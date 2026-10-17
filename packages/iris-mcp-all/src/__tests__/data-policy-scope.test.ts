@@ -80,7 +80,10 @@ describe("the PHI data policy scope (Story 39.2, AC-6)", () => {
       .sort(([a], [b]) => a.localeCompare(b));
     expect(declared.length, "a tool declares dataPolicy today").toBeGreaterThan(0);
     expect(governed).toEqual(declared);
-    expect(governed).toEqual([["iris_message_resend", ["preview"]]]);
+    expect(governed).toEqual([
+      ["iris_message_resend", ["preview"]],
+      ["iris_message_search", ["body"]],
+    ]);
   });
 
   it("the tool_support.md table lists exactly the governed and the residual rows, each with its scope", () => {

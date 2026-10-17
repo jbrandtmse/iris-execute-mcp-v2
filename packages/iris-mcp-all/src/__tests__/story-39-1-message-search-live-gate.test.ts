@@ -44,11 +44,11 @@ import {
   resolveSdkEsmDir,
   shippedBootstrapVersion,
   staleDistReason,
-  type AtelierRow,
   type WireSession,
   type WireSessionOptions,
   type WireToolResult,
 } from "./process-gate-helpers.js";
+import { expectedRow, oracleColumns } from "./header-row-oracle.js";
 import {
   FIXTURE_CLASS,
   FIXTURE_DOC,
@@ -315,51 +315,14 @@ describe("Story 39.1: the resendFiltered wire (AD-17, AD-33)", () => {
 
 // -- The header search against a hand-written SQL oracle -----------------
 
-/**
- * The oracle's columns. The raw Atelier query route renders a SQL NULL integer as 0, so whether
- * `CorrespondingMessageId` is NULL is read from its own column.
- */
-const COLUMNS =
-  "ID, SessionId, Type, Status, IsError, SourceConfigName, TargetConfigName, MessageBodyClassName, MessageBodyId, TimeCreated, TimeProcessed, CorrespondingMessageId, CASE WHEN CorrespondingMessageId IS NULL THEN 1 ELSE 0 END AS CorrespondingIsNull";
-
 /** The window FROM to TO as the SQL the oracle uses: the stored form, both ends inclusive. */
 const WINDOW_SQL = "TimeCreated >= '2001-02-03 06:00:00' AND TimeCreated <= '2001-02-03 18:00:00'";
-
-const TYPE_LABELS: Record<number, string> = { 1: "Request", 2: "Response", 3: "Terminate" };
-const STATUS_ROW_LABELS = ["Created", "Queued", "Delivered", "Discarded", "Suspended", "Deferred", "Aborted", "Error", "Completed"];
-
-/** A stored UTC value as `toISOString()` UTC, or `""`. Written here, not imported, so it is an independent oracle. */
-function isoOf(stored: string): string {
-  return stored === "" ? "" : new Date(`${stored.replace(" ", "T")}Z`).toISOString();
-}
-
-/** The row the tool must return for an oracle row. */
-function expectedRow(row: AtelierRow): Record<string, unknown> {
-  const created = String(row["TimeCreated"] ?? "");
-  const processed = row["TimeProcessed"] === null || row["TimeProcessed"] === undefined ? "" : String(row["TimeProcessed"]);
-  return {
-    id: Number(row["ID"]),
-    sessionId: Number(row["SessionId"]),
-    type: TYPE_LABELS[Number(row["Type"])] ?? "Unknown",
-    status: STATUS_ROW_LABELS[Number(row["Status"]) - 1] ?? "",
-    isError: Number(row["IsError"]) === 1,
-    sourceItem: String(row["SourceConfigName"]),
-    targetItem: String(row["TargetConfigName"]),
-    bodyClassName: String(row["MessageBodyClassName"]),
-    bodyId: String(row["MessageBodyId"]),
-    timeCreated: isoOf(created),
-    timeCreatedRaw: created,
-    timeProcessed: isoOf(processed),
-    timeProcessedRaw: processed,
-    correspondingMessageId: Number(row["CorrespondingIsNull"]) === 1 ? null : Number(row["CorrespondingMessageId"]),
-  };
-}
 
 /** The rows of `Ens.MessageHeader` in `ns` that `where` selects, in `TimeCreated, ID` order, as the tool must return them. */
 async function oracle(ns: string, where: string): Promise<Array<Record<string, unknown>>> {
   const rows = await atelierQuery(
     { ...TARGET, namespace: ns },
-    `SELECT ${COLUMNS} FROM Ens.MessageHeader WHERE ${where} ORDER BY TimeCreated, ID`,
+    `SELECT ${oracleColumns()} FROM Ens.MessageHeader WHERE ${where} ORDER BY TimeCreated, ID`,
   );
   return rows.map(expectedRow);
 }
@@ -617,7 +580,7 @@ describe("Story 39.1: bad input is refused naming the parameter, not the value (
   const ROUTE_CASES: Array<[string, Record<string, unknown>, string]> = [
     ["no action", { namespace: NS_A, from: FROM }, "action"],
     ["an unknown action", { ...valid, action: HOSTILE }, "action"],
-    ["an action that is not built", { ...valid, action: "body" }, "action"],
+    ["an action that is not built", { ...valid, action: "searchTable" }, "action"],
     ["a negative window", { ...valid, from: TO, to: FROM }, "earlier"],
     ["a window over 7 days", { ...valid, from: "2001-01-27T00:00:00Z", to: "2001-02-03T00:00:01Z" }, "7 days"],
     ["an unparseable from", { ...valid, from: HOSTILE }, "from"],
@@ -689,14 +652,14 @@ describe("Story 39.1: bad input is refused naming the parameter, not the value (
   }, 120000);
 });
 
-describe("Story 39.1: body and searchTable are declared but not built (AC-6)", () => {
-  for (const action of ["body", "searchTable"]) {
+describe("Story 39.1: searchTable is declared but not built (AC-6)", () => {
+  for (const action of ["searchTable"]) {
     it(`${action} returns the NOT_IMPLEMENTED refusal`, async (testCtx) => {
       if (skipReason) return skip(testCtx);
       const result = await search(interop, { action });
 
       expect(result.isError).toBe(true);
-      expect(result.structuredContent).toEqual({ code: "NOT_IMPLEMENTED", action, availableActions: ["headers"] });
+      expect(result.structuredContent).toEqual({ code: "NOT_IMPLEMENTED", action, availableActions: ["headers", "body"] });
     }, 120000);
   }
 });
@@ -735,7 +698,7 @@ describe("Story 39.1: the tool is listed, its keys are enabled reads, and govern
     expect(ids(searched.rows)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 13, 10, 11]);
   }, 120000);
 
-  it("an operator's disable of headers denies it, and body still reaches NOT_IMPLEMENTED", async (testCtx) => {
+  it("an operator's disable of headers denies it, and searchTable still reaches NOT_IMPLEMENTED", async (testCtx) => {
     if (skipReason) return skip(testCtx);
     const denied = await search(governed);
     expect(denied.isError).toBe(true);
@@ -745,8 +708,8 @@ describe("Story 39.1: the tool is listed, its keys are enabled reads, and govern
       server: "default",
     });
 
-    const body = await search(governed, { action: "body" });
-    expect(body.structuredContent).toMatchObject({ code: "NOT_IMPLEMENTED", action: "body" });
+    const unbuilt = await search(governed, { action: "searchTable" });
+    expect(unbuilt.structuredContent).toMatchObject({ code: "NOT_IMPLEMENTED", action: "searchTable" });
   }, 120000);
 });
 
@@ -1013,17 +976,20 @@ describe("Story 39.1 (QA): the window limits and hostile values, through the bui
 });
 
 describe("Story 39.1 (QA): the audit trail of the built server names the action and the outcome (AC-6)", () => {
-  it("records headers as ok, and body and searchTable as error, with each action named", async (testCtx) => {
+  it("records headers as ok, and body (a validation refusal) and searchTable (NOT_IMPLEMENTED) as error, with each action named", async (testCtx) => {
     if (skipReason) return skip(testCtx);
     const dir = mkdtempSync(path.join(tmpdir(), "story-39-1-audit-"));
     const auditPath = path.join(dir, "audit.log");
     const audited = await openWireSession(wireOptions("iris-interop-mcp"), { IRIS_AUDIT_LOG: auditPath });
     try {
       expect(succeeded(await audited.call("iris_message_search", { action: "headers", namespace: NS_B, from: FROM, to: TO })).rows).toHaveLength(3);
-      for (const action of ["body", "searchTable"]) {
-        const refused = await audited.call("iris_message_search", { action, namespace: NS_B, from: FROM, to: TO });
-        expect(refused.structuredContent).toMatchObject({ code: "NOT_IMPLEMENTED", action });
-      }
+      // body without its bodyClass and filters is refused by the tool's own validation, before any IRIS call.
+      const noInput = await audited.call("iris_message_search", { action: "body", namespace: NS_B, from: FROM, to: TO });
+      expect(noInput.isError).toBe(true);
+      expect(noInput.structuredContent).toBeUndefined();
+      expect(textOf(noInput)).toContain("'bodyClass'");
+      const unbuilt = await audited.call("iris_message_search", { action: "searchTable", namespace: NS_B, from: FROM, to: TO });
+      expect(unbuilt.structuredContent).toMatchObject({ code: "NOT_IMPLEMENTED", action: "searchTable" });
 
       // The child process writes the log on its own schedule: wait, bounded, for the three entries.
       const deadline = Date.now() + 10000;

@@ -483,7 +483,7 @@ describe("iris_message_search", () => {
   // -- handler: unbuilt actions ------------------------------------------------
 
   describe("actions that are declared but not built", () => {
-    it.each(["body", "searchTable"])("%s returns the NOT_IMPLEMENTED refusal and makes no HTTP call", async (action) => {
+    it.each(["searchTable"])("%s returns the NOT_IMPLEMENTED refusal and makes no HTTP call", async (action) => {
       const result = await messageSearchTool.handler(
         { action, from: "2001-02-03T06:00:00Z", to: "2001-02-03T18:00:00Z" },
         ctx,
@@ -493,7 +493,7 @@ describe("iris_message_search", () => {
       expect(result.structuredContent).toEqual({
         code: "NOT_IMPLEMENTED",
         action,
-        availableActions: ["headers"],
+        availableActions: ["headers", "body"],
       });
       expect(result.content[0]?.text).toContain(`'${action}'`);
       expect(mockHttp.post).not.toHaveBeenCalled();

@@ -2,6 +2,56 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-16] — Story 39.3: Message body content search
+
+No tool, action or governance key is added, so no tool count moves (the suite stays at 108 package tools, 113
+advertised) and the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys). `iris_message_search:body`
+was declared in Story 39.1 and now works; it is a read, enabled by default, and is the first action to return
+`DATA_POLICY_BLOCKED` under the PHI data policy (default `redact`).
+
+### Added
+
+- **The `body` action of `iris_message_search` finds messages by what their bodies hold.** It takes a required
+  `bodyClass`, the exact name of a persistent body class (only headers of exactly that class match), and `filters`: 1 to
+  10 conditions combined with AND, each `{property, op, value}`. `property` is the exact, case-sensitive name of one
+  property of the class; `op` is `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `contains`, `startsWith`, `isNull` or `notNull`;
+  `value` is a string of 1 to 1024 characters, a number or a boolean. It takes the scope options of `headers` (the
+  required window of at most 7 days, `item`, `source`, `target`, `status`, `sessionId`, `errorOnly`, `limit`, the cursor
+  and `namespace`) and returns the same header rows, paged by the same cursor, never a body value. The result also
+  carries `dataPolicy: {policy, redacted: 0, blocked: 0}`.
+- **No caller text becomes SQL.** The IRIS handler resolves each property through the class dictionary to its compiled
+  `SqlFieldName` and writes it as a delimited identifier, maps each operator from a closed list to a fixed fragment,
+  takes the body table from the dictionary, and binds every value and the page size as parameters. A property with no
+  column is refused (a list or array collection, an embedded object, a relationship, a multidimensional property, a
+  transient or calculated property that is not SQL-computed), and a stream property accepts only `isNull` and
+  `notNull`. Every refusal names the parameter, such as `filters[2].op`, and never the value, and every shape rule runs
+  before the namespace switch.
+- **`DATA_POLICY_BLOCKED` is returned for the first time.** Under the `block` data policy, set per profile, the `body`
+  action is refused with `{code: "DATA_POLICY_BLOCKED", action: "body", policy: "block"}` before any IRIS call. Under
+  `redact` and `allow` it runs. `filters` is a declared PHI input, so under `IRIS_AUDIT_LOG_PARAMS` the audit log writes
+  it as `"[REDACTED]"` under `redact` and `block`.
+
+### Changed
+
+- **The search route's `action` text lists both actions.** A request with an unknown action is refused with
+  `Parameter 'action' must be one of: headers, body`.
+- **`filters` on the `headers` action is refused, on the tool and on the route**, instead of being ignored: a dropped
+  filter would return unfiltered results. Before this release the key did not exist, and the tool's schema stripped it.
+- **`searchTable` still answers `NOT_IMPLEMENTED`, now with `availableActions: ["headers","body"]`.**
+- **`BOOTSTRAP_VERSION` moves `d440a659ba1e` to `f7b0868c95d0`**; the bootstrap still embeds 31 classes.
+  `MessageSearch.HeaderWhere` takes an optional alias for a joined statement and, with none, emits exactly the text it
+  did before; a `headers` request answers byte for byte as it did, pinned by a capture taken on `d440a659ba1e`.
+  `resendFiltered` is unchanged.
+
+### Tests
+
+- An injection fuzz drives the search route directly against disposable namespaces, with write-shaped payloads
+  (a statement that calls a function incrementing a global), a side-effect oracle, a TypeScript oracle for results and
+  an echo oracle; a hand-written JOIN is the oracle for every operator on every kind of property, a second namespace
+  with a different body class and a namespace without Interoperability are searched too, and the audit file, the
+  console log and every response are checked for a body marker. `ExecuteMCPv2.Tests.MessageBodySearchTest` covers the
+  statement builders over system classes.
+
 ## [Pre-release — 2026-10-16] — Story 39.2: PHI data policy
 
 No tool, action or governance key is added, so no tool count moves (the suite stays at 108 package tools, 113

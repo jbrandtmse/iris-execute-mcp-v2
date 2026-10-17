@@ -22,6 +22,7 @@ import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { CLAIMS, REDACTED_TEXT_SHOWN } from "./doc-claims-patterns.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
@@ -225,19 +226,6 @@ describe("Story 39.2: no document claims regulatory compliance or shows redacted
     ...readdirSync(path.join(REPO_ROOT, "packages"))
       .filter((dir) => existsSync(path.join(REPO_ROOT, "packages", dir, "README.md")))
       .map((dir): [string, string] => [`packages/${dir}/README.md`, read(`packages/${dir}/README.md`)]),
-  ];
-
-  const CLAIMS: RegExp[] = [
-    /\b(?:HIPAA|GDPR|HITECH)[- ]?(?:compliant|compliance|certified)\b/i,
-    /\bcompliant with\b/i,
-    /\b(?:ensures?|guarantees?|achieves?|provides?|delivers?|certif(?:y|ies))\s+(?:HIPAA\s+)?(?:compliance|de-?identification)\b/i,
-    /\bde-?identif(?:ied|ication) (?:data|output|text|messages?)\b/i,
-    /\bsafe harbor (?:compliant|compliance|certified)\b/i,
-  ];
-
-  const REDACTED_TEXT_SHOWN: RegExp[] = [
-    /\b(?:shows?|displays?|returns?|prints?|renders?)\s+(?:the\s+)?redacted\s+(?:HL7|ER7|body|message|text)/i,
-    /\bredacted\s+(?:HL7|ER7)\s+(?:text\s+)?(?:is|are)\s+(?:shown|returned|displayed)/i,
   ];
 
   for (const [name, text] of documents) {

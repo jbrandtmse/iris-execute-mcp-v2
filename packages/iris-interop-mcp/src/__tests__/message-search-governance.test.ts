@@ -8,10 +8,12 @@
  *   - the keys are enabled under an empty `IRIS_GOVERNANCE` and under the `read-only` preset, as the
  *     effective policy `iris_server_profiles` reports it;
  *   - an operator's `{"global": {"iris_message_search:headers": false}}` denies `headers` with
- *     `GOVERNANCE_DISABLED` before the handler runs, while `body` still reaches its own
+ *     `GOVERNANCE_DISABLED` before the handler runs, while `searchTable` still reaches its own
  *     `NOT_IMPLEMENTED` refusal;
  *   - the audit trail records the derived `action` and the closed `outcome` domain: `ok` for a search,
- *     `error` for the `NOT_IMPLEMENTED` refusal, `denied` for the governance denial.
+ *     `error` for a refusal, `denied` for the governance denial;
+ *   - (Story 39.3) a body call through the real handler audits its `dataPolicy` and, under
+ *     `IRIS_AUDIT_LOG_PARAMS`, its `filters` as `"[REDACTED]"` under `redact` and `block`.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -102,7 +104,7 @@ describe("iris_message_search governance (Story 39.1)", () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
-  it("denies headers with GOVERNANCE_DISABLED when an operator disables it, while body still reaches NOT_IMPLEMENTED", async () => {
+  it("denies headers with GOVERNANCE_DISABLED when an operator disables it, while searchTable still reaches NOT_IMPLEMENTED", async () => {
     process.env.IRIS_GOVERNANCE = JSON.stringify({ global: { "iris_message_search:headers": false } });
     stageDefaultStartup(env.fetchMock);
     const server = makeServer(messageSearchTool);
@@ -119,12 +121,12 @@ describe("iris_message_search governance (Story 39.1)", () => {
     // The real handler would POST to IRIS; a denied call makes no request at all.
     expect(env.fetchMock.mock.calls.length).toBe(callsAfterStart);
 
-    const body = await callTool(server, "iris_message_search", { action: "body", ...WINDOW });
-    expect(body.isError).toBe(true);
-    expect(body.structuredContent).toEqual({
+    const unbuilt = await callTool(server, "iris_message_search", { action: "searchTable", ...WINDOW });
+    expect(unbuilt.isError).toBe(true);
+    expect(unbuilt.structuredContent).toEqual({
       code: "NOT_IMPLEMENTED",
-      action: "body",
-      availableActions: ["headers"],
+      action: "searchTable",
+      availableActions: ["headers", "body"],
     });
     expect(env.fetchMock.mock.calls.length).toBe(callsAfterStart);
   });
@@ -180,6 +182,128 @@ describe("iris_message_search governance (Story 39.1)", () => {
     } finally {
       delete process.env.IRIS_AUDIT_LOG;
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/** An IRIS route answer for a body search that matched one header: the live route's envelope shape. */
+function bodySearchResponse(): Response {
+  const row = {
+    id: 1,
+    sessionId: 393001,
+    type: "Request",
+    status: "Completed",
+    isError: false,
+    sourceItem: "Story393.Source",
+    targetItem: "Story393.Target",
+    bodyClassName: "Story393.Body",
+    bodyId: "1",
+    timeCreated: "2001-02-03 08:00:00",
+    timeProcessed: "",
+    correspondingMessageId: "",
+  };
+  const result = {
+    action: "body",
+    limit: 100,
+    from: "2001-02-03 06:00:00",
+    to: "2001-02-03 18:00:00",
+    interopEnabled: true,
+    rows: [{ ...row, correspondingMessageId: null }],
+    hasMore: false,
+  };
+  return new Response(JSON.stringify({ status: { errors: [], summary: "" }, console: [], result }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+describe("iris_message_search body: the audit trail of the real handler (Story 39.3, AD-19)", () => {
+  const env = makeEnvHarness();
+  beforeEach(env.setup);
+  afterEach(env.teardown);
+
+  const FILTERS = [{ property: "Code", op: "eq", value: "SYNTHPHI393" }];
+
+  /** Start a real server, answer the body route from the staged envelope, call body, and return the audit entry. */
+  async function auditedBodyCall(policy: string | undefined, args: Record<string, unknown> = {}) {
+    const dir = mkdtempSync(join(tmpdir(), "iris-message-search-body-audit-"));
+    const auditPath = join(dir, "audit.log");
+    process.env.IRIS_AUDIT_LOG = auditPath;
+    process.env.IRIS_AUDIT_LOG_PARAMS = "true";
+    if (policy !== undefined) process.env.IRIS_DATA_POLICY = policy;
+    try {
+      stageDefaultStartup(env.fetchMock);
+      const server = makeServer(messageSearchTool);
+      await server.start("stdio");
+      env.fetchMock.mockImplementation(async (input: unknown) =>
+        String(input).endsWith("/interop/message/search") ? bodySearchResponse() : new Response(null, { status: 200 }),
+      );
+      const result = await callTool(server, "iris_message_search", {
+        action: "body",
+        ...WINDOW,
+        bodyClass: "Story393.Body",
+        filters: FILTERS,
+        ...args,
+      });
+      const entries = await auditLines(auditPath, 2);
+      const entry = entries.find((candidate) => candidate.tool === "iris_message_search") as Record<string, unknown>;
+      return { result, entry, raw: readFileSync(auditPath, "utf-8") };
+    } finally {
+      delete process.env.IRIS_AUDIT_LOG;
+      delete process.env.IRIS_AUDIT_LOG_PARAMS;
+      delete process.env.IRIS_DATA_POLICY;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("under redact records dataPolicy and logs the filters as [REDACTED]", async () => {
+    const { result, entry, raw } = await auditedBodyCall(undefined);
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent.dataPolicy).toEqual({ policy: "redact", redacted: 0, blocked: 0 });
+    expect(entry).toMatchObject({ action: "body", outcome: "ok", dataPolicy: { policy: "redact", redacted: 0, blocked: 0 } });
+    expect((entry.params as Record<string, unknown>).filters).toBe("[REDACTED]");
+    expect(raw).not.toContain("SYNTHPHI393");
+  });
+
+  it("under block records the refusal as error with the policy, and still logs the filters as [REDACTED]", async () => {
+    const { result, entry, raw } = await auditedBodyCall("block");
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({ code: "DATA_POLICY_BLOCKED", action: "body", policy: "block" });
+    expect(entry).toMatchObject({ action: "body", outcome: "error", dataPolicy: { policy: "block", redacted: 0, blocked: 0 } });
+    expect((entry.params as Record<string, unknown>).filters).toBe("[REDACTED]");
+    expect(raw).not.toContain("SYNTHPHI393");
+    // The refusal made no route call: only startup traffic reached the mocked fetch.
+    const searchCalls = env.fetchMock.mock.calls.filter((call: unknown[]) => String(call[0]).endsWith("/interop/message/search"));
+    expect(searchCalls).toHaveLength(0);
+  });
+
+  it("under allow logs the filters, the positive control that the redaction above can vary", async () => {
+    const { entry, raw } = await auditedBodyCall("allow");
+
+    expect(entry).toMatchObject({ action: "body", outcome: "ok", dataPolicy: { policy: "allow", redacted: 0, blocked: 0 } });
+    expect((entry.params as Record<string, unknown>).filters).toEqual(FILTERS);
+    expect(raw).toContain("SYNTHPHI393");
+  });
+
+  it("a Zod-invalid call whose op holds the marker reaches neither the audit file, the result nor the log", async () => {
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...parts: unknown[]) => {
+      logged.push(parts.map(String).join(" "));
+    });
+    try {
+      const { result, raw } = await auditedBodyCall(undefined, {
+        filters: [{ property: "Code", op: "SYNTHPHI393", value: "SYNTHPHI393" }],
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("filters.0.op");
+      expect(JSON.stringify(result)).not.toContain("SYNTHPHI393");
+      expect(raw).not.toContain("SYNTHPHI393");
+      expect(logged.join("\n")).not.toContain("SYNTHPHI393");
+    } finally {
+      spy.mockRestore();
     }
   });
 });

@@ -22,6 +22,10 @@
  * disposable namespace), and a `Leftovers` that also reports any `^%SYS("Ensemble",*,<ns>)` subscript and
  * any process running in a scratch namespace.
  *
+ * Story 39.3 adds the `STORY393_*` class sources, which `seedBodySearch` compiles INSIDE a scratch namespace
+ * (a body class, a second body class for the other namespace, and the seed), plus `sideCount`, `resetSide` and
+ * `sideDefined` for the injection fuzz's side-effect oracle.
+ *
  * Shared by Stories 39.1 to 39.6.
  */
 
@@ -569,6 +573,322 @@ XData ProductionDefinition
 
 }
 `;
+
+/**
+ * Story 39.3 body-search fixture sources. They are compiled INSIDE the scratch namespace (set `a`:
+ * Addr, Other, Body, Side, Seed; set `b`: Body, Seed), never in HSCUSTOM, so the database file that
+ * `removeInteropNamespace` deletes takes them away. Every body value that must never appear in a
+ * search result contains `SYNTHPHI393`.
+ */
+export const STORY393_ADDR_SOURCE = String.raw`Class Story393.Addr Extends %SerialObject
+{
+
+Property Street As %String;
+
+}
+`;
+
+export const STORY393_OTHER_SOURCE = String.raw`Class Story393.Other Extends %Persistent
+{
+
+Property Code As %String;
+
+}
+`;
+
+/** Namespace A's body class: one property of every kind the property-kind table decides. */
+export const STORY393_BODY_A_SOURCE = String.raw`Class Story393.Body Extends Ens.Request
+{
+
+Property Code As %String(MAXLEN = 64);
+
+Property Exact As %String(COLLATION = "EXACT", MAXLEN = 1024);
+
+Property Amount As %Integer;
+
+Property Flag As %Boolean;
+
+Property Renamed As %String [ SqlFieldName = RenamedField ];
+
+Property Group As %String;
+
+Property Computed As %String [ Calculated, SqlComputeCode = { Set {*} = "C-"_{Code}}, SqlComputed ];
+
+/// A SQL-computed property whose computation fails for every row: a search on it fails while it runs, not while it is prepared.
+Property Boom As %String [ Calculated, SqlComputeCode = { Set {*} = {Amount}/0}, SqlComputed ];
+
+Property Ref As Story393.Other;
+
+Property OnlyInA As %String;
+
+Property Note As %Stream.GlobalCharacter;
+
+Property Secret As %String [ Transient ];
+
+Property Shown As %String [ Calculated ];
+
+Property Scratch [ MultiDimensional ];
+
+Property Tags As list Of %String;
+
+Property Props As array Of %String;
+
+Property Addr As Story393.Addr;
+
+Method ShownGet() As %String
+{
+    Quit "shown"
+}
+
+}
+`;
+
+/** Namespace B's body class: same name, a different column for Renamed, and a property A lacks. */
+export const STORY393_BODY_B_SOURCE = String.raw`Class Story393.Body Extends Ens.Request
+{
+
+Property Code As %String(MAXLEN = 64);
+
+Property Renamed As %String [ SqlFieldName = RenamedB ];
+
+Property OnlyInB As %String;
+
+}
+`;
+
+/** A stored procedure whose side effect the injection fuzz watches for, and its counter. */
+export const STORY393_SIDE_SOURCE = String.raw`Class Story393.Side
+{
+
+ClassMethod Bump() As %Integer [ SqlProc ]
+{
+    Quit $Increment(^Story393Side)
+}
+
+ClassMethod Count() As %Integer
+{
+    Quit +$Get(^Story393Side)
+}
+
+ClassMethod Defined() As %Integer
+{
+    Quit $Data(^Story393Side)
+}
+
+ClassMethod Reset() As %Status
+{
+    Kill ^Story393Side
+    Quit $$$OK
+}
+
+}
+`;
+
+/** Seeds fixture sigma (set a) or the second namespace's bodies (set b); uses only $Property and $ClassMethod, so it compiles in both. */
+export const STORY393_SEED_SOURCE = String.raw`Class Story393.Seed
+{
+
+/// Seed set pSet ("a" or "b") into the current namespace, which must be an empty EXECMCPTMP393
+/// scratch namespace. pExactJson is a JSON array of the six Exact values. Returns a JSON ID map.
+ClassMethod Seed(pSet As %String, pExactJson As %String = "") As %String
+{
+    If $NAMESPACE '? 1"EXECMCPTMP393"1U { Quit "REFUSED: Seed runs only in a namespace named EXECMCPTMP393 followed by one capital letter" }
+    If $Order(^Ens.MessageHeaderD("")) '= "" { Quit "REFUSED: the namespace already holds message headers" }
+    If pSet = "a" { Quit ..SeedA(pExactJson) }
+    If pSet = "b" { Quit ..SeedB() }
+    Quit "REFUSED: the set must be a or b"
+}
+
+ClassMethod SeedA(pExactJson As %String) As %String
+{
+    Set tExact = ##class(%DynamicAbstractObject).%FromJSON(pExactJson)
+    If tExact.%Size() '= 6 { Quit "REFUSED: six exact values are required" }
+    Set tOther = ..NewObject("Story393.Other", $ListBuild("Code", "K1-alpha"))
+    If $Extract(tOther, 1, 6) = "ERROR:" { Quit tOther }
+    Set tBodies = ""
+    Set tBodies = tBodies_$ListBuild(..NewObject("Story393.Body", $ListBuild("Code", "K1-alpha", "Exact", tExact.%Get(0), "Amount", 10, "Flag", 1, "Renamed", "R-one", "Group", "g1", "Ref", tOther, "OnlyInA", "a1", "Note", "SYNTHPHI393 note")))
+    Set tBodies = tBodies_$ListBuild(..NewObject("Story393.Body", $ListBuild("Code", "k1-ALPHA", "Exact", tExact.%Get(1), "Amount", 20, "Flag", 0, "Renamed", "R-two")))
+    Set tBodies = tBodies_$ListBuild(..NewObject("Story393.Body", $ListBuild("Code", "K2", "Exact", tExact.%Get(2), "Amount", -5, "Flag", 1, "Ref", tOther)))
+    Set tBodies = tBodies_$ListBuild(..NewObject("Story393.Body", $ListBuild("Code", "K2", "Exact", tExact.%Get(3), "Amount", 0, "Note", "note 4")))
+    Set tBodies = tBodies_$ListBuild(..NewObject("Story393.Body", $ListBuild("Exact", tExact.%Get(4), "Amount", 1000)))
+    Set tBodies = tBodies_$ListBuild(..NewObject("Story393.Body", $ListBuild("Code", "K3", "Exact", tExact.%Get(5), "Amount", 15)))
+    Set tError = ""
+    For tI = 1:1:6 {
+        If $Extract($List(tBodies, tI), 1, 6) = "ERROR:" { Set tError = $List(tBodies, tI) Quit }
+    }
+    If tError '= "" { Quit tError }
+    Set tHl7 = ##class(ExecuteMCPv2.Temp.Story391Fixture).SaveHl7(..Hl7Text())
+    If $Extract(tHl7, 1, 6) = "ERROR:" { Quit tHl7 }
+    Set tIds = ""
+    Set tIds = tIds_..AddHeader(1, 1, 9, 0, "Story393.Target", "Story393.Body", $List(tBodies, 1), "2001-02-03 08:00:00")_","
+    Set tIds = tIds_..AddHeader(2, 1, 9, 0, "Story393.Target", "Story393.Body", $List(tBodies, 2), "2001-02-03 08:00:01")_","
+    Set tIds = tIds_..AddHeader(3, 1, 8, 1, "Story393.Other", "Story393.Body", $List(tBodies, 3), "2001-02-03 08:00:02")_","
+    Set tIds = tIds_..AddHeader(4, 1, 9, 0, "Story393.Target", "Story393.Body", $List(tBodies, 4), "2001-02-03 08:00:03")_","
+    Set tIds = tIds_..AddHeader(5, 1, 9, 0, "Story393.Target", "Story393.Body", $List(tBodies, 5), "2001-02-03 08:00:03")_","
+    Set tIds = tIds_..AddHeader(6, 1, 9, 0, "Story393.Target", "Story393.Body", $List(tBodies, 6), "2001-02-03 08:00:05")_","
+    Set tIds = tIds_..AddHeader(7, 1, 9, 0, "Story393.Target", "Story393.Other", tOther, "2001-02-03 08:00:06")_","
+    Set tIds = tIds_..AddHeader(8, 1, 9, 0, "Story393.Target", "Story393.Body", "999", "2001-02-03 08:00:07")_","
+    Set tIds = tIds_..AddHeader(9, 1, 9, 0, "Story393.Target", "", "1", "2001-02-03 08:00:08")_","
+    Set tIds = tIds_..AddHeader(10, 2, 9, 0, "Story393.Target", "Story393.Body", $List(tBodies, 1), "2001-02-03 08:00:09", 1)_","
+    Set tIds = tIds_..AddHeader(11, 1, 9, 0, "Story393.Target", "EnsLib.HL7.Message", tHl7, "2001-02-03 08:00:10")_","
+    Set tIds = tIds_..AddHeader(12, 1, 9, 0, "Story393.Target", "Story393.Body", $List(tBodies, 6), "2001-02-04 09:00:00")
+    Quit {"headers":(tIds),"body":($ListToString(tBodies)),"other":(tOther),"hl7":(tHl7)}.%ToJSON()
+}
+
+ClassMethod SeedB() As %String
+{
+    Set tOne = ..NewObject("Story393.Body", $ListBuild("Code", "B-alpha", "Renamed", "R-one", "OnlyInB", "b1"))
+    If $Extract(tOne, 1, 6) = "ERROR:" { Quit tOne }
+    Set tTwo = ..NewObject("Story393.Body", $ListBuild("Code", "B-beta", "Renamed", "R-two", "OnlyInB", "b2"))
+    If $Extract(tTwo, 1, 6) = "ERROR:" { Quit tTwo }
+    Set tIds = ..AddHeader(1, 1, 9, 0, "Story393.Target", "Story393.Body", tOne, "2001-02-03 08:00:00")_","
+    Set tIds = tIds_..AddHeader(2, 1, 9, 0, "Story393.Target", "Story393.Body", tTwo, "2001-02-03 08:00:01")
+    Quit {"headers":(tIds),"body":(tOne_","_tTwo)}.%ToJSON()
+}
+
+/// Save one header: session 393000 plus pN, a Request or Response, the source Story393.Source.
+ClassMethod AddHeader(pN As %Integer, pType As %Integer, pStatus As %Integer, pIsError As %Boolean, pTarget As %String, pBodyClass As %String, pBodyId As %String, pTime As %String, pCorresponding As %String = "") As %String
+{
+    Quit ##class(ExecuteMCPv2.Temp.Story391Fixture).Add(393000 + pN, pType, pStatus, pIsError, "Story393.Source", pTarget, pBodyClass, pBodyId, pTime, "", pCorresponding)
+}
+
+/// Save one pClass object with the property pairs in pPairs, a $ListBuild of name, value, name, value...
+/// A value for Note is written into its stream, and a value for Ref is a Story393.Other ID. Returns the ID or the error text.
+ClassMethod NewObject(pClass As %String, pPairs As %List) As %String
+{
+    Set tObj = $ClassMethod(pClass, "%New")
+    Set tSC = $$$OK
+    For tI = 1:2:$ListLength(pPairs) {
+        Set tName = $List(pPairs, tI), tValue = $List(pPairs, tI + 1)
+        If tName = "Note" {
+            Set tStream = $Property(tObj, "Note")
+            Set tSC = tStream.Write(tValue)
+        }
+        ElseIf tName = "Ref" {
+            Set $Property(tObj, "Ref") = $ClassMethod("Story393.Other", "%OpenId", tValue)
+        }
+        Else {
+            Set $Property(tObj, tName) = tValue
+        }
+        If $System.Status.IsError(tSC) { Quit }
+    }
+    If $System.Status.IsOK(tSC) { Set tSC = tObj.%Save() }
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Quit tObj.%Id()
+}
+
+/// The ER7 text of the ADT message whose PID-3 is SYNTHPHI393-MRN, with CR segment terminators.
+ClassMethod Hl7Text() As %String
+{
+    Set tCR = $Char(13)
+    Set tText = "MSH|^~\&|SYNTHPHI393-APP|SYNTHPHI393-FAC|||20010203080010||ADT^A01^ADT_A01|SYNTHPHI393-CTL|P|2.5.1"_tCR
+    Set tText = tText_"EVN|A01|20010203080010"_tCR
+    Set tText = tText_"PID|1||SYNTHPHI393-MRN^^^SYNTHPHI393-AA||SYNTHPHI393-LAST^SYNTHPHI393-FIRST||19010101|F"_tCR
+    Quit tText
+}
+
+}
+`;
+
+/** The six Exact values of namespace A's bodies 1 to 6, in order: one source for the seed and for the TypeScript oracle. */
+export const STORY393_EXACT_VALUES: readonly string[] = [
+  "SYNTHPHI393-E1",
+  "synthphi393-e1",
+  "x' OR '1'='1 SYNTHPHI393-E3",
+  '50% _off [SYNTHPHI393] "q" \\ ?',
+  "SYNTHPHI393-E5\ttab\r\nnl",
+  `${String.fromCodePoint(0xe9, 0x4e2d)} SYNTHPHI393-E6`,
+];
+
+/** The Story393 documents compiled into a scratch namespace, in compile order, for each seed set. */
+const STORY393_DOCUMENTS: Record<"a" | "b", ReadonlyArray<readonly [string, string]>> = {
+  a: [
+    ["Story393.Addr.cls", STORY393_ADDR_SOURCE],
+    ["Story393.Other.cls", STORY393_OTHER_SOURCE],
+    ["Story393.Body.cls", STORY393_BODY_A_SOURCE],
+    ["Story393.Side.cls", STORY393_SIDE_SOURCE],
+    ["Story393.Seed.cls", STORY393_SEED_SOURCE],
+  ],
+  b: [
+    ["Story393.Body.cls", STORY393_BODY_B_SOURCE],
+    ["Story393.Seed.cls", STORY393_SEED_SOURCE],
+  ],
+};
+
+/**
+ * What `Story393.Seed.Seed` returns: namespace A has twelve headers, six `Story393.Body` bodies, one
+ * `Story393.Other` and one HL7 message; B has two headers and two bodies. The body IDs are those of a fresh
+ * extent.
+ */
+export const STORY393_IDS: Record<"a" | "b", Record<string, string>> = {
+  a: { headers: "1,2,3,4,5,6,7,8,9,10,11,12", body: "1,2,3,4,5,6", other: "1", hl7: "1" },
+  b: { headers: "1,2", body: "1,2" },
+};
+
+/**
+ * Put and compile the `Story393` classes of `set` into the scratch namespace `name`, then seed it and
+ * check the IDs it received.
+ *
+ * @param dev - A session on a built iris-dev-mcp server.
+ * @param name - An interop-enabled, empty `EXECMCPTMP393<capital letter>` namespace.
+ * @param set - `a` (sigma: twelve headers) or `b` (two bodies and headers 1 and 2).
+ */
+export async function seedBodySearch(dev: WireSession, name: string, set: "a" | "b"): Promise<void> {
+  assertFixtureName(name);
+  const docs = docFixtures(dev, name);
+  for (const [doc, source] of STORY393_DOCUMENTS[set]) {
+    await docs.putDoc(doc, source);
+    await docs.compileDoc(doc);
+  }
+  const content = await callChecked(
+    dev,
+    "iris_execute_classmethod",
+    {
+      namespace: name,
+      className: "Story393.Seed",
+      methodName: "Seed",
+      args: [set, JSON.stringify(STORY393_EXACT_VALUES)],
+    },
+    `seeding the body-search set ${set} into ${name}`,
+  );
+  const returned = String(content.returnValue ?? "");
+  let ids: unknown;
+  try {
+    ids = JSON.parse(returned);
+  } catch {
+    throw new Error(`seeding the body-search set ${set} into ${name} returned ${JSON.stringify(returned.slice(0, 120))}`);
+  }
+  if (JSON.stringify(ids) !== JSON.stringify(STORY393_IDS[set])) {
+    throw new Error(`seeding the body-search set ${set} into ${name} returned ${JSON.stringify(returned.slice(0, 200))}`);
+  }
+}
+
+/** Call a `Story393.Side` class method in the scratch namespace `name` and return its string result. */
+async function sideMethod(dev: ToolSession, name: string, methodName: string): Promise<string> {
+  assertFixtureName(name);
+  const content = await callChecked(
+    dev,
+    "iris_execute_classmethod",
+    { namespace: name, className: "Story393.Side", methodName, args: [] },
+    `Story393.Side.${methodName} in ${name}`,
+  );
+  return String(content.returnValue ?? "");
+}
+
+/** How many times `Story393.Side.Bump` ran in `name` (`^Story393Side`); 0 when the global is undefined. */
+export async function sideCount(dev: ToolSession, name: string): Promise<number> {
+  return Number(await sideMethod(dev, name, "Count"));
+}
+
+/** Kill `^Story393Side` in `name`. */
+export async function resetSide(dev: ToolSession, name: string): Promise<void> {
+  await sideMethod(dev, name, "Reset");
+}
+
+/** Whether `^Story393Side` is defined in `name` (`$Data`: 0 means undefined). */
+export async function sideDefined(dev: ToolSession, name: string): Promise<number> {
+  return Number(await sideMethod(dev, name, "Defined"));
+}
 
 /**
  * Everything that remains of the namespaces in `names`: the namespace, database configuration,

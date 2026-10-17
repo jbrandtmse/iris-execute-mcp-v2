@@ -2,7 +2,8 @@
 title: 'Story 39.3: Message Body Content Search'
 type: 'feature'
 created: '2026-10-16'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '3977b72d51aef755ff2cec043ee67118053fa402'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -12,7 +13,17 @@ context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
 warnings:
   - oversized
-deferred: []
+deferred:
+  - summary: >-
+      The Story 39.0 live gate doc-type-description-live-gate compares the count of every cls document in HSCUSTOM
+      across two reads, so a class written to HSCUSTOM between them fails it.
+    evidence: |-
+      In the final pass `pnpm --filter @iris-mcp/dev test` (files in parallel) failed once with "*/cls: expected 12652
+      to be 12651"; the same suite passed with `--no-file-parallelism` (60 files, 1419 tests), which is how the spec's
+      (once) line runs it. Not touched by Story 39.3 (pre-existing, DW-567 / Story 39.0).
+    location: >-
+      packages/iris-dev-mcp/src/__tests__/doc-type-description-live-gate.test.ts
+    severity: low
 ---
 
 <intent-contract>
@@ -333,6 +344,48 @@ Namespace B (`EXECMCPTMP393B`) compiles a different `Story393.Body`: `Renamed` h
 
 ## Review Triage Log
 
+### 2026-10-17 — Review pass
+- verdicts: 36 findings — high 0, medium 3, low 25, false 8, maybe-false 0
+- findings:
+  - `[low]` `[reject]` Blind Hunter: the tool schema's non-strict filter objects drop unknown keys that the route refuses; Zod and IRIS name paths in two styles — Task 9 specifies non-strict objects and the route refuses the same input when sent to it; the fix would alter specified behavior and the harm is a round trip.
+  - `[low]` `[patch]` Blind Hunter: no body-action test of the shared window, limit, status and cursor bounds — four route rows added (window over 7 days, limit 0, unknown status, half a cursor); mutation: the 7-day bound applied to `headers` only turns the window row red.
+  - `[medium]` `[patch]` Blind Hunter: value forms for non-string properties undocumented (a `%Date` or `%Time` under select mode 0) — verified by probe (an ISO date and an ISO time match nothing, the day number and the seconds match); the logical form is now stated in the tool description, the interop README and a doc-claims pin.
+  - `[low]` `[reject]` Blind Hunter: collection-class-typed and dynamic-object properties fall to `value` — they project as ordinary columns, nothing unsafe happens and a search on them is valid SQL; the documented refusal list names the `Collection` keyword kinds, which it applies.
+  - `[low]` `[reject]` Blind Hunter: the "reads each body by its ID" claim rests on a 2 s timing assertion — the Performance budget is the spec's, the margin is 30x (64 ms), the plan is pinned by the OS class statement-text assertions and Task 0 (d) recorded the EXPLAIN.
+  - `[low]` `[patch]` Blind Hunter: the README `IRIS_DATA_POLICY` row and the policy value table describe `block` through the preview only — the `block` row, the `redact` row and the env-var row now name the body action; pinned by a doc-claims row (mutation recorded).
+  - `[low]` `[patch]` Blind Hunter: other summaries still read "header search" — the aggregate package README line and the interop README heading are updated and pinned; `docs/epic-summary.md` is the closing rollup Story 39.6 owns, so it is left (Rule #43).
+  - `[low]` `[patch]` Blind Hunter: the CHANGELOG heading date and the `tool_support.md` note date disagree — the note date now matches the spec's heading (2026-10-16).
+  - `[low]` `[patch]` Blind Hunter: the docs never say that `redact` does not constrain what a body search reveals — the README policy table, the interop README policy line and the tool description now say that which headers match still shows what the bodies hold and name `block` and the governance key; whether to constrain probing under `redact` is a product call the spec fixed (AD-26: redact and allow run), reported under residual risks.
+  - `[low]` `[patch]` Edge Case Hunter: a JSON number such as 0.5 binds as .5 and does not match a text property holding `0.5` — verified by probe; the canonical-form rule is documented with the value forms (same root as the value-forms entry).
+  - `[medium]` `[patch]` Edge Case Hunter: a date or time property compared in logical mode against an ISO string matches nothing — verified by probe; documented (same entry as above); refusing those types would change the property-kind table the spec fixes.
+  - `[false]` `[reject]` Edge Case Hunter: an Abstract persistent `bodyClass` gives a raw SQLCODE -30 — probed: an abstract persistent class has a compiled table, `BodyTable` accepts it and the statement prepares, so there is no prepare error.
+  - `[low]` `[reject]` Edge Case Hunter: `%IsA` tests the primary inheritance only — probed (`Extends (%RegisteredObject, %SerialObject)` answers `%IsA` 0, `%Extends` 1), but it needs a body property typed by a class that reaches serial or stream only by secondary inheritance, and it fails closed with a SQL text naming no value; the fix moves `BOOTSTRAP_VERSION` and every document that pins it, and a pin needs a compiled fixture class inside the data-free OS test.
+  - `[low]` `[reject]` Edge Case Hunter: a header whose body row was purged never matches `isNull` or `ne` — the matrix pins it (headers 8 never appear); the tool description and the interop README now say so.
+  - `[low]` `[reject]` Edge Case Hunter: a hard 2000 ms assertion on a shared instance can flake — the same Performance budget as in the earlier entry; the precedent is the 39.2 gate.
+  - `[low]` `[patch]` Edge Case Hunter: under the default `redact`, repeated `startsWith`/`contains` probes recover body values from row presence — the same root as the Blind Hunter docs finding on `redact`; documented, and the product call is reported under residual risks.
+  - `[low]` `[patch]` Edge Case Hunter (claims): the aggregate package README line 27 has no body action, default state or policy — updated and pinned.
+  - `[medium]` `[patch]` Verification Gap: no test pins the `"b"` alias at the body call site, because no fixture property shares a name with a header column — added the live row `a body property named like a header column (TimeCreated)` on `EnsLib.HL7.Message`, against a hand-written JOIN; mutation: the alias dropped at the call site turns it (alone) red.
+  - `[low]` `[patch]` Verification Gap: the refused-class rows cannot detect an echo of the class name, since none carries the marker — added `No.SYNTHPHI393`; mutation: the refusal text appends the class name turns that row (alone) red.
+  - `[low]` `[reject]` Verification Gap: the header-first plan and the header-only select list are pinned only by `MessageBodySearchTest`, which no automated path runs — OS %UnitTest classes are the project's data-free tier and the spec's `(loop)` runs it; running them from a vitest gate is a harness change, not a direct correction.
+  - `[low]` `[patch]` Verification Gap (other): several AC halves have no `mutation:` line — Rule 19 asks one per AC, and each AC had one; the lines for the echo, the `dataPolicy` field and the docs half are added; the remaining halves are existing invariants with their own tests.
+  - `[low]` `[patch]` Verification Gap (other): the redact/allow row does not assert its oracle is non-empty — `expect(ids(expected)).toEqual([1, 2, 10])` added.
+  - `[false]` `[reject]` Verification Gap (other): the audit row's Zod-invalid call cannot vary — the assertions on that call's response and on stderr do vary if a Zod message echoed the marker (Zod 4 does not), and the file notes why it has no entry.
+  - `[low]` `[patch]` Verification Gap (other): the fuzz relies on an earlier row to reset `^Story393Side` — `resetSide` now runs at the start of the fuzz row.
+  - `[low]` `[reject]` Verification Gap (other): the 2000 ms assertion attaches to a case name and can flake — a repeat of the Performance entry above; the precedent and margin stand.
+  - `[low]` `[reject]` Verification Gap (other): the byte-identity baseline holds IRIS 2026.2 `enuw` texts — the spec requires the raw-text capture ("equals its capture from d440a659ba1e") and the 39.1 replay has the same shape; a different build or locale is a re-capture, not a defect.
+  - `[low]` `[patch]` Verification Gap (other): the OS test comment says the system classes are "in every namespace" — corrected to an Interoperability-enabled namespace such as HSCUSTOM.
+  - `[low]` `[reject]` Verification Gap (other): the `Relationship` branch has no live fixture property — the spec assigns it to `TestBodyFilterWhereSystemClasses` (`Ens.Rule.Rule||RuleSet`), which passes.
+  - `[false]` `[reject]` Intent Alignment: "in the default suite" holds for file location, not execution — the gate sits in the default include and skips unarmed by the repo's live-gate convention; `story-39-1-gate-guards` pins that it fails closed when armed (Rule #59 path), and the `all` suite ran it armed.
+  - `[low]` `[patch]` Intent Alignment: "first consumer of the 39.2 policy plumbing" is narrower than it reads, since the preview already declares `dataPolicy` — the CHANGELOG sentence now says "the first action to return `DATA_POLICY_BLOCKED`".
+  - `[false]` `[reject]` Intent Alignment: the policy refusal and the SQL-safety property sit on different surfaces — each is tested where it lives (tool and wire for the policy, route for the SQL); AD-26 and AD-9 place the refusal in the tool.
+  - `[false]` `[reject]` Intent Alignment: `bodyClass` and `filters` are required in the handler, not in the schema — Task 9 step 5 specifies exactly that.
+  - `[low]` `[reject]` Intent Alignment: `bodyClass` is exact on `body` but a case-insensitive filter on `headers` — the headers behavior is Story 39.1's, and a header stored with a different-case class name does not occur (Ens writes the class name).
+  - `[false]` `[reject]` Intent Alignment: changes beyond the intent's list — every one is a Task of the spec (`filters` refused on `headers`, the action text, the alias, the oracle extraction, `mulberry32`, scope tables, docs, `BOOTSTRAP_VERSION`).
+  - `[false]` `[reject]` Intent Alignment: the searchable surface is narrower than "what bodies hold" — the property-kind table and the stream rule are the spec's.
+  - `[false]` `[reject]` Intent Alignment: the fuzz maps to property, op and value only and the JOIN oracle shares the join shape — the spec fixes those slots, and the oracle's predicates are independent literals.
+- note: the first `pnpm --filter @iris-mcp/dev test` of the final pass failed once in `doc-type-description-live-gate` (12652 against 12651 documents, a document written to HSCUSTOM between its two reads); it passed serialised, as the `(once)` line runs it. Pre-existing (Story 39.0), recorded under `deferred:`.
+- patched entries: 3 medium-graded findings in 2 entries (value forms; the alias row), 14 low; no high.
+
 ## Design Notes
 
 **Plan-time interpretations** (apply and report):
@@ -514,7 +567,66 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 | AC-6 | `searchTable` routed to `body` | the `NOT_IMPLEMENTED` rows |
 | AC-7 | the scope row back to `residual` | `data-policy-scope.test.ts` |
 
+**Task 0 probe results** (IRIS for UNIX (Ubuntu Server LTS for ARM64 Containers) 2026.2 (Build 221U) Fri Jun 26 2026; namespace `EXECMCPTMP393P`, removed afterwards with nothing left).
+- (a) `Story393.Body` properties, `%Dictionary.CompiledProperty`: `Code`/`Exact`/`Amount`/`Flag`/`Group`/`OnlyInA` plain; `Renamed` `SqlFieldName` `RenamedField`; `Computed` Calculated and SqlComputed; `Boom` (added later) the same; `Ref` type `Story393.Other`; `Note` type `%Stream.GlobalCharacter`; `Secret` Transient; `Shown` Calculated, not SqlComputed; `Scratch` MultiDimensional; `Tags` Collection `list`; `Props` Collection `array`; `Addr` type `Story393.Addr`. Classes: `Story393.Body` persistent `"Story393"."Body"`; `Story393.Addr` serial; `Story393.Other` persistent; `%Stream.GlobalCharacter` stream; `EnsLib.HL7.Message` persistent `"EnsLib_HL7"."Message"`; `Ens.StringRequest` persistent `"Ens"."StringRequest"`. `%OpenId` with a case variant of a class (`story393.body`) or of a property (`code`) returns no object, so a case variant is refused. `Ens.Rule.Rule||RuleSet` is compiled in HSCUSTOM with Relationship true. `Ens.StreamContainer||StreamGC` has type `%Library.GlobalCharacterStream`, which `%IsA` `%Stream.Object` (1), as `%Stream.GlobalCharacter` does; `%IsA` answers 0 for a datatype class (`%Library.String`), `Story393.Other` and `Ens.Rule.RuleSet`, and 1 for `Story393.Addr` against `%Library.SerialObject`. `EnsLib.HL7.Message` `RawContent` is Calculated, SqlComputed and Transient; `UserValues` is an `array`; `Separators` is Transient.
+- (b) `INFORMATION_SCHEMA.COLUMNS` of the `Story393.Body` table: `Addr_Street`, `Amount`, `Code`, `Computed`, `Exact`, `Flag`, `Group`, `ID`, `Note`, `OnlyInA`, `Ref`, `RenamedField`, `Tags`. It agrees with the property-kind table: no column for `Secret`, `Shown`, `Scratch`, `Props` or `Addr` itself; `Tags` is a column and is refused as a list.
+- (c) `Property Group As %String;` compiles with `SqlFieldName` `Group`; `"Group" = ?` prepares and runs; bare `Group = ?` fails to prepare (SQLCODE -4). `Group` stays in the fixture.
+- (d) The Design Notes statement with `%INORDER` prepares and runs with `tArgs...`, and returns headers 1, 2 and 10 for `Code = 'k1-alpha'`. `EXPLAIN` through Atelier and through `iris_sql_analyze` `explain` (literals, namespace P) reads the `Ens.MessageHeader(H).TimeCreated` index map with a range, then the header's IDKEY, then `Story393.Body(B).IDKEY`: header first, the body read by ID. `%INORDER` prepares, so the `%FIRSTTABLE` fallback is not used.
+- (e) Bound values: `Code = ?` ignores case (`K1-ALPHA` selects bodies 1 and 2); `Exact = ?` is case-sensitive (the lower-case value selects body 2 only); `[ ?` is case-sensitive on both and treats `%`, `_` and `[SYNTHPHI393]` literally; `%STARTSWITH ?` follows the collation (`Code` `k1-` selects bodies 1 and 2, `Exact` `synthphi` body 2 only); `Note [ ?` and `Note = ?` fail with SQLCODE -313 while `Note IS NULL` selects 2, 3, 5, 6 and `IS NOT NULL` 1 and 4; `Code <> ?` never matches the NULL Code (bodies 1, 2, 6). A number or a numeric string bound to the integer `Amount` compares as a number (`< 9` and `< "9"` both select 3 and 4); a non-numeric string selects nothing and is no error.
+- (f) `SELECT Story393.Side_Bump() AS n` through Atelier `action/query` returned `n` 1, `Story393.Side.Count` then read 1, and `Reset` left `^Story393Side` undefined (`$Data` 0).
+- (g) The deployed `BOOTSTRAP_VERSION` was `d440a659ba1e` before any edit, and the capture (`fixtures/story-39-3-search-baseline.json`) was taken on it; the story leaves `f7b0868c95d0`.
+- Also probed: `$Match` does not match a name with a trailing line feed; a JSON number beyond range (`1e400`) throws `<MAXNUMBER>` in `%Get` and `%Get(key, , "string")` returns its text, so `ReadFilterNumber` refuses it; the first extra-key check, which iterated the object with `%GetNext`, failed on a `1e400` value ("could not be read"), so the check counts the known keys present against `%Size` instead.
+
+**Mutation results** (each applied, red observed, reverted to a byte-identical file by `shasum`, the class reloaded or the dist rebuilt):
+- mutation: `BodyFilterWhere` embeds the value as a quoted literal instead of a bound `?` -> the fuzz (57 violations, value slot); `MessageBodySearchTest:TestBodyFilterWhereSystemClasses`.
+- mutation: `BodyOpSql` returns an op outside the map as written -> the refused-op route rows (`EQ`, `like`, `=`, the third filter); the fuzz op slot (178 violations); `TestBodyOpSqlClosedMap`, `TestBodyFilterShapeRefusals`, `TestBodyFilterWhereSystemClasses`.
+- mutation: the property pattern check and the dictionary resolution bypassed, the caller text emitted delimited -> 19 gate rows (the Renamed oracle row, every refused-property row, the second-namespace row); the fuzz property slot (412 violations).
+- mutation: the identifier emitted without delimiters -> the `Group` row, the fuzz property slot, `TestBodyFilterWhereSystemClasses`.
+- mutation: `BodyFilterShape` called only after the namespace switch -> 22 refused-shape route rows (the namespace error appears instead).
+- mutation: `block` falls through to the HTTP call -> `message-search-body.test.ts` block rows and the governance block audit row (5 unit rows); the live `EXECMCPTMP393Z` block row, the `tight` profile row and the audit row (3).
+- mutation: `phiInputs` dropped from the declaration -> the definition row and 3 audit rows in the unit suites; the live audit row.
+- mutation: the select list includes `b.*` -> NOT red in the live gate: `HeaderRow` reads columns by name, so no body value reaches the response and the header-rows-only row cannot see it. Red in `TestBodyTableSystemClasses`, whose statement-text assertions on the new `BodyStatement` method were added for this reason.
+- mutation: the `MessageBodyClassName` fragment dropped from the body path -> 10 or more operator rows (headers of another class join `Story393.Body` rows).
+- mutation: `SwitchNamespace` skipped -> 51 gate rows, including the A-against-B row.
+- mutation: `HeaderWhere` aliases even when no alias is given -> the 39.3 capture replay; the 39.1 resend replay and its headers oracle rows; `TestHeaderWhereAlias`.
+- mutation: `searchTable` no longer refused up front -> the `message-search.test.ts` and governance `NOT_IMPLEMENTED` rows; the live `searchTable` row.
+- mutation: the scope row back to `residual` -> `data-policy-scope.test.ts` (the governed-rows row and the `tool_support.md` table row).
+- mutation: the runtime-failure text replaced by the IRIS message (`SQL error: ...`) -> the live runtime-failure row (`Boom`).
+- mutation (review pass): `BodyFilterWhere` called with no alias at the body call site of `MessageSearch()` -> the live row `a body property named like a header column (TimeCreated)` (the only red; the class reloaded, then reverted byte-identical by `shasum`).
+- mutation (review pass): `BodyTable`'s refusal text appends the class name -> the live row `route: a well-formed name that carries the marker (No.SYNTHPHI393) is refused naming bodyClass` (the only red; reverted byte-identical).
+- mutation (review pass): the 7-day bound applied to the `headers` action only -> the live row `route: a window over 7 days on the body action` (the only red; reverted byte-identical).
+- mutation (review pass): the structured body result no longer carries `dataPolicy` -> 4 rows of `message-search-body.test.ts` and the real-handler audit row of `message-search-governance.test.ts` (reverted byte-identical).
+- mutation (review pass): the root README `block` row loses its body-action sentence -> `story-39-3-doc-claims.test.ts` (the policy table and `IRIS_DATA_POLICY` row; reverted byte-identical).
+- Review-pass probe (disposable `ExecuteMCPv2.Temp.Story393Probe*` classes in HSCUSTOM, deleted, no global left): under `%SelectMode=0` a bound ISO date does not match a `%Date` (the day number does), an ISO time does not match a `%Time` (the seconds do), a `%TimeStamp` matches its stored text but not the ISO `T` form, and the JSON number `0.5` binds as `.5` and does not match the text `0.5`; a `Extends (%RegisteredObject, %SerialObject)` class answers `%IsA` 0 and `%Extends` 1; an abstract persistent class has a table and prepares.
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** The `body` action of `iris_message_search` is implemented. The IRIS handler resolves each filter property through the class dictionary to its delimited `SqlFieldName`, maps each operator from one closed map, takes the body table from the dictionary and binds every value and the page size; the statement reads the headers first (`%INORDER`) and each body by its ID, and returns header rows only. The tool refuses the action under `block` with `DATA_POLICY_BLOCKED` before any IRIS call, declares `dataPolicy: {actions:["body"], phiInputs:["filters"]}`, and reports `dataPolicy` on every body success. `BOOTSTRAP_VERSION` moved `d440a659ba1e` to `f7b0868c95d0` (roster 31; a second `pnpm gen:bootstrap` is byte-identical).
+
+**Files changed.**
+- `src/ExecuteMCPv2/REST/MessageSearch.cls` (bootstrapped): aliased `HeaderWhere`, `BodyOpSql`, `BodyFilterShape`/`FilterShape`, `BodyTable`, `PropertyKind`, `BodyFilterWhere`, `BodyStatement`, `AliasedColumns`, `ReadFilterNumber`, and the `body` action in `MessageSearch()`.
+- `src/ExecuteMCPv2/Tests/MessageBodySearchTest.cls` (new, 5 methods) and `MessageSearchTest.cls` (`body` to `searchTable`).
+- `packages/shared/src/bootstrap-classes.ts` (generated); `packages/shared/src/__tests__/test-helpers.ts` and `lines.test.ts` (`mulberry32` promoted).
+- `packages/iris-interop-mcp/src/tools/message-search.ts`: `BODY_FILTER_OPS`, the `filters` schema, the policy gate and the body output; unit tests `message-search-body.test.ts` (new), `message-search.test.ts`, `message-search-governance.test.ts`.
+- `packages/iris-mcp-all/src/__tests__/`: `story-39-3-body-search-live-gate.test.ts` (capture/replay, JOIN oracles, fuzz, policy and audit rows), `story-39-3-doc-claims.test.ts`, `interop-namespace-fixture.ts` (Story393 sources and helpers), `header-row-oracle.ts`, `doc-claims-patterns.ts`, `fixtures/story-39-3-search-baseline.json`, scope table and test, the 39.1 gate and guards, the 39.2 doc-claims; `scripts/prepublish-gate.mjs`.
+- Docs: `README.md`, `packages/iris-interop-mcp/README.md`, `packages/iris-mcp-all/README.md`, `tool_support.md`, `CHANGELOG.md`, `.changeset/story-39-3-message-body-content-search.md`.
+
+**Review.** 36 findings (high 0, medium 3, low 25, false 8; counted from the log rows). Patches applied: value forms for non-string properties documented (probe-verified), the `redact` residual and the `block` rows documented, summaries and dates aligned, the CHANGELOG sentence corrected, a live row for a body property named like a header column, a marker-bearing refused class, four body-action bound rows, a non-empty oracle assertion, a fuzz-start reset, the OS test comment, and five `mutation:` lines. Deferred: 1 (a pre-existing Story 39.0 gate that races concurrent writes to HSCUSTOM). Rejected: 11 low and 8 false, each with its reason in the log (patched 17: 3 medium and 14 low).
+
+**Follow-up review recommendation:** `false`. This pass patched 3 medium-graded findings in 2 entries (value forms; the alias row) and no high; every patch is a test row, a document sentence or a comment, each proved by a mutation or a live probe, and no specific unverified risk remains.
+
+**Verification.**
+- Task 0 probes (a) to (g) recorded; the capture was taken on `d440a659ba1e` before any IRIS-side edit and the replay is byte for byte.
+- Loop lines: shared 126 tests; interop 172 tests; OS `MessageBodySearchTest` 5/5, `MessageSearchTest` 5/5, `MessageResendTest` 12/12, `MessagePreviewPolicyTest` 4/4; the 39.3 gate 92 passed and 1 skipped (the capture row), the 39.1 gate 103 and the 39.2 gate 17; scope and doc-claims files 121 (before the patch pass).
+- Once lines after the last patch: build, test, lint, type-check for shared (2047), dev (1419, serialised, armed), admin (498), interop (519), ops (350), data (165) and client-config (514); `@iris-mcp/all` armed 59 files, 894 passed, 3 skipped; `pnpm gen:bootstrap` twice (no diff), `gen:governance-baseline:check` OK (141 keys), `gen:skills:check` OK, `check-epics-sync` OK, `measure:tools-payload` equals the README rows. The only lint message is a pre-existing unused directive in `packages/shared/src/cli/governance.ts`.
+- Performance: first armed start 193 ms (budget 60 s); one body search of A over W 68 ms (budget 2 s); the 694-request fuzz 5.7 s.
+- After every armed run: no `EXECMCPTMP393*` namespace or database (`iris_namespace_list`, `iris_database_list`), no `Story393` or `ExecuteMCPv2.Temp.` document (generated included), no `Story393` global.
+- Matrix audit: every row has a covering test that ran and passed in the armed gate or the OS classes.
+
+**Residual risks.**
+- Under the default `redact` the body search runs, so a caller can learn what a body holds from which headers match (repeated `startsWith`/`contains`). The spec fixes this (AD-26: `redact` and `allow` run) and the docs now say so, naming `block` and the `iris_message_search:body` governance key; whether to constrain probing under `redact` is a Project Lead call.
+- The header body-class comparison keeps the header column's case-insensitive collation; the body table is exact (dictionary-resolved), so a header stored with another-case class name would join that class. Ens never writes one.
+- The statement-shape pin (`%INORDER`, header-only select list) lives in the OS class `MessageBodySearchTest`, which runs through `iris_execute_tests`, not through vitest.

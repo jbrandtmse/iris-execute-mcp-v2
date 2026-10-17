@@ -150,6 +150,12 @@ const gateTestFiles = [
   // (the wire body per policy, no body content in the result, the audit file or stderr, the four channels in order), and `redactHl7` of the BUILT
   // shared dist in a fresh Node process against the reviewed keep-list table; no IRIS instance is contacted.
   "src/__tests__/story-39-2-qa-process.test.ts",
+  // Story 39.3: `iris_message_search` `body`, its data policy and audit rows over real stdio JSON-RPC against the BUILT iris-interop-mcp,
+  // iris-dev-mcp and iris-admin-mcp dists, and the injection fuzz over raw HTTP to the route, with a hand-written JOIN as the oracle. Writes
+  // only the disposable namespaces and databases EXECMCPTMP393A, EXECMCPTMP393B and EXECMCPTMP393C (their database files and directories
+  // too, and the Story393 classes and ^Story393Side inside them) and the HSCUSTOM class ExecuteMCPv2.Temp.Story391Fixture, which it removes,
+  // asserting nothing is left.
+  "src/__tests__/story-39-3-body-search-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

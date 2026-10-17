@@ -43,6 +43,15 @@ export const DATA_POLICY_SCOPE_ROWS: ReadonlyArray<readonly [string, DataPolicyS
       reason: "The preview's body summary is the one body-derived output; resend and resendFiltered return status texts only.",
     },
   ],
+  [
+    "iris_message_search",
+    {
+      scope: "governed",
+      governedActions: ["body"],
+      reason:
+        "The body action is under the policy: refused under block; under redact and allow it returns header rows only. The headers action is not: for a header with no body class the body ID is the literal body value, so restrict iris_message_search:headers with its governance key. searchTable arrives in Story 39.4.",
+    },
+  ],
 
   ["iris_sql_execute", residual("Runs caller-supplied SQL, which can select message-body columns. Restrict it with its governance key or IRIS_SQL_READ_ONLY.")],
   ["iris_sql_query", residual("Runs caller-supplied SELECTs, which can select message-body columns. Restrict it with its governance key.")],
@@ -68,12 +77,6 @@ export const DATA_POLICY_SCOPE_ROWS: ReadonlyArray<readonly [string, DataPolicyS
   [
     "iris_production_messages",
     residual("Returns header columns; for a header with no body class the body ID is the literal body value. Restrict it with its governance key."),
-  ],
-  [
-    "iris_message_search",
-    residual(
-      "The headers action returns header columns, and for a header with no body class the body ID is the literal body value; the body and searchTable actions arrive in Stories 39.3 and 39.4 and are governed from then on. Restrict it with its governance key.",
-    ),
   ],
   ["iris_env_diff", residual("Compares configuration values across profiles, lookup values included. Restrict it with its governance key.")],
   ["iris_env_promote", residual("Copies configuration values across profiles, lookup values included. Restrict it with its governance key.")],

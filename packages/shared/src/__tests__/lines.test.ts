@@ -15,6 +15,7 @@ import {
   MAX_DIFF_DISTANCE,
 } from "../lines.js";
 import * as shared from "../index.js";
+import { mulberry32 } from "./test-helpers.js";
 
 describe("stripLeadingBom", () => {
   it("removes a single leading U+FEFF", () => {
@@ -430,18 +431,6 @@ describe("unifiedDiff against diff -U3", () => {
   });
 });
 
-/** A small seeded generator (mulberry32), so the random cases are reproducible. */
-function seeded(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 /** The length of the longest common subsequence of two arrays, by dynamic programming (an independent oracle). */
 function lcsLength(a: readonly string[], b: readonly string[]): number {
   let previous: number[] = new Array<number>(b.length + 1).fill(0);
@@ -521,7 +510,7 @@ describe("alignLines and unifiedDiff over random edits", () => {
   }
 
   it("pairs ascending, equal lines, in a number that equals the longest common subsequence", () => {
-    const random = seeded(384);
+    const random = mulberry32(384);
     for (let round = 0; round < 300; round += 1) {
       const { before, after } = randomEdit(random);
       const pairs = alignLines(before, after);
@@ -539,7 +528,7 @@ describe("alignLines and unifiedDiff over random edits", () => {
   });
 
   it("applying the hunks of unifiedDiff to before yields after, and every hunk header matches its rows", () => {
-    const random = seeded(4);
+    const random = mulberry32(4);
     for (let round = 0; round < 300; round += 1) {
       const { before, after } = randomEdit(random);
       const diff = unifiedDiff(before, after, LABELS);
@@ -549,7 +538,7 @@ describe("alignLines and unifiedDiff over random edits", () => {
   });
 
   it("every hunk has at most three context lines before its first change and after its last, and changes are never more than six unchanged lines apart inside it", () => {
-    const random = seeded(77);
+    const random = mulberry32(77);
     for (let round = 0; round < 100; round += 1) {
       const { before, after } = randomEdit(random);
       const diff = unifiedDiff(before, after, LABELS);

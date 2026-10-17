@@ -1,10 +1,18 @@
-/// REST handler for searching Interoperability message headers (Story 39.1).
+/// REST handler for searching Interoperability messages (Stories 39.1 and 39.3).
 /// <p><method>MessageSearch</method> is a read-only route, <code>POST /interop/message/search</code>.
-/// Its <code>action</code> body field selects the operation; <code>headers</code> is the only one
-/// implemented. It filters <code>Ens.MessageHeader</code> by a required time window plus optional item,
-/// source, target, status, session, body class and error flag, and returns header rows (never body data,
+/// Its <code>action</code> body field selects the operation: <code>headers</code> and <code>body</code>.
+/// Both filter <code>Ens.MessageHeader</code> by a required time window plus optional item,
+/// source, target, status, session, body class and error flag, and return header rows (never body data,
 /// <code>ErrorStatus</code> or <code>Description</code>) in <code>TimeCreated, ID</code> order, one page
 /// at a time, with a keyset cursor taken from the last row of the previous page.</p>
+/// <p>The <code>body</code> action also takes a required <code>bodyClass</code> and a list of structured
+/// <code>filters</code>, <code>{property, op, value}</code>, and keeps the headers whose body, read by its
+/// ID in the table of that class, satisfies every one of them. Nothing a caller sends becomes SQL text:
+/// <method>BodyFilterWhere</method> writes a property as its compiled <code>SqlFieldName</code>, in
+/// double quotes, <method>BodyOpSql</method> maps an operator from a closed list to a fixed fragment,
+/// <method>BodyTable</method> takes the table name from the class dictionary, and every value is a
+/// parameter. The shape of the filters is checked by <method>BodyFilterShape</method> before the namespace
+/// is switched.</p>
 /// <p><method>HeaderWhere</method> is the one place a set of header filters becomes a WHERE clause. It is
 /// shared by this handler and by <class>ExecuteMCPv2.REST.MessageResend</class>'s
 /// <code>resendFiltered</code>. It owns only that translation: each caller keeps its own required
@@ -25,6 +33,12 @@ Parameter DEFAULTLIMIT As %Integer = 100;
 /// The longest window, in days, between <code>from</code> and <code>to</code>.
 Parameter MAXWINDOWDAYS As %Integer = 7;
 
+/// The most filters one body search takes.
+Parameter MAXBODYFILTERS As %Integer = 10;
+
+/// The longest string value of one body filter, in characters.
+Parameter MAXFILTERVALUE As %Integer = 1024;
+
 /// The columns every header row is read from, in the order <method>HeaderRow</method> uses them.
 /// <code>ErrorStatus</code> and <code>Description</code> are deliberately absent.
 Parameter COLUMNS As %String = "ID, SessionId, Type, Status, IsError, SourceConfigName, TargetConfigName, MessageBodyClassName, MessageBodyId, TimeCreated, TimeProcessed, CorrespondingMessageId";
@@ -37,61 +51,65 @@ Parameter COLUMNS As %String = "ID, SessionId, Type, Status, IsError, SourceConf
 /// the order <code>item</code>, <code>source</code>, <code>target</code>, <code>statusCode</code>,
 /// <code>fromNorm</code>, <code>toNorm</code>, <code>sessionId</code>, <code>bodyClass</code>,
 /// <code>errorOnly</code>, joined with <code>" AND "</code>.</p>
+/// <p><var>pAlias</var> is the alias of the header table in the statement the clause joins; with one,
+/// every column is written <code>alias.column</code>. With none the text is exactly what it was before
+/// the alias existed.</p>
 /// <p><var>pWhere</var> is the clause body without the <code>WHERE</code> keyword, or <code>""</code>
 /// when no filter is set. <var>pParams</var> is the parameter count, with <code>pParams(i)</code> holding
 /// the i-th value in the order of the <code>?</code> markers, so a caller passes it as
 /// <code>pParams...</code>. This method never validates a value and never sees a cap.</p>
-ClassMethod HeaderWhere(pFilters As %DynamicObject, Output pWhere As %String, Output pParams) As %Status
+ClassMethod HeaderWhere(pFilters As %DynamicObject, Output pWhere As %String, Output pParams, pAlias As %String = "") As %Status
 {
     Set tSC = $$$OK
     Set pWhere = ""
     Kill pParams
     Set pParams = 0
     Try {
+        Set tQ = $Select(pAlias = "": "", 1: pAlias _ ".")
         Set tFragments = ""
         Set tItem = pFilters.%Get("item")
         If tItem '= "" {
-            Set tFragments = tFragments _ $ListBuild("(SourceConfigName = ? OR TargetConfigName = ?)")
+            Set tFragments = tFragments _ $ListBuild("(" _ tQ _ "SourceConfigName = ? OR " _ tQ _ "TargetConfigName = ?)")
             Set pParams = pParams + 1, pParams(pParams) = tItem
             Set pParams = pParams + 1, pParams(pParams) = tItem
         }
         Set tSource = pFilters.%Get("source")
         If tSource '= "" {
-            Set tFragments = tFragments _ $ListBuild("SourceConfigName = ?")
+            Set tFragments = tFragments _ $ListBuild(tQ _ "SourceConfigName = ?")
             Set pParams = pParams + 1, pParams(pParams) = tSource
         }
         Set tTarget = pFilters.%Get("target")
         If tTarget '= "" {
-            Set tFragments = tFragments _ $ListBuild("TargetConfigName = ?")
+            Set tFragments = tFragments _ $ListBuild(tQ _ "TargetConfigName = ?")
             Set pParams = pParams + 1, pParams(pParams) = tTarget
         }
         Set tStatusCode = pFilters.%Get("statusCode")
         If tStatusCode '= "" {
-            Set tFragments = tFragments _ $ListBuild("Status = ?")
+            Set tFragments = tFragments _ $ListBuild(tQ _ "Status = ?")
             Set pParams = pParams + 1, pParams(pParams) = tStatusCode
         }
         Set tFromNorm = pFilters.%Get("fromNorm")
         If tFromNorm '= "" {
-            Set tFragments = tFragments _ $ListBuild("TimeCreated >= ?")
+            Set tFragments = tFragments _ $ListBuild(tQ _ "TimeCreated >= ?")
             Set pParams = pParams + 1, pParams(pParams) = tFromNorm
         }
         Set tToNorm = pFilters.%Get("toNorm")
         If tToNorm '= "" {
-            Set tFragments = tFragments _ $ListBuild("TimeCreated <= ?")
+            Set tFragments = tFragments _ $ListBuild(tQ _ "TimeCreated <= ?")
             Set pParams = pParams + 1, pParams(pParams) = tToNorm
         }
         Set tSessionId = pFilters.%Get("sessionId")
         If tSessionId '= "" {
-            Set tFragments = tFragments _ $ListBuild("SessionId = ?")
+            Set tFragments = tFragments _ $ListBuild(tQ _ "SessionId = ?")
             Set pParams = pParams + 1, pParams(pParams) = tSessionId
         }
         Set tBodyClass = pFilters.%Get("bodyClass")
         If tBodyClass '= "" {
-            Set tFragments = tFragments _ $ListBuild("MessageBodyClassName = ?")
+            Set tFragments = tFragments _ $ListBuild(tQ _ "MessageBodyClassName = ?")
             Set pParams = pParams + 1, pParams(pParams) = tBodyClass
         }
         If +pFilters.%Get("errorOnly") {
-            Set tFragments = tFragments _ $ListBuild("IsError = 1")
+            Set tFragments = tFragments _ $ListBuild(tQ _ "IsError = 1")
         }
         For tI = 1:1:$ListLength(tFragments) {
             Set pWhere = pWhere _ $Select(tI > 1: " AND ", 1: "") _ $List(tFragments, tI)
@@ -100,6 +118,282 @@ ClassMethod HeaderWhere(pFilters As %DynamicObject, Output pWhere As %String, Ou
         Set tSC = ex.AsStatus()
     }
     Quit tSC
+}
+
+/// The select list of <parameter>COLUMNS</parameter> with every column written <code>pAlias.column</code>,
+/// so a statement that joins another table cannot read a column of the wrong table. The result column
+/// names stay the bare ones, which is what <method>HeaderRow</method> reads.
+ClassMethod AliasedColumns(pAlias As %String) As %String
+{
+    Set tList = ""
+    Set tColumns = ..#COLUMNS
+    For tI = 1:1:$Length(tColumns, ",") {
+        Set tList = tList _ $Select(tI > 1: ", ", 1: "") _ pAlias _ "." _ $ZStrip($Piece(tColumns, ",", tI), "<>W")
+    }
+    Quit tList
+}
+
+/// The SQL fragment of the body filter operator <var>pOp</var>, written after the quoted column, or
+/// <code>""</code> for anything that is not one of the ten operators. This is the only place an operator
+/// becomes SQL text, and it never returns any part of its argument. The match is exact: the operators are
+/// lower case and <code>EQ</code>, <code>=</code> and <code>like</code> are not operators.
+/// <p><code>eq</code>, <code>ne</code>, <code>lt</code>, <code>le</code>, <code>gt</code> and
+/// <code>ge</code> compare by the column's collation, so a default string column ignores case;
+/// <code>contains</code> is the case-sensitive substring operator; <code>startsWith</code> is
+/// <code>%STARTSWITH</code>; <code>isNull</code> and <code>notNull</code> take no value.</p>
+ClassMethod BodyOpSql(pOp As %String) As %String
+{
+    Quit $Case(pOp, "eq": "= ?", "ne": "<> ?", "lt": "< ?", "le": "<= ?", "gt": "> ?", "ge": ">= ?", "contains": "[ ?", "startsWith": "%STARTSWITH ?", "isNull": "IS NULL", "notNull": "IS NOT NULL", : "")
+}
+
+/// Check the shape of the body filters <var>pFilters</var> (the request's <code>filters</code> value) and
+/// return a refusal status naming the parameter path, <code>filters</code> or
+/// <code>filters[i].property</code>, <code>.op</code>, <code>.value</code>, with <code>i</code> counted
+/// from 0. No text names a value. It touches no namespace and no dictionary, so a caller runs it before it
+/// switches namespace.
+/// <p>The value must be a non-empty array of at most <parameter>MAXBODYFILTERS</parameter> objects, each
+/// holding only <code>property</code>, <code>op</code> and <code>value</code>. A <code>property</code> is
+/// 1 to 128 letters and digits starting with a letter. An <code>op</code> is one that
+/// <method>BodyOpSql</method> knows. A <code>value</code> is required unless the operator is
+/// <code>isNull</code> or <code>notNull</code>, where it must be absent or null; otherwise it is a string of
+/// 1 to <parameter>MAXFILTERVALUE</parameter> characters, a finite number or a boolean.</p>
+ClassMethod BodyFilterShape(pFilters As %RawString) As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        If '$IsObject(pFilters) {
+            If pFilters = "" {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' is required for the body action: a list of 1 to " _ ..#MAXBODYFILTERS _ " filters")
+            }
+            Else {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' must be an array of 1 to " _ ..#MAXBODYFILTERS _ " filters")
+            }
+        }
+        ElseIf 'pFilters.%IsA("%Library.DynamicArray") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' must be an array of 1 to " _ ..#MAXBODYFILTERS _ " filters")
+        }
+        ElseIf (pFilters.%Size() < 1) || (pFilters.%Size() > ..#MAXBODYFILTERS) {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' must hold from 1 to " _ ..#MAXBODYFILTERS _ " filters")
+        }
+        Else {
+            For tI = 0:1:pFilters.%Size() - 1 {
+                Set tIndex = tI
+                Set tSC = ..FilterShape(pFilters, tI)
+                If $$$ISERR(tSC) Quit
+            }
+        }
+    } Catch ex {
+        Set tSC = $$$ERROR($$$GeneralError, "Parameter '" _ $Select($Data(tIndex): "filters[" _ tIndex _ "]", 1: "filters") _ "' could not be read")
+    }
+    Quit tSC
+}
+
+/// Check filter number <var>pIndex</var> (from 0) of the array <var>pFilters</var>; see
+/// <method>BodyFilterShape</method>.
+ClassMethod FilterShape(pFilters As %DynamicArray, pIndex As %Integer) As %Status
+{
+    Set tPath = "filters[" _ pIndex _ "]"
+    If pFilters.%GetTypeOf(pIndex) '= "object" {
+        Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ "' must be an object holding property, op and value")
+    }
+    Set tFilter = pFilters.%Get(pIndex)
+    ; Counting the keys that are present avoids iterating, which would also convert every value.
+    Set tKnownKeys = tFilter.%IsDefined("property") + tFilter.%IsDefined("op") + tFilter.%IsDefined("value")
+    If tFilter.%Size() '= tKnownKeys {
+        Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ "' may hold only property, op and value")
+    }
+
+    If tFilter.%GetTypeOf("property") '= "string" {
+        Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".property' is required and must be a string")
+    }
+    Set tProperty = tFilter.%Get("property")
+    If ($Length(tProperty) > 128) || '$Match(tProperty, "^[A-Za-z][A-Za-z0-9]*$") {
+        Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".property' must be a property name of 1 to 128 letters and digits, starting with a letter")
+    }
+
+    If tFilter.%GetTypeOf("op") '= "string" {
+        Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".op' is required and must be one of: eq, ne, lt, le, gt, ge, contains, startsWith, isNull, notNull")
+    }
+    Set tOp = tFilter.%Get("op")
+    If ..BodyOpSql(tOp) = "" {
+        Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".op' must be one of: eq, ne, lt, le, gt, ge, contains, startsWith, isNull, notNull")
+    }
+
+    Set tValueType = tFilter.%GetTypeOf("value")
+    If (tOp = "isNull") || (tOp = "notNull") {
+        If (tValueType '= "unassigned") && (tValueType '= "null") {
+            Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".value' must be absent for the isNull and notNull operators")
+        }
+        Quit $$$OK
+    }
+    If tValueType = "string" {
+        Set tLength = $Length(tFilter.%Get("value"))
+        If (tLength < 1) || (tLength > ..#MAXFILTERVALUE) {
+            Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".value' must be a string of 1 to " _ ..#MAXFILTERVALUE _ " characters, a number or a boolean")
+        }
+        Quit $$$OK
+    }
+    If tValueType = "boolean" Quit $$$OK
+    If tValueType = "number" {
+        Set tSC = ..ReadFilterNumber(tFilter, .tNumber)
+        If $$$ISERR(tSC) {
+            Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".value' must be a finite number")
+        }
+        Quit $$$OK
+    }
+    Quit $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".value' is required and must be a string of 1 to " _ ..#MAXFILTERVALUE _ " characters, a number or a boolean")
+}
+
+/// Read the number <code>value</code> of <var>pFilter</var> into <var>pNumber</var>. Fails, without text,
+/// for a number IRIS cannot hold (an exponent beyond its range).
+ClassMethod ReadFilterNumber(pFilter As %DynamicObject, Output pNumber As %Numeric) As %Status
+{
+    Set tSC = $$$OK
+    Set pNumber = ""
+    Try {
+        Set pNumber = pFilter.%Get("value")
+    } Catch {
+        Set pNumber = ""
+        Set tSC = $$$ERROR($$$GeneralError, "Not a finite number")
+    }
+    Quit tSC
+}
+
+/// Resolve the body class <var>pClassName</var> to its SQL table, in <var>pTable</var> as
+/// <code>"schema"."table"</code> with both names in double quotes, taken from the class dictionary. The
+/// class must be compiled in this namespace, its name must equal <var>pClassName</var> exactly (a case
+/// variant is another name), it must be persistent, and its schema and table names must be non-empty and
+/// hold no double quote. Otherwise the status names <code>bodyClass</code>, without its value, and
+/// <var>pTable</var> is empty.
+ClassMethod BodyTable(pClassName As %String, Output pTable As %String) As %Status
+{
+    Set pTable = ""
+    Set tFound = 0
+    Try {
+        Set tClass = ##class(%Dictionary.CompiledClass).%OpenId(pClassName)
+        If $IsObject(tClass) && (tClass.Name = pClassName) && (tClass.ClassType = "persistent") {
+            Set tSchema = tClass.SqlSchemaName
+            Set tTable = tClass.SqlTableName
+            If (tSchema '= "") && (tTable '= "") && (tSchema '[ """") && (tTable '[ """") {
+                Set pTable = """" _ tSchema _ """.""" _ tTable _ """"
+                Set tFound = 1
+            }
+        }
+    } Catch {
+        Set tFound = 0
+    }
+    If tFound Quit $$$OK
+    Set pTable = ""
+    Quit $$$ERROR($$$GeneralError, "Parameter 'bodyClass' must name a compiled persistent class with an SQL table in this namespace")
+}
+
+/// How the property <var>pProperty</var> of the class <var>pClassName</var> may be searched, from the
+/// compiled class dictionary, and its SQL column in <var>pField</var> (the compiled <code>SqlFieldName</code>).
+/// The first rule that holds decides:
+/// <ol>
+/// <li>no compiled property of exactly that name: <code>refused</code>;</li>
+/// <li>multidimensional: <code>refused</code>;</li>
+/// <li>transient or calculated, and not SQL-computed (it has no column): <code>refused</code>;</li>
+/// <li>a list or an array collection: <code>refused</code>;</li>
+/// <li>a relationship: <code>refused</code>;</li>
+/// <li>a serial object (its columns are its sub-properties): <code>refused</code>;</li>
+/// <li>a stream (SQL allows only a null test on it): <code>stream</code>;</li>
+/// <li>an empty column name or one that holds a double quote: <code>refused</code>;</li>
+/// <li>anything else, which includes a reference to a persistent class (its column holds the ID):
+/// <code>value</code>.</li>
+/// </ol>
+/// Anything that cannot be determined is <code>refused</code>.
+ClassMethod PropertyKind(pClassName As %String, pProperty As %String, Output pField As %String) As %String
+{
+    Set pField = ""
+    Set tKind = "refused"
+    Try {
+        Set tProp = ##class(%Dictionary.CompiledProperty).%OpenId(pClassName _ "||" _ pProperty)
+        If '$IsObject(tProp) || (tProp.Name '= pProperty) { Set tKind = "refused" }
+        ElseIf tProp.MultiDimensional { Set tKind = "refused" }
+        ElseIf (tProp.Transient || tProp.Calculated) && 'tProp.SqlComputed { Set tKind = "refused" }
+        ElseIf tProp.Collection '= "" { Set tKind = "refused" }
+        ElseIf tProp.Relationship { Set tKind = "refused" }
+        ElseIf $ClassMethod(tProp.Type, "%IsA", "%Library.SerialObject") { Set tKind = "refused" }
+        Else {
+            Set tField = tProp.SqlFieldName
+            If (tField = "") || (tField [ """") { Set tKind = "refused" }
+            Else {
+                Set pField = tField
+                Set tKind = $Select($ClassMethod(tProp.Type, "%IsA", "%Stream.Object"): "stream", 1: "value")
+            }
+        }
+    } Catch {
+        Set pField = ""
+        Set tKind = "refused"
+    }
+    Quit tKind
+}
+
+/// Translate the body filters <var>pFilters</var> of the class <var>pClassName</var> into a WHERE clause
+/// body and its parameters, <var>pWhere</var> and <var>pParams</var> as <method>HeaderWhere</method>
+/// returns them. Each filter becomes <code>alias."SqlFieldName" fragment</code>: the column name comes
+/// from <method>PropertyKind</method>, the fragment from <method>BodyOpSql</method>, and the value, a
+/// string, a number or a boolean bound as 1 or 0, only into <var>pParams</var>. The fragments are joined
+/// with <code>" AND "</code>. A property <method>PropertyKind</method> refuses is refused, and so is any
+/// operator other than <code>isNull</code> and <code>notNull</code> on a stream, with a status naming
+/// <code>filters[i].property</code> or <code>filters[i].op</code>, never the value. The shape is checked
+/// again here with <method>BodyFilterShape</method>, so a caller cannot skip it.
+ClassMethod BodyFilterWhere(pClassName As %String, pFilters As %RawString, pAlias As %String, Output pWhere As %String, Output pParams) As %Status
+{
+    Set pWhere = ""
+    Kill pParams
+    Set pParams = 0
+    Set tSC = ..BodyFilterShape(pFilters)
+    If $$$ISERR(tSC) Quit tSC
+    Try {
+        Set tQ = $Select(pAlias = "": "", 1: pAlias _ ".")
+        For tI = 0:1:pFilters.%Size() - 1 {
+            Set tPath = "filters[" _ tI _ "]"
+            Set tFilter = pFilters.%Get(tI)
+            Set tOp = tFilter.%Get("op")
+            Set tKind = ..PropertyKind(pClassName, tFilter.%Get("property"), .tField)
+            If tKind = "refused" {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".property' is not a searchable property of the body class")
+                Quit
+            }
+            If (tKind = "stream") && (tOp '= "isNull") && (tOp '= "notNull") {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter '" _ tPath _ ".op' must be isNull or notNull for a stream property")
+                Quit
+            }
+            Set tFragment = ..BodyOpSql(tOp)
+            Set pWhere = pWhere _ $Select(tI > 0: " AND ", 1: "") _ tQ _ """" _ tField _ """ " _ tFragment
+            If tFragment [ "?" {
+                Set pParams = pParams + 1
+                Set pParams(pParams) = tFilter.%Get("value")
+            }
+        }
+    } Catch {
+        Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' could not be read")
+    }
+    If $$$ISERR(tSC) {
+        Set pWhere = ""
+        Kill pParams
+        Set pParams = 0
+    }
+    Quit tSC
+}
+
+/// The text of the body search statement. It reads the headers (alias <code>h</code>) first, in window
+/// order, and each body row (alias <code>b</code>, the table <var>pBodyTable</var> from
+/// <method>BodyTable</method>) by its ID, joined on the header's body ID. The select list is the header
+/// columns of <parameter>COLUMNS</parameter> and nothing of the body. <var>pWhere</var> is
+/// <method>HeaderWhere</method>'s clause (alias <code>h</code>) and <var>pBodyWhere</var>
+/// <method>BodyFilterWhere</method>'s (alias <code>b</code>); with <var>pCursor</var> the keyset clause
+/// follows them. Every other character is fixed text or a parameter marker, in the order the caller binds:
+/// the page size, <var>pWhere</var>'s, <var>pBodyWhere</var>'s, then the cursor's three.
+ClassMethod BodyStatement(pBodyTable As %String, pWhere As %String, pBodyWhere As %String, pCursor As %Boolean = 0) As %String
+{
+    Set tSQL = "SELECT TOP ? " _ ..AliasedColumns("h") _ " FROM %INORDER Ens.MessageHeader h, " _ pBodyTable _ " b WHERE h.MessageBodyId = b.%ID AND " _ pWhere _ " AND " _ pBodyWhere
+    If pCursor {
+        Set tSQL = tSQL _ " AND (h.TimeCreated > ? OR (h.TimeCreated = ? AND h.ID > ?))"
+    }
+    Quit tSQL _ " ORDER BY h.TimeCreated, h.ID"
 }
 
 /// The label of an <code>Ens.DataType.MessageType</code> code, or <code>"Unknown"</code>.
@@ -231,18 +525,24 @@ ClassMethod IsTimestamp(pNorm As %String) As %Boolean
     Quit $$$ISOK(##class(ExecuteMCPv2.REST.MessageResend).WindowDays(pNorm, pNorm, .tDays))
 }
 
-/// Search message headers. The JSON body holds <code>action</code> (<code>headers</code>),
-/// <code>from</code> (required, ISO-8601 or ODBC UTC), optional <code>to</code> (default now, to the
-/// millisecond, so a header created in the current second is inside the window), at most
+/// Search message headers. The JSON body holds <code>action</code> (<code>headers</code> or
+/// <code>body</code>), <code>from</code> (required, ISO-8601 or ODBC UTC), optional <code>to</code> (default
+/// now, to the millisecond, so a header created in the current second is inside the window), at most
 /// 7 days after <code>from</code>, optional <code>item</code>, <code>source</code>, <code>target</code>,
 /// <code>status</code> (a label, <code>Errored</code> or <code>Error</code> for status 8),
 /// <code>sessionId</code>, <code>bodyClass</code>, <code>errorOnly</code>, <code>limit</code>
 /// (1 to 500, default 100), the keyset cursor <code>afterTimeCreated</code> with <code>afterId</code>,
-/// and <code>namespace</code>.
+/// and <code>namespace</code>. The <code>body</code> action requires <code>bodyClass</code>, which is then
+/// the exact name of a persistent class and matches only the headers of that class, and
+/// <code>filters</code>, a list of 1 to 10 <code>{property, op, value}</code> objects (see
+/// <method>BodyFilterShape</method>); the <code>headers</code> action refuses a <code>filters</code> key.
 /// <p>The result is <code>{action, interopEnabled, rows, hasMore, limit, from, to}</code>.
 /// <code>interopEnabled</code> is false, with no rows, when the namespace has no
 /// <code>Ens.MessageHeader</code>. Every refusal is the standard envelope with <code>result:{}</code>;
-/// nothing is read before the input is valid, and nothing is written.</p>
+/// nothing is read before the input is valid, and nothing is written. A failure of the body statement's
+/// preparation carries its sanitized status, which holds only dictionary names and parameter markers; a
+/// failure while it runs is the fixed text <code>The body search failed with SQLCODE n.</code>, so no
+/// response names a filter value or body content.</p>
 ClassMethod MessageSearch() As %Status
 {
     Set tSC = $$$OK
@@ -259,8 +559,12 @@ ClassMethod MessageSearch() As %Status
         Set tAction = tBody.%Get("action")
         Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
         If $$$ISERR(tSC) Quit
-        If tAction '= "headers" {
-            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be: headers")
+        If (tAction '= "headers") && (tAction '= "body") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be one of: headers, body")
+            Quit
+        }
+        If (tAction = "headers") && tBody.%IsDefined("filters") {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'filters' applies only to the body action")
             Quit
         }
 
@@ -344,6 +648,20 @@ ClassMethod MessageSearch() As %Status
             }
         }
 
+        ; The body action's whole input is checked here, before the namespace is switched.
+        Set tBodyFilters = ""
+        If tAction = "body" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tBodyClass, "bodyClass")
+            If $$$ISERR(tSC) Quit
+            If '$Match(tBodyClass, "^%?[A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)*$") {
+                Set tSC = $$$ERROR($$$GeneralError, "Parameter 'bodyClass' must be a class name, such as Package.Class")
+                Quit
+            }
+            Set tBodyFilters = tBody.%Get("filters")
+            Set tSC = ..BodyFilterShape(tBodyFilters)
+            If $$$ISERR(tSC) Quit
+        }
+
         Set tFilters = {}
         Do tFilters.%Set("item", tItem)
         Do tFilters.%Set("source", tSource)
@@ -354,8 +672,10 @@ ClassMethod MessageSearch() As %Status
         Do tFilters.%Set("sessionId", tSessionId)
         Do tFilters.%Set("bodyClass", tBodyClass)
         Do tFilters.%Set("errorOnly", tErrorOnly, "boolean")
-        Set tSC = ..HeaderWhere(tFilters, .tWhere, .tWhereParams)
-        If $$$ISERR(tSC) Quit
+        If tAction = "headers" {
+            Set tSC = ..HeaderWhere(tFilters, .tWhere, .tWhereParams)
+            If $$$ISERR(tSC) Quit
+        }
 
         If tNamespace '= "" {
             Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
@@ -363,7 +683,7 @@ ClassMethod MessageSearch() As %Status
         }
 
         Set tResult = {}
-        Do tResult.%Set("action", "headers")
+        Do tResult.%Set("action", tAction)
         Do tResult.%Set("limit", tLimit, "number")
         Do tResult.%Set("from", tFromNorm)
         Do tResult.%Set("to", tToNorm)
@@ -375,21 +695,44 @@ ClassMethod MessageSearch() As %Status
             Quit
         }
 
+        ; The body action reads the headers first, in window order, and each body row by its ID. Its
+        ; statement holds only fixed text, names from the class dictionary, and parameter markers.
+        If tAction = "body" {
+            Set tSC = ..BodyTable(tBodyClass, .tBodyTable)
+            If $$$ISERR(tSC) Quit
+            Set tSC = ..HeaderWhere(tFilters, .tWhere, .tWhereParams, "h")
+            If $$$ISERR(tSC) Quit
+            Set tSC = ..BodyFilterWhere(tBodyClass, tBodyFilters, "b", .tBodyWhere, .tBodyParams)
+            If $$$ISERR(tSC) Quit
+        }
+
         ; TOP is a parameter and the keyset clause comes after the filters, so the parameters
-        ; are the page size, then HeaderWhere's, then the cursor's.
-        Set tSQL = "SELECT TOP ? " _ ..#COLUMNS _ " FROM Ens.MessageHeader WHERE " _ tWhere
+        ; are the page size, then HeaderWhere's, then the body filters', then the cursor's.
+        If tAction = "body" {
+            Set tSQL = ..BodyStatement(tBodyTable, tWhere, tBodyWhere, tAfterNorm '= "")
+        }
+        Else {
+            Set tSQL = "SELECT TOP ? " _ ..#COLUMNS _ " FROM Ens.MessageHeader WHERE " _ tWhere
+            If tAfterNorm '= "" {
+                Set tSQL = tSQL _ " AND (TimeCreated > ? OR (TimeCreated = ? AND ID > ?))"
+            }
+            Set tSQL = tSQL _ " ORDER BY TimeCreated, ID"
+        }
         Set tArgs = 1
         Set tArgs(1) = tLimit + 1
         For tI = 1:1:tWhereParams {
             Set tArgs = tArgs + 1, tArgs(tArgs) = tWhereParams(tI)
         }
+        If tAction = "body" {
+            For tI = 1:1:tBodyParams {
+                Set tArgs = tArgs + 1, tArgs(tArgs) = tBodyParams(tI)
+            }
+        }
         If tAfterNorm '= "" {
-            Set tSQL = tSQL _ " AND (TimeCreated > ? OR (TimeCreated = ? AND ID > ?))"
             Set tArgs = tArgs + 1, tArgs(tArgs) = tAfterNorm
             Set tArgs = tArgs + 1, tArgs(tArgs) = tAfterNorm
             Set tArgs = tArgs + 1, tArgs(tArgs) = tAfterId
         }
-        Set tSQL = tSQL _ " ORDER BY TimeCreated, ID"
 
         Set tStmt = ##class(%SQL.Statement).%New()
         Set tStmt.%SelectMode = 0
@@ -397,7 +740,12 @@ ClassMethod MessageSearch() As %Status
         If $$$ISERR(tSC) Quit
         Set tRS = tStmt.%Execute(tArgs...)
         If tRS.%SQLCODE < 0 {
-            Set tSC = $$$ERROR($$$GeneralError, "SQL error: " _ tRS.%Message)
+            If tAction = "body" {
+                Set tSC = $$$ERROR($$$GeneralError, "The body search failed with SQLCODE " _ tRS.%SQLCODE _ ".")
+            }
+            Else {
+                Set tSC = $$$ERROR($$$GeneralError, "SQL error: " _ tRS.%Message)
+            }
             Quit
         }
 
@@ -409,6 +757,10 @@ ClassMethod MessageSearch() As %Status
                 Quit
             }
             Do tRows.%Push(..HeaderRow(tRS))
+        }
+        If (tAction = "body") && (tRS.%SQLCODE < 0) {
+            Set tSC = $$$ERROR($$$GeneralError, "The body search failed with SQLCODE " _ tRS.%SQLCODE _ ".")
+            Quit
         }
         Do tResult.%Set("interopEnabled", 1, "boolean")
         Do tResult.%Set("rows", tRows)

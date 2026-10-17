@@ -7,17 +7,29 @@
  * - **headers** (read): header rows for a required time window, filtered by item, source, target,
  *   status, session, body class and error flag, paged by a keyset cursor. A row never carries body
  *   content, `ErrorStatus` or `Description`.
- * - **body** and **searchTable** (reads): declared now so the governance keys and the preset rows
- *   never change; they answer with the `NOT_IMPLEMENTED` refusal and make no IRIS call.
+ * - **body** (read, Story 39.3): the same header rows, for the headers whose body satisfies a list of
+ *   structured `{property, op, value}` filters over one exact body class. It never returns a body value.
+ *   The PHI data policy governs it: under `block` it is refused with `DATA_POLICY_BLOCKED` before any IRIS
+ *   call; under `redact` and `allow` it runs.
+ * - **searchTable** (read): declared so the governance key and the preset rows never change; it answers
+ *   with the `NOT_IMPLEMENTED` refusal and makes no IRIS call.
  *
- * All three keys are reads, so all are enabled by default. Every filter value is matched by equality
- * and bound as a parameter on the IRIS side; this layer validates and normalizes for good client errors.
+ * All three keys are reads, so all are enabled by default. Every filter value is matched on the IRIS side
+ * and bound as a parameter, a filter's property and operator are resolved there too, and this layer
+ * validates and normalizes for good client errors only.
  *
  * Timestamps in are ISO 8601 with `Z` or an offset and go to IRIS as canonical UTC. Timestamps out are
  * `toISOString()` UTC with a `...Raw` sibling that keeps the stored value.
  */
 
-import { IrisApiError, REFUSAL_CODES, refusalResult, type ToolDefinition } from "@iris-mcp/shared";
+import {
+  IrisApiError,
+  REFUSAL_CODES,
+  effectiveDataPolicy,
+  refusalResult,
+  type DataPolicySummary,
+  type ToolDefinition,
+} from "@iris-mcp/shared";
 import { z } from "zod";
 import { STATUS_LABELS } from "./message-resend.js";
 
@@ -29,7 +41,44 @@ const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 
 /** The actions that exist now. */
-const AVAILABLE_ACTIONS = ["headers"] as const;
+const AVAILABLE_ACTIONS = ["headers", "body"] as const;
+
+/**
+ * The operators of a body filter. The IRIS side owns the map from each to its SQL fragment
+ * (`ExecuteMCPv2.REST.MessageSearch.BodyOpSql`); a later search surface shares this list.
+ */
+export const BODY_FILTER_OPS = [
+  "eq",
+  "ne",
+  "lt",
+  "le",
+  "gt",
+  "ge",
+  "contains",
+  "startsWith",
+  "isNull",
+  "notNull",
+] as const;
+
+/** One structured condition on a body property. */
+export interface BodyFilter {
+  /** The exact, case-sensitive name of a property of the body class. */
+  property: string;
+  /** The operator. */
+  op: (typeof BODY_FILTER_OPS)[number];
+  /** The value to compare with; absent for `isNull` and `notNull`. */
+  value?: string | number | boolean;
+}
+
+/** The most filters one body search takes, and the longest string value of one. */
+const MAX_BODY_FILTERS = 10;
+const MAX_FILTER_VALUE = 1024;
+
+/** The text of the refusal a `block` data policy gives the body action. */
+const BODY_BLOCKED_TEXT =
+  "The block data policy withholds message body data, and a body search reveals what bodies hold, so " +
+  "the body action is refused. Use the headers action, or ask the operator for a looser IRIS_DATA_POLICY " +
+  "for this profile.";
 
 // -- Response shapes (ExecuteMCPv2.REST.MessageSearch) ----------------
 
@@ -269,33 +318,63 @@ export const messageSearchTool: ToolDefinition = {
   title: "Search Interoperability Messages",
   description:
     "Search Interoperability message headers in a required time window. Use it to find messages by " +
-    "item, status, session, body class or error flag before reading, diagramming or resending them. " +
+    "item, status, session, body class or error flag, or (body action) by what their bodies hold, " +
+    "before reading, diagramming or resending them. " +
     "Returns paged header rows only: id, sessionId, type, status, isError, sourceItem, targetItem, " +
     "bodyClassName, bodyId, UTC times (timeCreated, timeProcessed, each with a ...Raw sibling) and " +
     "correspondingMessageId. A row never carries message body content, error text or descriptions. " +
     "Rows come oldest first; when hasMore is true, pass nextCursor back as cursor for the next page.\n\n" +
     "Actions:\n" +
     "- **headers** (read, enabled by default): search the headers.\n" +
-    "- **body** and **searchTable** (reads, enabled by default): not yet available. Calling them " +
-    "(with a valid window) returns the NOT_IMPLEMENTED refusal and makes no IRIS call; use headers.\n\n" +
+    "- **body** (read, enabled by default): search by body content. It requires bodyClass, the exact " +
+    "name of a persistent body class in the namespace (only headers of exactly that class match; " +
+    "a subclass is a different class), and filters: 1 to 10 conditions combined with AND, each " +
+    "{property, op, value}. property is the exact, case-sensitive name of one property of bodyClass " +
+    "(letters and digits; not an SQL column name, not a dotted path). op is eq, ne, lt, le, gt, ge, " +
+    "contains, startsWith, isNull or notNull. value is a string of 1 to 1024 characters, a number or a " +
+    "boolean; leave it out for isNull and notNull. eq, ne, lt, le, gt, ge and startsWith compare by the " +
+    "property's collation, so a default string property ignores case; contains is a case-sensitive " +
+    "substring test; % and _ are ordinary characters; ne never matches an empty (null) value. Values are " +
+    "compared in IRIS logical form: a date property takes its day number and a time property its seconds " +
+    "since midnight, not a formatted string; a timestamp property takes its stored text, such as " +
+    "'2001-02-03 08:00:00', not an ISO 8601 'T' form; a number " +
+    "is sent in IRIS canonical form (0.5 becomes .5), so give a text property a string. A header whose " +
+    "body no longer exists never matches. A stream " +
+    "property accepts only isNull and notNull. Properties without a column are refused: list and array " +
+    "collections, embedded (serial) objects, relationships, multidimensional properties, and transient " +
+    "or calculated properties that are not SQL-computed. Everything is validated on the IRIS side and " +
+    "every value is bound as a parameter. The result is the header rows of the matching messages, " +
+    "plus dataPolicy; it never contains a body value. The body action is under the PHI data policy " +
+    "(IRIS_DATA_POLICY, set per profile; default redact): under block it is refused with the " +
+    "DATA_POLICY_BLOCKED code and no IRIS call, so use headers or ask the operator for a looser policy; " +
+    "under redact and allow it runs. Which headers match still shows what the bodies hold, so an " +
+    "operator who does not accept that uses block or restricts the body key.\n" +
+    "- **searchTable** (read, enabled by default): not yet available. Calling it (with a valid window) " +
+    "returns the NOT_IMPLEMENTED refusal and makes no IRIS call; use headers or body.\n\n" +
     "Scope: from is required (ISO 8601 with Z or an offset); to defaults to now; the window may span " +
     "at most 7 days. There is no whole-namespace mode. When paging a window close to 7 days wide, " +
     "pass the same from and to on every page, because an omitted to is recomputed as now on each " +
     "call. limit (default 100, max 500) caps the rows returned per page, not the work done: a wide " +
     "window on a busy namespace is scanned in full and can approach the ~60 s Web Gateway timeout, " +
-    "so narrow the window or add filters.\n\n" +
-    "Filters match by equality, not by pattern (% and _ are ordinary characters), and the name " +
+    "so narrow the window or add filters. The body action reads the headers in the window first and " +
+    "each body by its ID.\n\n" +
+    "Header filters match by equality, not by pattern (% and _ are ordinary characters), and the name " +
     "filters ignore case: item (the source or the target), source, target, status (Created, " +
     "Queued, Delivered, Discarded, Suspended, Deferred, Aborted, Errored, Completed; rows report " +
-    "Errored as Error), sessionId, bodyClass, and errorOnly (the IsError flag, which is separate from " +
-    "status Error).\n\n" +
+    "Errored as Error), sessionId, bodyClass (on the headers action), and errorOnly (the IsError flag, " +
+    "which is separate from status Error). The filters parameter belongs to the body action only; " +
+    "the headers action refuses it.\n\n" +
     "A namespace without Interoperability returns notApplicable: true with a reason, not an error.\n\n" +
     "GOVERNANCE - all three actions are reads and enabled by default. An operator can restrict one " +
-    'with IRIS_GOVERNANCE, e.g. {"global": {"iris_message_search:headers": false}}.',
+    'with IRIS_GOVERNANCE, e.g. {"global": {"iris_message_search:headers": false}}; the body key is ' +
+    "iris_message_search:body.",
   inputSchema: z.object({
     action: z
       .enum(["headers", "body", "searchTable"])
-      .describe("Action: headers (search headers). body and searchTable are not yet available (NOT_IMPLEMENTED)."),
+      .describe(
+        "Action: headers (search headers), body (search by body content; needs bodyClass and filters). " +
+          "searchTable is not yet available (NOT_IMPLEMENTED).",
+      ),
     from: z
       .string()
       .min(1)
@@ -309,7 +388,37 @@ export const messageSearchTool: ToolDefinition = {
     target: z.string().max(128).optional().describe("Target config item name."),
     status: z.enum(STATUS_LABELS).optional().describe("Message status filter. Rows report Errored as Error."),
     sessionId: z.number().int().positive().optional().describe("Session ID (a positive integer)."),
-    bodyClass: z.string().max(220).optional().describe("Message body class name."),
+    bodyClass: z
+      .string()
+      .max(220)
+      .optional()
+      .describe(
+        "Message body class name. On headers it filters by class name (ignoring case). On body it is " +
+          "REQUIRED: the exact name of a persistent class with an SQL table, such as Ens.StringRequest.",
+      ),
+    filters: z
+      .array(
+        z.object({
+          property: z
+            .string()
+            .min(1)
+            .max(128)
+            .regex(/^[A-Za-z][A-Za-z0-9]*$/)
+            .describe("The exact, case-sensitive name of one property of bodyClass."),
+          op: z.enum(BODY_FILTER_OPS).describe("The operator."),
+          value: z
+            .union([z.string().min(1).max(MAX_FILTER_VALUE), z.number(), z.boolean()])
+            .optional()
+            .describe("The value to compare with (required except for isNull and notNull)."),
+        }),
+      )
+      .min(1)
+      .max(MAX_BODY_FILTERS)
+      .optional()
+      .describe(
+        "body action only (REQUIRED there; the headers action refuses it): 1 to 10 conditions on body " +
+          "properties, combined with AND. Each is {property, op, value}.",
+      ),
     errorOnly: z
       .boolean()
       .optional()
@@ -344,6 +453,9 @@ export const messageSearchTool: ToolDefinition = {
     body: "read",
     searchTable: "read",
   },
+  // The PHI data policy governs the body action (Story 39.3, AD-26): a body search reveals what bodies
+  // hold. `filters` carries the search values, so the audit log redacts it under redact and block.
+  dataPolicy: { actions: ["body"], phiInputs: ["filters"] },
   handler: async (args, ctx) => {
     const input = args as {
       action: "headers" | "body" | "searchTable";
@@ -355,6 +467,7 @@ export const messageSearchTool: ToolDefinition = {
       status?: (typeof STATUS_LABELS)[number];
       sessionId?: number;
       bodyClass?: string;
+      filters?: BodyFilter[];
       errorOnly?: boolean;
       limit?: number;
       cursor?: string;
@@ -389,13 +502,38 @@ export const messageSearchTool: ToolDefinition = {
       to = converted;
     }
 
-    if (action !== "headers") {
+    if (action === "searchTable") {
       return refusalResult(
         REFUSAL_CODES.NOT_IMPLEMENTED,
         `The '${action}' action of iris_message_search is not available in this version. ` +
-          "Use the 'headers' action.",
+          "Use the 'headers' or 'body' action.",
         { action, availableActions: [...AVAILABLE_ACTIONS] },
       );
+    }
+
+    if (action === "headers" && input.filters !== undefined) {
+      return validationError("'filters' applies only to the body action.");
+    }
+
+    // The PHI data policy of the call's profile (Story 39.3, AD-26). A body search reveals what bodies
+    // hold, so `block` refuses it before anything else is checked and before any IRIS call.
+    const policy = effectiveDataPolicy(ctx.config);
+    if (action === "body" && policy === "block") {
+      return refusalResult(REFUSAL_CODES.DATA_POLICY_BLOCKED, BODY_BLOCKED_TEXT, {
+        action: "body",
+        policy: "block",
+      });
+    }
+
+    if (action === "body") {
+      if (input.bodyClass === undefined || input.bodyClass === "") {
+        return validationError("'bodyClass' is required for the body action: the exact name of the body class.");
+      }
+      if (input.filters === undefined || input.filters.length === 0) {
+        return validationError(
+          `'filters' is required for the body action: 1 to ${MAX_BODY_FILTERS} {property, op, value} conditions.`,
+        );
+      }
     }
 
     let cursor: SearchCursor | undefined;
@@ -410,18 +548,28 @@ export const messageSearchTool: ToolDefinition = {
 
     const ns = ctx.resolveNamespace(input.namespace);
     const limit = input.limit ?? DEFAULT_LIMIT;
-    const body: Record<string, unknown> = { action: "headers", from, to, limit, namespace: ns };
+    const body: Record<string, unknown> = { action, from, to, limit, namespace: ns };
     if (input.item !== undefined) body.item = input.item;
     if (input.source !== undefined) body.source = input.source;
     if (input.target !== undefined) body.target = input.target;
     if (input.status !== undefined) body.status = input.status;
     if (input.sessionId !== undefined) body.sessionId = input.sessionId;
     if (input.bodyClass !== undefined) body.bodyClass = input.bodyClass;
+    if (action === "body") body.filters = input.filters;
     if (input.errorOnly !== undefined) body.errorOnly = input.errorOnly;
     if (cursor !== undefined) {
       body.afterTimeCreated = cursor.t;
       body.afterId = cursor.id;
     }
+
+    // What the policy did over a body search: it returns header rows only, so nothing is redacted or
+    // withheld. The headers action carries no such field.
+    const dataPolicy: DataPolicySummary | undefined =
+      action === "body" ? { policy, redacted: 0, blocked: 0 } : undefined;
+    const policyLine =
+      dataPolicy === undefined
+        ? []
+        : [`Data policy ${dataPolicy.policy}: header rows only; the body action returns no body content.`];
 
     try {
       const response = await ctx.http.post<SearchResult>(`${BASE_URL}/interop/message/search`, body);
@@ -435,15 +583,16 @@ export const messageSearchTool: ToolDefinition = {
           `Interoperability is not configured in namespace '${ns}': it has no message headers to search. ` +
           "Search an Interoperability-enabled namespace.";
         return {
-          content: [{ type: "text" as const, text: reason }],
+          content: [{ type: "text" as const, text: [reason, ...policyLine].join("\n") }],
           structuredContent: toStructured({
-            action: "headers",
+            action,
             notApplicable: true,
             reason,
             rows: [],
             hasMore: false,
             limit: result.limit ?? limit,
             ...window,
+            ...(dataPolicy !== undefined ? { dataPolicy } : {}),
           }),
         };
       }
@@ -452,7 +601,7 @@ export const messageSearchTool: ToolDefinition = {
       const hasMore = result.hasMore === true;
       const last = rows[rows.length - 1];
       const structured: Record<string, unknown> = {
-        action: "headers",
+        action,
         rows,
         hasMore,
         limit: result.limit ?? limit,
@@ -461,6 +610,7 @@ export const messageSearchTool: ToolDefinition = {
       if (hasMore && last !== undefined) {
         structured.nextCursor = encodeCursor({ t: last.timeCreatedRaw, id: last.id });
       }
+      if (dataPolicy !== undefined) structured.dataPolicy = dataPolicy;
 
       const heading =
         rows.length === 0
@@ -468,7 +618,7 @@ export const messageSearchTool: ToolDefinition = {
           : `${rows.length} message header(s) from ${window.from || fromRaw} to ${window.to || toRaw}` +
             (hasMore ? "; more are available - pass nextCursor as cursor." : ".");
       return {
-        content: [{ type: "text" as const, text: [heading, ...rows.map(renderRow)].join("\n") }],
+        content: [{ type: "text" as const, text: [heading, ...rows.map(renderRow), ...policyLine].join("\n") }],
         structuredContent: toStructured(structured),
       };
     } catch (error: unknown) {
