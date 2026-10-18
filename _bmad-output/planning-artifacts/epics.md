@@ -5473,6 +5473,8 @@ G24.
   - `iris_test_status` returns `structuredContent` (research [56]);
   - `iris_execute_tests`' `readOnlyHint`/`idempotentHint` contradict its write classification and its "do not re-submit" contract. This is DW-498; the Epic 40 gate is recommended to route it here.
 - **AC 40.4.4** — Capstone (Rule #21), in the default suite and listed in the live-gate roster: a coverage run over a fixture yields the expected summary and a valid Cobertura file, and a pre-started monitor session causes a refusal. It is proven red by removing the guard (Rule #59).
+- DW-601: a freshly compiled class whose methods with INT code hold only `#;` or `#dim` lines reads `not-up-to-date` and fails the verdict, and a forced compile cannot clear it. The class data IRIS returns matches a genuinely stale class; only `$Data(^rMAP(<class>))` differs (10 when fresh, 0 when stale). Use that as the stale discriminator, recorded as raw data by `SourceMap` (the bootstrap moves), and pin both cases live. This also closes the 31-character method-name case, which can otherwise report a class at `line-rate="1"`. (ledger; routed by the 40.2 rework re-review 2026-10-18)
+- DW-602: `#dim tSC As %Status = $$$OK` compiles to an executable `Set` but is dropped from class coverage and counted as generated. That breaks AC 40.2.1's executable rule for a common idiom and can move a percent across `minCoverage`. Count an initializing `#dim` as an executable line at its own class line, and correct the README and CHANGELOG sentence that calls a `#dim` "never a class line". Pin it live. (ledger; routed by the 40.2 rework re-review 2026-10-18)
 
 ## Epic 41: Companion Skills & Rules Pack (added 2026-10-14)
 

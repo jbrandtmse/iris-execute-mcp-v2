@@ -3243,11 +3243,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 40.1 review 2026-10-17 (Blind), claim from reading only: ResultExecute returns zero rows without an error for an unknown routine, so a premature read would be silent; every gate run read correct counts; settle with a probe that starts a session and reads the same process's counts at once
 - 2026-10-18T04:15:06Z status=routed owner=40-2-coverage-reports-and-targets by=harvest note=probe first; 40.2 consumes the counts for its per-class/per-method summary
 - 2026-10-18T05:28:57Z occurrence=40-1-line-coverage-probe-and-engine
+- 2026-10-18T13:33:41Z status=wontfix-theoretical by=adjudication note=40.2 plan probe 2026-10-17: in the process that calls Start, code run right after Start is counted and its counts read at once with no wait, in 3 rounds; the runner is that process; reopen_if=a completed run reports zero counts for a routine whose tests ran
 
 ### DW-596: The coverage Status route builds one nested pair per counted line and per command line of the whole run on every read of a terminal run; the 200,000-line cap and 20-run retention were sized from SyntaxColor/Result timings, not measured on the Status path
 - source: _bmad-output/implementation-artifacts/spec-40-1-line-coverage-probe-and-engine.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 40.1 review 2026-10-17 (Blind), claim from reading only (REST/Coverage.cls BuildRoutines); the gate fixture has 48 lines; settle by measuring Status time, response bytes and process memory for a ~200,000-line routine
 - 2026-10-18T04:15:06Z status=routed owner=40-2-coverage-reports-and-targets by=harvest note=measure before 40.2 builds its summary on the Status payload; Rule #38 output caps are not scan caps
+- 2026-10-18T13:33:42Z status=wontfix-accepted by=adjudication note=measured at the 200,000-line cap (40.2 implement): one terminal Status read 0.62 s over HTTP, 4.8 MB, 62.8 MB IRIS process memory, inside the 2 s budget; encoding kept; reopen_if=a Status read at the cap exceeds 2 s or runs out of memory
 
 ### DW-597: ExecuteMCPv2.REST.UnitTest:BuildTestSpec joins a package's classes as :A;:B, which RunTest reads as class A with a method named B, so POST /tests with level package runs no test
 - source: _bmad-output/implementation-artifacts/spec-40-1-line-coverage-probe-and-engine.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3258,6 +3260,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-40-1-line-coverage-probe-and-engine.md | severity: med | fix-risk: low | footprint: in-story
 - evidence: 40.1 rework re-review 2026-10-18 (Edge, verified by reading): LineByLine.Start loads routines through $$LIST^%R and silently skips a missing .obj (irislib LineByLine.cls:56-70); ProofFailure's ListsEqual then fails for runner and supervisor, Finish keeps the node, and NodeDisproved (count mismatch) kills it
 - 2026-10-18T07:26:21Z status=routed owner=40-2-coverage-reports-and-targets by=cr note=probe first: Runner.Run checks GetRoutineCount against the run's list right after Start and stops at once with a startError
+- 2026-10-18T13:33:42Z status=resolved-by:40-2-coverage-reports-and-targets by=adjudication note=the runner checks right after Start that the session loaded every listed routine (Job.SessionScopeFailure, LoadedAsListed) and on a mismatch fails the run naming the routine, runs no test and stops its own proven session (Runner.RecordUnstoppedSession on a non-clean stop); zero-routine session case (row 13b) included; gate rows 13/13b live, mutation-verified; 4 armed coverage gates 79/79 at lead smoke
 
 ### DW-599: Spine AD-27 and the round-1 HIGH-2 note say an all-processes or paused session still reports the previous scoped session's list; the rework probe on the same build saw the starting process and others instead
 - source: spec-40-1-line-coverage-probe-and-engine.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3268,3 +3271,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-40-2-coverage-reports-and-targets.md | severity: low | fix-risk: med | footprint: in-story
 - evidence: Up to four gate files (story-40-1-coverage, story-40-1-qa, story-40-2-coverage-reports, story-40-2-qa live gates) declare the helpers, mostly verbatim; the spec's stated reason is only that the 40.2 gate follows the 40.1 gate shape (Rule 2, weak reason)
 - 2026-10-18T11:35:23Z status=wontfix-accepted owner=40-2-coverage-reports-and-targets by=cr note=reopen_if=a coverage gate's copy of expectIdle or another shared-instance check diverges from another gate's copy
+
+### DW-601: A freshly compiled class whose only methods with INT code have bodies of preprocessor lines alone (#; or #dim) reads source.reason not-up-to-date: IsDirective records those lines as 0, so lineMapIsGone cannot tell the class from one whose line map is gone
+- source: spec-40-2-coverage-reports-and-targets.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: CR re-review 2026-10-18, live: fresh ExecuteMCPv2.Temp.CR402Stub (IsUpToDate 1, $Data(^rMAP)=10) gives OnHook [0]/label 7, Declared [0]/label 5; built dist -> {reason:not-up-to-date}, verdict FAIL; a doc-only edit gives the same shape with ^rMAP 0
+- 2026-10-18T13:27:45Z status=routed owner=40-4-test-depth-docs-prompt-and-capstone by=cr note=fix: raw class flag from $Data(^rMAP(class)) in SourceMap; exact label via cMETHrtnlabel also closes the 31-char residual
+
+### DW-602: IsDirective drops a #dim line that carries an initial value (#dim tSC As %Status = $$$OK), which compiles to an executable Set: the statement is never a class line and its INT line counts as generated, against the AC-1 executable rule; the dev README and CHANGELOG state it as never a class line
+- source: spec-40-2-coverage-reports-and-targets.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: CR re-review 2026-10-18, live: ExecuteMCPv2.Temp.CR402Probe DimInit -> INT 16 'Set tSC=1' (C:set), raw intLines [0,17]/label 15; built dist reports only line 7 and generated 1; the idiom skews percent per method
+- 2026-10-18T13:27:45Z status=routed owner=40-4-test-depth-docs-prompt-and-capstone by=cr note=fix: keep INTLine's line for a #dim with '=' outside parens (or a raw per-line kind flag, TS decides); correct the README/CHANGELOG sentence
