@@ -2,7 +2,7 @@
 title: 'Story 40.3: TestProduction Runs'
 type: 'feature'
 created: '2026-10-18'
-status: 'done'
+status: 'in-progress'
 baseline_revision: '890f9db2290f74534a32f2b7697e578cb432324e'
 baseline_commit: '890f9db2290f74534a32f2b7697e578cb432324e'
 review_loop_iteration: 0
@@ -318,6 +318,10 @@ Checklist from the previous round:
 - [x] [Review][Defer] **LOW: spine AD-15's Story 40.3 bullet (decision #60) does not name the rework's older-copy case** [ARCHITECTURE-SPINE.md AD-15] — deferred: `wontfix-accepted` as DW-604 (the spine is lead-owned, Rule 20; the CHANGELOG, where AD-15's list is pruned at the Epic 42 retro, names it) (Blind Hunter).
 - [x] [Review][Defer] **MED (theoretical): `POST /tests` (`RunTests`) passes its raw target into the same spec** [src/ExecuteMCPv2/REST/UnitTest.cls:37] — deferred: `wontfix-theoretical` as DW-605 (no tool calls the route, and a REST caller with web-application access already holds `POST /command`; real if a tool starts calling `RunTests`) (reviewer).
 
+**Lead re-review of the round-2 HIGH patch (2026-10-18; scoped, read-only, frozen diff `cr-40-3/high2.diff` on `fb34472`): NOT-CLEAN, 1 high.** The method-segment character set (`;` `,` `^`) was confirmed complete from `irislib/%UnitTest/Manager.cls`; the class part is safe at package and class level. Rework iteration 2 of 3 works exactly this item, with a demonstrated `mutation:` line (Rule 19).
+
+- [ ] [Review][Patch] **HIGH: at `level:"method"` the guard is asked about the raw target, but the queue gets a class name trimmed by JavaScript** [packages/iris-dev-mcp/src/tools/execute.ts:943/:955/:967]. JS `.trim()` strips CR, LF, VT, FF, U+FEFF, U+2028/2029, U+3000 and the other Unicode spaces. The IRIS guard strips only `$ZStrip(…,"<>W")`, which is tab, space and NBSP (`UnitTest.cls:367`, `:540`). With `{target:"Story403.PassTest\n:TestControl", level:"method"}`, the guard sees a name that `IsClassName` rejects, so it answers `proceed`. Then `{class:"Story403.PassTest", methods:["Control"]}` is queued, and `TestControl` stops (and may force-stop and clean) the other production. **Fix:** at method level, ask the guard about exactly what is queued: `<className>[:<methodName>]`, built from the same trimmed values that go into `tests`. Do not add a second normalization. Pin it with a unit row: `"Story403.PassTest\n:TestControl"` (and a leading `\r` and a trailing `\n` with no colon) produces the guard query for the queued class. Revert the fix and show the row go red. Run nothing of this on the shared instance: the unit row uses the mocked HTTP client.
+
 **Rejected.**
 
 - `maybe-false` (low if true): the member check rests on `..ProductionGuard(` being resolved again in the target namespace; if it is not, an older-copy namespace that could run the guard goes unguarded. Settled only by a namespace without the `%ALL` mapping that holds its own pre-40.3 copy; the lead's rework item asked for the check, and the outcome either way is decision #60's "behaves as before" (Blind Hunter; the previous pass's findings 3, 12 and 14).
@@ -339,6 +343,9 @@ Checklist from the previous round:
   - Decision #60 accepts code review's extension of #56: a namespace that cannot see the `ExecuteMCPv2` classes answers `proceed` unguarded, like the 404 rule. Spine AD-15's Story 40.3 bullet now names it.
   - The lead re-review was NOT-CLEAN (1 medium, 1 low), so rework iteration 1 works the two `[Review]` items above.
   - The QA section's namespace names (`EXECMCPTMP40W`/`40X`) record what QA ran. Code review later renamed them `EXECMCPTMP403W`/`403X`.
+- **2026-10-18, lead, after the rework re-review and a second scoped re-review.**
+  - Decision #61 sanctions refusing a malformed method segment (`;`, `,` or `^`) as an AD-15 change on the frozen `iris_execute_tests` key. Spine AD-15's Story 40.3 bullet names it.
+  - The scoped re-review of that patch found one more HIGH (the trim mismatch), worked in rework iteration 2.
 
 ## Review Triage Log
 

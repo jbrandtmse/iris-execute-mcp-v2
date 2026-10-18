@@ -3287,3 +3287,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-40-3-testproduction-runs.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: story-40-1-coverage-live-gate, story-40-1-qa-live-gate, story-40-2-coverage-reports-live-gate and story-40-2-qa-live-gate each define the four helpers at top level (Rule 2 near-copies); a fix to the StopIfList safety net or the idle check in one copy does not reach the others
 - 2026-10-18T17:35:54Z status=routed owner=burndown by=cr note=Rule 2; move the four gates onto the shared helpers (a monitor-only module if the TestProduction helpers do not fit) and re-run them armed
+
+### DW-604: Spine AD-15's Story 40.3 bullet (decision #60) names a namespace that cannot see the ExecuteMCPv2 classes as unguarded, but not the rework-1 case of a namespace holding its own copy of an earlier build without ProductionGuard
+- source: spec-40-3-testproduction-runs.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: UnitTest.cls ProductionCheck now answers proceed unguarded where a namespace's own pre-40.3 copy lacks ProductionGuard (lead rework item 2); CHANGELOG, tool_support.md and the dev README state it, the spine AD-15 bullet does not
+- 2026-10-18T19:52:53Z status=wontfix-accepted owner=40-3-testproduction-runs by=cr note=spine is lead-owned (Rule 20); the CHANGELOG, where AD-15's list is pruned at the Epic 42 retro, names it. reopen_if=the AD-15 bullet is cited to decide an older-copy namespace
+
+### DW-605: POST /tests (ExecuteMCPv2.REST.UnitTest:RunTests) passes its raw target into BuildTestSpec and %UnitTest.Manager:RunTest, which reads ';' as more classes, ',' as more specs and '^' as setup code it runs with do @..., so a REST caller can run arbitrary classmethods and unguarded TestProduction classes
+- source: spec-40-3-testproduction-runs.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: irislib/%UnitTest/Manager.cls BeforeRunTest (d:before'="" @before), RunOneTestSuite ';' split and RunTest ',' split; RunTests validates only that target is non-empty. The MCP path (iris_execute_tests method segment) was closed in Story 40.3's re-review
+- 2026-10-18T19:52:59Z status=wontfix-theoretical owner=40-3-testproduction-runs by=cr note=no MCP tool calls POST /tests, and a REST caller with webapp access already holds POST /command. Real if a tool starts calling RunTests
