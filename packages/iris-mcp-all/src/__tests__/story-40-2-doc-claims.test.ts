@@ -56,7 +56,7 @@ const CHANGELOG_TITLE = /^## \[Pre-release \u2014 2026-10-18\] \u2014 Story 40\.
  * documented move to the committed embed, so a later move leaves this file true.
  */
 const BOOTSTRAP_FROM = "14a4cba6504a";
-const BOOTSTRAP_TO = "3a3b4cf76502";
+const BOOTSTRAP_TO = "06b8b83fc319";
 
 const EXPORT_RECIPE = '{"global":{"iris_test_status:export":true}}';
 
@@ -93,6 +93,13 @@ describe("Story 40.2: the Development README", () => {
     expect(entry).toContain("which IRIS stores in its own layout");
     expect(entry).toContain("A class without a result has `source: {reason}`, and the reason is one of three:");
     for (const reason of ["not-up-to-date", "not-compiled", "unavailable"]) expect(entry, reason).toContain(`\`${reason}\` (`);
+    // The mapping rules of the INT block, the one-line statement and the missing line map.
+    expect(entry).toContain("a method that compiles to no INT code (a constant return, for example) has no lines either, and no `reason`");
+    expect(entry).toContain("a preprocessor line (`#dim`, `#define`, `#sqlcompile` and the like) is never a class line: the compiler maps a leading one onto the code of the method before it or onto the method's own first statements");
+    expect(entry).toContain("**A statement that spans several lines but compiles to one INT line is reported once, at the first line that maps to its code.**");
+    expect(entry).toContain("For a multi-line embedded SQL statement that is the line after the `&sql(` line");
+    expect(entry).toContain("or its compiled line map is gone");
+    expect(entry).toContain("only a forced compile, flags `ck`, rebuilds the map");
     expect(entry).toContain("is counted per class in `generated` and never reported as source lines");
     expect(entry).toContain("**`minCoverage` and the verdict (Story 40.2).**");
     expect(entry).toContain("a rounded 79.995 never passes 80");
@@ -119,7 +126,7 @@ describe("Story 40.2: the Development README", () => {
     expect(entry).toContain("It validates against the published `coverage-04.dtd`.");
     // A run with no class-source result is refused, and the line numbers need the stored layout in the repository's files.
     expect(entry).toContain("**no class has a class-source result**");
-    expect(entry).toContain("the advice to recompile the classes and run the tests again");
+    expect(entry).toContain("the advice to recompile the classes (a forced compile when only comments changed) and run the tests again");
     expect(entry).toContain("would read to a CI tool as 100% covered");
     expect(entry).toContain("so is a completed run in which **no class has an executable class line**");
     expect(entry).toContain("**CI tools lay the reported line numbers over your repository's own `.cls` files**");
@@ -207,6 +214,11 @@ describe("Story 40.2: the CHANGELOG section and the changeset", () => {
     expect(text).toContain("a failing verdict is `isError: false`");
     expect(text).toContain("**Class line numbers are those of the document `iris_doc_get` returns for the class**");
     for (const reason of ["not-up-to-date", "not-compiled", "unavailable"]) expect(text, reason).toContain(`\`${reason}\` (`);
+    expect(text).toContain("a method that compiles to no INT code (a constant return) has no lines and no `reason`");
+    expect(text).toContain("a preprocessor line (`#dim`, `#define`, `#sqlcompile` and the like) is never a class line");
+    expect(text).toContain("**A statement that spans several lines but compiles to one INT line is reported once, at the first line that maps to its code: for a multi-line embedded SQL statement, the line after the `&sql(` line.**");
+    expect(text).toContain("or its compiled line map is gone");
+    expect(text).toContain("a forced compile, flags `ck`, rebuilds the map");
     expect(text).toContain("a completed run in which no class has a class-source result or no class has an executable class line");
     expect(text).toContain("CI tools lay the reported line numbers over the repository's own `.cls` files");
     expect(text).toContain("Earliest IRIS version verified: 2026.2 build 221U");

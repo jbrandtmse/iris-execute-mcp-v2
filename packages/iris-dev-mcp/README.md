@@ -1772,7 +1772,7 @@ least one test run and a class-source map can be exported:** for any other run (
 result is `isError: true`, names the status, and nothing is written (a run that is still `starting` or `running` is told to wait
 for it with `poll`; a finished one, to run the tests again). A completed run in which **no class has a class-source result**
 (every class is `not-up-to-date`, `not-compiled` or `unavailable`, or the instance returned an empty class-source map) is refused
-too, with `isError: true` and the advice to recompile the classes and run the tests again: a file with no lines would read to a CI
+too, with `isError: true` and the advice to recompile the classes (a forced compile when only comments changed) and run the tests again: a file with no lines would read to a CI
 tool as 100% covered. For the same reason, so is a completed run in which **no class has an executable class line** (for example,
 every listed class has only method generators, non-ObjectScript methods or methods that compile to no INT code). **CI tools lay the reported line numbers over your repository's own `.cls` files**, so those files must be
 in the layout IRIS stores (for example as `iris_doc_export` writes them), or the numbers can be offset. The document is
@@ -1858,9 +1858,17 @@ lines of the class source you edit: `coverage.classes[i].source` is
 and `coverage.source` is the total over the classes that have such a result. A class line is *executable* when its INT line is
 (the 40.1 rule, unchanged) and *covered* when that INT line ran. Only the body lines of the methods a class defines count: a
 `#define` line, a continuation line of a multi-line statement, a lone `}` and a comment line are never executable. A method has
-a `reason` and no lines when it is a method generator (`generator`), is not written in ObjectScript (`not-objectscript`), or is
-not laid out where IRIS stores it (`layout`). A class without a result has `source: {reason}`, and the reason is one of three:
-`not-up-to-date` (its definition changed after it was compiled), `not-compiled` (it has no compiled definition at the end of the
+a `reason` and no lines when it is a method generator (`generator`), is not written in ObjectScript (`not-objectscript`, a
+`Language` set on the method or on the class), or is not laid out where IRIS stores it (`layout`); a method that compiles to no
+INT code (a constant return, for example) has no lines either, and no `reason`. A method's lines are the lines of its own INT
+block, and a preprocessor line (`#dim`, `#define`, `#sqlcompile` and the like) is never a class line: the compiler maps a leading
+one onto the code of the method before it or onto the method's own first statements. **A statement that spans several lines but compiles to one INT line is reported once, at the first line that maps
+to its code.** For a multi-line embedded SQL statement that is the line after the `&sql(` line (the `&sql(` line maps to a comment
+line of the INT routine, and the other continuation lines are not executable); a single-line `&sql(...)` statement is reported at
+its own line. A class without a result has `source: {reason}`, and the reason is one of three:
+`not-up-to-date` (its definition changed after it was compiled, or its compiled line map is gone: a documentation-only edit saved
+after the compile leaves IRIS calling the class up to date, a default compile skips it, and only a forced compile, flags `ck`,
+rebuilds the map), `not-compiled` (it has no compiled definition at the end of the
 run) or `unavailable` (its map could not be built). The code the compiler generates in the class (property accessors, embedded-SQL helpers) is counted per class
 in `generated` and never reported as source lines. The text form adds, after the status line, one line per class and one
 indented line per method with an uncovered line:

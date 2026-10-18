@@ -514,9 +514,10 @@ ClassMethod BuildRun(pId As %Integer, pWithRoutines As %Boolean = 0) As %Dynamic
 }
 
 /// The class-source map of a terminal run, one entry per measured class: <code>{class, reason?, methods:[...]}</code>.
-/// A method that maps is <code>{name, line, routine, intLines:[...]}</code> (<code>intLines[k-1]</code> is the INT line of
-/// body line k, or 0), and a method that does not is <code>{name, line, reason}</code>. <code>line</code> is the
-/// class-document line that declares the method, or null. See <method>ExecuteMCPv2.Coverage.Job:SourceMap</method>.
+/// A method that maps is <code>{name, line, routine, intLines:[...], labelLine}</code> (<code>intLines[k-1]</code> is the
+/// INT line of body line k, or 0; <code>labelLine</code> is the INT line of the method's label, or 0 when it is not known),
+/// and a method that does not is <code>{name, line, reason}</code>. <code>line</code> is the class-document line that
+/// declares the method, or null. See <method>ExecuteMCPv2.Coverage.Job:SourceMap</method>.
 ClassMethod BuildSources(pId As %Integer) As %DynamicArray [ Private ]
 {
     Set tSources = []
@@ -549,6 +550,7 @@ ClassMethod BuildSources(pId As %Integer) As %DynamicArray [ Private ]
                     Do tInts.%Push(+^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tIndex, "m", tM, tK), "number")
                 }
                 Do tMethod.%Set("intLines", tInts)
+                Do tMethod.%Set("labelLine", +$ListGet(tNode, 5), "number")
             }
             Do tMethods.%Push(tMethod)
         }

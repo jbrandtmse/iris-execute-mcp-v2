@@ -98,6 +98,12 @@ export interface SourceMethodRaw {
   routine?: string;
   /** `intLines[k-1]` is the INT line of body line k, or 0 when that line has none. Absent when the method has a `reason`. */
   intLines?: number[];
+  /**
+   * The INT line of the method's label, which is the first line of its INT block: its body maps to lines after it. 0 (or
+   * absent, from an older IRIS-side class) when it is not known: the method compiled to no INT code, or its label cannot be
+   * told from another method's. Absent when the method has a `reason`.
+   */
+  labelLine?: number;
   /** Why the method has no body map: `generator`, `not-objectscript` or `layout`. */
   reason?: string;
 }
@@ -107,7 +113,8 @@ export interface SourceClassRaw {
   class: string;
   /**
    * Why the class has no map: `not-up-to-date` (its definition changed after it was compiled), `not-compiled` (it has no
-   * compiled definition at the end of the run), or `unavailable` (its map could not be built).
+   * compiled definition at the end of the run), or `unavailable` (its map could not be built). A class recorded without a
+   * reason whose compiled line map is gone is reported as `not-up-to-date` too (`mapSources` in `coverage-report.ts`).
    */
   reason?: string;
   methods: SourceMethodRaw[];
@@ -772,7 +779,7 @@ export async function exportCoverageRun(
     if (document.classes === 0) {
       return refuse(
         `no class has a class-source result, so the file would hold no lines and a CI tool would read it as fully covered. ` +
-          `Recompile the classes and run the tests again.`,
+          `Recompile the classes (a forced compile when only comments changed) and run the tests again.`,
       );
     }
     if (document.lines === 0) {
@@ -924,8 +931,11 @@ export const testCoverageTool: ToolDefinition = {
     "summary (total, passed, failed, skipped, details) and the coverage twice. Per class and per method, over the " +
     "class's own source lines (coverage.classes[].source): executable lines, covered lines, percent and the " +
     "uncovered line ranges, plus the count of lines the compiler generated in the class, which are never reported as " +
-    "source lines; a method that has no class-source lines carries a reason (generator, not-objectscript or layout), " +
-    "and a class whose definition changed after it was compiled has source.reason not-up-to-date. And per measured INT " +
+    "source lines; a method with a reason (generator, not-objectscript or layout) has no class-source lines, and neither " +
+    "has a method that compiles to no INT code, which carries no reason; a statement that spans several lines is one " +
+    "line, the first that maps to its code (for a multi-line &sql statement, the line after the &sql( line); a class " +
+    "whose definition changed after it was compiled, or whose compiled line map is gone (a documentation-only edit saved " +
+    "after the compile, which a default compile does not rebuild), has source.reason not-up-to-date. And per measured INT " +
     "routine (coverage.classes[].routines[]): its executable line count, covered line count, percent and the " +
     "executable and covered INT line ranges. A class that could not be measured is listed under coverage.unmeasured " +
     "with a reason (not-compiled, no-routines or no-int-source). The text result is compact: one status line, the " +

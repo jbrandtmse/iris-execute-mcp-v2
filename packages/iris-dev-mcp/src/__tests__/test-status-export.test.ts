@@ -171,7 +171,7 @@ describe("iris_test_status export: a run that cannot be exported writes nothing 
 
   it("a completed run in which no class has a class-source result is refused: an empty document would read as 100% covered", async () => {
     const empty = await refused({ ...STORY402_RUN, sources: [] }, /no class has a class-source result/);
-    expect(empty).toContain("Recompile the classes and run the tests again.");
+    expect(empty).toContain("Recompile the classes (a forced compile when only comments changed) and run the tests again.");
     const unmappable = await refused(
       {
         ...STORY402_RUN,
@@ -182,17 +182,27 @@ describe("iris_test_status export: a run that cannot be exported writes nothing 
       },
       /no class has a class-source result/,
     );
-    expect(unmappable).toContain("Recompile the classes and run the tests again.");
+    expect(unmappable).toContain("Recompile the classes (a forced compile when only comments changed) and run the tests again.");
   });
 
   it("a completed run whose classes have a class-source result but no executable class line is refused: a file of no lines would read as 100% covered", async () => {
-    const unmapped = (STORY402_RUN.sources ?? []).map((source) => ({
+    // Methods that compiled to no INT code: nothing maps and no label line exists.
+    const noCode = (STORY402_RUN.sources ?? []).map((source) => ({
+      ...source,
+      methods: source.methods.map((method) => (method.intLines ? { ...method, intLines: method.intLines.map(() => 0), labelLine: 0 } : method)),
+    }));
+    const text = await refused({ ...STORY402_RUN, sources: noCode }, /no class has an executable class line/);
+    expect(text).toContain("a CI tool would read it as fully covered");
+    expect(text).toContain("recompile it (a forced compile when only comments changed) and run the tests again.");
+  });
+
+  it("a completed run whose classes have INT labels but no mapped body line (their line map is gone) has no class with a class-source result, so it is refused as such", async () => {
+    const gone = (STORY402_RUN.sources ?? []).map((source) => ({
       ...source,
       methods: source.methods.map((method) => (method.intLines ? { ...method, intLines: method.intLines.map(() => 0) } : method)),
     }));
-    const text = await refused({ ...STORY402_RUN, sources: unmapped }, /no class has an executable class line/);
-    expect(text).toContain("a CI tool would read it as fully covered");
-    expect(text).toContain("recompile it (a forced compile when only comments changed) and run the tests again.");
+    const text = await refused({ ...STORY402_RUN, sources: gone }, /no class has a class-source result/);
+    expect(text).toContain("Recompile the classes (a forced compile when only comments changed) and run the tests again.");
   });
 
   it("a completed run that recorded no test run says no test method ran", async () => {

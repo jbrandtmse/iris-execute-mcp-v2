@@ -7,7 +7,7 @@ All notable changes to the IRIS MCP Server Suite are documented in this file.
 No tool is added, so no tool count moves (the Development server stays at 32 package tools, 33 advertised; the suite at 110
 package tools, 115 advertised). The prompt pack stays at 13 prompts, the `core` preset at 14 package tools, and the frozen
 governance baseline at hash `1e62c5ad5bf7` (141 keys). `iris_test_status` gains one action, `export`, and so one governance
-key. `BOOTSTRAP_VERSION` moves from `14a4cba6504a` to `3a3b4cf76502`, because `Coverage/Job.cls`, `Coverage/Runner.cls`
+key. `BOOTSTRAP_VERSION` moves from `14a4cba6504a` to `06b8b83fc319`, because `Coverage/Job.cls`, `Coverage/Runner.cls`
 and `REST/Coverage.cls` changed (the bootstrapped service stays at 35 classes).
 
 ### Added
@@ -18,9 +18,15 @@ and `REST/Coverage.cls` changed (the bootstrapped service stays at 35 classes).
   count of the lines the compiler generated in the class, which are never reported as source lines. The text adds one line per
   class and one indented line per method with an uncovered line. The mapping is the compiler's own
   (`%Studio.Debugger:INTLine` per method body line), so a `#define` line, a continuation line of a multi-line statement, a lone
-  `}` and a comment line are never executable; a method generator, a method not written in ObjectScript and a method whose
-  layout is not where IRIS stores it carry a `reason` and no lines; a class without a class-source result has `source.reason`
-  `not-up-to-date` (its definition changed after it was compiled), `not-compiled` (it has no compiled definition at the end of
+  `}` and a comment line are never executable; a method generator, a method not written in ObjectScript (a `Language` set on the
+  method or on the class) and a method whose layout is not where IRIS stores it carry a `reason` and no lines; a method that
+  compiles to no INT code (a constant return) has no lines and no `reason`. A method's lines are the lines
+  of its own INT block, and a preprocessor line (`#dim`, `#define`, `#sqlcompile` and the like) is never a class line. **A statement that spans
+  several lines but compiles to one INT line is reported once, at the first line that maps to its code: for a multi-line embedded
+  SQL statement, the line after the `&sql(` line.** A class without a class-source result has `source.reason`
+  `not-up-to-date` (its definition changed after it was compiled, or its compiled line map is gone: a documentation-only edit
+  saved after the compile leaves IRIS calling the class up to date, a default compile skips it, and a forced compile, flags `ck`,
+  rebuilds the map), `not-compiled` (it has no compiled definition at the end of
   the run) or `unavailable` (its map could not be built). **Class line numbers are those of the document `iris_doc_get` returns for the class**, which
   IRIS stores in its own layout, so a file uploaded in another layout can number its lines differently. Earliest IRIS version
   verified: 2026.2 build 221U.

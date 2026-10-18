@@ -3,7 +3,8 @@
  * Rule #36): `Story402.FixtureTest` (one test that calls every `Story402.Fixture` method once and `Story402.Layout.Spaced`)
  * over `Story402.Fixture`, `Story402.Layout` and `Story402.Missing` in the scratch namespace EXECMCPTMP402A, started with
  * `minCoverage` 90. The skeletons, the counts and the source maps are the route's, value for value; nothing is edited to
- * match the implementation.
+ * match the implementation. The `labelLine` of each method is `Job:SourceMap`'s, run on copies of the two fixture texts (the
+ * INT routine does not depend on the class name).
  *
  * The class documents the map refers to are the stored ones (`iris_doc_get` of `Story402.Fixture.cls`): for example class
  * line 31 is `        Quit "error"` (the one line of the fixture the test does not reach), 54 is the `&sql` line, 68 is
@@ -71,26 +72,26 @@ export const STORY402_RUN: CoverageRun = {
     {
       class: "Story402.Fixture",
       methods: [
-        { name: "ScoreSet", line: 11, routine: "Story402.Fixture.1", intLines: [47, 48] },
-        { name: "LabelGet", line: 17, routine: "Story402.Fixture.1", intLines: [26] },
-        { name: "Plain", line: 22, routine: "Story402.Fixture.1", intLines: [44, 45] },
-        { name: "Macro", line: 28, routine: "Story402.Fixture.1", intLines: [28, 29, 30, 31, 0, 32, 33] },
-        { name: "MultiLine", line: 39, routine: "Story402.Fixture.1", intLines: [35, 36, 37, 38, 39, 40, 41, 42] },
-        { name: "Sql", line: 51, routine: "Story402.Fixture.1", intLines: [50, 53, 54, 55] },
+        { name: "ScoreSet", line: 11, routine: "Story402.Fixture.1", intLines: [47, 48], labelLine: 46 },
+        { name: "LabelGet", line: 17, routine: "Story402.Fixture.1", intLines: [26], labelLine: 25 },
+        { name: "Plain", line: 22, routine: "Story402.Fixture.1", intLines: [44, 45], labelLine: 43 },
+        { name: "Macro", line: 28, routine: "Story402.Fixture.1", intLines: [28, 29, 30, 31, 0, 32, 33], labelLine: 27 },
+        { name: "MultiLine", line: 39, routine: "Story402.Fixture.1", intLines: [35, 36, 37, 38, 39, 40, 41, 42], labelLine: 34 },
+        { name: "Sql", line: 51, routine: "Story402.Fixture.1", intLines: [50, 53, 54, 55], labelLine: 49 },
         { name: "Generated", line: 59, reason: "generator" },
-        { name: "Expr", line: 66, routine: "Story402.Fixture.1", intLines: [21] },
-        { name: "Constant", line: 71, routine: "", intLines: [0] },
-        { name: "Comments", line: 76, routine: "Story402.Fixture.1", intLines: [15, 16, 17, 18, 19] },
-        { name: "TwoOnOne", line: 85, routine: "Story402.Fixture.1", intLines: [66, 67] },
+        { name: "Expr", line: 66, routine: "Story402.Fixture.1", intLines: [21], labelLine: 20 },
+        { name: "Constant", line: 71, routine: "", intLines: [0], labelLine: 0 },
+        { name: "Comments", line: 76, routine: "Story402.Fixture.1", intLines: [15, 16, 17, 18, 19], labelLine: 14 },
+        { name: "TwoOnOne", line: 85, routine: "Story402.Fixture.1", intLines: [66, 67], labelLine: 65 },
       ],
     },
     {
       class: "Story402.Layout",
       methods: [
-        { name: "Spaced", line: 7, routine: "Story402.Layout.1", intLines: [10, 0, 11] },
-        { name: "NoBlank", line: 14, routine: "", intLines: [0] },
-        { name: "Gap", line: 19, routine: "Story402.Layout.1", intLines: [6] },
-        { name: "Inst", line: 24, routine: "Story402.Layout.1", intLines: [8] },
+        { name: "Spaced", line: 7, routine: "Story402.Layout.1", intLines: [10, 0, 11], labelLine: 9 },
+        { name: "NoBlank", line: 14, routine: "", intLines: [0], labelLine: 0 },
+        { name: "Gap", line: 19, routine: "Story402.Layout.1", intLines: [6], labelLine: 5 },
+        { name: "Inst", line: 24, routine: "Story402.Layout.1", intLines: [8], labelLine: 7 },
         { name: "Py", line: 29, reason: "not-objectscript" },
       ],
     },

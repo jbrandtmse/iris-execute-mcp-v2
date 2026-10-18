@@ -19,7 +19,7 @@ import {
   verdictTextLine,
   type ClassSource,
 } from "../tools/coverage-report.js";
-import { buildCoverageSection, coverageRunEnvelope, type CoverageRun } from "../tools/test-coverage.js";
+import { buildCoverageSection, coverageRunEnvelope, type CoverageRun, type SourceClassRaw } from "../tools/test-coverage.js";
 import { STORY402_FIXTURE_SOURCE_VALUES, STORY402_LAYOUT_SOURCE_VALUES, STORY402_RUN } from "./story402-run.js";
 
 const ONE_PASSED = { total: 1, passed: 1, failed: 0, skipped: 0, details: [] };
@@ -140,17 +140,227 @@ describe("the mapping rule (AC 40.2.1)", () => {
     expect(layout).toMatchObject({ executableLines: 1, coveredLines: 0, executableRanges: [[42, 42]], uncoveredRanges: [[42, 42]] });
   });
 
-  it("two body lines that map to one INT line are two class lines", () => {
+  it("two body lines that map to one INT line are one class line, the first of them", () => {
     const run = runWith({
       sources: [{ class: "Story402.Layout", methods: [{ name: "Twice", line: 3, routine: "Story402.Layout.1", intLines: [10, 10] }] }],
     });
-    expect(summaries(run).get("Story402.Layout")).toMatchObject({ executableLines: 2, coveredLines: 2, executableRanges: [[5, 6]] });
+    expect(summaries(run).get("Story402.Layout")).toMatchObject({ executableLines: 1, coveredLines: 1, executableRanges: [[5, 5]] });
   });
 
   it("totals only the classes that have a result", () => {
     const totals = coverageTotals([...summaries(STORY402_RUN).values(), { reason: "not-up-to-date" }, undefined]);
     expect(totals).toEqual({ executableLines: 27, coveredLines: 24, percent: 88.89 });
     expect(coverageTotals([{ reason: "x" }])).toEqual({ executableLines: 0, coveredLines: 0, percent: null });
+  });
+});
+
+/**
+ * The raw data of a class with leading preprocessor lines and a multi-line embedded SQL statement, as `Job:SourceMap` and
+ * `Job:Skeleton` returned it for a disposable class with the text of the QA gate's `Story402.QaDirectives` (IRIS 2026.2 build
+ * 221U, 2026-10-18, Rule #36; the class lines are D+1+k for the declaration lines 5, 11 and 19). Beta's `#dim` and `#define`
+ * lines map onto Alpha's INT lines 6 and 7; Gamma's `&sql(` line maps to the comment-only INT line 13 and its three
+ * continuation lines to the one code line 18. Alpha and Gamma ran once, Beta did not.
+ */
+const DIRECTIVES_CLASS = "Story402.QaDirectives";
+const DIRECTIVES_ROUTINE = "Story402.QaDirectives.1";
+const DIRECTIVES_RUN = runWith({
+  unmeasured: [],
+  routines: [
+    {
+      class: DIRECTIVES_CLASS,
+      routine: DIRECTIVES_ROUTINE,
+      lines: 29,
+      hits: [[6, 1], [7, 1], [11, 1], [12, 1], [18, 1], [19, 1]],
+      skeleton: [
+        [5, "L C:methodimpl {"], [6, "C:set"], [7, "C:quit }"], [8, "L C:methodimpl {"], [9, "C:set"], [10, "C:quit }"],
+        [11, "L C:methodimpl { C:new"], [12, "C:set"], [18, "C:try { C:d } C:catch { C:if { C:d L } C:else { C:throw } }"],
+        [19, "C:quit }"], [20, "C:q"], [21, "L C:n"], [22, "C:s"], [23, "C:s"], [24, "C:do L"], [25, "C:return"],
+        [26, "C:if { C:try { C:set } C:catch { } }"], [27, "C:return"], [28, "L C:public {"], [29, "C:s"],
+      ],
+    },
+  ],
+  sources: [
+    {
+      class: DIRECTIVES_CLASS,
+      methods: [
+        { name: "Alpha", line: 5, routine: DIRECTIVES_ROUTINE, intLines: [6, 7], labelLine: 5 },
+        { name: "Beta", line: 11, routine: DIRECTIVES_ROUTINE, intLines: [6, 7, 9, 10], labelLine: 8 },
+        { name: "Gamma", line: 19, routine: DIRECTIVES_ROUTINE, intLines: [12, 13, 18, 18, 18, 19], labelLine: 11 },
+      ],
+    },
+  ],
+});
+
+/** The same run from an IRIS-side class that records no label lines. */
+function withoutLabelLines(run: CoverageRun): CoverageRun {
+  return {
+    ...run,
+    sources: (run.sources ?? []).map((source) => ({
+      ...source,
+      methods: source.methods.map((method) => {
+        const copy = { ...method };
+        delete copy.labelLine;
+        return copy;
+      }),
+    })),
+  };
+}
+
+describe("the INT block of a method and one class line per statement (AC 40.2.1)", () => {
+  const directives = (run: CoverageRun) => {
+    const summary = summaries(run).get(DIRECTIVES_CLASS);
+    return hasSourceResult(summary) ? summary : undefined;
+  };
+
+  it("a body line the compiler maps at or before the method's label line belongs to the method before it, so it is no class line", () => {
+    const summary = directives(DIRECTIVES_RUN);
+    const beta = summary?.methods.find((method) => method.method === "Beta");
+    expect(beta, "Beta's #dim and #define lines (INT 6 and 7, Alpha's) are dropped; its statements remain, and it never ran").toEqual({
+      method: "Beta", line: 11, executableLines: 2, coveredLines: 0, percent: 0, uncoveredRanges: [[15, 16]],
+    });
+    const alpha = summary?.methods.find((method) => method.method === "Alpha");
+    expect(alpha).toEqual({ method: "Alpha", line: 5, executableLines: 2, coveredLines: 2, percent: 100, uncoveredRanges: [] });
+  });
+
+  it("a record without label lines (an older IRIS-side class) keeps the unbounded mapping: Beta then reads Alpha's counts", () => {
+    const beta = directives(withoutLabelLines(DIRECTIVES_RUN))?.methods.find((method) => method.method === "Beta");
+    expect(beta).toMatchObject({ executableLines: 4, coveredLines: 2, uncoveredRanges: [[15, 16]] });
+  });
+
+  it("a multi-line embedded SQL statement is one class line, the first line that maps to its code line (the line after the &sql( line)", () => {
+    const gamma = directives(DIRECTIVES_RUN)?.methods.find((method) => method.method === "Gamma");
+    // Gamma is declared at 19: `Set` is line 21, `&sql(` line 22 maps to a comment-only INT line, its continuation lines 23 to 25 map to INT 18.
+    expect(gamma).toEqual({ method: "Gamma", line: 19, executableLines: 3, coveredLines: 3, percent: 100, uncoveredRanges: [] });
+    expect(directives(DIRECTIVES_RUN)).toMatchObject({
+      executableLines: 7,
+      coveredLines: 5,
+      percent: 71.43,
+      executableRanges: [[7, 8], [15, 16], [21, 21], [23, 23], [26, 26]],
+      coveredRanges: [[7, 8], [21, 21], [23, 23], [26, 26]],
+      uncoveredRanges: [[15, 16]],
+    });
+  });
+
+  it("a body line mapped at or before the label line is no class line, and an executable INT line it maps that no method claims stays generated", () => {
+    const withLead = (intLines: number[]): CoverageRun => ({
+      ...DIRECTIVES_RUN,
+      sources: [
+        {
+          class: DIRECTIVES_CLASS,
+          methods: [
+            ...(DIRECTIVES_RUN.sources?.[0]?.methods ?? []),
+            { name: "Lead", line: 31, routine: DIRECTIVES_ROUTINE, intLines, labelLine: 21 },
+          ],
+        },
+      ],
+    });
+    const mapped = directives(withLead([20, 22]));
+    const unmapped = directives(withLead([0, 22]));
+    expect(mapped?.generated, "INT 20 (the unreached quit) is the compiler's own code whether or not a body line points at it").toEqual(unmapped?.generated);
+    expect(mapped?.methods.find((method) => method.method === "Lead")).toMatchObject({ executableLines: 1, coveredLines: 0, uncoveredRanges: [[34, 34]] });
+  });
+
+  it("an INT line that two different methods each map is reported by each: only one method's repeats are folded", () => {
+    const run = runWith({
+      sources: [
+        {
+          class: "Story402.Layout",
+          methods: [
+            { name: "One", line: 3, routine: "Story402.Layout.1", intLines: [10, 10] },
+            { name: "Two", line: 9, routine: "Story402.Layout.1", intLines: [10] },
+          ],
+        },
+      ],
+    });
+    expect(summaries(run).get("Story402.Layout")).toMatchObject({ executableLines: 2, executableRanges: [[5, 5], [11, 11]] });
+  });
+});
+
+describe("a class whose line map is gone is not-up-to-date (AC 40.2.1, AC 40.2.4)", () => {
+  /** What `Job:SourceMap` returned live for a class compiled, then documented through the UDL text service and compiled the default way (IRIS says up to date): INT label on 5, no body line mapped. */
+  const GONE: SourceClassRaw = {
+    class: "Story402.QaStale",
+    methods: [{ name: "Go", line: 6, routine: "", intLines: [0, 0], labelLine: 5 }],
+  };
+
+  /** The routine of that class: `Go() methodimpl {` on INT line 5, its two statements on 6 and 7, both executed. */
+  const GONE_ROUTINE = {
+    class: "Story402.QaStale",
+    routine: "Story402.QaStale.1",
+    lines: 7,
+    hits: [[6, 1], [7, 1]] as Array<[number, number]>,
+    skeleton: [[5, "L C:methodimpl {"], [6, "C:set"], [7, "C:quit }"]] as Array<[number, string]>,
+  };
+
+  it("is reported as source.reason not-up-to-date, not as a class with no executable line", () => {
+    const summary = summaries(runWith({ sources: [GONE] })).get("Story402.QaStale") as ClassSource;
+    expect(summary).toEqual({ reason: "not-up-to-date" });
+    expect(sourceTextLines([{ class: "Story402.QaStale", source: summary }])).toEqual([
+      "Story402.QaStale: no class-source coverage (not-up-to-date)",
+    ]);
+  });
+
+  it("fails the verdict with that reason, and in a multi-class run keeps overall from passing on code it never measured", () => {
+    const alone = buildCoverageSection(runWith({ sources: [GONE], routines: [GONE_ROUTINE], unmeasured: [] }));
+    expect(alone.verdict).toEqual({
+      minCoverage: 90,
+      overall: "fail",
+      percent: null,
+      classes: [{ class: "Story402.QaStale", verdict: "fail", percent: null, reason: "not-up-to-date" }],
+    });
+    const both = buildCoverageSection(
+      runWith({
+        minCoverage: 50,
+        sources: [...(DIRECTIVES_RUN.sources ?? []), GONE],
+        routines: [...(DIRECTIVES_RUN.routines ?? []), GONE_ROUTINE],
+        unmeasured: [],
+      }),
+    );
+    expect(both.verdict?.overall, "the other class passes, the stale one was never measured").toBe("fail");
+    expect(both.verdict?.classes.map((entry) => [entry.class, entry.verdict])).toEqual([[DIRECTIVES_CLASS, "pass"], ["Story402.QaStale", "fail"]]);
+    expect(both.source, "the total is over the classes that have a result").toEqual({ executableLines: 7, coveredLines: 5, percent: 71.43 });
+  });
+
+  it("is not a class whose methods compile to no INT code: those have no label line, and stay a class with no executable line", () => {
+    const constants: SourceClassRaw = {
+      class: "Story402.QaConstants",
+      methods: [{ name: "Constant", line: 5, routine: "", intLines: [0], labelLine: 0 }, { name: "Py", line: 10, reason: "not-objectscript" }],
+    };
+    expect(summaries(runWith({ sources: [constants] })).get("Story402.QaConstants")).toMatchObject({ executableLines: 0, percent: null });
+    const section = buildCoverageSection(
+      runWith({
+        sources: [constants],
+        routines: [{ class: "Story402.QaConstants", routine: "Story402.QaConstants.1", lines: 4, hits: [], skeleton: [] }],
+        unmeasured: [],
+      }),
+    );
+    expect(section.verdict?.classes).toEqual([{ class: "Story402.QaConstants", verdict: "notApplicable", percent: null }]);
+  });
+
+  it("is not a class of empty stubs (a label line, no body line), nor one where any method maps a body line", () => {
+    const stubs: SourceClassRaw = {
+      class: "Story402.QaStubs",
+      methods: [{ name: "Empty", line: 5, routine: "", intLines: [], labelLine: 7 }],
+    };
+    expect(summaries(runWith({ sources: [stubs] })).get("Story402.QaStubs")).toMatchObject({ executableLines: 0, percent: null });
+    const partly: SourceClassRaw = {
+      class: "Story402.QaPartly",
+      methods: [
+        { name: "Todo", line: 5, routine: "", intLines: [0], labelLine: 5 },
+        { name: "Done", line: 10, routine: DIRECTIVES_ROUTINE, intLines: [6], labelLine: 5 },
+      ],
+    };
+    expect(summaries(runWith({ sources: [partly] })).get("Story402.QaPartly")).not.toHaveProperty("reason");
+  });
+
+  it("is not decided for a record without label lines (an older IRIS-side class)", () => {
+    const old: SourceClassRaw = { class: "Story402.QaStale", methods: [{ name: "Go", line: 6, routine: "", intLines: [0, 0] }] };
+    expect(summaries(runWith({ sources: [old] })).get("Story402.QaStale")).toMatchObject({ executableLines: 0, percent: null });
+  });
+
+  it("keeps the class-level reason the IRIS side recorded", () => {
+    const summary = summaries(runWith({ sources: [{ class: "Story402.QaStale", reason: "not-compiled", methods: [] }] })).get("Story402.QaStale");
+    expect(summary).toEqual({ reason: "not-compiled" });
   });
 });
 

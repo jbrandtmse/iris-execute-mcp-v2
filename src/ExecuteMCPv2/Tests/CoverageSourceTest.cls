@@ -10,6 +10,12 @@ Class ExecuteMCPv2.Tests.CoverageSourceTest Extends %UnitTest.TestCase
 /// The disposable class that the not-up-to-date test compiles and then changes.
 Parameter STALECLASS = "ExecuteMCPv2.Temp.Story402Stale";
 
+/// The disposable class that the line-map test documents after it was compiled.
+Parameter DOCUMENTEDCLASS = "ExecuteMCPv2.Temp.Story402Documented";
+
+/// The disposable class whose class-level Language is python.
+Parameter LANGUAGECLASS = "ExecuteMCPv2.Temp.Story402Language";
+
 /// The id of the fake run whose record the <code>RecordUnstoppedSession</code> tests write, far above any real run id. The
 /// session node of a fake run is written only under the coverage start lock while no session node and no live run exist,
 /// and is removed again before the lock is released (see <method>StartLockWithNoRun</method>).
@@ -18,6 +24,8 @@ Parameter FAKERUN = 990000003;
 Method OnAfterOneTest(testname As %String) As %Status
 {
     Do $System.OBJ.Delete(..#STALECLASS, "-d")
+    Do $System.OBJ.Delete(..#DOCUMENTEDCLASS, "-d")
+    Do $System.OBJ.Delete(..#LANGUAGECLASS, "-d")
     Kill ^IRIS.TempExecuteMCPv2Coverage("run", ..#FAKERUN)
     Set tNodeId = $ListGet($Get(^IRIS.TempExecuteMCPv2Coverage("session")), 1)
     If (tNodeId = ..#FAKERUN) || (tNodeId = (..#FAKERUN + 1)) Kill ^IRIS.TempExecuteMCPv2Coverage("session")
@@ -33,25 +41,27 @@ Method TestSourceMapOfTheFixture() As %Status
     Set tSC = ##class(ExecuteMCPv2.Coverage.Job).SourceMap("", tClass, .tMap)
     Do $$$AssertStatusOK(tSC, "the fixture's map is built")
     Do $$$AssertEquals(tMap, $ListBuild(tClass, ""), "a class with a map has no class reason")
-    Do ..AssertMethod(.tMap, 1, "ScoreSet", 11, tRoutine, "47 48", "")
-    Do ..AssertMethod(.tMap, 2, "LabelGet", 17, tRoutine, "26", "")
-    Do ..AssertMethod(.tMap, 3, "Plain", 22, tRoutine, "44 45", "")
-    Do ..AssertMethod(.tMap, 4, "Macro", 28, tRoutine, "28 29 30 31 0 32 33", "")
-    Do ..AssertMethod(.tMap, 5, "MultiLine", 39, tRoutine, "35 36 37 38 39 40 41 42", "")
-    Do ..AssertMethod(.tMap, 6, "Sql", 51, tRoutine, "50 53 54 55", "")
+    Do ..AssertMethod(.tMap, 1, "ScoreSet", 11, tRoutine, "47 48", "", 46)
+    Do ..AssertMethod(.tMap, 2, "LabelGet", 17, tRoutine, "26", "", 25)
+    Do ..AssertMethod(.tMap, 3, "Plain", 22, tRoutine, "44 45", "", 43)
+    Do ..AssertMethod(.tMap, 4, "Macro", 28, tRoutine, "28 29 30 31 0 32 33", "", 27)
+    Do ..AssertMethod(.tMap, 5, "MultiLine", 39, tRoutine, "35 36 37 38 39 40 41 42", "", 34)
+    Do ..AssertMethod(.tMap, 6, "Sql", 51, tRoutine, "50 53 54 55", "", 49)
     Do ..AssertMethod(.tMap, 7, "Generated", 59, "", "", "generator")
-    Do ..AssertMethod(.tMap, 8, "Expr", 66, tRoutine, "21", "")
-    Do ..AssertMethod(.tMap, 9, "Constant", 71, "", "0", "")
-    Do ..AssertMethod(.tMap, 10, "Comments", 76, tRoutine, "15 16 17 18 19", "")
-    Do ..AssertMethod(.tMap, 11, "TwoOnOne", 85, tRoutine, "66 67", "")
+    Do ..AssertMethod(.tMap, 8, "Expr", 66, tRoutine, "21", "", 20)
+    Do ..AssertMethod(.tMap, 9, "Constant", 71, "", "0", "", 0)
+    Do ..AssertMethod(.tMap, 10, "Comments", 76, tRoutine, "15 16 17 18 19", "", 14)
+    Do ..AssertMethod(.tMap, 11, "TwoOnOne", 85, tRoutine, "66 67", "", 65)
     Do $$$AssertEquals($Order(tMap("m", ""), -1), 11, "the fixture's own methods are all there is: the inherited and generated ones are not mapped")
     Quit $$$OK
 }
 
-/// Assert one method entry of a map: its head, and the INT lines of its body lines (a space-separated list).
-Method AssertMethod(ByRef pMap, pIndex As %Integer, pName As %String, pLine As %Integer, pRoutine As %String, pLines As %String, pReason As %String)
+/// Assert one method entry of a map: its head, and the INT lines of its body lines (a space-separated list). A method with a
+/// reason has a four-element head; the others carry the INT line of their label as a fifth element (0 when none is known).
+Method AssertMethod(ByRef pMap, pIndex As %Integer, pName As %String, pLine As %Integer, pRoutine As %String, pLines As %String, pReason As %String, pLabelLine As %Integer = 0)
 {
-    Do $$$AssertEquals($Get(pMap("m", pIndex)), $ListBuild(pName, pLine, pRoutine, pReason), pName_": name, declaration line, routine and reason")
+    Set tHead = $Select(pReason '= "": $ListBuild(pName, pLine, pRoutine, pReason), 1: $ListBuild(pName, pLine, pRoutine, "", pLabelLine))
+    Do $$$AssertEquals($Get(pMap("m", pIndex)), tHead, pName_": name, declaration line, routine, reason and label line")
     Set tActual = ""
     Set tK = ""
     For {
@@ -102,6 +112,89 @@ ClassMethod MakeStaleClass(pName As %String)
     Do tMethod.Implementation.Clear()
     Do tMethod.Implementation.WriteLine("    Quit 2")
     Set tSC = tDef.%Save()
+}
+
+/// A documentation-only edit saved after the compile leaves <code>$System.OBJ.IsUpToDate</code> true, and a default compile
+/// rebuilds nothing, but the save removed the class's line map: the INT text and its labels are still there, and no body line maps.
+Method TestSourceMapOfAClassWhoseLineMapIsGone() As %Status
+{
+    Set tName = ..#DOCUMENTEDCLASS
+    Do $$$AssertStatusOK(..SaveClassText(tName, ""), "the class is saved")
+    Do $$$AssertStatusOK($System.OBJ.Compile(tName, "cuk-d"), "the class is compiled")
+    Do $$$AssertNotEquals($Get(^rMAP(tName, "CLS", "INT")), "", "a compiled class with INT code has its line map")
+    Set tSC = ##class(ExecuteMCPv2.Coverage.Job).SourceMap("", tName, .tMap)
+    Do $$$AssertEquals($Get(tMap("m", 1, 1)), 6, "while it has one, the first body line maps")
+
+    Do $$$AssertStatusOK(..SaveClassText(tName, "/// What Go returns."_$Char(10)), "the documented class is saved")
+    Do $$$AssertStatusOK($System.OBJ.Compile(tName, "cuk-d"), "the default compile skips the class")
+    Do $$$AssertEquals($System.OBJ.IsUpToDate(tName), 1, "IRIS still calls the class up to date")
+    Do $$$AssertEquals($Get(^rMAP(tName, "CLS", "INT")), "", "but the documentation edit removed its line map")
+    Kill tMap
+    Set tSC = ##class(ExecuteMCPv2.Coverage.Job).SourceMap("", tName, .tMap)
+    Do $$$AssertStatusOK(tSC, "the class is a result, not an error")
+    Do $$$AssertEquals(tMap, $ListBuild(tName, ""), "it has no class reason: the IRIS side records what it finds")
+    Do $$$AssertEquals($Get(tMap("m", 1)), $ListBuild("Go", 5, "", "", 5), "the method has an INT label (line 5) and no mapped body line")
+    Do $$$AssertEquals($Get(tMap("m", 1, 1))_" "_$Get(tMap("m", 1, 2)), "0 0", "neither body line maps")
+
+    Do $$$AssertStatusOK($System.OBJ.Compile(tName, "ck-d"), "a forced compile rebuilds the class")
+    Do $$$AssertNotEquals($Get(^rMAP(tName, "CLS", "INT")), "", "and its line map")
+    Kill tMap
+    Set tSC = ##class(ExecuteMCPv2.Coverage.Job).SourceMap("", tName, .tMap)
+    Do $$$AssertEquals($Get(tMap("m", 1, 1)), 6, "the first body line maps again")
+    Quit $$$OK
+}
+
+/// Save a one-method class through the UDL text service, which is what a document save does. <var>pDoc</var> is the doc
+/// comment above the method.
+ClassMethod SaveClassText(pName As %String, pDoc As %String) As %Status
+{
+    Set tNL = $Char(10)
+    Set tText = "Class "_pName_tNL_"{"_tNL_tNL_pDoc_"ClassMethod Go() As %Integer"_tNL_"{"_tNL_"    Set tX = 1"_tNL_"    Quit tX"_tNL_"}"_tNL_tNL_"}"_tNL
+    Quit ##class(%Compiler.UDL.TextServices).SetTextFromString(, pName, tText, tNL)
+}
+
+/// A method inherits its class's Language default: the compiled keyword says so, the definition's does not.
+Method TestSourceMapLanguageDefault() As %Status
+{
+    Set tName = ..#LANGUAGECLASS
+    Set tNL = $Char(10)
+    Set tText = "Class "_tName_" [ Language = python ]"_tNL_"{"_tNL_tNL_"ClassMethod Py() As %Integer"_tNL_"{"_tNL_"    return 7"_tNL_"}"_tNL_tNL
+    Set tText = tText_"ClassMethod Os() As %Integer [ Language = objectscript ]"_tNL_"{"_tNL_"    Set tX = 1"_tNL_"    Quit tX"_tNL_"}"_tNL_tNL_"}"_tNL
+    Do $$$AssertStatusOK(##class(%Compiler.UDL.TextServices).SetTextFromString(, tName, tText, tNL), "the class is saved")
+    Do $$$AssertStatusOK($System.OBJ.Compile(tName, "cuk-d"), "the class is compiled")
+    Set tSC = ##class(ExecuteMCPv2.Coverage.Job).SourceMap("", tName, .tMap)
+    Do $$$AssertStatusOK(tSC, "the map is built")
+    Do $$$AssertEquals($List(tMap("m", 1), 1), "Py", "the method with no Language of its own is first")
+    Do $$$AssertEquals($List(tMap("m", 1), 4), "not-objectscript", "it takes the class's python")
+    Do $$$AssertEquals($Data(tMap("m", 1, 1)), 0, "and has no body map")
+    Do $$$AssertEquals($List(tMap("m", 2), 1), "Os", "the second method")
+    Do $$$AssertEquals($List(tMap("m", 2), 4), "", "says objectscript itself, so it maps")
+    Quit $$$OK
+}
+
+/// The INT labels of a class are indexed in one pass, and LabelLine returns a method's label only when it can be told.
+Method TestLabelLine() As %Status
+{
+    Set tJob = "ExecuteMCPv2.Coverage.Job"
+    Set tClass = "ExecuteMCPv2.Tests.CoverageSourceFixture"
+    Do $ClassMethod(tJob, "IndexLabels", tClass, .tLabels)
+    Do $$$AssertEquals($Get(tLabels("Plain")), $ListBuild(tClass_".1", 43), "the label of a method: its routine and INT line")
+    Do $$$AssertEquals($Data(tLabels("Constant")), 0, "a method that compiled to no INT code has none")
+
+    Kill tLabels
+    Set tLabels("Alpha") = $ListBuild("R.1", 5)
+    Set tLabels("%Pct") = $ListBuild("R.1", 8)
+    Set tLong = "AVeryLongMethodNameThatExceedsThirtyOneCharactersForSure"
+    Set tLabels($Extract(tLong, 1, 31)) = $ListBuild("R.1", 11)
+    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", "Alpha", "R.1", .tLabels, .tShared), 5, "a method with a label")
+    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", "Alpha", "", .tLabels, .tShared), 5, "any routine when the body maps nowhere")
+    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", "%Pct", "R.1", .tLabels, .tShared), 8, "a name that begins with a percent sign")
+    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", "Alpha", "R.2", .tLabels, .tShared), 0, "a label in another routine than the body's is not this method's")
+    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", "Constant", "", .tLabels, .tShared), 0, "no label, no line")
+    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", tLong, "R.1", .tLabels, .tShared), 11, "a long name is looked up by its first 31 characters")
+    Set tShared($Extract(tLong, 1, 31)) = 2
+    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", tLong, "R.1", .tLabels, .tShared), 0, "but not when another method shortens to the same label")
+    Quit $$$OK
 }
 
 /// The layout of a method: its declaration line D, with <code>{</code> on D+1 and <code>}</code> on D+2+n.

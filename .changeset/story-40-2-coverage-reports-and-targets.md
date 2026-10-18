@@ -11,4 +11,4 @@ feat(dev): coverage over the class source, `minCoverage` and a Cobertura export 
 
 A coverage run whose Line-by-Line session did not load every listed routine (a routine deleted after the run resolved its list) now ends `failed` before any test runs, naming the routines; the test process stops its own session at once.
 
-`@iris-mcp/shared` embeds the changed IRIS classes (`ExecuteMCPv2.Coverage.Job`, `ExecuteMCPv2.Coverage.Runner`, `ExecuteMCPv2.REST.Coverage`), so `BOOTSTRAP_VERSION` moves from `14a4cba6504a` to `3a3b4cf76502`. The Status and Start routes stay additive: every 40.1 request is accepted unchanged.
+`@iris-mcp/shared` embeds the changed IRIS classes (`ExecuteMCPv2.Coverage.Job`, `ExecuteMCPv2.Coverage.Runner`, `ExecuteMCPv2.REST.Coverage`), so `BOOTSTRAP_VERSION` moves from `14a4cba6504a` to `06b8b83fc319`. The Status and Start routes stay additive: every 40.1 request is accepted unchanged.

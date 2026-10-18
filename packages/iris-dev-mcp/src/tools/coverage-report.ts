@@ -8,8 +8,19 @@
  *
  *  - A class line is *executable* when its INT line's skeleton is executable under {@link isExecutableSkeleton}, and
  *    *covered* when that INT line's count is above 0.
+ *  - A method's body lines map to INT lines inside the method's own INT block, which starts at its label line. A body line
+ *    the compiler maps to an INT line at or before the label line (a `#dim` or `#define` line before the first statement) is
+ *    mapped to the code of the method before it, and is not a class line.
+ *  - An INT line is reported once per method, at the first class line that maps to it. A statement that spans several lines
+ *    but compiles to one INT line (a multi-line embedded SQL statement) is one class line: its first line maps to a comment
+ *    line of the INT routine, so the class line is the first continuation line, the one after the `&sql(` line.
  *  - An executable INT line that no class line maps to is *generated* (the compiler's own code): it is counted per class,
  *    never reported as source lines.
+ *  - A class whose line map is gone is `not-up-to-date`: IRIS still calls it up to date after a documentation-only edit
+ *    saved since the compile, but the edit removed the class's line map, which a default compile does not rebuild. It shows
+ *    as a method that has an INT label and body lines, with no body line of any method mapped. A class whose methods compile
+ *    to no INT code at all (constant returns, generators, methods not written in ObjectScript) maps nothing too, and is not
+ *    stale: it has no label to show.
  *  - A percentage and a range list are 40.1's {@link percentOf} and {@link toRanges}.
  *  - The verdict compares the unrounded ratio with the minimum, in exact integer arithmetic.
  *
@@ -79,6 +90,20 @@ export function mapSources(run: CoverageRun): MappedClass[] {
   return sources.map((source) => mapClass(run, source, index));
 }
 
+/**
+ * Is the line map of this class gone? A method that compiled to INT code (it has a label line) and has body lines, while no
+ * body line of any method maps to an INT line, is how a class shows whose map was removed by a documentation-only edit.
+ */
+function lineMapIsGone(source: SourceClassRaw): boolean {
+  let hasCode = false;
+  for (const method of source.methods) {
+    if (method.reason || method.intLines === undefined) continue;
+    if (method.intLines.some((intLine) => intLine > 0)) return false;
+    if ((method.labelLine ?? 0) > 0 && method.intLines.length > 0) hasCode = true;
+  }
+  return hasCode;
+}
+
 function mapClass(run: CoverageRun, source: SourceClassRaw, index: Map<string, RoutineIndex>): MappedClass {
   const mappedInt = new Map<string, Set<number>>();
   const methods: MappedMethod[] = [];
@@ -95,10 +120,13 @@ function mapClass(run: CoverageRun, source: SourceClassRaw, index: Map<string, R
     if (routine === undefined) continue;
     const seen = mappedInt.get(method.routine) ?? new Set<number>();
     mappedInt.set(method.routine, seen);
+    const labelLine = method.labelLine ?? 0;
+    const reported = new Set<number>();
     method.intLines.forEach((intLine, offset) => {
-      if (intLine <= 0) return;
+      if (intLine <= labelLine) return;
       seen.add(intLine);
-      if (!isExecutableSkeleton(routine.skeleton.get(intLine))) return;
+      if (!isExecutableSkeleton(routine.skeleton.get(intLine)) || reported.has(intLine)) return;
+      reported.add(intLine);
       mapped.lines.push({ line: (method.line as number) + 2 + offset, hits: routine.hits.get(intLine) ?? 0 });
     });
   }
@@ -114,7 +142,8 @@ function mapClass(run: CoverageRun, source: SourceClassRaw, index: Map<string, R
       if ((hits?.get(line) ?? 0) > 0) generated.coveredLines++;
     }
   }
-  return { class: source.class, ...(source.reason ? { reason: source.reason } : {}), methods, generated };
+  const reason = source.reason ?? (lineMapIsGone(source) ? "not-up-to-date" : undefined);
+  return { class: source.class, ...(reason ? { reason } : {}), methods, generated };
 }
 
 // -- The summary ----------------------------------------------------------------------

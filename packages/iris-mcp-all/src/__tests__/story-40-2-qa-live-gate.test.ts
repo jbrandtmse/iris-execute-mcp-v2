@@ -13,8 +13,8 @@
  *  - The class-source mapping against fixtures the implement stage did not use (Rule #58): a multi-line expression method, `_` line
  *    continuation, macros defined mid-body and used on several lines, a cursor over single-line `&sql`, an object generator, Try/Catch,
  *    loops with by-construction hit counts, a persistent class (property, index, trigger and computed code are generated), a call-mode
- *    method, and ratios that are not round. Two constructs are pinned as KNOWN DEFECTS: a preprocessor line before a method's first
- *    statement, and an embedded SQL statement over several lines (see the describe block).
+ *    method, and ratios that are not round. Three constructs have blocks of their own: a preprocessor line before a method's first
+ *    statement, an embedded SQL statement over several lines, and a class whose line map a documentation edit removed.
  *  - `minCoverage` at its edges against a class at exactly the minimum (29 of 50 is 58 percent, which float division misses by one ulp),
  *    0, 100, a value one ulp above a class's ratio, and values between a class's unrounded and rounded percent.
  *  - The export on the real file system: path forms the guard accepts and refuses, a parent that is a file, a target that is a
@@ -137,7 +137,7 @@ ClassMethod SetHang(pSeconds As %Integer) As %String
 }
 `;
 
-/** Constructs the implement stage's fixture did not use; every method here maps correctly (see the KNOWN DEFECT block for the two that do not). */
+/** Constructs the implement stage's fixture did not use; every method here maps correctly (the directive and embedded SQL constructs have a block of their own). */
 const DIVERSE_SOURCE = String.raw`/// Synthetic diverse coverage fixture (Story 40.2 QA).
 Class Story402.QaDiverse Extends %RegisteredObject
 {
@@ -263,6 +263,18 @@ ClassMethod Gamma(pName As %String) As %Integer
          FROM %Dictionary.ClassDefinition
          WHERE Name = :pName)
     Quit tCount
+}
+
+ClassMethod Zeta(pN As %Integer) As %Integer
+{
+    #dim tOne As %Integer
+    #dim tTwo As %Integer
+    #dim tThree As %Integer
+    #dim tFour As %Integer
+    #dim tFive As %Integer
+    Set tA = pN
+    Set tB = tA
+    Quit tB
 }
 
 }
@@ -664,15 +676,21 @@ const STORE_STATEMENTS: Readonly<Record<number, string>> = {
   25: "Called^Story402QaRtn(pN)",
 };
 
-/** What `Story402.QaDirectives` should report if the mapping held to the contract: statement lines only. */
+/**
+ * What `Story402.QaDirectives` reports: statement lines only. The multi-line `&sql(` statement is one class line, the first line
+ * that maps to its code, which is the line after the `&sql(` line (line 22 maps to a comment-only INT line).
+ */
 const DIRECTIVES_STATEMENTS_BY_CONTRACT: Readonly<Record<number, string>> = {
   7: "Set tA = pN",
   8: "Quit tA",
   15: "Set tX = $$$Twice(pN)",
   16: "Quit tX",
   21: "Set tCount = 0",
-  22: "&sql(SELECT COUNT(*)",
+  23: "INTO :tCount",
   26: "Quit tCount",
+  36: "Set tA = pN",
+  37: "Set tB = tA",
+  38: "Quit tB",
 };
 
 // -- The run, the result and the files ----------------------------------------------------------
@@ -756,7 +774,7 @@ interface RawRun {
   sources: Array<{
     class: string;
     reason?: string;
-    methods: Array<{ name: string; line: number | null; reason?: string; routine?: string; intLines?: number[] }>;
+    methods: Array<{ name: string; line: number | null; reason?: string; routine?: string; intLines?: number[]; labelLine?: number }>;
   }>;
 }
 
@@ -1167,52 +1185,72 @@ describe("Story 40.2 QA: the class-source mapping against unseen fixtures (AC-1,
   }, 300000);
 });
 
-describe("Story 40.2 QA: KNOWN DEFECTS of the mapping (AC-1: a preprocessor line and a continuation line are never executable)", () => {
+describe("Story 40.2 QA: the INT block of a method and one class line per statement (AC-1: a preprocessor line and a continuation line are never executable)", () => {
   let run: MainRun;
   beforeAll(async () => {
     if (!skipReason) run = await mainRun();
   }, 300000);
 
-  it("QA-3a: the IRIS side maps a preprocessor line before a method's first statement onto INT lines of the method before it, and the lines of a multi-line &sql statement onto its one code line", async (testCtx) => {
+  it("QA-3a: the raw map has no INT line for a preprocessor line and maps a multi-line &sql statement onto its one code line, with each method's label line", async (testCtx) => {
     if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const methods = (name: string) => run.raw.sources.find((entry) => entry.class === "Story402.QaDirectives")?.methods.find((method) => method.name === name);
     const skeleton = new Map(run.raw.routines.find((routine) => routine.class === "Story402.QaDirectives")?.skeleton ?? []);
-    // Beta's body is `#dim`, `#define`, `Set`, `Quit`: its first two INT lines are Alpha's own two lines.
-    expect(methods("Alpha")?.intLines).toEqual([6, 7]);
-    expect(methods("Beta")?.intLines, "Beta's leading #dim and #define map to Alpha's INT lines 6 and 7").toEqual([6, 7, 9, 10]);
-    expect(skeleton.get(6), "and those are executable lines").toBe("C:set");
+    // Beta's body is `#dim`, `#define`, `Set`, `Quit`. The compiler maps its first two lines onto Alpha's own INT lines 6 and 7, before
+    // Beta's label line (8); the IRIS side gives a preprocessor line no INT line.
+    expect(methods("Alpha")).toMatchObject({ intLines: [6, 7], labelLine: 5 });
+    expect(methods("Beta"), "Beta's leading #dim and #define have no INT line; its statements keep theirs").toMatchObject({ intLines: [0, 0, 9, 10], labelLine: 8 });
+    expect(skeleton.get(6), "Alpha's lines are executable lines").toBe("C:set");
     expect(skeleton.get(7)).toBe("C:quit }");
     // Gamma's &sql statement spans four lines: its first line maps to a comment-only INT line (no skeleton entry), the other three to the one code line.
-    expect(methods("Gamma")?.intLines).toEqual([12, 13, 18, 18, 18, 19]);
+    expect(methods("Gamma")).toMatchObject({ intLines: [12, 13, 18, 18, 18, 19], labelLine: 11 });
     expect(skeleton.has(13), "the first &sql line maps to a comment-only INT line").toBe(false);
     expect(skeleton.get(18), "the continuation lines map to the executable try line").toMatch(/^C:try \{/);
 
-    // What the summary therefore reports (the contract's statement lines are in DIRECTIVES_STATEMENTS_BY_CONTRACT).
+    // What the summary reports (the statement lines are in DIRECTIVES_STATEMENTS_BY_CONTRACT).
     const source = sourceOf(run.content, "Story402.QaDirectives");
-    expect(source.executableRanges).toEqual([[7, 8], [13, 16], [21, 21], [23, 26]]);
-    expect(source.coveredRanges, "Beta never ran, yet its two directive lines read as covered: they carry Alpha's counts").toEqual([[7, 8], [13, 14], [21, 21], [23, 26]]);
-    expect(source.uncoveredRanges).toEqual([[15, 16]]);
+    expect(source.executableRanges).toEqual([[7, 8], [15, 16], [21, 21], [23, 23], [26, 26], [36, 38]]);
+    expect(source.coveredRanges, "Beta and Zeta never ran, and their directive lines carry nobody's counts").toEqual([[7, 8], [21, 21], [23, 23], [26, 26]]);
+    expect(source.uncoveredRanges).toEqual([[15, 16], [36, 38]]);
+    expect(source).toMatchObject({ executableLines: 10, coveredLines: 5, percent: 50 });
     expect(source.methods.map((method) => [method.method, method.executableLines, method.coveredLines])).toEqual([
       ["Alpha", 2, 2],
-      ["Beta", 4, 2],
-      ["Gamma", 5, 5],
+      ["Beta", 2, 0],
+      ["Gamma", 3, 3],
+      ["Zeta", 3, 0],
     ]);
     await expectIdle("QA-3a");
   }, 300000);
 
-  // The contract (matrix row 2) says a preprocessor line and a continuation line are never executable. These two rows state it; they
-  // are expected to fail until the mapping holds to it, and the one that flips is the one to turn into a plain `it`.
-  it.fails("QA-3b: Beta reports only its two statements, so a method that never ran has no covered line", async (testCtx) => {
+  it("QA-3d: Zeta has five leading #dim lines, and the summary reports its three statements and none of the #dim lines", async (testCtx) => {
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const zeta = run.raw.sources.find((entry) => entry.class === "Story402.QaDirectives")?.methods.find((method) => method.name === "Zeta");
+    const labelLine = zeta?.labelLine ?? 0;
+    expect(labelLine, "Zeta compiled to INT code").toBeGreaterThan(0);
+    expect(zeta?.intLines?.slice(0, 5), "no #dim line has an INT line").toEqual([0, 0, 0, 0, 0]);
+    expect((zeta?.intLines ?? []).slice(5).every((intLine) => intLine > labelLine), "its statements are in its own INT block").toBe(true);
+    const stored = await storedDocument(NS_U, "Story402.QaDirectives");
+    for (const line of [31, 32, 33, 34, 35]) expect(textAt(stored, line), `line ${line} is a #dim line`).toMatch(/^#dim /);
+    const source = sourceOf(run.content, "Story402.QaDirectives");
+    expect(source.methods.find((method) => method.method === "Zeta")).toMatchObject({ line: 29, executableLines: 3, coveredLines: 0, uncoveredRanges: [[36, 38]] });
+    for (const [line, text] of [[36, "Set tA = pN"], [37, "Set tB = tA"], [38, "Quit tB"]] as const) expect(textAt(stored, line)).toBe(text);
+    await expectIdle("QA-3d");
+  }, 300000);
+
+  it("QA-3b: Beta reports only its two statements, so a method that never ran has no covered line", async (testCtx) => {
     if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const source = sourceOf(run.content, "Story402.QaDirectives");
     const beta = source.methods.find((method) => method.method === "Beta");
     expect(beta).toMatchObject({ executableLines: 2, coveredLines: 0, percent: 0, uncoveredRanges: [[15, 16]] });
   }, 300000);
 
-  it.fails("QA-3c: Gamma reports the first line of its &sql statement and none of its continuation lines", async (testCtx) => {
+  it("QA-3c: Gamma reports its &sql statement once, at the first line that maps to its code (the line after the &sql( line), and no other continuation line", async (testCtx) => {
     if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const source = sourceOf(run.content, "Story402.QaDirectives");
     expect(expand(source.executableRanges)).toEqual(Object.keys(DIRECTIVES_STATEMENTS_BY_CONTRACT).map(Number));
+    const stored = await storedDocument(NS_U, "Story402.QaDirectives");
+    expect(textAt(stored, 22), "the &sql( line is not a class line").toBe("&sql(SELECT COUNT(*)");
+    expect(textAt(stored, 23), "the line after it is the statement's class line").toBe("INTO :tCount");
+    expect(source.methods.find((method) => method.method === "Gamma")).toMatchObject({ executableLines: 3, coveredLines: 3, percent: 100 });
   }, 300000);
 });
 
@@ -1789,14 +1827,14 @@ describe("Story 40.2 QA: a class changed after it was compiled (AC-1, AC-2, AC-6
     const refused = await exportRun(only.coverageRunId, keep);
     expect(refused.isError, allText(refused)).toBe(true);
     expect(allText(refused)).toContain("no class has a class-source result");
-    expect(allText(refused)).toContain("Recompile the classes and run the tests again.");
+    expect(allText(refused)).toContain("Recompile the classes (a forced compile when only comments changed) and run the tests again.");
     expect(allText(refused)).toContain("Nothing was written.");
     expectUntouched(keep, snapshot, "a run with no class-source result");
     await expectIdle("QA-14");
   }, 300000);
 });
 
-describe("Story 40.2 QA: KNOWN DEFECT: a class documented after it was compiled maps nothing, and reads as no executable class line (AC-1, AC-2)", () => {
+describe("Story 40.2 QA: a class documented after it was compiled has no line map, and is reported as not-up-to-date (AC-1, AC-2)", () => {
   let before: CoverageContent;
   let after: CoverageContent;
   let afterResult: WireToolResult;
@@ -1827,42 +1865,46 @@ describe("Story 40.2 QA: KNOWN DEFECT: a class documented after it was compiled 
     await expectIdle("QA-15 setup");
   }, 300000);
 
-  it("QA-15a: before the documentation comment the class maps (lines 7 and 8); after it IRIS still says up to date, the map is empty, the summary has no executable class line, the verdict is notApplicable, and the export is refused because a file of no lines would read as fully covered", async (testCtx) => {
+  it("QA-15a: before the documentation comment the class maps (lines 7 and 8); after it IRIS still says up to date, the raw map has a label and no mapped line, the class has the reason not-up-to-date, the verdict fails with it, and the export is refused", async (testCtx) => {
     if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     expect(before.coverage?.classes[0]?.source).toMatchObject({ executableLines: 2, coveredLines: 2, percent: 100, executableRanges: [[7, 8]] });
     expect(upToDate, "IRIS still calls the class up to date").toBe("1");
     expect(await storedDocument(NS_U, "Story402.QaStale"), "the documentation comment is in the stored class").toContain("/// What Go returns.");
 
     const source = after.coverage?.classes[0]?.source;
-    expect(source).toMatchObject({ executableLines: 0, coveredLines: 0, percent: null, executableRanges: [], coveredRanges: [], uncoveredRanges: [] });
-    expect(source?.methods, "the method is found one line further down, and has no mapped line").toEqual([{ method: "Go", line: 6, executableLines: 0, coveredLines: 0, percent: null, uncoveredRanges: [] }]);
+    expect(source, "no class-source result: the compiled line map is gone").toEqual({ reason: "not-up-to-date" });
     const raw = await rawStatus(after.coverageRunId);
-    expect(raw.sources[0]?.methods[0], "the raw map: no INT line for either body line").toEqual({ name: "Go", line: 6, routine: "", intLines: [0, 0] });
+    expect(raw.sources[0], "the raw map: no class reason, and no INT line for either body line, while the method has an INT label (line 5)").toEqual({
+      class: "Story402.QaStale",
+      methods: [{ name: "Go", line: 6, routine: "", intLines: [0, 0], labelLine: 5 }],
+    });
     expect(allText(afterResult), "the INT coverage is measured as before").toContain("Story402.QaStale.1: 2 of 2 executable INT lines covered");
 
-    expect(after.coverage?.verdict, "a minimum of 50 is neither met nor failed").toEqual({
+    expect(after.coverage?.verdict, "a class that was not measured fails the verdict with its reason").toEqual({
       minCoverage: 50,
-      overall: "notApplicable",
+      overall: "fail",
       percent: null,
-      classes: [{ class: "Story402.QaStale", verdict: "notApplicable", percent: null }],
+      classes: [{ class: "Story402.QaStale", verdict: "fail", percent: null, reason: "not-up-to-date" }],
     });
-    expect(allText(afterResult).split("\n")[1]).toBe("Coverage target 50%: NOT APPLICABLE (no executable class lines)");
+    const lines = allText(afterResult).split("\n");
+    expect(lines[1]).toBe("Coverage target 50%: FAIL (no class-source coverage); failing: Story402.QaStale (not-up-to-date)");
+    expect(lines[2]).toBe("Story402.QaStale: no class-source coverage (not-up-to-date)");
+    expect(afterResult.isError, "a failing verdict is not a tool error").toBeFalsy();
 
     const directory = freshDirectory("stale");
     const target = path.join(directory, "stale.xml");
     const exported = await exportRun(after.coverageRunId, target);
-    expect(exported.isError, "a file of no lines would read to a CI tool as 100 percent of nothing, so the export is refused").toBe(true);
-    expect(allText(exported)).toContain("no class has an executable class line");
+    expect(exported.isError, "no class has a class-source result, so the export is refused").toBe(true);
+    expect(allText(exported)).toContain("no class has a class-source result");
     expect(allText(exported)).toContain("Nothing was written.");
     expect(existsSync(target), "nothing was written").toBe(false);
     expect(listing(directory)).toEqual([]);
     await expectIdle("QA-15a");
   }, 300000);
 
-  // The summary says what it knows: a class whose lines cannot be mapped has no class-source result, with the reason, like a class
-  // that is not up to date. Expected to fail until the mapping does; the one that flips is to be turned into a plain `it`.
-  it.fails("QA-15b: a class whose body lines cannot be mapped is reported with a reason, not as a class with no executable line", async (testCtx) => {
+  it("QA-15b: a class whose body lines cannot be mapped is reported with a reason, not as a class with no executable line", async (testCtx) => {
     if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
-    expect(after.coverage?.classes[0]?.source).toHaveProperty("reason");
+    expect(after.coverage?.classes[0]?.source).toHaveProperty("reason", "not-up-to-date");
+    expect(after.coverage?.source, "and it is not part of the total").toEqual({ executableLines: 0, coveredLines: 0, percent: null });
   }, 300000);
 });
