@@ -99,6 +99,7 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 - **`ToolDefinition.dataPolicy`** (`actions`, `phiInputs`) -- Declares that a tool is under the policy and which of its inputs carry PHI; `McpServerBase` checks the declaration at registration, and the audit log redacts the declared inputs under `redact` and `block`.
 - **`REFUSAL_CODES.DATA_POLICY_BLOCKED`** -- The refusal for body data a policy withheld.
 - **`REFUSAL_CODES.MONITOR_BUSY`** -- The refusal for a run that needs the instance-wide Line-by-Line monitor while a session is active (Story 40.1).
+- **`REFUSAL_CODES.PRODUCTION_BUSY`** -- The refusal for a run that includes `%UnitTest.TestProduction` tests while a different production runs in the namespace, or while its state cannot be read (Story 40.3).
 
 ---
 

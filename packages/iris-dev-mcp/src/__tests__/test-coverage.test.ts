@@ -561,7 +561,9 @@ describe("testCoverageTool definition (Story 40.1, AC-6)", () => {
     expect(description).toContain('IRIS_GOVERNANCE={"global":{"iris_test_status:cancel":true}}');
     expect(description).toContain("the suite's own supervisor process, which runs only the suite's own classes, so they count only if you list them");
     expect(description).toContain("including the code the compiler generates in them");
-    expect(description).not.toMatch(/\/api\/|\/dev\/|executemcp/i);
+    // No REST path or class is named. The only mention of the service is the guard sentence's "ExecuteMCPv2 service" (Story 40.3, decision #56).
+    expect(description).not.toMatch(/\/api\/|\/dev\/|executemcp(?!v2 service)/i);
+    expect(description.match(/executemcp/gi)).toHaveLength(1);
   });
 
   it("validates the input: classes is 1 to 50 class names without wildcards, level is one of three, timeout is positive", () => {
@@ -723,6 +725,60 @@ describe("createTestCoverageHandler", () => {
       "Another Line-by-Line or PERFMON monitor session is active on this instance and was not started by this suite; " +
         "nothing was started and that session was left untouched. Try again once it has ended.",
     );
+  });
+
+  it("production-busy start: the shared PRODUCTION_BUSY refusal, no run followed, Status never read (Story 40.3 matrix row 17)", async () => {
+    const h = makeHarness({
+      start: {
+        outcome: "production-busy",
+        decision: "busy",
+        namespace: "EXECMCPTMP403A",
+        testProductions: [{ class: "Story403.PassTest", production: "Story403.Production" }],
+        production: "Story403.Other",
+        state: "Running",
+        stateCode: 1,
+      },
+    });
+    const result = await createTestCoverageHandler(createFakeClock())(ARGS, h.ctx);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      code: REFUSAL_CODES.PRODUCTION_BUSY,
+      namespace: "EXECMCPTMP403A",
+      state: "Running",
+      testProductions: [{ class: "Story403.PassTest", production: "Story403.Production" }],
+      production: "Story403.Other",
+    });
+    expect((result.content[0] as { text: string }).text).toBe(
+      "Production 'Story403.Other' is Running in namespace EXECMCPTMP403A, and it is not the production of the " +
+        "TestProduction tests in this run (Story403.PassTest (Story403.Production)). %UnitTest.TestProduction stops " +
+        "any other production before it starts its own, so nothing was run and 'Story403.Other' was left untouched. " +
+        "Run the tests once it has stopped; if an interrupted test run left it running, stop it with " +
+        "iris_production_control and run the tests again.",
+    );
+    expect(h.http.get).not.toHaveBeenCalled();
+    expect(h.http.post).toHaveBeenCalledTimes(1);
+  });
+
+  it("production-busy start with the state unreadable: PRODUCTION_BUSY with state Unknown and the error (matrix row 17)", async () => {
+    const h = makeHarness({
+      start: {
+        outcome: "production-busy",
+        decision: "busy",
+        namespace: "EXECMCPTMP403A",
+        testProductions: [{ class: "Story403.PassTest", production: "Story403.Production" }],
+        error: "The Ens runtime lock (Ens.Runtime) was not acquired within 5 seconds",
+      },
+    });
+    const result = await createTestCoverageHandler(createFakeClock())(ARGS, h.ctx);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      code: "PRODUCTION_BUSY",
+      namespace: "EXECMCPTMP403A",
+      state: "Unknown",
+      testProductions: [{ class: "Story403.PassTest", production: "Story403.Production" }],
+      error: "The Ens runtime lock (Ens.Runtime) was not acquired within 5 seconds",
+    });
+    expect(h.http.get).not.toHaveBeenCalled();
   });
 
   it("a failed start with a run record is isError:true with the error (matrix row 12)", async () => {

@@ -372,4 +372,137 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
       await expect(seedCapstone(seeder as never, "EXECMCPTMP396A")).rejects.toThrow(/seeding the capstone fixture mu into EXECMCPTMP396A returned/);
     }
   });
+
+  it("the Story 40.3 fixture methods exist, and each keeps its guard: the InstalledNamespace node is set and cleared only for an existing scratch namespace, the Ens lock is held only in one", () => {
+    for (const method of [
+      "SetInstalledNamespace", "ClearInstalledNamespace", "HoldEnsRuntime", "EnsRuntimeRun", "EnsRuntimeHeld", "ReleaseEnsRuntime",
+    ]) {
+      expect(FIXTURE_CLASS_SOURCE, method).toContain(`ClassMethod ${method}(`);
+    }
+    const nodeMethods = FIXTURE_CLASS_SOURCE.slice(
+      FIXTURE_CLASS_SOURCE.indexOf("ClassMethod SetInstalledNamespace("),
+      FIXTURE_CLASS_SOURCE.indexOf("ClassMethod HoldEnsRuntime("),
+    );
+    // Both refuse a name that is not a scratch name, and a namespace that does not exist, before they touch the node.
+    expect(nodeMethods.match(/If pName '\? 1"EXECMCPTMP"1\.N1U \{ Quit "refused: the name must be EXECMCPTMP, digits and one capital letter" \}/g)).toHaveLength(2);
+    expect(nodeMethods.match(/If '##class\(Config\.Namespaces\)\.Exists\(pName\) \{/g)).toHaveLength(2);
+    // The one node, set to nothing and killed, and no other: no EnableNamespace, no other subscript, no other global.
+    expect(nodeMethods.match(/\^%SYS\(/g)).toHaveLength(2);
+    expect(nodeMethods).toContain('Set ^%SYS("Ensemble", "InstalledNamespace", pName) = ""');
+    expect(nodeMethods).toContain('Kill ^%SYS("Ensemble", "InstalledNamespace", pName)');
+    expect(FIXTURE_CLASS_SOURCE, "EnableNamespace is never called").not.toContain("EnsembleMgr");
+    expect(nodeMethods.indexOf("Exists(pName)"), "the existence check comes before the first write").toBeLessThan(nodeMethods.indexOf("Set ^%SYS("));
+    // The lock holder is a job of this class that switches to the scratch namespace itself, takes ^Ens.Runtime there and nowhere else.
+    const holder = FIXTURE_CLASS_SOURCE.slice(FIXTURE_CLASS_SOURCE.indexOf("ClassMethod HoldEnsRuntime("), FIXTURE_CLASS_SOURCE.indexOf("ClassMethod ReleaseEnsRuntime("));
+    expect(holder.match(/If pNamespace '\? 1"EXECMCPTMP"1\.N1U/g)).toHaveLength(3);
+    expect(holder).toContain("If '##class(%SYS.Namespace).Exists(pNamespace) { Quit \"refused: namespace \"_pNamespace_\" does not exist\" }");
+    expect(holder).toContain("Set $NAMESPACE = pNamespace\n    Lock +^Ens.Runtime:10");
+    expect(holder).toContain("$Select(pSeconds > 30: 30, pSeconds < 1: 1, 1: pSeconds)");
+    expect(holder).not.toContain("Terminate(");
+    expect(holder).not.toContain("LineByLine");
+    expect(holder.match(/Lock \+\^Ens\.Runtime/g)).toHaveLength(2);
+  });
+
+  it("the Story 40.3 fixture helpers refuse a name that is not EXECMCPTMP403<letter>, before any tool call", async () => {
+    const fixture = await import("./testproduction-fixture.js");
+    for (const name of [...REFUSED_NAMES, "EXECMCPTMP391A", "EXECMCPTMP4030", "EXECMCPTMP403AB"]) {
+      const admin = stubSession();
+      const dev = stubSession();
+      const interop = stubSession();
+      await expect(fixture.setInstalledNamespace(dev, name), name).rejects.toThrow(/not a fixture namespace name/);
+      await expect(fixture.clearInstalledNamespace(dev, name), name).rejects.toThrow(/not a fixture namespace name/);
+      await expect(fixture.holdEnsRuntime(dev, name, 10), name).rejects.toThrow(/not a fixture namespace name/);
+      await expect(fixture.releaseEnsRuntime(dev, name), name).rejects.toThrow(/not a fixture namespace name/);
+      await expect(fixture.seedTestProductionFixture(dev as never, name), name).rejects.toThrow(/not a fixture namespace name/);
+      await expect(fixture.seedPlainFixture(dev as never, name), name).rejects.toThrow(/not a fixture namespace name/);
+      await expect(fixture.createTestProductionNamespace(admin as never, dev as never, name), name).rejects.toThrow(/not a fixture namespace name/);
+      await expect(fixture.removeTestProductionNamespace(admin as never, interop, dev as never, name), name).rejects.toThrow(/not a fixture namespace name/);
+      expect(admin.call).not.toHaveBeenCalled();
+      expect(dev.call).not.toHaveBeenCalled();
+      expect(interop.call).not.toHaveBeenCalled();
+    }
+  });
+
+  it("the Story 40.3 teardown stops the production and clears the node only when the namespace exists, then removes it; the node is set before the classes compile", async () => {
+    const fixture = await import("./testproduction-fixture.js");
+
+    // Present: the leftovers list the namespace, so the production is stopped (forced) and the node cleared BEFORE the namespace goes.
+    const order: string[] = [];
+    const present = stubSession();
+    present.call.mockImplementation(async (tool: string, args: Record<string, unknown>) => {
+      order.push(`${tool}${args.methodName ? `:${String(args.methodName)}` : ""}${args.action ? `:${String(args.action)}` : ""}`);
+      const returnValue =
+        args.methodName === "Leftovers" ? JSON.stringify(["namespace EXECMCPTMP403A"])
+          : args.methodName === "ClearInstalledNamespace" ? "cleared"
+            : args.methodName === "ManagerDirectory" ? "C:/mgr/"
+              : args.methodName === "RemoveDatabaseFiles" ? "removed"
+                : "";
+      return { isError: false, content: [], structuredContent: { returnValue } };
+    });
+    await fixture.removeTestProductionNamespace(present as never, present, present as never, "EXECMCPTMP403A");
+    const stop = order.indexOf("iris_production_control:stop");
+    const clear = order.indexOf("iris_execute_classmethod:ClearInstalledNamespace");
+    const removeNamespace = order.indexOf("iris_namespace_manage:delete");
+    expect(stop, "the production is stopped").toBeGreaterThan(-1);
+    expect(clear, "the node is cleared after the stop").toBeGreaterThan(stop);
+    expect(removeNamespace, "the namespace is removed after the node is cleared").toBeGreaterThan(clear);
+    expect(present.call).toHaveBeenCalledWith(
+      "iris_production_control",
+      { action: "stop", force: true, namespace: "EXECMCPTMP403A" },
+    );
+
+    // Absent: nothing is stopped and no node is cleared (the fixture would refuse a namespace that does not exist), but the removal still runs.
+    const absentOrder: string[] = [];
+    const absent = stubSession();
+    absent.call.mockImplementation(async (tool: string, args: Record<string, unknown>) => {
+      absentOrder.push(`${tool}${args.methodName ? `:${String(args.methodName)}` : ""}`);
+      const returnValue = args.methodName === "Leftovers" ? "[]" : args.methodName === "ManagerDirectory" ? "C:/mgr/" : args.methodName === "RemoveDatabaseFiles" ? "removed" : "";
+      return { isError: false, content: [], structuredContent: { returnValue } };
+    });
+    await fixture.removeTestProductionNamespace(absent as never, absent, absent as never, "EXECMCPTMP403A");
+    expect(absentOrder).not.toContain("iris_production_control");
+    expect(absentOrder).not.toContain("iris_execute_classmethod:ClearInstalledNamespace");
+    expect(absentOrder).toContain("iris_namespace_manage");
+
+    // Creation: the node is set before the first TestProduction class is put, and every class is compiled.
+    const created: string[] = [];
+    const maker = stubSession();
+    maker.call.mockImplementation(async (tool: string, args: Record<string, unknown>) => {
+      created.push(`${tool}:${String(args.methodName ?? args.name ?? args.doc ?? args.action ?? "")}`);
+      return { isError: false, content: [], structuredContent: { returnValue: args.methodName === "SetInstalledNamespace" ? "set" : "C:/mgr/", success: true } };
+    });
+    await fixture.createTestProductionNamespace(maker as never, maker as never, "EXECMCPTMP403A");
+    const setNode = created.indexOf("iris_execute_classmethod:SetInstalledNamespace");
+    const firstClass = created.findIndex((entry) => entry.startsWith("iris_doc_put:"));
+    expect(setNode).toBeGreaterThan(-1);
+    expect(firstClass, "the node is set before any class is put").toBeGreaterThan(setNode);
+    expect(created.filter((entry) => entry.startsWith("iris_doc_compile:")).map((entry) => entry.slice("iris_doc_compile:".length))).toEqual(
+      fixture.STORY403_DOCUMENTS.map(([doc]) => doc),
+    );
+  });
+
+  it("the Story 40.3 sources: the pass, fail and error tests differ only in CheckResults, OtherTest and BadTest name their own production, FreshTest is a TestProduction test, and nothing is in HSCUSTOM", async () => {
+    const fixture = await import("./testproduction-fixture.js");
+    const sources = new Map(fixture.STORY403_DOCUMENTS.map(([doc, source]) => [doc, source] as const));
+    expect(fixture.STORY403_DOCUMENTS.map(([doc]) => doc)).toEqual([
+      "Story392.Operation.cls", "Story403.Production.cls", "Story403.Other.cls", "Story403.PassTest.cls", "Story403.FailTest.cls",
+      "Story403.ErrorTest.cls", "Story403.OtherTest.cls", "Story403.BadTest.cls", "Story403.Mixed.ProdTest.cls",
+      "Story403.PlainTest.cls", "Story403.Plain.OneTest.cls", "Story403.Mixed.PlainTest.cls",
+    ]);
+    expect(sources.get("Story403.PassTest.cls")).toContain('Parameter PRODUCTION = "Story403.Production";');
+    expect(sources.get("Story403.PassTest.cls")).toContain("Parameter MAXWAIT = 3;");
+    expect(sources.get("Story403.PassTest.cls")).toContain("Parameter MINRUN = 1;");
+    expect(sources.get("Story403.FailTest.cls")).toContain('$$$AssertTrue(0, "fail fixture")');
+    expect(sources.get("Story403.ErrorTest.cls")).toContain("1 / tZero");
+    expect(sources.get("Story403.OtherTest.cls")).toContain('Parameter PRODUCTION = "Story403.Other";');
+    expect(sources.get("Story403.BadTest.cls")).toContain('Parameter PRODUCTION = "Story403.Missing";');
+    expect(sources.get("Story403.Mixed.ProdTest.cls")).toContain("Extends %UnitTest.TestProduction");
+    expect(sources.get("Story403.Mixed.PlainTest.cls")).toContain("Extends %UnitTest.TestCase");
+    expect(fixture.STORY403_FRESH_SOURCE).toContain("Class Story403.FreshTest Extends %UnitTest.TestProduction");
+    expect(sources.get("Story403.Production.cls")).toContain('<Item Name="Story403.Target" Category="" ClassName="Story392.Operation"');
+    expect(sources.get("Story403.Other.cls")).toContain('<Item Name="Story403.OtherTarget" Category="" ClassName="Story392.Operation"');
+    for (const [doc, source] of fixture.STORY403_DOCUMENTS) {
+      expect(source, doc).not.toContain("ExecuteMCPv2");
+    }
+  });
 });

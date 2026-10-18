@@ -8,11 +8,16 @@
 /// <ul>
 /// <li><b>Start.</b> The request is validated before any namespace switch. The routines to measure are resolved in
 /// the target namespace, and a request that measures no routine, or more than <code>maxLines</code> INT lines, is an
-/// error that starts nothing. The busy check and the launch then run under one lock, so two requests cannot both
-/// start a session. The result is <code>{outcome, ...}</code>: <code>started</code> (the run record),
-/// <code>busy</code> (<code>owner</code> is <code>suite</code> or <code>foreign</code>, and for the suite the running
-/// run's <code>coverageRunId</code>, <code>pid</code>, <code>startedAt</code> and <code>namespace</code>) or
-/// <code>failed</code> (with <code>error</code>).</li>
+/// error that starts nothing. The TestProduction guard (Story 40.3, <method>ExecuteMCPv2.REST.UnitTest:ProductionGuard</method>,
+/// compiled classes only because the runner never compiles) then decides whether a run that includes
+/// <class>%UnitTest.TestProduction</class> tests may go ahead while another production runs in the namespace; a refusal
+/// allocates no run id, writes nothing and starts no session. The busy check and the launch then run under one lock, so
+/// two requests cannot both start a session. The result is <code>{outcome, ...}</code>: <code>started</code> (the run
+/// record), <code>busy</code> (<code>owner</code> is <code>suite</code> or <code>foreign</code>, and for the suite the
+/// running run's <code>coverageRunId</code>, <code>pid</code>, <code>startedAt</code> and <code>namespace</code>),
+/// <code>production-busy</code> (the guard's raw fields: <code>decision</code>, <code>namespace</code>,
+/// <code>testProductions</code> and, when the state was read, <code>production</code>, <code>state</code> and
+/// <code>stateCode</code>, or else <code>error</code>) or <code>failed</code> (with <code>error</code>).</li>
 /// <li><b>Status.</b> The run record, including <code>readError</code> when the run's line counts could not be read,
 /// and <code>minCoverage</code> when the run was started with one. A terminal run with counts also carries
 /// <code>routines</code> and <code>sources</code>, the class-source map. It never starts, stops or terminates anything.</li>
@@ -281,6 +286,16 @@ ClassMethod Run(pBody As %DynamicObject, Output pResult As %DynamicObject) As %S
             Set tSC = $$$ERROR($$$GeneralError, "Coverage of "_tTotalLines_" INT lines exceeds the limit of "_tParams("maxLines")_". List fewer classes, or classes with less code. Nothing was started.")
             Quit
         }
+        ; The runner never compiles (/noload), so only the compiled test classes are asked (pCompiles 0).
+        Set tGuardSC = ##class(ExecuteMCPv2.REST.UnitTest).ProductionGuard(tParams("target"), tParams("level"), 0, .tGuard)
+        If $$$ISERR(tGuardSC) {
+            Set tSC = $$$ERROR($$$GeneralError, "The TestProduction guard could not check the tests of '"_tParams("target")_"': "_##class(ExecuteMCPv2.Coverage.Job).SafeText($System.Status.GetErrorText(tGuardSC))_". Nothing was started.")
+            Quit
+        }
+        If tGuard.%Get("decision") = "busy" {
+            Set pResult = ..ProductionBusyResult(tGuard)
+            Quit
+        }
         Do ##class(ExecuteMCPv2.Setup).EnsureUnitTestRoot()
         Set tSpec = ..TestSpec(tParams("target"), tParams("level"))
     } Catch ex {
@@ -289,6 +304,7 @@ ClassMethod Run(pBody As %DynamicObject, Output pResult As %DynamicObject) As %S
     }
     Set $NAMESPACE = tOrigNS
     If $$$ISERR(tSC) Quit tSC
+    If $IsObject(pResult) Quit tSC
 
     Quit ..Launch(.tParams, tNamespace, tRoutines, tUnmeasured, tSpec, .pResult)
 }
@@ -420,6 +436,24 @@ ClassMethod BusyResult(pOwner As %String, pRunId As %Integer) As %DynamicObject
         Do tResult.%Set("startedAt", ##class(ExecuteMCPv2.Coverage.Job).RunGet(pRunId, "startedAt"))
         Do tResult.%Set("namespace", ##class(ExecuteMCPv2.Coverage.Job).RunGet(pRunId, "namespace"))
     }
+    Quit tResult
+}
+
+/// A <code>production-busy</code> outcome: the TestProduction guard (<method>ExecuteMCPv2.REST.UnitTest:ProductionGuard</method>)
+/// refused the run. It carries the guard's raw fields (<code>decision</code>, <code>namespace</code>,
+/// <code>testProductions</code> and, when present, <code>production</code>, <code>state</code>, <code>stateCode</code>
+/// and <code>error</code>) and no run id: nothing was allocated, written or started.
+ClassMethod ProductionBusyResult(pGuard As %DynamicObject) As %DynamicObject
+{
+    Set tResult = {}
+    Do tResult.%Set("outcome", "production-busy")
+    Do tResult.%Set("decision", "busy")
+    Do tResult.%Set("namespace", pGuard.%Get("namespace"))
+    Do tResult.%Set("testProductions", pGuard.%Get("testProductions"))
+    If pGuard.%IsDefined("production") Do tResult.%Set("production", pGuard.%Get("production"))
+    If pGuard.%IsDefined("state") Do tResult.%Set("state", pGuard.%Get("state"))
+    If pGuard.%IsDefined("stateCode") Do tResult.%Set("stateCode", pGuard.%Get("stateCode"), "number")
+    If pGuard.%IsDefined("error") Do tResult.%Set("error", pGuard.%Get("error"))
     Quit tResult
 }
 

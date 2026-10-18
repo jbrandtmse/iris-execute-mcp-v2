@@ -2,6 +2,68 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-18] — Story 40.3: TestProduction runs
+
+No tool, action or governance key is added, so no tool count moves (the Development server stays at 32 package tools, 33
+advertised; the suite at 110 package tools, 115 advertised). The prompt pack stays at 13 prompts, the `core` preset at 14
+package tools, and the frozen governance baseline at hash `1e62c5ad5bf7` (141 keys). The refusal-code catalog grows from 9 to
+10 codes. `BOOTSTRAP_VERSION` moves from `06b8b83fc319` to `9ce1a489469d`, because `REST/UnitTest.cls`, `REST/Coverage.cls`
+and `REST/Dispatch.cls` changed (the bootstrapped service stays at 35 classes).
+
+### Added
+
+- **A TestProduction guard on `iris_execute_tests` and `iris_test_coverage`.** `%UnitTest.TestProduction` stops, and when it
+  will not stop force-stops and cleans, any production in the namespace that is not stopped before it starts its own, so a
+  run of such a test silently stopped another user's production on a shared instance while the tool reported "passed". The
+  decision is now made on the IRIS side before anything runs, by one function (`ExecuteMCPv2.REST.UnitTest:ProductionGuard`)
+  that both tools use. It runs under Ens's own production lifecycle lock (`^Ens.Runtime`, five seconds to take it) and says
+  `proceed` when the namespace's production is stopped or is one of the productions the run's TestProduction tests declare
+  (their `PRODUCTION` parameter), and `busy` otherwise, including when the state cannot be read. A run is guarded when any test
+  class it will run is a TestProduction subclass, at package, class and method level (a method-level run of such a class is
+  guarded whatever the method). A run with no TestProduction test never reads Ens state and is byte-identical to before.
+- **`PRODUCTION_BUSY`, a refusal code.** The catalog goes from 9 to 10 codes. The refusal is `isError: true` with
+  `namespace`, `state`, `testProductions` (`class` and `production`) and, when the state was read, the running `production`,
+  or else `state: "Unknown"` and `error`. Nothing is run or queued, no run id is allocated, and that production is left
+  untouched; the text names it and tells the caller to run the tests once it has stopped or to stop an interrupted run's
+  leftover with `iris_production_control`. **Default state:** `iris_execute_tests` stays a read, enabled by default, and
+  `iris_test_coverage` stays a write, DEFAULT-DISABLED; the guard has no switch and adds no key.
+- **A read route, `GET /dev/test/production?target=&level=&namespace=`.** It returns `{decision, namespace, testProductions,
+  production?, state?, stateCode?, error?}` and is additive (AD-33). `iris_test_coverage`'s `Start` route gains the outcome
+  `production-busy`, which carries the same fields; every earlier request and outcome is unchanged.
+
+### Changed
+
+- **A sanctioned change on a frozen key (orchestrator decision #56, AD-15).** `iris_execute_tests` now asks the guard before
+  `ensureUnitTestRoot`, the counter read and `POST /work`. A 404 from the route (the ExecuteMCPv2 service is absent, or
+  predates this story) means the run goes ahead exactly as before, so **a run against a server without the guard is unguarded**;
+  any other guard failure ends the call as today's pre-queue errors do, with nothing queued. The tool descriptions of
+  `iris_execute_tests` and `iris_test_coverage` gain one sentence about the guard, and `pnpm gen:tools-list-snapshot --force`
+  regenerated the `tools/list` snapshot (orchestrator decision #29): it differs only in those two descriptions. `POST /tests`
+  (`RunTests`, which no tool calls) is not guarded.
+- **The suite never stops a production (orchestrator decision #58).** Ens keeps no record of who started a production, so a
+  production that a failed, cancelled or killed TestProduction run left behind cannot be told apart from one someone started
+  on purpose: it is refused and named like any other, and the caller stops it. The test's own production is run over, because
+  `%UnitTest.TestProduction` stops and restarts it itself.
+
+### Known limits
+
+- The decision is taken under Ens's lifecycle lock, but `%UnitTest.TestProduction` starts its production later, in the test
+  process, after the user's hooks (orchestrator decision #57). A production another process starts in that window is still
+  stopped.
+- A run against a server without the guard route is unguarded (above).
+- A production already running under a name one of the run's tests declares is treated as that run's own and is stopped and
+  restarted by the test, whoever started it: a developer's own run of that production, or a concurrent run of the same test, is
+  not protected.
+- A guard read that fails for any reason other than a 404 (an HTTP 5xx or 403, a connection error) ends the call before anything
+  is queued, even for a run with no TestProduction test.
+- A cancelled, killed or erroring TestProduction run leaves its production running.
+- Privileges were verified under `_SYSTEM` only; a lower-privileged account gets IRIS's own error text.
+- The live gate runs TestProduction tests only in a disposable namespace that the one node
+  `^%SYS("Ensemble","InstalledNamespace",<namespace>)` lets compile them (orchestrator decision #59; `EnableNamespace` is never
+  called); it clears the node before it removes the namespace.
+
+Earliest IRIS version verified: 2026.2 build 221U (`%UnitTest.TestProduction` and `Ens.Director:GetProductionStatus`).
+
 ## [Pre-release — 2026-10-18] — Story 40.2: Coverage reports and targets
 
 No tool is added, so no tool count moves (the Development server stays at 32 package tools, 33 advertised; the suite at 110

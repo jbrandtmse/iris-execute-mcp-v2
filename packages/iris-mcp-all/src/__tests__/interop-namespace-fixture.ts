@@ -792,6 +792,123 @@ ClassMethod MeasureStatus(pId As %Integer) As %String
     Quit tResult.%ToJSON()
 }
 
+/// Make the scratch namespace pName able to compile and run %UnitTest.TestProduction tests (Story 40.3): set the one node
+/// ^%SYS("Ensemble","InstalledNamespace",pName), which TestProduction's environment check reads and which is all it needs.
+/// EnableNamespace is never called. Refuses any name that is not EXECMCPTMP<digits><capital letter> and any namespace that does
+/// not exist, and touches no other node. ClearInstalledNamespace removes the node before the namespace is removed.
+/// Returns set, or refused: <why>.
+ClassMethod SetInstalledNamespace(pName As %String) As %String
+{
+    If pName '? 1"EXECMCPTMP"1.N1U { Quit "refused: the name must be EXECMCPTMP, digits and one capital letter" }
+    Set tOrig = $NAMESPACE
+    Set tResult = "set"
+    Try {
+        Set $NAMESPACE = "%SYS"
+        If '##class(Config.Namespaces).Exists(pName) {
+            Set tResult = "refused: namespace "_pName_" does not exist"
+        } Else {
+            Set ^%SYS("Ensemble", "InstalledNamespace", pName) = ""
+        }
+    } Catch ex {
+        Set tResult = "refused: "_ex.DisplayString()
+    }
+    Set $NAMESPACE = tOrig
+    Quit tResult
+}
+
+/// Remove the node SetInstalledNamespace set for pName, and no other. Refuses any name that is not
+/// EXECMCPTMP<digits><capital letter> and any namespace that does not exist. Returns cleared, or refused: <why>.
+ClassMethod ClearInstalledNamespace(pName As %String) As %String
+{
+    If pName '? 1"EXECMCPTMP"1.N1U { Quit "refused: the name must be EXECMCPTMP, digits and one capital letter" }
+    Set tOrig = $NAMESPACE
+    Set tResult = "cleared"
+    Try {
+        Set $NAMESPACE = "%SYS"
+        If '##class(Config.Namespaces).Exists(pName) {
+            Set tResult = "refused: namespace "_pName_" does not exist"
+        } Else {
+            Kill ^%SYS("Ensemble", "InstalledNamespace", pName)
+        }
+    } Catch ex {
+        Set tResult = "refused: "_ex.DisplayString()
+    }
+    Set $NAMESPACE = tOrig
+    Quit tResult
+}
+
+/// Hold Ens's production lifecycle lock ^Ens.Runtime of the scratch namespace pNamespace from a job of this class, so that the
+/// TestProduction guard cannot take it (Story 40.3). The job switches to pNamespace itself, so it holds that namespace's lock and no
+/// other, releases it when ReleaseEnsRuntime is called, and in any case after pSeconds (at most 30). Refuses any name that is not
+/// EXECMCPTMP<digits><capital letter> and any namespace that does not exist. Returns held, or refused: <why>.
+ClassMethod HoldEnsRuntime(pNamespace As %String, pSeconds As %Integer = 10) As %String
+{
+    If pNamespace '? 1"EXECMCPTMP"1.N1U { Quit "refused: the namespace must be EXECMCPTMP, digits and one capital letter" }
+    If '##class(%SYS.Namespace).Exists(pNamespace) { Quit "refused: namespace "_pNamespace_" does not exist" }
+    Kill ^IRIS.TempStory391Fixture("ensHoldStop")
+    Job ##class(ExecuteMCPv2.Temp.Story391Fixture).EnsRuntimeRun(pNamespace, $Select(pSeconds > 30: 30, pSeconds < 1: 1, 1: pSeconds))::10
+    If '$Test { Quit "refused: the lock holder did not start" }
+    Set tHeld = 0
+    For tI = 1:1:50 {
+        If ..EnsRuntimeHeld(pNamespace) {
+            Set tHeld = 1
+            Quit
+        }
+        Hang 0.1
+    }
+    Quit $Select(tHeld: "held", 1: "refused: the lock holder did not take the lock")
+}
+
+/// The lock holder's job: in the scratch namespace pNamespace, hold ^Ens.Runtime until ReleaseEnsRuntime sets the stop flag, for
+/// pSeconds at most.
+ClassMethod EnsRuntimeRun(pNamespace As %String, pSeconds As %Integer)
+{
+    If pNamespace '? 1"EXECMCPTMP"1.N1U { Quit }
+    Set $NAMESPACE = pNamespace
+    Lock +^Ens.Runtime:10
+    If '$Test { Quit }
+    For tI = 1:1:(pSeconds * 10) {
+        If $Get(^IRIS.TempStory391Fixture("ensHoldStop")) { Quit }
+        Hang 0.1
+    }
+    Lock -^Ens.Runtime
+}
+
+/// Is ^Ens.Runtime of the scratch namespace pNamespace held by another process? A lock this call can take is released at once. A
+/// name that is not a scratch namespace, or an error, reads as held, so a caller never mistakes it for a free lock.
+ClassMethod EnsRuntimeHeld(pNamespace As %String) As %Boolean
+{
+    If pNamespace '? 1"EXECMCPTMP"1.N1U { Quit 1 }
+    Set tOrig = $NAMESPACE
+    Set tHeld = 1
+    Try {
+        Set $NAMESPACE = pNamespace
+        Lock +^Ens.Runtime:0
+        If $Test {
+            Lock -^Ens.Runtime
+            Set tHeld = 0
+        }
+    } Catch ex {
+        Set tHeld = 1
+    }
+    Set $NAMESPACE = tOrig
+    Quit tHeld
+}
+
+/// Ask the lock holder to release ^Ens.Runtime of pNamespace and wait for it to do so. Returns released, or refused: <why>.
+ClassMethod ReleaseEnsRuntime(pNamespace As %String) As %String
+{
+    If pNamespace '? 1"EXECMCPTMP"1.N1U { Quit "refused: the namespace must be EXECMCPTMP, digits and one capital letter" }
+    Set ^IRIS.TempStory391Fixture("ensHoldStop") = 1
+    For tI = 1:1:50 {
+        If '..EnsRuntimeHeld(pNamespace) { Quit }
+        Hang 0.1
+    }
+    If ..EnsRuntimeHeld(pNamespace) { Quit "refused: the lock is still held" }
+    Kill ^IRIS.TempStory391Fixture("ensHoldStop")
+    Quit "released"
+}
+
 }
 `;
 

@@ -220,7 +220,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 |------|-------------|----------------|-------------|
 | `iris_execute_command` | Execute an ObjectScript command | `command`, `namespace?` | -- |
 | `iris_execute_classmethod` | Invoke a class method by name with up to 20 positional arguments (plain scalars or `{byRef, value?}` markers for `ByRef`/`Output` parameters). Captures any `Write` output from the target (no wrapper class needed for narrating methods, stock runners like `%UnitTest.Manager.RunTest`, or targets that switch namespace mid-call) and returns marked positions' post-call values | `className`, `methodName`, `args?`, `namespace?` | -- |
-| `iris_execute_tests` | Run unit tests (package, class, or method level). A run that outlives its wait budget returns a non-error "running" result carrying `jobId`/`runIndex` handles instead of a timeout error — see detail below | `target`, `level`, `timeout?`, `namespace?` | readOnly, idempotent |
+| `iris_execute_tests` | Run unit tests (package, class, or method level). A run that outlives its wait budget returns a non-error "running" result carrying `jobId`/`runIndex` handles instead of a timeout error — see detail below. Since Story 40.3 a run that includes `%UnitTest.TestProduction` tests is refused with `PRODUCTION_BUSY` while a different production runs in the namespace (the tool stays enabled; no new key) | `target`, `level`, `timeout?`, `namespace?` | readOnly, idempotent |
 
 ### Code Metrics Tools
 
@@ -251,7 +251,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_test_coverage` | Run unit tests and measure which lines of the listed classes they execute (Stories 40.1 and 40.2): per class and per method over the class's own source lines with the uncovered ranges, per-routine INT lines, an optional `minCoverage` verdict, plus the classes that could not be measured — see detail below | `target`, `level`, `classes`, `timeout?`, `namespace?`, `minCoverage?` | destructive |
+| `iris_test_coverage` | Run unit tests and measure which lines of the listed classes they execute (Stories 40.1 and 40.2): per class and per method over the class's own source lines with the uncovered ranges, per-routine INT lines, an optional `minCoverage` verdict, plus the classes that could not be measured; since Story 40.3 it asks the same TestProduction guard as `iris_execute_tests` and refuses a run with `PRODUCTION_BUSY` — see detail below | `target`, `level`, `classes`, `timeout?`, `namespace?`, `minCoverage?` | destructive |
 
 > **Governance defaults:** `iris_test_coverage` is truthfully classified `write` (it starts an instance-wide monitor session, runs test code and prunes its own older run records) and is **DEFAULT-DISABLED**; enable it via `IRIS_GOVERNANCE`, e.g. `{"global":{"iris_test_coverage":true}}`. It is outside the frozen governance baseline, uses no `defaultEnabled` marker, and is hidden under `IRIS_TOOLS_PRESET=core` (shown under `developer`); it and `iris_test_status` are a declared pair and stay co-visible.
 
@@ -1652,6 +1652,46 @@ the method name you typed doesn't match what actually ran (the endpoint's
 `Class:TestValidate` both resolve to the same wire filter), the response
 carries an additive `methodMismatchWarning` field naming the mismatch rather
 than staying silent about it.
+
+### TestProduction guard (Story 40.3)
+
+`%UnitTest.TestProduction` tests start a production, and before they do, it **stops any production in the namespace that is
+not stopped** (and, when that one will not stop, force-stops and cleans it). On a shared instance that would silently stop
+someone else's production while the tool reported "passed". So a run that includes a `%UnitTest.TestProduction` test, at
+package, class or method level (a method-level run of such a class is guarded whatever the method), is decided on the IRIS
+side before anything is queued:
+
+- the run **goes ahead** when the namespace's production is stopped, or is one of the productions the run's TestProduction
+  tests declare as their own (their `PRODUCTION` parameter);
+- otherwise it is **refused** with `isError: true`, `code: "PRODUCTION_BUSY"`: any other production in any state, or a state
+  that cannot be read (Ens's production lifecycle lock could not be taken within 5 seconds). Nothing is queued, no test runs,
+  and that production is left untouched.
+
+```json
+{ "code": "PRODUCTION_BUSY", "namespace": "MYAPP", "state": "Running",
+  "testProductions": [ { "class": "MyApp.Tests.OrderFlowTest", "production": "MyApp.OrderProduction" } ],
+  "production": "Other.Production" }
+```
+`production` is the running production (present when the state was read); when it could not be read, `state` is `"Unknown"`
+and `error` says why instead. The text names the production and says it was left untouched. A run with no TestProduction test
+is unaffected: it never reads Ens state and its result is byte-identical to before. The tool stays **enabled by default** and no
+governance key is added; the guard has no switch.
+
+What to do: run the tests once the other production has stopped. If an interrupted run of a TestProduction test left its
+production running (a test that raised an error in its own hook leaves it running, and so does a killed or cancelled test
+process), stop it with `iris_production_control` and run the tests again. The suite **never stops a production itself**: Ens
+keeps no record of who started one, so a leftover cannot be told from a production someone started on purpose.
+
+Limits, stated plainly. The guard needs the ExecuteMCPv2 service at the version that ships it; against a server whose service
+lacks it (the guard route answers 404) the run goes ahead unguarded, as before. The decision is taken under Ens's own lifecycle
+lock, but `%UnitTest.TestProduction` starts its production later, in the test process, so a production started by another
+process in between would still be stopped. A production that is already running under a name one of the run's tests declares is
+treated as that run's own and is stopped and restarted by the test, whoever started it, so a developer's own run of that
+production, or a concurrent run of the same test, is not protected. A guard read that fails for any reason other than a 404 (an
+HTTP 5xx or 403, a connection error) ends the call before anything is queued with the usual `Error executing tests` result, even
+for a run with no TestProduction test. A class that is neither compiled nor defined is not a TestProduction test. Privileges
+were verified under `_SYSTEM` only; a lower-privileged account gets IRIS's own error text. Earliest IRIS version verified:
+2026.2 build 221U.
 </details>
 
 <details>
@@ -1823,6 +1863,15 @@ counted. The run refuses more than 200,000 measured INT lines.
 Line-by-Line or PERFMON session is running, a call is refused with `isError: true` and `code: "MONITOR_BUSY"`, `owner:
 "suite"` (a coverage run is active: the refusal carries its `coverageRunId`, `pid`, `startedAt` and `namespace`) or
 `owner: "foreign"` (a session this suite did not start; it is never touched). Nothing is started in either case.
+
+**TestProduction guard (Story 40.3).** `%UnitTest.TestProduction` stops any production in the namespace that is not stopped
+before it starts its own. So a coverage run of a `%UnitTest.TestProduction` test asks the same IRIS-side guard as
+`iris_execute_tests`, before it allocates a run id (only the compiled test classes are asked, because the runner never
+compiles): while a production other than the tests' own runs in the namespace, or its state cannot be read, the call is
+refused with `isError: true` and `code: "PRODUCTION_BUSY"` (`namespace`, `state`, `testProductions`, and `production` or
+`error`). No run id is allocated, nothing is written and no monitor session is started, and that production is left
+untouched. With no other production running the run completes as before and leaves its own production stopped. See the
+`iris_execute_tests` entry for the fields, the recovery and the limits.
 
 **Budget expiry and re-attach.** A run that outlives the wait budget returns `isError: false`, `status: "running"` and its
 handles; do NOT re-submit. Call `iris_test_status` with `action: "poll"` and `coverageRunId` (the run's own namespace is

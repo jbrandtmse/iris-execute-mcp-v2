@@ -18,6 +18,11 @@ import {
   type ToolResult,
 } from "@iris-mcp/shared";
 import { z } from "zod";
+import {
+  TEST_PRODUCTION_GUARD_SENTENCE,
+  productionBusyRefusal,
+  readProductionGuard,
+} from "./test-production-guard.js";
 
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
@@ -944,6 +949,12 @@ export function createExecuteTestsHandler(clock: TestClock = realClock): ToolDef
         tests = [testEntry];
       }
 
+      // TestProduction guard (Story 40.3, AD-27): %UnitTest.TestProduction stops any production that is not
+      // stopped before it starts its own, so a run that includes such a test is decided IRIS-side before
+      // anything is queued. A refusal changes nothing; a 404 (no guard route on this server) runs as before.
+      const guard = await readProductionGuard(ctx, ns, target, level);
+      if (guard !== undefined && guard.decision === "busy") return productionBusyRefusal(guard);
+
       // Ensure ^UnitTestRoot is defined in the target namespace. The
       // Atelier /work unittest endpoint silently crashes the response
       // serializer (%Api.Atelier.v8::UnitTestResultToJSON) with a
@@ -1236,7 +1247,8 @@ export const executeTestsTool: ToolDefinition = {
     "`runIndexNote` saying why. Concurrency caveat: two runs of the SAME class started close together " +
     "share that class's fixtures, AND the Atelier endpoint predicts each run's index before " +
     "%UnitTest.Manager actually allocates it — a race between near-simultaneous submissions can " +
-    "misattribute a run's own index. Returns total, passed, failed, skipped counts and per-test details.",
+    "misattribute a run's own index. Returns total, passed, failed, skipped counts and per-test details. " +
+    TEST_PRODUCTION_GUARD_SENTENCE,
   inputSchema: z.object({
     target: z
       .string()

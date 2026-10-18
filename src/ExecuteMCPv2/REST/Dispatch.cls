@@ -191,6 +191,9 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/dev/test/coverage" Method="POST" Call="ExecuteMCPv2.REST.Coverage:Start" />
   <Route Url="/dev/test/coverage" Method="GET" Call="ExecuteMCPv2.REST.Coverage:Status" />
   <Route Url="/dev/test/coverage/cancel" Method="POST" Call="ExecuteMCPv2.REST.Coverage:Cancel" />
+
+  <!-- Epic 40 (Story 40.3): TestProduction guard - may a run that includes TestProduction tests go ahead? -->
+  <Route Url="/dev/test/production" Method="GET" Call="ExecuteMCPv2.REST.UnitTest:ProductionCheck" />
 </Routes>
 }
 

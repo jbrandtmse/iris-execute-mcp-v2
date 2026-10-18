@@ -2,9 +2,10 @@
 title: 'Story 40.3: TestProduction Runs'
 type: 'feature'
 created: '2026-10-18'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '1f5fb1cd163e62b2ecdcd873c4648d67adae7145'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
@@ -269,6 +270,49 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-10-18 — Review pass
+- verdicts: 39 findings — high 0, medium 6, low 26, false 7, maybe-false 0
+- findings (Blind Hunter 1-10, Edge Case Hunter 11-17, Verification Gap 18-26, Intent Alignment 27-39):
+  - `[low]` `[patch]` 1. A production already running under a name a test declares (a developer's own, or a concurrent run of the same test) is "own" and is stopped and restarted — verified: `GuardOutcome` proceeds on the name alone, as AC 40.3.2 and decision #58 say (Ens keeps no record of who started a production), so the code is spec-bound; the limits lists did not say it. Patched: the CHANGELOG known limits, the dev README limits and the `tool_support.md` note now state it, each pinned in `story-40-3-doc-claims.test.ts` (mutation line written).
+  - `[low]` `[reject]` 2. A 404 from the guard route runs unguarded with no signal — spec-bound: row 16 requires the 404 run to be byte-identical to today, so an added field or warning would break it; the docs, the CHANGELOG and both tool descriptions state it.
+  - `[low]` `[patch]` 3. Fail-open branches undocumented, and a non-404 guard failure blocks plain runs — verified: an unswitchable namespace answering `proceed` is spec text; the 32-class cap and a compiled class that cannot load under compiled-only resolution are not reachable by a real class (a 32-deep ancestry; the runner cannot run a class that cannot load); the non-404 failure fails every run, as the spec says, but the README and `tool_support.md` said only "unaffected". Patched: the README, CHANGELOG and `tool_support.md` limits state the non-404 failure.
+  - `[medium]` `[patch]` 4. The definition-walk half of `ResolveTest` (an intermediate base, an inherited `PRODUCTION`, a stale compiled class) is never exercised positively — verified: every fixture extends the root, so the walk ends in one step. Patched: gate rows 14b (stale compiled class) and 14c (uncompiled child of a compiled abstract base) and the `Story403.StaleTest`/`BaseTest`/`InheritTest` sources; mutation lines written.
+  - `[medium]` `[patch]` 5. The IRIS-side error branches have no test — verified for `Catch exEns` and `StatusText` (only the lock-timeout string was exercised); the outer `Catch` of `ProductionGuard` and the coverage guard-failure branch need `TestProductions` to throw, which the SQL and dictionary calls cannot be made to do. Patched: gate row 15b (a TestProduction test in the bare namespace B, where `Ens.Director` does not exist, is `PRODUCTION_BUSY` with `state: "Unknown"`, the exception text, and a free lock); the two unreachable branches stay untested by decision.
+  - `[false]` `[reject]` 6. `state: "Unknown"` is ambiguous and `stateCode` is not in the refusal — the refusal fields are the spec's (`namespace, state, testProductions, production?, error?`); a read state 0 or 6 has `production`, an unreadable one has `error`, and the docs say which field tells them apart; the label is `StateName`, which the spec says to reuse.
+  - `[low]` `[reject]` 7. The recovery text names `iris_production_control`, on the Interoperability server — the text is the spec's (Design Notes), and the same tool name is used by the other refusals and docs of this suite; not worth a wording change against the spec.
+  - `[low]` `[reject]` 8. Defensive normalization in `readProductionGuard`, `productionBusyRefusal` and `guardFromStart` is reached by no real answer — kept: it makes a malformed 200 fail closed in a safety gate; no named harm.
+  - `[low]` `[patch]` 9. The coverage-description pin was loosened to `executemcp\/` — verified: it let any class name through. Patched: `/executemcp(?!v2 service)/i` plus an exactly-one-mention assertion; mutation line written.
+  - `[low]` `[reject]` 10. The CHANGELOG says the snapshot "differs only in those two descriptions" while `capturedAt` also moved — its entries differ only there; `capturedAt` is generator metadata. Cosmetic.
+  - `[low]` `[patch]` 11. Same as 1 (concurrent runs of one TestProduction test) — carried: docs patched as in 1.
+  - `[low]` `[reject]` 12. The 32-class cap reads as "not a test" — no real class has 32 distinct ancestors; the cap only stops a cyclic or runaway chain.
+  - `[false]` `[reject]` 13. A read state 6 or a negative code is labelled "Unknown" with no `error` — the same as 6: `StateName` is the spec's label, the fields tell the cases apart.
+  - `[low]` `[reject]` 14. The guard's wait (up to the 5 s lock and the 2 s status read) is outside the tool's wait budget — verified: the budget starts after the queue call, so the discovery, `ensureUnitTestRoot` and the counter read are already outside it today; the guard adds a bounded few seconds only when the lock is held, and the client ceiling is the caller's.
+  - `[low]` `[reject]` 15. `removeTestProductionNamespace` cannot clear a node whose namespace is gone — the fixture refuses an absent namespace by spec; the teardown clears the node before it removes the namespace, so the state cannot arise in the gate's order.
+  - `[low]` `[patch]` 16. "A run with no TestProduction test is unaffected" versus a non-404 guard failure — same as 3: docs patched.
+  - `[low]` `[patch]` 17. Same as 9 — carried.
+  - `[medium]` `[patch]` 18. `ResolveTest`'s definition path has no test beyond a direct never-compiled subclass — same as 4: gate rows 14b and 14c.
+  - `[medium]` `[patch]` 19. The Ens exception and error-status branch and `StatusText` never run — same as 5: gate row 15b.
+  - `[low]` `[patch]` 20. The "namespace cannot be switched to" branch of `ProductionCheck` has no test — verified. Patched: a raw route call for the absent scratch name `EXECMCPTMP403Z` in gate row 12; mutation line written.
+  - `[low]` `[patch]` 21. "A method-level run is guarded whatever the method" is pinned only with `TestControl` — verified. Patched: a raw route call for `Story403.PassTest:TestNoSuchMethod` in gate row 12; mutation line written.
+  - `[low]` `[reject]` 22. The compiled-only resolution on the coverage path is not pinned — the spec's planned mutation pins the execute path (row 14); a coverage row needs a whole run to leave the monitor idle, for an edge where a stale class is run by `/noload` anyway. Reopen if a coverage run is seen to be refused for a class that is not compiled.
+  - `[low]` `[patch]` 23. The fixture methods' IRIS-side refusals are asserted only as source text — Patched: gate row 13b calls `SetInstalledNamespace`, `ClearInstalledNamespace` and `HoldEnsRuntime` with a non-scratch name and an absent scratch name (neither is a namespace, so a missing guard could not reach a node or a lock) and asserts the answers and that nothing was written; mutation line written.
+  - `[low]` `[patch]` 24. Pinning tests with no `mutation:` line (AC-8 other-error, explicit proceed, malformed-target precedence, `GuardOutcome` foreign and empty name, refusal text, helper-name refusal) — verified. Patched: each mutation applied, observed red and reverted; the lines are in `## Verification`.
+  - `[false]` `[reject]` 25. The OS `TestTestProductions*` tests assert only `""` — by design: the spec forbids a TestProduction class in HSCUSTOM, and the positive discovery is pinned by gate rows 5, 12, 14, 14b and 14c.
+  - `[low]` `[patch]` 26. The loosened coverage-description pin — same as 9, carried.
+  - `[medium]` `[patch]` 27. Intent-specified resolution (intermediate superclasses, nearest `PRODUCTION`, stale compiled class) untested — same as 4.
+  - `[low]` `[reject]` 28. Coverage-path compiled-only resolution untested — same as 22.
+  - `[low]` `[patch]` 29. The unswitchable-namespace branch untested — same as 20.
+  - `[medium]` `[patch]` 30. Guard failures other than the lock timeout untested — same as 5.
+  - `[false]` `[reject]` 31. The raw `production-busy` payload of `Start` is asserted nowhere — gate row 10 builds the refusal from that payload (state, production, testProductions, stateCode all come from it) and row 17 pins the mapping; a wrong raw field would turn row 10 red.
+  - `[false]` `[reject]` 32. The gate's residue oracle ignores Atelier work-queue workers — the worker is the test runner, which lingers about a second; it is not a production process (implementation notes); the spec's "no process entry" is about production processes.
+  - `[false]` `[reject]` 33. "Atomic" covers only the decision, not the test's own start — decision #57 and the CHANGELOG residuals say exactly this.
+  - `[low]` `[patch]` 34. A same-named production is "run over" — same as 1: docs patched.
+  - `[low]` `[reject]` 35. Row 16's "byte-identical to today" is compared inside the new build — the call sequence is the pre-change one, written out in the test, and the 86 existing `iris_execute_tests` tests keep their bodies and assertions (only the mock plumbing moved), which is the AD-15 pin.
+  - `[low]` `[patch]` 36. The pre-existing coverage-description pin was relaxed — same as 9.
+  - `[low]` `[reject]` 37. The 404 fail-open is pinned by mocks only — the unit row is the spec's row 16; the implementer's live probe of the real 404 shape is in the implementation notes.
+  - `[false]` `[reject]` 38. "One guard sentence" holds two sentences — decision #56 requires the service-dependence statement; the pin names it.
+  - `[low]` `[reject]` 39. `readProductionGuard` treats a non-explicit answer as busy, which the intent does not mention — same as 8.
+
 ## Design Notes
 
 **Orchestrator decisions needed** (the Lead's calls, delegated; this plan follows each recommendation):
@@ -395,6 +439,17 @@ deferred: []
 - **AD-2:** the gate in `iris-mcp-all`.
 - **Conventions:** Refusals, Tool results, Error text, Live gates, Live testing on a shared instance, Probes and references (earliest version verified: IRIS 2026.2 build 221U, for `%UnitTest.TestProduction` and `Ens.Director:GetProductionStatus`), and Performance budgets.
 
+**Implementation notes (implement stage).**
+
+- **Raw result when the state is unreadable.** Following "`production`, `state` and `stateCode` are present exactly when the state was read", the raw route omits all three then and carries `error`; `productionBusyRefusal` fills `state: "Unknown"` in the refusal fields (matrix row 13). The coverage outcome `production-busy` carries the same raw fields.
+- **`level` is required on the route** (`target` and `level` validated before any namespace switch, with the messages of `RunTests`); the tool always sends both.
+- **A 404 is real.** Live probe: a route that does not exist answers HTTP 404 with an empty-errors envelope, which the shared client turns into `IrisApiError` 404 (Story 39.7), so `readProductionGuard`'s rule is the wire behavior and not only the mock's.
+- **One pre-existing pin moved.** `test-coverage.test.ts` pinned the coverage description against `/\/api\/|\/dev\/|executemcp/i`; decision #56 requires the description to name "the ExecuteMCPv2 service", so the third alternative became `executemcp\/` (a REST path piece). `\/api\/` and `\/dev\/` still forbid every path.
+- **Compiled answer with a fallback.** `ResolveTest` answers from the compiled class (`$ClassMethod ... %Extends`, `$Parameter`) and, when that class cannot be loaded and the run compiles first, falls back to its definition; a class compiled but not defined answers from the compiled class.
+- **Gate processes.** The Atelier work-queue worker that ran a test stays in the namespace for about a second (`Routine` `%SYS.WorkQueueMgr`, state `EVTW`); it is the test runner, not a production process, so the gate's production-process reads leave workers out and give other transient processes up to 10 s. A production reports Running while its jobs are still starting, so the "untouched" comparison takes its first snapshot once two reads one second apart agree.
+- **Observation, no route impact.** The first test run after `REST/UnitTest.cls` is recompiled reported 17 to 44 s for `ProductionGuardTest:TestProductionGuardPlainTarget`, while the guard calls inside it took 0.018 s (measured in the method, between `OnBeforeOneTest` and `OnAfterOneTest`) and a repeat run took 1.3 s. The time is in the unit-test framework's accounting after a recompile, not in the guard; the route time is 6 ms in the gate.
+- **Fixture methods.** `SetInstalledNamespace` writes the node with an empty value (Ens sets the portal suffix there; the environment check only tests that the node exists); `ClearInstalledNamespace` refuses a namespace that no longer exists, so a node left behind by a crashed teardown is cleared by re-creating the namespace first (the AC-9 mutation did exactly that).
+
 ## Verification
 
 - Every command runs from `/Users/jbrandt/git/iris-execute-mcp-v2`, in the foreground, with `timeout: 600000`, and one package per call.
@@ -457,7 +512,80 @@ deferred: []
 - **AC-9:** skip `ClearInstalledNamespace` → the gate's `leftovers` assertion.
 - **AC-10:** a comment edit in `UnitTest.cls` without `gen:bootstrap` → the `bootstrap.test.ts` drift check.
 
+**Mutation results (Rule 19, implement stage).** Each IRIS-side mutation was applied to a scratch copy loaded into HSCUSTOM with `iris_doc_load` (the working tree's `.cls` files were never edited for it), run against the named test, then reverted by reloading the file from `src/` (the live classes equal `src/` again). Each TypeScript mutation was applied in `src/`, run, and reverted with `cmp` against a saved copy (byte-identical). The gate was run armed (`ENV` above) with its teardown in place; every mutation that lets a run stop `Story403.Other` ran with it.
+
+- mutation: `GuardOutcome` returns `busy` for state 2 -> OS `ProductionGuardTest:TestGuardOutcomeStopped` red (3 assertions), and the gate: rows 1, 2, 8, 9, 11, 12 and 13 red (row 3 also failed on a start-up race in its "untouched" snapshot, which `settledSnapshot` then closed), reverted
+- mutation: `ProductionGuard` reads the state even with no TestProduction test, and `GuardOutcome` drops its no-tests short-circuit -> OS `TestGuardOutcomeNoTests` and `TestProductionGuardPlainTarget` red; gate row 6 red ("Production 'Story403.Other' is Running ... (). nothing was run"), row 12 red (`stateCode` appears for a plain target), row 15 red (bare B: `<CLASS DOES NOT EXIST>ProductionGuard *Ens.Director`); reverted
+- mutation: `GuardOutcome` never matches the run's own productions (`If pName '= ""` -> `If 0`) -> OS `TestGuardOutcomeOwnProduction` red, and gate row 8 red (PassTest refused over ErrorTest's own leftover); reverted
+- mutation: `GuardOutcome` answers `proceed` when the state was not read -> OS `TestGuardOutcomeStateNotRead` red, and gate row 13 red (the run went ahead and passed twice); reverted
+- mutation: `ProductionCheck` resolves compiled-only (`ProductionGuard(..., 0, ...)`) -> gate row 14 red (the uncompiled `FreshTest` ran and stopped Other); reverted
+- mutation: the guard call deleted from `REST/Coverage.cls` `Run` (scratch copy: `tGuard` fixed to proceed) -> gate row 10 red ("Coverage run 1784 completed"), reverted
+- mutation: the guard call deleted from `execute.ts` (`guard` fixed to `undefined`, dev rebuilt) -> gate rows 3, 4, 5, 7, 9, 14 red (and 10 and 13), reverted and rebuilt
+- mutation: `readProductionGuard` fails closed on a 404 (returns a busy decision) -> `test-production-guard.test.ts` "a 404 ... is undefined" and "matrix row 16: a 404 from the guard route" red, reverted
+- mutation: `removeTestProductionNamespace` skips `clearInstalledNamespace` -> `interop-namespace-fixture.test.ts` "the Story 40.3 teardown stops the production and clears the node ..." red, and the gate's teardown red ("every teardown step completed": the leftovers check lists `^%SYS("Ensemble","InstalledNamespace","EXECMCPTMP403A")`); the stale node was cleared through the fixture (a throwaway recovery test, removed), reverted
+- mutation: a comment edit in `REST/UnitTest.cls` without `pnpm gen:bootstrap` -> `bootstrap.test.ts` "embedded class contents match disk .cls files" and "BOOTSTRAP_VERSION matches SHA-256 hash" red, reverted
+- mutation: `PRODUCTION_BUSY` removed from `REFUSAL_CODES` -> `refusals.test.ts` catalog pin red, reverted
+- mutation: the `production-busy` branch removed from `test-coverage.ts` -> `test-coverage.test.ts` "production-busy start ..." (both, matrix row 17) red, reverted
+- mutation: the guard asked after `ensureUnitTestRoot` -> `test-production-guard.test.ts` rows 16 (404, 500, busy) and the call-order test red, reverted
+- mutation: `encodeURIComponent` dropped from the guard's `target` -> `test-production-guard.test.ts` path/encoding tests (3) red, reverted
+- mutation: the namespace-exists guard of `SetInstalledNamespace` and `ClearInstalledNamespace` replaced by `If 0` -> `interop-namespace-fixture.test.ts` "the Story 40.3 fixture methods ... keep their guard" red, reverted
+- mutation: the Story 40.3 gate removed from `gateTestFiles` -> `live-gate-roster.test.ts` red; removed from `GATES` -> `story-39-1-gate-guards.test.ts` completeness red; reverted
+- mutation: "The suite **never stops a production itself**" reworded in the dev README -> `story-40-3-doc-claims.test.ts` guard-section pin red, reverted
+- mutation: the two tool descriptions without the guard sentence -> the tools-list snapshot check named exactly those two `description` differences before `--force` (and `tools-list-snapshot.test.ts` is the same comparison), then the snapshot was regenerated
+
+**Mutation results (review pass, same method: IRIS-side from a scratch copy loaded into HSCUSTOM and reloaded from `src/`; TypeScript in `src/`, reverted with `cmp`).**
+
+- mutation: `IsUpToDate` ignored (`Set tUseCompiled = 1`, a stale compiled class answers) -> gate row 14b red (the stale `StaleTest` was not refused), reverted
+- mutation: the superclass's production not inherited (`Set pProduction = ""` in `ResolveTest`) -> gate row 14c red (`production: ""` instead of `Story403.Production`), reverted
+- mutation: `ProductionCheck` answers `busy` for a namespace it cannot switch to -> gate row 12 red (the `EXECMCPTMP403Z` call), reverted
+- mutation: a method-level run guarded only when the method is `TestControl` -> gate row 12 red (the `TestNoSuchMethod` call), reverted
+- mutation: the `Catch exEns` handler drops the error text (`Set tError = ""`) -> gate row 15b red (the `error` text assertion), reverted. The lock-release assertion of row 15b is not mutated: dropping the unlock would leak `^Ens.Runtime` in a gateway job on the next gate's namespace directory
+- mutation: an empty production name matches an empty own production (`If pName '= ""` -> `If 1`) -> OS `TestGuardOutcomeEmptyName` red, reverted
+- mutation: `GuardOutcome` always `proceed` for a read state (`Quit "proceed"`) -> OS `TestGuardOutcomeForeignProduction` and `TestGuardOutcomeEmptyName` red, reverted
+- mutation: `readProductionGuard` swallows every failure (returns `undefined` for a non-404 too) -> `test-production-guard.test.ts` "any other failure is thrown" and the HTTP 500 row-16 test red, reverted
+- mutation: `readProductionGuard` treats an answer that is not `busy` as `proceed` -> `test-production-guard.test.ts` "only an explicit proceed lets a run go ahead" red, reverted
+- mutation: the guard read made before the tests array is built (`execute.ts`) -> `test-production-guard.test.ts` rows 16 (404, busy), the target/level/namespace test and the malformed-target/empty-package precedence test red, reverted and dev rebuilt
+- mutation: the refusal text says "left alone" for "left untouched" -> `test-production-guard.test.ts` refusal text tests and `test-coverage.test.ts` production-busy test red, reverted
+- mutation: `assertTestProductionName` widened to `/^EXECMCPTMP/` -> `interop-namespace-fixture.test.ts` "the Story 40.3 fixture helpers refuse a name ..." red, reverted
+- mutation: the coverage description names `ExecuteMCPv2.REST.Coverage` -> `test-coverage.test.ts` description pin (`executemcp(?!v2 service)`) red, reverted
+- mutation: the dev README sentence "treated as that run's own and is stopped and restarted by the test, whoever started it" reworded -> `story-40-3-doc-claims.test.ts` guard-section pin red, reverted
+- mutation: the name guard of `SetInstalledNamespace` (`If pName '? 1"EXECMCPTMP"1.N1U`) replaced by `If 0` -> gate row 13b red (the answer was `refused: namespace NOTASCRATCHNAME does not exist`, the existence guard having held), reverted
+
+**Verification run record (implement stage, 2026-10-18, IRIS 2026.2 build 221U, `default` localhost:52773).**
+
+- OS: `ProductionGuardTest` total 11 of 11 Test* methods passed; `UnitTestTest` 6 of 6; `CoverageJobTest` 31 of 31; `CoverageSourceTest` 13 of 13 (one class per call, totals equal the counts, Rule #35).
+- `pnpm gen:bootstrap` twice: `BOOTSTRAP_VERSION` `06b8b83fc319` to `9ce1a489469d`, 35 classes, the second run byte-identical (`cmp`). Shared then rebuilt from scratch (dist and `tsconfig.tsbuildinfo` deleted, DW-591), then dev, admin, interop, ops, data, client-config and all.
+- shared: `refusals.test.ts` and `bootstrap.test.ts` pass; full suite 80 files, 2066 tests. dev: the listed files pass; full suite 68 files, 1639 tests. admin 498, interop 670, ops 350, data 165, client-config 514 tests, and `build`, `lint` and `type-check` of every package green (shared's one pre-existing lint warning, an unused disable directive, is not from this story).
+- all: `story-40-3-doc-claims`, `story-40-2-doc-claims`, `story-40-1-doc-claims`, `tools-list-snapshot`, `live-gate-roster`, `story-39-1-gate-guards`, `changelog-bootstrap-move`, `interop-namespace-fixture` (31 tests) and `data-policy-scope` pass; with the live `ENV` the 57 offline files (928 tests) and the 35 gate files pass in four calls: the Story 40.3 gate 15 of 15, none skipped; 40.1 gate 25; 40.1 QA 12; 40.2 gate 16; 40.2 QA 26; 39.2 gate 17 passed and its one design skip (`CAPTURE`); the other 29 gate files 148, 454 (three design skips) and 157 tests.
+- `pnpm gen:governance-baseline:check`: 141 frozen keys all present (baseline files untouched). `pnpm measure:tools-payload` equals the README rows (dev 94,930 / 44,353 / 94,930 bytes). `node scripts/check-epics-sync.mjs`: OK. `pnpm gen:tools-list-snapshot:check`: OK after `--force`, which changed `capturedAt` and the two descriptions only.
+- Raw route time (gate row 12, three runs: 6, 6, 6 ms; first run 6, 7, 7 ms): a plain target 6 ms, a TestProduction target with A Stopped 6 ms, with Other running 6 ms; each under the 2 s read budget.
+- After every armed run: the gate's `afterAll` asserted `leftovers` for A and B `[]` (no namespace, database, mapping, process or InstalledNamespace node), `iris_doc_list` (HSCUSTOM, `Story403` and `Story391Fixture`, generated included) empty and the monitor idle; checked again by hand afterwards (no `EXECMCPTMP403*` namespace or database listed; no `Story403`, `Story391Fixture` or `Probe403` document).
+
+**Verification run record (review pass, 2026-10-18, after the last patch).**
+
+- OS, one class per call: `ProductionGuardTest` 11 of 11, `UnitTestTest` 6 of 6, `CoverageJobTest` 31 of 31, `CoverageSourceTest` 13 of 13. `pnpm gen:bootstrap` twice: `BOOTSTRAP_VERSION` stays `9ce1a489469d`, 35 classes, `bootstrap-classes.ts` byte-identical both times; shared then rebuilt from scratch.
+- Armed (`ENV`): the Story 40.3 gate 19 of 19, none skipped (rows 1 to 15 plus 13b, 14b, 14c and 15b); 40.1 gate 25; 40.1 QA 12; 40.2 gate 16; 40.2 QA 26; 39.2 gate 17 passed and its one design skip. `@iris-mcp/all`: the 58 non-gate files (1,006 tests) and the 34 gate files, in four calls, all passed.
+- `build`, `test`, `lint` and `type-check` of shared (2,066 tests; the one lint warning predates the story), dev (1,639), admin (498), interop (670), ops (350), data (165) and client-config (514) all exit 0. `pnpm gen:tools-list-snapshot:check` OK (115 entries). `pnpm gen:governance-baseline:check` OK (141 frozen keys present; baseline files untouched). `pnpm measure:tools-payload` equals the README rows. `node scripts/check-epics-sync.mjs` OK.
+- Raw route time (gate row 12): 8 ms plain target, 7 ms TestProduction target with A Stopped, 6 ms with Other running; each under the 2 s read budget.
+- After the armed runs: no `EXECMCPTMP403*` namespace or database is listed; `iris_doc_list` (HSCUSTOM, `Story403` and `Story391Fixture`, generated included) is empty; `^IRIS.TempExecuteMCPv2Coverage("session")` is unset; the gate's `afterAll` asserted `leftovers` for A and B `[]` (InstalledNamespace node included) and the monitor idle on every run, including the mutation runs.
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** `iris_execute_tests` and `iris_test_coverage` now ask one IRIS-side TestProduction guard, taken under Ens's lifecycle lock (`^Ens.Runtime`), before anything runs. A run that includes a `%UnitTest.TestProduction` test is refused with the new code `PRODUCTION_BUSY` while a production other than the tests' own runs in the namespace, or when the state cannot be read. Nothing is queued or run, and that production is left untouched. A run with no TestProduction test is unchanged, and a 404 from the new route (`GET /dev/test/production`) runs as before. `BOOTSTRAP_VERSION` moved `06b8b83fc319` to `9ce1a489469d` (35 classes). No tool, action, key or preset row was added, and `iris_execute_tests` and `iris_test_coverage` keep their default states (enabled, DEFAULT-DISABLED).
+
+**Files changed.**
+- IRIS: `src/ExecuteMCPv2/REST/UnitTest.cls` (the guard, the route entry, the pure `GuardOutcome`), `REST/Coverage.cls` (the guard call and the `production-busy` outcome), `REST/Dispatch.cls` (the route), `Tests/ProductionGuardTest.cls` (new, 11 tests); `packages/shared/src/bootstrap-classes.ts` (regenerated).
+- TypeScript: `packages/shared/src/refusals.ts` (`PRODUCTION_BUSY`), `packages/iris-dev-mcp/src/tools/test-production-guard.ts` (new: the read, the 404 rule, the one refusal builder), `execute.ts` and `test-coverage.ts` (the wiring and the description sentence).
+- Tests: `test-production-guard.test.ts` (new), the mock plumbing in `execute.test.ts`, the tightened description pin in `test-coverage.test.ts`, `refusals.test.ts`; in `@iris-mcp/all` the fixture methods and their roster case, `testproduction-fixture.ts`, the Story 40.3 gate (19 tests) and `story-40-3-doc-claims.test.ts`, the roster and session-gate comments, and the regenerated `tools-list-snapshot.json`.
+- Docs: dev README, root README, shared README, `tool_support.md`, `CHANGELOG.md` (new top section) and `.changeset/story-40-3-testproduction-runs.md`.
+
+**Review findings.** 39 findings from four layers: high 0, medium 6, low 26, false 7. Patches applied (20 rows, 6 root causes): gate rows 14b and 14c (the definition path of `ResolveTest`: a stale compiled class, an inherited `PRODUCTION`), row 15b (the exception branch of the guard, with the lock released), row 12 additions (an unswitchable namespace; a method-level run whatever the method), row 13b (the fixture methods refuse non-scratch names); the limits docs now say that a same-named running production is "run over" and that a non-404 guard failure fails every run; the coverage-description pin tightened to `executemcp(?!v2 service)`; 15 `mutation:` lines written in this pass for the new and the previously unrecorded pinning tests. Deferred: none. Rejected with reasons (19 rows): spec-bound behavior (the 404 run unguarded with no signal, the unswitchable-namespace `proceed`, the refusal fields and recovery text, a same-named production as "own"), unreachable or theoretical cases (the 32-class cap, a stranded node, the unreachable `ProductionGuard` outer Catch), documented residuals (the decision-to-start window, the residue oracle ignoring work-queue workers) and cosmetic items (`capturedAt`, two sentences in the guard sentence). Coverage-path compiled-only resolution (finding 22) is not pinned by a row; reopen if a coverage run is refused for a class that is not compiled.
+
+**Follow-up review recommendation:** `true` (two medium root causes were patched: the definition path of `ResolveTest`, and the exception branch of the guard). Unverified risk: the patch-pass additions (gate rows 13b, 14b, 14c, 15b and the row 12 calls, the `Story403.StaleTest`/`BaseTest`/`InheritTest` sources, and the new limits text and doc pins) have been through mutation checks and an armed run, but not through an independent review layer.
+
+**Verification.** See the two verification run records in `## Verification` and the mutation lines (33 entries from both passes: 18 from the implement pass and 15 from the review pass, each applied, observed red and reverted).
+
+**Residual risks.** The window between the decision and the test's own start in another process; a run against a server without the guard route is unguarded; a production already running under a name a test declares is stopped and restarted by the test; a cancelled, killed or erroring TestProduction run leaves its production running; privileges verified under `_SYSTEM` only. `ProductionGuard` is live in HSCUSTOM on the shared instance (the spec's `iris_doc_load` loop).

@@ -31,6 +31,8 @@ export const REFUSAL_CODES = {
   DATA_POLICY_BLOCKED: "DATA_POLICY_BLOCKED",
   /** An instance-wide monitor session is active, so a run that needs the monitor was not started. */
   MONITOR_BUSY: "MONITOR_BUSY",
+  /** A run that includes %UnitTest.TestProduction tests was not started because a different production runs in the namespace. */
+  PRODUCTION_BUSY: "PRODUCTION_BUSY",
 } as const;
 
 /** One of the {@link REFUSAL_CODES} values. */

@@ -55,6 +55,12 @@ import {
   type CoverageVerdict,
   type SourceTotals,
 } from "./coverage-report.js";
+import {
+  TEST_PRODUCTION_GUARD_SENTENCE,
+  productionBusyRefusal,
+  type ProductionGuardResult,
+  type ProductionGuardTest,
+} from "./test-production-guard.js";
 
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
@@ -151,9 +157,14 @@ export interface CoverageRun {
 
 /** The result of the Start route: a run record plus the outcome, or a refusal that holds no run. */
 type StartResult = Partial<CoverageRun> & {
-  outcome: "started" | "busy" | "failed";
+  outcome: "started" | "busy" | "failed" | "production-busy";
   owner?: "suite" | "foreign";
   error?: string;
+  /** `production-busy` only: the TestProduction guard's raw fields (Story 40.3). */
+  testProductions?: ProductionGuardTest[];
+  production?: string;
+  state?: string;
+  stateCode?: number;
 };
 
 // -- Coverage arithmetic (AD-12: the rule and the arithmetic live here) ----------
@@ -843,6 +854,22 @@ function busyRefusal(start: StartResult): ToolResult {
 }
 
 /**
+ * The TestProduction guard's `busy` decision carried by a `production-busy` Start outcome (Story 40.3): the
+ * outcome holds the guard's raw fields, which {@link productionBusyRefusal} turns into the one shared refusal.
+ */
+function guardFromStart(start: StartResult, ns: string): ProductionGuardResult {
+  return {
+    decision: "busy",
+    namespace: start.namespace ?? ns,
+    testProductions: start.testProductions ?? [],
+    ...(start.production !== undefined ? { production: start.production } : {}),
+    ...(start.state !== undefined ? { state: start.state } : {}),
+    ...(start.stateCode !== undefined ? { stateCode: start.stateCode } : {}),
+    ...(start.error !== undefined ? { error: start.error } : {}),
+  };
+}
+
+/**
  * Handler factory (the testability seam of `createExecuteTestsHandler`): {@link testCoverageTool}'s `handler` is
  * `createTestCoverageHandler()` with the real clock; tests inject a deterministic fake.
  *
@@ -876,6 +903,7 @@ export function createTestCoverageHandler(clock: TestClock = realClock): ToolDef
       const start = startResponse.result;
 
       if (start.outcome === "busy") return busyRefusal(start);
+      if (start.outcome === "production-busy") return productionBusyRefusal(guardFromStart(start, ns));
       if (start.outcome === "failed") {
         const error = start.error ?? "The coverage run could not be started.";
         return start.coverageRunId !== undefined
@@ -953,6 +981,7 @@ export const testCoverageTool: ToolDefinition = {
     "Shared-instance guard: one coverage run at a time instance-wide. While any Line-by-Line or PERFMON session is " +
     "running (this tool's own, or anyone else's), the call is refused with code MONITOR_BUSY and owner \"suite\" " +
     "or \"foreign\"; nothing is started and a foreign session is never touched. " +
+    TEST_PRODUCTION_GUARD_SENTENCE + " " +
     "Only the process that runs the tests is measured (and the suite's own supervisor process, which runs only " +
     "the suite's own classes, so they count only if you list them), so code that runs in processes the tests " +
     "start is not counted. Coverage is INT-line coverage of the listed classes' routines, including the code the compiler " +

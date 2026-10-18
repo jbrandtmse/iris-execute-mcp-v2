@@ -221,7 +221,7 @@ const gateTestFiles = [
   // Story40Q.* inside Q, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-40-0-qa-live-gate.test.ts",
   // Story 40.1: `iris_test_coverage` and the `iris_test_status` `coverageRunId` companion on the BUILT iris-dev-mcp and iris-admin-mcp dists over real stdio JSON-RPC, with raw HTTP to the
-  // coverage routes. It, the QA gate below and the two Story 40.2 gates (which follow them) are the only gates that start Line-by-Line sessions (the files run serially): it starts each row with the monitor idle and ends each row asserting it is idle, and
+  // coverage routes. It, the QA gate below, the two Story 40.2 gates and the Story 40.3 gate (which follow them) are the only gates that start Line-by-Line sessions (the files run serially): it starts each row with the monitor idle and ends each row asserting it is idle, and
   // terminates a process only through the fixture's MayTerminate check. Writes EXECMCPTMP401A and EXECMCPTMP401B (their database files too), Story401.* inside A, and
   // ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-40-1-coverage-live-gate.test.ts",
@@ -244,6 +244,12 @@ const gateTestFiles = [
   // real stdio JSON-RPC. It is the fourth gate that starts Line-by-Line sessions (the files run serially), starts each row with the monitor idle and ends each row asserting it is idle with no ownership node, and terminates no
   // process. Writes EXECMCPTMP40U and EXECMCPTMP40V (their database files too), Story402.Qa* inside them, a temporary directory and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-40-2-qa-live-gate.test.ts",
+  // Story 40.3: the TestProduction guard of `iris_execute_tests` and `iris_test_coverage` on the BUILT iris-dev-mcp, iris-admin-mcp and iris-interop-mcp dists over real stdio JSON-RPC, with raw HTTP to the
+  // guard route and the production status route. It runs `%UnitTest.TestProduction` tests and starts productions ONLY in EXECMCPTMP403A (it stops each one it started), refuses while another production runs and
+  // leaves that production untouched, and reads the same decision on the coverage path. Row 11 runs one coverage run, so it is the fifth gate that starts a Line-by-Line session (the files run serially): it starts
+  // each row with the monitor idle and ends each coverage row asserting it is idle with no ownership node. Writes EXECMCPTMP403A (with the one node ^%SYS("Ensemble","InstalledNamespace","EXECMCPTMP403A"), which it
+  // clears before it removes the namespace) and EXECMCPTMP403B (their database files too), Story392.Operation and Story403.* inside A, Story403.* inside B, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
+  "src/__tests__/story-40-3-testproduction-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup
