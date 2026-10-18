@@ -131,7 +131,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **Frozen-baseline tools.** An `action` enum is never added to a frozen-baseline tool, because that renames its key. A new operation goes on a companion tool instead.
   - **Annotations.** Annotations follow the MCP definitions. "Destructive" means the tool can delete, or irreversibly overwrite, existing state.
     - New tools and new actions declare all four hints truthfully, independently of `mutates` and `defaultEnabled`.
-    - An existing tool's hint changes only through a sanctioned AD-15 change. Known divergences: `iris_sql_execute`, `iris_execute_command` and `iris_doc_put` declare `destructiveHint: false`; `iris_execute_tests` declares `readOnlyHint: true` (DW-498).
+    - An existing tool's hint changes only through a sanctioned AD-15 change. Known divergences: `iris_sql_execute`, `iris_execute_command` and `iris_doc_put` declare `destructiveHint: false`. (`iris_execute_tests`' `readOnlyHint: true` and `idempotentHint: true` were corrected to false in Story 40.4, DW-498. No write-classified key's tool now declares `readOnlyHint: true`, and a reverse-direction pin keeps it so.)
     - Hand-curated classifications are cross-checked mechanically against `readOnlyHint`.
 
 ### AD-5 — The governance baseline is frozen [ADOPTED] (D3, H1; Rules #20, #23 and #25)
@@ -310,6 +310,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
       - `iris_production_logs` and `iris_message_diagram` withhold message-derived text under `block`;
       - `iris_message_body` renders character-stream bodies under `allow`;
       - the message-search statements carry an index hint, which changes the plan only, never results.
+    - **Story 40.4** (orchestrator decisions #62 and #63): `iris_execute_tests` now declares `readOnlyHint: false` and `idempotentHint: false` (the listed annotation correction, DW-498). The `deploy-and-test-class` prompt gains an optional coverage step and a `PRODUCTION_BUSY` note, and its description gains one clause; its name, title and arguments are unchanged.
     - **Story 40.3** (orchestrator decision #56): `iris_execute_tests` and `iris_test_coverage` refuse a run that contains `%UnitTest.TestProduction` tests while a different production runs in the namespace (`PRODUCTION_BUSY`). Before this, such a run silently stopped the other production. A run with no TestProduction test, a run on a server without the ExecuteMCPv2 service (the guard route answers 404), and a run in a namespace that cannot see the ExecuteMCPv2 classes (decision #60) behave exactly as before; the last two are unguarded, and the descriptions say so. A method-level target whose method part holds `;`, `,` or `^` is now refused as malformed (decision #61). The test runner reads those characters as "more classes", "another spec" and "run this setup code", so `A:TestX;B` no longer runs two classes.
     - **Story 40.0** (orchestrator decisions #36 and #38, made under the same delegation):
       - the `trace-message-flow` prompt tells agents, under `block`, to report the reason for withheld Event Log and diagram error text and never read it another way (DW-587);
@@ -757,6 +758,6 @@ ipm/                    # IPM module manifest (generated from Story 42.4)
   - the policy for a bad release (fix-forward or `npm deprecate`) and a `SECURITY.md` disclosure channel (Story 42.5);
   - the version policies for the extension, the plugin and IPM (Stories 42.7, 42.8 and 42.4);
   - the first-publish route under npm trusted publishing (Story 42.5). A staged publish creates a `0.0.0-stage` placeholder, which conflicts with D2, so the choice goes to the Lead.
-- **Annotation divergences of existing tools** (AD-4). The Epic 38 gate routes them to one ledger entry with an owner.
+- **Annotation divergences of existing tools** (AD-4). The Epic 38 gate routes them to one ledger entry with an owner. The `iris_execute_tests` divergence was closed in Story 40.4 (DW-498); the `destructiveHint: false` divergences remain.
 - **Development toolchain staleness** (Vitest 2, TypeScript 5.9, Turborepo, pnpm 9). Revisit at the Epic 42 gate. Story 42.5 pins whatever the release path needs.
 - **Declined on 2026-10-14:** G8, G17, G41, G45 and G47. The reasons are in the research gap register, and reopening one needs a Project Lead decision.
