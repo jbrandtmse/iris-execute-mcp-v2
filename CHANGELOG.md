@@ -34,8 +34,8 @@ and `REST/Coverage.cls` changed (the bootstrapped service stays at 35 classes).
   baseline, with no `defaultEnabled` marker. Enable it with `IRIS_GOVERNANCE={"global":{"iris_test_status:export":true}}`. It
   takes the run's `coverageRunId` and an absolute `outputPath` (the path guard of `iris_doc_export`, now shared: absolute, no `..`
   segment, ending `.xml`), and an optional `sourceRoot`. Only a completed run with complete coverage is written; any other run is
-  an error that names its status and writes nothing, and so is a completed run in which no class has a class-source result (an
-  empty file would read to a CI tool as 100% covered). CI tools lay the reported line numbers over the repository's own `.cls`
+  an error that names its status and writes nothing, and so is a completed run in which no class has a class-source result or no
+  class has an executable class line (an empty file would read to a CI tool as 100% covered). CI tools lay the reported line numbers over the repository's own `.cls`
   files, which must be in the layout IRIS stores (as `iris_doc_export` writes them). The parent directories are created and an
   existing file is overwritten. The
   document validates against the published `coverage-04.dtd`. `iris_test_coverage` writes no file, and the annotations of both

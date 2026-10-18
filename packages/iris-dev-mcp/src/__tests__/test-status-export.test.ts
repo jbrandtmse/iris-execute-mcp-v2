@@ -65,7 +65,7 @@ describe("iris_test_status export: the file (matrix rows 9 and 10, AC-4)", () =>
   it("writes the golden document, creating the missing parent directories, and returns the poll result plus cobertura", async () => {
     const root = scratch();
     const target = path.join(root, "x", "y", "coverage.xml");
-    const { ctx } = exportCtx([STORY402_RUN]);
+    const { http, ctx } = exportCtx([STORY402_RUN]);
     const result = await testStatusTool.handler(exportArgs(target), ctx);
 
     expect(result.isError).toBeUndefined();
@@ -81,7 +81,11 @@ describe("iris_test_status export: the file (matrix rows 9 and 10, AC-4)", () =>
     const text = textOf(result as never);
     expect(text).toContain("Coverage run 645 completed");
     expect(text.split("\n").pop()).toBe(`Cobertura XML written to ${path.resolve(target)} (${readFileSync(target).length} bytes).`);
-    // The write is the only side effect on IRIS: two reads of the run and the test-result queries, nothing else.
+    // The file is the only side effect: IRIS saw reads of the run record and the test-result queries, and nothing was posted
+    // to a coverage route (no start, no cancel).
+    expect(http.get.mock.calls.length).toBeGreaterThan(0);
+    expect(http.get.mock.calls.every(([route]) => /\/dev\/test\/coverage\?id=645$/.test(String(route)))).toBe(true);
+    expect(http.post.mock.calls.filter(([route]) => String(route).includes("/dev/test/coverage"))).toEqual([]);
     expect(readdirSync(path.dirname(target))).toEqual(["coverage.xml"]);
   });
 
@@ -179,6 +183,16 @@ describe("iris_test_status export: a run that cannot be exported writes nothing 
       /no class has a class-source result/,
     );
     expect(unmappable).toContain("Recompile the classes and run the tests again.");
+  });
+
+  it("a completed run whose classes have a class-source result but no executable class line is refused: a file of no lines would read as 100% covered", async () => {
+    const unmapped = (STORY402_RUN.sources ?? []).map((source) => ({
+      ...source,
+      methods: source.methods.map((method) => (method.intLines ? { ...method, intLines: method.intLines.map(() => 0) } : method)),
+    }));
+    const text = await refused({ ...STORY402_RUN, sources: unmapped }, /no class has an executable class line/);
+    expect(text).toContain("a CI tool would read it as fully covered");
+    expect(text).toContain("recompile it (a forced compile when only comments changed) and run the tests again.");
   });
 
   it("a completed run that recorded no test run says no test method ran", async () => {

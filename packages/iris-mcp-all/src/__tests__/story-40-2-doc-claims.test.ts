@@ -121,6 +121,7 @@ describe("Story 40.2: the Development README", () => {
     expect(entry).toContain("**no class has a class-source result**");
     expect(entry).toContain("the advice to recompile the classes and run the tests again");
     expect(entry).toContain("would read to a CI tool as 100% covered");
+    expect(entry).toContain("so is a completed run in which **no class has an executable class line**");
     expect(entry).toContain("**CI tools lay the reported line numbers over your repository's own `.cls` files**");
     expect(entry).toContain("in the layout IRIS stores (for example as `iris_doc_export` writes them), or the numbers can be offset");
   });
@@ -206,7 +207,7 @@ describe("Story 40.2: the CHANGELOG section and the changeset", () => {
     expect(text).toContain("a failing verdict is `isError: false`");
     expect(text).toContain("**Class line numbers are those of the document `iris_doc_get` returns for the class**");
     for (const reason of ["not-up-to-date", "not-compiled", "unavailable"]) expect(text, reason).toContain(`\`${reason}\` (`);
-    expect(text).toContain("a completed run in which no class has a class-source result");
+    expect(text).toContain("a completed run in which no class has a class-source result or no class has an executable class line");
     expect(text).toContain("CI tools lay the reported line numbers over the repository's own `.cls` files");
     expect(text).toContain("Earliest IRIS version verified: 2026.2 build 221U");
     expect(text).toContain("(DW-598)");

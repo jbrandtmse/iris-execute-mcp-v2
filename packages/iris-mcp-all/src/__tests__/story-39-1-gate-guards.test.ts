@@ -74,6 +74,7 @@ const GATES: readonly Gate[] = [
   { file: "story-40-1-coverage-live-gate.test.ts", tag: "story-40-1-coverage-live-gate", story: "Story 40.1" },
   { file: "story-40-1-qa-live-gate.test.ts", tag: "story-40-1-qa-live-gate", story: "Story 40.1 QA" },
   { file: "story-40-2-coverage-reports-live-gate.test.ts", tag: "story-40-2-coverage-reports-live-gate", story: "Story 40.2" },
+  { file: "story-40-2-qa-live-gate.test.ts", tag: "story-40-2-qa-live-gate", story: "Story 40.2 QA" },
 ];
 
 /** The vitest entry point this package's tests run under. */

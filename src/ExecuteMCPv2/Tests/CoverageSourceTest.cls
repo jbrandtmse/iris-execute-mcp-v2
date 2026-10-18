@@ -11,7 +11,8 @@ Class ExecuteMCPv2.Tests.CoverageSourceTest Extends %UnitTest.TestCase
 Parameter STALECLASS = "ExecuteMCPv2.Temp.Story402Stale";
 
 /// The id of the fake run whose record the <code>RecordUnstoppedSession</code> tests write, far above any real run id. The
-/// session node of a fake run is written only while no session node exists, and is removed again.
+/// session node of a fake run is written only under the coverage start lock while no session node and no live run exist,
+/// and is removed again before the lock is released (see <method>StartLockWithNoRun</method>).
 Parameter FAKERUN = 990000003;
 
 Method OnAfterOneTest(testname As %String) As %Status
@@ -323,19 +324,27 @@ Method TestRecordUnstoppedSessionRewritesTheRunAndItsNode() As %Status
     Set tListed = $ListBuild("Pkg.A.1", "Pkg.B.1")
     Set tLoaded = $ListBuild("Pkg.A.1")
     Set ^IRIS.TempExecuteMCPv2Coverage("run", tId, "routineList") = tListed
-    Set tFree = ($Data(^IRIS.TempExecuteMCPv2Coverage("session")) = 0)
-    If tFree Set ^IRIS.TempExecuteMCPv2Coverage("session") = $ListBuild(tId, 100, 200, "2026-10-18T00:00:00.000Z", tListed)
-
-    Do ##class(ExecuteMCPv2.Coverage.Runner).RecordUnstoppedSession(tId, tLoaded, "The Line-by-Line session did not load routine Pkg.B.1 of the run's routine list.")
+    Set tFree = ..StartLockWithNoRun(.tLocked)
+    Do $$$AssertTrue(tFree, "no coverage run is active and no coverage session node exists (run this class when no coverage run is active)")
+    Set tNode = ""
+    Set tError = ""
+    Try {
+        If tFree {
+            Set ^IRIS.TempExecuteMCPv2Coverage("session") = $ListBuild(tId, 100, 200, "2026-10-18T00:00:00.000Z", tListed)
+            Do ##class(ExecuteMCPv2.Coverage.Runner).RecordUnstoppedSession(tId, tLoaded, "The Line-by-Line session did not load routine Pkg.B.1 of the run's routine list.")
+            Set tNode = $Get(^IRIS.TempExecuteMCPv2Coverage("session"))
+        }
+    } Catch ex {
+        Set tError = ex.DisplayString()
+    }
+    Do ..ReleaseStartLock(tLocked, tId)
+    If 'tFree Quit $$$OK
+    Do $$$AssertEquals(tError, "", "RecordUnstoppedSession ran without an error")
 
     Do $$$AssertEquals($Get(^IRIS.TempExecuteMCPv2Coverage("run", tId, "routineList")), tLoaded, "the run's routine list is the routines the session loaded")
     Do $$$AssertEquals($Get(^IRIS.TempExecuteMCPv2Coverage("run", tId, "sessionStarted")), 1, "the session is marked started, so it is released")
     Do $$$AssertEquals($Get(^IRIS.TempExecuteMCPv2Coverage("run", tId, "startError")), "The Line-by-Line session did not load routine Pkg.B.1 of the run's routine list. No test was run.", "the start error says no test was run")
-    If tFree {
-        Do $$$AssertEquals($Get(^IRIS.TempExecuteMCPv2Coverage("session")), $ListBuild(tId, 100, 200, "2026-10-18T00:00:00.000Z", tLoaded), "the ownership node that names the run lists what the session loaded")
-    } Else {
-        Do $$$LogMessage("The ownership node assertion was skipped: a coverage session node exists, and it belongs to a real run.")
-    }
+    Do $$$AssertEquals(tNode, $ListBuild(tId, 100, 200, "2026-10-18T00:00:00.000Z", tLoaded), "the ownership node that names the run lists what the session loaded")
     Quit $$$OK
 }
 
@@ -344,17 +353,48 @@ Method TestRecordUnstoppedSessionLeavesAnotherRunsNode() As %Status
 {
     Set tId = ..#FAKERUN
     Set tListed = $ListBuild("Pkg.A.1", "Pkg.B.1")
+    Set tOther = $ListBuild(tId + 1, 100, 200, "2026-10-18T00:00:00.000Z", tListed)
     Set ^IRIS.TempExecuteMCPv2Coverage("run", tId, "routineList") = tListed
-    If $Data(^IRIS.TempExecuteMCPv2Coverage("session")) = 0 {
-        Set ^IRIS.TempExecuteMCPv2Coverage("session") = $ListBuild(tId + 1, 100, 200, "2026-10-18T00:00:00.000Z", tListed)
+    Set tFree = ..StartLockWithNoRun(.tLocked)
+    Do $$$AssertTrue(tFree, "no coverage run is active and no coverage session node exists (run this class when no coverage run is active)")
+    Set tNode = ""
+    Set tError = ""
+    Try {
+        If tFree {
+            Set ^IRIS.TempExecuteMCPv2Coverage("session") = tOther
+            Do ##class(ExecuteMCPv2.Coverage.Runner).RecordUnstoppedSession(tId, $ListBuild("Pkg.A.1"), "The Line-by-Line session did not load routine Pkg.B.1 of the run's routine list.")
+            Set tNode = $Get(^IRIS.TempExecuteMCPv2Coverage("session"))
+        }
+    } Catch ex {
+        Set tError = ex.DisplayString()
     }
-    Set tNode = $Get(^IRIS.TempExecuteMCPv2Coverage("session"))
-    Do $$$AssertNotEquals($ListGet(tNode, 1), tId, "the node names another run")
+    Do ..ReleaseStartLock(tLocked, tId + 1)
+    If 'tFree Quit $$$OK
+    Do $$$AssertEquals(tError, "", "RecordUnstoppedSession ran without an error")
 
-    Do ##class(ExecuteMCPv2.Coverage.Runner).RecordUnstoppedSession(tId, $ListBuild("Pkg.A.1"), "The Line-by-Line session did not load routine Pkg.B.1 of the run's routine list.")
-
-    Do $$$AssertEquals($Get(^IRIS.TempExecuteMCPv2Coverage("session")), tNode, "the other run's node is untouched")
+    Do $$$AssertEquals(tNode, tOther, "the other run's node is untouched")
     Do $$$AssertEquals($Get(^IRIS.TempExecuteMCPv2Coverage("run", tId, "routineList")), $ListBuild("Pkg.A.1"), "the run's own record is still rewritten")
+    Quit $$$OK
+}
+
+/// Take the coverage start lock, so that no coverage run starts while a test holds a fake run's session node, and return
+/// whether the instance has no coverage run: no session node and no live run (whose runner could write one). Only then may a
+/// test write a fake node; the real ownership node of a run is never written or removed by a test. <var>pLocked</var> says
+/// whether the lock is held; the caller releases it with <method>ReleaseStartLock</method>.
+Method StartLockWithNoRun(Output pLocked As %Boolean) As %Boolean
+{
+    Lock +^IRIS.TempExecuteMCPv2Coverage("start"):10
+    Set pLocked = $Test
+    If 'pLocked Quit 0
+    Quit ($Data(^IRIS.TempExecuteMCPv2Coverage("session")) = 0) && (##class(ExecuteMCPv2.Coverage.Job).LiveRunId() = "")
+}
+
+/// Remove the fake session node that names run <var>pNodeId</var>, if one is there, then release the start lock when
+/// <var>pLocked</var> says it is held (see <method>StartLockWithNoRun</method>).
+Method ReleaseStartLock(pLocked As %Boolean, pNodeId As %Integer) As %Status
+{
+    If pLocked && ($ListGet($Get(^IRIS.TempExecuteMCPv2Coverage("session")), 1) = pNodeId) Kill ^IRIS.TempExecuteMCPv2Coverage("session")
+    If pLocked Lock -^IRIS.TempExecuteMCPv2Coverage("start")
     Quit $$$OK
 }
 

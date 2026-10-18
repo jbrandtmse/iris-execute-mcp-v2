@@ -19,7 +19,7 @@
  *  - Row 13b: the same when every listed routine disappears, so the session monitors none and only its scope can prove it.
  *  - Row 14: a terminal run record at the largest size a run can hold is read in well under 2 seconds.
  *
- * This gate and the Story 40.1 gates are the only ones that start Line-by-Line sessions (the package runs its files serially,
+ * This gate, the Story 40.1 gates and the Story 40.2 QA gate are the only ones that start Line-by-Line sessions (the package runs its files serially,
  * `fileParallelism: false`). It starts every row with the monitor idle: when a session it did not start is active, an armed gate fails
  * and names it, an unarmed one skips, and the session is left alone. No production is started.
  *

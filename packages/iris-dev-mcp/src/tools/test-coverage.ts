@@ -775,6 +775,13 @@ export async function exportCoverageRun(
           `Recompile the classes and run the tests again.`,
       );
     }
+    if (document.lines === 0) {
+      return refuse(
+        `no class has an executable class line, so the file would hold no lines and a CI tool would read it as fully ` +
+          `covered. List classes whose methods have ObjectScript code; if a class changed since it was compiled, recompile it ` +
+          `(a forced compile when only comments changed) and run the tests again.`,
+      );
+    }
     let written: { outputPath: string; bytes: number };
     try {
       written = await writeCoberturaFile(args.outputPath, document.xml);

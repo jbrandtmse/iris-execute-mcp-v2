@@ -303,6 +303,19 @@ describe("the text (AC 40.2.2)", () => {
     );
   });
 
+  it("a record with an empty class-source map gives each measured class the reason unavailable, totals of nothing and a FAIL target line that says so", () => {
+    const run = runWith({ sources: [] });
+    const section = buildCoverageSection(run);
+    expect(section.classes.map((entry) => entry.source)).toEqual([{ reason: "unavailable" }, { reason: "unavailable" }]);
+    expect(section.source).toEqual({ executableLines: 0, coveredLines: 0, percent: null });
+    const text = (coverageRunEnvelope({ run, summary: ONE_PASSED }).content[0] as { text: string }).text.split("\n");
+    expect(text.slice(1, 4)).toEqual([
+      "Coverage target 90%: FAIL (no class-source coverage); failing: Story402.Fixture (unavailable), Story402.Layout (unavailable), Story402.Missing (not-compiled)",
+      "Story402.Fixture: no class-source coverage (unavailable)",
+      "Story402.Layout: no class-source coverage (unavailable)",
+    ]);
+  });
+
   it("a cancelled run has the class-source lines but no target line", () => {
     const text = (coverageRunEnvelope({ run: runWith({ status: "cancelled", reason: "cancel" }), summary: ONE_PASSED }).content[0] as {
       text: string;

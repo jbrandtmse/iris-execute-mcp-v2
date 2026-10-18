@@ -1773,7 +1773,8 @@ result is `isError: true`, names the status, and nothing is written (a run that 
 for it with `poll`; a finished one, to run the tests again). A completed run in which **no class has a class-source result**
 (every class is `not-up-to-date`, `not-compiled` or `unavailable`, or the instance returned an empty class-source map) is refused
 too, with `isError: true` and the advice to recompile the classes and run the tests again: a file with no lines would read to a CI
-tool as 100% covered. **CI tools lay the reported line numbers over your repository's own `.cls` files**, so those files must be
+tool as 100% covered. For the same reason, so is a completed run in which **no class has an executable class line** (for example,
+every listed class has only method generators, non-ObjectScript methods or methods that compile to no INT code). **CI tools lay the reported line numbers over your repository's own `.cls` files**, so those files must be
 in the layout IRIS stores (for example as `iris_doc_export` writes them), or the numbers can be offset. The document is
 deterministic for a run: the timestamp is
 the run's `finishedAt` in epoch milliseconds, each `filename` is the path `iris_doc_export` writes the class to (for example
