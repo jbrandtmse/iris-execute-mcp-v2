@@ -53,3 +53,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-18T07:37:35Z	Story 40.1	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=1248 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
 2026-10-18T07:37:37Z	Story 40.1	committed	sha=fbae70c code_sha=fd3d2b8 build_sha=da6d495 submodules= ci=none run=none branch=epic40 pushed=origin/epic40 verified=merge-base amendments=ARCHITECTURE-SPINE.md:AD-16,AD-27,epics.md:Story-40.2-DW-595,DW-596,DW-598
 2026-10-18T07:37:37Z	Story 40.1	story_cycle	plan_to_commit_min=446 implement_passes=3 reviews=3 rework=1 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-18T07:37:50Z	Story 40.2	stage_spawned	stage=plan spawn_at=2026-10-18T07:37:50Z model=claude-opus-5-5 agent_name=40-2-coverage-reports-and-targets-plan-1 cycle_iteration=1
