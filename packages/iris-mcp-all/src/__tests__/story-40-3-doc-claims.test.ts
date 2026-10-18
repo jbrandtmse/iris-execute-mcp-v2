@@ -125,6 +125,15 @@ describe("Story 40.3: the Development README", () => {
       "So does a run in a namespace that holds its own copy of an earlier build of the package, one without `ExecuteMCPv2.REST.UnitTest:ProductionGuard`.",
     );
   });
+
+  it("the iris_execute_tests method-level validation names the method segment that holds ';', ',' or '^'", () => {
+    const start = devReadme.indexOf("<summary><strong>iris_execute_tests</strong>");
+    const entry = squash(devReadme.slice(start, devReadme.indexOf("</details>", start)));
+    expect(entry).toContain("So does a method segment that holds `;`, `,` or `^` (Story 40.3)");
+    expect(entry).toContain(
+      "the run would include classes the TestProduction guard never inspected, or code that is not a test. Nothing is asked or queued.",
+    );
+  });
 });
 
 describe("Story 40.3: the refusal code is documented where the other codes are", () => {
@@ -239,6 +248,8 @@ describe("Story 40.3: the CHANGELOG section and the changeset", () => {
     expect(text).toContain("`iris_test_coverage` is refused there instead, with an error and nothing started.");
     expect(text).toContain("**`iris_test_coverage` refuses a `target` with an empty package or class part.**");
     expect(text).toContain("A target such as `:` or `:TestSomething` is rejected by the tool's schema and by the service's request validation, before any namespace switch, run id, run record, monitor session or production action.");
+    expect(text).toContain("**`iris_execute_tests` refuses a method-level target whose method segment holds `;`, `,` or `^`.**");
+    expect(text).toContain("Such a target is now the usual `Malformed method-level target` result, before the guard is asked and before anything is queued");
     expect(text).toContain("A production already running under a name one of the run's tests declares is treated as that run's own and is stopped by the run, whoever started it: by its own test, which restarts it for the test, or by another TestProduction test of the same run.");
     expect(text).toContain("is force-stopped and cleaned with `CleanProduction(1)`, which also deletes its persistent application data, and the run leaves it Stopped");
     expect(text).toContain("On the coverage path those are the classes its runner runs, judged by their compiled classes");

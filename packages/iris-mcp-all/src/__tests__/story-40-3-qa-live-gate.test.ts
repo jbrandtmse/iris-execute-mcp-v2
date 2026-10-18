@@ -17,7 +17,9 @@
  *    the `Unknown` refusal: a run with no TestProduction test never takes the lock.
  *  - Q2: refusals of inputs the first gate does not send: spaces around the method-level colon, a method that does not exist, a
  *    namespace in lower case. Each leaves the other production untouched with its items, and queues nothing in any of the five
- *    `%UnitTest_Result` tables. A class name in another letter case is not a test (today's "No tests found"), and runs nothing.
+ *    `%UnitTest_Result` tables. A class name in another letter case is not a test (today's "No tests found"), and runs nothing. A
+ *    method segment holding `;`, `,` or `^` (which the runner reads as more classes, more specs or setup code) is the malformed-target
+ *    result and queues nothing, so the TestProduction class it names does not stop the other production.
  *  - Q3: package discovery edges: an abstract base is not listed while its concrete subclass is; a package name that is only the
  *    prefix of another is not that package; a package that mixes plain and TestProduction tests runs whole when nothing else runs;
  *    an uncompiled test reached through two short-name `Extends` (an uncompiled class, then a compiled base) is refused.
@@ -478,6 +480,26 @@ describe("Story 40.3 QA: refusals leave the other production untouched, whatever
     expect(otherCase.structuredContent).toMatchObject({ total: 0, error: "No tests found for 'story403.passtest' at level 'class'" });
     expect(otherCase.structuredContent, "not a refusal").not.toHaveProperty("code");
     await expectUntouched(before, rowsBefore, "a class name in another letter case");
+    await stopAnyProduction();
+  }, 300000);
+
+  it("Q2b: a method segment holding ';', ',' or '^' is a malformed target that queues nothing: the runner would read ';' as more classes (here the TestProduction PassTest, which would stop Other) and '^' as setup code to run", async (testCtx) => {
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const { before, rowsBefore } = await otherRunning();
+    for (const target of [
+      "Story403.PlainTest:TestPlain;Story403.PassTest",
+      "Story403.PlainTest:TestPlain,Story403.PassTest",
+      "Story403.PlainTest:TestPlain^##class(Ens.Director).StopProduction()",
+    ]) {
+      const result = await executeTests(target, "method");
+      expect(result.isError, `${target}: ${allText(result)}`).toBe(true);
+      expect(result.structuredContent, target).toMatchObject({
+        total: 0,
+        error: `Malformed method-level target '${target}': the method segment after ':' must be one method name, without ';', ',' or '^'.`,
+      });
+      expect(result.structuredContent, `${target}: not a refusal`).not.toHaveProperty("code");
+      await expectUntouched(before, rowsBefore, target);
+    }
     await stopAnyProduction();
   }, 300000);
 });

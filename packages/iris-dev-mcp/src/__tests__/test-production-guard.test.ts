@@ -310,6 +310,38 @@ describe("iris_execute_tests and the guard (Story 40.3, matrix row 16)", () => {
     expect((emptyResult.content[0] as { text: string }).text).toContain("No test classes found in package 'No.Such'");
     expect(empty.calls.some((call) => call.path.startsWith(GUARD_PATH))).toBe(false);
   });
+
+  it("a method segment holding ';', ',' or '^' is malformed and reaches neither the guard nor the work queue (the runner would read it as more classes, more specs or setup code)", async () => {
+    // `%UnitTest.Manager` splits the spec the work queue writes (`:<class>:Test<method>`) on ',' into specs, the class part on
+    // ';' into classes, and a spec on '^' into setup code it runs with `do @...` (irislib/%UnitTest/Manager.cls); the guard asks
+    // only about the class before ':'.
+    for (const target of [
+      "Story403.PlainTest:X;Story403.PassTest",
+      "Story403.PlainTest:;Story403.PassTest",
+      "Story403.PlainTest:X,Story403.PassTest",
+      "Story403.PlainTest:X^##class(Ens.Director).StopProduction()",
+      "Story403.PlainTest: TestControl ; Story403.PassTest ",
+    ]) {
+      const h = harness(proceed);
+      const result = await createExecuteTestsHandler()({ target, level: "method" }, h.ctx);
+      expect(result.isError, target).toBe(true);
+      expect((result.content[0] as { text: string }).text, target).toContain(
+        `Malformed method-level target '${target}': the method segment after ':' must be one method name, without ';', ',' or '^'.`,
+      );
+      expect(h.calls, `${target}: no guard read, no ensure, no counter read, no /work`).toEqual([]);
+    }
+
+    // The control: one method name reaches the guard and is queued as that one method of that one class.
+    const control = harness(proceed);
+    const controlResult = await createExecuteTestsHandler()({ target: "Story403.PassTest:TestControl", level: "method" }, control.ctx);
+    expect(controlResult.isError).toBeUndefined();
+    expect(control.calls[0]?.path).toBe(`${GUARD_PATH}?target=Story403.PassTest%3ATestControl&level=method&namespace=USER`);
+    expect(control.calls.find((call) => call.method === "POST" && call.path.endsWith("/work"))?.body).toEqual({
+      request: "unittest",
+      tests: [{ class: "Story403.PassTest", methods: ["Control"] }],
+      console: false,
+    });
+  });
 });
 
 describe("the shipped guard runs only where the target namespace sees the classes it calls (AD-15)", () => {

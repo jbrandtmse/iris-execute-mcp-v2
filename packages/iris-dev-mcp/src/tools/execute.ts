@@ -928,7 +928,12 @@ export function createExecuteTestsHandler(clock: TestClock = realClock): ToolDef
         // single trailing ':' with an empty method part (also runs the
         // whole class unfiltered, guarded generically by the zero-result
         // check below on a genuine zero-match) — neither is "malformed" by
-        // this check, only >1 colon or an empty class segment are.
+        // this check, only >1 colon, an empty class segment, or a method
+        // segment holding ';', ',' or '^' are. The work queue writes the method
+        // into the test spec of %UnitTest.Manager:RunTest, which reads ',' as a
+        // list of specs, ';' as a list of classes and '^' as setup code to run:
+        // such a segment would run classes the TestProduction guard never
+        // inspected, or code that is not a test.
         const segments = target.split(":");
         if (segments.length > 2) {
           return zeroResultGuardResponse(
@@ -942,6 +947,11 @@ export function createExecuteTestsHandler(clock: TestClock = realClock): ToolDef
           );
         }
         const rawMethodName = segments.length > 1 ? segments[1] : undefined;
+        if (rawMethodName !== undefined && /[;,^]/.test(rawMethodName)) {
+          return zeroResultGuardResponse(
+            `Malformed method-level target '${target}': the method segment after ':' must be one method name, without ';', ',' or '^'.`,
+          );
+        }
         const methodName = rawMethodName !== undefined ? rawMethodName.trim() : undefined;
         const testEntry: { class: string; methods?: string[] } = { class: className };
         if (methodName) {

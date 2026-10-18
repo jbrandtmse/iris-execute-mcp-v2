@@ -1646,7 +1646,12 @@ a run's own index. Avoid submitting the same target concurrently.
 `ClassName:MethodName` target is trimmed and validated — more than one `:`
 separator, or an empty class segment before `:`, returns an explicit
 malformed-target error (distinct from the zero-result guard) instead of
-silently discarding part of the target or querying an empty class name. If
+silently discarding part of the target or querying an empty class name. So
+does a method segment that holds `;`, `,` or `^` (Story 40.3): the work queue
+writes it into `%UnitTest.Manager`'s test spec, which reads `;` as more
+classes, `,` as more specs and `^` as setup code to run, so the run would
+include classes the TestProduction guard never inspected, or code that is
+not a test. Nothing is asked or queued. If
 the method name you typed doesn't match what actually ran (the endpoint's
 `Test`-prefix-stripped filter is many-to-one — `Class:Validate` and
 `Class:TestValidate` both resolve to the same wire filter), the response
@@ -1685,9 +1690,9 @@ keeps no record of who started one, so a leftover cannot be told from a producti
 Limits, stated plainly. The guard needs the ExecuteMCPv2 service at the version that ships it; against a server whose service
 lacks it (the guard route answers 404) the run goes ahead unguarded, as before. So does a run in a namespace that cannot see the
 `ExecuteMCPv2` package (no `%ALL` package mapping, as after a manual setup): the guard cannot run there. So does a run in a
-namespace that holds its own copy of an earlier build of the package, one without
-`ExecuteMCPv2.REST.UnitTest:ProductionGuard`. The decision is taken under Ens's own lifecycle lock, but `%UnitTest.TestProduction` starts its production later, in the test process, so a
-production started by another process in between would still be stopped. A production that is already running under a name one
+namespace that holds its own copy of an earlier build of the package, one without `ExecuteMCPv2.REST.UnitTest:ProductionGuard`.
+The decision is taken under Ens's own lifecycle lock, but `%UnitTest.TestProduction` starts its production later, in the test
+process, so a production started by another process in between would still be stopped. A production that is already running under a name one
 of the run's tests declares is treated as that run's own and is stopped by the run, whoever started it: by its own test, which
 restarts it for the test, or by another TestProduction test of the same run. One that does not stop within the test's `MAXWAIT`
 is force-stopped and cleaned with `CleanProduction(1)`, which also deletes its persistent application data, and the run leaves it

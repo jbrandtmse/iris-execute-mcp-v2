@@ -46,6 +46,11 @@ and `REST/Dispatch.cls` changed (the bootstrapped service stays at 35 classes).
   rejected by the tool's schema and by the service's request validation, before any namespace switch, run id, run record,
   monitor session or production action. The runner reads such a spec as every compiled test class under `^UnitTestRoot`, which
   the TestProduction guard (it asks about the class part) cannot check. The advertised `tools/list` schema is unchanged.
+- **`iris_execute_tests` refuses a method-level target whose method segment holds `;`, `,` or `^`.** The work queue writes the
+  method into `%UnitTest.Manager`'s test spec, which reads `;` as more classes, `,` as more specs and `^` as setup code to run,
+  so `MyApp.Tests.PlainTest:TestX;MyApp.Tests.ProdTest` ran a class the TestProduction guard never inspected (it asks about the
+  class before `:`), and a `^` ran code that is not a test. Such a target is now the usual `Malformed method-level target`
+  result, before the guard is asked and before anything is queued; a method segment with one method name is unchanged.
 - **The suite never stops a production (orchestrator decision #58).** Ens keeps no record of who started a production, so a
   production that a failed, cancelled or killed TestProduction run left behind cannot be told apart from one someone started
   on purpose: it is refused and named like any other, and the caller stops it. The test's own production is run over, because
