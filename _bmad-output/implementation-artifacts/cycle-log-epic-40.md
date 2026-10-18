@@ -75,3 +75,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-18T13:41:13Z	Story 40.2	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=916 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
 2026-10-18T13:41:15Z	Story 40.2	committed	sha=92eea90 code_sha=1ae5353 build_sha=6b6216c submodules= ci=none run=none branch=epic40 pushed=origin/epic40 verified=merge-base amendments=ARCHITECTURE-SPINE.md:AD-16,epics.md:Story-40.4-DW-601,DW-602
 2026-10-18T13:41:15Z	Story 40.2	story_cycle	plan_to_commit_min=363 implement_passes=2 reviews=2 rework=1 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-18T13:41:32Z	Story 40.3	stage_spawned	stage=plan spawn_at=2026-10-18T13:41:32Z model=claude-opus-5-5 agent_name=40-3-testproduction-runs-plan-1 cycle_iteration=1
