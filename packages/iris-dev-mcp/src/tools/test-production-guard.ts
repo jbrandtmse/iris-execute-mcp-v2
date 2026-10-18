@@ -59,7 +59,8 @@ export interface ProductionGuardResult {
  *
  * @param ctx - The tool context; only its HTTP client is used.
  * @param namespace - The resolved target namespace.
- * @param target - The tool's `target`, as the caller gave it (a method-level `Class:Method` too).
+ * @param target - The target the run queues: the tool's `target` at package and class level, and at method level
+ *   the queued class and, when there is one, the trimmed method name (`Class[:Method]`).
  * @param level - The tool's `level`.
  * @returns The decision, or `undefined` when the route does not exist (HTTP 404: the IRIS-side classes predate
  *   the guard, or the service is not deployed), in which case the run goes ahead unguarded as it did before the

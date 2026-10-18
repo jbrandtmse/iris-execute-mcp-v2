@@ -910,6 +910,11 @@ export function createExecuteTestsHandler(clock: TestClock = realClock): ToolDef
     try {
       // Build the tests array for the Atelier async unittest request
       let tests: { class: string; methods?: string[] }[];
+      // What the TestProduction guard is asked about: the target the run queues. At package and class level that
+      // is `target` itself, which is what the queue reads. At method level it is the queued class and, when there
+      // is one, the trimmed method name, never the raw target: the IRIS side strips only tab, space and NBSP, so a
+      // raw target the queue trims further would be guarded as a different class than the one that runs.
+      let guardTarget = target;
 
       if (level === "package") {
         // Discover all %UnitTest.TestCase subclasses in the package
@@ -959,12 +964,13 @@ export function createExecuteTestsHandler(clock: TestClock = realClock): ToolDef
           requestedMethodName = methodName;
         }
         tests = [testEntry];
+        guardTarget = methodName ? `${className}:${methodName}` : className;
       }
 
       // TestProduction guard (Story 40.3, AD-27): %UnitTest.TestProduction stops any production that is not
       // stopped before it starts its own, so a run that includes such a test is decided IRIS-side before
       // anything is queued. A refusal changes nothing; a 404 (no guard route on this server) runs as before.
-      const guard = await readProductionGuard(ctx, ns, target, level);
+      const guard = await readProductionGuard(ctx, ns, guardTarget, level);
       if (guard !== undefined && guard.decision === "busy") return productionBusyRefusal(guard);
 
       // Ensure ^UnitTestRoot is defined in the target namespace. The

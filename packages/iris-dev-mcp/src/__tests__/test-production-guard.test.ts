@@ -342,6 +342,89 @@ describe("iris_execute_tests and the guard (Story 40.3, matrix row 16)", () => {
       console: false,
     });
   });
+
+  // `String.prototype.trim` strips LF, CR, VT, FF, U+2028, U+2029, U+FEFF, U+3000 and the other Unicode spaces; the IRIS guard strips
+  // only tab, space and NBSP (`$ZStrip(..., "<>W")`, `UnitTest.cls`). A raw target whose class the queue reads as `Story403.PassTest`
+  // would reach the guard as a name `IsClassName` rejects (answer: proceed) while the queued class stops the other production.
+  const queuedClass = "Story403.PassTest";
+  const LS = String.fromCodePoint(0x2028);
+  const PS = String.fromCodePoint(0x2029);
+  const IDEOGRAPHIC_SPACE = String.fromCodePoint(0x3000);
+  const BOM = String.fromCodePoint(0xfeff);
+  const VT = "\x0b";
+  const trimCases: { target: string; guarded: string; queued: { class: string; methods?: string[] } }[] = [
+    { target: "Story403.PassTest\n:TestControl", guarded: "Story403.PassTest:TestControl", queued: { class: queuedClass, methods: ["Control"] } },
+    { target: "\rStory403.PassTest:TestControl", guarded: "Story403.PassTest:TestControl", queued: { class: queuedClass, methods: ["Control"] } },
+    { target: "Story403.PassTest:\nTestControl\r", guarded: "Story403.PassTest:TestControl", queued: { class: queuedClass, methods: ["Control"] } },
+    { target: `${VT}Story403.PassTest\f:TestControl`, guarded: "Story403.PassTest:TestControl", queued: { class: queuedClass, methods: ["Control"] } },
+    {
+      target: `${LS}Story403.PassTest${IDEOGRAPHIC_SPACE}:${BOM}TestControl${PS}`,
+      guarded: "Story403.PassTest:TestControl",
+      queued: { class: queuedClass, methods: ["Control"] },
+    },
+    { target: "Story403.PassTest\n", guarded: "Story403.PassTest", queued: { class: queuedClass } },
+    { target: "\rStory403.PassTest", guarded: "Story403.PassTest", queued: { class: queuedClass } },
+    { target: "Story403.PassTest\n:", guarded: "Story403.PassTest", queued: { class: queuedClass } },
+  ];
+  const askedTarget = (path: string) => new URLSearchParams(path.split("?")[1] ?? "").get("target") ?? "";
+
+  it("at method level the guard is asked about exactly what is queued, built from the trimmed class and method and never the raw target", async () => {
+    for (const { target, guarded, queued } of trimCases) {
+      const h = harness(proceed);
+      const result = await createExecuteTestsHandler()({ target, level: "method" }, h.ctx);
+      const label = JSON.stringify(target);
+      expect(result.isError, label).toBeUndefined();
+      const guardCall = h.calls.find((call) => call.path.startsWith(GUARD_PATH));
+      expect(guardCall?.path, label).toBe(`${GUARD_PATH}?target=${encodeURIComponent(guarded)}&level=method&namespace=USER`);
+      const work = h.calls.find((call) => call.method === "POST" && call.path.endsWith("/work"));
+      expect((work?.body as { tests?: unknown } | undefined)?.tests, label).toEqual([queued]);
+      // The class the guard is asked about is the class that is queued.
+      const queuedEntry = ((work?.body as { tests?: { class: string }[] } | undefined)?.tests ?? [])[0];
+      expect(askedTarget(guardCall?.path ?? "").split(":")[0], label).toBe(queuedEntry?.class);
+    }
+  });
+
+  it("at class and package level the guard is asked about the string the queue reads, whitespace included, so nothing is normalized on one side only", async () => {
+    // The Atelier queue keeps a class only when it exists under exactly the name sent, and package discovery matches `<package>.` on
+    // the target as given; the guard gets that same string (the IRIS side can only list more classes than the queue runs).
+    for (const target of ["Story403.PassTest", "Story403.PassTest\n", "\rStory403.PassTest"]) {
+      const h = harness(proceed);
+      await createExecuteTestsHandler()({ target, level: "class" }, h.ctx);
+      const label = `class ${JSON.stringify(target)}`;
+      const guardCall = h.calls.find((call) => call.path.startsWith(GUARD_PATH));
+      const work = h.calls.find((call) => call.method === "POST" && call.path.endsWith("/work"));
+      expect(guardCall?.path, label).toBe(`${GUARD_PATH}?target=${encodeURIComponent(target)}&level=class&namespace=USER`);
+      expect((work?.body as { tests?: { class: string }[] } | undefined)?.tests?.map((entry) => entry.class), label).toEqual([target]);
+    }
+    for (const target of ["Story403.Mixed", "Story403.Mixed\n", "\rStory403.Mixed"]) {
+      const h = harness(proceed);
+      await createExecuteTestsHandler()({ target, level: "package" }, h.ctx);
+      const label = `package ${JSON.stringify(target)}`;
+      const guardCall = h.calls.find((call) => call.path.startsWith(GUARD_PATH));
+      const discovery = h.calls.find(
+        (call) => call.method === "POST" && String((call.body as { query?: string } | undefined)?.query ?? "").includes("%Dictionary.ClassDefinition"),
+      );
+      expect(guardCall?.path, label).toBe(`${GUARD_PATH}?target=${encodeURIComponent(target)}&level=package&namespace=USER`);
+      expect((discovery?.body as { parameters?: string[] } | undefined)?.parameters, label).toEqual([`${target}.`]);
+    }
+  });
+
+  it("a guard that finds the class by the name it is given refuses every target whose queued class is the other production's test, before anything is queued", async () => {
+    // The IRIS side looks the class up by its exact name after stripping only tab, space and NBSP, so a name that still holds a
+    // line break or another Unicode space is not found (proceed).
+    const irisLookup = (path: string) => {
+      const name = askedTarget(path).split(":")[0]?.replace(/^[\t \xa0]+|[\t \xa0]+$/g, "");
+      return name === queuedClass ? BUSY_RUNNING : proceed(path);
+    };
+    for (const { target } of trimCases) {
+      const h = harness(irisLookup);
+      const result = await createExecuteTestsHandler()({ target, level: "method" }, h.ctx);
+      const label = JSON.stringify(target);
+      expect(result.isError, label).toBe(true);
+      expect((result.structuredContent as { code?: string } | undefined)?.code, label).toBe("PRODUCTION_BUSY");
+      expect(h.calls.map((call) => `${call.method} ${call.path.replace(/\?.*$/, "")}`), label).toEqual([`GET ${GUARD_PATH}`]);
+    }
+  });
 });
 
 describe("the shipped guard runs only where the target namespace sees the classes it calls (AD-15)", () => {
