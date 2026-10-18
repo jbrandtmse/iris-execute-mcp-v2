@@ -310,6 +310,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
       - `iris_production_logs` and `iris_message_diagram` withhold message-derived text under `block`;
       - `iris_message_body` renders character-stream bodies under `allow`;
       - the message-search statements carry an index hint, which changes the plan only, never results.
+    - **Story 40.3** (orchestrator decision #56): `iris_execute_tests` and `iris_test_coverage` refuse a run that contains `%UnitTest.TestProduction` tests while a different production runs in the namespace (`PRODUCTION_BUSY`). Before this, such a run silently stopped the other production. A run with no TestProduction test, and a run on a server without the ExecuteMCPv2 service (the guard route answers 404), behave exactly as before.
     - **Story 40.0** (orchestrator decisions #36 and #38, made under the same delegation):
       - the `trace-message-flow` prompt tells agents, under `block`, to report the reason for withheld Event Log and diagram error text and never read it another way (DW-587);
       - `iris_metrics_interop` `errorCount24h` counts Error entries (it counted Warning), and both it and `messageCount24h` cover the 24 hours before the call in UTC (DW-584);
@@ -507,6 +508,8 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **Busy checks.**
     - A coverage run is refused while a foreign session is active.
     - A TestProduction run is refused while a production other than the test's own is running in the target namespace.
+      - **Where and how** (Story 40.3, orchestrator decisions #56 to #58). Both test-running tools ask one IRIS-side guard before anything runs. It decides under Ens's own lifecycle lock `^Ens.Runtime`. The test's own production is started later by `%UnitTest.TestProduction` in another process, so the window between the decision and that start is a recorded residual.
+      - **The suite never stops a production**, not even one a killed or failed TestProduction run left behind. Ens records no owner, so a leftover cannot be told apart from a live production. Any production other than the run's own is refused and named, with the recovery in the text, and left untouched.
     - The busy check is atomic (AD-12).
   - **Fixtures.** Coverage oracles are captured in a disposable namespace whose routines nobody else runs.
 
@@ -653,7 +656,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 | IRIS-side unit tests | `%UnitTest.TestCase` with `$$$Assert*` macros, under the `^UnitTestRoot` guard, with `/noload/nodelete`. Compare the reported `total` with the expected number of `Test*` methods. |
 | Configuration variables | `IRIS_` prefix. A malformed value fails fast at startup and names the variable; an unknown tool name only warns (AD-7). Each new variable is documented with its default. |
 | Probes and references | Verify a claim about an IRIS API, or about reusing internal code, live or in source before building on it. Disposable probe classes live under `ExecuteMCPv2.Temp.*` and are deleted before commit. `sources/`, `irislib/` and `irissys/` are read-only. A story that depends on an IRIS API records the earliest IRIS version it verified that API on. |
-| Live testing on a shared instance | Never stop or restart the shared development IRIS, and simulate outages with a closed local port. Writes go only to disposable `ExecuteMCPv2.Temp.*` artifacts, or to namespaces the story creates, and are removed afterwards. Fixtures are synthetic: no real configuration names and no PHI. A story never reads another project's namespace or messages. |
+| Live testing on a shared instance | Never stop or restart the shared development IRIS, and simulate outages with a closed local port. Writes go only to disposable `ExecuteMCPv2.Temp.*` artifacts, or to namespaces the story creates, and are removed afterwards. The one system-level write allowed is `^%SYS("Ensemble","InstalledNamespace",<disposable namespace>)` for a disposable `EXECMCPTMP*` namespace that must run a production. It is set and killed by a fixture method that refuses any other name, and it is part of the leftovers check; `EnableNamespace` is never called (Story 40.3, decision #59). Fixtures are synthetic: no real configuration names and no PHI. A story never reads another project's namespace or messages. |
 | Performance budgets | The PRD targets are: reads under 2 s, compile and deploy under 10 s, bootstrap under 60 s, and `tools/list` under 500 ms. A story that adds bootstrapped classes or a heavy read checks the relevant budget. |
 
 ## Stack
