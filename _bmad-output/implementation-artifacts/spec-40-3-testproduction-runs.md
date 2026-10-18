@@ -2,7 +2,7 @@
 title: 'Story 40.3: TestProduction Runs'
 type: 'feature'
 created: '2026-10-18'
-status: 'done'
+status: 'in-progress'
 baseline_revision: '1f5fb1cd163e62b2ecdcd873c4648d67adae7145'
 baseline_commit: '1f5fb1cd163e62b2ecdcd873c4648d67adae7145'
 review_loop_iteration: 0
@@ -292,9 +292,18 @@ Code review 2026-10-18 (`bmad-code-review`, four layers: Blind Hunter, Edge Case
 - `low`: on the definition path the production is taken along the branch that reaches TestProduction, not in member-inheritance order (a non-TestProduction mixin that sets `PRODUCTION`, or `Inheritance = right`) — needs an uncompiled multiple-inheritance test class whose mixin and base declare different productions, one of them running; the compiled path uses `$parameter` (Edge Case Hunter).
 - `low` (fix edits the spec under review): the Auto Run Result still says coverage-path compiled-only resolution is "not pinned by a row" — QA Q5d now pins it with a recorded mutation; noted here instead (Verification Gap).
 
+**Lead re-review of code review's HIGH patches (2026-10-18; scoped, read-only, on the frozen diff `cr-40-3/high-patches.diff` on `6c4617c`): NOT-CLEAN, 1 medium and 1 low.** Every `^Ens.Runtime` path was traced as released, and namespace restore holds (AD-13). Rework iteration 1 of 3 works exactly these two items, each with a demonstrated `mutation:` line (Rule 19).
+
+- [ ] [Review][Patch] **MED: `iris_test_coverage` runs a target whose class part is empty, unguarded** [src/ExecuteMCPv2/REST/Coverage.cls:162 `ValidateStart`; with UnitTest.cls:537-538 `TestProductions`; packages/iris-dev-mcp/src/tools/test-coverage.ts:1007 schema]. `":"` or `":TestControl"` passes validation. `BuildTestSpec` turns it into `"::"`, and with `/noload` and an empty test case `%UnitTest.Manager:RunOneTestSuite` runs every compiled, non-abstract TestCase class at the top of `^UnitTestRoot` (`irislib/%UnitTest/Manager.cls:841,876,920-921,961`). The guard takes `$Piece(target,":",1)`, which is empty, and answers `proceed`. With a developer-set root holding a TestProduction class there, a run stops another user's production, and force-stops and cleans it (deleting its application data) if it will not stop. **Fix:** reject an empty or blank class part in `ValidateStart`: `Parameter 'target' must start with a package or class name`. Also reject it in the TypeScript schema, as `iris_execute_tests` already does for its own target. Pin it in both places: the OS test, and a unit or gate row that starts nothing.
+- [ ] [Review][Patch] **LOW: the visibility check tests that the classes exist, not that the guard method exists** [src/ExecuteMCPv2/REST/UnitTest.cls:386]. In an unmapped namespace that holds its own older copy of the package (from 40.1 or 40.2), every `$$$comClassDefined` is true. The later `ProductionGuard` call would then fail, and a plain `iris_execute_tests` run would end in `Error executing tests`. **Fix:** also require `$$$comMemberDefined("ExecuteMCPv2.REST.UnitTest",$$$cCLASSmethod,"ProductionGuard")` (and any other method the guard calls that a 40.1 or 40.2 copy lacks), and pin it on the shipped embed as the visibility check already is.
+
 ## Spec Change Log
 
 - **2026-10-18, lead spec gate.** Decisions #56 to #59 were taken as recommended. #56 adds that the `iris_execute_tests` and `iris_test_coverage` descriptions state the guard needs the ExecuteMCPv2 service, and that a run without it is unguarded. #59 is the shared-instance sign-off for the one IRISSYS node per disposable namespace. Spine amended (Rule 20): AD-27 (the TestProduction decision under `^Ens.Runtime`, with its residual window; the suite never stops a production), AD-15's sanctioned list (Story 40.3), and the "Live testing on a shared instance" convention (the InstalledNamespace node).
+- **2026-10-18, lead, after the code review and the lead's scoped re-review.**
+  - Decision #60 accepts code review's extension of #56: a namespace that cannot see the `ExecuteMCPv2` classes answers `proceed` unguarded, like the 404 rule. Spine AD-15's Story 40.3 bullet now names it.
+  - The lead re-review was NOT-CLEAN (1 medium, 1 low), so rework iteration 1 works the two `[Review]` items above.
+  - The QA section's namespace names (`EXECMCPTMP40W`/`40X`) record what QA ran. Code review later renamed them `EXECMCPTMP403W`/`403X`.
 
 ## Review Triage Log
 

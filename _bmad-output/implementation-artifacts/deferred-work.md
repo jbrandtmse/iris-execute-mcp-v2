@@ -2029,6 +2029,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: New response fields and a newly truthy isError are feat-shaped; decide the initial minor/patch boundary before the first publish (free now, uncorrectable afterwards); consider stripping prepublishOnly via publishConfig.
 - 2026-10-14T10:47:57Z status=decision-pending owner=burndown by=migration note=human=Project Lead decides the initial minor/patch version boundary before the first npm publish
 - 2026-10-15T02:51:51Z status=routed owner=42-1-pre-publish-package-fixes by=correct-course note=decided D2 (decision-record-2026-10-14): align every @iris-mcp/* package at 1.0.0
+- 2026-10-18T17:35:49Z occurrence=40-3-testproduction-runs
 
 ### DW-395: [34-6-CR-20] Documentation and bookkeeping accuracy cluster: (a) error envelope can carry truncated:true for an absent output
 - source: legacy:34.6 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -3281,3 +3282,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-40-2-coverage-reports-and-targets.md | severity: med | fix-risk: med | footprint: in-story
 - evidence: CR re-review 2026-10-18, live: ExecuteMCPv2.Temp.CR402Probe DimInit -> INT 16 'Set tSC=1' (C:set), raw intLines [0,17]/label 15; built dist reports only line 7 and generated 1; the idiom skews percent per method
 - 2026-10-18T13:27:45Z status=routed owner=40-4-test-depth-docs-prompt-and-capstone by=cr note=fix: keep INTLine's line for a #dim with '=' outside parens (or a raw per-line kind flag, TS decides); correct the README/CHANGELOG sentence
+
+### DW-603: The Story 40.1 and 40.2 coverage gates and their QA gates each still declare their own copy of the instance-wide monitor helpers (monitorState, coverageGlobal, expectMonitorIdle, releaseLeftoverSession) that testproduction-gate-helpers.ts now shares for the two Story 40.3 gates
+- source: spec-40-3-testproduction-runs.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: story-40-1-coverage-live-gate, story-40-1-qa-live-gate, story-40-2-coverage-reports-live-gate and story-40-2-qa-live-gate each define the four helpers at top level (Rule 2 near-copies); a fix to the StopIfList safety net or the idle check in one copy does not reach the others
+- 2026-10-18T17:35:54Z status=routed owner=burndown by=cr note=Rule 2; move the four gates onto the shared helpers (a monitor-only module if the TestProduction helpers do not fit) and re-run them armed
