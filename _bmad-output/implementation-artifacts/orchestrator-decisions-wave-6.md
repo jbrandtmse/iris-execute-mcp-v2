@@ -1,6 +1,8 @@
 # Orchestrator decisions — wave 6 (`/epic-cycle 38-40`, unattended)
 
-> **Run paused 2026-10-15 for an account switch and resumed 2026-10-16. The notes below are historical.**
+> **Run paused 2026-10-18 (~20:40Z) for an account switch, during Epic 40.** Stories 40.0 to 40.2 are committed. Story 40.3's rework 2 is committed (`fbbdbcd`), and its scoped code-review re-review is the next step. Story 40.4, the Epic 40 burn-down gate and close, and the merge of `epic40` into `feature/feature-wave-6-competitive-gaps` follow. The resume plan is the `run_paused` line in `cycle-log-epic-40.md`.
+>
+> *(Earlier: the run paused 2026-10-15 for an account switch and resumed 2026-10-16.)*
 > - Done and pushed on `epic38`: Stories 38.0 to 38.4.
 > - 38.5 is implemented (`06b1b20`) and sits at `review`. Its QA, code review, smoke and fresh check have not run.
 > - To resume: re-invoke `/epic-cycle 38-40`. Resume mode picks up at Story 38.5's QA stage, then runs 38.6, the Epic 38 burn-down gate (DW-554, a HIGH governance fail-open, must be fixed there), the decision sheet, and the merge to the wave-6 feature branch. Epics 39 and 40 follow.
