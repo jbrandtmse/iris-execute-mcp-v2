@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "9ce1a489469d";
+export const BOOTSTRAP_VERSION = "3347b2f36ff2";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "9ce1a489469d";
+Parameter BOOTSTRAPVERSION = "3347b2f36ff2";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -6245,6 +6245,8 @@ ClassMethod GetFailureMessage(pInstanceId As %String, pClassName As %String, pMe
 /// asks <method>ProductionGuard</method> (the run compiles its test classes, so a class definition answers when the
 /// compiled class is not up to date) and renders one envelope. A namespace that cannot be switched to answers
 /// <code>proceed</code> with no TestProduction tests: nothing can run there, so the run then fails as it does today.
+/// So does a namespace whose class dictionary lacks the classes the guard calls (no <code>%ALL</code> package mapping of
+/// <code>ExecuteMCPv2</code>): the guard cannot run there, so the run goes ahead unguarded, as it did before the guard.
 /// The namespace is restored on every exit path.</p>
 ClassMethod ProductionCheck() As %Status
 {
@@ -6274,16 +6276,18 @@ ClassMethod ProductionCheck() As %Status
             Set tSwitchSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
             If $$$ISERR(tSwitchSC) Set tSwitched = 0
         }
-        If tSwitched {
+        ; The guard calls these classes in the target namespace, which sees them only through a package mapping.
+        Set tGuarded = tSwitched && $$$comClassDefined("ExecuteMCPv2.REST.UnitTest") && $$$comClassDefined("ExecuteMCPv2.Coverage.Job") && $$$comClassDefined("ExecuteMCPv2.REST.Interop") && $$$comClassDefined("ExecuteMCPv2.Utils")
+        If tGuarded {
             Set tCmdStatus = ..ProductionGuard(tTarget, tLevel, 1, .tResult)
-            Set $NAMESPACE = tOrigNS
             If $$$ISERR(tCmdStatus) Set tErrored = 1
         } Else {
             Set tResult = {}
             Do tResult.%Set("decision", "proceed")
-            Do tResult.%Set("namespace", tNamespace)
+            Do tResult.%Set("namespace", $Select(tSwitched: $NAMESPACE, 1: tNamespace))
             Do tResult.%Set("testProductions", [])
         }
+        Set $NAMESPACE = tOrigNS
     } Catch ex {
         Set $NAMESPACE = tOrigNS
         Set tErrored = 1
@@ -6322,22 +6326,25 @@ ClassMethod ProductionGuard(pTarget As %String, pLevel As %String, pCompiles As 
         Set tError = ""
         If tTests '= "" {
             Set tLocked = 0
+            Set tEnsSC = $$$OK
             Try {
                 Lock +^Ens.Runtime:5 Set tLocked = $Test
                 If tLocked {
-                    Set tStatus = ##class(Ens.Director).GetProductionStatus(.tName, .tState, 2)
-                    If $$$ISOK(tStatus) {
-                        Set tRead = 1
-                    } Else {
-                        Set tError = ..StatusText(tStatus)
-                    }
+                    Set tEnsSC = ##class(Ens.Director).GetProductionStatus(.tName, .tState, 2)
+                    If $$$ISOK(tEnsSC) Set tRead = 1
                 } Else {
                     Set tError = "The Ens runtime lock (Ens.Runtime) was not acquired within 5 seconds"
                 }
             } Catch exEns {
-                Set tError = ..StatusText(exEns.AsStatus())
+                Set tRead = 0
+                Set tEnsSC = exEns.AsStatus()
             }
-            If tLocked Lock -^Ens.Runtime
+            ; Released before anything else runs, so no later error can keep it.
+            If tLocked {
+                Lock -^Ens.Runtime
+                Set tLocked = 0
+            }
+            If $$$ISERR(tEnsSC) Set tError = ..StatusText(tEnsSC)
         }
 
         Set pResult = {}
@@ -6358,6 +6365,7 @@ ClassMethod ProductionGuard(pTarget As %String, pLevel As %String, pCompiles As 
         }
         If tError '= "" Do pResult.%Set("error", tError)
     } Catch ex {
+        If $Get(tLocked) Lock -^Ens.Runtime
         Set pResult = ""
         Set tSC = ex.AsStatus()
     }
@@ -6397,16 +6405,21 @@ ClassMethod GuardOutcome(pTestProductions As %List, pStateRead As %Boolean, pSta
 /// The TestProduction tests of a run, as a <class>%List</class> of <code>$ListBuild(class, production)</code> items
 /// sorted by class, in the current namespace; empty when the run has none.
 /// <p>The classes are the class of <var>pTarget</var> (the part before a colon, trimmed) at the class and method
-/// levels, and at the package level every non-abstract class under <code>&lt;package&gt;.</code> that the class
-/// dictionary lists as a subclass of <class>%UnitTest.TestProduction</class> (the predicates of the tool's own
-/// package discovery, with the TestProduction root). <method>ResolveTest</method> decides each class. A method-level
-/// run is guarded whatever the method: a subclass method can call the private <code>StartProduction</code>.</p>
+/// levels. At the package level they are the non-abstract classes under <code>&lt;package&gt;.</code> that the run
+/// will run: when it compiles first (<var>pCompiles</var>), those the class dictionary lists as a subclass of
+/// <class>%UnitTest.TestProduction</class> (the predicates of the tool's own package discovery, with the
+/// TestProduction root; the list follows the class definitions, which is what the run compiles); when it does not,
+/// every one of them, as <method>BuildTestSpec</method> lists them, because the runner runs the compiled class
+/// whatever the definition now says. <method>ResolveTest</method> decides each class. A method-level run is guarded
+/// whatever the method: a subclass method can call the private <code>StartProduction</code>.</p>
 ClassMethod TestProductions(pTarget As %String, pLevel As %String, pCompiles As %Boolean = 1) As %List
 {
     Set tResult = ""
     If pLevel = "package" {
+        Set tQuery = "SELECT Name FROM %Dictionary.ClassDefinition WHERE Name %STARTSWITH ? AND Abstract = 0"
+        If pCompiles Set tQuery = tQuery_" AND Name IN (SELECT Name FROM %Dictionary.ClassDefinitionQuery_SubclassOf('%UnitTest.TestProduction'))"
         Set tStmt = ##class(%SQL.Statement).%New()
-        Set tSC = tStmt.%Prepare("SELECT Name FROM %Dictionary.ClassDefinition WHERE Name %STARTSWITH ? AND Abstract = 0 AND Name IN (SELECT Name FROM %Dictionary.ClassDefinitionQuery_SubclassOf('%UnitTest.TestProduction'))")
+        Set tSC = tStmt.%Prepare(tQuery)
         If $$$ISERR(tSC) Throw ##class(%Exception.StatusException).CreateFromStatus(tSC)
         Set tRS = tStmt.%Execute(pTarget_".")
         If tRS.%SQLCODE < 0 Throw ##class(%Exception.SQL).CreateFromSQLCODE(tRS.%SQLCODE, tRS.%Message)
@@ -20000,7 +20013,8 @@ rchr(time) Quit ""
 /// <li><b>Start.</b> The request is validated before any namespace switch. The routines to measure are resolved in
 /// the target namespace, and a request that measures no routine, or more than <code>maxLines</code> INT lines, is an
 /// error that starts nothing. The TestProduction guard (Story 40.3, <method>ExecuteMCPv2.REST.UnitTest:ProductionGuard</method>,
-/// compiled classes only because the runner never compiles) then decides whether a run that includes
+/// compiled classes only because the runner never compiles, and asked about the classes the runner will run: a package that
+/// holds no test class is run as a class, and asked about as one) then decides whether a run that includes
 /// <class>%UnitTest.TestProduction</class> tests may go ahead while another production runs in the namespace; a refusal
 /// allocates no run id, writes nothing and starts no session. The busy check and the launch then run under one lock, so
 /// two requests cannot both start a session. The result is <code>{outcome, ...}</code>: <code>started</code> (the run
@@ -20277,8 +20291,13 @@ ClassMethod Run(pBody As %DynamicObject, Output pResult As %DynamicObject) As %S
             Set tSC = $$$ERROR($$$GeneralError, "Coverage of "_tTotalLines_" INT lines exceeds the limit of "_tParams("maxLines")_". List fewer classes, or classes with less code. Nothing was started.")
             Quit
         }
-        ; The runner never compiles (/noload), so only the compiled test classes are asked (pCompiles 0).
-        Set tGuardSC = ##class(ExecuteMCPv2.REST.UnitTest).ProductionGuard(tParams("target"), tParams("level"), 0, .tGuard)
+        ; The guard is asked about the classes the runner will run. The runner never compiles (/noload), so only the
+        ; compiled test classes are asked (pCompiles 0); and a package that holds no test class runs the target as a class
+        ; (BuildTestSpec falls back to :<target>), so that run is asked about at the class level.
+        Set tSpec = ..TestSpec(tParams("target"), tParams("level"))
+        Set tGuardLevel = tParams("level")
+        If (tGuardLevel = "package") && (tSpec = (":"_tParams("target"))) Set tGuardLevel = "class"
+        Set tGuardSC = ##class(ExecuteMCPv2.REST.UnitTest).ProductionGuard(tParams("target"), tGuardLevel, 0, .tGuard)
         If $$$ISERR(tGuardSC) {
             Set tSC = $$$ERROR($$$GeneralError, "The TestProduction guard could not check the tests of '"_tParams("target")_"': "_##class(ExecuteMCPv2.Coverage.Job).SafeText($System.Status.GetErrorText(tGuardSC))_". Nothing was started.")
             Quit
@@ -20288,7 +20307,6 @@ ClassMethod Run(pBody As %DynamicObject, Output pResult As %DynamicObject) As %S
             Quit
         }
         Do ##class(ExecuteMCPv2.Setup).EnsureUnitTestRoot()
-        Set tSpec = ..TestSpec(tParams("target"), tParams("level"))
     } Catch ex {
         Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()

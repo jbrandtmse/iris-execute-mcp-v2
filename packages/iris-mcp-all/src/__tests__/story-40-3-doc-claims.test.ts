@@ -57,7 +57,7 @@ const CHANGELOG_TITLE = new RegExp(`^## \\[Pre-release ${EM_DASH} 2026-10-18\\] 
  * documented move to the committed embed, so a later move leaves this file true.
  */
 const BOOTSTRAP_FROM = "06b8b83fc319";
-const BOOTSTRAP_TO = "9ce1a489469d";
+const BOOTSTRAP_TO = "3347b2f36ff2";
 
 describe("Story 40.3: the Development README", () => {
   it("names the guard and the code on both tool rows, and keeps the arguments", () => {
@@ -89,8 +89,10 @@ describe("Story 40.3: the Development README", () => {
     expect(entry).toContain("The suite **never stops a production itself**");
     expect(entry).toContain("against a server whose service lacks it (the guard route answers 404) the run goes ahead unguarded, as before");
     expect(entry).toContain("so a production started by another process in between would still be stopped");
-    expect(entry).toContain("A production that is already running under a name one of the run's tests declares is treated as that run's own and is stopped and restarted by the test, whoever started it");
-    expect(entry).toContain("A guard read that fails for any reason other than a 404 (an HTTP 5xx or 403, a connection error) ends the call before anything is queued");
+    expect(entry).toContain("So does a run in a namespace that cannot see the `ExecuteMCPv2` package (no `%ALL` package mapping, as after a manual setup): the guard cannot run there.");
+    expect(entry).toContain("A production that is already running under a name one of the run's tests declares is treated as that run's own and is stopped by the run, whoever started it: by its own test, which restarts it for the test, or by another TestProduction test of the same run.");
+    expect(entry).toContain("is force-stopped and cleaned with `CleanProduction(1)`, which also deletes its persistent application data, and the run leaves it Stopped");
+    expect(entry).toContain("A guard read that fails for any reason other than a 404 ends the call before anything is queued (an HTTP 5xx or 403 with the usual `Error executing tests` result, a connection error with the server's own tool error)");
     expect(entry).toContain("even for a run with no TestProduction test");
     expect(entry).toContain("Privileges were verified under `_SYSTEM` only");
     expect(entry).toContain("Earliest IRIS version verified: 2026.2 build 221U.");
@@ -103,6 +105,7 @@ describe("Story 40.3: the Development README", () => {
     expect(entry).toContain("**TestProduction guard (Story 40.3).**");
     expect(entry).toContain("asks the same IRIS-side guard as `iris_execute_tests`, before it allocates a run id");
     expect(entry).toContain("only the compiled test classes are asked, because the runner never compiles");
+    expect(entry).toContain("the target itself when a package-level target holds no test class, because the runner then runs it as a class");
     expect(entry).toContain('refused with `isError: true` and `code: "PRODUCTION_BUSY"`');
     expect(entry).toContain("No run id is allocated, nothing is written and no monitor session is started");
     expect(entry).toContain("With no other production running the run completes as before and leaves its own production stopped.");
@@ -162,7 +165,9 @@ describe("Story 40.3: tool_support.md", () => {
     expect(note).toContain("`POST /tests` (`RunTests`, which no tool calls) is not guarded");
     expect(note).toContain("**The suite never stops a production**");
     expect(note).toContain("Residual risks: the window between the decision and the test's own start in another process");
-    expect(note).toContain("a production already running under a name one of the run's tests declares is treated as the run's own and is stopped and restarted by the test, whoever started it");
+    expect(note).toContain("so is a run in a namespace that cannot see the `ExecuteMCPv2` package (no `%ALL` package mapping)");
+    expect(note).toContain("a production already running under a name one of the run's tests declares is treated as the run's own and is stopped by the run, whoever started it (by its own test, which restarts it, or by another TestProduction test of the run;");
+    expect(note).toContain("`CleanProduction(1)`, which also deletes its persistent application data), and is left Stopped");
     expect(note).toContain("a guard read that fails other than with a 404 ends the call before anything is queued, even for a run with no TestProduction test");
     expect(note).toContain("privileges were verified under `_SYSTEM` only");
     expect(note).toContain(`\`BOOTSTRAP_VERSION\` moves \`${BOOTSTRAP_FROM}\` ${ARROW} \`${BOOTSTRAP_TO}\``);
@@ -212,7 +217,10 @@ describe("Story 40.3: the CHANGELOG section and the changeset", () => {
     expect(text).toContain("it differs only in those two descriptions");
     expect(text).toContain("`POST /tests` (`RunTests`, which no tool calls) is not guarded");
     expect(text).toContain("**The suite never stops a production (orchestrator decision #58).**");
-    expect(text).toContain("A production already running under a name one of the run's tests declares is treated as that run's own and is stopped and restarted by the test, whoever started it");
+    expect(text).toContain("So is a run in a namespace that cannot see the `ExecuteMCPv2` package (no `%ALL` package mapping, as after a manual setup)");
+    expect(text).toContain("A production already running under a name one of the run's tests declares is treated as that run's own and is stopped by the run, whoever started it: by its own test, which restarts it for the test, or by another TestProduction test of the same run.");
+    expect(text).toContain("is force-stopped and cleaned with `CleanProduction(1)`, which also deletes its persistent application data, and the run leaves it Stopped");
+    expect(text).toContain("On the coverage path those are the classes its runner runs, judged by their compiled classes");
     expect(text).toContain("A guard read that fails for any reason other than a 404 (an HTTP 5xx or 403, a connection error) ends the call before anything is queued, even for a run with no TestProduction test.");
     expect(text).toContain("A cancelled, killed or erroring TestProduction run leaves its production running.");
     expect(text).toContain("(orchestrator decision #57)");

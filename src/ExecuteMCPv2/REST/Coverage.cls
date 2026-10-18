@@ -9,7 +9,8 @@
 /// <li><b>Start.</b> The request is validated before any namespace switch. The routines to measure are resolved in
 /// the target namespace, and a request that measures no routine, or more than <code>maxLines</code> INT lines, is an
 /// error that starts nothing. The TestProduction guard (Story 40.3, <method>ExecuteMCPv2.REST.UnitTest:ProductionGuard</method>,
-/// compiled classes only because the runner never compiles) then decides whether a run that includes
+/// compiled classes only because the runner never compiles, and asked about the classes the runner will run: a package that
+/// holds no test class is run as a class, and asked about as one) then decides whether a run that includes
 /// <class>%UnitTest.TestProduction</class> tests may go ahead while another production runs in the namespace; a refusal
 /// allocates no run id, writes nothing and starts no session. The busy check and the launch then run under one lock, so
 /// two requests cannot both start a session. The result is <code>{outcome, ...}</code>: <code>started</code> (the run
@@ -286,8 +287,13 @@ ClassMethod Run(pBody As %DynamicObject, Output pResult As %DynamicObject) As %S
             Set tSC = $$$ERROR($$$GeneralError, "Coverage of "_tTotalLines_" INT lines exceeds the limit of "_tParams("maxLines")_". List fewer classes, or classes with less code. Nothing was started.")
             Quit
         }
-        ; The runner never compiles (/noload), so only the compiled test classes are asked (pCompiles 0).
-        Set tGuardSC = ##class(ExecuteMCPv2.REST.UnitTest).ProductionGuard(tParams("target"), tParams("level"), 0, .tGuard)
+        ; The guard is asked about the classes the runner will run. The runner never compiles (/noload), so only the
+        ; compiled test classes are asked (pCompiles 0); and a package that holds no test class runs the target as a class
+        ; (BuildTestSpec falls back to :<target>), so that run is asked about at the class level.
+        Set tSpec = ..TestSpec(tParams("target"), tParams("level"))
+        Set tGuardLevel = tParams("level")
+        If (tGuardLevel = "package") && (tSpec = (":"_tParams("target"))) Set tGuardLevel = "class"
+        Set tGuardSC = ##class(ExecuteMCPv2.REST.UnitTest).ProductionGuard(tParams("target"), tGuardLevel, 0, .tGuard)
         If $$$ISERR(tGuardSC) {
             Set tSC = $$$ERROR($$$GeneralError, "The TestProduction guard could not check the tests of '"_tParams("target")_"': "_##class(ExecuteMCPv2.Coverage.Job).SafeText($System.Status.GetErrorText(tGuardSC))_". Nothing was started.")
             Quit
@@ -297,7 +303,6 @@ ClassMethod Run(pBody As %DynamicObject, Output pResult As %DynamicObject) As %S
             Quit
         }
         Do ##class(ExecuteMCPv2.Setup).EnsureUnitTestRoot()
-        Set tSpec = ..TestSpec(tParams("target"), tParams("level"))
     } Catch ex {
         Set $NAMESPACE = tOrigNS
         Set tSC = ex.AsStatus()

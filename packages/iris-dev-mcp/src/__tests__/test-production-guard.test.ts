@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { IrisApiError, IrisConnectionError, REFUSAL_CODES, type IrisHttpClient } from "@iris-mcp/shared";
+import { BOOTSTRAP_CLASSES, IrisApiError, IrisConnectionError, REFUSAL_CODES, type IrisHttpClient } from "@iris-mcp/shared";
 import { createExecuteTestsHandler, executeTestsTool } from "../tools/execute.js";
 import { testCoverageTool } from "../tools/test-coverage.js";
 import {
@@ -309,5 +309,35 @@ describe("iris_execute_tests and the guard (Story 40.3, matrix row 16)", () => {
     const emptyResult = await createExecuteTestsHandler()({ target: "No.Such", level: "package" }, empty.ctx);
     expect((emptyResult.content[0] as { text: string }).text).toContain("No test classes found in package 'No.Such'");
     expect(empty.calls.some((call) => call.path.startsWith(GUARD_PATH))).toBe(false);
+  });
+});
+
+describe("the shipped guard runs only where the target namespace sees the classes it calls (AD-15)", () => {
+  // `ProductionCheck` switches to the target namespace, which sees the ExecuteMCPv2 package only through a package mapping (the
+  // bootstrap's %ALL mapping is non-fatal, and a manual setup has none). A plain run there must not fail, so the route asks the
+  // guard only when every ExecuteMCPv2 class the guard calls is in that namespace's class dictionary, and otherwise answers proceed
+  // with no TestProduction tests. The oracle is the class the bootstrap ships (`BOOTSTRAP_CLASSES`), not the working tree.
+  const source = BOOTSTRAP_CLASSES.get("ExecuteMCPv2.REST.UnitTest.cls") ?? "";
+  const check = source.slice(source.indexOf("ClassMethod ProductionCheck("), source.indexOf("ClassMethod ProductionGuard("));
+  const guard = source.slice(source.indexOf("ClassMethod ProductionGuard("));
+  const calledByGuard = [...new Set([...guard.matchAll(/##class\((ExecuteMCPv2\.[A-Za-z0-9.]+)\)/g)].map((match) => match[1] ?? ""))].sort();
+
+  it("ProductionCheck asks the guard only behind a check that the guard's own class and every class it calls are defined there", () => {
+    expect(check, "the shipped class has ProductionCheck").toContain("ClassMethod ProductionCheck(");
+    const gate = /Set tGuarded = tSwitched((?: && \$\$\$comClassDefined\("[A-Za-z0-9.]+"\))+)/.exec(check);
+    expect(gate, "the visibility check").not.toBeNull();
+    const checked = [...(gate?.[1] ?? "").matchAll(/"([A-Za-z0-9.]+)"/g)].map((match) => match[1] ?? "").sort();
+    expect(calledByGuard.length, "the guard calls ExecuteMCPv2 classes").toBeGreaterThan(0);
+    expect(checked).toEqual(["ExecuteMCPv2.REST.UnitTest", ...calledByGuard].sort());
+    expect(check.indexOf("If tGuarded {"), "the guard call sits behind the check").toBeGreaterThan(-1);
+    expect(check.indexOf("If tGuarded {")).toBeLessThan(check.indexOf("..ProductionGuard("));
+    expect(check.match(/\.\.ProductionGuard\(/g), "one guard call").toHaveLength(1);
+  });
+
+  it("where the guard cannot run, the route answers proceed with no TestProduction tests and reads no state", () => {
+    const otherwise = check.slice(check.indexOf("} Else {", check.indexOf("If tGuarded {")));
+    expect(otherwise).toContain('Do tResult.%Set("decision", "proceed")');
+    expect(otherwise).toContain('Do tResult.%Set("testProductions", [])');
+    expect(otherwise.slice(0, otherwise.indexOf("Set $NAMESPACE = tOrigNS"))).not.toContain("Ens.");
   });
 });

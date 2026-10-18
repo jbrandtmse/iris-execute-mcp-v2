@@ -375,7 +375,8 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
 
   it("the Story 40.3 fixture methods exist, and each keeps its guard: the InstalledNamespace node is set and cleared only for an existing scratch namespace, the Ens lock is held only in one", () => {
     for (const method of [
-      "SetInstalledNamespace", "ClearInstalledNamespace", "HoldEnsRuntime", "EnsRuntimeRun", "EnsRuntimeHeld", "ReleaseEnsRuntime",
+      "SetInstalledNamespace", "ClearInstalledNamespace", "HoldEnsRuntime", "EnsRuntimeRun", "EnsRuntimeHeld", "EnsRuntimeProbe", "ReleaseEnsRuntime",
+      "EnsRuntimeHeldWhileHolding",
     ]) {
       expect(FIXTURE_CLASS_SOURCE, method).toContain(`ClassMethod ${method}(`);
     }
@@ -394,13 +395,27 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
     expect(nodeMethods.indexOf("Exists(pName)"), "the existence check comes before the first write").toBeLessThan(nodeMethods.indexOf("Set ^%SYS("));
     // The lock holder is a job of this class that switches to the scratch namespace itself, takes ^Ens.Runtime there and nowhere else.
     const holder = FIXTURE_CLASS_SOURCE.slice(FIXTURE_CLASS_SOURCE.indexOf("ClassMethod HoldEnsRuntime("), FIXTURE_CLASS_SOURCE.indexOf("ClassMethod ReleaseEnsRuntime("));
-    expect(holder.match(/If pNamespace '\? 1"EXECMCPTMP"1\.N1U/g)).toHaveLength(3);
+    expect(holder.match(/If pNamespace '\? 1"EXECMCPTMP"1\.N1U/g)).toHaveLength(4);
     expect(holder).toContain("If '##class(%SYS.Namespace).Exists(pNamespace) { Quit \"refused: namespace \"_pNamespace_\" does not exist\" }");
     expect(holder).toContain("Set $NAMESPACE = pNamespace\n    Lock +^Ens.Runtime:10");
     expect(holder).toContain("$Select(pSeconds > 30: 30, pSeconds < 1: 1, 1: pSeconds)");
     expect(holder).not.toContain("Terminate(");
     expect(holder).not.toContain("LineByLine");
     expect(holder.match(/Lock \+\^Ens\.Runtime/g)).toHaveLength(2);
+    // "Is it held?" is asked by a fresh job, never by the process serving the call: a process takes a lock it holds again at
+    // once, so a lock that process leaked would otherwise read as free (Story 40.3 row 15b).
+    const held = FIXTURE_CLASS_SOURCE.slice(FIXTURE_CLASS_SOURCE.indexOf("ClassMethod EnsRuntimeHeld("), FIXTURE_CLASS_SOURCE.indexOf("ClassMethod EnsRuntimeProbe("));
+    expect(held).toContain("Job ##class(ExecuteMCPv2.Temp.Story391Fixture).EnsRuntimeProbe(pNamespace)::10");
+    expect(held, "the asking process takes no lock itself").not.toContain("Lock ");
+    const probe = FIXTURE_CLASS_SOURCE.slice(FIXTURE_CLASS_SOURCE.indexOf("ClassMethod EnsRuntimeProbe("), FIXTURE_CLASS_SOURCE.indexOf("ClassMethod ReleaseEnsRuntime("));
+    expect(probe).toContain("Set $NAMESPACE = pNamespace\n        Lock +^Ens.Runtime:0");
+    // The positive control holds the lock in the asking process only for the question, in a scratch namespace that exists, and
+    // releases it after the Try/Catch, so no path leaves it held.
+    const control = FIXTURE_CLASS_SOURCE.slice(FIXTURE_CLASS_SOURCE.indexOf("ClassMethod EnsRuntimeHeldWhileHolding("));
+    expect(control).toContain("If pNamespace '? 1\"EXECMCPTMP\"1.N1U { Quit");
+    expect(control).toContain("If '##class(%SYS.Namespace).Exists(pNamespace) { Quit");
+    expect(control.indexOf("Lock -^Ens.Runtime"), "the release comes after the Try/Catch").toBeGreaterThan(control.indexOf("} Catch ex {"));
+    expect(control.match(/Lock [+-]\^Ens\.Runtime/g)).toEqual(["Lock +^Ens.Runtime", "Lock -^Ens.Runtime"]);
   });
 
   it("the Story 40.3 fixture helpers refuse a name that is not EXECMCPTMP403<letter>, before any tool call", async () => {

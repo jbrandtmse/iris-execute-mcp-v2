@@ -874,25 +874,50 @@ ClassMethod EnsRuntimeRun(pNamespace As %String, pSeconds As %Integer)
     Lock -^Ens.Runtime
 }
 
-/// Is ^Ens.Runtime of the scratch namespace pNamespace held by another process? A lock this call can take is released at once. A
-/// name that is not a scratch namespace, or an error, reads as held, so a caller never mistakes it for a free lock.
+/// Is ^Ens.Runtime of the scratch namespace pNamespace held by any process? A job of this class tries the lock (EnsRuntimeProbe), so
+/// the answer does not depend on which process serves this call: a process that holds a lock takes it again at once, so a lock held
+/// by the process that serves the call would read as free to that process. A name that is not a scratch namespace, a probe that does
+/// not answer, or an error reads as held, so a caller never mistakes it for a free lock.
 ClassMethod EnsRuntimeHeld(pNamespace As %String) As %Boolean
 {
     If pNamespace '? 1"EXECMCPTMP"1.N1U { Quit 1 }
-    Set tOrig = $NAMESPACE
     Set tHeld = 1
+    Try {
+        Job ##class(ExecuteMCPv2.Temp.Story391Fixture).EnsRuntimeProbe(pNamespace)::10
+        If $Test {
+            Set tProbe = $ZChild
+            For tI = 1:1:50 {
+                If $Data(^IRIS.TempStory391Fixture("ensProbe", tProbe), tFree) {
+                    Set tHeld = 'tFree
+                    Quit
+                }
+                Hang 0.1
+            }
+            Kill ^IRIS.TempStory391Fixture("ensProbe", tProbe)
+        }
+    } Catch ex {
+        Set tHeld = 1
+    }
+    Quit tHeld
+}
+
+/// The probe job of EnsRuntimeHeld: in the scratch namespace pNamespace, try ^Ens.Runtime without waiting, release it at once when
+/// it was taken, and record 1 when it was free and 0 when another process held it.
+ClassMethod EnsRuntimeProbe(pNamespace As %String)
+{
+    If pNamespace '? 1"EXECMCPTMP"1.N1U { Quit }
+    Set tFree = 0
     Try {
         Set $NAMESPACE = pNamespace
         Lock +^Ens.Runtime:0
         If $Test {
             Lock -^Ens.Runtime
-            Set tHeld = 0
+            Set tFree = 1
         }
     } Catch ex {
-        Set tHeld = 1
+        Set tFree = 0
     }
-    Set $NAMESPACE = tOrig
-    Quit tHeld
+    Set ^IRIS.TempStory391Fixture("ensProbe", $Job) = tFree
 }
 
 /// Ask the lock holder to release ^Ens.Runtime of pNamespace and wait for it to do so. Returns released, or refused: <why>.
@@ -907,6 +932,34 @@ ClassMethod ReleaseEnsRuntime(pNamespace As %String) As %String
     If ..EnsRuntimeHeld(pNamespace) { Quit "refused: the lock is still held" }
     Kill ^IRIS.TempStory391Fixture("ensHoldStop")
     Quit "released"
+}
+
+/// The positive control of EnsRuntimeHeld (Story 40.3 row 15b): take ^Ens.Runtime of the scratch namespace pNamespace in this process,
+/// ask EnsRuntimeHeld from this same process, and return what it said (1: it saw the lock the asking process holds). The lock is
+/// released before this returns, whatever happens. Refuses any name that is not EXECMCPTMP<digits><capital letter> and any namespace
+/// that does not exist.
+ClassMethod EnsRuntimeHeldWhileHolding(pNamespace As %String) As %String
+{
+    If pNamespace '? 1"EXECMCPTMP"1.N1U { Quit "refused: the namespace must be EXECMCPTMP, digits and one capital letter" }
+    If '##class(%SYS.Namespace).Exists(pNamespace) { Quit "refused: namespace "_pNamespace_" does not exist" }
+    Set tOrig = $NAMESPACE
+    Set tLocked = 0
+    Set tAnswer = "refused: the lock could not be taken"
+    Try {
+        Set $NAMESPACE = pNamespace
+        Lock +^Ens.Runtime:5
+        Set tLocked = $Test
+        Set $NAMESPACE = tOrig
+        If tLocked Set tAnswer = ..EnsRuntimeHeld(pNamespace)
+    } Catch ex {
+        Set tAnswer = "refused: "_ex.DisplayString()
+    }
+    If tLocked {
+        Set $NAMESPACE = pNamespace
+        Lock -^Ens.Runtime
+    }
+    Set $NAMESPACE = tOrig
+    Quit tAnswer
 }
 
 }

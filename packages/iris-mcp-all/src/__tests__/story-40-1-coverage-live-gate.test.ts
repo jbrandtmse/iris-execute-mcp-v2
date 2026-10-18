@@ -31,7 +31,7 @@
  *  - Rows 10 and 11: a foreign session and a running suite run both refuse a new run with `MONITOR_BUSY`.
  *  - Rows 13 and 14: the time limit, and the default governance.
  *
- * This gate, the Story 40.1 QA gate, the two Story 40.2 gates and the Story 40.3 gate are the only ones that start Line-by-Line sessions (the package runs its files
+ * This gate, the Story 40.1 QA gate, the two Story 40.2 gates and the two Story 40.3 gates are the only ones that start Line-by-Line sessions (the package runs its files
  * serially, `--no-file-parallelism`). It starts every
  * row with the monitor idle: when a session it did not start is active, an armed gate fails and names it, an unarmed one
  * skips, and the session is left alone. A process is terminated only through the fixture's `TerminateCoverageProcess`,

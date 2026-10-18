@@ -7,7 +7,7 @@ All notable changes to the IRIS MCP Server Suite are documented in this file.
 No tool, action or governance key is added, so no tool count moves (the Development server stays at 32 package tools, 33
 advertised; the suite at 110 package tools, 115 advertised). The prompt pack stays at 13 prompts, the `core` preset at 14
 package tools, and the frozen governance baseline at hash `1e62c5ad5bf7` (141 keys). The refusal-code catalog grows from 9 to
-10 codes. `BOOTSTRAP_VERSION` moves from `06b8b83fc319` to `9ce1a489469d`, because `REST/UnitTest.cls`, `REST/Coverage.cls`
+10 codes. `BOOTSTRAP_VERSION` moves from `06b8b83fc319` to `3347b2f36ff2`, because `REST/UnitTest.cls`, `REST/Coverage.cls`
 and `REST/Dispatch.cls` changed (the bootstrapped service stays at 35 classes).
 
 ### Added
@@ -20,7 +20,9 @@ and `REST/Dispatch.cls` changed (the bootstrapped service stays at 35 classes).
   `proceed` when the namespace's production is stopped or is one of the productions the run's TestProduction tests declare
   (their `PRODUCTION` parameter), and `busy` otherwise, including when the state cannot be read. A run is guarded when any test
   class it will run is a TestProduction subclass, at package, class and method level (a method-level run of such a class is
-  guarded whatever the method). A run with no TestProduction test never reads Ens state and is byte-identical to before.
+  guarded whatever the method). On the coverage path those are the classes its runner runs, judged by their compiled classes:
+  every class of a package, and the target itself when a package-level target holds no test class (the runner then runs it as
+  a class). A run with no TestProduction test never reads Ens state and is byte-identical to before.
 - **`PRODUCTION_BUSY`, a refusal code.** The catalog goes from 9 to 10 codes. The refusal is `isError: true` with
   `namespace`, `state`, `testProductions` (`class` and `production`) and, when the state was read, the running `production`,
   or else `state: "Unknown"` and `error`. Nothing is run or queued, no run id is allocated, and that production is left
@@ -50,10 +52,14 @@ and `REST/Dispatch.cls` changed (the bootstrapped service stays at 35 classes).
 - The decision is taken under Ens's lifecycle lock, but `%UnitTest.TestProduction` starts its production later, in the test
   process, after the user's hooks (orchestrator decision #57). A production another process starts in that window is still
   stopped.
-- A run against a server without the guard route is unguarded (above).
-- A production already running under a name one of the run's tests declares is treated as that run's own and is stopped and
-  restarted by the test, whoever started it: a developer's own run of that production, or a concurrent run of the same test, is
-  not protected.
+- A run against a server without the guard route is unguarded (above). So is a run in a namespace that cannot see the
+  `ExecuteMCPv2` package (no `%ALL` package mapping, as after a manual setup): the guard cannot run there, and the route answers
+  `proceed` with no TestProduction tests, as for a namespace that cannot be switched to.
+- A production already running under a name one of the run's tests declares is treated as that run's own and is stopped by the
+  run, whoever started it: by its own test, which restarts it for the test, or by another TestProduction test of the same run.
+  One that does not stop within the test's `MAXWAIT` is force-stopped and cleaned with `CleanProduction(1)`, which also deletes
+  its persistent application data, and the run leaves it Stopped: a developer's own run of that production, or a concurrent run
+  of the same test, is not protected.
 - A guard read that fails for any reason other than a 404 (an HTTP 5xx or 403, a connection error) ends the call before anything
   is queued, even for a run with no TestProduction test.
 - A cancelled, killed or erroring TestProduction run leaves its production running.

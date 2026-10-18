@@ -1683,13 +1683,17 @@ process), stop it with `iris_production_control` and run the tests again. The su
 keeps no record of who started one, so a leftover cannot be told from a production someone started on purpose.
 
 Limits, stated plainly. The guard needs the ExecuteMCPv2 service at the version that ships it; against a server whose service
-lacks it (the guard route answers 404) the run goes ahead unguarded, as before. The decision is taken under Ens's own lifecycle
-lock, but `%UnitTest.TestProduction` starts its production later, in the test process, so a production started by another
-process in between would still be stopped. A production that is already running under a name one of the run's tests declares is
-treated as that run's own and is stopped and restarted by the test, whoever started it, so a developer's own run of that
-production, or a concurrent run of the same test, is not protected. A guard read that fails for any reason other than a 404 (an
-HTTP 5xx or 403, a connection error) ends the call before anything is queued with the usual `Error executing tests` result, even
-for a run with no TestProduction test. A class that is neither compiled nor defined is not a TestProduction test. Privileges
+lacks it (the guard route answers 404) the run goes ahead unguarded, as before. So does a run in a namespace that cannot see the
+`ExecuteMCPv2` package (no `%ALL` package mapping, as after a manual setup): the guard cannot run there. The decision is taken
+under Ens's own lifecycle lock, but `%UnitTest.TestProduction` starts its production later, in the test process, so a
+production started by another process in between would still be stopped. A production that is already running under a name one
+of the run's tests declares is treated as that run's own and is stopped by the run, whoever started it: by its own test, which
+restarts it for the test, or by another TestProduction test of the same run. One that does not stop within the test's `MAXWAIT`
+is force-stopped and cleaned with `CleanProduction(1)`, which also deletes its persistent application data, and the run leaves it
+Stopped, so a developer's own run of that production, or a concurrent run of the same test, is not protected. A guard read that
+fails for any reason other than a 404 ends the call before anything is queued (an HTTP 5xx or 403 with the usual
+`Error executing tests` result, a connection error with the server's own tool error), even for a run with no TestProduction
+test. A class that is neither compiled nor defined is not a TestProduction test. Privileges
 were verified under `_SYSTEM` only; a lower-privileged account gets IRIS's own error text. Earliest IRIS version verified:
 2026.2 build 221U.
 </details>
@@ -1867,7 +1871,9 @@ Line-by-Line or PERFMON session is running, a call is refused with `isError: tru
 **TestProduction guard (Story 40.3).** `%UnitTest.TestProduction` stops any production in the namespace that is not stopped
 before it starts its own. So a coverage run of a `%UnitTest.TestProduction` test asks the same IRIS-side guard as
 `iris_execute_tests`, before it allocates a run id (only the compiled test classes are asked, because the runner never
-compiles): while a production other than the tests' own runs in the namespace, or its state cannot be read, the call is
+compiles, and they are the classes the runner will run: every class of a package, judged by its compiled class, and the target
+itself when a package-level target holds no test class, because the runner then runs it as a class): while a production other
+than the tests' own runs in the namespace, or its state cannot be read, the call is
 refused with `isError: true` and `code: "PRODUCTION_BUSY"` (`namespace`, `state`, `testProductions`, and `production` or
 `error`). No run id is allocated, nothing is written and no monitor session is started, and that production is left
 untouched. With no other production running the run completes as before and leaves its own production stopped. See the

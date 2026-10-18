@@ -534,11 +534,13 @@ async function discoverPackageTests(
  *
  * Story 36.1 AC 36.1.6: this is the error-kind entry point of the ONE
  * shared envelope helper, {@link testRunEnvelope}, which every return of this
- * tool now goes through — the pre-existing two zero-result-guard call sites
+ * tool but one goes through — the pre-existing two zero-result-guard call sites
  * (package discovery, and the shared post-run zero-method-rows check), the
  * "no job ID" early return, the transport-error catch, the "running" result
  * and the completed result — so their shapes and handle fields can never
- * diverge. `handles` is optional and additive (Rule #19): omitted entirely,
+ * diverge. The one exception is the TestProduction guard's `PRODUCTION_BUSY`
+ * refusal (Story 40.3): it is the shared `refusalResult` shape, returned before
+ * anything is queued, so it holds no handle. `handles` is optional and additive (Rule #19): omitted entirely,
  * the output is byte-for-byte what it was before this story (the
  * pre-existing two call sites' own pinned tests exercise exactly that path,
  * unchanged).
