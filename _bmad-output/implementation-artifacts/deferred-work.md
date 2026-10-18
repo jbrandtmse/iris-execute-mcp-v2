@@ -3297,3 +3297,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-40-3-testproduction-runs.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: irislib/%UnitTest/Manager.cls BeforeRunTest (d:before'="" @before), RunOneTestSuite ';' split and RunTest ',' split; RunTests validates only that target is non-empty. The MCP path (iris_execute_tests method segment) was closed in Story 40.3's re-review
 - 2026-10-18T19:52:59Z status=wontfix-theoretical owner=40-3-testproduction-runs by=cr note=no MCP tool calls POST /tests, and a REST caller with webapp access already holds POST /command. Real if a tool starts calling RunTests
+
+### DW-606: orchestrator-decisions-wave-6.md pause banner still says the run is paused after run_resumed, and its ~20:40Z time disagrees with the cycle log's 20:31:56Z
+- source: spec-40-3-testproduction-runs.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: banner: Run paused 2026-10-18 (~20:40Z); cycle-log-epic-40.md: run_paused 20:31:56Z, run_resumed 20:56:25Z (0f996c1 did not touch the banner)
+- 2026-10-18T21:41:52Z status=wontfix-accepted owner=40-3-testproduction-runs by=cr note=lead-owned run-state banner, rewritten at each pause/resume; reopen_if=a resume or merge gate reads the banner and treats the run as paused
+
+### DW-607: ProductionGuardTest's guard-and-dictionary agreement loop takes its expected value from %Dictionary.Classname:IsValid, the same function IsClassName now calls, so it cannot fail; the claim that every compilable class name passes the guard's name check is pinned only by one CJK sample, not against the compiler's own validator
+- source: _bmad-output/implementation-artifacts/spec-40-3-testproduction-runs.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: lead scoped re-review of 47412c4 (2026-10-18): ProductionGuardTest.cls:125-127; IsClassnameValid^%occName (behind $System.OBJ.IsValidClassname) source is not in the irislib snapshot
+- 2026-10-18T21:53:57Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 burn-down: take the expected value from $System.OBJ.IsValidClassname for non-existent names, or drop the loop and keep the CJK assertions
