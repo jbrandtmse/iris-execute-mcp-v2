@@ -5,9 +5,10 @@
  * frozen-baseline generator use (`packages/shared/src/governance-baseline-
  * derivation.ts`, CR 16.0-1) over the BUILT dev tool surface, so it checks
  * what actually ships:
- *  - `iris_test_status` derives exactly `iris_test_status:poll` and
- *    `iris_test_status:cancel`, classified `read` / `write` by `mutates`, and
- *    NEITHER key is in the frozen Epic-14 baseline (new keys are governed by
+ *  - `iris_test_status` derives exactly `iris_test_status:poll`,
+ *    `iris_test_status:cancel` and (Story 40.2) `iris_test_status:export`,
+ *    classified `read` / `write` / `write` by `mutates`, and NONE of the keys
+ *    is in the frozen Epic-14 baseline (new keys are governed by
  *    `mutates`, never absorbed into the baseline — Rule #23);
  *  - `iris_execute_tests` still derives its bare, frozen key (no `action` enum
  *    was added to it — constraint E-1; architecture decision L1) and that key
@@ -42,11 +43,17 @@ describe("Story 36.2 AC 36.2.1 — iris_test_status / iris_execute_tests governa
     };
 
     const testStatus = devTool("iris_test_status");
-    expect(deriveKeysForTool(testStatus, "iris-dev-mcp")).toEqual(["iris_test_status:poll", "iris_test_status:cancel"]);
-    expect(testStatus.mutates).toEqual({ poll: "read", cancel: "write" });
+    // Story 40.2 adds the third key, `export` (a write, default-disabled, outside the baseline); the first two are unchanged.
+    expect(deriveKeysForTool(testStatus, "iris-dev-mcp")).toEqual([
+      "iris_test_status:poll",
+      "iris_test_status:cancel",
+      "iris_test_status:export",
+    ]);
+    expect(testStatus.mutates).toEqual({ poll: "read", cancel: "write", export: "write" });
     expect(testStatus.defaultEnabled).toBeUndefined();
     expect(GOVERNANCE_BASELINE.has("iris_test_status:poll")).toBe(false);
     expect(GOVERNANCE_BASELINE.has("iris_test_status:cancel")).toBe(false);
+    expect(GOVERNANCE_BASELINE.has("iris_test_status:export")).toBe(false);
 
     const executeTests = devTool("iris_execute_tests");
     expect(deriveKeysForTool(executeTests, "iris-dev-mcp")).toEqual(["iris_execute_tests"]);
@@ -86,7 +93,7 @@ describe("Story 40.1 AC-6 - iris_test_coverage governance key and annotations", 
     });
   });
 
-  it("leaves the keys of iris_test_status and the frozen iris_execute_tests unchanged by the coverageRunId parameter", async () => {
+  it("leaves the first two keys of iris_test_status and the frozen iris_execute_tests unchanged by the coverageRunId parameter", async () => {
     const { deriveKeysForTool } = await import(
       pathToFileURL(resolve(sharedDist, "governance-baseline-derivation.js")).href
     );
@@ -96,8 +103,8 @@ describe("Story 40.1 AC-6 - iris_test_coverage governance key and annotations", 
       inputSchema: unknown;
       mutates?: unknown;
     };
-    expect(deriveKeysForTool(status, "iris-dev-mcp")).toEqual(["iris_test_status:poll", "iris_test_status:cancel"]);
-    expect(status.mutates).toEqual({ poll: "read", cancel: "write" });
+    expect(deriveKeysForTool(status, "iris-dev-mcp").slice(0, 2)).toEqual(["iris_test_status:poll", "iris_test_status:cancel"]);
+    expect(status.mutates).toMatchObject({ poll: "read", cancel: "write" });
     const tests = allTools.find(({ pkg, tool }) => pkg === "iris-dev-mcp" && tool.name === "iris_execute_tests")!.tool as {
       name: string;
       inputSchema: unknown;

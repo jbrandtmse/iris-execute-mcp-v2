@@ -221,7 +221,7 @@ const gateTestFiles = [
   // Story40Q.* inside Q, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-40-0-qa-live-gate.test.ts",
   // Story 40.1: `iris_test_coverage` and the `iris_test_status` `coverageRunId` companion on the BUILT iris-dev-mcp and iris-admin-mcp dists over real stdio JSON-RPC, with raw HTTP to the
-  // coverage routes. It and the QA gate below are the only gates that start Line-by-Line sessions (the files run serially): it starts each row with the monitor idle and ends each row asserting it is idle, and
+  // coverage routes. It, the QA gate below and the Story 40.2 gate (which follows them) are the only gates that start Line-by-Line sessions (the files run serially): it starts each row with the monitor idle and ends each row asserting it is idle, and
   // terminates a process only through the fixture's MayTerminate check. Writes EXECMCPTMP401A and EXECMCPTMP401B (their database files too), Story401.* inside A, and
   // ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-40-1-coverage-live-gate.test.ts",
@@ -231,6 +231,12 @@ const gateTestFiles = [
   // idle and ends each row asserting it is idle, and terminates no process. Writes EXECMCPTMP40S and EXECMCPTMP40T (their database files too), Story401.* and
   // Story401Q.* inside them, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-40-1-qa-live-gate.test.ts",
+  // Story 40.2: the class-source coverage summary, `minCoverage` and its verdict, the `iris_test_status` `export` action (the Cobertura file, checked against the pinned DTD's content model) and
+  // the loaded-routines check of a run, on the BUILT iris-dev-mcp and iris-admin-mcp dists over real stdio JSON-RPC, with raw HTTP to the coverage routes and raw Atelier reads of the class
+  // documents. It follows the two 40.1 gates as the third that starts Line-by-Line sessions (the files run serially), starts each row with the monitor idle and ends each row asserting it is idle
+  // with no ownership node, and terminates no process. Writes EXECMCPTMP402A (its database files too), Story402.* inside it, a temporary directory, one synthetic run record and
+  // ExecuteMCPv2.Temp.Story391Fixture, which it removes.
+  "src/__tests__/story-40-2-coverage-reports-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

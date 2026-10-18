@@ -27,7 +27,9 @@ import {
   type ToolResult,
   type ToolContext,
 } from "@iris-mcp/shared";
+import { createRequire } from "node:module";
 import { z } from "zod";
+import { buildCoberturaXml, validateOutputPath, writeCoberturaFile } from "./cobertura.js";
 import {
   TEST_POLL_INTERVAL,
   realClock,
@@ -41,6 +43,18 @@ import {
   readClassLevelErrors,
   type SqlCtx,
 } from "./unit-test-results.js";
+import {
+  classSourceCoverage,
+  coverageTotals,
+  coverageVerdict,
+  formatRanges,
+  mapSources,
+  sourceTextLines,
+  verdictTextLine,
+  type ClassSource,
+  type CoverageVerdict,
+  type SourceTotals,
+} from "./coverage-report.js";
 
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
@@ -75,6 +89,30 @@ export interface CoverageRoutine {
   skeleton: Array<[number, string]>;
 }
 
+/** One method of a class in the class-source map: its declaration line and the INT line of each body line. */
+export interface SourceMethodRaw {
+  name: string;
+  /** The class-document line that declares the method; `null` when it cannot be found. */
+  line: number | null;
+  /** The INT routine of the method's mapped lines; empty when none maps. Absent when the method has a `reason`. */
+  routine?: string;
+  /** `intLines[k-1]` is the INT line of body line k, or 0 when that line has none. Absent when the method has a `reason`. */
+  intLines?: number[];
+  /** Why the method has no body map: `generator`, `not-objectscript` or `layout`. */
+  reason?: string;
+}
+
+/** The class-source map of one measured class, as the IRIS side's Status route returns it. */
+export interface SourceClassRaw {
+  class: string;
+  /**
+   * Why the class has no map: `not-up-to-date` (its definition changed after it was compiled), `not-compiled` (it has no
+   * compiled definition at the end of the run), or `unavailable` (its map could not be built).
+   */
+  reason?: string;
+  methods: SourceMethodRaw[];
+}
+
 /** A coverage run record, as the IRIS side's Status route returns it. */
 export interface CoverageRun {
   coverageRunId: number;
@@ -98,6 +136,10 @@ export interface CoverageRun {
   unmeasured: Array<{ class: string; reason: string }>;
   reclaimed?: { coverageRunId: number; pid: number | null };
   routines?: CoverageRoutine[];
+  /** The minimum the run was started with (0 to 100). */
+  minCoverage?: number;
+  /** The class-source map of each measured class; present exactly when `routines` is. */
+  sources?: SourceClassRaw[];
 }
 
 /** The result of the Start route: a run record plus the outcome, or a refusal that holds no run. */
@@ -222,6 +264,8 @@ export function routineCoverage(routine: CoverageRoutine): RoutineCoverage {
 export interface ClassCoverage {
   class: string;
   routines: RoutineCoverage[];
+  /** The class-source coverage over the class document's lines (Story 40.2); present when the run has a source map. */
+  source?: ClassSource;
 }
 
 export interface CoverageSection {
@@ -229,9 +273,17 @@ export interface CoverageSection {
   complete: boolean;
   classes: ClassCoverage[];
   unmeasured: Array<{ class: string; reason: string }>;
+  /** The class-source totals over the classes that have a result; present when the run has a source map. */
+  source?: SourceTotals;
+  /** The verdict against `minCoverage`; present on a completed run started with one. */
+  verdict?: CoverageVerdict;
 }
 
-/** The `coverage` object of a run: its measured routines grouped by class, and the classes it could not measure. */
+/**
+ * The `coverage` object of a run: its measured routines grouped by class, and the classes it could not measure. When the
+ * run has a class-source map it also carries each class's `source`, the totals as `source`, and, for a completed run
+ * started with `minCoverage`, the `verdict`; a run without a map has exactly the 40.1 shape.
+ */
 export function buildCoverageSection(run: CoverageRun): CoverageSection {
   const byClass = new Map<string, RoutineCoverage[]>();
   for (const routine of run.routines ?? []) {
@@ -239,21 +291,26 @@ export function buildCoverageSection(run: CoverageRun): CoverageSection {
     list.push(routineCoverage(routine));
     byClass.set(routine.class, list);
   }
-  return {
+  const classes: ClassCoverage[] = [...byClass.entries()].map(([className, routines]) => ({ class: className, routines }));
+  const section: CoverageSection = {
     complete: run.status === "completed" && run.routines !== undefined,
-    classes: [...byClass.entries()].map(([className, routines]) => ({ class: className, routines })),
+    classes,
     unmeasured: run.unmeasured ?? [],
   };
+  if (run.sources === undefined) return section;
+
+  const sources = new Map(mapSources(run).map((mapped) => [mapped.class, classSourceCoverage(mapped)] as const));
+  for (const entry of classes) entry.source = sources.get(entry.class) ?? { reason: "unavailable" };
+  section.source = coverageTotals(classes.map((entry) => entry.source));
+  if (run.status === "completed" && run.minCoverage !== undefined) {
+    section.verdict = coverageVerdict(run.minCoverage, classes, section.unmeasured);
+  }
+  return section;
 }
 
 // -- Result envelopes --------------------------------------------------------------
 
 const EM_DASH = "\u2014";
-
-/** `8, 16-18, 23` from inclusive ranges. */
-function formatRanges(ranges: Array<[number, number]>): string {
-  return ranges.map(([start, end]) => (start === end ? String(start) : `${start}-${end}`)).join(", ");
-}
 
 /** Executable lines that are not covered, as ranges. */
 function uncoveredRanges(routine: RoutineCoverage): Array<[number, number]> {
@@ -270,9 +327,15 @@ function uncoveredRanges(routine: RoutineCoverage): Array<[number, number]> {
   return toRanges(uncovered);
 }
 
-/** The compact text lines of the coverage: one per routine, then the classes that were not measured. */
+/**
+ * The compact text lines of the coverage: the verdict line when there is a verdict, one line per class over the class
+ * document (and one indented line per method with an uncovered line), then one per routine and the classes that were
+ * not measured. A run without a source map has only the last two kinds.
+ */
 function coverageTextLines(coverage: CoverageSection): string[] {
   const lines: string[] = [];
+  if (coverage.verdict) lines.push(verdictTextLine(coverage.verdict));
+  lines.push(...sourceTextLines(coverage.classes));
   for (const classCoverage of coverage.classes) {
     for (const routine of classCoverage.routines) {
       if (routine.executableLines === 0) {
@@ -632,6 +695,113 @@ export async function cancelCoverageRun(
   }
 }
 
+/** The `@iris-mcp/dev` version, for the Cobertura `version` attribute. */
+function packageVersion(): string {
+  const require = createRequire(import.meta.url);
+  return (require("../../package.json") as { version: string }).version;
+}
+
+/** The error text for a `sourceRoot` that cannot be written into the document, or `undefined`. */
+function invalidSourceRoot(sourceRoot: string | undefined): string | undefined {
+  if (sourceRoot === undefined) return undefined;
+  if (sourceRoot.length === 0) return "sourceRoot must not be empty";
+  if ([...sourceRoot].some((character) => (character.codePointAt(0) as number) < 0x20 || character === "\u007F")) {
+    return "sourceRoot must not contain control characters";
+  }
+  return undefined;
+}
+
+/**
+ * `iris_test_status` `export` for a coverage run: write the run's Cobertura XML to `outputPath` and return the result
+ * `poll` returns for it plus `cobertura: {outputPath, bytes, classes, lines}`. Only a completed run whose coverage is
+ * complete, that ran at least one test and that has a class-source map with at least one class that has a class-source
+ * result is written; for any other run, and for a path that is not acceptable, the result is an error and nothing is
+ * written. A bad `outputPath` is refused before anything is sent
+ * to IRIS. An existing file is overwritten.
+ *
+ * @param ctx - The tool context.
+ * @param args - `coverageRunId`, an absolute `outputPath` ending in `.xml`, an optional `sourceRoot` (the document's one
+ *   `<source>`), and a `namespace` that must agree with the run's when given.
+ */
+export async function exportCoverageRun(
+  ctx: ToolContext,
+  args: { coverageRunId: string; outputPath: string; sourceRoot?: string; namespace?: string },
+): Promise<ToolResult> {
+  const invalid = invalidRunId(args.coverageRunId);
+  if (invalid) return invalid;
+  const badPath = validateOutputPath(args.outputPath) ?? invalidSourceRoot(args.sourceRoot);
+  if (badPath) return coverageErrorResult(`${badPath}. Nothing was sent to IRIS and nothing was written.`);
+  const id = Number(args.coverageRunId);
+  try {
+    const run = await readRun(ctx, args.coverageRunId);
+    const mismatch = namespaceMismatch(run, args.namespace);
+    if (mismatch) return mismatch;
+    const refuse = (why: string): ToolResult =>
+      coverageErrorResult(`Coverage run ${id} cannot be exported: ${why} Nothing was written.`, {
+        coverageRunId: id,
+        status: run.status,
+      });
+    if (run.status !== "completed") {
+      const advice =
+        run.status === "starting" || run.status === "running"
+          ? `Wait for it with iris_test_status (action "poll"), then export.`
+          : "Run the tests again.";
+      return refuse(`its status is ${run.status}, and only a completed run can be. ${advice}`);
+    }
+    const polled = await resultForRun(ctx, run);
+    const coverage = buildCoverageSection(run);
+    if (polled.isError) {
+      return refuse(
+        `it completed but no test method ran (status ${run.status}), so its coverage says nothing. Run the tests again.`,
+      );
+    }
+    if (!coverage.complete) {
+      return refuse(`its status is ${run.status} but its coverage is not complete. Run the tests again.`);
+    }
+    if (run.sources === undefined) {
+      return refuse(
+        `its status is ${run.status} but the instance returned no class-source data for it. Redeploy the IRIS-side ` +
+          `classes (start any iris-mcp server against this instance) and run the tests again.`,
+      );
+    }
+
+    const document = buildCoberturaXml(run, coverage, {
+      version: packageVersion(),
+      ...(args.sourceRoot !== undefined ? { sourceRoot: args.sourceRoot } : {}),
+    });
+    if (document.classes === 0) {
+      return refuse(
+        `no class has a class-source result, so the file would hold no lines and a CI tool would read it as fully covered. ` +
+          `Recompile the classes and run the tests again.`,
+      );
+    }
+    let written: { outputPath: string; bytes: number };
+    try {
+      written = await writeCoberturaFile(args.outputPath, document.xml);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return coverageErrorResult(
+        `The Cobertura file for coverage run ${id} could not be written: ${message}. Check that the path can be ` +
+          `written. Nothing was written.`,
+        { coverageRunId: id },
+      );
+    }
+    const line = `Cobertura XML written to ${written.outputPath} (${written.bytes} bytes).`;
+    const cobertura = { outputPath: written.outputPath, bytes: written.bytes, classes: document.classes, lines: document.lines };
+    const [first, ...rest] = polled.content;
+    return {
+      ...polled,
+      content: [{ type: "text", text: `${first?.text ?? ""}\n${line}` }, ...rest],
+      structuredContent: { ...(polled.structuredContent ?? {}), cobertura },
+    };
+  } catch (error: unknown) {
+    if (isIrisError(error)) {
+      return coverageErrorResult(`Error reading coverage run ${args.coverageRunId}: ${error.message}`, { coverageRunId: id });
+    }
+    throw error;
+  }
+}
+
 // -- The tool ------------------------------------------------------------------------
 
 /** The refusal text for a start refused because the monitor is busy. */
@@ -666,12 +836,13 @@ function busyRefusal(start: StartResult): ToolResult {
  */
 export function createTestCoverageHandler(clock: TestClock = realClock): ToolDefinition["handler"] {
   return async (args, ctx) => {
-    const { target, level, classes, namespace, timeout } = args as {
+    const { target, level, classes, namespace, timeout, minCoverage } = args as {
       target: string;
       level: "package" | "class" | "method";
       classes: string[];
       namespace?: string;
       timeout?: number;
+      minCoverage?: number;
     };
 
     const ns = ctx.resolveNamespace(namespace);
@@ -686,6 +857,7 @@ export function createTestCoverageHandler(clock: TestClock = realClock): ToolDef
         namespace: ns,
         maxSeconds: MAX_RUN_SECONDS,
         maxLines: MAX_MEASURED_LINES,
+        ...(minCoverage !== undefined ? { minCoverage } : {}),
       });
       const start = startResponse.result;
 
@@ -740,12 +912,22 @@ export const testCoverageTool: ToolDefinition = {
   name: "iris_test_coverage",
   title: "Test Coverage",
   description:
-    "Run ObjectScript unit tests and measure which INT lines of the listed classes' routines they execute. Use it to " +
-    "see how well a test target covers specific classes. It returns the test summary (total, passed, failed, " +
-    "skipped, details) and, per measured routine, its executable line count, covered line count, percent and the " +
-    "executable and covered line ranges; a class that could not be measured is listed under coverage.unmeasured " +
-    "with a reason (not-compiled, no-routines or no-int-source). The text result is compact: one status line, one " +
-    "line per routine with its uncovered ranges, then the classes that were not measured. " +
+    "Run ObjectScript unit tests and measure which lines of the listed classes they execute. Use it to " +
+    "see how well a test target covers specific classes, and which lines of their source it misses. It returns the test " +
+    "summary (total, passed, failed, skipped, details) and the coverage twice. Per class and per method, over the " +
+    "class's own source lines (coverage.classes[].source): executable lines, covered lines, percent and the " +
+    "uncovered line ranges, plus the count of lines the compiler generated in the class, which are never reported as " +
+    "source lines; a method that has no class-source lines carries a reason (generator, not-objectscript or layout), " +
+    "and a class whose definition changed after it was compiled has source.reason not-up-to-date. And per measured INT " +
+    "routine (coverage.classes[].routines[]): its executable line count, covered line count, percent and the " +
+    "executable and covered INT line ranges. A class that could not be measured is listed under coverage.unmeasured " +
+    "with a reason (not-compiled, no-routines or no-int-source). The text result is compact: one status line, the " +
+    "coverage target line when minCoverage was passed, one line per class with its uncovered ranges (and one indented " +
+    "line per method with an uncovered line), one line per routine, then the classes that were not measured. " +
+    "minCoverage (0 to 100) adds coverage.verdict to a completed result: a class passes when its unrounded ratio of " +
+    "covered to executable class lines is at least the minimum, fails below it or when it was not measured, and is " +
+    "notApplicable with no executable class line; overall passes when the unrounded total is at least the minimum and " +
+    "no class failed for want of a result. A failing verdict is still isError false. " +
     "DEFAULT-DISABLED (it starts an instance-wide monitor session and runs test code): enable it with " +
     "IRIS_GOVERNANCE={\"global\":{\"iris_test_coverage\":true}}. " +
     "Operator control: IRIS_TEST_TIMEOUT (seconds) sets the default wait budget; the `timeout` argument overrides " +
@@ -760,7 +942,10 @@ export const testCoverageTool: ToolDefinition = {
     "generates in them (list 1 to 50 classes; the run is refused above 200,000 measured INT lines); a method that " +
     "compiles to no INT code has no lines to cover. " +
     "Class names are matched exactly as compiled, with the package and the letter case (for example MyApp.Orders). " +
-    "Line numbers are INT line numbers: INT line n is line n+1 of the document iris_doc_get returns for " +
+    "Class line numbers are those of the class document that iris_doc_get returns for '<class>.cls', which IRIS " +
+    "stores in its own layout (one blank line between members, each signature on one line): a file uploaded in " +
+    "another layout can number its lines differently, so read the class with iris_doc_get before comparing. " +
+    "INT line numbers (the routine lines) are different: INT line n is line n+1 of the document iris_doc_get returns for " +
     "'<routine>.int' (for example 'MyApp.Orders.1.int') and of the text iris_routine_intermediate returns, whose " +
     "line 1 is the ROUTINE header. " +
     "If the wait budget expires while the run is still executing, the result is isError false with " +
@@ -768,7 +953,10 @@ export const testCoverageTool: ToolDefinition = {
     "iris_test_status (action \"poll\", coverageRunId), which returns the same result once the run is finished; " +
     "its \"cancel\" action stops the run and is a key of its own, iris_test_status:cancel, also DEFAULT-DISABLED " +
     "(enable it with IRIS_GOVERNANCE={\"global\":{\"iris_test_status:cancel\":true}}). A coverage handle is kept " +
-    "for the 20 most recent runs and does not survive an instance restart.",
+    "for the 20 most recent runs and does not survive an instance restart. " +
+    "A Cobertura XML file for CI tools is written by iris_test_status action \"export\" (coverageRunId, an absolute " +
+    "outputPath ending .xml), never by this tool; export is a write key of its own, also DEFAULT-DISABLED (enable it " +
+    "with IRIS_GOVERNANCE={\"global\":{\"iris_test_status:export\":true}}).",
   inputSchema: z.object({
     target: z
       .string()
@@ -802,6 +990,17 @@ export const testCoverageTool: ToolDefinition = {
           "robust path for a slow suite.",
       ),
     namespace: z.string().optional().describe("Target namespace (default: configured)"),
+    minCoverage: z
+      .number()
+      .min(0)
+      .max(100)
+      .optional()
+      .describe(
+        "A coverage target, a number from 0 to 100. The run is stored with it, and a completed result carries " +
+          "coverage.verdict: each class is pass when its unrounded class-line ratio is at least the target, fail " +
+          "below it or when it was not measured, and notApplicable with no executable class line. The verdict never " +
+          "makes the result an error. Omit it for no verdict.",
+      ),
   }),
   annotations: {
     // It prunes its own older run records and runs arbitrary test code.

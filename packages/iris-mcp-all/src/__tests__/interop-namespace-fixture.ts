@@ -49,7 +49,13 @@
  * relative to the moment the seed runs, fixture xi), which `seedEventLogCounts` compiles INSIDE a scratch
  * namespace.
  *
- * Shared by Stories 39.1 to 40.0.
+ * Story 40.2 adds the coverage-report helpers to the fixture class: `HoldRunnerLock`, `RunnerLockHeld` and
+ * `ReleaseRunnerLock` (hold the runner owner lock of the next coverage run, so its runner starts late),
+ * `DeleteObjectCode` (delete the object code of a `Story402` class's routine in a scratch namespace), and
+ * `SeedLargeRun`, `ClearLargeRun` and `MeasureStatus` (a synthetic 200,000-line run record at the largest size a run can
+ * hold, removed afterwards, and its measured Status read).
+ *
+ * Shared by Stories 39.1 to 40.2.
  */
 
 import { docFixtures, type WireSession } from "./process-gate-helpers.js";
@@ -637,6 +643,153 @@ ClassMethod TerminateCoverageProcess(pPid As %Integer) As %String
     If tRole = "" { Quit "refused: "_pPid_" is neither the supervisor nor the runner of the session node" }
     If '##class(ExecuteMCPv2.Coverage.Job).MayTerminate(tId, tRole, pPid) { Quit "refused: MayTerminate is false for the "_tRole }
     Quit "terminated:"_$System.Process.Terminate(pPid)
+}
+
+/// Hold the runner owner lock of coverage run pId from a job of this class, so that the runner of that run (it waits up to
+/// 10 seconds for the lock) starts late (Story 40.2). Refuses unless pId is the next id the coverage service will allocate and
+/// no run has it. The job releases the lock when ReleaseRunnerLock is called, and in any case after pSeconds (at most 8).
+/// Returns held, or refused: <why>.
+ClassMethod HoldRunnerLock(pId As %Integer, pSeconds As %Integer = 5) As %String
+{
+    If pId '= ($Get(^IRIS.TempExecuteMCPv2Coverage("seq")) + 1) { Quit "refused: "_pId_" is not the next coverage run id" }
+    If ##class(ExecuteMCPv2.Coverage.Job).RunExists(pId) { Quit "refused: coverage run "_pId_" exists" }
+    Kill ^IRIS.TempStory391Fixture("runnerHoldStop")
+    Job ##class(ExecuteMCPv2.Temp.Story391Fixture).RunnerLockRun(pId, $Select(pSeconds > 8: 8, pSeconds < 1: 1, 1: pSeconds))::10
+    If '$Test { Quit "refused: the lock holder did not start" }
+    Set tHeld = 0
+    For tI = 1:1:50 {
+        If ..RunnerLockHeld(pId) {
+            Set tHeld = 1
+            Quit
+        }
+        Hang 0.1
+    }
+    Quit $Select(tHeld: "held", 1: "refused: the lock holder did not take the lock")
+}
+
+/// The lock holder's job: hold the runner owner lock of run pId until ReleaseRunnerLock sets the stop flag, for pSeconds at most.
+ClassMethod RunnerLockRun(pId As %Integer, pSeconds As %Integer)
+{
+    Lock +^IRIS.TempExecuteMCPv2Coverage("owner", pId, "runner"):10
+    If '$Test { Quit }
+    For tI = 1:1:(pSeconds * 10) {
+        If $Get(^IRIS.TempStory391Fixture("runnerHoldStop")) { Quit }
+        Hang 0.1
+    }
+    Lock -^IRIS.TempExecuteMCPv2Coverage("owner", pId, "runner")
+}
+
+/// Is the runner owner lock of run pId held by another process? A lock this call can take is released at once.
+ClassMethod RunnerLockHeld(pId As %Integer) As %Boolean
+{
+    Lock +^IRIS.TempExecuteMCPv2Coverage("owner", pId, "runner"):0
+    If $Test {
+        Lock -^IRIS.TempExecuteMCPv2Coverage("owner", pId, "runner")
+        Quit 0
+    }
+    Quit 1
+}
+
+/// Ask the lock holder to release the runner owner lock of run pId and wait for it to do so. Returns released, or refused: <why>.
+ClassMethod ReleaseRunnerLock(pId As %Integer) As %String
+{
+    Set ^IRIS.TempStory391Fixture("runnerHoldStop") = 1
+    For tI = 1:1:50 {
+        If '..RunnerLockHeld(pId) { Quit }
+        Hang 0.1
+    }
+    If ..RunnerLockHeld(pId) { Quit "refused: the lock is still held" }
+    Kill ^IRIS.TempStory391Fixture("runnerHoldStop")
+    Quit "released"
+}
+
+/// Delete the object code (the OBJ routine) of routine pRoutine in the scratch namespace pNamespace, so that a Line-by-Line
+/// session cannot load it (Story 40.2). Refuses any namespace but EXECMCPTMP<digits><capital letter> and any routine but a
+/// Story402 class's first. Returns deleted, or refused: <why>.
+ClassMethod DeleteObjectCode(pNamespace As %String, pRoutine As %String) As %String
+{
+    If pNamespace '? 1"EXECMCPTMP"1.N1U { Quit "refused: the namespace must be EXECMCPTMP, digits and one capital letter" }
+    If pRoutine '? 1"Story402."1.AN1".1" { Quit "refused: the routine must be the first routine of a Story402 class" }
+    Set tOrig = $NAMESPACE
+    Set tResult = "deleted"
+    Try {
+        Set $NAMESPACE = pNamespace
+        If '$Data(^rOBJ(pRoutine)) { Set tResult = "refused: "_pRoutine_" has no object code in "_pNamespace }
+        Else {
+            Set tSC = ##class(%Routine).Delete(pRoutine_".OBJ", 1)
+            If $System.Status.IsError(tSC) { Set tResult = "refused: "_$System.Status.GetErrorText(tSC) }
+            ElseIf $Data(^rOBJ(pRoutine)) { Set tResult = "refused: the object code of "_pRoutine_" is still there" }
+        }
+    } Catch ex {
+        Set tResult = "refused: "_ex.DisplayString()
+    }
+    Set $NAMESPACE = tOrig
+    Quit tResult
+}
+
+/// Write a synthetic terminal coverage run record, id pId (above 990000000, so no real run has it): four routines of 50000
+/// INT lines each, 180000 skeleton entries and 100000 counted lines between them, and a class-source map of 180000 body lines
+/// (the largest a run can hold is 200000 INT lines). Returns the number of INT lines, or refused: <why>.
+ClassMethod SeedLargeRun(pId As %Integer) As %String
+{
+    If (pId < 990000000) || (pId '= (pId \ 1)) { Quit "refused: the id must be a whole number above 990000000" }
+    Kill ^IRIS.TempExecuteMCPv2Coverage("run", pId)
+    Set tRoutines = ""
+    For tN = 1:1:4 {
+        Set tClass = "Story402.Large"_tN
+        Set tRoutine = tClass_".1"
+        Set tRoutines = tRoutines_$ListBuild($ListBuild(tClass, tRoutine, 50000))
+        For tLine = 1:1:45000 {
+            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "skeleton", tN, tLine) = "C:set"
+            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tN, "m", 1, tLine) = tLine
+        }
+        For tLine = 1:1:25000 {
+            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "hits", tN, tLine) = (tLine # 7) + 1
+        }
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tN) = $ListBuild(tClass, "")
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tN, "m", 1) = $ListBuild("Run", 10, tRoutine, "")
+    }
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "namespace") = "HSCUSTOM"
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "target") = "Story402.Large"
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "level") = "class"
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "minCoverage") = 50
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "routines") = tRoutines
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "unmeasured") = ""
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "startedAt") = "2026-10-18T00:00:00.000Z"
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "finishedAt") = "2026-10-18T00:00:01.000Z"
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "hasCounts") = 1
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releasedBy") = "runner"
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "testsDone") = 1
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "status") = "completed"
+    Quit 200000
+}
+
+/// Remove the synthetic run record SeedLargeRun wrote. Refuses an id of a real run.
+ClassMethod ClearLargeRun(pId As %Integer) As %String
+{
+    If (pId < 990000000) || (pId '= (pId \ 1)) { Quit "refused: the id must be a whole number above 990000000" }
+    Kill ^IRIS.TempExecuteMCPv2Coverage("run", pId)
+    Quit "cleared"
+}
+
+/// Build the Status record of run pId the way the Status route does, and measure it inside IRIS: the seconds it took, the
+/// bytes of its JSON and the growth of this process's memory in kilobytes. Returns the measurements as JSON.
+ClassMethod MeasureStatus(pId As %Integer) As %String
+{
+    Set tBefore = $Storage
+    Set tStart = $ZHorolog
+    Set tRun = ##class(ExecuteMCPv2.REST.Coverage).BuildRun(pId, 1)
+    Set tBuilt = $ZHorolog - tStart
+    Set tStream = ##class(%Stream.TmpCharacter).%New()
+    Do tRun.%ToJSON(tStream)
+    Set tTotal = $ZHorolog - tStart
+    Set tAfter = $Storage
+    Set tResult = {}
+    Do tResult.%Set("buildSeconds", +$FNumber(tBuilt, "", 3), "number")
+    Do tResult.%Set("buildAndSerializeSeconds", +$FNumber(tTotal, "", 3), "number")
+    Do tResult.%Set("bytes", tStream.Size, "number")
+    Do tResult.%Set("memoryGrowthKB", (tBefore - tAfter) \ 1024, "number")
+    Quit tResult.%ToJSON()
 }
 
 }

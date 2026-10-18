@@ -42,6 +42,7 @@ ClassMethod Run(pId As %Integer)
         Set tStarted = 1
         Set tSession = $ListBuild(pId, ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "pid"), $Job, ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "startedAt"), tRoutines)
         Set ^IRIS.TempExecuteMCPv2Coverage("session") = tSession
+        If '..LoadedAsListed(pId, tRoutines) Quit
         Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sessionStarted") = 1
 
         Set tUser("ExecuteMCPv2CoverageRun") = pId
@@ -58,6 +59,93 @@ ClassMethod Run(pId As %Integer)
     }
     If tStarted Do ..StopOwnSession(pId)
     If tHeld Lock -^IRIS.TempExecuteMCPv2Coverage("owner", pId, "runner")
+}
+
+/// Did the session this process just started load exactly the routines the run lists? <code>Start</code> skips a routine
+/// that has no object code without an error (a routine deleted after the run resolved its list), and a session that
+/// measures less than the run lists would report 0% for code that was never watched, so the tests do not run then.
+/// <p>On a mismatch this process stops its own session at once, under the release locks
+/// (<method>ExecuteMCPv2.Coverage.Job:TakeReleaseLocks</method>), and only after the session proves to be this run's
+/// (<method>ExecuteMCPv2.Coverage.Job:ProofFailure</method> on the routines it reports: scoped to listed processes,
+/// listing exactly this process and the supervisor, every name readable) and every routine it reports is in the run's
+/// list. A session that monitors no routine at all (every listed routine lost its object code) has no name to read or
+/// compare, so the scope alone proves it (<method>ExecuteMCPv2.Coverage.Job:SessionScopeFailure</method>). After a stop,
+/// the session node is unset and <code>startError</code> says which routines were not loaded and that no test was run;
+/// the supervisor then ends the run <code>failed</code> with that text. Whatever the reason the session could not be
+/// stopped (no lock in time, no proof, <code>Stop</code> failed), <method>RecordUnstoppedSession</method> leaves it for
+/// the supervisor's release or the next start's reclaim.
+/// Returns 1 when the session loaded what the run lists and the tests may run.</p>
+ClassMethod LoadedAsListed(pId As %Integer, pRoutineList As %List) As %Boolean [ Private ]
+{
+    Set tJob = "ExecuteMCPv2.Coverage.Job"
+    If ##class(%Monitor.System.LineByLine).GetRoutineCount() > 0 Do $ClassMethod(tJob, "AwaitNamesReadable", 3)
+    Set tLoaded = $ClassMethod(tJob, "ActiveRoutines")
+    Set tText = $ClassMethod(tJob, "LoadedRoutinesFailure", pRoutineList, tLoaded)
+    If tText = "" Quit 1
+
+    Set tStopped = 0
+    Try {
+        If $ClassMethod(tJob, "TakeReleaseLocks", pId, .tLockText) {
+            Try {
+                ; Re-read under the locks what the session reports, and prove it before it is stopped.
+                Set tNow = $ClassMethod(tJob, "ActiveRoutines")
+                Set tInList = 1
+                For tI = 1:1:$ListLength(tNow) {
+                    If '$ListFind(pRoutineList, $List(tNow, tI)) {
+                        Set tInList = 0
+                        Quit
+                    }
+                }
+                If tInList && $ClassMethod(tJob, "MonitorActive", .tPids) {
+                    Set tSupervisorPid = $ClassMethod(tJob, "RunGet", pId, "pid")
+                    If $ListLength(tNow) = 0 {
+                        Set tProof = $ClassMethod(tJob, "SessionScopeFailure", tPids, $Job, tSupervisorPid, $Job)
+                    } Else {
+                        Set tProof = $ClassMethod(tJob, "ProofFailure", tPids, $Job, tSupervisorPid, $Job, tNow, tNow)
+                    }
+                    If tProof = "" {
+                        Set tSC = ##class(%Monitor.System.LineByLine).Stop()
+                        If $$$ISOK(tSC) {
+                            Set tStopped = 1
+                            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sessionReleased") = 1
+                            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releasedBy") = "runner"
+                            If $ListGet($Get(^IRIS.TempExecuteMCPv2Coverage("session")), 1) = pId Kill ^IRIS.TempExecuteMCPv2Coverage("session")
+                        }
+                    }
+                }
+            } Catch exStop {
+                Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releaseError") = exStop.DisplayString()
+            }
+            Do $ClassMethod(tJob, "DropReleaseLocks", pId)
+        }
+    } Catch ex {
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releaseError") = ex.DisplayString()
+    }
+    If 'tStopped {
+        Do ..RecordUnstoppedSession(pId, tLoaded, tText)
+    } Else {
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "startError") = tText_" No test was run."
+    }
+    Quit 0
+}
+
+/// Record, for run <var>pId</var>, a session this process could not stop although it loaded other routines than the run
+/// lists. <var>pLoaded</var> is the routines the session actually loaded and <var>pText</var> the failure text
+/// (<method>ExecuteMCPv2.Coverage.Job:LoadedRoutinesFailure</method>). The run's <code>routineList</code> is rewritten to
+/// <var>pLoaded</var> and, when the ownership node names this run, the node is rewritten to it as well
+/// (<method>ExecuteMCPv2.Coverage.Job:WithRoutineList</method>); a node that names another run is left as it is. The session is
+/// marked started, so the supervisor releases it, or failing that the next start reclaims it, after proving it against
+/// what it loaded. <code>startError</code> is written last: the supervisor ends the run as soon as it reads it, and by
+/// then everything the release needs is on record.
+ClassMethod RecordUnstoppedSession(pId As %Integer, pLoaded As %List, pText As %String)
+{
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "routineList") = pLoaded
+    Set tSession = $Get(^IRIS.TempExecuteMCPv2Coverage("session"))
+    If $ListGet(tSession, 1) = pId {
+        Set ^IRIS.TempExecuteMCPv2Coverage("session") = ##class(ExecuteMCPv2.Coverage.Job).WithRoutineList(tSession, pLoaded)
+    }
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sessionStarted") = 1
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "startError") = pText_" No test was run."
 }
 
 /// Record the counts, then stop this process's own session and record that it was released. Nothing is read or

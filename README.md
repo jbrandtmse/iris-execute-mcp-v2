@@ -572,6 +572,7 @@ Per the default-seed rule above, the **new write actions** added after governanc
 | dev | `iris_doc_edit` | `regenerateStorage` (the Storage-guard override; Story 38.4) | `apply` is a write that ships **enabled** (see the next subsection) |
 | dev | `iris_sql_query` | — (flat read tool, no actions; Story 38.5) | whole tool (queries only; enabled by default, and still enabled under the read-only preset) |
 | dev | `iris_test_coverage` | the whole tool (a flat write tool, no actions; Story 40.1: it starts an instance-wide Line-by-Line session and runs test code; enable it with `IRIS_GOVERNANCE={"global":{"iris_test_coverage":true}}`) | — |
+| dev | `iris_test_status` | `cancel` (Story 40.1: stops a running test or coverage run; enable it with `{"global":{"iris_test_status:cancel":true}}`), `export` (Story 40.2: writes a completed coverage run's Cobertura XML to a local file; enable it with `{"global":{"iris_test_status:export":true}}`) | `poll` (a read: re-attaches to a test or coverage run; Story 36.2) |
 
 Every **pre-governance** tool action (everything shipped before the governance layer) stays enabled by default. The authoritative per-tool catalog with endpoints and governance notes is [`tool_support.md`](tool_support.md).
 
@@ -711,13 +712,13 @@ Produced by `pnpm measure:tools-payload` ([`scripts/measure-tools-payload.mjs`](
 
 | Server | full (count / bytes / ~tokens) | core (count / bytes / ~tokens) | developer (count / bytes / ~tokens) |
 | --- | --- | --- | --- |
-| @iris-mcp/dev | 33 / 90,149 / ~22,537 | 15 / 43,878 / ~10,970 | 33 / 90,149 / ~22,537 |
+| @iris-mcp/dev | 33 / 93,633 / ~23,408 | 15 / 43,878 / ~10,970 | 33 / 93,633 / ~23,408 |
 | @iris-mcp/admin | 27 / 48,369 / ~12,092 | 13 / 16,862 / ~4,216 | 11 / 16,222 / ~4,056 |
 | @iris-mcp/interop | 25 / 57,046 / ~14,262 | 12 / 38,104 / ~9,526 | 25 / 57,046 / ~14,262 |
 | @iris-mcp/ops | 22 / 30,812 / ~7,703 | 10 / 13,814 / ~3,454 | 10 / 14,265 / ~3,566 |
 | @iris-mcp/data | 8 / 12,643 / ~3,161 | 8 / 12,643 / ~3,161 | 8 / 12,643 / ~3,161 |
 
-`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~65% fewer bytes (`@iris-mcp/admin`: 48,369 → 16,862; `@iris-mcp/dev`: 90,149 → 43,878, ~51%). Last re-measured at Story 40.1 (`pnpm measure:tools-payload` on freshly built dists — mechanical, Rule #51). Byte counts are not test-pinned (only the tool counts are), so they drift whenever a tool description or schema changes, until the next re-measure. `@iris-mcp/dev`'s `full`/`developer` rows include `iris_test_status` and `iris_test_coverage`, which `core` excludes.
+`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~65% fewer bytes (`@iris-mcp/admin`: 48,369 → 16,862; `@iris-mcp/dev`: 93,633 → 43,878, ~53%). Last re-measured at Story 40.2 (`pnpm measure:tools-payload` on freshly built dists — mechanical, Rule #51). Byte counts are not test-pinned (only the tool counts are), so they drift whenever a tool description or schema changes, until the next re-measure. `@iris-mcp/dev`'s `full`/`developer` rows include `iris_test_status` and `iris_test_coverage`, which `core` excludes.
 
 ---
 

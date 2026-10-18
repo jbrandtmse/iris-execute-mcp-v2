@@ -2,6 +2,64 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-18] — Story 40.2: Coverage reports and targets
+
+No tool is added, so no tool count moves (the Development server stays at 32 package tools, 33 advertised; the suite at 110
+package tools, 115 advertised). The prompt pack stays at 13 prompts, the `core` preset at 14 package tools, and the frozen
+governance baseline at hash `1e62c5ad5bf7` (141 keys). `iris_test_status` gains one action, `export`, and so one governance
+key. `BOOTSTRAP_VERSION` moves from `14a4cba6504a` to `3a3b4cf76502`, because `Coverage/Job.cls`, `Coverage/Runner.cls`
+and `REST/Coverage.cls` changed (the bootstrapped service stays at 35 classes).
+
+### Added
+
+- **Coverage over the class source.** Every coverage result (from `iris_test_coverage` and from `iris_test_status` with a
+  `coverageRunId`) now reports, per class and per method, the executable, covered and uncovered lines of the class document
+  (`coverage.classes[].source`, with `coverage.source` the total), the methods in the order the class declares them, and a
+  count of the lines the compiler generated in the class, which are never reported as source lines. The text adds one line per
+  class and one indented line per method with an uncovered line. The mapping is the compiler's own
+  (`%Studio.Debugger:INTLine` per method body line), so a `#define` line, a continuation line of a multi-line statement, a lone
+  `}` and a comment line are never executable; a method generator, a method not written in ObjectScript and a method whose
+  layout is not where IRIS stores it carry a `reason` and no lines; a class without a class-source result has `source.reason`
+  `not-up-to-date` (its definition changed after it was compiled), `not-compiled` (it has no compiled definition at the end of
+  the run) or `unavailable` (its map could not be built). **Class line numbers are those of the document `iris_doc_get` returns for the class**, which
+  IRIS stores in its own layout, so a file uploaded in another layout can number its lines differently. Earliest IRIS version
+  verified: 2026.2 build 221U.
+- **`minCoverage`, a target with a verdict.** `iris_test_coverage` takes an optional `minCoverage` (0 to 100), stored with the
+  run, and a completed result then carries `coverage.verdict` and the text line `Coverage target 90%: FAIL (88.89% overall);
+  failing: ...`. The comparison is unrounded, a class that was not measured (or has no class-source result) fails with its
+  reason, and a failing verdict is `isError: false`. `iris_test_status` reproduces the summary and the verdict from the handle
+  alone.
+- **`iris_test_status` `action: "export"`: a Cobertura XML file for CI tools.** **Default state: DEFAULT-DISABLED.** It is a
+  post-foundation key, `iris_test_status:export`, truthfully classified `write` (it writes a local file), outside the frozen
+  baseline, with no `defaultEnabled` marker. Enable it with `IRIS_GOVERNANCE={"global":{"iris_test_status:export":true}}`. It
+  takes the run's `coverageRunId` and an absolute `outputPath` (the path guard of `iris_doc_export`, now shared: absolute, no `..`
+  segment, ending `.xml`), and an optional `sourceRoot`. Only a completed run with complete coverage is written; any other run is
+  an error that names its status and writes nothing, and so is a completed run in which no class has a class-source result (an
+  empty file would read to a CI tool as 100% covered). CI tools lay the reported line numbers over the repository's own `.cls`
+  files, which must be in the layout IRIS stores (as `iris_doc_export` writes them). The parent directories are created and an
+  existing file is overwritten. The
+  document validates against the published `coverage-04.dtd`. `iris_test_coverage` writes no file, and the annotations of both
+  tools are unchanged.
+- **A session that did not load every listed routine runs no test (DW-598).** The Line-by-Line `Start` skips, without an error, a
+  routine that has no object code. The test process now compares the routines the session loaded with the run's list before any
+  test runs; on a mismatch it stops its own session at once (only after proving it is the run's; a session that monitors no
+  routine at all is proven by its process scope alone), no test runs, and the run ends `failed` with an `error` that names the
+  routines that were not loaded.
+
+### Changed
+
+- **The coverage result and the Status route are supersets (AD-15, AD-33).** The result gains `source` on each class and on
+  `coverage`, and `verdict`; the IRIS-side Status route returns `minCoverage` and `sources` (the class-source map) in addition
+  to everything it returned, and `Start` accepts every 40.1 request unchanged. A Status record without `sources` gives exactly
+  the 40.1 result and text.
+- **The tools-list snapshot** was regenerated with `pnpm gen:tools-list-snapshot --force` (decision #29); it differs only in the
+  `iris_test_coverage` entry (the `minCoverage` property and the description) and the `iris_test_status` entry (the `export`
+  action, `outputPath` and `sourceRoot`, and the description).
+- `iris_doc_export`'s path guard moved, unchanged, to a shared module that `iris_test_status` also uses; the tool's messages are
+  byte-identical.
+- DW-596 is closed with evidence: a terminal run record of the largest size a run can hold (200,000 INT lines) is read in well
+  under 2 seconds, so the 200,000-line cap stands.
+
 ## [Pre-release — 2026-10-17] — Story 40.1: Line coverage probe and engine
 
 One tool is added, `iris_test_coverage` (the Development server goes from 31 to 32 package tools, 32 to 33 advertised; the

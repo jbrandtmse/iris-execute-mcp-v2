@@ -74,7 +74,7 @@ import {
   readTestInstanceStatus,
   type SqlCtx,
 } from "./unit-test-results.js";
-import { cancelCoverageRun, coverageErrorResult, pollCoverageRun } from "./test-coverage.js";
+import { cancelCoverageRun, coverageErrorResult, exportCoverageRun, pollCoverageRun } from "./test-coverage.js";
 
 /** `iris_test_coverage`'s handle: the run's id, all digits (the IRIS side allocates it with `$Increment`). */
 const COVERAGE_RUN_ID_PATTERN = /^\d+$/;
@@ -530,11 +530,22 @@ export const testStatusTool: ToolDefinition = {
     "unit-test job. " +
     "Pass coverageRunId (from iris_test_coverage) alone, without jobId or runIndex, to poll or cancel a coverage " +
     "run (cancel then needs no jobId, and namespace is optional): the run's own namespace is used, and a poll " +
-    "returns the same result iris_test_coverage returns.",
+    "returns the same result iris_test_coverage returns, the class-source summary and the minCoverage verdict " +
+    "included. " +
+    "action:\"export\" (write, DEFAULT-DISABLED by governance \u2014 enable via IRIS_GOVERNANCE, e.g. " +
+    "{\"global\":{\"iris_test_status:export\":true}}): writes a coverage run's Cobertura XML to a local file for CI " +
+    "tools. It needs coverageRunId and outputPath (an absolute path ending in .xml, with no '..' segment; the " +
+    "parent directories are created and an existing file is overwritten); sourceRoot is the optional one <source> " +
+    "of the document. Only a completed run with complete coverage can be exported: for any other run the result is " +
+    "an error naming its status and nothing is written. It returns the poll result plus cobertura " +
+    "{outputPath, bytes, classes, lines}.",
   inputSchema: z.object({
     action: z
-      .enum(["poll", "cancel"])
-      .describe("'poll' (read) re-attaches/reads a run's status; 'cancel' (write, default-disabled) stops one."),
+      .enum(["poll", "cancel", "export"])
+      .describe(
+        "'poll' (read) re-attaches/reads a run's status; 'cancel' (write, default-disabled) stops one; 'export' " +
+          "(write, default-disabled) writes a coverage run's Cobertura XML file.",
+      ),
     jobId: z
       .string()
       .regex(JOB_ID_PATTERN, "jobId must be the all-digits Atelier work-queue id iris_execute_tests returned")
@@ -561,7 +572,21 @@ export const testStatusTool: ToolDefinition = {
         "A coverage run's handle, all digits (from iris_test_coverage's 'coverageRunId'). Use it alone: it cannot " +
           "be combined with jobId or runIndex. The run's own namespace is used; a namespace passed here must match " +
           "it. For 'poll' it returns the coverage result; for 'cancel' it stops the run and reports what was " +
-          "observed.",
+          "observed; for 'export' it names the run to write.",
+      ),
+    outputPath: z
+      .string()
+      .optional()
+      .describe(
+        "Only for 'export', where it is required: the absolute local path of the Cobertura XML file, ending in " +
+          ".xml, with no '..' segment. Missing parent directories are created; an existing file is overwritten.",
+      ),
+    sourceRoot: z
+      .string()
+      .optional()
+      .describe(
+        "Only for 'export': the document's one <source> element (a directory CI tools resolve each class filename " +
+          "against, for example 'src'). Without it the document has no <sources> element.",
       ),
     namespace: z
       .string()
@@ -597,15 +622,49 @@ export const testStatusTool: ToolDefinition = {
   mutates: {
     poll: "read",
     cancel: "write",
+    // Story 40.2 (AD-4, decision #50): writing the Cobertura file is a new side effect, so it is a key of its own,
+    // truthfully a write, and ships DISABLED. It is not in the frozen baseline.
+    export: "write",
   },
   handler: async (args, ctx) => {
     const input = args as {
-      action: "poll" | "cancel";
+      action: "poll" | "cancel" | "export";
       jobId?: string;
       runIndex?: number;
       coverageRunId?: string;
       namespace?: string;
+      outputPath?: string;
+      sourceRoot?: string;
     };
+    if (input.action === "export") {
+      if (input.coverageRunId === undefined) {
+        return coverageErrorResult(
+          "action \"export\" needs coverageRunId, the handle iris_test_coverage returned. Nothing was sent to IRIS.",
+        );
+      }
+      if (input.jobId !== undefined || input.runIndex !== undefined) {
+        return coverageErrorResult(
+          "coverageRunId cannot be combined with jobId or runIndex: a coverage handle names the whole run. " +
+            "Pass coverageRunId alone.",
+        );
+      }
+      if (input.outputPath === undefined) {
+        return coverageErrorResult(
+          "action \"export\" needs outputPath, the absolute path of the .xml file to write. Nothing was sent to IRIS.",
+        );
+      }
+      return exportCoverageRun(ctx, {
+        coverageRunId: input.coverageRunId,
+        outputPath: input.outputPath,
+        ...(input.sourceRoot !== undefined ? { sourceRoot: input.sourceRoot } : {}),
+        ...(input.namespace !== undefined ? { namespace: input.namespace } : {}),
+      });
+    }
+    if (input.outputPath !== undefined || input.sourceRoot !== undefined) {
+      return coverageErrorResult(
+        `outputPath and sourceRoot are only for action "export", not "${input.action}". Nothing was sent to IRIS.`,
+      );
+    }
     if (input.coverageRunId !== undefined) {
       if (input.jobId !== undefined || input.runIndex !== undefined) {
         return coverageErrorResult(

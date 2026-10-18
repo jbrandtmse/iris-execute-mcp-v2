@@ -346,6 +346,28 @@ function routinesOf(content: CoverageContent): RoutineValues[] {
   return content.coverage?.classes[0]?.routines ?? [];
 }
 
+/**
+ * The text lines of a coverage result as Story 40.1 returned them: Story 40.2 adds the class-source lines (a class line, and an
+ * indented method line for each method with an uncovered line) between the status line and the routine lines, so they are removed here
+ * and every other line is compared as before.
+ */
+function withoutClassSourceLines(lines: string[]): string[] {
+  return lines.filter(
+    (line) =>
+      !/^\S+: \d+ of \d+ class lines covered \(/.test(line) &&
+      !/^\S+: no (executable class lines|class-source coverage)/.test(line) &&
+      !/^ {2}\S+: \d+ of \d+ \([\d.]+%\); uncovered /.test(line),
+  );
+}
+
+/** The classes of a coverage object as Story 40.1 returned them: without the `source` that Story 40.2 adds to each class. */
+function classesWithoutSource(content: CoverageContent): unknown[] {
+  return (content.coverage?.classes ?? []).map((entry) => {
+    const { source: _source, ...rest } = entry as typeof entry & { source?: unknown };
+    return rest;
+  });
+}
+
 /** The INT source of a routine, one string per line, read through the raw Atelier document route (the oracle for line numbers). */
 async function intSource(namespace: string, routine: string): Promise<string[]> {
   const answer = await rawIrisRequest(TARGET, `/api/atelier/v1/${namespace}/doc/${routine}.int`, { method: "GET" });
@@ -566,7 +588,7 @@ describe("Story 40.1 QA: the documented recipe alone enables the tool, and a sec
     expect(run.coverage?.unmeasured).toEqual([]);
     expect(run).not.toHaveProperty("reclaimed");
     expect(typeof run.runIndex).toBe("number");
-    expect(allText(result).split("\n")).toEqual([
+    expect(withoutClassSourceLines(allText(result).split("\n"))).toEqual([
       `Coverage run ${run.coverageRunId} completed: 4 tests, 4 passed, 0 failed, 0 skipped.`,
       "Story401.Fixture.1: 20 of 28 executable INT lines covered (71.43%); uncovered 8, 16-18, 23, 27, 47-48",
     ]);
@@ -831,7 +853,7 @@ describe("Story 40.1 QA: input edges on the built server start nothing (AC-1, ma
         coveredRanges: [[6, 7], [10, 10], [13, 13], [16, 16]],
       },
     ]);
-    expect(allText(result).split("\n")).toEqual([
+    expect(withoutClassSourceLines(allText(result).split("\n"))).toEqual([
       `Coverage run ${run.coverageRunId} completed: 4 tests, 4 passed, 0 failed, 0 skipped.`,
       "Story401.FixtureTest.1: 5 of 5 executable INT lines covered (100%)",
       "Story401.Fixture.1: 20 of 28 executable INT lines covered (71.43%); uncovered 8, 16-18, 23, 27, 47-48",
@@ -864,7 +886,7 @@ describe("Story 40.1 QA: input edges on the built server start nothing (AC-1, ma
     expect(routinesOf(content)).toEqual([
       { ...STORY401_ORACLE_ROUTINE, coveredLines: 0, percent: 0, coveredRanges: [] },
     ]);
-    const lines = allText(result).split("\n");
+    const lines = withoutClassSourceLines(allText(result).split("\n"));
     expect(lines[0]).toMatch(/^Coverage run \d+ completed, but no test method ran: /);
     expect(lines[1]).toBe(
       "Story401.Fixture.1: 0 of 28 executable INT lines covered (0%); uncovered 6-10, 12, 14, 16-18, 20, 22-23, 25, 27, 29, 31-33, 36-38, 40-42, 44, 47-48",
@@ -886,7 +908,7 @@ describe("Story 40.1 QA: input edges on the built server start nothing (AC-1, ma
     expect(source[6], "INT line 6").toContain("Set tResult = pN * 2");
     expect(source[7], "INT line 7").toContain("Quit tResult }");
     expect(source).toHaveLength(8);
-    expect(run.coverage?.classes).toEqual([
+    expect(classesWithoutSource(run)).toEqual([
       {
         class: "Story401Q.Tiny",
         routines: [
@@ -903,7 +925,7 @@ describe("Story 40.1 QA: input edges on the built server start nothing (AC-1, ma
       },
     ]);
     expect(run.coverage?.unmeasured).toEqual([]);
-    expect(allText(result).split("\n")).toEqual([
+    expect(withoutClassSourceLines(allText(result).split("\n"))).toEqual([
       `Coverage run ${run.coverageRunId} completed: 1 tests, 1 passed, 0 failed, 0 skipped.`,
       "Story401Q.Tiny.1: 2 of 2 executable INT lines covered (100%)",
     ]);

@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   FIXTURE_CLASS_SOURCE,
   STORY392_IDS,
@@ -252,6 +253,53 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
       /MayTerminate\(tId, tRole, pPid\) \{ Quit "refused: MayTerminate is false for the "_tRole \}\n    Quit "terminated:"_\$System\.Process\.Terminate\(pPid\)/,
     );
     expect(FIXTURE_CLASS_SOURCE).toContain('If tRole = "" { Quit "refused: "_pPid_" is neither the supervisor nor the runner of the session node" }');
+  });
+
+  it("the Story 40.2 fixture methods exist, and each keeps its guard: the runner lock is held only for the next run id, object code is deleted only in a scratch namespace for a Story402 routine, the large record only above 990000000", () => {
+    for (const method of [
+      "HoldRunnerLock", "RunnerLockRun", "RunnerLockHeld", "ReleaseRunnerLock", "DeleteObjectCode",
+      "SeedLargeRun", "ClearLargeRun", "MeasureStatus",
+    ]) {
+      expect(FIXTURE_CLASS_SOURCE, method).toContain(`ClassMethod ${method}(`);
+    }
+    expect(FIXTURE_CLASS_SOURCE).toContain('If pId \'= ($Get(^IRIS.TempExecuteMCPv2Coverage("seq")) + 1) { Quit "refused: "_pId_" is not the next coverage run id" }');
+    expect(FIXTURE_CLASS_SOURCE).toContain('If ##class(ExecuteMCPv2.Coverage.Job).RunExists(pId) { Quit "refused: coverage run "_pId_" exists" }');
+    expect(FIXTURE_CLASS_SOURCE).toContain('If pNamespace \'? 1"EXECMCPTMP"1.N1U { Quit "refused: the namespace must be EXECMCPTMP, digits and one capital letter" }');
+    expect(FIXTURE_CLASS_SOURCE).toContain('If pRoutine \'? 1"Story402."1.AN1".1" { Quit "refused: the routine must be the first routine of a Story402 class" }');
+    expect(FIXTURE_CLASS_SOURCE.match(/If \(pId < 990000000\) \|\| \(pId '= \(pId \\ 1\)\) \{ Quit "refused: the id must be a whole number above 990000000" \}/g)).toHaveLength(2);
+    // The lock holder takes the lock of a run that does not exist yet, and terminates nothing.
+    const holder = FIXTURE_CLASS_SOURCE.slice(FIXTURE_CLASS_SOURCE.indexOf("ClassMethod HoldRunnerLock("), FIXTURE_CLASS_SOURCE.indexOf("ClassMethod DeleteObjectCode("));
+    expect(holder).not.toContain("Terminate(");
+    expect(holder).not.toContain("LineByLine");
+  });
+
+  it("the Story 40.2 fixture sources are the oracle classes under the 402 names, and the seed refuses any namespace but EXECMCPTMP402<letter>", async () => {
+    const fixture = await import("./coverage-fixture.js");
+    expect(fixture.STORY402_DOCUMENTS.map(([doc]) => doc)).toEqual([
+      "Story402.Fixture.cls",
+      "Story402.Layout.cls",
+      "Story402.Gone.cls",
+      "Story402.FixtureTest.cls",
+      "Story402.SlowTest.cls",
+      "Story402.Seed.cls",
+    ]);
+    expect(fixture.STORY402_SEED_SOURCE).toContain('If $NAMESPACE \'? 1"EXECMCPTMP402"1U');
+    expect(fixture.STORY402_LAYOUT_SOURCE, "tabs and a two-line signature, for the non-canonical layout").toContain("\tSet tX = pN\t; tab indented");
+    expect(fixture.STORY402_LAYOUT_SOURCE).toContain("ClassMethod Gap(pA As %Integer,\n    pB As %Integer) As %Integer");
+
+    // The repository's OS-test copy of the oracle class has the same text under its own name (the plan's "upload exactly").
+    const copy = readFileSync(new URL("../../../../src/ExecuteMCPv2/Tests/CoverageSourceFixture.cls", import.meta.url), "utf8");
+    expect(copy.replace("ExecuteMCPv2.Tests.CoverageSourceFixture", "Story402.Fixture")).toBe(fixture.STORY402_FIXTURE_SOURCE);
+
+    const dev = stubSession("20");
+    dev.call.mockImplementation(async () => ({ isError: false, content: [], structuredContent: { returnValue: "20" } }));
+    await expect(fixture.setSlowTestHang(dev as never, "EXECMCPTMP402A", 20)).resolves.toBeUndefined();
+    expect(dev.call).toHaveBeenCalledWith(
+      "iris_execute_classmethod",
+      expect.objectContaining({ namespace: "EXECMCPTMP402A", className: "Story402.Seed", methodName: "SetHang", args: [20] }),
+    );
+    await expect(fixture.seedReportFixture(dev as never, "EXECMCPTMP391A")).rejects.toThrow(/is not a fixture namespace name/);
+    await expect(fixture.seedReportFixture(dev as never, "HSCUSTOM")).rejects.toThrow(/is not a fixture namespace name/);
   });
 
   it("the all-processes foreign session (decision #49) starts only with the monitor idle, only on the fixture's own routine, and is the one Start in the fixture class without a process list", () => {

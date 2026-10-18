@@ -64,7 +64,8 @@ describe("Story 40.1: the Development README", () => {
   it("has the iris_test_coverage row and a Governance defaults line that states DEFAULT-DISABLED and the enable recipe", () => {
     const row = lineStarting(devReadme, "| `iris_test_coverage`");
     expect(row, "the tool table has the iris_test_coverage row").not.toBe("");
-    expect(row).toContain("`target`, `level`, `classes`, `timeout?`, `namespace?`");
+    // Story 40.2 appends `minCoverage?` to the arguments; the 40.1 ones are unchanged and first.
+    expect(row).toContain("`target`, `level`, `classes`, `timeout?`, `namespace?`, `minCoverage?`");
     expect(row).toContain("| destructive |");
 
     const defaults = lineStarting(devReadme, "> **Governance defaults:** `iris_test_coverage`");
@@ -79,10 +80,11 @@ describe("Story 40.1: the Development README", () => {
 
   it("adds coverageRunId to the iris_test_status row without changing its governance line", () => {
     const row = lineStarting(devReadme, "| `iris_test_status`");
-    expect(row).toContain("`action`, `jobId?`, `runIndex?`, `coverageRunId?`, `namespace?`");
+    // Story 40.2 appends `outputPath?` and `sourceRoot?`; the 40.1 arguments are unchanged and first.
+    expect(row).toContain("`action`, `jobId?`, `runIndex?`, `coverageRunId?`, `namespace?`, `outputPath?`, `sourceRoot?`");
     const defaults = lineStarting(devReadme, "> **Governance defaults:** `iris_test_status:poll`");
     expect(defaults).toContain("`iris_test_status:cancel` is truthfully classified `write` and is **DEFAULT-DISABLED**");
-    expect(defaults).toContain("The optional `coverageRunId` (Story 40.1) adds no action and changes neither key.");
+    expect(defaults).toContain("The optional `coverageRunId` (Story 40.1) added no action and changed neither key.");
   });
 
   it("has the detail entry: what is measured, the process scope, the one-run guard, the re-attach and the version", () => {

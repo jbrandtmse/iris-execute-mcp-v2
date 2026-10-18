@@ -173,8 +173,8 @@ function expectNoIrisTraffic(h: Harness) {
 // ── Governance/registration shape ────────────────────────────────
 
 describe("iris_test_status — registration shape", () => {
-  it("declares mutates per-action (poll: read, cancel: write) and truthful mixed annotations", () => {
-    expect(testStatusTool.mutates).toEqual({ poll: "read", cancel: "write" });
+  it("declares mutates per-action (poll: read, cancel: write, export: write) and truthful mixed annotations", () => {
+    expect(testStatusTool.mutates).toEqual({ poll: "read", cancel: "write", export: "write" });
     expect(testStatusTool.defaultEnabled).toBeUndefined();
     expect(testStatusTool.annotations.readOnlyHint).toBe(false);
     expect(testStatusTool.annotations.destructiveHint).toBe(true);
@@ -841,12 +841,12 @@ describe("iris_test_status \u2014 coverageRunId (Story 40.1)", () => {
     expect(text).toContain("HSCUSTOM");
   });
 
-  it("the input schema takes an optional all-digits coverageRunId, and the keys and classification are unchanged", () => {
+  it("the input schema takes an optional all-digits coverageRunId, and the keys and classification are those of 40.1 plus export", () => {
     const schema = testStatusTool.inputSchema;
     expect(schema.safeParse({ action: "poll", coverageRunId: "9" }).success).toBe(true);
     expect(schema.safeParse({ action: "poll", coverageRunId: "abc" }).success).toBe(false);
     expect(schema.safeParse({ action: "poll", coverageRunId: "9;1" }).success).toBe(false);
-    expect(testStatusTool.mutates).toEqual({ poll: "read", cancel: "write" });
+    expect(testStatusTool.mutates).toEqual({ poll: "read", cancel: "write", export: "write" });
     expect(testStatusTool.description).toContain("coverageRunId (from iris_test_coverage)");
   });
 });

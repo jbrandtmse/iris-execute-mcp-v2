@@ -541,7 +541,7 @@ describe("testCoverageTool definition (Story 40.1, AC-6)", () => {
 
   it("the description leads with what it does and states the default state, the operator control, the guard and the process scope", () => {
     const description = testCoverageTool.description;
-    expect(description.startsWith("Run ObjectScript unit tests and measure which INT lines")).toBe(true);
+    expect(description.startsWith("Run ObjectScript unit tests and measure which lines of the listed classes they execute")).toBe(true);
     expect(description).toContain("DEFAULT-DISABLED");
     expect(description).toContain('IRIS_GOVERNANCE={"global":{"iris_test_coverage":true}}');
     expect(description).toContain("IRIS_TEST_TIMEOUT");

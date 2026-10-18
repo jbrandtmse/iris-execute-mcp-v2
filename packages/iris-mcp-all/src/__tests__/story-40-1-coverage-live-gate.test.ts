@@ -31,7 +31,7 @@
  *  - Rows 10 and 11: a foreign session and a running suite run both refuse a new run with `MONITOR_BUSY`.
  *  - Rows 13 and 14: the time limit, and the default governance.
  *
- * This gate and the Story 40.1 QA gate are the only ones that start Line-by-Line sessions (the package runs its files
+ * This gate, the Story 40.1 QA gate and the Story 40.2 gate are the only ones that start Line-by-Line sessions (the package runs its files
  * serially, `--no-file-parallelism`). It starts every
  * row with the monitor idle: when a session it did not start is active, an armed gate fails and names it, an unarmed one
  * skips, and the session is left alone. A process is terminated only through the fixture's `TerminateCoverageProcess`,
@@ -482,13 +482,16 @@ describe("Story 40.1: the oracle run and the refusals that start nothing (AC-1, 
       ["TestSumTo", 1],
     ]);
 
-    // The text is compact: a status line, the routine line and the unmeasured line, never a JSON dump.
+    // The text is compact: a status line, the routine line and the unmeasured line, never a JSON dump. Since Story 40.2 the class-source
+    // lines stand between the status line and the routine line; the 40.1 lines are unchanged and follow them.
     const lines = allText(result).split("\n");
     expect(lines[0]).toBe("Coverage run " + row1.coverageRunId + " completed: 4 tests, 4 passed, 0 failed, 0 skipped.");
-    expect(lines[1]).toBe(
+    expect(lines.slice(-2)).toEqual([
       "Story401.Fixture.1: 20 of 28 executable INT lines covered (71.43%); uncovered 8, 16-18, 23, 27, 47-48",
-    );
-    expect(lines[2]).toBe("Not measured: Story401.Missing (not-compiled)");
+      "Not measured: Story401.Missing (not-compiled)",
+    ]);
+    expect(lines[1], "the class-source lines start right after the status line").toMatch(/^Story401\.Fixture: \d+ of \d+ class lines covered \(/);
+    expect(lines.slice(1, -2).every((line) => line.startsWith("Story401.Fixture: ") || line.startsWith("  ")), "the lines between are the class-source lines").toBe(true);
 
     // The raw Status route is the oracle for who stopped the session: a finished run's own runner does.
     const raw = await rawStatus(row1.coverageRunId);

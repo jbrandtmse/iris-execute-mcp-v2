@@ -1,6 +1,6 @@
-/// REST handler for line-coverage test runs (Story 40.1).
+/// REST handler for line-coverage test runs (Stories 40.1 and 40.2).
 /// <p>Backs three routes: <code>POST /api/executemcp/v2/dev/test/coverage</code> (<method>Start</method>, JSON body
-/// <code>{target, level, classes, namespace?, maxSeconds, maxLines}</code>), <code>GET .../dev/test/coverage?id=</code>
+/// <code>{target, level, classes, namespace?, maxSeconds, maxLines, minCoverage?}</code>), <code>GET .../dev/test/coverage?id=</code>
 /// (<method>Status</method>) and <code>POST .../dev/test/coverage/cancel</code> (<method>Cancel</method>, body
 /// <code>{id}</code>). The run itself is two suite jobs owned by <class>ExecuteMCPv2.Coverage.Job</class>
 /// (AD-27): this handler validates, decides whether the instance-wide Line-by-Line monitor is free, and
@@ -13,8 +13,9 @@
 /// <code>busy</code> (<code>owner</code> is <code>suite</code> or <code>foreign</code>, and for the suite the running
 /// run's <code>coverageRunId</code>, <code>pid</code>, <code>startedAt</code> and <code>namespace</code>) or
 /// <code>failed</code> (with <code>error</code>).</li>
-/// <li><b>Status.</b> The run record, including <code>readError</code> when the run's line counts could not be read.
-/// It never starts, stops or terminates anything.</li>
+/// <li><b>Status.</b> The run record, including <code>readError</code> when the run's line counts could not be read,
+/// and <code>minCoverage</code> when the run was started with one. A terminal run with counts also carries
+/// <code>routines</code> and <code>sources</code>, the class-source map. It never starts, stops or terminates anything.</li>
 /// <li><b>Cancel.</b> Sets the run's cancel flag, then returns the record. A cancel only signals the supervisor job.</li>
 /// </ul>
 Class ExecuteMCPv2.REST.Coverage Extends ExecuteMCPv2.REST.Base
@@ -138,8 +139,9 @@ ClassMethod ReadRun(pIdText As %String, Output pId As %Integer) As %Status
 
 /// Validate the Start request and return its parameters in <var>pParams</var>: <code>target</code>,
 /// <code>level</code>, <code>classes</code> (a <class>%List</class> of 1 to 50 valid class names, de-duplicated, order
-/// kept), <code>namespace</code> (empty when not given), <code>maxSeconds</code> (1 to 3600) and
-/// <code>maxLines</code> (at least 1). Runs before any namespace switch.
+/// kept), <code>namespace</code> (empty when not given), <code>maxSeconds</code> (1 to 3600), <code>maxLines</code>
+/// (at least 1) and <code>minCoverage</code> (empty when not given, otherwise a number from 0 to 100). Runs before any
+/// namespace switch.
 ClassMethod ValidateStart(pBody As %DynamicObject, Output pParams) As %Status
 {
     Kill pParams
@@ -211,6 +213,19 @@ ClassMethod ValidateStart(pBody As %DynamicObject, Output pParams) As %Status
     Set tSC = ..ReadInteger(pBody, "maxLines", 1, "", .tMaxLines)
     If $$$ISERR(tSC) Quit tSC
     Set pParams("maxLines") = tMaxLines
+
+    ; minCoverage (optional; JSON null means absent)
+    Set pParams("minCoverage") = ""
+    If pBody.%IsDefined("minCoverage") && (pBody.%GetTypeOf("minCoverage") '= "null") {
+        If pBody.%GetTypeOf("minCoverage") '= "number" {
+            Quit $$$ERROR($$$GeneralError, "Parameter 'minCoverage' must be a number from 0 to 100")
+        }
+        Set tMinCoverage = pBody.%Get("minCoverage")
+        If (tMinCoverage < 0) || (tMinCoverage > 100) {
+            Quit $$$ERROR($$$GeneralError, "Parameter 'minCoverage' must be a number from 0 to 100")
+        }
+        Set pParams("minCoverage") = +tMinCoverage
+    }
     Quit $$$OK
 }
 
@@ -488,10 +503,59 @@ ClassMethod BuildRun(pId As %Integer, pWithRoutines As %Boolean = 0) As %Dynamic
         Do tRun.%Set("reclaimed", tReclaimedObject)
     }
 
+    Set tMinCoverage = ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "minCoverage")
+    If tMinCoverage '= "" Do tRun.%Set("minCoverage", +tMinCoverage, "number")
+
     If pWithRoutines && tTerminal && ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "hasCounts") {
         Do tRun.%Set("routines", ..BuildRoutines(pId))
+        Do tRun.%Set("sources", ..BuildSources(pId))
     }
     Quit tRun
+}
+
+/// The class-source map of a terminal run, one entry per measured class: <code>{class, reason?, methods:[...]}</code>.
+/// A method that maps is <code>{name, line, routine, intLines:[...]}</code> (<code>intLines[k-1]</code> is the INT line of
+/// body line k, or 0), and a method that does not is <code>{name, line, reason}</code>. <code>line</code> is the
+/// class-document line that declares the method, or null. See <method>ExecuteMCPv2.Coverage.Job:SourceMap</method>.
+ClassMethod BuildSources(pId As %Integer) As %DynamicArray [ Private ]
+{
+    Set tSources = []
+    Set tIndex = ""
+    For {
+        Set tIndex = $Order(^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tIndex))
+        If tIndex = "" Quit
+        Set tHead = $Get(^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tIndex))
+        Set tClass = {}
+        Do tClass.%Set("class", $List(tHead, 1))
+        If $List(tHead, 2) '= "" Do tClass.%Set("reason", $List(tHead, 2))
+        Set tMethods = []
+        Set tM = ""
+        For {
+            Set tM = $Order(^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tIndex, "m", tM))
+            If tM = "" Quit
+            Set tNode = ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tIndex, "m", tM)
+            Set tMethod = {}
+            Do tMethod.%Set("name", $List(tNode, 1))
+            Do ..SetNumber(tMethod, "line", $List(tNode, 2))
+            If $List(tNode, 4) '= "" {
+                Do tMethod.%Set("reason", $List(tNode, 4))
+            } Else {
+                Do tMethod.%Set("routine", $List(tNode, 3))
+                Set tInts = []
+                Set tK = ""
+                For {
+                    Set tK = $Order(^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tIndex, "m", tM, tK))
+                    If tK = "" Quit
+                    Do tInts.%Push(+^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tIndex, "m", tM, tK), "number")
+                }
+                Do tMethod.%Set("intLines", tInts)
+            }
+            Do tMethods.%Push(tMethod)
+        }
+        Do tClass.%Set("methods", tMethods)
+        Do tSources.%Push(tClass)
+    }
+    Quit tSources
 }
 
 /// The per-routine counts and skeletons of a terminal run: <code>{class, routine, lines, hits:[[line,count]...],
