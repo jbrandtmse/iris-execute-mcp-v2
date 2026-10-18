@@ -328,6 +328,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **The companion.** Re-attach, read and cancel live on a separate, read-classified companion tool, whose write actions are classified separately. Every result a completed run returns can be reproduced by the companion from the durable handles alone.
   - **Pairing.** When a primary's `running` result can be resolved only through its companion, the two are declared in `TOOL_PAIRS`. That needs a Lead decision if it moves a `core` row.
   - **Local files.** A companion that writes a local file takes an explicit `outputPath`.
+  - **Handle lifetime.** A handle lives as long as the server-side state it names. The Atelier `jobId` and the coverage `coverageRunId` (Story 40.1, decision #42) are kept in IRIS temporary storage, so neither survives an instance restart, and an unknown handle's error says so.
 
 ### AD-17 — Bulk and data-loss writes are bounded server-side [ADOPTED] (F1, H6)
 
@@ -499,6 +500,8 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **Ownership.** One IRIS-side job owns a monitor's lifetime: it starts the monitor, runs the work and stops it in its own cleanup.
     - A client wait budget, a poll or a cancel never starts or stops a monitor directly; a cancel only signals the job.
     - So coverage runs only on an execution path whose job the suite controls.
+    - **Coverage uses two suite jobs** (Story 40.1, orchestrator decisions #40 and #41). A runner starts its own session, runs the tests and stops the session in its cleanup. A supervisor turns a cancel or the time limit into terminating the runner, and releases a session the runner left behind. This split exists because `$SYSTEM.Process.Terminate` cannot be trapped, so the process running the tests cannot be the only one that releases the monitor.
+    - **Terminate only proven processes.** The suite terminates a process only after proving, immediately before, that it is still the suite's own: the PID matches the owner record and that role's owner lock is still held. A PID can be reused once its process dies.
   - **Owner records.** The suite records a session's owner (job id and start time) durably. A later run may reclaim a suite-owned session whose job is dead. A session without a suite ownership record is never touched.
   - **Busy checks.**
     - A coverage run is refused while a foreign session is active.
