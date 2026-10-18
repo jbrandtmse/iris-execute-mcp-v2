@@ -327,7 +327,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **Budget expiry.** When the budget expires, the tool returns `isError: false` with `status: "running"`, every durable handle it holds, and any partial results labelled as partial. Handles are also returned on completion.
   - **The companion.** Re-attach, read and cancel live on a separate, read-classified companion tool, whose write actions are classified separately. Every result a completed run returns can be reproduced by the companion from the durable handles alone.
   - **Pairing.** When a primary's `running` result can be resolved only through its companion, the two are declared in `TOOL_PAIRS`. That needs a Lead decision if it moves a `core` row.
-  - **Local files.** A companion that writes a local file takes an explicit `outputPath`.
+  - **Local files.** A companion that writes a local file takes an explicit `outputPath`. The write is its own governed action, classified write and disabled by default: coverage's Cobertura file is `iris_test_status:export`, which exports completed runs only (Story 40.2, decision #50).
   - **Handle lifetime.** A handle lives as long as the server-side state it names. The Atelier `jobId` and the coverage `coverageRunId` (Story 40.1, decision #42) are kept in IRIS temporary storage, so neither survives an instance restart, and an unknown handle's error says so.
 
 ### AD-17 — Bulk and data-loss writes are bounded server-side [ADOPTED] (F1, H6)
