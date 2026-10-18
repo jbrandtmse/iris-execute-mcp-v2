@@ -3176,12 +3176,14 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 39.7 plan source read 2026-10-17 (Ens.DataType.LogType values 1-6); unverified live
 - 2026-10-17T20:40:17Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 X.0 gate: probe, then fix Type and the UTC cutoff
 - 2026-10-17T21:45:49Z status=routed owner=40-0-epic-39-deferred-cleanup by=x0 note=Epic 40 X.0 gate: probe then fix or close with evidence in Story 40.0 (DW bullet in its epics.md block)
+- 2026-10-18T00:08:43Z status=resolved-by:40-0-epic-39-deferred-cleanup by=adjudication note=errorCount24h counts Type 2 over a UTC cutoff from Monitor.UtcCutoff ($ZTimeStamp, never $Horolog); messageCount24h shares it (decision 38); live gate 3/2 at process zones 0, 420 and -600 through the route's own collector; build b3d11b1 + review patches 898ae48; mutation-verified (spec-40-0 Verification); lead smoke 82/82 armed
 
 ### DW-585: iris_production_logs type filter probably matches nothing: the EventLog handler binds the display name (Error) to Type = ? in logical select mode, but Type is an integer (Ens.DataType.LogType)
 - source: _bmad-output/implementation-artifacts/spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: 39.7 plan source read 2026-10-17; needs a probe before any fix
 - 2026-10-17T20:40:17Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 X.0 gate: probe with synthetic Event Log rows in a disposable namespace, then map display name to logical value
 - 2026-10-17T21:45:49Z status=routed owner=40-0-epic-39-deferred-cleanup by=x0 note=Epic 40 X.0 gate: probe then fix or close with evidence in Story 40.0 (DW bullet in its epics.md block)
+- 2026-10-18T00:08:43Z status=resolved-by:40-0-epic-39-deferred-cleanup by=adjudication note=Interop.LogTypeValue maps the six display names to their stored numbers (equal to the live Ens.DataType.LogType lists); numbers and unknown values pass through (AD-33); every type pinned on the wire against a SQL oracle; build b3d11b1 + review patches 898ae48; mutation-verified (spec-40-0 Verification); lead smoke 82/82 armed
 
 ### DW-586: Under block, iris_message_diagram leaves a per-session generation failure text (Generation failed for session N: <text> in warnings[] and the Mermaid %% line) unchanged; only the Correlator Error on message texts are rewritten
 - source: _bmad-output/implementation-artifacts/spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: in-epic
@@ -3189,6 +3191,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-17T20:40:17Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 X.0 gate: probe what <text> can carry; withhold under block if message-derived
 - 2026-10-17T21:35:25Z occurrence=39-7-epic-39-burn-down
 - 2026-10-17T21:45:49Z status=routed owner=40-0-epic-39-deferred-cleanup by=x0 note=Epic 40 X.0 gate: probe then fix or close with evidence in Story 40.0 (DW bullet in its epics.md block)
+- 2026-10-18T00:08:43Z status=wontfix-theoretical by=adjudication note=closed with evidence (spec-40-0 Design Notes): the generator failure text carries only a SQL schema error or a system error name and location, and no reachable code path puts message content in it; Diagram/*.cls and diagram.ts byte-identical; reopen_if=a Diagram stage's exception data or SQL %Message echoes a header field value
 
 ### DW-587: Under block, the trace-message-flow prompt and its generated skill give no rule for withheld Event Log and diagram error text: steps 5-6 ask what the error log says, with no report-the-reason, never-read-it-another-way line like step 3 has for bodies
 - source: spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: low | footprint: out-of-footprint
@@ -3196,6 +3199,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-17T21:35:25Z status=escalated owner=burndown by=cr note=decide at the Epic 40 X.0 gate: add the block rule to steps 4-5 (AD-15 prompt-body change, regenerate skills) or accept
 - 2026-10-17T21:41:21Z note=decided=orchestrator(Lead-away) decision 36: fix the trace-message-flow prompt text (sanctioned AD-15 prompt change) in the Epic 40 X.0 story
 - 2026-10-17T21:45:49Z status=routed owner=40-0-epic-39-deferred-cleanup by=x0 note=Epic 40 X.0 gate: decision 36 applied; fix the prompt text in Story 40.0 (DW bullet in its epics.md block)
+- 2026-10-18T00:08:43Z status=resolved-by:40-0-epic-39-deferred-cleanup by=adjudication note=trace-message-flow steps 4-6 carry the block report-the-reason, never-read-it-another-way rule; SKILL.md regenerated; built interop process over stdio with arguments omitted; build b3d11b1 + review patches 898ae48; mutation-verified (spec-40-0 Verification); lead smoke 82/82 armed
 
 ### DW-588: DW-572 residual: iris_message_resend filtered mode (resendFiltered) keeps the history-wide Status/Source/Target bitmap plan on an untuned Ens.MessageHeader, because decision 30 left its statements unchanged
 - source: spec-39-7-epic-39-burn-down.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3217,3 +3221,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-40-0-epic-39-deferred-cleanup.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 40.0 implement 2026-10-17; scripts/gen-bootstrap.mjs:180 writeFileSync unconditional; staleDistReason/checkDistFresh compare mtimes
 - 2026-10-17T23:04:41Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 burn-down: write only when content differs, and pin it
+
+### DW-592: Monitor.cls CollectInteropMetrics and Interop.cls EventLog bind the UTC cutoff and the type number through %ExecDirect at the process default select mode, not the explicit %SelectMode=0 MessageSearch.cls uses for the same Ens.DataType.UTC comparison
+- source: _bmad-output/implementation-artifacts/spec-40-0-epic-39-deferred-cleanup.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: 40.0 cr 2026-10-17: %SQL.Statement %SelectMode defaults to $zu(115,5); only a non-logical process default (nothing in src sets it) shifts the cutoff; fix moves BOOTSTRAP_VERSION
+- 2026-10-18T00:04:04Z status=wontfix-accepted owner=40-0-epic-39-deferred-cleanup by=cr note=reopen_if=a REST worker runs with $zu(115,5)'=0, or Monitor/Interop.cls next change (fix as MessageSearch.cls:1119)
+
+### DW-593: Mocked iris_production_logs entries in interop monitor.test.ts and logs-diagram-policy.test.ts carry type "Error" where the route returns the stored number (Rule #54 fake shape)
+- source: _bmad-output/implementation-artifacts/spec-40-0-epic-39-deferred-cleanup.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 40.0 cr 2026-10-17: monitor.test.ts:26, logs-diagram-policy.test.ts:46,146; Interop.cls EventLog sets type from tRS.Type (2); no assertion reads the field
+- 2026-10-18T00:04:04Z status=wontfix-accepted owner=40-0-epic-39-deferred-cleanup by=cr note=reopen_if=a test or tool reads an Event Log entry's type, or these mocks are next edited
+
+### DW-594: The 40.0 QA gate re-implements small helpers instead of extending shared ones: its seed put/compile/check (putCompileSeed is private) and rawLogs/idsOf/LogsContent copied from the burn-down gate
+- source: _bmad-output/implementation-artifacts/spec-40-0-epic-39-deferred-cleanup.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: 40.0 cr 2026-10-17: story-40-0-qa-live-gate beforeAll vs interop-namespace-fixture.ts putCompileSeed; rawLogs in both 40.0 gates; inline QA seeds follow the 39.3/39.5 QA gates
+- 2026-10-18T00:04:04Z status=wontfix-accepted owner=40-0-epic-39-deferred-cleanup by=cr note=reopen_if=a third gate declares rawLogs or idsOf, or another file needs Story40Q.Seed
