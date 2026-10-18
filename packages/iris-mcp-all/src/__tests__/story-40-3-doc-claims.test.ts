@@ -57,7 +57,7 @@ const CHANGELOG_TITLE = new RegExp(`^## \\[Pre-release ${EM_DASH} 2026-10-18\\] 
  * documented move to the committed embed, so a later move leaves this file true.
  */
 const BOOTSTRAP_FROM = "06b8b83fc319";
-const BOOTSTRAP_TO = "7f92a971b7e5";
+const BOOTSTRAP_TO = "845e95f6e726";
 
 describe("Story 40.3: the Development README", () => {
   it("names the guard and the code on both tool rows, and keeps the arguments", () => {

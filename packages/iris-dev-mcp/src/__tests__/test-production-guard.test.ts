@@ -281,7 +281,7 @@ describe("iris_execute_tests and the guard (Story 40.3, matrix row 16)", () => {
     expect(h.calls.map((call) => `${call.method} ${call.path.replace(/\?.*$/, "")}`)).toEqual([`GET ${GUARD_PATH}`]);
   });
 
-  it("asks with the tool's target, level and resolved namespace, whatever the level", async () => {
+  it("asks with the queued target, the level and the resolved namespace, whatever the level", async () => {
     const method = harness(proceed);
     await createExecuteTestsHandler()({ target: "Story403.PassTest:TestControl", level: "method", namespace: "EXECMCPTMP403A" }, method.ctx);
     expect(method.calls[0]?.path).toBe(`${GUARD_PATH}?target=Story403.PassTest%3ATestControl&level=method&namespace=EXECMCPTMP403A`);
@@ -384,9 +384,10 @@ describe("iris_execute_tests and the guard (Story 40.3, matrix row 16)", () => {
     }
   });
 
-  it("at class and package level the guard is asked about the string the queue reads, whitespace included, so nothing is normalized on one side only", async () => {
+  it("at class and package level the guard is asked about the string the queue reads, which TypeScript does not normalize, and a package target with a line break discovers nothing and never reaches the guard", async () => {
     // The Atelier queue keeps a class only when it exists under exactly the name sent, and package discovery matches `<package>.` on
-    // the target as given; the guard gets that same string (the IRIS side can only list more classes than the queue runs).
+    // the target as given; the guard gets that same string. The IRIS side strips only tab, space and NBSP from it, so it can only
+    // inspect classes the queue would not run, never miss one it would.
     for (const target of ["Story403.PassTest", "Story403.PassTest\n", "\rStory403.PassTest"]) {
       const h = harness(proceed);
       await createExecuteTestsHandler()({ target, level: "class" }, h.ctx);
@@ -396,16 +397,20 @@ describe("iris_execute_tests and the guard (Story 40.3, matrix row 16)", () => {
       expect(guardCall?.path, label).toBe(`${GUARD_PATH}?target=${encodeURIComponent(target)}&level=class&namespace=USER`);
       expect((work?.body as { tests?: { class: string }[] } | undefined)?.tests?.map((entry) => entry.class), label).toEqual([target]);
     }
-    for (const target of ["Story403.Mixed", "Story403.Mixed\n", "\rStory403.Mixed"]) {
-      const h = harness(proceed);
-      await createExecuteTestsHandler()({ target, level: "package" }, h.ctx);
+    const discoveryOf = (calls: Call[]) =>
+      calls.find((call) => call.method === "POST" && String((call.body as { query?: string } | undefined)?.query ?? "").includes("%Dictionary.ClassDefinition"));
+    const pkg = harness(proceed, ["Story403.Mixed.ProdTest"]);
+    await createExecuteTestsHandler()({ target: "Story403.Mixed", level: "package" }, pkg.ctx);
+    expect(pkg.calls.find((call) => call.path.startsWith(GUARD_PATH))?.path, "package").toBe(`${GUARD_PATH}?target=Story403.Mixed&level=package&namespace=USER`);
+    expect((discoveryOf(pkg.calls)?.body as { parameters?: string[] } | undefined)?.parameters, "package").toEqual(["Story403.Mixed."]);
+    // No class name holds a line break (the class dictionary refuses one), so the real discovery of such a prefix returns no row.
+    for (const target of ["Story403.Mixed\n", "\rStory403.Mixed"]) {
+      const h = harness(proceed, []);
+      const result = await createExecuteTestsHandler()({ target, level: "package" }, h.ctx);
       const label = `package ${JSON.stringify(target)}`;
-      const guardCall = h.calls.find((call) => call.path.startsWith(GUARD_PATH));
-      const discovery = h.calls.find(
-        (call) => call.method === "POST" && String((call.body as { query?: string } | undefined)?.query ?? "").includes("%Dictionary.ClassDefinition"),
-      );
-      expect(guardCall?.path, label).toBe(`${GUARD_PATH}?target=${encodeURIComponent(target)}&level=package&namespace=USER`);
-      expect((discovery?.body as { parameters?: string[] } | undefined)?.parameters, label).toEqual([`${target}.`]);
+      expect((discoveryOf(h.calls)?.body as { parameters?: string[] } | undefined)?.parameters, label).toEqual([`${target}.`]);
+      expect((result.structuredContent as { error?: string } | undefined)?.error, label).toBe(`No test classes found in package '${target}'`);
+      expect(h.calls.some((call) => call.path.startsWith(GUARD_PATH)), label).toBe(false);
     }
   });
 

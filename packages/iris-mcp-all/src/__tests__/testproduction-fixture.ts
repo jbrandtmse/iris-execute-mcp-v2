@@ -15,7 +15,8 @@
  *    `OtherTest` and `BadTest` uses `Story403.Production`;
  *  - the plain tests `PlainTest`, `Plain.OneTest` and `Mixed.PlainTest`.
  *
- * `FreshTest` (a TestProduction test the gate puts without compiling) is `STORY403_FRESH_SOURCE`.
+ * `FreshTest` (a TestProduction test the gate puts without compiling) is `STORY403_FRESH_SOURCE`. The extra rows' classes are listed in
+ * `STORY403_ROW_DOCUMENTS`, among them `STORY403_CASELESS_SOURCE`, a test whose class name holds a letter without case.
  *
  * No TestProduction subclass is ever defined in HSCUSTOM or in any `ExecuteMCPv2.*` package: all of these classes are put into
  * the scratch namespace, and the database file that `removeInteropNamespace` deletes takes them away.
@@ -139,12 +140,21 @@ export const STORY403_INHERIT_SOURCE = `Class Story403.InheritTest Extends Story
 }
 `;
 
+/**
+ * A TestProduction test of `Story403.Production` whose name holds U+4E2D, a CJK letter. That is a valid IRIS class name: the class
+ * dictionary accepts it and it compiles. But the pattern code `A` does not match the letter, which has no case. It is the only class
+ * of the package `Story403.Wide`, and the gate row that needs it puts and compiles it (matrix row 14d).
+ */
+export const STORY403_CASELESS_CLASS = `Story403.Wide.${String.fromCodePoint(0x4e2d)}Test`;
+export const STORY403_CASELESS_SOURCE = testProductionSource(STORY403_CASELESS_CLASS, STORY403_PRODUCTION);
+
 /** The classes the extra rows put into the scratch namespace, children first, for the cleanup after every row. */
 export const STORY403_ROW_DOCUMENTS: readonly string[] = [
   "Story403.FreshTest.cls",
   "Story403.StaleTest.cls",
   "Story403.InheritTest.cls",
   "Story403.BaseTest.cls",
+  `${STORY403_CASELESS_CLASS}.cls`,
 ];
 
 /**

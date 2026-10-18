@@ -7,8 +7,8 @@ All notable changes to the IRIS MCP Server Suite are documented in this file.
 No tool, action or governance key is added, so no tool count moves (the Development server stays at 32 package tools, 33
 advertised; the suite at 110 package tools, 115 advertised). The prompt pack stays at 13 prompts, the `core` preset at 14
 package tools, and the frozen governance baseline at hash `1e62c5ad5bf7` (141 keys). The refusal-code catalog grows from 9 to
-10 codes. `BOOTSTRAP_VERSION` moves from `06b8b83fc319` to `7f92a971b7e5`, because `REST/UnitTest.cls`, `REST/Coverage.cls`
-and `REST/Dispatch.cls` changed (the bootstrapped service stays at 35 classes).
+10 codes. `BOOTSTRAP_VERSION` moves from `06b8b83fc319` to `845e95f6e726`, because `REST/UnitTest.cls`, `REST/Coverage.cls`,
+`REST/Dispatch.cls` and `Coverage/Job.cls` changed (the bootstrapped service stays at 35 classes).
 
 ### Added
 
@@ -22,7 +22,9 @@ and `REST/Dispatch.cls` changed (the bootstrapped service stays at 35 classes).
   class it will run is a TestProduction subclass, at package, class and method level (a method-level run of such a class is
   guarded whatever the method). On the coverage path those are the classes its runner runs, judged by their compiled classes:
   every class of a package, and the target itself when a package-level target holds no test class (the runner then runs it as
-  a class). A run with no TestProduction test never reads Ens state and is byte-identical to before.
+  a class). A test class is recognized under any name the class dictionary accepts, a letter without case (a CJK one, for
+  example) included: `ExecuteMCPv2.Coverage.Job:IsClassName`, the guard's name check, now applies `%Dictionary.Classname`'s
+  own rule. A run with no TestProduction test never reads Ens state and is byte-identical to before.
 - **`PRODUCTION_BUSY`, a refusal code.** The catalog goes from 9 to 10 codes. The refusal is `isError: true` with
   `namespace`, `state`, `testProductions` (`class` and `production`) and, when the state was read, the running `production`,
   or else `state: "Unknown"` and `error`. Nothing is run or queued, no run id is allocated, and that production is left

@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "7f92a971b7e5";
+export const BOOTSTRAP_VERSION = "845e95f6e726";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "7f92a971b7e5";
+Parameter BOOTSTRAPVERSION = "845e95f6e726";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -4037,21 +4037,15 @@ ClassMethod Prune(pKeepId As %Integer, pMax As %Integer = "")
     }
 }
 
-/// Is <var>pName</var> a class name: an optional <code>%</code>, then dot-separated names of letters and digits
-/// that each begin with a letter?
+/// Is <var>pName</var> a class name: a name the class dictionary accepts (<class>%Dictionary.Classname</class>, the type
+/// of <code>%Dictionary.ClassDefinition.Name</code>)? That is at most 220 characters of dot-separated names, each a valid
+/// IRIS name of letters and digits that begins with a letter, where only the first may begin with <code>%</code>. Any
+/// letter IRIS accepts in a name counts, a letter without case (a CJK one, for example) included, so every class that can
+/// exist is a class name here.
 ClassMethod IsClassName(pName As %String) As %Boolean
 {
     If (pName = "") || ($Length(pName) > 220) Quit 0
-    Set tValid = 1
-    For tI = 1:1:$Length(pName, ".") {
-        Set tSegment = $Piece(pName, ".", tI)
-        If (tI = 1) && ($Extract(tSegment) = "%") Set tSegment = $Extract(tSegment, 2, *)
-        If tSegment '? 1A.AN {
-            Set tValid = 0
-            Quit
-        }
-    }
-    Quit tValid
+    Quit $$$ISOK(##class(%Dictionary.Classname).IsValid(pName))
 }
 
 /// Resolve the routines to measure for <var>pClasses</var> (a <class>%List</class> of class names) in namespace

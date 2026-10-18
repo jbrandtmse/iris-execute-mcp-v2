@@ -11,9 +11,10 @@
  * Rows 1 to 15 of the matrix run, each self-contained, and every row that starts a production ends with it Stopped.
  *
  *  - Rows 1 and 2: the pass and fail fixtures report their live result and leave the namespace Stopped with no production process.
- *  - Rows 3 to 5, 7, 14, 14b and 14c: another production runs, so a class, method or package run of a TestProduction test, a
- *    misconfigured one, an uncompiled one, a compiled one whose definition changed afterwards and an uncompiled one that inherits
- *    its production from a base are refused with PRODUCTION_BUSY; nothing ran and the other production is left exactly as it was.
+ *  - Rows 3 to 5, 7, 14, 14b, 14c and 14d: another production runs, so a class, method or package run of a TestProduction test, a
+ *    misconfigured one, an uncompiled one, a compiled one whose definition changed afterwards, an uncompiled one that inherits
+ *    its production from a base and one whose class name holds a letter without case are refused with PRODUCTION_BUSY; nothing
+ *    ran and the other production is left exactly as it was.
  *  - Row 6: runs with no TestProduction test are unchanged by the other production.
  *  - Rows 8 and 9: the test's own leftover is run over; another test's leftover is refused.
  *  - Rows 10 and 11: `iris_test_coverage` reads the same decision (refused with no run allocated and the monitor idle; completed when
@@ -71,6 +72,8 @@ import {
 } from "./interop-namespace-fixture.js";
 import {
   STORY403_BASE_SOURCE,
+  STORY403_CASELESS_CLASS,
+  STORY403_CASELESS_SOURCE,
   STORY403_FRESH_SOURCE,
   STORY403_INHERIT_SOURCE,
   STORY403_OTHER,
@@ -337,6 +340,9 @@ describe("Story 40.3: a different production runs, so the run is refused and tha
   it("row 4: a method-level run is refused the same way", async (testCtx) => {
     if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     await refusedWhileOtherRuns(() => executeTests("Story403.PassTest:TestControl", "method"), busyFields(STORY403_OTHER, "Running", PASS_TEST));
+    // The tool trims a line break off the class before it queues `Story403.PassTest`; the IRIS side strips only tab, space and
+    // NBSP, so the guard is refused here only when it is asked about the class that is queued.
+    await refusedWhileOtherRuns(() => executeTests("Story403.PassTest\n:TestControl", "method"), busyFields(STORY403_OTHER, "Running", PASS_TEST));
   }, 180000);
 
   it("row 5: a package-level run is refused, and its testProductions are only the package's TestProduction test", async (testCtx) => {
@@ -398,6 +404,32 @@ describe("Story 40.3: a different production runs, so the run is refused and tha
       busyFields(STORY403_OTHER, "Running", [{ class: "Story403.InheritTest", production: STORY403_PRODUCTION }]),
     );
   }, 180000);
+
+  it("row 14d: a TestProduction test whose class name holds a letter without case (a valid IRIS name) is refused at package and class level and by iris_test_coverage", async (testCtx) => {
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const docs = docFixtures(dev, NS_A);
+    await docs.putDoc(`${STORY403_CASELESS_CLASS}.cls`, STORY403_CASELESS_SOURCE);
+    await docs.compileDoc(`${STORY403_CASELESS_CLASS}.cls`);
+    const listed = await atelierQuery(oracleTarget(NS_A), "SELECT Name FROM %Dictionary.CompiledClass WHERE Name %STARTSWITH 'Story403.Wide.'");
+    expect(listed.map((row) => row["Name"]), "the class is compiled, under the name it was given").toEqual([STORY403_CASELESS_CLASS]);
+    const caseless = busyFields(STORY403_OTHER, "Running", [{ class: STORY403_CASELESS_CLASS, production: STORY403_PRODUCTION }]);
+    // Package level: the guard and the work queue both list the class from the class dictionary.
+    await refusedWhileOtherRuns(() => executeTests("Story403.Wide", "package"), caseless);
+    // Class level: the name also travels in the guard route's query string.
+    await refusedWhileOtherRuns(() => executeTests(STORY403_CASELESS_CLASS, "class"), caseless);
+    // The coverage runner runs the package's compiled test classes, and its guard reads the same name.
+    await expectMonitorIdle("row 14d, before");
+    await startOther();
+    const before = await settledSnapshot();
+    const instances = await testInstanceCount();
+    const counter = await coverageGlobal('"seq"');
+    expectRefusal(await coverageRun("Story403.Wide", "package", ["Story403.PassTest"]), caseless, STORY403_OTHER);
+    expect(await coverageGlobal('"seq"'), "no coverage run id was allocated").toEqual(counter);
+    expect(await testInstanceCount(), "nothing ran").toBe(instances);
+    await expectMonitorIdle("row 14d, after");
+    expect(await snapshot(), "Other is untouched").toEqual(before);
+    await stopAnyProduction();
+  }, 300000);
 });
 
 // -- Row 6: runs with no TestProduction test are unchanged ---------------------------------

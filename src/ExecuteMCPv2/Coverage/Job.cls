@@ -462,21 +462,15 @@ ClassMethod Prune(pKeepId As %Integer, pMax As %Integer = "")
     }
 }
 
-/// Is <var>pName</var> a class name: an optional <code>%</code>, then dot-separated names of letters and digits
-/// that each begin with a letter?
+/// Is <var>pName</var> a class name: a name the class dictionary accepts (<class>%Dictionary.Classname</class>, the type
+/// of <code>%Dictionary.ClassDefinition.Name</code>)? That is at most 220 characters of dot-separated names, each a valid
+/// IRIS name of letters and digits that begins with a letter, where only the first may begin with <code>%</code>. Any
+/// letter IRIS accepts in a name counts, a letter without case (a CJK one, for example) included, so every class that can
+/// exist is a class name here.
 ClassMethod IsClassName(pName As %String) As %Boolean
 {
     If (pName = "") || ($Length(pName) > 220) Quit 0
-    Set tValid = 1
-    For tI = 1:1:$Length(pName, ".") {
-        Set tSegment = $Piece(pName, ".", tI)
-        If (tI = 1) && ($Extract(tSegment) = "%") Set tSegment = $Extract(tSegment, 2, *)
-        If tSegment '? 1A.AN {
-            Set tValid = 0
-            Quit
-        }
-    }
-    Quit tValid
+    Quit $$$ISOK(##class(%Dictionary.Classname).IsValid(pName))
 }
 
 /// Resolve the routines to measure for <var>pClasses</var> (a <class>%List</class> of class names) in namespace

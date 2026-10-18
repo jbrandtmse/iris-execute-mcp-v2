@@ -910,10 +910,11 @@ export function createExecuteTestsHandler(clock: TestClock = realClock): ToolDef
     try {
       // Build the tests array for the Atelier async unittest request
       let tests: { class: string; methods?: string[] }[];
-      // What the TestProduction guard is asked about: the target the run queues. At package and class level that
-      // is `target` itself, which is what the queue reads. At method level it is the queued class and, when there
-      // is one, the trimmed method name, never the raw target: the IRIS side strips only tab, space and NBSP, so a
-      // raw target the queue trims further would be guarded as a different class than the one that runs.
+      // What the TestProduction guard is asked about: the target the run queues. At class level that is `target`
+      // itself, the name the queue looks up exactly; at package level it is `target` too, the prefix package discovery
+      // matches. At method level it is the queued class and, when there is one, the trimmed method name, never the raw
+      // target: the IRIS side strips only tab, space and NBSP, so a raw target the queue trims further would be
+      // guarded as a different class than the one that runs.
       let guardTarget = target;
 
       if (level === "package") {

@@ -1,7 +1,8 @@
 /// Unit tests for the TestProduction guard of <class>ExecuteMCPv2.REST.UnitTest</class> (Story 40.3).
 /// <p>Covers the pure decision <method>ExecuteMCPv2.REST.UnitTest:GuardOutcome</method> (every row of its table), the
 /// test discovery <method>ExecuteMCPv2.REST.UnitTest:TestProductions</method> and the guard
-/// <method>ExecuteMCPv2.REST.UnitTest:ProductionGuard</method> on runs that hold no TestProduction test, and the coverage
+/// <method>ExecuteMCPv2.REST.UnitTest:ProductionGuard</method> on runs that hold no TestProduction test, the name check
+/// <method>ExecuteMCPv2.REST.UnitTest:ResolveTest</method> applies first, and the coverage
 /// <method>ExecuteMCPv2.REST.Coverage:ValidateStart</method> rule that keeps a target with an empty class part away from it.
 /// This class starts no production and defines no TestProduction class: a TestProduction subclass in this
 /// namespace would stop a running production when it ran (the live gate covers the positive cases in a disposable
@@ -109,6 +110,21 @@ Method TestResolveTestSystemClasses()
             Do $$$AssertTrue('##class(ExecuteMCPv2.REST.UnitTest).ResolveTest(tClass, tCompiles, .tSeen, .tCount, .tProduction), tClass_" is not a TestProduction (compiles="_tCompiles_")")
             Do $$$AssertEquals(tProduction, "", tClass_" has no production")
         }
+    }
+}
+
+/// The name check <method>ResolveTest</method> applies first (<method>ExecuteMCPv2.Coverage.Job:IsClassName</method>)
+/// accepts every name the class dictionary accepts, a letter without case included. A class the work queue or the coverage
+/// runner can run is then never set aside as "not a class name", which would answer proceed for a TestProduction test.
+Method TestResolveTestNameCheckAcceptsEveryDictionaryName()
+{
+    ; U+4E2D is a CJK letter: IRIS compiles a class named with it, and the pattern code A does not match it
+    Set tCaseless = "Story403."_$Char(20013)_"Test"
+    Do $$$AssertStatusOK(##class(%Dictionary.Classname).IsValid(tCaseless), "the dictionary accepts a name with a letter that has no case")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Coverage.Job).IsClassName(tCaseless), 1, "so does the guard's name check")
+    For tName = "Pkg.Sub.Class1", "%Library.String", "Class", "Pkg."_$Char(20013), $Char(955)_"Pkg.A", "Pkg.%Class", "Pkg.", "", "Pkg.A B", "Pkg.A;B", "Pkg.A:B", "Pkg.A_B", "1Pkg.A" {
+        Set tExpected = $$$ISOK(##class(%Dictionary.Classname).IsValid(tName))
+        Do $$$AssertEquals(##class(ExecuteMCPv2.Coverage.Job).IsClassName(tName), tExpected, "the guard and the dictionary agree on '"_tName_"'")
     }
 }
 
