@@ -2371,6 +2371,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: The exact pattern Command.cls's historical >8KB bug documents; out of Story 35.2's Analytics-only scope; apply the null-device discipline and live-reproduce the RED oracle first (Rule #59).
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=The exact pattern Command.cls's historical >8KB bug documents; out of Story 35.2's Analytics-only scope
 - 2026-10-15T11:47:34Z status=routed owner=40-1-line-coverage-probe-and-engine by=x0 note=owned by named story (orchestrator decision 2): UnitTest.cls:80-96 still binds the mnemonic on tInitIO, but POST /tests has no tool caller today; AC 40.1.2 + 40.1.4 choose and own that route for coverage
+- 2026-10-18T07:31:54Z status=wontfix-accepted by=adjudication note=decision 40: coverage uses its own job-owned /dev/test/coverage routes and never calls RunTests; POST /tests keeps no tool caller and its class comment says so; RunTests code byte-identical; reopen_if=a tool caller is added for POST /tests, or a direct caller reports a truncated or mis-routed response from it
 
 ### DW-454: [35-2-CR-4] %BuildCube's narration is captured in full into %ExecuteMCPOutput (O(n^2) wstr) and then discarded; the obvious fix is forbidden
 - source: legacy:35.2 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3252,3 +3253,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-40-1-line-coverage-probe-and-engine.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 40.1 verification-gap review, captured live 2026-10-17: a package coverage run of Story401 ran 0 tests until REST.Coverage.TestSpec rewrote the spec as :A;B (then 5 ran); no MCP tool calls POST /tests; UnitTestTest pins only the string shape
 - 2026-10-18T04:15:06Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 burn-down: fix BuildTestSpec at its source (then TestSpec's rewrite can go) and pin a package run
+
+### DW-598: A coverage run whose Line-by-Line session loaded fewer routines than its routine list fails both release proofs, and the next start kills its node as disproved, so the suite's own session is orphaned and every later start is refused foreign
+- source: spec-40-1-line-coverage-probe-and-engine.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: 40.1 rework re-review 2026-10-18 (Edge, verified by reading): LineByLine.Start loads routines through $$LIST^%R and silently skips a missing .obj (irislib LineByLine.cls:56-70); ProofFailure's ListsEqual then fails for runner and supervisor, Finish keeps the node, and NodeDisproved (count mismatch) kills it
+- 2026-10-18T07:26:21Z status=routed owner=40-2-coverage-reports-and-targets by=cr note=probe first: Runner.Run checks GetRoutineCount against the run's list right after Start and stops at once with a startError
+
+### DW-599: Spine AD-27 and the round-1 HIGH-2 note say an all-processes or paused session still reports the previous scoped session's list; the rework probe on the same build saw the starting process and others instead
+- source: spec-40-1-line-coverage-probe-and-engine.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 40.1 rework re-review 2026-10-18 (Blind, Gap, Auditor): ARCHITECTURE-SPINE.md AD-27 'What proves a session is the suite's' vs spec Spec Change Log rework-1 probe and Verification mutation line for MonitorActive; the mode-2-only rule holds under both readings
+- 2026-10-18T07:26:21Z status=wontfix-accepted owner=40-1-line-coverage-probe-and-engine by=cr note=lead may reword the AD-27 rationale (Rule 20); reopen_if=a later AD-27 story bases a decision on what $ZU(84,10,2) reads in mode 1 or 0

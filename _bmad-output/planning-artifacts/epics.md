@@ -5450,6 +5450,7 @@ This story ships per-routine INT-line coverage, with a complete response shape. 
 - **AC 40.2.4** — A `minCoverage` target gives a pass/fail verdict per class and overall. The verdict never turns a completed test run into a tool error.
 - DW-595: the coverage runner reads the Line-by-Line counts right after `RunTest` with no readiness check, so a very fast suite could silently read zero counts. Probe first (start a session and read the same process's counts at once); add a readiness check if the probe shows the delay, otherwise close with evidence. (ledger; routed by harvest 2026-10-17)
 - DW-596: the coverage `Status` route returns one nested pair per counted line and per command line on every terminal read, and the 200,000-line cap was never measured on that path. Measure time, bytes and memory at the cap before building the summary on that payload, then fix or close with evidence. (ledger; routed by harvest 2026-10-17)
+- DW-598: if a measured routine is deleted or recompiled between the start request and the runner's `Start`, IRIS starts the session with fewer routines and no error. Both release proofs then fail, and the next start deletes the ownership node, leaving the suite's own session running with no owner record. That blocks every later coverage run and other projects' Line-by-Line use until someone stops it by hand. Compare the routine count right after `Start` and stop at once on a mismatch; pin it live. (ledger; routed by the 40.1 rework re-review 2026-10-18)
 
 ### Story 40.3: TestProduction Runs
 
