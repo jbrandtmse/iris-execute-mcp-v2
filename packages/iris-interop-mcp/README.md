@@ -637,13 +637,13 @@ Each key slot (`production` / `item` / `hostClass` / `setting`) defaults to `*` 
 ```json
 {
   "entries": [
-    { "id": 8, "timestamp": "2026-04-07 10:30:00.123", "type": 2, "itemName": "MyApp.Operation.SendEmail", "text": "SMTP connection timeout" }
+    { "id": 8, "timestamp": "2026-04-07 10:30:00.123", "type": 2, "itemName": "MyApp.Operation.SendEmail", "text": "SMTP connection timeout", "sourceClass": "EnsLib.EMail.OutboundAdapter", "sourceMethod": "SendMail", "sessionId": 1234 }
   ],
   "count": 1
 }
 ```
 
-`type` takes a display name, so `Error` returns the entries whose `type` is 2 (a read, enabled by default).
+`sourceClass`, `sourceMethod` and `sessionId` appear only when the entry holds a value. `type` takes a display name, so `Error` returns the entries whose `type` is 2 (a read, enabled by default).
 </details>
 
 <details>

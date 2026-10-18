@@ -1691,6 +1691,9 @@ export async function seedBurnDown(dev: WireSession, name: string): Promise<void
  *
  * The logs carry no session, source class or source method. The window rows (L2, L7, L10, H1, H2) sit well inside
  * 24 hours; L8, L9 and H3 sit 5 minutes outside it.
+ *
+ * `MetricsAtZone(zone)` returns, as JSON, the metrics `ExecuteMCPv2.REST.Monitor:CollectInteropMetrics` computes for
+ * the scratch namespace while its own process runs at the time zone `zone`, and restores `$ZTimeZone` on every path.
  */
 export const STORY400_SEED_SOURCE = String.raw`Class Story400.Seed
 {
@@ -1721,6 +1724,25 @@ ClassMethod Seed() As %String
     Set tError = ..FirstError(tH, 3)
     If tError '= "" { Quit tError }
     Quit {"logs":($ListToString(tL)),"headers":($ListToString(tH))}.%ToJSON()
+}
+
+/// The metrics ExecuteMCPv2.REST.Monitor:CollectInteropMetrics computes for the current scratch namespace while this
+/// process runs at the time zone pZone (minutes west of Greenwich), as JSON, or the error text.
+/// $ZTimeZone is per process; it is restored on every path.
+ClassMethod MetricsAtZone(pZone As %Integer) As %String
+{
+    If $NAMESPACE '? 1"EXECMCPTMP400"1U { Quit "REFUSED: MetricsAtZone runs only in a namespace named EXECMCPTMP400 followed by one capital letter" }
+    Set tSaved = $ZTimeZone
+    Set tResult = ""
+    Try {
+        Set $ZTimeZone = pZone
+        Set tResult = ##class(ExecuteMCPv2.REST.Monitor).CollectInteropMetrics($NAMESPACE).%ToJSON()
+    }
+    Catch ex {
+        Set tResult = "ERROR: "_ex.DisplayString()
+    }
+    Set $ZTimeZone = tSaved
+    Quit tResult
 }
 
 /// The UTC time pSeconds after the $ZTimeStamp value pStamp, as YYYY-MM-DD hh:mm:ss.nnn, by whole-second arithmetic on the day count.
@@ -1771,7 +1793,8 @@ export const STORY400_IDS = { logs: "1,2,3,4,5,6,7,8,9,10", headers: "1,2,3" } a
  * received. The seed refuses a namespace that already holds Event Log rows or headers.
  *
  * @param dev - A session on a built iris-dev-mcp server.
- * @param name - An interop-enabled or bare, empty `EXECMCPTMP400<capital letter>` namespace.
+ * @param name - An interop-enabled, empty `EXECMCPTMP400<capital letter>` namespace (a bare one has no
+ *   `Ens.Util.Log`, so the seed cannot run there).
  */
 export async function seedEventLogCounts(dev: WireSession, name: string): Promise<void> {
   assertFixtureName(name);

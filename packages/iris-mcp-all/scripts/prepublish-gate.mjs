@@ -215,6 +215,11 @@ const gateTestFiles = [
   // Story 40.0: the Epic 39 deferred cleanup (the interop metrics counts, the Event Log type filter) on the BUILT iris-dev-mcp, iris-admin-mcp, iris-interop-mcp and iris-ops-mcp dists over real stdio JSON-RPC.
   // Writes EXECMCPTMP400A and EXECMCPTMP400B (their database files too), Story400.* inside A, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-40-0-burn-down-live-gate.test.ts",
+  // Story 40.0 QA: the 24-hour window boundary of iris_metrics_interop (2 minutes inside and outside), the edge values of the iris_production_logs type and count
+  // filters over raw HTTP against hand-written SQL, a mapped namespace with no rows, and the trace-message-flow prompt through the spawned iris-interop-mcp entry,
+  // on the BUILT dev, admin, interop and ops dists over real stdio JSON-RPC. Writes EXECMCPTMP400Q and EXECMCPTMP400R (their database files too), Story400.* and
+  // Story40Q.* inside Q, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
+  "src/__tests__/story-40-0-qa-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

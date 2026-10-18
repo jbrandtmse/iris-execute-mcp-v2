@@ -6,9 +6,12 @@
  * `story-39-4-search-table-live-gate.test.ts`, `story-39-4-qa-live-gate.test.ts`,
  * `story-39-5-body-reader-live-gate.test.ts`, `story-39-5-qa-live-gate.test.ts`,
  * `epic39-capstone-gate.test.ts`, `story-39-7-burn-down-live-gate.test.ts` and
- * `story-40-0-burn-down-live-gate.test.ts`) on their own real path (project rule #59). A gate that drives a
+ * `story-40-0-burn-down-live-gate.test.ts` and `story-40-0-qa-live-gate.test.ts`) on their own real path (project
+ * rule #59). A gate that drives a
  * further dist beyond the dev, admin and interop ones names it in `extraDriven`: the guard then expects that
- * dist's freshness line after the three, in the skip reason and in the source order. No IRIS and no shared state.
+ * dist's freshness line after the three, in the skip reason and in the source order, and it checks `extraDriven`
+ * against the dists the gate's source spawns (`wireOptions("<pkg>")`, `distEntry(REPO_ROOT, "<pkg>")`), so a gate
+ * cannot drive a dist the list leaves out. No IRIS and no shared state.
  *
  * Each gate runs in the default suite and in the prepublish gate. Run against an IRIS that is not reachable (a
  * closed local port) it must skip every test with the reason when it is not armed, and fail in `beforeAll` with
@@ -60,6 +63,12 @@ const GATES: readonly Gate[] = [
     file: "story-40-0-burn-down-live-gate.test.ts",
     tag: "story-40-0-burn-down-live-gate",
     story: "Story 40.0",
+    extraDriven: ["iris-ops-mcp"],
+  },
+  {
+    file: "story-40-0-qa-live-gate.test.ts",
+    tag: "story-40-0-qa-live-gate",
+    story: "Story 40.0 QA",
     extraDriven: ["iris-ops-mcp"],
   },
 ];
@@ -160,6 +169,13 @@ describe.each(GATES)("$story: the live gate refuses a stale dist and checks the 
       previous = extra;
     }
     expect(session, "the gate opens its first session after every check").toBeGreaterThan(previous);
+  });
+
+  it("names in extraDriven exactly the dists it drives beyond the dev, admin and interop ones", () => {
+    const spawned = new Set([...source.matchAll(/(?:wireOptions\(|distEntry\(REPO_ROOT, )"(iris-[a-z]+-mcp)"/g)].map((match) => match[1] as string));
+    expect(spawned.size, "the scan finds the dists the gate spawns").toBeGreaterThan(0);
+    const beyond = [...spawned].filter((pkg) => !DRIVEN_PACKAGES.includes(pkg)).sort();
+    expect(beyond, "every further dist the gate spawns is in extraDriven, and nothing else is").toEqual([...(gate.extraDriven ?? [])].sort());
   });
 
   it("calls assertDeployedBootstrapVersion right after its first session opens, ahead of every describe", () => {

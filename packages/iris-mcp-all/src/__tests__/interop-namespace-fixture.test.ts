@@ -200,6 +200,11 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
     expect(STORY400_SEED_SOURCE).toContain('If $Order(^Ens.Util.LogD("")) \'= ""');
   });
 
+  it("the Story 40.0 MetricsAtZone helper runs only in EXECMCPTMP400<letter> and restores the process time zone after its Try/Catch, on every path", () => {
+    expect(STORY400_SEED_SOURCE).toContain('If $NAMESPACE \'? 1"EXECMCPTMP400"1U { Quit "REFUSED: MetricsAtZone');
+    expect(STORY400_SEED_SOURCE).toMatch(/Set tSaved = \$ZTimeZone\n[\s\S]*?Catch ex \{\n[^\n]*\n\s*\}\n\s*Set \$ZTimeZone = tSaved\n\s*Quit tResult/);
+  });
+
   it("maps HS to HSLIB only when hsLib is set, and removes an HS mapping in every teardown", async () => {
     const mappingCalls = (session: ReturnType<typeof stubSession>) =>
       session.call.mock.calls.filter(([tool]) => tool === "iris_mapping_manage").map(([, args]) => args as Record<string, unknown>);

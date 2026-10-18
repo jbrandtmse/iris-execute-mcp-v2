@@ -9,8 +9,12 @@
  *
  *  - DW-584: `errorCount24h` counts the Error entries (type 2), and it and `messageCount24h` cover the 24 hours before
  *    the call in UTC. Path: SDK `Client` -> built ops server -> `iris_metrics_interop` -> the monitor route ->
- *    `Ens_Util.Log` and `Ens.MessageHeader` of the scratch namespace. The process-time-zone half has no live row (this
- *    instance runs at time zone 0); `ExecuteMCPv2.Tests.EventLogMetricsTest` pins it in IRIS.
+ *    `Ens_Util.Log` and `Ens.MessageHeader` of the scratch namespace. The process-time-zone half: this instance runs at
+ *    time zone 0 and its REST workers' zone is never changed, so the time-zone row drives the route's own collector
+ *    instead. Path: SDK `Client` -> built dev server -> `iris_execute_classmethod` -> `Story400.Seed.MetricsAtZone` in
+ *    the scratch namespace -> `ExecuteMCPv2.REST.Monitor:CollectInteropMetrics` (the method the route calls), with the
+ *    calling process at time zones 420 and -600; a cutoff taken from `$Horolog` would count a 31-hour or a 14-hour
+ *    window there.
  *  - DW-585: the `type` filter of `iris_production_logs` maps a display name to its stored number. Path: SDK `Client` ->
  *    built interop server -> `iris_production_logs` -> the Event Log route, for all six names the live
  *    `Ens.DataType.LogType` lists hold; raw HTTP to the route for a number (an older request) and an unknown value.
@@ -87,6 +91,17 @@ const EXPECTED_IDS: Record<string, number[]> = {
 const SEEDED_TYPE: Record<number, number> = { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 2, 8: 2, 9: 3, 10: 2 };
 
 const LOGS_ROUTE = "/api/executemcp/v2/interop/production/logs";
+
+/** The keys of one namespace's metrics, in the order `CollectInteropMetrics` sets them, written out from its source. */
+const METRICS_KEYS = [
+  "namespace",
+  "productionName",
+  "productionState",
+  "productionStateCode",
+  "queueDepth",
+  "errorCount24h",
+  "messageCount24h",
+];
 
 let skipReason: string | undefined;
 let sdkEsmDir: string | undefined;
@@ -264,10 +279,29 @@ describe("Story 40.0: DW-584, the interop metrics count Error entries and messag
     const content = succeeded<MetricsContent>(result);
     expect(content.count).toBe(1);
     expect(content.namespaces[0]).toMatchObject({ namespace: NS_A, errorCount24h: 3, messageCount24h: 2, queueDepth: 0 });
+    expect(Object.keys(content), "the result keys are unchanged (AD-33)").toEqual(["namespaces", "count"]);
+    expect(Object.keys(content.namespaces[0] ?? {}), "the namespace keys and their order are unchanged (AD-33)").toEqual(METRICS_KEYS);
     const text = allText(result);
     expect(text).toContain("Errors (24h): 3");
     expect(text).toContain("Messages (24h): 2");
     expect(text).toContain("Queue Depth: 0");
+  }, 120000);
+
+  it("the collector the route calls counts the same UTC window with its process at time zones 420 and -600: errorCount24h 3 and messageCount24h 2 in both", async (testCtx) => {
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    for (const zone of [420, -600]) {
+      const result = await dev.call("iris_execute_classmethod", {
+        namespace: NS_A,
+        className: "Story400.Seed",
+        methodName: "MetricsAtZone",
+        args: [zone],
+      });
+      expect(result.isError, allText(result)).toBeFalsy();
+      const returned = String(result.structuredContent?.["returnValue"] ?? "");
+      expect(returned, `time zone ${zone}: the collector returned its metrics`).toMatch(/^\{/);
+      const metrics = JSON.parse(returned) as Record<string, unknown>;
+      expect(metrics, `time zone ${zone}`).toMatchObject({ namespace: NS_A, errorCount24h: 3, messageCount24h: 2, queueDepth: 0 });
+    }
   }, 120000);
 });
 
@@ -324,6 +358,7 @@ describe("Story 40.0: the not-configured namespace B (AC-3)", () => {
     if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const content = succeeded<MetricsContent>(await ops.call("iris_metrics_interop", { namespace: NS_B }));
     expect(content.namespaces[0]).toMatchObject({ namespace: NS_B, errorCount24h: 0, messageCount24h: 0, queueDepth: 0 });
+    expect(Object.keys(content.namespaces[0] ?? {}), "the namespace keys and their order are unchanged (AD-33)").toEqual(METRICS_KEYS);
   }, 120000);
 
   it("iris_production_logs for B is an error with and without type Error, and IRIS's error text is identical (the mapping adds no dependency)", async (testCtx) => {

@@ -50,12 +50,12 @@ const toolSupport = read("tool_support.md");
 
 const CHANGELOG_TITLE = /^## \[Pre-release \u2014 2026-10-17\] \u2014 Story 40\.0: Epic 39 deferred cleanup$/;
 
-/** The `BOOTSTRAP_VERSION` values of the Story 40.0 move. */
+/**
+ * The `BOOTSTRAP_VERSION` values of the Story 40.0 move, as history literals: `changelog-bootstrap-move.test.ts` ties
+ * the newest documented move to the committed embed, so a later move leaves this file true.
+ */
 const BOOTSTRAP_FROM = "7d12cd8b3a1e";
 const BOOTSTRAP_TO = "08b8adeaadc6";
-
-/** The `BOOTSTRAP_VERSION` the committed embed carries: the documents below must name it. */
-const EMBED_VERSION = /export const BOOTSTRAP_VERSION = "([0-9a-f]{12})"/.exec(read("packages/shared/src/bootstrap-classes.ts"))?.[1] ?? "";
 
 /** The prompt-row sentence both READMEs gain, after "for any erroring items". */
 const PROMPT_ROW_ADDITION =
@@ -76,9 +76,10 @@ describe("Story 40.0: the Interoperability README and the root README (DW-585, D
   it("the iris_production_logs example shows the real entry shape, and the type sentence states the default state", () => {
     const text = squash(interopReadme);
     expect(text).toContain(
-      '{ "id": 8, "timestamp": "2026-04-07 10:30:00.123", "type": 2, "itemName": "MyApp.Operation.SendEmail", "text": "SMTP connection timeout" }',
+      '{ "id": 8, "timestamp": "2026-04-07 10:30:00.123", "type": 2, "itemName": "MyApp.Operation.SendEmail", "text": "SMTP connection timeout", "sourceClass": "EnsLib.EMail.OutboundAdapter", "sourceMethod": "SendMail", "sessionId": 1234 }',
     );
     expect(text).not.toContain('"message": "SMTP connection timeout"');
+    expect(text).toContain("`sourceClass`, `sourceMethod` and `sessionId` appear only when the entry holds a value.");
     expect(text).toContain("`type` takes a display name, so `Error` returns the entries whose `type` is 2 (a read, enabled by default).");
   });
 
@@ -143,7 +144,6 @@ describe("Story 40.0: the CHANGELOG section and the changeset", () => {
     expect(text).toContain("the Operations `core` roster stays at 10");
     expect(text).toContain("hash `1e62c5ad5bf7` (141 keys)");
     expect(text).toContain(`\`BOOTSTRAP_VERSION\` moves from \`${BOOTSTRAP_FROM}\` to \`${BOOTSTRAP_TO}\``);
-    expect(EMBED_VERSION, "the committed embed carries the version these documents name").toBe(BOOTSTRAP_TO);
   });
 
   it("Changed names the prompt change as sanctioned, and Fixed names DW-584 with OD-1, DW-585 and the DW-586 closure, each read enabled by default", () => {
@@ -158,10 +158,13 @@ describe("Story 40.0: the CHANGELOG section and the changeset", () => {
     expect(text.match(/It is a read, enabled by default\./g)?.length, "both fixed reads state their default state").toBe(2);
   });
 
-  it("Tests names the gate, the OS test class and this file", () => {
+  it("Tests names both gates, both OS test classes, the bootstrap-move check and this file", () => {
     const text = squash(section);
     expect(text).toContain("**`story-40-0-burn-down-live-gate.test.ts`**");
+    expect(text).toContain("**`story-40-0-qa-live-gate.test.ts`**");
     expect(text).toContain("**`ExecuteMCPv2.Tests.EventLogMetricsTest`**");
+    expect(text).toContain("**`ExecuteMCPv2.Tests.EventLogMetricsEdgeTest`**");
+    expect(text).toContain("**`changelog-bootstrap-move.test.ts`**");
     expect(text).toContain("**`story-40-0-doc-claims.test.ts`**");
     expect(text).toContain("`extraDriven`");
     expect(text).toContain("`eventLogOracle` moves from the 39.7 gate to `header-row-oracle.ts`.");

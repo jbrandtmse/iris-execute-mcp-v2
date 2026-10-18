@@ -35,14 +35,15 @@ at 109 package tools (114 advertised), the prompt pack stays at 13 prompts, the 
   is bound as before, so an older request (`type=2`) still returns the same entries (AD-33). Sanctioned change (AD-15).
   It is a read, enabled by default.
 - **DW-586 is closed with evidence and no code change.** The diagram generator's own `Generation failed for session N:`
-  text carries only a SQL schema error or a system error name and location, never message content, so it is not
-  withheld under `block`.
+  text carries only a SQL schema error or a system error name and location, and no reachable code path puts message
+  content in it, so it is not withheld under `block`.
 
 ### Documentation
 
 - **The Operations README** states what `errorCount24h` and `messageCount24h` count, in UTC (a read, enabled by default).
 - **The Interoperability README** shows the real `iris_production_logs` entry (`id`, `timestamp`, `type` as a number,
-  `itemName`, `text`) and says `type` takes a display name (a read, enabled by default). Its prompt row and the suite
+  `itemName`, `text`, and `sourceClass`, `sourceMethod` and `sessionId` when they hold a value) and says `type` takes a
+  display name (a read, enabled by default). Its prompt row and the suite
   README's say that, under `block`, the reason for withheld diagram error text and Event Log text is reported the same
   way and never read another way.
 - **`tool_support.md`** has a Story 40.0 note.
@@ -53,13 +54,21 @@ at 109 package tools (114 advertised), the prompt pack stays at 13 prompts, the 
   on two disposable namespaces: fixture xi (`Story400.Seed`, ten Event Log rows and three headers placed relative to the
   time of the seed) in a mapping-only interop namespace, and a bare one. It pins the corrected counts, all six type
   names against a hand-written SQL oracle read from the live `Ens.DataType.LogType` lists, the raw route for a number
-  and an unknown value, and the not-configured namespace. It is listed in the prepublish roster and the arming guard,
-  which learns `extraDriven` for the ops dist.
+  and an unknown value, the keys of the metrics result and their order, the counts the route's collector computes
+  with its process at time zones 420 and -600, and the not-configured namespace. It is listed in the prepublish roster
+  and the arming guard, which learns `extraDriven` for the ops dist and checks it against the dists each gate spawns.
+- **`story-40-0-qa-live-gate.test.ts`** drives the same built servers on two more disposable namespaces: an Error row
+  and a header 2 minutes inside and outside the 24-hour window on the wire, the edge values of the `type` and `count`
+  filters over raw HTTP against hand-written SQL, a mapped namespace with no rows, and the `trace-message-flow` prompt
+  through its own spawn of the built interop entry. It is listed in the prepublish roster and the arming guard.
 - **`ExecuteMCPv2.Tests.EventLogMetricsTest`** pins `UtcCutoff` at a fixed instant and under two process time zones,
-  and `LogTypeValue` against the live `Ens.DataType.LogType` lists.
+  and `LogTypeValue` against the live `Ens.DataType.LogType` lists. **`ExecuteMCPv2.Tests.EventLogMetricsEdgeTest`**
+  pins the day, year and leap-day arithmetic of `UtcCutoff`, the cut of a fraction past the millisecond digits, and
+  `LogTypeValue` on 22 values that are not an exact display name.
 - **`story-40-0-doc-claims.test.ts`** pins each documented row with its default state, this section and the changeset.
   The prompt tests pin the three step texts, and the Story 39.7 doc-claims test pins its bootstrap move as history.
-  `eventLogOracle` moves from the 39.7 gate to `header-row-oracle.ts`.
+  **`changelog-bootstrap-move.test.ts`** checks that the newest section naming a `BOOTSTRAP_VERSION` move ends at the
+  version the committed embed carries. `eventLogOracle` moves from the 39.7 gate to `header-row-oracle.ts`.
 
 ## [Pre-release — 2026-10-17] — Story 39.7: Epic 39 burn-down
 
