@@ -5,10 +5,10 @@
 /// <p><b>Two suite jobs per run (AD-27).</b> The runner (<class>ExecuteMCPv2.Coverage.Runner</class>)
 /// starts a Line-by-Line session scoped to itself and to the supervisor, runs the tests and stops its own
 /// session. The supervisor (<method>Supervise</method>) turns a cancel or the time limit into terminating the
-/// runner, and releases a session that a dead runner left behind. A session counts only the process that
-/// called <code>Start</code>, and <code>$SYSTEM.Process.Terminate</code> cannot be trapped, so the process
-/// that runs the tests cannot be the only one that releases the monitor. Only a process in the session's
-/// process list can read its routine names and line counts, which is why the supervisor is in that list.</p>
+/// runner, and releases a session that a dead runner left behind. A session counts only the processes in its
+/// process list, and <code>$SYSTEM.Process.Terminate</code> cannot be trapped, so the process that runs the
+/// tests cannot be the only one that releases the monitor. Only a process in the session's process list can
+/// read its routine names and line counts, which is why the supervisor is in that list.</p>
 /// <p><b>The run record</b> lives in <code>^IRIS.TempExecuteMCPv2Coverage</code>, which is IRISTEMP:
 /// instance-wide, like the monitor, and not journaled. The 20 most recent runs are kept and a record
 /// does not survive an instance restart.</p>
@@ -29,8 +29,8 @@ Parameter MAXRUNS As %Integer = 20;
 
 /// Is a Line-by-Line or PERFMON session active on this instance? This is the only place the suite calls
 /// <code>$ZUtil(84,...)</code>; <code>$ZUtil(84,8)</code> is the same test <code>%Monitor.System.LineByLine:Start</code>
-/// makes. <var>pPids</var> receives the process ids the session is scoped to (space-delimited, empty when the
-/// session is not scoped to processes or cannot say).
+/// makes. <var>pPids</var> receives the process ids the session is scoped to (space-delimited), and is empty when the
+/// session is not scoped to listed processes or cannot say (see <method>ScopedPids</method>).
 /// <p>Any process can read the process list, but only a process that is itself in that list can read the session's
 /// routine names and line counts (probe, IRIS 2026.2 build 221U: a process outside the list reads them as
 /// unavailable, and a process in the list can read them after a short delay). That is why the session identity
@@ -40,11 +40,31 @@ ClassMethod MonitorActive(Output pPids As %String) As %Boolean
     Set pPids = ""
     If $ZUtil(84, 8) '= 1 Quit 0
     Try {
-        Set pPids = $ZUtil(84, 10, 2)
+        Set pPids = ..ScopedPids($ZUtil(84, 1), $ZUtil(84, 10, 2))
     } Catch {
         Set pPids = ""
     }
     Quit 1
+}
+
+/// The process list <var>pPids</var> as a session of collection mode <var>pMode</var> (<code>$ZUtil(84,1)</code>)
+/// means it: the list itself when the session is scoped to listed processes (mode 2, as
+/// <code>%Monitor.System.LineByLine:Start</code> sets it for a non-empty process list), and empty otherwise. A session
+/// of all processes (mode 1) or a paused one (mode 0) keeps the list of an earlier scoped session, which says nothing
+/// about the active one (probe, IRIS 2026.2 build 221U: an all-processes session read the previous session's list).
+ClassMethod ScopedPids(pMode As %Integer, pPids As %String) As %String
+{
+    If pMode '= 2 Quit ""
+    Quit pPids
+}
+
+/// Does the active Line-by-Line session's process list name process <var>pPid</var>? Only a session scoped to
+/// listed processes can (see <method>ScopedPids</method>). The runner asks this of itself before it reads its counts
+/// and stops its session: a session that does not list it is not the one it started.
+ClassMethod ListsProcess(pPid As %String) As %Boolean
+{
+    If (pPid = "") || '..MonitorActive(.tPids) Quit 0
+    Quit ((" "_tPids_" ") [ (" "_pPid_" "))
 }
 
 /// The routines the active Line-by-Line session monitors, as a <class>%List</class>; empty when none is active.

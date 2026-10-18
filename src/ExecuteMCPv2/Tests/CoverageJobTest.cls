@@ -37,23 +37,25 @@ Method TestPruneDeletesTheOldestRecordsFirst() As %Status
     Quit $$$OK
 }
 
-/// Prune with its default limit keeps at most 20 records (plus the one it is told to keep): with 25 fake terminal records
-/// ahead of every real one, the oldest fakes go first.
-Method TestPruneDefaultKeepsTheTwentyMostRecentRuns() As %Status
+/// Prune keeps the 20 most recent run records when it is given no limit. A Prune with the default limit here would
+/// also delete real run records of the shared instance, so this pins the limit itself, and the live gate's retention
+/// row drives the default through a start.
+Method TestPruneDefaultLimitIsTwentyRuns() As %Status
 {
-    For tId = -30:1:-6 Set ^IRIS.TempExecuteMCPv2Coverage("run", tId, "status") = "completed"
-    Set ^IRIS.TempExecuteMCPv2Coverage("run", -1, "status") = "completed"
-    Do ##class(ExecuteMCPv2.Coverage.Job).Prune(-1)
-    Set tCount = 0
-    Set tKey = ""
-    For {
-        Set tKey = $Order(^IRIS.TempExecuteMCPv2Coverage("run", tKey))
-        If tKey = "" Quit
-        Set tCount = tCount + 1
-    }
-    Do $$$AssertTrue(tCount <= (##class(ExecuteMCPv2.Coverage.Job).#MAXRUNS + 1), "at most 20 records remain, plus the record Prune was told to keep: "_tCount)
-    Do $$$AssertEquals($Data(^IRIS.TempExecuteMCPv2Coverage("run", -30)), 0, "the oldest record is gone")
-    Do $$$AssertTrue($Data(^IRIS.TempExecuteMCPv2Coverage("run", -1)) > 0, "the record to keep stays")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Coverage.Job).#MAXRUNS, 20, "the default limit is the 20 most recent runs")
+    Quit $$$OK
+}
+
+/// ScopedPids(mode, pids): only a session scoped to listed processes (mode 2) has a process list of its own. A session
+/// of all processes (mode 1) or a paused one (mode 0) keeps an earlier session's list (probe, IRIS 2026.2 build 221U).
+Method TestScopedPidsTrustsOnlyAScopedSession() As %Status
+{
+    Set tJob = "ExecuteMCPv2.Coverage.Job"
+    Do $$$AssertEquals($ClassMethod(tJob, "ScopedPids", 2, "100 200"), "100 200", "a scoped session: its own list")
+    Do $$$AssertEquals($ClassMethod(tJob, "ScopedPids", 1, "100 200"), "", "all processes: the list is an earlier session's")
+    Do $$$AssertEquals($ClassMethod(tJob, "ScopedPids", 1, 0), "", "all processes, with an earlier list that reads 0")
+    Do $$$AssertEquals($ClassMethod(tJob, "ScopedPids", 0, "100"), "", "a paused session")
+    Do $$$AssertEquals($ClassMethod(tJob, "PidsMatch", $ClassMethod(tJob, "ScopedPids", 1, 0), 100, 200), 0, "so an all-processes session never proves a dead suite session")
     Quit $$$OK
 }
 

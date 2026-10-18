@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "4ac115159db0";
+export const BOOTSTRAP_VERSION = "bdaff1eec1fa";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "4ac115159db0";
+Parameter BOOTSTRAPVERSION = "bdaff1eec1fa";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -3580,10 +3580,10 @@ ClassMethod Pct(pNum As %Integer, pDen As %Integer) As %Numeric [ Internal ]
 /// <p><b>Two suite jobs per run (AD-27).</b> The runner (<class>ExecuteMCPv2.Coverage.Runner</class>)
 /// starts a Line-by-Line session scoped to itself and to the supervisor, runs the tests and stops its own
 /// session. The supervisor (<method>Supervise</method>) turns a cancel or the time limit into terminating the
-/// runner, and releases a session that a dead runner left behind. A session counts only the process that
-/// called <code>Start</code>, and <code>$SYSTEM.Process.Terminate</code> cannot be trapped, so the process
-/// that runs the tests cannot be the only one that releases the monitor. Only a process in the session's
-/// process list can read its routine names and line counts, which is why the supervisor is in that list.</p>
+/// runner, and releases a session that a dead runner left behind. A session counts only the processes in its
+/// process list, and <code>$SYSTEM.Process.Terminate</code> cannot be trapped, so the process that runs the
+/// tests cannot be the only one that releases the monitor. Only a process in the session's process list can
+/// read its routine names and line counts, which is why the supervisor is in that list.</p>
 /// <p><b>The run record</b> lives in <code>^IRIS.TempExecuteMCPv2Coverage</code>, which is IRISTEMP:
 /// instance-wide, like the monitor, and not journaled. The 20 most recent runs are kept and a record
 /// does not survive an instance restart.</p>
@@ -3604,8 +3604,8 @@ Parameter MAXRUNS As %Integer = 20;
 
 /// Is a Line-by-Line or PERFMON session active on this instance? This is the only place the suite calls
 /// <code>$ZUtil(84,...)</code>; <code>$ZUtil(84,8)</code> is the same test <code>%Monitor.System.LineByLine:Start</code>
-/// makes. <var>pPids</var> receives the process ids the session is scoped to (space-delimited, empty when the
-/// session is not scoped to processes or cannot say).
+/// makes. <var>pPids</var> receives the process ids the session is scoped to (space-delimited), and is empty when the
+/// session is not scoped to listed processes or cannot say (see <method>ScopedPids</method>).
 /// <p>Any process can read the process list, but only a process that is itself in that list can read the session's
 /// routine names and line counts (probe, IRIS 2026.2 build 221U: a process outside the list reads them as
 /// unavailable, and a process in the list can read them after a short delay). That is why the session identity
@@ -3615,11 +3615,31 @@ ClassMethod MonitorActive(Output pPids As %String) As %Boolean
     Set pPids = ""
     If $ZUtil(84, 8) '= 1 Quit 0
     Try {
-        Set pPids = $ZUtil(84, 10, 2)
+        Set pPids = ..ScopedPids($ZUtil(84, 1), $ZUtil(84, 10, 2))
     } Catch {
         Set pPids = ""
     }
     Quit 1
+}
+
+/// The process list <var>pPids</var> as a session of collection mode <var>pMode</var> (<code>$ZUtil(84,1)</code>)
+/// means it: the list itself when the session is scoped to listed processes (mode 2, as
+/// <code>%Monitor.System.LineByLine:Start</code> sets it for a non-empty process list), and empty otherwise. A session
+/// of all processes (mode 1) or a paused one (mode 0) keeps the list of an earlier scoped session, which says nothing
+/// about the active one (probe, IRIS 2026.2 build 221U: an all-processes session read the previous session's list).
+ClassMethod ScopedPids(pMode As %Integer, pPids As %String) As %String
+{
+    If pMode '= 2 Quit ""
+    Quit pPids
+}
+
+/// Does the active Line-by-Line session's process list name process <var>pPid</var>? Only a session scoped to
+/// listed processes can (see <method>ScopedPids</method>). The runner asks this of itself before it reads its counts
+/// and stops its session: a session that does not list it is not the one it started.
+ClassMethod ListsProcess(pPid As %String) As %Boolean
+{
+    If (pPid = "") || '..MonitorActive(.tPids) Quit 0
+    Quit ((" "_tPids_" ") [ (" "_pPid_" "))
 }
 
 /// The routines the active Line-by-Line session monitors, as a <class>%List</class>; empty when none is active.
@@ -4267,10 +4287,10 @@ ClassMethod Finish(pId As %Integer, pReason As %String, pStartFailed As %Boolean
 /// Line-by-Line session (AD-27).
 /// <p>A Line-by-Line session counts only the processes in its process list, and only a process that is in that
 /// list can read the session's line counts. The runner therefore starts the session scoped to itself and to its
-/// supervisor (<code>$ListBuild($JOB, supervisorPid)</code>, never all processes). The supervisor runs none of
-/// the measured routines, so it adds no counts; being in the list is what lets it read the counts after the
-/// runner is terminated. The runner runs the tests through <method>%UnitTest.Manager:RunTest</method> in this same
-/// process, reads the line counts and stops the session.
+/// supervisor (<code>$ListBuild($JOB, supervisorPid)</code>, never all processes). The supervisor runs only
+/// <code>ExecuteMCPv2</code> and system code, so it adds counts only to those classes, and only when they are listed;
+/// being in the list is what lets it read the counts after the runner is terminated. The runner runs the tests
+/// through <method>%UnitTest.Manager:RunTest</method> in this same process, reads the line counts and stops the session.
 /// It never reads the cancel flag: <method>ExecuteMCPv2.Coverage.Job:Supervise</method> turns a cancel or the time
 /// limit into terminating this process, and releases a session this process leaves behind.</p>
 /// <p>This class extends <class>%UnitTest.Manager</class> only to hook <method>OnBeforeAllTests</method>, which
@@ -4279,9 +4299,10 @@ Class ExecuteMCPv2.Coverage.Runner Extends %UnitTest.Manager
 {
 
 /// The job entry point for run <var>pId</var>. It holds its owner lock for its whole life, switches to the run's
-/// namespace, starts the session, runs the tests, and always (also after an error) reads the counts and stops its
-/// own session. If <code>Start</code> fails it records the IRIS text and ends without calling <code>Stop</code>: the
-/// session that blocked it belongs to someone else.
+/// namespace, starts the session, runs the tests, and afterwards (also after an error) reads the counts and stops the
+/// session it started, as long as that session is still the active one (see <method>StopOwnSession</method>). If
+/// <code>Start</code> fails it records the IRIS text and ends without calling <code>Stop</code>: the session that
+/// blocked it belongs to someone else.
 ClassMethod Run(pId As %Integer)
 {
     Set tHeld = 0
@@ -4324,11 +4345,17 @@ ClassMethod Run(pId As %Integer)
     If tHeld Lock -^IRIS.TempExecuteMCPv2Coverage("owner", pId, "runner")
 }
 
-/// Record the counts, then stop this process's own session and record that it was released. When the counts cannot
-/// be read, the IRIS text is recorded as <code>readError</code> and the counts are never marked as read; the session
-/// is stopped all the same.
+/// Record the counts, then stop this process's own session and record that it was released. Nothing is read or
+/// stopped unless the active session's process list still names this process
+/// (<method>ExecuteMCPv2.Coverage.Job:ListsProcess</method>): the supervisor may already have read the counts and
+/// stopped the session (it does when this process's owner lock is gone, for example after test code released every
+/// lock of the process, or when this process outlived a cancel), and a session someone else started since is never
+/// touched; the supervisor's <method>ExecuteMCPv2.Coverage.Job:Finish</method> reports what it found. When the counts
+/// cannot be read, the IRIS text is recorded as <code>readError</code> and the counts are never marked as read; the
+/// session is stopped all the same.
 ClassMethod StopOwnSession(pId As %Integer) [ Private ]
 {
+    If '##class(ExecuteMCPv2.Coverage.Job).ListsProcess($Job) Quit
     Try {
         Set tReadSC = ..ReadCounts(pId)
         If $$$ISERR(tReadSC) Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError") = $System.Status.GetErrorText(tReadSC)

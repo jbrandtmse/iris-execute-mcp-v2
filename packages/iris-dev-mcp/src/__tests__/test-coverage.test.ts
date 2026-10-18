@@ -553,8 +553,14 @@ describe("testCoverageTool definition (Story 40.1, AC-6)", () => {
     expect(description).toContain("coverageRunId");
     expect(description).toContain("do NOT re-submit");
     expect(description).toContain("Class names are matched exactly as compiled, with the package and the letter case");
-    expect(description).toContain("Line numbers are lines of the routine's INT source");
-    expect(description).toContain("iris_doc_get");
+    // INT line n is document line n+1 of iris_doc_get on <routine>.int: its line 1 is the ROUTINE header.
+    expect(description).toContain("INT line n is line n+1 of the document iris_doc_get returns for '<routine>.int'");
+    expect(description).toContain("whose line 1 is the ROUTINE header");
+    // The companion's cancel is its own default-disabled key, with its own recipe.
+    expect(description).toContain("is a key of its own, iris_test_status:cancel, also DEFAULT-DISABLED");
+    expect(description).toContain('IRIS_GOVERNANCE={"global":{"iris_test_status:cancel":true}}');
+    expect(description).toContain("the suite's own supervisor process, which runs only the suite's own classes, so they count only if you list them");
+    expect(description).toContain("including the code the compiler generates in them");
     expect(description).not.toMatch(/\/api\/|\/dev\/|executemcp/i);
   });
 

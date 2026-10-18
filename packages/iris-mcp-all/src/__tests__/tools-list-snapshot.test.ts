@@ -47,7 +47,7 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const SNAPSHOT_FILE = path.join(REPO_ROOT, SNAPSHOT_RELATIVE_PATH);
 const CLI = path.join(REPO_ROOT, "scripts", "gen-tools-list-snapshot.mjs");
 
-/** The entries each server listed when the snapshot was first written (Story 39.6): a regenerate may not pin fewer. */
+/** The entries each server lists in the committed snapshot: a regenerate may not pin fewer. */
 const ENTRY_FLOOR: Record<string, number> = {
   "iris-dev-mcp": 33,
   "iris-admin-mcp": 27,

@@ -2,10 +2,10 @@
 /// Line-by-Line session (AD-27).
 /// <p>A Line-by-Line session counts only the processes in its process list, and only a process that is in that
 /// list can read the session's line counts. The runner therefore starts the session scoped to itself and to its
-/// supervisor (<code>$ListBuild($JOB, supervisorPid)</code>, never all processes). The supervisor runs none of
-/// the measured routines, so it adds no counts; being in the list is what lets it read the counts after the
-/// runner is terminated. The runner runs the tests through <method>%UnitTest.Manager:RunTest</method> in this same
-/// process, reads the line counts and stops the session.
+/// supervisor (<code>$ListBuild($JOB, supervisorPid)</code>, never all processes). The supervisor runs only
+/// <code>ExecuteMCPv2</code> and system code, so it adds counts only to those classes, and only when they are listed;
+/// being in the list is what lets it read the counts after the runner is terminated. The runner runs the tests
+/// through <method>%UnitTest.Manager:RunTest</method> in this same process, reads the line counts and stops the session.
 /// It never reads the cancel flag: <method>ExecuteMCPv2.Coverage.Job:Supervise</method> turns a cancel or the time
 /// limit into terminating this process, and releases a session this process leaves behind.</p>
 /// <p>This class extends <class>%UnitTest.Manager</class> only to hook <method>OnBeforeAllTests</method>, which
@@ -14,9 +14,10 @@ Class ExecuteMCPv2.Coverage.Runner Extends %UnitTest.Manager
 {
 
 /// The job entry point for run <var>pId</var>. It holds its owner lock for its whole life, switches to the run's
-/// namespace, starts the session, runs the tests, and always (also after an error) reads the counts and stops its
-/// own session. If <code>Start</code> fails it records the IRIS text and ends without calling <code>Stop</code>: the
-/// session that blocked it belongs to someone else.
+/// namespace, starts the session, runs the tests, and afterwards (also after an error) reads the counts and stops the
+/// session it started, as long as that session is still the active one (see <method>StopOwnSession</method>). If
+/// <code>Start</code> fails it records the IRIS text and ends without calling <code>Stop</code>: the session that
+/// blocked it belongs to someone else.
 ClassMethod Run(pId As %Integer)
 {
     Set tHeld = 0
@@ -59,11 +60,17 @@ ClassMethod Run(pId As %Integer)
     If tHeld Lock -^IRIS.TempExecuteMCPv2Coverage("owner", pId, "runner")
 }
 
-/// Record the counts, then stop this process's own session and record that it was released. When the counts cannot
-/// be read, the IRIS text is recorded as <code>readError</code> and the counts are never marked as read; the session
-/// is stopped all the same.
+/// Record the counts, then stop this process's own session and record that it was released. Nothing is read or
+/// stopped unless the active session's process list still names this process
+/// (<method>ExecuteMCPv2.Coverage.Job:ListsProcess</method>): the supervisor may already have read the counts and
+/// stopped the session (it does when this process's owner lock is gone, for example after test code released every
+/// lock of the process, or when this process outlived a cancel), and a session someone else started since is never
+/// touched; the supervisor's <method>ExecuteMCPv2.Coverage.Job:Finish</method> reports what it found. When the counts
+/// cannot be read, the IRIS text is recorded as <code>readError</code> and the counts are never marked as read; the
+/// session is stopped all the same.
 ClassMethod StopOwnSession(pId As %Integer) [ Private ]
 {
+    If '##class(ExecuteMCPv2.Coverage.Job).ListsProcess($Job) Quit
     Try {
         Set tReadSC = ..ReadCounts(pId)
         If $$$ISERR(tReadSC) Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError") = $System.Status.GetErrorText(tReadSC)

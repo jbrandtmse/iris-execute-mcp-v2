@@ -17,11 +17,16 @@
  *  - The MayTerminate decoy: a cancel of a run whose record names a process the supervisor did not start terminates
  *    nothing; the gate's own decoy process stays alive and the run finishes on its own.
  *  - Decision #48: a run whose line counts cannot be read (`counts-unreadable`) or whose session cannot be stopped
- *    (`release-failed`) ends `failed`, with the reason, IRIS's text, the test summary and any coverage that was read.
+ *    (`release-failed`, also when the supervisor's routine-name proof fails) ends `failed`, with the reason, IRIS's
+ *    text, the test summary and any coverage that was read.
+ *  - The test process stops only the session it started: after a test released every lock of its process (so the
+ *    supervisor ended the run), a session started since is left alone and the run keeps its counts.
+ *  - Stale ownership nodes (`clear-busy-foreign`, `clear-and-proceed`) and the retention of 20 run records.
  *  - Rows 10 and 11: a foreign session and a running suite run both refuse a new run with `MONITOR_BUSY`.
  *  - Rows 13 and 14: the time limit, and the default governance.
  *
- * Only this gate starts Line-by-Line sessions in Story 40.1 (it runs serially, `--no-file-parallelism`). It starts every
+ * This gate and the Story 40.1 QA gate are the only ones that start Line-by-Line sessions (the package runs its files
+ * serially, `--no-file-parallelism`). It starts every
  * row with the monitor idle: when a session it did not start is active, an armed gate fails and names it, an unarmed one
  * skips, and the session is left alone. A process is terminated only through the fixture's `TerminateCoverageProcess`,
  * which asks `ExecuteMCPv2.Coverage.Job:MayTerminate` immediately before. No production is started.
@@ -92,6 +97,26 @@ const FOREIGN_ROUTINES = "ExecuteMCPv2.Temp.Story391Fixture.1";
 
 /** The recorded reason a run that outlives its `maxSeconds` is cancelled with, and the text of a runner killed from outside. */
 const RUNNER_ENDED_ERROR = "The test process ended before the tests finished.";
+
+/**
+ * A test that releases every lock of its process with an argumentless `Lock` (as old code does), the runner's owner
+ * lock included, then hangs for `^Story401Hang` seconds. Put into A by the row that uses it.
+ */
+const LOCK_DROP_TEST_DOC = "Story401L.LockDropTest.cls";
+const LOCK_DROP_TEST_SOURCE = String.raw`/// Synthetic coverage test whose code releases every lock of its process (Story 40.1).
+Class Story401L.LockDropTest Extends %UnitTest.TestCase
+{
+
+Method TestDropLocks()
+{
+    Do $$$AssertEquals(##class(Story401.Fixture).SumTo(3), 6, "SumTo(3)")
+    Lock
+    Hang +$Get(^Story401Hang, 3)
+    Do $$$AssertTrue(1, "after the hang")
+}
+
+}
+`;
 
 let skipReason: string | undefined;
 let sdkEsmDir: string | undefined;
@@ -700,6 +725,90 @@ describe("Story 40.1: a run whose line counts could not be read, or whose sessio
     }
     await expectIdle("release-failed");
   }, 300000);
+
+  it("release-failed by the routine-name proof: a session whose routines the supervisor reads but are not the run's is left running, the run ends failed with the reason, and the next run reclaims the session", async (testCtx) => {
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    await setSlowTestHang(dev, NS_A, 20);
+    const running = await startSlow();
+    try {
+      // The run record now names a routine the session does not monitor; the session itself is still the run's.
+      expect(await fixtureCall("RenameRoutineList", [running.coverageRunId])).toBe("renamed");
+      expect(await fixtureCall("TerminateCoverageProcess", [running.runnerPid])).toMatch(/^terminated:1/);
+      const failed = await pollUntil(running.coverageRunId, ["failed"], 60000);
+      expect(failed.isError, allText(failed)).toBe(true);
+      const content = failed.structuredContent as unknown as CoverageContent;
+      expect(content).toMatchObject({ status: "failed", reason: "release-failed", coverageRunId: running.coverageRunId });
+      expect(content.error).toContain("could not be verified as this run's");
+      expect(content.error).toContain("are not this run's routine list");
+      expect((await rawStatus(running.coverageRunId)).run, "the supervisor stopped nothing").not.toHaveProperty("releasedBy");
+      expect((await monitorState()).active, "the session is still active").toBe(1);
+      expect((await coverageGlobal('"session"')).defined, "and its ownership node is kept for a reclaim").toBe(true);
+
+      const reclaimed = succeeded<CoverageContent>(await coverage());
+      expect(reclaimed.status).toBe("completed");
+      expect(reclaimed.reclaimed).toEqual({ coverageRunId: running.coverageRunId, pid: running.pid });
+    } finally {
+      await releaseLeftover(SUITE_ROUTINES);
+    }
+    await expectIdle("release-failed by the routine-name proof");
+  }, 240000);
+});
+
+// -- The test process stops only the session it started (AD-27) ---------------------------------------
+
+describe("Story 40.1: the test process stops only the session it started, so a session started after its own is never touched (AC-2, AD-27)", () => {
+  it("a test that releases every lock of its process: the supervisor ends the run and stops its session, and when the tests end the test process stops nothing, so a session started since is left alone and the run keeps its counts", async (testCtx) => {
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    for (const [tool, args] of [
+      ["iris_doc_put", { namespace: NS_A, name: LOCK_DROP_TEST_DOC, content: LOCK_DROP_TEST_SOURCE }],
+      ["iris_doc_compile", { namespace: NS_A, doc: LOCK_DROP_TEST_DOC }],
+    ] as const) {
+      const result = await dev.call(tool, args);
+      expect(result.isError, `${tool}: ${allText(result)}`).toBeFalsy();
+    }
+    await setSlowTestHang(dev, NS_A, 12);
+    const answer = await executeMcpPost(TARGET, "/dev/test/coverage", {
+      target: "Story401L.LockDropTest",
+      level: "class",
+      classes: ["Story401.Fixture"],
+      namespace: NS_A,
+      maxSeconds: 3600,
+      maxLines: 200000,
+    });
+    const started = (JSON.parse(answer.text) as { result?: { outcome?: string; coverageRunId?: number } }).result;
+    expect(started?.outcome, answer.text).toBe("started");
+    const id = Number(started?.coverageRunId);
+
+    // The test released the runner's owner lock, so the supervisor took the runner for dead: it read the counts, stopped
+    // the session and ended the run, while the test process went on with its hang.
+    const ended = await rawUntilTerminal(id, 30000);
+    expect(ended).toMatchObject({ status: "failed", error: RUNNER_ENDED_ERROR, releasedBy: "supervisor" });
+    const before = (await poll(id)).structuredContent as unknown as CoverageContent;
+    expect(routinesOf(before)[0]?.coveredRanges, "the supervisor read the SumTo lines").toEqual([[40, 42], [44, 44]]);
+    expect((await coverageGlobal(`"run",${id},"testsDone"`)).defined, "the test process is still in its hang").toBe(false);
+    await expectIdle("the supervisor stopped the run's session");
+
+    let stopped = false;
+    try {
+      expect(await fixtureCall("StartForeign")).toMatch(/^started:\d+$/);
+      const foreign = await monitorState();
+      const deadline = Date.now() + 30000;
+      while (!(await coverageGlobal(`"run",${id},"testsDone"`)).defined && Date.now() < deadline) await sleep(250);
+      expect((await coverageGlobal(`"run",${id},"testsDone"`)).defined, "the test process finished its tests").toBe(true);
+      await sleep(3000);
+      const after = await monitorState();
+      expect(after.active, "the test process did not stop the session started after its own").toBe(1);
+      expect(after.pids, "which keeps its process list").toBe(foreign.pids);
+      const again = (await poll(id)).structuredContent as unknown as CoverageContent;
+      expect(again.coverage, "the finished run keeps the counts the supervisor read").toEqual(before.coverage);
+      expect((await rawStatus(id)).run["releasedBy"], "and the record of who released its session").toBe("supervisor");
+      expect(await fixtureCall("StopIfList", [FOREIGN_ROUTINES])).toBe("stopped");
+      stopped = true;
+    } finally {
+      if (!stopped) await fixtureCall("StopIfList", [FOREIGN_ROUTINES]);
+    }
+    await expectIdle("the lock-dropping test");
+  }, 240000);
 });
 
 // -- Stale ownership nodes and the retention of run records --------------------------------
@@ -738,7 +847,7 @@ describe("Story 40.1: a stale session node never lets the suite touch a foreign 
     await expectIdle("clear-busy-foreign");
   }, 240000);
 
-  it("clear-and-proceed: a stale node with the monitor idle is cleared, the dead run is recorded abandoned, and the new run completes without reclaiming anything", async (testCtx) => {
+  it("clear-and-proceed: a stale node with the monitor idle does not block a start, the dead run is recorded abandoned, and the new run completes without reclaiming anything", async (testCtx) => {
     if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     await setSlowTestHang(dev, NS_A, 20);
     const running = await startSlow();
@@ -761,8 +870,9 @@ describe("Story 40.1: a stale session node never lets the suite touch a foreign 
       expect(Number(await fixtureCall("RunRecordCount")), "more than 20 records before the start").toBeGreaterThan(20);
       const result = succeeded<CoverageContent>(await coverage());
       expect(result.status).toBe("completed");
-      expect(Number(await fixtureCall("RunRecordCount")), "at most 20 records after it").toBeLessThanOrEqual(20);
-      expect((await coverageGlobal('"run",-1001,"status"')).defined, "the oldest fake record is gone").toBe(false);
+      // The start pruned to its limit of 20, oldest first: the fakes (ids -1001 to -1025) sort before every real run.
+      expect(Number(await fixtureCall("RunRecordCount")), "20 records after it").toBe(20);
+      expect((await coverageGlobal('"run",-1025,"status"')).defined, "the oldest fake record is gone").toBe(false);
     } finally {
       await fixtureCall("ClearFakeRuns");
     }

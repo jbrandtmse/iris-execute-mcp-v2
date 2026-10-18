@@ -585,6 +585,19 @@ ClassMethod CorruptRoutines(pId As %Integer) As %String
     Quit "corrupted"
 }
 
+/// Make the routine list of coverage run pId name a routine its session does not monitor, so that the supervisor's
+/// routine-name proof fails: the session stays the one the session node names, with its own routines. Refuses unless
+/// the run is not finished and its session has started. Returns renamed, or refused: <why>.
+ClassMethod RenameRoutineList(pId As %Integer) As %String
+{
+    Set tJob = "ExecuteMCPv2.Coverage.Job"
+    If '$ClassMethod(tJob, "RunExists", pId) { Quit "refused: no such run" }
+    If $ClassMethod(tJob, "IsTerminal", $ClassMethod(tJob, "RunGet", pId, "status")) { Quit "refused: the run has finished" }
+    If '$ClassMethod(tJob, "RunGet", pId, "sessionStarted") { Quit "refused: the run has no session yet" }
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "routineList") = $ListBuild("Story401.NotMonitored.1")
+    Quit "renamed"
+}
+
 /// Point the runnerPid of coverage run pId at the decoy pPid, as a PID that was reused would be. Refuses unless pPid
 /// is the decoy this fixture started and the run is not finished. Returns pointed, or refused: <why>.
 ClassMethod PointRunnerAtDecoy(pId As %Integer, pPid As %Integer) As %String

@@ -754,17 +754,21 @@ export const testCoverageTool: ToolDefinition = {
     "Shared-instance guard: one coverage run at a time instance-wide. While any Line-by-Line or PERFMON session is " +
     "running (this tool's own, or anyone else's), the call is refused with code MONITOR_BUSY and owner \"suite\" " +
     "or \"foreign\"; nothing is started and a foreign session is never touched. " +
-    "Only the process that runs the tests is measured, so code that runs in processes the tests start is not " +
-    "counted. Coverage is INT-line coverage of the listed classes' routines (list 1 to 50 classes; the run is " +
-    "refused above 200,000 measured INT lines); a method that compiles to no INT code has no lines to cover. " +
+    "Only the process that runs the tests is measured (and the suite's own supervisor process, which runs only " +
+    "the suite's own classes, so they count only if you list them), so code that runs in processes the tests " +
+    "start is not counted. Coverage is INT-line coverage of the listed classes' routines, including the code the compiler " +
+    "generates in them (list 1 to 50 classes; the run is refused above 200,000 measured INT lines); a method that " +
+    "compiles to no INT code has no lines to cover. " +
     "Class names are matched exactly as compiled, with the package and the letter case (for example MyApp.Orders). " +
-    "Line numbers are lines of the routine's INT source: read it with iris_doc_get on '<routine>.int' (for example " +
-    "'MyApp.Orders.1.int') or with iris_routine_intermediate. " +
+    "Line numbers are INT line numbers: INT line n is line n+1 of the document iris_doc_get returns for " +
+    "'<routine>.int' (for example 'MyApp.Orders.1.int') and of the text iris_routine_intermediate returns, whose " +
+    "line 1 is the ROUTINE header. " +
     "If the wait budget expires while the run is still executing, the result is isError false with " +
     "status \"running\", the run's coverageRunId and its handles: do NOT re-submit. Re-attach with " +
     "iris_test_status (action \"poll\", coverageRunId), which returns the same result once the run is finished; " +
-    "its \"cancel\" action stops the run. A coverage handle is kept for the 20 most recent runs and does not " +
-    "survive an instance restart.",
+    "its \"cancel\" action stops the run and is a key of its own, iris_test_status:cancel, also DEFAULT-DISABLED " +
+    "(enable it with IRIS_GOVERNANCE={\"global\":{\"iris_test_status:cancel\":true}}). A coverage handle is kept " +
+    "for the 20 most recent runs and does not survive an instance restart.",
   inputSchema: z.object({
     target: z
       .string()

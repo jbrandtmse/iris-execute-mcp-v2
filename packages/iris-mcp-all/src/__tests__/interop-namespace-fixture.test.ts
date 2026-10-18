@@ -237,7 +237,7 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
     for (const method of [
       "MonitorState", "StartForeign", "StopIfList", "TerminateCoverageProcess",
       "StartDecoy", "DecoyRun", "DecoyAlive", "StopDecoy", "PointRunnerAtDecoy",
-      "HoldMonitorLock", "MonitorLockRun", "MonitorLockHeld", "ReleaseMonitorLock", "CorruptRoutines",
+      "HoldMonitorLock", "MonitorLockRun", "MonitorLockHeld", "ReleaseMonitorLock", "CorruptRoutines", "RenameRoutineList",
       "SeedRunRecords", "RunRecordCount", "ClearFakeRuns",
     ]) {
       expect(FIXTURE_CLASS_SOURCE, method).toContain(`ClassMethod ${method}(`);

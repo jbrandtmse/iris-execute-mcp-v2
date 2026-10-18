@@ -7,7 +7,7 @@ All notable changes to the IRIS MCP Server Suite are documented in this file.
 One tool is added, `iris_test_coverage` (the Development server goes from 31 to 32 package tools, 32 to 33 advertised; the
 suite from 109 to 110 package tools, 114 to 115 advertised). The prompt pack stays at 13 prompts, and the frozen
 governance baseline stays at hash `1e62c5ad5bf7` (141 keys). `BOOTSTRAP_VERSION` moves from `08b8adeaadc6` to
-`4ac115159db0`, because the bootstrapped service gains three classes (32 to 35) and `Dispatch.cls` and `UnitTest.cls`
+`bdaff1eec1fa`, because the bootstrapped service gains three classes (32 to 35) and `Dispatch.cls` and `UnitTest.cls`
 changed.
 
 ### Added
@@ -21,7 +21,10 @@ changed.
   false), outside the frozen baseline, with no `defaultEnabled` marker. Enable it with
   `IRIS_GOVERNANCE={"global":{"iris_test_coverage":true}}`. The wait budget is the `timeout` argument, then
   `IRIS_TEST_TIMEOUT`, then 120 s, capped at 3600 s. Earliest IRIS version verified: 2026.2 build 221U. **Only the
-  process that runs the tests is measured**; code that runs in processes the tests start is not counted.
+  process that runs the tests is measured** (and the suite's own supervisor process, which runs only the suite's own
+  `ExecuteMCPv2` classes); code that runs in processes the tests start is not counted. The line numbers are INT line
+  numbers: INT line n is line n+1 of the document `iris_doc_get` returns for `<routine>.int`, whose line 1 is the
+  `ROUTINE` header. The companion's cancel is its own key, `iris_test_status:cancel`, also DEFAULT-DISABLED.
 - **One run at a time, instance-wide, and the new refusal code `MONITOR_BUSY`.** The Line-by-Line monitor is one per
   instance. While any Line-by-Line or PERFMON session runs, the tool is refused with `MONITOR_BUSY` (`owner` `suite`,
   with the running run's `coverageRunId`, `pid`, `startedAt` and `namespace`; or `owner` `foreign`) and nothing is

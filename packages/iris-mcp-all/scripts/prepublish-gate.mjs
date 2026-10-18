@@ -221,10 +221,16 @@ const gateTestFiles = [
   // Story40Q.* inside Q, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-40-0-qa-live-gate.test.ts",
   // Story 40.1: `iris_test_coverage` and the `iris_test_status` `coverageRunId` companion on the BUILT iris-dev-mcp and iris-admin-mcp dists over real stdio JSON-RPC, with raw HTTP to the
-  // coverage routes. The only gate that starts Line-by-Line sessions (the file runs serially): it starts each row with the monitor idle and ends each row asserting it is idle, and
+  // coverage routes. It and the QA gate below are the only gates that start Line-by-Line sessions (the files run serially): it starts each row with the monitor idle and ends each row asserting it is idle, and
   // terminates a process only through the fixture's MayTerminate check. Writes EXECMCPTMP401A and EXECMCPTMP401B (their database files too), Story401.* inside A, and
   // ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-40-1-coverage-live-gate.test.ts",
+  // Story 40.1 QA: iris_test_coverage on SEVERAL BUILT iris-dev-mcp server processes over real stdio JSON-RPC (default, core and developer presets; the documented
+  // IRIS_GOVERNANCE recipe alone; a run re-read by a second process and after the starting process ended; MONITOR_BUSY from another process), every input edge of the
+  // tool and of the iris_test_status coverageRunId companion, and a second namespace. Starts Line-by-Line sessions only through the tool, starts each row with the monitor
+  // idle and ends each row asserting it is idle, and terminates no process. Writes EXECMCPTMP40S and EXECMCPTMP40T (their database files too), Story401.* and
+  // Story401Q.* inside them, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
+  "src/__tests__/story-40-1-qa-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

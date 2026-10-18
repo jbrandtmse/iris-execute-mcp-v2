@@ -1783,10 +1783,13 @@ no routine, as for a class with no method) and `no-int-source` (a routine kept n
 **What is measured.** INT lines of the listed classes' routines (`<Class>.1` to `<Class>.N`; the `.0` method-generator
 routine is never measured), counted as executable by a fixed rule: a label's `methodimpl`/`public`/`private` keyword, `Try`,
 `Catch`, `Else` and `Do {` lines never count, `ElseIf` does. A method that compiles to no INT code has no line to cover.
-The line numbers are lines of the routine's INT source: read it with `iris_doc_get` on `<routine>.int` (for example
-`MyApp.Order.1.int`) or with `iris_routine_intermediate`.
-**Only the process that runs the tests is measured**, so code that runs in processes the tests start is not counted. The run
-refuses more than 200,000 measured INT lines.
+The code the compiler generates in a routine (property accessors, embedded-SQL helpers) is part of its INT lines.
+The line numbers are INT line numbers: INT line n is line n+1 of the document `iris_doc_get` returns for
+`<routine>.int` (for example `MyApp.Order.1.int`) and of the text `iris_routine_intermediate` returns, because their
+line 1 is the `ROUTINE <name> [Type=INT,Generated]` header.
+**Only the process that runs the tests is measured** (and the suite's own supervisor process, which runs only the suite's
+own `ExecuteMCPv2` classes, so they count only if you list them), so code that runs in processes the tests start is not
+counted. The run refuses more than 200,000 measured INT lines.
 
 **One run at a time, instance-wide.** The monitor is one per instance, shared with every other user of it. While any
 Line-by-Line or PERFMON session is running, a call is refused with `isError: true` and `code: "MONITOR_BUSY"`, `owner:
@@ -1795,7 +1798,8 @@ Line-by-Line or PERFMON session is running, a call is refused with `isError: tru
 
 **Budget expiry and re-attach.** A run that outlives the wait budget returns `isError: false`, `status: "running"` and its
 handles; do NOT re-submit. Call `iris_test_status` with `action: "poll"` and `coverageRunId` (the run's own namespace is
-used) for the same result once the run is finished, or `action: "cancel"` (default-disabled) to stop it. A cancelled or killed
+used) for the same result once the run is finished, or `action: "cancel"` to stop it; that is its own key,
+`iris_test_status:cancel`, **DEFAULT-DISABLED** (enable it with `{"global":{"iris_test_status:cancel":true}}`). A cancelled or killed
 run reports the partial counts it reached with `coverage.complete: false`. A handle is kept for the 20 most recent runs and
 does not survive an instance restart. A run is bounded by a server-side limit of 3600 s.
 
