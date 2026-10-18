@@ -2,7 +2,7 @@
 title: 'Story 40.1: Line Coverage Probe and Engine'
 type: 'feature'
 created: '2026-10-17'
-status: 'done'
+status: 'in-progress'
 baseline_revision: '966f6ee65f72f01435007cf4018a512fabd0e5ff'
 baseline_commit: '966f6ee65f72f01435007cf4018a512fabd0e5ff'
 review_loop_iteration: 0
@@ -126,10 +126,11 @@ deferred:
     - On an error it records the IRIS text and exits WITHOUT `Stop`.
     - On success it writes `("session")` and `started`.
   - **The tests.** It runs `..RunTest(<spec>, "/noload/nodelete/norecursive", .tUser)` with `tUser("ExecuteMCPv2CoverageRun") = id`. Its `OnBeforeAllTests` override records `manager.ResultId` as the run's `runIndex` before any test runs (probe).
-  - **Afterwards, always, catch path included:**
+  - **Afterwards, always, catch path included,** but only once it has proved that the active session is still its own: process-scoped, listing exactly its supervisor and itself, with this run's routine names (review HIGH 1, made complete in rework iteration 1). Without that proof it reads and stops nothing, and the supervisor's `Finish` reports what it finds. With it:
     - it reads the `RtnLine` count of every line of every routine through the `%Monitor.System.LineByLine:Result` query. Row n is INT line n, and a routine that never ran returns no rows, so every count is 0 (probe);
     - it records the counts, or, when reading them fails, records that error as `readError` and never marks the counts as read (decision #48);
     - it calls `Stop` and records `released`.
+  - **One releaser at a time.** The runner's release and the supervisor's release in `Finish` both run under one suite lock, `^IRIS.TempExecuteMCPv2Coverage("owner",id,"release")`, and re-read `sessionReleased` and `hasCounts` under it. Each holds `^%SYS("MON-HOLD")` (with a timeout) from its identity check through `Stop`, so no other `Start` or `Stop` can land in between. A timeout stops nothing; the supervisor then reports `release-failed`.
   - **No cancel handling.** The runner never reads the cancel flag.
 - **The token skeleton is raw data (AD-12).**
   - **Tokens.** For each INT line, `%Library.SyntaxColorReader.FromCode(<INT source>, "INT", "A", .tReader)` gives the line's tokens in order. A `Label` token becomes `L`, a `Command` token `C:<text in lower case>`, and a `Brace` token `{` or `}`. Every other token is dropped, and the rest are joined with single spaces.
@@ -200,7 +201,7 @@ deferred:
 
 - **Foreign sessions.** Never stop, pause, clear or reconfigure a session the suite did not start: refuse and leave it.
 - **No monitor control from the client side.** TypeScript never calls a monitor API, and the `Status` and `Cancel` routes never call `Start`, `Stop` or `Terminate` (AD-27).
-- **Process scope.** No `Process` list other than `$ListBuild(<runner $JOB>, <its own supervisor's pid>)` (decision #45); never all processes and never another process.
+- **Process scope.** No `Process` list other than `$ListBuild(<runner $JOB>, <its own supervisor's pid>)` (decision #45); never all processes and never another process. The single test-only exception is decision #49: the gate fixture's `StartForeignAll` starts an all-processes session to stand in for a foreign one. It does so only on a disposable `Story401` or `ExecuteMCPv2.Temp.*` routine that nobody else runs, only with the monitor idle, and stops it in that row's own cleanup, with the monitor idle afterwards.
 - **No unproven `Terminate`.** Never call `$SYSTEM.Process.Terminate` on a PID unless `MayTerminate` returned true for it immediately before. An OS test pins `MayTerminate` false for a free owner lock and for a PID that differs from the record's; it never terminates anything.
 - **Monitor calls.** No `Pause`, `Resume` or `Clear`, and no `$ZU(84,…)` call outside `MonitorActive()`.
 - **`iris_execute_tests`.** No change to `iris_execute_tests`: no `action`, parameter, behavior or annotation (it is a frozen key; DW-498 belongs to 40.4).
@@ -433,6 +434,20 @@ Code review (`/bmad-code-review`, 2026-10-17, `review_tier: full-opus`): four la
 - [x] [Review][Patch] **LOW: the recorded `CoverageJobTest` total (29 of 29) was stale** [Auto Run Result] - Edge+Gap+Auditor (Rule #35). Re-run after this pass: 31 of 31 (the class now has 31 `Test*` methods).
 - [x] [Review][Defer] **The runner's read of its own session with no readiness check (the timing half of the zero-count read)** [Runner.cls:ReadCounts] - deferred: occurrence on DW-595 (routed owner 40-2-coverage-reports-and-targets, probe first).
 
+**Lead re-review of the two HIGH patches (2026-10-18, scoped, read-only, frozen diff `cr-40-1/high-patches.diff` on `da6d495`): NOT-CLEAN, 1 medium and 5 low.** Rework iteration 1 of 3 works exactly these items. Each pinning test it adds or changes gets a demonstrated `mutation:` line.
+
+- [ ] [Review][Patch] **MED: patch 2's mode check is never exercised by a real all-processes session** [src/ExecuteMCPv2/Coverage/Job.cls:43 `MonitorActive`; CoverageJobTest.cls:51]. Reverting `:43` to read `$ZU(84,10,2)` in every mode leaves every test green, and patch 1's `ListsProcess` depends on that wiring. Fix (decision #49): add the fixture method `StartForeignAll` (`Start(<disposable routine>, $ListBuild("RtnLine"), "")`, only with the monitor idle) and a gate row:
+  1. a suite run's supervisor and runner are both dead, and the suite session has been stopped through `StopIfList`;
+  2. `StartForeignAll` starts its session;
+  3. `iris_test_coverage` is called. It must be refused `MONITOR_BUSY` `owner:"foreign"`, and the all-processes session must still be active.
+
+  The row stops that session in its own cleanup and asserts the monitor is idle. `mutation:` revert `:43` -> this row red.
+- [ ] [Review][Patch] **LOW: check-then-stop is not atomic between the two releasers** [Runner.cls:73-81; Job.cls:631-652]. Implement the Boundaries "One releaser at a time" bullet: one suite release lock, re-reading `sessionReleased`/`hasCounts` under it, and `^%SYS("MON-HOLD")` held with a timeout from the identity check through `Stop`.
+- [ ] [Review][Patch] **LOW: being listed is the runner's whole proof** [Job.cls:64-68 used at Runner.cls:73]. Before reading and stopping, the runner also requires `PidsMatch(<pids>, supervisorPid, $Job)` and the routine names to equal the run's (`ListsEqual(routineList, ActiveRoutines())`). The runner is in its own session's list, so it can read the names.
+- [ ] [Review][Patch] **LOW: `ProveOwnSession` ignores the session mode** [Job.cls:590-612]. Require `ListsProcess($Job)` (process-scoped, listing the supervisor) first.
+- [ ] [Review][Patch] **LOW: `clear-busy-foreign` kills the ownership record even when the process list cannot disprove it** [REST/Coverage.cls:331-335 with Job.cls:57]. Kill `("session")` only when the active session is process-scoped (mode 2) and its list disproves the record. Otherwise refuse as foreign and keep the node; `clear-and-proceed` removes it once the monitor is idle. A suite session paused by someone else then stays reclaimable instead of becoming an orphan.
+- [ ] [Review][Patch] **LOW: a test comment claims a paused-mode probe that was never run** [CoverageJobTest.cls:50]. Reword it: only all-processes mode was probed, and paused (mode 0) is read from `LineByLine.cls:249`.
+
 Verification of this pass: `CoverageJobTest` 31/31; the armed 40.1 gate 23/23 (the dev server opened in 1.4 s with the 35 classes redeployed at `bdaff1eec1fa`); the armed QA gate 12/12; `@iris-mcp/all` default suite 86 files (1670 passed, 4 skipped by their own conditions); dev 62 files / 1527, lint and type-check clean; shared bootstrap, refusals and visibility tests; `gen:bootstrap` idempotent; `gen:tools-list-snapshot:check` OK (115); governance `:check` OK (`1e62c5ad5bf7`/141). Afterwards the monitor was idle, `^IRIS.TempExecuteMCPv2Coverage("session")` unset, and no `ExecuteMCPv2.Temp.` or `Story401` document left in HSCUSTOM.
 
 Rejected (14 rows):
@@ -453,6 +468,12 @@ Rejected (14 rows):
 - Partial rejections: the Edge row on the 60 s wait keeps only its safety half (fixed by the first HIGH), and the Blind row's spec-text item is a spec edit.
 
 ## Spec Change Log
+
+- **2026-10-18, lead, rework iteration 1 after the scoped re-review of code review's two HIGH patches (NOT-CLEAN, 1 medium and 5 low).** Changes:
+  - The Runner clause now states the identity proof that gates its read and `Stop`, and the "One releaser at a time" rule.
+  - Never "Process scope" gains the test-only all-processes exception (decision #49).
+  - Spine AD-27 now says a session's process list proves ownership only when the session is process-scoped.
+  - The six `[Review]` items under Tasks & Acceptance are the whole rework.
 
 - **2026-10-17, lead spec gate.** Decisions #39 to #44 were taken as recommended. Decision #41 adds `Job.MayTerminate` (Boundaries: Supervisor, Never, Task 17), so a PID reused after its process died is never terminated. Spine AD-27 and AD-16 are amended (Rule 20).
 - **2026-10-17, lead, after the implement stage's `intent gap` (G1).** Decisions #45 to #48 answer its four questions:

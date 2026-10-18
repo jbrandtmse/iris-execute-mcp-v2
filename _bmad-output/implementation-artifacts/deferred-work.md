@@ -3241,6 +3241,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-40-1-line-coverage-probe-and-engine.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 40.1 review 2026-10-17 (Blind), claim from reading only: ResultExecute returns zero rows without an error for an unknown routine, so a premature read would be silent; every gate run read correct counts; settle with a probe that starts a session and reads the same process's counts at once
 - 2026-10-18T04:15:06Z status=routed owner=40-2-coverage-reports-and-targets by=harvest note=probe first; 40.2 consumes the counts for its per-class/per-method summary
+- 2026-10-18T05:28:57Z occurrence=40-1-line-coverage-probe-and-engine
 
 ### DW-596: The coverage Status route builds one nested pair per counted line and per command line of the whole run on every read of a terminal run; the 200,000-line cap and 20-run retention were sized from SyntaxColor/Result timings, not measured on the Status path
 - source: _bmad-output/implementation-artifacts/spec-40-1-line-coverage-probe-and-engine.md | severity: med | fix-risk: low | footprint: in-epic
