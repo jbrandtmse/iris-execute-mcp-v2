@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "bdaff1eec1fa";
+export const BOOTSTRAP_VERSION = "4dd596fa2a0c";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "bdaff1eec1fa";
+Parameter BOOTSTRAPVERSION = "4dd596fa2a0c";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -3584,6 +3584,11 @@ ClassMethod Pct(pNum As %Integer, pDen As %Integer) As %Numeric [ Internal ]
 /// process list, and <code>$SYSTEM.Process.Terminate</code> cannot be trapped, so the process that runs the
 /// tests cannot be the only one that releases the monitor. Only a process in the session's process list can
 /// read its routine names and line counts, which is why the supervisor is in that list.</p>
+/// <p><b>Releasing the session.</b> Either releaser reads the counts and stops the session only after
+/// <method>ProofFailure</method> shows that the active session is the run's own, and the two releasers never
+/// act at once: both take the run's release lock and the monitor's own lock
+/// (<method>TakeReleaseLocks</method>) and hold them from the proof through <code>Stop</code>. A lock that cannot
+/// be taken in time stops nothing, and the run ends <code>release-failed</code>.</p>
 /// <p><b>The run record</b> lives in <code>^IRIS.TempExecuteMCPv2Coverage</code>, which is IRISTEMP:
 /// instance-wide, like the monitor, and not journaled. The 20 most recent runs are kept and a record
 /// does not survive an instance restart.</p>
@@ -3594,6 +3599,8 @@ ClassMethod Pct(pNum As %Integer, pDen As %Integer) As %Numeric [ Internal ]
 /// <li><code>("owner",id,"supervisor")</code> and <code>("owner",id,"runner")</code> are locks that each
 /// process holds for its whole life. IRIS releases a dead process's lock, so a lock that can be taken
 /// with timeout 0 belongs to a dead process.</li>
+/// <li><code>("owner",id,"release")</code> is not a liveness lock: a releaser holds it only while it proves, reads
+/// and stops, and <method>OwnerAlive</method> and <method>MayTerminate</method> never read it.</li>
 /// <li><code>("start")</code> is the lock that makes the busy check and the launch atomic.</li>
 /// </ul>
 Class ExecuteMCPv2.Coverage.Job Extends %RegisteredObject
@@ -3601,6 +3608,12 @@ Class ExecuteMCPv2.Coverage.Job Extends %RegisteredObject
 
 /// The number of run records kept.
 Parameter MAXRUNS As %Integer = 20;
+
+/// Seconds a releaser waits for the run's release lock, which the other releaser holds while it proves and stops.
+Parameter RELEASELOCKSECONDS As %Integer = 10;
+
+/// Seconds a releaser waits for the monitor's own lock, <code>^%SYS("MON-HOLD")</code>.
+Parameter MONITORLOCKSECONDS As %Integer = 5;
 
 /// Is a Line-by-Line or PERFMON session active on this instance? This is the only place the suite calls
 /// <code>$ZUtil(84,...)</code>; <code>$ZUtil(84,8)</code> is the same test <code>%Monitor.System.LineByLine:Start</code>
@@ -3624,9 +3637,11 @@ ClassMethod MonitorActive(Output pPids As %String) As %Boolean
 
 /// The process list <var>pPids</var> as a session of collection mode <var>pMode</var> (<code>$ZUtil(84,1)</code>)
 /// means it: the list itself when the session is scoped to listed processes (mode 2, as
-/// <code>%Monitor.System.LineByLine:Start</code> sets it for a non-empty process list), and empty otherwise. A session
-/// of all processes (mode 1) or a paused one (mode 0) keeps the list of an earlier scoped session, which says nothing
-/// about the active one (probe, IRIS 2026.2 build 221U: an all-processes session read the previous session's list).
+/// <code>%Monitor.System.LineByLine:Start</code> sets it for a non-empty process list), and empty otherwise. In
+/// all-processes mode (mode 1) every process is monitored, so the list is not a scope (probe, IRIS 2026.2 build 221U:
+/// it read the starting process and then other processes). A paused session (mode 0) was not probed: from the source
+/// of <code>%Monitor.System.LineByLine:Pause</code> it leaves the list of the selected processes in place. Neither
+/// says anything about the active session, so neither is trusted.
 ClassMethod ScopedPids(pMode As %Integer, pPids As %String) As %String
 {
     If pMode '= 2 Quit ""
@@ -3634,8 +3649,8 @@ ClassMethod ScopedPids(pMode As %Integer, pPids As %String) As %String
 }
 
 /// Does the active Line-by-Line session's process list name process <var>pPid</var>? Only a session scoped to
-/// listed processes can (see <method>ScopedPids</method>). The runner asks this of itself before it reads its counts
-/// and stops its session: a session that does not list it is not the one it started.
+/// listed processes can (see <method>ScopedPids</method>). A releaser asks this of itself first: a session that does
+/// not list it is not one it can prove to be its run's (see <method>ProofFailure</method>).
 ClassMethod ListsProcess(pPid As %String) As %Boolean
 {
     If (pPid = "") || '..MonitorActive(.tPids) Quit 0
@@ -3658,16 +3673,110 @@ ClassMethod ActiveRoutines() As %List
 /// Can this process read the active session's routine names and line counts?
 ClassMethod NamesReadable() As %Boolean
 {
-    Set tList = ..ActiveRoutines()
-    If $ListLength(tList) = 0 Quit 0
-    Set tReadable = 1
-    For tI = 1:1:$ListLength(tList) {
-        If $List(tList, tI) = "" {
-            Set tReadable = 0
+    Quit ..AllNamed(..ActiveRoutines())
+}
+
+/// Does the routine list <var>pList</var> hold at least one routine and no empty name (a name that could not be read)?
+ClassMethod AllNamed(pList As %List) As %Boolean
+{
+    If $ListLength(pList) = 0 Quit 0
+    Set tNamed = 1
+    For tI = 1:1:$ListLength(pList) {
+        If $List(pList, tI) = "" {
+            Set tNamed = 0
             Quit
         }
     }
-    Quit tReadable
+    Quit tNamed
+}
+
+/// Wait up to <var>pSeconds</var> for this process to be able to read the active session's routine names, which a
+/// process in the session's process list can do after a short delay. Returns at once when the session does not list
+/// this process (it can never read the names then) or has ended. The wait happens before any lock is taken, so the
+/// monitor's own lock is never held while waiting. Returns whether the names are readable.
+ClassMethod AwaitNamesReadable(pSeconds As %Integer = 15) As %Boolean
+{
+    For tI = 1:1:(pSeconds * 5) {
+        If '..ListsProcess($Job) Quit
+        If ..NamesReadable() Quit
+        Hang 0.2
+    }
+    Quit ..NamesReadable()
+}
+
+/// Why the active Line-by-Line session is not the session of the run whose supervisor is <var>pSupervisorPid</var>,
+/// whose test process is <var>pRunnerPid</var> and whose routines are <var>pRoutineList</var>, as process
+/// <var>pSelfPid</var> (one of the two) can tell; empty when it is. <var>pPids</var> is the session's process list as
+/// <method>MonitorActive</method> returns it, <var>pActive</var> the routines it reports. A session proves to be the
+/// run's only when all of these hold: it is scoped to listed processes; its list names this process; its list holds
+/// only the run's two processes that are still alive (<method>PidsMatch</method>); this process can read every routine
+/// name; and the names equal the run's routine list.
+ClassMethod ProofFailure(pPids As %String, pSelfPid As %String, pSupervisorPid As %String, pRunnerPid As %String, pRoutineList As %List, pActive As %List) As %String
+{
+    If pPids = "" Quit "The active monitor session is not scoped to listed processes."
+    If (pSelfPid = "") || ((" "_pPids_" ") '[ (" "_pSelfPid_" ")) Quit "The active monitor session does not list this process."
+    If '..PidsMatch(pPids, pSupervisorPid, pRunnerPid) Quit "The active monitor session lists a process that is neither this run's test process nor its supervisor."
+    If '..AllNamed(pActive) Quit "This process could not read the routine names of the active monitor session."
+    If '..ListsEqual(pRoutineList, pActive) Quit "The routines the monitor session reports are not this run's routine list."
+    Quit ""
+}
+
+/// Does the active Line-by-Line session prove to be run <var>pId</var>'s, as seen by the runner (this process)? The
+/// runner is in its own session's process list, so it can read the routine names. See <method>ProofFailure</method>.
+ClassMethod RunnerOwnsSession(pId As %Integer) As %Boolean
+{
+    If '..MonitorActive(.tPids) Quit 0
+    Quit (..ProofFailure(tPids, $Job, ..RunGet(pId, "pid"), $Job, ..RunGet(pId, "routineList"), ..ActiveRoutines()) = "")
+}
+
+/// Does the active session's own process list disprove the session node <var>pSession</var>? Only a session scoped to
+/// listed processes has a list of its own (see <method>ScopedPids</method>), so only such a session can be shown not to
+/// be the one the node describes: a session of all processes, or a paused one, cannot, and the node is kept.
+ClassMethod SessionDisproved(pSession As %List) As %Boolean
+{
+    If pSession = "" Quit 0
+    If '..MonitorActive(.tPids) Quit 0
+    Quit ..NodeDisproved(pSession, tPids, ##class(%Monitor.System.LineByLine).GetRoutineCount())
+}
+
+/// The decision of <method>SessionDisproved</method> on given state: the process list <var>pPids</var> is a scoped
+/// session's own (not empty) and does not match the session node <var>pSession</var> (see <method>NodeMatches</method>).
+ClassMethod NodeDisproved(pSession As %List, pPids As %String, pRoutineCount As %Integer) As %Boolean
+{
+    If (pSession = "") || (pPids = "") Quit 0
+    Quit '..NodeMatches(pSession, pPids, pRoutineCount)
+}
+
+/// Take the locks under which one releaser at a time proves a session its own and stops it: the run's release lock
+/// (<code>("owner",id,"release")</code>), then the monitor's own lock, <code>^%SYS("MON-HOLD")</code>, which
+/// <code>%Monitor.System.LineByLine</code> takes in <code>Start</code> and <code>Stop</code>. Held from the identity
+/// check through <code>Stop</code>, they leave no gap in which another releaser or another project's monitor call
+/// can act. Each is taken with a timeout. Returns 1 when both are held; otherwise it holds neither, returns 0, and
+/// <var>pWhy</var> says which one timed out. The caller releases both with <method>DropReleaseLocks</method>.
+ClassMethod TakeReleaseLocks(pId As %Integer, Output pWhy As %String, pReleaseSeconds As %Integer = "", pMonitorSeconds As %Integer = "") As %Boolean
+{
+    Set pWhy = ""
+    If pReleaseSeconds = "" Set pReleaseSeconds = ..#RELEASELOCKSECONDS
+    If pMonitorSeconds = "" Set pMonitorSeconds = ..#MONITORLOCKSECONDS
+    Lock +^IRIS.TempExecuteMCPv2Coverage("owner", pId, "release"):pReleaseSeconds
+    If '$Test {
+        Set pWhy = "another releaser of this run held the release lock for "_pReleaseSeconds_" seconds"
+        Quit 0
+    }
+    Lock +^%SYS("MON-HOLD"):pMonitorSeconds
+    If '$Test {
+        Lock -^IRIS.TempExecuteMCPv2Coverage("owner", pId, "release")
+        Set pWhy = "the monitor's own lock was held by another process for "_pMonitorSeconds_" seconds"
+        Quit 0
+    }
+    Quit 1
+}
+
+/// Release the locks <method>TakeReleaseLocks</method> took.
+ClassMethod DropReleaseLocks(pId As %Integer)
+{
+    Lock -^%SYS("MON-HOLD")
+    Lock -^IRIS.TempExecuteMCPv2Coverage("owner", pId, "release")
 }
 
 /// Is the process list <var>pPids</var> that of a coverage session of the runner <var>pRunnerPid</var> and its
@@ -3707,8 +3816,17 @@ ClassMethod SessionMatches(pSession As %List) As %Boolean
 {
     If pSession = "" Quit 0
     If '..MonitorActive(.tPids) Quit 0
-    If '..PidsMatch(tPids, $ListGet(pSession, 2), $ListGet(pSession, 3)) Quit 0
-    Quit (##class(%Monitor.System.LineByLine).GetRoutineCount() = $ListLength($ListGet(pSession, 5)))
+    Quit ..NodeMatches(pSession, tPids, ##class(%Monitor.System.LineByLine).GetRoutineCount())
+}
+
+/// The decision of <method>SessionMatches</method> on given state: the process list <var>pPids</var> matches the
+/// processes the session node <var>pSession</var> names (see <method>PidsMatch</method>), and the number of monitored
+/// routines <var>pRoutineCount</var> equals the node's routine count.
+ClassMethod NodeMatches(pSession As %List, pPids As %String, pRoutineCount As %Integer) As %Boolean
+{
+    If pSession = "" Quit 0
+    If '..PidsMatch(pPids, $ListGet(pSession, 2), $ListGet(pSession, 3)) Quit 0
+    Quit (pRoutineCount = $ListLength($ListGet(pSession, 5)))
 }
 
 /// Do two routine lists name the same routines, whatever their order?
@@ -4159,37 +4277,29 @@ ClassMethod AwaitStart(pId As %Integer, pStart As %Decimal) As %String
 }
 
 /// Prove, from the supervisor, that the active Line-by-Line session is run <var>pId</var>'s: the session node names
-/// this run and the routine names the monitor reports equal the run's routine list. The supervisor is in the
-/// session's process list, so it can read the names after a short delay; this waits up to 15 seconds for that. The
-/// session is stopped, and its counts are read, only after this returns OK.
+/// this run, and the session is scoped to listed processes that are the run's two (the supervisor among them) with the
+/// run's routine names (see <method>ProofFailure</method>). The supervisor reads the names only once it is in the
+/// session's process list and the monitor has made them readable (see <method>AwaitNamesReadable</method>, which the
+/// caller runs before it takes the release locks). The session is stopped, and its counts are read, only after this
+/// returns OK.
 ClassMethod ProveOwnSession(pId As %Integer) As %Status
 {
     If $ListGet($Get(^IRIS.TempExecuteMCPv2Coverage("session")), 1) '= pId {
         Quit $$$ERROR($$$GeneralError, "The session record does not name this run.")
     }
-    Set tReadable = 0
-    For tI = 1:1:75 {
-        If '..MonitorActive() Quit
-        If ..NamesReadable() {
-            Set tReadable = 1
-            Quit
-        }
-        Hang 0.2
-    }
-    If 'tReadable {
-        If '..MonitorActive() Quit $$$ERROR($$$GeneralError, "The monitor session ended before it could be verified.")
-        Quit $$$ERROR($$$GeneralError, "The supervisor could not read the routine names of the monitor session within 15 seconds.")
-    }
-    If '..ListsEqual(..RunGet(pId, "routineList"), ..ActiveRoutines()) {
-        Quit $$$ERROR($$$GeneralError, "The routines the monitor session reports are not this run's routine list.")
-    }
+    If '..MonitorActive(.tPids) Quit $$$ERROR($$$GeneralError, "The monitor session ended before it could be verified.")
+    Set tWhy = ..ProofFailure(tPids, $Job, ..RunGet(pId, "pid"), ..RunGet(pId, "runnerPid"), ..RunGet(pId, "routineList"), ..ActiveRoutines())
+    If tWhy '= "" Quit $$$ERROR($$$GeneralError, tWhy)
     Quit $$$OK
 }
 
 /// Release the session, build the skeleton and write the terminal status of run <var>pId</var>, after the
 /// runner has gone. <var>pReason</var> is the cancel or time-limit reason that ended the run, if any.
-/// <p>When the runner started the session and did not release it, the supervisor reads the counts and stops the
-/// session only after <method>ProveOwnSession</method> showed it is this run's; otherwise it stops nothing.</p>
+/// <p>When the runner started the session and did not release it, the supervisor takes the release locks
+/// (<method>TakeReleaseLocks</method>), re-reads under them whether the runner has released the session or read the
+/// counts meanwhile, and reads the counts and stops the session only after <method>ProveOwnSession</method> showed it
+/// is this run's; otherwise it stops nothing. A release lock that cannot be taken in time stops nothing and ends the
+/// run <code>release-failed</code>.</p>
 /// <p>A run whose session had started never ends silently without its counts or its release: when the session could
 /// not be stopped or verified the run ends <code>failed</code> with reason <code>release-failed</code>, and when the
 /// counts could not be read, <code>failed</code> with reason <code>counts-unreadable</code> (the first of the two
@@ -4199,32 +4309,45 @@ ClassMethod Finish(pId As %Integer, pReason As %String, pStartFailed As %Boolean
     Set tStatus = "failed"
     Set tError = ""
     Set tUnreleased = ""
+    Set tLocked = 0
     Try {
         Set tNamespace = ..RunGet(pId, "namespace")
         Set tSessionStarted = ..RunGet(pId, "sessionStarted")
         Set tReadText = ""
         If tSessionStarted && '..RunGet(pId, "sessionReleased") && ..MonitorActive() {
-            Set tProof = ..ProveOwnSession(pId)
-            If $$$ISERR(tProof) {
-                Set tProofText = ..SafeText($System.Status.GetErrorText(tProof))
-                Set tUnreleased = "it could not be verified as this run's, so it was left running ("_tProofText_")"
-                Set tReadText = "The monitor session could not be verified as this run's, so its counts were not read: "_tProofText
+            Do ..AwaitNamesReadable()
+            If '..TakeReleaseLocks(pId, .tLockText) {
+                Set tUnreleased = "it could not be stopped ("_tLockText_")"
+                Set tReadText = "The monitor session was left as it was, so its counts were not read: "_tLockText
             } Else {
-                If '..RunGet(pId, "hasCounts") {
-                    Set tSC = ##class(ExecuteMCPv2.Coverage.Runner).ReadCounts(pId)
-                    If $$$ISERR(tSC) {
-                        Set tReadText = $System.Status.GetErrorText(tSC)
+                Set tLocked = 1
+                ; Under the locks the other releaser has finished: what it released or read is re-read, not assumed.
+                If '..RunGet(pId, "sessionReleased") && ..MonitorActive() {
+                    Set tProof = ..ProveOwnSession(pId)
+                    If $$$ISERR(tProof) {
+                        Set tProofText = ..SafeText($System.Status.GetErrorText(tProof))
+                        Set tUnreleased = "it could not be verified as this run's, so it was left running ("_tProofText_")"
+                        Set tReadText = "The monitor session could not be verified as this run's, so its counts were not read: "_tProofText
                     } Else {
-                        Kill ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError")
+                        If '..RunGet(pId, "hasCounts") {
+                            Set tSC = ##class(ExecuteMCPv2.Coverage.Runner).ReadCounts(pId)
+                            If $$$ISERR(tSC) {
+                                Set tReadText = $System.Status.GetErrorText(tSC)
+                            } Else {
+                                Kill ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError")
+                            }
+                        }
+                        Set tSC = ##class(%Monitor.System.LineByLine).Stop()
+                        If $$$ISOK(tSC) {
+                            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sessionReleased") = 1
+                            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releasedBy") = "supervisor"
+                        } Else {
+                            Set tUnreleased = "it could not be stopped ("_..SafeText($System.Status.GetErrorText(tSC))_")"
+                        }
                     }
                 }
-                Set tSC = ##class(%Monitor.System.LineByLine).Stop()
-                If $$$ISOK(tSC) {
-                    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sessionReleased") = 1
-                    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releasedBy") = "supervisor"
-                } Else {
-                    Set tUnreleased = "it could not be stopped ("_..SafeText($System.Status.GetErrorText(tSC))_")"
-                }
+                Set tLocked = 0
+                Do ..DropReleaseLocks(pId)
             }
         }
         If tSessionStarted && '..RunGet(pId, "hasCounts") {
@@ -4275,6 +4398,7 @@ ClassMethod Finish(pId As %Integer, pReason As %String, pStartFailed As %Boolean
             Kill ^IRIS.TempExecuteMCPv2Coverage("session")
         }
     } Catch ex {
+        If tLocked Do ..DropReleaseLocks(pId)
         Do ..SetStatus(pId, "failed", "", ex.DisplayString())
     }
 }
@@ -4300,7 +4424,7 @@ Class ExecuteMCPv2.Coverage.Runner Extends %UnitTest.Manager
 
 /// The job entry point for run <var>pId</var>. It holds its owner lock for its whole life, switches to the run's
 /// namespace, starts the session, runs the tests, and afterwards (also after an error) reads the counts and stops the
-/// session it started, as long as that session is still the active one (see <method>StopOwnSession</method>). If
+/// session it started, as long as that session proves to be its own (see <method>StopOwnSession</method>). If
 /// <code>Start</code> fails it records the IRIS text and ends without calling <code>Stop</code>: the session that
 /// blocked it belongs to someone else.
 ClassMethod Run(pId As %Integer)
@@ -4346,33 +4470,48 @@ ClassMethod Run(pId As %Integer)
 }
 
 /// Record the counts, then stop this process's own session and record that it was released. Nothing is read or
-/// stopped unless the active session's process list still names this process
-/// (<method>ExecuteMCPv2.Coverage.Job:ListsProcess</method>): the supervisor may already have read the counts and
+/// stopped unless the active session proves to be this run's
+/// (<method>ExecuteMCPv2.Coverage.Job:RunnerOwnsSession</method>): process-scoped, listing this process and no process
+/// but this run's supervisor, with this run's routine names. The supervisor may already have read the counts and
 /// stopped the session (it does when this process's owner lock is gone, for example after test code released every
 /// lock of the process, or when this process outlived a cancel), and a session someone else started since is never
-/// touched; the supervisor's <method>ExecuteMCPv2.Coverage.Job:Finish</method> reports what it found. When the counts
-/// cannot be read, the IRIS text is recorded as <code>readError</code> and the counts are never marked as read; the
-/// session is stopped all the same.
+/// touched; the supervisor's <method>ExecuteMCPv2.Coverage.Job:Finish</method> reports what it finds.
+/// <p>The proof, the read and the <code>Stop</code> run under the release locks
+/// (<method>ExecuteMCPv2.Coverage.Job:TakeReleaseLocks</method>), so the supervisor cannot release at the same time and
+/// no other <code>Start</code> or <code>Stop</code> lands in between. Under them, a session already released or counts
+/// already read are not done again. A lock that cannot be taken in time stops nothing, and is recorded as
+/// <code>releaseError</code>. When the counts cannot be read, the IRIS text is recorded as <code>readError</code> and the
+/// counts are never marked as read; the session is stopped all the same.</p>
 ClassMethod StopOwnSession(pId As %Integer) [ Private ]
 {
     If '##class(ExecuteMCPv2.Coverage.Job).ListsProcess($Job) Quit
-    Try {
-        Set tReadSC = ..ReadCounts(pId)
-        If $$$ISERR(tReadSC) Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError") = $System.Status.GetErrorText(tReadSC)
-    } Catch ex {
-        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError") = ex.DisplayString()
+    Do ##class(ExecuteMCPv2.Coverage.Job).AwaitNamesReadable()
+    If '##class(ExecuteMCPv2.Coverage.Job).TakeReleaseLocks(pId, .tLockText) {
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releaseError") = "The test process left its session as it was: "_tLockText
+        Quit
     }
     Try {
-        Set tSC = ##class(%Monitor.System.LineByLine).Stop()
-        If $$$ISOK(tSC) {
-            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sessionReleased") = 1
-            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releasedBy") = "runner"
-        } Else {
-            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releaseError") = $System.Status.GetErrorText(tSC)
+        If '##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "sessionReleased") && ##class(ExecuteMCPv2.Coverage.Job).RunnerOwnsSession(pId) {
+            If '##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "hasCounts") {
+                Try {
+                    Set tReadSC = ..ReadCounts(pId)
+                    If $$$ISERR(tReadSC) Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError") = $System.Status.GetErrorText(tReadSC)
+                } Catch exRead {
+                    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError") = exRead.DisplayString()
+                }
+            }
+            Set tSC = ##class(%Monitor.System.LineByLine).Stop()
+            If $$$ISOK(tSC) {
+                Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sessionReleased") = 1
+                Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releasedBy") = "runner"
+            } Else {
+                Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releaseError") = $System.Status.GetErrorText(tSC)
+            }
         }
     } Catch ex {
         Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releaseError") = ex.DisplayString()
     }
+    Do ##class(ExecuteMCPv2.Coverage.Job).DropReleaseLocks(pId)
 }
 
 /// Read the <code>RtnLine</code> count of every line of every measured routine of run <var>pId</var> from the active
@@ -19499,7 +19638,10 @@ ClassMethod Launch(ByRef pParams, pNamespace As %String, pRoutines As %List, pUn
             Quit
         }
         If tDecision = "clear-busy-foreign" {
-            Kill ^IRIS.TempExecuteMCPv2Coverage("session")
+            ; The ownership record is cleared only when the active session's own process list disproves it. A session of
+            ; all processes or a paused one has no list of its own, so the record is kept: a suite session paused by
+            ; someone else stays reclaimable, and clear-and-proceed removes the record once the monitor is idle.
+            If ##class(ExecuteMCPv2.Coverage.Job).SessionDisproved(tSession) Kill ^IRIS.TempExecuteMCPv2Coverage("session")
             Set pResult = ..BusyResult("foreign", "")
             Quit
         }

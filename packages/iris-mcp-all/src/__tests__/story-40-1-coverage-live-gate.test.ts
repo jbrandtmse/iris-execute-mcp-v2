@@ -17,11 +17,17 @@
  *  - The MayTerminate decoy: a cancel of a run whose record names a process the supervisor did not start terminates
  *    nothing; the gate's own decoy process stays alive and the run finishes on its own.
  *  - Decision #48: a run whose line counts cannot be read (`counts-unreadable`) or whose session cannot be stopped
- *    (`release-failed`, also when the supervisor's routine-name proof fails) ends `failed`, with the reason, IRIS's
+ *    (`release-failed`, also when the supervisor's identity proof fails) ends `failed`, with the reason, IRIS's
  *    text, the test summary and any coverage that was read.
+ *  - The release locks: a release that cannot take the monitor's own lock (`^%SYS("MON-HOLD")`) proves, reads and
+ *    stops nothing, and the run ends `failed` with `release-failed` and no counts.
  *  - The test process stops only the session it started: after a test released every lock of its process (so the
- *    supervisor ended the run), a session started since is left alone and the run keeps its counts.
+ *    supervisor ended the run), a session started since is left alone and the run keeps its counts; a session that test
+ *    code started in place of the suite's, listing the test process but not the run's routines, is neither read nor stopped.
  *  - Stale ownership nodes (`clear-busy-foreign`, `clear-and-proceed`) and the retention of 20 run records.
+ *  - Decision #49: the one session of ALL processes this suite ever starts, on the fixture's own routine, stands in for
+ *    a foreign session that has no process list of its own; it is refused as foreign, left active and stopped by the
+ *    row, and the stale ownership node is kept while it lasts.
  *  - Rows 10 and 11: a foreign session and a running suite run both refuse a new run with `MONITOR_BUSY`.
  *  - Rows 13 and 14: the time limit, and the default governance.
  *
@@ -113,6 +119,30 @@ Method TestDropLocks()
     Lock
     Hang +$Get(^Story401Hang, 3)
     Do $$$AssertTrue(1, "after the hang")
+}
+
+}
+`;
+
+/**
+ * A test whose code replaces the suite's Line-by-Line session with one of its own that lists the test process, on a
+ * routine that is not the run's, and records its process id as the fixture's foreign session so that the row can stop it
+ * through `StopIfList` whether or not the fixture process can read the routine names. Put into A by the row that uses
+ * it. If another monitor session wins the instant between the `Stop` and the `Start`, the `Start` fails and the test
+ * fails its status assertion.
+ */
+const SWAP_TEST_DOC = "Story401S.SwapTest.cls";
+const SWAP_TEST_SOURCE = String.raw`/// Synthetic coverage test whose code replaces the suite's Line-by-Line session with one of its own (Story 40.1).
+Class Story401S.SwapTest Extends %UnitTest.TestCase
+{
+
+Method TestSwapSession()
+{
+    Do $$$AssertEquals(##class(Story401.Fixture).SumTo(3), 6, "SumTo(3)")
+    Do ##class(%Monitor.System.LineByLine).Stop()
+    Set tSC = ##class(%Monitor.System.LineByLine).Start($ListBuild("ExecuteMCPv2.Temp.Story391Fixture.1"), $ListBuild("RtnLine"), $ListBuild($Job))
+    Do $$$AssertStatusOK(tSC, "the test started a session of its own")
+    Set ^IRIS.TempStory391Fixture("foreign") = $Job
 }
 
 }
@@ -693,12 +723,13 @@ describe("Story 40.1: a run whose line counts could not be read, or whose sessio
     await expectIdle("counts-unreadable");
   }, 240000);
 
-  it("release-failed: a session that cannot be stopped ends the run failed with the reason, the counts it read and the test summary; the next run reclaims the session", async (testCtx) => {
+  it("release-failed: a session whose release cannot take the monitor's own lock is left as it was, and the run ends failed with the reason and the test summary but no counts; the next run reclaims the session", async (testCtx) => {
     if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     await setSlowTestHang(dev, NS_A, 5);
     const running = await startSlow();
     try {
-      // The monitor's own lock is held, so neither the runner's nor the supervisor's Stop can take it.
+      // The monitor's own lock is held, so neither the runner nor the supervisor can take it for the release: each waits
+      // for it, then proves, reads and stops nothing.
       expect(await fixtureCall("HoldMonitorLock", [30])).toBe("held");
       const failed = await pollUntil(running.coverageRunId, ["failed"], 120000);
       expect(failed.isError, allText(failed)).toBe(true);
@@ -706,12 +737,12 @@ describe("Story 40.1: a run whose line counts could not be read, or whose sessio
       expect(content).toMatchObject({ status: "failed", reason: "release-failed", coverageRunId: running.coverageRunId });
       expect(content.partial, "the test summary is still returned").toMatchObject({ total: 1, passed: 1, failed: 0 });
       expect(content.error).toContain("A suite-owned Line-by-Line session is still active");
+      expect(content.error).toContain("the monitor's own lock was held by another process");
       expect(content.error).toContain("The next coverage run reclaims it");
-      expect(content.coverage?.complete, "the coverage it read is returned, and is not a complete result").toBe(false);
-      expect(routinesOf(content)[0]?.coveredRanges).toEqual([[40, 42], [44, 44]]);
+      expect(content, "nothing is read from a session that was not locked for its release, so there are no counts to report").not.toHaveProperty("coverage");
       const raw = await rawStatus(running.coverageRunId);
       expect(raw.run, "nobody released the session").not.toHaveProperty("releasedBy");
-      expect(raw.run, "the counts were read").not.toHaveProperty("readError");
+      expect(String(raw.run["readError"]), "the counts were not read, and the run says why").toContain("the monitor's own lock was held by another process");
       expect((await monitorState()).active, "the suite's own session is still active").toBe(1);
 
       expect(await fixtureCall("ReleaseMonitorLock")).toBe("released");
@@ -809,6 +840,45 @@ describe("Story 40.1: the test process stops only the session it started, so a s
     }
     await expectIdle("the lock-dropping test");
   }, 240000);
+
+  it("a session that test code started in place of the suite's, listing the test process but not this run's routines, is neither read nor stopped by the test process, and the run ends failed with release-failed", async (testCtx) => {
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    for (const [tool, args] of [
+      ["iris_doc_put", { namespace: NS_A, name: SWAP_TEST_DOC, content: SWAP_TEST_SOURCE }],
+      ["iris_doc_compile", { namespace: NS_A, doc: SWAP_TEST_DOC }],
+    ] as const) {
+      const result = await dev.call(tool, args);
+      expect(result.isError, `${tool}: ${allText(result)}`).toBeFalsy();
+    }
+    const answer = await executeMcpPost(TARGET, "/dev/test/coverage", {
+      target: "Story401S.SwapTest",
+      level: "class",
+      classes: ["Story401.Fixture"],
+      namespace: NS_A,
+      maxSeconds: 3600,
+      maxLines: 200000,
+    });
+    const started = (JSON.parse(answer.text) as { result?: { outcome?: string; coverageRunId?: number } }).result;
+    expect(started?.outcome, answer.text).toBe("started");
+    const id = Number(started?.coverageRunId);
+    let stopped = false;
+    try {
+      const ended = await rawUntilTerminal(id, 60000);
+      expect(ended, "the supervisor could not verify the session as the run's").toMatchObject({ status: "failed", reason: "release-failed" });
+      expect(String(ended["error"])).toContain("could not be verified as this run's");
+      expect(ended, "the test process stopped nothing").not.toHaveProperty("releasedBy");
+      expect((await coverageGlobal(`"run",${id},"hasCounts"`)).defined, "and read none of the other session's counts").toBe(false);
+      const state = await monitorState();
+      expect(state.active, "the session the test started is still active").toBe(1);
+      expect(state.count).toBe(1);
+      expect([FOREIGN_ROUTINES, ""], "each name either unreadable here or exactly the test's session's").toContain(state.routines[0]);
+      expect(await fixtureCall("StopIfList", [FOREIGN_ROUTINES])).toBe("stopped");
+      stopped = true;
+    } finally {
+      if (!stopped) await fixtureCall("StopIfList", [FOREIGN_ROUTINES]);
+    }
+    await expectIdle("the swapped session");
+  }, 240000);
 });
 
 // -- Stale ownership nodes and the retention of run records --------------------------------
@@ -846,6 +916,50 @@ describe("Story 40.1: a stale session node never lets the suite touch a foreign 
     }
     await expectIdle("clear-busy-foreign");
   }, 240000);
+
+  it("all-processes foreign session (decision #49): a session of ALL processes started by someone else is refused as foreign and left active, the stale ownership node is kept because that session has no process list of its own, and once it has ended the next start clears the node and completes", async (testCtx) => {
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    await setSlowTestHang(dev, NS_A, 20);
+    const running = await startSlow();
+    await killBothJobs(running);
+    // The suite's own session is stopped (the fixture proves it is the suite's), leaving the stale ownership node.
+    expect(await fixtureCall("StopIfList", [SUITE_ROUTINES])).toBe("stopped");
+    expect((await coverageGlobal('"session"')).defined, "the stale node is still there").toBe(true);
+    let stopped = false;
+    try {
+      // The one all-processes session of the suite, on the fixture's own routine that nobody else runs, started with the
+      // monitor idle; this row stops it below and asserts the monitor idle afterwards.
+      expect(await fixtureCall("StartForeignAll")).toMatch(/^started:\d+$/);
+      const before = await monitorState();
+      expect(before.active).toBe(1);
+      expect(before.pids, "a session of all processes has no scoped process list, so the suite reads none").toBe("");
+      const counter = await runCounter();
+
+      const refused = await coverage();
+      expect(refused.isError, allText(refused)).toBe(true);
+      expect(refused.structuredContent).toEqual({ code: "MONITOR_BUSY", owner: "foreign" });
+      const after = await monitorState();
+      expect(after.active, "the all-processes session is still active").toBe(1);
+      expect(after.pids, "with no scoped process list").toBe("");
+      expect(after.count, "and the same routine").toBe(1);
+      expect([FOREIGN_ROUTINES, ""], "each name either unreadable here or exactly the foreign session's").toContain(after.routines[0]);
+      expect((await coverageGlobal('"session"')).defined, "the ownership node is kept: this session's process list cannot disprove it").toBe(true);
+      expect(await runCounter(), "no run id was allocated").toBe(counter);
+
+      expect(await fixtureCall("StopIfList", [FOREIGN_ROUTINES])).toBe("stopped");
+      stopped = true;
+    } finally {
+      if (!stopped) await fixtureCall("StopIfList", [FOREIGN_ROUTINES]);
+    }
+    await expectIdle("the all-processes session, after it was stopped");
+    expect((await coverageGlobal('"session"')).defined, "the node outlived the foreign session").toBe(true);
+
+    const next = succeeded<CoverageContent>(await coverage());
+    expect(next.status).toBe("completed");
+    expect(next, "nothing was reclaimed: the dead run's session had already ended").not.toHaveProperty("reclaimed");
+    expect((await coverageGlobal(`"run",${running.coverageRunId},"status"`)).value, "the idle monitor cleared the node and recorded the dead run abandoned").toBe("abandoned");
+    await expectIdle("all-processes foreign session");
+  }, 300000);
 
   it("clear-and-proceed: a stale node with the monitor idle does not block a start, the dead run is recorded abandoned, and the new run completes without reclaiming anything", async (testCtx) => {
     if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);

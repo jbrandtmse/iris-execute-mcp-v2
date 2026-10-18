@@ -7,7 +7,7 @@ All notable changes to the IRIS MCP Server Suite are documented in this file.
 One tool is added, `iris_test_coverage` (the Development server goes from 31 to 32 package tools, 32 to 33 advertised; the
 suite from 109 to 110 package tools, 114 to 115 advertised). The prompt pack stays at 13 prompts, and the frozen
 governance baseline stays at hash `1e62c5ad5bf7` (141 keys). `BOOTSTRAP_VERSION` moves from `08b8adeaadc6` to
-`bdaff1eec1fa`, because the bootstrapped service gains three classes (32 to 35) and `Dispatch.cls` and `UnitTest.cls`
+`4dd596fa2a0c`, because the bootstrapped service gains three classes (32 to 35) and `Dispatch.cls` and `UnitTest.cls`
 changed.
 
 ### Added
@@ -28,8 +28,10 @@ changed.
 - **One run at a time, instance-wide, and the new refusal code `MONITOR_BUSY`.** The Line-by-Line monitor is one per
   instance. While any Line-by-Line or PERFMON session runs, the tool is refused with `MONITOR_BUSY` (`owner` `suite`,
   with the running run's `coverageRunId`, `pid`, `startedAt` and `namespace`; or `owner` `foreign`) and nothing is
-  started; a session the suite did not start is never touched. A run killed in flight releases the monitor (the supervisor
-  job stops the session), and a session whose two jobs are both dead is reclaimed by the next run. A run whose line
+  started; a session the suite did not start is never touched, including a session of all processes. A run killed in
+  flight releases the monitor (the supervisor job stops the session), and a session whose two jobs are both dead is
+  reclaimed by the next run. The test process and the supervisor release the session one at a time, each only after
+  proving it is the run's own (scoped to the run's two processes, with the run's routines). A run whose line
   counts could not be read ends `failed` with `reason` `counts-unreadable` (IRIS's text in `error` and `readError`), and a
   run whose session could not be stopped ends `failed` with `reason` `release-failed`; both are `isError: true` and
   carry the test summary and any coverage that was read.

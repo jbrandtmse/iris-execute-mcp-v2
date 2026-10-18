@@ -15,7 +15,7 @@ Class ExecuteMCPv2.Coverage.Runner Extends %UnitTest.Manager
 
 /// The job entry point for run <var>pId</var>. It holds its owner lock for its whole life, switches to the run's
 /// namespace, starts the session, runs the tests, and afterwards (also after an error) reads the counts and stops the
-/// session it started, as long as that session is still the active one (see <method>StopOwnSession</method>). If
+/// session it started, as long as that session proves to be its own (see <method>StopOwnSession</method>). If
 /// <code>Start</code> fails it records the IRIS text and ends without calling <code>Stop</code>: the session that
 /// blocked it belongs to someone else.
 ClassMethod Run(pId As %Integer)
@@ -61,33 +61,48 @@ ClassMethod Run(pId As %Integer)
 }
 
 /// Record the counts, then stop this process's own session and record that it was released. Nothing is read or
-/// stopped unless the active session's process list still names this process
-/// (<method>ExecuteMCPv2.Coverage.Job:ListsProcess</method>): the supervisor may already have read the counts and
+/// stopped unless the active session proves to be this run's
+/// (<method>ExecuteMCPv2.Coverage.Job:RunnerOwnsSession</method>): process-scoped, listing this process and no process
+/// but this run's supervisor, with this run's routine names. The supervisor may already have read the counts and
 /// stopped the session (it does when this process's owner lock is gone, for example after test code released every
 /// lock of the process, or when this process outlived a cancel), and a session someone else started since is never
-/// touched; the supervisor's <method>ExecuteMCPv2.Coverage.Job:Finish</method> reports what it found. When the counts
-/// cannot be read, the IRIS text is recorded as <code>readError</code> and the counts are never marked as read; the
-/// session is stopped all the same.
+/// touched; the supervisor's <method>ExecuteMCPv2.Coverage.Job:Finish</method> reports what it finds.
+/// <p>The proof, the read and the <code>Stop</code> run under the release locks
+/// (<method>ExecuteMCPv2.Coverage.Job:TakeReleaseLocks</method>), so the supervisor cannot release at the same time and
+/// no other <code>Start</code> or <code>Stop</code> lands in between. Under them, a session already released or counts
+/// already read are not done again. A lock that cannot be taken in time stops nothing, and is recorded as
+/// <code>releaseError</code>. When the counts cannot be read, the IRIS text is recorded as <code>readError</code> and the
+/// counts are never marked as read; the session is stopped all the same.</p>
 ClassMethod StopOwnSession(pId As %Integer) [ Private ]
 {
     If '##class(ExecuteMCPv2.Coverage.Job).ListsProcess($Job) Quit
-    Try {
-        Set tReadSC = ..ReadCounts(pId)
-        If $$$ISERR(tReadSC) Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError") = $System.Status.GetErrorText(tReadSC)
-    } Catch ex {
-        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError") = ex.DisplayString()
+    Do ##class(ExecuteMCPv2.Coverage.Job).AwaitNamesReadable()
+    If '##class(ExecuteMCPv2.Coverage.Job).TakeReleaseLocks(pId, .tLockText) {
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releaseError") = "The test process left its session as it was: "_tLockText
+        Quit
     }
     Try {
-        Set tSC = ##class(%Monitor.System.LineByLine).Stop()
-        If $$$ISOK(tSC) {
-            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sessionReleased") = 1
-            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releasedBy") = "runner"
-        } Else {
-            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releaseError") = $System.Status.GetErrorText(tSC)
+        If '##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "sessionReleased") && ##class(ExecuteMCPv2.Coverage.Job).RunnerOwnsSession(pId) {
+            If '##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "hasCounts") {
+                Try {
+                    Set tReadSC = ..ReadCounts(pId)
+                    If $$$ISERR(tReadSC) Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError") = $System.Status.GetErrorText(tReadSC)
+                } Catch exRead {
+                    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError") = exRead.DisplayString()
+                }
+            }
+            Set tSC = ##class(%Monitor.System.LineByLine).Stop()
+            If $$$ISOK(tSC) {
+                Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sessionReleased") = 1
+                Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releasedBy") = "runner"
+            } Else {
+                Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releaseError") = $System.Status.GetErrorText(tSC)
+            }
         }
     } Catch ex {
         Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releaseError") = ex.DisplayString()
     }
+    Do ##class(ExecuteMCPv2.Coverage.Job).DropReleaseLocks(pId)
 }
 
 /// Read the <code>RtnLine</code> count of every line of every measured routine of run <var>pId</var> from the active

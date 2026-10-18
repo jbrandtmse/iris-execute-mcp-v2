@@ -1806,8 +1806,10 @@ does not survive an instance restart. A run is bounded by a server-side limit of
 **A run that loses its counts or its release is never silent.** If the run's line counts could not be read, the run ends
 `status: "failed"` with `reason: "counts-unreadable"`, IRIS's text in `error` and `readError`, and the test summary. If its
 Line-by-Line session could not be stopped, it ends `status: "failed"` with `reason: "release-failed"`, the test summary and
-the coverage that was read; the suite-owned session stays active, and the next coverage run reclaims it. Both are
-`isError: true`.
+any coverage that was read (none when a release lock, the run's own or the monitor's, could not be taken in time, because
+nothing is read from a session that was not locked for its release); the suite-owned session stays active, and the next coverage run reclaims it. Both
+are `isError: true`. The test process and its supervisor release the session one at a time, each only after proving the
+session is the run's own.
 
 **Class names** are matched exactly as compiled, with the package and the letter case (`MyApp.Orders`); a name that is not
 compiled under that spelling is reported under `unmeasured` as `not-compiled`.

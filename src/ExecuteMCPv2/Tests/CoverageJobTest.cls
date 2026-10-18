@@ -46,13 +46,16 @@ Method TestPruneDefaultLimitIsTwentyRuns() As %Status
     Quit $$$OK
 }
 
-/// ScopedPids(mode, pids): only a session scoped to listed processes (mode 2) has a process list of its own. A session
-/// of all processes (mode 1) or a paused one (mode 0) keeps an earlier session's list (probe, IRIS 2026.2 build 221U).
+/// ScopedPids(mode, pids): only a session scoped to listed processes (mode 2) has a process list of its own. Only
+/// all-processes mode (mode 1) was probed (IRIS 2026.2 build 221U: the list read the starting process and then other
+/// processes, so it is not a scope). A paused session (mode 0) was not probed: it is read from
+/// <code>%Monitor.System.LineByLine:Pause</code> (<code>irislib/%Monitor/System/LineByLine.cls:248-249</code>), which keeps
+/// the list of the selected processes.
 Method TestScopedPidsTrustsOnlyAScopedSession() As %Status
 {
     Set tJob = "ExecuteMCPv2.Coverage.Job"
     Do $$$AssertEquals($ClassMethod(tJob, "ScopedPids", 2, "100 200"), "100 200", "a scoped session: its own list")
-    Do $$$AssertEquals($ClassMethod(tJob, "ScopedPids", 1, "100 200"), "", "all processes: the list is an earlier session's")
+    Do $$$AssertEquals($ClassMethod(tJob, "ScopedPids", 1, "100 200"), "", "all processes: the list is not a scope")
     Do $$$AssertEquals($ClassMethod(tJob, "ScopedPids", 1, 0), "", "all processes, with an earlier list that reads 0")
     Do $$$AssertEquals($ClassMethod(tJob, "ScopedPids", 0, "100"), "", "a paused session")
     Do $$$AssertEquals($ClassMethod(tJob, "PidsMatch", $ClassMethod(tJob, "ScopedPids", 1, 0), 100, 200), 0, "so an all-processes session never proves a dead suite session")

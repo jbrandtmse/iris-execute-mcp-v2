@@ -391,18 +391,33 @@ ClassMethod StartForeign() As %String
     Quit "started:"_$Job
 }
 
+/// Start a Line-by-Line session of ALL processes on this class's routine: a session the suite did not start, whose
+/// process list is not a scope. Test-only (decision #49): it refuses unless the monitor is idle, it starts only on this
+/// class's own routine, which nobody else runs, and the row that calls it stops the session in its own cleanup
+/// (StopIfList) and asserts the monitor idle. Returns started:<pid>, or refused: <why>.
+ClassMethod StartForeignAll() As %String
+{
+    If ##class(ExecuteMCPv2.Coverage.Job).MonitorActive() { Quit "refused: a monitor session is already active" }
+    Set tSC = ##class(%Monitor.System.LineByLine).Start($ListBuild("ExecuteMCPv2.Temp.Story391Fixture.1"), $ListBuild("RtnLine"), "")
+    If $System.Status.IsError(tSC) { Quit "refused: "_$System.Status.GetErrorText(tSC) }
+    Set ^IRIS.TempStory391Fixture("foreignAll") = $Job
+    Quit "started:"_$Job
+}
+
 /// Stop the active session only when it is provably the one pRoutines names (routine names, comma separated).
 /// A process that can read the session's routine names proves it by name equality. A process that cannot (it is not
 /// in the session's process list) proves it as a reclaiming request does: this fixture's foreign session is scoped
 /// to exactly the process id the fixture recorded (or to nothing alive, which reads 0 once that process has ended,
 /// while the fixture's own record of the start is still there) and monitors as many routines as pRoutines names, or
+/// is the fixture's all-processes session (recorded by StartForeignAll, with no scoped list) and monitors as many
+/// routines as pRoutines names, or
 /// the coverage session node's process list (only the node's runner and supervisor, still alive, or 0) and routine
 /// count match the active session and the node's routine list equals pRoutines. When the node is gone, the newest
 /// run record stands in for it: its session was started and not released. Returns idle, stopped, or refused: <why>.
 ClassMethod StopIfList(pRoutines As %String) As %String
 {
     If '##class(ExecuteMCPv2.Coverage.Job).MonitorActive(.tPids) {
-        Kill ^IRIS.TempStory391Fixture("foreign")
+        Kill ^IRIS.TempStory391Fixture("foreign"), ^IRIS.TempStory391Fixture("foreignAll")
         Quit "idle"
     }
     Set tWanted = $ListFromString(pRoutines, ",")
@@ -413,6 +428,7 @@ ClassMethod StopIfList(pRoutines As %String) As %String
         Set tForeign = $Get(^IRIS.TempStory391Fixture("foreign"))
         Set tCount = ##class(%Monitor.System.LineByLine).GetRoutineCount()
         If (tForeign '= "") && ((tPids = tForeign) || (tPids = 0)) && (tCount = $ListLength(tWanted)) && (pRoutines = "ExecuteMCPv2.Temp.Story391Fixture.1") { Set tProven = 1 }
+        If ($Get(^IRIS.TempStory391Fixture("foreignAll")) '= "") && (tPids = "") && (tCount = $ListLength(tWanted)) && (pRoutines = "ExecuteMCPv2.Temp.Story391Fixture.1") { Set tProven = 1 }
         Set tSession = $Get(^IRIS.TempExecuteMCPv2Coverage("session"))
         If tSession = "" {
             Set tJob = "ExecuteMCPv2.Coverage.Job"
@@ -428,7 +444,7 @@ ClassMethod StopIfList(pRoutines As %String) As %String
     If 'tProven { Quit "refused: the active session is not the one named" }
     Set tSC = ##class(%Monitor.System.LineByLine).Stop()
     If $System.Status.IsError(tSC) { Quit "refused: "_$System.Status.GetErrorText(tSC) }
-    Kill ^IRIS.TempStory391Fixture("foreign")
+    Kill ^IRIS.TempStory391Fixture("foreign"), ^IRIS.TempStory391Fixture("foreignAll")
     Quit "stopped"
 }
 

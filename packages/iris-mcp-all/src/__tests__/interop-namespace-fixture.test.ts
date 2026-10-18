@@ -235,7 +235,7 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
 
   it("the Story 40.1 fixture methods exist, the foreign session and the termination helper keep their guards, and MayTerminate is asked immediately before Terminate", () => {
     for (const method of [
-      "MonitorState", "StartForeign", "StopIfList", "TerminateCoverageProcess",
+      "MonitorState", "StartForeign", "StartForeignAll", "StopIfList", "TerminateCoverageProcess",
       "StartDecoy", "DecoyRun", "DecoyAlive", "StopDecoy", "PointRunnerAtDecoy",
       "HoldMonitorLock", "MonitorLockRun", "MonitorLockHeld", "ReleaseMonitorLock", "CorruptRoutines", "RenameRoutineList",
       "SeedRunRecords", "RunRecordCount", "ClearFakeRuns",
@@ -252,6 +252,16 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
       /MayTerminate\(tId, tRole, pPid\) \{ Quit "refused: MayTerminate is false for the "_tRole \}\n    Quit "terminated:"_\$System\.Process\.Terminate\(pPid\)/,
     );
     expect(FIXTURE_CLASS_SOURCE).toContain('If tRole = "" { Quit "refused: "_pPid_" is neither the supervisor nor the runner of the session node" }');
+  });
+
+  it("the all-processes foreign session (decision #49) starts only with the monitor idle, only on the fixture's own routine, and is the one Start in the fixture class without a process list", () => {
+    const method = FIXTURE_CLASS_SOURCE.slice(FIXTURE_CLASS_SOURCE.indexOf("ClassMethod StartForeignAll("), FIXTURE_CLASS_SOURCE.indexOf("ClassMethod StopIfList("));
+    expect(method).toContain('If ##class(ExecuteMCPv2.Coverage.Job).MonitorActive() { Quit "refused: a monitor session is already active" }');
+    expect(method).toContain('Start($ListBuild("ExecuteMCPv2.Temp.Story391Fixture.1"), $ListBuild("RtnLine"), "")');
+    expect(method.indexOf("MonitorActive()"), "the idle check comes before the Start").toBeLessThan(method.indexOf("LineByLine).Start("));
+    expect(FIXTURE_CLASS_SOURCE.match(/LineByLine\)\.Start\(/g), "the fixture class starts two kinds of session").toHaveLength(2);
+    expect(FIXTURE_CLASS_SOURCE.match(/\$ListBuild\("RtnLine"\), ""\)/g), "and only one is a session of all processes").toHaveLength(1);
+    expect(FIXTURE_CLASS_SOURCE).toContain('Kill ^IRIS.TempStory391Fixture("foreign"), ^IRIS.TempStory391Fixture("foreignAll")');
   });
 
   it("the Story 40.1 seed refuses any namespace but EXECMCPTMP401<letter>", async () => {

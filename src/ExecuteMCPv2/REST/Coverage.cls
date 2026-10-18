@@ -329,7 +329,10 @@ ClassMethod Launch(ByRef pParams, pNamespace As %String, pRoutines As %List, pUn
             Quit
         }
         If tDecision = "clear-busy-foreign" {
-            Kill ^IRIS.TempExecuteMCPv2Coverage("session")
+            ; The ownership record is cleared only when the active session's own process list disproves it. A session of
+            ; all processes or a paused one has no list of its own, so the record is kept: a suite session paused by
+            ; someone else stays reclaimable, and clear-and-proceed removes the record once the monitor is idle.
+            If ##class(ExecuteMCPv2.Coverage.Job).SessionDisproved(tSession) Kill ^IRIS.TempExecuteMCPv2Coverage("session")
             Set pResult = ..BusyResult("foreign", "")
             Quit
         }
