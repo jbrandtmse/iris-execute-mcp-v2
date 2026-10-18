@@ -27,7 +27,10 @@
  *    no run record, leaves the monitor idle and the other production untouched; an unreadable state is the `Unknown` refusal; a
  *    plain run is not refused; a compiled class that changed afterwards is judged by its compiled class, where the Atelier path
  *    judges its definition; a package-level run whose target is a class (the runner then runs that class) is refused, and so is a
- *    package whose class is still compiled as a TestProduction test although its definition no longer is one.
+ *    package whose class is still compiled as a TestProduction test although its definition no longer is one. A target whose
+ *    package or class part is empty (the runner would read it as every test class under `^UnitTestRoot`) is refused by the tool's
+ *    schema and by the route before any run id, run record, session or production; every request of that row lists a class that
+ *    does not exist, so none can start a run even if the refusal were missing.
  *  - Q6: the bare namespace `EXECMCPTMP403X` (no Interoperability): plain runs through both tools, the route's exact answer at every
  *    level, and a namespace that does not exist.
  *
@@ -61,6 +64,7 @@ import {
   irisTargetFromEnv,
   isIrisReachable,
   openWireSession,
+  postEnvelope,
   resolveSdkEsmDir,
   skipTest,
   staleDistReason,
@@ -734,6 +738,56 @@ describe("Story 40.3 QA: iris_test_coverage reads the same decision at every lev
     await expectMonitorIdle("stale package class, after");
     await expectUntouched(before, rowsBefore, "the stale package class refusal");
     await stopAnyProduction();
+  }, 300000);
+
+  it("Q5g: a coverage target whose package or class part is empty or blank is refused by the tool's schema and by the route before any run id, run record, session or production; the control with a valid target gets as far as resolving the listed class", async (testCtx) => {
+    if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    await expectMonitorIdle("empty class part, before");
+    const counter = await runCounter();
+    const rowsBefore = await resultRows(NS_W);
+    // The listed class does not exist, so a request the validation let through would stop at "no measurable routine", before the
+    // guard and the launch: no request of this row can start a run, whatever the validation does.
+    const classes = ["Story403.NoSuchClassAnywhere"];
+    const routeBody = (target: string, level: string) => ({ target, level, classes, namespace: NS_W, maxSeconds: 3600, maxLines: 200000 });
+
+    // The control: the same request with a valid target is refused later, by the resolution of the listed class (so the refusals
+    // below are the target's, and nothing else in the request).
+    const control = await postEnvelope(TARGET, "/dev/test/coverage", routeBody("Story403.PlainTest", "class"));
+    expect(control.errors, control.text).toHaveLength(1);
+    expect(control.errors[0]).toContain(`None of the listed classes has a measurable routine in namespace ${NS_W}`);
+    expect(control.errors[0]).toContain("Nothing was started");
+
+    const cases: ReadonlyArray<readonly [string, "package" | "class" | "method"]> = [
+      [":", "class"],
+      [":", "package"],
+      [":TestControl", "method"],
+      ["::", "class"],
+      [" :TestControl", "method"],
+    ];
+    for (const [target, level] of cases) {
+      const what = `${level} ${JSON.stringify(target)}`;
+      const viaTool = await coverageRun(target, level, classes);
+      expect(viaTool.isError, `${what}: ${allText(viaTool)}`).toBe(true);
+      expect(allText(viaTool), `${what}: refused by the tool's input schema, before any call to IRIS`).toContain(
+        "Invalid arguments for tool iris_test_coverage",
+      );
+      expect(allText(viaTool)).toContain("must start with a package or class name");
+
+      const viaRoute = await postEnvelope(TARGET, "/dev/test/coverage", routeBody(target, level));
+      expect(viaRoute.errors, `${what}: ${viaRoute.text}`).toHaveLength(1);
+      expect(viaRoute.errors[0], `${what}: refused by the validation, before the class is resolved`).toContain(
+        "Parameter 'target' must start with a package or class name",
+      );
+      expect(viaRoute.errors[0]).not.toContain("measurable routine");
+    }
+
+    expect(await runCounter(), "no coverage run id was allocated").toBe(counter);
+    const unallocated = await dev.raw("iris_test_status", { action: "poll", coverageRunId: String(counter + 1) });
+    expect(unallocated.isError, allText(unallocated)).toBe(true);
+    expect(allText(unallocated), "no run record exists for the next id").toContain(`Coverage run ${counter + 1} was not found`);
+    await expectMonitorIdle("empty class part, after");
+    expect(await resultRows(NS_W), "nothing ran").toEqual(rowsBefore);
+    expect((await productionStatus()).state, "no production was started").toBe("Stopped");
   }, 300000);
 });
 

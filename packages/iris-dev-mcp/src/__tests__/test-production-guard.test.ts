@@ -321,17 +321,46 @@ describe("the shipped guard runs only where the target namespace sees the classe
   const check = source.slice(source.indexOf("ClassMethod ProductionCheck("), source.indexOf("ClassMethod ProductionGuard("));
   const guard = source.slice(source.indexOf("ClassMethod ProductionGuard("));
   const calledByGuard = [...new Set([...guard.matchAll(/##class\((ExecuteMCPv2\.[A-Za-z0-9.]+)\)/g)].map((match) => match[1] ?? ""))].sort();
+  const calledMethods = [
+    ...new Set([...guard.matchAll(/##class\((ExecuteMCPv2\.[A-Za-z0-9.]+)\)\.([A-Za-z0-9]+)\(/g)].map((match) => `${match[1]}.${match[2]}`)),
+  ].sort();
+  // A namespace's own copy of an earlier build holds these classes, so the class check passes there. A method the guard calls in
+  // another class needs no member check of its own only when every copy that passes the class check has it. `ExecuteMCPv2.Coverage.Job`
+  // is new in Story 40.1, so a copy that holds it is a build of Story 40.1 or later, and `Job.IsClassName` (Story 40.1),
+  // `Interop.StateName` (Story 38.0) and `Utils.SanitizeError` are all in such a build.
+  const inEveryCopyOfItsClass = ["ExecuteMCPv2.Coverage.Job.IsClassName", "ExecuteMCPv2.REST.Interop.StateName", "ExecuteMCPv2.Utils.SanitizeError"];
 
   it("ProductionCheck asks the guard only behind a check that the guard's own class and every class it calls are defined there", () => {
     expect(check, "the shipped class has ProductionCheck").toContain("ClassMethod ProductionCheck(");
-    const gate = /Set tGuarded = tSwitched((?: && \$\$\$comClassDefined\("[A-Za-z0-9.]+"\))+)/.exec(check);
+    const gate = /Set tGuarded = tSwitched([^\n]*)/.exec(check);
     expect(gate, "the visibility check").not.toBeNull();
-    const checked = [...(gate?.[1] ?? "").matchAll(/"([A-Za-z0-9.]+)"/g)].map((match) => match[1] ?? "").sort();
+    const line = gate?.[1] ?? "";
+    const classCheck = /\$\$\$comClassDefined\("([A-Za-z0-9.]+)"\)/g;
+    const memberCheck = /\$\$\$comMemberDefined\("([A-Za-z0-9.]+)",\$\$\$cCLASSmethod,"([A-Za-z0-9]+)"\)/g;
+    expect(line.replace(classCheck, "").replace(memberCheck, "").replace(/ && /g, "").trim(), "the check is a conjunction of those two macros only").toBe("");
+    const checked = [...line.matchAll(classCheck)].map((match) => match[1] ?? "").sort();
     expect(calledByGuard.length, "the guard calls ExecuteMCPv2 classes").toBeGreaterThan(0);
     expect(checked).toEqual(["ExecuteMCPv2.REST.UnitTest", ...calledByGuard].sort());
     expect(check.indexOf("If tGuarded {"), "the guard call sits behind the check").toBeGreaterThan(-1);
     expect(check.indexOf("If tGuarded {")).toBeLessThan(check.indexOf("..ProductionGuard("));
     expect(check.match(/\.\.ProductionGuard\(/g), "one guard call").toHaveLength(1);
+  });
+
+  it("the check also requires the guard method itself, because a namespace's own copy of an earlier build has the class but not the method, and every method the guard calls elsewhere is checked or in every copy of its class", () => {
+    const line = /Set tGuarded = tSwitched([^\n]*)/.exec(check)?.[1] ?? "";
+    const members = [...line.matchAll(/\$\$\$comMemberDefined\("([A-Za-z0-9.]+)",\$\$\$cCLASSmethod,"([A-Za-z0-9]+)"\)/g)].map(
+      (match) => `${match[1]}.${match[2]}`,
+    );
+    expect(members, "the guard method, and only it").toEqual(["ExecuteMCPv2.REST.UnitTest.ProductionGuard"]);
+    expect(calledMethods.length, "the guard calls methods of other ExecuteMCPv2 classes").toBeGreaterThan(0);
+    expect(
+      calledMethods.filter((method) => !members.includes(method) && !inEveryCopyOfItsClass.includes(method)),
+      "a method the guard calls in another class that is neither checked nor in every copy of its class",
+    ).toEqual([]);
+    expect(
+      inEveryCopyOfItsClass.filter((method) => !calledMethods.includes(method)),
+      "the listed methods are all called by the guard",
+    ).toEqual([]);
   });
 
   it("where the guard cannot run, the route answers proceed with no TestProduction tests and reads no state", () => {

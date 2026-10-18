@@ -1684,8 +1684,9 @@ keeps no record of who started one, so a leftover cannot be told from a producti
 
 Limits, stated plainly. The guard needs the ExecuteMCPv2 service at the version that ships it; against a server whose service
 lacks it (the guard route answers 404) the run goes ahead unguarded, as before. So does a run in a namespace that cannot see the
-`ExecuteMCPv2` package (no `%ALL` package mapping, as after a manual setup): the guard cannot run there. The decision is taken
-under Ens's own lifecycle lock, but `%UnitTest.TestProduction` starts its production later, in the test process, so a
+`ExecuteMCPv2` package (no `%ALL` package mapping, as after a manual setup): the guard cannot run there. So does a run in a
+namespace that holds its own copy of an earlier build of the package, one without
+`ExecuteMCPv2.REST.UnitTest:ProductionGuard`. The decision is taken under Ens's own lifecycle lock, but `%UnitTest.TestProduction` starts its production later, in the test process, so a
 production started by another process in between would still be stopped. A production that is already running under a name one
 of the run's tests declares is treated as that run's own and is stopped by the run, whoever started it: by its own test, which
 restarts it for the test, or by another TestProduction test of the same run. One that does not stop within the test's `MAXWAIT`
@@ -1876,8 +1877,13 @@ itself when a package-level target holds no test class, because the runner then 
 than the tests' own runs in the namespace, or its state cannot be read, the call is
 refused with `isError: true` and `code: "PRODUCTION_BUSY"` (`namespace`, `state`, `testProductions`, and `production` or
 `error`). No run id is allocated, nothing is written and no monitor session is started, and that production is left
-untouched. With no other production running the run completes as before and leaves its own production stopped. See the
-`iris_execute_tests` entry for the fields, the recovery and the limits.
+untouched. With no other production running the run completes as before and leaves its own production stopped. A `target`
+whose package or class part (before the first `:`) is empty or blank, such as `:` or `:TestSomething`, is rejected before
+anything starts, by the tool's schema and by the service: the runner would read it as every compiled test class under
+`^UnitTestRoot`, which the guard cannot check. In a namespace where the guard cannot run (the `ExecuteMCPv2` classes are not
+visible there, or it holds its own copy of an earlier build) `iris_test_coverage` is refused with an error and nothing is
+started, where `iris_execute_tests` goes ahead unguarded. See the `iris_execute_tests` entry for the fields, the recovery and
+the other limits.
 
 **Budget expiry and re-attach.** A run that outlives the wait budget returns `isError: false`, `status: "running"` and its
 handles; do NOT re-submit. Call `iris_test_status` with `action: "poll"` and `coverageRunId` (the run's own namespace is

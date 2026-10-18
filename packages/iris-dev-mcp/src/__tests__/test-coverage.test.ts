@@ -581,6 +581,26 @@ describe("testCoverageTool definition (Story 40.1, AC-6)", () => {
     expect(schema.safeParse({ level: "class", classes: ["A.B"] }).success).toBe(false);
     expect(CLASS_NAME_PATTERN.test("%Library.String")).toBe(true);
   });
+
+  it("refuses a target whose package or class part is empty or blank, so nothing is sent (the runner would run every test class under ^UnitTestRoot)", () => {
+    const schema = testCoverageTool.inputSchema;
+    const ok = { level: "class", classes: ["A.B"] };
+    for (const target of [":", ":TestControl", "::", ":A:B", "  :TestControl", "\t:TestControl", " "]) {
+      const parsed = schema.safeParse({ ...ok, target });
+      expect(parsed.success, JSON.stringify(target)).toBe(false);
+      const issue = parsed.error?.issues[0];
+      expect(issue?.path, JSON.stringify(target)).toEqual(["target"]);
+      expect(issue?.message, JSON.stringify(target)).toContain("must start with a package or class name");
+    }
+    for (const level of ["package", "class", "method"]) {
+      expect(schema.safeParse({ ...ok, level, target: ":" }).success, `level ${level}`).toBe(false);
+    }
+    for (const target of ["A.B", "A.B:TestOne", "A.B:", "%UnitTest.TestCase", " A.B"]) {
+      expect(schema.safeParse({ ...ok, target }).success, JSON.stringify(target)).toBe(true);
+    }
+    // An empty target is not this rule's: the service refuses it with its own "required parameter" text, as before.
+    expect(schema.safeParse({ ...ok, target: "" }).success).toBe(true);
+  });
 });
 
 // -- The handler ---------------------------------------------------------------------

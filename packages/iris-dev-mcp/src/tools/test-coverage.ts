@@ -74,6 +74,19 @@ const MAX_MEASURED_LINES = 200000;
 export const CLASS_NAME_PATTERN = /^%?[A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)*$/;
 const RUN_ID_PATTERN = /^\d+$/;
 
+/**
+ * Does the target name a package or class: is the part before the first colon not blank? The runner reads an empty one as every
+ * compiled test class under `^UnitTestRoot`, so the IRIS side refuses it too (`ValidateStart`). An empty `target` is left to
+ * the service's own "required parameter" refusal, as before.
+ *
+ * @param target - The `target` argument.
+ * @returns `true` when the part before the first colon is not blank, or when the whole target is empty.
+ */
+function hasTargetName(target: string): boolean {
+  return target === "" || (target.split(":")[0] ?? "").trim() !== "";
+}
+const TARGET_NAME_MESSAGE = "must start with a package or class name (it is empty or blank before any ':')";
+
 /** How many times `cancel` reads the run after signalling it, and the gap between reads (milliseconds). */
 const CANCEL_OBSERVATIONS = 10;
 const CANCEL_OBSERVATION_GAP = 500;
@@ -1006,6 +1019,7 @@ export const testCoverageTool: ToolDefinition = {
   inputSchema: z.object({
     target: z
       .string()
+      .refine(hasTargetName, { message: TARGET_NAME_MESSAGE })
       .describe(
         "Test target: package name (e.g., 'MyApp.Tests'), class name (e.g., 'MyApp.Tests.UtilsTest'), " +
           "or class:method (e.g., 'MyApp.Tests.UtilsTest:TestSomething')",

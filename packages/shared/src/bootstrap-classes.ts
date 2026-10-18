@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "3347b2f36ff2";
+export const BOOTSTRAP_VERSION = "7f92a971b7e5";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "3347b2f36ff2";
+Parameter BOOTSTRAPVERSION = "7f92a971b7e5";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -6245,8 +6245,10 @@ ClassMethod GetFailureMessage(pInstanceId As %String, pClassName As %String, pMe
 /// asks <method>ProductionGuard</method> (the run compiles its test classes, so a class definition answers when the
 /// compiled class is not up to date) and renders one envelope. A namespace that cannot be switched to answers
 /// <code>proceed</code> with no TestProduction tests: nothing can run there, so the run then fails as it does today.
-/// So does a namespace whose class dictionary lacks the classes the guard calls (no <code>%ALL</code> package mapping of
-/// <code>ExecuteMCPv2</code>): the guard cannot run there, so the run goes ahead unguarded, as it did before the guard.
+/// So does a namespace whose class dictionary lacks the classes the guard calls, or holds a copy of
+/// <class>ExecuteMCPv2.REST.UnitTest</class> without <method>ProductionGuard</method> (no <code>%ALL</code> package
+/// mapping of <code>ExecuteMCPv2</code>, or a copy of an earlier build): the guard cannot run there, so the run goes
+/// ahead unguarded, as it did before the guard.
 /// The namespace is restored on every exit path.</p>
 ClassMethod ProductionCheck() As %Status
 {
@@ -6276,8 +6278,9 @@ ClassMethod ProductionCheck() As %Status
             Set tSwitchSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
             If $$$ISERR(tSwitchSC) Set tSwitched = 0
         }
-        ; The guard calls these classes in the target namespace, which sees them only through a package mapping.
-        Set tGuarded = tSwitched && $$$comClassDefined("ExecuteMCPv2.REST.UnitTest") && $$$comClassDefined("ExecuteMCPv2.Coverage.Job") && $$$comClassDefined("ExecuteMCPv2.REST.Interop") && $$$comClassDefined("ExecuteMCPv2.Utils")
+        ; The guard calls these classes in the target namespace, which sees them only through a package mapping or a copy
+        ; of its own; a copy of an earlier build has the classes but lacks ProductionGuard, so the method is checked too.
+        Set tGuarded = tSwitched && $$$comClassDefined("ExecuteMCPv2.REST.UnitTest") && $$$comClassDefined("ExecuteMCPv2.Coverage.Job") && $$$comClassDefined("ExecuteMCPv2.REST.Interop") && $$$comClassDefined("ExecuteMCPv2.Utils") && $$$comMemberDefined("ExecuteMCPv2.REST.UnitTest",$$$cCLASSmethod,"ProductionGuard")
         If tGuarded {
             Set tCmdStatus = ..ProductionGuard(tTarget, tLevel, 1, .tResult)
             If $$$ISERR(tCmdStatus) Set tErrored = 1
@@ -20010,7 +20013,9 @@ rchr(time) Quit ""
 /// (AD-27): this handler validates, decides whether the instance-wide Line-by-Line monitor is free, and
 /// launches the supervisor. It returns raw data; TypeScript decides what is executable and computes percentages.</p>
 /// <ul>
-/// <li><b>Start.</b> The request is validated before any namespace switch. The routines to measure are resolved in
+/// <li><b>Start.</b> The request is validated before any namespace switch (a target whose package or class part is
+/// empty is refused there, because the runner would read it as every test class under <code>^UnitTestRoot</code>).
+/// The routines to measure are resolved in
 /// the target namespace, and a request that measures no routine, or more than <code>maxLines</code> INT lines, is an
 /// error that starts nothing. The TestProduction guard (Story 40.3, <method>ExecuteMCPv2.REST.UnitTest:ProductionGuard</method>,
 /// compiled classes only because the runner never compiles, and asked about the classes the runner will run: a package that
@@ -20147,11 +20152,12 @@ ClassMethod ReadRun(pIdText As %String, Output pId As %Integer) As %Status
     Quit $$$OK
 }
 
-/// Validate the Start request and return its parameters in <var>pParams</var>: <code>target</code>,
-/// <code>level</code>, <code>classes</code> (a <class>%List</class> of 1 to 50 valid class names, de-duplicated, order
-/// kept), <code>namespace</code> (empty when not given), <code>maxSeconds</code> (1 to 3600), <code>maxLines</code>
-/// (at least 1) and <code>minCoverage</code> (empty when not given, otherwise a number from 0 to 100). Runs before any
-/// namespace switch.
+/// Validate the Start request and return its parameters in <var>pParams</var>: <code>target</code> (whose part before
+/// the first colon, the package or class, is not empty: the runner reads an empty one as every test class at the top of
+/// <code>^UnitTestRoot</code>, which the TestProduction guard cannot see), <code>level</code>, <code>classes</code> (a
+/// <class>%List</class> of 1 to 50 valid class names, de-duplicated, order kept), <code>namespace</code> (empty when not
+/// given), <code>maxSeconds</code> (1 to 3600), <code>maxLines</code> (at least 1) and <code>minCoverage</code> (empty
+/// when not given, otherwise a number from 0 to 100). Runs before any namespace switch.
 ClassMethod ValidateStart(pBody As %DynamicObject, Output pParams) As %Status
 {
     Kill pParams
@@ -20165,6 +20171,9 @@ ClassMethod ValidateStart(pBody As %DynamicObject, Output pParams) As %Status
     Set tTarget = $ZStrip(pBody.%Get("target"), "<>W")
     If (tTarget = "") || (tTarget '? 1.(1AN,1".",1"%",1"_",1":")) {
         Quit $$$ERROR($$$GeneralError, "Parameter 'target' must be a package, a class or class:method name")
+    }
+    If $Piece(tTarget, ":", 1) = "" {
+        Quit $$$ERROR($$$GeneralError, "Parameter 'target' must start with a package or class name")
     }
     Set pParams("target") = tTarget
 

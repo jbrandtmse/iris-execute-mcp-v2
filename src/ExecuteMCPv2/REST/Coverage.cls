@@ -6,7 +6,9 @@
 /// (AD-27): this handler validates, decides whether the instance-wide Line-by-Line monitor is free, and
 /// launches the supervisor. It returns raw data; TypeScript decides what is executable and computes percentages.</p>
 /// <ul>
-/// <li><b>Start.</b> The request is validated before any namespace switch. The routines to measure are resolved in
+/// <li><b>Start.</b> The request is validated before any namespace switch (a target whose package or class part is
+/// empty is refused there, because the runner would read it as every test class under <code>^UnitTestRoot</code>).
+/// The routines to measure are resolved in
 /// the target namespace, and a request that measures no routine, or more than <code>maxLines</code> INT lines, is an
 /// error that starts nothing. The TestProduction guard (Story 40.3, <method>ExecuteMCPv2.REST.UnitTest:ProductionGuard</method>,
 /// compiled classes only because the runner never compiles, and asked about the classes the runner will run: a package that
@@ -143,11 +145,12 @@ ClassMethod ReadRun(pIdText As %String, Output pId As %Integer) As %Status
     Quit $$$OK
 }
 
-/// Validate the Start request and return its parameters in <var>pParams</var>: <code>target</code>,
-/// <code>level</code>, <code>classes</code> (a <class>%List</class> of 1 to 50 valid class names, de-duplicated, order
-/// kept), <code>namespace</code> (empty when not given), <code>maxSeconds</code> (1 to 3600), <code>maxLines</code>
-/// (at least 1) and <code>minCoverage</code> (empty when not given, otherwise a number from 0 to 100). Runs before any
-/// namespace switch.
+/// Validate the Start request and return its parameters in <var>pParams</var>: <code>target</code> (whose part before
+/// the first colon, the package or class, is not empty: the runner reads an empty one as every test class at the top of
+/// <code>^UnitTestRoot</code>, which the TestProduction guard cannot see), <code>level</code>, <code>classes</code> (a
+/// <class>%List</class> of 1 to 50 valid class names, de-duplicated, order kept), <code>namespace</code> (empty when not
+/// given), <code>maxSeconds</code> (1 to 3600), <code>maxLines</code> (at least 1) and <code>minCoverage</code> (empty
+/// when not given, otherwise a number from 0 to 100). Runs before any namespace switch.
 ClassMethod ValidateStart(pBody As %DynamicObject, Output pParams) As %Status
 {
     Kill pParams
@@ -161,6 +164,9 @@ ClassMethod ValidateStart(pBody As %DynamicObject, Output pParams) As %Status
     Set tTarget = $ZStrip(pBody.%Get("target"), "<>W")
     If (tTarget = "") || (tTarget '? 1.(1AN,1".",1"%",1"_",1":")) {
         Quit $$$ERROR($$$GeneralError, "Parameter 'target' must be a package, a class or class:method name")
+    }
+    If $Piece(tTarget, ":", 1) = "" {
+        Quit $$$ERROR($$$GeneralError, "Parameter 'target' must start with a package or class name")
     }
     Set pParams("target") = tTarget
 

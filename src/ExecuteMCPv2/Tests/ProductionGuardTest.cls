@@ -1,7 +1,8 @@
 /// Unit tests for the TestProduction guard of <class>ExecuteMCPv2.REST.UnitTest</class> (Story 40.3).
 /// <p>Covers the pure decision <method>ExecuteMCPv2.REST.UnitTest:GuardOutcome</method> (every row of its table), the
 /// test discovery <method>ExecuteMCPv2.REST.UnitTest:TestProductions</method> and the guard
-/// <method>ExecuteMCPv2.REST.UnitTest:ProductionGuard</method> on runs that hold no TestProduction test.
+/// <method>ExecuteMCPv2.REST.UnitTest:ProductionGuard</method> on runs that hold no TestProduction test, and the coverage
+/// <method>ExecuteMCPv2.REST.Coverage:ValidateStart</method> rule that keeps a target with an empty class part away from it.
 /// This class starts no production and defines no TestProduction class: a TestProduction subclass in this
 /// namespace would stop a running production when it ran (the live gate covers the positive cases in a disposable
 /// namespace).</p>
@@ -128,6 +129,39 @@ Method TestProductionGuardPlainTarget()
     Do $$$AssertStatusOK(tSC, "the guard succeeds at package level")
     Do $$$AssertEquals(tResult.%Get("decision"), "proceed", "package level decision")
     Do $$$AssertTrue('tResult.%IsDefined("stateCode"), "package level: no state code")
+}
+
+/// The Start request for <var>pTarget</var>, with every other field valid, run through
+/// <method>ExecuteMCPv2.REST.Coverage:ValidateStart</method>. Nothing is started.
+ClassMethod ValidateTarget(pTarget As %String, Output pParams) As %Status [ Private ]
+{
+    Set tBody = {}
+    Do tBody.%Set("target", pTarget)
+    Do tBody.%Set("level", "class")
+    Do tBody.%Set("classes", ["ExecuteMCPv2.Tests.UnitTestTest"])
+    Do tBody.%Set("maxSeconds", 3600, "number")
+    Do tBody.%Set("maxLines", 200000, "number")
+    Quit ##class(ExecuteMCPv2.REST.Coverage).ValidateStart(tBody, .pParams)
+}
+
+/// A coverage target whose package or class part (before the first colon) is empty is refused by the validation, before
+/// any namespace switch, run record or session: the runner reads the spec <code>::</code> as every compiled test class
+/// under <code>^UnitTestRoot</code>, and the TestProduction guard asks about the class part, which is empty.
+Method TestValidateStartRejectsAnEmptyClassPart()
+{
+    For tTarget = ":", ":TestControl", "::", ":A:B", " :TestControl", $Char(9)_":TestControl" {
+        Kill tParams
+        Set tSC = ..ValidateTarget(tTarget, .tParams)
+        Do $$$AssertStatusNotOK(tSC, "'"_tTarget_"' has no package or class part")
+        Do $$$AssertTrue($System.Status.GetErrorText(tSC) [ "must start with a package or class name", "the error says what is missing for '"_tTarget_"'")
+        Do $$$AssertTrue('$Data(tParams("target")), "no target is returned for '"_tTarget_"'")
+    }
+    For tTarget = "ExecuteMCPv2.Tests.UnitTestTest", "ExecuteMCPv2.Tests.UnitTestTest:TestX", "%UnitTest.TestCase", "ExecuteMCPv2.Tests" {
+        Kill tParams
+        Set tSC = ..ValidateTarget(tTarget, .tParams)
+        Do $$$AssertStatusOK(tSC, "'"_tTarget_"' names a package or class")
+        Do $$$AssertEquals($Get(tParams("target")), tTarget, "the target is returned as given for '"_tTarget_"'")
+    }
 }
 
 }

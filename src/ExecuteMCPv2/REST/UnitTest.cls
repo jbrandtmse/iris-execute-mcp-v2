@@ -351,8 +351,10 @@ ClassMethod GetFailureMessage(pInstanceId As %String, pClassName As %String, pMe
 /// asks <method>ProductionGuard</method> (the run compiles its test classes, so a class definition answers when the
 /// compiled class is not up to date) and renders one envelope. A namespace that cannot be switched to answers
 /// <code>proceed</code> with no TestProduction tests: nothing can run there, so the run then fails as it does today.
-/// So does a namespace whose class dictionary lacks the classes the guard calls (no <code>%ALL</code> package mapping of
-/// <code>ExecuteMCPv2</code>): the guard cannot run there, so the run goes ahead unguarded, as it did before the guard.
+/// So does a namespace whose class dictionary lacks the classes the guard calls, or holds a copy of
+/// <class>ExecuteMCPv2.REST.UnitTest</class> without <method>ProductionGuard</method> (no <code>%ALL</code> package
+/// mapping of <code>ExecuteMCPv2</code>, or a copy of an earlier build): the guard cannot run there, so the run goes
+/// ahead unguarded, as it did before the guard.
 /// The namespace is restored on every exit path.</p>
 ClassMethod ProductionCheck() As %Status
 {
@@ -382,8 +384,9 @@ ClassMethod ProductionCheck() As %Status
             Set tSwitchSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
             If $$$ISERR(tSwitchSC) Set tSwitched = 0
         }
-        ; The guard calls these classes in the target namespace, which sees them only through a package mapping.
-        Set tGuarded = tSwitched && $$$comClassDefined("ExecuteMCPv2.REST.UnitTest") && $$$comClassDefined("ExecuteMCPv2.Coverage.Job") && $$$comClassDefined("ExecuteMCPv2.REST.Interop") && $$$comClassDefined("ExecuteMCPv2.Utils")
+        ; The guard calls these classes in the target namespace, which sees them only through a package mapping or a copy
+        ; of its own; a copy of an earlier build has the classes but lacks ProductionGuard, so the method is checked too.
+        Set tGuarded = tSwitched && $$$comClassDefined("ExecuteMCPv2.REST.UnitTest") && $$$comClassDefined("ExecuteMCPv2.Coverage.Job") && $$$comClassDefined("ExecuteMCPv2.REST.Interop") && $$$comClassDefined("ExecuteMCPv2.Utils") && $$$comMemberDefined("ExecuteMCPv2.REST.UnitTest",$$$cCLASSmethod,"ProductionGuard")
         If tGuarded {
             Set tCmdStatus = ..ProductionGuard(tTarget, tLevel, 1, .tResult)
             If $$$ISERR(tCmdStatus) Set tErrored = 1

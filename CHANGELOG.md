@@ -7,7 +7,7 @@ All notable changes to the IRIS MCP Server Suite are documented in this file.
 No tool, action or governance key is added, so no tool count moves (the Development server stays at 32 package tools, 33
 advertised; the suite at 110 package tools, 115 advertised). The prompt pack stays at 13 prompts, the `core` preset at 14
 package tools, and the frozen governance baseline at hash `1e62c5ad5bf7` (141 keys). The refusal-code catalog grows from 9 to
-10 codes. `BOOTSTRAP_VERSION` moves from `06b8b83fc319` to `3347b2f36ff2`, because `REST/UnitTest.cls`, `REST/Coverage.cls`
+10 codes. `BOOTSTRAP_VERSION` moves from `06b8b83fc319` to `7f92a971b7e5`, because `REST/UnitTest.cls`, `REST/Coverage.cls`
 and `REST/Dispatch.cls` changed (the bootstrapped service stays at 35 classes).
 
 ### Added
@@ -42,6 +42,10 @@ and `REST/Dispatch.cls` changed (the bootstrapped service stays at 35 classes).
   `iris_execute_tests` and `iris_test_coverage` gain one sentence about the guard, and `pnpm gen:tools-list-snapshot --force`
   regenerated the `tools/list` snapshot (orchestrator decision #29): it differs only in those two descriptions. `POST /tests`
   (`RunTests`, which no tool calls) is not guarded.
+- **`iris_test_coverage` refuses a `target` with an empty package or class part.** A target such as `:` or `:TestSomething` is
+  rejected by the tool's schema and by the service's request validation, before any namespace switch, run id, run record,
+  monitor session or production action. The runner reads such a spec as every compiled test class under `^UnitTestRoot`, which
+  the TestProduction guard (it asks about the class part) cannot check. The advertised `tools/list` schema is unchanged.
 - **The suite never stops a production (orchestrator decision #58).** Ens keeps no record of who started a production, so a
   production that a failed, cancelled or killed TestProduction run left behind cannot be told apart from one someone started
   on purpose: it is refused and named like any other, and the caller stops it. The test's own production is run over, because
@@ -53,8 +57,10 @@ and `REST/Dispatch.cls` changed (the bootstrapped service stays at 35 classes).
   process, after the user's hooks (orchestrator decision #57). A production another process starts in that window is still
   stopped.
 - A run against a server without the guard route is unguarded (above). So is a run in a namespace that cannot see the
-  `ExecuteMCPv2` package (no `%ALL` package mapping, as after a manual setup): the guard cannot run there, and the route answers
-  `proceed` with no TestProduction tests, as for a namespace that cannot be switched to.
+  `ExecuteMCPv2` package (no `%ALL` package mapping, as after a manual setup) or holds its own copy of an earlier build, one
+  without `ExecuteMCPv2.REST.UnitTest:ProductionGuard`: the guard cannot run there, and the route answers `proceed` with no
+  TestProduction tests, as for a namespace that cannot be switched to. `iris_test_coverage` is refused there instead, with an
+  error and nothing started.
 - A production already running under a name one of the run's tests declares is treated as that run's own and is stopped by the
   run, whoever started it: by its own test, which restarts it for the test, or by another TestProduction test of the same run.
   One that does not stop within the test's `MAXWAIT` is force-stopped and cleaned with `CleanProduction(1)`, which also deletes
