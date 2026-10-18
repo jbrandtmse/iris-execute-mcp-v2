@@ -2,6 +2,52 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-17] — Story 40.1: Line coverage probe and engine
+
+One tool is added, `iris_test_coverage` (the Development server goes from 31 to 32 package tools, 32 to 33 advertised; the
+suite from 109 to 110 package tools, 114 to 115 advertised). The prompt pack stays at 13 prompts, and the frozen
+governance baseline stays at hash `1e62c5ad5bf7` (141 keys). `BOOTSTRAP_VERSION` moves from `08b8adeaadc6` to
+`4ac115159db0`, because the bootstrapped service gains three classes (32 to 35) and `Dispatch.cls` and `UnitTest.cls`
+changed.
+
+### Added
+
+- **`iris_test_coverage`: line coverage of a unit-test run.** It runs the tests of a `target` while an IRIS Line-by-Line
+  session measures the INT routines of 1 to 50 listed `classes`, and returns the test summary and, per routine, its
+  executable lines, covered lines, percent and the executable and covered line ranges, plus the classes it could not
+  measure (`not-compiled`, `no-routines`, `no-int-source`). **Default state: DEFAULT-DISABLED.** It is a post-foundation
+  key, truthfully classified `write` (it starts an instance-wide monitor session, runs test code and prunes its own older
+  run records; annotations `readOnlyHint` false, `destructiveHint` true, `idempotentHint` false, `openWorldHint`
+  false), outside the frozen baseline, with no `defaultEnabled` marker. Enable it with
+  `IRIS_GOVERNANCE={"global":{"iris_test_coverage":true}}`. The wait budget is the `timeout` argument, then
+  `IRIS_TEST_TIMEOUT`, then 120 s, capped at 3600 s. Earliest IRIS version verified: 2026.2 build 221U. **Only the
+  process that runs the tests is measured**; code that runs in processes the tests start is not counted.
+- **One run at a time, instance-wide, and the new refusal code `MONITOR_BUSY`.** The Line-by-Line monitor is one per
+  instance. While any Line-by-Line or PERFMON session runs, the tool is refused with `MONITOR_BUSY` (`owner` `suite`,
+  with the running run's `coverageRunId`, `pid`, `startedAt` and `namespace`; or `owner` `foreign`) and nothing is
+  started; a session the suite did not start is never touched. A run killed in flight releases the monitor (the supervisor
+  job stops the session), and a session whose two jobs are both dead is reclaimed by the next run. A run whose line
+  counts could not be read ends `failed` with `reason` `counts-unreadable` (IRIS's text in `error` and `readError`), and a
+  run whose session could not be stopped ends `failed` with `reason` `release-failed`; both are `isError: true` and
+  carry the test summary and any coverage that was read.
+- **Three ExecuteMCPv2 routes and three bootstrapped classes** carry the run: `POST /dev/test/coverage`,
+  `GET /dev/test/coverage?id=` and `POST /dev/test/coverage/cancel`, handled by `ExecuteMCPv2.REST.Coverage`, with the
+  libraries `ExecuteMCPv2.Coverage.Job` and `ExecuteMCPv2.Coverage.Runner`. Every existing route is unchanged (AD-33).
+  `POST /tests` has no tool caller and its class comment now says so.
+- **`TOOL_PAIRS`** gains `iris_test_coverage` / `iris_test_status`: they stay co-visible in every preset. The `core`
+  preset excludes `iris_test_coverage` (it stays at 14 package tools, 15 runtime tools) and `developer` includes it.
+
+### Changed
+
+- **`iris_test_status` takes an optional `coverageRunId`.** It polls or cancels a coverage run by its handle alone (the
+  run's own namespace is used). Combining it with `jobId` or `runIndex`, or passing a namespace other than the run's,
+  is a validation error. The tool's two governance keys, `poll` and `cancel`, and their classification are unchanged,
+  and so is every existing call. Its description gains one sentence.
+- **The tools-list snapshot was regenerated with `pnpm gen:tools-list-snapshot --force`.** It differs from the old one
+  only in the new `iris_test_coverage` entry and in `iris_test_status`'s new property and description (AD-15).
+- **The PHI data policy scope table is exhaustive as of 2026-10-17** (moved from 2026-10-16) and classifies
+  `iris_test_coverage` as `residual`, like `iris_execute_tests` and `iris_test_status`.
+
 ## [Pre-release — 2026-10-17] — Story 40.0: Epic 39 deferred cleanup
 
 Four ledger entries are closed (DW-584, DW-585, DW-586 and DW-587). No tool, action, governance key, preset row,
@@ -1577,10 +1623,11 @@ Each of the 5 server packages declares an explicit `core`/`developer` roster
 (`assertPresetCoverage`, throws naming tool + preset on any gap) and at test time, so a future tool
 added without a visibility disposition cannot ship silently mis-classified. `iris_env_diff` /
 `iris_env_promote` are a declared pair, always co-visible in every preset (as of Story 38.4,
-`iris_doc_get` / `iris_doc_edit` are a second pair, and as of Story 39.5 `iris_message_search` /
-`iris_message_body` are a third). Roster summary (runtime
-tool counts, as of Story 39.5): `full` 32/27/25/22/8 (dev/admin/interop/ops/data), `core`
-15/13/12/10/8, `developer` 32/11/25/10/8 — every `core` server lands at about 13 runtime tools, a
+`iris_doc_get` / `iris_doc_edit` are a second pair, as of Story 39.5 `iris_message_search` /
+`iris_message_body` are a third, and as of Story 40.1 `iris_test_coverage` / `iris_test_status` are a
+fourth). Roster summary (runtime
+tool counts, as of Story 40.1): `full` 33/27/25/22/8 (dev/admin/interop/ops/data), `core`
+15/13/12/10/8, `developer` 33/11/25/10/8 — every `core` server lands at about 13 runtime tools, a
 guideline and not a hard limit (L-4; dev is at 15).
 Measured `tools/list` payload bytes/tokens per server × preset are recorded in the suite README's
 [Tool Visibility Presets](README.md#tool-visibility-presets) section (up to ~58% fewer bytes under

@@ -186,6 +186,11 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
 
   <!-- Epic 38 (Story 38.5): SQL write safety - classified, transactional SQL execution -->
   <Route Url="/dev/sql/execute" Method="POST" Call="ExecuteMCPv2.REST.Sql:Execute" />
+
+  <!-- Epic 40 (Story 40.1): line coverage - start, status and cancel of a job-owned coverage run -->
+  <Route Url="/dev/test/coverage" Method="POST" Call="ExecuteMCPv2.REST.Coverage:Start" />
+  <Route Url="/dev/test/coverage" Method="GET" Call="ExecuteMCPv2.REST.Coverage:Status" />
+  <Route Url="/dev/test/coverage/cancel" Method="POST" Call="ExecuteMCPv2.REST.Coverage:Cancel" />
 </Routes>
 }
 

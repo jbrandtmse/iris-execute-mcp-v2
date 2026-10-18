@@ -220,6 +220,11 @@ const gateTestFiles = [
   // on the BUILT dev, admin, interop and ops dists over real stdio JSON-RPC. Writes EXECMCPTMP400Q and EXECMCPTMP400R (their database files too), Story400.* and
   // Story40Q.* inside Q, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-40-0-qa-live-gate.test.ts",
+  // Story 40.1: `iris_test_coverage` and the `iris_test_status` `coverageRunId` companion on the BUILT iris-dev-mcp and iris-admin-mcp dists over real stdio JSON-RPC, with raw HTTP to the
+  // coverage routes. The only gate that starts Line-by-Line sessions (the file runs serially): it starts each row with the monitor idle and ends each row asserting it is idle, and
+  // terminates a process only through the fixture's MayTerminate check. Writes EXECMCPTMP401A and EXECMCPTMP401B (their database files too), Story401.* inside A, and
+  // ExecuteMCPv2.Temp.Story391Fixture, which it removes.
+  "src/__tests__/story-40-1-coverage-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

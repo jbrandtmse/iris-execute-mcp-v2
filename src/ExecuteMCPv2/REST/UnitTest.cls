@@ -10,6 +10,10 @@
 /// pre-compiled via MCP tools, not loaded from the filesystem.</p>
 /// <p>I/O from <code>%UnitTest.Manager.RunTest()</code> is redirected to prevent
 /// its progress output from corrupting the HTTP response body.</p>
+/// <p>No MCP tool calls <code>POST /tests</code>. <code>iris_execute_tests</code> runs tests through the Atelier
+/// work queue, and <code>iris_test_coverage</code> runs them in its own job through the coverage routes
+/// (<class>ExecuteMCPv2.REST.Coverage</class>), which never call <method>RunTests</method>. The route stays
+/// for direct REST callers.</p>
 Class ExecuteMCPv2.REST.UnitTest Extends ExecuteMCPv2.REST.Base
 {
 

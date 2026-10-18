@@ -49,7 +49,7 @@ const CLI = path.join(REPO_ROOT, "scripts", "gen-tools-list-snapshot.mjs");
 
 /** The entries each server listed when the snapshot was first written (Story 39.6): a regenerate may not pin fewer. */
 const ENTRY_FLOOR: Record<string, number> = {
-  "iris-dev-mcp": 32,
+  "iris-dev-mcp": 33,
   "iris-admin-mcp": 27,
   "iris-interop-mcp": 25,
   "iris-ops-mcp": 22,
@@ -138,7 +138,7 @@ describe("the committed tools/list snapshot (Story 39.6, DW-573)", () => {
       counted += size;
     }
     expect(committed.entryCount).toBe(counted);
-    expect(counted).toBeGreaterThanOrEqual(114);
+    expect(counted).toBeGreaterThanOrEqual(115);
   });
 
   it("pins the tool-owned fields only: no name, execution or _meta member in any entry", () => {

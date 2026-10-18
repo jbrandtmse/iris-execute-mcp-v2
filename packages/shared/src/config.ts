@@ -69,10 +69,11 @@ export interface IrisConnectionConfig {
   /**
    * Optional operator-set DEFAULT wait budget (in milliseconds, pre-converted
    * from the `IRIS_TEST_TIMEOUT` env var which is specified in seconds) for
-   * `iris_execute_tests`'s poll loop (Story 36.1 AC 36.1.4). Sits BELOW an
-   * explicit per-call `timeout` argument and ABOVE the tool's own hard-coded
+   * the poll loops of `iris_execute_tests` (Story 36.1 AC 36.1.4) and `iris_test_coverage`
+   * (Story 40.1). Sits BELOW an
+   * explicit per-call `timeout` argument and ABOVE each tool's own hard-coded
    * 120-second default in the resolution order (`timeout` arg > this >
-   * 120s). `undefined` when unset — the tool's 120-second default applies
+   * 120s). `undefined` when unset: each tool's 120-second default applies
    * unchanged (today's behavior).
    */
   testTimeoutMs?: number;
@@ -112,7 +113,7 @@ export const DEFAULT_ACCEPT_LANGUAGE = "en-US,en;q=0.9";
  * | IRIS_SQL_TIMEOUT  | *(unset — no per-request override)*, seconds |
  * | IRIS_SQL_READ_ONLY | *(unset: SQL tools are not forced read-only)*, `true` or `false` |
  * | IRIS_SQL_MAX_ROWS_AFFECTED | *(unset: no rows-affected ceiling)*, non-negative integer |
- * | IRIS_TEST_TIMEOUT | *(unset — `iris_execute_tests` keeps its 120s default)*, seconds |
+ * | IRIS_TEST_TIMEOUT | *(unset: `iris_execute_tests` and `iris_test_coverage` keep their 120s default)*, seconds |
  * | IRIS_ACCEPT_LANGUAGE | `en-US,en;q=0.9` |
  *
  * @throws {Error} When IRIS_USERNAME or IRIS_PASSWORD is not set.

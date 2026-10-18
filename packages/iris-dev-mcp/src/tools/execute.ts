@@ -155,13 +155,13 @@ export interface TestClock {
 }
 
 /** Real-time clock — production default. */
-const realClock: TestClock = {
+export const realClock: TestClock = {
   now: () => Date.now(),
   sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
 };
 
 /** Delay between poll requests (ms). */
-const TEST_POLL_INTERVAL = 200;
+export const TEST_POLL_INTERVAL = 200;
 /**
  * Fallback wait budget (seconds) when neither an explicit `timeout` argument
  * nor `IRIS_TEST_TIMEOUT` is set — today's hard-coded value (120s),
@@ -323,7 +323,7 @@ async function readUnitTestCounter(
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-interface ResolvedTimeout {
+export interface ResolvedTimeout {
   timeoutMs: number;
   timeoutCapped: boolean;
 }
@@ -334,7 +334,7 @@ interface ResolvedTimeout {
  * {@link DEFAULT_TEST_TIMEOUT_SECONDS}, clamped at
  * {@link MAX_TEST_TIMEOUT_SECONDS}.
  */
-function resolveTestTimeout(
+export function resolveTestTimeout(
   explicitSeconds: number | undefined,
   configTestTimeoutMs: number | undefined,
 ): ResolvedTimeout {

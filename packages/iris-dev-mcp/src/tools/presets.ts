@@ -9,11 +9,16 @@
  * kill) + SQL execute and SQL query. 14 package tools = 15 runtime (+ `iris_server_profiles`).
  * The target of about 13 runtime tools is a guideline, not a hard limit (L-4,
  * Project Lead decision 2026-10-14; AD-7).
- * `developer` = the full 31-tool dev server (all dev tools are dev-relevant).
+ * `developer` = the full 32-tool dev server (all dev tools are dev-relevant).
  *
- * `include union exclude` MUST equal the package's full 31-tool set for both
+ * `include union exclude` MUST equal the package's full 32-tool set for both
  * presets — enforced at `McpServerBase` construction by `assertPresetCoverage`
  * (see `index.ts`) and at test time by `presets.test.ts`.
+ *
+ * `iris_test_coverage` (Story 40.1): `developer` include / `core` exclude. A coverage run starts an
+ * instance-wide monitor session, so it is not an everyday-loop tool, and `core` stays at 14 package tools
+ * (15 runtime). It is in `TOOL_PAIRS` with `iris_test_status`, which re-attaches to it and cancels it, so the
+ * two stay co-visible; both are outside `core`, so the pair moves no `core` row.
  *
  * `iris_sql_query` (Story 38.5): `core` and `developer` include. Querying is part
  * of the everyday debug loop, and under the `read-only` governance preset
@@ -28,8 +33,9 @@
  * `iris_test_status` (Story 36.2, Lead decision L-2, 2026-09-10): `developer`
  * include / `core` exclude: the manual re-attach route (`iris_global_get` +
  * `iris_sql_query`, named in `iris_execute_tests`' `hint`) already works in
- * `core` today. NOT in `TOOL_PAIRS` - pairing it with `iris_execute_tests`
- * would force it into `core` too.
+ * `core` today. NOT in `TOOL_PAIRS` with `iris_execute_tests` - pairing it with
+ * `iris_execute_tests` would force it into `core` too. (Since Story 40.1 it is in
+ * `TOOL_PAIRS` with `iris_test_coverage`, which is outside `core` as well.)
  *
  * [Source: research/feature-specs/11-tool-visibility-presets.md#2.5 "iris-dev-mcp"]
  */
@@ -73,6 +79,7 @@ export const toolPresets: ToolPresetRosters = {
       "iris_env_diff",
       "iris_env_promote",
       "iris_test_status",
+      "iris_test_coverage",
     ],
   },
   developer: {
@@ -108,6 +115,7 @@ export const toolPresets: ToolPresetRosters = {
       "iris_test_status",
       "iris_doc_edit",
       "iris_sql_query",
+      "iris_test_coverage",
     ],
     exclude: [],
   },

@@ -363,6 +363,253 @@ ClassMethod Leftovers(pNames As %String) As %String
     Quit tList.%ToJSON()
 }
 
+/// The Line-by-Line monitor as this process reads it (Story 40.1), as JSON: active (0 or 1), count (the monitored
+/// routines), pids (the process ids the session is scoped to, space separated) and routines (their names). Read only.
+/// A process that is not in the session's process list reads each routine name as an empty string.
+ClassMethod MonitorState() As %String
+{
+    Set tState = {}
+    Set tActive = ##class(ExecuteMCPv2.Coverage.Job).MonitorActive(.tPids)
+    Do tState.%Set("active", +tActive, "number")
+    Do tState.%Set("count", +##class(%Monitor.System.LineByLine).GetRoutineCount(), "number")
+    Do tState.%Set("pids", tPids, "string")
+    Set tRoutines = []
+    Set tList = ##class(ExecuteMCPv2.Coverage.Job).ActiveRoutines()
+    For tI = 1:1:$ListLength(tList) { Do tRoutines.%Push($List(tList, tI)) }
+    Do tState.%Set("routines", tRoutines)
+    Quit tState.%ToJSON()
+}
+
+/// Start a Line-by-Line session on this class's routine, scoped to this process: a session the suite did not start.
+/// Refuses unless the monitor is idle. Returns started:<pid>, or refused: <why>.
+ClassMethod StartForeign() As %String
+{
+    If ##class(ExecuteMCPv2.Coverage.Job).MonitorActive() { Quit "refused: a monitor session is already active" }
+    Set tSC = ##class(%Monitor.System.LineByLine).Start($ListBuild("ExecuteMCPv2.Temp.Story391Fixture.1"), $ListBuild("RtnLine"), $ListBuild($Job))
+    If $System.Status.IsError(tSC) { Quit "refused: "_$System.Status.GetErrorText(tSC) }
+    Set ^IRIS.TempStory391Fixture("foreign") = $Job
+    Quit "started:"_$Job
+}
+
+/// Stop the active session only when it is provably the one pRoutines names (routine names, comma separated).
+/// A process that can read the session's routine names proves it by name equality. A process that cannot (it is not
+/// in the session's process list) proves it as a reclaiming request does: this fixture's foreign session is scoped
+/// to exactly the process id the fixture recorded (or to nothing alive, which reads 0 once that process has ended,
+/// while the fixture's own record of the start is still there) and monitors as many routines as pRoutines names, or
+/// the coverage session node's process list (only the node's runner and supervisor, still alive, or 0) and routine
+/// count match the active session and the node's routine list equals pRoutines. When the node is gone, the newest
+/// run record stands in for it: its session was started and not released. Returns idle, stopped, or refused: <why>.
+ClassMethod StopIfList(pRoutines As %String) As %String
+{
+    If '##class(ExecuteMCPv2.Coverage.Job).MonitorActive(.tPids) {
+        Kill ^IRIS.TempStory391Fixture("foreign")
+        Quit "idle"
+    }
+    Set tWanted = $ListFromString(pRoutines, ",")
+    Set tProven = 0
+    If ##class(ExecuteMCPv2.Coverage.Job).NamesReadable() {
+        Set tProven = ##class(ExecuteMCPv2.Coverage.Job).ListsEqual(tWanted, ##class(ExecuteMCPv2.Coverage.Job).ActiveRoutines())
+    } Else {
+        Set tForeign = $Get(^IRIS.TempStory391Fixture("foreign"))
+        Set tCount = ##class(%Monitor.System.LineByLine).GetRoutineCount()
+        If (tForeign '= "") && ((tPids = tForeign) || (tPids = 0)) && (tCount = $ListLength(tWanted)) && (pRoutines = "ExecuteMCPv2.Temp.Story391Fixture.1") { Set tProven = 1 }
+        Set tSession = $Get(^IRIS.TempExecuteMCPv2Coverage("session"))
+        If tSession = "" {
+            Set tJob = "ExecuteMCPv2.Coverage.Job"
+            Set tId = $Get(^IRIS.TempExecuteMCPv2Coverage("seq"))
+            If (tId '= "") && $ClassMethod(tJob, "RunExists", tId) && $ClassMethod(tJob, "RunGet", tId, "sessionStarted") && '$ClassMethod(tJob, "RunGet", tId, "sessionReleased") {
+                Set tSession = $ListBuild(tId, $ClassMethod(tJob, "RunGet", tId, "pid"), $ClassMethod(tJob, "RunGet", tId, "runnerPid"), "", $ClassMethod(tJob, "RunGet", tId, "routineList"))
+            }
+        }
+        If 'tProven && ##class(ExecuteMCPv2.Coverage.Job).SessionMatches(tSession) {
+            Set tProven = ##class(ExecuteMCPv2.Coverage.Job).ListsEqual($ListGet(tSession, 5), tWanted)
+        }
+    }
+    If 'tProven { Quit "refused: the active session is not the one named" }
+    Set tSC = ##class(%Monitor.System.LineByLine).Stop()
+    If $System.Status.IsError(tSC) { Quit "refused: "_$System.Status.GetErrorText(tSC) }
+    Kill ^IRIS.TempStory391Fixture("foreign")
+    Quit "stopped"
+}
+
+/// Start a decoy process: a job of this class that holds a lock and waits until it is asked to end. The coverage
+/// gate points a run record at it to prove that the supervisor terminates nothing MayTerminate has not approved.
+/// The decoy ends by itself (StopDecoy asks it to; it also ends after 120 seconds), so nothing ever terminates it.
+/// Returns started:<pid>, or refused: <why>.
+ClassMethod StartDecoy() As %String
+{
+    Kill ^IRIS.TempStory391Fixture("decoyStop")
+    Job ##class(ExecuteMCPv2.Temp.Story391Fixture).DecoyRun()::10
+    If '$Test { Quit "refused: the decoy did not start" }
+    Set tPid = $ZChild
+    For tI = 1:1:50 {
+        If ..DecoyAlive() { Quit }
+        Hang 0.1
+    }
+    If '..DecoyAlive() { Quit "refused: the decoy did not take its lock" }
+    Set ^IRIS.TempStory391Fixture("decoy") = tPid
+    Quit "started:"_tPid
+}
+
+/// The decoy's job: hold the decoy lock until StopDecoy sets the stop flag, for 120 seconds at most.
+ClassMethod DecoyRun()
+{
+    Lock +^IRIS.TempStory391Fixture("decoyLock"):5
+    If '$Test { Quit }
+    For tI = 1:1:1200 {
+        If $Get(^IRIS.TempStory391Fixture("decoyStop")) { Quit }
+        Hang 0.1
+    }
+    Lock -^IRIS.TempStory391Fixture("decoyLock")
+}
+
+/// Is the decoy alive? Its lock is held for its whole life, so a lock that cannot be taken belongs to it.
+ClassMethod DecoyAlive() As %Boolean
+{
+    Lock +^IRIS.TempStory391Fixture("decoyLock"):0
+    If $Test {
+        Lock -^IRIS.TempStory391Fixture("decoyLock")
+        Quit 0
+    }
+    Quit 1
+}
+
+/// Ask the decoy to end and wait for it to do so. Returns stopped, or refused: <why>.
+ClassMethod StopDecoy() As %String
+{
+    Set ^IRIS.TempStory391Fixture("decoyStop") = 1
+    For tI = 1:1:50 {
+        If '..DecoyAlive() { Quit }
+        Hang 0.1
+    }
+    If ..DecoyAlive() { Quit "refused: the decoy is still running" }
+    Kill ^IRIS.TempStory391Fixture("decoy"), ^IRIS.TempStory391Fixture("decoyStop")
+    Quit "stopped"
+}
+
+/// Hold the monitor's own lock, ^%SYS("MON-HOLD"), from a job of this class, so that a Stop of the Line-by-Line session
+/// fails with MonitorInUse (the monitor takes that lock with a 3 second wait). Only while the suite's own session is
+/// active: refuses unless the active session has a coverage session node. The job releases the lock when
+/// ReleaseMonitorLock is called, and in any case after pSeconds (at most 30). Returns held, or refused: <why>.
+ClassMethod HoldMonitorLock(pSeconds As %Integer = 20) As %String
+{
+    If $Get(^IRIS.TempExecuteMCPv2Coverage("session")) = "" { Quit "refused: no coverage session is active" }
+    If '##class(ExecuteMCPv2.Coverage.Job).MonitorActive() { Quit "refused: the monitor is idle" }
+    Kill ^IRIS.TempStory391Fixture("monHoldStop")
+    Job ##class(ExecuteMCPv2.Temp.Story391Fixture).MonitorLockRun($Select(pSeconds > 30: 30, pSeconds < 1: 1, 1: pSeconds))::10
+    If '$Test { Quit "refused: the lock holder did not start" }
+    Set tHeld = 0
+    For tI = 1:1:50 {
+        If ..MonitorLockHeld() {
+            Set tHeld = 1
+            Quit
+        }
+        Hang 0.1
+    }
+    Quit $Select(tHeld: "held", 1: "refused: the lock holder did not take the lock")
+}
+
+/// The lock holder's job: hold ^%SYS("MON-HOLD") until ReleaseMonitorLock sets the stop flag, for pSeconds at most.
+ClassMethod MonitorLockRun(pSeconds As %Integer)
+{
+    Lock +^%SYS("MON-HOLD"):10
+    If '$Test { Quit }
+    For tI = 1:1:(pSeconds * 10) {
+        If $Get(^IRIS.TempStory391Fixture("monHoldStop")) { Quit }
+        Hang 0.1
+    }
+    Lock -^%SYS("MON-HOLD")
+}
+
+/// Is ^%SYS("MON-HOLD") held by another process? A lock this call can take is released at once.
+ClassMethod MonitorLockHeld() As %Boolean
+{
+    Lock +^%SYS("MON-HOLD"):0
+    If $Test {
+        Lock -^%SYS("MON-HOLD")
+        Quit 0
+    }
+    Quit 1
+}
+
+/// Ask the lock holder to release ^%SYS("MON-HOLD") and wait for it to do so. Returns released, or refused: <why>.
+ClassMethod ReleaseMonitorLock() As %String
+{
+    Set ^IRIS.TempStory391Fixture("monHoldStop") = 1
+    For tI = 1:1:50 {
+        If '..MonitorLockHeld() { Quit }
+        Hang 0.1
+    }
+    If ..MonitorLockHeld() { Quit "refused: the lock is still held" }
+    Kill ^IRIS.TempStory391Fixture("monHoldStop")
+    Quit "released"
+}
+
+/// Write pCount fake finished run records, with negative ids so that they are older than every real run. Returns pCount.
+ClassMethod SeedRunRecords(pCount As %Integer) As %String
+{
+    For tI = 1:1:pCount { Set ^IRIS.TempExecuteMCPv2Coverage("run", -1000 - tI, "status") = "completed" }
+    Quit pCount
+}
+
+/// How many run records the coverage service holds, real and fake.
+ClassMethod RunRecordCount() As %Integer
+{
+    Set tCount = 0
+    Set tId = ""
+    For {
+        Set tId = $Order(^IRIS.TempExecuteMCPv2Coverage("run", tId))
+        If tId = "" { Quit }
+        Set tCount = tCount + 1
+    }
+    Quit tCount
+}
+
+/// Remove the fake run records SeedRunRecords wrote (up to 200 of them).
+ClassMethod ClearFakeRuns() As %String
+{
+    For tI = 1:1:200 { Kill ^IRIS.TempExecuteMCPv2Coverage("run", -1000 - tI) }
+    Quit "cleared"
+}
+
+/// Make the line counts of coverage run pId unreadable: replace the routine list its runner reads them for with text
+/// that is not a list. Refuses unless the run is not finished and its session has started. Returns corrupted, or
+/// refused: <why>.
+ClassMethod CorruptRoutines(pId As %Integer) As %String
+{
+    Set tJob = "ExecuteMCPv2.Coverage.Job"
+    If '$ClassMethod(tJob, "RunExists", pId) { Quit "refused: no such run" }
+    If $ClassMethod(tJob, "IsTerminal", $ClassMethod(tJob, "RunGet", pId, "status")) { Quit "refused: the run has finished" }
+    If '$ClassMethod(tJob, "RunGet", pId, "sessionStarted") { Quit "refused: the run has no session yet" }
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "routines") = "not a routine list"
+    Quit "corrupted"
+}
+
+/// Point the runnerPid of coverage run pId at the decoy pPid, as a PID that was reused would be. Refuses unless pPid
+/// is the decoy this fixture started and the run is not finished. Returns pointed, or refused: <why>.
+ClassMethod PointRunnerAtDecoy(pId As %Integer, pPid As %Integer) As %String
+{
+    If (pPid = "") || (pPid '= $Get(^IRIS.TempStory391Fixture("decoy"))) { Quit "refused: "_pPid_" is not the decoy" }
+    If '..DecoyAlive() { Quit "refused: the decoy is not running" }
+    If ##class(ExecuteMCPv2.Coverage.Job).IsTerminal(##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "status")) { Quit "refused: the run has finished" }
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "runnerPid") = pPid
+    Quit "pointed"
+}
+
+/// Terminate process pPid only when it is the supervisor or the runner the coverage session node names and
+/// ExecuteMCPv2.Coverage.Job:MayTerminate approves it, checked immediately before the call (a process id can be
+/// reused once its process has ended). Returns terminated:<result>, or refused: <why>.
+ClassMethod TerminateCoverageProcess(pPid As %Integer) As %String
+{
+    Set tSession = $Get(^IRIS.TempExecuteMCPv2Coverage("session"))
+    Set tId = $ListGet(tSession, 1)
+    If tId = "" { Quit "refused: no coverage session node" }
+    Set tRole = $Select(pPid = $ListGet(tSession, 2): "supervisor", pPid = $ListGet(tSession, 3): "runner", 1: "")
+    If tRole = "" { Quit "refused: "_pPid_" is neither the supervisor nor the runner of the session node" }
+    If '##class(ExecuteMCPv2.Coverage.Job).MayTerminate(tId, tRole, pPid) { Quit "refused: MayTerminate is false for the "_tRole }
+    Quit "terminated:"_$System.Process.Terminate(pPid)
+}
+
 }
 `;
 
@@ -1039,7 +1286,7 @@ export const STORY394_IDS: Record<"a" | "b", Record<string, string>> = {
  * Put and compile `documents` into the scratch namespace `name`, run `className.Seed(args)` there, and
  * check the JSON ID map it returns against `expected`. `what` names the seed in error text.
  */
-async function putCompileSeed(
+export async function putCompileSeed(
   dev: WireSession,
   name: string,
   documents: ReadonlyArray<readonly [string, string]>,

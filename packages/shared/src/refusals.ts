@@ -29,6 +29,8 @@ export const REFUSAL_CODES = {
   NOT_IMPLEMENTED: "NOT_IMPLEMENTED",
   /** A data policy withheld the requested body data. */
   DATA_POLICY_BLOCKED: "DATA_POLICY_BLOCKED",
+  /** An instance-wide monitor session is active, so a run that needs the monitor was not started. */
+  MONITOR_BUSY: "MONITOR_BUSY",
 } as const;
 
 /** One of the {@link REFUSAL_CODES} values. */

@@ -84,7 +84,7 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 - **`parseToolVisibilityConfig()`** -- Parses the visibility env family into a `ToolVisibilityConfig`. Fails fast on an unknown preset value (naming the valid `full`/`core`/`developer`), a bare `*`, or a literal `iris_server_profiles` in `IRIS_TOOLS_DISABLE`; WARNs (never fails) on unknown tool names and on the same literal in both lists (ENABLE wins).
 - **`resolveVisibleTools()`** -- Applies resolution `ENABLE > DISABLE > preset > default-visible` (trailing-`*` wildcards) over a package's tool set, returning the visible set plus visible/hidden counts. Reserved `iris_server_profiles` is always visible.
 - **`assertPresetCoverage()`** -- Registration-time guard (sibling of `assertGovernanceClassification`): throws, naming the offending tool + preset, if any preset's `include ∪ exclude` ≠ the package tool-set or `include ∩ exclude ≠ ∅`. `full` is reserved (all tools).
-- **`TOOL_PAIRS`** -- Co-visibility pairs (`iris_env_diff`/`iris_env_promote`, `iris_doc_get`/`iris_doc_edit` since Story 38.4, and `iris_message_search`/`iris_message_body` since Story 39.5) that every preset must keep together-in or together-out.
+- **`TOOL_PAIRS`** -- Co-visibility pairs (`iris_env_diff`/`iris_env_promote`, `iris_doc_get`/`iris_doc_edit` since Story 38.4, and `iris_message_search`/`iris_message_body` since Story 39.5, and `iris_test_coverage`/`iris_test_status` since Story 40.1) that every preset must keep together-in or together-out.
 - **`ToolPresetName`** / **`ToolPresetRoster`** / **`ToolPresetRosters`** / **`ToolVisibilityConfig`** (types) -- Preset name union and the per-package `include`/`exclude` roster shapes wired via `McpServerBaseOptions.toolPresets`.
 
 ### PHI Data Policy
@@ -98,6 +98,7 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 - **`redactHl7()`** -- Fail-closed ER7 redaction: keeps only the fields of `HL7_KEEP_FIELDS` and redacts every other field of every segment, preserving segment order, terminators and separators. It refuses a text it cannot read and never throws. `iris_message_body` shows its output under `redact`.
 - **`ToolDefinition.dataPolicy`** (`actions`, `phiInputs`) -- Declares that a tool is under the policy and which of its inputs carry PHI; `McpServerBase` checks the declaration at registration, and the audit log redacts the declared inputs under `redact` and `block`.
 - **`REFUSAL_CODES.DATA_POLICY_BLOCKED`** -- The refusal for body data a policy withheld.
+- **`REFUSAL_CODES.MONITOR_BUSY`** -- The refusal for a run that needs the instance-wide Line-by-Line monitor while a session is active (Story 40.1).
 
 ---
 

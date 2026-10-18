@@ -2,10 +2,10 @@
 title: 'Story 40.1: Line Coverage Probe and Engine'
 type: 'feature'
 created: '2026-10-17'
-status: 'in-review'
+status: 'done'
 baseline_revision: '966f6ee65f72f01435007cf4018a512fabd0e5ff'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
@@ -13,7 +13,40 @@ context:
   - '{project-root}/.claude/rules/object-script-testing.md'
 warnings:
   - oversized
-deferred: []
+deferred:
+  - summary: >-
+      The runner reads the line counts right after RunTest with no readiness check, so a suite fast enough to finish
+      before the monitor's short start-up delay could read zero counts and report 0% as a complete result.
+    evidence: |-
+      Claim from reading only (first review pass, Blind). Every gate run, including the 4-test oracle suite of about
+      1 s, reads the right counts, and ResultExecute returns zero rows without an error when a routine name is not
+      found, so a premature read would be silent. Would be medium. A probe that starts a session and reads the same
+      process's counts at once would settle it.
+    location: >-
+      src/ExecuteMCPv2/Coverage/Runner.cls:ReadCounts
+    severity: medium (unverified)
+  - summary: >-
+      The Status route builds one nested pair per counted line and per command line of the whole run and returns it
+      on every read of a terminal run, and the 200,000-line cap and the 20-run retention were sized from the
+      SyntaxColor and Result timings, not measured on the Status path.
+    evidence: |-
+      Claim from reading only (resumed review pass, Blind). The gate fixture has 48 lines. A run at the cap could build
+      millions of dynamic-object nodes per poll and keep up to 20 such records in IRISTEMP. Would be medium. Measuring
+      the Status call (time, response bytes, process memory) for a routine of about 200,000 lines would settle it.
+    location: >-
+      src/ExecuteMCPv2/REST/Coverage.cls:BuildRoutines
+    severity: medium (unverified)
+  - summary: >-
+      ExecuteMCPv2.REST.UnitTest:BuildTestSpec joins the classes of a package as ":A;:B", which RunTest reads as class A
+      with a method named B, so POST /tests with level package runs no test.
+    evidence: |-
+      Found by the verification-gap review of this story and captured live: a package run of Story401 through the
+      coverage tool reported 0 tests until REST.Coverage.TestSpec rewrote the spec as ":A;B" (then 5 tests ran). No MCP
+      tool calls POST /tests (its class comment now says so), and the existing UnitTestTest pins only the string
+      shape, so the defect is pre-existing and was not fixed in BuildTestSpec itself, which the Boundaries keep unchanged.
+    location: >-
+      src/ExecuteMCPv2/REST/UnitTest.cls:BuildTestSpec
+    severity: low
 ---
 
 <intent-contract>
@@ -301,11 +334,12 @@ The oracle values come from the plan-stage probe (Design Notes); the implement s
 
 1. `src/ExecuteMCPv2/Coverage/Job.cls` (new). Implement:
    - `MonitorActive()` and `ActiveRoutines()`;
-   - `ResolveRoutines(pNS, pClasses, .pUnmeasured)`;
+   - `ResolveRoutines(pNS, pClasses, .pUnmeasured, .pTotalLines, .pError)`, where `pError` is IRIS's text when resolving failed;
    - `BusyDecision(pMonitorActive, pSessionDefined, pOwnersAlive, pListMatches, pLiveRun)`, which returns `proceed|reclaim|clear-and-proceed|clear-busy-foreign|busy-suite|busy-foreign`;
+   - `PidsMatch` and `SessionMatches`, the reclaim identity proof of an unlisted request process, and `ProveOwnSession`, the supervisor's routine-name proof;
    - `Skeleton(pNS, pRoutine)`;
    - record helpers (allocate, prune to 20, read, set status, liveness by lock);
-   - `Supervise(pId)`, the job entry point.
+   - `Supervise(pId)`, the job entry point, and `Finish(pId, ...)`, which ends a run `failed` with `counts-unreadable` or `release-failed` when it lost its counts or its release (decision #48).
 
    This class is the AD-27 job mechanics and returns raw data only.
 2. `src/ExecuteMCPv2/Coverage/Runner.cls` (new, `Extends %UnitTest.Manager`). Implement `Run(pId)` (the job entry point), `OnBeforeAllTests` (records `manager.ResultId`, then returns `$$$OK`) and `ReadCounts`, exactly as the Boundaries say.
@@ -315,9 +349,13 @@ The oracle values come from the plan-stage probe (Design Notes); the implement s
    - the `outcome` result.
 4. `src/ExecuteMCPv2/REST/Dispatch.cls`: add the three routes (AD-33: additive only).
 5. `src/ExecuteMCPv2/REST/UnitTest.cls`: a class doc-comment-only change, saying that no MCP tool calls `POST /tests`. `iris_execute_tests` uses the Atelier work queue, and `iris_test_coverage` uses the coverage routes. The route stays for direct REST callers (AD-33). This addresses AC 40.1.2's "documented" and closes DW-453 with evidence (Design Notes).
-6. `src/ExecuteMCPv2/Tests/CoverageFixture.cls` and `CoverageJobTest.cls` (new). The tests cover:
+6. `src/ExecuteMCPv2/Tests/CoverageFixture.cls`, `CoverageFixtureEmpty.cls` (a class with no method, so it compiles no routine) and `CoverageJobTest.cls` (new). The tests cover:
    - the `BusyDecision` table, all 7 rows;
-   - `ResolveRoutines` for the fixture and a missing class (`not-compiled`);
+   - `PidsMatch` over the process lists IRIS really reports (the suite's processes still alive, ascending, or `0`);
+   - `ProveOwnSession` refusing a run the session node does not name, and `ReadRun` for a malformed and an unknown id;
+   - `MayTerminate` true only for the PID the record names while a helper job holds the role's owner lock, and false for a different PID, a free lock and an ended process;
+   - `Prune` with its default limit, and `TestSpec` (the package-level separator, see the Spec Change Log);
+   - `ResolveRoutines` for the fixture and a missing class (`not-compiled`), and for a namespace that cannot be entered (IRIS's text in `pError`, the namespace restored);
    - `Skeleton` strings for fixture lines 5, 6, 9, 11, 14, 21, 26, 35, 37 and 41, and the absence of lines 1-4, 13, 34, 43 and 46 (values in Design Notes);
    - the validation errors of `ExecuteMCPv2.REST.Coverage.ValidateStart`: a missing `target`, a bad `level`, empty or 51 `classes`, an invalid class name, and `maxSeconds` 0 and 3601.
 7. `scripts/gen-bootstrap.mjs` and `packages/shared/src/__tests__/bootstrap.test.ts`: both rosters (Rule #39); then `pnpm gen:bootstrap`. Record the version move.
@@ -342,12 +380,15 @@ The oracle values come from the plan-stage probe (Design Notes); the implement s
     - Add to `FIXTURE_CLASS_SOURCE`:
       - `MonitorState()`: JSON `{active, routines}`, read only;
       - `StartForeign()`: refuses unless the monitor is idle, then starts a session on `ExecuteMCPv2.Temp.Story391Fixture.1` scoped to its own process;
-      - `StopIfList(pRoutines)`: stops only when the active list is exactly `pRoutines`;
-      - `TerminateCoverageProcess(pPid)`: refuses unless `pPid` is the `pid` or `runnerPid` in `^IRIS.TempExecuteMCPv2Coverage("session")` and `ExecuteMCPv2.Coverage.Job.MayTerminate` is true for that role, checked immediately before the call (decision #41).
+      - `StopIfList(pRoutines)`: stops only when the active list is exactly `pRoutines`, proved by name equality where this process can read the names and otherwise as a reclaiming request does (the recorded foreign start, or the session node, or the newest run record when the node is gone: process list and routine count);
+      - `TerminateCoverageProcess(pPid)`: refuses unless `pPid` is the `pid` or `runnerPid` in `^IRIS.TempExecuteMCPv2Coverage("session")` and `ExecuteMCPv2.Coverage.Job.MayTerminate` is true for that role, checked immediately before the call (decision #41);
+      - the decoy for the `MayTerminate` row: `StartDecoy()` (a job that holds a lock and ends by itself when asked), `DecoyAlive()`, `StopDecoy()` and `PointRunnerAtDecoy(pId, pPid)`, which never terminate anything;
+      - the failure injections for decision #48: `HoldMonitorLock(pSeconds)`, `MonitorLockHeld()` and `ReleaseMonitorLock()` hold the monitor's own lock `^%SYS("MON-HOLD")` (for 30 seconds at most) while the suite's session is active, so that `Stop` fails; `CorruptRoutines(pId)` makes a running run's counts unreadable;
+      - the retention helpers: `SeedRunRecords(pCount)`, `RunRecordCount()` and `ClearFakeRuns()`.
     - Mirror any roster test of the fixture's methods.
 18. `packages/iris-mcp-all/src/__tests__/story-40-1-coverage-live-gate.test.ts` (new).
     - **Shape.** The 40.0 gate shape, with its own `REQUIRE_LIVE`, the shared, dev, admin and interop freshness lines, `assertDeployedBootstrapVersion` straight after `openWireSession`, the tag `story-40-1-coverage-live-gate`, and the armed text `IRIS_REQUIRE_LIVE is set, so the Story 40.1 live gate may not be skipped: <reason>`.
-    - **Rows.** Matrix rows 1-11, 13 and 14, run in order. Every row ends with an idle assertion. `afterAll` calls `StopIfList("Story401.Fixture.1")` and `StopIfList("ExecuteMCPv2.Temp.Story391Fixture.1")` as a safety net, removes A and B and the fixture class, and asserts that leftovers are `[]`.
+    - **Rows.** Matrix rows 1-11, 13 and 14, each self-contained (it sets its own hang and reads its own counters, so it passes alone), plus rows the matrix does not list: the `MayTerminate` decoy row (a cancel of a run whose record names another process terminates nothing: the decoy stays alive and the run finishes its tests), the decision #48 rows `counts-unreadable` and `release-failed`, `clear-busy-foreign` and `clear-and-proceed` (a stale session node never lets the suite touch a foreign session), `retention` (a start prunes the run records to 20), `levels` (`level` method and package), and a target that names no test class. Every row ends with an idle assertion. `afterEach` and `afterAll` call the fixture's `StopIfList` as a safety net, `afterAll` also removes A and B and the fixture class, and asserts that leftovers are `[]`.
     - **Rosters.** List it in `prepublish-gate.mjs` and `GATES`.
 19. `packages/iris-mcp-all/src/__tests__/story-40-1-doc-claims.test.ts` (new). It pins:
     - the dev README row and `> **Governance defaults:**` line (DEFAULT-DISABLED, the enable recipe);
@@ -383,6 +424,9 @@ The oracle values come from the plan-stage probe (Design Notes); the implement s
   - #48: a run whose counts could not be read, or whose session could not be stopped, ends `failed` with `counts-unreadable` or `release-failed` and is never silent; `readError` is returned.
 
   The saved patch `spec-40-1-line-coverage-probe-and-engine-attempt-1.patch` (md5 `ac1f6cf6bb2e93ab112fb94b6110691e`) is re-applied cleanly to the working tree, then removed from `_bmad-output` (it is not committed), and the spec resumes at review (`in-review`). The review's `patch` rows, and its `bad_spec` rows now covered by #48, are worked in that pass.
+- **2026-10-17, implement stage (resumed pass), reality correction to decision #46's reclaim proof (apply and report; the intent-contract text is not edited).** The Boundaries' reclaim proof says the process list has "exactly two entries, in order, each equal to the record's `runnerPid` and `pid` or `0`". Captured live on the gate fixture (Design Notes, "The process list"), IRIS lists only the scoped processes still alive, in ascending PID order, and reads `0` when none is: so no list of two entries ever occurs for a session whose two owners are dead, and the literal proof made every reclaim `clear-busy-foreign` (the first resumed run stranded a suite session with no ownership record: row 9's reclaim killed the node, and rows 10, 11, 13 and 14 were refused as foreign). `PidsMatch` now accepts one or two entries, each the runner's PID, the supervisor's PID or `0`, with no repeat; a reclaim requires both owner locks free, so it sees `0`. The proof is no weaker than #46 intended: the same node, owner-lock, routine-count and process-list conditions, and the same recorded residual. The lead should amend the Boundaries sentence in the contract to say "the scoped processes still alive, or `0`".
+- **2026-10-17, implement stage, the verification-gap review found `level:"package"` runs no test (apply and report).** The Boundaries say the test spec is `BuildTestSpec(target, level)`, unchanged. Captured live (a package run of `Story401` reported 0 tests, and a comma between the specs ran only the first class), RunTest reads one spec as `suite:class[:method];class[:method];...` and runs a directory once, so the `:A;:B` that `BuildTestSpec` returns at the package level means class A with a method named B. `BuildTestSpec` itself is untouched; `REST.Coverage.TestSpec` drops the colon after each semicolon at the package level (`:A;B`), which ran both test classes (5 tests) in the gate. The same defect sits in `POST /tests` (no tool calls it); it is deferred in the spec frontmatter.
+- **2026-10-17, implement stage, `bad_spec` row "the supervisor's `Terminate` call site is not pinned to `MayTerminate`".** Fixed by a gate row with a decoy (Task 18). The supervisor terminates the PID it started itself (`$ZChild`), never one read back from the record; `MayTerminate` compares it with the record, so a record pointed at another process makes the guard false. The row therefore proves two things at once: the decoy (the gate's own process, which ends itself when asked) stays alive, and the run, whose runner was not terminated, finishes its tests instead of ending `cancelled`.
 
 ## Review Triage Log
 
@@ -454,6 +498,54 @@ The oracle values come from the plan-stage probe (Design Notes); the implement s
   3. Matrix row 9 should say the gate terminates `pid` and then `runnerPid`.
   4. (bad_spec, outside the contract) what a completed run reports when its counts cannot be read or its session cannot be released: `failed` with the reason, or `completed` plus a `note`.
 
+### 2026-10-17 — Review pass (resumed pass, after decisions #45 to #48)
+- the first entry's open routes were worked before this pass's layers ran, on the applied tree:
+  - its 6 `intent_gap` rows by decisions #45 to #48 (the runner's process list, the supervisor's routine-name proof in `Finish`, the reclaim proof as corrected by the live capture in the Spec Change Log, matrix row 9's order, the gate fixture's `StopIfList`);
+  - its 5 `bad_spec` rows by decision #48 (`StopOwnSession` and `Finish` record `readError` and end the run `failed` with `counts-unreadable` or `release-failed`; `Status` returns `readError`; the envelope carries `reason`, `readError`, the summary and the coverage) and the `Terminate` call-site row by the decoy gate row;
+  - its 21 `patch` rows (README refusal row, stale dates and anchors, `ResolveRoutines` error text, class-name wording, `BuildRun` status re-read, the `typeof handler` test, gate row coupling and `fifty`, hygiene, the reclaim `IsTerminal` guard, `releasedBy:"runner"` in row 1, the `ReadRun` test, the cannot-fail assertions, `IRIS_TEST_TIMEOUT` documentation, the literal non-ASCII bytes);
+  - its `defer` row is carried into the frontmatter `deferred:` list.
+- layers: Blind, Edge, Verification-gap and Intent-alignment, on the frozen diff of 54 files (the two generated files left out). Their findings are the rows below.
+- verdicts: 38 findings — high 0, medium 9, low 28, false 0, maybe-false 1 (counted mechanically from the rows below; layers Blind 9, Edge 8, Gap 13, Intent 8; routes intent_gap 0, bad_spec 0, patch 23, defer 1, reject 14)
+- findings:
+  - `[low]` `[patch]` Blind: `README.md` says dev `89,340 -> 43,878` under a table row of `89,533` — verified by `measure:tools-payload`; the prose now reads the measured `89,756` (the figures moved again with the INT-source sentence).
+  - `[low]` `[patch]` Blind: the root README's "Default-disabled write actions" table has no `iris_test_coverage` row — verified; a row was added (the `iris_test_status:cancel` omission predates this story and is not touched).
+  - `[low]` `[patch]` Blind: the Story 39.5 note in `tool_support.md` says "the table's own date stays 2026-10-16" under a table now dated 2026-10-17 — verified; reworded as history.
+  - `[medium]` `[patch]` Blind: the `IRIS_TEST_TIMEOUT` precedence of `iris_test_coverage` is untested and `config.ts` still calls it `iris_execute_tests`-only — verified (a handler that ignores it kept every test green); three handler tests were added (explicit beats config, config applies, 120 s default) and the comment and table row in `config.ts` name both tools.
+  - `[medium]` `[patch]` Blind: the handle is a JSON number in results and an all-digits string in `iris_test_status`, and the busy text quotes it nowhere — verified (`safeParse({coverageRunId: 9})` fails); the busy refusal text now quotes it as the running hint does. The schema stays an all-digits string: accepting a number would widen the public surface the Boundaries fix.
+  - `[medium]` `[patch]` Blind: a `target` that names no test class has no test or live row — verified live: the run completes with 0 tests and `isError:true` ("no test method ran", every line uncovered); a gate row pins it.
+  - `[low]` `[patch]` Blind: the `iris_test_status` field descriptions still read as if every call needs a `jobId` or `runIndex` — verified; the one sentence the tool description gained now says cancel needs no `jobId` and `namespace` is optional (the property descriptions stay, so the snapshot differs only in the entry the AC allows).
+  - `[low]` `[patch]` Blind: the line ranges are INT line numbers and no document says how to read the INT source — verified live that `iris_doc_get` on `<routine>.int` returns the numbered INT; one sentence was added to the tool description and the README.
+  - `[maybe-false]` `[defer]` Blind: the 200,000-line cap and the 20-run retention were not measured on the Status path — whether a run at the cap makes a `Status` read too slow or too large is not known; deferred as medium (unverified), settled by measuring the Status call at about 200,000 lines.
+  - `[low]` `[reject]` Edge: `Supervise` discards the result of `Terminate` and waits 60 s for a runner that did not end — needs a process the suite started to refuse `Terminate`; `wontfix-theoretical`, real if a suite-started process can be unterminable.
+  - `[low]` `[reject]` Edge: an INT line of more than 32,000 characters would be read in pieces and shift the skeleton's line numbers — no class this suite measures generates such a line; `wontfix-theoretical`, real if one does.
+  - `[low]` `[patch]` Edge: a runner killed or failing after `Start` returns but before its record writes leaves a session with no ownership record — the exception variant is real (a failed node write skipped `StopOwnSession`) and `tStarted` is now set the moment `Start` succeeds; the microsecond kill window is `wontfix-theoretical`.
+  - `[low]` `[patch]` Edge: `ResolveRoutines` calls `SafeText` in its `Catch` before restoring `$NAMESPACE` (AD-13 says first) — verified; the restore is now the first line.
+  - `[low]` `[patch]` Edge: new lines of `test-status.test.ts` carry literal U+2500 and U+2014 — verified by grep; now ASCII and a `—` escape.
+  - `[low]` `[patch]` Edge: `CoverageJobTest.OnAfterOneTest` declares three formals and the base class passes one — verified in `%UnitTest.TestCase`; the signature is now `(testname)`.
+  - `[low]` `[patch]` Edge: the README payload prose and table disagree — same root as the first Blind row, fixed once.
+  - `[low]` `[patch]` Edge: the header of `docs-prompt-sync.test.ts` still names the "109 tools" claim the test no longer asserts — verified; now "110 tools".
+  - `[medium]` `[patch]` Gap: `level:"package"` and `level:"method"` are never run live — verified live and a real defect: a package run reported 0 tests, because RunTest reads `:A;:B` as class A with a method B and runs a directory once; `REST.Coverage.TestSpec` now drops the colon after each semicolon, a gate row runs both levels (5 tests; 1 test covering the SumTo lines) and an OS test pins the spec. `BuildTestSpec` itself is unchanged and its `POST /tests` defect is in `deferred:`.
+  - `[medium]` `[patch]` Gap: the timeout precedence is untested — same root as the fourth Blind row, fixed once.
+  - `[medium]` `[patch]` Gap: `clear-busy-foreign` and `clear-and-proceed` of `Launch` are covered only as decision-table rows — verified; two gate rows were added (a foreign session with a stale node stays untouched and the node is cleared; an idle monitor with a stale node clears it, records the dead run `abandoned` and reclaims nothing).
+  - `[medium]` `[patch]` Gap: the 20-run retention has no test — verified; an OS test calls `Prune` with its default limit, and a gate row seeds 25 finished records and asserts a start leaves at most 20.
+  - `[low]` `[patch]` Gap: `TestResolveRoutinesReasons` needs `CoverageFixtureEmpty`, which the Verification load list does not load — verified; the load list and Task 6 name it (the fix is to the verification commands, not to the intent).
+  - `[low]` `[reject]` Gap: AC-9's second pin (`assertDeployedBootstrapVersion`) has no red path of its own — the Verification section records why (it compares the stamp the drift test already pins); `wontfix-accepted`, `reopen_if` the deployed-version check can fail independently of the drift test.
+  - `[medium]` `[patch]` Gap: new test groups carry no `mutation:` line — the groups that pin a Boundaries clause now have one (`Prune`, the skeleton and `LineSkeleton`, `ValidateStart`, `MayTerminate`, the `coverageRunId` group of `test-status.test.ts`); `ListsEqual`, `IsClassName`, `SafeText`, `UtcNow` and `IsTerminal` pin helpers, not an acceptance criterion.
+  - `[medium]` `[patch]` Gap: the unit fixtures give `coverageRunId` and `runIndex` the same value and the SQL mock ignores its parameters — verified (swapping them passed); `runIndex` is now 12 in the fixtures and the SQL parameters are asserted, with a mutation line.
+  - `[low]` `[reject]` Gap: the seed check in `interop-namespace-fixture.test.ts` compares a stubbed return with its own literal — the compile order and call arguments it also pins discriminate, and it copies its siblings' pattern.
+  - `[low]` `[reject]` Gap: `refusedOrRejected` in gate row 4 counts any thrown error as a refusal — the schema rules themselves are pinned by the unit `safeParse` test and the route's `maxSeconds` error is asserted by text.
+  - `[low]` `[reject]` Gap: gate `runIndex === null || typeof ... === "number"` fails only for `undefined` — that is the property (the field is present, null or a number).
+  - `[low]` `[patch]` Gap: the Story 39.5 note contradicts its table — same root as the third Blind row, fixed once.
+  - `[low]` `[reject]` Gap: the fixture holds `^%SYS("MON-HOLD")` for up to 30 s on the shared instance — it holds it only while the suite's own session is active (nobody else can start one then), it is bounded and released by the row; `wontfix-accepted`, `reopen_if` another project reports a Line-by-Line `Stop` that failed with MonitorInUse during a gate.
+  - `[low]` `[reject]` Intent: the reclaim proof is looser than the contract's literal "exactly two entries, in order" — the literal list never occurs (live capture in the Spec Change Log); the fix is to edit the intent contract, which this build does not edit, so the lead amends the sentence.
+  - `[low]` `[reject]` Intent: `Prune` also removes a dead non-terminal record, and the supervisor's clock starts at its own start — the first carries the earlier pass's row, and no clause fixes the second.
+  - `[low]` `[reject]` Intent: row 12's IRIS half (a failed `Start` calls no `Stop`) has no test — the matrix says "unit tests plus review; it cannot be timed live", and the TypeScript mapping is tested.
+  - `[low]` `[reject]` Intent: row 3's cap message is exercised only by the live gate — the gate row asserts the exact text, and `ResolveRoutines` is tested for the line total.
+  - `[low]` `[reject]` Intent: row 16's two halves are tested separately and the gate does not run it — the unit tests cover the TypeScript errors and `CoverageJobTest` the IRIS text; the matrix puts row 16 at the unit tier (Task 15).
+  - `[low]` `[reject]` Intent: the IRIS job engine is reached only by the live gate — the established armed-gate pattern; no OS test may start a session (Boundaries).
+  - `[low]` `[reject]` Intent: the `.gitignore` negation, the changeset, the exports and the loosened 39.x doc-claims regexes have no anchor in the contract — each is needed by a Task, and the regexes now accept "Story 39 or 40" where the count or the re-measure moved.
+  - `[low]` `[patch]` Intent: the README payload prose and table disagree — same root as the first Blind row, fixed once.
+
 ## Design Notes
 
 **Orchestrator decisions** (decided at the spec gate on 2026-10-17 as decisions #39 to #44 in `orchestrator-decisions-wave-6.md`; all six as recommended, with #41 adding the `MayTerminate` identity check before any `Terminate`):
@@ -496,6 +588,12 @@ The oracle values come from the plan-stage probe (Design Notes); the implement s
 
    The limits are sized from the probe. SyntaxColor took 2.4 s for 63,988 lines, and the monitor allocates shared memory for each line.
 
+**Decisions #45 to #48** (after the implement stage's `intent gap`; they amend the Boundaries and spine AD-27):
+- **#45, the session's process list** is the runner and its own supervisor, never all processes. Only a listed process can read a session's routine names and counts, and the supervisor must read a killed runner's.
+- **#46, the identity proofs.** The supervisor (`Finish`) proves the active session is its run's by routine-name equality (`ProveOwnSession`). A request process that is not in the list cannot read the names, so it proves a session reclaimable by the session node, both owner locks free, the process list (`PidsMatch`) and the routine count. The residual is a foreign session whose listed processes have all ended, with the same routine count, started after the suite's own session was stopped by someone else: no live process can read it, so stopping it loses nothing anyone can read.
+- **#47, matrix row 9** terminates the supervisor first, then the runner.
+- **#48, a run never ends silent.** `counts-unreadable` and `release-failed` end a run `failed` (`isError:true`) with the test summary, any coverage read, the IRIS text in `error`, and `readError` from `Status`.
+
 **AC interpretations** (apply and report):
 - **R1 ("a run killed mid-flight leaves no monitor running").** Three paths are proven: the client stops waiting, a cancel, and the test process killed (rows 5, 7, 8). Killing both processes leaves a session that is suite-owned and dead until the next run reclaims it (row 9). That is AD-27's reclaim clause, and probe G showed termination cannot be trapped.
 - **R2 (overhead).** The overhead is measured per monitored line, in the monitored process only. No other process is monitored.
@@ -532,6 +630,7 @@ What the probes found:
   - `ExecuteMCPv2` is mapped to `%ALL`, so a `%UnitTest.Manager` subclass works from the scratch namespace. `OnBeforeAllTests` saw `manager.ResultId` = 6, its own class name, `userparam` and the namespace.
   - `RunTest` without `^UnitTestRoot` ran no test: the root suite failed.
   - `TestInstance.UserFields` holds the run key. The SQL table `TestInstance_UserFields` does not exist.
+- **The process list (implement stage, pass 2, live on the gate fixture, 2026-10-17).** `$ZUtil(84,10,2)` reports the scoped processes that are still alive, space separated and in ascending order of process id (not the order `Start` was given); an ended process leaves the list, and a list with no live process reads `0`. For the supervisor `1127955` and the runner `1127956` it read `1127955 1127956`, then `1127956` once the supervisor was killed, then `0` once the runner was killed. So `PidsMatch` accepts one or two entries, each the runner's PID, the supervisor's PID or `0`, with no repeat, and a reclaim (both owner locks free) sees `0`. This corrects the Boundaries' wording "exactly two entries, in order ... or `0`", which no list IRIS reports can satisfy; the proof keeps its substance and its recorded residual.
 - **Cost.**
   - `SumTo(200000)` took 3.3 ms without the monitor and 8.7 ms with it (about 2.6×).
   - On a class of 1,500 methods, `.1` had 63,988 lines and `.2` had 8,020.
@@ -653,7 +752,7 @@ At INT level, code the compiler generates counts as part of the routine; 40.2 dr
 - **Completed**, `structuredContent`: `{total, passed, failed, skipped, details, status:"completed", coverageRunId, runIndex, namespace, target, level, pid, runnerPid, startedAt, finishedAt, coverage:{complete, classes:[{class, routines:[{routine, lines, executableLines, coveredLines, percent, executableRanges, coveredRanges}]}], unmeasured:[{class, reason}]}, reclaimed?}`. `timeoutCapped` is added only by the primary call, and only when true.
 - **Running:** `{status:"running", coverageRunId, runIndex, namespace, target, level, pid, runnerPid, startedAt, elapsedMs?, timeoutMs?, timeoutCapped?, partial, hint}`. The first text line is `COVERAGE RUN STILL EXECUTING — not finished, not failed. coverageRunId=<id>. Do NOT re-submit.`
 - **Cancelled:** `isError:false`, `{status:"cancelled", …, reason, partial, coverage:{complete:false, …}}`.
-- **Failed:** `isError:true`, `{status:"failed", coverageRunId, runIndex, namespace, pid, runnerPid, error, partial?, coverage?}`.
+- **Failed:** `isError:true`, `{status:"failed", coverageRunId, runIndex, namespace, pid, runnerPid, error, reason?, readError?, partial?, coverage?}`. `reason` is `counts-unreadable` or `release-failed` (decision #48); `partial` is the test summary and `coverage` the coverage that was read, when there is any.
 - **Abandoned:** `isError:false`, `{status:"abandoned", coverageRunId, runIndex, namespace, note}`.
 - **The text form is compact:** one status line, then one line per routine, for example `Story401.Fixture.1: 20 of 28 executable INT lines covered (71.43%); uncovered 8, 16-18, 23, 27, 47-48`, then `Not measured: …`. No JSON dump.
 - **Refusal text:**
@@ -748,7 +847,7 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 - **Sessions.** No dev-package test and no OS test starts a session, and the gate checks the monitor is idle before it starts.
 
 **Commands:**
-- `(loop)` `iris_doc_load` into HSCUSTOM, each path an absolute glob (Rule #17): `/Users/jbrandt/git/iris-execute-mcp-v2/src/**/Coverage/*.cls`, `/Users/jbrandt/git/iris-execute-mcp-v2/src/**/REST/Coverage.cls`, `…/src/**/REST/Dispatch.cls`, `…/src/**/REST/UnitTest.cls`, `…/src/**/Tests/CoverageFixture.cls` and `…/src/**/Tests/CoverageJobTest.cls`; then compile -- expected: clean.
+- `(loop)` `iris_doc_load` into HSCUSTOM, each path an absolute glob (Rule #17): `/Users/jbrandt/git/iris-execute-mcp-v2/src/**/Coverage/*.cls`, `/Users/jbrandt/git/iris-execute-mcp-v2/src/**/REST/Coverage.cls`, `…/src/**/REST/Dispatch.cls`, `…/src/**/REST/UnitTest.cls`, and `…/src/**/Tests/Coverage*.cls` (the fixture `CoverageFixture`, the empty class `CoverageFixtureEmpty` that `TestResolveRoutinesReasons` needs, and `CoverageJobTest`); then compile -- expected: clean.
 - `(loop)` `iris_execute_tests` `ExecuteMCPv2.Tests.CoverageJobTest`, then, in a separate call, `ExecuteMCPv2.Tests.UnitTestTest` -- expected: totals equal the `Test*` counts, with 0 failures.
 - `(loop)` `pnpm gen:bootstrap` twice, then `git diff --stat packages/shared/src/bootstrap-classes.ts` -- expected: one move, and the second run is idempotent.
 - `(loop)` `pnpm --filter @iris-mcp/shared build`, then `pnpm --filter @iris-mcp/shared exec vitest run src/__tests__/refusals.test.ts src/__tests__/tool-visibility.test.ts src/__tests__/tool-visibility-backcompat.test.ts src/__tests__/bootstrap.test.ts` -- expected: pass.
@@ -778,38 +877,87 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 - **AC-8:** delete the `UnitTest.cls` doc sentence → `story-40-1-doc-claims`.
 - **AC-9:** skip `gen:bootstrap` after a class edit → `bootstrap.test.ts` drift check and `assertDeployedBootstrapVersion`.
 
-**Implementation results (Rule 19, recorded by the implement stage 2026-10-17).** Each mutation was applied, observed red, reverted (the file's md5 or `git diff --stat` checked against the pre-mutation copy), and the touched IRIS class reloaded or the touched package rebuilt. After every session-capable mutation the monitor was checked idle (`$ZU(84,8)` = 0) and a leaked session, where one remained, was stopped by hand after proving it was this story's. The unmutated state was then re-run green.
-- `mutation: isExecutableSkeleton counts C:else (28 -> 29 lines) -> test-coverage.test.ts "isExecutableSkeleton ... counting else would add the else lines", the two "routineCoverage against the matrix row 1 oracle" rows, and gate row 1`
-- `mutation: busy-foreign branch dropped from the decision -> gate row 10 (the runner's Start fails and the result is failed, not a refusal)`
-- `mutation: the supervisor's release removed -> gate row 8 (the afterAll safety net stopped the leftover session; monitor idle afterwards)`
-- `mutation: BusyDecision refuses any defined session as busy-suite (owner liveness ignored) -> CoverageJobTest:TestBusyDecisionTable rows 2, 3 and 4 (reclaim, clear-busy-foreign, clear-and-proceed) and gate row 9 ("A coverage run is already active ... nothing was started"); the monitor was already idle afterwards (the gate's afterAll stopped the session), and the stale session node was cleared by the next unmutated run; reverted, CoverageJobTest 25/25`
-- `mutation: pollCoverageRun/resultForRun reads the completed summary from the profile namespace instead of run.namespace -> test-coverage.test.ts "poll reads the test summary in the record's namespace, not the profile's", and gate rows 1 and "rows 5 and 6" (total 412 and 30 instead of 4 and 1; row 1 also reads the wrong namespace, so it goes red as well as row 6)`
+**Implementation results (Rule 19, recorded by the implement stage, resumed pass, 2026-10-17).** Each mutation was applied (an IRIS class through a scratch copy loaded into HSCUSTOM, so the tree stayed byte-identical, md5 checked; TypeScript in place with a backup compared by md5), observed red, reverted, and the touched IRIS class reloaded or the touched package rebuilt. After every session-capable mutation the monitor was checked idle (`MonitorActive` = 0) and `^IRIS.TempExecuteMCPv2Coverage("session")` unset. The unmutated state was then re-run green. Before the first fix of this pass one armed run stranded a suite session (the `PidsMatch` finding in the Spec Change Log); it was stopped by hand once the run record (supervisor 1127787 and runner 1127788 dead, session started and never released, routine list `Story401.Fixture.1`, started inside that gate run) proved it was this gate's.
+- `mutation: "else" removed from NEVER_COUNTED in isExecutableSkeleton (28 -> 29 lines) -> test-coverage.test.ts "} C:else {" -> false, "the oracle skeleton has 28 executable lines because an else line is never counted", "routineCoverage against the matrix row 1 oracle" (two rows), the completed-envelope row and the release-failed envelope row`
+- `mutation: Launch allocates a run id ($Increment) in its busy-foreign branch -> gate row 10 ("no run id was allocated": expected 107 to be 106)`
+- `mutation: the supervisor's release block skipped in Finish -> gate row 8 (status and counts differ from the runner-ended result; the stranded session was stopped by the afterEach safety net through the newest run record, monitor idle afterwards)`
+- `mutation: the runner's StopOwnSession never called -> gate row 1 ("the runner stopped its own session": received supervisor)`
+- `mutation: BusyDecision refuses any defined session as busy-suite (owner liveness ignored) -> CoverageJobTest:TestBusyDecisionTable rows 2, 3 and 4 (reclaim, clear-busy-foreign, clear-and-proceed) and gate row 9 ("A coverage run is already active ... nothing was started"); the afterEach safety net left the monitor idle`
+- `mutation: PidsMatch never rejects a foreign process (its foreign-PID condition replaced by 0) -> CoverageJobTest:TestPidsMatchIsTheSuiteProcessesStillAliveOrZero (a second entry that is a foreign process, a first entry that is a foreign process, only a foreign process)`
+- `mutation: the MayTerminate condition removed from the supervisor's Terminate call -> gate "the MayTerminate decoy" row (expected cancelled to be completed: the real runner was terminated)`
+- `mutation: the release-failed override removed from Finish -> gate "release-failed" row (the run ends completed; coverage run did not reach failed within 120000 ms)`
+- `mutation: the counts-unreadable override removed from Finish -> gate "counts-unreadable" row (the run ends completed; did not reach failed within 90000 ms)`
+- `mutation: Runner.StopOwnSession ignores the %Status of ReadCounts -> gate "counts-unreadable" row (readError is "The monitor session ended before its line counts were read.", not IRIS's <LIST> text)`
+- `mutation: REST.Coverage.BuildRun leaves readError out -> gate "counts-unreadable" row (readError undefined)`
+- `mutation: Launch's reclaim branch marks a finished run abandoned (the IsTerminal guard removed) -> gate "release-failed" row ("reclaiming a finished run's session leaves its status alone": received abandoned)`
+- `mutation: Job.ResolveRoutines leaves pError empty -> CoverageJobTest:TestResolveRoutinesReportsANamespaceErrorAndRestores ("the error text is returned")`
+- `mutation: REST.Coverage.ReadRun skips the RunExists check -> CoverageJobTest:TestReadRunRejectsUnknownAndMalformedIds (an unknown id is an error, the three message parts)`
+- `mutation: coverageRunEnvelope drops reason and readError from the failed envelope -> test-coverage.test.ts "failed with counts-unreadable", "failed with release-failed" and "a poll of a failed run with a reason returns the same result the primary call returns"`
+- `mutation: coverageTextLines drops the "no executable INT lines" branch -> test-coverage.test.ts "a measured routine without an executable line is reported as such in the text"`
+- `mutation: the class-name sentence deleted from the tool description -> test-coverage.test.ts "the description leads with what it does ..."`
+- `mutation: testCoverageTool.handler replaced by a stub -> test-coverage.test.ts "the exported tool runs the handler on the real clock ..."`
+- `mutation: pollCoverageRun reads the completed summary in the profile namespace instead of the record's -> gate "row 6 (the second half)" (total 412 instead of 4) and gate "rows 5 and 6" (total 412 instead of 1)`
+- `mutation: TestSpec leaves the package spec as BuildTestSpec returns it (":A;:B") -> CoverageJobTest:TestTestSpecSeparatesPackageClassesBySemicolon (three assertions) and gate "levels" (a package run of 0 tests: "no test method ran")`
+- `mutation: TestSpec makes a method-level spec run the whole class -> gate "levels" (total 4 instead of 1)`
+- `mutation: Launch's clear-busy-foreign branch also stops the active session -> gate "clear-busy-foreign" ("the foreign session is still active": received 0)`
+- `mutation: Launch's clear-and-proceed branch does not mark the dead run abandoned -> gate "clear-and-proceed" (recorded running, not abandoned)`
+- `mutation: Launch no longer calls Prune -> gate "retention" (46 records, at most 20 expected)`
+- `mutation: Job.MAXRUNS 20 -> 200 -> CoverageJobTest:TestPruneDefaultKeepsTheTwentyMostRecentRuns ("the oldest record is gone")`
+- `mutation: MayTerminate no longer compares the PID with the record's -> CoverageJobTest:TestMayTerminateIsTrueOnlyForTheProcessHoldingTheRecordedRole ("a PID that differs from the record's, the lock still held")`
+- `mutation: MayTerminate returns true without the owner-lock check -> the same test ("the supervisor's lock is free although the PID matches its record" and "the process has ended and released its lock")`
+- `mutation: LineSkeleton keeps a skeleton for a line with no command -> CoverageJobTest:TestLineSkeletonFromTokens and TestSkeletonHasNoEntryForCommentsAndLoneBraces (lines 13, 34 and 43)`
+- `mutation: ValidateStart accepts maxSeconds 0 -> CoverageJobTest:TestValidateStartChecksMaxSecondsAndMaxLines ("maxSeconds 0")`
+- `mutation: resolveTestTimeout(timeout, undefined) in the handler (IRIS_TEST_TIMEOUT ignored) -> test-coverage.test.ts "timeout precedence: IRIS_TEST_TIMEOUT applies when no timeout argument is given"`
+- `mutation: the test summary read by coverageRunId instead of runIndex -> test-coverage.test.ts "sends the documented limits ...", "poll reads the test summary in the record's namespace, not the profile's" and test-status.test.ts "poll with coverageRunId alone returns the coverage result ..." (the run's runIndex is 12 and its coverageRunId 9 in the fixtures)`
+- `mutation: the busy refusal text names coverageRunId without quotes -> test-coverage.test.ts "busy, owner suite: MONITOR_BUSY ..."`
+- `mutation: the coverageRunId branch of iris_test_status skipped -> the five tests of test-status.test.ts "iris_test_status - coverageRunId (Story 40.1)"`
+- `mutation: the zero-result rule skipped in resultForRun -> gate "a target that names no test class" (the run is reported as 0 tests with no error)`
+- The next four pinning tests (AC-6 to AC-9) are unchanged by the resumed pass, so their first-pass lines stand:
 - `mutation: mutates "write" -> "read" on iris_test_coverage -> test-coverage.test.ts "is the governed write the Boundaries describe" and test-status-governance-keys.test.ts "derives the one key iris_test_coverage, classified write ..."`
 - `mutation: METHOD_ORDER " ORDER BY %EXACT(tc.Name), %EXACT(tm.Name)" -> " ORDER BY tc.Name, tm.Name" -> test-status.test.ts "value identity with the DRAIN path, run 94 ..."`
 - `mutation: the UnitTest.cls "No MCP tool calls POST /tests" comment deleted -> story-40-1-doc-claims "ExecuteMCPv2.REST.UnitTest documents that no MCP tool calls POST /tests ..."`
 - `mutation: a comment line added to the bootstrapped Coverage/Job.cls without gen:bootstrap -> bootstrap.test.ts "embedded class contents match disk .cls files" and "BOOTSTRAP_VERSION matches SHA-256 hash of concatenated disk contents"`. `assertDeployedBootstrapVersion` has no separately reproducible red path here: the gate's deployed-version check compares the deployed stamp with the embedded constant, and the drift test above already fails first.
 
-**Bootstrap timing.** The deployed `ExecuteMCPv2.Setup` in HSCUSTOM was reloaded from disk (`BOOTSTRAPVERSION` = `dev`, so stale), and the armed gate then opened the dev server: `[INFO] story-40-1-coverage-live-gate: the dev server opened (startup bootstrap included) in 1.5 s` (35 classes redeployed; `GetBootstrapVersion()` read `10af536e8fbd` afterwards). Well under the 60 s bound. 13 of 13 gate rows passed, none skipped.
+**Bootstrap timing.** The deployed `ExecuteMCPv2.Setup` in HSCUSTOM was reloaded from disk (`BOOTSTRAPVERSION` = `dev`, so stale), and the armed gate then opened the dev server: `[INFO] story-40-1-coverage-live-gate: the dev server opened (startup bootstrap included) in 1.5 s` (35 classes redeployed; `GetBootstrapVersion()` read `10af536e8fbd` afterwards). Well under the 60 s bound. In the resumed pass the stamp moved to `4ac115159db0` and each armed run after a move opened the dev server in 1.4 s with the 35 classes redeployed. The gate has 21 rows: matrix rows 1 to 11, 13 and 14, plus the `MayTerminate` decoy, `counts-unreadable`, `release-failed`, `clear-busy-foreign`, `clear-and-proceed`, `retention`, `levels` (method and package) and the unknown target. All 21 pass in one run (71 s), and rows 7, 8, 10, 11, 13 and the decoy each pass alone.
 
 **Findings the lead should know.**
 - `.gitignore` carried `coverage/`, which (`core.ignorecase=true`) also ignored the new package directory `src/ExecuteMCPv2/Coverage/`, so `Job.cls` and `Runner.cls` would not have been committed. A `!src/ExecuteMCPv2/Coverage/` negation was added right after the rule; `git status` now lists the directory as untracked.
-- The shared tools-list payload rows were re-measured at the end and still match the README (dev `33 / 89,340 / ~22,335`, core `15 / 43,878 / ~10,970`); `pnpm gen:tools-list-snapshot:check` reports 115 entries unchanged.
+- The tools-list payload rows were re-measured after the description gained the class-name sentence: dev `33 / 89,756 / ~22,439` (full and developer), core `15 / 43,878 / ~10,970` (unchanged); the README rows equal `pnpm measure:tools-payload`, and `pnpm gen:tools-list-snapshot:check` reports 115 entries unchanged after `--force`.
+- The reclaim proof of decision #46 was corrected against the live process-list format (Spec Change Log). The lead should amend the contract sentence.
 
 ## Auto Run Result
 
-Status: blocked
-Blocking condition: intent gap
+Status: done
+Blocking condition: none
 
-**Implement pass 1 (2026-10-17).** The implementation was complete and passed every `## Verification` command (`CoverageJobTest` 25/25, `UnitTestTest` 6/6, shared 105 and dev 238 targeted tests, the 13-file `iris-mcp-all` group 193 tests, `gen:bootstrap` idempotent at 35 classes, armed live gate 13/13, nine mutations red and reverted). Review then found that the contract cannot be met as written. The code was reverted and the attempted change is saved as `_bmad-output/implementation-artifacts/spec-40-1-line-coverage-probe-and-engine-attempt-1.patch` (55 files, md5 `ac1f6cf6bb2e93ab112fb94b6110691e`, applies cleanly to `966f6ee` with `git apply`; the generated `bootstrap-classes.ts` and tools-list snapshot are in it). Nothing was committed.
+**Resumed pass (2026-10-17), after decisions #45 to #48.** The applied tree was conformed to the amended Boundaries, the first review's open routes were worked, and a fresh four-layer review (Blind, Edge, Verification-gap, Intent-alignment) ran on the frozen diff. `BOOTSTRAP_VERSION` moves `08b8adeaadc6` -> `4ac115159db0` (35 classes; `gen:bootstrap` twice, idempotent). No commit before the finalize commit, no push.
 
-**The unresolved questions are the four listed at the end of the Review Triage Log** (group G1, inside `<intent-contract>`):
-1. Allow the runner's session to be scoped to `$ListBuild($JOB, supervisorPid)`. A live mutation on 2026-10-17 (runner-only list) turned 7 of 13 gate rows red, because only a process in the session's list can read its routine names and line counts, so the supervisor cannot read a killed runner's counts (matrix rows 7 and 8).
-2. Decide whether the release and reclaim identity proof may be "process list plus routine count" (names are unreadable from a new request process), including the residual case where `PidsMatch` accepts an ended (`0`) process entry.
-3. Matrix row 9: terminate `pid` first, then `runnerPid`.
-4. (Design Notes, not the contract) what a completed run reports when its counts cannot be read or its session cannot be released.
+**Summary of the implemented change.**
+- `iris_test_coverage` (new, `write`, DEFAULT-DISABLED, outside `core`, paired with `iris_test_status`) runs the tests of a target under an instance-wide Line-by-Line session owned by a runner and a supervisor job (the session lists exactly those two processes), refuses while any other session is active, releases the monitor on every path, and reports per-routine INT-line coverage. `iris_test_status` gains `coverageRunId` (poll and cancel).
+- Decision #45 to #48 conformance: the supervisor proves a session is its run's by routine-name equality before it stops it; an unlisted request process reclaims a dead run's session only on the session node, both owner locks free, the process list and the routine count (corrected against the live list format, see the Spec Change Log); a run that loses its counts or its release ends `failed` with `counts-unreadable` or `release-failed` and `isError:true`, the test summary, any coverage read, and `readError` from `Status`; matrix row 9 terminates the supervisor first.
+- The decoy gate row proves the supervisor's `Terminate` call site is pinned to `MayTerminate`. A real defect the review found was fixed: `level:"package"` ran no test (`REST.Coverage.TestSpec`).
 
-Recommended re-dispatch: amend the contract and AD-27 (Rule 20), `git apply` the patch, set `status: in-review` and re-run the review step. The triage rows marked `patch` (21) are small fixes for the review step's patch handling once the patch is applied. The `bad_spec` rows (5) all hang on question 4 and need that Design Notes decision first.
+**Files changed.**
+- IRIS: `src/ExecuteMCPv2/Coverage/Job.cls`, `Coverage/Runner.cls`, `REST/Coverage.cls` (new, bootstrapped), `REST/Dispatch.cls` (three routes), `REST/UnitTest.cls` (class comment), `Tests/CoverageJobTest.cls`, `CoverageFixture.cls`, `CoverageFixtureEmpty.cls` (new tests).
+- Bootstrap and shared: `scripts/gen-bootstrap.mjs`, `packages/shared/src/bootstrap-classes.ts` (generated), `refusals.ts` (`MONITOR_BUSY`), `tool-visibility.ts` (`TOOL_PAIRS`), `config.ts` (comment), and the shared tests that pin them.
+- Dev: `tools/test-coverage.ts` and `tools/unit-test-results.ts` (new), `tools/test-status.ts`, `execute.ts` (exports), `index.ts`, `presets.ts`, and their tests (`test-coverage.test.ts` new).
+- iris-mcp-all: `coverage-fixture.ts`, `story-40-1-coverage-live-gate.test.ts` (21 rows), `story-40-1-doc-claims.test.ts` (new), `interop-namespace-fixture.ts` (the fixture class gains the monitor, decoy, lock, injection and retention helpers), the count pins, the PHI row, the snapshot, `prepublish-gate.mjs`.
+- Docs: `CHANGELOG.md`, `README.md`, `tool_support.md`, the dev, shared and all READMEs, `docs/*`, `.changeset/test-coverage-tool.md`, `.gitignore` (negation so `src/ExecuteMCPv2/Coverage/` is tracked).
 
-**Left behind on the shared instance.** The monitor is idle (`$ZU(84,8)` = 0), `^IRIS.TempExecuteMCPv2Coverage("session")` is unset, `EXECMCPTMP401A`/`B` and every `Story401`/`ExecuteMCPv2.Temp.` class are gone. HSCUSTOM still holds the additive attempt: `ExecuteMCPv2.Coverage.Job`, `Runner`, `REST.Coverage`, the three `Tests.Coverage*` classes, the three routes in the deployed `Dispatch`, and the stamp `10af536e8fbd`. The next bootstrap against the reverted tree (`08b8adeaadc6`) redeploys the 32 original classes and drops the routes. Package dists were last built from the attempted tree and must be rebuilt after the patch is applied or reverted.
+**Review findings.** 38 findings (high 0, medium 9, low 28, maybe-false 1): 23 patched, 1 deferred, 14 rejected, with the reasons in the triage log above. The first pass's 6 `intent_gap`, 5 `bad_spec` and 21 `patch` rows are all closed. Deferred (frontmatter `deferred:`): the runner's unchecked read readiness, the Status payload at the 200,000-line cap, and `BuildTestSpec`'s package-level spec in `POST /tests`.
 
-The plan stage halted after planning, as instructed. The live probes ran on the shared instance (`default`, IRIS 2026.2 build 221U). Before every session they confirmed the monitor was idle, and they stopped every session they started. They created and removed `EXECMCPTMP401A` (leftovers `[]`) and deleted the probe classes `ExecuteMCPv2.Temp.Probe401A`–`M`. The monitor was idle when the stage finished. Six orchestrator decisions are listed under Design Notes.
+**Follow-up review recommendation: true.** Nine mediums were patched after the layers returned (the package-level spec rewrite, the stale-node and retention gate rows, the `MayTerminate` OS test, the timeout and `runIndex` unit tests, the `levels` and unknown-target rows), and none was re-reviewed by a layer. Patched counts by verdict: medium 9, low 14. The unverified risk is that a layer finds a flaw in the new gate rows or in `TestSpec` that the live runs and the mutations did not.
+
+**Verification performed.**
+- IRIS: `CoverageJobTest` 29 of 29 (the class has 29 `Test*` methods) and `UnitTestTest` 6 of 6, after loading and compiling the changed classes clean.
+- Live gate: all 21 rows pass in one armed run (71 s, the dev server opened in 1.4 s with the 35 classes redeployed); six rows also pass alone. The monitor was idle and `("session")` unset after every run.
+- Packages (build, test, lint, type-check): shared 2066, dev 1527, admin 498, interop 670, ops 350, data 165, client-config 514 tests, all green (one pre-existing shared lint warning). `@iris-mcp/all` armed in four calls: 47 files (884 tests), 20 process and wire gates (279), 5 epic gates (33) and 12 other live gates (434 passed, 4 skipped by their own conditions), plus this story's gate. The two dev epic gates pass armed.
+- Governance `:check` OK (frozen 141 keys, hash unchanged), `gen:tools-list-snapshot:check` OK (115 entries), `check-epics-sync` OK, the README payload rows equal `measure:tools-payload`.
+- Mutations (Rule 19): every pinning test added or changed carries a `mutation:` line in Verification, each applied, observed red and reverted; the tree files were byte-identical afterwards (md5), and the monitor was idle after each.
+
+**Residual risks.**
+- A foreign session whose listed processes have all ended and whose routine count matches reads as reclaimable (the residual decision #46 records); a session whose ownership record was cleared by a refused start is never stopped by the suite.
+- The contract sentence "exactly two entries, in order" is unsatisfiable (live capture); the lead should amend it to "the scoped processes still alive, or `0`".
+- Privileges were verified under `_SYSTEM` only (R3). The Status payload at the cap and the runner's read readiness are unmeasured (deferred).
+- On the shared instance: one armed run in this pass stranded a suite session (cause fixed, see the Spec Change Log); it was stopped by hand after the run record proved it was this gate's. A timing probe overwrote the root value of `^ClineDebug` in HSCUSTOM; it was set back to `""`, the state the project's debugging rule starts from.
+- The shared instance is left with the monitor idle, `^IRIS.TempExecuteMCPv2Coverage("session")` unset, `EXECMCPTMP401A` and `EXECMCPTMP401B` removed, and no `Story401` or `ExecuteMCPv2.Temp.` document in HSCUSTOM.

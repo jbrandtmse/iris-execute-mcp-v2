@@ -46,7 +46,7 @@ Set `IRIS_GOVERNANCE_PRESET=read-only` to block every write-classified action on
 
 ### Tool Visibility (`IRIS_TOOLS_PRESET`)
 
-Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to a **15-tool runtime roster** (14 package tools + `iris_server_profiles`; about 13 is a guideline, not a hard limit) — the authoring loop (get/edit/put/list/compile/load), the execution & debug loop (command/classmethod/tests, global get/set/kill), and the SQL tools `iris_sql_execute` and `iris_sql_query`. `iris_doc_get` and `iris_doc_edit` are a pair and stay co-visible in every preset. `IRIS_TOOLS_PRESET=developer` keeps all **32 runtime tools** (31 + `iris_server_profiles`) visible — every tool on this server is already dev-relevant, so `developer` behaves like `full` here. Omit (or set `"full"`) for today's behavior — every tool visible, byte-for-byte. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` hide/force-show individual tools independent of the preset. This is orthogonal to `IRIS_GOVERNANCE_PRESET` above (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). Full model, exact per-tool roster, and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets).
+Set `IRIS_TOOLS_PRESET=core` to trim this server's `tools/list` to a **15-tool runtime roster** (14 package tools + `iris_server_profiles`; about 13 is a guideline, not a hard limit) — the authoring loop (get/edit/put/list/compile/load), the execution & debug loop (command/classmethod/tests, global get/set/kill), and the SQL tools `iris_sql_execute` and `iris_sql_query`. `iris_doc_get` and `iris_doc_edit` are a pair and stay co-visible in every preset, and so are `iris_test_coverage` and `iris_test_status` (both outside `core`). `IRIS_TOOLS_PRESET=developer` keeps all **33 runtime tools** (32 + `iris_server_profiles`) visible — every tool on this server is already dev-relevant, so `developer` behaves like `full` here. Omit (or set `"full"`) for today's behavior — every tool visible, byte-for-byte. `IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` hide/force-show individual tools independent of the preset. This is orthogonal to `IRIS_GOVERNANCE_PRESET` above (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). Full model, exact per-tool roster, and the payload-size measurements: [Tool Visibility Presets](../../README.md#tool-visibility-presets).
 
 > **Prompt-pack limitation.** Two of this server's prompts call tools `core` hides: `diagnose-slow-query` calls `iris_sql_analyze` (hidden under `core`), and `promote-environment-change` calls `iris_env_diff`/`iris_env_promote` (both hidden together under `core` — they are always co-visible). Both prompts work unchanged under `full` or `developer`. Running under `core`, either switch to `full`/`developer` or set `IRIS_TOOLS_ENABLE` to re-show the specific tool(s) the prompt needs.
 
@@ -196,7 +196,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 >
 > **SQL resource caps (optional, opt-in):** an operator may set `IRIS_SQL_MAX_ROWS` (a ceiling on the number of rows `iris_sql_execute` and `iris_sql_query` **return** — the response carries `rowsCapped: true` when it clamps the caller's request, distinct from the pre-existing `truncated`/`totalAvailable`; it bounds the returned row count post-fetch, not the server-side result set or transfer) and/or `IRIS_SQL_TIMEOUT` (a per-request timeout in **seconds**) as environment variables. Both are unset by default (no cap, today's behavior) and apply regardless of `IRIS_GOVERNANCE_PRESET`. Details: [suite README](../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable).
 >
-> **`iris_execute_tests` wait budget (optional, opt-in — Story 36.1):** an operator may set `IRIS_TEST_TIMEOUT` (the tool's DEFAULT wait budget, in **seconds**, before it returns a "running" result instead of blocking further) as an environment variable. Unset by default — the tool keeps its 120-second default. It applies to every server profile (named `IRIS_PROFILES` entries inherit it, like `IRIS_SQL_TIMEOUT`). A per-call `timeout` argument, when given, takes precedence over `IRIS_TEST_TIMEOUT`. See the `iris_execute_tests` detail section below for the full running-result contract.
+> **`iris_execute_tests` and `iris_test_coverage` wait budget (optional, opt-in — Story 36.1; Story 40.1):** an operator may set `IRIS_TEST_TIMEOUT` (the tools' DEFAULT wait budget, in **seconds**, before either returns a "running" result instead of blocking further) as an environment variable. Unset by default — each tool keeps its 120-second default. It applies to every server profile (named `IRIS_PROFILES` entries inherit it, like `IRIS_SQL_TIMEOUT`). A per-call `timeout` argument, when given, takes precedence over `IRIS_TEST_TIMEOUT`. See the `iris_execute_tests` detail section below for the full running-result contract.
 
 ### Server Tools
 
@@ -243,9 +243,17 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_test_status` | Companion to `iris_execute_tests` (Story 36.2): re-attach to a test run by `jobId` and/or read it by `runIndex` (`action: "poll"`), or stop a running one (`action: "cancel"`) — see detail below | `action`, `jobId?`, `runIndex?`, `namespace?` | destructive |
+| `iris_test_status` | Companion to `iris_execute_tests` (Story 36.2): re-attach to a test run by `jobId` and/or read it by `runIndex` (`action: "poll"`), or stop a running one (`action: "cancel"`) — see detail below. Since Story 40.1 it is also the companion of `iris_test_coverage`: pass `coverageRunId` alone to poll or cancel a coverage run | `action`, `jobId?`, `runIndex?`, `coverageRunId?`, `namespace?` | destructive |
 
-> **Governance defaults:** `iris_test_status:poll` is classified `read` and is therefore **enabled by default**. `iris_test_status:cancel` is truthfully classified `write` and is **DEFAULT-DISABLED** (it deliberately does not use the `defaultEnabled` mechanism — stopping a run is not a recovery-of-last-resort action like `iris_production_control:clean`); enable it via `IRIS_GOVERNANCE`, e.g. `{"global":{"iris_test_status:cancel":true}}`.
+> **Governance defaults:** `iris_test_status:poll` is classified `read` and is therefore **enabled by default**. `iris_test_status:cancel` is truthfully classified `write` and is **DEFAULT-DISABLED** (it deliberately does not use the `defaultEnabled` mechanism — stopping a run is not a recovery-of-last-resort action like `iris_production_control:clean`); enable it via `IRIS_GOVERNANCE`, e.g. `{"global":{"iris_test_status:cancel":true}}`. The optional `coverageRunId` (Story 40.1) adds no action and changes neither key.
+
+### Test Coverage Tools
+
+| Tool | Description | Key Parameters | Annotations |
+|------|-------------|----------------|-------------|
+| `iris_test_coverage` | Run unit tests and measure which INT lines of the listed classes' routines they execute (Story 40.1): per-routine executable lines, covered lines, percent and line ranges, plus the classes that could not be measured — see detail below | `target`, `level`, `classes`, `timeout?`, `namespace?` | destructive |
+
+> **Governance defaults:** `iris_test_coverage` is truthfully classified `write` (it starts an instance-wide monitor session, runs test code and prunes its own older run records) and is **DEFAULT-DISABLED**; enable it via `IRIS_GOVERNANCE`, e.g. `{"global":{"iris_test_coverage":true}}`. It is outside the frozen governance baseline, uses no `defaultEnabled` marker, and is hidden under `IRIS_TOOLS_PRESET=core` (shown under `developer`); it and `iris_test_status` are a declared pair and stay co-visible.
 
 ---
 
@@ -1748,13 +1756,69 @@ only the queue entry — the results are preserved and returned:
 Atelier work-queue `DELETE` route operates on the job id).
 </details>
 
+<details>
+<summary><strong>iris_test_coverage</strong> -- Line coverage of a test run (Story 40.1)</summary>
+
+Runs the tests of `target` while an IRIS Line-by-Line session measures the INT routines of the listed `classes`
+(1 to 50 class names, no wildcards), then reports coverage per routine. **DEFAULT-DISABLED** (enable it with
+`IRIS_GOVERNANCE={"global":{"iris_test_coverage":true}}`); the wait budget is `timeout`, or `IRIS_TEST_TIMEOUT`,
+or 120 s (capped at 3600 s, with `timeoutCapped: true` when clamped).
+
+**Input:**
+```json
+{ "target": "MyApp.Tests.OrderTest", "level": "class", "classes": ["MyApp.Order", "MyApp.OrderLine"], "namespace": "MYAPP" }
+```
+**Result:** the test summary (`total`, `passed`, `failed`, `skipped`, `details`) with `status: "completed"`, the handles
+(`coverageRunId`, `runIndex`, `pid`, `runnerPid`), and `coverage`:
+```json
+{ "complete": true,
+  "classes": [ { "class": "MyApp.Order", "routines": [ { "routine": "MyApp.Order.1", "lines": 48, "executableLines": 28,
+    "coveredLines": 20, "percent": 71.43, "executableRanges": [[6,10],[12,12] /* ... */], "coveredRanges": [[6,7],[9,10] /* ... */] } ] } ],
+  "unmeasured": [ { "class": "MyApp.Missing", "reason": "not-compiled" } ] }
+```
+The text form is compact: `MyApp.Order.1: 20 of 28 executable INT lines covered (71.43%); uncovered 8, 16-18, 23, 27, 47-48`,
+then `Not measured: MyApp.Missing (not-compiled)`. `unmeasured` reasons are `not-compiled`, `no-routines` (the class compiled
+no routine, as for a class with no method) and `no-int-source` (a routine kept no INT source, as for a system class).
+
+**What is measured.** INT lines of the listed classes' routines (`<Class>.1` to `<Class>.N`; the `.0` method-generator
+routine is never measured), counted as executable by a fixed rule: a label's `methodimpl`/`public`/`private` keyword, `Try`,
+`Catch`, `Else` and `Do {` lines never count, `ElseIf` does. A method that compiles to no INT code has no line to cover.
+The line numbers are lines of the routine's INT source: read it with `iris_doc_get` on `<routine>.int` (for example
+`MyApp.Order.1.int`) or with `iris_routine_intermediate`.
+**Only the process that runs the tests is measured**, so code that runs in processes the tests start is not counted. The run
+refuses more than 200,000 measured INT lines.
+
+**One run at a time, instance-wide.** The monitor is one per instance, shared with every other user of it. While any
+Line-by-Line or PERFMON session is running, a call is refused with `isError: true` and `code: "MONITOR_BUSY"`, `owner:
+"suite"` (a coverage run is active: the refusal carries its `coverageRunId`, `pid`, `startedAt` and `namespace`) or
+`owner: "foreign"` (a session this suite did not start; it is never touched). Nothing is started in either case.
+
+**Budget expiry and re-attach.** A run that outlives the wait budget returns `isError: false`, `status: "running"` and its
+handles; do NOT re-submit. Call `iris_test_status` with `action: "poll"` and `coverageRunId` (the run's own namespace is
+used) for the same result once the run is finished, or `action: "cancel"` (default-disabled) to stop it. A cancelled or killed
+run reports the partial counts it reached with `coverage.complete: false`. A handle is kept for the 20 most recent runs and
+does not survive an instance restart. A run is bounded by a server-side limit of 3600 s.
+
+**A run that loses its counts or its release is never silent.** If the run's line counts could not be read, the run ends
+`status: "failed"` with `reason: "counts-unreadable"`, IRIS's text in `error` and `readError`, and the test summary. If its
+Line-by-Line session could not be stopped, it ends `status: "failed"` with `reason: "release-failed"`, the test summary and
+the coverage that was read; the suite-owned session stays active, and the next coverage run reclaims it. Both are
+`isError: true`.
+
+**Class names** are matched exactly as compiled, with the package and the letter case (`MyApp.Orders`); a name that is not
+compiled under that spelling is reported under `unmeasured` as `not-compiled`.
+
+**Earliest IRIS version verified:** IRIS 2026.2 build 221U (`%Monitor.System.LineByLine`, the `%UnitTest.Manager` hooks and
+`%Library.SyntaxColorReader`).
+</details>
+
 ---
 
 ## Namespace Scoping
 
 Most tools accept an optional `namespace` parameter to target a specific IRIS namespace. If omitted, the configured default namespace (`IRIS_NAMESPACE` environment variable) is used.
 
-**All 31 tools in this package accept the `namespace` parameter** except:
+**All 32 tools in this package accept the `namespace` parameter** except:
 - `iris_server_info` -- Server-level info, no namespace needed
 
 Tools that use the Atelier REST API (doc, compile, intelligence, server tools) resolve namespace via the Atelier URL path. Tools that use the custom REST endpoint (global, execute, SQL execute/query tools) pass namespace as a request parameter. `iris_env_diff`/`iris_env_promote` are the exception in spirit rather than mechanism: their `namespace` overrides BOTH the `source` and `target` profile's namespace identically (each side otherwise falls back to its own profile's configured default), rather than targeting one connection's namespace like every other tool here.

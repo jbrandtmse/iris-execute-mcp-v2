@@ -143,9 +143,9 @@ function expectUntouched(tree: string, before: { bytes: Buffer; mtimeMs: number 
 }
 
 describe("Story 39.6 QA: the tools/list snapshot CLI, three modes, on throwaway trees", () => {
-  it("the committed fixture is the generator's own output, so the trees below start from a real snapshot of 114 entries", () => {
+  it("the committed fixture is the generator's own output, so the trees below start from a real snapshot of 115 entries", () => {
     expect(committedText).toBe(serializeSnapshot(committed));
-    expect(committed.entryCount).toBe(114);
+    expect(committed.entryCount).toBe(115);
     expect(Object.keys(committed.servers[DEV] ?? {})).toContain(TOOL);
   });
 
@@ -192,10 +192,10 @@ describe("Story 39.6 QA: the tools/list snapshot CLI, three modes, on throwaway 
 
       expect(result.status, result.stderr).toBe(0);
       expect(result.stdout).toContain("gen-tools-list-snapshot --check (no-write)");
-      expect(result.stdout).toMatch(/committed entries:\s+114/);
-      expect(result.stdout).toMatch(/live entries:\s+114/);
+      expect(result.stdout).toMatch(/committed entries:\s+115/);
+      expect(result.stdout).toMatch(/live entries:\s+115/);
       expect(result.stdout).toMatch(/new tools \(allowed\):\s+0/);
-      expect(result.stdout).toContain("OK - every one of the 114 snapshot entries is still listed, unchanged.");
+      expect(result.stdout).toContain("OK - every one of the 115 snapshot entries is still listed, unchanged.");
       expectUntouched(tree, before, "--check on a match");
     });
 
@@ -211,7 +211,7 @@ describe("Story 39.6 QA: the tools/list snapshot CLI, three modes, on throwaway 
       const result = runCli(tree, ["--check"]);
 
       expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout).toMatch(/committed entries:\s+113/);
+      expect(result.stdout).toMatch(/committed entries:\s+114/);
       expect(result.stdout).toMatch(/new tools \(allowed\):\s+1/);
       expect(result.stdout).toContain(`+ ${DEV} ${TOOL}`);
       expectUntouched(tree, before, "--check with a new tool");
@@ -232,7 +232,7 @@ describe("Story 39.6 QA: the tools/list snapshot CLI, three modes, on throwaway 
       expect(result.stderr).toContain("1 problem(s)");
       expect(result.stderr).toContain(`${DEV} ${TOOL}.description differs at $.description`);
       expect(result.stderr).toContain("pnpm gen:tools-list-snapshot --force");
-      expect(result.stdout, "the counts still print").toMatch(/live entries:\s+114/);
+      expect(result.stdout, "the counts still print").toMatch(/live entries:\s+115/);
       expectUntouched(tree, before, "--check on drift");
     });
 
@@ -275,7 +275,7 @@ describe("Story 39.6 QA: the tools/list snapshot CLI, three modes, on throwaway 
       const result = runCli(tree, ["--check"], { IRIS_TOOLS_PRESET: "core", IRIS_TOOLS_DISABLE: `${TOOL},iris_doc_put` });
 
       expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout).toMatch(/live entries:\s+114/);
+      expect(result.stdout).toMatch(/live entries:\s+115/);
     });
   });
 
@@ -288,7 +288,7 @@ describe("Story 39.6 QA: the tools/list snapshot CLI, three modes, on throwaway 
           (servers[TOOL] as Entry).description = "drifted";
           servers[GHOST] = JSON.parse(JSON.stringify(servers[TOOL])) as Entry;
           delete (document.servers["iris-ops-mcp"] as Record<string, Entry>)["iris_health_check"];
-          // One entry added (the ghost) and one removed: the count stays 114.
+          // One entry added (the ghost) and one removed: the count stays 115.
           document.sdkVersion = "0.0.0";
         }),
       );
@@ -301,7 +301,7 @@ describe("Story 39.6 QA: the tools/list snapshot CLI, three modes, on throwaway 
       expect(result.stdout).toContain(`${DEV} ${GHOST} vanished`);
       expect(result.stdout, "a live tool the copy did not pin is named as newly pinned").toContain("Pinning 1 new tool:\n  + iris-ops-mcp iris_health_check\n");
       expect(result.stdout).toContain(`Generated ${snapshotOf(tree)}`);
-      expect(result.stdout).toContain("entryCount: 114");
+      expect(result.stdout).toContain("entryCount: 115");
 
       const text = readFileSync(snapshotOf(tree), "utf8");
       const written = JSON.parse(text) as SnapshotDocument;
@@ -309,7 +309,7 @@ describe("Story 39.6 QA: the tools/list snapshot CLI, three modes, on throwaway 
       expect(text, "the generator's own serialization").toBe(serializeSnapshot(written));
       expect(text.endsWith("}\n") && !text.endsWith("\n\n")).toBe(true);
       expect(/[^ -~\n]/.test(text), "printable ASCII and line ends only").toBe(false);
-      expect(written.entryCount).toBe(114);
+      expect(written.entryCount).toBe(115);
       expect(written.servers, "the live capture is the committed snapshot's entries on this tree").toEqual(committed.servers);
       expect(written.sdkVersion).toBe(committed.sdkVersion);
       expect(written.zodVersion).toBe(committed.zodVersion);
@@ -319,7 +319,7 @@ describe("Story 39.6 QA: the tools/list snapshot CLI, three modes, on throwaway 
 
       const check = runCli(tree, ["--check"]);
       expect(check.status, check.stderr).toBe(0);
-      expect(check.stdout).toContain("OK - every one of the 114 snapshot entries is still listed, unchanged.");
+      expect(check.stdout).toContain("OK - every one of the 115 snapshot entries is still listed, unchanged.");
     });
 
     it("writes the snapshot when the tree has none, without any re-pinning line", () => {

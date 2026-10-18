@@ -21,7 +21,7 @@
  *   2. Each owning server's per-server README.md lists exactly its own
  *      prompts (ops 2, dev 5, interop 4, admin 2), and `iris-data-mcp`'s
  *      README does not claim any registered prompt name.
- *   3. The root README's "109 tools" claim is still present — a literal
+ *   3. The root README's "110 tools" claim is still present — a literal
  *      guard against prompts silently inflating the documented tool count
  *      (Rule #31: prompts are a framework/protocol surface, not tools).
  *
@@ -115,7 +115,7 @@ describe("prompts documentation stays in sync with the registered prompt catalog
     }
   });
 
-  it("the root README still advertises 109 tools - prompts must not inflate the documented tool count (Rule #31)", () => {
+  it("the root README still advertises 110 tools - prompts must not inflate the documented tool count (Rule #31)", () => {
     // The literal count itself moves only when a real TOOL is added/removed
     // (e.g. Epic 27's iris_env_diff/iris_env_promote, dev 26 -> 28, suite
     // 102 -> 104; Story 36.2's iris_test_status, dev 28 -> 29, suite 104 ->
@@ -124,7 +124,7 @@ describe("prompts documentation stays in sync with the registered prompt catalog
     // never when a PROMPT is added/removed (Rule #31). This test's
     // job is the latter guarantee, not pinning the literal forever.
     const rootReadme = readFileSync(resolve(root, "README.md"), "utf-8");
-    expect(rootReadme).toContain("109 tools");
+    expect(rootReadme).toContain("110 tools");
   });
 
   // CR 27.4-1 (resolved Story 29.3 burn-down): `docs/migration-v1-v2.md` had
@@ -133,9 +133,9 @@ describe("prompts documentation stays in sync with the registered prompt catalog
   // surfaces, but the migration guide was NOT one of those 5 scoped
   // surfaces). This pins the fix and guards against the migration guide
   // silently drifting stale again alongside the root README's own count.
-  it("docs/migration-v1-v2.md advertises 109 tools, not the stale 100 (CR 27.4-1)", () => {
+  it("docs/migration-v1-v2.md advertises 110 tools, not the stale 100 (CR 27.4-1)", () => {
     const migrationGuide = readFileSync(resolve(root, "docs/migration-v1-v2.md"), "utf-8");
-    expect(migrationGuide).toContain("109 tools");
+    expect(migrationGuide).toContain("110 tools");
     expect(migrationGuide).not.toContain("100 tools");
   });
 

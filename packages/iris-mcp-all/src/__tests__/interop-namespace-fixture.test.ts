@@ -31,6 +31,7 @@ import {
   seedEventLogCounts,
   seedHeaders,
 } from "./interop-namespace-fixture.js";
+import { STORY401_DOCUMENTS, STORY401_IDS, seedCoverageFixture, setSlowTestHang } from "./coverage-fixture.js";
 
 type Session = Parameters<typeof removeInteropNamespace>[0];
 
@@ -69,6 +70,8 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
       await expect(seedCapstone(dev as never, name)).rejects.toThrow(/not a fixture namespace name/);
       await expect(seedBurnDown(dev as never, name)).rejects.toThrow(/not a fixture namespace name/);
       await expect(seedEventLogCounts(dev as never, name)).rejects.toThrow(/not a fixture namespace name/);
+      await expect(seedCoverageFixture(dev as never, name)).rejects.toThrow(/not a fixture namespace name/);
+      await expect(setSlowTestHang(dev as never, name, 3)).rejects.toThrow(/not a fixture namespace name/);
       await expect(createInteropNamespace(admin, dev, name, { interop: true, hsLib: true })).rejects.toThrow(
         /not a fixture namespace name/,
       );
@@ -192,6 +195,68 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
     );
     expect(STORY400_IDS).toEqual({ logs: "1,2,3,4,5,6,7,8,9,10", headers: "1,2,3" });
     expect(Object.keys(STORY400_IDS), "the key order is the order the seed writes its map in").toEqual(["logs", "headers"]);
+  });
+
+  it("lets EXECMCPTMP401<letter> through for the Story 40.1 coverage seed, which compiles the four Story401 classes in order and seeds with no arguments", async () => {
+    const seeder = stubSession(JSON.stringify(STORY401_IDS));
+    seeder.call.mockImplementation(async () => ({
+      isError: false,
+      content: [],
+      structuredContent: { returnValue: JSON.stringify(STORY401_IDS), success: true },
+    }));
+    await expect(seedCoverageFixture(seeder as never, "EXECMCPTMP401A")).resolves.toBeUndefined();
+    const compiled = seeder.call.mock.calls
+      .filter(([tool]) => tool === "iris_doc_compile")
+      .map(([, args]) => (args as { doc: string }).doc);
+    expect(compiled, "the classes compiled, in order").toEqual([
+      "Story401.Fixture.cls",
+      "Story401.FixtureTest.cls",
+      "Story401.SlowTest.cls",
+      "Story401.Seed.cls",
+    ]);
+    expect(STORY401_DOCUMENTS.map(([doc]) => doc)).toEqual(compiled);
+    expect(seeder.call).toHaveBeenCalledWith(
+      "iris_execute_classmethod",
+      expect.objectContaining({ namespace: "EXECMCPTMP401A", className: "Story401.Seed", methodName: "Seed", args: [] }),
+    );
+    expect(STORY401_IDS).toEqual({ hang: "3" });
+  });
+
+  it("setSlowTestHang sets the hang in the named coverage namespace and checks what it returns", async () => {
+    const dev = stubSession("20");
+    dev.call.mockImplementation(async () => ({ isError: false, content: [], structuredContent: { returnValue: "20" } }));
+    await expect(setSlowTestHang(dev as never, "EXECMCPTMP401A", 20)).resolves.toBeUndefined();
+    expect(dev.call).toHaveBeenCalledWith(
+      "iris_execute_classmethod",
+      expect.objectContaining({ namespace: "EXECMCPTMP401A", className: "Story401.Seed", methodName: "SetHang", args: [20] }),
+    );
+    await expect(setSlowTestHang(dev as never, "EXECMCPTMP401A", 5)).rejects.toThrow(/returned "20"/);
+  });
+
+  it("the Story 40.1 fixture methods exist, the foreign session and the termination helper keep their guards, and MayTerminate is asked immediately before Terminate", () => {
+    for (const method of [
+      "MonitorState", "StartForeign", "StopIfList", "TerminateCoverageProcess",
+      "StartDecoy", "DecoyRun", "DecoyAlive", "StopDecoy", "PointRunnerAtDecoy",
+      "HoldMonitorLock", "MonitorLockRun", "MonitorLockHeld", "ReleaseMonitorLock", "CorruptRoutines",
+      "SeedRunRecords", "RunRecordCount", "ClearFakeRuns",
+    ]) {
+      expect(FIXTURE_CLASS_SOURCE, method).toContain(`ClassMethod ${method}(`);
+    }
+    // The decoy is never terminated: it ends by itself when asked, and the run record is pointed only at it.
+    expect(FIXTURE_CLASS_SOURCE).toContain('If (pPid = "") || (pPid \'= $Get(^IRIS.TempStory391Fixture("decoy"))) { Quit "refused: "_pPid_" is not the decoy" }');
+    const decoyMethods = FIXTURE_CLASS_SOURCE.slice(FIXTURE_CLASS_SOURCE.indexOf("ClassMethod StartDecoy("), FIXTURE_CLASS_SOURCE.indexOf("ClassMethod TerminateCoverageProcess("));
+    expect(decoyMethods).not.toContain("Terminate(");
+    expect(FIXTURE_CLASS_SOURCE).toContain('Quit "refused: a monitor session is already active"');
+    expect(FIXTURE_CLASS_SOURCE).toContain("$ListBuild(\"ExecuteMCPv2.Temp.Story391Fixture.1\"), $ListBuild(\"RtnLine\"), $ListBuild($Job))");
+    expect(FIXTURE_CLASS_SOURCE).toMatch(
+      /MayTerminate\(tId, tRole, pPid\) \{ Quit "refused: MayTerminate is false for the "_tRole \}\n    Quit "terminated:"_\$System\.Process\.Terminate\(pPid\)/,
+    );
+    expect(FIXTURE_CLASS_SOURCE).toContain('If tRole = "" { Quit "refused: "_pPid_" is neither the supervisor nor the runner of the session node" }');
+  });
+
+  it("the Story 40.1 seed refuses any namespace but EXECMCPTMP401<letter>", async () => {
+    const { STORY401_SEED_SOURCE } = await import("./coverage-fixture.js");
+    expect(STORY401_SEED_SOURCE).toContain('If $NAMESPACE \'? 1"EXECMCPTMP401"1U');
   });
 
   it("the Story 40.0 seed refuses any namespace but EXECMCPTMP400<letter>, and one that holds headers or Event Log rows", () => {

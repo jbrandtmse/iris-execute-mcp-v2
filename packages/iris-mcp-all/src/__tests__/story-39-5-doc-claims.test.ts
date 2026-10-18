@@ -104,9 +104,9 @@ describe("Story 39.5: the CHANGELOG section and the changeset", () => {
     expect(section).not.toMatch(/(?:full|core|developer)\s*`?\s*\d+\/\d+\/\d+\/\d+\/\d+/);
   });
 
-  it("the Epic 30 roster line is the Story 39.5 one", () => {
+  it("the Epic 30 roster line names the third pair of Story 39.5, with the counts of Story 40.1 (which moved dev to 33 runtime tools)", () => {
     const changelog = squash(read("CHANGELOG.md"));
-    expect(changelog).toContain("tool counts, as of Story 39.5): `full` 32/27/25/22/8 (dev/admin/interop/ops/data), `core` 15/13/12/10/8, `developer` 32/11/25/10/8");
+    expect(changelog).toContain("tool counts, as of Story 40.1): `full` 33/27/25/22/8 (dev/admin/interop/ops/data), `core` 15/13/12/10/8, `developer` 33/11/25/10/8");
     expect(changelog).toContain("as of Story 39.5 `iris_message_search` / `iris_message_body` are a third");
   });
 
@@ -158,8 +158,8 @@ describe("Story 39.5: the root README names the tool, its default state and the 
   it("the pairs sentence names the third pair, and the roster tables carry the new counts", () => {
     const text = squash(readme);
     expect(text).toContain("`iris_message_search` / `iris_message_body` (Story 39.5: find messages, then read what they carry)");
-    expect(text).toContain("| **full** (default) | 31 | 26 | 24 | 21 | 7 | 109 | 114 |");
-    expect(text).toContain("| **developer** | 31 | 10 | 24 | 9 | 7 | 81 | 86 |");
+    expect(text).toContain("| **full** (default) | 32 | 26 | 24 | 21 | 7 | 110 | 115 |");
+    expect(text).toContain("| **developer** | 32 | 10 | 24 | 9 | 7 | 82 | 87 |");
     expect(text).toContain("| **core** | 14 | 12 | 11 | 9 | 7 | 53 | 58 |");
     expect(text).toContain("`developer` = the full 24-tool server.");
   });
@@ -184,10 +184,10 @@ describe("Story 39.5: the root README names the tool, its default state and the 
     expect(text).toContain("| `allow` | Today's output, unchanged; `iris_message_body` shows each body as stored. |");
   });
 
-  it("the payload table was re-measured at this story", () => {
-    const match = /Last re-measured at Story 39\.(\d+) \(`pnpm measure:tools-payload`/.exec(squash(readme));
+  it("the payload table was re-measured at this story or a later one (Story 40.1 re-measured it again)", () => {
+    const match = /Last re-measured at Story (39|40)\.(\d+) \(`pnpm measure:tools-payload`/.exec(squash(readme));
     expect(match, "the re-measured sentence").not.toBeNull();
-    expect(Number(match?.[1])).toBeGreaterThanOrEqual(5);
+    expect(match?.[1] === "40" || Number(match?.[2]) >= 5).toBe(true);
   });
 });
 
@@ -283,9 +283,9 @@ describe("Story 39.5: tool_support.md states the note, the API row and the scope
     expect(squash(toolSupport)).toContain("governs every body `iris_message_body` returns (the tool Story 39.5 adds)");
   });
 
-  it("counts the suite at 109 package tools and 114 advertised", () => {
+  it("counts the suite at 110 package tools and 115 advertised (Story 39.5 took it to 109 and 114; Story 40.1 added iris_test_coverage)", () => {
     expect(toolSupport).toContain("| `@iris-mcp/interop` | 0 | 24 | 0 | **24** | **25** |");
-    expect(toolSupport).toContain("| **Total** | **20** | **84** | **5** | **109** | **114** |");
+    expect(toolSupport).toContain("| **Total** | **20** | **85** | **5** | **110** | **115** |");
   });
 });
 

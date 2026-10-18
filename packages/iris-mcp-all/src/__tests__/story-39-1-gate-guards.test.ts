@@ -71,6 +71,7 @@ const GATES: readonly Gate[] = [
     story: "Story 40.0 QA",
     extraDriven: ["iris-ops-mcp"],
   },
+  { file: "story-40-1-coverage-live-gate.test.ts", tag: "story-40-1-coverage-live-gate", story: "Story 40.1" },
 ];
 
 /** The vitest entry point this package's tests run under. */

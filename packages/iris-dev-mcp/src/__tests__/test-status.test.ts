@@ -726,3 +726,127 @@ describe("iris_test_status:cancel", () => {
     expect(testStatusTool.defaultEnabled ?? []).not.toContain("cancel");
   });
 });
+
+// -- Story 40.1: the coverage handle (coverageRunId) --------------------------------
+
+describe("iris_test_status \u2014 coverageRunId (Story 40.1)", () => {
+  /** A completed coverage run record, as the coverage Status route returns it (live shape). */
+  const completedRun = {
+    coverageRunId: 9,
+    status: "completed",
+    namespace: "EXECMCPTMP401A",
+    target: "Story401.FixtureTest",
+    level: "class",
+    pid: 1122162,
+    runnerPid: 1122163,
+    startedAt: "2026-10-18T01:36:10.613Z",
+    finishedAt: "2026-10-18T01:36:11.657Z",
+    runIndex: 12,
+    releasedBy: "runner",
+    cancelRequested: false,
+    supervisorAlive: false,
+    runnerAlive: false,
+    unmeasured: [],
+    routines: [
+      {
+        class: "Story401.Fixture",
+        routine: "Story401.Fixture.1",
+        lines: 48,
+        hits: [[40, 1], [41, 1], [42, 3], [43, 3], [44, 1]],
+        skeleton: [[39, "L C:methodimpl {"], [40, "C:set"], [41, "C:for {"], [42, "C:set"], [44, "C:quit }"]],
+      },
+    ],
+  };
+
+  function coverageCtx(records: unknown[]) {
+    const http = createMockHttp();
+    let index = 0;
+    http.get.mockImplementation(async (path: string) => {
+      expect(path).toMatch(/\/dev\/test\/coverage\?id=9$/);
+      return envelope(records[Math.min(index++, records.length - 1)]);
+    });
+    http.post.mockImplementation(async (path: string, body?: unknown) => {
+      if (path.endsWith("/dev/test/coverage/cancel")) return envelope(records[0]);
+      const query = String((body as { query?: string })?.query ?? "");
+      if (query.includes("TestAssert")) return envelope({ content: [] });
+      return envelope({
+        content: [
+          { ClassName: "Story401.SlowTest", MethodName: "TestSlow", Status: 1, Duration: 0.5, ErrorAction: "", ErrorDescription: "" },
+        ],
+      });
+    });
+    return { http, ctx: createMockCtx(http as unknown as IrisHttpClient, 8) };
+  }
+
+  it("poll with coverageRunId alone returns the coverage result, reading the tests in the run's own namespace", async () => {
+    const { http, ctx } = coverageCtx([completedRun]);
+    const result = await testStatusTool.handler({ action: "poll", coverageRunId: "9" }, ctx);
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as Record<string, unknown>;
+    expect(structured).toMatchObject({ status: "completed", coverageRunId: 9, total: 1, passed: 1, namespace: "EXECMCPTMP401A" });
+    const coverage = structured.coverage as { complete: boolean; classes: Array<{ routines: Array<{ coveredLines: number; percent: number }> }> };
+    expect(coverage.complete).toBe(true);
+    expect(coverage.classes[0]?.routines[0]).toMatchObject({ coveredLines: 4, percent: 100 });
+    for (const call of http.post.mock.calls) expect(String(call[0])).toContain("/EXECMCPTMP401A/");
+    const sqlCalls = http.post.mock.calls.filter((call) => String(call[0]).includes("action/query"));
+    expect(sqlCalls.length).toBeGreaterThan(0);
+    for (const call of sqlCalls) {
+      expect((call[1] as { parameters?: unknown[] }).parameters, "keyed by the record's runIndex (12), not its coverageRunId (9)").toEqual([12]);
+    }
+  });
+
+  it("cancel with coverageRunId signals the run and reports the cancelled outcome it observed", async () => {
+    const cancelled = { ...completedRun, status: "cancelled", reason: "cancel", releasedBy: "supervisor" };
+    const { http, ctx } = coverageCtx([{ ...completedRun, status: "running", routines: undefined, finishedAt: null }, cancelled]);
+    const result = await testStatusTool.handler({ action: "cancel", coverageRunId: "9" }, ctx);
+    const cancels = http.post.mock.calls.filter((call) => String(call[0]).endsWith("/dev/test/coverage/cancel"));
+    expect(cancels).toHaveLength(1);
+    expect(cancels[0]?.[1]).toEqual({ id: 9 });
+    expect(result.isError).toBe(false);
+    expect(result.structuredContent).toMatchObject({ status: "cancelled", reason: "cancel" });
+  });
+
+  it("coverageRunId combined with jobId or runIndex is a validation error and nothing is sent to IRIS", async () => {
+    const { http, ctx } = coverageCtx([completedRun]);
+    for (const extra of [{ jobId: "31797604" }, { runIndex: 9 }]) {
+      const result = await testStatusTool.handler({ action: "poll", coverageRunId: "9", ...extra }, ctx);
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("coverageRunId cannot be combined with jobId or runIndex");
+    }
+    expect(http.get).not.toHaveBeenCalled();
+    expect(http.post).not.toHaveBeenCalled();
+  });
+
+  it("an unknown coverageRunId is a not-found error", async () => {
+    const { http, ctx } = coverageCtx([completedRun]);
+    http.get.mockRejectedValueOnce(
+      new IrisApiError(
+        400,
+        [{ error: "ERROR #5001: Coverage run 9 was not found. Only the 20 most recent runs are kept, and runs do not survive an instance restart." }],
+        "/api/executemcp/v2/dev/test/coverage?id=9",
+        "IRIS reported errors for GET.",
+      ),
+    );
+    const result = await testStatusTool.handler({ action: "poll", coverageRunId: "9" }, ctx);
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain("was not found");
+  });
+
+  it("a namespace that differs from the record's is an error naming both namespaces", async () => {
+    const { ctx } = coverageCtx([completedRun]);
+    const result = await testStatusTool.handler({ action: "poll", coverageRunId: "9", namespace: "HSCUSTOM" }, ctx);
+    expect(result.isError).toBe(true);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("EXECMCPTMP401A");
+    expect(text).toContain("HSCUSTOM");
+  });
+
+  it("the input schema takes an optional all-digits coverageRunId, and the keys and classification are unchanged", () => {
+    const schema = testStatusTool.inputSchema;
+    expect(schema.safeParse({ action: "poll", coverageRunId: "9" }).success).toBe(true);
+    expect(schema.safeParse({ action: "poll", coverageRunId: "abc" }).success).toBe(false);
+    expect(schema.safeParse({ action: "poll", coverageRunId: "9;1" }).success).toBe(false);
+    expect(testStatusTool.mutates).toEqual({ poll: "read", cancel: "write" });
+    expect(testStatusTool.description).toContain("coverageRunId (from iris_test_coverage)");
+  });
+});

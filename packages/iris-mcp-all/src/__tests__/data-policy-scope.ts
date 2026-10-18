@@ -14,7 +14,7 @@
  */
 
 /** The date the classification is exhaustive as of. */
-export const DATA_POLICY_SCOPE_DATE = "2026-10-16";
+export const DATA_POLICY_SCOPE_DATE = "2026-10-17";
 
 export type DataPolicyScope = "governed" | "residual" | "notApplicable";
 
@@ -85,6 +85,7 @@ export const DATA_POLICY_SCOPE_ROWS: ReadonlyArray<readonly [string, DataPolicyS
   ["iris_execute_classmethod", residual("Calls any class method, whose result and output are unrestricted. Restrict it with its governance key.")],
   ["iris_execute_tests", residual("Returns the text of unit-test results, which can quote data. Restrict it with its governance key.")],
   ["iris_test_status", residual("Returns the text of unit-test results, which can quote data. Restrict it with its governance key.")],
+  ["iris_test_coverage", residual("Returns the text of unit-test results, which can quote data. Restrict it with its governance key.")],
   ["iris_doc_get", residual("Returns the source of a document, which can hold message text. Restrict it with its governance key.")],
   ["iris_doc_search", residual("Returns matching lines of document source, which can hold message text. Restrict it with its governance key.")],
   ["iris_doc_convert", residual("Returns document source, which can hold message text. Restrict it with its governance key.")],
