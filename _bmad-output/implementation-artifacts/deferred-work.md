@@ -3236,3 +3236,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-40-0-epic-39-deferred-cleanup.md | severity: low | fix-risk: low | footprint: in-story
 - evidence: 40.0 cr 2026-10-17: story-40-0-qa-live-gate beforeAll vs interop-namespace-fixture.ts putCompileSeed; rawLogs in both 40.0 gates; inline QA seeds follow the 39.3/39.5 QA gates
 - 2026-10-18T00:04:04Z status=wontfix-accepted owner=40-0-epic-39-deferred-cleanup by=cr note=reopen_if=a third gate declares rawLogs or idsOf, or another file needs Story40Q.Seed
+
+### DW-595: Coverage Runner.ReadCounts reads the Line-by-Line counts right after RunTest with no readiness check, so a suite that finishes inside the monitor's start-up delay could read zero counts and report 0% as a complete result
+- source: _bmad-output/implementation-artifacts/spec-40-1-line-coverage-probe-and-engine.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 40.1 review 2026-10-17 (Blind), claim from reading only: ResultExecute returns zero rows without an error for an unknown routine, so a premature read would be silent; every gate run read correct counts; settle with a probe that starts a session and reads the same process's counts at once
+- 2026-10-18T04:15:06Z status=routed owner=40-2-coverage-reports-and-targets by=harvest note=probe first; 40.2 consumes the counts for its per-class/per-method summary
+
+### DW-596: The coverage Status route builds one nested pair per counted line and per command line of the whole run on every read of a terminal run; the 200,000-line cap and 20-run retention were sized from SyntaxColor/Result timings, not measured on the Status path
+- source: _bmad-output/implementation-artifacts/spec-40-1-line-coverage-probe-and-engine.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 40.1 review 2026-10-17 (Blind), claim from reading only (REST/Coverage.cls BuildRoutines); the gate fixture has 48 lines; settle by measuring Status time, response bytes and process memory for a ~200,000-line routine
+- 2026-10-18T04:15:06Z status=routed owner=40-2-coverage-reports-and-targets by=harvest note=measure before 40.2 builds its summary on the Status payload; Rule #38 output caps are not scan caps
+
+### DW-597: ExecuteMCPv2.REST.UnitTest:BuildTestSpec joins a package's classes as :A;:B, which RunTest reads as class A with a method named B, so POST /tests with level package runs no test
+- source: _bmad-output/implementation-artifacts/spec-40-1-line-coverage-probe-and-engine.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 40.1 verification-gap review, captured live 2026-10-17: a package coverage run of Story401 ran 0 tests until REST.Coverage.TestSpec rewrote the spec as :A;B (then 5 ran); no MCP tool calls POST /tests; UnitTestTest pins only the string shape
+- 2026-10-18T04:15:06Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 burn-down: fix BuildTestSpec at its source (then TestSpec's rewrite can go) and pin a package run

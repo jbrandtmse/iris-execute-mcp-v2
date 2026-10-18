@@ -5448,6 +5448,8 @@ This story ships per-routine INT-line coverage, with a complete response shape. 
 - **AC 40.2.2** — Summary: per class and per method, the coverage percentage and the uncovered line ranges, in `structuredContent` and in a compact text form.
 - **AC 40.2.3** — Cobertura XML is written to a caller-supplied local path, following the path conventions of `iris_doc_export`. The XML validates against the Cobertura DTD, and one known file is checked round-trip.
 - **AC 40.2.4** — A `minCoverage` target gives a pass/fail verdict per class and overall. The verdict never turns a completed test run into a tool error.
+- DW-595: the coverage runner reads the Line-by-Line counts right after `RunTest` with no readiness check, so a very fast suite could silently read zero counts. Probe first (start a session and read the same process's counts at once); add a readiness check if the probe shows the delay, otherwise close with evidence. (ledger; routed by harvest 2026-10-17)
+- DW-596: the coverage `Status` route returns one nested pair per counted line and per command line on every terminal read, and the 200,000-line cap was never measured on that path. Measure time, bytes and memory at the cap before building the summary on that payload, then fix or close with evidence. (ledger; routed by harvest 2026-10-17)
 
 ### Story 40.3: TestProduction Runs
 

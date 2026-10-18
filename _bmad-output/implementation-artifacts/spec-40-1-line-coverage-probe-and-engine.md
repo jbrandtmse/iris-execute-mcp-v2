@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-10-17'
 status: 'done'
 baseline_revision: '966f6ee65f72f01435007cf4018a512fabd0e5ff'
+baseline_commit: '966f6ee65f72f01435007cf4018a512fabd0e5ff'
 review_loop_iteration: 0
 followup_review_recommended: true
 context:
@@ -89,7 +90,7 @@ deferred:
   - **The reclaim identity proof (decision #46).** A new request process is not in the session's process list, so it cannot read the routine names. Its `pListMatches` is true only when all of these hold:
     - the `("session")` node exists;
     - both owner locks of that run are free;
-    - the active session's process list has exactly two entries, in order, each equal to the record's `runnerPid` and `pid` or `0` (an ended process);
+    - the active session's process list holds only the run's scoped processes that are still alive, in the order IRIS reports them (ascending PID), or `0` when none is alive: so one or two entries, each the record's `runnerPid`, its `pid` or `0`, with no repeat (lead amendment 2026-10-17, from the live capture in the resumed implement pass; with both owner locks free this reads `0`);
     - the active routine count equals the record's routine count.
 
     Otherwise the session is foreign: refused and left alone. The residual case is a foreign session whose listed processes have all ended, with the same routine count, started after the suite's own session was stopped by someone else. It is recorded under Design Notes: no live process can read such a session's data, so stopping it loses nothing anyone can read.
