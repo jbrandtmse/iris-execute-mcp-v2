@@ -104,3 +104,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-18T22:00:13Z	Story 40.3	lead_rereview	scope=rereview2_high_patch_IsClassName frozen_diff=cr-40-3/high3.diff verdict=CLEAN high=0 med=0 low=1 new_dw=DW-607 model=claude-opus-5-5
 2026-10-18T22:00:13Z	Story 40.3	ledger_adjudicated	owned=0 resolved=0 reowned=0 terminal=0 note=no_ledger_inbox model=claude-opus-5-5
 2026-10-18T22:00:13Z	Story 40.3	smoke_complete	method=armed_live_gates+built_process+os_class+instance_state result=pass iterations=1 defects_caught=0 checks=37+79+13 evidence=story-40-3-gate_20,story-40-3-qa_17,coverage_gates_79,ProductionGuardTest_13,no_scratch_ns_processes,InstalledNamespace_nodes_unset model=claude-opus-5-5
+2026-10-18T22:10:04Z	Story 40.3	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=870 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
