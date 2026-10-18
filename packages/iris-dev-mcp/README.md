@@ -1860,8 +1860,8 @@ and `coverage.source` is the total over the classes that have such a result. A c
 `#define` line, a continuation line of a multi-line statement, a lone `}` and a comment line are never executable. A method has
 a `reason` and no lines when it is a method generator (`generator`), is not written in ObjectScript (`not-objectscript`, a
 `Language` set on the method or on the class), or is not laid out where IRIS stores it (`layout`); a method that compiles to no
-INT code (a constant return, for example) has no lines either, and no `reason`. A method's lines are the lines of its own INT
-block, and a preprocessor line (`#dim`, `#define`, `#sqlcompile` and the like) is never a class line: the compiler maps a leading
+INT code (a constant return, for example) has no lines either, and no `reason`. A method's lines are the body lines that map
+after its own INT label line, and a preprocessor line (`#dim`, `#define`, `#sqlcompile` and the like) is never a class line: the compiler maps a leading
 one onto the code of the method before it or onto the method's own first statements. **A statement that spans several lines but compiles to one INT line is reported once, at the first line that maps
 to its code.** For a multi-line embedded SQL statement that is the line after the `&sql(` line (the `&sql(` line maps to a comment
 line of the INT routine, and the other continuation lines are not executable); a single-line `&sql(...)` statement is reported at

@@ -9,8 +9,9 @@
  *  - A class line is *executable* when its INT line's skeleton is executable under {@link isExecutableSkeleton}, and
  *    *covered* when that INT line's count is above 0.
  *  - A method's body lines map to INT lines inside the method's own INT block, which starts at its label line. A body line
- *    the compiler maps to an INT line at or before the label line (a `#dim` or `#define` line before the first statement) is
- *    mapped to the code of the method before it, and is not a class line.
+ *    the compiler maps to an INT line at or before the label line (the continuation line of a leading `#define ... ##continue`;
+ *    the IRIS side records a preprocessor line itself as 0) is mapped to the code of the method before it, and is not a class
+ *    line.
  *  - An INT line is reported once per method, at the first class line that maps to it. A statement that spans several lines
  *    but compiles to one INT line (a multi-line embedded SQL statement) is one class line: its first line maps to a comment
  *    line of the INT routine, so the class line is the first continuation line, the one after the `&sql(` line.

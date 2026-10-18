@@ -157,9 +157,11 @@ describe("the mapping rule (AC 40.2.1)", () => {
 /**
  * The raw data of a class with leading preprocessor lines and a multi-line embedded SQL statement, as `Job:SourceMap` and
  * `Job:Skeleton` returned it for a disposable class with the text of the QA gate's `Story402.QaDirectives` (IRIS 2026.2 build
- * 221U, 2026-10-18, Rule #36; the class lines are D+1+k for the declaration lines 5, 11 and 19). Beta's `#dim` and `#define`
- * lines map onto Alpha's INT lines 6 and 7; Gamma's `&sql(` line maps to the comment-only INT line 13 and its three
- * continuation lines to the one code line 18. Alpha and Gamma ran once, Beta did not.
+ * 221U, 2026-10-18, Rule #36; the class lines are D+1+k for the declaration lines 5, 11 and 19), from a `SourceMap` that still
+ * recorded what `INTLine` answers for a preprocessor line: Beta's `#dim` and `#define` lines map onto Alpha's INT lines 6 and
+ * 7. The current `SourceMap` records a preprocessor line as 0 (Beta `[0, 0, 9, 10]`, pinned live by QA-3a); a current record
+ * that still reaches the label-line bound is `CONTINUE_RUN`. Gamma's `&sql(` line maps to the comment-only INT line 13 and its
+ * three continuation lines to the one code line 18. Alpha and Gamma ran once, Beta did not.
  */
 const DIRECTIVES_CLASS = "Story402.QaDirectives";
 const DIRECTIVES_ROUTINE = "Story402.QaDirectives.1";
@@ -186,6 +188,36 @@ const DIRECTIVES_RUN = runWith({
         { name: "Alpha", line: 5, routine: DIRECTIVES_ROUTINE, intLines: [6, 7], labelLine: 5 },
         { name: "Beta", line: 11, routine: DIRECTIVES_ROUTINE, intLines: [6, 7, 9, 10], labelLine: 8 },
         { name: "Gamma", line: 19, routine: DIRECTIVES_ROUTINE, intLines: [12, 13, 18, 18, 18, 19], labelLine: 11 },
+      ],
+    },
+  ],
+});
+
+/**
+ * The raw data `Job:SourceMap` and `Job:Skeleton` returned for a disposable class whose second method opens with a
+ * `#define Two(%a) %a ##continue` line and its continuation line `+1` (`ExecuteMCPv2.Temp.CR402Bound`, IRIS 2026.2 build
+ * 221U, 2026-10-18, compiled `ck`; declaration lines 4 and 10). The `#define` line is recorded as 0, but the continuation line
+ * is no preprocessor line, and the compiler maps it onto INT 7, Alpha's `Quit tA }`, before Beta's label line 8. The counts
+ * are added here: Alpha ran once, Beta did not.
+ */
+const CONTINUE_CLASS = "ExecuteMCPv2.Temp.CR402Bound";
+const CONTINUE_RUN = runWith({
+  unmeasured: [],
+  routines: [
+    {
+      class: CONTINUE_CLASS,
+      routine: `${CONTINUE_CLASS}.1`,
+      lines: 10,
+      hits: [[6, 1], [7, 1]],
+      skeleton: [[5, "L C:methodimpl {"], [6, "C:set"], [7, "C:quit }"], [8, "L C:methodimpl {"], [9, "C:set"], [10, "C:quit }"]],
+    },
+  ],
+  sources: [
+    {
+      class: CONTINUE_CLASS,
+      methods: [
+        { name: "Alpha", line: 4, routine: `${CONTINUE_CLASS}.1`, intLines: [6, 7], labelLine: 5 },
+        { name: "Beta", line: 10, routine: `${CONTINUE_CLASS}.1`, intLines: [0, 7, 9, 10], labelLine: 8 },
       ],
     },
   ],
@@ -220,6 +252,14 @@ describe("the INT block of a method and one class line per statement (AC 40.2.1)
     });
     const alpha = summary?.methods.find((method) => method.method === "Alpha");
     expect(alpha).toEqual({ method: "Alpha", line: 5, executableLines: 2, coveredLines: 2, percent: 100, uncoveredRanges: [] });
+  });
+
+  it("the continuation line of a leading #define, which the compiler maps onto the method before it, is no class line (a current record)", () => {
+    const summary = summaries(CONTINUE_RUN).get(CONTINUE_CLASS);
+    const beta = hasSourceResult(summary) ? summary.methods.find((method) => method.method === "Beta") : undefined;
+    expect(beta, "Beta's `+1` line (INT 7, Alpha's) is dropped; its statements 14 and 15 remain, and it never ran").toEqual({
+      method: "Beta", line: 10, executableLines: 2, coveredLines: 0, percent: 0, uncoveredRanges: [[14, 15]],
+    });
   });
 
   it("a record without label lines (an older IRIS-side class) keeps the unbounded mapping: Beta then reads Alpha's counts", () => {
@@ -318,7 +358,7 @@ describe("a class whose line map is gone is not-up-to-date (AC 40.2.1, AC 40.2.4
     );
     expect(both.verdict?.overall, "the other class passes, the stale one was never measured").toBe("fail");
     expect(both.verdict?.classes.map((entry) => [entry.class, entry.verdict])).toEqual([[DIRECTIVES_CLASS, "pass"], ["Story402.QaStale", "fail"]]);
-    expect(both.source, "the total is over the classes that have a result").toEqual({ executableLines: 7, coveredLines: 5, percent: 71.43 });
+    expect(both.source, "the total is the other class's own 7 executable and 5 covered lines").toEqual({ executableLines: 7, coveredLines: 5, percent: 71.43 });
   });
 
   it("is not a class whose methods compile to no INT code: those have no label line, and stay a class with no executable line", () => {

@@ -339,6 +339,58 @@ Code review (bmad-code-review, 2026-10-18, review tier full-opus; Blind Hunter, 
 - `false` AC-2's `isError:false` and AC-7's "no `reclaimed`" clauses have no mutation of their own. Rule 19 asks for one mutation per AC, and both ACs have one.
 - `false` DW-595, DW-596 and DW-598 are still `routed`. Their disposition is the lead's `ledger_adjudicated` gate after `cr_complete` (Rule 17 (2)), not a code finding.
 
+**Rework re-review (iteration 1, 2026-10-18).**
+- **Review setup.** Tier full-opus. Four layers delivered: Blind Hunter, Edge Case Hunter, Verification Gap and Acceptance Auditor. They read the frozen diff `4d09b1f..HEAD`, plus a clean tree.
+- **Counts.** 28 raw rows were grouped into 6 entries: high 0, med 2, low 4. The rest were rejected below.
+- **Probes.** Live probes ran in HSCUSTOM on disposable `ExecuteMCPv2.Temp.CR402*` classes, compiled `ck`, then deleted: `iris_doc_list` for `CR402` and `ExecuteMCPv2.Temp.` returned `[]`. A helper called `Job:SourceMap` and `Job:Skeleton`, and the built dev dist read the result. No Line-by-Line session was started. Afterwards `MonitorActive` was 0 and `("session")` was unset.
+
+Checklist of the previous round:
+- (1) **HIGH, stale line map: fixed.**
+  - The stale map is detected, fails the verdict and is left out of the export. A class with no INT code stays `notApplicable`.
+  - DW-601 below is a new false positive of the same rule.
+- (2) **MED, leading preprocessor lines: fixed.** This includes the five-`#dim` case (QA-3d), and `##;` lines (they leave blank INT lines and map 1:1). DW-602 below is a regression of the IRIS-side rule.
+- (3) **MED, multi-line `&sql(`: fixed.** The statement is reported once, at the documented line after `&sql(` (live: `[10, 14, 14, 15]`, reported at the `INTO` line).
+- (4) **LOW, class-level `Language`: fixed** (`$$$comMemberKeyGet`).
+- (5) **LOW, the description sentence: fixed.** The snapshot and payload rows match the built dist.
+
+Lead questions:
+- **The once-per-INT-line fold applied to every construct is correct.** Live: `_` continuation `[12,13,14]`, a multi-line argument list `[36..39]`, `If {...} Else {...}` on one line, an `If` block, block and line comments, and two statements over two lines (`2) Set tY = 3` is its own INT line 42 and is reported). All of these map 1:1, and their continuation INT lines are not executable. The fold acts only where several class lines share one INT line, which has one count: multi-line `&sql(`. So no separate executable line is hidden. A multi-line macro argument list does not compile (MPP5612). The lead still owns confirming this call from the Auto Run Result.
+- **The 40.1 per-routine INT fields are unchanged.** `BuildRoutines`, `Runner.cls`, `Skeleton` and the per-routine TypeScript are not in the diff.
+- **The 31-character case is not a real path on the shared instance.** 11 HSCUSTOM classes have two methods sharing a 31-character prefix, and every one also has 7 or more methods that do not. If it were ever reached, the class would read as 0 lines (`notApplicable`, outside the overall). A multi-class Cobertura file would show it as `<class lines-valid=0 line-rate=1>`, a false 100% for that class element. That is `wontfix-theoretical` here, and the fix for DW-601 (exact labels from `$$$cMETHrtnlabel`) closes it.
+
+Findings:
+- [x] [Review][Defer] **(MED) A fresh class whose methods with INT code have only `#;`/`#dim` bodies reads `not-up-to-date`.** [`src/ExecuteMCPv2/Coverage/Job.cls:793`, `packages/iris-dev-mcp/src/tools/coverage-report.ts:97`]
+  - Live: the freshly compiled `CR402Stub` (`IsUpToDate` 1, `$Data(^rMAP)` 10) gives `OnHook [0]`/label 7 and `Declared [0]`/label 5. That produces `{reason:"not-up-to-date"}` and a verdict of FAIL, which a forced compile cannot clear.
+  - A documentation-only edit gives the same shape with `^rMAP` 0, so only an IRIS-side raw flag can tell them apart.
+  - Fail-safe direction: a false FAIL, never a false PASS.
+  - Deferred: DW-601 `routed owner=40-4-test-depth-docs-prompt-and-capstone` (fix-risk med: an IRIS-side raw field, a bootstrap move and re-run live gates; a re-review never re-opens on a MED).
+- [x] [Review][Defer] **(MED) A `#dim` with an initial value is dropped.** [`src/ExecuteMCPv2/Coverage/Job.cls:759-793`, `packages/iris-dev-mcp/README.md:1864`, `CHANGELOG.md:24`]
+  - Live: `#dim tSC As %Status = $$$OK` compiles to INT `Set tSC=1` (`C:set`). `IsDirective` records it as 0, so the statement is never a class line and its INT line counts as generated.
+  - This breaks the AC-1 executable rule for a common idiom, and it can move a percent across a minimum. The README and CHANGELOG state it as "never a class line".
+  - Deferred: DW-602 `routed owner=40-4-test-depth-docs-prompt-and-capstone` (fix-risk med: IRIS side and bootstrap).
+- [x] [Review][Patch] **(LOW) The label-line bound's evidence came from before the IRIS-side preprocessor rule.** The `DIRECTIVES_RUN` comment claimed a current capture, and the bound's `mutation:` line claimed live rows that no longer see it.
+  - The provenance comment is corrected.
+  - A live-captured current-record case was added (`CONTINUE_RUN`: a `##continue` continuation line that maps onto the method before it).
+  - The mutation was re-run, 5 tests went red, the source was reverted byte-identical, and the line was corrected under Verification. [`packages/iris-dev-mcp/src/__tests__/coverage-report.test.ts`]
+- [x] [Review][Patch] **(LOW) A stale QA-gate comment ("the two constructs the mapping gets wrong") now says what the fixture holds.** [`packages/iris-mcp-all/src/__tests__/story-40-2-qa-live-gate.test.ts:239`]
+- [x] [Review][Patch] **(LOW) Two "not part of the total" assertion messages claimed a property they cannot observe.** A stale class adds no line either way. The messages now say what is pinned. [`story-40-2-qa-live-gate.test.ts` QA-15b, `coverage-report.test.ts` stale multi-class case]
+- [x] [Review][Patch] **(LOW) "A method's lines are the lines of its own INT block" overstated the rule.** The code bounds a method's lines only from below. Both docs and the source comment now say "the body lines that map after its own INT label line". [`packages/iris-dev-mcp/README.md`, `CHANGELOG.md`, `packages/iris-dev-mcp/src/tools/coverage-report.ts` header]
+
+Rejected (re-review):
+- `false` A leading `##;` comment line takes the first statement's INT line. Live: `##;` lines become blank INT lines and map 1:1, as `[19..23]` with the `Set` at 24.
+- `false` A no-op reload removes the line map. Live: an identical document PUT is not saved (`ts` unchanged) and `^rMAP` stays.
+- `false` `IsDirective` breaks AD-12. It decides which INT line a body line belongs to, raw mapping like the spec's return-type filter. Executability is still judged in TypeScript. Its inaccuracy is DW-602.
+- `false` The generalized fold goes beyond decision #54 and hides lines. See the probe above. The contract-wording change would edit the spec, and the lead confirms the call.
+- `false` The tool description drops the "compiles to one INT line" qualifier. Its sentence ("a statement that spans several lines is one line, the first that maps to its code") holds for every probed construct.
+- `false` The Auto Run Result was overwritten. Rule 14: a rework pass's Auto Run Result covers only that pass.
+- `low` Labels are guessed instead of read from `$$$cMETHrtnlabel`. A label inside an earlier method can only lower the bound, which is harmless. A collision with a compiler-generated label needs a name over 31 characters. The redesign is noted on DW-601.
+- `low` A `#define ... ##continue` inside a body. Its continuation line is dropped by the bound, and four or more such leading lines are contrived.
+- `low` The class text line carries the bare `not-up-to-date` reason, with no forced-compile hint. The tool description states the remedy, and the reason is decision #55's.
+- `low` A blank line straight after `&sql(` is not probed. That is rare.
+- `low` A text rule for `&sql(` was dismissed. The fallback is pre-approved, and the rule would be another IRIS-side heuristic plus a bootstrap move.
+- `low` The spec:911 bootstrap paragraph is out of date. It is the history of that pass, and the next section records the final value (an edit to the spec under review).
+- Previously adjudicated: the hermeticity of `TestLabelLine`, and the no-label-line back-compatibility pins.
+
 ## Spec Change Log
 
 - **2026-10-18, lead spec gate.** Decisions #50, #51 and #53 were taken as recommended. Decision #52 takes alternative (a) instead of vendoring the DTD: `cobertura-dtd.mjs` encodes the pinned copy's content model, and no third-party file or text is committed (Tasks 11, Never, matrix row 9, Verification). Spine AD-16 now names the companion's `export` action as the coverage file write (Rule 20).
@@ -913,7 +965,7 @@ ClassMethod TwoOnOne(pN As %Integer) As %Integer
 **Mutations (Rule 19).** Each was applied, observed red, reverted so the touched source was byte-identical (`shasum -a 256` against hashes recorded before the first mutation, `cmp` against a backup, `git status --short` and `git diff --stat` unchanged), and the touched class reloaded from `src/` or the dev dist rebuilt.
 - mutation: `lineMapIsGone` returns false (`return hasCode && false`) -> `coverage-report.test.ts` (the two stale-class cases) and `test-status-export.test.ts` ("INT labels but no mapped body line") red; on the rebuilt dev dist the live QA gate rows QA-15a and QA-15b red (`expected { executableLines: +0, ... } to deeply equal { reason: 'not-up-to-date' }`).
 - mutation: `LabelLine` returns 0, so the IRIS side records no label line (Job.cls loaded into HSCUSTOM, restored from `src/` and reloaded) -> `CoverageSourceTest:TestLabelLine`, `:TestSourceMapOfTheFixture` and `:TestSourceMapOfAClassWhoseLineMapIsGone` red (3 of 13); live QA-3a and QA-15a red (the raw record has no `labelLine`, so the stale class reads as a class with no executable line).
-- mutation: the label-line bound `intLine <= labelLine` weakened to `intLine <= 0` in `mapClass` -> `coverage-report.test.ts` (the bound case, the multi-line SQL case and the multi-class total) red; live QA-3a, QA-3b and QA-3c red (Beta reads `[[13, 16]]`).
+- mutation: the label-line bound `intLine <= labelLine` weakened to `intLine <= 0` in `mapClass` -> `coverage-report.test.ts` red, 5 tests: the bound case, the current-record `##continue` case ("the continuation line of a leading #define ..."), the multi-line SQL case, the generated-line case and the multi-class total. Re-run at the code review re-review (2026-10-18, final tree, `shasum -a 256 -c` OK after the revert). The live QA rows no longer observe the bound, because the IRIS side now records a preprocessor line as 0 (QA-3a pins Beta `[0, 0, 9, 10]`). A current record still reaches it: a `##continue` continuation line maps onto the method before it (live probe `ExecuteMCPv2.Temp.CR402Bound`: Beta `[0, 7, 9, 10]`, label 8, INT 7 = Alpha's `Quit`).
 - mutation: the once-per-INT-line fold removed (`|| reported.has(intLine)` deleted) -> `coverage-report.test.ts` (4 tests) red; live QA-3a and QA-3c red (the executable lines read `[7, 8, 15, 16, 21, 23, 24, 25, 26]`).
 - mutation: the fold's set shared by the whole class instead of one method -> `coverage-report.test.ts` "an INT line that two different methods each map is reported by each" and the no-label-lines case red, and only those two.
 - mutation: `MapMethod` reads `$$$defMemberKeyGet` for `Language` instead of `$$$comMemberKeyGet` (Job.cls loaded, restored and reloaded) -> `CoverageSourceTest:TestSourceMapLanguageDefault` red (it takes the class's python; and has no body map).

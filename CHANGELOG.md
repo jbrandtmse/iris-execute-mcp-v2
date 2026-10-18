@@ -20,8 +20,8 @@ and `REST/Coverage.cls` changed (the bootstrapped service stays at 35 classes).
   (`%Studio.Debugger:INTLine` per method body line), so a `#define` line, a continuation line of a multi-line statement, a lone
   `}` and a comment line are never executable; a method generator, a method not written in ObjectScript (a `Language` set on the
   method or on the class) and a method whose layout is not where IRIS stores it carry a `reason` and no lines; a method that
-  compiles to no INT code (a constant return) has no lines and no `reason`. A method's lines are the lines
-  of its own INT block, and a preprocessor line (`#dim`, `#define`, `#sqlcompile` and the like) is never a class line. **A statement that spans
+  compiles to no INT code (a constant return) has no lines and no `reason`. A method's lines are the body
+  lines that map after its own INT label line, and a preprocessor line (`#dim`, `#define`, `#sqlcompile` and the like) is never a class line. **A statement that spans
   several lines but compiles to one INT line is reported once, at the first line that maps to its code: for a multi-line embedded
   SQL statement, the line after the `&sql(` line.** A class without a class-source result has `source.reason`
   `not-up-to-date` (its definition changed after it was compiled, or its compiled line map is gone: a documentation-only edit

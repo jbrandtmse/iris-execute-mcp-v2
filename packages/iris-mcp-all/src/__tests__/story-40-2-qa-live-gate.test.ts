@@ -236,7 +236,7 @@ ClassMethod Never(pN As %Integer) As %Integer
 }
 `;
 
-/** The two constructs the mapping gets wrong: a preprocessor line before a method's first statement, and an embedded SQL statement over several lines. */
+/** The two constructs `INTLine` maps off the statement: a preprocessor line before a method's first statement, and an embedded SQL statement over several lines. */
 const DIRECTIVES_SOURCE = String.raw`/// Synthetic directive coverage fixture (Story 40.2 QA): leading preprocessor lines and an embedded SQL statement over several lines.
 Class Story402.QaDirectives Extends %RegisteredObject
 {
@@ -1905,6 +1905,6 @@ describe("Story 40.2 QA: a class documented after it was compiled has no line ma
   it("QA-15b: a class whose body lines cannot be mapped is reported with a reason, not as a class with no executable line", async (testCtx) => {
     if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     expect(after.coverage?.classes[0]?.source).toHaveProperty("reason", "not-up-to-date");
-    expect(after.coverage?.source, "and it is not part of the total").toEqual({ executableLines: 0, coveredLines: 0, percent: null });
+    expect(after.coverage?.source, "the run's total has no line: its one class has no result").toEqual({ executableLines: 0, coveredLines: 0, percent: null });
   }, 300000);
 });
