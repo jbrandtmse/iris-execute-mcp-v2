@@ -56,7 +56,7 @@ const CHANGELOG_TITLE = /^## \[Pre-release \u2014 2026-10-17\] \u2014 Story 40\.
  * newest documented move to the committed embed, so a later move leaves this file true.
  */
 const BOOTSTRAP_FROM = "08b8adeaadc6";
-const BOOTSTRAP_TO = "4dd596fa2a0c";
+const BOOTSTRAP_TO = "14a4cba6504a";
 
 const ENABLE_RECIPE = '{"global":{"iris_test_coverage":true}}';
 

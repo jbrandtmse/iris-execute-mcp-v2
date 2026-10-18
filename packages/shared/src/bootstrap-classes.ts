@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "4dd596fa2a0c";
+export const BOOTSTRAP_VERSION = "14a4cba6504a";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "4dd596fa2a0c";
+Parameter BOOTSTRAPVERSION = "14a4cba6504a";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -3588,7 +3588,8 @@ ClassMethod Pct(pNum As %Integer, pDen As %Integer) As %Numeric [ Internal ]
 /// <method>ProofFailure</method> shows that the active session is the run's own, and the two releasers never
 /// act at once: both take the run's release lock and the monitor's own lock
 /// (<method>TakeReleaseLocks</method>) and hold them from the proof through <code>Stop</code>. A lock that cannot
-/// be taken in time stops nothing, and the run ends <code>release-failed</code>.</p>
+/// be taken in time stops nothing: when the runner cannot take it, the supervisor releases the session afterwards, and
+/// when the supervisor cannot, the run ends <code>release-failed</code>.</p>
 /// <p><b>The run record</b> lives in <code>^IRIS.TempExecuteMCPv2Coverage</code>, which is IRISTEMP:
 /// instance-wide, like the monitor, and not journaled. The 20 most recent runs are kept and a record
 /// does not survive an instance restart.</p>
@@ -3639,9 +3640,11 @@ ClassMethod MonitorActive(Output pPids As %String) As %Boolean
 /// means it: the list itself when the session is scoped to listed processes (mode 2, as
 /// <code>%Monitor.System.LineByLine:Start</code> sets it for a non-empty process list), and empty otherwise. In
 /// all-processes mode (mode 1) every process is monitored, so the list is not a scope (probe, IRIS 2026.2 build 221U:
-/// it read the starting process and then other processes). A paused session (mode 0) was not probed: from the source
-/// of <code>%Monitor.System.LineByLine:Pause</code> it leaves the list of the selected processes in place. Neither
-/// says anything about the active session, so neither is trusted.
+/// it read the starting process and then other processes). A paused session (mode 0) was not probed:
+/// <code>%Monitor.System.LineByLine:Pause</code> saves a copy of a scoped session's list in
+/// <code>^|"%SYS"|SYS("MONITOR","PAUSE","SELECTED")</code> before it sets mode 0, and <code>Resume</code> registers
+/// those processes again, so what the list reads in mode 0 is not relied on. Neither mode's list says anything about the
+/// active session, so neither is trusted.
 ClassMethod ScopedPids(pMode As %Integer, pPids As %String) As %String
 {
     If pMode '= 2 Quit ""
@@ -3749,9 +3752,12 @@ ClassMethod NodeDisproved(pSession As %List, pPids As %String, pRoutineCount As 
 
 /// Take the locks under which one releaser at a time proves a session its own and stops it: the run's release lock
 /// (<code>("owner",id,"release")</code>), then the monitor's own lock, <code>^%SYS("MON-HOLD")</code>, which
-/// <code>%Monitor.System.LineByLine</code> takes in <code>Start</code> and <code>Stop</code>. Held from the identity
-/// check through <code>Stop</code>, they leave no gap in which another releaser or another project's monitor call
-/// can act. Each is taken with a timeout. Returns 1 when both are held; otherwise it holds neither, returns 0, and
+/// <code>%Monitor.System.LineByLine</code> takes in <code>Start</code>, <code>Stop</code>, <code>Pause</code> and
+/// <code>Resume</code>, each of which refuses when it cannot take it within 3 seconds. Held from the identity check
+/// through <code>Stop</code>, they leave no gap in which the other releaser, or another caller of those four methods,
+/// can act. They do not exclude <code>%Monitor.System.LineByLine:Clear</code> or the <code>^PROFILE</code> utility,
+/// which take <code>^|"%SYS"|SYS("MON-HOLD")</code> instead, nor <code>AddRoutine</code>, which goes on without the
+/// lock after 3 seconds. Each is taken with a timeout. Returns 1 when both are held; otherwise it holds neither, returns 0, and
 /// <var>pWhy</var> says which one timed out. The caller releases both with <method>DropReleaseLocks</method>.
 ClassMethod TakeReleaseLocks(pId As %Integer, Output pWhy As %String, pReleaseSeconds As %Integer = "", pMonitorSeconds As %Integer = "") As %Boolean
 {
@@ -4478,7 +4484,8 @@ ClassMethod Run(pId As %Integer)
 /// touched; the supervisor's <method>ExecuteMCPv2.Coverage.Job:Finish</method> reports what it finds.
 /// <p>The proof, the read and the <code>Stop</code> run under the release locks
 /// (<method>ExecuteMCPv2.Coverage.Job:TakeReleaseLocks</method>), so the supervisor cannot release at the same time and
-/// no other <code>Start</code> or <code>Stop</code> lands in between. Under them, a session already released or counts
+/// no other <code>Start</code> or <code>Stop</code> of <class>%Monitor.System.LineByLine</class> lands in between (that
+/// method says what the monitor's lock does not exclude). Under them, a session already released or counts
 /// already read are not done again. A lock that cannot be taken in time stops nothing, and is recorded as
 /// <code>releaseError</code>. When the counts cannot be read, the IRIS text is recorded as <code>readError</code> and the
 /// counts are never marked as read; the session is stopped all the same.</p>
@@ -19640,7 +19647,8 @@ ClassMethod Launch(ByRef pParams, pNamespace As %String, pRoutines As %List, pUn
         If tDecision = "clear-busy-foreign" {
             ; The ownership record is cleared only when the active session's own process list disproves it. A session of
             ; all processes or a paused one has no list of its own, so the record is kept: a suite session paused by
-            ; someone else stays reclaimable, and clear-and-proceed removes the record once the monitor is idle.
+            ; someone else is refused as foreign while it is paused and is reclaimable once it is resumed, and
+            ; clear-and-proceed removes the record once the monitor is idle.
             If ##class(ExecuteMCPv2.Coverage.Job).SessionDisproved(tSession) Kill ^IRIS.TempExecuteMCPv2Coverage("session")
             Set pResult = ..BusyResult("foreign", "")
             Quit

@@ -69,7 +69,8 @@ ClassMethod Run(pId As %Integer)
 /// touched; the supervisor's <method>ExecuteMCPv2.Coverage.Job:Finish</method> reports what it finds.
 /// <p>The proof, the read and the <code>Stop</code> run under the release locks
 /// (<method>ExecuteMCPv2.Coverage.Job:TakeReleaseLocks</method>), so the supervisor cannot release at the same time and
-/// no other <code>Start</code> or <code>Stop</code> lands in between. Under them, a session already released or counts
+/// no other <code>Start</code> or <code>Stop</code> of <class>%Monitor.System.LineByLine</class> lands in between (that
+/// method says what the monitor's lock does not exclude). Under them, a session already released or counts
 /// already read are not done again. A lock that cannot be taken in time stops nothing, and is recorded as
 /// <code>releaseError</code>. When the counts cannot be read, the IRIS text is recorded as <code>readError</code> and the
 /// counts are never marked as read; the session is stopped all the same.</p>

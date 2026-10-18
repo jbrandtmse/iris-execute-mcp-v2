@@ -1,7 +1,9 @@
 /// Unit tests for the release proofs and the release locks of <class>ExecuteMCPv2.Coverage.Job</class> (Story 40.1).
 /// <p>No test here starts a Line-by-Line session or terminates a process. The proofs are pure functions of the state
-/// they are given. The lock tests hold the fake run's release lock, or the monitor's own lock, for a second or two,
-/// from a helper job, and release it again.</p>
+/// they are given. The lock tests hold the fake run's release lock, or the monitor's own lock, for at most 2.5 seconds,
+/// below the 3 seconds other projects' Line-by-Line calls wait for the monitor's lock: from a helper job that lets go by
+/// itself after 2.5 seconds, or in the test process while a probe job (1 second to start, 1.5 seconds to answer)
+/// checks it. Every test lets go of what it took, and the test process lets go of both locks after each test.</p>
 Class ExecuteMCPv2.Tests.CoverageReleaseTest Extends %UnitTest.TestCase
 {
 
@@ -10,6 +12,7 @@ Parameter FAKERUN = 990000002;
 
 Method OnAfterOneTest(testname As %String) As %Status
 {
+    Do ##class(ExecuteMCPv2.Coverage.Job).DropReleaseLocks(..#FAKERUN)
     Kill ^IRIS.TempExecuteMCPv2Coverage("fakeRelease")
     Quit $$$OK
 }
@@ -80,7 +83,7 @@ Method TestAllNamed() As %Status
 
 /// A job: hold the lock <var>pWhich</var> (<code>release</code>, the fake run's release lock, or <code>monitor</code>,
 /// <code>^%SYS("MON-HOLD")</code>, which other projects' Line-by-Line calls wait 3 seconds for) until the stop flag
-/// is set, for 3 seconds at most.
+/// is set, for 2.5 seconds at most.
 ClassMethod HoldLock(pWhich As %String)
 {
     If pWhich = "release" {
@@ -90,7 +93,7 @@ ClassMethod HoldLock(pWhich As %String)
     }
     If '$Test Quit
     Set ^IRIS.TempExecuteMCPv2Coverage("fakeRelease", "held") = 1
-    For tI = 1:1:30 {
+    For tI = 1:1:25 {
         If $Get(^IRIS.TempExecuteMCPv2Coverage("fakeRelease", "stop")) Quit
         Hang 0.1
     }
@@ -120,12 +123,13 @@ ClassMethod TryLocks()
 }
 
 /// What another process can take now: <code>release,monitor</code>, each 1 when it can take that lock and 0 when not.
+/// It takes 2.5 seconds at most, because the test process may hold the monitor's lock meanwhile.
 Method OtherProcessCanTake() As %String
 {
     Kill ^IRIS.TempExecuteMCPv2Coverage("fakeRelease", "try")
-    Job ##class(ExecuteMCPv2.Tests.CoverageReleaseTest).TryLocks()::10
+    Job ##class(ExecuteMCPv2.Tests.CoverageReleaseTest).TryLocks()::1
     If '$Test Quit "the probe job did not start"
-    For tI = 1:1:50 {
+    For tI = 1:1:15 {
         If $Data(^IRIS.TempExecuteMCPv2Coverage("fakeRelease", "try")) Quit
         Hang 0.1
     }
@@ -190,6 +194,7 @@ Method TestTakeReleaseLocksHoldsNothingWhenTheReleaseLockTimesOut() As %Status
     Do $$$AssertTrue(tHeld, "another process holds the release lock")
     If tHeld {
         Set tTaken = $ClassMethod(tJob, "TakeReleaseLocks", ..#FAKERUN, .tWhy, 1, 5)
+        If tTaken Do $ClassMethod(tJob, "DropReleaseLocks", ..#FAKERUN)
         Set tProbe = ..OtherProcessCanTake()
         Do $$$AssertEquals(tTaken, 0, "the release lock times out, so nothing is taken")
         Do $$$AssertTrue(tWhy [ "release lock", "and the reason names the release lock: "_tWhy)
@@ -208,6 +213,7 @@ Method TestTakeReleaseLocksLetsGoOfTheReleaseLockWhenTheMonitorLockTimesOut() As
     Do $$$AssertTrue(tHeld, "another process holds the monitor's lock")
     If tHeld {
         Set tTaken = $ClassMethod(tJob, "TakeReleaseLocks", ..#FAKERUN, .tWhy, 5, 1)
+        If tTaken Do $ClassMethod(tJob, "DropReleaseLocks", ..#FAKERUN)
         Set tProbe = ..OtherProcessCanTake()
         Do $$$AssertEquals(tTaken, 0, "the monitor's lock times out, so nothing is taken")
         Do $$$AssertTrue(tWhy [ "monitor's own lock", "and the reason names the monitor's lock: "_tWhy)

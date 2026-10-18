@@ -126,10 +126,11 @@ Method TestDropLocks()
 
 /**
  * A test whose code replaces the suite's Line-by-Line session with one of its own that lists the test process, on a
- * routine that is not the run's, and records its process id as the fixture's foreign session so that the row can stop it
- * through `StopIfList` whether or not the fixture process can read the routine names. Put into A by the row that uses
- * it. If another monitor session wins the instant between the `Stop` and the `Start`, the `Start` fails and the test
- * fails its status assertion.
+ * routine that is not the run's, and, once its `Start` succeeded, records its process id as the fixture's foreign session
+ * so that the row can stop it through `StopIfList` whether or not the fixture process can read the routine names. It
+ * stops only a session that lists the test process, which is the suite's own. Put into A by the row that uses it. If
+ * another monitor session wins the instant between the `Stop` and the `Start`, the `Start` fails, nothing is recorded,
+ * and the test fails its status assertion.
  */
 const SWAP_TEST_DOC = "Story401S.SwapTest.cls";
 const SWAP_TEST_SOURCE = String.raw`/// Synthetic coverage test whose code replaces the suite's Line-by-Line session with one of its own (Story 40.1).
@@ -139,10 +140,10 @@ Class Story401S.SwapTest Extends %UnitTest.TestCase
 Method TestSwapSession()
 {
     Do $$$AssertEquals(##class(Story401.Fixture).SumTo(3), 6, "SumTo(3)")
-    Do ##class(%Monitor.System.LineByLine).Stop()
+    If ##class(ExecuteMCPv2.Coverage.Job).ListsProcess($Job) Do ##class(%Monitor.System.LineByLine).Stop()
     Set tSC = ##class(%Monitor.System.LineByLine).Start($ListBuild("ExecuteMCPv2.Temp.Story391Fixture.1"), $ListBuild("RtnLine"), $ListBuild($Job))
     Do $$$AssertStatusOK(tSC, "the test started a session of its own")
-    Set ^IRIS.TempStory391Fixture("foreign") = $Job
+    If $$$ISOK(tSC) Set ^IRIS.TempStory391Fixture("foreign") = $Job
 }
 
 }
@@ -430,6 +431,9 @@ afterAll(async () => {
     });
     await attempt("the monitor is idle", async () => {
       expect((await monitorState()).active, "the monitor is idle after the run").toBe(0);
+    });
+    await attempt("no coverage ownership node is left", async () => {
+      expect((await coverageGlobal('"session"')).defined, "no suite session node after the run").toBe(false);
     });
     for (const name of NAMESPACES) await attempt(`removing ${name}`, () => removeInteropNamespace(admin, dev, name));
     await attempt("the leftovers check", async () => {
@@ -878,6 +882,16 @@ describe("Story 40.1: the test process stops only the session it started, so a s
       if (!stopped) await fixtureCall("StopIfList", [FOREIGN_ROUTINES]);
     }
     await expectIdle("the swapped session");
+
+    // A release-failed run keeps its ownership node for a reclaim. The session it named has been stopped, so the next
+    // start clears the node with the monitor idle and leaves the finished run's status alone; nothing is left behind.
+    expect((await coverageGlobal('"session"')).defined, "the release-failed run kept its ownership node").toBe(true);
+    const next = succeeded<CoverageContent>(await coverage());
+    expect(next.status).toBe("completed");
+    expect(next, "nothing was reclaimed: the swapped session had already been stopped").not.toHaveProperty("reclaimed");
+    expect((await coverageGlobal('"session"')).defined, "the next start cleared the node").toBe(false);
+    expect((await rawStatus(id)).run["status"], "the finished run keeps its status").toBe("failed");
+    await expectIdle("the swapped session's node");
   }, 240000);
 });
 

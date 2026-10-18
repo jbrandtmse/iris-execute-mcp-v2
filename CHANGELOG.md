@@ -7,7 +7,7 @@ All notable changes to the IRIS MCP Server Suite are documented in this file.
 One tool is added, `iris_test_coverage` (the Development server goes from 31 to 32 package tools, 32 to 33 advertised; the
 suite from 109 to 110 package tools, 114 to 115 advertised). The prompt pack stays at 13 prompts, and the frozen
 governance baseline stays at hash `1e62c5ad5bf7` (141 keys). `BOOTSTRAP_VERSION` moves from `08b8adeaadc6` to
-`4dd596fa2a0c`, because the bootstrapped service gains three classes (32 to 35) and `Dispatch.cls` and `UnitTest.cls`
+`14a4cba6504a`, because the bootstrapped service gains three classes (32 to 35) and `Dispatch.cls` and `UnitTest.cls`
 changed.
 
 ### Added
@@ -34,7 +34,7 @@ changed.
   proving it is the run's own (scoped to the run's two processes, with the run's routines). A run whose line
   counts could not be read ends `failed` with `reason` `counts-unreadable` (IRIS's text in `error` and `readError`), and a
   run whose session could not be stopped ends `failed` with `reason` `release-failed`; both are `isError: true` and
-  carry the test summary and any coverage that was read.
+  carry the test summary and any coverage that was read (when none was read, `readError` says why).
 - **Three ExecuteMCPv2 routes and three bootstrapped classes** carry the run: `POST /dev/test/coverage`,
   `GET /dev/test/coverage?id=` and `POST /dev/test/coverage/cancel`, handled by `ExecuteMCPv2.REST.Coverage`, with the
   libraries `ExecuteMCPv2.Coverage.Job` and `ExecuteMCPv2.Coverage.Runner`. Every existing route is unchanged (AD-33).

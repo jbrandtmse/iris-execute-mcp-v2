@@ -13,7 +13,8 @@
 /// <method>ProofFailure</method> shows that the active session is the run's own, and the two releasers never
 /// act at once: both take the run's release lock and the monitor's own lock
 /// (<method>TakeReleaseLocks</method>) and hold them from the proof through <code>Stop</code>. A lock that cannot
-/// be taken in time stops nothing, and the run ends <code>release-failed</code>.</p>
+/// be taken in time stops nothing: when the runner cannot take it, the supervisor releases the session afterwards, and
+/// when the supervisor cannot, the run ends <code>release-failed</code>.</p>
 /// <p><b>The run record</b> lives in <code>^IRIS.TempExecuteMCPv2Coverage</code>, which is IRISTEMP:
 /// instance-wide, like the monitor, and not journaled. The 20 most recent runs are kept and a record
 /// does not survive an instance restart.</p>
@@ -64,9 +65,11 @@ ClassMethod MonitorActive(Output pPids As %String) As %Boolean
 /// means it: the list itself when the session is scoped to listed processes (mode 2, as
 /// <code>%Monitor.System.LineByLine:Start</code> sets it for a non-empty process list), and empty otherwise. In
 /// all-processes mode (mode 1) every process is monitored, so the list is not a scope (probe, IRIS 2026.2 build 221U:
-/// it read the starting process and then other processes). A paused session (mode 0) was not probed: from the source
-/// of <code>%Monitor.System.LineByLine:Pause</code> it leaves the list of the selected processes in place. Neither
-/// says anything about the active session, so neither is trusted.
+/// it read the starting process and then other processes). A paused session (mode 0) was not probed:
+/// <code>%Monitor.System.LineByLine:Pause</code> saves a copy of a scoped session's list in
+/// <code>^|"%SYS"|SYS("MONITOR","PAUSE","SELECTED")</code> before it sets mode 0, and <code>Resume</code> registers
+/// those processes again, so what the list reads in mode 0 is not relied on. Neither mode's list says anything about the
+/// active session, so neither is trusted.
 ClassMethod ScopedPids(pMode As %Integer, pPids As %String) As %String
 {
     If pMode '= 2 Quit ""
@@ -174,9 +177,12 @@ ClassMethod NodeDisproved(pSession As %List, pPids As %String, pRoutineCount As 
 
 /// Take the locks under which one releaser at a time proves a session its own and stops it: the run's release lock
 /// (<code>("owner",id,"release")</code>), then the monitor's own lock, <code>^%SYS("MON-HOLD")</code>, which
-/// <code>%Monitor.System.LineByLine</code> takes in <code>Start</code> and <code>Stop</code>. Held from the identity
-/// check through <code>Stop</code>, they leave no gap in which another releaser or another project's monitor call
-/// can act. Each is taken with a timeout. Returns 1 when both are held; otherwise it holds neither, returns 0, and
+/// <code>%Monitor.System.LineByLine</code> takes in <code>Start</code>, <code>Stop</code>, <code>Pause</code> and
+/// <code>Resume</code>, each of which refuses when it cannot take it within 3 seconds. Held from the identity check
+/// through <code>Stop</code>, they leave no gap in which the other releaser, or another caller of those four methods,
+/// can act. They do not exclude <code>%Monitor.System.LineByLine:Clear</code> or the <code>^PROFILE</code> utility,
+/// which take <code>^|"%SYS"|SYS("MON-HOLD")</code> instead, nor <code>AddRoutine</code>, which goes on without the
+/// lock after 3 seconds. Each is taken with a timeout. Returns 1 when both are held; otherwise it holds neither, returns 0, and
 /// <var>pWhy</var> says which one timed out. The caller releases both with <method>DropReleaseLocks</method>.
 ClassMethod TakeReleaseLocks(pId As %Integer, Output pWhy As %String, pReleaseSeconds As %Integer = "", pMonitorSeconds As %Integer = "") As %Boolean
 {
