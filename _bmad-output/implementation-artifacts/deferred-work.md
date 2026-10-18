@@ -3263,3 +3263,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-40-1-line-coverage-probe-and-engine.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 40.1 rework re-review 2026-10-18 (Blind, Gap, Auditor): ARCHITECTURE-SPINE.md AD-27 'What proves a session is the suite's' vs spec Spec Change Log rework-1 probe and Verification mutation line for MonitorActive; the mode-2-only rule holds under both readings
 - 2026-10-18T07:26:21Z status=wontfix-accepted owner=40-1-line-coverage-probe-and-engine by=cr note=lead may reword the AD-27 rationale (Rule 20); reopen_if=a later AD-27 story bases a decision on what $ZU(84,10,2) reads in mode 1 or 0
+
+### DW-600: The coverage live gates declare their own copies of the same helpers (fixtureCall, monitorState, coverageGlobal, runCounter, expectIdle, rawStatus, releaseLeftover, coverage, poll, wireOptions, sourceOf) and the fixture HoldRunnerLock repeats HoldMonitorLock
+- source: spec-40-2-coverage-reports-and-targets.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: Up to four gate files (story-40-1-coverage, story-40-1-qa, story-40-2-coverage-reports, story-40-2-qa live gates) declare the helpers, mostly verbatim; the spec's stated reason is only that the 40.2 gate follows the 40.1 gate shape (Rule 2, weak reason)
+- 2026-10-18T11:35:23Z status=wontfix-accepted owner=40-2-coverage-reports-and-targets by=cr note=reopen_if=a coverage gate's copy of expectIdle or another shared-instance check diverges from another gate's copy
