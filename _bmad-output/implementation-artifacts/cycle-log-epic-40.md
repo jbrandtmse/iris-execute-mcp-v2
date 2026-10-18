@@ -45,3 +45,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-18T05:44:17Z	Story 40.1	lead_rereview	scope=cr_high_patches frozen_diff=cr-40-1/high-patches.diff verdict=NOT-CLEAN med=1 low=5 model=claude-opus-5-5
 2026-10-18T05:44:17Z	Story 40.1	rework_opened	iteration=1_of_3 items=6 med=1 low=5 decisions=49 spine_amended=AD-27 baseline=285cf4c
 2026-10-18T05:44:17Z	Story 40.1	stage_spawned	stage=implement spawn_at=2026-10-18T05:44:17Z model=claude-sonnet-5-5 agent_name=40-1-line-coverage-probe-and-engine-rework-1 cycle_iteration=3
+2026-10-18T06:54:42Z	Story 40.1	dev_complete	spawn_at=2026-10-18T05:44:17Z model=claude-sonnet-5-5 build_sha=cdb2465 baseline_revision=e8720c7 review_loop_iteration=1 followup_review_recommended=false deferred=0 new_dw=none shortstat=_15_files_changed._908_insertions(+)._204_deletions(-) bootstrap=bdaff1eec1fa_to_4dd596fa2a0c rework=1_of_3 items_closed=6 internal_review=high0_med0_low30 cycle_iteration=3
+2026-10-18T06:54:43Z	Story 40.1	stage_spawned	stage=code-review spawn_at=2026-10-18T06:54:43Z model=claude-opus-5-5 agent_name=40-1-line-coverage-probe-and-engine-cr-2 cycle_iteration=3
