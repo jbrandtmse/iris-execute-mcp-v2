@@ -52,3 +52,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-19T10:10:29Z	Story 41.2	ledger_routed_planned	story=43-1-framework-migration-to-sdk-v2 entries=1 excess=0 by=cr dw=DW-617
 2026-10-19T10:10:56Z	Story 41.2	ledger_adjudicated	owned=0 resolved=0 reowned=0 terminal=0 note=story_owned_entries_all_terminal_at_birth(DW-614,DW-618..621) model=claude-opus-5-5
 2026-10-19T10:10:56Z	Story 41.2	smoke_complete	method=cli+sdk_stdio result=pass iterations=1 defects_caught=0 checks=4+forms+99 evidence=gen:pack:check(16),gen:skills:check(13),check:provenance,validate:prompts(12_prompts),rule_forms_claude-code+agents-md_markers,built_servers_stdio_sdk_client_99 model=claude-opus-5-5
+2026-10-19T10:12:36Z	Story 41.2	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=1320 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
