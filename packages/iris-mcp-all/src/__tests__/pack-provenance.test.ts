@@ -17,7 +17,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -593,7 +593,7 @@ describe("the real tree", () => {
     const names = inputs.distributions.map((distribution) => distribution.name);
     const packagesDir = join(REPO_ROOT, "packages");
     const publishable = readdirSync(packagesDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
+      .filter((entry) => entry.isDirectory() && existsSync(join(packagesDir, entry.name, "package.json")))
       .map((entry) => JSON.parse(readFileSync(join(packagesDir, entry.name, "package.json"), "utf8")) as { name: string; private?: boolean })
       .filter((manifest) => manifest.private !== true)
       .map((manifest) => manifest.name);

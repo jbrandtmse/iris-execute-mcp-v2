@@ -40,7 +40,8 @@ export const ADAPTATION_HEADER =
 
 /**
  * An ASCII marker that identifies adapted content inside any file, compiled JavaScript included.
- * It is the ASCII prefix of ADAPTATION_HEADER.
+ * Capture: ADAPTATION_HEADER cut before its parenthesised licence clause, so the marker holds no
+ * non-ASCII character.
  */
 export const DISTRIBUTION_MARKER = 'Adapted from intersystems-community/iris-agentic-dev';
 
@@ -60,12 +61,18 @@ export const EXCLUDED_SOURCES = {
  */
 export const REQUIRED_CREDITS = ['Tim Leavitt', 'Tom Dyar'];
 
-/** The non-endorsement sentence the notice must carry (AD-28, "Names and endorsement"). */
+/**
+ * The non-endorsement sentence the notice must carry, which meets AD-28's "Names and endorsement".
+ * Capture: the pinned notice text of the skills-pack spec (Story 41.1, Design Notes, "Pinned oracles").
+ */
 export const NON_ENDORSEMENT =
   'The IRIS MCP Server Suite and this skills pack are independent projects; they are not affiliated with, ' +
   'sponsored by, or endorsed by InterSystems Corporation.';
 
-/** The header row of the notice's provenance table. */
+/**
+ * The header row of the notice's provenance table.
+ * Capture: the notice skeleton of the skills-pack spec (Story 41.1, Design Notes, "Golden example").
+ */
 export const PROVENANCE_HEADER_ROW = '| Pack file | Source file at b6205bb | Adaptation |';
 
 /** The directory, inside a package, that holds the shipped pack. */

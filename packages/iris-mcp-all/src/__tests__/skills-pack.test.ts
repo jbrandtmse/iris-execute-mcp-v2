@@ -97,6 +97,7 @@ describe("assemblePack layout (fixture roots)", () => {
     ["a file at the top level", () => ({ rel: `${PACK_SOURCE_DIR}/NOTES.md`, content: "x" }), "NOTES.md"],
     ["a directory at the top level", () => ({ rel: `${PACK_SOURCE_DIR}/extras/a.md`, content: "x" }), "extras"],
     ["a knowledge directory without SKILL.md", () => ({ rel: `${KNOWLEDGE_SOURCE_DIR}/k2/other.md`, content: "x" }), "k2"],
+    ["a knowledge directory whose skill file is skill.md, not SKILL.md", () => ({ rel: `${KNOWLEDGE_SOURCE_DIR}/k3/skill.md`, content: "x" }), "k3"],
     ["a file directly in knowledge/", () => ({ rel: `${KNOWLEDGE_SOURCE_DIR}/stray.md`, content: "x" }), "stray.md"],
   ])("fails on an unknown entry: %s", (_name, probe, entry) => {
     const root = tempRoot();

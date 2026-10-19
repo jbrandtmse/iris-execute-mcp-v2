@@ -138,8 +138,9 @@ if (CHECK_MODE) {
 }
 
 // ── Write mode (default) ─────────────────────────────────────────────────
-// Writes every expected file, then removes every other file under skills/ (a leftover SKILL.md from a
-// removed prompt, or a hand-added file) so `--check` never flags a leftover this generator could have removed.
+// Removes every file under skills/ that is not expected (a leftover SKILL.md from a removed prompt, or a
+// hand-added file), then writes every expected file, so `--check` never flags a leftover this generator
+// could have removed.
 for (const rel of writeTree(files, skillsDir)) {
   console.log(`gen-skills: removing stray/stale generated file: skills/${rel}`);
 }

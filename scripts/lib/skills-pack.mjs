@@ -49,7 +49,7 @@ export function renderPackReadme() {
     `- \`rules/\`: the always-on rule, in the forms each client reads.\n` +
     `- \`${NOTICE_FILENAME}\`: third-party notices and licence texts for adapted content.\n\n` +
     `## Third-party content\n\n` +
-    `Content adapted from another project carries a header line as its first line after any ` +
+    `Content adapted from another project carries a header line as its first non-blank line after any ` +
     `frontmatter, and a row in the provenance table of \`${NOTICE_FILENAME}\`. ` +
     `Read that file before redistributing the pack.\n`
   );
@@ -132,7 +132,8 @@ export function assemblePack(root) {
 
   for (const name of listSubdirectories(knowledgeDir)) {
     const skillDir = join(knowledgeDir, name);
-    if (!existsSync(join(skillDir, SKILL_FILENAME))) {
+    // The exact name, letter case included: a case-insensitive file system would accept `skill.md`.
+    if (!readdirSync(skillDir).includes(SKILL_FILENAME)) {
       throw new Error(`${KNOWLEDGE_SOURCE_DIR}/${name}/ has no ${SKILL_FILENAME}.`);
     }
     if (workflowNames.includes(name)) {

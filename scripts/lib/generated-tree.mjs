@@ -73,22 +73,19 @@ export function diffTree(expected, dir) {
 }
 
 /**
- * Make the tree on disk at `dir` equal to the expected tree: write every expected file whose bytes
- * differ, delete every file that is not expected, and prune the directories that end up empty (`dir`
- * itself is kept).
+ * Make the tree on disk at `dir` equal to the expected tree: delete every file that is not expected,
+ * prune the directories that end up empty (`dir` itself is kept), then write every expected file whose
+ * bytes differ.
+ *
+ * Deleting and pruning come first so the result is exact on a case-insensitive file system too: a stray
+ * file or directory whose name differs from an expected one only in letter case is gone before the
+ * expected file is written under its exact name.
  *
  * @param {Map<string, Buffer | string>} expected
  * @param {string} dir
  * @returns {string[]} The relative paths of the files that were deleted.
  */
 export function writeTree(expected, dir) {
-  for (const [rel, content] of expected) {
-    const abs = join(dir, rel);
-    const bytes = toBuffer(content);
-    if (existsSync(abs) && statSync(abs).isFile() && readFileSync(abs).equals(bytes)) continue;
-    mkdirSync(dirname(abs), { recursive: true });
-    writeFileSync(abs, bytes);
-  }
   const removed = [];
   for (const rel of listFilesRecursive(dir)) {
     if (expected.has(rel)) continue;
@@ -96,6 +93,13 @@ export function writeTree(expected, dir) {
     removed.push(rel);
   }
   removeEmptyDirs(dir, dir);
+  for (const [rel, content] of expected) {
+    const abs = join(dir, rel);
+    const bytes = toBuffer(content);
+    if (existsSync(abs) && statSync(abs).isFile() && readFileSync(abs).equals(bytes)) continue;
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, bytes);
+  }
   return removed;
 }
 

@@ -12,4 +12,4 @@ Agent skills and the always-on rule for working with the IRIS MCP Server Suite.
 
 ## Third-party content
 
-Content adapted from another project carries a header line as its first line after any frontmatter, and a row in the provenance table of `IRIS-MCP-THIRD-PARTY-NOTICES.md`. Read that file before redistributing the pack.
+Content adapted from another project carries a header line as its first non-blank line after any frontmatter, and a row in the provenance table of `IRIS-MCP-THIRD-PARTY-NOTICES.md`. Read that file before redistributing the pack.

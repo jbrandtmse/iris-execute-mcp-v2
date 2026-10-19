@@ -48,5 +48,5 @@ Do not change the MIT licence block in the notice. `pnpm check:provenance` compa
 ## Checks
 
 - `pnpm gen:pack:check`: the pack equals what the sources produce.
-- `pnpm check:provenance`: the notice, the header lines, the provenance rows, and the notice in every npm tarball.
+- `pnpm check:provenance`: the notice, the header lines, the provenance rows, that the client-config tarball ships the whole pack, and that every npm tarball carrying pack or adapted content ships the notice.
 - `pnpm validate:prompts`: every `iris_*` token in the skills and rule files names a real tool.

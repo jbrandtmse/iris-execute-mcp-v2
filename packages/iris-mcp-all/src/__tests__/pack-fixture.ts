@@ -37,8 +37,20 @@ export interface NodeRun {
   stderr: string;
 }
 
+export interface NodeRunOptions {
+  /** Variables added to the inherited environment. */
+  env?: Record<string, string>;
+  /** Milliseconds after which the child is killed; no limit when omitted. */
+  timeout?: number;
+}
+
 /** Run `node <script> <args>` with `cwd` as the working directory, in a real child process. */
-export function runNode(cwd: string, script: string, args: string[] = []): NodeRun {
-  const result = spawnSync(process.execPath, [script, ...args], { cwd, encoding: "utf8" });
+export function runNode(cwd: string, script: string, args: string[] = [], options: NodeRunOptions = {}): NodeRun {
+  const result = spawnSync(process.execPath, [script, ...args], {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, ...options.env },
+    timeout: options.timeout,
+  });
   return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 }
