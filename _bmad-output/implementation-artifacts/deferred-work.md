@@ -3403,3 +3403,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: 41.2 code review 2026-10-19: it.skipIf(!changesetPresent) at story-41-2-doc-claims.test.ts:92; the skip exists because changeset version consumes the file
 - 2026-10-19T09:50:16Z status=wontfix-accepted owner=41-2-always-on-objectscript-pre-write-rule by=cr note=reopen_if=the Epic 42 release gate runs changeset version without checking each story changeset still exists
+
+### DW-622: SanitizeError strips only the English and Arabic ERROR #N: prefixes, but this instance also has French and German message tables (ERREUR, FEHLER), so a status read in those languages keeps its prefix and doubles when re-wrapped (project rule #13)
+- source: _bmad-output/implementation-artifacts/spec-41-3-core-knowledge-skills.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.3 plan probes 2026-10-19: GetErrorText(sc,fr)='ERREUR #5001: disk full', GetErrorText(sc,de)='FEHLER #5001: disk full'; src/ExecuteMCPv2/Utils.cls:179-185 loops over 'ERROR #' and the Arabic word only; the epic-11 retro predicted this
+- 2026-10-19T12:10:06Z status=routed owner=burndown by=harvest note=fix-pack-sized LOW (strip the localized prefix generically, a pinned test per locale, bootstrap moves): into the Epic 41 burn-down story if one is chartered, else wontfix-accepted with a probe at the gate
