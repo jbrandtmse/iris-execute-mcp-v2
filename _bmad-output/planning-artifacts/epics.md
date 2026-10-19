@@ -5603,7 +5603,7 @@ Embedded SQL, IRIS system-class discipline, and interoperability patterns. Adapt
 
 - **AC 41.6.1** — A per-client disposition table covers **all 16 adapters** in `adapters.ts`. It is exhaustive as of a named date, with the documentation source for each row (Rule #56). For each client it gives the native skill location, the rule location and format, or "`AGENTS.md` fallback" with the reason. The minimum:
   - Claude Code → `.claude/skills/` and `.claude/rules/`;
-  - VS Code / Copilot → `.github/instructions/` (`*.instructions.md` with `applyTo:`);
+  - VS Code / Copilot → `.agents/skills/` and the `AGENTS.md` block. [AMENDED 2026-10-19, wave-7 decision #24: an `applyTo:` instructions file attaches only to files the agent creates or modifies, so it would never load for a class written through the MCP tools.]
   - Cursor → `.cursor/rules/`;
   - other agents → `.agents/skills/` and `AGENTS.md`.
 
