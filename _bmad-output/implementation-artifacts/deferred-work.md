@@ -3385,6 +3385,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: 41.2 QA over stdio saw -32602 on all four; server-base.ts registerPrompt passes an argsSchema whenever a prompt declares arguments; after the retirement no shipped prompt renders from an omitted arguments
 - 2026-10-19T09:50:06Z status=routed owner=43-1-framework-migration-to-sdk-v2 by=cr note=43.1 rewrites prompt registration on SDK v2: render all-optional prompts from an omitted arguments; pin it in AC 43.1.3
+- 2026-10-19T19:44:33Z occurrence=41-5-workflow-skills-refresh
 
 ### DW-618: .changeset/epic35-defect-gate.md still says the objectscript-review prompt got a wording fix, so the first changeset version lists a fix to a prompt the same release removes
 - source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3416,3 +3417,9 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-41-4-platform-knowledge-skills.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: AD-28 requires the header as the first non-blank line after frontmatter; 41.4's knowledge test exempts exactly that line (a repository-file and tool-or-server-name match otherwise); the 41.5 'No internal references' AC in epics.md and the ledger carry no exemption, so a check built from the AC alone refuses the shipped iris-mcp-objectscript-sql
 - 2026-10-19T16:03:54Z status=routed owner=41-5-workflow-skills-refresh by=cr note=41.5's check accepts exactly ADAPTATION_HEADER as the first body line of an oracle-adapted skill, with negative controls
+- 2026-10-19T19:55:02Z status=resolved-by:41-5-workflow-skills-refresh owner=41-5-workflow-skills-refresh by=lead note=delivered: scripts/lib/provenance-core.mjs withoutAdaptationHeader exempts only the exact ADAPTATION_HEADER as the first body line of a provenance-row file; live validate:prompts on the real tree prints '2 adaptation header line(s) exempted' exit 0; validate-prompts-pack-checks CLI rows (second copy, header in iris-mcp-objectscript-gotchas, row removed) red then green; core controls (CRLF, (c), not first body line, prompt source) in validate-prompts.test.ts
+
+### DW-624: The pack docs read a declared tool preset as if the presets were nested, but they are not: provision-project-environment declares core and names iris_user_manage, which the admin server's developer preset hides, so a developer-preset user installs a core skill it cannot run
+- source: spec-41-5-workflow-skills-refresh.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 41.5 code review 2026-10-19: rosters from dist/tools/presets.js (admin core includes iris_user_manage, developer excludes it); the catalog intro, skills/README.md and README.md:830 state the first-of rule but never say a later preset can hide a tool; only the CHANGELOG Known limits says so
+- 2026-10-19T19:44:33Z status=routed owner=41-7-skills-pack-docs-and-capstone by=cr note=41.7's pack docs (root README section, the catalog that supersedes skills/README.md) say the presets are not nested

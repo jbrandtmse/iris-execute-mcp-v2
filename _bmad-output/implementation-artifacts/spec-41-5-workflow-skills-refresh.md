@@ -258,9 +258,70 @@ deferred: []
   - `git diff --stat packages/shared/src/bootstrap-classes.ts` is empty;
   - the tools stay at 110 package / 115 advertised.
 
+### Review Findings
+
+Code review 2026-10-19 (`bmad-code-review`, review tier `full-opus`). Four layers ran and all four delivered a payload: Blind Hunter, Edge Case Hunter, Verification Gap Reviewer and Acceptance Auditor. They reported 30 rows. 8 rows were rejected; the other 22 group into 15 entries, and the lead's item 6 adds one more, for 16 entries (0 high, 6 medium, 10 low). Each line gives severity, fix-risk, footprint and the Rule 15 disposition.
+
+- [x] [Review][Patch] Prompt argument names and descriptions were never scanned. `prompts/list` serves them, but neither the tool-name check nor the internal-reference check read them (blind 2, edge 2, verification-gap other 3, auditor 4, lead item 1). Medium, fix-risk low, in-story. Fixed: `promptSourceText` adds `<name>: <description>` per argument, and the CLI, the tool-name check and the real-tree rows all read it. Line 1 and line 2 of the output are unchanged, re-derived from the CLI output. All 12 declared presets still meet the first-of rule over the widened text (`declared` 6/3/3), and the three tool-naming argument descriptions are pinned. [scripts/lib/validate-prompts-core.mjs:66]
+- [x] [Review][Patch] The CLI's source assembly was copied into the real-tree tests, so a CLI that dropped a prompt's title, description and body stayed green (verification-gap 1; auditor 5, AD-2 "a check's CLI script and its test share one implementation"). Medium, fix-risk low, in-story. Fixed: `promptSourceText` and `declaredToolPreset` live in the core, used by the CLI and both real-tree rows. A new scratch CLI row puts an internal reference in a stub prompt's title, description, body and argument description, plus an unknown tool in the argument. [scripts/validate-prompts.mjs:70]
+- [x] [Review][Patch] AC 41.5.4's "or the rule" leg had no test that could fail: the CLI would have printed 51 sources even with the rule sources filtered out (auditor 1). Medium, fix-risk low, in-story. Fixed: a scratch CLI row writes `irislib` into the rule source, runs `gen:pack`, and requires `[internal-reference]` for `rule:` and both `pack:rules/` forms. [packages/iris-mcp-all/src/__tests__/validate-prompts-pack-checks.test.ts:282]
+- [x] [Review][Patch] The "every row ran in a scratch copy" checks were plain `it` rows. Under `--sequence.shuffle` they could run first, and they read only three strings (verification-gap 3, Rule 19 hermeticity). Medium, fix-risk low, in-story. Fixed in both scratch files: `beforeAll`/`afterAll` compare a fingerprint of the real `skills/`, `skills-pack-src/` and pack trees and the real ops prompts module. [packages/iris-mcp-all/src/__tests__/validate-prompts-pack-checks.test.ts:52, story-41-5-qa-gen-skills-refusal.test.ts:77]
+- [x] [Review][Patch] Three golden descriptions over-claimed (auditor 3 plus this review's decision #15 sweep of all 12 descriptions against their bodies). Medium, fix-risk low, in-story.
+  - `trace-message-flow` said "without running a recovery", but body step 6 allows a confirmed recovery.
+  - `find-patient-messages` said the PHI data policy "redacts or withholds" bodies, but `allow` is a policy value (`data-policy.ts:26`) that does neither.
+  - `edit-and-test-class` said it "reads only the lines around the change", but body step 1 allows a whole-document read.
+
+  Fixed in the three prompt sources (off the wire), with dev and interop rebuilt and `gen:skills`/`gen:pack` regenerated. The golden table, descriptions, oracle sha256 values and catalog hash are updated (Spec Change Log). [packages/iris-interop-mcp/src/prompts/traceMessageFlow.ts:26]
+- [x] [Review][Defer] The presets are not nested, but the docs never say so. `provision-project-environment` declares `core` and names `iris_user_manage`, which admin's `developer` hides, so a `developer`-preset user gets a `core` skill that cannot run (blind 1). Medium, fix-risk low, in-epic. The catalog template and its golden text are spec-bound, and Story 41.7 owns the pack docs — deferred: routed DW-624 owner=41-7-skills-pack-docs-and-capstone (the lead inserts the `DW-624:` bullet under Story 41.7 in `epics.md`). A Known-limits line is added to the CHANGELOG now. [packages/client-config/skills-pack/README.md:5]
+- [x] [Review][Patch] Pinning tests with no `mutation:` line (verification-gap 4) were the AC "Unchanged counts" `check:provenance` leg, AC 41.5.3's `13 generated file(s)` leg, the 41.3 grammar rows, the inverted 41.3 knowledge rows, the changed 41.1 knowledge fixture, and the real-tree "declares one tool preset" row. Low, closed in this pass: mutations V4a-V4f under `## Verification`. [_bmad-output/implementation-artifacts/spec-41-5-workflow-skills-refresh.md]
+- [x] [Review][Patch] Spelling variants the classes missed (blind 4, lead item 4). Low, fix-risk low, in-story. Widened under decision #20, only where the spelling is unambiguous and the real tree stays clean: `Rule#7`, `AC 41.5.1`/`DW 615`/`AD28`, `Stories`/`story-41-5`/`Epic41`, `./` and `../` before a repository path, `.yml`, `validate:` and `check:`. Each has a sample row. Everything else is enumerated, as of 2026-10-19, under the CHANGELOG's Known limits and the Residual risks below (Rule #56); not filed as DW. [scripts/lib/validate-prompts-core.mjs:144]
+- [x] [Review][Patch] The bare-`#` class flagged legitimate ObjectScript (`i#2`, `Read x#5`), an HTML entity and a lower-case `error #5659`, against decision #20's "a bare `#n` that is not an IRIS error code" (edge 7). Low, fix-risk low, in-story. Fixed: no match after a word character or `&`, and `ERROR ` in any case; `Rule#7` stays caught by the widened rule-number class. [scripts/lib/validate-prompts-core.mjs:145]
+- [x] [Review][Patch] The CHANGELOG and the 41.2 stdio row credited the SDK-side test with "exactly four keys", but the SDK's parse drops unknown keys (QA Q2). The changeset said only the skill generator reads the field (blind 6, edge 10, verification-gap other 1). Low, mechanical. Fixed: the CHANGELOG Tests bullet names the raw-frame rows and the QA files, the 41.2 row title and header claim only what the SDK view pins, and the changeset names both readers. [CHANGELOG.md:62]
+- [x] [Review][Patch] The QA omitted-`arguments` rows pinned DW-617's SDK refusal with no pointer, so they would go red when 43.1 fixes DW-617 (blind 3, verification-gap 2). Low, mechanical. Fixed: the header and both row titles cite DW-617 and say 43.1 inverts the rows; `occurrence=41-5-workflow-skills-refresh` appended to DW-617. [packages/iris-mcp-all/src/__tests__/story-41-5-qa-dist-consumer.test.ts:17]
+- [x] [Review][Patch] `stubPrompt` and `VALID_SKILL` were copied in two test files (blind 8, Rule 2). Low, mechanical. Fixed: `stubPromptSource` and `VALID_STUB_SKILL` in `story-41-5-qa-fixture.ts`, whose defaults are byte-identical to both copies. The two ops-stub helpers differ in purpose (one re-exports the real prompts, one links the tools), so they stay separate. [packages/iris-mcp-all/src/__tests__/story-41-5-qa-fixture.ts:35]
+- [x] [Review][Patch] The YAML consumer passed every frontmatter block in one argv string: 25,231 characters today, against Windows' 32,767 limit (edge 9). Low, mechanical. Fixed: the blocks go on stdin. [packages/iris-mcp-all/src/__tests__/story-41-5-qa-yaml-consumer.test.ts:44]
+- [x] [Review][Patch] The scratch row "gen:skills stops before writing" claimed more than it pins: its write-mode "nothing written" leg cannot fail on an up-to-date tree (verification-gap other 2, QA Q7). Low, mechanical. Fixed: retitled to what it pins, pointing at the stale-tree QA rows. [packages/iris-mcp-all/src/__tests__/validate-prompts-pack-checks.test.ts:375]
+- [x] [Review][Patch] The docs said "nine classes" but listed eight, omitting the bare `#` class (auditor 2). Low, mechanical. Fixed in `skills-pack-src/README.md:83`, the `validate-prompts.mjs` header and the CHANGELOG Added bullet. [skills-pack-src/README.md:83]
+- [x] [Review][Patch] The I/O matrix row "Across servers" had no pin on the real CLI path (lead item 6; M6 left the real tree green, because `check-system-health` needs `full` either way). Low, fix-risk low, in-story. Fixed: a scratch CLI row gives `check-system-health` a body naming ops' `iris_health_check` and admin's `iris_database_manage`. Each is in its own server's `core`, so the CLI exits 0 with `14 core, 6 developer, 4 full`; declared `full`, it is refused as wider than `core`. Mutation P4 (a first-owner lookup) turns it red. [packages/iris-mcp-all/src/__tests__/validate-prompts-pack-checks.test.ts:227]
+
+Also checked, with no finding:
+- `registerPrompt` is untouched (an empty diff of `server-base.ts`), and a leak turns the raw-frame rows red (Q2, N5).
+- The grammar refuses each I/O-matrix case (probed: unknown key, bad preset, `metadata: x`, empty map, tab, four-space indent, repeated key, empty value).
+- `skills-pack.mjs` keeps its three imports.
+- The `gen:skills` refusal is atomic: every prompt is checked before any render or write, in both modes.
+- The count pins are re-derived from CLI output.
+- The changeset levels follow AD-29.
+- The stdio wire hashes still match after the description fixes.
+
+**DW-623: addressed.**
+- `internalReferenceProblems` reads `withoutAdaptationHeader(text)` only for a `packRel` that a provenance row names. `withoutAdaptationHeader` removes the exact header only when it is the first non-blank body line (`hasValidAdaptationHeader`).
+- The real tree exempts exactly 2 lines (the SQL source and its pack copy).
+- These controls are each flagged, in the core and in the scratch CLI rows: a second copy, a file no row names, the header not on the first body line, CRLF, `(c)`, the row removed, and a prompt source. M10 a/b/c show the exemption is load-bearing and no wider.
+- The lead's `ledger_adjudicated` can close it `resolved-by:41-5-workflow-skills-refresh`.
+
+**Rejected** (8 layer rows: edge 4, blind 5 with edge 6, blind 7, edge 1, edge 3, edge 5 and edge 8; also listed are the second part of blind 8 and the lead's items 2, 3 and 5):
+- `false`: the header removal uses `indexOf` and may remove another copy than the first body line (edge 4). When `hasValidAdaptationHeader` holds, the first body line is a header copy. If another copy is removed, that one remains and class 7 still flags the file, so no defect can pass.
+- `low`, spec-bound (`by-design`): class 5 flags a user's own `src/`, `docs/` or `.claude/` path, and class 7 flags `AGENTS.md`, `CLAUDE.md`, `.mcp.json` and `package.json` (blind 5, edge 6). The classes are decided as the top-level repository entries and that extension list; the false positives are enumerated in the CHANGELOG's Known limits.
+- `low`, spec-bound: a knowledge skill that names a tool is told to "declare metadata iris-tools-preset: core", which the 41.3 knowledge pins refuse (blind 7). The message is the I/O matrix's exact text, and decision #14's reversal path is to name tools once presets exist.
+- `low`: a tool-free prompt could never pass, because the generator always writes a preset (edge 1). No prompt is tool-free, and the fix adds an optional-preset branch. It becomes real when a prompt that names no tool is added.
+- `low`: a `|` or a newline in a skill description breaks the `skills/README.md` table (edge 3). Every prompt is in the typed oracle, which checks ASCII, no `|` and the length. This repeats the implement review's blind 2 / edge 1.
+- `low`: the rule title misreads a BOM or a heading inside a code fence (edge 5). There is one rule with a plain first heading, the title rule is spec-defined, and the fix adds branches.
+- `low`: the raw-wire harness throws on a non-JSON stdout line and waits 30 s on a dead server (edge 8). Both fail loudly, never silently.
+- `low`: five tests declare a local `skill?:` shape instead of importing `PromptSkillDefinition` (blind 8, second part). These are structural casts over the untyped `.mjs` loader output.
+- `low`, dismissed (lead item 2): the header comments of the pack `README.md` and `skills/README.md` name `pnpm gen:pack` and `scripts/`. Neither file is agent content. The 41.6 installer installs `skills/<name>/`, the rule forms and the notice, and Claude Code loads only `skills/<name>/SKILL.md`.
+- `low`, dismissed (lead item 3): "informational in v1" in `check-system-health`. It is wire-frozen body text, and no class covers it.
+- `low`, re-run (lead item 5): QA's Q1 mutation, re-run after its helper tightened. It is red as recorded: 5 rows in `story-41-5-qa-dist-consumer.test.ts` and 1 in the preset oracle.
+
 ## Spec Change Log
 
 - 2026-10-19 (lead spec gate): the 7 orchestrator decisions were taken as recommended (wave-7 decisions #16-#22). Spine AD-28 was amended with the drafted text: the frontmatter `metadata` map, the first-of-core/developer/full preset rule, the prompt `skill` field, the nine internal-reference classes with the DW-623 exemption, and the catalog wording. The spine lint passed. Counts and the wire are unchanged.
+- 2026-10-19 (code review, decision #15 and decision #20): the review changed these Design Notes values in place.
+  - **Three golden descriptions corrected** to what their bodies say. In `trace-message-flow`, "recommends next steps without running a recovery" became "recommends next steps, never running a recovery without the user's confirmation". In `find-patient-messages`, "under the PHI data policy, which redacts or withholds them" became "..., which by default redacts or withholds them". In `edit-and-test-class`, "reads only the lines around the change" became "reads the lines around the change".
+  - **New `SKILL.md` values,** from the regenerated files. `edit-and-test-class` went from 4338 to 4333 bytes (`636f70ba...` → `a26759dc...`). `find-patient-messages` went from 3412 to 3423 (`4e6472ab...` → `9d0ccda8...`). `trace-message-flow` went from 4767 to 4798 (`b2e6b081...` → `f3a2d19c...`). The descriptions stay within 411 to 601 characters.
+  - **New catalog values:** 11611 → 11648 bytes, still 48 lines, `4806e801...` → `bdd1b54f...`.
+  - **The wire is unchanged.** The 16 stdio hashes still match, because the `skill` field is never sent.
+  - **The internal-reference classes widened,** each for an unambiguous spelling of its own class, with the real tree still clean. The narrowed class 2 now matches decision #20's "a bare `#n`". The class names and the count of nine are unchanged, so the spine is unaffected.
+  - **The prompt source text now includes each argument's name and description.** `promptSourceText` in the core is read by the CLI and the tests. The I/O matrix row "Internal reference" names four prompt fields; arguments widen it and contradict nothing.
 
 ## Review Triage Log
 
@@ -347,7 +408,7 @@ deferred: []
 **AC interpretations** (apply and report):
 
 - **"Every skill in the pack declares the preset it needs" (AC 41.5.4).** Every skill that names a tool declares exactly one preset; a tool-free skill and the rule declare none, as the spine already says. Every one of the 24 workflow and pack copies of a workflow skill declares one.
-- **"Internal references".** Read as the nine classes. The check covers each prompt's title, description, body and skill description.
+- **"Internal references".** Read as the nine classes. The check covers each prompt's title, description, body, argument names and descriptions (added by the code review) and skill description.
 - **"The MCP prompt text keeps its user-facing role" (AC 41.5.1).** The wire bytes are unchanged, as pinned. A skill description is not a prompt-body change (AD-15): no prompt name, title, description, argument or rendered text changes, so no sanctioned-change entry is needed.
 
 **Golden descriptions and presets.** In `prompt.skill`, and in each skill's frontmatter. These are the planned `SKILL.md` sha256 values, rendered from these values and today's `build({})`; the line counts are unchanged.
@@ -358,14 +419,14 @@ deferred: []
 | check-system-health | full | 2680 | `2cbc983d96fc39f826ab04ae7859de6f34c64d89a03c40c5d533561f7bd21cda` |
 | deploy-and-test-class | developer | 6753 | `ba24af252067fe92ce4046b5956b4e2918812b1ad0775371d9b25a238ab5448c` |
 | diagnose-slow-query | developer | 2209 | `3a76caf480096ca68bdfdc47150d4c4e19db383b2c2a18e7321aa9ca8706d8f3` |
-| edit-and-test-class | core | 4338 | `636f70baddf7add206532d64372ab53adfd337336766f6366250b1c0545b478d` |
-| find-patient-messages | core | 3412 | `4e6472ab0fc3748e82a4d5a458de546c26e4aff5d713395cf86fd32264e66daa` |
+| edit-and-test-class | core | 4333 | `a26759dc2c6a14e57d28462a46a1bbd890fc3af7975d0c6d75af3bc714161b3f` |
+| find-patient-messages | core | 3423 | `9d0ccda8d608ca87c04de6e89384bc174afbef5c1ae742f0a2adf92cd1300193` |
 | promote-environment-change | developer | 4874 | `e6458184bf4be63be6bea23d9cf1c1b141c50d820d04d0c9268d459bb5b6ed69` |
 | provision-project-environment | core | 2343 | `dd8f6c73a0f16670fd93337c1fb6e2154f26fb9c246b313876b7adccd469498e` |
 | recover-stuck-production | core | 2919 | `efb9c171934a20c6b6d1c611af976b4039f92d47962689e349e0bc70a433c6e1` |
 | resend-failed-messages | core | 3087 | `b9e38324de5fdf454f74f45b951000bc124ee5e56465fffef41dd8cb7a5b8ccf` |
 | run-external-backup | full | 2102 | `40d01bd37a98297430ca307c2a1424a940f0b2521859e7c8e10d14ba3ee59764` |
-| trace-message-flow | core | 4767 | `b2e6b0812fecec3f07f384072bd574d687e1b3164802c1c43e28f0e40de2d2d8` |
+| trace-message-flow | core | 4798 | `f3a2d19c2e362852419efc7ea22afd213586b41d1eae7f936b91c753ac16d6f0` |
 
 The descriptions, verbatim (each value is one line):
 
@@ -374,14 +435,14 @@ audit-security-posture: A read-only audit of an IRIS instance's security: users 
 check-system-health: Runs one composite health check of an IRIS instance across its nine areas (journal, databases, license, locks, alerts, mirror, ECP, interoperability and the system) and follows each warning, critical or error finding to the tool that explains or fixes it, never running a destructive fix without the user's confirmation. Use when the user asks whether IRIS is healthy or wants a health or status check, or reports trouble with journal space, database size, the license, locks or alerts.
 deploy-and-test-class: Deploys an ObjectScript class or package from local source files to IRIS with a glob-path load and compile, fixes compile errors in the source and loads it again, runs its unit tests, compares the returned total with the number of test methods because an early partial result looks like a green run, re-attaches to a run that is still going instead of starting a second one, and measures line coverage when the user asks for it. Use when the user wants to deploy, load or import ObjectScript source into IRIS, compile it, run its %UnitTest tests, or see their coverage.
 diagnose-slow-query: Diagnoses a slow IRIS SQL query from its query plan, the maps and indexes the plan reads, and the statement's cumulative run-time statistics, looking for full table scans, missing indexes, hot statements and plan inefficiencies, then recommends a fix such as a new index or a rewritten WHERE clause without applying it. Use when the user says a SQL query is slow, asks why a query does not use an index, or wants a query plan explained.
-edit-and-test-class: Changes a few lines of an ObjectScript class directly in IRIS: reads only the lines around the change, applies a guarded line edit that stores nothing when the class no longer matches what was read, compiles the class and fixes errors the same way, runs its unit tests and checks the returned total, and reports the diff. Use when the user wants a small fix or change to a class that lives in IRIS, especially one with no local source file, or asks to patch, compile and test a class in place.
-find-patient-messages: Finds a patient's interoperability messages by an identifier such as a medical record number, through a Search Table and in search windows of at most 7 days, lists the matching message headers, and reads message bodies only when the user wants the content, under the PHI data policy, which redacts or withholds them. Use when the user asks for the messages, HL7 traffic or message history of a patient or medical record number in an IRIS interoperability production.
+edit-and-test-class: Changes a few lines of an ObjectScript class directly in IRIS: reads the lines around the change, applies a guarded line edit that stores nothing when the class no longer matches what was read, compiles the class and fixes errors the same way, runs its unit tests and checks the returned total, and reports the diff. Use when the user wants a small fix or change to a class that lives in IRIS, especially one with no local source file, or asks to patch, compile and test a class in place.
+find-patient-messages: Finds a patient's interoperability messages by an identifier such as a medical record number, through a Search Table and in search windows of at most 7 days, lists the matching message headers, and reads message bodies only when the user wants the content, under the PHI data policy, which by default redacts or withholds them. Use when the user asks for the messages, HL7 traffic or message history of a patient or medical record number in an IRIS interoperability production.
 promote-environment-change: Promotes configuration and code drift from one IRIS environment to another in review-before-write order, diff -> plan -> confirmed execute -> second diff: it compares mappings, System Default Settings, web applications, supported CPF settings and, given a spec, ObjectScript source, executes only the plan steps the user picks and confirms, and checks that the promoted drift is gone. It never removes an item that exists only on the target. Use when the user wants to compare two IRIS servers or environments, or to promote, sync or copy changes from one to another, such as from development to test.
 provision-project-environment: Provisions a new IRIS project environment in order: a DATA and a CODE database, a namespace over them, a user whose default namespace it is, and a web application, checking each step before the next, rolling back the completed steps when one fails, and naming the manual follow-up a new web application needs. Use when the user wants to set up or create a new IRIS project, namespace or application environment.
 recover-stuck-production: Diagnoses and recovers a troubled or wedged interoperability production along an escalation ladder, in order: status, queues and error logs first, then the recover action, and the clean action only when recover does not fix it, never wiping persistent business state unless the user explicitly accepts the data loss. Use when an IRIS interoperability production is stuck, troubled or suspended, messages are not processing or queues are backing up, or the user asks to restart or recover a production.
 resend-failed-messages: Resends failed interoperability messages for one configuration item, dry run first: it previews the match count and a sample, resends only after the user approves with an explicit confirmation, and then checks the new message headers. It states that a resend delivers the data downstream again and that the resend actions are writes disabled by default. Use when the user wants to retry, replay or resend failed or errored messages in an IRIS interoperability production.
 run-external-backup: Freezes an IRIS instance for an external backup snapshot taken at the OS or SAN level, waits while the user takes the snapshot, and always thaws the instance afterwards, even when the snapshot fails, then confirms that journaling resumed and checks the run in the backup history. Use when the user wants to back up IRIS with an external OS-level or SAN snapshot, or asks to freeze and thaw IRIS database writes for a backup.
-trace-message-flow: Traces one interoperability message flow from a session or message header ID: lists every hop, searches the session's message headers, reads the bodies that matter under the PHI data policy, draws a sequence diagram, and pulls the error log entries of each failing item, then reports where the flow failed and recommends next steps without running a recovery. Use when the user asks what happened to a message or session, why a message failed or never arrived, or how a message moved through an IRIS interoperability production.
+trace-message-flow: Traces one interoperability message flow from a session or message header ID: lists every hop, searches the session's message headers, reads the bodies that matter under the PHI data policy, draws a sequence diagram, and pulls the error log entries of each failing item, then reports where the flow failed and recommends next steps, never running a recovery without the user's confirmation. Use when the user asks what happened to a message or session, why a message failed or never arrived, or how a message moved through an IRIS interoperability production.
 ~~~
 
 **Claim check (decision #15).** Each clause was matched to the body of the generated skill, as read at `26dc8b2`. For example:
@@ -418,15 +479,17 @@ None adds an IRIS fact, so no IRIS probe applies.
 
 **The nine internal-reference classes** (name, pattern, sample):
 
-1. `an internal rule number`, `/\bRules? #\d+/i`, `see Rule #7`.
-2. `a number sign and digits that are not an IRIS error code`, `/(?<!ERROR )#\d+(?!\d|:)/`, `item #58`.
-3. `a planning or deferred-work id`, `/\b(?:DW|AD|AC|NFR|FR)-\d+/`, `tracked as DW-615`.
-4. `a story or epic number`, `/\b(?:Story|Epic|Sprint)\s+\d/i`, `added in Story 41.2`.
-5. `a repository path`: the top-level repository entries, escaped, joined, then `/`, behind `(?<![A-Za-z0-9_./-])`. Sample `see packages/shared`.
+1. `an internal rule number`, `/\bRules? ?#\d+/i`, `see Rule #7`.
+2. `a number sign and digits that are not an IRIS error code`, `/(?<![\w&])(?<![Ee][Rr][Rr][Oo][Rr] )#\d+(?!\d|:)/`, `item #58`.
+3. `a planning or deferred-work id`, `/\b(?:DW|AD|AC|NFR|FR)[- ]?\d+/`, `tracked as DW-615`.
+4. `a story or epic number`, `/\b(?:Stor(?:y|ies)|Epics?|Sprints?)[\s-]*\d/i`, `added in Story 41.2`.
+5. `a repository path`: the top-level repository entries, escaped, joined, then `/`, behind `(?<![A-Za-z0-9_./-])` and an optional `./` or `../`. Sample `see packages/shared`.
 6. `an absolute path`, `/(?<![A-Za-z0-9_.-])\/(?:Users|home|private|tmp|usr|opt|var)\//`, `open /Users/someone/file`.
-7. `a repository file`, `/\b[\w-]+\.(?:md|ts|mjs|json|yaml|toml)\b/i`, `edit rules.md`.
-8. `repository tooling`, `/\b(?:pnpm|turbo|vitest|tsc)\b|\bgen:[a-z]/`, `run pnpm test`.
+7. `a repository file`, `/\b[\w-]+\.(?:md|ts|mjs|json|ya?ml|toml)\b/i`, `edit rules.md`.
+8. `repository tooling`, `/\b(?:pnpm|turbo|vitest|tsc)\b|\b(?:gen|validate|check):[a-z]/`, `run pnpm test`.
 9. `a snapshot folder`, `/\birislib\b|\birissys\b/`, `read irislib`.
+
+(The code review widened classes 1, 3, 4, 5, 7 and 8 and narrowed class 2 to "a bare `#n`"; see the Spec Change Log.)
 
 A problem is `{ label, className, match }`, where `match` is the first match. The CLI prints `  - [internal-reference] <label>: <className> (<match>)`.
 
@@ -446,7 +509,7 @@ validate-prompts: OK — tool presets: 24 file(s) declare one (12 core, 6 develo
 
   Write the dash as `\u2014`, like line 1. The 24 are 12 workflow plus 12 pack copies. The 15 are 6 knowledge, 6 pack knowledge, 2 pack rule forms and 1 rule. 24 + 15 = 39 content files. The two exempted lines are the SQL skill's `knowledge:` and `pack:` copies.
 
-**The catalog template.** The renderer output for the real tree is 11,611 bytes, 48 lines, sha256 `4806e801f7a9dff2eae1d4099a6dc481d5d2ea410407584fca76e22e85c99b82`, ASCII. Slots are in `<>`. Each list is sorted by name, and an empty list renders `None.`. Without a readable description, an entry renders `(no description could be read from its frontmatter)`. ` (tool preset `<p>`)` appears only when a valid preset is declared. A rule's title is its first line matching `^#{1,6}[ \t]+(.+?)[ \t]*$` (a trailing CR removed), or else its stem.
+**The catalog template.** The renderer output for the real tree is 11,648 bytes, 48 lines, sha256 `bdd1b54f06327f00af5a46b07457e3f4a6380a97479e3225afabf3b8ed5becd3`, ASCII (after the code review's description corrections; it was 11,611 bytes, `4806e801...`). Slots are in `<>`. Each list is sorted by name, and an empty list renders `None.`. Without a readable description, an entry renders `(no description could be read from its frontmatter)`. ` (tool preset `<p>`)` appears only when a valid preset is declared. A rule's title is its first line matching `^#{1,6}[ \t]+(.+?)[ \t]*$` (a trailing CR removed), or else its stem.
 
 ~~~text
 <!-- DO NOT EDIT. This directory is generated by `pnpm gen:pack` from the pack sources. Edit the sources, then regenerate. -->
@@ -585,7 +648,7 @@ No AC contradicts an AD. AD-28's "holding only `name` and `description`" itself 
 
 **Commands:**
 
-- `(loop)` `shasum -a 256 skills/*/SKILL.md packages/client-config/skills-pack/README.md` -- expected: the 12 golden values and the catalog's `4806e801...`.
+- `(loop)` `shasum -a 256 skills/*/SKILL.md packages/client-config/skills-pack/README.md` -- expected: the 12 golden values and the catalog's `bdd1b54f...` (it was `4806e801...` before the code review).
 - `(loop)` `pnpm gen:skills` twice, then `pnpm gen:skills:check` -- expected: no change on the second run, and `13 generated file(s)`.
 - `(loop)` `pnpm gen:pack` twice, then `pnpm gen:pack:check` -- expected: `22 pack file(s)`.
 - `(loop)` `pnpm validate:prompts`, then `pnpm check:provenance` -- expected: the unchanged line 1 and the golden line 2; `1 provenance row(s), 39 agent file(s), 8 distribution(s)`.
@@ -666,6 +729,81 @@ No AC contradicts an AD. AD-28's "holding only `name` and `description`" itself 
 
 **Commands run (review pass, after the last patch).** `(loop)` groups green again: the nine-file validator/pack group, the five-file wire group (live gates skipped), the four `story-41-1-qa-*` files, the two `story-41-3-qa-*` files, `story-41-4-qa-first-row-process` with the `story-41-2-qa-*` files, and shared `prompts.test.ts`. `gen:skills` and `gen:pack` (twice each) changed nothing; the 12 `SKILL.md` and the catalog still equal their golden sha256 values. `(once)`, run once after the last patch: `pnpm --filter <pkg> test` for shared (2072), dev (1663), admin (498), interop (672), ops (350) and client-config (514); `type-check` and `lint` for the same six (0 errors; the one shared lint warning is in untouched `cli/governance.ts`); the full `@iris-mcp/all` suite in three calls over 117 files (873 + 1138 + 808 passed, 1 + 2 + 1 skipped; the three review-pass rows account for +4 against the implement stage); `gen:governance-baseline:check` OK (141 frozen keys), `gen:tools-list-snapshot:check` OK (115 of 115), `node scripts/check-epics-sync.mjs` OK, `git diff --stat packages/shared/src/bootstrap-classes.ts` empty (`BOOTSTRAP_VERSION` stays `5296a1c836f4`), `gen:skills:check` 13 files, `gen:pack:check` 22 files, `check:provenance` "1 provenance row(s), 39 agent file(s), 8 distribution(s)".
 
+**QA (2026-10-19): real-runtime gap tests.** Four new test files and one helper, all in `packages/iris-mcp-all/src/__tests__/`, in the default suite (`*.test.ts`, none excluded; none arms on `IRIS_REQUIRE_LIVE`, so none belongs in a prepublish roster). No IRIS, no network; each server is started with `default` on the closed port 127.0.0.1:9.
+
+- `story-41-5-qa-fixture.ts` (QA): helper only; a fresh-Node-process import of a built prompts module, a frontmatter reader that does not use `skills-pack.mjs`, and a listing of the 39 content files.
+- `story-41-5-qa-dist-consumer.test.ts` (QA, 28 tests): a fresh Node process finds `skill` on all 12 definitions; a real SDK `Client` over stdio; the raw JSON-RPC frames of each prompt server read without the SDK; `prompts/get` with `arguments` omitted for the 4 all-optional prompts; `arguments: {}` renders the bytes of the generated skills at 9ae509b (sha256 captured with `git show 9ae509b:skills/<name>/SKILL.md`).
+- `story-41-5-qa-preset-oracle.test.ts` (QA, 47 tests): each of the 5 built servers is started under `IRIS_TOOLS_PRESET=core|developer|full` and its `tools/list` is the oracle for the first-of-core/developer/full rule over all 39 content files; independent of `validate-prompts-core.mjs` and the rosters. Also the spec's preset table, source/pack-copy parity and the dist definitions' presets.
+- `story-41-5-qa-gen-skills-refusal.test.ts` (QA, 19 tests): `gen:skills` and `gen:skills --check` on scratch copies, 9 kinds of invalid `skill` field, a stale `skills/` tree for write mode and an up-to-date tree for `--check`, each with a repaired control.
+- `story-41-5-qa-yaml-consumer.test.ts` (QA, 39 tests): every `SKILL.md` frontmatter parsed with the real `yaml` package of client-config in a fresh process, checked against the Agent Skills shape, with 4 negative controls.
+
+- mutation: Q1 (a fresh process finds `skill`) the `skill` block removed from `runExternalBackup.ts`, ops rebuilt → `story-41-5-qa-dist-consumer.test.ts` red: ops "every definition carries a skill-only field", "the 12 definitions equal the 12 generated skills", "never carry its skill description", and 2 raw-frame rows; `story-41-5-qa-preset-oracle.test.ts` 1 red (the built definitions' preset). Reverted, ops rebuilt.
+- mutation: Q2 (no `skill` member on the wire) the `prompts/list` handler wrapped to add a top-level `skill` to each entry, shared rebuilt → dist-consumer 4 red (the 4 "prompts/list frame holds exactly name, title, description and arguments" rows) and shared `prompts.test.ts` 1 red; `story-41-2-qa-prompts-stdio-wire.test.ts` stays 35/35 green, because the SDK client's parse drops a key it does not know (shown: `ListPromptsResultSchema.safeParse` of `{name, skill}` returns `{name}`). Reverted, shared rebuilt.
+- mutation: Q3 (`arguments` omitted entirely, rule #46) the `prompts/get` handler wrapped to turn an omitted `arguments` into `{}`, shared rebuilt → dist-consumer 6 red (admin, interop and ops, each the SDK row and the raw-frame row; dev has no all-optional prompt); `story-41-2-qa-prompts-stdio-wire.test.ts` stays green, because its row accepts a render or a refusal. Reverted, shared rebuilt.
+- mutation: Q4 (the prompt's own preset) `runExternalBackup.ts` `skill.preset` "full" changed to "core", ops rebuilt, generated files left as they were → dist-consumer 1 red ("the 12 definitions equal the 12 generated skills") and preset-oracle 1 red ("the built prompt definitions declare the preset the oracle computes"); `pnpm validate:prompts` stays green and `pnpm gen:skills:check` reports DRIFT for `skills/run-external-backup/SKILL.md` and `skills/README.md`. Reverted, ops rebuilt.
+- mutation: Q5 (declared presets against the real servers) the pack copy of `edit-and-test-class` widened from core to developer and `skills/deploy-and-test-class` narrowed from developer to core → preset-oracle 4 red (the two file rows, the spec-table row, the source/pack parity row). Reverted.
+- mutation: Q6 (the oracle can vary) `{ IRIS_TOOLS_PRESET: preset }` replaced by `{}` where the oracle starts each server → preset-oracle 15 red (the "core and developer each hide tools" row, 12 file rows, the table row, the definitions row). Reverted.
+- mutation: Q7 (`gen:skills` refuses before writing) the guard of `gen-skills.mjs` changed to `process.exitCode = 1` plus skipping each invalid prompt → `story-41-5-qa-gen-skills-refusal.test.ts` 18 red of 19 (9 write-mode rows on a stale tree, 9 `--check` rows); `validate-prompts-pack-checks.test.ts` (15), `skills-generated-frontmatter.test.ts` and `gen-skills-stray-file.test.ts` (36) stay green, because their stub is broken from the first prompt (a missing `skill` crashes the README render before any write) and the tree it compares was already up to date. Reverted.
+- mutation: Q8 (a real YAML parser reads the frontmatter) the `name` of the pack copy of `trace-message-flow` changed to `Trace-Message-Flow` → `story-41-5-qa-yaml-consumer.test.ts` 1 red (that file's row). Reverted.
+- After every revert `git diff --stat` and `git status --short` showed only the QA files and this spec; generated files and dists were rebuilt or regenerated where a mutation needed it (`gen:skills:check` 13 files, `gen:pack:check` 22 files, `validate:prompts` golden lines, `check:provenance` unchanged).
+- Either order: the four test files ran with `--sequence.shuffle --sequence.seed=20261019` and `--sequence.seed=77`: 133 of 133 passed. The `(loop)` groups still pass (566, 121, 118, 63, 137 and shared 18).
+
+**QA enumeration check (rule #56; report only, no class was widened).** Each item was run through `validate:prompts` in a scratch copy, or read from the real tree. Passing means the nine classes do not catch it.
+
+- In the real tree, outside the scanned set: the pack `README.md` (shipped in the npm tarball, `files: ["skills-pack"]`) opens with a comment naming `pnpm gen:pack`; `skills/README.md` names `Epic 25`, `scripts/gen-skills.mjs`, `scripts/validate-prompts.mjs`, `packages/<server>/src/prompts/` and `pnpm gen:skills`; neither is a `listAgentContentFiles` source.
+- In the real tree, inside the scanned set but uncaught: `check-system-health` says its areas are "informational in v1".
+- On the wire, outside both validator scans: a prompt's `arguments` (name and description) are in `prompts/list` but not in `renderPromptText`. A scratch stub with `See Rule #7 and run pnpm.`, `Read packages/shared/src.` or an unknown `iris_not_a_real_tool` in an argument description passes (exit 0). Three real argument descriptions name tools (`iris_env_promote`, `iris_env_diff`, `iris_production_status`), so a rename would not break the build for them.
+- Spelling variants that pass: `Rule 16` and `decision 15` (no `#`); `AC 41.5.1`, `AC41.5.1`, `NFR 12`, `FR12`, `AD28`, `DW 615`; `epic-41`, `Epic41`, `story-41-5`, `Stories 41.2 and 41.3`, `S41.5`, `wave 7`, a bare `41.5`; `GH-123`, `PR 45`, `issue 12`, `JIRA-123`; `spec-41-5`, `41-5-workflow-skills-refresh`.
+- Tooling and files that pass: `validate:prompts`, `check:provenance`, `gen-skills`, `gen-pack`, `npm run build`, `yarn`, `eslint`, `changeset`; `tsconfig`, `CHANGELOG`, `README`, `.gitignore`, `node_modules`, and any name ending `.js`, `.cjs`, `.yml`, `.sh` or `.cls`.
+- Paths and environment that pass: `./scripts/helper`, `../packages/shared`, `~/git/...`, `C:\git\...`, `c:/git/.../src/ExecuteMCPv2`, `file:///...` (the last two forms are already in the Residual risks), `ExecuteMCPv2/REST/Dispatch`, the namespace `HSCUSTOM`, `localhost:52773`, the repository name `iris-execute-mcp-v2`, `ExecuteMCPv2.Temp.Probe`, `IRIS_REQUIRE_LIVE`, `BOOTSTRAP_VERSION`, a commit hash, `IRIS 2026.2 Build 221U`.
+- Process words that pass: the architecture spine, ledger, retrospective, burn-down, BMAD, Project Lead, orchestrator, project rules, golden, oracle, mutation. The two forms with a `#` (`decision #15`) and `pnpm` are caught.
+
+**Mutation evidence (code review, 2026-10-19).** Each mutation was applied, run, observed red and reverted. After each revert, the snapshot hash of `git status --short`, `git diff` and the sha256 of every untracked file equalled the one taken before the first mutation (`5b7898aa0b4a93a224aaeafca927c578970716266f93e6f787276c6a485ff406`). A rebuild followed each revert that needed one.
+
+- mutation: P1 (AC 41.5.4, a prompt's argument text is scanned). `promptSourceText` returns the rendered text and the skill description without the argument lines → 2 red: the source-text unit row in `validate-prompts.test.ts`, and the title, description, body and argument CLI row in `validate-prompts-pack-checks.test.ts`. Reverted.
+- mutation: P2 (the CLI builds a prompt's text through the core). The CLI's prompt text is replaced by `prompt.skill?.description` alone → `validate-prompts-pack-checks.test.ts` 1 red, the same CLI row. The real-tree rows and the skill-description row stay green, which is the gap that row closes. Reverted.
+- mutation: P3 (AC 41.5.4, the rule leg). The CLI drops the `rule:` and `pack:rules/` sources from the internal-reference call → `validate-prompts-pack-checks.test.ts` 1 red, the rule row. Every other row and the real tree stay green. Reverted.
+- mutation: P4 (I/O row "Across servers", on the CLI path). M6 is re-applied for each source: every token is looked up in the first owner of the source's first token → 4 red. In `validate-prompts.test.ts` these are the three unit rows M6 named. In `validate-prompts-pack-checks.test.ts` it is the cross-server CLI row, whose green leg now exits 1. Reverted.
+- mutation: P5 (the widened and narrowed classes). The seven changed patterns are restored to their pre-review form → `validate-prompts.test.ts` 17 red. That is the 12 spelling rows, the 4 accept rows (`i#2`, `Read x#5`, `error #5659`, `&#169;`) and the `Rule#7` row. Reverted.
+- mutation: P6 (each prompt's preset over its widened text). `recoverStuckProduction.ts` `skill.preset` goes from `core` to `developer`, with interop rebuilt → `validate-prompts.test.ts` 1 red ("each prompt's own skill.preset is the first preset ..."). Reverted, interop rebuilt.
+- mutation: V4a (AC "Unchanged counts", the `check:provenance` leg). `check-provenance.mjs` prints `agentFiles + 1` → 5 red across `story-41-1-qa-provenance-cli.test.ts` and `story-41-4-qa-first-row-process.test.ts`. Reverted.
+  - The governance-baseline, tools-list-snapshot and bootstrap legs are the pre-existing `(once)` gates. This story changes none of their inputs, so they were not re-mutated.
+- mutation: V4b (AC 41.5.3, `13 generated file(s)`). `gen-skills --check` prints `files.size + 1` → `story-41-1-qa-pack-scratch-cli.test.ts` 2 red. Reverted.
+- mutation: V4c (I/O row "Grammar", the 41.3 process rows).
+  - The unknown-metadata-key refusal is disabled → `story-41-3-qa-frontmatter-process.test.ts` 1 red ("an unknown metadata key"). Reverted.
+  - M11 (`metadata` not an allowed field), re-run on the same file → 30 red, among them "accepts a metadata map that declares a tool preset". Reverted.
+- mutation: V4d (the inverted 41.3 knowledge rows). Classes 1 and 3 become `/(?!)/` → `story-41-3-qa-knowledge-gate-process.test.ts` 3 red (the rule number, the DW id and the AD id). Reverted.
+- mutation: V4e (the changed 41.1 knowledge fixture). `declaredToolPreset` always returns `null` → `story-41-1-qa-validate-prompts-pack.test.ts` 3 red, among them "good knowledge and rule sources are counted by kind once the pack is built". Reverted.
+- mutation: V4f (the real-tree "declares one tool preset" row). `readSkillFrontmatter` no longer records a metadata value → `skills-pack-frontmatter.test.ts` 6 red, among them "each workflow skill declares one tool preset in its metadata, and no knowledge skill declares any". Reverted.
+- mutation: Q1, re-run (lead item 5, after the helper tightened). The `skill` block is removed from `runExternalBackup.ts`, with ops rebuilt → red as recorded: 5 rows of `story-41-5-qa-dist-consumer.test.ts` and 1 of `story-41-5-qa-preset-oracle.test.ts`. Reverted, ops rebuilt.
+- mutation: Q8, re-run (the YAML consumer now reads its blocks from stdin). The pack copy's `name: trace-message-flow` becomes `Trace-Message-Flow` → `story-41-5-qa-yaml-consumer.test.ts` 1 red. Reverted.
+- Not re-mutated, with reasons:
+  - **The two real-tree fingerprints** (`afterAll` in `validate-prompts-pack-checks.test.ts` and `story-41-5-qa-gen-skills-refusal.test.ts`). Showing them red needs a write into the real tree, which this review may not make. Each compares two fingerprints that the same function takes.
+  - **The three corrected descriptions.** They are pinned by the oracle rows whose red M1 showed. The mechanism is unchanged, and M1's "around the change" is still in the description.
+- Either order: the 8 added or changed test files ran with `--sequence.shuffle --sequence.seed=20261019` and with `--sequence.seed=4242`, 287 of 287 green both times.
+
+**Commands run (code review, after the last patch).**
+- Rebuilds: dev and interop after the description fixes, ops after Q1, interop after P6. Then `pnpm gen:skills` twice, `gen:skills:check` (13 files), `pnpm gen:pack` twice, and `gen:pack:check` (22 files).
+- `node scripts/validate-prompts.mjs`: both golden lines unchanged.
+- `pnpm check:provenance`: "1 provenance row(s), 39 agent file(s), 8 distribution(s)".
+- `gen:governance-baseline:check` OK, `gen:tools-list-snapshot:check` OK (115), `node scripts/check-epics-sync.mjs` OK, and `git diff --stat packages/shared/src/bootstrap-classes.ts` empty.
+- The test groups:
+
+  | Group | Tests | Note |
+  | --- | --- | --- |
+  | The nine-file validator/pack group | 589 | |
+  | The four `story-41-5-qa-*` files | 132 | |
+  | The five-file wire group | 121 | live gates skipped |
+  | The `story-41-1-qa-*` files | 118 | |
+  | The `story-41-3-qa-*` files | 63 | |
+  | `story-41-4-qa-first-row-process` with the `story-41-2-qa-*` files | 129 | |
+  | Shared `prompts.test.ts` | 18 | |
+  | `@iris-mcp/dev` | 1663 | |
+  | `@iris-mcp/interop` | 672 | |
+  | The full `@iris-mcp/all` suite, 121 files in three calls | 975 + 1132 + 867 | 1 + 2 + 1 skipped |
+- `type-check` and `lint` for dev and interop were clean.
+- An ad hoc `tsc --noEmit` (bundler resolution) over the changed `@iris-mcp/all` tests found no error on a changed line. Those tests have no type-check or lint script of their own.
+
 ## Auto Run Result
 
 Status: done
@@ -689,8 +827,13 @@ Blocking condition: none
 - **Verification.** Every `(loop)` and `(once)` command of `## Verification` ran green after the last patch (listed above). Mutations M1 to M13 and N1 to N9 were each applied, observed red and reverted with a byte-identical tree; the preset, internal-reference and DW-623 checks are proven red on the real CLI path, through `validate:prompts` on the real tree (M3, M7, M8b, M10c, M13) and through scratch copies (`validate-prompts-pack-checks.test.ts`).
 - **Residual risks.**
   - The live gates A5 and P6 were edited but not executed (unarmed; no IRIS call).
-  - The per-server preset lookup is pinned by unit rows only; no real-tree skill needs it to differ from a first-owner lookup (M6 line).
-  - The absolute-path class knows POSIX roots only, and a `./` or `../` prefixed repository path passes the repository-path class; both are the decided patterns.
+  - The per-server preset lookup was pinned by unit rows only; no real-tree skill needs it to differ from a first-owner lookup (M6 line). Closed by the code review: a scratch CLI row with an ops tool and admin's `iris_database_manage` (mutation P4).
+  - The absolute-path class knows POSIX roots only; both are the decided patterns. (A `./` or `../` prefixed repository path is caught since the code review.)
+  - Code review, the internal-reference enumeration as of 2026-10-19 (Rule #56; mirrored under the CHANGELOG's Known limits). Every item was run through the check on the real repository entries.
+    - **Spellings that pass.** Planning words: `Rule 16` with no `#` (left out because interoperability routing rules are numbered in legitimate text), `decision 15`, `wave 7`, a bare `41.5`, `S41.5`, a story key, `spec-41-5`, `GH-123`, `PR 45`, `issue 12` and `JIRA-123`. Tools and files: `gen-skills`, `gen-pack`, `npm run build`, `yarn`, `eslint`, `changeset`, `tsconfig`, `CHANGELOG`, `README`, `.gitignore`, `node_modules` with no `/` after it, and `.js`/`.cjs`/`.sh`/`.cls` names. Paths and environment: `~/git/...`, Windows paths and `file:///C:/...`, `ExecuteMCPv2/...`, `IRIS_REQUIRE_LIVE`, `BOOTSTRAP_VERSION`, a commit hash, a build string and the repository's name. Process words: spine, ledger, retrospective, burn-down, BMAD, Project Lead, orchestrator, project rules, golden, oracle, mutation.
+    - **Legitimate text that is flagged.** A path under a top-level name of this repository (`src/`, `docs/`, `.claude/`, any untracked root entry), and the file names `AGENTS.md`, `CLAUDE.md`, `.mcp.json` and `package.json`.
+    - **Deliberately not flagged:** `npm`, `npx`, `ExecuteMCPv2`, `HSCUSTOM` and `localhost:52773`.
+  - Code review: the presets are not nested, and only the CHANGELOG says so; routed to Story 41.7's docs as DW-624.
 
 **Plan stage (2026-10-19).** Halted after planning, as directed.
 
