@@ -3367,8 +3367,39 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: med | footprint: in-epic
 - evidence: 41.2 implement review 2026-10-19 (recorded as a residual risk); no story plans an adapted rule
 - 2026-10-19T09:16:29Z status=wontfix-accepted owner=41-2-always-on-objectscript-pre-write-rule by=harvest note=reopen_if=a story adds a rule adapted from third-party content, or check:provenance reports a rule:<f> path that does not exist in the pack
+- 2026-10-19T09:50:16Z occurrence=41-2-always-on-objectscript-pre-write-rule
 
 ### DW-615: Live probes in Story 41.2 found the project's own agent rule files wrong in places: object-script-testing.md (typed MultiDimensional properties compile; %OnNew-Private holds only when the parent's %OnNew is public; the macro list omits AssertNotTrue and others), iris-objectscript-basics.md (an empty abstract body compiles; // is a valid comment; % names are a convention; the New $NAMESPACE example is environment-dependent) and project rule #7 (Use dev::("") clears the mnemonic but leaves redirection on)
 - source: _bmad-output/implementation-artifacts/spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 41.2 plan probes 2026-10-19 (26 Probe412 classes, IRIS 2026.2 build 221U); the full list is under Flagged for the retro in the spec; retros are skipped this run, so the flag would otherwise be lost
 - 2026-10-19T09:16:29Z status=decision-pending owner=burndown by=harvest note=human=the user decides whether to correct .claude/rules/object-script-testing.md, iris-objectscript-basics.md and project rule #7 (agent instruction files are the user's to edit)
+
+### DW-616: The AGENTS.md marker-reading contract Story 41.2 defined has no owner in Story 41.6: report, never guess, on a missing or repeated own marker; a BOM before line 1; end the last line before appending; and the reader rows of story-41-2-qa-agents-md-consumer.test.ts run only a test-local reader
+- source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 41.2 code review 2026-10-19: AC 41.6.2 lists CRLF, BOM, no-final-newline and foreign-block fixtures but not two BEGIN or END lines of our own; 16 of the consumer test's 60 rows exercise only its own locateBlock
+- 2026-10-19T09:50:06Z status=routed owner=41-6-skills-and-rules-installer by=cr note=41.6 refuses (never guesses) an ambiguous own block and points the 41.2 consumer rows at its real locate/replace
+
+### DW-617: A prompts/get that omits the optional arguments field is refused with -32602 for every prompt whose arguments are all optional (audit-security-posture, recover-stuck-production, check-system-health, run-external-backup); CR 25.1-6 closed it as an SDK v1 limitation
+- source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: 41.2 QA over stdio saw -32602 on all four; server-base.ts registerPrompt passes an argsSchema whenever a prompt declares arguments; after the retirement no shipped prompt renders from an omitted arguments
+- 2026-10-19T09:50:06Z status=routed owner=43-1-framework-migration-to-sdk-v2 by=cr note=43.1 rewrites prompt registration on SDK v2: render all-optional prompts from an omitted arguments; pin it in AC 43.1.3
+
+### DW-618: .changeset/epic35-defect-gate.md still says the objectscript-review prompt got a wording fix, so the first changeset version lists a fix to a prompt the same release removes
+- source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.2 code review 2026-10-19: .changeset/epic35-defect-gate.md:11; AC 41.2.2 names this file as one that may keep the name
+- 2026-10-19T09:50:16Z status=by-design owner=41-2-always-on-objectscript-pre-write-rule by=cr note=AC 41.2.2 exempts this file; it records a true Epic 35 change, and the 41.2 changeset records the removal
+
+### DW-619: gen:pack refuses a Finder .DS_Store (gitignored) in skills-pack-src/rules/ or at its top level, so gen:pack:check and the real-tree tests go red on a macOS checkout over a file git never shows
+- source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: 41.2 code review 2026-10-19: assemblePack refuses every rules/ entry that is not a flat <name>.md; skills-pack-rule.test.ts UNKNOWN_ENTRIES pins .DS_Store as refused; .gitignore:25
+- 2026-10-19T09:50:16Z status=by-design owner=41-2-always-on-objectscript-pre-write-rule by=cr note=spec matrix 'Unknown rule entry' refuses any non-.md file; the message names the file, so the remedy is to delete it
+
+### DW-620: The typed-out agents-md section oracle is written three times: sectionOf in skills-pack-rule.test.ts, expectedSection in story-41-1-qa-pack-scratch-cli.test.ts and sectionOf in story-41-2-qa-agents-md-consumer.test.ts
+- source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: 41.2 code review 2026-10-19 (Rule 2, weak reason): independence from skills-pack.mjs argues for one typed-out copy in pack-fixture.ts, not three
+- 2026-10-19T09:50:16Z status=wontfix-accepted owner=41-2-always-on-objectscript-pre-write-rule by=cr note=reopen_if=the IRIS-MCP-RULE marker grammar changes, or a fourth typed-out copy of the section oracle is added
+
+### DW-621: The changeset check of story-41-2-doc-claims.test.ts, like 9 other doc-claims files, skips when the changeset is missing, so a deleted or misnamed changeset leaves the suite green
+- source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: 41.2 code review 2026-10-19: it.skipIf(!changesetPresent) at story-41-2-doc-claims.test.ts:92; the skip exists because changeset version consumes the file
+- 2026-10-19T09:50:16Z status=wontfix-accepted owner=41-2-always-on-objectscript-pre-write-rule by=cr note=reopen_if=the Epic 42 release gate runs changeset version without checking each story changeset still exists

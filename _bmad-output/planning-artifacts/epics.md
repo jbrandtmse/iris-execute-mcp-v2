@@ -5616,6 +5616,13 @@ Embedded SQL, IRIS system-class discipline, and interoperability patterns. Adapt
   An existing `AGENTS.md`, `CLAUDE.md` or instructions file is preserved byte for byte outside the marked block. The fixtures are varied (Rule #58): CRLF, a BOM, comments, no trailing newline, and an existing foreign block.
 - **AC 41.6.3** — When a project has a `CLAUDE.md`, the Claude Code route uses `.claude/rules/`, and the installer reports how to import `AGENTS.md` (`@AGENTS.md`) instead of assuming it is read.
 - **AC 41.6.4** — It is a CLI command on `iris-mcp-clients`. The extension UI is out of scope.
+- DW-616: the `AGENTS.md` marker-reading contract that Story 41.2 defined has no implementation owner until this installer exists. It must:
+  - report, and never guess, when its own marker is missing, repeated or out of order;
+  - decide whether a BOM before line 1 belongs to that line;
+  - end a last line that has no newline before appending a block;
+  - replace the test-local reader in `story-41-2-qa-agents-md-consumer.test.ts` with the installer's real one.
+
+  (ledger; routed by the Story 41.2 code review 2026-10-19)
 
 ### Story 41.7: Skills Pack Docs and Capstone
 
@@ -5892,6 +5899,7 @@ DW-441.
   - `bootstrap-classes.ts` is absent from the diff;
   - `pnpm audit` on production dependencies is recorded, and the HTTP-stack advisories that v1 carried are expected to drop.
 - DW-579: a `tools/call` that the MCP SDK rejects as schema-invalid never reaches `handleToolCall`, so it is never audited (AD-3 step 1, Zod validation; AD-19, one audit entry per call). This story rewrites the call path for SDK v2: make a schema-invalid call produce its single audit entry, outcome `error`, with no argument values logged. (ledger; routed by merge_gate 2026-10-17, orchestrator decision #33)
+- DW-617: a `prompts/get` that omits the optional `arguments` field is refused with -32602 for every prompt whose arguments are all optional (`audit-security-posture`, `recover-stuck-production`, `check-system-health`, `run-external-backup`). CR 25.1-6 closed this as an SDK v1 limitation because a fix meant rewriting prompt registration, which this story does. On SDK v2, make such a request render the prompt, and pin it with a real SDK client that omits `arguments` entirely (Rule #46). (ledger; routed by the Story 41.2 code review 2026-10-19)
 
 ### Story 43.2: Serve MCP Revision 2026-07-28
 
