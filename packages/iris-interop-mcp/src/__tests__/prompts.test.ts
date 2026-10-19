@@ -66,7 +66,6 @@ const FOREIGN_PROMPT_NAMES = [
   "check-system-health",
   "run-external-backup",
   "diagnose-slow-query",
-  "objectscript-review",
   "deploy-and-test-class",
   "edit-and-test-class",
   "provision-project-environment",

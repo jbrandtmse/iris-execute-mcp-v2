@@ -20,7 +20,15 @@ import { spawnSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { extractLicenseBlock } from "../../../../scripts/lib/provenance-core.mjs";
 import { NPM_PACK_ARGS } from "../../../../scripts/lib/provenance-inputs.mjs";
-import { assemblePack, NOTICE_FILENAME, PACK_DIR, PACK_SOURCE_DIR, WORKFLOW_SKILLS_DIR } from "../../../../scripts/lib/skills-pack.mjs";
+import {
+  ALWAYS_ON_RULE_FILENAME,
+  assemblePack,
+  NOTICE_FILENAME,
+  PACK_DIR,
+  PACK_SOURCE_DIR,
+  RULE_FORM_DIRS,
+  WORKFLOW_SKILLS_DIR,
+} from "../../../../scripts/lib/skills-pack.mjs";
 import { makeTempRoot, removeTempRoot, REPO_ROOT } from "./pack-fixture";
 import { QUIET_NPM_ENV, sha256, walkFiles } from "./story-41-1-qa-fixture";
 
@@ -99,20 +107,24 @@ describe("the real tarball built by npm pack --ignore-scripts (AC 41.1.1 Integra
     const committed = walkFiles(join(REPO_ROOT, PACK_DIR));
     const extracted = walkFiles(join(extractDir, "package", "skills-pack"));
     expect(extracted).toEqual(committed);
-    expect(committed.length).toBeGreaterThanOrEqual(15);
+    expect(committed.length).toBeGreaterThanOrEqual(16);
   });
 
-  it("carries the notice, the pack README and all 13 workflow SKILL.md files at the expected paths", () => {
+  it("carries the notice, the pack README, both forms of the always-on rule and all 12 workflow SKILL.md files at the expected paths", () => {
     const base = join(extractDir, "package", "skills-pack");
     expect(existsSync(join(base, NOTICE_FILENAME))).toBe(true);
     expect(existsSync(join(base, "README.md"))).toBe(true);
+    for (const dir of Object.values(RULE_FORM_DIRS)) {
+      expect(existsSync(join(base, dir, ALWAYS_ON_RULE_FILENAME)), `${dir}/${ALWAYS_ON_RULE_FILENAME}`).toBe(true);
+    }
     const workflowSkills = readdirSync(join(REPO_ROOT, WORKFLOW_SKILLS_DIR), { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name);
-    expect(workflowSkills).toHaveLength(13);
+    expect(workflowSkills).toHaveLength(12);
     for (const name of workflowSkills) {
       expect(existsSync(join(base, "skills", name, "SKILL.md")), `skills/${name}/SKILL.md`).toBe(true);
     }
+    expect(existsSync(join(base, "skills", "objectscript-review")), "the retired prompt's skill is not shipped").toBe(false);
   });
 
   it("every extracted pack file is byte-identical to the committed pack file", () => {

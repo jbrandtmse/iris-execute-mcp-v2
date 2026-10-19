@@ -4,7 +4,8 @@
 // Builds the IRIS MCP skills pack, `packages/client-config/skills-pack/`, from its two source trees:
 // the generated workflow skills in `skills/` (owned by `gen-skills.mjs`) and the hand-authored sources
 // in `skills-pack-src/` (knowledge skills, the always-on rule, the notice). Every pack file is a byte
-// for byte copy of its source, except the generated pack README. The assembly rules and the layout live in
+// for byte copy of its source, except the generated pack README and each rule's `AGENTS.md` section form
+// (the source bytes between two marker lines). The assembly rules and the layout live in
 // scripts/lib/skills-pack.mjs; the tree synchronisation is shared with gen-skills.mjs
 // (scripts/lib/generated-tree.mjs).
 //
@@ -19,8 +20,9 @@
 //
 //   npm: `pnpm gen:pack` / `pnpm gen:pack:check`
 //
-// A skill name defined in both sources, a knowledge skill without a SKILL.md, or an unknown entry in
-// skills-pack-src/ exits 1 before anything is written.
+// A skill name defined in both sources, a knowledge skill without a SKILL.md, an unknown entry in
+// skills-pack-src/ or in skills-pack-src/rules/, or a rule source with frontmatter exits 1 before
+// anything is written.
 // ----------------------------------------------------------------------------
 
 import { resolve, dirname } from 'path';

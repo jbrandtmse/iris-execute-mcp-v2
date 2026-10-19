@@ -2,9 +2,10 @@
 title: 'Story 41.2: Always-On ObjectScript Pre-Write Rule'
 type: 'feature'
 created: '2026-10-19'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '751b736f0583f7f0c8b3afa41f63f2d8946aad86'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
@@ -238,6 +239,43 @@ deferred: []
   - **Constraints on the live check (decision #6).** It runs only in the stage's scratchpad project, never in the repository. Its only write is `ExecuteMCPv2.Temp.Probe412Live`. The copied credentials are deleted with the directory, and the recorded `total_cost_usd` must stay within the USD 1 cap per session.
 
 ## Review Triage Log
+
+### 2026-10-19 — Review pass
+- verdicts: 29 findings — high 0, medium 4, low 18, false 7, maybe-false 0
+- findings:
+  - Blind Hunter
+    - `[low]` `[patch]` The generated pack README still said "`rules/`: the always-on rule, in the forms each client reads" and never named the two form directories or the markers — `renderPackReadme` now names `rules/claude-code/<name>.md` and `rules/agents-md/<name>.md` with the marker lines, and the pack was regenerated.
+    - `[low]` `[reject]` No guard against a rule source that holds its own marker line — a maintainer-authored, single reviewed rule; the guard is a new refusal branch beyond a direct correction, and the 41.6 installer must treat duplicate or nested markers in a user's hand-edited `AGENTS.md` defensively in any case. Grouped with the Edge Case Hunter and verification-gap sightings.
+    - `[false]` `[reject]` The `agents-md` form embeds BOM, invalid UTF-8 and CRLF bytes unchanged — the matrix row "Byte variants (#58)" requires byte-identical bytes between the marker lines, and the real rule is ASCII with LF endings (pinned).
+    - `[low]` `[reject]` The "no stale build output" test reads `dist/prompts` unguarded and is a proxy for dev's tarball — a missing build fails loudly like every other dist-reading test of the package (the spec requires built dists); dev's `npm pack --dry-run` was run in the `(loop)` verification and lists no `objectscriptReview` file.
+    - `[low]` `[reject]` The 300-word cap passes by one word under the alphanumeric-token counter — the counter is the retired prompt's own (the spec's AC interpretation: the golden text is 299), and a later addition tripping the cap is the intended behavior.
+    - `[medium]` `[patch]` The retired prompt's `getPrompt({name})` call was the only Client-level render of a prompt that declares no arguments — `story-38-6-qa-edit-prompt-sdk-wire.test.ts` gained a fixture zero-argument prompt on the real built `McpServerBase` (mutation M19).
+    - `[low]` `[patch]` `tool_support.md` changed the counts without saying a prompt was removed — one retirement sentence added to its prompt tally paragraph and pinned in `story-41-2-doc-claims.test.ts`.
+    - `[low]` `[patch]` The CHANGELOG described the rule-name pattern as "lower-case words joined by hyphens" while the pattern also admits digits — reworded to "lower-case letters, digits and single hyphens". The changeset does not state the pattern.
+  - Edge Case Hunter
+    - `[low]` `[reject]` Marker line inside a rule source — same root cause as the Blind Hunter row above.
+    - `[low]` `[reject]` `listAgentContentFiles` keeps `packRel: rules/<f>` for a `rule:` source, so an adapted rule could never satisfy `check:provenance` — no rule is adapted or planned (the epic adapts skills only), the spec leaves `listAgentContentFiles` unchanged, and the fix needs a header-placement decision for the `agents-md` form. Recorded as a residual risk for any future story that adapts a rule.
+    - `[low]` `[reject]` Unguarded `readdirSync(dist/prompts)` and a build script that never cleans `dist` — same as the Blind Hunter dist row; changing the dev build script is outside the story, and the spec prescribes the clean rebuild and this test.
+    - `[medium]` `[patch]` Lost Client-level coverage of a zero-argument prompt — same root cause as the Blind Hunter row (fixture case, mutation M19).
+    - `[false]` `[reject]` The deleted checklist bullets (`%`/`_` prefixes, `///` against `//`, validate before switching to `%SYS`) have no counterpart — the probe log and "Flagged for the retro" settle each: the `//` advice is false, the `%` rule is a convention, and the `%SYS` advice is project-internal.
+    - `[low]` `[patch]` The CHANGELOG claimed its negative controls show "each content check" can fail while only the size, internal-reference and tool-name checks have them — reworded; the anchor and ASCII checks now carry mutations M14 and M15.
+  - Verification Gap
+    - `[medium]` `[patch]` Two AC 41.2.2 bullets (the CHANGELOG `### Removed` text; the name found only in retirement notes) had no pinning test — `story-41-2-doc-claims.test.ts` added (mutations M16 to M18).
+    - `[low]` `[patch]` Pinning tests with no `mutation:` line (probe anchors, ASCII and final LF, generated-copy absence, the final-LF branch, the BEGIN line, the form directories) — mutations M10 to M16 applied, observed red and recorded above.
+    - `[low]` `[patch]` `startsWith("---")` on the `agents-md` form is false by construction — the assertion skips the BEGIN line for that form (mutation M13).
+    - `[low]` `[reject]` The dev `dist` dependency of the stale-output test breaks "passes on a fresh environment" — a fresh environment is built by the project's recipe; same as the Blind Hunter dist row.
+    - `[low]` `[reject]` "is clean again after the refusals" is order-dependent and its `finally` assertions can mask a primary failure — the test is green on its own and goes red only when an earlier case leaks, which is its purpose; the masking is cosmetic.
+    - `[medium]` `[patch]` No real-SDK happy path for a zero-argument prompt remains — same root cause as the Blind Hunter row (fixture case, mutation M19).
+    - `[low]` `[reject]` `assemblePack` does not refuse a source that already holds a marker line — same root cause as the Blind Hunter row.
+  - Intent Alignment (descriptive; divergences logged as rows)
+    - `[false]` `[reject]` The always-on effect lives at the client surface, the diff pins bytes — the live check (AC 41.2.5) is the loading evidence and is recorded above (hook oracle, both legs); the `AGENTS.md` effect is Story 41.6's and the CHANGELOG's Known limits say so.
+    - `[false]` `[reject]` The marker contract is pinned on the producer side only — the first consumer is Story 41.6 (Design Notes, Consumed-by); the producer is pinned against typed-out literals.
+    - `[low]` `[reject]` Two claims have no probe row of their own ("`_` is the concatenation operator", "`Quit` a variable after the block") — language facts that rows P3, P5 and P6 bracket; a probe would add no information.
+    - `[false]` `[reject]` The word budget holds only under one counter — spec-bound, same as the Blind Hunter word-cap row.
+    - `[low]` `[reject]` Dev's `npm pack --dry-run` listing is not asserted by a test (the `dist` listing stands in) — dev ships `files: ["dist"]`, so the listing is exact, and the command was run in the `(loop)` verification.
+    - `[false]` `[reject]` Matrix rows "Real tree" are tested through scratch copies — the spec says the real tree is never written; committed bytes are compared on the real tree and `--check` was run on it.
+    - `[false]` `[reject]` The provenance fixtures were renamed from `objectscript-review` to `objectscript-style` — they are synthetic upstream-shaped paths, and the rename is what makes AC 41.2.2's `rg` sweep hold.
+    - `[low]` `[patch]` The generated pack README layout line was unchanged — same root cause as the first Blind Hunter row.
 
 ## Design Notes
 
@@ -574,7 +612,85 @@ No AC contradicts an AD. Decision 2 amends AD-28's wording ("renders nothing") i
 - **M8** (AC 41.2.2): re-register the prompt in `index.ts` and rebuild dev → the SDK list test and the `validate-prompts` count go red.
 - **M9** (AC 41.2.5, #59): the contrast leg of the live procedure is the red proof of the hook oracle.
 
+### Implementation record (implement stage, 2026-10-19)
+
+**`(loop)` commands run.** All from the repository root, in the foreground, one group per call.
+
+- Clean dev rebuild (`dist` and `tsconfig.tsbuildinfo` deleted, then `pnpm --filter @iris-mcp/dev build`): exit 0, `ls packages/iris-dev-mcp/dist/prompts | grep -c objectscriptReview` prints 0. Shared was rebuilt first, because `server-base.ts` changed (a comment).
+- `pnpm gen:skills` removed `skills/objectscript-review/SKILL.md` ("Generated 13 file(s) under skills/ from 12 prompt(s)"); `pnpm gen:skills:check`: `13 generated file(s) match source`. `skills/README.md` has 12 skill rows (`grep -c '^| \`'` prints 12).
+- `pnpm gen:pack` twice (the second run changed nothing, `git status` of the pack shows only the removed skill and the new `rules/`); `pnpm gen:pack:check`: `16 pack file(s) match their sources`. The `claude-code` form is `cmp`-identical to the source; the `agents-md` form starts with the BEGIN line and ends with the END line.
+- `pnpm validate:prompts`: `39 source(s) checked (12 prompt(s) + 27 content file(s): 12 workflow, 14 pack, 0 knowledge, 1 rule), 111 known tool name(s)`. `pnpm check:provenance`: `0 provenance row(s), 27 agent file(s), 8 distribution(s)`.
+- `npm pack --dry-run --json --ignore-scripts --offline`: client-config lists `skills-pack/rules/claude-code/iris-mcp-objectscript-pre-write.md` and `skills-pack/rules/agents-md/iris-mcp-objectscript-pre-write.md` and no `objectscript-review`; dev lists no `objectscriptReview` file (142 files).
+- The `@iris-mcp/all` vitest group of the `(loop)` list (11 files, including the new `skills-pack-rule.test.ts` with 81 tests): 385 passed. The `story-41-1-qa-*` files plus `changelog-bootstrap-move.test.ts` (5 files): 118 passed. `pnpm --filter @iris-mcp/dev test`: 68 files, 1663 tests passed. The admin, interop and ops `prompts.test.ts` and shared `prompts-guardrails.test.ts` pass.
+- Also run: dev `type-check` and `lint` (clean), `pnpm gen:governance-baseline:check` (OK), `node scripts/check-epics-sync.mjs` (OK), and `git diff --stat packages/shared/src/bootstrap-classes.ts` (empty; `BOOTSTRAP_VERSION` stays `5296a1c836f4`).
+
+**Mutations (Rule 19).** Each was applied, observed red, and reverted; the fingerprint of `git status --short`, `git diff` (spec excluded) and the hashes of the untracked files was identical before and after every one (`7ec4a7b0928caabd8cfc2a837fe828db64bdfd67`). Where a mutation changed the rule source, `gen:pack` was re-run before the test and after the revert.
+
+- mutation: M1, `---` plus `paths: ["**/*.cls"]` plus `---` prepended to the rule source -> `node scripts/gen-pack.mjs` exits 1 with "skills-pack-src/rules/iris-mcp-objectscript-pre-write.md has frontmatter; an always-on rule takes none (no paths:)", and `skills-pack-rule.test.ts` goes red (9 tests) on the real-tree forms-against-source tests ("neither form starts with frontmatter ...", "the claude-code form equals the source bytes") and on the scratch-copy CLI rows.
+- mutation: M1b, the frontmatter check in `assemblePack` disabled (`FRONTMATTER_OPENER.test('')`) -> the 7 frontmatter-refusal fixtures, their 7 CLI rows and the "clean again" row in `skills-pack-rule.test.ts` go red (15 failed).
+- mutation: M1c, the frontmatter opener widened to any leading `---` -> "accepts a rule source with a four-dash line" and "with a dash line with text after it" go red (2 failed).
+- mutation: M2, `renderAgentsMdSection` without the END line -> 19 tests red across `skills-pack-rule.test.ts` and `skills-pack.test.ts` (the section-form rows, the layout test, "committed pack matches its sources", "gen-pack --check passes on the committed tree").
+- mutation: M3, the `agents-md` body built through `bytes.toString('utf8')` -> "keeps the invalid-utf8 variant byte for byte in both forms" and the CLI byte-variant row go red (2 failed; the BOM variant survives a UTF-8 round trip, so only the invalid-UTF-8 fixture catches it).
+- mutation: M4, a 20-word bullet appended to the rule source, then `gen:pack` -> "has no problem a reader of the text would meet" goes red with "319 words, over the 300-word budget" (and the 16-bullet test with 17).
+- mutation: M5, "(see Rule #7)" added to the rule's first line, then `gen:pack` -> "keeps the IRIS error code ERROR #5001, which is no internal rule number" goes red with `['an internal rule number']` (the content test also reports the 302 words).
+- mutation: M6, `` `iris_doc_put` `` added to the rule's first line (300 words, so only this check fires), then `gen:pack` -> the content test goes red with `['a tool name: iris_doc_put']`; `validate:prompts` stays green, because the name is real, so the rule test is the only gate.
+- mutation: M7, `skills-pack-src/rules/nested/x.md` added -> `node scripts/gen-pack.mjs` exits 1 ("unknown entry in skills-pack-src/rules/: nested"), and `skills-pack.test.ts` and `skills-pack-rule.test.ts` go red on every real-tree and scratch-copy row.
+- mutation: M7b, the unknown-entry filter in `assemblePack` emptied (`.filter(() => false)`) -> the 9 unknown-entry fixtures, their 9 CLI rows, the "clean again" row and the 3 rules/ rows of `skills-pack.test.ts` go red (22 failed).
+- mutation: M8, `objectscriptReview.ts` restored as a stub, re-registered in `index.ts`, dev rebuilt -> `story-38-6-qa-edit-prompt-sdk-wire.test.ts` (the four-prompt list and "a retired prompt is neither listed nor served"), `validate-prompts.test.ts` (12 prompts, the CLI count) and the retirement check of `skills-pack-rule.test.ts` go red (6 failed). Reverted, then dev rebuilt from a deleted `dist` (0 `objectscriptReview` files).
+- mutation: M8b, a stale `packages/iris-dev-mcp/dist/prompts/objectscriptReview.js` placed -> "the dev package has neither the prompt source nor a built file of it" goes red (1 failed); the file was removed.
+- mutation: M9, the contrast leg of the live procedure (below), a copy of the rule with `paths:` frontmatter -> no `InstructionsLoaded` line for the rule while `iris_doc_put` still ran, so the hook oracle can tell a scoped rule from an unscoped one.
+
+**Live check (AC 41.2.5), run last.**
+
+- **Environment.** CLI `2.1.296 (Claude Code)`. Everything lived in a throwaway directory under the stage scratchpad (`s412-live/`: two projects without a `CLAUDE.md`, `proj-positive/` and `proj-contrast/`, an `mcp.json`, a hook logger and a log checker, all written with the file tools). The rule copied into `.claude/rules/` is the pack's `rules/claude-code/` form (2,120 bytes); the contrast copy is the same bytes behind `---\npaths:\n  - "**/*.cls"\n---\n` (2,150 bytes). `mcp.json` held only `iris-dev` (`node packages/iris-dev-mcp/dist/index.js`), its `IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD` and `IRIS_HTTPS` copied by a script from the user-scope entry and never printed, `IRIS_NAMESPACE=HSCUSTOM`, with `IRIS_SERVER_MANAGER` and `IRIS_SM_WORKSPACE` dropped. Project `settings.json` registered `InstructionsLoaded` and `PreToolUse` command hooks that append one line per event to the file named by `S412_HOOK_LOG`.
+- **Command (each leg, from its project directory).** `S412_HOOK_LOG=<leg log> perl -e 'alarm 300; exec @ARGV' -- env -u CLAUDECODE claude -p --model haiku --max-budget-usd 1 --strict-mcp-config --mcp-config ../mcp.json --setting-sources project --allowedTools mcp__iris-dev__iris_doc_put --disallowedTools Read,Write,Edit,Bash --output-format json "<P>"`, with `<P>` exactly as in the procedure above.
+- **Positive leg.** Exit 0, `is_error` false, 3 turns, `total_cost_usd` 0.00785803, reply `DONE`. The hook log, reduced to event, tool and path: `InstructionsLoaded` for `<s412-live>/proj-positive/.claude/rules/iris-mcp-objectscript-pre-write.md` with `memory_type` `Project` and `load_reason` `session_start`; then `PreToolUse` `ToolSearch` (the client loading the deferred MCP tool); then `PreToolUse` `mcp__iris-dev__iris_doc_put`; all one `session_id`. No `PreToolUse` for `Read`, `Write`, `Edit` or `Bash`. `iris_doc_get` then showed the class in HSCUSTOM with `Ping()` returning `"pong"`.
+- **Contrast leg** (after the class was deleted). Exit 0, `is_error` false, 3 turns, `total_cost_usd` 0.00332339, reply `DONE`. The log held only `PreToolUse` `ToolSearch` and `PreToolUse` `mcp__iris-dev__iris_doc_put` (one session): no `InstructionsLoaded` line for the rule, while `iris_doc_put` still ran.
+- **Oracle.** The hook oracle decided: `InstructionsLoaded` fires under `-p`, so the fallback quote oracle was not needed and no further session was run. Both legs stayed far below the USD 1 cap (total 0.0112 USD for the two sessions). No credential appears in the result files, stderr files or hook logs (`grep IRIS_PASSWORD` found 0 in each).
+- **Cleanup.** `ExecuteMCPv2.Temp.Probe412Live.cls` was deleted after each leg with `iris_doc_delete` (`server:"default"`, `namespace:"HSCUSTOM"`); `iris_doc_list filter:"Probe412" generated:true` returned `{"items":[]}` before the legs and after the last deletion. `s412-live/`, credentials included, was deleted and `ls` confirmed it is gone. The only records left are the two sessions' transcripts under the user's `~/.claude/projects/`, which hold prompts and tool calls and no credentials.
+
+### Review-pass patches and mutations (2026-10-19)
+
+Each mutation was applied, observed red, and reverted; a fingerprint of `git status --short` plus `git diff` (spec excluded) was identical before and after every one. A mutation that changed `scripts/lib/skills-pack.mjs` or the rule source re-ran `pnpm gen:pack` for the red run and again after the revert.
+
+- mutation: M10, the `endsInLineFeed ? '' : '\n'` branch of `renderAgentsMdSection` flipped -> the section-form and byte-variant rows of `skills-pack-rule.test.ts` go red (AC 41.2.3, the END line stays whole).
+- mutation: M11, the BEGIN marker renamed `START` in `agentsMdMarkers` -> 16 tests of `skills-pack-rule.test.ts` go red, because the oracles type the marker lines literally.
+- mutation: M12, the two `RULE_FORM_DIRS` values swapped -> 4 tests go red, including the real-tree "claude-code form equals the source bytes" and the `gen:pack --check` CLI row.
+- mutation: M13, `renderAgentsMdSection` emits `---\nname: x\n---\n` after the BEGIN line, then `gen:pack` -> "neither form starts with frontmatter" goes red with "agents-md starts with ---" (the assertion read only the BEGIN line before the review pass, so it could not fail for that form).
+- mutation: M14, "start with `Test`" reworded to "begin with `Test`" in the rule source, then `gen:pack` -> "has exactly 16 bullets, and bullet n carries probe anchor n" goes red naming bullet 14 (the only automated tie from a bullet to its probe row).
+- mutation: M15, a second final LF appended to the rule source, then `gen:pack` -> "is ASCII, LF only, and ends in exactly one LF" goes red.
+- mutation: M16, stub `skills/objectscript-review/SKILL.md` and its pack copy restored -> 5 tests in 4 files go red: `skills-pack-rule.test.ts` (generated copy and the CLI `--check` row), `skills-generated-frontmatter.test.ts`, `story-41-1-qa-pack-tarball.test.ts` and the sweep of `story-41-2-doc-claims.test.ts`.
+- mutation: M17, a `| @iris-mcp/dev | objectscript-review |` table row restored in the root README -> 2 tests of `story-41-2-doc-claims.test.ts` go red (the row test and the sweep).
+- mutation: M18, "Story 41.2" dropped from the CHANGELOG's `### Removed` bullet -> "Removed names the retired prompt, Story 41.2, the AD-15 sanction and the reason" goes red.
+- mutation: M19, `if (def.arguments.length === 0)` made `< 0` in `packages/shared/src/server-base.ts`, shared rebuilt -> the new fixture case "a prompt that declares no arguments renders from a prompts/get with `arguments` omitted entirely" of `story-38-6-qa-edit-prompt-sdk-wire.test.ts` goes red with the SDK's "Invalid input: expected object, received undefined" (1 failed, 9 passed); reverted and shared rebuilt.
+
+**Patches applied in the review pass.** The pack README generator (`renderPackReadme`) names the two rule forms and the marker lines; the pack README was regenerated. `story-41-2-doc-claims.test.ts` is new. The wire test gained a fixture zero-argument prompt case (the retired prompt was the only shipped one). The "neither form starts with frontmatter" assertion now skips the BEGIN marker line for the `agents-md` form. `tool_support.md` records the retirement in its prompt tally paragraph. The CHANGELOG states the rule-name pattern as lower-case letters, digits and single hyphens, narrows its negative-control claim, and names Story 41.2 in `### Removed`.
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** The ObjectScript pre-write checklist is now one hand-authored, probe-verified rule source, `skills-pack-src/rules/iris-mcp-objectscript-pre-write.md` (299 words by the retired prompt's counter, 2,120 bytes, sha256 prefix `4d5702cb9f53`, ASCII, no frontmatter, no tool name). `gen:pack` renders it as `rules/claude-code/<name>.md` (the source bytes) and `rules/agents-md/<name>.md` (the same bytes between the `IRIS-MCP-RULE` BEGIN and END marker lines) and refuses frontmatter and any entry of `rules/` that is not a flat `<name>.md`. The `objectscript-review` prompt and both generated skill copies are retired (AD-15): prompts 13 to 12, dev 5 to 4, `gen:skills` files 14 to 13, pack files 15 to 16, validator sources 39 (12 prompts, 27 content files). The live Claude Code check ran and the hook oracle decided: `InstructionsLoaded` fired for the unscoped rule at `session_start` before the `iris_doc_put` call, and did not fire for the `paths:`-scoped copy (total cost 0.0112 USD over two haiku sessions). `BOOTSTRAP_VERSION` stays `5296a1c836f4`; no tool, key, preset, route or bootstrapped class changed; tools 110 package / 115 advertised; governance baseline `1e62c5ad5bf7`/141 unchanged.
+
+**Files changed.**
+
+- `skills-pack-src/rules/iris-mcp-objectscript-pre-write.md` (new): the rule source. `skills-pack-src/README.md`: the rules row and a section on the two forms and the markers.
+- `scripts/lib/skills-pack.mjs`: `RULE_FORM_DIRS`, `RULE_SOURCE_NAME`, `ALWAYS_ON_RULE_FILENAME`, `agentsMdMarkers`, `renderAgentsMdSection`, the two refusals, and the pack README layout lines. `scripts/gen-pack.mjs`: header comment only.
+- `packages/client-config/skills-pack/` (generated): both rule forms, the regenerated README, and the removed `objectscript-review` skill. `skills/` (generated): the removed skill and its README row.
+- `packages/iris-dev-mcp/src/prompts/objectscriptReview.ts` (deleted) and `index.ts` (no longer registers it). `packages/shared/src/server-base.ts` and `prompts-guardrails.test.ts`: two comments reworded.
+- `README.md`, `packages/iris-dev-mcp/README.md`, `tool_support.md`, `CHANGELOG.md`, `.changeset/story-41-2-objectscript-pre-write-rule.md`: the retirement, the counts and the new section.
+- Tests: `skills-pack-rule.test.ts` and `story-41-2-doc-claims.test.ts` (new); the pins in the Code Map moved to the new counts; the 41.1 rule fixtures moved to the two-form shape; the wire test gained a fixture zero-argument prompt case.
+
+**Review.** Four layers returned 29 findings, counted from the triage log: high 0, medium 4, low 18, false 7, maybe-false 0. Patched, as 8 grouped entries (2 medium, 6 low): a Client-level zero-argument prompt case (three layers saw the same lost coverage); `story-41-2-doc-claims.test.ts` for the two unpinned AC 41.2.2 bullets; the pack README layout lines; the vacuous `startsWith("---")` for the `agents-md` form; the missing mutation lines (M10 to M19); the `tool_support.md` retirement note; and two CHANGELOG wording fixes (the rule-name pattern, the negative-control claim). Nothing deferred. Rejected, each with its reason in the triage log: a marker-line guard in `assemblePack` (maintainer-authored single rule, a new refusal branch), the dist-reading test (fails loudly on an unbuilt checkout like its siblings), the word counter and the byte-variant embedding (the spec requires both), the stale `rule:` pack path in `listAgentContentFiles`, and the descriptive intent-audit divergences.
+
+**Follow-up review recommendation: true.** Two medium entries were patched. The unverified risk is that the review-pass patches (the new doc-claims test and its sweep, the zero-argument wire case, the regenerated pack README text) were written after the layers read the diff; each carries a recorded mutation and the full suites ran green on the patched tree, but no layer has read them.
+
+**Verification.** `(loop)` and `(once)` commands all green on the final tree: dev rebuilt from a deleted `dist` (0 `objectscriptReview` files); `gen:skills:check` 13 files; `gen:pack` twice, no change, `gen:pack:check` 16 files; `validate:prompts` `39 source(s) checked (12 prompt(s) + 27 content file(s): 12 workflow, 14 pack, 0 knowledge, 1 rule)`; `check:provenance` `0 provenance row(s), 27 agent file(s), 8 distribution(s)`; client-config tarball lists both forms and no `objectscript-review`, dev tarball lists no `objectscriptReview`; `@iris-mcp/dev` 1663, shared 2071, admin 498, interop 672, ops 350, client-config 514 tests pass; `@iris-mcp/all` 108 test files in three calls (36 files each) pass; dev lint and type-check clean; `gen:governance-baseline:check`, `gen:tools-list-snapshot:check` (115 entries) and `check-epics-sync` OK; `git diff --stat packages/shared/src/bootstrap-classes.ts` empty. `iris_doc_list filter:"Probe412" generated:true` returns `[]`.
+
+**Residual risks.**
+
+- `listAgentContentFiles` still labels a `rule:<f>` source with `packRel: rules/<f>`, a path the pack no longer holds. A rule adapted from upstream could not satisfy `check:provenance` until that seam and the header position in the `agents-md` form are decided. No story plans an adapted rule.
+- The zero-argument prompt case uses a fixture, because no shipped prompt declares none; interop's `recover-stuck-production` call accepts either a render or a clean refusal, so the spec's claim that it covers the happy path is weaker than written.
+- The two live-check session transcripts remain under the user's `~/.claude/projects/` (prompts and tool calls, no credentials).
+- Source-rule corrections for the retro are listed under Design Notes ("Flagged for the retro"); this story did not edit those files.

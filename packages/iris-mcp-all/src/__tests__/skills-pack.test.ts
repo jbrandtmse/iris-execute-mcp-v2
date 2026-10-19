@@ -22,6 +22,7 @@ import {
   NOTICE_FILENAME,
   PACK_DIR,
   PACK_SOURCE_DIR,
+  RULE_FORM_DIRS,
   RULES_SOURCE_DIR,
   WORKFLOW_SKILLS_DIR,
 } from "../../../../scripts/lib/skills-pack.mjs";
@@ -54,7 +55,6 @@ describe("assemblePack layout (fixture roots)", () => {
     put(root, `${KNOWLEDGE_SOURCE_DIR}/k1/SKILL.md`, "knowledge skill\n");
     put(root, `${KNOWLEDGE_SOURCE_DIR}/k1/references/x.md`, "reference\n");
     put(root, `${RULES_SOURCE_DIR}/always.md`, "rule\n");
-    put(root, `${RULES_SOURCE_DIR}/nested/form.md`, "rule form\n");
     put(root, `${PACK_SOURCE_DIR}/README.md`, "contributor doc, never copied\n");
 
     const pack = assemblePack(root) as Map<string, Buffer>;
@@ -62,14 +62,18 @@ describe("assemblePack layout (fixture roots)", () => {
     expect([...pack.keys()].sort()).toEqual([
       NOTICE_FILENAME,
       "README.md",
-      "rules/always.md",
-      "rules/nested/form.md",
+      `${RULE_FORM_DIRS.claudeCode}/always.md`,
+      `${RULE_FORM_DIRS.agentsMd}/always.md`,
       "skills/k1/SKILL.md",
       "skills/k1/references/x.md",
       "skills/wf/SKILL.md",
       "skills/wf/extra.md",
     ].sort());
     expect(pack.get(NOTICE_FILENAME)?.toString("utf8")).toBe(NOTICE_TEXT);
+    expect(pack.get(`${RULE_FORM_DIRS.claudeCode}/always.md`)?.toString("utf8")).toBe("rule\n");
+    expect(pack.get(`${RULE_FORM_DIRS.agentsMd}/always.md`)?.toString("utf8")).toBe(
+      "<!-- IRIS-MCP-RULE:always:BEGIN -->\nrule\n<!-- IRIS-MCP-RULE:always:END -->\n",
+    );
     const readme = pack.get("README.md")?.toString("utf8") ?? "";
     expect(readme.startsWith("<!-- DO NOT EDIT")).toBe(true);
     expect(readme).toContain("pnpm gen:pack");
@@ -99,6 +103,9 @@ describe("assemblePack layout (fixture roots)", () => {
     ["a knowledge directory without SKILL.md", () => ({ rel: `${KNOWLEDGE_SOURCE_DIR}/k2/other.md`, content: "x" }), "k2"],
     ["a knowledge directory whose skill file is skill.md, not SKILL.md", () => ({ rel: `${KNOWLEDGE_SOURCE_DIR}/k3/skill.md`, content: "x" }), "k3"],
     ["a file directly in knowledge/", () => ({ rel: `${KNOWLEDGE_SOURCE_DIR}/stray.md`, content: "x" }), "stray.md"],
+    ["a directory in rules/", () => ({ rel: `${RULES_SOURCE_DIR}/nested/form.md`, content: "x\n" }), "nested"],
+    ["a non-Markdown file in rules/", () => ({ rel: `${RULES_SOURCE_DIR}/notes.txt`, content: "x\n" }), "notes.txt"],
+    ["a rule whose name is not lower-case words joined by hyphens", () => ({ rel: `${RULES_SOURCE_DIR}/Bad_Name.md`, content: "x\n" }), "Bad_Name.md"],
   ])("fails on an unknown entry: %s", (_name, probe, entry) => {
     const root = tempRoot();
     seedMinimalRoot(root);
@@ -117,6 +124,7 @@ describe("assemblePack layout (fixture roots)", () => {
 describe("byte preservation (fixture roots)", () => {
   // Non-canonical variants: CRLF, a BOM, no trailing newline, non-ASCII UTF-8 (bytes, not escapes), and a
   // byte sequence that is not valid UTF-8 at all. A copy that decodes and re-encodes changes the last two.
+  // These are the skills' byte variants; the rule forms' byte variants are pinned in skills-pack-rule.test.ts.
   const variants: Record<string, Buffer> = {
     crlf: Buffer.from("---\r\nname: crlf\r\n---\r\n\r\nline one\r\nline two\r\n", "utf8"),
     bom: Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("---\nname: bom\n---\nbody\n", "utf8")]),
@@ -132,10 +140,8 @@ describe("byte preservation (fixture roots)", () => {
     for (const [key, bytes] of Object.entries(variants)) {
       put(root, `${WORKFLOW_SKILLS_DIR}/wf/${key}.md`, bytes);
       put(root, `${KNOWLEDGE_SOURCE_DIR}/kn/${key}.md`, bytes);
-      put(root, `${RULES_SOURCE_DIR}/${key}.md`, bytes);
       expectedBytes.set(`skills/wf/${key}.md`, bytes);
       expectedBytes.set(`skills/kn/${key}.md`, bytes);
-      expectedBytes.set(`rules/${key}.md`, bytes);
     }
     put(root, `${WORKFLOW_SKILLS_DIR}/wf/SKILL.md`, "wf\n");
     put(root, `${KNOWLEDGE_SOURCE_DIR}/kn/SKILL.md`, "kn\n");
@@ -211,7 +217,14 @@ describe("gen-pack CLI (a copy of the scripts inside a fixture root)", () => {
     expect(first.status, first.stderr).toBe(0);
     const packDir = join(root, PACK_DIR);
     expect(listFilesRecursive(packDir)).toEqual(
-      [NOTICE_FILENAME, "README.md", "rules/rule.md", "skills/kn/SKILL.md", "skills/wf/SKILL.md"].sort(),
+      [
+        NOTICE_FILENAME,
+        "README.md",
+        `${RULE_FORM_DIRS.agentsMd}/rule.md`,
+        `${RULE_FORM_DIRS.claudeCode}/rule.md`,
+        "skills/kn/SKILL.md",
+        "skills/wf/SKILL.md",
+      ].sort(),
     );
 
     const files = listFilesRecursive(packDir);
@@ -288,7 +301,7 @@ describe("the committed pack (real tree)", () => {
     expect(files.has(NOTICE_FILENAME)).toBe(true);
     expect(files.has("README.md")).toBe(true);
     const workflowSkills = listFilesRecursive(join(REPO_ROOT, WORKFLOW_SKILLS_DIR)).filter((rel) => rel.endsWith("/SKILL.md"));
-    expect(workflowSkills).toHaveLength(13);
+    expect(workflowSkills).toHaveLength(12);
     for (const rel of workflowSkills) {
       expect(files.has(`skills/${rel}`), `skills/${rel}`).toBe(true);
     }

@@ -5,13 +5,20 @@
 // standard-layout plugin root:
 //
 //   skills/<name>/...                       one directory per skill
-//   rules/...                               the always-on rule's forms
+//   rules/claude-code/<name>.md             each always-on rule, as the Claude Code rule file
+//   rules/agents-md/<name>.md               each always-on rule, as an AGENTS.md section
 //   IRIS-MCP-THIRD-PARTY-NOTICES.md         the third-party notice
 //   README.md                               generated (carries the DO-NOT-EDIT banner)
 //
 // SOURCES. Workflow skills are `gen:skills` output in `skills/`. Hand-authored content lives in
-// `skills-pack-src/`: knowledge skills under `knowledge/<name>/`, the rule under `rules/`, and the notice
-// at the root of that directory. Assembly copies bytes and renders nothing except the pack README.
+// `skills-pack-src/`: knowledge skills under `knowledge/<name>/`, the rules under `rules/`, and the notice
+// at the root of that directory. Assembly copies bytes and renders only the pack README and each rule's
+// two forms.
+//
+// RULES. A rule source is one flat `rules/<name>.md` with no frontmatter (an always-on rule is unscoped,
+// so it takes no `paths:`). Its `claude-code` form is the source bytes. Its `agents-md` form is the same
+// bytes between two marker lines, `<!-- IRIS-MCP-RULE:<name>:BEGIN -->` and `<!-- IRIS-MCP-RULE:<name>:END -->`;
+// a consumer matches those lines exactly and owns everything between them.
 //
 // This module reads the filesystem but never writes it; `scripts/gen-pack.mjs` owns the writes.
 
@@ -29,8 +36,56 @@ export const NOTICE_FILENAME = 'IRIS-MCP-THIRD-PARTY-NOTICES.md';
 /** The pack's top-level index file. Generated; the source tree's own README is never copied. */
 export const PACK_README_FILENAME = 'README.md';
 
+/** The pack directory of each rule form, relative to the pack root. */
+export const RULE_FORM_DIRS = Object.freeze({
+  claudeCode: 'rules/claude-code',
+  agentsMd: 'rules/agents-md',
+});
+
+/** A rule source's file name: lowercase words joined by single hyphens, with the `.md` extension. */
+export const RULE_SOURCE_NAME = /^[a-z0-9]+(-[a-z0-9]+)*\.md$/;
+
+/** The always-on ObjectScript pre-write rule's file name, in the source tree and in both pack forms. */
+export const ALWAYS_ON_RULE_FILENAME = 'iris-mcp-objectscript-pre-write.md';
+
 const SOURCE_README_FILENAME = 'README.md';
 const SKILL_FILENAME = 'SKILL.md';
+
+// The first line of a rule source, read as bytes: an optional BOM, then `---` and the end of the line.
+// Latin-1 maps every byte to one character, so any input is matched without a UTF-8 decode.
+const FRONTMATTER_OPENER = /^(?:\xef\xbb\xbf)?---[ \t]*(?:\r?\n|$)/;
+
+/**
+ * The two marker lines that bound a rule's `AGENTS.md` section, each without its line ending.
+ *
+ * @param {string} stem - The rule's file name without `.md`.
+ * @returns {{ begin: string, end: string }}
+ */
+export function agentsMdMarkers(stem) {
+  return {
+    begin: `<!-- IRIS-MCP-RULE:${stem}:BEGIN -->`,
+    end: `<!-- IRIS-MCP-RULE:${stem}:END -->`,
+  };
+}
+
+/**
+ * A rule's `AGENTS.md` section: the BEGIN line, the source bytes, the END line, each line ending in LF.
+ * One LF is added between the source and the END line when the source does not end in one, so the END
+ * marker is always a whole line. The source bytes are never decoded.
+ *
+ * @param {string} stem - The rule's file name without `.md`.
+ * @param {Buffer} bytes - The rule source.
+ * @returns {Buffer}
+ */
+export function renderAgentsMdSection(stem, bytes) {
+  const { begin, end } = agentsMdMarkers(stem);
+  const endsInLineFeed = bytes.length > 0 && bytes[bytes.length - 1] === 0x0a;
+  return Buffer.concat([
+    Buffer.from(`${begin}\n`, 'utf8'),
+    bytes,
+    Buffer.from(`${endsInLineFeed ? '' : '\n'}${end}\n`, 'utf8'),
+  ]);
+}
 
 /**
  * The generated pack README: a DO-NOT-EDIT banner naming the generator, the layout, and a pointer to
@@ -46,7 +101,9 @@ export function renderPackReadme() {
     `Agent skills and the always-on rule for working with the IRIS MCP Server Suite.\n\n` +
     `## Layout\n\n` +
     `- \`skills/<name>/SKILL.md\`: one directory per skill, in the standard plugin layout.\n` +
-    `- \`rules/\`: the always-on rule, in the forms each client reads.\n` +
+    `- \`rules/claude-code/<name>.md\`: the always-on rule as a Claude Code rule file.\n` +
+    `- \`rules/agents-md/<name>.md\`: the same rule as an \`AGENTS.md\` section, between the lines ` +
+    `\`<!-- IRIS-MCP-RULE:<name>:BEGIN -->\` and \`<!-- IRIS-MCP-RULE:<name>:END -->\`.\n` +
     `- \`${NOTICE_FILENAME}\`: third-party notices and licence texts for adapted content.\n\n` +
     `## Third-party content\n\n` +
     `Content adapted from another project carries a header line as its first non-blank line after any ` +
@@ -74,7 +131,8 @@ function listSubdirectories(dir) {
  *
  * - every file of each `skills/<n>/` (not `skills/README.md`) goes to `skills/<n>/...`;
  * - every file of each `skills-pack-src/knowledge/<n>/` goes to `skills/<n>/...`;
- * - `skills-pack-src/rules/**` goes to `rules/**`;
+ * - each `skills-pack-src/rules/<n>.md` goes to `rules/claude-code/<n>.md` (the source bytes) and to
+ *   `rules/agents-md/<n>.md` (the source bytes between the two marker lines);
  * - the notice goes to the pack root, beside a generated `README.md`.
  *
  * A missing `knowledge/` or `rules/` directory counts as empty.
@@ -82,7 +140,8 @@ function listSubdirectories(dir) {
  * @param {string} root - Repository root (absolute path).
  * @returns {Map<string, Buffer>}
  * @throws {Error} If a skill name is defined in both sources, a `knowledge/<n>/` has no `SKILL.md`, the
- *   source directory holds an entry the layout does not know, or the notice is missing. Nothing has been
+ *   source directory holds an entry the layout does not know, `rules/` holds anything but flat
+ *   `<name>.md` files, a rule source opens with frontmatter, or the notice is missing. Nothing has been
  *   written when it throws: this function never writes.
  */
 export function assemblePack(root) {
@@ -154,8 +213,28 @@ export function assemblePack(root) {
     }
   }
 
-  for (const rel of listFilesRecursive(rulesDir)) {
-    add(`rules/${rel}`, readFileSync(join(rulesDir, rel)), `${RULES_SOURCE_DIR}/`);
+  if (existsSync(rulesDir)) {
+    const ruleEntries = readdirSync(rulesDir, { withFileTypes: true });
+    const unknownRules = ruleEntries
+      .filter((entry) => !(entry.isFile() && RULE_SOURCE_NAME.test(entry.name)))
+      .map((entry) => entry.name)
+      .sort();
+    if (unknownRules.length > 0) {
+      throw new Error(
+        `unknown entry in ${RULES_SOURCE_DIR}/: ${unknownRules.join(', ')}. ` +
+          `Expected one flat <name>.md file per rule (lowercase letters, digits and hyphens).`,
+      );
+    }
+    for (const entry of ruleEntries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const bytes = readFileSync(join(rulesDir, entry.name));
+      if (FRONTMATTER_OPENER.test(bytes.toString('latin1'))) {
+        throw new Error(`${RULES_SOURCE_DIR}/${entry.name} has frontmatter; an always-on rule takes none (no paths:)`);
+      }
+      const stem = entry.name.slice(0, -'.md'.length);
+      const source = `${RULES_SOURCE_DIR}/${entry.name}`;
+      add(`${RULE_FORM_DIRS.claudeCode}/${entry.name}`, bytes, source);
+      add(`${RULE_FORM_DIRS.agentsMd}/${entry.name}`, renderAgentsMdSection(stem, bytes), source);
+    }
   }
 
   const noticePath = join(sourceDir, NOTICE_FILENAME);

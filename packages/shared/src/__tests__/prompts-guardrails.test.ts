@@ -136,8 +136,8 @@ describe("Story 25.0 guardrails — prompts/get error paths are real McpError (A
     // no-args callback form (`cb(extra)`) and does NOT validate
     // `request.params.arguments` — an omitted `arguments` renders correctly
     // instead of being refused with InvalidParams (CR 25.0-1). Regression
-    // guard: this is exactly the path a real no-arg prompt (Story 25.1's
-    // `objectscript-review`) is fetched by a strictly-spec-compliant client.
+    // guard: this is exactly the path by which a strictly-spec-compliant
+    // client fetches a prompt that declares no arguments.
     const server = new McpServerBase(makeServerOpts(FIXTURE_PROMPTS));
     const result = await callRequest(server, "prompts/get", {
       name: "guardrail-no-args",

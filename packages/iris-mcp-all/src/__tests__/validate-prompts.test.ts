@@ -94,14 +94,15 @@ describe("validate-prompts core logic (AC 25.1.3)", () => {
 });
 
 describe("every registered prompt references only real, live tool names (AC 25.1.3)", () => {
-  it("all iris_* tokens across all 13 registered prompts resolve to a real tool", async () => {
+  it("all iris_* tokens across all 12 registered prompts resolve to a real tool", async () => {
     const [prompts, toolNames] = await Promise.all([
       loadAllPrompts(root),
       loadAllToolNames(root),
     ]);
 
-    // Sanity: the pack is exactly 13 registered prompts across 4 packages —
-    // the 9 v1 stakeholder-approved prompts (AC 25.1.5) plus
+    // Sanity: the pack is exactly 12 registered prompts across 4 packages —
+    // the 9 v1 stakeholder-approved prompts (AC 25.1.5) minus
+    // `objectscript-review` (retired in Story 41.2) plus
     // `resend-failed-messages`, un-gated in Story 26.3 once
     // `iris_message_resend` shipped (Story 26.2), plus
     // `promote-environment-change`, un-gated in Story 27.4 once
@@ -109,7 +110,7 @@ describe("every registered prompt references only real, live tool names (AC 25.1
     // `edit-and-test-class`, added in Story 38.6. Both
     // gated prompts from the original pack are now registered — none remain, and
     // `find-patient-messages` was added in Story 39.6.
-    expect(prompts).toHaveLength(13);
+    expect(prompts).toHaveLength(12);
 
     const sources = prompts.map(({ pkg, prompt }) => ({
       label: `prompt:${pkg}/${prompt.name}`,
@@ -199,8 +200,8 @@ describe("every pack and source content file names only real tools (AC 41.1.5)",
     );
     expect(counts, run.stdout).not.toBeNull();
     const [sources, prompts, content, workflow, pack, knowledge, rule] = (counts ?? []).slice(1).map(Number);
-    expect(prompts).toBe(13);
-    expect(workflow).toBe(13);
+    expect(prompts).toBe(12);
+    expect(workflow).toBe(12);
     expect(pack, "the committed pack copies are scanned").toBeGreaterThanOrEqual(workflow ?? 0);
     expect(content).toBe((workflow ?? 0) + (pack ?? 0) + (knowledge ?? 0) + (rule ?? 0));
     expect(sources).toBe((prompts ?? 0) + (content ?? 0));

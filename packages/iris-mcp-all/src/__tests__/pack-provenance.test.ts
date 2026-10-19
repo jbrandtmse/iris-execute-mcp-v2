@@ -301,7 +301,7 @@ describe("excluded and malformed sources", () => {
     "",
   ];
   const allowed = [
-    "skills/skills/objectscript-review/SKILL.md",
+    "skills/skills/objectscript-style/SKILL.md",
     "skills/kb/other-guide.md",
     "skills/skills/iris-objectscript-eval-notes/SKILL.md",
     "docs/ipm-module-authoring.md",
@@ -579,14 +579,14 @@ describe("the real tree", () => {
     const workflowSkills = readdirSync(join(REPO_ROOT, WORKFLOW_SKILLS_DIR), { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name);
-    expect(workflowSkills).toHaveLength(13);
+    expect(workflowSkills).toHaveLength(12);
     for (const name of workflowSkills) {
       expect(listed.has(`skills-pack/skills/${name}/SKILL.md`), `skills-pack/skills/${name}/SKILL.md`).toBe(true);
     }
     for (const file of inputs.packFiles) {
       expect(listed.has(`skills-pack/${file.rel}`), `skills-pack/${file.rel}`).toBe(true);
     }
-    expect(inputs.packFiles.length).toBeGreaterThanOrEqual(15);
+    expect(inputs.packFiles.length).toBeGreaterThanOrEqual(16);
   });
 
   it("enumerates one distribution per non-private workspace package, as of 2026-10-18, each listing dist files when it ships dist", () => {

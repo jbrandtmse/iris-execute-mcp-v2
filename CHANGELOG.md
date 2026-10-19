@@ -2,6 +2,63 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-19] — Story 41.2: Always-on ObjectScript pre-write rule
+
+No tool, action, governance key, preset row, refusal code, environment variable or route is added or changed, so no tool count
+moves (the suite stays at 110 package tools, 115 advertised; the Development server at 32 package tools, 33 advertised). The
+prompt pack goes from 13 prompts to 12 (the Development server from 5 to 4) and the generated skills from 13 to 12. The `core`
+preset sizes and the `developer` presets are unchanged, the refusal-code catalog stays at 10 codes, and the frozen governance
+baseline stays at hash `1e62c5ad5bf7` (141 keys). The tools-list snapshot does not move. `BOOTSTRAP_VERSION` stays at
+`5296a1c836f4`, because no bootstrapped class changed.
+
+### Added
+
+- **The always-on rule `iris-mcp-objectscript-pre-write`.** One hand-authored source, `skills-pack-src/rules/iris-mcp-objectscript-pre-write.md`:
+  a 16-bullet ObjectScript pre-write checklist of at most 300 words, with no frontmatter (so no `paths:`) and no tool name. An
+  unscoped rule loads at the start of every session of a project that installs it, so the checklist is in context before the
+  first write; the prompt it replaces reached the model only when a user invoked it. Every claim in the rule was probed on
+  InterSystems IRIS 2026.2 (Build 221U), which corrected several claims of the old checklist.
+- **Two pack forms, rendered by `pnpm gen:pack`.** `rules/claude-code/<name>.md` holds the source bytes, as the Claude Code rule.
+  `rules/agents-md/<name>.md` holds the same bytes between the marker lines `<!-- IRIS-MCP-RULE:<name>:BEGIN -->` and
+  `<!-- IRIS-MCP-RULE:<name>:END -->`, as the `AGENTS.md` section. The markers are whole lines for an installer to match
+  exactly; when the source lacks a final LF, one is added so the END line stays whole. The pack goes from 15 to 16 files, and
+  a second `gen:pack` run changes nothing.
+- **Build refusals.** `pnpm gen:pack` and `gen:pack:check` exit 1, naming the entry and writing nothing, when `skills-pack-src/rules/`
+  holds anything but flat `<name>.md` files (a subdirectory, a non-Markdown file, a name outside lower-case letters, digits
+  and single hyphens), or when a rule source opens with frontmatter.
+
+### Removed
+
+- **The `objectscript-review` prompt and its generated skill, retired in Story 41.2 (an AD-15 sanctioned retirement; wave-7 decision #4).** The
+  Development server no longer lists or serves it: `prompts/get` for it answers InvalidParams (-32602). `skills/objectscript-review/`,
+  its `skills/README.md` row and its pack copy are gone. The reason: the rule above is the one copy of the checklist, and it is
+  in context before a write instead of waiting for a slash command. Clients that read only MCP prompts lose the slash command;
+  clients that read `AGENTS.md` get the rule always on. Nothing was published, so no release loses it. The other 12 prompts keep
+  their names, titles, arguments and bodies. Rebuild the Development package from a clean `dist/` (`tsc` never deletes a
+  stale `dist/prompts/objectscriptReview.js`).
+
+### Tests
+
+- `skills-pack-rule.test.ts` pins both committed forms against the source, the rule's size, the absence of internal references
+  and tool names, one probe anchor per bullet, the section form on byte variants (CRLF, BOM, no final LF, non-ASCII and
+  invalid UTF-8, comments), and the frontmatter and unknown-entry refusals through `assemblePack` and the real `gen:pack` CLI.
+  Its negative controls show the size, internal-reference and tool-name checks can fail.
+- The prompt, skill and doc-claim pins move to the new counts: 12 prompts, 12 workflow skills, 13 `gen:skills` files, 16 pack
+  files, and `validate:prompts` reporting 39 sources (12 prompts and 27 content files: 12 workflow, 14 pack, none
+  knowledge, 1 rule). The `objectscript-review` word cap and marker checks moved from `prompt-safety-invariants.test.ts` to
+  the rule test.
+- `story-41-2-doc-claims.test.ts` pins this section, the changeset's bump map, the retirement sentence in the root and
+  Development READMEs, the retirement note in `tool_support.md`, and a sweep that finds the retired prompt's name nowhere
+  else outside the tests.
+- A real SDK `Client` case with a fixture prompt that declares no arguments keeps the omitted-`arguments` render covered,
+  now that no shipped prompt declares none.
+
+### Known limits
+
+- No installer places the forms yet: Story 41.6 copies `rules/claude-code/` into `.claude/rules/` and inserts
+  `rules/agents-md/` into `AGENTS.md` by its marker lines.
+- The live check of the rule loading at session start covers the Claude Code form only.
+
 ## [Pre-release — 2026-10-19] — Story 41.1: Pack layout, licensing and provenance
 
 No tool, action, governance key, preset row, prompt, refusal code, environment variable or route is added, so no count moves

@@ -4,7 +4,7 @@
  * under `os.tmpdir()`). Nothing in the working tree is edited.
  *
  * What the fixture-root tests in `skills-pack.test.ts` do not reach:
- *  - the real 13-skill data set: every fault kind is injected into the real pack, detected by `--check` with
+ *  - the real 12-skill data set: every fault kind is injected into the real pack, detected by `--check` with
  *    no write, and write mode restores the committed pack exactly (files and directories);
  *  - byte-level faults a text comparison would miss: LF to CRLF, a BOM added or removed, one trailing LF,
  *    Unicode normalisation, an invalid UTF-8 sequence (project rule #58, fixture diversity);
@@ -16,10 +16,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { existsSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  ALWAYS_ON_RULE_FILENAME,
   KNOWLEDGE_SOURCE_DIR,
   NOTICE_FILENAME,
   PACK_DIR,
   PACK_SOURCE_DIR,
+  RULE_FORM_DIRS,
   RULES_SOURCE_DIR,
   WORKFLOW_SKILLS_DIR,
 } from "../../../../scripts/lib/skills-pack.mjs";
@@ -105,6 +107,21 @@ const PACK_FAULTS: PackFault[] = [
     stderr: [drift("README.md")],
   },
   {
+    name: "a deleted rule form",
+    apply: (pack) => rmSync(join(pack, RULE_FORM_DIRS.agentsMd, ALWAYS_ON_RULE_FILENAME)),
+    stderr: [missing(`${RULE_FORM_DIRS.agentsMd}/${ALWAYS_ON_RULE_FILENAME}`)],
+  },
+  {
+    name: "one changed byte in the AGENTS.md section form",
+    apply: (pack) => mutate(join(pack, RULE_FORM_DIRS.agentsMd, ALWAYS_ON_RULE_FILENAME), flipMiddleByte),
+    stderr: [drift(`${RULE_FORM_DIRS.agentsMd}/${ALWAYS_ON_RULE_FILENAME}`)],
+  },
+  {
+    name: "a stray rule form",
+    apply: (pack) => put(pack, `${RULE_FORM_DIRS.claudeCode}/zz-ghost.md`, "x\n"),
+    stderr: [stray(`${RULE_FORM_DIRS.claudeCode}/zz-ghost.md`)],
+  },
+  {
     name: "a file truncated to zero bytes",
     apply: (pack) => writeFileSync(join(pack, CHECK_SKILL), Buffer.alloc(0)),
     stderr: [drift(CHECK_SKILL)],
@@ -131,7 +148,7 @@ describe("gen:pack against a scratch copy of the real tree: the clean baseline",
     const root = scratch();
     const check = runScript(root, GEN_PACK, ["--check"]);
     expect(check.status, check.stderr).toBe(0);
-    expect(check.stdout).toContain("15 pack file(s) match their sources");
+    expect(check.stdout).toContain("16 pack file(s) match their sources");
 
     const pack = join(root, PACK_DIR);
     for (const rel of walkFiles(pack)) utimesSync(join(pack, rel), 1, 1);
@@ -257,25 +274,49 @@ describe("gen:pack against a scratch copy of the real tree: byte preservation (#
     ],
   ];
 
+  // A rule source carries no frontmatter, so the three variants above that open with frontmatter get
+  // frontmatter-free rule bodies with the same byte property; the other two are used as they are.
+  const RULE_BODIES: Record<string, Buffer> = {
+    crlf: Buffer.from("line one\r\nline two\r\n", "utf8"),
+    bom: Buffer.concat([BOM, Buffer.from("body\n", "utf8")]),
+    "no-trailing-newline": Buffer.from("no final newline", "utf8"),
+  };
+  const ruleBytes = (key: string, skillBytes: Buffer): Buffer => RULE_BODIES[key] ?? skillBytes;
+
+  /** The AGENTS.md section the source bytes must produce, with the marker lines typed out. */
+  function expectedSection(key: string, bytes: Buffer): Buffer {
+    const endsInLineFeed = bytes[bytes.length - 1] === 0x0a;
+    return Buffer.concat([
+      Buffer.from(`<!-- IRIS-MCP-RULE:qa-bytes-${key}:BEGIN -->\n`, "utf8"),
+      bytes,
+      Buffer.from(`${endsInLineFeed ? "" : "\n"}<!-- IRIS-MCP-RULE:qa-bytes-${key}:END -->\n`, "utf8"),
+    ]);
+  }
+
   function seedVariants(root: string): void {
     for (const [key, bytes] of VARIANTS) {
       put(root, `${KNOWLEDGE_SOURCE_DIR}/qa-bytes-${key}/SKILL.md`, bytes);
-      put(root, `${RULES_SOURCE_DIR}/qa-bytes-${key}.md`, bytes);
+      put(root, `${RULES_SOURCE_DIR}/qa-bytes-${key}.md`, ruleBytes(key, bytes));
     }
   }
 
-  it("write mode copies every variant byte for byte, and --check then passes", () => {
+  it("write mode copies every variant byte for byte into both rule forms, and --check then passes", () => {
     const root = scratch();
     seedVariants(root);
     const write = runScript(root, GEN_PACK);
     expect(write.status, write.stderr).toBe(0);
     for (const [key, bytes] of VARIANTS) {
+      const rule = ruleBytes(key, bytes);
       expect(readFileSync(join(root, PACK_DIR, `skills/qa-bytes-${key}/SKILL.md`)).equals(bytes), `${key} skill`).toBe(true);
-      expect(readFileSync(join(root, PACK_DIR, `rules/qa-bytes-${key}.md`)).equals(bytes), `${key} rule`).toBe(true);
+      expect(readFileSync(join(root, PACK_DIR, `${RULE_FORM_DIRS.claudeCode}/qa-bytes-${key}.md`)).equals(rule), `${key} claude-code form`).toBe(true);
+      expect(
+        readFileSync(join(root, PACK_DIR, `${RULE_FORM_DIRS.agentsMd}/qa-bytes-${key}.md`)).equals(expectedSection(key, rule)),
+        `${key} AGENTS.md section form`,
+      ).toBe(true);
     }
     const check = runScript(root, GEN_PACK, ["--check"]);
     expect(check.status, check.stderr).toBe(0);
-    expect(check.stdout).toContain("25 pack file(s) match their sources");
+    expect(check.stdout).toContain("31 pack file(s) match their sources");
   });
 
   it.each(VARIANTS.map(([key, bytes, tamper]) => [key, bytes, tamper] as const))(
@@ -310,7 +351,7 @@ describe("gen:skills against a scratch copy: a hand-authored pack source is neve
     const root = scratch({ serverPackages: true });
     const run = runScript(root, GEN_SKILLS, ["--check"]);
     expect(run.status, `${run.stderr}${run.stdout}`).toBe(0);
-    expect(run.stdout).toContain("14 generated file(s) match source");
+    expect(run.stdout).toContain("13 generated file(s) match source");
   });
 
   it.each([
@@ -329,17 +370,22 @@ describe("gen:skills against a scratch copy: a hand-authored pack source is neve
     expect(runScript(root, GEN_SKILLS, ["--check"]).status).toBe(0);
   });
 
-  it("gen:skills --check still passes with hand-authored sources present; gen:pack --check names the three missing pack files until gen:pack runs", () => {
+  it("gen:skills --check still passes with hand-authored sources present; gen:pack --check names the four missing pack files until gen:pack runs", () => {
     const root = scratch({ serverPackages: true });
     for (const { rel, content } of HAND_AUTHORED) put(root, rel, content);
 
     const skills = runScript(root, GEN_SKILLS, ["--check"]);
     expect(skills.status, `${skills.stderr}${skills.stdout}`).toBe(0);
-    expect(skills.stdout).toContain("14 generated file(s) match source");
+    expect(skills.stdout).toContain("13 generated file(s) match source");
 
     const pack = runScript(root, GEN_PACK, ["--check"]);
     expect(pack.status).toBe(1);
-    for (const rel of ["skills/qa-hand/SKILL.md", "skills/qa-hand/references/guide.md", "rules/qa-rule.md"]) {
+    for (const rel of [
+      "skills/qa-hand/SKILL.md",
+      "skills/qa-hand/references/guide.md",
+      `${RULE_FORM_DIRS.claudeCode}/qa-rule.md`,
+      `${RULE_FORM_DIRS.agentsMd}/qa-rule.md`,
+    ]) {
       expect(pack.stderr).toContain(missing(rel));
     }
 

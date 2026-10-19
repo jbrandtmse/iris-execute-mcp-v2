@@ -803,14 +803,13 @@ Beyond individual tools, the suite ships a pack of **MCP prompts** (Epic 25) —
 
 **Prompts do not change the 110-tool count anywhere.** They are a framework/protocol surface, not tools — no `mutates` classification, no governance key, no package tool-array change (Rule #31). See [Backward Compatibility](#backward-compatibility) above.
 
-### The v1 pack — 13 prompts, grouped by owning server
+### The v1 pack — 12 prompts, grouped by owning server
 
 | Server | Prompt | What it does |
 |---|---|---|
 | `@iris-mcp/ops` | `check-system-health` | Runs `iris_health_check`, interprets every non-`ok` finding, and names the fixing tool for each one. |
 | `@iris-mcp/ops` | `run-external-backup` | Freezes the instance for an external (OS/SAN-level) snapshot and thaws it safely afterward — thaw always runs, even if the snapshot step failed. |
 | `@iris-mcp/dev` | `diagnose-slow-query` | Runs `iris_sql_analyze` (`explain` → `indexUsage` → `stats`) and recommends a fix — never auto-applies one. |
-| `@iris-mcp/dev` | `objectscript-review` | A concise pre-write checklist distilling this project's ObjectScript conventions ($$$ macros, `Quit` in try/catch, `%OnNew`/`initvalue`, no-underscore names, storage sections untouchable). |
 | `@iris-mcp/dev` | `deploy-and-test-class` | Deploys an ObjectScript class or package (`iris_doc_load`, glob-path form), resolves compile errors, then runs its unit tests (`iris_execute_tests`) with a total-count check and, only when the user asks, measures their line coverage (`iris_test_coverage`; see [Test coverage](#test-coverage-epic-40)). |
 | `@iris-mcp/dev` | `promote-environment-change` | Reviews and promotes configuration/code drift from a source IRIS environment to a target using the review-before-write `iris_env_diff` → `iris_env_promote` workflow — scoped diff, review with the user, plan, an explicit user-selected step allowlist, confirmed execute, then re-diff to verify. Never acts on `onlyInTarget` warnings; states the no-deletions guarantee and that `execute` is default-disabled. |
 | `@iris-mcp/dev` | `edit-and-test-class` | Changes a few lines of an ObjectScript class in place: a ranged `iris_doc_get`, a guarded `iris_doc_edit` (`apply`, with `expected` built from the read; a `STALE_CONTENT` retry with `mismatches[].current`), `iris_doc_compile`, then `iris_execute_tests` with a check of `total` against the number of `Test*` methods. Every tool on the main path is in the dev `core` preset. `iris_doc_edit:apply` is enabled by default. It tells the model what a `PRODUCTION_BUSY` refusal means (a production other than the tests' own is running, or the production state could not be read) and not to stop a production without the user's confirmation. |
@@ -822,6 +821,8 @@ Beyond individual tools, the suite ships a pack of **MCP prompts** (Epic 25) —
 | `@iris-mcp/admin` | `audit-security-posture` | Audits users, roles, service authentication settings, SSL/TLS configs, and instance auditing status; reports default passwords, `%All` holders, and insecure services. |
 
 `@iris-mcp/data` ships **no prompts in v1**.
+
+`objectscript-review` was retired in Story 41.2: its checklist is now the always-on rule in the skills pack (`rules/claude-code/` for Claude Code, `rules/agents-md/` for `AGENTS.md`). The installer arrives in Story 41.6.
 
 ### Using the prompts
 

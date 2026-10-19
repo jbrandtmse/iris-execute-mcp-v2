@@ -7,7 +7,8 @@ Agent skills and the always-on rule for working with the IRIS MCP Server Suite.
 ## Layout
 
 - `skills/<name>/SKILL.md`: one directory per skill, in the standard plugin layout.
-- `rules/`: the always-on rule, in the forms each client reads.
+- `rules/claude-code/<name>.md`: the always-on rule as a Claude Code rule file.
+- `rules/agents-md/<name>.md`: the same rule as an `AGENTS.md` section, between the lines `<!-- IRIS-MCP-RULE:<name>:BEGIN -->` and `<!-- IRIS-MCP-RULE:<name>:END -->`.
 - `IRIS-MCP-THIRD-PARTY-NOTICES.md`: third-party notices and licence texts for adapted content.
 
 ## Third-party content

@@ -14,7 +14,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { KNOWLEDGE_SOURCE_DIR, PACK_DIR, RULES_SOURCE_DIR } from "../../../../scripts/lib/skills-pack.mjs";
+import { KNOWLEDGE_SOURCE_DIR, PACK_DIR, RULE_FORM_DIRS, RULES_SOURCE_DIR } from "../../../../scripts/lib/skills-pack.mjs";
 import { put } from "./pack-fixture";
 import { BOM, makeScratchRepo, removeScratchRepo, runScript, toCrlf } from "./story-41-1-qa-fixture";
 
@@ -46,10 +46,10 @@ function expectRejected(root: string): string {
 }
 
 describe("validate:prompts CLI, scratch copy: the green controls", () => {
-  it("the unmodified copy passes with 39 sources: 13 prompts and 26 content files (13 workflow, 13 pack)", () => {
+  it("the unmodified copy passes with 39 sources: 12 prompts and 27 content files (12 workflow, 14 pack, 1 rule)", () => {
     const run = runScript(scratch(), VALIDATE);
     expect(run.status, run.stderr).toBe(0);
-    expect(run.stdout).toContain("39 source(s) checked (13 prompt(s) + 26 content file(s): 13 workflow, 13 pack, 0 knowledge, 0 rule)");
+    expect(run.stdout).toContain("39 source(s) checked (12 prompt(s) + 27 content file(s): 12 workflow, 14 pack, 0 knowledge, 1 rule)");
   });
 
   it("a real tool name added to a pack file is accepted, and counted as no extra source", () => {
@@ -119,11 +119,15 @@ describe("validate:prompts CLI, scratch copy: a source and its regenerated pack 
     ]);
   });
 
-  it("a bad token in a rule names the source and the pack copy after gen:pack", () => {
+  it("a bad token in a rule names the source and both pack forms after gen:pack", () => {
     const root = scratch();
     put(root, `${RULES_SOURCE_DIR}/qa-rule.md`, `Call \`${BAD_TOKEN}\`.\n`);
     expect(runScript(root, GEN_PACK).status).toBe(0);
-    expect(flaggedLabels(expectRejected(root))).toEqual([`pack:rules/qa-rule.md ${BAD_TOKEN}`, `rule:qa-rule.md ${BAD_TOKEN}`]);
+    expect(flaggedLabels(expectRejected(root))).toEqual([
+      `pack:${RULE_FORM_DIRS.agentsMd}/qa-rule.md ${BAD_TOKEN}`,
+      `pack:${RULE_FORM_DIRS.claudeCode}/qa-rule.md ${BAD_TOKEN}`,
+      `rule:qa-rule.md ${BAD_TOKEN}`,
+    ]);
   });
 
   it("a bad token in the generated workflow skill is named with the workflow label", () => {
@@ -139,6 +143,6 @@ describe("validate:prompts CLI, scratch copy: a source and its regenerated pack 
     expect(runScript(root, GEN_PACK).status).toBe(0);
     const run = runScript(root, VALIDATE);
     expect(run.status, run.stderr).toBe(0);
-    expect(run.stdout).toContain("(13 prompt(s) + 30 content file(s): 13 workflow, 15 pack, 1 knowledge, 1 rule)");
+    expect(run.stdout).toContain("(12 prompt(s) + 32 content file(s): 12 workflow, 17 pack, 1 knowledge, 2 rule)");
   });
 });

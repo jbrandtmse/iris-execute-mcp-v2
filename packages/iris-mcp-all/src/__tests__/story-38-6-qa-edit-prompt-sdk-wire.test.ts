@@ -9,13 +9,14 @@
  * calls the request handlers directly; this file is the one that drives the `Client`.)
  *
  * Pinned here:
- *  - `initialize` advertises `prompts`; `prompts/list` holds the five dev prompts with `edit-and-test-class`
- *    last, and its three arguments (`className` and `change` required, `testClass` optional).
+ *  - `initialize` advertises `prompts`; `prompts/list` holds the four dev prompts with `edit-and-test-class`
+ *    last, and its three arguments (`className` and `change` required, `testClass` optional). The retired
+ *    `objectscript-review` is not listed, and `prompts/get` for it is an InvalidParams naming it (Story 41.2).
  *  - `prompts/get` with `testClass` omitted renders one user message, its twelve steps in order, with the
  *    test step telling the model to find the test class or ask; with `testClass` given, the test step names it.
  *  - `prompts/get` with `arguments` omitted entirely: a prompt that has required arguments answers a clean
- *    InvalidParams (-32602) naming the prompt and the connection stays usable, while a prompt with no
- *    arguments renders from the same omission.
+ *    InvalidParams (-32602) naming the prompt and the connection stays usable. A prompt that declares no
+ *    arguments (a fixture, since no shipped prompt is one) renders from the same omission.
  *  - `deploy-and-test-class` names the in-place route and sends the manual `%UnitTest_Result` query to
  *    `iris_sql_query`, never `iris_sql_execute`.
  *  - Every `iris_*` token the two prompts render is a tool the real `tools/list` returns; the tokens of
@@ -41,11 +42,11 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const INVALID_PARAMS = -32602;
 const DEV_PROMPT_NAMES = [
   "diagnose-slow-query",
-  "objectscript-review",
   "deploy-and-test-class",
   "promote-environment-change",
   "edit-and-test-class",
 ];
+const RETIRED_PROMPT = "objectscript-review";
 const EDIT_PROMPT = "edit-and-test-class";
 const DEPLOY_PROMPT = "deploy-and-test-class";
 
@@ -89,7 +90,8 @@ interface Connection {
 
 const TOOLS_ENV = ["IRIS_TOOLS_PRESET", "IRIS_TOOLS_DISABLE", "IRIS_TOOLS_ENABLE"] as const;
 
-let openConnection: (preset?: "core") => Promise<Connection>;
+/** `promptList` replaces the dev prompts the server registers, for a fixture prompt the dev pack does not ship. */
+let openConnection: (preset?: "core", promptList?: unknown[]) => Promise<Connection>;
 const opened: Connection[] = [];
 
 beforeAll(async () => {
@@ -118,14 +120,21 @@ beforeAll(async () => {
   const { toolPresets } = await load(path.join(REPO_ROOT, "packages", "iris-dev-mcp", "dist", "tools", "presets.js"));
   const { prompts } = await load(path.join(REPO_ROOT, "packages", "iris-dev-mcp", "dist", "prompts", "index.js"));
 
-  openConnection = async (preset) => {
+  openConnection = async (preset, promptList) => {
     // The tool visibility preset is read from the environment when the server is constructed.
     const saved = TOOLS_ENV.map((name) => [name, process.env[name]] as const);
     for (const name of TOOLS_ENV) delete process.env[name];
     if (preset !== undefined) process.env.IRIS_TOOLS_PRESET = preset;
     let server: { server: SdkServer };
     try {
-      server = new McpServerBase({ name: "@iris-mcp/dev", version: "0.0.0", tools, toolPresets, prompts, needsCustomRest: true });
+      server = new McpServerBase({
+        name: "@iris-mcp/dev",
+        version: "0.0.0",
+        tools,
+        toolPresets,
+        prompts: promptList ?? prompts,
+        needsCustomRest: true,
+      });
     } finally {
       for (const [name, value] of saved) {
         if (value === undefined) delete process.env[name];
@@ -162,7 +171,7 @@ function messageText(result: WirePromptResult): string {
 }
 
 describe("Story 38.6 QA: the dev prompts through a real SDK Client over an in-memory transport (rule #46)", () => {
-  it("advertises prompts, and lists the five dev prompts with edit-and-test-class last and its three arguments", async () => {
+  it("advertises prompts, and lists the four dev prompts with edit-and-test-class last and its three arguments", async () => {
     const { client } = await openConnection();
 
     expect(client.getServerCapabilities()?.prompts).toEqual({ listChanged: true });
@@ -233,7 +242,37 @@ describe("Story 38.6 QA: the dev prompts through a real SDK Client over an in-me
     expect(testStep).not.toContain("find the test class that covers");
   });
 
-  it("prompts/get without `arguments`: a prompt with required arguments is a clean InvalidParams naming it, the connection stays usable, and a prompt with no arguments renders", async () => {
+  it("a retired prompt is neither listed nor served: prompts/get is an InvalidParams naming it (Story 41.2)", async () => {
+    const { client } = await openConnection();
+
+    const { prompts } = await client.listPrompts();
+    expect(prompts.map((prompt) => prompt.name)).not.toContain(RETIRED_PROMPT);
+
+    const refused = await client.getPrompt({ name: RETIRED_PROMPT }).then(
+      () => undefined,
+      (error: unknown) => error as { code?: number; message?: string },
+    );
+    expect(refused, "the request was refused").toBeDefined();
+    expect(refused?.code).toBe(INVALID_PARAMS);
+    expect(refused?.message).toContain(RETIRED_PROMPT);
+  });
+
+  it("a prompt that declares no arguments renders from a prompts/get with `arguments` omitted entirely (fixture; no shipped prompt is one)", async () => {
+    const noArguments = {
+      name: "wire-no-arguments",
+      title: "Wire: No Arguments",
+      description: "A fixture prompt that declares no arguments.",
+      arguments: [],
+      build: () => "no-arguments rendered",
+    };
+    const { client } = await openConnection(undefined, [noArguments]);
+
+    const { prompts } = await client.listPrompts();
+    expect(prompts.map((prompt) => prompt.name)).toEqual(["wire-no-arguments"]);
+    expect(messageText(await client.getPrompt({ name: "wire-no-arguments" }))).toBe("no-arguments rendered");
+  });
+
+  it("prompts/get without `arguments`: a prompt with required arguments is a clean InvalidParams naming it, and the connection stays usable", async () => {
     const { client } = await openConnection();
 
     const refused = await client.getPrompt({ name: EDIT_PROMPT }).then(
@@ -260,9 +299,6 @@ describe("Story 38.6 QA: the dev prompts through a real SDK Client over an in-me
 
     const stillUsable = messageText(await client.getPrompt({ name: EDIT_PROMPT, arguments: { className: "MyApp.Orders", change: "x" } }));
     expect(stillUsable).toContain("Class: `MyApp.Orders`");
-
-    const noArguments = messageText(await client.getPrompt({ name: "objectscript-review" }));
-    expect(noArguments.length).toBeGreaterThan(0);
   });
 
   it("deploy-and-test-class names the in-place route and the iris_sql_query manual query, never iris_sql_execute", async () => {

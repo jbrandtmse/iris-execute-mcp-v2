@@ -39,7 +39,7 @@ const NOTICE_REL = `${PACK_SOURCE_DIR}/${NOTICE_FILENAME}`;
 const SEPARATOR_ROW = "| --- | --- | --- |\n";
 const SKILL_REL = "skills/qa-adapted/SKILL.md";
 const SKILL_SRC = `${KNOWLEDGE_SOURCE_DIR}/qa-adapted/SKILL.md`;
-const GOOD_SOURCE = "skills/skills/objectscript-review/SKILL.md";
+const GOOD_SOURCE = "skills/skills/objectscript-style/SKILL.md";
 
 const temps: string[] = [];
 function scratch(): string {
@@ -93,22 +93,22 @@ function expectGreen(root: string): string {
 }
 
 describe("check:provenance CLI, scratch copy: the green controls", () => {
-  it("the unmodified copy passes: pinned MIT hash, no rows, the 26 agent files and one distribution", () => {
+  it("the unmodified copy passes: pinned MIT hash, no rows, the 27 agent files and one distribution", () => {
     const out = expectGreen(scratch());
     expect(out).toContain(`MIT block sha256 ${PINNED_SHA256} (1081 bytes)`);
-    expect(out).toContain("0 provenance row(s), 26 agent file(s), 1 distribution(s)");
+    expect(out).toContain("0 provenance row(s), 27 agent file(s), 1 distribution(s)");
   });
 
   it("an adapted skill with the exact header and a row passes, source and pack copy both counted", () => {
     const root = scratch();
     adapt(root, { skill: skillText(HEADER) });
-    expect(expectGreen(root)).toContain("1 provenance row(s), 28 agent file(s), 1 distribution(s)");
+    expect(expectGreen(root)).toContain("1 provenance row(s), 29 agent file(s), 1 distribution(s)");
   });
 
   it("the same adapted skill as CRLF with a BOM passes (project rule #58)", () => {
     const root = scratch();
     adapt(root, { skill: Buffer.concat([BOM, toCrlf(Buffer.from(skillText(HEADER), "utf8"))]) });
-    expect(expectGreen(root)).toContain("1 provenance row(s), 28 agent file(s)");
+    expect(expectGreen(root)).toContain("1 provenance row(s), 29 agent file(s)");
   });
 });
 
@@ -178,8 +178,8 @@ describe("check:provenance CLI, scratch copy: a row citing an excluded source (A
     "skills/skills/iris-objectscript-eval/SKILL.md",
     "skills/skills/IRIS-ObjectScript-Eval/SKILL.md",
     "skills/skills/iris-objectscript-eval/",
-    "../iris-agentic-dev/skills/skills/objectscript-review/SKILL.md",
-    "/work/iris-agentic-dev/skills/skills/objectscript-review/SKILL.md",
+    "../iris-agentic-dev/skills/skills/objectscript-style/SKILL.md",
+    "/work/iris-agentic-dev/skills/skills/objectscript-style/SKILL.md",
     "https://github.com/intersystems-community/iris-agentic-dev/blob/b6205bb/skills/kb/ipm-module-authoring.md",
   ];
 

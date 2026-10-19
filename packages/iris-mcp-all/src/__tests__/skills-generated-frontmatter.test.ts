@@ -7,11 +7,12 @@
  * test checks the STRUCTURE every generated skill file must carry: a valid
  * YAML frontmatter block with non-empty `name`/`description` fields, a
  * DO-NOT-EDIT banner (Rule #18) naming the regen command, and that a skill
- * directory exists for EVERY one of the 13 registered prompts (the original
+ * directory exists for EVERY one of the 12 registered prompts (the original
  * 9 v1 stakeholder-approved prompts, Story 25.1, plus `resend-failed-messages`
  * un-gated in Story 26.3, plus `promote-environment-change` un-gated in
  * Story 27.4, plus `edit-and-test-class` added in Story 38.6, plus
- * `find-patient-messages` added in Story 39.6 — no prompt
+ * `find-patient-messages` added in Story 39.6, minus `objectscript-review`
+ * retired in Story 41.2 — no prompt
  * silently missing its generated skill, no orphaned/
  * stale skill directory left over — `gen-skills.mjs`'s write mode is
  * supposed to remove those, per the story's Task 2).
@@ -37,13 +38,13 @@ const skillsDir = resolve(root, "skills");
  * The 9 stakeholder-approved v1 prompt names (AC 25.1.5) plus
  * `resend-failed-messages`, un-gated in Story 26.3, plus
  * `promote-environment-change`, un-gated in Story 27.4, plus `edit-and-test-class`
- * (Story 38.6), plus `find-patient-messages` (Story 39.6): one skill each.
+ * (Story 38.6), plus `find-patient-messages` (Story 39.6), minus the retired
+ * `objectscript-review` (Story 41.2): one skill each.
  */
 const EXPECTED_SKILL_NAMES = [
   "check-system-health",
   "run-external-backup",
   "diagnose-slow-query",
-  "objectscript-review",
   "deploy-and-test-class",
   "trace-message-flow",
   "recover-stuck-production",
@@ -116,7 +117,7 @@ describe("generated skills/ directory structure (AC 25.1.2)", () => {
     expect(body.trim().length).toBeGreaterThan(0);
   });
 
-  it("skills/README.md exists with its own DO-NOT-EDIT banner and lists all 13 skills", () => {
+  it("skills/README.md exists with its own DO-NOT-EDIT banner and lists all 12 skills", () => {
     const readmePath = resolve(skillsDir, "README.md");
     expect(existsSync(readmePath)).toBe(true);
     const raw = readFileSync(readmePath, "utf-8");
@@ -125,5 +126,6 @@ describe("generated skills/ directory structure (AC 25.1.2)", () => {
     for (const name of EXPECTED_SKILL_NAMES) {
       expect(raw).toContain(name);
     }
+    expect(raw).not.toContain("objectscript-review");
   });
 });
