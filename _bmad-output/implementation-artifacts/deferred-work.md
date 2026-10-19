@@ -3307,3 +3307,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-40-3-testproduction-runs.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: lead scoped re-review of 47412c4 (2026-10-18): ProductionGuardTest.cls:125-127; IsClassnameValid^%occName (behind $System.OBJ.IsValidClassname) source is not in the irislib snapshot
 - 2026-10-18T21:53:57Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 burn-down: take the expected value from $System.OBJ.IsValidClassname for non-existent names, or drop the loop and keep the CJK assertions
+
+### DW-608: Once, a freshly compiled class (UDL save plus Compile cuk-d) showed $Data(^rMAP(class)) 0 while IsUpToDate was 1, so SourceMap would record lineMap 0 and coverage would read the class not-up-to-date (a false FAIL)
+- source: _bmad-output/implementation-artifacts/spec-40-4-test-depth-docs-prompt-and-capstone.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: 40.4 implement probe 2026-10-18 22:43 in HSCUSTOM, two brand-new classes; 12 later probe rounds, about 10 capstone runs and every OS run gave 10; cause not found; errs only toward a false FAIL (CHANGELOG known limits)
+- 2026-10-19T00:11:38Z status=wontfix-theoretical owner=40-4-test-depth-docs-prompt-and-capstone by=harvest note=reopen_if=a capstone or OS run shows lineMap 0 straight after a compile
+
+### DW-609: The edit-and-test-class prompt calls iris_execute_tests but has no PRODUCTION_BUSY note, so under the Story 40.3 guard an agent has no instruction to report the refusal rather than stop the other production to get its tests to run
+- source: _bmad-output/implementation-artifacts/spec-40-4-test-depth-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 40.4 implement review 2026-10-18: editAndTestClass.ts; deploy-and-test-class gained the note in 40.4 (decision 62); the AD-15 sanction names only deploy-and-test-class; same shape as DW-590
+- 2026-10-19T00:11:38Z status=escalated owner=burndown by=harvest note=decide at the Epic 40 burn-down decision sheet together with DW-590 (prompt-text changes need an AD-15 sanction)
