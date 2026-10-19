@@ -1,6 +1,6 @@
 ---
 name: iris-mcp-objectscript-unit-tests
-description: "Writing and running %UnitTest tests in ObjectScript: the TestCase class shape and its setup and teardown hooks, which methods run and in what order, every Assert macro and what it returns, skipping a test, what happens when setup or a test fails, and running a class with %UnitTest.Manager and checking its totals. Use when creating or editing a %UnitTest.TestCase class, running IRIS unit tests, or when a run reports fewer tests than expected, zero tests, or a failure you cannot explain."
+description: "Writing and running %UnitTest tests in ObjectScript: the TestCase class shape and its setup and teardown hooks, which methods run and in what order, the common Assert macros and what they return, skipping a test, what happens when setup or a test fails, and running a class with %UnitTest.Manager and checking its totals. Use when creating or editing a %UnitTest.TestCase class, running IRIS unit tests, or when a run reports fewer tests than expected, zero tests, or a failure you cannot explain."
 ---
 
 # %UnitTest in ObjectScript
@@ -82,7 +82,8 @@ Method TestTotal()
 - `$$$AssertSkipped(reason)` in `OnBeforeOneTest` skips that test: its method does not run, and it is reported skipped. Inside a test, call it and then `Quit`; the test is reported skipped too.
 - In `OnBeforeAllTests`, `$$$AssertSkipped` does not skip the class. The first test does not run, yet it is reported passed, and the other tests run as usual. Skip from `OnBeforeOneTest` instead.
 - An error status from `OnBeforeOneTest` fails that one test without running it.
-- An error status from `OnBeforeAllTests` stops the whole class. None of its tests runs, and the run has no test results for it.
+- When `OnBeforeOneTest` returns an error or skips its test, `OnAfterOneTest` is not called for that test, so undo anything it had already set up before it returns. A test that fails, even with a runtime error, still gets its `OnAfterOneTest`.
+- An error status from `OnBeforeAllTests` stops the whole class. None of its tests runs: the class is reported failed with that error, and it has no `TestMethod` rows.
 - A runtime error in a test, such as `<UNDEFINED>`, ends and fails that test with `ERROR #5002: ObjectScript error: <UNDEFINED>` and the location. The next test still runs.
 
 ## Running tests
@@ -91,7 +92,8 @@ Method TestTotal()
 - The testspec is a suite, a class and a method, separated by colons. `":MyApp.Tests.Cart"` runs one class, and `":MyApp.Tests.Cart:TestTotal"` runs one method of it.
 - For classes already compiled on the server, pass `"/noload/nodelete/norecursive"`. The default, `/load`, first loads the classes from the test directory, and a run that loads and runs them deletes the loaded classes when it finishes unless `/nodelete` is given.
 - `RunTest` checks that `^UnitTestRoot` names a directory that exists. It is a global, so each namespace has its own: set it in the namespace where the tests run.
-- Results stay in that namespace and can be read with SQL from `%UnitTest_Result.TestInstance`, `TestSuite`, `TestCase`, `TestMethod` and `TestAssert`. `TestMethod.Status` is 1 for passed, 0 for failed and 2 for skipped, and `TestAssert` holds one row per assertion.
+- Results stay in that namespace and can be read with SQL from `%UnitTest_Result.TestInstance`, `TestSuite`, `TestCase`, `TestMethod` and `TestAssert`. `TestMethod.Status` is 1 for passed, 0 for failed and 2 for skipped.
+- `TestAssert` holds a row for each assertion, and also one for each `$$$LogMessage` and a `Duration of execution` row for each test method that runs without a runtime error. Those two kinds have the `Action` `LogMessage`, so count assertions by `Action`, not by rows.
 - After a run, compare the number of test methods reported for each class with the number of `Test` methods in it. When the count is short, the run's `TestMethod` rows show which tests never ran.
 
 ## Related skills

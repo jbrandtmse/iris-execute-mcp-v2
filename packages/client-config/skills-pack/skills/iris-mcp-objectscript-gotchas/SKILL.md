@@ -12,7 +12,8 @@ Each section names the error or the wrong value you see, then its cause and the 
 - `$$$Name` is a macro, which the compiler expands before the code runs. `$$Name` calls the label `Name` as a function, and `$Name` is a system function such as `$Piece`.
 - Every class gets the status macros without an `Include`: `$$$OK`, `$$$ERROR`, `$$$ISERR`, `$$$ISOK`, `$$$ADDSC`, `$$$ThrowOnError`, `$$$ThrowStatus` and `$$$QuitOnError`.
 - Error-code macros are different. Inside `$$$ERROR($$$GeneralError, "text")` the code name works in any class, because `$$$ERROR` looks the name up itself. On its own, as in `Set tCode = $$$GeneralError`, it needs `Include %occErrors` above the `Class` line. Without it the compile fails with `MPP5610 : Referenced macro not defined: 'GeneralError'`.
-- The `$$$Assert` macros work only in a `%UnitTest.TestCase` subclass. In any other class the compile fails with `MPP5610` for the macro. Adding `Include %outUnitTest` does not help: the compile then fails with `MPP5376 : Method or Property 'AssertEqualsViaMacro' does not exist`, because each macro calls a method of the test case.
+- The `$$$Assert` macros work only in the instance methods of a `%UnitTest.TestCase` subclass, because each macro calls an instance method of the test case. In a class method of a test case the compile fails with `MPP5377 : You are attempting to call instance method 'AssertEqualsViaMacro' from a class method`.
+- In any other class the compile fails with `MPP5610` for the macro. Adding `Include %outUnitTest` does not help: the compile then fails with `MPP5376 : Method or Property 'AssertEqualsViaMacro' does not exist` in an instance method, and with `MPP5392 : No such method 'AssertEqualsViaMacro' defined in this class` in a class method.
 
 ## Calls and arguments
 

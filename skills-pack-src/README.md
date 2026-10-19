@@ -33,9 +33,11 @@ The `SKILL.md` opens with frontmatter on its first line, so a client reads the s
 - Line 1 is `---`, with no byte-order mark and nothing above it (an adaptation header goes after the frontmatter, never before it), and a later `---` line closes the block.
 - The block holds only `name` and `description`, each once, one `key: value` per line at column 1. A value is a double-quoted string that JSON reads, a single-quoted string, or a plain value that holds no `: ` or ` #`, does not end in `:` and does not start with a YAML indicator character. Blank lines and `#` comment lines are allowed.
 - `name` equals the directory name. It is lower-case letters and digits in groups joined by single hyphens, at most 64 characters, and holds neither `claude` nor `anthropic`.
-- `description` is at most 1,024 characters and holds no XML tag. It names what the skill covers in its first sentence, then says `Use when` followed by the situations that call for it. Write `UNDEFINED`, not `<UNDEFINED>`.
+- `description` is at most 1,024 characters and holds no XML tag. Write `UNDEFINED`, not `<UNDEFINED>`.
 
-The three core knowledge skills (`iris-mcp-objectscript-gotchas`, `iris-mcp-objectscript-error-handling` and `iris-mcp-objectscript-unit-tests`) name no `iris_*` tool, so they declare no preset, and they are written for a user's agent: no internal rule number, planning id, repository path or repository tooling. Each claim in them is run on a live IRIS instance before it is written, and a changed claim is run again. A new frontmatter field, such as a preset declaration, extends the field list and the grammar in `scripts/lib/skills-pack.mjs`.
+A description also names what the skill covers in its first sentence, then says `Use when` followed by the situations that call for it. `check:provenance` does not check that wording; `skills-pack-knowledge.test.ts` does, for every knowledge skill, because it lists each one by name.
+
+The three core knowledge skills (`iris-mcp-objectscript-gotchas`, `iris-mcp-objectscript-error-handling` and `iris-mcp-objectscript-unit-tests`) name no `iris_*` tool, so they declare no preset, and they are written for a user's agent: no internal rule number, planning id, repository path or repository tooling. Each claim in them is run on a live IRIS instance before it is written, and a changed claim is run again. A new frontmatter field, such as a preset declaration, extends the field list and the grammar in `scripts/lib/skills-pack.mjs`. Every field in that list is required, so a field a skill may leave out also needs the grammar to allow it without requiring it.
 
 ## Rules and their two forms
 

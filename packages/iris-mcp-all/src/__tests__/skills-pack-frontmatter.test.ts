@@ -37,7 +37,8 @@ import {
 import { put, REPO_ROOT } from "./pack-fixture";
 import { BOM, makeScratchRepo, problemRules, removeScratchRepo, runScript, toCrlf } from "./story-41-1-qa-fixture";
 
-/** U+00A9 COPYRIGHT SIGN, U+00E9 LATIN SMALL LETTER E WITH ACUTE and U+FEFF BYTE ORDER MARK, from code points (ASCII source). */
+/** U+00A0 NO-BREAK SPACE, U+00A9 COPYRIGHT SIGN, U+00E9 LATIN SMALL LETTER E WITH ACUTE and U+FEFF BYTE ORDER MARK, from code points (ASCII source). */
+const NO_BREAK_SPACE = String.fromCharCode(0xa0);
 const COPYRIGHT_SIGN = String.fromCharCode(0xa9);
 const E_ACUTE = String.fromCharCode(0xe9);
 const BYTE_ORDER_MARK = String.fromCharCode(0xfeff);
@@ -116,6 +117,12 @@ const BAD: Array<[string, string, string, string[]]> = [
   ["a name that starts with a hyphen", fm('name: "-bad"', "description: d"), "-bad", ["is not lower-case letters and digits"]],
   ["a name with a doubled hyphen", fm("name: bad--skill", "description: d"), "bad--skill", ["is not lower-case letters and digits"]],
   ["a name that ends in a hyphen", fm('name: "bad-"', "description: d"), "bad-", ["is not lower-case letters and digits"]],
+  [
+    "a name that ends in a no-break space, which YAML keeps",
+    fm(`name: bad-skill${NO_BREAK_SPACE}`, "description: d"),
+    "bad-skill",
+    ["is not lower-case letters and digits", 'is not its directory name "bad-skill"'],
+  ],
   ["a name of 65 characters", fm(`name: ${"a".repeat(65)}`, "description: d"), "a".repeat(65), ["the name is 65 characters; the limit is 64"]],
   ["a name with the reserved word claude", fm("name: claude-helper", "description: d"), "claude-helper", ['contains the reserved word "claude"']],
   ["a name with the reserved word anthropic", fm("name: my-anthropic-tool", "description: d"), "my-anthropic-tool", ['contains the reserved word "anthropic"']],

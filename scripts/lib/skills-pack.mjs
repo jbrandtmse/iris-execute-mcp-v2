@@ -24,8 +24,10 @@
 // SKILL FRONTMATTER. Every `SKILL.md` in the pack opens with a frontmatter block on its first line, holding
 // only `name` and `description` (`skillFrontmatterProblems`). The grammar is a strict subset of YAML read line
 // by line, and it is fail-safe: whatever lies outside it is reported, never guessed at. A later field, such as
-// a skill's preset declaration, extends SKILL_FRONTMATTER_FIELDS and that grammar. `check:provenance` applies
-// it to every agent file at `skills/<name>/SKILL.md`; `assemblePack` still copies those bytes unchanged.
+// a skill's preset declaration, extends SKILL_FRONTMATTER_FIELDS and that grammar. Every field in that list is
+// required, so a field a skill may leave out also needs the grammar to allow it without requiring it.
+// `check:provenance` applies it to every agent file at `skills/<name>/SKILL.md`; `assemblePack` still copies
+// those bytes unchanged.
 //
 // This module reads the filesystem but never writes it; `scripts/gen-pack.mjs` owns the writes.
 
@@ -69,7 +71,7 @@ export const SKILL_NAME_MAX_LENGTH = 64;
 /** The longest `description`, in characters. */
 export const SKILL_DESCRIPTION_MAX_LENGTH = 1024;
 
-/** The only frontmatter fields a pack `SKILL.md` may hold. */
+/** The only frontmatter fields a pack `SKILL.md` may hold; each of them is required. */
 export const SKILL_FRONTMATTER_FIELDS = Object.freeze(['name', 'description']);
 
 // Words a skill `name` may not contain.
@@ -185,7 +187,8 @@ function parseFrontmatterValue(raw) {
  *
  * - Line 1 is exactly `---` (no byte-order mark) and a later `---` line closes the block. Lines split on LF,
  *   and one trailing CR is dropped from each.
- * - Each line between is blank, a comment (first non-space character `#`), or `key: value` at column 1.
+ * - Each line between is blank, a comment (first character after any spaces or tabs is `#`), or `key: value`
+ *   at column 1. Only spaces and tabs around a value are dropped, as YAML drops them.
  * - Keys come only from SKILL_FRONTMATTER_FIELDS, each once, and both are required.
  * - `name` matches SKILL_NAME, has at most SKILL_NAME_MAX_LENGTH characters, equals `dirName`, and holds no
  *   reserved word.
@@ -214,7 +217,7 @@ export function skillFrontmatterProblems(text, dirName) {
   const values = new Map();
   for (let index = 1; index < closing; index += 1) {
     const line = lines[index] ?? '';
-    if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+    if (/^[ \t]*(#|$)/.test(line)) continue;
     const position = `frontmatter line ${index + 1}`;
     const match = FRONTMATTER_LINE.exec(line);
     if (match === null) {
@@ -231,7 +234,7 @@ export function skillFrontmatterProblems(text, dirName) {
       continue;
     }
     seen.add(key);
-    const raw = (match[2] ?? '').trim();
+    const raw = (match[2] ?? '').replace(/^[ \t]+|[ \t]+$/g, '');
     if (raw === '') {
       problems.push(`the field "${key}" is empty (${position}); give it a value`);
       continue;

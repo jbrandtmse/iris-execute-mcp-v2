@@ -13,7 +13,8 @@ hash `1e62c5ad5bf7` (141 keys). The pack goes from 16 to 19 files.
 
 - **Three core knowledge skills**, each one hand-authored `SKILL.md` under `skills-pack-src/knowledge/<name>/` that `pnpm gen:pack`
   copies unchanged into the pack. Every claim in them was run on InterSystems IRIS 2026.2 (Build 221U), and every code block was
-  compiled as written. They name no `iris_*` tool, so they declare no preset, and nothing in them is adapted from another project,
+  compiled unchanged (the `Process` example inside a class that also defines the `Validate` and `Count` methods it calls). They
+  name no `iris_*` tool, so they declare no preset, and nothing in them is adapted from another project,
   so the notice still has no provenance row.
   - `iris-mcp-objectscript-gotchas`: language traps that compile or run differently from what the code suggests (macros and
     `Include`, extra arguments, JSON `null` against a missing key, object references in `$List`, numeric-looking subscripts,
@@ -22,7 +23,8 @@ hash `1e62c5ad5bf7` (141 keys). The pack goes from 16 to 19 files.
     `ThrowOnError`, `ThrowStatus`, `AsStatus`, the `Try` and `Catch` method shape, reading error text without its translated
     `ERROR #N` prefix).
   - `iris-mcp-objectscript-unit-tests`: writing and running `%UnitTest` tests (the `TestCase` shape and its hooks, which
-    methods run and in what order, every `Assert` macro, skipping, failed setup, `%UnitTest.Manager.RunTest` and its totals).
+    methods run and in what order, the common `Assert` macros, skipping, failed setup, `%UnitTest.Manager.RunTest` and its
+    totals).
 - **The `skill-frontmatter` rule of `pnpm check:provenance`.** Every `skills/<name>/SKILL.md` it enumerates (a workflow skill, a
   knowledge source and its pack copy) must open with frontmatter on its first line that holds only `name` and `description`.
   `name` equals the directory and is lower-case letters and digits in hyphen-joined groups, at most 64 characters, without
@@ -43,6 +45,10 @@ hash `1e62c5ad5bf7` (141 keys). The pack goes from 16 to 19 files.
 - `skills-pack-knowledge.test.ts` pins the three skills: their exact name and description, one file per directory, a pack copy
   equal to the source, ASCII, size, no tool name, no internal reference, no bullet copied from the always-on rule, and one anchor
   per probed claim. `agent-text-hygiene.ts` holds the wording list and the word counter that this file shares with the rule's tests.
+- `story-41-3-qa-frontmatter-process.test.ts` (QA) runs the real `check-provenance` CLI in a scratch copy with one frontmatter
+  defect at a time, each red with exactly `skill-frontmatter` for the source and the pack copy and green once repaired, plus the
+  accepted forms. `story-41-3-qa-knowledge-gate-process.test.ts` (QA) runs `validate:prompts` on the three real skills, and the
+  committed knowledge test in a child process against a scratch copy with one offending line added to one skill.
 
 ### Known limits
 

@@ -49,7 +49,7 @@ interface Skill {
 const SKILLS: Skill[] = [
   {
     name: "iris-mcp-objectscript-gotchas",
-    sha256: "99452fa1228345f1b4359d2871de417aa14a05ab7a75bda0051a3f31cba20bf4",
+    sha256: "9803a88ed4a741cb4e4ee2ef1ec24e0c78c94a55f1823e1774469fbabd9c2ac1",
     description:
       "ObjectScript language traps that compile or run differently from what the code suggests: which macros a class gets without an Include, extra arguments, JSON null against a missing key in a dynamic object, object references inside $List, numeric-looking subscripts, New $NAMESPACE and Catch blocks, missing Ens classes, and Open timeouts. Use when writing, reviewing or debugging ObjectScript, or when IRIS reports MPP5610, PARAMETER, INVALID CLASS, INVALID OREF or CLASS DOES NOT EXIST and the cause is not obvious.",
     codeBlocks: 0,
@@ -59,6 +59,8 @@ const SKILLS: Skill[] = [
       "MPP5610 : Referenced macro not defined: 'GeneralError'",
       "Include %occErrors",
       "MPP5376 : Method or Property 'AssertEqualsViaMacro' does not exist",
+      "MPP5377 : You are attempting to call instance method 'AssertEqualsViaMacro' from a class method",
+      "MPP5392 : No such method 'AssertEqualsViaMacro' defined in this class",
       "then raises `<PARAMETER>` when it runs",
       "`$Data(pB)` is 0",
       "does not support MultiDimensional operations",
@@ -78,7 +80,7 @@ const SKILLS: Skill[] = [
   },
   {
     name: "iris-mcp-objectscript-error-handling",
-    sha256: "e1618ef052f13f34e719d5fcba8e103e28cadd8a27ba15ee439c0ff88023c5e4",
+    sha256: "779cd9829c4fb65291898b97ef11d8d6cf2cc2334eed1b79dccebf06980e4434",
     description:
       "How %Status values and exceptions work in ObjectScript: making, testing, combining and reading a status, the Try and Catch method shape, ThrowOnError, ThrowStatus and AsStatus, what a runtime error looks like inside a Catch, and reading error text without its translated ERROR #N prefix. Use when writing a method that returns %Status, handling, rethrowing or logging an error, converting between exceptions and statuses, or putting error text that IRIS returned into a new error.",
     codeBlocks: 2,
@@ -93,14 +95,19 @@ const SKILLS: Skill[] = [
       "`FEHLER #5001: disk full`",
       `If $Piece(tText, tTag) '[ " " Set tText = $Piece(tText, tTag, 2, *)`,
       "`Order #12: `",
+      "`ERROR <Ens>ErrGeneral: queue full`",
       "`ERROR #5001: ERROR #5001: file: missing`",
       "`ERROR #5001: Import failed: file: missing`",
+      "`%Exception.SystemException` when the status holds an ObjectScript error",
       "`sc` is 1",
+      "`ERROR #5001: Called ThrowIfInterrupt with a $$$OK status`",
+      "comparing it with `=` to the status that was thrown gives 0",
       "`ex.Code` is 9",
       "`ERROR #5002: ObjectScript error: <UNDEFINED>`",
       "`ERROR #5035: General exception Name '...' Code '...' Data '...'`",
       "with its original `Name` and `Location`",
       "`#1043: QUIT argument not allowed : 'sc'`",
+      "Inside a `For` loop it compiles, but an error status then raises `<COMMAND>`",
       "`#1026: Invalid command : 'Finally'`",
       '$$$ThrowStatus($$$ERROR($$$GeneralError, "Nothing to process for "_pId))',
       "`Do ..Save()` throws away",
@@ -109,9 +116,9 @@ const SKILLS: Skill[] = [
   },
   {
     name: "iris-mcp-objectscript-unit-tests",
-    sha256: "88fabb181a627bb05a47f8029e651ccee4d408f57dd4557031c02eb41bdc10c5",
+    sha256: "448526cbeb36ad7acbb764ac5ed29ec9eea77f379d794539242d06a3767f58e1",
     description:
-      "Writing and running %UnitTest tests in ObjectScript: the TestCase class shape and its setup and teardown hooks, which methods run and in what order, every Assert macro and what it returns, skipping a test, what happens when setup or a test fails, and running a class with %UnitTest.Manager and checking its totals. Use when creating or editing a %UnitTest.TestCase class, running IRIS unit tests, or when a run reports fewer tests than expected, zero tests, or a failure you cannot explain.",
+      "Writing and running %UnitTest tests in ObjectScript: the TestCase class shape and its setup and teardown hooks, which methods run and in what order, the common Assert macros and what they return, skipping a test, what happens when setup or a test fails, and running a class with %UnitTest.Manager and checking its totals. Use when creating or editing a %UnitTest.TestCase class, running IRIS unit tests, or when a run reports fewer tests than expected, zero tests, or a failure you cannot explain.",
     codeBlocks: 1,
     anchors: [
       "While tIter.%GetNext(.tKey, .tItem) {",
@@ -131,12 +138,15 @@ const SKILLS: Skill[] = [
       "its method does not run, and it is reported skipped",
       "yet it is reported passed",
       "fails that one test without running it",
+      "`OnAfterOneTest` is not called for that test",
       "None of its tests runs",
+      "the class is reported failed with that error, and it has no `TestMethod` rows",
       "The next test still runs",
       '`":MyApp.Tests.Cart:TestTotal"`',
       '`"/noload/nodelete/norecursive"`',
       "each namespace has its own",
       "`TestMethod.Status` is 1 for passed, 0 for failed and 2 for skipped",
+      "a `Duration of execution` row for each test method that runs without a runtime error",
     ],
   },
 ];
@@ -198,11 +208,11 @@ function skillForbidden(repositoryEntries: string[]): Array<[name: string, patte
 const REPOSITORY_ENTRIES = readdirSync(REPO_ROOT);
 const SKILL_FORBIDDEN = skillForbidden(REPOSITORY_ENTRIES);
 
-/** The text a hygiene scan reads: no `name:` line and none of the pack's own skill names. */
+/** The text a hygiene scan reads: no frontmatter `name:` line (line 2) and none of the pack's own skill names. */
 function scannedText(text: string, names: string[]): string {
   const withoutNameLine = text
     .split("\n")
-    .filter((line) => !line.startsWith("name:"))
+    .filter((line, index) => !(index === 1 && line.startsWith("name:")))
     .join("\n");
   return [...names].sort((a, b) => b.length - a.length).reduce((rest, name) => rest.split(name).join(""), withoutNameLine);
 }
@@ -325,8 +335,8 @@ describe("the three core knowledge skills, real tree (AC 41.3.1)", () => {
     });
   });
 
-  it("the probe anchors total 65: 20, 22 and 23", () => {
-    expect(SKILLS.map((skill) => skill.anchors.length)).toEqual([20, 22, 23]);
+  it("the probe anchors total 75: 22, 27 and 26", () => {
+    expect(SKILLS.map((skill) => skill.anchors.length)).toEqual([22, 27, 26]);
   });
 
   it("the notice still has no provenance row: nothing is adapted from another project (AC 41.3.1)", () => {
@@ -366,6 +376,13 @@ describe("the knowledge-skill text checks can fail (negative controls)", () => {
     expect(textProblems(text, names)).toContain(reported);
   });
 
+  it.each(FORBIDDEN.filter(([name]) => name !== NUMBER_SIGN && name !== PATH))(
+    "the skill list still holds the shared class %s, and flags its sample",
+    (name, _pattern, sample) => {
+      expect(textProblems(`${body}${sample}\n`, names)).toContain(name);
+    },
+  );
+
   it("flags a copied bullet of the always-on rule, even with its whitespace changed", () => {
     const bullet = ruleBullets[4] ?? "";
     expect(bullet.length).toBeGreaterThan(40);
@@ -382,9 +399,14 @@ describe("the knowledge-skill text checks can fail (negative controls)", () => {
   });
 
   it("removes the name line and the pack's own skill names before the scan", () => {
-    const text = "name: iris-mcp-objectscript-gotchas\n- See `iris-mcp-objectscript-gotchas` for traps.\n";
+    const text = "---\nname: iris-mcp-objectscript-gotchas\n---\n- See `iris-mcp-objectscript-gotchas` for traps.\n";
     expect(textProblems(text, names)).toEqual([]);
     expect(textProblems(text, [])).toContain("a tool or server name");
+  });
+
+  it("still scans a body line that starts with name:", () => {
+    const text = "---\nname: iris-mcp-objectscript-gotchas\n---\nname: iris-dev\n";
+    expect(textProblems(text, names)).toContain("a tool or server name");
   });
 
   it("the overrides are needed: the unmodified shared list flags the real skills for exactly those two reasons", () => {

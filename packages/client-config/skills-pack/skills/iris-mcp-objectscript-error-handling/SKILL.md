@@ -35,17 +35,18 @@ ClassMethod ErrorMessage(pSC As %Status) As %String
 ```
 
 - It removes one prefix in any language and keeps the rest of the text as it was. `ERROR #5001: file: missing` becomes `file: missing`, and a message that itself contains `Order #12: ` keeps it. On a combined status only the first line loses its prefix.
+- That holds for a status whose code is a number, such as 5001. A code from the interoperability classes, such as `<Ens>ErrGeneral`, has no `#` before it: the text reads `ERROR <Ens>ErrGeneral: queue full`, and the method returns it unchanged.
 - Wrapping the whole text in a new `$$$ERROR($$$GeneralError, ...)` gives `ERROR #5001: ERROR #5001: file: missing`. Wrap the message instead: `$$$ERROR($$$GeneralError, "Import failed: "_..ErrorMessage(tSC))` gives `ERROR #5001: Import failed: file: missing`.
 
 ## Exceptions
 
-- `$$$ThrowOnError(expr)` stores the value of `expr` in a local variable named `sc`, then throws a `%Exception.StatusException` when it is an error. It overwrites any `sc` of your own: after `Set sc = "mine"` and `$$$ThrowOnError($$$OK)`, `sc` is 1.
-- `$$$ThrowStatus(tSC)` throws a status you already have.
-- In `Catch ex`, `ex.AsStatus()` turns any exception into a status. A thrown status comes back unchanged, with its own code and text.
+- `$$$ThrowOnError(expr)` stores the value of `expr` in a local variable named `sc`, then, when it is an error, throws an exception made from it: a `%Exception.StatusException`, or a `%Exception.SystemException` when the status holds an ObjectScript error (code 5002). It overwrites any `sc` of your own: after `Set sc = "mine"` and `$$$ThrowOnError($$$OK)`, `sc` is 1.
+- `$$$ThrowStatus(tSC)` throws a status you already have, the same way. Never pass it an OK status: `$$$ThrowStatus($$$OK)` still throws, with `ERROR #5001: Called ThrowIfInterrupt with a $$$OK status`.
+- In `Catch ex`, `ex.AsStatus()` turns any exception into a status. A thrown status comes back with its own code and text, but not as the same string: comparing it with `=` to the status that was thrown gives 0. Compare the codes or the text instead.
 - A runtime error arrives as a `%Exception.SystemException`. For an undefined variable, `ex.Name` is `<UNDEFINED>`, `ex.Code` is 9, `ex.Location` is the line as `label+offset^routine`, and `ex.Data` is the variable name. `ex.AsStatus()` gives code 5002, `ERROR #5002: ObjectScript error: <UNDEFINED>`, followed by the location, a `*` and the variable name. `$ZERROR` holds the same text from `<UNDEFINED>` on.
 - `##class(%Exception.General).%New(name, code, location, data)` makes your own exception, but its `code` is only a field: `AsStatus()` always gives `ERROR #5035: General exception Name '...' Code '...' Data '...'`. To raise a status with a code of your choosing, use `$$$ThrowStatus`.
 - `Throw ex` inside a `Catch` passes the same exception up to the caller's `Catch`, with its original `Name` and `Location`.
-- `$$$QuitOnError(expr)` expands to an argumented `Quit`. Outside `Try` it returns the error status from the method. Inside `Try` or `Catch` it does not compile: `#1043: QUIT argument not allowed : 'sc'`. Use `$$$ThrowOnError` there.
+- `$$$QuitOnError(expr)` expands to an argumented `Quit`. Outside `Try` and loops it returns the error status from the method. Inside `Try` or `Catch`, and inside a `While` loop or a `Do` loop that ends in `While`, it does not compile: `#1043: QUIT argument not allowed : 'sc'`. Inside a `For` loop it compiles, but an error status then raises `<COMMAND>`. Use `$$$ThrowOnError` in all of these places.
 - There is no `Finally` block: `Finally { }` fails to compile with `#1026: Invalid command : 'Finally'`. Code that must run on both paths goes after the `Try` and `Catch` blocks.
 
 ## The method shape

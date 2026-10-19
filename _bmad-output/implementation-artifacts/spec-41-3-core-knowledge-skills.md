@@ -221,9 +221,66 @@ deferred:
   - `git diff --stat packages/shared/src/bootstrap-classes.ts` is empty;
   - tools stay at 110 package / 115 advertised.
 
+### Review Findings
+
+Code review, 2026-10-19. Review tier `full-opus`, frozen diff `c7cb9f9..HEAD` plus the working tree and QA's two untracked tests. All four layers delivered (Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor): 33 rows, 19 entries after grouping (high 0, medium 8, low 11), 14 rows rejected. Every entry is patched in this pass; no decision-needed and no defer. Each line gives severity, fix-risk, footprint and the Rule 15 disposition.
+
+- [x] [Review][Patch] Decision #11 item 1: the unit-tests description said "every Assert macro", but `$$$AssertFilesSQLUnorderedSame` is not covered; narrowed to "the common Assert macros" (CR11), also in `CHANGELOG.md` [skills-pack-src/knowledge/iris-mcp-objectscript-unit-tests/SKILL.md:3] - low, fix-risk low (one phrase and its typed oracle), in-story, spec-bound and corrected under the Lead's authorization.
+- [x] [Review][Patch] Decision #11 item 2: the quoted `MPP5376` holds only in an instance method. The bullet now gives `MPP5377` (class method of a test case), `MPP5376` and `MPP5392` (`Include %outUnitTest`, instance and class method), and says the macros work only in instance methods (CR1) [skills-pack-src/knowledge/iris-mcp-objectscript-gotchas/SKILL.md:15] - medium, fix-risk low, in-story, Lead-authorized.
+- [x] [Review][Patch] Decision #11 item 3: "a thrown status comes back unchanged" became "the same code and text, not the same string" (CR6) [skills-pack-src/knowledge/iris-mcp-objectscript-error-handling/SKILL.md:45] - medium, fix-risk low, in-story, Lead-authorized.
+- [x] [Review][Patch] Decision #11 item 4: "`TestAssert` holds one row per assertion" over-counts; the text now names the `$$$LogMessage` and duration rows and says to count by `Action` (CR9) [skills-pack-src/knowledge/iris-mcp-objectscript-unit-tests/SKILL.md:96] - medium, fix-risk low, in-story, Lead-authorized.
+- [x] [Review][Patch] Decision #11 item 5 (with the Acceptance Auditor's "decision #11 not applied", which this stage owns): added `$$$ThrowStatus($$$OK)` throws (CR5); `$$$QuitOnError` in loops, narrowed to what runs: `While` and `Do`/`While` do not compile, `For` compiles and raises `<COMMAND>` (CR7); `OnAfterOneTest` is not called after a failed or skipping `OnBeforeOneTest` (CR8) [skills-pack-src/knowledge/iris-mcp-objectscript-error-handling/SKILL.md:44,49; skills-pack-src/knowledge/iris-mcp-objectscript-unit-tests/SKILL.md:85] - medium, fix-risk low, in-story, Lead-authorized.
+- [x] [Review][Patch] Decision #11 item 6: "removes one prefix in any language" is kept and its 15-table evidence cited (CR2); the spec's stale Residual-risks bullet is closed by the Spec Change Log [spec probe log E8] - low, fix-risk low, in-story. The DW-622 part of the same row got an `occurrence` line.
+- [x] [Review][Patch] Found in review: `ErrorMessage` "removes one prefix" is false for a non-numeric code; `<Ens>ErrGeneral` comes back unchanged and doubles when wrapped (CR3). A sentence now scopes it [skills-pack-src/knowledge/iris-mcp-objectscript-error-handling/SKILL.md:38] - medium, fix-risk low, in-story. Corrected under decision #11's principle, beyond the six listed items; the Lead may revert.
+- [x] [Review][Patch] Found in review: `$$$ThrowOnError` (and `$$$ThrowStatus`) throw a `%Exception.SystemException`, not a `StatusException`, for a 5002 status (CR4) [skills-pack-src/knowledge/iris-mcp-objectscript-error-handling/SKILL.md:43] - medium, fix-risk low, in-story. Beyond the six items, the Lead may revert.
+- [x] [Review][Patch] Found in review: a failed `OnBeforeAllTests` does leave results: the class is reported failed with the error, and it has no `TestMethod` rows (CR10) [skills-pack-src/knowledge/iris-mcp-objectscript-unit-tests/SKILL.md:86] - low, fix-risk low, in-story. Beyond the six items, the Lead may revert.
+- [x] [Review][Patch] The skill-level hygiene list's 11 pass-through classes (Story ids among them) had no membership row, so dropping one stayed green; an `it.each` over them added, mutation M17 [packages/iris-mcp-all/src/__tests__/skills-pack-knowledge.test.ts:380] - medium (Rule 19), fix-risk low, in-story.
+- [x] [Review][Patch] The QA child-process gate wrote its Vite cache through the scratch `node_modules` link into the real `node_modules/.vite`; `cacheDir` keeps it in the scratch copy, two guards added, mutation M20 [packages/iris-mcp-all/src/__tests__/story-41-3-qa-knowledge-gate-process.test.ts:151] - medium (Rule 19 hermeticity), fix-risk low, in-story. The stray `node_modules/.vite/` the QA run left is the lead's to delete.
+- [x] [Review][Patch] `SKILL_FRONTMATTER_FIELDS` is both the allowed and the required list, so the documented seam ("a later field extends it") would make a preset declaration mandatory; the module comment, the constant's doc and the README now say so [scripts/lib/skills-pack.mjs:27] - low, fix-risk low, in-story.
+- [x] [Review][Patch] The README said `check:provenance` refuses a description that does not name its content and say `Use when`; that wording is checked by the knowledge test, and the README now says which [skills-pack-src/README.md:38] - low, fix-risk low, in-story.
+- [x] [Review][Patch] The CHANGELOG's `### Tests` omitted QA's two files; added [CHANGELOG.md:48] - low, fix-risk low, in-story.
+- [x] [Review][Patch] The CHANGELOG said every code block "compiled as written", but `Process` compiles only beside `Validate` and `Count`; reworded [CHANGELOG.md:16] - low, fix-risk low, in-story.
+- [x] [Review][Patch] The QA gate linked `node_modules` with type `"dir"`, which needs a privilege on Windows; `"junction"`, as the sibling `makeScratchRepo` does [packages/iris-mcp-all/src/__tests__/story-41-3-qa-knowledge-gate-process.test.ts:175] - low, fix-risk low, in-story.
+- [x] [Review][Patch] The hygiene scan dropped every line starting with `name:`, so a body line such as `name: iris-dev` escaped it; only frontmatter line 2 is dropped now, with a control, mutation M18 [packages/iris-mcp-all/src/__tests__/skills-pack-knowledge.test.ts:215] - low, fix-risk low, in-story.
+- [x] [Review][Patch] The reader trimmed values with `String.trim`, which also strips a no-break space that YAML keeps, so `name: bad-skill` plus U+00A0 passed; spaces and tabs only now, with a refusal row, mutation M19 [scripts/lib/skills-pack.mjs:237] - low, fix-risk low, in-story.
+- [x] [Review][Patch] AC "Unchanged counts" had no `mutation:` line; one written (`gen:skills:check` drift) [spec ## Verification] - low (Rule 19), closed in this pass.
+
+Rejected (14):
+
+- `low` BH: `$$$QuitOnError` also overwrites `sc`. An omission; the fix adds golden text outside decision #11's list.
+- `low` BH: `OnAfterAllTests` still runs after a failed `OnBeforeAllTests` (`Manager.cls:1298-1306`). An omission; same reason.
+- `low` BH: `RunTest`'s `%Status` is not the test result (`Manager.cls:693`). True, but the skill never claims it is, and it points the reader to the `TestMethod` counts. An omission; same reason.
+- `low` BH: `Test01` and `Test1` collide in `getTestMethods` (`Manager.cls:1340-1352`), so one never runs. A rare naming corner; the fix adds content and a new claim.
+- `low` BH: operator precedence and the `&`/`!` short-circuit trap. An omission beyond the three skills' scope.
+- `low` BH: `%OpenId` and `SQLCODE` error paths. An omission beyond scope; the SQL half belongs to a later platform skill.
+- `low` BH: decision #11's row in the orchestrator record still calls "any language" an over-claim. That is the orchestrator's record, and the Lead's prompt already settles it (CR2).
+- `low` BH and QA: the skill does not say `Validate` and `Count` stand for the reader's own methods. Negligible, as before; the CHANGELOG claim was fixed instead.
+- `false` AA: the gotchas description names `CLASS DOES NOT EXIST`, which the body never mentions. CR12 shows calling an `Ens.*` class in `%SYS` raises it, and the namespace and `Ens.*` sections are its causes.
+- `low` ECH: the fenced-block count sees only backtick fences. Any added block already breaks the sha256 pin, so nothing slips through silently.
+- `low` ECH: `readdirSync(REPO_ROOT)` differs across checkouts in ignored entries. The skills hold no such path, and the fix changes the mechanism shared with QA's gate.
+- `low` VG: the DW-613 refusal row depends on `hasValidAdaptationHeader`'s gap staying open. By design: the spec pins the gap.
+- `false` VG: "the rows and the controls are distinct skills" guards nothing. It also asserts `BAD.length >= 18`, a floor against a silently shrunk table.
+- `low` AA and BH: the Auto Run Result's Residual-risks bullets went stale. They are closed by the Spec Change Log entry of this review, and that build-auto section stays as its record of that pass.
+
 ## Spec Change Log
 
 - **2026-10-19, lead spec gate.** Wave-7 decisions #7, #8, #9 and #10 were taken as recommended (Design Notes). The spine is amended (Rule 20): AD-28 gains the knowledge-skill names bullet and the skill-frontmatter bullet, and the conventions table gains "Pack names". The plan's one `deferred:` item (`SanitizeError` localized prefixes) is harvested by the lead at dev-complete.
+- **2026-10-19, code review (wave-7 decision #11; Rule 5 apply-and-report, on the Lead's authorization).** The golden texts, their sha256 values and sizes, the probe log (rows CR1 to CR12) and the probe anchors (65 to 75) were amended in one pass. Each changed or added claim was run live first: 10 disposable `ExecuteMCPv2.Temp.Probe413CR*` classes, `iris_execute_tests` run 1366 with total 5 of 5, leftovers `[]`. `pnpm gen:pack` was re-run afterwards (19 files; the pack copies are byte-identical).
+  - Item 1: the unit-tests description's "every Assert macro and what it returns" became "the common Assert macros and what they return" (CR11). `$$$AssertFilesSQLUnorderedSame` is not covered.
+  - Item 2: the gotchas `$$$Assert` bullet now says the macros work only in the instance methods of a test case, and gives each compile error by context (CR1): `MPP5377` in a class method of a test case; with `Include %outUnitTest`, `MPP5376` in an instance method and `MPP5392` in a class method.
+  - Item 3: "a thrown status comes back unchanged" became "the same code and text, but not the same string" (CR6).
+  - Item 4: "`TestAssert` holds one row per assertion" became a row per assertion, per `$$$LogMessage` and per duration, counted by `Action` (CR9).
+  - Item 5: three claims were added.
+    - `$$$ThrowStatus($$$OK)` throws (CR5).
+    - `$$$QuitOnError` in loops (CR7). A `While` loop and a `Do`/`While` loop do not compile; a `For` loop compiles and then raises `<COMMAND>`. This is narrower than the decision's "does not compile inside a loop", which holds for only two of the three loops.
+    - `OnAfterOneTest` is not called after a failed or skipping `OnBeforeOneTest` (CR8).
+  - Item 6: "removes one prefix in any language" is kept as written, citing QA's run over all 15 message tables (CR2).
+  - **Beyond the six listed items.** Three more claims were corrected under decision #11's principle that a false claim in a skill is a defect. This review's layers found them, and each was run live:
+    - the `ErrorMessage` strip holds only for a numeric code; `<Ens>ErrGeneral` comes back unchanged (CR3);
+    - `$$$ThrowOnError` and `$$$ThrowStatus` throw a `%Exception.SystemException` for a 5002 status (CR4);
+    - a failed `OnBeforeAllTests` reports the class failed, with no `TestMethod` rows, rather than leaving "no test results" (CR10).
+    Each is one sentence plus its anchor, and the Lead may revert them.
+  - **Closed.** This entry closes the Auto Run Result's golden-text Residual-risks bullets and the QA stage's three "QA findings (live)" wording points. `CHANGELOG.md` follows item 1 and now names QA's two test files.
 
 ## Review Triage Log
 
@@ -312,7 +369,7 @@ deferred:
 - **41.3.1, "a description that says when to load it".**
   - The first sentence says what the skill covers, and a `Use when` sentence gives the triggers.
   - At most 1,024 characters, and no XML-like tag: the Claude API refuses tags in a description, so the descriptions name `UNDEFINED`, not `<UNDEFINED>`.
-  - The descriptions are 515, 480 and 490 characters.
+  - The descriptions are 515, 480 and 497 characters.
 - **41.3.2, "probed live".** Every claim maps to a row run on the live instance:
   - a compile, a run, an `iris_execute_tests` call, a read-only SQL query or global read;
   - or, where a run would need a file or global write, a ranged `iris_doc_get` of the live system class (the `/load` deletion, the directory check, `%Save()`'s return type, `$$$AssertFilesSame`).
@@ -322,7 +379,7 @@ deferred:
   - IRIS codes in two forms, `ERROR #<n>` and `#<n>:`;
   - the qualifier string `/noload/nodelete/norecursive`;
   - their own `iris-mcp-` names.
-- **Size.** At most 500 lines comes from the Claude Code and Agent Skills guidance; at most 1,200 words is this plan's budget. The skills are 55, 81 and 100 lines, and 762, 814 and 880 words.
+- **Size.** At most 500 lines comes from the Claude Code and Agent Skills guidance; at most 1,200 words is this plan's budget. The skills are 56, 82 and 102 lines, and 811, 946 and 963 words.
 - **DW-613, "every pack `SKILL.md`".** The rule checks every `skills/<n>/SKILL.md` agent file. "Its header comes after it" holds because the frontmatter must be first and the existing header rule wants the first non-blank line after it.
 
 **Spine text for the lead** (Rule 20, light path):
@@ -369,7 +426,7 @@ No AC contradicts an AD.
 
 **Golden texts.** Each file is the text between the fences, ending in a single LF.
 
-- `skills-pack-src/knowledge/iris-mcp-objectscript-gotchas/SKILL.md`: 5,115 bytes, 55 lines, 762 words, sha256 `99452fa1228345f1b4359d2871de417aa14a05ab7a75bda0051a3f31cba20bf4`.
+- `skills-pack-src/knowledge/iris-mcp-objectscript-gotchas/SKILL.md`: 5,428 bytes, 56 lines, 811 words, sha256 `9803a88ed4a741cb4e4ee2ef1ec24e0c78c94a55f1823e1774469fbabd9c2ac1`.
 
 ~~~markdown
 ---
@@ -386,7 +443,8 @@ Each section names the error or the wrong value you see, then its cause and the 
 - `$$$Name` is a macro, which the compiler expands before the code runs. `$$Name` calls the label `Name` as a function, and `$Name` is a system function such as `$Piece`.
 - Every class gets the status macros without an `Include`: `$$$OK`, `$$$ERROR`, `$$$ISERR`, `$$$ISOK`, `$$$ADDSC`, `$$$ThrowOnError`, `$$$ThrowStatus` and `$$$QuitOnError`.
 - Error-code macros are different. Inside `$$$ERROR($$$GeneralError, "text")` the code name works in any class, because `$$$ERROR` looks the name up itself. On its own, as in `Set tCode = $$$GeneralError`, it needs `Include %occErrors` above the `Class` line. Without it the compile fails with `MPP5610 : Referenced macro not defined: 'GeneralError'`.
-- The `$$$Assert` macros work only in a `%UnitTest.TestCase` subclass. In any other class the compile fails with `MPP5610` for the macro. Adding `Include %outUnitTest` does not help: the compile then fails with `MPP5376 : Method or Property 'AssertEqualsViaMacro' does not exist`, because each macro calls a method of the test case.
+- The `$$$Assert` macros work only in the instance methods of a `%UnitTest.TestCase` subclass, because each macro calls an instance method of the test case. In a class method of a test case the compile fails with `MPP5377 : You are attempting to call instance method 'AssertEqualsViaMacro' from a class method`.
+- In any other class the compile fails with `MPP5610` for the macro. Adding `Include %outUnitTest` does not help: the compile then fails with `MPP5376 : Method or Property 'AssertEqualsViaMacro' does not exist` in an instance method, and with `MPP5392 : No such method 'AssertEqualsViaMacro' defined in this class` in a class method.
 
 ## Calls and arguments
 
@@ -429,7 +487,7 @@ Each section names the error or the wrong value you see, then its cause and the 
 - `iris-mcp-objectscript-unit-tests`: writing and running `%UnitTest` test classes.
 ~~~
 
-- `skills-pack-src/knowledge/iris-mcp-objectscript-error-handling/SKILL.md`: 5,954 bytes, 81 lines, 814 words, sha256 `e1618ef052f13f34e719d5fcba8e103e28cadd8a27ba15ee439c0ff88023c5e4`.
+- `skills-pack-src/knowledge/iris-mcp-objectscript-error-handling/SKILL.md`: 6,749 bytes, 82 lines, 946 words, sha256 `779cd9829c4fb65291898b97ef11d8d6cf2cc2334eed1b79dccebf06980e4434`.
 
 ~~~markdown
 ---
@@ -469,17 +527,18 @@ ClassMethod ErrorMessage(pSC As %Status) As %String
 ```
 
 - It removes one prefix in any language and keeps the rest of the text as it was. `ERROR #5001: file: missing` becomes `file: missing`, and a message that itself contains `Order #12: ` keeps it. On a combined status only the first line loses its prefix.
+- That holds for a status whose code is a number, such as 5001. A code from the interoperability classes, such as `<Ens>ErrGeneral`, has no `#` before it: the text reads `ERROR <Ens>ErrGeneral: queue full`, and the method returns it unchanged.
 - Wrapping the whole text in a new `$$$ERROR($$$GeneralError, ...)` gives `ERROR #5001: ERROR #5001: file: missing`. Wrap the message instead: `$$$ERROR($$$GeneralError, "Import failed: "_..ErrorMessage(tSC))` gives `ERROR #5001: Import failed: file: missing`.
 
 ## Exceptions
 
-- `$$$ThrowOnError(expr)` stores the value of `expr` in a local variable named `sc`, then throws a `%Exception.StatusException` when it is an error. It overwrites any `sc` of your own: after `Set sc = "mine"` and `$$$ThrowOnError($$$OK)`, `sc` is 1.
-- `$$$ThrowStatus(tSC)` throws a status you already have.
-- In `Catch ex`, `ex.AsStatus()` turns any exception into a status. A thrown status comes back unchanged, with its own code and text.
+- `$$$ThrowOnError(expr)` stores the value of `expr` in a local variable named `sc`, then, when it is an error, throws an exception made from it: a `%Exception.StatusException`, or a `%Exception.SystemException` when the status holds an ObjectScript error (code 5002). It overwrites any `sc` of your own: after `Set sc = "mine"` and `$$$ThrowOnError($$$OK)`, `sc` is 1.
+- `$$$ThrowStatus(tSC)` throws a status you already have, the same way. Never pass it an OK status: `$$$ThrowStatus($$$OK)` still throws, with `ERROR #5001: Called ThrowIfInterrupt with a $$$OK status`.
+- In `Catch ex`, `ex.AsStatus()` turns any exception into a status. A thrown status comes back with its own code and text, but not as the same string: comparing it with `=` to the status that was thrown gives 0. Compare the codes or the text instead.
 - A runtime error arrives as a `%Exception.SystemException`. For an undefined variable, `ex.Name` is `<UNDEFINED>`, `ex.Code` is 9, `ex.Location` is the line as `label+offset^routine`, and `ex.Data` is the variable name. `ex.AsStatus()` gives code 5002, `ERROR #5002: ObjectScript error: <UNDEFINED>`, followed by the location, a `*` and the variable name. `$ZERROR` holds the same text from `<UNDEFINED>` on.
 - `##class(%Exception.General).%New(name, code, location, data)` makes your own exception, but its `code` is only a field: `AsStatus()` always gives `ERROR #5035: General exception Name '...' Code '...' Data '...'`. To raise a status with a code of your choosing, use `$$$ThrowStatus`.
 - `Throw ex` inside a `Catch` passes the same exception up to the caller's `Catch`, with its original `Name` and `Location`.
-- `$$$QuitOnError(expr)` expands to an argumented `Quit`. Outside `Try` it returns the error status from the method. Inside `Try` or `Catch` it does not compile: `#1043: QUIT argument not allowed : 'sc'`. Use `$$$ThrowOnError` there.
+- `$$$QuitOnError(expr)` expands to an argumented `Quit`. Outside `Try` and loops it returns the error status from the method. Inside `Try` or `Catch`, and inside a `While` loop or a `Do` loop that ends in `While`, it does not compile: `#1043: QUIT argument not allowed : 'sc'`. Inside a `For` loop it compiles, but an error status then raises `<COMMAND>`. Use `$$$ThrowOnError` in all of these places.
 - There is no `Finally` block: `Finally { }` fails to compile with `#1026: Invalid command : 'Finally'`. Code that must run on both paths goes after the `Try` and `Catch` blocks.
 
 ## The method shape
@@ -515,12 +574,12 @@ ClassMethod Process(pId As %String) As %Status
 - `iris-mcp-objectscript-unit-tests`: asserting on statuses in `%UnitTest` tests.
 ~~~
 
-- `skills-pack-src/knowledge/iris-mcp-objectscript-unit-tests/SKILL.md`: 6,209 bytes, 100 lines, 880 words, sha256 `88fabb181a627bb05a47f8029e651ccee4d408f57dd4557031c02eb41bdc10c5`.
+- `skills-pack-src/knowledge/iris-mcp-objectscript-unit-tests/SKILL.md`: 6,722 bytes, 102 lines, 963 words, sha256 `448526cbeb36ad7acbb764ac5ed29ec9eea77f379d794539242d06a3767f58e1`.
 
 ~~~markdown
 ---
 name: iris-mcp-objectscript-unit-tests
-description: "Writing and running %UnitTest tests in ObjectScript: the TestCase class shape and its setup and teardown hooks, which methods run and in what order, every Assert macro and what it returns, skipping a test, what happens when setup or a test fails, and running a class with %UnitTest.Manager and checking its totals. Use when creating or editing a %UnitTest.TestCase class, running IRIS unit tests, or when a run reports fewer tests than expected, zero tests, or a failure you cannot explain."
+description: "Writing and running %UnitTest tests in ObjectScript: the TestCase class shape and its setup and teardown hooks, which methods run and in what order, the common Assert macros and what they return, skipping a test, what happens when setup or a test fails, and running a class with %UnitTest.Manager and checking its totals. Use when creating or editing a %UnitTest.TestCase class, running IRIS unit tests, or when a run reports fewer tests than expected, zero tests, or a failure you cannot explain."
 ---
 
 # %UnitTest in ObjectScript
@@ -602,7 +661,8 @@ Method TestTotal()
 - `$$$AssertSkipped(reason)` in `OnBeforeOneTest` skips that test: its method does not run, and it is reported skipped. Inside a test, call it and then `Quit`; the test is reported skipped too.
 - In `OnBeforeAllTests`, `$$$AssertSkipped` does not skip the class. The first test does not run, yet it is reported passed, and the other tests run as usual. Skip from `OnBeforeOneTest` instead.
 - An error status from `OnBeforeOneTest` fails that one test without running it.
-- An error status from `OnBeforeAllTests` stops the whole class. None of its tests runs, and the run has no test results for it.
+- When `OnBeforeOneTest` returns an error or skips its test, `OnAfterOneTest` is not called for that test, so undo anything it had already set up before it returns. A test that fails, even with a runtime error, still gets its `OnAfterOneTest`.
+- An error status from `OnBeforeAllTests` stops the whole class. None of its tests runs: the class is reported failed with that error, and it has no `TestMethod` rows.
 - A runtime error in a test, such as `<UNDEFINED>`, ends and fails that test with `ERROR #5002: ObjectScript error: <UNDEFINED>` and the location. The next test still runs.
 
 ## Running tests
@@ -611,7 +671,8 @@ Method TestTotal()
 - The testspec is a suite, a class and a method, separated by colons. `":MyApp.Tests.Cart"` runs one class, and `":MyApp.Tests.Cart:TestTotal"` runs one method of it.
 - For classes already compiled on the server, pass `"/noload/nodelete/norecursive"`. The default, `/load`, first loads the classes from the test directory, and a run that loads and runs them deletes the loaded classes when it finishes unless `/nodelete` is given.
 - `RunTest` checks that `^UnitTestRoot` names a directory that exists. It is a global, so each namespace has its own: set it in the namespace where the tests run.
-- Results stay in that namespace and can be read with SQL from `%UnitTest_Result.TestInstance`, `TestSuite`, `TestCase`, `TestMethod` and `TestAssert`. `TestMethod.Status` is 1 for passed, 0 for failed and 2 for skipped, and `TestAssert` holds one row per assertion.
+- Results stay in that namespace and can be read with SQL from `%UnitTest_Result.TestInstance`, `TestSuite`, `TestCase`, `TestMethod` and `TestAssert`. `TestMethod.Status` is 1 for passed, 0 for failed and 2 for skipped.
+- `TestAssert` holds a row for each assertion, and also one for each `$$$LogMessage` and a `Duration of execution` row for each test method that runs without a runtime error. Those two kinds have the `Action` `LogMessage`, so count assertions by `Action`, not by rows.
 - After a run, compare the number of test methods reported for each class with the number of `Test` methods in it. When the count is short, the run's `TestMethod` rows show which tests never ran.
 
 ## Related skills
@@ -657,7 +718,7 @@ Each row gives the claim, the probe, what was observed, and the verdict.
 - **G4, `$$$Assert` only in a test case.**
   - Probe: `Probe413NoMacro` and `Probe413IncTest`.
   - Observed: `MPP5610 : Referenced macro not defined: 'AssertEquals'`, then `MPP5376 : Method or Property 'AssertEqualsViaMacro' does not exist in this class.` Source: `TestCase.cls:5`.
-  - Holds.
+  - Holds for an instance method only. Narrowed and extended in code review: CR1.
 - **G5, extra arguments compile, then raise `<PARAMETER>`.**
   - Probe: `Probe413ArgCompile.Direct` (compiled) and `Probe413Run.ExtraArg`.
   - Observed: `direct:<PARAMETER> TakesOne^...` and `extra:<PARAMETER>`.
@@ -756,7 +817,7 @@ Each row gives the claim, the probe, what was observed, and the verdict.
 - **E8, `ErrorMessage`, compiled verbatim.**
   - Probe: `Probe413Strip.Cases`.
   - Observed: `en=file: missing;fr=file: missing;de=file: missing;lookalike=Order #12: late;samecode=see #5001: here;combined=first\r\nERROR #5001: second`. The `fr` and `de` cases ran through `ErrorMessageIn`, the same logic with a language parameter.
-  - Holds. This replaced the draft's shape-based strip, which turned `see #12: here` into `here`.
+  - Holds. This replaced the draft's shape-based strip, which turned `see #12: here` into `here`. "In any language" is settled for all 15 message tables (CR2); the numeric-code scope is CR3.
 - **E9, doubling, and wrapping the message.**
   - Probe: `Strip` and `Cases`.
   - Observed: `wrappedRaw=ERROR #5001: ERROR #5001: file: missing` and `rewrapped=ERROR #5001: Import failed: file: missing`.
@@ -764,15 +825,15 @@ Each row gives the claim, the probe, what was observed, and the verdict.
 - **E10, `ThrowOnError` uses `sc` and throws a `StatusException`.**
   - Probe: `ThrowOnErrorSc` and `Macros`, with source `%occStatus.inc:70`.
   - Observed: `sc=1` and `thrown=%Exception.StatusException`.
-  - Holds.
+  - Holds for a status that is not an ObjectScript error. Corrected in code review: CR4.
 - **E11, `ThrowStatus`.**
   - Probe: `ThrowStatus`.
   - Observed: `%Exception.StatusException:ERROR #5001: thrown`.
-  - Holds.
+  - Holds. The OK-status case is CR5, and the 5002 case is CR4.
 - **E12, `AsStatus` gives a thrown status back unchanged.**
   - Probe: `StatusError`.
   - Observed: `codes=5001;text=ERROR #5001: boom`.
-  - Holds.
+  - Holds for the code and the text, not for the value. Corrected in code review: CR6.
 - **E13, a runtime error in `Catch`.**
   - Probe: `SystemError`.
   - Observed: `class=%Exception.SystemException;name=<UNDEFINED>;code=9;location=SystemError+3^...;data=tNeverSet;codes=5002;text=ERROR #5002: ObjectScript error: <UNDEFINED>SystemError+3^... *tNeverSet;zerror=<UNDEFINED>SystemError+3^... *tNeverSet`.
@@ -788,7 +849,7 @@ Each row gives the claim, the probe, what was observed, and the verdict.
 - **E16, `QuitOnError`.**
   - Probe: `QuitOutside` and `Probe413QuitOnErr`.
   - Observed: `ERROR #5001: boom` outside a `Try`. Inside one, `#1043: QUIT argument not allowed : 'sc'`.
-  - Holds.
+  - Holds. The loops are CR7.
 - **E17, no `Finally`.**
   - Probe: `Probe413Finally`.
   - Observed: `#1026: Invalid command : 'Finally'`.
@@ -839,7 +900,7 @@ Each row gives the claim, the probe, what was observed, and the verdict.
 - **U8, the macro table.**
   - Probe: source `%outUnitTest.inc` and `TestCase.cls:338-375`, plus `Probe413TestAsserts`, run 1342.
   - Observed: total 8 of 8 expected; 5 passed, 2 failed (`TestErrorStops`, `TestFailsOnPurpose`), 1 skipped (`TestSkipsItself`). `AssertStatusEquals` passed on two separately built equal errors.
-  - Holds.
+  - Holds. The description's macro claim is narrowed in code review: CR11.
 - **U9, `$$$AssertFilesSame`.**
   - Probe: live `iris_doc_get %UnitTest.TestCase.cls:381`.
   - Observed: `Method AssertFilesSameViaMacro(autoquoted, file1, file2, description) As %Boolean`.
@@ -875,7 +936,7 @@ Each row gives the claim, the probe, what was observed, and the verdict.
 - **U17, an `OnBeforeAllTests` error.**
   - Probe: `Probe413TestBeforeAll`, run 1343.
   - Observed: total 0 against 2 expected: "produced no method-level results ... OnBeforeAllTests: ERROR #5001: setup failed".
-  - Holds.
+  - Holds that no test runs. "No test results" is corrected in code review: CR10.
 - **U18, a runtime error fails one test, and the run goes on.**
   - Probe: run 1342.
   - Observed: `TestErrorStops` failed with `ERROR #5002: ObjectScript error: <UNDEFINED>TestErrorStops+1^... *tNeverSet`, and `TestZAfterError` passed.
@@ -897,23 +958,91 @@ Each row gives the claim, the probe, what was observed, and the verdict.
 - **U23, results per namespace; `Status` 1, 0 and 2; one `TestAssert` row per assertion.**
   - Probe: SQL over runs 1342 and 1346, with source `Result/TestMethod.cls:13`.
   - Observed: `COUNT(*)` of the `Probe413` cases is 10 in HSCUSTOM and 0 in USER.
-  - Holds.
+  - Holds for the namespace and the `Status` values. The row count was never established; "one row per assertion" is corrected in code review: CR9.
 - **U24, comparing counts and reading `TestMethod` rows.**
   - Probe: advice resting on U17 and U23.
   - Holds.
 
 Claims that failed in the draft and were corrected before the golden text: G3 (the `$$$GeneralError` include), G17 (narrowed to `%SYS`), E8 (the strip), E13 (the `$ZERROR` wording), U10 (`AssertSkipped` needs its reason) and U15 (`OnBeforeAllTests` skip).
 
+*Code review, 2026-10-19 (wave-7 decision #11).* Same discipline, on `server:"default"`, namespace `HSCUSTOM`.
+
+- **Target:** `iris_server_info` reported `IRIS for UNIX (Ubuntu Server LTS for ARM64 Containers) 2026.2 (Build 221U)`.
+- **Before and after:** `iris_doc_list filter:"Probe413" generated:true` returned `[]` both times.
+- **Classes:** 10 disposable `ExecuteMCPv2.Temp.Probe413CR*` classes were put and compiled with `ck`; five were meant to fail. They were run, then deleted with one `iris_doc_delete` call.
+- **Writes:** no HSCUSTOM global was written. The only writes were the `%UnitTest` framework's own result rows of run 1366.
+- **Reads:** `%UnitTest_Result` for runs 1343, 1363 and 1366 (`iris_sql_query`). Source: `irislib/%occStatus.inc:68-81`, `irislib/%Exception/StatusException.cls:15-52,117-131`, `irislib/%outUnitTest.inc:6-31`, `irislib/%UnitTest/TestCase.cls:215-246,400-415` and `irislib/%UnitTest/Manager.cls:1225-1310`.
+
+The rows:
+
+- **CR1, `$$$Assert` only in the instance methods of a test case (item 2).**
+  - Probe: `Probe413CRAssertCM`, a TestCase subclass with a `ClassMethod`, gave `MPP5377 : You are attempting to call instance method 'AssertEqualsViaMacro' from a class method`.
+  - With `Include %outUnitTest`, `Probe413CRIncMethod` (an instance `Method`) gave `MPP5376 : Method or Property 'AssertEqualsViaMacro' does not exist in this class.` and `Probe413CRIncClassMethod` (a `ClassMethod`) gave `MPP5392 : No such method 'AssertEqualsViaMacro' defined in this class.`
+  - `Probe413CRNoInc`, with no include, gave `MPP5610 : Referenced macro not defined: 'AssertEquals'`.
+  - Source: every `$$$Assert` macro expands to `..<Name>ViaMacro` (`%outUnitTest.inc:6-31`), which is an instance method.
+  - Holds.
+- **CR2, "removes one prefix in any language" (item 6).**
+  - Evidence: the QA stage's live run above, which put the verbatim `ErrorMessage` through all 15 system message tables (ar, de, en, en-us, es, es-cl, fr, it, ja, ko, nl, pt-br, ru, uk, zh-cn). It ran both through an explicit-language twin and under each session language, and one prefix was removed in every case.
+  - Holds. The sentence is kept as written.
+- **CR3, the numeric-code scope of `ErrorMessage` (found in review).**
+  - Probe: `Probe413CREns` (`Include Ensemble`), with the verbatim `ErrorMessage`.
+  - Observed: `codes=<Ens>ErrGeneral;text=ERROR <Ens>ErrGeneral: queue full;msg=ERROR <Ens>ErrGeneral: queue full;wrapped=ERROR #5001: Import failed: ERROR <Ens>ErrGeneral: queue full;fr=ERREUR <Ens>ErrGeneral: queue full;genMsg=disk full`.
+  - Holds: a numeric code is cut, and a non-numeric code comes back unchanged.
+- **CR4, the class `$$$ThrowOnError` and `$$$ThrowStatus` throw (found in review).**
+  - Probe: `Probe413CRStatus.ThrowOnError5002`.
+  - Observed: `codes=5002;toeClass=%Exception.SystemException;isStatusEx=0;back=5002;tsClass=%Exception.SystemException;generalClass=%Exception.StatusException`.
+  - Source: `StatusException.cls:37-40`, where `CreateFromStatus` builds a `SystemException` for `ObjectScriptError`.
+  - Holds. E10 corrected.
+- **CR5, `$$$ThrowStatus` with an OK status (item 5).**
+  - Probe: `Probe413CRStatus.ThrowStatusOK`.
+  - Observed: `%Exception.StatusException:ERROR #5001: Called ThrowIfInterrupt with a $$$OK status`.
+  - Source: `StatusException.cls:124`.
+  - Holds.
+- **CR6, `AsStatus()` on a thrown status (item 3).**
+  - Probe: `Probe413CRStatus.AsStatusRoundTrip`.
+  - Observed: `codes=5001;sameText=1;sameValue=0;len=559/616`, with the same `caller` and the same `stack` in both. So the text says only what was observed (the same code and text, not the same string) and does not name what the extra characters hold.
+  - Holds. E12 corrected.
+- **CR7, `$$$QuitOnError` in a loop (item 5).**
+  - Probe: `Probe413CRQuitLoop` (a `While` loop) and `Probe413CRQuitDo` (a `Do` loop with `While`) each gave `#1043: QUIT argument not allowed : 'sc'`.
+  - `Probe413CRQuitFor`, a `For` loop in block and line form, compiled. Run: `okBlock:ran=3;errBlock:threw:<COMMAND> InFor+4^...;okLine:ran=3;errLine:threw:<COMMAND> InForLine+2^...`.
+  - Holds as narrowed: "does not compile inside a loop" is true for `While` and `Do`/`While` only, so the text says what each kind of loop does.
+- **CR8, `OnAfterOneTest` after a failed or skipping `OnBeforeOneTest` (item 5).**
+  - Probe: `Probe413CRTestHooks`, `iris_execute_tests` at class level, run 1366. Total 5 of 5 expected: 1 passed, 3 failed and 1 skipped. Its `OnAfterOneTest` logs a message.
+  - Observed (SQL over `TestAssert`): the message is present for `TestNormal`, `TestFailedAssert` and `TestRuntimeError`. It is absent for `TestSetupFails` (a setup error) and `TestSkippedInSetup` (a skip in setup).
+  - Source: `Manager.cls:1233-1265`.
+  - Holds.
+- **CR9, what `TestAssert` holds (item 4).**
+  - Probe: SQL over run 1366.
+  - Observed: `TestNormal` has 4 rows: `AssertTrue`, then `LogMessage` "a note", `LogMessage` "Duration of execution: ...", and the `LogMessage` from `OnAfterOneTest`. `TestFailedAssert` has a duration row, `TestRuntimeError` has none, and `TestSkippedInSetup` has only `TestSkipped`.
+  - Source: `Manager.cls:1249-1252`.
+  - Holds. U23 corrected.
+- **CR10, a failed `OnBeforeAllTests` (found in review).**
+  - Probe: SQL over runs 1343 and 1363.
+  - Observed: each class has a `TestCase` row with `Status` 0 and `ErrorDescription` ` ERROR #5001: setup failed`, and 0 `TestMethod` rows.
+  - Holds. U17's "no test results for it" corrected.
+- **CR11, the macros the unit-tests skill covers (item 1).**
+  - Source: `%outUnitTest.inc` defines 13 macros. The table and its bullets cover 12, all but `$$$AssertFilesSQLUnorderedSame` (`TestCase.cls:415`), which compares SQL result and plan files.
+  - The description now says "the common Assert macros".
+  - Holds as narrowed.
+- **CR12, the gotchas description's `CLASS DOES NOT EXIST` trigger (found in review).**
+  - Probe: `Probe413CRStatus.EnsInSys`.
+  - Observed: `##class(Ens.Director).IsProductionRunning()` in `%SYS` raises `<CLASS DOES NOT EXIST>`, and the namespace was restored (`back=HSCUSTOM`).
+  - Holds. No text change.
+
+Claims corrected in code review: G4 (narrowed), E10, E12, E16 (narrowed), U17, U23 and the unit-tests description. Claims added: CR3, CR5, CR7 and CR8.
+
 **Flagged for the retro:** none of the corrections above contradicts a `.claude/rules/*` file. DW-615 already holds the 41.2 list. One new item goes to the lead as the `deferred:` entry in the frontmatter: `SanitizeError` knows only two prefix words.
 
-**Probe anchors**, one per row, which `skills-pack-knowledge.test.ts` requires verbatim. 65 in all, checked against the golden texts by a scratch script: none missing.
+**Probe anchors**, one per row, which `skills-pack-knowledge.test.ts` requires verbatim. 75 in all (65 from the plan, 10 from code review), checked against the golden texts by the test: none missing.
 
-- **gotchas (20):**
+- **gotchas (22):**
   - `` `$$Name` calls the label ``
   - `` `$$$ThrowStatus` and `$$$QuitOnError` ``
   - `MPP5610 : Referenced macro not defined: 'GeneralError'`
   - `Include %occErrors`
   - `MPP5376 : Method or Property 'AssertEqualsViaMacro' does not exist`
+  - `MPP5377 : You are attempting to call instance method 'AssertEqualsViaMacro' from a class method` (CR1)
+  - `MPP5392 : No such method 'AssertEqualsViaMacro' defined in this class` (CR1)
   - `` then raises `<PARAMETER>` when it runs ``
   - `` `$Data(pB)` is 0 ``
   - `does not support MultiDimensional operations`
@@ -929,7 +1058,7 @@ Claims that failed in the draft and were corrected before the golden text: G3 (t
   - `%ExistsId("Ens.Director")`
   - `` `Open tFile::5` ``
   - `` In `Open tFile:::1` the `1` is the mnemonic space ``
-- **error-handling (22):**
+- **error-handling (27):**
   - `` never with `tSC = 1` ``
   - `` `$$$ISERR("")` and `$$$ISERR("done")` are both 1 ``
   - `` `$$$ERRORISTYPE(tSC, $$$GeneralError)` ``
@@ -940,19 +1069,24 @@ Claims that failed in the draft and were corrected before the golden text: G3 (t
   - `` `FEHLER #5001: disk full` ``
   - `If $Piece(tText, tTag) '[ " " Set tText = $Piece(tText, tTag, 2, *)`
   - `` `Order #12: ` ``
+  - `` `ERROR <Ens>ErrGeneral: queue full` `` (CR3)
   - `` `ERROR #5001: ERROR #5001: file: missing` ``
   - `` `ERROR #5001: Import failed: file: missing` ``
+  - `` `%Exception.SystemException` when the status holds an ObjectScript error `` (CR4)
   - `` `sc` is 1 ``
+  - `` `ERROR #5001: Called ThrowIfInterrupt with a $$$OK status` `` (CR5)
+  - `` comparing it with `=` to the status that was thrown gives 0 `` (CR6)
   - `` `ex.Code` is 9 ``
   - `` `ERROR #5002: ObjectScript error: <UNDEFINED>` ``
   - ``` `ERROR #5035: General exception Name '...' Code '...' Data '...'` ```
   - `` with its original `Name` and `Location` ``
   - `` `#1043: QUIT argument not allowed : 'sc'` ``
+  - `` Inside a `For` loop it compiles, but an error status then raises `<COMMAND>` `` (CR7)
   - `` `#1026: Invalid command : 'Finally'` ``
   - `$$$ThrowStatus($$$ERROR($$$GeneralError, "Nothing to process for "_pId))`
   - `` `Do ..Save()` throws away ``
   - `` `$$$ThrowOnError(tObj.%Save())` ``
-- **unit-tests (23):**
+- **unit-tests (26):**
   - `While tIter.%GetNext(.tKey, .tItem) {`
   - `Tests are instance methods with no arguments`
   - `One test-case object serves every test of the class`
@@ -970,12 +1104,15 @@ Claims that failed in the draft and were corrected before the golden text: G3 (t
   - `its method does not run, and it is reported skipped`
   - `yet it is reported passed`
   - `fails that one test without running it`
+  - `` `OnAfterOneTest` is not called for that test `` (CR8)
   - `None of its tests runs`
+  - `` the class is reported failed with that error, and it has no `TestMethod` rows `` (CR10)
   - `The next test still runs`
   - `` `":MyApp.Tests.Cart:TestTotal"` ``
   - `` `"/noload/nodelete/norecursive"` ``
   - `each namespace has its own`
   - `` `TestMethod.Status` is 1 for passed, 0 for failed and 2 for skipped ``
+  - `` a `Duration of execution` row for each test method that runs without a runtime error `` (CR9)
 
 The test types each anchor literally, without the outer Markdown code span shown here.
 
@@ -1062,7 +1199,21 @@ The test types each anchor literally, without the outer Markdown code span shown
   - mutation: the unit-tests knowledge directory moved out of `skills-pack-src/knowledge/` and `pnpm gen:pack` re-run (the pack drops to 18 files) → 9 red across `skills-pack-rule.test.ts`, `story-41-1-qa-pack-scratch-cli.test.ts`, `story-41-1-qa-provenance-cli.test.ts` and `story-41-1-qa-validate-prompts-pack.test.ts`: the `19 pack file(s)` and `34 pack file(s)` pins, the `45 source(s) checked` pins, and the `33` and `35 agent file(s)` pins. Directory moved back and `pnpm gen:pack` re-run; `gen:pack:check` reports 19 files and the tree digest equalled the digest taken before.
 - **M16** (AC 41.3.3, a project class or helper; added in the review pass).
   - mutation: the line "- Call ExecuteMCPv2.Utils." added to the unit-tests source → `skills-pack-knowledge.test.ts` "names nothing of this repository, its planning or its tooling" red (with the sha256 and pack-copy rows). Removed; the three sha256 values equal the golden ones again.
-- **Unchanged counts** (AC "Unchanged counts"): pinned by the existing `(once)` gates, `gen:skills:check`, `gen:governance-baseline:check`, `gen:tools-list-snapshot:check` and the empty `git diff --stat packages/shared/src/bootstrap-classes.ts`. This story edits no prompt, tool, preset, governance or bootstrapped input, so no mutation of those gates applies; their own stories hold their mutation evidence.
+- **M17** (AC 41.3.3, the skill-level list keeps every shared class; added in code review).
+  - mutation: the pass-through branch of `skillForbidden` changed to `else if (!entry[0].startsWith("a story")) list.push(entry);` → `skills-pack-knowledge.test.ts` red on "the skill list still holds the shared class a story, epic or sprint number, and flags its sample". Applied together with M18 and M19: exactly 3 red, 181 green. All three reverted.
+- **M18** (the hygiene scan reads every body line; added in code review).
+  - mutation: the `name:` filter in `scannedText` changed back to `!line.startsWith("name:")` → `skills-pack-knowledge.test.ts` red on "still scans a body line that starts with name:". Reverted.
+- **M19** (the frontmatter reader keeps a no-break space, as YAML does; added in code review).
+  - mutation: the value strip in `skillFrontmatterProblems` changed back to `.trim()` → `skills-pack-frontmatter.test.ts` red on "refuses a name that ends in a no-break space, which YAML keeps". Reverted.
+- **M20** (Rule 19 hermeticity of QA's child-process gate; added in code review).
+  - mutation: the `cacheDir` line removed from `GATE_CONFIG` → `story-41-3-qa-knowledge-gate-process.test.ts` "the baseline" red twice: on "the child run kept its cache inside the scratch copy", and in `afterEach` on "the real node_modules/.vite results cache is untouched" (its mtime moved). Reverted.
+  - After the revert, the file passed 25 of 25, and the real cache's mtime held through the three full-suite slices.
+- **M21** (AC 41.3.2, the code-review anchors).
+  - mutation: the CR6 sentence of the error-handling source changed back to "A thrown status comes back unchanged, with its own code and text." → `skills-pack-knowledge.test.ts` red on "carries every probe anchor", naming `` comparing it with `=` to the status that was thrown gives 0 ``. The sha256 and pack-copy rows went red too. Reverted, and the three sha256 values equal the golden ones.
+- **Unchanged counts** (AC "Unchanged counts"): pinned by the existing `(once)` gates, `gen:skills:check`, `gen:governance-baseline:check`, `gen:tools-list-snapshot:check` and the empty `git diff --stat packages/shared/src/bootstrap-classes.ts`. This story edits no prompt, tool, preset, governance or bootstrapped input.
+  - mutation (code review): `name: check-system-health` changed to `name: check-system-health-x` in `skills/check-system-health/SKILL.md` → `pnpm gen:skills:check` reports `DRIFT in skills/check-system-health/SKILL.md` and exits 1. `pnpm check:provenance` also names `[skill-frontmatter] workflow:check-system-health/SKILL.md`. Reverted; the sha256 is `ad5bd059...` again.
+  - After the revert, `gen:skills:check` reports 13 files, `gen:governance-baseline:check` and `gen:tools-list-snapshot:check` (115 entries) are OK, and `bootstrap-classes.ts` has no diff.
+  - The baseline and snapshot gates take no input from this story; their own stories hold their mutation evidence.
 
 ### QA stage (2026-10-19)
 
