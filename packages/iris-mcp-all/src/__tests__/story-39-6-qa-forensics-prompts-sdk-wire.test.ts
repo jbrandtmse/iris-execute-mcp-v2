@@ -34,6 +34,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { loadAllPrompts } from "../../../../scripts/lib/prompt-catalog.mjs";
 import { resolveSdkEsmDir } from "./process-gate-helpers.js";
 import { stepsOf, toolTokens } from "./prompt-gate-helpers.js";
 
@@ -453,14 +454,25 @@ describe("Story 39.6 QA: the forensic prompts through a real SDK Client over an 
     }
   });
 
-  it("the generated skill carries the description the wire serves", async () => {
+  it("the generated skill carries the skill description its definition declares, and the wire serves the unchanged prompt description", async () => {
     const { client } = await openConnection();
     const { prompts } = await client.listPrompts();
+    const definitions = (await loadAllPrompts(REPO_ROOT)) as Array<{
+      prompt: { name: string; description: string; skill?: { description: string; preset: string } };
+    }>;
 
     for (const name of [TRACE, FIND]) {
       const served = (prompts.find((prompt) => prompt.name === name) as WirePrompt).description as string;
+      const definition = definitions.find((entry) => entry.prompt.name === name)?.prompt;
+      expect(definition?.skill, `${name}: the definition sets its skill field`).toBeDefined();
+      expect(served, `${name}: the wire serves the prompt's own description`).toBe(definition?.description);
+      expect(served, `${name}: the wire does not serve the skill description`).not.toBe(definition?.skill?.description);
+
       const skill = readFileSync(path.join(REPO_ROOT, "skills", name, "SKILL.md"), "utf8");
-      expect(skill, `${name}: the skill's frontmatter description`).toContain(`\ndescription: ${JSON.stringify(served)}\n`);
+      expect(skill, `${name}: the skill's frontmatter description`).toContain(
+        `\ndescription: ${JSON.stringify(definition?.skill?.description)}\n`,
+      );
+      expect(skill, `${name}: the skill does not carry the prompt description`).not.toContain(`\ndescription: ${JSON.stringify(served)}\n`);
       expect(skill).toContain(`\nname: ${name}\n`);
     }
   });

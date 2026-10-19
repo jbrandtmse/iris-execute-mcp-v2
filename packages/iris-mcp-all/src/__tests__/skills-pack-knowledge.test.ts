@@ -33,6 +33,7 @@ import {
   hasValidAdaptationHeader,
   parseProvenanceRows,
   PROVENANCE_HEADER_ROW,
+  withoutAdaptationHeader,
 } from "../../../../scripts/lib/provenance-core.mjs";
 import {
   ALWAYS_ON_RULE_FILENAME,
@@ -392,17 +393,12 @@ function isPrintableAscii(text: string): boolean {
 /**
  * The text the ASCII, wording, tool-name and rule-copy checks read. The adaptation header is the one line they skip,
  * and only the first line that is exactly ADAPTATION_HEADER, only when it is the first body line (the shared
- * `hasValidAdaptationHeader`), and only for a skill whose oracle marks it adapted. Any other copy of the header, a
+ * `withoutAdaptationHeader`, which `validate:prompts` also uses), and only for a skill whose oracle marks it adapted. Any other copy of the header, a
  * header anywhere else, a header in a skill that is not marked adapted, and a header with a changed character are read
  * like any other line.
  */
 function checkedText(text: string, adapted: boolean): string {
-  if (!adapted || !hasValidAdaptationHeader(text)) return text;
-  const lines = text.split("\n");
-  const at = lines.indexOf(ADAPTATION_HEADER);
-  if (at < 0) return text;
-  lines.splice(at, 1);
-  return lines.join("\n");
+  return adapted ? (withoutAdaptationHeader(text) as string) : text;
 }
 
 /** Every reason the text is not an acceptable knowledge skill body, or an empty list. */

@@ -12,8 +12,8 @@
 //   - every provenance row names a pack file that exists and carries the header, and cites no excluded
 //     upstream source;
 //   - every agent file at skills/<name>/SKILL.md (a workflow skill, a knowledge source or a pack copy)
-//     opens with frontmatter on its first line that holds only a valid name and description (rule
-//     skill-frontmatter);
+//     opens with frontmatter on its first line that holds a valid name and description and, optionally,
+//     a valid metadata map (its one key is iris-tools-preset; rule skill-frontmatter);
 //   - every npm tarball that carries pack or adapted content also carries the notice, and the client-config
 //     tarball carries every pack file.
 //

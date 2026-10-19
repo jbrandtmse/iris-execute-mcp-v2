@@ -186,6 +186,25 @@ export function hasValidAdaptationHeader(text) {
 }
 
 /**
+ * The text with its adaptation header line removed, for the checks that read an adapted file's body.
+ * Only the first line that is exactly ADAPTATION_HEADER goes, and only when it is the first body line
+ * (`hasValidAdaptationHeader`); any other copy of the header, a header anywhere else, and a header with a
+ * changed character or a CRLF ending stay in the text and are read like any other line. The caller decides
+ * which files may use this: only a file its provenance row names is adapted.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function withoutAdaptationHeader(text) {
+  if (!hasValidAdaptationHeader(text)) return text;
+  const lines = text.split('\n');
+  const at = lines.indexOf(ADAPTATION_HEADER);
+  if (at < 0) return text;
+  lines.splice(at, 1);
+  return lines.join('\n');
+}
+
+/**
  * Whether a provenance source path may not be cited: it is an excluded upstream source, or it is not a
  * plain relative path inside the upstream checkout. A plain path is non-empty, not absolute, free of `..`,
  * and made only of letters, digits, `.`, `_`, `-` and `/`; anything else (a fragment, a line suffix, a note,

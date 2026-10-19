@@ -2,6 +2,73 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-19] — Story 41.5: Workflow skills refresh
+
+No tool, action, governance key, preset row, refusal code, environment variable or route is added or changed, so no tool count
+moves (the suite stays at 110 package tools, 115 advertised). The 12 prompts stay byte-identical on the wire: the name, title,
+description, arguments and rendered text of each, pinned over stdio against the bytes captured before this story. `gen:skills`
+stays at 13 generated files and the pack at 22 files. `BOOTSTRAP_VERSION` stays at `5296a1c836f4` because no bootstrapped class
+changed, and the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys).
+
+### Added
+
+- **A skill-only field on a prompt.** `PromptDefinition` (a `@iris-mcp/shared` export) gains an optional
+  `skill: { description, preset }`, typed `PromptSkillDefinition`, and all 12 prompts set it. Only `gen:skills` and
+  `validate:prompts` read it: `registerPrompt` still passes the SDK only the title, the description and the argument schema, so
+  neither the skill description nor the preset reaches `prompts/list` or `prompts/get`.
+- **Descriptions an agent can choose a skill by.** Each of the 12 generated workflow skills now carries its own description, which
+  names what the skill covers and then says `Use when` and the situations that call for it, where it used to copy the prompt's
+  description of what the prompt does. Each is printable ASCII, at most 1,024 characters, and names no tool.
+- **The tool preset a skill needs.** Each generated skill carries a `metadata` map with `iris-tools-preset`: the first of `core`,
+  `developer` and `full` under which every tool the skill names is visible on the server that owns it. A skill or rule that names no
+  tool declares none. The skill's frontmatter comment is now one line, `# DO NOT EDIT: generated from the MCP prompt of the same
+  name.`, with no repository path in it.
+- **The frontmatter grammar accepts that map.** `readSkillFrontmatter` (in `scripts/lib/skills-pack.mjs`) reads an optional
+  `metadata:` map of two-space `key: value` lines whose only key is `iris-tools-preset`, with a value of `core`, `developer` or
+  `full`. An unknown key, a repeated key, an empty map, `metadata: x` and a tab or four-space indent are each refused under the
+  `skill-frontmatter` rule of `pnpm check:provenance`.
+- **The pack README is a catalog.** `pnpm gen:pack` lists the six knowledge skills, the twelve workflow skills and the one always-on
+  rule, in that order and each sorted by name, with each skill's description and declared preset and the rule's first heading.
+- **Two checks in `pnpm validate:prompts`.** A tool-preset check refuses a skill that names a tool without declaring a preset, one
+  whose preset hides a tool it names, and one that declares a wider preset than it needs, and a no-internal-references check refuses
+  an internal rule number, a planning or deferred-work id, a story number, a repository path or file, an absolute path, repository
+  tooling and a snapshot folder in any prompt (its skill description included) and any agent content file. The only exemption is the
+  exact adaptation header, as the first body line of a file that a row of the notice's provenance table names (DW-623). Success
+  prints a second line with the counts.
+
+### Changed
+
+- **`validate:prompts` output.** The first success line is unchanged. A failure now also prints, under their own headers, the
+  `[skill-field]`, `[preset]` and `[internal-reference]` lines, and its closing guidance names the prompt's `skill` field and the
+  `metadata` declaration. The unknown-field message of the frontmatter rule now reads `only name, description and metadata are allowed`.
+- **`skills/README.md`** (still the 13th generated file) gains each skill's description and a `Tool preset` column, and points at the
+  prompt sources and the catalog. The root `README.md` sentence on installable skills and `skills-pack-src/README.md` describe the
+  new frontmatter, the preset declaration, the catalog and the checks.
+- **One shared header exemption.** `withoutAdaptationHeader` in `scripts/lib/provenance-core.mjs` replaces the private helper of
+  `skills-pack-knowledge.test.ts`, whose controls are unchanged.
+
+### Tests
+
+- `story-41-2-qa-prompts-stdio-wire.test.ts` pins every `prompts/list` and `prompts/get` of the four prompt servers to the sha256
+  captured before this story, and requires every listed entry to keep exactly its four keys and its own description and to hold
+  neither a skill description nor the preset key. `prompts.test.ts` (shared) checks the same in memory.
+- `skills-generated-frontmatter.test.ts` carries a typed oracle of each skill's description, preset and sha256, and checks each
+  against the prompt's `skill` field in the built dist. `skills-pack.test.ts` pins the catalog on fixture roots and pins the committed
+  README by its sha256, size and line count.
+- `validate-prompts.test.ts` covers the nine classes, the preset units (too narrow, wider than needed, undeclared, an unknown token,
+  two servers) and the DW-623 controls. `validate-prompts-pack-checks.test.ts` (new) proves each check red through the real
+  `validate:prompts` process in scratch copies of the tree, and green once repaired.
+- The 41.1 and 41.3 tests that pinned "it checks tool names only" now pin the opposite: a real tool in a skill without a declaration
+  is a `[preset]` problem, and a rule number, a DW or AD id and a repository path are `[internal-reference]` problems. The live gates
+  that compared a skill's description with the listed one compare it with the prompt's `skill.description` instead, and still skip
+  unless armed.
+
+### Known limits
+
+- No installer places the skills until Story 41.6, and the root README's pack section arrives in Story 41.7.
+- A prompt's own `skill.preset` is checked through the file generated from it: `gen:skills --check` reports a skill that was not
+  regenerated, and `validate:prompts` checks the generated file's declaration against the tools it names.
+
 ## [Pre-release — 2026-10-19] — Story 41.4: Platform knowledge skills
 
 No tool, action, governance key, preset row, refusal code, environment variable or route is added or changed, so no tool count

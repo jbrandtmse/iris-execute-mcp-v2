@@ -1,66 +1,126 @@
 // ════════════════════════════════════════════════════════════════════════════
-// validate-prompts.mjs (Epic 25, Story 25.1, AC 25.1.3)
+// validate-prompts.mjs (Epic 25, Story 25.1, AC 25.1.3; extended in Story 41.5)
 //
-// Extracts every `iris_[a-z0-9_]+` token from every registered prompt's
-// text (title + description + `build({})` body) AND every Markdown file of
+// Checks every registered prompt's text (title + description + `build({})`
+// body + the skill description of its `skill` field) AND every Markdown file of
 // agent content (scripts/lib/skills-pack.mjs `listAgentContentFiles`: the
 // generated workflow skills, the skills pack, and the hand-authored knowledge
-// skill and rule sources), and asserts each token names a REAL tool: a member of
-// the union of the five server packages' `tools` arrays plus the framework
-// discovery tool (`iris_server_profiles`). A tool rename/removal breaks CI
-// here, not a client mid-workflow.
+// skill and rule sources). Four checks run on that set:
 //
-// The core extraction/validation logic lives in
-// scripts/lib/validate-prompts-core.mjs, imported by BOTH this script AND
-// packages/iris-mcp-all's default-suite vitest test (single source of
-// truth, per the story's Task 3).
+//   1. Tool names. Each `iris_[a-z0-9_]+` token names a REAL tool: a member of
+//      the union of the five server packages' `tools` arrays plus the framework
+//      discovery tool (`iris_server_profiles`). A tool rename/removal breaks CI
+//      here, not a client mid-workflow.
+//   2. Skill fields. Each prompt has a valid `skill: { description, preset }`
+//      field, which `gen:skills` renders into its workflow skill.
+//   3. Tool presets. A skill that names a real tool declares, as its `metadata`
+//      `iris-tools-preset`, the first of core, developer and full under which every
+//      tool it names is visible on the server that owns it. A skill or rule that
+//      names no tool declares none. A file that is not a `SKILL.md` names no tool.
+//   4. Internal references. No prompt or agent content file holds an internal
+//      rule number, planning id, story number, repository path or file, absolute
+//      path, repository tooling or snapshot folder (nine classes). The one
+//      exemption is the exact adaptation header, as the first body line of a file
+//      that a row of the notice's provenance table names (DW-623).
+//
+// The check logic lives in scripts/lib/validate-prompts-core.mjs, imported by
+// BOTH this script AND packages/iris-mcp-all's default-suite vitest tests
+// (single source of truth, per the story's Task 3).
 //
 // USAGE:
 //   node scripts/validate-prompts.mjs
 //   npm: `pnpm validate:prompts`
 //
 // Requires a prior `pnpm turbo run build` (imports each package's BUILT
-// dist/tools/index.js and dist/prompts/index.js).
+// dist/tools/index.js, dist/tools/presets.js and dist/prompts/index.js).
 // ════════════════════════════════════════════════════════════════════════════
 
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import { loadAllPrompts } from './lib/prompt-catalog.mjs';
-import { loadAllToolNames } from './lib/tool-catalog.mjs';
-import { listAgentContentFiles } from './lib/skills-pack.mjs';
-import { renderPromptText, validateSources } from './lib/validate-prompts-core.mjs';
+import { loadAllToolNames, loadToolPresetCatalog } from './lib/tool-catalog.mjs';
+import { NOTICE_FILENAME, PACK_SOURCE_DIR, SKILL_PRESET_KEY, listAgentContentFiles, readSkillFrontmatter } from './lib/skills-pack.mjs';
+import { parseProvenanceRows } from './lib/provenance-core.mjs';
+import { promptSkillProblems } from './lib/workflow-skills.mjs';
+import { internalReferenceProblems, presetProblems, renderPromptText, validateSources } from './lib/validate-prompts-core.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 
-const [prompts, toolNames] = await Promise.all([loadAllPrompts(root), loadAllToolNames(root)]);
+const [prompts, toolNames, presetCatalog] = await Promise.all([
+  loadAllPrompts(root),
+  loadAllToolNames(root),
+  loadToolPresetCatalog(root),
+]);
 
+// A prompt's text surface is what it renders plus the description of its skill, which only its skill reads.
 const sources = [];
 for (const { pkg, prompt } of prompts) {
-  sources.push({ label: `prompt:${pkg}/${prompt.name}`, text: renderPromptText(prompt) });
+  sources.push({ label: `prompt:${pkg}/${prompt.name}`, text: `${renderPromptText(prompt)}\n${prompt.skill?.description ?? ''}`, packRel: null });
 }
 
 // Also scan every file of agent content that exists, since a generator bug (truncation, wrong prompt mapping)
 // that corrupts content would otherwise slip past a prompt-only check, and hand-authored content has no
 // prompt to check it against.
 const contentFiles = listAgentContentFiles(root);
-for (const { label, absPath } of contentFiles) {
-  sources.push({ label, text: readFileSync(absPath, 'utf-8') });
-}
+const contentSources = contentFiles.map(({ label, packRel, absPath }) => {
+  const text = readFileSync(absPath, 'utf-8');
+  const skill = /^skills\/([^/]+)\/SKILL\.md$/.exec(packRel);
+  const declared = skill === null ? undefined : readSkillFrontmatter(text, skill[1] ?? '').metadata[SKILL_PRESET_KEY];
+  return { label, text, packRel, preset: declared ?? null };
+});
+sources.push(...contentSources);
 
-const problems = validateSources(sources, toolNames);
+const toolNameProblems = validateSources(sources, toolNames);
 
-if (problems.length > 0) {
-  console.error('validate-prompts: found tool-name references that do not match any real tool:');
-  for (const p of problems) {
-    console.error(`  - ${p.label}: "${p.token}"`);
+const skillFieldProblems = prompts.flatMap(({ pkg, prompt }) =>
+  promptSkillProblems(prompt).map((message) => ({ label: `prompt:${pkg}/${prompt.name}`, message })),
+);
+
+const preset = presetProblems(contentSources, presetCatalog);
+
+// The files a row of the notice's provenance table names: the only ones whose adaptation header is exempt.
+const noticePath = resolve(root, PACK_SOURCE_DIR, NOTICE_FILENAME);
+const adaptedPackFiles = new Set(
+  existsSync(noticePath) ? parseProvenanceRows(readFileSync(noticePath, 'utf-8')).rows.map((row) => row.packFile) : [],
+);
+const references = internalReferenceProblems(sources, { repositoryEntries: readdirSync(root), adaptedPackFiles });
+
+const failed = toolNameProblems.length + skillFieldProblems.length + preset.problems.length + references.problems.length > 0;
+
+if (failed) {
+  if (toolNameProblems.length > 0) {
+    console.error('validate-prompts: found tool-name references that do not match any real tool:');
+    for (const p of toolNameProblems) {
+      console.error(`  - ${p.label}: "${p.token}"`);
+    }
+  }
+  if (skillFieldProblems.length > 0) {
+    console.error('validate-prompts: found prompts without a valid skill field:');
+    for (const p of skillFieldProblems) {
+      console.error(`  - [skill-field] ${p.label}: ${p.message}`);
+    }
+  }
+  if (preset.problems.length > 0) {
+    console.error('validate-prompts: found tool-preset problems:');
+    for (const p of preset.problems) {
+      console.error(`  - [preset] ${p.label}: ${p.message}`);
+    }
+  }
+  if (references.problems.length > 0) {
+    console.error('validate-prompts: found internal references in agent content:');
+    for (const p of references.problems) {
+      console.error(`  - [internal-reference] ${p.label}: ${p.className} (${p.match})`);
+    }
   }
   console.error('');
   console.error(
     `Checked against ${toolNames.size} known tool name(s) across the five server packages ` +
-      `plus the framework discovery tool. Fix the prompt source (packages/*/src/prompts/*.ts) or the ` +
-      `hand-authored source (skills-pack-src/), then re-run "pnpm gen:skills" and "pnpm gen:pack" as needed.`,
+      `plus the framework discovery tool. Fix the prompt source (packages/*/src/prompts/*.ts, its skill field included) ` +
+      `or the hand-authored source (skills-pack-src/), then re-run "pnpm gen:skills" and "pnpm gen:pack" as needed. ` +
+      `A skill that names a tool declares its tool preset as the metadata ${SKILL_PRESET_KEY}: for a workflow skill, ` +
+      `that is the preset of its prompt's skill field.`,
   );
   process.exit(1);
 }
@@ -71,5 +131,12 @@ console.log(
     `${contentFiles.length} content file(s): ${countOf('workflow')} workflow, ${countOf('pack')} pack, ` +
     `${countOf('knowledge')} knowledge, ${countOf('rule')} rule), ` +
     `${toolNames.size} known tool name(s).`,
+);
+const declaredTotal = preset.declared.core + preset.declared.developer + preset.declared.full;
+console.log(
+  `validate-prompts: OK \u2014 tool presets: ${declaredTotal} file(s) declare one ` +
+    `(${preset.declared.core} core, ${preset.declared.developer} developer, ${preset.declared.full} full) ` +
+    `and ${preset.toolFree} tool-free file(s) declare none; ` +
+    `no internal reference in ${sources.length} source(s), ${references.exempted} adaptation header line(s) exempted.`,
 );
 process.exit(0);

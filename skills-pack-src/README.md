@@ -12,7 +12,7 @@ Hand-authored sources of the IRIS MCP skills pack. This file is for contributors
 
 Nothing else belongs here. `pnpm gen:pack` fails and names any other top-level entry, a `knowledge/<name>/` without a `SKILL.md`, a skill name that a workflow skill in `skills/` already uses, anything in `rules/` that is not a flat `<name>.md` file (lower-case letters, digits and single hyphens in the name), a rule source that opens with frontmatter, and a rule source with a line that starts with `<!-- IRIS-MCP-RULE:` (only the generated section's own two marker lines may).
 
-The workflow skills in `skills/` are not hand-authored: `pnpm gen:skills` generates them from the MCP prompts, and `pnpm gen:pack` copies them into the pack beside the skills from `knowledge/`.
+The workflow skills in `skills/` are not hand-authored: `pnpm gen:skills` generates them from the MCP prompts, and `pnpm gen:pack` copies them into the pack beside the skills from `knowledge/`. `gen:skills` takes each skill's `description` and tool preset from the prompt's `skill` field (`packages/<server>/src/prompts/`), which only the generator and `validate:prompts` read; the server never sends it.
 
 ## Edit here, then generate
 
@@ -31,13 +31,14 @@ A knowledge skill is one directory, `knowledge/<name>/`, that holds its `SKILL.m
 The `SKILL.md` opens with frontmatter on its first line, so a client reads the skill's name and description. `pnpm check:provenance` refuses a file that breaks any of these, and names the file and the fix:
 
 - Line 1 is `---`, with no byte-order mark and nothing above it (an adaptation header goes after the frontmatter, never before it), and a later `---` line closes the block.
-- The block holds only `name` and `description`, each once, one `key: value` per line at column 1. A value is a double-quoted string that JSON reads, a single-quoted string, or a plain value that holds no `: ` or ` #`, does not end in `:` and does not start with a YAML indicator character. Blank lines and `#` comment lines are allowed.
+- The block holds `name` and `description`, each once, one `key: value` per line at column 1. A value is a double-quoted string that JSON reads, a single-quoted string, or a plain value that holds no `: ` or ` #`, does not end in `:` and does not start with a YAML indicator character. Blank lines and `#` comment lines are allowed.
+- The block also allows an optional `metadata` map: a `metadata:` line plus two-space `key: value` lines, whose only key is `iris-tools-preset` (`core`, `developer` or `full`).
 - `name` equals the directory name. It is lower-case letters and digits in groups joined by single hyphens, at most 64 characters, and holds neither `claude` nor `anthropic`.
 - `description` is at most 1,024 characters and holds no XML tag. Write `UNDEFINED`, not `<UNDEFINED>`.
 
 A description also names what the skill covers in its first sentence, then says `Use when` followed by the situations that call for it. `check:provenance` does not check that wording; `skills-pack-knowledge.test.ts` does, for every knowledge skill, because it lists each one by name.
 
-The six knowledge skills are the three core skills (`iris-mcp-objectscript-gotchas`, `iris-mcp-objectscript-error-handling` and `iris-mcp-objectscript-unit-tests`) and the three platform skills (`iris-mcp-objectscript-sql`, `iris-mcp-system-classes` and `iris-mcp-interoperability`). All six name no `iris_*` tool, so they declare no preset, and they are written for a user's agent: no internal rule number, planning id, repository path or repository tooling. Each claim in them is checked on a live IRIS instance before it is written, by running it or, where running it would change a shared instance, by reading the IRIS class source of the same build, and a changed claim is checked again. A new frontmatter field, such as a preset declaration, extends the field list and the grammar in `scripts/lib/skills-pack.mjs`. Every field in that list is required, so a field a skill may leave out also needs the grammar to allow it without requiring it.
+The six knowledge skills are the three core skills (`iris-mcp-objectscript-gotchas`, `iris-mcp-objectscript-error-handling` and `iris-mcp-objectscript-unit-tests`) and the three platform skills (`iris-mcp-objectscript-sql`, `iris-mcp-system-classes` and `iris-mcp-interoperability`). All six name no `iris_*` tool, so they declare no preset, and they are written for a user's agent: no internal rule number, planning id, repository path or repository tooling. Each claim in them is checked on a live IRIS instance before it is written, by running it or, where running it would change a shared instance, by reading the IRIS class source of the same build, and a changed claim is checked again. A skill that names an `iris_*` tool declares, as `metadata` `iris-tools-preset`, the first of `core`, `developer` and `full` under which every tool it names is visible; `pnpm validate:prompts` checks it.
 
 ## Rules and their two forms
 
@@ -62,7 +63,11 @@ Third-party content that is adapted into the pack (not written from scratch) car
 
 Do not change the MIT licence block in the notice. `pnpm check:provenance` compares it with the upstream `LICENSE` byte for byte.
 
-One skill is adapted so far: `iris-mcp-objectscript-sql`. It carries the header on the first non-blank line after its frontmatter, and the notice holds its row, which cites `skills/skills/objectscript-sql-patterns/SKILL.md`. The header names the upstream project and the notice file, and it holds the copyright sign, so `skills-pack-knowledge.test.ts` exempts exactly that one line from its ASCII and wording checks. It does so only for a skill that the test's table marks as adapted (`adaptedFrom`), only when the line equals the header and is the first non-blank line after the frontmatter, and the same test requires the notice to hold exactly the rows of the adapted skills. A header in any other place or any other skill is read like any other line, and the test fails on it.
+One skill is adapted so far: `iris-mcp-objectscript-sql`. It carries the header on the first non-blank line after its frontmatter, and the notice holds its row, which cites `skills/skills/objectscript-sql-patterns/SKILL.md`. The header names the upstream project and the notice file, and it holds the copyright sign, so `skills-pack-knowledge.test.ts` exempts exactly that one line from its ASCII and wording checks. It does so only for a skill that the test's table marks as adapted (`adaptedFrom`), only when the line equals the header and is the first non-blank line after the frontmatter, and the same test requires the notice to hold exactly the rows of the adapted skills. A header in any other place or any other skill is read like any other line, and the test fails on it. `pnpm validate:prompts` exempts the same one line from its internal-reference check, for a skill that the notice's provenance table names, because the header names the notice file.
+
+## The pack catalog
+
+`pnpm gen:pack` renders the pack's `README.md` as a catalog of what the pack holds: the knowledge skills, then the workflow skills, then the always-on rules, each section sorted by name. A skill's entry carries its frontmatter `description` and, when it declares one, its tool preset; a rule's entry carries its first heading and how it loads. A `SKILL.md` whose description cannot be read renders a fallback line, and `gen:pack` still succeeds, so `pnpm check:provenance` can report the frontmatter.
 
 ## Never adapt these upstream sources
 
@@ -75,4 +80,4 @@ One skill is adapted so far: `iris-mcp-objectscript-sql`. It carries the header 
 
 - `pnpm gen:pack:check`: the pack equals what the sources produce.
 - `pnpm check:provenance`: the notice, the header lines, the provenance rows, the frontmatter of every `skills/<name>/SKILL.md` (rule `skill-frontmatter`), that the client-config tarball ships the whole pack, and that every npm tarball carrying pack or adapted content ships the notice.
-- `pnpm validate:prompts`: every `iris_*` token in the skills and rule files names a real tool.
+- `pnpm validate:prompts`: every `iris_*` token in the skills and rule files names a real tool, every skill declares the tool preset it needs, and no prompt or agent content file holds an internal reference (nine classes: a rule number, a planning id, a story number, a repository path or file, an absolute path, repository tooling and a snapshot folder).

@@ -15,6 +15,8 @@
  *    process exits 0. The repair is the negative control: the red comes from the defect, not from the scratch copy.
  * A second list holds inputs that must stay accepted: CRLF in every form, the 64 and 1,024 character limits, quoted
  * values that hold ': ', ' #' and '->', comment lines inside the block, and a reference file with no frontmatter.
+ * Story 41.5 adds the optional `metadata` map: a valid `iris-tools-preset` block is accepted, and an unknown metadata
+ * key and a preset outside core, developer and full are each refused.
  *
  * The expected message fragments, the limits and the rule tag are typed here, not read from the module under test.
  * No IRIS and no network; the real tree is never written.
@@ -106,7 +108,19 @@ const BAD: BadRow[] = [
     row: "an extra frontmatter key",
     dir: "qa-extra-key",
     text: fm("name: qa-extra-key", "description: A skill.", "license: MIT"),
-    fragments: ['has the field "license"; only name and description are allowed'],
+    fragments: ['has the field "license"; only name, description and metadata are allowed'],
+  },
+  {
+    row: "an unknown metadata key (Story 41.5)",
+    dir: "qa-meta-key",
+    text: fm("name: qa-meta-key", "description: A skill.", "metadata:", "  author: me"),
+    fragments: ['has the key "author"; only iris-tools-preset is allowed'],
+  },
+  {
+    row: "a preset value that is not core, developer or full (Story 41.5)",
+    dir: "qa-meta-preset",
+    text: fm("name: qa-meta-preset", "description: A skill.", "metadata:", "  iris-tools-preset: everything"),
+    fragments: ['the tool preset "everything" is not one of core, developer and full'],
   },
   {
     row: "a repeated frontmatter key",
@@ -186,6 +200,11 @@ const ACCEPTED: Array<[row: string, dir: string, text: string, extra?: [rel: str
     fm("# DO NOT EDIT", "", "name: qa-ok-comment", "# another comment", "description: A skill."),
   ],
   ["the fields in the other order", "qa-ok-order", fm("description: A skill.", "name: qa-ok-order")],
+  [
+    "a metadata map that declares a tool preset (Story 41.5)",
+    "qa-ok-metadata",
+    fm("name: qa-ok-metadata", "description: A skill.", "metadata:", "  iris-tools-preset: developer"),
+  ],
   [
     "a reference file with no frontmatter beside a valid skill",
     "qa-ok-reference",

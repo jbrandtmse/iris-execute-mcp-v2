@@ -3,9 +3,11 @@
  * path out of a knowledge skill, run as real processes in SCRATCH COPIES of the repository under `os.tmpdir()`.
  *
  * Two layers guard the wording, and they own different things:
- *  - `scripts/validate-prompts.mjs` rejects an `iris_*` token that names no real tool. It accepts a real tool name
- *    (`iris_doc_put` is a tool), and it does not look for a rule number, a planning id or a path at all;
- *  - the committed `skills-pack-knowledge.test.ts` rejects every one of them, a real tool name included.
+ *  - `scripts/validate-prompts.mjs` rejects an `iris_*` token that names no real tool. Since Story 41.5 it also rejects
+ *    a real tool name (`iris_doc_put` is a tool) in a skill that declares no tool preset (`[preset]`), and a rule number,
+ *    a planning id or a repository path (`[internal-reference]`);
+ *  - the committed `skills-pack-knowledge.test.ts` rejects every one of them, a real tool name included, and pins that a
+ *    knowledge skill holds no `metadata`.
  *
  * Part 1 drives the validator CLI on the real knowledge skills (the rows edit the three core skills, source and pack copy;
  * the count covers all six) and pins that division of labour. Part 2 runs the COMMITTED `skills-pack-knowledge.test.ts` in a child vitest process against a
@@ -89,6 +91,16 @@ function flagged(stderr: string): string[] {
   return [...stderr.matchAll(/^ {2}- (.+): "(.+)"$/gm)].map((match) => `${match[1]} ${match[2]}`).sort();
 }
 
+/** The labels of the `[preset]` lines on stderr, sorted. */
+function presetLabels(stderr: string): string[] {
+  return [...stderr.matchAll(/^ {2}- \[preset\] (.+?): /gm)].map((match) => match[1] ?? "").sort();
+}
+
+/** The `label class` pairs of the `[internal-reference]` lines on stderr (`  - [internal-reference] <label>: <class> (<match>)`), sorted. */
+function referencePairs(stderr: string): string[] {
+  return [...stderr.matchAll(/^ {2}- \[internal-reference\] (.+?): (.+) \(.+\)$/gm)].map((match) => `${match[1]} ${match[2]}`).sort();
+}
+
 describe("validate:prompts CLI, scratch copy: the real knowledge skills (AC 41.3.3)", () => {
   it("control: the unmodified copy passes and counts the six knowledge skills", () => {
     const run = runScript(validatorScratch(), VALIDATE);
@@ -113,25 +125,36 @@ describe("validate:prompts CLI, scratch copy: the real knowledge skills (AC 41.3
     expect(flagged(run.stderr)).toEqual([`knowledge:${GOTCHAS}/SKILL.md iris_doc_gett`, `pack:skills/${GOTCHAS}/SKILL.md iris_doc_gett`]);
   });
 
-  it("a REAL tool name passes the validator (the no-tool pin belongs to the knowledge test, not to this layer)", () => {
+  it("a REAL tool name in a knowledge skill that declares no preset is refused under [preset], for the source and the pack copy (Story 41.5)", () => {
     const root = validatorScratch();
     editSkill(root, ERRORS, withLine(ERRORS, "Call `iris_doc_put`."));
     const run = runScript(root, VALIDATE);
-    expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
-    expect(run.stdout).toContain("validate-prompts: OK");
+    expect(run.status, `${run.stdout}${run.stderr}`).toBe(1);
+    expect(run.stdout).not.toContain("validate-prompts: OK");
+    expect(run.stderr).toContain("validate-prompts: found tool-preset problems:");
+    for (const label of [`knowledge:${ERRORS}/SKILL.md`, `pack:skills/${ERRORS}/SKILL.md`]) {
+      expect(run.stderr).toContain(`  - [preset] ${label}: names iris_doc_put but declares no tool preset; declare metadata iris-tools-preset: core\n`);
+    }
+    expect(presetLabels(run.stderr)).toEqual([`knowledge:${ERRORS}/SKILL.md`, `pack:skills/${ERRORS}/SKILL.md`]);
+    expect(flagged(run.stderr), "a real tool is no unknown token").toEqual([]);
   });
 
   it.each([
-    ["an internal rule number", "See Rule #7: do this."],
-    ["a DW id", "Tracked as DW-613."],
-    ["an AD id", "Decided in AD-28."],
-    ["a repository path", "Edit packages/shared/src/index.ts."],
-  ])("%s passes the validator: it checks tool names only (the wording test owns the rest)", (_row, line) => {
+    ["an internal rule number", "See Rule #7: do this.", ["an internal rule number"]],
+    ["a DW id", "Tracked as DW-613.", ["a planning or deferred-work id"]],
+    ["an AD id", "Decided in AD-28.", ["a planning or deferred-work id"]],
+    ["a repository path", "Edit packages/shared/src/index.ts.", ["a repository file", "a repository path"]],
+  ])("%s is refused under [internal-reference], for the source and the pack copy (Story 41.5)", (_row, line, classes) => {
     const root = validatorScratch();
     editSkill(root, UNIT_TESTS, withLine(UNIT_TESTS, line));
     const run = runScript(root, VALIDATE);
-    expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
-    expect(run.stdout).toContain("validate-prompts: OK");
+    expect(run.status, `${run.stdout}${run.stderr}`).toBe(1);
+    expect(run.stdout).not.toContain("validate-prompts: OK");
+    expect(run.stderr).toContain("validate-prompts: found internal references in agent content:");
+    expect(referencePairs(run.stderr)).toEqual(
+      [`knowledge:${UNIT_TESTS}/SKILL.md`, `pack:skills/${UNIT_TESTS}/SKILL.md`].flatMap((label) => classes.map((name) => `${label} ${name}`)).sort(),
+    );
+    expect(presetLabels(run.stderr), "no preset problem beside it").toEqual([]);
   });
 });
 

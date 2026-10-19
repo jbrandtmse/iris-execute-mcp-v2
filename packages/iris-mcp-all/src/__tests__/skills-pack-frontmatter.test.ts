@@ -4,9 +4,11 @@
  *
  * A client reads a skill's name and description only when the file's first line is `---`. The adaptation-header
  * rule skips a leading `---` block and treats a file whose line 1 is anything else as frontmatter-less, so a header
- * placed above the frontmatter passes it while the skill loses its name and description. `skillFrontmatterProblems`
- * (scripts/lib/skills-pack.mjs) is the one strict reader; `checkProvenance` applies it to every agent file at
- * `skills/<name>/SKILL.md` under the rule tag `skill-frontmatter`. Four layers, none of which needs IRIS or the network:
+ * placed above the frontmatter passes it while the skill loses its name and description. `readSkillFrontmatter`
+ * (scripts/lib/skills-pack.mjs; `skillFrontmatterProblems` is its problems) is the one strict reader, and since Story
+ * 41.5 it also reads the optional `metadata` map whose one key is `iris-tools-preset`; `checkProvenance` applies it to
+ * every agent file at `skills/<name>/SKILL.md` under the rule tag `skill-frontmatter`. Four layers, none of which needs
+ * IRIS or the network:
  *  - the reader on typed text: the good, bad and not-a-skill rows of the story's I/O matrix;
  *  - `checkProvenance` on in-memory inputs: rule tag, labels and the directory name taken from the pack path;
  *  - the real `scripts/check-provenance.mjs` in a scratch copy of the repository, where the pack is built by the
@@ -20,17 +22,23 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { hasValidAdaptationHeader, checkProvenance } from "../../../../scripts/lib/provenance-core.mjs";
 import {
   KNOWLEDGE_SOURCE_DIR,
   NOTICE_FILENAME,
   PACK_DIR,
   PACK_SOURCE_DIR,
+  readSkillFrontmatter,
   SKILL_DESCRIPTION_MAX_LENGTH,
   SKILL_FILENAME,
   SKILL_FRONTMATTER_FIELDS,
+  SKILL_METADATA_KEYS,
   SKILL_NAME,
   SKILL_NAME_MAX_LENGTH,
+  SKILL_OPTIONAL_FRONTMATTER_FIELDS,
+  SKILL_PRESET_KEY,
+  SKILL_PRESETS,
   skillFrontmatterProblems,
   WORKFLOW_SKILLS_DIR,
 } from "../../../../scripts/lib/skills-pack.mjs";
@@ -55,11 +63,23 @@ const GOOD_LINES = ["name: bad-skill", "description: Covers one thing. Use when 
 // ---------------------------------------------------------------------------------------------------------
 
 describe("the frontmatter contract constants (typed oracles)", () => {
-  it("allows exactly name and description, within the published limits", () => {
+  it("requires exactly name and description, within the published limits", () => {
     expect([...SKILL_FRONTMATTER_FIELDS]).toEqual(["name", "description"]);
     expect(SKILL_NAME_MAX_LENGTH).toBe(64);
     expect(SKILL_DESCRIPTION_MAX_LENGTH).toBe(1024);
     expect(SKILL_FILENAME).toBe("SKILL.md");
+  });
+
+  it("allows one optional field, metadata, whose one key declares the tool preset (Story 41.5)", () => {
+    expect([...SKILL_OPTIONAL_FRONTMATTER_FIELDS]).toEqual(["metadata"]);
+    expect([...SKILL_METADATA_KEYS]).toEqual(["iris-tools-preset"]);
+    expect(SKILL_PRESET_KEY).toBe("iris-tools-preset");
+  });
+
+  it("the declarable presets are core, developer and full in that order, and are exactly the names of shared's TOOL_PRESET_NAMES (Rule #44)", async () => {
+    expect([...SKILL_PRESETS]).toEqual(["core", "developer", "full"]);
+    const shared = (await import(pathToFileURL(join(REPO_ROOT, "packages/shared/dist/index.js")).href)) as { TOOL_PRESET_NAMES: readonly string[] };
+    expect([...shared.TOOL_PRESET_NAMES].sort()).toEqual([...SKILL_PRESETS].sort());
   });
 
   it.each(["a", "a1", "iris-mcp-objectscript-gotchas", "2fa", "a-b-c-1"])("the name pattern accepts %s", (name) => {
@@ -94,6 +114,23 @@ const GOOD: Array<[string, string, string]> = [
   ["a description with '->' and angle brackets that are no tag", fm("name: bad-skill", `description: ${JSON.stringify("Move a -> b, then check a < b and b > c.")}`), "bad-skill"],
   ["the longest name", fm(`name: ${"a".repeat(64)}`, "description: d"), "a".repeat(64)],
   ["the longest description", fm("name: bad-skill", `description: ${"x".repeat(1024)}`), "bad-skill"],
+  // Story 41.5: the optional metadata map.
+  ["a metadata map with the preset", fm(...GOOD_LINES, "metadata:", "  iris-tools-preset: developer"), "bad-skill"],
+  ["the metadata map before the fields", fm("metadata:", "  iris-tools-preset: core", ...GOOD_LINES), "bad-skill"],
+  ["the metadata map between the fields", fm(GOOD_LINES[0] ?? "", "metadata:", "  iris-tools-preset: core", GOOD_LINES[1] ?? ""), "bad-skill"],
+  [
+    "a comment, a blank line and an indented comment inside the map",
+    fm(...GOOD_LINES, "metadata:", "  # why this preset", "", "  iris-tools-preset: core", "    # more"),
+    "bad-skill",
+  ],
+  ["a double-quoted preset value", fm(...GOOD_LINES, "metadata:", '  iris-tools-preset: "core"'), "bad-skill"],
+  ["trailing spaces after metadata: and after the value", fm(...GOOD_LINES, "metadata:  ", "  iris-tools-preset: core  "), "bad-skill"],
+  ["the metadata map with CRLF line endings", toCrlf(Buffer.from(fm(...GOOD_LINES, "metadata:", "  iris-tools-preset: core"), "utf8")).toString("utf8"), "bad-skill"],
+  [
+    "the frontmatter gen:skills writes (one comment line, name, description, the map)",
+    fm("# DO NOT EDIT: generated from the MCP prompt of the same name.", "name: bad-skill", 'description: "Covers one thing. Use when asked."', "metadata:", "  iris-tools-preset: developer"),
+    "bad-skill",
+  ],
 ];
 
 /** Frontmatter that must raise exactly the listed problems, in order: [row, text, directory name, fragments]. */
@@ -144,7 +181,7 @@ const BAD: Array<[string, string, string, string[]]> = [
     "bad-skill",
     ["the description holds an XML-like tag"],
   ],
-  ["an unknown field", fm(...GOOD_LINES, "license: MIT"), "bad-skill", ['has the field "license"; only name and description are allowed']],
+  ["an unknown field", fm(...GOOD_LINES, "license: MIT"), "bad-skill", ['has the field "license"; only name, description and metadata are allowed']],
   ["a repeated field", fm(GOOD_LINES[0] ?? "", GOOD_LINES[0] ?? "", GOOD_LINES[1] ?? ""), "bad-skill", ['repeats the field "name"']],
   [
     "an indented field",
@@ -173,6 +210,71 @@ const BAD: Array<[string, string, string, string[]]> = [
   ["a double-quoted value followed by text", fm("name: bad-skill", 'description: "a" trailing'), "bad-skill", ["not one valid JSON string"]],
   ["a single-quoted value that is not closed", fm("name: bad-skill", "description: 'unterminated"), "bad-skill", ["not closed or holds a lone quote"]],
   ["a single-quoted value with a lone quote", fm("name: bad-skill", "description: 'it's'"), "bad-skill", ["not closed or holds a lone quote"]],
+  // Story 41.5: the optional metadata map (each row alone).
+  [
+    "an unknown metadata key",
+    fm(...GOOD_LINES, "metadata:", "  author: me"),
+    "bad-skill",
+    ['metadata line 5 has the key "author"; only iris-tools-preset is allowed'],
+  ],
+  [
+    "a preset outside core, developer and full",
+    fm(...GOOD_LINES, "metadata:", "  iris-tools-preset: all"),
+    "bad-skill",
+    ['the tool preset "all" is not one of core, developer and full (frontmatter line 5)'],
+  ],
+  [
+    "metadata with a value instead of a map",
+    fm(...GOOD_LINES, "metadata: x"),
+    "bad-skill",
+    ['the field "metadata" must be a map of two-space indented "key: value" lines, not a value (frontmatter line 4)'],
+  ],
+  ["a metadata map with no entry, last", fm(...GOOD_LINES, "metadata:"), "bad-skill", ['the field "metadata" holds no entry; add iris-tools-preset or remove it']],
+  ["a metadata map with no entry, before a field", fm("metadata:", ...GOOD_LINES), "bad-skill", ['the field "metadata" holds no entry; add iris-tools-preset or remove it']],
+  [
+    "a metadata map with only comments",
+    fm(...GOOD_LINES, "metadata:", "  # nothing here"),
+    "bad-skill",
+    ['the field "metadata" holds no entry; add iris-tools-preset or remove it'],
+  ],
+  [
+    "a tab-indented metadata entry",
+    fm(...GOOD_LINES, "metadata:", "\tiris-tools-preset: core"),
+    "bad-skill",
+    ['is not "key: value" at column 1', 'the field "metadata" holds no entry'],
+  ],
+  [
+    "a four-space-indented metadata entry",
+    fm(...GOOD_LINES, "metadata:", "    iris-tools-preset: core"),
+    "bad-skill",
+    ['is not "key: value" at column 1', 'the field "metadata" holds no entry'],
+  ],
+  [
+    "a repeated metadata key",
+    fm(...GOOD_LINES, "metadata:", "  iris-tools-preset: core", "  iris-tools-preset: full"),
+    "bad-skill",
+    ['repeats the metadata key "iris-tools-preset"; keep one'],
+  ],
+  [
+    "a repeated metadata field",
+    fm(...GOOD_LINES, "metadata:", "  iris-tools-preset: core", "metadata:", "  iris-tools-preset: full"),
+    "bad-skill",
+    ['repeats the field "metadata"; keep one', 'is not "key: value" at column 1'],
+  ],
+  ["an indented entry with no map open", fm(...GOOD_LINES, "  iris-tools-preset: core"), "bad-skill", ['is not "key: value" at column 1']],
+  [
+    "an indented entry after a column-1 key ended the map",
+    fm("metadata:", "  iris-tools-preset: core", GOOD_LINES[0] ?? "", "  iris-tools-preset: full", GOOD_LINES[1] ?? ""),
+    "bad-skill",
+    ['is not "key: value" at column 1'],
+  ],
+  ["an empty preset value", fm(...GOOD_LINES, "metadata:", "  iris-tools-preset:"), "bad-skill", ['the metadata key "iris-tools-preset" is empty']],
+  [
+    "a preset value that is an unclosed quote",
+    fm(...GOOD_LINES, "metadata:", '  iris-tools-preset: "core'),
+    "bad-skill",
+    ['the metadata key "iris-tools-preset" is a double-quoted value that is not one valid JSON string'],
+  ],
 ];
 
 function expectProblems(text: string, dirName: string, fragments: string[]): void {
@@ -198,6 +300,55 @@ describe("skillFrontmatterProblems: the bad rows (each one alone)", () => {
 
   it("names the problem and the fix in the message for a header above the frontmatter", () => {
     expect(skillFrontmatterProblems(`${HEADER}\n\n${fm(...GOOD_LINES)}`, "bad-skill")).toEqual([OPEN_LINE_MESSAGE]);
+  });
+});
+
+describe("readSkillFrontmatter: what it reads, with and without the metadata map (Story 41.5)", () => {
+  it.each(["core", "developer", "full"])("accepts the preset %s and returns it", (preset) => {
+    const read = readSkillFrontmatter(fm(...GOOD_LINES, "metadata:", `  iris-tools-preset: ${preset}`), "bad-skill");
+    expect(read).toEqual({
+      fields: { name: "bad-skill", description: "Covers one thing. Use when you need it." },
+      metadata: { "iris-tools-preset": preset },
+      problems: [],
+    });
+  });
+
+  it("a skill with no metadata map reads no metadata and raises nothing", () => {
+    expect(readSkillFrontmatter(fm(...GOOD_LINES), "bad-skill")).toEqual({
+      fields: { name: "bad-skill", description: "Covers one thing. Use when you need it." },
+      metadata: {},
+      problems: [],
+    });
+  });
+
+  it("records a preset value that is not allowed, so a caller can report what the file declares", () => {
+    const read = readSkillFrontmatter(fm(...GOOD_LINES, "metadata:", "  iris-tools-preset: all"), "bad-skill");
+    expect(read.metadata).toEqual({ "iris-tools-preset": "all" });
+    expect(read.problems).toHaveLength(1);
+  });
+
+  it("records nothing for an unknown metadata key or a repeated one beyond the first", () => {
+    expect(readSkillFrontmatter(fm(...GOOD_LINES, "metadata:", "  author: me"), "bad-skill").metadata).toEqual({});
+    expect(readSkillFrontmatter(fm(...GOOD_LINES, "metadata:", "  iris-tools-preset: core", "  iris-tools-preset: full"), "bad-skill").metadata).toEqual({
+      "iris-tools-preset": "core",
+    });
+  });
+
+  it.each([
+    ["a BOM", `${BYTE_ORDER_MARK}${fm(...GOOD_LINES)}`],
+    ["no frontmatter", "# Title\n"],
+    ["no closing line", `---\n${GOOD_LINES.join("\n")}\n`],
+  ])("reads nothing from %s", (_row, text) => {
+    const read = readSkillFrontmatter(text, "bad-skill");
+    expect(read.fields).toEqual({});
+    expect(read.metadata).toEqual({});
+    expect(read.problems).toHaveLength(1);
+  });
+
+  it("skillFrontmatterProblems is exactly its problems", () => {
+    for (const [, text, dirName] of [...GOOD, ...BAD]) {
+      expect(skillFrontmatterProblems(text, dirName)).toEqual(readSkillFrontmatter(text, dirName).problems);
+    }
   });
 });
 
@@ -431,6 +582,16 @@ describe("the committed pack: every skills/<name>/SKILL.md opens with valid fron
   it("raises no problem for any of them", () => {
     const withProblems = Object.entries(sweep(packSkills)).filter(([, problems]) => problems.length > 0);
     expect(withProblems).toEqual([]);
+  });
+
+  it("each workflow skill declares one tool preset in its metadata, and no knowledge skill declares any (Story 41.5)", () => {
+    const metadataOf = (dir: string): Record<string, string> =>
+      readSkillFrontmatter(readFileSync(join(packSkills, dir, SKILL_FILENAME), "utf8"), dir).metadata as Record<string, string>;
+    for (const name of workflowNames) {
+      expect(Object.keys(metadataOf(name)), name).toEqual(["iris-tools-preset"]);
+      expect(["core", "developer", "full"], name).toContain(metadataOf(name)["iris-tools-preset"]);
+    }
+    for (const name of knowledgeNames) expect(metadataOf(name), name).toEqual({});
   });
 
   it("the sweep can fail: a copy of each pack skill without its description line is refused", () => {

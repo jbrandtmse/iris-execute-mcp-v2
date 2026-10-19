@@ -22,6 +22,15 @@ export const findPatientMessagesPrompt: PromptDefinition = {
     "Find a patient's Interoperability messages by a Search Table value, such as a medical " +
     "record number, with iris_message_search, then read their bodies with iris_message_body " +
     "under the PHI data policy.",
+  skill: {
+    description:
+      "Finds a patient's interoperability messages by an identifier such as a medical record number, " +
+      "through a Search Table and in search windows of at most 7 days, lists the matching message " +
+      "headers, and reads message bodies only when the user wants the content, under the PHI data " +
+      "policy, which redacts or withholds them. Use when the user asks for the messages, HL7 traffic or " +
+      "message history of a patient or medical record number in an IRIS interoperability production.",
+    preset: "core",
+  },
   arguments: [
     {
       name: "patientId",

@@ -17,6 +17,16 @@ export const auditSecurityPosturePrompt: PromptDefinition = {
   description:
     "Audit the IRIS instance's security posture: users (default passwords, %All holders), " +
     "roles, service authentication settings, SSL/TLS configs, and instance auditing status.",
+  skill: {
+    description:
+      "A read-only audit of an IRIS instance's security: users whose password settings look stale or " +
+      "that may use a well-known default credential, every user and role that holds %All, services that " +
+      "are enabled without authentication or not needed, SSL/TLS configurations with a minimum TLS " +
+      "version below 1.2 or missing certificate paths, and whether auditing is on, ending in a report " +
+      "of recommended fixes; it changes nothing. Use when the user asks to audit, review or harden IRIS " +
+      "security, asks who holds %All, or asks whether services, SSL/TLS or auditing are set up safely.",
+    preset: "full",
+  },
   arguments: [
     {
       name: "server",

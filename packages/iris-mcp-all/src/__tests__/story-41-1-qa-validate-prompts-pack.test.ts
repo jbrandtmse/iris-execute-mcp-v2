@@ -138,8 +138,9 @@ describe("validate:prompts CLI, scratch copy: a source and its regenerated pack 
 
   it("good knowledge and rule sources are counted by kind once the pack is built", () => {
     const root = scratch();
-    put(root, `${KNOWLEDGE_SOURCE_DIR}/qa-k/SKILL.md`, "---\nname: qa-k\n---\n\nCall `iris_doc_get`.\n");
-    put(root, `${RULES_SOURCE_DIR}/qa-rule.md`, "Prefer `iris_doc_search`.\n");
+    // A knowledge skill that names a tool declares its preset (Story 41.5); a rule cannot declare one, so it names none.
+    put(root, `${KNOWLEDGE_SOURCE_DIR}/qa-k/SKILL.md`, "---\nname: qa-k\nmetadata:\n  iris-tools-preset: core\n---\n\nCall `iris_doc_get`.\n");
+    put(root, `${RULES_SOURCE_DIR}/qa-rule.md`, "Prefer the document search tool.\n");
     expect(runScript(root, GEN_PACK).status).toBe(0);
     const run = runScript(root, VALIDATE);
     expect(run.status, run.stderr).toBe(0);

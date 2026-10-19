@@ -11,7 +11,10 @@
  *    `prompts/list` is MethodNotFound), 12 in all, and their names are the names of the generated workflow skills;
  *  - every remaining prompt renders over the wire, and none points at the retired prompt;
  *  - `prompts/get` with `arguments` omitted entirely never ends in an internal error, and the connection stays usable;
- *  - dev's npm tarball file list holds the four prompt modules and nothing of the retired one.
+ *  - dev's npm tarball file list holds the four prompt modules and nothing of the retired one;
+ *  - Story 41.5 (AC 41.5.1, AD-15, AD-28): `prompts/list` and every `prompts/get` hash to the bytes captured before a prompt
+ *    gained its skill-only `skill` field, each listed entry keeps exactly its four keys and its own description, and neither
+ *    the skill description nor the preset key appears anywhere on the wire.
  *
  * Every server is started with `default` pointing at 127.0.0.1:9, a closed local port, and no tool is called, so no
  * IRIS instance is reached. The expected prompt table was captured from the built dists over stdio on 2026-10-19
@@ -23,8 +26,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { loadAllPrompts } from "../../../../scripts/lib/prompt-catalog.mjs";
 import { runNpmPack } from "../../../../scripts/lib/provenance-inputs.mjs";
 import { PACK_DIR, WORKFLOW_SKILLS_DIR } from "../../../../scripts/lib/skills-pack.mjs";
 import { REPO_ROOT } from "./pack-fixture";
@@ -259,6 +264,116 @@ describe("every remaining prompt renders over stdio and none points at the retir
     // A prompt with a required argument is always refused, so the refusal path is exercised.
     expect(requiredCount).toBeGreaterThan(0);
     expect(refusedCount).toBeGreaterThanOrEqual(requiredCount);
+  });
+});
+
+/**
+ * The wire bytes of every prompt, captured at 26dc8b2 (before Story 41.5 gave a prompt a skill-only field) from the
+ * built dists over stdio, with a scratch Node script on the SDK `@modelcontextprotocol/sdk@1.29.0` (`StdioClientTransport`
+ * against `packages/<pkg>/dist/index.js`, `IRIS_HOST=127.0.0.1`, `IRIS_PORT=9`). Each value is
+ * `sha256(JSON.stringify(x))`: `list` hashes `(await client.listPrompts()).prompts`, and each `get` value hashes the whole
+ * `getPrompt` result for `arguments` = every declared argument set to `v-<name>`. The oracle is the pre-change server,
+ * so an edit that changes any wire byte cannot move it.
+ */
+const WIRE_GOLDEN: Record<string, { list: string; get: Record<string, string> }> = {
+  "iris-admin-mcp": {
+    list: "bd531fad56f723fc0bdb547d4a38bec717139f2724a3ddd3df1616488a3aa827",
+    get: {
+      "provision-project-environment": "72cd7ebd5c7a5283183dbf40c3bf7bdaa02465cab38b81177cfc50e60d7ce215",
+      "audit-security-posture": "fed7d6bdbbcc5520297910ca88502803ea08a246d92364abc9c8e86cbe3eb116",
+    },
+  },
+  "iris-dev-mcp": {
+    list: "a1317b095ad7720e2caae07d57e3658a308a1bf42d2c3c6272d897520eade217",
+    get: {
+      "diagnose-slow-query": "b038a8c18dbc1b010f4f1f2662a26b17c995e735ed3f0230ed271433ebe42abb",
+      "deploy-and-test-class": "a33adecb68164ce91338713b4ffac873e926d6635acbe495591c722e8edeb15d",
+      "promote-environment-change": "31c9e03e31d888530ce9c021b104e0fa2b5c8144f24bc27280bc86a5f6e3704f",
+      "edit-and-test-class": "f97413b0c895e5663568ef0c06037db2765898b1e28e5d4ee29b62059554173e",
+    },
+  },
+  "iris-interop-mcp": {
+    list: "71984e9be366489028552861bb096415ad6d2673f683029e35d7d94bf9785164",
+    get: {
+      "trace-message-flow": "d774181ef6d285aeaf14fd41abdf83422a67d01e82705d125e19b92e3e1d0482",
+      "recover-stuck-production": "186084eb03b610917a641d521db127596107ee7d5b97c402fea9c11a11eb4b4f",
+      "resend-failed-messages": "af4ac020ae0c2e8baace9ff5686431f60f3cb812fc479543569c36261da5211a",
+      "find-patient-messages": "9f1b22aa8fc71c837b2a792f759b854ac7bc5e42bb2f1e822ddbc873401f080d",
+    },
+  },
+  "iris-ops-mcp": {
+    list: "a8a37a4ec55f819cfdfd6d9106a7ddbca413b47e3da758816119cb5398ff55bb",
+    get: {
+      "check-system-health": "3cdb4da3fbaffc886a64469b0e6525249ab83f52d3e9579e5b3bb2c8142d48d7",
+      "run-external-backup": "70c81a1f821451a05e2e414f2d9503976e2ad9663e74a3f94a40d39a7fe29e0a",
+    },
+  },
+};
+
+function sha256Hex(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+interface PromptWithSkill {
+  name: string;
+  description: string;
+  skill?: { description: string; preset: string };
+}
+
+/** The definitions each built server registers, read from the same dist the server runs. */
+async function definitionsOf(pkg: string): Promise<PromptWithSkill[]> {
+  const all = (await loadAllPrompts(REPO_ROOT)) as Array<{ pkg: string; prompt: PromptWithSkill }>;
+  return all.filter((entry) => entry.pkg === pkg).map((entry) => entry.prompt);
+}
+
+describe("the skill-only field never reaches the wire (AC 41.5.1, AD-15, AD-28)", () => {
+  it.each(Object.keys(WIRE_GOLDEN))("%s: every prompt sets its skill field, and prompts/list serves only name, title, description and arguments", async (pkg) => {
+    const definitions = await definitionsOf(pkg);
+    const listedPrompts = (await sessionOf(pkg).listPrompts()) as Array<Record<string, unknown>>;
+    expect(listedPrompts.map((entry) => entry.name)).toEqual(definitions.map((definition) => definition.name));
+    for (const entry of listedPrompts) {
+      const definition = definitions.find((candidate) => candidate.name === entry.name);
+      expect(definition?.skill, `${pkg}/${String(entry.name)} sets a skill field`).toBeDefined();
+      expect(Object.keys(entry).sort(), `${entry.name} keys`).toEqual(["arguments", "description", "name", "title"]);
+      expect(entry.description, `${entry.name} lists its own description`).toBe(definition?.description);
+      expect(entry.description, `${entry.name} does not list its skill description`).not.toBe(definition?.skill?.description);
+      const json = JSON.stringify(entry);
+      expect(json, `${entry.name} entry holds no skill description`).not.toContain(definition?.skill?.description ?? "");
+      expect(json, `${entry.name} entry names no preset key`).not.toContain("iris-tools-preset");
+    }
+  });
+
+  it.each(Object.keys(WIRE_GOLDEN))("%s: prompts/get carries no skill field, no skill description and no preset key", async (pkg) => {
+    const definitions = await definitionsOf(pkg);
+    const session = sessionOf(pkg);
+    for (const definition of definitions) {
+      expect(definition.skill, `${definition.name} sets a skill field`).toBeDefined();
+      const prompt = (await listed(pkg)).find((candidate) => candidate.name === definition.name);
+      const args = Object.fromEntries((prompt?.arguments ?? []).map((argument) => [argument.name, `v-${argument.name}`]));
+      const rendered = (await session.getPrompt({ name: definition.name, arguments: args })) as object;
+      // The SDK's prompts/get result carries the callback's own fields (messages), not the registered description.
+      expect(Object.keys(rendered), `${definition.name} result keys`).not.toContain("skill");
+      const json = JSON.stringify(rendered);
+      expect(json, `${definition.name} result holds no skill description`).not.toContain(definition.skill?.description ?? "");
+      expect(json, `${definition.name} result names no preset key`).not.toContain("iris-tools-preset");
+    }
+  });
+});
+
+describe("the prompt wire bytes are the bytes captured before the skill-only field (AC 41.5.1, AD-15)", () => {
+  it.each(Object.keys(WIRE_GOLDEN))("%s: prompts/list hashes to its golden value", async (pkg) => {
+    expect(sha256Hex(await sessionOf(pkg).listPrompts())).toBe(WIRE_GOLDEN[pkg]?.list);
+  });
+
+  it.each(Object.keys(WIRE_GOLDEN))("%s: every prompts/get hashes to its golden value, and no prompt is unpinned", async (pkg) => {
+    const session = sessionOf(pkg);
+    const golden = WIRE_GOLDEN[pkg]?.get ?? {};
+    const prompts = await listed(pkg);
+    expect(prompts.map((prompt) => prompt.name).sort()).toEqual(Object.keys(golden).sort());
+    for (const prompt of prompts) {
+      const args = Object.fromEntries((prompt.arguments ?? []).map((argument) => [argument.name, `v-${argument.name}`]));
+      expect(sha256Hex(await session.getPrompt({ name: prompt.name, arguments: args })), `${pkg}/${prompt.name}`).toBe(golden[prompt.name]);
+    }
   });
 });
 

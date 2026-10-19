@@ -12,8 +12,8 @@
 //
 // SOURCES. Workflow skills are `gen:skills` output in `skills/`. Hand-authored content lives in
 // `skills-pack-src/`: knowledge skills under `knowledge/<name>/`, the rules under `rules/`, and the notice
-// at the root of that directory. Assembly copies bytes and renders only the pack README and each rule's
-// two forms.
+// at the root of that directory. Assembly copies bytes and renders only the pack README (a catalog of the
+// knowledge skills, the workflow skills and the rules) and each rule's two forms.
 //
 // RULES. A rule source is one flat `rules/<name>.md` with no frontmatter (an always-on rule is unscoped,
 // so it takes no `paths:`). Its `claude-code` form is the source bytes. Its `agents-md` form is the same
@@ -22,12 +22,13 @@
 // `<!-- IRIS-MCP-RULE:`, so each section holds exactly its own two marker lines.
 //
 // SKILL FRONTMATTER. Every `SKILL.md` in the pack opens with a frontmatter block on its first line, holding
-// only `name` and `description` (`skillFrontmatterProblems`). The grammar is a strict subset of YAML read line
-// by line, and it is fail-safe: whatever lies outside it is reported, never guessed at. A later field, such as
-// a skill's preset declaration, extends SKILL_FRONTMATTER_FIELDS and that grammar. Every field in that list is
-// required, so a field a skill may leave out also needs the grammar to allow it without requiring it.
-// `check:provenance` applies it to every agent file at `skills/<name>/SKILL.md`; `assemblePack` still copies
-// those bytes unchanged.
+// `name` and `description` and, optionally, a `metadata` map (`readSkillFrontmatter`). The grammar is a
+// strict subset of YAML read line by line, and it is fail-safe: whatever lies outside it is reported, never
+// guessed at. Every field in SKILL_FRONTMATTER_FIELDS is required; a field a skill may leave out is listed in
+// SKILL_OPTIONAL_FRONTMATTER_FIELDS instead. The one `metadata` key is `iris-tools-preset`, the tool preset
+// the skill needs, and it is declared only by a skill that names an `iris_*` tool.
+// `check:provenance` applies the grammar to every agent file at `skills/<name>/SKILL.md`; `assemblePack` still
+// copies those bytes unchanged, and reads each skill's frontmatter only to render the pack README.
 //
 // This module reads the filesystem but never writes it; `scripts/gen-pack.mjs` owns the writes.
 
@@ -71,8 +72,20 @@ export const SKILL_NAME_MAX_LENGTH = 64;
 /** The longest `description`, in characters. */
 export const SKILL_DESCRIPTION_MAX_LENGTH = 1024;
 
-/** The only frontmatter fields a pack `SKILL.md` may hold; each of them is required. */
+/** The frontmatter fields a pack `SKILL.md` must hold. */
 export const SKILL_FRONTMATTER_FIELDS = Object.freeze(['name', 'description']);
+
+/** The frontmatter fields a pack `SKILL.md` may hold and may leave out. */
+export const SKILL_OPTIONAL_FRONTMATTER_FIELDS = Object.freeze(['metadata']);
+
+/** The keys the `metadata` map may hold. */
+export const SKILL_METADATA_KEYS = Object.freeze(['iris-tools-preset']);
+
+/** The `metadata` key that declares the tool preset a skill needs. */
+export const SKILL_PRESET_KEY = 'iris-tools-preset';
+
+/** The `IRIS_TOOLS_PRESET` values a skill may declare, in minimality order: the first one that shows every tool a skill names is the one it declares. */
+export const SKILL_PRESETS = Object.freeze(['core', 'developer', 'full']);
 
 // Words a skill `name` may not contain.
 const SKILL_NAME_RESERVED_WORDS = ['claude', 'anthropic'];
@@ -82,6 +95,15 @@ const XML_LIKE_TAG = /<\/?[A-Za-z][^<>]*>/;
 
 // A frontmatter line: a key at column 1, then `:` and, optionally, whitespace and a value.
 const FRONTMATTER_LINE = /^([A-Za-z][A-Za-z0-9_-]*):(?:[ \t]+(.*))?$/;
+
+// An entry of the `metadata` map: exactly two spaces, then `key: value`.
+const METADATA_ENTRY_LINE = /^ {2}([A-Za-z][A-Za-z0-9_-]*):(?:[ \t]+(.*))?$/;
+
+// A rule's title: its first Markdown heading.
+const RULE_HEADING = /^#{1,6}[ \t]+(.+?)[ \t]*$/;
+
+// What the catalog says about a skill whose description cannot be read.
+const CATALOG_NO_DESCRIPTION = '(no description could be read from its frontmatter)';
 
 // The characters a plain (unquoted) scalar may not start with.
 const PLAIN_SCALAR_INDICATOR = /^[-?:,[\]{}#&*!|>'"%@`]/;
@@ -126,17 +148,87 @@ export function renderAgentsMdSection(stem, bytes) {
 }
 
 /**
- * The generated pack README: a DO-NOT-EDIT banner naming the generator, the layout, and a pointer to
- * the notice.
+ * One skill of the pack catalog: its directory name, the description read from its frontmatter (`null`
+ * when none can be read) and the tool preset it declares (`null` when none is declared or the value is not
+ * one of SKILL_PRESETS).
  *
+ * @typedef {{ name: string, description: string | null, preset: string | null }} CatalogSkill
+ */
+
+/**
+ * The pack catalog: the skills of each kind, and the rules, each sorted by name. A rule's `title` is its
+ * first Markdown heading, or its file name stem when it has none.
+ *
+ * @typedef {object} PackCatalogContents
+ * @property {CatalogSkill[]} [knowledge]
+ * @property {CatalogSkill[]} [workflow]
+ * @property {Array<{ stem: string, title: string }>} [rules]
+ */
+
+/**
+ * A catalog section's list: one line per entry, or `None.` when the section has none.
+ *
+ * @param {string[]} entries - Rendered list lines.
  * @returns {string}
  */
-export function renderPackReadme() {
+function catalogList(entries) {
+  return entries.length === 0 ? 'None.' : entries.join('\n');
+}
+
+/**
+ * One catalog line for a skill: its name, its declared preset when it has one, and its description.
+ *
+ * @param {CatalogSkill} skill
+ * @returns {string}
+ */
+function catalogSkillLine({ name, description, preset }) {
+  const tag = preset !== null && SKILL_PRESETS.includes(preset) ? ` (tool preset \`${preset}\`)` : '';
+  return `- \`${name}\`${tag}: ${description ?? CATALOG_NO_DESCRIPTION}`;
+}
+
+/**
+ * One catalog line for a rule: its title, and how its two pack forms load.
+ *
+ * @param {{ stem: string, title: string }} rule
+ * @returns {string}
+ */
+function catalogRuleLine({ stem, title }) {
+  return (
+    `- \`${stem}\`: ${title}. Its Claude Code form, \`${RULE_FORM_DIRS.claudeCode}/${stem}.md\`, has no ` +
+    `\`paths:\` scope, so it loads in every session of a project that installs it. ` +
+    `\`${RULE_FORM_DIRS.agentsMd}/${stem}.md\` holds the same text for \`AGENTS.md\`, between two marker lines.`
+  );
+}
+
+/**
+ * The generated pack README: a DO-NOT-EDIT banner naming the generator, a catalog of what the pack holds
+ * (the knowledge skills, the workflow skills and the always-on rules, in that order, each sorted by name,
+ * each skill with its description and the tool preset it declares), the layout, and a pointer to the notice.
+ *
+ * @param {PackCatalogContents} [contents]
+ * @returns {string}
+ */
+export function renderPackReadme(contents = {}) {
+  const knowledge = (contents.knowledge ?? []).map(catalogSkillLine);
+  const workflow = (contents.workflow ?? []).map(catalogSkillLine);
+  const rules = (contents.rules ?? []).map(catalogRuleLine);
   return (
     `<!-- DO NOT EDIT. This directory is generated by \`pnpm gen:pack\` from the pack sources. ` +
     `Edit the sources, then regenerate. -->\n\n` +
     `# IRIS MCP skills pack\n\n` +
-    `Agent skills and the always-on rule for working with the IRIS MCP Server Suite.\n\n` +
+    `Agent skills and the always-on rule for working with the IRIS MCP Server Suite. ` +
+    `A skill that names the suite's tools shows its tool preset: the first of \`core\`, \`developer\` and ` +
+    `\`full\` (the values of \`IRIS_TOOLS_PRESET\`) under which every tool it names is visible. ` +
+    `\`full\`, the default, shows every tool.\n\n` +
+    `## Knowledge skills\n\n` +
+    `An agent loads a knowledge skill when its task matches the skill's description.\n\n` +
+    `${catalogList(knowledge)}\n\n` +
+    `## Workflow skills\n\n` +
+    `Each is generated from the MCP prompt of the same name and walks an agent through one task with the ` +
+    `suite's tools.\n\n` +
+    `${catalogList(workflow)}\n\n` +
+    `## Always-on rules\n\n` +
+    `${catalogList(rules)}\n\n` +
     `## Layout\n\n` +
     `- \`skills/<name>/SKILL.md\`: one directory per skill, in the standard plugin layout.\n` +
     `- \`rules/claude-code/<name>.md\`: the always-on rule as a Claude Code rule file.\n` +
@@ -183,50 +275,115 @@ function parseFrontmatterValue(raw) {
 }
 
 /**
- * The problems of a `SKILL.md` frontmatter block, in the strict grammar the pack accepts.
+ * Names in a sentence: `a`, `a and b`, `a, b and c`.
+ *
+ * @param {readonly string[]} names
+ * @returns {string}
+ */
+function nameList(names) {
+  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/**
+ * Read a `SKILL.md` frontmatter block in the strict grammar the pack accepts, and report every problem.
  *
  * - Line 1 is exactly `---` (no byte-order mark) and a later `---` line closes the block. Lines split on LF,
  *   and one trailing CR is dropped from each.
  * - Each line between is blank, a comment (first character after any spaces or tabs is `#`), or `key: value`
  *   at column 1. Only spaces and tabs around a value are dropped, as YAML drops them.
- * - Keys come only from SKILL_FRONTMATTER_FIELDS, each once, and both are required.
+ * - Keys come only from SKILL_FRONTMATTER_FIELDS and SKILL_OPTIONAL_FRONTMATTER_FIELDS, each once, and the
+ *   first list is required.
+ * - `metadata:` with nothing after the colon opens a map: each following line of exactly two spaces, then
+ *   `key: value`, is an entry, and the next column-1 key line or the closing `---` ends it. A map holds at
+ *   least one entry, each key comes from SKILL_METADATA_KEYS and is held once, and a `iris-tools-preset`
+ *   value is one of SKILL_PRESETS. Any other indented line is refused like any line that is not at column 1.
  * - `name` matches SKILL_NAME, has at most SKILL_NAME_MAX_LENGTH characters, equals `dirName`, and holds no
  *   reserved word.
  * - `description` is not empty after trimming, has at most SKILL_DESCRIPTION_MAX_LENGTH characters and holds
  *   no XML-like tag.
  *
- * Each message names the problem and the fix.
+ * Each message names the problem and the fix. A value that is read is recorded even when it is invalid, so a
+ * caller can report what the file declares.
  *
  * @param {string} text - The decoded file.
  * @param {string} dirName - The skill's directory name.
- * @returns {string[]} Empty when the frontmatter is valid.
+ * @returns {{ fields: { name?: string, description?: string }, metadata: Record<string, string>, problems: string[] }}
+ *   `problems` is empty when the frontmatter is valid.
  */
-export function skillFrontmatterProblems(text, dirName) {
+export function readSkillFrontmatter(text, dirName) {
+  const fields = {};
+  const metadata = {};
+  const problems = [];
+  const result = () => ({ fields, metadata, problems });
   if (text.charCodeAt(0) === 0xfeff) {
-    return ['begins with a byte-order mark, so a client may not read the opening --- as the first line; save the file without a BOM'];
+    problems.push('begins with a byte-order mark, so a client may not read the opening --- as the first line; save the file without a BOM');
+    return result();
   }
   const lines = text.split('\n').map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line));
   if (lines[0] !== '---') {
-    return ['does not open with a --- frontmatter line, so clients read no name or description; put the frontmatter on line 1'];
+    problems.push('does not open with a --- frontmatter line, so clients read no name or description; put the frontmatter on line 1');
+    return result();
   }
   const closing = lines.indexOf('---', 1);
-  if (closing < 0) return ['has no closing --- line after its frontmatter; add one'];
+  if (closing < 0) {
+    problems.push('has no closing --- line after its frontmatter; add one');
+    return result();
+  }
 
-  const problems = [];
+  const allowedFields = [...SKILL_FRONTMATTER_FIELDS, ...SKILL_OPTIONAL_FRONTMATTER_FIELDS];
   const seen = new Set();
+  const seenMetadata = new Set();
   const values = new Map();
+  let mapOpen = false;
+  let mapEntries = 0;
+  const closeMap = () => {
+    if (mapOpen && mapEntries === 0) {
+      problems.push(`the field "metadata" holds no entry; add ${SKILL_METADATA_KEYS.join(' or ')} or remove it`);
+    }
+    mapOpen = false;
+  };
   for (let index = 1; index < closing; index += 1) {
     const line = lines[index] ?? '';
     if (/^[ \t]*(#|$)/.test(line)) continue;
     const position = `frontmatter line ${index + 1}`;
+    const entry = mapOpen ? METADATA_ENTRY_LINE.exec(line) : null;
+    if (entry !== null) {
+      mapEntries += 1;
+      const entryKey = entry[1] ?? '';
+      if (!SKILL_METADATA_KEYS.includes(entryKey)) {
+        problems.push(`metadata line ${index + 1} has the key "${entryKey}"; only ${SKILL_METADATA_KEYS.join(', ')} is allowed`);
+        continue;
+      }
+      if (seenMetadata.has(entryKey)) {
+        problems.push(`${position} repeats the metadata key "${entryKey}"; keep one`);
+        continue;
+      }
+      seenMetadata.add(entryKey);
+      const entryRaw = (entry[2] ?? '').replace(/^[ \t]+|[ \t]+$/g, '');
+      if (entryRaw === '') {
+        problems.push(`the metadata key "${entryKey}" is empty (${position}); give it a value`);
+        continue;
+      }
+      const entryParsed = parseFrontmatterValue(entryRaw);
+      if ('problem' in entryParsed) {
+        problems.push(`the metadata key "${entryKey}" ${entryParsed.problem} (${position})`);
+        continue;
+      }
+      metadata[entryKey] = entryParsed.value;
+      if (entryKey === SKILL_PRESET_KEY && !SKILL_PRESETS.includes(entryParsed.value)) {
+        problems.push(`the tool preset "${entryParsed.value}" is not one of ${nameList(SKILL_PRESETS)} (${position})`);
+      }
+      continue;
+    }
     const match = FRONTMATTER_LINE.exec(line);
     if (match === null) {
       problems.push(`${position} is not "key: value" at column 1; indented, multi-line and list values are not supported`);
       continue;
     }
+    closeMap();
     const key = match[1] ?? '';
-    if (!SKILL_FRONTMATTER_FIELDS.includes(key)) {
-      problems.push(`${position} has the field "${key}"; only ${SKILL_FRONTMATTER_FIELDS.join(' and ')} are allowed`);
+    if (!allowedFields.includes(key)) {
+      problems.push(`${position} has the field "${key}"; only ${nameList(allowedFields)} are allowed`);
       continue;
     }
     if (seen.has(key)) {
@@ -235,6 +392,15 @@ export function skillFrontmatterProblems(text, dirName) {
     }
     seen.add(key);
     const raw = (match[2] ?? '').replace(/^[ \t]+|[ \t]+$/g, '');
+    if (key === 'metadata') {
+      if (raw === '') {
+        mapOpen = true;
+        mapEntries = 0;
+      } else {
+        problems.push(`the field "metadata" must be a map of two-space indented "key: value" lines, not a value (${position})`);
+      }
+      continue;
+    }
     if (raw === '') {
       problems.push(`the field "${key}" is empty (${position}); give it a value`);
       continue;
@@ -246,6 +412,7 @@ export function skillFrontmatterProblems(text, dirName) {
     }
     values.set(key, parsed.value);
   }
+  closeMap();
 
   for (const field of SKILL_FRONTMATTER_FIELDS) {
     if (!seen.has(field)) problems.push(`has no "${field}" field in its frontmatter; add it`);
@@ -279,7 +446,21 @@ export function skillFrontmatterProblems(text, dirName) {
     }
   }
 
-  return problems;
+  if (name !== undefined) fields.name = name;
+  if (description !== undefined) fields.description = description;
+  return result();
+}
+
+/**
+ * The problems of a `SKILL.md` frontmatter block, in the strict grammar the pack accepts: those of
+ * `readSkillFrontmatter`.
+ *
+ * @param {string} text - The decoded file.
+ * @param {string} dirName - The skill's directory name.
+ * @returns {string[]} Empty when the frontmatter is valid.
+ */
+export function skillFrontmatterProblems(text, dirName) {
+  return readSkillFrontmatter(text, dirName).problems;
 }
 
 /**
@@ -297,13 +478,47 @@ function listSubdirectories(dir) {
 }
 
 /**
+ * The catalog entry of one skill directory: its description and declared preset, read through
+ * `readSkillFrontmatter`. A directory with no `SKILL.md`, or whose frontmatter holds no readable
+ * description, has a `null` description; the validators report that file, this only reads.
+ *
+ * @param {string} skillDir
+ * @param {string} name - The skill's directory name.
+ * @returns {CatalogSkill}
+ */
+function catalogSkill(skillDir, name) {
+  const file = join(skillDir, SKILL_FILENAME);
+  if (!existsSync(file)) return { name, description: null, preset: null };
+  const { fields, metadata } = readSkillFrontmatter(readFileSync(file, 'utf8'), name);
+  const description = typeof fields.description === 'string' && fields.description.trim() !== '' ? fields.description : null;
+  const declared = metadata[SKILL_PRESET_KEY];
+  return { name, description, preset: declared !== undefined && SKILL_PRESETS.includes(declared) ? declared : null };
+}
+
+/**
+ * A rule's catalog title: its first Markdown heading, or its file name stem when it has none.
+ *
+ * @param {string} stem
+ * @param {Buffer} bytes
+ * @returns {string}
+ */
+function ruleTitle(stem, bytes) {
+  for (const line of bytes.toString('utf8').split('\n')) {
+    const match = RULE_HEADING.exec(line.endsWith('\r') ? line.slice(0, -1) : line);
+    if (match !== null) return match[1] ?? stem;
+  }
+  return stem;
+}
+
+/**
  * Build the pack: pack-relative POSIX path -> file bytes.
  *
  * - every file of each `skills/<n>/` (not `skills/README.md`) goes to `skills/<n>/...`;
  * - every file of each `skills-pack-src/knowledge/<n>/` goes to `skills/<n>/...`;
  * - each `skills-pack-src/rules/<n>.md` goes to `rules/claude-code/<n>.md` (the source bytes) and to
  *   `rules/agents-md/<n>.md` (the source bytes between the two marker lines);
- * - the notice goes to the pack root, beside a generated `README.md`.
+ * - the notice goes to the pack root, beside a generated `README.md` that catalogs the skills (each with
+ *   the description and the tool preset its frontmatter declares) and the rules.
  *
  * A missing `knowledge/` or `rules/` directory counts as empty.
  *
@@ -352,9 +567,13 @@ export function assemblePack(root) {
     pack.set(packRel, bytes);
   };
 
+  /** @type {{ knowledge: CatalogSkill[], workflow: CatalogSkill[], rules: Array<{ stem: string, title: string }> }} */
+  const catalog = { knowledge: [], workflow: [], rules: [] };
+
   const workflowNames = listSubdirectories(join(root, WORKFLOW_SKILLS_DIR));
   for (const name of workflowNames) {
     const skillDir = join(root, WORKFLOW_SKILLS_DIR, name);
+    catalog.workflow.push(catalogSkill(skillDir, name));
     for (const rel of listFilesRecursive(skillDir)) {
       add(`skills/${name}/${rel}`, readFileSync(join(skillDir, rel)), `${WORKFLOW_SKILLS_DIR}/${name}/`);
     }
@@ -372,6 +591,7 @@ export function assemblePack(root) {
           `${KNOWLEDGE_SOURCE_DIR}/${name}/.`,
       );
     }
+    catalog.knowledge.push(catalogSkill(skillDir, name));
     for (const rel of listFilesRecursive(skillDir)) {
       add(`skills/${name}/${rel}`, readFileSync(join(skillDir, rel)), `${KNOWLEDGE_SOURCE_DIR}/${name}/`);
     }
@@ -409,9 +629,11 @@ export function assemblePack(root) {
       }
       const stem = entry.name.slice(0, -'.md'.length);
       const source = `${RULES_SOURCE_DIR}/${entry.name}`;
+      catalog.rules.push({ stem, title: ruleTitle(stem, bytes) });
       add(`${RULE_FORM_DIRS.claudeCode}/${entry.name}`, bytes, source);
       add(`${RULE_FORM_DIRS.agentsMd}/${entry.name}`, renderAgentsMdSection(stem, bytes), source);
     }
+    catalog.rules.sort((a, b) => (a.stem < b.stem ? -1 : a.stem > b.stem ? 1 : 0));
   }
 
   const noticePath = join(sourceDir, NOTICE_FILENAME);
@@ -419,7 +641,7 @@ export function assemblePack(root) {
     throw new Error(`missing ${PACK_SOURCE_DIR}/${NOTICE_FILENAME}.`);
   }
   add(NOTICE_FILENAME, readFileSync(noticePath), `${PACK_SOURCE_DIR}/${NOTICE_FILENAME}`);
-  add(PACK_README_FILENAME, Buffer.from(renderPackReadme(), 'utf8'), 'the generated pack README');
+  add(PACK_README_FILENAME, Buffer.from(renderPackReadme(catalog), 'utf8'), 'the generated pack README');
 
   return pack;
 }
