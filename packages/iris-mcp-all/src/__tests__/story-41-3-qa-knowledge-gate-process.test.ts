@@ -17,6 +17,10 @@
  * Every offender row has a negative control: benign lookalikes (an IRIS error code, an IRIS qualifier, a pack skill
  * name, `AD-hoc`) added the same way keep the wording tests green, while the sha256 test goes red, which proves the
  * child run read the edited file.
+ * Story 41.4 QA adds the rows for the adaptation-header exemption (the one line the knowledge test does not read, in the
+ * one adapted skill): a second exact copy of the credit line, a different credit-like line, the credit line with `(c)`,
+ * and the exact credit line in a skill that is not adapted. Each must go red on the tests that read it (ASCII, wording,
+ * the header test or the "not adapted" test) and leave every other skill's watched tests green.
  *
  * The expected class names are typed here from the story's wording rules, not read from the gate. No IRIS and no
  * network; the real tree is never written.
@@ -280,6 +284,20 @@ const T_HYGIENE = "names nothing of this repository, its planning or its tooling
 const T_NO_COPY = "goes deeper than the always-on rule";
 const T_SHA = "is the text that was run on a live instance";
 const WORDING_TESTS = [T_NO_TOOL, T_HYGIENE, T_NO_COPY];
+// Story 41.4 QA: the adaptation-header exemption is read by three more tests, which these rows also watch.
+const T_ASCII = "is ASCII, LF only, and ends in exactly one LF";
+const T_HEADER = "opens with the adaptation header as its first body line";
+const T_NOT_ADAPTED = "is not adapted: it carries no mention of the upstream project";
+/** The identity test a skill has: the adapted skill is checked for its header, every other skill for having none. */
+const identityTest = (skill: string): string => (skill === ADAPTED ? T_HEADER : T_NOT_ADAPTED);
+/** Every test the rows watch for a skill: the wording tests, the ASCII test and the header-or-no-header test. */
+const watchedTests = (skill: string): string[] => [...WORDING_TESTS, T_ASCII, identityTest(skill)];
+/** U+00A9 COPYRIGHT SIGN, from its code point (this source stays ASCII). */
+const COPYRIGHT_SIGN = String.fromCharCode(0xa9);
+/** The adaptation header, typed from AD-28's wording rather than read from the checker. */
+const CREDIT = `Adapted from intersystems-community/iris-agentic-dev (MIT, ${COPYRIGHT_SIGN} 2025 InterSystems Corporation); see IRIS-MCP-THIRD-PARTY-NOTICES.md`;
+/** What a credit line trips when the exemption does not cover it: the upstream project's name and the notice file. */
+const CREDIT_CLASSES = ["a tool or server name", "a repository file"];
 
 /** The one result of the test whose title starts with `titleStart`, for a skill. */
 function resultOf(run: GateRun, skill: string, titleStart: string): GateResult {
@@ -298,7 +316,7 @@ describe("the committed knowledge test as a child process: the baseline", () => 
     expect(run.status).toBe(0);
     expect(run.total).toBeGreaterThanOrEqual(58);
     for (const skill of SKILL_NAMES) {
-      for (const title of [...WORDING_TESTS, T_SHA]) expect(resultOf(run, skill, title).status, `${skill} / ${title}`).toBe("passed");
+      for (const title of [...watchedTests(skill), T_SHA]) expect(resultOf(run, skill, title).status, `${skill} / ${title}`).toBe("passed");
     }
   });
 });
@@ -307,10 +325,13 @@ interface Offender {
   row: string;
   /** The skill that gets the offending line (the other five stay untouched). */
   skill: string;
+  /** The line added to the skill as a last bullet (the default edit). */
   line: string;
+  /** Replaces the default edit: the skill's new text, made from its real text (for a line that must be added bare, or in place). */
+  edit?: (text: string) => string;
   /** Each class name the hygiene test must report; empty when only the no-tool test is the subject. */
   classes: string[];
-  /** The wording tests that must go red for that skill. */
+  /** The watched tests that must go red for that skill. */
   red: string[];
 }
 
@@ -399,12 +420,45 @@ const OFFENDERS: Offender[] = [
     classes: ["an internal rule number"],
     red: [T_HYGIENE],
   },
+  // Story 41.4 QA (AC 41.4.3): the adaptation-header exemption covers ONE line, and only in the adapted skill.
+  {
+    row: "a second, exact copy of the credit line, below the adapted skill's own",
+    skill: ADAPTED,
+    line: "",
+    edit: (text) => `${text}\n${CREDIT}\n`,
+    classes: CREDIT_CLASSES,
+    red: [T_ASCII, T_HYGIENE, T_HEADER],
+  },
+  {
+    row: "a different, ASCII credit-like line, below the adaptation header",
+    skill: ADAPTED,
+    line: "Adapted from intersystems-community/iris-agentic-dev, see IRIS-MCP-THIRD-PARTY-NOTICES.md",
+    classes: CREDIT_CLASSES,
+    red: [T_HYGIENE],
+  },
+  {
+    row: "the adapted skill's own credit line with (c) in place of the copyright sign",
+    skill: ADAPTED,
+    line: "",
+    edit: (text) => text.replace(COPYRIGHT_SIGN, "(c)"),
+    classes: CREDIT_CLASSES,
+    red: [T_HYGIENE, T_HEADER],
+  },
+  {
+    row: "the exact credit line as the first body line, where the exemption would read it",
+    skill: GOTCHAS,
+    line: "",
+    edit: (text) => text.replace("---\n\n", `---\n\n${CREDIT}\n\n`),
+    classes: CREDIT_CLASSES,
+    red: [T_ASCII, T_HYGIENE, T_NOT_ADAPTED],
+  },
 ];
 
-describe("the committed knowledge test as a child process: each offender alone goes red, the others stay green (AC 41.3.3)", () => {
+describe("the committed knowledge test as a child process: each offender alone goes red, the others stay green (AC 41.3.3, 41.4.3)", () => {
   it.each(OFFENDERS)("$row in $skill", (offender) => {
     const root = gateScratch();
-    editSkill(root, offender.skill, withLine(offender.skill, offender.line));
+    const real = readFileSync(join(REPO_ROOT, sourceRel(offender.skill)), "utf8");
+    editSkill(root, offender.skill, offender.edit === undefined ? withLine(offender.skill, offender.line) : offender.edit(real));
     const run = runGate(root);
     expect(run.status, "the child run exits non-zero").not.toBe(0);
 
@@ -417,13 +471,15 @@ describe("the committed knowledge test as a child process: each offender alone g
     expect(block, `the console report has a failure block for the hygiene test\n${run.log}`).not.toBe("");
     for (const name of offender.classes) expect(block, `names the class "${name}"`).toContain(`"${name}"`);
 
-    // The wording tests that are not expected to go red stay green, for this skill and for the two untouched ones.
+    // The watched tests that are not expected to go red stay green, for this skill and for the five untouched ones.
     for (const skill of SKILL_NAMES) {
-      for (const title of WORDING_TESTS) {
+      for (const title of watchedTests(skill)) {
         const expectRed = skill === offender.skill && offender.red.includes(title);
         expect(resultOf(run, skill, title).status, `${skill} / ${title}`).toBe(expectRed ? "failed" : "passed");
       }
     }
+    // Every red test the row names exists for the edited skill: a header test belongs to the adapted skill only.
+    for (const title of offender.red) expect(watchedTests(offender.skill), `${title} is watched for ${offender.skill}`).toContain(title);
     // The edited text is what the child read: its pinned sha256 no longer holds, the untouched skills' still do.
     expect(resultOf(run, offender.skill, T_SHA).status).toBe("failed");
     for (const skill of SKILL_NAMES.filter((name) => name !== offender.skill)) expect(resultOf(run, skill, T_SHA).status).toBe("passed");

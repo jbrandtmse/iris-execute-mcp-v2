@@ -5,12 +5,12 @@ description: "Writing IRIS interoperability (Ensemble) components in ObjectScrip
 
 # Interoperability components
 
-Every behavior below was observed on IRIS 2026.2, by compiling business hosts or by reading the IRIS classes they extend. None of it needs a running production.
+Every behavior below was observed on IRIS 2026.2, by compiling business hosts or by reading the IRIS classes they extend, without running a production.
 
 ## Messages
 
-- A request class extends `Ens.Request`, and a response class extends `Ens.Response`. Both are persistent, and the send methods take a `%Library.Persistent`.
-- Every message body class keeps its data in one place, `^Ens.MessageBodyD`: `Ens.MessageBody`, `Ens.StringRequest` and `Ens.StringResponse` all compile to it. Leave the storage of a message class to the compiler.
+- A request class extends `Ens.Request`, and a response class extends `Ens.Response`. Both are persistent. The send methods declare their request as a `%Library.Persistent`, except a business process's `SendRequestAsync`, which declares an `Ens.Request`.
+- A message class derived from `Ens.MessageBody`, as `Ens.Request` and `Ens.Response` are, keeps its data in `^Ens.MessageBodyD`: `Ens.MessageBody`, `Ens.StringRequest` and `Ens.StringResponse` all compile to it. Other message classes keep their own, such as `Ens.StreamContainer` in `^Ens.StreamContainerD`. Leave the storage of a message class to the compiler.
 - `Parameter RESPONSECLASSNAME` on a request class names its response class, and `NewResponse(.tResponse)` creates one. Without it, `NewResponse` returns `ERROR <Ens>ErrGeneral: Ens.StringRequest has no value for parameter RESPONSECLASSNAME`.
 - `Ens.StringRequest` and `Ens.StringResponse` each carry one `StringValue` property, enough for a first test of a host.
 

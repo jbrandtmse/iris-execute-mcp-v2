@@ -11,15 +11,16 @@ Every behavior below was observed on IRIS 2026.2.
 
 ## The table name of a class
 
-- The last dot of a class name separates the schema from the table, and every earlier dot becomes an underscore. `Ens.Request` is the table `Ens.Request`, and `Ens.Config.Item` is the table `Ens_Config.Item`.
+- By default, the last dot of a class name separates the schema from the table, and every earlier dot becomes an underscore. `Ens.Request` is the table `Ens.Request`, and `Ens.Config.Item` is the table `Ens_Config.Item`. A class of the package `User` is in the schema `SQLUser`, and a class's `SqlTableName`, or its package's SQL name, replaces the default.
 - The dotted form of a longer name is read as another table: `SELECT Name FROM Ens.Config.Item` fails with SQLCODE -30, `Table 'CONFIG.ITEM' not found`.
 - To look a name up, query `SELECT SqlSchemaName, SqlTableName FROM %Dictionary.CompiledClass WHERE Name = ?`.
 
 ## SQLCODE
 
-- After `&sql(...)`, `SQLCODE` is 0 when the statement worked, 100 when it found or changed no row, and negative for an error, whose text is in `%msg`.
+- After `&sql(...)`, `SQLCODE` is 0 when the statement worked, 100 when it found or changed no row, and negative for an error.
 - `If SQLCODE` is true for 100 and for every error alike, so it reports an error as "not found". Test `SQLCODE = 100` and `SQLCODE < 0` apart.
-- A successful statement leaves `%msg` as it was, still holding the text of an earlier error. Read `%msg` only when SQLCODE is negative.
+- `%msg` holds the text of an error, but not always this statement's. A successful statement leaves it as it was, still holding the text of an earlier error. An error found when the statement is compiled, such as -30 or -29, replaces it, but an error raised while the statement runs, such as -400, sets `%msg` only when it is empty.
+- A method that holds embedded SQL starts with `%msg` undefined and gives the caller's `%msg` back when it returns. In a method that runs several statements, `Set %msg = ""` before each one whose error text you report, and read `%msg` only when SQLCODE is negative.
 - An `UPDATE` or `DELETE` that changes no row gives 100, not an error, and `%ROWCOUNT` is 0. After an `INSERT`, `%ROWID` holds the new row's ID and `%ROWCOUNT` is 1.
 - `$$$ThrowSQLIfError(SQLCODE, %msg)` throws a `%Exception.SQL` when SQLCODE is negative and does nothing for 0 or 100. Its `AsStatus()` reads `ERROR #5540: SQLCODE: -400 Message: ...`. Like the status macros, it needs no `Include`.
 

@@ -118,7 +118,7 @@ deferred: []
   - **the header exception:** for a skill with `adaptedFrom`, the first non-blank line after the frontmatter must equal `ADAPTATION_HEADER` (imported from `provenance-core.mjs`) and `hasValidAdaptationHeader` must be `true`; the ASCII check, the hygiene scan, the tool-name check and the rule-copy check then read the text without exactly that line. A skill without `adaptedFrom` is checked whole and must not match `/iris-agentic-dev/i`;
   - **controls for the exception** (with the existing controls): the header at the end of an adapted body is flagged (non-ASCII, "a tool or server name", "a repository file"); the header as the first body line of a skill not marked adapted is flagged the same way; a header with `(c)` in place of the copyright sign fails the header check and is flagged by the hygiene scan;
   - the notice test becomes "the notice holds exactly the rows of the adapted skills": `parsed.problems` is `[]`, and `parsed.rows` mapped to `{packFile, source, adaptation}` equals the golden row; the set of oracle `adaptedFrom` skills equals the set of row pack files;
-  - "the probe anchors total 167: 22, 27, 26, 29, 31, 32", in `SKILLS` order (gotchas, error-handling, unit-tests, sql, system-classes, interoperability) -- AC 41.4.1, 41.4.2, 41.4.3.
+  - "the probe anchors total 170: 22, 27, 26, 32, 31, 32", in `SKILLS` order (gotchas, error-handling, unit-tests, sql, system-classes, interoperability) -- AC 41.4.1, 41.4.2, 41.4.3.
 - `packages/iris-mcp-all/src/__tests__/story-41-3-qa-knowledge-gate-process.test.ts` -- the hermetic directory check (`:442`) and the untouched-skill loop cover all six knowledge skills; the count regex reads `6 knowledge`; the offender and look-alike rows keep editing only the skills they name. The baseline stays green because the committed knowledge test carries the exception.
 - `packages/iris-mcp-all/src/__tests__/skills-pack-frontmatter.test.ts` and `pack-provenance.test.ts` -- in-memory fixtures that feed `checkProvenance` the real notice also carry, as `packFiles`, the committed pack files its rows name (read from the pack), so the real row adds no problem and the exact expected problem lists stay as they are. Parsed-row counts are derived as the real notice's rows plus the rows the fixture inserts. Fixture names stay clear of the six real skill names.
 - Count pins, each derived from the CLI output (#51) and cross-checked by hand: `story-41-1-qa-provenance-cli.test.ts:96,99` becomes `1 provenance row(s), 39 agent file(s), 1 distribution(s)`, and `:105,111` become `2 provenance row(s), 41 agent file(s)`; `:275-280` expects `["claim-row","notice"]` (title says why); `skills-pack-frontmatter.test.ts:352` becomes `1 provenance row(s), 41 agent file(s), 1 distribution(s)` and `:373` `2 provenance row(s), 41 agent file(s)`; `story-41-1-qa-validate-prompts-pack.test.ts:49,52` becomes `51 source(s) checked (12 prompt(s) + 39 content file(s): 12 workflow, 20 pack, 6 knowledge, 1 rule)`, `:60` `51 source(s) checked`, `:146` `(12 prompt(s) + 44 content file(s): 12 workflow, 23 pack, 7 knowledge, 2 rule)`; `story-41-1-qa-pack-scratch-cli.test.ts:151` and `skills-pack-rule.test.ts:392` become `22 pack file(s)`, and `story-41-1-qa-pack-scratch-cli.test.ts:319` `37 pack file(s)`. Search every `packages/*/src/__tests__/` for `pack file(s)`, `agent file(s)`, `provenance row(s)`, `source(s) checked`, `knowledge,` and `realNotice` before finishing (Rule 19).
@@ -129,14 +129,42 @@ deferred: []
 
 - **The system-class skill (AC 41.4.1).** Given the committed source and its pack copy, when `skills-pack-knowledge.test.ts` and `pnpm gen:pack:check` run, then `iris-mcp-system-classes` equals its golden text (sha256), its pack copy is byte-identical, and every one of its 31 anchors is present; and given the probe log, when the reviewer maps each claim to a row (`Config`/`SYS`/`Security` and their join, deprecated properties, the `%SYS` switch, per-process against instance-wide counters), every row reads "holds".
 - **The interoperability skill (AC 41.4.2).** Given the committed source and its pack copy, when the same checks run, then `iris-mcp-interoperability` equals its golden text, its pack copy is byte-identical, and its 32 anchors are present; and every claim (host signatures, `Ens.Request`/`Ens.Response`, adapters and settings, the production XData) maps to a "holds" row, run by compiling a host or by reading the IRIS class it extends.
-- **The SQL skill.** Given the same, `iris-mcp-objectscript-sql` equals its golden text, its 29 anchors are present, and its two code blocks are the ones compiled verbatim (class name aside) and run as twins.
+- **The SQL skill.** Given the same, `iris-mcp-objectscript-sql` equals its golden text, its 32 anchors are present, and its two code blocks are the ones compiled verbatim (class name aside) and run as twins.
 - **Count and provenance (AC 41.4.3).** Given the committed tree, when the default suite and `pnpm check:provenance` run, then the knowledge-skill count read from `skills-pack-src/knowledge/` is 6, the notice holds exactly the golden row, and `check:provenance` prints `1 provenance row(s), 39 agent file(s), 8 distribution(s)`; and when the row is removed and the pack regenerated (mutation), `check:provenance` exits 1 with `[claim-row]` for both labels of the SQL skill and `pack-provenance.test.ts` "real tree passes every provenance rule" goes red.
 - **The wording.** Given the three new sources, when `pnpm validate:prompts` and `skills-pack-knowledge.test.ts` run, then no `iris_*` token is present, the hygiene scan (with the two existing overrides and the header exception) is empty, and no rule bullet is copied.
 - **Unchanged counts.** Given the suite, when the `(once)` checks run, then `gen:governance-baseline:check` reports `1e62c5ad5bf7`/141, `gen:tools-list-snapshot:check` reports no drift, `gen:skills:check` reports `13 generated file(s)`, `git diff --stat packages/shared/src/bootstrap-classes.ts` is empty, and tools stay at 110 package / 115 advertised.
 
+### Review Findings
+
+Code review, 2026-10-19. Review tier `full-opus`; all four layers delivered (Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor); outcome CLEAN. 28 rows gave 12 entries (high 0, medium 5, low 7); 7 rows were rejected. Every skill correction was confirmed by a live probe or a read of the IRIS source (wave-7 decision #15; probe-log rows Q30 to Q32, I1, I2, C21).
+
+- [x] [Review][Patch] SQL skill: a run-time error such as -400 sets `%msg` only when it is empty, so `$$$ThrowSQLIfError(SQLCODE, %msg)` after an earlier statement in the same method throws that statement's text [skills-pack-src/knowledge/iris-mcp-objectscript-sql/SKILL.md:20] — medium, blind-hunter+edge-case-hunter+verification-gap+acceptance-auditor (and QA's live finding); fixed: compile-time errors replace `%msg`, run-time errors do not, each method with embedded SQL starts with `%msg` undefined, and clear it before a statement whose error text you report (Q31, Q32)
+- [x] [Review][Patch] SQL skill: the table-name rule is the default only (`User` is `SQLUser`; `SqlTableName` and a package's SQL name replace it) [skills-pack-src/knowledge/iris-mcp-objectscript-sql/SKILL.md:14] — medium, blind-hunter; fixed (Q30)
+- [x] [Review][Patch] Interoperability skill: a business process's `SendRequestAsync` declares `Ens.Request`, not `%Library.Persistent` [skills-pack-src/knowledge/iris-mcp-interoperability/SKILL.md:12] — medium, all four layers; fixed (I1)
+- [x] [Review][Patch] Interoperability skill: only classes derived from `Ens.MessageBody` keep their data in `^Ens.MessageBodyD` (`Ens.StreamContainer`, `Ens.StringContainer` and `EnsLib.HL7.Message` keep their own) [skills-pack-src/knowledge/iris-mcp-interoperability/SKILL.md:13] — medium, all four layers; fixed (I2)
+- [x] [Review][Patch] Interoperability preamble "None of it needs a running production" read as a claim about behavior that several bullets contradict [skills-pack-src/knowledge/iris-mcp-interoperability/SKILL.md:8] — low, blind-hunter; now "without running a production"
+- [x] [Review][Patch] System-class skill: "Close a `%SQL.Statement` result" names no method an agent can call (`%CloseCursor` is `Private`) [skills-pack-src/knowledge/iris-mcp-system-classes/SKILL.md:51] — low, blind-hunter; now "Kill", as C21 ran it
+- [x] [Review][Patch] The changeset and the contributor README said every claim was run; the CHANGELOG said every code block was compiled unchanged [.changeset/story-41-4-platform-knowledge-skills.md:7] — low, blind-hunter+acceptance-auditor; all three now match the evidence (run or source read; the host block compiled under another class name)
+- [x] [Review][Patch] The CHANGELOG's `### Tests` named no QA test file [CHANGELOG.md:42] — low, blind-hunter+acceptance-auditor; both QA files added
+- [x] [Review][Patch] The QA process test re-implemented the fixture's `problemRules` as a local `pairs` (Rule 2) [packages/iris-mcp-all/src/__tests__/story-41-4-qa-first-row-process.test.ts:76] — low, blind-hunter; moved into `story-41-1-qa-fixture.ts` as `problemPairs`; the per-file `scratch`/`afterEach` stays, the idiom every sibling uses over the shared `makeScratchRepo`
+- [x] [Review][Patch] The "Unchanged counts" AC had no `mutation:` line (Rule 19) [_bmad-output/implementation-artifacts/spec-41-4-platform-knowledge-skills.md:135] — low, verification-gap; CR1 demonstrated and recorded
+- [x] [Review][Patch] "the header appears once" could not fail alone beside `not.toContain(ADAPTATION_HEADER)` (Rule 19; QA's note) [packages/iris-mcp-all/src/__tests__/skills-pack-knowledge.test.ts:481] — low, lead+QA; removed, its intent kept as the remaining assertion's message, CR3 demonstrated
+- [x] [Review][Defer] Story 41.5's pack-wide internal-reference check must accept the exact adaptation header, an obligation recorded only in this spec's Consumed-by note [_bmad-output/planning-artifacts/epics.md:5590] — deferred: medium, in-epic, DW-623 `routed owner=41-5-workflow-skills-refresh`
+
+Rejected:
+
+- `low` Blind Hunter: the core skills do not link to the platform skills — skills load by their descriptions, not by links, and the fix edits two 41.3 golden texts outside this story.
+- `false` Edge Case Hunter: `DatabaseDirectory` called with no argument raises `<UNDEFINED>` — a missing required argument failing loudly is correct; the method's input check is for an empty name, as C16 ran it.
+- `false` Edge Case Hunter: `FindName` called with no argument — the `<UNDEFINED>` is raised inside the `Try` and comes back as a status, as the method promises.
+- `low` Edge Case Hunter: `committedRowFiles` throws ENOENT at collection for a row whose pack file is missing — loud and names the path, and `check:provenance` and the real-tree tests name it too (as adjudicated in the implement review).
+- `low` Edge Case Hunter: no green control left for a consistent notice with zero rows — the shipped tree has a row, and a control needs a second fixture shape; it matters only if the pack returns to zero adapted files.
+- `low` Verification Gap: the floors `>= 19`, `>= 3` and `run.total >= 58` sit below the real totals — an exact check beside each pins the real value, and the spec keeps those tests unchanged.
+- `false` Verification Gap: a concurrent run could collide with `zz-probe-skill` — the suite runs files serially (`fileParallelism: false`) and the probe directory is removed in `finally`.
+
 ## Spec Change Log
 
 - **2026-10-19, lead spec gate.** Wave-7 decisions #12, #13 and #14 were taken as recommended (Design Notes). The spine's AD-28 lists the three platform skills and names the adapted SQL skill as the first provenance row (Rule 20). The plan's two new facts for the project rules are recorded on DW-615 for the user, since retrospectives are skipped this run.
+- **2026-10-19, code review (wave-7 decision #15).** Four over-broad claims corrected, each confirmed by a live probe or a read of the IRIS source. SQL: `%msg` after a run-time error and per method (Q31, Q32), and the table-name rule as a default with its exceptions (Q30). Interoperability: the declared request type of the send methods (I1) and `^Ens.MessageBodyD` for `Ens.MessageBody` classes only (I2). Two wording fixes: the interoperability preamble now reads "without running a production", and the system-class skill says to kill a `%SYS` statement result, not close it (C21). The golden texts, sha256 values (`b48e137b...` to `135b2a37...`, `dd15048c...` to `f5f22ff7...`, `ea093f10...` to `f10dec5d...`), byte, line and word counts, the anchors (sql 29 to 32, two interoperability anchors replaced, 167 to 170 in all) and the SQL AC's anchor count moved together. Line 6, the header, and the provenance row are unchanged, so the notice sha256 `d2e80ca6...` stands. This supersedes the implement review's Blind Hunter 1 rejection and the Auto Run Result's residual-risk paragraph. The changeset, contributor README and CHANGELOG now say each claim was run or checked against the IRIS source.
 
 ## Review Triage Log
 
@@ -182,7 +210,7 @@ deferred: []
 **Orchestrator decisions needed** (the Lead's calls, delegated). This plan follows each recommendation.
 
 - **Orchestrator decision needed: how many platform skills, and their names** -- recommended: three, `iris-mcp-objectscript-sql`, `iris-mcp-system-classes` and `iris-mcp-interoperability`, for six knowledge skills in all, because:
-  - the story names three topics, and each fits one skill inside 41.3's budget (1,013, 910 and 957 words; 106, 65 and 89 lines);
+  - the story names three topics, and each fits one skill inside 41.3's budget (1,115, 910 and 981 words; 107, 65 and 89 lines, after the code-review corrections);
   - a fourth (an adapted list-patterns skill) is not one of the three topics, and decision 2 finds it is not a better start;
   - six is inside 6 to 10, counted from the `knowledge/` directories;
   - the names follow the "Pack names" convention; `objectscript-` in the SQL name says it is SQL run from ObjectScript code, matches the core three, and differs from the upstream `objectscript-sql-patterns` and `iris-sql`, so an installed copy never shadows another kit's skill.
@@ -242,7 +270,7 @@ The notice with this row: 2,369 bytes, 41 lines, sha256 `d2e80ca61ad50a3914b997d
 
 **Golden texts.** Each file is the text between the fences, ending in a single LF.
 
-- `skills-pack-src/knowledge/iris-mcp-objectscript-sql/SKILL.md`: 6,939 bytes, 106 lines, 1,013 words, sha256 `b48e137b594ce745344110f818690ccc23dbf281e1947b9bd4c54de81972f123`. Line 6 is the header; its copyright sign is U+00A9.
+- `skills-pack-src/knowledge/iris-mcp-objectscript-sql/SKILL.md`: 7,525 bytes, 107 lines, 1,115 words, sha256 `135b2a3770f7dfd2676807edc6439f2f93a81c2843721bb0d2e5d28bd571e916`. Line 6 is the header; its copyright sign is U+00A9.
 
 ~~~markdown
 ---
@@ -258,15 +286,16 @@ Every behavior below was observed on IRIS 2026.2.
 
 ## The table name of a class
 
-- The last dot of a class name separates the schema from the table, and every earlier dot becomes an underscore. `Ens.Request` is the table `Ens.Request`, and `Ens.Config.Item` is the table `Ens_Config.Item`.
+- By default, the last dot of a class name separates the schema from the table, and every earlier dot becomes an underscore. `Ens.Request` is the table `Ens.Request`, and `Ens.Config.Item` is the table `Ens_Config.Item`. A class of the package `User` is in the schema `SQLUser`, and a class's `SqlTableName`, or its package's SQL name, replaces the default.
 - The dotted form of a longer name is read as another table: `SELECT Name FROM Ens.Config.Item` fails with SQLCODE -30, `Table 'CONFIG.ITEM' not found`.
 - To look a name up, query `SELECT SqlSchemaName, SqlTableName FROM %Dictionary.CompiledClass WHERE Name = ?`.
 
 ## SQLCODE
 
-- After `&sql(...)`, `SQLCODE` is 0 when the statement worked, 100 when it found or changed no row, and negative for an error, whose text is in `%msg`.
+- After `&sql(...)`, `SQLCODE` is 0 when the statement worked, 100 when it found or changed no row, and negative for an error.
 - `If SQLCODE` is true for 100 and for every error alike, so it reports an error as "not found". Test `SQLCODE = 100` and `SQLCODE < 0` apart.
-- A successful statement leaves `%msg` as it was, still holding the text of an earlier error. Read `%msg` only when SQLCODE is negative.
+- `%msg` holds the text of an error, but not always this statement's. A successful statement leaves it as it was, still holding the text of an earlier error. An error found when the statement is compiled, such as -30 or -29, replaces it, but an error raised while the statement runs, such as -400, sets `%msg` only when it is empty.
+- A method that holds embedded SQL starts with `%msg` undefined and gives the caller's `%msg` back when it returns. In a method that runs several statements, `Set %msg = ""` before each one whose error text you report, and read `%msg` only when SQLCODE is negative.
 - An `UPDATE` or `DELETE` that changes no row gives 100, not an error, and `%ROWCOUNT` is 0. After an `INSERT`, `%ROWID` holds the new row's ID and `%ROWCOUNT` is 1.
 - `$$$ThrowSQLIfError(SQLCODE, %msg)` throws a `%Exception.SQL` when SQLCODE is negative and does nothing for 0 or 100. Its `AsStatus()` reads `ERROR #5540: SQLCODE: -400 Message: ...`. Like the status macros, it needs no `Include`.
 
@@ -353,7 +382,7 @@ ClassMethod ListNames(pMinPrice As %Numeric, Output pNames As %List) As %Status
 - `iris-mcp-system-classes`: class queries of the system classes, which run through `%SQL.Statement` too.
 ~~~
 
-- `skills-pack-src/knowledge/iris-mcp-system-classes/SKILL.md`: 6,444 bytes, 65 lines, 910 words, sha256 `dd15048c643a0fe8e2aa06dddf693c30961c38be6beba957f2c9420e0e3fd214`.
+- `skills-pack-src/knowledge/iris-mcp-system-classes/SKILL.md`: 6,443 bytes, 65 lines, 910 words, sha256 `f5f22ff75c2c75726c5c4fd8b3098492b735700cf22853c11d37d83092f9b310`.
 
 ~~~markdown
 ---
@@ -406,7 +435,7 @@ ClassMethod DatabaseDirectory(pName As %String, Output pDir As %String) As %Stat
 - `Set $NAMESPACE` is not undone by an error. When a called method switches and then fails, the caller's `Catch` runs in `%SYS`.
 - Local variables keep their values across a switch.
 - Switching to a namespace that does not exist raises `<NAMESPACE>` and leaves you where you were. `##class(%SYS.Namespace).Exists(name)` checks first.
-- Close a `%SQL.Statement` result of a `%SYS` class query, prepared with `%PrepareClassQuery`, before you switch back. Killed after the switch, it raised `<CLASS DOES NOT EXIST>`. One still open when its method returned raised the error after the method's own `Catch` had finished, so the caller got it. A `%ResultSet` of the same query could be killed after the switch without an error, and so could an object of such a class opened by ID, which could also still be read.
+- Kill a `%SQL.Statement` result of a `%SYS` class query, prepared with `%PrepareClassQuery`, before you switch back. Killed after the switch, it raised `<CLASS DOES NOT EXIST>`. One still open when its method returned raised the error after the method's own `Catch` had finished, so the caller got it. A `%ResultSet` of the same query could be killed after the switch without an error, and so could an object of such a class opened by ID, which could also still be read.
 - In a REST handler, avoid `New $NAMESPACE`. The switch then lasts until the method returns, so its `Catch` and its error response run in `%SYS`. Whether the application's own classes exist there depends on package mappings: a mapped package resolved in `%SYS`, while `Ens.Director` did not. A handler that works on one instance can therefore fail on another, so restore the namespace yourself.
 
 ## One process or the whole instance
@@ -423,7 +452,7 @@ ClassMethod DatabaseDirectory(pName As %String, Output pDir As %String) As %Stat
 - `iris-mcp-objectscript-error-handling`: turning an exception into a `%Status`.
 ~~~
 
-- `skills-pack-src/knowledge/iris-mcp-interoperability/SKILL.md`: 7,230 bytes, 89 lines, 957 words, sha256 `ea093f10c52f5f027388a49e8d7626a3aaa8195ca24cee6fd8fe573f41b73fec`.
+- `skills-pack-src/knowledge/iris-mcp-interoperability/SKILL.md`: 7,467 bytes, 89 lines, 981 words, sha256 `f10dec5dcb06dc19900a344f82670637e9d93c8c864a8b5f408b1d56a9682d9c`.
 
 ~~~markdown
 ---
@@ -433,12 +462,12 @@ description: "Writing IRIS interoperability (Ensemble) components in ObjectScrip
 
 # Interoperability components
 
-Every behavior below was observed on IRIS 2026.2, by compiling business hosts or by reading the IRIS classes they extend. None of it needs a running production.
+Every behavior below was observed on IRIS 2026.2, by compiling business hosts or by reading the IRIS classes they extend, without running a production.
 
 ## Messages
 
-- A request class extends `Ens.Request`, and a response class extends `Ens.Response`. Both are persistent, and the send methods take a `%Library.Persistent`.
-- Every message body class keeps its data in one place, `^Ens.MessageBodyD`: `Ens.MessageBody`, `Ens.StringRequest` and `Ens.StringResponse` all compile to it. Leave the storage of a message class to the compiler.
+- A request class extends `Ens.Request`, and a response class extends `Ens.Response`. Both are persistent. The send methods declare their request as a `%Library.Persistent`, except a business process's `SendRequestAsync`, which declares an `Ens.Request`.
+- A message class derived from `Ens.MessageBody`, as `Ens.Request` and `Ens.Response` are, keeps its data in `^Ens.MessageBodyD`: `Ens.MessageBody`, `Ens.StringRequest` and `Ens.StringResponse` all compile to it. Other message classes keep their own, such as `Ens.StreamContainer` in `^Ens.StreamContainerD`. Leave the storage of a message class to the compiler.
 - `Parameter RESPONSECLASSNAME` on a request class names its response class, and `NewResponse(.tResponse)` creates one. Without it, `NewResponse` returns `ERROR <Ens>ErrGeneral: Ens.StringRequest has no value for parameter RESPONSECLASSNAME`.
 - `Ens.StringRequest` and `Ens.StringResponse` each carry one `StringValue` property, enough for a first test of a host.
 
@@ -525,6 +554,7 @@ XData MessageMap
 - **Writes:** no HSCUSTOM global. SQL data lived only in process-private globals (`^||Probe414ItemD`/`I`), killed at the end of every call. No message class or production class was compiled (AC interpretations). No production was started, stopped or read. Configuration and security objects were read only (`Config.Namespaces.Get`, `Config.Databases.Get` and `:List`, `SYS.Database.%OpenId`, `Security.Roles` `Get`/`Exists`/`:List`/`:ListAll`/`%OpenId`, `Security.SSLConfigs` `:List`/`Get`/SQL/`%OpenId`).
 - **Reads:** `%Dictionary.CompiledClass`, `CompiledStorage`, `CompiledIndex` and `CompiledProperty` (`iris_sql_query`); the compiled `.int` of `Probe414Op` (`iris_routine_intermediate`, the `MessageHandler` section only); `%Projection.XML` (`iris_doc_get` 1-80); the IRIS source in the Code Map.
 - **Upstream (data only):** `skills/skills/objectscript-sql-patterns/SKILL.md`, `objectscript-list-patterns/SKILL.md`, `ensemble-production/SKILL.md` (lines 1-36, 173-224, 384-509) and the headings of `iris-sql/SKILL.md`. Nothing was executed.
+- **Code-review probe (2026-10-19, wave-7 decision #15).** Same target (`iris_server_info`: 2026.2 Build 221U). Two disposable classes, `ExecuteMCPv2.Temp.Probe414CRItem` (persistent, `DEFAULTGLOBAL = "^||Probe414CRItem"`, killed at the end of the call) and `ExecuteMCPv2.Temp.Probe414CRSql`, compiled with `ck`, run, then deleted with one `iris_doc_delete`; `iris_doc_list filter:"Probe414" generated:true` was `[]` before the first put and after the delete. No HSCUSTOM global, no message or production class. Read-only: `%Dictionary.CompiledClass` and `CompiledStorage` queries, the compiled `.int` of `Probe414CRSql`. Rows Q30 to Q32 are new; Q1 stands with Q30; I1, I2 and C21 gained the evidence named in them.
 
 Each row: claim -- probe -- observed -- verdict. Anchor numbers match the lists below.
 
@@ -559,6 +589,9 @@ Each row: claim -- probe -- observed -- verdict. Anchor numbers match the lists 
 - **Q27, `%OpenId` on a missing ID.** `OpenId`: `isObj=0,value=[]`, `sc=ERROR #5809: Object to Load not found, class '...', ID '999999'`; without a status argument, `""` and no error. Holds.
 - **Q28, chaining and `%ExistsId`.** `OpenId`: `%ExistsId` 0 and 1; `%OpenId(999999).Name` -> `<INVALID OREF>`. Holds.
 - **Q29, `%DeleteId`.** `OpenId`: `ERROR #5810: Object to Delete not found, class '...', ID '999999'`. Holds.
+- **Q30, the default and its exceptions (code review).** Source `%occDetermineSchemaName.inc:14-17`: the package's SQL name when one is set, `SQLUser` for the package `User`, else the dots of the package become underscores. `Probe414CRItem` (`[ SqlTableName = Probe414CRTable ]`, process-private storage): `%Dictionary.CompiledClass` -> `ExecuteMCPv2_Temp`/`Probe414CRTable`; `Probe414CRSql.TableNames`: `%Prepare` of `ExecuteMCPv2_Temp.Probe414CRTable` status 1, of `ExecuteMCPv2_Temp.Probe414CRItem` -> `SQLCODE: -30 ... Table 'EXECUTEMCPV2_TEMP.PROBE414CRITEM' not found`. No `User.*` class exists in HSCUSTOM, so the `User` case rests on the source. Holds (Q1 alone stated the rule without exceptions).
+- **Q31, which errors replace `%msg` (code review).** `Probe414CRSql.Inner`, one method: a -29 (`Field 'NOPE' not found ...`) then a -400 (`SELECT Price/0 INTO ...`) left the -29 text; with `%msg` set to `STALE TEXT` first, a -30 (`Table 'EXECUTEMCPV2_TEMP.NOSUCHTABLE414' not found ...`) and a -29 (`Field 'NOPE2' ...`) each replaced it, and a -400 left `STALE TEXT`; with `%msg` `""` or killed, the -400 read `Unexpected error occurred:  <DIVIDE>...`; a later successful statement left that text. Confirms QA's run (`QA414Twin.RunCodes`, `QA414Probe.Div2`). Holds.
+- **Q32, `%msg` per method and the clearing advice (code review).** `Probe414CRSql.Run` set `%msg = "CALLER TEXT"` and called `Inner`: `atStart=0` in `Inner`, `callerAfter=CALLER TEXT`; the compiled `.int` of `Inner` opens with `New %ROWCOUNT,%ROWID,%msg,SQLCODE`. After a stale `%msg`, `$$$ThrowSQLIfError(SQLCODE, %msg)` on a -400 threw `ERROR #5540: SQLCODE: -400 Message: STALE TEXT`; after `Set %msg = ""`, `ERROR #5540: SQLCODE: -400 Message: Unexpected error occurred:  <DIVIDE>...`. Holds.
 
 *The system-class skill:*
 
@@ -582,7 +615,7 @@ Each row: claim -- probe -- observed -- verdict. Anchor numbers match the lists 
 - **C18, locals.** `Switching`: `localInSys=kept`. Holds.
 - **C19, a missing namespace.** `Switching`: `missingNs=<NAMESPACE>,nsAfter=HSCUSTOM`. Holds.
 - **C20, `%SYS.Namespace.Exists`.** `Switching`: `exists=0,1` for a missing namespace and `%SYS`. Holds.
-- **C21, a statement result killed after the switch.** `Probe414Sys2.CloseAfterSwitch`: `%PrepareClassQuery("Security.Roles","ListAll")` result killed in HSCUSTOM -> `<CLASS DOES NOT EXIST>`, data `Security.Roles`; killed before the switch: no error. Holds.
+- **C21, a statement result killed after the switch.** `Probe414Sys2.CloseAfterSwitch`: `%PrepareClassQuery("Security.Roles","ListAll")` result killed in HSCUSTOM -> `<CLASS DOES NOT EXIST>`, data `Security.Roles`; killed before the switch: no error. Holds. The text says to kill the result, not to close it: `%CloseCursor` is `Private` (`%Library/IResultSet.cls:307`, `%SQL/CustomQuery.cls:203`), so no public method closes it (code review).
 - **C22, one left open at method end.** `Probe414Sys.Deprecated` restored the namespace with a `Security.SSLConfigs` `:List` statement result still open; the call itself failed with `<CLASS DOES NOT EXIST>%CloseCursor *Security.SSLConfigs` although the method had a `Catch`. Holds.
 - **C23, `%ResultSet` is not affected.** `Probe414Rs`: a `%ResultSet` of `Security.Roles:ListAll`, executed with an open row, and one never executed, both killed after the switch with no error; one left open at method end returned normally. Holds. This narrowed the draft's "close the result set of a `%SYS` class query" and showed that the suite's own handlers, which use `%ResultSet`, do not carry the trap (no deferred item).
 - **C24, an object by ID.** `CloseAfterSwitch`: `Security.Roles.%OpenId("%developer")`, read (`Name` = `%Developer`) and killed after the switch, no error. Holds.
@@ -596,8 +629,8 @@ Each row: claim -- probe -- observed -- verdict. Anchor numbers match the lists 
 
 *The interoperability skill:*
 
-- **I1, `Ens.Request`/`Ens.Response` and the send signature.** Source `Ens/Request.cls:5`, `Ens/Response.cls:5`, `Ens/MessageBody.cls:9` (`%Persistent`); `SendRequestSync`/`Async` take `pRequest As %Library.Persistent` (`BusinessService.cls:138,182`). Holds.
-- **I2, one storage.** `%Dictionary.CompiledStorage`: `Ens.MessageBody`, `Ens.StringRequest`, `Ens.StringResponse` all `^Ens.MessageBodyD`; source `MessageBody.cls:7-8,30`. Holds.
+- **I1, `Ens.Request`/`Ens.Response` and the send signatures.** Source `Ens/Request.cls:5`, `Ens/Response.cls:5`, `Ens/MessageBody.cls:9` (`%Persistent`); `SendRequestSync`/`Async` declare `pRequest As %Library.Persistent` in `BusinessService.cls:138,182`, `BusinessOperation.cls:713,726`, `Host.cls:126` and `BusinessProcess.cls:143`, while `BusinessProcess.cls:160` `SendRequestAsync` declares `pRequest As Request` (`Ens.Request`). Holds (narrowed in code review from "the send methods take a `%Library.Persistent`").
+- **I2, one storage for `Ens.MessageBody` classes.** `%Dictionary.CompiledStorage`: `Ens.MessageBody`, `Ens.Request`, `Ens.Response`, `Ens.StringRequest`, `Ens.StringResponse` all `^Ens.MessageBodyD`; `Ens.StreamContainer` `^Ens.StreamContainerD`, `Ens.StringContainer` `^Ens.StringContainerD`, `EnsLib.HL7.Message` `^EnsLib.H.MessageD` (code review, read-only query); source `MessageBody.cls:7-8,30`, `StreamContainer.cls:300`. Holds (narrowed in code review from "every message body class").
 - **I3, `NewResponse`.** `Probe414Op.NewResponseOfString`: `sc=ERROR <Ens>ErrGeneral: Ens.StringRequest has no value for parameter RESPONSECLASSNAME;isObj=0`. Holds.
 - **I4, `StringValue`.** Source `StringRequest.cls:9`, `StringResponse.cls:9`. Holds.
 - **I5, the `FileWriter` block, compiled verbatim.** `Probe414FileWriter` (class name changed): compiled. Holds.
@@ -631,9 +664,9 @@ Each row: claim -- probe -- observed -- verdict. Anchor numbers match the lists 
 
 **Flagged for the retro:** none of the probes contradicts a `.claude/rules/*` file. Two facts the rules lack: embedded SQL compiles when it first runs (Q9), and a `%PrepareClassQuery` result must be closed before the namespace is switched back (C21, C22).
 
-**Probe anchors**, one per claim row, which `skills-pack-knowledge.test.ts` requires verbatim (the test types each without the outer Markdown code span shown here). 92 new, 167 in all.
+**Probe anchors**, one per claim row, which `skills-pack-knowledge.test.ts` requires verbatim (the test types each without the outer Markdown code span shown here). 95 new, 170 in all.
 
-- **sql (29):**
+- **sql (32):**
   - `` `Ens.Config.Item` is the table `Ens_Config.Item` ``
   - `` `Table 'CONFIG.ITEM' not found` ``
   - `SELECT SqlSchemaName, SqlTableName FROM %Dictionary.CompiledClass WHERE Name = ?`
@@ -663,6 +696,9 @@ Each row: claim -- probe -- observed -- verdict. Anchor numbers match the lists 
   - `` `ERROR #5809: Object to Load not found, class '...', ID '...'` ``
   - `` `%OpenId(tId).Name` raises `<INVALID OREF>` ``
   - `` `ERROR #5810: Object to Delete not found` ``
+  - `` A class of the package `User` is in the schema `SQLUser`, and a class's `SqlTableName` ``
+  - `` but an error raised while the statement runs, such as -400, sets `%msg` only when it is empty ``
+  - `` A method that holds embedded SQL starts with `%msg` undefined ``
 - **system-classes (31):**
   - `` `Config.*` classes read and write the instance's configuration file ``
   - `` `##class(%Dictionary.CompiledClass).%ExistsId("Config.Databases")` is 0 ``
@@ -696,8 +732,8 @@ Each row: claim -- probe -- observed -- verdict. Anchor numbers match the lists 
   - `` but it returns a `SYS.Stats.Routine` ``
   - `grew by 200,430 and the process's by 200,488`
 - **interoperability (32):**
-  - `` the send methods take a `%Library.Persistent` ``
-  - `` `^Ens.MessageBodyD` ``
+  - `` except a business process's `SendRequestAsync`, which declares an `Ens.Request` ``
+  - `` as `Ens.Request` and `Ens.Response` are, keeps its data in `^Ens.MessageBodyD` ``
   - `` `ERROR <Ens>ErrGeneral: Ens.StringRequest has no value for parameter RESPONSECLASSNAME` ``
   - `` each carry one `StringValue` property ``
   - `<MapItem MessageType="Ens.StringRequest">`
@@ -729,9 +765,9 @@ Each row: claim -- probe -- observed -- verdict. Anchor numbers match the lists 
   - `covers the production and the name together and is not unique`
   - `applies a changed configuration to the running production`
 
-Rows and anchors map one to one, in order: Q1 to Q29, C1 to C31 and I1 to I32.
+Rows and anchors map one to one, in order: Q1 to Q32, C1 to C31 and I1 to I32.
 
-**Scratch copies (convenience only; the spec text is authoritative).** The plan's measured drafts are at `/private/tmp/claude-501/-Users-jbrandt-git-iris-execute-mcp-v2/03eb9a39-2d9e-4087-85ac-363a9bb86d2a/scratchpad/skills414/<name>/SKILL.md` and the notice at `.../scratchpad/notice414/IRIS-MCP-THIRD-PARTY-NOTICES.md`, byte-equal to the golden texts. If they are gone, recreate from the fences above and check the sha256.
+**Scratch copies (convenience only; the spec text is authoritative).** The plan's measured drafts are at `/private/tmp/claude-501/-Users-jbrandt-git-iris-execute-mcp-v2/03eb9a39-2d9e-4087-85ac-363a9bb86d2a/scratchpad/skills414/<name>/SKILL.md` and the notice at `.../scratchpad/notice414/IRIS-MCP-THIRD-PARTY-NOTICES.md`; the skill drafts predate the code-review corrections, so only the notice is still byte-equal to its golden form. If they are gone, recreate from the fences above and check the sha256.
 
 ## Verification
 
@@ -772,7 +808,7 @@ Rows and anchors map one to one, in order: Q1 to Q29, C1 to C31 and I1 to I32.
 - **M7** (AC 41.4.3, the count): move one new knowledge directory out and re-run `gen:pack` -> "are exactly the planned skills" goes red with 5, and the moved count pins (`22 pack file(s)`, `51 source(s) checked`, `39 agent file(s)`) go red.
 - **M8** (the row oracle): change the row's source cell to `skills/skills/iris-sql/SKILL.md` (a valid path) -> `check:provenance` stays green, and the knowledge test's notice-row test goes red (the oracle pins the specific source).
 - **M9** (the wording): add the line "- Call `iris_production_item`." to the interoperability source -> `pnpm validate:prompts` stays green (a real tool), and the knowledge test's tool-name and hygiene tests go red.
-- **Unchanged counts:** pinned by the existing `(once)` gates; this story edits no prompt, tool, preset, governance or bootstrapped input.
+- **Unchanged counts:** pinned by the existing `(once)` gates; this story edits no prompt, tool, preset, governance or bootstrapped input. mutation: CR1 (below).
 
 **Demonstrated mutations (implement pass).** Each was applied with the file tools, observed red, and reverted; a sha256 listing of `skills-pack-src/`, the pack and the `__tests__` directory, `git status --short` and `git diff --stat` were identical before and after each one (M7 also changed the knowledge test once, on purpose, see below). M10 and M11 are added to the plan: they cover the 41.1 and 41.3 pins this story moved.
 
@@ -800,6 +836,29 @@ Rows and anchors map one to one, in order: Q1 to Q29, C1 to C31 and I1 to I32.
 - mutation: M16, the opening fence of the interoperability code block changed from backticks to tildes in the source, pack not regenerated -> "holds 1 fenced code block(s)" went red for `iris-mcp-interoperability` (with its sha256 and pack-copy rows).
 - mutation: M17, the real-tree "names no iris_* tool" and "names nothing of this repository ..." tests made to skip the adapted skill -> `story-41-3-qa-knowledge-gate-process.test.ts` rows "an iris_* tool name that is a real tool, below the adaptation header" and "an internal rule number, below the adaptation header" went red (the only red tests).
 - mutation: M18, `iris-mcp-interoperability` dropped from `SKILL_NAMES` and the validator regex changed to `5 knowledge` in `story-41-3-qa-knowledge-gate-process.test.ts` -> "control: the unmodified copy passes and counts the six knowledge skills" and "these rows are hermetic > the real node_modules and the real knowledge sources are intact" went red (the only red tests).
+
+**QA pass (2026-10-19).** Gap analysis against the I/O matrix and the ACs; three real-runtime gaps closed (Rule 3). Test files (QA):
+
+- `packages/iris-mcp-all/src/__tests__/story-41-4-qa-first-row-process.test.ts` (QA, new, 15 tests): the real `check:provenance` process, with the real npm packer and the real `gen-pack.mjs`, on scratch copies of the real tree, against the REAL adapted skill and its real row. The unmodified copy is green (`1 provenance row(s), 39 agent file(s), 1 distribution(s)`, pack regeneration a no-op); then each damage alone, with the exact `[rule] label` pairs: the row removed, pack regenerated (`claim-row` for `knowledge:` and `pack:`); the row removed, pack not regenerated (`claim-row` x2, `distribution`, `notice-sync`); the header removed (`row-file`, the only rule that sees it, because the file then no longer mentions the upstream); the header above the frontmatter (`skill-frontmatter` x2, because the header rule accepts it as the first line of a file with no frontmatter); the credit line altered four ways (`header` x2 plus `row-file`); the row citing an excluded or malformed source three ways (`excluded-source`); the row's pack-file cell renamed (`claim-row` x2, `row-file`); the skill directory renamed (`claim-row`, `row-file`, `skill-frontmatter`); and a row citing another valid source is green here (the knowledge test owns which file is cited, M8). Capture: the first run of the file agreed with every expectation typed from `provenance-core.mjs`.
+- `packages/iris-mcp-all/src/__tests__/story-41-3-qa-knowledge-gate-process.test.ts` (QA, changed): four offender rows run the COMMITTED knowledge test in a child process on scratch copies, for the header exemption, with the ASCII test and the header-or-not-adapted test now watched for every skill (`watchedTests`): a second exact copy of the credit line in the adapted skill (ASCII, wording and header tests red); a different ASCII credit-like line (wording red only); the adapted skill's own header with `(c)` (wording and header red); the exact credit line as the first body line of a skill that is not adapted (ASCII, wording and "not adapted" red). The baseline and every offender row also check that the other five skills' watched tests stay green.
+
+Live runtime check of the shipped text (one time, `server:"default"`, namespace `HSCUSTOM`; nothing in the default suite writes to IRIS): the four code blocks were compiled verbatim in disposable `ExecuteMCPv2.Temp.QA414*` classes (`FindName` and `ListNames` against a missing table, then as twins on a process-private table; `DatabaseDirectory`; the `FileWriter` host), 15 classes in all, all deleted, `iris_doc_list filter:"QA414" generated:true` is `[]`. No `%UnitTest` snippet exists in the three skills, so no `iris_execute_tests` run applied. Every claim run held except the one finding below. The `FileWriter` block is illustrative at run time (it needs a running production and a file adapter); its compile, its settings (15: `Prefix` plus 14 inherited, no `ThrottleDelay`), its compiled `MessageHandler` (map order, open-transaction commit) and the adapter's `PutString` were checked instead.
+
+- mutation: QM1, the `claim-row` push in `checkProvenance` disabled (`if (false && ...)`) -> the four "row removed", "row removed without regen", "pack-file cell renamed" and "directory renamed" rows of `story-41-4-qa-first-row-process.test.ts` went red; reverted, `git diff | shasum` identical.
+- mutation: QM2, the `excluded-source` push disabled -> the three excluded-source rows went red (the only red tests).
+- mutation: QM3, the `row-file` missing-header branch disabled -> "header removed" and the four "credit line altered" rows went red (the only red tests).
+- mutation: QM4, the `skill-frontmatter` loop in `checkProvenance` disabled -> "header moved above the frontmatter" and "directory renamed" went red (the only red tests).
+- mutation: QM5, `checkedText` in `skills-pack-knowledge.test.ts` made to drop every line equal to the header -> the offender row "a second, exact copy of the credit line" (and the child baseline, through the knowledge test's own control) went red; restored, the file's sha256 equals the pre-mutation value.
+- mutation: QM6, `checkedText` made to ignore `adapted` -> the offender row "the exact credit line as the first body line" in the non-adapted skill (and the child baseline) went red.
+- mutation: QM7, `checkedText` made to drop every line that contains `Adapted from` -> the three adapted-skill credit rows went red (and the child baseline).
+- finding (QA, skill text, not edited by QA; decision 15 gives the correction to code review): `iris-mcp-objectscript-sql` says SQLCODE is "negative for an error, whose text is in `%msg`" and "Read `%msg` only when SQLCODE is negative". Run on 2026.2 Build 221U in one method (disposable `QA414Twin.RunCodes` and `QA414Probe.Div2`, both deleted): an error found while the statement is compiled (-30, -29) always replaces `%msg`, but a RUNTIME error (-400, `SELECT Price/0 INTO ...`) writes `%msg` only when `%msg` is undefined or empty. With `%msg` set to `STALE TEXT` first, the -400 statement left `STALE TEXT` (a new statement text and the same text twice alike); with `%msg` killed or `""` it read `Unexpected error occurred:  <DIVIDE>...`. So in a method that runs several statements, `$$$ThrowSQLIfError(SQLCODE, %msg)` after a -400 can throw an earlier statement's message; each method starts with `%msg` undefined, so the skill's one-statement blocks are not affected. A correction is one sentence (set `%msg = ""` before a statement whose error text matters), and moves the golden text, its sha256 and an anchor, so it is a spec change.
+- note: removing the "the header appears once" assertion from the knowledge test left everything green, because `expect(checkedText(text, true)).not.toContain(ADAPTATION_HEADER)` in the same test fails on a second copy too; the two assertions guard one thing.
+
+**Code-review mutations (2026-10-19).** Each was applied with the file tools, observed red, and reverted; `git status --short` and `git diff --stat` were identical before and after, and the three skill sha256 values equal the golden ones afterwards.
+
+- mutation: CR1 (Unchanged counts), "to check" changed to "to verify" in the generated `skills/audit-security-posture/SKILL.md` -> `pnpm gen:skills:check` exit 1 with `DRIFT in skills/audit-security-posture/SKILL.md`; reverted, the file's sha256 is `f9e2115c...` again and the check reports `13 generated file(s)`. `gen:governance-baseline:check`, `gen:tools-list-snapshot:check` (115 entries) and the empty `bootstrap-classes.ts` diff were green in the same pass.
+- mutation: CR2 (the SQL and interoperability corrections), "sets `%msg` only when it is empty" changed to "always replaces `%msg`" in the SQL source and "which declares an `Ens.Request`" to "which declares a `%Library.Persistent` too" in the interoperability source, pack not regenerated -> "carries every probe anchor" went red for both skills, naming exactly those two anchors (with their sha256 and pack-copy rows).
+- mutation: CR3 (the header appears once, after the redundant assertion was removed), a second copy of the header added above the SQL skill's related-skills list -> "opens with the adaptation header as its first body line ..." went red at `not.toContain(ADAPTATION_HEADER)`, with the ASCII, wording, sha256 and pack-copy rows.
 
 ## Auto Run Result
 

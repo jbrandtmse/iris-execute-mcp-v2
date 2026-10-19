@@ -13,8 +13,8 @@ hash `1e62c5ad5bf7` (141 keys). The pack goes from 19 to 22 files, and holds six
 
 - **Three platform knowledge skills**, each one hand-authored `SKILL.md` under `skills-pack-src/knowledge/<name>/` that `pnpm gen:pack`
   copies unchanged into the pack. Every claim in them was run on InterSystems IRIS 2026.2 (Build 221U), by compiling and running
-  the code or by reading the IRIS class source of the same build, and every code block was compiled unchanged. They name no
-  `iris_*` tool, so they declare no preset.
+  the code or by reading the IRIS class source of the same build, and every code block was compiled as written (the
+  interoperability host under another class name). They name no `iris_*` tool, so they declare no preset.
   - `iris-mcp-objectscript-sql`: running SQL from ObjectScript with embedded SQL and `%SQL.Statement` (the SQL table name of a
     class, `SQLCODE` 0, 100 and negative values, what `INTO` variables hold when no row is found, errors that appear only when a
     statement runs or a row is fetched, `NULL` against the empty string, and what `%OpenId` and `%DeleteId` return for a missing
@@ -41,8 +41,13 @@ hash `1e62c5ad5bf7` (141 keys). The pack goes from 19 to 22 files, and holds six
 
 ### Tests
 
-- `skills-pack-knowledge.test.ts` covers the six skills (the three new oracles, 92 new probe anchors, 167 in all) and the header
+- `skills-pack-knowledge.test.ts` covers the six skills (the three new oracles, 95 new probe anchors, 170 in all) and the header
   exception, with a negative control for each side of it.
+- `story-41-4-qa-first-row-process.test.ts` (new) runs the real `check:provenance` process, with the real npm packer and
+  `gen-pack.mjs`, on scratch copies of the real tree, and damages the real adapted skill, its row or its header one way at a time.
+- `story-41-3-qa-knowledge-gate-process.test.ts` runs the committed knowledge test in a child process against all six skills, with
+  offender rows for the header exception: a second copy of the header, a credit-like line, the header with `(c)`, and the header
+  in a skill that is not adapted.
 - The in-memory fixtures of `skills-pack-frontmatter.test.ts` and `pack-provenance.test.ts` that feed `checkProvenance` the real
   notice now also carry the committed pack files its rows name, so the real row adds no problem. The count pins of the 41.1 and
   41.3 tests move with the new files: 22 pack files, 51 validator sources, 39 agent files, and one provenance row.

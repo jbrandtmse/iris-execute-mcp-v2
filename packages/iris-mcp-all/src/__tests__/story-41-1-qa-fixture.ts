@@ -126,6 +126,13 @@ export function problemRules(stderr: string): string[] {
   return [...rules].sort();
 }
 
+/** The distinct `rule label` pairs of a `check-provenance` failure (`  - [rule] label: message`), sorted. */
+export function problemPairs(stderr: string): string[] {
+  const pairs = new Set<string>();
+  for (const match of stderr.matchAll(/^\s+- \[([a-z-]+)\] (.+?): /gm)) pairs.add(`${match[1]} ${match[2]}`);
+  return [...pairs].sort();
+}
+
 /** The same bytes with every LF replaced by CRLF. */
 export function toCrlf(bytes: Buffer): Buffer {
   return Buffer.from(bytes.toString("utf8").replace(/\n/g, "\r\n"), "utf8");

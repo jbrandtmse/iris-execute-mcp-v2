@@ -165,7 +165,7 @@ const SKILLS: Skill[] = [
   },
   {
     name: "iris-mcp-objectscript-sql",
-    sha256: "b48e137b594ce745344110f818690ccc23dbf281e1947b9bd4c54de81972f123",
+    sha256: "135b2a3770f7dfd2676807edc6439f2f93a81c2843721bb0d2e5d28bd571e916",
     description:
       "Running SQL from ObjectScript with embedded SQL and %SQL.Statement: the SQL table name of a class, SQLCODE 0, 100 and negative values, what INTO variables hold when no row is found, errors that appear only when a statement runs or a row is fetched, NULL against the empty string, and what %OpenId and %DeleteId return for a missing ID. Use when writing or reviewing &sql or %SQL.Statement code, or when a query reports SQLCODE -30 or -29, finds no row you expected, or returns an empty value.",
     codeBlocks: 2,
@@ -200,11 +200,14 @@ const SKILLS: Skill[] = [
       "`ERROR #5809: Object to Load not found, class '...', ID '...'`",
       "`%OpenId(tId).Name` raises `<INVALID OREF>`",
       "`ERROR #5810: Object to Delete not found`",
+      "A class of the package `User` is in the schema `SQLUser`, and a class's `SqlTableName`",
+      "but an error raised while the statement runs, such as -400, sets `%msg` only when it is empty",
+      "A method that holds embedded SQL starts with `%msg` undefined",
     ],
   },
   {
     name: "iris-mcp-system-classes",
-    sha256: "dd15048c643a0fe8e2aa06dddf693c30961c38be6beba957f2c9420e0e3fd214",
+    sha256: "f5f22ff75c2c75726c5c4fd8b3098492b735700cf22853c11d37d83092f9b310",
     description:
       "Using the IRIS system classes from ObjectScript: what the Config, SYS and Security classes hold and when one answer needs two of them, class queries with fewer columns than the class, deprecated properties that still read but no longer follow the configuration, switching to %SYS and back safely, and counters of one process against the whole instance. Use when code calls Config, SYS or Security classes, switches $NAMESPACE to %SYS, reports system metrics, or fails with CLASS DOES NOT EXIST or NAMESPACE around a namespace switch.",
     codeBlocks: 1,
@@ -244,13 +247,13 @@ const SKILLS: Skill[] = [
   },
   {
     name: "iris-mcp-interoperability",
-    sha256: "ea093f10c52f5f027388a49e8d7626a3aaa8195ca24cee6fd8fe573f41b73fec",
+    sha256: "f10dec5dcb06dc19900a344f82670637e9d93c8c864a8b5f408b1d56a9682d9c",
     description:
       "Writing IRIS interoperability (Ensemble) components in ObjectScript: business service, process and operation classes and their method signatures, Ens.Request and Ens.Response messages, adapters, settings and message maps, synchronous and asynchronous sends, and why the production class XData, not the configuration tables, defines a production. Use when creating or editing a business host, a message class or a production class, or when a host does not compile, a request is not handled, a setting does not appear, or a configuration change does not last.",
     codeBlocks: 1,
     anchors: [
-      "the send methods take a `%Library.Persistent`",
-      "`^Ens.MessageBodyD`",
+      "except a business process's `SendRequestAsync`, which declares an `Ens.Request`",
+      "as `Ens.Request` and `Ens.Response` are, keeps its data in `^Ens.MessageBodyD`",
       "`ERROR <Ens>ErrGeneral: Ens.StringRequest has no value for parameter RESPONSECLASSNAME`",
       "each carry one `StringValue` property",
       '<MapItem MessageType="Ens.StringRequest">',
@@ -478,9 +481,8 @@ describe("the knowledge skills, real tree (AC 41.3.1, 41.4.3)", () => {
       it("opens with the adaptation header as its first body line, the one line that holds a non-ASCII character", () => {
         expect(hasValidAdaptationHeader(text)).toBe(true);
         expect(text.split("\n")[5], "the header is line 6, after the frontmatter and one blank line").toBe(ADAPTATION_HEADER);
-        expect(text.split("\n").filter((line) => line === ADAPTATION_HEADER), "the header appears once").toHaveLength(1);
         expect(isPrintableAscii(text), "the header line is what makes the file non-ASCII").toBe(false);
-        expect(checkedText(text, true)).not.toContain(ADAPTATION_HEADER);
+        expect(checkedText(text, true), "the header appears once: no copy is left once its line is exempted").not.toContain(ADAPTATION_HEADER);
       });
     } else {
       it("is not adapted: it carries no mention of the upstream project", () => {
@@ -522,8 +524,8 @@ describe("the knowledge skills, real tree (AC 41.3.1, 41.4.3)", () => {
     });
   });
 
-  it("the probe anchors total 167: 22, 27, 26, 29, 31 and 32", () => {
-    expect(SKILLS.map((skill) => skill.anchors.length)).toEqual([22, 27, 26, 29, 31, 32]);
+  it("the probe anchors total 170: 22, 27, 26, 32, 31 and 32", () => {
+    expect(SKILLS.map((skill) => skill.anchors.length)).toEqual([22, 27, 26, 32, 31, 32]);
   });
 
   it("the notice holds exactly the rows of the adapted skills (AC 41.3.1, 41.4.3)", () => {
