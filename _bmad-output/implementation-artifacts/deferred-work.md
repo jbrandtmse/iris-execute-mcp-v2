@@ -3362,3 +3362,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-41-1-pack-layout-licensing-and-provenance.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 41.1 CR 2026-10-19: hasValidAdaptationHeader (provenance-core.mjs:165) reads a file whose line 1 is not --- as frontmatter-less, so header-then-frontmatter passes; reproduced by 4 layers and QA; the frontmatter test reads root skills/ only
 - 2026-10-19T07:08:11Z status=routed owner=41-3-core-knowledge-skills by=cr note=add a default-suite check that every pack SKILL.md opens with frontmatter holding name and description; prove it red
+
+### DW-614: Provenance cannot yet cover an adapted rule: listAgentContentFiles labels a rule source packRel rules/<f>, a path the pack no longer has (the forms are rules/claude-code/ and rules/agents-md/), and the adaptation header's position inside the agents-md form is undecided
+- source: _bmad-output/implementation-artifacts/spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: 41.2 implement review 2026-10-19 (recorded as a residual risk); no story plans an adapted rule
+- 2026-10-19T09:16:29Z status=wontfix-accepted owner=41-2-always-on-objectscript-pre-write-rule by=harvest note=reopen_if=a story adds a rule adapted from third-party content, or check:provenance reports a rule:<f> path that does not exist in the pack
+
+### DW-615: Live probes in Story 41.2 found the project's own agent rule files wrong in places: object-script-testing.md (typed MultiDimensional properties compile; %OnNew-Private holds only when the parent's %OnNew is public; the macro list omits AssertNotTrue and others), iris-objectscript-basics.md (an empty abstract body compiles; // is a valid comment; % names are a convention; the New $NAMESPACE example is environment-dependent) and project rule #7 (Use dev::("") clears the mnemonic but leaves redirection on)
+- source: _bmad-output/implementation-artifacts/spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.2 plan probes 2026-10-19 (26 Probe412 classes, IRIS 2026.2 build 221U); the full list is under Flagged for the retro in the spec; retros are skipped this run, so the flag would otherwise be lost
+- 2026-10-19T09:16:29Z status=decision-pending owner=burndown by=harvest note=human=the user decides whether to correct .claude/rules/object-script-testing.md, iris-objectscript-basics.md and project rule #7 (agent instruction files are the user's to edit)
