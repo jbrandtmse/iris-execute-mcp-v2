@@ -33,6 +33,7 @@ import {
   REQUIRED_CREDITS,
   UPSTREAM_COMMIT,
 } from "../../../../scripts/lib/provenance-core.mjs";
+import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
 import { gatherProvenanceInputs, NPM_PACK_ARGS } from "../../../../scripts/lib/provenance-inputs.mjs";
 import { NOTICE_FILENAME, PACK_DIR, PACK_SOURCE_DIR, WORKFLOW_SKILLS_DIR } from "../../../../scripts/lib/skills-pack.mjs";
 import { committedRowFiles, makeTempRoot, put, removeTempRoot, REPO_ROOT, runNode } from "./pack-fixture";
@@ -563,6 +564,13 @@ describe("gathering distributions fails closed (fixture workspace, injected pack
 describe("the real tree", () => {
   let inputs: Inputs;
   beforeAll(() => {
+    const fresh = checkDistFresh(join(REPO_ROOT, "packages", "client-config"), "@iris-mcp/client-config");
+    if (!fresh.ok || fresh.skipped) {
+      throw new Error(
+        `${fresh.reason ?? "@iris-mcp/client-config declares no dist/ build output."} ` +
+          'Run "pnpm --filter @iris-mcp/client-config build" and retry.',
+      );
+    }
     inputs = gatherProvenanceInputs(REPO_ROOT) as Inputs;
   }, 120_000);
 
@@ -592,8 +600,10 @@ describe("the real tree", () => {
     expect(inputs.packFiles.length).toBeGreaterThanOrEqual(19);
   });
 
-  it("enumerates one distribution per non-private workspace package, as of 2026-10-18, each listing dist files when it ships dist", () => {
-    const names = inputs.distributions.map((distribution) => distribution.name);
+  it("enumerates one distribution per non-private workspace package, as of 2026-10-18, each listing dist files when it ships dist, then one per installer route (Story 41.6)", () => {
+    const npmDistributions = inputs.distributions.filter((distribution) => !distribution.name.startsWith("installer:"));
+    const installerDistributions = inputs.distributions.filter((distribution) => distribution.name.startsWith("installer:"));
+    const names = npmDistributions.map((distribution) => distribution.name);
     const packagesDir = join(REPO_ROOT, "packages");
     const publishable = readdirSync(packagesDir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && existsSync(join(packagesDir, entry.name, "package.json")))
@@ -601,6 +611,18 @@ describe("the real tree", () => {
       .filter((manifest) => manifest.private !== true)
       .map((manifest) => manifest.name);
     expect([...names].sort()).toEqual([...publishable].sort());
+    expect(installerDistributions.map((distribution) => distribution.name)).toEqual([
+      "installer:claude-code",
+      "installer:cursor",
+      "installer:gemini",
+      "installer:agents",
+    ]);
+    for (const distribution of installerDistributions) {
+      expect(distribution.problem, distribution.name).toBeUndefined();
+      expect(distribution.mustShipPack, distribution.name).toBe(false);
+      expect(distribution.noticeBeside, distribution.name).toBe(true);
+      expect(distribution.files.length, distribution.name).toBeGreaterThan(20);
+    }
     expect(names).toEqual(
       expect.arrayContaining([
         "@iris-mcp/client-config",
@@ -613,7 +635,7 @@ describe("the real tree", () => {
         "@iris-mcp/all",
       ]),
     );
-    for (const distribution of inputs.distributions) {
+    for (const distribution of npmDistributions) {
       expect(distribution.problem, distribution.name).toBeUndefined();
       expect(distribution.files.some((file) => file.path === "package.json"), `${distribution.name} lists package.json`).toBe(true);
     }

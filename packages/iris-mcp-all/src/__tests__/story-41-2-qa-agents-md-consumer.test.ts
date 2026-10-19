@@ -1,32 +1,40 @@
 /**
- * Story 41.2 QA (AC 41.2.3) - the `agents-md` pack form, read the way a consumer of `AGENTS.md` will read it.
+ * Story 41.2 QA (AC 41.2.3), run against the installer's real reader (Story 41.6, DW-616) - the `agents-md` pack form,
+ * read the way a consumer of `AGENTS.md` reads it.
  *
- * The form is a section: a BEGIN marker line, the rule, an END marker line. A consumer (Story 41.6's installer) finds
- * that section in a user's own `AGENTS.md` by matching the two marker lines as exact whole lines, owns everything
- * between them, and leaves every other byte alone. This file pins the form against that reading. It is a contract
- * test of the pack bytes, not an installer: `locateBlock` below is a deliberately small reference reader, and the
- * marker strings are typed out here so nothing is derived from the module under test.
+ * The form is a section: a BEGIN marker line, the rule, an END marker line. The installer finds that section in a
+ * user's own `AGENTS.md` by matching the two marker lines as exact whole lines, owns everything between them, and
+ * leaves every other byte alone. This file pins the form against that reading, and every row calls the REAL
+ * `locateRuleBlock` / `withRuleBlock` / `withoutRuleBlock` of `@iris-mcp/client-config`, imported from its built dist.
+ * There is no reader of the test's own: the marker strings and the section renderer (`sectionOf`) are typed out here as
+ * independent oracles of the bytes, nothing more.
  *
  * Pinned:
- *  - the real form: BEGIN on line 1, END on the last line, each one whole line ending in LF, each once, and no other
- *    line of the form (or of the source, or of the `claude-code` form) holds the marker text;
+ *  - the real forms: BEGIN on line 1, END on the last line, each one whole line ending in LF, each once, and no other
+ *    line of the form (or of the source, the `claude-code` form or the `cursor` form) holds the marker text;
  *  - a scratch `AGENTS.md` in each variant of project rule #58 (LF, CRLF, a BOM, no final newline, the section first,
  *    last or alone) holds exactly one section, found by the exact lines, whose bytes are the section as the file holds
  *    it; replacing it with the same form changes no byte, and a replaced section is found again;
  *  - lines that only look like a marker (a different rule name, an indent, trailing blanks, another case, the text
  *    inside a sentence) are not found, and a section of another rule is left alone;
- *  - a missing or repeated marker is not "one section": the reader reports it instead of choosing;
- *  - the form starts with its BEGIN line, so appending it to a file that does not end in a line break produces no
- *    marker line: a consumer has to add the line break first;
+ *  - a missing, repeated or misordered marker is not "one section": the reader reports every line number instead of
+ *    choosing, and the writer refuses;
+ *  - the form starts with its BEGIN line, so the real insert ends an unterminated last line first, in the file's own
+ *    style, and finds BEGIN as a whole line; appending the bytes naively would not;
+ *  - a BOM at byte 0 stays there through insert, replace and remove, and a BEGIN line right after it counts;
  *  - gen:pack refuses a rule source with a line that starts like a marker line (real CLI, scratch copy), so a
  *    generated section never holds a third marker line.
  *
- * No IRIS and no network. Scratch files live under `os.tmpdir()` and are removed by the test that made them.
+ * The suite fails loudly when the client-config dist is missing or older than its source: it would otherwise run
+ * these rows over code that is not what the source says. No IRIS and no network. Scratch files live under
+ * `os.tmpdir()` and are removed by the test that made them.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
 import {
   ALWAYS_ON_RULE_FILENAME,
   PACK_DIR,
@@ -42,62 +50,51 @@ const END_LINE = `<!-- IRIS-MCP-RULE:${STEM}:END -->`;
 const MARKER_TEXT = "IRIS-MCP-RULE";
 
 // ---------------------------------------------------------------------------------------------------------
-// The reference reader: exact whole-line markers, bytes kept as they are.
+// The installer's real reader and writer, from the built client-config dist.
 // ---------------------------------------------------------------------------------------------------------
-
-interface Line {
-  /** Byte offset of the first byte of the line. */
-  start: number;
-  /** Byte offset just past the line's terminator (the end of the file for an unterminated last line). */
-  end: number;
-  /** The line without its terminator: no LF, and no CR before the LF. Latin-1, so one character per byte. */
-  text: string;
-}
-
-function linesOf(host: Buffer): Line[] {
-  const text = host.toString("latin1");
-  const lines: Line[] = [];
-  let start = 0;
-  while (start < text.length) {
-    const lf = text.indexOf("\n", start);
-    const end = lf === -1 ? text.length : lf + 1;
-    let body = text.slice(start, lf === -1 ? text.length : lf);
-    if (body.endsWith("\r")) body = body.slice(0, -1);
-    lines.push({ start, end, text: body });
-    start = end;
-  }
-  return lines;
-}
 
 type Located =
   | { status: "absent" }
-  | { status: "one"; start: number; end: number }
-  | { status: "ambiguous"; begins: number; ends: number };
+  | { status: "one"; start: number; end: number; beginLine: number; endLine: number }
+  | { status: "ambiguous"; begins: number[]; ends: number[] };
 
-/** The one section of `stem` in `host`: from its BEGIN line to the end of its END line. */
-function locateBlock(host: Buffer, stem: string): Located {
-  const begin = `<!-- IRIS-MCP-RULE:${stem}:BEGIN -->`;
-  const end = `<!-- IRIS-MCP-RULE:${stem}:END -->`;
-  const lines = linesOf(host);
-  const begins = lines.filter((line) => line.text === begin);
-  const ends = lines.filter((line) => line.text === end);
-  if (begins.length === 0 && ends.length === 0) return { status: "absent" };
-  const first = begins[0];
-  const last = ends[0];
-  if (begins.length === 1 && ends.length === 1 && first !== undefined && last !== undefined && first.start < last.start) {
-    return { status: "one", start: first.start, end: last.end };
+type Inserted =
+  | { ok: true; bytes: Buffer; change: "create" | "insert" | "replace" | "unchanged"; lineEndingAdded: "" | "\n" | "\r\n" }
+  | { ok: false; reason: string; location: string };
+
+type Removed = { ok: true; bytes: Buffer | null; change: "remove" | "absent" } | { ok: false; reason: string; location: string };
+
+interface RuleBlockApi {
+  locateRuleBlock(host: Uint8Array, stem: string): Located;
+  withRuleBlock(host: Uint8Array | null, section: Uint8Array, stem: string): Inserted;
+  withoutRuleBlock(host: Uint8Array, stem: string, record: { lineEndingAdded: "" | "\n" | "\r\n"; created: boolean }): Removed;
+  describeAmbiguousRuleBlock(stem: string, begins: readonly number[], ends: readonly number[]): string;
+}
+
+let api: RuleBlockApi;
+
+beforeAll(async () => {
+  const packageDir = join(REPO_ROOT, "packages", "client-config");
+  const fresh = checkDistFresh(packageDir, "@iris-mcp/client-config");
+  if (!fresh.ok || fresh.skipped) {
+    throw new Error(
+      `${fresh.reason ?? "@iris-mcp/client-config declares no dist/ build output."} ` +
+        'Run "pnpm --filter @iris-mcp/client-config build" and retry.',
+    );
   }
-  return { status: "ambiguous", begins: begins.length, ends: ends.length };
-}
-
-/** `host` with the bytes of the located section replaced by `section`. */
-function replaceBlock(host: Buffer, located: Located & { status: "one" }, section: Buffer): Buffer {
-  return Buffer.concat([host.subarray(0, located.start), section, host.subarray(located.end)]);
-}
+  api = (await import(pathToFileURL(join(packageDir, "dist", "rule-block.js")).href)) as RuleBlockApi;
+});
 
 function asOne(located: Located): Located & { status: "one" } {
   expect(located.status).toBe("one");
   return located as Located & { status: "one" };
+}
+
+/** The real writer's output for a host and a section; the host must be editable. */
+function inserted(host: Uint8Array | null, section: Buffer): Inserted & { ok: true } {
+  const result = api.withRuleBlock(host, section, STEM);
+  expect(result.ok, JSON.stringify(result)).toBe(true);
+  return result as Inserted & { ok: true };
 }
 
 /** A section as the form renders it, typed out here: BEGIN, the body, END. */
@@ -116,9 +113,12 @@ const text = (value: string): Buffer => Buffer.from(value, "latin1");
 // The real pack bytes.
 // ---------------------------------------------------------------------------------------------------------
 
+const CURSOR_FILENAME = ALWAYS_ON_RULE_FILENAME.replace(/\.md$/, ".mdc");
 const source = readFileSync(join(REPO_ROOT, RULES_SOURCE_DIR, ALWAYS_ON_RULE_FILENAME));
 const claudeCode = readFileSync(join(REPO_ROOT, PACK_DIR, RULE_FORM_DIRS.claudeCode, ALWAYS_ON_RULE_FILENAME));
+const cursor = readFileSync(join(REPO_ROOT, PACK_DIR, RULE_FORM_DIRS.cursor, CURSOR_FILENAME));
 const form = readFileSync(join(REPO_ROOT, PACK_DIR, RULE_FORM_DIRS.agentsMd, ALWAYS_ON_RULE_FILENAME));
+const FORM_LINES = form.toString("latin1").split("\n").length - 1;
 
 describe("the real agents-md form is a section a consumer can find by exact lines (AC 41.2.3)", () => {
   it("opens with the BEGIN line and closes with the END line, each one whole LF-terminated line, and holds no CR", () => {
@@ -129,23 +129,31 @@ describe("the real agents-md form is a section a consumer can find by exact line
     expect(form.includes(0x0d), "no carriage return").toBe(false);
   });
 
-  it("holds each marker line once, and the marker text nowhere else: not in the rule, not in the claude-code form", () => {
-    const lines = linesOf(form);
-    expect(lines.filter((line) => line.text === BEGIN_LINE)).toHaveLength(1);
-    expect(lines.filter((line) => line.text === END_LINE)).toHaveLength(1);
+  it("holds each marker line once, and the marker text nowhere else: not in the rule, not in the other two forms", () => {
+    const lines = form.toString("latin1").split("\n");
+    expect(lines.filter((line) => line === BEGIN_LINE)).toHaveLength(1);
+    expect(lines.filter((line) => line === END_LINE)).toHaveLength(1);
     expect(form.toString("utf8").split(MARKER_TEXT)).toHaveLength(3);
     for (const [label, bytes] of [
       ["the rule source", source],
       ["the claude-code form", claudeCode],
+      ["the cursor form", cursor],
     ] as const) {
       expect(bytes.toString("latin1").includes(MARKER_TEXT), `${label} holds the marker text`).toBe(false);
     }
   });
 
   it("is located as exactly one section that spans the whole form", () => {
-    const located = asOne(locateBlock(form, STEM));
+    const located = asOne(api.locateRuleBlock(form, STEM));
     expect(located.start).toBe(0);
     expect(located.end).toBe(form.length);
+    expect([located.beginLine, located.endLine]).toEqual([1, FORM_LINES]);
+  });
+
+  it("is accepted by the writer as a whole section, and creates a file equal to itself", () => {
+    const created = inserted(null, form);
+    expect(created.change).toBe("create");
+    expect(created.bytes.equals(form)).toBe(true);
   });
 });
 
@@ -192,6 +200,11 @@ function hostsAround(block: Buffer): Host[] {
       region: block,
     },
     {
+      name: "a BOM, then the section on line 1",
+      host: Buffer.concat([BOM, block, text("\n## Other section\n")]),
+      region: block,
+    },
+    {
       name: "no final newline after the END line",
       host: Buffer.concat([text("# Project\n\n"), withoutFinalLf]),
       region: withoutFinalLf,
@@ -220,34 +233,83 @@ describe("a scratch AGENTS.md holds exactly one section, found by exact lines (p
   const variants = hostsAround(form);
 
   it.each(variants)("$name: located once, and the located bytes are the section as the file holds it", ({ host, region }) => {
-    const located = asOne(locateBlock(host, STEM));
+    const located = asOne(api.locateRuleBlock(host, STEM));
     expect(host.subarray(located.start, located.end).equals(region)).toBe(true);
   });
 
   it.each(variants)("$name: the section replaced with the form is found again as the form, and a second replacement changes nothing", ({ host, region }) => {
-    const located = asOne(locateBlock(host, STEM));
-    const updated = replaceBlock(host, located, form);
-    const again = asOne(locateBlock(updated, STEM));
-    expect(updated.subarray(again.start, again.end).equals(form)).toBe(true);
-    expect(replaceBlock(updated, again, form).equals(updated)).toBe(true);
+    const updated = inserted(host, form);
+    expect(updated.change).toBe(region.equals(form) ? "unchanged" : "replace");
+    const again = asOne(api.locateRuleBlock(updated.bytes, STEM));
+    expect(updated.bytes.subarray(again.start, again.end).equals(form)).toBe(true);
+    const second = inserted(updated.bytes, form);
+    expect(second.change).toBe("unchanged");
+    expect(second.bytes.equals(updated.bytes)).toBe(true);
     // A file that already holds the form byte for byte comes back unchanged.
-    if (region.equals(form)) expect(updated.equals(host)).toBe(true);
+    if (region.equals(form)) expect(updated.bytes.equals(host)).toBe(true);
   });
 
   it.each(variants)("$name: the section replaced with an older one is found again as that one, and the form restores the file", ({ host }) => {
-    const located = asOne(locateBlock(host, STEM));
-    const updated = replaceBlock(host, located, OLD_SECTION);
-    const again = asOne(locateBlock(updated, STEM));
-    expect(updated.subarray(again.start, again.end).equals(OLD_SECTION)).toBe(true);
-    expect(replaceBlock(updated, again, form).equals(replaceBlock(host, located, form))).toBe(true);
+    const older = inserted(host, OLD_SECTION);
+    const again = asOne(api.locateRuleBlock(older.bytes, STEM));
+    expect(older.bytes.subarray(again.start, again.end).equals(OLD_SECTION)).toBe(true);
+    expect(inserted(older.bytes, form).bytes.equals(inserted(host, form).bytes)).toBe(true);
+  });
+
+  it.each(variants)("$name: only the located bytes change; the bytes before and after the section are identical", ({ host }) => {
+    const located = asOne(api.locateRuleBlock(host, STEM));
+    const updated = inserted(host, OLD_SECTION);
+    expect(updated.bytes.subarray(0, located.start).equals(host.subarray(0, located.start))).toBe(true);
+    expect(updated.bytes.subarray(updated.bytes.length - (host.length - located.end)).equals(host.subarray(located.end))).toBe(true);
+  });
+
+  it.each(variants)("$name: removing the section leaves exactly the bytes around it", ({ host }) => {
+    const located = asOne(api.locateRuleBlock(host, STEM));
+    const removed = api.withoutRuleBlock(host, STEM, { lineEndingAdded: "", created: false });
+    expect(removed.ok).toBe(true);
+    if (removed.ok) {
+      expect(removed.change).toBe("remove");
+      expect(removed.bytes?.equals(Buffer.concat([host.subarray(0, located.start), host.subarray(located.end)]))).toBe(true);
+    }
   });
 
   it("a section in a file with a BOM and CRLF text keeps the BOM and every CR byte", () => {
     const host = Buffer.concat([BOM, text("# Title\r\n\r\n"), form, text("\r\ntail\r\n")]);
-    const updated = replaceBlock(host, asOne(locateBlock(host, STEM)), OLD_SECTION);
+    const updated = inserted(host, OLD_SECTION).bytes;
     expect(updated.subarray(0, 3).equals(BOM)).toBe(true);
     expect(updated.subarray(3, 3 + "# Title\r\n\r\n".length).toString("latin1")).toBe("# Title\r\n\r\n");
     expect(updated.subarray(updated.length - "\r\ntail\r\n".length).toString("latin1")).toBe("\r\ntail\r\n");
+  });
+});
+
+describe("a BOM at byte 0 stays there, and a BEGIN line right after it counts (D7)", () => {
+  it("a BEGIN line directly after the BOM is a marker, line 1", () => {
+    const host = Buffer.concat([BOM, form]);
+    expect(api.locateRuleBlock(host, STEM)).toEqual({ status: "one", start: 3, end: host.length, beginLine: 1, endLine: FORM_LINES });
+  });
+
+  it("is kept through insert, replace and remove", () => {
+    const plain = Buffer.concat([BOM, text("# Title\r\nlast line without a newline")]);
+    const added = inserted(plain, form);
+    expect(added.change).toBe("insert");
+    expect(added.lineEndingAdded).toBe("\r\n");
+    expect(added.bytes.subarray(0, 3).equals(BOM)).toBe(true);
+
+    const replaced = inserted(added.bytes, OLD_SECTION);
+    expect(replaced.change).toBe("replace");
+    expect(replaced.bytes.subarray(0, 3).equals(BOM)).toBe(true);
+
+    const removed = api.withoutRuleBlock(replaced.bytes, STEM, { lineEndingAdded: added.lineEndingAdded, created: false });
+    expect(removed.ok && removed.bytes?.equals(plain)).toBe(true);
+
+    const first = Buffer.concat([BOM, form, text("tail\n")]);
+    const gone = api.withoutRuleBlock(first, STEM, { lineEndingAdded: "", created: false });
+    expect(gone.ok && gone.bytes?.equals(Buffer.concat([BOM, text("tail\n")]))).toBe(true);
+  });
+
+  it("is not counted as part of line 1 when the BOM sits on a later line", () => {
+    const host = Buffer.concat([text("first\n"), BOM, text(`${BEGIN_LINE}\nx\n`), BOM, text(`${END_LINE}\n`)]);
+    expect(api.locateRuleBlock(host, STEM)).toEqual({ status: "absent" });
   });
 });
 
@@ -268,68 +330,74 @@ describe("lines that only look like the markers are not the markers", () => {
   ];
 
   it.each(lookalikes)("%s is not found", (_name, line) => {
-    expect(locateBlock(text(`# Project\n${line}\nbody\n${line}\n`), STEM)).toEqual({ status: "absent" });
+    expect(api.locateRuleBlock(text(`# Project\n${line}\nbody\n${line}\n`), STEM)).toEqual({ status: "absent" });
   });
 
   it("a section of another rule is not ours and is left alone when ours is replaced", () => {
     const host = Buffer.concat([OTHER_RULE, text("\n"), form, text("\n"), PREFIX_NAMED_RULE]);
-    expect(locateBlock(Buffer.concat([OTHER_RULE, PREFIX_NAMED_RULE, SHORTER_NAMED_RULE]), STEM)).toEqual({ status: "absent" });
-    const located = asOne(locateBlock(host, STEM));
-    const updated = replaceBlock(host, located, OLD_SECTION);
+    expect(api.locateRuleBlock(Buffer.concat([OTHER_RULE, PREFIX_NAMED_RULE, SHORTER_NAMED_RULE]), STEM)).toEqual({ status: "absent" });
+    const updated = inserted(host, OLD_SECTION).bytes;
     expect(updated.subarray(0, OTHER_RULE.length + 1).equals(Buffer.concat([OTHER_RULE, text("\n")]))).toBe(true);
     expect(updated.subarray(updated.length - PREFIX_NAMED_RULE.length - 1).equals(Buffer.concat([text("\n"), PREFIX_NAMED_RULE]))).toBe(true);
-    expect(locateBlock(updated, "other-rule").status).toBe("one");
-    expect(locateBlock(updated, `${STEM}-extra`).status).toBe("one");
+    expect(api.locateRuleBlock(updated, "other-rule").status).toBe("one");
+    expect(api.locateRuleBlock(updated, `${STEM}-extra`).status).toBe("one");
   });
 });
 
-describe("a missing or repeated marker is reported, not guessed at", () => {
-  it.each([
-    ["two sections", Buffer.concat([form, text("\n"), form]), 2, 2],
-    ["a BEGIN line with no END line", text(`# Project\n${BEGIN_LINE}\n- text\n`), 1, 0],
-    ["an END line with no BEGIN line", text(`# Project\n- text\n${END_LINE}\n`), 0, 1],
-    ["two BEGIN lines and one END line", Buffer.concat([text(`${BEGIN_LINE}\nold\n`), form]), 2, 1],
-    ["the END line before the BEGIN line", text(`${END_LINE}\ntext\n${BEGIN_LINE}\n`), 1, 1],
-  ])("%s", (_name, host, begins, ends) => {
-    const located = locateBlock(host, STEM);
-    expect(located.status).toBe("ambiguous");
-    if (located.status === "ambiguous") expect([located.begins, located.ends]).toEqual([begins, ends]);
+describe("a missing, repeated or misordered marker is reported with its line numbers, not guessed at", () => {
+  const rows: Array<[string, Buffer, number[], number[]]> = [
+    ["two sections", Buffer.concat([form, text("\n"), form]), [1, FORM_LINES + 2], [FORM_LINES, 2 * FORM_LINES + 1]],
+    ["a BEGIN line with no END line", text(`# Project\n${BEGIN_LINE}\n- text\n`), [2], []],
+    ["an END line with no BEGIN line", text(`# Project\n- text\n${END_LINE}\n`), [], [3]],
+    ["two BEGIN lines and one END line", Buffer.concat([text(`${BEGIN_LINE}\nold\n`), form]), [1, 3], [2 + FORM_LINES]],
+    ["one BEGIN line and two END lines", Buffer.concat([form, text(`${END_LINE}\n`)]), [1], [FORM_LINES, FORM_LINES + 1]],
+    ["the END line before the BEGIN line", text(`${END_LINE}\ntext\n${BEGIN_LINE}\n`), [3], [1]],
+  ];
+
+  it.each(rows)("%s", (_name, host, begins, ends) => {
+    expect(api.locateRuleBlock(host, STEM)).toEqual({ status: "ambiguous", begins, ends });
+    const location = api.describeAmbiguousRuleBlock(STEM, begins, ends);
+    expect(location).toContain(`the ${STEM} markers are not one BEGIN line followed by one END line`);
+    expect(api.withRuleBlock(host, form, STEM)).toEqual({ ok: false, reason: "ambiguous", location });
+    expect(api.withoutRuleBlock(host, STEM, { lineEndingAdded: "", created: false })).toEqual({ ok: false, reason: "ambiguous", location });
   });
 
   it("a file with no marker line holds no section", () => {
-    expect(locateBlock(text("# Project\n\nNo managed block here.\n"), STEM)).toEqual({ status: "absent" });
-    expect(locateBlock(Buffer.alloc(0), STEM)).toEqual({ status: "absent" });
+    expect(api.locateRuleBlock(text("# Project\n\nNo managed block here.\n"), STEM)).toEqual({ status: "absent" });
+    expect(api.locateRuleBlock(Buffer.alloc(0), STEM)).toEqual({ status: "absent" });
   });
 });
 
 describe("adding the form to a file that has no section of ours", () => {
-  /** What a consumer must do first: end the last line, in the file's own style. */
-  function endLine(host: Buffer): Buffer {
-    if (host.length === 0 || host[host.length - 1] === 0x0a) return host;
-    return Buffer.concat([host, text(host.includes(text("\r\n")) ? "\r\n" : "\n")]);
-  }
-
   it.each([
-    ["an LF file", text("# Project\n\nSome notes.\n")],
-    ["a CRLF file", text("# Project\r\n\r\nSome notes.\r\n")],
-    ["a file with no final newline", text("# Project\n\nSome notes. No final newline")],
-    ["a CRLF file with no final newline", text("# Project\r\n\r\nNotes without the last break")],
-    ["a BOM file", Buffer.concat([BOM, text("# Project\n")])],
-    ["an empty file", Buffer.alloc(0)],
-  ])("%s: the form appended after a line break is found once, and the file's own bytes stay as the prefix", (_name, host) => {
-    const grown = Buffer.concat([endLine(host), form]);
-    expect(grown.subarray(0, host.length).equals(host)).toBe(true);
-    const located = asOne(locateBlock(grown, STEM));
-    expect(grown.subarray(located.start, located.end).equals(form)).toBe(true);
-    expect(located.end).toBe(grown.length);
+    ["an LF file", text("# Project\n\nSome notes.\n"), ""],
+    ["a CRLF file", text("# Project\r\n\r\nSome notes.\r\n"), ""],
+    ["a file with no final newline", text("# Project\n\nSome notes. No final newline"), "\n"],
+    ["a CRLF file with no final newline", text("# Project\r\n\r\nNotes without the last break"), "\r\n"],
+    ["a BOM file", Buffer.concat([BOM, text("# Project\n")]), ""],
+    ["an empty file", Buffer.alloc(0), ""],
+  ] as const)("%s: the real insert is found once, the file's own bytes stay as the prefix, and the ending is in its style", (_name, host, ending) => {
+    const grown = inserted(host, form);
+    expect(grown.change).toBe("insert");
+    expect(grown.lineEndingAdded).toBe(ending);
+    expect(grown.bytes.subarray(0, host.length).equals(host)).toBe(true);
+    expect(grown.bytes.subarray(host.length, host.length + ending.length).toString("latin1")).toBe(ending);
+    const located = asOne(api.locateRuleBlock(grown.bytes, STEM));
+    expect(grown.bytes.subarray(located.start, located.end).equals(form)).toBe(true);
+    expect(located.end).toBe(grown.bytes.length);
+    // And it comes out again exactly.
+    const removed = api.withoutRuleBlock(grown.bytes, STEM, { lineEndingAdded: grown.lineEndingAdded, created: false });
+    expect(removed.ok && removed.bytes?.equals(host)).toBe(true);
   });
 
-  it("the form appended straight to a file with no final newline puts BEGIN inside the last line, so no marker line exists", () => {
+  it("the real insert into a file with no final newline ends the line first and finds BEGIN as a whole line; appending the bytes naively does not", () => {
     const host = text("# Project\n\nNo final newline");
     const naive = Buffer.concat([host, form]);
-    expect(linesOf(naive).some((line) => line.text === BEGIN_LINE)).toBe(false);
-    expect(locateBlock(naive, STEM).status).not.toBe("one");
-    // The remedy is a consumer's, because the form itself must start with its BEGIN line.
+    expect(api.locateRuleBlock(naive, STEM).status).not.toBe("one");
+    const real = inserted(host, form);
+    expect(real.bytes.equals(Buffer.concat([host, text("\n"), form]))).toBe(true);
+    expect(asOne(api.locateRuleBlock(real.bytes, STEM)).beginLine).toBe(4);
+    // The form itself must start with its BEGIN line, which is why the line ending is the writer's to add.
     expect(form.toString("latin1").startsWith(`${BEGIN_LINE}\n`)).toBe(true);
   });
 });

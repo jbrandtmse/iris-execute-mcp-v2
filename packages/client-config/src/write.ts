@@ -295,8 +295,8 @@ export interface ApplyWriteOptions {
   skipPreParse?: boolean;
 }
 
-/** Filesystem-safe timestamp: ISO 8601 with `:` and `.` flattened (Windows). */
-function stamp(now: Date): string {
+/** Filesystem-safe timestamp: ISO 8601 with `:` and `.` flattened (Windows). Shared by every backup writer. */
+export function stamp(now: Date): string {
   return now.toISOString().replace(/[:.]/g, "-");
 }
 

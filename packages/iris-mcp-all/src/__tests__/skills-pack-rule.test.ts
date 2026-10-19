@@ -99,9 +99,18 @@ describe("the always-on rule, real tree: the committed forms against the source 
   const source = readFileSync(join(REPO_ROOT, RULES_SOURCE_DIR, ALWAYS_ON_RULE_FILENAME));
   const claudeCode = readFileSync(join(REPO_ROOT, PACK_DIR, RULE_FORM_DIRS.claudeCode, ALWAYS_ON_RULE_FILENAME));
   const agentsMd = readFileSync(join(REPO_ROOT, PACK_DIR, RULE_FORM_DIRS.agentsMd, ALWAYS_ON_RULE_FILENAME));
+  const cursorFile = ALWAYS_ON_RULE_FILENAME.replace(/\.md$/, ".mdc");
+  const cursor = readFileSync(join(REPO_ROOT, PACK_DIR, RULE_FORM_DIRS.cursor, cursorFile));
 
   it("the claude-code form equals the source bytes", () => {
     expect(claudeCode.equals(source)).toBe(true);
+  });
+
+  it("the cursor form is a .mdc file: the always-apply frontmatter, a blank line, then the source bytes", () => {
+    expect(cursorFile.endsWith(".mdc")).toBe(true);
+    const expected = Buffer.concat([Buffer.from("---\nalwaysApply: true\n---\n\n", "utf8"), source]);
+    expect(cursor.equals(expected)).toBe(true);
+    expect(cursor.length).toBe(source.length + 27);
   });
 
   it("the agents-md form is the BEGIN line, the source bytes and the END line, each line ending in LF", () => {
@@ -126,13 +135,14 @@ describe("the always-on rule, real tree: the committed forms against the source 
     }
   });
 
-  it("assemblePack renders exactly these two forms from the source", () => {
+  it("assemblePack renders exactly these three forms from the source", () => {
     const root = makeTempRoot("rule-real-tree");
     try {
       put(root, `${PACK_SOURCE_DIR}/${NOTICE_FILENAME}`, "# notice\n");
       put(root, `${RULES_SOURCE_DIR}/${ALWAYS_ON_RULE_FILENAME}`, source);
       const pack = assemblePack(root) as Map<string, Buffer>;
       expect((pack.get(`${RULE_FORM_DIRS.claudeCode}/${ALWAYS_ON_RULE_FILENAME}`) as Buffer).equals(claudeCode)).toBe(true);
+      expect((pack.get(`${RULE_FORM_DIRS.cursor}/${cursorFile}`) as Buffer).equals(cursor)).toBe(true);
       expect((pack.get(`${RULE_FORM_DIRS.agentsMd}/${ALWAYS_ON_RULE_FILENAME}`) as Buffer).equals(agentsMd)).toBe(true);
     } finally {
       removeTempRoot(root);
@@ -275,13 +285,18 @@ describe("the section form (fixture roots)", () => {
     );
   });
 
-  it.each(BYTE_VARIANTS)("keeps the %s variant byte for byte in both forms", (key, bytes) => {
+  it.each(BYTE_VARIANTS)("keeps the %s variant byte for byte in all three forms", (key, bytes) => {
     const root = tempRoot();
     put(root, `${RULES_SOURCE_DIR}/${key}.md`, bytes);
     const pack = assemblePack(root) as Map<string, Buffer>;
     const claudeCode = pack.get(`${RULE_FORM_DIRS.claudeCode}/${key}.md`);
+    const cursor = pack.get(`${RULE_FORM_DIRS.cursor}/${key}.mdc`);
     const agentsMd = pack.get(`${RULE_FORM_DIRS.agentsMd}/${key}.md`);
     expect(Buffer.isBuffer(claudeCode) && claudeCode.equals(bytes), "the claude-code form is the source bytes").toBe(true);
+    expect(
+      Buffer.isBuffer(cursor) && cursor.equals(Buffer.concat([Buffer.from("---\nalwaysApply: true\n---\n\n", "utf8"), bytes])),
+      "the cursor form is the frontmatter and the source bytes",
+    ).toBe(true);
     expect(Buffer.isBuffer(agentsMd) && agentsMd.equals(sectionOf(key, bytes)), "the agents-md form wraps the source bytes").toBe(true);
   });
 
@@ -389,10 +404,10 @@ describe("gen:pack, the rule rows through the real CLI (scratch copy)", () => {
     expect(treeLines(scratch)).toEqual(before);
     const check = runScript(scratch, GEN_PACK, ["--check"]);
     expect(check.status, check.stderr).toBe(0);
-    expect(check.stdout).toContain("22 pack file(s) match their sources");
+    expect(check.stdout).toContain("23 pack file(s) match their sources");
   });
 
-  it("writes both forms of every byte variant, byte for byte, and a second run changes nothing", () => {
+  it("writes all three forms of every byte variant, byte for byte, and a second run changes nothing", () => {
     for (const [key, bytes] of BYTE_VARIANTS) put(scratch, `${RULES_SOURCE_DIR}/cli-${key}.md`, bytes);
     try {
       const first = runScript(scratch, GEN_PACK);
@@ -400,6 +415,10 @@ describe("gen:pack, the rule rows through the real CLI (scratch copy)", () => {
       for (const [key, bytes] of BYTE_VARIANTS) {
         const name = `cli-${key}.md`;
         expect(readFileSync(packed(RULE_FORM_DIRS.claudeCode, name)).equals(bytes), `${key}: claude-code form`).toBe(true);
+        expect(
+          readFileSync(packed(RULE_FORM_DIRS.cursor, `cli-${key}.mdc`)).equals(Buffer.concat([Buffer.from("---\nalwaysApply: true\n---\n\n", "utf8"), bytes])),
+          `${key}: cursor form`,
+        ).toBe(true);
         expect(readFileSync(packed(RULE_FORM_DIRS.agentsMd, name)).equals(sectionOf(`cli-${key}`, bytes)), `${key}: agents-md form`).toBe(
           true,
         );
@@ -415,13 +434,14 @@ describe("gen:pack, the rule rows through the real CLI (scratch copy)", () => {
     }
   });
 
-  it("a CRLF copy of the real rule keeps its line endings in both forms", () => {
+  it("a CRLF copy of the real rule keeps its line endings in all three forms", () => {
     const real = readFileSync(join(REPO_ROOT, RULES_SOURCE_DIR, ALWAYS_ON_RULE_FILENAME));
     const crlf = toCrlf(real);
     put(scratch, `${RULES_SOURCE_DIR}/cli-crlf-copy.md`, crlf);
     try {
       expect(runScript(scratch, GEN_PACK).status).toBe(0);
       expect(readFileSync(packed(RULE_FORM_DIRS.claudeCode, "cli-crlf-copy.md")).equals(crlf)).toBe(true);
+      expect(readFileSync(packed(RULE_FORM_DIRS.cursor, "cli-crlf-copy.mdc")).equals(Buffer.concat([Buffer.from("---\nalwaysApply: true\n---\n\n", "utf8"), crlf]))).toBe(true);
       expect(readFileSync(packed(RULE_FORM_DIRS.agentsMd, "cli-crlf-copy.md")).equals(sectionOf("cli-crlf-copy", crlf))).toBe(true);
     } finally {
       rmSync(ruleSource("cli-crlf-copy.md"), { force: true });

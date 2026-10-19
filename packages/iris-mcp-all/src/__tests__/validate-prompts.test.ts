@@ -383,7 +383,7 @@ describe("internal references: the nine classes (AC 41.5.4)", () => {
 });
 
 describe("internal references: the real tree is clean (AC 41.5.4)", () => {
-  it("none of the 51 sources, the prompts' arguments and skill descriptions included, holds one", async () => {
+  it("none of the 52 sources, the prompts' arguments and skill descriptions included, holds one", async () => {
     const prompts = (await loadAllPrompts(root)) as Array<{
       pkg: string;
       prompt: Parameters<typeof promptSourceText>[0] & { name: string };
@@ -396,7 +396,7 @@ describe("internal references: the real tree is clean (AC 41.5.4)", () => {
     for (const { label, packRel, absPath } of listAgentContentFiles(root) as ContentFile[]) {
       sources.push({ label, packRel, text: readFileSync(absPath, "utf-8") });
     }
-    expect(sources).toHaveLength(51);
+    expect(sources).toHaveLength(52);
 
     const notice = readFileSync(join(root, PACK_SOURCE_DIR, NOTICE_FILENAME), "utf-8");
     const adapted = new Set<string>((parseProvenanceRows(notice).rows as Array<{ packFile: string }>).map((row) => row.packFile));
@@ -628,18 +628,18 @@ describe("presetProblems: the first preset that shows every tool a skill names (
 });
 
 describe("tool presets, real tree (AC 41.5.4)", () => {
-  it("every content file declares the preset it needs: 24 declare one (12 core, 6 developer, 6 full) and 15 are tool-free", async () => {
+  it("every content file declares the preset it needs: 24 declare one (12 core, 6 developer, 6 full) and 16 are tool-free", async () => {
     const catalog = await loadToolPresetCatalog(root);
     const files = listAgentContentFiles(root) as ContentFile[];
     const sources = files.map(({ label, packRel, absPath }) => {
       const text = readFileSync(absPath, "utf-8");
       return { label, text, packRel, preset: declaredToolPreset(text, packRel) as string | null };
     });
-    expect(sources).toHaveLength(39);
+    expect(sources).toHaveLength(40);
     const result = presetProblems(sources, catalog) as { problems: unknown[]; declared: Record<string, number>; toolFree: number };
     expect(result.problems).toEqual([]);
     expect(result.declared).toEqual({ core: 12, developer: 6, full: 6 });
-    expect(result.toolFree).toBe(15);
+    expect(result.toolFree).toBe(16);
   });
 
   it("the catalog loader maps each tool to its owning server, the framework tool to none, and carries each server's rosters", async () => {
@@ -658,8 +658,8 @@ describe("validate:prompts CLI on the real tree (AC 41.5.3)", () => {
     const run = runNode(root, "scripts/validate-prompts.mjs");
     expect(run.status, run.stderr).toBe(0);
     expect(run.stdout.split("\n").filter((line: string) => line !== "")).toEqual([
-      "validate-prompts: OK \u2014 51 source(s) checked (12 prompt(s) + 39 content file(s): 12 workflow, 20 pack, 6 knowledge, 1 rule), 111 known tool name(s).",
-      "validate-prompts: OK \u2014 tool presets: 24 file(s) declare one (12 core, 6 developer, 6 full) and 15 tool-free file(s) declare none; no internal reference in 51 source(s), 2 adaptation header line(s) exempted.",
+      "validate-prompts: OK \u2014 52 source(s) checked (12 prompt(s) + 40 content file(s): 12 workflow, 21 pack, 6 knowledge, 1 rule), 111 known tool name(s).",
+      "validate-prompts: OK \u2014 tool presets: 24 file(s) declare one (12 core, 6 developer, 6 full) and 16 tool-free file(s) declare none; no internal reference in 52 source(s), 2 adaptation header line(s) exempted.",
     ]);
   });
 });

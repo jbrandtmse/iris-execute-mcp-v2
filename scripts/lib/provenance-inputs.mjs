@@ -3,15 +3,24 @@
 // DISTRIBUTIONS. One per non-private `packages/*/package.json`, enumerated mechanically. A distribution's
 // file list is what npm's own packer would put in the tarball (`npm pack --dry-run --json
 // --ignore-scripts --offline`); the bytes of those files come from disk. Stories that add a distribution
-// (the installer payload, the plugin) append it to `gatherDistributions`.
+// (the plugin) append it to `gatherProvenanceInputs`.
+//
+// INSTALLER PAYLOADS. When `packages/client-config/package.json` exists, one more distribution per installer
+// route (`installer:claude-code`, `installer:cursor`, `installer:gemini`, `installer:agents`) holds the files an
+// install of that route writes into an empty project. They come from the built installer, through a child
+// process (`installer-payload-probe.mjs`), so the check runs the installer's own placement logic and
+// `gatherProvenanceInputs` stays synchronous. Each is marked `noticeBeside`: every installed file that carries
+// adapted content needs the notice in its own directory.
 //
 // FAIL CLOSED. A distribution whose file list cannot be gathered is returned with a `problem`, never
 // skipped: npm missing, a non-zero exit, output that is not the expected JSON, an unreadable file, and a
-// dist-shipping package whose list names no `dist/` file.
+// dist-shipping package whose list names no `dist/` file. The installer payloads fail the same way, as one
+// distribution named `installer`.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isDistShipping } from './dist-freshness.mjs';
 import { listFilesRecursive } from './generated-tree.mjs';
 import { listAgentContentFiles, NOTICE_FILENAME, PACK_DIR, PACK_SOURCE_DIR } from './skills-pack.mjs';
@@ -134,15 +143,90 @@ function gatherDistributions(root, runner) {
   return distributions;
 }
 
+const INSTALLER_PROBE_SCRIPT = fileURLToPath(new URL('./installer-payload-probe.mjs', import.meta.url));
+
+/**
+ * Run the installer payload probe against a repository root.
+ *
+ * @param {string} root - Repository root (absolute path).
+ * @returns {{ status: number | null, stdout: string, stderr: string, error: Error | null }}
+ */
+export function runInstallerProbe(root) {
+  const keep = ['PATH', 'PATHEXT', 'SystemRoot', 'windir', 'TEMP', 'TMP', 'TMPDIR'];
+  const env = Object.fromEntries(keep.map((name) => [name, process.env[name] ?? '']));
+  const result = spawnSync(process.execPath, [INSTALLER_PROBE_SCRIPT, root], {
+    encoding: 'utf8',
+    timeout: 120_000,
+    maxBuffer: 64 * 1024 * 1024,
+    env,
+  });
+  return {
+    status: result.status,
+    stdout: typeof result.stdout === 'string' ? result.stdout : '',
+    stderr: typeof result.stderr === 'string' ? result.stderr : '',
+    error: result.error ?? null,
+  };
+}
+
+/**
+ * One distribution per installer route, or one `installer` distribution carrying a `problem`.
+ *
+ * @param {string} root
+ * @param {(root: string) => { status: number | null, stdout: string, stderr: string, error: Error | null }} probe
+ */
+function gatherInstallerDistributions(root, probe) {
+  if (!existsSync(join(root, 'packages', 'client-config', 'package.json'))) return [];
+  const failure = (detail) => [
+    {
+      name: 'installer',
+      mustShipPack: false,
+      files: [],
+      problem: `the installer payloads could not be computed (${detail}); build @iris-mcp/client-config first`,
+    },
+  ];
+
+  const result = probe(root);
+  if (result.error) return failure(result.error.message);
+  if (result.status !== 0) {
+    const first = result.stderr.trim().split('\n')[0] ?? '';
+    return failure(first === '' ? `exit status ${String(result.status)}` : first);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch {
+    return failure('the probe did not print JSON');
+  }
+  const payloads = parsed?.payloads;
+  const wellFormed =
+    Array.isArray(payloads) &&
+    payloads.every(
+      (payload) =>
+        typeof payload?.route === 'string' &&
+        Array.isArray(payload.files) &&
+        payload.files.every((file) => typeof file?.path === 'string' && typeof file?.base64 === 'string'),
+    );
+  if (!wellFormed || payloads.length === 0) return failure('the probe printed JSON without payloads');
+
+  return payloads.map((payload) => ({
+    name: `installer:${payload.route}`,
+    mustShipPack: false,
+    noticeBeside: true,
+    files: payload.files.map((file) => ({ path: file.path, bytes: Buffer.from(file.base64, 'base64') })),
+  }));
+}
+
 /**
  * Everything `checkProvenance` reads.
  *
  * @param {string} root - Repository root (absolute path).
- * @param {{ runNpmPack?: typeof runNpmPack }} [options] - `runNpmPack` replaces the packer call.
+ * @param {{ runNpmPack?: typeof runNpmPack, runInstallerProbe?: typeof runInstallerProbe }} [options] -
+ *   `runNpmPack` replaces the packer call; `runInstallerProbe` replaces the installer payload probe.
  * @returns {import('./provenance-core.mjs').ProvenanceInputs}
  */
 export function gatherProvenanceInputs(root, options = {}) {
   const runner = options.runNpmPack ?? runNpmPack;
+  const probe = options.runInstallerProbe ?? runInstallerProbe;
   const packDir = join(root, PACK_DIR);
   return {
     sourceNotice: readOrNull(join(root, PACK_SOURCE_DIR, NOTICE_FILENAME)),
@@ -153,6 +237,6 @@ export function gatherProvenanceInputs(root, options = {}) {
       text: readFileSync(absPath, 'utf8'),
     })),
     packFiles: listFilesRecursive(packDir).map((rel) => ({ rel, bytes: readFileSync(join(packDir, rel)) })),
-    distributions: gatherDistributions(root, runner),
+    distributions: [...gatherDistributions(root, runner), ...gatherInstallerDistributions(root, probe)],
   };
 }

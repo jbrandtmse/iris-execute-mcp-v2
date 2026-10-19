@@ -25,9 +25,10 @@ import {
 import { FORBIDDEN, problemsOf } from "./agent-text-hygiene";
 import { REPO_ROOT } from "./pack-fixture";
 
-/** The text of a copy without the two marker lines of the `agents-md` form. */
+/** The text of a copy without the two marker lines of the `agents-md` form and the frontmatter of the `cursor` form. */
 function withoutMarkerLines(text: string): string {
   return text
+    .replace(/^---\nalwaysApply: true\n---\n\n/, "")
     .split("\n")
     .filter((line) => !/^<!-- IRIS-MCP-RULE:[a-z0-9-]+:(?:BEGIN|END) -->$/.test(line))
     .join("\n");
@@ -36,6 +37,7 @@ function withoutMarkerLines(text: string): string {
 const COPIES: Array<[label: string, rel: string]> = [
   ["the rule source", `${RULES_SOURCE_DIR}/${ALWAYS_ON_RULE_FILENAME}`],
   ["the claude-code form", `${PACK_DIR}/${RULE_FORM_DIRS.claudeCode}/${ALWAYS_ON_RULE_FILENAME}`],
+  ["the cursor form", `${PACK_DIR}/${RULE_FORM_DIRS.cursor}/${ALWAYS_ON_RULE_FILENAME.replace(/\.md$/, ".mdc")}`],
   ["the agents-md form", `${PACK_DIR}/${RULE_FORM_DIRS.agentsMd}/${ALWAYS_ON_RULE_FILENAME}`],
 ];
 

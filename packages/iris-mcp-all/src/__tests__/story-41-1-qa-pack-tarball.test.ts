@@ -27,6 +27,7 @@ import {
   PACK_DIR,
   PACK_SOURCE_DIR,
   RULE_FORM_DIRS,
+  RULE_FORM_EXTENSIONS,
   WORKFLOW_SKILLS_DIR,
 } from "../../../../scripts/lib/skills-pack.mjs";
 import { makeTempRoot, removeTempRoot, REPO_ROOT } from "./pack-fixture";
@@ -110,12 +111,14 @@ describe("the real tarball built by npm pack --ignore-scripts (AC 41.1.1 Integra
     expect(committed.length).toBeGreaterThanOrEqual(19);
   });
 
-  it("carries the notice, the pack README, both forms of the always-on rule and all 12 workflow SKILL.md files at the expected paths", () => {
+  it("carries the notice, the pack README, all three forms of the always-on rule and all 12 workflow SKILL.md files at the expected paths", () => {
     const base = join(extractDir, "package", "skills-pack");
     expect(existsSync(join(base, NOTICE_FILENAME))).toBe(true);
     expect(existsSync(join(base, "README.md"))).toBe(true);
-    for (const dir of Object.values(RULE_FORM_DIRS)) {
-      expect(existsSync(join(base, dir, ALWAYS_ON_RULE_FILENAME)), `${dir}/${ALWAYS_ON_RULE_FILENAME}`).toBe(true);
+    expect(Object.keys(RULE_FORM_DIRS)).toHaveLength(3);
+    for (const [form, dir] of Object.entries(RULE_FORM_DIRS) as Array<[keyof typeof RULE_FORM_EXTENSIONS, string]>) {
+      const file = `${ALWAYS_ON_RULE_FILENAME.replace(/\.md$/, "")}${RULE_FORM_EXTENSIONS[form]}`;
+      expect(existsSync(join(base, dir, file)), `${dir}/${file}`).toBe(true);
     }
     const workflowSkills = readdirSync(join(REPO_ROOT, WORKFLOW_SKILLS_DIR), { withFileTypes: true })
       .filter((entry) => entry.isDirectory())

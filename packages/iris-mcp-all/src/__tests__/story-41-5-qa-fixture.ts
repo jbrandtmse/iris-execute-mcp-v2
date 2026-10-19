@@ -157,7 +157,7 @@ export function agentContentFiles(repoRoot: string): ContentFile[] {
   for (const name of skillDirectories(join(repoRoot, pack, "skills"))) add("pack-skill", `${pack}/skills/${name}/SKILL.md`);
   for (const name of skillDirectories(join(repoRoot, "skills-pack-src", "knowledge"))) add("knowledge", `skills-pack-src/knowledge/${name}/SKILL.md`);
   for (const file of readdirSync(join(repoRoot, "skills-pack-src", "rules")).sort()) add("rule", `skills-pack-src/rules/${file}`);
-  for (const form of ["agents-md", "claude-code"]) {
+  for (const form of ["agents-md", "claude-code", "cursor"]) {
     for (const file of readdirSync(join(repoRoot, pack, "rules", form)).sort()) add("pack-rule", `${pack}/rules/${form}/${file}`);
   }
   return out;

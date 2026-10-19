@@ -148,7 +148,7 @@ describe("gen:pack against a scratch copy of the real tree: the clean baseline",
     const root = scratch();
     const check = runScript(root, GEN_PACK, ["--check"]);
     expect(check.status, check.stderr).toBe(0);
-    expect(check.stdout).toContain("22 pack file(s) match their sources");
+    expect(check.stdout).toContain("23 pack file(s) match their sources");
 
     const pack = join(root, PACK_DIR);
     for (const rel of walkFiles(pack)) utimesSync(join(pack, rel), 1, 1);
@@ -310,13 +310,17 @@ describe("gen:pack against a scratch copy of the real tree: byte preservation (#
       expect(readFileSync(join(root, PACK_DIR, `skills/qa-bytes-${key}/SKILL.md`)).equals(bytes), `${key} skill`).toBe(true);
       expect(readFileSync(join(root, PACK_DIR, `${RULE_FORM_DIRS.claudeCode}/qa-bytes-${key}.md`)).equals(rule), `${key} claude-code form`).toBe(true);
       expect(
+        readFileSync(join(root, PACK_DIR, `${RULE_FORM_DIRS.cursor}/qa-bytes-${key}.mdc`)).equals(Buffer.concat([Buffer.from("---\nalwaysApply: true\n---\n\n", "utf8"), rule])),
+        `${key} cursor form`,
+      ).toBe(true);
+      expect(
         readFileSync(join(root, PACK_DIR, `${RULE_FORM_DIRS.agentsMd}/qa-bytes-${key}.md`)).equals(expectedSection(key, rule)),
         `${key} AGENTS.md section form`,
       ).toBe(true);
     }
     const check = runScript(root, GEN_PACK, ["--check"]);
     expect(check.status, check.stderr).toBe(0);
-    expect(check.stdout).toContain("37 pack file(s) match their sources");
+    expect(check.stdout).toContain("43 pack file(s) match their sources");
   });
 
   it.each(VARIANTS.map(([key, bytes, tamper]) => [key, bytes, tamper] as const))(

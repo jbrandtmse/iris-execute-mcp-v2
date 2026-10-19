@@ -23,7 +23,7 @@ import {
   PACK_SOURCE_DIR,
 } from "../../../../scripts/lib/skills-pack.mjs";
 import { makeTempRoot, put, REPO_ROOT } from "./pack-fixture";
-import { BOM, makeScratchRepo, problemRules, removeScratchRepo, runScript, toCrlf } from "./story-41-1-qa-fixture";
+import { BOM, makeScratchRepo, problemPairs, problemRules, removeScratchRepo, runScript, toCrlf } from "./story-41-1-qa-fixture";
 
 const PINNED_SHA256 = "85b458dc150c4d17873dd5e73d01cfa23c797997a09d841884e08378242e929c";
 const PINNED_COMMIT = "b6205bbbad2f431ae14c34401fd55d85cb5d2305";
@@ -93,22 +93,22 @@ function expectGreen(root: string): string {
 }
 
 describe("check:provenance CLI, scratch copy: the green controls", () => {
-  it("the unmodified copy passes: pinned MIT hash, the one real row, the 39 agent files and one distribution", () => {
+  it("the unmodified copy passes: pinned MIT hash, the one real row, the 40 agent files and five distributions (the package and the four installer routes)", () => {
     const out = expectGreen(scratch());
     expect(out).toContain(`MIT block sha256 ${PINNED_SHA256} (1081 bytes)`);
-    expect(out).toContain("1 provenance row(s), 39 agent file(s), 1 distribution(s)");
+    expect(out).toContain("1 provenance row(s), 40 agent file(s), 5 distribution(s)");
   });
 
   it("an adapted skill with the exact header and a row passes, source and pack copy both counted", () => {
     const root = scratch();
     adapt(root, { skill: skillText(HEADER) });
-    expect(expectGreen(root)).toContain("2 provenance row(s), 41 agent file(s), 1 distribution(s)");
+    expect(expectGreen(root)).toContain("2 provenance row(s), 42 agent file(s), 5 distribution(s)");
   });
 
   it("the same adapted skill as CRLF passes (project rule #58)", () => {
     const root = scratch();
     adapt(root, { skill: toCrlf(Buffer.from(skillText(HEADER), "utf8")) });
-    expect(expectGreen(root)).toContain("2 provenance row(s), 41 agent file(s)");
+    expect(expectGreen(root)).toContain("2 provenance row(s), 42 agent file(s)");
   });
 
   it("the same adapted skill as CRLF with a BOM before its frontmatter is refused, for the source and for the pack copy", () => {
@@ -297,10 +297,10 @@ describe("check:provenance CLI, scratch copy: distributions through the real npm
   const canonicalNotice = (root: string): Buffer => readFileSync(join(root, NOTICE_REL));
   const packReadme = (root: string): Buffer => readFileSync(join(root, PACK_DIR, "README.md"));
 
-  it("control: a package with ordinary content passes, and both distributions are counted", () => {
+  it("control: a package with ordinary content passes, and it is counted with client-config and the four installer routes", () => {
     const root = scratch();
     addPackage(root, "clean", { "index.js": "export const value = 1;\n" });
-    expect(expectGreen(root)).toContain("2 distribution(s)");
+    expect(expectGreen(root)).toContain("6 distribution(s)");
   });
 
   it("a byte-identical copy of a pack file in another package, without the notice, is refused naming that package", () => {
@@ -355,6 +355,10 @@ describe("check:provenance CLI, scratch copy: distributions through the real npm
     rmSync(join(root, "packages/client-config/dist"), { recursive: true });
     const stderr = expectRed(root, ["distribution"]);
     expect(stderr).toContain("ships dist but its tarball file list names no dist/ file");
+    // The installer payloads come from the same dist, so the missing build is reported once more, by name (Story 41.6).
+    expect(problemPairs(stderr)).toEqual(["distribution @iris-mcp/client-config", "distribution installer"]);
+    expect(stderr).toContain("[distribution] installer: the installer payloads could not be computed (");
+    expect(stderr).toContain("build @iris-mcp/client-config first");
   });
 
   it("a package.json that is not valid JSON is refused, naming it", () => {

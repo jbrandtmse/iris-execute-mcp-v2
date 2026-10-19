@@ -2,6 +2,92 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-19] — Story 41.6: Skills and rules installer
+
+`iris-mcp-clients skills install|uninstall` is a CLI of `@iris-mcp/client-config`, not an MCP tool, so no tool, action, governance
+key, preset row, refusal code, environment variable or route is added or changed. The suite stays at 110 package tools and 115
+advertised, the 12 prompts are byte-identical on the wire, `BOOTSTRAP_VERSION` stays at `5296a1c836f4` because no bootstrapped
+class changed, the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and `gen:skills` stays at 13 generated
+files. Three counts moved, each taken from tool output: the pack grows from 22 to 23 files (the Cursor form of the rule), the agent
+content files from 39 to 40 (`validate:prompts` now checks 52 sources, up from 51), and `check:provenance` counts 12
+distributions, up from 8: the 8 npm packages plus `installer:claude-code`, `installer:cursor`, `installer:gemini` and
+`installer:agents`.
+
+### Added
+
+- **The installer.** `iris-mcp-clients skills install|uninstall --client <id> [--project <dir>] [--dry-run] [--yes]
+  [--include-modified] [--json]` installs, updates or removes the skills pack and its always-on rule in one project, at project
+  scope only. Each client takes one of four routes: `claude-code` (`.claude/skills/` and `.claude/rules/`), `cursor`
+  (`.agents/skills/` and `.cursor/rules/<name>.mdc`), `gemini` (`.agents/skills/` and a block in `GEMINI.md`) and `agents`
+  (`.agents/skills/` and a block in `AGENTS.md`). Claude Desktop has no route and is refused with exit 2. The CLI previews a
+  file-level plan first and writes only after `--yes` or a TTY confirmation; a non-TTY run without `--yes` writes nothing and
+  exits 2, as `apply` does, and `--dry-run` writes nothing.
+- **A disposition table of 17 clients.** `PACK_TARGETS` has one row per adapter, per disposition and the generic `agents` row, each
+  with its route, a reason, its documentation sources (checked on 2026-10-19) and the notes the CLI prints. VS Code / Copilot takes
+  the `AGENTS.md` block, because an `applyTo:` instructions file attaches only to files the agent creates or modifies.
+- **Ownership by record.** The installer keeps `.iris-mcp/skills-pack.json` in the project: the files it installed with their
+  sha256 and the clients that need them, the blocks it owns, and the directories it created. A file at an owned path that it did
+  not install is a conflict and refuses the whole run; a file byte-identical to the pack is adopted; a file you changed since is
+  kept unless `--include-modified`, which backs it up first. An update removes owned paths that left the pack, and an uninstall
+  removes a shared path only when no client still needs it. A manifest that is invalid, or that names a path outside the
+  installer's own locations, is refused, so a hand-edited record can never direct a delete elsewhere.
+- **Byte-exact writes.** Pack files are copied as bytes, and a user's `AGENTS.md` or `GEMINI.md` is read and written as bytes. The
+  block between `<!-- IRIS-MCP-RULE:<name>:BEGIN -->` and `<!-- IRIS-MCP-RULE:<name>:END -->` is replaced whole and every other
+  byte is kept, a BOM at byte 0, CRLF, invalid UTF-8, comments and other tools' blocks included. A last line without a line ending
+  gets one in the file's own style before the block, and an uninstall removes it again. Own markers that are missing, repeated or out
+  of order are reported with their line numbers and nothing is written (DW-616).
+- **The write protocol.** Every run re-reads each planned path and refuses if one changed since the preview, creates directories,
+  backs up and writes each file and reads it back, backs up and deletes removed files, removes the empty directories it created,
+  and writes the manifest last. On a failure everything done is undone in reverse. Backups go under
+  `~/.iris-mcp/client-manager/backups/skills-pack/<project>/`.
+- **The notice beside adapted content.** `IRIS-MCP-THIRD-PARTY-NOTICES.md` is written in the directory of every installed file
+  that carries adapted content, byte-equal to the pack notice. A rule form that carries adapted content is refused, because no safe
+  place for the notice exists beside a rule a client loads on its own.
+- **A Cursor form of the rule.** `pnpm gen:pack` renders `rules/cursor/<name>.mdc` from each rule source: the frontmatter
+  `alwaysApply: true`, a blank line, then the source bytes. Cursor ignores a plain `.md` in `.cursor/rules`.
+- **Installer payloads in `check:provenance`.** One distribution per route is computed by the built installer through a child-process
+  probe, and each installed file that carries adapted content needs the canonical notice in its own directory. A client-config that
+  is not built is reported as a `[distribution] installer` problem, never skipped.
+
+### Changed
+
+- **The pack README catalog** names the Cursor form of the rule and lists it in its Layout. Its size is 11859 bytes, 49 lines.
+- **`iris-mcp-clients` help and dispatch.** `--help` gains the `skills` command, the `--project`, `--dry-run` and `--include-modified`
+  options and a line on the backups; the `--yes` line reads `apply, skills`. The valid-commands message ends `, doctor, skills.` The
+  messages of the existing commands are unchanged, and the confirmation gate of `apply` is now one helper shared with `skills`.
+- **The 41.2 consumer test** runs every row against the installer's real `locateRuleBlock`, `withRuleBlock` and `withoutRuleBlock`
+  from the built client-config dist, and fails loudly when that dist is stale. Its test-local reader is gone.
+- **`stamp`** (the backup timestamp of the MCP-entry writer) is exported from `write.ts`, so both writers share one format.
+
+### Tests
+
+- `pack-targets.test.ts` pins the 17 rows against the adapter and disposition data, the four routes, the notes, and the copies of
+  the pack generator's constants; it scans the installer modules for forbidden imports and process reads.
+- `rule-block.test.ts` and `pack-plan.test.ts` cover the reader and the planner with byte oracles over non-canonical hosts (CRLF,
+  BOM, no final newline, invalid UTF-8, comments, look-alike and foreign markers), ambiguous markers, adopt, keep, conflict, update,
+  shared paths and the manifest refusals. `pack-apply.test.ts` runs real temp directories through a jailed file system: byte-exact
+  copies, idempotence by an fs spy, backups, rollback on an injected write failure at several points, the changed-since-preview
+  refusal, and the never-boundary jail with `stateDir` unset. `pack-apply-verify.test.ts` pins the read-back after each write, the
+  whole-block and outside-bytes checks on a host, and a rollback that cannot finish.
+- `skills-cli.test.ts` drives every usage error, the gate, `--json` and the notes in process; `skills-cli-process.test.ts` drives
+  the built bin in a temp project with a temp home and requires the real repository root's rule, skill and instruction paths to be
+  unchanged.
+- `story-41-6-qa-installer-provenance.test.ts` proves the beside rule red through an injected payload, and the probe failure
+  fail-closed. The pins that moved are updated from tool output.
+
+### Known limits
+
+- Project scope only: a user-scope install is refused, because it would load the rule in every session of every project.
+- The Claude Code route installs the skills even when the Claude Code plugin is present; plugin detection arrives with the plugin.
+- The notes about a client that reads a skill or the rule twice are static text; the installer does not deduplicate.
+- Only the project directory is checked for a `CLAUDE.md`; a `CLAUDE.md` in a parent directory is not seen.
+- A symlinked `.claude/` or `.agents/` directory, or a symlinked `AGENTS.md` or `GEMINI.md`, is written through.
+- `--project` is not compared with your home directory: `--project ~` (or running from `~`) installs the rule where every
+  project's session loads it.
+- Skills-pack backups are never pruned, and `doctor` does not list them.
+- An edit inside the installer's own block is replaced on the next install.
+- Installing for one client never updates another client's non-shared files.
+
 ## [Pre-release — 2026-10-19] — Story 41.5: Workflow skills refresh
 
 No tool, action, governance key, preset row, refusal code, environment variable or route is added or changed, so no tool count

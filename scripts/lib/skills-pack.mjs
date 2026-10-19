@@ -6,6 +6,7 @@
 //
 //   skills/<name>/...                       one directory per skill
 //   rules/claude-code/<name>.md             each always-on rule, as the Claude Code rule file
+//   rules/cursor/<name>.mdc                 each always-on rule, as a Cursor project rule
 //   rules/agents-md/<name>.md               each always-on rule, as an AGENTS.md section
 //   IRIS-MCP-THIRD-PARTY-NOTICES.md         the third-party notice
 //   README.md                               generated (carries the DO-NOT-EDIT banner)
@@ -13,11 +14,13 @@
 // SOURCES. Workflow skills are `gen:skills` output in `skills/`. Hand-authored content lives in
 // `skills-pack-src/`: knowledge skills under `knowledge/<name>/`, the rules under `rules/`, and the notice
 // at the root of that directory. Assembly copies bytes and renders only the pack README (a catalog of the
-// knowledge skills, the workflow skills and the rules) and each rule's two forms.
+// knowledge skills, the workflow skills and the rules) and each rule's three forms.
 //
 // RULES. A rule source is one flat `rules/<name>.md` with no frontmatter (an always-on rule is unscoped,
-// so it takes no `paths:`). Its `claude-code` form is the source bytes. Its `agents-md` form is the same
-// bytes between two marker lines, `<!-- IRIS-MCP-RULE:<name>:BEGIN -->` and `<!-- IRIS-MCP-RULE:<name>:END -->`;
+// so it takes no `paths:`). Its `claude-code` form is the source bytes. Its `cursor` form is the source bytes
+// after Cursor's always-apply frontmatter (CURSOR_RULE_FRONTMATTER), in a `.mdc` file. Its `agents-md` form is
+// the same bytes between two marker lines, `<!-- IRIS-MCP-RULE:<name>:BEGIN -->` and
+// `<!-- IRIS-MCP-RULE:<name>:END -->`;
 // a consumer matches those lines exactly and owns everything between them. No line of a rule source may start with
 // `<!-- IRIS-MCP-RULE:`, so each section holds exactly its own two marker lines.
 //
@@ -49,8 +52,30 @@ export const PACK_README_FILENAME = 'README.md';
 /** The pack directory of each rule form, relative to the pack root. */
 export const RULE_FORM_DIRS = Object.freeze({
   claudeCode: 'rules/claude-code',
+  cursor: 'rules/cursor',
   agentsMd: 'rules/agents-md',
 });
+
+/** The file extension of each rule form. Cursor ignores a plain `.md` in `.cursor/rules`, so its form is `.mdc`. */
+export const RULE_FORM_EXTENSIONS = Object.freeze({
+  claudeCode: '.md',
+  cursor: '.mdc',
+  agentsMd: '.md',
+});
+
+/** The Cursor rule form's frontmatter: the rule applies in every session. */
+export const CURSOR_RULE_FRONTMATTER = '---\nalwaysApply: true\n---\n\n';
+
+/**
+ * The pack-relative path of one rule form.
+ *
+ * @param {'claudeCode' | 'cursor' | 'agentsMd'} form
+ * @param {string} stem - The rule's file name without `.md`.
+ * @returns {string}
+ */
+export function ruleFormPath(form, stem) {
+  return `${RULE_FORM_DIRS[form]}/${stem}${RULE_FORM_EXTENSIONS[form]}`;
+}
 
 /** A rule source's file name: lower-case letters and digits, in groups joined by single hyphens, with the `.md` extension. */
 export const RULE_SOURCE_NAME = /^[a-z0-9]+(-[a-z0-9]+)*\.md$/;
@@ -148,6 +173,16 @@ export function renderAgentsMdSection(stem, bytes) {
 }
 
 /**
+ * A rule's Cursor form: CURSOR_RULE_FRONTMATTER followed by the source bytes. The source bytes are never decoded.
+ *
+ * @param {Buffer} bytes - The rule source.
+ * @returns {Buffer}
+ */
+export function renderCursorRule(bytes) {
+  return Buffer.concat([Buffer.from(CURSOR_RULE_FRONTMATTER, 'utf8'), bytes]);
+}
+
+/**
  * One skill of the pack catalog: its directory name, the description read from its frontmatter (`null`
  * when none can be read) and the tool preset it declares (`null` when none is declared or the value is not
  * one of SKILL_PRESETS).
@@ -187,7 +222,7 @@ function catalogSkillLine({ name, description, preset }) {
 }
 
 /**
- * One catalog line for a rule: its title, and how its two pack forms load.
+ * One catalog line for a rule: its title, and how its three pack forms load.
  *
  * @param {{ stem: string, title: string }} rule
  * @returns {string}
@@ -196,7 +231,8 @@ function catalogRuleLine({ stem, title }) {
   return (
     `- \`${stem}\`: ${title}. Its Claude Code form, \`${RULE_FORM_DIRS.claudeCode}/${stem}.md\`, has no ` +
     `\`paths:\` scope, so it loads in every session of a project that installs it. ` +
-    `\`${RULE_FORM_DIRS.agentsMd}/${stem}.md\` holds the same text for \`AGENTS.md\`, between two marker lines.`
+    `\`${ruleFormPath('cursor', stem)}\` is the same text as a Cursor rule with \`alwaysApply: true\`, ` +
+    `and \`${ruleFormPath('agentsMd', stem)}\` holds it for \`AGENTS.md\`, between two marker lines.`
   );
 }
 
@@ -232,6 +268,7 @@ export function renderPackReadme(contents = {}) {
     `## Layout\n\n` +
     `- \`skills/<name>/SKILL.md\`: one directory per skill, in the standard plugin layout.\n` +
     `- \`rules/claude-code/<name>.md\`: the always-on rule as a Claude Code rule file.\n` +
+    `- \`rules/cursor/<name>.mdc\`: the same rule as a Cursor project rule, with \`alwaysApply: true\` frontmatter.\n` +
     `- \`rules/agents-md/<name>.md\`: the same rule as an \`AGENTS.md\` section, between the lines ` +
     `\`<!-- IRIS-MCP-RULE:<name>:BEGIN -->\` and \`<!-- IRIS-MCP-RULE:<name>:END -->\`.\n` +
     `- \`${NOTICE_FILENAME}\`: third-party notices and licence texts for adapted content.\n\n` +
@@ -515,7 +552,8 @@ function ruleTitle(stem, bytes) {
  *
  * - every file of each `skills/<n>/` (not `skills/README.md`) goes to `skills/<n>/...`;
  * - every file of each `skills-pack-src/knowledge/<n>/` goes to `skills/<n>/...`;
- * - each `skills-pack-src/rules/<n>.md` goes to `rules/claude-code/<n>.md` (the source bytes) and to
+ * - each `skills-pack-src/rules/<n>.md` goes to `rules/claude-code/<n>.md` (the source bytes), to
+ *   `rules/cursor/<n>.mdc` (the source bytes after the always-apply frontmatter) and to
  *   `rules/agents-md/<n>.md` (the source bytes between the two marker lines);
  * - the notice goes to the pack root, beside a generated `README.md` that catalogs the skills (each with
  *   the description and the tool preset its frontmatter declares) and the rules.
@@ -630,8 +668,9 @@ export function assemblePack(root) {
       const stem = entry.name.slice(0, -'.md'.length);
       const source = `${RULES_SOURCE_DIR}/${entry.name}`;
       catalog.rules.push({ stem, title: ruleTitle(stem, bytes) });
-      add(`${RULE_FORM_DIRS.claudeCode}/${entry.name}`, bytes, source);
-      add(`${RULE_FORM_DIRS.agentsMd}/${entry.name}`, renderAgentsMdSection(stem, bytes), source);
+      add(ruleFormPath('claudeCode', stem), bytes, source);
+      add(ruleFormPath('cursor', stem), renderCursorRule(bytes), source);
+      add(ruleFormPath('agentsMd', stem), renderAgentsMdSection(stem, bytes), source);
     }
     catalog.rules.sort((a, b) => (a.stem < b.stem ? -1 : a.stem > b.stem ? 1 : 0));
   }
@@ -651,7 +690,7 @@ export function assemblePack(root) {
  * occupies (or will occupy) in the pack. This is the one enumeration of agent content.
  *
  * - `workflow:<n>/<f>`: each `.md` under `skills/<n>/` (the generated workflow skills);
- * - `pack:<rel>`: each `.md` under the pack's `skills/` and `rules/`;
+ * - `pack:<rel>`: each `.md` under the pack's `skills/` and each `.md` or `.mdc` under its `rules/`;
  * - `knowledge:<n>/<f>`: each `.md` under `skills-pack-src/knowledge/<n>/`;
  * - `rule:<f>`: each `.md` under `skills-pack-src/rules/`.
  *
@@ -660,7 +699,7 @@ export function assemblePack(root) {
  */
 export function listAgentContentFiles(root) {
   const out = [];
-  const markdown = (rels) => rels.filter((rel) => rel.endsWith('.md'));
+  const markdown = (rels, extensions = ['.md']) => rels.filter((rel) => extensions.some((extension) => rel.endsWith(extension)));
 
   const workflowDir = join(root, WORKFLOW_SKILLS_DIR);
   for (const name of listSubdirectories(workflowDir)) {
@@ -672,7 +711,7 @@ export function listAgentContentFiles(root) {
 
   const packDir = join(root, PACK_DIR);
   for (const area of ['skills', 'rules']) {
-    for (const rel of markdown(listFilesRecursive(join(packDir, area)))) {
+    for (const rel of markdown(listFilesRecursive(join(packDir, area)), area === 'rules' ? ['.md', '.mdc'] : ['.md'])) {
       out.push({ label: `pack:${area}/${rel}`, packRel: `${area}/${rel}`, absPath: join(packDir, area, rel) });
     }
   }

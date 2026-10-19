@@ -9,7 +9,9 @@
  * (a source-scan pin in `clients-cli.test.ts` asserts no
  * `jsonc-parser`/`smol-toml`/`yaml` import and no edit mechanics appear in
  * this file; host probing lives in the sibling `host-probes.ts` for the
- * same reason).
+ * same reason). The `skills install|uninstall` command (Story 41.6) is just
+ * as thin: it consumes the installer modules (`pack-plan.ts`, `pack-apply.ts`)
+ * and holds no placement, marker or manifest logic of its own.
  *
  * **Exit codes (mirrors the governance CLI contract, AC 33.2.3).**
  * - `0` success
@@ -49,6 +51,7 @@
  */
 
 import { homedir } from "node:os";
+import path from "node:path";
 import type { Readable } from "node:stream";
 
 import { ADAPTER_DATA_VERSION, CLIENT_ADAPTERS, CLIENT_DISPOSITIONS } from "../adapters.js";
@@ -64,6 +67,9 @@ import {
   restore,
   type EngineResult,
 } from "../engine.js";
+import { executePackPlan, preparePackChange, REAL_BYTES_FS, type BytesFs } from "../pack-apply.js";
+import { renderPlanPreview } from "../pack-plan.js";
+import { PACK_TARGETS, packTargetFor } from "../pack-targets.js";
 import { resolveScopePath } from "../paths.js";
 import {
   diagnoseConfigSurface,
@@ -121,6 +127,8 @@ export interface CliDeps {
    * shapes). */
   stdin?: Readable & { isTTY?: boolean };
   fs?: WriteFs;
+  /** Byte-level file system the `skills` command reads and writes through (default: the real one). */
+  bytesFs?: BytesFs;
   now?: () => Date;
   /** Interactive yes/no confirmation (default: TTY line prompt). */
   promptConfirm?: (question: string) => Promise<boolean>;
@@ -138,6 +146,7 @@ interface ResolvedDeps {
   stderr: CliOutput;
   stdin: (Readable & { isTTY?: boolean }) | undefined;
   fs: WriteFs;
+  bytesFs: BytesFs;
   now: () => Date;
   promptConfirm: (question: string) => Promise<boolean>;
   promptPassword: (label: string) => Promise<string>;
@@ -159,6 +168,7 @@ function resolveDeps(deps: CliDeps): ResolvedDeps {
     stderr: deps.stderr ?? process.stderr,
     stdin,
     fs: deps.fs ?? REAL_WRITE_FS,
+    bytesFs: deps.bytesFs ?? REAL_BYTES_FS,
     now: deps.now ?? (() => new Date()),
     promptConfirm: deps.promptConfirm ?? ((question: string) => defaultConfirm(question, stdin)),
     promptPassword: deps.promptPassword ?? ((label: string) => defaultPassword(label, stdin)),
@@ -329,6 +339,7 @@ export const VALUED_OPTIONS: ReadonlySet<string> = new Set([
   "--governance-file",
   "--backup",
   "--confirm-secret",
+  "--project",
 ]);
 
 function parseArgs(
@@ -487,6 +498,12 @@ Commands:
       expectations), stale backups, orphaned stashes, and present
       non-canonical entries that fail ownership (re-recorded manager-created
       by --repair --yes-i-mean-it).
+  skills install|uninstall --client <id> [--project <dir>] [--dry-run] [--yes] [--include-modified] [--json]
+      Install, update or remove the IRIS MCP skills pack and its always-on
+      rule in a project, in the client's native locations (--client agents
+      for any agent that reads .agents/skills/ and AGENTS.md). Previews the
+      changes first and needs the same confirmation as apply; only files and
+      marked blocks it installed are changed.
 
 Options:
   --client <id>         Client id (see "detect" for the roster).
@@ -512,7 +529,12 @@ ${hiddenNote}  --host <host>          Connection literal (env-reference on no-ex
   --confirm-secret <n>  explicit mode: typed confirmation, exactly the entry
                         name, before any literal password is written.
   --backup <name>       restore: a specific backup basename.
-  --yes                 apply: skip the interactive confirmation.
+  --yes                 apply, skills: skip the interactive confirmation.
+  --project <dir>       skills: the project to install into (default: the
+                        current directory). Only project scope is supported.
+  --dry-run             skills: preview the changes and write nothing.
+  --include-modified    skills: also replace or remove installed files you
+                        changed since (each is backed up first).
   --repair              doctor: re-record orphaned manager-created entries.
   --yes-i-mean-it       doctor --repair: the typed confirmation (required).
   --json                Machine-readable output: one {ok, command, data,
@@ -530,6 +552,7 @@ Exit codes:
 Every successful write prints the client's restart hint. Backups live under
 ~/.iris-mcp/client-manager/backups/<client>/<scope>/; state.json there is
 the manager's ownership/stash ledger.
+Skills-pack backups live under ~/.iris-mcp/client-manager/backups/skills-pack/.
 `;
 }
 
@@ -580,6 +603,36 @@ function usageError(deps: ResolvedDeps, message: string, usage: string): number 
  * narrows object types). */
 function isFailure(value: unknown): value is { error: string } {
   return typeof value === "object" && value !== null && "error" in value;
+}
+
+/**
+ * The confirmation gate shared by `apply` and `skills`: nothing is written unless `--yes` was given or an
+ * interactive terminal confirmed. Returns the exit code when the run must stop here (exit 2 on a non-TTY without
+ * `--yes`; exit 1 when the human declined), or `undefined` to go on and write.
+ */
+async function confirmBeforeWrite(
+  deps: ResolvedDeps,
+  gate: {
+    command: string;
+    usage: string;
+    wantsWrite: boolean;
+    yes: boolean;
+    wantJson: boolean;
+    nonTtyMessage: string;
+    question: string;
+  },
+): Promise<number | undefined> {
+  if (!gate.wantsWrite || gate.yes) return undefined;
+  if (deps.stdin === undefined || deps.stdin.isTTY !== true) {
+    return usageError(deps, gate.nonTtyMessage, gate.usage);
+  }
+  const confirmed = await deps.promptConfirm(gate.question);
+  if (!confirmed) {
+    deps.stderr.write(`Aborted; no changes were written.\n`);
+    if (gate.wantJson) emitJson(deps, gate.command, false, null, "confirmation declined");
+    return 1;
+  }
+  return undefined;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1069,21 +1122,16 @@ async function cmdApply(args: string[], deps: ResolvedDeps): Promise<number> {
   }
 
   const wantsWrite = plans.some((plan) => plan.mechanism !== "already-in-state" || plan.missingInputIds.length > 0);
-  if (wantsWrite && !parsed.flags.has("--yes")) {
-    if (deps.stdin === undefined || deps.stdin.isTTY !== true) {
-      return usageError(
-        deps,
-        `apply needs confirmation before writing and this is not an interactive terminal; re-run with --yes to accept the previewed changes`,
-        APPLY_USAGE,
-      );
-    }
-    const confirmed = await deps.promptConfirm(`Apply these changes to ${adapter.displayName}?`);
-    if (!confirmed) {
-      deps.stderr.write(`Aborted; no changes were written.\n`);
-      if (wantJson) emitJson(deps, "apply", false, null, "confirmation declined");
-      return 1;
-    }
-  }
+  const stopped = await confirmBeforeWrite(deps, {
+    command: "apply",
+    usage: APPLY_USAGE,
+    wantsWrite,
+    yes: parsed.flags.has("--yes"),
+    wantJson,
+    nonTtyMessage: `apply needs confirmation before writing and this is not an interactive terminal; re-run with --yes to accept the previewed changes`,
+    question: `Apply these changes to ${adapter.displayName}?`,
+  });
+  if (stopped !== undefined) return stopped;
 
   const ctx = hostContext(deps);
   const results: EngineResult[] = [];
@@ -1758,6 +1806,143 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
   return findingCount === 0 ? 0 : 1;
 }
 
+// ------------------------------------------------------------------
+// skills install | uninstall (Story 41.6, AC 41.6.4) - thin: parse,
+// validate, plan, preview, confirm, execute, render. All planning and
+// writing is the pack-plan / pack-apply modules (the installer).
+// ------------------------------------------------------------------
+
+const SKILLS_USAGE =
+  "iris-mcp-clients skills install|uninstall --client <id> [--project <dir>] [--scope project] [--dry-run] [--yes] [--include-modified] [--json]";
+
+const SKILLS_USER_SCOPE_REFUSAL =
+  "skills supports only --scope project: at user scope the always-on rule would load in every session of every project, and a personal skill shadows a project skill of the same name in Claude Code";
+
+async function cmdSkills(args: string[], deps: ResolvedDeps): Promise<number> {
+  const parsed = parseArgs(
+    args,
+    ["--json", "--yes", "--dry-run", "--include-modified"],
+    ["--client", "--project", "--scope"],
+  );
+  if (parsed.error) return usageError(deps, parsed.error, SKILLS_USAGE);
+  const [actionArg, ...extra] = parsed.positional;
+  if (actionArg === undefined) return usageError(deps, "skills needs an action: install or uninstall", SKILLS_USAGE);
+  if (actionArg !== "install" && actionArg !== "uninstall") {
+    return usageError(deps, `unknown skills action "${actionArg}" (expected: install, uninstall)`, SKILLS_USAGE);
+  }
+  if (extra.length !== 0) {
+    return usageError(deps, `"skills ${actionArg}" takes no further arguments (got "${extra[0]}").`, SKILLS_USAGE);
+  }
+  const action = actionArg;
+  const wantJson = parsed.flags.has("--json");
+  const dryRun = parsed.flags.has("--dry-run");
+
+  const knownClients = PACK_TARGETS.map((target) => target.id).join(", ");
+  const clientId = parsed.options.get("--client");
+  if (clientId === undefined || clientId === "") {
+    return usageError(deps, `a --client <id> is required (known clients: ${knownClients})`, SKILLS_USAGE);
+  }
+  const target = packTargetFor(clientId);
+  if (target === undefined) {
+    return usageError(deps, `unknown client "${clientId}" (known clients: ${knownClients})`, SKILLS_USAGE);
+  }
+  if (target.route === null) {
+    return usageError(deps, target.noRouteReason ?? `${target.displayName} has no project folder for skills`, SKILLS_USAGE);
+  }
+  const rawScope = parsed.options.get("--scope");
+  const scope = scopeFor(rawScope);
+  if (isFailure(scope)) return usageError(deps, scope.error, SKILLS_USAGE);
+  if (rawScope !== undefined && scope !== "project") return usageError(deps, SKILLS_USER_SCOPE_REFUSAL, SKILLS_USAGE);
+
+  const base = deps.projectDir;
+  if (base === undefined) return usageError(deps, "no project directory is known; pass --project <dir>", SKILLS_USAGE);
+  const pathApi = deps.platform === "win32" ? path.win32 : path.posix;
+  const projectOption = parsed.options.get("--project");
+  const project = projectOption === undefined ? base : pathApi.resolve(base, projectOption);
+
+  const ctx = { ...hostContext(deps), projectDir: project };
+  const prepared = preparePackChange(ctx, {
+    action,
+    client: target.id,
+    includeModified: parsed.flags.has("--include-modified"),
+    fs: deps.bytesFs,
+  });
+  if (!prepared.ok) {
+    if (prepared.kind === "usage") return usageError(deps, prepared.message, SKILLS_USAGE);
+    deps.stderr.write(`Error: ${prepared.message}\n`);
+    if (wantJson) emitJson(deps, "skills", false, null, prepared.message);
+    return 1;
+  }
+  const { plan } = prepared;
+
+  // Text goes to stdout; under --json it goes to stderr so stdout stays one parseable envelope.
+  const say = (text: string): void => (wantJson ? deps.stderr : deps.stdout).write(text);
+  const envelope = (changed: number) => ({
+    action,
+    client: plan.client,
+    route: plan.route,
+    project,
+    dryRun,
+    changed,
+    items: plan.items,
+    notes: plan.notes,
+  });
+  say(renderPlanPreview(plan, project));
+
+  if (plan.conflicts.length > 0) {
+    const message = `${plan.conflicts.length} conflict(s); nothing was written. Resolve them as listed above, then re-run.`;
+    deps.stderr.write(`Error: ${message}\n`);
+    if (wantJson) emitJson(deps, "skills", false, envelope(0), message);
+    return 1;
+  }
+  if (dryRun) {
+    say(`(dry run: nothing was written)\n`);
+    if (wantJson) emitJson(deps, "skills", true, envelope(0));
+    return 0;
+  }
+  if (plan.changes === 0) {
+    if (action === "install" && plan.counts.keep > 0) {
+      say(
+        `Nothing to change for ${plan.displayName}: ${plan.counts.keep} installed file(s) you changed were kept; re-run with --include-modified to replace them.\n`,
+      );
+    } else if (action === "install") {
+      say(`Nothing to change for ${plan.displayName}: the skills pack is already installed.\n`);
+    } else if (!plan.installed) {
+      say(`Nothing to remove for ${plan.displayName}: the skills pack is not installed.\n`);
+    } else {
+      say(
+        `Nothing to remove for ${plan.displayName}: every installed file you changed was kept; re-run with --include-modified to remove them.\n`,
+      );
+    }
+    if (wantJson) emitJson(deps, "skills", true, envelope(0));
+    return 0;
+  }
+
+  const stopped = await confirmBeforeWrite(deps, {
+    command: "skills",
+    usage: SKILLS_USAGE,
+    wantsWrite: true,
+    yes: parsed.flags.has("--yes"),
+    wantJson,
+    nonTtyMessage: `skills ${action} needs confirmation before writing and this is not an interactive terminal; re-run with --yes to accept the previewed changes, or --dry-run to preview only`,
+    question: `Apply these changes to ${plan.displayName}?`,
+  });
+  if (stopped !== undefined) return stopped;
+
+  const result = executePackPlan(ctx, plan, { fs: deps.bytesFs, now: deps.now });
+  if (!result.ok) {
+    deps.stderr.write(`Error: ${result.reason}\n`);
+    if (wantJson) emitJson(deps, "skills", false, envelope(0), result.reason);
+    return 1;
+  }
+  say(`Done: ${result.changed} path(s) changed for ${plan.displayName}.\n`);
+  if (plan.notes.length > 0) {
+    say(`Notes:\n${plan.notes.map((note) => `  - ${note}`).join("\n")}\n`);
+  }
+  if (wantJson) emitJson(deps, "skills", true, envelope(result.changed));
+  return 0;
+}
+
 // ════════════════════════════════════════════════════════════════════
 // Entry point.
 // ════════════════════════════════════════════════════════════════════
@@ -1803,9 +1988,11 @@ export async function runCli(argv: string[], deps: CliDeps = {}): Promise<number
       return cmdRestore(rest, resolved);
     case "doctor":
       return cmdDoctor(rest, resolved);
+    case "skills":
+      return cmdSkills(rest, resolved);
     default:
       resolved.stderr.write(
-        `Error: unknown command "${command}". Valid commands: detect, status, diff, apply, enable, disable, remove, restore, doctor.\n`,
+        `Error: unknown command "${command}". Valid commands: detect, status, diff, apply, enable, disable, remove, restore, doctor, skills.\n`,
       );
       return 2;
   }

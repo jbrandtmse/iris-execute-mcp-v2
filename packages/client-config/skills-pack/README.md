@@ -34,12 +34,13 @@ Each is generated from the MCP prompt of the same name and walks an agent throug
 
 ## Always-on rules
 
-- `iris-mcp-objectscript-pre-write`: ObjectScript pre-write checklist. Its Claude Code form, `rules/claude-code/iris-mcp-objectscript-pre-write.md`, has no `paths:` scope, so it loads in every session of a project that installs it. `rules/agents-md/iris-mcp-objectscript-pre-write.md` holds the same text for `AGENTS.md`, between two marker lines.
+- `iris-mcp-objectscript-pre-write`: ObjectScript pre-write checklist. Its Claude Code form, `rules/claude-code/iris-mcp-objectscript-pre-write.md`, has no `paths:` scope, so it loads in every session of a project that installs it. `rules/cursor/iris-mcp-objectscript-pre-write.mdc` is the same text as a Cursor rule with `alwaysApply: true`, and `rules/agents-md/iris-mcp-objectscript-pre-write.md` holds it for `AGENTS.md`, between two marker lines.
 
 ## Layout
 
 - `skills/<name>/SKILL.md`: one directory per skill, in the standard plugin layout.
 - `rules/claude-code/<name>.md`: the always-on rule as a Claude Code rule file.
+- `rules/cursor/<name>.mdc`: the same rule as a Cursor project rule, with `alwaysApply: true` frontmatter.
 - `rules/agents-md/<name>.md`: the same rule as an `AGENTS.md` section, between the lines `<!-- IRIS-MCP-RULE:<name>:BEGIN -->` and `<!-- IRIS-MCP-RULE:<name>:END -->`.
 - `IRIS-MCP-THIRD-PARTY-NOTICES.md`: third-party notices and licence texts for adapted content.
 

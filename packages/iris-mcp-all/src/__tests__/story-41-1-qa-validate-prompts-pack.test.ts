@@ -46,10 +46,10 @@ function expectRejected(root: string): string {
 }
 
 describe("validate:prompts CLI, scratch copy: the green controls", () => {
-  it("the unmodified copy passes with 51 sources: 12 prompts and 39 content files (12 workflow, 20 pack, 6 knowledge, 1 rule)", () => {
+  it("the unmodified copy passes with 52 sources: 12 prompts and 40 content files (12 workflow, 21 pack, 6 knowledge, 1 rule)", () => {
     const run = runScript(scratch(), VALIDATE);
     expect(run.status, run.stderr).toBe(0);
-    expect(run.stdout).toContain("51 source(s) checked (12 prompt(s) + 39 content file(s): 12 workflow, 20 pack, 6 knowledge, 1 rule)");
+    expect(run.stdout).toContain("52 source(s) checked (12 prompt(s) + 40 content file(s): 12 workflow, 21 pack, 6 knowledge, 1 rule)");
   });
 
   it("a real tool name added to a pack file is accepted, and counted as no extra source", () => {
@@ -57,7 +57,7 @@ describe("validate:prompts CLI, scratch copy: the green controls", () => {
     appendFileSync(join(root, PACK_DIR, PACK_SKILL), "\nThen call `iris_doc_get` and `iris_server_profiles`.\n");
     const run = runScript(root, VALIDATE);
     expect(run.status, run.stderr).toBe(0);
-    expect(run.stdout).toContain("51 source(s) checked");
+    expect(run.stdout).toContain("52 source(s) checked");
   });
 });
 
@@ -119,13 +119,14 @@ describe("validate:prompts CLI, scratch copy: a source and its regenerated pack 
     ]);
   });
 
-  it("a bad token in a rule names the source and both pack forms after gen:pack", () => {
+  it("a bad token in a rule names the source and all three pack forms after gen:pack", () => {
     const root = scratch();
     put(root, `${RULES_SOURCE_DIR}/qa-rule.md`, `Call \`${BAD_TOKEN}\`.\n`);
     expect(runScript(root, GEN_PACK).status).toBe(0);
     expect(flaggedLabels(expectRejected(root))).toEqual([
       `pack:${RULE_FORM_DIRS.agentsMd}/qa-rule.md ${BAD_TOKEN}`,
       `pack:${RULE_FORM_DIRS.claudeCode}/qa-rule.md ${BAD_TOKEN}`,
+      `pack:${RULE_FORM_DIRS.cursor}/qa-rule.mdc ${BAD_TOKEN}`,
       `rule:qa-rule.md ${BAD_TOKEN}`,
     ]);
   });
@@ -144,6 +145,6 @@ describe("validate:prompts CLI, scratch copy: a source and its regenerated pack 
     expect(runScript(root, GEN_PACK).status).toBe(0);
     const run = runScript(root, VALIDATE);
     expect(run.status, run.stderr).toBe(0);
-    expect(run.stdout).toContain("(12 prompt(s) + 44 content file(s): 12 workflow, 23 pack, 7 knowledge, 2 rule)");
+    expect(run.stdout).toContain("(12 prompt(s) + 46 content file(s): 12 workflow, 25 pack, 7 knowledge, 2 rule)");
   });
 });

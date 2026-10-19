@@ -7,7 +7,7 @@ Hand-authored sources of the IRIS MCP skills pack. This file is for contributors
 | Path | What it holds | Where it goes in the pack |
 | --- | --- | --- |
 | `knowledge/<name>/SKILL.md` (and any files beside it) | One knowledge skill per directory | `skills/<name>/...` |
-| `rules/<name>.md` | One always-on rule per flat file, with no frontmatter | `rules/claude-code/<name>.md` and `rules/agents-md/<name>.md` |
+| `rules/<name>.md` | One always-on rule per flat file, with no frontmatter | `rules/claude-code/<name>.md`, `rules/cursor/<name>.mdc` and `rules/agents-md/<name>.md` |
 | `IRIS-MCP-THIRD-PARTY-NOTICES.md` | The third-party notice and the upstream licence text | the pack root |
 
 Nothing else belongs here. `pnpm gen:pack` fails and names any other top-level entry, a `knowledge/<name>/` without a `SKILL.md`, a skill name that a workflow skill in `skills/` already uses, anything in `rules/` that is not a flat `<name>.md` file (lower-case letters, digits and single hyphens in the name), a rule source that opens with frontmatter, and a rule source with a line that starts with `<!-- IRIS-MCP-RULE:` (only the generated section's own two marker lines may).
@@ -22,7 +22,7 @@ The pack is `packages/client-config/skills-pack/`. It is a generated, committed 
 2. Run `pnpm gen:pack`.
 3. Commit the sources and the regenerated pack together.
 
-Every pack file is a byte-for-byte copy of its source, except the pack's `README.md` and the `AGENTS.md` form of each rule, which the generator renders.
+Every pack file is a byte-for-byte copy of its source, except the pack's `README.md`, the Cursor form of each rule and the `AGENTS.md` form of each rule, which the generator renders.
 
 ## Knowledge skills
 
@@ -40,13 +40,14 @@ A description also names what the skill covers in its first sentence, then says 
 
 The six knowledge skills are the three core skills (`iris-mcp-objectscript-gotchas`, `iris-mcp-objectscript-error-handling` and `iris-mcp-objectscript-unit-tests`) and the three platform skills (`iris-mcp-objectscript-sql`, `iris-mcp-system-classes` and `iris-mcp-interoperability`). All six name no `iris_*` tool, so they declare no preset, and they are written for a user's agent: no internal rule number, planning id, repository path or repository tooling. Each claim in them is checked on a live IRIS instance before it is written, by running it or, where running it would change a shared instance, by reading the IRIS class source of the same build, and a changed claim is checked again. A skill that names an `iris_*` tool declares, as `metadata` `iris-tools-preset`, the first of `core`, `developer` and `full` under which every tool it names is visible; `pnpm validate:prompts` checks it.
 
-## Rules and their two forms
+## Rules and their three forms
 
 A rule is always on, so it takes no frontmatter, and `paths:` least of all: a scoped rule loads only when the agent touches a matching file, which is too late for a checklist that is meant to be in context before the first write. `pnpm gen:pack` fails and names a rule source whose first line is `---`. A rule also names no `iris_*` tool, so it declares no preset.
 
-From each `rules/<name>.md` the generator writes two files:
+From each `rules/<name>.md` the generator writes three files:
 
 - `rules/claude-code/<name>.md` holds the source bytes. Claude Code loads it from `.claude/rules/`.
+- `rules/cursor/<name>.mdc` holds the source bytes after a fixed frontmatter block (`---`, `alwaysApply: true`, `---` and a blank line). Cursor loads a project rule from `.cursor/rules/` and ignores a plain `.md` file there, so the form is a `.mdc` file.
 - `rules/agents-md/<name>.md` holds the same bytes between two marker lines, each a whole line ending in LF: `<!-- IRIS-MCP-RULE:<name>:BEGIN -->` before them and `<!-- IRIS-MCP-RULE:<name>:END -->` after them. When the source does not end in LF, the generator adds one so the END line stays a whole line. An installer finds the block by those two exact lines, replaces everything between them, and leaves the rest of the user's `AGENTS.md` byte for byte as it was.
 
 ## Adapted content: header and provenance row

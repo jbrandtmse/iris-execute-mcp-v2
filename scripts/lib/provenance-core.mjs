@@ -231,8 +231,10 @@ export function isExcludedSource(path) {
  * @property {Buffer | null} packNotice - The notice inside the pack.
  * @property {Array<{ label: string, packRel: string, text: string }>} agentFiles - Every agent content file.
  * @property {Array<{ rel: string, bytes: Buffer }>} packFiles - Every file of the pack, pack-relative.
- * @property {Array<{ name: string, mustShipPack: boolean, files: Array<{ path: string, bytes: Buffer }>, problem?: string }>} distributions
- *   One per npm tarball. `problem` is set when the file list could not be gathered.
+ * @property {Array<{ name: string, mustShipPack: boolean, noticeBeside?: boolean, files: Array<{ path: string, bytes: Buffer }>, problem?: string }>} distributions
+ *   One per npm tarball, and one per installer route. `problem` is set when the file list could not be gathered.
+ *   `noticeBeside` marks an installer payload: each of its files that carries adapted content needs the notice
+ *   in its own directory.
  */
 
 /**
@@ -343,6 +345,22 @@ export function checkProvenance(inputs) {
         distribution.name,
         `the tarball carries pack or adapted content but no ${NOTICE_FILENAME} equal to the canonical notice`,
       );
+    }
+    if (distribution.noticeBeside === true) {
+      const byPath = new Map(distribution.files.map((file) => [file.path, file.bytes]));
+      for (const file of distribution.files) {
+        if (!file.bytes.includes(DISTRIBUTION_MARKER)) continue;
+        const slash = file.path.lastIndexOf('/');
+        const beside = `${slash < 0 ? '' : file.path.slice(0, slash + 1)}${NOTICE_FILENAME}`;
+        const notice = byPath.get(beside);
+        if (notice === undefined || canonical === null || !notice.equals(canonical)) {
+          add(
+            'distribution',
+            distribution.name,
+            `the installed copy ${file.path} carries adapted content but no ${NOTICE_FILENAME} beside it equal to the canonical notice`,
+          );
+        }
+      }
     }
     if (distribution.mustShipPack) {
       const shipped = new Set(distribution.files.map((file) => file.path));

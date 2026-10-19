@@ -64,6 +64,7 @@ describe("assemblePack layout (fixture roots)", () => {
       NOTICE_FILENAME,
       "README.md",
       `${RULE_FORM_DIRS.claudeCode}/always.md`,
+      `${RULE_FORM_DIRS.cursor}/always.mdc`,
       `${RULE_FORM_DIRS.agentsMd}/always.md`,
       "skills/k1/SKILL.md",
       "skills/k1/references/x.md",
@@ -72,6 +73,7 @@ describe("assemblePack layout (fixture roots)", () => {
     ].sort());
     expect(pack.get(NOTICE_FILENAME)?.toString("utf8")).toBe(NOTICE_TEXT);
     expect(pack.get(`${RULE_FORM_DIRS.claudeCode}/always.md`)?.toString("utf8")).toBe("rule\n");
+    expect(pack.get(`${RULE_FORM_DIRS.cursor}/always.mdc`)?.toString("utf8")).toBe("---\nalwaysApply: true\n---\n\nrule\n");
     expect(pack.get(`${RULE_FORM_DIRS.agentsMd}/always.md`)?.toString("utf8")).toBe(
       "<!-- IRIS-MCP-RULE:always:BEGIN -->\nrule\n<!-- IRIS-MCP-RULE:always:END -->\n",
     );
@@ -135,6 +137,7 @@ const README_LAYOUT = [
   "",
   "- `skills/<name>/SKILL.md`: one directory per skill, in the standard plugin layout.",
   "- `rules/claude-code/<name>.md`: the always-on rule as a Claude Code rule file.",
+  "- `rules/cursor/<name>.mdc`: the same rule as a Cursor project rule, with `alwaysApply: true` frontmatter.",
   "- `rules/agents-md/<name>.md`: the same rule as an `AGENTS.md` section, between the lines `<!-- IRIS-MCP-RULE:<name>:BEGIN -->` and `<!-- IRIS-MCP-RULE:<name>:END -->`.",
   "- `IRIS-MCP-THIRD-PARTY-NOTICES.md`: third-party notices and licence texts for adapted content.",
   "",
@@ -146,7 +149,7 @@ const README_LAYOUT = [
 
 /** The rule line of the catalog for a rule stem and title. */
 const ruleLine = (stem: string, title: string): string =>
-  `- \`${stem}\`: ${title}. Its Claude Code form, \`rules/claude-code/${stem}.md\`, has no \`paths:\` scope, so it loads in every session of a project that installs it. \`rules/agents-md/${stem}.md\` holds the same text for \`AGENTS.md\`, between two marker lines.`;
+  `- \`${stem}\`: ${title}. Its Claude Code form, \`rules/claude-code/${stem}.md\`, has no \`paths:\` scope, so it loads in every session of a project that installs it. \`rules/cursor/${stem}.mdc\` is the same text as a Cursor rule with \`alwaysApply: true\`, and \`rules/agents-md/${stem}.md\` holds it for \`AGENTS.md\`, between two marker lines.`;
 
 /** A README from its three lists, each already rendered as lines (an empty list renders `None.`). */
 function expectedReadme(knowledge: string[], workflow: string[], rules: string[]): string {
@@ -361,6 +364,7 @@ describe("gen-pack CLI (a copy of the scripts inside a fixture root)", () => {
         "README.md",
         `${RULE_FORM_DIRS.agentsMd}/rule.md`,
         `${RULE_FORM_DIRS.claudeCode}/rule.md`,
+        `${RULE_FORM_DIRS.cursor}/rule.mdc`,
         "skills/kn/SKILL.md",
         "skills/wf/SKILL.md",
       ].sort(),
@@ -449,7 +453,7 @@ describe("the committed pack (real tree)", () => {
   it("gen-pack --check passes on the committed tree", () => {
     const run = runNode(REPO_ROOT, "scripts/gen-pack.mjs", ["--check"]);
     expect(run.status, run.stderr).toBe(0);
-    expect(run.stdout).toContain("22 pack file(s)");
+    expect(run.stdout).toContain("23 pack file(s)");
   });
 
   describe("the README catalog (AC 41.5.2)", () => {
@@ -473,10 +477,10 @@ describe("the committed pack (real tree)", () => {
       return `- \`${name}\`${preset === null ? "" : ` (tool preset \`${preset}\`)`}: ${description}`;
     };
 
-    it("is the golden file: 11648 bytes, 48 lines, sha256 bdd1b54f...", () => {
-      expect(readme.length).toBe(11648);
-      expect(text.split("\n").length - 1, "48 lines").toBe(48);
-      expect(createHash("sha256").update(readme).digest("hex")).toBe("bdd1b54f06327f00af5a46b07457e3f4a6380a97479e3225afabf3b8ed5becd3");
+    it("is the golden file: 11859 bytes, 49 lines, sha256 00004f56...", () => {
+      expect(readme.length).toBe(11859);
+      expect(text.split("\n").length - 1, "49 lines").toBe(49);
+      expect(createHash("sha256").update(readme).digest("hex")).toBe("00004f56ab199117b7348a2b84a4eafc78bf3158f50b28a65c605d936f832c97");
       expect(/^[\x0a\x20-\x7e]+$/.test(text), "ASCII").toBe(true);
     });
 

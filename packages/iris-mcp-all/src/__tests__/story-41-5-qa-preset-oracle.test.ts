@@ -121,15 +121,15 @@ describe("the oracle reads the real servers, and the presets can tell a skill ap
     expect(developerOnly.length, "a tool developer shows and core hides").toBeGreaterThan(0);
   });
 
-  it("every iris_* token of the 39 content files names a tool some server advertises", () => {
+  it("every iris_* token of the 40 content files names a tool some server advertises", () => {
     const unknown = files.flatMap((file) => irisTokens(file.text).filter((token) => token !== DISCOVERY_TOOL && ownersOf(token).length === 0).map((token) => `${file.rel}: ${token}`));
     expect(unknown).toEqual([]);
   });
 
-  it("the 39 files are 12 workflow skills, 18 pack skills, 6 knowledge skills, 1 rule and 2 pack rule forms", () => {
+  it("the 40 files are 12 workflow skills, 18 pack skills, 6 knowledge skills, 1 rule and 3 pack rule forms", () => {
     const count = (group: ContentFile["group"]): number => files.filter((file) => file.group === group).length;
-    expect([count("workflow"), count("pack-skill"), count("knowledge"), count("rule"), count("pack-rule")]).toEqual([12, 18, 6, 1, 2]);
-    expect(files).toHaveLength(39);
+    expect([count("workflow"), count("pack-skill"), count("knowledge"), count("rule"), count("pack-rule")]).toEqual([12, 18, 6, 1, 3]);
+    expect(files).toHaveLength(40);
   });
 });
 

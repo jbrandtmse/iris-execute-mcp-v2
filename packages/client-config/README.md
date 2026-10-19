@@ -37,6 +37,7 @@ iris-mcp-clients apply --client <id> --servers <list> [--scope user|project] [--
 iris-mcp-clients enable|disable|remove --client <id> --server <name> [--scope user|project] [--json]
 iris-mcp-clients restore --client <id> [--scope user|project] [--backup <name>] [--json]
 iris-mcp-clients doctor [--json] [--repair --yes-i-mean-it]
+iris-mcp-clients skills install|uninstall --client <id> [--project <dir>] [--dry-run] [--yes] [--include-modified] [--json]
 ```
 
 - `apply` prints the pending diff FIRST and requires confirmation: an
@@ -61,6 +62,43 @@ iris-mcp-clients doctor [--json] [--repair --yes-i-mean-it]
   present `iris-`-namespaced entries that fail ownership (a state.json loss;
   re-record them manager-created with `doctor --repair --yes-i-mean-it`).
   Exit `0` when clean, `1` on any finding.
+
+## Installing the skills pack
+
+`iris-mcp-clients skills install --client <id>` puts the IRIS MCP skills pack (the `skills-pack/` directory of this
+package: the workflow and knowledge skills and the always-on ObjectScript pre-write rule) into one project, in the places
+that client reads. `skills uninstall` takes it out again. It is a CLI of this package, not an MCP tool, so it has no
+governance key and no visibility preset.
+
+- **Four routes, one per client family.** `claude-code` writes `.claude/skills/` and `.claude/rules/`. `cursor` writes
+  `.agents/skills/` and `.cursor/rules/<name>.mdc`. `gemini` writes `.agents/skills/` and a marked block in `GEMINI.md`.
+  `agents` writes `.agents/skills/` and a marked block in `AGENTS.md`; every other client takes it, VS Code included, and
+  `--client agents` serves any agent that reads `.agents/skills/` and `AGENTS.md`. Claude Desktop has no project folder for
+  skills, so `--client claude-desktop` is refused (exit 2).
+- **Project scope only.** The target is the current directory, or `--project <dir>`. `--scope user` is refused, because a
+  user-scope rule would load in every session of every project.
+- **Preview, then confirm.** Like `apply`, it prints the plan first (one line per path: `create`, `update`, `remove`,
+  `adopt`, `unchanged`, `keep` or `conflict`) and writes only after `--yes` or a TTY confirmation; a non-TTY run without
+  `--yes` refuses (exit 2). `--dry-run` previews and writes nothing. Re-running an install that would change nothing writes
+  nothing.
+- **It writes only what it owns.** The installer records the files and blocks it installed in
+  `.iris-mcp/skills-pack.json` in the project. A file at an owned path that it did not install is a conflict, and a conflict
+  refuses the whole run. Your `AGENTS.md` or `GEMINI.md` is read and written as bytes: only the block between its two
+  `IRIS-MCP-RULE` marker lines is ever changed, and uninstalling restores the other bytes exactly. It never writes
+  `CLAUDE.md` or a client's settings file.
+- **`--include-modified`.** A file you edited after the install is kept, with a note, on both install and uninstall; with
+  `--include-modified` it is replaced or removed after a backup. Every file an update or an uninstall overwrites or deletes is
+  backed up first under `~/.iris-mcp/client-manager/backups/skills-pack/`.
+- **Keep the record with the files.** Commit `.iris-mcp/skills-pack.json` together with the installed files, so that a
+  clone can update or uninstall them. Without the record, an installed file that differs from the pack is a file the
+  installer did not install, which is a conflict: move or delete it, then re-run.
+- **Exit codes.** `0` for success, nothing to change or a clean dry run; `1` for a conflict (a dry run included), an invalid
+  manifest or pack, a failed write (it is rolled back), a declined confirmation or a file that changed after the preview;
+  `2` for a usage error.
+- The notice for adapted content (`IRIS-MCP-THIRD-PARTY-NOTICES.md`) is installed beside every skill that carries it, and
+  stays while a file you changed remains in that skill's directory.
+
+Run `iris-mcp-clients --help` for every option.
 
 ## Doctor: config-surface drift
 

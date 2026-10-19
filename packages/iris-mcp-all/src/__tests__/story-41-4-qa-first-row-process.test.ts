@@ -37,6 +37,8 @@ const PACK_LABEL = `pack:${PACK_FILE}`;
 
 const CHECK = "scripts/check-provenance.mjs";
 const GEN_PACK = "scripts/gen-pack.mjs";
+/** The four installer routes' distributions (Story 41.6): each holds the pack's skills, so each is refused when the notice is not canonical. */
+const INSTALLER_DISTRIBUTIONS = ["agents", "claude-code", "cursor", "gemini"].map((route) => `distribution installer:${route}`);
 
 const temps: string[] = [];
 function scratch(): string {
@@ -82,7 +84,7 @@ function expectRed(root: string, expected: string[]): string {
 }
 
 describe("check:provenance CLI, scratch copy of the real tree: the real adapted skill and its real row (AC 41.4.3)", () => {
-  it("control: the unmodified copy passes with the one real row and the 39 agent files, and starts from the shipped state", () => {
+  it("control: the unmodified copy passes with the one real row and the 40 agent files, and starts from the shipped state", () => {
     const root = scratch();
     const source = readFileSync(join(root, SOURCE_REL), "utf8");
     expect(source.split("\n")[5], "the header is line 6 of the real source").toBe(HEADER);
@@ -90,7 +92,7 @@ describe("check:provenance CLI, scratch copy of the real tree: the real adapted 
     expect(rowLine(readFileSync(join(root, NOTICE_REL), "utf8"))).toContain(`| \`${ROW_SOURCE}\` |`);
     const run = runScript(root, CHECK);
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
-    expect(run.stdout).toContain("1 provenance row(s), 39 agent file(s), 1 distribution(s)");
+    expect(run.stdout).toContain("1 provenance row(s), 40 agent file(s), 5 distribution(s)");
     // The scratch pack is the committed pack: regenerating it from the unmodified sources changes nothing.
     regenerate(root);
     expect(readFileSync(join(root, PACK_DIR, PACK_FILE)).equals(readFileSync(join(REPO_ROOT, PACK_DIR, PACK_FILE)))).toBe(true);
@@ -113,6 +115,7 @@ describe("check:provenance CLI, scratch copy of the real tree: the real adapted 
       `claim-row ${KNOWLEDGE_LABEL}`,
       `claim-row ${PACK_LABEL}`,
       `distribution @iris-mcp/client-config`,
+      ...INSTALLER_DISTRIBUTIONS,
       `notice-sync skills-pack/${NOTICE_FILENAME}`,
     ]);
   });
@@ -122,7 +125,8 @@ describe("check:provenance CLI, scratch copy of the real tree: the real adapted 
     edit(root, SOURCE_REL, (text) => text.replace(`${HEADER}\n\n`, ""));
     regenerate(root);
     // With the header gone the file no longer mentions the upstream project at all, so only the row's own check can see it.
-    const stderr = expectRed(root, [`row-file ${PACK_FILE}`]);
+    // The installed copies then carry pack content but no notice, which each installer route reports as a distribution.
+    const stderr = expectRed(root, [`row-file ${PACK_FILE}`, ...INSTALLER_DISTRIBUTIONS]);
     expect(stderr).toContain("without the adaptation header");
   });
 
@@ -167,7 +171,7 @@ describe("check:provenance CLI, scratch copy of the real tree: the real adapted 
     regenerate(root);
     const run = runScript(root, CHECK);
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
-    expect(run.stdout).toContain("1 provenance row(s), 39 agent file(s)");
+    expect(run.stdout).toContain("1 provenance row(s), 40 agent file(s)");
   });
 
   it("the row's pack-file cell renamed: the row names a file that is not in the pack, and the real skill has no row", () => {

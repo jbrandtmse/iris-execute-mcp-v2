@@ -46,7 +46,7 @@ const GOTCHAS = "iris-mcp-objectscript-gotchas";
 const RULE = "iris-mcp-objectscript-pre-write";
 
 const GOLDEN_LINE_2 =
-  "validate-prompts: OK \u2014 tool presets: 24 file(s) declare one (12 core, 6 developer, 6 full) and 15 tool-free file(s) declare none; no internal reference in 51 source(s), 2 adaptation header line(s) exempted.";
+  "validate-prompts: OK \u2014 tool presets: 24 file(s) declare one (12 core, 6 developer, 6 full) and 16 tool-free file(s) declare none; no internal reference in 52 source(s), 2 adaptation header line(s) exempted.";
 
 /** A fingerprint of everything in the real tree that a row's scratch copy is made from or stands in for. */
 function realTreeFingerprint(): string[] {
@@ -181,7 +181,7 @@ describe("validate:prompts CLI, scratch copy: the tool preset check (AC 41.5.4)"
     green(root);
   });
 
-  it("a real tool named in the always-on rule is refused for the source and both pack forms: a rule cannot declare a preset", () => {
+  it("a real tool named in the always-on rule is refused for the source and all three pack forms: a rule cannot declare a preset", () => {
     const root = scratch();
     const sourceRel = `${RULES_SOURCE_DIR}/${RULE}.md`;
     const originals = editAll(root, [sourceRel], (text) => `${text.trimEnd()}\n- Search first with iris_doc_search.\n`);
@@ -190,9 +190,10 @@ describe("validate:prompts CLI, scratch copy: the tool preset check (AC 41.5.4)"
     expect(problemPairs(stderr)).toEqual([
       `preset pack:rules/agents-md/${RULE}.md`,
       `preset pack:rules/claude-code/${RULE}.md`,
+      `preset pack:rules/cursor/${RULE}.mdc`,
       `preset rule:${RULE}.md`,
     ]);
-    for (const label of [`pack:rules/agents-md/${RULE}.md`, `pack:rules/claude-code/${RULE}.md`, `rule:${RULE}.md`]) {
+    for (const label of [`pack:rules/agents-md/${RULE}.md`, `pack:rules/claude-code/${RULE}.md`, `pack:rules/cursor/${RULE}.mdc`, `rule:${RULE}.md`]) {
       expect(stderr).toContain(`  - [preset] ${label}: names iris_doc_search but declares no tool preset; only a SKILL.md can declare one, so name no tool here\n`);
     }
     repair(root, originals);
@@ -237,9 +238,7 @@ describe("validate:prompts CLI, scratch copy: the tool preset check (AC 41.5.4)"
     const run = runScript(root, VALIDATE);
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
     // The two copies move from full to core: 14 core, 6 developer, 4 full.
-    expect(run.stdout.split("\n")).toContain(
-      "validate-prompts: OK — tool presets: 24 file(s) declare one (14 core, 6 developer, 4 full) and 15 tool-free file(s) declare none; no internal reference in 51 source(s), 2 adaptation header line(s) exempted.",
-    );
+    expect(run.stdout.split("\n")).toContain(GOLDEN_LINE_2.replace("(12 core, 6 developer, 6 full)", "(14 core, 6 developer, 4 full)"));
     repair(root, originals);
     editAll(root, rels, crossServer("full"));
     const stderr = red(root);
@@ -279,13 +278,13 @@ describe("validate:prompts CLI, scratch copy: no internal references (AC 41.5.4)
     green(root);
   });
 
-  it("an internal reference in the always-on rule is refused for the source and both pack forms", () => {
+  it("an internal reference in the always-on rule is refused for the source and all three pack forms", () => {
     const root = scratch();
     const sourceRel = `${RULES_SOURCE_DIR}/${RULE}.md`;
     const originals = editAll(root, [sourceRel], (text) => `${text.trimEnd()}\n- Read the irislib copy of the class first.\n`);
     expect(runScript(root, GEN_PACK).status).toBe(0);
     const stderr = red(root);
-    const labels = [`pack:rules/agents-md/${RULE}.md`, `pack:rules/claude-code/${RULE}.md`, `rule:${RULE}.md`];
+    const labels = [`pack:rules/agents-md/${RULE}.md`, `pack:rules/claude-code/${RULE}.md`, `pack:rules/cursor/${RULE}.mdc`, `rule:${RULE}.md`];
     expect(problemPairs(stderr)).toEqual(labels.map((label) => `internal-reference ${label}`));
     for (const label of labels) {
       expect(stderr).toContain(`  - [internal-reference] ${label}: a snapshot folder (irislib)\n`);

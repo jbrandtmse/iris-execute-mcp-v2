@@ -501,7 +501,7 @@ describe("check:provenance CLI, scratch copy: the skill-frontmatter rule (DW-613
   it("control: a knowledge skill with valid frontmatter passes, source and pack copy both counted", () => {
     const run = runScript(scratchWithSkill(GOOD_SKILL, false), CHECK);
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
-    expect(run.stdout).toContain("1 provenance row(s), 41 agent file(s), 1 distribution(s)");
+    expect(run.stdout).toContain("1 provenance row(s), 42 agent file(s), 5 distribution(s)");
   });
 
   it("control: the same skill as CRLF passes", () => {
@@ -522,7 +522,7 @@ describe("check:provenance CLI, scratch copy: the skill-frontmatter rule (DW-613
     const text = GOOD_SKILL.replace("\n\nBody.\n", `\n\n${HEADER}\n\nBody.\n`);
     const run = runScript(scratchWithSkill(text, true), CHECK);
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
-    expect(run.stdout).toContain("2 provenance row(s), 41 agent file(s)");
+    expect(run.stdout).toContain("2 provenance row(s), 42 agent file(s)");
   });
 
   it("a skill with no description is refused for the source and the pack copy", () => {
