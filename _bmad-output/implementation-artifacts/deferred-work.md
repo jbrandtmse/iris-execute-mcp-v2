@@ -3215,18 +3215,21 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 40.0 implement review 2026-10-17: Monitor.cls ~960 $Translate($ZDateTime($Horolog,3,1)," ","T")_"Z"; instance runs at $ZTimeZone 0 so invisible live; pre-existing
 - 2026-10-17T23:04:40Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 burn-down: use $ZTimeStamp (as UtcCutoff does) and pin under a per-process $ZTimeZone
 - 2026-10-19T01:44:17Z status=routed owner=40-5-epic-40-burn-down by=burndown note=Epic 40 burn-down gate: chartered into Story 40.5 (DW bullet in its epics.md block)
+- 2026-10-19T04:15:02Z status=resolved-by:40-5-epic-40-burn-down by=adjudication note=AlertsManage clearedAt comes from Monitor.UtcStamp ($ZTimeStamp); OS tests at fixed instants and process zones 420/-600, and a falsifiable source pin on the route (the reset route is never called on the shared instance); build 1fdda9e + review patches 506fd0c; mutation-verified (spec-40-5 Verification, Rule 48); lead smoke 116/116 armed + OS classes
 
 ### DW-590: Under block, the recover-stuck-production prompt step 3 calls iris_production_logs with no report-the-reason, never-read-it-another-way rule for withheld Event Log text (the rule DW-587 added to trace-message-flow)
 - source: _bmad-output/implementation-artifacts/spec-40-0-epic-39-deferred-cleanup.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 40.0 implement review 2026-10-17: recoverStuckProduction.ts:54 says nothing about textPolicy; decision 36 scoped DW-587 to trace-message-flow; a prompt-text change is a sanctioned AD-15 change
 - 2026-10-17T23:04:40Z status=escalated owner=burndown by=harvest note=decide at the Epic 40 burn-down decision sheet (same shape as decision 36)
 - 2026-10-19T01:44:17Z status=routed owner=40-5-epic-40-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 65: add the block report-the-reason rule to recover-stuck-production step 3 (sanctioned AD-15 prompt change) in Story 40.5
+- 2026-10-19T04:15:02Z status=resolved-by:40-5-epic-40-burn-down by=adjudication note=recover-stuck-production step 3 carries the block report-the-reason, never-read-it-another-way rule (decision 65); skill regenerated; built interop server over stdio; build 1fdda9e + review patches 506fd0c; mutation-verified (spec-40-5 Verification, Rule 48); lead smoke 116/116 armed + OS classes
 
 ### DW-591: gen:bootstrap rewrites bootstrap-classes.ts even when its content is unchanged, so an idempotence re-run after a build leaves the shared dist older than its source and every armed live gate skips or fails as stale until shared is rebuilt
 - source: _bmad-output/implementation-artifacts/spec-40-0-epic-39-deferred-cleanup.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 40.0 implement 2026-10-17; scripts/gen-bootstrap.mjs:180 writeFileSync unconditional; staleDistReason/checkDistFresh compare mtimes
 - 2026-10-17T23:04:41Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 burn-down: write only when content differs, and pin it
 - 2026-10-19T01:44:17Z status=routed owner=40-5-epic-40-burn-down by=burndown note=Epic 40 burn-down gate: chartered into Story 40.5 (DW bullet in its epics.md block)
+- 2026-10-19T04:15:02Z status=resolved-by:40-5-epic-40-burn-down by=adjudication note=gen:bootstrap writes bootstrap-classes.ts only when the whole content differs (prints Unchanged otherwise, mtime untouched); drift and idempotence tests unchanged, hand-edit and round-trip cases pinned in scratch trees; build 1fdda9e + review patches 506fd0c; mutation-verified (spec-40-5 Verification, Rule 48); lead smoke 116/116 armed + OS classes
 
 ### DW-592: Monitor.cls CollectInteropMetrics and Interop.cls EventLog bind the UTC cutoff and the type number through %ExecDirect at the process default select mode, not the explicit %SelectMode=0 MessageSearch.cls uses for the same Ens.DataType.UTC comparison
 - source: _bmad-output/implementation-artifacts/spec-40-0-epic-39-deferred-cleanup.md | severity: low | fix-risk: med | footprint: in-story
@@ -3261,6 +3264,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 40.1 verification-gap review, captured live 2026-10-17: a package coverage run of Story401 ran 0 tests until REST.Coverage.TestSpec rewrote the spec as :A;B (then 5 ran); no MCP tool calls POST /tests; UnitTestTest pins only the string shape
 - 2026-10-18T04:15:06Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 burn-down: fix BuildTestSpec at its source (then TestSpec's rewrite can go) and pin a package run
 - 2026-10-19T01:44:17Z status=routed owner=40-5-epic-40-burn-down by=burndown note=Epic 40 burn-down gate: chartered into Story 40.5 (DW bullet in its epics.md block)
+- 2026-10-19T04:15:02Z status=resolved-by:40-5-epic-40-burn-down by=adjudication note=BuildTestSpec joins a package's classes as :A;B; the coverage TestSpec rewrite is removed; POST /tests and iris_test_coverage package runs pinned live (3 classes, 6 methods) in disposable namespaces; iris_execute_tests' own path pinned unchanged; build 1fdda9e + review patches 506fd0c; mutation-verified (spec-40-5 Verification, Rule 48); lead smoke 116/116 armed + OS classes
 
 ### DW-598: A coverage run whose Line-by-Line session loaded fewer routines than its routine list fails both release proofs, and the next start kills its node as disproved, so the suite's own session is orphaned and every later start is refused foreign
 - source: spec-40-1-line-coverage-probe-and-engine.md | severity: med | fix-risk: low | footprint: in-story
@@ -3277,6 +3281,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-40-2-coverage-reports-and-targets.md | severity: low | fix-risk: med | footprint: in-story
 - evidence: Up to four gate files (story-40-1-coverage, story-40-1-qa, story-40-2-coverage-reports, story-40-2-qa live gates) declare the helpers, mostly verbatim; the spec's stated reason is only that the 40.2 gate follows the 40.1 gate shape (Rule 2, weak reason)
 - 2026-10-18T11:35:23Z status=wontfix-accepted owner=40-2-coverage-reports-and-targets by=cr note=reopen_if=a coverage gate's copy of expectIdle or another shared-instance check diverges from another gate's copy
+- 2026-10-19T04:12:15Z occurrence=40-5-epic-40-burn-down
 
 ### DW-601: A freshly compiled class whose only methods with INT code have bodies of preprocessor lines alone (#; or #dim) reads source.reason not-up-to-date: IsDirective records those lines as 0, so lineMapIsGone cannot tell the class from one whose line map is gone
 - source: spec-40-2-coverage-reports-and-targets.md | severity: med | fix-risk: med | footprint: in-story
@@ -3296,6 +3301,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-18T17:35:54Z status=routed owner=burndown by=cr note=Rule 2; move the four gates onto the shared helpers (a monitor-only module if the TestProduction helpers do not fit) and re-run them armed
 - 2026-10-19T01:00:23Z occurrence=40-4-test-depth-docs-prompt-and-capstone
 - 2026-10-19T01:44:17Z status=routed owner=40-5-epic-40-burn-down by=burndown note=Epic 40 burn-down gate: chartered into Story 40.5 (DW bullet in its epics.md block)
+- 2026-10-19T04:15:02Z status=resolved-by:40-5-epic-40-burn-down by=adjudication note=the 40.1/40.2 gates, the capstone and 40.4 QA use the shared monitor-gate-helpers.ts; the copy guard learns the moved names; all 11 Epic 40 gates armed green; build 1fdda9e + review patches 506fd0c; mutation-verified (spec-40-5 Verification, Rule 48); lead smoke 116/116 armed + OS classes
 
 ### DW-604: Spine AD-15's Story 40.3 bullet (decision #60) names a namespace that cannot see the ExecuteMCPv2 classes as unguarded, but not the rework-1 case of a namespace holding its own copy of an earlier build without ProductionGuard
 - source: spec-40-3-testproduction-runs.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3306,6 +3312,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-40-3-testproduction-runs.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: irislib/%UnitTest/Manager.cls BeforeRunTest (d:before'="" @before), RunOneTestSuite ';' split and RunTest ',' split; RunTests validates only that target is non-empty. The MCP path (iris_execute_tests method segment) was closed in Story 40.3's re-review
 - 2026-10-18T19:52:59Z status=wontfix-theoretical owner=40-3-testproduction-runs by=cr note=no MCP tool calls POST /tests, and a REST caller with webapp access already holds POST /command. Real if a tool starts calling RunTests
+- 2026-10-19T04:12:15Z occurrence=40-5-epic-40-burn-down
 
 ### DW-606: orchestrator-decisions-wave-6.md pause banner still says the run is paused after run_resumed, and its ~20:40Z time disagrees with the cycle log's 20:31:56Z
 - source: spec-40-3-testproduction-runs.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3317,6 +3324,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: lead scoped re-review of 47412c4 (2026-10-18): ProductionGuardTest.cls:125-127; IsClassnameValid^%occName (behind $System.OBJ.IsValidClassname) source is not in the irislib snapshot
 - 2026-10-18T21:53:57Z status=routed owner=burndown by=harvest note=overflow for the Epic 40 burn-down: take the expected value from $System.OBJ.IsValidClassname for non-existent names, or drop the loop and keep the CJK assertions
 - 2026-10-19T01:44:17Z status=routed owner=40-5-epic-40-burn-down by=burndown note=Epic 40 burn-down gate: chartered into Story 40.5 (DW bullet in its epics.md block)
+- 2026-10-19T04:15:02Z status=resolved-by:40-5-epic-40-burn-down by=adjudication note=ProductionGuardTest's agreement loop takes its expected value from $System.OBJ.IsValidClassname (independent of IsClassName); "" asserted separately; mutation to an ASCII-only check goes red; build 1fdda9e + review patches 506fd0c; mutation-verified (spec-40-5 Verification, Rule 48); lead smoke 116/116 armed + OS classes
 
 ### DW-608: Once, a freshly compiled class (UDL save plus Compile cuk-d) showed $Data(^rMAP(class)) 0 while IsUpToDate was 1, so SourceMap would record lineMap 0 and coverage would read the class not-up-to-date (a false FAIL)
 - source: _bmad-output/implementation-artifacts/spec-40-4-test-depth-docs-prompt-and-capstone.md | severity: low | fix-risk: med | footprint: in-story
@@ -3330,9 +3338,11 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-19T00:11:38Z status=escalated owner=burndown by=harvest note=decide at the Epic 40 burn-down decision sheet together with DW-590 (prompt-text changes need an AD-15 sanction)
 - 2026-10-19T01:24:40Z status=decision-pending owner=burndown by=adjudication note=lead correction (40.4 code review): a low prompt-text item awaiting a decision, not an escalated medium; decide at the Epic 40 decision sheet with DW-590 and DW-610
 - 2026-10-19T01:44:17Z status=routed owner=40-5-epic-40-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 66: add the PRODUCTION_BUSY note to edit-and-test-class (sanctioned AD-15 prompt change) in Story 40.5
+- 2026-10-19T04:15:02Z status=resolved-by:40-5-epic-40-burn-down by=adjudication note=edit-and-test-class carries the shared PRODUCTION_BUSY note (decision 66); skill regenerated; built dev server over stdio; build 1fdda9e + review patches 506fd0c; mutation-verified (spec-40-5 Verification, Rule 48); lead smoke 116/116 armed + OS classes
 
 ### DW-610: Step 4 of the deploy-and-test-class prompt says a PRODUCTION_BUSY refusal means a production other than the tests' own is running and the refusal names it, but the Story 40.3 guard also refuses with state Unknown when the production state cannot be read
 - source: spec-40-4-test-depth-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: in-story
 - evidence: 40.4 code review 2026-10-18: deployAndTestClass.ts step 4 (decision 62 golden text); 40.3 CHANGELOG: busy including when the state cannot be read, refusal carries state Unknown and error; the refusal text names the case
 - 2026-10-19T01:00:23Z status=decision-pending owner=burndown by=cr note=prompt-text amendment needs a lead call (AD-15, decision 62); decide at the Epic 40 decision sheet with DW-590 and DW-609
 - 2026-10-19T01:44:17Z status=routed owner=40-5-epic-40-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 67: step 4 wording covers the unreadable-state refusal too (sanctioned AD-15 prompt change) in Story 40.5
+- 2026-10-19T04:15:02Z status=resolved-by:40-5-epic-40-burn-down by=adjudication note=the shared PRODUCTION_BUSY note covers both the running-production and the unreadable-state refusal in deploy-and-test-class and edit-and-test-class (decision 67); pinned against a live Unknown refusal; build 1fdda9e + review patches 506fd0c; mutation-verified (spec-40-5 Verification, Rule 48); lead smoke 116/116 armed + OS classes
