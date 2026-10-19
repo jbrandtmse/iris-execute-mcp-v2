@@ -33,3 +33,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-19T07:28:38Z	Story 41.1	ledger_routed_planned	story=41-3-core-knowledge-skills entries=1 excess=0 by=cr dw=DW-613
 2026-10-19T07:29:13Z	Story 41.1	ledger_adjudicated	owned=0 resolved=0 reowned=0 terminal=0 model=claude-opus-5-5
 2026-10-19T07:29:13Z	Story 41.1	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 checks=4+idempotence+real_tarball evidence=gen:pack:check,gen:skills:check,check:provenance(mit_sha_pinned),validate:prompts(39),gen:pack_idempotent,npm_pack_real_tarball_15_files_identical_notice_present model=claude-opus-5-5
+2026-10-19T07:30:32Z	Story 41.1	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=440 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
