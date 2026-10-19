@@ -5628,6 +5628,7 @@ Embedded SQL, IRIS system-class discipline, and interoperability patterns. Adapt
 
   It is proven red (Rule #59).
 - **AC 41.7.3** — A one-time live check, recorded: a real Claude Code session in the temporary project lists the installed skills, and the rule activates for a `.cls` path.
+- DW-611: the real-tree provenance tests need client-config's built dist, but nothing orders `@iris-mcp/all`'s test after `@iris-mcp/client-config`'s build, and the turbo cache key of `@iris-mcp/all`'s test omits the pack inputs (`skills-pack-src/`, `skills/`, `scripts/`). The capstone runs in the default suite, so add the ordering (a workspace devDependency or turbo `inputs`) and pin that a pack-source change invalidates the cached green. (ledger; routed by harvest 2026-10-19)
 
 ## Epic 42: Published Install & Distribution (added 2026-10-14)
 
@@ -5793,6 +5794,7 @@ DW-47, DW-300, D2.
   - every package is at `1.0.0` with a provenance attestation;
   - `npx -y @iris-mcp/dev@1` starts in a clean environment;
   - the registry 404s are gone.
+- DW-612: nothing on the publish path runs `gen:pack --check` or `check:provenance`. client-config's `prepublishOnly` runs only `verify-iris-reachable`, so a publish made without the default suite could ship a drifted skills pack or a tarball without `IRIS-MCP-THIRD-PARTY-NOTICES.md`. Add both checks to the publish path and prove them red on that path (Rule #59). (ledger; routed by harvest 2026-10-19 from Story 41.1)
 
 ### Story 42.7: VS Code Extension Publish
 

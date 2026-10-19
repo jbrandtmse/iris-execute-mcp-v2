@@ -3346,3 +3346,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-19T01:00:23Z status=decision-pending owner=burndown by=cr note=prompt-text amendment needs a lead call (AD-15, decision 62); decide at the Epic 40 decision sheet with DW-590 and DW-609
 - 2026-10-19T01:44:17Z status=routed owner=40-5-epic-40-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 67: step 4 wording covers the unreadable-state refusal too (sanctioned AD-15 prompt change) in Story 40.5
 - 2026-10-19T04:15:02Z status=resolved-by:40-5-epic-40-burn-down by=adjudication note=the shared PRODUCTION_BUSY note covers both the running-production and the unreadable-state refusal in deploy-and-test-class and edit-and-test-class (decision 67); pinned against a live Unknown refusal; build 1fdda9e + review patches 506fd0c; mutation-verified (spec-40-5 Verification, Rule 48); lead smoke 116/116 armed + OS classes
+
+### DW-611: The real-tree provenance tests need client-config's built dist, but nothing orders @iris-mcp/all's test after @iris-mcp/client-config's build, and the turbo cache key of @iris-mcp/all's test omits the pack inputs (skills-pack-src/, skills/, scripts/)
+- source: _bmad-output/implementation-artifacts/spec-41-1-pack-layout-licensing-and-provenance.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 41.1 implement review 2026-10-19: packages/iris-mcp-all depends on the five servers, not client-config; turbo.json gives test no inputs; on a fresh clone the gatherer fails loudly (not a false green), and a cached green can replay after pack sources change
+- 2026-10-19T06:17:55Z status=routed owner=41-7-skills-pack-docs-and-capstone by=harvest note=the 41.7 capstone runs in the default suite and needs that ordering; add a workspace devDependency or turbo inputs, and pin it
+
+### DW-612: Nothing on the publish path runs gen:pack --check or check:provenance; client-config's prepublishOnly runs only verify-iris-reachable, so a publish made without the default suite could ship a drifted pack or a tarball without the notice
+- source: _bmad-output/implementation-artifacts/spec-41-1-pack-layout-licensing-and-provenance.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.1 implement review 2026-10-19: packages/client-config/package.json scripts.prepublishOnly; Epic 42 owns the publish gates (AD-29)
+- 2026-10-19T06:17:55Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=harvest note=42.6's tarball smoke proves the pack and notice gate red on the real publish path (Rule 59)
