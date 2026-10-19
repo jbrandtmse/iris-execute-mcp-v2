@@ -5595,6 +5595,7 @@ Embedded SQL, IRIS system-class discipline, and interoperability patterns. Adapt
 - **AC 41.5.4** *(added 2026-10-19 at the Story 41.1 spec gate, wave-7 decision #3)* — The pack-wide checks AD-28 names, both in the default suite and proven red (Rule #59):
   - **Preset visibility:** every skill in the pack declares the preset it needs, and `validate:prompts` checks that every `iris_*` tool it names is visible under that preset.
   - **No internal references:** no internal rule number, DW or AD id, or repository path appears in any agent content: skills, the rule, and the prompts. The generated skills' header comments are included, so a comment naming `packages/<pkg>/src/prompts/*.ts` has to move out of the agent-visible text.
+- DW-623: the pack-wide no-internal-references check must accept the exact adaptation header line of an adapted skill, which names the upstream project and `IRIS-MCP-THIRD-PARTY-NOTICES.md` (today `iris-mcp-objectscript-sql`). Accept exactly that line as the first body line of a skill the provenance table marks adapted, and nowhere else; add negative controls for a second copy and for the line in a non-adapted skill. (ledger; routed by the Story 41.4 code review 2026-10-19)
 
 ### Story 41.6: Skills and Rules Installer
 

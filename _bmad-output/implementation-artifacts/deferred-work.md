@@ -3411,3 +3411,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 41.3 plan probes 2026-10-19: GetErrorText(sc,fr)='ERREUR #5001: disk full', GetErrorText(sc,de)='FEHLER #5001: disk full'; src/ExecuteMCPv2/Utils.cls:179-185 loops over 'ERROR #' and the Arabic word only; the epic-11 retro predicted this
 - 2026-10-19T12:10:06Z status=routed owner=burndown by=harvest note=fix-pack-sized LOW (strip the localized prefix generically, a pinned test per locale, bootstrap moves): into the Epic 41 burn-down story if one is chartered, else wontfix-accepted with a probe at the gate
 - 2026-10-19T13:21:44Z occurrence=41-3-core-knowledge-skills
+
+### DW-623: Story 41.5's pack-wide no-internal-references check must accept the exact adaptation header line of an adapted skill (it names the upstream project and IRIS-MCP-THIRD-PARTY-NOTICES.md), but that obligation is recorded only in the 41.4 spec's Consumed-by note
+- source: spec-41-4-platform-knowledge-skills.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: AD-28 requires the header as the first non-blank line after frontmatter; 41.4's knowledge test exempts exactly that line (a repository-file and tool-or-server-name match otherwise); the 41.5 'No internal references' AC in epics.md and the ledger carry no exemption, so a check built from the AC alone refuses the shipped iris-mcp-objectscript-sql
+- 2026-10-19T16:03:54Z status=routed owner=41-5-workflow-skills-refresh by=cr note=41.5's check accepts exactly ADAPTATION_HEADER as the first body line of an oracle-adapted skill, with negative controls
