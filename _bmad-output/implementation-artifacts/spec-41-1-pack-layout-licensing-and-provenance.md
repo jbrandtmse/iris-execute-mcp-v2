@@ -2,15 +2,30 @@
 title: 'Story 41.1: Pack Layout, Licensing and Provenance'
 type: 'feature'
 created: '2026-10-18'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '54dc14f19c971b12e4ad2dda4e72eb85bda5b6e9'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
 warnings:
   - oversized
-deferred: []
+deferred:
+  - summary: >-
+      The real-tree provenance tests need client-config's built dist, but nothing orders @iris-mcp/all's test after @iris-mcp/client-config's build, and the turbo cache key of @iris-mcp/all's test omits the pack inputs.
+    evidence: |-
+      packages/iris-mcp-all depends on dev, admin, interop, ops and data and not on client-config, and turbo.json gives test no inputs. On a fresh clone a whole-workspace turbo run can start the all package's test before client-config's dist exists; the gatherer then reports "ships dist but its tarball file list names no dist/ file" (loud, not a false green). A cached green can also replay after skills-pack-src/, skills/ or scripts/ change. The spec's Verification states the built dist as a precondition, so the tests are correct as specified; the cure is a workspace devDependency (lockfile change) or a turbo inputs entry, outside this story's footprint.
+    location: >-
+      turbo.json; packages/iris-mcp-all/package.json
+    severity: medium
+  - summary: >-
+      Nothing on the publish path runs gen-pack --check or check:provenance; client-config's prepublishOnly runs only verify-iris-reachable.
+    evidence: |-
+      packages/client-config/package.json scripts.prepublishOnly is "node ../../scripts/verify-iris-reachable.mjs". A publish made without running the default suite could ship a pack that drifted from its sources or a tarball without the notice. Epic 42 owns the publish gates (AD-29); Story 42.6's tarball smoke is the place to prove such a gate red on the publish path (Rule #59).
+    location: >-
+      packages/client-config/package.json
+    severity: medium
 ---
 
 <intent-contract>
@@ -209,6 +224,57 @@ deferred: []
   - **Story 41.5.** It gains AC 41.5.4, the preset-visibility and no-internal-references checks.
 
 ## Review Triage Log
+
+### 2026-10-19 — Review pass
+- verdicts: 45 findings — high 0, medium 12, low 31, false 2, maybe-false 0
+- routes: patch 17, defer 3, reject 25
+- layers (rows): blind-hunter 11 (its 10 reported bullets; bullet 1 held two claims and has two rows), edge-case-hunter 12, verification-gap 8, intent-alignment 14 (the layer is descriptive; each divergence it names is one row). Counts are derived by grep over this entry's rows.
+- findings:
+  - `[medium]` `[patch]` BH1 `pnpm format` rewrites the hand-authored notice (blank lines inside the license markers, padded table header row), so `extractLicenseBlock` returns null — `.prettierignore` did not list the notice. Fixed: the notice is now ignored (checked with `prettier --check`).
+  - `[low]` `[patch]` BH1b the unanchored `skills/` pattern in `.prettierignore` also matched `.claude/skills/`. Fixed: anchored as `/skills/` (checked: `.claude/skills/bmad-help/SKILL.md` is now seen by prettier again).
+  - `[medium]` `[defer]` BH2 `@iris-mcp/all#test` is not ordered after `@iris-mcp/client-config#build` and its turbo hash omits the pack inputs. Caused by the spec's stated precondition, not a defect of the tests; the fix is a package-manifest and lockfile change outside this story's footprint (deferred, below).
+  - `[low]` `[reject]` BH3 `listAgentContentFiles` sees only `.md`. AC 41.1.5 says `.md`, and both rule forms in Story 41.2 (a Claude Code rule file and an `AGENTS.md` section) are `.md`; reopen_if a non-`.md` rule form is added.
+  - `[medium]` `[patch]` BH4 `isExcludedSource` passed decorated cells such as `...ipm-module-authoring.md#L5`. Fixed: a plain-path charset test, and `..` anywhere in the cell refuses it; tests added for four decorated forms and `a..b`.
+  - `[medium]` `[patch]` BH5 no test runs `scripts/check-provenance.mjs`. Fixed: two child-process tests (real tree exit 0 with the pinned hash; a fixture root with an altered notice exits 1 naming `[mit-block]`).
+  - `[low]` `[patch]` BH6 the distribution enumeration test used `arrayContaining`, so a dropped ninth package would pass. Fixed: the names are also compared with an independent listing of `packages/*/package.json` (private excluded). The second half of the claim (a `packages/<dir>` without a manifest is skipped) is not a defect: it is not a workspace package.
+  - `[low]` `[patch]` BH7 the recorded full-suite run took 605 s and overran one call's cap. Fixed by running the final `(once)` suite in three foreground calls and recording them.
+  - `[low]` `[reject]` BH8 skill names are matched case-sensitively. wontfix-theoretical: knowledge skill names are authored kebab-case lowercase; reopen_if a skill directory with upper-case letters is ever added.
+  - `[low]` `[reject]` BH9 symlinks under the source trees are dropped silently. wontfix-theoretical: same behavior as the previous `gen-skills` walk (regular files only); documented on `listFilesRecursive`.
+  - `[low]` `[reject]` BH10 real-tree probe files rely on `finally` for removal. by-design: the spec's Tasks require real-tree temporary files removed in `finally` (precedent `gen-skills-stray-file.test.ts`); the validate-prompts rule probe needs the real tree because the prompt catalog loads built dists from the repository root.
+  - `[medium]` `[patch]` EC1 same root as BH4 (decorated source cells bypass the exclusion; five variants probed). Fixed with BH4.
+  - `[medium]` `[patch]` EC2 same root as BH1 (notice not ignored by prettier). Fixed with BH1.
+  - `[low]` `[patch]` EC3 same root as BH1b (unanchored `skills/`). Fixed with BH1b.
+  - `[low]` `[reject]` EC4 same root as BH3 (`.md` filter). Rejected with BH3.
+  - `[low]` `[reject]` EC5 same root as BH8 (case-insensitive collision). Rejected with BH8.
+  - `[low]` `[reject]` EC6 a stray `.DS_Store` inside a source skill directory is copied into the pack. wontfix-accepted: the previous `gen-skills` walk flagged it the same way for `skills/`; reopen_if Finder-created files are observed breaking `gen:pack:check`.
+  - `[low]` `[reject]` EC7 same root as BH9 (symlinks). Rejected with BH9.
+  - `[low]` `[reject]` EC8 `writeTree` aborts with EISDIR if an expected file path is a directory on disk. wontfix-theoretical: the pack directory is generated only by this writer; reopen_if a hand-created directory is seen to block regeneration.
+  - `[low]` `[reject]` EC9 an empty pack file hashes into `packHashes`, so any empty file in another tarball would demand the notice. wontfix-theoretical: no pack file is empty; reopen_if an empty pack file is added.
+  - `[false]` `[reject]` EC10 two provenance rows for one pack file pass unnoticed. Disproved: a pack file adapted from two upstream files legitimately has two rows, so flagging duplicates would be wrong.
+  - `[medium]` `[defer]` EC11 client-config's `prepublishOnly` runs only `verify-iris-reachable`; nothing on the publish path runs `gen-pack --check` or `check:provenance`. The publish gate belongs to Epic 42 (deferred, below).
+  - `[low]` `[reject]` EC12 same root as BH10 (probe leftovers after a kill). Rejected with BH10.
+  - `[medium]` `[patch]` VG1 same root as BH5 (the provenance CLI is untested). Fixed with BH5; mutation N3.
+  - `[medium]` `[patch]` VG2 the "any case" detection of `iris-agentic-dev` was pinned by nothing (both fixture bodies carried the lower-case header). Fixed: two headerless upper- and mixed-case fixtures must raise both `header` and `claim-row`; mutation N2.
+  - `[medium]` `[patch]` VG3 the `validate:prompts` CLI test accepted `0 pack`. Fixed: counts are parsed, the pack count must be at least the workflow count, and the totals must add up; mutation N4.
+  - `[medium]` `[defer]` VG4 same root as BH2 (build order of the real-tree provenance tests). Deferred with BH2.
+  - `[low]` `[patch]` VG5 several pinning tests had no `mutation:` line (notice completeness, header placement, byte preservation, collision, stray reporting, rule-source scanning). Fixed: mutations N5 to N12 were applied, observed red and reverted; the lines are in `## Verification`.
+  - `[low]` `[patch]` VG6 duplicate or reversed MIT markers were rejected by code no test exercised. Fixed: a second-copy fixture and a reversed-marker fixture were added; mutation N9 turns the first red. The reversed fixture pins the outcome only, because the mutated slice is empty.
+  - `[false]` `[reject]` VG-other-1 the contributor README says `gen:pack:check` is part of the default suite while the suite runs the node script. Disproved: the CLI that `pnpm gen:pack:check` wraps is what the suite runs, and the claim is about the check, not the script alias.
+  - `[low]` `[reject]` VG-other-2 same root as BH10 (real-tree probe leftovers; the rule probe could be copied into the pack by a later `gen:pack`). Rejected with BH10.
+  - `[medium]` `[patch]` IA-1 the divergence "no test executes `check-provenance.mjs`" is the same root as BH5. Fixed with BH5.
+  - `[low]` `[reject]` IA-2 no test calls a `pnpm` script alias, so the root `package.json` wiring is unexercised. Not worth a test: each alias was run by the verification loop, and a wrong alias fails the first contributor who types it.
+  - `[low]` `[reject]` IA-3 the disk-to-checker path for adapted files is covered only in pieces. No change needed: the pieces are each pinned (`listAgentContentFiles` mapping in the collection test, `checkProvenance` rules by fixtures, the whole chain by the real-tree `check:provenance` run and mutation M5), and no adapted file exists yet to drive end to end; Story 41.3 adds the first.
+  - `[low]` `[reject]` IA-4 the packer is npm's dry-run list, not a built archive, and the publish-time packer may differ. Recorded residual (CHANGELOG known limits; Story 42.6 re-verifies on the publish path).
+  - `[low]` `[reject]` IA-5 tests spawn `node scripts/*.mjs` although the intent says the only external process is `npm pack`. by-design: the spec's Tasks require the real CLI tests; the existing `gen-skills-stray-file.test.ts` does the same.
+  - `[low]` `[reject]` IA-6 the real-tree validator CLI test plants only a `rule:` file, so the `pack:` label appears only in fixture tests and mutation N4. Covered by the VG3 fix (the CLI's pack count is now pinned).
+  - `[low]` `[reject]` IA-7 non-`.md` files in the pack are not scanned. Rejected with BH3.
+  - `[low]` `[reject]` IA-8 private packages and the vsix and IPM manifests are not enumerated. Recorded in the spec's Distributions list and the CHANGELOG known limits.
+  - `[low]` `[patch]` IA-9 `isExcludedSource` accepted a file name containing `..` as a substring. Fixed with BH4 (a literal reading of "contains `..`").
+  - `[low]` `[patch]` IA-10 the non-endorsement sentence was compared with the module's own constant only. Fixed: an independently typed copy is pinned in the constants test.
+  - `[low]` `[reject]` IA-11 "provenance has 0 rows" is not asserted. A count of rows is stale after Story 41.3; the real-tree test asserts the rules, and the CLI prints the count.
+  - `[low]` `[reject]` IA-12 `gen:skills --check` on the unmodified tree is asserted only with a probe present. The probe test passes only if the unmodified tree passes; the loop ran the bare command.
+  - `[low]` `[reject]` IA-13 `gen-skills.mjs` now compares bytes and skips rewriting unchanged files, and the validator label changed from `skill:` to `workflow:`. Intended by the spec (shared helper, Rule 2); the stray-file test's assertions are unchanged and green.
+  - `[low]` `[reject]` IA-14 `.prettierignore` matches `skills/` at any depth. Same root as BH1b; fixed there.
 
 ## Design Notes
 
@@ -418,9 +484,56 @@ MIT License
 - **M6** (AC 41.1.4, exclusion): make `isExcludedSource` return `false` → `pack-provenance.test.ts` › a row citing an excluded source is refused.
 - **M7** (AC 41.1.5): add `skills-pack-src/rules/zz-mutation.md` containing `iris_not_a_real_tool`, then `gen:pack` → `validate-prompts.test.ts` › every pack and source content file resolves. `pnpm validate:prompts` also exits 1, naming `rule:zz-mutation.md`.
 
+**Mutation record** (implement stage, 2026-10-19). Each mutation was applied, the named test observed red, then reverted. After each revert (and after `pnpm gen:pack` where the mutation touched a source) a tree digest of `git status --short`, `git diff --stat` and the hash of every modified or untracked file was byte-identical to the one taken before the mutation.
+
+- mutation: M1, deleted `"skills-pack"` from client-config's `files` → `pack-provenance.test.ts` › the real tree › "real tree passes every provenance rule" and › "client-config tarball ships every pack file and the notice" (red: `the tarball lacks the pack file skills-pack/skills/resend-failed-messages/SKILL.md`).
+- mutation: M2, `Health` → `Healt` in `packages/client-config/skills-pack/skills/check-system-health/SKILL.md` → `skills-pack.test.ts` › the committed pack (real tree) › "committed pack matches its sources: no missing, drifted or stray file" and › "gen-pack --check passes on the committed tree" (`gen-pack --check` printed `DRIFT in …/check-system-health/SKILL.md`, exit 1).
+- mutation: M3, `KNOWLEDGE_SOURCE_DIR` set to `'skills'` → `skills-pack.test.ts` › "gen:skills --check still passes: skills/ is gen:skills output and never sees a hand-authored skill" (red: `STRAY/STALE generated file … skills/zz-probe-skill/SKILL.md`; 10 layout and CLI tests went red as well).
+- mutation: M4, `2025` → `2024` inside the notice's MIT block, then `pnpm gen:pack` → `pack-provenance.test.ts` › the pinned oracles › "MIT block is byte-exact to the pinned upstream LICENSE" (red: sha256 `4d1cff3e…` against the pin; `pnpm check:provenance` exit 1). The fixture tests are mutations of the committed notice, so 14 more went red with it.
+- mutation: M5, added `skills-pack-src/knowledge/zz-mutation/SKILL.md` carrying the header, then `pnpm gen:pack` → `pack-provenance.test.ts` › the real tree › "real tree passes every provenance rule" (red: `claim-row` for `knowledge:` and `pack:`); `pnpm check:provenance` exit 1.
+- mutation: M6, `isExcludedSource` returns `false` → `pack-provenance.test.ts` › excluded and malformed sources › "a row citing an excluded source is refused" and › "isExcludedSource refuses the excluded and malformed paths and allows ordinary ones".
+- mutation: M7, added `skills-pack-src/rules/zz-mutation.md` containing `iris_not_a_real_tool`, then `pnpm gen:pack` → `validate-prompts.test.ts` › "every pack and source content file resolves to a real tool" (and the CLI-count test); `pnpm validate:prompts` exit 1 naming `pack:rules/zz-mutation.md` and `rule:zz-mutation.md`.
+- mutation: X1 (matrix: fail closed), `gatherDistribution`'s `fail()` drops the problem → `pack-provenance.test.ts` › "gathering distributions fails closed (fixture workspace, injected packer)": the six failure cases and the dist-less case (7 red).
+- mutation: X2 (matrix: distribution without notice), the tarball-notice rule disabled (`if (false && …)`) → `pack-provenance.test.ts` › distributions: the pack-only, marker, altered-notice and byte-identical-copy cases (4 red).
+- mutation: X3 (AC 41.1.1, idempotence), `writeTree` rewrites unchanged files → `skills-pack.test.ts` › "writeTree leaves an up-to-date file untouched" and › the gen-pack CLI "write mode builds the pack, and a second run changes nothing".
+
+**Review-pass mutations** (review pass 1, 2026-10-19). Same discipline: each applied, the named test observed red, reverted, no mutation remnant left in the tree.
+
+- mutation: N1 (AC 41.1.4, excluded or malformed source), the source-cell charset check removed from `isExcludedSource` → `pack-provenance.test.ts` › excluded and malformed sources › "a row citing an excluded source is refused" and "isExcludedSource refuses the excluded and malformed paths and allows ordinary ones" (a cell such as `skills/kb/ipm-module-authoring.md#L5` is no longer refused).
+- mutation: N2 (matrix: claim without row, any case), the `i` flag dropped from the `iris-agentic-dev` claim test → `pack-provenance.test.ts` › claim without a row, and the header › "a file whose only mention is ... in another case and with no header, is refused for both the header and the row" (2 red).
+- mutation: N3 (`pnpm check:provenance`), the failing branch of `scripts/check-provenance.mjs` no longer calls `process.exit(1)` → `pack-provenance.test.ts` › the check-provenance CLI › "exits 1 and names the failing rule for a fixture root whose notice was altered".
+- mutation: N4 (AC 41.1.5, CLI), `validate-prompts.mjs` drops the `pack:` files → `validate-prompts.test.ts` › "the validate:prompts CLI exits 0 and counts the content files by kind" (the pack count falls below the workflow count).
+- mutation: N5 (AC 41.1.3, notice complete), the required-content loop of `checkProvenance` skipped → `pack-provenance.test.ts` › the notice › the four "without ..." tests for the commit, both credits and the non-endorsement sentence (4 red).
+- mutation: N6 (matrix: header misplaced), `hasValidAdaptationHeader` accepts the header anywhere → `pack-provenance.test.ts` › "a file whose header is after other text is refused as missing or misplaced" and hasValidAdaptationHeader › "header only in the body".
+- mutation: N7 (matrix: byte preservation, #58), `assemblePack` reads a workflow skill as utf-8 and re-encodes it → `skills-pack.test.ts` › byte preservation › "copies every source byte for byte into the assembled pack and onto disk".
+- mutation: N8 (matrix: name collision), the explicit collision check of `assemblePack` skipped → `skills-pack.test.ts` › "fails when a skill name is defined in both sources, naming both" (the later duplicate-path guard alone gives a different message, so the test pins the explicit one).
+- mutation: N9 (matrix: MIT block altered), the duplicate-marker and marker-order checks of `extractLicenseBlock` removed → `pack-provenance.test.ts` › the MIT block › "a second copy of the block appended is refused". The reversed-marker fixture stays green because the mutated slice is empty and its sha256 differs: it pins the outcome, not the branch.
+- mutation: N10 (matrix: distribution enumeration), `gatherDistributions` skips the `iris-ops-mcp` directory → `pack-provenance.test.ts` › the real tree › "enumerates one distribution per non-private workspace package, as of 2026-10-18, ...".
+- mutation: N11 (matrix: stray), `diffTree` reports no stray file → `skills-pack.test.ts` › diffTree, the gen-pack CLI and the real-tree stray tests, and `gen-skills-stray-file.test.ts` › "flags a hand-added stray file inside an otherwise-valid skill directory" (4 red).
+- mutation: N12 (AC 41.1.5, rule sources), `listAgentContentFiles` skips `skills-pack-src/rules/` → `validate-prompts.test.ts` › the fixture collection test and "the validate:prompts CLI exits 1 and names a temporary rule file holding a bad token" (2 red).
+
+**Verification run** (implement stage, 2026-10-19). `shared`, `dev` and `interop` had `dist/` older than `src/` by mtime with no source change in git (an earlier mutate-and-revert touched the files); they were rebuilt with the clean recipe (delete `dist/` and `tsconfig.tsbuildinfo`, then build) so the freshness-based tests could run. The first full `@iris-mcp/all` run without live variables took 605 s, over one call's cap, so the final `(once)` run was split into three foreground calls of 34 files each (`ls src/__tests__/*.test.ts | awk 'NR%3==k'`, k = 1, 2, 0), after the last patch: 34 + 34 + 34 files, 738 + 805 + 514 passed, 4 skipped, 0 failed, each call under 240 s. Also after the last patch, for client-config: `build`, `test` (21 files, 514 passed), `lint` and `type-check` all exit 0; `gen:governance-baseline:check` reports 141 frozen keys and OK; `gen:tools-list-snapshot:check` reports 115 entries unchanged; `check-epics-sync.mjs` reports no genuine drift; `git diff --stat skills/ packages/shared/src/bootstrap-classes.ts` is empty.
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Implement and review pass (2026-10-19).**
+
+- **Summary.** The skills pack layout, the notice and both checks are in place. `scripts/lib/generated-tree.mjs` is the one tree-sync helper behind `gen-skills.mjs` (same messages, exit codes and bytes) and the new `gen-pack.mjs`. `scripts/lib/skills-pack.mjs` assembles the pack byte for byte and holds the one enumeration of agent content. `scripts/lib/provenance-core.mjs` (pinned oracles and rules) and `provenance-inputs.mjs` (npm dry-run gatherer, fail closed) back `scripts/check-provenance.mjs` and the default-suite test. `validate-prompts.mjs` now scans 26 content files beside the 13 prompts. The pack holds 15 generated files and client-config ships it through `files`. `BOOTSTRAP_VERSION` stays at `5296a1c836f4`; the governance baseline (141 keys), the tools-list snapshot and `skills/` are untouched.
+- **Files changed.**
+  - New scripts: `scripts/gen-pack.mjs`, `scripts/check-provenance.mjs`, `scripts/lib/generated-tree.mjs`, `scripts/lib/skills-pack.mjs`, `scripts/lib/provenance-core.mjs`, `scripts/lib/provenance-inputs.mjs`.
+  - Edited scripts: `scripts/gen-skills.mjs` (shared helper), `scripts/validate-prompts.mjs` (shared collector), `scripts/lib/dist-freshness.mjs` (exports `isDistShipping`).
+  - Pack sources and output: `skills-pack-src/IRIS-MCP-THIRD-PARTY-NOTICES.md` (MIT block byte-exact, sha256 `85b458dc...929c`, 1081 bytes), `skills-pack-src/README.md`, and the generated `packages/client-config/skills-pack/` (15 files).
+  - Config and docs: root `package.json` (three scripts), `packages/client-config/package.json` (`files`), `.prettierignore`, `CHANGELOG.md`, `.changeset/story-41-1-skills-pack-layout.md`.
+  - Tests: new `skills-pack.test.ts`, `pack-provenance.test.ts`, `pack-fixture.ts`; `validate-prompts.test.ts` now uses the shared collector.
+- **Review findings.** 45 rows over four layers: patches applied 17 rows (11 root causes; the medium ones are the prettier handling of the notice, the decorated-source exclusion bypass, the untested provenance CLI, the unpinned any-case claim detection and the unpinned pack count), items deferred 2 entries (3 rows: turbo build order and cache inputs; publish-path gate), rejected 25 with a recorded reason each (see the Review Triage Log).
+- **Follow-up review recommendation.** `true`. Five medium root causes were patched in this pass. The specific unverified risk: the rewritten `isExcludedSource` (a plain-path charset test) and the new check-provenance CLI tests were written after the review layers ran, so no independent layer has read them. The charset test could refuse a legitimate upstream path containing a character outside letters, digits, `.`, `_`, `-` and `/`; Stories 41.3 and 41.4 will meet that first.
+- **Verification.**
+  - `(loop)` after the last patch: `gen:pack` twice leaves the pack byte-identical, and `gen:pack:check`, `gen:skills:check`, `check:provenance` and `validate:prompts` print OK (39 sources: 13 prompts and 26 content files). The npm dry-run lists 15 `skills-pack/` entries, the notice included. The one-time `cmp` of the extracted MIT block against the scratch LICENSE is identical. The nine-file vitest group passes (184 tests).
+  - `(once)` after the last patch: client-config `build`, `test` (514), `lint` and `type-check` exit 0; the full `@iris-mcp/all` suite in three foreground calls passes (102 files, 2057 passed, 4 skipped); governance baseline 141 keys OK; tools-list snapshot 115 entries unchanged; `check-epics-sync` OK; `git diff --stat skills/ packages/shared/src/bootstrap-classes.ts` is empty.
+  - Mutations: M1 to M7 and X1 to X3 from the implement stage and N1 to N12 from this pass, each observed red and reverted; the lines are in `## Verification`.
+- **Residual risks.** The npm dry-run list stands in for the publish-time packer (Story 42.6 re-verifies). The two deferred entries above. The pack copies of the workflow skills still carry the `gen:skills` frontmatter comment that names a repository path (owned by Story 41.5). The reversed-marker fixture in the MIT block tests pins the outcome, not the branch.
 
 Planning pass (2026-10-19, plan stage, halted after planning as instructed). The spec meets the ready-for-development standard. Three orchestrator decisions are recorded under Design Notes, and this plan follows each recommendation. The ledger inbox is empty. The spine and `epics.md` texts are drafted for the lead (Rule 20, Rule 5). The upstream source was fetched into the scratchpad as untrusted data and read only. No IRIS call was made, and no file other than this spec changed.

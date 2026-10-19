@@ -20,14 +20,17 @@
 //
 //   npm: `pnpm gen:skills` / `pnpm gen:skills:check`
 //
+// `skills/` is owned entirely by this generator. Hand-authored pack sources live in
+// `skills-pack-src/` and reach the skills pack through `pnpm gen:pack`, never through `skills/`.
+//
 // Requires a prior `pnpm turbo run build` (imports each package's BUILT
 // dist/prompts/index.js — see scripts/lib/prompt-catalog.mjs).
 // ════════════════════════════════════════════════════════════════════════════
 
-import { writeFileSync, mkdirSync, readFileSync, existsSync, readdirSync, rmSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { loadAllPrompts } from './lib/prompt-catalog.mjs';
+import { diffTree, writeTree } from './lib/generated-tree.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -94,93 +97,37 @@ function renderReadme(entries) {
   );
 }
 
-/** Every generated file, relative-to-root path -> expected content. */
+/** Every generated file, relative-to-`skills/` path -> expected content. */
 async function computeExpectedFiles() {
   const entries = await loadAllPrompts(root);
   const files = new Map();
   for (const { pkg, prompt } of entries) {
-    files.set(`skills/${prompt.name}/SKILL.md`, renderSkillMd(pkg, prompt));
+    files.set(`${prompt.name}/SKILL.md`, renderSkillMd(pkg, prompt));
   }
-  files.set('skills/README.md', renderReadme(entries));
+  files.set('README.md', renderReadme(entries));
   return { entries, files };
-}
-
-/**
- * EVERY file currently on disk under `skills/`, recursive (relative-to-root
- * paths, e.g. `skills/<name>/SKILL.md`).
- *
- * CR 25.1-3 (resolved Story 26.4): previously this only enumerated the
- * per-directory `SKILL.md` + top-level `README.md`, so a hand-added stray
- * file inside an otherwise-valid skill directory (e.g. a manually-added
- * `skills/<name>/NOTES.md`) was invisible to `--check`'s drift detection and
- * survived write-mode cleanup — mildly overstating the header's "fail on ANY
- * drift" claim. Walking the full tree makes every on-disk path a candidate
- * for the expected-files comparison below, so ANY stray file (not just a
- * whole stale `SKILL.md`-having directory) is caught and cleaned up.
- */
-function listAllOnDiskFiles() {
-  const onDisk = new Set();
-  if (!existsSync(skillsDir)) return onDisk;
-  function walk(dir, relPrefix) {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const abs = resolve(dir, entry.name);
-      const rel = `${relPrefix}${entry.name}`;
-      if (entry.isDirectory()) {
-        walk(abs, `${rel}/`);
-      } else if (entry.isFile()) {
-        onDisk.add(`skills/${rel}`);
-      }
-    }
-  }
-  walk(skillsDir, '');
-  return onDisk;
-}
-
-/** Recursively remove empty directories under (but not including) `skillsDir`. */
-function removeEmptyDirs(dir) {
-  if (!existsSync(dir)) return;
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.isDirectory()) removeEmptyDirs(resolve(dir, entry.name));
-  }
-  if (dir !== skillsDir && readdirSync(dir).length === 0) {
-    rmSync(dir, { recursive: true, force: true });
-  }
 }
 
 const { entries, files } = await computeExpectedFiles();
 
 if (CHECK_MODE) {
-  let drift = false;
+  // Any on-disk file under skills/ that is not an expected generated file is flagged: a whole stale
+  // skill directory (no source prompt) and a stray file inside an otherwise-valid skill directory alike.
+  const { missing, drift, stray } = diffTree(files, skillsDir);
 
-  for (const [rel, expected] of files) {
-    const abs = resolve(root, rel);
-    if (!existsSync(abs)) {
-      console.error(`gen-skills --check: MISSING generated file: ${rel}`);
-      drift = true;
-      continue;
-    }
-    const actual = readFileSync(abs, 'utf-8');
-    if (actual !== expected) {
-      console.error(
-        `gen-skills --check: DRIFT in ${rel} (hand-edited, or source changed without regenerating).`,
-      );
-      drift = true;
-    }
+  for (const rel of missing) {
+    console.error(`gen-skills --check: MISSING generated file: skills/${rel}`);
+  }
+  for (const rel of drift) {
+    console.error(
+      `gen-skills --check: DRIFT in skills/${rel} (hand-edited, or source changed without regenerating).`,
+    );
+  }
+  for (const rel of stray) {
+    console.error(`gen-skills --check: STRAY/STALE generated file (no source prompt): skills/${rel}`);
   }
 
-  // Stray/stale-file detection (CR 25.1-3): ANY on-disk path under skills/
-  // that is not one of the expected generated files — a whole stale
-  // SKILL.md-having directory (no corresponding source prompt) OR a stray
-  // hand-added file inside an otherwise-valid skill directory.
-  const onDisk = listAllOnDiskFiles();
-  for (const rel of onDisk) {
-    if (!files.has(rel)) {
-      console.error(`gen-skills --check: STRAY/STALE generated file (no source prompt): ${rel}`);
-      drift = true;
-    }
-  }
-
-  if (drift) {
+  if (missing.length + drift.length + stray.length > 0) {
     console.error('');
     console.error('Run "pnpm gen:skills" to regenerate skills/ from source, then commit the result.');
     process.exit(1);
@@ -191,25 +138,10 @@ if (CHECK_MODE) {
 }
 
 // ── Write mode (default) ─────────────────────────────────────────────────
-for (const [rel, content] of files) {
-  const abs = resolve(root, rel);
-  mkdirSync(dirname(abs), { recursive: true });
-  writeFileSync(abs, content, 'utf-8');
+// Writes every expected file, then removes every other file under skills/ (a leftover SKILL.md from a
+// removed prompt, or a hand-added file) so `--check` never flags a leftover this generator could have removed.
+for (const rel of writeTree(files, skillsDir)) {
+  console.log(`gen-skills: removing stray/stale generated file: skills/${rel}`);
 }
-
-// Remove ANY stray/stale file under skills/ that is not one of the expected
-// generated files (CR 25.1-3, resolved) — a leftover SKILL.md from a removed
-// prompt, a hand-added file inside an otherwise-valid skill directory, or an
-// orphan directory's leftover content — so the tree never silently
-// accumulates drift this generator itself failed to clean up, and so
-// `--check` never flags a leftover it could have removed.
-const onDisk = listAllOnDiskFiles();
-for (const rel of onDisk) {
-  if (files.has(rel)) continue;
-  const abs = resolve(root, rel);
-  console.log(`gen-skills: removing stray/stale generated file: ${rel}`);
-  rmSync(abs, { force: true });
-}
-removeEmptyDirs(skillsDir);
 
 console.log(`Generated ${files.size} file(s) under skills/ from ${entries.length} prompt(s).`);

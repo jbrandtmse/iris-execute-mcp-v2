@@ -57,6 +57,20 @@ function normalizeFilesEntry(entry) {
 }
 
 /**
+ * Whether a parsed `package.json` declares a dist-shipping `files` entry: one that names `dist` or a
+ * path under it (negations are ignored). The one definition of a dist-shipping package; a manifest
+ * with no `files` array, or an empty one, does not ship `dist`.
+ *
+ * @param {unknown} pkgJson
+ * @returns {boolean}
+ */
+export function isDistShipping(pkgJson) {
+  if (pkgJson === null || typeof pkgJson !== 'object') return false;
+  const files = /** @type {{ files?: unknown }} */ (pkgJson).files;
+  return Array.isArray(files) && files.some((entry) => normalizeFilesEntry(entry) === 'dist');
+}
+
+/**
  * Directories under `src/` whose files never reach the published build: every package
  * ships `files: ["dist", "!dist/**\/__tests__"]`, so a test or fixture edit cannot make
  * the shipped `dist/` stale (and a non-TypeScript fixture would never be re-emitted by a
@@ -197,9 +211,7 @@ function inspectDist(pkgDir, pkgName, now) {
     throw new FreshnessFinding(`package.json at ${pkgJsonPath} is not a JSON object`);
   }
 
-  const declaresDist =
-    Array.isArray(pkgJson.files) && pkgJson.files.some((entry) => normalizeFilesEntry(entry) === 'dist');
-  if (!declaresDist) {
+  if (!isDistShipping(pkgJson)) {
     return { ok: true, skipped: true };
   }
 
