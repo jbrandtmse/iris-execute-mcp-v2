@@ -594,6 +594,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - A file whose hash no longer matches is never overwritten without confirmation (`--include-modified`, after a backup).
     - A file byte-identical to the pack is adopted. Any other file at an owned path is a conflict, and a conflict refuses the whole run.
     - Manifest paths are allow-listed to the installer's own locations, so a hand-edited manifest can never direct a delete elsewhere.
+    - A symbolic link at or above an owned path, dangling or not, or a file with a second hard link, refuses the run, so nothing is written or deleted outside the project or through a link (wave-7 decision #34).
     - Pack files and block hosts are read and written as bytes, through the same protocol order as the MCP-entry writer.
   - **Re-install and uninstall.** Re-install is idempotent. Uninstall removes only owned content. Third-party entries are never logged.
 

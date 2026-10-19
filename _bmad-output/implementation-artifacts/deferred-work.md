@@ -3353,6 +3353,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 41.1 implement review 2026-10-19: packages/iris-mcp-all depends on the five servers, not client-config; turbo.json gives test no inputs; on a fresh clone the gatherer fails loudly (not a false green), and a cached green can replay after pack sources change
 - 2026-10-19T06:17:55Z status=routed owner=41-7-skills-pack-docs-and-capstone by=harvest note=the 41.7 capstone runs in the default suite and needs that ordering; add a workspace devDependency or turbo inputs, and pin it
 - 2026-10-19T07:08:11Z occurrence=41-1-pack-layout-licensing-and-provenance note=cr: inputs also miss packages/client-config/package.json, client-config/skills-pack/** and client-config dist
+- 2026-10-19T23:32:06Z occurrence=41-6-skills-and-rules-installer note=cr: check:provenance itself imports client-config dist/pack-plan.js with no freshness check (provenance-inputs.mjs gatherInstallerDistributions)
 
 ### DW-612: Nothing on the publish path runs gen:pack --check or check:provenance; client-config's prepublishOnly runs only verify-iris-reachable, so a publish made without the default suite could ship a drifted pack or a tarball without the notice
 - source: _bmad-output/implementation-artifacts/spec-41-1-pack-layout-licensing-and-provenance.md | severity: med | fix-risk: low | footprint: out-of-footprint
@@ -3381,6 +3382,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 41.2 code review 2026-10-19: AC 41.6.2 lists CRLF, BOM, no-final-newline and foreign-block fixtures but not two BEGIN or END lines of our own; 16 of the consumer test's 60 rows exercise only its own locateBlock
 - 2026-10-19T09:50:06Z status=routed owner=41-6-skills-and-rules-installer by=cr note=41.6 refuses (never guesses) an ambiguous own block and points the 41.2 consumer rows at its real locate/replace
+- 2026-10-19T23:36:30Z status=resolved-by:41-6-skills-and-rules-installer owner=41-6-skills-and-rules-installer by=lead note=delivered: packages/client-config/src/rule-block.ts reports missing/repeated/out-of-order own markers with line numbers and writes nothing, treats a BOM at byte 0 as not part of line 1 and keeps it there, ends an unterminated last line in the file's style and removes it on uninstall; story-41-2-qa-agents-md-consumer.test.ts runs its 88 rows against the built rule-block.js with no test-local reader (stale-dist guard); lead smoke: BOM+CRLF AGENTS.md with no final newline round-trips byte-identical through the built bin
 
 ### DW-617: A prompts/get that omits the optional arguments field is refused with -32602 for every prompt whose arguments are all optional (audit-security-posture, recover-stuck-production, check-system-health, run-external-backup); CR 25.1-6 closed it as an SDK v1 limitation
 - source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: med | fix-risk: med | footprint: out-of-footprint
