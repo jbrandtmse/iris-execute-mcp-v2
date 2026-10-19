@@ -128,3 +128,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-19T23:39:53Z	Story 41.6	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=2538 result=pass order=forward,reverse files=29 model=claude-opus-5-5
 2026-10-19T23:39:55Z	Story 41.6	committed	sha=963b902 code_sha=2381d08 build_sha=f709c90 submodules= ci=none run=none branch=epic41 pushed=origin/epic41 verified=merge-base amendments=ARCHITECTURE-SPINE.md:AD-28,AD-30,conv,epics.md:41.6.1_amended,42.2_DW-627,42.8_DW-625,42.9_DW-626
 2026-10-19T23:39:55Z	Story 41.6	story_cycle	plan_to_commit_min=213 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-19T23:47:47Z	Epic 41	epic_context_compiled	reason=planning_artifact_newer model=claude-opus-5-5 lines=138
+2026-10-19T23:47:47Z	Story 41.7	stage_spawned	stage=plan spawn_at=2026-10-19T23:47:47Z model=claude-opus-5-5 agent_name=41-7-skills-pack-docs-and-capstone-plan-1 cycle_iteration=1
