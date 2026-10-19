@@ -92,3 +92,6 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-19T16:21:57Z	Story 41.4	story_cycle	plan_to_commit_min=166 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
 2026-10-19T16:30:48Z	Epic 41	epic_context_compiled	reason=planning_artifact_newer model=claude-opus-5-5 lines=311
 2026-10-19T16:30:48Z	Story 41.5	stage_spawned	stage=plan spawn_at=2026-10-19T16:30:48Z model=claude-opus-5-5 agent_name=41-5-workflow-skills-refresh-plan-1 cycle_iteration=1
+2026-10-19T17:06:30Z	Story 41.5	story_created	spawn_at=2026-10-19T16:30:48Z model=claude-opus-5-5 path=_bmad-output/implementation-artifacts/spec-41-5-workflow-skills-refresh.md build_status=ready-for-dev epic_context=rewarmed orchestrator_decisions=16,17,18,19,20,21,22 plan_deferred=0 cycle_iteration=1
+2026-10-19T17:06:30Z	Story 41.5	spec_validated	service_introducing=false integration_ac=present adr_constrained_acs=AD-15,AD-28 decision_dependency=none orchestrator_decisions=16,17,18,19,20,21,22 owned_ledger=DW-623 addressed=1 declined=0 mutates_shared_runtime=false counts=unchanged_110_115 wire=byte_identical spine_amended=AD-28 model=claude-opus-5-5
+2026-10-19T17:06:31Z	Epic 41	spine_updated	ad=AD-28 reason=decision_sheet by=lead story=41-5-workflow-skills-refresh lint=ok
