@@ -5589,7 +5589,7 @@ Embedded SQL, IRIS system-class discipline, and interoperability patterns. Adapt
 
 ### Story 41.5: Workflow Skills Refresh
 
-- **AC 41.5.1** — The 11 generated workflow skills, plus every prompt added by 38.6, 39.6 and 40.4, are regenerated. Each description is rewritten for model invocation, because skills are chosen from their description. The MCP prompt text keeps its user-facing role.
+- **AC 41.5.1** — Every generated workflow skill is regenerated: the 12 prompts that remain after Story 41.2 retired `objectscript-review`. [AMENDED 2026-10-19 — see the Story 41.2 change log] Each description is rewritten for model invocation, because skills are chosen from their description. The MCP prompt text keeps its user-facing role.
 - **AC 41.5.2** — A generated pack catalog (README) lists the knowledge skills, the workflow skills and the rule, with what each is for.
 - **AC 41.5.3** — `gen:skills:check` and the extended `validate:prompts` pass.
 - **AC 41.5.4** *(added 2026-10-19 at the Story 41.1 spec gate, wave-7 decision #3)* — The pack-wide checks AD-28 names, both in the default suite and proven red (Rule #59):
