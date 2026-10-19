@@ -3351,8 +3351,14 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-41-1-pack-layout-licensing-and-provenance.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 41.1 implement review 2026-10-19: packages/iris-mcp-all depends on the five servers, not client-config; turbo.json gives test no inputs; on a fresh clone the gatherer fails loudly (not a false green), and a cached green can replay after pack sources change
 - 2026-10-19T06:17:55Z status=routed owner=41-7-skills-pack-docs-and-capstone by=harvest note=the 41.7 capstone runs in the default suite and needs that ordering; add a workspace devDependency or turbo inputs, and pin it
+- 2026-10-19T07:08:11Z occurrence=41-1-pack-layout-licensing-and-provenance note=cr: inputs also miss packages/client-config/package.json, client-config/skills-pack/** and client-config dist
 
 ### DW-612: Nothing on the publish path runs gen:pack --check or check:provenance; client-config's prepublishOnly runs only verify-iris-reachable, so a publish made without the default suite could ship a drifted pack or a tarball without the notice
 - source: _bmad-output/implementation-artifacts/spec-41-1-pack-layout-licensing-and-provenance.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: 41.1 implement review 2026-10-19: packages/client-config/package.json scripts.prepublishOnly; Epic 42 owns the publish gates (AD-29)
 - 2026-10-19T06:17:55Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=harvest note=42.6's tarball smoke proves the pack and notice gate red on the real publish path (Rule 59)
+
+### DW-613: No pack check requires a SKILL.md to start with frontmatter, so an adaptation header placed above the frontmatter passes provenance while the skill loses its name and description
+- source: spec-41-1-pack-layout-licensing-and-provenance.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 41.1 CR 2026-10-19: hasValidAdaptationHeader (provenance-core.mjs:165) reads a file whose line 1 is not --- as frontmatter-less, so header-then-frontmatter passes; reproduced by 4 layers and QA; the frontmatter test reads root skills/ only
+- 2026-10-19T07:08:11Z status=routed owner=41-3-core-knowledge-skills by=cr note=add a default-suite check that every pack SKILL.md opens with frontmatter holding name and description; prove it red

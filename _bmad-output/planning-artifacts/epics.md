@@ -5565,6 +5565,7 @@ ObjectScript gotchas, `%Status` and error handling, `%UnitTest`.
 - **AC 41.3.1** — Three `SKILL.md` files, each with `name` and a model-invocation `description` that says when to load it. They are written from our rules and retros. Any competitor-derived passage carries the header and a provenance row (41.1).
 - **AC 41.3.2** — Every factual claim is probed live, with a probe log. Code snippets are compiled in a disposable `ExecuteMCPv2.Temp.*` class, and test snippets run through `iris_execute_tests` with a total-count check (Rule #35). Then the fixtures are deleted.
 - **AC 41.3.3** — Tool-name tokens validate. No internal rule numbers or repository paths appear in user-facing text.
+- DW-613: no pack check requires a `SKILL.md` to start with frontmatter, so an adaptation header placed above the frontmatter passes provenance while the skill loses its `name` and `description`. Add a default-suite check that every pack `SKILL.md` opens with frontmatter holding `name` and `description` (and that an adapted skill's header comes after it), and prove it red. (ledger; routed by the Story 41.1 code review 2026-10-19)
 
 ### Story 41.4: Platform Knowledge Skills
 
@@ -5628,7 +5629,7 @@ Embedded SQL, IRIS system-class discipline, and interoperability patterns. Adapt
 
   It is proven red (Rule #59).
 - **AC 41.7.3** — A one-time live check, recorded: a real Claude Code session in the temporary project lists the installed skills, and the rule activates for a `.cls` path.
-- DW-611: the real-tree provenance tests need client-config's built dist, but nothing orders `@iris-mcp/all`'s test after `@iris-mcp/client-config`'s build, and the turbo cache key of `@iris-mcp/all`'s test omits the pack inputs (`skills-pack-src/`, `skills/`, `scripts/`). The capstone runs in the default suite, so add the ordering (a workspace devDependency or turbo `inputs`) and pin that a pack-source change invalidates the cached green. (ledger; routed by harvest 2026-10-19)
+- DW-611: the real-tree provenance tests need client-config's built dist, but nothing orders `@iris-mcp/all`'s test after `@iris-mcp/client-config`'s build, and the turbo cache key of `@iris-mcp/all`'s test omits the pack inputs (`skills-pack-src/`, `skills/`, `scripts/`). The capstone runs in the default suite, so add the ordering (a workspace devDependency or turbo `inputs`) and pin that a pack-source change invalidates the cached green. The cache inputs must also cover client-config's `package.json`, its `skills-pack/**` and the built `dist/` the gate fixtures copy (widened by the Story 41.1 code review). (ledger; routed by harvest 2026-10-19)
 
 ## Epic 42: Published Install & Distribution (added 2026-10-14)
 
