@@ -15,3 +15,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-19T04:45:23Z	Epic 41	ledger_load	total=610 open=0 routed=18 escalated=0 decision_pending=0 terminal=592 owner_unknown=0 burndown=0 reowned_none=0 owners_all_42x_43x=true
 2026-10-19T04:46:11Z	Epic 41	sprint_planning_complete	gate=PASS model=claude-opus-5-5 in_sync=true new_entries=0 orphans=0 warnings=title_and_epic_list_headings,live_claude_session_checks_41.2.5_41.7.3
 2026-10-19T04:46:11Z	Epic 41	retro_review_skipped	reason=no_retro(epic40_retro_skipped_by_user)+ledger_nonterminal_all_owned_by_named_epic42_43_stories_with_bullets(18)+burndown_overflow_0+action_items_open=1_user_owned_DW-538_not_in_scope x0=none
+2026-10-19T04:52:57Z	Epic 41	epic_context_compiled	reason=initial model=claude-opus-5-5 lines=155
+2026-10-19T04:52:57Z	Story 41.1	stage_spawned	stage=plan spawn_at=2026-10-19T04:52:57Z model=claude-opus-5-5 agent_name=41-1-pack-layout-licensing-and-provenance-plan-1 cycle_iteration=1
