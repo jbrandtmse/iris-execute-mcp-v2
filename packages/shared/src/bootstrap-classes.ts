@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "5024e4623f1d";
+export const BOOTSTRAP_VERSION = "5296a1c836f4";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "5024e4623f1d";
+Parameter BOOTSTRAPVERSION = "5296a1c836f4";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -6132,10 +6132,18 @@ ClassMethod EnsureTestEnvironment() As %Status
     Quit tSC
 }
 
-/// Build the testspec string for <method>%UnitTest.Manager.RunTest</method>.
-/// Build testspec for <code>%UnitTest.Manager.RunTest</code> in <code>/noload</code> mode.
+/// Build the testspec string for <code>%UnitTest.Manager.RunTest</code> in <code>/noload</code> mode.
 /// <p>With /noload, testspec MUST use colon format to specify classes directly.
 /// The framework cannot discover classes from directories when ^UnitTestRoot="".</p>
+/// <p>RunTest reads one spec as <code>suite:class[:method];class[:method];...</code>: the
+/// classes of one suite follow the first colon and are separated by a semicolon alone.</p>
+/// <ul>
+/// <li>Class level: <code>:Class</code>.</li>
+/// <li>Method level: <code>:Class:Method</code> (a target without a colon is <code>:Target</code>).</li>
+/// <li>Package level: <code>:A;B;C</code>, one colon and then the package's
+/// <code>%UnitTest.TestCase</code> classes. A package that holds no test class falls back to
+/// <code>:Target</code>.</li>
+/// </ul>
 ClassMethod BuildTestSpec(pTarget As %String, pLevel As %String) As %String
 {
     If pLevel = "class" {
@@ -6161,8 +6169,7 @@ ClassMethod BuildTestSpec(pTarget As %String, pLevel As %String) As %String
                 Set tClassName = tRS.%Get("Name")
                 Try {
                     If $ClassMethod(tClassName, "%Extends", "%UnitTest.TestCase") {
-                        If tSpec '= "" Set tSpec = tSpec _ ";"
-                        Set tSpec = tSpec _ ":" _ tClassName
+                        Set tSpec = tSpec _ $Select(tSpec = "": ":", 1: ";") _ tClassName
                     }
                 } Catch {}
             }
@@ -16641,6 +16648,17 @@ ClassMethod UtcCutoff(pSeconds As %Integer, pNow As %String = "") As %String
     Quit $ZDateTime(tDays_","_tSecs, 3, 1, 3)
 }
 
+/// The UTC instant <var>pNow</var> as ISO 8601 text, <code>YYYY-MM-DDThh:mm:ssZ</code>.
+/// <p><var>pNow</var> is a <code>$ZTimeStamp</code> value; the empty string means the
+/// current <code>$ZTimeStamp</code>. Fractional seconds are truncated, never rounded, so the
+/// result never moves to the next second or day. The result is independent of the process
+/// time zone and never reads the local clock.</p>
+ClassMethod UtcStamp(pNow As %String = "") As %String
+{
+    If pNow = "" Set pNow = $ZTimeStamp
+    Quit $Translate($ZDateTime($Piece(pNow, "."), 3, 1), " ", "T")_"Z"
+}
+
 /// Collect interoperability metrics for the current namespace.
 /// <p>Returns a <class>%DynamicObject</class> with queue depth, error count,
 /// and production status for the current namespace context.</p>
@@ -17001,6 +17019,7 @@ ClassMethod LicenseInfo() As %Status
 /// state. The <code>alerts.log</code> file is <b>NOT</b> truncated — historical entries
 /// remain on disk for audit. <code>iris_metrics_alerts</code> will re-populate active
 /// alerts on the next poll if conditions persist.</p>
+/// <p><code>clearedAt</code> is the UTC time of the reset (ISO 8601, to the second).</p>
 /// <p>Note: Per-alert <code>clear</code> by index and <code>acknowledge</code> are not
 /// supported — IRIS exposes no native API for either. Deferred to Epic 13 if needed.</p>
 ClassMethod AlertsManage() As %Status
@@ -17048,12 +17067,10 @@ ClassMethod AlertsManage() As %Status
         ; Restore namespace before building response
         Set $NAMESPACE = tOrigNS
 
-        ; Build response with ISO 8601 timestamp: replace space separator with "T"
-        ; $ZDateTime($Horolog, 3, 1) => "YYYY-MM-DD HH:MM:SS"; $Translate adds "T"
-        Set tTimestamp = $Translate($ZDateTime($Horolog, 3, 1), " ", "T")_"Z"
+        ; Build response; clearedAt is the UTC time of the reset (ISO 8601, to the second)
         Set tResult = {}
         Do tResult.%Set("action", "reset")
-        Do tResult.%Set("clearedAt", tTimestamp)
+        Do tResult.%Set("clearedAt", ..UtcStamp())
 
         Do ..RenderResponseBody($$$OK, , tResult)
     }
@@ -20393,16 +20410,13 @@ ClassMethod Run(pBody As %DynamicObject, Output pResult As %DynamicObject) As %S
     Quit ..Launch(.tParams, tNamespace, tRoutines, tUnmeasured, tSpec, .pResult)
 }
 
-/// The test spec for <method>%UnitTest.Manager:RunTest</method>: <method>ExecuteMCPv2.REST.UnitTest:BuildTestSpec</method>
-/// for the target and level. RunTest reads one spec as <code>suite:class[:method];class[:method];...</code>: the classes
-/// of one suite follow the first colon and are separated by a semicolon alone. At the package level that method joins
-/// the classes as <code>:A;:B</code>, which RunTest reads as class A and a method named B (and so runs no test), so the
-/// colon after each semicolon is dropped: <code>:A;B</code>.
+/// The test spec for <method>%UnitTest.Manager:RunTest</method>: the value of
+/// <method>ExecuteMCPv2.REST.UnitTest:BuildTestSpec</method> for the target and level, unchanged. At the package level
+/// that is <code>:A;B;C</code>, one colon and then the classes separated by a semicolon alone, which is how RunTest
+/// reads a suite of several classes.
 ClassMethod TestSpec(pTarget As %String, pLevel As %String) As %String
 {
-    Set tSpec = ##class(ExecuteMCPv2.REST.UnitTest).BuildTestSpec(pTarget, pLevel)
-    If pLevel = "package" Set tSpec = $Replace(tSpec, ";:", ";")
-    Quit tSpec
+    Quit ##class(ExecuteMCPv2.REST.UnitTest).BuildTestSpec(pTarget, pLevel)
 }
 
 /// The unmeasured classes as text: <code>Class: reason, Class: reason</code>.

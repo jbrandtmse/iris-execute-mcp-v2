@@ -2,7 +2,8 @@
 title: 'Story 40.5: Epic 40 Burn-down'
 type: 'chore'
 created: '2026-10-18'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'e0d883ba0363f02c98330248a69ae1e3f8b96f01'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -279,6 +280,44 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-10-18 — Review pass
+- verdicts: 33 findings — high 0, medium 3, low 24, false 6, maybe-false 0
+- layers: blind-hunter 7, edge-case-hunter 9, verification-gap 8, intent-alignment 9 (descriptive divergences, one row each)
+- findings:
+  - `[medium]` `[patch]` `gen-bootstrap-write.test.ts` second test reads an embed only the first test creates (blind 1) — verified: filtered run failed ENOENT; each test now builds its own scratch tree (beforeEach/afterEach) and the changed-run test makes its own baseline; passes whole and with `-t` for either test
+  - `[low]` `[patch]` `story-40-4-doc-claims.test.ts` pin loosened from `toBe(0)` to `<= 1` (blind 2) — the `toBe(0)` could not survive the Story 40.5 section above it; removed it, as 40.0 to 40.3 never had it (`toBeLessThan(previous)` stays); the Story 40.5 test title no longer says "first"
+  - `[low]` `[patch]` the recover rule is "the sentence trace-message-flow step 5 carries" but is not byte-identical (blind 3) — the wording is the spec's golden text (decision #65), so it stays; the invariants-test comment now says "modelled on"; single-sourcing across prompts is not part of the spec
+  - `[low]` `[reject]` 40.5 gate checks the interop dist it never opens (blind 4) — the freshness line is the skeleton `story-39-1-gate-guards.test.ts:202` pins for every gate; the 40.0 and 40.4 QA gates carry the same line
+  - `[low]` `[patch]` DW-589 route wiring pinned by substring matching (blind 5) — the wiring test now asserts the exact `Do tResult.%Set("clearedAt", ..UtcStamp())` line besides the `horolog` check; mutation recorded (key renamed to `cleared_at` -> red)
+  - `[low]` `[reject]` `IsClassName` oracle depends on case conflicts in the namespace (blind 6) — spec-bound: the Intent names the loop and Design Notes records the assumption (names with no existing different-case class or package); closed by-design
+  - `[low]` `[reject]` README/CHANGELOG say "not to stop a production without the user's confirmation" though the Unknown branch is stricter; root deploy row silent on PRODUCTION_BUSY (blind 7) — the clauses are the spec's golden README text; the root deploy row is Story 40.4's and not in this story's list
+  - `[low]` `[reject]` the note matches both branches when a refusal has `production` and `Unknown` (edge 1) — `productionBusyRefusal` sets `production` only when a numeric state code was read, and `Unknown` then needs an unmapped code no real state produces (wontfix-theoretical); the text is decision #67's golden text
+  - `[low]` `[reject]` "is running" is wrong for a Troubled or Suspended production (edge 2) — the sentence is the wording Story 40.4 already ships, kept by decision #66/#67; closed by-design
+  - `[low]` `[reject]` a refusal flows into "Otherwise, compare total" (edge 3) — the note starts "nothing ran"; the "Otherwise" structure is Story 40.4's; golden text
+  - `[low]` `[patch]` `TestAlertsManageStampsClearedAtInUtc` matches loosely (edge 4) — same root cause as blind 5; patched there
+  - `[low]` `[reject]` `MonitorStateJson` not in `REPLACED_NAMES` and interfaces are not matched (edge 5) — the spec lists the ten names and records that the regex sees `function`/`const` only (Code Map, DW-603)
+  - `[false]` `[reject]` `coverageGlobal` passes vacuously on an answer without structured content (edge 6) — the real `iris_global_get` always returns `{value, defined}` structured content (`tools/global.ts`); the code is the 40.3 helper moved verbatim; no real input reaches the branch (Rule #54)
+  - `[low]` `[reject]` `ProductionGuardTest` oracle red on a case-conflicting package (edge 7) — same as blind 6
+  - `[medium]` `[patch]` `gen-bootstrap-write` order dependence (edge 8) — same as blind 1
+  - `[low]` `[patch]` 40.4 doc pin loosened (edge 9) — same as blind 2
+  - `[low]` `[patch]` AlertsManage `clearedAt` pinned only by text (verification-gap 1; filed as defer) — same root cause as blind 5; patched in-pass (a one-line assertion), so not deferred
+  - `[medium]` `[patch]` `gen-bootstrap-write` second test not self-contained (verification-gap 2) — same as blind 1
+  - `[low]` `[reject]` `ProductionGuardTest` oracle depends on dictionary state (verification-gap 3; filed as defer) — same as blind 6; spec-bound
+  - `[low]` `[patch]` `BUSY_NOTE`/`BLOCK_RULE` `not.toMatch(/\biris_/)` assert on test-local literals (verification-gap 4) — now asserted on the last `BUSY_NOTE.length`/`BLOCK_RULE.length` characters of each rendered step
+  - `[low]` `[reject]` `TestSpec equals BuildTestSpec` compares a pass-through with its target (verification-gap 5) — matrix row 8 requires it; `TestSpec` is the contract that returns `BuildTestSpec`'s value, `CoverageJobTest:TestTestSpecSeparatesPackageClassesBySemicolon` pins its package form, and any new rewrite goes red
+  - `[low]` `[patch]` secondary tests without a `mutation:` line (verification-gap 6) — Rule 19 asks one mutation per AC and each AC had one; lines added for the changed-run, fixed-instant, release-state, inactive-check and note-placement tests; the AC-3 row 7 and AC-5 name-list tests are covered by their AC's recorded mutation
+  - `[low]` `[patch]` 40.4 doc pin weakened and the 40.5 title says "first" (verification-gap 7) — same as blind 2
+  - `[false]` `[reject]` the `testproduction-gate-helpers` composition runs only in armed gates (verification-gap 8) — the two armed 40.3 gates ran this pass (20 and 17 tests passed, none skipped) through that composition
+  - `[low]` `[patch]` DW-589 divergence: the intent's surface is the route; the tests read source text (intent 1) — the contract forbids calling the route; same as blind 5
+  - `[false]` `[reject]` DW-597 "iris_test_coverage package runs unchanged" is backed only by an OS equality (intent 2) — the armed 40.1 gate's package row (`Story401`, total 5, passed 5) ran live this pass
+  - `[false]` `[reject]` DW-607 oracle independence unverified (intent 3) — read: `IsClassName` calls `%Dictionary.Classname.IsValid` (a `$ZName` loop), the oracle calls `IsClassnameConflict^%occName` and `IsClassnameValid^%occName`; separate code
+  - `[low]` `[reject]` DW-603 changed the 40.1 gates' release logic and the idle message (intent 4) — disclosed and accepted under Design Notes "AC interpretations"
+  - `[low]` `[patch]` older stories' assertions edited (intent 5) — the 40.4 doc pin is covered by blind 2; the `prompt-safety-invariants.test.ts` deploy step 4 lines are the spec's sanctioned move (:646-647)
+  - `[low]` `[patch]` recover wording differs from trace step 5 (intent 6) — same as blind 3
+  - `[false]` `[reject]` Rule #48 evidence is not in the diff (intent 7) — the spec's Verification holds the `mutation:` lines; the auditor was told not to read it
+  - `[false]` `[reject]` the edited gates are not run in the diff (intent 8) — all 11 Epic 40 gates ran armed this pass, none skipped
+  - `[low]` `[reject]` prompt tests carry their own literal copy of the text instead of importing the constant (intent 9) — deliberate: the oracle must not be the implementation (Rule #36)
+
 ## Design Notes
 
 **Governing ADs:**
@@ -429,7 +468,57 @@ deferred: []
   - the recover rule dropped → interop `prompts.test.ts`.
 - **AC-7:** `Monitor.cls` edited without regenerating → the `bootstrap.test.ts` drift check.
 
+**Mutation evidence (Rule 19; each applied, observed red, reverted, and the tree checked byte-identical).** IRIS-side mutations were applied to `src/`, loaded into HSCUSTOM through the glob, and restored through the same glob; `shasum` of the four edited `.cls` files before and after matched, and `pnpm gen:bootstrap` then printed unchanged with the embed's mtime untouched.
+- mutation: `scripts/gen-bootstrap.mjs` `unchanged` forced false (an unconditional `writeFileSync`) -> `gen-bootstrap-write.test.ts` "an unchanged run leaves the file's mtime and content as they were and says so" red (stdout `Generated ...` did not match `/unchanged/i`) (AC-1)
+- mutation: `REST/Monitor.cls` `UtcStamp` defaults to `$Horolog` instead of `$ZTimeStamp` -> OS `EventLogMetricsTest:TestUtcStampIgnoresProcessTimeZone` red (`2026-10-18T19:14:51Z` under zone 420, `2026-10-19T12:14:51Z` under -600), 6 of 7 passed (AC-2)
+- mutation: `AlertsManage` renders the key as `cleared_at` (`Do tResult.%Set("cleared_at", ..UtcStamp())`) -> OS `EventLogMetricsTest:TestAlertsManageStampsClearedAtInUtc` red ("clearedAt is set from ..UtcStamp() on the response object"), 6 of 7 passed; the test asserts the exact `Do tResult.%Set("clearedAt", ..UtcStamp())` line and no `horolog` in the method (AC-2)
+- mutation: `REST/Monitor.cls` `UtcStamp` ignores `pNow` (`Set pNow = $ZTimeStamp` without the empty check) -> OS `EventLogMetricsTest:TestUtcStampFixedInstant` red (all three fixed instants), 6 of 7 passed (AC-2, row 3)
+- mutation: `scripts/gen-bootstrap.mjs` `unchanged` as `existsSync(outPath)` alone (an existing file is never rewritten) -> `gen-bootstrap-write.test.ts` "a changed run rewrites the file, moves its mtime and gives it a new BOOTSTRAP_VERSION" red (stdout `Unchanged ...` did not contain `Generated`), 1 of 2 passed; the test builds its own scratch tree and passes alone with `-t` (AC-1)
+- mutation: `monitor-gate-helpers.ts` `releaseLeftoverSession` without its state read before each `StopIfList` -> `monitor-gate-helpers.test.ts` 4 red (no `StopIfList` call when idle; the state read before each call; the first matching set; every set tried once) (AC-4)
+- mutation: `monitor-gate-helpers.ts` `expectMonitorInactive` with the ownership-node check added -> `monitor-gate-helpers.test.ts` 2 red ("expectMonitorInactive passes ... whether or not the ownership node is defined", "reads no coverage node") (AC-4)
+- mutation: `editAndTestClass.ts` step 9 with the note before the `running` sentence instead of after it -> dev `prompts.test.ts` "edit-and-test-class step 9 ends with the note, after the running sentence ..." red, 1 of 12 failed (AC-6)
+- mutation: `REST/UnitTest.cls` `BuildTestSpec` joins with `;:` again -> OS `UnitTestTest:TestBuildTestSpecPackage` red (one colon, no `;:`, membership), and live gate `story-40-5-burn-down-live-gate.test.ts` row 6 red (`{"total":0,"passed":0,...,"details":[]}`: expected 0 to be 3) (AC-3)
+- mutation: a column-0 `function monitorState(): void {}` added to `story-40-2-coverage-reports-live-gate.test.ts` -> `gate-helper-copies.test.ts` red, naming `story-40-2-coverage-reports-live-gate.test.ts: monitorState` (AC-4)
+- mutation: `monitor-gate-helpers.ts` `expectMonitorIdle` without its ownership-node check -> `monitor-gate-helpers.test.ts` "expectMonitorIdle throws on a defined ownership node, naming the row" red (AC-4)
+- mutation: `Coverage/Job.cls` `IsClassName` as the ASCII pattern `pName?1(1"%",1A).AN.(1"."1A.AN)` -> OS `ProductionGuardTest:TestResolveTestNameCheckAgreesWithTheCompiler` red ("so does the guard's name check", "the guard and the compiler agree on 'Pkg.<U+4E2D>' (5 characters)"), 12 of 13 passed (AC-5)
+- mutation: the `Unknown` sentence dropped from `PRODUCTION_BUSY_NOTE` -> dev `prompts.test.ts` 3 red (step 4 / step 9 end with the note, the rendered note covers the unreadable state) and `prompt-safety-invariants.test.ts` Story 40.5 block 2 red (identical note and step counts; the `Unknown` sentence) (AC-6)
+- mutation: the block rule dropped from `recover-stuck-production` step 3 -> interop `prompts.test.ts` 2 red (step 3 ends with the rule; the ladder around it) and `prompt-safety-invariants.test.ts` "recover-stuck-production step 3 ends with the block rule" red (AC-6)
+- mutation: `REST/Monitor.cls` edited (one doc-comment line) without `pnpm gen:bootstrap` -> `bootstrap.test.ts` 2 red ("embedded class contents match disk .cls files" naming `ExecuteMCPv2.REST.Monitor.cls`, and "BOOTSTRAP_VERSION matches SHA-256 hash of concatenated disk contents": `5296a1c836f4` vs `110435d802d2`) (AC-7)
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** All eight ledger entries are resolved.
+- DW-591: `scripts/gen-bootstrap.mjs` writes `bootstrap-classes.ts` only when its content differs; the second `pnpm gen:bootstrap` printed `Unchanged` and left the file's mtime (1792376133) as it was.
+- DW-589: `Monitor.UtcStamp` builds `clearedAt` from `$ZTimeStamp`; `AlertsManage` uses it. The reset route was never called.
+- DW-597: `BuildTestSpec` joins the package's classes as `:A;B;C`, and the `Coverage.TestSpec` rewrite is gone. The new Story 40.5 gate ran the package live in `EXECMCPTMP405A` (3 of 3 passed; class and method levels and the six result keys unchanged).
+- DW-603: `monitor-gate-helpers.ts` (`monitorGate`, `sleep`, `MonitorStateJson`) replaces the copies in the six coverage gates and in `testproduction-gate-helpers.ts`. `REPLACED_NAMES` gained the ten moved names.
+- DW-607: the `IsClassName` agreement test takes its expected value from `$System.OBJ.IsValidClassname`; `""` is asserted on its own.
+- DW-590, DW-609, DW-610: the three prompt texts (decisions #65, #66, #67), with `PRODUCTION_BUSY_NOTE` as one constant. Only the three `SKILL.md` files were regenerated.
+- `BOOTSTRAP_VERSION` moves `5024e4623f1d` to `5296a1c836f4` (35 classes), recorded in the new CHANGELOG section; the changeset is `.changeset/story-40-5-epic-40-burn-down.md`.
+
+**Files changed.**
+- Generator and embed: `scripts/gen-bootstrap.mjs`, `packages/shared/src/bootstrap-classes.ts` (generated), new `packages/shared/src/__tests__/gen-bootstrap-write.test.ts`.
+- IRIS classes: `src/ExecuteMCPv2/REST/Monitor.cls`, `REST/UnitTest.cls`, `REST/Coverage.cls`; tests `Tests/EventLogMetricsTest.cls` (7 tests), `Tests/UnitTestTest.cls` (6), `Tests/ProductionGuardTest.cls` (13).
+- Prompts: new `packages/iris-dev-mcp/src/prompts/productionBusyNote.ts`; `deployAndTestClass.ts`, `editAndTestClass.ts`, `packages/iris-interop-mcp/src/prompts/recoverStuckProduction.ts`; the dev and interop `prompts.test.ts`; `skills/{deploy-and-test-class,edit-and-test-class,recover-stuck-production}/SKILL.md` (generated).
+- Gates: new `monitor-gate-helpers.ts` and `.test.ts`, new `story-40-5-burn-down-live-gate.test.ts`; `testproduction-gate-helpers.ts`; the 40.1, 40.1 QA, 40.2, 40.2 QA, capstone and 40.4 QA gates; `gate-helper-copies.test.ts`, `story-39-1-gate-guards.test.ts`, `scripts/prepublish-gate.mjs`, `prompt-safety-invariants.test.ts`.
+- Docs: `CHANGELOG.md`, root, dev, interop and ops `README.md`, the changeset, new `story-40-5-doc-claims.test.ts`.
+- Interpretation applied and reported: AC-7's "40.4 doc pins are unchanged" cannot hold for the one 40.4 pin `expect(index).toBe(0)` (the new Story 40.5 CHANGELOG section must sit above Story 40.4); it was removed in `story-40-4-doc-claims.test.ts`, as the 40.0 to 40.3 doc-claims tests never had it, and every 40.4 literal stays.
+
+**Review findings (pass 1).** 33 findings from four layers: high 0, medium 3, low 24, false 6. Patches applied: 15 rows (6 root causes): the `gen-bootstrap-write` tests build their own scratch tree; the 40.4 position pin; the `AlertsManage` wiring assertion is now the exact `%Set` line; the `iris_*` check runs on the rendered text; a test comment; six more `mutation:` lines. Deferred: none. Rejected: 18 rows, each with its reason in the Review Triage Log (spec-bound golden text, a pinned gate skeleton, a verified-false claim, or a theoretical state).
+
+**Follow-up review recommendation.** `followup_review_recommended: false` (patched entries: 1 medium, 5 low; no high).
+
+**Verification performed (after the last patch unless noted).**
+- OS tests, one class per call, totals compared: `EventLogMetricsTest` 7/7, `EventLogMetricsEdgeTest` 3/3, `UnitTestTest` 6/6, `ProductionGuardTest` 13/13, `CoverageJobTest` 31/31; HSCUSTOM `^UnitTestRoot` was `/durable/iris/mgr/` before and after.
+- Armed gates, one per call, none skipped: 40.0, 40.0 QA, 40.1 (25), 40.1 QA (12), 40.2 (16), 40.2 QA (26), 40.3 (20), 40.3 QA (17), capstone (8), 40.4 QA (16), 40.5 (2), then `story-39-1-gate-guards` and `gate-helper-copies`. After the patches, `@iris-mcp/all` ran armed in seven chunks: 99 of 99 files passed (3 + 1 pre-existing `skipIf(!changesetPresent)` skips in Stories 39.0 to 39.2).
+- Per package (shared, dev, admin, interop, ops, data, client-config): build, test, lint and type-check pass (shared 2068, dev 1662, admin 498, interop 672, ops 350, data 165, client-config 514 tests; one pre-existing lint warning in `shared/src/cli/governance.ts`).
+- `gen:governance-baseline:check` OK (frozen keys, 0 new tools), `gen:tools-list-snapshot:check` OK (115 entries), `check-epics-sync` OK, `gen:skills:check` and `validate:prompts` OK (13 prompts, 13 skills); `skills/README.md` unchanged.
+- After the armed runs: `iris_doc_list` for `Story405`, `Story391Fixture` and `Probe405` (generated included) is `[]`, and `^IRIS.TempExecuteMCPv2Coverage("session")` is undefined; the gates' own `afterAll` assert `leftovers` `[]` and the monitor idle.
+
+**Residual risks.**
+- `ProductionGuardTest`'s oracle (`IsValidClassname`) also rejects a name that differs only in case from an existing class or package, so a namespace holding such a `Pkg` would turn it red without a defect in `IsClassName` (spec-bound; the loop names are the spec's).
+- The DW-589 route wiring is pinned by reading `AlertsManage`'s source (the exact `%Set` line, no `horolog`), because the reset clears instance-wide alert state and may not be called; the stamp itself is pinned by value and under real time zones.
+- The recover block-rule wording (spec golden text) is not byte-identical to `trace-message-flow` step 5.

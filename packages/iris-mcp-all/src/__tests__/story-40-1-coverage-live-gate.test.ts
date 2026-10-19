@@ -69,7 +69,6 @@ import {
   type WireToolResult,
 } from "./process-gate-helpers.js";
 import {
-  FIXTURE_CLASS,
   FIXTURE_DOC,
   createInteropNamespace,
   leftovers,
@@ -77,6 +76,7 @@ import {
   removeFixtureClass,
   removeInteropNamespace,
 } from "./interop-namespace-fixture.js";
+import { monitorGate, sleep } from "./monitor-gate-helpers.js";
 import { STORY401_ORACLE_ROUTINE, STORY401_SLOW_ROUTINE, seedCoverageFixture, setSlowTestHang } from "./coverage-fixture.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -155,6 +155,11 @@ let dev: WireSession;
 let devPlain: WireSession;
 let admin: WireSession;
 
+const { fixtureCall, monitorState, coverageGlobal, runCounter, expectMonitorInactive, releaseLeftoverSession } = monitorGate({
+  dev: () => dev,
+  suiteRoutineSets: [SUITE_ROUTINES],
+});
+
 function wireOptions(pkg: string): WireSessionOptions {
   return {
     sdkEsmDir: sdkEsmDir as string,
@@ -166,15 +171,6 @@ function wireOptions(pkg: string): WireSessionOptions {
 
 /** The target of the raw Atelier oracle: the scratch namespace A. */
 const oracleTarget = (): typeof TARGET => ({ ...TARGET, namespace: NS_A });
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-interface MonitorStateJson {
-  active: number;
-  count: number;
-  pids: string;
-  routines: string[];
-}
 
 interface RoutineValues {
   routine: string;
@@ -213,23 +209,6 @@ interface CoverageContent {
   };
 }
 
-/** A class method of the fixture class, which lives in HSCUSTOM, and its string result. */
-async function fixtureCall(methodName: string, args: unknown[] = []): Promise<string> {
-  const result = await dev.call("iris_execute_classmethod", { namespace: "HSCUSTOM", className: FIXTURE_CLASS, methodName, args });
-  expect(result.isError, allText(result)).toBeFalsy();
-  return String(result.structuredContent?.["returnValue"] ?? "");
-}
-
-async function monitorState(): Promise<MonitorStateJson> {
-  return JSON.parse(await fixtureCall("MonitorState")) as MonitorStateJson;
-}
-
-/** The monitor is idle: no Line-by-Line or PERFMON session is active on the instance. */
-async function expectIdle(row: string): Promise<void> {
-  const state = await monitorState();
-  expect(state.active, `${row}: the monitor is idle afterwards (process list "${state.pids}")`).toBe(0);
-}
-
 /** Wait up to 5 seconds for the session's process list to read `expected`, then assert it does. */
 async function expectPids(expected: string, why: string): Promise<void> {
   const deadline = Date.now() + 5000;
@@ -239,29 +218,6 @@ async function expectPids(expected: string, why: string): Promise<void> {
     state = await monitorState();
   }
   expect(state.pids, `the session's process list: ${why}`).toBe(expected);
-}
-
-/**
- * Stop a session a failed row left behind, so it cannot poison the rows after it: the fixture stops it only when it is
- * provably the one `routines` names, and refuses otherwise.
- */
-async function releaseLeftover(routines: string): Promise<void> {
-  if ((await monitorState()).active === 1) await fixtureCall("StopIfList", [routines]);
-}
-
-/** The last run id the coverage service allocated, read from its IRISTEMP counter. */
-async function runCounter(): Promise<number> {
-  const result = await dev.call("iris_global_get", { namespace: "HSCUSTOM", global: "IRIS.TempExecuteMCPv2Coverage", subscripts: '"seq"' });
-  expect(result.isError, allText(result)).toBeFalsy();
-  return Number((result.structuredContent as { value?: unknown } | undefined)?.value ?? 0);
-}
-
-/** A node of the coverage service's IRISTEMP global, as `{value, defined}`. */
-async function coverageGlobal(subscripts: string): Promise<{ value: unknown; defined: boolean }> {
-  const result = await dev.call("iris_global_get", { namespace: "HSCUSTOM", global: "IRIS.TempExecuteMCPv2Coverage", subscripts });
-  expect(result.isError, allText(result)).toBeFalsy();
-  const content = result.structuredContent as { value?: unknown; defined?: boolean } | undefined;
-  return { value: content?.value, defined: content?.defined === true };
 }
 
 /** Kill both jobs of a run with the fixture (the supervisor first), leaving its session active with a stale ownership node. */
@@ -405,7 +361,7 @@ afterEach(async () => {
   if (skipReason) return;
   // A row that fails must not leave its session behind for the rows after it: the fixture stops it only when it is
   // provably a coverage session of this gate, and refuses otherwise.
-  await releaseLeftover(SUITE_ROUTINES);
+  await releaseLeftoverSession();
 });
 
 afterAll(async () => {
@@ -497,7 +453,7 @@ describe("Story 40.1: the oracle run and the refusals that start nothing (AC-1, 
     const raw = await rawStatus(row1.coverageRunId);
     expect(raw.run["releasedBy"], "the runner stopped its own session").toBe("runner");
     expect(raw.run, "the counts were read").not.toHaveProperty("readError");
-    await expectIdle("row 1");
+    await expectMonitorInactive("row 1");
   }, 180000);
 
   it("row 2: a namespace with no Story401 classes is an error that names the namespace, starts nothing and allocates no run id", async (testCtx) => {
@@ -507,7 +463,7 @@ describe("Story 40.1: the oracle run and the refusals that start nothing (AC-1, 
     expect(result.isError, allText(result)).toBe(true);
     expect(allText(result)).toContain(NS_B);
     expect(await runCounter(), "no run id was allocated").toBe(before);
-    await expectIdle("row 2");
+    await expectMonitorInactive("row 2");
   }, 120000);
 
   it("a target that names no test class is an error that says no test method ran, with nothing covered and the monitor idle", async (testCtx) => {
@@ -518,7 +474,7 @@ describe("Story 40.1: the oracle run and the refusals that start nothing (AC-1, 
     expect(content).toMatchObject({ status: "completed", total: 0, passed: 0, failed: 0 });
     expect(content.error).toContain("no test method ran");
     expect(routinesOf(content)[0], "nothing ran, so nothing is covered").toMatchObject({ executableLines: 28, coveredLines: 0, percent: 0 });
-    await expectIdle("unknown target");
+    await expectMonitorInactive("unknown target");
   }, 240000);
 
   it("row 3: a run over the line cap is an error from the route (48 INT lines over a limit of 10), starting nothing", async (testCtx) => {
@@ -535,7 +491,7 @@ describe("Story 40.1: the oracle run and the refusals that start nothing (AC-1, 
     const body = JSON.parse(answer.text) as { status?: { errors?: Array<{ error?: string }> } };
     expect(body.status?.errors?.[0]?.error ?? "").toContain("Coverage of 48 INT lines exceeds the limit of 10.");
     expect(await runCounter(), "no run id was allocated").toBe(before);
-    await expectIdle("row 3");
+    await expectMonitorInactive("row 3");
   }, 120000);
 
   it("row 4: no classes, 51 classes and a bad level are refused by the tool's schema, and maxSeconds 0 by the route; nothing is started", async (testCtx) => {
@@ -557,7 +513,7 @@ describe("Story 40.1: the oracle run and the refusals that start nothing (AC-1, 
     const body = JSON.parse(answer.text) as { status?: { errors?: Array<{ error?: string }> } };
     expect(body.status?.errors?.[0]?.error ?? "").toContain("maxSeconds");
     expect(await runCounter(), "no run id was allocated").toBe(before);
-    await expectIdle("row 4");
+    await expectMonitorInactive("row 4");
   }, 120000);
 
   it("levels: method runs the one test method (coverage of the SumTo lines only), package runs every test class of the package", async (testCtx) => {
@@ -565,13 +521,13 @@ describe("Story 40.1: the oracle run and the refusals that start nothing (AC-1, 
     const method = succeeded<CoverageContent>(await coverage({ target: "Story401.FixtureTest:TestSumTo", level: "method" }));
     expect(method).toMatchObject({ status: "completed", total: 1, passed: 1, failed: 0 });
     expect(routinesOf(method)[0], "only SumTo ran").toEqual(STORY401_SLOW_ROUTINE);
-    await expectIdle("level method");
+    await expectMonitorInactive("level method");
 
     await setSlowTestHang(dev, NS_A, 1);
     const pack = succeeded<CoverageContent>(await coverage({ target: "Story401", level: "package" }));
     expect(pack, "FixtureTest has four tests and SlowTest one").toMatchObject({ status: "completed", total: 5, passed: 5, failed: 0 });
     expect(routinesOf(pack)[0], "the union of both classes covers what FixtureTest alone covers").toEqual(STORY401_ORACLE_ROUTINE);
-    await expectIdle("level package");
+    await expectMonitorInactive("level package");
   }, 240000);
 
   it("row 6 (the second half): one poll of a completed run's coverageRunId by the handle alone deep-equals that run's own structuredContent (AC-5)", async (testCtx) => {
@@ -582,7 +538,7 @@ describe("Story 40.1: the oracle run and the refusals that start nothing (AC-1, 
     const polled = await poll(content.coverageRunId);
     expect(polled.isError, allText(polled)).toBeFalsy();
     expect(polled.structuredContent).toEqual(result.structuredContent);
-    await expectIdle("row 6, the poll of a completed run");
+    await expectMonitorInactive("row 6, the poll of a completed run");
   }, 180000);
 });
 
@@ -608,7 +564,7 @@ describe("Story 40.1: a run that outlives its wait budget returns running, and t
     expect(routinesOf(completed)[0]).toEqual(STORY401_SLOW_ROUTINE);
     const second = await poll(running.coverageRunId);
     expect(second.structuredContent, "a second poll deep-equals the first").toEqual(first.structuredContent);
-    await expectIdle("rows 5 and 6");
+    await expectMonitorInactive("rows 5 and 6");
   }, 180000);
 });
 
@@ -627,7 +583,7 @@ describe("Story 40.1: a run killed mid-flight leaves no monitor session, and a s
     expect(content.coverage?.complete).toBe(false);
     expect(routinesOf(content)[0]?.coveredRanges, "the SumTo lines the test reached are covered").toEqual([[40, 42], [44, 44]]);
     expect(Date.now() - startedAt, "the cancel did not wait for the 20 second hang").toBeLessThan(18000);
-    await expectIdle("row 7");
+    await expectMonitorInactive("row 7");
   }, 180000);
 
   it("row 8: terminating the test process from outside ends the run failed with the runner-ended error, released by the supervisor, with the monitor idle", async (testCtx) => {
@@ -645,7 +601,7 @@ describe("Story 40.1: a run killed mid-flight leaves no monitor session, and a s
     expect(routinesOf(content)[0]?.coveredRanges, "the SumTo lines the test reached are covered").toEqual([[40, 42], [44, 44]]);
     const raw = await rawStatus(running.coverageRunId);
     expect(raw.run["releasedBy"], "the raw Status route shows who released the session").toBe("supervisor");
-    await expectIdle("row 8");
+    await expectMonitorInactive("row 8");
   }, 180000);
 
   it("row 9: with the supervisor and then the runner terminated the run is abandoned and its session stays; the next run reclaims it and completes", async (testCtx) => {
@@ -673,9 +629,9 @@ describe("Story 40.1: a run killed mid-flight leaves no monitor session, and a s
       expect(reclaimed.reclaimed).toEqual({ coverageRunId: running.coverageRunId, pid: running.pid });
       expect(routinesOf(reclaimed)[0]).toEqual(STORY401_ORACLE_ROUTINE);
     } finally {
-      await releaseLeftover(SUITE_ROUTINES);
+      await releaseLeftoverSession();
     }
-    await expectIdle("row 9");
+    await expectMonitorInactive("row 9");
   }, 240000);
 
   it("the MayTerminate decoy: a cancel of a run whose record names another process terminates nothing, so the decoy lives and the run finishes its tests on its own", async (testCtx) => {
@@ -704,7 +660,7 @@ describe("Story 40.1: a run killed mid-flight leaves no monitor session, and a s
     } finally {
       expect(await fixtureCall("StopDecoy"), "the gate ended its own decoy").toBe("stopped");
     }
-    await expectIdle("the MayTerminate decoy row");
+    await expectMonitorInactive("the MayTerminate decoy row");
   }, 240000);
 });
 
@@ -727,7 +683,7 @@ describe("Story 40.1: a run whose line counts could not be read, or whose sessio
     const raw = await rawStatus(running.coverageRunId);
     expect(raw.run["readError"], "the raw Status route returns readError").toBe(content.readError);
     expect(raw.run["releasedBy"], "the runner still stopped its own session").toBe("runner");
-    await expectIdle("counts-unreadable");
+    await expectMonitorInactive("counts-unreadable");
   }, 240000);
 
   it("release-failed: a session whose release cannot take the monitor's own lock is left as it was, and the run ends failed with the reason and the test summary but no counts; the next run reclaims the session", async (testCtx) => {
@@ -759,9 +715,9 @@ describe("Story 40.1: a run whose line counts could not be read, or whose sessio
       expect((await rawStatus(running.coverageRunId)).run["status"], "reclaiming a finished run's session leaves its status alone").toBe("failed");
     } finally {
       await fixtureCall("ReleaseMonitorLock");
-      await releaseLeftover(SUITE_ROUTINES);
+      await releaseLeftoverSession();
     }
-    await expectIdle("release-failed");
+    await expectMonitorInactive("release-failed");
   }, 300000);
 
   it("release-failed by the routine-name proof: a session whose routines the supervisor reads but are not the run's is left running, the run ends failed with the reason, and the next run reclaims the session", async (testCtx) => {
@@ -786,9 +742,9 @@ describe("Story 40.1: a run whose line counts could not be read, or whose sessio
       expect(reclaimed.status).toBe("completed");
       expect(reclaimed.reclaimed).toEqual({ coverageRunId: running.coverageRunId, pid: running.pid });
     } finally {
-      await releaseLeftover(SUITE_ROUTINES);
+      await releaseLeftoverSession();
     }
-    await expectIdle("release-failed by the routine-name proof");
+    await expectMonitorInactive("release-failed by the routine-name proof");
   }, 240000);
 });
 
@@ -824,7 +780,7 @@ describe("Story 40.1: the test process stops only the session it started, so a s
     const before = (await poll(id)).structuredContent as unknown as CoverageContent;
     expect(routinesOf(before)[0]?.coveredRanges, "the supervisor read the SumTo lines").toEqual([[40, 42], [44, 44]]);
     expect((await coverageGlobal(`"run",${id},"testsDone"`)).defined, "the test process is still in its hang").toBe(false);
-    await expectIdle("the supervisor stopped the run's session");
+    await expectMonitorInactive("the supervisor stopped the run's session");
 
     let stopped = false;
     try {
@@ -845,7 +801,7 @@ describe("Story 40.1: the test process stops only the session it started, so a s
     } finally {
       if (!stopped) await fixtureCall("StopIfList", [FOREIGN_ROUTINES]);
     }
-    await expectIdle("the lock-dropping test");
+    await expectMonitorInactive("the lock-dropping test");
   }, 240000);
 
   it("a session that test code started in place of the suite's, listing the test process but not this run's routines, is neither read nor stopped by the test process, and the run ends failed with release-failed", async (testCtx) => {
@@ -884,7 +840,7 @@ describe("Story 40.1: the test process stops only the session it started, so a s
     } finally {
       if (!stopped) await fixtureCall("StopIfList", [FOREIGN_ROUTINES]);
     }
-    await expectIdle("the swapped session");
+    await expectMonitorInactive("the swapped session");
 
     // A release-failed run keeps its ownership node for a reclaim. The session it named has been stopped, so the next
     // start clears the node with the monitor idle and leaves the finished run's status alone; nothing is left behind.
@@ -894,7 +850,7 @@ describe("Story 40.1: the test process stops only the session it started, so a s
     expect(next, "nothing was reclaimed: the swapped session had already been stopped").not.toHaveProperty("reclaimed");
     expect((await coverageGlobal('"session"')).defined, "the next start cleared the node").toBe(false);
     expect((await rawStatus(id)).run["status"], "the finished run keeps its status").toBe("failed");
-    await expectIdle("the swapped session's node");
+    await expectMonitorInactive("the swapped session's node");
   }, 240000);
 });
 
@@ -931,7 +887,7 @@ describe("Story 40.1: a stale session node never lets the suite touch a foreign 
     } finally {
       if (!stopped) await fixtureCall("StopIfList", [FOREIGN_ROUTINES]);
     }
-    await expectIdle("clear-busy-foreign");
+    await expectMonitorInactive("clear-busy-foreign");
   }, 240000);
 
   it("all-processes foreign session (decision #49): a session of ALL processes started by someone else is refused as foreign and left active, the stale ownership node is kept because that session has no process list of its own, and once it has ended the next start clears the node and completes", async (testCtx) => {
@@ -968,14 +924,14 @@ describe("Story 40.1: a stale session node never lets the suite touch a foreign 
     } finally {
       if (!stopped) await fixtureCall("StopIfList", [FOREIGN_ROUTINES]);
     }
-    await expectIdle("the all-processes session, after it was stopped");
+    await expectMonitorInactive("the all-processes session, after it was stopped");
     expect((await coverageGlobal('"session"')).defined, "the node outlived the foreign session").toBe(true);
 
     const next = succeeded<CoverageContent>(await coverage());
     expect(next.status).toBe("completed");
     expect(next, "nothing was reclaimed: the dead run's session had already ended").not.toHaveProperty("reclaimed");
     expect((await coverageGlobal(`"run",${running.coverageRunId},"status"`)).value, "the idle monitor cleared the node and recorded the dead run abandoned").toBe("abandoned");
-    await expectIdle("all-processes foreign session");
+    await expectMonitorInactive("all-processes foreign session");
   }, 300000);
 
   it("clear-and-proceed: a stale node with the monitor idle does not block a start, the dead run is recorded abandoned, and the new run completes without reclaiming anything", async (testCtx) => {
@@ -991,7 +947,7 @@ describe("Story 40.1: a stale session node never lets the suite touch a foreign 
     expect(next.status).toBe("completed");
     expect(next, "nothing was reclaimed: the dead run's session had already ended").not.toHaveProperty("reclaimed");
     expect((await coverageGlobal(`"run",${running.coverageRunId},"status"`)).value, "the dead run is now recorded abandoned").toBe("abandoned");
-    await expectIdle("clear-and-proceed");
+    await expectMonitorInactive("clear-and-proceed");
   }, 240000);
 
   it("retention: with 25 finished run records ahead of the real ones, a start prunes the run records to 20", async (testCtx) => {
@@ -1007,7 +963,7 @@ describe("Story 40.1: a stale session node never lets the suite touch a foreign 
     } finally {
       await fixtureCall("ClearFakeRuns");
     }
-    await expectIdle("retention");
+    await expectMonitorInactive("retention");
   }, 240000);
 });
 
@@ -1041,7 +997,7 @@ describe("Story 40.1: the monitor is instance-wide, so a foreign session and a r
 
       expect(await fixtureCall("StopIfList", [FOREIGN_ROUTINES])).toBe("stopped");
       stopped = true;
-      await expectIdle("row 10, after the foreign session was stopped");
+      await expectMonitorInactive("row 10, after the foreign session was stopped");
 
       const next = succeeded<CoverageContent>(await coverage());
       expect(next.status).toBe("completed");
@@ -1049,7 +1005,7 @@ describe("Story 40.1: the monitor is instance-wide, so a foreign session and a r
     } finally {
       if (!stopped) await fixtureCall("StopIfList", [FOREIGN_ROUTINES]);
     }
-    await expectIdle("row 10");
+    await expectMonitorInactive("row 10");
   }, 180000);
 
   it("row 11: a second call while a suite run is running is refused as MONITOR_BUSY owner suite with that run's handles, allocating no run id, and the running run is unaffected", async (testCtx) => {
@@ -1080,7 +1036,7 @@ describe("Story 40.1: the monitor is instance-wide, so a foreign session and a r
       const cancelled = await dev.raw("iris_test_status", { action: "cancel", coverageRunId: String(first.coverageRunId) });
       expect(cancelled.structuredContent).toMatchObject({ status: "cancelled", reason: "cancel" });
     }
-    await expectIdle("row 11");
+    await expectMonitorInactive("row 11");
   }, 180000);
 });
 
@@ -1103,7 +1059,7 @@ describe("Story 40.1: the time limit ends a run, and the tool is disabled by def
     const run = await rawUntilTerminal(Number(body.result?.coverageRunId));
     expect(run["status"]).toBe("cancelled");
     expect(run["reason"]).toBe("time-limit");
-    await expectIdle("row 13");
+    await expectMonitorInactive("row 13");
   }, 180000);
 
   it("row 14: a plain session, with no governance override, is refused with GOVERNANCE_DISABLED and no route is called", async (testCtx) => {
@@ -1118,6 +1074,6 @@ describe("Story 40.1: the time limit ends a run, and the tool is disabled by def
     expect(refused.isError, allText(refused)).toBe(true);
     expect(refused.structuredContent).toMatchObject({ code: "GOVERNANCE_DISABLED" });
     expect(await runCounter(), "no run id was allocated").toBe(before);
-    await expectIdle("row 14");
+    await expectMonitorInactive("row 14");
   }, 120000);
 });

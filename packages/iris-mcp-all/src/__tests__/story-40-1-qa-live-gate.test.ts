@@ -63,7 +63,6 @@ import {
   type WireToolResult,
 } from "./process-gate-helpers.js";
 import {
-  FIXTURE_CLASS,
   FIXTURE_DOC,
   createInteropNamespace,
   leftovers,
@@ -72,6 +71,7 @@ import {
   removeFixtureClass,
   removeInteropNamespace,
 } from "./interop-namespace-fixture.js";
+import { monitorGate, sleep } from "./monitor-gate-helpers.js";
 import {
   STORY401_FIXTURE_SOURCE,
   STORY401_FIXTURE_TEST_SOURCE,
@@ -192,6 +192,11 @@ let dev: WireSession;
 let devPlain: WireSession;
 let admin: WireSession;
 
+const { monitorState, runCounter, expectMonitorInactive, releaseLeftoverSession } = monitorGate({
+  dev: () => dev,
+  suiteRoutineSets: SUITE_ROUTINES,
+});
+
 function wireOptions(pkg: string): WireSessionOptions {
   return {
     sdkEsmDir: sdkEsmDir as string,
@@ -199,15 +204,6 @@ function wireOptions(pkg: string): WireSessionOptions {
     target: TARGET,
     clientName: "story-40-1-qa-live-gate",
   };
-}
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-interface MonitorStateJson {
-  active: number;
-  count: number;
-  pids: string;
-  routines: string[];
 }
 
 interface RoutineValues {
@@ -243,41 +239,6 @@ interface CoverageContent {
     classes: Array<{ class: string; routines: RoutineValues[] }>;
     unmeasured: Array<{ class: string; reason: string }>;
   };
-}
-
-/** A class method of the fixture class, which lives in HSCUSTOM, and its string result. */
-async function fixtureCall(methodName: string, args: unknown[] = []): Promise<string> {
-  const result = await dev.call("iris_execute_classmethod", { namespace: "HSCUSTOM", className: FIXTURE_CLASS, methodName, args });
-  expect(result.isError, allText(result)).toBeFalsy();
-  return String(result.structuredContent?.["returnValue"] ?? "");
-}
-
-async function monitorState(): Promise<MonitorStateJson> {
-  return JSON.parse(await fixtureCall("MonitorState")) as MonitorStateJson;
-}
-
-/** The monitor is idle: no Line-by-Line or PERFMON session is active on the instance. */
-async function expectIdle(row: string): Promise<void> {
-  const state = await monitorState();
-  expect(state.active, `${row}: the monitor is idle afterwards (process list "${state.pids}")`).toBe(0);
-}
-
-/**
- * Stop a session a failed row left behind, so it cannot poison the rows after it: the fixture stops it only when it is
- * provably the one `routines` names, and refuses otherwise.
- */
-async function releaseLeftover(): Promise<void> {
-  if ((await monitorState()).active !== 1) return;
-  for (const routines of SUITE_ROUTINES) {
-    if ((await fixtureCall("StopIfList", [routines])) === "stopped") return;
-  }
-}
-
-/** The last run id the coverage service allocated, read from its IRISTEMP counter. */
-async function runCounter(): Promise<number> {
-  const result = await dev.call("iris_global_get", { namespace: "HSCUSTOM", global: "IRIS.TempExecuteMCPv2Coverage", subscripts: '"seq"' });
-  expect(result.isError, allText(result)).toBeFalsy();
-  return Number((result.structuredContent as { value?: unknown } | undefined)?.value ?? 0);
 }
 
 /** The structured content of a tool call that must not be an error. */
@@ -435,7 +396,7 @@ beforeAll(async () => {
 afterEach(async () => {
   if (skipReason) return;
   // A row that fails must not leave its session behind for the rows after it.
-  await releaseLeftover();
+  await releaseLeftoverSession();
 });
 
 afterAll(async () => {
@@ -443,7 +404,7 @@ afterAll(async () => {
   // Every step runs even when an earlier one failed, so one bad removal cannot leave the others behind.
   const { problems, attempt } = teardownRecorder();
   try {
-    await attempt("stopping a coverage session left behind", releaseLeftover);
+    await attempt("stopping a coverage session left behind", releaseLeftoverSession);
     await attempt("the monitor is idle", async () => {
       expect((await monitorState()).active, "the monitor is idle after the run").toBe(0);
     });
@@ -530,7 +491,7 @@ describe("Story 40.1 QA: visibility and default governance on the built dev serv
     expect(refused.isError, allText(refused)).toBe(true);
     expect(refused.structuredContent).toEqual({ code: "GOVERNANCE_DISABLED", action: "iris_test_coverage", server: "default" });
     expect(await runCounter(), "no run id was allocated").toBe(before);
-    await expectIdle("default governance");
+    await expectMonitorInactive("default governance");
   }, 120000);
 
   it("the core preset hides iris_test_coverage even when the recipe enables it, and the call is an unknown tool that starts nothing", async (testCtx) => {
@@ -552,7 +513,7 @@ describe("Story 40.1 QA: visibility and default governance on the built dev serv
       await core.close();
     }
     expect(await runCounter(), "enabling a hidden tool starts nothing").toBe(before);
-    await expectIdle("core preset");
+    await expectMonitorInactive("core preset");
   }, 120000);
 
   it("the developer preset lists iris_test_coverage, and default governance still refuses it", async (testCtx) => {
@@ -570,7 +531,7 @@ describe("Story 40.1 QA: visibility and default governance on the built dev serv
       await developer.close();
     }
     expect(await runCounter(), "no run id was allocated").toBe(before);
-    await expectIdle("developer preset");
+    await expectMonitorInactive("developer preset");
   }, 120000);
 });
 
@@ -629,7 +590,7 @@ describe("Story 40.1 QA: the documented recipe alone enables the tool, and a sec
       expect(cancel.structuredContent).toEqual({ code: "GOVERNANCE_DISABLED", action: "iris_test_status:cancel", server: "default" });
     }
     expect((await poll(devPlain, run.coverageRunId)).structuredContent, "a refused cancel changes nothing").toEqual(result.structuredContent);
-    await expectIdle("the recipe run");
+    await expectMonitorInactive("the recipe run");
   }, 180000);
 });
 
@@ -668,7 +629,7 @@ describe("Story 40.1 QA: a run belongs to the instance, not to the server proces
     const record = await rawStatus(running.coverageRunId);
     expect(record["releasedBy"], "the runner stopped its own session").toBe("runner");
     expect(record["cancelRequested"]).toBe(false);
-    await expectIdle("re-attach");
+    await expectMonitorInactive("re-attach");
   }, 240000);
 });
 
@@ -723,7 +684,7 @@ describe("Story 40.1 QA: a busy refusal reaches every other server process and l
     const record = await rawStatus(first.coverageRunId);
     expect(record["releasedBy"]).toBe("runner");
     expect(record["cancelRequested"]).toBe(false);
-    await expectIdle("busy");
+    await expectMonitorInactive("busy");
   }, 240000);
 });
 
@@ -777,7 +738,7 @@ describe("Story 40.1 QA: input edges on the built server start nothing (AC-1, ma
       if (message) expect(text, `${label}: the message the schema gives`).toContain(message);
     }
     expect(await runCounter(), "no run id was allocated").toBe(before);
-    await expectIdle("schema edges");
+    await expectMonitorInactive("schema edges");
   }, 120000);
 
   it("names that resolve to nothing are refused by the route with its own text, naming the namespace, starting nothing: absent, wrong case, no routine, another namespace's class, 50 absent names, an empty target, a namespace that does not exist", async (testCtx) => {
@@ -820,7 +781,7 @@ describe("Story 40.1 QA: input edges on the built server start nothing (AC-1, ma
     expect(allText(noNamespace)).toContain("Nothing was started.");
 
     expect(await runCounter(), "no run id was allocated by any of them").toBe(before);
-    await expectIdle("names that resolve to nothing");
+    await expectMonitorInactive("names that resolve to nothing");
   }, 120000);
 
   it("classes are de-duplicated with the order kept, a class with no routine and a wrong-case name are listed as unmeasured beside the measured ones, and a measured test class is fully covered", async (testCtx) => {
@@ -859,7 +820,7 @@ describe("Story 40.1 QA: input edges on the built server start nothing (AC-1, ma
       "Story401.Fixture.1: 20 of 28 executable INT lines covered (71.43%); uncovered 8, 16-18, 23, 27, 47-48",
       "Not measured: Story401Q.Empty (no-routines), story401.fixture (not-compiled)",
     ]);
-    await expectIdle("de-duplication");
+    await expectMonitorInactive("de-duplication");
   }, 180000);
 
   it("level method: one method covers only its own lines, and a method that does not exist is a completed run with no test, isError, and nothing covered", async (testCtx) => {
@@ -867,7 +828,7 @@ describe("Story 40.1 QA: input edges on the built server start nothing (AC-1, ma
     const real = succeeded<CoverageContent>(await coverage({ target: "Story401.FixtureTest:TestSumTo", level: "method" }));
     expect(real).toMatchObject({ status: "completed", total: 1, passed: 1, failed: 0, level: "method" });
     expect(routinesOf(real), "TestSumTo reaches only SumTo(3)").toEqual([STORY401_SLOW_ROUTINE]);
-    await expectIdle("level method, an existing method");
+    await expectMonitorInactive("level method, an existing method");
 
     const result = await coverage({ target: "Story401.FixtureTest:TestNoSuchMethod", level: "method" });
     expect(result.isError, allText(result)).toBe(true);
@@ -891,7 +852,7 @@ describe("Story 40.1 QA: input edges on the built server start nothing (AC-1, ma
     expect(lines[1]).toBe(
       "Story401.Fixture.1: 0 of 28 executable INT lines covered (0%); uncovered 6-10, 12, 14, 16-18, 20, 22-23, 25, 27, 29, 31-33, 36-38, 40-42, 44, 47-48",
     );
-    await expectIdle("level method, a method that does not exist");
+    await expectMonitorInactive("level method, a method that does not exist");
   }, 240000);
 
   it("a second namespace with different classes gives a different result: the tiny class is 2 of 2 lines (100%), by hand from its source, and the oracle class is not in it", async (testCtx) => {
@@ -939,7 +900,7 @@ describe("Story 40.1 QA: input edges on the built server start nothing (AC-1, ma
     const oracleInTiny = await coverage({ ...ORACLE_ARGS, namespace: NS_T });
     expect(oracleInTiny.isError, allText(oracleInTiny)).toBe(true);
     expect(allText(oracleInTiny)).toContain("None of the listed classes has a measurable routine in namespace EXECMCPTMP40T (Story401.Fixture: not-compiled)");
-    await expectIdle("the second namespace");
+    await expectMonitorInactive("the second namespace");
   }, 180000);
 });
 
@@ -992,7 +953,7 @@ describe("Story 40.1 QA: iris_test_status with coverageRunId refuses what cannot
       expect(polled.structuredContent, `${namespace ?? "no namespace"}: the same result`).toEqual(result.structuredContent);
     }
     expect(await runCounter(), "no refusal allocated a run id").toBe(before);
-    await expectIdle("companion edges");
+    await expectMonitorInactive("companion edges");
   }, 180000);
 });
 

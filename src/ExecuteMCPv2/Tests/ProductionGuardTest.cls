@@ -114,17 +114,26 @@ Method TestResolveTestSystemClasses()
 }
 
 /// The name check <method>ResolveTest</method> applies first (<method>ExecuteMCPv2.Coverage.Job:IsClassName</method>)
-/// accepts every name the class dictionary accepts, a letter without case included. A class the work queue or the coverage
-/// runner can run is then never set aside as "not a class name", which would answer proceed for a TestProduction test.
-Method TestResolveTestNameCheckAcceptsEveryDictionaryName()
+/// agrees with the compiler's own validator, <code>$System.OBJ.IsValidClassname</code>, on every name below: it accepts
+/// the names the compiler accepts, a letter without case included, so a class the work queue or the coverage runner can
+/// run is never set aside as "not a class name", which would answer proceed for a TestProduction test; and it rejects
+/// the names the compiler rejects. The empty name is asserted on its own, because the validator throws on it. The names
+/// hold no case-only difference from an existing class or package, the one thing the validator also checks.
+Method TestResolveTestNameCheckAgreesWithTheCompiler()
 {
     ; U+4E2D is a CJK letter: IRIS compiles a class named with it, and the pattern code A does not match it
     Set tCaseless = "Story403."_$Char(20013)_"Test"
-    Do $$$AssertStatusOK(##class(%Dictionary.Classname).IsValid(tCaseless), "the dictionary accepts a name with a letter that has no case")
+    Do $$$AssertStatusOK($System.OBJ.IsValidClassname(tCaseless), "the compiler accepts a name with a letter that has no case")
     Do $$$AssertEquals(##class(ExecuteMCPv2.Coverage.Job).IsClassName(tCaseless), 1, "so does the guard's name check")
-    For tName = "Pkg.Sub.Class1", "%Library.String", "Class", "Pkg."_$Char(20013), $Char(955)_"Pkg.A", "Pkg.%Class", "Pkg.", "", "Pkg.A B", "Pkg.A;B", "Pkg.A:B", "Pkg.A_B", "1Pkg.A" {
-        Set tExpected = $$$ISOK(##class(%Dictionary.Classname).IsValid(tName))
-        Do $$$AssertEquals(##class(ExecuteMCPv2.Coverage.Job).IsClassName(tName), tExpected, "the guard and the dictionary agree on '"_tName_"'")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.Coverage.Job).IsClassName(""), 0, "the empty name is not a class name")
+    ; 220 characters is the longest name; 221 is one too many
+    Set tLongest = "A."_$Translate($Justify("", 218), " ", "B")
+    Set tTooLong = $Translate($Justify("", 221), " ", "A")
+    Do $$$AssertEquals($Length(tLongest), 220, "the longest name is 220 characters")
+    Do $$$AssertEquals($Length(tTooLong), 221, "the too-long name is 221 characters")
+    For tName = "Pkg.Sub.Class1", "%Library.String", "Class", "Pkg."_$Char(20013), $Char(955)_"Pkg.A", "Pkg.%Class", "Pkg.", "Pkg.A B", "Pkg.A;B", "Pkg.A:B", "Pkg.A_B", "1Pkg.A", "Pkg.A1", "User.Class", "Pkg..A", "Pkg.A.", "Pkg.1A", tLongest, tTooLong {
+        Set tExpected = $$$ISOK($System.OBJ.IsValidClassname(tName))
+        Do $$$AssertEquals(##class(ExecuteMCPv2.Coverage.Job).IsClassName(tName), tExpected, "the guard and the compiler agree on '"_$Extract(tName, 1, 40)_"' ("_$Length(tName)_" characters)")
     }
 }
 

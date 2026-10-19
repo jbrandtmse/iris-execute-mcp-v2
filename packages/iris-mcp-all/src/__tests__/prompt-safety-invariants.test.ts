@@ -643,8 +643,8 @@ describe("deploy-and-test-class - the optional coverage step and the PRODUCTION_
     for (const { label, body } of await deployRenderings()) {
       const step = stepText(body, 4);
       expect(step, label).toContain("If the response is a `PRODUCTION_BUSY` refusal, nothing ran");
-      expect(step, label).toContain("a production other than the tests' own is running in the namespace, and the refusal names it");
-      expect(step, label).toContain("Tell the user, and do not stop that production unless the user confirms it is a leftover of an interrupted test run.");
+      expect(step, label).toContain("When the refusal has a `production` field, that production is running in the namespace and is not the tests' own");
+      expect(step, label).toContain("tell the user, and do not stop that production unless the user confirms it is a leftover of an interrupted test run.");
     }
   });
 
@@ -702,6 +702,83 @@ describe("deploy-and-test-class - the optional coverage step and the PRODUCTION_
       expect(stepText(body, 2), label).toContain("A class that has no local source file (it exists only in IRIS) is fixed in place instead");
       expect(stepText(body, 6), label).toContain("**compare the returned `total` against the expected number of test methods**");
       expect(stepText(body, 7), label).toContain("rerun `iris_execute_tests`");
+    }
+  });
+});
+
+describe("the test prompts' PRODUCTION_BUSY note and recover-stuck-production's block rule (Story 40.5)", () => {
+  /** The note, character for character: a refusal that names a production, and a refusal whose production state could not be read. */
+  const BUSY_NOTE =
+    "If the response is a `PRODUCTION_BUSY` refusal, nothing ran. When the refusal has a `production` field, that production is running in the namespace and is not the tests' own: tell the user, and do not stop that production unless the user confirms it is a leftover of an interrupted test run. When its `state` is `Unknown`, the namespace's production state could not be read (the refusal says why): tell the user, run the tests again in a moment, and do not stop any production to make them run.";
+
+  /** The recover rule, modelled on the sentence trace-message-flow step 5 carries for Event Log text. */
+  const BLOCK_RULE =
+    "Under the `block` data policy each entry's `text` is withheld and its `textPolicy` gives the reason: report that reason to the user, and never read the log text another way (for example through SQL, global or document tools).";
+
+  /** The text of step `n` of a rendering: from its number to the next step's. */
+  function stepText(body: string, n: number): string {
+    const from = body.indexOf(`\n${n}. `);
+    const to = body.indexOf(`\n${n + 1}. `);
+    expect(from, `step ${n} exists`).toBeGreaterThan(-1);
+    return body.slice(from, to === -1 ? undefined : to);
+  }
+
+  /** The number of numbered steps in a rendering. */
+  function stepCount(body: string): number {
+    return (body.match(/^\d+\. /gm) ?? []).length;
+  }
+
+  async function recoverRenderings(): Promise<Array<{ label: string; body: string }>> {
+    const { prompt } = await findPrompt("recover-stuck-production");
+    return [
+      { label: "recover-stuck-production", body: prompt.build({ production: "MyApp.Production", namespace: "MYAPP" }) },
+      { label: "recover-stuck-production (skill form)", body: prompt.build({}) },
+    ];
+  }
+
+  async function testPromptRenderings(): Promise<Array<{ label: string; body: string; step: number; steps: number }>> {
+    const deploy = await findPrompt("deploy-and-test-class");
+    const edit = await findPrompt("edit-and-test-class");
+    return [
+      { label: "deploy-and-test-class", body: deploy.prompt.build({ classOrPackage: "MyApp.MyClass" }), step: 4, steps: 9 },
+      { label: "deploy-and-test-class (skill form)", body: deploy.prompt.build({}), step: 4, steps: 9 },
+      { label: "edit-and-test-class", body: edit.prompt.build({ className: "MyApp.MyClass", change: "rename a variable", testClass: "MyApp.Tests.MyClassTest" }), step: 9, steps: 12 },
+      { label: "edit-and-test-class (skill form)", body: edit.prompt.build({}), step: 9, steps: 12 },
+    ];
+  }
+
+  it("recover-stuck-production step 3 ends with the block rule, and the prompt still has 8 steps", async () => {
+    for (const { label, body } of await recoverRenderings()) {
+      expect(stepText(body, 3), label).toMatch(/to understand what is actually wrong\. /);
+      expect(stepText(body, 3).endsWith(BLOCK_RULE), label).toBe(true);
+      expect(stepCount(body), label).toBe(8);
+      expect(body, label).not.toMatch(/Rule #\d/);
+    }
+  });
+
+  it("deploy-and-test-class step 4 and edit-and-test-class step 9 end with the identical note, and the step counts are 9 and 12", async () => {
+    for (const { label, body, step, steps } of await testPromptRenderings()) {
+      expect(stepText(body, step).endsWith(BUSY_NOTE), label).toBe(true);
+      expect(body.split(BUSY_NOTE).length - 1, `${label}: the note appears once`).toBe(1);
+      expect(stepCount(body), label).toBe(steps);
+    }
+  });
+
+  it("the note covers a refusal whose production state could not be read: the Unknown state, tell the user, run again, stop nothing", async () => {
+    for (const { label, body, step } of await testPromptRenderings()) {
+      const text = stepText(body, step);
+      expect(text, label).toContain("When its `state` is `Unknown`, the namespace's production state could not be read (the refusal says why)");
+      expect(text, label).toContain("tell the user, run the tests again in a moment, and do not stop any production to make them run.");
+    }
+  });
+
+  it("neither test prompt names iris_production_control, and the rendered note and rule add no iris_* token", async () => {
+    for (const { label, body, step } of await testPromptRenderings()) {
+      expect(body, label).not.toContain("iris_production_control");
+      expect(stepText(body, step).slice(-BUSY_NOTE.length), `${label}: the rendered note`).not.toMatch(/\biris_/);
+    }
+    for (const { label, body } of await recoverRenderings()) {
+      expect(stepText(body, 3).slice(-BLOCK_RULE.length), `${label}: the rendered rule`).not.toMatch(/\biris_/);
     }
   });
 });

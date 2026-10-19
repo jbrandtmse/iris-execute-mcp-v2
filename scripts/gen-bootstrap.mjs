@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
@@ -179,8 +179,17 @@ export function getBootstrapClasses(): BootstrapClass[] {
 }
 `;
 
+// Step 5: Write only when the output differs from the file on disk. The shared
+// dist's freshness check is mtime-based, so rewriting an identical embed would
+// make a clean dist look stale.
 const outPath = resolve(root, 'packages/shared/src/bootstrap-classes.ts');
-writeFileSync(outPath, output, 'utf-8');
-console.log(`Generated ${outPath} with ${classes.length} classes`);
-console.log(`BOOTSTRAP_VERSION: ${BOOTSTRAP_VERSION}`);
-console.log('Classes in order:', classes.map(c => c.name).join(', '));
+const unchanged = existsSync(outPath) && readFileSync(outPath, 'utf-8') === output;
+if (unchanged) {
+  console.log(`Unchanged ${outPath} with ${classes.length} classes (not rewritten)`);
+  console.log(`BOOTSTRAP_VERSION: ${BOOTSTRAP_VERSION}`);
+} else {
+  writeFileSync(outPath, output, 'utf-8');
+  console.log(`Generated ${outPath} with ${classes.length} classes`);
+  console.log(`BOOTSTRAP_VERSION: ${BOOTSTRAP_VERSION}`);
+  console.log('Classes in order:', classes.map(c => c.name).join(', '));
+}

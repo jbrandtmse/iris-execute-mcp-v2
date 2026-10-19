@@ -172,10 +172,18 @@ ClassMethod EnsureTestEnvironment() As %Status
     Quit tSC
 }
 
-/// Build the testspec string for <method>%UnitTest.Manager.RunTest</method>.
-/// Build testspec for <code>%UnitTest.Manager.RunTest</code> in <code>/noload</code> mode.
+/// Build the testspec string for <code>%UnitTest.Manager.RunTest</code> in <code>/noload</code> mode.
 /// <p>With /noload, testspec MUST use colon format to specify classes directly.
 /// The framework cannot discover classes from directories when ^UnitTestRoot="".</p>
+/// <p>RunTest reads one spec as <code>suite:class[:method];class[:method];...</code>: the
+/// classes of one suite follow the first colon and are separated by a semicolon alone.</p>
+/// <ul>
+/// <li>Class level: <code>:Class</code>.</li>
+/// <li>Method level: <code>:Class:Method</code> (a target without a colon is <code>:Target</code>).</li>
+/// <li>Package level: <code>:A;B;C</code>, one colon and then the package's
+/// <code>%UnitTest.TestCase</code> classes. A package that holds no test class falls back to
+/// <code>:Target</code>.</li>
+/// </ul>
 ClassMethod BuildTestSpec(pTarget As %String, pLevel As %String) As %String
 {
     If pLevel = "class" {
@@ -201,8 +209,7 @@ ClassMethod BuildTestSpec(pTarget As %String, pLevel As %String) As %String
                 Set tClassName = tRS.%Get("Name")
                 Try {
                     If $ClassMethod(tClassName, "%Extends", "%UnitTest.TestCase") {
-                        If tSpec '= "" Set tSpec = tSpec _ ";"
-                        Set tSpec = tSpec _ ":" _ tClassName
+                        Set tSpec = tSpec _ $Select(tSpec = "": ":", 1: ";") _ tClassName
                     }
                 } Catch {}
             }

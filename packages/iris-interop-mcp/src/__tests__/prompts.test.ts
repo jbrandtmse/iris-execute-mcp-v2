@@ -289,6 +289,34 @@ describe("trace-message-flow \u2014 contract and flow (Story 39.6)", () => {
   });
 });
 
+describe("recover-stuck-production \u2014 the block rule for withheld Event Log text (Story 40.5)", () => {
+  const rule =
+    "Under the `block` data policy each entry's `text` is withheld and its `textPolicy` gives the reason: report that reason to the user, and never read the log text another way (for example through SQL, global or document tools).";
+
+  it("step 3 ends with the rule, with and without arguments, and the prompt keeps its 8 steps", async () => {
+    for (const args of [{}, { production: "My.Production", namespace: "USER" }]) {
+      const text = await getPromptText("recover-stuck-production", args);
+      const lines = text.split("\n");
+      const stepOf = (n: number) => lines.find((line) => line.startsWith(`${n}. `)) ?? "";
+
+      expect(stepOf(3)).toContain(`to understand what is actually wrong. ${rule}`);
+      expect(stepOf(3).endsWith(rule)).toBe(true);
+      expect(lines.filter((line) => /^\d+\. /.test(line)).length).toBe(8);
+    }
+    expect(recoverStuckProductionPrompt.build({})).toContain(rule);
+  });
+
+  it("keeps the escalation ladder around the new rule: logs before recover, recover before clean", async () => {
+    const text = await getPromptText("recover-stuck-production", {});
+    expectInOrder(text, [
+      "3. For each stuck/errored item, call `iris_production_logs`",
+      rule,
+      "4. **Try `iris_production_control` action 'recover' FIRST**",
+      "6. **Only if still wedged after 'recover'**",
+    ]);
+  });
+});
+
 describe("find-patient-messages \u2014 contract and flow (Story 39.6)", () => {
   it("is an interop prompt titled Find Patient Messages with one required argument", async () => {
     const server = makeRealServer();

@@ -2,6 +2,64 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-19] — Story 40.5: Epic 40 burn-down
+
+No tool, action, governance key, preset row, prompt, refusal code, environment variable or route is added, so no count moves
+(the Development server stays at 32 package tools, 33 advertised; the suite at 110 package tools, 115 advertised). The prompt
+pack stays at 13 prompts (5 on the Development server), the `core` preset at 14 package tools (15 runtime tools), the
+`developer` preset at 32 package tools (33 advertised), the refusal-code catalog at 10 codes, and the frozen governance
+baseline at hash `1e62c5ad5bf7` (141 keys). `BOOTSTRAP_VERSION` moves from `5024e4623f1d` to `5296a1c836f4`, because
+`REST/Monitor.cls`, `REST/UnitTest.cls` and `REST/Coverage.cls` changed (the bootstrapped service stays at 35 classes).
+
+### Changed
+
+- **`recover-stuck-production` reports withheld Event Log text and never reads it another way (DW-590; orchestrator decision
+  #65, a sanctioned AD-15 change).** Step 3 gains the rule the `trace-message-flow` prompt already carries: under the `block`
+  data policy each entry's `text` is withheld and its `textPolicy` gives the reason, which the model reports to the user; it
+  never reads the log text through SQL, global or document tools. The prompt keeps its 8 steps.
+- **`edit-and-test-class` tells the model what a `PRODUCTION_BUSY` refusal means (DW-609; orchestrator decision #66, a
+  sanctioned AD-15 change).** Step 9 ends with the note that `deploy-and-test-class` carries: nothing ran, the model tells the
+  user, and it does not stop a production without the user's confirmation. The prompt keeps its 12 steps and its tools, all of
+  them in the `core` preset.
+- **The `PRODUCTION_BUSY` note of `deploy-and-test-class` covers a refusal whose production state could not be read (DW-610;
+  orchestrator decision #67, a sanctioned AD-15 change).** When the refusal says the state is `Unknown`, the model tells the
+  user, runs the tests again in a moment, and stops no production to make them run. The note is one text, shared by step 4 of
+  `deploy-and-test-class` and step 9 of `edit-and-test-class`. The prompt keeps its 9 steps.
+
+The names, titles, arguments and descriptions of the three prompts are unchanged, and the three generated skills are
+regenerated (`pnpm gen:skills`); the skills index is unchanged.
+
+### Fixed
+
+- **`iris_alerts_manage` `reset` stamps `clearedAt` in UTC (DW-589).** The stamp was built from the local clock and labelled
+  `Z`, so a process at a time zone other than 0 reported a time that was off by its zone offset. It is now built from
+  `$ZTimeStamp`, in the same format (`YYYY-MM-DDThh:mm:ssZ`, to the second, a fraction truncated). A process at time zone 0
+  got the same value before, which is why the defect was invisible on an instance that runs at 0. The route's request and
+  response keys are unchanged.
+- **`POST /tests` at the package level runs the package's test classes (DW-597).** The spec joined the classes as `:A;:B`,
+  which the test runner reads as class A with a method named B, so a package run ran no test. It is now `:A;B;C`. No tool calls
+  the route (orchestrator decision #40), and `iris_test_coverage` package runs are unchanged: that service rewrote the spec to
+  the same form, and the rewrite it needed is removed. The class level, the method level and the response keys are unchanged
+  (AD-33).
+- **`pnpm gen:bootstrap` writes the embed only when its content changes (DW-591).** It rewrote an unchanged
+  `bootstrap-classes.ts`, which moved the file's modification time and made the shared build look stale to the live gates'
+  freshness check. A run that changes nothing now says the file is unchanged and prints `BOOTSTRAP_VERSION`; the hash and the
+  content are unchanged.
+
+### Tests
+
+- **One monitor helper module for the live gates (DW-603).** The six coverage gates (Stories 40.1 and 40.2, their QA gates, the
+  Epic 40 capstone and the Story 40.4 QA gate) each declared their own copy of the monitor helpers. They now build them with
+  `monitorGate` from `monitor-gate-helpers.ts`, and the Story 40.3 helpers build on it too. `gate-helper-copies.test.ts` fails,
+  naming the gate and the name, when a gate declares one of the moved names again.
+- **The class-name check is compared with the compiler (DW-607).** The agreement test of `IsClassName` takes its expected value
+  from `$System.OBJ.IsValidClassname`, not from the function it checks, over more names including the length limit; the empty
+  name is asserted on its own.
+- **The Story 40.5 gate (`story-40-5-burn-down-live-gate.test.ts`).** It runs in the default suite and in the prepublish roster,
+  and runs a package of two test classes through `POST /tests` in a disposable namespace, then checks that a class run, a
+  method run and the six result keys are unchanged. It starts no Line-by-Line session and no production.
+- Earliest IRIS version verified for `$System.OBJ.IsValidClassname` and the truncation of `$ZTimeStamp`: 2026.2 build 221U.
+
 ## [Pre-release — 2026-10-18] — Story 40.4: Test depth docs, prompt and capstone
 
 No tool, action or governance key is added, so no tool count moves (the Development server stays at 32 package tools, 33

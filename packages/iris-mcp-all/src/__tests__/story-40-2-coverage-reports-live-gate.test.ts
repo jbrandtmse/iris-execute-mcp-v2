@@ -57,7 +57,6 @@ import {
   type WireToolResult,
 } from "./process-gate-helpers.js";
 import {
-  FIXTURE_CLASS,
   FIXTURE_DOC,
   createInteropNamespace,
   leftovers,
@@ -65,6 +64,7 @@ import {
   removeFixtureClass,
   removeInteropNamespace,
 } from "./interop-namespace-fixture.js";
+import { monitorGate, sleep } from "./monitor-gate-helpers.js";
 import {
   STORY402_FIXTURE_NEVER_EXECUTABLE,
   STORY402_FIXTURE_ROUTINE_STABLE,
@@ -139,21 +139,17 @@ let devPlain: WireSession;
 let admin: WireSession;
 let tempDir = "";
 
+const { fixtureCall, monitorState, coverageGlobal, runCounter, expectMonitorIdle, releaseLeftoverSession } = monitorGate({
+  dev: () => dev,
+  suiteRoutineSets: SUITE_ROUTINE_SETS,
+});
+
 function wireOptions(pkg: string): WireSessionOptions {
   return { sdkEsmDir: sdkEsmDir as string, entry: distEntry(REPO_ROOT, pkg), target: TARGET, clientName: "story-40-2-live-gate" };
 }
 
 /** The target of the raw Atelier oracle: the scratch namespace A. */
 const oracleTarget = (): typeof TARGET => ({ ...TARGET, namespace: NS_A });
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-interface MonitorStateJson {
-  active: number;
-  count: number;
-  pids: string;
-  routines: string[];
-}
 
 type Range = [number, number];
 
@@ -213,45 +209,6 @@ interface CoverageContent {
     source?: { executableLines: number; coveredLines: number; percent: number | null };
     verdict?: Verdict;
   };
-}
-
-/** A class method of the fixture class, which lives in HSCUSTOM, and its string result. */
-async function fixtureCall(methodName: string, args: unknown[] = []): Promise<string> {
-  const result = await dev.call("iris_execute_classmethod", { namespace: "HSCUSTOM", className: FIXTURE_CLASS, methodName, args });
-  expect(result.isError, allText(result)).toBeFalsy();
-  return String(result.structuredContent?.["returnValue"] ?? "");
-}
-
-async function monitorState(): Promise<MonitorStateJson> {
-  return JSON.parse(await fixtureCall("MonitorState")) as MonitorStateJson;
-}
-
-/** A node of the coverage service's IRISTEMP global, as `{value, defined}`. */
-async function coverageGlobal(subscripts: string): Promise<{ value: unknown; defined: boolean }> {
-  const result = await dev.call("iris_global_get", { namespace: "HSCUSTOM", global: "IRIS.TempExecuteMCPv2Coverage", subscripts });
-  expect(result.isError, allText(result)).toBeFalsy();
-  const content = result.structuredContent as { value?: unknown; defined?: boolean } | undefined;
-  return { value: content?.value, defined: content?.defined === true };
-}
-
-/** The last run id the coverage service allocated, read from its IRISTEMP counter. */
-async function runCounter(): Promise<number> {
-  return Number((await coverageGlobal('"seq"')).value ?? 0);
-}
-
-/** The monitor is idle and no coverage ownership node is left: the end of every row. */
-async function expectIdle(row: string): Promise<void> {
-  const state = await monitorState();
-  expect(state.active, `${row}: the monitor is idle afterwards (process list "${state.pids}")`).toBe(0);
-  expect((await coverageGlobal('"session"')).defined, `${row}: no ownership node is left`).toBe(false);
-}
-
-/** Stop a session a failed row left behind: the fixture stops it only when it is provably one of the candidate routine sets. */
-async function releaseLeftover(): Promise<void> {
-  for (const routines of SUITE_ROUTINE_SETS) {
-    if ((await monitorState()).active === 0) return;
-    await fixtureCall("StopIfList", [routines]);
-  }
 }
 
 /** The structured content of a tool call that must not be an error. */
@@ -370,7 +327,7 @@ beforeAll(async () => {
 afterEach(async () => {
   if (skipReason) return;
   // A row that fails must not leave its session behind for the rows after it.
-  await releaseLeftover();
+  await releaseLeftoverSession();
 });
 
 afterAll(async () => {
@@ -378,7 +335,7 @@ afterAll(async () => {
   // Every step runs even when an earlier one failed, so one bad removal cannot leave the others behind.
   const { problems, attempt } = teardownRecorder();
   try {
-    await attempt("stopping a coverage session left behind", releaseLeftover);
+    await attempt("stopping a coverage session left behind", releaseLeftoverSession);
     await attempt("letting go of a runner lock left behind", async () => {
       await fixtureCall("ReleaseRunnerLock", [(await runCounter()) + 1]);
     });
@@ -457,7 +414,7 @@ describe("Story 40.2: the class-source summary (AC-1, matrix rows 1 to 3)", () =
     expect(raw.run["routines"], "the 40.1 routines are the tool's").toEqual(
       content.coverage?.classes.flatMap((entry) => entry.routines.map((routine) => expect.objectContaining({ routine: routine.routine }))),
     );
-    await expectIdle("row 1");
+    await expectMonitorIdle("row 1");
   }, 180000);
 
   it("row 2: every reported class line names the statement the oracle expects in the stored class document; a #define, a continuation line, a lone brace and a comment are never reported; Generated, Constant and Py are as expected", async (testCtx) => {
@@ -499,7 +456,7 @@ describe("Story 40.2: the class-source summary (AC-1, matrix rows 1 to 3)", () =
     expect(fixture.methods.find((method) => method.method === "Constant")).not.toHaveProperty("reason");
     expect(layout.methods.find((method) => method.method === "Py")).toMatchObject({ reason: "not-objectscript", executableLines: 0 });
     expect(fixture.generated.executableLines, "the compiler's own code is counted per class, never as source lines").toBe(23);
-    await expectIdle("row 2");
+    await expectMonitorIdle("row 2");
   }, 180000);
 
   it("row 3: Story402.Layout, uploaded in a non-canonical layout, reports the line numbers of the document IRIS stores, and the uploaded text numbers them differently", async (testCtx) => {
@@ -530,7 +487,7 @@ describe("Story 40.2: the class-source summary (AC-1, matrix rows 1 to 3)", () =
       "{",
     ]);
     expect(stored.content[18], "the two-line signature was joined").toBe("ClassMethod Gap(pA As %Integer, pB As %Integer) As %Integer");
-    await expectIdle("row 3");
+    await expectMonitorIdle("row 3");
   }, 180000);
 });
 
@@ -560,7 +517,7 @@ describe("Story 40.2: minCoverage and the verdict (AC-2, matrix rows 4 to 6)", (
     expect(Object.keys(raw.run).sort(), "the raw Status record: the 40.1 keys plus sources and the stored minimum").toEqual(
       [...STATUS_KEYS_40_1, "minCoverage", "sources"].sort(),
     );
-    await expectIdle("row 4");
+    await expectMonitorIdle("row 4");
   }, 180000);
 
   it("row 5: a class at exactly the minimum passes (Layout at its own 50%), and so does overall", async (testCtx) => {
@@ -574,7 +531,7 @@ describe("Story 40.2: minCoverage and the verdict (AC-2, matrix rows 4 to 6)", (
     ]);
     expect(verdict?.overall).toBe("pass");
     expect(allText(result).split("\n")[1]).toBe("Coverage target 50%: PASS (88.89% overall)");
-    await expectIdle("row 5");
+    await expectMonitorIdle("row 5");
   }, 180000);
 
   it("row 6: the aggregate is compared unrounded: a minimum equal to the displayed 88.89 fails, and 88.88 passes", async (testCtx) => {
@@ -587,7 +544,7 @@ describe("Story 40.2: minCoverage and the verdict (AC-2, matrix rows 4 to 6)", (
 
     const passing = await coverage({ classes: ["Story402.Fixture", "Story402.Layout"], minCoverage: 88.88 });
     expect((passing.structuredContent as unknown as CoverageContent).coverage?.verdict?.overall).toBe("pass");
-    await expectIdle("row 6");
+    await expectMonitorIdle("row 6");
   }, 240000);
 
   it("row 16: a bad minCoverage is refused by the schema, and a raw Start with 101 is refused by the route; nothing is started", async (testCtx) => {
@@ -610,7 +567,7 @@ describe("Story 40.2: minCoverage and the verdict (AC-2, matrix rows 4 to 6)", (
     const body = answer.json as { status?: { errors?: Array<{ error?: string }> } };
     expect(body.status?.errors?.[0]?.error ?? "").toContain("'minCoverage' must be a number from 0 to 100");
     expect(await runCounter(), "no run id was allocated").toBe(before);
-    await expectIdle("row 16");
+    await expectMonitorIdle("row 16");
   }, 120000);
 });
 
@@ -633,7 +590,7 @@ describe("Story 40.2: the companion reproduces the result from the handle alone 
         "minCoverage" in overrides,
       );
     }
-    await expectIdle("row 7");
+    await expectMonitorIdle("row 7");
   }, 240000);
 });
 
@@ -687,7 +644,7 @@ describe("Story 40.2: the Cobertura export (AC-4, AC-5, AC-6, matrix rows 8 to 1
     expect(existsSync(path.dirname(target)), "not even its directory").toBe(false);
     const polled = await poll(devPlain, primary.coverageRunId);
     expect(polled.isError, "poll is a read and stays enabled").toBeFalsy();
-    await expectIdle("row 8");
+    await expectMonitorIdle("row 8");
   }, 180000);
 
   it("row 9: an enabled export writes a Cobertura file that validates against the pinned DTD's content model and, parsed back, equals the summary", async (testCtx) => {
@@ -732,7 +689,7 @@ describe("Story 40.2: the Cobertura export (AC-4, AC-5, AC-6, matrix rows 8 to 1
     expect(cobertura).toEqual({ outputPath: path.resolve(target), bytes: Buffer.byteLength(xml), classes: 2, lines: 27 });
     expect(allText(exported).split("\n").pop()).toBe(`Cobertura XML written to ${path.resolve(target)} (${Buffer.byteLength(xml)} bytes).`);
     expect(readdirSync(path.dirname(target)), "no temporary file is left").toEqual(["coverage.xml"]);
-    await expectIdle("row 9");
+    await expectMonitorIdle("row 9");
   }, 180000);
 
   it("row 10: a second export with a source root is identical but for the one <sources> element, and a third export to the first path overwrites it with identical bytes", async (testCtx) => {
@@ -751,7 +708,7 @@ describe("Story 40.2: the Cobertura export (AC-4, AC-5, AC-6, matrix rows 8 to 1
     writeFileSync(first, "overwritten by something else");
     expect((await exportRun(dev, content.coverageRunId, first)).isError).toBeFalsy();
     expect(readFileSync(first, "utf8"), "the third export overwrote the file with identical bytes").toBe(plain);
-    await expectIdle("row 10");
+    await expectMonitorIdle("row 10");
   }, 180000);
 
   it("row 11: a running run, then the same run after a cancel, cannot be exported: isError, the text names the status, no file, and the run is unaffected", async (testCtx) => {
@@ -776,7 +733,7 @@ describe("Story 40.2: the Cobertura export (AC-4, AC-5, AC-6, matrix rows 8 to 1
     expect(allText(refusedCancelled)).toContain("status is cancelled");
     expect(existsSync(target), "no file").toBe(false);
     expect(existsSync(path.dirname(target)), "not even its directory").toBe(false);
-    await expectIdle("row 11");
+    await expectMonitorIdle("row 11");
   }, 240000);
 
   it("row 12: a relative path, one with .., one ending .txt, a missing one and one with jobId are errors that name outputPath, nothing is sent to IRIS (a run that does not exist is never looked up) and no file is written", async (testCtx) => {
@@ -804,7 +761,7 @@ describe("Story 40.2: the Cobertura export (AC-4, AC-5, AC-6, matrix rows 8 to 1
     expect(control.isError).toBe(true);
     expect(allText(control)).toContain("was not found");
     expect(existsSync(tempPath("control"))).toBe(false);
-    await expectIdle("row 12");
+    await expectMonitorIdle("row 12");
   }, 120000);
 });
 
@@ -851,7 +808,7 @@ describe("Story 40.2: a session that did not load every listed routine runs no t
     expect(content.error).toMatch(/no test was run/i);
     expect((await coverageGlobal(`"run",${next},"testsDone"`)).defined, "no test ran").toBe(false);
     expect((await coverageGlobal(`"run",${next},"runIndex"`)).defined, "no test run was recorded").toBe(false);
-    await expectIdle("row 13, as soon as the run is terminal");
+    await expectMonitorIdle("row 13, as soon as the run is terminal");
     const raw = await rawStatus(next);
     expect(raw.run["status"]).toBe("failed");
     expect(raw.run["releasedBy"], "the runner stopped its own session").toBe("runner");
@@ -859,7 +816,7 @@ describe("Story 40.2: a session that did not load every listed routine runs no t
     const after = succeeded<CoverageContent>(await coverage({ classes: ["Story402.Fixture", "Story402.Layout"] }));
     expect(after.status).toBe("completed");
     expect(after, "the next run starts normally: nothing was reclaimed").not.toHaveProperty("reclaimed");
-    await expectIdle("row 13, after the next run");
+    await expectMonitorIdle("row 13, after the next run");
   }, 240000);
 
   it("row 13b: every listed routine is gone, so the session monitors none: the run ends failed naming Story402.Gone.1, no test ran, the runner still proved the session by its scope and stopped it at once, and the next run completes with no reclaim", async (testCtx) => {
@@ -873,7 +830,7 @@ describe("Story 40.2: a session that did not load every listed routine runs no t
     expect(content.error).toMatch(/no test was run/i);
     expect((await coverageGlobal(`"run",${next},"testsDone"`)).defined, "no test ran").toBe(false);
     expect((await coverageGlobal(`"run",${next},"runIndex"`)).defined, "no test run was recorded").toBe(false);
-    await expectIdle("row 13b, as soon as the run is terminal");
+    await expectMonitorIdle("row 13b, as soon as the run is terminal");
     const raw = await rawStatus(next);
     expect(raw.run["status"]).toBe("failed");
     expect(raw.run["releasedBy"], "the runner stopped its own session, which monitored no routine").toBe("runner");
@@ -881,7 +838,7 @@ describe("Story 40.2: a session that did not load every listed routine runs no t
     const after = succeeded<CoverageContent>(await coverage({ classes: ["Story402.Fixture", "Story402.Layout"] }));
     expect(after.status).toBe("completed");
     expect(after, "the next run starts normally: nothing was reclaimed").not.toHaveProperty("reclaimed");
-    await expectIdle("row 13b, after the next run");
+    await expectMonitorIdle("row 13b, after the next run");
   }, 240000);
 });
 
@@ -926,6 +883,6 @@ describe("Story 40.2: a terminal record at the largest size a run can hold is re
       expect(await fixtureCall("ClearLargeRun", [LARGE_RUN_ID])).toBe("cleared");
     }
     expect((await coverageGlobal(`"run",${LARGE_RUN_ID},"status"`)).defined, "the large record is gone").toBe(false);
-    await expectIdle("row 14");
+    await expectMonitorIdle("row 14");
   }, 240000);
 });

@@ -270,7 +270,6 @@ describe("Story 40.4: the CHANGELOG section and the changeset", () => {
     const previous = sections.findIndex((candidate) => (candidate.split("\n")[0] ?? "").includes("Story 40.3:"));
     expect(previous, "the CHANGELOG still has the Story 40.3 section").toBeGreaterThanOrEqual(0);
     expect(index, "newest section first").toBeLessThan(previous);
-    expect(index).toBe(0);
   });
 
   it("states the unchanged counts and the bootstrap move as literals", () => {

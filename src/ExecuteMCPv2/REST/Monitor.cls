@@ -548,6 +548,17 @@ ClassMethod UtcCutoff(pSeconds As %Integer, pNow As %String = "") As %String
     Quit $ZDateTime(tDays_","_tSecs, 3, 1, 3)
 }
 
+/// The UTC instant <var>pNow</var> as ISO 8601 text, <code>YYYY-MM-DDThh:mm:ssZ</code>.
+/// <p><var>pNow</var> is a <code>$ZTimeStamp</code> value; the empty string means the
+/// current <code>$ZTimeStamp</code>. Fractional seconds are truncated, never rounded, so the
+/// result never moves to the next second or day. The result is independent of the process
+/// time zone and never reads the local clock.</p>
+ClassMethod UtcStamp(pNow As %String = "") As %String
+{
+    If pNow = "" Set pNow = $ZTimeStamp
+    Quit $Translate($ZDateTime($Piece(pNow, "."), 3, 1), " ", "T")_"Z"
+}
+
 /// Collect interoperability metrics for the current namespace.
 /// <p>Returns a <class>%DynamicObject</class> with queue depth, error count,
 /// and production status for the current namespace context.</p>
@@ -908,6 +919,7 @@ ClassMethod LicenseInfo() As %Status
 /// state. The <code>alerts.log</code> file is <b>NOT</b> truncated — historical entries
 /// remain on disk for audit. <code>iris_metrics_alerts</code> will re-populate active
 /// alerts on the next poll if conditions persist.</p>
+/// <p><code>clearedAt</code> is the UTC time of the reset (ISO 8601, to the second).</p>
 /// <p>Note: Per-alert <code>clear</code> by index and <code>acknowledge</code> are not
 /// supported — IRIS exposes no native API for either. Deferred to Epic 13 if needed.</p>
 ClassMethod AlertsManage() As %Status
@@ -955,12 +967,10 @@ ClassMethod AlertsManage() As %Status
         ; Restore namespace before building response
         Set $NAMESPACE = tOrigNS
 
-        ; Build response with ISO 8601 timestamp: replace space separator with "T"
-        ; $ZDateTime($Horolog, 3, 1) => "YYYY-MM-DD HH:MM:SS"; $Translate adds "T"
-        Set tTimestamp = $Translate($ZDateTime($Horolog, 3, 1), " ", "T")_"Z"
+        ; Build response; clearedAt is the UTC time of the reset (ISO 8601, to the second)
         Set tResult = {}
         Do tResult.%Set("action", "reset")
-        Do tResult.%Set("clearedAt", tTimestamp)
+        Do tResult.%Set("clearedAt", ..UtcStamp())
 
         Do ..RenderResponseBody($$$OK, , tResult)
     }

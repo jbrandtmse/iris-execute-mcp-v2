@@ -68,7 +68,6 @@ import {
   type WireToolResult,
 } from "./process-gate-helpers.js";
 import {
-  FIXTURE_CLASS,
   FIXTURE_DOC,
   createInteropNamespace,
   leftovers,
@@ -76,6 +75,7 @@ import {
   removeFixtureClass,
   removeInteropNamespace,
 } from "./interop-namespace-fixture.js";
+import { monitorGate, sleep } from "./monitor-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -280,6 +280,11 @@ let plain: WireSession;
 let admin: WireSession;
 let tempDir = "";
 
+const { monitorState, coverageGlobal, runCounter, expectMonitorIdle, releaseLeftoverSession } = monitorGate({
+  dev: () => dev,
+  suiteRoutineSets: [...SUITE_ROUTINE_SETS, FOREIGN_ROUTINES],
+});
+
 function wireOptions(pkg: string): WireSessionOptions {
   return { sdkEsmDir: sdkEsmDir as string, entry: distEntry(REPO_ROOT, pkg), target: TARGET, clientName: GATE_TAG };
 }
@@ -288,13 +293,6 @@ function wireOptions(pkg: string): WireSessionOptions {
 const oracleTarget = (): typeof TARGET => ({ ...TARGET, namespace: NS });
 
 type Range = [number, number];
-
-interface MonitorStateJson {
-  active: number;
-  count: number;
-  pids: string;
-  routines: string[];
-}
 
 interface MethodSummary {
   method: string;
@@ -361,49 +359,6 @@ interface TestRunContent {
   runIndex?: number | null;
   runIndexSource?: string | null;
   error?: string;
-}
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-// -- The monitor and the run counter ------------------------------------------------
-
-/** A class method of the fixture class, which lives in HSCUSTOM, and its string result. */
-async function fixtureCall(methodName: string, args: unknown[] = []): Promise<string> {
-  const result = await dev.call("iris_execute_classmethod", { namespace: "HSCUSTOM", className: FIXTURE_CLASS, methodName, args });
-  expect(result.isError, allText(result)).toBeFalsy();
-  return String(result.structuredContent?.["returnValue"] ?? "");
-}
-
-async function monitorState(): Promise<MonitorStateJson> {
-  return JSON.parse(await fixtureCall("MonitorState")) as MonitorStateJson;
-}
-
-/** A node of the coverage service's IRISTEMP global, as `{value, defined}`. */
-async function coverageGlobal(subscripts: string): Promise<{ value: unknown; defined: boolean }> {
-  const result = await dev.call("iris_global_get", { namespace: "HSCUSTOM", global: "IRIS.TempExecuteMCPv2Coverage", subscripts });
-  expect(result.isError, allText(result)).toBeFalsy();
-  const content = result.structuredContent as { value?: unknown; defined?: boolean } | undefined;
-  return { value: content?.value, defined: content?.defined === true };
-}
-
-/** The last run id the coverage service allocated, read from its IRISTEMP counter. */
-async function runCounter(): Promise<number> {
-  return Number((await coverageGlobal('"seq"')).value ?? 0);
-}
-
-/** The monitor is idle and no coverage ownership node is left: the end of every row that runs coverage. */
-async function expectIdle(row: string): Promise<void> {
-  const state = await monitorState();
-  expect(state.active, `${row}: the monitor is idle afterwards (process list "${state.pids}")`).toBe(0);
-  expect((await coverageGlobal('"session"')).defined, `${row}: no ownership node is left`).toBe(false);
-}
-
-/** Stop a session a failed row left behind: the fixture stops it only when it is provably one of the candidate routine sets. */
-async function releaseLeftover(): Promise<void> {
-  for (const routines of [...SUITE_ROUTINE_SETS, FOREIGN_ROUTINES]) {
-    if ((await monitorState()).active === 0) return;
-    await fixtureCall("StopIfList", [routines]);
-  }
 }
 
 // -- Calling the tools ----------------------------------------------------------------
@@ -670,7 +625,7 @@ beforeEach(async () => {
 afterEach(async () => {
   if (skipReason) return;
   // A row that fails must not leave its session behind for the rows after it.
-  await releaseLeftover();
+  await releaseLeftoverSession();
 });
 
 afterAll(async () => {
@@ -678,7 +633,7 @@ afterAll(async () => {
   // Every step runs even when an earlier one failed, so one bad removal cannot leave the others behind.
   const { problems, attempt } = teardownRecorder();
   try {
-    await attempt("stopping a coverage session left behind", releaseLeftover);
+    await attempt("stopping a coverage session left behind", releaseLeftoverSession);
     await attempt("the monitor is idle", async () => {
       expect((await monitorState()).active, "the monitor is idle after the run").toBe(0);
     });
@@ -899,7 +854,7 @@ describe("Story 40.4 QA: the corrected annotations and the stated defaults throu
     expect(refusedCancel.structuredContent).toEqual(governanceDenial("iris_test_status:cancel"));
 
     expect(await runCounter(), "no run id was allocated").toBe(counter);
-    await expectIdle("B2");
+    await expectMonitorIdle("B2");
 
     // The enabled side is real: the poll answers under the same default policy, and a test run is not refused.
     const handleOnly = await plain.raw("iris_test_status", { action: "poll", coverageRunId: "99999999" });
@@ -966,7 +921,7 @@ describe("Story 40.4 QA: the class-source mapping against fixtures the first 40.
       "Quit tE }",
     ]);
     expect(rawMethod(raw, "ControlAfterFour").intLines).toEqual([0, 0, 0, 0, 0, 20, 21]);
-    await expectIdle("C1");
+    await expectMonitorIdle("C1");
   }, 240000);
 
   it("C2: a #dim that initializes nothing but has a trailing comment holding = keeps no INT line, although the compiler maps it onto a statement of the method, so the statements keep their own lines", async (testCtx) => {
@@ -995,7 +950,7 @@ describe("Story 40.4 QA: the class-source mapping against fixtures the first 40.
     expect(rawMethod(raw, "CommentMid").intLines?.[1], "a mid-body directive maps to nothing").toBe(0);
     expect(rawMethod(raw, "SemicolonMid").intLines?.[1], "so does one with a ; comment").toBe(0);
     expect(rawMethod(raw, "CommentLead").intLines?.[0], "and a leading one").toBe(0);
-    await expectIdle("C2");
+    await expectMonitorIdle("C2");
   }, 240000);
 
   it("C3: a method whose name begins with % has its label line (the INT label is its name), its lines map, and a leading directive whose comment holds = is not reported", async (testCtx) => {
@@ -1037,7 +992,7 @@ describe("Story 40.4 QA: the class-source mapping against fixtures the first 40.
     expect(pct.executableRanges).toEqual([[7, 9], [14, 15], [21, 22], [28, 29]]);
     expect(statementLines(stored), "the text says the statements are lines 28 and 29").toEqual([7, 8, 9, 14, 15, 21, 22, 28, 29]);
     expect(linesOf(pct.executableRanges), "and the report says the same").toEqual(statementLines(stored));
-    await expectIdle("C3");
+    await expectMonitorIdle("C3");
   }, 240000);
 
   it("C4: a class saved with a comment-only edit and compiled by default is not-up-to-date (lineMap 0, label lines kept) and fails the verdict without a tool error; the forced compile of the same edit is measured at the edited document's lines", async (testCtx) => {
@@ -1089,7 +1044,7 @@ describe("Story 40.4 QA: the class-source mapping against fixtures the first 40.
     // 29 = Mix 16 + Pct 9 + Redo 4 (the statements the text rule reads in C1 and C3), the two stale classes not included.
     expect(content.coverage?.source, "the stale classes are not part of the total").toEqual({ executableLines: 29, coveredLines: 29, percent: 100 });
     expect(content.coverage?.unmeasured).toEqual([]);
-    await expectIdle("C4");
+    await expectMonitorIdle("C4");
   }, 240000);
 
   it("C5: a stale class whose only INT-compiled method is named with % is recognised as stale through its label line, fails the verdict, and is left out of the Cobertura file with the stale ordinary class", async (testCtx) => {
@@ -1123,7 +1078,7 @@ describe("Story 40.4 QA: the class-source mapping against fixtures the first 40.
     ]);
     // The 29 lines are C4's total.
     expect((exported.structuredContent as unknown as CoverageContent).cobertura).toMatchObject({ classes: 3, lines: 29 });
-    await expectIdle("C5");
+    await expectMonitorIdle("C5");
   }, 240000);
 });
 
@@ -1141,7 +1096,7 @@ describe("Story 40.4 QA: iris_test_status error envelopes on paths the unit test
     expect(other.error).toBe(`No test run recorded at InstanceIndex ${runIndex} in %UnitTest_Result.TestInstance (namespace ${NS_OTHER}).`);
     const absent = failedWithEnvelope<TestRunContent>(await companion({ action: "poll", runIndex: 999999, namespace: NS }));
     expect(absent.error).toBe(`No test run recorded at InstanceIndex 999999 in %UnitTest_Result.TestInstance (namespace ${NS}).`);
-    await expectIdle("D1");
+    await expectMonitorIdle("D1");
   }, 120000);
 
   it("D2: a stale jobId is an error envelope that keeps the handle; with the runIndex it recovers the finished run from the result table; cancel of it is an envelope too", async (testCtx) => {
@@ -1164,7 +1119,7 @@ describe("Story 40.4 QA: iris_test_status error envelopes on paths the unit test
     const cancelled = failedWithEnvelope<TestRunContent>(await companion({ action: "cancel", jobId, namespace: NS }));
     expect(cancelled).toMatchObject({ jobId });
     expect(cancelled.error).toContain(`jobId '${jobId}' was already gone (HTTP 404)`);
-    await expectIdle("D2");
+    await expectMonitorIdle("D2");
   }, 120000);
 
   it("D3: a result table IRIS cannot read (a namespace that does not exist) is an error envelope with the handles and the do-not-re-submit text, by runIndex alone and behind a stale jobId", async (testCtx) => {
@@ -1184,7 +1139,7 @@ describe("Story 40.4 QA: iris_test_status error envelopes on paths the unit test
     );
     // The IRIS message ends in a full stop of its own; the text quotes it with one full stop before the advice, never two.
     for (const text of [byIndex.error, behindStaleJob.error]) expect(text, "one full stop between the IRIS message and the advice").not.toContain("..");
-    await expectIdle("D3");
+    await expectMonitorIdle("D3");
   }, 120000);
 
   it("D4: a malformed runIndex or jobId is answered with an error result naming the tool and the argument, never a thrown error", async (testCtx) => {
@@ -1208,6 +1163,6 @@ describe("Story 40.4 QA: iris_test_status error envelopes on paths the unit test
       expect(allText(result), `${what} names the tool and the argument`).toContain("iris_test_status");
       expect(allText(result)).toContain(property);
     }
-    await expectIdle("D4");
+    await expectMonitorIdle("D4");
   }, 120000);
 });

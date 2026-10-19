@@ -70,7 +70,6 @@ import {
   type WireToolResult,
 } from "./process-gate-helpers.js";
 import {
-  FIXTURE_CLASS,
   FIXTURE_DOC,
   createInteropNamespace,
   leftovers,
@@ -78,6 +77,7 @@ import {
   removeFixtureClass,
   removeInteropNamespace,
 } from "./interop-namespace-fixture.js";
+import { monitorGate, sleep } from "./monitor-gate-helpers.js";
 import {
   STORY402_FIXTURE_SOURCE_VALUES,
   STORY402_LAYOUT_SOURCE_VALUES,
@@ -125,6 +125,11 @@ let dev: WireSession;
 let admin: WireSession;
 let tempDir = "";
 
+const { fixtureCall, monitorState, coverageGlobal, runCounter, expectMonitorIdle, releaseLeftoverSession } = monitorGate({
+  dev: () => dev,
+  suiteRoutineSets: [...SUITE_ROUTINE_SETS, FOREIGN_ROUTINES],
+});
+
 function wireOptions(pkg: string): WireSessionOptions {
   return { sdkEsmDir: sdkEsmDir as string, entry: distEntry(REPO_ROOT, pkg), target: TARGET, clientName: "epic40-capstone-gate" };
 }
@@ -133,13 +138,6 @@ function wireOptions(pkg: string): WireSessionOptions {
 const oracleTarget = (): typeof TARGET => ({ ...TARGET, namespace: NS });
 
 type Range = [number, number];
-
-interface MonitorStateJson {
-  active: number;
-  count: number;
-  pids: string;
-  routines: string[];
-}
 
 interface MethodSummary {
   method: string;
@@ -194,49 +192,6 @@ interface RawSource {
   reason?: string;
   lineMap?: number;
   methods: Array<{ name: string; line: number | null; reason?: string; routine?: string; intLines?: number[]; labelLine?: number }>;
-}
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-// -- The monitor and the run counter ------------------------------------------------
-
-/** A class method of the fixture class, which lives in HSCUSTOM, and its string result. */
-async function fixtureCall(methodName: string, args: unknown[] = []): Promise<string> {
-  const result = await dev.call("iris_execute_classmethod", { namespace: "HSCUSTOM", className: FIXTURE_CLASS, methodName, args });
-  expect(result.isError, allText(result)).toBeFalsy();
-  return String(result.structuredContent?.["returnValue"] ?? "");
-}
-
-async function monitorState(): Promise<MonitorStateJson> {
-  return JSON.parse(await fixtureCall("MonitorState")) as MonitorStateJson;
-}
-
-/** A node of the coverage service's IRISTEMP global, as `{value, defined}`. */
-async function coverageGlobal(subscripts: string): Promise<{ value: unknown; defined: boolean }> {
-  const result = await dev.call("iris_global_get", { namespace: "HSCUSTOM", global: "IRIS.TempExecuteMCPv2Coverage", subscripts });
-  expect(result.isError, allText(result)).toBeFalsy();
-  const content = result.structuredContent as { value?: unknown; defined?: boolean } | undefined;
-  return { value: content?.value, defined: content?.defined === true };
-}
-
-/** The last run id the coverage service allocated, read from its IRISTEMP counter. */
-async function runCounter(): Promise<number> {
-  return Number((await coverageGlobal('"seq"')).value ?? 0);
-}
-
-/** The monitor is idle and no coverage ownership node is left: the end of every row. */
-async function expectIdle(row: string): Promise<void> {
-  const state = await monitorState();
-  expect(state.active, `${row}: the monitor is idle afterwards (process list "${state.pids}")`).toBe(0);
-  expect((await coverageGlobal('"session"')).defined, `${row}: no ownership node is left`).toBe(false);
-}
-
-/** Stop a session a failed row left behind: the fixture stops it only when it is provably one of the candidate routine sets. */
-async function releaseLeftover(): Promise<void> {
-  for (const routines of [...SUITE_ROUTINE_SETS, FOREIGN_ROUTINES]) {
-    if ((await monitorState()).active === 0) return;
-    await fixtureCall("StopIfList", [routines]);
-  }
 }
 
 // -- Calling the tools ----------------------------------------------------------------
@@ -415,7 +370,7 @@ beforeEach(async () => {
 afterEach(async () => {
   if (skipReason) return;
   // A row that fails must not leave its session behind for the rows after it.
-  await releaseLeftover();
+  await releaseLeftoverSession();
 });
 
 afterAll(async () => {
@@ -423,7 +378,7 @@ afterAll(async () => {
   // Every step runs even when an earlier one failed, so one bad removal cannot leave the others behind.
   const { problems, attempt } = teardownRecorder();
   try {
-    await attempt("stopping a coverage or foreign session left behind", releaseLeftover);
+    await attempt("stopping a coverage or foreign session left behind", releaseLeftoverSession);
     await attempt("the monitor is idle", async () => {
       expect((await monitorState()).active, "the monitor is idle after the run").toBe(0);
     });
@@ -483,7 +438,7 @@ describe("Epic 40 capstone: the wire surfaces of the built dev server (row 1)", 
       expect(step8, `step 8 names ${marker}`).toContain(marker);
     }
     expect(text.indexOf("\n9. Report"), "the report step follows it").toBeGreaterThan(text.indexOf("\n8. Optional"));
-    await expectIdle("row 1");
+    await expectMonitorIdle("row 1");
   }, 120000);
 });
 
@@ -510,7 +465,7 @@ describe("Epic 40 capstone: the summary, the verdict, the re-attach and the Cobe
         { class: "Story402.Layout", verdict: "pass", percent: 50 },
       ],
     });
-    await expectIdle("row 2");
+    await expectMonitorIdle("row 2");
   }, 240000);
 
   it("row 3: iris_test_status poll by the coverageRunId alone returns row 2's coverage", async (testCtx) => {
@@ -520,7 +475,7 @@ describe("Epic 40 capstone: the summary, the verdict, the re-attach and the Cobe
     expect(polled.status).toBe("completed");
     expect(polled.coverage, "the handle reproduces the primary call's coverage, summary and verdict").toEqual(content.coverage);
     expect(polled.coverage?.verdict?.overall).toBe("pass");
-    await expectIdle("row 3");
+    await expectMonitorIdle("row 3");
   }, 240000);
 
   it("row 4: the exported Cobertura file validates against the pinned content model and, read back, equals row 2's summary", async (testCtx) => {
@@ -546,7 +501,7 @@ describe("Epic 40 capstone: the summary, the verdict, the re-attach and the Cobe
     expect([...written.values()].reduce((sum, lines) => sum + lines.length, 0), "the file's lines are the run's executable class lines").toBe(
       content.coverage?.source?.executableLines,
     );
-    await expectIdle("row 4");
+    await expectMonitorIdle("row 4");
   }, 240000);
 });
 
@@ -572,7 +527,7 @@ describe("Epic 40 capstone: the class-source mapping of initializing #dim lines,
     expect(directives, "no other preprocessor line is reported").toEqual(initializing);
     expect(dim.uncoveredRanges, "FixtureTest reaches every line of Story404.Dim").toEqual([]);
     expect(dim, "the live values of the whole class summary").toEqual(STORY404_DIM_SOURCE_VALUES);
-    await expectIdle("row 5");
+    await expectMonitorIdle("row 5");
   }, 240000);
 
   it("row 6: Story404.Hooks has no reason, no executable class line and verdict notApplicable; the two long-name methods of Story404.Long report their lines, with distinct label lines and lineMap 10 in the raw Status record", async (testCtx) => {
@@ -595,7 +550,7 @@ describe("Epic 40 capstone: the class-source mapping of initializing #dim lines,
     expect(labels.every((label) => label > 0), "every method has a label line").toBe(true);
     expect(new Set(labels).size, "and the labels are distinct").toBe(labels.length);
     expect((await rawSource(content.coverageRunId, "Story404.Hooks")).lineMap).toBe(10);
-    await expectIdle("row 6");
+    await expectMonitorIdle("row 6");
   }, 240000);
 
   it("row 7: Story404.Stale is not-up-to-date with raw lineMap 0, its verdict and the overall verdict fail without a tool error, and the exported file has no element for it", async (testCtx) => {
@@ -624,7 +579,7 @@ describe("Epic 40 capstone: the class-source mapping of initializing #dim lines,
     expect([...written.keys()], "the classes that have a class-source result, and not the stale one").toEqual(["Story404.Dim", "Story404.Hooks", "Story404.Long"]);
     expect(written.get("Story404.Hooks"), "a class with no executable line has no line element").toEqual([]);
     expect((exported.structuredContent as unknown as CoverageContent).cobertura).toMatchObject({ classes: 3, lines: 27 });
-    await expectIdle("row 7");
+    await expectMonitorIdle("row 7");
   }, 240000);
 });
 
@@ -663,10 +618,10 @@ describe("Epic 40 capstone: a monitor session the suite did not start refuses th
 
       expect(await fixtureCall("StopIfList", [FOREIGN_ROUTINES])).toBe("stopped");
       stopped = true;
-      await expectIdle("row 8, after the foreign session was stopped");
+      await expectMonitorIdle("row 8, after the foreign session was stopped");
     } finally {
       if (!stopped) await fixtureCall("StopIfList", [FOREIGN_ROUTINES]);
     }
-    await expectIdle("row 8");
+    await expectMonitorIdle("row 8");
   }, 180000);
 });

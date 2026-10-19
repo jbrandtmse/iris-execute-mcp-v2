@@ -391,6 +391,8 @@ Single supported action: **reset** — calls `$SYSTEM.Monitor.Clear()` in `%SYS`
   "clearedAt": "2026-04-22T10:50:00Z"
 }
 ```
+
+`clearedAt` is the time of the reset in UTC (ISO 8601, to the second).
 </details>
 
 <details>

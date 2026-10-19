@@ -273,6 +273,10 @@ const gateTestFiles = [
   // node, and terminates no process. Writes EXECMCPTMP404Q and EXECMCPTMP404R (their database files too), Story404Q.* inside Q, a temporary directory and ExecuteMCPv2.Temp.Story391Fixture, which it
   // removes, asserting nothing is left.
   "src/__tests__/story-40-4-qa-live-gate.test.ts",
+  // Story 40.5: the Epic 40 burn-down. DW-597 (POST /tests at the package level runs every test class of the package; the class and method levels and the six result keys are unchanged) on the BUILT
+  // iris-dev-mcp and iris-admin-mcp dists over real stdio JSON-RPC for the fixtures, and raw HTTP to the tests route. No Line-by-Line session and no production is started. Writes EXECMCPTMP405A (its
+  // database files too), Story405.* inside it, and ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
+  "src/__tests__/story-40-5-burn-down-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

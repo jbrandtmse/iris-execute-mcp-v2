@@ -1,6 +1,7 @@
 /**
  * The helpers the two Story 40.3 live gates (`story-40-3-testproduction-live-gate.test.ts` and `story-40-3-qa-live-gate.test.ts`)
- * share: the fixture-class calls and the monitor checks, the production oracle of the interop-mapped scratch namespace read by the raw
+ * share: the fixture-class calls and the monitor checks (built with {@link monitorGate} from `monitor-gate-helpers.ts`, which the
+ * coverage gates use too), the production oracle of the interop-mapped scratch namespace read by the raw
  * production status route, its production processes and residue, the settled leftovers check, and the calls and refusal checks of
  * `iris_execute_tests` / `iris_test_coverage` and the guard route. Each gate builds one set with {@link testProductionGate} over its
  * own scratch namespace; the sessions are read when a helper runs, because a gate opens them in `beforeAll`.
@@ -18,8 +19,11 @@ import {
   type WireSession,
   type WireToolResult,
 } from "./process-gate-helpers.js";
-import { FIXTURE_CLASS, leftovers } from "./interop-namespace-fixture.js";
+import { leftovers } from "./interop-namespace-fixture.js";
+import { monitorGate, sleep, type MonitorGate } from "./monitor-gate-helpers.js";
 import { STORY403_OTHER } from "./testproduction-fixture.js";
+
+export { sleep, type MonitorStateJson } from "./monitor-gate-helpers.js";
 
 /** The guard route and the production status route, below the web port. */
 export const GUARD_ROUTE = "/api/executemcp/v2/dev/test/production";
@@ -31,15 +35,6 @@ export const ENABLED_GOVERNANCE = JSON.stringify({ global: { iris_test_coverage:
 /** The InstalledNamespace node of a scratch namespace, which the leftovers check lists and the processes check ignores. */
 export function installedNode(namespace: string): string {
   return `^%SYS("Ensemble","InstalledNamespace","${namespace}")`;
-}
-
-export const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-export interface MonitorStateJson {
-  active: number;
-  count: number;
-  pids: string;
-  routines: string[];
 }
 
 export interface ProductionStatusJson {
@@ -110,18 +105,7 @@ export interface TestProductionGateOptions {
   suiteRoutineSets: readonly string[];
 }
 
-export interface TestProductionGate {
-  /** A class method of the fixture class, which lives in HSCUSTOM, and its string result. */
-  fixtureCall(methodName: string, args?: unknown[]): Promise<string>;
-  monitorState(): Promise<MonitorStateJson>;
-  /** A node of the coverage service's IRISTEMP global, as `{value, defined}`. */
-  coverageGlobal(subscripts: string): Promise<{ value: unknown; defined: boolean }>;
-  /** The last run id the coverage service allocated, read from its IRISTEMP counter. */
-  runCounter(): Promise<number>;
-  /** The monitor is idle and no coverage ownership node is left. */
-  expectMonitorIdle(row: string): Promise<void>;
-  /** Stop a coverage session a failed row left behind: the fixture stops it only when it is provably one of the candidate sets. */
-  releaseLeftoverSession(): Promise<void>;
+export interface TestProductionGate extends MonitorGate {
   /** The production status of the scratch namespace, by the raw status route: the oracle for "Stopped" and "untouched". */
   productionStatus(): Promise<ProductionStatusJson>;
   /** Wait until the production reaches `state` (the start and stop calls return before the jobs have settled). */
@@ -160,40 +144,7 @@ export function testProductionGate(options: TestProductionGateOptions): TestProd
   const node = installedNode(namespace);
   const dev = (): WireSession => options.sessions().dev;
   const interop = (): WireSession => options.sessions().interop;
-
-  async function fixtureCall(methodName: string, args: unknown[] = []): Promise<string> {
-    const result = await dev().call("iris_execute_classmethod", { namespace: "HSCUSTOM", className: FIXTURE_CLASS, methodName, args });
-    expect(result.isError, allText(result)).toBeFalsy();
-    return String(result.structuredContent?.["returnValue"] ?? "");
-  }
-
-  async function monitorState(): Promise<MonitorStateJson> {
-    return JSON.parse(await fixtureCall("MonitorState")) as MonitorStateJson;
-  }
-
-  async function coverageGlobal(subscripts: string): Promise<{ value: unknown; defined: boolean }> {
-    const result = await dev().call("iris_global_get", { namespace: "HSCUSTOM", global: "IRIS.TempExecuteMCPv2Coverage", subscripts });
-    expect(result.isError, allText(result)).toBeFalsy();
-    const content = result.structuredContent as { value?: unknown; defined?: boolean } | undefined;
-    return { value: content?.value, defined: content?.defined === true };
-  }
-
-  async function runCounter(): Promise<number> {
-    return Number((await coverageGlobal('"seq"')).value ?? 0);
-  }
-
-  async function expectMonitorIdle(row: string): Promise<void> {
-    const state = await monitorState();
-    expect(state.active, `${row}: the monitor is idle (process list "${state.pids}")`).toBe(0);
-    expect((await coverageGlobal('"session"')).defined, `${row}: no ownership node is left`).toBe(false);
-  }
-
-  async function releaseLeftoverSession(): Promise<void> {
-    for (const routines of suiteRoutineSets) {
-      if ((await monitorState()).active === 0) return;
-      await fixtureCall("StopIfList", [routines]);
-    }
-  }
+  const monitor = monitorGate({ dev, suiteRoutineSets });
 
   async function productionStatus(): Promise<ProductionStatusJson> {
     const answer = await rawIrisRequest(target, `${STATUS_ROUTE}?namespace=${namespace}`, { method: "GET" });
@@ -312,12 +263,7 @@ export function testProductionGate(options: TestProductionGateOptions): TestProd
   }
 
   return {
-    fixtureCall,
-    monitorState,
-    coverageGlobal,
-    runCounter,
-    expectMonitorIdle,
-    releaseLeftoverSession,
+    ...monitor,
     productionStatus,
     waitForState,
     startOther,

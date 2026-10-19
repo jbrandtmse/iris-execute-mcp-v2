@@ -1,10 +1,13 @@
-/// Tests for the two helpers behind the interoperability Event Log surfaces:
+/// Tests for the helpers behind the interoperability Event Log and alert surfaces:
 /// <method>ExecuteMCPv2.REST.Monitor:UtcCutoff</method> (the 24-hour window of
-/// <code>iris_metrics_interop</code>) and
+/// <code>iris_metrics_interop</code>),
+/// <method>ExecuteMCPv2.REST.Monitor:UtcStamp</method> (the UTC <code>clearedAt</code> of the
+/// <code>iris_alerts_manage</code> reset) and
 /// <method>ExecuteMCPv2.REST.Interop:LogTypeValue</method> (the display-name to stored-number
 /// mapping of the <code>iris_production_logs</code> <code>type</code> filter).
-/// <p>Data-free: no Event Log or message rows are read or written. The cutoff test changes
-/// this process's <code>$ZTimeZone</code> and restores it on every path, including
+/// <p>Data-free: no Event Log or message rows are read or written, and the alert reset itself
+/// is never called (it clears instance-wide alert state). The cutoff and stamp tests change
+/// this process's <code>$ZTimeZone</code> and restore it on every path, including
 /// <method>OnAfterOneTest</method>.</p>
 Class ExecuteMCPv2.Tests.EventLogMetricsTest Extends %UnitTest.TestCase
 {
@@ -72,6 +75,61 @@ Method TestUtcCutoffIgnoresProcessTimeZone()
         }
         Set $ZTimeZone = ..SavedZone
     }
+}
+
+/// A fixed instant gives a fixed stamp in the form <code>YYYY-MM-DDThh:mm:ssZ</code>. Expected
+/// values were captured live (IRIS 2026.2 build 221U): a mid-morning instant with a fraction, an
+/// instant one second short of midnight whose fraction would round up (it truncates, so the day
+/// does not advance), and the midnight boundary.
+Method TestUtcStampFixedInstant()
+{
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Monitor).UtcStamp("67000,3600.5"), "2024-06-09T01:00:00Z", "a fraction of a second is dropped")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Monitor).UtcStamp("67000,86399.9996"), "2024-06-09T23:59:59Z", "a fraction that would round up truncates and stays on the same day")
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Monitor).UtcStamp("67860,0"), "2026-10-17T00:00:00Z", "midnight is the start of the day")
+}
+
+/// The default stamp comes from <code>$ZTimeStamp</code>, so the process time zone, which moves
+/// the local clock, leaves it alone. The stamp lies between two <code>$ZTimeStamp</code> readings
+/// taken around the call in both a zone east of UTC and a zone west of it.
+Method TestUtcStampIgnoresProcessTimeZone()
+{
+    Set tZones = $ListBuild(420, -600)
+    Set tPointer = 0
+    While $ListNext(tZones, tPointer, tZone) {
+        Try {
+            Set $ZTimeZone = tZone
+            Set tBefore = ..Seconds($ZTimeStamp)
+            Set tStamp = ##class(ExecuteMCPv2.REST.Monitor).UtcStamp()
+            Set tAfter = ..Seconds($ZTimeStamp)
+            Do $$$AssertEquals($Length(tStamp), 20, "stamp is 20 characters under $ZTimeZone "_tZone_": "_tStamp)
+            Do $$$AssertEquals($Extract(tStamp, 11), "T", "stamp separates date and time with T under $ZTimeZone "_tZone)
+            Do $$$AssertEquals($Extract(tStamp, 20), "Z", "stamp ends with Z under $ZTimeZone "_tZone)
+            Set tGot = ..Seconds($ZDateTimeH($Translate($Extract(tStamp, 1, 19), "T", " "), 3, 1))
+            Do $$$AssertTrue((tGot > (tBefore - 1)) && (tGot <= tAfter), "stamp is the current UTC second under $ZTimeZone "_tZone_": "_tStamp)
+        }
+        Catch ex {
+            Do $$$AssertTrue(0, "UtcStamp under $ZTimeZone "_tZone_" threw: "_ex.DisplayString())
+        }
+        Set $ZTimeZone = ..SavedZone
+    }
+}
+
+/// The reset route stamps <code>clearedAt</code> from <method>UtcStamp</method> and never reads the local
+/// clock. The route itself is not called: it clears instance-wide alert state.
+Method TestAlertsManageStampsClearedAtInUtc()
+{
+    Set tText = ""
+    Set tMethod = ##class(%Dictionary.MethodDefinition).%OpenId("ExecuteMCPv2.REST.Monitor||AlertsManage")
+    Do $$$AssertTrue($IsObject(tMethod), "AlertsManage has a method definition")
+    If $IsObject(tMethod) {
+        Do tMethod.Implementation.Rewind()
+        While 'tMethod.Implementation.AtEnd {
+            Set tText = tText _ tMethod.Implementation.Read(30000)
+        }
+    }
+    Set tLower = $ZConvert(tText, "L")
+    Do $$$AssertTrue(tText [ "Do tResult.%Set(""clearedAt"", ..UtcStamp())", "clearedAt is set from ..UtcStamp() on the response object")
+    Do $$$AssertTrue(tLower '[ "horolog", "AlertsManage does not read the local clock")
 }
 
 /// Every Event Log type name maps to its stored number: the live

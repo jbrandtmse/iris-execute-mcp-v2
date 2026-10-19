@@ -320,16 +320,13 @@ ClassMethod Run(pBody As %DynamicObject, Output pResult As %DynamicObject) As %S
     Quit ..Launch(.tParams, tNamespace, tRoutines, tUnmeasured, tSpec, .pResult)
 }
 
-/// The test spec for <method>%UnitTest.Manager:RunTest</method>: <method>ExecuteMCPv2.REST.UnitTest:BuildTestSpec</method>
-/// for the target and level. RunTest reads one spec as <code>suite:class[:method];class[:method];...</code>: the classes
-/// of one suite follow the first colon and are separated by a semicolon alone. At the package level that method joins
-/// the classes as <code>:A;:B</code>, which RunTest reads as class A and a method named B (and so runs no test), so the
-/// colon after each semicolon is dropped: <code>:A;B</code>.
+/// The test spec for <method>%UnitTest.Manager:RunTest</method>: the value of
+/// <method>ExecuteMCPv2.REST.UnitTest:BuildTestSpec</method> for the target and level, unchanged. At the package level
+/// that is <code>:A;B;C</code>, one colon and then the classes separated by a semicolon alone, which is how RunTest
+/// reads a suite of several classes.
 ClassMethod TestSpec(pTarget As %String, pLevel As %String) As %String
 {
-    Set tSpec = ##class(ExecuteMCPv2.REST.UnitTest).BuildTestSpec(pTarget, pLevel)
-    If pLevel = "package" Set tSpec = $Replace(tSpec, ";:", ";")
-    Quit tSpec
+    Quit ##class(ExecuteMCPv2.REST.UnitTest).BuildTestSpec(pTarget, pLevel)
 }
 
 /// The unmeasured classes as text: <code>Class: reason, Class: reason</code>.

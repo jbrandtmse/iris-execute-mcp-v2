@@ -77,7 +77,6 @@ import {
   type WireToolResult,
 } from "./process-gate-helpers.js";
 import {
-  FIXTURE_CLASS,
   FIXTURE_DOC,
   createInteropNamespace,
   leftovers,
@@ -86,6 +85,7 @@ import {
   removeFixtureClass,
   removeInteropNamespace,
 } from "./interop-namespace-fixture.js";
+import { monitorGate, sleep } from "./monitor-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -701,21 +701,17 @@ let dev: WireSession;
 let admin: WireSession;
 let tempDir = "";
 
+const { fixtureCall, monitorState, coverageGlobal, runCounter, expectMonitorIdle, releaseLeftoverSession } = monitorGate({
+  dev: () => dev,
+  suiteRoutineSets: SAFETY_NET_SETS,
+});
+
 function wireOptions(pkg: string): WireSessionOptions {
   return { sdkEsmDir: sdkEsmDir as string, entry: distEntry(REPO_ROOT, pkg), target: TARGET, clientName: "story-40-2-qa-live-gate" };
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
 /** The raw Atelier oracle for the documents of namespace `namespace`. */
 const oracleTarget = (namespace: string): typeof TARGET => ({ ...TARGET, namespace });
-
-interface MonitorStateJson {
-  active: number;
-  count: number;
-  pids: string;
-  routines: string[];
-}
 
 interface MethodSummary {
   method: string;
@@ -779,48 +775,11 @@ interface RawRun {
   }>;
 }
 
-async function fixtureCall(methodName: string, args: unknown[] = []): Promise<string> {
-  const result = await dev.call("iris_execute_classmethod", { namespace: "HSCUSTOM", className: FIXTURE_CLASS, methodName, args });
-  expect(result.isError, allText(result)).toBeFalsy();
-  return String(result.structuredContent?.["returnValue"] ?? "");
-}
-
 /** `$System.OBJ.IsUpToDate(className)` in U, as the string `1` or `0`: whether IRIS thinks the compiled class matches its definition. */
 async function objIsUpToDate(className: string): Promise<string> {
   const result = await dev.call("iris_execute_classmethod", { namespace: NS_U, className: "%SYSTEM.OBJ", methodName: "IsUpToDate", args: [className] });
   expect(result.isError, allText(result)).toBeFalsy();
   return String(result.structuredContent?.["returnValue"] ?? "");
-}
-
-async function monitorState(): Promise<MonitorStateJson> {
-  return JSON.parse(await fixtureCall("MonitorState")) as MonitorStateJson;
-}
-
-/** A node of the coverage service's IRISTEMP global, as `{value, defined}`. */
-async function coverageGlobal(subscripts: string): Promise<{ value: unknown; defined: boolean }> {
-  const result = await dev.call("iris_global_get", { namespace: "HSCUSTOM", global: "IRIS.TempExecuteMCPv2Coverage", subscripts });
-  expect(result.isError, allText(result)).toBeFalsy();
-  const content = result.structuredContent as { value?: unknown; defined?: boolean } | undefined;
-  return { value: content?.value, defined: content?.defined === true };
-}
-
-async function runCounter(): Promise<number> {
-  return Number((await coverageGlobal('"seq"')).value ?? 0);
-}
-
-/** The monitor is idle and no coverage ownership node is left: the end of every row that starts a run. */
-async function expectIdle(row: string): Promise<void> {
-  const state = await monitorState();
-  expect(state.active, `${row}: the monitor is idle afterwards (process list "${state.pids}")`).toBe(0);
-  expect((await coverageGlobal('"session"')).defined, `${row}: no ownership node is left`).toBe(false);
-}
-
-/** Stop a session a failed row left behind: the fixture stops it only when it is provably one of the candidate routine sets. */
-async function releaseLeftover(): Promise<void> {
-  for (const routines of SAFETY_NET_SETS) {
-    if ((await monitorState()).active === 0) return;
-    await fixtureCall("StopIfList", [routines]);
-  }
 }
 
 function succeeded<T>(result: WireToolResult): T {
@@ -1076,7 +1035,7 @@ beforeAll(async () => {
 afterEach(async () => {
   if (skipReason) return;
   // A row that fails must not leave its session behind for the rows after it.
-  await releaseLeftover();
+  await releaseLeftoverSession();
 });
 
 afterAll(async () => {
@@ -1084,7 +1043,7 @@ afterAll(async () => {
   // Every step runs even when an earlier one failed, so one bad removal cannot leave the others behind.
   const { problems, attempt } = teardownRecorder();
   try {
-    await attempt("stopping a coverage session left behind", releaseLeftover);
+    await attempt("stopping a coverage session left behind", releaseLeftoverSession);
     await attempt("letting go of a runner lock left behind", async () => {
       await fixtureCall("ReleaseRunnerLock", [(await runCounter()) + 1]);
     });
@@ -1143,7 +1102,7 @@ describe("Story 40.2 QA: the class-source mapping against unseen fixtures (AC-1,
     expect(source.methods).toEqual(DIVERSE_METHODS);
     expect(source.generated.executableLines, "the compiler's own code (the cursor helper and the rest) is counted per class").toBeGreaterThan(0);
     expect(source.generated.coveredLines).toBeLessThanOrEqual(source.generated.executableLines);
-    await expectIdle("QA-1");
+    await expectMonitorIdle("QA-1");
   }, 300000);
 
   it("QA-2: the persistent Story402.QaStore reports Create and the call-mode Called as class lines and its trigger, computed code and property methods only as generated code", async (testCtx) => {
@@ -1165,7 +1124,7 @@ describe("Story 40.2 QA: the class-source mapping against unseen fixtures (AC-1,
     ]);
     expect(source.generated.executableLines, "a persistent class's property, index, trigger and computed code is generated").toBeGreaterThan(100);
     expect(source.generated.coveredLines).toBeGreaterThan(0);
-    await expectIdle("QA-2");
+    await expectMonitorIdle("QA-2");
   }, 300000);
 
   it("QA-3: counts known by construction: Pick ran three times, the loop body three times and its For line once, and the Cobertura hits are the INT counts of the raw record for every class line", async (testCtx) => {
@@ -1182,7 +1141,7 @@ describe("Story 40.2 QA: the class-source mapping against unseen fixtures (AC-1,
       expect(byLine.has(line), `class line ${line} has a mapped INT line in the raw record`).toBe(true);
       expect(expand(source.coveredRanges).includes(line), `line ${line}: covered exactly when its INT count is above 0`).toBe((byLine.get(line)?.hits ?? 0) > 0);
     }
-    await expectIdle("QA-3");
+    await expectMonitorIdle("QA-3");
   }, 300000);
 });
 
@@ -1219,7 +1178,7 @@ describe("Story 40.2 QA: the INT block of a method and one class line per statem
       ["Gamma", 3, 3],
       ["Zeta", 3, 0],
     ]);
-    await expectIdle("QA-3a");
+    await expectMonitorIdle("QA-3a");
   }, 300000);
 
   it("QA-3d: Zeta has five leading #dim lines, and the summary reports its three statements and none of the #dim lines", async (testCtx) => {
@@ -1234,7 +1193,7 @@ describe("Story 40.2 QA: the INT block of a method and one class line per statem
     const source = sourceOf(run.content, "Story402.QaDirectives");
     expect(source.methods.find((method) => method.method === "Zeta")).toMatchObject({ line: 29, executableLines: 3, coveredLines: 0, uncoveredRanges: [[36, 38]] });
     for (const [line, text] of [[36, "Set tA = pN"], [37, "Set tB = tA"], [38, "Quit tB"]] as const) expect(textAt(stored, line)).toBe(text);
-    await expectIdle("QA-3d");
+    await expectMonitorIdle("QA-3d");
   }, 300000);
 
   it("QA-3b: Beta reports only its two statements, so a method that never ran has no covered line", async (testCtx) => {
@@ -1330,7 +1289,7 @@ describe("Story 40.2 QA: minCoverage at its edges (AC-2, matrix rows 4 to 6) aga
 
       const polled = await poll(content.coverageRunId);
       expect(polled.structuredContent, "the companion reproduces the primary result from the handle alone").toEqual(result.structuredContent);
-      await expectIdle(`QA-4 (${entry.min})`);
+      await expectMonitorIdle(`QA-4 (${entry.min})`);
     }, 300000);
   }
 
@@ -1345,7 +1304,7 @@ describe("Story 40.2 QA: minCoverage at its edges (AC-2, matrix rows 4 to 6) aga
     const third = await verdictRun(66.67, { classes: ["Story402.QaThird"] });
     const thirdVerdict = (third.structuredContent as unknown as CoverageContent).coverage?.verdict;
     expect(thirdVerdict, "the displayed 66.67 is above the unrounded ratio, so the class fails although it shows the minimum").toMatchObject({ overall: "fail", percent: 66.67 });
-    await expectIdle("QA-4b");
+    await expectMonitorIdle("QA-4b");
   }, 300000);
 });
 
@@ -1380,7 +1339,7 @@ describe("Story 40.2 QA: a second namespace with a class of the same name and a 
     const lower = await exportRun(content.coverageRunId, path.join(directory, "lower.xml"), { namespace: NS_V.toLowerCase() });
     expect(lower.isError, allText(lower)).toBeFalsy();
     expect(readFileSync(path.join(directory, "lower.xml"), "utf8")).toBe(readFileSync(path.join(directory, "right.xml"), "utf8"));
-    await expectIdle("QA-5");
+    await expectMonitorIdle("QA-5");
   }, 300000);
 });
 
@@ -1461,7 +1420,7 @@ describe("Story 40.2 QA: the exported Cobertura file against the summary, the ra
       const names = spawnSync("xmllint", ["--nonet", "--xpath", "string(//class[3]/@name)", target], { encoding: "utf8" });
       expect(names.stdout.trim(), "xmllint reads the third class").toBe("Story402.QaStore");
     }
-    await expectIdle("QA-6");
+    await expectMonitorIdle("QA-6");
   }, 300000);
 });
 
@@ -1542,7 +1501,7 @@ describe("Story 40.2 QA: the export's path guard and write on the real file syst
       expect(readFileSync(resolved).equals(bytes), `${name}: the same bytes as the reference export`).toBe(true);
       expect(strayTemporaries(path.dirname(resolved)), `${name}: no temporary file is left`).toEqual([]);
     }
-    await expectIdle("QA-8");
+    await expectMonitorIdle("QA-8");
   }, 300000);
 
   it("QA-9: a parent that is a file, a grandparent that is a file, a target that is a directory, a NUL in the path and a file name past the limit are errors that say the file could not be written, and leave every existing file as it was", async (testCtx) => {
@@ -1574,7 +1533,7 @@ describe("Story 40.2 QA: the export's path guard and write on the real file syst
     expect(readFileSync(path.join(adirectory, "inside.txt"), "utf8")).toBe("INSIDE");
     expect(listing(directory), "no file or directory was added, no temporary file is left").toEqual(before);
     expect(strayTemporaries(directory)).toEqual([]);
-    await expectIdle("QA-9");
+    await expectMonitorIdle("QA-9");
   }, 300000);
 
   it.skipIf(!POSIX)("QA-10: a symlinked parent is followed (the file lands in the directory it points to and the result names the path as given), and a symlink as the target is replaced, never written through", async (testCtx) => {
@@ -1615,7 +1574,7 @@ describe("Story 40.2 QA: the export's path guard and write on the real file syst
     expect(existsSync(path.dirname(missing)), "nothing was created where the dangling link pointed").toBe(false);
     expect(lstatSync(dangling).isSymbolicLink()).toBe(false);
     expect(strayTemporaries(directory)).toEqual([]);
-    await expectIdle("QA-10");
+    await expectMonitorIdle("QA-10");
   }, 300000);
 
   it.skipIf(!POSIX || IS_ROOT)("QA-11: an existing read-only file is replaced, as the contract says an existing file is overwritten, and a read-only directory is an error that leaves it empty", async (testCtx) => {
@@ -1644,7 +1603,7 @@ describe("Story 40.2 QA: the export's path guard and write on the real file syst
     } finally {
       chmodSync(readOnlyDirectory, 0o755);
     }
-    await expectIdle("QA-11");
+    await expectMonitorIdle("QA-11");
   }, 300000);
 });
 
@@ -1697,7 +1656,7 @@ describe("Story 40.2 QA: an export that is refused leaves an existing file at ou
     } finally {
       await setHang(3);
     }
-    await expectIdle("QA-12, after the cancel");
+    await expectMonitorIdle("QA-12, after the cancel");
 
     // A handle that names no run, malformed handles (the schema refuses them before the tool runs), and the wrong namespace.
     const unknown = await exportRun("999999998", keep);
@@ -1752,7 +1711,7 @@ describe("Story 40.2 QA: an export that is refused leaves an existing file at ou
     const failed = result?.structuredContent as unknown as CoverageContent;
     expect(failed).toMatchObject({ status: "failed", coverageRunId: next });
     expect(failed.error).toContain("Story402.QaGone.1");
-    await expectIdle("QA-13, as soon as the run is terminal");
+    await expectMonitorIdle("QA-13, as soon as the run is terminal");
 
     const refused = await exportRun(next, keep);
     expect(refused.isError, allText(refused)).toBe(true);
@@ -1762,7 +1721,7 @@ describe("Story 40.2 QA: an export that is refused leaves an existing file at ou
     expect(allText(refused)).toContain("Nothing was written.");
     expectUntouched(keep, snapshot, "a failed run");
     expect(listing(directory)).toEqual(["keep.xml"]);
-    await expectIdle("QA-13");
+    await expectMonitorIdle("QA-13");
   }, 300000);
 });
 
@@ -1831,7 +1790,7 @@ describe("Story 40.2 QA: a class changed after it was compiled (AC-1, AC-2, AC-6
     expect(allText(refused)).toContain("Recompile the classes (a forced compile when only comments changed) and run the tests again.");
     expect(allText(refused)).toContain("Nothing was written.");
     expectUntouched(keep, snapshot, "a run with no class-source result");
-    await expectIdle("QA-14");
+    await expectMonitorIdle("QA-14");
   }, 300000);
 });
 
@@ -1863,7 +1822,7 @@ describe("Story 40.2 QA: a class documented after it was compiled has no line ma
 
     afterResult = await coverage({ target: "Story402.QaStaleTest", classes: ["Story402.QaStale"], minCoverage: 50 });
     after = succeeded<CoverageContent>(afterResult);
-    await expectIdle("QA-15 setup");
+    await expectMonitorIdle("QA-15 setup");
   }, 300000);
 
   it("QA-15a: before the documentation comment the class maps (lines 7 and 8); after it IRIS still says up to date, the raw map has a label and no mapped line, the class has the reason not-up-to-date, the verdict fails with it, and the export is refused", async (testCtx) => {
@@ -1901,7 +1860,7 @@ describe("Story 40.2 QA: a class documented after it was compiled has no line ma
     expect(allText(exported)).toContain("Nothing was written.");
     expect(existsSync(target), "nothing was written").toBe(false);
     expect(listing(directory)).toEqual([]);
-    await expectIdle("QA-15a");
+    await expectMonitorIdle("QA-15a");
   }, 300000);
 
   it("QA-15b: a class whose body lines cannot be mapped is reported with a reason, not as a class with no executable line", async (testCtx) => {
