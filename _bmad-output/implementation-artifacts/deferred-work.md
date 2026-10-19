@@ -3362,6 +3362,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-41-1-pack-layout-licensing-and-provenance.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 41.1 CR 2026-10-19: hasValidAdaptationHeader (provenance-core.mjs:165) reads a file whose line 1 is not --- as frontmatter-less, so header-then-frontmatter passes; reproduced by 4 layers and QA; the frontmatter test reads root skills/ only
 - 2026-10-19T07:08:11Z status=routed owner=41-3-core-knowledge-skills by=cr note=add a default-suite check that every pack SKILL.md opens with frontmatter holding name and description; prove it red
+- 2026-10-19T13:25:46Z status=resolved-by:41-3-core-knowledge-skills by=adjudication note=check:provenance gained the skill-frontmatter rule (skillFrontmatterProblems): every pack SKILL.md opens with frontmatter on line 1 (no BOM) holding only name and description, name = directory; a header above the frontmatter is refused; proven red on the real tree (mutations) and as a real process on scratch copies (story-41-3-qa-frontmatter-process.test.ts); build baaf229 + review 41b2a79
 
 ### DW-614: Provenance cannot yet cover an adapted rule: listAgentContentFiles labels a rule source packRel rules/<f>, a path the pack no longer has (the forms are rules/claude-code/ and rules/agents-md/), and the adaptation header's position inside the agents-md form is undecided
 - source: _bmad-output/implementation-artifacts/spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: med | footprint: in-epic
@@ -3408,3 +3409,4 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-41-3-core-knowledge-skills.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 41.3 plan probes 2026-10-19: GetErrorText(sc,fr)='ERREUR #5001: disk full', GetErrorText(sc,de)='FEHLER #5001: disk full'; src/ExecuteMCPv2/Utils.cls:179-185 loops over 'ERROR #' and the Arabic word only; the epic-11 retro predicted this
 - 2026-10-19T12:10:06Z status=routed owner=burndown by=harvest note=fix-pack-sized LOW (strip the localized prefix generically, a pinned test per locale, bootstrap moves): into the Epic 41 burn-down story if one is chartered, else wontfix-accepted with a probe at the gate
+- 2026-10-19T13:21:44Z occurrence=41-3-core-knowledge-skills
