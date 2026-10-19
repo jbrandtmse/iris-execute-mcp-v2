@@ -422,8 +422,26 @@ describe("the changed-since-preview refusal", () => {
     expect(dirResult).toMatchObject({ ok: false, changedSincePreview: true, path: ".claude" });
     writeProjectFile(sandbox.project, `.claude/rules/${RULE}.md`, "appeared\n");
     const fileResult = executePackPlan(ctx, prepared.plan, { fs });
-    expect(fileResult).toMatchObject({ ok: false, changedSincePreview: true });
+    expect(fileResult).toMatchObject({ ok: false, changedSincePreview: true, path: `.claude/rules/${RULE}.md` });
     expect([...treeSnapshot(sandbox.project).keys()].sort()).toEqual([".claude", ".claude/rules", `.claude/rules/${RULE}.md`]);
+  });
+
+  it("refuses when the host the plan creates appears before the run, with no directory involved, and keeps its bytes", () => {
+    const sandbox = makeSandbox();
+    const fs = jailedBytesFs(sandbox.root);
+    const ctx = contextFor(sandbox, { stateDir: sandbox.state });
+    const prepared = preparePackChange(ctx, { action: "install", client: "codex", includeModified: false, fs });
+    if (!prepared.ok) throw new Error(prepared.message);
+    writeProjectFile(sandbox.project, "AGENTS.md", "mine, written while the prompt was open\n");
+    const result = executePackPlan(ctx, prepared.plan, { fs });
+    expect(result).toMatchObject({
+      ok: false,
+      path: "AGENTS.md",
+      reason: "AGENTS.md changed after the preview; nothing was written; re-run the command",
+      changedSincePreview: true,
+    });
+    expect(readProjectFile(sandbox.project, "AGENTS.md").toString("utf8")).toBe("mine, written while the prompt was open\n");
+    expect([...treeSnapshot(sandbox.project).keys()]).toEqual(["AGENTS.md"]);
   });
 });
 

@@ -85,13 +85,17 @@ governance key and no visibility preset.
   `.iris-mcp/skills-pack.json` in the project. A file at an owned path that it did not install is a conflict, and a conflict
   refuses the whole run. Your `AGENTS.md` or `GEMINI.md` is read and written as bytes: only the block between its two
   `IRIS-MCP-RULE` marker lines is ever changed, and uninstalling restores the other bytes exactly. It never writes
-  `CLAUDE.md` or a client's settings file.
+  `CLAUDE.md` or a client's settings file. A symbolic link at or above any path it owns (a linked `.claude/` or an
+  `AGENTS.md` that links to `CLAUDE.md`, dangling or not), or a hard link at one, is a conflict that names the link, so it
+  never writes or deletes through a link; replace the link or install by hand.
 - **`--include-modified`.** A file you edited after the install is kept, with a note, on both install and uninstall; with
   `--include-modified` it is replaced or removed after a backup. Every file an update or an uninstall overwrites or deletes is
   backed up first under `~/.iris-mcp/client-manager/backups/skills-pack/`.
 - **Keep the record with the files.** Commit `.iris-mcp/skills-pack.json` together with the installed files, so that a
   clone can update or uninstall them. Without the record, an installed file that differs from the pack is a file the
-  installer did not install, which is a conflict: move or delete it, then re-run.
+  installer did not install, which is a conflict: move or delete it, then re-run. If git converts line endings in your
+  checkout (`core.autocrlf`), mark the installed paths `-text` in `.gitattributes`: a converted file reads as one you
+  changed, and is kept.
 - **Exit codes.** `0` for success, nothing to change or a clean dry run; `1` for a conflict (a dry run included), an invalid
   manifest or pack, a failed write (it is rolled back), a declined confirmation or a file that changed after the preview;
   `2` for a usage error.

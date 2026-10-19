@@ -162,8 +162,10 @@ export {
 
 export {
   DEFAULT_PACK_DIR,
+  LINK_DETAILS,
   MANIFEST_PATH,
   emptyManifest,
+  firstLinkOn,
   installerPayloads,
   loadPack,
   parseManifest,
@@ -171,6 +173,7 @@ export {
   renderManifest,
   renderPlanPreview,
   type InstallerPayload,
+  type LinkKind,
   type LoadPackResult,
   type LoadedPack,
   type ManifestBlock,

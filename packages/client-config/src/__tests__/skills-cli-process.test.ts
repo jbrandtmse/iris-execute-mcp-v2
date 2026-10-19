@@ -7,54 +7,22 @@
  * unchanged: the installer must never be pointed at them.
  */
 
-import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { MANIFEST_PATH } from "../pack-plan.js";
 import { NOTICE_FILENAME } from "../pack-targets.js";
 
-import { makeSandbox, readProjectFile, realPack, removeSandboxes, treeSnapshot, writeProjectFile, type Sandbox } from "./pack-test-helpers.js";
+import { makeSandbox, readProjectFile, realPack, removeSandboxes, treeSnapshot, writeProjectFile } from "./pack-test-helpers.js";
+import { assertBinFresh, BIN, REPO_ROOT, runBin } from "./qa-41-6-helpers.js";
 
+beforeAll(assertBinFresh);
 afterEach(removeSandboxes);
 
-const PACKAGE_ROOT = fileURLToPath(new URL("../..", import.meta.url));
-const REPO_ROOT = path.resolve(PACKAGE_ROOT, "..", "..");
-const BIN = path.join(PACKAGE_ROOT, "dist", "cli", "clients-cli.js");
 const RULE = "iris-mcp-objectscript-pre-write";
 const T = 120_000;
-
-interface RunResult {
-  status: number | null;
-  stdout: string;
-  stderr: string;
-}
-
-function runBin(sandbox: Sandbox, args: string[], options: { cwd?: string } = {}): RunResult {
-  const result = spawnSync(process.execPath, [BIN, ...args], {
-    cwd: options.cwd ?? sandbox.project,
-    env: {
-      PATH: process.env.PATH ?? "",
-      PATHEXT: process.env.PATHEXT ?? "",
-      SystemRoot: process.env.SystemRoot ?? "",
-      windir: process.env.windir ?? "",
-      TEMP: process.env.TEMP ?? "",
-      TMP: process.env.TMP ?? "",
-      TMPDIR: process.env.TMPDIR ?? "",
-      HOME: sandbox.home,
-      USERPROFILE: sandbox.home,
-      APPDATA: path.join(sandbox.home, "AppData", "Roaming"),
-    },
-    encoding: "utf8",
-    input: "",
-    timeout: 60_000,
-  });
-  if (result.error) throw result.error;
-  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
-}
 
 /** The real repository root's paths the installer must never touch, as path|size|mtime lines. */
 function realRootFingerprint(): string[] {

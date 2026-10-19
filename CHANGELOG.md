@@ -30,7 +30,10 @@ distributions, up from 8: the 8 npm packages plus `installer:claude-code`, `inst
   not install is a conflict and refuses the whole run; a file byte-identical to the pack is adopted; a file you changed since is
   kept unless `--include-modified`, which backs it up first. An update removes owned paths that left the pack, and an uninstall
   removes a shared path only when no client still needs it. A manifest that is invalid, or that names a path outside the
-  installer's own locations, is refused, so a hand-edited record can never direct a delete elsewhere.
+  installer's own locations, is refused, so a hand-edited record can never direct a delete elsewhere. A symbolic link at or
+  above any path the installer reads or writes, dangling or not, or a hard link at one, is a conflict that names the link and
+  refuses the whole run (the manifest is never read through a link either), so nothing is written or deleted through a link,
+  outside the project or into a file such as `CLAUDE.md`. A link that appears between the preview and the run is refused too.
 - **Byte-exact writes.** Pack files are copied as bytes, and a user's `AGENTS.md` or `GEMINI.md` is read and written as bytes. The
   block between `<!-- IRIS-MCP-RULE:<name>:BEGIN -->` and `<!-- IRIS-MCP-RULE:<name>:END -->` is replaced whole and every other
   byte is kept, a BOM at byte 0, CRLF, invalid UTF-8, comments and other tools' blocks included. A last line without a line ending
@@ -74,6 +77,10 @@ distributions, up from 8: the 8 npm packages plus `installer:claude-code`, `inst
   unchanged.
 - `story-41-6-qa-installer-provenance.test.ts` proves the beside rule red through an injected payload, and the probe failure
   fail-closed. The pins that moved are updated from tool output.
+- `pack-links.test.ts` pins the link refusal in the plan, at prepare time and at execute time, and `pack-rule-change.test.ts`
+  pins a pack update that renames the rule on every route, the uninstall giving back the host's original bytes. The QA suites
+  drive the built bin through links, host fixtures, the manifest allow-list and real rollbacks, and every built-bin suite fails
+  loudly when `dist/` is older than `src/`.
 
 ### Known limits
 
@@ -81,10 +88,14 @@ distributions, up from 8: the 8 npm packages plus `installer:claude-code`, `inst
 - The Claude Code route installs the skills even when the Claude Code plugin is present; plugin detection arrives with the plugin.
 - The notes about a client that reads a skill or the rule twice are static text; the installer does not deduplicate.
 - Only the project directory is checked for a `CLAUDE.md`; a `CLAUDE.md` in a parent directory is not seen.
-- A symlinked `.claude/` or `.agents/` directory, or a symlinked `AGENTS.md` or `GEMINI.md`, is written through.
+- A project that keeps `.claude/`, `.agents/`, `.cursor/rules/`, `.iris-mcp/`, `AGENTS.md` or `GEMINI.md` as a symbolic link, or
+  `AGENTS.md` or `GEMINI.md` as a hard link, is refused; replace the link or install by hand.
 - `--project` is not compared with your home directory: `--project ~` (or running from `~`) installs the rule where every
   project's session loads it.
-- Skills-pack backups are never pruned, and `doctor` does not list them.
+- Skills-pack backups are never pruned, `doctor` does not list them and `restore` does not read them (copy a backup back by
+  hand). Every file an update or an uninstall replaces or removes is backed up, including files that still match the pack.
+- Git's line-ending conversion (`core.autocrlf`) changes the bytes of committed installed files in a checkout, and the
+  installer then keeps them as files you changed; mark the installed paths `-text` in `.gitattributes` to avoid it.
 - An edit inside the installer's own block is replaced on the next install.
 - Installing for one client never updates another client's non-shared files.
 

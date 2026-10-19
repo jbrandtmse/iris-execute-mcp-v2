@@ -140,6 +140,31 @@ function ancestorsOf(rel: string): string[] {
   return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
 }
 
+/** A path that is not a file or directory of its own: a symbolic link, or a file with a second hard link. */
+export type LinkKind = "symbolic" | "hard";
+
+/**
+ * The shallowest of `rel`'s ancestors, or `rel` itself, that `kindOf` reports as a link, or `null` when none is.
+ * The project directory itself is never asked about: the user names it.
+ *
+ * @param rel - A project-relative POSIX path.
+ * @param kindOf - What kind of link a project-relative path is (never following it), or `null`.
+ */
+export function firstLinkOn(rel: string, kindOf: (rel: string) => LinkKind | null): { path: string; kind: LinkKind } | null {
+  for (const prefix of [...ancestorsOf(rel), rel]) {
+    const kind = kindOf(prefix);
+    if (kind !== null) return { path: prefix, kind };
+  }
+  return null;
+}
+
+/** The conflict detail of a link at or above an owned path. */
+export const LINK_DETAILS: Readonly<Record<LinkKind, string>> = Object.freeze({
+  symbolic:
+    "a symbolic link; this installer writes only real files and folders inside the project, so replace the link or install by hand",
+  hard: "a hard link that another path shares; this installer never writes a file that another path also names, so replace the link or install by hand",
+});
+
 // ------------------------------------------------------------------
 // The manifest.
 // ------------------------------------------------------------------
@@ -477,6 +502,8 @@ export interface PlanWrite {
   after: Buffer | null;
   /** The blocks that must be present, whole and equal to their section, after the write. */
   blocks?: Array<{ stem: string; section: Buffer }>;
+  /** The rules whose blocks this write takes out of the host (a rule the pack renamed or dropped). */
+  removedBlocks?: string[];
 }
 
 export interface PlanCounts {
@@ -531,6 +558,11 @@ export interface ProjectView {
   isDirectory(rel: string): boolean;
   /** Entry names of a directory, or null when it does not exist. Optional: without it, emptiness is assumed. */
   listDir?(rel: string): string[] | null;
+  /**
+   * What kind of link the path itself is, never following it, or null for a plain file, a plain directory or
+   * nothing. Optional: without it, no path is a link.
+   */
+  linkKind?(rel: string): LinkKind | null;
 }
 
 export interface PlanInput {
@@ -573,16 +605,38 @@ function compare(a: string, b: string): number {
  *   files are updated, byte-identical files are adopted, owned paths no longer in the pack are removed.
  * - **uninstall** removes the files and blocks this client owns, unless another client still needs them.
  *
+ * A link at or above a path the plan reads (`project.linkKind`) is never read through: the plan reports each such
+ * link as its only conflicts, so a run can never write or delete outside the project, or in a file such as
+ * `CLAUDE.md` that an `AGENTS.md` link points at.
+ *
  * A refusal (unknown client, no route, invalid manifest, unusable pack) is returned, never thrown.
  */
 export function planPackChange(input: PlanInput): PackPlan | PackRefusal {
-  const { action, client, includeModified, project } = input;
+  const { action, client, includeModified, project: raw } = input;
   const target = packTargetFor(client);
   if (target === undefined) return { ok: false, kind: "unknown-client", message: `unknown client "${client}"` };
   const route = packRouteFor(client);
   if (target.route === null || route === undefined) {
     return { ok: false, kind: "no-route", message: target.noRouteReason ?? `${target.displayName} has no skills route` };
   }
+
+  // Every read of a path the plan may own goes through `project`, which treats a path under a link as absent and
+  // records the link; the notes alone read `raw`, because they only ask whether a file such as CLAUDE.md exists.
+  const links = new Map<string, LinkKind>();
+  const kindOf = raw.linkKind?.bind(raw);
+  const underLink = (rel: string): boolean => {
+    if (kindOf === undefined) return false;
+    const link = firstLinkOn(rel, kindOf);
+    if (link === null) return false;
+    if (!links.has(link.path)) links.set(link.path, link.kind);
+    return true;
+  };
+  const rawListDir = raw.listDir?.bind(raw);
+  const project: ProjectView = {
+    read: (rel) => (underLink(rel) ? null : raw.read(rel)),
+    isDirectory: (rel) => !underLink(rel) && raw.isDirectory(rel),
+    ...(rawListDir !== undefined ? { listDir: (rel: string) => (underLink(rel) ? null : rawListDir(rel)) } : {}),
+  };
 
   const observed = new Map<string, string | null>();
   const readTracked = (rel: string): Buffer | null => {
@@ -657,6 +711,9 @@ export function planPackChange(input: PlanInput): PackPlan | PackRefusal {
   const item = (path: string, change: PackChange, detail?: string): void => {
     items.push(detail === undefined ? { path, change } : { path, change, detail });
   };
+  // Directories that keep a file the user changed. A notice in one of them stays, because the kept file may still
+  // carry the adapted content, so adapted content is never left without it.
+  const keptDirs = new Set<string>();
 
   // Files wanted by this client (install).
   for (const [rel, bytes] of [...desired.files].sort((a, b) => compare(a[0], b[0]))) {
@@ -688,6 +745,7 @@ export function planPackChange(input: PlanInput): PackPlan | PackRefusal {
         item(rel, "update", BACKED_UP_DETAIL);
         own(want);
       } else {
+        keptDirs.add(parentOf(rel));
         item(rel, "keep", KEPT_DETAIL_INSTALL);
         own(record.sha256);
       }
@@ -704,8 +762,7 @@ export function planPackChange(input: PlanInput): PackPlan | PackRefusal {
   }
 
   // Records this client no longer needs (stale after an update, or everything on uninstall). A notice stays for as
-  // long as a file the user changed stays in its directory, so adapted content is never left without it.
-  const keptDirs = new Set<string>();
+  // long as a file the user changed stays in its directory (`keptDirs`).
   const removeFileRecord = (record: ManifestFile, remaining: string[], stale: boolean): void => {
     if (remaining.length > 0) {
       files.set(record.path, { ...record, clients: remaining });
@@ -755,6 +812,7 @@ export function planPackChange(input: PlanInput): PackPlan | PackRefusal {
   const hostOriginal = new Map<string, Buffer | null>();
   const hostBytes = new Map<string, Buffer | null>();
   const hostChecks = new Map<string, Array<{ stem: string; section: Buffer }>>();
+  const hostRemoved = new Map<string, string[]>();
   const hostUsable = (host: string): boolean => {
     if (project.isDirectory(host)) {
       item(host, "conflict", "a directory is in the way; move or delete it, then re-run");
@@ -795,6 +853,7 @@ export function planPackChange(input: PlanInput): PackPlan | PackRefusal {
       return;
     }
     hostBytes.set(record.path, result.bytes);
+    hostRemoved.set(record.path, [...(hostRemoved.get(record.path) ?? []), record.rule]);
     blocks.delete(key);
     if (result.bytes === null) {
       deleted.add(record.path);
@@ -803,6 +862,24 @@ export function planPackChange(input: PlanInput): PackPlan | PackRefusal {
       item(record.path, "remove", `remove the ${record.rule} block, lines ${location.beginLine}-${location.endLine}`);
     }
   };
+
+  // Blocks this client no longer needs come out first, so that a rule the pack renamed or dropped leaves its host
+  // as it was before that block went in (the line ending added for it included) before a new block is appended.
+  for (const record of [...blocks.values()].sort((a, b) => compare(blockKey(a.path, a.rule), blockKey(b.path, b.rule)))) {
+    if (!record.clients.includes(client)) continue;
+    if (action === "install" && desired.blocks.some((b) => b.host === record.path && b.stem === record.rule)) continue;
+    if (action === "install") {
+      removeBlockRecord(
+        record,
+        record.clients.filter((other) => other !== client && stillDesiredBlock(other, record.path, record.rule)),
+      );
+    } else {
+      removeBlockRecord(
+        record,
+        record.clients.filter((other) => other !== client),
+      );
+    }
+  }
 
   for (const block of [...desired.blocks].sort((a, b) => compare(blockKey(a.host, a.stem), blockKey(b.host, b.stem)))) {
     if (!hostUsable(block.host)) continue;
@@ -858,31 +935,17 @@ export function planPackChange(input: PlanInput): PackPlan | PackRefusal {
     }
   }
 
-  for (const record of [...blocks.values()].sort((a, b) => compare(blockKey(a.path, a.rule), blockKey(b.path, b.rule)))) {
-    if (!record.clients.includes(client)) continue;
-    if (action === "install" && desired.blocks.some((b) => b.host === record.path && b.stem === record.rule)) continue;
-    if (action === "install") {
-      removeBlockRecord(
-        record,
-        record.clients.filter((other) => other !== client && stillDesiredBlock(other, record.path, record.rule)),
-      );
-    } else {
-      removeBlockRecord(
-        record,
-        record.clients.filter((other) => other !== client),
-      );
-    }
-  }
-
   for (const [host, original] of hostOriginal) {
     const final = hostBytes.get(host) ?? null;
     if ((original === null && final === null) || (original !== null && final !== null && original.equals(final))) continue;
     const checks = hostChecks.get(host);
+    const removed = hostRemoved.get(host);
     writes.push({
       rel: host,
       before: original,
       after: final,
       ...(final !== null && checks !== undefined ? { blocks: checks } : {}),
+      ...(final !== null && checks !== undefined && removed !== undefined ? { removedBlocks: removed } : {}),
     });
   }
 
@@ -981,7 +1044,7 @@ export function planPackChange(input: PlanInput): PackPlan | PackRefusal {
   if (action === "install") {
     if (
       target.id === "claude-code" &&
-      ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"].some((rel) => project.read(rel) !== null)
+      ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"].some((rel) => raw.read(rel) !== null)
     ) {
       notes.push(NOTE_CLAUDE_MD);
     }
@@ -989,18 +1052,26 @@ export function planPackChange(input: PlanInput): PackPlan | PackRefusal {
       route.rule.kind === "block" &&
       route.rule.host === "AGENTS.md" &&
       hostOriginal.get("AGENTS.md") === null &&
-      project.read("CLAUDE.md") !== null
+      raw.read("CLAUDE.md") !== null
     ) {
       notes.push(firstMatchNote());
     }
     notes.push(...target.notes);
   }
 
+  // A link refuses the run, and the links are the whole report: what the plan read through them is not what the
+  // project holds, so no other item, and no note, would be true.
+  if (links.size > 0) {
+    items.length = 0;
+    for (const [rel, kind] of links) item(rel, "conflict", LINK_DETAILS[kind]);
+    notes.length = 0;
+  }
+
   const sorted = items.sort((a, b) => compare(a.path, b.path));
   const counts: PlanCounts = { create: 0, update: 0, remove: 0, adopt: 0, unchanged: 0, keep: 0, conflict: 0 };
   for (const entry of sorted) counts[entry.change] += 1;
 
-  const refused = conflicts.length > 0;
+  const refused = conflicts.length > 0 || links.size > 0;
   return {
     ok: true,
     action,

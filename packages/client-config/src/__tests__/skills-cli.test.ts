@@ -316,6 +316,20 @@ describe("--json", () => {
     const declined = harness({ stdin: stdinFrom(true), promptConfirm: async () => false });
     expect(await declined.run(["skills", "install", "--client", "codex", "--json"])).toBe(1);
     expect(JSON.parse(declined.stdout.text.trim())).toEqual({ ok: false, command: "skills", data: null, error: "confirmation declined" });
+
+    const sandbox = makeSandbox();
+    const failed = harness({ bytesFs: failingOnWrite(jailedBytesFs(sandbox.root), 3) }, sandbox);
+    const before = treeSnapshot(sandbox.project);
+    expect(await failed.run(["skills", "install", "--client", "codex", "--yes", "--json"])).toBe(1);
+    const lines = failed.stdout.text.trim().split("\n");
+    expect(lines.length).toBe(1);
+    expect(JSON.parse(lines[0] as string)).toMatchObject({
+      ok: false,
+      command: "skills",
+      data: { action: "install", client: "codex", changed: 0 },
+      error: expect.stringContaining("every change of this run was undone"),
+    });
+    expect(treeSnapshot(sandbox.project)).toEqual(before);
   });
 
   it("keeps usage errors as plain text on stderr", async () => {

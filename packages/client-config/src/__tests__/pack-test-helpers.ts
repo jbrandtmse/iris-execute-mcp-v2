@@ -102,6 +102,7 @@ export function jailedBytesFs(root: string, inner: BytesFs = REAL_BYTES_FS): Byt
     removeFile: (p) => inner.removeFile(guard(p)),
     removeEmptyDir: (p) => inner.removeEmptyDir(guard(p)),
     listDir: (p) => inner.listDir(guard(p)),
+    linkKind: (p) => inner.linkKind(guard(p)),
   };
 }
 

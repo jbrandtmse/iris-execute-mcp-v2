@@ -4,7 +4,8 @@
  * `preparePackChange` builds the project view over a byte-level file system and plans the change.
  * `executePackPlan` writes it under the same protocol order as the MCP-entry writer (`applyWrite`), run-level:
  *
- *   1. re-read every planned path and refuse if any differs from the plan (nothing is written);
+ *   1. re-read every planned path and refuse if any differs from the plan, or if a link now sits at or above one
+ *      (nothing is written);
  *   2. create the missing directories;
  *   3. for each file to write: back up an existing file, write, re-read and compare (a block host is also
  *      re-located: exactly one block, equal to its section, and the bytes outside it as they were before);
@@ -25,6 +26,7 @@
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -36,6 +38,7 @@ import {
 import path from "node:path";
 
 import {
+  firstLinkOn,
   isManagedDirPath,
   isManagedPath,
   isSafeRelativePath,
@@ -43,7 +46,7 @@ import {
   MANIFEST_PATH,
   planPackChange,
 } from "./pack-plan.js";
-import type { PackAction, PackPlan, ProjectView } from "./pack-plan.js";
+import type { LinkKind, PackAction, PackPlan, ProjectView } from "./pack-plan.js";
 import { locateRuleBlock } from "./rule-block.js";
 import { resolveStateDir, type EngineHostContext } from "./state.js";
 import { stamp } from "./write.js";
@@ -62,11 +65,26 @@ export interface BytesFs {
   removeEmptyDir(dir: string): boolean;
   /** Entry names in a directory. */
   listDir(dir: string): string[];
+  /**
+   * What kind of link the path itself is, never following it: `symbolic`, `hard` (a file with a second hard
+   * link), or `null` for a plain file, a plain directory or nothing at all.
+   */
+  linkKind(path: string): LinkKind | null;
 }
 
 /** The real file system. */
 export const REAL_BYTES_FS: BytesFs = {
   exists: (p) => existsSync(p),
+  linkKind: (p) => {
+    let stats;
+    try {
+      stats = lstatSync(p);
+    } catch {
+      return null;
+    }
+    if (stats.isSymbolicLink()) return "symbolic";
+    return stats.isFile() && stats.nlink > 1 ? "hard" : null;
+  },
   isDirectory: (p) => {
     try {
       return statSync(p).isDirectory();
@@ -170,6 +188,7 @@ export function preparePackChange(ctx: PackContext, options: PrepareOptions): Pr
       const dir = absolute(ctx, projectDir, rel);
       return fs.isDirectory(dir) ? fs.listDir(dir) : null;
     },
+    linkKind: (rel) => (isSafeRelativePath(rel) ? fs.linkKind(absolute(ctx, projectDir, rel)) : null),
   };
 
   let plan: ReturnType<typeof planPackChange>;
@@ -189,8 +208,9 @@ export function preparePackChange(ctx: PackContext, options: PrepareOptions): Pr
     return { ok: false, kind: usage ? "usage" : "failure", message: plan.message };
   }
 
+  // A conflict may name one of the installer's directories (a link in the way); it is reported, never written.
   const outside = [
-    ...plan.items.map((item) => item.path),
+    ...plan.items.filter((item) => !(item.change === "conflict" && isManagedDirPath(item.path))).map((item) => item.path),
     ...plan.writes.map((write) => write.rel),
     ...plan.observed.map((entry) => entry.rel).filter((rel) => !isSafeRelativePath(rel)),
   ].find((rel) => !isManagedPath(rel));
@@ -297,6 +317,16 @@ export function executePackPlan(ctx: PackContext, plan: PackPlan, options: Execu
         });
       }
     }
+    // A link that appeared at or above a planned path since the preview (a dangling one reads as absent above).
+    const touched = [...plan.writes.map((write) => write.rel), ...plan.createDirs, ...plan.removeDirs, MANIFEST_PATH];
+    for (const rel of touched) {
+      if (firstLinkOn(rel, (prefix) => fs.linkKind(abs(prefix))) !== null) {
+        return fail(rel, `${rel} changed after the preview; nothing was written; re-run the command`, {
+          changedSincePreview: true,
+          rolledBack: true,
+        });
+      }
+    }
   } catch (error) {
     return fail("", `could not read the project before writing: ${describeError(error)}; nothing was written`, { rolledBack: true });
   }
@@ -352,7 +382,8 @@ export function executePackPlan(ctx: PackContext, plan: PackPlan, options: Execu
           throw new Error(`the ${block.stem} block is not exactly one whole block after the write`);
         }
       }
-      if (blocks.length > 0 && !outsideBlocksKept(write.before, written, blocks.map((block) => block.stem))) {
+      const stems = [...blocks.map((block) => block.stem), ...(write.removedBlocks ?? [])];
+      if (blocks.length > 0 && !outsideBlocksKept(write.before, written, stems)) {
         throw new Error("the bytes outside the block changed");
       }
     }

@@ -391,6 +391,21 @@ describe("idempotence and the manifest", () => {
         'the blocks entry "AGENTS.md" has an invalid "lineEndingAdded"',
       ],
       ["foreign directory", good({ dirs: ["src"] }), 'the directory "src" is outside the locations this installer manages'],
+      ["note not a string", good({ note: 1 }), '"note" is not a string'],
+      ["files entry without a sha256", good({ files: [{ path: ".claude/skills/x/SKILL.md", clients: ["codex"] }] }), "a files entry needs a path and a sha256"],
+      ["files entry with an extra field", good({ files: [{ ...entry(".claude/skills/x/SKILL.md"), extra: 1 }] }), 'the files entry ".claude/skills/x/SKILL.md" has an unexpected field'],
+      ["a client that is not a name", good({ files: [{ ...entry(".claude/skills/x/SKILL.md"), clients: [""] }] }), 'the files entry ".claude/skills/x/SKILL.md" has a client that is not a name'],
+      ["a client listed twice", good({ files: [{ ...entry(".claude/skills/x/SKILL.md"), clients: ["codex", "codex"] }] }), 'the files entry ".claude/skills/x/SKILL.md" lists the client "codex" twice'],
+      ["blocks entry without a rule", good({ blocks: [{ path: "AGENTS.md", created: false, lineEndingAdded: "", clients: ["codex"] }] }), "a blocks entry needs a path and a rule"],
+      ["blocks entry with an extra field", good({ blocks: [{ path: "AGENTS.md", rule: "r", created: false, lineEndingAdded: "", clients: ["codex"], extra: 1 }] }), 'the blocks entry "AGENTS.md" has an unexpected field'],
+      ["an invalid rule name", good({ blocks: [{ path: "AGENTS.md", rule: "Not A Name", created: false, lineEndingAdded: "", clients: ["codex"] }] }), 'the blocks entry "AGENTS.md" has an invalid rule name'],
+      ["created not a boolean", good({ blocks: [{ path: "AGENTS.md", rule: "r", created: "false", lineEndingAdded: "", clients: ["codex"] }] }), 'the blocks entry "AGENTS.md" needs a boolean "created"'],
+      [
+        "a block listed twice",
+        good({ blocks: [1, 2].map(() => ({ path: "AGENTS.md", rule: "r", created: false, lineEndingAdded: "", clients: ["codex"] })) }),
+        'the block "r" in "AGENTS.md" is listed twice',
+      ],
+      ["a directory listed twice", good({ dirs: [".iris-mcp", ".iris-mcp"] }), 'the directory ".iris-mcp" is listed twice'],
     ];
     for (const [name, content, why] of cases) {
       const result = refusal({ action: "install", client: "codex", pack: realPack(), project: mapProject({ [MANIFEST_PATH]: content }) });
@@ -494,6 +509,39 @@ describe("pack update and stale removal", () => {
     install(untouched, "claude-code");
     const removed = plan({ action: "uninstall", client: "claude-code", project: untouched });
     expect(removed.writes.find((write) => write.rel === notice)).toMatchObject({ after: null });
+  });
+
+  it("keeps the notice beside an adapted skill the user edited when an update stops shipping the adaptation", () => {
+    const skill = `.claude/skills/${SQL_SKILL}`;
+    const notice = `.claude/skills/iris-mcp-objectscript-sql/${NOTICE_FILENAME}`;
+    const keptDetail = "kept beside a file you changed, which may still carry the adapted content";
+    const project = mapProject();
+    install(project, "claude-code");
+    project.put(skill, "adapted content, edited by the user\n");
+    const clean = Buffer.from("---\nname: iris-mcp-objectscript-sql\ndescription: A clean-room text.\n---\n\nA clean-room text.\n");
+    const packB = withPack((skills) => skills.set(SQL_SKILL, clean));
+
+    const kept = plan({ action: "install", client: "claude-code", pack: packB, project });
+    expect(kept.items.find((item) => item.path === skill)?.change).toBe("keep");
+    expect(kept.items.find((item) => item.path === notice)).toEqual({ path: notice, change: "keep", detail: keptDetail });
+    expect(kept.writes.some((write) => write.rel === notice || write.rel === skill)).toBe(false);
+
+    const forced = plan({ action: "install", client: "claude-code", pack: packB, project, includeModified: true });
+    expect(forced.writes.find((write) => write.rel === skill)?.after?.equals(clean)).toBe(true);
+    expect(forced.writes.find((write) => write.rel === notice)).toMatchObject({ after: null });
+  });
+
+  it("removes a dropped skill that two clients share once no route still installs it", () => {
+    const project = mapProject();
+    install(project, "codex");
+    install(project, "cursor");
+    const dropped = ".agents/skills/check-system-health/SKILL.md";
+    const packB = withPack((skills) => skills.delete("check-system-health/SKILL.md"));
+    const result = plan({ action: "install", client: "codex", pack: packB, project });
+    expect(result.items.find((item) => item.path === dropped)).toEqual({ path: dropped, change: "remove", detail: "no longer in the skills pack" });
+    project.apply(result);
+    const manifest = parseManifest(project.files.get(MANIFEST_PATH) as Buffer);
+    expect(manifest.ok && manifest.manifest.files.some((file) => file.path === dropped)).toBe(false);
   });
 
   it("drops the record of a file that is already gone", () => {
