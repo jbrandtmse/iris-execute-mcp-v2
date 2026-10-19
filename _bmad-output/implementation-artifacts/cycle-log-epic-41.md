@@ -70,3 +70,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-19T13:25:46Z	Story 41.3	ledger_adjudicated	owned=1 resolved=1 reowned=0 terminal=0 model=claude-opus-5-5
 2026-10-19T13:25:46Z	Story 41.3	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 checks=4+184+leftovers evidence=gen:pack:check(19),check:provenance,validate:prompts(45:3_knowledge),gen:skills:check,skills_pack_knowledge+frontmatter_184,frontmatter_name_matches_dir,word_budget_ok,iris_leftovers_413_empty model=claude-opus-5-5
 2026-10-19T13:27:46Z	Story 41.3	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=1108 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
+2026-10-19T13:27:48Z	Story 41.3	committed	sha=ec22ae5 code_sha=41b2a79 build_sha=baaf229 submodules= ci=none run=none branch=epic41 pushed=origin/epic41 verified=merge-base amendments=ARCHITECTURE-SPINE.md:AD-28,conventions_pack_names
+2026-10-19T13:27:48Z	Story 41.3	story_cycle	plan_to_commit_min=190 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
