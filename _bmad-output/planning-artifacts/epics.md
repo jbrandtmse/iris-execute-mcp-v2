@@ -5735,6 +5735,7 @@ DW-508, HIGH. A dedicated story; it must land before 42.6 publishes.
 
   Proven red by reverting to equality comparison.
 - DW-518: the default-suite live gate `epic37-default-outage-gate` deploys the bootstrap to its target on first touch. Under this story's version-ordered guard, an older-sequenced branch must not redeploy over a newer deployment. Verify it, and record the gate's write footprint. (ledger; routed by x0 2026-10-15)
+- DW-627: the default `@iris-mcp/all` sweep reaches a local IRIS. The live gates default to `localhost:52773` and `HSCUSTOM`, and run their legs whenever that instance answers, so a contributor's plain `pnpm test` touches their instance. This is the same class as DW-518. Gate every live leg on an explicit opt-in (`IRIS_REQUIRE_LIVE`, or an `IRIS_HOST` the caller set), keeping the armed lead and CI runs, and pin that an unset environment runs no leg. (ledger; routed by harvest 2026-10-19)
 
 ### Story 42.3: CI Workflow
 
@@ -5827,6 +5828,7 @@ DW-389, D5.
 - **AC 42.8.3** — The optional compile-on-save hook is evaluated, the result recorded, and the hook shipped as opt-in only if the Lead approves. Otherwise it is filed as a candidate.
 - **AC 42.8.4** — Live check: in a clean Claude Code, add the marketplace, install the plugin, and confirm the five servers connect and the skills list. The result is recorded.
 - **AC 42.8.5** — An MCP Registry listing (the current registry requirements are probed; namespace verification as required), and an Open Exchange listing for the IPM package. Listing needs the Lead's InterSystems Developer Community account.
+- DW-625: the 41.6 installer's `claude-code` route installs the skills even when the plugin is present (AD-28 Duplicates), because no plugin existed to detect. Once the plugin exists, make that route of `iris-mcp-clients skills install` install only the rule when it detects the plugin, with a test for each case. (ledger; routed by harvest 2026-10-19)
 
 ### Story 42.9: Install Docs and Client Re-Certification
 
@@ -5842,6 +5844,13 @@ DW-441.
 - **AC 42.9.3** — The CHANGELOG `1.0.0` release notes and the PRD's distribution section match what shipped.
 - DW-440: the Kimi Code VS Code extension half of its certification row. Re-certify it if an installed extension is available, otherwise mark the row human-only with the date (AC 42.9.2). (ledger; routed by x0 2026-10-15)
 - DW-442: the GitHub Copilot Chat certification row needs a consenting Copilot user. Mark it human-only with the date unless one is available (AC 42.9.2). (ledger; routed by x0 2026-10-15)
+- DW-626: the MCP adapter data in `adapters.ts` is stale against the clients' docs as read on 2026-10-19:
+  - Pi, Kilo Code and JetBrains Junie now document MCP setup but are still dispositioned excluded or roadmap;
+  - Kimi CLI is archived, and Roo Code shut down;
+  - Windsurf is now Devin Desktop;
+  - the Goose `docsUrl` returns 404.
+
+  Before re-certifying, re-disposition those clients and bump `ADAPTER_DATA_VERSION` with the certification table. (ledger; routed by harvest 2026-10-19)
 
 ## Epic 43: MCP SDK v2 Migration (added 2026-10-15)
 

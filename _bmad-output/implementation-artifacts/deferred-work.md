@@ -2847,6 +2847,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: clientsEngine/governanceEngine assert Windows C:\git paths; constants/credentials tests cannot load @intersystems-community/intersystems-servermanager (absent from extension node_modules); clientsActivationFlow 33-3-3 times out at 60s; reproduced with launcher code at HEAD
 - 2026-10-15T13:36:58Z status=routed owner=burndown by=harvest note=pre-existing; blocks a green launcher suite before 42.7 publishes the extension
 - 2026-10-16T15:58:09Z status=routed owner=42-7-vs-code-extension-publish by=burndown note=overflow: the extension-publish story needs a green launcher suite on every platform; DW bullet in 42.7
+- 2026-10-19T22:31:15Z status=routed owner=42-7-vs-code-extension-publish by=harvest note=occurrence: 41.6 implement 2026-10-19 reproduced clientsActivationFlow 33-3-3 timing out at 60s on the working tree and on a baseline 3890fec copy (re-toggled roster never persists)
 
 ### DW-533: iris_production_manage delete removes ANY class given as name: the class-delete path never checks that the class extends Ens.Production
 - source: spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: high | footprint: in-story
@@ -3423,3 +3424,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-41-5-workflow-skills-refresh.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 41.5 code review 2026-10-19: rosters from dist/tools/presets.js (admin core includes iris_user_manage, developer excludes it); the catalog intro, skills/README.md and README.md:830 state the first-of rule but never say a later preset can hide a tool; only the CHANGELOG Known limits says so
 - 2026-10-19T19:44:33Z status=routed owner=41-7-skills-pack-docs-and-capstone by=cr note=41.7's pack docs (root README section, the catalog that supersedes skills/README.md) say the presets are not nested
+
+### DW-625: The installer's claude-code route installs the skills even when the Claude Code plugin is present (AD-28 Duplicates): no plugin exists yet to detect
+- source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.6 plan 2026-10-19: no .claude-plugin/plugin.json in the repo or pack; a detection branch now is unreachable (rule #54); packages/client-config/src/pack-plan.ts claude-code route
+- 2026-10-19T22:31:15Z status=routed owner=42-8-claude-code-plugin-and-registry-listings by=harvest note=42.8 creates the plugin and makes the claude-code route of iris-mcp-clients skills install install only the rule when it detects the plugin
+
+### DW-626: The MCP adapter data in adapters.ts is stale against the clients' docs read on 2026-10-19 (Pi, Kilo Code, Junie now document MCP; Kimi CLI archived; Roo Code shut down; Windsurf renamed Devin Desktop; the Goose docsUrl 404s)
+- source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.6 plan research 2026-10-19: Pi MCP since 0.99.0 (.pi/mcp.json), Kilo kilo.json[c] mcp key, Junie .junie/mcp/mcp.json, all still excluded/roadmap; adapters.ts:579-601, :480
+- 2026-10-19T22:31:15Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=re-disposition the three MCP-capable clients, rename or retire the stale rows, fix docsUrl, bump ADAPTER_DATA_VERSION with the certification table, before 1.0
+
+### DW-627: The default iris-mcp-all test sweep reaches a local IRIS: the live gates default to localhost:52773 / HSCUSTOM and run their legs whenever that instance answers, with no opt-in
+- source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: 41.6 implement 2026-10-19: the (once) sweep with no IRIS_* set ran 182 (third 0) and 195 (third 1) live-gate tests against the shared instance (no leftovers found); with IRIS_HOST=127.0.0.1 IRIS_PORT=1 they skip; epic35-defect-gate.test.ts:50 reads IRIS_HOST ?? localhost, as do the story-39/40 and epic38/40 capstone gates
+- 2026-10-19T22:31:15Z status=routed owner=42-2-bootstrap-downgrade-guard by=harvest note=same class as DW-518: a contributor's plain pnpm test must not touch an instance; gate every live leg on an explicit opt-in (IRIS_REQUIRE_LIVE or an IRIS_HOST the caller set) before 1.0, keeping the armed lead/CI runs
