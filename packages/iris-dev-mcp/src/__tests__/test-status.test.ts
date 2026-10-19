@@ -173,8 +173,8 @@ function expectNoIrisTraffic(h: Harness) {
 // ── Governance/registration shape ────────────────────────────────
 
 describe("iris_test_status — registration shape", () => {
-  it("declares mutates per-action (poll: read, cancel: write) and truthful mixed annotations", () => {
-    expect(testStatusTool.mutates).toEqual({ poll: "read", cancel: "write" });
+  it("declares mutates per-action (poll: read, cancel: write, export: write) and truthful mixed annotations", () => {
+    expect(testStatusTool.mutates).toEqual({ poll: "read", cancel: "write", export: "write" });
     expect(testStatusTool.defaultEnabled).toBeUndefined();
     expect(testStatusTool.annotations.readOnlyHint).toBe(false);
     expect(testStatusTool.annotations.destructiveHint).toBe(true);
@@ -724,5 +724,233 @@ describe("iris_test_status:cancel", () => {
   it("cancel is governance-classified 'write' and never carries a defaultEnabled marker", () => {
     expect(testStatusTool.mutates).toMatchObject({ cancel: "write" });
     expect(testStatusTool.defaultEnabled ?? []).not.toContain("cancel");
+  });
+});
+
+// -- A failed read of %UnitTest_Result is an error result, not a thrown error (Story 40.4, AC 40.4.3) --
+
+describe("iris_test_status \u{2014} a failed read of %UnitTest_Result keeps the handles in an error result", () => {
+  let h: Harness;
+  /**
+   * The SQL route failing the way a real server error does: an `IrisApiError` for HTTP 500 whose message (the constructor's
+   * fourth argument) is the one `http-client.ts` builds, which ends in a full stop.
+   */
+  const SQL500_MESSAGE =
+    "IRIS returned HTTP 500 for POST /api/atelier/v8/USER/action/query. Check the request parameters and try again.";
+  const sql500 = () => new IrisApiError(500, [], "/api/atelier/v8/USER/action/query", SQL500_MESSAGE);
+  /** The message as the error texts quote it: without its one trailing full stop, which each text adds itself. */
+  const QUOTED =
+    "IRIS returned HTTP 500 for POST /api/atelier/v8/USER/action/query. Check the request parameters and try again";
+  /** The error envelope's counts, which every error result carries. */
+  const NO_COUNTS = { total: 0, passed: 0, failed: 0, skipped: 0, details: [] };
+
+  beforeEach(() => {
+    h = makeHarness();
+  });
+
+  it("poll by runIndex alone: isError with the runIndex handle and the text that says not to re-submit", async () => {
+    stubSql(h, { failWith: sql500() });
+
+    const result = await testStatusTool.handler({ action: "poll", runIndex: 62 }, h.ctx);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      ...NO_COUNTS,
+      error:
+        `Reading the result of runIndex 62 from %UnitTest_Result failed: ${QUOTED}. ` +
+        "Poll again with runIndex 62; do NOT re-submit the tests.",
+      runIndex: 62,
+    });
+    expect((result.structuredContent as { error: string }).error, "one full stop between the message and the advice").not.toContain("..");
+    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining('"runIndex": 62') });
+  });
+
+  it("poll by runIndex alone: a connection error is an error result too", async () => {
+    stubSql(h, { failWith: new IrisConnectionError("TIMEOUT", "timed out", "retry") });
+
+    const result = await testStatusTool.handler({ action: "poll", runIndex: 62 }, h.ctx);
+    expect(result.isError).toBe(true);
+    expect((result.structuredContent as { error: string }).error).toContain("failed: timed out");
+  });
+
+  it("poll whose GET /work is 404 (the job is gone) with a known runIndex: the jobId, runIndex and source are kept", async () => {
+    h.workGet.mockRejectedValueOnce(new IrisApiError(404, [], "/api/atelier/v8/USER/work/31797609", "IRIS returned HTTP 404"));
+    stubSql(h, { failWith: sql500() });
+
+    const result = await testStatusTool.handler({ action: "poll", jobId: "31797609", runIndex: 62 }, h.ctx);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      ...NO_COUNTS,
+      error:
+        "Atelier no longer references jobId '31797609', and reading runIndex 62 from %UnitTest_Result failed: " +
+        `${QUOTED}. Do NOT re-submit \u{2014} poll again with runIndex 62.`,
+      jobId: "31797609",
+      runIndex: 62,
+      runIndexSource: null,
+    });
+  });
+
+  it("poll whose GET /work is 404, with the runIndex read from the queue node: the source is 'queue'", async () => {
+    stubQueueNode(h, "31797610", 66);
+    h.workGet.mockRejectedValueOnce(new IrisApiError(404, [], "/api/atelier/v8/USER/work/31797610", "IRIS returned HTTP 404"));
+    stubSql(h, { failWith: sql500() });
+
+    const result = await testStatusTool.handler({ action: "poll", jobId: "31797610" }, h.ctx);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({ jobId: "31797610", runIndex: 66, runIndexSource: "queue" });
+    expect((result.structuredContent as { error: string }).error).toContain("reading runIndex 66 from %UnitTest_Result failed");
+  });
+
+  it("cancel whose DELETE is 404 (the job is gone) with a captured runIndex: the cancel's handles are kept", async () => {
+    stubQueueNode(h, "31797624", 66);
+    h.workDelete.mockRejectedValueOnce(new IrisApiError(404, [], "/api/atelier/v8/USER/work/31797624", "IRIS returned HTTP 404"));
+    stubSql(h, { failWith: sql500() });
+
+    const result = await testStatusTool.handler({ action: "cancel", jobId: "31797624" }, h.ctx);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      ...NO_COUNTS,
+      error:
+        "jobId '31797624' was already gone (HTTP 404) before this cancel could act, and reading runIndex 66 from " +
+        `%UnitTest_Result failed: ${QUOTED}. Poll by runIndex 66 to observe the run.`,
+      jobId: "31797624",
+      runIndex: 66,
+      runIndexSource: "queue",
+    });
+  });
+
+  it("an error that is not an IRIS API or connection error still propagates from all three paths", async () => {
+    stubSql(h, { failWith: new Error("boom") });
+    await expect(testStatusTool.handler({ action: "poll", runIndex: 62 }, h.ctx)).rejects.toThrow("boom");
+
+    h.workGet.mockRejectedValueOnce(new IrisApiError(404, [], "/api/atelier/v8/USER/work/31797611", "IRIS returned HTTP 404"));
+    await expect(testStatusTool.handler({ action: "poll", jobId: "31797611", runIndex: 62 }, h.ctx)).rejects.toThrow("boom");
+
+    stubQueueNode(h, "31797612", 66);
+    h.workDelete.mockRejectedValueOnce(new IrisApiError(404, [], "/api/atelier/v8/USER/work/31797612", "IRIS returned HTTP 404"));
+    await expect(testStatusTool.handler({ action: "cancel", jobId: "31797612" }, h.ctx)).rejects.toThrow("boom");
+  });
+});
+
+// -- Story 40.1: the coverage handle (coverageRunId) --------------------------------
+
+describe("iris_test_status \u2014 coverageRunId (Story 40.1)", () => {
+  /** A completed coverage run record, as the coverage Status route returns it (live shape). */
+  const completedRun = {
+    coverageRunId: 9,
+    status: "completed",
+    namespace: "EXECMCPTMP401A",
+    target: "Story401.FixtureTest",
+    level: "class",
+    pid: 1122162,
+    runnerPid: 1122163,
+    startedAt: "2026-10-18T01:36:10.613Z",
+    finishedAt: "2026-10-18T01:36:11.657Z",
+    runIndex: 12,
+    releasedBy: "runner",
+    cancelRequested: false,
+    supervisorAlive: false,
+    runnerAlive: false,
+    unmeasured: [],
+    routines: [
+      {
+        class: "Story401.Fixture",
+        routine: "Story401.Fixture.1",
+        lines: 48,
+        hits: [[40, 1], [41, 1], [42, 3], [43, 3], [44, 1]],
+        skeleton: [[39, "L C:methodimpl {"], [40, "C:set"], [41, "C:for {"], [42, "C:set"], [44, "C:quit }"]],
+      },
+    ],
+  };
+
+  function coverageCtx(records: unknown[]) {
+    const http = createMockHttp();
+    let index = 0;
+    http.get.mockImplementation(async (path: string) => {
+      expect(path).toMatch(/\/dev\/test\/coverage\?id=9$/);
+      return envelope(records[Math.min(index++, records.length - 1)]);
+    });
+    http.post.mockImplementation(async (path: string, body?: unknown) => {
+      if (path.endsWith("/dev/test/coverage/cancel")) return envelope(records[0]);
+      const query = String((body as { query?: string })?.query ?? "");
+      if (query.includes("TestAssert")) return envelope({ content: [] });
+      return envelope({
+        content: [
+          { ClassName: "Story401.SlowTest", MethodName: "TestSlow", Status: 1, Duration: 0.5, ErrorAction: "", ErrorDescription: "" },
+        ],
+      });
+    });
+    return { http, ctx: createMockCtx(http as unknown as IrisHttpClient, 8) };
+  }
+
+  it("poll with coverageRunId alone returns the coverage result, reading the tests in the run's own namespace", async () => {
+    const { http, ctx } = coverageCtx([completedRun]);
+    const result = await testStatusTool.handler({ action: "poll", coverageRunId: "9" }, ctx);
+    expect(result.isError).toBeUndefined();
+    const structured = result.structuredContent as Record<string, unknown>;
+    expect(structured).toMatchObject({ status: "completed", coverageRunId: 9, total: 1, passed: 1, namespace: "EXECMCPTMP401A" });
+    const coverage = structured.coverage as { complete: boolean; classes: Array<{ routines: Array<{ coveredLines: number; percent: number }> }> };
+    expect(coverage.complete).toBe(true);
+    expect(coverage.classes[0]?.routines[0]).toMatchObject({ coveredLines: 4, percent: 100 });
+    for (const call of http.post.mock.calls) expect(String(call[0])).toContain("/EXECMCPTMP401A/");
+    const sqlCalls = http.post.mock.calls.filter((call) => String(call[0]).includes("action/query"));
+    expect(sqlCalls.length).toBeGreaterThan(0);
+    for (const call of sqlCalls) {
+      expect((call[1] as { parameters?: unknown[] }).parameters, "keyed by the record's runIndex (12), not its coverageRunId (9)").toEqual([12]);
+    }
+  });
+
+  it("cancel with coverageRunId signals the run and reports the cancelled outcome it observed", async () => {
+    const cancelled = { ...completedRun, status: "cancelled", reason: "cancel", releasedBy: "supervisor" };
+    const { http, ctx } = coverageCtx([{ ...completedRun, status: "running", routines: undefined, finishedAt: null }, cancelled]);
+    const result = await testStatusTool.handler({ action: "cancel", coverageRunId: "9" }, ctx);
+    const cancels = http.post.mock.calls.filter((call) => String(call[0]).endsWith("/dev/test/coverage/cancel"));
+    expect(cancels).toHaveLength(1);
+    expect(cancels[0]?.[1]).toEqual({ id: 9 });
+    expect(result.isError).toBe(false);
+    expect(result.structuredContent).toMatchObject({ status: "cancelled", reason: "cancel" });
+  });
+
+  it("coverageRunId combined with jobId or runIndex is a validation error and nothing is sent to IRIS", async () => {
+    const { http, ctx } = coverageCtx([completedRun]);
+    for (const extra of [{ jobId: "31797604" }, { runIndex: 9 }]) {
+      const result = await testStatusTool.handler({ action: "poll", coverageRunId: "9", ...extra }, ctx);
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("coverageRunId cannot be combined with jobId or runIndex");
+    }
+    expect(http.get).not.toHaveBeenCalled();
+    expect(http.post).not.toHaveBeenCalled();
+  });
+
+  it("an unknown coverageRunId is a not-found error", async () => {
+    const { http, ctx } = coverageCtx([completedRun]);
+    http.get.mockRejectedValueOnce(
+      new IrisApiError(
+        400,
+        [{ error: "ERROR #5001: Coverage run 9 was not found. Only the 20 most recent runs are kept, and runs do not survive an instance restart." }],
+        "/api/executemcp/v2/dev/test/coverage?id=9",
+        "IRIS reported errors for GET.",
+      ),
+    );
+    const result = await testStatusTool.handler({ action: "poll", coverageRunId: "9" }, ctx);
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain("was not found");
+  });
+
+  it("a namespace that differs from the record's is an error naming both namespaces", async () => {
+    const { ctx } = coverageCtx([completedRun]);
+    const result = await testStatusTool.handler({ action: "poll", coverageRunId: "9", namespace: "HSCUSTOM" }, ctx);
+    expect(result.isError).toBe(true);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("EXECMCPTMP401A");
+    expect(text).toContain("HSCUSTOM");
+  });
+
+  it("the input schema takes an optional all-digits coverageRunId, and the keys and classification are those of 40.1 plus export", () => {
+    const schema = testStatusTool.inputSchema;
+    expect(schema.safeParse({ action: "poll", coverageRunId: "9" }).success).toBe(true);
+    expect(schema.safeParse({ action: "poll", coverageRunId: "abc" }).success).toBe(false);
+    expect(schema.safeParse({ action: "poll", coverageRunId: "9;1" }).success).toBe(false);
+    expect(testStatusTool.mutates).toEqual({ poll: "read", cancel: "write", export: "write" });
+    expect(testStatusTool.description).toContain("coverageRunId (from iris_test_coverage)");
   });
 });

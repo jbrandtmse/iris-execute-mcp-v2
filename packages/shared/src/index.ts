@@ -27,7 +27,66 @@ export {
   negotiateVersion,
   requireMinVersion,
   atelierPath,
+  atelierDocStatusError,
+  atelierDocRequest,
 } from "./atelier.js";
+export {
+  stripLeadingBom,
+  stripLeadingBomFromLines,
+  documentLines,
+  linesInRange,
+  formatNumberedLines,
+  NUMBERED_LINE_WIDTH,
+  splitLines,
+  joinLines,
+  textToLines,
+  alignLines,
+  unifiedDiff,
+  DIFF_CONTEXT_LINES,
+  MAX_DIFF_DISTANCE,
+} from "./lines.js";
+export { REFUSAL_CODES, refusalResult } from "./refusals.js";
+export type { RefusalCode, RefusalResult } from "./refusals.js";
+export {
+  DATA_POLICIES,
+  DEFAULT_DATA_POLICY,
+  DATA_POLICY_ENV_VAR,
+  BODY_KINDS,
+  BLOCK_REASONS,
+  HL7_BODY_TEXT_MAX_CHARS,
+  isBodyKind,
+  isRedactableBodyKind,
+  parseDataPolicyValue,
+  parseOperatorDataPolicy,
+  resolveDataPolicy,
+  applyDataPolicies,
+  effectiveDataPolicy,
+  tightenDataPolicy,
+  decideBodyPolicy,
+} from "./data-policy.js";
+export type {
+  DataPolicy,
+  DataPolicySource,
+  DataPolicyCarrier,
+  DataPolicySummary,
+  BodyKind,
+  BodyPolicyOutcome,
+  BodyPolicyPlan,
+} from "./data-policy.js";
+export {
+  HL7_REDACTION_REVIEW,
+  HL7_KEEP_FIELDS,
+  HL7_SAFE_HARBOR_FIELDS,
+  HL7_REDACTED_VALUE,
+  redactHl7,
+} from "./hl7-redaction.js";
+export type { Hl7RedactionResult, Hl7SafeHarborField } from "./hl7-redaction.js";
+export {
+  isClassDocument,
+  storageDefinitionNames,
+  droppedStorageDefinitions,
+  storageDroppedRefusal,
+} from "./storage-guard.js";
 export type {
   ToolAnnotations,
   ToolDefinition,
@@ -69,6 +128,9 @@ export {
   loadGovernanceFile,
   buildMutatesLookup,
   buildDefaultEnabledWrites,
+  buildParentKeys,
+  assertParentKeysKnown,
+  inheritedParentDisable,
   unwrapActionOptions,
   assertGovernanceClassification,
   defaultSeed,
@@ -85,6 +147,7 @@ export type {
   GovernanceConfig,
   GovernanceConfigSource,
   MutatesLookup,
+  ParentKeys,
 } from "./governance.js";
 export { BASELINE_ACTION_CLASSIFICATIONS } from "./baseline-classifications.js";
 export {

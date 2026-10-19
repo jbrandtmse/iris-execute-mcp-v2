@@ -3,20 +3,23 @@
  *
  * Provides {@link packageListTool} to list ObjectScript packages in a
  * namespace with depth-based rollup, prefix narrowing, and the same
- * category/type/generated/system/modifiedSince filters as
- * {@link docListTool}. Unlike `iris_doc_list`, this tool returns a
- * bounded structural summary (one row per package) rather than one row
- * per document.
+ * category/type/generated/system filters as {@link docListTool}.
+ * Unlike `iris_doc_list`, this tool returns a bounded structural
+ * summary (one row per package) rather than one row per document.
  *
- * Implementation walks the Atelier `/docnames/{cat}/{type}` (or
- * `/modified/{ts}`) endpoint and aggregates client-side. No IRIS-side
- * class is involved.
+ * Implementation walks the Atelier `/docnames/{cat}/{type}` endpoint
+ * and aggregates client-side. No IRIS-side class is involved.
  */
 
 import { atelierPath, type ToolDefinition } from "@iris-mcp/shared";
 import { z } from "zod";
 import { booleanParam } from "./zod-helpers.js";
-import { extractAtelierContentArray } from "./doc.js";
+import {
+  DOC_TYPE_DESCRIPTION,
+  extractAtelierContentArray,
+  MODIFIED_SINCE_DESCRIPTION,
+  modifiedSinceUnsupported,
+} from "./doc.js";
 
 /**
  * Maximum number of package rows returned. Beyond this, the response is
@@ -92,8 +95,8 @@ export const packageListTool: ToolDefinition = {
     "List ObjectScript packages in a namespace, rolled up to a chosen dotted depth. " +
     "Use iris_package_list when you want a structural overview (what packages exist, " +
     "how many documents each contains); use iris_doc_list when you want individual " +
-    "document names. Supports prefix narrowing, system-package tri-state, category/type " +
-    "filters, and modifiedSince — the same filtering surface as iris_doc_list, aggregated " +
+    "document names. Supports prefix narrowing, system-package tri-state, and category/type " +
+    "filters \u2014 the same filtering surface as iris_doc_list, aggregated " +
     "client-side into one row per package.",
   inputSchema: z.object({
     depth: z
@@ -127,14 +130,7 @@ export const packageListTool: ToolDefinition = {
         "CSP = CSP/ZEN pages and other web-facing files under /csp/. " +
         "OTH = other Studio document types. * = all categories (default).",
       ),
-    type: z
-      .string()
-      .optional()
-      .describe(
-        "Document type filter within category — the file extension without " +
-        "the dot (e.g., 'cls' for CLS, 'mac' or 'inc' for RTN). Default: " +
-        "all types within the chosen category.",
-      ),
+    type: z.string().optional().describe(DOC_TYPE_DESCRIPTION),
     generated: booleanParam
       .optional()
       .describe("Include generated documents (default: false)"),
@@ -146,14 +142,7 @@ export const packageListTool: ToolDefinition = {
         "'true' includes both system and user packages; 'only' returns only " +
         "'%*' system packages.",
       ),
-    modifiedSince: z
-      .string()
-      .optional()
-      .describe(
-        "ISO 8601 timestamp — when provided, only documents modified since " +
-        "this time contribute to the package rollup (uses the Atelier " +
-        "/modified/ endpoint instead of /docnames/).",
-      ),
+    modifiedSince: z.string().optional().describe(MODIFIED_SINCE_DESCRIPTION),
     namespace: z
       .string()
       .optional()
@@ -191,31 +180,19 @@ export const packageListTool: ToolDefinition = {
     const system = systemArg ?? "false";
     const ns = ctx.resolveNamespace(namespace);
 
+    // modifiedSince is refused before any request.
+    if (modifiedSince) return modifiedSinceUnsupported("counted");
+
     // ── Build the Atelier request path ────────────────────────────
-    let fullPath: string;
-    if (modifiedSince) {
-      const base = atelierPath(
-        ctx.atelierVersion,
-        ns,
-        `modified/${encodeURIComponent(modifiedSince)}`,
-      );
-      const params = new URLSearchParams();
-      if (generated !== undefined) {
-        params.set("generated", String(generated ? 1 : 0));
-      }
-      const queryString = params.toString();
-      fullPath = queryString ? `${base}?${queryString}` : base;
-    } else {
-      const cat = category ?? "*";
-      const typ = type ?? "*";
-      const base = atelierPath(ctx.atelierVersion, ns, `docnames/${cat}/${typ}`);
-      const params = new URLSearchParams();
-      if (generated !== undefined) {
-        params.set("generated", String(generated ? 1 : 0));
-      }
-      const queryString = params.toString();
-      fullPath = queryString ? `${base}?${queryString}` : base;
+    const cat = category ?? "*";
+    const typ = type ?? "*";
+    const base = atelierPath(ctx.atelierVersion, ns, `docnames/${cat}/${typ}`);
+    const params = new URLSearchParams();
+    if (generated !== undefined) {
+      params.set("generated", String(generated ? 1 : 0));
     }
+    const queryString = params.toString();
+    const fullPath = queryString ? `${base}?${queryString}` : base;
 
     const response = await ctx.http.get(fullPath);
     const allDocs = extractAtelierContentArray(response.result);

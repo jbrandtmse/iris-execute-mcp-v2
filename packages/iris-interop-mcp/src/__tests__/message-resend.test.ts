@@ -41,6 +41,9 @@ describe("iris_message_resend", () => {
   beforeEach(() => {
     mockHttp = createMockHttp();
     ctx = createMockCtx(mockHttp);
+    // These rows pin the legacy preview wire and result, which the `allow` data policy keeps unchanged
+    // (Story 39.2). The policy rows are in message-resend-policy.test.ts.
+    ctx = { ...ctx, config: { ...ctx.config, dataPolicy: "allow" } };
   });
 
   // ── metadata ─────────────────────────────────────────────────

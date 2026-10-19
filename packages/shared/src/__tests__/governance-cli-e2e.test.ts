@@ -251,3 +251,98 @@ describe("iris-mcp-governance bin — error-path e2e (built dist, spawned proces
     }
   });
 });
+
+// -- Story 39.0 (DW-565): `check` through the built bin ---------------------
+//
+// The expected texts below are the Story 39.0 intent contract's (its I/O matrix),
+// checked against a run of this built bin on 2026-10-16. The package dists are
+// located the way an installed bin locates them: from its own location.
+
+describe("iris-mcp-governance check, built bin, spawned process (Story 39.0, DW-565)", () => {
+  function writeDoc(name: string, document: unknown): string {
+    const file = path.join(scratch, name);
+    writeFileSync(file, JSON.stringify(document), "utf8");
+    return file;
+  }
+
+  it("exit 0: every key matches, the OK line counts the keys and the universe", () => {
+    const file = writeDoc("check-valid.json", { global: { iris_doc_put: false }, profiles: { prod: { "iris_doc_edit:apply": false } } });
+    const universe = JSON.parse(runBin(["universe", "--json"]).stdout) as { keys: string[] };
+
+    const result = runBin(["check", "--file", file]);
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe(
+      `OK: all 2 key(s) in IRIS_GOVERNANCE_FILE (path: ${file}) match the suite's ${universe.keys.length} governance keys.\n`,
+    );
+  });
+
+  it("exit 1: one message per dead key on stderr, then the summary; stdout stays empty", () => {
+    const file = writeDoc("check-dead.json", { global: { iris_doc_putt: false, iris_doc_edit: false, "iris_doc_put:apply": false } });
+
+    const result = runBin(["check", "--file", file]);
+
+    const source = `IRIS_GOVERNANCE_FILE (path: ${file})`;
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(
+      [
+        `${source}: "iris_doc_putt" under "global" has no effect, because no tool of the suite has this key. Check it for a typo; iris-mcp-governance universe lists every key.`,
+        `${source}: "iris_doc_edit" under "global" has no effect, because iris_doc_edit is governed per action. Set the actions you mean instead: iris_doc_edit:apply, iris_doc_edit:regenerateStorage.`,
+        `${source}: "iris_doc_put:apply" under "global" has no effect, because iris_doc_put takes no action. Use "iris_doc_put" instead.`,
+        `Error: 3 of 3 key(s) in ${source} have no effect on any server.`,
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("exit 2: no governance document, a stray argument and an unknown option are usage errors", () => {
+    const usage = "Usage: iris-mcp-governance check [--file <path>] [--root <path>] [--json]\n";
+    const none = runBin(["check"]);
+    expect(none.status).toBe(2);
+    expect(none.stdout).toBe("");
+    expect(none.stderr).toBe(
+      `Error: "check" needs a governance document: pass --file <path>, or set IRIS_GOVERNANCE_FILE or IRIS_GOVERNANCE.\n\n${usage}`,
+    );
+
+    const stray = runBin(["check", "stray"]);
+    expect(stray.status).toBe(2);
+    expect(stray.stderr).toBe(`Error: "check" takes no arguments.\n\n${usage}`);
+
+    const unknown = runBin(["check", "--bogus"]);
+    expect(unknown.status).toBe(2);
+    expect(unknown.stderr).toBe(`Error: Unknown option "--bogus".\n\n${usage}`);
+  });
+
+  it("--json writes exactly one object on stdout on exit 0 and on exit 1", () => {
+    const valid = writeDoc("check-json-valid.json", { global: { iris_doc_put: false } });
+    const dead = writeDoc("check-json-dead.json", { global: { iris_doc_putt: false } });
+
+    const ok = runBin(["check", "--file", valid, "--json"]);
+    expect(ok.status).toBe(0);
+    expect(ok.stdout.trim().split(/\r?\n/)).toHaveLength(1);
+    const okJson = JSON.parse(ok.stdout) as { ok: boolean; checked: number; unmatched: unknown[]; sources: string[] };
+    expect(okJson).toMatchObject({ ok: true, checked: 1, unmatched: [], sources: [`IRIS_GOVERNANCE_FILE (path: ${valid})`] });
+
+    const bad = runBin(["check", "--file", dead, "--json"]);
+    expect(bad.status).toBe(1);
+    expect(bad.stdout.trim().split(/\r?\n/)).toHaveLength(1);
+    const badJson = JSON.parse(bad.stdout) as { ok: boolean; unmatched: Array<{ key: string; layer: string }> };
+    expect(badJson.ok).toBe(false);
+    expect(badJson.unmatched).toMatchObject([{ key: "iris_doc_putt", layer: '"global"' }]);
+    expect(bad.stderr).toContain('"iris_doc_putt" under "global" has no effect');
+  });
+
+  it("--root names the dist location: a directory with no packages exits 1 with the universe loader's message", () => {
+    const file = writeDoc("check-root.json", { global: { iris_doc_put: false } });
+    const empty = path.join(scratch, "no-dist-here");
+    mkdirSync(empty);
+
+    const result = runBin(["check", "--file", file, "--root", empty]);
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("universe: could not locate built tools for package");
+  });
+});

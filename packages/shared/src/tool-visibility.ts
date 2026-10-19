@@ -305,13 +305,22 @@ export function resolveVisibleTools(
  * (Epic 30, spec 11 §2.4 "Pairs guard"). Hiding one half of a pair while
  * showing the other strands the agent mid-workflow — e.g. a `core` server
  * that shows `iris_env_diff` (plan a change) but hides `iris_env_promote`
- * (apply it) offers a dead-end tool. Extensible: append `[string, string]`
- * tuples here as future pairs are identified; each owning package's tests
- * assert every pair is together-in or together-out of every roster for any
- * package that owns BOTH members.
+ * (apply it) offers a dead-end tool. Likewise `iris_doc_get` (read the exact
+ * lines, with their version) and `iris_doc_edit` (change them) are one workflow
+ * (Story 38.4), `iris_message_search` (find messages) with `iris_message_body`
+ * (read what they carry) are one forensic workflow (Story 39.5), and `iris_test_coverage`
+ * (start a coverage run) with `iris_test_status` (re-attach to it and cancel it, through its
+ * `coverageRunId`) are one workflow (Story 40.1).
+ * Extensible: append `[string, string]` tuples here as future
+ * pairs are identified; each owning package's tests assert every pair is
+ * together-in or together-out of every roster for any package that owns BOTH
+ * members.
  */
 export const TOOL_PAIRS: readonly (readonly [string, string])[] = [
   ["iris_env_diff", "iris_env_promote"],
+  ["iris_doc_get", "iris_doc_edit"],
+  ["iris_message_search", "iris_message_body"],
+  ["iris_test_coverage", "iris_test_status"],
 ] as const;
 
 /**

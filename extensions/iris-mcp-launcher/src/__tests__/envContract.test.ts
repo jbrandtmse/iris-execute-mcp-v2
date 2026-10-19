@@ -30,6 +30,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 import { synthesizeIrisEnv } from "../env.js";
+import { readSettings } from "../settings.js";
 import type { ResolvedConnectionProfile } from "../types.js";
 
 const SHARED_DIST = path.resolve(__dirname, "..", "..", "..", "..", "packages", "shared", "dist");
@@ -119,12 +120,18 @@ describe.skipIf(!ORACLE_AVAILABLE)(
     });
 
     it("the namespace default the extension advertises is the one the consumer would have used anyway", () => {
-      const parsed = loadConfig(synthesizeIrisEnv([profile({ namespace: "" })], "HSCUSTOM"));
+      // The extension's own default, read through its real settings reader with
+      // nothing configured (not restated as a literal).
+      const advertised = readSettings(() => ({
+        get: <T>(_key: string, defaultValue: T): T => defaultValue,
+      })).namespace;
+      const parsed = loadConfig(synthesizeIrisEnv([profile({ namespace: "" })], advertised));
 
-      expect(parsed.namespace).toBe("HSCUSTOM");
+      expect(parsed.namespace).toBe("USER");
+      expect(advertised).toBe("USER");
       // Cross-check the extension's advertised default against the consumer's
       // own fallback, so a change to loadConfig's default is caught here.
-      expect(loadConfig({ IRIS_USERNAME: "u", IRIS_PASSWORD: "p" }).namespace).toBe("HSCUSTOM");
+      expect(loadConfig({ IRIS_USERNAME: "u", IRIS_PASSWORD: "p" }).namespace).toBe(advertised);
     });
   },
 );

@@ -18,6 +18,11 @@ import {
   type ToolResult,
 } from "@iris-mcp/shared";
 import { z } from "zod";
+import {
+  TEST_PRODUCTION_GUARD_SENTENCE,
+  productionBusyRefusal,
+  readProductionGuard,
+} from "./test-production-guard.js";
 
 /** Base URL for the custom ExecuteMCPv2 REST service. */
 const BASE_URL = "/api/executemcp/v2";
@@ -155,13 +160,13 @@ export interface TestClock {
 }
 
 /** Real-time clock — production default. */
-const realClock: TestClock = {
+export const realClock: TestClock = {
   now: () => Date.now(),
   sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
 };
 
 /** Delay between poll requests (ms). */
-const TEST_POLL_INTERVAL = 200;
+export const TEST_POLL_INTERVAL = 200;
 /**
  * Fallback wait budget (seconds) when neither an explicit `timeout` argument
  * nor `IRIS_TEST_TIMEOUT` is set — today's hard-coded value (120s),
@@ -323,7 +328,7 @@ async function readUnitTestCounter(
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-interface ResolvedTimeout {
+export interface ResolvedTimeout {
   timeoutMs: number;
   timeoutCapped: boolean;
 }
@@ -334,7 +339,7 @@ interface ResolvedTimeout {
  * {@link DEFAULT_TEST_TIMEOUT_SECONDS}, clamped at
  * {@link MAX_TEST_TIMEOUT_SECONDS}.
  */
-function resolveTestTimeout(
+export function resolveTestTimeout(
   explicitSeconds: number | undefined,
   configTestTimeoutMs: number | undefined,
 ): ResolvedTimeout {
@@ -358,7 +363,7 @@ function resolveTestTimeout(
  * shipped `iris_test_status` companion tool (Story 36.2) and the manual route
  * that works in EVERY preset today (`core` included, Lead decision L-2):
  * `iris_global_get` on the jobId's queue node for the run index, then
- * `iris_sql_execute` joined down from `%UnitTest_Result.TestInstance` — the
+ * `iris_sql_query` joined down from `%UnitTest_Result.TestInstance` — the
  * ONLY `%UnitTest_Result` table carrying the `InstanceIndex` column
  * (`TestSuite.TestInstance` → `TestCase.TestSuite` → `TestMethod.TestCase` →
  * `TestAssert.TestMethod`; live-verified via INFORMATION_SCHEMA.COLUMNS at
@@ -393,7 +398,7 @@ export function buildRunningHint(
     `via IRIS_GOVERNANCE). Today, in every preset, the manual route also still works: ` +
     `(1) the runIndex (${capturedPart}re-readable while the job is ` +
     `queued or running via iris_global_get with global "IRIS.TempAtelierAsyncQueue" and subscripts ` +
-    `'${jobId},"unittest","id"'); (2) iris_sql_execute "SELECT ti.DateTime AS FinishedAt, tc.Name AS ClassName, ` +
+    `'${jobId},"unittest","id"'); (2) iris_sql_query "SELECT ti.DateTime AS FinishedAt, tc.Name AS ClassName, ` +
     `tm.Name AS MethodName, tm.Status, tm.Duration, tm.ErrorDescription FROM %UnitTest_Result.TestMethod tm ` +
     `JOIN %UnitTest_Result.TestCase tc ON tm.TestCase = tc.ID JOIN %UnitTest_Result.TestSuite ts ON ` +
     `tc.TestSuite = ts.ID JOIN %UnitTest_Result.TestInstance ti ON ts.TestInstance = ti.ID WHERE ` +
@@ -529,11 +534,13 @@ async function discoverPackageTests(
  *
  * Story 36.1 AC 36.1.6: this is the error-kind entry point of the ONE
  * shared envelope helper, {@link testRunEnvelope}, which every return of this
- * tool now goes through — the pre-existing two zero-result-guard call sites
+ * tool but one goes through — the pre-existing two zero-result-guard call sites
  * (package discovery, and the shared post-run zero-method-rows check), the
  * "no job ID" early return, the transport-error catch, the "running" result
  * and the completed result — so their shapes and handle fields can never
- * diverge. `handles` is optional and additive (Rule #19): omitted entirely,
+ * diverge. The one exception is the TestProduction guard's `PRODUCTION_BUSY`
+ * refusal (Story 40.3): it is the shared `refusalResult` shape, returned before
+ * anything is queued, so it holds no handle. `handles` is optional and additive (Rule #19): omitted entirely,
  * the output is byte-for-byte what it was before this story (the
  * pre-existing two call sites' own pinned tests exercise exactly that path,
  * unchanged).
@@ -903,6 +910,12 @@ export function createExecuteTestsHandler(clock: TestClock = realClock): ToolDef
     try {
       // Build the tests array for the Atelier async unittest request
       let tests: { class: string; methods?: string[] }[];
+      // What the TestProduction guard is asked about: the target the run queues. At class level that is `target`
+      // itself, the name the queue looks up exactly; at package level it is `target` too, the prefix package discovery
+      // matches. At method level it is the queued class and, when there is one, the trimmed method name, never the raw
+      // target: the IRIS side strips only tab, space and NBSP, so a raw target the queue trims further would be
+      // guarded as a different class than the one that runs.
+      let guardTarget = target;
 
       if (level === "package") {
         // Discover all %UnitTest.TestCase subclasses in the package
@@ -921,7 +934,12 @@ export function createExecuteTestsHandler(clock: TestClock = realClock): ToolDef
         // single trailing ':' with an empty method part (also runs the
         // whole class unfiltered, guarded generically by the zero-result
         // check below on a genuine zero-match) — neither is "malformed" by
-        // this check, only >1 colon or an empty class segment are.
+        // this check, only >1 colon, an empty class segment, or a method
+        // segment holding ';', ',' or '^' are. The work queue writes the method
+        // into the test spec of %UnitTest.Manager:RunTest, which reads ',' as a
+        // list of specs, ';' as a list of classes and '^' as setup code to run:
+        // such a segment would run classes the TestProduction guard never
+        // inspected, or code that is not a test.
         const segments = target.split(":");
         if (segments.length > 2) {
           return zeroResultGuardResponse(
@@ -935,6 +953,11 @@ export function createExecuteTestsHandler(clock: TestClock = realClock): ToolDef
           );
         }
         const rawMethodName = segments.length > 1 ? segments[1] : undefined;
+        if (rawMethodName !== undefined && /[;,^]/.test(rawMethodName)) {
+          return zeroResultGuardResponse(
+            `Malformed method-level target '${target}': the method segment after ':' must be one method name, without ';', ',' or '^'.`,
+          );
+        }
         const methodName = rawMethodName !== undefined ? rawMethodName.trim() : undefined;
         const testEntry: { class: string; methods?: string[] } = { class: className };
         if (methodName) {
@@ -942,7 +965,14 @@ export function createExecuteTestsHandler(clock: TestClock = realClock): ToolDef
           requestedMethodName = methodName;
         }
         tests = [testEntry];
+        guardTarget = methodName ? `${className}:${methodName}` : className;
       }
+
+      // TestProduction guard (Story 40.3, AD-27): %UnitTest.TestProduction stops any production that is not
+      // stopped before it starts its own, so a run that includes such a test is decided IRIS-side before
+      // anything is queued. A refusal changes nothing; a 404 (no guard route on this server) runs as before.
+      const guard = await readProductionGuard(ctx, ns, guardTarget, level);
+      if (guard !== undefined && guard.decision === "busy") return productionBusyRefusal(guard);
 
       // Ensure ^UnitTestRoot is defined in the target namespace. The
       // Atelier /work unittest endpoint silently crashes the response
@@ -1223,7 +1253,7 @@ export const executeTestsTool: ToolDefinition = {
     "a failure and NOT a final result. Do NOT re-submit the same target on a running result — that " +
     "starts a SECOND concurrent run against shared fixtures. Re-attach instead (the response's `hint` " +
     "carries the exact calls): today, `iris_global_get` on `IRIS.TempAtelierAsyncQueue(<jobId>,\"unittest\",\"id\")` " +
-    "for the runIndex, then `iris_sql_execute` over `%UnitTest_Result` — only `TestInstance` carries the " +
+    "for the runIndex, then `iris_sql_query` over `%UnitTest_Result` — only `TestInstance` carries the " +
     "`InstanceIndex` column, so join `TestMethod` → `TestCase` → `TestSuite` → `TestInstance` and filter " +
     "`ti.InstanceIndex = <runIndex>` (never MAX(InstanceIndex) — a concurrent run can allocate a higher " +
     "index first); the rows exist while the run is still executing, so treat them as final only once " +
@@ -1236,7 +1266,8 @@ export const executeTestsTool: ToolDefinition = {
     "`runIndexNote` saying why. Concurrency caveat: two runs of the SAME class started close together " +
     "share that class's fixtures, AND the Atelier endpoint predicts each run's index before " +
     "%UnitTest.Manager actually allocates it — a race between near-simultaneous submissions can " +
-    "misattribute a run's own index. Returns total, passed, failed, skipped counts and per-test details.",
+    "misattribute a run's own index. Returns total, passed, failed, skipped counts and per-test details. " +
+    TEST_PRODUCTION_GUARD_SENTENCE,
   inputSchema: z.object({
     target: z
       .string()
@@ -1266,9 +1297,9 @@ export const executeTestsTool: ToolDefinition = {
       .describe("Target namespace (default: configured)"),
   }),
   annotations: {
-    readOnlyHint: true,
+    readOnlyHint: false,
     destructiveHint: false,
-    idempotentHint: true,
+    idempotentHint: false,
     openWorldHint: false,
   },
   scope: "NS",

@@ -1929,3 +1929,141 @@ describe("Story 31.3 QA — sourceFile never carries a secret, even directly (no
     expect(candidateLog).toContain("exampleOperator");
   });
 });
+
+// ====================================================================
+// Story 38.5 - IRIS_SQL_READ_ONLY and IRIS_SQL_MAX_ROWS_AFFECTED are global
+// operator variables. `mergeProfile` inherits both from the env-derived base
+// into every profile (an IRIS_PROFILES entry and a Server Manager entry), and
+// no per-profile key can loosen them: `ProfileOverride` ignores unknown keys,
+// so an entry that names `sqlReadOnly` or `sqlMaxRowsAffected` changes nothing.
+// ====================================================================
+
+describe("Story 38.5 - SQL write-safety variables reach every profile", () => {
+  const SQL_ENV = {
+    IRIS_USERNAME: "admin",
+    IRIS_PASSWORD: "secret",
+    IRIS_SQL_READ_ONLY: "true",
+    IRIS_SQL_MAX_ROWS_AFFECTED: "7",
+  };
+  let dirs: string[] = [];
+
+  beforeEach(() => {
+    vi.spyOn(logger, "warn").mockImplementation(() => {});
+    vi.spyOn(logger, "debug").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+    dirs = [];
+  });
+
+  function workspaceWithServer(): string {
+    const dir = mkdtempSync(join(tmpdir(), "iris-profiles-sql-safety-"));
+    dirs.push(dir);
+    mkdirSync(join(dir, ".vscode"), { recursive: true });
+    writeFileSync(
+      join(dir, ".vscode", "settings.json"),
+      JSON.stringify({
+        "intersystems.servers": {
+          smServer: {
+            webServer: { scheme: "http", host: "sm.example.com", port: 52773 },
+            username: "smuser",
+            password: "smpass",
+          },
+        },
+      }),
+      "utf8",
+    );
+    return dir;
+  }
+
+  it("a named IRIS_PROFILES entry inherits both variables from the default profile", () => {
+    const env = { ...SQL_ENV, IRIS_PROFILES: JSON.stringify({ secondary: { host: "secondary.example.com" } }) };
+    const registry = buildProfileRegistry(loadConfig(env), env);
+
+    for (const name of [DEFAULT_PROFILE_NAME, "secondary"]) {
+      const profile = registry.get(name) as IrisProfile;
+      expect(profile.sqlReadOnly, name).toBe(true);
+      expect(profile.sqlMaxRowsAffected, name).toBe(7);
+    }
+  });
+
+  it("an explicit IRIS_SQL_READ_ONLY=false and a 0 ceiling are inherited as set values", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SQL_READ_ONLY: "false",
+      IRIS_SQL_MAX_ROWS_AFFECTED: "0",
+      IRIS_PROFILES: JSON.stringify({ secondary: { host: "secondary.example.com" } }),
+    };
+    const secondary = buildProfileRegistry(loadConfig(env), env).get("secondary") as IrisProfile;
+
+    expect(secondary).toHaveProperty("sqlReadOnly", false);
+    expect(secondary).toHaveProperty("sqlMaxRowsAffected", 0);
+  });
+
+  it("a profile carries neither key when the variables are unset", () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_PROFILES: JSON.stringify({ secondary: { host: "secondary.example.com" } }),
+    };
+    const registry = buildProfileRegistry(loadConfig(env), env);
+
+    for (const name of [DEFAULT_PROFILE_NAME, "secondary"]) {
+      expect(registry.get(name), name).not.toHaveProperty("sqlReadOnly");
+      expect(registry.get(name), name).not.toHaveProperty("sqlMaxRowsAffected");
+    }
+  });
+
+  it("a Server Manager entry inherits both variables", async () => {
+    const env = {
+      ...SQL_ENV,
+      IRIS_SERVER_MANAGER: "auto",
+      IRIS_SM_WORKSPACE: workspaceWithServer(),
+    };
+    const registry = await loadProfileRegistry(env, process.platform, {
+      getKeychainPassword: async () => undefined,
+    });
+
+    const sm = registry.get("smServer") as IrisProfile;
+    expect(sm.source).toBe("server-manager");
+    expect(sm.sqlReadOnly).toBe(true);
+    expect(sm.sqlMaxRowsAffected).toBe(7);
+  });
+
+  it("a Server Manager entry carries neither key when the variables are unset", async () => {
+    const env = {
+      IRIS_USERNAME: "admin",
+      IRIS_PASSWORD: "secret",
+      IRIS_SERVER_MANAGER: "auto",
+      IRIS_SM_WORKSPACE: workspaceWithServer(),
+    };
+    const registry = await loadProfileRegistry(env, process.platform, {
+      getKeychainPassword: async () => undefined,
+    });
+
+    const sm = registry.get("smServer") as IrisProfile;
+    expect(sm).not.toHaveProperty("sqlReadOnly");
+    expect(sm).not.toHaveProperty("sqlMaxRowsAffected");
+  });
+
+  it("an IRIS_PROFILES entry, including a default entry, cannot set or loosen either variable", () => {
+    const env = {
+      ...SQL_ENV,
+      IRIS_PROFILES: JSON.stringify({
+        [DEFAULT_PROFILE_NAME]: { host: "override.example.com", sqlReadOnly: false, sqlMaxRowsAffected: 999 },
+        secondary: { host: "secondary.example.com", sqlReadOnly: false, sqlMaxRowsAffected: 999 },
+      }),
+    };
+    const registry = buildProfileRegistry(loadConfig(env), env);
+
+    for (const name of [DEFAULT_PROFILE_NAME, "secondary"]) {
+      const profile = registry.get(name) as IrisProfile;
+      expect(profile.host, name).toMatch(/\.example\.com$/);
+      expect(profile.sqlReadOnly, name).toBe(true);
+      expect(profile.sqlMaxRowsAffected, name).toBe(7);
+    }
+  });
+});

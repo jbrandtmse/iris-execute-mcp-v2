@@ -27,6 +27,7 @@ import { existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
+import { inheritedEnv } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
@@ -161,17 +162,11 @@ async function rosterWithSwitch(serverManager: "auto" | "unset"): Promise<Roster
     }) => unknown;
   };
 
-  // 32-3-R9 (Story 32.4): inherit the ambient env (PATH, and SystemRoot on
-  // Windows) with EVERY IRIS_* variable scrubbed CASE-INSENSITIVELY, then
-  // layer the test's explicit values. The pre-Story-32.4 fresh-built env had
-  // NO PATH at all — resolving the spawned `node` (and any credential
-  // helper) survived only via a Windows CreateProcess quirk and broke on
-  // POSIX/nvm — and an uppercase-only scrub missed lowercase ambient IRIS_*
-  // vars on Windows's case-insensitive environment.
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === "string" && !key.toUpperCase().startsWith("IRIS_")) env[key] = value;
-  }
+  // Inherit the ambient env (PATH, and SystemRoot on Windows, which the
+  // spawned `node` and any credential helper need) with EVERY IRIS_* variable
+  // and MCP_TRANSPORT scrubbed CASE-INSENSITIVELY (`inheritedEnv`), then layer
+  // the test's explicit values.
+  const env = inheritedEnv();
   Object.assign(env, {
     IRIS_HOST,
     IRIS_PORT: String(IRIS_PORT),

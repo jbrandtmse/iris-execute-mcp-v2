@@ -25,6 +25,7 @@ import { logger } from "./logger.js";
 // `profiles.ts` and cannot deepen the profiles/server-manager-source cycle the
 // Story 31.3 Dev Notes warn about.
 import type { ProfileSource } from "./profiles.js";
+import type { DataPolicySummary } from "./data-policy.js";
 
 /** Case-insensitive key-name family redacted per spec §4. */
 const REDACT_KEY_PATTERN =
@@ -187,6 +188,13 @@ export interface AuditEntryInput {
    * recorded when `outcome === "denied"` AND the source field was present.
    */
   presetApplied?: string;
+  /**
+   * What the PHI data policy did over the call (Story 39.2, AD-19): the policy in force and the
+   * number of bodies shown redacted and withheld. Present only for a call to a tool that declares
+   * `ToolDefinition.dataPolicy` (and, with `actions`, whose action is listed) on a profile that
+   * resolved. Additive: `outcome` keeps its domain. It never holds body content.
+   */
+  dataPolicy?: DataPolicySummary;
 }
 
 /** One JSON line written to the audit file (spec §3 entry format). */
@@ -207,6 +215,7 @@ interface AuditEntry {
   error?: string;
   denyReason?: string;
   presetApplied?: string;
+  dataPolicy?: DataPolicySummary;
 }
 
 /**
@@ -290,6 +299,9 @@ export class AuditLogger {
     }
     if (input.outcome === "denied" && input.presetApplied !== undefined) {
       entry.presetApplied = input.presetApplied;
+    }
+    if (input.dataPolicy !== undefined) {
+      entry.dataPolicy = input.dataPolicy;
     }
     this.enqueueWrite(JSON.stringify(entry));
   }

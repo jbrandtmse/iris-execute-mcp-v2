@@ -266,14 +266,16 @@ ClassMethod CubeAction() As %Status
                 Set tSC2 = exBuild.AsStatus()
             }
 
-            ; Restore I/O unconditionally, before any render. Bare `Use
-            ; tInitIO` (never `Use tInitIO::("")`, a NO-OP) is required to
-            ; actually clear the mnemonic bound above.
-            Do ##class(%Library.Device).ReDirectIO(0)
-            Use tInitIO
-            Close tNull
-            Set tRedirected = 0
+            ; Restore I/O unconditionally, before any render, through the same
+            ; helper Command.cls uses: each teardown step (ReDirectIO(0), the
+            ; bare `Use tInitIO` that actually clears the mnemonic bound above,
+            ; Close tNull) is attempted independently, so a throw from one
+            ; cannot skip the others and strand the render on the null device.
+            ; The namespace is restored first so the helper class is visible
+            ; whichever namespace the build ran in.
             Set $NAMESPACE = tOrigNS
+            Do ##class(ExecuteMCPv2.REST.Command).TeardownRedirect(tInitIO, tNull)
+            Set tRedirected = 0
 
             ; AC 35.2.3 disposition: the captured text is DISCARDED, not
             ; surfaced. %BuildCube's progress narration is diagnostic noise
@@ -318,16 +320,14 @@ ClassMethod CubeAction() As %Status
         ; (Story 35.2, mirrors Command.cls's own outer-catch belt-and-braces
         ; restore at Command.cls:132-138). Any errors during cleanup are
         ; swallowed so the real exception is still what gets rendered below.
+        Set $NAMESPACE = tOrigNS
         Try {
             If tRedirected {
-                Do ##class(%Library.Device).ReDirectIO(0)
-                If $Get(tInitIO) '= "" { Use tInitIO }
-                If $Get(tNull) '= "" { Close tNull }
+                Do ##class(ExecuteMCPv2.REST.Command).TeardownRedirect($Get(tInitIO), $Get(tNull))
             }
         } Catch {}
         Kill %ExecuteMCPOutput
         Kill %ExecuteMCPTruncated
-        Set $NAMESPACE = tOrigNS
         Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(ex.AsStatus()))
         Set tSC = $$$OK
     }

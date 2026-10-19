@@ -302,7 +302,8 @@ describe("Request-body UTF-8 decoding (Story 34.8, ledger 34-6-CR-7)", () => {
   it(
     "a non-ASCII JSON KEY elsewhere in the request body does not corrupt decoding of an adjacent real value (AC 34.8.6)",
     async (testCtx) => {
-      if (skipReason) {
+      // Needs the ClassMethodArgsFixture, so it honors BOTH skip conditions.
+      if (skipReason || fixtureSkipReason) {
         testCtx.skip();
         return;
       }

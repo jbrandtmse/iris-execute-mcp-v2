@@ -100,11 +100,11 @@ describe("iris_doc_get", () => {
 
   // ── metadataOnly mode ───────────────────────────────────────────
 
-  it("should call HEAD and return exists/timestamp when metadataOnly=true", async () => {
+  // Atelier answers a HEAD with only `ETag` (the document's `ts`), never `Last-Modified`.
+  it("should call HEAD and return exists/etag when metadataOnly=true", async () => {
     mockHttp.head.mockResolvedValue(
       headResponse(200, {
-        "Last-Modified": "Sat, 05 Apr 2026 12:00:00 GMT",
-        "ETag": '"abc123"',
+        "ETag": "2026-04-05 12:00:00.123",
       }),
     );
 
@@ -117,11 +117,10 @@ describe("iris_doc_get", () => {
       "/api/atelier/v7/USER/doc/MyApp.Service.cls",
     );
     expect(mockHttp.get).not.toHaveBeenCalled();
-    expect(result.structuredContent).toEqual({
+    expect(result.structuredContent).toStrictEqual({
       exists: true,
       name: "MyApp.Service.cls",
-      timestamp: "Sat, 05 Apr 2026 12:00:00 GMT",
-      etag: '"abc123"',
+      etag: "2026-04-05 12:00:00.123",
     });
     expect(result.isError).toBeUndefined();
   });
@@ -153,7 +152,7 @@ describe("iris_doc_get", () => {
     ).rejects.toThrow(IrisApiError);
   });
 
-  it("should handle missing Last-Modified and ETag headers in metadataOnly mode", async () => {
+  it("should handle a missing ETag header in metadataOnly mode, and never report a timestamp", async () => {
     mockHttp.head.mockResolvedValue(headResponse(200, {}));
 
     const result = await docGetTool.handler(
@@ -164,9 +163,8 @@ describe("iris_doc_get", () => {
     expect(result.structuredContent).toEqual({
       exists: true,
       name: "MyApp.Service.cls",
-      timestamp: undefined,
-      etag: undefined,
     });
+    expect(Object.keys(result.structuredContent as object)).not.toContain("timestamp");
   });
 
   it("should still use GET when metadataOnly is not set (regression)", async () => {
@@ -230,18 +228,125 @@ describe("iris_doc_put", () => {
     );
   });
 
+  // A routine: a class put with ignoreConflict is sent without the flag first (doc-put-storage-guard.test.ts),
+  // so the query-parameter pin needs a document type that is never guarded.
   it("should pass ignoreConflict as query parameter", async () => {
-    mockHttp.put.mockResolvedValue(envelope({ name: "Test.cls" }));
+    mockHttp.put.mockResolvedValue(envelope({ name: "Test.mac" }));
 
     await docPutTool.handler(
-      { name: "Test.cls", content: ["// test"], ignoreConflict: true },
+      { name: "Test.mac", content: ["// test"], ignoreConflict: true },
       ctx,
     );
 
     expect(mockHttp.put).toHaveBeenCalledWith(
-      "/api/atelier/v7/USER/doc/Test.cls?ignoreConflict=1",
+      "/api/atelier/v7/USER/doc/Test.mac?ignoreConflict=1",
       { enc: false, content: ["// test"] },
     );
+  });
+
+  // Result shapes below were captured live on 2026-10-15 (IRIS 2026.2, Atelier
+  // v8, HSCUSTOM) from `PUT .../doc/ExecuteMCPv2.Temp.Story380Bom.cls`: a
+  // BOM-prefixed first line is refused with HTTP 200 / empty `status.errors`
+  // and a string `result.status`; the same document without the BOM is
+  // accepted with `result.status === ""`.
+  const LIVE_REFUSED_RESULT = {
+    name: "ExecuteMCPv2.Temp.Story380Bom.cls",
+    db: "",
+    ts: "",
+    cat: "CLS",
+    enc: false,
+    content: "",
+    status:
+      "ERROR #16021: Illegal Header Line: \uFEFFClass ExecuteMCPv2.Temp.Story380Bom Extends %RegisteredObject",
+  };
+  const LIVE_ACCEPTED_RESULT = {
+    name: "ExecuteMCPv2.Temp.Story380Bom.cls",
+    db: "HSCUSTOM",
+    ts: "2026-10-15 12:25:56.148",
+    upd: false,
+    cat: "CLS",
+    status: "",
+    enc: false,
+    flags: 0,
+    content: [],
+  };
+
+  it("strips a leading BOM from string content before the PUT", async () => {
+    mockHttp.put.mockResolvedValue(envelope(LIVE_ACCEPTED_RESULT));
+
+    await docPutTool.handler(
+      { name: "Test.cls", content: "\uFEFFClass Test {\n}" },
+      ctx,
+    );
+
+    const body = mockHttp.put.mock.calls[0]?.[1] as { content: string[] };
+    expect(body.content).toEqual(["Class Test {", "}"]);
+    expect(body.content[0]?.charCodeAt(0)).not.toBe(0xfeff);
+  });
+
+  it("strips a leading BOM from array content without mutating the caller's array", async () => {
+    mockHttp.put.mockResolvedValue(envelope(LIVE_ACCEPTED_RESULT));
+    const callerLines = ["\uFEFFClass Test {", "}"];
+
+    await docPutTool.handler({ name: "Test.cls", content: callerLines }, ctx);
+
+    const body = mockHttp.put.mock.calls[0]?.[1] as { content: string[] };
+    expect(body.content).toEqual(["Class Test {", "}"]);
+    expect(callerLines).toEqual(["\uFEFFClass Test {", "}"]);
+  });
+
+  it("returns isError with the status text when IRIS refuses the document", async () => {
+    mockHttp.put.mockResolvedValue(envelope(LIVE_REFUSED_RESULT));
+
+    const result = await docPutTool.handler(
+      { name: "ExecuteMCPv2.Temp.Story380Bom.cls", content: "Class X {}" },
+      ctx,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe(
+      `Document 'ExecuteMCPv2.Temp.Story380Bom.cls' was not saved in namespace 'USER': ${LIVE_REFUSED_RESULT.status}. Nothing was stored; correct the document text and retry.`,
+    );
+    expect(result.content[0]?.text).not.toContain("saved successfully");
+    expect(result.structuredContent).toEqual(LIVE_REFUSED_RESULT);
+  });
+
+  it("keeps the success response byte-identical when status is an empty string", async () => {
+    mockHttp.put.mockResolvedValue(envelope(LIVE_ACCEPTED_RESULT));
+
+    const result = await docPutTool.handler(
+      { name: "ExecuteMCPv2.Temp.Story380Bom.cls", content: "Class X {}" },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toEqual([
+      {
+        type: "text",
+        text: "Document 'ExecuteMCPv2.Temp.Story380Bom.cls' saved successfully in namespace 'USER'.",
+      },
+    ]);
+    expect(result.structuredContent).toEqual(LIVE_ACCEPTED_RESULT);
+  });
+
+  it("keeps the success response when the result carries no status field", async () => {
+    mockHttp.put.mockResolvedValue(envelope({ name: "Test.cls" }));
+
+    const result = await docPutTool.handler(
+      { name: "Test.cls", content: "Class X {}" },
+      ctx,
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]?.text).toBe(
+      "Document 'Test.cls' saved successfully in namespace 'USER'.",
+    );
+  });
+
+  it("description documents the BOM strip and the error returned for a refused write", () => {
+    const desc = docPutTool.description ?? "";
+    expect(desc).toContain("A leading byte-order mark is stripped from the content before it is sent");
+    expect(desc).toContain("is returned as an error carrying IRIS's text; nothing is stored then");
   });
 
   it("should propagate connection errors", async () => {
@@ -415,67 +520,53 @@ describe("iris_doc_list", () => {
     expect(result.isError).toBeUndefined();
   });
 
-  // ── modifiedSince mode ──────────────────────────────────────────
+  // modifiedSince is refused (Story 38.7, DW-528)
 
-  it("should call modified endpoint when modifiedSince is provided", async () => {
-    const modifiedDocs = [
-      { name: "MyApp.Updated.cls", ts: "2026-04-05T12:00:00Z" },
-    ];
-    mockHttp.get.mockResolvedValue(envelope(modifiedDocs));
-
+  it("refuses a non-empty modifiedSince with the unsupported text, no code and no HTTP request", async () => {
     const result = await docListTool.handler(
-      { modifiedSince: "2026-04-05T00:00:00Z" },
+      { modifiedSince: "2026-04-05T00:00:00Z", namespace: "HSCUSTOM", generated: false, category: "CLS" },
       ctx,
     );
 
-    expect(mockHttp.get).toHaveBeenCalledWith(
-      `/api/atelier/v7/USER/modified/${encodeURIComponent("2026-04-05T00:00:00Z")}`,
-    );
-    expect(result.structuredContent).toEqual({ items: modifiedDocs });
-    expect(result.isError).toBeUndefined();
+    expect(mockHttp.get).not.toHaveBeenCalled();
+    expect(mockHttp.head).not.toHaveBeenCalled();
+    expect(result).toStrictEqual({
+      content: [
+        {
+          type: "text",
+          text:
+            "modifiedSince is not supported, so nothing was listed: IRIS has no way to list documents changed since a timestamp " +
+            "(its change list works from a database hash). " +
+            "Omit modifiedSince; to find recent changes, list the documents with iris_doc_list and compare each one's ts.",
+        },
+      ],
+      isError: true,
+    });
+    expect(result.structuredContent).toBeUndefined();
   });
 
-  it("should use namespace override with modifiedSince", async () => {
-    mockHttp.get.mockResolvedValue(envelope([]));
+  it("an empty or absent modifiedSince is the unchanged docnames request and result", async () => {
+    mockHttp.get.mockResolvedValue(envelope({ content: [{ name: "MyApp.Thing.cls", ts: "2026-04-05 12:00:00.000" }] }));
 
-    await docListTool.handler(
-      { modifiedSince: "2026-04-01T00:00:00Z", namespace: "HSCUSTOM" },
-      ctx,
-    );
+    const withEmpty = await docListTool.handler({ modifiedSince: "", category: "CLS", generated: true }, ctx);
+    const without = await docListTool.handler({ category: "CLS", generated: true }, ctx);
 
-    expect(mockHttp.get).toHaveBeenCalledWith(
-      `/api/atelier/v7/HSCUSTOM/modified/${encodeURIComponent("2026-04-01T00:00:00Z")}`,
-    );
+    expect(mockHttp.get.mock.calls).toEqual([
+      ["/api/atelier/v7/USER/docnames/CLS/*?generated=1"],
+      ["/api/atelier/v7/USER/docnames/CLS/*?generated=1"],
+    ]);
+    expect(withEmpty).toStrictEqual(without);
+    expect(without.structuredContent).toEqual({ items: [{ name: "MyApp.Thing.cls", ts: "2026-04-05 12:00:00.000" }] });
   });
 
-  it("includes generated=0 on /modified/ branch when modifiedSince and generated:false are both set", async () => {
-    mockHttp.get.mockResolvedValue(envelope([]));
+  it("the modifiedSince description says the parameter is not supported and what to do instead", () => {
+    const shape = docListTool.inputSchema.shape as Record<string, { description?: string }>;
 
-    await docListTool.handler(
-      { modifiedSince: "2026-04-05T00:00:00Z", generated: false },
-      ctx,
+    expect(shape.modifiedSince?.description).toBe(
+      "Not supported: IRIS cannot filter documents by modification time, so a call that sets it is refused " +
+        "and changes nothing; compare the ts of the documents iris_doc_list returns instead.",
     );
-
-    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
-    expect(calledPath).toContain(
-      `/modified/${encodeURIComponent("2026-04-05T00:00:00Z")}`,
-    );
-    expect(calledPath).toContain("generated=0");
-  });
-
-  it("omits generated query param on /modified/ branch when generated is undefined", async () => {
-    mockHttp.get.mockResolvedValue(envelope([]));
-
-    await docListTool.handler(
-      { modifiedSince: "2026-04-05T00:00:00Z" },
-      ctx,
-    );
-
-    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
-    expect(calledPath).toContain(
-      `/modified/${encodeURIComponent("2026-04-05T00:00:00Z")}`,
-    );
-    expect(calledPath).not.toContain("generated=");
+    expect(docListTool.description).not.toContain("modifiedSince");
   });
 
   it("should pass generated=0 when generated is false", async () => {
@@ -519,21 +610,6 @@ describe("iris_doc_list", () => {
     mockHttp.get.mockResolvedValue(envelope({ content: docs }));
 
     const result = await docListTool.handler({ category: "CLS" }, ctx);
-
-    expect(result.structuredContent).toEqual({ items: docs });
-    expect(result.isError).toBeUndefined();
-  });
-
-  it("should unwrap result.content for /modified (real Atelier shape)", async () => {
-    const docs = [
-      { name: "MyApp.Updated.cls", ts: "2026-04-05T12:00:00Z" },
-    ];
-    mockHttp.get.mockResolvedValue(envelope({ content: docs }));
-
-    const result = await docListTool.handler(
-      { modifiedSince: "2026-04-05T00:00:00Z" },
-      ctx,
-    );
 
     expect(result.structuredContent).toEqual({ items: docs });
     expect(result.isError).toBeUndefined();

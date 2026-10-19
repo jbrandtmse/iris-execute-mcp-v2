@@ -31,8 +31,10 @@ const FOREIGN_PROMPT_NAMES = [
   "diagnose-slow-query",
   "objectscript-review",
   "deploy-and-test-class",
+  "edit-and-test-class",
   "trace-message-flow",
   "recover-stuck-production",
+  "find-patient-messages",
   "provision-project-environment",
   "audit-security-posture",
 ];

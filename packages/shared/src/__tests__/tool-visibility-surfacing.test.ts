@@ -34,6 +34,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
 import type { BootstrapResult } from "../bootstrap.js";
+import { makeEnvHarness } from "./env-harness.js";
 import { GOVERNANCE_BASELINE } from "../governance-baseline.js";
 import { SERVER_DISCOVERY_TOOL_NAME } from "../server-discovery.js";
 import type { ServerDiscoveryResult } from "../server-discovery.js";
@@ -224,54 +225,11 @@ describe("expectToolNameAbsent — the walker itself (32-3-R10)", () => {
   });
 });
 
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv = {
-    IRIS_USERNAME: process.env.IRIS_USERNAME,
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD,
-    IRIS_HOST: process.env.IRIS_HOST,
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
-    IRIS_PROFILES: process.env.IRIS_PROFILES,
-    IRIS_GOVERNANCE: process.env.IRIS_GOVERNANCE,
-    IRIS_TOOLS_PRESET: process.env.IRIS_TOOLS_PRESET,
-    IRIS_TOOLS_DISABLE: process.env.IRIS_TOOLS_DISABLE,
-    IRIS_TOOLS_ENABLE: process.env.IRIS_TOOLS_ENABLE,
-  };
-
-  function setup(): void {
-    bootstrapSpy.mockClear();
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    for (const key of Object.keys(savedEnv)) delete process.env[key];
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-  };
-}
+/** The shared env harness, with this file's bootstrap spy reset on every setup. */
+const ENV_OPTIONS = {
+  onSetup: () => bootstrapSpy.mockClear(),
+  connection: "unset",
+} as const;
 
 function stageDefaultStartup(fetchMock: ReturnType<typeof vi.fn>): void {
   fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
@@ -290,7 +248,7 @@ function setDefaultEnv(): void {
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 30.2 — toolVisibility block on iris_server_profiles (AC 30.2.1)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -365,7 +323,7 @@ describe("Story 30.2 — toolVisibility block on iris_server_profiles (AC 30.2.1
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 30.2 — governance report + resource omit hidden tools' keys (AC 30.2.2)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -463,7 +421,7 @@ describe("Story 30.2 — governance report + resource omit hidden tools' keys (A
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 30.2 — toolVisibility counts track addTools/removeTools (review regression)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 

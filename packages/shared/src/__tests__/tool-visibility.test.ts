@@ -361,6 +361,27 @@ describe("TOOL_PAIRS", () => {
     expect(TOOL_PAIRS).toContainEqual(["iris_env_diff", "iris_env_promote"]);
   });
 
+  it("contains the iris_doc_get / iris_doc_edit pair (Story 38.4)", () => {
+    expect(TOOL_PAIRS).toContainEqual(["iris_doc_get", "iris_doc_edit"]);
+  });
+
+  it("contains the iris_message_search / iris_message_body pair (Story 39.5)", () => {
+    expect(TOOL_PAIRS).toContainEqual(["iris_message_search", "iris_message_body"]);
+  });
+
+  it("contains the iris_test_coverage / iris_test_status pair (Story 40.1)", () => {
+    expect(TOOL_PAIRS).toContainEqual(["iris_test_coverage", "iris_test_status"]);
+  });
+
+  it("is exactly the four pairs, so an unreviewed addition fails here", () => {
+    expect(TOOL_PAIRS).toEqual([
+      ["iris_env_diff", "iris_env_promote"],
+      ["iris_doc_get", "iris_doc_edit"],
+      ["iris_message_search", "iris_message_body"],
+      ["iris_test_coverage", "iris_test_status"],
+    ]);
+  });
+
   it("is a non-empty, extensible list of 2-tuples", () => {
     expect(TOOL_PAIRS.length).toBeGreaterThan(0);
     for (const pair of TOOL_PAIRS) {

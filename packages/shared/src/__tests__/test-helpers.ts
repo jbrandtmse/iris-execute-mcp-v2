@@ -1,13 +1,74 @@
 /**
  * Shared test helpers for IRIS MCP tool unit tests.
  *
- * Consolidates `createMockHttp()`, `createMockCtx()`, and `envelope()`
- * so that all server packages (iris-dev-mcp, iris-admin-mcp, etc.)
- * can import them from a single location.
+ * Consolidates `createMockHttp()`, `createMockCtx()`, `envelope()`, the env
+ * harness, the `McpServerBase` startup helpers `stageDefaultStartup()` and
+ * `callTool()`, and the governance and audit readers `effectivePolicy()` and
+ * `auditLines()`, so that all server packages (iris-dev-mcp, iris-admin-mcp,
+ * etc.) can import them from a single location.
  */
 
+import { existsSync, readFileSync } from "node:fs";
 import { vi } from "vitest";
 import type { IrisHttpClient, ToolContext, IrisConnectionConfig, AtelierEnvelope, PaginateResult } from "../index.js";
+
+// The one env harness, re-exported because `@iris-mcp/shared/test-helpers` is the
+// subpath the other packages import. The harness lives in `./env-harness.ts`, which
+// never imports this file.
+export { makeEnvHarness } from "./env-harness.js";
+export type { EnvHarnessOptions } from "./env-harness.js";
+
+/**
+ * Queue, on a mocked `fetch`, the two responses a default profile's startup
+ * consumes: the health HEAD (200, no body), then the Atelier version GET (an
+ * envelope naming version `8.0.0`).
+ */
+export function stageDefaultStartup(fetchMock: ReturnType<typeof vi.fn>): void {
+  fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+  fetchMock.mockResolvedValueOnce(
+    new Response(JSON.stringify({ status: { errors: [] }, console: [], result: { version: "8.0.0" } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+
+/**
+ * Invoke a tool of a constructed `McpServerBase` through the callback the MCP
+ * SDK registered for it, which is the `handleToolCall` path a `tools/call`
+ * request takes.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function callTool(server: any, name: string, args: unknown) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const entry = (server.server as any)._registeredTools[name];
+  return (entry.callback ?? entry.handler ?? entry.cb)(args);
+}
+
+/** The effective governance policy that `iris_server_profiles` reports for the default profile of `server`. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function effectivePolicy(server: any): Promise<Record<string, boolean>> {
+  const result = await callTool(server, "iris_server_profiles", {});
+  return (result.structuredContent as { governance: { policy: Record<string, boolean> } }).governance.policy;
+}
+
+/**
+ * The JSON entries of the audit file at `filePath`, once it holds at least `minLines` non-empty lines. Polls for
+ * up to 3 seconds (the audit writer is asynchronous), then throws.
+ */
+export async function auditLines(filePath: string, minLines: number): Promise<Array<Record<string, unknown>>> {
+  const deadline = Date.now() + 3000;
+  for (;;) {
+    if (existsSync(filePath)) {
+      const lines = readFileSync(filePath, "utf-8")
+        .split("\n")
+        .filter((line) => line.trim().length > 0);
+      if (lines.length >= minLines) return lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    }
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${minLines} line(s) in ${filePath}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 
 /**
  * Create a fully mocked {@link IrisHttpClient} with vi.fn() stubs
@@ -86,5 +147,23 @@ export function envelope<T>(result: T, console: string[] = []): AtelierEnvelope<
     status: { errors: [] },
     console,
     result,
+  };
+}
+
+/**
+ * A small seeded random generator (mulberry32), so a test's random cases are reproducible: the same
+ * seed gives the same sequence of numbers in `[0, 1)`.
+ *
+ * @param seed - The seed; its low 32 bits are used.
+ * @returns A function that returns the next number of the sequence.
+ */
+export function mulberry32(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }

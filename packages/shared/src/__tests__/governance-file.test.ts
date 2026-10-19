@@ -30,6 +30,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BootstrapResult } from "../bootstrap.js";
+import { makeEnvHarness } from "./env-harness.js";
 import { GOVERNANCE_BASELINE } from "../governance-baseline.js";
 import {
   SERVER_DISCOVERY_TOOL_NAME,
@@ -232,6 +233,39 @@ describe("loadGovernanceFile (AC 32.0.1)", () => {
     );
     expect(message).toContain('"constructor" is a reserved key');
     expect(message).toContain(p);
+  });
+
+  // Story 38.7, DW-554: the file channel rejects a governance-shaped top-level key through the SAME validator.
+  it.each([
+    ["a flat tool key", { iris_doc_put: false }, "iris_doc_put"],
+    ["a top-level profile layer", { prod: { iris_doc_put: false } }, "prod"],
+    ["an object-valued `globals` typo beside a valid `global`", { globals: { iris_doc_put: false }, global: { iris_a: true } }, "globals"],
+    ["an upper-case flat tool key", { IRIS_DOC_PUT: false }, "IRIS_DOC_PUT"],
+    ["an iris_-prefixed key with a string value", { iris_doc_put: "SECRET-VALUE-123" }, "iris_doc_put"],
+    ["an upper-case iris_ key with a string value", { IRIS_DOC_PUT: "SECRET-VALUE-123" }, "IRIS_DOC_PUT"],
+  ])("a file with %s fails fast naming the variable, the path and the documented shape, never echoing a value", (_label, document, key) => {
+    const p = writeGovernanceFile("unrecognized-key.json", JSON.stringify(document));
+    const message = thrownMessage(() => loadGovernanceFile({ IRIS_GOVERNANCE_FILE: p }));
+    expect(message).toBe(
+      `IRIS_GOVERNANCE_FILE is invalid: "${key}" is not a recognized top-level key, so it would be ignored. Use the documented shape {"global":{"<tool|tool:action>":true|false},"profiles":{"<profile>":{...}}}: put the key under "global" to apply it to every profile, or under "profiles" for one profile. (path: ${p})`,
+    );
+    expect(message).not.toContain("SECRET-VALUE-123");
+  });
+
+  it("a file carrying scalar metadata (comment, version) beside its layers parses to the layers alone", () => {
+    const p = writeGovernanceFile(
+      "metadata.json",
+      JSON.stringify({
+        comment: "team policy",
+        version: 1,
+        global: { iris_a: true },
+        profiles: { prod: { iris_b: false } },
+      }),
+    );
+    expect(loadGovernanceFile({ IRIS_GOVERNANCE_FILE: p })).toEqual({
+      global: { iris_a: true },
+      profiles: { prod: { iris_b: false } },
+    });
   });
 
   it("a valid file parses through the same shape validation (global + profiles layers)", () => {
@@ -773,63 +807,14 @@ function setDefaultEnv(): void {
   process.env.IRIS_NAMESPACE = "DEFAULTNS";
 }
 
-const GOVERNANCE_ENV_VARS = [
-  "IRIS_USERNAME",
-  "IRIS_PASSWORD",
-  "IRIS_HOST",
-  "IRIS_NAMESPACE",
-  "IRIS_PROFILES",
-  "IRIS_GOVERNANCE",
-  "IRIS_GOVERNANCE_FILE",
-  "IRIS_GOVERNANCE_PRESET",
-  "IRIS_TOOLS_PRESET",
-  "IRIS_TOOLS_DISABLE",
-  "IRIS_TOOLS_ENABLE",
-] as const;
-
-/** Shared environment save/restore for hermetic runs. */
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv: Record<string, string | undefined> = {};
-  for (const k of GOVERNANCE_ENV_VARS) savedEnv[k] = process.env[k];
-
-  function setup(): void {
-    bootstrapSpy.mockClear();
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    for (const k of GOVERNANCE_ENV_VARS) delete process.env[k];
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-  };
-}
+/** The shared env harness, with this file's bootstrap spy reset on every setup. */
+const ENV_OPTIONS = {
+  onSetup: () => bootstrapSpy.mockClear(),
+  connection: "unset",
+} as const;
 
 describe("Integration AC 32.0.3 — the file reaches the gate, the resource, and the discovery view", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 

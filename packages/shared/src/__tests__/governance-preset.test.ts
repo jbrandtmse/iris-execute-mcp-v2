@@ -30,6 +30,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
 import type { BootstrapResult } from "../bootstrap.js";
+import { makeEnvHarness } from "./env-harness.js";
 import {
   parseGovernancePreset,
   presetSeed,
@@ -177,54 +178,11 @@ function discoveryOf(result: any): ServerDiscoveryResult {
   return result.structuredContent as ServerDiscoveryResult;
 }
 
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv = {
-    IRIS_USERNAME: process.env.IRIS_USERNAME,
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD,
-    IRIS_HOST: process.env.IRIS_HOST,
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
-    IRIS_PROFILES: process.env.IRIS_PROFILES,
-    IRIS_GOVERNANCE: process.env.IRIS_GOVERNANCE,
-    IRIS_GOVERNANCE_PRESET: process.env.IRIS_GOVERNANCE_PRESET,
-  };
-
-  function setup(): void {
-    bootstrapSpy.mockClear();
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    delete process.env.IRIS_GOVERNANCE;
-    delete process.env.IRIS_PROFILES;
-    delete process.env.IRIS_GOVERNANCE_PRESET;
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-  };
-}
+/** The shared env harness, with this file's bootstrap spy reset on every setup. */
+const ENV_OPTIONS = {
+  onSetup: () => bootstrapSpy.mockClear(),
+  connection: "unset",
+} as const;
 
 function stageDefaultStartup(fetchMock: ReturnType<typeof vi.fn>): void {
   fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
@@ -589,7 +547,7 @@ describe("AC 24.1.2 — read-only capstone over the REAL BASELINE_ACTION_CLASSIF
 // ════════════════════════════════════════════════════════════════════
 
 describe("Constructed-server capstone — unset preset is byte-for-byte (AC 24.1.1)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -633,7 +591,7 @@ describe("Constructed-server capstone — unset preset is byte-for-byte (AC 24.1
 });
 
 describe("Constructed-server capstone — read-only over the full registered key universe (AC 24.1.2)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -740,7 +698,7 @@ describe("Constructed-server capstone — read-only over the full registered key
 // ════════════════════════════════════════════════════════════════════
 
 describe("AC 24.1.4a — discovery tool preset field", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -785,7 +743,7 @@ describe("AC 24.1.4a — discovery tool preset field", () => {
 // ════════════════════════════════════════════════════════════════════
 
 describe("AC 24.1.4b — governance resource reflects the preset", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -813,7 +771,7 @@ describe("AC 24.1.4b — governance resource reflects the preset", () => {
 // ════════════════════════════════════════════════════════════════════
 
 describe("AC 24.1.4c — presetApplied denial attribution", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 

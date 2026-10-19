@@ -30,6 +30,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
 import type { BootstrapResult } from "../bootstrap.js";
+import { makeEnvHarness } from "./env-harness.js";
 // Import governance ENGINE values from their direct modules (not the `../index.js`
 // barrel): the barrel transitively re-exports `server-base.js`, which imports
 // `bootstrap.js`, and that import would be evaluated during the hoisted `vi.mock`
@@ -190,53 +191,11 @@ function readPolicy(result: any): Record<string, boolean> {
   return (JSON.parse(firstContentText(result)) as { policy: Record<string, boolean> }).policy;
 }
 
-/** Shared environment save/restore for hermetic runs. */
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv = {
-    IRIS_USERNAME: process.env.IRIS_USERNAME,
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD,
-    IRIS_HOST: process.env.IRIS_HOST,
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
-    IRIS_PROFILES: process.env.IRIS_PROFILES,
-    IRIS_GOVERNANCE: process.env.IRIS_GOVERNANCE,
-  };
-
-  function setup(): void {
-    bootstrapSpy.mockClear();
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    delete process.env.IRIS_GOVERNANCE;
-    delete process.env.IRIS_PROFILES;
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-  };
-}
+/** The shared env harness, with this file's bootstrap spy reset on every setup. */
+const ENV_OPTIONS = {
+  onSetup: () => bootstrapSpy.mockClear(),
+  connection: "unset",
+} as const;
 
 function stageDefaultStartup(fetchMock: ReturnType<typeof vi.fn>): void {
   fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
@@ -255,7 +214,7 @@ function setDefaultEnv(): void {
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.5 — `resources` capability advertised (AC 14.5.1)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -287,7 +246,7 @@ describe("Story 14.5 — `resources` capability advertised (AC 14.5.1)", () => {
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.5 — resources/list and resources/templates/list (AC 14.5.2)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -326,7 +285,7 @@ describe("Story 14.5 — resources/list and resources/templates/list (AC 14.5.2)
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.5 — resources/read effective policy (AC 14.5.3)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -440,7 +399,7 @@ describe("Story 14.5 — resources/read effective policy (AC 14.5.3)", () => {
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.5 — the resource is advisory; the gate is authoritative (AC 14.5.4)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -493,7 +452,7 @@ describe("Story 14.5 — the resource is advisory; the gate is authoritative (AC
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.5 — resource policy keys align with the gate (tool:action) (D4/D6)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 

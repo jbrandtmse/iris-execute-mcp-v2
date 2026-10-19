@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { ToolContext } from "@iris-mcp/shared";
+import { IrisApiError, type ToolContext } from "@iris-mcp/shared";
 import { docLoadTool, filePathToDocName, extractBaseDir, docNameToFilePath, extractDeclaredIdentity } from "../tools/load.js";
+import { conflict, currentClass, TS_CURRENT } from "./conflict-fakes.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
 // ── Mock node:fs ──────────────────────────────────────────────────────
@@ -311,18 +312,161 @@ describe("iris_doc_load", () => {
     expect(structured.failures[0]?.error).toContain("Upload failed: 500");
   });
 
-  it("should respect ignoreConflict=false and omit the query parameter", async () => {
-    mockGlobSync.mockReturnValue(["c:/src/Test.cls"]);
-    mockReadFileSync.mockReturnValue("content\n");
-    mockHttp.put.mockResolvedValue(envelope({ name: "Test.cls" }));
+  describe("ignoreConflict false: the version-checked save (Story 38.7, DW-549)", () => {
+    // The 409 fakes are real Atelier shapes (conflict-fakes.ts): a put to an existing document that carries
+    // no version token answers HTTP 409 with the document as it is now.
+    const PUT_PATH = "/api/atelier/v7/USER/doc/Test.cls";
+    const BODY = { enc: false, content: ["Class Test {}", ""] };
+    const versionChecked = { headers: { "If-None-Match": TS_CURRENT } };
+    const CONFLICT_TEXT =
+      "The document changed on the server while this tool was saving it, so nothing was stored. " +
+      "Run iris_doc_load again to replace the current version.";
 
-    await docLoadTool.handler(
-      { path: "c:/src/**/*.cls", ignoreConflict: false },
-      ctx,
-    );
+    beforeEach(() => {
+      mockGlobSync.mockReturnValue(["c:/src/Test.cls"]);
+      mockReadFileSync.mockReturnValue("Class Test {}\n");
+    });
 
-    const callPath = mockHttp.put.mock.calls[0]?.[0] as string;
-    expect(callPath).not.toContain("ignoreConflict");
+    it("a new document takes one PUT, with no query parameter and no version header", async () => {
+      mockHttp.put.mockResolvedValue(envelope({ name: "Test.cls", status: "" }));
+
+      const result = await docLoadTool.handler({ path: "c:/src/**/*.cls", ignoreConflict: false }, ctx);
+
+      expect(mockHttp.put.mock.calls).toEqual([[PUT_PATH, BODY]]);
+      expect(result.structuredContent).toEqual({ total: 1, uploaded: 1, failed: 0 });
+    });
+
+    it("an existing document: the unversioned PUT gets the 409, a second PUT carries If-None-Match with its ts, and the file is uploaded", async () => {
+      mockHttp.put
+        .mockRejectedValueOnce(conflict(PUT_PATH, currentClass(["Class Test {}"])))
+        .mockResolvedValueOnce(envelope({ name: "Test.cls", status: "" }));
+
+      const result = await docLoadTool.handler({ path: "c:/src/**/*.cls", ignoreConflict: false }, ctx);
+
+      expect(mockHttp.put.mock.calls).toEqual([
+        [PUT_PATH, BODY],
+        [PUT_PATH, BODY, versionChecked],
+      ]);
+      expect(result.structuredContent).toEqual({ total: 1, uploaded: 1, failed: 0 });
+      expect(result.isError).toBe(false);
+    });
+
+    it("a 409 on the version-checked save is a per-file DOCUMENT_CONFLICT with no third PUT, and the other files continue", async () => {
+      mockGlobSync.mockReturnValue(["c:/src/Test.cls", "c:/src/Other.cls", "c:/src/Third.cls"]);
+      mockReadFileSync
+        .mockReturnValueOnce("Class Test {}\n")
+        .mockReturnValueOnce("Class Other {}\n")
+        .mockReturnValueOnce("Class Third {}\n");
+      mockHttp.put
+        // Test.cls: an existing document that changes while it is being saved.
+        .mockRejectedValueOnce(conflict(PUT_PATH, currentClass(["Class Test {}"])))
+        .mockRejectedValueOnce(conflict(PUT_PATH, currentClass(["Class Test {}"], "2026-10-15 17:59:21.512")))
+        // Other.cls: a new document.
+        .mockResolvedValueOnce(envelope({ name: "Other.cls", status: "" }))
+        // Third.cls: an existing document that saves.
+        .mockRejectedValueOnce(conflict("/api/atelier/v7/USER/doc/Third.cls", currentClass(["Class Third {}"])))
+        .mockResolvedValueOnce(envelope({ name: "Third.cls", status: "" }));
+
+      const result = await docLoadTool.handler({ path: "c:/src/**/*.cls", ignoreConflict: false }, ctx);
+
+      expect(mockHttp.put).toHaveBeenCalledTimes(5);
+      expect(result.structuredContent).toEqual({
+        total: 3,
+        uploaded: 2,
+        failed: 1,
+        failures: [{ file: "c:/src/Test.cls", docName: "Test.cls", error: CONFLICT_TEXT, code: "DOCUMENT_CONFLICT" }],
+      });
+      expect(result.isError).toBe(false);
+    });
+
+    it("a 409 that carries no readable document is not retried and keeps today's failure text", async () => {
+      mockHttp.put.mockRejectedValueOnce(conflict(PUT_PATH, undefined));
+
+      const result = await docLoadTool.handler({ path: "c:/src/**/*.cls", ignoreConflict: false }, ctx);
+
+      expect(mockHttp.put).toHaveBeenCalledTimes(1);
+      expect(result.structuredContent).toEqual({
+        total: 1,
+        uploaded: 0,
+        failed: 1,
+        failures: [
+          {
+            file: "c:/src/Test.cls",
+            docName: "Test.cls",
+            error: `IRIS returned HTTP 409 for PUT ${PUT_PATH}. Check the request parameters and try again.`,
+          },
+        ],
+      });
+      expect(result.isError).toBe(true);
+    });
+
+    it("a soft error on the retry is today's refusal text, without a code", async () => {
+      mockHttp.put
+        .mockRejectedValueOnce(conflict(PUT_PATH, currentClass(["Class Test {}"])))
+        .mockResolvedValueOnce(envelope({ name: "Test.cls", status: "ERROR #16021: Illegal Header Line: x" }));
+
+      const result = await docLoadTool.handler({ path: "c:/src/**/*.cls", ignoreConflict: false }, ctx);
+
+      expect(mockHttp.put).toHaveBeenCalledTimes(2);
+      expect(result.structuredContent).toEqual({
+        total: 1,
+        uploaded: 0,
+        failed: 1,
+        failures: [
+          { file: "c:/src/Test.cls", docName: "Test.cls", error: "IRIS refused the upload: ERROR #16021: Illegal Header Line: x" },
+        ],
+      });
+    });
+
+    it("a failure other than a 409 on the version-checked save keeps that error's text, with no code and no third PUT", async () => {
+      mockHttp.put
+        .mockRejectedValueOnce(conflict(PUT_PATH, currentClass(["Class Test {}"])))
+        .mockRejectedValueOnce(new IrisApiError(500, [], PUT_PATH, "IRIS returned HTTP 500."));
+
+      const result = await docLoadTool.handler({ path: "c:/src/**/*.cls", ignoreConflict: false }, ctx);
+
+      expect(mockHttp.put).toHaveBeenCalledTimes(2);
+      expect(result.structuredContent).toEqual({
+        total: 1,
+        uploaded: 0,
+        failed: 1,
+        failures: [{ file: "c:/src/Test.cls", docName: "Test.cls", error: "IRIS returned HTTP 500." }],
+      });
+    });
+
+    it("a failure other than a 409 on the first PUT is not retried", async () => {
+      mockHttp.put.mockRejectedValueOnce(new IrisApiError(500, [], PUT_PATH, "IRIS returned HTTP 500."));
+
+      const result = await docLoadTool.handler({ path: "c:/src/**/*.cls", ignoreConflict: false }, ctx);
+
+      expect(mockHttp.put).toHaveBeenCalledTimes(1);
+      expect((result.structuredContent as { failures: Array<{ error: string }> }).failures[0]?.error).toBe(
+        "IRIS returned HTTP 500.",
+      );
+    });
+
+    it("the default (ignoreConflict true) is one PUT with ?ignoreConflict=1 and nothing else, even when it is a 409", async () => {
+      mockHttp.put.mockResolvedValue(envelope({ name: "Test.cls", status: "" }));
+      await docLoadTool.handler({ path: "c:/src/**/*.cls" }, ctx);
+      expect(mockHttp.put.mock.calls).toEqual([[`${PUT_PATH}?ignoreConflict=1`, BODY]]);
+
+      mockHttp.put.mockReset();
+      mockHttp.put.mockRejectedValueOnce(conflict(`${PUT_PATH}?ignoreConflict=1`, currentClass(["Class Test {}"])));
+      const failed = await docLoadTool.handler({ path: "c:/src/**/*.cls" }, ctx);
+      expect(mockHttp.put).toHaveBeenCalledTimes(1);
+      expect((failed.structuredContent as { failures: Array<{ code?: string }> }).failures[0]?.code).toBeUndefined();
+    });
+
+    it("the ignoreConflict description states the version-checked save", () => {
+      const shape = docLoadTool.inputSchema.shape as Record<string, { description?: string }>;
+
+      expect(shape.ignoreConflict?.description).toBe(
+        "If true (default), each file overwrites its server copy unconditionally. " +
+          "If false, a file whose document already exists is saved under a version check: it is overwritten " +
+          "unless the document changes on the server while it is being saved, in which case that file fails " +
+          "with DOCUMENT_CONFLICT and the others continue.",
+      );
+    });
   });
 
   it("should default ignoreConflict to true when not specified", async () => {
@@ -998,6 +1142,33 @@ describe("iris_doc_load — BOM strip + string-status failure (Story 35.9 rework
     expect(structured.failed).toBe(1);
     expect(structured.failures[0]?.docName).toBe("ProbeR359.Bom.cls");
     expect(structured.failures[0]?.error).toContain("ERROR #16021: Illegal Header Line");
+    expect(result.isError).toBe(true);
+  });
+
+  it("reports IRIS's reason for a document name it refuses with HTTP 400 and an empty error list as an upload failure (Story 39.7, DW-569)", async () => {
+    mockGlobSync.mockReturnValue(["c:/src/ProbeR359/Plain"]);
+    mockReadFileSync.mockReturnValue("plain text\n");
+    const reason = "ERROR #16006: Document 'ProbeR359.Plain' name is invalid";
+    // The answer Atelier gives for a name with no document type (captured live 2026-10-17, IRIS 2026.2 build 221U): the
+    // shared client throws it as an IrisApiError that carries the envelope's result.
+    mockHttp.put.mockRejectedValue(
+      new IrisApiError(400, [], "/api/atelier/v7/USER/doc/ProbeR359.Plain", "IRIS returned HTTP 400", {
+        name: "ProbeR359.Plain",
+        db: "",
+        ts: "",
+        cat: "OTH",
+        enc: false,
+        content: "",
+        status: reason,
+      }),
+    );
+
+    const result = await docLoadTool.handler({ path: "c:/src/**/*" }, ctx);
+
+    const structured = result.structuredContent as { uploaded: number; failed: number; failures: Array<{ error: string }> };
+    expect(structured.uploaded).toBe(0);
+    expect(structured.failed).toBe(1);
+    expect(structured.failures[0]?.error).toBe(`IRIS refused the upload: ${reason}`);
     expect(result.isError).toBe(true);
   });
 

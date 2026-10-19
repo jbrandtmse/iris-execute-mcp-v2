@@ -124,7 +124,7 @@
 # put new epic notes in epics.md, not here.
 
 generated: '2026-04-05'
-last_updated: '10-15-2026 10:00'
+last_updated: '10-18-2026 21:24'
 previous_update: '2026-09-16 (Story 37.1 dev complete via bmad-dev-story - ready-for-dev
   -> review. Fixed McpServerBase.start(): a default-profile health-check rejection
   no longer calls process.exit(1) - it logs (health-check-failed line + a new continuation
@@ -497,29 +497,35 @@ development_status:
   37-1-medium-default-profile-outage-must-not-take-down-the-server: done
   epic-37-retrospective: optional
 
-  epic-38: backlog
-  38-1-reject-the-unimplemented-http-transport: backlog
-  38-2-line-range-document-read: backlog
-  38-3-storage-block-drop-guard: backlog
-  38-4-surgical-line-edit-tool: backlog
-  38-5-sql-write-safety: backlog
-  38-6-editing-and-sql-safety-docs-prompt-and-capstone: backlog
+  epic-38: done
+  38-0-epic-37-deferred-cleanup: done
+  38-1-reject-the-unimplemented-http-transport: done
+  38-2-line-range-document-read: done
+  38-3-storage-block-drop-guard: done
+  38-4-surgical-line-edit-tool: done
+  38-5-sql-write-safety: done
+  38-6-editing-and-sql-safety-docs-prompt-and-capstone: done
+  38-7-epic-38-burn-down: done
   epic-38-retrospective: optional
 
-  epic-39: backlog
-  39-1-message-header-search: backlog
-  39-2-phi-data-policy: backlog
-  39-3-message-body-content-search: backlog
-  39-4-search-table-lookup: backlog
-  39-5-message-body-reader: backlog
-  39-6-message-forensics-docs-prompt-and-capstone: backlog
+  epic-39: done
+  39-0-epic-38-deferred-cleanup: done
+  39-1-message-header-search: done
+  39-2-phi-data-policy: done
+  39-3-message-body-content-search: done
+  39-4-search-table-lookup: done
+  39-5-message-body-reader: done
+  39-6-message-forensics-docs-prompt-and-capstone: done
+  39-7-epic-39-burn-down: done
   epic-39-retrospective: optional
 
-  epic-40: backlog
-  40-1-line-coverage-probe-and-engine: backlog
-  40-2-coverage-reports-and-targets: backlog
-  40-3-testproduction-runs: backlog
-  40-4-test-depth-docs-prompt-and-capstone: backlog
+  epic-40: done
+  40-0-epic-39-deferred-cleanup: done
+  40-1-line-coverage-probe-and-engine: done
+  40-2-coverage-reports-and-targets: done
+  40-3-testproduction-runs: done
+  40-4-test-depth-docs-prompt-and-capstone: done
+  40-5-epic-40-burn-down: done
   epic-40-retrospective: optional
 
   epic-41: backlog
@@ -550,3 +556,12 @@ development_status:
   43-3-human-confirmation-through-elicitation: backlog
   43-4-sdk-v2-docs-smokes-and-capstone: backlog
   epic-43-retrospective: optional
+action_items:
+  - id: "epic-38-retro-item-1-decide-whether-to-build-a-streamable-htt"
+    epic: 38
+    action: "Decide whether to build a Streamable HTTP MCP transport: confirm a remote-access
+      use case and design authentication, bind address and sessions (AD-23); until
+      then stdio stays the only transport (DW-538)"
+    owner: "user"
+    status: open
+    ref: ""

@@ -30,7 +30,11 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { BootstrapResult } from "../bootstrap.js";
+import { makeEnvHarness } from "./env-harness.js";
 import { GOVERNANCE_BASELINE } from "../governance-baseline.js";
 
 // A successful, no-op bootstrap result (REST service already current). Mirrors
@@ -173,57 +177,11 @@ function makeMultiActionTool(
   };
 }
 
-/**
- * Shared environment save/restore so each describe block runs hermetically and
- * never leaks IRIS_* / IRIS_PROFILES / IRIS_GOVERNANCE into sibling suites.
- */
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv = {
-    IRIS_USERNAME: process.env.IRIS_USERNAME,
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD,
-    IRIS_HOST: process.env.IRIS_HOST,
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
-    IRIS_PROFILES: process.env.IRIS_PROFILES,
-    IRIS_GOVERNANCE: process.env.IRIS_GOVERNANCE,
-  };
-
-  function setup(): void {
-    bootstrapSpy.mockClear();
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    // Clear inherited governance/profiles; each test sets what it needs.
-    delete process.env.IRIS_GOVERNANCE;
-    delete process.env.IRIS_PROFILES;
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-  };
-}
+/** The shared env harness, with this file's bootstrap spy reset on every setup. */
+const ENV_OPTIONS = {
+  onSetup: () => bootstrapSpy.mockClear(),
+  connection: "unset",
+} as const;
 
 /** Stage the default profile's startup HEAD (health) + GET (version) responses. */
 function stageDefaultStartup(fetchMock: ReturnType<typeof vi.fn>): void {
@@ -244,7 +202,7 @@ function setDefaultEnv(): void {
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 — denied action returns a structured error (handler + connection untouched)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -341,7 +299,7 @@ describe("Story 14.4 — denied action returns a structured error (handler + con
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 — a profile can re-enable a globally/seed-disabled action", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -438,7 +396,7 @@ describe("Story 14.4 — a profile can re-enable a globally/seed-disabled action
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 — back-compat gate: empty IRIS_GOVERNANCE is a pure pass-through", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -517,7 +475,7 @@ describe("Story 14.4 — back-compat gate: empty IRIS_GOVERNANCE is a pure pass-
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 — gate ordering: profile resolution precedes enforcement", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -591,7 +549,7 @@ describe("Story 14.4 — gate ordering: profile resolution precedes enforcement"
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 — governance key computation aligns with GOVERNANCE_BASELINE (D4)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -678,7 +636,7 @@ describe("Story 14.4 — governance key computation aligns with GOVERNANCE_BASEL
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 — call-time enforcement keeps every tool advertised (AC 14.4.3)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -717,7 +675,7 @@ describe("Story 14.4 — call-time enforcement keeps every tool advertised (AC 1
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 — malformed IRIS_GOVERNANCE fails fast at start() (D7)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -743,12 +701,102 @@ describe("Story 14.4 — malformed IRIS_GOVERNANCE fails fast at start() (D7)", 
   });
 });
 
+// ====================================================================
+// Story 38.7 (DW-554): a governance-shaped key outside global/profiles fails
+// start(); an unknown profile name under "profiles" only warns.
+// ====================================================================
+
+describe("Story 38.7: start() and the governance document shape (DW-554)", () => {
+  const env = makeEnvHarness(ENV_OPTIONS);
+  beforeEach(env.setup);
+  afterEach(env.teardown);
+
+  /** The `[WARN]` lines about an unconfigured profile name that `start()` wrote to stderr. */
+  function profileWarnings(): string[] {
+    return vi
+      .mocked(console.error)
+      .mock.calls.map((call) => String(call[0]))
+      .filter((line) => line.includes("is not a configured profile"));
+  }
+
+  const UNKNOWN_PROFILE_TEXT =
+    'profile "prdo" under "profiles" is not a configured profile, so its overrides apply to no connection. Check the name against the configured profiles: default, prod.';
+
+  it("a flat IRIS_GOVERNANCE key fails start() before any IRIS traffic, naming the variable and the key", async () => {
+    setDefaultEnv();
+    process.env.IRIS_GOVERNANCE = JSON.stringify({ iris_new_write: true });
+    const server = new McpServerBase(makeServerOpts([makeEchoTool("iris_doc_get")]));
+
+    await expect(server.start("stdio")).rejects.toThrow(
+      /^IRIS_GOVERNANCE is invalid: "iris_new_write" is not a recognized top-level key/,
+    );
+    expect(env.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("an unknown name under IRIS_GOVERNANCE profiles warns once and the policy is unchanged", async () => {
+    setDefaultEnv();
+    process.env.IRIS_PROFILES = JSON.stringify({ prod: { host: "prod.example.com", namespace: "PRODNS" } });
+    process.env.IRIS_GOVERNANCE = JSON.stringify({ profiles: { prdo: { iris_new_write: true } } });
+    stageDefaultStartup(env.fetchMock);
+    const handlerSpy = vi.fn();
+    const server = new McpServerBase(makeServerOpts([makeWriteTool("iris_new_write", handlerSpy)]));
+
+    await server.start("stdio");
+
+    expect(profileWarnings()).toEqual([`[WARN] IRIS_GOVERNANCE: ${UNKNOWN_PROFILE_TEXT}`]);
+    // The override of the unknown profile applies to no connection: the new write stays seed-disabled.
+    const result = await callTool(server, "iris_new_write", { value: "x" });
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      code: "GOVERNANCE_DISABLED",
+      action: "iris_new_write",
+      server: "default",
+    });
+    expect(handlerSpy).not.toHaveBeenCalled();
+  });
+
+  it("an unknown name under IRIS_GOVERNANCE_FILE profiles warns with the file path", async () => {
+    setDefaultEnv();
+    process.env.IRIS_PROFILES = JSON.stringify({ prod: { host: "prod.example.com", namespace: "PRODNS" } });
+    const dir = mkdtempSync(join(tmpdir(), "iris-gov-profile-warn-"));
+    const governanceFile = join(dir, "governance.json");
+    writeFileSync(governanceFile, JSON.stringify({ profiles: { prdo: { iris_new_write: true } } }), "utf8");
+    process.env.IRIS_GOVERNANCE_FILE = governanceFile;
+    try {
+      stageDefaultStartup(env.fetchMock);
+      const server = new McpServerBase(makeServerOpts([makeWriteTool("iris_new_write", vi.fn())]));
+
+      await server.start("stdio");
+
+      expect(profileWarnings()).toEqual([`[WARN] IRIS_GOVERNANCE_FILE (path: ${governanceFile}): ${UNKNOWN_PROFILE_TEXT}`]);
+    } finally {
+      delete process.env.IRIS_GOVERNANCE_FILE;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("configured profile names, and a document without profiles, produce no warning", async () => {
+    setDefaultEnv();
+    process.env.IRIS_PROFILES = JSON.stringify({ prod: { host: "prod.example.com", namespace: "PRODNS" } });
+    process.env.IRIS_GOVERNANCE = JSON.stringify({
+      global: { iris_new_write: true },
+      profiles: { default: { iris_new_write: true }, prod: { iris_new_write: false } },
+    });
+    stageDefaultStartup(env.fetchMock);
+    const server = new McpServerBase(makeServerOpts([makeWriteTool("iris_new_write", vi.fn())]));
+
+    await server.start("stdio");
+
+    expect(profileWarnings()).toEqual([]);
+  });
+});
+
 // ════════════════════════════════════════════════════════════════════
 // Constructed-but-not-started safety: governanceConfig defaults to {}.
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.4 — a constructed-but-not-started server has a safe empty policy", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 

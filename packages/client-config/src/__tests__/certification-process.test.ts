@@ -40,6 +40,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -73,7 +74,9 @@ afterEach(() => {
 });
 
 function mkTmp(prefix: string): string {
-  const dir = mkdtempSync(path.join(tmpdir(), prefix));
+  // realpath: on macOS tmpdir() is a symlinked path (/var -> /private/var) that
+  // the child process resolves, so a drift comparison needs the canonical form.
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), prefix));
   createdDirs.push(dir);
   return dir;
 }

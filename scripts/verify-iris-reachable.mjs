@@ -66,6 +66,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { checkDistFresh } from "./lib/dist-freshness.mjs";
+import { resolveIrisTarget } from "./lib/iris-target.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
@@ -73,6 +74,23 @@ const sharedDistEntry = resolve(repoRoot, "packages/shared/dist/index.js");
 
 const pkgName = process.env.npm_package_name ?? "(unknown package)";
 const timeoutMs = 10000;
+
+// Resolve the IRIS target FIRST (DW-388): before the dist check, the shared import and any
+// network call. An unset variable silently falling back to a local-dev value must never
+// loosen a release check, so the fallback is announced, and refused outright under CI.
+const target = resolveIrisTarget(process.env);
+if (target.ciRefusal) {
+  console.error(
+    `[verify-iris-reachable] FAILED CLOSED: ${target.ciRefusal} Publishing ${pkgName} must not proceed.`,
+  );
+  process.exit(1);
+}
+if (target.defaulted.length > 0) {
+  console.error(
+    `[WARN] [verify-iris-reachable] ${target.defaulted.join(", ")} not set - using the local-dev ` +
+      "default for each. Export them to check the instance you are actually releasing against.",
+  );
+}
 
 const distCheck = checkDistFresh(process.cwd(), pkgName);
 if (!distCheck.ok) {
@@ -107,19 +125,11 @@ const { loadConfig, IrisHttpClient, ping } = shared;
 
 // loadConfig() REQUIRES IRIS_USERNAME/IRIS_PASSWORD in the env it is given —
 // by design, it throws rather than silently defaulting credentials (see its
-// own doc comment). Mirrors execute-classmethod-epic-gate.test.ts's own
-// local-dev-default env object (this repo's established convention) rather
-// than calling loadConfig() bare, so this gate behaves predictably (local
-// defaults) when no real release-target env vars are exported, and still
-// honors real IRIS_HOST/IRIS_USERNAME/IRIS_PASSWORD when they are set.
-const env = {
-  IRIS_HOST: process.env.IRIS_HOST ?? "localhost",
-  IRIS_PORT: process.env.IRIS_PORT ?? "52773",
-  IRIS_USERNAME: process.env.IRIS_USERNAME ?? "_SYSTEM",
-  IRIS_PASSWORD: process.env.IRIS_PASSWORD ?? "SYS",
-  IRIS_NAMESPACE: process.env.IRIS_NAMESPACE ?? "HSCUSTOM",
-  IRIS_HTTPS: process.env.IRIS_HTTPS ?? "false",
-};
+// own doc comment). The target resolved above carries the local-dev default for
+// each variable the operator left unset (this repo's established convention),
+// so the local loop behaves predictably, and every real
+// IRIS_HOST/IRIS_USERNAME/IRIS_PASSWORD that is set is honored unchanged.
+const env = target.env;
 
 let reachable = false;
 let config;

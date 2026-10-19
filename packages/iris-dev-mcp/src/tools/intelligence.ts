@@ -11,6 +11,7 @@
 
 import {
   atelierPath,
+  IrisApiError,
   requireMinVersion,
   type ToolDefinition,
 } from "@iris-mcp/shared";
@@ -236,16 +237,35 @@ export const macroInfoTool: ToolDefinition = {
 
     const body = { docname, macroname: name, includes: includeList };
 
-    const [definitionResponse, locationResponse] = await Promise.all([
-      ctx.http.post(definitionPath, body),
-      ctx.http.post(locationPath, body),
+    // Atelier answers a macro lookup with HTTP 400 and no error list when the
+    // document name fails its name validation: an empty name, and also a
+    // non-empty name that is not a valid document name (for example one with no
+    // document type). The tool advertises that "without a document, resolution
+    // returns empty", so only the empty name keeps the envelope's own result;
+    // any other 400 is an error.
+    const macroResult = async (path: string): Promise<unknown> => {
+      try {
+        return (await ctx.http.post(path, body)).result;
+      } catch (error) {
+        if (
+          docname === "" &&
+          error instanceof IrisApiError &&
+          error.statusCode === 400 &&
+          error.errors.length === 0 &&
+          error.result !== undefined
+        ) {
+          return error.result;
+        }
+        throw error;
+      }
+    };
+
+    const [definition, location] = await Promise.all([
+      macroResult(definitionPath),
+      macroResult(locationPath),
     ]);
 
-    const result = {
-      name,
-      definition: definitionResponse.result,
-      location: locationResponse.result,
-    };
+    const result = { name, definition, location };
 
     return {
       content: [

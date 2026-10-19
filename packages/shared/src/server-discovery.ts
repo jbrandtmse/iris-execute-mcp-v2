@@ -34,7 +34,15 @@
 
 import { z } from "zod";
 
-import type { GovernanceConfig, GovernanceConfigSource, GovernancePreset, MutatesLookup, MutationClass } from "./governance.js";
+import type {
+  GovernanceConfig,
+  GovernanceConfigSource,
+  GovernancePreset,
+  MutatesLookup,
+  MutationClass,
+  ParentKeys,
+} from "./governance.js";
+import { effectiveDataPolicy, type DataPolicy, type DataPolicySource } from "./data-policy.js";
 import { getEffectiveConfigSources, getEffectivePolicy } from "./governance.js";
 import type { IrisProfile, ProfileRegistry, ProfileSource } from "./profiles.js";
 import { DEFAULT_PROFILE_NAME, resolveProfile } from "./profiles.js";
@@ -106,6 +114,16 @@ export interface ProfileRosterEntry {
    * field exists to convey. See {@link import("./profiles.js").IrisProfile.sourceFile}.
    */
   sourceFile?: string;
+  /**
+   * The profile's effective PHI data policy (Story 39.2): `block`, `redact` or `allow`. A profile
+   * that no channel names reports `redact`.
+   */
+  dataPolicy: DataPolicy;
+  /**
+   * The channel that supplied {@link dataPolicy}: `IRIS_PROFILES`, `IRIS_DATA_POLICY`,
+   * `IRIS_GOVERNANCE_FILE:profiles`, `IRIS_GOVERNANCE_FILE:global` or `default`.
+   */
+  dataPolicySource: DataPolicySource;
 }
 
 /**
@@ -139,7 +157,8 @@ export interface ServerDiscoveryResult {
     policy?: Record<string, boolean>;
     /**
      * Per-key config channel that resolved the single profile's policy (Epic
-     * 32, Story 32.0, AC 32.0.3): `env` | `file` | `preset` | `default`.
+     * 32, Story 32.0, AC 32.0.3): `env` | `file` | `parent` | `preset` | `default`
+     * (`parent`, Story 38.4: the key inherits a disable from its parent key).
      * Emitted UNCONDITIONALLY alongside `policy` (absent only when
      * `allProfiles`), over the SAME visibility-filtered key set — the
      * hidden-tool key omission (Epic 30) applies identically, so no hidden
@@ -194,6 +213,8 @@ export function buildRosterEntry(profile: IrisProfile): ProfileRosterEntry {
     timeout: profile.timeout,
     ...(profile.source !== undefined ? { source: profile.source } : {}),
     ...(profile.sourceFile !== undefined ? { sourceFile: profile.sourceFile } : {}),
+    dataPolicy: effectiveDataPolicy(profile),
+    dataPolicySource: profile.dataPolicySource ?? "default",
   };
 }
 
@@ -230,6 +251,10 @@ export function buildRoster(profiles: ProfileRegistry): ProfileRosterEntry[] {
  *   {@link getEffectiveConfigSources} call so the reported policy + per-key
  *   `configSource` reflect the file layers exactly as the gate does. Default
  *   `undefined` (no file) — byte-for-byte the pre-Epic-32 report's policy.
+ * @param parentKeys - Child key to parent key map (Story 38.4), threaded into every
+ *   {@link getEffectivePolicy}/{@link getEffectiveConfigSources} call so an inherited
+ *   disable is reported (with source `parent`) exactly as the gate enforces it.
+ *   Default empty - byte-for-byte the report without parent keys.
  * @returns The {@link ServerDiscoveryResult}.
  * @throws {ProfileResolutionError} When a requested single `profile` is unknown.
  */
@@ -248,6 +273,7 @@ export function computeServerDiscovery(
     hiddenCount: number;
   } = { preset: "full", visibleCount: 0, hiddenCount: 0 },
   fileConfig?: GovernanceConfig,
+  parentKeys: ParentKeys = new Map(),
 ): ServerDiscoveryResult {
   const roster = buildRoster(profiles);
 
@@ -281,6 +307,7 @@ export function computeServerDiscovery(
           preset,
           classifications,
           fileConfig,
+          parentKeys,
         ),
         enumerable: true,
         writable: true,
@@ -297,6 +324,7 @@ export function computeServerDiscovery(
           preset,
           classifications,
           fileConfig,
+          parentKeys,
         ),
         enumerable: true,
         writable: true,
@@ -320,6 +348,7 @@ export function computeServerDiscovery(
         preset,
         classifications,
         fileConfig,
+        parentKeys,
       ),
       configSource: getEffectiveConfigSources(
         profile.name,
@@ -329,6 +358,7 @@ export function computeServerDiscovery(
         preset,
         classifications,
         fileConfig,
+        parentKeys,
       ),
     };
   }
@@ -388,7 +418,9 @@ export const serverDiscoveryTool: ToolDefinition = {
     "Returns: (1) a profile roster with non-secret connection metadata " +
     "(name, host, port, username, namespace, https, baseUrl, timeout, source " +
     "[\"env\" or \"server-manager\"], sourceFile [the settings file, for " +
-    "server-manager-sourced profiles only]; the password is NEVER included); " +
+    "server-manager-sourced profiles only], dataPolicy [\"block\", \"redact\" or " +
+    "\"allow\": what the profile shows of message bodies], dataPolicySource [the " +
+    "channel that set it]; the password is NEVER included); " +
     "and (2) the effective enabled/disabled action " +
     "map for a selected profile (optional `profile` arg; defaults to the " +
     "`default` profile), or for every profile when `allProfiles: true`. " +

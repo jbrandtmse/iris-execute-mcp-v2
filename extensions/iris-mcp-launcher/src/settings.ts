@@ -19,7 +19,7 @@ export const DEFAULT_PACKAGES: readonly SuitePackageKey[] = [
   "ops",
 ];
 
-const DEFAULT_NAMESPACE = "HSCUSTOM";
+const DEFAULT_NAMESPACE = "USER";
 
 /** Minimal shape of `vscode.WorkspaceConfiguration` this module reads. */
 export interface ConfigReader {

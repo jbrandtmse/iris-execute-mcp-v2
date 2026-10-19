@@ -28,13 +28,14 @@ import { diagnoseSlowQueryPrompt } from "../prompts/diagnoseSlowQuery.js";
  * The prompts this package (iris-dev-mcp) owns per Story 25.1 AC 25.1.1, plus
  * `promote-environment-change` (un-gated in Story 27.4 once `iris_env_diff`/
  * `iris_env_promote` shipped — mirrors the Epic 26 `resend-failed-messages`
- * un-gate precedent).
+ * un-gate precedent), and `edit-and-test-class` (Story 38.6).
  */
 const OWN_PROMPT_NAMES = [
   "diagnose-slow-query",
   "objectscript-review",
   "deploy-and-test-class",
   "promote-environment-change",
+  "edit-and-test-class",
 ];
 
 /** Every prompt name owned by a DIFFERENT package — must never leak here. */
@@ -43,6 +44,7 @@ const FOREIGN_PROMPT_NAMES = [
   "run-external-backup",
   "trace-message-flow",
   "recover-stuck-production",
+  "find-patient-messages",
   "provision-project-environment",
   "audit-security-posture",
 ];
@@ -90,7 +92,7 @@ describe("iris-dev-mcp real server prompts/list (AC 25.1.1, AC 25.0.3)", () => {
     expect(caps.prompts).toEqual({ listChanged: true });
   });
 
-  it("prompts/list returns EXACTLY this package's 4 owned prompt names, nothing else", async () => {
+  it("prompts/list returns EXACTLY this package's 5 owned prompt names, nothing else", async () => {
     const server = makeRealServer();
     const result = await callRequest(server, "prompts/list", {});
     const names = (result.prompts as Array<{ name: string }>).map((p) => p.name).sort();
@@ -103,6 +105,138 @@ describe("iris-dev-mcp real server prompts/list (AC 25.1.1, AC 25.0.3)", () => {
     const names = (result.prompts as Array<{ name: string }>).map((p) => p.name);
     for (const foreign of FOREIGN_PROMPT_NAMES) {
       expect(names).not.toContain(foreign);
+    }
+  });
+});
+
+describe("edit-and-test-class over the real prompts/list and prompts/get (Story 38.6)", () => {
+  /** The rendered text of the single user message `prompts/get` returns. */
+  async function getBody(args: Record<string, string>): Promise<string> {
+    const server = makeRealServer();
+    const result = await callRequest(server, "prompts/get", { name: "edit-and-test-class", arguments: args });
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0].role).toBe("user");
+    expect(result.messages[0].content.type).toBe("text");
+    return result.messages[0].content.text as string;
+  }
+
+  it("is advertised with className and change required, testClass optional, and a title", async () => {
+    const server = makeRealServer();
+    const result = await callRequest(server, "prompts/list", {});
+    const listed = (
+      result.prompts as Array<{
+        name: string;
+        title?: string;
+        arguments?: Array<{ name: string; required?: boolean }>;
+      }>
+    ).find((p) => p.name === "edit-and-test-class");
+    expect(listed?.title).toBe("Edit And Test Class");
+    expect(listed?.arguments?.map((a) => [a.name, a.required === true])).toEqual([
+      ["className", true],
+      ["change", true],
+      ["testClass", false],
+    ]);
+  });
+
+  it("renders one user message with the steps in order when testClass is omitted, telling the model to find the test class or ask", async () => {
+    const body = await getBody({ className: "MyApp.Orders", change: "Rename the Total property to Amount" });
+
+    expect(body).toContain("`MyApp.Orders`");
+    expect(body).toContain("Rename the Total property to Amount");
+    const order = [
+      "`iris_doc_get` with `name: \"MyApp.Orders.cls\"`",
+      "`iris_doc_edit` with `action: \"apply\"`",
+      "`STALE_CONTENT`",
+      "`DOCUMENT_CONFLICT`",
+      "`STORAGE_DROPPED`",
+      "`GOVERNANCE_DISABLED`",
+      "`iris_doc_compile`",
+      "`iris_execute_tests`",
+      "`Test*` methods",
+      "`unifiedDiff`",
+    ].map((needle) => body.indexOf(needle));
+    expect(order.every((index) => index > -1)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(body).toContain("find the test class that covers `MyApp.Orders`");
+    expect(body).toContain("or ask the user");
+  });
+
+  it("names the test class in the test step when testClass is given", async () => {
+    const body = await getBody({
+      className: "MyApp.Orders",
+      change: "Rename the Total property to Amount",
+      testClass: "MyApp.Tests.OrdersTest",
+    });
+
+    expect(body).toContain('`iris_execute_tests` with `target: "MyApp.Tests.OrdersTest"` and `level: "class"`');
+    expect(body).not.toContain("find the test class that covers");
+  });
+
+  it("an explicitly empty testClass renders like an omitted one", async () => {
+    const omitted = await getBody({ className: "MyApp.Orders", change: "x" });
+    const empty = await getBody({ className: "MyApp.Orders", change: "x", testClass: "" });
+    expect(empty).toBe(omitted);
+  });
+});
+
+describe("the PRODUCTION_BUSY note in deploy-and-test-class step 4 and edit-and-test-class step 9 (Story 40.5)", () => {
+  /** The note, character for character: a refusal that names a production, and a refusal whose production state could not be read. */
+  const NOTE =
+    "If the response is a `PRODUCTION_BUSY` refusal, nothing ran. When the refusal has a `production` field, that production is running in the namespace and is not the tests' own: tell the user, and do not stop that production unless the user confirms it is a leftover of an interrupted test run. When its `state` is `Unknown`, the namespace's production state could not be read (the refusal says why): tell the user, run the tests again in a moment, and do not stop any production to make them run.";
+
+  async function getBody(name: string, args: Record<string, string>): Promise<string> {
+    const server = makeRealServer();
+    const result = await callRequest(server, "prompts/get", { name, arguments: args });
+    expect(result.messages).toHaveLength(1);
+    return result.messages[0].content.text as string;
+  }
+
+  /** The numbered step `n` of a rendering, as the one line it is. */
+  function stepOf(body: string, n: number): string {
+    return body.split("\n").find((line) => line.startsWith(`${n}. `)) ?? "";
+  }
+
+  function stepCount(body: string): number {
+    return body.split("\n").filter((line) => /^\d+\. /.test(line)).length;
+  }
+
+  it("deploy-and-test-class step 4 ends with the note, after the call to iris_execute_tests, and the prompt keeps 9 steps", async () => {
+    const body = await getBody("deploy-and-test-class", { classOrPackage: "MyApp.Tests" });
+    const step = stepOf(body, 4);
+    expect(step).toContain("Call `iris_execute_tests` with `target: \"MyApp.Tests\"` and the chosen `level`. If the response is a `PRODUCTION_BUSY` refusal, nothing ran.");
+    expect(step.endsWith(NOTE)).toBe(true);
+    expect(stepCount(body)).toBe(9);
+    expect(body).not.toContain("iris_production_control");
+  });
+
+  it("edit-and-test-class step 9 ends with the note, after the running sentence, with and without a test class, and the prompt keeps 12 steps", async () => {
+    for (const testClass of [undefined, "MyApp.Tests.OrdersTest"]) {
+      const body = await getBody("edit-and-test-class", {
+        className: "MyApp.Orders",
+        change: "Rename the Total property to Amount",
+        ...(testClass === undefined ? {} : { testClass }),
+      });
+      const step = stepOf(body, 9);
+      expect(step.endsWith(NOTE), String(testClass)).toBe(true);
+      expect(step, String(testClass)).toContain(`(that starts a second concurrent run against shared fixtures). ${NOTE}`);
+      expect(stepCount(body), String(testClass)).toBe(12);
+      expect(body, String(testClass)).not.toContain("iris_production_control");
+    }
+  });
+
+  it("in both renderings the note names no tool and no internal reference, and covers the refusal whose production state could not be read", async () => {
+    const renderings = [
+      await getBody("deploy-and-test-class", { classOrPackage: "MyApp.Tests" }),
+      await getBody("edit-and-test-class", { className: "MyApp.Orders", change: "x" }),
+    ];
+    for (const body of renderings) {
+      const note = body.slice(body.indexOf("If the response is a `PRODUCTION_BUSY` refusal"));
+      const rendered = note.split("\n")[0] ?? "";
+      expect(rendered.length).toBeGreaterThan(0);
+      expect(rendered).not.toMatch(/\biris_/);
+      expect(rendered).not.toMatch(/Rule #|DW-\d|AD-\d|packages\//);
+      expect(rendered).toContain("When its `state` is `Unknown`, the namespace's production state could not be read (the refusal says why)");
+      expect(rendered).toContain("do not stop any production to make them run.");
     }
   });
 });

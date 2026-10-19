@@ -451,4 +451,35 @@ Method TestAddSettingsClassNameOverrideIsGuarded() As %Status
     Quit $$$OK
 }
 
+/// DW-450 - a 'get' WITHOUT 'production' resolves the item from whichever production's row the
+/// extent yields first when the name exists in more than one production. The response now names
+/// that production so the caller is never left guessing which item it read. Here both fixture
+/// productions carry <code>FixtureOp</code>: the echoed <code>production</code> must be one of
+/// them, and a production-scoped 'get' of THAT production must return the same row (same
+/// production, same comment) - so the echo is the production the fields actually came from.
+Method TestGetOmittedProductionEchoesProduction() As %Status
+{
+    Set tBasePath = "/api/executemcp/v2/interop/production/item"
+    Set tNS = $NAMESPACE
+
+    Set tGetBody = "{""action"":""get"",""itemName"":"""_..#ITEMNAME_""",""namespace"":"""_tNS_"""}"
+    Set tSC = ..PostJson(tBasePath, tGetBody, .tHttp, .tEnv)
+    Do $$$AssertStatusOK(tSC, "the 'get' without 'production' HTTP call must succeed")
+    If $$$ISERR(tSC) Quit $$$OK
+    Do $$$AssertEquals(tHttp, 200, "'get' without 'production' HTTP 200")
+    Do $$$AssertEquals(..EnvelopeErrorCount(tEnv), 0, "'get' without 'production' carries no errors")
+    Set tProduction = tEnv.result.production
+    Set tComment = $Select(tEnv.result.%IsDefined("comment"): tEnv.result.comment, 1: "")
+    Do $$$AssertTrue((tProduction = ..#PROD1) || (tProduction = ..#PROD2), "the echoed production is one of the two fixture productions (got: " _ tProduction _ ")")
+
+    Set tScopedBody = "{""action"":""get"",""itemName"":"""_..#ITEMNAME_""",""production"":"""_tProduction_""",""namespace"":"""_tNS_"""}"
+    Set tSC = ..PostJson(tBasePath, tScopedBody, .tHttp, .tEnv)
+    Do $$$AssertStatusOK(tSC, "the production-scoped 'get' HTTP call must succeed")
+    If $$$ISERR(tSC) Quit $$$OK
+    Do $$$AssertEquals(tEnv.result.production, tProduction, "a production-scoped 'get' reports the same production field")
+    Set tScopedComment = $Select(tEnv.result.%IsDefined("comment"): tEnv.result.comment, 1: "")
+    Do $$$AssertEquals(tScopedComment, tComment, "the unscoped 'get' read the same row the production-scoped 'get' returns for the echoed production")
+    Quit $$$OK
+}
+
 }

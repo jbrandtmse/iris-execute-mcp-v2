@@ -5,7 +5,7 @@
  * FR107: iris_debug_terminal — IRIS terminal via WebSocket
  *
  * These tools are deferred to post-MVP and will require WebSocket
- * transport support (not available in current MCP stdio/HTTP transports).
+ * transport support (not available over the stdio transport).
  *
  * When implemented, these tools will be added to the tools array in
  * tools/index.ts and registered with the MCP server.

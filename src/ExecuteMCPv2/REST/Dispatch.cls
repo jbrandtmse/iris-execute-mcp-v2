@@ -119,6 +119,12 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/interop/message/resend" Method="POST" Call="ExecuteMCPv2.REST.MessageResend:MessageResend" />
   <Route Url="/interop/message/resend/preview" Method="POST" Call="ExecuteMCPv2.REST.MessageResend:MessageResendPreview" />
 
+  <!-- Epic 39 (Story 39.1): Interoperability message header search -->
+  <Route Url="/interop/message/search" Method="POST" Call="ExecuteMCPv2.REST.MessageSearch:MessageSearch" />
+
+  <!-- Epic 39 (Story 39.5): Interoperability message body reader -->
+  <Route Url="/interop/message/body" Method="POST" Call="ExecuteMCPv2.REST.MessageBody:MessageBody" />
+
   <!-- Epic 5: Credentials and Lookup Tables -->
   <Route Url="/interop/credential" Method="GET" Call="ExecuteMCPv2.REST.Interop:CredentialList" />
   <Route Url="/interop/credential" Method="POST" Call="ExecuteMCPv2.REST.Interop:CredentialManage" />
@@ -177,6 +183,17 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
 
   <!-- Epic 28 (Story 28.1): SQL Performance Advisor - Data Endpoint -->
   <Route Url="/dev/sql/advise-data" Method="POST" Call="ExecuteMCPv2.REST.SqlAdvisor:AdviseData" />
+
+  <!-- Epic 38 (Story 38.5): SQL write safety - classified, transactional SQL execution -->
+  <Route Url="/dev/sql/execute" Method="POST" Call="ExecuteMCPv2.REST.Sql:Execute" />
+
+  <!-- Epic 40 (Story 40.1): line coverage - start, status and cancel of a job-owned coverage run -->
+  <Route Url="/dev/test/coverage" Method="POST" Call="ExecuteMCPv2.REST.Coverage:Start" />
+  <Route Url="/dev/test/coverage" Method="GET" Call="ExecuteMCPv2.REST.Coverage:Status" />
+  <Route Url="/dev/test/coverage/cancel" Method="POST" Call="ExecuteMCPv2.REST.Coverage:Cancel" />
+
+  <!-- Epic 40 (Story 40.3): TestProduction guard - may a run that includes TestProduction tests go ahead? -->
+  <Route Url="/dev/test/production" Method="GET" Call="ExecuteMCPv2.REST.UnitTest:ProductionCheck" />
 </Routes>
 }
 

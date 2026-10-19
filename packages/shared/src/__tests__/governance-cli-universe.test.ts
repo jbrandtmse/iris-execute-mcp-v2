@@ -27,6 +27,7 @@ import { runCli, type CliDeps, type LoadedPackage } from "../cli/governance.js";
 import {
   buildDefaultEnabledWrites,
   buildMutatesLookup,
+  buildParentKeys,
   getEffectiveConfigSources,
   getEffectivePolicy,
 } from "../governance.js";
@@ -150,7 +151,7 @@ describe("universe — full-universe render over the real built dist", { timeout
     // Every value is from the real domains.
     for (const value of Object.values(json.policy)) expect(typeof value).toBe("boolean");
     for (const source of Object.values(json.configSource)) {
-      expect(["env", "file", "preset", "default"]).toContain(source);
+      expect(["env", "file", "parent", "preset", "default"]).toContain(source);
     }
     for (const cls of Object.values(json.mutates)) expect(["read", "write"]).toContain(cls);
 
@@ -222,6 +223,7 @@ describe("universe — full-universe render over the real built dist", { timeout
     const oracleTools = [...oraclePackages.flatMap((pkg) => pkg.tools), serverDiscoveryTool];
     const mutatesLookup = buildMutatesLookup(oracleTools);
     const defaultEnabledWrites = buildDefaultEnabledWrites(oracleTools);
+    const parentKeys = buildParentKeys(oracleTools);
 
     const expectedPolicy = getEffectivePolicy(
       "default",
@@ -233,6 +235,7 @@ describe("universe — full-universe render over the real built dist", { timeout
       undefined,
       BASELINE_ACTION_CLASSIFICATIONS,
       undefined,
+      parentKeys,
     );
     const expectedSources = getEffectiveConfigSources(
       "default",
@@ -242,10 +245,56 @@ describe("universe — full-universe render over the real built dist", { timeout
       undefined,
       BASELINE_ACTION_CLASSIFICATIONS,
       undefined,
+      parentKeys,
     );
 
     expect(json.policy).toEqual(expectedPolicy);
     expect(json.configSource).toEqual(expectedSources);
+  });
+
+  it("agrees with the same direct render when the parent of a child key is disabled, and reports the parent source for the child's keys only", async () => {
+    const env = { IRIS_GOVERNANCE: JSON.stringify({ global: { iris_doc_put: false } }) };
+    const { code, json } = await runUniverseJson([], env);
+    expect(code).toBe(0);
+
+    const oraclePackages = await loadOracleTools();
+    const oracleTools = [...oraclePackages.flatMap((pkg) => pkg.tools), serverDiscoveryTool];
+    const parentKeys = buildParentKeys(oracleTools);
+    expect(
+      parentKeys.size,
+      "no built server dist declares a parent key: the dists predate Story 38.4, so rebuild them (pnpm turbo run build)",
+    ).toBeGreaterThan(0);
+
+    const expectedPolicy = getEffectivePolicy(
+      "default",
+      { global: { iris_doc_put: false } },
+      json.keys,
+      buildMutatesLookup(oracleTools),
+      GOVERNANCE_BASELINE,
+      buildDefaultEnabledWrites(oracleTools),
+      undefined,
+      BASELINE_ACTION_CLASSIFICATIONS,
+      undefined,
+      parentKeys,
+    );
+    expect(json.policy).toEqual(expectedPolicy);
+
+    // Derived from the real dist, never hand-picked: every key of a tool whose parent is the disabled
+    // `iris_doc_put` reports `parent`, and no other key does (a child of another parent stays enabled).
+    const inherited = Object.entries(json.configSource)
+      .filter(([, source]) => source === "parent")
+      .map(([key]) => key)
+      .sort();
+    const childrenOfDocPut = [...parentKeys.entries()]
+      .filter(([, parent]) => parent === "iris_doc_put")
+      .map(([key]) => key)
+      .sort();
+    expect(childrenOfDocPut.length).toBeGreaterThan(0);
+    expect(inherited).toEqual(childrenOfDocPut);
+    for (const key of inherited) expect(json.policy[key], key).toBe(false);
+    for (const [key, parent] of parentKeys) {
+      if (parent !== "iris_doc_put") expect(json.policy[key], key).toBe(true);
+    }
   });
 });
 

@@ -22,13 +22,13 @@ This installs all five servers:
 
 | Package | Domain | Tools | Description |
 |---------|--------|------:|-------------|
-| [@iris-mcp/dev](../iris-dev-mcp/README.md) | Development | 29 | ObjectScript document CRUD, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis and performance advisories, lines-of-code metrics, cross-profile environment diff & promotion, long-running test-run re-attach/read/cancel |
+| [@iris-mcp/dev](../iris-dev-mcp/README.md) | Development | 32 | ObjectScript document CRUD, guarded surgical line edits of existing documents, compilation, SQL, globals, code execution, unit tests, package browsing, bulk export, macro-expanded routine lookup, SQL query analysis and performance advisories, lines-of-code metrics, cross-profile environment diff & promotion, long-running test-run re-attach/read/cancel, line coverage of a test run (disabled by default) |
 | [@iris-mcp/admin](../iris-admin-mcp/README.md) | Administration | 26 | Namespace, database, user, role, resource (incl. SQL privileges), web-app, SSL/TLS, OAuth2, service, LDAP, X.509, and audit management |
-| [@iris-mcp/interop](../iris-interop-mcp/README.md) | Interoperability | 22 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms, message-trace Mermaid diagrams, message resend/replay |
+| [@iris-mcp/interop](../iris-interop-mcp/README.md) | Interoperability | 24 | Ensemble/Health Connect production lifecycle, production item management, system default settings, credentials, lookups, rules, transforms, message-trace Mermaid diagrams, message header, body content and Search Table search (`iris_message_search`, read-only; the body and searchTable actions are refused under the `block` data policy), message body reading (`iris_message_body`, a read under the data policy), message resend/replay |
 | [@iris-mcp/ops](../iris-ops-mcp/README.md) | Operations & Monitoring | 21 | Composite health check (`iris_health_check`), system metrics, jobs, locks, journals, mirrors, audit, database integrity, licensing, ECP, tasks, alert management, process control, database maintenance operations, backups |
 | [@iris-mcp/data](../iris-data-mcp/README.md) | Data & Analytics | 7 | DocDB document database, DeepSee analytics (MDX/cubes), REST API management |
 
-> **105 tools** across 5 servers. Each server additionally provides the framework tool `iris_server_profiles` (so each advertises one more than its package total).
+> **110 tools** across 5 servers. Each server additionally provides the framework tool `iris_server_profiles` (so each advertises one more than its package total).
 
 ### Discover profiles & policy first
 
@@ -36,13 +36,13 @@ Every server provides a framework tool, **`iris_server_profiles`** — call it *
 
 ### Tool Visibility (`IRIS_TOOLS_PRESET`)
 
-Every server in this suite supports `IRIS_TOOLS_PRESET`/`IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` to trim what it advertises on `tools/list` — orthogonal to governance (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). `core` is the small-model everyday subset (≤13 runtime tools per server); `developer` hides security & enterprise administration. Default (`full`, unset) is today's behavior for every server, byte-for-byte.
+Every server in this suite supports `IRIS_TOOLS_PRESET`/`IRIS_TOOLS_DISABLE`/`IRIS_TOOLS_ENABLE` to trim what it advertises on `tools/list` — orthogonal to governance (visibility = does the agent know a tool exists; governance = is an already-visible call allowed). `core` is the small-model everyday subset (about 13 runtime tools per server, a guideline: `@iris-mcp/dev` has 14); `developer` hides security & enterprise administration. Default (`full`, unset) is today's behavior for every server, byte-for-byte.
 
 | Server | full (runtime) | core (runtime) | developer (runtime) |
 |---|:---:|:---:|:---:|
-| `@iris-mcp/dev` | 30 | 13 | 30 |
+| `@iris-mcp/dev` | 33 | 15 | 33 |
 | `@iris-mcp/admin` | 27 | 13 | 11 |
-| `@iris-mcp/interop` | 23 | 10 | 23 |
+| `@iris-mcp/interop` | 25 | 12 | 25 |
 | `@iris-mcp/ops` | 22 | 10 | 10 |
 | `@iris-mcp/data` | 8 | 8 | 8 |
 

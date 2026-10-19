@@ -44,6 +44,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
 import type { BootstrapResult } from "../bootstrap.js";
+import { makeEnvHarness } from "./env-harness.js";
 
 // A successful, no-op bootstrap result (REST service already current). Mirrors
 // the shape used across the profile / enforcement / resource suites.
@@ -169,53 +170,11 @@ function makeWrappedActionTool(
   };
 }
 
-/** Shared environment save/restore for hermetic runs (no env leak across suites). */
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv = {
-    IRIS_USERNAME: process.env.IRIS_USERNAME,
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD,
-    IRIS_HOST: process.env.IRIS_HOST,
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
-    IRIS_PROFILES: process.env.IRIS_PROFILES,
-    IRIS_GOVERNANCE: process.env.IRIS_GOVERNANCE,
-  };
-
-  function setup(): void {
-    bootstrapSpy.mockClear();
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    delete process.env.IRIS_GOVERNANCE;
-    delete process.env.IRIS_PROFILES;
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-  };
-}
+/** The shared env harness, with this file's bootstrap spy reset on every setup. */
+const ENV_OPTIONS = {
+  onSetup: () => bootstrapSpy.mockClear(),
+  connection: "unset",
+} as const;
 
 /** Stage the default profile's startup HEAD (health) + GET (version) responses. */
 function stageDefaultStartup(fetchMock: ReturnType<typeof vi.fn>): void {
@@ -238,7 +197,7 @@ function setDefaultEnv(): void {
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 15.0 — wrapped action enum governs per-action through the live gate", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -343,7 +302,7 @@ describe("Story 15.0 — wrapped action enum governs per-action through the live
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 15.0 — wrapped action enum surfaces per-action keys in the advisory resource", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -420,7 +379,7 @@ describe("Story 15.0 — wrapped action enum surfaces per-action keys in the adv
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 15.0 — absent wrapped action falls back to the bare-tool key (no tool:undefined)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -575,7 +534,7 @@ describe("Story 15.0 — absent wrapped action falls back to the bare-tool key (
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 15.0 — registration assertion fires for a realistic unclassified write tool", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 

@@ -21,7 +21,7 @@
 
 import { describe, it, expect } from "vitest";
 import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadAllPrompts } from "../../../../scripts/lib/prompt-catalog.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -45,6 +45,14 @@ async function findPrompt(name: string): Promise<LoadedPrompt> {
     throw new Error(`Prompt "${name}" not found among registered prompts.`);
   }
   return found;
+}
+
+/** The text of step `n` of a rendering: from its number to the next step's. */
+function stepText(body: string, n: number): string {
+  const from = body.indexOf(`\n${n}. `);
+  const to = body.indexOf(`\n${n + 1}. `);
+  expect(from, `step ${n} exists`).toBeGreaterThan(-1);
+  return body.slice(from, to === -1 ? undefined : to);
 }
 
 describe("recover-stuck-production — recover-first / clean-last-resort / killAppData double-gate (Epic-20 escalation ladder)", () => {
@@ -332,6 +340,437 @@ describe("objectscript-review — <=300 word rendered body (AC 25.1.1)", () => {
       "iris_execute_tests",
     ]) {
       expect(body).toContain(marker);
+    }
+  });
+});
+
+describe("edit-and-test-class and deploy-and-test-class - the in-place edit loop (Story 38.6)", () => {
+  const EDIT_ARGS = { className: "MyApp.Orders", change: "Rename a property", testClass: "MyApp.Tests.OrdersTest" };
+  const OMITTED_ARGS = { className: "MyApp.Orders", change: "Rename a property" };
+
+  /** Every rendering of the two prompts: all arguments given, an optional one omitted, and the skill form. */
+  async function renderings(): Promise<Array<{ label: string; body: string }>> {
+    const edit = (await findPrompt("edit-and-test-class")).prompt;
+    const deploy = (await findPrompt("deploy-and-test-class")).prompt;
+    return [
+      { label: "edit-and-test-class (all arguments)", body: edit.build(EDIT_ARGS) },
+      { label: "edit-and-test-class (testClass omitted)", body: edit.build(OMITTED_ARGS) },
+      { label: "edit-and-test-class (skill form)", body: edit.build({}) },
+      { label: "deploy-and-test-class", body: deploy.build({ classOrPackage: "MyApp.MyClass" }) },
+      { label: "deploy-and-test-class (skill form)", body: deploy.build({}) },
+    ];
+  }
+
+  it("edit-and-test-class is a dev prompt that reads a range, edits with expected, compiles, tests and checks the total, in that order", async () => {
+    const { pkg, prompt } = await findPrompt("edit-and-test-class");
+    expect(pkg).toBe("iris-dev-mcp");
+    for (const args of [EDIT_ARGS, OMITTED_ARGS, {}]) {
+      const body = prompt.build(args);
+      const steps = [
+        "`startLine` / `endLine`",
+        "`iris_doc_edit` with `action: \"apply\"`",
+        "`iris_doc_compile`",
+        "`iris_execute_tests`",
+        "number of `Test*` methods",
+        "`unifiedDiff`",
+      ];
+      const at = steps.map((step) => body.indexOf(step));
+      expect(at.every((index) => index > -1), JSON.stringify(args)).toBe(true);
+      expect([...at].sort((a, b) => a - b), JSON.stringify(args)).toEqual(at);
+      expect(body.indexOf("`iris_doc_get`")).toBeLessThan(body.indexOf("`iris_doc_edit`"));
+    }
+  });
+
+  it("builds expected from the read's lines with a line break after every line, the last included", async () => {
+    const { prompt } = await findPrompt("edit-and-test-class");
+    const body = prompt.build(OMITTED_ARGS);
+    expect(body).toContain("Build each edit's `expected` from the read's `lines`");
+    expect(body).toContain("every line followed by a line break");
+    expect(body).toContain("the last line included");
+  });
+
+  it("on STALE_CONTENT passes mismatches[].current back as expected when the change still applies, else re-reads", async () => {
+    const { prompt } = await findPrompt("edit-and-test-class");
+    const body = prompt.build(OMITTED_ARGS);
+    expect(body).toContain("`STALE_CONTENT`");
+    expect(body).toContain("Pass each `mismatches[].current` back as that edit's `expected`, unchanged");
+    expect(body).toContain("once your change still applies to that text; otherwise read the lines again");
+  });
+
+  it("never regenerates Storage unless the user explicitly asks, and says why", async () => {
+    const { prompt } = await findPrompt("edit-and-test-class");
+    const body = prompt.build(OMITTED_ARGS);
+    expect(body).toContain("`STORAGE_DROPPED`");
+    expect(body).toContain("keep the Storage lines");
+    expect(body).toMatch(/Never use action `regenerateStorage` unless the user explicitly asks/);
+    expect(body).toContain("disabled by default");
+    // The only mention of the override is the prohibition.
+    expect(body.match(/regenerateStorage/g)).toHaveLength(1);
+  });
+
+  it("stops on GOVERNANCE_DISABLED, re-reads on DOCUMENT_CONFLICT, and warns that a local source file is now stale", async () => {
+    const { prompt } = await findPrompt("edit-and-test-class");
+    const body = prompt.build(OMITTED_ARGS);
+    expect(body).toMatch(/`GOVERNANCE_DISABLED` refusal[^.]*stop and tell the user/);
+    expect(body).toMatch(/`DOCUMENT_CONFLICT` refusal[^.]*read the lines again/);
+    expect(body).toContain("out of date because the edit was made in IRIS");
+    expect(body).toContain("loading that file again would overwrite the edit");
+  });
+
+  it("on a running test result follows the hint and never re-submits; a short total is rerun", async () => {
+    const { prompt } = await findPrompt("edit-and-test-class");
+    const body = prompt.build(OMITTED_ARGS);
+    expect(body).toContain('`status: "running"`');
+    expect(body).toContain("follow the response's `hint`");
+    expect(body).toContain("never re-submit the same target");
+    expect(body).toContain("compare the returned `total` against the number of `Test*` methods");
+    expect(body).toContain("rerun `iris_execute_tests` if `total` is short");
+  });
+
+  it("names the test class when given, and otherwise tells the model to find it or ask", async () => {
+    const { prompt } = await findPrompt("edit-and-test-class");
+    expect(prompt.build(EDIT_ARGS)).toContain('`target: "MyApp.Tests.OrdersTest"`');
+    const omitted = prompt.build(OMITTED_ARGS);
+    expect(omitted).toContain("find the test class that covers `MyApp.Orders`");
+    expect(omitted).toContain("or ask the user which test class to run");
+  });
+
+  it("every iris_* token of edit-and-test-class is a dev core tool, and of deploy-and-test-class a dev core tool, iris_test_status or iris_test_coverage", async () => {
+    const presets = (await import(
+      pathToFileURL(resolve(root, "packages/iris-dev-mcp/dist/tools/presets.js")).href
+    )) as { toolPresets: { core: { include: string[] } } };
+    const core = new Set(presets.toolPresets.core.include);
+    const withTestStatus = new Set([...core, "iris_test_status", "iris_test_coverage"]);
+    expect(core.has("iris_doc_edit")).toBe(true);
+    expect(core.has("iris_test_status")).toBe(false);
+    expect(core.has("iris_test_coverage"), "the coverage tool is outside core, which is why step 8 tells the model what to do when it is hidden").toBe(false);
+
+    for (const { label, body } of await renderings()) {
+      const allowed = label.startsWith("edit-and-test-class") ? core : withTestStatus;
+      const tokens = [...new Set(body.match(/\biris_[a-z_]+/g) ?? [])];
+      expect(tokens.length, label).toBeGreaterThan(0);
+      expect(
+        tokens.filter((token) => !allowed.has(token)),
+        label,
+      ).toEqual([]);
+    }
+  });
+
+  it("carries no internal rule number and no repository path", async () => {
+    for (const { label, body } of await renderings()) {
+      expect(body, label).not.toMatch(/Rule #\d/);
+      expect(body, label).not.toMatch(/iris-execute-mcp-v2|packages\/|_bmad|\.claude|node_modules|research\/|deferred-work|spec-\d/);
+    }
+  });
+
+  it("deploy-and-test-class sends the manual %UnitTest_Result query to iris_sql_query, never iris_sql_execute", async () => {
+    const { prompt } = await findPrompt("deploy-and-test-class");
+    const body = prompt.build({ classOrPackage: "MyApp.MyClass" });
+    expect(body).toContain("`iris_sql_query` (with `parameters: [<runIndex>]`) joining `%UnitTest_Result.TestMethod`");
+    expect(body).toContain("`WHERE ti.InstanceIndex = ?`");
+    expect(body).not.toContain("InstanceIndex = <runIndex>");
+    expect(body).not.toContain("iris_sql_execute");
+  });
+
+  it("deploy-and-test-class fixes a class that has no local source in place, and keeps the disk route for the rest", async () => {
+    const { prompt } = await findPrompt("deploy-and-test-class");
+    const body = prompt.build({ classOrPackage: "MyApp.MyClass" });
+    expect(body).toContain("fix the SOURCE `.cls` file on disk (never edit generated/compiled output)");
+    expect(body).toContain("A class that has no local source file (it exists only in IRIS) is fixed in place instead");
+    expect(body).toContain("ranged `iris_doc_get`");
+    expect(body).toContain("`iris_doc_edit`");
+    expect(body).toContain("`iris_doc_compile`");
+    expect(body).toContain("`edit-and-test-class`");
+    expect(body).toContain(
+      "Repeat until `iris_doc_load` (or `iris_doc_compile`, for a class fixed in place) reports zero compile errors.",
+    );
+  });
+});
+
+describe("trace-message-flow and find-patient-messages - the message forensic loop (Story 39.6)", () => {
+  const TRACE_ARGS = { sessionOrHeaderId: "7", namespace: "USER" };
+  const FIND_ARGS = {
+    patientId: "X",
+    from: "2001-02-03T00:00:00Z",
+    to: "2001-02-04T00:00:00Z",
+    searchTableClass: "EnsLib.HL7.SearchTable",
+    namespace: "USER",
+  };
+
+  /** Every rendering of the two prompts: all arguments given, optional ones omitted, and the skill form. */
+  async function renderings(): Promise<Array<{ label: string; name: string; body: string }>> {
+    const trace = (await findPrompt("trace-message-flow")).prompt;
+    const find = (await findPrompt("find-patient-messages")).prompt;
+    return [
+      { label: "trace-message-flow (all arguments)", name: "trace-message-flow", body: trace.build(TRACE_ARGS) },
+      { label: "trace-message-flow (namespace omitted)", name: "trace-message-flow", body: trace.build({ sessionOrHeaderId: "7" }) },
+      { label: "trace-message-flow (skill form)", name: "trace-message-flow", body: trace.build({}) },
+      { label: "find-patient-messages (all arguments)", name: "find-patient-messages", body: find.build(FIND_ARGS) },
+      { label: "find-patient-messages (patientId only)", name: "find-patient-messages", body: find.build({ patientId: "X" }) },
+      { label: "find-patient-messages (skill form)", name: "find-patient-messages", body: find.build({}) },
+    ];
+  }
+
+  /** Assert each marker is present and the markers appear in the given order. */
+  function expectOrdered(label: string, body: string, markers: string[]): void {
+    const at = markers.map((marker) => body.indexOf(marker));
+    markers.forEach((marker, i) => expect(at[i], `${label}: "${marker}" not found`).toBeGreaterThan(-1));
+    expect([...at].sort((a, b) => a - b), label).toEqual(at);
+  }
+
+  it("both prompts belong to the interop package", async () => {
+    expect((await findPrompt("trace-message-flow")).pkg).toBe("iris-interop-mcp");
+    expect((await findPrompt("find-patient-messages")).pkg).toBe("iris-interop-mcp");
+  });
+
+  it("trace-message-flow runs messages, header search, body read, diagram, logs and the summary, in that order", async () => {
+    for (const { label, name, body } of await renderings()) {
+      if (name !== "trace-message-flow") continue;
+      expectOrdered(label, body, [
+        "1. Call `iris_production_messages`",
+        "2. Call `iris_message_search`",
+        "3. Call `iris_message_body`",
+        "4. Call `iris_message_diagram`",
+        "5. For every step flagged as an error",
+        "`iris_production_logs`",
+        "6. Summarize the failure point",
+      ]);
+    }
+  });
+
+  it("every trace-message-flow rendering reports the reason for withheld error and log text and never reads either another way", async () => {
+    let checked = 0;
+    for (const { label, name, body } of await renderings()) {
+      if (name !== "trace-message-flow") continue;
+      expect(body, label).toContain("never read the error text another way");
+      expect(body, label).toContain("never read the log text another way");
+      expect(body, label).toContain("give its reason instead of the text");
+      checked += 1;
+    }
+    expect(checked).toBe(3);
+  });
+
+  it("find-patient-messages checks the policy, fixes the window, searches the Search Table, lists, reads, diagrams and reports, in that order", async () => {
+    for (const { label, name, body } of await renderings()) {
+      if (name !== "find-patient-messages") continue;
+      expectOrdered(label, body, [
+        "1. Call `iris_server_profiles`",
+        "2. Fix the search window",
+        '3. Call `iris_message_search` with `action: "searchTable"`',
+        "4. List the matching rows",
+        "5. Only when the user wants the content, call `iris_message_body`",
+        "6. Optionally call `iris_message_diagram`",
+        "7. Report the messages found",
+      ]);
+    }
+  });
+
+  it("find-patient-messages pins the block refusal, the 7-day window, the no-other-route rule and tighten-only dataPolicy", async () => {
+    for (const { label, name, body } of await renderings()) {
+      if (name !== "find-patient-messages") continue;
+      expect(body, label).toContain('`action: "searchTable"`');
+      expect(body, label).toContain("`DATA_POLICY_BLOCKED`");
+      expect(body, label).toContain("Do not look the patient up another way");
+      expect(body, label).toContain("at most 7 days");
+      expect(body, label).toContain("never search without a window");
+      expect(body, label).toContain("never read a withheld body another way");
+      expect(body, label).toContain("can only tighten the profile's policy");
+      expect(body, label).toContain("`dataPolicyClamped`");
+      expect(body, label).toContain("`notApplicable`");
+      expect(body, label).toContain("does not prove that no message holds the value");
+    }
+  });
+
+  it("neither prompt tells the agent to loosen the policy or to read a withheld body another way", async () => {
+    for (const { label, body } of await renderings()) {
+      expect(body, label).not.toMatch(/dataPolicy"?\s*[:=]\s*"?allow/i);
+      expect(body, label).not.toMatch(/set\s+`?dataPolicy`?\s+to\s+`?allow/i);
+      expect(body, label).not.toMatch(/IRIS_DATA_POLICY/);
+      expect(body, label).toContain("another way");
+    }
+  });
+
+  it("every iris_* token of both prompts is an interop core tool or iris_server_profiles", async () => {
+    const presets = (await import(
+      pathToFileURL(resolve(root, "packages/iris-interop-mcp/dist/tools/presets.js")).href
+    )) as { toolPresets: { core: { include: string[] } } };
+    const allowed = new Set([...presets.toolPresets.core.include, "iris_server_profiles"]);
+    expect(allowed.has("iris_message_body")).toBe(true);
+    expect(allowed.has("iris_message_search")).toBe(true);
+
+    for (const { label, body } of await renderings()) {
+      const tokens = [...new Set(body.match(/\biris_[a-z_]+/g) ?? [])];
+      expect(tokens.length, label).toBeGreaterThan(0);
+      expect(
+        tokens.filter((token) => !allowed.has(token)),
+        label,
+      ).toEqual([]);
+    }
+  });
+
+  it("carries no internal rule number and no repository path", async () => {
+    for (const { label, body } of await renderings()) {
+      expect(body, label).not.toMatch(/Rule #\d/);
+      expect(body, label).not.toMatch(/iris-execute-mcp-v2|packages\/|_bmad|\.claude|node_modules|research\/|deferred-work|spec-\d/);
+    }
+  });
+});
+
+describe("deploy-and-test-class - the optional coverage step and the PRODUCTION_BUSY note (Story 40.4)", () => {
+  /** Both renderings of the prompt: with its argument, and the skill form. */
+  async function deployRenderings(): Promise<Array<{ label: string; body: string }>> {
+    const { prompt } = await findPrompt("deploy-and-test-class");
+    return [
+      { label: "deploy-and-test-class", body: prompt.build({ classOrPackage: "MyApp.MyClass" }) },
+      { label: "deploy-and-test-class (skill form)", body: prompt.build({}) },
+    ];
+  }
+
+  it("keeps its name, title and one required argument, and its description gains the coverage clause", async () => {
+    const { pkg, prompt } = await findPrompt("deploy-and-test-class");
+    expect(pkg).toBe("iris-dev-mcp");
+    expect(prompt.title).toBe("Deploy And Test Class");
+    expect((prompt as unknown as { arguments: Array<{ name: string; required: boolean }> }).arguments.map((a) => [a.name, a.required])).toEqual([
+      ["classOrPackage", true],
+    ]);
+    expect(prompt.description).toBe(
+      "Deploy an ObjectScript class or package to IRIS (iris_doc_load, glob-path form), fix compile errors, then run its unit tests " +
+        "(iris_execute_tests) with a total-count check and, when asked, measure their line coverage (iris_test_coverage).",
+    );
+  });
+
+  it("step 4 tells the model what a PRODUCTION_BUSY refusal means, to tell the user, and not to stop that production without confirmation", async () => {
+    for (const { label, body } of await deployRenderings()) {
+      const step = stepText(body, 4);
+      expect(step, label).toContain("If the response is a `PRODUCTION_BUSY` refusal, nothing ran");
+      expect(step, label).toContain("When the refusal has a `production` field, that production is running in the namespace and is not the tests' own");
+      expect(step, label).toContain("tell the user, and do not stop that production unless the user confirms it is a leftover of an interrupted test run.");
+    }
+  });
+
+  it("step 8 is the optional coverage step, only on the user's request and once the tests pass, and step 9 reports", async () => {
+    for (const { label, body } of await deployRenderings()) {
+      const at = ["\n7. ", "\n8. Optional", "\n9. Report"].map((marker) => body.indexOf(marker));
+      expect(at.every((index) => index > -1), label).toBe(true);
+      expect([...at].sort((a, b) => a - b), label).toEqual(at);
+      const step = stepText(body, 8);
+      expect(step, label).toContain("only when the user asks how much of the code the tests cover or gives a coverage target, and once the tests pass");
+      expect(step, label).toContain("call `iris_test_coverage` with the same `target` and `level`");
+      expect(step, label).toContain("(not the test classes; at most 50)");
+      expect(step, label).toContain("`minCoverage` set to the user's target when there is one");
+      expect(stepText(body, 9), label).toContain("and the coverage, when it was measured");
+    }
+  });
+
+  it("step 8 copes with a hidden tool and with a GOVERNANCE_DISABLED, MONITOR_BUSY and PRODUCTION_BUSY refusal, and never works around one", async () => {
+    for (const { label, body } of await deployRenderings()) {
+      const step = stepText(body, 8);
+      expect(step, label).toContain("If `iris_test_coverage` is not in your tool list, the tool-visibility preset hides it (it is outside `core`)");
+      expect(step, label).toContain("`IRIS_TOOLS_PRESET`");
+      expect(step, label).toContain("If it is refused with `GOVERNANCE_DISABLED`, it is disabled by default because it starts an instance-wide monitor and runs test code");
+      expect(step, label).toContain('`{"global":{"iris_test_coverage":true}}`');
+      expect(step, label).toContain("do not measure coverage another way");
+      expect(step, label).toContain("If it is refused with `MONITOR_BUSY`, another monitor session is running on the instance (its `owner` says whose) and nothing was started");
+      expect(step, label).toContain("never stop that session");
+      expect(step, label).toContain("If it is refused with `PRODUCTION_BUSY`, handle it as in step 4.");
+      expect(body, label).not.toContain("iris_production_control");
+    }
+  });
+
+  it("step 8 polls a running coverage run by its coverageRunId and never re-submits, reports a failing verdict as a result, and exports only to a path the user chose", async () => {
+    for (const { label, body } of await deployRenderings()) {
+      const step = stepText(body, 8);
+      expect(step, label).toContain('If the response has `status: "running"`, do NOT re-submit');
+      expect(step, label).toContain('call `iris_test_status` with `action: "poll"` and the response\'s `coverageRunId` until it completes');
+      expect(step, label).toContain("(a failing verdict is a result, not a tool error)");
+      expect(step, label).toContain('`action: "export"`, the `coverageRunId` and an absolute `outputPath` ending in `.xml` that the user chose');
+      expect(step, label).toContain("export is disabled by default too (`iris_test_status:export`), so handle a `GOVERNANCE_DISABLED` refusal the same way.");
+    }
+  });
+
+  it("step 8 gives the remedy for a class a documentation-only edit left not-up-to-date: a forced compile, then measure again", async () => {
+    for (const { label, body } of await deployRenderings()) {
+      const step = stepText(body, 8);
+      expect(step, label).toContain(
+        'A class reported `not-up-to-date` after a documentation-only edit (a comment or a `///` line) needs a forced compile before it can be measured: call `iris_doc_compile` on it with `flags: "ck"`, then call `iris_test_coverage` again.',
+      );
+    }
+  });
+
+  it("every other step is the 38.6 text: step 2 keeps its number and its in-place fix route", async () => {
+    for (const { label, body } of await deployRenderings()) {
+      expect(stepText(body, 2), label).toContain("A class that has no local source file (it exists only in IRIS) is fixed in place instead");
+      expect(stepText(body, 6), label).toContain("**compare the returned `total` against the expected number of test methods**");
+      expect(stepText(body, 7), label).toContain("rerun `iris_execute_tests`");
+    }
+  });
+});
+
+describe("the test prompts' PRODUCTION_BUSY note and recover-stuck-production's block rule (Story 40.5)", () => {
+  /** The note, character for character: a refusal that names a production, and a refusal whose production state could not be read. */
+  const BUSY_NOTE =
+    "If the response is a `PRODUCTION_BUSY` refusal, nothing ran. When the refusal has a `production` field, that production is running in the namespace and is not the tests' own: tell the user, and do not stop that production unless the user confirms it is a leftover of an interrupted test run. When its `state` is `Unknown`, the namespace's production state could not be read (the refusal says why): tell the user, run the tests again in a moment, and do not stop any production to make them run.";
+
+  /** The recover rule, modelled on the sentence trace-message-flow step 5 carries for Event Log text. */
+  const BLOCK_RULE =
+    "Under the `block` data policy each entry's `text` is withheld and its `textPolicy` gives the reason: report that reason to the user, and never read the log text another way (for example through SQL, global or document tools).";
+
+  /** The number of numbered steps in a rendering. */
+  function stepCount(body: string): number {
+    return (body.match(/^\d+\. /gm) ?? []).length;
+  }
+
+  async function recoverRenderings(): Promise<Array<{ label: string; body: string }>> {
+    const { prompt } = await findPrompt("recover-stuck-production");
+    return [
+      { label: "recover-stuck-production", body: prompt.build({ production: "MyApp.Production", namespace: "MYAPP" }) },
+      { label: "recover-stuck-production (skill form)", body: prompt.build({}) },
+    ];
+  }
+
+  async function testPromptRenderings(): Promise<Array<{ label: string; body: string; step: number; steps: number }>> {
+    const deploy = await findPrompt("deploy-and-test-class");
+    const edit = await findPrompt("edit-and-test-class");
+    return [
+      { label: "deploy-and-test-class", body: deploy.prompt.build({ classOrPackage: "MyApp.MyClass" }), step: 4, steps: 9 },
+      { label: "deploy-and-test-class (skill form)", body: deploy.prompt.build({}), step: 4, steps: 9 },
+      { label: "edit-and-test-class", body: edit.prompt.build({ className: "MyApp.MyClass", change: "rename a variable", testClass: "MyApp.Tests.MyClassTest" }), step: 9, steps: 12 },
+      { label: "edit-and-test-class (skill form)", body: edit.prompt.build({}), step: 9, steps: 12 },
+    ];
+  }
+
+  it("recover-stuck-production step 3 ends with the block rule, and the prompt still has 8 steps", async () => {
+    for (const { label, body } of await recoverRenderings()) {
+      expect(stepText(body, 3), label).toMatch(/to understand what is actually wrong\. /);
+      expect(stepText(body, 3).endsWith(BLOCK_RULE), label).toBe(true);
+      expect(stepCount(body), label).toBe(8);
+      expect(body, label).not.toMatch(/Rule #\d/);
+    }
+  });
+
+  it("deploy-and-test-class step 4 and edit-and-test-class step 9 end with the identical note, and the step counts are 9 and 12", async () => {
+    for (const { label, body, step, steps } of await testPromptRenderings()) {
+      expect(stepText(body, step).endsWith(BUSY_NOTE), label).toBe(true);
+      expect(body.split(BUSY_NOTE).length - 1, `${label}: the note appears once`).toBe(1);
+      expect(stepCount(body), label).toBe(steps);
+    }
+  });
+
+  it("the note covers a refusal whose production state could not be read: the Unknown state, tell the user, run again, stop nothing", async () => {
+    for (const { label, body, step } of await testPromptRenderings()) {
+      const text = stepText(body, step);
+      expect(text, label).toContain("When its `state` is `Unknown`, the namespace's production state could not be read (the refusal says why)");
+      expect(text, label).toContain("tell the user, run the tests again in a moment, and do not stop any production to make them run.");
+    }
+  });
+
+  it("neither test prompt names iris_production_control, and the rendered note and rule add no iris_* token", async () => {
+    for (const { label, body, step } of await testPromptRenderings()) {
+      expect(body, label).not.toContain("iris_production_control");
+      expect(stepText(body, step).slice(-BUSY_NOTE.length), `${label}: the rendered note`).not.toMatch(/\biris_/);
+    }
+    for (const { label, body } of await recoverRenderings()) {
+      expect(stepText(body, 3).slice(-BLOCK_RULE.length), `${label}: the rendered rule`).not.toMatch(/\biris_/);
     }
   });
 });

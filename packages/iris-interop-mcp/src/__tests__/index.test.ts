@@ -21,7 +21,7 @@ describe("iris-interop-mcp", () => {
     });
 
     it("should export production tool definitions", () => {
-      expect(tools).toHaveLength(22);
+      expect(tools).toHaveLength(24);
     });
 
     it("should be a ToolDefinition[] accepted by McpServerBaseOptions", () => {
@@ -35,7 +35,7 @@ describe("iris-interop-mcp", () => {
   });
 
   describe("McpServerBase instantiation", () => {
-    it("should create a server instance with 22 package tools (+1 framework tool)", () => {
+    it("should create a server instance with 24 package tools (+1 framework tool)", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/interop",
         version: "0.0.1",
@@ -43,9 +43,9 @@ describe("iris-interop-mcp", () => {
         needsCustomRest: true,
       });
       expect(server).toBeDefined();
-      // 22 package tools + the framework `iris_server_profiles` discovery tool
+      // 24 package tools + the framework `iris_server_profiles` discovery tool
       // (Epic 19, decision E1 — registered on every server by the shared base).
-      expect(server.toolCount).toBe(23);
+      expect(server.toolCount).toBe(25);
     });
 
     it("should accept needsCustomRest: true", () => {
@@ -68,7 +68,7 @@ describe("iris-interop-mcp", () => {
       expect(server.server).toBeDefined();
     });
 
-    it("should return tool names for all 22 interop tools", () => {
+    it("should return tool names for all 24 interop tools", () => {
       const server = new McpServerBase({
         name: "@iris-mcp/interop",
         version: "0.0.1",
@@ -76,8 +76,8 @@ describe("iris-interop-mcp", () => {
         needsCustomRest: true,
       });
       const names = server.getToolNames();
-      // 22 package tools + the framework discovery tool (Epic 19, decision E1).
-      expect(names).toHaveLength(23);
+      // 24 package tools + the framework discovery tool (Epic 19, decision E1).
+      expect(names).toHaveLength(25);
       expect(names).toContain("iris_server_profiles");
       expect(names).toContain("iris_production_manage");
       expect(names).toContain("iris_production_control");
@@ -101,6 +101,8 @@ describe("iris-interop-mcp", () => {
       expect(names).toContain("iris_default_settings_manage");
       expect(names).toContain("iris_message_diagram");
       expect(names).toContain("iris_message_resend");
+      expect(names).toContain("iris_message_search");
+      expect(names).toContain("iris_message_body");
     });
 
     it("should return undefined for nonexistent tool lookup", () => {
@@ -148,6 +150,10 @@ describe("iris-interop-mcp", () => {
   describe("resolveTransport()", () => {
     const originalArgv = process.argv;
     const originalEnv = process.env["MCP_TRANSPORT"];
+    const ENV_HTTP_MESSAGE =
+      'Unsupported transport "http" from MCP_TRANSPORT: stdio is the only supported transport. Unset MCP_TRANSPORT or set it to "stdio".';
+    const FLAG_HTTP_MESSAGE =
+      'Unsupported transport "http" from --transport: stdio is the only supported transport. Remove --transport or pass --transport stdio.';
 
     afterEach(() => {
       process.argv = originalArgv;
@@ -164,28 +170,42 @@ describe("iris-interop-mcp", () => {
       expect(resolveTransport()).toBe("stdio");
     });
 
-    it("should return http from --transport=http CLI arg", () => {
-      process.argv = ["node", "index.js", "--transport=http"];
-      delete process.env["MCP_TRANSPORT"];
-      expect(resolveTransport()).toBe("http");
+    it("should return stdio from MCP_TRANSPORT env var", () => {
+      process.argv = ["node", "index.js"];
+      process.env["MCP_TRANSPORT"] = "stdio";
+      expect(resolveTransport()).toBe("stdio");
     });
 
-    it("should return http from --transport http CLI arg", () => {
+    it("should reject --transport=http CLI arg as a configuration error", () => {
+      process.argv = ["node", "index.js", "--transport=http"];
+      delete process.env["MCP_TRANSPORT"];
+      expect(() => resolveTransport()).toThrow(FLAG_HTTP_MESSAGE);
+    });
+
+    it("should reject --transport http CLI arg as a configuration error", () => {
       process.argv = ["node", "index.js", "--transport", "http"];
       delete process.env["MCP_TRANSPORT"];
-      expect(resolveTransport()).toBe("http");
+      expect(() => resolveTransport()).toThrow(FLAG_HTTP_MESSAGE);
     });
 
-    it("should return http from MCP_TRANSPORT env var", () => {
+    it("should reject MCP_TRANSPORT=http as a configuration error", () => {
       process.argv = ["node", "index.js"];
       process.env["MCP_TRANSPORT"] = "http";
-      expect(resolveTransport()).toBe("http");
+      expect(() => resolveTransport()).toThrow(ENV_HTTP_MESSAGE);
     });
 
-    it("should prefer CLI arg over env var", () => {
+    it("should reject an unrecognised MCP_TRANSPORT instead of falling back to stdio", () => {
+      process.argv = ["node", "index.js"];
+      process.env["MCP_TRANSPORT"] = "invalid";
+      expect(() => resolveTransport()).toThrow(
+        'Unsupported transport "invalid" from MCP_TRANSPORT: stdio is the only supported transport. Unset MCP_TRANSPORT or set it to "stdio".',
+      );
+    });
+
+    it("should check the CLI arg even when MCP_TRANSPORT is stdio", () => {
       process.argv = ["node", "index.js", "--transport=http"];
       process.env["MCP_TRANSPORT"] = "stdio";
-      expect(resolveTransport()).toBe("http");
+      expect(() => resolveTransport()).toThrow(FLAG_HTTP_MESSAGE);
     });
   });
 });

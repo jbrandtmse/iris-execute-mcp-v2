@@ -1,0 +1,257 @@
+{
+  "capturedWithBootstrapVersion": "6dcdd238c792",
+  "irisVersion": "IRIS for UNIX (Ubuntu Server LTS for ARM64 Containers) 2026.2 (Build 221U) Fri Jun 26 2026 09:59:12 EDT",
+  "capturedAt": "2026-10-17T04:07:39.737Z",
+  "command": "STORY_39_2_CAPTURE=1 pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-39-2-data-policy-live-gate.test.ts -t capture",
+  "rest": [
+    {
+      "name": "legacy preview of 1..9",
+      "body": {
+        "headerIds": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ],
+        "namespace": "EXECMCPTMP392A"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"headers\":[{\"id\":1,\"found\":true,\"sessionId\":392001,\"type\":\"Request\",\"sourceItem\":\"Story392.Source\",\"targetItem\":\"Story392.Hl7Target\",\"status\":\"Error\",\"isError\":true,\"timeCreated\":\"2001-02-03 09:00:01\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyClassExists\":true,\"bodySummary\":\"(non-stream body; class=EnsLib.HL7.Message)\",\"verdict\":\"recommended\",\"reason\":\"This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\"},{\"id\":2,\"found\":true,\"sessionId\":392002,\"type\":\"Request\",\"sourceItem\":\"Story392.Source\",\"targetItem\":\"Story392.Hl7Target\",\"status\":\"Error\",\"isError\":true,\"timeCreated\":\"2001-02-03 09:00:02\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyClassExists\":true,\"bodySummary\":\"(non-stream body; class=EnsLib.HL7.Message)\",\"verdict\":\"recommended\",\"reason\":\"This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\"},{\"id\":3,\"found\":true,\"sessionId\":392003,\"type\":\"Request\",\"sourceItem\":\"Story392.Source\",\"targetItem\":\"Story392.Hl7Target\",\"status\":\"Error\",\"isError\":true,\"timeCreated\":\"2001-02-03 09:00:03\",\"bodyClassName\":\"%Stream.GlobalCharacter\",\"bodyClassExists\":true,\"bodySummary\":\"SYNTHPHI-S1  \\txSYNTHPHI-S2  \\txSYNTHPHI-S3  \\txSYNTHPHI-S4  \\txSYNTHPHI-S5  \\txSYNTHPHI-S6  \\txSYNTHPHI-S7  \\txSYNTHPHI-S8  \\txSYNTHPHI-S9  \\txSYNTHPHI-S10  \\txSYNTHPHI-S11  \\txSYNTHPHI-S12  \\txSYNTHPHI-S13  \\txSYNTHPHI-S14  \\txSYNTHPHI-S15  \\txSYNTHPHI-S16  \\txSYNTHPHI-S17  \\txSYNTHPHI-S18  \\txSYNTHPHI-S19  \\txSYNTHPHI-S20  \\txSYNTHPHI-S21  \\txSYNTHPHI-S22  \\txSYNTHPHI-S23  \\txSYNTHPHI-S24  \\txSYNTHPHI-S25  \\txSYNTHPHI-S26  \\txSYNTHPHI-S27  \\txSYNTHPHI-S28  \\txSYNTHPHI-S29  \\txSYNTHPHI-S30  \\txSYNTHPHI-S31  \\txSYNTHPHI-S32  \\txSYNTHPHI-S33  \\txSYNTHPHI-S34  \\txSYNTHPHI-S35  \\txSYNTHPHI-S36  \\txSYNTHPHI-S37  \\txSYNTHPHI-S38  \\txSYNTHPHI-S39  \\txSYNTHPHI-S40  \\txSYNTHPHI-S41  \\txSYNTHPHI-S42  \\txSYNTHPHI-S43  \\txSYNTHPHI-S44  \\txSYNTHPHI-S45  \\txSYNTHPHI-S46  \\txSYNTHPHI-S47  \\txSYNTHPHI-S48  \\txSYNTHPHI-S49  \\txSYNTHPHI-S50  \\txSYNTHPHI-S51  \\txSYNTHPHI-S52  \\txSYNTHPHI-S53  \\txSYNTHPHI-S54  \\txSYNTHPHI-S55  \\txSYNTHPHI-S56  \\txSYNTHPHI-S57  \\txSYNTHPHI-S58  \\txSYNTHPHI-S59  \\txSYNTHPHI-S60  \\txSYNTHPHI-S61  \\txSYNTHPHI-S62  \\txSYNTHPHI-S63  \\txSYNTHPHI-S64  \\txSYNTHPHI-...\",\"verdict\":\"recommended\",\"reason\":\"This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\"},{\"id\":4,\"found\":true,\"sessionId\":392004,\"type\":\"Request\",\"sourceItem\":\"Story392.Source\",\"targetItem\":\"Story392.Hl7Target\",\"status\":\"Error\",\"isError\":true,\"timeCreated\":\"2001-02-03 09:00:04\",\"bodyClassName\":\"Ens.StringRequest\",\"bodyClassExists\":true,\"bodySummary\":\"(non-stream body; class=Ens.StringRequest)\",\"verdict\":\"recommended\",\"reason\":\"This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\"},{\"id\":5,\"found\":true,\"sessionId\":392005,\"type\":\"Request\",\"sourceItem\":\"Story392.Source\",\"targetItem\":\"Story392.Hl7Target\",\"status\":\"Error\",\"isError\":true,\"timeCreated\":\"2001-02-03 09:00:05\",\"bodyClassName\":\"Ens.StreamContainer\",\"bodyClassExists\":true,\"bodySummary\":\"(non-stream body; class=Ens.StreamContainer)\",\"verdict\":\"recommended\",\"reason\":\"This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\"},{\"id\":6,\"found\":true,\"sessionId\":392006,\"type\":\"Request\",\"sourceItem\":\"Story392.Source\",\"targetItem\":\"Story392.Hl7Target\",\"status\":\"Error\",\"isError\":true,\"timeCreated\":\"2001-02-03 09:00:06\",\"bodyClassName\":\"Story392.Body.Missing\",\"bodyClassExists\":false,\"bodySummary\":\"\",\"verdict\":\"caution\",\"reason\":\"This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message. WARNING: message body class 'Story392.Body.Missing' no longer exists — resend will succeed at the header level, but the target will fail when it tries to open the body (visible only in the Ensemble Event Log).\"},{\"id\":7,\"found\":true,\"sessionId\":392007,\"type\":\"Request\",\"sourceItem\":\"Story392.Source\",\"targetItem\":\"Story392.Hl7Target\",\"status\":\"Error\",\"isError\":true,\"timeCreated\":\"2001-02-03 09:00:07\",\"bodyClassName\":\"\",\"bodyClassExists\":false,\"bodySummary\":\"\",\"verdict\":\"recommended\",\"reason\":\"This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\"},{\"id\":8,\"found\":true,\"sessionId\":392008,\"type\":\"Request\",\"sourceItem\":\"Story392.Source\",\"targetItem\":\"Story392.Hl7Target\",\"status\":\"Error\",\"isError\":true,\"timeCreated\":\"2001-02-03 09:00:08\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyClassExists\":true,\"bodySummary\":\"(non-stream body; class=EnsLib.HL7.Message)\",\"verdict\":\"recommended\",\"reason\":\"This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\"},{\"id\":9,\"found\":true,\"sessionId\":392009,\"type\":\"Request\",\"sourceItem\":\"Story392.Source\",\"targetItem\":\"Story392.Hl7Target\",\"status\":\"Error\",\"isError\":true,\"timeCreated\":\"2001-02-03 09:00:09\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyClassExists\":true,\"bodySummary\":\"(non-stream body; class=EnsLib.HL7.Message)\",\"verdict\":\"recommended\",\"reason\":\"This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\"}],\"count\":9}}"
+    },
+    {
+      "name": "legacy preview with a missing header",
+      "body": {
+        "headerIds": [
+          3,
+          999
+        ],
+        "namespace": "EXECMCPTMP392A"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"headers\":[{\"id\":3,\"found\":true,\"sessionId\":392003,\"type\":\"Request\",\"sourceItem\":\"Story392.Source\",\"targetItem\":\"Story392.Hl7Target\",\"status\":\"Error\",\"isError\":true,\"timeCreated\":\"2001-02-03 09:00:03\",\"bodyClassName\":\"%Stream.GlobalCharacter\",\"bodyClassExists\":true,\"bodySummary\":\"SYNTHPHI-S1  \\txSYNTHPHI-S2  \\txSYNTHPHI-S3  \\txSYNTHPHI-S4  \\txSYNTHPHI-S5  \\txSYNTHPHI-S6  \\txSYNTHPHI-S7  \\txSYNTHPHI-S8  \\txSYNTHPHI-S9  \\txSYNTHPHI-S10  \\txSYNTHPHI-S11  \\txSYNTHPHI-S12  \\txSYNTHPHI-S13  \\txSYNTHPHI-S14  \\txSYNTHPHI-S15  \\txSYNTHPHI-S16  \\txSYNTHPHI-S17  \\txSYNTHPHI-S18  \\txSYNTHPHI-S19  \\txSYNTHPHI-S20  \\txSYNTHPHI-S21  \\txSYNTHPHI-S22  \\txSYNTHPHI-S23  \\txSYNTHPHI-S24  \\txSYNTHPHI-S25  \\txSYNTHPHI-S26  \\txSYNTHPHI-S27  \\txSYNTHPHI-S28  \\txSYNTHPHI-S29  \\txSYNTHPHI-S30  \\txSYNTHPHI-S31  \\txSYNTHPHI-S32  \\txSYNTHPHI-S33  \\txSYNTHPHI-S34  \\txSYNTHPHI-S35  \\txSYNTHPHI-S36  \\txSYNTHPHI-S37  \\txSYNTHPHI-S38  \\txSYNTHPHI-S39  \\txSYNTHPHI-S40  \\txSYNTHPHI-S41  \\txSYNTHPHI-S42  \\txSYNTHPHI-S43  \\txSYNTHPHI-S44  \\txSYNTHPHI-S45  \\txSYNTHPHI-S46  \\txSYNTHPHI-S47  \\txSYNTHPHI-S48  \\txSYNTHPHI-S49  \\txSYNTHPHI-S50  \\txSYNTHPHI-S51  \\txSYNTHPHI-S52  \\txSYNTHPHI-S53  \\txSYNTHPHI-S54  \\txSYNTHPHI-S55  \\txSYNTHPHI-S56  \\txSYNTHPHI-S57  \\txSYNTHPHI-S58  \\txSYNTHPHI-S59  \\txSYNTHPHI-S60  \\txSYNTHPHI-S61  \\txSYNTHPHI-S62  \\txSYNTHPHI-S63  \\txSYNTHPHI-S64  \\txSYNTHPHI-...\",\"verdict\":\"recommended\",\"reason\":\"This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\"},{\"id\":999,\"found\":false,\"error\":\"Header 999 not found\"}],\"count\":2}}"
+    }
+  ],
+  "tool": [
+    {
+      "name": "tool preview of 1..9",
+      "args": {
+        "action": "preview",
+        "headerIds": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ],
+        "namespace": "EXECMCPTMP392A"
+      },
+      "structuredContent": {
+        "headers": [
+          {
+            "id": 1,
+            "found": true,
+            "sessionId": 392001,
+            "type": "Request",
+            "sourceItem": "Story392.Source",
+            "targetItem": "Story392.Hl7Target",
+            "status": "Error",
+            "isError": true,
+            "timeCreated": "2001-02-03T09:00:01Z",
+            "bodyClassName": "EnsLib.HL7.Message",
+            "bodyClassExists": true,
+            "bodySummary": "(non-stream body; class=EnsLib.HL7.Message)",
+            "verdict": "recommended",
+            "reason": "This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.",
+            "timeCreatedRaw": "2001-02-03 09:00:01"
+          },
+          {
+            "id": 2,
+            "found": true,
+            "sessionId": 392002,
+            "type": "Request",
+            "sourceItem": "Story392.Source",
+            "targetItem": "Story392.Hl7Target",
+            "status": "Error",
+            "isError": true,
+            "timeCreated": "2001-02-03T09:00:02Z",
+            "bodyClassName": "EnsLib.HL7.Message",
+            "bodyClassExists": true,
+            "bodySummary": "(non-stream body; class=EnsLib.HL7.Message)",
+            "verdict": "recommended",
+            "reason": "This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.",
+            "timeCreatedRaw": "2001-02-03 09:00:02"
+          },
+          {
+            "id": 3,
+            "found": true,
+            "sessionId": 392003,
+            "type": "Request",
+            "sourceItem": "Story392.Source",
+            "targetItem": "Story392.Hl7Target",
+            "status": "Error",
+            "isError": true,
+            "timeCreated": "2001-02-03T09:00:03Z",
+            "bodyClassName": "%Stream.GlobalCharacter",
+            "bodyClassExists": true,
+            "bodySummary": "SYNTHPHI-S1  \txSYNTHPHI-S2  \txSYNTHPHI-S3  \txSYNTHPHI-S4  \txSYNTHPHI-S5  \txSYNTHPHI-S6  \txSYNTHPHI-S7  \txSYNTHPHI-S8  \txSYNTHPHI-S9  \txSYNTHPHI-S10  \txSYNTHPHI-S11  \txSYNTHPHI-S12  \txSYNTHPHI-S13  \txSYNTHPHI-S14  \txSYNTHPHI-S15  \txSYNTHPHI-S16  \txSYNTHPHI-S17  \txSYNTHPHI-S18  \txSYNTHPHI-S19  \txSYNTHPHI-S20  \txSYNTHPHI-S21  \txSYNTHPHI-S22  \txSYNTHPHI-S23  \txSYNTHPHI-S24  \txSYNTHPHI-S25  \txSYNTHPHI-S26  \txSYNTHPHI-S27  \txSYNTHPHI-S28  \txSYNTHPHI-S29  \txSYNTHPHI-S30  \txSYNTHPHI-S31  \txSYNTHPHI-S32  \txSYNTHPHI-S33  \txSYNTHPHI-S34  \txSYNTHPHI-S35  \txSYNTHPHI-S36  \txSYNTHPHI-S37  \txSYNTHPHI-S38  \txSYNTHPHI-S39  \txSYNTHPHI-S40  \txSYNTHPHI-S41  \txSYNTHPHI-S42  \txSYNTHPHI-S43  \txSYNTHPHI-S44  \txSYNTHPHI-S45  \txSYNTHPHI-S46  \txSYNTHPHI-S47  \txSYNTHPHI-S48  \txSYNTHPHI-S49  \txSYNTHPHI-S50  \txSYNTHPHI-S51  \txSYNTHPHI-S52  \txSYNTHPHI-S53  \txSYNTHPHI-S54  \txSYNTHPHI-S55  \txSYNTHPHI-S56  \txSYNTHPHI-S57  \txSYNTHPHI-S58  \txSYNTHPHI-S59  \txSYNTHPHI-S60  \txSYNTHPHI-S61  \txSYNTHPHI-S62  \txSYNTHPHI-S63  \txSYNTHPHI-S64  \txSYNTHPHI-...",
+            "verdict": "recommended",
+            "reason": "This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.",
+            "timeCreatedRaw": "2001-02-03 09:00:03"
+          },
+          {
+            "id": 4,
+            "found": true,
+            "sessionId": 392004,
+            "type": "Request",
+            "sourceItem": "Story392.Source",
+            "targetItem": "Story392.Hl7Target",
+            "status": "Error",
+            "isError": true,
+            "timeCreated": "2001-02-03T09:00:04Z",
+            "bodyClassName": "Ens.StringRequest",
+            "bodyClassExists": true,
+            "bodySummary": "(non-stream body; class=Ens.StringRequest)",
+            "verdict": "recommended",
+            "reason": "This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.",
+            "timeCreatedRaw": "2001-02-03 09:00:04"
+          },
+          {
+            "id": 5,
+            "found": true,
+            "sessionId": 392005,
+            "type": "Request",
+            "sourceItem": "Story392.Source",
+            "targetItem": "Story392.Hl7Target",
+            "status": "Error",
+            "isError": true,
+            "timeCreated": "2001-02-03T09:00:05Z",
+            "bodyClassName": "Ens.StreamContainer",
+            "bodyClassExists": true,
+            "bodySummary": "(non-stream body; class=Ens.StreamContainer)",
+            "verdict": "recommended",
+            "reason": "This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.",
+            "timeCreatedRaw": "2001-02-03 09:00:05"
+          },
+          {
+            "id": 6,
+            "found": true,
+            "sessionId": 392006,
+            "type": "Request",
+            "sourceItem": "Story392.Source",
+            "targetItem": "Story392.Hl7Target",
+            "status": "Error",
+            "isError": true,
+            "timeCreated": "2001-02-03T09:00:06Z",
+            "bodyClassName": "Story392.Body.Missing",
+            "bodyClassExists": false,
+            "bodySummary": "",
+            "verdict": "caution",
+            "reason": "This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message. WARNING: message body class 'Story392.Body.Missing' no longer exists — resend will succeed at the header level, but the target will fail when it tries to open the body (visible only in the Ensemble Event Log).",
+            "timeCreatedRaw": "2001-02-03 09:00:06"
+          },
+          {
+            "id": 7,
+            "found": true,
+            "sessionId": 392007,
+            "type": "Request",
+            "sourceItem": "Story392.Source",
+            "targetItem": "Story392.Hl7Target",
+            "status": "Error",
+            "isError": true,
+            "timeCreated": "2001-02-03T09:00:07Z",
+            "bodyClassName": "",
+            "bodyClassExists": false,
+            "bodySummary": "",
+            "verdict": "recommended",
+            "reason": "This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.",
+            "timeCreatedRaw": "2001-02-03 09:00:07"
+          },
+          {
+            "id": 8,
+            "found": true,
+            "sessionId": 392008,
+            "type": "Request",
+            "sourceItem": "Story392.Source",
+            "targetItem": "Story392.Hl7Target",
+            "status": "Error",
+            "isError": true,
+            "timeCreated": "2001-02-03T09:00:08Z",
+            "bodyClassName": "EnsLib.HL7.Message",
+            "bodyClassExists": true,
+            "bodySummary": "(non-stream body; class=EnsLib.HL7.Message)",
+            "verdict": "recommended",
+            "reason": "This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.",
+            "timeCreatedRaw": "2001-02-03 09:00:08"
+          },
+          {
+            "id": 9,
+            "found": true,
+            "sessionId": 392009,
+            "type": "Request",
+            "sourceItem": "Story392.Source",
+            "targetItem": "Story392.Hl7Target",
+            "status": "Error",
+            "isError": true,
+            "timeCreated": "2001-02-03T09:00:09Z",
+            "bodyClassName": "EnsLib.HL7.Message",
+            "bodyClassExists": true,
+            "bodySummary": "(non-stream body; class=EnsLib.HL7.Message)",
+            "verdict": "recommended",
+            "reason": "This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.",
+            "timeCreatedRaw": "2001-02-03 09:00:09"
+          }
+        ],
+        "count": 9
+      },
+      "text": "#1 [recommended] Request Story392.Source -> Story392.Hl7Target (Error) [isError] — This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\n#2 [recommended] Request Story392.Source -> Story392.Hl7Target (Error) [isError] — This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\n#3 [recommended] Request Story392.Source -> Story392.Hl7Target (Error) [isError] — This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\n#4 [recommended] Request Story392.Source -> Story392.Hl7Target (Error) [isError] — This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\n#5 [recommended] Request Story392.Source -> Story392.Hl7Target (Error) [isError] — This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\n#6 [caution] Request Story392.Source -> Story392.Hl7Target (Error) [isError, body class missing] — This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message. WARNING: message body class 'Story392.Body.Missing' no longer exists — resend will succeed at the header level, but the target will fail when it tries to open the body (visible only in the Ensemble Event Log).\n#7 [recommended] Request Story392.Source -> Story392.Hl7Target (Error) [isError] — This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\n#8 [recommended] Request Story392.Source -> Story392.Hl7Target (Error) [isError] — This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\n#9 [recommended] Request Story392.Source -> Story392.Hl7Target (Error) [isError] — This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message."
+    },
+    {
+      "name": "tool preview with a missing header",
+      "args": {
+        "action": "preview",
+        "headerIds": [
+          3,
+          999
+        ],
+        "namespace": "EXECMCPTMP392A"
+      },
+      "structuredContent": {
+        "headers": [
+          {
+            "id": 3,
+            "found": true,
+            "sessionId": 392003,
+            "type": "Request",
+            "sourceItem": "Story392.Source",
+            "targetItem": "Story392.Hl7Target",
+            "status": "Error",
+            "isError": true,
+            "timeCreated": "2001-02-03T09:00:03Z",
+            "bodyClassName": "%Stream.GlobalCharacter",
+            "bodyClassExists": true,
+            "bodySummary": "SYNTHPHI-S1  \txSYNTHPHI-S2  \txSYNTHPHI-S3  \txSYNTHPHI-S4  \txSYNTHPHI-S5  \txSYNTHPHI-S6  \txSYNTHPHI-S7  \txSYNTHPHI-S8  \txSYNTHPHI-S9  \txSYNTHPHI-S10  \txSYNTHPHI-S11  \txSYNTHPHI-S12  \txSYNTHPHI-S13  \txSYNTHPHI-S14  \txSYNTHPHI-S15  \txSYNTHPHI-S16  \txSYNTHPHI-S17  \txSYNTHPHI-S18  \txSYNTHPHI-S19  \txSYNTHPHI-S20  \txSYNTHPHI-S21  \txSYNTHPHI-S22  \txSYNTHPHI-S23  \txSYNTHPHI-S24  \txSYNTHPHI-S25  \txSYNTHPHI-S26  \txSYNTHPHI-S27  \txSYNTHPHI-S28  \txSYNTHPHI-S29  \txSYNTHPHI-S30  \txSYNTHPHI-S31  \txSYNTHPHI-S32  \txSYNTHPHI-S33  \txSYNTHPHI-S34  \txSYNTHPHI-S35  \txSYNTHPHI-S36  \txSYNTHPHI-S37  \txSYNTHPHI-S38  \txSYNTHPHI-S39  \txSYNTHPHI-S40  \txSYNTHPHI-S41  \txSYNTHPHI-S42  \txSYNTHPHI-S43  \txSYNTHPHI-S44  \txSYNTHPHI-S45  \txSYNTHPHI-S46  \txSYNTHPHI-S47  \txSYNTHPHI-S48  \txSYNTHPHI-S49  \txSYNTHPHI-S50  \txSYNTHPHI-S51  \txSYNTHPHI-S52  \txSYNTHPHI-S53  \txSYNTHPHI-S54  \txSYNTHPHI-S55  \txSYNTHPHI-S56  \txSYNTHPHI-S57  \txSYNTHPHI-S58  \txSYNTHPHI-S59  \txSYNTHPHI-S60  \txSYNTHPHI-S61  \txSYNTHPHI-S62  \txSYNTHPHI-S63  \txSYNTHPHI-S64  \txSYNTHPHI-...",
+            "verdict": "recommended",
+            "reason": "This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.",
+            "timeCreatedRaw": "2001-02-03 09:00:03"
+          },
+          {
+            "id": 999,
+            "found": false,
+            "error": "Header 999 not found"
+          }
+        ],
+        "count": 2
+      },
+      "text": "#3 [recommended] Request Story392.Source -> Story392.Hl7Target (Error) [isError] — This is the failed REQUEST message (Status=Error); resending will retry delivery to the target — the correct retry target for a failed message.\n#999: NOT FOUND — Header 999 not found"
+    }
+  ]
+}

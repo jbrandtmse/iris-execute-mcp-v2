@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
@@ -24,6 +24,8 @@ const classes = [
   { name: 'ExecuteMCPv2.Loc.Classifier.cls', path: 'src/ExecuteMCPv2/Loc/Classifier.cls' },
   { name: 'ExecuteMCPv2.Loc.Scanner.cls', path: 'src/ExecuteMCPv2/Loc/Scanner.cls' },
   { name: 'ExecuteMCPv2.Loc.Generate.cls', path: 'src/ExecuteMCPv2/Loc/Generate.cls' },
+  { name: 'ExecuteMCPv2.Coverage.Job.cls', path: 'src/ExecuteMCPv2/Coverage/Job.cls' },
+  { name: 'ExecuteMCPv2.Coverage.Runner.cls', path: 'src/ExecuteMCPv2/Coverage/Runner.cls' },
   { name: 'ExecuteMCPv2.REST.Base.cls', path: 'src/ExecuteMCPv2/REST/Base.cls' },
   { name: 'ExecuteMCPv2.REST.Global.cls', path: 'src/ExecuteMCPv2/REST/Global.cls' },
   { name: 'ExecuteMCPv2.REST.Command.cls', path: 'src/ExecuteMCPv2/REST/Command.cls' },
@@ -32,6 +34,8 @@ const classes = [
   { name: 'ExecuteMCPv2.REST.Security.cls', path: 'src/ExecuteMCPv2/REST/Security.cls' },
   { name: 'ExecuteMCPv2.REST.Interop.cls', path: 'src/ExecuteMCPv2/REST/Interop.cls' },
   { name: 'ExecuteMCPv2.REST.MessageResend.cls', path: 'src/ExecuteMCPv2/REST/MessageResend.cls' },
+  { name: 'ExecuteMCPv2.REST.MessageSearch.cls', path: 'src/ExecuteMCPv2/REST/MessageSearch.cls' },
+  { name: 'ExecuteMCPv2.REST.MessageBody.cls', path: 'src/ExecuteMCPv2/REST/MessageBody.cls' },
   { name: 'ExecuteMCPv2.REST.Loc.cls', path: 'src/ExecuteMCPv2/REST/Loc.cls' },
   { name: 'ExecuteMCPv2.REST.Monitor.cls', path: 'src/ExecuteMCPv2/REST/Monitor.cls' },
   { name: 'ExecuteMCPv2.REST.Health.cls', path: 'src/ExecuteMCPv2/REST/Health.cls' },
@@ -40,6 +44,8 @@ const classes = [
   { name: 'ExecuteMCPv2.REST.SystemConfig.cls', path: 'src/ExecuteMCPv2/REST/SystemConfig.cls' },
   { name: 'ExecuteMCPv2.REST.Analytics.cls', path: 'src/ExecuteMCPv2/REST/Analytics.cls' },
   { name: 'ExecuteMCPv2.REST.SqlAdvisor.cls', path: 'src/ExecuteMCPv2/REST/SqlAdvisor.cls' },
+  { name: 'ExecuteMCPv2.REST.Sql.cls', path: 'src/ExecuteMCPv2/REST/Sql.cls' },
+  { name: 'ExecuteMCPv2.REST.Coverage.cls', path: 'src/ExecuteMCPv2/REST/Coverage.cls' },
   { name: 'ExecuteMCPv2.REST.Dispatch.cls', path: 'src/ExecuteMCPv2/REST/Dispatch.cls' },
 ];
 
@@ -173,8 +179,17 @@ export function getBootstrapClasses(): BootstrapClass[] {
 }
 `;
 
+// Step 5: Write only when the output differs from the file on disk. The shared
+// dist's freshness check is mtime-based, so rewriting an identical embed would
+// make a clean dist look stale.
 const outPath = resolve(root, 'packages/shared/src/bootstrap-classes.ts');
-writeFileSync(outPath, output, 'utf-8');
-console.log(`Generated ${outPath} with ${classes.length} classes`);
-console.log(`BOOTSTRAP_VERSION: ${BOOTSTRAP_VERSION}`);
-console.log('Classes in order:', classes.map(c => c.name).join(', '));
+const unchanged = existsSync(outPath) && readFileSync(outPath, 'utf-8') === output;
+if (unchanged) {
+  console.log(`Unchanged ${outPath} with ${classes.length} classes (not rewritten)`);
+  console.log(`BOOTSTRAP_VERSION: ${BOOTSTRAP_VERSION}`);
+} else {
+  writeFileSync(outPath, output, 'utf-8');
+  console.log(`Generated ${outPath} with ${classes.length} classes`);
+  console.log(`BOOTSTRAP_VERSION: ${BOOTSTRAP_VERSION}`);
+  console.log('Classes in order:', classes.map(c => c.name).join(', '));
+}

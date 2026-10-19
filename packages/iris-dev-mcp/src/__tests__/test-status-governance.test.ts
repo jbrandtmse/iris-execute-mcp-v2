@@ -26,6 +26,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { McpServerBase } from "@iris-mcp/shared";
 import type { McpServerBaseOptions, ToolDefinition } from "@iris-mcp/shared";
+import { makeEnvHarness } from "@iris-mcp/shared/test-helpers";
 import { testStatusTool } from "../tools/test-status.js";
 
 // ── Harness ─────────────────────────────────────────────────────────
@@ -65,57 +66,6 @@ function makeServerOpts(tools: ToolDefinition[]): McpServerBaseOptions {
  * field (name, inputSchema with the `action` enum, `mutates`, scope). */
 function spiedTool(spy: ReturnType<typeof vi.fn>): ToolDefinition {
   return { ...testStatusTool, handler: spy };
-}
-
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv = {
-    IRIS_USERNAME: process.env.IRIS_USERNAME,
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD,
-    IRIS_HOST: process.env.IRIS_HOST,
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
-    IRIS_PROFILES: process.env.IRIS_PROFILES,
-    IRIS_GOVERNANCE: process.env.IRIS_GOVERNANCE,
-  };
-
-  function setup(): void {
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(console, "info").mockImplementation(() => {});
-    delete process.env.IRIS_GOVERNANCE;
-    delete process.env.IRIS_PROFILES;
-    process.env.IRIS_USERNAME = "u";
-    process.env.IRIS_PASSWORD = "p";
-    process.env.IRIS_HOST = "default.example.com";
-    process.env.IRIS_NAMESPACE = "DEFAULTNS";
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-  };
 }
 
 /** Stage the default profile's startup HEAD (health) + GET (version). */
@@ -233,5 +183,69 @@ describe("iris_test_status governance default (Story 36.2)", () => {
       code: "GOVERNANCE_DISABLED",
       action: "iris_test_status:cancel",
     });
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Story 40.2 governance default — `export` is a write key of its own, DISABLED by default (AD-4, decision #50).
+// ════════════════════════════════════════════════════════════════════
+
+describe("iris_test_status:export governance default (Story 40.2)", () => {
+  const env = makeEnvHarness();
+  beforeEach(env.setup);
+  afterEach(env.teardown);
+
+  const EXPORT_ARGS = { action: "export", coverageRunId: "9", outputPath: "/tmp/never-written/coverage.xml" };
+
+  it("under EMPTY IRIS_GOVERNANCE, `export` is DENIED with GOVERNANCE_DISABLED keyed iris_test_status:export; handler NOT called, no IRIS traffic", async () => {
+    stageDefaultStartup(env.fetchMock);
+
+    const handlerSpy = vi.fn(async () => ({ content: [{ type: "text" as const, text: "should not run" }] }));
+    const server = new McpServerBase(makeServerOpts([spiedTool(handlerSpy)]));
+    await server.start("stdio");
+    const callsAfterStart = env.fetchMock.mock.calls.length;
+
+    const result = await callTool(server, "iris_test_status", EXPORT_ARGS);
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      code: "GOVERNANCE_DISABLED",
+      action: "iris_test_status:export",
+      server: "default",
+    });
+    expect(handlerSpy).not.toHaveBeenCalled();
+    expect(env.fetchMock.mock.calls.length).toBe(callsAfterStart);
+  });
+
+  it("an explicit IRIS_GOVERNANCE enable of `export` FLIPS just that action; `cancel` stays denied and `poll` stays enabled", async () => {
+    process.env.IRIS_GOVERNANCE = JSON.stringify({ global: { "iris_test_status:export": true } });
+    stageDefaultStartup(env.fetchMock);
+
+    const handlerSpy = vi.fn(async () => ({ content: [{ type: "text" as const, text: "ran" }] }));
+    const server = new McpServerBase(makeServerOpts([spiedTool(handlerSpy)]));
+    await server.start("stdio");
+
+    const exported = await callTool(server, "iris_test_status", EXPORT_ARGS);
+    expect(exported.isError).toBeFalsy();
+    expect(handlerSpy).toHaveBeenCalledTimes(1);
+
+    const cancelled = await callTool(server, "iris_test_status", { action: "cancel", jobId: "31797604" });
+    expect(cancelled.structuredContent).toMatchObject({ code: "GOVERNANCE_DISABLED", action: "iris_test_status:cancel" });
+    const polled = await callTool(server, "iris_test_status", { action: "poll", runIndex: 1 });
+    expect(polled.isError).toBeFalsy();
+    expect(handlerSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("enabling `cancel` alone does not enable `export`", async () => {
+    process.env.IRIS_GOVERNANCE = JSON.stringify({ global: { "iris_test_status:cancel": true } });
+    stageDefaultStartup(env.fetchMock);
+
+    const handlerSpy = vi.fn(async () => ({ content: [{ type: "text" as const, text: "ran" }] }));
+    const server = new McpServerBase(makeServerOpts([spiedTool(handlerSpy)]));
+    await server.start("stdio");
+
+    const result = await callTool(server, "iris_test_status", EXPORT_ARGS);
+    expect(result.structuredContent).toMatchObject({ code: "GOVERNANCE_DISABLED", action: "iris_test_status:export" });
+    expect(handlerSpy).not.toHaveBeenCalled();
   });
 });

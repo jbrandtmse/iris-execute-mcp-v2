@@ -6,6 +6,7 @@ import {
   executeClassMethodTool,
   executeTestsTool,
   createExecuteTestsHandler,
+  buildRunningHint,
   type TestClock,
 } from "../tools/execute.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
@@ -866,6 +867,8 @@ describe("iris_execute_tests", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   /** `/global` GET reads (run-index capture) — see beforeEach. */
   let globalGet: ReturnType<typeof vi.fn>;
+  /** `GET /dev/test/production` guard reads (Story 40.3), see beforeEach. */
+  let productionGuardGet: ReturnType<typeof vi.fn>;
   let ctx: ToolContext;
 
   beforeEach(() => {
@@ -885,10 +888,27 @@ describe("iris_execute_tests", () => {
       console: [],
       result: { value: "", defined: false },
     }));
+    // MOCK PLUMBING ONLY (Story 40.3, AD-15): the tool asks the TestProduction guard route before it queues
+    // anything. Route that GET to its own mock too, answering the shape the real route returns for a run with
+    // no TestProduction test (`ExecuteMCPv2.REST.UnitTest:ProductionGuard`, Rule #54), so every fixture below
+    // is served exactly as it was and no test body or assertion changes.
+    productionGuardGet = vi.fn(async (path: string) => ({
+      status: { errors: [] },
+      console: [],
+      result: {
+        decision: "proceed",
+        namespace: new URLSearchParams(path.split("?")[1] ?? "").get("namespace") ?? "",
+        testProductions: [],
+      },
+    }));
     const routedHttp = {
       ...mockHttp,
       get: (path: string, options?: unknown) =>
-        path.startsWith("/api/executemcp/v2/global?") ? globalGet(path, options) : mockHttp.get(path, options),
+        path.startsWith("/api/executemcp/v2/global?")
+          ? globalGet(path, options)
+          : path.startsWith("/api/executemcp/v2/dev/test/production?")
+            ? productionGuardGet(path, options)
+            : mockHttp.get(path, options),
     };
     ctx = createMockCtx(routedHttp as unknown as IrisHttpClient);
   });
@@ -1585,11 +1605,11 @@ describe("iris_execute_tests", () => {
     ).rejects.toThrow("ECONNREFUSED");
   });
 
-  it("should have correct annotations (readOnlyHint: true, destructiveHint: false)", () => {
+  it("should have correct annotations (readOnlyHint: false, idempotentHint: false: a run writes results and may not be re-submitted)", () => {
     expect(executeTestsTool.annotations).toEqual({
-      readOnlyHint: true,
+      readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: true,
+      idempotentHint: false,
       openWorldHint: false,
     });
   });
@@ -1977,6 +1997,26 @@ describe("iris_execute_tests", () => {
       expect(hint).toContain("EMPTY FinishedAt means the run is STILL executing");
       expect(hint).toContain("Never MAX(InstanceIndex)");
       expect(hint).toContain("iris_test_status");
+    });
+
+    it("the manual %UnitTest_Result query goes through iris_sql_query, which the read-only preset runs, and never iris_sql_execute (DW-555)", async () => {
+      mockHttp.post.mockResolvedValue(envelope({ location: "job-hint-query" }));
+      installPathAwareGet([{ result: [], retryafter: "1" }], {
+        'IRIS.TempAtelierAsyncQueue|job-hint-query,"unittest","id"': { value: "42", defined: true },
+      });
+
+      const handler = createExecuteTestsHandler(createFakeClock());
+      const result = await handler({ target: "MyApp.Tests.SlowClass", level: "class", timeout: 1 }, ctx);
+
+      const hint = (result.structuredContent as { hint: string }).hint;
+      expect(hint).toContain('iris_sql_query "SELECT ti.DateTime AS FinishedAt');
+      expect(hint).toContain("with parameters [runIndex]");
+      expect(hint).not.toContain("iris_sql_execute");
+      expect(buildRunningHint("lead", "job-x", null)).toContain("iris_sql_query");
+      expect(buildRunningHint("lead", "job-x", null)).not.toContain("iris_sql_execute");
+
+      expect(executeTestsTool.description).toContain("`iris_sql_query` over `%UnitTest_Result`");
+      expect(executeTestsTool.description).not.toContain("iris_sql_execute");
     });
 
     // ── timeout precedence + cap clamp (AC 36.1.4, Rule #59) ──

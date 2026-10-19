@@ -26,7 +26,7 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 
 ### MCP Server Base
 
-- **`McpServerBase`** -- Abstract base class for all IRIS MCP servers. Handles tool registration, input validation (Zod), transport setup (stdio/Streamable HTTP), health checking, and auto-bootstrap of custom REST classes.
+- **`McpServerBase`** -- Abstract base class for all IRIS MCP servers. Handles tool registration, input validation (Zod), stdio transport setup, health checking, and auto-bootstrap of custom REST classes.
 - **`McpServerBaseOptions`** (type) -- Options for constructing an MCP server (name, version, tool definitions).
 - **`ToolDefinition`** (type) -- Tool definition interface including name, title, description, inputSchema (Zod), annotations, scope, and handler function.
 - **`ToolContext`** (type) -- Context passed to tool handlers: HTTP client, Atelier version, namespace resolver, paginator.
@@ -36,7 +36,7 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 - **`PaginateResult<T>`** (type) -- Generic result type for paginated tool responses: items array, nextCursor, and hasMore flag.
 - **`buildToolContext()`** -- Factory function to create a ToolContext from an HTTP client and Atelier version.
 - **`encodeCursor()` / `decodeCursor()`** -- Cursor encoding utilities for paginated tool responses.
-- **`resolveTransport()`** -- Determines MCP transport type (stdio vs Streamable HTTP) from environment.
+- **`resolveTransport()`** -- Returns `stdio` from `--transport` / `MCP_TRANSPORT`, and throws a configuration error for any other configured value.
 
 ### Atelier API Utilities
 
@@ -84,8 +84,22 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 - **`parseToolVisibilityConfig()`** -- Parses the visibility env family into a `ToolVisibilityConfig`. Fails fast on an unknown preset value (naming the valid `full`/`core`/`developer`), a bare `*`, or a literal `iris_server_profiles` in `IRIS_TOOLS_DISABLE`; WARNs (never fails) on unknown tool names and on the same literal in both lists (ENABLE wins).
 - **`resolveVisibleTools()`** -- Applies resolution `ENABLE > DISABLE > preset > default-visible` (trailing-`*` wildcards) over a package's tool set, returning the visible set plus visible/hidden counts. Reserved `iris_server_profiles` is always visible.
 - **`assertPresetCoverage()`** -- Registration-time guard (sibling of `assertGovernanceClassification`): throws, naming the offending tool + preset, if any preset's `include ∪ exclude` ≠ the package tool-set or `include ∩ exclude ≠ ∅`. `full` is reserved (all tools).
-- **`TOOL_PAIRS`** -- Co-visibility pairs (`iris_env_diff`/`iris_env_promote`) that every preset must keep together-in or together-out.
+- **`TOOL_PAIRS`** -- Co-visibility pairs (`iris_env_diff`/`iris_env_promote`, `iris_doc_get`/`iris_doc_edit` since Story 38.4, and `iris_message_search`/`iris_message_body` since Story 39.5, and `iris_test_coverage`/`iris_test_status` since Story 40.1) that every preset must keep together-in or together-out.
 - **`ToolPresetName`** / **`ToolPresetRoster`** / **`ToolPresetRosters`** / **`ToolVisibilityConfig`** (types) -- Preset name union and the per-package `include`/`exclude` roster shapes wired via `McpServerBaseOptions.toolPresets`.
+
+### PHI Data Policy
+
+`data-policy.ts` and `hl7-redaction.ts` implement the per-profile PHI data policy described in the suite's [PHI data policy](../../README.md#phi-data-policy) section: `block`, `redact` (the default) or `allow`, resolved at startup from the `IRIS_PROFILES` entry, `IRIS_DATA_POLICY`, the governance file's `dataPolicy` section, then `redact`. `McpServerBase` applies it to every profile, so a handler reads the policy that applies to the call as `ctx.config.dataPolicy`; the roster of `iris_server_profiles` reports `dataPolicy` and `dataPolicySource`. The data policy reduces exposure of message-body data; it is not a compliance certification.
+
+- **`parseOperatorDataPolicy()`** / **`resolveDataPolicy()`** / **`applyDataPolicies()`** / **`effectiveDataPolicy()`** -- Read `IRIS_DATA_POLICY` (fails fast on a malformed value), resolve one profile or a whole registry, and read the effective policy of a config. A value on the `default` entry is never inherited by another profile.
+- **`tightenDataPolicy()`** -- A caller can only tighten the operator's policy; the result says when a looser request was clamped.
+- **`BODY_KINDS`** / **`isRedactableBodyKind()`** / **`BLOCK_REASONS`** -- The nine body kinds `ExecuteMCPv2.REST.MessageSearch.BodyKind` returns (only `hl7v2` is redactable) and the fixed texts that say why a body is withheld.
+- **`decideBodyPolicy()`** / **`BodyPolicyPlan`** -- The policy's decision for one body from its kind, whether it can be read and the policy (`none`, `blocked` with a fixed reason, or `redact`); the resend preview and `iris_message_body` both decide through it.
+- **`redactHl7()`** -- Fail-closed ER7 redaction: keeps only the fields of `HL7_KEEP_FIELDS` and redacts every other field of every segment, preserving segment order, terminators and separators. It refuses a text it cannot read and never throws. `iris_message_body` shows its output under `redact`.
+- **`ToolDefinition.dataPolicy`** (`actions`, `phiInputs`) -- Declares that a tool is under the policy and which of its inputs carry PHI; `McpServerBase` checks the declaration at registration, and the audit log redacts the declared inputs under `redact` and `block`.
+- **`REFUSAL_CODES.DATA_POLICY_BLOCKED`** -- The refusal for body data a policy withheld.
+- **`REFUSAL_CODES.MONITOR_BUSY`** -- The refusal for a run that needs the instance-wide Line-by-Line monitor while a session is active (Story 40.1).
+- **`REFUSAL_CODES.PRODUCTION_BUSY`** -- The refusal for a run that includes `%UnitTest.TestProduction` tests while a different production runs in the namespace, or while its state cannot be read (Story 40.3).
 
 ---
 
@@ -111,9 +125,9 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 
 ## Governance File & the `iris-mcp-governance` CLI
 
-`governance.ts` implements the policy engine (parse, seeds, 6-layer cascade, `configSource`) and `cli/governance.ts` the suite's second `bin` — **`iris-mcp-governance`** (built to `dist/cli/governance-cli.js`) — the scriptable management surface for the [`IRIS_GOVERNANCE_FILE`](../../README.md#governance-file-iris_governance_file) policy file (Epic 32). Both are **opt-in**: with the variable unset the servers never touch the filesystem, and the CLI is a standalone utility that changes nothing until you point it (or a server) at a file.
+`governance.ts` implements the policy engine (parse, seeds, the 7-step cascade including the parent-key inherited disable of Story 38.4, `configSource` with its `parent` value) and `cli/governance.ts` the suite's second `bin` — **`iris-mcp-governance`** (built to `dist/cli/governance-cli.js`) — the scriptable management surface for the [`IRIS_GOVERNANCE_FILE`](../../README.md#governance-file-iris_governance_file) policy file (Epic 32). Both are **opt-in**: with the variable unset the servers never touch the filesystem, and the CLI is a standalone utility that changes nothing until you point it (or a server) at a file.
 
-- **`iris-mcp-governance` bin** — `validate` (the server's exact loader error text on failure), `get`/`set`/`unset <key> [--profile <name>]` (file-layer edits; atomic temp+rename writes with automatic post-write re-validation and rollback), `preset read-only|full` (prints env-level guidance — writes nothing, the preset is env-sourced only), `effective [--profile]` and `diff` (the SAME shared cascade functions the servers compute with — imported, never reimplemented), and **`universe [--profile <name>] [--root <path>]`** (Story 32.2 — the FULL governed-key universe: the frozen baseline ∪ the five server packages' registered tool keys, derived from their built dist the same way the `iris-mcp-all` cross-package tests and the baseline generator do, ∪ the framework `iris_server_profiles` tool — rendered with the REAL `mutates`/default-enabled classifications, so post-foundation write keys seed default-DISABLED exactly as a running server reports; `--root` names a monorepo root or package container dir, otherwise the CLI auto-detects from its own install location). Default file resolution: `--file` wins over `IRIS_GOVERNANCE_FILE`; explicit path only, never discovered (architecture decision J1). Exit codes: 0 success / 1 operational failure (invalid file per the server loader, key not set for `unset`) / 2 usage error. `--json` on read commands emits exactly one parseable JSON object on every operational outcome, failures included. Full reference: the [suite README](../../README.md#iris-mcp-governance-cli).
+- **`iris-mcp-governance` bin** — `validate` (the server's exact loader error text on failure), `get`/`set`/`unset <key> [--profile <name>]` (file-layer edits; atomic temp+rename writes with automatic post-write re-validation and rollback), `preset read-only|full` (prints env-level guidance — writes nothing, the preset is env-sourced only), `effective [--profile]` and `diff` (the SAME shared cascade functions the servers compute with — imported, never reimplemented), and **`universe [--profile <name>] [--root <path>]`** (Story 32.2 — the FULL governed-key universe: the frozen baseline ∪ the five server packages' registered tool keys, derived from their built dist the same way the `iris-mcp-all` cross-package tests and the baseline generator do, ∪ the framework `iris_server_profiles` tool — rendered with the REAL `mutates`/default-enabled classifications and parent keys, so post-foundation write keys seed default-DISABLED exactly as a running server reports; `--root` names a monorepo root or package container dir, otherwise the CLI auto-detects from its own install location). Default file resolution: `--file` wins over `IRIS_GOVERNANCE_FILE`; explicit path only, never discovered (architecture decision J1). **`check [--file <path>] [--root <path>]`** (Story 39.0 — every key in `IRIS_GOVERNANCE` and the resolved file checked against that full universe; a key that is none of them has no effect on any server, and the command exits 1 with one message per key. A running server only warns about such a key at startup, and only for the tools it registers). Exit codes: 0 success / 1 operational failure (invalid file per the server loader, key not set for `unset`, a key that matches nothing for `check`) / 2 usage error. `--json` on read commands emits exactly one parseable JSON object on every operational outcome, failures included. Full reference: the [suite README](../../README.md#iris-mcp-governance-cli).
 - **Single-sourcing discipline.** The CLI composes `loadGovernanceFile`, `parseGovernanceConfig`, `parseGovernancePreset`, `effective`, `configSource`, `defaultSeed`, `getEffectivePolicy`, `getEffectiveConfigSources`, `GOVERNANCE_BASELINE`, and `BASELINE_ACTION_CLASSIFICATIONS` from this package — a policy written by the CLI is byte-for-byte what the servers will enforce, and `validate` failure text is identical to a server's startup failure.
 - **Caveat (post-foundation keys).** `effective`/`diff` render over the frozen baseline ∪ keys mentioned in any config layer; they cannot enumerate each server's registered tool keys (importing a server package would be a circular dependency). The `universe` command closes that gap by deriving the registered half from built dist (it needs the packages' `dist/tools/index.js` locatable — monorepo layout or npm siblings); `iris_server_profiles` on a running server remains the authoritative render.
 
@@ -147,7 +161,7 @@ The shared package provides the HTTP communication layer, MCP protocol handling,
 
 The connection flow is:
 1. Server starts and loads configuration from environment variables
-2. `McpServerBase` initializes the MCP transport (stdio or Streamable HTTP)
+2. `McpServerBase` initializes the MCP transport (stdio)
 3. On first tool call, the HTTP client connects to IRIS and negotiates the Atelier API version
 4. Bootstrap checks for the custom REST endpoint and deploys it if missing
 5. Tools execute via the Atelier REST API or custom REST endpoint as appropriate

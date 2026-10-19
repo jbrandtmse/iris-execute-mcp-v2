@@ -13,6 +13,7 @@ import {
   docDeleteTool,
   docListTool,
 } from "./doc.js";
+import { docEditTool } from "./doc-edit.js";
 import { docCompileTool } from "./compile.js";
 import {
   docIndexTool,
@@ -27,7 +28,7 @@ import { envDiffTool } from "./env-diff.js";
 import { envPromoteTool } from "./env-promote.js";
 import { packageListTool } from "./packages.js";
 import { routineIntermediateTool } from "./routine.js";
-import { sqlExecuteTool } from "./sql.js";
+import { sqlExecuteTool, sqlQueryTool } from "./sql.js";
 import { sqlAnalyzeTool } from "./sqlAnalyze.js";
 import { serverInfoTool, serverNamespaceTool } from "./server.js";
 import {
@@ -42,6 +43,7 @@ import {
   executeTestsTool,
 } from "./execute.js";
 import { testStatusTool } from "./test-status.js";
+import { testCoverageTool } from "./test-coverage.js";
 
 /** All tool definitions registered by the iris-dev-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -74,4 +76,7 @@ export const tools: ToolDefinition[] = [
   envDiffTool,
   envPromoteTool,
   testStatusTool,
+  docEditTool,
+  sqlQueryTool,
+  testCoverageTool,
 ];

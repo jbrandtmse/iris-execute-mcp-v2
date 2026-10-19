@@ -5,6 +5,8 @@
  * a validated {@link IrisConnectionConfig} object.
  */
 
+import type { DataPolicy, DataPolicySource } from "./data-policy.js";
+
 /** Configuration required to connect to an IRIS instance over HTTP. */
 export interface IrisConnectionConfig {
   /** Hostname or IP of the IRIS server. */
@@ -51,15 +53,40 @@ export interface IrisConnectionConfig {
    */
   sqlTimeoutMs?: number;
   /**
+   * Optional operator-set read-only mode for the SQL tools (`IRIS_SQL_READ_ONLY`).
+   * `true` makes every `iris_sql_execute` call read-only: only queries run, and a
+   * call parameter cannot weaken it. `undefined` when the variable is unset or
+   * empty: nothing is forced (today's behavior).
+   */
+  sqlReadOnly?: boolean;
+  /**
+   * Optional operator-set ceiling on the rows one SQL statement may change
+   * (`IRIS_SQL_MAX_ROWS_AFFECTED`, a non-negative integer; 0 is a valid ceiling).
+   * A call's `maxRowsAffected` can only tighten it. `undefined` when the variable
+   * is unset or empty: no ceiling (today's behavior).
+   */
+  sqlMaxRowsAffected?: number;
+  /**
    * Optional operator-set DEFAULT wait budget (in milliseconds, pre-converted
    * from the `IRIS_TEST_TIMEOUT` env var which is specified in seconds) for
-   * `iris_execute_tests`'s poll loop (Story 36.1 AC 36.1.4). Sits BELOW an
-   * explicit per-call `timeout` argument and ABOVE the tool's own hard-coded
+   * the poll loops of `iris_execute_tests` (Story 36.1 AC 36.1.4) and `iris_test_coverage`
+   * (Story 40.1). Sits BELOW an
+   * explicit per-call `timeout` argument and ABOVE each tool's own hard-coded
    * 120-second default in the resolution order (`timeout` arg > this >
-   * 120s). `undefined` when unset — the tool's 120-second default applies
+   * 120s). `undefined` when unset: each tool's 120-second default applies
    * unchanged (today's behavior).
    */
   testTimeoutMs?: number;
+  /**
+   * The PHI data policy of this connection's profile (Story 39.2): `block`, `redact` or `allow`.
+   * {@link loadConfig} never sets it. The profile registry carries the resolved value of every
+   * profile (see `data-policy.ts`), so a call's `ctx.config.dataPolicy` is the policy that applies to
+   * it. Absent on a hand-built config, which counts as `redact`. A value is never inherited from the
+   * `default` profile.
+   */
+  dataPolicy?: DataPolicy;
+  /** The channel that supplied {@link dataPolicy}. */
+  dataPolicySource?: DataPolicySource;
 }
 
 /**
@@ -79,12 +106,14 @@ export const DEFAULT_ACCEPT_LANGUAGE = "en-US,en;q=0.9";
  * | IRIS_PORT         | 52773        |
  * | IRIS_USERNAME     | *(required)* |
  * | IRIS_PASSWORD     | *(required)* |
- * | IRIS_NAMESPACE    | HSCUSTOM     |
+ * | IRIS_NAMESPACE    | USER         |
  * | IRIS_HTTPS        | false        |
  * | IRIS_TIMEOUT      | 60000        |
  * | IRIS_SQL_MAX_ROWS | *(unset — no cap)*  |
  * | IRIS_SQL_TIMEOUT  | *(unset — no per-request override)*, seconds |
- * | IRIS_TEST_TIMEOUT | *(unset — `iris_execute_tests` keeps its 120s default)*, seconds |
+ * | IRIS_SQL_READ_ONLY | *(unset: SQL tools are not forced read-only)*, `true` or `false` |
+ * | IRIS_SQL_MAX_ROWS_AFFECTED | *(unset: no rows-affected ceiling)*, non-negative integer |
+ * | IRIS_TEST_TIMEOUT | *(unset: `iris_execute_tests` and `iris_test_coverage` keep their 120s default)*, seconds |
  * | IRIS_ACCEPT_LANGUAGE | `en-US,en;q=0.9` |
  *
  * @throws {Error} When IRIS_USERNAME or IRIS_PASSWORD is not set.
@@ -92,6 +121,10 @@ export const DEFAULT_ACCEPT_LANGUAGE = "en-US,en;q=0.9";
  *   valid HTTP header field-value (non-printable-ASCII, CR, or LF).
  * @throws {Error} When IRIS_SQL_MAX_ROWS or IRIS_SQL_TIMEOUT is set to a
  *   non-positive or non-numeric value.
+ * @throws {Error} When IRIS_SQL_READ_ONLY is set to a value other than `true`
+ *   or `false` (case-insensitive).
+ * @throws {Error} When IRIS_SQL_MAX_ROWS_AFFECTED is set to a value that is
+ *   not a non-negative integer.
  * @throws {Error} When IRIS_TEST_TIMEOUT is set to a non-positive or
  *   non-numeric value.
  */
@@ -128,7 +161,7 @@ export function loadConfig(
 
   const username = env.IRIS_USERNAME;
   const password = env.IRIS_PASSWORD;
-  const namespace = env.IRIS_NAMESPACE ?? "HSCUSTOM";
+  const namespace = env.IRIS_NAMESPACE ?? "USER";
   const https = env.IRIS_HTTPS === "true";
 
   if (!username) {
@@ -180,6 +213,35 @@ export function loadConfig(
       );
     }
     sqlTimeoutMs = parsed * 1000;
+  }
+
+  // IRIS_SQL_READ_ONLY: optional "true"/"false" (case-insensitive). Empty or
+  // unset -> sqlReadOnly stays undefined (nothing forced, today's behavior).
+  const rawSqlReadOnly = env.IRIS_SQL_READ_ONLY;
+  let sqlReadOnly: boolean | undefined;
+  if (rawSqlReadOnly !== undefined && rawSqlReadOnly !== "") {
+    const lowered = rawSqlReadOnly.toLowerCase();
+    if (lowered !== "true" && lowered !== "false") {
+      throw new Error(
+        `IRIS_SQL_READ_ONLY must be "true" or "false". Received: "${rawSqlReadOnly}".`,
+      );
+    }
+    sqlReadOnly = lowered === "true";
+  }
+
+  // IRIS_SQL_MAX_ROWS_AFFECTED: optional non-negative integer ceiling on the
+  // rows one statement may change; 0 is a valid ceiling. Empty or unset ->
+  // sqlMaxRowsAffected stays undefined (no ceiling, today's behavior).
+  const rawSqlMaxRowsAffected = env.IRIS_SQL_MAX_ROWS_AFFECTED;
+  let sqlMaxRowsAffected: number | undefined;
+  if (rawSqlMaxRowsAffected !== undefined && rawSqlMaxRowsAffected !== "") {
+    const parsed = /^[0-9]+$/.test(rawSqlMaxRowsAffected) ? Number(rawSqlMaxRowsAffected) : Number.NaN;
+    if (!Number.isSafeInteger(parsed)) {
+      throw new Error(
+        `IRIS_SQL_MAX_ROWS_AFFECTED must be a non-negative integer. Received: "${rawSqlMaxRowsAffected}".`,
+      );
+    }
+    sqlMaxRowsAffected = parsed;
   }
 
   // IRIS_TEST_TIMEOUT (Story 36.1 AC 36.1.4): optional positive number of
@@ -251,6 +313,8 @@ export function loadConfig(
     acceptLanguage,
     ...(sqlMaxRows !== undefined ? { sqlMaxRows } : {}),
     ...(sqlTimeoutMs !== undefined ? { sqlTimeoutMs } : {}),
+    ...(sqlReadOnly !== undefined ? { sqlReadOnly } : {}),
+    ...(sqlMaxRowsAffected !== undefined ? { sqlMaxRowsAffected } : {}),
     ...(testTimeoutMs !== undefined ? { testTimeoutMs } : {}),
   };
 }

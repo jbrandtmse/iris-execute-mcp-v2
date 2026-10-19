@@ -12,7 +12,13 @@
  * Read-only (`mutates: "read"` — Rule #28), scope NS.
  */
 
-import { IrisApiError, type ToolDefinition } from "@iris-mcp/shared";
+import {
+  BLOCK_REASONS,
+  IrisApiError,
+  effectiveDataPolicy,
+  type DataPolicySummary,
+  type ToolDefinition,
+} from "@iris-mcp/shared";
 import { z } from "zod";
 
 /** Base URL for the custom ExecuteMCPv2 REST service. */
@@ -50,6 +56,38 @@ function renderDiagramText(d: DiagramEntry): string {
   return `Session ${d.sessionId}: ${d.messageCount} ${noun}${suffix}\n\`\`\`mermaid\n${d.mermaid}\n\`\`\``;
 }
 
+/**
+ * The error warning the IRIS-side correlator writes for an errored message: `Error on message <id>: <text>`.
+ * Only this template prefix is matched, never the text after it (AD-26: no content sniffing).
+ */
+const ERROR_WARNING = /^(Error on message \d+: ).*$/s;
+
+/** The same warning as a Mermaid comment line: the writer renders every warning as `<indent>%% <one line>`. */
+const ERROR_WARNING_LINE = /^([ \t]*%% Error on message \d+: )[^\r\n]*$/gm;
+
+/**
+ * The diagram result with the text of each error warning withheld (the `block` data policy): in `warnings[]` and
+ * in every Mermaid `%% Error on message <id>: ` line the prefix is kept and the rest becomes the fixed reason.
+ * Every other warning is untouched. The result gains `dataPolicy` with the number of warnings withheld.
+ */
+function withholdErrorText(result: DiagramResult): DiagramResult & { dataPolicy: DataPolicySummary } {
+  const reason = BLOCK_REASONS.diagramErrorText();
+  let withheld = 0;
+  const diagrams = (result.diagrams ?? []).map((d) => {
+    const warnings = (d.warnings ?? []).map((warning) => {
+      if (typeof warning !== "string" || !ERROR_WARNING.test(warning)) return warning;
+      withheld += 1;
+      return warning.replace(ERROR_WARNING, (_whole, prefix: string) => `${prefix}${reason}`);
+    });
+    const mermaid =
+      typeof d.mermaid === "string"
+        ? d.mermaid.replace(ERROR_WARNING_LINE, (_whole, prefix: string) => `${prefix}${reason}`)
+        : d.mermaid;
+    return { ...d, warnings, mermaid };
+  });
+  return { ...result, diagrams, dataPolicy: { policy: "block", redacted: 0, blocked: withheld } };
+}
+
 // ── iris_message_diagram ─────────────────────────────────────
 
 export const messageDiagramTool: ToolDefinition = {
@@ -63,7 +101,9 @@ export const messageDiagramTool: ToolDefinition = {
     "items as participants, sync (->>) vs async (-->>) calls, request/response pairing, " +
     "loop blocks compressing repeated patterns, and [ERROR] flags on failed messages; " +
     "anomalies are reported as warnings, and iris_production_messages remains the tool " +
-    "for raw message-row data.",
+    "for raw message-row data. Under the block PHI data policy (IRIS_DATA_POLICY) the text of " +
+    "error warnings, which can carry message content, is withheld with a fixed reason; under " +
+    "redact and allow it is shown unchanged.",
   inputSchema: z.object({
     sessionIds: z
       .array(z.number().int().positive())
@@ -110,6 +150,10 @@ export const messageDiagramTool: ToolDefinition = {
   },
   scope: "NS",
   mutates: "read",
+  // Story 39.7 (AD-26, decision #31): the policy governs every call, under `block` only. The audit entry
+  // carries `dataPolicy` from the response's own counts; under redact and allow the response has none, so the
+  // entry records the profile's policy with 0 counts.
+  dataPolicy: {},
   handler: async (args, ctx) => {
     const { sessionIds, labelMode, maxRows, dedup, namespace } = args as {
       sessionIds: number[];
@@ -119,6 +163,7 @@ export const messageDiagramTool: ToolDefinition = {
       namespace?: string;
     };
 
+    const blocked = effectiveDataPolicy(ctx.config) === "block";
     const ns = ctx.resolveNamespace(namespace);
     const params = new URLSearchParams();
     params.set("namespace", ns);
@@ -132,7 +177,9 @@ export const messageDiagramTool: ToolDefinition = {
 
     try {
       const response = await ctx.http.get(path);
-      const result = response.result as DiagramResult;
+      const result = blocked
+        ? withholdErrorText(response.result as DiagramResult)
+        : (response.result as DiagramResult);
       const diagrams = result.diagrams ?? [];
       const content =
         diagrams.length > 0
@@ -155,6 +202,9 @@ export const messageDiagramTool: ToolDefinition = {
               text: `Error generating message diagram: ${error.message}`,
             },
           ],
+          ...(blocked
+            ? { structuredContent: { dataPolicy: { policy: "block", redacted: 0, blocked: 0 } } }
+            : {}),
           isError: true,
         };
       }

@@ -36,6 +36,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
 import type { BootstrapResult } from "../bootstrap.js";
+import { makeEnvHarness } from "./env-harness.js";
 import { ProfileResolutionError } from "../profiles.js";
 
 // A successful, no-op bootstrap result (REST service already current).
@@ -121,50 +122,11 @@ async function callTool(server: any, name: string, args: unknown) {
   return callback(args);
 }
 
-/** Shared environment save/restore so this suite runs hermetically. */
-function makeEnvHarness() {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv = {
-    IRIS_USERNAME: process.env.IRIS_USERNAME,
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD,
-    IRIS_HOST: process.env.IRIS_HOST,
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
-    IRIS_PROFILES: process.env.IRIS_PROFILES,
-  };
-
-  function setup(): void {
-    bootstrapSpy.mockClear();
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return {
-    setup,
-    teardown,
-    get fetchMock() {
-      return fetchMock;
-    },
-  };
-}
+/** The shared env harness, with this file's bootstrap spy reset on every setup. */
+const ENV_OPTIONS = {
+  onSetup: () => bootstrapSpy.mockClear(),
+  connection: "unset",
+} as const;
 
 /** Stage the default profile's startup HEAD (health) + GET (version). */
 function stageDefaultStartup(fetchMock: ReturnType<typeof vi.fn>): void {
@@ -184,7 +146,7 @@ function stageProfileEstablishment(fetchMock: ReturnType<typeof vi.fn>): void {
 // ════════════════════════════════════════════════════════════════════
 
 describe("resolveProfileClient — back-compat snapshot (AC 27.0.1, Rule #19)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -237,7 +199,7 @@ describe("resolveProfileClient — back-compat snapshot (AC 27.0.1, Rule #19)", 
 // ════════════════════════════════════════════════════════════════════
 
 describe("resolveProfileClient — unknown profile (AC 27.0.1)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -275,7 +237,7 @@ describe("resolveProfileClient — unknown profile (AC 27.0.1)", () => {
 // ════════════════════════════════════════════════════════════════════
 
 describe("resolveProfileClient — second-profile establishment + isolation (AC 27.0.1)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 

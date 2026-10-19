@@ -444,19 +444,47 @@ describe("32-1-R3 — unknown top-level keys are preserved on write; layer-shape
     });
   });
 
-  it("a layer-SHAPED unknown key (\"globals\") warns that it has no effect, and is still preserved", async () => {
-    writeGovernance({ globals: { iris_doc_put: false }, global: { iris_sql_execute: true } });
+  it("a layer-SHAPED unknown key with a SCALAR value (\"globals\") warns that it has no effect, and is still preserved", async () => {
+    writeGovernance({ globals: "see global", global: { iris_sql_execute: true } });
     const { deps, stderr } = baseDeps();
     const code = await runCli(["set", "iris_doc_put", "true", "--file", file], deps);
     expect(code).toBe(0);
     expect(stderr.text).toContain('"globals"');
     expect(stderr.text).toContain("NO effect");
     expect(stderr.text).toContain("preserved as-is");
-    // The typo'd layer is preserved (never silently dropped), and the real
+    // The typo'd key is preserved (never silently dropped), and the real
     // layer got the write.
     expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
-      globals: { iris_doc_put: false },
+      globals: "see global",
       global: { iris_sql_execute: true, iris_doc_put: true },
+    });
+  });
+
+  // Story 38.7, DW-554: an OBJECT-valued layer typo is governance that would be silently ignored, so the
+  // server's own validator rejects the file, and set / unset / validate fail the same way, writing nothing.
+  describe.each([
+    ["an object-valued \"globals\" typo", { globals: { iris_doc_put: false }, global: { iris_sql_execute: true } }, "globals"],
+    ["a flat tool key", { iris_doc_put: false }, "iris_doc_put"],
+    ["a top-level profile layer", { prod: { iris_doc_put: false }, global: { iris_sql_execute: true } }, "prod"],
+  ])("a file with %s", (_label, document, key) => {
+    const expectedError = (): string =>
+      `Error: IRIS_GOVERNANCE_FILE is invalid: "${key}" is not a recognized top-level key, so it would be ignored. Use the documented shape {"global":{"<tool|tool:action>":true|false},"profiles":{"<profile>":{...}}}: put the key under "global" to apply it to every profile, or under "profiles" for one profile. (path: ${file})\n`;
+
+    it.each([
+      ["validate", ["validate", "--file"]],
+      ["set", ["set", "iris_doc_put", "true", "--file"]],
+      ["unset", ["unset", "iris_sql_execute", "--file"]],
+    ])("%s exits 1 with the validator's message and leaves the file byte-identical", async (_command, argv) => {
+      writeGovernance(document);
+      const before = readFileSync(file);
+      const { deps, stdout, stderr } = baseDeps();
+
+      const code = await runCli([...argv, file], deps);
+
+      expect(code).toBe(1);
+      expect(stderr.text).toBe(expectedError());
+      expect(stdout.text).not.toContain("is a valid governance file");
+      expect(readFileSync(file).equals(before)).toBe(true);
     });
   });
 
@@ -768,4 +796,61 @@ describe("32-4-R1 — VALUED_OPTIONS single-sourcing pin", () => {
     expect(source).toContain("const valuedOptions = VALUED_OPTIONS");
     expect(source).not.toMatch(/const valuedOptions = new Set\(/);
   });
+});
+
+// -- Story 39.2: the file's dataPolicy section ---------------------------
+
+describe("Story 39.2: the governance file's dataPolicy section", () => {
+  const DATA_POLICY = { global: "redact", profiles: { prod: "block", dev: "allow" } };
+  const repoRoot = path.resolve(__dirname, "..", "..", "..", "..");
+
+  it("validate accepts a file with a dataPolicy section, and does not count it as a layer", async () => {
+    writeGovernance({ global: { iris_doc_put: false }, dataPolicy: DATA_POLICY });
+    const { deps, stdout } = baseDeps();
+    const code = await runCli(["validate", "--file", file], deps);
+    expect(code).toBe(0);
+    expect(stdout.text).toContain("is a valid governance file (1 global key(s), 0 profile(s))");
+  });
+
+  it("validate rejects a malformed dataPolicy section with the loader's text, naming the key and not the value", async () => {
+    writeGovernance({ dataPolicy: { global: "SYNTHPHI-open" } });
+    const { deps, stderr } = baseDeps();
+    const code = await runCli(["validate", "--file", file], deps);
+    expect(code).toBe(1);
+    expect(stderr.text).toContain('"dataPolicy.global" must be "block", "redact" or "allow".');
+    expect(stderr.text).not.toContain("SYNTHPHI");
+  });
+
+  it("set keeps the dataPolicy section byte for byte, in its place, and the written file still validates", async () => {
+    const section = JSON.stringify(DATA_POLICY, null, 2).split("\n").join("\n  ");
+    writeGovernance(`{\n  "global": {\n    "iris_doc_put": true\n  },\n  "dataPolicy": ${section}\n}\n`);
+    const { deps } = baseDeps();
+    const code = await runCli(["set", "iris_sql_execute", "false", "--file", file], deps);
+    expect(code).toBe(0);
+    const written = readFileSync(file, "utf8");
+    expect(written).toContain(`"dataPolicy": ${section}`);
+    expect(JSON.parse(written)).toEqual({
+      global: { iris_doc_put: true, iris_sql_execute: false },
+      dataPolicy: DATA_POLICY,
+    });
+    expect(Object.keys(JSON.parse(written) as object)).toEqual(["global", "dataPolicy"]);
+    const again = baseDeps();
+    expect(await runCli(["validate", "--file", file], again.deps)).toBe(0);
+  });
+
+  it("unset keeps the dataPolicy section too", async () => {
+    writeGovernance({ global: { iris_doc_put: true }, dataPolicy: DATA_POLICY });
+    const unset = baseDeps();
+    expect(await runCli(["unset", "iris_doc_put", "--file", file], unset.deps)).toBe(0);
+    expect((JSON.parse(readFileSync(file, "utf8")) as { dataPolicy: unknown }).dataPolicy).toEqual(DATA_POLICY);
+  });
+
+  it("check accepts the file: the dataPolicy section is not a key", async () => {
+    writeGovernance({ global: { iris_doc_put: false }, dataPolicy: DATA_POLICY });
+    const { deps, stdout, stderr } = baseDeps();
+    const code = await runCli(["check", "--file", file, "--root", repoRoot], deps);
+    expect(stderr.text).toBe("");
+    expect(code).toBe(0);
+    expect(stdout.text).toContain("OK: all 1 key(s) in IRIS_GOVERNANCE_FILE");
+  }, 60_000);
 });

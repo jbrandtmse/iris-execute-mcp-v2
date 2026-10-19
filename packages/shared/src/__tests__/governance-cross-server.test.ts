@@ -31,6 +31,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
 import type { BootstrapResult } from "../bootstrap.js";
+import { makeEnvHarness } from "./env-harness.js";
 import type { ToolDefinition } from "../tool-types.js";
 
 const okBootstrap: BootstrapResult = {
@@ -205,44 +206,12 @@ function makeHostAwareFetch() {
 
 // ── Env harness ─────────────────────────────────────────────────────
 
-function makeEnvHarness() {
-  const originalFetch = globalThis.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let exitMock: any;
-  const savedEnv = {
-    IRIS_USERNAME: process.env.IRIS_USERNAME,
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD,
-    IRIS_HOST: process.env.IRIS_HOST,
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE,
-    IRIS_PROFILES: process.env.IRIS_PROFILES,
-    IRIS_GOVERNANCE: process.env.IRIS_GOVERNANCE,
-  };
-
-  function setup(): void {
-    bootstrapSpy.mockClear();
-    exitMock = vi
-      .spyOn(process, "exit")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((() => {}) as any);
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(console, "info").mockImplementation(() => {});
-    delete process.env.IRIS_GOVERNANCE;
-    delete process.env.IRIS_PROFILES;
-  }
-
-  function teardown(): void {
-    globalThis.fetch = originalFetch;
-    exitMock.mockRestore();
-    vi.restoreAllMocks();
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-
-  return { setup, teardown };
-}
+/** The shared env harness, with this file's bootstrap spy reset on every setup. The tests stage their own fetch. */
+const ENV_OPTIONS = {
+  onSetup: () => bootstrapSpy.mockClear(),
+  connection: "unset",
+  mockFetch: false,
+} as const;
 
 /**
  * Construct + start a server whose default profile is `defaultHost` and which
@@ -276,7 +245,7 @@ async function startServer(
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.5 AC 14.5.6(a) — per-profile session isolation across two servers (D1)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
@@ -371,7 +340,7 @@ describe("Story 14.5 AC 14.5.6(a) — per-profile session isolation across two s
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 14.5 AC 14.5.6(b) — uniform governance enforcement across two servers (D5)", () => {
-  const env = makeEnvHarness();
+  const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 

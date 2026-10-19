@@ -3,7 +3,7 @@
  *
  * Provides {@link docExportTool} — the inverse of {@link docLoadTool}.
  * Enumerates documents in an IRIS namespace via Atelier
- * `GET /docnames/{cat}/{type}` (or `/modified/{ts}`), fetches each
+ * `GET /docnames/{cat}/{type}`, fetches each
  * matching document's content, and writes it to a local directory
  * tree where dotted package segments become subdirectories.
  *
@@ -41,7 +41,13 @@ import {
 import { z } from "zod";
 import { booleanParam } from "./zod-helpers.js";
 import { docNameToFilePath } from "./load.js";
-import { extractAtelierContentArray } from "./doc.js";
+import { assertInsideRoot, validateLocalPath } from "./local-path.js";
+import {
+  DOC_TYPE_DESCRIPTION,
+  extractAtelierContentArray,
+  MODIFIED_SINCE_DESCRIPTION,
+  modifiedSinceUnsupported,
+} from "./doc.js";
 
 // ── Constants ─────────────────────────────────────────────────────────
 
@@ -140,7 +146,7 @@ function contentToBuffer(result: unknown): Buffer {
   return Buffer.from("", "utf-8");
 }
 
-/** Pull a doc name (string) out of an Atelier /docnames or /modified entry. */
+/** Pull a doc name (string) out of an Atelier /docnames entry. */
 function extractDocName(entry: unknown): string | undefined {
   if (typeof entry === "string") return entry;
   const name = (entry as { name?: unknown })?.name;
@@ -152,45 +158,6 @@ function extractServerTimestamp(entry: unknown): string | undefined {
   if (typeof entry !== "object" || entry === null) return undefined;
   const ts = (entry as { ts?: unknown; db?: unknown; upd?: unknown }).ts;
   return typeof ts === "string" ? ts : undefined;
-}
-
-/**
- * Hard-reject any user-supplied path that contains `..` segments or
- * that does not resolve to an absolute location on disk.
- *
- * Returns an error message string, or `undefined` if the path is safe.
- */
-function validateDestinationDir(destinationDir: string): string | undefined {
-  if (typeof destinationDir !== "string" || destinationDir.length === 0) {
-    return "destinationDir must be a non-empty string";
-  }
-  // Reject if the raw input contains traversal syntax.
-  const norm = destinationDir.replace(/\\/g, "/");
-  if (norm.split("/").some((seg) => seg === "..")) {
-    return `destinationDir '${destinationDir}' must not contain '..' (path traversal)`;
-  }
-  if (!path.isAbsolute(destinationDir)) {
-    return `destinationDir '${destinationDir}' must be an absolute path`;
-  }
-  return undefined;
-}
-
-/**
- * Assert that a resolved local path stays inside the destinationDir
- * root. Throws on escape (returned as a hard error — not a skip —
- * because this would indicate a server-controlled doc name trying to
- * write outside the caller's chosen sandbox).
- */
-function assertInsideRoot(resolvedPath: string, root: string): void {
-  const rootResolved = path.resolve(root);
-  const rootWithSep = rootResolved.endsWith(path.sep)
-    ? rootResolved
-    : rootResolved + path.sep;
-  if (resolvedPath !== rootResolved && !resolvedPath.startsWith(rootWithSep)) {
-    throw new Error(
-      `Refusing to write '${resolvedPath}': resolves outside destinationDir '${rootResolved}'`,
-    );
-  }
 }
 
 /**
@@ -224,7 +191,7 @@ export const docExportTool: ToolDefinition = {
     "('EnsLib.HTTP.GenericService.cls' → '<destinationDir>/EnsLib/HTTP/GenericService.cls'). " +
     "CSP paths keep their forward slashes. Writes a manifest.json recording every file " +
     "and every skipped item with a reason. Supports prefix/category/type filters, " +
-    "system/generated tri-states, modifiedSince incremental exports, overwrite policies " +
+    "system/generated tri-states, overwrite policies " +
     "(never/ifDifferent/always), Windows long-path workaround via useShortPaths, " +
     "bounded concurrency, and cancellation tolerance. Inverse of iris_doc_load. " +
     "Note: some namespaces include CSP static assets (e.g., /csp/.../*.css) in docnames " +
@@ -261,13 +228,7 @@ export const docExportTool: ToolDefinition = {
         "(.mac/.int/.inc/.bas/.mvi/.mvb). CSP = CSP/ZEN pages. " +
         "OTH = other Studio document types. * = all (default).",
       ),
-    type: z
-      .string()
-      .optional()
-      .describe(
-        "Document type within category — the file extension without the dot " +
-        "(e.g., 'cls', 'mac', 'inc'). Default: all types in the chosen category.",
-      ),
+    type: z.string().optional().describe(DOC_TYPE_DESCRIPTION),
     generated: z
       .enum(["true", "false", "both"])
       .optional()
@@ -282,14 +243,7 @@ export const docExportTool: ToolDefinition = {
         "System-package tri-state: 'false' (default) excludes '%*'; " +
         "'true' includes both user and system; 'only' returns only '%*'.",
       ),
-    modifiedSince: z
-      .string()
-      .optional()
-      .describe(
-        "ISO 8601 timestamp (e.g., '2026-04-05T00:00:00Z'). When provided, only " +
-        "documents modified since this time are exported (uses Atelier /modified/ " +
-        "endpoint).",
-      ),
+    modifiedSince: z.string().optional().describe(MODIFIED_SINCE_DESCRIPTION),
     namespace: z
       .string()
       .optional()
@@ -373,13 +327,16 @@ export const docExportTool: ToolDefinition = {
     const ns = ctx.resolveNamespace(a.namespace);
 
     // ── Validate destinationDir (path-traversal hard guard) ───────
-    const validationError = validateDestinationDir(destinationDir);
+    const validationError = validateLocalPath(destinationDir, "destinationDir");
     if (validationError) {
       return {
         content: [{ type: "text", text: validationError }],
         isError: true,
       };
     }
+
+    // modifiedSince is refused before any request.
+    if (modifiedSince) return modifiedSinceUnsupported("exported");
 
     const rootAbs = path.resolve(destinationDir);
     const useShort = useShortPaths && process.platform === "win32";
@@ -394,23 +351,14 @@ export const docExportTool: ToolDefinition = {
     };
 
     // ── Enumerate docs via Atelier ────────────────────────────────
-    let fullPath: string;
-    if (modifiedSince) {
-      fullPath = atelierPath(
-        ctx.atelierVersion,
-        ns,
-        `modified/${encodeURIComponent(modifiedSince)}`,
-      );
-    } else {
-      const base = atelierPath(ctx.atelierVersion, ns, `docnames/${category}/${type}`);
-      const params = new URLSearchParams();
-      // generated: "both" → omit param; "true"/"false" → 1/0
-      if (generated !== "both") {
-        params.set("generated", generated === "true" ? "1" : "0");
-      }
-      const queryString = params.toString();
-      fullPath = queryString ? `${base}?${queryString}` : base;
+    // `generated`: "both" -> omit the param; "true"/"false" -> 1/0.
+    const params = new URLSearchParams();
+    if (generated !== "both") {
+      params.set("generated", generated === "true" ? "1" : "0");
     }
+    const queryString = params.toString();
+    const base = atelierPath(ctx.atelierVersion, ns, `docnames/${category}/${type}`);
+    const fullPath = queryString ? `${base}?${queryString}` : base;
 
     const listResponse = await ctx.http.get(fullPath);
     const enumerated = extractAtelierContentArray(listResponse.result);

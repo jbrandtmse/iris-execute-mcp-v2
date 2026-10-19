@@ -1,0 +1,173 @@
+{
+  "capturedWithBootstrapVersion": "d440a659ba1e",
+  "irisVersion": "IRIS for UNIX (Ubuntu Server LTS for ARM64 Containers) 2026.2 (Build 221U) Fri Jun 26 2026 09:59:12 EDT",
+  "capturedAt": "2026-10-17T07:00:57.705Z",
+  "command": "STORY_39_3_CAPTURE=1 pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-39-3-body-search-live-gate.test.ts -t capture",
+  "cases": [
+    {
+      "name": "A: window alone",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP393A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"headers\",\"limit\":100,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[{\"id\":1,\"sessionId\":393001,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:00\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":2,\"sessionId\":393002,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"2\",\"timeCreated\":\"2001-02-03 08:00:01\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":3,\"sessionId\":393003,\"type\":\"Request\",\"status\":\"Error\",\"isError\":true,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Other\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"3\",\"timeCreated\":\"2001-02-03 08:00:02\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":4,\"sessionId\":393004,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"4\",\"timeCreated\":\"2001-02-03 08:00:03\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":5,\"sessionId\":393005,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"5\",\"timeCreated\":\"2001-02-03 08:00:03\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":6,\"sessionId\":393006,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"6\",\"timeCreated\":\"2001-02-03 08:00:05\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":7,\"sessionId\":393007,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Other\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:06\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":8,\"sessionId\":393008,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"999\",\"timeCreated\":\"2001-02-03 08:00:07\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":9,\"sessionId\":393009,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:08\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":10,\"sessionId\":393010,\"type\":\"Response\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:09\",\"timeProcessed\":\"\",\"correspondingMessageId\":1},{\"id\":11,\"sessionId\":393011,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:10\",\"timeProcessed\":\"\",\"correspondingMessageId\":null}],\"hasMore\":false}}"
+    },
+    {
+      "name": "A: source",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP393A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "source": "Story393.Source"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"headers\",\"limit\":100,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[{\"id\":1,\"sessionId\":393001,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:00\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":2,\"sessionId\":393002,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"2\",\"timeCreated\":\"2001-02-03 08:00:01\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":3,\"sessionId\":393003,\"type\":\"Request\",\"status\":\"Error\",\"isError\":true,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Other\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"3\",\"timeCreated\":\"2001-02-03 08:00:02\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":4,\"sessionId\":393004,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"4\",\"timeCreated\":\"2001-02-03 08:00:03\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":5,\"sessionId\":393005,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"5\",\"timeCreated\":\"2001-02-03 08:00:03\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":6,\"sessionId\":393006,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"6\",\"timeCreated\":\"2001-02-03 08:00:05\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":7,\"sessionId\":393007,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Other\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:06\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":8,\"sessionId\":393008,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"999\",\"timeCreated\":\"2001-02-03 08:00:07\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":9,\"sessionId\":393009,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:08\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":10,\"sessionId\":393010,\"type\":\"Response\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:09\",\"timeProcessed\":\"\",\"correspondingMessageId\":1},{\"id\":11,\"sessionId\":393011,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"EnsLib.HL7.Message\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:10\",\"timeProcessed\":\"\",\"correspondingMessageId\":null}],\"hasMore\":false}}"
+    },
+    {
+      "name": "A: target",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP393A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "target": "Story393.Other"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"headers\",\"limit\":100,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[{\"id\":3,\"sessionId\":393003,\"type\":\"Request\",\"status\":\"Error\",\"isError\":true,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Other\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"3\",\"timeCreated\":\"2001-02-03 08:00:02\",\"timeProcessed\":\"\",\"correspondingMessageId\":null}],\"hasMore\":false}}"
+    },
+    {
+      "name": "A: bodyClass",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP393A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "bodyClass": "Story393.Body"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"headers\",\"limit\":100,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[{\"id\":1,\"sessionId\":393001,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:00\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":2,\"sessionId\":393002,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"2\",\"timeCreated\":\"2001-02-03 08:00:01\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":3,\"sessionId\":393003,\"type\":\"Request\",\"status\":\"Error\",\"isError\":true,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Other\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"3\",\"timeCreated\":\"2001-02-03 08:00:02\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":4,\"sessionId\":393004,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"4\",\"timeCreated\":\"2001-02-03 08:00:03\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":5,\"sessionId\":393005,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"5\",\"timeCreated\":\"2001-02-03 08:00:03\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":6,\"sessionId\":393006,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"6\",\"timeCreated\":\"2001-02-03 08:00:05\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":8,\"sessionId\":393008,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"999\",\"timeCreated\":\"2001-02-03 08:00:07\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":10,\"sessionId\":393010,\"type\":\"Response\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:09\",\"timeProcessed\":\"\",\"correspondingMessageId\":1}],\"hasMore\":false}}"
+    },
+    {
+      "name": "A: errorOnly",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP393A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "errorOnly": true
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"headers\",\"limit\":100,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[{\"id\":3,\"sessionId\":393003,\"type\":\"Request\",\"status\":\"Error\",\"isError\":true,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Other\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"3\",\"timeCreated\":\"2001-02-03 08:00:02\",\"timeProcessed\":\"\",\"correspondingMessageId\":null}],\"hasMore\":false}}"
+    },
+    {
+      "name": "A: status Errored",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP393A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "status": "Errored"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"headers\",\"limit\":100,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[{\"id\":3,\"sessionId\":393003,\"type\":\"Request\",\"status\":\"Error\",\"isError\":true,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Other\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"3\",\"timeCreated\":\"2001-02-03 08:00:02\",\"timeProcessed\":\"\",\"correspondingMessageId\":null}],\"hasMore\":false}}"
+    },
+    {
+      "name": "A: limit 2, page 1",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP393A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "limit": 2
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"headers\",\"limit\":2,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[{\"id\":1,\"sessionId\":393001,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"1\",\"timeCreated\":\"2001-02-03 08:00:00\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":2,\"sessionId\":393002,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"2\",\"timeCreated\":\"2001-02-03 08:00:01\",\"timeProcessed\":\"\",\"correspondingMessageId\":null}],\"hasMore\":true}}"
+    },
+    {
+      "name": "A: limit 2, page 2",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP393A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "limit": 2,
+        "afterTimeCreated": "2001-02-03 08:00:01",
+        "afterId": 2
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"headers\",\"limit\":2,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":true,\"rows\":[{\"id\":3,\"sessionId\":393003,\"type\":\"Request\",\"status\":\"Error\",\"isError\":true,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Other\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"3\",\"timeCreated\":\"2001-02-03 08:00:02\",\"timeProcessed\":\"\",\"correspondingMessageId\":null},{\"id\":4,\"sessionId\":393004,\"type\":\"Request\",\"status\":\"Completed\",\"isError\":false,\"sourceItem\":\"Story393.Source\",\"targetItem\":\"Story393.Target\",\"bodyClassName\":\"Story393.Body\",\"bodyId\":\"4\",\"timeCreated\":\"2001-02-03 08:00:03\",\"timeProcessed\":\"\",\"correspondingMessageId\":null}],\"hasMore\":true}}"
+    },
+    {
+      "name": "A: no from",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP393A",
+        "to": "2001-02-03T09:00:00Z"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Required parameter 'from' is missing or empty\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Required parameter &#39;from&#39; is missing or empty\"]}],\"summary\":\"ERROR #5001: Required parameter &#39;from&#39; is missing or empty\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "A: window over 7 days",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP393A",
+        "from": "2001-01-27T00:00:00Z",
+        "to": "2001-02-03T00:00:01Z"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: The 'from'/'to' window exceeds the maximum of 7 days; narrow the range and retry\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"The &#39;from&#39;/&#39;to&#39; window exceeds the maximum of 7 days; narrow the range and retry\"]}],\"summary\":\"ERROR #5001: The &#39;from&#39;/&#39;to&#39; window exceeds the maximum of 7 days; narrow the range and retry\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "A: limit 0",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP393A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "limit": 0
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Parameter 'limit' must be an integer from 1 to 500\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Parameter &#39;limit&#39; must be an integer from 1 to 500\"]}],\"summary\":\"ERROR #5001: Parameter &#39;limit&#39; must be an integer from 1 to 500\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "A: unknown status",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP393A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "status": "Bogus"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Parameter 'status' must be one of: Created, Queued, Delivered, Discarded, Suspended, Deferred, Aborted, Errored, Completed\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Parameter &#39;status&#39; must be one of: Created, Queued, Delivered, Discarded, Suspended, Deferred, Aborted, Errored, Completed\"]}],\"summary\":\"ERROR #5001: Parameter &#39;status&#39; must be one of: Created, Queued, Delivered, Discarded, Suspended, Deferred, Aborted, Errored, Completed\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "A: sessionId not an integer",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP393A",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z",
+        "sessionId": "x1"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[{\"error\":\"ERROR #5001: Parameter 'sessionId' must be an integer from 1 to 999999999999999999\",\"code\":5001,\"domain\":\"%ObjectErrors\",\"id\":\"GeneralError\",\"params\":[\"Parameter &#39;sessionId&#39; must be an integer from 1 to 999999999999999999\"]}],\"summary\":\"ERROR #5001: Parameter &#39;sessionId&#39; must be an integer from 1 to 999999999999999999\"},\"console\":[],\"result\":{}}"
+    },
+    {
+      "name": "C: window alone",
+      "body": {
+        "action": "headers",
+        "namespace": "EXECMCPTMP393C",
+        "from": "2001-02-03T07:00:00Z",
+        "to": "2001-02-03T09:00:00Z"
+      },
+      "status": 200,
+      "text": "{\"status\":{\"errors\":[],\"summary\":\"\"},\"console\":[],\"result\":{\"action\":\"headers\",\"limit\":100,\"from\":\"2001-02-03 07:00:00\",\"to\":\"2001-02-03 09:00:00\",\"interopEnabled\":false,\"rows\":[],\"hasMore\":false}}"
+    }
+  ]
+}

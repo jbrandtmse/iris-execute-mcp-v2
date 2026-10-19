@@ -126,6 +126,45 @@ export interface ToolDefinition {
    * tool name with no action, so an action-keyed `defaultEnabled` cannot address it.
    */
   defaultEnabled?: string[];
+  /**
+   * The existing governance key whose capability every key of this tool re-exposes
+   * (architecture decisions AD-4 and AD-6).
+   *
+   * A tool that offers a narrower, guarded way to do what an existing key does
+   * declares that key here (`iris_doc_edit` declares `iris_doc_put`). When the
+   * parent is explicitly disabled, every key of this tool seeds disabled too, so an
+   * operator who turned the capability off does not find it still open through the
+   * new tool. "Explicitly disabled" means the first explicit layer that sets the
+   * parent, in cascade order, sets it `false`. An explicit setting on a key of this
+   * tool still wins, and the effective policy reports a key that inherited the
+   * disable as source `parent`.
+   *
+   * The parent must be a baseline key or a key of another registered tool, must not
+   * be one of this tool's own keys, and must not itself have a parent. A tool that
+   * owns a baseline key cannot declare one. `buildParentKeys` and
+   * `assertParentKeysKnown` fail fast at registration otherwise. With no tool
+   * declaring a parent, the governance policy is byte-for-byte unchanged.
+   */
+  parent?: string;
+  /**
+   * The PHI data policy declaration of a tool that returns message-body data (Story 39.2, AD-19 and
+   * AD-26). A tool without it is outside the data policy: it is either residual or not applicable, as
+   * `tool_support.md` records.
+   *
+   * - `actions` lists the `action` values the policy governs. Absent, the policy governs every call.
+   *   Each one must be a member of the tool's `action` enum.
+   * - `phiInputs` lists the top-level input keys that carry PHI (a search value, a body filter value).
+   *   The audit log redacts those values under the `redact` and `block` policies and for an unresolved
+   *   profile. Each key must exist in the tool's input schema, and `server` is never one. This is a
+   *   declaration about the schema; the audit log never decides by matching parameter names.
+   *
+   * `McpServerBase` validates both lists at registration and throws, naming the tool, on a
+   * mismatch.
+   */
+  dataPolicy?: {
+    actions?: readonly string[];
+    phiInputs?: readonly string[];
+  };
   /** Async handler invoked when the tool is called. */
   handler: (args: unknown, context: ToolContext) => Promise<ToolResult>;
 }

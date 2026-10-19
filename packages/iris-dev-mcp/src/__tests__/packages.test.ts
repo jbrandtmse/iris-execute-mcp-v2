@@ -210,61 +210,50 @@ describe("iris_package_list", () => {
     expect(sc.totalDocs).toBe(3);
   });
 
-  it("calls /modified/{ts} endpoint when modifiedSince is set and aggregates the result", async () => {
-    const modifiedDocs = [
-      doc("MyApp.Updated.cls"),
-      doc("MyApp.Changed.cls"),
-      doc("Other.New.cls"),
-    ];
-    mockHttp.get.mockResolvedValue(envelope({ content: modifiedDocs }));
-
+  it("refuses a non-empty modifiedSince with the unsupported text, no code and no HTTP request (Story 38.7, DW-528)", async () => {
     const result = await packageListTool.handler(
-      { modifiedSince: "2026-04-05T00:00:00Z" },
+      { modifiedSince: "2026-04-05T00:00:00Z", generated: true, depth: 2 },
       ctx,
     );
 
-    expect(mockHttp.get).toHaveBeenCalledWith(
-      `/api/atelier/v7/USER/modified/${encodeURIComponent("2026-04-05T00:00:00Z")}`,
-    );
-    const sc = result.structuredContent as {
-      packages: Array<{ name: string; docCount: number }>;
-      totalDocs: number;
-    };
-    expect(sc.packages).toEqual([
-      { name: "MyApp", docCount: 2, depth: 1 },
-      { name: "Other", docCount: 1, depth: 1 },
+    expect(mockHttp.get).not.toHaveBeenCalled();
+    expect(mockHttp.head).not.toHaveBeenCalled();
+    expect(result).toStrictEqual({
+      content: [
+        {
+          type: "text",
+          text:
+            "modifiedSince is not supported, so nothing was counted: IRIS has no way to list documents changed since a timestamp " +
+            "(its change list works from a database hash). " +
+            "Omit modifiedSince; to find recent changes, list the documents with iris_doc_list and compare each one's ts.",
+        },
+      ],
+      isError: true,
+    });
+  });
+
+  it("an empty or absent modifiedSince is the unchanged docnames request and rollup", async () => {
+    mockHttp.get.mockResolvedValue(envelope({ content: [doc("MyApp.Updated.cls"), doc("Other.New.cls")] }));
+
+    const withEmpty = await packageListTool.handler({ modifiedSince: "", generated: true }, ctx);
+    const without = await packageListTool.handler({ generated: true }, ctx);
+
+    expect(mockHttp.get.mock.calls).toEqual([
+      ["/api/atelier/v7/USER/docnames/*/*?generated=1"],
+      ["/api/atelier/v7/USER/docnames/*/*?generated=1"],
     ]);
-    expect(sc.totalDocs).toBe(3);
+    expect(withEmpty).toStrictEqual(without);
+    expect((withEmpty.structuredContent as { totalDocs: number }).totalDocs).toBe(2);
   });
 
-  it("includes generated=1 when both modifiedSince and generated:true are set", async () => {
-    mockHttp.get.mockResolvedValue(envelope({ content: [] }));
+  it("the modifiedSince description says the parameter is not supported, and the tool description no longer promises the filter", () => {
+    const shape = packageListTool.inputSchema.shape as Record<string, { description?: string }>;
 
-    await packageListTool.handler(
-      { modifiedSince: "2026-04-05T00:00:00Z", generated: true },
-      ctx,
+    expect(shape.modifiedSince?.description).toBe(
+      "Not supported: IRIS cannot filter documents by modification time, so a call that sets it is refused " +
+        "and changes nothing; compare the ts of the documents iris_doc_list returns instead.",
     );
-
-    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
-    expect(calledPath).toContain(
-      `/modified/${encodeURIComponent("2026-04-05T00:00:00Z")}`,
-    );
-    expect(calledPath).toContain("generated=1");
-  });
-
-  it("omits generated query param on /modified/ branch when generated is undefined", async () => {
-    mockHttp.get.mockResolvedValue(envelope({ content: [] }));
-
-    await packageListTool.handler(
-      { modifiedSince: "2026-04-05T00:00:00Z" },
-      ctx,
-    );
-
-    const calledPath = mockHttp.get.mock.calls[0]?.[0] as string;
-    expect(calledPath).toContain(
-      `/modified/${encodeURIComponent("2026-04-05T00:00:00Z")}`,
-    );
-    expect(calledPath).not.toContain("generated=");
+    expect(packageListTool.description).not.toContain("modifiedSince");
   });
 
   it("returns empty packages/count/totalDocs for an empty namespace", async () => {

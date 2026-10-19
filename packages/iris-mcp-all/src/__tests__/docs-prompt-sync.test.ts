@@ -19,9 +19,9 @@
  *
  *   1. Every registered prompt's `name` appears in the root README.md.
  *   2. Each owning server's per-server README.md lists exactly its own
- *      prompts (ops 2, dev 3, interop 3, admin 2), and `iris-data-mcp`'s
- *      README does not claim any of the 10 registered prompt names.
- *   3. The root README's "102 tools" claim is still present — a literal
+ *      prompts (ops 2, dev 5, interop 4, admin 2), and `iris-data-mcp`'s
+ *      README does not claim any registered prompt name.
+ *   3. The root README's "110 tools" claim is still present — a literal
  *      guard against prompts silently inflating the documented tool count
  *      (Rule #31: prompts are a framework/protocol surface, not tools).
  *
@@ -47,8 +47,8 @@ const root = resolve(__dirname, "../../../..");
 /** Expected prompt count per owning server package (Story 25.2 AC 25.2.1 / Task 2). */
 const EXPECTED_COUNTS: Record<string, number> = {
   "iris-ops-mcp": 2,
-  "iris-dev-mcp": 4,
-  "iris-interop-mcp": 3,
+  "iris-dev-mcp": 5,
+  "iris-interop-mcp": 4,
   "iris-admin-mcp": 2,
 };
 
@@ -82,7 +82,7 @@ describe("prompts documentation stays in sync with the registered prompt catalog
     }
   });
 
-  it("iris-data-mcp's README does not claim any of the 10 registered prompt names (it ships none in v1)", async () => {
+  it("iris-data-mcp's README does not claim any registered prompt name (it ships none in v1)", async () => {
     const prompts = await loadAllPrompts(root);
     const dataReadme = readReadme("iris-data-mcp");
 
@@ -115,14 +115,16 @@ describe("prompts documentation stays in sync with the registered prompt catalog
     }
   });
 
-  it("the root README still advertises 105 tools — prompts must not inflate the documented tool count (Rule #31)", () => {
+  it("the root README still advertises 110 tools - prompts must not inflate the documented tool count (Rule #31)", () => {
     // The literal count itself moves only when a real TOOL is added/removed
     // (e.g. Epic 27's iris_env_diff/iris_env_promote, dev 26 -> 28, suite
     // 102 -> 104; Story 36.2's iris_test_status, dev 28 -> 29, suite 104 ->
-    // 105) — never when a PROMPT is added/removed (Rule #31). This test's
+    // 105; Story 38.4's iris_doc_edit, dev 29 -> 30, suite 105 -> 106; Story 38.5's
+    // iris_sql_query, dev 30 -> 31, suite 106 -> 107; Story 39.1's iris_message_search, interop 22 -> 23, suite 107 -> 108; Story 39.5's iris_message_body, interop 23 -> 24, suite 108 -> 109) -
+    // never when a PROMPT is added/removed (Rule #31). This test's
     // job is the latter guarantee, not pinning the literal forever.
     const rootReadme = readFileSync(resolve(root, "README.md"), "utf-8");
-    expect(rootReadme).toContain("105 tools");
+    expect(rootReadme).toContain("110 tools");
   });
 
   // CR 27.4-1 (resolved Story 29.3 burn-down): `docs/migration-v1-v2.md` had
@@ -131,9 +133,9 @@ describe("prompts documentation stays in sync with the registered prompt catalog
   // surfaces, but the migration guide was NOT one of those 5 scoped
   // surfaces). This pins the fix and guards against the migration guide
   // silently drifting stale again alongside the root README's own count.
-  it("docs/migration-v1-v2.md advertises 105 tools, not the stale 100 (CR 27.4-1)", () => {
+  it("docs/migration-v1-v2.md advertises 110 tools, not the stale 100 (CR 27.4-1)", () => {
     const migrationGuide = readFileSync(resolve(root, "docs/migration-v1-v2.md"), "utf-8");
-    expect(migrationGuide).toContain("105 tools");
+    expect(migrationGuide).toContain("110 tools");
     expect(migrationGuide).not.toContain("100 tools");
   });
 

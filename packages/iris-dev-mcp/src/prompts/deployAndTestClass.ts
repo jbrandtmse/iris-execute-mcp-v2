@@ -4,18 +4,26 @@
  *
  * Walks the deploy loop: `iris_doc_load` with a GLOB-PREFIXED path (Rule
  * #17), a compile-error fix loop, then `iris_execute_tests` with the
- * returned-`total`-vs-expected check (Rule #35). Server: iris-dev-mcp.
+ * returned-`total`-vs-expected check (Rule #35). When the user asks for coverage,
+ * an optional last step runs `iris_test_coverage` and copes with a hidden tool,
+ * a `GOVERNANCE_DISABLED`, `MONITOR_BUSY` or `PRODUCTION_BUSY` refusal, a
+ * `running` result and a class that a documentation-only edit left
+ * `not-up-to-date` (Story 40.4). Step 4 ends with the shared `PRODUCTION_BUSY`
+ * note, which also covers a refusal whose production state could not be read
+ * (Story 40.5). Server: iris-dev-mcp.
  */
 
 import type { PromptDefinition } from "@iris-mcp/shared";
 import { argOrPlaceholder as arg } from "@iris-mcp/shared";
+import { PRODUCTION_BUSY_NOTE } from "./productionBusyNote.js";
 
 export const deployAndTestClassPrompt: PromptDefinition = {
   name: "deploy-and-test-class",
   title: "Deploy And Test Class",
   description:
     "Deploy an ObjectScript class or package to IRIS (iris_doc_load, glob-path form), fix " +
-    "compile errors, then run its unit tests (iris_execute_tests) with a total-count check.",
+    "compile errors, then run its unit tests (iris_execute_tests) with a total-count check and, " +
+    "when asked, measure their line coverage (iris_test_coverage).",
   arguments: [
     {
       name: "classOrPackage",
@@ -31,13 +39,14 @@ export const deployAndTestClassPrompt: PromptDefinition = {
 
 Target: \`${target}\`
 
-1. Deploy: call \`iris_doc_load\` with a **glob-prefixed path** rooted at the local source directory this class/package lives under, e.g. \`c:/path/to/src/**/${target.replace(/\./g, "/")}*.cls\` — a bare (non-glob) file path derives an unqualified class name and the upload is REFUSED when it disagrees with the file's own Class declaration (Rule #17), so ALWAYS include a directory prefix ending in \`**/*.cls\` or \`**/<ClassName>.cls\`. Pass \`compile: true\`.
-2. If the response reports compile errors, read each error's document/line/message, fix the SOURCE \`.cls\` file on disk (never edit generated/compiled output), and re-run step 1. Repeat until \`iris_doc_load\` reports zero compile errors.
+1. Deploy: call \`iris_doc_load\` with a **glob-prefixed path** rooted at the local source directory this class/package lives under, e.g. \`c:/path/to/src/**/${target.replace(/\./g, "/")}*.cls\` — a bare (non-glob) file path derives an unqualified class name and the upload is REFUSED when it disagrees with the file's own Class declaration, so ALWAYS include a directory prefix ending in \`**/*.cls\` or \`**/<ClassName>.cls\`. Pass \`compile: true\`.
+2. If the response reports compile errors, read each error's document/line/message, fix the SOURCE \`.cls\` file on disk (never edit generated/compiled output), and re-run step 1. A class that has no local source file (it exists only in IRIS) is fixed in place instead: read the reported lines with a ranged \`iris_doc_get\` (\`startLine\`/\`endLine\`), change them with \`iris_doc_edit\` (\`action: "apply"\`, each edit's \`expected\` built from the read's lines with every line followed by a line break), and run \`iris_doc_compile\` on the class (the \`edit-and-test-class\` prompt walks that loop). Repeat until \`iris_doc_load\` (or \`iris_doc_compile\`, for a class fixed in place) reports zero compile errors.
 3. Determine the test level: if \`${target}\` names a single class ending in a recognizable test-class pattern (or the user says "just this class"), use \`level: "class"\`; if it names a package, use \`level: "package"\`; if the user names one specific test method, use \`level: "method"\` with \`target: "ClassName:MethodName"\`.
-4. Call \`iris_execute_tests\` with \`target: "${target}"\` and the chosen \`level\`.
-5. **If the response has \`status: "running"\` (\`isError: false\`), the run has NOT finished — do NOT treat it as a result and do NOT re-submit the same target** (that starts a second concurrent run against shared fixtures). Its top-level \`total\` does not exist; only \`partial.total\` does, and that is a drained-so-far subset, never a final count. Re-attach instead: call \`iris_test_status\` with \`action: "poll"\`, the response's \`jobId\` (and/or \`runIndex\`) and its \`namespace\` — it builds the SAME shapes from \`%UnitTest_Result\` authoritatively once finished. If \`iris_test_status\` is hidden under your current tool-visibility preset, the manual route in the response's \`hint\` still works: the \`runIndex\` (the response's own, or \`iris_global_get\` on \`IRIS.TempAtelierAsyncQueue(<jobId>,"unittest","id")\`), then \`iris_sql_execute\` joining \`%UnitTest_Result.TestMethod\` → \`TestCase\` → \`TestSuite\` → \`TestInstance\` \`WHERE ti.InstanceIndex = <runIndex>\` (only \`TestInstance\` has that column; never \`MAX(InstanceIndex)\`) — those rows exist while the run is still executing, so treat them as final only once \`TestInstance.DateTime\` (the hint's \`FinishedAt\`) is non-empty.
-6. Otherwise, **compare the returned \`total\` against the expected number of test methods** (count them from the source file(s) you just deployed, or ask the user). \`iris_execute_tests\` can return an early PARTIAL snapshot — all passing, fewer tests than exist (Rule #35) — which looks identical to a genuine green run unless the count is checked.
+4. Call \`iris_execute_tests\` with \`target: "${target}"\` and the chosen \`level\`. ${PRODUCTION_BUSY_NOTE}
+5. **If the response has \`status: "running"\` (\`isError: false\`), the run has NOT finished — do NOT treat it as a result and do NOT re-submit the same target** (that starts a second concurrent run against shared fixtures). Its top-level \`total\` does not exist; only \`partial.total\` does, and that is a drained-so-far subset, never a final count. Re-attach instead: call \`iris_test_status\` with \`action: "poll"\`, the response's \`jobId\` (and/or \`runIndex\`) and its \`namespace\` — it builds the SAME shapes from \`%UnitTest_Result\` authoritatively once finished. If \`iris_test_status\` is hidden under your current tool-visibility preset, the manual route in the response's \`hint\` still works: the \`runIndex\` (the response's own, or \`iris_global_get\` on \`IRIS.TempAtelierAsyncQueue(<jobId>,"unittest","id")\`), then \`iris_sql_query\` (with \`parameters: [<runIndex>]\`) joining \`%UnitTest_Result.TestMethod\` → \`TestCase\` → \`TestSuite\` → \`TestInstance\` \`WHERE ti.InstanceIndex = ?\` (only \`TestInstance\` has that column; never \`MAX(InstanceIndex)\`) — those rows exist while the run is still executing, so treat them as final only once \`TestInstance.DateTime\` (the hint's \`FinishedAt\`) is non-empty.
+6. Otherwise, **compare the returned \`total\` against the expected number of test methods** (count them from the source file(s) you just deployed, or ask the user). \`iris_execute_tests\` can return an early PARTIAL snapshot — all passing, fewer tests than exist — which looks identical to a genuine green run unless the count is checked.
 7. If \`total\` is short of the expected count, rerun \`iris_execute_tests\` (prefer a per-class call when precision matters; raise \`timeout\` if the suite is simply slow) before reporting the run as green.
-8. Report the final pass/fail/skipped counts and any failure details to the user.`;
+8. Optional \u{2014} line coverage, only when the user asks how much of the code the tests cover or gives a coverage target, and once the tests pass: call \`iris_test_coverage\` with the same \`target\` and \`level\`, \`classes\` set to the classes the tests exercise (not the test classes; at most 50), and \`minCoverage\` set to the user's target when there is one. It runs the tests again under an instance-wide line monitor. If \`iris_test_coverage\` is not in your tool list, the tool-visibility preset hides it (it is outside \`core\`): tell the user it needs the \`developer\` or full preset (\`IRIS_TOOLS_PRESET\`), and report the results without coverage. If it is refused with \`GOVERNANCE_DISABLED\`, it is disabled by default because it starts an instance-wide monitor and runs test code: tell the user the operator can enable it through \`IRIS_GOVERNANCE\`, for example \`{"global":{"iris_test_coverage":true}}\`, report the results without coverage, and do not measure coverage another way. If it is refused with \`MONITOR_BUSY\`, another monitor session is running on the instance (its \`owner\` says whose) and nothing was started: tell the user, and never stop that session. If it is refused with \`PRODUCTION_BUSY\`, handle it as in step 4. If the response has \`status: "running"\`, do NOT re-submit: call \`iris_test_status\` with \`action: "poll"\` and the response's \`coverageRunId\` until it completes. Report each class's percent and uncovered line ranges and, with \`minCoverage\`, the verdict (a failing verdict is a result, not a tool error). A class reported \`not-up-to-date\` after a documentation-only edit (a comment or a \`///\` line) needs a forced compile before it can be measured: call \`iris_doc_compile\` on it with \`flags: "ck"\`, then call \`iris_test_coverage\` again. For a Cobertura file, call \`iris_test_status\` with \`action: "export"\`, the \`coverageRunId\` and an absolute \`outputPath\` ending in \`.xml\` that the user chose (for example \`c:/path/to/coverage.xml\`); export is disabled by default too (\`iris_test_status:export\`), so handle a \`GOVERNANCE_DISABLED\` refusal the same way.
+9. Report the final pass/fail/skipped counts and any failure details to the user, and the coverage, when it was measured.`;
   },
 };

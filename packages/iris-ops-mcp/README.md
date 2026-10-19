@@ -366,6 +366,8 @@ processes on the instance — not per-process snapshots.
   "count": 1
 }
 ```
+
+`errorCount24h` counts Event Log entries of type Error and `messageCount24h` counts message headers, each over the 24 hours before the call, measured in UTC (a read, enabled by default).
 </details>
 
 <details>
@@ -389,6 +391,8 @@ Single supported action: **reset** — calls `$SYSTEM.Monitor.Clear()` in `%SYS`
   "clearedAt": "2026-04-22T10:50:00Z"
 }
 ```
+
+`clearedAt` is the time of the reset in UTC (ISO 8601, to the second).
 </details>
 
 <details>

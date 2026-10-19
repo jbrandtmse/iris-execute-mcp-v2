@@ -12,6 +12,7 @@ import type { IrisConnectionConfig } from "../config.js";
 import { IrisHttpClient } from "../http-client.js";
 import { SERVER_DISCOVERY_TOOL_NAME } from "../server-discovery.js";
 import { logger } from "../logger.js";
+import { resolveTransport } from "../transport.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -578,9 +579,14 @@ describe("server-base", () => {
       // that logs both lines, skips process.exit, then returns early before
       // the connect step would otherwise leave this test green.
       expect(infoSpy).toHaveBeenCalledWith("Connected via stdio transport");
-      expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining("IRIS health check failed"),
-      );
+      // The health failure is named EXACTLY once: one log line, one occurrence
+      // of the prefix (a network error arrives unprefixed, so the prefix is
+      // added once; it is never stacked on a message that already carries it).
+      const healthLines = errorSpy.mock.calls
+        .map((call) => String(call[0]))
+        .filter((line) => line.includes("IRIS health check failed"));
+      expect(healthLines).toHaveLength(1);
+      expect(healthLines[0]?.split("IRIS health check failed")).toHaveLength(2);
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining(
           'Continuing startup without the "default" profile',
@@ -588,33 +594,101 @@ describe("server-base", () => {
       );
     });
 
-    it("should throw for HTTP transport (not yet implemented)", async () => {
-      // Set up health check to succeed
-      fetchMock.mockResolvedValueOnce(
-        new Response(null, { status: 200 }),
+    // Story 38.1 AC 38.1.3 -- startup with no transport configured, or with
+    // `stdio` in any form, is byte-identical to the pre-change startup.
+    //
+    // Oracle (Rule #36): the two literals below were captured by running this
+    // case with empty expectations against the unmodified baseline, tree at
+    // `e25f1e7` (`transport.ts` and `server-base.ts` byte-identical to
+    // `3cf6df7`), with
+    //   pnpm --filter @iris-mcp/shared exec vitest run src/__tests__/server-base.test.ts -t "back-compat"
+    // and pasting the actual arrays from the assertion diff. No `[DEBUG]` line
+    // is logged on this path; the only varying text is the wall-clock duration
+    // of the two logged requests, normalized to `<N>ms`.
+    //
+    // Needs: the logger at its default level (`vitest.config.ts` pins
+    // `LOG_LEVEL`), and no ambient `IRIS_*` variable, which the case clears for
+    // its duration and restores.
+    it("start(resolveTransport()) is unchanged when no transport is configured or stdio is explicit (back-compat)", async () => {
+      const originalArgv = process.argv;
+      const originalEnvTransport = process.env["MCP_TRANSPORT"];
+      const ambientIrisEnv = Object.entries(process.env).filter(([key]) =>
+        key.toUpperCase().startsWith("IRIS_"),
       );
-      // Negotiation call
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            status: { errors: [] },
-            console: [],
-            result: { version: "8.0.0" },
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        ),
-      );
+      for (const [key] of ambientIrisEnv) delete process.env[key];
+      const inputs: Array<{
+        label: string;
+        argv: string[];
+        env: string | undefined;
+      }> = [
+        { label: "unset", argv: [], env: undefined },
+        { label: 'MCP_TRANSPORT=""', argv: [], env: "" },
+        { label: "--transport stdio", argv: ["--transport", "stdio"], env: undefined },
+        { label: "--transport=stdio", argv: ["--transport=stdio"], env: undefined },
+        { label: "MCP_TRANSPORT=stdio", argv: [], env: "stdio" },
+      ];
+      const expectedFetchCalls: Array<[string, string]> = [
+        ["HEAD", "http://localhost:52773/api/atelier/"],
+        ["GET", "http://localhost:52773/api/atelier/"],
+      ];
+      const expectedStderrLines: string[] = [
+        "[INFO] HEAD /api/atelier/ completed in <N>ms",
+        "[INFO] IRIS health check passed",
+        "[INFO] GET /api/atelier/ completed in <N>ms",
+        "[INFO] Detected Atelier API v8",
+        "[INFO] test-server v1.0.0 starting with Atelier API v8",
+        "[INFO] Connected via stdio transport",
+      ];
 
-      const server = new McpServerBase(
-        makeServerOpts([], makeConfig()),
-      );
+      try {
+        for (const input of inputs) {
+          fetchMock.mockReset();
+          fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+          fetchMock.mockResolvedValueOnce(
+            new Response(
+              JSON.stringify({
+                status: { errors: [] },
+                console: [],
+                result: { version: "8.0.0" },
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              },
+            ),
+          );
+          const server = new McpServerBase(makeServerOpts([], makeConfig()));
+          const errorSpy = vi.mocked(console.error);
+          errorSpy.mockClear();
 
-      await expect(server.start("http")).rejects.toThrow(
-        "HTTP transport not yet implemented",
-      );
+          process.argv = ["node", "script", ...input.argv];
+          if (input.env === undefined) delete process.env["MCP_TRANSPORT"];
+          else process.env["MCP_TRANSPORT"] = input.env;
+
+          await server.start(resolveTransport());
+
+          const fetchCalls = fetchMock.mock.calls.map((call) => [
+            String((call[1] as RequestInit | undefined)?.method ?? "GET").toUpperCase(),
+            String(call[0]),
+          ]);
+          // Only the wall-clock duration of the two logged requests varies.
+          const stderrLines = errorSpy.mock.calls.map((call) =>
+            call.map(String).join(" ").replace(/ completed in \d+ms$/, " completed in <N>ms"),
+          );
+
+          expect(fetchCalls, `fetch sequence for ${input.label}`).toEqual(
+            expectedFetchCalls,
+          );
+          expect(stderrLines, `stderr lines for ${input.label}`).toEqual(
+            expectedStderrLines,
+          );
+        }
+      } finally {
+        process.argv = originalArgv;
+        if (originalEnvTransport === undefined) delete process.env["MCP_TRANSPORT"];
+        else process.env["MCP_TRANSPORT"] = originalEnvTransport;
+        for (const [key, value] of ambientIrisEnv) process.env[key] = value;
+      }
     });
   });
 
