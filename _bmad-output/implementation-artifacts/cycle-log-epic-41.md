@@ -90,3 +90,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-19T16:21:55Z	Story 41.4	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=1082 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
 2026-10-19T16:21:57Z	Story 41.4	committed	sha=28c1631 code_sha=2a91ea5 build_sha=c970654 submodules= ci=none run=none branch=epic41 pushed=origin/epic41 verified=merge-base amendments=ARCHITECTURE-SPINE.md:AD-28,epics.md:41.5_DW-623
 2026-10-19T16:21:57Z	Story 41.4	story_cycle	plan_to_commit_min=166 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-19T16:30:48Z	Epic 41	epic_context_compiled	reason=planning_artifact_newer model=claude-opus-5-5 lines=311
+2026-10-19T16:30:48Z	Story 41.5	stage_spawned	stage=plan spawn_at=2026-10-19T16:30:48Z model=claude-opus-5-5 agent_name=41-5-workflow-skills-refresh-plan-1 cycle_iteration=1
