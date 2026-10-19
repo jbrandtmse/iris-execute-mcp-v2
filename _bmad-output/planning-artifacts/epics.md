@@ -5505,9 +5505,9 @@ This is the `/epic-cycle` burn-down story, chartered on 2026-10-19 at Epic 40's 
 
 **Constraints (licensing):** the competitor's kit is MIT, © 2025 InterSystems Corporation.
 
-- `THIRD_PARTY_NOTICES.md` carries their full MIT text and a provenance table mapping each derived file to its source at commit `b6205bb`.
+- `IRIS-MCP-THIRD-PARTY-NOTICES.md` carries their full MIT text and a provenance table mapping each derived file to its source at commit `b6205bb`. [AMENDED 2026-10-19 — see the story change log]
 - The notice ships wherever the skills ship.
-- Each derived `SKILL.md` carries one header line: "Adapted from intersystems-community/iris-agentic-dev (MIT, © 2025 InterSystems Corporation); see THIRD_PARTY_NOTICES".
+- Each derived `SKILL.md` carries one header line: "Adapted from intersystems-community/iris-agentic-dev (MIT, © 2025 InterSystems Corporation); see IRIS-MCP-THIRD-PARTY-NOTICES.md", as its first non-blank line after any frontmatter. [AMENDED 2026-10-19 — see the story change log]
 - The named authors, Tim Leavitt and Tom Dyar, are credited.
 - Nothing is derived from `kb/ipm-module-authoring.md` or `iris-objectscript-eval`.
 - The pack is never presented as InterSystems' and never implies endorsement. "IRIS" and "ObjectScript" may be used descriptively.
@@ -5530,7 +5530,7 @@ This is the `/epic-cycle` burn-down story, chartered on 2026-10-19 at Epic 40's 
 
   `gen:skills:check` keeps passing and never treats hand-authored files as stale.
 - **AC 41.1.2** — The competitor source is fetched at `b6205bb` into a scratch directory as untrusted data: read only, never executed.
-- **AC 41.1.3** — `THIRD_PARTY_NOTICES.md` holds:
+- **AC 41.1.3** — `IRIS-MCP-THIRD-PARTY-NOTICES.md` holds: [AMENDED 2026-10-19 — see the story change log]
   - their full MIT text;
   - the provenance table;
   - author credits;
@@ -5591,6 +5591,9 @@ Embedded SQL, IRIS system-class discipline, and interoperability patterns. Adapt
 - **AC 41.5.1** — The 11 generated workflow skills, plus every prompt added by 38.6, 39.6 and 40.4, are regenerated. Each description is rewritten for model invocation, because skills are chosen from their description. The MCP prompt text keeps its user-facing role.
 - **AC 41.5.2** — A generated pack catalog (README) lists the knowledge skills, the workflow skills and the rule, with what each is for.
 - **AC 41.5.3** — `gen:skills:check` and the extended `validate:prompts` pass.
+- **AC 41.5.4** *(added 2026-10-19 at the Story 41.1 spec gate, wave-7 decision #3)* — The pack-wide checks AD-28 names, both in the default suite and proven red (Rule #59):
+  - **Preset visibility:** every skill in the pack declares the preset it needs, and `validate:prompts` checks that every `iris_*` tool it names is visible under that preset.
+  - **No internal references:** no internal rule number, DW or AD id, or repository path appears in any agent content: skills, the rule, and the prompts. The generated skills' header comments are included, so a comment naming `packages/<pkg>/src/prompts/*.ts` has to move out of the agent-visible text.
 
 ### Story 41.6: Skills and Rules Installer
 
@@ -5607,7 +5610,7 @@ Embedded SQL, IRIS system-class discipline, and interoperability patterns. Adapt
   - a dry-run diff before any write;
   - idempotent re-install;
   - update and uninstall of only the files it owns;
-  - `THIRD_PARTY_NOTICES.md` written alongside every installed copy of adapted content.
+  - `IRIS-MCP-THIRD-PARTY-NOTICES.md` written alongside every installed copy of adapted content. [AMENDED 2026-10-19 — see the Story 41.1 change log]
 
   An existing `AGENTS.md`, `CLAUDE.md` or instructions file is preserved byte for byte outside the marked block. The fixtures are varied (Rule #58): CRLF, a BOM, comments, no trailing newline, and an existing foreign block.
 - **AC 41.6.3** — When a project has a `CLAUDE.md`, the Claude Code route uses `.claude/rules/`, and the installer reports how to import `AGENTS.md` (`@AGENTS.md`) instead of assuming it is read.
@@ -5805,7 +5808,7 @@ DW-389, D5.
 - **AC 42.8.1** — `.claude-plugin/plugin.json` and a `marketplace.json` in this repo. The plugin brings:
   - all 5 MCP servers (`npx -y @iris-mcp/<pkg>@1`, with the IRIS connection supplied through the plugin's user configuration or environment);
   - Epic 41's skills pack;
-  - `THIRD_PARTY_NOTICES.md`.
+  - `IRIS-MCP-THIRD-PARTY-NOTICES.md`. [AMENDED 2026-10-19 by the wave-7 orchestrator, decision #2 — see the Story 41.1 change log]
 
   41.1's provenance check is extended to the plugin folder. The format is verified against the current Claude Code plugin docs (Rule #14).
 - **AC 42.8.2** — Rules cannot ride in a plugin. The plugin README points to the 41.6 installer for the always-on rule.

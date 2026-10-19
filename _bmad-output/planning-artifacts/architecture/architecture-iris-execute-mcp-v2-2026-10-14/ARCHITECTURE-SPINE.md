@@ -525,17 +525,16 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **Knowledge skills and the always-on rule.** Each hand-authored knowledge skill, and the always-on rule, has exactly one source.
     - The rule is unscoped (no `paths:`), so it loads in every session of a project that installed it.
     - Plugins cannot carry rules, so rules reach Claude Code only through the installer.
-  - **One pack.** Story 41.1 records which of these it is:
-    - **A committed, generated, DO-NOT-EDIT directory** with a `--check` drift test, at a path the plugin manifest names. The client-config tarball copies that same directory.
-    - **A plugin sourced from the npm tarball.**
-
-    Either way, the installer and the plugin consume one pack.
+  - **One pack** *(decided in Story 41.1, orchestrator decision wave-7 #1)*. The pack is the committed, generated, DO-NOT-EDIT directory `packages/client-config/skills-pack/`. Only `pnpm gen:pack` writes it. `pnpm gen:pack:check` runs in the default suite and fails on any missing, changed or stray file.
+    - **Sources.** Each knowledge skill, the always-on rule and the notice has one hand-authored source in `skills-pack-src/`: skills under `knowledge/<name>/`, the rule under `rules/`, and the notice at the root. The workflow skills stay `gen:skills` output in `skills/`. `gen:skills` owns only `skills/`, so it never sees a hand-authored file. `gen:pack` copies both sources byte for byte and renders nothing.
+    - **Shape.** The pack is a standard-layout Claude Code plugin root: `skills/<name>/SKILL.md` for every skill, `rules/` for the rule's forms, and the notice and a generated `README.md` at the root. A skill name defined in both sources fails the build.
+    - **Consumers.** `@iris-mcp/client-config` ships the directory through its npm `files`, with no lifecycle hook. The installer reads it from its own package, and the plugin uses the same directory. A plugin rooted at the repository root is ruled out, because Claude Code always scans a plugin's default `skills/` and would load the workflow skills twice.
   - **Duplicates.** The installer's Claude Code route installs rules only when it detects the plugin, so skills aren't installed twice.
   - **Tool names and presets.** Every `iris_*` token in agent content names a real tool. Each skill declares the preset it needs, and `validate:prompts` checks visibility under that preset.
   - **No internal references.** Internal rule numbers and repository paths never appear in any agent content, prompts included, and this is checked mechanically.
   - **Adapted content.** Third-party content or code is either a clean-room reimplementation or adapted under its licence. Adapted material:
-    - ships with its notice, under a suite-specific filename (for example `IRIS-MCP-THIRD-PARTY-NOTICES.md`), at a location no client auto-loads;
-    - carries a one-line adaptation header;
+    - ships with its notice as `IRIS-MCP-THIRD-PARTY-NOTICES.md` (wave-7 decision #2), at a location no client auto-loads;
+    - carries, as its first non-blank line after any frontmatter, the header `Adapted from intersystems-community/iris-agentic-dev (MIT, © 2025 InterSystems Corporation); see IRIS-MCP-THIRD-PARTY-NOTICES.md`;
     - has a provenance row pinned to the source commit (`b6205bb` for iris-agentic-dev).
 
     The MIT text is byte-exact and the authors are credited. Nothing is derived from `kb/ipm-module-authoring.md` or `iris-objectscript-eval`. All of this is checked mechanically in the default suite.
@@ -713,9 +712,11 @@ packages/
   iris-<domain>-mcp/    # dev | admin | interop | ops | data: src/tools, src/prompts, src/tools/presets.ts, scripts/prepublish-gate.mjs
   iris-mcp-all/         # meta-package, cross-package checks, prepublish gate
   client-config/        # client registry and installer (not a server runtime dependency)
+  client-config/skills-pack/  # the assembled skills pack (generated, DO-NOT-EDIT; gen:pack)
 extensions/iris-mcp-launcher/   # VS Code extension; spawns servers through npx
 src/ExecuteMCPv2/       # REST service and libraries (bootstrapped); Tests/ and QAFixtures/ (not bootstrapped)
 skills/                 # generated workflow skills (DO-NOT-EDIT)
+skills-pack-src/        # hand-authored pack sources: knowledge skills, the always-on rule, the notice
 scripts/                # generators and checks (gen-bootstrap, gen-skills, governance check, epics sync)
 ipm/                    # IPM module manifest (generated from Story 42.4)
 ```
@@ -732,7 +733,7 @@ ipm/                    # IPM module manifest (generated from Story 42.4)
 | Transport rejection (Epic 38) | `packages/shared/src/transport.ts` | AD-23, AD-8 |
 | Message forensics and PHI (Epic 39) | `iris-interop-mcp` tools; the shared search helper; the redaction engine and classifier | AD-26, AD-17, AD-19, AD-20, AD-12 |
 | Coverage and TestProduction (Epic 40) | `iris-dev-mcp` test tools; a coverage endpoint and its IRIS-side job | AD-27, AD-16, AD-4, AD-14 |
-| Skills and rules pack (Epic 41) | the pack source tree, `skills/`, the `client-config` installer | AD-28, AD-30, AD-2 |
+| Skills and rules pack (Epic 41) | `skills-pack-src/`, `skills/`, `packages/client-config/skills-pack/`, the `client-config` installer | AD-28, AD-30, AD-2 |
 | SDK v2 migration (Epic 43) | `packages/shared/src/server-base.ts` and the SDK-client tests | AD-32, AD-15, AD-3 |
 | Human confirmation (Epic 43) | the confirmation helper in `@iris-mcp/shared`; the gated tools | AD-34, AD-17, AD-4 |
 | Published install (Epic 42) | manifests, `.github/workflows/`, `ipm/`, the extension, the plugin | AD-29, AD-14, AD-28, AD-33 |
