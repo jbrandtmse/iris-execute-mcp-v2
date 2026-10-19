@@ -141,3 +141,9 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-19T04:24:09Z	Story 40.5	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=836 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
 2026-10-19T04:24:10Z	Story 40.5	committed	sha=21a45c1 code_sha=506fd0c build_sha=1fdda9e submodules= ci=none run=none branch=epic40 pushed=origin/epic40 verified=merge-base amendments=ARCHITECTURE-SPINE.md:AD-15,epics.md:Story-40.5-chartered
 2026-10-19T04:24:10Z	Story 40.5	story_cycle	plan_to_commit_min=159 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-19T04:24:58Z	Epic 40	epic_status_done	stories=6
+2026-10-19T04:24:58Z	Epic 40	model_tier_checkpoint	armed=false stack_risk=none review_tier=full-opus implement_model=claude-sonnet-5-5 high_med_avg=5.67 unresolved_high_med_avg=1.33 metric=unresolved rework_stories=3 rework_iterations=4 review_high=7 review_med=27 result=hold applied=false note=derived_mechanically_from_cr_complete_lines
+2026-10-19T04:24:58Z	Epic 40	epic_retro_skipped	reason=user_directed_skip_unattended_run
+2026-10-19T04:24:58Z	Epic 40	decision_sheet_skipped	reason=empty_after_charter note=closing_sheet_taken_before_charter decisions=65,66,67 escalated=0 decision_pending=0
+2026-10-19T04:24:58Z	Epic 40	range_ledger_sweep	range=38-40 total=610 terminal=592 nonterminal=18 all_owned_outside_range=true owners=42-1:5,42-9:3,42-7:2,42-6:2,42-2:2,43-1:1,42-5:1,42-4:1,42-3:1 escalated=0 decision_pending=0 burndown=0
+2026-10-19T04:24:58Z	Epic 40	ci_green_verified	run=none head=c1eec44 ci=none
