@@ -332,7 +332,7 @@ describe("the committed pack (real tree)", () => {
     /** Place the probe skill through the layout constant; returns the cleanup. */
     function placeProbe(): () => void {
       const existed = existsSync(knowledgeDir);
-      put(REPO_ROOT, `${KNOWLEDGE_SOURCE_DIR}/${probeName}/SKILL.md`, "---\nname: zz-probe-skill\n---\n\nProbe.\n");
+      put(REPO_ROOT, `${KNOWLEDGE_SOURCE_DIR}/${probeName}/SKILL.md`, '---\nname: zz-probe-skill\ndescription: "Probe."\n---\n\nProbe.\n');
       return () => rmSync(existed ? join(knowledgeDir, probeName) : knowledgeDir, { recursive: true, force: true });
     }
 

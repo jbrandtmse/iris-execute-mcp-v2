@@ -93,22 +93,30 @@ function expectGreen(root: string): string {
 }
 
 describe("check:provenance CLI, scratch copy: the green controls", () => {
-  it("the unmodified copy passes: pinned MIT hash, no rows, the 27 agent files and one distribution", () => {
+  it("the unmodified copy passes: pinned MIT hash, no rows, the 33 agent files and one distribution", () => {
     const out = expectGreen(scratch());
     expect(out).toContain(`MIT block sha256 ${PINNED_SHA256} (1081 bytes)`);
-    expect(out).toContain("0 provenance row(s), 27 agent file(s), 1 distribution(s)");
+    expect(out).toContain("0 provenance row(s), 33 agent file(s), 1 distribution(s)");
   });
 
   it("an adapted skill with the exact header and a row passes, source and pack copy both counted", () => {
     const root = scratch();
     adapt(root, { skill: skillText(HEADER) });
-    expect(expectGreen(root)).toContain("1 provenance row(s), 29 agent file(s), 1 distribution(s)");
+    expect(expectGreen(root)).toContain("1 provenance row(s), 35 agent file(s), 1 distribution(s)");
   });
 
-  it("the same adapted skill as CRLF with a BOM passes (project rule #58)", () => {
+  it("the same adapted skill as CRLF passes (project rule #58)", () => {
+    const root = scratch();
+    adapt(root, { skill: toCrlf(Buffer.from(skillText(HEADER), "utf8")) });
+    expect(expectGreen(root)).toContain("1 provenance row(s), 35 agent file(s)");
+  });
+
+  it("the same adapted skill as CRLF with a BOM before its frontmatter is refused, for the source and for the pack copy", () => {
     const root = scratch();
     adapt(root, { skill: Buffer.concat([BOM, toCrlf(Buffer.from(skillText(HEADER), "utf8"))]) });
-    expect(expectGreen(root)).toContain("1 provenance row(s), 29 agent file(s)");
+    const stderr = expectRed(root, ["skill-frontmatter"]);
+    expect(stderr).toContain("knowledge:qa-adapted/SKILL.md: begins with a byte-order mark");
+    expect(stderr).toContain("pack:skills/qa-adapted/SKILL.md: begins with a byte-order mark");
   });
 });
 
@@ -144,7 +152,7 @@ describe("check:provenance CLI, scratch copy: a near-miss adaptation header (AC 
   it("the exact header in a frontmatter block that is never closed is misplaced", () => {
     const root = scratch();
     adapt(root, { skill: `---\nname: qa-adapted\n\n${HEADER}\n\nBody.\n` });
-    expectRed(root, ["header", "row-file"]);
+    expectRed(root, ["header", "row-file", "skill-frontmatter"]);
   });
 
   it("a row for a file with no header and no mention of the upstream project is refused as a row problem", () => {

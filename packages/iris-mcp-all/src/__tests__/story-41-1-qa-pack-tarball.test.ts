@@ -107,7 +107,7 @@ describe("the real tarball built by npm pack --ignore-scripts (AC 41.1.1 Integra
     const committed = walkFiles(join(REPO_ROOT, PACK_DIR));
     const extracted = walkFiles(join(extractDir, "package", "skills-pack"));
     expect(extracted).toEqual(committed);
-    expect(committed.length).toBeGreaterThanOrEqual(16);
+    expect(committed.length).toBeGreaterThanOrEqual(19);
   });
 
   it("carries the notice, the pack README, both forms of the always-on rule and all 12 workflow SKILL.md files at the expected paths", () => {

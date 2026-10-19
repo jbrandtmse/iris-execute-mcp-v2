@@ -1,4 +1,5 @@
-// Provenance rules for adapted third-party content in the skills pack (AD-28).
+// Provenance rules for adapted third-party content in the skills pack, and the frontmatter rule for every
+// pack skill file (AD-28).
 //
 // Pure functions: no filesystem and no process access. `scripts/check-provenance.mjs` (the CLI) and
 // `packages/iris-mcp-all/src/__tests__/pack-provenance.test.ts` (the default-suite test) both import this
@@ -9,7 +10,7 @@
 // https://github.com/intersystems-community/iris-agentic-dev (never in this repository).
 
 import { createHash } from 'node:crypto';
-import { NOTICE_FILENAME } from './skills-pack.mjs';
+import { NOTICE_FILENAME, skillFrontmatterProblems } from './skills-pack.mjs';
 
 /**
  * The upstream commit adapted content is pinned to.
@@ -77,6 +78,9 @@ export const PROVENANCE_HEADER_ROW = '| Pack file | Source file at b6205bb | Ada
 
 /** The directory, inside a package, that holds the shipped pack. */
 export const PACK_PATH_IN_PACKAGE = 'skills-pack';
+
+// A skill definition file's pack-relative path; group 1 is the skill's directory name.
+const SKILL_FILE_PACK_REL = /^skills\/([^/]+)\/SKILL\.md$/;
 
 const LICENSE_OPEN = '<!-- BEGIN iris-agentic-dev LICENSE (verbatim) -->\n```text\n';
 const LICENSE_CLOSE = '```\n<!-- END iris-agentic-dev LICENSE -->';
@@ -213,7 +217,9 @@ export function isExcludedSource(path) {
  */
 
 /**
- * Every provenance rule, applied to gathered inputs.
+ * Every provenance rule, applied to gathered inputs. The `skill-frontmatter` rule covers each agent file at
+ * `skills/<name>/SKILL.md` (a workflow source, a knowledge source or a pack copy): it reports each problem of
+ * `skillFrontmatterProblems`, labelled with the file.
  *
  * @param {ProvenanceInputs} inputs
  * @returns {Array<{ rule: string, label: string, message: string }>} Empty when every rule holds.
@@ -280,6 +286,12 @@ export function checkProvenance(inputs) {
   }
 
   for (const file of inputs.agentFiles) {
+    const skill = SKILL_FILE_PACK_REL.exec(file.packRel);
+    if (skill !== null) {
+      for (const message of skillFrontmatterProblems(file.text, skill[1] ?? '')) {
+        add('skill-frontmatter', file.label, message);
+      }
+    }
     if (!/iris-agentic-dev/i.test(file.text)) continue;
     if (!hasValidAdaptationHeader(file.text)) {
       add('header', file.label, 'missing or misplaced adaptation header');

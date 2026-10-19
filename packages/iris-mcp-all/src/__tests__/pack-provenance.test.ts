@@ -192,7 +192,7 @@ describe("claim without a row, and the header", () => {
   it.each(["Based on IRIS-AGENTIC-DEV.\n", "Credit: Iris-Agentic-Dev.\n"])(
     "a file whose only mention is %j, in another case and with no header, is refused for both the header and the row",
     (body) => {
-      const text = `---\nname: k\n---\n\n${body}`;
+      const text = `---\nname: k\ndescription: d\n---\n\n${body}`;
       const problems = check(inputsFor({ agentFiles: [{ label: "knowledge:k/SKILL.md", packRel: "skills/k/SKILL.md", text }] }));
       expect(problems.map((problem) => problem.rule).sort()).toEqual(["claim-row", "header"]);
     },
@@ -586,7 +586,7 @@ describe("the real tree", () => {
     for (const file of inputs.packFiles) {
       expect(listed.has(`skills-pack/${file.rel}`), `skills-pack/${file.rel}`).toBe(true);
     }
-    expect(inputs.packFiles.length).toBeGreaterThanOrEqual(16);
+    expect(inputs.packFiles.length).toBeGreaterThanOrEqual(19);
   });
 
   it("enumerates one distribution per non-private workspace package, as of 2026-10-18, each listing dist files when it ships dist", () => {

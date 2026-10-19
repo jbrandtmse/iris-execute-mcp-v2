@@ -32,6 +32,7 @@ import {
   RULES_SOURCE_DIR,
   WORKFLOW_SKILLS_DIR,
 } from "../../../../scripts/lib/skills-pack.mjs";
+import { wordCount } from "./agent-text-hygiene";
 import { makeTempRoot, put, removeTempRoot, REPO_ROOT } from "./pack-fixture";
 import { BOM, makeScratchRepo, removeScratchRepo, runScript, toCrlf, treeLines } from "./story-41-1-qa-fixture";
 
@@ -42,14 +43,6 @@ const END_LINE = "<!-- IRIS-MCP-RULE:iris-mcp-objectscript-pre-write:END -->";
 // ---------------------------------------------------------------------------------------------------------
 // The rule text's own checks, as functions, so a negative control can prove each one is able to fail.
 // ---------------------------------------------------------------------------------------------------------
-
-/** Whitespace-separated tokens that hold at least one letter or digit (a bare "-" bullet marker is no word). */
-function wordCount(text: string): number {
-  return text
-    .trim()
-    .split(/\s+/)
-    .filter((word) => /[A-Za-z0-9]/.test(word)).length;
-}
 
 /** The internal references an agent-facing rule must never carry, by the name each one is reported under. */
 const INTERNAL_REFERENCES: Array<[string, RegExp]> = [
@@ -396,7 +389,7 @@ describe("gen:pack, the rule rows through the real CLI (scratch copy)", () => {
     expect(treeLines(scratch)).toEqual(before);
     const check = runScript(scratch, GEN_PACK, ["--check"]);
     expect(check.status, check.stderr).toBe(0);
-    expect(check.stdout).toContain("16 pack file(s) match their sources");
+    expect(check.stdout).toContain("19 pack file(s) match their sources");
   });
 
   it("writes both forms of every byte variant, byte for byte, and a second run changes nothing", () => {

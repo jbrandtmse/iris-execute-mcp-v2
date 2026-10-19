@@ -22,29 +22,8 @@ import {
   RULE_FORM_DIRS,
   RULES_SOURCE_DIR,
 } from "../../../../scripts/lib/skills-pack.mjs";
+import { FORBIDDEN, problemsOf } from "./agent-text-hygiene";
 import { REPO_ROOT } from "./pack-fixture";
-
-/** What a rule for another project's agent must not carry, by the name each pattern is reported under. */
-const FORBIDDEN: Array<[name: string, pattern: RegExp, sample: string]> = [
-  ["a number sign and digits that are not an IRIS error code", /(?<!ERROR )#\d+/, "see rule #7 or item #58"],
-  ["a story, epic or sprint number", /\b(?:Story|Epic|Sprint)\s+\d/i, "added in Story 41.2"],
-  ["a planning or deferred-work id", /\b(?:DW|AD|AC|NFR|FR)-\d+/, "tracked as DW-615"],
-  ["a snapshot folder of this repository", /\birislib\b|\birissys\b/, "read irislib for the class"],
-  // Case-sensitive: `tSC` is the ObjectScript status variable the rule's examples use.
-  ["repository tooling", /\b(?:pnpm|npm|npx|turbo|vitest|tsc|gen:pack|gen:skills)\b/, "run pnpm test or tsc"],
-  ["a repository file", /\b[\w-]+\.(?:md|ts|mjs|json|yaml|toml)\b/i, "edit rules.md"],
-  ["a path", /[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/, "see packages/shared"],
-  ["a URL", /https?:\/\//i, "docs at https://example.com"],
-  ["a tool or server name", /\biris[-_][a-z]|mcp__|@iris-mcp/i, "use iris-dev or mcp__iris-dev__tool"],
-  ["a client configuration file", /\b(?:CLAUDE|AGENTS)\.md\b|\.claude\b|\.cursor\b/, "put it in CLAUDE.md"],
-  ["the retired prompt", /objectscript-review/, "run the objectscript-review prompt"],
-  ["a mention of how the claims were checked", /\bprobe[sd]?\b/i, "verified by a probe"],
-  ["this project", /\bthis (?:project|repo|repository)\b/i, "in this repo"],
-];
-
-function problemsOf(text: string): string[] {
-  return FORBIDDEN.filter(([, pattern]) => pattern.test(text)).map(([name]) => name);
-}
 
 /** The text of a copy without the two marker lines of the `agents-md` form. */
 function withoutMarkerLines(text: string): string {

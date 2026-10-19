@@ -21,6 +21,12 @@
 // a consumer matches those lines exactly and owns everything between them. No line of a rule source may start with
 // `<!-- IRIS-MCP-RULE:`, so each section holds exactly its own two marker lines.
 //
+// SKILL FRONTMATTER. Every `SKILL.md` in the pack opens with a frontmatter block on its first line, holding
+// only `name` and `description` (`skillFrontmatterProblems`). The grammar is a strict subset of YAML read line
+// by line, and it is fail-safe: whatever lies outside it is reported, never guessed at. A later field, such as
+// a skill's preset declaration, extends SKILL_FRONTMATTER_FIELDS and that grammar. `check:provenance` applies
+// it to every agent file at `skills/<name>/SKILL.md`; `assemblePack` still copies those bytes unchanged.
+//
 // This module reads the filesystem but never writes it; `scripts/gen-pack.mjs` owns the writes.
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -50,7 +56,33 @@ export const RULE_SOURCE_NAME = /^[a-z0-9]+(-[a-z0-9]+)*\.md$/;
 export const ALWAYS_ON_RULE_FILENAME = 'iris-mcp-objectscript-pre-write.md';
 
 const SOURCE_README_FILENAME = 'README.md';
-const SKILL_FILENAME = 'SKILL.md';
+
+/** The file that defines a skill, inside its directory. */
+export const SKILL_FILENAME = 'SKILL.md';
+
+/** A skill's `name`: lower-case letters and digits, in groups joined by single hyphens. */
+export const SKILL_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+/** The longest `name`, in characters. */
+export const SKILL_NAME_MAX_LENGTH = 64;
+
+/** The longest `description`, in characters. */
+export const SKILL_DESCRIPTION_MAX_LENGTH = 1024;
+
+/** The only frontmatter fields a pack `SKILL.md` may hold. */
+export const SKILL_FRONTMATTER_FIELDS = Object.freeze(['name', 'description']);
+
+// Words a skill `name` may not contain.
+const SKILL_NAME_RESERVED_WORDS = ['claude', 'anthropic'];
+
+// An XML-like tag: `<` or `</`, a letter, then anything up to the next `>`. `->` and `<UNDEFINED` do not match.
+const XML_LIKE_TAG = /<\/?[A-Za-z][^<>]*>/;
+
+// A frontmatter line: a key at column 1, then `:` and, optionally, whitespace and a value.
+const FRONTMATTER_LINE = /^([A-Za-z][A-Za-z0-9_-]*):(?:[ \t]+(.*))?$/;
+
+// The characters a plain (unquoted) scalar may not start with.
+const PLAIN_SCALAR_INDICATOR = /^[-?:,[\]{}#&*!|>'"%@`]/;
 
 // The first line of a rule source, read as bytes: an optional BOM, then `---` and the end of the line.
 // Latin-1 maps every byte to one character, so any input is matched without a UTF-8 decode.
@@ -114,6 +146,137 @@ export function renderPackReadme() {
     `frontmatter, and a row in the provenance table of \`${NOTICE_FILENAME}\`. ` +
     `Read that file before redistributing the pack.\n`
   );
+}
+
+/**
+ * Read one frontmatter value: a double-quoted string that JSON reads as one string, a single-quoted string
+ * (`''` escapes a quote), or a plain scalar that holds no `: ` or ` #`, does not end in `:` and does not start
+ * with a YAML indicator character.
+ *
+ * @param {string} raw - The value text, trimmed and not empty.
+ * @returns {{ value: string } | { problem: string }}
+ */
+function parseFrontmatterValue(raw) {
+  if (raw.startsWith('"')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === 'string') return { value: parsed };
+    } catch {
+      // Falls through to the problem below.
+    }
+    return { problem: 'is a double-quoted value that is not one valid JSON string; fix the quotes or the escapes' };
+  }
+  if (raw.startsWith("'")) {
+    const match = /^'((?:[^']|'')*)'$/.exec(raw);
+    if (match === null) return { problem: 'is a single-quoted value that is not closed or holds a lone quote; double each inner quote' };
+    return { value: (match[1] ?? '').replace(/''/g, "'") };
+  }
+  if (PLAIN_SCALAR_INDICATOR.test(raw)) {
+    return { problem: 'is a plain value that starts with a YAML indicator character; put it in double quotes' };
+  }
+  if (raw.includes(': ') || raw.includes(' #') || raw.endsWith(':')) {
+    return { problem: 'is a plain value that holds ": " or " #" or ends in ":"; put it in double quotes' };
+  }
+  return { value: raw };
+}
+
+/**
+ * The problems of a `SKILL.md` frontmatter block, in the strict grammar the pack accepts.
+ *
+ * - Line 1 is exactly `---` (no byte-order mark) and a later `---` line closes the block. Lines split on LF,
+ *   and one trailing CR is dropped from each.
+ * - Each line between is blank, a comment (first non-space character `#`), or `key: value` at column 1.
+ * - Keys come only from SKILL_FRONTMATTER_FIELDS, each once, and both are required.
+ * - `name` matches SKILL_NAME, has at most SKILL_NAME_MAX_LENGTH characters, equals `dirName`, and holds no
+ *   reserved word.
+ * - `description` is not empty after trimming, has at most SKILL_DESCRIPTION_MAX_LENGTH characters and holds
+ *   no XML-like tag.
+ *
+ * Each message names the problem and the fix.
+ *
+ * @param {string} text - The decoded file.
+ * @param {string} dirName - The skill's directory name.
+ * @returns {string[]} Empty when the frontmatter is valid.
+ */
+export function skillFrontmatterProblems(text, dirName) {
+  if (text.charCodeAt(0) === 0xfeff) {
+    return ['begins with a byte-order mark, so a client may not read the opening --- as the first line; save the file without a BOM'];
+  }
+  const lines = text.split('\n').map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line));
+  if (lines[0] !== '---') {
+    return ['does not open with a --- frontmatter line, so clients read no name or description; put the frontmatter on line 1'];
+  }
+  const closing = lines.indexOf('---', 1);
+  if (closing < 0) return ['has no closing --- line after its frontmatter; add one'];
+
+  const problems = [];
+  const seen = new Set();
+  const values = new Map();
+  for (let index = 1; index < closing; index += 1) {
+    const line = lines[index] ?? '';
+    if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+    const position = `frontmatter line ${index + 1}`;
+    const match = FRONTMATTER_LINE.exec(line);
+    if (match === null) {
+      problems.push(`${position} is not "key: value" at column 1; indented, multi-line and list values are not supported`);
+      continue;
+    }
+    const key = match[1] ?? '';
+    if (!SKILL_FRONTMATTER_FIELDS.includes(key)) {
+      problems.push(`${position} has the field "${key}"; only ${SKILL_FRONTMATTER_FIELDS.join(' and ')} are allowed`);
+      continue;
+    }
+    if (seen.has(key)) {
+      problems.push(`${position} repeats the field "${key}"; keep one`);
+      continue;
+    }
+    seen.add(key);
+    const raw = (match[2] ?? '').trim();
+    if (raw === '') {
+      problems.push(`the field "${key}" is empty (${position}); give it a value`);
+      continue;
+    }
+    const parsed = parseFrontmatterValue(raw);
+    if ('problem' in parsed) {
+      problems.push(`the field "${key}" ${parsed.problem} (${position})`);
+      continue;
+    }
+    values.set(key, parsed.value);
+  }
+
+  for (const field of SKILL_FRONTMATTER_FIELDS) {
+    if (!seen.has(field)) problems.push(`has no "${field}" field in its frontmatter; add it`);
+  }
+
+  const name = values.get('name');
+  if (name !== undefined) {
+    if (!SKILL_NAME.test(name)) {
+      problems.push(`the name "${name}" is not lower-case letters and digits in groups joined by single hyphens; rename it`);
+    } else {
+      if (name.length > SKILL_NAME_MAX_LENGTH) {
+        problems.push(`the name is ${name.length} characters; the limit is ${SKILL_NAME_MAX_LENGTH}`);
+      }
+      const reserved = SKILL_NAME_RESERVED_WORDS.find((word) => name.includes(word));
+      if (reserved !== undefined) problems.push(`the name "${name}" contains the reserved word "${reserved}"; rename it`);
+    }
+    if (name !== dirName) problems.push(`the name "${name}" is not its directory name "${dirName}"; make them equal`);
+  }
+
+  const description = values.get('description');
+  if (description !== undefined) {
+    if (description.trim() === '') {
+      problems.push('the description is empty; say what the skill covers and when to use it');
+    } else {
+      if (description.length > SKILL_DESCRIPTION_MAX_LENGTH) {
+        problems.push(`the description is ${description.length} characters; the limit is ${SKILL_DESCRIPTION_MAX_LENGTH}`);
+      }
+      if (XML_LIKE_TAG.test(description)) {
+        problems.push('the description holds an XML-like tag, which some clients refuse; write the name without angle brackets');
+      }
+    }
+  }
+
+  return problems;
 }
 
 /**

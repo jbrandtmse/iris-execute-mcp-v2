@@ -24,6 +24,19 @@ The pack is `packages/client-config/skills-pack/`. It is a generated, committed 
 
 Every pack file is a byte-for-byte copy of its source, except the pack's `README.md` and the `AGENTS.md` form of each rule, which the generator renders.
 
+## Knowledge skills
+
+A knowledge skill is one directory, `knowledge/<name>/`, that holds its `SKILL.md` and any files beside it. The generator copies the directory to `skills/<name>/` byte for byte. Hand-authored names carry the suite prefix, `iris-mcp-<name>`, so an installed copy never collides with a skill of the user's own or of another kit.
+
+The `SKILL.md` opens with frontmatter on its first line, so a client reads the skill's name and description. `pnpm check:provenance` refuses a file that breaks any of these, and names the file and the fix:
+
+- Line 1 is `---`, with no byte-order mark and nothing above it (an adaptation header goes after the frontmatter, never before it), and a later `---` line closes the block.
+- The block holds only `name` and `description`, each once, one `key: value` per line at column 1. A value is a double-quoted string that JSON reads, a single-quoted string, or a plain value that holds no `: ` or ` #`, does not end in `:` and does not start with a YAML indicator character. Blank lines and `#` comment lines are allowed.
+- `name` equals the directory name. It is lower-case letters and digits in groups joined by single hyphens, at most 64 characters, and holds neither `claude` nor `anthropic`.
+- `description` is at most 1,024 characters and holds no XML tag. It names what the skill covers in its first sentence, then says `Use when` followed by the situations that call for it. Write `UNDEFINED`, not `<UNDEFINED>`.
+
+The three core knowledge skills (`iris-mcp-objectscript-gotchas`, `iris-mcp-objectscript-error-handling` and `iris-mcp-objectscript-unit-tests`) name no `iris_*` tool, so they declare no preset, and they are written for a user's agent: no internal rule number, planning id, repository path or repository tooling. Each claim in them is run on a live IRIS instance before it is written, and a changed claim is run again. A new frontmatter field, such as a preset declaration, extends the field list and the grammar in `scripts/lib/skills-pack.mjs`.
+
 ## Rules and their two forms
 
 A rule is always on, so it takes no frontmatter, and `paths:` least of all: a scoped rule loads only when the agent touches a matching file, which is too late for a checklist that is meant to be in context before the first write. `pnpm gen:pack` fails and names a rule source whose first line is `---`. A rule also names no `iris_*` tool, so it declares no preset.
@@ -57,5 +70,5 @@ Do not change the MIT licence block in the notice. `pnpm check:provenance` compa
 ## Checks
 
 - `pnpm gen:pack:check`: the pack equals what the sources produce.
-- `pnpm check:provenance`: the notice, the header lines, the provenance rows, that the client-config tarball ships the whole pack, and that every npm tarball carrying pack or adapted content ships the notice.
+- `pnpm check:provenance`: the notice, the header lines, the provenance rows, the frontmatter of every `skills/<name>/SKILL.md` (rule `skill-frontmatter`), that the client-config tarball ships the whole pack, and that every npm tarball carrying pack or adapted content ships the notice.
 - `pnpm validate:prompts`: every `iris_*` token in the skills and rule files names a real tool.

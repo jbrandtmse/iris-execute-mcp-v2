@@ -2,7 +2,8 @@
 title: 'Story 41.3: Core Knowledge Skills'
 type: 'feature'
 created: '2026-10-19'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'c7cb9f90ad3176f7c8d6fc31e6f4e28b081dcb6d'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -224,6 +225,50 @@ deferred:
 - **2026-10-19, lead spec gate.** Wave-7 decisions #7, #8, #9 and #10 were taken as recommended (Design Notes). The spine is amended (Rule 20): AD-28 gains the knowledge-skill names bullet and the skill-frontmatter bullet, and the conventions table gains "Pack names". The plan's one `deferred:` item (`SanitizeError` localized prefixes) is harvested by the lead at dev-complete.
 
 ## Review Triage Log
+
+### 2026-10-19 — Review pass
+- verdicts: 36 findings — high 0, medium 0, low 32, false 3, maybe-false 1
+- findings:
+  - Blind Hunter:
+    - `[low]` `[reject]` unit-tests skill omits that `OnAfterOneTest` is skipped after a failed or skipping `OnBeforeOneTest`, and that `OnAfterAllTests` still runs after a failed `OnBeforeAllTests` — confirmed at `irislib/%UnitTest/Manager.cls` (hook order), but it is an omission, not a false claim, and the fix edits the golden text, which is the spec's; rejected.
+    - `[low]` `[reject]` "every Assert macro" over-claims: `$$$AssertFilesSQLUnorderedSame` exists (`irislib/%outUnitTest.inc:22`) and is not covered — real, but the fix edits the spec's golden text and sha256; recorded for the lead under Residual risks.
+    - `[low]` `[reject]` "checking its totals" gives no query for the count — omission; fix edits the golden text.
+    - `[low]` `[reject]` the `Process` example calls `..Validate` and `..Count`, which are not defined — the block was compiled inside a class that defined both (probe E18); the names are illustrative placeholders; negligible.
+    - `[low]` `[reject]` error-handling omits `$$$THROWONERROR`/`$$$TOE`, `TROLLBACK` in `Catch` and the SQLCODE throw macros — omissions beyond the golden text.
+    - `[maybe-false]` `[reject]` "removes one prefix in any language" was run for en, es, fr and de only — what would settle it: `GetErrorText(sc, <lang>)` for every shipped message table; if a prefix held a space the helper would leave it in place, which is a cosmetic double prefix (low), so rejected.
+    - `[low]` `[reject]` the `#<n>:` override lets `item #58:` through — by design: the spec defines the override and gives `Rule #n` its own entry; the three skills are clean and any edit also trips the sha256 pin.
+    - `[low]` `[reject]` the path override misses `c:/git/...` and `~/x` and reads `readdirSync(REPO_ROOT)` — by design: the spec defines it as a top-level repository entry plus the listed absolute roots.
+    - `[false]` `[reject]` "negative controls miss 5 of 14 classes" — `story-41-2-qa-rule-text-hygiene.test.ts` runs `it.each(FORBIDDEN)` over the same pattern objects that `skillForbidden` reuses, so every unchanged class has a sample-based control; the two replaced classes have their own rows.
+    - `[low]` `[reject]` the reader accepts plain scalars YAML reads as non-strings (`description: 2024`) — the spec's grammar allows a plain scalar; no pack source uses one; a guard adds branches for a case no one writes.
+    - `[low]` `[reject]` a quoted value followed by a comment gets the "fix the quotes" message — negligible wording.
+    - `[low]` `[reject]` `iris-mcp-` prefix is unenforced and "exactly the three planned skills" will move in 41.4 — by design: the prefix is a convention in the spec and README, and every count pin moves with the story that adds skills.
+    - `[low]` `[patch]` `scripts/check-provenance.mjs` header and failure hint do not mention the `skill-frontmatter` rule or that a `workflow:` skill is generated — header bullet and one hint line added (grouped with the Edge, Verification and Gap rows below).
+  - Edge Case Hunter:
+    - `[low]` `[reject]` plain `null`, `~`, `true`, `123` accepted — same as the Blind row on non-string scalars.
+    - `[low]` `[reject]` a TAB before `#` or after `:` in a plain value is accepted — the spec's grammar names the space forms; negligible.
+    - `[low]` `[reject]` lengths count UTF-16 units — the pack's skills are ASCII; negligible.
+    - `[low]` `[patch]` `check-provenance.mjs` hint and header stale — same root cause as the Blind row above; patched.
+    - `[low]` `[reject]` `$$$ThrowStatus` on an OK status throws a spurious General error (`StatusException.cls` `ThrowIfInterrupt`) — confirmed; omission, fix edits the golden text.
+    - `[low]` `[reject]` `$$$ThrowOnError` does not throw a `StatusException` for an `<INTERRUPT>`-wrapping status — confirmed at `ThrowIfInterrupt`; a corner of a corner, fix edits the golden text.
+    - `[low]` `[reject]` `$$$QuitOnError` in a loop does not compile — omission, fix edits the golden text.
+    - `[low]` `[reject]` `$$$AssertFilesSQLUnorderedSame` omitted — same as the Blind "every Assert macro" row.
+    - `[low]` `[reject]` `item #58:` passes the number-sign override — same as the Blind row; by design.
+  - Verification Gap Reviewer:
+    - `[low]` `[patch]` the "notice has 0 provenance rows" pin passed when the table header was absent or a row was malformed — now also asserts the header row is present and `problems` is empty; mutation lines M13 written.
+    - `[low]` `[patch]` ACs and pins with no `mutation:` line (notice rows, fenced-block counts, moved count pins, the wording class for a project class, M7 recorded before the sha256 pin) — M13 to M16 written, M7 re-run on the final tree; the "Unchanged counts" AC is pinned by the existing gates and has a note.
+    - `[low]` `[reject]` the `hasValidAdaptationHeader` `true` pins depend on the DW-613 gap staying open — by design: the spec requires the gap pinned.
+    - `[low]` `[reject]` "each refusal row ran in a scratch copy" is a trivially green post-condition — harmless guard that the spec's "each refusal row removes its own input" asks for.
+    - `[low]` `[reject]` scratch CLI rows copy `packages/client-config/dist`, which the test does not build — the same dependency the 41.1 rows already had; the pipeline's `test` task depends on `build`.
+    - `[false]` `[reject]` "exactly the three planned skills" can race `skills-pack.test.ts` writing `zz-probe-skill` — `packages/iris-mcp-all/vitest.config.ts` sets `fileParallelism: false`.
+    - `[false]` `[reject]` agent-file count pins hold only for the committed set — intended: the pins are derived from the CLI output and move with 41.4.
+    - `[low]` `[patch]` header comment of `check-provenance.mjs` lists no `skill-frontmatter` rule — same root cause; patched.
+    - `[low]` `[patch]` failure hint points at `skills-pack-src/` for a generated `workflow:` skill — same root cause; patched.
+  - Intent Alignment Auditor:
+    - `[low]` `[reject]` no client loader or YAML library is the oracle for the reader — by design: the spec's grammar is a fail-safe subset typed by hand.
+    - `[low]` `[reject]` live-IRIS claims are checked by the probe log and text pins, not by compiling in the suite — by design: the probe log is the evidence, the sha256 pin ties the text to it.
+    - `[low]` `[reject]` `8 distribution(s)` appears in no test; scratch copies print `1 distribution(s)` — the Integration row is run as a `## Verification` command on the real tree, and `pack-provenance.test.ts` enumerates distributions.
+    - `[low]` `[patch]` the intent lists "a project class or helper" but no hygiene pattern matched one — a skill-specific pattern (`ExecuteMCPv2`, `SanitizeError`) and two negative-control rows added; mutation line M16.
+    - `[low]` `[reject]` "Use when" and "names the content first" are checked for the three skills only — by design: the AC scopes them to the three skills.
 
 ## Design Notes
 
@@ -985,19 +1030,74 @@ The test types each anchor literally, without the outer Markdown code span shown
 **Planned mutations (Rule 19).** Apply each, observe red, revert (re-running `gen:pack` where it applies), and confirm `git status --short` and `git diff --stat` are unchanged. Record each as `mutation: <change> → <test>`.
 
 - **M1** (DW-613, on the guarded path): delete the `description:` line of the real gotchas source and run `gen:pack` → `pnpm check:provenance` exits 1 with `[skill-frontmatter]` for `knowledge:` and `pack:`, and `pack-provenance.test.ts` "real tree passes every provenance rule" goes red.
+  - mutation: M1 applied as planned (the `description:` line of the real gotchas source deleted, `pnpm gen:pack` re-run) → `pnpm check:provenance` exit 1 with `[skill-frontmatter] pack:skills/iris-mcp-objectscript-gotchas/SKILL.md` and `[skill-frontmatter] knowledge:iris-mcp-objectscript-gotchas/SKILL.md`; `pack-provenance.test.ts` "real tree passes every provenance rule" red. Reverted (line restored, `gen:pack` re-run); the changed-and-untracked file digest was identical to before.
 - **M2** (DW-613): `checkProvenance` skips the new rule → the scratch CLI row "header above the frontmatter" and the rule's unit rows go red.
+  - mutation: `const skill = null;` in the `checkProvenance` agent-file loop (the rule never runs) → `skills-pack-frontmatter.test.ts` 9 red: the five `checkProvenance` rows (three labels with no description, the directory-name row, the every-file row) and the four scratch CLI rows (header above the frontmatter, no description, BOM, name not the directory). Reverted; digest identical.
 - **M3** (DW-613): the reader skips its line-1 check → the header-above rows go red, while `hasValidAdaptationHeader` stays `true` (the gap).
+  - mutation: the reader's line-1 check replaced by `if (false)` in `skillFrontmatterProblems` → `skills-pack-frontmatter.test.ts` 8 red: the header-above, no-frontmatter, empty-file, blank-first-line and trailing-space-opener reader rows, the message row, the CLI row "header above the frontmatter", and the gap pin (`hasValidAdaptationHeader` stays `true`, as its first expectation shows; the second expectation, that the reader refuses the text, is the one that goes red). Reverted; digest identical.
 - **M4** (decision 4): the reader strips a BOM → the BOM rows go red.
+  - mutation: the BOM early-return replaced by `if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);` → 3 red: the reader row "a BOM before the opening line" and the scratch CLI row "a skill that starts with a BOM" in `skills-pack-frontmatter.test.ts`, and "the same adapted skill as CRLF with a BOM before its frontmatter is refused" in `story-41-1-qa-provenance-cli.test.ts`. Reverted; digest identical.
 - **M5:** the name-equals-directory check is removed → the mismatch rows go red.
+  - mutation: `if (name !== dirName)` replaced by `if (false)` → 4 red in `skills-pack-frontmatter.test.ts`: the reader row "a name that is not its directory", the `checkProvenance` rows "takes the directory name from the pack path" and "reports every file with a problem", and the scratch CLI row "a skill whose name is not its directory". Reverted; digest identical.
 - **M6:** the tag check becomes "no `<` or `>`" → the real-tree sweep goes red on `promote-environment-change` (`->`). With the tag check removed instead, the `<UNDEFINED>` row goes red.
+  - mutation: the tag pattern replaced by `/[<>]/` → 8 red in `skills-pack-frontmatter.test.ts`, among them "raises no problem for any of them" (the committed-pack sweep, red on `promote-environment-change`) and "a generated workflow description holds '->'". The tag pattern replaced by `/(?!)/` (never matches) → 2 red: the `<UNDEFINED>` and the closing-tag reader rows. Both reverted; digest identical.
 - **M7** (AC 41.3.1): `Use when` is removed from a description → the knowledge test goes red.
+  - mutation: " Use when creating" changed to " When creating" in the unit-tests description (re-run on the final tree) → `skills-pack-knowledge.test.ts` 3 red: the sha256 row, "holds exactly its name and description" and "has a pack copy equal to the source". Reverted; the three sha256 values equal the golden ones again.
 - **M8** (AC 41.3.3): `` `iris_doc_put` `` is added to a skill → the knowledge test goes red, while `validate:prompts` stays green because the name is real.
+  - mutation: the line "- Call `iris_doc_put`." added to the gotchas source, `pnpm gen:pack` re-run → `pnpm validate:prompts` stays green (`45 source(s) checked`, because the name is real), and `skills-pack-knowledge.test.ts` goes red on "names no iris_* tool" and on "names nothing of this repository" for the gotchas skill. Reverted (`gen:pack` re-run); digest identical.
 - **M9** (AC 41.3.3): "see Rule #7" is added, then `packages/shared` → the hygiene test goes red for each.
+  - mutation: the line "- See Rule #7." added to the unit-tests source → `skills-pack-knowledge.test.ts` "names nothing of this repository" red with two classes (an internal rule number, a number sign that is no IRIS error code); then "- See packages/shared." instead → the same test red with "a repository path". Both reverted; digest identical.
 - **M10:** bullet 5 of the rule is pasted into a skill → the no-copy test goes red.
+  - mutation: the rule's fifth bullet (the `Quit` bullet) pasted at the end of the gotchas source → `skills-pack-knowledge.test.ts` "goes deeper than the always-on rule: it copies none of the rule's bullets" red (and the hygiene test, whose problem list holds the copy). Reverted; digest identical.
 - **M11** (AC 41.3.2): `` `Test2` runs before `Test10` `` is reversed → the anchor test goes red.
+  - mutation: "so `Test2` runs before `Test10`" changed to "so `Test10` runs before `Test2`" in the unit-tests source → `skills-pack-knowledge.test.ts` "carries every probe anchor" red, naming the missing anchor `` `Test2` runs before `Test10` `` (the sha256 and pack-copy rows go red too). Reverted; digest identical.
 - **M12:** a stray `.DS_Store` is placed in a knowledge directory → the "only `SKILL.md`" test goes red.
+  - mutation: a stray `.DS_Store` file placed in `skills-pack-src/knowledge/iris-mcp-objectscript-gotchas/` → `skills-pack-knowledge.test.ts` "is the only file in its source directory and in its pack directory" red (`[ '.DS_Store', 'SKILL.md' ]`). File removed; digest identical. The digest of every mutation run is `git ls-files -m -o --exclude-standard` (outside `_bmad-output/`) sorted, sha256 of each file, sha256 of that list.
+- **M13** (AC 41.3.1, the notice keeps 0 provenance rows; added in the review pass).
+  - mutation: a well-formed provenance row added to the real notice source → `skills-pack-knowledge.test.ts` "the notice still has no provenance row" red. Then the table header row changed to `| Pack File | ...` (the case the old assertion could not see) → the same test red, on the header-present assertion. Both reverted with `git checkout --` on the notice; the tree digest equalled the digest taken before.
+- **M14** (AC 41.3.1, the fenced-block shape; added in the review pass).
+  - mutation: an extra fenced block (a fence line, `x`, a fence line) added to the gotchas source → `skills-pack-knowledge.test.ts` red on "holds 0 fenced code block(s)" (with the sha256 and pack-copy rows). Removed; the three sha256 values equal the golden ones again.
+- **M15** (the moved count pins, 19, 34, 45, 33 and 35; added in the review pass).
+  - mutation: the unit-tests knowledge directory moved out of `skills-pack-src/knowledge/` and `pnpm gen:pack` re-run (the pack drops to 18 files) → 9 red across `skills-pack-rule.test.ts`, `story-41-1-qa-pack-scratch-cli.test.ts`, `story-41-1-qa-provenance-cli.test.ts` and `story-41-1-qa-validate-prompts-pack.test.ts`: the `19 pack file(s)` and `34 pack file(s)` pins, the `45 source(s) checked` pins, and the `33` and `35 agent file(s)` pins. Directory moved back and `pnpm gen:pack` re-run; `gen:pack:check` reports 19 files and the tree digest equalled the digest taken before.
+- **M16** (AC 41.3.3, a project class or helper; added in the review pass).
+  - mutation: the line "- Call ExecuteMCPv2.Utils." added to the unit-tests source → `skills-pack-knowledge.test.ts` "names nothing of this repository, its planning or its tooling" red (with the sha256 and pack-copy rows). Removed; the three sha256 values equal the golden ones again.
+- **Unchanged counts** (AC "Unchanged counts"): pinned by the existing `(once)` gates, `gen:skills:check`, `gen:governance-baseline:check`, `gen:tools-list-snapshot:check` and the empty `git diff --stat packages/shared/src/bootstrap-classes.ts`. This story edits no prompt, tool, preset, governance or bootstrapped input, so no mutation of those gates applies; their own stories hold their mutation evidence.
 
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** Three suite-prefixed, tool-free knowledge skills (`iris-mcp-objectscript-gotchas`, `iris-mcp-objectscript-error-handling`, `iris-mcp-objectscript-unit-tests`) are in `skills-pack-src/knowledge/`, each equal to its golden text (sha256 checked), and `pnpm gen:pack` shipped the 3 copies unchanged (19 pack files; a second run changes nothing). DW-613 is closed by a `skill-frontmatter` rule in `check:provenance`, backed by one strict reader, `skillFrontmatterProblems`, shared from `scripts/lib/skills-pack.mjs`. `BOOTSTRAP_VERSION` stays `5296a1c836f4`; tools stay 110 package / 115 advertised; the governance baseline is untouched.
+
+**Files changed.**
+- `skills-pack-src/knowledge/iris-mcp-objectscript-{gotchas,error-handling,unit-tests}/SKILL.md`: the three golden texts (new).
+- `packages/client-config/skills-pack/skills/iris-mcp-objectscript-{gotchas,error-handling,unit-tests}/SKILL.md`: generated copies from `pnpm gen:pack` (new).
+- `scripts/lib/skills-pack.mjs`: the frontmatter reader and its exports.
+- `scripts/lib/provenance-core.mjs`: the `skill-frontmatter` rule in `checkProvenance`.
+- `scripts/check-provenance.mjs`: header comment lists the new rule; the failure hint covers a generated workflow skill.
+- `skills-pack-src/README.md`, `CHANGELOG.md`, `.changeset/story-41-3-core-knowledge-skills.md`: docs and a minor changeset for `@iris-mcp/client-config`.
+- `packages/iris-mcp-all/src/__tests__/agent-text-hygiene.ts` (new): the shared hygiene list and word counter, moved out of two siblings.
+- `skills-pack-frontmatter.test.ts` (113 tests) and `skills-pack-knowledge.test.ts` (58 tests), both new.
+- Count pins and fixtures moved in `pack-provenance`, `skills-pack`, `skills-pack-rule`, `story-41-1-qa-{pack-scratch-cli,pack-tarball,provenance-cli,validate-prompts-pack}` and `story-41-2-qa-rule-text-hygiene` tests; the 41.1 "CRLF with a BOM passes" row became a green CRLF row and a red BOM row (decision 4).
+
+**Review.** 36 findings from four layers: high 0, medium 0, low 32, false 3, maybe-false 1. Patches applied (all low, 4 root causes): the `check-provenance.mjs` header and hint; the notice "0 provenance rows" pin now also asserts the header row and an empty `problems`; a skill-specific hygiene class for a project class or helper with two negative controls; mutation lines M13 to M16 and an M7 re-run. Deferred: none. Rejected: 29 rows, each with its reason in the triage log (spec-bound golden text, spec-defined overrides, omissions beyond the golden scope, three refuted claims).
+
+**Follow-up review recommended:** `false`. Patched by verdict: high 0, medium 0, low 7 rows.
+
+**Verification performed.**
+- `shasum -a 256` of the three sources equals the golden values; ASCII, LF, 55 / 81 / 100 lines.
+- `pnpm gen:pack` twice: unchanged tree digest; `gen:pack:check`: 19 pack files match. `pnpm validate:prompts`: 45 sources (12 prompts + 33 content files: 12 workflow, 17 pack, 3 knowledge, 1 rule). `pnpm check:provenance`: 0 provenance rows, 33 agent files, 8 distributions. `npm pack --dry-run` in `packages/client-config` lists the three `SKILL.md` files.
+- Vitest: the nine listed files pass (401 tests) and the four `story-41-1-qa-*` files pass (118 tests), re-run after the review patches.
+- `(once)` after the last patch: shared 2071, dev 1663, admin 498, interop 672, ops 350 and client-config 514 tests pass; the full `@iris-mcp/all` suite passes in three slices (38 + 38 + 37 = 113 files; 792 + 1047 + 696 tests, 4 skipped); `gen:skills:check` 13 files; `gen:governance-baseline:check` OK with 141 frozen keys; `gen:tools-list-snapshot:check` OK (115 entries); `check-epics-sync` OK; `bootstrap-classes.ts` has no diff.
+- Mutations M1 to M16 each observed red and reverted (digest or sha256 equal afterwards); the lines are in `## Verification`.
+- IRIS: no probe was written in this stage; `iris_doc_list` filter `Probe413` (generated included) on `server:"default"`, `namespace:"HSCUSTOM"` returns `[]`.
+
+**Residual risks.**
+- Golden-text over-claims, left as the spec has them because a fix edits the golden text and its sha256 (the lead's call, with a re-probe of the new claim):
+  - the unit-tests description says "every Assert macro", yet `$$$AssertFilesSQLUnorderedSame` is not covered;
+  - `ErrorMessage` "removes one prefix in any language" was run for en, es, fr and de only;
+  - the error-handling skill does not say that `$$$ThrowStatus` with an OK status throws a spurious error, nor that `$$$QuitOnError` does not compile inside a loop;
+  - the unit-tests skill does not say that `OnAfterOneTest` is not called after a failed or skipping `OnBeforeOneTest`.
+- The new tests read the real `knowledge/` directory and rely on `fileParallelism: false` in `packages/iris-mcp-all/vitest.config.ts`; the CLI rows rely on a built `packages/client-config/dist`, as the 41.1 rows already did.
+- The `deferred:` item in the frontmatter (`SanitizeError` localized prefixes) is the lead's to harvest; `src/ExecuteMCPv2/Utils.cls` is untouched.

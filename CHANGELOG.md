@@ -2,6 +2,53 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-19] — Story 41.3: Core knowledge skills
+
+No tool, action, governance key, preset row, refusal code, environment variable or route is added or changed, so no tool count
+moves (the suite stays at 110 package tools, 115 advertised). The prompts stay at 12, `gen:skills` stays at 13 generated files,
+`BOOTSTRAP_VERSION` stays at `5296a1c836f4` because no bootstrapped class changed, and the frozen governance baseline stays at
+hash `1e62c5ad5bf7` (141 keys). The pack goes from 16 to 19 files.
+
+### Added
+
+- **Three core knowledge skills**, each one hand-authored `SKILL.md` under `skills-pack-src/knowledge/<name>/` that `pnpm gen:pack`
+  copies unchanged into the pack. Every claim in them was run on InterSystems IRIS 2026.2 (Build 221U), and every code block was
+  compiled as written. They name no `iris_*` tool, so they declare no preset, and nothing in them is adapted from another project,
+  so the notice still has no provenance row.
+  - `iris-mcp-objectscript-gotchas`: language traps that compile or run differently from what the code suggests (macros and
+    `Include`, extra arguments, JSON `null` against a missing key, object references in `$List`, numeric-looking subscripts,
+    `New $NAMESPACE` and `Catch`, missing `Ens.*` classes, `Open` timeouts).
+  - `iris-mcp-objectscript-error-handling`: `%Status` values and exceptions (testing, combining and reading a status,
+    `ThrowOnError`, `ThrowStatus`, `AsStatus`, the `Try` and `Catch` method shape, reading error text without its translated
+    `ERROR #N` prefix).
+  - `iris-mcp-objectscript-unit-tests`: writing and running `%UnitTest` tests (the `TestCase` shape and its hooks, which
+    methods run and in what order, every `Assert` macro, skipping, failed setup, `%UnitTest.Manager.RunTest` and its totals).
+- **The `skill-frontmatter` rule of `pnpm check:provenance`.** Every `skills/<name>/SKILL.md` it enumerates (a workflow skill, a
+  knowledge source and its pack copy) must open with frontmatter on its first line that holds only `name` and `description`.
+  `name` equals the directory and is lower-case letters and digits in hyphen-joined groups, at most 64 characters, without
+  `claude` or `anthropic`. `description` is at most 1,024 characters, with no XML tag. Before this rule, an adaptation header
+  placed above the frontmatter passed `check:provenance` while the skill lost its name and description in every client.
+
+### Changed
+
+- **A pack `SKILL.md` whose first bytes are a byte-order mark is now refused by `pnpm check:provenance`.** A client may not read the
+  opening `---` as the file's first line, so the skill could lose its name and description. `pnpm gen:pack` still copies any
+  bytes unchanged; only the check refuses.
+
+### Tests
+
+- `skills-pack-frontmatter.test.ts` pins the reader on every good, bad and not-a-skill row, the rule through `checkProvenance`, the
+  real `check-provenance` CLI in a scratch copy (a header above the frontmatter, a header after it, a missing description, a BOM,
+  a name that is not the directory), and that every committed pack skill passes.
+- `skills-pack-knowledge.test.ts` pins the three skills: their exact name and description, one file per directory, a pack copy
+  equal to the source, ASCII, size, no tool name, no internal reference, no bullet copied from the always-on rule, and one anchor
+  per probed claim. `agent-text-hygiene.ts` holds the wording list and the word counter that this file shares with the rule's tests.
+
+### Known limits
+
+- No installer places the skills until Story 41.6, and no catalog lists them until Story 41.5. The skills name no tool, and the
+  platform skills come in Story 41.4.
+
 ## [Pre-release — 2026-10-19] — Story 41.2: Always-on ObjectScript pre-write rule
 
 No tool, action, governance key, preset row, refusal code, environment variable or route is added or changed, so no tool count

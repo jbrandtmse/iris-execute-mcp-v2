@@ -11,6 +11,9 @@
 //     non-blank line after any frontmatter, and has a provenance row;
 //   - every provenance row names a pack file that exists and carries the header, and cites no excluded
 //     upstream source;
+//   - every agent file at skills/<name>/SKILL.md (a workflow skill, a knowledge source or a pack copy)
+//     opens with frontmatter on its first line that holds only a valid name and description (rule
+//     skill-frontmatter);
 //   - every npm tarball that carries pack or adapted content also carries the notice, and the client-config
 //     tarball carries every pack file.
 //
@@ -45,6 +48,9 @@ if (problems.length > 0) {
   console.error('');
   console.error(
     'Fix the sources in skills-pack-src/ (or the package manifest), run "pnpm gen:pack", then re-run "pnpm check:provenance".',
+  );
+  console.error(
+    'A workflow skill is generated from its prompt in packages/*-mcp/src/prompts/: fix the prompt, then run "pnpm gen:skills" and "pnpm gen:pack".',
   );
   process.exit(1);
 }
