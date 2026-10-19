@@ -12,22 +12,27 @@
  *    the process exits 0. The repair is the negative control: the red comes from the defect, not from the copy.
  *
  * The rows: the preset narrowed, widened and undeclared; a real tool named in the rule (which cannot declare a preset);
- * the old three-line generated header written into a workflow skill; and the three DW-623 controls (a second copy of the
- * adaptation header in the adapted skill, the header in a skill no provenance row names, and the adapted skill's row
- * removed from the notice). A last group drives `gen:skills` and `validate:prompts` over a prompt without a valid `skill`
- * field and a prompt whose skill description holds an internal reference: the scratch copy's ops package is a real
- * directory with a stub `dist/prompts/index.js` and a link to the real built tools. The expected messages, classes and
- * labels are typed here, not read from the check.
- * No IRIS and no network; the real tree is never written.
+ * a skill that names an ops tool and admin's `iris_database_manage`, each visible under its own server's `core`, so the
+ * per-server lookup gives `core` where a lookup in one server's roster would not; the old three-line generated header
+ * written into a workflow skill; an internal reference written into the rule source; and the three DW-623 controls (a
+ * second copy of the adaptation header in the adapted skill, the header in a skill no provenance row names, and the
+ * adapted skill's row removed from the notice). A last group drives `gen:skills` and `validate:prompts` over a prompt
+ * without a valid `skill` field and over prompts with an internal reference in the title, the description, the body, an
+ * argument description or the skill description: the scratch copy's ops package is a real directory with a stub
+ * `dist/prompts/index.js` and a link to the real built tools. The expected messages, classes and labels are typed here,
+ * not read from the check.
+ * No IRIS and no network. The real tree is never written: the trees the rows copy, and the real ops prompts module, are
+ * fingerprinted before the first row and compared after the last.
  */
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { KNOWLEDGE_SOURCE_DIR, NOTICE_FILENAME, PACK_DIR, PACK_SOURCE_DIR, RULES_SOURCE_DIR } from "../../../../scripts/lib/skills-pack.mjs";
 import { ADAPTATION_HEADER } from "../../../../scripts/lib/provenance-core.mjs";
 import { REPO_ROOT } from "./pack-fixture";
-import { makeScratchRepo, problemPairs, removeScratchRepo, runScript, treeLines } from "./story-41-1-qa-fixture";
+import { makeScratchRepo, problemPairs, removeScratchRepo, runScript, sha256, treeLines } from "./story-41-1-qa-fixture";
+import { stubPromptSource, VALID_STUB_SKILL } from "./story-41-5-qa-fixture";
 
 const VALIDATE = "scripts/validate-prompts.mjs";
 const GEN_PACK = "scripts/gen-pack.mjs";
@@ -42,6 +47,21 @@ const RULE = "iris-mcp-objectscript-pre-write";
 
 const GOLDEN_LINE_2 =
   "validate-prompts: OK \u2014 tool presets: 24 file(s) declare one (12 core, 6 developer, 6 full) and 15 tool-free file(s) declare none; no internal reference in 51 source(s), 2 adaptation header line(s) exempted.";
+
+/** A fingerprint of everything in the real tree that a row's scratch copy is made from or stands in for. */
+function realTreeFingerprint(): string[] {
+  return [
+    ...["skills", PACK_SOURCE_DIR, PACK_DIR].flatMap((rel) => treeLines(join(REPO_ROOT, rel)).map((line) => `${rel}: ${line}`)),
+    `ops prompts module ${sha256(readFileSync(join(REPO_ROOT, "packages", "iris-ops-mcp", "dist", "prompts", "index.js")))}`,
+  ];
+}
+let realTreeBefore: string[] = [];
+beforeAll(() => {
+  realTreeBefore = realTreeFingerprint();
+});
+afterAll(() => {
+  expect(realTreeFingerprint(), "no row wrote to the real tree").toEqual(realTreeBefore);
+});
 
 const scratches: string[] = [];
 /** The scratch roots whose ops package was replaced by a real directory that links the real built tools (`stubOpsPrompts`). */
@@ -203,6 +223,33 @@ describe("validate:prompts CLI, scratch copy: the tool preset check (AC 41.5.4)"
       green(root);
     }
   });
+
+  it("each tool is looked up on the server that owns it: an ops tool and admin's iris_database_manage, each in its own server's core, need core", () => {
+    const root = scratch();
+    const rels = [workflowRel("check-system-health"), packSkillRel("check-system-health")];
+    /** The skill's own frontmatter with the given preset, over a body that names one ops tool and then one admin tool. */
+    const crossServer = (preset: string) => (text: string): string => {
+      const end = text.indexOf("\n---\n", 4) + "\n---\n".length;
+      const frontmatter = text.slice(0, end).replace("  iris-tools-preset: full\n", `  iris-tools-preset: ${preset}\n`);
+      return `${frontmatter}\nCall iris_health_check, then iris_database_manage on the admin server.\n`;
+    };
+    const originals = editAll(root, rels, crossServer("core"));
+    const run = runScript(root, VALIDATE);
+    expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
+    // The two copies move from full to core: 14 core, 6 developer, 4 full.
+    expect(run.stdout.split("\n")).toContain(
+      "validate-prompts: OK — tool presets: 24 file(s) declare one (14 core, 6 developer, 4 full) and 15 tool-free file(s) declare none; no internal reference in 51 source(s), 2 adaptation header line(s) exempted.",
+    );
+    repair(root, originals);
+    editAll(root, rels, crossServer("full"));
+    const stderr = red(root);
+    expect(problemPairs(stderr)).toEqual(["preset pack:skills/check-system-health/SKILL.md", "preset workflow:check-system-health/SKILL.md"]);
+    expect(stderr).toContain(
+      "  - [preset] workflow:check-system-health/SKILL.md: declares the full tool preset, but every tool it names is visible under core; declare core\n",
+    );
+    repair(root, originals);
+    green(root);
+  });
 });
 
 describe("validate:prompts CLI, scratch copy: no internal references (AC 41.5.4)", () => {
@@ -229,6 +276,22 @@ describe("validate:prompts CLI, scratch copy: no internal references (AC 41.5.4)
     expect(stderr).toContain("validate-prompts: found internal references in agent content:");
     expectNoLegacyShape(stderr);
     repair(root, originals);
+    green(root);
+  });
+
+  it("an internal reference in the always-on rule is refused for the source and both pack forms", () => {
+    const root = scratch();
+    const sourceRel = `${RULES_SOURCE_DIR}/${RULE}.md`;
+    const originals = editAll(root, [sourceRel], (text) => `${text.trimEnd()}\n- Read the irislib copy of the class first.\n`);
+    expect(runScript(root, GEN_PACK).status).toBe(0);
+    const stderr = red(root);
+    const labels = [`pack:rules/agents-md/${RULE}.md`, `pack:rules/claude-code/${RULE}.md`, `rule:${RULE}.md`];
+    expect(problemPairs(stderr)).toEqual(labels.map((label) => `internal-reference ${label}`));
+    for (const label of labels) {
+      expect(stderr).toContain(`  - [internal-reference] ${label}: a snapshot folder (irislib)\n`);
+    }
+    repair(root, originals);
+    expect(runScript(root, GEN_PACK).status).toBe(0);
     green(root);
   });
 });
@@ -280,10 +343,9 @@ describe("validate:prompts CLI, scratch copy: the DW-623 controls (AC 41.5.4)", 
   });
 });
 
-describe("gen:skills and validate:prompts CLI, scratch copy: a prompt without a valid skill field (AC 41.5.1, AC 41.5.4)", () => {
-  const stubPrompt = (name: string, skill: string | null, description = "A stub prompt."): string =>
-    `{ name: ${JSON.stringify(name)}, title: "Stub", description: ${JSON.stringify(description)}, arguments: [], ${skill === null ? "" : `skill: ${skill}, `}build: () => "A stub body." }`;
-  const VALID_SKILL = '{ description: "A stub. Use when testing.", preset: "core" }';
+describe("gen:skills and validate:prompts CLI, scratch copy: the prompts themselves (AC 41.5.1, AC 41.5.4)", () => {
+  const stubPrompt = stubPromptSource;
+  const VALID_SKILL = VALID_STUB_SKILL;
   const BROKEN = [
     stubPrompt("zz-no-skill", null),
     stubPrompt("zz-empty", '{ description: "  ", preset: "core" }'),
@@ -308,7 +370,9 @@ describe("gen:skills and validate:prompts CLI, scratch copy: a prompt without a 
     writeFileSync(join(dir, "dist", "prompts", "index.js"), `export const prompts = [${prompts.join(",")}];\n`);
   }
 
-  it("gen:skills stops before writing, in write mode and in --check mode, and names each prompt and problem", () => {
+  // The write-mode leg leaves an up-to-date tree as it was; story-41-5-qa-gen-skills-refusal.test.ts proves on a stale tree
+  // that nothing is written before the refusal.
+  it("gen:skills exits 1, in write mode and in --check mode, naming each prompt and problem, and leaves an up-to-date tree as it was", () => {
     const root = scratch();
     stubOpsPrompts(root, BROKEN);
     const before = treeLines(join(root, "skills"));
@@ -351,12 +415,30 @@ describe("gen:skills and validate:prompts CLI, scratch copy: a prompt without a 
     const repaired = runScript(root, VALIDATE);
     expect(repaired.status, `${repaired.stdout}${repaired.stderr}`).toBe(0);
   });
-});
 
-describe("every row ran in a scratch copy", () => {
-  it("the real tree still has the exempted header and the declared preset it started with", () => {
-    expect(readFileSync(join(REPO_ROOT, "skills", DEPLOY, "SKILL.md"), "utf8")).toContain("  iris-tools-preset: developer\n");
-    expect(readFileSync(join(REPO_ROOT, OPS_PACKAGE, "dist", "prompts", "index.js"), "utf8")).not.toContain("zz-no-skill");
-    expect(readFileSync(join(REPO_ROOT, KNOWLEDGE_SOURCE_DIR, SQL, "SKILL.md"), "utf8").split(ADAPTATION_HEADER)).toHaveLength(2);
+  it("an internal reference in a prompt's title, description, body or argument description is refused for that prompt, and an unknown tool in an argument description is a tool-name problem", () => {
+    const root = scratch();
+    const argumentsWith = (description: string): string => `[{ name: "target", description: ${JSON.stringify(description)}, required: false }]`;
+    const defects: Array<[name: string, fields: Parameters<typeof stubPromptSource>[2], line: string]> = [
+      ["zz-title", { title: "Stub from Story 41.2" }, "a story or epic number (Story 4)"],
+      ["zz-description", { description: "A stub prompt; run pnpm first." }, "repository tooling (pnpm)"],
+      ["zz-body", { body: "A stub body, tracked as DW-615." }, "a planning or deferred-work id (DW-615)"],
+      ["zz-argument", { arguments: argumentsWith("Read packages/shared first, then call iris_not_a_real_tool.") }, "a repository path (packages/)"],
+    ];
+    stubOpsPrompts(root, defects.map(([name, fields]) => stubPrompt(name, VALID_SKILL, fields)));
+    const stderr = red(root);
+    expect(problemPairs(stderr)).toEqual(defects.map(([name]) => `internal-reference prompt:iris-ops-mcp/${name}`).sort());
+    for (const [name, , line] of defects) {
+      expect(stderr).toContain(`  - [internal-reference] prompt:iris-ops-mcp/${name}: ${line}\n`);
+    }
+    expect(stderr).toContain("validate-prompts: found tool-name references that do not match any real tool:");
+    expect(stderr).toContain('  - prompt:iris-ops-mcp/zz-argument: "iris_not_a_real_tool"\n');
+    // The same prompts with clean text, the argument kept and naming a real tool.
+    stubOpsPrompts(root, [
+      ...defects.slice(0, 3).map(([name]) => stubPrompt(name, VALID_SKILL)),
+      stubPrompt("zz-argument", VALID_SKILL, { arguments: argumentsWith("The profile to read; see iris_server_profiles.") }),
+    ]);
+    const repaired = runScript(root, VALIDATE);
+    expect(repaired.status, `${repaired.stdout}${repaired.stderr}`).toBe(0);
   });
 });

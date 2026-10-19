@@ -21,7 +21,7 @@ export const editAndTestClassPrompt: PromptDefinition = {
     "with a total-count check.",
   skill: {
     description:
-      "Changes a few lines of an ObjectScript class directly in IRIS: reads only the lines around the " +
+      "Changes a few lines of an ObjectScript class directly in IRIS: reads the lines around the " +
       "change, applies a guarded line edit that stores nothing when the class no longer matches what was " +
       "read, compiles the class and fixes errors the same way, runs its unit tests and checks the " +
       "returned total, and reports the diff. Use when the user wants a small fix or change to a class " +

@@ -76,15 +76,15 @@ const SKILLS: SkillOracle[] = [
     name: "edit-and-test-class",
     preset: "core",
     description:
-      "Changes a few lines of an ObjectScript class directly in IRIS: reads only the lines around the change, applies a guarded line edit that stores nothing when the class no longer matches what was read, compiles the class and fixes errors the same way, runs its unit tests and checks the returned total, and reports the diff. Use when the user wants a small fix or change to a class that lives in IRIS, especially one with no local source file, or asks to patch, compile and test a class in place.",
-    sha256: "636f70baddf7add206532d64372ab53adfd337336766f6366250b1c0545b478d",
+      "Changes a few lines of an ObjectScript class directly in IRIS: reads the lines around the change, applies a guarded line edit that stores nothing when the class no longer matches what was read, compiles the class and fixes errors the same way, runs its unit tests and checks the returned total, and reports the diff. Use when the user wants a small fix or change to a class that lives in IRIS, especially one with no local source file, or asks to patch, compile and test a class in place.",
+    sha256: "a26759dc2c6a14e57d28462a46a1bbd890fc3af7975d0c6d75af3bc714161b3f",
   },
   {
     name: "find-patient-messages",
     preset: "core",
     description:
-      "Finds a patient's interoperability messages by an identifier such as a medical record number, through a Search Table and in search windows of at most 7 days, lists the matching message headers, and reads message bodies only when the user wants the content, under the PHI data policy, which redacts or withholds them. Use when the user asks for the messages, HL7 traffic or message history of a patient or medical record number in an IRIS interoperability production.",
-    sha256: "4e6472ab0fc3748e82a4d5a458de546c26e4aff5d713395cf86fd32264e66daa",
+      "Finds a patient's interoperability messages by an identifier such as a medical record number, through a Search Table and in search windows of at most 7 days, lists the matching message headers, and reads message bodies only when the user wants the content, under the PHI data policy, which by default redacts or withholds them. Use when the user asks for the messages, HL7 traffic or message history of a patient or medical record number in an IRIS interoperability production.",
+    sha256: "9d0ccda8d608ca87c04de6e89384bc174afbef5c1ae742f0a2adf92cd1300193",
   },
   {
     name: "promote-environment-change",
@@ -125,8 +125,8 @@ const SKILLS: SkillOracle[] = [
     name: "trace-message-flow",
     preset: "core",
     description:
-      "Traces one interoperability message flow from a session or message header ID: lists every hop, searches the session's message headers, reads the bodies that matter under the PHI data policy, draws a sequence diagram, and pulls the error log entries of each failing item, then reports where the flow failed and recommends next steps without running a recovery. Use when the user asks what happened to a message or session, why a message failed or never arrived, or how a message moved through an IRIS interoperability production.",
-    sha256: "b2e6b0812fecec3f07f384072bd574d687e1b3164802c1c43e28f0e40de2d2d8",
+      "Traces one interoperability message flow from a session or message header ID: lists every hop, searches the session's message headers, reads the bodies that matter under the PHI data policy, draws a sequence diagram, and pulls the error log entries of each failing item, then reports where the flow failed and recommends next steps, never running a recovery without the user's confirmation. Use when the user asks what happened to a message or session, why a message failed or never arrived, or how a message moved through an IRIS interoperability production.",
+    sha256: "f3a2d19c2e362852419efc7ea22afd213586b41d1eae7f936b91c753ac16d6f0",
   },
 ];
 

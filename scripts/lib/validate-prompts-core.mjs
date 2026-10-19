@@ -11,7 +11,7 @@
 // no internal references in agent content (`internalReferenceProblems`, with the one DW-623 exemption).
 
 import { withoutAdaptationHeader } from './provenance-core.mjs';
-import { SKILL_PRESETS } from './skills-pack.mjs';
+import { SKILL_PRESET_KEY, SKILL_PRESETS, readSkillFrontmatter } from './skills-pack.mjs';
 
 /** Matches every `iris_<lowercase/digits/underscore>` token in a string. */
 const IRIS_TOKEN_RE = /\biris_[a-z0-9_]+\b/g;
@@ -56,6 +56,34 @@ export function renderPromptText(prompt) {
 }
 
 /**
+ * The text of a prompt that `validate:prompts` checks: what `renderPromptText` renders, then each argument's
+ * name and description (both served by `prompts/list`), then the description of its skill-only `skill`
+ * field, which only its generated skill carries. The CLI and its tests build a prompt's source from this.
+ *
+ * @param {{ title: string, description: string, arguments: Array<{ name: string, description: string }>, build: (args: Record<string, string | undefined>) => string, skill?: { description?: string } | null }} prompt
+ * @returns {string}
+ */
+export function promptSourceText(prompt) {
+  const argumentLines = prompt.arguments.map((argument) => `${argument.name}: ${argument.description}`).join('\n');
+  return `${renderPromptText(prompt)}\n${argumentLines}\n${prompt.skill?.description ?? ''}`;
+}
+
+/**
+ * The tool preset an agent content file declares: the `metadata` `iris-tools-preset` of a `SKILL.md`
+ * (`packRel` `skills/<name>/SKILL.md`), or `null` when the file declares none. Any other file cannot declare
+ * one, so it is `null` too. The value is returned as written, valid or not, for `presetProblems` to judge.
+ *
+ * @param {string} text
+ * @param {string} packRel
+ * @returns {string | null}
+ */
+export function declaredToolPreset(text, packRel) {
+  const skill = /^skills\/([^/]+)\/SKILL\.md$/.exec(packRel);
+  if (skill === null) return null;
+  return readSkillFrontmatter(text, skill[1] ?? '').metadata[SKILL_PRESET_KEY] ?? null;
+}
+
+/**
  * Validate a set of labeled text sources against a set of known-valid tool
  * names, returning every (label, token) pair where the token does not match
  * a real tool name.
@@ -85,11 +113,22 @@ function escapeRegExp(text) {
 
 /**
  * The nine classes of internal reference that agent content never holds: a prompt's title, description,
- * body and skill description, a workflow skill, a pack file, a knowledge skill and the rule. Each entry is
- * `[name, pattern, sample]`; `sample` is a short text that the class flags.
+ * body, argument names and descriptions and skill description, a workflow skill, a pack file, a knowledge
+ * skill and the rule. Each entry is `[name, pattern, sample]`; `sample` is a short text that the class flags.
  *
- * The repository-path class matches the top-level entries of the repository followed by `/`, and only where
- * a path starts (not after a letter, digit, `_`, `.`, `/` or `-`), so a user's own `c:/path/to/src/**` passes.
+ * Each class covers the spellings below; a spelling outside them passes.
+ * - A rule number: `Rule #7`, `Rules #7`, `Rule#7` (any case). A number with no `#` (`Rule 7`) passes,
+ *   because the rules of an interoperability routing rule set are numbered in legitimate text.
+ * - A bare `#` and digits: `item #58`, but not after a letter, digit, `_` or `&` (the ObjectScript
+ *   operators in `i#2` and `Read x#5`, an HTML entity) and not after `ERROR ` in any case (an IRIS error code).
+ * - A planning or deferred-work id: `DW-615`, `DW 615`, `AC41`, and the same for `AD`, `AC`, `NFR` and `FR`.
+ * - A story or epic number: `Story 41.2`, `Stories 41.2`, `story-41-5`, `Epic41`, `Sprint 3` (any case).
+ * - A repository path: a top-level entry of the repository followed by `/`, alone or after `./` or `../`,
+ *   only where a path starts (not after a letter, digit, `_`, `.`, `/` or `-`), so a user's own
+ *   `c:/path/to/src/**` passes.
+ * - A repository file: a name ending `.md`, `.ts`, `.mjs`, `.json`, `.yaml`, `.yml` or `.toml`.
+ * - Repository tooling: `pnpm`, `turbo`, `vitest`, `tsc`, and a `gen:`, `validate:` or `check:` script name.
+ *
  * `npm` and `npx` are deliberately not classes (an install command can be legitimate content), and neither
  * is `ExecuteMCPv2` (that IRIS package is deployed into the user's instance).
  *
@@ -100,16 +139,16 @@ export function INTERNAL_REFERENCE_CLASSES(repositoryEntries) {
   const repositoryPath =
     repositoryEntries.length === 0
       ? /(?!)/
-      : new RegExp(`(?<![A-Za-z0-9_./-])(?:${repositoryEntries.map(escapeRegExp).join('|')})/`);
+      : new RegExp(`(?<![A-Za-z0-9_./-])(?:\\.\\.?/)?(?:${repositoryEntries.map(escapeRegExp).join('|')})/`);
   return [
-    ['an internal rule number', /\bRules? #\d+/i, 'see Rule #7'],
-    ['a number sign and digits that are not an IRIS error code', /(?<!ERROR )#\d+(?!\d|:)/, 'item #58'],
-    ['a planning or deferred-work id', /\b(?:DW|AD|AC|NFR|FR)-\d+/, 'tracked as DW-615'],
-    ['a story or epic number', /\b(?:Story|Epic|Sprint)\s+\d/i, 'added in Story 41.2'],
+    ['an internal rule number', /\bRules? ?#\d+/i, 'see Rule #7'],
+    ['a number sign and digits that are not an IRIS error code', /(?<![\w&])(?<![Ee][Rr][Rr][Oo][Rr] )#\d+(?!\d|:)/, 'item #58'],
+    ['a planning or deferred-work id', /\b(?:DW|AD|AC|NFR|FR)[- ]?\d+/, 'tracked as DW-615'],
+    ['a story or epic number', /\b(?:Stor(?:y|ies)|Epics?|Sprints?)[\s-]*\d/i, 'added in Story 41.2'],
     ['a repository path', repositoryPath, 'see packages/shared'],
     ['an absolute path', /(?<![A-Za-z0-9_.-])\/(?:Users|home|private|tmp|usr|opt|var)\//, 'open /Users/someone/file'],
-    ['a repository file', /\b[\w-]+\.(?:md|ts|mjs|json|yaml|toml)\b/i, 'edit rules.md'],
-    ['repository tooling', /\b(?:pnpm|turbo|vitest|tsc)\b|\bgen:[a-z]/, 'run pnpm test'],
+    ['a repository file', /\b[\w-]+\.(?:md|ts|mjs|json|ya?ml|toml)\b/i, 'edit rules.md'],
+    ['repository tooling', /\b(?:pnpm|turbo|vitest|tsc)\b|\b(?:gen|validate|check):[a-z]/, 'run pnpm test'],
     ['a snapshot folder', /\birislib\b|\birissys\b/, 'read irislib'],
   ];
 }

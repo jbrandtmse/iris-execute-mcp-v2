@@ -31,16 +31,19 @@ changed, and the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 ke
   rule, in that order and each sorted by name, with each skill's description and declared preset and the rule's first heading.
 - **Two checks in `pnpm validate:prompts`.** A tool-preset check refuses a skill that names a tool without declaring a preset, one
   whose preset hides a tool it names, and one that declares a wider preset than it needs, and a no-internal-references check refuses
-  an internal rule number, a planning or deferred-work id, a story number, a repository path or file, an absolute path, repository
-  tooling and a snapshot folder in any prompt (its skill description included) and any agent content file. The only exemption is the
-  exact adaptation header, as the first body line of a file that a row of the notice's provenance table names (DW-623). Success
-  prints a second line with the counts.
+  nine classes: an internal rule number, a bare `#` and digits that is not an IRIS error code, a planning or deferred-work id, a
+  story number, a repository path, an absolute path, a repository file, repository tooling and a snapshot folder, in any prompt (its
+  argument names and descriptions and its skill description included) and any agent content file. The only exemption is the exact
+  adaptation header, as the first body line of a file that a row of the notice's provenance table names (DW-623). Success prints a
+  second line with the counts.
 
 ### Changed
 
 - **`validate:prompts` output.** The first success line is unchanged. A failure now also prints, under their own headers, the
   `[skill-field]`, `[preset]` and `[internal-reference]` lines, and its closing guidance names the prompt's `skill` field and the
   `metadata` declaration. The unknown-field message of the frontmatter rule now reads `only name, description and metadata are allowed`.
+  The tool-name check now also reads each prompt argument's name and description, which `prompts/list` serves: three of them name a
+  tool, so renaming that tool now fails the check. The counts of both success lines are unchanged.
 - **`skills/README.md`** (still the 13th generated file) gains each skill's description and a `Tool preset` column, and points at the
   prompt sources and the catalog. The root `README.md` sentence on installable skills and `skills-pack-src/README.md` describe the
   new frontmatter, the preset declaration, the catalog and the checks.
@@ -50,8 +53,14 @@ changed, and the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 ke
 ### Tests
 
 - `story-41-2-qa-prompts-stdio-wire.test.ts` pins every `prompts/list` and `prompts/get` of the four prompt servers to the sha256
-  captured before this story, and requires every listed entry to keep exactly its four keys and its own description and to hold
-  neither a skill description nor the preset key. `prompts.test.ts` (shared) checks the same in memory.
+  captured before this story, and requires every entry the SDK client lists to keep its own description and to hold neither a skill
+  description nor the preset key. The SDK's parse drops a key it does not know, so the raw JSON-RPC frame rows of
+  `story-41-5-qa-dist-consumer.test.ts` are the ones that require every listed entry to hold exactly its four keys.
+  `prompts.test.ts` (shared) checks the same in memory.
+- The `story-41-5-qa-*` files read the built packages as consumers do: a fresh Node process imports each prompt module, the raw
+  frames of each server are read without the SDK, each of the five servers is started under each `IRIS_TOOLS_PRESET` so that
+  `tools/list` is the oracle for every declared preset, `gen:skills` is refused on stale and up-to-date scratch trees, and every
+  `SKILL.md` frontmatter is parsed by the `yaml` package.
 - `skills-generated-frontmatter.test.ts` carries a typed oracle of each skill's description, preset and sha256, and checks each
   against the prompt's `skill` field in the built dist. `skills-pack.test.ts` pins the catalog on fixture roots and pins the committed
   README by its sha256, size and line count.
@@ -68,6 +77,25 @@ changed, and the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 ke
 - No installer places the skills until Story 41.6, and the root README's pack section arrives in Story 41.7.
 - A prompt's own `skill.preset` is checked through the file generated from it: `gen:skills --check` reports a skill that was not
   regenerated, and `validate:prompts` checks the generated file's declaration against the tools it names.
+- The presets are not nested, so a skill's declared preset says nothing about the presets after it: `provision-project-environment`
+  declares `core` and names `iris_user_manage`, which the admin server's `developer` preset hides.
+- The internal-reference classes, as of 2026-10-19. Beyond the spellings each class names (for example `AC 41.5.1`, `Stories 41.2`,
+  `story-41-5`, `./scripts/`, `.yml` and `validate:prompts` are caught), these pass the check:
+  - planning words with no class: `Rule 16` with no `#` (the rules of a routing rule set are numbered in legitimate text),
+    `decision 15`, `wave 7`, a bare `41.5`, `S41.5`, a story key such as `41-5-workflow-skills-refresh`, `spec-41-5`, and
+    tracker ids such as `GH-123`, `PR 45`, `issue 12` and `JIRA-123`;
+  - tools and files with no class: `gen-skills`, `gen-pack`, `npm run build`, `yarn`, `eslint`, `changeset`, `tsconfig`,
+    `CHANGELOG`, `README`, `.gitignore`, `node_modules` with no `/` after it, and names ending `.js`, `.cjs`, `.sh` or `.cls`;
+  - paths and environment: `~/git/...`, Windows paths such as `C:\git\...`, `c:/git/.../src/...` or `file:///C:/...` (a user's
+    own path takes the same form), `ExecuteMCPv2/REST/Dispatch`, `ExecuteMCPv2.Temp.Probe`, `IRIS_REQUIRE_LIVE`, `BOOTSTRAP_VERSION`,
+    a commit hash, `IRIS 2026.2 Build 221U` and the repository's name;
+  - process words: the architecture spine, ledger, retrospective, burn-down, BMAD, Project Lead, orchestrator, project rules,
+    golden, oracle and mutation.
+
+  Deliberately not flagged: `npm`, `npx`, `ExecuteMCPv2`, a namespace such as `HSCUSTOM` and `localhost:52773`. Flagged although
+  a user's own project can hold the same name: a path under a top-level name of this repository (`src/`, `docs/`, `.claude/`), the
+  files `AGENTS.md`, `CLAUDE.md`, `.mcp.json` and `package.json`, and any local entry of the checkout's root, such as an untracked
+  `node_modules/`.
 
 ## [Pre-release — 2026-10-19] — Story 41.4: Platform knowledge skills
 

@@ -473,10 +473,10 @@ describe("the committed pack (real tree)", () => {
       return `- \`${name}\`${preset === null ? "" : ` (tool preset \`${preset}\`)`}: ${description}`;
     };
 
-    it("is the golden file: 11611 bytes, 48 lines, sha256 4806e801...", () => {
-      expect(readme.length).toBe(11611);
+    it("is the golden file: 11648 bytes, 48 lines, sha256 bdd1b54f...", () => {
+      expect(readme.length).toBe(11648);
       expect(text.split("\n").length - 1, "48 lines").toBe(48);
-      expect(createHash("sha256").update(readme).digest("hex")).toBe("4806e801f7a9dff2eae1d4099a6dc481d5d2ea410407584fca76e22e85c99b82");
+      expect(createHash("sha256").update(readme).digest("hex")).toBe("bdd1b54f06327f00af5a46b07457e3f4a6380a97479e3225afabf3b8ed5becd3");
       expect(/^[\x0a\x20-\x7e]+$/.test(text), "ASCII").toBe(true);
     });
 

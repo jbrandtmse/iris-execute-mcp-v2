@@ -2,7 +2,8 @@
 // validate-prompts.mjs (Epic 25, Story 25.1, AC 25.1.3; extended in Story 41.5)
 //
 // Checks every registered prompt's text (title + description + `build({})`
-// body + the skill description of its `skill` field) AND every Markdown file of
+// body + each argument's name and description + the skill description of its
+// `skill` field, as `promptSourceText` builds it) AND every Markdown file of
 // agent content (scripts/lib/skills-pack.mjs `listAgentContentFiles`: the
 // generated workflow skills, the skills pack, and the hand-authored knowledge
 // skill and rule sources). Four checks run on that set:
@@ -18,8 +19,10 @@
 //      tool it names is visible on the server that owns it. A skill or rule that
 //      names no tool declares none. A file that is not a `SKILL.md` names no tool.
 //   4. Internal references. No prompt or agent content file holds an internal
-//      rule number, planning id, story number, repository path or file, absolute
-//      path, repository tooling or snapshot folder (nine classes). The one
+//      reference of the nine classes: a rule number, a bare `#` and digits that
+//      is not an IRIS error code, a planning or deferred-work id, a story number,
+//      a repository path, an absolute path, a repository file, repository tooling
+//      or a snapshot folder. The one
 //      exemption is the exact adaptation header, as the first body line of a file
 //      that a row of the notice's provenance table names (DW-623).
 //
@@ -40,10 +43,16 @@ import { fileURLToPath } from 'url';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { loadAllPrompts } from './lib/prompt-catalog.mjs';
 import { loadAllToolNames, loadToolPresetCatalog } from './lib/tool-catalog.mjs';
-import { NOTICE_FILENAME, PACK_SOURCE_DIR, SKILL_PRESET_KEY, listAgentContentFiles, readSkillFrontmatter } from './lib/skills-pack.mjs';
+import { NOTICE_FILENAME, PACK_SOURCE_DIR, SKILL_PRESET_KEY, listAgentContentFiles } from './lib/skills-pack.mjs';
 import { parseProvenanceRows } from './lib/provenance-core.mjs';
 import { promptSkillProblems } from './lib/workflow-skills.mjs';
-import { internalReferenceProblems, presetProblems, renderPromptText, validateSources } from './lib/validate-prompts-core.mjs';
+import {
+  declaredToolPreset,
+  internalReferenceProblems,
+  presetProblems,
+  promptSourceText,
+  validateSources,
+} from './lib/validate-prompts-core.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -54,10 +63,11 @@ const [prompts, toolNames, presetCatalog] = await Promise.all([
   loadToolPresetCatalog(root),
 ]);
 
-// A prompt's text surface is what it renders plus the description of its skill, which only its skill reads.
+// A prompt's text surface is what it renders, its arguments as `prompts/list` serves them, and the description of
+// its skill, which only its skill reads.
 const sources = [];
 for (const { pkg, prompt } of prompts) {
-  sources.push({ label: `prompt:${pkg}/${prompt.name}`, text: `${renderPromptText(prompt)}\n${prompt.skill?.description ?? ''}`, packRel: null });
+  sources.push({ label: `prompt:${pkg}/${prompt.name}`, text: promptSourceText(prompt), packRel: null });
 }
 
 // Also scan every file of agent content that exists, since a generator bug (truncation, wrong prompt mapping)
@@ -66,9 +76,7 @@ for (const { pkg, prompt } of prompts) {
 const contentFiles = listAgentContentFiles(root);
 const contentSources = contentFiles.map(({ label, packRel, absPath }) => {
   const text = readFileSync(absPath, 'utf-8');
-  const skill = /^skills\/([^/]+)\/SKILL\.md$/.exec(packRel);
-  const declared = skill === null ? undefined : readSkillFrontmatter(text, skill[1] ?? '').metadata[SKILL_PRESET_KEY];
-  return { label, text, packRel, preset: declared ?? null };
+  return { label, text, packRel, preset: declaredToolPreset(text, packRel) };
 });
 sources.push(...contentSources);
 

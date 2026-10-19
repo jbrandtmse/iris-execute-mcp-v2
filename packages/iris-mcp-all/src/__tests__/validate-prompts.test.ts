@@ -46,15 +46,15 @@ import {
   NOTICE_FILENAME,
   PACK_DIR,
   PACK_SOURCE_DIR,
-  readSkillFrontmatter,
   RULES_SOURCE_DIR,
   WORKFLOW_SKILLS_DIR,
 } from "../../../../scripts/lib/skills-pack.mjs";
 import {
+  declaredToolPreset,
   INTERNAL_REFERENCE_CLASSES,
   internalReferenceProblems,
   presetProblems,
-  renderPromptText,
+  promptSourceText,
   validateSources,
   extractIrisTokens,
 } from "../../../../scripts/lib/validate-prompts-core.mjs";
@@ -125,11 +125,42 @@ describe("every registered prompt references only real, live tool names (AC 25.1
 
     const sources = prompts.map(({ pkg, prompt }) => ({
       label: `prompt:${pkg}/${prompt.name}`,
-      text: renderPromptText(prompt),
+      text: promptSourceText(prompt),
     }));
 
     const problems = validateSources(sources, toolNames);
     expect(problems).toEqual([]);
+  });
+
+  it("a prompt's source text is its title, description, body, each argument's name and description, then its skill description", () => {
+    const prompt = {
+      title: "T-title",
+      description: "T-description",
+      arguments: [
+        { name: "first", description: "Names iris_doc_get." },
+        { name: "second", description: "The second." },
+      ],
+      build: () => "T-body",
+      skill: { description: "T-skill", preset: "core" },
+    };
+    expect(promptSourceText(prompt)).toBe("T-title\nT-description\nT-body\nfirst: Names iris_doc_get.\nsecond: The second.\nT-skill");
+    expect(promptSourceText({ ...prompt, arguments: [], skill: undefined })).toBe("T-title\nT-description\nT-body\n\n");
+    expect(extractIrisTokens(promptSourceText(prompt))).toEqual(["iris_doc_get"]);
+  });
+
+  it("each prompt's own skill.preset is the first preset that shows every tool its source text names, its argument descriptions included", async () => {
+    const [prompts, catalog] = await Promise.all([loadAllPrompts(root), loadToolPresetCatalog(root)]);
+    const sources = (prompts as Array<{ pkg: string; prompt: Parameters<typeof promptSourceText>[0] & { name: string; skill: { preset: string } } }>).map(
+      ({ pkg, prompt }) => ({ label: `prompt:${pkg}/${prompt.name}`, text: promptSourceText(prompt), packRel: `skills/${prompt.name}/SKILL.md`, preset: prompt.skill.preset }),
+    );
+    // Three argument descriptions name a tool: promote-environment-change (iris_env_promote, iris_env_diff) and recover-stuck-production (iris_production_status).
+    const argumentTools = (prompts as Array<{ prompt: { arguments: Array<{ description: string }> } }>).flatMap(({ prompt }) =>
+      prompt.arguments.flatMap((argument) => extractIrisTokens(argument.description)),
+    );
+    expect(argumentTools.sort()).toEqual(["iris_env_diff", "iris_env_promote", "iris_production_status"]);
+    const result = presetProblems(sources, catalog) as { problems: unknown[]; declared: Record<string, number> };
+    expect(result.problems).toEqual([]);
+    expect(result.declared).toEqual({ core: 6, developer: 3, full: 3 });
   });
 
   it("resend-failed-messages (Story 26.3) AND promote-environment-change (Story 27.4) are BOTH registered — no gated prompt remains", async () => {
@@ -298,8 +329,40 @@ describe("internal references: the nine classes (AC 41.5.4)", () => {
     ["an install command", "run npm install and npx create-thing"],
     ["the IRIS package that ships into the user's instance", "the ExecuteMCPv2 package"],
     ["a plain sentence", "Run the tests and compare the total with the number of test methods."],
+    ["an ObjectScript modulo expression", 'If i#2=0 { Write "even" }'],
+    ["an ObjectScript read with a length", "Read x#5"],
+    ["an IRIS error code in lower case", "the save failed with error #5659"],
+    ["an HTML entity", "&#169; 2026"],
+    ["a numbered rule of a routing rule set, with no number sign", "rule 2 of the routing rule set sends it to the operation"],
+    ["the namespace and the web port of a local instance", "connect to localhost:52773 in the HSCUSTOM namespace"],
   ])("accepts %s", (_row, text) => {
     expect(referencesIn(text).problems).toEqual([]);
+  });
+
+  /** The other spellings each class covers, typed out here: sample, class, first match. */
+  const SPELLING_ORACLE: Array<[sample: string, name: string, match: string]> = [
+    ["per Rule#16", "an internal rule number", "Rule#16"],
+    ["see AC 41.5.1", "a planning or deferred-work id", "AC 41"],
+    ["see DW 615 and AD28", "a planning or deferred-work id", "DW 615"],
+    ["see NFR12", "a planning or deferred-work id", "NFR12"],
+    ["added in Stories 41.2 and 41.3", "a story or epic number", "Stories 4"],
+    ["from story-41-5", "a story or epic number", "story-4"],
+    ["planned in Epic41", "a story or epic number", "Epic4"],
+    ["run ./scripts/helper", "a repository path", "./scripts/"],
+    ["read ../packages/shared", "a repository path", "../packages/"],
+    ["edit ci.yml", "a repository file", "ci.yml"],
+    ["run validate:prompts", "repository tooling", "validate:p"],
+    ["run check:provenance", "repository tooling", "check:p"],
+  ];
+
+  it.each(SPELLING_ORACLE)("flags %j as %s", (sample, name, match) => {
+    const { problems } = referencesIn(sample);
+    expect(problems.filter((problem) => problem.className === name)).toEqual([{ label: "fixture", className: name, match }]);
+  });
+
+  it("a number sign after a word character is left to the rule-number class, which still flags Rule#7", () => {
+    const names = referencesIn("see Rule#7").problems.map((problem) => problem.className);
+    expect(names).toEqual(["an internal rule number"]);
   });
 
   it("an empty list of repository entries never makes the path class match", () => {
@@ -320,14 +383,14 @@ describe("internal references: the nine classes (AC 41.5.4)", () => {
 });
 
 describe("internal references: the real tree is clean (AC 41.5.4)", () => {
-  it("none of the 51 sources, the prompts' skill descriptions included, holds one", async () => {
+  it("none of the 51 sources, the prompts' arguments and skill descriptions included, holds one", async () => {
     const prompts = (await loadAllPrompts(root)) as Array<{
       pkg: string;
-      prompt: Parameters<typeof renderPromptText>[0] & { name: string; skill?: { description: string } };
+      prompt: Parameters<typeof promptSourceText>[0] & { name: string };
     }>;
     const sources: Array<{ label: string; text: string; packRel: string | null }> = prompts.map(({ pkg, prompt }) => ({
       label: `prompt:${pkg}/${prompt.name}`,
-      text: `${renderPromptText(prompt)}\n${prompt.skill?.description ?? ""}`,
+      text: promptSourceText(prompt),
       packRel: null,
     }));
     for (const { label, packRel, absPath } of listAgentContentFiles(root) as ContentFile[]) {
@@ -570,9 +633,7 @@ describe("tool presets, real tree (AC 41.5.4)", () => {
     const files = listAgentContentFiles(root) as ContentFile[];
     const sources = files.map(({ label, packRel, absPath }) => {
       const text = readFileSync(absPath, "utf-8");
-      const skill = /^skills\/([^/]+)\/SKILL\.md$/.exec(packRel);
-      const declared = skill === null ? undefined : (readSkillFrontmatter(text, skill[1] ?? "").metadata as Record<string, string>)["iris-tools-preset"];
-      return { label, text, packRel, preset: declared ?? null };
+      return { label, text, packRel, preset: declaredToolPreset(text, packRel) as string | null };
     });
     expect(sources).toHaveLength(39);
     const result = presetProblems(sources, catalog) as { problems: unknown[]; declared: Record<string, number>; toolFree: number };

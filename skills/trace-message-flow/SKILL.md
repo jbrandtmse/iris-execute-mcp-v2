@@ -1,7 +1,7 @@
 ---
 # DO NOT EDIT: generated from the MCP prompt of the same name.
 name: trace-message-flow
-description: "Traces one interoperability message flow from a session or message header ID: lists every hop, searches the session's message headers, reads the bodies that matter under the PHI data policy, draws a sequence diagram, and pulls the error log entries of each failing item, then reports where the flow failed and recommends next steps without running a recovery. Use when the user asks what happened to a message or session, why a message failed or never arrived, or how a message moved through an IRIS interoperability production."
+description: "Traces one interoperability message flow from a session or message header ID: lists every hop, searches the session's message headers, reads the bodies that matter under the PHI data policy, draws a sequence diagram, and pulls the error log entries of each failing item, then reports where the flow failed and recommends next steps, never running a recovery without the user's confirmation. Use when the user asks what happened to a message or session, why a message failed or never arrived, or how a message moved through an IRIS interoperability production."
 metadata:
   iris-tools-preset: core
 ---

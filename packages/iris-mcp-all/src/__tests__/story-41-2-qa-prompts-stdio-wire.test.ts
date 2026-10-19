@@ -13,8 +13,10 @@
  *  - `prompts/get` with `arguments` omitted entirely never ends in an internal error, and the connection stays usable;
  *  - dev's npm tarball file list holds the four prompt modules and nothing of the retired one;
  *  - Story 41.5 (AC 41.5.1, AD-15, AD-28): `prompts/list` and every `prompts/get` hash to the bytes captured before a prompt
- *    gained its skill-only `skill` field, each listed entry keeps exactly its four keys and its own description, and neither
- *    the skill description nor the preset key appears anywhere on the wire.
+ *    gained its skill-only `skill` field, each entry as the SDK client parses it has exactly its four keys and its own
+ *    description, and neither the skill description nor the preset key appears in what the client reads. The SDK's parse of
+ *    a `prompts/list` entry drops a key it does not know, so a fifth key the server sent is pinned by the raw JSON-RPC frame
+ *    rows of `story-41-5-qa-dist-consumer.test.ts`, not here.
  *
  * Every server is started with `default` pointing at 127.0.0.1:9, a closed local port, and no tool is called, so no
  * IRIS instance is reached. The expected prompt table was captured from the built dists over stdio on 2026-10-19
@@ -327,7 +329,7 @@ async function definitionsOf(pkg: string): Promise<PromptWithSkill[]> {
 }
 
 describe("the skill-only field never reaches the wire (AC 41.5.1, AD-15, AD-28)", () => {
-  it.each(Object.keys(WIRE_GOLDEN))("%s: every prompt sets its skill field, and prompts/list serves only name, title, description and arguments", async (pkg) => {
+  it.each(Object.keys(WIRE_GOLDEN))("%s: every prompt sets its skill field, and the SDK client lists each prompt with exactly name, title, description and arguments", async (pkg) => {
     const definitions = await definitionsOf(pkg);
     const listedPrompts = (await sessionOf(pkg).listPrompts()) as Array<Record<string, unknown>>;
     expect(listedPrompts.map((entry) => entry.name)).toEqual(definitions.map((definition) => definition.name));
