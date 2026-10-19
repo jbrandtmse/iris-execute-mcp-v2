@@ -2636,6 +2636,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: A client trusting annotations may retry freely, the damage vector the running contract removes; set idempotentHint:false, re-evaluate readOnlyHint with the BASELINE_ACTION_CLASSIFICATIONS cross-check (#44) and update the annotation pins.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=A client trusting annotations may retry freely, the damage vector the running contract removes
 - 2026-10-15T11:47:35Z status=routed owner=40-4-test-depth-docs-prompt-and-capstone by=x0 note=owned by named story (orchestrator decision 2): AC 40.4.3 names DW-498 explicitly (readOnlyHint/idempotentHint vs the write classification and the do-not-resubmit contract)
+- 2026-10-19T01:32:46Z status=resolved-by:40-4-test-depth-docs-prompt-and-capstone by=adjudication note=iris_execute_tests declares readOnlyHint:false and idempotentHint:false (decision 63); no key, classification or baseline moved; a reverse-direction pin with no allowlist, derived from the built servers, keeps any write-classified tool from declaring readOnlyHint:true; build 27d04e5 + review patches 36d2f90; mutation-verified (spec-40-4 Verification); lead smoke: 9 Epic 40 gates armed 262/262
 
 ### DW-499: [36-1-CR-2] The iris_execute_tests wait budget bounds only the poll loop's START condition
 - source: legacy:36.1 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -3277,16 +3278,19 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-40-2-coverage-reports-and-targets.md | severity: med | fix-risk: med | footprint: in-story
 - evidence: CR re-review 2026-10-18, live: fresh ExecuteMCPv2.Temp.CR402Stub (IsUpToDate 1, $Data(^rMAP)=10) gives OnHook [0]/label 7, Declared [0]/label 5; built dist -> {reason:not-up-to-date}, verdict FAIL; a doc-only edit gives the same shape with ^rMAP 0
 - 2026-10-18T13:27:45Z status=routed owner=40-4-test-depth-docs-prompt-and-capstone by=cr note=fix: raw class flag from $Data(^rMAP(class)) in SourceMap; exact label via cMETHrtnlabel also closes the 31-char residual
+- 2026-10-19T01:32:46Z status=resolved-by:40-4-test-depth-docs-prompt-and-capstone by=adjudication note=SourceMap records $Data(^rMAP(class)) (10 fresh, 0 stale) and each method's compiled label (cMETHrtnlabel; a %-named method with an empty RtnLabel uses its name cut to 31 characters); the TypeScript stale rule uses lineMap; a directive-only fresh class is no longer not-up-to-date and a stale %-only class no longer exports at line-rate 1; build 27d04e5 + review patches 36d2f90; mutation-verified (spec-40-4 Verification); lead smoke: 9 Epic 40 gates armed 262/262
 
 ### DW-602: IsDirective drops a #dim line that carries an initial value (#dim tSC As %Status = $$$OK), which compiles to an executable Set: the statement is never a class line and its INT line counts as generated, against the AC-1 executable rule; the dev README and CHANGELOG state it as never a class line
 - source: spec-40-2-coverage-reports-and-targets.md | severity: med | fix-risk: med | footprint: in-story
 - evidence: CR re-review 2026-10-18, live: ExecuteMCPv2.Temp.CR402Probe DimInit -> INT 16 'Set tSC=1' (C:set), raw intLines [0,17]/label 15; built dist reports only line 7 and generated 1; the idiom skews percent per method
 - 2026-10-18T13:27:45Z status=routed owner=40-4-test-depth-docs-prompt-and-capstone by=cr note=fix: keep INTLine's line for a #dim with '=' outside parens (or a raw per-line kind flag, TS decides); correct the README/CHANGELOG sentence
+- 2026-10-19T01:32:46Z status=resolved-by:40-4-test-depth-docs-prompt-and-capstone by=adjudication note=an initializing #dim is an executable class line at its own line; a non-initializing #dim whose trailing comment holds = (// ; or /* */, strings respected) is not; README and CHANGELOG corrected; build 27d04e5 + review patches 36d2f90; mutation-verified (spec-40-4 Verification); lead smoke: 9 Epic 40 gates armed 262/262
 
 ### DW-603: The Story 40.1 and 40.2 coverage gates and their QA gates each still declare their own copy of the instance-wide monitor helpers (monitorState, coverageGlobal, expectMonitorIdle, releaseLeftoverSession) that testproduction-gate-helpers.ts now shares for the two Story 40.3 gates
 - source: spec-40-3-testproduction-runs.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: story-40-1-coverage-live-gate, story-40-1-qa-live-gate, story-40-2-coverage-reports-live-gate and story-40-2-qa-live-gate each define the four helpers at top level (Rule 2 near-copies); a fix to the StopIfList safety net or the idle check in one copy does not reach the others
 - 2026-10-18T17:35:54Z status=routed owner=burndown by=cr note=Rule 2; move the four gates onto the shared helpers (a monitor-only module if the TestProduction helpers do not fit) and re-run them armed
+- 2026-10-19T01:00:23Z occurrence=40-4-test-depth-docs-prompt-and-capstone
 
 ### DW-604: Spine AD-15's Story 40.3 bullet (decision #60) names a namespace that cannot see the ExecuteMCPv2 classes as unguarded, but not the rework-1 case of a namespace holding its own copy of an earlier build without ProductionGuard
 - source: spec-40-3-testproduction-runs.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3312,8 +3316,15 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-40-4-test-depth-docs-prompt-and-capstone.md | severity: low | fix-risk: med | footprint: in-story
 - evidence: 40.4 implement probe 2026-10-18 22:43 in HSCUSTOM, two brand-new classes; 12 later probe rounds, about 10 capstone runs and every OS run gave 10; cause not found; errs only toward a false FAIL (CHANGELOG known limits)
 - 2026-10-19T00:11:38Z status=wontfix-theoretical owner=40-4-test-depth-docs-prompt-and-capstone by=harvest note=reopen_if=a capstone or OS run shows lineMap 0 straight after a compile
+- 2026-10-19T01:24:40Z status=wontfix-accepted by=adjudication note=lead correction (40.4 code review): the event was observed once, so it is an accepted residual, not theoretical; errs only toward a false FAIL; reopen_if=a capstone or OS run shows lineMap 0 straight after a compile
 
 ### DW-609: The edit-and-test-class prompt calls iris_execute_tests but has no PRODUCTION_BUSY note, so under the Story 40.3 guard an agent has no instruction to report the refusal rather than stop the other production to get its tests to run
 - source: _bmad-output/implementation-artifacts/spec-40-4-test-depth-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 40.4 implement review 2026-10-18: editAndTestClass.ts; deploy-and-test-class gained the note in 40.4 (decision 62); the AD-15 sanction names only deploy-and-test-class; same shape as DW-590
 - 2026-10-19T00:11:38Z status=escalated owner=burndown by=harvest note=decide at the Epic 40 burn-down decision sheet together with DW-590 (prompt-text changes need an AD-15 sanction)
+- 2026-10-19T01:24:40Z status=decision-pending owner=burndown by=adjudication note=lead correction (40.4 code review): a low prompt-text item awaiting a decision, not an escalated medium; decide at the Epic 40 decision sheet with DW-590 and DW-610
+
+### DW-610: Step 4 of the deploy-and-test-class prompt says a PRODUCTION_BUSY refusal means a production other than the tests' own is running and the refusal names it, but the Story 40.3 guard also refuses with state Unknown when the production state cannot be read
+- source: spec-40-4-test-depth-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: 40.4 code review 2026-10-18: deployAndTestClass.ts step 4 (decision 62 golden text); 40.3 CHANGELOG: busy including when the state cannot be read, refusal carries state Unknown and error; the refusal text names the case
+- 2026-10-19T01:00:23Z status=decision-pending owner=burndown by=cr note=prompt-text amendment needs a lead call (AD-15, decision 62); decide at the Epic 40 decision sheet with DW-590 and DW-609
