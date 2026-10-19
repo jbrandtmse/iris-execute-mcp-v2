@@ -105,7 +105,7 @@ describe("assemblePack layout (fixture roots)", () => {
     ["a file directly in knowledge/", () => ({ rel: `${KNOWLEDGE_SOURCE_DIR}/stray.md`, content: "x" }), "stray.md"],
     ["a directory in rules/", () => ({ rel: `${RULES_SOURCE_DIR}/nested/form.md`, content: "x\n" }), "nested"],
     ["a non-Markdown file in rules/", () => ({ rel: `${RULES_SOURCE_DIR}/notes.txt`, content: "x\n" }), "notes.txt"],
-    ["a rule whose name is not lower-case words joined by hyphens", () => ({ rel: `${RULES_SOURCE_DIR}/Bad_Name.md`, content: "x\n" }), "Bad_Name.md"],
+    ["a rule whose name is not lower-case letters and digits joined by single hyphens", () => ({ rel: `${RULES_SOURCE_DIR}/Bad_Name.md`, content: "x\n" }), "Bad_Name.md"],
   ])("fails on an unknown entry: %s", (_name, probe, entry) => {
     const root = tempRoot();
     seedMinimalRoot(root);

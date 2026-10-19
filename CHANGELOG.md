@@ -25,7 +25,8 @@ baseline stays at hash `1e62c5ad5bf7` (141 keys). The tools-list snapshot does n
   a second `gen:pack` run changes nothing.
 - **Build refusals.** `pnpm gen:pack` and `gen:pack:check` exit 1, naming the entry and writing nothing, when `skills-pack-src/rules/`
   holds anything but flat `<name>.md` files (a subdirectory, a non-Markdown file, a name outside lower-case letters, digits
-  and single hyphens), or when a rule source opens with frontmatter.
+  and single hyphens), when a rule source opens with frontmatter, or when a line of a rule source starts with
+  `<!-- IRIS-MCP-RULE:`, so each `AGENTS.md` section holds only its own two marker lines.
 
 ### Removed
 
@@ -52,6 +53,10 @@ baseline stays at hash `1e62c5ad5bf7` (141 keys). The tools-list snapshot does n
   else outside the tests.
 - A real SDK `Client` case with a fixture prompt that declares no arguments keeps the omitted-`arguments` render covered,
   now that no shipped prompt declares none.
+- `story-41-2-qa-prompts-stdio-wire.test.ts` drives the five built servers over real stdio (dev's four prompts, the
+  retired name refused, the other servers' prompts unchanged, dev's npm tarball). `story-41-2-qa-agents-md-consumer.test.ts`
+  reads the `agents-md` form by exact marker lines in varied `AGENTS.md` files and pins the marker-line refusal.
+  `story-41-2-qa-rule-text-hygiene.test.ts` scans the rule and both forms for internal wording beyond the rule test's list.
 
 ### Known limits
 

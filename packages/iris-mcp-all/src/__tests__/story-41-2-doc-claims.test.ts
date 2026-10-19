@@ -10,8 +10,10 @@
  *  - the changeset's exact bump map (AD-29);
  *  - the root README and the dev README: the retirement sentence, and no table row for the retired prompt;
  *  - `tool_support.md`: the retirement note and the prompt tally;
- *  - a sweep of the documents, the generated skills, the pack, the pack sources and the package sources (tests
- *    excluded) in which the prompt's name appears only in those retirement notes.
+ *  - a sweep of the documents, `docs/`, `scripts/`, `ipm/`, `extensions/`, the pending changesets, the generated
+ *    skills, the pack, the pack sources, and each package's sources, scripts and `package.json` (tests excluded) in
+ *    which the prompt's name appears only in those retirement notes. AC 41.2.2 leaves out the older CHANGELOG sections
+ *    and `.changeset/epic35-defect-gate.md`; this story's own changeset and CHANGELOG section are retirement notes.
  *
  * Needs no IRIS and no built dist: it reads documents and sources. Cross-package documentation checks live in
  * `@iris-mcp/all` (rule #45).
@@ -134,8 +136,9 @@ describe("Story 41.2: the retired prompt is documented only as retired", () => {
     const scan = (relative: string): void => {
       const lines = read(relative).split("\n");
       lines.forEach((line, index) => {
-        const retirementNote = line === RETIREMENT_SENTENCE || (relative === "tool_support.md" && line.includes(TOOL_SUPPORT_NOTE));
-        if (line.includes(RETIRED) && !retirementNote) hits.push(`${relative}:${index + 1}`);
+        // The tool_support.md note sits inside a one-line paragraph, so only the note's own text is exempt.
+        const rest = line === RETIREMENT_SENTENCE ? "" : relative === "tool_support.md" ? line.replace(TOOL_SUPPORT_NOTE, "") : line;
+        if (rest.includes(RETIRED)) hits.push(`${relative}:${index + 1}`);
       });
     };
 
@@ -146,19 +149,22 @@ describe("Story 41.2: the retired prompt is documented only as retired", () => {
         if (entry.name === "node_modules" || entry.name === "dist" || skip(entry.name)) continue;
         const relative = `${relativeDir}/${entry.name}`;
         if (entry.isDirectory()) walk(relative, skip);
-        else if (entry.isFile() && /\.(md|ts|mjs|json)$/.test(entry.name)) scan(relative);
+        else if (entry.isFile() && /\.(md|ts|mts|mjs|json|xml)$/.test(entry.name)) scan(relative);
       }
     };
 
-    for (const file of ["README.md", "tool_support.md"]) scan(file);
+    for (const file of ["README.md", "tool_support.md", "package.json"]) scan(file);
     const packages = readdirSync(path.join(REPO_ROOT, "packages"), { withFileTypes: true }).filter((entry) => entry.isDirectory());
     for (const entry of packages) {
-      if (existsSync(path.join(REPO_ROOT, "packages", entry.name, "README.md"))) scan(`packages/${entry.name}/README.md`);
+      for (const file of ["README.md", "package.json"]) {
+        if (existsSync(path.join(REPO_ROOT, "packages", entry.name, file))) scan(`packages/${entry.name}/${file}`);
+      }
       walk(`packages/${entry.name}/src`, (name) => name === "__tests__");
+      walk(`packages/${entry.name}/scripts`, () => false);
     }
-    walk("skills", () => false);
-    walk("packages/client-config/skills-pack", () => false);
-    walk("skills-pack-src", () => false);
+    for (const dir of ["skills", "packages/client-config/skills-pack", "skills-pack-src", "docs", "scripts", "ipm"]) walk(dir, () => false);
+    walk("extensions", (name) => name === "__tests__");
+    walk(".changeset", (name) => name === "epic35-defect-gate.md" || name === "story-41-2-objectscript-pre-write-rule.md");
 
     expect(hits, "a place that still names the retired prompt").toEqual([]);
   });

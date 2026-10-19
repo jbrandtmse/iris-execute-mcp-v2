@@ -449,6 +449,7 @@ describe("gen:pack, the rule rows through the real CLI (scratch copy)", () => {
     } finally {
       rmSync(ruleSource("cli-scoped.md"), { force: true });
     }
+    expect(runScript(scratch, GEN_PACK, ["--check"]).status, "clean again once the source is removed").toBe(0);
   });
 
   it.each(UNKNOWN_ENTRIES)("exits 1 on %s in rules/, names it, and writes nothing", (_name, rel, content, reported) => {
@@ -464,11 +465,7 @@ describe("gen:pack, the rule rows through the real CLI (scratch copy)", () => {
     } finally {
       rmSync(ruleSource(rel.split("/")[0] ?? rel), { recursive: true, force: true });
     }
-  });
-
-  it("is clean again after the refusals: the scratch tree equals the committed pack", () => {
-    expect(runScript(scratch, GEN_PACK, ["--check"]).status).toBe(0);
-    expect(existsSync(ruleSource(ALWAYS_ON_RULE_FILENAME))).toBe(true);
+    expect(runScript(scratch, GEN_PACK, ["--check"]).status, "clean again once the entry is removed").toBe(0);
   });
 });
 

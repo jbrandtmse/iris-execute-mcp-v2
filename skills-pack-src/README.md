@@ -10,7 +10,7 @@ Hand-authored sources of the IRIS MCP skills pack. This file is for contributors
 | `rules/<name>.md` | One always-on rule per flat file, with no frontmatter | `rules/claude-code/<name>.md` and `rules/agents-md/<name>.md` |
 | `IRIS-MCP-THIRD-PARTY-NOTICES.md` | The third-party notice and the upstream licence text | the pack root |
 
-Nothing else belongs here. `pnpm gen:pack` fails and names any other top-level entry, a `knowledge/<name>/` without a `SKILL.md`, a skill name that a workflow skill in `skills/` already uses, anything in `rules/` that is not a flat `<name>.md` file (lower-case letters, digits and single hyphens in the name), and a rule source that opens with frontmatter.
+Nothing else belongs here. `pnpm gen:pack` fails and names any other top-level entry, a `knowledge/<name>/` without a `SKILL.md`, a skill name that a workflow skill in `skills/` already uses, anything in `rules/` that is not a flat `<name>.md` file (lower-case letters, digits and single hyphens in the name), a rule source that opens with frontmatter, and a rule source with a line that starts with `<!-- IRIS-MCP-RULE:` (only the generated section's own two marker lines may).
 
 The workflow skills in `skills/` are not hand-authored: `pnpm gen:skills` generates them from the MCP prompts, and `pnpm gen:pack` copies them into the pack beside the skills from `knowledge/`.
 

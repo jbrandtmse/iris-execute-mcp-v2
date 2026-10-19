@@ -18,7 +18,8 @@
 // RULES. A rule source is one flat `rules/<name>.md` with no frontmatter (an always-on rule is unscoped,
 // so it takes no `paths:`). Its `claude-code` form is the source bytes. Its `agents-md` form is the same
 // bytes between two marker lines, `<!-- IRIS-MCP-RULE:<name>:BEGIN -->` and `<!-- IRIS-MCP-RULE:<name>:END -->`;
-// a consumer matches those lines exactly and owns everything between them.
+// a consumer matches those lines exactly and owns everything between them. No line of a rule source may start with
+// `<!-- IRIS-MCP-RULE:`, so each section holds exactly its own two marker lines.
 //
 // This module reads the filesystem but never writes it; `scripts/gen-pack.mjs` owns the writes.
 
@@ -42,7 +43,7 @@ export const RULE_FORM_DIRS = Object.freeze({
   agentsMd: 'rules/agents-md',
 });
 
-/** A rule source's file name: lowercase words joined by single hyphens, with the `.md` extension. */
+/** A rule source's file name: lower-case letters and digits, in groups joined by single hyphens, with the `.md` extension. */
 export const RULE_SOURCE_NAME = /^[a-z0-9]+(-[a-z0-9]+)*\.md$/;
 
 /** The always-on ObjectScript pre-write rule's file name, in the source tree and in both pack forms. */
@@ -54,6 +55,9 @@ const SKILL_FILENAME = 'SKILL.md';
 // The first line of a rule source, read as bytes: an optional BOM, then `---` and the end of the line.
 // Latin-1 maps every byte to one character, so any input is matched without a UTF-8 decode.
 const FRONTMATTER_OPENER = /^(?:\xef\xbb\xbf)?---[ \t]*(?:\r?\n|$)/;
+
+// A line of a rule source, read as bytes, that starts like a marker line. Only the section's own two lines may.
+const MARKER_LINE_START = /^<!-- IRIS-MCP-RULE:/m;
 
 /**
  * The two marker lines that bound a rule's `AGENTS.md` section, each without its line ending.
@@ -141,7 +145,8 @@ function listSubdirectories(dir) {
  * @returns {Map<string, Buffer>}
  * @throws {Error} If a skill name is defined in both sources, a `knowledge/<n>/` has no `SKILL.md`, the
  *   source directory holds an entry the layout does not know, `rules/` holds anything but flat
- *   `<name>.md` files, a rule source opens with frontmatter, or the notice is missing. Nothing has been
+ *   `<name>.md` files, a rule source opens with frontmatter or has a line that starts with
+ *   `<!-- IRIS-MCP-RULE:`, or the notice is missing. Nothing has been
  *   written when it throws: this function never writes.
  */
 export function assemblePack(root) {
@@ -222,13 +227,19 @@ export function assemblePack(root) {
     if (unknownRules.length > 0) {
       throw new Error(
         `unknown entry in ${RULES_SOURCE_DIR}/: ${unknownRules.join(', ')}. ` +
-          `Expected one flat <name>.md file per rule (lowercase letters, digits and hyphens).`,
+          `Expected one flat <name>.md file per rule (lower-case letters and digits, in groups joined by single hyphens).`,
       );
     }
     for (const entry of ruleEntries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
       const bytes = readFileSync(join(rulesDir, entry.name));
       if (FRONTMATTER_OPENER.test(bytes.toString('latin1'))) {
         throw new Error(`${RULES_SOURCE_DIR}/${entry.name} has frontmatter; an always-on rule takes none (no paths:)`);
+      }
+      if (MARKER_LINE_START.test(bytes.toString('latin1'))) {
+        throw new Error(
+          `${RULES_SOURCE_DIR}/${entry.name} has a line that starts with "<!-- IRIS-MCP-RULE:"; ` +
+            `only the AGENTS.md section's own BEGIN and END lines may`,
+        );
       }
       const stem = entry.name.slice(0, -'.md'.length);
       const source = `${RULES_SOURCE_DIR}/${entry.name}`;
