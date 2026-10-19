@@ -727,6 +727,101 @@ describe("iris_test_status:cancel", () => {
   });
 });
 
+// -- A failed read of %UnitTest_Result is an error result, not a thrown error (Story 40.4, AC 40.4.3) --
+
+describe("iris_test_status \u{2014} a failed read of %UnitTest_Result keeps the handles in an error result", () => {
+  let h: Harness;
+  /** The SQL route failing the way a real server error does: an `IrisApiError` for HTTP 500 (the constructor's fourth argument is `message`). */
+  const sql500 = () => new IrisApiError(500, [], "/api/atelier/v8/USER/action/query", "IRIS returned HTTP 500");
+  /** The error envelope's counts, which every error result carries. */
+  const NO_COUNTS = { total: 0, passed: 0, failed: 0, skipped: 0, details: [] };
+
+  beforeEach(() => {
+    h = makeHarness();
+  });
+
+  it("poll by runIndex alone: isError with the runIndex handle and the text that says not to re-submit", async () => {
+    stubSql(h, { failWith: sql500() });
+
+    const result = await testStatusTool.handler({ action: "poll", runIndex: 62 }, h.ctx);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      ...NO_COUNTS,
+      error:
+        "Reading the result of runIndex 62 from %UnitTest_Result failed: IRIS returned HTTP 500. " +
+        "Poll again with runIndex 62; do NOT re-submit the tests.",
+      runIndex: 62,
+    });
+    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining('"runIndex": 62') });
+  });
+
+  it("poll by runIndex alone: a connection error is an error result too", async () => {
+    stubSql(h, { failWith: new IrisConnectionError("TIMEOUT", "timed out", "retry") });
+
+    const result = await testStatusTool.handler({ action: "poll", runIndex: 62 }, h.ctx);
+    expect(result.isError).toBe(true);
+    expect((result.structuredContent as { error: string }).error).toContain("failed: timed out");
+  });
+
+  it("poll whose GET /work is 404 (the job is gone) with a known runIndex: the jobId, runIndex and source are kept", async () => {
+    h.workGet.mockRejectedValueOnce(new IrisApiError(404, [], "/api/atelier/v8/USER/work/31797609", "IRIS returned HTTP 404"));
+    stubSql(h, { failWith: sql500() });
+
+    const result = await testStatusTool.handler({ action: "poll", jobId: "31797609", runIndex: 62 }, h.ctx);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      ...NO_COUNTS,
+      error:
+        "Atelier no longer references jobId '31797609', and reading runIndex 62 from %UnitTest_Result failed: " +
+        "IRIS returned HTTP 500. Do NOT re-submit \u{2014} poll again with runIndex 62.",
+      jobId: "31797609",
+      runIndex: 62,
+      runIndexSource: null,
+    });
+  });
+
+  it("poll whose GET /work is 404, with the runIndex read from the queue node: the source is 'queue'", async () => {
+    stubQueueNode(h, "31797610", 66);
+    h.workGet.mockRejectedValueOnce(new IrisApiError(404, [], "/api/atelier/v8/USER/work/31797610", "IRIS returned HTTP 404"));
+    stubSql(h, { failWith: sql500() });
+
+    const result = await testStatusTool.handler({ action: "poll", jobId: "31797610" }, h.ctx);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({ jobId: "31797610", runIndex: 66, runIndexSource: "queue" });
+    expect((result.structuredContent as { error: string }).error).toContain("reading runIndex 66 from %UnitTest_Result failed");
+  });
+
+  it("cancel whose DELETE is 404 (the job is gone) with a captured runIndex: the cancel's handles are kept", async () => {
+    stubQueueNode(h, "31797624", 66);
+    h.workDelete.mockRejectedValueOnce(new IrisApiError(404, [], "/api/atelier/v8/USER/work/31797624", "IRIS returned HTTP 404"));
+    stubSql(h, { failWith: sql500() });
+
+    const result = await testStatusTool.handler({ action: "cancel", jobId: "31797624" }, h.ctx);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      ...NO_COUNTS,
+      error:
+        "jobId '31797624' was already gone (HTTP 404) before this cancel could act, and reading runIndex 66 from " +
+        "%UnitTest_Result failed: IRIS returned HTTP 500. Poll by runIndex 66 to observe the run.",
+      jobId: "31797624",
+      runIndex: 66,
+      runIndexSource: "queue",
+    });
+  });
+
+  it("an error that is not an IRIS API or connection error still propagates from all three paths", async () => {
+    stubSql(h, { failWith: new Error("boom") });
+    await expect(testStatusTool.handler({ action: "poll", runIndex: 62 }, h.ctx)).rejects.toThrow("boom");
+
+    h.workGet.mockRejectedValueOnce(new IrisApiError(404, [], "/api/atelier/v8/USER/work/31797611", "IRIS returned HTTP 404"));
+    await expect(testStatusTool.handler({ action: "poll", jobId: "31797611", runIndex: 62 }, h.ctx)).rejects.toThrow("boom");
+
+    stubQueueNode(h, "31797612", 66);
+    h.workDelete.mockRejectedValueOnce(new IrisApiError(404, [], "/api/atelier/v8/USER/work/31797612", "IRIS returned HTTP 404"));
+    await expect(testStatusTool.handler({ action: "cancel", jobId: "31797612" }, h.ctx)).rejects.toThrow("boom");
+  });
+});
+
 // -- Story 40.1: the coverage handle (coverageRunId) --------------------------------
 
 describe("iris_test_status \u2014 coverageRunId (Story 40.1)", () => {

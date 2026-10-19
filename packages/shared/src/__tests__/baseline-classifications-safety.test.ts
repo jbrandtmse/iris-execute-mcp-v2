@@ -21,11 +21,12 @@
  * Two kinds of pin:
  *   1. Named spot-checks on well-known execution/mutation keys (must stay
  *      `write`) and well-known pure-query keys (must stay `read`), including
- *      the three documented judgment calls (`iris_doc_export`,
- *      `iris_execute_tests`, `iris_sql_execute`) that deliberately diverge
- *      from their own tool's `annotations.readOnlyHint` per the dev's
- *      fail-safe reasoning (Dev Notes, Completion Notes List) — exactly the
- *      kind of "looks read-ish" key a future edit is most likely to flip.
+ *      the documented judgment calls (`iris_doc_export`, `iris_sql_execute`)
+ *      that deliberately diverge from their own tool's
+ *      `annotations.readOnlyHint` per the dev's fail-safe reasoning (Dev
+ *      Notes, Completion Notes List), and `iris_execute_tests`, whose
+ *      `readOnlyHint` now agrees with its `write` classification: exactly
+ *      the kind of "looks read-ish" key a future edit is most likely to flip.
  *   2. A systematic verb-suffix sweep: every `tool:action` key in the map
  *      whose action verb is an unambiguous write verb (create/delete/modify/
  *      set/update/build/sync/reset/add/remove/enable/disable, per AC
@@ -83,15 +84,15 @@ describe("BASELINE_ACTION_CLASSIFICATIONS safety-relevant value pins (QA)", () =
     expect(BASELINE_ACTION_CLASSIFICATIONS[key]).toBe("read");
   });
 
-  // ── 1c. Documented judgment calls (diverge from the tool's own
-  //        annotations.readOnlyHint per the dev's fail-safe reasoning) —
+  // ── 1c. Documented judgment calls (classified apart from what a read-ish
+  //        name suggests, per the dev's fail-safe reasoning):
   //        the exact keys a future "helpful" sync-to-annotations edit would
   //        most plausibly flip. Pinned individually with the rationale.
   it('"iris_doc_export" stays "write" despite bulk-downloading (no IRIS-state mutation, but a caller-controlled local-disk write surface — fail-safe per AC 24.0.2)', () => {
     expect(BASELINE_ACTION_CLASSIFICATIONS["iris_doc_export"]).toBe("write");
   });
 
-  it('"iris_execute_tests" stays "write" despite annotations.readOnlyHint:true (runs real ObjectScript unit-test methods; setup/teardown can mutate state)', () => {
+  it('"iris_execute_tests" stays "write" (runs real ObjectScript unit-test methods; setup/teardown can mutate state; its readOnlyHint is false to match)', () => {
     expect(BASELINE_ACTION_CLASSIFICATIONS["iris_execute_tests"]).toBe("write");
   });
 

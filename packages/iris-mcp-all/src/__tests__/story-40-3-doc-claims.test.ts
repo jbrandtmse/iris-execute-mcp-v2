@@ -64,7 +64,7 @@ describe("Story 40.3: the Development README", () => {
     const tests = lineStarting(devReadme, "| `iris_execute_tests`");
     expect(tests).toContain("Since Story 40.3 a run that includes `%UnitTest.TestProduction` tests is refused with `PRODUCTION_BUSY` while a different production runs in the namespace");
     expect(tests).toContain("the tool stays enabled; no new key");
-    expect(tests).toContain("`target`, `level`, `timeout?`, `namespace?` | readOnly, idempotent |");
+    expect(tests).toContain("`target`, `level`, `timeout?`, `namespace?` | -- |");
     const coverage = lineStarting(devReadme, "| `iris_test_coverage`");
     expect(coverage).toContain("since Story 40.3 it asks the same TestProduction guard as `iris_execute_tests` and refuses a run with `PRODUCTION_BUSY`");
     expect(coverage).toContain("`target`, `level`, `classes`, `timeout?`, `namespace?`, `minCoverage?` | destructive |");
@@ -181,7 +181,7 @@ describe("Story 40.3: tool_support.md", () => {
     expect(note).toContain(`> **Story 40.3 (2026-10-18) ${EM_DASH} governance defaults, TestProduction runs:**`);
     expect(note).toContain("no tool, action or governance key is added, so no default state and no tool count moves (110 package tools, 115 advertised; dev stays at 32 package tools");
     expect(note).toContain("the frozen baseline stays `1e62c5ad5bf7`, 141 keys; 13 prompts");
-    expect(note).toContain("`iris_execute_tests` stays a **read, enabled by default** with its annotations unchanged, and `iris_test_coverage` stays `write` and **DEFAULT-DISABLED**");
+    expect(note).toContain("`iris_execute_tests` stays **enabled by default** (a baseline key, classified `write`), and `iris_test_coverage` stays `write` and **DEFAULT-DISABLED**");
     expect(note).toContain("`ExecuteMCPv2.REST.UnitTest:ProductionGuard`, taken under Ens's own production lifecycle lock (`^Ens.Runtime`, five seconds to take it)");
     expect(note).toContain("`GET /dev/test/production?target=&level=&namespace=`");
     expect(note).toContain("A refusal is the new code `PRODUCTION_BUSY` (the catalog goes from 9 to 10 codes)");
@@ -233,7 +233,7 @@ describe("Story 40.3: the CHANGELOG section and the changeset", () => {
     expect(text).toContain("(the bootstrapped service stays at 35 classes)");
     expect(text).toContain("`ExecuteMCPv2.REST.UnitTest:ProductionGuard`");
     expect(text).toContain("`PRODUCTION_BUSY`");
-    expect(text).toContain("`iris_execute_tests` stays a read, enabled by default, and `iris_test_coverage` stays a write, DEFAULT-DISABLED; the guard has no switch and adds no key");
+    expect(text).toContain("`iris_execute_tests` stays enabled by default (a baseline key, classified `write`), and `iris_test_coverage` stays a write, DEFAULT-DISABLED; the guard has no switch and adds no key");
     expect(text).toContain("`GET /dev/test/production?target=&level=&namespace=`");
     expect(text).toContain("and is additive (AD-33)");
     expect(text).toContain("`production-busy`");

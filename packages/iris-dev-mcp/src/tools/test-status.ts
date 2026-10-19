@@ -249,6 +249,29 @@ async function resolveByRunIndex(
   });
 }
 
+/**
+ * {@link resolveByRunIndex}, where a failed read of `%UnitTest_Result` (an IRIS API or connection error) is returned as an
+ * error result that carries `handles` and the text `describe` makes of the failure, so the caller keeps the run's handles
+ * instead of a thrown `Tool error`. Any other error still propagates.
+ */
+async function resolveByRunIndexOrError(
+  ctx: SqlCtx,
+  ns: string,
+  runIndex: number,
+  jobId: string | undefined,
+  handles: RunHandles,
+  describe: (message: string) => string,
+): Promise<ToolResult> {
+  try {
+    return await resolveByRunIndex(ctx, ns, runIndex, jobId);
+  } catch (error: unknown) {
+    if (isIrisError(error)) {
+      return testRunEnvelope({ kind: "error", error: describe(error.message), handles });
+    }
+    throw error;
+  }
+}
+
 async function handlePoll(
   args: { jobId?: string; runIndex?: number; namespace?: string },
   ctx: ToolContext,
@@ -267,7 +290,17 @@ async function handlePoll(
 
   if (!jobId) {
     // runIndex alone (AC 36.2.2 (iv)).
-    return resolveByRunIndex(ctx, ns, explicitRunIndex as number, undefined);
+    const index = explicitRunIndex as number;
+    return resolveByRunIndexOrError(
+      ctx,
+      ns,
+      index,
+      undefined,
+      { runIndex: index },
+      (message) =>
+        `Reading the result of runIndex ${index} from %UnitTest_Result failed: ${message}. ` +
+        `Poll again with runIndex ${index}; do NOT re-submit the tests.`,
+    );
   }
 
   const refusal = await refuseNonUnitTestJob(ctx, ns, jobId, "poll");
@@ -294,7 +327,16 @@ async function handlePoll(
           handles: { jobId },
         });
       }
-      return resolveByRunIndex(ctx, ns, idx, jobId);
+      return resolveByRunIndexOrError(
+        ctx,
+        ns,
+        idx,
+        jobId,
+        { jobId, runIndex: idx, runIndexSource: idx === queueRunIndex ? "queue" : null },
+        (message) =>
+          `Atelier no longer references jobId '${jobId}', and reading runIndex ${idx} from %UnitTest_Result ` +
+          `failed: ${message}. Do NOT re-submit \u{2014} poll again with runIndex ${idx}.`,
+      );
     }
     if (isIrisError(error)) {
       return testRunEnvelope({
@@ -409,7 +451,16 @@ async function handleCancel(args: { jobId?: string; namespace?: string }, ctx: T
           handles: { jobId },
         });
       }
-      return resolveByRunIndex(ctx, ns, runIndex, jobId);
+      return resolveByRunIndexOrError(
+        ctx,
+        ns,
+        runIndex,
+        jobId,
+        handles,
+        (message) =>
+          `jobId '${jobId}' was already gone (HTTP 404) before this cancel could act, and reading runIndex ` +
+          `${runIndex} from %UnitTest_Result failed: ${message}. Poll by runIndex ${runIndex} to observe the run.`,
+      );
     }
     if (isIrisError(error)) {
       // Never lose the handles: whether the DELETE took effect is unknown.

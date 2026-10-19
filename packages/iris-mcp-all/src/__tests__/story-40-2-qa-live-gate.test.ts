@@ -774,6 +774,7 @@ interface RawRun {
   sources: Array<{
     class: string;
     reason?: string;
+    lineMap?: number;
     methods: Array<{ name: string; line: number | null; reason?: string; routine?: string; intLines?: number[]; labelLine?: number }>;
   }>;
 }
@@ -1874,8 +1875,9 @@ describe("Story 40.2 QA: a class documented after it was compiled has no line ma
     const source = after.coverage?.classes[0]?.source;
     expect(source, "no class-source result: the compiled line map is gone").toEqual({ reason: "not-up-to-date" });
     const raw = await rawStatus(after.coverageRunId);
-    expect(raw.sources[0], "the raw map: no class reason, and no INT line for either body line, while the method has an INT label (line 5)").toEqual({
+    expect(raw.sources[0], "the raw map: no class reason, its line map gone (0), and no INT line for either body line, while the method has an INT label (line 5)").toEqual({
       class: "Story402.QaStale",
+      lineMap: 0,
       methods: [{ name: "Go", line: 6, routine: "", intLines: [0, 0], labelLine: 5 }],
     });
     expect(allText(afterResult), "the INT coverage is measured as before").toContain("Story402.QaStale.1: 2 of 2 executable INT lines covered");

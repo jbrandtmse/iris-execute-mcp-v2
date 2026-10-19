@@ -2,6 +2,98 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-18] — Story 40.4: Test depth docs, prompt and capstone
+
+No tool, action or governance key is added, so no tool count moves (the Development server stays at 32 package tools, 33
+advertised; the suite at 110 package tools, 115 advertised). The prompt pack stays at 13 prompts (5 on the Development
+server), the `core` preset at 14 package tools (15 runtime tools), the `developer` preset at 32 package tools (33 advertised),
+the refusal-code catalog at 10 codes, and the frozen governance baseline at hash `1e62c5ad5bf7` (141 keys).
+`BOOTSTRAP_VERSION` moves from `845e95f6e726` to `5c8e80ed67ca`, because `Coverage/Job.cls` and `REST/Coverage.cls` changed
+(the bootstrapped service stays at 35 classes).
+
+### Changed
+
+- **`iris_execute_tests` declares the hints of a write (DW-498; a sanctioned AD-15 change, orchestrator decision #63).** Its
+  `readOnlyHint` and `idempotentHint` were `true`, against its `write` classification and its rule that a run that is still
+  executing is never re-submitted. Both are now `false`; `destructiveHint` and `openWorldHint` stay `false`. Its key, its
+  classification, its description and the frozen baseline do not change, and nothing in this suite reads the hints (the server
+  passes them to the client, and the `read-only` preset uses classifications). An MCP client that does read them now treats the
+  tool as a write: it may, for example, ask for approval before a run, and it will not retry one as idempotent. **Default state:**
+  `iris_execute_tests` stays classified `write` and **enabled by default**. A reverse-direction check now fails when any tool
+  that owns a key classified `write` declares `readOnlyHint: true`, with no allowlist.
+  `pnpm gen:tools-list-snapshot --force` regenerated the `tools/list` snapshot (orchestrator decision #29): it differs only in
+  the annotations of `iris_execute_tests`.
+- **The `deploy-and-test-class` prompt gains an optional coverage step and a `PRODUCTION_BUSY` note (orchestrator decision
+  #62, AD-15).** A new step 8 runs only when the user asks how much of the code the tests cover or gives a coverage target, and
+  once the tests pass: it calls `iris_test_coverage` with the classes the tests exercise and the user's `minCoverage`, and
+  copes with a tool that the `core` preset hides, a `GOVERNANCE_DISABLED`, `MONITOR_BUSY` or `PRODUCTION_BUSY` refusal and a
+  `running` result (poll by `coverageRunId`, never re-submit). Step 4 tells the model what a `PRODUCTION_BUSY` refusal means
+  and not to stop that production without the user's confirmation. The old step 8, the report, is now step 9; step 2 keeps its
+  number. The prompt's description gains one clause, and its name, title and argument (`classOrPackage`) are unchanged. The
+  generated skill and the skills index are regenerated.
+
+### Fixed
+
+- **A freshly compiled class whose methods hold only `#;` or `#dim` lines is no longer reported `not-up-to-date` (DW-601).**
+  Every method of such a class has an INT label and no mapped body line, which the shape rule of the class-source map read as a
+  class whose line map had been removed, a false FAIL. The service now records, per class, whether the class still has the line
+  map its compile wrote (`lineMap`, `$Data(^rMAP(<class>))`: 10 fresh, 0 after a documentation-only save), and the class is
+  `not-up-to-date` exactly when `lineMap` is 0 while a method that compiled to INT code has a label line. A record stored
+  without `lineMap` is judged by the earlier shape rule, unchanged, and a class with only constant or Python methods stays
+  without a reason.
+- **Two methods whose names share their first 31 characters no longer lose their label line (DW-601).** The label line was
+  found by the method name cut to 31 characters, and a shortened name that two methods share gave neither a label, so a stale
+  class of such methods read as 0 lines with `line-rate="1"`. A method's label line is now read from its compiled label
+  (`RtnLabel`, `label^routine`), which is exact, and is 0 when the method has none (an inlined constant, a Python method).
+- **An initializing `#dim` is an executable class line (DW-602).** A `#dim` line that holds an `=` outside parentheses and
+  string literals compiles to a `Set` at its own INT line, and the class-source map dropped it with the other preprocessor
+  lines. It is now kept; every other preprocessor line is still never a class line.
+- **`iris_test_status` returns an error result when a read of `%UnitTest_Result` fails (AC 40.4.3).** Three paths could still
+  throw the IRIS error as a `Tool error`: a poll by `runIndex` alone, a poll whose job was gone (HTTP 404) with a known
+  `runIndex`, and a cancel whose job was gone with a captured `runIndex`. Each now returns `isError: true` with
+  `structuredContent` (`error` and the handles the caller holds) and text that says not to re-submit; any other error still
+  propagates.
+
+The Status route of the coverage service returns a superset (AD-33): every earlier field, and `lineMap` on every class that has
+a map. The corrected values of `labelLine` and `intLines` are read only by this suite, and `iris_test_coverage` has not been
+released.
+
+### Documentation
+
+- The Development README states each default where it is used: the coverage tool, the three `iris_test_status` keys, and
+  `iris_execute_tests` classified `write` and enabled by default; that `minCoverage` omitted means no verdict; the enabling
+  setting; and a CI recipe. Its entry titles, the annotations cell of `iris_execute_tests` and the prompt row are corrected.
+- The root README has a Test coverage section (the loop, a key table with default states, the guards, `minCoverage`, the export
+  path rules, the presets and the prompt), and the payload table is re-measured.
+- `tool_support.md` has a note for this story, and its row for `iris_execute_tests` says `write`, enabled by default.
+- The earlier sentence on `#dim` lines is corrected in place, and so is the earlier sentence that called `iris_execute_tests` a
+  read.
+
+### Tests
+
+- **The Epic 40 capstone gate (`epic40-capstone-gate.test.ts`).** It runs in the default suite and in the prepublish roster,
+  and drives the built Development and Administration servers over stdio in one disposable namespace. Its rows pin the
+  `tools/list` annotations and the rendered prompt, the summary and verdict, the re-attach by handle, the Cobertura file against
+  the pinned content model (no DTD file is vendored), the three class-source fixes, and the refusal of a run while a monitor
+  session the suite did not start is active, which leaves that session untouched. It starts each row with the monitor idle and
+  ends it with the monitor idle and no ownership node.
+- OS tests pin the new head of the class-source map, the exact labels of long names, the kept `#dim` shapes and the
+  preprocessor-line rule; unit tests pin the stale rule over the Status record with and without `lineMap`, the three
+  error results of `iris_test_status`, the annotations, and the prompt text.
+
+### Known limits
+
+- A class compiled without a debug line map, if a compile qualifier allows one, would read `not-up-to-date`: a false FAIL in the
+  direction of caution, never a false PASS. One probe of a newly created class found no line map right after its compile, once;
+  about 30 later runs did not repeat it, and its cause is not known. A forced compile (flags `ck`) rebuilds the map.
+- A method whose name begins with a percent sign (`%OnNew`, for example) has no compiled label (its `RtnLabel` is empty), so it
+  has no label line. A class whose only methods that compile to INT code are named so is not recognised as `not-up-to-date`
+  after a documentation-only save, and reads as a class with no executable lines.
+- A `#dim` line is read as initializing when an `=` follows it outside parentheses and string literals, and a comment is not told
+  from code: a `#dim` that initializes nothing, with a trailing comment that holds an `=`, is read as initializing, and its line
+  can then be counted as an executable class line.
+- `RtnLabel` and `^rMAP` were verified on one IRIS version only. Earliest IRIS version verified: 2026.2 build 221U.
+
 ## [Pre-release — 2026-10-18] — Story 40.3: TestProduction runs
 
 No tool, action or governance key is added, so no tool count moves (the Development server stays at 32 package tools, 33
@@ -29,8 +121,8 @@ package tools, and the frozen governance baseline at hash `1e62c5ad5bf7` (141 ke
   `namespace`, `state`, `testProductions` (`class` and `production`) and, when the state was read, the running `production`,
   or else `state: "Unknown"` and `error`. Nothing is run or queued, no run id is allocated, and that production is left
   untouched; the text names it and tells the caller to run the tests once it has stopped or to stop an interrupted run's
-  leftover with `iris_production_control`. **Default state:** `iris_execute_tests` stays a read, enabled by default, and
-  `iris_test_coverage` stays a write, DEFAULT-DISABLED; the guard has no switch and adds no key.
+  leftover with `iris_production_control`. **Default state:** `iris_execute_tests` stays enabled by default (a baseline key,
+  classified `write`), and `iris_test_coverage` stays a write, DEFAULT-DISABLED; the guard has no switch and adds no key.
 - **A read route, `GET /dev/test/production?target=&level=&namespace=`.** It returns `{decision, namespace, testProductions,
   production?, state?, stateCode?, error?}` and is additive (AD-33). `iris_test_coverage`'s `Start` route gains the outcome
   `production-busy`, which carries the same fields; every earlier request and outcome is unchanged.
@@ -102,7 +194,7 @@ and `REST/Coverage.cls` changed (the bootstrapped service stays at 35 classes).
   `}` and a comment line are never executable; a method generator, a method not written in ObjectScript (a `Language` set on the
   method or on the class) and a method whose layout is not where IRIS stores it carry a `reason` and no lines; a method that
   compiles to no INT code (a constant return) has no lines and no `reason`. A method's lines are the body
-  lines that map after its own INT label line, and a preprocessor line (`#dim`, `#define`, `#sqlcompile` and the like) is never a class line. **A statement that spans
+  lines that map after its own INT label line, and a preprocessor line (`#dim` that initializes nothing, `#define`, `#sqlcompile` and the like) is never a class line (a `#dim` that holds an `=` outside parentheses and string literals compiles to a `Set` and is one, since Story 40.4). **A statement that spans
   several lines but compiles to one INT line is reported once, at the first line that maps to its code: for a multi-line embedded
   SQL statement, the line after the `&sql(` line.** A class without a class-source result has `source.reason`
   `not-up-to-date` (its definition changed after it was compiled, or its compiled line map is gone: a documentation-only edit

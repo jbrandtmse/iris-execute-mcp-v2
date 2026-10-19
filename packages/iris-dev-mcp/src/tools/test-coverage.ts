@@ -118,9 +118,9 @@ export interface SourceMethodRaw {
   /** `intLines[k-1]` is the INT line of body line k, or 0 when that line has none. Absent when the method has a `reason`. */
   intLines?: number[];
   /**
-   * The INT line of the method's label, which is the first line of its INT block: its body maps to lines after it. 0 (or
-   * absent, from an older IRIS-side class) when it is not known: the method compiled to no INT code, or its label cannot be
-   * told from another method's. Absent when the method has a `reason`.
+   * The INT line of the method's compiled label, which is the first line of its INT block: its body maps to lines after it.
+   * 0 (or absent, from an older IRIS-side class) when it is not known: the method compiled to no INT code, or its label is
+   * not in the INT text of the routine its body maps to. Absent when the method has a `reason`.
    */
   labelLine?: number;
   /** Why the method has no body map: `generator`, `not-objectscript` or `layout`. */
@@ -136,6 +136,12 @@ export interface SourceClassRaw {
    * reason whose compiled line map is gone is reported as `not-up-to-date` too (`mapSources` in `coverage-report.ts`).
    */
   reason?: string;
+  /**
+   * `$Data(^rMAP(class))` in the run's namespace when the map was built: 10 while the class has the line map its compile
+   * wrote, 0 once a documentation-only save removed it. Absent from a class with a `reason` and from a record stored by an
+   * older IRIS-side class, which `mapSources` judges by its shape.
+   */
+  lineMap?: number;
   methods: SourceMethodRaw[];
 }
 

@@ -404,6 +404,87 @@ describe("a class whose line map is gone is not-up-to-date (AC 40.2.1, AC 40.2.4
   });
 });
 
+describe("the lineMap marker decides whether a class is stale when the IRIS side records it (AC 40.4.6, DW-601)", () => {
+  /** The class reason `mapSources` gives a source record. */
+  function reasonOf(source: SourceClassRaw): string | undefined {
+    return mapSources(runWith({ sources: [source] }))[0]?.reason;
+  }
+
+  // Captured live from `ExecuteMCPv2.Coverage.Job:SourceMap` on disposable classes compiled and saved through the UDL text
+  // service (IRIS 2026.2 build 221U, 2026-10-18), then trimmed to the fields below.
+  /** A fresh class whose methods hold only `#;` and `#dim` lines: it has its line map, a label per method, and no mapped body line. */
+  const HOOKS: SourceClassRaw = {
+    class: "Story404.Hooks",
+    lineMap: 10,
+    methods: [
+      { name: "OnHook", line: 4, routine: "", intLines: [0], labelLine: 7 },
+      { name: "Declared", line: 9, routine: "", intLines: [0], labelLine: 5 },
+    ],
+  };
+  /** The same class after a documentation-only save: its line map is gone and the labels are still there. */
+  const HOOKS_DOCUMENTED: SourceClassRaw = {
+    class: "Story404.Hooks",
+    lineMap: 0,
+    methods: [
+      { name: "OnHook", line: 5, routine: "", intLines: [0], labelLine: 7 },
+      { name: "Declared", line: 10, routine: "", intLines: [0], labelLine: 5 },
+    ],
+  };
+  /** A class whose only methods compile to no INT code: no line map and no label. */
+  const CONSTANTS: SourceClassRaw = {
+    class: "Story404.Const",
+    lineMap: 0,
+    methods: [
+      { name: "Const", line: 4, routine: "", intLines: [0], labelLine: 0 },
+      { name: "Py", line: 9, reason: "not-objectscript" },
+    ],
+  };
+
+  it("a fresh class with its line map (10) is not stale, though it maps no body line and its methods have labels", () => {
+    expect(reasonOf(HOOKS)).toBeUndefined();
+    const older: SourceClassRaw = { class: HOOKS.class, methods: HOOKS.methods };
+    expect(reasonOf(older), "without the marker, today's shape rule reads the same record as stale").toBe("not-up-to-date");
+  });
+
+  it("a class that lost its line map (0) while a method has a label line is not-up-to-date", () => {
+    expect(reasonOf(HOOKS_DOCUMENTED)).toBe("not-up-to-date");
+    expect(summaries(runWith({ sources: [HOOKS_DOCUMENTED] })).get("Story404.Hooks")).toEqual({ reason: "not-up-to-date" });
+  });
+
+  it("is stale whatever the body lines map to: a long-name pair whose lines are all 0 is, and so is a class that still maps a line", () => {
+    const long: SourceClassRaw = {
+      class: "Story404.Stale",
+      lineMap: 0,
+      methods: [
+        { name: "AVeryLongMethodNameThatExceedsThirtyOneCharactersOne", line: 5, routine: "", intLines: [0, 0], labelLine: 5 },
+        { name: "AVeryLongMethodNameThatExceedsThirtyOneCharactersTwo", line: 11, routine: "", intLines: [0, 0, 0], labelLine: 8 },
+        { name: "Short", line: 18, routine: "", intLines: [0, 0], labelLine: 11 },
+      ],
+    };
+    expect(reasonOf(long)).toBe("not-up-to-date");
+    expect(reasonOf({ ...long, methods: [{ name: "Done", line: 5, routine: "Story404.Stale.1", intLines: [6], labelLine: 5 }] })).toBe("not-up-to-date");
+  });
+
+  it("a class with no label line, or whose methods have reasons, is not stale at lineMap 0", () => {
+    expect(reasonOf(CONSTANTS)).toBeUndefined();
+    expect(reasonOf({ class: "Story404.Gen", lineMap: 0, methods: [{ name: "Generated", line: 5, reason: "generator" }] })).toBeUndefined();
+    expect(reasonOf({ class: "Story404.Empty", lineMap: 0, methods: [] })).toBeUndefined();
+    expect(summaries(runWith({ sources: [CONSTANTS] })).get("Story404.Const")).toMatchObject({ executableLines: 0, percent: null });
+  });
+
+  it("a class-level reason from the IRIS side is reported as it is (the IRIS side sends no lineMap with one)", () => {
+    expect(reasonOf({ class: "Story404.Hooks", reason: "not-compiled", methods: [] })).toBe("not-compiled");
+    expect(reasonOf({ class: "Story404.Hooks", reason: "not-up-to-date", methods: [] })).toBe("not-up-to-date");
+  });
+
+  it("the oracle record, stored without lineMap, is read as before", () => {
+    const stored = (STORY402_RUN.sources ?? []).map((entry) => entry.lineMap);
+    expect(stored.length).toBeGreaterThan(0);
+    expect(stored, "a record that predates lineMap has none").toEqual(stored.map(() => undefined));
+    expect(mapSources(STORY402_RUN).map((entry) => entry.reason), "and its classes are read by their shape: neither is stale").toEqual(stored.map(() => undefined));
+  });
+});
+
 describe("meetsMinimum: the comparison is exact, never rounded (AC 40.2.4)", () => {
   it("compares covered * 100 with minimum * executable in exact arithmetic", () => {
     expect(meetsMinimum(1, 2, 50)).toBe(true);

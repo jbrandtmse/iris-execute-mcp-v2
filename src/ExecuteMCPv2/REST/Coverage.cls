@@ -558,11 +558,14 @@ ClassMethod BuildRun(pId As %Integer, pWithRoutines As %Boolean = 0) As %Dynamic
     Quit tRun
 }
 
-/// The class-source map of a terminal run, one entry per measured class: <code>{class, reason?, methods:[...]}</code>.
-/// A method that maps is <code>{name, line, routine, intLines:[...], labelLine}</code> (<code>intLines[k-1]</code> is the
-/// INT line of body line k, or 0; <code>labelLine</code> is the INT line of the method's label, or 0 when it is not known),
-/// and a method that does not is <code>{name, line, reason}</code>. <code>line</code> is the class-document line that
-/// declares the method, or null. See <method>ExecuteMCPv2.Coverage.Job:SourceMap</method>.
+/// The class-source map of a terminal run, one entry per measured class: <code>{class, reason?, lineMap?, methods:[...]}</code>.
+/// <code>lineMap</code> is a number, <code>$Data(^rMAP(class))</code> when the map was built (10 while the class has its debug
+/// line map, 0 once a documentation-only save removed it), and is absent from a class with a <code>reason</code> and from a
+/// record that was stored without it. A method that maps is <code>{name, line, routine, intLines:[...], labelLine}</code>
+/// (<code>intLines[k-1]</code> is the INT line of body line k, or 0; <code>labelLine</code> is the INT line of the method's
+/// compiled label, or 0 when it is not known), and a method that does not is <code>{name, line, reason}</code>.
+/// <code>line</code> is the class-document line that declares the method, or null. See
+/// <method>ExecuteMCPv2.Coverage.Job:SourceMap</method>.
 ClassMethod BuildSources(pId As %Integer) As %DynamicArray [ Private ]
 {
     Set tSources = []
@@ -574,6 +577,7 @@ ClassMethod BuildSources(pId As %Integer) As %DynamicArray [ Private ]
         Set tClass = {}
         Do tClass.%Set("class", $List(tHead, 1))
         If $List(tHead, 2) '= "" Do tClass.%Set("reason", $List(tHead, 2))
+        If $ListLength(tHead) > 2 Do tClass.%Set("lineMap", +$List(tHead, 3), "number")
         Set tMethods = []
         Set tM = ""
         For {

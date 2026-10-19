@@ -111,6 +111,6 @@ describe("Story 40.1 AC-6 - iris_test_coverage governance key and annotations", 
       annotations?: unknown;
     };
     expect(deriveKeysForTool(tests, "iris-dev-mcp")).toEqual(["iris_execute_tests"]);
-    expect(tests.annotations, "iris_execute_tests keeps its annotations (DW-498 is Story 40.4's)").toMatchObject({ readOnlyHint: true });
+    expect(tests.annotations, "iris_execute_tests declares the hints of a write (Story 40.4, DW-498)").toMatchObject({ readOnlyHint: false, idempotentHint: false });
   });
 });

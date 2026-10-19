@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "845e95f6e726";
+export const BOOTSTRAP_VERSION = "5c8e80ed67ca";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "845e95f6e726";
+Parameter BOOTSTRAPVERSION = "5c8e80ed67ca";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -4174,10 +4174,13 @@ ClassMethod LineSkeleton(pTokens As %List) As %String
 /// The class-source map of class <var>pClass</var> in namespace <var>pNamespace</var>: which INT line each body line of
 /// each method that the class itself defines belongs to. It is raw data, the sibling of <method>Skeleton</method>
 /// (AD-12): which of those INT lines are executable or covered, and what share of them is, is decided in TypeScript.
-/// <p><var>pMap</var> is <code>$ListBuild(class, reason)</code>, where <code>reason</code> is empty when the class has a
-/// map, <code>not-compiled</code> (the class has no compiled definition) or <code>not-up-to-date</code> (its definition
+/// <p><var>pMap</var> is <code>$ListBuild(class, reason)</code> for a class with <code>reason</code>
+/// <code>not-compiled</code> (the class has no compiled definition) or <code>not-up-to-date</code> (its definition
 /// changed after it was compiled, <code>$System.OBJ.IsUpToDate</code>, so the compiled code no longer matches the
-/// document). Then, for each method that the class source defines, in the order the class document declares them,
+/// document), and <code>$ListBuild(class, "", lineMap)</code> for a class that is mapped. <code>lineMap</code> is
+/// <code>$Data(^rMAP(class))</code> in the target namespace: 10 while the class has the debug line map that its compile
+/// wrote, and 0 once a documentation-only save removed it, which is how a stale map shows. Then, for each method that the
+/// class source defines, in the order the class document declares them,
 /// <code>pMap("m",i)</code> is <code>$ListBuild(name, line, routine, reason, labelLine)</code>:</p>
 /// <ul>
 /// <li><code>line</code> is the class-document line D that declares the method, or empty when it cannot be found.
@@ -4191,16 +4194,19 @@ ClassMethod LineSkeleton(pTokens As %List) As %String
 /// <code>%Studio.Debugger:INTLine</code>, and only return type 0 (mapped) counts: 1 means the line is unmapped and the next
 /// mapped line is returned instead, 2 means no mapping at all. A preprocessor line (<method>IsDirective</method>) has
 /// none, whatever <code>INTLine</code> says: the compiler maps a leading one onto INT lines near the method's label, which
-/// belong to the method before it or to the method's own first statements. <code>routine</code> is the INT routine of the
+/// belong to the method before it or to the method's own first statements. An initializing <code>#dim</code> is not a
+/// preprocessor line: it compiles to a <code>Set</code> at its own INT line. <code>routine</code> is the INT routine of the
 /// first mapped line, and empty when none maps.</li>
 /// </ul>
-/// <p><code>labelLine</code> (the fifth element) is the INT line of the method's label in <code>routine</code>, and 0 when it
-/// is not known. A method that compiled to INT code has a label line, which is the first line of its INT block: its body
-/// maps to lines after it. A method that compiled to no INT code (a constant return, a generator, a method not written in
-/// ObjectScript) has none. A label is the method name, shortened to <code>$$$MAXLABELLENGTH</code> characters when it is
-/// longer, so a method whose shortened name is also the shortened name of another method of the class has no known label.
-/// The label lines come from the INT text, which a documentation-only edit saved after the compile leaves in place while it
-/// removes the class's line map: a method with a label line whose body lines all map to nothing is how a stale map shows.</p>
+/// <p><code>labelLine</code> (the fifth element) is the INT line of the method's compiled label in <code>routine</code>, and 0
+/// when it is not known. A method that compiled to INT code has a label line, which is the first line of its INT block: its
+/// body maps to lines after it. The label is the one the compiler recorded for the method (<code>RtnLabel</code>,
+/// <code>label^routine</code>), so two methods whose names share their first <code>$$$MAXLABELLENGTH</code> characters have
+/// distinct labels. A method that compiled to no INT code (a constant return, a generator, a method not written in
+/// ObjectScript) has no <code>label^routine</code> and no label line, and neither has a method whose label is not in the INT
+/// text or whose compiled routine is not the one its body maps to. The label lines come from the INT text, which a
+/// documentation-only edit saved after the compile leaves in place while it removes the class's line map: a method with a
+/// label line in a class with <code>lineMap</code> 0 is how a stale map shows.</p>
 /// The namespace is restored on every exit path. A failure to read the class text or the dictionary is returned as the
 /// status, and the caller records the class as unavailable.
 ClassMethod SourceMap(pNamespace As %String, pClass As %String, Output pMap) As %Status
@@ -4219,6 +4225,7 @@ ClassMethod SourceMap(pNamespace As %String, pClass As %String, Output pMap) As 
             Set pMap = $ListBuild(pClass, "not-up-to-date")
             Quit
         }
+        Set pMap = $ListBuild(pClass, "", $Data(^rMAP(pClass)))
         Set tSC = ##class(%Atelier.v1.Utils.TextServices).GetTextAsArray(pClass_".cls", 0, .tText)
         If $$$ISERR(tSC) Quit
         Do ..IndexDeclarations(.tText, .tDeclarations)
@@ -4228,8 +4235,6 @@ ClassMethod SourceMap(pNamespace As %String, pClass As %String, Output pMap) As 
             Set tName = $$$defMemberNext(pClass, $$$cCLASSmethod, tName)
             If tName = "" Quit
             Set tOrder(+$$$defMemberKeyGet(pClass, $$$cCLASSmethod, tName, $$$cMETHsequencenumber), tName) = ""
-            Set tLabel = $Extract(tName, 1, $$$MAXLABELLENGTH)
-            Set tShared(tLabel) = $Get(tShared(tLabel)) + 1
         }
         Set tIndex = 0
         Set tSequence = ""
@@ -4241,7 +4246,7 @@ ClassMethod SourceMap(pNamespace As %String, pClass As %String, Output pMap) As 
                 Set tName = $Order(tOrder(tSequence, tName))
                 If tName = "" Quit
                 Set tIndex = tIndex + 1
-                Do ..MapMethod(pClass, tName, .tText, .tDeclarations, .tLabels, .tShared, tIndex, .pMap)
+                Do ..MapMethod(pClass, tName, .tText, .tDeclarations, .tLabels, tIndex, .pMap)
             }
         }
     } Catch ex {
@@ -4266,8 +4271,8 @@ ClassMethod IndexDeclarations(ByRef pText, Output pDeclarations)
 }
 
 /// Index the INT labels of the routines that class <var>pClass</var> compiled to, in one pass over each routine's INT text:
-/// <code>pLabels(label)</code> is <code>$ListBuild(routine, line)</code> for the first line, of the first routine, that begins
-/// with <var>label</var> (a label starts in column 1 and ends at a space, a tab, a left parenthesis or a semicolon, as
+/// <code>pLabels(routine, label)</code> is the line of the first line of <code>routine</code> that begins with
+/// <var>label</var> (a label starts in column 1 and ends at a space, a tab, a left parenthesis or a semicolon, as
 /// <code>%Studio.Debugger:INTLine</code> reads one).
 ClassMethod IndexLabels(pClass As %String, Output pLabels)
 {
@@ -4276,23 +4281,26 @@ ClassMethod IndexLabels(pClass As %String, Output pLabels)
         Set tRoutine = $$$nameClassRoutineNameGet(pClass, tN)
         For tLine = 1:1:+$Get(^ROUTINE(tRoutine, 0, 0)) {
             Set tLabel = $Piece($Piece($Piece($Piece($Get(^ROUTINE(tRoutine, 0, tLine)), $Char(9)), " "), "("), ";")
-            If (tLabel '= "") && '$Data(pLabels(tLabel)) Set pLabels(tLabel) = $ListBuild(tRoutine, tLine)
+            If (tLabel '= "") && '$Data(pLabels(tRoutine, tLabel)) Set pLabels(tRoutine, tLabel) = tLine
         }
     }
 }
 
-/// The INT line of the label of method <var>pName</var> in routine <var>pRoutine</var> (any routine of the class when it is
-/// empty), from <var>pLabels</var> (see <method>IndexLabels</method>), or 0 when the method has no known label: it compiled to
-/// no INT code, or <var>pShared</var> shows that another method of the class has the same shortened name (<code>pShared(label)</code>
-/// counts the methods whose name, shortened to <code>$$$MAXLABELLENGTH</code> characters, is <code>label</code>), or its label is
-/// in another routine than <var>pRoutine</var>.
-ClassMethod LabelLine(pName As %String, pRoutine As %String, ByRef pLabels, ByRef pShared) As %Integer
+/// The INT line of the compiled label of method <var>pName</var> of class <var>pClass</var>, from <var>pLabels</var> (see
+/// <method>IndexLabels</method>), or 0 when the method has no known label. The label is the compiler's own
+/// (<code>RtnLabel</code>, <code>label^routine</code>), so it is exact whatever the method's name. It is 0 when the keyword
+/// is not <code>label^routine</code> (a method that compiled to no INT code has none or an inlined constant), when the
+/// label is not in that routine's INT text, or when <var>pRoutine</var>, the routine the method's body maps to, is not empty
+/// and is another routine.
+ClassMethod LabelLine(pClass As %String, pName As %String, pRoutine As %String, ByRef pLabels) As %Integer
 {
-    Set tLabel = $Extract(pName, 1, $$$MAXLABELLENGTH)
-    If ($Get(pShared(tLabel)) > 1) || '$Data(pLabels(tLabel)) Quit 0
-    Set tEntry = pLabels(tLabel)
-    If (pRoutine '= "") && (pRoutine '= $List(tEntry, 1)) Quit 0
-    Quit $List(tEntry, 2)
+    Set tRtnLabel = $$$comMemberKeyGet(pClass, $$$cCLASSmethod, pName, $$$cMETHrtnlabel)
+    If $Length(tRtnLabel, "^") '= 2 Quit 0
+    Set tLabel = $Piece(tRtnLabel, "^", 1)
+    Set tRoutine = $Piece(tRtnLabel, "^", 2)
+    If (tLabel = "") || (tRoutine = "") Quit 0
+    If (pRoutine '= "") && (pRoutine '= tRoutine) Quit 0
+    Quit +$Get(pLabels(tRoutine, tLabel))
 }
 
 /// The class-document line D that declares method <var>pName</var>, whose body holds <var>pCount</var> lines, from the
@@ -4325,15 +4333,47 @@ ClassMethod DeclarationLine(ByRef pText, ByRef pDeclarations, pName As %String, 
 /// Is class-document line <var>pLine</var> a preprocessor line: <code>#dim</code>, <code>#define</code>, <code>#sqlcompile</code>,
 /// <code>#;</code> and the other directives? It is when, after any leading blanks, it begins with one <code>#</code> followed
 /// by a letter or a semicolon. A line that begins with <code>##</code> (<code>##class</code>, <code>##super</code>) is not.
+/// <p>A <code>#dim</code> line (in any letter case) that holds an <code>=</code> outside parentheses and string literals
+/// initializes its variable, and the compiler turns it into a <code>Set</code> at its own INT line, so it is not a
+/// preprocessor line here. Every other directive is one: the compiler maps a leading one onto code that belongs to other
+/// methods.</p>
 ClassMethod IsDirective(pLine As %String) As %Boolean
 {
     Set tText = $ZStrip(pLine, "<W")
-    Quit ($Extract(tText, 1) = "#") && ($Extract(tText, 2) ? 1(1A,1";"))
+    If '(($Extract(tText, 1) = "#") && ($Extract(tText, 2) ? 1(1A,1";"))) Quit 0
+    If '$Locate(tText, "(?i)^#dim(\\s|$)", 1, tEnd) Quit 1
+    Quit '..HasInitializer($Extract(tText, tEnd, *))
+}
+
+/// Does <var>pText</var>, the text of a <code>#dim</code> line after the directive name, hold an <code>=</code> outside
+/// parentheses and string literals? A string literal opens at a double quote and closes at the next one, so a doubled quote
+/// inside it closes and reopens it.
+ClassMethod HasInitializer(pText As %String) As %Boolean
+{
+    Set tDepth = 0
+    Set tQuoted = 0
+    Set tFound = 0
+    For tI = 1:1:$Length(pText) {
+        Set tChar = $Extract(pText, tI)
+        If tChar = """" {
+            Set tQuoted = 'tQuoted
+        } ElseIf 'tQuoted {
+            If tChar = "(" {
+                Set tDepth = tDepth + 1
+            } ElseIf (tChar = ")") && (tDepth > 0) {
+                Set tDepth = tDepth - 1
+            } ElseIf (tChar = "=") && (tDepth = 0) {
+                Set tFound = 1
+                Quit
+            }
+        }
+    }
+    Quit tFound
 }
 
 /// Map the body lines of method <var>pName</var> of class <var>pClass</var> into <var>pMap</var> entry <var>pIndex</var>
 /// (see <method>SourceMap</method> and <method>DeclarationLine</method>).
-ClassMethod MapMethod(pClass As %String, pName As %String, ByRef pText, ByRef pDeclarations, ByRef pLabels, ByRef pShared, pIndex As %Integer, ByRef pMap) [ Private ]
+ClassMethod MapMethod(pClass As %String, pName As %String, ByRef pText, ByRef pDeclarations, ByRef pLabels, pIndex As %Integer, ByRef pMap) [ Private ]
 {
     Set tCount = +$$$defMemberKeyGet(pClass, $$$cCLASSmethod, pName, $$$cMETHimplementation)
     Set tCodeMode = $ZConvert($$$defMemberKeyGet(pClass, $$$cCLASSmethod, pName, $$$cMETHcodemode), "L")
@@ -4366,7 +4406,7 @@ ClassMethod MapMethod(pClass As %String, pName As %String, ByRef pText, ByRef pD
             Set pMap("m", pIndex, tK) = 0
         }
     }
-    Set pMap("m", pIndex) = $ListBuild(pName, tDeclaration, tRoutine, "", ..LabelLine(pName, tRoutine, .pLabels, .pShared))
+    Set pMap("m", pIndex) = $ListBuild(pName, tDeclaration, tRoutine, "", ..LabelLine(pClass, pName, tRoutine, .pLabels))
 }
 
 /// The session node <var>pSession</var> with its routine list replaced by <var>pLoaded</var>, the routines the session
@@ -20559,11 +20599,14 @@ ClassMethod BuildRun(pId As %Integer, pWithRoutines As %Boolean = 0) As %Dynamic
     Quit tRun
 }
 
-/// The class-source map of a terminal run, one entry per measured class: <code>{class, reason?, methods:[...]}</code>.
-/// A method that maps is <code>{name, line, routine, intLines:[...], labelLine}</code> (<code>intLines[k-1]</code> is the
-/// INT line of body line k, or 0; <code>labelLine</code> is the INT line of the method's label, or 0 when it is not known),
-/// and a method that does not is <code>{name, line, reason}</code>. <code>line</code> is the class-document line that
-/// declares the method, or null. See <method>ExecuteMCPv2.Coverage.Job:SourceMap</method>.
+/// The class-source map of a terminal run, one entry per measured class: <code>{class, reason?, lineMap?, methods:[...]}</code>.
+/// <code>lineMap</code> is a number, <code>$Data(^rMAP(class))</code> when the map was built (10 while the class has its debug
+/// line map, 0 once a documentation-only save removed it), and is absent from a class with a <code>reason</code> and from a
+/// record that was stored without it. A method that maps is <code>{name, line, routine, intLines:[...], labelLine}</code>
+/// (<code>intLines[k-1]</code> is the INT line of body line k, or 0; <code>labelLine</code> is the INT line of the method's
+/// compiled label, or 0 when it is not known), and a method that does not is <code>{name, line, reason}</code>.
+/// <code>line</code> is the class-document line that declares the method, or null. See
+/// <method>ExecuteMCPv2.Coverage.Job:SourceMap</method>.
 ClassMethod BuildSources(pId As %Integer) As %DynamicArray [ Private ]
 {
     Set tSources = []
@@ -20575,6 +20618,7 @@ ClassMethod BuildSources(pId As %Integer) As %DynamicArray [ Private ]
         Set tClass = {}
         Do tClass.%Set("class", $List(tHead, 1))
         If $List(tHead, 2) '= "" Do tClass.%Set("reason", $List(tHead, 2))
+        If $ListLength(tHead) > 2 Do tClass.%Set("lineMap", +$List(tHead, 3), "number")
         Set tMethods = []
         Set tM = ""
         For {

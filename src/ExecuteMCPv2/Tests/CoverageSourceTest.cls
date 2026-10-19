@@ -40,7 +40,7 @@ Method TestSourceMapOfTheFixture() As %Status
     Set tRoutine = tClass_".1"
     Set tSC = ##class(ExecuteMCPv2.Coverage.Job).SourceMap("", tClass, .tMap)
     Do $$$AssertStatusOK(tSC, "the fixture's map is built")
-    Do $$$AssertEquals(tMap, $ListBuild(tClass, ""), "a class with a map has no class reason")
+    Do $$$AssertEquals(tMap, $ListBuild(tClass, "", 10), "a class with a map has no class reason and its line map")
     Do ..AssertMethod(.tMap, 1, "ScoreSet", 11, tRoutine, "47 48", "", 46)
     Do ..AssertMethod(.tMap, 2, "LabelGet", 17, tRoutine, "26", "", 25)
     Do ..AssertMethod(.tMap, 3, "Plain", 22, tRoutine, "44 45", "", 43)
@@ -132,7 +132,7 @@ Method TestSourceMapOfAClassWhoseLineMapIsGone() As %Status
     Kill tMap
     Set tSC = ##class(ExecuteMCPv2.Coverage.Job).SourceMap("", tName, .tMap)
     Do $$$AssertStatusOK(tSC, "the class is a result, not an error")
-    Do $$$AssertEquals(tMap, $ListBuild(tName, ""), "it has no class reason: the IRIS side records what it finds")
+    Do $$$AssertEquals(tMap, $ListBuild(tName, "", 0), "it has no class reason, and its line map is 0: the IRIS side records what it finds")
     Do $$$AssertEquals($Get(tMap("m", 1)), $ListBuild("Go", 5, "", "", 5), "the method has an INT label (line 5) and no mapped body line")
     Do $$$AssertEquals($Get(tMap("m", 1, 1))_" "_$Get(tMap("m", 1, 2)), "0 0", "neither body line maps")
 
@@ -172,28 +172,25 @@ Method TestSourceMapLanguageDefault() As %Status
     Quit $$$OK
 }
 
-/// The INT labels of a class are indexed in one pass, and LabelLine returns a method's label only when it can be told.
+/// The INT labels of a class are indexed by routine in one pass, and LabelLine returns a method's compiled label line only
+/// when it can be told.
 Method TestLabelLine() As %Status
 {
     Set tJob = "ExecuteMCPv2.Coverage.Job"
     Set tClass = "ExecuteMCPv2.Tests.CoverageSourceFixture"
+    Set tRoutine = tClass_".1"
     Do $ClassMethod(tJob, "IndexLabels", tClass, .tLabels)
-    Do $$$AssertEquals($Get(tLabels("Plain")), $ListBuild(tClass_".1", 43), "the label of a method: its routine and INT line")
-    Do $$$AssertEquals($Data(tLabels("Constant")), 0, "a method that compiled to no INT code has none")
-
-    Kill tLabels
-    Set tLabels("Alpha") = $ListBuild("R.1", 5)
-    Set tLabels("%Pct") = $ListBuild("R.1", 8)
-    Set tLong = "AVeryLongMethodNameThatExceedsThirtyOneCharactersForSure"
-    Set tLabels($Extract(tLong, 1, 31)) = $ListBuild("R.1", 11)
-    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", "Alpha", "R.1", .tLabels, .tShared), 5, "a method with a label")
-    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", "Alpha", "", .tLabels, .tShared), 5, "any routine when the body maps nowhere")
-    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", "%Pct", "R.1", .tLabels, .tShared), 8, "a name that begins with a percent sign")
-    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", "Alpha", "R.2", .tLabels, .tShared), 0, "a label in another routine than the body's is not this method's")
-    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", "Constant", "", .tLabels, .tShared), 0, "no label, no line")
-    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", tLong, "R.1", .tLabels, .tShared), 11, "a long name is looked up by its first 31 characters")
-    Set tShared($Extract(tLong, 1, 31)) = 2
-    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", tLong, "R.1", .tLabels, .tShared), 0, "but not when another method shortens to the same label")
+    Do $$$AssertEquals($Get(tLabels(tRoutine, "Plain")), 43, "the label of a method: its INT line in its routine")
+    Do $$$AssertEquals($Data(tLabels(tRoutine, "Constant")), 0, "a method that compiled to no INT code has none")
+    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", tClass, "Plain", tRoutine, .tLabels), 43, "a method with a compiled label")
+    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", tClass, "Plain", "", .tLabels), 43, "any routine when the body maps nowhere")
+    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", tClass, "Plain", tClass_".2", .tLabels), 0, "a method whose body maps to another routine than its label is not mapped")
+    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", tClass, "Constant", "", .tLabels), 0, "a compiled label that is not label^routine, no line")
+    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", tClass, "NoSuchMethod", "", .tLabels), 0, "a name that is not a method of the class, no line")
+    Set tLabels(tRoutine, "Plain") = 99
+    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", tClass, "Plain", tRoutine, .tLabels), 99, "the line is the index's")
+    Kill tLabels(tRoutine, "Plain")
+    Do $$$AssertEquals($ClassMethod(tJob, "LabelLine", tClass, "Plain", tRoutine, .tLabels), 0, "a label that is not in the INT text, no line")
     Quit $$$OK
 }
 

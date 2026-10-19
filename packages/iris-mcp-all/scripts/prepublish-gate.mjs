@@ -221,7 +221,7 @@ const gateTestFiles = [
   // Story40Q.* inside Q, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-40-0-qa-live-gate.test.ts",
   // Story 40.1: `iris_test_coverage` and the `iris_test_status` `coverageRunId` companion on the BUILT iris-dev-mcp and iris-admin-mcp dists over real stdio JSON-RPC, with raw HTTP to the
-  // coverage routes. It, the QA gate below, the two Story 40.2 gates and the two Story 40.3 gates (which follow them) are the only gates that start Line-by-Line sessions (the files run serially): it starts each row with the monitor idle and ends each row asserting it is idle, and
+  // coverage routes. It, the QA gate below, the two Story 40.2 gates, the two Story 40.3 gates and the Epic 40 capstone (which follow them) are the only gates that start Line-by-Line sessions (the files run serially): it starts each row with the monitor idle and ends each row asserting it is idle, and
   // terminates a process only through the fixture's MayTerminate check. Writes EXECMCPTMP401A and EXECMCPTMP401B (their database files too), Story401.* inside A, and
   // ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-40-1-coverage-live-gate.test.ts",
@@ -258,6 +258,12 @@ const gateTestFiles = [
   // the namespace) and EXECMCPTMP403X (their database files too), Story392.Operation, Story403.* and Story403Q.* inside W, Story403.* inside X, and ExecuteMCPv2.Temp.Story391Fixture, which it removes. Its helpers are the
   // Story 40.3 gate's (testproduction-gate-helpers.ts), and W is made and removed by the fixture's createTestProductionNamespace / removeTestProductionNamespace.
   "src/__tests__/story-40-3-qa-live-gate.test.ts",
+  // The Epic 40 capstone: the coverage loop (summary and verdict, re-attach, the Cobertura file, the class-source mapping fixes and the refusal behind a monitor session the suite
+  // did not start) and the deploy-and-test-class prompt and the iris_execute_tests annotations, on the BUILT iris-dev-mcp and iris-admin-mcp dists over real stdio JSON-RPC. It is the seventh gate
+  // that starts Line-by-Line sessions (the files run serially): it starts each row with the monitor idle and ends each row asserting it is idle with no ownership node, and it starts a foreign
+  // session only through the fixture (and stops it through the fixture). No production is started. Writes EXECMCPTMP402C (its database files too), Story402.* and Story404.* inside it, a temporary
+  // directory and ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
+  "src/__tests__/epic40-capstone-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

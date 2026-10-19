@@ -1,6 +1,8 @@
 /**
  * The Story 40.1 coverage fixture: the `Story401` classes of the disposable namespace `EXECMCPTMP401A`, and the helpers
- * the live gate (`story-40-1-coverage-live-gate.test.ts`) and, later, the Epic 40 capstone use to seed them.
+ * the live gate (`story-40-1-coverage-live-gate.test.ts`) and the Epic 40 capstone use to seed them. The Story 40.2 report
+ * fixture (`Story402`) and the Story 40.4 class-source mapping fixture (`Story404`) follow it in this file; the capstone seeds
+ * both into `EXECMCPTMP402C`.
  *
  *  - `Story401.Fixture` is the oracle: its INT routine `Story401.Fixture.1` has 48 lines, of which 28 are executable.
  *    The source is used verbatim, because the INT line numbers every expected value names depend on it.
@@ -13,7 +15,7 @@
  * Story 40.1 spec.
  */
 
-import type { WireSession } from "./process-gate-helpers.js";
+import { docFixtures, type WireSession } from "./process-gate-helpers.js";
 import { putCompileSeed } from "./interop-namespace-fixture.js";
 
 type ToolSession = Pick<WireSession, "call">;
@@ -593,4 +595,282 @@ export const STORY402_FIXTURE_NEVER_EXECUTABLE: readonly string[] = [
 export async function seedReportFixture(dev: WireSession, name: string): Promise<void> {
   assertCoverageFixtureName(name);
   await putCompileSeed(dev, name, STORY402_DOCUMENTS, { className: "Story402.Seed", args: [] }, STORY402_IDS, "the coverage-report fixture");
+}
+
+// -- Story 40.4: the class-source mapping fixture ----------------------------------------------------------------------
+//
+// The `Story404` classes, seeded beside the `Story402` ones into the capstone's disposable namespace. The class line numbers every
+// expected value names depend on the exact text of each class (a canonical layout, which IRIS stores unchanged), so the sources are
+// used verbatim. Each class has methods of one shape the DW-601 and DW-602 fixes distinguish:
+//
+//  - `Story404.Dim`: initializing `#dim` lines (leading, mid-body, nested in a block, after four and after six leading `#dim` lines
+//    that initialize nothing, in capitals, with several variables, with no type, and with a value that holds an equals sign).
+//  - `Story404.Hooks`: methods whose bodies are only a `#;` line or a `#dim` line that initializes nothing.
+//  - `Story404.Long`: two methods whose names share their first 31 characters, and a short one.
+//  - `Story404.Stale`: only the two long-name methods of `Story404.Long`, compiled and then saved with a documentation-only edit. It has
+//    no short method, so a rule that needs one method with a known label cannot see that the class is stale.
+//  - `Story404.FixtureTest`: one test that calls every method of the four classes; it passes.
+
+const STORY404_LONG_NAME = "AVeryLongMethodNameThatExceedsThirtyOneCharacters";
+
+/** Every shape of an initializing `#dim`. */
+export const STORY404_DIM_SOURCE = String.raw`/// Synthetic class-source mapping fixture: every shape of an initializing #dim (Story 40.4).
+Class Story404.Dim
+{
+
+ClassMethod Leading() As %Integer
+{
+    #dim tSC As %Status = $$$OK
+    Quit tSC
+}
+
+ClassMethod MidBody() As %Integer
+{
+    Set tA = 1
+    #dim tB As %Integer = 2
+    Quit tA + tB
+}
+
+ClassMethod Nested(pN As %Integer) As %Integer
+{
+    If pN {
+        #dim tC As %Integer = 3
+        Quit tC
+    }
+    Quit 0
+}
+
+ClassMethod AfterFour() As %Integer
+{
+    #dim t1 As %Integer
+    #dim t2 As %Integer
+    #dim t3 As %Integer
+    #dim t4 As %Integer
+    #dim tD As %Integer = 4
+    Quit tD
+}
+
+ClassMethod AfterSix() As %Integer
+{
+    #dim t1 As %Integer
+    #dim t2 As %Integer
+    #dim t3 As %Integer
+    #dim t4 As %Integer
+    #dim t5 As %Integer
+    #dim t6 As %Integer
+    #dim tE As %Integer = 5
+    Quit tE
+}
+
+ClassMethod Capitals() As %Integer
+{
+    #DIM tF As %Integer = 7
+    Quit tF
+}
+
+ClassMethod Multi() As %Integer
+{
+    #dim tG, tH As %Integer = 0
+    Quit tG
+}
+
+ClassMethod NoType() As %Integer
+{
+    #dim tI = 5
+    Quit tI
+}
+
+ClassMethod Quoted() As %String
+{
+    #dim tJ As %String = "a=b"
+    Quit tJ
+}
+
+}
+`;
+
+/** Methods whose bodies hold only preprocessor lines. */
+export const STORY404_HOOKS_SOURCE = String.raw`/// Synthetic class-source mapping fixture: methods that hold only preprocessor lines (Story 40.4).
+Class Story404.Hooks
+{
+
+ClassMethod OnHook()
+{
+    #; nothing runs here
+}
+
+ClassMethod Declared()
+{
+    #dim tX As %Integer
+}
+
+}
+`;
+
+/** Two methods whose names share their first 31 characters, each followed by a blank line. */
+function longPair(): string {
+  return `ClassMethod ${STORY404_LONG_NAME}One() As %Integer
+{
+    Set tX = 1
+    Quit tX
+}
+
+ClassMethod ${STORY404_LONG_NAME}Two() As %Integer
+{
+    #dim tY As %Integer
+    Set tY = 2
+    Quit tY
+}
+
+`;
+}
+
+/** Two methods whose names share their first 31 characters, and a short one. */
+export const STORY404_LONG_SOURCE = `/// Synthetic class-source mapping fixture: method names that share their first 31 characters (Story 40.4).
+Class Story404.Long
+{
+
+${longPair()}ClassMethod Short() As %Integer
+{
+    Set tZ = 3
+    Quit tZ
+}
+
+}
+`;
+
+/** Only the two methods whose names share their first 31 characters: the class a stale-map rule that needs a short method cannot see. */
+export const STORY404_STALE_SOURCE = `/// Synthetic class-source mapping fixture: a class saved after its compile (Story 40.4).
+Class Story404.Stale
+{
+
+${longPair()}}
+`;
+
+/** `Story404.Stale` with the one documentation line the edit adds above its first method. */
+export const STORY404_STALE_DOCUMENTED_SOURCE = `/// Synthetic class-source mapping fixture: a class saved after its compile (Story 40.4).
+Class Story404.Stale
+{
+
+/// What the first method returns.
+${longPair()}}
+`;
+
+/** One test that calls every method of the four classes once, with arguments that reach every line. */
+export const STORY404_FIXTURE_TEST_SOURCE = String.raw`/// Synthetic class-source mapping test: calls every method of the four classes (Story 40.4).
+Class Story404.FixtureTest Extends %UnitTest.TestCase
+{
+
+Method TestEveryMethod()
+{
+    Do $$$AssertEquals(##class(Story404.Dim).Leading(), 1, "Leading")
+    Do $$$AssertEquals(##class(Story404.Dim).MidBody(), 3, "MidBody")
+    Do $$$AssertEquals(##class(Story404.Dim).Nested(1), 3, "Nested(1)")
+    Do $$$AssertEquals(##class(Story404.Dim).Nested(0), 0, "Nested(0)")
+    Do $$$AssertEquals(##class(Story404.Dim).AfterFour(), 4, "AfterFour")
+    Do $$$AssertEquals(##class(Story404.Dim).AfterSix(), 5, "AfterSix")
+    Do $$$AssertEquals(##class(Story404.Dim).Capitals(), 7, "Capitals")
+    Do $$$AssertEquals(##class(Story404.Dim).Multi(), 0, "Multi")
+    Do $$$AssertEquals(##class(Story404.Dim).NoType(), 5, "NoType")
+    Do $$$AssertEquals(##class(Story404.Dim).Quoted(), "a=b", "Quoted")
+    Do ##class(Story404.Hooks).OnHook()
+    Do ##class(Story404.Hooks).Declared()
+    Do $$$AssertEquals(##class(Story404.Long).AVeryLongMethodNameThatExceedsThirtyOneCharactersOne(), 1, "Long One")
+    Do $$$AssertEquals(##class(Story404.Long).AVeryLongMethodNameThatExceedsThirtyOneCharactersTwo(), 2, "Long Two")
+    Do $$$AssertEquals(##class(Story404.Long).Short(), 3, "Long Short")
+    Do $$$AssertEquals(##class(Story404.Stale).AVeryLongMethodNameThatExceedsThirtyOneCharactersOne(), 1, "Stale One")
+    Do $$$AssertEquals(##class(Story404.Stale).AVeryLongMethodNameThatExceedsThirtyOneCharactersTwo(), 2, "Stale Two")
+}
+
+}
+`;
+
+/**
+ * The class-source summaries of the three measured classes that have one, in the run of `Story404.FixtureTest` over `Story404.Dim`,
+ * `Story404.Hooks`, `Story404.Long` and `Story404.Stale`, captured live (IRIS 2026.2 build 221U, 2026-10-18; Rule #36) in
+ * `EXECMCPTMP402C` and checked against the stored class documents: the line numbers are those of the stored documents, whose first line
+ * is the class doc comment. `Story404.Dim` reports nine initializing `#dim` lines (7, 14, 21, 33, 45, 51, 57, 63 and 69) and no other
+ * preprocessor line; the three methods of `Story404.Long` report their statements and not the `#dim` line of the second; `Story404.Hooks`
+ * reports no line at all.
+ */
+export const STORY404_DIM_SOURCE_VALUES = {
+  executableLines: 21,
+  coveredLines: 21,
+  percent: 100,
+  executableRanges: [[7, 8], [13, 15], [20, 22], [24, 24], [33, 34], [45, 46], [51, 52], [57, 58], [63, 64], [69, 70]],
+  coveredRanges: [[7, 8], [13, 15], [20, 22], [24, 24], [33, 34], [45, 46], [51, 52], [57, 58], [63, 64], [69, 70]],
+  uncoveredRanges: [],
+  methods: [
+    { method: "Leading", line: 5, executableLines: 2, coveredLines: 2, percent: 100, uncoveredRanges: [] },
+    { method: "MidBody", line: 11, executableLines: 3, coveredLines: 3, percent: 100, uncoveredRanges: [] },
+    { method: "Nested", line: 18, executableLines: 4, coveredLines: 4, percent: 100, uncoveredRanges: [] },
+    { method: "AfterFour", line: 27, executableLines: 2, coveredLines: 2, percent: 100, uncoveredRanges: [] },
+    { method: "AfterSix", line: 37, executableLines: 2, coveredLines: 2, percent: 100, uncoveredRanges: [] },
+    { method: "Capitals", line: 49, executableLines: 2, coveredLines: 2, percent: 100, uncoveredRanges: [] },
+    { method: "Multi", line: 55, executableLines: 2, coveredLines: 2, percent: 100, uncoveredRanges: [] },
+    { method: "NoType", line: 61, executableLines: 2, coveredLines: 2, percent: 100, uncoveredRanges: [] },
+    { method: "Quoted", line: 67, executableLines: 2, coveredLines: 2, percent: 100, uncoveredRanges: [] },
+  ],
+  generated: { executableLines: 0, coveredLines: 0 },
+} as const;
+
+/** `Story404.Hooks` in that run: methods that hold only preprocessor lines report no class line. */
+export const STORY404_HOOKS_SOURCE_VALUES = {
+  executableLines: 0,
+  coveredLines: 0,
+  percent: null,
+  executableRanges: [],
+  coveredRanges: [],
+  uncoveredRanges: [],
+  methods: [
+    { method: "OnHook", line: 5, executableLines: 0, coveredLines: 0, percent: null, uncoveredRanges: [] },
+    { method: "Declared", line: 10, executableLines: 0, coveredLines: 0, percent: null, uncoveredRanges: [] },
+  ],
+  generated: { executableLines: 0, coveredLines: 0 },
+} as const;
+
+/** `Story404.Long` in that run: both long-name methods report their statements, and the `#dim` line of `...Two` is not one. */
+export const STORY404_LONG_SOURCE_VALUES = {
+  executableLines: 6,
+  coveredLines: 6,
+  percent: 100,
+  executableRanges: [[7, 8], [14, 15], [20, 21]],
+  coveredRanges: [[7, 8], [14, 15], [20, 21]],
+  uncoveredRanges: [],
+  methods: [
+    { method: `${STORY404_LONG_NAME}One`, line: 5, executableLines: 2, coveredLines: 2, percent: 100, uncoveredRanges: [] },
+    { method: `${STORY404_LONG_NAME}Two`, line: 11, executableLines: 2, coveredLines: 2, percent: 100, uncoveredRanges: [] },
+    { method: "Short", line: 18, executableLines: 2, coveredLines: 2, percent: 100, uncoveredRanges: [] },
+  ],
+  generated: { executableLines: 0, coveredLines: 0 },
+} as const;
+
+/** The documents compiled into the fixture namespace, in order: the four classes, then the test that calls them. */
+export const STORY404_DOCUMENTS: ReadonlyArray<readonly [string, string]> = [
+  ["Story404.Dim.cls", STORY404_DIM_SOURCE],
+  ["Story404.Hooks.cls", STORY404_HOOKS_SOURCE],
+  ["Story404.Long.cls", STORY404_LONG_SOURCE],
+  ["Story404.Stale.cls", STORY404_STALE_SOURCE],
+  ["Story404.FixtureTest.cls", STORY404_FIXTURE_TEST_SOURCE],
+];
+
+/**
+ * Put and compile the `Story404` classes into the scratch namespace `name`, then save `Story404.Stale` again with its documentation
+ * line and compile nothing more: the save leaves IRIS calling the class up to date and removes its compiled line map, which is how
+ * a class that was edited after its compile looks.
+ *
+ * @param dev - A session on a built iris-dev-mcp server.
+ * @param name - `EXECMCPTMP401<capital letter>` or `EXECMCPTMP402<capital letter>`.
+ */
+export async function seedSourceMapFixture(dev: WireSession, name: string): Promise<void> {
+  assertCoverageFixtureName(name);
+  const docs = docFixtures(dev, name);
+  for (const [doc, source] of STORY404_DOCUMENTS) {
+    await docs.putDoc(doc, source);
+    await docs.compileDoc(doc);
+  }
+  const saved = await dev.call("iris_doc_put", { namespace: name, name: "Story404.Stale.cls", content: STORY404_STALE_DOCUMENTED_SOURCE });
+  if (saved.isError) {
+    throw new Error(`saving the documented Story404.Stale in ${name}: ${saved.content?.[0]?.text ?? "no content"}`);
+  }
 }

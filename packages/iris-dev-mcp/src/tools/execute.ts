@@ -1297,9 +1297,9 @@ export const executeTestsTool: ToolDefinition = {
       .describe("Target namespace (default: configured)"),
   }),
   annotations: {
-    readOnlyHint: true,
+    readOnlyHint: false,
     destructiveHint: false,
-    idempotentHint: true,
+    idempotentHint: false,
     openWorldHint: false,
   },
   scope: "NS",

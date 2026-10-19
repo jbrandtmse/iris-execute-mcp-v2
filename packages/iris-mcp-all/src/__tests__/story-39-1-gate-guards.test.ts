@@ -7,7 +7,7 @@
  * `story-39-5-body-reader-live-gate.test.ts`, `story-39-5-qa-live-gate.test.ts`,
  * `epic39-capstone-gate.test.ts`, `story-39-7-burn-down-live-gate.test.ts` and
  * `story-40-0-burn-down-live-gate.test.ts`, `story-40-0-qa-live-gate.test.ts`, the Story 40.1 and 40.2 coverage gates and
- * `story-40-3-testproduction-live-gate.test.ts`, `story-40-3-qa-live-gate.test.ts`) on their own real path (project
+ * `story-40-3-testproduction-live-gate.test.ts`, `story-40-3-qa-live-gate.test.ts` and `epic40-capstone-gate.test.ts`) on their own real path (project
  * rule #59). A gate that drives a
  * further dist beyond the dev, admin and interop ones names it in `extraDriven`: the guard then expects that
  * dist's freshness line after the three, in the skip reason and in the source order, and it checks `extraDriven`
@@ -78,6 +78,7 @@ const GATES: readonly Gate[] = [
   { file: "story-40-2-qa-live-gate.test.ts", tag: "story-40-2-qa-live-gate", story: "Story 40.2 QA" },
   { file: "story-40-3-testproduction-live-gate.test.ts", tag: "story-40-3-testproduction-live-gate", story: "Story 40.3" },
   { file: "story-40-3-qa-live-gate.test.ts", tag: "story-40-3-qa-live-gate", story: "Story 40.3 QA" },
+  { file: "epic40-capstone-gate.test.ts", tag: "epic40-capstone-gate", story: "Epic 40 capstone" },
 ];
 
 /** The vitest entry point this package's tests run under. */

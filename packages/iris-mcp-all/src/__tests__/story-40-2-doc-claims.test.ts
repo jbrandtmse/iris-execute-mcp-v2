@@ -95,7 +95,7 @@ describe("Story 40.2: the Development README", () => {
     for (const reason of ["not-up-to-date", "not-compiled", "unavailable"]) expect(entry, reason).toContain(`\`${reason}\` (`);
     // The mapping rules of the INT block, the one-line statement and the missing line map.
     expect(entry).toContain("a method that compiles to no INT code (a constant return, for example) has no lines either, and no `reason`");
-    expect(entry).toContain("a preprocessor line (`#dim`, `#define`, `#sqlcompile` and the like) is never a class line: the compiler maps a leading one onto the code of the method before it or onto the method's own first statements");
+    expect(entry).toContain("a preprocessor line (`#dim` that initializes nothing, `#define`, `#sqlcompile` and the like) is never a class line: the compiler maps a leading one onto the code of the method before it or onto the method's own first statements");
     expect(entry).toContain("**A statement that spans several lines but compiles to one INT line is reported once, at the first line that maps to its code.**");
     expect(entry).toContain("For a multi-line embedded SQL statement that is the line after the `&sql(` line");
     expect(entry).toContain("or its compiled line map is gone");
@@ -215,7 +215,7 @@ describe("Story 40.2: the CHANGELOG section and the changeset", () => {
     expect(text).toContain("**Class line numbers are those of the document `iris_doc_get` returns for the class**");
     for (const reason of ["not-up-to-date", "not-compiled", "unavailable"]) expect(text, reason).toContain(`\`${reason}\` (`);
     expect(text).toContain("a method that compiles to no INT code (a constant return) has no lines and no `reason`");
-    expect(text).toContain("a preprocessor line (`#dim`, `#define`, `#sqlcompile` and the like) is never a class line");
+    expect(text).toContain("a preprocessor line (`#dim` that initializes nothing, `#define`, `#sqlcompile` and the like) is never a class line");
     expect(text).toContain("**A statement that spans several lines but compiles to one INT line is reported once, at the first line that maps to its code: for a multi-line embedded SQL statement, the line after the `&sql(` line.**");
     expect(text).toContain("or its compiled line map is gone");
     expect(text).toContain("a forced compile, flags `ck`, rebuilds the map");

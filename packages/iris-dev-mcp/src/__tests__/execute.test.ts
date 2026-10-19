@@ -1605,11 +1605,11 @@ describe("iris_execute_tests", () => {
     ).rejects.toThrow("ECONNREFUSED");
   });
 
-  it("should have correct annotations (readOnlyHint: true, destructiveHint: false)", () => {
+  it("should have correct annotations (readOnlyHint: false, idempotentHint: false: a run writes results and may not be re-submitted)", () => {
     expect(executeTestsTool.annotations).toEqual({
-      readOnlyHint: true,
+      readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: true,
+      idempotentHint: false,
       openWorldHint: false,
     });
   });

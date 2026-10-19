@@ -1,6 +1,6 @@
 # @iris-mcp/dev
 
-**IRIS Development Tools MCP Server** -- ObjectScript document CRUD, compilation, SQL execution, analysis, and performance advisories, globals management, code execution, unit testing, package browsing, bulk export, lines-of-code analysis, and cross-profile environment diff & promotion via the Model Context Protocol.
+**IRIS Development Tools MCP Server** -- ObjectScript document CRUD, compilation, SQL execution, analysis, and performance advisories, globals management, code execution, unit testing with line coverage (a verdict against a target, and a Cobertura file for CI), package browsing, bulk export, lines-of-code analysis, and cross-profile environment diff & promotion via the Model Context Protocol.
 
 Part of the [IRIS MCP Server Suite](../../README.md).
 
@@ -220,7 +220,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 |------|-------------|----------------|-------------|
 | `iris_execute_command` | Execute an ObjectScript command | `command`, `namespace?` | -- |
 | `iris_execute_classmethod` | Invoke a class method by name with up to 20 positional arguments (plain scalars or `{byRef, value?}` markers for `ByRef`/`Output` parameters). Captures any `Write` output from the target (no wrapper class needed for narrating methods, stock runners like `%UnitTest.Manager.RunTest`, or targets that switch namespace mid-call) and returns marked positions' post-call values | `className`, `methodName`, `args?`, `namespace?` | -- |
-| `iris_execute_tests` | Run unit tests (package, class, or method level). A run that outlives its wait budget returns a non-error "running" result carrying `jobId`/`runIndex` handles instead of a timeout error — see detail below. Since Story 40.3 a run that includes `%UnitTest.TestProduction` tests is refused with `PRODUCTION_BUSY` while a different production runs in the namespace (the tool stays enabled; no new key) | `target`, `level`, `timeout?`, `namespace?` | readOnly, idempotent |
+| `iris_execute_tests` | Run unit tests (package, class, or method level). A run that outlives its wait budget returns a non-error "running" result carrying `jobId`/`runIndex` handles instead of a timeout error — see detail below. Since Story 40.3 a run that includes `%UnitTest.TestProduction` tests is refused with `PRODUCTION_BUSY` while a different production runs in the namespace (the tool stays enabled; no new key). Classified `write` because it runs test code, and **enabled by default** (a key of the frozen baseline); since Story 40.4 its annotations say so (not read-only, not idempotent) | `target`, `level`, `timeout?`, `namespace?` | -- |
 
 ### Code Metrics Tools
 
@@ -243,7 +243,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_test_status` | Companion to `iris_execute_tests` (Story 36.2): re-attach to a test run by `jobId` and/or read it by `runIndex` (`action: "poll"`), or stop a running one (`action: "cancel"`) — see detail below. Since Story 40.1 it is also the companion of `iris_test_coverage`: pass `coverageRunId` alone to poll or cancel a coverage run. Since Story 40.2 `action: "export"` writes a completed coverage run's Cobertura XML file to an absolute `outputPath` | `action`, `jobId?`, `runIndex?`, `coverageRunId?`, `namespace?`, `outputPath?`, `sourceRoot?` | destructive |
+| `iris_test_status` | Companion to `iris_execute_tests` (Story 36.2): re-attach to a test run by `jobId` and/or read it by `runIndex` (`action: "poll"`), or stop a running one (`action: "cancel"`) — see detail below. Since Story 40.1 it is also the companion of `iris_test_coverage`: pass `coverageRunId` alone to poll or cancel a coverage run. Since Story 40.2 `action: "export"` writes a completed coverage run's Cobertura XML file to an absolute `outputPath`. Defaults: `poll` is a read, **enabled by default**; `cancel` and `export` are writes, **DEFAULT-DISABLED** (enable them through `IRIS_GOVERNANCE`) | `action`, `jobId?`, `runIndex?`, `coverageRunId?`, `namespace?`, `outputPath?`, `sourceRoot?` | destructive |
 
 > **Governance defaults:** `iris_test_status:poll` is classified `read` and is therefore **enabled by default**. `iris_test_status:cancel` is truthfully classified `write` and is **DEFAULT-DISABLED** (it deliberately does not use the `defaultEnabled` mechanism — stopping a run is not a recovery-of-last-resort action like `iris_production_control:clean`); enable it via `IRIS_GOVERNANCE`, e.g. `{"global":{"iris_test_status:cancel":true}}`. The optional `coverageRunId` (Story 40.1) added no action and changed neither key. `iris_test_status:export` (Story 40.2) is a third key: it is truthfully classified `write` (it writes a local file) and is **DEFAULT-DISABLED**; enable it via `IRIS_GOVERNANCE`, e.g. `{"global":{"iris_test_status:export":true}}`. It is outside the frozen governance baseline and carries no `defaultEnabled` marker; the tool's annotations (`destructiveHint: true`) already cover overwriting a file, and `iris_test_coverage` itself never writes a file.
 
@@ -251,7 +251,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_test_coverage` | Run unit tests and measure which lines of the listed classes they execute (Stories 40.1 and 40.2): per class and per method over the class's own source lines with the uncovered ranges, per-routine INT lines, an optional `minCoverage` verdict, plus the classes that could not be measured; since Story 40.3 it asks the same TestProduction guard as `iris_execute_tests` and refuses a run with `PRODUCTION_BUSY` — see detail below | `target`, `level`, `classes`, `timeout?`, `namespace?`, `minCoverage?` | destructive |
+| `iris_test_coverage` | Run unit tests and measure which lines of the listed classes they execute (Stories 40.1 and 40.2): per class and per method over the class's own source lines with the uncovered ranges, per-routine INT lines, an optional `minCoverage` verdict, plus the classes that could not be measured; since Story 40.3 it asks the same TestProduction guard as `iris_execute_tests` and refuses a run with `PRODUCTION_BUSY`. **A write, DEFAULT-DISABLED** (it starts an instance-wide Line-by-Line session and runs test code; enable it with `IRIS_GOVERNANCE={"global":{"iris_test_coverage":true}}`); `minCoverage` omitted means no verdict — see detail below | `target`, `level`, `classes`, `timeout?`, `namespace?`, `minCoverage?` | destructive |
 
 > **Governance defaults:** `iris_test_coverage` is truthfully classified `write` (it starts an instance-wide monitor session, runs test code and prunes its own older run records) and is **DEFAULT-DISABLED**; enable it via `IRIS_GOVERNANCE`, e.g. `{"global":{"iris_test_coverage":true}}`. It is outside the frozen governance baseline, uses no `defaultEnabled` marker, and is hidden under `IRIS_TOOLS_PRESET=core` (shown under `developer`); it and `iris_test_status` are a declared pair and stay co-visible.
 
@@ -265,7 +265,7 @@ Workflow-shaped [MCP prompts](../../README.md#workflow-prompts--agent-skills) (E
 |---|---|
 | `diagnose-slow-query` | Runs `iris_sql_analyze` (`explain` → `indexUsage` → `stats`) and recommends a fix — never auto-applies one. |
 | `objectscript-review` | A concise pre-write checklist distilling this project's ObjectScript conventions ($$$ macros, `Quit` in try/catch, `%OnNew`/`initvalue`, no-underscore names, storage sections untouchable). |
-| `deploy-and-test-class` | Deploys an ObjectScript class or package (`iris_doc_load`, glob-path form), resolves compile errors, then runs its unit tests (`iris_execute_tests`) with a total-count check. |
+| `deploy-and-test-class` | Deploys an ObjectScript class or package (`iris_doc_load`, glob-path form), resolves compile errors, then runs its unit tests (`iris_execute_tests`) with a total-count check. It tells the model what a `PRODUCTION_BUSY` refusal means, and, only when the user asks for coverage, adds an optional last step that runs `iris_test_coverage` and copes with a hidden tool (outside `core`), a `GOVERNANCE_DISABLED` or `MONITOR_BUSY` refusal and a `running` result (Story 40.4). |
 | `promote-environment-change` | Reviews and promotes configuration/code drift from a source IRIS environment to a target using the review-before-write `iris_env_diff` → `iris_env_promote` workflow — scoped diff, review with the user, plan, an explicit user-selected step allowlist, confirmed execute, then re-diff to verify. Never acts on `onlyInTarget` warnings; states the no-deletions guarantee and that `execute` is default-disabled. |
 | `edit-and-test-class` | Changes a few lines of a class in place: a ranged `iris_doc_get`, a guarded `iris_doc_edit` (`apply`, enabled by default; `expected` built from the read, with a `STALE_CONTENT` retry using `mismatches[].current`), `iris_doc_compile`, then `iris_execute_tests` with a check of `total` against the number of `Test*` methods. Takes `className`, `change` and an optional `testClass`; every tool on its main path is in the `core` preset. |
 
@@ -1705,12 +1705,19 @@ were verified under `_SYSTEM` only; a lower-privileged account gets IRIS's own e
 </details>
 
 <details>
-<summary><strong>iris_test_status</strong> -- Re-attach, read, or cancel a test run (Story 36.2)</summary>
+<summary><strong>iris_test_status</strong> -- Re-attach, read, cancel or export a test or coverage run (Stories 36.2, 40.1, 40.2)</summary>
 
 Companion to `iris_execute_tests`: use it after that tool returns
 `status: "running"` (or after your own client abandoned a long call) instead
 of re-submitting the same target — re-submitting starts a SECOND concurrent
-run against shared fixtures.
+run against shared fixtures. With a `coverageRunId` instead of `jobId` or
+`runIndex` it is the companion of `iris_test_coverage` too.
+
+**Defaults at a glance (Story 40.4).** One governance key per action:
+`iris_test_status:poll` is a read and **enabled by default**;
+`iris_test_status:cancel` and `iris_test_status:export` are writes and
+**DEFAULT-DISABLED**. Enable them with
+`IRIS_GOVERNANCE={"global":{"iris_test_status:cancel":true,"iris_test_status:export":true}}`.
 
 **`action: "poll"` (read, enabled by default) — Input:**
 ```json
@@ -1835,12 +1842,28 @@ generated INT lines and unmeasured classes are left out. It validates against th
 </details>
 
 <details>
-<summary><strong>iris_test_coverage</strong> -- Line coverage of a test run (Story 40.1)</summary>
+<summary><strong>iris_test_coverage</strong> -- Line coverage of a test run, with a target and a Cobertura file (Stories 40.1, 40.2, 40.4)</summary>
 
 Runs the tests of `target` while an IRIS Line-by-Line session measures the INT routines of the listed `classes`
 (1 to 50 class names, no wildcards), then reports coverage per routine. **DEFAULT-DISABLED** (enable it with
 `IRIS_GOVERNANCE={"global":{"iris_test_coverage":true}}`); the wait budget is `timeout`, or `IRIS_TEST_TIMEOUT`,
 or 120 s (capped at 3600 s, with `timeoutCapped: true` when clamped).
+
+**Defaults at a glance (Story 40.4).**
+
+| Key | Class | Default state |
+|---|---|---|
+| `iris_test_coverage` | write | **DEFAULT-DISABLED** (it starts an instance-wide monitor and runs test code) |
+| `iris_test_status:poll` | read | enabled |
+| `iris_test_status:cancel` | write | **DEFAULT-DISABLED** |
+| `iris_test_status:export` | write | **DEFAULT-DISABLED** (it writes a local file) |
+
+`iris_execute_tests` is classified `write` and enabled by default (a key of the frozen baseline). `minCoverage` omitted means no
+verdict: the result then carries no `coverage.verdict` and no `Coverage target` line. The `developer` preset shows
+`iris_test_coverage` and `iris_test_status`; the `core` preset hides both, and a hidden tool cannot be called. One setting enables
+the three disabled keys:
+`IRIS_GOVERNANCE={"global":{"iris_test_coverage":true,"iris_test_status:cancel":true,"iris_test_status:export":true}}`.
+The `deploy-and-test-class` prompt offers a coverage step and copes with a hidden or disabled tool.
 
 **Input:**
 ```json
@@ -1927,8 +1950,10 @@ and `coverage.source` is the total over the classes that have such a result. A c
 a `reason` and no lines when it is a method generator (`generator`), is not written in ObjectScript (`not-objectscript`, a
 `Language` set on the method or on the class), or is not laid out where IRIS stores it (`layout`); a method that compiles to no
 INT code (a constant return, for example) has no lines either, and no `reason`. A method's lines are the body lines that map
-after its own INT label line, and a preprocessor line (`#dim`, `#define`, `#sqlcompile` and the like) is never a class line: the compiler maps a leading
-one onto the code of the method before it or onto the method's own first statements. **A statement that spans several lines but compiles to one INT line is reported once, at the first line that maps
+after its own INT label line, and a preprocessor line (`#dim` that initializes nothing, `#define`, `#sqlcompile` and the like) is never a class line: the compiler maps a leading
+one onto the code of the method before it or onto the method's own first statements. A `#dim` that initializes its variable
+(it holds an `=` outside parentheses and string literals, as in `#dim tSC As %Status = $$$OK`) is the exception: it compiles to a
+`Set` at its own INT line, so it is an executable class line (Story 40.4). **A statement that spans several lines but compiles to one INT line is reported once, at the first line that maps
 to its code.** For a multi-line embedded SQL statement that is the line after the `&sql(` line (the `&sql(` line maps to a comment
 line of the INT routine, and the other continuation lines are not executable); a single-line `&sql(...)` statement is reported at
 its own line. A class without a result has `source: {reason}`, and the reason is one of three:
@@ -1944,6 +1969,20 @@ layout (one blank line between members, each signature on one line, a blank line
 another layout can number its lines differently, so read the class with `iris_doc_get` before comparing. The per-routine INT
 fields of each result are exactly what Story 40.1 returned.
 
+**Stale classes and label lines (Story 40.4).** The IRIS side reports, per class, whether the class still has the line map its
+compile wrote (`lineMap` in the run's Status record: 10, or 0 once a documentation-only save removed it), and, per method, the INT
+line of its compiled label (`labelLine`, read from the method's own `RtnLabel`, so it is exact when two method names share their
+first 31 characters). A class is `not-up-to-date` exactly when its `lineMap` is 0 while some method that compiled to INT code has a
+label line; a class whose methods hold only preprocessor lines and has its line map is not (it has no executable class line and the
+verdict `notApplicable`), and neither is a class whose methods all compile to no INT code. A record stored without `lineMap` (by
+an older service build) is judged by its shape as before. A class compiled without a debug line map, if a compile qualifier allows
+one, would read `not-up-to-date`: a false FAIL, never a false PASS; one probe of a newly created class found no line map right
+after its compile, once, and about 30 later runs did not repeat it (a forced compile, flags `ck`, rebuilds the map). A method whose
+name begins with a percent sign (`%OnNew`, for example) has no compiled label, so it has no label line: a class whose only methods
+that compile to INT code are named so is not recognised as `not-up-to-date` after a documentation-only save, and reads as a class
+with no executable lines. A `#dim` that initializes nothing but has a trailing comment holding an `=` is read as initializing, and its
+line can then be counted as an executable class line. Earliest IRIS version verified: 2026.2 build 221U.
+
 **`minCoverage` and the verdict (Story 40.2).** An optional number from 0 to 100 stored with the run. A completed result then
 carries `coverage.verdict` (`{minCoverage, overall, percent, classes:[{class, verdict, percent, reason?}]}`) and the text line
 `Coverage target 90%: FAIL (88.89% overall); failing: Story402.Layout 50%, Story402.Missing (not-compiled)`. A class is `pass`
@@ -1952,7 +1991,8 @@ executable class line, and `fail` with a `reason` when it has no class-source re
 `overall` is `pass` when the unrounded total over the classes that have a result is at least the minimum and no class failed for
 want of a result, `notApplicable` when no class has an executable class line, and otherwise `fail`: a rounded 79.995 never
 passes 80. A failing verdict is still `isError: false`. `iris_test_status` with the `coverageRunId` returns the same summary and
-verdict from the handle alone.
+verdict from the handle alone. **`minCoverage` omitted means no verdict:** the result has no `coverage.verdict` and no `Coverage
+target` line, and no run is judged on its percentage.
 
 **A session that did not load every listed routine runs no test (Story 40.2).** `Start` of the Line-by-Line session skips, without
 an error, a routine that has no object code (for example a class deleted after the run resolved its list). The test process
@@ -1964,6 +2004,19 @@ were not loaded and says that no test was run.
 with `action: "export"`, the run's `coverageRunId` and an absolute `outputPath` ending `.xml` (no `..` segment; the same path guard
 as `iris_doc_export`'s `destinationDir`). That action is `iris_test_status:export`, a key of its own that is `write` and
 **DEFAULT-DISABLED**: enable it with `IRIS_GOVERNANCE={"global":{"iris_test_status:export":true}}`. See the `iris_test_status` entry.
+
+**A CI recipe (Story 40.4).**
+1. The operator enables the keys (the setting under "Defaults at a glance"; the export needs `iris_test_status:export`).
+2. Call `iris_test_coverage` with `target`, `level`, `classes` (the classes under test, not the test classes) and `minCoverage` set
+   to the pipeline's gate.
+3. A `status: "running"` result is polled with `iris_test_status` (`action: "poll"`, the `coverageRunId`) until it completes; never
+   re-submit.
+4. Read `coverage.verdict.overall`: `pass`, `fail` (a result, not a tool error: `isError` stays `false`) or `notApplicable` (no class
+   has an executable class line, so there is nothing to export). Fail the pipeline on `fail`; step 5 works for a failing verdict
+   too, so export first when the CI tool should read the file of a failing run.
+5. Call `iris_test_status` with `action: "export"`, the `coverageRunId`, an absolute `outputPath` ending `.xml` and, for the
+   repository's source directory, `sourceRoot`; point the CI tool's Cobertura reader at that file. The repository's `.cls` files must
+   be in the layout IRIS stores (as `iris_doc_export` writes them).
 </details>
 
 ---

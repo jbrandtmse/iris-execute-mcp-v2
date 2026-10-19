@@ -427,14 +427,15 @@ describe("edit-and-test-class and deploy-and-test-class - the in-place edit loop
     expect(omitted).toContain("or ask the user which test class to run");
   });
 
-  it("every iris_* token of edit-and-test-class is a dev core tool, and of deploy-and-test-class a dev core tool or iris_test_status", async () => {
+  it("every iris_* token of edit-and-test-class is a dev core tool, and of deploy-and-test-class a dev core tool, iris_test_status or iris_test_coverage", async () => {
     const presets = (await import(
       pathToFileURL(resolve(root, "packages/iris-dev-mcp/dist/tools/presets.js")).href
     )) as { toolPresets: { core: { include: string[] } } };
     const core = new Set(presets.toolPresets.core.include);
-    const withTestStatus = new Set([...core, "iris_test_status"]);
+    const withTestStatus = new Set([...core, "iris_test_status", "iris_test_coverage"]);
     expect(core.has("iris_doc_edit")).toBe(true);
     expect(core.has("iris_test_status")).toBe(false);
+    expect(core.has("iris_test_coverage"), "the coverage tool is outside core, which is why step 8 tells the model what to do when it is hidden").toBe(false);
 
     for (const { label, body } of await renderings()) {
       const allowed = label.startsWith("edit-and-test-class") ? core : withTestStatus;
@@ -603,6 +604,95 @@ describe("trace-message-flow and find-patient-messages - the message forensic lo
     for (const { label, body } of await renderings()) {
       expect(body, label).not.toMatch(/Rule #\d/);
       expect(body, label).not.toMatch(/iris-execute-mcp-v2|packages\/|_bmad|\.claude|node_modules|research\/|deferred-work|spec-\d/);
+    }
+  });
+});
+
+describe("deploy-and-test-class - the optional coverage step and the PRODUCTION_BUSY note (Story 40.4)", () => {
+  /** Both renderings of the prompt: with its argument, and the skill form. */
+  async function deployRenderings(): Promise<Array<{ label: string; body: string }>> {
+    const { prompt } = await findPrompt("deploy-and-test-class");
+    return [
+      { label: "deploy-and-test-class", body: prompt.build({ classOrPackage: "MyApp.MyClass" }) },
+      { label: "deploy-and-test-class (skill form)", body: prompt.build({}) },
+    ];
+  }
+
+  /** The text of step `n` of a rendering: from its number to the next step's. */
+  function stepText(body: string, n: number): string {
+    const from = body.indexOf(`\n${n}. `);
+    const to = body.indexOf(`\n${n + 1}. `);
+    expect(from, `step ${n} exists`).toBeGreaterThan(-1);
+    return body.slice(from, to === -1 ? undefined : to);
+  }
+
+  it("keeps its name, title and one required argument, and its description gains the coverage clause", async () => {
+    const { pkg, prompt } = await findPrompt("deploy-and-test-class");
+    expect(pkg).toBe("iris-dev-mcp");
+    expect(prompt.title).toBe("Deploy And Test Class");
+    expect((prompt as unknown as { arguments: Array<{ name: string; required: boolean }> }).arguments.map((a) => [a.name, a.required])).toEqual([
+      ["classOrPackage", true],
+    ]);
+    expect(prompt.description).toBe(
+      "Deploy an ObjectScript class or package to IRIS (iris_doc_load, glob-path form), fix compile errors, then run its unit tests " +
+        "(iris_execute_tests) with a total-count check and, when asked, measure their line coverage (iris_test_coverage).",
+    );
+  });
+
+  it("step 4 tells the model what a PRODUCTION_BUSY refusal means, to tell the user, and not to stop that production without confirmation", async () => {
+    for (const { label, body } of await deployRenderings()) {
+      const step = stepText(body, 4);
+      expect(step, label).toContain("If the response is a `PRODUCTION_BUSY` refusal, nothing ran");
+      expect(step, label).toContain("a production other than the tests' own is running in the namespace, and the refusal names it");
+      expect(step, label).toContain("Tell the user, and do not stop that production unless the user confirms it is a leftover of an interrupted test run.");
+    }
+  });
+
+  it("step 8 is the optional coverage step, only on the user's request and once the tests pass, and step 9 reports", async () => {
+    for (const { label, body } of await deployRenderings()) {
+      const at = ["\n7. ", "\n8. Optional", "\n9. Report"].map((marker) => body.indexOf(marker));
+      expect(at.every((index) => index > -1), label).toBe(true);
+      expect([...at].sort((a, b) => a - b), label).toEqual(at);
+      const step = stepText(body, 8);
+      expect(step, label).toContain("only when the user asks how much of the code the tests cover or gives a coverage target, and once the tests pass");
+      expect(step, label).toContain("call `iris_test_coverage` with the same `target` and `level`");
+      expect(step, label).toContain("(not the test classes; at most 50)");
+      expect(step, label).toContain("`minCoverage` set to the user's target when there is one");
+      expect(stepText(body, 9), label).toContain("and the coverage, when it was measured");
+    }
+  });
+
+  it("step 8 copes with a hidden tool and with a GOVERNANCE_DISABLED, MONITOR_BUSY and PRODUCTION_BUSY refusal, and never works around one", async () => {
+    for (const { label, body } of await deployRenderings()) {
+      const step = stepText(body, 8);
+      expect(step, label).toContain("If `iris_test_coverage` is not in your tool list, the tool-visibility preset hides it (it is outside `core`)");
+      expect(step, label).toContain("`IRIS_TOOLS_PRESET`");
+      expect(step, label).toContain("If it is refused with `GOVERNANCE_DISABLED`, it is disabled by default because it starts an instance-wide monitor and runs test code");
+      expect(step, label).toContain('`{"global":{"iris_test_coverage":true}}`');
+      expect(step, label).toContain("do not measure coverage another way");
+      expect(step, label).toContain("If it is refused with `MONITOR_BUSY`, another monitor session is running on the instance (its `owner` says whose) and nothing was started");
+      expect(step, label).toContain("never stop that session");
+      expect(step, label).toContain("If it is refused with `PRODUCTION_BUSY`, handle it as in step 4.");
+      expect(body, label).not.toContain("iris_production_control");
+    }
+  });
+
+  it("step 8 polls a running coverage run by its coverageRunId and never re-submits, reports a failing verdict as a result, and exports only to a path the user chose", async () => {
+    for (const { label, body } of await deployRenderings()) {
+      const step = stepText(body, 8);
+      expect(step, label).toContain('If the response has `status: "running"`, do NOT re-submit');
+      expect(step, label).toContain('call `iris_test_status` with `action: "poll"` and the response\'s `coverageRunId` until it completes');
+      expect(step, label).toContain("(a failing verdict is a result, not a tool error)");
+      expect(step, label).toContain('`action: "export"`, the `coverageRunId` and an absolute `outputPath` ending in `.xml` that the user chose');
+      expect(step, label).toContain("export is disabled by default too (`iris_test_status:export`), so handle a `GOVERNANCE_DISABLED` refusal the same way.");
+    }
+  });
+
+  it("every other step is the 38.6 text: step 2 keeps its number and its in-place fix route", async () => {
+    for (const { label, body } of await deployRenderings()) {
+      expect(stepText(body, 2), label).toContain("A class that has no local source file (it exists only in IRIS) is fixed in place instead");
+      expect(stepText(body, 6), label).toContain("**compare the returned `total` against the expected number of test methods**");
+      expect(stepText(body, 7), label).toContain("rerun `iris_execute_tests`");
     }
   });
 });

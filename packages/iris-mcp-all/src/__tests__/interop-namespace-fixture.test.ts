@@ -302,6 +302,52 @@ describe("Story 39.1: the fixture harness refuses a name that is not a scratch n
     await expect(fixture.seedReportFixture(dev as never, "HSCUSTOM")).rejects.toThrow(/is not a fixture namespace name/);
   });
 
+  it("the Story 40.4 source-map fixture refuses a non-fixture name before any call, and saves the documented Story404.Stale last without removing it", async () => {
+    const fixture = await import("./coverage-fixture.js");
+    expect(fixture.STORY404_DOCUMENTS.map(([doc]) => doc)).toEqual([
+      "Story404.Dim.cls",
+      "Story404.Hooks.cls",
+      "Story404.Long.cls",
+      "Story404.Stale.cls",
+      "Story404.FixtureTest.cls",
+    ]);
+    expect(
+      fixture.STORY404_STALE_DOCUMENTED_SOURCE.replace("/// What the first method returns.\n", ""),
+      "the documented source differs from the compiled one by its one documentation line",
+    ).toBe(fixture.STORY404_STALE_SOURCE);
+
+    const refused = stubSession();
+    for (const name of ["HSCUSTOM", "USER", "EXECMCPTMP391A", "EXECMCPTMP403A", "EXECMCPTMP402", "EXECMCPTMP402c", "EXECMCPTMP4022A"]) {
+      await expect(fixture.seedSourceMapFixture(refused as never, name), name).rejects.toThrow(/is not a fixture namespace name/);
+    }
+    expect(refused.call, "no tool was called for any refused name").not.toHaveBeenCalled();
+
+    const accepted = stubSession();
+    accepted.call.mockImplementation((async () => ({ isError: false, content: [], structuredContent: { success: true } })) as never);
+    await expect(fixture.seedSourceMapFixture(accepted as never, "EXECMCPTMP402C")).resolves.toBeUndefined();
+    const calls = accepted.call.mock.calls as unknown as Array<[string, Record<string, unknown>]>;
+    expect(calls.every(([, args]) => args["namespace"] === "EXECMCPTMP402C"), "every call names the fixture namespace").toBe(true);
+    const last = calls[calls.length - 1] as [string, Record<string, unknown>];
+    expect(last).toEqual([
+      "iris_doc_put",
+      { namespace: "EXECMCPTMP402C", name: "Story404.Stale.cls", content: fixture.STORY404_STALE_DOCUMENTED_SOURCE },
+    ]);
+    const staleDeletes = calls.filter(([tool, args]) => tool === "iris_doc_delete" && args["name"] === "Story404.Stale.cls");
+    expect(staleDeletes, "the class is removed once, before its first save, and never after the documentation edit").toHaveLength(1);
+    const firstStaleCompile = calls.findIndex(([tool, args]) => tool === "iris_doc_compile" && args["doc"] === "Story404.Stale.cls");
+    expect(firstStaleCompile, "it was compiled before the edit").toBeGreaterThan(-1);
+    expect(firstStaleCompile).toBeLessThan(calls.length - 1);
+
+    const failing = stubSession();
+    failing.call.mockImplementation((async (...args: unknown[]) => {
+      const tool = args[0];
+      const body = args[1] as { name?: string; content?: string };
+      const documented = tool === "iris_doc_put" && body.content === fixture.STORY404_STALE_DOCUMENTED_SOURCE;
+      return { isError: documented, content: [{ type: "text", text: "refused" }], structuredContent: { success: true } };
+    }) as never);
+    await expect(fixture.seedSourceMapFixture(failing as never, "EXECMCPTMP402C")).rejects.toThrow(/saving the documented Story404\.Stale in EXECMCPTMP402C: refused/);
+  });
+
   it("the all-processes foreign session (decision #49) starts only with the monitor idle, only on the fixture's own routine, and is the one Start in the fixture class without a process list", () => {
     const method = FIXTURE_CLASS_SOURCE.slice(FIXTURE_CLASS_SOURCE.indexOf("ClassMethod StartForeignAll("), FIXTURE_CLASS_SOURCE.indexOf("ClassMethod StopIfList("));
     expect(method).toContain('If ##class(ExecuteMCPv2.Coverage.Job).MonitorActive() { Quit "refused: a monitor session is already active" }');

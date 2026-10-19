@@ -2,8 +2,8 @@
 title: 'Story 40.4: Test Depth Docs, Prompt and Capstone'
 type: 'feature'
 created: '2026-10-18'
-status: 'ready-for-dev'
-baseline_revision: '8f3a00c61c6a42574359d5af40e0d37e9827658d'
+status: 'done'
+baseline_revision: '80bcccfc437e83ca3abb4db8c70033c5a60868f3'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -14,7 +14,15 @@ context:
 warnings:
   - oversized
   - multiple-goals
-deferred: []
+deferred:
+  - 'rmap-absent-after-one-fresh-compile | severity: low | fix-risk: med | footprint: in-story | evidence: in the first probe run only (HSCUSTOM, 2026-10-18 22:43), a UDL save plus Compile cuk-d of two brand-new classes (a directive-only one and a long-name one) left $Data(^rMAP(class)) at 0 while IsUpToDate was 1, so SourceMap recorded lineMap 0 for a fresh class; 12 later probe rounds, about 10 capstone runs and every OS test run gave 10, and the cause was not found. If it is real, a fresh class with a labelled method reads not-up-to-date (the false-FAIL residual in the CHANGELOG known limits). reopen_if: a capstone or OS run shows lineMap 0 straight after a compile.'
+  - summary: >-
+      The edit-and-test-class prompt has no PRODUCTION_BUSY note, although it calls iris_execute_tests, which Story 40.3's guard can refuse.
+    evidence: |-
+      deploy-and-test-class step 4 gained the note in this story (orchestrator decision #62); the steps of edit-and-test-class still say nothing about the refusal, so a model could stop another user's production to get its tests to run. The cause is the 40.3 guard, not this diff, and the AD-15 sanction names only deploy-and-test-class.
+    location: >-
+      packages/iris-dev-mcp/src/prompts/editAndTestClass.ts
+    severity: low
 ---
 
 <intent-contract>
@@ -263,6 +271,40 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-10-18 — Review pass
+- verdicts: 30 findings — high 0, medium 0, low 24, false 6, maybe-false 0
+- findings: (Blind Hunter rows 1-10, Edge Case Hunter 11-16, Verification Gap 17-22, Intent Alignment 23-30; patch routes: 7 entries, deferred: 1, none intent_gap or bad_spec)
+  - `[low]` `[patch]` 1. Blind: the hint flip changes how MCP clients treat `iris_execute_tests`, yet the docs said "no runtime reads the hints" -- real: the sentence meant this suite only. Patched: CHANGELOG, `tool_support.md` note and changeset say a client that reads the hints now treats it as a write; pinned in `story-40-4-doc-claims.test.ts`.
+  - `[low]` `[reject]` 2. Blind: step 8 of the deploy prompt is silent on a `not-up-to-date` or unmeasured class -- the prompt text is the golden text of Design Notes (orchestrator decision #62); the fix edits the spec. The tool result already carries the reason, and the dev README gives the remedy. Recorded for the lead as a possible prompt amendment.
+  - `[low]` `[defer]` 3. Blind: `edit-and-test-class` has no `PRODUCTION_BUSY` note -- caused by Story 40.3's guard, not by this diff; the intent and AD-15 sanction name only `deploy-and-test-class`. Added to `deferred:`.
+  - `[low]` `[patch]` 4. Blind: the root README export sentence and the CI recipe are incomplete on the export preconditions and on `notApplicable` -- real (dev README: a run with no executable class line is refused). Patched: root README sentence, recipe step 4; pinned.
+  - `[low]` `[patch]` 5. Blind: the percent-sign case of the old `TestLabelLine` was dropped with no replacement -- live probe: every method whose name begins with `%` (`%OnNew`, `%Cm`) has an empty `RtnLabel`, so `labelLine` is 0 (the spec rule "0 when not `label^routine`"). Patched: new OS test `TestSourceMapOfPercentSignMethods` (live values) and a Known limit in the CHANGELOG and dev README; the code is unchanged because the spec forbids the name-guess.
+  - `[low]` `[patch]` 6. Blind: mutation evidence for AC-4 and AC-8 is thin -- real (one of three catches; no AC-8 line). Patched: five lines written in `## Verification` after running each mutation red and restoring.
+  - `[low]` `[patch]` 7. Blind: Known limits understate the unexplained `^rMAP` anomaly -- real (the frontmatter `deferred:` item records it, the docs did not). Patched: CHANGELOG and dev README say it was seen once, not repeated in about 30 runs, and that a forced compile rebuilds the map; pinned.
+  - `[low]` `[reject]` 8. Blind: `HasInitializer` does not stop at a trailing comment, so a `#dim` that initializes nothing but has a comment holding `=` is read as initializing -- verified (`IsDirective("    #dim tA As %Integer // a = 1")` is 0), but the probe shows the resulting lines map before the method's label (dropped by the label filter) or to 0 mid-body, so no reported wrong line was demonstrated; the fix adds a branch and moves `BOOTSTRAP_VERSION` again. Documented as a Known limit; `reopen_if`: a live run reports a `#dim` comment line as an executable class line.
+  - `[low]` `[reject]` 9. Blind: the floor of the reverse `readOnlyHint` sweep (more than 40 keys) is loose -- the sweep also requires four named write keys and the mutation turned it red; a tighter floor would couple the test to roster growth.
+  - `[low]` `[reject]` 10. Blind: the "no document calls `iris_execute_tests` a read" guard matches one phrase -- the positive pins (README cell, `tool_support.md` row, CHANGELOG, changeset) already pin the correct state; a wider regex would false-positive on legitimate text.
+  - `[low]` `[reject]` 11. Edge: step 4 says the `PRODUCTION_BUSY` refusal names a running production, but the guard also refuses when the state cannot be read -- real wording gap, in the golden text (decision #62); the refusal text the model reads says which case it is. Recorded for the lead as a possible prompt amendment.
+  - `[low]` `[reject]` 12. Edge: `HasInitializer` trailing comment -- same root as row 8; grouped, same route.
+  - `[low]` `[reject]` 13. Edge: step 8 gives no recompile advice for a failing class -- same root as row 2.
+  - `[false]` `[reject]` 14. Edge: `isStale` reads an empty-body labelled method at `lineMap` 0 as stale -- refuted: the spec probe shows a fresh empty-body class has `lineMap` 10, so 0 means the map really was removed after the compile; the literal spec formula is implemented.
+  - `[false]` `[reject]` 15. Edge: the capstone teardown lists HSCUSTOM by the bare stems `Story404` and `Story402` -- refuted: the spec's Verification prescribes exactly these filters, and a stray `Story404*` class is a leftover the teardown must flag.
+  - `[low]` `[patch]` 16. Edge: the docs name only a compile qualifier as the cause of a missing line map -- same root as row 7.
+  - `[low]` `[patch]` 17. Verification gap: AC-8 has no `mutation:` line and the `lineMap` emission and head were never shown red -- patched (rows 6 and 7 of the capstone red without the emission; `TestSourceMapLineMapHead` red with a hard-coded head).
+  - `[low]` `[patch]` 18. Verification gap: the AC-4 line covers one of three catches -- patched with the second and third call sites.
+  - `[low]` `[patch]` 19. Verification gap: the test "a class-level reason ... wins over the marker" cannot fail for the precedence it names and its record cannot come from IRIS -- real. Patched: renamed, the unreachable `lineMap: 10` removed, and both class reasons pinned as they are.
+  - `[low]` `[reject]` 20. Verification gap, other: `HasInitializer` comment text -- same root as row 8.
+  - `[low]` `[reject]` 21. Verification gap, other: the `LabelLine` guard against an empty label or routine has no test -- defensive against a null subscript on a malformed value; no real input reaches it and it cannot be set through the dictionary.
+  - `[low]` `[reject]` 22. Verification gap, other: capstone row 3 would compare a poll with a poll if the primary call returned `running` -- the spec's row 2 allows a polled result and row 3 then proves poll idempotence; the runs take about 1 s against a 120 s budget.
+  - `[false]` `[reject]` 23. Intent: rows 3, 4, 6 and 7 are written as continuations of rows 2 and 5 but each runs its own loop -- Task 9 says each row is self-contained; not a defect.
+  - `[low]` `[patch]` 24. Intent: the `BuildSources` emission is observed only on the wire -- same root as row 17.
+  - `[false]` `[reject]` 25. Intent: the target-namespace read of `^rMAP` is exercised only on the wire -- refuted: a read of HSCUSTOM's map would make every `Story404.*` class read `lineMap` 0, which capstone rows 6 and 7 pin.
+  - `[low]` `[patch]` 26. Intent: the premise that a fresh class has `lineMap` 10 sits beside one unexplained observation -- same root as row 7.
+  - `[false]` `[reject]` 27. Intent: the TypeScript fixtures were captured from `SourceMap` and trimmed, not from the Status route -- refuted: the route's `lineMap` is captured live by the capstone's raw reads (rows 6 and 7).
+  - `[low]` `[patch]` 28. Intent: the capstone fails a row when a foreign session appears between rows even unarmed, while its header said an unarmed gate skips -- header comment corrected (the setup skips, each row asserts idle again); the stricter per-row check is what the spec asks for.
+  - `[false]` `[reject]` 29. Intent: the stale rule on empty methods -- same root as row 14.
+  - `[low]` `[reject]` 30. Intent: one rewritten comment line in `baseline-classifications-safety.test.ts` keeps literal box-drawing characters -- the neighbouring section markers use the same marker and Rule 14 exempts comments by project convention; no code line carries a non-ASCII byte.
+
 ## Design Notes
 
 **Orchestrator decisions needed** (the Lead's calls, delegated). This plan follows each recommendation.
@@ -484,7 +526,54 @@ The mutations:
 - **AC-7:** restore the old `IsDirective` (Job.cls) → row 5 and `CoverageLabelTest`.
 - **AC-9:** edit `Job.cls` without regenerating → `bootstrap.test.ts` (drift).
 
+**Demonstrated mutations** (implement pass, 2026-10-18). Each was applied, observed red, reverted, and the tree fingerprint (`git diff`
+and the untracked files) compared with the one taken before it; built-dist mutations were restored by a clean rebuild of the dev dist, and
+the IRIS-side ones by loading `src/` through the glob and comparing the deployed class with the source (equal).
+
+- mutation: delete the `minCoverage` default sentence from the dev README -> `story-40-4-doc-claims.test.ts` "the minCoverage default sentence is where the verdict is described" red (AC-1)
+- mutation: drop the `GOVERNANCE_DISABLED` clause of step 8 in `deployAndTestClass.ts` (dev rebuilt) -> `prompt-safety-invariants.test.ts` "step 8 copes with a hidden tool and with a GOVERNANCE_DISABLED, MONITOR_BUSY and PRODUCTION_BUSY refusal" red, and capstone row 1 red ("step 8 names refused with `GOVERNANCE_DISABLED`") (AC-2)
+- mutation: `readOnlyHint: true` on `iris_execute_tests` in `dist/tools/execute.js` -> `readonly-hint-crosscheck.test.ts` row 12 red (`['iris_execute_tests']`), and capstone row 1 red (the hints of a write) (AC-3)
+- mutation: poll by `runIndex` alone returns the unwrapped `resolveByRunIndex` in `test-status.ts` (the catch at the first call site removed) -> `test-status.test.ts` "poll by runIndex alone" (two tests) red (AC-4)
+- mutation: remove `Launch`'s `busy-foreign` branch on a scratch copy of `REST/Coverage.cls` loaded into HSCUSTOM -> capstone row 8 red: the result is `status: "failed"`, `error: "ERROR #6062: The Monitor is already running"` (a run id was allocated); the foreign session was released by `StopIfList`, the monitor was idle and the session node unset afterwards (AC-5)
+- mutation: drop the DOCTYPE in `dist/tools/cobertura.js` -> capstone row 4 red (`the document has no DOCTYPE`) (AC-5)
+- mutation: `method.line + 3 + offset` for the reported class line in `dist/tools/coverage-report.js` -> capstone row 2 red (the class summary no longer equals the 40.2 constants) (AC-5)
+- mutation: `isStale` ignores `lineMap` in `dist/tools/coverage-report.js` -> capstone row 6 red (`Story404.Hooks` reads `not-up-to-date`); the same change in `coverage-report.ts` -> `coverage-report.test.ts` "a fresh class with its line map (10) is not stale" and "is stale whatever the body lines map to" red (AC-6)
+- mutation: `LabelLine` finds the label by the method name cut to 31 characters, zero when two methods share it (scratch `Coverage/Job.cls` loaded into HSCUSTOM) -> capstone row 6 red ("every method has a label line") and row 7 red (`Story404.Stale` reads as a class with 0 executable lines, not `not-up-to-date`) (AC-6)
+- mutation: `IsDirective` back to its Story 40.2 body (scratch `Coverage/Job.cls`) -> capstone row 5 red (the initializing `#dim` at line 7 is not an executable class line), and `CoverageLabelTest` `TestIsDirective` and `TestSourceMapKeepsEveryInitializingDim` red (AC-7)
+- mutation: edit a comment of `Coverage/Job.cls` without `pnpm gen:bootstrap` -> `bootstrap.test.ts` "embedded class contents match disk .cls files" and "BOOTSTRAP_VERSION matches SHA-256 hash" red (AC-9)
+
+Review pass (2026-10-18), the lines the first pass lacked. Same procedure: the tree fingerprint (`git diff` and the untracked files) equal before and after each TypeScript mutation; the IRIS-side ones were scratch copies loaded into HSCUSTOM and then restored from `src/` through the glob, with deployed == `src/` compared by a raw Atelier read for `Coverage/Job.cls`, `REST/Coverage.cls` and both OS test classes; dev was clean-rebuilt before the armed run.
+
+- mutation: poll whose `GET /work` is 404 returns the unwrapped `resolveByRunIndex` (the catch at the second call site in `test-status.ts` removed) -> `test-status.test.ts` "poll whose GET /work is 404 (the job is gone) with a known runIndex" and "...with the runIndex read from the queue node" red (AC-4)
+- mutation: cancel whose `DELETE` is 404 returns the unwrapped `resolveByRunIndex` (the third call site removed) -> `test-status.test.ts` "cancel whose DELETE is 404 (the job is gone) with a captured runIndex: the cancel's handles are kept" red (AC-4)
+- mutation: `BuildSources` in `REST/Coverage.cls` no longer emits `lineMap` (scratch copy) -> armed capstone rows 6 and 7 red (`Story404.Hooks` reads `not-up-to-date`, and the raw `Story404.Stale` record has no `lineMap`) (AC-8)
+- mutation: the `SourceMap` head is `$ListBuild(pClass, "", 10)` instead of `$Data(^rMAP(pClass))` (scratch `Coverage/Job.cls`) -> `CoverageLabelTest` `TestSourceMapLineMapHead` ("documented: lineMap 0") and `TestSourceMapOfMethodsWithoutALabel` red (AC-8)
+- mutation: `LabelLine` falls back to the method name when the compiled label is empty and the name begins with `%` (scratch `Coverage/Job.cls`) -> `CoverageLabelTest` `TestSourceMapOfPercentSignMethods` ("%Cm: name, declaration line, routine and label line") red (AC-6, the percent-sign limit)
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** DW-601 and DW-602 are fixed with the raw data IRIS already has: `SourceMap`'s class head carries `lineMap` (`$Data(^rMAP(<class>))`: 10 fresh, 0 after a documentation-only save), a method's `labelLine` is read from its compiled `RtnLabel`, and `IsDirective` keeps an initializing `#dim` (`HasInitializer`). TypeScript keeps the stale rule (`isStale` with `lineMap`, the earlier shape rule without it). `iris_execute_tests` declares `readOnlyHint: false` and `idempotentHint: false` (DW-498). The three `resolveByRunIndex` calls of `iris_test_status` return an error envelope on an IRIS error. `deploy-and-test-class` has an optional coverage step 8, a `PRODUCTION_BUSY` note in step 4 and one description clause; `skills/` is regenerated. Docs are rolled up, and the Epic 40 capstone gate (`epic40-capstone-gate.test.ts`, rows 1-8) runs in the default suite and in `gateTestFiles`/`GATES`. `BOOTSTRAP_VERSION` moves `845e95f6e726` -> `5c8e80ed67ca` (35 classes). No tool, action, key, preset row, prompt or refusal code is added; the counts in Never are unchanged and the frozen baseline stays `1e62c5ad5bf7`/141.
+
+**Files changed.**
+- `src/ExecuteMCPv2/Coverage/Job.cls`, `src/ExecuteMCPv2/REST/Coverage.cls`: the class-source map contract above (`SourceMap`, `IndexLabels`, `LabelLine`, `IsDirective`, `HasInitializer`, `MapMethod`, `BuildSources`).
+- `src/ExecuteMCPv2/Tests/CoverageLabelTest.cls` (8 tests), `CoverageSourceTest.cls` (13), `CoverageJobTest.cls` (31, untouched): OS pins, including the new percent-sign test.
+- `packages/iris-dev-mcp/src/tools/coverage-report.ts`, `test-coverage.ts`, `execute.ts`, `test-status.ts`, `prompts/deployAndTestClass.ts`, with their tests (`coverage-report`, `execute`, `test-status`).
+- `packages/iris-mcp-all`: `epic40-capstone-gate.test.ts`, `story-40-4-doc-claims.test.ts` (new); `coverage-fixture.ts` (the `Story404` fixture and `seedSourceMapFixture`); `prepublish-gate.mjs`, `story-39-1-gate-guards.test.ts` (rosters); `readonly-hint-crosscheck.test.ts` (row 12); `prompt-safety-invariants.test.ts`, `test-status-governance-keys.test.ts`, `interop-namespace-fixture.test.ts`; the moved 40.1-40.3 pins and session-count prose; `fixtures/tools-list-snapshot.json` (regenerated, only the `iris_execute_tests` annotations differ).
+- `packages/shared/src/bootstrap-classes.ts` (regenerated), `baseline-classifications-safety.test.ts` (title and header).
+- `skills/deploy-and-test-class/SKILL.md`, `skills/README.md` (generated).
+- `README.md`, `packages/iris-dev-mcp/README.md`, `tool_support.md`, `CHANGELOG.md`, `.changeset/story-40-4-test-depth-docs-prompt-and-capstone.md`.
+
+**Review findings.** 30 findings from four layers: high 0, medium 0, low 24, false 6. Patches applied (7 entries): the client-effect sentence for the hint flip; the export preconditions and `notApplicable` in the root README and CI recipe; a percent-sign OS test and its Known limit (every `%`-prefixed method has an empty `RtnLabel`, found by live probe); the missing AC-4 and AC-8 `mutation:` lines (each run red and restored); the unexplained-`^rMAP` and trailing-comment Known limits; the title and record of the "reason" test; the capstone header comment. Deferred: 1 (the `edit-and-test-class` prompt has no `PRODUCTION_BUSY` note). Rejected with reasons (rows 2, 8-15, 20-23, 25, 27, 29, 30 of the triage log): two are possible prompt amendments for the lead (step 8 has no advice for a `not-up-to-date` class; step 4 says the refusal names a production although an unreadable state also refuses), both inside the golden text of decision #62.
+
+**Follow-up review recommendation.** `false`: no `high` and no `medium` entry was patched.
+
+**Verification.** All run after the last patch unless noted. OS: `CoverageLabelTest` 8/8, `CoverageSourceTest` 13/13, `CoverageJobTest` 31/31 (totals equal the `Test*` counts); deployed `Coverage/Job.cls`, `REST/Coverage.cls` and both test classes equal `src/` (raw Atelier read). `pnpm gen:bootstrap` re-run: no change (idempotent). Per package, build/test/lint/type-check green for shared (2066), dev (1659), admin (498), interop (670), ops (350), data (165) and client-config (514); the only message is the existing lint warning in `shared`. `@iris-mcp/all` armed (`IRIS_REQUIRE_LIVE=1`), in groups: 59 non-gate files (1047 tests), guard and process gates (166), epic 35/37/38 gates (108), epic 39 gates (413 passed, 4 skipped: the `runIf(CAPTURE)` capture tests), and the Epic 40 gates one file per call: capstone 8/8, 40.0 and 40.1 QA and 40.3 QA (50), 40.1 25/25, 40.2 16/16, 40.2 QA 26/26, 40.3 20/20 (none skipped). `gen:skills:check`, `validate:prompts` (13 prompts, 13 skills), `gen:tools-list-snapshot:check` (115), `gen:governance-baseline:check` (141 frozen keys), `check-epics-sync.mjs` and `measure:tools-payload` (README rows equal) pass. After every run the monitor was idle, `^IRIS.TempExecuteMCPv2Coverage("session")` unset, and HSCUSTOM held no `Story39*`, `Story40*` or `ExecuteMCPv2.Temp.*` document; the gates' `afterAll` assert no `EXECMCPTMP402C` namespace or database is left.
+
+**Residual risks.**
+- One unexplained observation: in a single early probe a freshly compiled class had no `^rMAP` (`lineMap` 0), so it would read `not-up-to-date`; about 30 later runs did not repeat it. It is in `deferred:` and in the Known limits (false-FAIL direction only).
+- Percent-sign methods have no label line, and a `#dim` with a trailing comment that holds an `=` is read as initializing (both Known limits; no wrong reported line was demonstrated).
+- `BOOTSTRAP_VERSION` `5c8e80ed67ca` is a literal in `story-40-4-doc-claims.test.ts`, the CHANGELOG, the changeset and the `tool_support.md` note; a later IRIS-class change must update all four.
+- The capstone's red proof removed the `busy-foreign` branch on a scratch copy of `REST/Coverage.cls` (the run allocated an id and failed with `ERROR #6062`; the foreign session was released by `StopIfList`); the class was restored and verified equal to `src/`.
