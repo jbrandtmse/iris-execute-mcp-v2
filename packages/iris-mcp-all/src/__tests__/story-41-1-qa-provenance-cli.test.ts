@@ -93,22 +93,22 @@ function expectGreen(root: string): string {
 }
 
 describe("check:provenance CLI, scratch copy: the green controls", () => {
-  it("the unmodified copy passes: pinned MIT hash, no rows, the 33 agent files and one distribution", () => {
+  it("the unmodified copy passes: pinned MIT hash, the one real row, the 39 agent files and one distribution", () => {
     const out = expectGreen(scratch());
     expect(out).toContain(`MIT block sha256 ${PINNED_SHA256} (1081 bytes)`);
-    expect(out).toContain("0 provenance row(s), 33 agent file(s), 1 distribution(s)");
+    expect(out).toContain("1 provenance row(s), 39 agent file(s), 1 distribution(s)");
   });
 
   it("an adapted skill with the exact header and a row passes, source and pack copy both counted", () => {
     const root = scratch();
     adapt(root, { skill: skillText(HEADER) });
-    expect(expectGreen(root)).toContain("1 provenance row(s), 35 agent file(s), 1 distribution(s)");
+    expect(expectGreen(root)).toContain("2 provenance row(s), 41 agent file(s), 1 distribution(s)");
   });
 
   it("the same adapted skill as CRLF passes (project rule #58)", () => {
     const root = scratch();
     adapt(root, { skill: toCrlf(Buffer.from(skillText(HEADER), "utf8")) });
-    expect(expectGreen(root)).toContain("1 provenance row(s), 35 agent file(s)");
+    expect(expectGreen(root)).toContain("2 provenance row(s), 41 agent file(s)");
   });
 
   it("the same adapted skill as CRLF with a BOM before its frontmatter is refused, for the source and for the pack copy", () => {
@@ -265,19 +265,25 @@ describe("check:provenance CLI, scratch copy: the notice and its MIT block (AC 4
   });
 
   it.each([
-    ["the full upstream commit", (text: string) => text.replace(PINNED_COMMIT, "b6205bb")],
-    ["the credit Tom Dyar", (text: string) => text.replace("Tom Dyar", "T. Dyar")],
-    ["the credit Tim Leavitt", (text: string) => text.replace("Tim Leavitt", "T. Leavitt")],
+    ["the full upstream commit", (text: string) => text.replace(PINNED_COMMIT, "b6205bb"), ["notice"]],
+    ["the credit Tom Dyar", (text: string) => text.replace("Tom Dyar", "T. Dyar"), ["notice"]],
+    ["the credit Tim Leavitt", (text: string) => text.replace("Tim Leavitt", "T. Leavitt"), ["notice"]],
     [
       "the non-endorsement sentence",
       (text: string) => text.replace("they are not affiliated with, sponsored by, or endorsed by", "they are affiliated with"),
+      ["notice"],
     ],
-    ["the provenance table header row", (text: string) => text.replace("| Pack file | Source file at b6205bb | Adaptation |", "| File | Source | Note |")],
-  ])("a notice without %s is refused", (_name, change) => {
+    // Without the header row no row is read, so the real adapted skill (its source and its pack copy) has no row: claim-row.
+    [
+      "the provenance table header row (no row is then read, so the real adapted skill is refused too, as claim-row)",
+      (text: string) => text.replace("| Pack file | Source file at b6205bb | Adaptation |", "| File | Source | Note |"),
+      ["claim-row", "notice"],
+    ],
+  ])("a notice without %s is refused", (_name, change, rules) => {
     const root = scratch();
     editNotice(root, change);
     expect(runScript(root, GEN_PACK).status).toBe(0);
-    expect(expectRed(root, ["notice"])).toContain("the notice lacks");
+    expect(expectRed(root, rules)).toContain("the notice lacks");
   });
 });
 

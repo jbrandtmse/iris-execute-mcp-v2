@@ -1,5 +1,6 @@
 /**
- * Story 41.3 (AC 41.3.1, 41.3.2 and 41.3.3) - the three core knowledge skills, read as a user's agent will read them.
+ * Stories 41.3 and 41.4 (AC 41.3.1 to 41.3.3 and AC 41.4.1 to 41.4.3) - the six knowledge skills, read as a user's agent
+ * will read them: the three core skills and the three platform skills.
  *
  * `skills-pack-src/knowledge/<name>/SKILL.md` is the one source of each skill, and `gen:pack` copies it unchanged to
  * `packages/client-config/skills-pack/skills/<name>/SKILL.md`. These tests read the committed sources and pack copies;
@@ -11,7 +12,13 @@
  *  - the wording: nothing of this repository, its planning or its tooling (the shared hygiene list, with two
  *    documented overrides), and no bullet copied from the always-on rule;
  *  - the evidence: one anchor phrase per claim that was run on a live instance, so a reworded claim must be run again;
- *  - the shape: the number of fenced code blocks, each of which was compiled as written.
+ *  - the shape: the number of fenced code blocks, each of which was compiled as written;
+ *  - the provenance: the oracle names the skill that is adapted from another project, the notice holds exactly that
+ *    skill's row, and the skill opens with the adaptation header.
+ *
+ * The adaptation header is the one line the wording and ASCII checks do not read: it names the upstream project and the
+ * notice file, and it holds the copyright sign. The exemption covers exactly that line, only as the first body line,
+ * and only for a skill whose oracle carries `adaptedFrom`.
  *
  * Every pattern is applied to sample text first, so a pattern that has stopped matching shows up as a failed negative
  * control rather than as a clean skill.
@@ -19,9 +26,14 @@
 
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseProvenanceRows, PROVENANCE_HEADER_ROW } from "../../../../scripts/lib/provenance-core.mjs";
+import {
+  ADAPTATION_HEADER,
+  hasValidAdaptationHeader,
+  parseProvenanceRows,
+  PROVENANCE_HEADER_ROW,
+} from "../../../../scripts/lib/provenance-core.mjs";
 import {
   ALWAYS_ON_RULE_FILENAME,
   KNOWLEDGE_SOURCE_DIR,
@@ -44,6 +56,8 @@ interface Skill {
   codeBlocks: number;
   /** One phrase per probed claim, typed literally. */
   anchors: string[];
+  /** Present only on an adapted skill: the upstream source path, as the notice's provenance row names it. */
+  adaptedFrom?: string;
 }
 
 const SKILLS: Skill[] = [
@@ -149,12 +163,143 @@ const SKILLS: Skill[] = [
       "a `Duration of execution` row for each test method that runs without a runtime error",
     ],
   },
+  {
+    name: "iris-mcp-objectscript-sql",
+    sha256: "b48e137b594ce745344110f818690ccc23dbf281e1947b9bd4c54de81972f123",
+    description:
+      "Running SQL from ObjectScript with embedded SQL and %SQL.Statement: the SQL table name of a class, SQLCODE 0, 100 and negative values, what INTO variables hold when no row is found, errors that appear only when a statement runs or a row is fetched, NULL against the empty string, and what %OpenId and %DeleteId return for a missing ID. Use when writing or reviewing &sql or %SQL.Statement code, or when a query reports SQLCODE -30 or -29, finds no row you expected, or returns an empty value.",
+    codeBlocks: 2,
+    adaptedFrom: "skills/skills/objectscript-sql-patterns/SKILL.md",
+    anchors: [
+      "`Ens.Config.Item` is the table `Ens_Config.Item`",
+      "`Table 'CONFIG.ITEM' not found`",
+      "SELECT SqlSchemaName, SqlTableName FROM %Dictionary.CompiledClass WHERE Name = ?",
+      "100 when it found or changed no row",
+      "Test `SQLCODE = 100` and `SQLCODE < 0` apart",
+      "still holding the text of an earlier error",
+      "`%ROWID` holds the new row's ID",
+      "`ERROR #5540: SQLCODE: -400 Message: ...`",
+      "`Table 'MYAPP_DATA.MISSING' not found compiling embedded cached query`",
+      "with `tCode` undefined finds nothing and gives 100",
+      'every `INTO` variable is set to `""`',
+      "`tCount` is 0 when nothing matches",
+      "takes the first one and gives 0",
+      "&sql(SELECT Name INTO :tName FROM MyApp_Data.Item WHERE Code = :pCode)",
+      "No row and an SQL error, such as a missing table, each end in `tSC`",
+      "`Field 'APPLE' not found`",
+      "`%ExecDirect` returns a result object even when the statement fails",
+      "`%Execute` leaves `%SQLCODE` at 0",
+      "`%ROWCOUNT` is the number of rows fetched",
+      "the ODBC form, `2024-06-09`",
+      "While tRS.%Next(.tFetch) {",
+      "No matching row is no error",
+      'A saved object whose `Name` is `""` matches `Name IS NULL`',
+      "It is stored as `$Char(0)`",
+      "A property set to `$Char(0)` matches `Name = ''` too",
+      "test `Name IS NULL OR Name = ''`",
+      "`ERROR #5809: Object to Load not found, class '...', ID '...'`",
+      "`%OpenId(tId).Name` raises `<INVALID OREF>`",
+      "`ERROR #5810: Object to Delete not found`",
+    ],
+  },
+  {
+    name: "iris-mcp-system-classes",
+    sha256: "dd15048c643a0fe8e2aa06dddf693c30961c38be6beba957f2c9420e0e3fd214",
+    description:
+      "Using the IRIS system classes from ObjectScript: what the Config, SYS and Security classes hold and when one answer needs two of them, class queries with fewer columns than the class, deprecated properties that still read but no longer follow the configuration, switching to %SYS and back safely, and counters of one process against the whole instance. Use when code calls Config, SYS or Security classes, switches $NAMESPACE to %SYS, reports system metrics, or fails with CLASS DOES NOT EXIST or NAMESPACE around a namespace switch.",
+    codeBlocks: 1,
+    anchors: [
+      "`Config.*` classes read and write the instance's configuration file",
+      '`##class(%Dictionary.CompiledClass).%ExistsId("Config.Databases")` is 0',
+      "calling such a class from outside `%SYS` raises `<CLASS DOES NOT EXIST>`",
+      "exists in `USER` too",
+      "but no size and no mounted state",
+      "gives `Size` in MB, `Mounted` and `ReadOnly`",
+      '`props("Globals")`',
+      "has no `NamespaceList` method",
+      "its `ListAll` query has one",
+      "`ERROR #883: Role ... does not exist`",
+      "gives it an empty `Resources`",
+      "`CRLFile`, `Protocols` and `SNIName`",
+      "read empty for each of three TLS configurations",
+      "`Get(name, .props)` leaves it out",
+      "Set tSC = ##class(Config.Databases).Get(pName, .tProps)",
+      "for a missing one with `ERROR #420`",
+      "the caller's `Catch` runs in `%SYS`",
+      "Local variables keep their values across a switch",
+      "raises `<NAMESPACE>` and leaves you where you were",
+      "`##class(%SYS.Namespace).Exists(name)`",
+      "Killed after the switch, it raised `<CLASS DOES NOT EXIST>`",
+      "after the method's own `Catch` had finished",
+      "A `%ResultSet` of the same query could be killed after the switch without an error",
+      "which could also still be read",
+      "a mapped package resolved in `%SYS`, while `Ens.Director` did not",
+      "a loop of 100,000 passes added about 200,000 commands",
+      "`CommandsExecuted` was 3.5 billion",
+      "`RefLocal + RefPrivate + RefRemote`",
+      "51 times the worker's",
+      "but it returns a `SYS.Stats.Routine`",
+      "grew by 200,430 and the process's by 200,488",
+    ],
+  },
+  {
+    name: "iris-mcp-interoperability",
+    sha256: "ea093f10c52f5f027388a49e8d7626a3aaa8195ca24cee6fd8fe573f41b73fec",
+    description:
+      "Writing IRIS interoperability (Ensemble) components in ObjectScript: business service, process and operation classes and their method signatures, Ens.Request and Ens.Response messages, adapters, settings and message maps, synchronous and asynchronous sends, and why the production class XData, not the configuration tables, defines a production. Use when creating or editing a business host, a message class or a production class, or when a host does not compile, a request is not handled, a setting does not appear, or a configuration change does not last.",
+    codeBlocks: 1,
+    anchors: [
+      "the send methods take a `%Library.Persistent`",
+      "`^Ens.MessageBodyD`",
+      "`ERROR <Ens>ErrGeneral: Ens.StringRequest has no value for parameter RESPONSECLASSNAME`",
+      "each carry one `StringValue` property",
+      '<MapItem MessageType="Ens.StringRequest">',
+      "offers `PutString(filename, data)`, `PutLine` and `PutStream`",
+      "A misspelled adapter class still compiles",
+      "tests in map order, so the first match wins",
+      "goes to `OnMessage`, whose default returns an error",
+      "`Method Missing referenced in MessageMap does not exist`",
+      "does not check that the method's argument type matches",
+      "and so may an override of `OnMessage`",
+      "is committed after it returns, with a warning in the event log",
+      '`Parameter INVOCATION` is `"Queue"`',
+      "work in a business host without an `Include`",
+      "`MPP5610 : Referenced macro not defined: 'LOGINFO'`",
+      "leaving `Prefix` and 14 inherited ones",
+      "come from the adapter class's own list",
+      "A narrower type for `pInput`, such as `%Stream.Object`, compiles",
+      '`pInput.Attributes("Filename")`',
+      "a name the running production does not know returns an error status",
+      "The comment on `OnProcessInput` says not to call the send methods from outside it",
+      "or the production is quiescent",
+      "Typed arguments compile here too",
+      "The default `OnResponse` returns an error",
+      "`OnComplete` runs when every response is in or the wait has timed out",
+      "can deadlock when both share the production's actor pool",
+      "Compiling that class deletes the production's row in the configuration tables",
+      "does the same reload",
+      "but does not compile it",
+      "covers the production and the name together and is not unique",
+      "applies a changed configuration to the running production",
+    ],
+  },
 ];
+
+/** The provenance row the notice must hold for the adapted skill, typed here and not derived from the notice. */
+const GOLDEN_ROW = {
+  packFile: "skills/iris-mcp-objectscript-sql/SKILL.md",
+  source: "skills/skills/objectscript-sql-patterns/SKILL.md",
+  adaptation:
+    "Rewritten for IRIS 2026.2 and run on it again: kept the table-name, SQLCODE, fetch-time error, double-quote and INTO-variable traps; corrected the NULL and empty-string section; dropped the lock-timeout, ObjectScript-operator and date sections; added first-run compilation of embedded SQL, undefined host variables, %msg, select mode, and the %OpenId and %DeleteId failures",
+};
 
 const sourcePath = (name: string): string => join(REPO_ROOT, KNOWLEDGE_SOURCE_DIR, name, "SKILL.md");
 const packPath = (name: string): string => join(REPO_ROOT, PACK_DIR, "skills", name, "SKILL.md");
 const MAX_LINES = 500;
 const MAX_WORDS = 1200;
+
+/** The bytes of a skill source, or none when it is missing, so a missing skill fails its own tests and the directory test, not the whole file. */
+const readSourceBytes = (name: string): Buffer => (existsSync(sourcePath(name)) ? readFileSync(sourcePath(name)) : Buffer.alloc(0));
 
 // ---------------------------------------------------------------------------------------------------------
 // The text checks, as functions, so a negative control can prove each one is able to fail.
@@ -236,12 +381,35 @@ function copiedBullets(text: string): string[] {
   return ruleBullets.filter((bullet) => normalized.includes(bullet));
 }
 
+/** Whether every byte of the text is LF or printable ASCII. */
+function isPrintableAscii(text: string): boolean {
+  return Buffer.from(text, "utf8").every((byte) => byte === 0x0a || (byte >= 0x20 && byte <= 0x7e));
+}
+
+/**
+ * The text the ASCII, wording, tool-name and rule-copy checks read. The adaptation header is the one line they skip,
+ * and only the first line that is exactly ADAPTATION_HEADER, only when it is the first body line (the shared
+ * `hasValidAdaptationHeader`), and only for a skill whose oracle marks it adapted. Any other copy of the header, a
+ * header anywhere else, a header in a skill that is not marked adapted, and a header with a changed character are read
+ * like any other line.
+ */
+function checkedText(text: string, adapted: boolean): string {
+  if (!adapted || !hasValidAdaptationHeader(text)) return text;
+  const lines = text.split("\n");
+  const at = lines.indexOf(ADAPTATION_HEADER);
+  if (at < 0) return text;
+  lines.splice(at, 1);
+  return lines.join("\n");
+}
+
 /** Every reason the text is not an acceptable knowledge skill body, or an empty list. */
-function textProblems(text: string, names: string[]): string[] {
-  const problems = hygieneProblems(text, names);
-  const tokens = extractIrisTokens(text) as string[];
+function textProblems(text: string, names: string[], adapted = false): string[] {
+  const read = checkedText(text, adapted);
+  const problems = hygieneProblems(read, names);
+  if (!isPrintableAscii(read)) problems.push("a character outside printable ASCII");
+  const tokens = extractIrisTokens(read) as string[];
   if (tokens.length > 0) problems.push(`a tool name: ${tokens.join(", ")}`);
-  if (copiedBullets(text).length > 0) problems.push("a bullet copied from the always-on rule");
+  if (copiedBullets(read).length > 0) problems.push("a bullet copied from the always-on rule");
   return problems;
 }
 
@@ -256,18 +424,22 @@ function codeBlockCount(text: string): number {
 // The real sources.
 // ---------------------------------------------------------------------------------------------------------
 
-describe("the three core knowledge skills, real tree (AC 41.3.1)", () => {
-  it("are exactly the three planned skills", () => {
+describe("the knowledge skills, real tree (AC 41.3.1, 41.4.3)", () => {
+  it("are exactly the six planned skills, and six is within the 6 to 10 the pack allows", () => {
     const directories = readdirSync(join(REPO_ROOT, KNOWLEDGE_SOURCE_DIR), { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
       .sort();
     expect(directories).toEqual(SKILLS.map((skill) => skill.name).sort());
+    expect(directories.length).toBeGreaterThanOrEqual(6);
+    expect(directories.length).toBeLessThanOrEqual(10);
+    expect(SKILLS).toHaveLength(6);
   });
 
   describe.each(SKILLS)("$name", (skill) => {
-    const bytes = readFileSync(sourcePath(skill.name));
+    const bytes = readSourceBytes(skill.name);
     const text = bytes.toString("utf8");
+    const adapted = skill.adaptedFrom !== undefined;
 
     it("is the text that was run on a live instance: its sha256 equals the recorded one", () => {
       expect(createHash("sha256").update(bytes).digest("hex")).toBe(skill.sha256);
@@ -295,12 +467,27 @@ describe("the three core knowledge skills, real tree (AC 41.3.1)", () => {
       expect(readFileSync(packPath(skill.name)).equals(bytes)).toBe(true);
     });
 
-    it("is ASCII, LF only, and ends in exactly one LF", () => {
-      expect(bytes.every((byte) => byte === 0x0a || (byte >= 0x20 && byte <= 0x7e)), "every byte is LF or printable ASCII").toBe(true);
+    it("is ASCII, LF only, and ends in exactly one LF (an adapted skill: outside its header line)", () => {
+      expect(isPrintableAscii(checkedText(text, adapted)), "every byte is LF or printable ASCII").toBe(true);
       expect(text.includes("\r"), "no CR").toBe(false);
       expect(text.endsWith("\n")).toBe(true);
       expect(text.endsWith("\n\n")).toBe(false);
     });
+
+    if (adapted) {
+      it("opens with the adaptation header as its first body line, the one line that holds a non-ASCII character", () => {
+        expect(hasValidAdaptationHeader(text)).toBe(true);
+        expect(text.split("\n")[5], "the header is line 6, after the frontmatter and one blank line").toBe(ADAPTATION_HEADER);
+        expect(text.split("\n").filter((line) => line === ADAPTATION_HEADER), "the header appears once").toHaveLength(1);
+        expect(isPrintableAscii(text), "the header line is what makes the file non-ASCII").toBe(false);
+        expect(checkedText(text, true)).not.toContain(ADAPTATION_HEADER);
+      });
+    } else {
+      it("is not adapted: it carries no mention of the upstream project", () => {
+        expect(text).not.toMatch(/iris-agentic-dev/i);
+        expect(hasValidAdaptationHeader(text)).toBe(false);
+      });
+    }
 
     it(`is within ${MAX_LINES} lines and ${MAX_WORDS} words`, () => {
       expect(text.split("\n").length - 1).toBeLessThanOrEqual(MAX_LINES);
@@ -323,28 +510,33 @@ describe("the three core knowledge skills, real tree (AC 41.3.1)", () => {
 
     it("goes deeper than the always-on rule: it copies none of the rule's bullets (AC 41.3.3)", () => {
       expect(ruleBullets).toHaveLength(16);
-      expect(copiedBullets(text)).toEqual([]);
+      expect(copiedBullets(checkedText(text, adapted))).toEqual([]);
     });
 
     it("names nothing of this repository, its planning or its tooling, in the source and in the pack copy (AC 41.3.3)", () => {
       const names = packSkillNames();
       for (const copy of [text, readFileSync(packPath(skill.name), "utf8")]) {
-        expect(hygieneProblems(copy, names)).toEqual([]);
-        expect(textProblems(copy, names)).toEqual([]);
+        expect(hygieneProblems(checkedText(copy, adapted), names)).toEqual([]);
+        expect(textProblems(copy, names, adapted)).toEqual([]);
       }
     });
   });
 
-  it("the probe anchors total 75: 22, 27 and 26", () => {
-    expect(SKILLS.map((skill) => skill.anchors.length)).toEqual([22, 27, 26]);
+  it("the probe anchors total 167: 22, 27, 26, 29, 31 and 32", () => {
+    expect(SKILLS.map((skill) => skill.anchors.length)).toEqual([22, 27, 26, 29, 31, 32]);
   });
 
-  it("the notice still has no provenance row: nothing is adapted from another project (AC 41.3.1)", () => {
+  it("the notice holds exactly the rows of the adapted skills (AC 41.3.1, 41.4.3)", () => {
     const notice = readFileSync(join(REPO_ROOT, PACK_SOURCE_DIR, NOTICE_FILENAME), "utf8");
     expect(notice.split(/\r?\n/).some((line) => line.trim() === PROVENANCE_HEADER_ROW), "the provenance table header row is present").toBe(true);
     const parsed = parseProvenanceRows(notice);
     expect(parsed.problems).toEqual([]);
-    expect(parsed.rows).toEqual([]);
+    expect(parsed.rows.map(({ packFile, source, adaptation }) => ({ packFile, source, adaptation }))).toEqual([GOLDEN_ROW]);
+    const byPackFile = (a: { packFile: string }, b: { packFile: string }): number => a.packFile.localeCompare(b.packFile);
+    const adaptedSkills = SKILLS.filter((skill) => skill.adaptedFrom !== undefined);
+    expect(
+      adaptedSkills.map((skill) => ({ packFile: `skills/${skill.name}/SKILL.md`, source: skill.adaptedFrom })).sort(byPackFile),
+    ).toEqual(parsed.rows.map(({ packFile, source }) => ({ packFile, source })).sort(byPackFile));
   });
 });
 
@@ -416,5 +608,63 @@ describe("the knowledge-skill text checks can fail (negative controls)", () => {
     const errorHandling = readFileSync(sourcePath("iris-mcp-objectscript-error-handling"), "utf8");
     expect(unmodified(unitTests)).toEqual([PATH]);
     expect(unmodified(errorHandling)).toEqual([NUMBER_SIGN]);
+  });
+});
+
+describe("the adaptation-header exception is one line and can fail (negative controls)", () => {
+  const names = ["iris-mcp-objectscript-sql"];
+  const frontmatter = '---\nname: iris-mcp-objectscript-sql\ndescription: "Running SQL from ObjectScript."\n---\n';
+  const body = "# SQL in ObjectScript\n\n- A line that is fine.\n";
+  /** The header line and what it trips when it is read like any other line. */
+  const HEADER_CLASSES = ["a character outside printable ASCII", "a tool or server name", "a repository file"];
+
+  const headerFirst = `${frontmatter}\n${ADAPTATION_HEADER}\n\n${body}`;
+  const headerLast = `${frontmatter}\n${body}\n${ADAPTATION_HEADER}\n`;
+  const headerTwice = `${frontmatter}\n${ADAPTATION_HEADER}\n\n${body}\n${ADAPTATION_HEADER}\n`;
+  const COPYRIGHT_SIGN = String.fromCharCode(0xa9);
+  const headerAsciiCopyright = `${frontmatter}\n${ADAPTATION_HEADER.replace(COPYRIGHT_SIGN, "(c)")}\n\n${body}`;
+  const headerCrlf = `${frontmatter}\n${ADAPTATION_HEADER}\n\n${body}- See Rule #7: do this.`.replace(/\n/g, "\r\n");
+
+  it("passes an adapted skill whose header is its first body line, and nothing else", () => {
+    expect(hasValidAdaptationHeader(headerFirst)).toBe(true);
+    expect(textProblems(headerFirst, names, true)).toEqual([]);
+  });
+
+  it("flags the same header in a skill that is not marked adapted: non-ASCII, a tool or server name, a repository file", () => {
+    expect(hasValidAdaptationHeader(headerFirst)).toBe(true);
+    const problems = textProblems(headerFirst, names, false);
+    for (const reported of HEADER_CLASSES) expect(problems).toContain(reported);
+  });
+
+  it("flags the header at the end of an adapted body: non-ASCII, a tool or server name, a repository file", () => {
+    expect(hasValidAdaptationHeader(headerLast)).toBe(false);
+    const problems = textProblems(headerLast, names, true);
+    for (const reported of HEADER_CLASSES) expect(problems).toContain(reported);
+  });
+
+  it("flags a second copy of the header in an adapted body", () => {
+    expect(hasValidAdaptationHeader(headerTwice)).toBe(true);
+    const problems = textProblems(headerTwice, names, true);
+    for (const reported of HEADER_CLASSES) expect(problems).toContain(reported);
+  });
+
+  it("fails the header check for a header with (c) in place of the copyright sign, and flags it as wording", () => {
+    expect(hasValidAdaptationHeader(headerAsciiCopyright)).toBe(false);
+    const problems = textProblems(headerAsciiCopyright, names, true);
+    expect(problems).toContain("a tool or server name");
+    expect(problems).toContain("a repository file");
+    expect(problems).not.toContain("a character outside printable ASCII");
+  });
+
+  it("reads an adapted skill with CRLF line endings whole: its header is flagged and no other line is dropped", () => {
+    expect(hasValidAdaptationHeader(headerCrlf)).toBe(true);
+    const problems = textProblems(headerCrlf, names, true);
+    for (const reported of HEADER_CLASSES) expect(problems).toContain(reported);
+    expect(problems).toContain("an internal rule number");
+  });
+
+  it("an adapted skill without the header fails the header check (its wording is clean, so only that check catches it)", () => {
+    expect(hasValidAdaptationHeader(`${frontmatter}\n${body}`)).toBe(false);
+    expect(textProblems(`${frontmatter}\n${body}`, names, true)).toEqual([]);
   });
 });

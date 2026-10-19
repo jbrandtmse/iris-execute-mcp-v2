@@ -10,6 +10,7 @@ Files listed below are adapted from https://github.com/intersystems-community/ir
 
 | Pack file | Source file at b6205bb | Adaptation |
 | --- | --- | --- |
+| `skills/iris-mcp-objectscript-sql/SKILL.md` | `skills/skills/objectscript-sql-patterns/SKILL.md` | Rewritten for IRIS 2026.2 and run on it again: kept the table-name, SQLCODE, fetch-time error, double-quote and INTO-variable traps; corrected the NULL and empty-string section; dropped the lock-timeout, ObjectScript-operator and date sections; added first-run compilation of embedded SQL, undefined host variables, %msg, select mode, and the %OpenId and %DeleteId failures |
 
 ## License
 

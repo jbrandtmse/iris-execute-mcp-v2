@@ -2,6 +2,55 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-19] — Story 41.4: Platform knowledge skills
+
+No tool, action, governance key, preset row, refusal code, environment variable or route is added or changed, so no tool count
+moves (the suite stays at 110 package tools, 115 advertised). The prompts stay at 12, `gen:skills` stays at 13 generated files,
+`BOOTSTRAP_VERSION` stays at `5296a1c836f4` because no bootstrapped class changed, and the frozen governance baseline stays at
+hash `1e62c5ad5bf7` (141 keys). The pack goes from 19 to 22 files, and holds six knowledge skills.
+
+### Added
+
+- **Three platform knowledge skills**, each one hand-authored `SKILL.md` under `skills-pack-src/knowledge/<name>/` that `pnpm gen:pack`
+  copies unchanged into the pack. Every claim in them was run on InterSystems IRIS 2026.2 (Build 221U), by compiling and running
+  the code or by reading the IRIS class source of the same build, and every code block was compiled unchanged. They name no
+  `iris_*` tool, so they declare no preset.
+  - `iris-mcp-objectscript-sql`: running SQL from ObjectScript with embedded SQL and `%SQL.Statement` (the SQL table name of a
+    class, `SQLCODE` 0, 100 and negative values, what `INTO` variables hold when no row is found, errors that appear only when a
+    statement runs or a row is fetched, `NULL` against the empty string, and what `%OpenId` and `%DeleteId` return for a missing
+    ID). This skill is adapted from the upstream `objectscript-sql-patterns` skill, and it carries the adaptation header.
+  - `iris-mcp-system-classes`: the `Config`, `SYS` and `Security` system classes (when one answer needs two of them, class queries
+    with fewer columns than the class, deprecated properties that read empty, switching to `%SYS` and back safely, and counters of
+    one process against the whole instance).
+  - `iris-mcp-interoperability`: business service, process and operation classes and their method signatures, `Ens.Request` and
+    `Ens.Response` messages, adapters, settings and message maps, synchronous and asynchronous sends, and why the production class
+    XData, not the configuration tables, defines a production.
+- **The first provenance row** of `IRIS-MCP-THIRD-PARTY-NOTICES.md`, for `iris-mcp-objectscript-sql`, citing
+  `skills/skills/objectscript-sql-patterns/SKILL.md` at upstream commit `b6205bb`. `pnpm check:provenance` now reads one row,
+  and checks that the pack file it names exists and carries the adaptation header.
+
+### Changed
+
+- **The notice gains its row** (the MIT block and the rest of the notice are unchanged), and the pack's copy of the notice with it.
+- **`skills-pack-knowledge.test.ts` exempts one line.** The adaptation header names the upstream project and the notice file and
+  holds the copyright sign, so the ASCII, wording, tool-name and rule-copy checks skip exactly that line, only when it is the first
+  non-blank line after the frontmatter and only for a skill that the test's table marks as adapted. A header anywhere else, a header in
+  another skill, and a header with `(c)` for the copyright sign are still flagged.
+- The notice test now requires the notice to hold exactly the rows of the adapted skills, and the test that lists the knowledge
+  directories requires six, within the pack's 6 to 10.
+
+### Tests
+
+- `skills-pack-knowledge.test.ts` covers the six skills (the three new oracles, 92 new probe anchors, 167 in all) and the header
+  exception, with a negative control for each side of it.
+- The in-memory fixtures of `skills-pack-frontmatter.test.ts` and `pack-provenance.test.ts` that feed `checkProvenance` the real
+  notice now also carry the committed pack files its rows name, so the real row adds no problem. The count pins of the 41.1 and
+  41.3 tests move with the new files: 22 pack files, 51 validator sources, 39 agent files, and one provenance row.
+
+### Known limits
+
+- No installer places the skills until Story 41.6, and no catalog lists them until Story 41.5. The skills name no tool.
+
 ## [Pre-release — 2026-10-19] — Story 41.3: Core knowledge skills
 
 No tool, action, governance key, preset row, refusal code, environment variable or route is added or changed, so no tool count

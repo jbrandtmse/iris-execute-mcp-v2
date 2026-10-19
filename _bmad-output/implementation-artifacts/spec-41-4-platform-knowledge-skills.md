@@ -2,7 +2,8 @@
 title: 'Story 41.4: Platform Knowledge Skills'
 type: 'feature'
 created: '2026-10-19'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '05eead9dc6e4affff0355088eb5c0f80dd81843f'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -137,6 +138,43 @@ deferred: []
 - **2026-10-19, lead spec gate.** Wave-7 decisions #12, #13 and #14 were taken as recommended (Design Notes). The spine's AD-28 lists the three platform skills and names the adapted SQL skill as the first provenance row (Rule 20). The plan's two new facts for the project rules are recorded on DW-615 for the user, since retrospectives are skipped this run.
 
 ## Review Triage Log
+
+### 2026-10-19 — Review pass
+- verdicts: 33 findings — high 0, medium 2, low 27, false 4, maybe-false 0
+- findings:
+  - `[low]` `[reject]` Blind Hunter 1: interoperability "Messages" says every message body class keeps its data in `^Ens.MessageBodyD` and that the send methods take a `%Library.Persistent` — real imprecision (`Ens.StringContainer` and `Ens.StreamContainer` have their own extents; `Ens.BusinessProcess.SendRequestAsync` is typed `Request`), but no reader who follows the skill's own examples is misled, and the fix rewords a golden text pinned by sha256 in this spec, so it is a spec edit; noted for the lead in the final report
+  - `[low]` `[patch]` Blind Hunter 2: `checkedText` splices index -1 on CRLF text (`hasValidAdaptationHeader` accepts CRLF, `indexOf` is LF-exact) — real, latent (sources are LF-only and a "no CR" check exists); fixed with an `at < 0` guard, a CRLF control, and M13d
+  - `[low]` `[reject]` Blind Hunter 3: no `<PROTECT>` coverage in the system-class skill — a new unprobed claim and a golden-text edit; the description names only the two errors the skill covers
+  - `[false]` `[reject]` Blind Hunter 4: two skills give opposite `New $NAMESPACE` advice — the gotchas skill itself offers "save `$NAMESPACE` in a local variable and set it back yourself" as its second option, which is the system-class skill's advice for handlers, and each lists the other under Related skills
+  - `[low]` `[reject]` Blind Hunter 5: the production-class section lacks a `ProductionDefinition` skeleton, and "loads it again from the XData" omits the invalid-XData case — an omission and a simplification of a probed claim (I28), golden text, no harm named
+  - `[low]` `[reject]` Blind Hunter 6: the "None of it needs a running production" and "observed" preambles blur compile, run and source-read evidence — the spec's AC interpretations accept the same-build source read as evidence and the preambles say how each skill was checked; golden text
+  - `[low]` `[reject]` Blind Hunter 7: the deprecated-property advice names no replacement for `CRLFile` and `SNIName` — the sentence is conditional on the property's comment, rows C12 to C14 hold, golden text
+  - `[low]` `[reject]` Blind Hunter 8: one-off measurements written as facts — the spec's AC interpretations record that these numbers are presented as observations, and the delta bullet claims only what row C31 holds
+  - `[low]` `[patch]` Blind Hunter 9: the real-tree tool-name test asserts the same call twice, the second on the exempted text, so it cannot fail alone — real, harmless; the redundant assertion was removed (the exemption is exercised by the `textProblems` checks and their controls)
+  - `[low]` `[patch]` Blind Hunter 10: gates not shown red on the path they guard (the "not adapted" test, the second-copy and `(c)` controls, no offender row for the adapted skill) — closed by M12 to M18 and two offender rows for the adapted skill
+  - `[low]` `[patch]` Blind Hunter 11: README and CHANGELOG say the header is "the first line after the frontmatter" where the shipped rule is the first non-blank line — corrected in both; the stale `Auto Run Result` is written at finalize, and the M10 and M11 wording is accurate as written
+  - `[low]` `[patch]` Edge Case Hunter 1: `checkedText` on CRLF text — same root cause as Blind Hunter 2, fixed once
+  - `[low]` `[reject]` Edge Case Hunter 2: `committedRowFiles` throws ENOENT at collection if a notice row names a pack file that is missing — on an inconsistent tree the failure is loud and `check:provenance` and the real-tree tests still name the missing file; the spec chose to reuse the committed pack bytes
+  - `[low]` `[patch]` Edge Case Hunter 3: the "exactly one line" claim has no CRLF control — same root cause as Blind Hunter 2, control added
+  - `[medium]` `[patch]` Edge Case Hunter 4: the child-process offender and look-alike rows edit only the core skills, so the exemption's one real consumer has no end-to-end offender check — real; two offender rows for the adapted skill added, with M17
+  - `[medium]` `[patch]` Verification Gap 1: no offender row reaches the adapted skill through the real-tree path (demonstrated: skipping the wording tests for it stays green) — same root cause as Edge Case Hunter 4; fixed once, M17 shows it can fail
+  - `[low]` `[patch]` Verification Gap 2a: the duplicate `checkedText` tool-name assertion cannot fail alone — same root cause as Blind Hunter 9
+  - `[low]` `[reject]` Verification Gap 2b: the 6 to 10 bounds, the `run.total >= 58` floor and the frontmatter sweep's `>= 3` cannot fail alone or sit below the real total — the bounds restate AC 41.4.3 beside the exact-name check, the floor is a sanity floor that was already about 13 below the 41.3 total and is not changed by the spec, the sweep's `>= 3` is stated to stay, and the per-skill `resultOf` rows carry the baseline
+  - `[low]` `[patch]` Verification Gap 3: pins with no `mutation:` line (the three controls, the SQL anchors, the code-block counts, the oracle-against-notice cross-check, the gate-process widening) — M12 to M18 written under `## Verification`; the "Unchanged counts" AC is pinned by the existing `(once)` gates
+  - `[low]` `[patch]` Verification Gap 4a: the title "passes with no adapted file and no row" is false now that the fixture carries the real row — retitled "passes with only the real notice's own row and its committed pack file"
+  - `[low]` `[reject]` Verification Gap 4b: the in-memory fixtures read the committed pack copy of the real row's file — the spec's own decision ("reuse the committed pack bytes"); M11 shows the fixtures exercise it, and a second adapted skill would replace it with synthetic bytes
+  - `[low]` `[patch]` Verification Gap, other 1: `checkedText` on CRLF text — same root cause as Blind Hunter 2
+  - `[low]` `[patch]` Verification Gap, other 2: the comment "(the other two stay untouched)" is stale with six skills — now "the other five"
+  - `[false]` `[reject]` Intent Alignment 1: the claims hold on a live instance but no test contacts IRIS — by design: the plan's 92-row probe log is the evidence, the tests pin the text, and this stage re-probes only a claim it changes (none was)
+  - `[low]` `[reject]` Intent Alignment 2: "run on IRIS" against source reads in the skills' preambles — same as Blind Hunter 6
+  - `[false]` `[reject]` Intent Alignment 3: an agent has nothing installed to load — out of this story: the installer, catalog and plugin are Stories 41.5, 41.6 and 42.8, which the intent excludes
+  - `[low]` `[reject]` Intent Alignment 4: `8 distribution(s)`, `22 pack file(s)` and `51 source(s)` are pinned only on scratch copies — the spec records the 8 as pinned by no test, the real tree is covered by the real-tree provenance test, the pack diff test and the `(loop)` commands
+  - `[low]` `[reject]` Intent Alignment 5: the tarball and frontmatter-sweep floors stay at `>= 19` and `>= 3` — the spec lists those tests as unchanged and they enumerate whatever the pack holds
+  - `[low]` `[reject]` Intent Alignment 6: no test pins the notice's sha256 — the spec's notice test is the parsed-row test; the MIT block is pinned by the existing hash and the golden form was checked with `shasum` in every `(loop)` pass
+  - `[low]` `[reject]` Intent Alignment 7: the exemption's controls are synthetic and no process-level row injects the header into a real non-adapted skill — the real-tree "not adapted" test covers it (M12) and the child-process rows now cover the adapted skill (M17)
+  - `[low]` `[patch]` Intent Alignment 8: `checkedText` against `hasValidAdaptationHeader` on CRLF — same root cause as Blind Hunter 2
+  - `[low]` `[reject]` Intent Alignment 9: the fixtures depend on the committed pack — same as Verification Gap 4b
+  - `[false]` `[reject]` Intent Alignment 10: the row's adaptation prose cannot be checked against the upstream file — not testable here, and the golden row is the lead's decided text
 
 ## Design Notes
 
@@ -735,10 +773,51 @@ Rows and anchors map one to one, in order: Q1 to Q29, C1 to C31 and I1 to I32.
 - **M9** (the wording): add the line "- Call `iris_production_item`." to the interoperability source -> `pnpm validate:prompts` stays green (a real tool), and the knowledge test's tool-name and hygiene tests go red.
 - **Unchanged counts:** pinned by the existing `(once)` gates; this story edits no prompt, tool, preset, governance or bootstrapped input.
 
+**Demonstrated mutations (implement pass).** Each was applied with the file tools, observed red, and reverted; a sha256 listing of `skills-pack-src/`, the pack and the `__tests__` directory, `git status --short` and `git diff --stat` were identical before and after each one (M7 also changed the knowledge test once, on purpose, see below). M10 and M11 are added to the plan: they cover the 41.1 and 41.3 pins this story moved.
+
+- mutation: M1, the golden row deleted from the source notice and `pnpm gen:pack` re-run -> `pnpm check:provenance` exit 1 with `[claim-row] pack:skills/iris-mcp-objectscript-sql/SKILL.md` and `[claim-row] knowledge:iris-mcp-objectscript-sql/SKILL.md`; `pack-provenance.test.ts` "real tree passes every provenance rule" and "the check-provenance CLI > exits 0 on the real tree", and the knowledge test "the notice holds exactly the rows of the adapted skills", went red.
+- mutation: M2, line 6 (the header) deleted from the SQL source and `pnpm gen:pack` re-run -> `pnpm check:provenance` exit 1 with `[row-file] skills/iris-mcp-objectscript-sql/SKILL.md ... without the adaptation header`; the knowledge test "opens with the adaptation header as its first body line" and the sha256 row went red.
+- mutation: M3, `checkedText` stopped requiring `adapted` (the exception applied to every skill) -> the control "flags the same header in a skill that is not marked adapted: non-ASCII, a tool or server name, a repository file" went red (the only red test).
+- mutation: M4, `checkedText` returned the whole text (the exception dropped) -> the SQL skill's "is ASCII, LF only ..." and "names nothing of this repository ..." (`["a repository file", "a tool or server name"]`), its header test, and the control "passes an adapted skill whose header is its first body line, and nothing else" went red.
+- mutation: M5, "51 times" changed to "50 times" in the system-class source, pack not regenerated -> "carries every probe anchor" went red naming `51 times the worker's`; the sha256 row and the pack-copy row went red too.
+- mutation: M6, "so the first match wins" changed to "so the last match wins" in the interoperability source, pack not regenerated -> "carries every probe anchor" went red naming `tests in map order, so the first match wins`; the sha256 and pack-copy rows went red too.
+- mutation: M7, `knowledge/iris-mcp-interoperability/` moved out and `pnpm gen:pack` re-run (21 pack files) -> the knowledge test "are exactly the six planned skills, and six is within the 6 to 10 the pack allows" went red with 5 directories; the `22 pack file(s)` pins (`story-41-1-qa-pack-scratch-cli.test.ts`, `skills-pack-rule.test.ts`), the `37 pack file(s)` pin, the `51 source(s) checked` pins, the `44 content file(s)` pin, and the `39 agent file(s)` and `41 agent file(s)` pins (`story-41-1-qa-provenance-cli.test.ts`, `skills-pack-frontmatter.test.ts`) went red. Before this pass the knowledge test read each source at collection, so the missing directory failed the whole file with ENOENT and 0 tests ran; `readSourceBytes` now returns no bytes for a missing source, so the directory test is the test that reports the 5 against 6.
+- mutation: M8, the row's source cell changed to `skills/skills/iris-sql/SKILL.md` and `pnpm gen:pack` re-run -> `pnpm check:provenance` stayed green (1 row, 39 agent files); the knowledge test "the notice holds exactly the rows of the adapted skills" went red.
+- mutation: M9, "- Call `iris_production_item`." added to the interoperability source and `pnpm gen:pack` re-run -> `pnpm validate:prompts` stayed green (51 sources); the knowledge test "names no iris_* tool" (`["iris_production_item"]`) and "names nothing of this repository ..." (`["a tool or server name"]`) went red, with the sha256 row.
+- mutation: M10, the `claim-row` push in `checkProvenance` (`scripts/lib/provenance-core.mjs`) disabled -> `story-41-1-qa-provenance-cli.test.ts` "a notice without the provenance table header row (no row is then read, ...) is refused" went red (it now expects `["claim-row", "notice"]`), along with the other `claim-row` pins in that file and in `pack-provenance.test.ts`; reverted, `git diff --stat -- scripts` empty.
+- mutation: M11, `...REAL_ROW_FILES` removed from `inputsFor` in `pack-provenance.test.ts` and `...committedRowFiles(realNotice)` removed from `inputsWith` in `skills-pack-frontmatter.test.ts` -> 27 tests across the two files went red (`row-file` for the real row), so the fixtures feed the real row's pack file, and the exact problem lists stay unchanged only because of it.
+
+**Review-pass mutations.** The review pass added the CRLF control and two offender rows for the adapted skill, and closed the missing lines for the controls and pins that M1 to M11 did not name. Each was applied with the file tools, observed red, and reverted; `git diff <baseline_revision> | shasum -a 256` was identical before and after each one.
+
+- mutation: M12, the adaptation header added after the frontmatter of `iris-mcp-objectscript-unit-tests` (source only) -> the knowledge test "is not adapted: it carries no mention of the upstream project" went red for that skill (with its sha256, pack-copy, ASCII and hygiene rows).
+- mutation: M13a, `checkedText` removed every line equal to `ADAPTATION_HEADER` instead of the first -> the control "flags a second copy of the header in an adapted body" went red (the only red test).
+- mutation: M13b, `checkedText` stopped requiring `hasValidAdaptationHeader` -> the control "flags the header at the end of an adapted body: non-ASCII, a tool or server name, a repository file" went red (the only red test).
+- mutation: M13c, `checkedText` matched the header by its `Adapted from` prefix and stopped requiring `hasValidAdaptationHeader` -> the controls "flags the header at the end of an adapted body ...", "fails the header check for a header with (c) in place of the copyright sign, and flags it as wording" and "reads an adapted skill with CRLF line endings whole ..." went red.
+- mutation: M13d, the `at < 0` guard removed from `checkedText` -> the control "reads an adapted skill with CRLF line endings whole: its header is flagged and no other line is dropped" went red (the only red test).
+- mutation: M14, the SQL oracle's `adaptedFrom` changed to `skills/skills/iris-sql/SKILL.md` in the knowledge test -> "the notice holds exactly the rows of the adapted skills" went red at the cross-check of the oracle against the notice (the only red test).
+- mutation: M15, "takes the first one and gives 0" changed to "takes the last one and gives 0" in the SQL source, pack not regenerated -> "carries every probe anchor" went red for `iris-mcp-objectscript-sql` (with its sha256 and pack-copy rows).
+- mutation: M16, the opening fence of the interoperability code block changed from backticks to tildes in the source, pack not regenerated -> "holds 1 fenced code block(s)" went red for `iris-mcp-interoperability` (with its sha256 and pack-copy rows).
+- mutation: M17, the real-tree "names no iris_* tool" and "names nothing of this repository ..." tests made to skip the adapted skill -> `story-41-3-qa-knowledge-gate-process.test.ts` rows "an iris_* tool name that is a real tool, below the adaptation header" and "an internal rule number, below the adaptation header" went red (the only red tests).
+- mutation: M18, `iris-mcp-interoperability` dropped from `SKILL_NAMES` and the validator regex changed to `5 knowledge` in `story-41-3-qa-knowledge-gate-process.test.ts` -> "control: the unmodified copy passes and counts the six knowledge skills" and "these rows are hermetic > the real node_modules and the real knowledge sources are intact" went red (the only red tests).
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Implement stage (2026-10-19).** One implement pass, one review pass, one patch round.
+
+- **Summary.** Three platform knowledge skills (`iris-mcp-objectscript-sql`, `iris-mcp-system-classes`, `iris-mcp-interoperability`) written byte for byte from the golden texts (sha256 `b48e137b…`, `dd15048c…`, `ea093f10…`), the pack's first provenance row added to the notice (sha256 `d2e80ca6…`), the pack regenerated through `pnpm gen:pack` (19 to 22 files; a second run changes nothing), and the knowledge test extended to six oracles with the one-line adaptation-header exception and its controls. No script, `src/`, prompt, tool, preset, governance or bootstrapped input changed (`BOOTSTRAP_VERSION` stays `5296a1c836f4`).
+- **Files changed.**
+  - `skills-pack-src/knowledge/iris-mcp-objectscript-sql/SKILL.md`, `.../iris-mcp-system-classes/SKILL.md`, `.../iris-mcp-interoperability/SKILL.md`: new sources.
+  - `skills-pack-src/IRIS-MCP-THIRD-PARTY-NOTICES.md`: the golden row under the separator row; `skills-pack-src/README.md`: six skills, the one adapted skill and the narrow exemption.
+  - `packages/client-config/skills-pack/` (three skill directories and the notice copy): generated by `gen:pack`.
+  - `packages/iris-mcp-all/src/__tests__/skills-pack-knowledge.test.ts`: six oracles, `adaptedFrom`, the exemption (`checkedText`), the notice-row test and six controls; `pack-fixture.ts` (`committedRowFiles`), `pack-provenance.test.ts` and `skills-pack-frontmatter.test.ts`: the fixtures carry the real row's committed pack file; `skills-pack-rule.test.ts`, `story-41-1-qa-pack-scratch-cli.test.ts`, `story-41-1-qa-provenance-cli.test.ts`, `story-41-1-qa-validate-prompts-pack.test.ts`: count pins moved; `story-41-3-qa-knowledge-gate-process.test.ts`: six skills and two offender rows for the adapted skill.
+  - `CHANGELOG.md`, `.changeset/story-41-4-platform-knowledge-skills.md`: the release notes and the minor changeset.
+- **Review findings.** 33 findings from four layers: high 0, medium 2, low 27, false 4. 14 rows (7 root causes) patched: the CRLF mismatch in `checkedText` (guard and control), a redundant assertion, the missing mutation lines (M12 to M18), two offender rows for the adapted skill, the "first non-blank line" wording in README and CHANGELOG, a stale test title, a stale comment. 19 rows rejected with reasons in the triage log, none deferred (`deferred:` is empty). Patched entries at entry verdict: 1 medium, 6 low.
+- **Follow-up review recommendation.** `false`: no patched `high`, and one patched `medium` entry.
+- **Verification.** All `(loop)` commands green after the last patch: the three golden sha256 values and the notice's; `gen:pack` twice (22 files, no change) and `gen:pack:check` (`22 pack file(s)`); `validate:prompts` (`51 source(s) checked (12 prompt(s) + 39 content file(s): 12 workflow, 20 pack, 6 knowledge, 1 rule)`); `check:provenance` (`1 provenance row(s), 39 agent file(s), 8 distribution(s)`); the npm tarball lists the three skills and the notice; the nine-file group (463 tests), the four `story-41-1-qa-*` files (118), the two `story-41-3-qa-*` files (56) and the two `story-41-2-qa-*` files (79). All `(once)` commands green: shared 2071, dev 1663, admin 498, interop 672, ops 350, client-config 514, `@iris-mcp/all` in three slices (39, 38 and 38 files; 894, 1074 and 685 tests passed), `gen:skills:check` (`13 generated file(s)`), `gen:governance-baseline:check`, `gen:tools-list-snapshot:check` (115 entries), `check-epics-sync`, and an empty `git diff --stat` for `bootstrap-classes.ts`. Mutations M1 to M18 are recorded under `## Verification`.
+- **Residual risks.** The review found two imprecisions in the golden interoperability text that this pass left alone because the golden text is the lead's decided text (Review Triage Log, Blind Hunter 1): "Every message body class keeps its data in one place, `^Ens.MessageBodyD`" holds only for classes derived from `Ens.MessageBody` (`Ens.StringContainer` and `Ens.StreamContainer` have their own extents), and "the send methods take a `%Library.Persistent`" is not true of `Ens.BusinessProcess.SendRequestAsync`, which is typed `Request`. Neither misleads a reader who follows the skill's own examples; a reword would move the golden text, its sha256 and its anchors together. No IRIS call was made in this stage, so no probe class exists.
 
 **Plan stage (2026-10-19).** Halted after planning, as directed.
 

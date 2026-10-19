@@ -37,7 +37,7 @@ The `SKILL.md` opens with frontmatter on its first line, so a client reads the s
 
 A description also names what the skill covers in its first sentence, then says `Use when` followed by the situations that call for it. `check:provenance` does not check that wording; `skills-pack-knowledge.test.ts` does, for every knowledge skill, because it lists each one by name.
 
-The three core knowledge skills (`iris-mcp-objectscript-gotchas`, `iris-mcp-objectscript-error-handling` and `iris-mcp-objectscript-unit-tests`) name no `iris_*` tool, so they declare no preset, and they are written for a user's agent: no internal rule number, planning id, repository path or repository tooling. Each claim in them is run on a live IRIS instance before it is written, and a changed claim is run again. A new frontmatter field, such as a preset declaration, extends the field list and the grammar in `scripts/lib/skills-pack.mjs`. Every field in that list is required, so a field a skill may leave out also needs the grammar to allow it without requiring it.
+The six knowledge skills are the three core skills (`iris-mcp-objectscript-gotchas`, `iris-mcp-objectscript-error-handling` and `iris-mcp-objectscript-unit-tests`) and the three platform skills (`iris-mcp-objectscript-sql`, `iris-mcp-system-classes` and `iris-mcp-interoperability`). All six name no `iris_*` tool, so they declare no preset, and they are written for a user's agent: no internal rule number, planning id, repository path or repository tooling. Each claim in them is run on a live IRIS instance before it is written, and a changed claim is run again. A new frontmatter field, such as a preset declaration, extends the field list and the grammar in `scripts/lib/skills-pack.mjs`. Every field in that list is required, so a field a skill may leave out also needs the grammar to allow it without requiring it.
 
 ## Rules and their two forms
 
@@ -61,6 +61,8 @@ Third-party content that is adapted into the pack (not written from scratch) car
   `` | `skills/<name>/SKILL.md` | `skills/skills/<upstream-name>/SKILL.md` | <what changed> | ``
 
 Do not change the MIT licence block in the notice. `pnpm check:provenance` compares it with the upstream `LICENSE` byte for byte.
+
+One skill is adapted so far: `iris-mcp-objectscript-sql`. It carries the header on the first non-blank line after its frontmatter, and the notice holds its row, which cites `skills/skills/objectscript-sql-patterns/SKILL.md`. The header names the upstream project and the notice file, and it holds the copyright sign, so `skills-pack-knowledge.test.ts` exempts exactly that one line from its ASCII and wording checks. It does so only for a skill that the test's table marks as adapted (`adaptedFrom`), only when the line equals the header and is the first non-blank line after the frontmatter, and the same test requires the notice to hold exactly the rows of the adapted skills. A header in any other place or any other skill is read like any other line, and the test fails on it.
 
 ## Never adapt these upstream sources
 

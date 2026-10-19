@@ -34,7 +34,7 @@ import {
   skillFrontmatterProblems,
   WORKFLOW_SKILLS_DIR,
 } from "../../../../scripts/lib/skills-pack.mjs";
-import { put, REPO_ROOT } from "./pack-fixture";
+import { committedRowFiles, put, REPO_ROOT } from "./pack-fixture";
 import { BOM, makeScratchRepo, problemRules, removeScratchRepo, runScript, toCrlf } from "./story-41-1-qa-fixture";
 
 /** U+00A0 NO-BREAK SPACE, U+00A9 COPYRIGHT SIGN, U+00E9 LATIN SMALL LETTER E WITH ACUTE and U+FEFF BYTE ORDER MARK, from code points (ASCII source). */
@@ -228,15 +228,16 @@ interface AgentFile {
 
 const realNotice = readFileSync(join(REPO_ROOT, PACK_SOURCE_DIR, NOTICE_FILENAME));
 
-/** A consistent input set: the real notice, no adapted file and no row, a pack that holds only the notice. */
+/** A consistent input set: the real notice, the committed pack files its rows name, and the given agent files. */
 function inputsWith(agentFiles: AgentFile[]) {
+  const packFiles = [{ rel: NOTICE_FILENAME, bytes: realNotice }, ...committedRowFiles(realNotice)];
   return {
     sourceNotice: realNotice,
     packNotice: realNotice,
     agentFiles,
-    packFiles: [{ rel: NOTICE_FILENAME, bytes: realNotice }],
+    packFiles,
     distributions: [
-      { name: "@x/client-config", mustShipPack: true, files: [{ path: `skills-pack/${NOTICE_FILENAME}`, bytes: realNotice }] },
+      { name: "@x/client-config", mustShipPack: true, files: packFiles.map((file) => ({ path: `skills-pack/${file.rel}`, bytes: file.bytes })) },
     ],
   };
 }
@@ -349,7 +350,7 @@ describe("check:provenance CLI, scratch copy: the skill-frontmatter rule (DW-613
   it("control: a knowledge skill with valid frontmatter passes, source and pack copy both counted", () => {
     const run = runScript(scratchWithSkill(GOOD_SKILL, false), CHECK);
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
-    expect(run.stdout).toContain("0 provenance row(s), 35 agent file(s), 1 distribution(s)");
+    expect(run.stdout).toContain("1 provenance row(s), 41 agent file(s), 1 distribution(s)");
   });
 
   it("control: the same skill as CRLF passes", () => {
@@ -370,7 +371,7 @@ describe("check:provenance CLI, scratch copy: the skill-frontmatter rule (DW-613
     const text = GOOD_SKILL.replace("\n\nBody.\n", `\n\n${HEADER}\n\nBody.\n`);
     const run = runScript(scratchWithSkill(text, true), CHECK);
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
-    expect(run.stdout).toContain("1 provenance row(s), 35 agent file(s)");
+    expect(run.stdout).toContain("2 provenance row(s), 41 agent file(s)");
   });
 
   it("a skill with no description is refused for the source and the pack copy", () => {

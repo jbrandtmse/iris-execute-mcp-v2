@@ -148,7 +148,7 @@ describe("gen:pack against a scratch copy of the real tree: the clean baseline",
     const root = scratch();
     const check = runScript(root, GEN_PACK, ["--check"]);
     expect(check.status, check.stderr).toBe(0);
-    expect(check.stdout).toContain("19 pack file(s) match their sources");
+    expect(check.stdout).toContain("22 pack file(s) match their sources");
 
     const pack = join(root, PACK_DIR);
     for (const rel of walkFiles(pack)) utimesSync(join(pack, rel), 1, 1);
@@ -316,7 +316,7 @@ describe("gen:pack against a scratch copy of the real tree: byte preservation (#
     }
     const check = runScript(root, GEN_PACK, ["--check"]);
     expect(check.status, check.stderr).toBe(0);
-    expect(check.stdout).toContain("34 pack file(s) match their sources");
+    expect(check.stdout).toContain("37 pack file(s) match their sources");
   });
 
   it.each(VARIANTS.map(([key, bytes, tamper]) => [key, bytes, tamper] as const))(

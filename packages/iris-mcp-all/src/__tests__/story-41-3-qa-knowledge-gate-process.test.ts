@@ -7,8 +7,8 @@
  *    (`iris_doc_put` is a tool), and it does not look for a rule number, a planning id or a path at all;
  *  - the committed `skills-pack-knowledge.test.ts` rejects every one of them, a real tool name included.
  *
- * Part 1 drives the validator CLI on the three real knowledge skills (their source and their pack copy) and pins that
- * division of labour. Part 2 runs the COMMITTED `skills-pack-knowledge.test.ts` in a child vitest process against a
+ * Part 1 drives the validator CLI on the real knowledge skills (the rows edit the three core skills, source and pack copy;
+ * the count covers all six) and pins that division of labour. Part 2 runs the COMMITTED `skills-pack-knowledge.test.ts` in a child vitest process against a
  * scratch copy in which one offending line is added to one real skill (source and pack copy alike), and reads which of
  * its tests go red. The scratch copy holds a byte copy of that test file and its two helpers, the real `scripts/`, the
  * sources and the committed pack, an empty entry for every other top-level entry of the repository (the repository-path
@@ -33,7 +33,12 @@ import { makeScratchRepo, removeScratchRepo, runScript } from "./story-41-1-qa-f
 const GOTCHAS = "iris-mcp-objectscript-gotchas";
 const ERRORS = "iris-mcp-objectscript-error-handling";
 const UNIT_TESTS = "iris-mcp-objectscript-unit-tests";
-const SKILL_NAMES = [GOTCHAS, ERRORS, UNIT_TESTS];
+/** The three skills the offender, validator and look-alike rows edit, each by name. */
+const CORE_SKILLS = [GOTCHAS, ERRORS, UNIT_TESTS];
+/** The adapted skill: the one whose header line the knowledge test exempts, so its wording rows edit it by name. */
+const ADAPTED = "iris-mcp-objectscript-sql";
+/** Every knowledge skill: the rows that read all of them (the baseline, the untouched skills, the directory) cover these. */
+const SKILL_NAMES = [...CORE_SKILLS, ADAPTED, "iris-mcp-system-classes", "iris-mcp-interoperability"];
 
 const sourceRel = (skill: string): string => `${KNOWLEDGE_SOURCE_DIR}/${skill}/SKILL.md`;
 const packRel = (skill: string): string => `${PACK_DIR}/skills/${skill}/SKILL.md`;
@@ -80,14 +85,14 @@ function flagged(stderr: string): string[] {
   return [...stderr.matchAll(/^ {2}- (.+): "(.+)"$/gm)].map((match) => `${match[1]} ${match[2]}`).sort();
 }
 
-describe("validate:prompts CLI, scratch copy: the three real knowledge skills (AC 41.3.3)", () => {
-  it("control: the unmodified copy passes and counts the three knowledge skills", () => {
+describe("validate:prompts CLI, scratch copy: the real knowledge skills (AC 41.3.3)", () => {
+  it("control: the unmodified copy passes and counts the six knowledge skills", () => {
     const run = runScript(validatorScratch(), VALIDATE);
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
-    expect(run.stdout).toMatch(/\d+ source\(s\) checked \(\d+ prompt\(s\) \+ \d+ content file\(s\): 12 workflow, \d+ pack, 3 knowledge, 1 rule\)/);
+    expect(run.stdout).toMatch(/\d+ source\(s\) checked \(\d+ prompt\(s\) \+ \d+ content file\(s\): 12 workflow, \d+ pack, 6 knowledge, 1 rule\)/);
   });
 
-  it.each(SKILL_NAMES)("an unknown iris_* token in %s names the source and the pack copy and exits 1", (skill) => {
+  it.each(CORE_SKILLS)("an unknown iris_* token in %s names the source and the pack copy and exits 1", (skill) => {
     const root = validatorScratch();
     editSkill(root, skill, withLine(skill, "Call `iris_not_a_real_tool`."));
     const run = runScript(root, VALIDATE);
@@ -287,7 +292,7 @@ function resultOf(run: GateRun, skill: string, titleStart: string): GateResult {
 }
 
 describe("the committed knowledge test as a child process: the baseline", () => {
-  it("passes on an unmodified scratch copy, for all three skills, and is able to run there", () => {
+  it("passes on an unmodified scratch copy, for all six skills (the adapted one included), and is able to run there", () => {
     const run = runGate(gateScratch());
     expect(run.failed, run.results.filter((result) => result.status === "failed").map((result) => `${result.ancestors.join(" > ")} > ${result.title}\n${result.failure}`).join("\n\n")).toBe(0);
     expect(run.status).toBe(0);
@@ -300,7 +305,7 @@ describe("the committed knowledge test as a child process: the baseline", () => 
 
 interface Offender {
   row: string;
-  /** The skill that gets the offending line (the other two stay untouched). */
+  /** The skill that gets the offending line (the other five stay untouched). */
   skill: string;
   line: string;
   /** Each class name the hygiene test must report; empty when only the no-tool test is the subject. */
@@ -380,6 +385,20 @@ const OFFENDERS: Offender[] = [
     classes: ["a URL"],
     red: [T_HYGIENE],
   },
+  {
+    row: "an iris_* tool name that is a real tool, below the adaptation header",
+    skill: ADAPTED,
+    line: "Call `iris_doc_put`.",
+    classes: ["a tool or server name"],
+    red: [T_NO_TOOL, T_HYGIENE],
+  },
+  {
+    row: "an internal rule number, below the adaptation header",
+    skill: ADAPTED,
+    line: "See Rule #7: do this.",
+    classes: ["an internal rule number"],
+    red: [T_HYGIENE],
+  },
 ];
 
 describe("the committed knowledge test as a child process: each offender alone goes red, the others stay green (AC 41.3.3)", () => {
@@ -423,7 +442,7 @@ const LOOKALIKES = [
 ];
 
 describe("the committed knowledge test as a child process: benign lookalikes stay accepted (negative controls)", () => {
-  it.each(SKILL_NAMES)("IRIS codes, an IRIS qualifier, a pack skill name and AD-hoc in %s keep every wording test green", (skill) => {
+  it.each(CORE_SKILLS)("IRIS codes, an IRIS qualifier, a pack skill name and AD-hoc in %s keep every wording test green", (skill) => {
     const root = gateScratch();
     editSkill(root, skill, `${readFileSync(join(REPO_ROOT, sourceRel(skill)), "utf8")}\n${LOOKALIKES.map((line) => `- ${line}`).join("\n")}\n`);
     const run = runGate(root);

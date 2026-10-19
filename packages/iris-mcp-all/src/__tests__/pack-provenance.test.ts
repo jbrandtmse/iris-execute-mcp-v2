@@ -35,7 +35,7 @@ import {
 } from "../../../../scripts/lib/provenance-core.mjs";
 import { gatherProvenanceInputs, NPM_PACK_ARGS } from "../../../../scripts/lib/provenance-inputs.mjs";
 import { NOTICE_FILENAME, PACK_DIR, PACK_SOURCE_DIR, WORKFLOW_SKILLS_DIR } from "../../../../scripts/lib/skills-pack.mjs";
-import { makeTempRoot, put, removeTempRoot, REPO_ROOT, runNode } from "./pack-fixture";
+import { committedRowFiles, makeTempRoot, put, removeTempRoot, REPO_ROOT, runNode } from "./pack-fixture";
 
 interface Distribution {
   name: string;
@@ -69,6 +69,8 @@ const PINNED_HEADER =
   "Adapted from intersystems-community/iris-agentic-dev (MIT, \u00A9 2025 InterSystems Corporation); see IRIS-MCP-THIRD-PARTY-NOTICES.md";
 
 const realNotice = readFileSync(join(REPO_ROOT, PACK_SOURCE_DIR, NOTICE_FILENAME));
+/** The committed pack files that the real notice's own rows name: every input set built on the real notice carries them. */
+const REAL_ROW_FILES = committedRowFiles(realNotice);
 const SEPARATOR_ROW = "| --- | --- | --- |\n";
 
 /** The real notice with provenance rows inserted after the table's separator row. */
@@ -102,6 +104,7 @@ function inputsFor(
   const packNotice = options.packNotice === undefined ? notice : options.packNotice;
   const packFiles = [
     ...(packNotice === null ? [] : [{ rel: NOTICE_FILENAME, bytes: packNotice }]),
+    ...REAL_ROW_FILES,
     ...(options.extraPackFiles ?? []),
   ];
   return {
@@ -160,7 +163,7 @@ describe("the pinned oracles", () => {
 });
 
 describe("a consistent input set (fixture)", () => {
-  it("passes with no adapted file and no row", () => {
+  it("passes with only the real notice's own row and its committed pack file", () => {
     expect(check(inputsFor())).toEqual([]);
   });
 
