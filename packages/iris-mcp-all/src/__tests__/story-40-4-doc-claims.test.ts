@@ -69,7 +69,7 @@ const CHANGELOG_TITLE = new RegExp(`^## \\[Pre-release ${EM_DASH} 2026-10-18\\] 
  * documented move to the committed embed, so a later move leaves this file true.
  */
 const BOOTSTRAP_FROM = "845e95f6e726";
-const BOOTSTRAP_TO = "5c8e80ed67ca";
+const BOOTSTRAP_TO = "5024e4623f1d";
 
 /** The enabling setting of the three disabled keys. */
 const ENABLE_RECIPE = '{"global":{"iris_test_coverage":true,"iris_test_status:cancel":true,"iris_test_status:export":true}}';
@@ -123,7 +123,7 @@ describe("Story 40.4: the Development README states each default where it is use
     const entry = detailEntry(devReadme, "iris_test_coverage");
     expect(entry).toContain("a preprocessor line (`#dim` that initializes nothing, `#define`, `#sqlcompile` and the like) is never a class line");
     expect(entry).toContain(
-      "A `#dim` that initializes its variable (it holds an `=` outside parentheses and string literals, as in `#dim tSC As %Status = $$$OK`) is the exception: it compiles to a `Set` at its own INT line, so it is an executable class line (Story 40.4).",
+      "A `#dim` that initializes its variable (it holds an `=` outside parentheses, string literals and comments, as in `#dim tSC As %Status = $$$OK`) is the exception: it compiles to a `Set` at its own INT line, so it is an executable class line (Story 40.4). An `=` in a trailing `//`, `;` or `/* */` comment initializes nothing.",
     );
     expect(entry).toContain("**Stale classes and label lines (Story 40.4).**");
     expect(entry).toContain("`lineMap` in the run's Status record: 10, or 0 once a documentation-only save removed it");
@@ -132,8 +132,10 @@ describe("Story 40.4: the Development README states each default where it is use
     expect(entry).toContain("A record stored without `lineMap` (by an older service build) is judged by its shape as before.");
     expect(entry).toContain("would read `not-up-to-date`: a false FAIL, never a false PASS");
     expect(entry).toContain("one probe of a newly created class found no line map right after its compile, once, and about 30 later runs did not repeat it");
-    expect(entry).toContain("A method whose name begins with a percent sign (`%OnNew`, for example) has no compiled label, so it has no label line");
-    expect(entry).toContain("A `#dim` that initializes nothing but has a trailing comment holding an `=` is read as initializing");
+    expect(entry).toContain(
+      "A method whose name begins with a percent sign (`%OnNew`, for example) has an empty `RtnLabel` when its label is its name cut to 31 characters, and that label is its label line, so a stale class of such methods is `not-up-to-date` too.",
+    );
+    expect(entry, "the fixed limits are no longer stated as limits").not.toMatch(/has no compiled label, so it has no label line|is read as initializing/);
     expect(entry).toContain("Earliest IRIS version verified: 2026.2 build 221U.");
   });
 
@@ -145,7 +147,7 @@ describe("Story 40.4: the Development README states each default where it is use
     expect(entry).toContain('3. A `status: "running"` result is polled with `iris_test_status` (`action: "poll"`, the `coverageRunId`) until it completes; never re-submit.');
     expect(entry).toContain("`fail` (a result, not a tool error: `isError` stays `false`)");
     expect(entry).toContain(
-      "or `notApplicable` (no class has an executable class line, so there is nothing to export). Fail the pipeline on `fail`; step 5 works for a failing verdict too, so export first when the CI tool should read the file of a failing run.",
+      "or `notApplicable` (no class has an executable class line, so there is nothing to export). Fail the pipeline on `fail`, and on `notApplicable` too: it means nothing was measured, so check `classes`. Step 5 works for a failing verdict too, so export first when the CI tool should read the file of a failing run.",
     );
     expect(entry).toContain('5. Call `iris_test_status` with `action: "export"`, the `coverageRunId`, an absolute `outputPath` ending `.xml`');
   });
@@ -299,8 +301,16 @@ describe("Story 40.4: the CHANGELOG section and the changeset", () => {
     expect(text).toContain("(DW-601)");
     expect(text).toContain("`lineMap`, `$Data(^rMAP(<class>))`: 10 fresh, 0 after a documentation-only save");
     expect(text).toContain("(`RtnLabel`, `label^routine`), which is exact");
+    expect(text).toContain(
+      "A method whose name begins with a percent sign (`%OnNew`, for example) has an empty `RtnLabel` when its label is its name cut to 31 characters (the second of two such names that share them is given a `RtnLabel` of its own), so that label is used: a stale class whose only methods are named so is `not-up-to-date` too, not a class with no executable lines.",
+    );
     expect(text).toContain("An initializing `#dim` is an executable class line (DW-602).");
+    expect(text).toContain("A `#dim` line that holds an `=` outside parentheses, string literals and comments compiles to a `Set` at its own INT line");
+    expect(text).toContain("that includes a `#dim` whose only `=` is in a trailing `//`, `;` or `/* */` comment");
     expect(text).toContain("`iris_test_status` returns an error result when a read of `%UnitTest_Result` fails (AC 40.4.3).");
+    expect(text).toContain(
+      "text that says what to do next: the two polls say to poll again by `runIndex` and not to re-submit, and the cancel says to poll by `runIndex` to observe the run.",
+    );
     expect(text).toContain("The Status route of the coverage service returns a superset (AD-33): every earlier field, and `lineMap` on every class that has a map.");
   });
 
@@ -308,8 +318,7 @@ describe("Story 40.4: the CHANGELOG section and the changeset", () => {
     const text = squash(section);
     expect(text).toContain("would read `not-up-to-date`: a false FAIL in the direction of caution, never a false PASS.");
     expect(text).toContain("One probe of a newly created class found no line map right after its compile, once; about 30 later runs did not repeat it, and its cause is not known.");
-    expect(text).toContain("A method whose name begins with a percent sign (`%OnNew`, for example) has no compiled label (its `RtnLabel` is empty), so it has no label line.");
-    expect(text).toContain("a `#dim` that initializes nothing, with a trailing comment that holds an `=`, is read as initializing");
+    expect(text, "the two limits Story 40.4's review fixed are not listed").not.toMatch(/has no compiled label \(its `RtnLabel` is empty\)|is read as initializing/);
     expect(text).toContain("Earliest IRIS version verified: 2026.2 build 221U.");
   });
 
@@ -325,7 +334,7 @@ describe("Story 40.4: the CHANGELOG section and the changeset", () => {
 
   it("the corrected sentences are in place in the earlier sections", () => {
     const flat = squash(changelog);
-    expect(flat).toContain("a preprocessor line (`#dim` that initializes nothing, `#define`, `#sqlcompile` and the like) is never a class line (a `#dim` that holds an `=` outside parentheses and string literals compiles to a `Set` and is one, since Story 40.4)");
+    expect(flat).toContain("a preprocessor line (`#dim` that initializes nothing, `#define`, `#sqlcompile` and the like) is never a class line (a `#dim` that holds an `=` outside parentheses, string literals and comments compiles to a `Set` and is one, since Story 40.4)");
     expect(flat).toContain("`iris_execute_tests` stays enabled by default (a baseline key, classified `write`), and `iris_test_coverage` stays a write, DEFAULT-DISABLED; the guard has no switch and adds no key");
   });
 

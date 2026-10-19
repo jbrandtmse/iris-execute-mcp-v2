@@ -1952,8 +1952,9 @@ a `reason` and no lines when it is a method generator (`generator`), is not writ
 INT code (a constant return, for example) has no lines either, and no `reason`. A method's lines are the body lines that map
 after its own INT label line, and a preprocessor line (`#dim` that initializes nothing, `#define`, `#sqlcompile` and the like) is never a class line: the compiler maps a leading
 one onto the code of the method before it or onto the method's own first statements. A `#dim` that initializes its variable
-(it holds an `=` outside parentheses and string literals, as in `#dim tSC As %Status = $$$OK`) is the exception: it compiles to a
-`Set` at its own INT line, so it is an executable class line (Story 40.4). **A statement that spans several lines but compiles to one INT line is reported once, at the first line that maps
+(it holds an `=` outside parentheses, string literals and comments, as in `#dim tSC As %Status = $$$OK`) is the exception: it compiles to a
+`Set` at its own INT line, so it is an executable class line (Story 40.4). An `=` in a trailing `//`, `;` or `/* */` comment initializes
+nothing. **A statement that spans several lines but compiles to one INT line is reported once, at the first line that maps
 to its code.** For a multi-line embedded SQL statement that is the line after the `&sql(` line (the `&sql(` line maps to a comment
 line of the INT routine, and the other continuation lines are not executable); a single-line `&sql(...)` statement is reported at
 its own line. A class without a result has `source: {reason}`, and the reason is one of three:
@@ -1978,10 +1979,9 @@ verdict `notApplicable`), and neither is a class whose methods all compile to no
 an older service build) is judged by its shape as before. A class compiled without a debug line map, if a compile qualifier allows
 one, would read `not-up-to-date`: a false FAIL, never a false PASS; one probe of a newly created class found no line map right
 after its compile, once, and about 30 later runs did not repeat it (a forced compile, flags `ck`, rebuilds the map). A method whose
-name begins with a percent sign (`%OnNew`, for example) has no compiled label, so it has no label line: a class whose only methods
-that compile to INT code are named so is not recognised as `not-up-to-date` after a documentation-only save, and reads as a class
-with no executable lines. A `#dim` that initializes nothing but has a trailing comment holding an `=` is read as initializing, and its
-line can then be counted as an executable class line. Earliest IRIS version verified: 2026.2 build 221U.
+name begins with a percent sign (`%OnNew`, for example) has an empty `RtnLabel` when its label is its name cut to 31 characters, and
+that label is its label line, so a stale class of such methods is `not-up-to-date` too. Earliest IRIS version verified: 2026.2 build
+221U.
 
 **`minCoverage` and the verdict (Story 40.2).** An optional number from 0 to 100 stored with the run. A completed result then
 carries `coverage.verdict` (`{minCoverage, overall, percent, classes:[{class, verdict, percent, reason?}]}`) and the text line
@@ -2012,8 +2012,9 @@ as `iris_doc_export`'s `destinationDir`). That action is `iris_test_status:expor
 3. A `status: "running"` result is polled with `iris_test_status` (`action: "poll"`, the `coverageRunId`) until it completes; never
    re-submit.
 4. Read `coverage.verdict.overall`: `pass`, `fail` (a result, not a tool error: `isError` stays `false`) or `notApplicable` (no class
-   has an executable class line, so there is nothing to export). Fail the pipeline on `fail`; step 5 works for a failing verdict
-   too, so export first when the CI tool should read the file of a failing run.
+   has an executable class line, so there is nothing to export). Fail the pipeline on `fail`, and on `notApplicable` too: it means
+   nothing was measured, so check `classes`. Step 5 works for a failing verdict too, so export first when the CI tool should read the
+   file of a failing run.
 5. Call `iris_test_status` with `action: "export"`, the `coverageRunId`, an absolute `outputPath` ending `.xml` and, for the
    repository's source directory, `sourceRoot`; point the CI tool's Cobertura reader at that file. The repository's `.cls` files must
    be in the layout IRIS stores (as `iris_doc_export` writes them).

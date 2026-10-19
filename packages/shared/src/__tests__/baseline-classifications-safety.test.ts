@@ -21,12 +21,12 @@
  * Two kinds of pin:
  *   1. Named spot-checks on well-known execution/mutation keys (must stay
  *      `write`) and well-known pure-query keys (must stay `read`), including
- *      the documented judgment calls (`iris_doc_export`, `iris_sql_execute`)
- *      that deliberately diverge from their own tool's
- *      `annotations.readOnlyHint` per the dev's fail-safe reasoning (Dev
- *      Notes, Completion Notes List), and `iris_execute_tests`, whose
- *      `readOnlyHint` now agrees with its `write` classification: exactly
- *      the kind of "looks read-ish" key a future edit is most likely to flip.
+ *      the documented judgment calls (`iris_doc_export`, `iris_sql_execute`,
+ *      `iris_execute_tests`) that are classified `write` although their
+ *      names read as reads, per the dev's fail-safe reasoning (Dev Notes,
+ *      Completion Notes List); each tool's `readOnlyHint` is `false`, which
+ *      agrees with that classification: exactly the kind of "looks
+ *      read-ish" key a future edit is most likely to flip.
  *   2. A systematic verb-suffix sweep: every `tool:action` key in the map
  *      whose action verb is an unambiguous write verb (create/delete/modify/
  *      set/update/build/sync/reset/add/remove/enable/disable, per AC

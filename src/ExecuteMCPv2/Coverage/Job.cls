@@ -626,10 +626,11 @@ ClassMethod LineSkeleton(pTokens As %List) As %String
 /// <p><code>labelLine</code> (the fifth element) is the INT line of the method's compiled label in <code>routine</code>, and 0
 /// when it is not known. A method that compiled to INT code has a label line, which is the first line of its INT block: its
 /// body maps to lines after it. The label is the one the compiler recorded for the method (<code>RtnLabel</code>,
-/// <code>label^routine</code>), so two methods whose names share their first <code>$$$MAXLABELLENGTH</code> characters have
-/// distinct labels. A method that compiled to no INT code (a constant return, a generator, a method not written in
-/// ObjectScript) has no <code>label^routine</code> and no label line, and neither has a method whose label is not in the INT
-/// text or whose compiled routine is not the one its body maps to. The label lines come from the INT text, which a
+/// <code>label^routine</code>), or, for a method whose name begins with <code>%</code> and has no <code>RtnLabel</code>, its
+/// name cut to <code>$$$MAXLABELLENGTH</code> characters (<method>LabelLine</method>), so two methods whose names share their
+/// first <code>$$$MAXLABELLENGTH</code> characters have distinct labels. A method that compiled to no INT code (a constant
+/// return, a generator, a method not written in ObjectScript) has no label line, and neither has a method whose label is not in
+/// the INT text or whose compiled routine is not the one its body maps to. The label lines come from the INT text, which a
 /// documentation-only edit saved after the compile leaves in place while it removes the class's line map: a method with a
 /// label line in a class with <code>lineMap</code> 0 is how a stale map shows.</p>
 /// The namespace is restored on every exit path. A failure to read the class text or the dictionary is returned as the
@@ -712,20 +713,39 @@ ClassMethod IndexLabels(pClass As %String, Output pLabels)
 }
 
 /// The INT line of the compiled label of method <var>pName</var> of class <var>pClass</var>, from <var>pLabels</var> (see
-/// <method>IndexLabels</method>), or 0 when the method has no known label. The label is the compiler's own
-/// (<code>RtnLabel</code>, <code>label^routine</code>), so it is exact whatever the method's name. It is 0 when the keyword
-/// is not <code>label^routine</code> (a method that compiled to no INT code has none or an inlined constant), when the
-/// label is not in that routine's INT text, or when <var>pRoutine</var>, the routine the method's body maps to, is not empty
-/// and is another routine.
+/// <method>IndexLabels</method>), or 0 when the method has no known label. The label is the compiler's own: the one its
+/// <code>RtnLabel</code> records (<code>label^routine</code>), so it is exact whatever the method's name. A method whose name
+/// begins with <code>%</code> has an empty <code>RtnLabel</code> when its label is its name cut to
+/// <code>$$$MAXLABELLENGTH</code> characters (a second such method whose cut name would be the same is given a
+/// <code>RtnLabel</code> of its own), so that label is exact too (<method>NameLabelLine</method>). It is 0 when the keyword of
+/// any other method is not <code>label^routine</code> (a method that compiled to no INT code has none or an inlined constant),
+/// when the label is not in that routine's INT text, or when <var>pRoutine</var>, the routine the method's body maps to, is
+/// not empty and is another routine.
 ClassMethod LabelLine(pClass As %String, pName As %String, pRoutine As %String, ByRef pLabels) As %Integer
 {
     Set tRtnLabel = $$$comMemberKeyGet(pClass, $$$cCLASSmethod, pName, $$$cMETHrtnlabel)
+    If (tRtnLabel = "") && ($Extract(pName) = "%") Quit ..NameLabelLine($Extract(pName, 1, $$$MAXLABELLENGTH), pRoutine, .pLabels)
     If $Length(tRtnLabel, "^") '= 2 Quit 0
     Set tLabel = $Piece(tRtnLabel, "^", 1)
     Set tRoutine = $Piece(tRtnLabel, "^", 2)
     If (tLabel = "") || (tRoutine = "") Quit 0
     If (pRoutine '= "") && (pRoutine '= tRoutine) Quit 0
     Quit +$Get(pLabels(tRoutine, tLabel))
+}
+
+/// The INT line of label <var>pLabel</var> in routine <var>pRoutine</var>, from <var>pLabels</var> (see
+/// <method>IndexLabels</method>), or, when <var>pRoutine</var> is empty, in the routine of the class whose INT text holds it
+/// (the compiler gives each method of a class a label of its own); 0 when the label is not there.
+ClassMethod NameLabelLine(pLabel As %String, pRoutine As %String, ByRef pLabels) As %Integer
+{
+    If pRoutine '= "" Quit +$Get(pLabels(pRoutine, pLabel))
+    Set tRoutine = ""
+    For {
+        Set tRoutine = $Order(pLabels(tRoutine))
+        If tRoutine = "" Quit
+        If $Data(pLabels(tRoutine, pLabel)) Quit
+    }
+    Quit $Select(tRoutine = "": 0, 1: pLabels(tRoutine, pLabel))
 }
 
 /// The class-document line D that declares method <var>pName</var>, whose body holds <var>pCount</var> lines, from the
@@ -758,10 +778,10 @@ ClassMethod DeclarationLine(ByRef pText, ByRef pDeclarations, pName As %String, 
 /// Is class-document line <var>pLine</var> a preprocessor line: <code>#dim</code>, <code>#define</code>, <code>#sqlcompile</code>,
 /// <code>#;</code> and the other directives? It is when, after any leading blanks, it begins with one <code>#</code> followed
 /// by a letter or a semicolon. A line that begins with <code>##</code> (<code>##class</code>, <code>##super</code>) is not.
-/// <p>A <code>#dim</code> line (in any letter case) that holds an <code>=</code> outside parentheses and string literals
-/// initializes its variable, and the compiler turns it into a <code>Set</code> at its own INT line, so it is not a
-/// preprocessor line here. Every other directive is one: the compiler maps a leading one onto code that belongs to other
-/// methods.</p>
+/// <p>A <code>#dim</code> line (in any letter case) that holds an <code>=</code> outside parentheses, string literals and
+/// comments (<method>HasInitializer</method>) initializes its variable, and the compiler turns it into a <code>Set</code> at its
+/// own INT line, so it is not a preprocessor line here. Every other directive is one: the compiler maps a leading one onto code
+/// that belongs to other methods.</p>
 ClassMethod IsDirective(pLine As %String) As %Boolean
 {
     Set tText = $ZStrip(pLine, "<W")
@@ -771,26 +791,38 @@ ClassMethod IsDirective(pLine As %String) As %Boolean
 }
 
 /// Does <var>pText</var>, the text of a <code>#dim</code> line after the directive name, hold an <code>=</code> outside
-/// parentheses and string literals? A string literal opens at a double quote and closes at the next one, so a doubled quote
-/// inside it closes and reopens it.
+/// parentheses, string literals and comments? A string literal opens at a double quote and closes at the next one, so a doubled
+/// quote inside it closes and reopens it. Outside a string literal, <code>//</code> or <code>;</code> starts a comment that runs
+/// to the end of the line, and <code>/*</code> one that runs to the next <code>*/</code> (or to the end of the line when none
+/// follows), so an <code>=</code> inside a comment initializes nothing.
 ClassMethod HasInitializer(pText As %String) As %Boolean
 {
     Set tDepth = 0
     Set tQuoted = 0
     Set tFound = 0
-    For tI = 1:1:$Length(pText) {
+    Set tLength = $Length(pText)
+    Set tI = 0
+    While tI < tLength {
+        Set tI = tI + 1
         Set tChar = $Extract(pText, tI)
         If tChar = """" {
             Set tQuoted = 'tQuoted
-        } ElseIf 'tQuoted {
-            If tChar = "(" {
-                Set tDepth = tDepth + 1
-            } ElseIf (tChar = ")") && (tDepth > 0) {
-                Set tDepth = tDepth - 1
-            } ElseIf (tChar = "=") && (tDepth = 0) {
-                Set tFound = 1
-                Quit
-            }
+            Continue
+        }
+        If tQuoted Continue
+        Set tPair = $Extract(pText, tI, tI + 1)
+        If (tChar = ";") || (tPair = "//") Quit
+        If tPair = "/*" {
+            Set tClose = $Find(pText, "*/", tI + 2)
+            If tClose = 0 Quit
+            Set tI = tClose - 1
+        } ElseIf tChar = "(" {
+            Set tDepth = tDepth + 1
+        } ElseIf (tChar = ")") && (tDepth > 0) {
+            Set tDepth = tDepth - 1
+        } ElseIf (tChar = "=") && (tDepth = 0) {
+            Set tFound = 1
+            Quit
         }
     }
     Quit tFound

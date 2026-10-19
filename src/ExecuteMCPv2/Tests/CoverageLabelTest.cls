@@ -22,8 +22,11 @@ Parameter LONGCLASS = "ExecuteMCPv2.Temp.Story404Long";
 /// The disposable class with a constant method and a python method.
 Parameter CONSTCLASS = "ExecuteMCPv2.Temp.Story404Const";
 
-/// The disposable class with a method whose name begins with a percent sign.
+/// The disposable class with methods whose names begin with a percent sign.
 Parameter PCTCLASS = "ExecuteMCPv2.Temp.Story404Pct";
+
+/// The disposable class whose <code>#dim</code> lines carry a comment that holds an equals sign.
+Parameter COMMENTCLASS = "ExecuteMCPv2.Temp.Story404Comment";
 
 Method OnAfterOneTest(testname As %String) As %Status
 {
@@ -33,6 +36,7 @@ Method OnAfterOneTest(testname As %String) As %Status
     Do $System.OBJ.Delete(..#LONGCLASS, "-d")
     Do $System.OBJ.Delete(..#CONSTCLASS, "-d")
     Do $System.OBJ.Delete(..#PCTCLASS, "-d")
+    Do $System.OBJ.Delete(..#COMMENTCLASS, "-d")
     Quit $$$OK
 }
 
@@ -63,6 +67,14 @@ Method TestIsDirective() As %Status
     Do $$$AssertEquals($ClassMethod(tJob, "IsDirective", "    #dim tQ As %String = ""a=b"""), 0, "an = before a string literal that holds one")
     Do $$$AssertEquals($ClassMethod(tJob, "IsDirective", "    #dim tT As %String(MAXLEN=5) = ""x"""), 0, "an = after parentheses")
     Do $$$AssertEquals($ClassMethod(tJob, "IsDirective", "    #dim tU As %String(MAXLEN=5, "")="")"), 1, "an = inside a string literal inside parentheses is not an initializer")
+
+    Do $$$AssertEquals($ClassMethod(tJob, "IsDirective", "    #dim tI As %Integer // sets nothing = 5"), 1, "an = in a // comment is not an initializer")
+    Do $$$AssertEquals($ClassMethod(tJob, "IsDirective", "    #dim tN As %Integer ; sets nothing = 13"), 1, "an = in a ; comment is not an initializer")
+    Do $$$AssertEquals($ClassMethod(tJob, "IsDirective", "    #dim tA As %Integer /* sets nothing = 1 */"), 1, "an = in a /* */ comment is not an initializer")
+    Do $$$AssertEquals($ClassMethod(tJob, "IsDirective", "    #dim tA As %Integer /* not closed = 1"), 1, "an = after a /* that is not closed is not an initializer")
+    Do $$$AssertEquals($ClassMethod(tJob, "IsDirective", "    #dim tC /* a comment */ As %Integer = 3"), 0, "an = after a closed /* */ comment initializes")
+    Do $$$AssertEquals($ClassMethod(tJob, "IsDirective", "    #dim tG As %Integer = 3 // initializes tG"), 0, "an = before a comment initializes")
+    Do $$$AssertEquals($ClassMethod(tJob, "IsDirective", "    #dim tV As %String(VALUELIST="";a//b"") = ""x"""), 0, "a ; or // inside a string literal starts no comment")
     Quit $$$OK
 }
 
@@ -166,20 +178,64 @@ Method TestSourceMapOfMethodsWithoutALabel() As %Status
     Quit $$$OK
 }
 
-/// A method whose name begins with a percent sign has no compiled label (its <code>RtnLabel</code> is empty, whatever its
-/// body), so it has no known label line, while its body lines map as any other method's do; a method with an ordinary name in
-/// the same class has its label line.
+/// A method whose name begins with a percent sign has an empty <code>RtnLabel</code> when its INT label is its name cut to
+/// 31 characters, and the second of two such names that share those characters is given a <code>RtnLabel</code> of its own.
+/// Each method's label line is found, the INT text holding that label at that line, and after a documentation-only save
+/// every label line is still known, so a stale class of such methods shows as stale (<code>lineMap</code> 0, label lines
+/// kept).
 Method TestSourceMapOfPercentSignMethods() As %Status
 {
     Set tName = ..#PCTCLASS
+    Set tRoutine = tName_".1"
+    Set tLong = "%AVeryLongPercentMethodNameThatExceedsThirtyOne"
     Do $$$AssertStatusOK(..CompiledClass(tName, ..PctBody()), "the class is saved and compiled")
     Do $$$AssertEquals($$$comMemberKeyGet(tName, $$$cCLASSmethod, "%Cm", $$$cMETHrtnlabel), "", "a percent-sign method has no compiled label")
-    Do $$$AssertEquals($$$comMemberKeyGet(tName, $$$cCLASSmethod, "Plain", $$$cMETHrtnlabel), "Plain^"_tName_".1", "an ordinary name has one")
+    Do $$$AssertEquals($$$comMemberKeyGet(tName, $$$cCLASSmethod, tLong_"A", $$$cMETHrtnlabel), "", "neither has the first long one")
+    Do $$$AssertEquals($$$comMemberKeyGet(tName, $$$cCLASSmethod, tLong_"B", $$$cMETHrtnlabel), "%AVeryLongPercentMethodNameTha2^"_tRoutine, "the second long one has a label of its own")
+    Do $$$AssertEquals($$$comMemberKeyGet(tName, $$$cCLASSmethod, "Plain", $$$cMETHrtnlabel), "Plain^"_tRoutine, "an ordinary name has one")
+    Do ..AssertIntLabel(tRoutine, 11, "%Cm")
+    Do ..AssertIntLabel(tRoutine, 5, "%AVeryLongPercentMethodNameThat")
+    Do ..AssertIntLabel(tRoutine, 8, "%AVeryLongPercentMethodNameTha2")
     Set tSC = ##class(ExecuteMCPv2.Coverage.Job).SourceMap("", tName, .tMap)
     Do $$$AssertStatusOK(tSC, "the map is built")
     Do $$$AssertEquals(tMap, $ListBuild(tName, "", 10), "a class with its line map")
-    Do ..AssertMapped(.tMap, 1, "%Cm", 4, tName_".1", 0, "6 7")
-    Do ..AssertMapped(.tMap, 2, "Plain", 10, tName_".1", 8, "9 10")
+    Do ..AssertMapped(.tMap, 1, "%Cm", 4, tRoutine, 11, "12 13")
+    Do ..AssertMapped(.tMap, 2, "Plain", 10, tRoutine, 14, "15 16")
+    Do ..AssertMapped(.tMap, 3, tLong_"A", 16, tRoutine, 5, "6 7")
+    Do ..AssertMapped(.tMap, 4, tLong_"B", 22, tRoutine, 8, "9 10")
+
+    Do $$$AssertStatusOK(..CompiledClass(tName, "/// Documentation only."_$Char(10)_..PctBody()), "the documented class is saved and compiled")
+    Do $$$AssertEquals($Data(^rMAP(tName)), 0, "the documentation edit removed its line map")
+    Kill tMap
+    Set tSC = ##class(ExecuteMCPv2.Coverage.Job).SourceMap("", tName, .tMap)
+    Do $$$AssertStatusOK(tSC, "the stale class is a result, not an error")
+    Do $$$AssertEquals(tMap, $ListBuild(tName, "", 0), "documented: lineMap 0")
+    Do ..AssertMapped(.tMap, 1, "%Cm", 5, "", 11, "0 0")
+    Do ..AssertMapped(.tMap, 2, "Plain", 11, "", 14, "0 0")
+    Do ..AssertMapped(.tMap, 3, tLong_"A", 17, "", 5, "0 0")
+    Do ..AssertMapped(.tMap, 4, tLong_"B", 23, "", 8, "0 0")
+    Quit $$$OK
+}
+
+/// A <code>#dim</code> that initializes nothing, whose trailing <code>//</code>, <code>;</code> or <code>/* */</code> comment holds
+/// an equals sign, keeps no INT line even after four leading <code>#dim</code> lines (where the compiler maps it onto the
+/// method's last statement), so each statement keeps its own INT line; an <code>=</code> before a comment initializes. Each
+/// mapped line is checked against the INT text it maps to.
+Method TestSourceMapIgnoresAnEqualsSignInAComment() As %Status
+{
+    Set tName = ..#COMMENTCLASS
+    Set tRoutine = tName_".1"
+    Do $$$AssertStatusOK(..CompiledClass(tName, ..CommentBody()), "the class is saved and compiled")
+    Set tSC = ##class(ExecuteMCPv2.Coverage.Job).SourceMap("", tName, .tMap)
+    Do $$$AssertStatusOK(tSC, "the map is built")
+    Do $$$AssertEquals(tMap, $ListBuild(tName, "", 10), "a class with its line map")
+    Do ..AssertMapped(.tMap, 1, "SlashesAfterFour", 4, tRoutine, 14, "0 0 0 0 0 15 16")
+    Do ..AssertMapped(.tMap, 2, "SemicolonAfterFour", 15, tRoutine, 11, "0 0 0 0 0 12 13")
+    Do ..AssertMapped(.tMap, 3, "BlockAfterFour", 26, tRoutine, 5, "0 0 0 0 0 6 7")
+    Do ..AssertMapped(.tMap, 4, "InitWithComment", 37, tRoutine, 8, "9 10")
+    For tLine = 6, 12, 15 Do ..AssertIntText(tRoutine, tLine, "Set tL")
+    For tLine = 7, 13, 16 Do ..AssertIntText(tRoutine, tLine, "Quit tL")
+    Do ..AssertIntText(tRoutine, 9, "Set tG")
     Quit $$$OK
 }
 
@@ -220,6 +276,21 @@ Method AssertMapped(ByRef pMap, pIndex As %Integer, pName As %String, pLine As %
     Do $$$AssertEquals(tActual, pLines, pName_": the INT line of each body line")
 }
 
+/// Assert that INT line <var>pLine</var> of routine <var>pRoutine</var> is the label <var>pLabel</var> (the text before its
+/// parameter list), as <method>IndexLabels</method> reads a label.
+Method AssertIntLabel(pRoutine As %String, pLine As %Integer, pLabel As %String)
+{
+    Do $$$AssertEquals($Piece($Get(^ROUTINE(pRoutine, 0, pLine)), "("), pLabel, "INT line "_pLine_" holds the label "_pLabel)
+}
+
+/// Assert that INT line <var>pLine</var> of routine <var>pRoutine</var>, without its leading blanks, begins with
+/// <var>pText</var>.
+Method AssertIntText(pRoutine As %String, pLine As %Integer, pText As %String)
+{
+    Set tText = $ZStrip($Get(^ROUTINE(pRoutine, 0, pLine)), "<W")
+    Do $$$AssertEquals($Extract(tText, 1, $Length(pText)), pText, "INT line "_pLine_" is "_pText_" ("_tText_")")
+}
+
 /// Save class <var>pName</var> with the methods of <var>pBody</var> through the UDL text service, which is what a document save
 /// does, then compile it.
 ClassMethod CompiledClass(pName As %String, pBody As %String) As %Status
@@ -257,12 +328,32 @@ ClassMethod ConstBody() As %String
     Quit tBody_"ClassMethod Py() As %Integer [ Language = python ]"_tNL_"{"_tNL_"    return 7"_tNL_"}"_tNL_tNL
 }
 
-/// The methods of the class with a percent-sign name: one, and one with an ordinary name.
+/// The methods of the class with percent-sign names: a short one, one with an ordinary name, and two long ones whose names
+/// share their first 31 characters.
 ClassMethod PctBody() As %String
 {
     Set tNL = $Char(10)
+    Set tLong = "%AVeryLongPercentMethodNameThatExceedsThirtyOne"
     Set tBody = "ClassMethod %Cm() As %Integer"_tNL_"{"_tNL_"    Set tX = 1"_tNL_"    Quit tX"_tNL_"}"_tNL_tNL
-    Quit tBody_"ClassMethod Plain() As %Integer"_tNL_"{"_tNL_"    Set tY = 2"_tNL_"    Quit tY"_tNL_"}"_tNL_tNL
+    Set tBody = tBody_"ClassMethod Plain() As %Integer"_tNL_"{"_tNL_"    Set tY = 2"_tNL_"    Quit tY"_tNL_"}"_tNL_tNL
+    Set tBody = tBody_"ClassMethod "_tLong_"A() As %Integer"_tNL_"{"_tNL_"    Set tV = 3"_tNL_"    Quit tV"_tNL_"}"_tNL_tNL
+    Quit tBody_"ClassMethod "_tLong_"B() As %Integer"_tNL_"{"_tNL_"    Set tW = 4"_tNL_"    Quit tW"_tNL_"}"_tNL_tNL
+}
+
+/// The methods of the comment class: a <code>#dim</code> that initializes nothing with an <code>=</code> in a trailing
+/// <code>//</code>, <code>;</code> or <code>/* */</code> comment after four leading <code>#dim</code> lines, and an initializer
+/// followed by a comment.
+ClassMethod CommentBody() As %String
+{
+    Set tNL = $Char(10)
+    Set tBody = ""
+    For tComment = "// sets nothing = 8", "; sets nothing = 8", "/* sets nothing = 8 */" {
+        Set tMethod = $Select(tComment [ "//": "Slashes", tComment [ "/*": "Block", 1: "Semicolon")
+        Set tBody = tBody_"ClassMethod "_tMethod_"AfterFour() As %Integer"_tNL_"{"_tNL
+        For tI = 1:1:4 Set tBody = tBody_"    #dim t"_tI_" As %Integer"_tNL
+        Set tBody = tBody_"    #dim t5 As %Integer "_tComment_tNL_"    Set tL = 9"_tNL_"    Quit tL"_tNL_"}"_tNL_tNL
+    }
+    Quit tBody_"ClassMethod InitWithComment() As %Integer"_tNL_"{"_tNL_"    #dim tG As %Integer = 3 // initializes tG"_tNL_"    Quit tG"_tNL_"}"_tNL_tNL
 }
 
 /// The methods of the class with every shape of an initializing <code>#dim</code>: leading, mid-body, nested in a block, after

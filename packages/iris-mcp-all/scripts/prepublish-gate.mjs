@@ -221,7 +221,7 @@ const gateTestFiles = [
   // Story40Q.* inside Q, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-40-0-qa-live-gate.test.ts",
   // Story 40.1: `iris_test_coverage` and the `iris_test_status` `coverageRunId` companion on the BUILT iris-dev-mcp and iris-admin-mcp dists over real stdio JSON-RPC, with raw HTTP to the
-  // coverage routes. It, the QA gate below, the two Story 40.2 gates, the two Story 40.3 gates and the Epic 40 capstone (which follow them) are the only gates that start Line-by-Line sessions (the files run serially): it starts each row with the monitor idle and ends each row asserting it is idle, and
+  // coverage routes. It, the QA gate below, the two Story 40.2 gates, the two Story 40.3 gates, the Epic 40 capstone and the Story 40.4 QA gate (which follow them) are the only gates that start Line-by-Line sessions (the files run serially): it starts each row with the monitor idle and ends each row asserting it is idle, and
   // terminates a process only through the fixture's MayTerminate check. Writes EXECMCPTMP401A and EXECMCPTMP401B (their database files too), Story401.* inside A, and
   // ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-40-1-coverage-live-gate.test.ts",
@@ -264,6 +264,15 @@ const gateTestFiles = [
   // session only through the fixture (and stops it through the fixture). No production is started. Writes EXECMCPTMP402C (its database files too), Story402.* and Story404.* inside it, a temporary
   // directory and ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
   "src/__tests__/epic40-capstone-gate.test.ts",
+  // Story 40.4 QA: what the Story 40.4 gates leave open, on the BUILT iris-dev-mcp and iris-admin-mcp dists over real stdio JSON-RPC: the deploy-and-test-class prompt over stdio (arguments omitted,
+  // the required argument alone, an unknown extra argument, step 8 against the real tools/list schemas, refusal shape, governance recipe and preset lists, and the generated skill against the render), the
+  // corrected iris_execute_tests annotations under the full, core and developer presets and the stated governance defaults (the refusals leave nothing written and allocate no run id), the class-source
+  // mapping against fixtures the first 40.4 gates did not use (initializing and non-initializing #dim lines mixed, a trailing // or ; comment, % method names, a comment-only edit compiled by default and
+  // by force; two documented known limits pinned as they behave), and iris_test_status answering for a missing runIndex, a stale jobId, an unreadable result table and malformed arguments. Its coverage
+  // rows make it the eighth gate that starts Line-by-Line sessions (the files run serially): it starts each row with the monitor idle and ends each coverage row asserting it is idle with no ownership
+  // node, and terminates no process. Writes EXECMCPTMP404Q and EXECMCPTMP404R (their database files too), Story404Q.* inside Q, a temporary directory and ExecuteMCPv2.Temp.Story391Fixture, which it
+  // removes, asserting nothing is left.
+  "src/__tests__/story-40-4-qa-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

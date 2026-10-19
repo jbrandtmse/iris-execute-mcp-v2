@@ -24,7 +24,7 @@
  *  - Row 15: the bare namespace B, where interoperability is not configured; row 15b: a TestProduction test there cannot have its
  *    state read, so it is refused and the lifecycle lock is released.
  *
- * This gate (its row 11), the Story 40.3 QA gate, the Story 40.1 gates, the Story 40.2 gates and the Epic 40 capstone are the only ones that start Line-by-Line
+ * This gate (its row 11), the Story 40.3 QA gate, the Story 40.1 gates, the Story 40.2 gates, the Epic 40 capstone and the Story 40.4 QA gate are the only ones that start Line-by-Line
  * sessions (the package runs its files serially, `fileParallelism: false`): row 11 starts one. Its helpers, shared with the QA gate, are in
  * `testproduction-gate-helpers.ts`. It starts every row with the monitor idle: when a session it did not
  * start is active, an armed gate fails and names it, an unarmed one skips, and the session is left alone. Every production it starts

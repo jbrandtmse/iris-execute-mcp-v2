@@ -79,6 +79,7 @@ const GATES: readonly Gate[] = [
   { file: "story-40-3-testproduction-live-gate.test.ts", tag: "story-40-3-testproduction-live-gate", story: "Story 40.3" },
   { file: "story-40-3-qa-live-gate.test.ts", tag: "story-40-3-qa-live-gate", story: "Story 40.3 QA" },
   { file: "epic40-capstone-gate.test.ts", tag: "epic40-capstone-gate", story: "Epic 40 capstone" },
+  { file: "story-40-4-qa-live-gate.test.ts", tag: "story-40-4-qa-live-gate", story: "Story 40.4 QA" },
 ];
 
 /** The vitest entry point this package's tests run under. */

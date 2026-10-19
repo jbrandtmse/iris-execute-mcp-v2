@@ -8,7 +8,7 @@ No tool, action or governance key is added, so no tool count moves (the Developm
 advertised; the suite at 110 package tools, 115 advertised). The prompt pack stays at 13 prompts (5 on the Development
 server), the `core` preset at 14 package tools (15 runtime tools), the `developer` preset at 32 package tools (33 advertised),
 the refusal-code catalog at 10 codes, and the frozen governance baseline at hash `1e62c5ad5bf7` (141 keys).
-`BOOTSTRAP_VERSION` moves from `845e95f6e726` to `5c8e80ed67ca`, because `Coverage/Job.cls` and `REST/Coverage.cls` changed
+`BOOTSTRAP_VERSION` moves from `845e95f6e726` to `5024e4623f1d`, because `Coverage/Job.cls` and `REST/Coverage.cls` changed
 (the bootstrapped service stays at 35 classes).
 
 ### Changed
@@ -44,14 +44,19 @@ the refusal-code catalog at 10 codes, and the frozen governance baseline at hash
 - **Two methods whose names share their first 31 characters no longer lose their label line (DW-601).** The label line was
   found by the method name cut to 31 characters, and a shortened name that two methods share gave neither a label, so a stale
   class of such methods read as 0 lines with `line-rate="1"`. A method's label line is now read from its compiled label
-  (`RtnLabel`, `label^routine`), which is exact, and is 0 when the method has none (an inlined constant, a Python method).
-- **An initializing `#dim` is an executable class line (DW-602).** A `#dim` line that holds an `=` outside parentheses and
-  string literals compiles to a `Set` at its own INT line, and the class-source map dropped it with the other preprocessor
-  lines. It is now kept; every other preprocessor line is still never a class line.
+  (`RtnLabel`, `label^routine`), which is exact, and is 0 when the method has none (an inlined constant, a Python method). A
+  method whose name begins with a percent sign (`%OnNew`, for example) has an empty `RtnLabel` when its label is its name cut to
+  31 characters (the second of two such names that share them is given a `RtnLabel` of its own), so that label is used: a
+  stale class whose only methods are named so is `not-up-to-date` too, not a class with no executable lines.
+- **An initializing `#dim` is an executable class line (DW-602).** A `#dim` line that holds an `=` outside parentheses, string
+  literals and comments compiles to a `Set` at its own INT line, and the class-source map dropped it with the other
+  preprocessor lines. It is now kept; every other preprocessor line is still never a class line, and that includes a `#dim`
+  whose only `=` is in a trailing `//`, `;` or `/* */` comment (the compiler maps such a line onto another statement).
 - **`iris_test_status` returns an error result when a read of `%UnitTest_Result` fails (AC 40.4.3).** Three paths could still
   throw the IRIS error as a `Tool error`: a poll by `runIndex` alone, a poll whose job was gone (HTTP 404) with a known
   `runIndex`, and a cancel whose job was gone with a captured `runIndex`. Each now returns `isError: true` with
-  `structuredContent` (`error` and the handles the caller holds) and text that says not to re-submit; any other error still
+  `structuredContent` (`error` and the handles the caller holds) and text that says what to do next: the two polls say to poll
+  again by `runIndex` and not to re-submit, and the cancel says to poll by `runIndex` to observe the run. Any other error still
   propagates.
 
 The Status route of the coverage service returns a superset (AD-33): every earlier field, and `lineMap` on every class that has
@@ -77,8 +82,9 @@ released.
   the pinned content model (no DTD file is vendored), the three class-source fixes, and the refusal of a run while a monitor
   session the suite did not start is active, which leaves that session untouched. It starts each row with the monitor idle and
   ends it with the monitor idle and no ownership node.
-- OS tests pin the new head of the class-source map, the exact labels of long names, the kept `#dim` shapes and the
-  preprocessor-line rule; unit tests pin the stale rule over the Status record with and without `lineMap`, the three
+- OS tests pin the new head of the class-source map, the exact labels of long names and of names that begin with a percent
+  sign, the kept `#dim` shapes, the `=` in a comment and the preprocessor-line rule, each mapped line against the INT text it
+  maps to; unit tests pin the stale rule over the Status record with and without `lineMap`, the three
   error results of `iris_test_status`, the annotations, and the prompt text.
 
 ### Known limits
@@ -86,12 +92,6 @@ released.
 - A class compiled without a debug line map, if a compile qualifier allows one, would read `not-up-to-date`: a false FAIL in the
   direction of caution, never a false PASS. One probe of a newly created class found no line map right after its compile, once;
   about 30 later runs did not repeat it, and its cause is not known. A forced compile (flags `ck`) rebuilds the map.
-- A method whose name begins with a percent sign (`%OnNew`, for example) has no compiled label (its `RtnLabel` is empty), so it
-  has no label line. A class whose only methods that compile to INT code are named so is not recognised as `not-up-to-date`
-  after a documentation-only save, and reads as a class with no executable lines.
-- A `#dim` line is read as initializing when an `=` follows it outside parentheses and string literals, and a comment is not told
-  from code: a `#dim` that initializes nothing, with a trailing comment that holds an `=`, is read as initializing, and its line
-  can then be counted as an executable class line.
 - `RtnLabel` and `^rMAP` were verified on one IRIS version only. Earliest IRIS version verified: 2026.2 build 221U.
 
 ## [Pre-release — 2026-10-18] — Story 40.3: TestProduction runs
@@ -194,7 +194,7 @@ and `REST/Coverage.cls` changed (the bootstrapped service stays at 35 classes).
   `}` and a comment line are never executable; a method generator, a method not written in ObjectScript (a `Language` set on the
   method or on the class) and a method whose layout is not where IRIS stores it carry a `reason` and no lines; a method that
   compiles to no INT code (a constant return) has no lines and no `reason`. A method's lines are the body
-  lines that map after its own INT label line, and a preprocessor line (`#dim` that initializes nothing, `#define`, `#sqlcompile` and the like) is never a class line (a `#dim` that holds an `=` outside parentheses and string literals compiles to a `Set` and is one, since Story 40.4). **A statement that spans
+  lines that map after its own INT label line, and a preprocessor line (`#dim` that initializes nothing, `#define`, `#sqlcompile` and the like) is never a class line (a `#dim` that holds an `=` outside parentheses, string literals and comments compiles to a `Set` and is one, since Story 40.4). **A statement that spans
   several lines but compiles to one INT line is reported once, at the first line that maps to its code: for a multi-line embedded
   SQL statement, the line after the `&sql(` line.** A class without a class-source result has `source.reason`
   `not-up-to-date` (its definition changed after it was compiled, or its compiled line map is gone: a documentation-only edit

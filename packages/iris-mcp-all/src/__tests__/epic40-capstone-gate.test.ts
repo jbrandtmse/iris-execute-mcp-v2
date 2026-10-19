@@ -385,8 +385,9 @@ beforeAll(async () => {
     await admin.close();
     await removeFixtureClass(dev);
     await dev.close();
-    if (REQUIRE_LIVE) throw new Error(`IRIS_REQUIRE_LIVE is set, so the Epic 40 capstone live gate may not be skipped: ${named}`);
+    // Set before the armed throw too, so afterAll sees closed sessions and nothing to remove.
     skipReason = named;
+    if (REQUIRE_LIVE) throw new Error(`IRIS_REQUIRE_LIVE is set, so the Epic 40 capstone live gate may not be skipped: ${named}`);
     return;
   }
 

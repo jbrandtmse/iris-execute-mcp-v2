@@ -252,7 +252,8 @@ async function resolveByRunIndex(
 /**
  * {@link resolveByRunIndex}, where a failed read of `%UnitTest_Result` (an IRIS API or connection error) is returned as an
  * error result that carries `handles` and the text `describe` makes of the failure, so the caller keeps the run's handles
- * instead of a thrown `Tool error`. Any other error still propagates.
+ * instead of a thrown `Tool error`. `describe` receives the error's message without its one trailing full stop, because each
+ * text adds its own. Any other error still propagates.
  */
 async function resolveByRunIndexOrError(
   ctx: SqlCtx,
@@ -266,7 +267,7 @@ async function resolveByRunIndexOrError(
     return await resolveByRunIndex(ctx, ns, runIndex, jobId);
   } catch (error: unknown) {
     if (isIrisError(error)) {
-      return testRunEnvelope({ kind: "error", error: describe(error.message), handles });
+      return testRunEnvelope({ kind: "error", error: describe(error.message.replace(/\.$/, "")), handles });
     }
     throw error;
   }

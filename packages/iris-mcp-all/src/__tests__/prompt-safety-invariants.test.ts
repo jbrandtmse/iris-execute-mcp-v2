@@ -688,6 +688,15 @@ describe("deploy-and-test-class - the optional coverage step and the PRODUCTION_
     }
   });
 
+  it("step 8 gives the remedy for a class a documentation-only edit left not-up-to-date: a forced compile, then measure again", async () => {
+    for (const { label, body } of await deployRenderings()) {
+      const step = stepText(body, 8);
+      expect(step, label).toContain(
+        'A class reported `not-up-to-date` after a documentation-only edit (a comment or a `///` line) needs a forced compile before it can be measured: call `iris_doc_compile` on it with `flags: "ck"`, then call `iris_test_coverage` again.',
+      );
+    }
+  });
+
   it("every other step is the 38.6 text: step 2 keeps its number and its in-place fix route", async () => {
     for (const { label, body } of await deployRenderings()) {
       expect(stepText(body, 2), label).toContain("A class that has no local source file (it exists only in IRIS) is fixed in place instead");
