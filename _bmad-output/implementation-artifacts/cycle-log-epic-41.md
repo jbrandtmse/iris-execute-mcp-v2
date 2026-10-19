@@ -87,3 +87,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-19T16:19:38Z	Story 41.4	ledger_routed_planned	story=41-5-workflow-skills-refresh entries=1 excess=0 by=cr dw=DW-623
 2026-10-19T16:20:00Z	Story 41.4	ledger_adjudicated	owned=0 resolved=0 reowned=0 terminal=0 model=claude-opus-5-5
 2026-10-19T16:20:00Z	Story 41.4	smoke_complete	method=cli result=pass iterations=1 defects_caught=0 checks=4+frontmatter+provenance_row+leftovers evidence=gen:pack:check(22),check:provenance(1_row),validate:prompts(51:6_knowledge),gen:skills:check,six_skills_name=dir,adapted_header_after_frontmatter,iris_leftovers_414_empty model=claude-opus-5-5
+2026-10-19T16:21:55Z	Story 41.4	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=1082 result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
