@@ -30,6 +30,9 @@ Thumbs.db
 
 # Coverage
 coverage/
+# ...but not the IRIS class package ExecuteMCPv2.Coverage (Story 40.1): `coverage/` also matches `Coverage/` where
+# the file system ignores case, and these classes are source.
+!src/ExecuteMCPv2/Coverage/
 
 # Existing exclusions
 sources/

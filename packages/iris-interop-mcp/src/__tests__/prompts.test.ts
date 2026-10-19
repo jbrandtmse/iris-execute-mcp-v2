@@ -261,6 +261,60 @@ describe("trace-message-flow \u2014 contract and flow (Story 39.6)", () => {
     expect(text).toContain('Target namespace: "USER"');
     expect(text).not.toContain("No namespace specified");
   });
+
+  it("under `block`, reports the reason for withheld error text and log text and never reads either another way, with and without a namespace", async () => {
+    const step4 =
+      "Under the `block` data policy the text of each `Error on message` warning, in `warnings` and on its `%%` line of the diagram, is replaced by a reason: report that reason to the user, and never read the error text another way (for example through SQL, global or document tools).";
+    const step5 =
+      "Under `block` each entry's `text` is withheld and its `textPolicy` gives the reason: report that reason to the user, and never read the log text another way (for example through SQL, global or document tools).";
+    const step6 =
+      "what the error log says (where the log or diagram text was withheld, say so and give its reason instead of the text), and where in the flow";
+
+    for (const args of [{ sessionOrHeaderId: "7" }, { sessionOrHeaderId: "7", namespace: "USER" }]) {
+      const text = await getPromptText("trace-message-flow", args);
+      const lines = text.split("\n");
+      const stepOf = (n: number) => lines.find((line) => line.startsWith(`${n}. `)) ?? "";
+
+      expect(stepOf(4)).toContain(`on failed messages. ${step4}`);
+      expect(stepOf(4).endsWith(step4)).toBe(true);
+      expect(stepOf(5)).toContain(`around the same timeframe. ${step5}`);
+      expect(stepOf(5).endsWith(step5)).toBe(true);
+      expect(stepOf(6)).toContain(step6);
+      expect(lines.filter((line) => /^\d+\. /.test(line)).length).toBe(6);
+    }
+    const built = traceMessageFlowPrompt.build({});
+    expect(built).toContain(step4);
+    expect(built).toContain(step5);
+    expect(built).toContain(step6);
+  });
+});
+
+describe("recover-stuck-production \u2014 the block rule for withheld Event Log text (Story 40.5)", () => {
+  const rule =
+    "Under the `block` data policy each entry's `text` is withheld and its `textPolicy` gives the reason: report that reason to the user, and never read the log text another way (for example through SQL, global or document tools).";
+
+  it("step 3 ends with the rule, with and without arguments, and the prompt keeps its 8 steps", async () => {
+    for (const args of [{}, { production: "My.Production", namespace: "USER" }]) {
+      const text = await getPromptText("recover-stuck-production", args);
+      const lines = text.split("\n");
+      const stepOf = (n: number) => lines.find((line) => line.startsWith(`${n}. `)) ?? "";
+
+      expect(stepOf(3)).toContain(`to understand what is actually wrong. ${rule}`);
+      expect(stepOf(3).endsWith(rule)).toBe(true);
+      expect(lines.filter((line) => /^\d+\. /.test(line)).length).toBe(8);
+    }
+    expect(recoverStuckProductionPrompt.build({})).toContain(rule);
+  });
+
+  it("keeps the escalation ladder around the new rule: logs before recover, recover before clean", async () => {
+    const text = await getPromptText("recover-stuck-production", {});
+    expectInOrder(text, [
+      "3. For each stuck/errored item, call `iris_production_logs`",
+      rule,
+      "4. **Try `iris_production_control` action 'recover' FIRST**",
+      "6. **Only if still wedged after 'recover'**",
+    ]);
+  });
 });
 
 describe("find-patient-messages \u2014 contract and flow (Story 39.6)", () => {

@@ -131,7 +131,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **Frozen-baseline tools.** An `action` enum is never added to a frozen-baseline tool, because that renames its key. A new operation goes on a companion tool instead.
   - **Annotations.** Annotations follow the MCP definitions. "Destructive" means the tool can delete, or irreversibly overwrite, existing state.
     - New tools and new actions declare all four hints truthfully, independently of `mutates` and `defaultEnabled`.
-    - An existing tool's hint changes only through a sanctioned AD-15 change. Known divergences: `iris_sql_execute`, `iris_execute_command` and `iris_doc_put` declare `destructiveHint: false`; `iris_execute_tests` declares `readOnlyHint: true` (DW-498).
+    - An existing tool's hint changes only through a sanctioned AD-15 change. Known divergences: `iris_sql_execute`, `iris_execute_command` and `iris_doc_put` declare `destructiveHint: false`. (`iris_execute_tests`' `readOnlyHint: true` and `idempotentHint: true` were corrected to false in Story 40.4, DW-498. No write-classified key's tool now declares `readOnlyHint: true`, and a reverse-direction pin keeps it so.)
     - Hand-curated classifications are cross-checked mechanically against `readOnlyHint`.
 
 ### AD-5 — The governance baseline is frozen [ADOPTED] (D3, H1; Rules #20, #23 and #25)
@@ -310,6 +310,13 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
       - `iris_production_logs` and `iris_message_diagram` withhold message-derived text under `block`;
       - `iris_message_body` renders character-stream bodies under `allow`;
       - the message-search statements carry an index hint, which changes the plan only, never results.
+    - **Story 40.5** (orchestrator decisions #65 to #67): prompt-text fixes. `recover-stuck-production` gains the `block` report-the-reason rule for withheld Event Log text. `edit-and-test-class` gains the `PRODUCTION_BUSY` note. The `PRODUCTION_BUSY` wording in both test prompts covers the unreadable-state refusal. Names, titles and arguments are unchanged.
+    - **Story 40.4** (orchestrator decisions #62 and #63): `iris_execute_tests` now declares `readOnlyHint: false` and `idempotentHint: false` (the listed annotation correction, DW-498). The `deploy-and-test-class` prompt gains an optional coverage step and a `PRODUCTION_BUSY` note, and its description gains one clause; its name, title and arguments are unchanged.
+    - **Story 40.3** (orchestrator decision #56): `iris_execute_tests` and `iris_test_coverage` refuse a run that contains `%UnitTest.TestProduction` tests while a different production runs in the namespace (`PRODUCTION_BUSY`). Before this, such a run silently stopped the other production. A run with no TestProduction test, a run on a server without the ExecuteMCPv2 service (the guard route answers 404), and a run in a namespace that cannot see the ExecuteMCPv2 classes (decision #60) behave exactly as before; the last two are unguarded, and the descriptions say so. A method-level target whose method part holds `;`, `,` or `^` is now refused as malformed (decision #61). The test runner reads those characters as "more classes", "another spec" and "run this setup code", so `A:TestX;B` no longer runs two classes.
+    - **Story 40.0** (orchestrator decisions #36 and #38, made under the same delegation):
+      - the `trace-message-flow` prompt tells agents, under `block`, to report the reason for withheld Event Log and diagram error text and never read it another way (DW-587);
+      - `iris_metrics_interop` `errorCount24h` counts Error entries (it counted Warning), and both it and `messageCount24h` cover the 24 hours before the call in UTC (DW-584);
+      - the `iris_production_logs` `type` filter maps a display name such as `Error` to its stored number; a numeric value still matches as before (DW-585).
 
     Each change may land in the earliest story that needs it, and is named in `CHANGELOG.md` with that story. Prune this list into the CHANGELOG at the Epic 42 retro.
   - **After `1.0.0`.** A breaking change requires a new major version. Clients pinned to `@1` receive every 1.x release automatically.
@@ -323,7 +330,8 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **Budget expiry.** When the budget expires, the tool returns `isError: false` with `status: "running"`, every durable handle it holds, and any partial results labelled as partial. Handles are also returned on completion.
   - **The companion.** Re-attach, read and cancel live on a separate, read-classified companion tool, whose write actions are classified separately. Every result a completed run returns can be reproduced by the companion from the durable handles alone.
   - **Pairing.** When a primary's `running` result can be resolved only through its companion, the two are declared in `TOOL_PAIRS`. That needs a Lead decision if it moves a `core` row.
-  - **Local files.** A companion that writes a local file takes an explicit `outputPath`.
+  - **Local files.** A companion that writes a local file takes an explicit `outputPath`. The write is its own governed action, classified write and disabled by default: coverage's Cobertura file is `iris_test_status:export`, which exports completed runs only (Story 40.2, decision #50).
+  - **Handle lifetime.** A handle lives as long as the server-side state it names. The Atelier `jobId` and the coverage `coverageRunId` (Story 40.1, decision #42) are kept in IRIS temporary storage, so neither survives an instance restart, and an unknown handle's error says so.
 
 ### AD-17 — Bulk and data-loss writes are bounded server-side [ADOPTED] (F1, H6)
 
@@ -472,6 +480,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - **Least exposure by default.** Under `redact`, no surface shows more body text than it did before this policy existed. The resend preview keeps its HL7 class-name note and withholds non-HL7 bodies with a reason. The engine's first body-text consumer is `iris_message_body` (Story 39.5).
     - In 39.2 the policy governed the resend preview only.
     - Since Story 39.7, `iris_production_logs` (Event Log `Text`) and `iris_message_diagram` (the Correlator's `Error on message …` texts) are governed under `block` only: their message-derived text is withheld with a fixed reason. Under `redact` and `allow` they are byte-identical to before and stay documented residuals, because free log text cannot be redacted reliably and content sniffing is forbidden (decision #31).
+      - The diagram generator's own `Generation failed for session N: …` text is not withheld under `block`: it carries only a SQL schema error or a system error name and location, and no reachable code path puts message content in it (Story 40.0 probe, DW-586). Revisit if a Diagram stage's exception data or SQL `%Message` ever echoes a header field value.
     - Under `allow`, `iris_message_body` renders character-stream property bodies (for example `HS.Message.XMLMessage` `ContentStream`) within `maxChars`. They are withheld under `redact` and kind-only under `block` (decision #32).
     - The scope as of 2026-10-16 is recorded in `tool_support.md`.
   - **What redaction may read.** Redaction runs only on the complete, unsanitized body. Truncation and sanitization come after redaction, in TypeScript.
@@ -494,10 +503,15 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **Ownership.** One IRIS-side job owns a monitor's lifetime: it starts the monitor, runs the work and stops it in its own cleanup.
     - A client wait budget, a poll or a cancel never starts or stops a monitor directly; a cancel only signals the job.
     - So coverage runs only on an execution path whose job the suite controls.
+    - **Coverage uses two suite jobs** (Story 40.1, orchestrator decisions #40 and #41). A runner starts its own session, runs the tests and stops the session in its cleanup. A supervisor turns a cancel or the time limit into terminating the runner, and releases a session the runner left behind. This split exists because `$SYSTEM.Process.Terminate` cannot be trapped, so the process running the tests cannot be the only one that releases the monitor. The session's process list is exactly these two processes (decision #45), because only a listed process can read a session's routine names and counts. It is never all processes and never another process.
+    - **What proves a session is the suite's.** A session's process list counts as evidence only while the session is process-scoped. In all-processes or paused mode the list IRIS reports does not describe the session's scope (probes saw both a previous session's list and the starting process's own list), so it proves nothing. A releaser stops a session only after proving it is its own, and the two releasers never act at the same time (Story 40.1 review).
+    - **Terminate only proven processes.** The suite terminates a process only after proving, immediately before, that it is still the suite's own: the PID matches the owner record and that role's owner lock is still held. A PID can be reused once its process dies.
   - **Owner records.** The suite records a session's owner (job id and start time) durably. A later run may reclaim a suite-owned session whose job is dead. A session without a suite ownership record is never touched.
   - **Busy checks.**
     - A coverage run is refused while a foreign session is active.
     - A TestProduction run is refused while a production other than the test's own is running in the target namespace.
+      - **Where and how** (Story 40.3, orchestrator decisions #56 to #58). Both test-running tools ask one IRIS-side guard before anything runs. It decides under Ens's own lifecycle lock `^Ens.Runtime`. The test's own production is started later by `%UnitTest.TestProduction` in another process, so the window between the decision and that start is a recorded residual.
+      - **The suite never stops a production**, not even one a killed or failed TestProduction run left behind. Ens records no owner, so a leftover cannot be told apart from a live production. Any production other than the run's own is refused and named, with the recovery in the text, and left untouched.
     - The busy check is atomic (AD-12).
   - **Fixtures.** Coverage oracles are captured in a disposable namespace whose routines nobody else runs.
 
@@ -644,7 +658,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 | IRIS-side unit tests | `%UnitTest.TestCase` with `$$$Assert*` macros, under the `^UnitTestRoot` guard, with `/noload/nodelete`. Compare the reported `total` with the expected number of `Test*` methods. |
 | Configuration variables | `IRIS_` prefix. A malformed value fails fast at startup and names the variable; an unknown tool name only warns (AD-7). Each new variable is documented with its default. |
 | Probes and references | Verify a claim about an IRIS API, or about reusing internal code, live or in source before building on it. Disposable probe classes live under `ExecuteMCPv2.Temp.*` and are deleted before commit. `sources/`, `irislib/` and `irissys/` are read-only. A story that depends on an IRIS API records the earliest IRIS version it verified that API on. |
-| Live testing on a shared instance | Never stop or restart the shared development IRIS, and simulate outages with a closed local port. Writes go only to disposable `ExecuteMCPv2.Temp.*` artifacts, or to namespaces the story creates, and are removed afterwards. Fixtures are synthetic: no real configuration names and no PHI. A story never reads another project's namespace or messages. |
+| Live testing on a shared instance | Never stop or restart the shared development IRIS, and simulate outages with a closed local port. Writes go only to disposable `ExecuteMCPv2.Temp.*` artifacts, or to namespaces the story creates, and are removed afterwards. The one system-level write allowed is `^%SYS("Ensemble","InstalledNamespace",<disposable namespace>)` for a disposable `EXECMCPTMP*` namespace that must run a production. It is set and killed by a fixture method that refuses any other name, and it is part of the leftovers check; `EnableNamespace` is never called (Story 40.3, decision #59). Fixtures are synthetic: no real configuration names and no PHI. A story never reads another project's namespace or messages. |
 | Performance budgets | The PRD targets are: reads under 2 s, compile and deploy under 10 s, bootstrap under 60 s, and `tools/list` under 500 ms. A story that adds bootstrapped classes or a heavy read checks the relevant budget. |
 
 ## Stack
@@ -745,6 +759,6 @@ ipm/                    # IPM module manifest (generated from Story 42.4)
   - the policy for a bad release (fix-forward or `npm deprecate`) and a `SECURITY.md` disclosure channel (Story 42.5);
   - the version policies for the extension, the plugin and IPM (Stories 42.7, 42.8 and 42.4);
   - the first-publish route under npm trusted publishing (Story 42.5). A staged publish creates a `0.0.0-stage` placeholder, which conflicts with D2, so the choice goes to the Lead.
-- **Annotation divergences of existing tools** (AD-4). The Epic 38 gate routes them to one ledger entry with an owner.
+- **Annotation divergences of existing tools** (AD-4). The Epic 38 gate routes them to one ledger entry with an owner. The `iris_execute_tests` divergence was closed in Story 40.4 (DW-498); the `destructiveHint: false` divergences remain.
 - **Development toolchain staleness** (Vitest 2, TypeScript 5.9, Turborepo, pnpm 9). Revisit at the Epic 42 gate. Story 42.5 pins whatever the release path needs.
 - **Declined on 2026-10-14:** G8, G17, G41, G45 and G47. The reasons are in the research gap register, and reopening one needs a Project Lead decision.

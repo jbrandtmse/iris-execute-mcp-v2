@@ -50,10 +50,10 @@ describe("iris-dev-mcp tool visibility presets (Story 30.1)", () => {
     });
   });
 
-  it("pins the exact roster sizes (dev: core 14/17, developer 31/0 - Story 36.2 added iris_test_status, developer-include/core-exclude; Story 38.4 added iris_doc_edit and Story 38.5 added iris_sql_query to both)", () => {
+  it("pins the exact roster sizes (dev: core 14/18, developer 32/0 - Story 36.2 added iris_test_status and Story 40.1 added iris_test_coverage, both developer-include/core-exclude; Story 38.4 added iris_doc_edit and Story 38.5 added iris_sql_query to both)", () => {
     expect(toolPresets.core.include.length).toBe(14);
-    expect(toolPresets.core.exclude.length).toBe(17);
-    expect(toolPresets.developer.include.length).toBe(31);
+    expect(toolPresets.core.exclude.length).toBe(18);
+    expect(toolPresets.developer.include.length).toBe(32);
     expect(toolPresets.developer.exclude.length).toBe(0);
   });
 
@@ -97,6 +97,15 @@ describe("iris-dev-mcp tool visibility presets (Story 30.1)", () => {
         expect(toolPresets[preset].include, preset).toContain("iris_doc_get");
         expect(toolPresets[preset].include, preset).toContain("iris_doc_edit");
       }
+    });
+
+    it("iris_test_coverage / iris_test_status are co-visible: both excluded from core and both included in developer (Story 40.1; no core row moves)", () => {
+      expect(TOOL_PAIRS).toContainEqual(["iris_test_coverage", "iris_test_status"]);
+      expect(toolPresets.core.exclude).toContain("iris_test_coverage");
+      expect(toolPresets.core.exclude).toContain("iris_test_status");
+      expect(toolPresets.core.include).not.toContain("iris_test_coverage");
+      expect(toolPresets.developer.include).toContain("iris_test_coverage");
+      expect(toolPresets.developer.include).toContain("iris_test_status");
     });
 
     it("iris_env_diff / iris_env_promote are both excluded from core and both included in developer", () => {

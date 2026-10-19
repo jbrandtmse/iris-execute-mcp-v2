@@ -41,6 +41,7 @@ import {
 import { z } from "zod";
 import { booleanParam } from "./zod-helpers.js";
 import { docNameToFilePath } from "./load.js";
+import { assertInsideRoot, validateLocalPath } from "./local-path.js";
 import {
   DOC_TYPE_DESCRIPTION,
   extractAtelierContentArray,
@@ -157,45 +158,6 @@ function extractServerTimestamp(entry: unknown): string | undefined {
   if (typeof entry !== "object" || entry === null) return undefined;
   const ts = (entry as { ts?: unknown; db?: unknown; upd?: unknown }).ts;
   return typeof ts === "string" ? ts : undefined;
-}
-
-/**
- * Hard-reject any user-supplied path that contains `..` segments or
- * that does not resolve to an absolute location on disk.
- *
- * Returns an error message string, or `undefined` if the path is safe.
- */
-function validateDestinationDir(destinationDir: string): string | undefined {
-  if (typeof destinationDir !== "string" || destinationDir.length === 0) {
-    return "destinationDir must be a non-empty string";
-  }
-  // Reject if the raw input contains traversal syntax.
-  const norm = destinationDir.replace(/\\/g, "/");
-  if (norm.split("/").some((seg) => seg === "..")) {
-    return `destinationDir '${destinationDir}' must not contain '..' (path traversal)`;
-  }
-  if (!path.isAbsolute(destinationDir)) {
-    return `destinationDir '${destinationDir}' must be an absolute path`;
-  }
-  return undefined;
-}
-
-/**
- * Assert that a resolved local path stays inside the destinationDir
- * root. Throws on escape (returned as a hard error — not a skip —
- * because this would indicate a server-controlled doc name trying to
- * write outside the caller's chosen sandbox).
- */
-function assertInsideRoot(resolvedPath: string, root: string): void {
-  const rootResolved = path.resolve(root);
-  const rootWithSep = rootResolved.endsWith(path.sep)
-    ? rootResolved
-    : rootResolved + path.sep;
-  if (resolvedPath !== rootResolved && !resolvedPath.startsWith(rootWithSep)) {
-    throw new Error(
-      `Refusing to write '${resolvedPath}': resolves outside destinationDir '${rootResolved}'`,
-    );
-  }
 }
 
 /**
@@ -365,7 +327,7 @@ export const docExportTool: ToolDefinition = {
     const ns = ctx.resolveNamespace(a.namespace);
 
     // ── Validate destinationDir (path-traversal hard guard) ───────
-    const validationError = validateDestinationDir(destinationDir);
+    const validationError = validateLocalPath(destinationDir, "destinationDir");
     if (validationError) {
       return {
         content: [{ type: "text", text: validationError }],

@@ -1,0 +1,124 @@
+<?xml version="1.0" ?>
+<!DOCTYPE coverage SYSTEM "https://raw.githubusercontent.com/cobertura/web/master/htdocs/xml/coverage-04.dtd">
+<coverage line-rate="0.8889" branch-rate="0" lines-covered="24" lines-valid="27" branches-covered="0" branches-valid="0" complexity="0" version="iris-mcp-dev 0.0.2" timestamp="1792312277953">
+  <packages>
+    <package name="Story402" line-rate="0.8889" branch-rate="0" complexity="0">
+      <classes>
+        <class name="Story402.Fixture" filename="Story402/Fixture.cls" line-rate="0.9565" branch-rate="0" complexity="0">
+          <methods>
+            <method name="ScoreSet" signature="" line-rate="1" branch-rate="0">
+              <lines>
+                <line number="13" hits="1"/>
+                <line number="14" hits="1"/>
+              </lines>
+            </method>
+            <method name="LabelGet" signature="" line-rate="1" branch-rate="0">
+              <lines>
+                <line number="19" hits="1"/>
+              </lines>
+            </method>
+            <method name="Plain" signature="" line-rate="1" branch-rate="0">
+              <lines>
+                <line number="24" hits="1"/>
+                <line number="25" hits="1"/>
+              </lines>
+            </method>
+            <method name="Macro" signature="" line-rate="0.8" branch-rate="0">
+              <lines>
+                <line number="30" hits="1"/>
+                <line number="31" hits="0"/>
+                <line number="33" hits="1"/>
+                <line number="35" hits="1"/>
+                <line number="36" hits="1"/>
+              </lines>
+            </method>
+            <method name="MultiLine" signature="" line-rate="1" branch-rate="0">
+              <lines>
+                <line number="41" hits="1"/>
+                <line number="44" hits="1"/>
+                <line number="46" hits="1"/>
+                <line number="48" hits="1"/>
+              </lines>
+            </method>
+            <method name="Sql" signature="" line-rate="1" branch-rate="0">
+              <lines>
+                <line number="53" hits="1"/>
+                <line number="54" hits="1"/>
+                <line number="55" hits="1"/>
+                <line number="56" hits="1"/>
+              </lines>
+            </method>
+            <method name="Expr" signature="" line-rate="1" branch-rate="0">
+              <lines>
+                <line number="68" hits="1"/>
+              </lines>
+            </method>
+            <method name="Comments" signature="" line-rate="1" branch-rate="0">
+              <lines>
+                <line number="81" hits="1"/>
+                <line number="82" hits="1"/>
+              </lines>
+            </method>
+            <method name="TwoOnOne" signature="" line-rate="1" branch-rate="0">
+              <lines>
+                <line number="87" hits="1"/>
+                <line number="88" hits="1"/>
+              </lines>
+            </method>
+          </methods>
+          <lines>
+            <line number="13" hits="1"/>
+            <line number="14" hits="1"/>
+            <line number="19" hits="1"/>
+            <line number="24" hits="1"/>
+            <line number="25" hits="1"/>
+            <line number="30" hits="1"/>
+            <line number="31" hits="0"/>
+            <line number="33" hits="1"/>
+            <line number="35" hits="1"/>
+            <line number="36" hits="1"/>
+            <line number="41" hits="1"/>
+            <line number="44" hits="1"/>
+            <line number="46" hits="1"/>
+            <line number="48" hits="1"/>
+            <line number="53" hits="1"/>
+            <line number="54" hits="1"/>
+            <line number="55" hits="1"/>
+            <line number="56" hits="1"/>
+            <line number="68" hits="1"/>
+            <line number="81" hits="1"/>
+            <line number="82" hits="1"/>
+            <line number="87" hits="1"/>
+            <line number="88" hits="1"/>
+          </lines>
+        </class>
+        <class name="Story402.Layout" filename="Story402/Layout.cls" line-rate="0.5" branch-rate="0" complexity="0">
+          <methods>
+            <method name="Spaced" signature="" line-rate="1" branch-rate="0">
+              <lines>
+                <line number="9" hits="1"/>
+                <line number="11" hits="1"/>
+              </lines>
+            </method>
+            <method name="Gap" signature="" line-rate="0" branch-rate="0">
+              <lines>
+                <line number="21" hits="0"/>
+              </lines>
+            </method>
+            <method name="Inst" signature="" line-rate="0" branch-rate="0">
+              <lines>
+                <line number="26" hits="0"/>
+              </lines>
+            </method>
+          </methods>
+          <lines>
+            <line number="9" hits="1"/>
+            <line number="11" hits="1"/>
+            <line number="21" hits="0"/>
+            <line number="26" hits="0"/>
+          </lines>
+        </class>
+      </classes>
+    </package>
+  </packages>
+</coverage>

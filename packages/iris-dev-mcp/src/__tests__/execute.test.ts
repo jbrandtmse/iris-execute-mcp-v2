@@ -867,6 +867,8 @@ describe("iris_execute_tests", () => {
   let mockHttp: ReturnType<typeof createMockHttp>;
   /** `/global` GET reads (run-index capture) — see beforeEach. */
   let globalGet: ReturnType<typeof vi.fn>;
+  /** `GET /dev/test/production` guard reads (Story 40.3), see beforeEach. */
+  let productionGuardGet: ReturnType<typeof vi.fn>;
   let ctx: ToolContext;
 
   beforeEach(() => {
@@ -886,10 +888,27 @@ describe("iris_execute_tests", () => {
       console: [],
       result: { value: "", defined: false },
     }));
+    // MOCK PLUMBING ONLY (Story 40.3, AD-15): the tool asks the TestProduction guard route before it queues
+    // anything. Route that GET to its own mock too, answering the shape the real route returns for a run with
+    // no TestProduction test (`ExecuteMCPv2.REST.UnitTest:ProductionGuard`, Rule #54), so every fixture below
+    // is served exactly as it was and no test body or assertion changes.
+    productionGuardGet = vi.fn(async (path: string) => ({
+      status: { errors: [] },
+      console: [],
+      result: {
+        decision: "proceed",
+        namespace: new URLSearchParams(path.split("?")[1] ?? "").get("namespace") ?? "",
+        testProductions: [],
+      },
+    }));
     const routedHttp = {
       ...mockHttp,
       get: (path: string, options?: unknown) =>
-        path.startsWith("/api/executemcp/v2/global?") ? globalGet(path, options) : mockHttp.get(path, options),
+        path.startsWith("/api/executemcp/v2/global?")
+          ? globalGet(path, options)
+          : path.startsWith("/api/executemcp/v2/dev/test/production?")
+            ? productionGuardGet(path, options)
+            : mockHttp.get(path, options),
     };
     ctx = createMockCtx(routedHttp as unknown as IrisHttpClient);
   });
@@ -1586,11 +1605,11 @@ describe("iris_execute_tests", () => {
     ).rejects.toThrow("ECONNREFUSED");
   });
 
-  it("should have correct annotations (readOnlyHint: true, destructiveHint: false)", () => {
+  it("should have correct annotations (readOnlyHint: false, idempotentHint: false: a run writes results and may not be re-submitted)", () => {
     expect(executeTestsTool.annotations).toEqual({
-      readOnlyHint: true,
+      readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: true,
+      idempotentHint: false,
       openWorldHint: false,
     });
   });

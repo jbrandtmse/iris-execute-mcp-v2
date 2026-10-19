@@ -1,7 +1,7 @@
 /**
  * Embedded ObjectScript class content for the ExecuteMCPv2 REST service.
  *
- * Contains all 32 production classes as string literals, keyed by their
+ * Contains all 35 production classes as string literals, keyed by their
  * document name (e.g. "ExecuteMCPv2.Utils.cls"). These are deployed to
  * IRIS via the Atelier PUT /doc endpoint during bootstrap.
  *
@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "7d12cd8b3a1e";
+export const BOOTSTRAP_VERSION = "5296a1c836f4";
 
 export interface BootstrapClass {
   name: string;
@@ -1224,7 +1224,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "7d12cd8b3a1e";
+Parameter BOOTSTRAPVERSION = "5296a1c836f4";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -3572,6 +3572,1431 @@ ClassMethod Pct(pNum As %Integer, pDen As %Integer) As %Numeric [ Internal ]
 }`,
   ],
   [
+    "ExecuteMCPv2.Coverage.Job.cls",
+    `/// Line-coverage job mechanics for <class>ExecuteMCPv2.REST.Coverage</class> (Stories 40.1 and 40.2).
+/// <p>This library owns the run record, the busy decision, routine resolution, the token skeleton,
+/// the class-source map and the supervisor job. It returns raw data only: which INT lines are executable,
+/// which class lines they belong to, and every percentage and verdict, is decided in TypeScript (AD-12).</p>
+/// <p><b>Two suite jobs per run (AD-27).</b> The runner (<class>ExecuteMCPv2.Coverage.Runner</class>)
+/// starts a Line-by-Line session scoped to itself and to the supervisor, runs the tests and stops its own
+/// session. The supervisor (<method>Supervise</method>) turns a cancel or the time limit into terminating the
+/// runner, and releases a session that a dead runner left behind. A session counts only the processes in its
+/// process list, and <code>$SYSTEM.Process.Terminate</code> cannot be trapped, so the process that runs the
+/// tests cannot be the only one that releases the monitor. Only a process in the session's process list can
+/// read its routine names and line counts, which is why the supervisor is in that list.</p>
+/// <p><b>Releasing the session.</b> Either releaser reads the counts and stops the session only after
+/// <method>ProofFailure</method> shows that the active session is the run's own, and the two releasers never
+/// act at once: both take the run's release lock and the monitor's own lock
+/// (<method>TakeReleaseLocks</method>) and hold them from the proof through <code>Stop</code>. A lock that cannot
+/// be taken in time stops nothing: when the runner cannot take it, the supervisor releases the session afterwards, and
+/// when the supervisor cannot, the run ends <code>release-failed</code>.</p>
+/// <p><b>The run record</b> lives in <code>^IRIS.TempExecuteMCPv2Coverage</code>, which is IRISTEMP:
+/// instance-wide, like the monitor, and not journaled. The 20 most recent runs are kept and a record
+/// does not survive an instance restart.</p>
+/// <ul>
+/// <li><code>("seq")</code> is the last run id allocated; <code>("run",id,field)</code> are the run's fields.</li>
+/// <li><code>("session")</code> exists while a suite session may be active:
+/// <code>$ListBuild(runId, supervisorPid, runnerPid, startedAt, $ListBuild(routine, ...))</code>.</li>
+/// <li><code>("owner",id,"supervisor")</code> and <code>("owner",id,"runner")</code> are locks that each
+/// process holds for its whole life. IRIS releases a dead process's lock, so a lock that can be taken
+/// with timeout 0 belongs to a dead process.</li>
+/// <li><code>("owner",id,"release")</code> is not a liveness lock: a releaser holds it only while it proves, reads
+/// and stops, and <method>OwnerAlive</method> and <method>MayTerminate</method> never read it.</li>
+/// <li><code>("start")</code> is the lock that makes the busy check and the launch atomic.</li>
+/// <li><code>("run",id,"minCoverage")</code> is the optional target the run was started with.</li>
+/// <li><code>("run",id,"sources",n)</code> is the class-source map of the n-th measured class
+/// (<method>SourceMap</method>), written by <method>Finish</method> beside <code>("run",id,"skeleton",n)</code>.</li>
+/// </ul>
+Class ExecuteMCPv2.Coverage.Job Extends %RegisteredObject
+{
+
+/// The number of run records kept.
+Parameter MAXRUNS As %Integer = 20;
+
+/// Seconds a releaser waits for the run's release lock, which the other releaser holds while it proves and stops.
+Parameter RELEASELOCKSECONDS As %Integer = 10;
+
+/// Seconds a releaser waits for the monitor's own lock, <code>^%SYS("MON-HOLD")</code>.
+Parameter MONITORLOCKSECONDS As %Integer = 5;
+
+/// Is a Line-by-Line or PERFMON session active on this instance? This is the only place the suite calls
+/// <code>$ZUtil(84,...)</code>; <code>$ZUtil(84,8)</code> is the same test <code>%Monitor.System.LineByLine:Start</code>
+/// makes. <var>pPids</var> receives the process ids the session is scoped to (space-delimited), and is empty when the
+/// session is not scoped to listed processes or cannot say (see <method>ScopedPids</method>).
+/// <p>Any process can read the process list, but only a process that is itself in that list can read the session's
+/// routine names and line counts (probe, IRIS 2026.2 build 221U: a process outside the list reads them as
+/// unavailable, and a process in the list can read them after a short delay). That is why the session identity
+/// check below compares process lists, and why the supervisor is in the session's process list.</p>
+ClassMethod MonitorActive(Output pPids As %String) As %Boolean
+{
+    Set pPids = ""
+    If $ZUtil(84, 8) '= 1 Quit 0
+    Try {
+        Set pPids = ..ScopedPids($ZUtil(84, 1), $ZUtil(84, 10, 2))
+    } Catch {
+        Set pPids = ""
+    }
+    Quit 1
+}
+
+/// The process list <var>pPids</var> as a session of collection mode <var>pMode</var> (<code>$ZUtil(84,1)</code>)
+/// means it: the list itself when the session is scoped to listed processes (mode 2, as
+/// <code>%Monitor.System.LineByLine:Start</code> sets it for a non-empty process list), and empty otherwise. In
+/// all-processes mode (mode 1) every process is monitored, so the list is not a scope (probe, IRIS 2026.2 build 221U:
+/// it read the starting process and then other processes). A paused session (mode 0) was not probed:
+/// <code>%Monitor.System.LineByLine:Pause</code> saves a copy of a scoped session's list in
+/// <code>^|"%SYS"|SYS("MONITOR","PAUSE","SELECTED")</code> before it sets mode 0, and <code>Resume</code> registers
+/// those processes again, so what the list reads in mode 0 is not relied on. Neither mode's list says anything about the
+/// active session, so neither is trusted.
+ClassMethod ScopedPids(pMode As %Integer, pPids As %String) As %String
+{
+    If pMode '= 2 Quit ""
+    Quit pPids
+}
+
+/// Does the active Line-by-Line session's process list name process <var>pPid</var>? Only a session scoped to
+/// listed processes can (see <method>ScopedPids</method>). A releaser asks this of itself first: a session that does
+/// not list it is not one it can prove to be its run's (see <method>ProofFailure</method>).
+ClassMethod ListsProcess(pPid As %String) As %Boolean
+{
+    If (pPid = "") || '..MonitorActive(.tPids) Quit 0
+    Quit ((" "_tPids_" ") [ (" "_pPid_" "))
+}
+
+/// The routines the active Line-by-Line session monitors, as a <class>%List</class>; empty when none is active.
+/// A name this process cannot read yet is an empty element (see <method>MonitorActive</method>).
+ClassMethod ActiveRoutines() As %List
+{
+    Set tList = ""
+    If '..MonitorActive() Quit tList
+    Set tCount = ##class(%Monitor.System.LineByLine).GetRoutineCount()
+    For tI = 1:1:tCount {
+        Set tList = tList_$ListBuild(##class(%Monitor.System.LineByLine).GetRoutineName(tI))
+    }
+    Quit tList
+}
+
+/// Can this process read the active session's routine names and line counts?
+ClassMethod NamesReadable() As %Boolean
+{
+    Quit ..AllNamed(..ActiveRoutines())
+}
+
+/// Does the routine list <var>pList</var> hold at least one routine and no empty name (a name that could not be read)?
+ClassMethod AllNamed(pList As %List) As %Boolean
+{
+    If $ListLength(pList) = 0 Quit 0
+    Set tNamed = 1
+    For tI = 1:1:$ListLength(pList) {
+        If $List(pList, tI) = "" {
+            Set tNamed = 0
+            Quit
+        }
+    }
+    Quit tNamed
+}
+
+/// Wait up to <var>pSeconds</var> for this process to be able to read the active session's routine names, which a
+/// process in the session's process list can do after a short delay. Returns at once when the session does not list
+/// this process (it can never read the names then) or has ended. The wait happens before any lock is taken, so the
+/// monitor's own lock is never held while waiting. Returns whether the names are readable.
+ClassMethod AwaitNamesReadable(pSeconds As %Integer = 15) As %Boolean
+{
+    For tI = 1:1:(pSeconds * 5) {
+        If '..ListsProcess($Job) Quit
+        If ..NamesReadable() Quit
+        Hang 0.2
+    }
+    Quit ..NamesReadable()
+}
+
+/// Why the active Line-by-Line session is not scoped to the run whose supervisor is <var>pSupervisorPid</var> and whose
+/// test process is <var>pRunnerPid</var>, as process <var>pSelfPid</var> (one of the two) can tell; empty when it is.
+/// <var>pPids</var> is the session's process list as <method>MonitorActive</method> returns it. The scope holds only when
+/// the session is scoped to listed processes, its list names this process, and its list holds only the run's two
+/// processes that are still alive (<method>PidsMatch</method>). A session that monitors no routine has nothing else to
+/// prove, so this is the whole proof for it (see <method>ProofFailure</method> for a session that monitors routines).
+ClassMethod SessionScopeFailure(pPids As %String, pSelfPid As %String, pSupervisorPid As %String, pRunnerPid As %String) As %String
+{
+    If pPids = "" Quit "The active monitor session is not scoped to listed processes."
+    If (pSelfPid = "") || ((" "_pPids_" ") '[ (" "_pSelfPid_" ")) Quit "The active monitor session does not list this process."
+    If '..PidsMatch(pPids, pSupervisorPid, pRunnerPid) Quit "The active monitor session lists a process that is neither this run's test process nor its supervisor."
+    Quit ""
+}
+
+/// Why the active Line-by-Line session is not the session of the run whose supervisor is <var>pSupervisorPid</var>,
+/// whose test process is <var>pRunnerPid</var> and whose routines are <var>pRoutineList</var>, as process
+/// <var>pSelfPid</var> (one of the two) can tell; empty when it is. <var>pPids</var> is the session's process list as
+/// <method>MonitorActive</method> returns it, <var>pActive</var> the routines it reports. A session proves to be the
+/// run's only when all of these hold: it is scoped to listed processes; its list names this process; its list holds
+/// only the run's two processes that are still alive (<method>PidsMatch</method>), the three checks of
+/// <method>SessionScopeFailure</method>; this process can read every routine name; and the names equal the run's
+/// routine list.
+ClassMethod ProofFailure(pPids As %String, pSelfPid As %String, pSupervisorPid As %String, pRunnerPid As %String, pRoutineList As %List, pActive As %List) As %String
+{
+    Set tScope = ..SessionScopeFailure(pPids, pSelfPid, pSupervisorPid, pRunnerPid)
+    If tScope '= "" Quit tScope
+    If '..AllNamed(pActive) Quit "This process could not read the routine names of the active monitor session."
+    If '..ListsEqual(pRoutineList, pActive) Quit "The routines the monitor session reports are not this run's routine list."
+    Quit ""
+}
+
+/// Does the active Line-by-Line session prove to be run <var>pId</var>'s, as seen by the runner (this process)? The
+/// runner is in its own session's process list, so it can read the routine names. See <method>ProofFailure</method>.
+ClassMethod RunnerOwnsSession(pId As %Integer) As %Boolean
+{
+    If '..MonitorActive(.tPids) Quit 0
+    Quit (..ProofFailure(tPids, $Job, ..RunGet(pId, "pid"), $Job, ..RunGet(pId, "routineList"), ..ActiveRoutines()) = "")
+}
+
+/// Does the active session's own process list disprove the session node <var>pSession</var>? Only a session scoped to
+/// listed processes has a list of its own (see <method>ScopedPids</method>), so only such a session can be shown not to
+/// be the one the node describes: a session of all processes, or a paused one, cannot, and the node is kept.
+ClassMethod SessionDisproved(pSession As %List) As %Boolean
+{
+    If pSession = "" Quit 0
+    If '..MonitorActive(.tPids) Quit 0
+    Quit ..NodeDisproved(pSession, tPids, ##class(%Monitor.System.LineByLine).GetRoutineCount())
+}
+
+/// The decision of <method>SessionDisproved</method> on given state: the process list <var>pPids</var> is a scoped
+/// session's own (not empty) and does not match the session node <var>pSession</var> (see <method>NodeMatches</method>).
+ClassMethod NodeDisproved(pSession As %List, pPids As %String, pRoutineCount As %Integer) As %Boolean
+{
+    If (pSession = "") || (pPids = "") Quit 0
+    Quit '..NodeMatches(pSession, pPids, pRoutineCount)
+}
+
+/// Take the locks under which one releaser at a time proves a session its own and stops it: the run's release lock
+/// (<code>("owner",id,"release")</code>), then the monitor's own lock, <code>^%SYS("MON-HOLD")</code>, which
+/// <code>%Monitor.System.LineByLine</code> takes in <code>Start</code>, <code>Stop</code>, <code>Pause</code> and
+/// <code>Resume</code>, each of which refuses when it cannot take it within 3 seconds. Held from the identity check
+/// through <code>Stop</code>, they leave no gap in which the other releaser, or another caller of those four methods,
+/// can act. They do not exclude <code>%Monitor.System.LineByLine:Clear</code> or the <code>^PROFILE</code> utility,
+/// which take <code>^|"%SYS"|SYS("MON-HOLD")</code> instead, nor <code>AddRoutine</code>, which goes on without the
+/// lock after 3 seconds. Each is taken with a timeout. Returns 1 when both are held; otherwise it holds neither, returns 0, and
+/// <var>pWhy</var> says which one timed out. The caller releases both with <method>DropReleaseLocks</method>.
+ClassMethod TakeReleaseLocks(pId As %Integer, Output pWhy As %String, pReleaseSeconds As %Integer = "", pMonitorSeconds As %Integer = "") As %Boolean
+{
+    Set pWhy = ""
+    If pReleaseSeconds = "" Set pReleaseSeconds = ..#RELEASELOCKSECONDS
+    If pMonitorSeconds = "" Set pMonitorSeconds = ..#MONITORLOCKSECONDS
+    Lock +^IRIS.TempExecuteMCPv2Coverage("owner", pId, "release"):pReleaseSeconds
+    If '$Test {
+        Set pWhy = "another releaser of this run held the release lock for "_pReleaseSeconds_" seconds"
+        Quit 0
+    }
+    Lock +^%SYS("MON-HOLD"):pMonitorSeconds
+    If '$Test {
+        Lock -^IRIS.TempExecuteMCPv2Coverage("owner", pId, "release")
+        Set pWhy = "the monitor's own lock was held by another process for "_pMonitorSeconds_" seconds"
+        Quit 0
+    }
+    Quit 1
+}
+
+/// Release the locks <method>TakeReleaseLocks</method> took.
+ClassMethod DropReleaseLocks(pId As %Integer)
+{
+    Lock -^%SYS("MON-HOLD")
+    Lock -^IRIS.TempExecuteMCPv2Coverage("owner", pId, "release")
+}
+
+/// Is the process list <var>pPids</var> that of a coverage session of the runner <var>pRunnerPid</var> and its
+/// supervisor <var>pSupervisorPid</var>? The runner starts the session with
+/// <code>$ListBuild($JOB, supervisorPid)</code>. IRIS reports the processes of the list that are still alive, space
+/// separated and in ascending order of process id (not the order they were given in); a process that has ended
+/// leaves the list, and a list with no live process reads <code>0</code> (probe, IRIS 2026.2 build 221U).
+/// So the list matches when it has one or two entries, each the runner's PID, the supervisor's PID or
+/// <code>0</code>, with no repeated PID. Any other list does not match.
+ClassMethod PidsMatch(pPids As %String, pSupervisorPid As %String, pRunnerPid As %String) As %Boolean
+{
+    If (pSupervisorPid = "") || (pRunnerPid = "") Quit 0
+    Set tCount = $Length(pPids, " ")
+    If (pPids = "") || (tCount > 2) Quit 0
+    For tI = 1:1:tCount {
+        Set tPid = $Piece(pPids, " ", tI)
+        If tPid = "" Quit
+        If (tPid '= 0) && (tPid '= pSupervisorPid) && (tPid '= pRunnerPid) {
+            Set tPid = ""
+            Quit
+        }
+        If (tPid '= 0) && $Data(tSeen(tPid)) {
+            Set tPid = ""
+            Quit
+        }
+        Set tSeen(tPid) = ""
+    }
+    Quit (tPid '= "")
+}
+
+/// Is the active session the one the session node <var>pSession</var> describes, as a process outside the session
+/// can prove it? Such a process cannot read the session's routine names, so the proof is the process list (see
+/// <method>PidsMatch</method>) and the number of monitored routines. This is the identity proof for reclaiming a
+/// session whose two owner processes have ended; the supervisor, which is in the process list, proves the stronger
+/// routine-name equality (see <method>ProveOwnSession</method>).
+ClassMethod SessionMatches(pSession As %List) As %Boolean
+{
+    If pSession = "" Quit 0
+    If '..MonitorActive(.tPids) Quit 0
+    Quit ..NodeMatches(pSession, tPids, ##class(%Monitor.System.LineByLine).GetRoutineCount())
+}
+
+/// The decision of <method>SessionMatches</method> on given state: the process list <var>pPids</var> matches the
+/// processes the session node <var>pSession</var> names (see <method>PidsMatch</method>), and the number of monitored
+/// routines <var>pRoutineCount</var> equals the node's routine count.
+ClassMethod NodeMatches(pSession As %List, pPids As %String, pRoutineCount As %Integer) As %Boolean
+{
+    If pSession = "" Quit 0
+    If '..PidsMatch(pPids, $ListGet(pSession, 2), $ListGet(pSession, 3)) Quit 0
+    Quit (pRoutineCount = $ListLength($ListGet(pSession, 5)))
+}
+
+/// Do two routine lists name the same routines, whatever their order?
+ClassMethod ListsEqual(pA As %List, pB As %List) As %Boolean
+{
+    If $ListLength(pA) '= $ListLength(pB) Quit 0
+    For tI = 1:1:$ListLength(pA) Set tSeen("n"_$List(pA, tI)) = ""
+    Set tEqual = 1
+    For tI = 1:1:$ListLength(pB) {
+        If '$Data(tSeen("n"_$List(pB, tI))) {
+            Set tEqual = 0
+            Quit
+        }
+    }
+    Quit tEqual
+}
+
+/// The busy decision, a pure function of the monitor and record state. Returns one of
+/// <code>proceed</code>, <code>reclaim</code>, <code>clear-and-proceed</code>,
+/// <code>clear-busy-foreign</code>, <code>busy-suite</code> and <code>busy-foreign</code>.
+/// <table>
+/// <tr><th>session node</th><th>owners alive</th><th>monitor active</th><th>list matches</th><th>live run</th><th>decision</th></tr>
+/// <tr><td>set</td><td>yes</td><td>any</td><td>any</td><td>any</td><td>busy-suite</td></tr>
+/// <tr><td>set</td><td>no</td><td>yes</td><td>yes</td><td>any</td><td>reclaim</td></tr>
+/// <tr><td>set</td><td>no</td><td>yes</td><td>no</td><td>any</td><td>clear-busy-foreign</td></tr>
+/// <tr><td>set</td><td>no</td><td>no</td><td>any</td><td>any</td><td>clear-and-proceed</td></tr>
+/// <tr><td>unset</td><td>n/a</td><td>any</td><td>any</td><td>yes</td><td>busy-suite</td></tr>
+/// <tr><td>unset</td><td>n/a</td><td>yes</td><td>any</td><td>no</td><td>busy-foreign</td></tr>
+/// <tr><td>unset</td><td>n/a</td><td>no</td><td>any</td><td>no</td><td>proceed</td></tr>
+/// </table>
+ClassMethod BusyDecision(pMonitorActive As %Boolean, pSessionDefined As %Boolean, pOwnersAlive As %Boolean, pListMatches As %Boolean, pLiveRun As %Boolean) As %String
+{
+    If pSessionDefined {
+        If pOwnersAlive Quit "busy-suite"
+        If 'pMonitorActive Quit "clear-and-proceed"
+        If pListMatches Quit "reclaim"
+        Quit "clear-busy-foreign"
+    }
+    If pLiveRun Quit "busy-suite"
+    If pMonitorActive Quit "busy-foreign"
+    Quit "proceed"
+}
+
+/// Gather the session, monitor and run state, and return the <method>BusyDecision</method>.
+/// <var>pSession</var> is the session node (empty when unset); <var>pLiveRunId</var> is the newest live
+/// non-terminal run (empty when none).
+ClassMethod Evaluate(Output pSession As %List, Output pLiveRunId As %Integer) As %String
+{
+    Set pSession = $Get(^IRIS.TempExecuteMCPv2Coverage("session"))
+    Set tDefined = ($Data(^IRIS.TempExecuteMCPv2Coverage("session")) # 2)
+    Set tActive = ..MonitorActive()
+    Set tOwners = 0
+    Set tMatches = 0
+    If tDefined {
+        Set tSessionId = $ListGet(pSession, 1)
+        Set tOwners = ..OwnerAlive(tSessionId, "supervisor") || ..OwnerAlive(tSessionId, "runner")
+        Set tMatches = ..SessionMatches(pSession)
+    }
+    Set pLiveRunId = ..LiveRunId()
+    Quit ..BusyDecision(tActive, tDefined, tOwners, tMatches, (pLiveRunId '= ""))
+}
+
+/// Is the process that holds <var>pRole</var>'s owner lock of run <var>pId</var> alive? A lock that can
+/// be taken with timeout 0 belongs to a dead process, and is released at once. Never call this for the
+/// role of the calling process: a process always takes a lock it already holds.
+ClassMethod OwnerAlive(pId As %Integer, pRole As %String) As %Boolean
+{
+    Lock +^IRIS.TempExecuteMCPv2Coverage("owner", pId, pRole):0
+    If $Test {
+        Lock -^IRIS.TempExecuteMCPv2Coverage("owner", pId, pRole)
+        Quit 0
+    }
+    Quit 1
+}
+
+/// May the suite terminate process <var>pPid</var> as the <var>pRole</var> (<code>supervisor</code> or
+/// <code>runner</code>) of run <var>pId</var>? A PID can be reused once its process dies, and this is a
+/// shared instance, so this is true only when <var>pPid</var> equals the record's PID for that role and
+/// that role's owner lock cannot be taken with timeout 0: the process holding it is still the suite's own.
+/// Call it immediately before every <code>Terminate</code>, and terminate only when it is true.
+ClassMethod MayTerminate(pId As %Integer, pRole As %String, pPid As %Integer) As %Boolean
+{
+    If (pRole '= "supervisor") && (pRole '= "runner") Quit 0
+    Set tRecordPid = $Get(^IRIS.TempExecuteMCPv2Coverage("run", pId, $Select(pRole = "supervisor": "pid", 1: "runnerPid")))
+    If (tRecordPid = "") || (pPid = "") || (pPid '= tRecordPid) Quit 0
+    Quit ..OwnerAlive(pId, pRole)
+}
+
+/// The newest non-terminal run whose supervisor or runner is alive; empty when there is none.
+ClassMethod LiveRunId() As %Integer
+{
+    Set tId = ""
+    For {
+        Set tId = $Order(^IRIS.TempExecuteMCPv2Coverage("run", tId), -1)
+        If tId = "" Quit
+        If ..IsTerminal(..RunGet(tId, "status")) Continue
+        If ..OwnerAlive(tId, "supervisor") || ..OwnerAlive(tId, "runner") Quit
+    }
+    Quit tId
+}
+
+/// Is <var>pStatus</var> a terminal run status?
+ClassMethod IsTerminal(pStatus As %String) As %Boolean
+{
+    Quit (pStatus = "completed") || (pStatus = "cancelled") || (pStatus = "failed") || (pStatus = "abandoned")
+}
+
+/// One field of a run record.
+ClassMethod RunGet(pId As %Integer, pField As %String) As %String
+{
+    Quit $Get(^IRIS.TempExecuteMCPv2Coverage("run", pId, pField))
+}
+
+/// Does run <var>pId</var> exist?
+ClassMethod RunExists(pId As %Integer) As %Boolean
+{
+    Quit ($Data(^IRIS.TempExecuteMCPv2Coverage("run", pId, "status")) # 2)
+}
+
+/// The current UTC time as ISO 8601 with a trailing <code>Z</code>.
+ClassMethod UtcNow() As %String
+{
+    Quit $Translate($ZDateTime($ZTimeStamp, 3, 1, 3), " ", "T")_"Z"
+}
+
+/// Set a run's status. A terminal status also records <code>finishedAt</code>, and
+/// <var>pReason</var> and <var>pError</var> are recorded when given.
+ClassMethod SetStatus(pId As %Integer, pStatus As %String, pReason As %String = "", pError As %String = "")
+{
+    If pReason '= "" Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "reason") = pReason
+    If pError '= "" Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "error") = pError
+    If ..IsTerminal(pStatus) Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "finishedAt") = ..UtcNow()
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "status") = pStatus
+}
+
+/// Write the record of a new run, in status <code>starting</code>. <var>pParams</var> holds the validated
+/// request (see <method>ExecuteMCPv2.REST.Coverage:ValidateStart</method>); <var>pRoutines</var> is the
+/// measured routines as <method>ResolveRoutines</method> returns them, <var>pUnmeasured</var> the classes
+/// that are not measured, <var>pSpec</var> the test spec, and <var>pReclaimed</var> the dead run this run
+/// reclaimed (<code>$ListBuild(runId, pid)</code>), or empty.
+ClassMethod CreateRun(pId As %Integer, ByRef pParams, pNamespace As %String, pRoutines As %List, pUnmeasured As %List, pSpec As %String, pReclaimed As %List = "")
+{
+    Kill ^IRIS.TempExecuteMCPv2Coverage("run", pId)
+    Set tNames = ""
+    For tI = 1:1:$ListLength(pRoutines) Set tNames = tNames_$ListBuild($List($List(pRoutines, tI), 2))
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "namespace") = pNamespace
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "target") = pParams("target")
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "level") = pParams("level")
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "maxSeconds") = pParams("maxSeconds")
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "maxLines") = pParams("maxLines")
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "classes") = pParams("classes")
+    If $Get(pParams("minCoverage")) '= "" Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "minCoverage") = pParams("minCoverage")
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "spec") = pSpec
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "routines") = pRoutines
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "routineList") = tNames
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "unmeasured") = pUnmeasured
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "startedAt") = ..UtcNow()
+    If pReclaimed '= "" Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "reclaimed") = pReclaimed
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "status") = "starting"
+}
+
+/// Keep at most <var>pMax</var> (default <parameter>MAXRUNS</parameter>) run records: delete the oldest terminal
+/// records, and any non-terminal record whose supervisor is dead. Never delete <var>pKeepId</var>, the run the
+/// session node names, or a non-terminal record whose supervisor is alive.
+ClassMethod Prune(pKeepId As %Integer, pMax As %Integer = "")
+{
+    If pMax = "" Set pMax = ..#MAXRUNS
+    Set tCount = 0
+    Set tId = ""
+    For {
+        Set tId = $Order(^IRIS.TempExecuteMCPv2Coverage("run", tId))
+        If tId = "" Quit
+        Set tCount = tCount + 1
+    }
+    If tCount <= pMax Quit
+    Set tSessionId = $ListGet($Get(^IRIS.TempExecuteMCPv2Coverage("session")), 1)
+    Set tId = ""
+    For {
+        Set tId = $Order(^IRIS.TempExecuteMCPv2Coverage("run", tId))
+        If (tId = "") || (tCount <= pMax) Quit
+        If (tId = pKeepId) || (tId = tSessionId) Continue
+        If '..IsTerminal(..RunGet(tId, "status")) && ..OwnerAlive(tId, "supervisor") Continue
+        Kill ^IRIS.TempExecuteMCPv2Coverage("run", tId)
+        Set tCount = tCount - 1
+    }
+}
+
+/// Is <var>pName</var> a class name: a name the class dictionary accepts (<class>%Dictionary.Classname</class>, the type
+/// of <code>%Dictionary.ClassDefinition.Name</code>)? That is at most 220 characters of dot-separated names, each a valid
+/// IRIS name of letters and digits that begins with a letter, where only the first may begin with <code>%</code>. Any
+/// letter IRIS accepts in a name counts, a letter without case (a CJK one, for example) included, so every class that can
+/// exist is a class name here.
+ClassMethod IsClassName(pName As %String) As %Boolean
+{
+    If (pName = "") || ($Length(pName) > 220) Quit 0
+    Quit $$$ISOK(##class(%Dictionary.Classname).IsValid(pName))
+}
+
+/// Resolve the routines to measure for <var>pClasses</var> (a <class>%List</class> of class names) in namespace
+/// <var>pNamespace</var>. For each class, the routines <code>.1</code> to <code>.N</code> that the compiler
+/// generated (the <code>.0</code> method-generator routine is never measured). A class is measured only when
+/// it is compiled and every routine that has object code also has kept INT source.
+/// <p>Returns a <class>%List</class> of <code>$ListBuild(class, routine, lines)</code>. <var>pUnmeasured</var>
+/// is a <class>%List</class> of <code>$ListBuild(class, reason)</code>, where reason is <code>not-compiled</code>,
+/// <code>no-routines</code> (no routine of the class has object code) or <code>no-int-source</code>.
+/// <var>pTotalLines</var> is the number of INT lines over the measured routines. <var>pError</var> is empty, or
+/// IRIS's own text when resolving failed (a namespace or privilege error); nothing is then measured.</p>
+ClassMethod ResolveRoutines(pNamespace As %String, pClasses As %List, Output pUnmeasured As %List, Output pTotalLines As %Integer, Output pError As %String) As %List
+{
+    Set tResult = ""
+    Set pUnmeasured = ""
+    Set pTotalLines = 0
+    Set pError = ""
+    Set tOrigNS = $NAMESPACE
+    Try {
+        If pNamespace '= "" Set $NAMESPACE = pNamespace
+        For tI = 1:1:$ListLength(pClasses) {
+            Set tClass = $List(pClasses, tI)
+            If '$$$comClassDefined(tClass) {
+                Set pUnmeasured = pUnmeasured_$ListBuild($ListBuild(tClass, "not-compiled"))
+                Continue
+            }
+            Set tCount = +$$$comClassKeyGet(tClass, $$$cCLASSroutinecount)
+            Set tEntries = ""
+            Set tLines = 0
+            Set tMissingSource = 0
+            For tN = 1:1:tCount {
+                Set tRoutine = $$$nameClassRoutineNameGet(tClass, tN)
+                If '$Data(^rOBJ(tRoutine)) Continue
+                If '$Data(^ROUTINE(tRoutine, 0, 0)) {
+                    Set tMissingSource = 1
+                    Quit
+                }
+                Set tEntries = tEntries_$ListBuild($ListBuild(tClass, tRoutine, +$Get(^ROUTINE(tRoutine, 0, 0))))
+                Set tLines = tLines + $Get(^ROUTINE(tRoutine, 0, 0))
+            }
+            If tMissingSource {
+                Set pUnmeasured = pUnmeasured_$ListBuild($ListBuild(tClass, "no-int-source"))
+            } ElseIf tEntries = "" {
+                Set pUnmeasured = pUnmeasured_$ListBuild($ListBuild(tClass, "no-routines"))
+            } Else {
+                Set tResult = tResult_tEntries
+                Set pTotalLines = pTotalLines + tLines
+            }
+        }
+    } Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tResult = ""
+        Set pUnmeasured = ""
+        Set pTotalLines = 0
+        Set pError = ..SafeText($System.Status.GetErrorText(ex.AsStatus()))
+    }
+    Set $NAMESPACE = tOrigNS
+    Quit tResult
+}
+
+/// The token skeleton of INT routine <var>pRoutine</var> in namespace <var>pNamespace</var>, by line:
+/// <code>pSkeleton(line)</code> is the line's labels, commands and braces. A line with no command has no entry.
+/// See <method>LineSkeleton</method>.
+ClassMethod Skeleton(pNamespace As %String, pRoutine As %String, Output pSkeleton) As %Status
+{
+    Kill pSkeleton
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        If pNamespace '= "" Set $NAMESPACE = pNamespace
+        If '$Data(^ROUTINE(pRoutine, 0, 0)) {
+            Set tSC = $$$ERROR($$$GeneralError, "INT routine "_pRoutine_" has no kept source in namespace "_$NAMESPACE)
+            Quit
+        }
+        Set tRoutine = ##class(%Library.Routine).%OpenId(pRoutine_".INT")
+        If '$IsObject(tRoutine) {
+            Set tSC = $$$ERROR($$$GeneralError, "INT routine "_pRoutine_" could not be opened in namespace "_$NAMESPACE)
+            Quit
+        }
+        Set tStream = ##class(%Stream.TmpCharacter).%New()
+        While 'tRoutine.AtEnd {
+            Do tStream.WriteLine(tRoutine.ReadLine())
+        }
+        Set tSC = ##class(%Library.SyntaxColorReader).FromCode(tStream, "INT", "A", .tReader)
+        If $$$ISERR(tSC) Quit
+        Set tLine = 0
+        While tReader.NextLine(.tTokens) {
+            Set tLine = tLine + 1
+            Set tText = ..LineSkeleton(tTokens)
+            If tText '= "" Set pSkeleton(tLine) = tText
+        }
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Set $NAMESPACE = tOrigNS
+    Quit tSC
+}
+
+/// The skeleton of one line from its syntax-colour tokens (each <code>$ListBuild(language, attribute, text)</code>):
+/// a <code>Label</code> token becomes <code>L</code>, a <code>Command</code> token <code>C:</code> and its text in
+/// lower case, and a <code>Brace</code> token its text. Every other token is dropped, and the rest are joined with
+/// single spaces. A line with no <code>Command</code> token returns an empty string.
+ClassMethod LineSkeleton(pTokens As %List) As %String
+{
+    Set tText = ""
+    Set tHasCommand = 0
+    For tI = 1:1:$ListLength(pTokens) {
+        Set tToken = $List(pTokens, tI)
+        Set tAttribute = $List(tToken, 2)
+        If tAttribute = "Label" {
+            Set tPart = "L"
+        } ElseIf tAttribute = "Command" {
+            Set tPart = "C:"_$ZConvert($List(tToken, 3), "L")
+            Set tHasCommand = 1
+        } ElseIf tAttribute = "Brace" {
+            Set tPart = $List(tToken, 3)
+        } Else {
+            Continue
+        }
+        Set tText = tText_$Select(tText = "": "", 1: " ")_tPart
+    }
+    If 'tHasCommand Quit ""
+    Quit tText
+}
+
+/// The class-source map of class <var>pClass</var> in namespace <var>pNamespace</var>: which INT line each body line of
+/// each method that the class itself defines belongs to. It is raw data, the sibling of <method>Skeleton</method>
+/// (AD-12): which of those INT lines are executable or covered, and what share of them is, is decided in TypeScript.
+/// <p><var>pMap</var> is <code>$ListBuild(class, reason)</code> for a class with <code>reason</code>
+/// <code>not-compiled</code> (the class has no compiled definition) or <code>not-up-to-date</code> (its definition
+/// changed after it was compiled, <code>$System.OBJ.IsUpToDate</code>, so the compiled code no longer matches the
+/// document), and <code>$ListBuild(class, "", lineMap)</code> for a class that is mapped. <code>lineMap</code> is
+/// <code>$Data(^rMAP(class))</code> in the target namespace: 10 while the class has the debug line map that its compile
+/// wrote, and 0 once a documentation-only save removed it, which is how a stale map shows. Then, for each method that the
+/// class source defines, in the order the class document declares them,
+/// <code>pMap("m",i)</code> is <code>$ListBuild(name, line, routine, reason, labelLine)</code>:</p>
+/// <ul>
+/// <li><code>line</code> is the class-document line D that declares the method, or empty when it cannot be found.
+/// A class is stored in IRIS's own layout (signature on one line, <code>{</code> on line D+1), so body line k of the
+/// method (k = 1 to n) is document line D+1+k, and the closing brace is line D+2+n.</li>
+/// <li><code>reason</code> is empty for a method whose body lines map: <code>generator</code> (CodeMode
+/// <code>objectgenerator</code> or <code>generator</code>: the body runs at compile time), <code>not-objectscript</code> (any
+/// other Language) or <code>layout</code> (the declaration, the <code>{</code> line or the <code>}</code> line is not where
+/// the layout says). A method with a reason has no body map.</li>
+/// <li><code>pMap("m",i,k)</code> is the INT line of body line k, or 0 when that line has none. It comes from
+/// <code>%Studio.Debugger:INTLine</code>, and only return type 0 (mapped) counts: 1 means the line is unmapped and the next
+/// mapped line is returned instead, 2 means no mapping at all. A preprocessor line (<method>IsDirective</method>) has
+/// none, whatever <code>INTLine</code> says: the compiler maps a leading one onto INT lines near the method's label, which
+/// belong to the method before it or to the method's own first statements. An initializing <code>#dim</code> is not a
+/// preprocessor line: it compiles to a <code>Set</code> at its own INT line. <code>routine</code> is the INT routine of the
+/// first mapped line, and empty when none maps.</li>
+/// </ul>
+/// <p><code>labelLine</code> (the fifth element) is the INT line of the method's compiled label in <code>routine</code>, and 0
+/// when it is not known. A method that compiled to INT code has a label line, which is the first line of its INT block: its
+/// body maps to lines after it. The label is the one the compiler recorded for the method (<code>RtnLabel</code>,
+/// <code>label^routine</code>), or, for a method whose name begins with <code>%</code> and has no <code>RtnLabel</code>, its
+/// name cut to <code>$$$MAXLABELLENGTH</code> characters (<method>LabelLine</method>), so two methods whose names share their
+/// first <code>$$$MAXLABELLENGTH</code> characters have distinct labels. A method that compiled to no INT code (a constant
+/// return, a generator, a method not written in ObjectScript) has no label line, and neither has a method whose label is not in
+/// the INT text or whose compiled routine is not the one its body maps to. The label lines come from the INT text, which a
+/// documentation-only edit saved after the compile leaves in place while it removes the class's line map: a method with a
+/// label line in a class with <code>lineMap</code> 0 is how a stale map shows.</p>
+/// The namespace is restored on every exit path. A failure to read the class text or the dictionary is returned as the
+/// status, and the caller records the class as unavailable.
+ClassMethod SourceMap(pNamespace As %String, pClass As %String, Output pMap) As %Status
+{
+    Kill pMap
+    Set pMap = $ListBuild(pClass, "")
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        If pNamespace '= "" Set $NAMESPACE = pNamespace
+        If '$$$comClassDefined(pClass) {
+            Set pMap = $ListBuild(pClass, "not-compiled")
+            Quit
+        }
+        If '$System.OBJ.IsUpToDate(pClass) {
+            Set pMap = $ListBuild(pClass, "not-up-to-date")
+            Quit
+        }
+        Set pMap = $ListBuild(pClass, "", $Data(^rMAP(pClass)))
+        Set tSC = ##class(%Atelier.v1.Utils.TextServices).GetTextAsArray(pClass_".cls", 0, .tText)
+        If $$$ISERR(tSC) Quit
+        Do ..IndexDeclarations(.tText, .tDeclarations)
+        Do ..IndexLabels(pClass, .tLabels)
+        Set tName = ""
+        For {
+            Set tName = $$$defMemberNext(pClass, $$$cCLASSmethod, tName)
+            If tName = "" Quit
+            Set tOrder(+$$$defMemberKeyGet(pClass, $$$cCLASSmethod, tName, $$$cMETHsequencenumber), tName) = ""
+        }
+        Set tIndex = 0
+        Set tSequence = ""
+        For {
+            Set tSequence = $Order(tOrder(tSequence))
+            If tSequence = "" Quit
+            Set tName = ""
+            For {
+                Set tName = $Order(tOrder(tSequence, tName))
+                If tName = "" Quit
+                Set tIndex = tIndex + 1
+                Do ..MapMethod(pClass, tName, .tText, .tDeclarations, .tLabels, tIndex, .pMap)
+            }
+        }
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Set $NAMESPACE = tOrigNS
+    Quit tSC
+}
+
+/// Index the method declarations of a class document in one pass: <code>pDeclarations(name, line)</code> is set for
+/// every line of <var>pText</var> (<code>pText(0)</code> lines, as <code>GetTextAsArray</code> returns them) that begins
+/// with <code>Method</code> or <code>ClassMethod</code> and a name.
+ClassMethod IndexDeclarations(ByRef pText, Output pDeclarations)
+{
+    Kill pDeclarations
+    For tI = 1:1:+$Get(pText(0)) {
+        If '$Locate(pText(tI), "(?i)^(Class)?Method\\s+", 1, tEnd) Continue
+        Set tRest = $Extract(pText(tI), tEnd, *)
+        Set tName = $Translate($Piece($Piece(tRest, "(", 1), " ", 1), """")
+        If tName '= "" Set pDeclarations(tName, tI) = ""
+    }
+}
+
+/// Index the INT labels of the routines that class <var>pClass</var> compiled to, in one pass over each routine's INT text:
+/// <code>pLabels(routine, label)</code> is the line of the first line of <code>routine</code> that begins with
+/// <var>label</var> (a label starts in column 1 and ends at a space, a tab, a left parenthesis or a semicolon, as
+/// <code>%Studio.Debugger:INTLine</code> reads one).
+ClassMethod IndexLabels(pClass As %String, Output pLabels)
+{
+    Kill pLabels
+    For tN = 1:1:+$$$comClassKeyGet(pClass, $$$cCLASSroutinecount) {
+        Set tRoutine = $$$nameClassRoutineNameGet(pClass, tN)
+        For tLine = 1:1:+$Get(^ROUTINE(tRoutine, 0, 0)) {
+            Set tLabel = $Piece($Piece($Piece($Piece($Get(^ROUTINE(tRoutine, 0, tLine)), $Char(9)), " "), "("), ";")
+            If (tLabel '= "") && '$Data(pLabels(tRoutine, tLabel)) Set pLabels(tRoutine, tLabel) = tLine
+        }
+    }
+}
+
+/// The INT line of the compiled label of method <var>pName</var> of class <var>pClass</var>, from <var>pLabels</var> (see
+/// <method>IndexLabels</method>), or 0 when the method has no known label. The label is the compiler's own: the one its
+/// <code>RtnLabel</code> records (<code>label^routine</code>), so it is exact whatever the method's name. A method whose name
+/// begins with <code>%</code> has an empty <code>RtnLabel</code> when its label is its name cut to
+/// <code>$$$MAXLABELLENGTH</code> characters (a second such method whose cut name would be the same is given a
+/// <code>RtnLabel</code> of its own), so that label is exact too (<method>NameLabelLine</method>). It is 0 when the keyword of
+/// any other method is not <code>label^routine</code> (a method that compiled to no INT code has none or an inlined constant),
+/// when the label is not in that routine's INT text, or when <var>pRoutine</var>, the routine the method's body maps to, is
+/// not empty and is another routine.
+ClassMethod LabelLine(pClass As %String, pName As %String, pRoutine As %String, ByRef pLabels) As %Integer
+{
+    Set tRtnLabel = $$$comMemberKeyGet(pClass, $$$cCLASSmethod, pName, $$$cMETHrtnlabel)
+    If (tRtnLabel = "") && ($Extract(pName) = "%") Quit ..NameLabelLine($Extract(pName, 1, $$$MAXLABELLENGTH), pRoutine, .pLabels)
+    If $Length(tRtnLabel, "^") '= 2 Quit 0
+    Set tLabel = $Piece(tRtnLabel, "^", 1)
+    Set tRoutine = $Piece(tRtnLabel, "^", 2)
+    If (tLabel = "") || (tRoutine = "") Quit 0
+    If (pRoutine '= "") && (pRoutine '= tRoutine) Quit 0
+    Quit +$Get(pLabels(tRoutine, tLabel))
+}
+
+/// The INT line of label <var>pLabel</var> in routine <var>pRoutine</var>, from <var>pLabels</var> (see
+/// <method>IndexLabels</method>), or, when <var>pRoutine</var> is empty, in the routine of the class whose INT text holds it
+/// (the compiler gives each method of a class a label of its own); 0 when the label is not there.
+ClassMethod NameLabelLine(pLabel As %String, pRoutine As %String, ByRef pLabels) As %Integer
+{
+    If pRoutine '= "" Quit +$Get(pLabels(pRoutine, pLabel))
+    Set tRoutine = ""
+    For {
+        Set tRoutine = $Order(pLabels(tRoutine))
+        If tRoutine = "" Quit
+        If $Data(pLabels(tRoutine, pLabel)) Quit
+    }
+    Quit $Select(tRoutine = "": 0, 1: pLabels(tRoutine, pLabel))
+}
+
+/// The class-document line D that declares method <var>pName</var>, whose body holds <var>pCount</var> lines, from the
+/// index <var>pDeclarations</var> (see <method>IndexDeclarations</method>) of the document <var>pText</var>.
+/// <var>pLayoutOK</var> is 1 when the layout is where IRIS stores it: line D+1 is <code>{</code> and line D+2+n is
+/// <code>}</code>. A name declared on one line is that line (with <var>pLayoutOK</var> telling whether its braces are
+/// where they should be). A name declared on several lines is resolved to the one whose braces are where the layout says;
+/// when that leaves none or several, or the name is not declared at all, the result is empty and <var>pLayoutOK</var> is 0.
+ClassMethod DeclarationLine(ByRef pText, ByRef pDeclarations, pName As %String, pCount As %Integer, Output pLayoutOK As %Boolean) As %Integer
+{
+    Set tCandidates = 0
+    Set tValid = 0
+    Set tFirst = ""
+    Set tValidLine = ""
+    Set tLine = ""
+    For {
+        Set tLine = $Order(pDeclarations(pName, tLine))
+        If tLine = "" Quit
+        Set tCandidates = tCandidates + 1
+        If tFirst = "" Set tFirst = tLine
+        If ($ZStrip($Get(pText(tLine + 1)), "<>W") = "{") && ($ZStrip($Get(pText(tLine + 2 + pCount)), "<>W") = "}") {
+            Set tValid = tValid + 1
+            Set tValidLine = tLine
+        }
+    }
+    Set pLayoutOK = (tValid = 1)
+    Quit $Select(tCandidates = 1: tFirst, tValid = 1: tValidLine, 1: "")
+}
+
+/// Is class-document line <var>pLine</var> a preprocessor line: <code>#dim</code>, <code>#define</code>, <code>#sqlcompile</code>,
+/// <code>#;</code> and the other directives? It is when, after any leading blanks, it begins with one <code>#</code> followed
+/// by a letter or a semicolon. A line that begins with <code>##</code> (<code>##class</code>, <code>##super</code>) is not.
+/// <p>A <code>#dim</code> line (in any letter case) that holds an <code>=</code> outside parentheses, string literals and
+/// comments (<method>HasInitializer</method>) initializes its variable, and the compiler turns it into a <code>Set</code> at its
+/// own INT line, so it is not a preprocessor line here. Every other directive is one: the compiler maps a leading one onto code
+/// that belongs to other methods.</p>
+ClassMethod IsDirective(pLine As %String) As %Boolean
+{
+    Set tText = $ZStrip(pLine, "<W")
+    If '(($Extract(tText, 1) = "#") && ($Extract(tText, 2) ? 1(1A,1";"))) Quit 0
+    If '$Locate(tText, "(?i)^#dim(\\s|$)", 1, tEnd) Quit 1
+    Quit '..HasInitializer($Extract(tText, tEnd, *))
+}
+
+/// Does <var>pText</var>, the text of a <code>#dim</code> line after the directive name, hold an <code>=</code> outside
+/// parentheses, string literals and comments? A string literal opens at a double quote and closes at the next one, so a doubled
+/// quote inside it closes and reopens it. Outside a string literal, <code>//</code> or <code>;</code> starts a comment that runs
+/// to the end of the line, and <code>/*</code> one that runs to the next <code>*/</code> (or to the end of the line when none
+/// follows), so an <code>=</code> inside a comment initializes nothing.
+ClassMethod HasInitializer(pText As %String) As %Boolean
+{
+    Set tDepth = 0
+    Set tQuoted = 0
+    Set tFound = 0
+    Set tLength = $Length(pText)
+    Set tI = 0
+    While tI < tLength {
+        Set tI = tI + 1
+        Set tChar = $Extract(pText, tI)
+        If tChar = """" {
+            Set tQuoted = 'tQuoted
+            Continue
+        }
+        If tQuoted Continue
+        Set tPair = $Extract(pText, tI, tI + 1)
+        If (tChar = ";") || (tPair = "//") Quit
+        If tPair = "/*" {
+            Set tClose = $Find(pText, "*/", tI + 2)
+            If tClose = 0 Quit
+            Set tI = tClose - 1
+        } ElseIf tChar = "(" {
+            Set tDepth = tDepth + 1
+        } ElseIf (tChar = ")") && (tDepth > 0) {
+            Set tDepth = tDepth - 1
+        } ElseIf (tChar = "=") && (tDepth = 0) {
+            Set tFound = 1
+            Quit
+        }
+    }
+    Quit tFound
+}
+
+/// Map the body lines of method <var>pName</var> of class <var>pClass</var> into <var>pMap</var> entry <var>pIndex</var>
+/// (see <method>SourceMap</method> and <method>DeclarationLine</method>).
+ClassMethod MapMethod(pClass As %String, pName As %String, ByRef pText, ByRef pDeclarations, ByRef pLabels, pIndex As %Integer, ByRef pMap) [ Private ]
+{
+    Set tCount = +$$$defMemberKeyGet(pClass, $$$cCLASSmethod, pName, $$$cMETHimplementation)
+    Set tCodeMode = $ZConvert($$$defMemberKeyGet(pClass, $$$cCLASSmethod, pName, $$$cMETHcodemode), "L")
+    ; The compiled keyword carries the class's Language default; the definition's keyword is empty for a method with none of its own.
+    Set tLanguage = $ZConvert($$$comMemberKeyGet(pClass, $$$cCLASSmethod, pName, $$$cMETHlanguage), "L")
+    Set tReason = ""
+    If (tCodeMode = "objectgenerator") || (tCodeMode = "generator") {
+        Set tReason = "generator"
+    } ElseIf (tLanguage '= "") && (tLanguage '= "objectscript") && (tLanguage '= "cache") {
+        Set tReason = "not-objectscript"
+    }
+
+    Set tDeclaration = ..DeclarationLine(.pText, .pDeclarations, pName, tCount, .tLayoutOK)
+    If (tReason = "") && 'tLayoutOK Set tReason = "layout"
+    If tReason '= "" {
+        Set pMap("m", pIndex) = $ListBuild(pName, tDeclaration, "", tReason)
+        Quit
+    }
+
+    Set tRoutine = ""
+    For tK = 1:1:tCount {
+        Set tIntName = ""
+        Set tIntLine = -1
+        Set tType = 2
+        Set tSC = ##class(%Studio.Debugger).INTLine(pClass_".CLS", pName, tK, .tIntName, .tIntLine, .tType)
+        If $$$ISOK(tSC) && (tType = 0) && (tIntLine > 0) && '..IsDirective($Get(pText(tDeclaration + 1 + tK))) {
+            Set pMap("m", pIndex, tK) = tIntLine
+            If tRoutine = "" Set tRoutine = tIntName
+        } Else {
+            Set pMap("m", pIndex, tK) = 0
+        }
+    }
+    Set pMap("m", pIndex) = $ListBuild(pName, tDeclaration, tRoutine, "", ..LabelLine(pClass, pName, tRoutine, .pLabels))
+}
+
+/// The session node <var>pSession</var> with its routine list replaced by <var>pLoaded</var>, the routines the session
+/// actually loaded. A releaser and a later start prove a session against the node's list (<method>ProofFailure</method>,
+/// <method>NodeMatches</method>), so a session that loaded fewer routines than the run listed can be proven and stopped
+/// only once the node and the run record name what it loaded.
+ClassMethod WithRoutineList(pSession As %List, pLoaded As %List) As %List
+{
+    Quit $ListBuild($ListGet(pSession, 1), $ListGet(pSession, 2), $ListGet(pSession, 3), $ListGet(pSession, 4), pLoaded)
+}
+
+/// The text naming what is wrong when the Line-by-Line session loaded other routines than the run listed, and empty when
+/// both lists name the same routines, whatever their order. <var>pRunList</var> is the run's routine list,
+/// <var>pLoaded</var> the routines the session reports (see <method>ActiveRoutines</method>). <code>Start</code> skips a
+/// routine that has no object code without an error, so a routine deleted after the run resolved its list is silently
+/// missing from the session.
+ClassMethod LoadedRoutinesFailure(pRunList As %List, pLoaded As %List) As %String
+{
+    If ..ListsEqual(pRunList, pLoaded) Quit ""
+    For tI = 1:1:$ListLength(pLoaded) Set tLoaded("n"_$List(pLoaded, tI)) = ""
+    For tI = 1:1:$ListLength(pRunList) Set tListed("n"_$List(pRunList, tI)) = ""
+    Set tMissing = ""
+    Set tMissingCount = 0
+    For tI = 1:1:$ListLength(pRunList) {
+        If '$Data(tLoaded("n"_$List(pRunList, tI))) {
+            Set tMissing = tMissing_$Select(tMissing = "": "", 1: ", ")_$List(pRunList, tI)
+            Set tMissingCount = tMissingCount + 1
+        }
+    }
+    Set tExtra = ""
+    Set tExtraCount = 0
+    For tI = 1:1:$ListLength(pLoaded) {
+        If '$Data(tListed("n"_$List(pLoaded, tI))) {
+            Set tExtra = tExtra_$Select(tExtra = "": "", 1: ", ")_$Select($List(pLoaded, tI) = "": "(a name that could not be read)", 1: $List(pLoaded, tI))
+            Set tExtraCount = tExtraCount + 1
+        }
+    }
+    Set tText = ""
+    If tMissingCount > 0 {
+        Set tText = "The Line-by-Line session did not load "_$Select(tMissingCount = 1: "routine ", 1: "routines ")_tMissing_" of the run's routine list"
+    }
+    If tExtraCount > 0 {
+        Set tText = tText_$Select(tText = "": "The Line-by-Line session loaded ", 1: " and loaded ")_$Select(tExtraCount = 1: "routine ", 1: "routines ")_tExtra_" that the run did not list"
+    }
+    If tText = "" {
+        Set tText = "The Line-by-Line session loaded "_$ListLength(pLoaded)_" routines where the run listed "_$ListLength(pRunList)
+    }
+    Quit tText_"."
+}
+
+/// Strip the sensitive parts of recorded error text for output: caret global references and control
+/// characters go through <method>ExecuteMCPv2.Utils:SanitizeError</method>, and the IRIS error code
+/// (<code>ERROR #N:</code>) is kept.
+ClassMethod SafeText(pText As %String) As %String
+{
+    Set tPrefix = ""
+    If $Extract(pText, 1, 7) = "ERROR #" {
+        Set tRest = $Extract(pText, 8, *)
+        Set tColon = $Find(tRest, ": ")
+        If (tColon > 0) && ($Extract(tRest, 1, tColon - 3) ? 1.N) {
+            Set tPrefix = $Extract(pText, 1, 7 + tColon - 1)
+            Set pText = $Extract(tRest, tColon, *)
+        }
+    }
+    Set tSafe = $System.Status.GetErrorText(##class(ExecuteMCPv2.Utils).SanitizeError($$$ERROR($$$GeneralError, pText)))
+    Set tMarker = "ERROR #5001: "
+    If $Extract(tSafe, 1, $Length(tMarker)) = tMarker Set tSafe = $Extract(tSafe, $Length(tMarker) + 1, *)
+    Quit tPrefix_tSafe
+}
+
+/// The supervisor job entry point for run <var>pId</var> (<code>JOB</code>bed by the Start route).
+/// <p>It holds its owner lock for its whole life, JOBs the runner, and sets the status <code>running</code> once the
+/// runner reports its session started (or <code>failed</code> with the runner's error). It then checks every 100 ms
+/// that the runner is alive, for a cancel and for the time limit; a cancel or the time limit terminates the runner
+/// (after <method>MayTerminate</method>). Once the runner has gone it reads the counts and stops the session itself
+/// only when the record shows the runner started the session and did not release it, the monitor is active and its
+/// routine list is this run's. It then builds the skeleton, writes the terminal status, kills the session node,
+/// releases its lock and ends.</p>
+ClassMethod Supervise(pId As %Integer)
+{
+    Set tRunnerPid = ""
+    Set tReason = ""
+    Set tStartFailed = 0
+    Try {
+        Lock +^IRIS.TempExecuteMCPv2Coverage("owner", pId, "supervisor"):10
+        If '$Test {
+            Set tStartFailed = 1
+            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "error") = "The coverage supervisor could not take its owner lock."
+            Quit
+        }
+        Set tStart = $ZHorolog
+        Set tMaxSeconds = +..RunGet(pId, "maxSeconds")
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "pid") = $Job
+
+        Job ##class(ExecuteMCPv2.Coverage.Runner).Run(pId)::10
+        If '$Test {
+            Set tStartFailed = 1
+            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "error") = "The test process did not start within 10 seconds."
+            Quit
+        }
+        Set tRunnerPid = $ZChild
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "runnerPid") = tRunnerPid
+
+        ; Phase 1: wait for the runner to report that its session started or failed to start.
+        Set tOutcome = ..AwaitStart(pId, tStart)
+        If tOutcome = "startfailed" {
+            Set tStartFailed = 1
+            Quit
+        }
+        If tOutcome = "timeout" Set tReason = "time-limit"
+        If tOutcome = "started" {
+            Do ..SetStatus(pId, "running")
+            ; Phase 2: watch the runner.
+            For {
+                If ..RunGet(pId, "testsDone") Quit
+                If ..RunGet(pId, "cancel") {
+                    Set tReason = "cancel"
+                    Quit
+                }
+                If ($ZHorolog - tStart) > tMaxSeconds {
+                    Set tReason = "time-limit"
+                    Quit
+                }
+                If '..OwnerAlive(pId, "runner") Quit
+                Hang 0.1
+            }
+        }
+        If (tReason '= "") && ..MayTerminate(pId, "runner", tRunnerPid) {
+            Do $System.Process.Terminate(tRunnerPid)
+        }
+        ; The runner ends by itself once its tests are done; wait for it to be gone.
+        For tI = 1:1:600 {
+            If '..OwnerAlive(pId, "runner") Quit
+            Hang 0.1
+        }
+    } Catch ex {
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "error") = ex.DisplayString()
+        Set tStartFailed = 1
+    }
+    Do ..Finish(pId, tReason, tStartFailed)
+    Lock -^IRIS.TempExecuteMCPv2Coverage("owner", pId, "supervisor")
+}
+
+/// Wait for the runner of run <var>pId</var> to report its session. Returns <code>started</code>,
+/// <code>startfailed</code> (the runner's <code>Start</code> failed), <code>runnerdead</code> (the runner ended
+/// before it reported) or <code>timeout</code>.
+ClassMethod AwaitStart(pId As %Integer, pStart As %Decimal) As %String
+{
+    Set tOutcome = "timeout"
+    For {
+        If ..RunGet(pId, "startError") '= "" {
+            Set tOutcome = "startfailed"
+            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "error") = ..RunGet(pId, "startError")
+            Quit
+        }
+        If ..RunGet(pId, "sessionStarted") {
+            Set tOutcome = "started"
+            Quit
+        }
+        If ..RunGet(pId, "runnerUp") && '..OwnerAlive(pId, "runner") {
+            Set tOutcome = "runnerdead"
+            Quit
+        }
+        If '..RunGet(pId, "runnerUp") && (($ZHorolog - pStart) > 30) {
+            Set tOutcome = "runnerdead"
+            Quit
+        }
+        If ($ZHorolog - pStart) > 120 Quit
+        Hang 0.1
+    }
+    Quit tOutcome
+}
+
+/// Prove, from the supervisor, that the active Line-by-Line session is run <var>pId</var>'s: the session node names
+/// this run, and the session is scoped to listed processes that are the run's two (the supervisor among them) with the
+/// run's routine names (see <method>ProofFailure</method>). The supervisor reads the names only once it is in the
+/// session's process list and the monitor has made them readable (see <method>AwaitNamesReadable</method>, which the
+/// caller runs before it takes the release locks). The session is stopped, and its counts are read, only after this
+/// returns OK.
+ClassMethod ProveOwnSession(pId As %Integer) As %Status
+{
+    If $ListGet($Get(^IRIS.TempExecuteMCPv2Coverage("session")), 1) '= pId {
+        Quit $$$ERROR($$$GeneralError, "The session record does not name this run.")
+    }
+    If '..MonitorActive(.tPids) Quit $$$ERROR($$$GeneralError, "The monitor session ended before it could be verified.")
+    Set tWhy = ..ProofFailure(tPids, $Job, ..RunGet(pId, "pid"), ..RunGet(pId, "runnerPid"), ..RunGet(pId, "routineList"), ..ActiveRoutines())
+    If tWhy '= "" Quit $$$ERROR($$$GeneralError, tWhy)
+    Quit $$$OK
+}
+
+/// Release the session, build the skeleton and write the terminal status of run <var>pId</var>, after the
+/// runner has gone. <var>pReason</var> is the cancel or time-limit reason that ended the run, if any.
+/// <p>When the runner started the session and did not release it, the supervisor takes the release locks
+/// (<method>TakeReleaseLocks</method>), re-reads under them whether the runner has released the session or read the
+/// counts meanwhile, and reads the counts and stops the session only after <method>ProveOwnSession</method> showed it
+/// is this run's; otherwise it stops nothing. A release lock that cannot be taken in time stops nothing and ends the
+/// run <code>release-failed</code>.</p>
+/// <p>A run whose session had started never ends silently without its counts or its release: when the session could
+/// not be stopped or verified the run ends <code>failed</code> with reason <code>release-failed</code>, and when the
+/// counts could not be read, <code>failed</code> with reason <code>counts-unreadable</code> (the first of the two
+/// wins). The IRIS text is in <code>error</code>, and the counts text in <code>readError</code>.</p>
+ClassMethod Finish(pId As %Integer, pReason As %String, pStartFailed As %Boolean)
+{
+    Set tStatus = "failed"
+    Set tError = ""
+    Set tUnreleased = ""
+    Set tLocked = 0
+    Try {
+        Set tNamespace = ..RunGet(pId, "namespace")
+        Set tSessionStarted = ..RunGet(pId, "sessionStarted")
+        Set tReadText = ""
+        If tSessionStarted && '..RunGet(pId, "sessionReleased") && ..MonitorActive() {
+            Do ..AwaitNamesReadable()
+            If '..TakeReleaseLocks(pId, .tLockText) {
+                Set tUnreleased = "it could not be stopped ("_tLockText_")"
+                Set tReadText = "The monitor session was left as it was, so its counts were not read: "_tLockText
+            } Else {
+                Set tLocked = 1
+                ; Under the locks the other releaser has finished: what it released or read is re-read, not assumed.
+                If '..RunGet(pId, "sessionReleased") && ..MonitorActive() {
+                    Set tProof = ..ProveOwnSession(pId)
+                    If $$$ISERR(tProof) {
+                        Set tProofText = ..SafeText($System.Status.GetErrorText(tProof))
+                        Set tUnreleased = "it could not be verified as this run's, so it was left running ("_tProofText_")"
+                        Set tReadText = "The monitor session could not be verified as this run's, so its counts were not read: "_tProofText
+                    } Else {
+                        If '..RunGet(pId, "hasCounts") {
+                            Set tSC = ##class(ExecuteMCPv2.Coverage.Runner).ReadCounts(pId)
+                            If $$$ISERR(tSC) {
+                                Set tReadText = $System.Status.GetErrorText(tSC)
+                            } Else {
+                                Kill ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError")
+                            }
+                        }
+                        Set tSC = ##class(%Monitor.System.LineByLine).Stop()
+                        If $$$ISOK(tSC) {
+                            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sessionReleased") = 1
+                            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releasedBy") = "supervisor"
+                        } Else {
+                            Set tUnreleased = "it could not be stopped ("_..SafeText($System.Status.GetErrorText(tSC))_")"
+                        }
+                    }
+                }
+                Set tLocked = 0
+                Do ..DropReleaseLocks(pId)
+            }
+        }
+        If tSessionStarted && '..RunGet(pId, "hasCounts") {
+            If tReadText '= "" {
+                Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError") = tReadText
+            } ElseIf ..RunGet(pId, "readError") = "" {
+                Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError") = "The monitor session ended before its line counts were read."
+            }
+        }
+        If ..RunGet(pId, "hasCounts") {
+            Set tRoutines = ..RunGet(pId, "routines")
+            For tN = 1:1:$ListLength(tRoutines) {
+                Kill tSkeleton
+                Set tSC = ..Skeleton(tNamespace, $List($List(tRoutines, tN), 2), .tSkeleton)
+                If $$$ISERR(tSC) Continue
+                Merge ^IRIS.TempExecuteMCPv2Coverage("run", pId, "skeleton", tN) = tSkeleton
+            }
+            ; The class-source map, beside the skeleton: one entry per distinct measured class, in routine order.
+            Set tClassIndex = 0
+            For tN = 1:1:$ListLength(tRoutines) {
+                Set tClass = $List($List(tRoutines, tN), 1)
+                If $Data(tSeenClass(tClass)) Continue
+                Set tSeenClass(tClass) = ""
+                Set tClassIndex = tClassIndex + 1
+                Kill tMap
+                Set tSC = ..SourceMap(tNamespace, tClass, .tMap)
+                If $$$ISERR(tSC) {
+                    Kill tMap
+                    Set tMap = $ListBuild(tClass, "unavailable")
+                }
+                Merge ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tClassIndex) = tMap
+            }
+        }
+        If ..RunGet(pId, "testsDone") {
+            Set tStatus = "completed"
+            If ..RunGet(pId, "runnerError") '= "" {
+                Set tStatus = "failed"
+                Set tError = ..RunGet(pId, "runnerError")
+            }
+        } ElseIf pReason '= "" {
+            Set tStatus = "cancelled"
+        } ElseIf pStartFailed {
+            Set tError = $Select(..RunGet(pId, "error") '= "": ..RunGet(pId, "error"), 1: "The test process did not start.")
+        } Else {
+            Set tError = "The test process ended before the tests finished."
+        }
+        Set tOutReason = $Select(tStatus = "cancelled": pReason, 1: "")
+        If tUnreleased '= "" {
+            Set tText = "A suite-owned Line-by-Line session is still active: "_tUnreleased_". The next coverage run reclaims it."
+            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releaseError") = tText
+            Set tStatus = "failed"
+            Set tOutReason = "release-failed"
+            Set tError = $Select(tError = "": tText, 1: tError_" "_tText)
+        } ElseIf tSessionStarted && '..RunGet(pId, "hasCounts") {
+            Set tText = "The line counts of this run could not be read: "_..RunGet(pId, "readError")
+            Set tStatus = "failed"
+            Set tOutReason = "counts-unreadable"
+            Set tError = $Select(tError = "": tText, 1: tError_" "_tText)
+        }
+        Do ..SetStatus(pId, tStatus, tOutReason, tError)
+        ; The session node stays while a session this run started may still be active, so a later run can reclaim it.
+        If ($ListGet($Get(^IRIS.TempExecuteMCPv2Coverage("session")), 1) = pId) && (tUnreleased = "") {
+            Kill ^IRIS.TempExecuteMCPv2Coverage("session")
+        }
+    } Catch ex {
+        If tLocked Do ..DropReleaseLocks(pId)
+        Do ..SetStatus(pId, "failed", "", ex.DisplayString())
+    }
+}
+
+}`,
+  ],
+  [
+    "ExecuteMCPv2.Coverage.Runner.cls",
+    `/// The runner of one line-coverage run (Story 40.1): the one suite job that starts, uses and stops its own
+/// Line-by-Line session (AD-27).
+/// <p>A Line-by-Line session counts only the processes in its process list, and only a process that is in that
+/// list can read the session's line counts. The runner therefore starts the session scoped to itself and to its
+/// supervisor (<code>$ListBuild($JOB, supervisorPid)</code>, never all processes). The supervisor runs only
+/// <code>ExecuteMCPv2</code> and system code, so it adds counts only to those classes, and only when they are listed;
+/// being in the list is what lets it read the counts after the runner is terminated. The runner runs the tests
+/// through <method>%UnitTest.Manager:RunTest</method> in this same process, reads the line counts and stops the session.
+/// It never reads the cancel flag: <method>ExecuteMCPv2.Coverage.Job:Supervise</method> turns a cancel or the time
+/// limit into terminating this process, and releases a session this process leaves behind.</p>
+/// <p>This class extends <class>%UnitTest.Manager</class> only to hook <method>OnBeforeAllTests</method>, which
+/// records the <code>%UnitTest_Result</code> run index before any test runs.</p>
+Class ExecuteMCPv2.Coverage.Runner Extends %UnitTest.Manager
+{
+
+/// The job entry point for run <var>pId</var>. It holds its owner lock for its whole life, switches to the run's
+/// namespace, starts the session, runs the tests, and afterwards (also after an error) reads the counts and stops the
+/// session it started, as long as that session proves to be its own (see <method>StopOwnSession</method>). If
+/// <code>Start</code> fails it records the IRIS text and ends without calling <code>Stop</code>: the session that
+/// blocked it belongs to someone else.
+ClassMethod Run(pId As %Integer)
+{
+    Set tHeld = 0
+    Set tStarted = 0
+    Try {
+        Lock +^IRIS.TempExecuteMCPv2Coverage("owner", pId, "runner"):10
+        If '$Test {
+            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "startError") = "The test process could not take its owner lock."
+            Quit
+        }
+        Set tHeld = 1
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "runnerUp") = 1
+
+        Set $NAMESPACE = ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "namespace")
+        Set tRoutines = ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "routineList")
+        Set tSupervisorPid = ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "pid")
+        Set tSC = ##class(%Monitor.System.LineByLine).Start(tRoutines, $ListBuild("RtnLine"), $ListBuild($Job, tSupervisorPid))
+        If $$$ISERR(tSC) {
+            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "startError") = $System.Status.GetErrorText(tSC)
+            Quit
+        }
+        Set tStarted = 1
+        Set tSession = $ListBuild(pId, ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "pid"), $Job, ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "startedAt"), tRoutines)
+        Set ^IRIS.TempExecuteMCPv2Coverage("session") = tSession
+        If '..LoadedAsListed(pId, tRoutines) Quit
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sessionStarted") = 1
+
+        Set tUser("ExecuteMCPv2CoverageRun") = pId
+        Set tSpec = ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "spec")
+        Try {
+            Set tTestSC = ..RunTest(tSpec, "/noload/nodelete/norecursive", .tUser)
+        } Catch exTest {
+            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "runnerError") = exTest.DisplayString()
+        }
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "testsDone") = 1
+    } Catch ex {
+        If 'tStarted Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "startError") = ex.DisplayString()
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "runnerError") = ex.DisplayString()
+    }
+    If tStarted Do ..StopOwnSession(pId)
+    If tHeld Lock -^IRIS.TempExecuteMCPv2Coverage("owner", pId, "runner")
+}
+
+/// Did the session this process just started load exactly the routines the run lists? <code>Start</code> skips a routine
+/// that has no object code without an error (a routine deleted after the run resolved its list), and a session that
+/// measures less than the run lists would report 0% for code that was never watched, so the tests do not run then.
+/// <p>On a mismatch this process stops its own session at once, under the release locks
+/// (<method>ExecuteMCPv2.Coverage.Job:TakeReleaseLocks</method>), and only after the session proves to be this run's
+/// (<method>ExecuteMCPv2.Coverage.Job:ProofFailure</method> on the routines it reports: scoped to listed processes,
+/// listing exactly this process and the supervisor, every name readable) and every routine it reports is in the run's
+/// list. A session that monitors no routine at all (every listed routine lost its object code) has no name to read or
+/// compare, so the scope alone proves it (<method>ExecuteMCPv2.Coverage.Job:SessionScopeFailure</method>). After a stop,
+/// the session node is unset and <code>startError</code> says which routines were not loaded and that no test was run;
+/// the supervisor then ends the run <code>failed</code> with that text. Whatever the reason the session could not be
+/// stopped (no lock in time, no proof, <code>Stop</code> failed), <method>RecordUnstoppedSession</method> leaves it for
+/// the supervisor's release or the next start's reclaim.
+/// Returns 1 when the session loaded what the run lists and the tests may run.</p>
+ClassMethod LoadedAsListed(pId As %Integer, pRoutineList As %List) As %Boolean [ Private ]
+{
+    Set tJob = "ExecuteMCPv2.Coverage.Job"
+    If ##class(%Monitor.System.LineByLine).GetRoutineCount() > 0 Do $ClassMethod(tJob, "AwaitNamesReadable", 3)
+    Set tLoaded = $ClassMethod(tJob, "ActiveRoutines")
+    Set tText = $ClassMethod(tJob, "LoadedRoutinesFailure", pRoutineList, tLoaded)
+    If tText = "" Quit 1
+
+    Set tStopped = 0
+    Try {
+        If $ClassMethod(tJob, "TakeReleaseLocks", pId, .tLockText) {
+            Try {
+                ; Re-read under the locks what the session reports, and prove it before it is stopped.
+                Set tNow = $ClassMethod(tJob, "ActiveRoutines")
+                Set tInList = 1
+                For tI = 1:1:$ListLength(tNow) {
+                    If '$ListFind(pRoutineList, $List(tNow, tI)) {
+                        Set tInList = 0
+                        Quit
+                    }
+                }
+                If tInList && $ClassMethod(tJob, "MonitorActive", .tPids) {
+                    Set tSupervisorPid = $ClassMethod(tJob, "RunGet", pId, "pid")
+                    If $ListLength(tNow) = 0 {
+                        Set tProof = $ClassMethod(tJob, "SessionScopeFailure", tPids, $Job, tSupervisorPid, $Job)
+                    } Else {
+                        Set tProof = $ClassMethod(tJob, "ProofFailure", tPids, $Job, tSupervisorPid, $Job, tNow, tNow)
+                    }
+                    If tProof = "" {
+                        Set tSC = ##class(%Monitor.System.LineByLine).Stop()
+                        If $$$ISOK(tSC) {
+                            Set tStopped = 1
+                            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sessionReleased") = 1
+                            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releasedBy") = "runner"
+                            If $ListGet($Get(^IRIS.TempExecuteMCPv2Coverage("session")), 1) = pId Kill ^IRIS.TempExecuteMCPv2Coverage("session")
+                        }
+                    }
+                }
+            } Catch exStop {
+                Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releaseError") = exStop.DisplayString()
+            }
+            Do $ClassMethod(tJob, "DropReleaseLocks", pId)
+        }
+    } Catch ex {
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releaseError") = ex.DisplayString()
+    }
+    If 'tStopped {
+        Do ..RecordUnstoppedSession(pId, tLoaded, tText)
+    } Else {
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "startError") = tText_" No test was run."
+    }
+    Quit 0
+}
+
+/// Record, for run <var>pId</var>, a session this process could not stop although it loaded other routines than the run
+/// lists. <var>pLoaded</var> is the routines the session actually loaded and <var>pText</var> the failure text
+/// (<method>ExecuteMCPv2.Coverage.Job:LoadedRoutinesFailure</method>). The run's <code>routineList</code> is rewritten to
+/// <var>pLoaded</var> and, when the ownership node names this run, the node is rewritten to it as well
+/// (<method>ExecuteMCPv2.Coverage.Job:WithRoutineList</method>); a node that names another run is left as it is. The session is
+/// marked started, so the supervisor releases it, or failing that the next start reclaims it, after proving it against
+/// what it loaded. <code>startError</code> is written last: the supervisor ends the run as soon as it reads it, and by
+/// then everything the release needs is on record.
+ClassMethod RecordUnstoppedSession(pId As %Integer, pLoaded As %List, pText As %String)
+{
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "routineList") = pLoaded
+    Set tSession = $Get(^IRIS.TempExecuteMCPv2Coverage("session"))
+    If $ListGet(tSession, 1) = pId {
+        Set ^IRIS.TempExecuteMCPv2Coverage("session") = ##class(ExecuteMCPv2.Coverage.Job).WithRoutineList(tSession, pLoaded)
+    }
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sessionStarted") = 1
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "startError") = pText_" No test was run."
+}
+
+/// Record the counts, then stop this process's own session and record that it was released. Nothing is read or
+/// stopped unless the active session proves to be this run's
+/// (<method>ExecuteMCPv2.Coverage.Job:RunnerOwnsSession</method>): process-scoped, listing this process and no process
+/// but this run's supervisor, with this run's routine names. The supervisor may already have read the counts and
+/// stopped the session (it does when this process's owner lock is gone, for example after test code released every
+/// lock of the process, or when this process outlived a cancel), and a session someone else started since is never
+/// touched; the supervisor's <method>ExecuteMCPv2.Coverage.Job:Finish</method> reports what it finds.
+/// <p>The proof, the read and the <code>Stop</code> run under the release locks
+/// (<method>ExecuteMCPv2.Coverage.Job:TakeReleaseLocks</method>), so the supervisor cannot release at the same time and
+/// no other <code>Start</code> or <code>Stop</code> of <class>%Monitor.System.LineByLine</class> lands in between (that
+/// method says what the monitor's lock does not exclude). Under them, a session already released or counts
+/// already read are not done again. A lock that cannot be taken in time stops nothing, and is recorded as
+/// <code>releaseError</code>. When the counts cannot be read, the IRIS text is recorded as <code>readError</code> and the
+/// counts are never marked as read; the session is stopped all the same.</p>
+ClassMethod StopOwnSession(pId As %Integer) [ Private ]
+{
+    If '##class(ExecuteMCPv2.Coverage.Job).ListsProcess($Job) Quit
+    Do ##class(ExecuteMCPv2.Coverage.Job).AwaitNamesReadable()
+    If '##class(ExecuteMCPv2.Coverage.Job).TakeReleaseLocks(pId, .tLockText) {
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releaseError") = "The test process left its session as it was: "_tLockText
+        Quit
+    }
+    Try {
+        If '##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "sessionReleased") && ##class(ExecuteMCPv2.Coverage.Job).RunnerOwnsSession(pId) {
+            If '##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "hasCounts") {
+                Try {
+                    Set tReadSC = ..ReadCounts(pId)
+                    If $$$ISERR(tReadSC) Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError") = $System.Status.GetErrorText(tReadSC)
+                } Catch exRead {
+                    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "readError") = exRead.DisplayString()
+                }
+            }
+            Set tSC = ##class(%Monitor.System.LineByLine).Stop()
+            If $$$ISOK(tSC) {
+                Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sessionReleased") = 1
+                Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releasedBy") = "runner"
+            } Else {
+                Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releaseError") = $System.Status.GetErrorText(tSC)
+            }
+        }
+    } Catch ex {
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releaseError") = ex.DisplayString()
+    }
+    Do ##class(ExecuteMCPv2.Coverage.Job).DropReleaseLocks(pId)
+}
+
+/// Read the <code>RtnLine</code> count of every line of every measured routine of run <var>pId</var> from the active
+/// session through the <class>%Monitor.System.LineByLine</class>:Result query, and record the lines with a count above
+/// 0 in <code>("run",id,"hits",routineIndex,line)</code>. Row n of a routine's result is INT line n, and a routine that
+/// never ran returns no rows, so every count is 0.
+ClassMethod ReadCounts(pId As %Integer) As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        Set tRoutines = ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "routines")
+        Kill ^IRIS.TempExecuteMCPv2Coverage("run", pId, "hits")
+        For tN = 1:1:$ListLength(tRoutines) {
+            Set tName = $List($List(tRoutines, tN), 2)
+            Set tResult = ##class(%ResultSet).%New("%Monitor.System.LineByLine:Result")
+            Set tSC = tResult.Execute(tName)
+            If $$$ISERR(tSC) Quit
+            Set tLine = 0
+            While tResult.Next() {
+                Set tLine = tLine + 1
+                Set tData = tResult.GetData(1)
+                Set tCount = +$List(tData, 1)
+                If tCount > 0 Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "hits", tN, tLine) = tCount
+            }
+            Do tResult.Close()
+        }
+        If $$$ISOK(tSC) Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "hasCounts") = 1
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Record the <code>%UnitTest_Result</code> run index (<code>manager.ResultId</code>) of the coverage run before any
+/// test runs. The run is identified by the <code>ExecuteMCPv2CoverageRun</code> user parameter.
+ClassMethod OnBeforeAllTests(manager As %UnitTest.Manager, dir As %String, ByRef qstruct, ByRef userparam) As %Status
+{
+    Set tId = $Get(userparam("ExecuteMCPv2CoverageRun"))
+    If tId '= "" Set ^IRIS.TempExecuteMCPv2Coverage("run", tId, "runIndex") = manager.ResultId
+    Quit $$$OK
+}
+
+}`,
+  ],
+  [
     "ExecuteMCPv2.REST.Base.cls",
     `/// Common base class for <class>ExecuteMCPv2.REST.*</class> handlers.
 /// <p>Every handler in this package previously extended <class>%Atelier.REST</class>
@@ -4545,6 +5970,21 @@ rchr(time) Quit ""
 /// pre-compiled via MCP tools, not loaded from the filesystem.</p>
 /// <p>I/O from <code>%UnitTest.Manager.RunTest()</code> is redirected to prevent
 /// its progress output from corrupting the HTTP response body.</p>
+/// <p>No MCP tool calls <code>POST /tests</code>. <code>iris_execute_tests</code> runs tests through the Atelier
+/// work queue, and <code>iris_test_coverage</code> runs them in its own job through the coverage routes
+/// (<class>ExecuteMCPv2.REST.Coverage</class>), which never call <method>RunTests</method>. The route stays
+/// for direct REST callers. <method>RunTests</method> is not guarded by the production guard below.</p>
+/// <p><b>The TestProduction guard (Story 40.3).</b> <class>%UnitTest.TestProduction</class> stops (and, when it will
+/// not stop, force-stops and cleans) any production that is not stopped before it starts its own. So a run that
+/// includes a TestProduction test is decided here before it starts: <method>ProductionGuard</method> says
+/// <code>proceed</code> when the namespace's production is stopped or is one of the production(s) those tests
+/// declare, and <code>busy</code> otherwise, including when the production state cannot be read. It is the one
+/// decision both test-running tools use: <code>GET /dev/test/production</code> (<method>ProductionCheck</method>)
+/// serves <code>iris_execute_tests</code>, and <class>ExecuteMCPv2.REST.Coverage</class> calls it in its own start.
+/// A run with no TestProduction test is <code>proceed</code> without any <code>Ens.*</code> call or lock. The
+/// decision is taken under Ens's own production lifecycle lock (<code>^Ens.Runtime</code>), so no production start,
+/// stop or update interleaves with the read; the window between the decision and the test's own start in another
+/// process is a known residual. The guard only reads: it never starts, stops or cleans a production.</p>
 Class ExecuteMCPv2.REST.UnitTest Extends ExecuteMCPv2.REST.Base
 {
 
@@ -4692,10 +6132,18 @@ ClassMethod EnsureTestEnvironment() As %Status
     Quit tSC
 }
 
-/// Build the testspec string for <method>%UnitTest.Manager.RunTest</method>.
-/// Build testspec for <code>%UnitTest.Manager.RunTest</code> in <code>/noload</code> mode.
+/// Build the testspec string for <code>%UnitTest.Manager.RunTest</code> in <code>/noload</code> mode.
 /// <p>With /noload, testspec MUST use colon format to specify classes directly.
 /// The framework cannot discover classes from directories when ^UnitTestRoot="".</p>
+/// <p>RunTest reads one spec as <code>suite:class[:method];class[:method];...</code>: the
+/// classes of one suite follow the first colon and are separated by a semicolon alone.</p>
+/// <ul>
+/// <li>Class level: <code>:Class</code>.</li>
+/// <li>Method level: <code>:Class:Method</code> (a target without a colon is <code>:Target</code>).</li>
+/// <li>Package level: <code>:A;B;C</code>, one colon and then the package's
+/// <code>%UnitTest.TestCase</code> classes. A package that holds no test class falls back to
+/// <code>:Target</code>.</li>
+/// </ul>
 ClassMethod BuildTestSpec(pTarget As %String, pLevel As %String) As %String
 {
     If pLevel = "class" {
@@ -4721,8 +6169,7 @@ ClassMethod BuildTestSpec(pTarget As %String, pLevel As %String) As %String
                 Set tClassName = tRS.%Get("Name")
                 Try {
                     If $ClassMethod(tClassName, "%Extends", "%UnitTest.TestCase") {
-                        If tSpec '= "" Set tSpec = tSpec _ ";"
-                        Set tSpec = tSpec _ ":" _ tClassName
+                        Set tSpec = tSpec _ $Select(tSpec = "": ":", 1: ";") _ tClassName
                     }
                 } Catch {}
             }
@@ -4863,6 +6310,319 @@ ClassMethod GetFailureMessage(pInstanceId As %String, pClassName As %String, pMe
         Set tMsg = "Error retrieving failure details"
     }
     Quit tMsg
+}
+
+/// HTTP entry point of <code>GET /dev/test/production?target=&amp;level=&amp;namespace=</code>: may a run of the tests
+/// <var>target</var> at <var>level</var> (<code>package|class|method</code>) go ahead in <var>namespace</var>?
+/// <p>Validates <code>target</code> and <code>level</code> before any namespace switch, switches to the namespace,
+/// asks <method>ProductionGuard</method> (the run compiles its test classes, so a class definition answers when the
+/// compiled class is not up to date) and renders one envelope. A namespace that cannot be switched to answers
+/// <code>proceed</code> with no TestProduction tests: nothing can run there, so the run then fails as it does today.
+/// So does a namespace whose class dictionary lacks the classes the guard calls, or holds a copy of
+/// <class>ExecuteMCPv2.REST.UnitTest</class> without <method>ProductionGuard</method> (no <code>%ALL</code> package
+/// mapping of <code>ExecuteMCPv2</code>, or a copy of an earlier build): the guard cannot run there, so the run goes
+/// ahead unguarded, as it did before the guard.
+/// The namespace is restored on every exit path.</p>
+ClassMethod ProductionCheck() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Set tResult = ""
+    Set tErrored = 0
+    Set tCmdStatus = $$$OK
+    Try {
+        Set tTarget = $ZStrip($Get(%request.Data("target", 1)), "<>W")
+        Set tLevel = $ZStrip($Get(%request.Data("level", 1)), "<>W")
+        Set tNamespace = $ZStrip($Get(%request.Data("namespace", 1)), "<>W")
+
+        Set tCmdStatus = ##class(ExecuteMCPv2.Utils).ValidateRequired(tTarget, "target")
+        If $$$ISERR(tCmdStatus) {
+            Set tErrored = 1
+            Quit
+        }
+        If (tLevel '= "package") && (tLevel '= "class") && (tLevel '= "method") {
+            Set tCmdStatus = $$$ERROR($$$GeneralError, "Parameter 'level' must be one of: package, class, method")
+            Set tErrored = 1
+            Quit
+        }
+
+        Set tSwitched = 1
+        If tNamespace '= "" {
+            Set tSwitchSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tNamespace, .tOrigNS)
+            If $$$ISERR(tSwitchSC) Set tSwitched = 0
+        }
+        ; The guard calls these classes in the target namespace, which sees them only through a package mapping or a copy
+        ; of its own; a copy of an earlier build has the classes but lacks ProductionGuard, so the method is checked too.
+        Set tGuarded = tSwitched && $$$comClassDefined("ExecuteMCPv2.REST.UnitTest") && $$$comClassDefined("ExecuteMCPv2.Coverage.Job") && $$$comClassDefined("ExecuteMCPv2.REST.Interop") && $$$comClassDefined("ExecuteMCPv2.Utils") && $$$comMemberDefined("ExecuteMCPv2.REST.UnitTest",$$$cCLASSmethod,"ProductionGuard")
+        If tGuarded {
+            Set tCmdStatus = ..ProductionGuard(tTarget, tLevel, 1, .tResult)
+            If $$$ISERR(tCmdStatus) Set tErrored = 1
+        } Else {
+            Set tResult = {}
+            Do tResult.%Set("decision", "proceed")
+            Do tResult.%Set("namespace", $Select(tSwitched: $NAMESPACE, 1: tNamespace))
+            Do tResult.%Set("testProductions", [])
+        }
+        Set $NAMESPACE = tOrigNS
+    } Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tErrored = 1
+        Set tCmdStatus = ex.AsStatus()
+    }
+    Set $NAMESPACE = tOrigNS
+
+    If tErrored {
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tCmdStatus))
+    } Else {
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Quit tSC
+}
+
+/// The TestProduction decision for a run of <var>pTarget</var> at <var>pLevel</var>, taken in the current namespace.
+/// <var>pCompiles</var> is 1 when the run compiles its test classes first (the Atelier work queue, behind
+/// <code>iris_execute_tests</code>) and 0 when it runs the compiled classes as they are (the coverage runner).
+/// <p><var>pResult</var> is <code>{decision, namespace, testProductions:[{class, production}], production?, state?,
+/// stateCode?, error?}</code>. <code>decision</code> is <code>proceed</code> or <code>busy</code>
+/// (<method>GuardOutcome</method>). <code>production</code>, <code>state</code> and <code>stateCode</code> are present
+/// exactly when the production state was read; <code>error</code> is the sanitized reason when it could not be.</p>
+/// <p>A run with no TestProduction test is <code>proceed</code> and calls nothing in <code>Ens.*</code>. Otherwise
+/// the state is read with <code>Ens.Director:GetProductionStatus</code> while holding Ens's own lifecycle lock
+/// <code>^Ens.Runtime</code> (five seconds to take it), which is released before the decision is rendered. Nothing
+/// here starts, stops or cleans a production.</p>
+ClassMethod ProductionGuard(pTarget As %String, pLevel As %String, pCompiles As %Boolean = 1, Output pResult As %DynamicObject) As %Status
+{
+    Set tSC = $$$OK
+    Set pResult = ""
+    Try {
+        Set tTests = ..TestProductions(pTarget, pLevel, pCompiles)
+        Set tRead = 0
+        Set tName = ""
+        Set tState = ""
+        Set tError = ""
+        If tTests '= "" {
+            Set tLocked = 0
+            Set tEnsSC = $$$OK
+            Try {
+                Lock +^Ens.Runtime:5 Set tLocked = $Test
+                If tLocked {
+                    Set tEnsSC = ##class(Ens.Director).GetProductionStatus(.tName, .tState, 2)
+                    If $$$ISOK(tEnsSC) Set tRead = 1
+                } Else {
+                    Set tError = "The Ens runtime lock (Ens.Runtime) was not acquired within 5 seconds"
+                }
+            } Catch exEns {
+                Set tRead = 0
+                Set tEnsSC = exEns.AsStatus()
+            }
+            ; Released before anything else runs, so no later error can keep it.
+            If tLocked {
+                Lock -^Ens.Runtime
+                Set tLocked = 0
+            }
+            If $$$ISERR(tEnsSC) Set tError = ..StatusText(tEnsSC)
+        }
+
+        Set pResult = {}
+        Do pResult.%Set("decision", ..GuardOutcome(tTests, tRead, tState, tName))
+        Do pResult.%Set("namespace", $NAMESPACE)
+        Set tArray = []
+        For tI = 1:1:$ListLength(tTests) {
+            Set tItem = {}
+            Do tItem.%Set("class", $List($List(tTests, tI), 1))
+            Do tItem.%Set("production", $List($List(tTests, tI), 2))
+            Do tArray.%Push(tItem)
+        }
+        Do pResult.%Set("testProductions", tArray)
+        If tRead {
+            Do pResult.%Set("production", tName)
+            Do pResult.%Set("state", ##class(ExecuteMCPv2.REST.Interop).StateName(tState))
+            Do pResult.%Set("stateCode", tState, "number")
+        }
+        If tError '= "" Do pResult.%Set("error", tError)
+    } Catch ex {
+        If $Get(tLocked) Lock -^Ens.Runtime
+        Set pResult = ""
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Pure decision of the TestProduction guard: <code>proceed</code> or <code>busy</code>.
+/// <var>pTestProductions</var> is the run's <method>TestProductions</method> list; <var>pStateRead</var> is whether the
+/// production state was read, and <var>pState</var> and <var>pName</var> are the state code and production name read.
+/// <table border="1">
+/// <tr><th>TestProduction tests</th><th>State read</th><th>State</th><th>Name in the tests' own productions</th><th>Outcome</th></tr>
+/// <tr><td>none</td><td>not asked</td><td>-</td><td>-</td><td>proceed</td></tr>
+/// <tr><td>some</td><td>no (lock, error, exception)</td><td>Unknown</td><td>-</td><td>busy</td></tr>
+/// <tr><td>some</td><td>yes</td><td>Stopped (2, or -2 on a mirror backup member)</td><td>any</td><td>proceed</td></tr>
+/// <tr><td>some</td><td>yes</td><td>any other</td><td>yes</td><td>proceed</td></tr>
+/// <tr><td>some</td><td>yes</td><td>any other</td><td>no (an empty name never matches)</td><td>busy</td></tr>
+/// </table>
+/// A sibling of <method>ExecuteMCPv2.REST.Interop:DeleteBlockedByState</method>: the same Stopped rule, a different
+/// question.
+ClassMethod GuardOutcome(pTestProductions As %List, pStateRead As %Boolean, pState As %Integer, pName As %String) As %String
+{
+    If pTestProductions = "" Quit "proceed"
+    If 'pStateRead Quit "busy"
+    If $ZAbs(pState) = 2 Quit "proceed"
+    Set tOwn = 0
+    If pName '= "" {
+        For tI = 1:1:$ListLength(pTestProductions) {
+            If $List($List(pTestProductions, tI), 2) = pName {
+                Set tOwn = 1
+                Quit
+            }
+        }
+    }
+    Quit $Select(tOwn: "proceed", 1: "busy")
+}
+
+/// The TestProduction tests of a run, as a <class>%List</class> of <code>$ListBuild(class, production)</code> items
+/// sorted by class, in the current namespace; empty when the run has none.
+/// <p>The classes are the class of <var>pTarget</var> (the part before a colon, trimmed) at the class and method
+/// levels. At the package level they are the non-abstract classes under <code>&lt;package&gt;.</code> that the run
+/// will run: when it compiles first (<var>pCompiles</var>), those the class dictionary lists as a subclass of
+/// <class>%UnitTest.TestProduction</class> (the predicates of the tool's own package discovery, with the
+/// TestProduction root; the list follows the class definitions, which is what the run compiles); when it does not,
+/// every one of them, as <method>BuildTestSpec</method> lists them, because the runner runs the compiled class
+/// whatever the definition now says. <method>ResolveTest</method> decides each class. A method-level run is guarded
+/// whatever the method: a subclass method can call the private <code>StartProduction</code>.</p>
+ClassMethod TestProductions(pTarget As %String, pLevel As %String, pCompiles As %Boolean = 1) As %List
+{
+    Set tResult = ""
+    If pLevel = "package" {
+        Set tQuery = "SELECT Name FROM %Dictionary.ClassDefinition WHERE Name %STARTSWITH ? AND Abstract = 0"
+        If pCompiles Set tQuery = tQuery_" AND Name IN (SELECT Name FROM %Dictionary.ClassDefinitionQuery_SubclassOf('%UnitTest.TestProduction'))"
+        Set tStmt = ##class(%SQL.Statement).%New()
+        Set tSC = tStmt.%Prepare(tQuery)
+        If $$$ISERR(tSC) Throw ##class(%Exception.StatusException).CreateFromStatus(tSC)
+        Set tRS = tStmt.%Execute(pTarget_".")
+        If tRS.%SQLCODE < 0 Throw ##class(%Exception.SQL).CreateFromSQLCODE(tRS.%SQLCODE, tRS.%Message)
+        While tRS.%Next(.tNextSC) {
+            Set tClasses(tRS.%Get("Name")) = ""
+        }
+        If $$$ISERR(tNextSC) Throw ##class(%Exception.StatusException).CreateFromStatus(tNextSC)
+    } Else {
+        Set tOne = $ZStrip($Piece(pTarget, ":", 1), "<>W")
+        If tOne '= "" Set tClasses(tOne) = ""
+    }
+
+    Set tClass = ""
+    For {
+        Set tClass = $Order(tClasses(tClass))
+        If tClass = "" Quit
+        Kill tSeen
+        Set tCount = 0
+        If ..ResolveTest(tClass, pCompiles, .tSeen, .tCount, .tProduction) {
+            Set tResult = tResult_$ListBuild($ListBuild(tClass, tProduction))
+        }
+    }
+    Quit tResult
+}
+
+/// Is the class <var>pClass</var> a <class>%UnitTest.TestProduction</class> test, and what production does it declare?
+/// <var>pProduction</var> is its <code>PRODUCTION</code> default.
+/// <ul>
+/// <li>When the class is compiled and, if the run compiles first (<var>pCompiles</var>), up to date
+/// (<code>$System.OBJ.IsUpToDate</code>), the compiled class answers: <code>%Extends</code> and
+/// <code>$parameter</code>. A run that does not compile (<var>pCompiles</var> 0) is answered by the compiled class
+/// alone, and a class that is not compiled is not a test.</li>
+/// <li>Otherwise the definition answers, because the Atelier work queue compiles the definition before it runs. The
+/// superclasses are followed through their definitions (each normalized against the class that names it), or
+/// through a superclass's compiled class when that is compiled and up to date. The class is a test when the chain
+/// reaches <class>%UnitTest.TestProduction</class>, and its production is the <code>PRODUCTION</code> default of the
+/// nearest class on that path whose definition sets one. At most 32 classes are visited, each once
+/// (<var>pSeen</var> and <var>pCount</var> carry that across the recursion).</li>
+/// <li>A class that is neither compiled nor defined is not a test.</li>
+/// </ul>
+ClassMethod ResolveTest(pClass As %String, pCompiles As %Boolean, ByRef pSeen, ByRef pCount As %Integer, Output pProduction As %String) As %Boolean
+{
+    Set pProduction = ""
+    If '##class(ExecuteMCPv2.Coverage.Job).IsClassName(pClass) Quit 0
+    If pClass = "%UnitTest.TestProduction" Quit 1
+    If $Data(pSeen(pClass)) || (pCount >= 32) Quit 0
+    Set pSeen(pClass) = ""
+    Set pCount = pCount + 1
+
+    Set tCompiled = $$$comClassDefined(pClass)
+    Set tDefined = $$$defClassDefined(pClass)
+    Set tUseCompiled = 0
+    If tCompiled {
+        If 'pCompiles || 'tDefined {
+            Set tUseCompiled = 1
+        } Else {
+            Set tUseCompiled = ..IsUpToDate(pClass)
+        }
+    }
+    If tUseCompiled {
+        Set tIs = ..CompiledAnswer(pClass, .pProduction, .tAnswered)
+        If tAnswered Quit tIs
+    }
+    If 'pCompiles || 'tDefined Quit 0
+
+    Set tSuper = $$$defClassKeyGet(pClass, $$$cCLASSsuper)
+    $$$NormalizeClassnameByDef(tSuper, pClass)
+    Set tFound = 0
+    Set tSuperProduction = ""
+    For tI = 1:1:$Length(tSuper, ",") {
+        Set tName = $ZStrip($Piece(tSuper, ",", tI), "<>W")
+        If tName = "" Continue
+        If ..ResolveTest(tName, pCompiles, .pSeen, .pCount, .tSuperProduction) {
+            Set tFound = 1
+            Quit
+        }
+    }
+    If 'tFound Quit 0
+    Set pProduction = tSuperProduction
+    If $$$defMemberKeyDefined(pClass, $$$cCLASSparameter, "PRODUCTION", $$$cPARAMdefault)#2 {
+        Set pProduction = $$$defMemberKeyGet(pClass, $$$cCLASSparameter, "PRODUCTION", $$$cPARAMdefault)
+    }
+    Quit 1
+}
+
+/// The compiled class <var>pClass</var>'s own answer to <method>ResolveTest</method>. <var>pAnswered</var> is 0 when the
+/// class cannot be loaded, so the caller can fall back to the definition.
+ClassMethod CompiledAnswer(pClass As %String, Output pProduction As %String, Output pAnswered As %Boolean) As %Boolean [ Private ]
+{
+    Set pProduction = ""
+    Set pAnswered = 0
+    Set tIs = 0
+    Try {
+        ; $classmethod throws for a class that cannot be loaded; the Catch leaves the class unanswered
+        Set tIs = +$ClassMethod(pClass, "%Extends", "%UnitTest.TestProduction")
+        If tIs Set pProduction = $Parameter(pClass, "PRODUCTION")
+        Set pAnswered = 1
+    } Catch {
+        Set tIs = 0
+        Set pProduction = ""
+        Set pAnswered = 0
+    }
+    Quit tIs
+}
+
+/// Is the compiled class <var>pClass</var> up to date with its definition? An error is a no.
+ClassMethod IsUpToDate(pClass As %String) As %Boolean [ Private ]
+{
+    Set tUpToDate = 0
+    Try {
+        Set tUpToDate = +$System.OBJ.IsUpToDate(pClass)
+    } Catch {
+        Set tUpToDate = 0
+    }
+    Quit tUpToDate
+}
+
+/// The sanitized text of an error status, without its leading <code>ERROR #N:</code> prefix (English or localized).
+ClassMethod StatusText(pStatus As %Status) As %String [ Private ]
+{
+    Set tText = $System.Status.GetErrorText(##class(ExecuteMCPv2.Utils).SanitizeError(pStatus))
+    Set tColon = $Find(tText, ": ")
+    If (tColon > 0) && (tColon <= 24) {
+        Set tHead = $Extract(tText, 1, tColon - 3)
+        If ($Length(tHead, "#") = 2) && ($Piece(tHead, "#", 2) ? 1.N) Set tText = $Extract(tText, tColon, *)
+    }
+    Quit tText
 }
 
 }`,
@@ -10270,13 +12030,23 @@ ClassMethod AutoStart() As %Status
     Quit $$$OK
 }
 
+/// The stored <code>Ens_Util.Log.Type</code> number for an Event Log type display name.
+/// <p>The literal map mirrors <code>Ens.DataType.LogType</code> (Assert 1, Error 2,
+/// Warning 3, Info 4, Trace 5, Alert 6) without depending on that class, so a namespace
+/// with no interoperability answers exactly as before. Any other value, including a type
+/// number, is returned unchanged.</p>
+ClassMethod LogTypeValue(pType As %String) As %String
+{
+    Quit $Case(pType, "Assert":1, "Error":2, "Warning":3, "Info":4, "Trace":5, "Alert":6, :pType)
+}
+
 /// Query event log entries filtered by type, item name, and count.
 /// <p>Returns entries from <code>Ens_Util.Log</code> with timestamp, type,
 /// item name, and message text. Supports filtering by log type
 /// (Info/Warning/Error/Trace/Assert/Alert), config item name, and row count.</p>
 /// <p>Query parameters:
 /// <ul>
-///   <li><code>type</code> — Log type filter: Info, Warning, Error, Trace, Assert, Alert</li>
+///   <li><code>type</code> — Log type filter: a display name (Assert, Error, Warning, Info, Trace, Alert), mapped to its type number, or the type number itself</li>
 ///   <li><code>itemName</code> — Config item name filter (exact match on ConfigName)</li>
 ///   <li><code>count</code> — Maximum number of rows to return (default 100)</li>
 ///   <li><code>namespace</code> — Target namespace for Ens.* operations</li>
@@ -10307,7 +12077,7 @@ ClassMethod EventLog() As %Status
         If tType '= "" {
             Set tWhere = tWhere_$Select(tWhere="":"", 1:" AND")_" Type = ?"
             Set tParamCount = tParamCount + 1
-            Set tParams(tParamCount) = tType
+            Set tParams(tParamCount) = ..LogTypeValue(tType)
         }
         If tItemName '= "" {
             Set tWhere = tWhere_$Select(tWhere="":"", 1:" AND")_" ConfigName = ?"
@@ -14859,9 +16629,42 @@ ClassMethod AuditEvents() As %Status
     Quit $$$OK
 }
 
+/// The UTC instant <var>pSeconds</var> seconds before <var>pNow</var>, in the
+/// <class>Ens.DataType.UTC</class> logical form (<code>YYYY-MM-DD hh:mm:ss.nnn</code>).
+/// <p><var>pNow</var> is a <code>$ZTimeStamp</code> value; the empty string means the
+/// current <code>$ZTimeStamp</code>. The result is independent of the process time zone
+/// and never reads <code>$Horolog</code>, so it compares correctly with the UTC
+/// <code>TimeLogged</code> and <code>TimeCreated</code> columns.</p>
+ClassMethod UtcCutoff(pSeconds As %Integer, pNow As %String = "") As %String
+{
+    If pNow = "" Set pNow = $ZTimeStamp
+    Set tSecs = +$Piece(pNow, ",", 2) - pSeconds
+    Set tDays = +$Piece(pNow, ",", 1) + (tSecs \\ 86400)
+    Set tSecs = tSecs - ((tSecs \\ 86400) * 86400)
+    If tSecs < 0 {
+        Set tSecs = tSecs + 86400
+        Set tDays = tDays - 1
+    }
+    Quit $ZDateTime(tDays_","_tSecs, 3, 1, 3)
+}
+
+/// The UTC instant <var>pNow</var> as ISO 8601 text, <code>YYYY-MM-DDThh:mm:ssZ</code>.
+/// <p><var>pNow</var> is a <code>$ZTimeStamp</code> value; the empty string means the
+/// current <code>$ZTimeStamp</code>. Fractional seconds are truncated, never rounded, so the
+/// result never moves to the next second or day. The result is independent of the process
+/// time zone and never reads the local clock.</p>
+ClassMethod UtcStamp(pNow As %String = "") As %String
+{
+    If pNow = "" Set pNow = $ZTimeStamp
+    Quit $Translate($ZDateTime($Piece(pNow, "."), 3, 1), " ", "T")_"Z"
+}
+
 /// Collect interoperability metrics for the current namespace.
 /// <p>Returns a <class>%DynamicObject</class> with queue depth, error count,
 /// and production status for the current namespace context.</p>
+/// <p><code>errorCount24h</code> counts Event Log entries of type Error and
+/// <code>messageCount24h</code> counts message headers, each over the 86,400 seconds
+/// before the call, measured in UTC.</p>
 ClassMethod CollectInteropMetrics(pNamespace As %String) As %DynamicObject
 {
     Set tMetrics = {}
@@ -14902,11 +16705,13 @@ ClassMethod CollectInteropMetrics(pNamespace As %String) As %DynamicObject
     }
     Do tMetrics.%Set("queueDepth", tQueueDepth, "number")
 
-    ; -- Error count in last 24 hours from Ens_Util.Log --
+    ; -- One UTC cutoff shared by both 24-hour counts --
+    Set tCutoff = ..UtcCutoff(86400)
+
+    ; -- Error count in last 24 hours from Ens_Util.Log (Type 2 = Error) --
     Set tErrorCount = 0
     Try {
-        Set tCutoff = $ZDateTime($Horolog - 1, 3)
-        Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) AS cnt FROM Ens_Util.Log WHERE Type = 3 AND TimeLogged > ?", tCutoff)
+        Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) AS cnt FROM Ens_Util.Log WHERE Type = 2 AND TimeLogged > ?", tCutoff)
         If $IsObject(tRS) && tRS.%Next() {
             Set tErrorCount = +tRS.cnt
         }
@@ -14919,7 +16724,6 @@ ClassMethod CollectInteropMetrics(pNamespace As %String) As %DynamicObject
     ; -- Total messages in last 24 hours --
     Set tMessageCount = 0
     Try {
-        Set tCutoff = $ZDateTime($Horolog - 1, 3)
         Set tRS = ##class(%SQL.Statement).%ExecDirect(, "SELECT COUNT(*) AS cnt FROM Ens.MessageHeader WHERE TimeCreated > ?", tCutoff)
         If $IsObject(tRS) && tRS.%Next() {
             Set tMessageCount = +tRS.cnt
@@ -15215,6 +17019,7 @@ ClassMethod LicenseInfo() As %Status
 /// state. The <code>alerts.log</code> file is <b>NOT</b> truncated — historical entries
 /// remain on disk for audit. <code>iris_metrics_alerts</code> will re-populate active
 /// alerts on the next poll if conditions persist.</p>
+/// <p><code>clearedAt</code> is the UTC time of the reset (ISO 8601, to the second).</p>
 /// <p>Note: Per-alert <code>clear</code> by index and <code>acknowledge</code> are not
 /// supported — IRIS exposes no native API for either. Deferred to Epic 13 if needed.</p>
 ClassMethod AlertsManage() As %Status
@@ -15262,12 +17067,10 @@ ClassMethod AlertsManage() As %Status
         ; Restore namespace before building response
         Set $NAMESPACE = tOrigNS
 
-        ; Build response with ISO 8601 timestamp: replace space separator with "T"
-        ; $ZDateTime($Horolog, 3, 1) => "YYYY-MM-DD HH:MM:SS"; $Translate adds "T"
-        Set tTimestamp = $Translate($ZDateTime($Horolog, 3, 1), " ", "T")_"Z"
+        ; Build response; clearedAt is the UTC time of the reset (ISO 8601, to the second)
         Set tResult = {}
         Do tResult.%Set("action", "reset")
-        Do tResult.%Set("clearedAt", tTimestamp)
+        Do tResult.%Set("clearedAt", ..UtcStamp())
 
         Do ..RenderResponseBody($$$OK, , tResult)
     }
@@ -18284,6 +20087,657 @@ rchr(time) Quit ""
 }`,
   ],
   [
+    "ExecuteMCPv2.REST.Coverage.cls",
+    `/// REST handler for line-coverage test runs (Stories 40.1 and 40.2).
+/// <p>Backs three routes: <code>POST /api/executemcp/v2/dev/test/coverage</code> (<method>Start</method>, JSON body
+/// <code>{target, level, classes, namespace?, maxSeconds, maxLines, minCoverage?}</code>), <code>GET .../dev/test/coverage?id=</code>
+/// (<method>Status</method>) and <code>POST .../dev/test/coverage/cancel</code> (<method>Cancel</method>, body
+/// <code>{id}</code>). The run itself is two suite jobs owned by <class>ExecuteMCPv2.Coverage.Job</class>
+/// (AD-27): this handler validates, decides whether the instance-wide Line-by-Line monitor is free, and
+/// launches the supervisor. It returns raw data; TypeScript decides what is executable and computes percentages.</p>
+/// <ul>
+/// <li><b>Start.</b> The request is validated before any namespace switch (a target whose package or class part is
+/// empty is refused there, because the runner would read it as every test class under <code>^UnitTestRoot</code>).
+/// The routines to measure are resolved in
+/// the target namespace, and a request that measures no routine, or more than <code>maxLines</code> INT lines, is an
+/// error that starts nothing. The TestProduction guard (Story 40.3, <method>ExecuteMCPv2.REST.UnitTest:ProductionGuard</method>,
+/// compiled classes only because the runner never compiles, and asked about the classes the runner will run: a package that
+/// holds no test class is run as a class, and asked about as one) then decides whether a run that includes
+/// <class>%UnitTest.TestProduction</class> tests may go ahead while another production runs in the namespace; a refusal
+/// allocates no run id, writes nothing and starts no session. The busy check and the launch then run under one lock, so
+/// two requests cannot both start a session. The result is <code>{outcome, ...}</code>: <code>started</code> (the run
+/// record), <code>busy</code> (<code>owner</code> is <code>suite</code> or <code>foreign</code>, and for the suite the
+/// running run's <code>coverageRunId</code>, <code>pid</code>, <code>startedAt</code> and <code>namespace</code>),
+/// <code>production-busy</code> (the guard's raw fields: <code>decision</code>, <code>namespace</code>,
+/// <code>testProductions</code> and, when the state was read, <code>production</code>, <code>state</code> and
+/// <code>stateCode</code>, or else <code>error</code>) or <code>failed</code> (with <code>error</code>).</li>
+/// <li><b>Status.</b> The run record, including <code>readError</code> when the run's line counts could not be read,
+/// and <code>minCoverage</code> when the run was started with one. A terminal run with counts also carries
+/// <code>routines</code> and <code>sources</code>, the class-source map. It never starts, stops or terminates anything.</li>
+/// <li><b>Cancel.</b> Sets the run's cancel flag, then returns the record. A cancel only signals the supervisor job.</li>
+/// </ul>
+Class ExecuteMCPv2.REST.Coverage Extends ExecuteMCPv2.REST.Base
+{
+
+/// HTTP entry point of <code>POST /dev/test/coverage</code>: reads the body, starts the run, renders one envelope.
+ClassMethod Start() As %Status
+{
+    Set tSC = $$$OK
+    Set tResult = ""
+    Set tErrored = 0
+    Try {
+        Set tSC1 = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC1) {
+            Set tErrored = 1
+            Set tCmdStatus = tSC1
+            Quit
+        }
+        Set tSC2 = ..Run(tBody, .tResult)
+        If $$$ISERR(tSC2) {
+            Set tErrored = 1
+            Set tCmdStatus = tSC2
+            Quit
+        }
+        Quit
+    } Catch ex {
+        Set tErrored = 1
+        Set tCmdStatus = ex.AsStatus()
+    }
+
+    If tErrored {
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tCmdStatus))
+    } Else {
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Quit tSC
+}
+
+/// HTTP entry point of <code>GET /dev/test/coverage?id=</code>: the run record, with the per-routine counts and
+/// skeletons when the run is terminal and has counts.
+ClassMethod Status() As %Status
+{
+    Set tSC = $$$OK
+    Set tResult = ""
+    Set tErrored = 0
+    Try {
+        Set tSC1 = ..ReadRun($ZStrip($Get(%request.Data("id", 1)), "<>W"), .tId)
+        If $$$ISERR(tSC1) {
+            Set tErrored = 1
+            Set tCmdStatus = tSC1
+            Quit
+        }
+        Set tResult = ..BuildRun(tId, 1)
+        Quit
+    } Catch ex {
+        Set tErrored = 1
+        Set tCmdStatus = ex.AsStatus()
+    }
+
+    If tErrored {
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tCmdStatus))
+    } Else {
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Quit tSC
+}
+
+/// HTTP entry point of <code>POST /dev/test/coverage/cancel</code>: sets the cancel flag of a non-terminal run and
+/// returns the record. The supervisor job reacts within 100 ms; this method never terminates or stops anything.
+ClassMethod Cancel() As %Status
+{
+    Set tSC = $$$OK
+    Set tResult = ""
+    Set tErrored = 0
+    Try {
+        Set tSC1 = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC1) {
+            Set tErrored = 1
+            Set tCmdStatus = tSC1
+            Quit
+        }
+        Set tIdText = ""
+        If $IsObject(tBody) Set tIdText = $ZStrip(tBody.%Get("id"), "<>W")
+        Set tSC2 = ..ReadRun(tIdText, .tId)
+        If $$$ISERR(tSC2) {
+            Set tErrored = 1
+            Set tCmdStatus = tSC2
+            Quit
+        }
+        If '##class(ExecuteMCPv2.Coverage.Job).IsTerminal(##class(ExecuteMCPv2.Coverage.Job).RunGet(tId, "status")) {
+            Set ^IRIS.TempExecuteMCPv2Coverage("run", tId, "cancel") = 1
+        }
+        Set tResult = ..BuildRun(tId, 0)
+        Quit
+    } Catch ex {
+        Set tErrored = 1
+        Set tCmdStatus = ex.AsStatus()
+    }
+
+    If tErrored {
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tCmdStatus))
+    } Else {
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Quit tSC
+}
+
+/// Validate a run id and check that the run exists. <var>pId</var> is the run id on success.
+ClassMethod ReadRun(pIdText As %String, Output pId As %Integer) As %Status
+{
+    Set pId = ""
+    Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(pIdText, "id")
+    If $$$ISERR(tSC) Quit tSC
+    If pIdText '? 1.N Quit $$$ERROR($$$GeneralError, "Parameter 'id' must be the coverageRunId, all digits")
+    Set pId = +pIdText
+    If '##class(ExecuteMCPv2.Coverage.Job).RunExists(pId) {
+        Quit $$$ERROR($$$GeneralError, "Coverage run "_pId_" was not found. Only the "_##class(ExecuteMCPv2.Coverage.Job).#MAXRUNS_" most recent runs are kept, and runs do not survive an instance restart.")
+    }
+    Quit $$$OK
+}
+
+/// Validate the Start request and return its parameters in <var>pParams</var>: <code>target</code> (whose part before
+/// the first colon, the package or class, is not empty: the runner reads an empty one as every test class at the top of
+/// <code>^UnitTestRoot</code>, which the TestProduction guard cannot see), <code>level</code>, <code>classes</code> (a
+/// <class>%List</class> of 1 to 50 valid class names, de-duplicated, order kept), <code>namespace</code> (empty when not
+/// given), <code>maxSeconds</code> (1 to 3600), <code>maxLines</code> (at least 1) and <code>minCoverage</code> (empty
+/// when not given, otherwise a number from 0 to 100). Runs before any namespace switch.
+ClassMethod ValidateStart(pBody As %DynamicObject, Output pParams) As %Status
+{
+    Kill pParams
+    If '$IsObject(pBody) Quit $$$ERROR($$$GeneralError, "The request body must be a JSON object")
+
+    ; target
+    If 'pBody.%IsDefined("target") || (pBody.%GetTypeOf("target") = "null") || (pBody.%Get("target") = "") {
+        Quit $$$ERROR($$$GeneralError, "Required parameter 'target' is missing or empty")
+    }
+    If pBody.%GetTypeOf("target") '= "string" Quit $$$ERROR($$$GeneralError, "Parameter 'target' must be a string")
+    Set tTarget = $ZStrip(pBody.%Get("target"), "<>W")
+    If (tTarget = "") || (tTarget '? 1.(1AN,1".",1"%",1"_",1":")) {
+        Quit $$$ERROR($$$GeneralError, "Parameter 'target' must be a package, a class or class:method name")
+    }
+    If $Piece(tTarget, ":", 1) = "" {
+        Quit $$$ERROR($$$GeneralError, "Parameter 'target' must start with a package or class name")
+    }
+    Set pParams("target") = tTarget
+
+    ; level
+    If 'pBody.%IsDefined("level") || (pBody.%Get("level") = "") {
+        Quit $$$ERROR($$$GeneralError, "Required parameter 'level' is missing or empty")
+    }
+    Set tLevel = pBody.%Get("level")
+    If (pBody.%GetTypeOf("level") '= "string") || ((tLevel '= "package") && (tLevel '= "class") && (tLevel '= "method")) {
+        Quit $$$ERROR($$$GeneralError, "Parameter 'level' must be one of: package, class, method")
+    }
+    Set pParams("level") = tLevel
+
+    ; classes
+    If 'pBody.%IsDefined("classes") || (pBody.%GetTypeOf("classes") '= "array") {
+        Quit $$$ERROR($$$GeneralError, "Required parameter 'classes' must be an array of 1 to 50 class names")
+    }
+    Set tClasses = pBody.%Get("classes")
+    Set tSize = tClasses.%Size()
+    If (tSize < 1) || (tSize > 50) {
+        Quit $$$ERROR($$$GeneralError, "Parameter 'classes' must list 1 to 50 class names, got "_tSize)
+    }
+    Set tList = ""
+    Set tInvalid = ""
+    For tI = 0:1:tSize - 1 {
+        If tClasses.%GetTypeOf(tI) '= "string" {
+            Set tInvalid = "an entry that is not a string"
+            Quit
+        }
+        Set tName = tClasses.%Get(tI)
+        If '##class(ExecuteMCPv2.Coverage.Job).IsClassName(tName) {
+            Set tInvalid = "the invalid class name '"_$Extract(tName, 1, 80)_"'"
+            Quit
+        }
+        If '$Data(tSeen(tName)) {
+            Set tSeen(tName) = ""
+            Set tList = tList_$ListBuild(tName)
+        }
+    }
+    If tInvalid '= "" Quit $$$ERROR($$$GeneralError, "Parameter 'classes' holds "_tInvalid)
+    Set pParams("classes") = tList
+
+    ; namespace (optional)
+    Set pParams("namespace") = ""
+    If pBody.%IsDefined("namespace") && (pBody.%GetTypeOf("namespace") '= "null") {
+        If pBody.%GetTypeOf("namespace") '= "string" Quit $$$ERROR($$$GeneralError, "Parameter 'namespace' must be a string")
+        Set pParams("namespace") = $ZStrip(pBody.%Get("namespace"), "<>W")
+    }
+
+    ; maxSeconds
+    Set tSC = ..ReadInteger(pBody, "maxSeconds", 1, 3600, .tMaxSeconds)
+    If $$$ISERR(tSC) Quit tSC
+    Set pParams("maxSeconds") = tMaxSeconds
+
+    ; maxLines
+    Set tSC = ..ReadInteger(pBody, "maxLines", 1, "", .tMaxLines)
+    If $$$ISERR(tSC) Quit tSC
+    Set pParams("maxLines") = tMaxLines
+
+    ; minCoverage (optional; JSON null means absent)
+    Set pParams("minCoverage") = ""
+    If pBody.%IsDefined("minCoverage") && (pBody.%GetTypeOf("minCoverage") '= "null") {
+        If pBody.%GetTypeOf("minCoverage") '= "number" {
+            Quit $$$ERROR($$$GeneralError, "Parameter 'minCoverage' must be a number from 0 to 100")
+        }
+        Set tMinCoverage = pBody.%Get("minCoverage")
+        If (tMinCoverage < 0) || (tMinCoverage > 100) {
+            Quit $$$ERROR($$$GeneralError, "Parameter 'minCoverage' must be a number from 0 to 100")
+        }
+        Set pParams("minCoverage") = +tMinCoverage
+    }
+    Quit $$$OK
+}
+
+/// Read the required integer <var>pName</var> of <var>pBody</var>, between <var>pMin</var> and <var>pMax</var>
+/// (an empty <var>pMax</var> means no maximum).
+ClassMethod ReadInteger(pBody As %DynamicObject, pName As %String, pMin As %Integer, pMax As %Integer, Output pValue As %Integer) As %Status [ Private ]
+{
+    Set pValue = ""
+    Set tRange = $Select(pMax = "": "an integer of at least "_pMin, 1: "an integer from "_pMin_" to "_pMax)
+    If 'pBody.%IsDefined(pName) || (pBody.%GetTypeOf(pName) '= "number") {
+        Quit $$$ERROR($$$GeneralError, "Required parameter '"_pName_"' must be "_tRange)
+    }
+    Set tValue = pBody.%Get(pName)
+    If (tValue '= (tValue \\ 1)) || (tValue < pMin) || ((pMax '= "") && (tValue > pMax)) {
+        Quit $$$ERROR($$$GeneralError, "Parameter '"_pName_"' must be "_tRange)
+    }
+    Set pValue = tValue
+    Quit $$$OK
+}
+
+/// The request-independent core of <method>Start</method>: validate, resolve and check in the target namespace,
+/// then launch from the home namespace. The namespace is restored on every exit path.
+ClassMethod Run(pBody As %DynamicObject, Output pResult As %DynamicObject) As %Status
+{
+    Set pResult = ""
+    Set tSC = ..ValidateStart(pBody, .tParams)
+    If $$$ISERR(tSC) Quit tSC
+
+    Set tOrigNS = $NAMESPACE
+    Set tNamespace = ""
+    Set tRoutines = ""
+    Set tUnmeasured = ""
+    Set tSpec = ""
+    Try {
+        If tParams("namespace") '= "" {
+            Set tSC = ##class(ExecuteMCPv2.Utils).SwitchNamespace(tParams("namespace"), .tOrigNS)
+            If $$$ISERR(tSC) {
+                Set tSC = $$$ERROR($$$GeneralError, "Namespace '"_tParams("namespace")_"' does not exist or cannot be used. Check the namespace name. Nothing was started.")
+                Quit
+            }
+        }
+        Set tNamespace = $NAMESPACE
+        Set tRoutines = ##class(ExecuteMCPv2.Coverage.Job).ResolveRoutines(tNamespace, tParams("classes"), .tUnmeasured, .tTotalLines, .tResolveError)
+        If tResolveError '= "" {
+            Set tSC = $$$ERROR($$$GeneralError, "The routines of the listed classes could not be resolved in namespace "_tNamespace_": "_tResolveError_". Nothing was started.")
+            Quit
+        }
+        If tRoutines = "" {
+            Set tSC = $$$ERROR($$$GeneralError, "None of the listed classes has a measurable routine in namespace "_tNamespace_" ("_..UnmeasuredText(tUnmeasured)_"). Compile the classes in that namespace, or pass the namespace they are compiled in. Nothing was started.")
+            Quit
+        }
+        If tTotalLines > tParams("maxLines") {
+            Set tSC = $$$ERROR($$$GeneralError, "Coverage of "_tTotalLines_" INT lines exceeds the limit of "_tParams("maxLines")_". List fewer classes, or classes with less code. Nothing was started.")
+            Quit
+        }
+        ; The guard is asked about the classes the runner will run. The runner never compiles (/noload), so only the
+        ; compiled test classes are asked (pCompiles 0); and a package that holds no test class runs the target as a class
+        ; (BuildTestSpec falls back to :<target>), so that run is asked about at the class level.
+        Set tSpec = ..TestSpec(tParams("target"), tParams("level"))
+        Set tGuardLevel = tParams("level")
+        If (tGuardLevel = "package") && (tSpec = (":"_tParams("target"))) Set tGuardLevel = "class"
+        Set tGuardSC = ##class(ExecuteMCPv2.REST.UnitTest).ProductionGuard(tParams("target"), tGuardLevel, 0, .tGuard)
+        If $$$ISERR(tGuardSC) {
+            Set tSC = $$$ERROR($$$GeneralError, "The TestProduction guard could not check the tests of '"_tParams("target")_"': "_##class(ExecuteMCPv2.Coverage.Job).SafeText($System.Status.GetErrorText(tGuardSC))_". Nothing was started.")
+            Quit
+        }
+        If tGuard.%Get("decision") = "busy" {
+            Set pResult = ..ProductionBusyResult(tGuard)
+            Quit
+        }
+        Do ##class(ExecuteMCPv2.Setup).EnsureUnitTestRoot()
+    } Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+    }
+    Set $NAMESPACE = tOrigNS
+    If $$$ISERR(tSC) Quit tSC
+    If $IsObject(pResult) Quit tSC
+
+    Quit ..Launch(.tParams, tNamespace, tRoutines, tUnmeasured, tSpec, .pResult)
+}
+
+/// The test spec for <method>%UnitTest.Manager:RunTest</method>: the value of
+/// <method>ExecuteMCPv2.REST.UnitTest:BuildTestSpec</method> for the target and level, unchanged. At the package level
+/// that is <code>:A;B;C</code>, one colon and then the classes separated by a semicolon alone, which is how RunTest
+/// reads a suite of several classes.
+ClassMethod TestSpec(pTarget As %String, pLevel As %String) As %String
+{
+    Quit ##class(ExecuteMCPv2.REST.UnitTest).BuildTestSpec(pTarget, pLevel)
+}
+
+/// The unmeasured classes as text: <code>Class: reason, Class: reason</code>.
+ClassMethod UnmeasuredText(pUnmeasured As %List) As %String
+{
+    Set tText = ""
+    For tI = 1:1:$ListLength(pUnmeasured) {
+        Set tItem = $List(pUnmeasured, tI)
+        Set tText = tText_$Select(tText = "": "", 1: ", ")_$List(tItem, 1)_": "_$List(tItem, 2)
+    }
+    Quit tText
+}
+
+/// Decide whether the monitor is free and, if so, create the run and launch its supervisor; both under one lock.
+/// <var>pResult</var> is <code>{outcome:"started", ...run}</code>, <code>{outcome:"busy", owner, ...}</code> or
+/// <code>{outcome:"failed", error, ...}</code>. Only a decision that proceeds allocates a run id.
+ClassMethod Launch(ByRef pParams, pNamespace As %String, pRoutines As %List, pUnmeasured As %List, pSpec As %String, Output pResult As %DynamicObject) As %Status
+{
+    Set tSC = $$$OK
+    Set pResult = ""
+    Set tLocked = 0
+    Set tId = ""
+    Try {
+        Lock +^IRIS.TempExecuteMCPv2Coverage("start"):15
+        If '$Test {
+            Set pResult = ..BusyResult("suite", "")
+            Quit
+        }
+        Set tLocked = 1
+        Set tDecision = ##class(ExecuteMCPv2.Coverage.Job).Evaluate(.tSession, .tLiveRunId)
+        Set tSessionId = $ListGet(tSession, 1)
+        Set tReclaimed = ""
+        If tDecision = "busy-suite" {
+            Set pResult = ..BusyResult("suite", $Select(tSessionId '= "": tSessionId, 1: tLiveRunId))
+            Quit
+        }
+        If tDecision = "busy-foreign" {
+            Set pResult = ..BusyResult("foreign", "")
+            Quit
+        }
+        If tDecision = "clear-busy-foreign" {
+            ; The ownership record is cleared only when the active session's own process list disproves it. A session of
+            ; all processes or a paused one has no list of its own, so the record is kept: a suite session paused by
+            ; someone else is refused as foreign while it is paused and is reclaimable once it is resumed, and
+            ; clear-and-proceed removes the record once the monitor is idle.
+            If ##class(ExecuteMCPv2.Coverage.Job).SessionDisproved(tSession) Kill ^IRIS.TempExecuteMCPv2Coverage("session")
+            Set pResult = ..BusyResult("foreign", "")
+            Quit
+        }
+        If tDecision = "reclaim" {
+            Set tStopSC = ##class(%Monitor.System.LineByLine).Stop()
+            If $$$ISERR(tStopSC) {
+                Set pResult = ..FailedResult("", "The monitor session of dead coverage run "_tSessionId_" could not be released: "_##class(ExecuteMCPv2.Coverage.Job).SafeText($System.Status.GetErrorText(tStopSC))_". Nothing was started.")
+                Quit
+            }
+            Set tReclaimed = $ListBuild(tSessionId, ##class(ExecuteMCPv2.Coverage.Job).RunGet(tSessionId, "pid"))
+            Kill ^IRIS.TempExecuteMCPv2Coverage("session")
+            If '##class(ExecuteMCPv2.Coverage.Job).IsTerminal(##class(ExecuteMCPv2.Coverage.Job).RunGet(tSessionId, "status")) {
+                Do ##class(ExecuteMCPv2.Coverage.Job).SetStatus(tSessionId, "abandoned")
+            }
+        } ElseIf tDecision = "clear-and-proceed" {
+            Kill ^IRIS.TempExecuteMCPv2Coverage("session")
+            If '##class(ExecuteMCPv2.Coverage.Job).IsTerminal(##class(ExecuteMCPv2.Coverage.Job).RunGet(tSessionId, "status")) {
+                Do ##class(ExecuteMCPv2.Coverage.Job).SetStatus(tSessionId, "abandoned")
+            }
+        }
+
+        Set tId = $Increment(^IRIS.TempExecuteMCPv2Coverage("seq"))
+        Do ##class(ExecuteMCPv2.Coverage.Job).CreateRun(tId, .pParams, pNamespace, pRoutines, pUnmeasured, pSpec, tReclaimed)
+        Do ##class(ExecuteMCPv2.Coverage.Job).Prune(tId)
+
+        Job ##class(ExecuteMCPv2.Coverage.Job).Supervise(tId)::10
+        If '$Test {
+            Do ##class(ExecuteMCPv2.Coverage.Job).SetStatus(tId, "failed", "", "The coverage supervisor did not start within 10 seconds.")
+            Quit
+        }
+        For tWait = 1:1:100 {
+            If ##class(ExecuteMCPv2.Coverage.Job).RunGet(tId, "pid") '= "" Quit
+            Hang 0.1
+        }
+        If ##class(ExecuteMCPv2.Coverage.Job).RunGet(tId, "pid") = "" {
+            Do ##class(ExecuteMCPv2.Coverage.Job).SetStatus(tId, "failed", "", "The coverage supervisor did not report in within 10 seconds.")
+        }
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    If tLocked Lock -^IRIS.TempExecuteMCPv2Coverage("start")
+    If $$$ISERR(tSC) Quit tSC
+    If (pResult '= "") || (tId = "") Quit tSC
+
+    ; The run is launched: wait for it to leave "starting", then return it.
+    For tWait = 1:1:150 {
+        If ##class(ExecuteMCPv2.Coverage.Job).RunGet(tId, "status") '= "starting" Quit
+        Hang 0.1
+    }
+    Set pResult = ..BuildRun(tId, 0)
+    If pResult.status = "failed" {
+        Do pResult.%Set("outcome", "failed")
+    } Else {
+        Do pResult.%Set("outcome", "started")
+    }
+    Quit tSC
+}
+
+/// A <code>busy</code> outcome. <var>pOwner</var> is <code>suite</code> or <code>foreign</code>; for the suite, the
+/// running run's id, supervisor pid, start time and namespace are added when <var>pRunId</var> is given.
+ClassMethod BusyResult(pOwner As %String, pRunId As %Integer) As %DynamicObject
+{
+    Set tResult = {}
+    Do tResult.%Set("outcome", "busy")
+    Do tResult.%Set("owner", pOwner)
+    If (pOwner = "suite") && (pRunId '= "") {
+        Do tResult.%Set("coverageRunId", +pRunId, "number")
+        Do tResult.%Set("pid", +##class(ExecuteMCPv2.Coverage.Job).RunGet(pRunId, "pid"), "number")
+        Do tResult.%Set("startedAt", ##class(ExecuteMCPv2.Coverage.Job).RunGet(pRunId, "startedAt"))
+        Do tResult.%Set("namespace", ##class(ExecuteMCPv2.Coverage.Job).RunGet(pRunId, "namespace"))
+    }
+    Quit tResult
+}
+
+/// A <code>production-busy</code> outcome: the TestProduction guard (<method>ExecuteMCPv2.REST.UnitTest:ProductionGuard</method>)
+/// refused the run. It carries the guard's raw fields (<code>decision</code>, <code>namespace</code>,
+/// <code>testProductions</code> and, when present, <code>production</code>, <code>state</code>, <code>stateCode</code>
+/// and <code>error</code>) and no run id: nothing was allocated, written or started.
+ClassMethod ProductionBusyResult(pGuard As %DynamicObject) As %DynamicObject
+{
+    Set tResult = {}
+    Do tResult.%Set("outcome", "production-busy")
+    Do tResult.%Set("decision", "busy")
+    Do tResult.%Set("namespace", pGuard.%Get("namespace"))
+    Do tResult.%Set("testProductions", pGuard.%Get("testProductions"))
+    If pGuard.%IsDefined("production") Do tResult.%Set("production", pGuard.%Get("production"))
+    If pGuard.%IsDefined("state") Do tResult.%Set("state", pGuard.%Get("state"))
+    If pGuard.%IsDefined("stateCode") Do tResult.%Set("stateCode", pGuard.%Get("stateCode"), "number")
+    If pGuard.%IsDefined("error") Do tResult.%Set("error", pGuard.%Get("error"))
+    Quit tResult
+}
+
+/// A <code>failed</code> outcome that has no run record.
+ClassMethod FailedResult(pRunId As %Integer, pError As %String) As %DynamicObject
+{
+    Set tResult = {}
+    Do tResult.%Set("outcome", "failed")
+    If pRunId '= "" Do tResult.%Set("coverageRunId", +pRunId, "number")
+    Do tResult.%Set("error", pError)
+    Quit tResult
+}
+
+/// Set <var>pKey</var> to the number <var>pValue</var>, or to JSON null when it is empty.
+ClassMethod SetNumber(pObject As %DynamicObject, pKey As %String, pValue As %String) [ Private ]
+{
+    If pValue = "" {
+        Do pObject.%Set(pKey, "", "null")
+    } Else {
+        Do pObject.%Set(pKey, +pValue, "number")
+    }
+}
+
+/// The run record as a JSON object. <var>pWithRoutines</var> adds <code>routines</code>, the per-routine counts and
+/// skeletons, when the run is terminal and has counts. A non-terminal record whose supervisor and runner are both
+/// dead is reported with status <code>abandoned</code>; the record itself is not changed.
+ClassMethod BuildRun(pId As %Integer, pWithRoutines As %Boolean = 0) As %DynamicObject
+{
+    Set tSupervisorAlive = ##class(ExecuteMCPv2.Coverage.Job).OwnerAlive(pId, "supervisor")
+    Set tRunnerAlive = ##class(ExecuteMCPv2.Coverage.Job).OwnerAlive(pId, "runner")
+    ; The status is read after the two probes: a supervisor that finished in between has written its terminal status.
+    Set tRecorded = ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "status")
+    Set tTerminal = ##class(ExecuteMCPv2.Coverage.Job).IsTerminal(tRecorded)
+    Set tStatus = tRecorded
+    If 'tTerminal && 'tSupervisorAlive && 'tRunnerAlive Set tStatus = "abandoned"
+
+    Set tRun = {}
+    Do tRun.%Set("coverageRunId", +pId, "number")
+    Do tRun.%Set("status", tStatus)
+    Do tRun.%Set("namespace", ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "namespace"))
+    Do tRun.%Set("target", ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "target"))
+    Do tRun.%Set("level", ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "level"))
+    Do ..SetNumber(tRun, "pid", ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "pid"))
+    Do ..SetNumber(tRun, "runnerPid", ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "runnerPid"))
+    Do tRun.%Set("startedAt", ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "startedAt"))
+    Set tFinishedAt = ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "finishedAt")
+    If tFinishedAt = "" {
+        Do tRun.%Set("finishedAt", "", "null")
+    } Else {
+        Do tRun.%Set("finishedAt", tFinishedAt)
+    }
+    Do ..SetNumber(tRun, "runIndex", ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "runIndex"))
+    Set tReason = ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "reason")
+    If tReason '= "" Do tRun.%Set("reason", tReason)
+    Set tError = ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "error")
+    If tError '= "" Do tRun.%Set("error", ##class(ExecuteMCPv2.Coverage.Job).SafeText(tError))
+    Set tReadError = ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "readError")
+    If tReadError '= "" Do tRun.%Set("readError", ##class(ExecuteMCPv2.Coverage.Job).SafeText(tReadError))
+    Set tReleasedBy = ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "releasedBy")
+    If tReleasedBy '= "" Do tRun.%Set("releasedBy", tReleasedBy)
+    Do tRun.%Set("cancelRequested", +##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "cancel"), "boolean")
+    Do tRun.%Set("supervisorAlive", +tSupervisorAlive, "boolean")
+    Do tRun.%Set("runnerAlive", +tRunnerAlive, "boolean")
+
+    Set tUnmeasured = []
+    Set tList = ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "unmeasured")
+    For tI = 1:1:$ListLength(tList) {
+        Set tItem = $List(tList, tI)
+        Set tEntry = {}
+        Do tEntry.%Set("class", $List(tItem, 1))
+        Do tEntry.%Set("reason", $List(tItem, 2))
+        Do tUnmeasured.%Push(tEntry)
+    }
+    Do tRun.%Set("unmeasured", tUnmeasured)
+
+    Set tReclaimed = ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "reclaimed")
+    If tReclaimed '= "" {
+        Set tReclaimedObject = {}
+        Do tReclaimedObject.%Set("coverageRunId", +$List(tReclaimed, 1), "number")
+        Do ..SetNumber(tReclaimedObject, "pid", $List(tReclaimed, 2))
+        Do tRun.%Set("reclaimed", tReclaimedObject)
+    }
+
+    Set tMinCoverage = ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "minCoverage")
+    If tMinCoverage '= "" Do tRun.%Set("minCoverage", +tMinCoverage, "number")
+
+    If pWithRoutines && tTerminal && ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "hasCounts") {
+        Do tRun.%Set("routines", ..BuildRoutines(pId))
+        Do tRun.%Set("sources", ..BuildSources(pId))
+    }
+    Quit tRun
+}
+
+/// The class-source map of a terminal run, one entry per measured class: <code>{class, reason?, lineMap?, methods:[...]}</code>.
+/// <code>lineMap</code> is a number, <code>$Data(^rMAP(class))</code> when the map was built (10 while the class has its debug
+/// line map, 0 once a documentation-only save removed it), and is absent from a class with a <code>reason</code> and from a
+/// record that was stored without it. A method that maps is <code>{name, line, routine, intLines:[...], labelLine}</code>
+/// (<code>intLines[k-1]</code> is the INT line of body line k, or 0; <code>labelLine</code> is the INT line of the method's
+/// compiled label, or 0 when it is not known), and a method that does not is <code>{name, line, reason}</code>.
+/// <code>line</code> is the class-document line that declares the method, or null. See
+/// <method>ExecuteMCPv2.Coverage.Job:SourceMap</method>.
+ClassMethod BuildSources(pId As %Integer) As %DynamicArray [ Private ]
+{
+    Set tSources = []
+    Set tIndex = ""
+    For {
+        Set tIndex = $Order(^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tIndex))
+        If tIndex = "" Quit
+        Set tHead = $Get(^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tIndex))
+        Set tClass = {}
+        Do tClass.%Set("class", $List(tHead, 1))
+        If $List(tHead, 2) '= "" Do tClass.%Set("reason", $List(tHead, 2))
+        If $ListLength(tHead) > 2 Do tClass.%Set("lineMap", +$List(tHead, 3), "number")
+        Set tMethods = []
+        Set tM = ""
+        For {
+            Set tM = $Order(^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tIndex, "m", tM))
+            If tM = "" Quit
+            Set tNode = ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tIndex, "m", tM)
+            Set tMethod = {}
+            Do tMethod.%Set("name", $List(tNode, 1))
+            Do ..SetNumber(tMethod, "line", $List(tNode, 2))
+            If $List(tNode, 4) '= "" {
+                Do tMethod.%Set("reason", $List(tNode, 4))
+            } Else {
+                Do tMethod.%Set("routine", $List(tNode, 3))
+                Set tInts = []
+                Set tK = ""
+                For {
+                    Set tK = $Order(^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tIndex, "m", tM, tK))
+                    If tK = "" Quit
+                    Do tInts.%Push(+^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tIndex, "m", tM, tK), "number")
+                }
+                Do tMethod.%Set("intLines", tInts)
+                Do tMethod.%Set("labelLine", +$ListGet(tNode, 5), "number")
+            }
+            Do tMethods.%Push(tMethod)
+        }
+        Do tClass.%Set("methods", tMethods)
+        Do tSources.%Push(tClass)
+    }
+    Quit tSources
+}
+
+/// The per-routine counts and skeletons of a terminal run: <code>{class, routine, lines, hits:[[line,count]...],
+/// skeleton:[[line,text]...]}</code>. <code>hits</code> lists only the lines with a count above 0.
+ClassMethod BuildRoutines(pId As %Integer) As %DynamicArray [ Private ]
+{
+    Set tRoutines = []
+    Set tList = ##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "routines")
+    For tN = 1:1:$ListLength(tList) {
+        Set tEntry = $List(tList, tN)
+        Set tHits = []
+        Set tLine = ""
+        For {
+            Set tLine = $Order(^IRIS.TempExecuteMCPv2Coverage("run", pId, "hits", tN, tLine))
+            If tLine = "" Quit
+            Set tPair = []
+            Do tPair.%Push(+tLine, "number")
+            Do tPair.%Push(+^IRIS.TempExecuteMCPv2Coverage("run", pId, "hits", tN, tLine), "number")
+            Do tHits.%Push(tPair)
+        }
+        Set tSkeleton = []
+        Set tLine = ""
+        For {
+            Set tLine = $Order(^IRIS.TempExecuteMCPv2Coverage("run", pId, "skeleton", tN, tLine))
+            If tLine = "" Quit
+            Set tPair = []
+            Do tPair.%Push(+tLine, "number")
+            Do tPair.%Push(^IRIS.TempExecuteMCPv2Coverage("run", pId, "skeleton", tN, tLine), "string")
+            Do tSkeleton.%Push(tPair)
+        }
+        Set tRoutine = {}
+        Do tRoutine.%Set("class", $List(tEntry, 1))
+        Do tRoutine.%Set("routine", $List(tEntry, 2))
+        Do tRoutine.%Set("lines", +$List(tEntry, 3), "number")
+        Do tRoutine.%Set("hits", tHits)
+        Do tRoutine.%Set("skeleton", tSkeleton)
+        Do tRoutines.%Push(tRoutine)
+    }
+    Quit tRoutines
+}
+
+}`,
+  ],
+  [
     "ExecuteMCPv2.REST.Dispatch.cls",
     `/// Main REST dispatch class for the ExecuteMCPv2 custom REST service.
 /// <p>Extends <class>%Atelier.REST</class> to inherit the three-part response envelope
@@ -18473,6 +20927,14 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
 
   <!-- Epic 38 (Story 38.5): SQL write safety - classified, transactional SQL execution -->
   <Route Url="/dev/sql/execute" Method="POST" Call="ExecuteMCPv2.REST.Sql:Execute" />
+
+  <!-- Epic 40 (Story 40.1): line coverage - start, status and cancel of a job-owned coverage run -->
+  <Route Url="/dev/test/coverage" Method="POST" Call="ExecuteMCPv2.REST.Coverage:Start" />
+  <Route Url="/dev/test/coverage" Method="GET" Call="ExecuteMCPv2.REST.Coverage:Status" />
+  <Route Url="/dev/test/coverage/cancel" Method="POST" Call="ExecuteMCPv2.REST.Coverage:Cancel" />
+
+  <!-- Epic 40 (Story 40.3): TestProduction guard - may a run that includes TestProduction tests go ahead? -->
+  <Route Url="/dev/test/production" Method="GET" Call="ExecuteMCPv2.REST.UnitTest:ProductionCheck" />
 </Routes>
 }
 

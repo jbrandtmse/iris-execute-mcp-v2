@@ -65,11 +65,19 @@ import {
   summarizeAtelierResults,
   type PartialSnapshot,
   type RunHandles,
-  type TestDetail,
   type AtelierTestResult,
 } from "./execute.js";
+import {
+  buildCompletedSummaryFromSql,
+  buildInterimPartialFromSql,
+  readClassLevelErrors,
+  readTestInstanceStatus,
+  type SqlCtx,
+} from "./unit-test-results.js";
+import { cancelCoverageRun, coverageErrorResult, exportCoverageRun, pollCoverageRun } from "./test-coverage.js";
 
-type SqlCtx = Pick<ToolContext, "http" | "atelierVersion">;
+/** `iris_test_coverage`'s handle: the run's id, all digits (the IRIS side allocates it with `$Increment`). */
+const COVERAGE_RUN_ID_PATTERN = /^\d+$/;
 
 /** The Atelier async work-queue global (IRISTEMP, instance-wide). */
 const QUEUE_GLOBAL = "IRIS.TempAtelierAsyncQueue";
@@ -90,163 +98,6 @@ function invalidJobIdError(jobId: string): ToolResult {
     error:
       `jobId ${JSON.stringify(jobId)} is not an Atelier work-queue id — it must be the all-digits id ` +
       `iris_execute_tests returned (e.g. "31797604"). Nothing was sent to IRIS.`,
-  });
-}
-
-// ── SQL helpers ──────────────────────────────────────────────────
-
-/** Run one SQL query via the Atelier `action/query` route (the same route
- * `execute.ts`'s `discoverPackageTests` uses). */
-async function runSqlQuery(
-  ctx: SqlCtx,
-  ns: string,
-  query: string,
-  parameters: unknown[],
-): Promise<Record<string, unknown>[]> {
-  const path = atelierPath(ctx.atelierVersion, ns, "action/query");
-  const resp = await ctx.http.post<Record<string, unknown>>(path, { query, parameters });
-  const result = resp.result as Record<string, unknown>;
-  const rows = (result?.content ?? result) as unknown[];
-  return (Array.isArray(rows) ? rows : []) as Record<string, unknown>[];
-}
-
-/** The exact join `execute.ts`'s `buildRunningHint` documents: only
- * `TestInstance` carries `InstanceIndex`, so method rows join down to it. */
-const METHOD_JOIN =
-  "FROM %UnitTest_Result.TestMethod tm " +
-  "JOIN %UnitTest_Result.TestCase tc ON tm.TestCase = tc.ID " +
-  "JOIN %UnitTest_Result.TestSuite ts ON tc.TestSuite = ts.ID " +
-  "JOIN %UnitTest_Result.TestInstance ti ON ts.TestInstance = ti.ID " +
-  "WHERE ti.InstanceIndex = ?";
-
-/** The drain's `$ORDER` traversal order (class, then method), in SQL. */
-const METHOD_ORDER = " ORDER BY %EXACT(tc.Name), %EXACT(tm.Name)";
-
-const STATUS_MAP: Record<number, string> = { 0: "failed", 1: "passed", 2: "skipped" };
-
-function str(value: unknown): string {
-  return value === undefined || value === null ? "" : String(value);
-}
-
-/**
- * `TestMethod.Duration` (SECONDS, `%Numeric(SCALE=6)`) → the drain's
- * MILLISECONDS, value-identical to `UnitTestResultToJSON`'s exact-decimal
- * `Duration * 1000`: scale to integer microseconds first (exact for SCALE=6),
- * then ONE correctly-rounded division — the nearest double to the exact
- * decimal, i.e. exactly what `JSON.parse` yields for the drain's number.
- */
-function secondsToDrainMilliseconds(raw: unknown): number {
-  const seconds = Number(raw);
-  if (!Number.isFinite(seconds)) return 0;
-  return Math.round(seconds * 1e6) / 1000;
-}
-
-/** Is `%UnitTest_Result.TestInstance` present for this index, and finished? */
-async function readTestInstanceStatus(
-  ctx: SqlCtx,
-  ns: string,
-  runIndex: number,
-): Promise<{ exists: boolean; finished: boolean }> {
-  const rows = await runSqlQuery(
-    ctx,
-    ns,
-    "SELECT DateTime AS FinishedAt FROM %UnitTest_Result.TestInstance WHERE InstanceIndex = ?",
-    [runIndex],
-  );
-  if (rows.length === 0) return { exists: false, finished: false };
-  const finishedAt = rows[0]?.FinishedAt;
-  return { exists: true, finished: typeof finishedAt === "string" && finishedAt !== "" };
-}
-
-/**
- * Build a `completed` summary from `%UnitTest_Result.*` by EXACT
- * `InstanceIndex` — never from drained Atelier rows alone (AC 36.2.2 (ii):
- * the drain is DELTA, so an earlier caller's own drain can never be assumed
- * absent). Every field is value-identical to the drain path — see this
- * file's banner.
- */
-async function buildCompletedSummaryFromSql(ctx: SqlCtx, ns: string, runIndex: number): Promise<PartialSnapshot> {
-  const methodRows = await runSqlQuery(
-    ctx,
-    ns,
-    "SELECT tc.Name AS ClassName, tm.Name AS MethodName, tm.Status, tm.Duration, tm.ErrorAction, " +
-      `tm.ErrorDescription ${METHOD_JOIN}${METHOD_ORDER}`,
-    [runIndex],
-  );
-  const assertRows = await runSqlQuery(
-    ctx,
-    ns,
-    "SELECT tc.Name AS ClassName, tm.Name AS MethodName, ta.Action, ta.Description " +
-      "FROM %UnitTest_Result.TestAssert ta JOIN %UnitTest_Result.TestMethod tm ON ta.TestMethod = tm.ID " +
-      "JOIN %UnitTest_Result.TestCase tc ON tm.TestCase = tc.ID JOIN %UnitTest_Result.TestSuite ts ON " +
-      "tc.TestSuite = ts.ID JOIN %UnitTest_Result.TestInstance ti ON ts.TestInstance = ti.ID " +
-      `WHERE ti.InstanceIndex = ? AND ta.Status = 0${METHOD_ORDER}, ta.Counter`,
-    [runIndex],
-  );
-
-  const failuresByMethod = new Map<string, string[]>();
-  for (const row of assertRows) {
-    const key = `${str(row.ClassName)}::${str(row.MethodName)}`;
-    const list = failuresByMethod.get(key) ?? [];
-    list.push(`${str(row.Action)}: ${str(row.Description)}`);
-    failuresByMethod.set(key, list);
-  }
-
-  let total = 0,
-    passed = 0,
-    failed = 0,
-    skipped = 0;
-  const details: TestDetail[] = [];
-  for (const row of methodRows) {
-    total++;
-    const status = Number(row.Status);
-    if (status === 1) passed++;
-    else if (status === 0) failed++;
-    else skipped++;
-    const className = str(row.ClassName);
-    const methodName = str(row.MethodName); // already Test-prefixed by %UnitTest_Result
-    // The drain attaches messages to FAILED methods only (UnitTestResultToJSON).
-    const messages: string[] = [];
-    if (status === 0) {
-      const errorAction = str(row.ErrorAction);
-      const errorDescription = str(row.ErrorDescription);
-      if (errorAction !== "" && errorDescription !== "") {
-        messages.push(errorDescription.startsWith(" ") ? errorDescription.slice(1) : errorDescription);
-      }
-      messages.push(...(failuresByMethod.get(`${className}::${methodName}`) ?? []));
-    }
-    details.push({
-      class: className,
-      method: methodName,
-      status: STATUS_MAP[status] ?? "unknown",
-      duration: secondsToDrainMilliseconds(row.Duration),
-      message: messages.join("; "),
-    });
-  }
-  return { total, passed, failed, skipped, details };
-}
-
-/**
- * Class-level failures of a run (e.g. `OnBeforeAllTests`), formatted exactly
- * as the drain path reports them (`UnitTestResultToJSON`'s class row `error`
- * → `summarizeAtelierResults`' `classLevelErrors`), for the zero-result guard.
- */
-async function readClassLevelErrors(ctx: SqlCtx, ns: string, runIndex: number): Promise<string[]> {
-  const rows = await runSqlQuery(
-    ctx,
-    ns,
-    "SELECT tc.Name AS ClassName, tc.ErrorAction, tc.ErrorDescription FROM %UnitTest_Result.TestCase tc " +
-      "JOIN %UnitTest_Result.TestSuite ts ON tc.TestSuite = ts.ID " +
-      "JOIN %UnitTest_Result.TestInstance ti ON ts.TestInstance = ti.ID " +
-      "WHERE ti.InstanceIndex = ? AND tc.Status = 0 ORDER BY %EXACT(tc.Name)",
-    [runIndex],
-  );
-  return rows.map((row) => {
-    const action = str(row.ErrorAction);
-    const description = str(row.ErrorDescription);
-    return action !== "" && description !== ""
-      ? `${str(row.ClassName)}: ${action}:${description.startsWith(" ") ? "" : " "}${description}`
-      : `${str(row.ClassName)}: the test runner reported a class-level failure`;
   });
 }
 
@@ -273,50 +124,6 @@ async function completedFromResultTable(
     return testRunEnvelope({ kind: "error", error: note ? `${reason} ${note}` : reason, handles });
   }
   return testRunEnvelope({ kind: "completed", summary, handles, timeoutCapped: false, ...(note ? { note } : {}) });
-}
-
-/**
- * Interim (mid-run) rows for the `unfinished` state's `partial` snapshot.
- * `%UnitTest_Result.TestMethod` rows exist and read `Status 1` (and
- * `Duration 0`) BEFORE the method has actually finished (Task 1 probe,
- * reconfirming the Story 36.1 review's manual-SQL trap) — such a row is
- * reported as `"in-progress"`, never `"passed"`, and excluded from the
- * `total`/`passed`/`failed`/`skipped` counts entirely (so those counts stay
- * internally consistent: `total === passed+failed+skipped`), satisfying AC
- * 36.2.2 (iv)'s "never reported as passes" at the per-row level, not merely
- * by nesting under `partial`.
- */
-async function buildInterimPartialFromSql(ctx: SqlCtx, ns: string, runIndex: number): Promise<PartialSnapshot> {
-  const methodRows = await runSqlQuery(
-    ctx,
-    ns,
-    `SELECT tc.Name AS ClassName, tm.Name AS MethodName, tm.Status, tm.Duration ${METHOD_JOIN}${METHOD_ORDER}`,
-    [runIndex],
-  );
-  let total = 0,
-    passed = 0,
-    failed = 0,
-    skipped = 0;
-  const details: TestDetail[] = [];
-  for (const row of methodRows) {
-    const duration = secondsToDrainMilliseconds(row.Duration);
-    const status = Number(row.Status);
-    const provisional = duration === 0;
-    if (!provisional) {
-      total++;
-      if (status === 1) passed++;
-      else if (status === 0) failed++;
-      else skipped++;
-    }
-    details.push({
-      class: str(row.ClassName),
-      method: str(row.MethodName),
-      status: provisional ? "in-progress" : (STATUS_MAP[status] ?? "unknown"),
-      duration,
-      message: provisional ? "Row not final — this method has not finished executing yet." : "",
-    });
-  }
-  return { total, passed, failed, skipped, details };
 }
 
 // ── Atelier drain parsing (poll's one-shot GET /work/{jobId}) ────
@@ -442,6 +249,30 @@ async function resolveByRunIndex(
   });
 }
 
+/**
+ * {@link resolveByRunIndex}, where a failed read of `%UnitTest_Result` (an IRIS API or connection error) is returned as an
+ * error result that carries `handles` and the text `describe` makes of the failure, so the caller keeps the run's handles
+ * instead of a thrown `Tool error`. `describe` receives the error's message without its one trailing full stop, because each
+ * text adds its own. Any other error still propagates.
+ */
+async function resolveByRunIndexOrError(
+  ctx: SqlCtx,
+  ns: string,
+  runIndex: number,
+  jobId: string | undefined,
+  handles: RunHandles,
+  describe: (message: string) => string,
+): Promise<ToolResult> {
+  try {
+    return await resolveByRunIndex(ctx, ns, runIndex, jobId);
+  } catch (error: unknown) {
+    if (isIrisError(error)) {
+      return testRunEnvelope({ kind: "error", error: describe(error.message.replace(/\.$/, "")), handles });
+    }
+    throw error;
+  }
+}
+
 async function handlePoll(
   args: { jobId?: string; runIndex?: number; namespace?: string },
   ctx: ToolContext,
@@ -460,7 +291,17 @@ async function handlePoll(
 
   if (!jobId) {
     // runIndex alone (AC 36.2.2 (iv)).
-    return resolveByRunIndex(ctx, ns, explicitRunIndex as number, undefined);
+    const index = explicitRunIndex as number;
+    return resolveByRunIndexOrError(
+      ctx,
+      ns,
+      index,
+      undefined,
+      { runIndex: index },
+      (message) =>
+        `Reading the result of runIndex ${index} from %UnitTest_Result failed: ${message}. ` +
+        `Poll again with runIndex ${index}; do NOT re-submit the tests.`,
+    );
   }
 
   const refusal = await refuseNonUnitTestJob(ctx, ns, jobId, "poll");
@@ -487,7 +328,16 @@ async function handlePoll(
           handles: { jobId },
         });
       }
-      return resolveByRunIndex(ctx, ns, idx, jobId);
+      return resolveByRunIndexOrError(
+        ctx,
+        ns,
+        idx,
+        jobId,
+        { jobId, runIndex: idx, runIndexSource: idx === queueRunIndex ? "queue" : null },
+        (message) =>
+          `Atelier no longer references jobId '${jobId}', and reading runIndex ${idx} from %UnitTest_Result ` +
+          `failed: ${message}. Do NOT re-submit \u{2014} poll again with runIndex ${idx}.`,
+      );
     }
     if (isIrisError(error)) {
       return testRunEnvelope({
@@ -602,7 +452,16 @@ async function handleCancel(args: { jobId?: string; namespace?: string }, ctx: T
           handles: { jobId },
         });
       }
-      return resolveByRunIndex(ctx, ns, runIndex, jobId);
+      return resolveByRunIndexOrError(
+        ctx,
+        ns,
+        runIndex,
+        jobId,
+        handles,
+        (message) =>
+          `jobId '${jobId}' was already gone (HTTP 404) before this cancel could act, and reading runIndex ` +
+          `${runIndex} from %UnitTest_Result failed: ${message}. Poll by runIndex ${runIndex} to observe the run.`,
+      );
     }
     if (isIrisError(error)) {
       // Never lose the handles: whether the DELETE took effect is unknown.
@@ -720,11 +579,25 @@ export const testStatusTool: ToolDefinition = {
     "entry; result row), or, when the job had ALREADY finished but was never drained, status:\"completed\" " +
     "with a note that only the queue entry was discarded and results are preserved at that runIndex. cancel " +
     "requires jobId (there is no way to cancel by runIndex alone). Both actions refuse a jobId that is not a " +
-    "unit-test job.",
+    "unit-test job. " +
+    "Pass coverageRunId (from iris_test_coverage) alone, without jobId or runIndex, to poll or cancel a coverage " +
+    "run (cancel then needs no jobId, and namespace is optional): the run's own namespace is used, and a poll " +
+    "returns the same result iris_test_coverage returns, the class-source summary and the minCoverage verdict " +
+    "included. " +
+    "action:\"export\" (write, DEFAULT-DISABLED by governance \u2014 enable via IRIS_GOVERNANCE, e.g. " +
+    "{\"global\":{\"iris_test_status:export\":true}}): writes a coverage run's Cobertura XML to a local file for CI " +
+    "tools. It needs coverageRunId and outputPath (an absolute path ending in .xml, with no '..' segment; the " +
+    "parent directories are created and an existing file is overwritten); sourceRoot is the optional one <source> " +
+    "of the document. Only a completed run with complete coverage can be exported: for any other run the result is " +
+    "an error naming its status and nothing is written. It returns the poll result plus cobertura " +
+    "{outputPath, bytes, classes, lines}.",
   inputSchema: z.object({
     action: z
-      .enum(["poll", "cancel"])
-      .describe("'poll' (read) re-attaches/reads a run's status; 'cancel' (write, default-disabled) stops one."),
+      .enum(["poll", "cancel", "export"])
+      .describe(
+        "'poll' (read) re-attaches/reads a run's status; 'cancel' (write, default-disabled) stops one; 'export' " +
+          "(write, default-disabled) writes a coverage run's Cobertura XML file.",
+      ),
     jobId: z
       .string()
       .regex(JOB_ID_PATTERN, "jobId must be the all-digits Atelier work-queue id iris_execute_tests returned")
@@ -742,6 +615,30 @@ export const testStatusTool: ToolDefinition = {
         "%UnitTest_Result.TestInstance.InstanceIndex (from iris_execute_tests' 'runIndex', or a prior poll's " +
           "own 'runIndex'). For 'poll', usable alone (reads %UnitTest_Result directly) or as a fallback when " +
           "jobId is stale/unknown. Not usable for 'cancel' (cancelling requires jobId).",
+      ),
+    coverageRunId: z
+      .string()
+      .regex(COVERAGE_RUN_ID_PATTERN, "coverageRunId must be the all-digits id iris_test_coverage returned")
+      .optional()
+      .describe(
+        "A coverage run's handle, all digits (from iris_test_coverage's 'coverageRunId'). Use it alone: it cannot " +
+          "be combined with jobId or runIndex. The run's own namespace is used; a namespace passed here must match " +
+          "it. For 'poll' it returns the coverage result; for 'cancel' it stops the run and reports what was " +
+          "observed; for 'export' it names the run to write.",
+      ),
+    outputPath: z
+      .string()
+      .optional()
+      .describe(
+        "Only for 'export', where it is required: the absolute local path of the Cobertura XML file, ending in " +
+          ".xml, with no '..' segment. Missing parent directories are created; an existing file is overwritten.",
+      ),
+    sourceRoot: z
+      .string()
+      .optional()
+      .describe(
+        "Only for 'export': the document's one <source> element (a directory CI tools resolve each class filename " +
+          "against, for example 'src'). Without it the document has no <sources> element.",
       ),
     namespace: z
       .string()
@@ -777,9 +674,62 @@ export const testStatusTool: ToolDefinition = {
   mutates: {
     poll: "read",
     cancel: "write",
+    // Story 40.2 (AD-4, decision #50): writing the Cobertura file is a new side effect, so it is a key of its own,
+    // truthfully a write, and ships DISABLED. It is not in the frozen baseline.
+    export: "write",
   },
   handler: async (args, ctx) => {
-    const input = args as { action: "poll" | "cancel"; jobId?: string; runIndex?: number; namespace?: string };
+    const input = args as {
+      action: "poll" | "cancel" | "export";
+      jobId?: string;
+      runIndex?: number;
+      coverageRunId?: string;
+      namespace?: string;
+      outputPath?: string;
+      sourceRoot?: string;
+    };
+    if (input.action === "export") {
+      if (input.coverageRunId === undefined) {
+        return coverageErrorResult(
+          "action \"export\" needs coverageRunId, the handle iris_test_coverage returned. Nothing was sent to IRIS.",
+        );
+      }
+      if (input.jobId !== undefined || input.runIndex !== undefined) {
+        return coverageErrorResult(
+          "coverageRunId cannot be combined with jobId or runIndex: a coverage handle names the whole run. " +
+            "Pass coverageRunId alone.",
+        );
+      }
+      if (input.outputPath === undefined) {
+        return coverageErrorResult(
+          "action \"export\" needs outputPath, the absolute path of the .xml file to write. Nothing was sent to IRIS.",
+        );
+      }
+      return exportCoverageRun(ctx, {
+        coverageRunId: input.coverageRunId,
+        outputPath: input.outputPath,
+        ...(input.sourceRoot !== undefined ? { sourceRoot: input.sourceRoot } : {}),
+        ...(input.namespace !== undefined ? { namespace: input.namespace } : {}),
+      });
+    }
+    if (input.outputPath !== undefined || input.sourceRoot !== undefined) {
+      return coverageErrorResult(
+        `outputPath and sourceRoot are only for action "export", not "${input.action}". Nothing was sent to IRIS.`,
+      );
+    }
+    if (input.coverageRunId !== undefined) {
+      if (input.jobId !== undefined || input.runIndex !== undefined) {
+        return coverageErrorResult(
+          "coverageRunId cannot be combined with jobId or runIndex: a coverage handle names the whole run. " +
+            "Pass coverageRunId alone.",
+        );
+      }
+      const coverageArgs = {
+        coverageRunId: input.coverageRunId,
+        ...(input.namespace !== undefined ? { namespace: input.namespace } : {}),
+      };
+      return input.action === "cancel" ? cancelCoverageRun(ctx, coverageArgs) : pollCoverageRun(ctx, coverageArgs);
+    }
     if (input.action === "cancel") {
       return handleCancel(input, ctx);
     }

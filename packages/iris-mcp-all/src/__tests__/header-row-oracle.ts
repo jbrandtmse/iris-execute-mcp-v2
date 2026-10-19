@@ -156,6 +156,36 @@ export async function searchTableOracle(
   return rows.map(expectedRow);
 }
 
+/**
+ * The Event Log rows of `target`'s namespace, newest first, as `iris_production_logs` must return them (an optional
+ * key only when it holds a value), read through the raw Atelier query route. `where` is a hand-written condition on
+ * `Ens_Util.Log` (literals only) and is added only when it is not empty. The raw route renders a SQL NULL integer as
+ * 0, so whether `SessionId` is NULL is read from its own column, `SessionIsNull`.
+ */
+export async function eventLogOracle(target: IrisTarget, where = ""): Promise<Array<Record<string, unknown>>> {
+  const rows = await atelierQuery(
+    target,
+    "SELECT ID, TimeLogged, Type, ConfigName, Text, SourceClass, SourceMethod, SessionId, " +
+      "CASE WHEN SessionId IS NULL THEN 1 ELSE 0 END AS SessionIsNull FROM Ens_Util.Log" +
+      (where === "" ? "" : ` WHERE ${where}`) +
+      " ORDER BY ID DESC",
+  );
+  const present = (value: unknown): boolean => value !== null && value !== undefined && String(value) !== "";
+  return rows.map((row) => {
+    const entry: Record<string, unknown> = {
+      id: Number(row["ID"]),
+      timestamp: row["TimeLogged"],
+      type: row["Type"],
+      itemName: row["ConfigName"],
+      text: row["Text"],
+    };
+    if (present(row["SourceClass"])) entry["sourceClass"] = row["SourceClass"];
+    if (present(row["SourceMethod"])) entry["sourceMethod"] = row["SourceMethod"];
+    if (Number(row["SessionIsNull"]) !== 1) entry["sessionId"] = Number(row["SessionId"]);
+    return entry;
+  });
+}
+
 /** The row the tool must return for an oracle row. */
 export function expectedRow(row: AtelierRow): Record<string, unknown> {
   const created = String(row["TimeCreated"] ?? "");

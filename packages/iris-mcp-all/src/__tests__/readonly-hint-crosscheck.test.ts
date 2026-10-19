@@ -33,6 +33,10 @@
  * caught the two real CR 24.0-1 misclassifications
  * (`iris_oauth_manage:discover`, `iris_transform_test`), which are NOT in
  * this allowlist because they were reclassified to `"write"` instead.
+ *
+ * The reverse direction (Story 40.4, DW-498) has no allowlist: no tool that owns
+ * a key classified `"write"` (a baseline key, or a post-foundation key whose
+ * tool declares `mutates: "write"`) may declare `readOnlyHint: true`.
  */
 
 import { describe, it, expect } from "vitest";
@@ -161,5 +165,34 @@ describe("BASELINE_ACTION_CLASSIFICATIONS readOnlyHint cross-check (CR 24.0-1 / 
         `${key}'s owning tool no longer declares readOnlyHint:false — the divergence is gone, remove its stale allowlist entry`,
       ).toBe(false);
     }
+  });
+
+  it("no tool that owns a key classified 'write' (baseline, or post-foundation mutates) declares readOnlyHint:true, with no allowlist (Story 40.4, DW-498)", async () => {
+    const { deriveKeysForTool } = await import(
+      pathToFileURL(resolve(sharedDist, "governance-baseline-derivation.js")).href
+    );
+    const { BASELINE_ACTION_CLASSIFICATIONS } = await import(
+      pathToFileURL(resolve(sharedDist, "baseline-classifications.js")).href
+    );
+    const { buildMutatesLookup } = await import(pathToFileURL(resolve(sharedDist, "governance.js")).href);
+    const allTools = await loadAllTools(root);
+    const baseline = BASELINE_ACTION_CLASSIFICATIONS as Record<string, string>;
+    const postFoundation = buildMutatesLookup(allTools.map(({ tool }) => tool)) as Map<string, string>;
+
+    const writeKeys: string[] = [];
+    const offenders: string[] = [];
+    for (const { pkg, tool } of allTools) {
+      for (const key of deriveKeysForTool(tool, pkg) as string[]) {
+        // A frozen-baseline key takes its classification from the baseline, as the governance engine does.
+        if ((baseline[key] ?? postFoundation.get(key)) !== "write") continue;
+        writeKeys.push(key);
+        if (tool.annotations?.readOnlyHint === true) offenders.push(key);
+      }
+    }
+
+    // The sweep is not vacuous: it sees baseline writes (including the one DW-498 corrected) and post-foundation writes.
+    expect(writeKeys).toEqual(expect.arrayContaining(["iris_execute_tests", "iris_doc_put", "iris_test_coverage", "iris_test_status:export"]));
+    expect(writeKeys.length).toBeGreaterThan(40);
+    expect(offenders).toEqual([]);
   });
 });

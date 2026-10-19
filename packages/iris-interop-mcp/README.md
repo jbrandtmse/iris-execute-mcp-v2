@@ -393,8 +393,8 @@ Workflow-shaped [MCP prompts](../../README.md#workflow-prompts--agent-skills) (E
 
 | Prompt | Description |
 |---|---|
-| `trace-message-flow` | Traces a message's flow through a production: `iris_production_messages` for the hops, `iris_message_search` (`headers`, in a window of at most 7 days) for the header rows, `iris_message_body` for the bodies that matter under the PHI data policy (a withheld body's reason is reported, never read another way), `iris_message_diagram` for the sequence diagram, and `iris_production_logs` for any erroring items. Its name, title and arguments are unchanged (`sessionOrHeaderId` required, `namespace` optional). Every tool it calls is in the `core` preset, and each is a read that is enabled by default, except the recovery it may recommend (`iris_production_control` action `recover`, a write that is enabled by default), which it never runs without the user's confirmation. |
-| `recover-stuck-production` | Diagnoses and recovers a troubled/wedged production, following the recover-first, clean-last-resort escalation ladder — never suggests `killAppData` without the user's explicit acceptance of persistent business-state loss. |
+| `trace-message-flow` | Traces a message's flow through a production: `iris_production_messages` for the hops, `iris_message_search` (`headers`, in a window of at most 7 days) for the header rows, `iris_message_body` for the bodies that matter under the PHI data policy (a withheld body's reason is reported, never read another way), `iris_message_diagram` for the sequence diagram, and `iris_production_logs` for any erroring items (under `block`, the reason for withheld diagram error text and Event Log text is reported the same way, never read another way). Its name, title and arguments are unchanged (`sessionOrHeaderId` required, `namespace` optional). Every tool it calls is in the `core` preset, and each is a read that is enabled by default, except the recovery it may recommend (`iris_production_control` action `recover`, a write that is enabled by default), which it never runs without the user's confirmation. |
+| `recover-stuck-production` | Diagnoses and recovers a troubled/wedged production, following the recover-first, clean-last-resort escalation ladder — never suggests `killAppData` without the user's explicit acceptance of persistent business-state loss. Under the `block` data policy it reports the reason for withheld Event Log text and never reads that text another way. |
 | `resend-failed-messages` | Resends failed messages for a config item using the dry-run-first `iris_message_resend` workflow — preview the match count, review with the user, execute only on explicit approval, then verify the new headers. States the duplication hazard and that the write actions are default-disabled. |
 | `find-patient-messages` | Finds a patient's messages by a Search Table value such as a medical record number (`patientId` required; `from`, `to`, `searchTableClass` and `namespace` optional). It reads the profile's data policy with `iris_server_profiles`, asks for a window of at most 7 days, looks the patient up with `iris_message_search` (`searchTable`, `PatientID`), lists the header rows, and reads bodies with `iris_message_body` only when the user wants content, under the PHI data policy. Its main path is in the `core` preset. It reads only: `iris_message_search:searchTable` and `iris_message_body` are reads, enabled by default. A withheld body stays withheld: the prompt never loosens the policy and never reads a body another way. |
 
@@ -637,11 +637,13 @@ Each key slot (`production` / `item` / `hostClass` / `setting`) defaults to `*` 
 ```json
 {
   "entries": [
-    { "timestamp": "2026-04-07 10:30:00", "type": "Error", "itemName": "MyApp.Operation.SendEmail", "message": "SMTP connection timeout" }
+    { "id": 8, "timestamp": "2026-04-07 10:30:00.123", "type": 2, "itemName": "MyApp.Operation.SendEmail", "text": "SMTP connection timeout", "sourceClass": "EnsLib.EMail.OutboundAdapter", "sourceMethod": "SendMail", "sessionId": 1234 }
   ],
   "count": 1
 }
 ```
+
+`sourceClass`, `sourceMethod` and `sessionId` appear only when the entry holds a value. `type` takes a display name, so `Error` returns the entries whose `type` is 2 (a read, enabled by default).
 </details>
 
 <details>

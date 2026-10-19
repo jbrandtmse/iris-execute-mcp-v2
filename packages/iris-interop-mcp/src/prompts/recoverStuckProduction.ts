@@ -5,7 +5,9 @@
  * Encodes the Epic-20 production-recovery escalation ladder: `recover`
  * FIRST, `clean` only as a last resort, and `killAppData` NEVER without the
  * user's explicit, informed acceptance of persistent business-state loss
- * (a double confirmation gate). Server: iris-interop-mcp.
+ * (a double confirmation gate). Under the `block` data policy, step 3 reports
+ * the reason for withheld Event Log text and never reads that text another way
+ * (Story 40.5). Server: iris-interop-mcp.
  */
 
 import type { PromptDefinition } from "@iris-mcp/shared";
@@ -51,7 +53,7 @@ ${namespaceNote}
 
 1. Call \`iris_production_status\` (with \`detail: true\`) to see the current production name and state (Running/Stopped/Suspended/Troubled/NetworkStopped).
 2. Call \`iris_production_summary\` (cross-namespace, no namespace param) and \`iris_production_queues\` to locate stuck or backed-up items — queues that are not draining, items reporting errors.
-3. For each stuck/errored item, call \`iris_production_logs\` filtered by \`itemName\` and/or \`type: "Error"\` to understand what is actually wrong.
+3. For each stuck/errored item, call \`iris_production_logs\` filtered by \`itemName\` and/or \`type: "Error"\` to understand what is actually wrong. Under the \`block\` data policy each entry's \`text\` is withheld and its \`textPolicy\` gives the reason: report that reason to the user, and never read the log text another way (for example through SQL, global or document tools).
 4. **Try \`iris_production_control\` action 'recover' FIRST** (pass \`name: "${production}"\` if known). This attempts to restart a troubled production without touching stored state.
 5. Re-check status (\`iris_production_status\`) — if the production is now healthy, STOP here; report success.
 6. **Only if still wedged after 'recover'**, call \`iris_production_control\` action 'clean' — this clears STALE TRANSIENT runtime state (queues, job-status, suspended messages) that 'recover' cannot fix. This is a last resort, not a first response.

@@ -80,13 +80,28 @@ Method TestBuildTestSpecMethodNoColon() As %Status
     Quit $$$OK
 }
 
-/// Test BuildTestSpec for package level discovers test classes via SQL.
+/// Test BuildTestSpec for package level discovers test classes via SQL and joins them as
+/// <code>:A;B;C</code>: one colon, then the classes separated by a semicolon alone (RunTest reads
+/// <code>:A;:B</code> as class A with a method B). <method>ExecuteMCPv2.REST.Coverage:TestSpec</method>
+/// returns the same value at every level.
 Method TestBuildTestSpecPackage() As %Status
 {
     Set tSpec = ##class(ExecuteMCPv2.REST.UnitTest).BuildTestSpec("ExecuteMCPv2.Tests", "package")
-    ; Should contain at least UtilsTest with colon prefix
-    Do $$$AssertTrue(tSpec [ ":ExecuteMCPv2.Tests.UtilsTest", "Package spec should contain UtilsTest")
     Do $$$AssertTrue($Extract(tSpec) = ":", "Package spec should start with colon")
+    Do $$$AssertEquals($Length(tSpec, ":"), 2, "Package spec should hold exactly one colon")
+    Do $$$AssertTrue(tSpec '[ ";:", "Package spec should hold no colon after a semicolon")
+    Set tClasses = $ListFromString($Extract(tSpec, 2, *), ";")
+    Do $$$AssertTrue($ListFind(tClasses, "ExecuteMCPv2.Tests.UtilsTest") > 0, "Package spec should list UtilsTest as a semicolon-delimited member")
+    Do $$$AssertTrue($ListLength(tClasses) > 1, "Package spec should list several classes")
+
+    ; Coverage TestSpec is BuildTestSpec's value, with no rewrite, at all three levels
+    Set tCases = $ListBuild($ListBuild("ExecuteMCPv2.Tests", "package"), $ListBuild("ExecuteMCPv2.Tests.UtilsTest", "class"), $ListBuild("ExecuteMCPv2.Tests.UtilsTest:TestValidateRequiredEmpty", "method"))
+    For tIndex = 1:1:$ListLength(tCases) {
+        Set tCase = $List(tCases, tIndex)
+        Set tBuilt = ##class(ExecuteMCPv2.REST.UnitTest).BuildTestSpec($List(tCase, 1), $List(tCase, 2))
+        Set tCoverage = ##class(ExecuteMCPv2.REST.Coverage).TestSpec($List(tCase, 1), $List(tCase, 2))
+        Do $$$AssertEquals(tCoverage, tBuilt, "Coverage TestSpec equals BuildTestSpec at the "_$List(tCase, 2)_" level")
+    }
     Quit $$$OK
 }
 

@@ -35,6 +35,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolveSdkEsmDir } from "./process-gate-helpers.js";
+import { stepsOf, toolTokens } from "./prompt-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -191,21 +192,6 @@ async function refusalOf(call: Promise<unknown>): Promise<{ code?: number; messa
   );
 }
 
-/** The distinct `iris_*` tool names a rendered prompt mentions. */
-function toolTokens(text: string): string[] {
-  return [...new Set(text.match(/\biris_[a-z][a-z0-9_]*/g) ?? [])].sort();
-}
-
-/** The numbered steps of a rendered prompt, by number: the text from `N. ` up to the next step. */
-function stepsOf(text: string): Map<number, string> {
-  const steps = new Map<number, string>();
-  for (const chunk of text.split(/\n(?=\d+\. )/)) {
-    const match = /^(\d+)\. /.exec(chunk);
-    if (match) steps.set(Number(match[1]), chunk);
-  }
-  return steps;
-}
-
 /** Assert every needle of every step is present, and that the steps are exactly `1..count`. */
 function expectSteps(text: string, count: number, expectations: Array<[number, string[]]>): void {
   const steps = stepsOf(text);
@@ -279,9 +265,9 @@ describe("Story 39.6 QA: the forensic prompts through a real SDK Client over an 
       [1, ["`iris_production_messages`", "`sessionId: 7`", "`headerId: 7`", "earliest and latest"]],
       [2, ["`iris_message_search`", '`action: "headers"`', "`from` and `to`", "at most 7 days", "`nextCursor`", "do not read the headers another way"]],
       [3, ["`iris_message_body`", "up to 20", "`bodyPolicy`", "`redact`", "`block`", "never read it another way"]],
-      [4, ["`iris_message_diagram`", "`sessionIds: [7]`"]],
-      [5, ["`iris_production_logs`", "`itemName`"]],
-      [6, ["Summarize the failure point", "do NOT execute a recovery action without the user's confirmation"]],
+      [4, ["`iris_message_diagram`", "`sessionIds: [7]`", "`block`", "never read the error text another way"]],
+      [5, ["`iris_production_logs`", "`itemName`", "`textPolicy`", "never read the log text another way"]],
+      [6, ["Summarize the failure point", "give its reason instead of the text", "do NOT execute a recovery action without the user's confirmation"]],
     ]);
     expect(text, "no unresolved placeholder for the omitted argument").not.toMatch(/<namespace>|<sessionOrHeaderId>|undefined/);
   });

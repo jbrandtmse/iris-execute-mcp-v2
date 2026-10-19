@@ -124,9 +124,9 @@ describe("Story 39.1: tool_support.md states the tool and the default state", ()
     expect(note).toContain("`MessageResendLiveTest` only");
   });
 
-  it("counts the suite at 109 tools, 84 of them on the custom handlers, and the interop row at 24 / 25 (Story 39.5 added one)", () => {
+  it("counts the suite at 110 tools, 85 of them on the custom handlers, and the interop row at 24 / 25 (Story 39.5 added one; Story 40.1 added iris_test_coverage)", () => {
     expect(toolSupport).toContain("| `@iris-mcp/interop` | 0 | 24 | 0 | **24** | **25** |");
-    expect(toolSupport).toContain("| **Total** | **20** | **84** | **5** | **109** | **114** |");
+    expect(toolSupport).toContain("| **Total** | **20** | **85** | **5** | **110** | **115** |");
   });
 });
 
@@ -150,8 +150,8 @@ describe("Story 39.1: the READMEs state the tool, its default state and the refu
     expect(row).toContain("`availableActions`");
   });
 
-  it("the root README says the payload table was last re-measured at a Story 39.x (Story 39.2 re-measured it after this story)", () => {
-    expect(squash(rootReadme)).toMatch(/Last re-measured at Story 39\.\d+ \(`pnpm measure:tools-payload`/);
+  it("the root README says the payload table was last re-measured at a Story 39.x or 40.x (Story 39.2 re-measured it after this story, and Story 40.1 after that)", () => {
+    expect(squash(rootReadme)).toMatch(/Last re-measured at Story (?:39|40)\.\d+ \(`pnpm measure:tools-payload`/);
   });
 
   it("the interop README has a subsection for the tool with the governance default and the 7-day window", () => {

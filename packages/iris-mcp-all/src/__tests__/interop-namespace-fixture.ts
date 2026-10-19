@@ -45,7 +45,17 @@
  * four headers, an XML message, two stream bodies and two Event Log rows, fixture nu), which `seedBurnDown`
  * compiles INSIDE a scratch namespace.
  *
- * Shared by Stories 39.1 to 39.7.
+ * Story 40.0 adds the `STORY400_*` seed source (`Story400.Seed`: ten Event Log rows and three headers placed
+ * relative to the moment the seed runs, fixture xi), which `seedEventLogCounts` compiles INSIDE a scratch
+ * namespace.
+ *
+ * Story 40.2 adds the coverage-report helpers to the fixture class: `HoldRunnerLock`, `RunnerLockHeld` and
+ * `ReleaseRunnerLock` (hold the runner owner lock of the next coverage run, so its runner starts late),
+ * `DeleteObjectCode` (delete the object code of a `Story402` class's routine in a scratch namespace), and
+ * `SeedLargeRun`, `ClearLargeRun` and `MeasureStatus` (a synthetic 200,000-line run record at the largest size a run can
+ * hold, removed afterwards, and its measured Status read).
+ *
+ * Shared by Stories 39.1 to 40.2.
  */
 
 import { docFixtures, type WireSession } from "./process-gate-helpers.js";
@@ -357,6 +367,599 @@ ClassMethod Leftovers(pNames As %String) As %String
     }
     Set $NAMESPACE = tOrig
     Quit tList.%ToJSON()
+}
+
+/// The Line-by-Line monitor as this process reads it (Story 40.1), as JSON: active (0 or 1), count (the monitored
+/// routines), pids (the process ids the session is scoped to, space separated) and routines (their names). Read only.
+/// A process that is not in the session's process list reads each routine name as an empty string.
+ClassMethod MonitorState() As %String
+{
+    Set tState = {}
+    Set tActive = ##class(ExecuteMCPv2.Coverage.Job).MonitorActive(.tPids)
+    Do tState.%Set("active", +tActive, "number")
+    Do tState.%Set("count", +##class(%Monitor.System.LineByLine).GetRoutineCount(), "number")
+    Do tState.%Set("pids", tPids, "string")
+    Set tRoutines = []
+    Set tList = ##class(ExecuteMCPv2.Coverage.Job).ActiveRoutines()
+    For tI = 1:1:$ListLength(tList) { Do tRoutines.%Push($List(tList, tI)) }
+    Do tState.%Set("routines", tRoutines)
+    Quit tState.%ToJSON()
+}
+
+/// Start a Line-by-Line session on this class's routine, scoped to this process: a session the suite did not start.
+/// Refuses unless the monitor is idle. Returns started:<pid>, or refused: <why>.
+ClassMethod StartForeign() As %String
+{
+    If ##class(ExecuteMCPv2.Coverage.Job).MonitorActive() { Quit "refused: a monitor session is already active" }
+    Set tSC = ##class(%Monitor.System.LineByLine).Start($ListBuild("ExecuteMCPv2.Temp.Story391Fixture.1"), $ListBuild("RtnLine"), $ListBuild($Job))
+    If $System.Status.IsError(tSC) { Quit "refused: "_$System.Status.GetErrorText(tSC) }
+    Set ^IRIS.TempStory391Fixture("foreign") = $Job
+    Quit "started:"_$Job
+}
+
+/// Start a Line-by-Line session of ALL processes on this class's routine: a session the suite did not start, whose
+/// process list is not a scope. Test-only (decision #49): it refuses unless the monitor is idle, it starts only on this
+/// class's own routine, which nobody else runs, and the row that calls it stops the session in its own cleanup
+/// (StopIfList) and asserts the monitor idle. Returns started:<pid>, or refused: <why>.
+ClassMethod StartForeignAll() As %String
+{
+    If ##class(ExecuteMCPv2.Coverage.Job).MonitorActive() { Quit "refused: a monitor session is already active" }
+    Set tSC = ##class(%Monitor.System.LineByLine).Start($ListBuild("ExecuteMCPv2.Temp.Story391Fixture.1"), $ListBuild("RtnLine"), "")
+    If $System.Status.IsError(tSC) { Quit "refused: "_$System.Status.GetErrorText(tSC) }
+    Set ^IRIS.TempStory391Fixture("foreignAll") = $Job
+    Quit "started:"_$Job
+}
+
+/// Stop the active session only when it is provably the one pRoutines names (routine names, comma separated).
+/// A process that can read the session's routine names proves it by name equality. A process that cannot (it is not
+/// in the session's process list) proves it as a reclaiming request does: this fixture's foreign session is scoped
+/// to exactly the process id the fixture recorded (or to nothing alive, which reads 0 once that process has ended,
+/// while the fixture's own record of the start is still there) and monitors as many routines as pRoutines names, or
+/// is the fixture's all-processes session (recorded by StartForeignAll, with no scoped list) and monitors as many
+/// routines as pRoutines names, or
+/// the coverage session node's process list (only the node's runner and supervisor, still alive, or 0) and routine
+/// count match the active session and the node's routine list equals pRoutines. When the node is gone, the newest
+/// run record stands in for it: its session was started and not released. Returns idle, stopped, or refused: <why>.
+ClassMethod StopIfList(pRoutines As %String) As %String
+{
+    If '##class(ExecuteMCPv2.Coverage.Job).MonitorActive(.tPids) {
+        Kill ^IRIS.TempStory391Fixture("foreign"), ^IRIS.TempStory391Fixture("foreignAll")
+        Quit "idle"
+    }
+    Set tWanted = $ListFromString(pRoutines, ",")
+    Set tProven = 0
+    If ##class(ExecuteMCPv2.Coverage.Job).NamesReadable() {
+        Set tProven = ##class(ExecuteMCPv2.Coverage.Job).ListsEqual(tWanted, ##class(ExecuteMCPv2.Coverage.Job).ActiveRoutines())
+    } Else {
+        Set tForeign = $Get(^IRIS.TempStory391Fixture("foreign"))
+        Set tCount = ##class(%Monitor.System.LineByLine).GetRoutineCount()
+        If (tForeign '= "") && ((tPids = tForeign) || (tPids = 0)) && (tCount = $ListLength(tWanted)) && (pRoutines = "ExecuteMCPv2.Temp.Story391Fixture.1") { Set tProven = 1 }
+        If ($Get(^IRIS.TempStory391Fixture("foreignAll")) '= "") && (tPids = "") && (tCount = $ListLength(tWanted)) && (pRoutines = "ExecuteMCPv2.Temp.Story391Fixture.1") { Set tProven = 1 }
+        Set tSession = $Get(^IRIS.TempExecuteMCPv2Coverage("session"))
+        If tSession = "" {
+            Set tJob = "ExecuteMCPv2.Coverage.Job"
+            Set tId = $Get(^IRIS.TempExecuteMCPv2Coverage("seq"))
+            If (tId '= "") && $ClassMethod(tJob, "RunExists", tId) && $ClassMethod(tJob, "RunGet", tId, "sessionStarted") && '$ClassMethod(tJob, "RunGet", tId, "sessionReleased") {
+                Set tSession = $ListBuild(tId, $ClassMethod(tJob, "RunGet", tId, "pid"), $ClassMethod(tJob, "RunGet", tId, "runnerPid"), "", $ClassMethod(tJob, "RunGet", tId, "routineList"))
+            }
+        }
+        If 'tProven && ##class(ExecuteMCPv2.Coverage.Job).SessionMatches(tSession) {
+            Set tProven = ##class(ExecuteMCPv2.Coverage.Job).ListsEqual($ListGet(tSession, 5), tWanted)
+        }
+    }
+    If 'tProven { Quit "refused: the active session is not the one named" }
+    Set tSC = ##class(%Monitor.System.LineByLine).Stop()
+    If $System.Status.IsError(tSC) { Quit "refused: "_$System.Status.GetErrorText(tSC) }
+    Kill ^IRIS.TempStory391Fixture("foreign"), ^IRIS.TempStory391Fixture("foreignAll")
+    Quit "stopped"
+}
+
+/// Start a decoy process: a job of this class that holds a lock and waits until it is asked to end. The coverage
+/// gate points a run record at it to prove that the supervisor terminates nothing MayTerminate has not approved.
+/// The decoy ends by itself (StopDecoy asks it to; it also ends after 120 seconds), so nothing ever terminates it.
+/// Returns started:<pid>, or refused: <why>.
+ClassMethod StartDecoy() As %String
+{
+    Kill ^IRIS.TempStory391Fixture("decoyStop")
+    Job ##class(ExecuteMCPv2.Temp.Story391Fixture).DecoyRun()::10
+    If '$Test { Quit "refused: the decoy did not start" }
+    Set tPid = $ZChild
+    For tI = 1:1:50 {
+        If ..DecoyAlive() { Quit }
+        Hang 0.1
+    }
+    If '..DecoyAlive() { Quit "refused: the decoy did not take its lock" }
+    Set ^IRIS.TempStory391Fixture("decoy") = tPid
+    Quit "started:"_tPid
+}
+
+/// The decoy's job: hold the decoy lock until StopDecoy sets the stop flag, for 120 seconds at most.
+ClassMethod DecoyRun()
+{
+    Lock +^IRIS.TempStory391Fixture("decoyLock"):5
+    If '$Test { Quit }
+    For tI = 1:1:1200 {
+        If $Get(^IRIS.TempStory391Fixture("decoyStop")) { Quit }
+        Hang 0.1
+    }
+    Lock -^IRIS.TempStory391Fixture("decoyLock")
+}
+
+/// Is the decoy alive? Its lock is held for its whole life, so a lock that cannot be taken belongs to it.
+ClassMethod DecoyAlive() As %Boolean
+{
+    Lock +^IRIS.TempStory391Fixture("decoyLock"):0
+    If $Test {
+        Lock -^IRIS.TempStory391Fixture("decoyLock")
+        Quit 0
+    }
+    Quit 1
+}
+
+/// Ask the decoy to end and wait for it to do so. Returns stopped, or refused: <why>.
+ClassMethod StopDecoy() As %String
+{
+    Set ^IRIS.TempStory391Fixture("decoyStop") = 1
+    For tI = 1:1:50 {
+        If '..DecoyAlive() { Quit }
+        Hang 0.1
+    }
+    If ..DecoyAlive() { Quit "refused: the decoy is still running" }
+    Kill ^IRIS.TempStory391Fixture("decoy"), ^IRIS.TempStory391Fixture("decoyStop")
+    Quit "stopped"
+}
+
+/// Hold the monitor's own lock, ^%SYS("MON-HOLD"), from a job of this class, so that a Stop of the Line-by-Line session
+/// fails with MonitorInUse (the monitor takes that lock with a 3 second wait). Only while the suite's own session is
+/// active: refuses unless the active session has a coverage session node. The job releases the lock when
+/// ReleaseMonitorLock is called, and in any case after pSeconds (at most 30). Returns held, or refused: <why>.
+ClassMethod HoldMonitorLock(pSeconds As %Integer = 20) As %String
+{
+    If $Get(^IRIS.TempExecuteMCPv2Coverage("session")) = "" { Quit "refused: no coverage session is active" }
+    If '##class(ExecuteMCPv2.Coverage.Job).MonitorActive() { Quit "refused: the monitor is idle" }
+    Kill ^IRIS.TempStory391Fixture("monHoldStop")
+    Job ##class(ExecuteMCPv2.Temp.Story391Fixture).MonitorLockRun($Select(pSeconds > 30: 30, pSeconds < 1: 1, 1: pSeconds))::10
+    If '$Test { Quit "refused: the lock holder did not start" }
+    Set tHeld = 0
+    For tI = 1:1:50 {
+        If ..MonitorLockHeld() {
+            Set tHeld = 1
+            Quit
+        }
+        Hang 0.1
+    }
+    Quit $Select(tHeld: "held", 1: "refused: the lock holder did not take the lock")
+}
+
+/// The lock holder's job: hold ^%SYS("MON-HOLD") until ReleaseMonitorLock sets the stop flag, for pSeconds at most.
+ClassMethod MonitorLockRun(pSeconds As %Integer)
+{
+    Lock +^%SYS("MON-HOLD"):10
+    If '$Test { Quit }
+    For tI = 1:1:(pSeconds * 10) {
+        If $Get(^IRIS.TempStory391Fixture("monHoldStop")) { Quit }
+        Hang 0.1
+    }
+    Lock -^%SYS("MON-HOLD")
+}
+
+/// Is ^%SYS("MON-HOLD") held by another process? A lock this call can take is released at once.
+ClassMethod MonitorLockHeld() As %Boolean
+{
+    Lock +^%SYS("MON-HOLD"):0
+    If $Test {
+        Lock -^%SYS("MON-HOLD")
+        Quit 0
+    }
+    Quit 1
+}
+
+/// Ask the lock holder to release ^%SYS("MON-HOLD") and wait for it to do so. Returns released, or refused: <why>.
+ClassMethod ReleaseMonitorLock() As %String
+{
+    Set ^IRIS.TempStory391Fixture("monHoldStop") = 1
+    For tI = 1:1:50 {
+        If '..MonitorLockHeld() { Quit }
+        Hang 0.1
+    }
+    If ..MonitorLockHeld() { Quit "refused: the lock is still held" }
+    Kill ^IRIS.TempStory391Fixture("monHoldStop")
+    Quit "released"
+}
+
+/// Write pCount fake finished run records, with negative ids so that they are older than every real run. Returns pCount.
+ClassMethod SeedRunRecords(pCount As %Integer) As %String
+{
+    For tI = 1:1:pCount { Set ^IRIS.TempExecuteMCPv2Coverage("run", -1000 - tI, "status") = "completed" }
+    Quit pCount
+}
+
+/// How many run records the coverage service holds, real and fake.
+ClassMethod RunRecordCount() As %Integer
+{
+    Set tCount = 0
+    Set tId = ""
+    For {
+        Set tId = $Order(^IRIS.TempExecuteMCPv2Coverage("run", tId))
+        If tId = "" { Quit }
+        Set tCount = tCount + 1
+    }
+    Quit tCount
+}
+
+/// Remove the fake run records SeedRunRecords wrote (up to 200 of them).
+ClassMethod ClearFakeRuns() As %String
+{
+    For tI = 1:1:200 { Kill ^IRIS.TempExecuteMCPv2Coverage("run", -1000 - tI) }
+    Quit "cleared"
+}
+
+/// Make the line counts of coverage run pId unreadable: replace the routine list its runner reads them for with text
+/// that is not a list. Refuses unless the run is not finished and its session has started. Returns corrupted, or
+/// refused: <why>.
+ClassMethod CorruptRoutines(pId As %Integer) As %String
+{
+    Set tJob = "ExecuteMCPv2.Coverage.Job"
+    If '$ClassMethod(tJob, "RunExists", pId) { Quit "refused: no such run" }
+    If $ClassMethod(tJob, "IsTerminal", $ClassMethod(tJob, "RunGet", pId, "status")) { Quit "refused: the run has finished" }
+    If '$ClassMethod(tJob, "RunGet", pId, "sessionStarted") { Quit "refused: the run has no session yet" }
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "routines") = "not a routine list"
+    Quit "corrupted"
+}
+
+/// Make the routine list of coverage run pId name a routine its session does not monitor, so that the supervisor's
+/// routine-name proof fails: the session stays the one the session node names, with its own routines. Refuses unless
+/// the run is not finished and its session has started. Returns renamed, or refused: <why>.
+ClassMethod RenameRoutineList(pId As %Integer) As %String
+{
+    Set tJob = "ExecuteMCPv2.Coverage.Job"
+    If '$ClassMethod(tJob, "RunExists", pId) { Quit "refused: no such run" }
+    If $ClassMethod(tJob, "IsTerminal", $ClassMethod(tJob, "RunGet", pId, "status")) { Quit "refused: the run has finished" }
+    If '$ClassMethod(tJob, "RunGet", pId, "sessionStarted") { Quit "refused: the run has no session yet" }
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "routineList") = $ListBuild("Story401.NotMonitored.1")
+    Quit "renamed"
+}
+
+/// Point the runnerPid of coverage run pId at the decoy pPid, as a PID that was reused would be. Refuses unless pPid
+/// is the decoy this fixture started and the run is not finished. Returns pointed, or refused: <why>.
+ClassMethod PointRunnerAtDecoy(pId As %Integer, pPid As %Integer) As %String
+{
+    If (pPid = "") || (pPid '= $Get(^IRIS.TempStory391Fixture("decoy"))) { Quit "refused: "_pPid_" is not the decoy" }
+    If '..DecoyAlive() { Quit "refused: the decoy is not running" }
+    If ##class(ExecuteMCPv2.Coverage.Job).IsTerminal(##class(ExecuteMCPv2.Coverage.Job).RunGet(pId, "status")) { Quit "refused: the run has finished" }
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "runnerPid") = pPid
+    Quit "pointed"
+}
+
+/// Terminate process pPid only when it is the supervisor or the runner the coverage session node names and
+/// ExecuteMCPv2.Coverage.Job:MayTerminate approves it, checked immediately before the call (a process id can be
+/// reused once its process has ended). Returns terminated:<result>, or refused: <why>.
+ClassMethod TerminateCoverageProcess(pPid As %Integer) As %String
+{
+    Set tSession = $Get(^IRIS.TempExecuteMCPv2Coverage("session"))
+    Set tId = $ListGet(tSession, 1)
+    If tId = "" { Quit "refused: no coverage session node" }
+    Set tRole = $Select(pPid = $ListGet(tSession, 2): "supervisor", pPid = $ListGet(tSession, 3): "runner", 1: "")
+    If tRole = "" { Quit "refused: "_pPid_" is neither the supervisor nor the runner of the session node" }
+    If '##class(ExecuteMCPv2.Coverage.Job).MayTerminate(tId, tRole, pPid) { Quit "refused: MayTerminate is false for the "_tRole }
+    Quit "terminated:"_$System.Process.Terminate(pPid)
+}
+
+/// Hold the runner owner lock of coverage run pId from a job of this class, so that the runner of that run (it waits up to
+/// 10 seconds for the lock) starts late (Story 40.2). Refuses unless pId is the next id the coverage service will allocate and
+/// no run has it. The job releases the lock when ReleaseRunnerLock is called, and in any case after pSeconds (at most 8).
+/// Returns held, or refused: <why>.
+ClassMethod HoldRunnerLock(pId As %Integer, pSeconds As %Integer = 5) As %String
+{
+    If pId '= ($Get(^IRIS.TempExecuteMCPv2Coverage("seq")) + 1) { Quit "refused: "_pId_" is not the next coverage run id" }
+    If ##class(ExecuteMCPv2.Coverage.Job).RunExists(pId) { Quit "refused: coverage run "_pId_" exists" }
+    Kill ^IRIS.TempStory391Fixture("runnerHoldStop")
+    Job ##class(ExecuteMCPv2.Temp.Story391Fixture).RunnerLockRun(pId, $Select(pSeconds > 8: 8, pSeconds < 1: 1, 1: pSeconds))::10
+    If '$Test { Quit "refused: the lock holder did not start" }
+    Set tHeld = 0
+    For tI = 1:1:50 {
+        If ..RunnerLockHeld(pId) {
+            Set tHeld = 1
+            Quit
+        }
+        Hang 0.1
+    }
+    Quit $Select(tHeld: "held", 1: "refused: the lock holder did not take the lock")
+}
+
+/// The lock holder's job: hold the runner owner lock of run pId until ReleaseRunnerLock sets the stop flag, for pSeconds at most.
+ClassMethod RunnerLockRun(pId As %Integer, pSeconds As %Integer)
+{
+    Lock +^IRIS.TempExecuteMCPv2Coverage("owner", pId, "runner"):10
+    If '$Test { Quit }
+    For tI = 1:1:(pSeconds * 10) {
+        If $Get(^IRIS.TempStory391Fixture("runnerHoldStop")) { Quit }
+        Hang 0.1
+    }
+    Lock -^IRIS.TempExecuteMCPv2Coverage("owner", pId, "runner")
+}
+
+/// Is the runner owner lock of run pId held by another process? A lock this call can take is released at once.
+ClassMethod RunnerLockHeld(pId As %Integer) As %Boolean
+{
+    Lock +^IRIS.TempExecuteMCPv2Coverage("owner", pId, "runner"):0
+    If $Test {
+        Lock -^IRIS.TempExecuteMCPv2Coverage("owner", pId, "runner")
+        Quit 0
+    }
+    Quit 1
+}
+
+/// Ask the lock holder to release the runner owner lock of run pId and wait for it to do so. Returns released, or refused: <why>.
+ClassMethod ReleaseRunnerLock(pId As %Integer) As %String
+{
+    Set ^IRIS.TempStory391Fixture("runnerHoldStop") = 1
+    For tI = 1:1:50 {
+        If '..RunnerLockHeld(pId) { Quit }
+        Hang 0.1
+    }
+    If ..RunnerLockHeld(pId) { Quit "refused: the lock is still held" }
+    Kill ^IRIS.TempStory391Fixture("runnerHoldStop")
+    Quit "released"
+}
+
+/// Delete the object code (the OBJ routine) of routine pRoutine in the scratch namespace pNamespace, so that a Line-by-Line
+/// session cannot load it (Story 40.2). Refuses any namespace but EXECMCPTMP<digits><capital letter> and any routine but a
+/// Story402 class's first. Returns deleted, or refused: <why>.
+ClassMethod DeleteObjectCode(pNamespace As %String, pRoutine As %String) As %String
+{
+    If pNamespace '? 1"EXECMCPTMP"1.N1U { Quit "refused: the namespace must be EXECMCPTMP, digits and one capital letter" }
+    If pRoutine '? 1"Story402."1.AN1".1" { Quit "refused: the routine must be the first routine of a Story402 class" }
+    Set tOrig = $NAMESPACE
+    Set tResult = "deleted"
+    Try {
+        Set $NAMESPACE = pNamespace
+        If '$Data(^rOBJ(pRoutine)) { Set tResult = "refused: "_pRoutine_" has no object code in "_pNamespace }
+        Else {
+            Set tSC = ##class(%Routine).Delete(pRoutine_".OBJ", 1)
+            If $System.Status.IsError(tSC) { Set tResult = "refused: "_$System.Status.GetErrorText(tSC) }
+            ElseIf $Data(^rOBJ(pRoutine)) { Set tResult = "refused: the object code of "_pRoutine_" is still there" }
+        }
+    } Catch ex {
+        Set tResult = "refused: "_ex.DisplayString()
+    }
+    Set $NAMESPACE = tOrig
+    Quit tResult
+}
+
+/// Write a synthetic terminal coverage run record, id pId (above 990000000, so no real run has it): four routines of 50000
+/// INT lines each, 180000 skeleton entries and 100000 counted lines between them, and a class-source map of 180000 body lines
+/// (the largest a run can hold is 200000 INT lines). Returns the number of INT lines, or refused: <why>.
+ClassMethod SeedLargeRun(pId As %Integer) As %String
+{
+    If (pId < 990000000) || (pId '= (pId \ 1)) { Quit "refused: the id must be a whole number above 990000000" }
+    Kill ^IRIS.TempExecuteMCPv2Coverage("run", pId)
+    Set tRoutines = ""
+    For tN = 1:1:4 {
+        Set tClass = "Story402.Large"_tN
+        Set tRoutine = tClass_".1"
+        Set tRoutines = tRoutines_$ListBuild($ListBuild(tClass, tRoutine, 50000))
+        For tLine = 1:1:45000 {
+            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "skeleton", tN, tLine) = "C:set"
+            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tN, "m", 1, tLine) = tLine
+        }
+        For tLine = 1:1:25000 {
+            Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "hits", tN, tLine) = (tLine # 7) + 1
+        }
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tN) = $ListBuild(tClass, "")
+        Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "sources", tN, "m", 1) = $ListBuild("Run", 10, tRoutine, "")
+    }
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "namespace") = "HSCUSTOM"
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "target") = "Story402.Large"
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "level") = "class"
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "minCoverage") = 50
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "routines") = tRoutines
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "unmeasured") = ""
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "startedAt") = "2026-10-18T00:00:00.000Z"
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "finishedAt") = "2026-10-18T00:00:01.000Z"
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "hasCounts") = 1
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "releasedBy") = "runner"
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "testsDone") = 1
+    Set ^IRIS.TempExecuteMCPv2Coverage("run", pId, "status") = "completed"
+    Quit 200000
+}
+
+/// Remove the synthetic run record SeedLargeRun wrote. Refuses an id of a real run.
+ClassMethod ClearLargeRun(pId As %Integer) As %String
+{
+    If (pId < 990000000) || (pId '= (pId \ 1)) { Quit "refused: the id must be a whole number above 990000000" }
+    Kill ^IRIS.TempExecuteMCPv2Coverage("run", pId)
+    Quit "cleared"
+}
+
+/// Build the Status record of run pId the way the Status route does, and measure it inside IRIS: the seconds it took, the
+/// bytes of its JSON and the growth of this process's memory in kilobytes. Returns the measurements as JSON.
+ClassMethod MeasureStatus(pId As %Integer) As %String
+{
+    Set tBefore = $Storage
+    Set tStart = $ZHorolog
+    Set tRun = ##class(ExecuteMCPv2.REST.Coverage).BuildRun(pId, 1)
+    Set tBuilt = $ZHorolog - tStart
+    Set tStream = ##class(%Stream.TmpCharacter).%New()
+    Do tRun.%ToJSON(tStream)
+    Set tTotal = $ZHorolog - tStart
+    Set tAfter = $Storage
+    Set tResult = {}
+    Do tResult.%Set("buildSeconds", +$FNumber(tBuilt, "", 3), "number")
+    Do tResult.%Set("buildAndSerializeSeconds", +$FNumber(tTotal, "", 3), "number")
+    Do tResult.%Set("bytes", tStream.Size, "number")
+    Do tResult.%Set("memoryGrowthKB", (tBefore - tAfter) \ 1024, "number")
+    Quit tResult.%ToJSON()
+}
+
+/// Make the scratch namespace pName able to compile and run %UnitTest.TestProduction tests (Story 40.3): set the one node
+/// ^%SYS("Ensemble","InstalledNamespace",pName), which TestProduction's environment check reads and which is all it needs.
+/// EnableNamespace is never called. Refuses any name that is not EXECMCPTMP<digits><capital letter> and any namespace that does
+/// not exist, and touches no other node. ClearInstalledNamespace removes the node before the namespace is removed.
+/// Returns set, or refused: <why>.
+ClassMethod SetInstalledNamespace(pName As %String) As %String
+{
+    If pName '? 1"EXECMCPTMP"1.N1U { Quit "refused: the name must be EXECMCPTMP, digits and one capital letter" }
+    Set tOrig = $NAMESPACE
+    Set tResult = "set"
+    Try {
+        Set $NAMESPACE = "%SYS"
+        If '##class(Config.Namespaces).Exists(pName) {
+            Set tResult = "refused: namespace "_pName_" does not exist"
+        } Else {
+            Set ^%SYS("Ensemble", "InstalledNamespace", pName) = ""
+        }
+    } Catch ex {
+        Set tResult = "refused: "_ex.DisplayString()
+    }
+    Set $NAMESPACE = tOrig
+    Quit tResult
+}
+
+/// Remove the node SetInstalledNamespace set for pName, and no other. Refuses any name that is not
+/// EXECMCPTMP<digits><capital letter> and any namespace that does not exist. Returns cleared, or refused: <why>.
+ClassMethod ClearInstalledNamespace(pName As %String) As %String
+{
+    If pName '? 1"EXECMCPTMP"1.N1U { Quit "refused: the name must be EXECMCPTMP, digits and one capital letter" }
+    Set tOrig = $NAMESPACE
+    Set tResult = "cleared"
+    Try {
+        Set $NAMESPACE = "%SYS"
+        If '##class(Config.Namespaces).Exists(pName) {
+            Set tResult = "refused: namespace "_pName_" does not exist"
+        } Else {
+            Kill ^%SYS("Ensemble", "InstalledNamespace", pName)
+        }
+    } Catch ex {
+        Set tResult = "refused: "_ex.DisplayString()
+    }
+    Set $NAMESPACE = tOrig
+    Quit tResult
+}
+
+/// Hold Ens's production lifecycle lock ^Ens.Runtime of the scratch namespace pNamespace from a job of this class, so that the
+/// TestProduction guard cannot take it (Story 40.3). The job switches to pNamespace itself, so it holds that namespace's lock and no
+/// other, releases it when ReleaseEnsRuntime is called, and in any case after pSeconds (at most 30). Refuses any name that is not
+/// EXECMCPTMP<digits><capital letter> and any namespace that does not exist. Returns held, or refused: <why>.
+ClassMethod HoldEnsRuntime(pNamespace As %String, pSeconds As %Integer = 10) As %String
+{
+    If pNamespace '? 1"EXECMCPTMP"1.N1U { Quit "refused: the namespace must be EXECMCPTMP, digits and one capital letter" }
+    If '##class(%SYS.Namespace).Exists(pNamespace) { Quit "refused: namespace "_pNamespace_" does not exist" }
+    Kill ^IRIS.TempStory391Fixture("ensHoldStop")
+    Job ##class(ExecuteMCPv2.Temp.Story391Fixture).EnsRuntimeRun(pNamespace, $Select(pSeconds > 30: 30, pSeconds < 1: 1, 1: pSeconds))::10
+    If '$Test { Quit "refused: the lock holder did not start" }
+    Set tHeld = 0
+    For tI = 1:1:50 {
+        If ..EnsRuntimeHeld(pNamespace) {
+            Set tHeld = 1
+            Quit
+        }
+        Hang 0.1
+    }
+    Quit $Select(tHeld: "held", 1: "refused: the lock holder did not take the lock")
+}
+
+/// The lock holder's job: in the scratch namespace pNamespace, hold ^Ens.Runtime until ReleaseEnsRuntime sets the stop flag, for
+/// pSeconds at most.
+ClassMethod EnsRuntimeRun(pNamespace As %String, pSeconds As %Integer)
+{
+    If pNamespace '? 1"EXECMCPTMP"1.N1U { Quit }
+    Set $NAMESPACE = pNamespace
+    Lock +^Ens.Runtime:10
+    If '$Test { Quit }
+    For tI = 1:1:(pSeconds * 10) {
+        If $Get(^IRIS.TempStory391Fixture("ensHoldStop")) { Quit }
+        Hang 0.1
+    }
+    Lock -^Ens.Runtime
+}
+
+/// Is ^Ens.Runtime of the scratch namespace pNamespace held by any process? A job of this class tries the lock (EnsRuntimeProbe), so
+/// the answer does not depend on which process serves this call: a process that holds a lock takes it again at once, so a lock held
+/// by the process that serves the call would read as free to that process. A name that is not a scratch namespace, a probe that does
+/// not answer, or an error reads as held, so a caller never mistakes it for a free lock.
+ClassMethod EnsRuntimeHeld(pNamespace As %String) As %Boolean
+{
+    If pNamespace '? 1"EXECMCPTMP"1.N1U { Quit 1 }
+    Set tHeld = 1
+    Try {
+        Job ##class(ExecuteMCPv2.Temp.Story391Fixture).EnsRuntimeProbe(pNamespace)::10
+        If $Test {
+            Set tProbe = $ZChild
+            For tI = 1:1:50 {
+                If $Data(^IRIS.TempStory391Fixture("ensProbe", tProbe), tFree) {
+                    Set tHeld = 'tFree
+                    Quit
+                }
+                Hang 0.1
+            }
+            Kill ^IRIS.TempStory391Fixture("ensProbe", tProbe)
+        }
+    } Catch ex {
+        Set tHeld = 1
+    }
+    Quit tHeld
+}
+
+/// The probe job of EnsRuntimeHeld: in the scratch namespace pNamespace, try ^Ens.Runtime without waiting, release it at once when
+/// it was taken, and record 1 when it was free and 0 when another process held it.
+ClassMethod EnsRuntimeProbe(pNamespace As %String)
+{
+    If pNamespace '? 1"EXECMCPTMP"1.N1U { Quit }
+    Set tFree = 0
+    Try {
+        Set $NAMESPACE = pNamespace
+        Lock +^Ens.Runtime:0
+        If $Test {
+            Lock -^Ens.Runtime
+            Set tFree = 1
+        }
+    } Catch ex {
+        Set tFree = 0
+    }
+    Set ^IRIS.TempStory391Fixture("ensProbe", $Job) = tFree
+}
+
+/// Ask the lock holder to release ^Ens.Runtime of pNamespace and wait for it to do so. Returns released, or refused: <why>.
+ClassMethod ReleaseEnsRuntime(pNamespace As %String) As %String
+{
+    If pNamespace '? 1"EXECMCPTMP"1.N1U { Quit "refused: the namespace must be EXECMCPTMP, digits and one capital letter" }
+    Set ^IRIS.TempStory391Fixture("ensHoldStop") = 1
+    For tI = 1:1:50 {
+        If '..EnsRuntimeHeld(pNamespace) { Quit }
+        Hang 0.1
+    }
+    If ..EnsRuntimeHeld(pNamespace) { Quit "refused: the lock is still held" }
+    Kill ^IRIS.TempStory391Fixture("ensHoldStop")
+    Quit "released"
+}
+
+/// The positive control of EnsRuntimeHeld (Story 40.3 row 15b): take ^Ens.Runtime of the scratch namespace pNamespace in this process,
+/// ask EnsRuntimeHeld from this same process, and return what it said (1: it saw the lock the asking process holds). The lock is
+/// released before this returns, whatever happens. Refuses any name that is not EXECMCPTMP<digits><capital letter> and any namespace
+/// that does not exist.
+ClassMethod EnsRuntimeHeldWhileHolding(pNamespace As %String) As %String
+{
+    If pNamespace '? 1"EXECMCPTMP"1.N1U { Quit "refused: the namespace must be EXECMCPTMP, digits and one capital letter" }
+    If '##class(%SYS.Namespace).Exists(pNamespace) { Quit "refused: namespace "_pNamespace_" does not exist" }
+    Set tOrig = $NAMESPACE
+    Set tLocked = 0
+    Set tAnswer = "refused: the lock could not be taken"
+    Try {
+        Set $NAMESPACE = pNamespace
+        Lock +^Ens.Runtime:5
+        Set tLocked = $Test
+        Set $NAMESPACE = tOrig
+        If tLocked Set tAnswer = ..EnsRuntimeHeld(pNamespace)
+    } Catch ex {
+        Set tAnswer = "refused: "_ex.DisplayString()
+    }
+    If tLocked {
+        Set $NAMESPACE = pNamespace
+        Lock -^Ens.Runtime
+    }
+    Set $NAMESPACE = tOrig
+    Quit tAnswer
 }
 
 }
@@ -1035,7 +1638,7 @@ export const STORY394_IDS: Record<"a" | "b", Record<string, string>> = {
  * Put and compile `documents` into the scratch namespace `name`, run `className.Seed(args)` there, and
  * check the JSON ID map it returns against `expected`. `what` names the seed in error text.
  */
-async function putCompileSeed(
+export async function putCompileSeed(
   dev: WireSession,
   name: string,
   documents: ReadonlyArray<readonly [string, string]>,
@@ -1668,6 +2271,139 @@ export async function seedBurnDown(dev: WireSession, name: string): Promise<void
     { className: "Story397.Seed", args: [] },
     STORY397_IDS,
     "the burn-down fixture nu",
+  );
+}
+
+/**
+ * Story 40.0 fixture xi: Event Log rows and headers placed relative to the moment the seed runs (T0, its
+ * `$ZTimeStamp`), so a 24-hour window can be asserted live. Each time is T0 plus an offset, written by the seed's own
+ * `Shift` arithmetic, never by the code under test. Every log text is `SYNTHPHI400-L<n>`.
+ *
+ * | rows | kind | type | item | offset from T0 |
+ * |---|---|---|---|---|
+ * | L1 to L6 | Event Log | 1, 2, 3, 4, 5, 6 (Assert, Error, Warning, Info, Trace, Alert) | Story400.Item | -1 h |
+ * | L7 | Event Log | 2 | Story400.Item | -23 h |
+ * | L8 | Event Log | 2 | Story400.Item | -24 h 5 min |
+ * | L9 | Event Log | 3 | Story400.Item | -24 h 5 min |
+ * | L10 | Event Log | 2 | Story400.Other | -1 h |
+ * | H1, H2, H3 | header, session 400001, Request, Story400.Service to Story400.Operation, Completed, no body | 1 | - | -1 h, -23 h, -24 h 5 min |
+ *
+ * The logs carry no session, source class or source method. The window rows (L2, L7, L10, H1, H2) sit well inside
+ * 24 hours; L8, L9 and H3 sit 5 minutes outside it.
+ *
+ * `MetricsAtZone(zone)` returns, as JSON, the metrics `ExecuteMCPv2.REST.Monitor:CollectInteropMetrics` computes for
+ * the scratch namespace while its own process runs at the time zone `zone`, and restores `$ZTimeZone` on every path.
+ */
+export const STORY400_SEED_SOURCE = String.raw`Class Story400.Seed
+{
+
+/// Seed fixture xi into the current namespace, which must be an empty EXECMCPTMP400 scratch namespace.
+/// Returns the JSON ID map {"logs":"1,2,3,4,5,6,7,8,9,10","headers":"1,2,3"}, or the first error text.
+ClassMethod Seed() As %String
+{
+    If $NAMESPACE '? 1"EXECMCPTMP400"1U { Quit "REFUSED: Seed runs only in a namespace named EXECMCPTMP400 followed by one capital letter" }
+    If $Order(^Ens.MessageHeaderD("")) '= "" { Quit "REFUSED: the namespace already holds message headers" }
+    If $Order(^Ens.Util.LogD("")) '= "" { Quit "REFUSED: the namespace already holds Event Log rows" }
+    Set tNow = $ZTimeStamp
+    Set tHour = ..Shift(tNow, -3600)
+    Set tL = ""
+    For tType = 1:1:6 {
+        Set tL = tL_$ListBuild(..SaveLog(tType, "Story400.Item", tType, tHour))
+    }
+    Set tL = tL_$ListBuild(..SaveLog(2, "Story400.Item", 7, ..Shift(tNow, -82800)))
+    Set tL = tL_$ListBuild(..SaveLog(2, "Story400.Item", 8, ..Shift(tNow, -86700)))
+    Set tL = tL_$ListBuild(..SaveLog(3, "Story400.Item", 9, ..Shift(tNow, -86700)))
+    Set tL = tL_$ListBuild(..SaveLog(2, "Story400.Other", 10, tHour))
+    Set tError = ..FirstError(tL, 10)
+    If tError '= "" { Quit tError }
+    Set tH = ""
+    Set tH = tH_$ListBuild(##class(ExecuteMCPv2.Temp.Story391Fixture).Add(400001, 1, 9, 0, "Story400.Service", "Story400.Operation", "", "", tHour))
+    Set tH = tH_$ListBuild(##class(ExecuteMCPv2.Temp.Story391Fixture).Add(400001, 1, 9, 0, "Story400.Service", "Story400.Operation", "", "", ..Shift(tNow, -82800)))
+    Set tH = tH_$ListBuild(##class(ExecuteMCPv2.Temp.Story391Fixture).Add(400001, 1, 9, 0, "Story400.Service", "Story400.Operation", "", "", ..Shift(tNow, -86700)))
+    Set tError = ..FirstError(tH, 3)
+    If tError '= "" { Quit tError }
+    Quit {"logs":($ListToString(tL)),"headers":($ListToString(tH))}.%ToJSON()
+}
+
+/// The metrics ExecuteMCPv2.REST.Monitor:CollectInteropMetrics computes for the current scratch namespace while this
+/// process runs at the time zone pZone (minutes west of Greenwich), as JSON, or the error text.
+/// $ZTimeZone is per process; it is restored on every path.
+ClassMethod MetricsAtZone(pZone As %Integer) As %String
+{
+    If $NAMESPACE '? 1"EXECMCPTMP400"1U { Quit "REFUSED: MetricsAtZone runs only in a namespace named EXECMCPTMP400 followed by one capital letter" }
+    Set tSaved = $ZTimeZone
+    Set tResult = ""
+    Try {
+        Set $ZTimeZone = pZone
+        Set tResult = ##class(ExecuteMCPv2.REST.Monitor).CollectInteropMetrics($NAMESPACE).%ToJSON()
+    }
+    Catch ex {
+        Set tResult = "ERROR: "_ex.DisplayString()
+    }
+    Set $ZTimeZone = tSaved
+    Quit tResult
+}
+
+/// The UTC time pSeconds after the $ZTimeStamp value pStamp, as YYYY-MM-DD hh:mm:ss.nnn, by whole-second arithmetic on the day count.
+ClassMethod Shift(pStamp As %String, pSeconds As %Integer) As %String
+{
+    Set tTotal = (+$Piece(pStamp, ",", 1) * 86400) + $Piece(pStamp, ",", 2) + pSeconds
+    Set tDays = tTotal \ 86400
+    Quit $ZDateTime(tDays_","_(tTotal - (tDays * 86400)), 3, 1, 3)
+}
+
+/// The first ERROR: text among the first pCount items of the list pList, or "".
+ClassMethod FirstError(pList As %List, pCount As %Integer) As %String
+{
+    Set tError = ""
+    For tI = 1:1:pCount {
+        If $Extract($List(pList, tI), 1, 6) = "ERROR:" {
+            Set tError = $List(pList, tI)
+            Quit
+        }
+    }
+    Quit tError
+}
+
+/// Save one Event Log row directly and return its ID, or the error text. The text is SYNTHPHI400-L followed by pNumber.
+ClassMethod SaveLog(pType As %Integer, pItem As %String, pNumber As %Integer, pTime As %String) As %String
+{
+    Set tLog = ##class(Ens.Util.Log).%New()
+    Set tLog.Type = pType
+    Set tLog.ConfigName = pItem
+    Set tLog.Text = "SYNTHPHI400-L"_pNumber
+    Set tLog.TimeLogged = pTime
+    Set tSC = tLog.%Save()
+    If $System.Status.IsError(tSC) { Quit "ERROR: "_$System.Status.GetErrorText(tSC) }
+    Quit tLog.%Id()
+}
+
+}
+`;
+
+/** The Story400 documents compiled into the scratch namespace, in compile order. */
+export const STORY400_DOCUMENTS: ReadonlyArray<readonly [string, string]> = [["Story400.Seed.cls", STORY400_SEED_SOURCE]];
+
+/** What `Story400.Seed.Seed` returns: ten Event Log rows and three headers, numbered from 1 in a fresh namespace. */
+export const STORY400_IDS = { logs: "1,2,3,4,5,6,7,8,9,10", headers: "1,2,3" } as const;
+
+/**
+ * Put and compile the `Story400` seed into the scratch namespace `name`, then seed fixture xi and check the IDs it
+ * received. The seed refuses a namespace that already holds Event Log rows or headers.
+ *
+ * @param dev - A session on a built iris-dev-mcp server.
+ * @param name - An interop-enabled, empty `EXECMCPTMP400<capital letter>` namespace (a bare one has no
+ *   `Ens.Util.Log`, so the seed cannot run there).
+ */
+export async function seedEventLogCounts(dev: WireSession, name: string): Promise<void> {
+  assertFixtureName(name);
+  await putCompileSeed(
+    dev,
+    name,
+    STORY400_DOCUMENTS,
+    { className: "Story400.Seed", args: [] },
+    STORY400_IDS,
+    "the Event Log counts fixture xi",
   );
 }
 

@@ -15,8 +15,8 @@
  * Provenance: transcribed verbatim from the product-owner-approved spec
  * table (`research/feature-specs/11-tool-visibility-presets.md` §2.5, dated
  * 2026-07-12). Counts cross-checked against each package's own
- * `index.test.ts`: dev 31 (28 at spec time + `iris_test_status`, Story 36.2,
- * + `iris_doc_edit`, Story 38.4, + `iris_sql_query`, Story 38.5), admin 26, interop 24 (22 at spec time + `iris_message_search`, Story 39.1, + `iris_message_body`, Story 39.5), ops 21, data 7. The
+ * `index.test.ts`: dev 32 (28 at spec time + `iris_test_status`, Story 36.2,
+ * + `iris_doc_edit`, Story 38.4, + `iris_sql_query`, Story 38.5, + `iris_test_coverage`, Story 40.1), admin 26, interop 24 (22 at spec time + `iris_message_search`, Story 39.1, + `iris_message_body`, Story 39.5), ops 21, data 7. The
  * drift gate above is what makes this transcription SOURCE-DERIVED rather
  * than trusted (Rule #36): a package adding/removing/renaming a tool
  * without updating this module fails `@iris-mcp/all`'s default suite.
@@ -54,6 +54,7 @@ export const PRE_FEATURE_SNAPSHOTS: Record<string, string[]> = {
     "iris_test_status",
     "iris_doc_edit",
     "iris_sql_query",
+    "iris_test_coverage",
   ],
   "iris-admin-mcp": [
     "iris_namespace_manage",

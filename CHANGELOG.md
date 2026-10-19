@@ -2,6 +2,428 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-19] — Story 40.5: Epic 40 burn-down
+
+No tool, action, governance key, preset row, prompt, refusal code, environment variable or route is added, so no count moves
+(the Development server stays at 32 package tools, 33 advertised; the suite at 110 package tools, 115 advertised). The prompt
+pack stays at 13 prompts (5 on the Development server), the `core` preset at 14 package tools (15 runtime tools), the
+`developer` preset at 32 package tools (33 advertised), the refusal-code catalog at 10 codes, and the frozen governance
+baseline at hash `1e62c5ad5bf7` (141 keys). The tools-list snapshot does not move. `BOOTSTRAP_VERSION` moves from
+`5024e4623f1d` to `5296a1c836f4`, because `REST/Monitor.cls`, `REST/UnitTest.cls` and `REST/Coverage.cls` changed (the
+bootstrapped service stays at 35 classes).
+
+### Changed
+
+- **`recover-stuck-production` reports withheld Event Log text and never reads it another way (DW-590; orchestrator decision
+  #65, a sanctioned AD-15 change).** Step 3 gains the rule the `trace-message-flow` prompt already carries: under the `block`
+  data policy each entry's `text` is withheld and its `textPolicy` gives the reason, which the model reports to the user; it
+  never reads the log text through SQL, global or document tools. The prompt keeps its 8 steps.
+- **`edit-and-test-class` tells the model what a `PRODUCTION_BUSY` refusal means (DW-609; orchestrator decision #66, a
+  sanctioned AD-15 change).** Step 9 ends with the note that `deploy-and-test-class` carries: nothing ran, the model tells the
+  user, and it does not stop a production without the user's confirmation. The prompt keeps its 12 steps and its tools, all of
+  them in the `core` preset.
+- **The `PRODUCTION_BUSY` note of `deploy-and-test-class` covers a refusal whose production state could not be read (DW-610;
+  orchestrator decision #67, a sanctioned AD-15 change).** When the refusal says the state is `Unknown`, the model tells the
+  user, runs the tests again in a moment, and stops no production to make them run. The note is one text, shared by step 4 of
+  `deploy-and-test-class` and step 9 of `edit-and-test-class`. The prompt keeps its 9 steps.
+
+The names, titles, arguments and descriptions of the three prompts are unchanged, and the three generated skills are
+regenerated (`pnpm gen:skills`); the skills index is unchanged.
+
+### Fixed
+
+- **`iris_alerts_manage` `reset` stamps `clearedAt` in UTC (DW-589).** The stamp was built from the local clock and labelled
+  `Z`, so a process whose local time is not UTC reported a time that was off by its offset from UTC (its time zone, plus an
+  hour while daylight-saving time is in effect). It is now built from `$ZTimeStamp`, in the same format
+  (`YYYY-MM-DDThh:mm:ssZ`, to the second, a fraction truncated). A process at time zone 0 with no daylight-saving shift got
+  the same value before, which is why the defect was invisible on an instance whose local time is UTC. The route's request
+  and response keys are unchanged.
+- **`POST /tests` at the package level runs the package's test classes (DW-597).** The spec joined the classes as `:A;:B`,
+  which the test runner reads as class A with a method named B, so a package of two or more test classes ran no test. It is
+  now `:A;B;C`. No tool calls the route (orchestrator decision #40), and `iris_test_coverage` package runs are unchanged: that
+  service rewrote the spec to the same form, and the rewrite it needed is removed. The route is still not guarded by the
+  TestProduction guard, so a package run now also runs the package's `%UnitTest.TestProduction` tests. The class level, the
+  method level and the response keys are unchanged (AD-33).
+- **`pnpm gen:bootstrap` writes the embed only when its content changes (DW-591).** It rewrote an unchanged
+  `bootstrap-classes.ts`, which moved the file's modification time and made the shared build look stale to the live gates'
+  freshness check. A run that changes nothing now says the file is unchanged and prints `BOOTSTRAP_VERSION`; the hash and the
+  content are unchanged.
+
+### Tests
+
+- **One monitor helper module for the live gates (DW-603).** The six coverage gates (Stories 40.1 and 40.2, their QA gates, the
+  Epic 40 capstone and the Story 40.4 QA gate) each declared their own copy of the monitor helpers. They now build them with
+  `monitorGate` from `monitor-gate-helpers.ts`, and the Story 40.3 helpers build on it too. `gate-helper-copies.test.ts` fails,
+  naming the gate and the name, when a gate declares one of the moved names again.
+- **The class-name check is compared with the compiler (DW-607).** The agreement test of `IsClassName` takes its expected value
+  from `$System.OBJ.IsValidClassname`, not from the function it checks, over more names including the length limit; the empty
+  name is asserted on its own.
+- **The Story 40.5 gate (`story-40-5-burn-down-live-gate.test.ts`).** It runs in the default suite and in the prepublish roster,
+  and runs a package of two test classes through `POST /tests` in a disposable namespace, then checks that a class run, a
+  method run and the six result keys are unchanged. It starts no Line-by-Line session and no production.
+- **The Story 40.5 QA gate (`story-40-5-qa-live-gate.test.ts`).** It runs in the default suite and in the prepublish roster.
+  It renders the three changed prompts through the built servers, checks a live `PRODUCTION_BUSY` refusal for an unreadable
+  production state against the note, and runs a package through `iris_execute_tests`, `POST /tests` and
+  `iris_test_coverage`. Its coverage rows start Line-by-Line sessions only while the monitor is idle, and end with the
+  monitor idle and no ownership node. It starts no production.
+- Earliest IRIS version verified for `$System.OBJ.IsValidClassname` and the truncation of `$ZTimeStamp`: 2026.2 build 221U.
+
+## [Pre-release — 2026-10-18] — Story 40.4: Test depth docs, prompt and capstone
+
+No tool, action or governance key is added, so no tool count moves (the Development server stays at 32 package tools, 33
+advertised; the suite at 110 package tools, 115 advertised). The prompt pack stays at 13 prompts (5 on the Development
+server), the `core` preset at 14 package tools (15 runtime tools), the `developer` preset at 32 package tools (33 advertised),
+the refusal-code catalog at 10 codes, and the frozen governance baseline at hash `1e62c5ad5bf7` (141 keys).
+`BOOTSTRAP_VERSION` moves from `845e95f6e726` to `5024e4623f1d`, because `Coverage/Job.cls` and `REST/Coverage.cls` changed
+(the bootstrapped service stays at 35 classes).
+
+### Changed
+
+- **`iris_execute_tests` declares the hints of a write (DW-498; a sanctioned AD-15 change, orchestrator decision #63).** Its
+  `readOnlyHint` and `idempotentHint` were `true`, against its `write` classification and its rule that a run that is still
+  executing is never re-submitted. Both are now `false`; `destructiveHint` and `openWorldHint` stay `false`. Its key, its
+  classification, its description and the frozen baseline do not change, and nothing in this suite reads the hints (the server
+  passes them to the client, and the `read-only` preset uses classifications). An MCP client that does read them now treats the
+  tool as a write: it may, for example, ask for approval before a run, and it will not retry one as idempotent. **Default state:**
+  `iris_execute_tests` stays classified `write` and **enabled by default**. A reverse-direction check now fails when any tool
+  that owns a key classified `write` declares `readOnlyHint: true`, with no allowlist.
+  `pnpm gen:tools-list-snapshot --force` regenerated the `tools/list` snapshot (orchestrator decision #29): it differs only in
+  the annotations of `iris_execute_tests`.
+- **The `deploy-and-test-class` prompt gains an optional coverage step and a `PRODUCTION_BUSY` note (orchestrator decision
+  #62, AD-15).** A new step 8 runs only when the user asks how much of the code the tests cover or gives a coverage target, and
+  once the tests pass: it calls `iris_test_coverage` with the classes the tests exercise and the user's `minCoverage`, and
+  copes with a tool that the `core` preset hides, a `GOVERNANCE_DISABLED`, `MONITOR_BUSY` or `PRODUCTION_BUSY` refusal and a
+  `running` result (poll by `coverageRunId`, never re-submit). Step 4 tells the model what a `PRODUCTION_BUSY` refusal means
+  and not to stop that production without the user's confirmation. The old step 8, the report, is now step 9; step 2 keeps its
+  number. The prompt's description gains one clause, and its name, title and argument (`classOrPackage`) are unchanged. The
+  generated skill and the skills index are regenerated.
+
+### Fixed
+
+- **A freshly compiled class whose methods hold only `#;` or `#dim` lines is no longer reported `not-up-to-date` (DW-601).**
+  Every method of such a class has an INT label and no mapped body line, which the shape rule of the class-source map read as a
+  class whose line map had been removed, a false FAIL. The service now records, per class, whether the class still has the line
+  map its compile wrote (`lineMap`, `$Data(^rMAP(<class>))`: 10 fresh, 0 after a documentation-only save), and the class is
+  `not-up-to-date` exactly when `lineMap` is 0 while a method that compiled to INT code has a label line. A record stored
+  without `lineMap` is judged by the earlier shape rule, unchanged, and a class with only constant or Python methods stays
+  without a reason.
+- **Two methods whose names share their first 31 characters no longer lose their label line (DW-601).** The label line was
+  found by the method name cut to 31 characters, and a shortened name that two methods share gave neither a label, so a stale
+  class of such methods read as 0 lines with `line-rate="1"`. A method's label line is now read from its compiled label
+  (`RtnLabel`, `label^routine`), which is exact, and is 0 when the method has none (an inlined constant, a Python method). A
+  method whose name begins with a percent sign (`%OnNew`, for example) has an empty `RtnLabel` when its label is its name cut to
+  31 characters (the second of two such names that share them is given a `RtnLabel` of its own), so that label is used: a
+  stale class whose only methods are named so is `not-up-to-date` too, not a class with no executable lines.
+- **An initializing `#dim` is an executable class line (DW-602).** A `#dim` line that holds an `=` outside parentheses, string
+  literals and comments compiles to a `Set` at its own INT line, and the class-source map dropped it with the other
+  preprocessor lines. It is now kept; every other preprocessor line is still never a class line, and that includes a `#dim`
+  whose only `=` is in a trailing `//`, `;` or `/* */` comment (the compiler maps such a line onto another statement).
+- **`iris_test_status` returns an error result when a read of `%UnitTest_Result` fails (AC 40.4.3).** Three paths could still
+  throw the IRIS error as a `Tool error`: a poll by `runIndex` alone, a poll whose job was gone (HTTP 404) with a known
+  `runIndex`, and a cancel whose job was gone with a captured `runIndex`. Each now returns `isError: true` with
+  `structuredContent` (`error` and the handles the caller holds) and text that says what to do next: the two polls say to poll
+  again by `runIndex` and not to re-submit, and the cancel says to poll by `runIndex` to observe the run. Any other error still
+  propagates.
+
+The Status route of the coverage service returns a superset (AD-33): every earlier field, and `lineMap` on every class that has
+a map. The corrected values of `labelLine` and `intLines` are read only by this suite, and `iris_test_coverage` has not been
+released.
+
+### Documentation
+
+- The Development README states each default where it is used: the coverage tool, the three `iris_test_status` keys, and
+  `iris_execute_tests` classified `write` and enabled by default; that `minCoverage` omitted means no verdict; the enabling
+  setting; and a CI recipe. Its entry titles, the annotations cell of `iris_execute_tests` and the prompt row are corrected.
+- The root README has a Test coverage section (the loop, a key table with default states, the guards, `minCoverage`, the export
+  path rules, the presets and the prompt), and the payload table is re-measured.
+- `tool_support.md` has a note for this story, and its row for `iris_execute_tests` says `write`, enabled by default.
+- The earlier sentence on `#dim` lines is corrected in place, and so is the earlier sentence that called `iris_execute_tests` a
+  read.
+
+### Tests
+
+- **The Epic 40 capstone gate (`epic40-capstone-gate.test.ts`).** It runs in the default suite and in the prepublish roster,
+  and drives the built Development and Administration servers over stdio in one disposable namespace. Its rows pin the
+  `tools/list` annotations and the rendered prompt, the summary and verdict, the re-attach by handle, the Cobertura file against
+  the pinned content model (no DTD file is vendored), the three class-source fixes, and the refusal of a run while a monitor
+  session the suite did not start is active, which leaves that session untouched. It starts each row with the monitor idle and
+  ends it with the monitor idle and no ownership node.
+- OS tests pin the new head of the class-source map, the exact labels of long names and of names that begin with a percent
+  sign, the kept `#dim` shapes, the `=` in a comment and the preprocessor-line rule, each mapped line against the INT text it
+  maps to; unit tests pin the stale rule over the Status record with and without `lineMap`, the three
+  error results of `iris_test_status`, the annotations, and the prompt text.
+
+### Known limits
+
+- A class compiled without a debug line map, if a compile qualifier allows one, would read `not-up-to-date`: a false FAIL in the
+  direction of caution, never a false PASS. One probe of a newly created class found no line map right after its compile, once;
+  about 30 later runs did not repeat it, and its cause is not known. A forced compile (flags `ck`) rebuilds the map.
+- `RtnLabel` and `^rMAP` were verified on one IRIS version only. Earliest IRIS version verified: 2026.2 build 221U.
+
+## [Pre-release — 2026-10-18] — Story 40.3: TestProduction runs
+
+No tool, action or governance key is added, so no tool count moves (the Development server stays at 32 package tools, 33
+advertised; the suite at 110 package tools, 115 advertised). The prompt pack stays at 13 prompts, the `core` preset at 14
+package tools, and the frozen governance baseline at hash `1e62c5ad5bf7` (141 keys). The refusal-code catalog grows from 9 to
+10 codes. `BOOTSTRAP_VERSION` moves from `06b8b83fc319` to `845e95f6e726`, because `REST/UnitTest.cls`, `REST/Coverage.cls`,
+`REST/Dispatch.cls` and `Coverage/Job.cls` changed (the bootstrapped service stays at 35 classes).
+
+### Added
+
+- **A TestProduction guard on `iris_execute_tests` and `iris_test_coverage`.** `%UnitTest.TestProduction` stops, and when it
+  will not stop force-stops and cleans, any production in the namespace that is not stopped before it starts its own, so a
+  run of such a test silently stopped another user's production on a shared instance while the tool reported "passed". The
+  decision is now made on the IRIS side before anything runs, by one function (`ExecuteMCPv2.REST.UnitTest:ProductionGuard`)
+  that both tools use. It runs under Ens's own production lifecycle lock (`^Ens.Runtime`, five seconds to take it) and says
+  `proceed` when the namespace's production is stopped or is one of the productions the run's TestProduction tests declare
+  (their `PRODUCTION` parameter), and `busy` otherwise, including when the state cannot be read. A run is guarded when any test
+  class it will run is a TestProduction subclass, at package, class and method level (a method-level run of such a class is
+  guarded whatever the method). On the coverage path those are the classes its runner runs, judged by their compiled classes:
+  every class of a package, and the target itself when a package-level target holds no test class (the runner then runs it as
+  a class). A test class is recognized under any name the class dictionary accepts, a letter without case (a CJK one, for
+  example) included: `ExecuteMCPv2.Coverage.Job:IsClassName`, the guard's name check, now applies `%Dictionary.Classname`'s
+  own rule. A run with no TestProduction test never reads Ens state and is byte-identical to before.
+- **`PRODUCTION_BUSY`, a refusal code.** The catalog goes from 9 to 10 codes. The refusal is `isError: true` with
+  `namespace`, `state`, `testProductions` (`class` and `production`) and, when the state was read, the running `production`,
+  or else `state: "Unknown"` and `error`. Nothing is run or queued, no run id is allocated, and that production is left
+  untouched; the text names it and tells the caller to run the tests once it has stopped or to stop an interrupted run's
+  leftover with `iris_production_control`. **Default state:** `iris_execute_tests` stays enabled by default (a baseline key,
+  classified `write`), and `iris_test_coverage` stays a write, DEFAULT-DISABLED; the guard has no switch and adds no key.
+- **A read route, `GET /dev/test/production?target=&level=&namespace=`.** It returns `{decision, namespace, testProductions,
+  production?, state?, stateCode?, error?}` and is additive (AD-33). `iris_test_coverage`'s `Start` route gains the outcome
+  `production-busy`, which carries the same fields; every earlier request and outcome is unchanged.
+
+### Changed
+
+- **A sanctioned change on a frozen key (orchestrator decision #56, AD-15).** `iris_execute_tests` now asks the guard before
+  `ensureUnitTestRoot`, the counter read and `POST /work`. A 404 from the route (the ExecuteMCPv2 service is absent, or
+  predates this story) means the run goes ahead exactly as before, so **a run against a server without the guard is unguarded**;
+  any other guard failure ends the call as today's pre-queue errors do, with nothing queued. The tool descriptions of
+  `iris_execute_tests` and `iris_test_coverage` gain one sentence about the guard, and `pnpm gen:tools-list-snapshot --force`
+  regenerated the `tools/list` snapshot (orchestrator decision #29): it differs only in those two descriptions. `POST /tests`
+  (`RunTests`, which no tool calls) is not guarded.
+- **`iris_test_coverage` refuses a `target` with an empty package or class part.** A target such as `:` or `:TestSomething` is
+  rejected by the tool's schema and by the service's request validation, before any namespace switch, run id, run record,
+  monitor session or production action. The runner reads such a spec as every compiled test class under `^UnitTestRoot`, which
+  the TestProduction guard (it asks about the class part) cannot check. The advertised `tools/list` schema is unchanged.
+- **`iris_execute_tests` refuses a method-level target whose method segment holds `;`, `,` or `^`.** The work queue writes the
+  method into `%UnitTest.Manager`'s test spec, which reads `;` as more classes, `,` as more specs and `^` as setup code to run,
+  so `MyApp.Tests.PlainTest:TestX;MyApp.Tests.ProdTest` ran a class the TestProduction guard never inspected (it asks about the
+  class before `:`), and a `^` ran code that is not a test. Such a target is now the usual `Malformed method-level target`
+  result, before the guard is asked and before anything is queued; a method segment with one method name is unchanged.
+- **The suite never stops a production (orchestrator decision #58).** Ens keeps no record of who started a production, so a
+  production that a failed, cancelled or killed TestProduction run left behind cannot be told apart from one someone started
+  on purpose: it is refused and named like any other, and the caller stops it. The test's own production is run over, because
+  `%UnitTest.TestProduction` stops and restarts it itself.
+
+### Known limits
+
+- The decision is taken under Ens's lifecycle lock, but `%UnitTest.TestProduction` starts its production later, in the test
+  process, after the user's hooks (orchestrator decision #57). A production another process starts in that window is still
+  stopped.
+- A run against a server without the guard route is unguarded (above). So is a run in a namespace that cannot see the
+  `ExecuteMCPv2` package (no `%ALL` package mapping, as after a manual setup) or holds its own copy of an earlier build, one
+  without `ExecuteMCPv2.REST.UnitTest:ProductionGuard`: the guard cannot run there, and the route answers `proceed` with no
+  TestProduction tests, as for a namespace that cannot be switched to. `iris_test_coverage` is refused there instead, with an
+  error and nothing started.
+- A production already running under a name one of the run's tests declares is treated as that run's own and is stopped by the
+  run, whoever started it: by its own test, which restarts it for the test, or by another TestProduction test of the same run.
+  One that does not stop within the test's `MAXWAIT` is force-stopped and cleaned with `CleanProduction(1)`, which also deletes
+  its persistent application data, and the run leaves it Stopped: a developer's own run of that production, or a concurrent run
+  of the same test, is not protected.
+- A guard read that fails for any reason other than a 404 (an HTTP 5xx or 403, a connection error) ends the call before anything
+  is queued, even for a run with no TestProduction test.
+- A cancelled, killed or erroring TestProduction run leaves its production running.
+- Privileges were verified under `_SYSTEM` only; a lower-privileged account gets IRIS's own error text.
+- The live gate runs TestProduction tests only in a disposable namespace that the one node
+  `^%SYS("Ensemble","InstalledNamespace",<namespace>)` lets compile them (orchestrator decision #59; `EnableNamespace` is never
+  called); it clears the node before it removes the namespace.
+
+Earliest IRIS version verified: 2026.2 build 221U (`%UnitTest.TestProduction` and `Ens.Director:GetProductionStatus`).
+
+## [Pre-release — 2026-10-18] — Story 40.2: Coverage reports and targets
+
+No tool is added, so no tool count moves (the Development server stays at 32 package tools, 33 advertised; the suite at 110
+package tools, 115 advertised). The prompt pack stays at 13 prompts, the `core` preset at 14 package tools, and the frozen
+governance baseline at hash `1e62c5ad5bf7` (141 keys). `iris_test_status` gains one action, `export`, and so one governance
+key. `BOOTSTRAP_VERSION` moves from `14a4cba6504a` to `06b8b83fc319`, because `Coverage/Job.cls`, `Coverage/Runner.cls`
+and `REST/Coverage.cls` changed (the bootstrapped service stays at 35 classes).
+
+### Added
+
+- **Coverage over the class source.** Every coverage result (from `iris_test_coverage` and from `iris_test_status` with a
+  `coverageRunId`) now reports, per class and per method, the executable, covered and uncovered lines of the class document
+  (`coverage.classes[].source`, with `coverage.source` the total), the methods in the order the class declares them, and a
+  count of the lines the compiler generated in the class, which are never reported as source lines. The text adds one line per
+  class and one indented line per method with an uncovered line. The mapping is the compiler's own
+  (`%Studio.Debugger:INTLine` per method body line), so a `#define` line, a continuation line of a multi-line statement, a lone
+  `}` and a comment line are never executable; a method generator, a method not written in ObjectScript (a `Language` set on the
+  method or on the class) and a method whose layout is not where IRIS stores it carry a `reason` and no lines; a method that
+  compiles to no INT code (a constant return) has no lines and no `reason`. A method's lines are the body
+  lines that map after its own INT label line, and a preprocessor line (`#dim` that initializes nothing, `#define`, `#sqlcompile` and the like) is never a class line (a `#dim` that holds an `=` outside parentheses, string literals and comments compiles to a `Set` and is one, since Story 40.4). **A statement that spans
+  several lines but compiles to one INT line is reported once, at the first line that maps to its code: for a multi-line embedded
+  SQL statement, the line after the `&sql(` line.** A class without a class-source result has `source.reason`
+  `not-up-to-date` (its definition changed after it was compiled, or its compiled line map is gone: a documentation-only edit
+  saved after the compile leaves IRIS calling the class up to date, a default compile skips it, and a forced compile, flags `ck`,
+  rebuilds the map), `not-compiled` (it has no compiled definition at the end of
+  the run) or `unavailable` (its map could not be built). **Class line numbers are those of the document `iris_doc_get` returns for the class**, which
+  IRIS stores in its own layout, so a file uploaded in another layout can number its lines differently. Earliest IRIS version
+  verified: 2026.2 build 221U.
+- **`minCoverage`, a target with a verdict.** `iris_test_coverage` takes an optional `minCoverage` (0 to 100), stored with the
+  run, and a completed result then carries `coverage.verdict` and the text line `Coverage target 90%: FAIL (88.89% overall);
+  failing: ...`. The comparison is unrounded, a class that was not measured (or has no class-source result) fails with its
+  reason, and a failing verdict is `isError: false`. `iris_test_status` reproduces the summary and the verdict from the handle
+  alone.
+- **`iris_test_status` `action: "export"`: a Cobertura XML file for CI tools.** **Default state: DEFAULT-DISABLED.** It is a
+  post-foundation key, `iris_test_status:export`, truthfully classified `write` (it writes a local file), outside the frozen
+  baseline, with no `defaultEnabled` marker. Enable it with `IRIS_GOVERNANCE={"global":{"iris_test_status:export":true}}`. It
+  takes the run's `coverageRunId` and an absolute `outputPath` (the path guard of `iris_doc_export`, now shared: absolute, no `..`
+  segment, ending `.xml`), and an optional `sourceRoot`. Only a completed run with complete coverage is written; any other run is
+  an error that names its status and writes nothing, and so is a completed run in which no class has a class-source result or no
+  class has an executable class line (an empty file would read to a CI tool as 100% covered). CI tools lay the reported line numbers over the repository's own `.cls`
+  files, which must be in the layout IRIS stores (as `iris_doc_export` writes them). The parent directories are created and an
+  existing file is overwritten. The
+  document validates against the published `coverage-04.dtd`. `iris_test_coverage` writes no file, and the annotations of both
+  tools are unchanged.
+- **A session that did not load every listed routine runs no test (DW-598).** The Line-by-Line `Start` skips, without an error, a
+  routine that has no object code. The test process now compares the routines the session loaded with the run's list before any
+  test runs; on a mismatch it stops its own session at once (only after proving it is the run's; a session that monitors no
+  routine at all is proven by its process scope alone), no test runs, and the run ends `failed` with an `error` that names the
+  routines that were not loaded.
+
+### Changed
+
+- **The coverage result and the Status route are supersets (AD-15, AD-33).** The result gains `source` on each class and on
+  `coverage`, and `verdict`; the IRIS-side Status route returns `minCoverage` and `sources` (the class-source map) in addition
+  to everything it returned, and `Start` accepts every 40.1 request unchanged. A Status record without `sources` gives exactly
+  the 40.1 result and text.
+- **The tools-list snapshot** was regenerated with `pnpm gen:tools-list-snapshot --force` (decision #29); it differs only in the
+  `iris_test_coverage` entry (the `minCoverage` property and the description) and the `iris_test_status` entry (the `export`
+  action, `outputPath` and `sourceRoot`, and the description).
+- `iris_doc_export`'s path guard moved, unchanged, to a shared module that `iris_test_status` also uses; the tool's messages are
+  byte-identical.
+- DW-596 is closed with evidence: a terminal run record of the largest size a run can hold (200,000 INT lines) is read in well
+  under 2 seconds, so the 200,000-line cap stands.
+
+## [Pre-release — 2026-10-17] — Story 40.1: Line coverage probe and engine
+
+One tool is added, `iris_test_coverage` (the Development server goes from 31 to 32 package tools, 32 to 33 advertised; the
+suite from 109 to 110 package tools, 114 to 115 advertised). The prompt pack stays at 13 prompts, and the frozen
+governance baseline stays at hash `1e62c5ad5bf7` (141 keys). `BOOTSTRAP_VERSION` moves from `08b8adeaadc6` to
+`14a4cba6504a`, because the bootstrapped service gains three classes (32 to 35) and `Dispatch.cls` and `UnitTest.cls`
+changed.
+
+### Added
+
+- **`iris_test_coverage`: line coverage of a unit-test run.** It runs the tests of a `target` while an IRIS Line-by-Line
+  session measures the INT routines of 1 to 50 listed `classes`, and returns the test summary and, per routine, its
+  executable lines, covered lines, percent and the executable and covered line ranges, plus the classes it could not
+  measure (`not-compiled`, `no-routines`, `no-int-source`). **Default state: DEFAULT-DISABLED.** It is a post-foundation
+  key, truthfully classified `write` (it starts an instance-wide monitor session, runs test code and prunes its own older
+  run records; annotations `readOnlyHint` false, `destructiveHint` true, `idempotentHint` false, `openWorldHint`
+  false), outside the frozen baseline, with no `defaultEnabled` marker. Enable it with
+  `IRIS_GOVERNANCE={"global":{"iris_test_coverage":true}}`. The wait budget is the `timeout` argument, then
+  `IRIS_TEST_TIMEOUT`, then 120 s, capped at 3600 s. Earliest IRIS version verified: 2026.2 build 221U. **Only the
+  process that runs the tests is measured** (and the suite's own supervisor process, which runs only the suite's own
+  `ExecuteMCPv2` classes); code that runs in processes the tests start is not counted. The line numbers are INT line
+  numbers: INT line n is line n+1 of the document `iris_doc_get` returns for `<routine>.int`, whose line 1 is the
+  `ROUTINE` header. The companion's cancel is its own key, `iris_test_status:cancel`, also DEFAULT-DISABLED.
+- **One run at a time, instance-wide, and the new refusal code `MONITOR_BUSY`.** The Line-by-Line monitor is one per
+  instance. While any Line-by-Line or PERFMON session runs, the tool is refused with `MONITOR_BUSY` (`owner` `suite`,
+  with the running run's `coverageRunId`, `pid`, `startedAt` and `namespace`; or `owner` `foreign`) and nothing is
+  started; a session the suite did not start is never touched, including a session of all processes. A run killed in
+  flight releases the monitor (the supervisor job stops the session), and a session whose two jobs are both dead is
+  reclaimed by the next run. The test process and the supervisor release the session one at a time, each only after
+  proving it is the run's own (scoped to the run's two processes, with the run's routines). A run whose line
+  counts could not be read ends `failed` with `reason` `counts-unreadable` (IRIS's text in `error` and `readError`), and a
+  run whose session could not be stopped ends `failed` with `reason` `release-failed`; both are `isError: true` and
+  carry the test summary and any coverage that was read (when none was read, `readError` says why).
+- **Three ExecuteMCPv2 routes and three bootstrapped classes** carry the run: `POST /dev/test/coverage`,
+  `GET /dev/test/coverage?id=` and `POST /dev/test/coverage/cancel`, handled by `ExecuteMCPv2.REST.Coverage`, with the
+  libraries `ExecuteMCPv2.Coverage.Job` and `ExecuteMCPv2.Coverage.Runner`. Every existing route is unchanged (AD-33).
+  `POST /tests` has no tool caller and its class comment now says so.
+- **`TOOL_PAIRS`** gains `iris_test_coverage` / `iris_test_status`: they stay co-visible in every preset. The `core`
+  preset excludes `iris_test_coverage` (it stays at 14 package tools, 15 runtime tools) and `developer` includes it.
+
+### Changed
+
+- **`iris_test_status` takes an optional `coverageRunId`.** It polls or cancels a coverage run by its handle alone (the
+  run's own namespace is used). Combining it with `jobId` or `runIndex`, or passing a namespace other than the run's,
+  is a validation error. The tool's two governance keys, `poll` and `cancel`, and their classification are unchanged,
+  and so is every existing call. Its description gains one sentence.
+- **The tools-list snapshot was regenerated with `pnpm gen:tools-list-snapshot --force`.** It differs from the old one
+  only in the new `iris_test_coverage` entry and in `iris_test_status`'s new property and description (AD-15).
+- **The PHI data policy scope table is exhaustive as of 2026-10-17** (moved from 2026-10-16) and classifies
+  `iris_test_coverage` as `residual`, like `iris_execute_tests` and `iris_test_status`.
+
+## [Pre-release — 2026-10-17] — Story 40.0: Epic 39 deferred cleanup
+
+Four ledger entries are closed (DW-584, DW-585, DW-586 and DW-587). No tool, action, governance key, preset row,
+annotation, input schema or environment variable is added, so no default state and no tool count moves: the suite stays
+at 109 package tools (114 advertised), the prompt pack stays at 13 prompts, the Interoperability `core` roster stays at
+12 runtime tools, the Operations `core` roster stays at 10, and the frozen governance baseline stays at hash
+`1e62c5ad5bf7` (141 keys). `BOOTSTRAP_VERSION` moves from `7d12cd8b3a1e` to `08b8adeaadc6`, because `Monitor.cls` and
+`Interop.cls` changed.
+
+### Changed
+
+- **The `trace-message-flow` prompt reports the reason for withheld text under `block` (DW-587).** Under the `block`
+  data policy, step 4 tells the agent that the text of each `Error on message` warning and its `%%` diagram line is
+  replaced by a reason, step 5 that each Event Log entry's `text` is withheld with its `textPolicy` reason, and both say
+  to report that reason to the user and never to read the text another way (for example through SQL, global or document
+  tools). Step 6 asks the summary to say where the log or diagram text was withheld and to give its reason instead of the
+  text. The name, title, arguments, description and the six steps are unchanged. Sanctioned change (AD-15, orchestrator
+  decision #36).
+
+### Fixed
+
+- **`iris_metrics_interop` counts Error entries over the last 24 hours in UTC (DW-584).** `errorCount24h` counted
+  Warning entries (type 3, where Error is 2), and its window started at midnight of the previous local day because the
+  cutoff was the date-only text of `$Horolog - 1`, compared with UTC times: it covered 24 to 48 hours, in local time.
+  The count is now the Error entries (type 2) over the 86,400 seconds before the call, taken from `$ZTimeStamp`. By
+  orchestrator decision OD-1, `messageCount24h` uses the same cutoff, so the two values in one result cover one window.
+  Sanctioned change (AD-15). It is a read, enabled by default.
+- **The `type` filter of `iris_production_logs` maps a display name to its stored number (DW-585).** The filter bound
+  the name (`Error`) to the stored type number in logical mode, so `type: "Error"` matched nothing. The Event Log route
+  now maps `Assert`, `Error`, `Warning`, `Info`, `Trace` and `Alert` to 1 to 6; any other value, including a number,
+  is bound as before, so an older request (`type=2`) still returns the same entries (AD-33). Sanctioned change (AD-15).
+  It is a read, enabled by default.
+- **DW-586 is closed with evidence and no code change.** The diagram generator's own `Generation failed for session N:`
+  text carries only a SQL schema error or a system error name and location, and no reachable code path puts message
+  content in it, so it is not withheld under `block`.
+
+### Documentation
+
+- **The Operations README** states what `errorCount24h` and `messageCount24h` count, in UTC (a read, enabled by default).
+- **The Interoperability README** shows the real `iris_production_logs` entry (`id`, `timestamp`, `type` as a number,
+  `itemName`, `text`, and `sourceClass`, `sourceMethod` and `sessionId` when they hold a value) and says `type` takes a
+  display name (a read, enabled by default). Its prompt row and the suite
+  README's say that, under `block`, the reason for withheld diagram error text and Event Log text is reported the same
+  way and never read another way.
+- **`tool_support.md`** has a Story 40.0 note.
+
+### Tests
+
+- **`story-40-0-burn-down-live-gate.test.ts`** drives the built dev, admin, interop and ops servers over the SDK client
+  on two disposable namespaces: fixture xi (`Story400.Seed`, ten Event Log rows and three headers placed relative to the
+  time of the seed) in a mapping-only interop namespace, and a bare one. It pins the corrected counts, all six type
+  names against a hand-written SQL oracle read from the live `Ens.DataType.LogType` lists, the raw route for a number
+  and an unknown value, the keys of the metrics result and their order, the counts the route's collector computes
+  with its process at time zones 420 and -600, and the not-configured namespace. It is listed in the prepublish roster
+  and the arming guard, which learns `extraDriven` for the ops dist and checks it against the dists each gate spawns.
+- **`story-40-0-qa-live-gate.test.ts`** drives the same built servers on two more disposable namespaces: an Error row
+  and a header 2 minutes inside and outside the 24-hour window on the wire, the edge values of the `type` and `count`
+  filters over raw HTTP against hand-written SQL, a mapped namespace with no rows, and the `trace-message-flow` prompt
+  through its own spawn of the built interop entry. It is listed in the prepublish roster and the arming guard.
+- **`ExecuteMCPv2.Tests.EventLogMetricsTest`** pins `UtcCutoff` at a fixed instant and under two process time zones,
+  and `LogTypeValue` against the live `Ens.DataType.LogType` lists. **`ExecuteMCPv2.Tests.EventLogMetricsEdgeTest`**
+  pins the day, year and leap-day arithmetic of `UtcCutoff`, the cut of a fraction past the millisecond digits, and
+  `LogTypeValue` on 22 values that are not an exact display name.
+- **`story-40-0-doc-claims.test.ts`** pins each documented row with its default state, this section and the changeset.
+  The prompt tests pin the three step texts, and the Story 39.7 doc-claims test pins its bootstrap move as history.
+  **`changelog-bootstrap-move.test.ts`** checks that the newest section naming a `BOOTSTRAP_VERSION` move ends at the
+  version the committed embed carries. `eventLogOracle` moves from the 39.7 gate to `header-row-oracle.ts`.
+
 ## [Pre-release — 2026-10-17] — Story 39.7: Epic 39 burn-down
 
 Five ledger entries are fixed (DW-569, DW-571, DW-572, DW-576 and DW-583). No tool, action, governance key, preset row,
@@ -1509,10 +1931,11 @@ Each of the 5 server packages declares an explicit `core`/`developer` roster
 (`assertPresetCoverage`, throws naming tool + preset on any gap) and at test time, so a future tool
 added without a visibility disposition cannot ship silently mis-classified. `iris_env_diff` /
 `iris_env_promote` are a declared pair, always co-visible in every preset (as of Story 38.4,
-`iris_doc_get` / `iris_doc_edit` are a second pair, and as of Story 39.5 `iris_message_search` /
-`iris_message_body` are a third). Roster summary (runtime
-tool counts, as of Story 39.5): `full` 32/27/25/22/8 (dev/admin/interop/ops/data), `core`
-15/13/12/10/8, `developer` 32/11/25/10/8 — every `core` server lands at about 13 runtime tools, a
+`iris_doc_get` / `iris_doc_edit` are a second pair, as of Story 39.5 `iris_message_search` /
+`iris_message_body` are a third, and as of Story 40.1 `iris_test_coverage` / `iris_test_status` are a
+fourth). Roster summary (runtime
+tool counts, as of Story 40.1): `full` 33/27/25/22/8 (dev/admin/interop/ops/data), `core`
+15/13/12/10/8, `developer` 33/11/25/10/8 — every `core` server lands at about 13 runtime tools, a
 guideline and not a hard limit (L-4; dev is at 15).
 Measured `tools/list` payload bytes/tokens per server × preset are recorded in the suite README's
 [Tool Visibility Presets](README.md#tool-visibility-presets) section (up to ~58% fewer bytes under

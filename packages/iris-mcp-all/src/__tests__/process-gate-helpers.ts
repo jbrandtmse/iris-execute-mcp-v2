@@ -201,11 +201,31 @@ export interface WireTool {
   annotations?: Record<string, unknown>;
 }
 
+/** One entry of `prompts/list`. */
+export interface WirePrompt {
+  name: string;
+  title?: string;
+  arguments?: Array<{ name: string; required?: boolean }>;
+}
+
+/** A rendered prompt as `prompts/get` returns it. */
+export interface WirePromptResult {
+  messages: Array<{ role: string; content: { type: string; text?: string } }>;
+}
+
+/** A `prompts/get` request: `arguments` is sent exactly as given, so an omitted one stays omitted on the wire. */
+export interface WirePromptRequest {
+  name: string;
+  arguments?: Record<string, string>;
+}
+
 interface SdkClient {
   connect: (transport: unknown) => Promise<void>;
   close: () => Promise<void>;
   callTool: (params: { name: string; arguments: Record<string, unknown> }) => Promise<WireToolResult>;
   listTools: () => Promise<{ tools: WireTool[] }>;
+  listPrompts: () => Promise<{ prompts: WirePrompt[] }>;
+  getPrompt: (params: WirePromptRequest) => Promise<WirePromptResult>;
 }
 
 /** A connected client of one spawned server. */
@@ -217,6 +237,9 @@ export interface WireSession {
   /** Call a tool exactly as given (the discovery tool takes no profile argument here). */
   raw: (name: string, args: Record<string, unknown>) => Promise<WireToolResult>;
   listTools: () => Promise<WireTool[]>;
+  listPrompts: () => Promise<WirePrompt[]>;
+  /** Render a prompt; a refusal rejects with the SDK's error (its `code` is the JSON-RPC error code). */
+  getPrompt: (request: WirePromptRequest) => Promise<WirePromptResult>;
   close: () => Promise<void>;
 }
 
@@ -276,6 +299,8 @@ export async function openWireSession(
     callOn: (server, name, args) => client.callTool({ name, arguments: { server, namespace, ...args } }),
     raw: (name, args) => client.callTool({ name, arguments: args }),
     listTools: async () => (await client.listTools()).tools,
+    listPrompts: async () => (await client.listPrompts()).prompts,
+    getPrompt: (request) => client.getPrompt(request),
     close: () => client.close().catch(() => {}),
   };
 }

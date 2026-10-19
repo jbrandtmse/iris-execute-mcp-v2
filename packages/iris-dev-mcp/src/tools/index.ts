@@ -43,6 +43,7 @@ import {
   executeTestsTool,
 } from "./execute.js";
 import { testStatusTool } from "./test-status.js";
+import { testCoverageTool } from "./test-coverage.js";
 
 /** All tool definitions registered by the iris-dev-mcp server. */
 export const tools: ToolDefinition[] = [
@@ -77,4 +78,5 @@ export const tools: ToolDefinition[] = [
   testStatusTool,
   docEditTool,
   sqlQueryTool,
+  testCoverageTool,
 ];

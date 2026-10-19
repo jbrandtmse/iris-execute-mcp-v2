@@ -145,10 +145,10 @@ describe("Story 39.4: the root README names the searchTable action, its default 
     expect(paragraph).toContain("a read, enabled by default");
   });
 
-  it("the payload table says it was last re-measured at a Story 39.x, no earlier than the story that moved its bytes", () => {
-    const match = /Last re-measured at Story 39\.(\d+) \(`pnpm measure:tools-payload`/.exec(squash(readme));
+  it("the payload table says it was last re-measured at a Story 39.x or 40.x, no earlier than the story that moved its bytes", () => {
+    const match = /Last re-measured at Story (39|40)\.(\d+) \(`pnpm measure:tools-payload`/.exec(squash(readme));
     expect(match, "the re-measured sentence").not.toBeNull();
-    expect(Number(match?.[1])).toBeGreaterThanOrEqual(4);
+    expect(match?.[1] === "40" || Number(match?.[2]) >= 4).toBe(true);
   });
 });
 
@@ -223,8 +223,8 @@ describe("Story 39.4: tool_support.md states the note, the scope row and the cou
     expect(toolSupport.split("\n").filter((line) => line.startsWith("| `iris_message_search` |"))).toHaveLength(1);
   });
 
-  it("counts the suite at 109 package tools and 114 advertised (Story 39.5 added one)", () => {
-    expect(toolSupport).toContain("| **Total** | **20** | **84** | **5** | **109** | **114** |");
+  it("counts the suite at 110 package tools and 115 advertised (Story 39.5 added one; Story 40.1 added iris_test_coverage)", () => {
+    expect(toolSupport).toContain("| **Total** | **20** | **85** | **5** | **110** | **115** |");
   });
 });
 

@@ -5404,6 +5404,15 @@ The Epic 39 burn-down story was chartered at the epic's burn-down gate on 2026-1
 - performance profiling;
 - G25 (INT-offset mapping as a standalone tool).
 
+### Story 40.0: Epic 39 Deferred Cleanup
+
+This is the `/epic-cycle` retro-review gate story, inserted on 2026-10-17 during the unattended run. Epic 39 has no retrospective; the Lead directed a skip. Epic 39's burn-down story (39.7) left four ledger entries for this gate, and this story handles all four. Every other non-terminal entry is already owned by a named later story.
+
+- DW-584: the `iris_metrics_interop` 24-hour error count (`Monitor.cls`) counts Event Log rows with `Type = 3`, which is Warning (Error is 2 in `Ens.DataType.LogType`), and compares a local `$Horolog` cutoff with the UTC `TimeLogged`. Probe first with synthetic Event Log rows in a disposable namespace, then count errors against a UTC cutoff. Pin both against a live oracle (Rule #36).
+- DW-585: the `iris_production_logs` `type` filter probably matches nothing. The EventLog handler binds the display name (`Error`) to `Type = ?` in logical select mode, but `Type` is stored as an integer. Probe with synthetic rows in a disposable namespace. If confirmed, map each display name to its logical value and pin every type; if the filter works, close with evidence.
+- DW-586: under `block`, `iris_message_diagram` passes the per-session `Generation failed for session N: <text>` text through unchanged, in `warnings[]` and in the Mermaid `%%` line. Only the Correlator error texts are rewritten today. Probe what `<text>` can carry; if it can carry message-derived content, withhold it under `block` the same way.
+- DW-587 (decided by the orchestrator, decision #36): under `block`, the `trace-message-flow` prompt gives agents no rule for withheld Event Log and diagram error text. Give the steps that ask what the error log and the diagram say the same report-the-reason, never-read-it-another-way rule that step 3 has for bodies. This is a sanctioned AD-15 prompt-body change: regenerate anything generated from the prompt and record it in the CHANGELOG.
+
 ### Story 40.1: Line Coverage Probe and Engine
 
 This story ships per-routine INT-line coverage, with a complete response shape. 40.2 owns class-source mapping, aggregation, Cobertura and targets (Rule #52).
@@ -5439,6 +5448,9 @@ This story ships per-routine INT-line coverage, with a complete response shape. 
 - **AC 40.2.2** — Summary: per class and per method, the coverage percentage and the uncovered line ranges, in `structuredContent` and in a compact text form.
 - **AC 40.2.3** — Cobertura XML is written to a caller-supplied local path, following the path conventions of `iris_doc_export`. The XML validates against the Cobertura DTD, and one known file is checked round-trip.
 - **AC 40.2.4** — A `minCoverage` target gives a pass/fail verdict per class and overall. The verdict never turns a completed test run into a tool error.
+- DW-595: the coverage runner reads the Line-by-Line counts right after `RunTest` with no readiness check, so a very fast suite could silently read zero counts. Probe first (start a session and read the same process's counts at once); add a readiness check if the probe shows the delay, otherwise close with evidence. (ledger; routed by harvest 2026-10-17)
+- DW-596: the coverage `Status` route returns one nested pair per counted line and per command line on every terminal read, and the 200,000-line cap was never measured on that path. Measure time, bytes and memory at the cap before building the summary on that payload, then fix or close with evidence. (ledger; routed by harvest 2026-10-17)
+- DW-598: if a measured routine is deleted or recompiled between the start request and the runner's `Start`, IRIS starts the session with fewer routines and no error. Both release proofs then fail, and the next start deletes the ownership node, leaving the suite's own session running with no owner record. That blocks every later coverage run and other projects' Line-by-Line use until someone stops it by hand. Compare the routine count right after `Start` and stop at once on a mismatch; pin it live. (ledger; routed by the 40.1 rework re-review 2026-10-18)
 
 ### Story 40.3: TestProduction Runs
 
@@ -5461,6 +5473,21 @@ G24.
   - `iris_test_status` returns `structuredContent` (research [56]);
   - `iris_execute_tests`' `readOnlyHint`/`idempotentHint` contradict its write classification and its "do not re-submit" contract. This is DW-498; the Epic 40 gate is recommended to route it here.
 - **AC 40.4.4** — Capstone (Rule #21), in the default suite and listed in the live-gate roster: a coverage run over a fixture yields the expected summary and a valid Cobertura file, and a pre-started monitor session causes a refusal. It is proven red by removing the guard (Rule #59).
+- DW-601: a freshly compiled class whose methods with INT code hold only `#;` or `#dim` lines reads `not-up-to-date` and fails the verdict, and a forced compile cannot clear it. The class data IRIS returns matches a genuinely stale class; only `$Data(^rMAP(<class>))` differs (10 when fresh, 0 when stale). Use that as the stale discriminator, recorded as raw data by `SourceMap` (the bootstrap moves), and pin both cases live. This also closes the 31-character method-name case, which can otherwise report a class at `line-rate="1"`. (ledger; routed by the 40.2 rework re-review 2026-10-18)
+- DW-602: `#dim tSC As %Status = $$$OK` compiles to an executable `Set` but is dropped from class coverage and counted as generated. That breaks AC 40.2.1's executable rule for a common idiom and can move a percent across `minCoverage`. Count an initializing `#dim` as an executable line at its own class line, and correct the README and CHANGELOG sentence that calls a `#dim` "never a class line". Pin it live. (ledger; routed by the 40.2 rework re-review 2026-10-18)
+
+### Story 40.5: Epic 40 Burn-down
+
+This is the `/epic-cycle` burn-down story, chartered on 2026-10-19 at Epic 40's burn-down gate during the unattended run. Epic 40 is the last epic of the 38–40 range. So every ledger entry its stories left with the burn-down owner is closed here, together with three prompt-text items from the closing decision sheet (orchestrator decisions #65–#67). That leaves the wave-6 branch with no Epic 40 residue. Every fix that changes behavior is proven live or by mutation (Rule #48).
+
+- DW-591: `pnpm gen:bootstrap` rewrites `bootstrap-classes.ts` even when its content is unchanged (`scripts/gen-bootstrap.mjs:180`, unconditional `writeFileSync`). An idempotence re-run after a build then leaves the shared dist older than its source, and every armed live gate refuses as stale until shared is rebuilt; this cost time in every Epic 40 story. Write only when the content differs, and pin both cases (an unchanged run leaves the mtime alone; a changed one writes).
+- DW-589: `iris_alerts_manage` reset builds `clearedAt` from the local `$Horolog` and appends a literal `Z` (`Monitor.cls` ~960), so on a non-zero time zone it labels local time as UTC (the DW-584 defect class). Use `$ZTimeStamp`, as `UtcCutoff` does, and pin it under a per-process `$ZTimeZone` (the bootstrap moves).
+- DW-597: `ExecuteMCPv2.REST.UnitTest:BuildTestSpec` joins a package's classes as `:A;:B`, which `RunTest` reads as class A with a method named B, so `POST /tests` with level package runs no test. Fix it at the source, so `REST.Coverage.TestSpec`'s rewrite can go or stay as a no-op. Pin a package run. `POST /tests` still has no tool caller (decision #40).
+- DW-603 (MED, Rule 2): the Story 40.1 and 40.2 coverage gates and their QA gates each declare their own copy of the instance-wide monitor helpers (`monitorState`, `coverageGlobal`, `expectMonitorIdle`, `releaseLeftoverSession`), which `testproduction-gate-helpers.ts` now shares. Move them onto the shared module with no behavior change; the copy guard learns the old names.
+- DW-607: `ProductionGuardTest`'s guard-and-dictionary agreement loop takes its expected value from `%Dictionary.Classname:IsValid`, the same function `IsClassName` calls, so it cannot fail. Take the expected value for non-existent names from `$System.OBJ.IsValidClassname`, or drop the loop and keep the CJK assertions.
+- DW-590 (decided by the orchestrator, decision #65): under `block`, `recover-stuck-production` step 3 calls `iris_production_logs` with no rule to report the withheld-text reason and never read it another way. Add the rule decision #36 gave `trace-message-flow`, as a sanctioned AD-15 prompt-text change, and regenerate the skill.
+- DW-609 (decision #66): `edit-and-test-class` calls `iris_execute_tests` but says nothing about a `PRODUCTION_BUSY` refusal. Add the same note `deploy-and-test-class` got in Story 40.4 (sanctioned AD-15 prompt change), and regenerate the skill.
+- DW-610 (decision #67): `deploy-and-test-class` step 4 says a `PRODUCTION_BUSY` refusal names a running production, but the guard also refuses when the production state cannot be read. Reword step 4, and the new `edit-and-test-class` note, to cover both cases (sanctioned AD-15 prompt change). Regenerate the skills and run `gen:skills:check` and `validate:prompts`.
 
 ## Epic 41: Companion Skills & Rules Pack (added 2026-10-14)
 

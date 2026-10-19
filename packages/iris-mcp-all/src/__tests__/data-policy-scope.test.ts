@@ -48,8 +48,8 @@ function tableRows(section: string): Map<string, string> {
 }
 
 describe("the PHI data policy scope (Story 39.2, AC-6)", () => {
-  it("names 2026-10-16 as the date the classification is exhaustive as of", () => {
-    expect(DATA_POLICY_SCOPE_DATE).toBe("2026-10-16");
+  it("names 2026-10-17 as the date the classification is exhaustive as of", () => {
+    expect(DATA_POLICY_SCOPE_DATE).toBe("2026-10-17");
   });
 
   it("gives every tool name of the suite exactly one row, and no row names a tool that does not exist", async () => {
