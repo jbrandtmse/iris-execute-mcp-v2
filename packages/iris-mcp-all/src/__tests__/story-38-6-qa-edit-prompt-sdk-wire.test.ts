@@ -33,6 +33,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolveSdkEsmDir } from "./process-gate-helpers.js";
+import { stepsOf, toolTokens } from "./prompt-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -158,21 +159,6 @@ function messageText(result: WirePromptResult): string {
   expect(message.content.type).toBe("text");
   expect(typeof message.content.text).toBe("string");
   return message.content.text as string;
-}
-
-/** The distinct `iris_*` tool names a rendered prompt mentions. */
-function toolTokens(text: string): string[] {
-  return [...new Set(text.match(/\biris_[a-z][a-z0-9_]*/g) ?? [])].sort();
-}
-
-/** The numbered steps of a rendered prompt, by number: the text from `N. ` up to the next step. */
-function stepsOf(text: string): Map<number, string> {
-  const steps = new Map<number, string>();
-  for (const chunk of text.split(/\n(?=\d+\. )/)) {
-    const match = /^(\d+)\. /.exec(chunk);
-    if (match) steps.set(Number(match[1]), chunk);
-  }
-  return steps;
 }
 
 describe("Story 38.6 QA: the dev prompts through a real SDK Client over an in-memory transport (rule #46)", () => {

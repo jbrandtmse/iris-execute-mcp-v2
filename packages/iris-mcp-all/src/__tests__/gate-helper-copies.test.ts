@@ -1,7 +1,7 @@
 /**
  * DW-561 guard: no gate declares its own copy of a helper that `process-gate-helpers.ts` (or, for the
- * SQL strings, `header-row-oracle.ts`, and for the monitor and coverage-session helpers and `sleep`,
- * `monitor-gate-helpers.ts`) now exports.
+ * SQL strings, `header-row-oracle.ts`, for the monitor and coverage-session helpers and `sleep`,
+ * `monitor-gate-helpers.ts`, and for the rendered-prompt helpers, `prompt-gate-helpers.ts`) now exports.
  *
  * Scans every `*.test.ts` of this directory that imports `./process-gate-helpers.js`. A top-level
  * `function <name>(` or `const <name> =` of a replaced name fails the test, naming the file and the name,
@@ -67,6 +67,10 @@ const REPLACED_NAMES = [
   "expectMonitorIdle",
   "expectMonitorInactive",
   "releaseLeftoverSession",
+  "stepsOf",
+  "toolTokens",
+  "promptText",
+  "promptRejection",
 ] as const;
 
 /** Replaced names that are never a local variable, so a declaration at any depth is a copy. */

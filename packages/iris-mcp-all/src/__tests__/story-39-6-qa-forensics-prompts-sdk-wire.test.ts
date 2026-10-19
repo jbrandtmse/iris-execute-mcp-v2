@@ -35,6 +35,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolveSdkEsmDir } from "./process-gate-helpers.js";
+import { stepsOf, toolTokens } from "./prompt-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -189,21 +190,6 @@ async function refusalOf(call: Promise<unknown>): Promise<{ code?: number; messa
     () => undefined,
     (error: unknown) => error as { code?: number; message?: string },
   );
-}
-
-/** The distinct `iris_*` tool names a rendered prompt mentions. */
-function toolTokens(text: string): string[] {
-  return [...new Set(text.match(/\biris_[a-z][a-z0-9_]*/g) ?? [])].sort();
-}
-
-/** The numbered steps of a rendered prompt, by number: the text from `N. ` up to the next step. */
-function stepsOf(text: string): Map<number, string> {
-  const steps = new Map<number, string>();
-  for (const chunk of text.split(/\n(?=\d+\. )/)) {
-    const match = /^(\d+)\. /.exec(chunk);
-    if (match) steps.set(Number(match[1]), chunk);
-  }
-  return steps;
 }
 
 /** Assert every needle of every step is present, and that the steps are exactly `1..count`. */

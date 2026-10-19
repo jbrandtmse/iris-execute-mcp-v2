@@ -6,7 +6,10 @@
  * test while a different production runs in the namespace. The refusal either
  * names that production (`production`), or, when the namespace's production
  * state could not be read, carries `state: "Unknown"` and the reason. Both
- * refusals ran nothing, and neither tells the model to stop a production.
+ * refusals ran nothing. The named-production refusal suggests stopping that
+ * production when an interrupted test run left it running; the note asks the
+ * model to stop it only once the user confirms it is such a leftover, and to
+ * stop no production after an `Unknown` refusal.
  * Server: iris-dev-mcp.
  */
 

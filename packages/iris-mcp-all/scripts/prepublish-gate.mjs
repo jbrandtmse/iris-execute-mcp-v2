@@ -221,7 +221,7 @@ const gateTestFiles = [
   // Story40Q.* inside Q, and ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-40-0-qa-live-gate.test.ts",
   // Story 40.1: `iris_test_coverage` and the `iris_test_status` `coverageRunId` companion on the BUILT iris-dev-mcp and iris-admin-mcp dists over real stdio JSON-RPC, with raw HTTP to the
-  // coverage routes. It, the QA gate below, the two Story 40.2 gates, the two Story 40.3 gates, the Epic 40 capstone and the Story 40.4 QA gate (which follow them) are the only gates that start Line-by-Line sessions (the files run serially): it starts each row with the monitor idle and ends each row asserting it is idle, and
+  // coverage routes. It, the QA gate below, the two Story 40.2 gates, the two Story 40.3 gates, the Epic 40 capstone, the Story 40.4 QA gate and the Story 40.5 QA gate (which follow them) are the only gates that start Line-by-Line sessions (the files run serially): it starts each row with the monitor idle and ends each row asserting it is idle, and
   // terminates a process only through the fixture's MayTerminate check. Writes EXECMCPTMP401A and EXECMCPTMP401B (their database files too), Story401.* inside A, and
   // ExecuteMCPv2.Temp.Story391Fixture, which it removes.
   "src/__tests__/story-40-1-coverage-live-gate.test.ts",
@@ -277,6 +277,14 @@ const gateTestFiles = [
   // iris-dev-mcp and iris-admin-mcp dists over real stdio JSON-RPC for the fixtures, and raw HTTP to the tests route. No Line-by-Line session and no production is started. Writes EXECMCPTMP405A (its
   // database files too), Story405.* inside it, and ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
   "src/__tests__/story-40-5-burn-down-live-gate.test.ts",
+  // Story 40.5 QA: what the Story 40.5 gate leaves open, on the BUILT iris-dev-mcp, iris-admin-mcp and iris-interop-mcp dists over real stdio JSON-RPC: the three changed prompts (recover-stuck-production,
+  // edit-and-test-class, deploy-and-test-class) with `arguments` omitted, empty, partial and complete, the new sentences in place and single, the names, titles, arguments, descriptions and step counts as
+  // listed before, every named tool real on the server that lists the prompt, a live PRODUCTION_BUSY refusal of an unreadable production state against the fields the note branches on, and each generated
+  // SKILL.md against its render; and DW-597 at the package level through iris_execute_tests, POST /tests and iris_test_coverage over a package of three test classes beside an abstract class, a class that
+  // is no test and a sibling package. Its coverage rows make it the ninth gate that starts Line-by-Line sessions (the files run serially): a coverage row runs only with the monitor idle and ends asserting
+  // it is idle with no ownership node, and no process is terminated. No production is started, and the only production state asked for is the bare EXECMCPTMP405R's, which cannot be read. Writes EXECMCPTMP405Q and EXECMCPTMP405R (their database files too), Story405Q.*, Story405QX.* and
+  // Story405R.* inside them, and ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
+  "src/__tests__/story-40-5-qa-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup

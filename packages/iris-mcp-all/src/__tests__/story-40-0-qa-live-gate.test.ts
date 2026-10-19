@@ -77,6 +77,7 @@ import {
   removeInteropNamespace,
 } from "./interop-namespace-fixture.js";
 import { eventLogOracle } from "./header-row-oracle.js";
+import { stepsOf } from "./prompt-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -263,16 +264,6 @@ async function topIds(top: number | undefined, where: string): Promise<number[]>
     `SELECT ${top === undefined ? "" : `TOP ${top} `}ID FROM Ens_Util.Log${where === "" ? "" : ` WHERE ${where}`} ORDER BY ID DESC`,
   );
   return rows.map((row) => Number(row["ID"]));
-}
-
-/** The numbered steps of a rendered prompt, by number: the text from `N. ` up to the next step. */
-function stepsOf(text: string): Map<number, string> {
-  const steps = new Map<number, string>();
-  for (const chunk of text.split(/\n(?=\d+\. )/)) {
-    const match = /^(\d+)\. /.exec(chunk);
-    if (match) steps.set(Number(match[1]), chunk);
-  }
-  return steps;
 }
 
 // -- Setup and teardown ------------------------------------------------

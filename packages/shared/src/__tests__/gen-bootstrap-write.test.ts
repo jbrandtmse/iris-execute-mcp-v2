@@ -11,6 +11,7 @@ import {
   rmSync,
   statSync,
   utimesSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -107,5 +108,64 @@ describe("gen-bootstrap writes the embed only when its content changes (DW-591)"
     expect(after).not.toBe(before);
     expect(versionOf(after)).not.toBe(versionOf(before));
     expect(run.stdout).toContain(`BOOTSTRAP_VERSION: ${versionOf(after)}`);
+  });
+
+  it("an embed edited by hand, with its BOOTSTRAP_VERSION line intact, is written back to the generated content", () => {
+    const baseline = runGenerator();
+    expect(baseline.status, baseline.stderr).toBe(0);
+    const generated = readFileSync(embedPath, "utf8");
+
+    // The edit leaves the version line alone, so only a comparison of the whole content can see it.
+    const edited = generated.replace("export interface BootstrapClass {", "export interface BootstrapClass {\n  // hand edit");
+    expect(edited, "the edit changed the content").not.toBe(generated);
+    expect(versionOf(edited), "and left the version line as it was").toBe(versionOf(generated));
+    writeFileSync(embedPath, edited);
+    utimesSync(embedPath, PAST_SECONDS, PAST_SECONDS);
+    const pinned = statSync(embedPath).mtimeMs;
+
+    const run = runGenerator();
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toContain("Generated");
+    expect(run.stdout).not.toMatch(/unchanged/i);
+    expect(readFileSync(embedPath, "utf8"), "the hand edit is gone").toBe(generated);
+    expect(statSync(embedPath).mtimeMs, "the rewrite has a new mtime").toBeGreaterThan(pinned);
+  });
+
+  it("a class change and its reversal give back the original embed byte for byte, and the run after that is unchanged", () => {
+    const baseline = runGenerator();
+    expect(baseline.status, baseline.stderr).toBe(0);
+    const original = readFileSync(embedPath, "utf8");
+    const classPath = join(scratch, "src", "ExecuteMCPv2", "Utils.cls");
+    const classSource = readFileSync(classPath);
+
+    appendFileSync(classPath, "\n// scratch change\n");
+    const changed = runGenerator();
+    expect(changed.stdout).toContain("Generated");
+    expect(readFileSync(embedPath, "utf8"), "the change reached the embed").not.toBe(original);
+
+    writeFileSync(classPath, classSource);
+    const reverted = runGenerator();
+    expect(reverted.stdout, "the embed no longer matches the sources, so it is rewritten").toContain("Generated");
+    expect(readFileSync(embedPath, "utf8"), "the reversal gives the original embed back").toBe(original);
+    expect(versionOf(readFileSync(embedPath, "utf8"))).toBe(versionOf(original));
+
+    utimesSync(embedPath, PAST_SECONDS, PAST_SECONDS);
+    const settled = runGenerator();
+    expect(settled.stdout).toMatch(/unchanged/i);
+    expect(statSync(embedPath).mtimeMs, "and the settled embed keeps its mtime").toBe(PAST_SECONDS * 1000);
+  });
+
+  it("the checked-in embed is exactly what the generator writes from the checked-in classes, so a run on a clean tree rewrites nothing", () => {
+    // A scratch tree holds a copy of the real embed beside a copy of the real classes: the real files are only read.
+    copyFileSync(join(REPO_ROOT, EMBED_RELATIVE_PATH), embedPath);
+    const checkedIn = readFileSync(embedPath, "utf8");
+    utimesSync(embedPath, PAST_SECONDS, PAST_SECONDS);
+
+    const run = runGenerator();
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout, "the generator found nothing to change").toMatch(/unchanged/i);
+    expect(run.stdout).toContain(`BOOTSTRAP_VERSION: ${versionOf(checkedIn)}`);
+    expect(readFileSync(embedPath, "utf8")).toBe(checkedIn);
+    expect(statSync(embedPath).mtimeMs).toBe(PAST_SECONDS * 1000);
   });
 });

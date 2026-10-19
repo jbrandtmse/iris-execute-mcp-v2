@@ -8,8 +8,9 @@ No tool, action, governance key, preset row, prompt, refusal code, environment v
 (the Development server stays at 32 package tools, 33 advertised; the suite at 110 package tools, 115 advertised). The prompt
 pack stays at 13 prompts (5 on the Development server), the `core` preset at 14 package tools (15 runtime tools), the
 `developer` preset at 32 package tools (33 advertised), the refusal-code catalog at 10 codes, and the frozen governance
-baseline at hash `1e62c5ad5bf7` (141 keys). `BOOTSTRAP_VERSION` moves from `5024e4623f1d` to `5296a1c836f4`, because
-`REST/Monitor.cls`, `REST/UnitTest.cls` and `REST/Coverage.cls` changed (the bootstrapped service stays at 35 classes).
+baseline at hash `1e62c5ad5bf7` (141 keys). The tools-list snapshot does not move. `BOOTSTRAP_VERSION` moves from
+`5024e4623f1d` to `5296a1c836f4`, because `REST/Monitor.cls`, `REST/UnitTest.cls` and `REST/Coverage.cls` changed (the
+bootstrapped service stays at 35 classes).
 
 ### Changed
 
@@ -32,15 +33,17 @@ regenerated (`pnpm gen:skills`); the skills index is unchanged.
 ### Fixed
 
 - **`iris_alerts_manage` `reset` stamps `clearedAt` in UTC (DW-589).** The stamp was built from the local clock and labelled
-  `Z`, so a process at a time zone other than 0 reported a time that was off by its zone offset. It is now built from
-  `$ZTimeStamp`, in the same format (`YYYY-MM-DDThh:mm:ssZ`, to the second, a fraction truncated). A process at time zone 0
-  got the same value before, which is why the defect was invisible on an instance that runs at 0. The route's request and
-  response keys are unchanged.
+  `Z`, so a process whose local time is not UTC reported a time that was off by its offset from UTC (its time zone, plus an
+  hour while daylight-saving time is in effect). It is now built from `$ZTimeStamp`, in the same format
+  (`YYYY-MM-DDThh:mm:ssZ`, to the second, a fraction truncated). A process at time zone 0 with no daylight-saving shift got
+  the same value before, which is why the defect was invisible on an instance whose local time is UTC. The route's request
+  and response keys are unchanged.
 - **`POST /tests` at the package level runs the package's test classes (DW-597).** The spec joined the classes as `:A;:B`,
-  which the test runner reads as class A with a method named B, so a package run ran no test. It is now `:A;B;C`. No tool calls
-  the route (orchestrator decision #40), and `iris_test_coverage` package runs are unchanged: that service rewrote the spec to
-  the same form, and the rewrite it needed is removed. The class level, the method level and the response keys are unchanged
-  (AD-33).
+  which the test runner reads as class A with a method named B, so a package of two or more test classes ran no test. It is
+  now `:A;B;C`. No tool calls the route (orchestrator decision #40), and `iris_test_coverage` package runs are unchanged: that
+  service rewrote the spec to the same form, and the rewrite it needed is removed. The route is still not guarded by the
+  TestProduction guard, so a package run now also runs the package's `%UnitTest.TestProduction` tests. The class level, the
+  method level and the response keys are unchanged (AD-33).
 - **`pnpm gen:bootstrap` writes the embed only when its content changes (DW-591).** It rewrote an unchanged
   `bootstrap-classes.ts`, which moved the file's modification time and made the shared build look stale to the live gates'
   freshness check. A run that changes nothing now says the file is unchanged and prints `BOOTSTRAP_VERSION`; the hash and the
@@ -58,6 +61,11 @@ regenerated (`pnpm gen:skills`); the skills index is unchanged.
 - **The Story 40.5 gate (`story-40-5-burn-down-live-gate.test.ts`).** It runs in the default suite and in the prepublish roster,
   and runs a package of two test classes through `POST /tests` in a disposable namespace, then checks that a class run, a
   method run and the six result keys are unchanged. It starts no Line-by-Line session and no production.
+- **The Story 40.5 QA gate (`story-40-5-qa-live-gate.test.ts`).** It runs in the default suite and in the prepublish roster.
+  It renders the three changed prompts through the built servers, checks a live `PRODUCTION_BUSY` refusal for an unreadable
+  production state against the note, and runs a package through `iris_execute_tests`, `POST /tests` and
+  `iris_test_coverage`. Its coverage rows start Line-by-Line sessions only while the monitor is idle, and end with the
+  monitor idle and no ownership node. It starts no production.
 - Earliest IRIS version verified for `$System.OBJ.IsValidClassname` and the truncation of `$ZTimeStamp`: 2026.2 build 221U.
 
 ## [Pre-release — 2026-10-18] — Story 40.4: Test depth docs, prompt and capstone

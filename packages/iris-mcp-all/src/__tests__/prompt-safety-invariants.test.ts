@@ -47,6 +47,14 @@ async function findPrompt(name: string): Promise<LoadedPrompt> {
   return found;
 }
 
+/** The text of step `n` of a rendering: from its number to the next step's. */
+function stepText(body: string, n: number): string {
+  const from = body.indexOf(`\n${n}. `);
+  const to = body.indexOf(`\n${n + 1}. `);
+  expect(from, `step ${n} exists`).toBeGreaterThan(-1);
+  return body.slice(from, to === -1 ? undefined : to);
+}
+
 describe("recover-stuck-production — recover-first / clean-last-resort / killAppData double-gate (Epic-20 escalation ladder)", () => {
   it("instructs 'recover' strictly BEFORE 'clean' in the escalation ladder", async () => {
     const { pkg, prompt } = await findPrompt("recover-stuck-production");
@@ -618,14 +626,6 @@ describe("deploy-and-test-class - the optional coverage step and the PRODUCTION_
     ];
   }
 
-  /** The text of step `n` of a rendering: from its number to the next step's. */
-  function stepText(body: string, n: number): string {
-    const from = body.indexOf(`\n${n}. `);
-    const to = body.indexOf(`\n${n + 1}. `);
-    expect(from, `step ${n} exists`).toBeGreaterThan(-1);
-    return body.slice(from, to === -1 ? undefined : to);
-  }
-
   it("keeps its name, title and one required argument, and its description gains the coverage clause", async () => {
     const { pkg, prompt } = await findPrompt("deploy-and-test-class");
     expect(pkg).toBe("iris-dev-mcp");
@@ -714,14 +714,6 @@ describe("the test prompts' PRODUCTION_BUSY note and recover-stuck-production's 
   /** The recover rule, modelled on the sentence trace-message-flow step 5 carries for Event Log text. */
   const BLOCK_RULE =
     "Under the `block` data policy each entry's `text` is withheld and its `textPolicy` gives the reason: report that reason to the user, and never read the log text another way (for example through SQL, global or document tools).";
-
-  /** The text of step `n` of a rendering: from its number to the next step's. */
-  function stepText(body: string, n: number): string {
-    const from = body.indexOf(`\n${n}. `);
-    const to = body.indexOf(`\n${n + 1}. `);
-    expect(from, `step ${n} exists`).toBeGreaterThan(-1);
-    return body.slice(from, to === -1 ? undefined : to);
-  }
 
   /** The number of numbered steps in a rendering. */
   function stepCount(body: string): number {

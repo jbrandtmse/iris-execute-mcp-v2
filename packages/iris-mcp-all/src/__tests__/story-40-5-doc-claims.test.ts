@@ -120,7 +120,7 @@ describe("Story 40.5: the CHANGELOG section and the changeset", () => {
     const text = squash(section);
     expect(text).toContain("no count moves (the Development server stays at 32 package tools, 33 advertised; the suite at 110 package tools, 115 advertised)");
     expect(text).toContain("The prompt pack stays at 13 prompts (5 on the Development server), the `core` preset at 14 package tools (15 runtime tools), the `developer` preset at 32 package tools (33 advertised), the refusal-code catalog at 10 codes");
-    expect(text).toContain("hash `1e62c5ad5bf7` (141 keys)");
+    expect(text).toContain("hash `1e62c5ad5bf7` (141 keys). The tools-list snapshot does not move.");
     expect(text).toContain(`\`BOOTSTRAP_VERSION\` moves from \`${BOOTSTRAP_FROM}\` to \`${BOOTSTRAP_TO}\``);
     expect(text).toContain("`REST/Monitor.cls`, `REST/UnitTest.cls` and `REST/Coverage.cls` changed (the bootstrapped service stays at 35 classes)");
   });
@@ -141,16 +141,18 @@ describe("Story 40.5: the CHANGELOG section and the changeset", () => {
     const text = squash(section);
     expect(text).toContain("`iris_alerts_manage` `reset` stamps `clearedAt` in UTC (DW-589).");
     expect(text).toContain("in the same format (`YYYY-MM-DDThh:mm:ssZ`, to the second, a fraction truncated)");
-    expect(text).toContain("A process at time zone 0 got the same value before");
+    expect(text).toContain("plus an hour while daylight-saving time is in effect");
+    expect(text).toContain("A process at time zone 0 with no daylight-saving shift got the same value before");
     expect(text).toContain("`POST /tests` at the package level runs the package's test classes (DW-597).");
-    expect(text).toContain("It is now `:A;B;C`.");
+    expect(text).toContain("so a package of two or more test classes ran no test. It is now `:A;B;C`.");
+    expect(text).toContain("The route is still not guarded by the TestProduction guard, so a package run now also runs the package's `%UnitTest.TestProduction` tests.");
     expect(text).toContain("No tool calls the route (orchestrator decision #40), and `iris_test_coverage` package runs are unchanged");
     expect(text).toContain("The class level, the method level and the response keys are unchanged (AD-33).");
     expect(text).toContain("`pnpm gen:bootstrap` writes the embed only when its content changes (DW-591).");
     expect(text).toContain("the hash and the content are unchanged");
   });
 
-  it("Tests records DW-603, DW-607, the Story 40.5 gate and the IRIS version", () => {
+  it("Tests records DW-603, DW-607, the Story 40.5 gate, its QA gate and the IRIS version", () => {
     const text = squash(section);
     expect(text).toContain("One monitor helper module for the live gates (DW-603).");
     expect(text).toContain("`gate-helper-copies.test.ts` fails, naming the gate and the name, when a gate declares one of the moved names again.");
@@ -158,6 +160,8 @@ describe("Story 40.5: the CHANGELOG section and the changeset", () => {
     expect(text).toContain("`$System.OBJ.IsValidClassname`");
     expect(text).toContain("The Story 40.5 gate (`story-40-5-burn-down-live-gate.test.ts`).");
     expect(text).toContain("It starts no Line-by-Line session and no production.");
+    expect(text).toContain("The Story 40.5 QA gate (`story-40-5-qa-live-gate.test.ts`).");
+    expect(text).toContain("Its coverage rows start Line-by-Line sessions only while the monitor is idle");
     expect(text).toContain("Earliest IRIS version verified for `$System.OBJ.IsValidClassname` and the truncation of `$ZTimeStamp`: 2026.2 build 221U.");
   });
 
