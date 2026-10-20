@@ -359,18 +359,14 @@ export async function handshake(wire, protocolVersion, clientName) {
 }
 
 /**
- * Run one session against a built server and return its rows: the handshake response first, then one
- * row per exchange, each with the response line verbatim.
- *
- * @param {object} options
- * @param {string} options.entry - Absolute path of the built server's `index.js`.
- * @param {Record<string, string>} options.baseEnv - The environment without the `IRIS_*` settings of the host.
- * @param {ReturnType<typeof goldenSessions>[number]} options.session
- * @returns {Promise<Array<{ label: string, method: string, params?: object, dw617Of?: string, line: string }>>}
+ * Run one session against a built server and return its rows and its stderr: the handshake response first,
+ * then one row per exchange, each with the response line verbatim. With `probeFirst`, a `server/discover`
+ * opening precedes the handshake on the same connection.
  */
-export async function runGoldenSession({ entry, baseEnv, session }) {
+async function runSession({ entry, baseEnv, session, probeFirst }) {
   const wire = openRawWire({ entry, env: { ...baseEnv, ...CLOSED_PORT_ENV, ...session.env } });
   try {
+    if (probeFirst) await discoverHandshake(wire, 'sdk-wire-golden');
     const initialized = await handshake(wire, session.protocolVersion, 'sdk-wire-golden');
     const rows = [
       {
@@ -384,10 +380,238 @@ export async function runGoldenSession({ entry, baseEnv, session }) {
       const frame = await wire.request(exchange.method, exchange.params);
       rows.push({ ...exchange, line: frame.line });
     }
-    return rows;
+    return { rows, stderr: wire.stderr() };
   } finally {
     await wire.close();
   }
+}
+
+/**
+ * Run one session against a built server and return its rows: the handshake response first, then one
+ * row per exchange, each with the response line verbatim.
+ *
+ * @param {object} options
+ * @param {string} options.entry - Absolute path of the built server's `index.js`.
+ * @param {Record<string, string>} options.baseEnv - The environment without the `IRIS_*` settings of the host.
+ * @param {ReturnType<typeof goldenSessions>[number]} options.session
+ * @returns {Promise<Array<{ label: string, method: string, params?: object, dw617Of?: string, line: string }>>}
+ */
+export async function runGoldenSession({ entry, baseEnv, session }) {
+  return (await runSession({ entry, baseEnv, session, probeFirst: false })).rows;
+}
+
+// -- the 2026-07-28 era (Story 43.2) ----------------------------------------------------------
+
+/** The revision the modern era serves. */
+export const MODERN_ERA = '2026-07-28';
+
+const PROTOCOL_VERSION_META_KEY = 'io.modelcontextprotocol/protocolVersion';
+const CLIENT_CAPABILITIES_META_KEY = 'io.modelcontextprotocol/clientCapabilities';
+const CLIENT_INFO_META_KEY = 'io.modelcontextprotocol/clientInfo';
+
+/** The `_meta` key under which the modern era reports the server's identity on every result. */
+export const SERVER_INFO_META_KEY = 'io.modelcontextprotocol/serverInfo';
+
+/** The methods whose modern result carries the caching hints `ttlMs` and `cacheScope`. */
+export const MODERN_CACHEABLE_METHODS = Object.freeze([
+  'server/discover',
+  'tools/list',
+  'prompts/list',
+  'resources/list',
+  'resources/templates/list',
+  'resources/read',
+]);
+
+/**
+ * What the 2026-07-28 revision adds to or removes from a response, and therefore the only differences the
+ * cross-era comparison ignores (wave-8 decision #7; AD-32). `value` is what each added field must carry.
+ */
+export const MANDATED_MODERN_FIELDS = Object.freeze([
+  Object.freeze({ id: 'resultType', applies: 'every result', change: 'added', field: 'resultType', value: 'complete' }),
+  Object.freeze({
+    id: 'cacheHints',
+    applies: MODERN_CACHEABLE_METHODS,
+    change: 'added',
+    fields: Object.freeze(['ttlMs', 'cacheScope']),
+    value: Object.freeze({ ttlMs: 0, cacheScope: 'private' }),
+  }),
+  Object.freeze({
+    id: 'serverInfoMeta',
+    applies: 'every result',
+    change: 'added',
+    field: `_meta[${SERVER_INFO_META_KEY}]`,
+    value: 'the serverInfo of the 2025 initialize result',
+  }),
+  Object.freeze({ id: 'toolExecution', applies: 'tools/list', change: 'removed', field: 'tools[].execution', member: 'execution' }),
+  Object.freeze({ id: 'discover', applies: 'the opening exchange', change: 'relocated', field: 'initialize -> server/discover' }),
+  Object.freeze({ id: 'jsonRpcId', applies: 'every frame', change: 'substituted' }),
+]);
+
+/** The entry of {@link MANDATED_MODERN_FIELDS} with this id: the one place the functions below read the field names and pinned values from. */
+function mandatedEntry(id) {
+  const entry = MANDATED_MODERN_FIELDS.find((candidate) => candidate.id === id);
+  if (entry === undefined) throw new Error(`MANDATED_MODERN_FIELDS has no entry ${id}`);
+  return entry;
+}
+
+const RESULT_TYPE = mandatedEntry('resultType');
+const CACHE_HINTS = mandatedEntry('cacheHints');
+const TOOL_EXECUTION = mandatedEntry('toolExecution');
+
+/**
+ * The per-request `_meta` envelope of a modern request.
+ *
+ * @param {string} clientName - The name the client reports.
+ * @returns {Record<string, unknown>}
+ */
+export function modernEnvelope(clientName) {
+  return {
+    [PROTOCOL_VERSION_META_KEY]: MODERN_ERA,
+    [CLIENT_CAPABILITIES_META_KEY]: {},
+    [CLIENT_INFO_META_KEY]: { name: clientName, version: '0.0.0' },
+  };
+}
+
+/**
+ * `params` with the envelope merged into its `_meta`. A key of `params._meta` wins over the envelope's, as it
+ * does for the SDK client.
+ *
+ * @param {Record<string, unknown>} params
+ * @param {Record<string, unknown>} envelope
+ * @returns {Record<string, unknown>}
+ */
+export function withEnvelope(params, envelope) {
+  const own = params._meta !== null && typeof params._meta === 'object' ? params._meta : {};
+  return { ...params, _meta: { ...envelope, ...own } };
+}
+
+/**
+ * Open a modern connection on a raw wire: `server/discover` with the envelope. Resolves with the response frame.
+ *
+ * @param {ReturnType<typeof openRawWire>} wire
+ * @param {string} clientName - The name the client reports.
+ */
+export async function discoverHandshake(wire, clientName) {
+  const discovered = await wire.request('server/discover', withEnvelope({}, modernEnvelope(clientName)));
+  if (discovered.message.error !== undefined) {
+    throw new Error(`the server refused server/discover: ${discovered.line}`);
+  }
+  return discovered;
+}
+
+/**
+ * A parsed response with `execution` removed from every `tools/list` entry; every other member and the member
+ * order are kept.
+ *
+ * @param {any} message - A parsed JSON-RPC response.
+ */
+export function withoutExecution(message) {
+  const tools = message?.result?.tools;
+  if (!Array.isArray(tools)) return message;
+  const stripped = tools.map((tool) => {
+    if (tool === null || typeof tool !== 'object' || !(TOOL_EXECUTION.member in tool)) return tool;
+    const { [TOOL_EXECUTION.member]: _removed, ...rest } = tool;
+    return rest;
+  });
+  return { ...message, result: { ...message.result, tools: stripped } };
+}
+
+/**
+ * A parsed modern response with the fields the 2026-07-28 revision mandates removed (see
+ * {@link MANDATED_MODERN_FIELDS}): `resultType`, `ttlMs` and `cacheScope` on the cacheable methods,
+ * the `serverInfo` member of `_meta` (and `_meta` itself when that leaves it empty), and `execution` on each tool.
+ * An error frame is returned as it is. Every other member and the member order are kept.
+ *
+ * @param {string} method - The method of the request the response answers.
+ * @param {any} message - A parsed JSON-RPC response.
+ */
+export function withoutMandatedFields(method, message) {
+  const result = message?.result;
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return message;
+  const stripped = { ...result };
+  delete stripped[RESULT_TYPE.field];
+  if (CACHE_HINTS.applies.includes(method)) {
+    for (const field of CACHE_HINTS.fields) delete stripped[field];
+  }
+  if (stripped._meta !== null && typeof stripped._meta === 'object') {
+    const meta = { ...stripped._meta };
+    delete meta[SERVER_INFO_META_KEY];
+    if (Object.keys(meta).length === 0) delete stripped._meta;
+    else stripped._meta = meta;
+  }
+  return withoutExecution({ ...message, result: stripped });
+}
+
+/**
+ * What is wrong with the values of the mandated fields in one parsed modern response, as sentences; empty when
+ * every field is present with its pinned value. An error frame has none of them and reports nothing.
+ *
+ * @param {string} method - The method of the request the response answers.
+ * @param {any} message - A parsed JSON-RPC response.
+ * @param {unknown} serverInfo - The `serverInfo` the 2025 `initialize` result carries, version masked as the caller needs.
+ * @returns {string[]}
+ */
+export function mandatedFieldProblems(method, message, serverInfo) {
+  const result = message?.result;
+  if (result === null || typeof result !== 'object') return [];
+  const problems = [];
+  if (result[RESULT_TYPE.field] !== RESULT_TYPE.value) {
+    problems.push(`${RESULT_TYPE.field} is ${JSON.stringify(result[RESULT_TYPE.field])}, not ${JSON.stringify(RESULT_TYPE.value)}`);
+  }
+  const cacheable = CACHE_HINTS.applies.includes(method);
+  for (const field of CACHE_HINTS.fields) {
+    if (cacheable && result[field] !== CACHE_HINTS.value[field]) {
+      problems.push(`${field} is ${JSON.stringify(result[field])}, not ${JSON.stringify(CACHE_HINTS.value[field])}`);
+    }
+  }
+  if (!cacheable && CACHE_HINTS.fields.some((field) => field in result)) problems.push(`${method} carries cache hints it should not`);
+  if (JSON.stringify(result._meta?.[SERVER_INFO_META_KEY]) !== JSON.stringify(serverInfo)) {
+    problems.push(`_meta[${SERVER_INFO_META_KEY}] is ${JSON.stringify(result._meta?.[SERVER_INFO_META_KEY])}, not the initialize serverInfo`);
+  }
+  if (Array.isArray(result.tools) && result.tools.some((tool) => tool !== null && typeof tool === 'object' && TOOL_EXECUTION.member in tool)) {
+    problems.push('a tool entry carries execution');
+  }
+  return problems;
+}
+
+/**
+ * Run one golden session on the modern era: `server/discover` opens the connection, and each exchange is sent
+ * with the envelope merged into its `params`. Rows are the discover response first, then one per exchange.
+ *
+ * @param {object} options
+ * @param {string} options.entry - Absolute path of the built server's `index.js`.
+ * @param {Record<string, string>} options.baseEnv - The environment without the `IRIS_*` settings of the host.
+ * @param {ReturnType<typeof goldenSessions>[number]} options.session
+ * @returns {Promise<{ rows: Array<{ label: string, method: string, params?: object, dw617Of?: string, line: string }>, stderr: string }>}
+ */
+export async function runModernGoldenSession({ entry, baseEnv, session }) {
+  const wire = openRawWire({ entry, env: { ...baseEnv, ...CLOSED_PORT_ENV, ...session.env } });
+  try {
+    const envelope = modernEnvelope('sdk-wire-golden');
+    const discovered = await discoverHandshake(wire, 'sdk-wire-golden');
+    const rows = [{ label: 'server/discover', method: 'server/discover', line: discovered.line }];
+    for (const exchange of session.exchanges) {
+      const frame = await wire.request(exchange.method, withEnvelope(exchange.params ?? {}, envelope));
+      rows.push({ ...exchange, line: frame.line });
+    }
+    return { rows, stderr: wire.stderr() };
+  } finally {
+    await wire.close();
+  }
+}
+
+/**
+ * Run one golden session after a `server/discover` opening on the same connection: the probe instance is
+ * discarded when the 2025-era `initialize` arrives, and the session then runs as {@link runGoldenSession} does.
+ *
+ * @param {object} options
+ * @param {string} options.entry - Absolute path of the built server's `index.js`.
+ * @param {Record<string, string>} options.baseEnv - The environment without the `IRIS_*` settings of the host.
+ * @param {ReturnType<typeof goldenSessions>[number]} options.session
+ * @returns {Promise<{ rows: Array<{ label: string, method: string, params?: object, dw617Of?: string, line: string }>, stderr: string }>}
+ */
+export function runProbeDiscardSession({ entry, baseEnv, session }) {
+  return runSession({ entry, baseEnv, session, probeFirst: true });
 }
 
 // -- versions ---------------------------------------------------------------------------------

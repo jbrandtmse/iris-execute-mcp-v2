@@ -13,11 +13,14 @@ import { constants as fsConstants } from "node:fs";
 import { dirname } from "node:path";
 
 import { McpServer, ProtocolErrorCode, ResourceTemplate } from "@modelcontextprotocol/server";
-import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
+import { StdioServerTransport, serveStdio } from "@modelcontextprotocol/server/stdio";
+import type { StdioServerHandle } from "@modelcontextprotocol/server/stdio";
 import type {
   CallToolResult,
   ReadResourceResult,
   GetPromptResult,
+  McpRequestContext,
+  McpServerFactory,
   RegisteredTool,
   Variables,
 } from "@modelcontextprotocol/server";
@@ -221,20 +224,40 @@ export interface McpServerBaseOptions {
 export type { PaginateResult } from "./tool-types.js";
 
 /**
- * A registered prompt as the framework's own `prompts/get` serves it: the render function and, for a prompt
- * that declares arguments, the object schema that checks `arguments`. A prompt that declares none has no schema
- * and ignores whatever `arguments` the request carries.
+ * A registered prompt: what the framework's own `prompts/get` serves, and what the instance builder registers on
+ * the SDK. `render` turns the arguments into the prompt's messages. For a prompt that declares arguments,
+ * `argsSchema` is the object schema that checks `arguments`; a prompt that declares none has no schema and
+ * ignores whatever `arguments` the request carries.
  */
 interface PromptEntry {
+  name: string;
+  title: string;
+  description: string;
   render: (args: Record<string, string | undefined>) => GetPromptResult;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   argsSchema: ZodObject<any> | undefined;
 }
 
-/** A resource as the framework's own `resources/read` serves it: one exact URI, or every URI a template matches. */
+/** The SDK-visible metadata of a resource. */
+interface ResourceInfo {
+  title: string;
+  description: string;
+  mimeType: string;
+}
+
+/**
+ * A resource: what the framework's own `resources/read` serves (one exact URI, or every URI a template matches),
+ * and what the instance builder registers on the SDK.
+ */
 type ResourceReader =
-  | { kind: "exact"; uri: string; read: (uri: URL) => ReadResourceResult }
-  | { kind: "template"; template: ResourceTemplate; read: (uri: URL, variables: Variables) => ReadResourceResult };
+  | { kind: "exact"; name: string; info: ResourceInfo; uri: string; read: (uri: URL) => ReadResourceResult }
+  | {
+      kind: "template";
+      name: string;
+      info: ResourceInfo;
+      template: ResourceTemplate;
+      read: (uri: URL, variables: Variables) => ReadResourceResult;
+    };
 
 /** The paths into `handleToolCall`: the SDK-registered callback (in-process), and the wire request. */
 type ToolCallSource = "callback" | "wire";
@@ -369,7 +392,15 @@ export function buildToolContext(
  * - Startup orchestration: loadConfig &rarr; connect &rarr; health check &rarr; version negotiation
  */
 export class McpServerBase {
-  private readonly mcpServer: McpServer;
+  /**
+   * The current SDK instance: the one built at construction until the stdio entry asks for another, then the
+   * latest one it asked for.
+   */
+  private mcpServer: McpServer;
+  /** Whether the instance built at construction has been handed to the stdio entry. */
+  private constructionInstanceHandedOut = false;
+  /** The open stdio serving handle, from {@link start} until {@link stop}. */
+  private servingHandle: StdioServerHandle | undefined;
   private readonly tools: Map<string, ToolDefinition> = new Map();
   /**
    * Per-tool input schema extended with the shared `server` parameter (D2).
@@ -389,11 +420,16 @@ export class McpServerBase {
   private readonly wireSchemas: Map<string, ZodObject<any>> = new Map();
   /** The `tools/list` entry of each tool, built on first use. Keyed by tool name. */
   private readonly listedTools: Map<string, ListedTool> = new Map();
-  /** The SDK's handle on each registered tool, so a removed tool leaves the SDK registry through its public `remove()`. */
-  private readonly sdkTools: Map<string, RegisteredTool> = new Map();
+  /**
+   * The SDK's handle on each tool of the current instance, so a removed tool leaves that instance's registry
+   * through its public `remove()`.
+   */
+  private sdkTools: Map<string, RegisteredTool> = new Map();
   /** The registered prompts, by name, for the framework's own `prompts/get`. */
   private readonly promptEntries: Map<string, PromptEntry> = new Map();
-  /** The registered resources, in registration order, for the framework's own `resources/read`. */
+  /** Every registered prompt, in registration order, for the instance builder. */
+  private readonly promptRegistrations: PromptEntry[] = [];
+  /** The registered resources, in registration order, for the framework's own `resources/read` and the instance builder. */
   private readonly resourceReaders: ResourceReader[] = [];
   /**
    * The default profile's connection config (the `IRIS_*`-derived config).
@@ -601,30 +637,6 @@ export class McpServerBase {
   readonly pageSize: number = DEFAULT_PAGE_SIZE;
 
   constructor(private readonly options: McpServerBaseOptions) {
-    this.mcpServer = new McpServer(
-      { name: options.name, version: options.version },
-      {
-        // `resources` is declared explicitly here per D6 so the `initialize`
-        // result advertises it. The SDK ALSO calls registerCapabilities with the
-        // identical `resources: { listChanged: true }` when registerResource runs
-        // (mcp.js setResourceRequestHandlers); registerCapabilities merges, so the
-        // two are idempotent and do not conflict. Declaring it up front guarantees
-        // the capability is present even before any transport/registration timing.
-        capabilities: {
-          tools: { listChanged: true },
-          resources: { listChanged: true },
-        },
-        // Server-level usage guidance (Epic 19, decision E1 / AC 19.0.5). Carried
-        // into the `initialize` result by the SDK so capable clients surface it at
-        // connect time; reinforces the call-first guidance also in the discovery
-        // tool's own description. Generic across all five servers.
-        instructions: SERVER_DISCOVERY_INSTRUCTIONS,
-        // The SDK announces a change each time a tool is registered or removed; a call that changes
-        // several tools in one turn (addTools, removeTools) announces it once.
-        debouncedNotificationMethods: ["notifications/tools/list_changed"],
-      },
-    );
-
     if (options.config) {
       this.config = options.config;
     }
@@ -746,50 +758,116 @@ export class McpServerBase {
     // Epic 15+ write tools. Runs after BOTH rebuilds so it reads current state.
     this.assertGovernanceClassified();
 
-    // Register the advisory governance resource (D6): a static default-policy
-    // resource + a per-profile template. Registered at construction (like tools)
-    // so the resource handlers + the `resources` capability are wired before any
-    // transport connects. The read callbacks close over `this`, so they read the
-    // governance config / governed-key set as they are AT READ TIME — by which
-    // point start() has parsed IRIS_GOVERNANCE. sendResourceListChanged() is a
-    // no-op until a transport attaches, so this is safe pre-connect.
+    // Record the advisory governance resource (D6): a static default-policy
+    // resource + a per-profile template. Recorded at construction (like tools)
+    // so the instance builder registers them before any transport connects. The
+    // read callbacks close over `this`, so they read the governance config /
+    // governed-key set as they are AT READ TIME, by which point start() has
+    // parsed IRIS_GOVERNANCE.
     this.registerGovernanceResource();
 
-    // Register prompts (Story 25.0, framework plumbing for the Agent Skills
+    // Record prompts (Story 25.0, framework plumbing for the Agent Skills
     // Pack). Kept after tool/discovery registration and the governance
-    // resource wiring (and before the wire handlers are installed) because prompts are
-    // independent of the governance machinery: they carry no `mutates`
-    // classification and must not perturb the governed-key rebuilds above.
+    // resource wiring because prompts are independent of the governance
+    // machinery: they carry no `mutates` classification and must not perturb
+    // the governed-key rebuilds above.
     //
     // CRITICAL back-compat (AC 25.0.1): `prompts` is deliberately NOT
-    // pre-declared in the constructor's `capabilities` object above (unlike
+    // pre-declared in the builder's `capabilities` object (unlike
     // `resources`, which IS pre-declared per D6). The MCP SDK's own
     // `registerPrompt` → `registerCapabilities({ prompts: { listChanged: true } })`
     // call is what advertises the capability, and it runs ONLY when
     // `registerPrompt` is actually called. So when `options.prompts` is
-    // empty/absent, this loop never calls it, and the `prompts` key never
+    // empty/absent, the builder never calls it, and the `prompts` key never
     // appears in the advertised `initialize` capabilities — a no-prompts
     // server is byte-for-byte unchanged (Rule #19).
     for (const prompt of options.prompts ?? []) {
       this.registerPrompt(prompt);
     }
 
-    // Install the framework's own handlers for the four methods whose SDK-served bytes differ from the
-    // 2025-11-25 wire (see sdk-wire-compat.ts). They come last: the SDK installs its own handlers when
-    // the first tool, resource or prompt is registered, and these replace them.
-    this.installWireHandlers();
+    // Every SDK registration happens in the builder, so the instance built here and every instance built
+    // later are complete by construction.
+    this.mcpServer = this.buildMcpServer();
   }
 
   /**
-   * Serve `tools/list`, `tools/call`, `prompts/get` and `resources/read` from the framework's own state, so
-   * the 2025-11-25 wire stays byte-identical (AD-15, AD-32). `prompts/get` is installed only when a prompt is
-   * registered, because the SDK advertises the `prompts` capability only then.
+   * Build one complete SDK instance from framework state: every tool in {@link tools} in insertion order, both
+   * governance resources, every prompt in registration order, and the framework's own handlers last. The only
+   * place SDK registration of the construction-time surface happens. {@link sdkTools} holds the handles of the
+   * instance this returns.
+   *
+   * The framework's own handlers come last because the SDK installs its own handlers when the first tool,
+   * resource or prompt is registered, and these replace them.
+   */
+  private buildMcpServer(): McpServer {
+    const server = new McpServer(
+      { name: this.options.name, version: this.options.version },
+      {
+        // `resources` is declared explicitly here per D6 so the `initialize`
+        // result advertises it. The SDK ALSO calls registerCapabilities with the
+        // identical `resources: { listChanged: true }` when registerResource runs
+        // (mcp.js setResourceRequestHandlers); registerCapabilities merges, so the
+        // two are idempotent and do not conflict. Declaring it up front guarantees
+        // the capability is present even before any transport/registration timing.
+        capabilities: {
+          tools: { listChanged: true },
+          resources: { listChanged: true },
+        },
+        // Server-level usage guidance (Epic 19, decision E1 / AC 19.0.5). Carried
+        // into the `initialize` result by the SDK so capable clients surface it at
+        // connect time; reinforces the call-first guidance also in the discovery
+        // tool's own description. Generic across all five servers.
+        instructions: SERVER_DISCOVERY_INSTRUCTIONS,
+        // The SDK announces a change each time a tool is registered or removed; a call that changes
+        // several tools in one turn (addTools, removeTools) announces it once.
+        debouncedNotificationMethods: ["notifications/tools/list_changed"],
+      },
+    );
+    const handles = new Map<string, RegisteredTool>();
+    for (const tool of this.tools.values()) {
+      handles.set(tool.name, this.registerToolOn(server, tool));
+    }
+    for (const reader of this.resourceReaders) {
+      this.registerResourceOn(server, reader);
+    }
+    for (const entry of this.promptRegistrations) {
+      this.registerPromptOn(server, entry);
+    }
+    this.installWireHandlers(server);
+    this.sdkTools = handles;
+    return server;
+  }
+
+  /**
+   * The factory the stdio entry calls for each instance it serves. The first call returns the instance built at
+   * construction, so a caller that reads {@link server} sees the instance that serves; a later call (the stdio
+   * entry rebuilds when a `server/discover` probe is followed by a 2025-era `initialize`) builds a fresh,
+   * complete instance and makes it current. Each call writes one INFO line naming the era.
+   */
+  private readonly serverFactory: McpServerFactory = (context: McpRequestContext): McpServer => {
+    logger.info(
+      context.era === "modern"
+        ? "Serving MCP protocol revision 2026-07-28 (server/discover)"
+        : "Serving the 2025-era MCP handshake (initialize)",
+    );
+    if (!this.constructionInstanceHandedOut) {
+      this.constructionInstanceHandedOut = true;
+      return this.mcpServer;
+    }
+    this.mcpServer = this.buildMcpServer();
+    return this.mcpServer;
+  };
+
+  /**
+   * Serve `tools/list`, `tools/call`, `prompts/get` and `resources/read` on `server` from the framework's own
+   * state, so the 2025-11-25 wire stays byte-identical (AD-15, AD-32). `prompts/get` is installed only when a
+   * prompt is registered, because the SDK advertises the `prompts` capability only then.
    *
    * The handlers read {@link tools}, {@link promptEntries} and {@link resourceReaders} at request time, so a
    * tool added or removed later is served without reinstalling anything.
    */
-  private installWireHandlers(): void {
-    const sdkServer = this.mcpServer.server;
+  private installWireHandlers(server: McpServer): void {
+    const sdkServer = server.server;
     sdkServer.setRequestHandler("tools/list", () => ({
       tools: [...this.tools.values()].map((tool) => this.listedToolOf(tool)),
     }));
@@ -1068,7 +1146,7 @@ export class McpServerBase {
   }
 
   /**
-   * Register the advisory governance resource (architecture decision D6 — the
+   * Record the advisory governance resource (architecture decision D6: the
    * minimal, single-resource-type provider; NOT a generalized ResourceDefinition
    * framework, which is deferred until a second resource exists). Two pieces:
    *
@@ -1076,24 +1154,23 @@ export class McpServerBase {
    *   policy, so `resources/list` advertises a concrete entry.
    * - A `ResourceTemplate` `iris-governance://{profile}` for any profile, serving
    *   `resources/read` and listed under `resources/templates/list`. Its `list`
-   *   callback is `undefined` (D6 minimal — the template is for parameterized
-   *   read, not enumeration of every profile); the SDK requires the field to be
-   *   passed explicitly even when undefined.
+   *   callback enumerates the configured profiles.
    *
-   * Registering either resource auto-wires the SDK's `resources/list` and
-   * `resources/templates/list` handlers and (re)advertises the `resources`
-   * capability (already declared in the constructor). `resources/read` is served
-   * by {@link readResourceFromWire} from {@link resourceReaders}, which this method
-   * fills with the same read callbacks.
+   * Both go into {@link resourceReaders}. The instance builder registers them on
+   * each SDK instance ({@link registerResourceOn}), which auto-wires the SDK's
+   * `resources/list` and `resources/templates/list` handlers and (re)advertises
+   * the `resources` capability (already declared by the builder).
+   * `resources/read` is served by {@link readResourceFromWire} from the same
+   * read callbacks.
    */
   private registerGovernanceResource(): void {
     // Static default/global policy resource → resources/list.
     const readDefault = (uri: URL): ReadResourceResult =>
       this.buildGovernancePolicyResult(DEFAULT_PROFILE_NAME, uri.toString());
-    this.mcpServer.registerResource(
-      GOVERNANCE_DEFAULT_RESOURCE_NAME,
-      GOVERNANCE_DEFAULT_URI,
-      {
+    this.resourceReaders.push({
+      kind: "exact",
+      name: GOVERNANCE_DEFAULT_RESOURCE_NAME,
+      info: {
         title: "IRIS governance policy (default profile)",
         description:
           "Advisory: the effective enabled/disabled action map for the default " +
@@ -1101,9 +1178,9 @@ export class McpServerBase {
           "resource is a read-only preview.",
         mimeType: "application/json",
       },
-      readDefault,
-    );
-    this.resourceReaders.push({ kind: "exact", uri: GOVERNANCE_DEFAULT_URI, read: readDefault });
+      uri: GOVERNANCE_DEFAULT_URI,
+      read: readDefault,
+    });
 
     // Per-profile policy template → resources/templates/list + resources/read.
     //
@@ -1137,10 +1214,10 @@ export class McpServerBase {
       const profileName = Array.isArray(raw) ? String(raw[0]) : String(raw);
       return this.buildGovernancePolicyResult(profileName, uri.toString());
     };
-    this.mcpServer.registerResource(
-      GOVERNANCE_TEMPLATE_RESOURCE_NAME,
-      profileTemplate,
-      {
+    this.resourceReaders.push({
+      kind: "template",
+      name: GOVERNANCE_TEMPLATE_RESOURCE_NAME,
+      info: {
         title: "IRIS governance policy (per profile)",
         description:
           "Advisory: the effective enabled/disabled action map for a named " +
@@ -1148,17 +1225,26 @@ export class McpServerBase {
           "enforcement gate is authoritative; this resource is a read-only preview.",
         mimeType: "application/json",
       },
-      readProfile,
-    );
-    this.resourceReaders.push({ kind: "template", template: profileTemplate, read: readProfile });
+      template: profileTemplate,
+      read: readProfile,
+    });
+  }
+
+  /** Register a recorded resource on one SDK instance. */
+  private registerResourceOn(server: McpServer, reader: ResourceReader): void {
+    if (reader.kind === "exact") {
+      server.registerResource(reader.name, reader.uri, reader.info, reader.read);
+    } else {
+      server.registerResource(reader.name, reader.template, reader.info, reader.read);
+    }
   }
 
   // ── Prompt registration (Story 25.0) ───────────────────────────────
 
   /**
-   * Register a single prompt with the MCP SDK (Story 25.0, spec
-   * `03-skills-prompts-pack.md` section 2) and with the framework's own `prompts/get`
-   * ({@link getPromptFromWire}).
+   * Record a single prompt (Story 25.0, spec `03-skills-prompts-pack.md` section 2) for the framework's own
+   * `prompts/get` ({@link getPromptFromWire}) and for the instance builder, which registers it on each SDK
+   * instance ({@link registerPromptOn}).
    *
    * For a prompt WITH arguments, builds `z.object(argsShape)` from
    * {@link PromptDefinition.arguments}: each argument becomes
@@ -1172,7 +1258,7 @@ export class McpServerBase {
    *
    * The render function turns `def.build(args)` into a single **user**-role
    * text message (spec section 2). A duplicate prompt name is caught by the SDK's own
-   * `Prompt ${name} is already registered` guard in `registerPrompt`.
+   * `Prompt ${name} is already registered` guard when the builder registers it.
    */
   private registerPrompt(def: PromptDefinition): void {
     // Shared render: a single user-role text message (spec §2) from the
@@ -1211,15 +1297,10 @@ export class McpServerBase {
       };
     };
 
-    // No-argument prompt: register WITHOUT an argsSchema (see the doc comment
-    // above), and render with an empty args object.
+    // No-argument prompt: no argsSchema (see the doc comment above), and it
+    // renders with an empty args object.
     if (def.arguments.length === 0) {
-      this.mcpServer.registerPrompt(
-        def.name,
-        { title: def.title, description: def.description },
-        (): GetPromptResult => render({}),
-      );
-      this.promptEntries.set(def.name, { render, argsSchema: undefined });
+      this.recordPrompt({ name: def.name, title: def.title, description: def.description, render, argsSchema: undefined });
       return;
     }
 
@@ -1249,50 +1330,83 @@ export class McpServerBase {
     // An omitted `arguments` counts as `{}` on `prompts/get`, so a prompt whose
     // arguments are all optional renders from it (see getPromptFromWire).
     const argsSchema = z.object(argsShape);
-    this.mcpServer.registerPrompt(
-      def.name,
+    this.recordPrompt({ name: def.name, title: def.title, description: def.description, render, argsSchema });
+  }
+
+  /** Keep a prompt for the framework's `prompts/get` (by name) and for the builder (in registration order). */
+  private recordPrompt(entry: PromptEntry): void {
+    this.promptEntries.set(entry.name, entry);
+    this.promptRegistrations.push(entry);
+  }
+
+  /** Register a recorded prompt on one SDK instance. */
+  private registerPromptOn(server: McpServer, entry: PromptEntry): void {
+    if (entry.argsSchema === undefined) {
+      server.registerPrompt(
+        entry.name,
+        { title: entry.title, description: entry.description },
+        (): GetPromptResult => entry.render({}),
+      );
+      return;
+    }
+    server.registerPrompt(
+      entry.name,
       {
-        title: def.title,
-        description: def.description,
-        argsSchema,
+        title: entry.title,
+        description: entry.description,
+        argsSchema: entry.argsSchema,
       },
       // The SDK's callback argument type from a Record<string, ZodTypeAny>
       // shape resolves to a loosely-typed record; `any` here mirrors the
       // `registerTool` callback pattern below.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (args: any): GetPromptResult =>
-        render(args as Record<string, string | undefined>),
+      (args: any): GetPromptResult => entry.render(args as Record<string, string | undefined>),
     );
-    this.promptEntries.set(def.name, { render, argsSchema });
   }
 
   // ── Tool registration ──────────────────────────────────────────────
 
   /**
-   * Register a single tool with the MCP SDK.
+   * Record a single tool in the framework's registry.
    *
-   * Passes the extended input schema (a Zod object) to the SDK's `registerTool`.
-   * The SDK-registered callback is the in-process path to {@link handleToolCall}
-   * (no wire request reaches it, because the framework serves `tools/call`
-   * itself); the wire path validates the arguments first, in
-   * {@link callToolFromWire}. Both validate independently to produce structured
-   * error messages on failure.
+   * Builds the extended input schema (a Zod object) that the SDK registration
+   * ({@link registerToolOn}) advertises and that {@link handleToolCall} validates
+   * against. Throws, with the SDK's own text, when the name is already registered.
    */
   private registerTool(tool: ToolDefinition): void {
-    this.tools.set(tool.name, tool);
+    if (this.tools.has(tool.name)) {
+      throw new Error(`Tool ${tool.name} is already registered`);
+    }
 
     // Centrally inject the framework `server` parameter into the tool's input
     // schema (architecture decision D2). The EXTENDED schema is what we advertise
     // and what handleToolCall validates against; it is stored so the two stay in
     // lock-step. Injecting here (once, for every tool) — rather than hand-adding
     // `server` per tool — gives uniform coverage and makes future tools inherit
-    // it for free. outputSchema is untouched (additive, back-compat).
+    // it for free. outputSchema is untouched (additive, back-compat). It runs
+    // before the registry is touched, so a tool that fails it is never recorded.
     const extendedInputSchema = withServerParam(tool.inputSchema, tool.name);
+    this.tools.set(tool.name, tool);
     this.extendedSchemas.set(tool.name, extendedInputSchema);
     this.wireSchemas.set(tool.name, wireInputSchema(extendedInputSchema));
     this.listedTools.delete(tool.name);
+  }
 
-    const registered = this.mcpServer.registerTool(
+  /**
+   * Register a recorded tool on one SDK instance.
+   *
+   * The SDK-registered callback is the in-process path to {@link handleToolCall}
+   * (no wire request reaches it, because the framework serves `tools/call`
+   * itself); the wire path validates the arguments first, in
+   * {@link callToolFromWire}. Both validate independently to produce structured
+   * error messages on failure.
+   */
+  private registerToolOn(server: McpServer, tool: ToolDefinition): RegisteredTool {
+    const extendedInputSchema = this.extendedSchemas.get(tool.name);
+    if (!extendedInputSchema) {
+      throw new Error(`Tool "${tool.name}" is not fully registered (missing extended schema).`);
+    }
+    return server.registerTool(
       tool.name,
       {
         title: tool.title,
@@ -1311,7 +1425,6 @@ export class McpServerBase {
         return this.handleToolCall(tool, args);
       },
     );
-    this.sdkTools.set(tool.name, registered);
   }
 
   /**
@@ -2074,6 +2187,7 @@ export class McpServerBase {
     for (const tool of tools) {
       if (this.isToolVisible(tool.name)) {
         this.registerTool(tool);
+        this.sdkTools.set(tool.name, this.registerToolOn(this.mcpServer, tool));
         registeredCount++;
       } else {
         // Track a dynamically-added-but-hidden tool (Epic 30, AC 30.2.2/30.2.1):
@@ -2117,9 +2231,9 @@ export class McpServerBase {
         this.extendedSchemas.delete(name);
         this.wireSchemas.delete(name);
         this.listedTools.delete(name);
-        // Remove from the SDK's registry through the handle `registerTool` returned, so the name can
-        // be registered again. The SDK announces each removal; the debounce on the server (see the
-        // constructor) joins those announcements and the one below into a single notification.
+        // Remove from the SDK's registry through the handle `registerToolOn` returned, so the name can
+        // be registered again. The SDK announces each removal; the debounce on the server (see
+        // `buildMcpServer`) joins those announcements and the one below into a single notification.
         this.sdkTools.get(name)?.remove();
         this.sdkTools.delete(name);
         removedCount++;
@@ -2182,7 +2296,8 @@ export class McpServerBase {
   // ── Transport and startup ──────────────────────────────────────────
 
   /**
-   * Start the MCP server and connect its stdio transport.
+   * Start the MCP server and serve its stdio transport, in the 2025-11-25 era
+   * or revision 2026-07-28 as the client's opening message chooses.
    *
    * Startup sequence:
    * 1. Load config + build the profile registry (if not provided)
@@ -2190,7 +2305,9 @@ export class McpServerBase {
    * 3. Health check via `HEAD /api/atelier/`
    * 4. Negotiate Atelier API version
    * 5. Bootstrap custom REST service for the default profile (if needed)
-   * 6. Connect transport
+   * 6. Serve the transport
+   *
+   * A call while stdio is already being served throws before it reads stdin.
    *
    * Non-default profiles (from `IRIS_PROFILES`) are NOT established here — they
    * are created lazily on first use via {@link getOrCreateClient} (architecture
@@ -2215,6 +2332,8 @@ export class McpServerBase {
    *   transport connected in the last startup step is always stdio.
    */
   async start(_transport: "stdio" = "stdio"): Promise<void> {
+    this.assertNotServing();
+
     // 1. Load config + build the profile registry.
     //    loadConfig is preserved for the default profile's config so existing
     //    single-server behavior is byte-for-byte unchanged.
@@ -2450,17 +2569,34 @@ export class McpServerBase {
       );
     }
 
-    // 5. Connect transport
-    const stdioTransport = new StdioServerTransport();
-    await this.mcpServer.connect(stdioTransport);
+    // 5. Serve stdio. `serveStdio` chooses the era of the connection from its opening message and takes an
+    //    instance from the factory for it: the 2025-11-25 handshake or revision 2026-07-28 (Story 43.2).
+    //    Both options are passed explicitly, so a 2025-era client is served as before.
+    this.assertNotServing();
+    this.servingHandle = serveStdio(this.serverFactory, {
+      legacy: "serve",
+      transport: new StdioServerTransport(),
+    });
     logger.info("Connected via stdio transport");
+  }
+
+  /** Throws when stdio is already being served: a second `start()` must not attach to stdin again. */
+  private assertNotServing(): void {
+    if (this.servingHandle !== undefined) {
+      throw new Error(
+        `${this.options.name}: start() was called while the server is already serving stdio (re-entry). ` +
+          `Call stop() first.`,
+      );
+    }
   }
 
   /**
    * Stop the server (Epic 29, Story 29.1, AC 29.1.3 — the audit shutdown-flush
-   * seam). Closes the transport connection (a safe no-op via `Transport?.`
-   * optional-chaining if {@link start} was never called or already closed),
-   * then — when auditing is ON — AWAITS {@link AuditLogger.shutdown}: it
+   * seam). Closes the serving handle that {@link start} opened (the instance
+   * the connection is pinned to, and the transport); when {@link start} was
+   * never called, or the handle is already closed, it closes the current
+   * instance instead (a safe no-op when nothing is connected). Then, when
+   * auditing is ON, AWAITS {@link AuditLogger.shutdown}: it
    * enqueues the final `droppedEntries` line and drains the write queue, so
    * no entry enqueued up to this point is lost before the process exits.
    *
@@ -2473,7 +2609,14 @@ export class McpServerBase {
    * multiple times; closing an already-closed transport is a no-op too).
    */
   async stop(): Promise<void> {
-    await this.mcpServer.close();
+    const handle = this.servingHandle;
+    this.servingHandle = undefined;
+    if (handle !== undefined) {
+      // Closes the instance the connection is pinned to, and the transport.
+      await handle.close();
+    } else {
+      await this.mcpServer.close();
+    }
     if (this.auditLogger) {
       await this.auditLogger.shutdown();
     }
@@ -2658,7 +2801,10 @@ export class McpServerBase {
 
   // ── Accessors ──────────────────────────────────────────────────────
 
-  /** The underlying MCP SDK server instance, for advanced use cases. */
+  /**
+   * The underlying MCP SDK server instance, for advanced use cases: the instance built at construction until
+   * the stdio entry asks the factory for another, then the latest one it built.
+   */
   get server(): McpServer {
     return this.mcpServer;
   }

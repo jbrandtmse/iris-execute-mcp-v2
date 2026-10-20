@@ -2,9 +2,10 @@
 title: 'Story 43.2: Serve MCP Revision 2026-07-28'
 type: 'feature'
 created: '2026-10-20'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '0ee3ae30c7b43c10b4867c62d6a35bf4252491ff'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
@@ -263,6 +264,58 @@ Every row runs on all five built servers against a closed port, unless the row n
 
 ## Review Triage Log
 
+### 2026-10-20 - Review pass
+- verdicts: 43 findings - high 0, medium 6, low 29, false 8, maybe-false 0
+- layers: blind-hunter 10, edge-case-hunter 9, verification-gap 14, intent-alignment 10 (its numbered divergences). A group of rows shares one root cause and one route.
+- findings:
+  - Blind hunter
+    - `[low]` `[patch]` README and CHANGELOG say other clients are unaffected, but the client record lists Goose (and vendor-claimed Windsurf) as negotiating 2026-07-28 - rewritten: a 2025-only client is unaffected, and any other client that negotiates 2026-07-28 is now served it (README.md, CHANGELOG.md).
+    - `[low]` `[patch]` The mandated-field wording reads as if `resultType` were limited to the cacheable methods - rewritten in CHANGELOG, `packages/shared/README.md` and the changeset: `resultType` and the `_meta` identity on every result, `ttlMs` and `cacheScope` on the six cacheable methods.
+    - `[low]` `[reject]` `serveStdio` is called without `onerror`, so SDK out-of-band reports are dropped, and `start()` no longer observes the transport start; the "Connected" line prints before a client connects - the old `connect` had no `onerror` either and the line printed at the same point; `StdioServerTransport.start()` rejects only with "already started" and a fresh transport is built per call, so the swallowed rejection is unreachable (SDK `stdio.mjs:69`); a logging callback is new behavior, not a correction.
+    - `[medium]` `[patch]` The era `[INFO]` line is hidden under `LOG_LEVEL=WARN` or `ERROR`, and the cross-era pin counts it from stderr, so an exported `LOG_LEVEL` breaks it (38-7 and 39-2 set the level for this reason) - `LOG_LEVEL=INFO` is set in every child the pin starts, and README, shared README and CHANGELOG say "at the default log level".
+    - `[low]` `[reject]` The era line's text is looser than the docs: the probe-discard path writes a modern line for a revision never served, and "(server/discover)" is printed for any modern factory call - the texts are wave-8 decision #10 verbatim (by-design); the docs now say the line names the era of the opening message.
+    - `[low]` `[reject]` The probe-process limit is not tied to Claude Code, the second startup's audit and IRIS side effects are undocumented, and the `ping`, `list_changed` and probe limits have no pinning test - the probe-process docs item is already in this spec's `deferred:` list for 43.4 (AC 43.4.3); the other two are SDK-owned prose limits, a test would pin SDK behavior the SDK may change, and nothing in everyday use meets the gap.
+    - `[medium]` `[patch]` "Byte for byte" is checked after a JSON round trip - (d) now compares the raw golden and live lines with only the `id` set to 0 (`rawWithIdZero`: after `jsonrpc` for an error frame, last for a result frame); (a) stays parsed because stripping the mandated fields needs a parse, which the spec's own `withoutMandatedFields` design requires. Mutation line written.
+    - `[low]` `[patch]` Stale comment in `removeTools` names the constructor for the debounce - now names `buildMcpServer` and `registerToolOn`.
+    - `[low]` `[reject]` The re-entry guard's second `assertNotServing()` has no test, and overlapping `start()` calls run the whole startup before the second throws - no caller overlaps `start()`; the matrix row ("while already serving") is pinned and the second guard still stops a second attach to stdin.
+    - `[low]` `[patch]` The chokepoint test cannot tell a modern session from a legacy one, and `MANDATED_MODERN_FIELDS` is data that nothing reads - the first half is false (a legacy build answers `server/discover` with -32601, `discoverHandshake` throws, and the serving mutation turned the file red); the second half is fixed: `withoutMandatedFields`, `withoutExecution` and `mandatedFieldProblems` now read the field names and pinned values from the table.
+  - Edge case hunter
+    - `[low]` `[reject]` `servingHandle` is cleared only by `stop()`, so a `start()` after the wire closed itself on stdin EOF throws the re-entry error - the process exits at stdin EOF and nothing restarts a server in one process; no realistic path.
+    - `[low]` `[reject]` Two overlapping `start()` calls repeat the IRIS contact before the second throws - same root as the blind-hunter re-entry row.
+    - `[low]` `[reject]` `stop()` clears `servingHandle` before awaiting `close()`, so a `start()` during that await passes the guard - nothing calls `start()` while `stop()` is pending.
+    - `[low]` `[reject]` No `onerror` on `serveStdio` - same root as the blind-hunter `onerror` row.
+    - `[false]` `[reject]` The `connect` await was removed, so a transport start failure no longer fails startup - `StdioServerTransport.start()` rejects only when already started, and each call builds a new transport (SDK `stdio.mjs:69`).
+    - `[medium]` `[patch]` `callThroughClient`'s default branch throws "no client call is mapped", caught as an error outcome that is equal on both eras, so a row passes vacuously - and section (e) never reads `.kind` - added the (e) row "the legacy client's calls reach the server": the tools list has the golden's count, the profiles call is a non-error result, and no error message is the unmapped one. Mutation line written; the old (e) row stayed green under the mutation.
+    - `[low]` `[patch]` `MANDATED_MODERN_FIELDS` is documented as the whole ignore list but the functions hard-code its content - same root as the last blind-hunter row, same fix.
+    - `[false]` `[reject]` `addTools` registers on `this.mcpServer` and a factory rebuild between its two calls would strand a handle - the two calls are synchronous and `addTools` has no production caller (grep of `packages/*/src`).
+    - `[low]` `[reject]` The chokepoint session leaks listener A if listener B or the raw wire fails to start - failure path only; the 43.1 handler-golden helpers have the same shape.
+  - Verification gap
+    - `[low]` `[patch]` The duplicate-tool throw in `registerTool` is pinned by no test - added "a repeated tool name throws the SDK's text from the constructor and from addTools ..." to the new `describe` block. Mutation line written.
+    - `[low]` `[patch]` AC 43.2.3's visibility claim is exercised on `tools/call` only - added "7 tools-list smuggled" to the chokepoint core steps and its equality with the plain list on both eras. Mutation line written.
+    - `[medium]` `[patch]` The stop() row cannot tell `handle.close()` from the old `mcpServer.close()` once a client has connected - added "stop() before any client message closes the transport the stdio entry opened". Mutation line written; it is the only red row.
+    - `[medium]` `[patch]` Section (e) passes if both clients get the same error - same root as the edge-case row on `callThroughClient`; same fix.
+    - `[low]` `[reject]` `expect(NEWER_ERA_REQUEST).toBe(MODERN_ERA)` compares two literals - it ties the golden's request to the era the test serves, and deleting it buys nothing.
+    - `[low]` `[patch]` `MANDATED_MODERN_FIELDS` has no executing consumer - same root and fix as the blind-hunter row.
+    - `[low]` `[reject]` Section (e)'s "calls cover ..." row asserts labels, and the omitted-`arguments` check is vacuous for the data server - the data server registers no prompts, so there is no prompt call to omit arguments from; the anchoring row now covers the outcomes.
+    - `[low]` `[reject]` `every` and `toEqual` pass on empty lists in the first `sdk-wire-compat` 43.2 row - the fixture is non-empty and the row lists it; a length guard is more than a correction.
+    - `[low]` `[patch]` AC 43.2.1's "every instance carries every tool, resource, prompt and the owned handlers" clause has no mutation line - ran the builder-skips-prompts mutation, red in four rows; line written.
+    - `[low]` `[reject]` AC 43.2.1 (record) has no pinning test - it is a documentation deliverable (the Design Notes record and the README wording); a test over static text would assert wording, not behavior.
+    - `[low]` `[reject]` AC 43.2.2a has no line for clause (c) or for the other branches of `mandatedFieldProblems` - one demonstrated mutation per AC; two exist.
+    - `[low]` `[reject]` AC 43.2.3 has no line for the namespace and visibility clauses - one per AC; two exist, and the visibility row now has its own.
+    - `[low]` `[reject]` Back-compat, release bookkeeping, and the (f) and (g) matrix rows have no mutation line - the back-compat pin is the diff-guard command plus the live 43.1 goldens (the `legacy: "reject"` line shows they are live); release bookkeeping is documentation; (f) and (g) are matrix rows, not ACs.
+    - `[low]` `[reject]` `servingHandle` is not cleared when the wire closes by itself - same root as the first edge-case row.
+  - Intent alignment
+    - `[false]` `[reject]` The mandated fields have no producer in the diff, and the spec's mutation list has no entry for the (f) and (g) rows - the SDK encoder produces them by the spec's own Approach; (f) and (g) are matrix rows (see the row above).
+    - `[low]` `[reject]` Stop and Re-entry are shown on an in-memory transport, not on real stdin - the spec's task 2 names the in-memory half; the spawned (g) row covers the real stdin EOF, and the new stop() row now discriminates the handle.
+    - `[false]` `[reject]` The primary client, Claude Code, is not exercised - decision #9 puts the live check on the lead at smoke, and the spec forbids `claude` runs in this stage.
+    - `[medium]` `[patch]` Byte-level claims are checked as parsed JSON - same root and fix as the blind-hunter row.
+    - `[false]` `[reject]` Probe-discard coverage follows reading C1 (`newer-era` runs only its `initialize` row) - the matrix says "`main/initialize` (or `newer-era/initialize`)", and the golden `newer-era` session holds one exchange.
+    - `[low]` `[reject]` The Known limits (`ping`, `list_changed`) are not pinned - same root as the blind-hunter row.
+    - `[low]` `[patch]` Docs say only Claude Code switches while the record lists Goose and a vendor-claimed Windsurf - same root and fix as the first blind-hunter row.
+    - `[false]` `[reject]` The diff edits `scripts/lib` files outside the test trees - task 3 names the additive exports, and the story's file boundary lists only the two test-tree files.
+    - `[false]` `[reject]` Behavior beyond the matrix (start after stop, the duplicate-name throw) - both are pinned by rows now; neither contradicts the intent.
+    - `[false]` `[reject]` The factory reads only `context.era` - confirms the "no `_meta` reads" boundary; nothing to fix.
+
 ## Design Notes
 
 **Governing architecture:**
@@ -492,10 +545,75 @@ Every test added or changed passes on a fresh environment, in either order. No I
 **Manual checks:**
 - `git status --short` shows nothing under `irislib/`, `irissys/` or `extensions/iris-mcp-launcher/package-lock.json`.
 
+**Mutation evidence (Rule 19).** Each mutation was applied with the Edit tool to the built `packages/shared/dist/server-base.js` (or, where marked src, to `packages/shared/src/server-base.ts`), the named tests were run on the closed port, and the edit was reverted by the reverse edit; shared was rebuilt and every test is green again.
+
+mutation: serving (AC 43.2.1, 43.2.2) - `start()` connected a plain `StdioServerTransport` (`await this.mcpServer.connect(new StdioServerTransport())` in place of `serveStdio`) - red: all five suites of `story-43-2-cross-era-pin.test.ts` and `story-43-2-chokepoint-both-eras.test.ts`, both failing in their `beforeAll` on `the server refused server/discover: ... -32601 Method not found`; `story-43-1-sdk-wire-golden.test.ts` stayed green (232) - reverted.
+mutation: a 2025 client is served (AC 43.2.2) - `legacy: "serve"` became `legacy: "reject"` - red: the 43.1 golden (five server suites), the five cross-era suites and the chokepoint file, all on `Unsupported protocol version: 2025-11-25` (-32022) - reverted.
+mutation: factory semantics (AC 43.2.1, D8) - the factory returned the construction instance on every call (`if (!this.constructionInstanceHandedOut)` became `if (true)`) - red: dist, the five cross-era suites (the `initialize` that follows a `server/discover` probe is answered -32601 by the reused modern-marked instance); src, three `sdk-wire-compat.test.ts` rows (probe then `initialize`, probe then `initialize` asking 2026-07-28, add and remove after the probe) - reverted. It did not stay green, so the fallback mutation ("the builder skips prompts") was not needed.
+mutation: the modern `tools/list` pin (AC 43.2.2a) - the owned `tools/list` reversed the tool order when `params._meta` was present: green (334 passed), because the SDK lifts `_meta` off `request.params` before the owned handler runs, so the condition never fired; the discriminator became `ctx.mcpReq.envelope !== undefined` (modern only) - red: 21 tests of `story-43-2-cross-era-pin.test.ts` (the modern `tools-list` rows of (a), and the pinned and `auto` client rows of (e)); the 43.1 golden stayed green (232) - reverted.
+mutation: mandated values (AC 43.2.2a, D7) - the owned `tools/list` returned `ttlMs: 5` - red: the `(b)` rows `main/tools-list: expected [ 'ttlMs is 5, not 0' ] to deeply equal []` on all five servers and `core-preset/tools-list` (11 tests); the `(a)` rows stayed green, because they ignore `ttlMs` by design, which is why `(b)` exists; the 43.1 golden also went red (12 tests), because the member reaches the 2025 encoder too - reverted.
+mutation: `server` from `_meta` (AC 43.2.3) - `callToolFromWire` passed `params._meta.server` as the call's `server` - red: `story-43-2-chokepoint-both-eras.test.ts` call 2, call 5 and the audit row, on both eras (6 tests) - reverted.
+mutation: governance gate skipped for `_meta` (AC 43.2.3) - the gate condition was skipped when the `tools/call` carried `params._meta` - red: the same file, call 5 and the audit row, on both eras (4 tests) - reverted.
+mutation: era line (D10) - the `logger.info` of the factory dropped (src) - red: four rows of `sdk-wire-compat.test.ts` (the discover opening, the probe followed by `initialize`, the probe followed by the `initialize` asking 2026-07-28, and "a 2025 client and a modern client each cause one factory call") - reverted.
+mutation: re-entry guard (matrix row Re-entry) - the `assertNotServing()` call at the top of `start()` removed (src) - red: `sdk-wire-compat.test.ts` "a second start() while serving throws ... before it contacts IRIS or attaches anything" (`expected 3 to be 2` IRIS requests) - reverted.
+mutation: `stop()` (matrix row Stop) - `stop()` skipped `handle.close()` (src) - red: `sdk-wire-compat.test.ts` "stop() closes the serving handle" (`expected true to be false`) - reverted.
+mutation: `stop()` uses the handle (matrix row Stop, review pass) - `stop()` closed `this.mcpServer` in place of the handle (src) - red: `sdk-wire-compat.test.ts` "stop() before any client message closes the transport the stdio entry opened" (`expected false to be true`), the only red row; the earlier "stop() closes the serving handle" row stayed green, which is why the new row exists - reverted.
+mutation: duplicate tool name (AC 43.2.1, review pass) - the duplicate throw of `registerTool` removed (src) - red: `sdk-wire-compat.test.ts` "a repeated tool name throws the SDK's text from the constructor and from addTools ..." (`expected [Function] to throw an error`), the only red row - reverted.
+mutation: builder completeness (AC 43.2.1, review pass) - the builder skipped the prompts once the construction instance was handed out (src), so a rebuilt instance had none - red: four `sdk-wire-compat.test.ts` rows (the probe followed by `initialize`, the probe followed by the `initialize` asking 2026-07-28, add and remove after the probe, `start()` after `stop()`; each fails on `Internal server error` or an undefined `protocolVersion`) - reverted.
+mutation: rebuilt instance is byte-identical (AC 43.2.1, D8, review pass) - on a rebuilt instance only, `instructions` gained one trailing space (dist) - red: the (d) `main` and `newer-era` rows of `story-43-2-cross-era-pin.test.ts` on all five servers (10 tests, now compared as raw lines with only the `id` set to 0); the 43.1 golden stayed green (232) - reverted.
+mutation: tools/list visibility (AC 43.2.3, review pass) - the owned `tools/list` reversed its listing when `params._meta.visible` was set (dist) - red: chokepoint call 7 on both eras (2 tests, `_meta { visible: true } lists no hidden tool`) - reverted.
+mutation: SDK client calls (AC 43.2.2, review pass) - `callToolFromWire` threw on every call, so every `callTool` rejected alike on all three clients (dist) - red: the (e) row "the legacy client's calls reach the server ..." on all five servers, plus rows of (a), (b) and (d); the (e) row "every golden main call comes to what the legacy client saw" stayed green, which is why the anchoring row exists - reverted.
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Implementation pass (2026-10-20), baseline `0ee3ae30c7b43c10b4867c62d6a35bf4252491ff`.**
+- **Summary.** `McpServerBase.start()` serves stdio through `serveStdio(factory, { legacy: "serve", transport: new StdioServerTransport() })` and keeps the handle.
+  - One private builder (`buildMcpServer`) makes every SDK instance from framework state: tools in insertion order, both governance resources, the prompts, then the owned handlers last. `registerTool`, `registerGovernanceResource` and `registerPrompt` only record state, and `addTools` registers each added tool on the current instance.
+  - The factory returns the construction-time instance first and builds a fresh one on any later call (the probe-discard path). Each call writes one INFO line naming the era, with the two texts of decision #10.
+  - A second `start()` while serving throws an error naming the re-entry before it reads config. `stop()` closes the handle, or the current instance when never started.
+  - `registerTool` keeps the SDK's "Tool X is already registered" throw, now raised before the registry is touched.
+  - The 2025 era is unchanged: every 43.1 golden and pin passes with no fixture or assertion change. No ObjectScript, dependency, manifest, lockfile, governance, preset, annotation or catalogue change. `BOOTSTRAP_VERSION` stays `d51856f74d6a` (no move). Tool counts stay 115.
+- **Files changed.**
+  - `packages/shared/src/server-base.ts`: the builder, the factory, `serveStdio`, `stop()` and the re-entry guard.
+  - `packages/shared/src/__tests__/sdk-wire-compat.test.ts`: mock plumbing (spread `importOriginal()`), `boot()`'s option, and the new `describe("Story 43.2: both eras over serveStdio")` (14 rows).
+  - `packages/iris-mcp-all/src/__tests__/process-gate-helpers.ts`: additive `versionNegotiation` option, `getProtocolEra` and `getDiscoverResult`.
+  - `scripts/lib/sdk-wire-golden-core.mjs`: additive modern-era exports (`MODERN_ERA`, `modernEnvelope`, `withEnvelope`, `discoverHandshake`, `MANDATED_MODERN_FIELDS`, `withoutMandatedFields`, `withoutExecution`, `mandatedFieldProblems`, `runModernGoldenSession`, `runProbeDiscardSession`, `SERVER_INFO_META_KEY`, `MODERN_CACHEABLE_METHODS`) and a private `runSession`. `scripts/lib/sdk-handler-golden-core.mjs`: `settledAuditEntries` is exported.
+  - NEW `story-43-2-cross-era-pin.test.ts` (107 tests: (a) to (g) on all five servers) and `story-43-2-chokepoint-both-eras.test.ts` (18 tests: the seven calls on both eras).
+  - Docs: `README.md`, `packages/shared/README.md`, `CHANGELOG.md`, NEW `.changeset/story-43-2-serve-2026-07-28.md` (patch, six packages).
+- **Review findings.** 43 findings from four layers: high 0, medium 6, low 29, false 8.
+  - **Patched (grouped by root cause, 11 entries; 4 medium, 7 low).** Docs wording on other clients and on the mandated fields; the stale `removeTools` comment; `LOG_LEVEL=INFO` pinned in the cross-era pin's children; the (d) rows compared as raw lines; the (e) anchoring row; the stop-before-first-message row; the duplicate-tool row; the smuggled `tools/list` row; `MANDATED_MODERN_FIELDS` read by its three functions; the builder-completeness mutation line.
+  - **Rejected with a recorded reason:** every other finding (see the Review Triage Log). Nothing was deferred.
+  - **Deferred in this pass:** none. The four plan-stage `deferred:` items in the frontmatter are unchanged, for the lead's harvest.
+- **Follow-up review recommendation:** `true` (`followup_review_recommended: true`). Four medium entries were patched (the `LOG_LEVEL` pin, the raw (d) comparison, the (e) anchoring row, the stop-before-first-message row). Unverified risk: the table-driven rewrite of `withoutMandatedFields` and `mandatedFieldProblems` in `sdk-wire-golden-core.mjs`, which 43.4's capstone and the 43.1 raw-wire driver reuse, and the new raw-line comparison have run green and been mutation-checked, but no independent layer reviewed them.
+- **Verification performed (all with `IRIS_HOST=127.0.0.1 IRIS_PORT=1`, launcher also `IRIS_TEST_HOST=127.0.0.1 IRIS_TEST_PORT=1`).**
+  - **Builds** of shared, dev, admin, interop, ops and data: exit 0.
+  - **Package suites, type-check and lint:**
+
+    | Package | Tests | type-check | lint |
+    |---|---|---|---|
+    | shared | 82 files, 2127 passed | 0 | 0 (1 existing warning in `cli/governance.ts`) |
+    | dev | 68 files, 1356 passed, 307 skipped | 0 | 0 |
+    | admin | 35 files, 490 passed, 8 skipped | 0 | 0 |
+    | interop | 30 files, 672 passed | 0 | 0 |
+    | ops | 20 files, 350 passed | 0 | 0 |
+    | data | 9 files, 163 passed, 2 skipped | 0 | 0 |
+    | client-config | 37 files, 1008 passed | 0 | 0 |
+
+  - **`iris-mcp-all`** in thirds (47 + 48 + 47 = 142 files): all green, with the live gates skipped.
+  - **Wire pins** (the spec's command): 8 files, 482 tests, no skip in the `story-43-*` files.
+  - **Launcher:** 5 failed tests in 3 files plus 2 files that cannot load, which is exactly the DW-532 set.
+  - **Gates:** `gen:governance-baseline:check` OK (141 frozen keys), `gen:tools-list-snapshot:check` OK (115), `validate:prompts`, `gen:skills:check` and `gen:pack:check` OK.
+  - **Diff checks:** the only pre-existing files changed under a test tree are `sdk-wire-compat.test.ts` and `process-gate-helpers.ts`; no removed or changed assertion line; the fixtures are unchanged; `git diff --name-only` lists no `bootstrap-classes.ts`, `package.json` or `pnpm-lock.yaml`; nothing under `irislib/`, `irissys/` or the launcher lockfile.
+  - **Shuffled runs** (seeds 11 and 22) of the added and changed tests: green.
+  - **Mutations:** 16 `mutation:` lines under `## Verification` (10 from the handoff, 6 from this review pass); every one was applied, observed red, and reverted, with the tree rebuilt and re-checked against the reviewed diff.
+- **Residual risks and notes for the lead.**
+  - **Shared IRIS instance was contacted once.** The handoff subagent ran `pnpm --filter @iris-mcp/dev test` once without `IRIS_HOST=127.0.0.1 IRIS_PORT=1`. Dev's live gates then ran against `localhost:52773` as the default user in HSCUSTOM and wrote their disposable `ExecuteMCPv2.Temp.QaStory*` fixtures; they passed, including their own no-fixture-left checks. This stage made no IRIS call to confirm the cleanup. Check HSCUSTOM for leftover `ExecuteMCPv2.Temp.*` documents and globals. Every other run, and the dev rerun here, used the closed port.
+  - **Observed, now pinned:** a call with `server: "nope"` writes an audit entry with outcome `error`, profile `nope` and an empty namespace, on both eras.
+  - **D9 is still open:** the live Claude Code check runs at the lead's smoke; no `claude` run happened here.
+  - **Finalize check:** `orchestrator-decisions-wave-8.md` carries the lead's own uncommitted edit and was left unstaged, so the tree is clean apart from that file.
 
 **Planning pass (2026-10-20).** The story is planned and halted after planning, as instructed.
 - **Probes.** They ran in a scratch copy, since deleted, with no IRIS contact.

@@ -161,6 +161,8 @@ The shared package provides the HTTP communication layer, MCP protocol handling,
 
 `@iris-mcp/shared` is the only package that imports the MCP SDK. It runs on the SDK v2 server package (`@modelcontextprotocol/server`, pinned to an exact version), and `McpServerBase` serves `tools/list`, `tools/call`, `prompts/get` and `resources/read` itself, through the SDK's public `setRequestHandler`, so the bytes a 2025-11-25 client reads do not depend on how the SDK formats them. A `tools/call` is validated inside the audited call path, so a schema-invalid call writes its audit entry.
 
+`McpServerBase.start()` serves stdio through the SDK's `serveStdio`, which serves both protocol revisions from one process: the 2025-11-25 `initialize` handshake and revision 2026-07-28 (`server/discover` with a per-request `_meta` envelope). One builder makes each SDK instance from the framework's state (every visible tool, the governance resources, every prompt, then the owned handlers), and the factory `serveStdio` calls takes the instance built at construction first, so `server` is the instance that serves. At the default log level, each factory call writes one `[INFO]` line naming the era of the message the connection opened with. The two revisions answer the same content: the 2026-07-28 wire is the 2025-11-25 wire plus the fields that revision mandates (`resultType` and the server identity in `_meta` on every result, `ttlMs` and `cacheScope` on the cacheable methods), minus the tools' `execution`. A per-request `_meta` key never changes `server` or namespace resolution, governance, visibility or the audit entry.
+
 The connection flow is:
 1. Server starts and loads configuration from environment variables
 2. `McpServerBase` initializes the MCP transport (stdio)

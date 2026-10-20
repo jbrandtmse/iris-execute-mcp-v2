@@ -236,6 +236,10 @@ export interface SdkClient {
   getServerVersion: () => { name: string; version: string } | undefined;
   getInstructions: () => string | undefined;
   getNegotiatedProtocolVersion: () => string | undefined;
+  /** The era the connect negotiated (`modern` for 2026-07-28, `legacy` for the 2025 handshake), once connected. */
+  getProtocolEra: () => "legacy" | "modern" | undefined;
+  /** The `server/discover` result a probing or pinned connect adopted; `undefined` on a legacy connect. */
+  getDiscoverResult: () => Record<string, unknown> | undefined;
   /** Send a request exactly as given. Unlike the typed methods above, it is not skipped for a capability the server never advertised. */
   request: (request: { method: string; params?: Record<string, unknown> }) => Promise<unknown>;
 }
@@ -261,6 +265,9 @@ export interface WireSession {
   close: () => Promise<void>;
 }
 
+/** How the SDK client negotiates the protocol revision: `legacy` is the plain 2025 handshake, `auto` probes, `pin` requires the revision. */
+export type SdkVersionNegotiation = { mode: "legacy" | "auto" | { pin: string } };
+
 /** What a wire session needs to start a built server and name its target. */
 export interface WireSessionOptions {
   /** The MCP client's ESM build (see {@link resolveSdkEsmDir}). */
@@ -273,12 +280,15 @@ export interface WireSessionOptions {
   clientName: string;
   /** Receives each chunk the server writes to stderr (its log); omitted, the chunks are discarded. */
   onStderr?: (chunk: string) => void;
+  /** The client's negotiation mode; omitted, `{ mode: "legacy" }` is sent explicitly. */
+  versionNegotiation?: SdkVersionNegotiation;
 }
 
 /**
  * Spawn the built server with `extraEnv` on top of the explicit connection settings, and connect the
- * SDK client to it over stdio in its legacy mode (the plain 2025-11-25 connect: no probe and no
- * 2026-07-28 headers). Resolves with the connected client; the caller closes it.
+ * SDK client to it over stdio in `options.versionNegotiation` (default legacy: the plain 2025-11-25
+ * connect, with no probe and no 2026-07-28 headers). Resolves with the connected client; the caller
+ * closes it.
  */
 export async function connectSdkClient(
   options: WireSessionOptions,
@@ -287,7 +297,7 @@ export async function connectSdkClient(
   const sdkClientIndex = pathToFileURL(path.join(options.sdkEsmDir, "index.mjs")).href;
   const sdkClientStdio = pathToFileURL(path.join(options.sdkEsmDir, "stdio.mjs")).href;
   const { Client } = (await import(sdkClientIndex)) as {
-    Client: new (info: { name: string; version: string }, options: { versionNegotiation: { mode: "legacy" } }) => SdkClient;
+    Client: new (info: { name: string; version: string }, options: { versionNegotiation: SdkVersionNegotiation }) => SdkClient;
   };
   const { StdioClientTransport } = (await import(sdkClientStdio)) as {
     StdioClientTransport: new (params: {
@@ -309,7 +319,10 @@ export async function connectSdkClient(
     options.onStderr?.(chunk.toString());
   });
 
-  const client = new Client({ name: options.clientName, version: "0.0.0" }, { versionNegotiation: { mode: "legacy" } });
+  const client = new Client(
+    { name: options.clientName, version: "0.0.0" },
+    { versionNegotiation: options.versionNegotiation ?? { mode: "legacy" } },
+  );
   await client.connect(transport);
   return client;
 }

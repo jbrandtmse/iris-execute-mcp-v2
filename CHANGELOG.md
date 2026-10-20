@@ -2,6 +2,51 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-20] — Story 43.2: Serve MCP revision 2026-07-28
+
+The change is additive. No tool, action, governance key, preset row, annotation, prompt, refusal code, environment variable or route is
+added or changed, and no ObjectScript class is touched: the suite stays at 115 advertised tools (33, 27, 25, 22 and 8), the frozen
+governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and `BOOTSTRAP_VERSION` stays at `d51856f74d6a`. **The 2025-11-25 wire is
+unchanged**: every golden line of Story 43.1 and every pin passes with its fixture and assertion lines as they were, so no AD-15 sanction
+is needed.
+
+### Added
+
+- **Every server also serves MCP revision 2026-07-28 over stdio (AD-32).** `McpServerBase.start()` serves stdio through the SDK's
+  `serveStdio` with `legacy: "serve"` and the transport passed explicitly. The client's first message chooses the revision: an
+  `initialize` is the 2025-11-25 handshake, and a `server/discover` with the per-request `_meta` envelope is 2026-07-28. One builder makes
+  each SDK instance from the framework's state (the visible tools, the governance resources, the prompts and the framework's own
+  handlers), and the factory `serveStdio` calls hands out the instance built at construction first, so `server` is the instance that
+  serves. A `server/discover` probe followed by an `initialize` on one connection discards the probe and builds a second, complete
+  instance for the 2025-11-25 handshake. At the default log level, each factory call writes one stderr `[INFO]` line naming the era of
+  the message the connection opened with (`server/discover` or `initialize`).
+- **The two revisions answer the same content.** The 2026-07-28 wire is the 2025-11-25 wire plus the fields that revision mandates
+  (`resultType` and the server identity in `_meta` on every result, `ttlMs` and `cacheScope` on the cacheable methods), minus the tools'
+  `execution`, with `server/discover` in place of `initialize` and the JSON-RPC `id` as framing. `story-43-2-cross-era-pin.test.ts` pins this on all
+  five built servers against the frozen 43.1 golden, byte for byte, and pins the mandated fields by value; it also runs SDK clients on
+  `{ pin: "2026-07-28" }` and on `auto` against a legacy one, and the probe-discard path.
+- **A per-request `_meta` key never bypasses the call-time chokepoint (AD-3).** `story-43-2-chokepoint-both-eras.test.ts` drives `server`
+  and namespace resolution, the governance gate, visibility and the audit entry on both revisions against two fake IRIS profiles, with
+  `_meta` keys that try to steer each of them.
+- **Claude Code switches to 2026-07-28 with this release.** Claude Code 2.1.292 and later negotiate 2026-07-28 with stdio servers by
+  default, and fell back to 2025-11-25 against earlier servers. `MCP_PROTOCOL_NEGOTIATION=legacy`, set in Claude Code's own environment
+  (not in a server entry's `env`), keeps the 2025-11-25 handshake. A client that speaks only 2025-11-25 is unaffected, and any other
+  client that negotiates 2026-07-28 is now served that revision.
+- **Test helpers.** `scripts/lib/sdk-wire-golden-core.mjs` gains the modern-era driver (`MODERN_ERA`, `modernEnvelope`, `withEnvelope`,
+  `discoverHandshake`, `runModernGoldenSession`, `runProbeDiscardSession`), the list of mandated fields (`MANDATED_MODERN_FIELDS`) and the
+  functions that apply it (`withoutMandatedFields`, `withoutExecution`, `mandatedFieldProblems`); `connectSdkClient` takes a
+  `versionNegotiation` mode (default legacy, sent explicitly).
+
+### Known limits
+
+All three are the SDK's, and none changes a 2025-11-25 client.
+
+- On the 2026-07-28 revision a `ping` is answered `-32601`.
+- On the 2026-07-28 revision `notifications/tools/list_changed` reaches only a client that opened a `subscriptions/listen`
+  subscription. Nothing in production adds or removes tools after startup.
+- A v2 SDK client on `auto` or `{ pin }` that uses the SDK's stdio transport starts a short-lived probe process from the same command for
+  each connect, which runs the server's whole startup once more.
+
 ## [Pre-release — 2026-10-20] — Story 43.1: Framework migration to SDK v2
 
 No tool, action, governance key, preset row, prompt, refusal code, environment variable or route is added or changed, and no

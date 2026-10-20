@@ -113,7 +113,7 @@ export function withSessionVersion(entries, version) {
 }
 
 /** Wait until the audit file holds at least `minimum` lines and has stopped growing, then return its entries. */
-async function settledAuditEntries(file, minimum) {
+export async function settledAuditEntries(file, minimum) {
   const read = () =>
     (existsSync(file) ? readFileSync(file, 'utf8') : '')
       .split('\n')
