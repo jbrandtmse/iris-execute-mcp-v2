@@ -124,7 +124,7 @@
 # put new epic notes in epics.md, not here.
 
 generated: '2026-04-05'
-last_updated: '10-20-2026 04:06'
+last_updated: '10-20-2026 05:12'
 previous_update: '2026-09-16 (Story 37.1 dev complete via bmad-dev-story - ready-for-dev
   -> review. Fixed McpServerBase.start(): a default-profile health-check rejection
   no longer calls process.exit(1) - it logs (health-check-failed line + a new continuation
@@ -553,7 +553,7 @@ development_status:
 
   epic-43: in-progress
   43-1-framework-migration-to-sdk-v2: done
-  43-2-serve-mcp-revision-2026-07-28: in-progress
+  43-2-serve-mcp-revision-2026-07-28: review
   43-3-human-confirmation-through-elicitation: backlog
   43-4-sdk-v2-docs-smokes-and-capstone: backlog
   epic-43-retrospective: optional

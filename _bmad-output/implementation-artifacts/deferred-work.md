@@ -3446,6 +3446,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 41.6 plan research 2026-10-19: Pi MCP since 0.99.0 (.pi/mcp.json), Kilo kilo.json[c] mcp key, Junie .junie/mcp/mcp.json, all still excluded/roadmap; adapters.ts:579-601, :480
 - 2026-10-19T22:31:15Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=re-disposition the three MCP-capable clients, rename or retire the stale rows, fix docsUrl, bump ADAPTER_DATA_VERSION with the certification table, before 1.0
 - 2026-10-20T02:12:59Z occurrence=41-7-skills-pack-docs-and-capstone by=cr note=PACK_TARGETS too: the gemini row's own note says Antigravity CLI replaced Gemini CLI for unpaid users; no row or id names it
+- 2026-10-20T12:12:41Z occurrence=43-2-serve-mcp-revision-2026-07-28 note=43.2 plan research 2026-10-20: pi MCP since 0.99.0 (stdio+streamable HTTP, ~/.pi/agent/mcp.json, .pi/mcp.json; npm now @earendil-works/pi-coding-agent); windsurf adapter may write a config Devin Desktop ignores (Cascade removed v3.9.19 2026-09-08; mcp_config.json legacy-Cascade-only); goose repo now aaif-goose/goose, docs goose-docs.ai
 
 ### DW-627: The default iris-mcp-all test sweep reaches a local IRIS: the live gates default to localhost:52773 / HSCUSTOM and run their legs whenever that instance answers, with no opt-in
 - source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3453,6 +3454,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-19T22:31:15Z status=routed owner=42-2-bootstrap-downgrade-guard by=harvest note=same class as DW-518: a contributor's plain pnpm test must not touch an instance; gate every live leg on an explicit opt-in (IRIS_REQUIRE_LIVE or an IRIS_HOST the caller set) before 1.0, keeping the armed lead/CI runs
 - 2026-10-20T04:42:43Z status=routed owner=42-2-bootstrap-downgrade-guard by=lead note=reference: Story 41.8's story-41-8-qa-accept-language-live-gate.test.ts is the opt-in shape (legs run only with IRIS_REQUIRE_LIVE=1 and all five IRIS_*; a guard test proves zero requests unarmed); the prepublish gate must then export all five IRIS_* (42.6)
 - 2026-10-20T07:58:39Z occurrence=43-1-framework-migration-to-sdk-v2 note=the two launcher SDK-client tests (governanceUiRoundTrip, localSpawnIntegration) read IRIS_TEST_HOST/IRIS_TEST_PORT defaulting to localhost:52773 HSCUSTOM and ignore IRIS_HOST/IRIS_PORT; a 43.1 plan probe reached the shared instance through them (read-only)
+- 2026-10-20T12:12:41Z occurrence=43-2-serve-mcp-revision-2026-07-28 note=43.2 implement handoff ran pnpm --filter @iris-mcp/dev test with no IRIS_* set; dev's live gates wrote and removed their disposable ExecuteMCPv2.Temp.QaStory* fixtures on the shared instance (lead verified no leftovers)
 
 ### DW-628: The documented npx form npx -y @iris-mcp/client-config iris-mcp-clients <command> passes iris-mcp-clients to the CLI as its command (unknown-command once published) and carries no @1 pin
 - source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: med | fix-risk: low | footprint: out-of-footprint
@@ -3526,3 +3528,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 43.1 review: the SDK Server re-encodes the owned handler's result in its schema order; JSON value identical; no public option keeps v1 order
 - 2026-10-20T07:58:39Z status=by-design owner=43-1-framework-migration-to-sdk-v2 by=harvest note=sanctioned AD-15 exception, wave-8 decision 4; pinned by the sdk-wire-compat row
 - 2026-10-20T08:51:38Z status=dropped owner=43-1-framework-migration-to-sdk-v2 by=lead note=invalid premise (wave-8 decision 5): QA showed v1's SDK server already re-encoded every tools/call result in schema order (content, structuredContent, isError); v1 baseline vs v2 byte-identical on 22 handler-golden rows and 90 sweep results
+
+### DW-641: A TS SDK v2 client on auto or pin negotiation (Claude Code since 2.1.292) spawns a short-lived probe process from the same command on every connect, which runs the server's whole startup (bootstrap probe, config load) once more
+- source: _bmad-output/implementation-artifacts/spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 43.2 plan probe 2026-10-20: one factory call per process per client mode; the extra process is the client's version probe, predates 43.2
+- 2026-10-20T12:12:41Z status=routed owner=43-4-sdk-v2-docs-smokes-and-capstone by=harvest note=43.4 documents it in the client docs (startup cost, log lines appearing twice) and checks the probe process exits cleanly in its live smoke
