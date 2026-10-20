@@ -145,3 +145,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-20T02:23:38Z	Story 41.7	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=580 result=pass order=forward,reverse files=14 model=claude-opus-5-5
 2026-10-20T02:23:40Z	Story 41.7	committed	sha=9a2feb5 code_sha=0314a7c build_sha=4046924 submodules= ci=none run=none branch=epic41 pushed=origin/epic41 verified=merge-base amendments=ARCHITECTURE-SPINE.md:conv,epics.md:42.1_DW-628/630,42.9_DW-629/631/632
 2026-10-20T02:23:40Z	Story 41.7	story_cycle	plan_to_commit_min=155 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-20T02:24:50Z	Epic 41	ledger_burndown_complete	story_closable=1 chartered=41-8-epic-41-burn-down(DW-622) reowned_next_epic=0 terminal_now=0 decision_items=DW-615(decision-pending) decision=43 model=claude-opus-5-5

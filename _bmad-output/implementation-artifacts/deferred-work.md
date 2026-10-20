@@ -3416,6 +3416,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 41.3 plan probes 2026-10-19: GetErrorText(sc,fr)='ERREUR #5001: disk full', GetErrorText(sc,de)='FEHLER #5001: disk full'; src/ExecuteMCPv2/Utils.cls:179-185 loops over 'ERROR #' and the Arabic word only; the epic-11 retro predicted this
 - 2026-10-19T12:10:06Z status=routed owner=burndown by=harvest note=fix-pack-sized LOW (strip the localized prefix generically, a pinned test per locale, bootstrap moves): into the Epic 41 burn-down story if one is chartered, else wontfix-accepted with a probe at the gate
 - 2026-10-19T13:21:44Z occurrence=41-3-core-knowledge-skills
+- 2026-10-20T02:24:50Z status=routed owner=41-8-epic-41-burn-down by=burndown note=chartered at the Epic 41 burn-down gate (decision 43): strip one leading localized ERROR-#N prefix generically, a live-pinned row per instance locale, bootstrap moves
 
 ### DW-623: Story 41.5's pack-wide no-internal-references check must accept the exact adaptation header line of an adapted skill (it names the upstream project and IRIS-MCP-THIRD-PARTY-NOTICES.md), but that obligation is recorded only in the 41.4 spec's Consumed-by note
 - source: spec-41-4-platform-knowledge-skills.md | severity: med | fix-risk: low | footprint: in-epic

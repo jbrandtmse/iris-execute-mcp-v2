@@ -5640,6 +5640,16 @@ Embedded SQL, IRIS system-class discipline, and interoperability patterns. Adapt
 - DW-611: the real-tree provenance tests need client-config's built dist, but nothing orders `@iris-mcp/all`'s test after `@iris-mcp/client-config`'s build, and the turbo cache key of `@iris-mcp/all`'s test omits the pack inputs (`skills-pack-src/`, `skills/`, `scripts/`). The capstone runs in the default suite, so add the ordering (a workspace devDependency or turbo `inputs`) and pin that a pack-source change invalidates the cached green. The cache inputs must also cover client-config's `package.json`, its `skills-pack/**` and the built `dist/` the gate fixtures copy (widened by the Story 41.1 code review). (ledger; routed by harvest 2026-10-19)
 - DW-624: the pack docs read a declared tool preset as if the presets were nested, but they are not. `provision-project-environment` declares `core` and names `iris_user_manage`, which the admin server's `developer` preset hides, so a `developer`-preset user installs a `core` skill they can't run. The root README pack section and the catalog that supersedes `skills/README.md` say the presets are not nested, so a skill's preset names the smallest preset that shows its tools, not one that every larger preset includes. (ledger; routed by the Story 41.5 code review 2026-10-19)
 
+### Story 41.8: Epic 41 Burn-down
+
+This is the `/epic-cycle` burn-down story, chartered on 2026-10-20 at Epic 41's burn-down gate during the unattended run (orchestrator decision #43). Epic 41 left one story-closable ledger entry with the burn-down owner, and it is closed here. DW-615 is a human decision and goes to the decision sheet instead.
+
+- DW-622: `ExecuteMCPv2.Utils:SanitizeError` strips a leading `ERROR #N: ` prefix only in English and Arabic (`src/ExecuteMCPv2/Utils.cls`, the prefix loop). This instance also has French and German message tables (`ERREUR #5001: …`, `FEHLER #5001: …`, probed 2026-10-19), so a status read in those languages keeps its prefix and doubles when it is re-wrapped (project rules #8 and #13).
+  - **The fix.** Strip ONE leading localized prefix generically: a short word, then ` #`, digits and `: `. Never strip a `<TOKEN>`-style item.
+  - **Pins.** One pinned case per locale the instance has, taken from live `GetErrorText` output rather than hand-typed (Rule #36), plus negative controls for text that only looks like a prefix.
+  - **Bootstrap.** `ExecuteMCPv2.Utils` is bootstrapped, so `pnpm gen:bootstrap` runs in the same story and records `BOOTSTRAP_VERSION` from → to (Rule #24).
+  - (ledger; chartered at the burn-down gate 2026-10-20)
+
 ## Epic 42: Published Install & Distribution (added 2026-10-14)
 
 **Goal:** Installing the suite becomes "install Node 22, run one command":
