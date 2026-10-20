@@ -3441,3 +3441,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: 41.6 implement 2026-10-19: the (once) sweep with no IRIS_* set ran 182 (third 0) and 195 (third 1) live-gate tests against the shared instance (no leftovers found); with IRIS_HOST=127.0.0.1 IRIS_PORT=1 they skip; epic35-defect-gate.test.ts:50 reads IRIS_HOST ?? localhost, as do the story-39/40 and epic38/40 capstone gates
 - 2026-10-19T22:31:15Z status=routed owner=42-2-bootstrap-downgrade-guard by=harvest note=same class as DW-518: a contributor's plain pnpm test must not touch an instance; gate every live leg on an explicit opt-in (IRIS_REQUIRE_LIVE or an IRIS_HOST the caller set) before 1.0, keeping the armed lead/CI runs
+
+### DW-628: The documented npx form npx -y @iris-mcp/client-config iris-mcp-clients <command> passes iris-mcp-clients to the CLI as its command (unknown-command once published) and carries no @1 pin
+- source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.7 plan 2026-10-20: clients-cli.ts:14 runCli(process.argv.slice(2)), clients.ts:1966 takes argv[0] as the command; the form is at packages/client-config/README.md:17, docs/client-config/README.md:5, docs/client-config/{claude-code,claude-desktop,cursor}.md:4; certification-docs.test.ts:88 pins it
+- 2026-10-20T01:15:16Z status=routed owner=42-1-pre-publish-package-fixes by=harvest note=42.1 (AC 42.1.6 owns the npx pin): likely npx -y -p @iris-mcp/client-config@1 iris-mcp-clients <command>, verified against the published package; move the certification-docs pin
+
+### DW-629: The why text of the cursor and vscode PACK_TARGETS rows never says the client reads .agents/skills/, the claim that justifies their route
+- source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.7 review 2026-10-20: the generated Skills pack targets table in packages/client-config/README.md; Cursor names .cursor/.claude/.codex skills, VS Code names .github/.claude skills; every other agents-route row states .agents/skills/
+- 2026-10-20T01:15:16Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=re-read both clients' skills docs with DW-626's re-dispositions, fix the two why texts in pack-targets.ts, re-render the table
+
+### DW-630: packages/client-config/package.json description still reads 'read-only foundation; writes arrive in Epic 33 Story 33.1' though the package writes client configs and installs the skills pack
+- source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.7 review 2026-10-20: packages/client-config/package.json:4; npm-facing summary before the first publish
+- 2026-10-20T01:15:16Z status=routed owner=42-1-pre-publish-package-fixes by=harvest note=rewrite the npm description with the other package.json metadata fixes (DW-31)

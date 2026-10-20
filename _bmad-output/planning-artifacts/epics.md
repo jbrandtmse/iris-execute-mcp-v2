@@ -5720,6 +5720,8 @@ The decision record's fix table, except DW-508 (42.2) and IPM (42.4). Ledger: DW
 - **AC 42.1.7** — The documented `npx … @iris-mcp/client-config iris-mcp-clients` command (`packages/client-config/README.md:17`) is corrected. The correct invocation of a scoped package with a differently named `bin` is probed, and every documented instance is fixed (Rule #56).
 - **AC 42.1.8** — The `npm pack --dry-run` file list for each package is recorded in the story record.
 - DW-560: correct the existing-tool annotation divergences before 1.0. `iris_sql_execute`, `iris_execute_command` and `iris_doc_put` get `destructiveHint: true`, because each can delete or overwrite state. This is a sanctioned AD-15 hint correction (orchestrator decision #18, Epic 38 decision sheet, 2026-10-16). Rule #44's cross-check and the annotation sweeps move with it, and the CHANGELOG records it. (ledger; routed by merge_gate 2026-10-16)
+- DW-628 (evidence for AC 42.1.7): `clients-cli.ts:14` passes `process.argv.slice(2)` to `runCli`, which takes the first argument as the command. So `npx -y @iris-mcp/client-config iris-mcp-clients <command>` fails as an unknown command once the package is published, and it has no `@1` pin. The form appears at `packages/client-config/README.md:17`, `docs/client-config/README.md:5` and `docs/client-config/{claude-code,claude-desktop,cursor}.md:4`, and `certification-docs.test.ts:88` pins it. (ledger; routed by harvest 2026-10-20)
+- DW-630: `packages/client-config/package.json`'s `description` still reads "read-only foundation; writes arrive in Epic 33 Story 33.1". Rewrite it with the other `package.json` metadata fixes (DW-31). (ledger; routed by harvest 2026-10-20)
 
 ### Story 42.2: Bootstrap Downgrade Guard
 
@@ -5851,6 +5853,7 @@ DW-441.
   - the Goose `docsUrl` returns 404.
 
   Before re-certifying, re-disposition those clients and bump `ADAPTER_DATA_VERSION` with the certification table. (ledger; routed by harvest 2026-10-19)
+- DW-629: the `why` text of the `cursor` and `vscode` rows of `PACK_TARGETS` never says the client reads `.agents/skills/`, the folder the installer writes for both. Re-read both clients' skills docs together with DW-626, fix the two rows in `pack-targets.ts`, and re-render the client-config README table. (ledger; routed by harvest 2026-10-20)
 
 ## Epic 43: MCP SDK v2 Migration (added 2026-10-15)
 
