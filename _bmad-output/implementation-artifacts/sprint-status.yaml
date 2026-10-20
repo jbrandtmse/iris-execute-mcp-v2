@@ -551,8 +551,8 @@ development_status:
   42-9-install-docs-and-client-re-certification: backlog
   epic-42-retrospective: optional
 
-  epic-43: backlog
-  43-1-framework-migration-to-sdk-v2: ready-for-dev
+  epic-43: in-progress
+  43-1-framework-migration-to-sdk-v2: in-progress
   43-2-serve-mcp-revision-2026-07-28: backlog
   43-3-human-confirmation-through-elicitation: backlog
   43-4-sdk-v2-docs-smokes-and-capstone: backlog
