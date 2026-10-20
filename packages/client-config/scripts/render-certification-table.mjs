@@ -1,38 +1,50 @@
 #!/usr/bin/env node
 /**
- * `render-certification-table.mjs` — generates the README's adapter table and
- * certification disposition sections (Story 33.4, AC 33.4.1/33.4.3; Rule
- * #51/#56 discipline: the tables are GENERATED from `CLIENT_ADAPTERS` ⨝
- * `scripts/certification-results.json`, never hand-authored).
+ * `render-certification-table.mjs` generates the README's adapter table,
+ * certification disposition and skills-pack-targets sections (Story 33.4,
+ * AC 33.4.1/33.4.3; Story 41.7; Rule #51/#56 discipline: the tables are
+ * GENERATED from `CLIENT_ADAPTERS` joined with `scripts/certification-results.json`
+ * and from `PACK_TARGETS`, never hand-authored).
  *
  * The generator REQUIRES one results record per registry adapter (the
  * enumeration is exhaustive by construction — a missing record fails the
- * render, so a new client can never ship an undocumented disposition).
+ * render, so a new client can never ship an undocumented disposition). The
+ * skills-pack-targets section has its own roster guard (exit 2).
  *
  * Usage:
  *   node scripts/render-certification-table.mjs           # rewrite the README marker sections
  *   node scripts/render-certification-table.mjs --check   # exit 1 when the README is out of sync
  *
  * Requires a built dist (`npm run build`) — adapter data is imported from
- * ../dist/adapters.js so the generated docs can never drift from the data
- * the engine actually uses.
+ * ../dist/adapters.js and the pack targets from ../dist/pack-targets.js so
+ * the generated docs can never drift from the data the engine and the
+ * installer actually use.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const README_PATH = path.join(PACKAGE_ROOT, "README.md");
 const RESULTS_PATH = path.join(PACKAGE_ROOT, "scripts", "certification-results.json");
+const CLAUDE_CODE_RULES_DIR = path.join(PACKAGE_ROOT, "skills-pack", "rules", "claude-code");
 
 const { CLIENT_ADAPTERS, ADAPTER_DATA_VERSION } = await import("../dist/adapters.js");
+const { PACK_TARGETS, PACK_ROUTES, PACK_TARGETS_CHECKED_ON, RULE_FORM_EXTENSIONS } = await import(
+  "../dist/pack-targets.js"
+);
 const results = JSON.parse(readFileSync(RESULTS_PATH, "utf8"));
 
 const ADAPTER_BEGIN = "<!-- ADAPTER-TABLE:BEGIN -->";
 const ADAPTER_END = "<!-- ADAPTER-TABLE:END -->";
 const CERT_BEGIN = "<!-- CERTIFICATION-TABLE:BEGIN -->";
 const CERT_END = "<!-- CERTIFICATION-TABLE:END -->";
+const PACK_BEGIN = "<!-- PACK-TARGETS-TABLE:BEGIN -->";
+const PACK_END = "<!-- PACK-TARGETS-TABLE:END -->";
+
+/** The number of rows `PACK_TARGETS` holds: the 13 adapters, the 3 dispositions and the generic `agents` row. */
+const EXPECTED_PACK_TARGET_COUNT = 17;
 
 // ────────────────────────────────────────────────────────────────────
 // Roster validation (Rule #56): one record per adapter, no extras.
@@ -68,6 +80,56 @@ for (const id of adapterIds) {
     console.error(`render: ${id} is fixture-only-with-residual-risk but lacks a note`);
     process.exit(2);
   }
+}
+
+// --------------------------------------------------------------------
+// Roster validation for the skills pack targets (Rule #56): the table is
+// exhaustive over PACK_TARGETS, and every row is renderable.
+// --------------------------------------------------------------------
+
+function packRosterProblems() {
+  const problems = [];
+  if (PACK_TARGETS.length !== EXPECTED_PACK_TARGET_COUNT) {
+    problems.push(`PACK_TARGETS has ${PACK_TARGETS.length} rows, expected ${EXPECTED_PACK_TARGET_COUNT}`);
+  }
+  const seen = new Set();
+  for (const target of PACK_TARGETS) {
+    if (seen.has(target.id)) problems.push(`duplicate id "${target.id}"`);
+    seen.add(target.id);
+    if (target.route !== null && PACK_ROUTES[target.route] === undefined) {
+      problems.push(`${target.id}: route "${target.route}" has no PACK_ROUTES entry`);
+    }
+    if (target.route === null && (typeof target.noRouteReason !== "string" || target.noRouteReason === "")) {
+      problems.push(`${target.id}: a null route needs a noRouteReason`);
+    }
+    if (!Array.isArray(target.sources) || target.sources.length === 0 || !target.sources.every((url) => url.startsWith("https://"))) {
+      problems.push(`${target.id}: every row needs at least one https:// source`);
+    }
+  }
+  return problems;
+}
+
+const packProblems = packRosterProblems();
+if (packProblems.length > 0) {
+  console.error(`render: PACK_TARGETS roster violation: ${packProblems.join("; ")}`);
+  process.exit(2);
+}
+
+/** The always-on rules' stems: the file names under skills-pack/rules/claude-code/, without `.md`. */
+function ruleStems() {
+  let names = [];
+  try {
+    names = readdirSync(CLAUDE_CODE_RULES_DIR);
+  } catch {
+    names = [];
+  }
+  return names.filter((name) => name.endsWith(".md")).map((name) => name.slice(0, -".md".length)).sort();
+}
+
+const RULE_STEMS = ruleStems();
+if (RULE_STEMS.length === 0) {
+  console.error(`render: no always-on rule found under ${CLAUDE_CODE_RULES_DIR}`);
+  process.exit(2);
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -194,6 +256,53 @@ function renderCertificationDetails() {
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
 }
 
+// --------------------------------------------------------------------
+// Section 3: the skills pack targets (Story 41.7).
+// --------------------------------------------------------------------
+
+/** A table cell: a `|` inside the text must not end the cell. */
+function cell(text) {
+  return text.replaceAll("|", "\\|");
+}
+
+function skillsDirCell(target) {
+  return target.route === null ? "none" : `\`${PACK_ROUTES[target.route].skillsDir}/\``;
+}
+
+function ruleCell(target) {
+  if (target.route === null) return "none";
+  const rule = PACK_ROUTES[target.route].rule;
+  if (rule.kind === "block") return `a marked block in \`${rule.host}\``;
+  return RULE_STEMS.map((stem) => `\`${rule.dir}/${stem}${RULE_FORM_EXTENSIONS[rule.form]}\``).join(", ");
+}
+
+function whyCell(target) {
+  const parts = [target.why, ...target.notes.map((note) => `Installer note: ${note}`)];
+  if (target.route === null) parts.push(`Refused: ${target.noRouteReason}`);
+  return cell(parts.join(" "));
+}
+
+function sourcesCell(target) {
+  return target.sources.map((url, index) => `[${index + 1}](${url})`).join(", ");
+}
+
+function renderPackTargetsTable() {
+  const lines = [
+    `Generated from \`PACK_TARGETS\` (client documentation checked ${PACK_TARGETS_CHECKED_ON}) by ` +
+      `\`scripts/render-certification-table.mjs\`; do not edit by hand.`,
+    ``,
+    `| Client | \`--client\` | Skills go to | The always-on rule goes to | Why | Sources |`,
+    `| --- | --- | --- | --- | --- | --- |`,
+  ];
+  for (const target of PACK_TARGETS) {
+    lines.push(
+      `| ${cell(target.displayName)} | \`${target.id}\` | ${skillsDirCell(target)} | ${ruleCell(target)} | ` +
+        `${whyCell(target)} | ${sourcesCell(target)} |`,
+    );
+  }
+  return lines.join("\n");
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Splice the rendered sections into the README (or check them).
 // ────────────────────────────────────────────────────────────────────
@@ -211,6 +320,7 @@ function splice(readme, begin, end, content) {
 const readme = readFileSync(README_PATH, "utf8");
 let next = splice(readme, ADAPTER_BEGIN, ADAPTER_END, renderAdapterTable());
 next = splice(next, CERT_BEGIN, CERT_END, renderCertificationDetails());
+next = splice(next, PACK_BEGIN, PACK_END, renderPackTargetsTable());
 
 if (process.argv.includes("--check")) {
   if (next !== readme) {

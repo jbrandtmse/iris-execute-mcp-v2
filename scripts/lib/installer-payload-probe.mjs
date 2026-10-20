@@ -11,9 +11,15 @@
 // On any failure it prints one line to stderr and exits 1. It runs in a child process so that the provenance
 // check stays synchronous, and it needs no node_modules in <root>: the installer's planning modules import only
 // node built-ins.
+//
+// When <root> holds the installer's sources (`packages/client-config/src`), the probe first checks that the
+// installer's `dist/` is at least as new as them, so a stale build is refused instead of describing an installer
+// that no longer exists. A root without those sources (a scratch copy of the built installer) is not checked.
 
+import { existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { checkDistFresh } from './dist-freshness.mjs';
 
 /** @param {string} message */
 function fail(message) {
@@ -29,7 +35,13 @@ function describe(error) {
 const rootArg = process.argv[2];
 if (rootArg === undefined || rootArg === '') fail('usage: node installer-payload-probe.mjs <root>');
 
-const modulePath = join(resolve(rootArg), 'packages', 'client-config', 'dist', 'pack-plan.js');
+const clientConfigDir = join(resolve(rootArg), 'packages', 'client-config');
+const modulePath = join(clientConfigDir, 'dist', 'pack-plan.js');
+
+if (existsSync(join(clientConfigDir, 'src'))) {
+  const freshness = checkDistFresh(clientConfigDir, '@iris-mcp/client-config');
+  if (!freshness.ok) fail(`client-config's dist is not fresh: ${freshness.reason ?? 'unknown reason'}`);
+}
 
 let installer;
 try {

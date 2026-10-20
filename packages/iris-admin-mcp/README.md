@@ -256,7 +256,7 @@ Workflow-shaped [MCP prompts](../../README.md#workflow-prompts--agent-skills) (E
 | `provision-project-environment` | Provisions a new project environment (two databases, a namespace, a user, a web application), verifying each step before the next, with rollback notes. |
 | `audit-security-posture` | Audits users, roles, service authentication settings, SSL/TLS configs, and instance auditing status; reports default passwords, `%All` holders, and insecure services. |
 
-Also installable as [Agent Skills](../../skills/README.md).
+Also installable as [Agent Skills](../../README.md#the-skills-pack).
 
 ---
 

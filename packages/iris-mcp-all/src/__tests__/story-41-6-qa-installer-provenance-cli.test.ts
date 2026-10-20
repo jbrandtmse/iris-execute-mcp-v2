@@ -14,8 +14,8 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { NOTICE_FILENAME } from "../../../../scripts/lib/skills-pack.mjs";
 import { makeScratchRepo, problemPairs, removeScratchRepo, runScript } from "./story-41-1-qa-fixture";
 
@@ -125,5 +125,46 @@ describe("a client-config dist that cannot produce the payloads fails closed as 
     expect(run.stderr).toMatch(FAIL_CLOSED);
     expect(run.stderr).toContain("every rule needs all three forms");
     expect(problemPairs(run.stderr)).toContain("distribution installer");
+  });
+
+  describe("a client-config dist that is older than its sources (Story 41.7, DW-611)", () => {
+    const SRC_INDEX = "packages/client-config/src/index.ts";
+
+    /** The newest modification time under `dir`, in milliseconds. */
+    function newestMtimeMs(dir: string): number {
+      let newest = -Infinity;
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        newest = Math.max(newest, entry.isDirectory() ? newestMtimeMs(full) : statSync(full).mtimeMs);
+      }
+      return newest;
+    }
+
+    /** Add a client-config source file whose mtime is `offsetMs` after the newest file of the scratch dist. */
+    function addSource(root: string, offsetMs: number): void {
+      const newestDist = newestMtimeMs(join(root, "packages", "client-config", "dist"));
+      const file = join(root, SRC_INDEX);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, "export {};\n");
+      const when = new Date(newestDist + offsetMs);
+      utimesSync(file, when, when);
+    }
+
+    it("a source 10 s newer than the newest dist file is refused as `installer`, naming the stale dist", () => {
+      const root = scratch();
+      addSource(root, 10_000);
+      const run = red(root);
+      expect(run.stderr).toMatch(FAIL_CLOSED);
+      expect(run.stderr).toContain("not fresh");
+      expect(problemPairs(run.stderr)).toEqual(["distribution installer"]);
+    });
+
+    it("the control: a source 10 s older than the newest dist file passes with the same 5 distributions", () => {
+      const root = scratch();
+      addSource(root, -10_000);
+      const run = runScript(root, CHECK);
+      expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
+      expect(run.stdout).toMatch(/5 distribution\(s\)\./);
+    });
   });
 });

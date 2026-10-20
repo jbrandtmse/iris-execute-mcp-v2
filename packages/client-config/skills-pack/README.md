@@ -2,7 +2,7 @@
 
 # IRIS MCP skills pack
 
-Agent skills and the always-on rule for working with the IRIS MCP Server Suite. A skill that names the suite's tools shows its tool preset: the first of `core`, `developer` and `full` (the values of `IRIS_TOOLS_PRESET`) under which every tool it names is visible. `full`, the default, shows every tool.
+Agent skills and the always-on rule for working with the IRIS MCP Server Suite. A skill that names the suite's tools shows its tool preset: the first of `core`, `developer` and `full` (the values of `IRIS_TOOLS_PRESET`) under which every tool it names is visible. `full`, the default, shows every tool. The presets are not nested: `developer` is not `core` plus more tools, and it hides some tools that `core` shows, so a skill runs under its own preset and under `full`, but not necessarily under the other one. For example, `provision-project-environment` declares `core` and uses `iris_user_manage`, which the admin server's `developer` preset hides.
 
 ## Knowledge skills
 

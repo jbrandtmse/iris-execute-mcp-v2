@@ -492,10 +492,27 @@ describe("the retired objectscript-review prompt leaves no generated copy behind
     expect(existsSync(join(REPO_ROOT, PACK_DIR, "skills", "objectscript-review"))).toBe(false);
   });
 
-  it("skills/README.md lists 12 skills and none is the retired one", () => {
+  it("the catalog's workflow skills section lists the 12 skills under skills/ and none is the retired one", () => {
+    const catalog = readFileSync(join(REPO_ROOT, PACK_DIR, "README.md"), "utf8");
+    const section = /\n## Workflow skills\n([\s\S]*?)(?=\n## )/.exec(catalog)?.[1] ?? "";
+    expect(section, "the catalog has a Workflow skills section").not.toBe("");
+    const listed = section
+      .split("\n")
+      .map((line) => /^- `([a-z0-9-]+)`/.exec(line)?.[1])
+      .filter((name): name is string => name !== undefined)
+      .sort();
+    const generated = readdirSync(join(REPO_ROOT, WORKFLOW_SKILLS_DIR), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+    expect(listed).toHaveLength(12);
+    expect(listed).toEqual(generated);
+    expect(catalog).not.toContain("objectscript-review");
+  });
+
+  it("skills/README.md is a pointer, so the catalog is the only list of skills", () => {
     const readme = readFileSync(join(REPO_ROOT, WORKFLOW_SKILLS_DIR, "README.md"), "utf8");
-    const rows = readme.split("\n").filter((line) => /^\| `[a-z0-9-]+` \|/.test(line));
-    expect(rows).toHaveLength(12);
+    expect(readme.split("\n").filter((line) => /^\| `[a-z0-9-]+` \|/.test(line))).toEqual([]);
     expect(readme).not.toContain("objectscript-review");
   });
 

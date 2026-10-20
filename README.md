@@ -237,7 +237,7 @@ node packages/client-config/dist/cli/clients-cli.js apply --client claude-code -
 node packages/client-config/dist/cli/clients-cli.js doctor                    # env refs, parseability, drift, backups, stashes
 ```
 
-`apply` prints the pending diff first and requires confirmation (`--yes` to skip); every successful write takes a timestamped backup and prints the client's restart hint.
+`apply` prints the pending diff first and requires confirmation (`--yes` to skip); every successful write takes a timestamped backup and prints the client's restart hint. It also installs the skills pack into a project: see [The skills pack](#the-skills-pack).
 
 **The zero-secrets end state** — three composable pieces, each covering a different secret class:
 
@@ -822,12 +822,50 @@ Beyond individual tools, the suite ships a pack of **MCP prompts** (Epic 25) —
 
 `@iris-mcp/data` ships **no prompts in v1**.
 
-`objectscript-review` was retired in Story 41.2: its checklist is now the always-on rule in the skills pack (`rules/claude-code/` for Claude Code, `rules/agents-md/` for `AGENTS.md`). The installer arrives in Story 41.6.
+`objectscript-review` was retired in Story 41.2: its checklist is now the always-on rule in the skills pack, which `iris-mcp-clients skills install` puts where each client loads it (`.claude/rules/` for Claude Code, `.cursor/rules/` for Cursor, a marked block in `GEMINI.md` for Gemini CLI and in `AGENTS.md` for every other client).
 
 ### Using the prompts
 
 - **Via the MCP protocol directly** (recommended when your client supports it): call `prompts/list` on the relevant server to see its prompts, then `prompts/get` with the prompt's `name` and any arguments to render the workflow text.
-- **As installable Agent Skills**: the same workflows are generated into a repo-root [`skills/`](skills/README.md) directory, one `SKILL.md` per prompt. Its body is the prompt's text; its frontmatter holds `name`, a `description` written for the model to choose the skill (the prompt keeps its own description), and `metadata.iris-tools-preset`, the tool preset under which every tool it names is visible. Copy the skills you want into your project's `.claude/skills/` directory (see [`skills/README.md`](skills/README.md) for details); the skills pack catalog, [`packages/client-config/skills-pack/README.md`](packages/client-config/skills-pack/README.md), lists them with the knowledge skills and the always-on rule. Every tool name referenced in a prompt or skill is validated against the live tool catalog in CI, so a renamed or removed tool breaks the build rather than shipping a broken workflow.
+- **As installable Agent Skills**: the same workflows are generated into a repo-root [`skills/`](skills/README.md) directory, one `SKILL.md` per prompt. Its body is the prompt's text; its frontmatter holds `name`, a `description` written for the model to choose the skill (the prompt keeps its own description), and `metadata.iris-tools-preset`, the first of `core`, `developer` and `full` under which every tool it names is visible (the presets are not nested). Install them, with the knowledge skills and the always-on rule, through `iris-mcp-clients skills install` (see [The skills pack](#the-skills-pack)); the skills pack catalog, [`packages/client-config/skills-pack/README.md`](packages/client-config/skills-pack/README.md), lists them with the knowledge skills and the always-on rule. Every tool name referenced in a prompt or skill is validated against the live tool catalog in CI, so a renamed or removed tool breaks the build rather than shipping a broken workflow.
+
+### The skills pack
+
+The skills pack gives an agent the suite's ObjectScript know-how where the agent looks for it: 18 Agent Skills (6 knowledge skills and the 12 workflow skills above) and 1 always-on rule, the ObjectScript pre-write checklist. It ships inside [`@iris-mcp/client-config`](packages/client-config/README.md) as `packages/client-config/skills-pack/`, whose [catalog](packages/client-config/skills-pack/README.md) lists every skill with what it is for and its tool preset. `iris-mcp-clients skills install` copies the pack into one project, into the folders the chosen client reads:
+
+| Route | `--client` | Skills go to | The always-on rule goes to |
+|---|---|---|---|
+| Claude Code | `claude-code` | `.claude/skills/` | `.claude/rules/iris-mcp-objectscript-pre-write.md` |
+| Cursor | `cursor` | `.agents/skills/` | `.cursor/rules/iris-mcp-objectscript-pre-write.mdc` |
+| Gemini CLI | `gemini` | `.agents/skills/` | a marked block in `GEMINI.md` |
+| Every other client | `vscode`, `cline`, `roo-code`, `windsurf`, `codex`, `zed`, `goose`, `kimi`, `kimi-code`, `pi`, `jetbrains-junie`, `kilo-code`, `agents` | `.agents/skills/` | a marked block in `AGENTS.md` |
+
+Claude Desktop (`claude-desktop`) has no route: it takes skills only as an uploaded ZIP, so the installer refuses it. The per-client table, with each client's reason and documentation sources, is generated from the installer's own data in the [client-config README](packages/client-config/README.md#skills-pack-targets-generated).
+
+From the repository root (the package is not yet published to npm), preview the plan first, then install:
+
+```bash
+node packages/client-config/dist/cli/clients-cli.js skills install --client claude-code --project /path/to/your/project --dry-run
+node packages/client-config/dist/cli/clients-cli.js skills install --client claude-code --project /path/to/your/project
+node packages/client-config/dist/cli/clients-cli.js skills install --client cursor --project /path/to/your/project
+node packages/client-config/dist/cli/clients-cli.js skills install --client gemini --project /path/to/your/project
+node packages/client-config/dist/cli/clients-cli.js skills install --client codex --project /path/to/your/project
+node packages/client-config/dist/cli/clients-cli.js skills uninstall --client claude-code --project /path/to/your/project
+```
+
+The installer prints its plan and asks before it writes (`--yes` skips the question). It writes only the files it installs and its own marked block, records them in `.iris-mcp/skills-pack.json` in the project, and leaves every other byte, `CLAUDE.md` included, as it was. Running the same install again changes nothing, and `uninstall` removes only what the installer put there.
+
+**Tool presets are not nested.** A workflow skill declares, as `metadata.iris-tools-preset`, the first of `core`, `developer` and `full` under which every tool it names is visible. `developer` is not `core` plus more tools: it hides some tools that `core` shows. So a skill runs under its declared preset and under `full`, the default, but not necessarily under the other one. For example, `provision-project-environment` declares `core` and uses `iris_user_manage`, which the admin server's `developer` preset hides.
+
+**Known limits:**
+
+- Project scope only: `--scope user` is refused.
+- Claude Desktop has no route, as above.
+- The Claude Code route always installs both the skills and the rule; it does not detect a Claude Code plugin.
+- A symbolic link at or above a path the installer would write, or a second hard link to such a file, refuses the run.
+- A file you edit after installing is kept; `--include-modified` replaces or removes it after a backup under `~/.iris-mcp/client-manager/backups/skills-pack/`.
+
+The full list is in the [client-config README](packages/client-config/README.md#installing-the-skills-pack).
 
 ---
 

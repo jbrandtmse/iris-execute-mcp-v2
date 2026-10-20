@@ -268,9 +268,9 @@ Workflow-shaped [MCP prompts](../../README.md#workflow-prompts--agent-skills) (E
 | `promote-environment-change` | Reviews and promotes configuration/code drift from a source IRIS environment to a target using the review-before-write `iris_env_diff` → `iris_env_promote` workflow — scoped diff, review with the user, plan, an explicit user-selected step allowlist, confirmed execute, then re-diff to verify. Never acts on `onlyInTarget` warnings; states the no-deletions guarantee and that `execute` is default-disabled. |
 | `edit-and-test-class` | Changes a few lines of a class in place: a ranged `iris_doc_get`, a guarded `iris_doc_edit` (`apply`, enabled by default; `expected` built from the read, with a `STALE_CONTENT` retry using `mismatches[].current`), `iris_doc_compile`, then `iris_execute_tests` with a check of `total` against the number of `Test*` methods. Takes `className`, `change` and an optional `testClass`; every tool on its main path is in the `core` preset. It tells the model what a `PRODUCTION_BUSY` refusal means (a production other than the tests' own is running, or the production state could not be read) and not to stop a production without the user's confirmation. |
 
-`objectscript-review` was retired in Story 41.2: its checklist is now the always-on rule in the skills pack (`rules/claude-code/` for Claude Code, `rules/agents-md/` for `AGENTS.md`). The installer arrives in Story 41.6.
+`objectscript-review` was retired in Story 41.2: its checklist is now the always-on rule in the skills pack, which `iris-mcp-clients skills install` puts where each client loads it (`.claude/rules/` for Claude Code, `.cursor/rules/` for Cursor, a marked block in `GEMINI.md` for Gemini CLI and in `AGENTS.md` for every other client).
 
-Also installable as [Agent Skills](../../skills/README.md).
+Also installable as [Agent Skills](../../README.md#the-skills-pack).
 
 ---
 

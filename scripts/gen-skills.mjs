@@ -10,7 +10,8 @@
 // `metadata` `iris-tools-preset`) come from the prompt's own `skill: { description, preset }` field,
 // which only this generator and `validate:prompts` read (AD-28). A prompt without a valid `skill`
 // field stops the run (exit 1, in `--check` too) before anything is written. The rendering lives in
-// scripts/lib/workflow-skills.mjs.
+// scripts/lib/workflow-skills.mjs. `skills/README.md` is a pointer to the skills pack catalog and the
+// installer; the catalog is the only list of skills.
 //
 // UNLIKE `scripts/gen-governance-baseline.mjs`, `skills/` is NOT a frozen
 // artifact (Rule #23/#25 do not apply here) — the default (no-flag) mode
@@ -55,37 +56,21 @@ function doNotEditHeader(sourceNote) {
   );
 }
 
-/** Render `skills/README.md`, the installable-skills install guide (contributor-facing, not agent content). */
-function renderReadme(entries) {
+/** Render `skills/README.md`, a contributor-facing pointer to the skills pack catalog and the installer (not agent content). */
+function renderReadme() {
   const header = doNotEditHeader('the registered PromptDefinitions across packages/*/src/prompts/*.ts');
-  const rows = entries
-    .map(({ pkg, prompt }) => `| \`${prompt.name}\` | ${pkg} | \`${prompt.skill.preset}\` | ${prompt.skill.description} |`)
-    .join('\n');
   return (
     `${header}\n` +
-    `# IRIS MCP Agent Skills Pack\n\n` +
-    `This directory is **generated** from the suite's MCP \`prompts\` capability (Epic 25). Each skill's ` +
-    `body is the text \`prompts/get\` renders for the prompt of the same name. Its \`description\` is the ` +
-    `prompt's separate model-invocation description, and \`metadata.iris-tools-preset\` is its tool preset; ` +
-    `both are set in the prompt's \`skill\` field in \`packages/<server>/src/prompts/\`. The skills pack ` +
-    `catalog, \`packages/client-config/skills-pack/README.md\`, lists these skills with the knowledge ` +
-    `skills and the always-on rule.\n\n` +
-    `## Installation\n\n` +
-    `Copy the skill directories you want into your project's \`.claude/skills/\` directory (or point ` +
-    `your client's skill-loader configuration at this \`skills/\` directory directly):\n\n` +
-    `\`\`\`bash\ncp -r skills/<skill-name> /path/to/your/project/.claude/skills/\n\`\`\`\n\n` +
-    `Each skill is a self-contained \`SKILL.md\` with YAML frontmatter (\`name\`, \`description\`, \`metadata\`) ` +
-    `followed by the workflow instructions — the exact tool sequence, argument names, and safety notes ` +
-    `an MCP client should follow. Tool names referenced in every skill are validated against the live ` +
-    `tool catalog by \`scripts/validate-prompts.mjs\` (wired into the default test suite), so a renamed ` +
-    `or removed tool breaks CI rather than shipping a broken skill.\n\n` +
-    `## Available Skills\n\n` +
-    `| Skill | Server | Tool preset | Description |\n` +
-    `|---|---|---|---|\n` +
-    `${rows}\n\n` +
-    `Prefer calling these workflows via the MCP \`prompts\` capability directly (\`prompts/get\`) when ` +
-    `your client supports it — the skill files here are a convenience export for clients that only load ` +
-    `local skill directories.\n`
+    `# Generated workflow skills\n\n` +
+    `This directory is **generated** from the suite's MCP prompts. Each \`<name>/SKILL.md\` is the text ` +
+    `\`prompts/get\` renders for the prompt of the same name; its \`description\` and ` +
+    `\`metadata.iris-tools-preset\` come from the prompt's \`skill\` field in \`packages/<server>/src/prompts/\`. ` +
+    `To change a skill, edit its prompt, then run \`pnpm gen:skills\` and \`pnpm gen:pack\`.\n\n` +
+    `These files are a source of the skills pack, not the copy you install. The ` +
+    `[skills pack catalog](../packages/client-config/skills-pack/README.md) ` +
+    `(\`packages/client-config/skills-pack/README.md\`) lists every skill with its tool preset, and ` +
+    `\`iris-mcp-clients skills install --client <id>\` installs the pack into a project: see ` +
+    `[The skills pack](../README.md#the-skills-pack) in the root README.\n`
   );
 }
 
@@ -106,7 +91,7 @@ async function computeExpectedFiles() {
   for (const { prompt } of entries) {
     files.set(`${prompt.name}/SKILL.md`, renderWorkflowSkill(prompt));
   }
-  files.set('README.md', renderReadme(entries));
+  files.set('README.md', renderReadme());
   return { entries, files };
 }
 

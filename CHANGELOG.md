@@ -2,6 +2,78 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-19] — Story 41.7: Skills pack docs and capstone
+
+No tool, action, governance key, preset roster, prompt, refusal code, route or bootstrapped class is added or changed, and the
+installer's write path, plan, manifest, routes and `PACK_TARGETS` rows are untouched. The suite stays at 110 package tools and 115
+advertised, the 12 prompts are byte-identical on the wire (16 hashes), the frozen governance baseline stays at hash `1e62c5ad5bf7`
+(141 keys), `BOOTSTRAP_VERSION` stays at `5296a1c836f4`, `gen:skills` stays at 13 generated files, the pack at 23 files and 40 agent
+files, `validate:prompts` at 52 sources, and `check:provenance` at 12 distributions. One count moved, taken from the file: the pack
+catalog (`packages/client-config/skills-pack/README.md`) goes from 11859 bytes to 12210 bytes (49 lines either way), sha256 from
+`00004f56ab19...` to `e4e2e800833850...`.
+
+### Added
+
+- **`### The skills pack` in the root README**, inside the prompts and skills chapter: what the pack holds (18 Agent Skills, 6
+  knowledge skills and the 12 workflow skills, and 1 always-on rule), the four installer routes as a table, the preview-then-install
+  commands, what the installer writes and records, the presets paragraph, and five known limits. The commands use the built bin
+  (`node packages/client-config/dist/cli/clients-cli.js skills ...`) until the package is published.
+- **A generated `Skills pack targets` table** in the `@iris-mcp/client-config` README: one row per `PACK_TARGETS` row (17), in order,
+  with the `--client` id, the folder the skills go to, the folder or marked block that holds the always-on rule, why, and the
+  documentation sources. `scripts/render-certification-table.mjs` renders it between `PACK-TARGETS-TABLE` markers, refuses a roster
+  that is not 17 unique rows, a route that has no entry, a missing refusal reason or a source that is not `https://` (exit 2), and
+  `--check` fails when a hand edit or a `PACK_TARGETS` change leaves the README out of sync. The README also gains example
+  `skills install` and `skills uninstall` commands.
+- **The Epic 41 capstone gate**, `epic41-capstone-gate.test.ts`, in client-config's default suite: for each of the 17 `PACK_TARGETS`
+  ids it drives the built `iris-mcp-clients` bin in a fresh process with a temp home and project, seeded with foreign content in 16
+  different byte shapes. A routed client is installed, re-installed with aged mtimes and uninstalled, with the tree diff, the bytes
+  against the pack, the installed frontmatter and the foreign bytes checked at each step; Claude Desktop's install and uninstall are
+  each refused with exit 2 and change nothing. Twelve of the clients on the `agents` route run end to end for the first time.
+- **`story-41-7-doc-claims.test.ts`, `skills-docs.test.ts` and `story-41-7-turbo-test-graph.test.ts`**, which check each documented
+  claim against its source (see Tests).
+
+### Changed
+
+- **`skills/README.md`** is a generated pointer to the skills pack catalog and the installer, with no skill table and no `cp -r`
+  instructions, so the catalog is the only list of skills. It is still the 13th `gen:skills` file.
+- **The skills pack catalog and the root README say that the tool presets are not nested** (DW-624): `developer` is not `core` plus
+  more tools, and it hides some tools that `core` shows, so a skill runs under its own preset and under `full`, but not necessarily
+  under the other one. The example is `provision-project-environment`, which declares `core` and uses `iris_user_manage`, which the
+  admin server's `developer` preset hides. The root README's workflow-skills bullet no longer calls the preset "the tool preset
+  under which every tool it names is visible".
+- **The retirement sentence** (root README and the dev package README), the four server READMEs' `Also installable as Agent Skills`
+  line and `tool_support.md` point at the installer and `#the-skills-pack`. The sentence names where the installer puts the rule:
+  `.claude/rules/` for Claude Code, `.cursor/rules/` for Cursor, a marked block in `GEMINI.md` for Gemini CLI and in `AGENTS.md` for
+  every other client.
+- **Turbo never caches a `test` task, and orders `@iris-mcp/all`'s tests after client-config's build** (DW-611). The suites read
+  repository files that no input list fully names, so a cached green could outlive a change to what the tests read. The ordering is a
+  turbo `pkg#task` edge, not a package dependency.
+- **`check:provenance` fails closed on a stale client-config dist** (DW-611): when the repository holds client-config's `src/` and a
+  file there is newer than `dist/`, the installer probe reports `[distribution] installer` instead of describing an installer that no
+  longer exists. A root without those sources is checked as before.
+
+### Tests
+
+- `epic41-capstone-gate.test.ts` has 17 legs (one per `PACK_TARGETS` row) and a completeness row. Each leg's oracles come from
+  client-config's `src/`, the pack on disk and the pack generator's own frontmatter reader, so an edit made only in the compiled
+  `dist/` turns a leg red.
+- `story-41-7-doc-claims.test.ts` pins the root README section against the pack tree, the route table, the bin's `Usage:` and
+  `--help` text and refusals, `MANIFEST_PATH`, `LINK_DETAILS` and the admin preset rosters; it runs every documented command with
+  `--dry-run` against a temp project. `skills-docs.test.ts` does the same for the client-config README commands and the table's
+  rows and anchors, and `certification-process.test.ts` proves the new generated section red on its real `--check` path.
+- `story-41-7-turbo-test-graph.test.ts` reads turbo's own dry run of a copy of the manifests: the `@iris-mcp/all#test` edge on
+  client-config's build, and no cacheable `test` task. `story-41-6-qa-installer-provenance-cli.test.ts` gains the stale-`src/` row
+  and its control.
+- The 41.2 retirement sentence, the `skills/README.md` pin, the catalog golden and the workflow-skills row check moved with the
+  documents they pin.
+
+### Known limits
+
+- The one-time live check that Claude Code loads the installed rule before a `.cls` write (AC 41.7.3) runs once, at the story's
+  smoke step, against the CLI version and model recorded in the spec; it is not part of the default suite.
+- The per-client table reflects each client's documentation as read on 2026-10-19.
+- The root README commands use the built bin until the package is published to npm.
+
 ## [Pre-release — 2026-10-19] — Story 41.6: Skills and rules installer
 
 `iris-mcp-clients skills install|uninstall` is a CLI of `@iris-mcp/client-config`, not an MCP tool, so no tool, action, governance

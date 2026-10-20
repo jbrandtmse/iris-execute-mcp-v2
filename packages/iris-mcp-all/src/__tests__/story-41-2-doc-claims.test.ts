@@ -42,8 +42,9 @@ function sectionsOf(changelog: string): string[] {
 }
 
 const RETIREMENT_SENTENCE =
-  "`objectscript-review` was retired in Story 41.2: its checklist is now the always-on rule in the skills pack " +
-  "(`rules/claude-code/` for Claude Code, `rules/agents-md/` for `AGENTS.md`). The installer arrives in Story 41.6.";
+  "`objectscript-review` was retired in Story 41.2: its checklist is now the always-on rule in the skills pack, " +
+  "which `iris-mcp-clients skills install` puts where each client loads it (`.claude/rules/` for Claude Code, " +
+  "`.cursor/rules/` for Cursor, a marked block in `GEMINI.md` for Gemini CLI and in `AGENTS.md` for every other client).";
 
 /** The one place besides the two READMEs that may name the retired prompt: the prompt tally paragraph of tool_support.md. */
 const TOOL_SUPPORT_NOTE = "`dev` lost `objectscript-review` in Story 41.2: its checklist is now the always-on rule in the skills pack";
