@@ -36,7 +36,7 @@
  * defaults (the 31-6-5 convention).
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync, readdirSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -48,6 +48,7 @@ import {
 } from "../governanceEngine.js";
 import type { DiffJson } from "../governanceView.js";
 import type { LauncherSettings } from "../types.js";
+import { resolveSdkEsmDir } from "./sdkClientStore.js";
 
 // src/__tests__ → repo root is four levels up.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -77,37 +78,6 @@ async function isIrisReachable(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/**
- * The ESM build of `@modelcontextprotocol/client` (its `dist/`, holding `index.mjs` and `stdio.mjs`) in the monorepo's
- * pnpm store, iterated to exhaustion. The extension is outside the workspace and cannot import the iris-mcp-all test
- * helper that does the same, so this file keeps its own copy.
- */
-function resolveSdkEsmDir(): string | undefined {
-  const pnpmDir = path.join(REPO_ROOT, "node_modules", ".pnpm");
-  if (!existsSync(pnpmDir)) return undefined;
-  let entries: string[];
-  try {
-    entries = readdirSync(pnpmDir);
-  } catch {
-    return undefined;
-  }
-  const candidates = entries
-    .filter((name) => name.startsWith("@modelcontextprotocol+client@"))
-    .sort();
-  for (const candidate of candidates) {
-    const esmDir = path.join(
-      pnpmDir,
-      candidate,
-      "node_modules",
-      "@modelcontextprotocol",
-      "client",
-      "dist",
-    );
-    if (existsSync(path.join(esmDir, "index.mjs")) && existsSync(path.join(esmDir, "stdio.mjs"))) return esmDir;
-  }
-  return undefined;
 }
 
 interface CallToolResult {

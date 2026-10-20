@@ -31,12 +31,13 @@
  * against `localhost:52773`, `_SYSTEM`/`SYS`, namespace `HSCUSTOM` (story Dev
  * Notes).
  */
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { LauncherProvider } from "../serverDefinitionProvider.js";
 import type { AuthApi, LauncherSettings, ServerManagerApi } from "../types.js";
+import { resolveSdkEsmDir } from "./sdkClientStore.js";
 
 // Repo root — 4 levels up from src/__tests__ (__tests__ -> src ->
 // iris-mcp-launcher -> extensions -> repo root), matching the pattern
@@ -79,53 +80,6 @@ function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
     toolsEnable: "",
     ...overrides,
   };
-}
-
-/**
- * Resolve the ESM entry points of the installed `@modelcontextprotocol/client`
- * WITHOUT hardcoding a version-pinned path (story Dev Notes: "resolve it
- * dynamically; do not hardcode a version-pinned path that will rot"). It
- * lives under the pnpm STORE layout —
- * `node_modules/.pnpm/@modelcontextprotocol+client@<version>/node_modules/@modelcontextprotocol/client/dist/`
- * — not the flat `node_modules/@modelcontextprotocol/client` this extension's
- * OWN `node_modules` would use (it has no such dependency at all; the client
- * is only ever a devDependency of the monorepo's own packages). The extension
- * is outside the workspace and cannot import the iris-mcp-all test helper that
- * does the same, so this file keeps its own copy.
- */
-function resolveSdkEsmDir(): string | undefined {
-  const pnpmDir = path.join(REPO_ROOT, "node_modules", ".pnpm");
-  if (!existsSync(pnpmDir)) return undefined;
-
-  let entries: string[];
-  try {
-    entries = readdirSync(pnpmDir);
-  } catch {
-    return undefined;
-  }
-
-  // Sorted for determinism and iterated to exhaustion: pnpm's store holds one
-  // directory per (version, peer-hash) pair, so a version bump or a peer-dep
-  // split routinely yields several `@modelcontextprotocol+client@…` entries in
-  // readdir order. Taking `find()`'s first hit and giving up if ITS dist is
-  // absent would silently skip this whole test — and a skip is indistinguishable
-  // from "IRIS is not running", so the rot would never be noticed.
-  const candidates = entries
-    .filter((name) => name.startsWith("@modelcontextprotocol+client@"))
-    .sort();
-
-  for (const candidate of candidates) {
-    const esmDir = path.join(
-      pnpmDir,
-      candidate,
-      "node_modules",
-      "@modelcontextprotocol",
-      "client",
-      "dist",
-    );
-    if (existsSync(path.join(esmDir, "index.mjs")) && existsSync(path.join(esmDir, "stdio.mjs"))) return esmDir;
-  }
-  return undefined;
 }
 
 /** Any HTTP response — even a 401 — proves the IRIS Web Gateway is reachable. A network error/timeout does not. */

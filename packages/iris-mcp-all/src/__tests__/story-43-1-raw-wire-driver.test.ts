@@ -70,7 +70,7 @@ describe("the raw stdio driver", () => {
   it("rejects a request made after the server has exited", async () => {
     const wire = open();
     await wire.request("bye");
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await expect(wire.request("ping")).rejects.toThrow(/already exited|exited/);
+    expect(await wire.exit()).toEqual({ code: 0, signal: null });
+    await expect(wire.request("ping")).rejects.toThrow(/^the server had already exited before ping$/);
   });
 });

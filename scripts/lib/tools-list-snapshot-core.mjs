@@ -142,7 +142,7 @@ async function withToolsEnvScrubbed(fn) {
 }
 
 /** The installed version of `dep` as the shared package resolves it (read from its manifest, not an exports map). */
-function installedVersion(root, dep) {
+export function installedVersion(root, dep) {
   const manifest = JSON.parse(readFileSync(join(root, 'packages', 'shared', 'node_modules', dep, 'package.json'), 'utf-8'));
   return String(manifest.version);
 }

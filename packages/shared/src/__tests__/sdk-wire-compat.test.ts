@@ -415,10 +415,11 @@ describe("tools/call: valid calls", () => {
   });
 });
 
-describe("tools/call: a result that carries isError and structuredContent", () => {
-  // The SDK re-encodes a tools/call result in the order of its result schema, so the members of such a result are listed as content,
-  // structuredContent, isError. The dispatch builds them as content, isError, structuredContent, the order of the SDK v1 wire. The
-  // value is the same JSON object either way; only the member order differs, and no public SDK option keeps the dispatch's order.
+describe("tools/call: a result that carries isError and structuredContent keeps every member", () => {
+  // The owned tools/call hands back every member of such a result with its value. This row reads the handler's result in-process,
+  // so it pins members and values, not their order; the order on the wire is the SDK's result schema order (content,
+  // structuredContent, isError), the same as on the SDK v1 wire, and story-43-1-qa-handler-golden.test.ts pins those bytes
+  // against the v1 capture.
   it.each([[false], [true]])("keeps every member and its value when isError is %s", async (failed) => {
     const { server } = await boot({ tools: [orderTool] });
     const result = await callRequest(server, "tools/call", { name: "iris_wire_order", arguments: { failed } });
@@ -614,8 +615,11 @@ describe("the audit trail (DW-579, AD-19)", () => {
     const { booted, file } = await bootAudited();
     const result = await booted.client.callTool({ name: "iris_wire_echo" });
     expect(result.isError).toBe(true);
-    const lines = await toolEntries(file, 1);
-    expect(lines).toHaveLength(1);
+    // A valid call after it marks the end: its entry is the second, so a second entry for the omitted call would be seen.
+    await booted.client.callTool({ name: "iris_wire_echo", arguments: { name: "marker" } });
+    const lines = await toolEntries(file, 2);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toMatchObject({ tool: "iris_wire_echo", outcome: "ok", params: { name: "marker" } });
     const [entry] = lines as [Record<string, unknown>];
     expect(entry).toMatchObject({
       tool: "iris_wire_echo",

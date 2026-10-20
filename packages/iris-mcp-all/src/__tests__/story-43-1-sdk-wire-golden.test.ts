@@ -28,6 +28,7 @@ import {
   goldenLabels,
   goldenSessions,
   inheritedGoldenEnv,
+  packageVersion,
   runGoldenSession,
 } from "../../../../scripts/lib/sdk-wire-golden-core.mjs";
 import { connectSdkClient, distEntry, resolveSdkEsmDir, staleDistReason, type IrisTarget, type SdkClient } from "./process-gate-helpers.js";
@@ -77,9 +78,7 @@ const withoutId = (line: string): string => {
 };
 
 /** The version a built server reports in `serverInfo`: its package manifest's, which a release changes. */
-function manifestVersion(pkg: string): string {
-  return (JSON.parse(readFileSync(path.join(REPO_ROOT, "packages", pkg, "package.json"), "utf8")) as { version: string }).version;
-}
+const manifestVersion = (pkg: string): string => packageVersion(REPO_ROOT, pkg);
 
 /** An `initialize` line with its `serverInfo.version` set to the manifest's version and every other byte as captured. */
 function withManifestVersion(pkg: string, line: string): string {
@@ -143,6 +142,22 @@ describe("the golden fixture", () => {
 
   it("covers the five servers", () => {
     expect(Object.keys(golden.servers)).toEqual([...GOLDEN_PACKAGES]);
+  });
+
+  it("holds the v1 answers that the migration changed: every omitted-arguments prompts/get row is the -32602 refusal, unlike its {} row", () => {
+    // A capture of a later build would hold equal lines here (DW-617), so these rows tell a v1 capture from any other by content.
+    let dw617Rows = 0;
+    for (const pkg of GOLDEN_PACKAGES) {
+      const rows = Object.values(golden.servers[pkg]?.sessions ?? {}).flatMap((session) => session.rows);
+      for (const row of rows.filter((candidate) => candidate.dw617Of !== undefined)) {
+        dw617Rows += 1;
+        const empty = rows.find((candidate) => candidate.label === row.dw617Of);
+        expect(frameOf(row.line).error?.code, `${pkg} ${row.label}`).toBe(-32602);
+        expect(frameOf(row.line).error?.message, `${pkg} ${row.label}`).toMatch(/^MCP error -32602: Invalid arguments for prompt /);
+        expect(withoutId(row.line), `${pkg} ${row.label}`).not.toBe(withoutId(empty!.line));
+      }
+    }
+    expect(dw617Rows, "the golden holds the seven omitted-arguments rows").toBe(7);
   });
 
   it.each(GOLDEN_PACKAGES)("%s: its rows are the exchange list of the core, request for request", (pkg) => {

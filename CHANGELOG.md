@@ -6,9 +6,10 @@ All notable changes to the IRIS MCP Server Suite are documented in this file.
 
 No tool, action, governance key, preset row, prompt, refusal code, environment variable or route is added or changed, and no
 ObjectScript class is touched, so no count moves: the suite stays at 115 advertised tools (33, 27, 25, 22 and 8), the frozen governance
-baseline stays at hash `1e62c5ad5bf7` (141 keys), and `BOOTSTRAP_VERSION` stays at `d51856f74d6a`. The two behavior changes are the two
-fixes below, and only them. The 2025-11-25 wire is otherwise unchanged, with the one limit under Known limits: the member order of a
-handler result that carries both `isError` and `structuredContent`.
+baseline stays at hash `1e62c5ad5bf7` (141 keys), and `BOOTSTRAP_VERSION` stays at `d51856f74d6a`. The behavior changes are the two
+fixes below and three changes under Changed that AD-15 sanctions (wave-8 decisions #4 and #6): `addTools` sends one `list_changed` per
+call, a malformed `tools/call` request is refused with `-32602`, and a `tools/call` that carries `task` runs as a plain call. Every other
+response on the 2025-11-25 wire is byte-identical to the v1 build's.
 
 ### Changed
 
@@ -18,7 +19,7 @@ handler result that carries both `isError` and `structuredContent`.
   `@iris-mcp/shared`). `@modelcontextprotocol/core` 2.3.1 is a transitive dependency, `zod` stays at the one copy 4.3.6, and none of
   the packages runs an install script. `McpError` and `ErrorCode` become `ProtocolError` and `ProtocolErrorCode`, and only
   `packages/shared/src` imports the server package.
-- **The 2025-11-25 wire is unchanged.** The SDK's own `tools/list`, `tools/call`, `prompts/get` and `resources/read` would have changed
+- **The 2025-11-25 wire is unchanged for every request a client that follows the protocol sends.** The SDK's own `tools/list`, `tools/call`, `prompts/get` and `resources/read` would have changed
   every tool's `$schema`, dropped `execution` and reworded the error texts, so `McpServerBase` serves those four methods itself from its
   own state (`sdk-wire-compat.ts`), through the SDK's public `setRequestHandler`. A golden of 112 response lines, captured from the v1
   build before the migration edit and replayed byte for byte against the five built v2 servers (and through a real v2 client), pins
@@ -31,7 +32,17 @@ handler result that carries both `isError` and `structuredContent`.
   chain and `smol-toml`.
 - **`removeTools` removes a tool through the handle that `registerTool` returned.** It no longer deletes from the SDK's private
   registry, and a call that removes several tools still sends exactly one `notifications/tools/list_changed`: the server joins the SDK's
-  announcements into one (`debouncedNotificationMethods`), and `addTools` is joined the same way.
+  announcements into one (`debouncedNotificationMethods`).
+- **`addTools` sends one `notifications/tools/list_changed` per call (AD-15, wave-8 decision #4).** It sent one per tool plus one; the
+  same debounce joins them. Nothing in production calls `addTools` or `removeTools`.
+- **A malformed `tools/call` request is refused with `-32602` (AD-15, wave-8 decision #6).** A request with no `params`, a `name` that is
+  missing or not a string, or `arguments` that is not an object is answered `-32602` `Invalid tools/call request: <the schema issues>`,
+  where v1 answered `-32603` with the bare schema issues. The SDK checks the request before the framework's `tools/call` runs. Only a
+  client that breaks the MCP request schema sends one; `story-43-1-sanctioned-wire-changes.test.ts` pins the exact responses.
+- **A `tools/call` that carries a `task` parameter runs as a plain call (AD-15, wave-8 decision #6).** The servers advertise no `tasks`
+  capability. v1 refused such a call with `-32603` `Server does not support task creation (required for tools/call)`; v2 serves it as if
+  `task` were absent. Only a client that ignores the capability list sends one; the same test pins the response, byte for byte, as the
+  plain call's.
 - **The tools-list snapshot script reads the installed server package.** `sdkVersion` in a regenerated snapshot is the version of
   `@modelcontextprotocol/server`. The committed snapshot is untouched and keeps `1.29.0`, the version it was captured on; its 115 entries
   equal the live ones. `story-39-6-qa-snapshot-cli.test.ts` compares the written `sdkVersion` with the installed one instead of the
@@ -44,7 +55,8 @@ handler result that carries both `isError` and `structuredContent`.
   its one entry: `outcome` `error`, the schema-invalid text as `error`, the raw top-level key names minus `server` as `paramKeys`, and no
   `params` and no `dataPolicy` even with `IRIS_AUDIT_LOG_PARAMS=true`. Profile, namespace and action come from the existing derivations
   (a non-string value falls back to `default`, the profile's namespace and `null`). A valid call's entry is unchanged, and an unknown or
-  hidden tool still writes none.
+  hidden tool still writes none. A call whose fields pass and that fails only a refinement on the whole object (for example
+  `iris_production_control` `start` with no `name`) is refused by the dispatch and audited like any other call, as before.
 - **A `prompts/get` that omits `arguments` renders like `{}` (DW-617).** The four prompts whose arguments are all optional
   (`audit-security-posture`, `recover-stuck-production`, `check-system-health` and `run-external-backup`) were refused with `-32602`;
   they render now, and a prompt with a required argument answers the error that `arguments: {}` gives.
@@ -61,6 +73,17 @@ handler result that carries both `isError` and `structuredContent`.
   2.3.1 pins, only `packages/shared/src` imports an `@modelcontextprotocol` package, no install script on the three packages), and
   **`story-43-1-raw-wire-driver.test.ts`** pins the contract of the SDK-free stdio driver. The golden's `initialize` rows compare
   `serverInfo.version` with the package manifest's version, so a release does not turn the pin red.
+- **`sdk-handler-golden.json`**, captured from the v1 build by `scripts/capture-sdk-handler-golden.mjs` (core
+  `scripts/lib/sdk-handler-golden-core.mjs`) against the fake IRIS of `scripts/lib/fake-iris-listener.mjs`, and
+  **`story-43-1-qa-handler-golden.test.ts`**, which replays it: the response line of 22 handler results, the requests each server makes to
+  IRIS and the audit entries, byte for byte against the v1 build, apart from the DW-579 entry. Its audit `sessionStart` lines compare
+  `version` with the package manifest's version, as the wire golden's `initialize` rows do. Both capture scripts share their command line
+  in `scripts/lib/golden-capture-cli.mjs`.
+- **`story-43-1-qa-dw579-process.test.ts`** (DW-579 for every tool of the five built servers, with the parameter log on and off),
+  **`story-43-1-qa-pack-confinement.test.ts`** (what `npm pack` would publish: no v1 SDK, the SDK imported only by shared, exact pins),
+  **`story-43-1-qa-stdio-lifecycle.test.ts`** (each built server exits by itself when its client closes stdin) and
+  **`story-43-1-sanctioned-wire-changes.test.ts`** (the exact responses of the two decision-#6 changes above). The launcher's two SDK-client
+  tests and its resolution test share one store lookup, `src/__tests__/sdkClientStore.ts`.
 
 ### Tests
 
@@ -79,12 +102,8 @@ handler result that carries both `isError` and `structuredContent`.
 - The server package's dist bundles `ajv` 8.18.0, `ajv-formats` and `fast-uri` 3.1.0 as the default JSON Schema validator for
   elicitation; `pnpm audit` cannot see them. Story 43.3 is the first user.
 - A client that sends `server/discover` gets `-32601`; serving the 2026-07-28 revision is Story 43.2.
-- **Member order of a result that carries both `isError` and `structuredContent`.** The SDK re-encodes a `tools/call` result in the
-  order of its result schema, so such a result lists `structuredContent` before `isError`, where the v1 wire listed `isError` first
-  (the dispatch builds `content`, `isError`, `structuredContent`). The JSON value is the same. A result without an `isError`
-  member, and the governance denial, keep their v1 order, and the golden pins both; a handler result with an explicit `isError`
-  needs a live instance, so only the armed live gates and `sdk-wire-compat.test.ts` (members and values) see it. No public SDK
-  option keeps the dispatch's order.
+- The v2 SDK packages declare `engines.node >=20`, while the root manifest and README still say Node 18 or later. Story 42.1 sets the
+  floor (`>=22`, AD-29); nothing is published before it.
 
 ## [Pre-release — 2026-10-19] — Story 41.8: Epic 41 burn-down
 

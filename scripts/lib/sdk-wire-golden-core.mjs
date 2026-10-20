@@ -238,9 +238,15 @@ export function goldenLabels(pkg) {
  * @param {Record<string, string>} options.env - The complete child environment.
  * @param {number} [options.timeoutMs] - Milliseconds one request may take.
  * @returns {{ request: (method: string, params?: object) => Promise<{ line: string, message: any }>,
+ *   requestFrame: (fields: { method: string, params?: unknown }) => Promise<{ line: string, message: any }>,
  *   notify: (method: string, params?: object) => void,
  *   stderr: () => string,
+ *   endInput: () => void,
+ *   exit: () => Promise<{ code: number | null, signal: string | null }>,
  *   close: () => Promise<void> }}
+ *   `request` always sends `params` (`{}` when omitted); `requestFrame` sends exactly the members it is given after
+ *   `jsonrpc` and `id`, so a request without `params` can be written. `endInput` closes the server's stdin, as a client
+ *   does when it is done; `exit` resolves with how the process ended, whenever it does.
  */
 export function openRawWire({ entry, env, timeoutMs = REQUEST_TIMEOUT_MS }) {
   const child = spawn(process.execPath, [entry], { env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -285,33 +291,41 @@ export function openRawWire({ entry, env, timeoutMs = REQUEST_TIMEOUT_MS }) {
   child.stdin.on('error', failAll);
 
   const send = (frame) => child.stdin.write(`${JSON.stringify(frame)}\n`);
-  return {
-    request: (method, params = {}) =>
-      new Promise((resolve, reject) => {
-        if (ended) {
-          reject(new Error(`the server had already exited before ${method}`));
-          return;
-        }
-        const id = nextId++;
-        const timer = setTimeout(() => {
+  const requestFrame = (fields) =>
+    new Promise((resolve, reject) => {
+      if (ended) {
+        reject(new Error(`the server had already exited before ${fields.method}`));
+        return;
+      }
+      const id = nextId++;
+      const timer = setTimeout(() => {
+        waiting.delete(id);
+        reject(new Error(`no answer to ${fields.method} within ${timeoutMs} ms; stderr: ${stderr.slice(0, 500)}`));
+      }, timeoutMs);
+      waiting.set(id, {
+        resolve: (frame) => {
+          clearTimeout(timer);
           waiting.delete(id);
-          reject(new Error(`no answer to ${method} within ${timeoutMs} ms; stderr: ${stderr.slice(0, 500)}`));
-        }, timeoutMs);
-        waiting.set(id, {
-          resolve: (frame) => {
-            clearTimeout(timer);
-            waiting.delete(id);
-            resolve(frame);
-          },
-          reject: (error) => {
-            clearTimeout(timer);
-            reject(error);
-          },
-        });
-        send({ jsonrpc: '2.0', id, method, params });
-      }),
+          resolve(frame);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
+      send({ jsonrpc: '2.0', id, ...fields });
+    });
+  return {
+    request: (method, params = {}) => requestFrame({ method, params }),
+    requestFrame,
     notify: (method, params) => send(params === undefined ? { jsonrpc: '2.0', method } : { jsonrpc: '2.0', method, params }),
     stderr: () => stderr,
+    endInput: () => child.stdin.end(),
+    exit: () =>
+      new Promise((resolve) => {
+        if (child.exitCode !== null || child.signalCode !== null) resolve({ code: child.exitCode, signal: child.signalCode });
+        else child.once('exit', (code, signal) => resolve({ code, signal }));
+      }),
     close: async () => {
       child.stdin.end();
       child.kill();
@@ -374,6 +388,20 @@ export async function runGoldenSession({ entry, baseEnv, session }) {
   } finally {
     await wire.close();
   }
+}
+
+// -- versions ---------------------------------------------------------------------------------
+
+/**
+ * The version in a server package's manifest: what its `serverInfo.version` and its audit `sessionStart` line report,
+ * and what a release changes.
+ *
+ * @param {string} root - Repository root.
+ * @param {string} pkg - A server package directory name.
+ * @returns {string}
+ */
+export function packageVersion(root, pkg) {
+  return String(JSON.parse(readFileSync(join(root, 'packages', pkg, 'package.json'), 'utf-8')).version);
 }
 
 // -- the installed SDK ------------------------------------------------------------------------

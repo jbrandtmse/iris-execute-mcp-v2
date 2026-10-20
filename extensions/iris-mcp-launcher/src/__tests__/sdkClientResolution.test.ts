@@ -4,36 +4,19 @@
  * `localSpawnIntegration.test.ts` and `governanceUiRoundTrip.test.ts` reach `@modelcontextprotocol/client` through the monorepo's pnpm
  * store, because the extension declares no dependency on it, and each SKIPS with a logged reason when the client is missing. A skip reads
  * the same as "IRIS is not running", so this file is the check that the client IS found: it does not skip, and a missing or moved
- * client is red here. The extension is outside the workspace and cannot import the iris-mcp-all test helper that does the same, so the
- * lookup is written out here as it is in those two tests.
+ * client is red here. It runs the lookup those two tests import, `resolveSdkEsmDir` in `sdkClientStore.ts`, so a broken lookup in
+ * either of them is red here too.
  */
 import { describe, it, expect } from "vitest";
-import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-
-// src/__tests__ -> repo root is four levels up.
-const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
-
-/** The `dist/` of the `@modelcontextprotocol/client` package in the monorepo's pnpm store, iterated to exhaustion, or `undefined`. */
-function resolveSdkEsmDir(): string | undefined {
-  const pnpmDir = path.join(REPO_ROOT, "node_modules", ".pnpm");
-  if (!existsSync(pnpmDir)) return undefined;
-  const candidates = readdirSync(pnpmDir)
-    .filter((name) => name.startsWith("@modelcontextprotocol+client@"))
-    .sort();
-  for (const candidate of candidates) {
-    const esmDir = path.join(pnpmDir, candidate, "node_modules", "@modelcontextprotocol", "client", "dist");
-    if (existsSync(path.join(esmDir, "index.mjs")) && existsSync(path.join(esmDir, "stdio.mjs"))) return esmDir;
-  }
-  return undefined;
-}
+import { REPO_ROOT, SDK_CLIENT_STORE_PREFIX, resolveSdkEsmDir } from "./sdkClientStore.js";
 
 describe("the MCP client the launcher's SDK-client tests load (Story 43.1)", () => {
   it("the monorepo's pnpm store holds the ESM build of @modelcontextprotocol/client", () => {
     const esmDir = resolveSdkEsmDir();
     expect(esmDir, "a pnpm store directory of @modelcontextprotocol/client holding index.mjs and stdio.mjs").toBeDefined();
-    expect(path.relative(path.join(REPO_ROOT, "node_modules", ".pnpm"), esmDir as string).startsWith("@modelcontextprotocol+client@")).toBe(true);
+    expect(path.relative(path.join(REPO_ROOT, "node_modules", ".pnpm"), esmDir as string).startsWith(SDK_CLIENT_STORE_PREFIX)).toBe(true);
   });
 
   it("index.mjs exports Client and InMemoryTransport, and stdio.mjs exports StdioClientTransport", async () => {
