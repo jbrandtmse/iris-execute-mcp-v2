@@ -5919,8 +5919,8 @@ DW-441.
     - an unknown-tool error;
     - a Zod validation error.
   - Each is captured before the migration and compared after with `toEqual`.
-  - The 38 `stageDefaultStartup` test files pass unmodified.
-- **AC 43.1.4** — The test suites that use the SDK client (in-memory transport pairs in `@iris-mcp/shared`, `iris-mcp-all` and the extension) move to `@modelcontextprotocol/client`, and their assertions are unchanged.
+  - The 43 `stageDefaultStartup` test files pass with no assertion line changed, proven by a diff guard. [AMENDED 2026-10-20, wave-8 decision #3: the count was 38, and five files using the shared helper were added on 10-16 and 10-17. "Unmodified" cannot hold, because SDK v2 wraps every handler and calls `ctx.mcpReq.requestState()`.]
+- **AC 43.1.4** — The test suites that use the SDK client (in `@iris-mcp/dev`, `iris-mcp-all` and the extension; `@iris-mcp/shared` has none) move to `@modelcontextprotocol/client`, and their assertions are unchanged. [AMENDED 2026-10-20, wave-8 decision #3.]
 - **AC 43.1.5** — Gates:
   - build, test, lint and type-check pass;
   - governance `:check`;

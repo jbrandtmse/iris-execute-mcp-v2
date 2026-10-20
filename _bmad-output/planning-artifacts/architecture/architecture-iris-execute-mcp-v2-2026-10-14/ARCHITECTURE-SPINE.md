@@ -317,6 +317,9 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
       - the `trace-message-flow` prompt tells agents, under `block`, to report the reason for withheld Event Log and diagram error text and never read it another way (DW-587);
       - `iris_metrics_interop` `errorCount24h` counts Error entries (it counted Warning), and both it and `messageCount24h` cover the 24 hours before the call in UTC (DW-584);
       - the `iris_production_logs` `type` filter maps a display name such as `Error` to its stored number; a numeric value still matches as before (DW-585).
+    - **Story 43.1** (wave-8 decisions #1 and #2):
+      - a `prompts/get` that omits `arguments` renders like `{}` for a prompt whose arguments are all optional, where v1 refused it with -32602 (DW-617);
+      - a schema-invalid `tools/call` now writes its one audit entry: `outcome` `error`, the raw top-level key names only, never `params` (DW-579, AD-19). This is an additive audit behavior; the wire is unchanged.
 
     Each change may land in the earliest story that needs it, and is named in `CHANGELOG.md` with that story. Prune this list into the CHANGELOG at the Epic 42 retro.
   - **After `1.0.0`.** A breaking change requires a new major version. Clients pinned to `@1` receive every 1.x release automatically.
@@ -614,6 +617,9 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 - **Rule:**
   - **Where the SDK is used.** Only inside `@iris-mcp/shared` (AD-2, AD-3). Today one source file imports it.
   - **SDK v2.** From Epic 43, the framework runs on the TypeScript SDK v2 packages (`@modelcontextprotocol/server`, `client` and `core`), and `@modelcontextprotocol/sdk` v1 is removed. Epic 43 lands before Epic 42 publishes `1.0.0`.
+    - The v2 packages are pinned exactly, starting at 2.3.1 (published 2026-10-05, with SLSA provenance and no install scripts).
+    - The framework owns `tools/list`, `tools/call`, `prompts/get` and `resources/read`, installed through the public `setRequestHandler` from framework state, so the 2025-11-25 wire stays byte-identical. The SDK's own registration would change every tool's `$schema`, drop `execution` and reword the error texts (Story 43.1, wave-8 decision #1).
+    - Tool-input validation runs inside the audited call path, so a schema-invalid call is audited (DW-579).
   - **Protocol revisions.**
     - On the 2025-11-25 revision, behavior is byte-identical (AD-15).
     - The same process also serves revision `2026-07-28`, through `serveStdio(factory)` with the default `legacy: 'serve'`. This was verified by the live probe of 2026-10-15 (`research/mcp-sdk-v2-stdio-probe-2026-10-15.md`), and lands in Story 43.2.
