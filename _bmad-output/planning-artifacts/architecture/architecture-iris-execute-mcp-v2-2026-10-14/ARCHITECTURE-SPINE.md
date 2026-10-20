@@ -104,7 +104,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 
     The audit interceptor wraps the whole sequence.
   - **Framework parameters.** `server` is injected into every input schema at registration and stripped before the handler runs.
-  - **What handlers may use.** Only `ToolContext`: `http`, `resolveNamespace`, `resolveProfileClient`, `atelierVersion`, `paginate`, `config` and `governanceFileConfig`. Handlers never read environment variables.
+  - **What handlers may use.** Only `ToolContext`: `http`, `resolveNamespace`, `resolveProfileClient`, `atelierVersion`, `paginate`, `config`, `governanceFileConfig` and the optional `confirm` (the AD-34 helper, present only on a wire call; Story 43.3, wave-8 decision #13). Handlers never read environment variables.
   - **Scope.** Every tool declares `scope` (`NS`, `SYS`, `BOTH` or `NONE`), which decides how its namespace resolves.
   - **Atelier versions.** A feature that needs a newer Atelier version calls `requireMinVersion` against the calling profile's negotiated version.
 
@@ -371,6 +371,10 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 - **Prevents:** an AI client switching off an operator-mandated trail, auditing slowing or failing calls, and PHI reaching the log
 - **Rule:**
   - **Writing entries.** One JSONL entry is written per call from the chokepoint (AD-3). Audit cannot be expressed in `IRIS_GOVERNANCE`.
+    - **Multi-round calls** *(Story 43.3, wave-8 decisions #14 and #18)*. A multi-round request, such as an AD-34 confirmation, is one logical call. Its one entry is written by the round that ends it, and an asking round writes none.
+    - **A confirmation never answered** is written as `error`, with `confirmation: "unanswered"`, after its 600 s TTL or at shutdown, so every asked dialog has its entry.
+    - **A decline** (`CONFIRMATION_DECLINED`) is `denied`. The additive `confirmation` field records `accepted`, `declined`, `cancelled`, `unconfirmed` or `unanswered`.
+    - **A call the client cancels** is `error`, with a fixed text saying an in-flight IRIS request was aborted.
   - **Secrets.** They are redacted before an entry is queued.
   - **Failure handling.** The writer never fails or delays a tool call. Only an unwritable path at startup fails fast.
   - **Schema.** `outcome` keeps its closed domain (`ok`, `error`, `denied`). New fields are additive.
@@ -671,6 +675,11 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **Other clients.** When the client does not declare elicitation, today's `confirm: true` contract applies unchanged.
   - **Binding to the call.** A confirmation is bound to the exact arguments it showed: if they change between rounds, the helper asks again. Any `requestState` is integrity-protected and verified.
   - **Hooks.** A client-side hook that auto-answers dialogs is the user's choice, and is documented.
+  - **As built** *(Story 43.3, wave-8 decisions #12, #13, #15 and #16)*.
+    - **The gated set.** Exactly six: `iris_audit_manage:purge`, `iris_env_promote:execute`, `iris_production_control:clean` with `killAppData: true`, `iris_message_resend:resendFiltered` execute, `iris_message_resend:resend`, and `iris_doc_edit:regenerateStorage`. The last two have no `confirm` parameter, and their fallback is governance only. AD-15's "existing confirmation gates" means this set.
+    - **The helper.** It is `ToolContext.confirm` (`confirmation.ts`). It sends one required boolean `confirm` in the form, and only an accept with `confirm: true` proceeds. It reads the client's capabilities by era: the request envelope on the modern era, and the `initialize` declaration on the legacy era, never a request's `_meta`.
+    - **Binding.** Through signed, single-use `requestState`: an HMAC codec with a per-process key and a 600 s TTL. The state covers the tool, the resolved profile and a hash of the validated arguments, plus a nonce consumed on the deciding round. Forged, replayed, expired or changed-argument state asks again.
+    - **Order.** Each handler asks immediately before its first IRIS write, after all its own checks. `resendFiltered` asks only for 1 ≤ match count ≤ cap, from a read-only preflight. `clean` asks only under IRIS's own pass condition.
 
 ## Consistency Conventions
 

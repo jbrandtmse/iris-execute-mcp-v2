@@ -224,7 +224,7 @@ Line numbers are at HEAD `87bf941`.
    Exact texts are in Design Notes. Rationale: one helper, testable without the SDK (AD-34, AD-32).
 2. `packages/shared/src/tool-types.ts`: add `ConfirmationRequest {operation; target; scope: string | (() => Promise<string | undefined>)}` and `ConfirmationOutcome = {proceed: true} | {proceed: false; result: ToolResult}`, plus the optional `ToolContext.confirm?(request): Promise<ConfirmationOutcome>`. It is optional so `createMockCtx` and the literal contexts still compile.
 3. `packages/shared/src/refusals.ts`: add `CONFIRMATION_DECLINED`, with a doc line.
-4. `packages/shared/src/audit.ts`: add `AuditEntry.confirmation?` and `AuditEntryInput.confirmation?`, typed `"accepted" | "declined" | "cancelled" | "unconfirmed"`. `log()` writes it last, only when it is present. This is additive under AD-19.
+4. `packages/shared/src/audit.ts`: add `AuditEntry.confirmation?` and `AuditEntryInput.confirmation?`, typed `"accepted" | "declined" | "cancelled" | "unconfirmed" | "unanswered"` (`unanswered` per lead decision #14, task 6b). `log()` writes it last, only when it is present. This is additive under AD-19.
 5. `packages/shared/src/http-client.ts` (DW-642):
    - `RequestOptions.signal?: AbortSignal`.
    - In `executeFetch`:
@@ -253,6 +253,12 @@ Line numbers are at HEAD `87bf941`.
    - **`deriveAuditOutcome`.** `CONFIRMATION_DECLINED` gives `denied`.
    - **`registerToolOn`'s in-process callback** stays `handleToolCall(tool, args)` with no `wireCall`; only its type follows the widened return. That path never gets `confirm` or a bound signal.
    - **Doc comments** state the contract only (Rule 14).
+6b. `packages/shared/src/server-base.ts`: the pending-ask map. This is the #14 alternative, taken by the lead at the spec gate so AD-19's one entry per call also covers a dialog nobody answers.
+   - **On the asking round,** record `{tool, action, profile, args, start}` under its nonce in a per-process map, and write no entry.
+   - **On the deciding round** (accepted, declined, cancelled or unconfirmed), write the one entry and delete the map entry.
+   - **When a dialog is never answered.** An unref'd sweep timer, or `stop()` before the audit shutdown, writes every ask still pending after its 600 s TTL as one entry: `outcome: "error"`, `error: "The confirmation dialog was not answered. Nothing was changed."`, `confirmation: "unanswered"`. That covers a modern client that never retries, and a legacy shim leg that times out, is cancelled or fails.
+   - **Argument values** are never logged, exactly as for any other entry. `paramKeys` follows the existing rules.
+   - **Tests:** fake-timer unit rows for the TTL sweep and for `stop()`. Over real stdio on each era, one row where the dialog is never answered and the process is stopped: exactly one `unanswered` entry, and no IRIS write.
 
    Missing ctx, `mcpReq`, `signal` or envelope are all normal (the stub contexts).
 7. `packages/shared/src/index.ts`: export `contentHash`, plus the types `ConfirmationRequest` and `ConfirmationOutcome`.
@@ -376,6 +382,12 @@ Line numbers are at HEAD `87bf941`.
   - both goldens and every fixture JSON are byte-unchanged.
 
 ## Spec Change Log
+
+- 2026-10-20 (lead spec gate): decisions #12, #13, #15–#18 and #20 were taken as recommended.
+  - **#14:** the lead took the ALTERNATIVE (the pending-ask map, so an unanswered dialog gets its one `error`/`unanswered` entry). This adds task 6b and the `unanswered` value in task 4.
+  - **#19:** the verdict and tripwire stay in this story, as planned. The residual (bump the SDK when a release pins fast-uri ≥ 3.1.8) routes DW-637 to 42.1 at the lead's adjudication, not as `wontfix-accepted`.
+  - **`epics.md`:** AC 43.3.6 is amended (the descriptions move to 43.4, per #17), a matching bullet is added under 43.4, and a DW-637 bullet under 42.1.
+  - **Spine:** AD-3 (`confirm` in the handler list), AD-19 (logical calls, the unanswered dialog, decline as `denied`, cancel as `error`) and AD-34 ("As built": the six gates, the helper, binding, order).
 
 ## Review Triage Log
 
