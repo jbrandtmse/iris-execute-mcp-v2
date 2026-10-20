@@ -3473,3 +3473,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 41.7 review 2026-10-20: the same checker over git ls-files '*.md' (130 files, _bmad and .claude excluded) reported 13 broken links before the review's 4 fixes
 - 2026-10-20T02:13:05Z status=wontfix-accepted owner=41-7-skills-pack-docs-and-capstone by=cr note=reopen_if=a user-facing README or docs/ page outside CHANGED_DOCS ships a broken relative link or anchor that a user reports or a doc story finds
 - 2026-10-20T02:20:25Z status=routed owner=42-9-install-docs-and-client-re-certification by=lead note=reopened before 1.0: run the qa-41-7-doc-links checker repo-wide (git ls-files *.md minus _bmad/.claude), fix the broken links it reports (packages/shared/README.md:108, the docs/known-bugs-* links), and widen the test's document set so it pins them
+
+### DW-633: The IRIS_ACCEPT_LANGUAGE docs (README.md:77, http-client.ts:183-193) describe a per-worker message-table mechanism the header does not affect, but %CSP.REST re-matches the message language from the header on every request; tool_support.md:21 also calls the Utils prefix-stripping English/Arabic-only and unmodified
+- source: _bmad-output/implementation-artifacts/spec-41-8-epic-41-burn-down.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.8 plan + implement 2026-10-20: irislib/%CSP/REST.cls:149-151 MatchLanguage per request (UseSession=0); live MatchLanguage(fr)=fr; tool_support.md:21 stale after StripErrorPrefix
+- 2026-10-20T03:43:34Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=rewrite the IRIS_ACCEPT_LANGUAGE paragraph and tool_support.md:21 against the per-request model and the 15-language StripErrorPrefix
+
+### DW-634: BaseTest:TestAllSixteenHandlersExtendBase pins 16 ExecuteMCPv2.REST handlers but 19 exist (MessageSearch, MessageBody, Coverage added later), so the OS test is red at HEAD
+- source: _bmad-output/implementation-artifacts/spec-41-8-epic-41-burn-down.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 41.8 implement 2026-10-20: src/ExecuteMCPv2/Tests/BaseTest.cls:299 asserts tCount=16; ls src/ExecuteMCPv2/REST/ and iris_doc_list show 21 classes (19 handlers); live BaseTest 6/7
+- 2026-10-20T03:43:34Z status=routed owner=41-8-epic-41-burn-down by=harvest note=fix in this story's review: derive the expected set from the REST/ source files or pin 19 with the names, redeploy BaseTest (this project's own test class) and run it 7/7
+
+### DW-635: No re-runnable automated check drives the one-argument SanitizeError/SafeText production path under a non-English request language; AC 41.8.8 rests on a recorded manual curl
+- source: _bmad-output/implementation-artifacts/spec-41-8-epic-41-burn-down.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 41.8 implement 2026-10-20: all 614 SanitizeError and 8 SafeText calls pass one argument; SanitizeErrorLocaleTest reaches only the pLanguage branch; collapsing the empty branch keeps every OS row green; no packages/** test sends a non-English Accept-Language to GET /global
+- 2026-10-20T03:43:35Z status=routed owner=41-8-epic-41-burn-down by=harvest note=QA adds an env-armed (IRIS_REQUIRE_LIVE) live gate: GET /global refusal with Accept-Language fr, de, ja expects exactly one prefix each, proven red by the collapsed-branch mutation
