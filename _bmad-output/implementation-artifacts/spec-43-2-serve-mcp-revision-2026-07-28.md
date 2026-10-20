@@ -259,6 +259,53 @@ Every row runs on all five built servers against a closed port, unless the row n
   - Both goldens are byte-unchanged.
 - **Release bookkeeping (AD-29, AD-15).** **Given** the story's commit, **when** a reviewer reads `CHANGELOG.md` and the changeset, **then** they name the modern era (additive), the unchanged 2025 wire and Claude Code's switch. No AD-15 sanction is needed, because no 2025-era byte changes.
 
+### Review Findings
+
+Code review, 2026-10-20 (`bmad-code-review`, tier `full-opus`; Blind Hunter, Edge Case Hunter, Verification Gap and Acceptance Auditor all delivered). 25 raw rows, grouped into 10 entries (high 0, medium 3, low 7), plus 9 rejected rows. Every patch was applied in this pass. No HIGH, no AD violation.
+
+- [x] [Review][Patch] (med) An era line was read from stderr before it was known to have arrived. stderr and stdout are separate pipes, so the `newer-era` probe-discard count in (d) (via `runSession`) and `qa-mixed-eras` "a refused opening creates no instance" could flake [scripts/lib/sdk-wire-golden-core.mjs:openRawWire, runSession, runModernGoldenSession; story-43-2-qa-mixed-eras.test.ts:174]. Fix: new additive `closedStderr()`; both session drivers return stderr once the child's streams have closed; the mixed-eras row waits `quiet(150)`, as the era-log-line file does.
+- [x] [Review][Patch] (med) The cancellation rows asserted silence after a fixed `quiet(600)`, with no signal that the released IRIS reply had reached the server, so a slow host could hide an answer to a cancelled id [story-43-2-qa-concurrency-cancel.test.ts]. Fix: the proxy counts each held read whose server connection has closed (`replied`), and `untilReplied` waits for it before the silence window. The count uses `close`, not `finish`, so it still settles when 43.3 makes a cancel abort the IRIS call (DW-642).
+- [x] [Review][Patch] (med) The QA findings handed to code review had no ledger entry. They are filed with the lead's dispositions: DW-642 (cancelled call still runs and is audited `ok`; routed to 43-3), DW-643 (per-request `protocolVersion` is not re-checked; wontfix-accepted), DW-644 (unknown tool is in-band `isError`; by-design), DW-645 (enveloped `initialize` gets -32601 without `data.supported`; wontfix-accepted), DW-646 (`resources/list` duplicate; routed to 43-4), DW-647 (junk lines dropped; wontfix-accepted), DW-648 (legacy pin serves enveloped requests as 2025; by-design).
+- [x] [Review][Patch] (low) `MANDATED_MODERN_FIELDS` was documented as the one place the helpers read, but `serverInfoMeta` was bypassed through `SERVER_INFO_META_KEY`, and `discover`/`jsonRpcId` have no reader [scripts/lib/sdk-wire-golden-core.mjs]. Fix: the entry carries `metaKey` and both helpers read it. The table's doc now says the last two entries are applied by the caller (the `server/discover` opening, the id substitution).
+- [x] [Review][Patch] (low) (a) and the CHANGELOG said "byte for byte" but compared re-serialized JSON [story-43-2-cross-era-pin.test.ts (a)]. Fix: each live and golden line is first asserted to be canonical JSON (re-serializing changes no byte), so the parsed comparison is a byte comparison. The header says so.
+- [x] [Review][Patch] (low, Rule 2) `rawWithIdZero` was copied verbatim between the cross-era pin and the QA hand-wire. Fix: one export in `sdk-wire-golden-core.mjs`, imported by the pin and re-exported by the hand-wire, whose header names it. The hand-wire's own driver stays independent of the core's (Rule #36 oracle).
+- [x] [Review][Patch] (low) `qa-mixed-eras` "a legacy initialize, then modern-enveloped requests" claims "served as the pinned era", but its served branches strip `resultType` before comparing. Fix: each served branch asserts `resultType` is absent (DW-648).
+- [x] [Review][Patch] (low) The junk-line row's "ignored" was not pinned, since a `-32700` reply would have passed. Fix: stdout holds exactly the answers to ids 1 and 2. This is DW-647's `reopen_if` probe.
+- [x] [Review][Patch] (low) The concurrency header claimed "the answer to its own request", but the three document reads return the same document. Fix: the header says which assertions tell those three apart (the listener requests and the audit). Distinct contents would need a proxy that rewrites replies; not worth it.
+- [x] [Review][Patch] (low, Rule 19) The Integration AC's pinning test, the cross-era pin spawning each built entry, had no `mutation:` line naming it. Closed in this pass: the serving mutation was re-applied, went red and was reverted, and the line now names Integration.
+
+**Known limits (recorded at review, lead dispositions).**
+- A pinned modern connection does not re-check each request's `protocolVersion` (DW-643, SDK-owned): a mismatched claim is served where the revision says -32022. No gate, namespace or audit outcome changes.
+- An unknown tool is an in-band `isError` result on both eras (DW-644), not a JSON-RPC error. This is by design: it stays identical to the frozen 2025 golden (decision #1, cross-era pin).
+
+**For 43.3 (record only).** The QA observation on reading client capabilities per request stands (Verification, "QA observations"). On modern stdio, read `ctx.mcpReq.envelope["io.modelcontextprotocol/clientCapabilities"]`. On a legacy-pinned connection that envelope is also filled from a request's reserved `_meta` keys, so choose the source by era (`getNegotiatedProtocolVersion()`); otherwise a 2025 client could claim a capability it never declared. The cancellation half is DW-642.
+
+**QA's five dist mutations** (a changing `tools/list`, a rebuild logging "Connected" again, `resources/read` profile from `_meta.server`, serialized calls, a `_meta.namespace` gate bypass). Each QA file spawns the BUILT dist over real stdio and records its red. The review re-ran the `resources/read` one independently: `qa-meta-smuggling` went red on both eras while the chokepoint file stayed green. None of the five shows an existing pin's assertion that cannot fail. The earlier pins never claimed those properties (post-call listing, startup lines other than the era line, `_meta` on `resources/read`, concurrency), so no pin was patched.
+
+**Also confirmed:**
+- `serveStdio` takes `legacy: "serve"` and the transport explicitly.
+- The factory follows decision #8, and the era-line texts follow decision #10, with no new env read.
+- `stop()` and re-entry behave as specified.
+- The diff guard is clean: only the two sanctioned pre-existing test files changed, with 0 removed or changed assertion lines. Both goldens and the fixtures are unchanged.
+- No manifest, lockfile or `bootstrap-classes.ts` change; 115 tools.
+- The changeset is `patch` x6.
+- Decision #11: every commit carries the previously auto-detected identity, and no `user.*` git config exists.
+- `resources/list`'s duplicate comes from `registerGovernanceResource` (`server-base.ts:1166-1215`): the static `iris-governance-default` plus the `{profile}` template's `list` entry `iris-governance-profile-default`.
+
+**Rejected (9 rows).**
+- `false`:
+  - mixed-eras per-request `protocolVersion` row ">= 2": its title says "served or refused", and the gate property is pinned in both branches.
+  - `withoutMandatedFields` and an empty golden `_meta`: none of the 112 golden rows carries `result._meta`, and a mismatch would be a loud red.
+  - Era-line literals and stale-dist guards as "copies": test literals are the oracle (Rule #36), and the guard is a call to the shared `staleDistReason`.
+- `low`, not worth a guard:
+  - No `serveStdio` `onerror`: the old `connect()` left the SDK's `onerror` unset too; the newly reported paths (a factory or connect throw) cannot be reached on rebuild, and a log callback would add stderr lines that QA rows compare.
+  - `addTools` with a duplicate later in the batch is not atomic: pre-existing (v1 also overwrote the existing tool), and there is no production caller.
+  - Overlapping `start()` calls: no caller overlaps.
+  - `mandatedFieldProblems` with an undefined `serverInfo`: every caller passes the golden's.
+  - The chokepoint `version` mask cannot fail: version is not an AC property, and the mask is the 43.1 normalization.
+  - Dead QA helpers (`resultOf`, `errorOf`, `endInput`): no harm.
+- `low`, spec-bound (by-design): (e) `comparable()` drops all `_meta` and cache hints because task 5(e) orders it. The raw (a) and (b) rows keep the exact six-field rule. 43.4 should reuse the raw helpers, not the client-level strip.
+
 ## Spec Change Log
 
 - 2026-10-20 (lead spec gate): D7–D10 were taken as recommended (wave-8 decisions #7–#10). AC 43.2.1's "once per process" is amended in `epics.md` per #8. Spine AD-32 now carries the pin's six ignored fields, the factory rule and the era log line; the lint passed. The four plan-stage `deferred:` items are harvested at dev complete: three as occurrences of DW-626 (`pi`, `windsurf`, `goose`), and the probe-process docs item to 43.4. The lead runs the D9 live check at smoke.
@@ -548,7 +595,7 @@ Every test added or changed passes on a fresh environment, in either order. No I
 
 **Mutation evidence (Rule 19).** Each mutation was applied with the Edit tool to the built `packages/shared/dist/server-base.js` (or, where marked src, to `packages/shared/src/server-base.ts`), the named tests were run on the closed port, and the edit was reverted by the reverse edit; shared was rebuilt and every test is green again.
 
-mutation: serving (AC 43.2.1, 43.2.2) - `start()` connected a plain `StdioServerTransport` (`await this.mcpServer.connect(new StdioServerTransport())` in place of `serveStdio`) - red: all five suites of `story-43-2-cross-era-pin.test.ts` and `story-43-2-chokepoint-both-eras.test.ts`, both failing in their `beforeAll` on `the server refused server/discover: ... -32601 Method not found`; `story-43-1-sdk-wire-golden.test.ts` stayed green (232) - reverted.
+mutation: serving (AC 43.2.1, 43.2.2, Integration; re-applied at code review, same red on all five spawned entry points) - `start()` connected a plain `StdioServerTransport` (`await this.mcpServer.connect(new StdioServerTransport())` in place of `serveStdio`) - red: all five suites of `story-43-2-cross-era-pin.test.ts` and `story-43-2-chokepoint-both-eras.test.ts`, both failing in their `beforeAll` on `the server refused server/discover: ... -32601 Method not found`; `story-43-1-sdk-wire-golden.test.ts` stayed green (232) - reverted.
 mutation: a 2025 client is served (AC 43.2.2) - `legacy: "serve"` became `legacy: "reject"` - red: the 43.1 golden (five server suites), the five cross-era suites and the chokepoint file, all on `Unsupported protocol version: 2025-11-25` (-32022) - reverted.
 mutation: factory semantics (AC 43.2.1, D8) - the factory returned the construction instance on every call (`if (!this.constructionInstanceHandedOut)` became `if (true)`) - red: dist, the five cross-era suites (the `initialize` that follows a `server/discover` probe is answered -32601 by the reused modern-marked instance); src, three `sdk-wire-compat.test.ts` rows (probe then `initialize`, probe then `initialize` asking 2026-07-28, add and remove after the probe) - reverted. It did not stay green, so the fallback mutation ("the builder skips prompts") was not needed.
 mutation: the modern `tools/list` pin (AC 43.2.2a) - the owned `tools/list` reversed the tool order when `params._meta` was present: green (334 passed), because the SDK lifts `_meta` off `request.params` before the owned handler runs, so the condition never fired; the discriminator became `ctx.mcpReq.envelope !== undefined` (modern only) - red: 21 tests of `story-43-2-cross-era-pin.test.ts` (the modern `tools-list` rows of (a), and the pinned and `auto` client rows of (e)); the 43.1 golden stayed green (232) - reverted.
@@ -564,6 +611,62 @@ mutation: builder completeness (AC 43.2.1, review pass) - the builder skipped th
 mutation: rebuilt instance is byte-identical (AC 43.2.1, D8, review pass) - on a rebuilt instance only, `instructions` gained one trailing space (dist) - red: the (d) `main` and `newer-era` rows of `story-43-2-cross-era-pin.test.ts` on all five servers (10 tests, now compared as raw lines with only the `id` set to 0); the 43.1 golden stayed green (232) - reverted.
 mutation: tools/list visibility (AC 43.2.3, review pass) - the owned `tools/list` reversed its listing when `params._meta.visible` was set (dist) - red: chokepoint call 7 on both eras (2 tests, `_meta { visible: true } lists no hidden tool`) - reverted.
 mutation: SDK client calls (AC 43.2.2, review pass) - `callToolFromWire` threw on every call, so every `callTool` rejected alike on all three clients (dist) - red: the (e) row "the legacy client's calls reach the server ..." on all five servers, plus rows of (a), (b) and (d); the (e) row "every golden main call comes to what the legacy client saw" stayed green, which is why the anchoring row exists - reverted.
+
+**QA stage (2026-10-20): the gaps the pins above cannot see.** Five default-suite files and one helper, all under `packages/iris-mcp-all/src/__tests__/`. They spawn the BUILT servers on 127.0.0.1:1 or on fake listeners at 127.0.0.1, write every JSON-RPC line by hand (no SDK client; the envelope constants are the revision's text, read 2026-10-20 from `basic/index#_meta`, `basic/versioning`, `server/discover`, `server/utilities/caching`, `server/tools` and `basic/patterns/cancellation`), keep every stdout line, and fail rather than skip on a stale dist. No IRIS instance was contacted.
+- (QA) `story-43-2-qa-hand-wire.ts` - helper, not a test: the hand driver, the envelope literals, the rig of two fake listeners and an audit file.
+- (QA) `story-43-2-qa-revision-oracle.test.ts` (50) - gap 1: each of the five servers read member by member against the revision's text, including the minimal envelope (no `clientInfo`) and `tools/list` stability across calls.
+- (QA) `story-43-2-qa-mixed-eras.test.ts` (9) - gap 2: era orderings, refused openings, the per-request `protocolVersion`, and the factory-rebuild path compared with an `initialize`-first run under two configurations.
+- (QA) `story-43-2-qa-concurrency-cancel.test.ts` (8) - gap 2: eight requests in flight behind a holding proxy, and cancellation, on both eras.
+- (QA) `story-43-2-qa-meta-smuggling.test.ts` (5) - gap 3: five groups of keys, and all of them together, on 13 request kinds plus `server/discover`, on both eras, twin against plain.
+- (QA) `story-43-2-qa-era-log-line.test.ts` (27) - gap 4: the era line at five `LOG_LEVEL` settings on three paths, and on all five servers at the default level.
+
+mutation: oracle, a listing that varies with the calls (QA, gap 1) - the owned `tools/list` dropped its last tool once any `tools/call` had run (dist) - red: the oracle rows "tools/list: ... unchanged by the calls between two listings" and "an envelope of the two required keys is served exactly like ..." on all five servers (10), and the mixed-eras row "modern, then a legacy initialize ..." (11 in all); the cross-era pin, the chokepoint file and the 43.1 golden stayed green (357) - reverted.
+mutation: rebuild runs a startup effect again (QA, gap 2) - the factory's rebuild branch logged "Connected via stdio transport" once more (dist) - red: both rows "the factory-rebuild path under ..." of `story-43-2-qa-mixed-eras.test.ts` (`expected [ ...(15) ] to deeply equal [ ...(14) ]`); the cross-era pin and the chokepoint file stayed green (125), because they count only the era lines - reverted.
+mutation: per-request claim reaches the gate (QA, gap 2) - `callToolFromWire` returned a success for any call whose `_meta.namespace` was `%SYS` (dist) - red: the mixed-eras rows "a legacy initialize, then modern-enveloped requests ..." and "a protocolVersion in _meta that differs per request ..." - reverted.
+mutation: calls served one at a time (QA, gap 2) - `callToolFromWire` chained every call behind the one before it (dist) - red: five rows of `story-43-2-qa-concurrency-cancel.test.ts`, each on `no response to request 11 within 8000 ms`; the cross-era pin, the chokepoint file and the 43.1 golden stayed green (357) - reverted.
+mutation: cancellation (QA, gap 2) - the test did not send the `notifications/cancelled` for the held request (test file) - red: the two rows "cancellation on the legacy era" and "... on the modern era", on `still none after its IRIS call completed`; the control row shows the request is answered once released - restored; the file's checksum equals the one taken before the edit.
+mutation: `_meta` beyond the chokepoint rows (QA, gap 3) - `resources/read` took the profile from `params._meta.server` (dist) - red: both rows "per-request metadata on the legacy/modern era > changes nothing the chokepoint decides", on `resource default under: server, profile, namespace and connection`; the cross-era pin, the chokepoint file and the 43.1 golden stayed green (357), because the chokepoint file smuggles into `tools/call` and `tools/list` only - reverted.
+mutation: era line (QA, gap 4) - the modern era line gained ` as <IRIS_USERNAME>` (dist) - red: 14 of the 27 rows of `story-43-2-qa-era-log-line.test.ts` (every modern and probe-discard path that shows `[INFO]`); the cross-era pin and the 43.1 lifecycle and DW-579 process files stayed green (139), because they match the line by substring - reverted.
+The dist was byte-identical after each revert (`shasum` of `packages/shared/dist/server-base.js` before the first mutation and after the last: `20f15e09ebe1382344ea453392d5353f899facce`), and `git status --short` listed only the six new files.
+
+**Code review (2026-10-20): the review patches' mutations.** All ran on 127.0.0.1:1 or the fake listeners. Each file was reverted by the reverse edit and checked byte-identical by `shasum`: dist `20f15e09ebe1382344ea453392d5353f899facce`, `sdk-wire-golden-core.mjs` `e0ef57c004967e4faf504d2f8eaa2ab96e2a660c`, cross-era pin `18f36d98e0c8282301851ba85562e1cec5c22bd6`, concurrency-cancel `0d3715663085480d3f745dbeda1ceae37071fdf9`.
+mutation: era line read after the streams close (AC 43.2.1, D8, D10; review) - the factory wrote its era line only on the first call (dist) - red: (d) "the factory runs twice on that path ... era lines say so" on all five servers (`main: expected +0 to be 1`), read through `closedStderr` - reverted.
+mutation: the table drives the helpers (AC 43.2.2a, D7; review) - the `serverInfoMeta` entry's `metaKey` pointed at a wrong key (`sdk-wire-golden-core.mjs`) - red: 17 rows of (a), (b) and (c) on all five servers - reverted.
+mutation: (a) is a byte comparison (AC 43.2.2a; review) - (a) was fed a live line with one added space after `"jsonrpc":` (test file), which the parsed comparison alone ignores - red: the (a) `main` row on all five servers (`the live line is canonical JSON`) - reverted.
+mutation: cancellation waits for the reply (QA gap 2; review) - the proxy forwarded a released read 700 ms late and the test sent no cancel for id 10 (test file), the case the old fixed `quiet(600)` could not see - red: both "cancellation on the legacy/modern era" rows (`still none after its IRIS call completed: ... got 1`) - reverted.
+mutation: QA gap 3 re-checked (review) - `resources/read` took the profile from `params._meta.server` (dist) - red: both `qa-meta-smuggling` rows "changes nothing the chokepoint decides"; the chokepoint file stayed green (18), as QA recorded - reverted.
+
+**QA observations for the lead and for 43.3 and 43.4 (nothing here is a 43.2 defect that changes a tested row).**
+- **Client capabilities on the modern era over stdio (for 43.3).** A handler reads them per request from `ctx.mcpReq.envelope["io.modelcontextprotocol/clientCapabilities"]`. The deprecated accessors `server.getClientCapabilities()` and `getClientVersion()` return `undefined` there: only the SDK's HTTP handler seeds them (`index.mjs:1420`), `serveStdio` never does. On a legacy-pinned connection the accessor holds the `initialize`-declared capabilities, but `ctx.mcpReq.envelope` is ALSO filled from whatever reserved keys a request's `_meta` carries (probe, SDK 2.3.1: `initialize` declared `elicitation`, a later request's `_meta` claimed `sampling`, and the envelope showed `sampling`). So 43.3 must pick the source by era (`getNegotiatedProtocolVersion()`), never read the envelope on a legacy connection, or a 2025 client could claim elicitation it never declared. Non-reserved `_meta` keys (`server`, `namespace`, ...) stay in `request.params._meta` on both eras, reachable by an owned handler; the 43.1 `callToolFromWire` receives `request.params` only (no `ctx`), and nothing under `packages/*/src` reads a client capability today.
+- **Cancellation (revision, `basic/patterns/cancellation`).** A cancelled call gets no answer on both eras (the MUST NOT holds), but the owned handlers do not receive the SDK's abort signal, so the IRIS call runs to its end and is audited `ok` (a cancelled write still happens). Same on both eras; it belongs with the `ctx` forwarding that 43.3 owns.
+- **A pinned modern connection does not re-check each request's `protocolVersion`.** A request claiming `2025-11-25`, `2099-01-01` or `garbage` is served as the modern era, where the revision (`basic/versioning`) says an unsupported version MUST get -32022. SDK-owned and already listed in this spec's edge cases; no claim reaches the gates (tested).
+- **Unknown tool on the modern era** is an in-band `isError` result ("MCP error -32602: Tool X not found"), where `server/tools` lists it as a JSON-RPC protocol error. It is the 2025 golden's behaviour kept byte for byte (AD-15), so it is the same on both eras.
+- **An `initialize` that carries a valid modern envelope** gets -32601 without `data.supported`; the revision says a modern-only server SHOULD name its versions in any `initialize` error. The envelope-less `initialize` does carry them (-32022).
+- **`resources/list` lists `iris-governance://default` twice** (a concrete resource and the template's listing), on both eras (the 2025 golden has it).
+- **After a legacy `initialize`, a request with a modern envelope is served as the 2025 era** (no `resultType`), and `server/discover` is -32601. Lines that are not requests (not JSON, `[]`, `{}`, a batch array) are dropped without any output.
+
+**Lead live check (D9, AC 43.2.1; the lead, 2026-10-20, at smoke): PASS on both legs.**
+
+- **Setup.**
+  - CLI `2.1.296 (Claude Code)`, with all dists rebuilt first (`turbo run build`, 7/7).
+  - `<S>` = `<lead scratchpad>/s432-live`: `tap.mjs` as specified, one `mcp-<leg>.json` per leg (`iris-dev` through the tap, `IRIS_HOST=127.0.0.1 IRIS_PORT=1`, dummy `qa` credentials), and an empty `proj/`.
+  - Each leg ran the D9 command exactly, with `env -u MCP_PROTOCOL_NEGOTIATION` for `auto` and `MCP_PROTOCOL_NEGOTIATION=legacy` for `legacy`.
+  - The checker is `<S>/check.mjs`.
+- **`auto` leg.**
+  - The first `in` line is `server/discover`, with `_meta["io.modelcontextprotocol/protocolVersion"]` `2026-07-28`, and there is no `initialize`.
+  - `tools/list` returns 33 tools with `resultType` `complete`, `ttlMs` 0, `cacheScope` `private` and the `_meta` serverInfo.
+  - `tools/call iris_server_profiles` carries the envelope, and is answered with `resultType` `complete` and no `isError`.
+  - stderr holds the closed-port health-check line, `Connected via stdio transport` and `Serving MCP protocol revision 2026-07-28 (server/discover)`.
+  - stream-json: `iris-dev` connected, the tool listed, result `success`, `total_cost_usd` 0.0038.
+- **How this Claude Code build connects (step 8).**
+  - One tap file, not the two the spec expected: Claude Code 2.1.296 sent its version probe (`server/discover`, id `server-discover-probe-1`) on the session connection itself, then `subscriptions/listen` (answered with an empty result), then a second `server/discover`. Then `prompts/list`, `resources/list`, `tools/list` and `tools/call`.
+  - So no separate probe process ran on this build. That is relevant to DW-641, which 43.4 owns.
+- **`legacy` leg.**
+  - No `server/discover`. The first `in` line is `initialize` (`protocolVersion` `2025-11-25`), followed by `notifications/initialized`.
+  - The answers carry no `resultType` and no `_meta` serverInfo. The same 33 tools are listed, and the call succeeds with no `isError`.
+  - stderr holds `Serving the 2025-era MCP handshake (initialize)`.
+  - stream-json: connected, the tool listed, `success`, `total_cost_usd` 0.0032.
+- **Totals.** USD 0.0070 for both legs. No IRIS contact (closed port), and `<S>` deleted.
 
 ## Auto Run Result
 

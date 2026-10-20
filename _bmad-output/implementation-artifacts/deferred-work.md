@@ -3533,3 +3533,43 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 43.2 plan probe 2026-10-20: one factory call per process per client mode; the extra process is the client's version probe, predates 43.2
 - 2026-10-20T12:12:41Z status=routed owner=43-4-sdk-v2-docs-smokes-and-capstone by=harvest note=43.4 documents it in the client docs (startup cost, log lines appearing twice) and checks the probe process exits cleanly in its live smoke
+
+### DW-642: A cancelled tools/call still runs its IRIS call to the end and is audited ok on both eras: the owned handlers get request.params only, never the SDK abort signal, so a cancelled write still happens
+- source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: QA 2026-10-20 story-43-2-qa-concurrency-cancel: the cancelled id gets no answer but its held read is forwarded and audited ok; server-base.ts:874 passes request.params only (pre-existing, both eras)
+- 2026-10-20T13:22:16Z status=routed owner=43-3-human-confirmation-through-elicitation by=cr note=43.3 forwards ctx: forward the abort signal to the HTTP call; pin a cancelled call never reaches IRIS or is not audited ok
+
+### DW-643: On a modern-pinned stdio connection the SDK does not re-check each request's _meta protocolVersion: a request claiming 2025-11-25, 2099-01-01 or garbage is served where the revision (basic/versioning) says -32022 MUST be returned
+- source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: high | footprint: out-of-footprint
+- evidence: QA 2026-10-20 story-43-2-qa-mixed-eras per-request protocolVersion row: every claim served as the modern era; no claim reached a different profile, namespace, gate or audit outcome (SDK 2.3.1-owned)
+- 2026-10-20T13:22:21Z status=wontfix-accepted owner=43-2-serve-mcp-revision-2026-07-28 by=cr note=reopen_if=an SDK release answers -32022 to a mismatched per-request protocolVersion, or a client depends on -32022
+
+### DW-644: An unknown tool on the 2026-07-28 era is an in-band isError result (MCP error -32602: Tool X not found), where the revision's server/tools lists it as a JSON-RPC protocol error
+- source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: QA 2026-10-20 story-43-2-qa-revision-oracle unknown-tool row; the cross-era pin and the 43.1 golden pin the in-band result byte for byte on both eras
+- 2026-10-20T13:22:27Z status=by-design owner=43-2-serve-mcp-revision-2026-07-28 by=cr note=wave-8 decision #1 and the cross-era equivalence pin keep it identical to the frozen 2025 golden on both eras
+
+### DW-645: An initialize that carries a valid 2026-07-28 _meta envelope is refused -32601 without data.supported, where the revision says a modern-only server SHOULD name its versions in any initialize error (the envelope-less initialize does, -32022)
+- source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: high | footprint: out-of-footprint
+- evidence: QA 2026-10-20 story-43-2-qa-mixed-eras row: an initialize with a valid modern envelope is a JSON-RPC error with no data.supported (SDK 2.3.1-owned)
+- 2026-10-20T13:22:30Z status=wontfix-accepted owner=43-2-serve-mcp-revision-2026-07-28 by=cr note=reopen_if=a client fails on the -32601 answer to an enveloped initialize because it lacks data.supported
+
+### DW-646: resources/list lists iris-governance://default twice on both eras: the static default resource and the iris-governance://{profile} template's list entry for the default profile
+- source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: registerGovernanceResource (server-base.ts:1166-1215): the static iris-governance-default plus the template list callback naming every profile incl. default; in the frozen v1 golden for all 5 servers
+- 2026-10-20T13:22:33Z status=routed owner=43-4-sdk-v2-docs-smokes-and-capstone by=cr note=decide with DW-639's golden retirement: a fix changes the frozen 2025 wire and needs an AD-15 sanction
+
+### DW-647: Stdio lines that are not JSON-RPC requests (not JSON, [], {}, a batch array) are dropped with no output, where JSON-RPC expects -32700 or -32600
+- source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: high | footprint: out-of-footprint
+- evidence: QA 2026-10-20 story-43-2-qa-mixed-eras junk-line row; the review pinned it: stdout holds only the answers to ids 1 and 2 (SDK 2.3.1-owned)
+- 2026-10-20T13:22:36Z status=wontfix-accepted owner=43-2-serve-mcp-revision-2026-07-28 by=cr note=reopen_if=the qa-mixed-eras junk-line row goes red (the SDK writes -32700/-32600) or a client needs those errors
+
+### DW-648: After a legacy initialize, a request carrying a 2026-07-28 _meta envelope is served as the 2025 era (no resultType), and server/discover answers -32601
+- source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: QA 2026-10-20 story-43-2-qa-mixed-eras legacy-then-modern row; the review pinned the 2025 shape (no resultType) in its served branches
+- 2026-10-20T13:22:39Z status=by-design owner=43-2-serve-mcp-revision-2026-07-28 by=cr note=the legacy pin: a connection's era is fixed by its opening message (serveStdio legacy: serve)
+
+### DW-649: flake: packages/shared sdk-wire-compat.test.ts failed 1 of 55 in the Story 43.2 fresh check (forward order, clean worktree) and passed on 8 unchanged reruns; the likely cause is the removeTools/addTools rows asserting a list_changed count after a fixed 50 ms sleep
+- source: _bmad-output/implementation-artifacts/spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 43.2 fresh check 2026-10-20: shared forward 1 failed|54 passed, reverse 55/55; reruns: main checkout 3/3, fresh worktree 5/5; the failing row name was lost to the summary grep; rows at sdk-wire-compat.test.ts:538-568 wait setTimeout(50) before reading the notification count
+- 2026-10-20T13:30:48Z status=routed owner=43-3-human-confirmation-through-elicitation by=harvest note=43.3 reworks this file: replace the fixed sleeps with a deterministic barrier (await the notification, or a client round trip before counting)
