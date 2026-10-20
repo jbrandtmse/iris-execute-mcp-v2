@@ -29,7 +29,6 @@ const OWN_PROMPT_NAMES = ["check-system-health", "run-external-backup"];
 /** Every prompt name owned by a DIFFERENT package — must never leak here. */
 const FOREIGN_PROMPT_NAMES = [
   "diagnose-slow-query",
-  "objectscript-review",
   "deploy-and-test-class",
   "edit-and-test-class",
   "trace-message-flow",

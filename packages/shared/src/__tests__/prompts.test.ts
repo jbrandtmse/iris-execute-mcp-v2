@@ -199,6 +199,28 @@ describe("Story 25.0 — prompts/list (AC 25.0.2)", () => {
     ]);
   });
 
+  it("a prompt's skill-only field is never listed: the list equals the list of the same prompts without it (Story 41.5, AD-15)", async () => {
+    const skillDescription = "A skill-only description that only the skill generator reads. Use when a test lists prompts.";
+    const withSkill = FIXTURE_PROMPTS.map(
+      (prompt): PromptDefinition => ({ ...prompt, skill: { description: skillDescription, preset: "developer" } }),
+    );
+    const listed = async (prompts: PromptDefinition[]) =>
+      (await callRequest(new McpServerBase(makeServerOpts(prompts)), "prompts/list", {})).prompts as unknown[];
+
+    const withField = await listed(withSkill);
+    expect(withField).toEqual(await listed(FIXTURE_PROMPTS));
+    const json = JSON.stringify(withField);
+    expect(json).not.toContain(skillDescription);
+    expect(json).not.toContain("iris-tools-preset");
+    expect(json).not.toContain("skill");
+
+    const result = await callRequest(new McpServerBase(makeServerOpts(withSkill)), "prompts/get", {
+      name: "fixture-required-arg",
+      arguments: { topic: "backup" },
+    });
+    expect(JSON.stringify(result)).not.toContain(skillDescription);
+  });
+
   it("a no-prompts server registers NO prompts/list handler at all (matches the absent capability)", async () => {
     // The SDK only wires prompts/list, prompts/get once registerPrompt() is
     // called at least once (setPromptRequestHandlers). An absent/empty

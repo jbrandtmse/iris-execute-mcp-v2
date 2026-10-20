@@ -20,6 +20,16 @@ export const recoverStuckProductionPrompt: PromptDefinition = {
     "Diagnose and recover a troubled/wedged Interoperability production, following the " +
     "recover-first, clean-last-resort escalation ladder. Never suggests killAppData " +
     "without the user's explicit acceptance of persistent business-state loss.",
+  skill: {
+    description:
+      "Diagnoses and recovers a troubled or wedged interoperability production along an escalation " +
+      "ladder, in order: status, queues and error logs first, then the recover action, and the clean " +
+      "action only when recover does not fix it, never wiping persistent business state unless the user " +
+      "explicitly accepts the data loss. Use when an IRIS interoperability production is stuck, troubled " +
+      "or suspended, messages are not processing or queues are backing up, or the user asks to restart " +
+      "or recover a production.",
+    preset: "core",
+  },
   arguments: [
     {
       name: "production",

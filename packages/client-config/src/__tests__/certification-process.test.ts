@@ -270,7 +270,9 @@ describe("QA 33.4: doctor config-drift edges (process level)", () => {
 // 2. render-certification-table.mjs — the --check guard is GENUINE.
 //    Runs against a sandbox COPY of the package so the real README/results
 //    are never touched. dist/adapters.js is self-contained (zero imports —
-//    verified), so the copy needs only the four files.
+//    verified) and dist/pack-targets.js imports only it, so the copy needs
+//    the two dist files, the always-on rules (the stems of the skills pack
+//    table) and the README.
 // ════════════════════════════════════════════════════════════════════
 
 function makePkgSandbox(): { pkg: string; run: (args: string[]) => RunResult; readmePath: string; resultsPath: string } {
@@ -280,6 +282,8 @@ function makePkgSandbox(): { pkg: string; run: (args: string[]) => RunResult; re
   cpSync(RENDERER, path.join(pkg, "scripts", "render-certification-table.mjs"));
   cpSync(RESULTS_PATH, path.join(pkg, "scripts", "certification-results.json"));
   cpSync(path.join(PACKAGE_ROOT, "dist", "adapters.js"), path.join(pkg, "dist", "adapters.js"));
+  cpSync(path.join(PACKAGE_ROOT, "dist", "pack-targets.js"), path.join(pkg, "dist", "pack-targets.js"));
+  cpSync(path.join(PACKAGE_ROOT, "skills-pack", "rules"), path.join(pkg, "skills-pack", "rules"), { recursive: true });
   cpSync(path.join(PACKAGE_ROOT, "README.md"), path.join(pkg, "README.md"));
   const run = (args: string[]): RunResult => {
     const result = spawnSync(process.execPath, [path.join(pkg, "scripts", "render-certification-table.mjs"), ...args], {
@@ -406,6 +410,122 @@ describe("QA 33.4: render-certification-table --check guard (real script, sandbo
     const result = sandbox.run(["--check"]);
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("missing the <!-- ADAPTER-TABLE:BEGIN -->");
+  }, T);
+});
+
+describe("Story 41.7: the PACK-TARGETS-TABLE section of the README is generated and guarded (real script, sandbox package)", () => {
+  const pristine = readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8");
+
+  it("a hand-edited table row fails --check (exit 1), and a bare run restores the README byte for byte", () => {
+    const sandbox = makePkgSandbox();
+    expect(sandbox.run(["--check"]).status).toBe(0);
+    mutateReadme(sandbox.readmePath, "| Claude Code | `claude-code` | `.claude/skills/` |", "| Claude Code | `claude-code` | `.claude/skillz/` |");
+    const stale = sandbox.run(["--check"]);
+    expect(stale.status).toBe(1);
+    expect(stale.stderr).toContain("OUT OF SYNC");
+
+    const regen = sandbox.run([]);
+    expect(regen.status).toBe(0);
+    expect(regen.stdout).toContain("regenerated");
+    expect(readFileSync(sandbox.readmePath, "utf8")).toBe(pristine);
+    expect(sandbox.run(["--check"]).status).toBe(0);
+  }, T);
+
+  it("a README missing the PACK-TARGETS-TABLE marker pair is a hard error (exit 2)", () => {
+    const sandbox = makePkgSandbox();
+    mutateReadme(sandbox.readmePath, "<!-- PACK-TARGETS-TABLE:END -->", "<!-- PACK-TARGETS-TABLE:REMOVED -->");
+    const result = sandbox.run(["--check"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("missing the <!-- PACK-TARGETS-TABLE:BEGIN -->");
+  }, T);
+
+  it("the roster guard refuses a row with no https source, naming the id (exit 2); the README is never written", () => {
+    const sandbox = makePkgSandbox();
+    const dist = path.join(sandbox.pkg, "dist", "pack-targets.js");
+    const source = readFileSync(dist, "utf8");
+    expect(source.split('"https://agents.md"')).toHaveLength(2);
+    writeFileSync(dist, source.replace('"https://agents.md"', '"http://agents.md"'), "utf8");
+
+    for (const args of [["--check"], []]) {
+      const result = sandbox.run(args);
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("PACK_TARGETS roster violation");
+      expect(result.stderr).toContain("agents: every row needs at least one https:// source");
+    }
+    expect(readFileSync(sandbox.readmePath, "utf8")).toBe(pristine);
+  }, T);
+
+  it("the roster guard refuses a null route with no noRouteReason, and a duplicate id (exit 2)", () => {
+    const noReason = makePkgSandbox();
+    const noReasonDist = path.join(noReason.pkg, "dist", "pack-targets.js");
+    const noReasonSource = readFileSync(noReasonDist, "utf8");
+    expect(noReasonSource.split("noRouteReason: CLAUDE_DESKTOP_REFUSAL,")).toHaveLength(2);
+    writeFileSync(noReasonDist, noReasonSource.replace("noRouteReason: CLAUDE_DESKTOP_REFUSAL,", ""), "utf8");
+    const refused = noReason.run(["--check"]);
+    expect(refused.status).toBe(2);
+    expect(refused.stderr).toContain("claude-desktop: a null route needs a noRouteReason");
+
+    const duplicate = makePkgSandbox();
+    const duplicateDist = path.join(duplicate.pkg, "dist", "pack-targets.js");
+    const duplicateSource = readFileSync(duplicateDist, "utf8");
+    expect(duplicateSource.split('id: "kilo-code",')).toHaveLength(2);
+    writeFileSync(duplicateDist, duplicateSource.replace('id: "kilo-code",', 'id: "pi",'), "utf8");
+    const twice = duplicate.run(["--check"]);
+    expect(twice.status).toBe(2);
+    expect(twice.stderr).toContain('duplicate id "pi"');
+  }, T);
+
+  it("the roster guard refuses a roster of 16 rows, and a routed row whose route has no entry (exit 2)", () => {
+    const short = makePkgSandbox();
+    const shortDist = path.join(short.pkg, "dist", "pack-targets.js");
+    const shortSource = readFileSync(shortDist, "utf8");
+    expect(shortSource.split("export const PACK_TARGETS = Object.freeze([")).toHaveLength(2);
+    writeFileSync(
+      shortDist,
+      `${shortSource.replace("export const PACK_TARGETS = Object.freeze([", "const ALL_PACK_TARGETS = Object.freeze([")}\nexport const PACK_TARGETS = ALL_PACK_TARGETS.slice(1);\n`,
+      "utf8",
+    );
+    const missing = short.run(["--check"]);
+    expect(missing.status).toBe(2);
+    expect(missing.stderr).toContain("PACK_TARGETS has 16 rows, expected 17");
+
+    const unrouted = makePkgSandbox();
+    const unroutedDist = path.join(unrouted.pkg, "dist", "pack-targets.js");
+    const unroutedSource = readFileSync(unroutedDist, "utf8");
+    const anchor = 'displayName: displayNameOf("kilo-code"),\n        route: "agents",';
+    expect(unroutedSource.split(anchor)).toHaveLength(2);
+    writeFileSync(unroutedDist, unroutedSource.replace(anchor, 'displayName: displayNameOf("kilo-code"),\n        route: "nowhere",'), "utf8");
+    const refused = unrouted.run(["--check"]);
+    expect(refused.status).toBe(2);
+    expect(refused.stderr).toContain('kilo-code: route "nowhere" has no PACK_ROUTES entry');
+    expect(readFileSync(unrouted.readmePath, "utf8")).toBe(pristine);
+  }, T);
+
+  it("a pipe inside a client's text is written as an escaped pipe, so the row keeps its six cells", () => {
+    const sandbox = makePkgSandbox();
+    const dist = path.join(sandbox.pkg, "dist", "pack-targets.js");
+    const source = readFileSync(dist, "utf8");
+    const anchor = '"Claude Code never reads .agents/. A rule';
+    expect(source.split(anchor)).toHaveLength(2);
+    writeFileSync(dist, source.replace(anchor, '"Claude Code never reads .agents/ | nor here. A rule'), "utf8");
+
+    expect(sandbox.run([]).status).toBe(0);
+    const row = readFileSync(sandbox.readmePath, "utf8")
+      .split("\n")
+      .find((line) => line.startsWith("| Claude Code | `claude-code` |"));
+    expect(row, "the claude-code row").toBeDefined();
+    expect(row).toContain(".agents/ \\| nor here.");
+    const cells = (row ?? "").split(/(?<!\\)\|/).map((cell) => cell.trim());
+    expect(cells, "an empty cell before the first and after the last pipe, and six cells between").toHaveLength(8);
+    expect(sandbox.run(["--check"]).status).toBe(0);
+  }, T);
+
+  it("a pack without its always-on rule is refused (exit 2) rather than rendering an empty rule cell", () => {
+    const sandbox = makePkgSandbox();
+    rmSync(path.join(sandbox.pkg, "skills-pack", "rules", "claude-code"), { recursive: true });
+    const result = sandbox.run(["--check"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("no always-on rule found");
   }, T);
 });
 

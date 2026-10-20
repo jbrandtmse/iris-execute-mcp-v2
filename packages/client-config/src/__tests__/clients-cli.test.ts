@@ -117,6 +117,9 @@ describe("scaffold — exit codes and usage discipline (AC 33.2.3)", () => {
     expect(await h.run(["frobnicate"])).toBe(2);
     expect(h.stderr.text).toContain('unknown command "frobnicate"');
     expect(h.stderr.text).toContain("detect, status, diff, apply, enable, disable, remove, restore, doctor");
+    expect(h.stderr.text).toBe(
+      'Error: unknown command "frobnicate". Valid commands: detect, status, diff, apply, enable, disable, remove, restore, doctor, skills.\n',
+    );
   });
 
   it("--help prints help and exits 0 (also after a command)", async () => {
@@ -202,6 +205,11 @@ describe("AC 33.2-I1 — the CLI re-implements no engine logic (mechanical pin)"
     expect(core).toContain(`from "../status.js"`);
     expect(core).toContain(`from "../diff.js"`);
     expect(core).toContain(`from "../synthesize.js"`);
+    // Story 41.6: the skills command consumes the installer; it holds no placement or marker logic of its own.
+    expect(core).toContain(`from "../pack-apply.js"`);
+    expect(core).toContain(`from "../pack-plan.js"`);
+    expect(core).not.toMatch(/withRuleBlock\(|withoutRuleBlock\(|locateRuleBlock\(|planPackChange\(|loadPack\(/);
+    expect(core).not.toMatch(/IRIS-MCP-RULE|writeBytes\(|readBytes\(/);
   });
 });
 

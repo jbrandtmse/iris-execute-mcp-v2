@@ -17,6 +17,15 @@ export const diagnoseSlowQueryPrompt: PromptDefinition = {
   description:
     "Diagnose a slow SQL query using iris_sql_analyze (explain, indexUsage, stats) and " +
     "recommend a fix — never auto-applies one.",
+  skill: {
+    description:
+      "Diagnoses a slow IRIS SQL query from its query plan, the maps and indexes the plan reads, and the " +
+      "statement's cumulative run-time statistics, looking for full table scans, missing indexes, hot " +
+      "statements and plan inefficiencies, then recommends a fix such as a new index or a rewritten " +
+      "WHERE clause without applying it. Use when the user says a SQL query is slow, asks why a query " +
+      "does not use an index, or wants a query plan explained.",
+    preset: "developer",
+  },
   arguments: [
     {
       name: "query",

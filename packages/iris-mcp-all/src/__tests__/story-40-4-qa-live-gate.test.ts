@@ -45,6 +45,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseXml, validateCobertura } from "../../../../scripts/lib/cobertura-dtd.mjs";
+import { loadAllPrompts } from "../../../../scripts/lib/prompt-catalog.mjs";
 import {
   allText,
   assertDeployedBootstrapVersion,
@@ -746,7 +747,7 @@ describe("Story 40.4 QA: deploy-and-test-class through the built dev server over
     }
   }, 120000);
 
-  it("A5: skills/deploy-and-test-class/SKILL.md is the render of the prompt and its description is the listed one", async (testCtx) => {
+  it("A5: skills/deploy-and-test-class/SKILL.md is the render of the prompt with its definition's skill description, and the wire lists the unchanged prompt description", async (testCtx) => {
     if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
     const skill = readFileSync(path.join(REPO_ROOT, "skills", DEPLOY_PROMPT, "SKILL.md"), "utf8");
     const parts = /^---\n([\s\S]*?)\n---\n+([\s\S]*)$/.exec(skill);
@@ -756,8 +757,15 @@ describe("Story 40.4 QA: deploy-and-test-class through the built dev server over
     const description = /^description: (".*")$/m.exec(frontmatter)?.[1];
     expect(description, "a quoted description").toBeDefined();
 
+    const definition = ((await loadAllPrompts(REPO_ROOT)) as Array<{ prompt: { name: string; description: string; skill?: { description: string } } }>).find(
+      (entry) => entry.prompt.name === DEPLOY_PROMPT,
+    )?.prompt;
+    expect(definition?.skill, "the definition sets its skill field").toBeDefined();
+    expect(JSON.parse(description as string), "the skill description is the definition's skill.description").toBe(definition?.skill?.description);
+
     const listed = (await plain.listPrompts()).find((prompt) => prompt.name === DEPLOY_PROMPT) as { description?: string } | undefined;
-    expect(JSON.parse(description as string), "the skill description is the description the wire lists").toBe(listed?.description);
+    expect(listed?.description, "the wire lists the prompt's own, unchanged description").toBe(definition?.description);
+    expect(listed?.description, "the wire does not list the skill description").not.toBe(definition?.skill?.description);
     expect(listed?.description).toContain("(iris_test_coverage)");
 
     const rendered = promptText(await plain.getPrompt({ name: DEPLOY_PROMPT, arguments: { classOrPackage: "<classOrPackage>" } }));

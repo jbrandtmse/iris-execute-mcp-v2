@@ -7,7 +7,7 @@
  * ORDERING, wording, or safety semantics) and to
  * `readonly-hint-crosscheck.test.ts` (governance classification, unrelated).
  * The story's own escalation-ladder / double-gate / thaw-always / total-count
- * / word-count invariants are exactly the kind of thing a future content
+ * invariants are exactly the kind of thing a future content
  * edit could silently break while every existing test stays green (the
  * tool-name tokens would still resolve; only the SAFETY semantics would
  * regress). These tests pin the exact safety-critical semantics called out
@@ -301,46 +301,6 @@ describe("deploy-and-test-class — glob-path guidance (Rule #17) + total-count 
     expect(body).toMatch(/returned `total`/);
     expect(body.toLowerCase()).toContain("partial");
     expect(body.toLowerCase()).toContain("rerun");
-  });
-});
-
-describe("objectscript-review — <=300 word rendered body (AC 25.1.1)", () => {
-  it("has no arguments and renders a body of at most 300 words", async () => {
-    const { pkg, prompt } = await findPrompt("objectscript-review");
-    expect(pkg).toBe("iris-dev-mcp");
-
-    const body = prompt.build({});
-    // Word count = whitespace-separated tokens containing at least one
-    // alphanumeric character. Bare markdown punctuation tokens (a lone "-"
-    // list-bullet marker, a standalone "→"/"—" separator) are NOT prose
-    // words by any conventional word-count definition (a naive
-    // whitespace-only split over-counts by ~39 words on this body, purely
-    // from list-bullet "-" markers — confirmed by direct measurement against
-    // the built prompt content).
-    const wordCount = body
-      .trim()
-      .split(/\s+/)
-      .filter((w) => /[A-Za-z0-9]/.test(w)).length;
-
-    expect(wordCount).toBeGreaterThan(0);
-    expect(wordCount).toBeLessThanOrEqual(300);
-  });
-
-  it("distills the core ObjectScript conventions the spec names", async () => {
-    const { prompt } = await findPrompt("objectscript-review");
-    const body = prompt.build({});
-
-    for (const marker of [
-      "$$$",
-      "underscore",
-      "Try/Catch",
-      "%OnNew",
-      "Storage",
-      "iris_doc_load",
-      "iris_execute_tests",
-    ]) {
-      expect(body).toContain(marker);
-    }
   });
 });
 

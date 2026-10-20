@@ -16,6 +16,15 @@ export const provisionProjectEnvironmentPrompt: PromptDefinition = {
   description:
     "Provision a new IRIS project environment: two databases, a namespace, a user, and a " +
     "web application — verifying each step before the next, with rollback notes.",
+  skill: {
+    description:
+      "Provisions a new IRIS project environment in order: a DATA and a CODE database, a namespace over " +
+      "them, a user whose default namespace it is, and a web application, checking each step before the " +
+      "next, rolling back the completed steps when one fails, and naming the manual follow-up a new web " +
+      "application needs. Use when the user wants to set up or create a new IRIS project, namespace or " +
+      "application environment.",
+    preset: "core",
+  },
   arguments: [
     {
       name: "projectName",

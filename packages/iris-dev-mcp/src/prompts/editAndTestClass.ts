@@ -19,6 +19,16 @@ export const editAndTestClassPrompt: PromptDefinition = {
     "Change a few lines of an ObjectScript class in place (ranged iris_doc_get, then a guarded " +
     "iris_doc_edit), compile it (iris_doc_compile), then run its unit tests (iris_execute_tests) " +
     "with a total-count check.",
+  skill: {
+    description:
+      "Changes a few lines of an ObjectScript class directly in IRIS: reads the lines around the " +
+      "change, applies a guarded line edit that stores nothing when the class no longer matches what was " +
+      "read, compiles the class and fixes errors the same way, runs its unit tests and checks the " +
+      "returned total, and reports the diff. Use when the user wants a small fix or change to a class " +
+      "that lives in IRIS, especially one with no local source file, or asks to patch, compile and test " +
+      "a class in place.",
+    preset: "core",
+  },
   arguments: [
     {
       name: "className",

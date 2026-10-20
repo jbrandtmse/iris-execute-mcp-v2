@@ -196,7 +196,7 @@ Workflow-shaped [MCP prompts](../../README.md#workflow-prompts--agent-skills) (E
 | `check-system-health` | Runs `iris_health_check`, interprets every non-`ok` finding, and names the fixing tool for each one. |
 | `run-external-backup` | Freezes the instance for an external (OS/SAN-level) snapshot and thaws it safely afterward — thaw always runs, even if the snapshot step failed. |
 
-Also installable as [Agent Skills](../../skills/README.md).
+Also installable as [Agent Skills](../../README.md#the-skills-pack).
 
 ---
 

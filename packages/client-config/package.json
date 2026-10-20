@@ -16,7 +16,8 @@
   },
   "files": [
     "dist",
-    "!dist/**/__tests__"
+    "!dist/**/__tests__",
+    "skills-pack"
   ],
   "scripts": {
     "build": "tsc --project tsconfig.json",

@@ -18,6 +18,16 @@ export const traceMessageFlowPrompt: PromptDefinition = {
     "Trace a message's flow through an Interoperability production using " +
     "iris_production_messages, iris_message_search, iris_message_body, iris_message_diagram, " +
     "and iris_production_logs for any erroring items.",
+  skill: {
+    description:
+      "Traces one interoperability message flow from a session or message header ID: lists every hop, " +
+      "searches the session's message headers, reads the bodies that matter under the PHI data policy, " +
+      "draws a sequence diagram, and pulls the error log entries of each failing item, then reports " +
+      "where the flow failed and recommends next steps, never running a recovery without the user's " +
+      "confirmation. Use when the user asks what happened to a message or session, why a message failed " +
+      "or never arrived, or how a message moved through an IRIS interoperability production.",
+    preset: "core",
+  },
   arguments: [
     {
       name: "sessionOrHeaderId",
