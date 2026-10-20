@@ -239,6 +239,8 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 > **Governance defaults:** `iris_env_diff` and `iris_env_promote`'s `plan` action are classified `read` and are therefore **enabled by default** — neither is gated behind `IRIS_GOVERNANCE`. `iris_env_promote`'s `execute` action is truthfully classified `write` and is **DEFAULT-DISABLED** (unlike `iris_production_control:clean`, it deliberately does not use the `defaultEnabled` mechanism — promotion is a real environment-mutating write, not a recovery action); enable it via `IRIS_GOVERNANCE`, e.g. `{"global":{"iris_env_promote:execute":true}}` — `execute` ALSO requires the **target** profile's own governance to allow the underlying write families it uses (a fourth gate on top of this one). **Safety:** nothing on the target is ever deleted — items that exist on the target only (`onlyInTarget`) are always informational warnings, never steps — and System Default Settings values that look like credentials are redacted in both diff and plan/execute output; their plaintext never appears in any tool result. Credentials/users/roles promotion is out of scope entirely.
 
+> **Human confirmation (Story 43.3):** `iris_env_promote` action `execute` (a write, default-disabled) also asks the person right before its first write, after the four gates pass, when the MCP client declares form elicitation; any other client keeps today's contract (`confirm: true` and the gates), and declining ends the call with `CONFIRMATION_DECLINED` and changes nothing. A Claude Code `Elicitation` hook can answer the dialog for the person, which is the user's choice and removes the person from the loop. See [Human confirmation (elicitation)](../../README.md#human-confirmation-elicitation).
+
 ### Test Status Tools
 
 | Tool | Description | Key Parameters | Annotations |
@@ -426,6 +428,11 @@ addressed in the numbering of that read.
   `iris_doc_edit` keys seed disabled, reported as `configSource: "parent"`; an explicit setting on `iris_doc_edit:apply`
   still wins). The read-only preset blocks it too. `action: "regenerateStorage"` (the Storage-guard override, below) is
   **disabled by default**. See [Parent keys](../../README.md#parent-keys-a-new-tool-that-re-exposes-an-existing-one).
+  **Human confirmation (Story 43.3):** `action: "regenerateStorage"` also asks the person right before the save, when the
+  MCP client declares form elicitation; any other client keeps today's contract (governance is the only gate, there is no
+  `confirm` parameter), and declining ends the call with `CONFIRMATION_DECLINED` and changes nothing. A Claude Code
+  `Elicitation` hook can answer the dialog for the person, which is the user's choice and removes the person from the
+  loop. See [Human confirmation (elicitation)](../../README.md#human-confirmation-elicitation).
 - **`expected`.** The current text of the addressed lines (of line `afterLine`, or line 1 when `afterLine` is 0, for an
   insert). `text` and `expected` are parsed alike: one leading byte-order mark is dropped, one trailing line break is
   dropped, and CRLF and LF both separate lines, so `"a\nb\n"` and `"a\r\nb"` are both the two lines `a`, `b`. An empty

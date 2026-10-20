@@ -4,7 +4,10 @@
 //   `startFakeIris` listens on 127.0.0.1 on an ephemeral port and answers, deterministically, the Atelier and
 //   ExecuteMCPv2 REST shapes that the handler golden's tool calls need: the connection checks, the version
 //   negotiation, the bootstrap probe (reported "current", so a started server deploys nothing), documents, document
-//   names, the SQL endpoint, and one read route for each of the other four servers. It records every request, so a
+//   names, the SQL endpoint, and one read route for each of the other four servers. It also answers the write routes
+//   of the confirmation gates: the audit purge, the production `clean`, `resend` and `resendFiltered`, the persistent
+//   class `Demo.Stored.cls` (a read, a version probe and a save), and the save and compile of a promoted document
+//   (`Demo.Sample.cls` and `action/compile`). It records every request, so a
 //   run can be compared with another by what each server asked IRIS for. It is SDK-free and reaches nothing but its
 //   own socket.
 //
@@ -40,6 +43,36 @@ const SAMPLE_DOCUMENT = {
   flags: 0,
   content: ['Class Demo.Sample Extends %RegisteredObject', '{', 'Method A()', '{', '}', '}'],
 };
+
+/** The persistent class `Demo.Stored.cls`: one `Storage Default` definition, which an edit can drop. */
+const STORED_DOCUMENT = {
+  name: 'Demo.Stored.cls',
+  db: 'HSCUSTOM',
+  ts: '2026-01-01 00:00:00.000',
+  upd: false,
+  cat: 'CLS',
+  status: '',
+  enc: false,
+  flags: 0,
+  content: [
+    'Class Demo.Stored Extends %Persistent',
+    '{',
+    'Property A As %String;',
+    'Storage Default',
+    '{',
+    '<DataLocation>^Demo.StoredD</DataLocation>',
+    '<Type>%Storage.Persistent</Type>',
+    '}',
+    '}',
+  ],
+};
+
+/** How many messages the `resendFiltered` route counts for `item`: none for `Demo.Zero`, 600 for `Demo.Many`, else 3. */
+function matchCountOf(item) {
+  if (item === 'Demo.Zero') return 0;
+  if (item === 'Demo.Many') return 600;
+  return 3;
+}
 
 /**
  * Start the fake.
@@ -90,6 +123,10 @@ export async function startFakeIris({ bootstrapVersion }) {
         else reply(res, 200, envelope({ content: [] }));
         return;
       }
+      if (method === 'POST' && action === 'action/compile') {
+        reply(res, 200, envelope({ content: [] }));
+        return;
+      }
       if (method === 'GET' && action.startsWith('docnames/')) {
         if (url.searchParams.get('filter') === 'throw') {
           reply(res, 200, '<html><body>not an Atelier envelope</body></html>');
@@ -105,6 +142,17 @@ export async function startFakeIris({ bootstrapVersion }) {
       }
       if (action.startsWith('doc/')) {
         const name = decodeURIComponent(action.slice('doc/'.length));
+        if (name === 'Demo.Stored.cls') {
+          if (method === 'HEAD') {
+            res.writeHead(200, { ETag: `"${STORED_DOCUMENT.ts}"` });
+            res.end();
+          } else if (method === 'PUT') {
+            reply(res, 200, envelope({ name, ts: '2026-01-02 00:00:00.000', status: '', content: [] }));
+          } else {
+            reply(res, 200, envelope(STORED_DOCUMENT));
+          }
+          return;
+        }
         if (name === 'Demo.Sample.cls') {
           if (method === 'HEAD') {
             res.writeHead(200, { ETag: '"2026-01-01 00:00:00.000"' });
@@ -156,6 +204,69 @@ export async function startFakeIris({ bootstrapVersion }) {
     }
     if (method === 'POST' && /^\/api\/docdb\/v1\/[^/]+\/find\/[^/]+$/.test(path)) {
       reply(res, 200, envelope([{ _id: 1, name: 'alpha' }, { _id: 2, name: 'beta' }]));
+      return;
+    }
+
+    // The write routes of the confirmation gates (Story 43.3). Each answers from the request alone and uses the
+    // texts of the IRIS-side guards (`Security.cls`, `Interop.cls`, `MessageResend.cls`).
+    if (method === 'POST' && path === '/api/executemcp/v2/security/audit' && body?.action === 'purge') {
+      if (body.confirm === true) {
+        reply(res, 200, envelope({ action: 'purge', deleted: 3, success: 1 }));
+      } else {
+        reply(res, 400, errorEnvelope("ERROR #5001: Parameter 'confirm' must be true to purge audit-log records", 5001));
+      }
+      return;
+    }
+    if (method === 'POST' && path === '/api/executemcp/v2/interop/production/control' && body?.action === 'clean') {
+      if (body.killAppData && !body.confirm) {
+        reply(res, 400, errorEnvelope(
+          'ERROR #5001: killAppData wipes the persistent Ens.AppData business state (HL7 sequence numbers, file/FTP done-file tables, batch/control-number state) and can cause duplicate re-ingestion of already-processed data; it requires confirm:true. No changes were made.',
+          5001,
+        ));
+      } else {
+        reply(res, 200, envelope({ action: 'cleaned', killAppData: !!body.killAppData }));
+      }
+      return;
+    }
+    if (method === 'POST' && path === '/api/executemcp/v2/interop/message/resend' && body?.action === 'resend') {
+      const ids = Array.isArray(body.headerIds) ? body.headerIds : [];
+      reply(res, 200, envelope({ results: [], summary: { total: ids.length, succeeded: ids.length, failed: 0 } }));
+      return;
+    }
+    if (method === 'POST' && path === '/api/executemcp/v2/interop/message/resend' && body?.action === 'resendFiltered') {
+      const matchCount = matchCountOf(body.item);
+      const maxMessages = body.maxMessages ?? 100;
+      if (body.dryRun === undefined || body.dryRun === true) {
+        reply(res, 200, envelope({
+          action: 'resendFiltered',
+          dryRun: true,
+          matchCount,
+          sample: [],
+          item: body.item,
+          status: body.status ?? 'Errored',
+          from: body.from,
+          to: body.to ?? body.from,
+          maxMessages,
+        }));
+      } else if (!body.confirm) {
+        reply(res, 400, errorEnvelope(
+          'ERROR #5001: resendFiltered execution requires dryRun:false and confirm:true; by default dryRun is true and only previews matching messages without resending. No changes were made.',
+          5001,
+        ));
+      } else if (matchCount > maxMessages) {
+        reply(res, 400, errorEnvelope(
+          `ERROR #5001: ${matchCount} messages match the filter, exceeding the maxMessages cap of ${maxMessages}; narrow the time window or item filter and retry. No changes were made.`,
+          5001,
+        ));
+      } else {
+        reply(res, 200, envelope({
+          action: 'resendFiltered',
+          dryRun: false,
+          matchCount,
+          results: [],
+          summary: { total: matchCount, succeeded: matchCount, failed: 0 },
+        }));
+      }
       return;
     }
 

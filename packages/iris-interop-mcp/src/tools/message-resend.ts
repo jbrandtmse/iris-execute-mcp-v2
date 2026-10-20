@@ -338,6 +338,9 @@ function renderResendSummary(summary: ResendSummary | undefined | null): string 
 
 // ── iris_message_resend ─────────────────────────────────────
 
+/** The header IDs a `resend` confirmation dialog lists before it says "and N more". */
+const CONFIRMATION_HEADER_LIMIT = 20;
+
 export const messageResendTool: ToolDefinition = {
   name: "iris_message_resend",
   title: "Resend Interoperability Messages",
@@ -545,6 +548,18 @@ export const messageResendTool: ToolDefinition = {
             "'headerIds' is required for action 'resend' (1-100 numeric header IDs).",
           );
         }
+        // Every check has passed and nothing has been resent: the person is asked (AD-34).
+        const ids = input.headerIds;
+        const outcome = await ctx.confirm?.({
+          operation: "resend messages by header ID",
+          target: `namespace ${ns}`,
+          scope:
+            `${ids.length} header ID(s): ${ids.slice(0, CONFIRMATION_HEADER_LIMIT).join(", ")}` +
+            (ids.length > CONFIRMATION_HEADER_LIMIT ? ` and ${ids.length - CONFIRMATION_HEADER_LIMIT} more` : "") +
+            (input.headOfQueue ? "; each goes to the head of its queue" : ""),
+        });
+        if (outcome !== undefined && !outcome.proceed) return outcome.result;
+
         const body: Record<string, unknown> = {
           action: "resend",
           headerIds: input.headerIds,
@@ -587,6 +602,36 @@ export const messageResendTool: ToolDefinition = {
       if (input.maxMessages !== undefined) body.maxMessages = input.maxMessages;
       if (input.dryRun !== undefined) body.dryRun = input.dryRun;
       if (input.confirm !== undefined) body.confirm = input.confirm;
+
+      // An execute that IRIS will let through (dryRun false with confirm true) asks the person (AD-34). The
+      // dialog names the match count, which a read-only preview of the same filters provides: it is shown only
+      // when 1 <= count <= cap, and otherwise the execute request goes out as it always did.
+      if (input.dryRun === false && input.confirm === true) {
+        const preview = async (): Promise<string | undefined> => {
+          try {
+            const previewBody: Record<string, unknown> = { ...body, dryRun: true };
+            delete previewBody.confirm;
+            const found = (
+              await ctx.http.post<ResendFilteredDryRunResult>(`${BASE_URL}/interop/message/resend`, previewBody)
+            ).result;
+            const { matchCount, maxMessages } = found;
+            if (typeof matchCount !== "number" || typeof maxMessages !== "number") return undefined;
+            if (matchCount < 1 || matchCount > maxMessages) return undefined;
+            return (
+              `${matchCount} message(s) match now (status ${found.status}, from ${found.from} to ${found.to}); ` +
+              `IRIS counts again when it runs and resends at most ${maxMessages}`
+            );
+          } catch {
+            return undefined;
+          }
+        };
+        const outcome = await ctx.confirm?.({
+          operation: "resend the messages that match a filter",
+          target: `item ${input.item}, namespace ${ns}`,
+          scope: preview,
+        });
+        if (outcome !== undefined && !outcome.proceed) return outcome.result;
+      }
 
       const response = await ctx.http.post<ResendFilteredResult>(
         `${BASE_URL}/interop/message/resend`,

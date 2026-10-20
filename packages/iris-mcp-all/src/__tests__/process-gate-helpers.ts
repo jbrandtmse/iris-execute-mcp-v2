@@ -282,6 +282,30 @@ export interface WireSessionOptions {
   onStderr?: (chunk: string) => void;
   /** The client's negotiation mode; omitted, `{ mode: "legacy" }` is sent explicitly. */
   versionNegotiation?: SdkVersionNegotiation;
+  /**
+   * The capabilities the client declares (for example `{ elicitation: { form: {} } }`); omitted, the client sends
+   * no `capabilities` option and its handshake is unchanged.
+   */
+  clientCapabilities?: Record<string, unknown>;
+  /**
+   * Answers each `elicitation/create` request the server sends. Registered only when `clientCapabilities` declares
+   * `elicitation`; then, omitted, every request is cancelled.
+   */
+  onElicitation?: (request: ElicitationRequest) => Promise<ElicitationAnswer> | ElicitationAnswer;
+}
+
+/** The params of an `elicitation/create` request, as the server sent them. */
+export interface ElicitationRequest {
+  message: string;
+  requestedSchema: unknown;
+  mode?: string;
+  [member: string]: unknown;
+}
+
+/** An answer to an `elicitation/create` request. */
+export interface ElicitationAnswer {
+  action: "accept" | "decline" | "cancel";
+  content?: Record<string, unknown>;
 }
 
 /**
@@ -297,7 +321,15 @@ export async function connectSdkClient(
   const sdkClientIndex = pathToFileURL(path.join(options.sdkEsmDir, "index.mjs")).href;
   const sdkClientStdio = pathToFileURL(path.join(options.sdkEsmDir, "stdio.mjs")).href;
   const { Client } = (await import(sdkClientIndex)) as {
-    Client: new (info: { name: string; version: string }, options: { versionNegotiation: SdkVersionNegotiation }) => SdkClient;
+    Client: new (
+      info: { name: string; version: string },
+      options: { versionNegotiation: SdkVersionNegotiation; capabilities?: Record<string, unknown> },
+    ) => SdkClient & {
+      setRequestHandler: (
+        method: "elicitation/create",
+        handler: (request: { params: ElicitationRequest }) => Promise<ElicitationAnswer> | ElicitationAnswer,
+      ) => void;
+    };
   };
   const { StdioClientTransport } = (await import(sdkClientStdio)) as {
     StdioClientTransport: new (params: {
@@ -321,8 +353,16 @@ export async function connectSdkClient(
 
   const client = new Client(
     { name: options.clientName, version: "0.0.0" },
-    { versionNegotiation: options.versionNegotiation ?? { mode: "legacy" } },
+    {
+      versionNegotiation: options.versionNegotiation ?? { mode: "legacy" },
+      ...(options.clientCapabilities !== undefined ? { capabilities: options.clientCapabilities } : {}),
+    },
   );
+  // The client refuses a handler for a request it did not declare, so it is registered only with `elicitation`.
+  if (options.clientCapabilities?.["elicitation"] !== undefined) {
+    const answer = options.onElicitation ?? ((): ElicitationAnswer => ({ action: "cancel" }));
+    client.setRequestHandler("elicitation/create", (request) => answer(request.params));
+  }
   await client.connect(transport);
   return client;
 }

@@ -67,6 +67,8 @@ export interface HandWire {
   request(id: number, method: string, params?: unknown): Promise<WireLine>;
   /** Resolve with the response to request `id`, whenever the server writes it. */
   response(id: number, timeoutMs?: number): Promise<WireLine>;
+  /** Resolve with the first stdout line, already written or still to come, that `predicate` accepts; reject after `timeoutMs` or when the server exits first. */
+  untilLine(predicate: (line: WireLine) => boolean, timeoutMs?: number): Promise<WireLine>;
   /** Every stdout line so far. */
   stdout(): WireLine[];
   /** Every response (a line with an `id` and no `method`) to request `id` so far. */
@@ -141,12 +143,34 @@ export function startHandWire(entry: string, env: Record<string, string>): HandW
       listeners.add(check);
       check();
     });
+  const untilLine = (predicate: (line: WireLine) => boolean, timeoutMs = 10_000): Promise<WireLine> =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        listeners.delete(check);
+        reject(new Error(`no stdout line matched within ${timeoutMs} ms; stderr: ${stderr.slice(0, 600)}`));
+      }, timeoutMs);
+      const check = (): void => {
+        const found = lines.find(predicate);
+        if (found !== undefined) {
+          clearTimeout(timer);
+          listeners.delete(check);
+          resolve(found);
+        } else if (ended !== undefined) {
+          clearTimeout(timer);
+          listeners.delete(check);
+          reject(new Error(`the server exited (${JSON.stringify(ended)}) before a stdout line matched; stderr: ${stderr.slice(0, 600)}`));
+        }
+      };
+      listeners.add(check);
+      check();
+    });
   const send = (frame: unknown): void => {
     child.stdin.write(`${JSON.stringify(frame)}\n`);
   };
 
   return {
     send,
+    untilLine,
     sendRaw: (text) => {
       child.stdin.write(`${text}\n`);
     },

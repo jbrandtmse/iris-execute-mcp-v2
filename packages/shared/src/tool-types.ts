@@ -341,7 +341,37 @@ export interface ToolContext {
    * pre-Epic-32 behavior (the AC 32.0.1 back-compat gate).
    */
   governanceFileConfig?: GovernanceConfig;
+  /**
+   * Ask the person to confirm a change (AD-34, Story 43.3). A gate calls it after every check of its own and
+   * right before its first IRIS write, and returns `result` unchanged when `proceed` is `false`.
+   *
+   * Present only on a call that came off the wire. It is `undefined` for a context built directly (a unit test,
+   * an in-process callback), which a gate treats as today's contract: no question, the gate's own checks decide.
+   * On the wire it resolves to `{ proceed: true }` for a client that does not declare form elicitation, and to
+   * `{ proceed: true }` after the person ticked Confirm and accepted. A decline, a dismissal and an accept without
+   * the tick resolve to a `CONFIRMATION_DECLINED` refusal that changes nothing and is never asked again.
+   */
+  confirm?(request: ConfirmationRequest): Promise<ConfirmationOutcome>;
 }
+
+/**
+ * What a gate asks the person to confirm. `operation` is fixed text that never carries a caller value; `target`
+ * and `scope` name what the call would change.
+ */
+export interface ConfirmationRequest {
+  /** What the call does, as a verb phrase (it also opens the refusal text). */
+  operation: string;
+  /** What the call acts on. */
+  target: string;
+  /**
+   * What the call covers. A function is resolved only when the client can be asked, and may return `undefined`
+   * to say there is nothing to ask (the call then proceeds as it would without a dialog).
+   */
+  scope: string | (() => Promise<string | undefined>);
+}
+
+/** The answer to a {@link ConfirmationRequest}: carry on, or end the call with `result`. */
+export type ConfirmationOutcome = { proceed: true } | { proceed: false; result: ToolResult };
 
 /**
  * Standard return type from every tool handler.

@@ -19,7 +19,7 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 
 - **`IrisHttpClient`** -- HTTP client for communicating with IRIS. Handles Basic Auth, session cookie reuse, CSRF token management, and Atelier REST API envelope parsing. Supports GET, POST, PUT, DELETE, and HEAD methods.
 - **`IrisConnectionConfig`** (type) -- Configuration interface for IRIS connection: host, port, username, password, namespace, https flag.
-- **`RequestOptions`** (type) -- Options for HTTP requests: method, path, body, headers, query parameters.
+- **`RequestOptions`** (type) -- Options for HTTP requests: method, path, body, headers, query parameters, and an optional `signal` (Story 43.3). `RequestOptions.signal` is an `AbortSignal`: an already aborted signal sends no request and rejects with an `IrisConnectionError` of code `CANCELLED`, and an abort while the request is in flight aborts it and rejects with the same code. `McpServerBase` passes the signal of a call off the wire, so a call the client cancels (`notifications/cancelled`) aborts its IRIS requests.
 - **`AtelierEnvelope`** (type) -- Parsed Atelier REST API response envelope with status, result, and console output.
 - **`HeadResponse`** (type) -- Response type for HEAD requests: status code and headers.
 - **`loadConfig()`** -- Loads connection configuration from environment variables (`IRIS_HOST`, `IRIS_PORT`, etc.).
@@ -29,7 +29,9 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 - **`McpServerBase`** -- Abstract base class for all IRIS MCP servers. Handles tool registration, input validation (Zod), stdio transport setup, health checking, and auto-bootstrap of custom REST classes. It owns the `tools/list`, `tools/call`, `prompts/get` and `resources/read` handlers on top of the MCP SDK v2, and its protocol errors are SDK `ProtocolError`s.
 - **`McpServerBaseOptions`** (type) -- Options for constructing an MCP server (name, version, tool definitions).
 - **`ToolDefinition`** (type) -- Tool definition interface including name, title, description, inputSchema (Zod), annotations, scope, and handler function.
-- **`ToolContext`** (type) -- Context passed to tool handlers: HTTP client, Atelier version, namespace resolver, paginator.
+- **`ToolContext`** (type) -- Context passed to tool handlers: HTTP client, Atelier version, namespace resolver, paginator, and the optional `confirm(request)` (Story 43.3).
+- **`ToolContext.confirm(request)`** -- Asks the person to confirm a destructive change (AD-34). It is present only on a call off the wire and resolves to `{proceed: true}` or `{proceed: false; result}`. A gate calls it after every check of its own and right before its first IRIS write, and returns `result` unchanged when `proceed` is `false`. `proceed` is `true` for a client that does not declare form elicitation (today's contract) and after the person ticked Confirm and accepted; a decline, a dismissal and an accept without the tick resolve to a `CONFIRMATION_DECLINED` refusal that changes nothing. A context built directly (a unit test, an in-process callback) has no `confirm`, and a handler treats that as no question. `ConfirmationRequest` (`operation`, `target`, `scope`) and `ConfirmationOutcome` are exported as types. See the suite's [Human confirmation (elicitation)](../../README.md#human-confirmation-elicitation) section.
+- **`contentHash(value)`** -- SHA-256 of the key-sorted JSON of `value`; the confirmation state is bound to the hash of the exact validated arguments.
 - **`ToolResult`** (type) -- Standard tool return type with content array, optional structuredContent, and isError flag.
 - **`ToolAnnotations`** (type) -- MCP tool annotations: readOnlyHint, destructiveHint, idempotentHint, openWorldHint.
 - **`ToolScope`** (type) -- Tool scope enum: `"NS"` (namespace-scoped), `"SYS"` (system-scoped), `"NONE"` (no namespace), `"BOTH"`.
@@ -100,6 +102,7 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 - **`REFUSAL_CODES.DATA_POLICY_BLOCKED`** -- The refusal for body data a policy withheld.
 - **`REFUSAL_CODES.MONITOR_BUSY`** -- The refusal for a run that needs the instance-wide Line-by-Line monitor while a session is active (Story 40.1).
 - **`REFUSAL_CODES.PRODUCTION_BUSY`** -- The refusal for a run that includes `%UnitTest.TestProduction` tests while a different production runs in the namespace, or while its state cannot be read (Story 40.3).
+- **`REFUSAL_CODES.CONFIRMATION_DECLINED`** -- The refusal for a gate whose confirmation dialog the person declined, dismissed, or accepted without ticking Confirm (Story 43.3). `structuredContent` is `{code, action, response}` with `response` `decline`, `cancel` or `unconfirmed`; nothing was changed, and the person is not asked again for that call. The audit entry is `denied` with `denyReason: "CONFIRMATION_DECLINED"`.
 
 ---
 
@@ -139,6 +142,7 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 
 - **`AuditLogger`** -- Owns the per-process session UUID, a monotonic per-session `seq` counter, a serialized append queue (`fs.appendFile`, one JSONL line per call), size-based rotation (`<path>` → `<path>.1`), and degrade-never-throw semantics (a post-startup sink failure is swallowed, logged once, and counted rather than propagated into the tool path). `shutdown()` flushes the queue and writes a final line recording `droppedEntries`.
 - **`parseAuditConfig()`** -- Parses `IRIS_AUDIT_LOG` / `IRIS_AUDIT_LOG_MAX_MB` / `IRIS_AUDIT_LOG_PARAMS` from an injectable `env`. Returns `undefined` (auditing OFF) when `IRIS_AUDIT_LOG` is unset; throws naming the offending variable on a malformed `IRIS_AUDIT_LOG_MAX_MB`.
+- **The `confirmation` field (Story 43.3).** `AuditEntryInput.confirmation` is additive, set only on the entry of a call that was asked: `accepted`, `declined`, `cancelled`, `unconfirmed` or `unanswered`. A decline is `outcome: "denied"` with `denyReason: "CONFIRMATION_DECLINED"`; a dialog nobody answers and a call the client cancels are `error` entries. `outcome` keeps its domain.
 - **`redactValue()`** -- Pure, non-mutating recursive redaction: replaces the value of any key matching the credential-name family (`password`, `secret`, `token`, `credential`, `apikey`, `authorization`, etc. — case-insensitive) with `"[REDACTED]"`, and truncates any other string over 2 KB.
 
 **Framework surface, not a tool (Rule #31).** `McpServerBase.handleToolCall` — the single choke point every tool call passes through, on every server — wraps each call with a thin audit interceptor when `IRIS_AUDIT_LOG` is set. It is wired centrally in `server-base.ts`, so it automatically covers all five server packages and every present and future tool with zero per-tool code, and it appears in **no package's tool array**: it adds nothing to any `packages/<pkg>/src/tools/index.ts` array and changes no package's advertised tool count. It also carries no `mutates` classification and no `IRIS_GOVERNANCE` key — deliberately: audit logging is server *configuration*, not a governed tool action an AI client could switch off via governance.

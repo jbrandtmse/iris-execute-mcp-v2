@@ -2,6 +2,99 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-20] — Story 43.3: Human confirmation through elicitation
+
+No tool, action, governance key, preset row, annotation, description, prompt, `instructions` text or environment variable is added or
+changed, and no ObjectScript class is touched: the suite stays at 115 advertised tools (33, 27, 25, 22 and 8; 110 package tools), the
+frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and `BOOTSTRAP_VERSION` stays at `d51856f74d6a`. The 2025-11-25 wire
+is byte-identical for a client that does not declare form elicitation: the same requests to IRIS, the same result and the same audit
+entry for every call that runs to its end. The one behavior change for such a client is a call the client cancels, under Added.
+
+### Added
+
+- **Six gates ask the person before they change anything (the AD-15 sanctioned change for elicitation-capable clients, per AD-34).** When
+  the calling client declares form elicitation (`elicitation: {}`, `{form: {}}` or `{form: {}, url: {}}`; `{url: {}}` alone does not
+  count), these gates show a confirmation form right before their first IRIS write: `iris_audit_manage` `purge`, `iris_env_promote`
+  `execute`, `iris_production_control` `clean` with `killAppData: true`, `iris_message_resend` `resendFiltered` (to execute),
+  `iris_message_resend` `resend` and `iris_doc_edit` `regenerateStorage`. Default states are unchanged: `purge`, `execute`, `resendFiltered`,
+  `resend` and `regenerateStorage` are default-disabled writes, and `clean` is a default-enabled write. Argument validation, profile
+  resolution, the governance gate and every check of the tool itself (bounds, dry run, caps, `confirm: true`, `dryRun: false`, plan gates)
+  run first and refuse exactly as before, so the dialog is an additional gate and never a replacement for `confirm: true`. The form names
+  the operation, the target, the scope and the server, and has one required boolean, `confirm`, unticked by default; only an accept with it
+  ticked runs the call. The target and the scope each show on one line (control characters in a value the call supplies become a space,
+  and a text over 600 characters is cut there and ends in `...`). For `resendFiltered` the server first sends a read-only preview of the same filters, and the dialog names the live
+  match count, the window and the `maxMessages` cap; it is shown only for 1 to `maxMessages` matches. `resend` and `regenerateStorage` have no
+  `confirm` parameter, so for a client without elicitation governance remains their only gate.
+- **The confirmation is bound and single-use.** It is bound to the tool, the resolved server profile and a hash of the exact validated
+  arguments, through a signed state (HMAC-SHA256, per-process random key) that can be used once and lives 10 minutes. A forged, altered,
+  expired, replayed or other-arguments state is never honored; the person is asked again. A 2025-11-25 connection reads the capabilities
+  the client declared at `initialize`, a 2026-07-28 connection reads them from each request's envelope, and a 2025-11-25 request's `_meta`
+  is never trusted.
+- **New refusal code `CONFIRMATION_DECLINED`.** A decline, a dismissal, or an accept without ticking Confirm ends the call with
+  `isError: true` and `structuredContent` `{code, action, response}`, where `response` is `decline`, `cancel` or `unconfirmed`. Nothing
+  changes, the person is never asked again for that call, and the refusal text tells the agent not to repeat the call unless the person
+  asks again. Changing any argument asks again for the new arguments. It is a catalog code in `REFUSAL_CODES`, not a governance key.
+- **The audit entry records the answer (AD-19).** One entry per logical call, written by the round that ends it. A decline is
+  `outcome: "denied"` with `denyReason: "CONFIRMATION_DECLINED"`. The new additive field `confirmation` is `accepted`, `declined`,
+  `cancelled`, `unconfirmed` or `unanswered`. A dialog nobody answers (a client that never retries, a 2025-11-25 leg that times out, is
+  cancelled or fails) changes nothing and is written as an `error` entry with `confirmation: "unanswered"` and the text
+  `The confirmation dialog was not answered. Nothing was changed.`, after the 10-minute lifetime or when the server stops.
+- **A cancelled call aborts its IRIS request, and is audited `error` (DW-642).** A call the client cancels (`notifications/cancelled`)
+  now aborts the IRIS request it has in flight and is audited `error` with the text
+  `Cancelled by the client before a result was sent. An IRIS request still in flight was aborted; a write IRIS had already received may still have completed.`
+  Before this story such a call still ran to the end and was audited `ok`. `RequestOptions.signal` carries the abort: an already aborted signal sends no request, and
+  an abort in flight aborts the request, both rejecting with `IrisConnectionError` code `CANCELLED`.
+- **Library surface of `@iris-mcp/shared`.** `REFUSAL_CODES.CONFIRMATION_DECLINED`; the optional `ToolContext.confirm(request)`, present
+  only on a call off the wire, returning `{proceed: true}` or `{proceed: false; result}` (handlers call it after their own checks and
+  return `result` unchanged), with the types `ConfirmationRequest` and `ConfirmationOutcome`; `RequestOptions.signal`; and
+  `contentHash(value)`, the SHA-256 of key-sorted JSON.
+- **Claude Code `Elicitation` hooks.** A hook under `hooks.Elicitation`, matched on the MCP server name such as `iris-admin`, can accept
+  or decline a dialog automatically; whether to install one that answers by itself is the user's choice, and it removes the person from
+  the loop. In headless `claude -p` hooks run, so a hook answers; with `--permission-prompts none` an elicitation no hook answers is
+  cancelled, which the server reports as `CONFIRMATION_DECLINED` with `response: "cancel"`. The dialog stops the agent from proceeding on
+  its own; it is only as strong as the client software that relays the person's answer. See the README section *Human confirmation
+  (elicitation)*.
+- **Tests and helpers.** Both-eras stdio tests through the real SDK client and a hand-wire raw-protocol test, an in-memory test, unit tests
+  per gate, an HTTP-client signal test, and rows for DW-649 (the `sdk-wire-compat` flake: three fixed 50 ms waits replaced by a
+  deterministic barrier) and DW-642 (cancel). `scripts/lib/fake-iris-listener.mjs` gains the write routes of the gates, and the test
+  helpers `process-gate-helpers.ts` and `story-43-2-qa-hand-wire.ts` gain a client that declares elicitation and answers the dialog.
+
+### Unchanged
+
+- No tool, action, governance key, preset row, annotation, description, prompt, `instructions` text or environment variable. The
+  governance baseline (141 keys, hash `1e62c5ad5bf7`), `BOOTSTRAP_VERSION` (`d51856f74d6a`) and every default state are as before.
+- A client that does not declare form elicitation, including every 2025-11-25 client that declared none and any request whose `_meta`
+  claims otherwise, gets exactly the previous contract.
+- Only the six gates ask. Other destructive tools stay protected by governance, not by a dialog.
+
+### Known limits
+
+- The match count of `resendFiltered` can change between the preview and the run: IRIS counts again when it runs and never exceeds
+  `maxMessages`.
+- A dialog can be accepted and then refused by IRIS, for example by the production-running check of `resendFiltered` (which the preview
+  skips) or by bad header IDs on `resend`. Nothing changes.
+- On 2026-07-28 each round re-runs the tool's own checks.
+- A `resendFiltered` whose preview fails (a timeout or a server error) shows no dialog, and the execute request is sent as before; the
+  same holds at zero matches and over the cap, where IRIS resends nothing or refuses.
+- A promotion (`execute`) resolves its source and target profiles before the dialog. The first use of a profile in a session sets it up as
+  for any other call (the connection check and, once, the deployment of the ExecuteMCPv2 classes), so a declined promotion can still have
+  done that. It writes no document, mapping, setting, web application or configuration.
+- Tool descriptions are not changed in this release; they change together with the golden retirement in Story 43.4. Until then the README
+  section and the dialog itself are where an agent learns of the dialog.
+- With no `Elicitation` hook and no flag, Claude Code does not document what headless `claude -p` does with an elicitation; check it
+  before relying on it.
+
+### Security
+
+- **DW-637, the SDK's bundled JSON-schema validator: no change, verdict recorded.** The SDK's default validator bundles ajv 8.18.0,
+  ajv-formats 3.0.1 and fast-uri 3.1.0 (invisible to `pnpm audit`). ajv and the others have no applicable advisory. fast-uri 3.1.0 is
+  affected by nine (GHSA-q3j6-qgpj-74h6, GHSA-v39h-62p7-jpjc, GHSA-4c8g-83qw-93j6, GHSA-v2hh-gcrm-f6hx, GHSA-7p8r-x3mc-p8w7,
+  GHSA-f65p-4m7j-42xc, GHSA-jqff-g426-hqxp, GHSA-qw65-cvwx-89v3 and GHSA-hrr3-gc8f-f4qj), fixed in 3.1.8. They are unreachable here: they
+  need attacker-controlled URLs that are normalized or compared, ajv uses fast-uri only for schema `$id` and `$ref`, our one schema is a
+  constant, and the server never invokes the validator (no `elicitInput`, no `fromJsonSchema`, no 3-argument `acceptedContent`); a new
+  default-suite test fails if any source file adds one. Upstream tracks the pin in modelcontextprotocol/typescript-sdk issue 2966 and PR
+  2973; bump the SDK when a release pins fast-uri 3.1.8 or later.
+
 ## [Pre-release — 2026-10-20] — Story 43.2: Serve MCP revision 2026-07-28
 
 The change is additive. No tool, action, governance key, preset row, annotation, prompt, refusal code, environment variable or route is

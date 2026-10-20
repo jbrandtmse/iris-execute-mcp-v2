@@ -13,7 +13,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -40,7 +40,8 @@ import type { McpServerBaseOptions } from "../server-base.js";
 import type { IrisConnectionConfig } from "../config.js";
 import { logger } from "../logger.js";
 import type { PromptDefinition, ToolDefinition } from "../tool-types.js";
-import { auditLines, stageDefaultStartup } from "./test-helpers.js";
+import { AuditLogger } from "../audit.js";
+import { auditLines, callTool, stageDefaultStartup } from "./test-helpers.js";
 import { makeEnvHarness } from "./env-harness.js";
 
 const READ_ANNOTATIONS = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
@@ -207,15 +208,32 @@ interface Booted {
   client: Client;
   /** How many `notifications/tools/list_changed` the client has received. */
   listChanged: () => number;
+  /** Resolves when the next `notifications/tools/list_changed` reaches the client. */
+  nextListChanged: () => Promise<void>;
+}
+
+/** An answer to `elicitation/create`: what the person chose and, for an accept, what the form held. */
+interface ElicitationAnswer {
+  [member: string]: unknown;
+  action: "accept" | "decline" | "cancel";
+  content?: Record<string, string | number | boolean | string[]>;
+}
+
+/** How a booted client answers `elicitation/create`, and what it declares. */
+interface ClientOptions {
+  capabilities?: Record<string, unknown>;
+  onElicitation?: (params: Record<string, unknown>) => ElicitationAnswer;
 }
 
 /**
  * Start a fixture server through its real `start()` and connect a v2 client to it over the in-memory pair. The client
- * negotiates `versionNegotiation`, which is the plain 2025 handshake unless a row asks for another mode.
+ * negotiates `versionNegotiation`, which is the plain 2025 handshake unless a row asks for another mode. `clientOptions`
+ * adds the capabilities the client declares and, when it declares `elicitation`, the handler that answers the server's dialog.
  */
 async function boot(
   options: Partial<McpServerBaseOptions> = {},
   versionNegotiation: VersionNegotiationOptions = { mode: "legacy" },
+  clientOptions: ClientOptions = {},
 ): Promise<Booted> {
   stageDefaultStartup(env.fetchMock);
   const server = new McpServerBase({
@@ -227,14 +245,28 @@ async function boot(
     ...options,
   });
   await server.start("stdio");
-  const client = new Client({ name: "wire-compat-client", version: "0.0.0" }, { versionNegotiation });
+  const client = new Client(
+    { name: "wire-compat-client", version: "0.0.0" },
+    { versionNegotiation, ...(clientOptions.capabilities !== undefined ? { capabilities: clientOptions.capabilities } : {}) },
+  );
   let changes = 0;
+  const waiters: Array<() => void> = [];
   client.setNotificationHandler("notifications/tools/list_changed", () => {
     changes += 1;
+    for (const resolve of waiters.splice(0)) resolve();
   });
+  if (clientOptions.capabilities?.["elicitation"] !== undefined) {
+    const answer = clientOptions.onElicitation ?? (() => ({ action: "cancel" as const }));
+    client.setRequestHandler("elicitation/create", (request) => answer(request.params as Record<string, unknown>));
+  }
   await client.connect(linked.clientHalf as Parameters<Client["connect"]>[0]);
   opened.push({ server, client });
-  return { server, client, listChanged: () => changes };
+  return {
+    server,
+    client,
+    listChanged: () => changes,
+    nextListChanged: () => new Promise<void>((resolve) => waiters.push(resolve)),
+  };
 }
 
 /** The text of the first content block of a tool result. */
@@ -536,10 +568,12 @@ describe("resources", () => {
 
 describe("removeTools and addTools", () => {
   it("one call that removes tools sends exactly one list_changed, however many it removes", async () => {
-    const { server, client, listChanged } = await boot();
+    const { server, client, listChanged, nextListChanged } = await boot();
     const before = listChanged();
+    const notified = nextListChanged();
     server.removeTools(["iris_wire_echo", "iris_wire_structured"]);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await notified;
+    await client.listTools();
     expect(listChanged() - before).toBe(1);
     expect((await client.listTools()).tools.map((tool) => tool.name)).not.toContain("iris_wire_echo");
     const gone = await client.callTool({ name: "iris_wire_echo", arguments: { name: "x" } });
@@ -547,21 +581,23 @@ describe("removeTools and addTools", () => {
   });
 
   it("a call that removes nothing sends nothing", async () => {
-    const { server, listChanged } = await boot();
+    const { server, client, listChanged } = await boot();
     const before = listChanged();
     server.removeTools(["nonexistent"]);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await client.listTools();
     expect(listChanged() - before).toBe(0);
   });
 
   it("one call that adds tools sends exactly one list_changed, however many it adds", async () => {
-    const { server, client, listChanged } = await boot({ tools: [echoTool] });
+    const { server, client, listChanged, nextListChanged } = await boot({ tools: [echoTool] });
     const before = listChanged();
+    const notified = nextListChanged();
     server.addTools([
       { ...echoTool, name: "iris_wire_added_a", title: "Wire added A" },
       { ...echoTool, name: "iris_wire_added_b", title: "Wire added B" },
     ]);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await notified;
+    await client.listTools();
     expect(listChanged() - before).toBe(1);
     const names = (await client.listTools()).tools.map((tool) => tool.name);
     expect(names).toEqual(expect.arrayContaining(["iris_wire_added_a", "iris_wire_added_b"]));
@@ -618,7 +654,10 @@ describe("the audit trail (DW-579, AD-19)", () => {
     });
     expect([...(entry.paramKeys as string[])].sort()).toEqual(["action", "name", "namespace"]);
     expect(Object.prototype.hasOwnProperty.call(entry, "params")).toBe(false);
-    expect(JSON.stringify(entry)).not.toContain("777");
+    // The session id, the timestamp, the sequence number and the duration are generated, and any of them can hold the digits 777.
+    const generated = ["session", "ts", "seq", "durationMs"];
+    const content = Object.fromEntries(Object.entries(entry).filter(([key]) => !generated.includes(key)));
+    expect(JSON.stringify(content)).not.toContain("777");
 
     expect(valid).toMatchObject({ tool: "iris_wire_echo", outcome: "ok", profile: "default", namespace: "HSCUSTOM", paramKeys: ["name"], params: { name: "doc" } });
   });
@@ -708,13 +747,15 @@ describe("Story 43.2: both eras over serveStdio", () => {
     infoSpy.mock.calls.map((call) => String(call[0])).filter((line) => line === MODERN_ERA_LINE || line === LEGACY_ERA_LINE);
 
   /** Start a fixture server through `start()` and return it with a raw JSON-RPC session on the client half of its pair. */
-  async function startRaw(): Promise<{ server: McpServerBase; request: (method: string, params?: Record<string, unknown>) => Promise<RawAnswer>; notify: (method: string) => Promise<void> }> {
+  async function startRaw(
+    extraTools: ToolDefinition[] = [],
+  ): Promise<{ server: McpServerBase; request: (method: string, params?: Record<string, unknown>) => Promise<RawAnswer>; notify: (method: string) => Promise<void> }> {
     stageDefaultStartup(env.fetchMock);
     const server = new McpServerBase({
       name: "wire-compat",
       version: "1.0.0",
       config: makeConfig(),
-      tools: [echoTool, refinedTool, writeTool, hiddenTool, structuredTool],
+      tools: [echoTool, refinedTool, writeTool, hiddenTool, structuredTool, ...extraTools],
       prompts: PROMPTS,
     });
     servers.push(server);
@@ -942,5 +983,818 @@ describe("Story 43.2: both eras over serveStdio", () => {
     opened.push({ server, client });
     expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("iris_wire_echo");
     expect(registered(server).tools).toContain("iris_wire_echo");
+  });
+
+  describe("Story 43.3: confirmation through elicitation", () => {
+    type Era = "legacy" | "modern";
+    type Answer = ElicitationAnswer;
+    const ERAS: Array<[Era, VersionNegotiationOptions]> = [
+      ["legacy", { mode: "legacy" }],
+      ["modern", { mode: { pin: MODERN_ERA } }],
+    ];
+    const FORM = { elicitation: { form: {} } };
+    const ASKING_ENVELOPE = { ...ENVELOPE, "io.modelcontextprotocol/clientCapabilities": FORM };
+    const SCHEMA = {
+      type: "object",
+      properties: { confirm: { type: "boolean", title: "Confirm", description: "Tick to confirm this change.", default: false } },
+      required: ["confirm"],
+    };
+    const TICKED: Answer = { action: "accept", content: { confirm: true } };
+    const CANCELLED_TEXT =
+      "Cancelled by the client before a result was sent. An IRIS request still in flight was aborted; a write IRIS had already received may still have completed.";
+    const message = (value: string): string =>
+      `Confirm: write a value.\nTarget: value ${value}\nScope: one write\nServer: default (localhost:52773)\n` +
+      "Tick Confirm and accept to run it now. Decline or cancel to change nothing.";
+
+    /** The values the handler of `iris_wire_confirm` wrote, whether the context it saw had `confirm`, and the dialogs the client was asked. */
+    const executions: string[] = [];
+    const sawConfirm: boolean[] = [];
+    const asked: Array<Record<string, unknown>> = [];
+
+    /** A write that asks the person right before it writes, the way a gate does. */
+    const confirmTool: ToolDefinition = {
+      name: "iris_wire_confirm",
+      title: "Wire confirm",
+      description: "A write that asks the person before it runs.",
+      inputSchema: z.object({ value: z.string(), also: z.string().optional() }),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+      scope: "NS",
+      mutates: "write",
+      handler: async (args, ctx) => {
+        const { value } = args as { value: string };
+        sawConfirm.push(ctx.confirm !== undefined);
+        const outcome = await ctx.confirm?.({ operation: "write a value", target: `value ${value}`, scope: "one write" });
+        if (outcome !== undefined && !outcome.proceed) return outcome.result;
+        executions.push(value);
+        return { content: [{ type: "text" as const, text: `wrote ${value}` }] };
+      },
+    };
+
+    /** A second write with the same inputs and handler, to prove a state is bound to the tool it was minted for. */
+    const confirmToolB: ToolDefinition = { ...confirmTool, name: "iris_wire_confirm_b", title: "Wire confirm B" };
+
+    /** A tool that makes one request to IRIS through the context's client. */
+    const reachTool: ToolDefinition = {
+      name: "iris_wire_reach",
+      title: "Wire reach",
+      description: "Make one request to IRIS.",
+      inputSchema: z.object({ name: z.string() }),
+      annotations: READ_ANNOTATIONS,
+      scope: "NS",
+      mutates: "read",
+      handler: async (args, ctx) => {
+        await ctx.http.get(`/api/atelier/v8/HSCUSTOM/doc/${(args as { name: string }).name}`);
+        return { content: [{ type: "text" as const, text: "reached" }] };
+      },
+    };
+
+    /** A tool that makes one request to IRIS through a client it asked the context for by profile name, as a promotion does. */
+    const reachProfileTool: ToolDefinition = {
+      ...reachTool,
+      name: "iris_wire_reach_profile",
+      title: "Wire reach profile",
+      handler: async (args, ctx) => {
+        const client = await ctx.resolveProfileClient("default");
+        await client.get(`/api/atelier/v8/HSCUSTOM/doc/${(args as { name: string }).name}`);
+        return { content: [{ type: "text" as const, text: "reached" }] };
+      },
+    };
+
+    beforeEach(() => {
+      executions.length = 0;
+      sawConfirm.length = 0;
+      asked.length = 0;
+    });
+
+    /** Enable the write, which is disabled by default. */
+    function governed(): void {
+      process.env.IRIS_GOVERNANCE = JSON.stringify({ global: { iris_wire_confirm: true, iris_wire_confirm_b: true } });
+    }
+
+    /** Turn auditing on with parameters, and return the file the entries land in. */
+    function auditOn(): string {
+      const file = join(workDir, "audit.jsonl");
+      process.env.IRIS_AUDIT_LOG = file;
+      process.env.IRIS_AUDIT_LOG_PARAMS = "true";
+      return file;
+    }
+
+    /** The entries of the file once the entry of a marker call is in it: the marker call is last, so nothing earlier is still queued. */
+    async function entriesAfterMarker(call: (name: string, args: Record<string, unknown>) => Promise<unknown>, file: string): Promise<Array<Record<string, unknown>>> {
+      await call("iris_wire_echo", { name: "marker" });
+      const deadline = Date.now() + 3000;
+      for (;;) {
+        const entries = existsSync(file)
+          ? readFileSync(file, "utf-8")
+              .split("\n")
+              .filter((line) => line.trim().length > 0)
+              .map((line) => JSON.parse(line) as Record<string, unknown>)
+              .filter((entry) => typeof entry.tool === "string")
+          : [];
+        const marker = entries.findIndex((entry) => entry.tool === "iris_wire_echo");
+        if (marker >= 0) return entries.slice(0, marker);
+        if (Date.now() > deadline) throw new Error("the marker entry never reached the audit file");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+
+    describe.each(ERAS)("on the %s era", (_era, negotiation) => {
+      /** A server with the write enabled, auditing on, and a client that declares form elicitation and answers with `answer`. */
+      async function asking(answer: Answer, capabilities: Record<string, unknown> = FORM): Promise<{ booted: Booted; file: string; call: (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>> }> {
+        governed();
+        const file = auditOn();
+        const booted = await boot({ tools: [confirmTool, echoTool] }, negotiation, {
+          capabilities,
+          onElicitation: (params) => {
+            asked.push(params);
+            return answer;
+          },
+        });
+        return { booted, file, call: (name, args) => booted.client.callTool({ name, arguments: args }) as Promise<Record<string, unknown>> };
+      }
+
+      it("accept: asks once with the template and the form, runs once, and writes one entry that says accepted", async () => {
+        const { file, call } = await asking(TICKED);
+
+        const result = await call("iris_wire_confirm", { value: "a" });
+
+        expect(textOf(result)).toBe("wrote a");
+        expect(result.isError).toBeFalsy();
+        expect(executions).toEqual(["a"]);
+        expect(asked).toHaveLength(1);
+        expect(asked[0]).toMatchObject({ mode: "form", message: message("a"), requestedSchema: SCHEMA });
+        expect(asked[0]?.requestedSchema).toStrictEqual(SCHEMA);
+        const entries = await entriesAfterMarker(call, file);
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({
+          tool: "iris_wire_confirm",
+          action: null,
+          profile: "default",
+          outcome: "ok",
+          paramKeys: ["value"],
+          params: { value: "a" },
+          confirmation: "accepted",
+        });
+        expect(entries[0]?.denyReason).toBeUndefined();
+      });
+
+      it.each([
+        ["decline", { action: "decline" } as Answer, "declined", "The person declined the confirmation for: write a value. Nothing was changed. Do not repeat this call unless the person asks for it again."],
+        ["cancel", { action: "cancel" } as Answer, "cancelled", "The person dismissed the confirmation dialog for: write a value. Nothing was changed. Do not repeat this call unless the person asks for it again."],
+        ["unconfirmed", { action: "accept", content: { confirm: false } } as Answer, "unconfirmed", "The person accepted the confirmation dialog for: write a value without ticking Confirm. Nothing was changed. Do not repeat this call unless the person asks for it again."],
+        ["an accept with no content", { action: "accept" } as Answer, "unconfirmed", "The person accepted the confirmation dialog for: write a value without ticking Confirm. Nothing was changed. Do not repeat this call unless the person asks for it again."],
+      ])("%s: ends the call with CONFIRMATION_DECLINED, never asks again, and writes one denied entry", async (label, answer, recorded, text) => {
+        const { file, call } = await asking(answer);
+
+        const result = await call("iris_wire_confirm", { value: "a" });
+
+        expect(result.isError).toBe(true);
+        expect(textOf(result)).toBe(text);
+        expect(result.structuredContent).toEqual({
+          code: "CONFIRMATION_DECLINED",
+          action: "iris_wire_confirm",
+          response: label === "decline" || label === "cancel" ? label : "unconfirmed",
+        });
+        expect(executions).toEqual([]);
+        expect(asked).toHaveLength(1);
+        const entries = await entriesAfterMarker(call, file);
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({ tool: "iris_wire_confirm", outcome: "denied", denyReason: "CONFIRMATION_DECLINED", confirmation: recorded });
+        expect(entries[0]?.error).toBeUndefined();
+      });
+
+      it("fallback: a client that declares no capability is never asked, and the call runs as it always did", async () => {
+        const { file, call } = await asking(TICKED, {});
+        const result = await call("iris_wire_confirm", { value: "a" });
+        expect(textOf(result)).toBe("wrote a");
+        expect(asked).toEqual([]);
+        expect(executions).toEqual(["a"]);
+        const entries = await entriesAfterMarker(call, file);
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({ outcome: "ok" });
+        expect(Object.prototype.hasOwnProperty.call(entries[0], "confirmation")).toBe(false);
+      });
+
+      it("fallback: a client that declares url elicitation alone is never asked", async () => {
+        const { call } = await asking(TICKED, { elicitation: { url: {} } });
+        const result = await call("iris_wire_confirm", { value: "a" });
+        expect(textOf(result)).toBe("wrote a");
+        expect(asked).toEqual([]);
+      });
+
+      it("fallback: a client that declares a bare elicitation is asked, as the SDK counts it as form", async () => {
+        const { call } = await asking(TICKED, { elicitation: {} });
+        const result = await call("iris_wire_confirm", { value: "a" });
+        expect(textOf(result)).toBe("wrote a");
+        expect(asked).toHaveLength(1);
+      });
+
+      it("governance first: a disabled write is refused before any dialog, and is audited denied with no confirmation", async () => {
+        const file = auditOn();
+        const { client } = await boot({ tools: [confirmTool, echoTool] }, negotiation, {
+          capabilities: FORM,
+          onElicitation: (params) => {
+            asked.push(params);
+            return TICKED;
+          },
+        });
+        const call = (name: string, args: Record<string, unknown>): Promise<unknown> => client.callTool({ name, arguments: args });
+
+        const result = await client.callTool({ name: "iris_wire_confirm", arguments: { value: "a" } });
+
+        expect(result.structuredContent).toEqual({ code: "GOVERNANCE_DISABLED", action: "iris_wire_confirm", server: "default" });
+        expect(asked).toEqual([]);
+        expect(executions).toEqual([]);
+        const entries = await entriesAfterMarker(call, file);
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({ outcome: "denied", denyReason: "GOVERNANCE_DISABLED" });
+        expect(Object.prototype.hasOwnProperty.call(entries[0], "confirmation")).toBe(false);
+      });
+
+      it("the in-process callback gets no confirm and writes as it always did", async () => {
+        governed();
+        const { server } = await boot({ tools: [confirmTool] }, negotiation, { capabilities: FORM, onElicitation: () => TICKED });
+        const result = await callTool(server, "iris_wire_confirm", { value: "a" });
+        expect(textOf(result)).toBe("wrote a");
+        expect(sawConfirm).toEqual([false]);
+        expect(executions).toEqual(["a"]);
+      });
+    });
+
+    describe("a request context that lacks pieces", () => {
+      /** The owned `tools/call` handler, called with a hand-made context. */
+      async function callWith(server: McpServerBase, params: unknown, ctx: unknown): Promise<{ content: Array<{ text: string }>; isError?: boolean }> {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const handler = (server.server.server as any)._requestHandlers.get("tools/call") as (request: unknown, ctx: unknown) => Promise<unknown>;
+        return (await handler({ method: "tools/call", params }, ctx)) as { content: Array<{ text: string }>; isError?: boolean };
+      }
+
+      it.each([
+        // The 2025 era reads what the client declared at `initialize`, so a context without an envelope still asks.
+        ["legacy", { mode: "legacy" } as VersionNegotiationOptions, 1],
+        // The 2026-07-28 era reads the request's envelope, which a stub context lacks, so there is no dialog.
+        ["modern", { mode: { pin: MODERN_ERA } } as VersionNegotiationOptions, 0],
+      ])("%s: a stub context with no signal and no envelope neither throws nor binds anything", async (_era, negotiation, dialogs) => {
+        governed();
+        const { server } = await boot({ tools: [confirmTool, reachTool] }, negotiation, {
+          capabilities: FORM,
+          onElicitation: (params) => {
+            asked.push(params);
+            return TICKED;
+          },
+        });
+
+        const result = await callWith(server, { name: "iris_wire_confirm", arguments: { value: "a" } }, { mcpReq: { requestState: () => undefined } });
+
+        expect(result.content[0]?.text).toBe("wrote a");
+        expect(executions).toEqual(["a"]);
+        expect(asked).toHaveLength(dialogs);
+      });
+
+      it.each(ERAS)("%s: a signal that is already aborted reaches no fetch, and the call is audited error with the cancelled text", async (_era, negotiation) => {
+        const file = auditOn();
+        const { server, client } = await boot({ tools: [reachTool, echoTool] }, negotiation);
+        const aborted = new AbortController();
+        aborted.abort();
+        const before = env.fetchMock.mock.calls.length;
+
+        const result = await callWith(
+          server,
+          { name: "iris_wire_reach", arguments: { name: "A.cls" } },
+          { signal: aborted.signal, mcpReq: { requestState: () => undefined, signal: aborted.signal } },
+        );
+
+        expect(env.fetchMock.mock.calls.length).toBe(before);
+        expect(result.isError).toBe(true);
+        expect(result.content[0]?.text).toBe(
+          "Tool error: Request GET /api/atelier/v8/HSCUSTOM/doc/A.cls was cancelled by the client. No answer is expected for a cancelled call.",
+        );
+        const entries = await entriesAfterMarker((name, args) => client.callTool({ name, arguments: args }), file);
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({ tool: "iris_wire_reach", outcome: "error", error: CANCELLED_TEXT });
+      });
+
+      it.each(ERAS)("%s: a client asked for by profile name carries the signal too: an aborted one reaches no fetch", async (_era, negotiation) => {
+        const file = auditOn();
+        const { server, client } = await boot({ tools: [reachProfileTool, echoTool] }, negotiation);
+        const aborted = new AbortController();
+        aborted.abort();
+        const before = env.fetchMock.mock.calls.length;
+
+        const result = await callWith(
+          server,
+          { name: "iris_wire_reach_profile", arguments: { name: "A.cls" } },
+          { signal: aborted.signal, mcpReq: { requestState: () => undefined, signal: aborted.signal } },
+        );
+
+        expect(env.fetchMock.mock.calls.length).toBe(before);
+        expect(result.isError).toBe(true);
+        expect(result.content[0]?.text).toBe(
+          "Tool error: Request GET /api/atelier/v8/HSCUSTOM/doc/A.cls was cancelled by the client. No answer is expected for a cancelled call.",
+        );
+        const entries = await entriesAfterMarker((name, args) => client.callTool({ name, arguments: args }), file);
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({ tool: "iris_wire_reach_profile", outcome: "error", error: CANCELLED_TEXT });
+      });
+
+      it.each(ERAS)("%s: the same call through a client asked for by profile name, with a live signal, reaches IRIS", async (_era, negotiation) => {
+        const { server } = await boot({ tools: [reachProfileTool] }, negotiation);
+        env.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ status: { errors: [] }, console: [], result: {} }), { status: 200 }));
+        const before = env.fetchMock.mock.calls.length;
+        const live = new AbortController();
+
+        const result = await callWith(
+          server,
+          { name: "iris_wire_reach_profile", arguments: { name: "A.cls" } },
+          { signal: live.signal, mcpReq: { requestState: () => undefined, signal: live.signal } },
+        );
+
+        expect(result.content[0]?.text).toBe("reached");
+        expect(env.fetchMock.mock.calls.length).toBeGreaterThan(before);
+      });
+
+      it.each(ERAS)("%s: the same call with a live signal reaches IRIS", async (_era, negotiation) => {
+        const { server } = await boot({ tools: [reachTool] }, negotiation);
+        env.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ status: { errors: [] }, console: [], result: {} }), { status: 200 }));
+        const before = env.fetchMock.mock.calls.length;
+        const live = new AbortController();
+
+        const result = await callWith(
+          server,
+          { name: "iris_wire_reach", arguments: { name: "A.cls" } },
+          { signal: live.signal, mcpReq: { requestState: () => undefined, signal: live.signal } },
+        );
+
+        expect(result.content[0]?.text).toBe("reached");
+        expect(env.fetchMock.mock.calls.length).toBeGreaterThan(before);
+      });
+    });
+
+    describe("on the modern era, over raw frames", () => {
+      /** The first and later rounds of one `tools/call` of the write, with the retry members of the 2026-07-28 revision. */
+      async function rawSession(): Promise<{
+        server: McpServerBase;
+        file: string;
+        request: (method: string, params?: Record<string, unknown>) => Promise<RawAnswer>;
+        round: (args: Record<string, unknown>, extra?: Record<string, unknown>, meta?: Record<string, unknown>) => Promise<RawAnswer>;
+        marker: () => Promise<Array<Record<string, unknown>>>;
+      }> {
+        governed();
+        const file = auditOn();
+        const { server, request } = await startRaw([confirmTool, confirmToolB]);
+        const discovered = await request("server/discover", { _meta: ENVELOPE });
+        expect(discovered.error).toBeUndefined();
+        const round = (args: Record<string, unknown>, extra: Record<string, unknown> = {}, meta: Record<string, unknown> = ASKING_ENVELOPE) =>
+          request("tools/call", { name: "iris_wire_confirm", arguments: args, _meta: meta, ...extra });
+        const marker = (): Promise<Array<Record<string, unknown>>> =>
+          entriesAfterMarker(async (name, args) => {
+            const answered = await request("tools/call", { name, arguments: args, _meta: ENVELOPE });
+            expect(answered.error).toBeUndefined();
+          }, file);
+        return { server, file, request, round, marker };
+      }
+
+      const stateOf = (answer: RawAnswer): string => {
+        expect(answer.result?.resultType).toBe("input_required");
+        return answer.result?.requestState as string;
+      };
+      const accept = (state: string): Record<string, unknown> => ({ inputResponses: { confirm: TICKED }, requestState: state });
+
+      it("the first round returns the question and a state, runs nothing, and writes no entry", async () => {
+        const { round, marker } = await rawSession();
+
+        const first = await round({ value: "a" });
+
+        expect(first.error).toBeUndefined();
+        expect(first.result?.resultType).toBe("input_required");
+        const inputRequests = first.result?.inputRequests as Record<string, { method: string; params: Record<string, unknown> }>;
+        expect(Object.keys(inputRequests)).toEqual(["confirm"]);
+        expect(inputRequests.confirm?.method).toBe("elicitation/create");
+        expect(inputRequests.confirm?.params).toStrictEqual({ mode: "form", message: message("a"), requestedSchema: SCHEMA });
+        expect(typeof first.result?.requestState).toBe("string");
+        expect(executions).toEqual([]);
+        expect(await marker()).toEqual([]);
+      });
+
+      it("the retry with the state and an accept runs once and writes one entry", async () => {
+        const { round, marker } = await rawSession();
+        const state = stateOf(await round({ value: "a" }));
+
+        const second = await round({ value: "a" }, accept(state));
+
+        expect(second.result?.resultType).toBe("complete");
+        expect((second.result?.content as Array<{ text: string }>)[0]?.text).toBe("wrote a");
+        expect(executions).toEqual(["a"]);
+        const entries = await marker();
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({ tool: "iris_wire_confirm", outcome: "ok", confirmation: "accepted" });
+      });
+
+      it("replay: a state that decided a call is asked again and never runs a second time", async () => {
+        const { round, marker } = await rawSession();
+        const state = stateOf(await round({ value: "a" }));
+        await round({ value: "a" }, accept(state));
+
+        const replay = await round({ value: "a" }, accept(state));
+
+        expect(replay.error).toBeUndefined();
+        expect(stateOf(replay)).not.toBe(state);
+        expect(executions).toEqual(["a"]);
+        expect(await marker()).toHaveLength(1);
+      });
+
+      it("replay: a state that decided a call is still refused in the last second of its life, past the 600 seconds since it was used", async () => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        try {
+          vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+          const { round } = await rawSession();
+          const state = stateOf(await round({ value: "a" }));
+          await round({ value: "a" }, accept(state));
+
+          // The state counts its life in whole seconds, so it is still good 600.5 seconds after it was minted.
+          vi.setSystemTime(new Date("2026-01-01T00:10:00.500Z"));
+          const replay = await round({ value: "a" }, accept(state));
+
+          expect(replay.error).toBeUndefined();
+          expect(replay.result?.resultType).toBe("input_required");
+        } finally {
+          vi.useRealTimers();
+        }
+        expect(executions).toEqual(["a"]);
+      });
+
+      it("another server process never honors a state: the key is per process, so a state minted by one is asked again by the other", async () => {
+        governed();
+        const minting = await startRaw([confirmTool]);
+        await minting.request("server/discover", { _meta: ENVELOPE });
+        const other = await startRaw([confirmTool]);
+        await other.request("server/discover", { _meta: ENVELOPE });
+        const state = stateOf(await minting.request("tools/call", { name: "iris_wire_confirm", arguments: { value: "a" }, _meta: ASKING_ENVELOPE }));
+
+        const elsewhere = await other.request("tools/call", {
+          name: "iris_wire_confirm",
+          arguments: { value: "a" },
+          _meta: ASKING_ENVELOPE,
+          ...accept(state),
+        });
+
+        expect(elsewhere.error).toBeUndefined();
+        expect(stateOf(elsewhere)).not.toBe(state);
+        expect(executions).toEqual([]);
+      });
+
+      it("tampered: a state with one character changed is asked again and never runs", async () => {
+        const { round } = await rawSession();
+        const state = stateOf(await round({ value: "a" }));
+        const body = state.slice(0, state.lastIndexOf("."));
+        const mac = state.slice(state.lastIndexOf(".") + 1);
+        const flipped = (text: string, at: number): string => `${text.slice(0, at)}${text[at] === "A" ? "B" : "A"}${text.slice(at + 1)}`;
+
+        for (const tampered of [flipped(state, 5), `${body}.${flipped(mac, 3)}`]) {
+          const again = await round({ value: "a" }, accept(tampered));
+          expect(again.error).toBeUndefined();
+          expect(stateOf(again)).not.toBe(tampered);
+        }
+        expect(executions).toEqual([]);
+      });
+
+      it("forged: an accept with no state, a made-up state, or a well-formed payload under a wrong signature is asked and never runs", async () => {
+        const { round } = await rawSession();
+        const real = stateOf(await round({ value: "a" }));
+        const body = JSON.parse(Buffer.from(real.split(".")[1] as string, "base64url").toString("utf8")) as { p: Record<string, unknown>; exp: number };
+        const signedWrong = `v1.${Buffer.from(JSON.stringify({ p: { ...body.p, nonce: "forged-nonce" }, exp: body.exp })).toString("base64url")}.AAAA`;
+
+        const withoutState = await round({ value: "a" }, { inputResponses: { confirm: TICKED } });
+        const madeUp = await round({ value: "a" }, accept("v1.e30.AAAA"));
+        const wrongSignature = await round({ value: "a" }, accept(signedWrong));
+        const notEvenAString = await round({ value: "a" }, { inputResponses: { confirm: TICKED }, requestState: 7 });
+
+        expect(withoutState.result?.resultType).toBe("input_required");
+        expect(madeUp.result?.resultType).toBe("input_required");
+        expect(wrongSignature.result?.resultType).toBe("input_required");
+        expect(notEvenAString.error?.code).toBe(-32602);
+        expect(executions).toEqual([]);
+      });
+
+      it("a state minted for other arguments is asked again for the new ones, with a new state", async () => {
+        const { round } = await rawSession();
+        const state = stateOf(await round({ value: "a" }));
+
+        const changed = await round({ value: "b" }, accept(state));
+
+        const newState = stateOf(changed);
+        expect(newState).not.toBe(state);
+        const asking = (changed.result?.inputRequests as Record<string, { params: { message: string } }>).confirm?.params.message;
+        expect(asking).toBe(message("b"));
+        expect(executions).toEqual([]);
+        // The new state decides the new arguments, and the old one still cannot decide them.
+        const decided = await round({ value: "b" }, accept(newState));
+        expect((decided.result?.content as Array<{ text: string }>)[0]?.text).toBe("wrote b");
+        expect(executions).toEqual(["b"]);
+      });
+
+      it("a state minted for one tool is not honored by another tool called with the same arguments", async () => {
+        const { round, request } = await rawSession();
+        const state = stateOf(await round({ value: "a" }));
+
+        const other = await request("tools/call", {
+          name: "iris_wire_confirm_b",
+          arguments: { value: "a" },
+          _meta: ASKING_ENVELOPE,
+          ...accept(state),
+        });
+
+        expect(other.result?.resultType).toBe("input_required");
+        expect(other.result?.requestState).not.toBe(state);
+        expect(executions).toEqual([]);
+      });
+
+      it("a state is bound to every argument of the call: one more argument is not honored", async () => {
+        const { round } = await rawSession();
+        const state = stateOf(await round({ value: "a" }));
+
+        const other = await round({ value: "a", also: "x" }, accept(state));
+
+        expect(other.result?.resultType).toBe("input_required");
+        expect(executions).toEqual([]);
+      });
+
+      it("expired: a state older than 600 seconds is asked again and never runs", async () => {
+        const { round } = await rawSession();
+        const state = stateOf(await round({ value: "a" }));
+        vi.useFakeTimers({ toFake: ["Date"] });
+        try {
+          vi.setSystemTime(Date.now() + 601_000);
+          const late = await round({ value: "a" }, accept(state));
+          expect(late.error).toBeUndefined();
+          expect(late.result?.resultType).toBe("input_required");
+        } finally {
+          vi.useRealTimers();
+        }
+        expect(executions).toEqual([]);
+      });
+
+      it("a state is still good just inside its lifetime", async () => {
+        const { round } = await rawSession();
+        const state = stateOf(await round({ value: "a" }));
+        vi.useFakeTimers({ toFake: ["Date"] });
+        try {
+          vi.setSystemTime(Date.now() + 590_000);
+          const inTime = await round({ value: "a" }, accept(state));
+          expect(inTime.result?.resultType).toBe("complete");
+        } finally {
+          vi.useRealTimers();
+        }
+        expect(executions).toEqual(["a"]);
+      });
+
+      it("a valid decline is honored even when the retry no longer declares the capability", async () => {
+        const { round, marker } = await rawSession();
+        const state = stateOf(await round({ value: "a" }));
+
+        const declined = await round({ value: "a" }, { inputResponses: { confirm: { action: "decline" } }, requestState: state }, ENVELOPE);
+
+        expect(declined.result?.isError).toBe(true);
+        expect(declined.result?.structuredContent).toEqual({ code: "CONFIRMATION_DECLINED", action: "iris_wire_confirm", response: "decline" });
+        const entries = await marker();
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({ outcome: "denied", denyReason: "CONFIRMATION_DECLINED", confirmation: "declined" });
+      });
+
+      it("a valid accept is honored even when the retry no longer declares the capability", async () => {
+        const { round } = await rawSession();
+        const state = stateOf(await round({ value: "a" }));
+
+        const accepted = await round({ value: "a" }, accept(state), ENVELOPE);
+
+        expect((accepted.result?.content as Array<{ text: string }>)[0]?.text).toBe("wrote a");
+        expect(executions).toEqual(["a"]);
+      });
+
+      it("a client whose envelope declares no capability gets the fallback, whatever it sends back", async () => {
+        const { round } = await rawSession();
+        const plain = await round({ value: "a" }, {}, ENVELOPE);
+        const forged = await round({ value: "b" }, { inputResponses: { confirm: TICKED } }, ENVELOPE);
+        expect((plain.result?.content as Array<{ text: string }>)[0]?.text).toBe("wrote a");
+        expect((forged.result?.content as Array<{ text: string }>)[0]?.text).toBe("wrote b");
+        expect(executions).toEqual(["a", "b"]);
+      });
+    });
+
+    describe("on the legacy era, over raw frames", () => {
+      const SMUGGLED = { "io.modelcontextprotocol/clientCapabilities": FORM };
+
+      it("a 2025 client that declared no elicitation cannot claim one through _meta", async () => {
+        governed();
+        const { request } = await startRaw([confirmTool]);
+        const initialized = await request("initialize", initializeParams("2025-11-25"));
+        expect(initialized.result?.protocolVersion).toBe("2025-11-25");
+
+        const answer = await request("tools/call", { name: "iris_wire_confirm", arguments: { value: "a" }, _meta: SMUGGLED });
+
+        expect(answer.error).toBeUndefined();
+        expect((answer.result?.content as Array<{ text: string }>)[0]?.text).toBe("wrote a");
+        expect(answer.result?.resultType).toBeUndefined();
+        expect(executions).toEqual(["a"]);
+      });
+
+      it("a plain call that carries an accept and a made-up state is not honored by a client that declared nothing", async () => {
+        governed();
+        const { request } = await startRaw([confirmTool]);
+        await request("initialize", initializeParams("2025-11-25"));
+
+        const answer = await request("tools/call", {
+          name: "iris_wire_confirm",
+          arguments: { value: "a" },
+          inputResponses: { confirm: TICKED },
+          requestState: "v1.e30.AAAA",
+        });
+
+        expect((answer.result?.content as Array<{ text: string }>)[0]?.text).toBe("wrote a");
+        expect(asked).toEqual([]);
+      });
+    });
+
+    describe("a dialog that nobody answers (decision 14)", () => {
+      /** The audit entries the server has handed to the writer, read at the writer so no file I/O is needed. */
+      function loggedEntries(log: ReturnType<typeof vi.spyOn>): Array<Record<string, unknown>> {
+        return log.mock.calls.map((call) => call[0] as Record<string, unknown>);
+      }
+
+      const UNANSWERED = "The confirmation dialog was not answered. Nothing was changed.";
+
+      async function asked600(): Promise<{
+        server: McpServerBase;
+        file: string;
+        log: ReturnType<typeof vi.spyOn>;
+        first: RawAnswer;
+        round: (args: Record<string, unknown>, extra?: Record<string, unknown>) => Promise<RawAnswer>;
+      }> {
+        governed();
+        const file = auditOn();
+        const log = vi.spyOn(AuditLogger.prototype, "log");
+        const { server, request } = await startRaw([confirmTool]);
+        await request("server/discover", { _meta: ENVELOPE });
+        const round = (args: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+          request("tools/call", { name: "iris_wire_confirm", arguments: args, _meta: ASKING_ENVELOPE, ...extra });
+        const first = await round({ value: "a" });
+        return { server, file, log, first, round };
+      }
+
+      it("the sweep timer fires at the lifetime of the state and writes the entry (fake timers)", async () => {
+        governed();
+        const file = auditOn();
+        const log = vi.spyOn(AuditLogger.prototype, "log");
+        const { request } = await startRaw([confirmTool]);
+        await request("server/discover", { _meta: ENVELOPE });
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+        try {
+          const first = await request("tools/call", { name: "iris_wire_confirm", arguments: { value: "a" }, _meta: ASKING_ENVELOPE });
+          expect(first.result?.resultType).toBe("input_required");
+          expect(vi.getTimerCount()).toBe(1);
+          expect(loggedEntries(log)).toEqual([]);
+
+          await vi.advanceTimersByTimeAsync(599_999);
+          expect(loggedEntries(log)).toEqual([]);
+
+          await vi.advanceTimersByTimeAsync(1);
+          const entries = loggedEntries(log);
+          expect(entries).toHaveLength(1);
+          expect(entries[0]).toMatchObject({
+            tool: "iris_wire_confirm",
+            action: null,
+            profile: "default",
+            namespace: "HSCUSTOM",
+            outcome: "error",
+            error: UNANSWERED,
+            paramKeys: ["value"],
+            params: { value: "a" },
+            confirmation: "unanswered",
+          });
+          expect(vi.getTimerCount()).toBe(0);
+          await vi.advanceTimersByTimeAsync(1_200_000);
+          expect(loggedEntries(log)).toHaveLength(1);
+        } finally {
+          vi.useRealTimers();
+        }
+        const written = await auditLines(file, 2);
+        expect(written[1]).toMatchObject({ tool: "iris_wire_confirm", outcome: "error", error: UNANSWERED, confirmation: "unanswered" });
+        expect(Object.prototype.hasOwnProperty.call(written[1], "denyReason")).toBe(false);
+        expect(executions).toEqual([]);
+      });
+
+      it("an answered dialog leaves nothing to sweep: no unanswered entry follows when its lifetime has passed", async () => {
+        governed();
+        auditOn();
+        const log = vi.spyOn(AuditLogger.prototype, "log");
+        const { request } = await startRaw([confirmTool]);
+        await request("server/discover", { _meta: ENVELOPE });
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+        try {
+          const call = (extra: Record<string, unknown> = {}) =>
+            request("tools/call", { name: "iris_wire_confirm", arguments: { value: "a" }, _meta: ASKING_ENVELOPE, ...extra });
+          const first = await call();
+          expect(vi.getTimerCount()).toBe(1);
+          await call({ inputResponses: { confirm: TICKED }, requestState: first.result?.requestState });
+          expect(loggedEntries(log)).toHaveLength(1);
+
+          await vi.advanceTimersByTimeAsync(1_200_000);
+
+          expect(loggedEntries(log)).toHaveLength(1);
+          expect(loggedEntries(log)[0]).toMatchObject({ outcome: "ok", confirmation: "accepted" });
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("two dialogs asked at different times are each ended at their own lifetime", async () => {
+        governed();
+        auditOn();
+        const log = vi.spyOn(AuditLogger.prototype, "log");
+        const { request } = await startRaw([confirmTool]);
+        await request("server/discover", { _meta: ENVELOPE });
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+        try {
+          const ask = (value: string) =>
+            request("tools/call", { name: "iris_wire_confirm", arguments: { value }, _meta: ASKING_ENVELOPE });
+          await ask("a");
+          await vi.advanceTimersByTimeAsync(300_000);
+          await ask("b");
+
+          await vi.advanceTimersByTimeAsync(300_000);
+          expect(loggedEntries(log).map((entry) => (entry.params as { value: string }).value)).toEqual(["a"]);
+
+          await vi.advanceTimersByTimeAsync(300_000);
+          expect(loggedEntries(log).map((entry) => (entry.params as { value: string }).value)).toEqual(["a", "b"]);
+          expect(vi.getTimerCount()).toBe(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("stop() writes every pending ask before the audit writer shuts down", async () => {
+        const { server, file, log, first } = await asked600();
+        expect(first.result?.resultType).toBe("input_required");
+        expect(loggedEntries(log)).toEqual([]);
+
+        await server.stop();
+
+        const entries = loggedEntries(log);
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({ tool: "iris_wire_confirm", outcome: "error", error: UNANSWERED, confirmation: "unanswered" });
+        const written = await auditLines(file, 3);
+        expect(written.map((line) => line.type ?? line.tool)).toEqual(["sessionStart", "iris_wire_confirm", "shutdown"]);
+        expect(executions).toEqual([]);
+      });
+
+      it("closing the connection writes the entry, and stop() afterwards writes nothing more", async () => {
+        const { server, log, first } = await asked600();
+        expect(first.result?.resultType).toBe("input_required");
+
+        await (linked.clientHalf as { close: () => Promise<void> }).close();
+        await vi.waitFor(() => expect(loggedEntries(log)).toHaveLength(1));
+        await server.stop();
+
+        expect(loggedEntries(log)).toHaveLength(1);
+        expect(loggedEntries(log)[0]).toMatchObject({ outcome: "error", confirmation: "unanswered" });
+      });
+
+      it("the sweep timer never keeps the process alive", async () => {
+        governed();
+        auditOn();
+        const handles: Array<{ delay: number; handle: { hasRef: () => boolean } }> = [];
+        const realSetTimeout = globalThis.setTimeout;
+        vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void, delay?: number, ...rest: unknown[]) => {
+          const handle = (realSetTimeout as unknown as (...args: unknown[]) => { hasRef: () => boolean })(callback, delay, ...rest);
+          handles.push({ delay: delay ?? 0, handle });
+          return handle;
+        }) as unknown as typeof setTimeout);
+        const { server, request } = await startRaw([confirmTool]);
+        await request("server/discover", { _meta: ENVELOPE });
+
+        await request("tools/call", { name: "iris_wire_confirm", arguments: { value: "a" }, _meta: ASKING_ENVELOPE });
+
+        const sweep = handles.filter((entry) => entry.delay > 590_000 && entry.delay <= 600_000);
+        expect(sweep).toHaveLength(1);
+        expect(sweep[0]?.handle.hasRef()).toBe(false);
+        await server.stop();
+      });
+
+      it("no entry and no timer exist while auditing is off", async () => {
+        governed();
+        const log = vi.spyOn(AuditLogger.prototype, "log");
+        const { request } = await startRaw([confirmTool]);
+        await request("server/discover", { _meta: ENVELOPE });
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+        try {
+          const first = await request("tools/call", { name: "iris_wire_confirm", arguments: { value: "a" }, _meta: ASKING_ENVELOPE });
+          expect(first.result?.resultType).toBe("input_required");
+          expect(vi.getTimerCount()).toBe(0);
+        } finally {
+          vi.useRealTimers();
+        }
+        expect(log).not.toHaveBeenCalled();
+      });
+    });
   });
 });

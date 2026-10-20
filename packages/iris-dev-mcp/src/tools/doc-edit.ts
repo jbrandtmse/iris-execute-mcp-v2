@@ -571,6 +571,20 @@ export const docEditTool: ToolDefinition = {
       };
     }
 
+    // `regenerateStorage` saves without the Storage guard, so the person is asked (AD-34) after every check
+    // above and before the save, with the Storage definitions the edits drop.
+    if (action === "regenerateStorage") {
+      const dropped = isClassDocument(name) ? droppedStorageDefinitions(lines, applied.lines) : [];
+      const outcome = await ctx.confirm?.({
+        operation: "save a document without the Storage guard",
+        target: `document ${name}, namespace ${ns}`,
+        scope:
+          `${edits.length} edit(s); ` +
+          (dropped.length > 0 ? `drops Storage definition(s): ${dropped.join(", ")}` : "drops no Storage definition"),
+      });
+      if (outcome !== undefined && !outcome.proceed) return outcome.result;
+    }
+
     // The one save. It carries the version of the read, so a change made since then is a conflict, and
     // a conflict is never retried.
     let saved: AtelierEnvelope;

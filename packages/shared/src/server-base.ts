@@ -8,20 +8,32 @@
  * array.
  */
 
+import { randomBytes, randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { dirname } from "node:path";
 
-import { McpServer, ProtocolErrorCode, ResourceTemplate } from "@modelcontextprotocol/server";
+import {
+  CLIENT_CAPABILITIES_META_KEY,
+  McpServer,
+  ProtocolErrorCode,
+  ResourceTemplate,
+  createRequestStateCodec,
+  inputRequired,
+  inputResponse,
+  isInputRequiredResult,
+} from "@modelcontextprotocol/server";
 import { StdioServerTransport, serveStdio } from "@modelcontextprotocol/server/stdio";
 import type { StdioServerHandle } from "@modelcontextprotocol/server/stdio";
 import type {
   CallToolResult,
+  InputRequiredResult,
   ReadResourceResult,
   GetPromptResult,
   McpRequestContext,
   McpServerFactory,
   RegisteredTool,
+  ServerContext,
   Variables,
 } from "@modelcontextprotocol/server";
 import { z } from "zod";
@@ -29,13 +41,30 @@ import type { ZodObject } from "zod";
 
 import type { IrisConnectionConfig } from "./config.js";
 import { loadConfig } from "./config.js";
-import { IrisHttpClient } from "./http-client.js";
+import { IrisHttpClient, bindSignal } from "./http-client.js";
 import { checkHealth } from "./health.js";
 import { negotiateVersion } from "./atelier.js";
 import { bootstrap } from "./bootstrap.js";
 import { logger } from "./logger.js";
-import type { AuditConfig, AuditEntryInput, AuditOutcome } from "./audit.js";
+import type { AuditConfig, AuditConfirmation, AuditEntryInput, AuditOutcome } from "./audit.js";
 import { AuditLogger, parseAuditConfig } from "./audit.js";
+import type { ConfirmationState } from "./confirmation.js";
+import {
+  CANCELLED_CALL_TEXT,
+  CONFIRMATION_INPUT_KEY,
+  CONFIRMATION_PENDING,
+  CONFIRMATION_SCHEMA,
+  CONFIRMATION_STATE_TTL_SECONDS,
+  ConfirmationNonces,
+  UNANSWERED_CONFIRMATION_TEXT,
+  auditConfirmationOf,
+  classifyConfirmationResponse,
+  confirmationDeclinedResult,
+  confirmationMessage,
+  contentHash,
+  declaresFormElicitation,
+  isConfirmationState,
+} from "./confirmation.js";
 import type { ProfileRegistry, IrisProfile } from "./profiles.js";
 import {
   ProfileClientRegistry,
@@ -46,6 +75,8 @@ import {
   DEFAULT_PROFILE_NAME,
 } from "./profiles.js";
 import type {
+  ConfirmationOutcome,
+  ConfirmationRequest,
   ToolDefinition,
   ToolContext,
   ToolResult,
@@ -262,6 +293,46 @@ type ResourceReader =
 /** The paths into `handleToolCall`: the SDK-registered callback (in-process), and the wire request. */
 type ToolCallSource = "callback" | "wire";
 
+/** The first protocol revision of the era that carries client capabilities in each request's envelope. */
+const MODERN_PROTOCOL_VERSION = "2026-07-28";
+
+/**
+ * What a `tools/call` off the wire carries beyond its parameters: the SDK instance serving it and the request
+ * context of this round (its abort signal, retry state and envelope), and what the round decided about a
+ * confirmation. A context of a unit test may lack any member of `ctx`; every read of it allows that.
+ */
+interface WireCall {
+  instance: McpServer;
+  ctx: ServerContext;
+  /** How the person answered, once this round has decided the call. */
+  confirmation?: AuditConfirmation;
+  /** The question this round asks, when it asks one: the handler's `ctx.confirm` returned the pending sentinel. */
+  pending?: InputRequiredResult;
+  /** The nonce of {@link pending}'s state. */
+  pendingNonce?: string;
+}
+
+/** The members of a request context that a wire call reads. Each may be absent on the stub context of a test. */
+interface RequestView {
+  signal?: AbortSignal;
+  envelope?: object;
+  inputResponses?: Record<string, unknown>;
+  requestState?: () => unknown;
+}
+
+/** The `mcpReq` of the request context of `wireCall`, or `undefined` when the context has none. */
+function requestView(wireCall: WireCall): RequestView | undefined {
+  return (wireCall.ctx as { mcpReq?: RequestView } | undefined)?.mcpReq;
+}
+
+/** A confirmation dialog that was put to the client and has no answer yet; it ends as one `unanswered` audit entry. */
+interface PendingAsk {
+  tool: ToolDefinition;
+  args: unknown;
+  start: number;
+  expiresAt: number;
+}
+
 /**
  * Encode a pagination cursor from an offset number.
  *
@@ -401,6 +472,23 @@ export class McpServerBase {
   private constructionInstanceHandedOut = false;
   /** The open stdio serving handle, from {@link start} until {@link stop}. */
   private servingHandle: StdioServerHandle | undefined;
+  /**
+   * Mints and verifies the `requestState` of a confirmation dialog: HMAC-SHA256 under a key that lives as long as
+   * this process, which over stdio serves every round of a call. A state minted by another process never verifies.
+   */
+  private readonly confirmationCodec = createRequestStateCodec<ConfirmationState>({
+    key: randomBytes(32),
+    ttlSeconds: CONFIRMATION_STATE_TTL_SECONDS,
+  });
+  /**
+   * The nonces of the confirmation states that have decided a call, so a state is honored once. A nonce outlives
+   * its state by two seconds, because the codec counts a state's expiry in whole seconds.
+   */
+  private readonly confirmationNonces = new ConfirmationNonces((CONFIRMATION_STATE_TTL_SECONDS + 2) * 1000);
+  /** The dialogs put to a client that have no answer yet, by nonce. Filled only while auditing is on. */
+  private readonly pendingAsks: Map<string, PendingAsk> = new Map();
+  /** The timer that ends the pending asks whose state has expired. It never keeps the process alive. */
+  private pendingAskTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly tools: Map<string, ToolDefinition> = new Map();
   /**
    * Per-tool input schema extended with the shared `server` parameter (D2).
@@ -821,8 +909,14 @@ export class McpServerBase {
         // The SDK announces a change each time a tool is registered or removed; a call that changes
         // several tools in one turn (addTools, removeTools) announces it once.
         debouncedNotificationMethods: ["notifications/tools/list_changed"],
+        // Multi-round-trip serving (AD-34), every knob explicit: on the 2025 era the SDK's shim puts the
+        // confirmation dialog to the client and re-enters the handler with the answer. The SDK is given no
+        // `requestState` hook: the confirmation verifies its own state in confirmOnWire.
+        inputRequired: { legacyShim: true, maxRounds: 8, roundTimeoutMs: 600000 },
       },
     );
+    // A dialog that is still unanswered when the connection ends gets its audit entry.
+    server.server.onclose = () => this.flushPendingAsks();
     const handles = new Map<string, RegisteredTool>();
     for (const tool of this.tools.values()) {
       handles.set(tool.name, this.registerToolOn(server, tool));
@@ -871,7 +965,9 @@ export class McpServerBase {
     sdkServer.setRequestHandler("tools/list", () => ({
       tools: [...this.tools.values()].map((tool) => this.listedToolOf(tool)),
     }));
-    sdkServer.setRequestHandler("tools/call", (request) => this.callToolFromWire(request.params));
+    sdkServer.setRequestHandler("tools/call", (request, ctx) =>
+      this.callToolFromWire(request.params, { instance: server, ctx }),
+    );
     sdkServer.setRequestHandler("resources/read", (request) => this.readResourceFromWire(request.params.uri));
     if (this.promptEntries.size > 0) {
       sdkServer.setRequestHandler("prompts/get", (request) => this.getPromptFromWire(request.params));
@@ -897,10 +993,13 @@ export class McpServerBase {
    * call runs through {@link handleToolCall} as a wire call, and a declared `outputSchema` is checked on
    * the way out. Anything that throws becomes an in-band error result.
    */
-  private async callToolFromWire(params: {
-    name: string;
-    arguments?: Record<string, unknown> | undefined;
-  }): Promise<CallToolResult> {
+  private async callToolFromWire(
+    params: {
+      name: string;
+      arguments?: Record<string, unknown> | undefined;
+    },
+    origin: { instance: McpServer; ctx: ServerContext },
+  ): Promise<CallToolResult | InputRequiredResult> {
     const tool = this.tools.get(params.name);
     if (!tool) {
       return toolErrorResult(
@@ -908,7 +1007,9 @@ export class McpServerBase {
       );
     }
     try {
-      const result = await this.handleToolCall(tool, params.arguments, "wire");
+      const result = await this.handleToolCall(tool, params.arguments, "wire", { ...origin });
+      // A question for the client is not a tool result, so the declared output schema does not apply to it.
+      if (isInputRequiredResult(result)) return result;
       const outputProblem = checkWireOutput(tool.name, tool, result);
       return outputProblem === undefined ? result : toolErrorResult(outputProblem);
     } catch (error: unknown) {
@@ -1509,16 +1610,34 @@ export class McpServerBase {
    * key names only, never `params`. The `"callback"` source is the
    * SDK-registered callback (in-process): the arguments go straight to
    * {@link dispatchToolCall}, whose own validation is step 1.
+   *
+   * A wire call also carries its {@link WireCall}: the request context of the round. Its abort signal reaches
+   * the HTTP client of the call, and a call whose signal is aborted is audited `error` with
+   * {@link CANCELLED_CALL_TEXT}. A call can take several rounds when it asks the person to confirm: a round
+   * that asks returns the question and writes no entry, and the round that ends the call writes the one entry,
+   * with the person's answer in `confirmation`. The in-process callback has no `wireCall`, so it never asks.
    */
   private async handleToolCall(
     tool: ToolDefinition,
     rawArgs: unknown,
+    source?: "callback",
+  ): Promise<CallToolResult>;
+  private async handleToolCall(
+    tool: ToolDefinition,
+    rawArgs: unknown,
+    source: "wire",
+    wireCall?: WireCall,
+  ): Promise<CallToolResult | InputRequiredResult>;
+  private async handleToolCall(
+    tool: ToolDefinition,
+    rawArgs: unknown,
     source: ToolCallSource = "callback",
-  ): Promise<CallToolResult> {
+    wireCall?: WireCall,
+  ): Promise<CallToolResult | InputRequiredResult> {
     const auditLogger = this.auditLogger;
     const start = auditLogger ? Date.now() : 0;
     let args = rawArgs;
-    let result: CallToolResult | undefined;
+    let result: CallToolResult | InputRequiredResult | undefined;
     if (source === "wire") {
       const wireSchema = this.wireSchemas.get(tool.name);
       if (wireSchema === undefined) {
@@ -1529,10 +1648,21 @@ export class McpServerBase {
       else result = toolErrorResult(checked.text);
     }
     const schemaInvalid = result !== undefined;
-    result ??= await this.dispatchToolCall(tool, args);
+    result ??= await this.dispatchToolCall(tool, args, wireCall);
+    // A question for the client ends no call: the round that ends it writes the entry (AD-19), and a dialog
+    // nobody answers gets its entry from the pending-ask map.
+    if (isInputRequiredResult(result)) {
+      if (auditLogger && wireCall?.pendingNonce !== undefined) {
+        this.recordPendingAsk(wireCall.pendingNonce, tool, args, start);
+      }
+      return result;
+    }
     if (!auditLogger) return result;
 
     const durationMs = Date.now() - start;
+    // A call the client cancelled is audited `error`, never `ok`, whatever its handler went on to return.
+    const cancelled = wireCall !== undefined && requestView(wireCall)?.signal?.aborted === true;
+    const audited = cancelled ? toolErrorResult(CANCELLED_CALL_TEXT) : result;
     // Fire-and-forget audit recording must NEVER throw into the tool path
     // (spec §5): the async file write is already swallowed inside the logger,
     // but the SYNCHRONOUS derivation + redaction walk + JSON serialization
@@ -1541,7 +1671,7 @@ export class McpServerBase {
     // IRIS_AUDIT_LOG_PARAMS). Guard it so the tool result the client is owed
     // is returned regardless.
     try {
-      this.recordAuditEntry(auditLogger, tool, args, result, durationMs, schemaInvalid);
+      this.recordAuditEntry(auditLogger, tool, args, audited, durationMs, schemaInvalid, wireCall?.confirmation);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn(`Audit entry recording failed; entry dropped: ${message}`);
@@ -1562,7 +1692,8 @@ export class McpServerBase {
   private async dispatchToolCall(
     tool: ToolDefinition,
     rawArgs: unknown,
-  ): Promise<CallToolResult> {
+    wireCall?: WireCall,
+  ): Promise<CallToolResult | InputRequiredResult> {
     // Validate arguments via Zod against the EXTENDED schema (the original
     // inputSchema + the framework `server` field). Validating against the
     // extended schema is what lets Zod capture `server`; parsing with the
@@ -1865,7 +1996,7 @@ export class McpServerBase {
       return resolvedClient;
     };
 
-    const ctx = buildToolContext(
+    const baseCtx = buildToolContext(
       tool.scope,
       profile,
       client,
@@ -1878,9 +2009,16 @@ export class McpServerBase {
       // per-call file re-read (restart-only semantics, no hot-reload in v1).
       this.governanceFileConfig,
     );
+    // A call off the wire gets the request's abort signal on its HTTP clients and the confirmation helper.
+    const ctx =
+      wireCall === undefined
+        ? baseCtx
+        : this.wireToolContext(baseCtx, tool, profile, parseResult.data, validatedArgs, wireCall);
 
     try {
       const result: ToolResult = await tool.handler(validatedArgs, ctx);
+      // The handler asked for a confirmation: answer with the question, not with a tool result.
+      if (result === CONFIRMATION_PENDING && wireCall?.pending !== undefined) return wireCall.pending;
       const callResult: CallToolResult = {
         content: result.content,
         isError: result.isError,
@@ -1901,6 +2039,191 @@ export class McpServerBase {
         isError: true,
       };
     }
+  }
+
+  // ── Wire call context and the confirmation dialog (AD-34, Story 43.3) ───
+
+  /**
+   * The context of a call off the wire: `base`, with the HTTP clients bound to the request's abort signal (so a
+   * cancelled call aborts the IRIS request it has in flight and sends no further one) and the confirmation
+   * helper. A request context without a signal leaves the clients as they are.
+   */
+  private wireToolContext(
+    base: ToolContext,
+    tool: ToolDefinition,
+    profile: IrisProfile,
+    parsedArgs: unknown,
+    validatedArgs: Record<string, unknown>,
+    wireCall: WireCall,
+  ): ToolContext {
+    const signal = requestView(wireCall)?.signal;
+    const bind = (client: IrisHttpClient): IrisHttpClient =>
+      signal === undefined ? client : bindSignal(client, signal);
+    const actionKey = this.deriveAuditAction(tool, validatedArgs) ?? tool.name;
+    const argsHash = (): string => contentHash({ tool: tool.name, profile: profile.name, args: parsedArgs });
+    return {
+      ...base,
+      http: bind(base.http),
+      resolveProfileClient: async (profileName: string) => bind(await base.resolveProfileClient(profileName)),
+      confirm: (request) => this.confirmOnWire(tool, profile, actionKey, argsHash, request, wireCall),
+    };
+  }
+
+  /**
+   * The capabilities the calling client declared, read from the source of the era. On revision 2026-07-28 and
+   * later that is the envelope of this request; before it, what the client declared at `initialize`. The
+   * envelope is never read on a 2025-era connection, because a request's `_meta` can carry reserved keys there.
+   */
+  private clientCapabilitiesOf(wireCall: WireCall): unknown {
+    const lowLevel = wireCall.instance.server;
+    const version = lowLevel.getNegotiatedProtocolVersion();
+    if (typeof version === "string" && version >= MODERN_PROTOCOL_VERSION) {
+      const envelope = requestView(wireCall)?.envelope as Record<string, unknown> | undefined;
+      return envelope?.[CLIENT_CAPABILITIES_META_KEY];
+    }
+    return lowLevel.getClientCapabilities();
+  }
+
+  /**
+   * The state a retry echoed, when this process minted it for this very call: its MAC verifies, it has not
+   * expired, and it was minted for this tool and these arguments. Anything else is no state.
+   */
+  private async echoedConfirmationState(
+    tool: ToolDefinition,
+    hash: string,
+    wireCall: WireCall,
+  ): Promise<ConfirmationState | undefined> {
+    const raw = requestView(wireCall)?.requestState?.();
+    if (typeof raw !== "string") return undefined;
+    let state: unknown;
+    try {
+      state = await this.confirmationCodec.verify(raw, wireCall.ctx);
+    } catch {
+      return undefined;
+    }
+    return isConfirmationState(state) && state.tool === tool.name && state.hash === hash ? state : undefined;
+  }
+
+  /**
+   * The helper behind {@link ToolContext.confirm} on a wire call. In order:
+   *
+   * 1. A retry that echoes a valid state of this call, whose nonce is unused, and carries an answer decides the
+   *    call whatever its capabilities now say: the nonce is used, and an accept with `confirm: true` proceeds,
+   *    while a decline, a dismissal and an unticked accept end the call with `CONFIRMATION_DECLINED`.
+   * 2. A client that does not declare form elicitation is not asked: the call proceeds as it always did.
+   * 3. A scope that resolves to `undefined` means there is nothing to ask: the call proceeds.
+   * 4. Otherwise the question is minted: a state for this tool and these arguments, and a form request. The
+   *    handler gets {@link CONFIRMATION_PENDING}, which {@link dispatchToolCall} swaps for the question.
+   */
+  private async confirmOnWire(
+    tool: ToolDefinition,
+    profile: IrisProfile,
+    actionKey: string,
+    argsHash: () => string,
+    request: ConfirmationRequest,
+    wireCall: WireCall,
+  ): Promise<ConfirmationOutcome> {
+    const hash = argsHash();
+    const state = await this.echoedConfirmationState(tool, hash, wireCall);
+    if (state !== undefined && !this.confirmationNonces.isUsed(state.nonce)) {
+      const response = classifyConfirmationResponse(
+        inputResponse(requestView(wireCall)?.inputResponses, CONFIRMATION_INPUT_KEY),
+      );
+      if (response !== "missing") {
+        this.confirmationNonces.markUsed(state.nonce);
+        this.pendingAsks.delete(state.nonce);
+        wireCall.confirmation = auditConfirmationOf(response);
+        if (response === "accepted") return { proceed: true };
+        return {
+          proceed: false,
+          result: confirmationDeclinedResult(actionKey, request.operation, response),
+        };
+      }
+    }
+
+    if (!declaresFormElicitation(this.clientCapabilitiesOf(wireCall))) return { proceed: true };
+
+    const scope = typeof request.scope === "function" ? await request.scope() : request.scope;
+    if (scope === undefined) return { proceed: true };
+
+    const nonce = randomUUID();
+    const requestState = await this.confirmationCodec.mint({ v: 1, tool: tool.name, hash, nonce });
+    const message = confirmationMessage(
+      { operation: request.operation, target: request.target, scope },
+      { profile: profile.name, host: profile.host, port: profile.port },
+    );
+    wireCall.pending = inputRequired({
+      inputRequests: {
+        [CONFIRMATION_INPUT_KEY]: inputRequired.elicit({ message, requestedSchema: CONFIRMATION_SCHEMA }),
+      },
+      requestState,
+    });
+    wireCall.pendingNonce = nonce;
+    return { proceed: false, result: CONFIRMATION_PENDING };
+  }
+
+  /** Remember a dialog put to the client, so it ends as one audit entry even when nobody answers. */
+  private recordPendingAsk(nonce: string, tool: ToolDefinition, args: unknown, start: number): void {
+    this.pendingAsks.set(nonce, {
+      tool,
+      args,
+      start,
+      expiresAt: Date.now() + CONFIRMATION_STATE_TTL_SECONDS * 1000,
+    });
+    this.schedulePendingSweep();
+  }
+
+  /** Arm the timer for the earliest expiry among the pending asks, unless it is armed or none is pending. */
+  private schedulePendingSweep(): void {
+    if (this.pendingAskTimer !== undefined || this.pendingAsks.size === 0) return;
+    let earliest = Number.POSITIVE_INFINITY;
+    for (const ask of this.pendingAsks.values()) earliest = Math.min(earliest, ask.expiresAt);
+    this.pendingAskTimer = setTimeout(
+      () => {
+        this.pendingAskTimer = undefined;
+        this.sweepPendingAsks(false);
+        this.schedulePendingSweep();
+      },
+      Math.max(0, earliest - Date.now()),
+    );
+    this.pendingAskTimer.unref();
+  }
+
+  /**
+   * Write the `unanswered` audit entry of each pending ask that has expired (or of every one, when `all`), and
+   * forget it. Never throws.
+   */
+  private sweepPendingAsks(all: boolean): void {
+    const now = Date.now();
+    for (const [nonce, ask] of this.pendingAsks) {
+      if (!all && ask.expiresAt > now) continue;
+      this.pendingAsks.delete(nonce);
+      const auditLogger = this.auditLogger;
+      if (!auditLogger) continue;
+      try {
+        this.recordAuditEntry(
+          auditLogger,
+          ask.tool,
+          ask.args,
+          toolErrorResult(UNANSWERED_CONFIRMATION_TEXT),
+          now - ask.start,
+          false,
+          "unanswered",
+        );
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.warn(`Audit entry recording failed; entry dropped: ${message}`);
+      }
+    }
+  }
+
+  /** End every pending ask now, as the connection ends or the server stops, and disarm the timer. */
+  private flushPendingAsks(): void {
+    if (this.pendingAskTimer !== undefined) {
+      clearTimeout(this.pendingAskTimer);
+      this.pendingAskTimer = undefined;
+    }
+    this.sweepPendingAsks(true);
   }
 
   // ── Audit entry derivation (Epic 29, Story 29.0) ────────────────────
@@ -1936,6 +2259,7 @@ export class McpServerBase {
     result: CallToolResult,
     durationMs: number,
     schemaInvalid = false,
+    confirmation?: AuditConfirmation,
   ): void {
     const argsRecord =
       rawArgs !== null && typeof rawArgs === "object"
@@ -1983,6 +2307,8 @@ export class McpServerBase {
         entryInput.presetApplied = presetApplied;
       }
     }
+    // Story 43.3 (AD-19): the person's answer to the confirmation dialog, when the call was asked one.
+    if (confirmation !== undefined) entryInput.confirmation = confirmation;
     auditLogger.log(entryInput);
   }
 
@@ -2101,6 +2427,8 @@ export class McpServerBase {
       | Record<string, unknown>
       | undefined;
     if (structured?.code === REFUSAL_CODES.GOVERNANCE_DISABLED) return "denied";
+    // A person refused before anything changed, which is what `denied` means for governance (AD-19).
+    if (structured?.code === REFUSAL_CODES.CONFIRMATION_DECLINED) return "denied";
     if (result.isError) return "error";
     return "ok";
   }
@@ -2595,7 +2923,8 @@ export class McpServerBase {
    * seam). Closes the serving handle that {@link start} opened (the instance
    * the connection is pinned to, and the transport); when {@link start} was
    * never called, or the handle is already closed, it closes the current
-   * instance instead (a safe no-op when nothing is connected). Then, when
+   * instance instead (a safe no-op when nothing is connected). A confirmation dialog that is still unanswered
+   * is written as its `unanswered` audit entry first. Then, when
    * auditing is ON, AWAITS {@link AuditLogger.shutdown}: it
    * enqueues the final `droppedEntries` line and drains the write queue, so
    * no entry enqueued up to this point is lost before the process exits.
@@ -2617,6 +2946,8 @@ export class McpServerBase {
     } else {
       await this.mcpServer.close();
     }
+    // A dialog nobody answered gets its entry before the audit writer shuts down.
+    this.flushPendingAsks();
     if (this.auditLogger) {
       await this.auditLogger.shutdown();
     }

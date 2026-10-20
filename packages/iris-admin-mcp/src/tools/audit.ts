@@ -368,6 +368,29 @@ export const auditManageTool: ToolDefinition = {
         }
       }
 
+      // ── purge: after every check above, the person is asked (AD-34) ──
+      if (action === "purge") {
+        const supplied: Array<[string, string | undefined]> = [
+          ["begin", begin],
+          ["end", end],
+          ["user", user],
+          ["event", event],
+          ["source", source],
+          ["type", type],
+        ];
+        const outcome = await ctx.confirm?.({
+          operation: "permanently delete audit-log records",
+          target: "the IRIS audit log",
+          scope:
+            "records matching " +
+            supplied
+              .filter(([, value]) => value !== undefined && value !== "")
+              .map(([filter, value]) => `${filter}=${value}`)
+              .join(", "),
+        });
+        if (outcome !== undefined && !outcome.proceed) return outcome.result;
+      }
+
       // ── enable / disable / configureEvent / purge / export (POST) ──
       const body: Record<string, unknown> = { action };
       if (action === "configureEvent") {

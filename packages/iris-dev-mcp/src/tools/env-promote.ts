@@ -49,7 +49,6 @@
  * resort action like `iris_production_control:clean`).
  */
 
-import { createHash } from "node:crypto";
 import type {
   ToolDefinition,
   ToolContext,
@@ -62,6 +61,7 @@ import {
   ProfileResolutionError,
   atelierDocStatusError,
   atelierPath,
+  contentHash,
   negotiateVersion,
   parseGovernanceConfig,
   parseGovernancePreset,
@@ -413,32 +413,16 @@ function buildPlan(diff: Record<string, unknown>): { steps: PlanStep[]; warnings
 
 // ── plan content hash (AC 27.2.3) ───────────────────────────────────
 
-/** Recursively sort object keys (arrays keep their order -- only object keys are sorted). */
-function sortKeysDeep(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(sortKeysDeep);
-  }
-  if (isPlainObject(value)) {
-    const sorted: Record<string, unknown> = {};
-    for (const key of Object.keys(value).sort()) {
-      sorted[key] = sortKeysDeep(value[key]);
-    }
-    return sorted;
-  }
-  return value;
-}
-
 /**
  * Compute a stable content hash of a `diff` object: SHA-256 hex of a
  * canonical, key-sorted JSON serialization -- deterministic regardless of the
  * input's own key order, and sensitive to any value change. Exported so
  * Story 27.3's `execute` can re-derive the SAME hash from the diff it is
  * given and compare against `plan.planHash` (stale-plan protection) without
- * reimplementing the algorithm.
+ * reimplementing the algorithm. The algorithm is the shared `contentHash`.
  */
 export function computePlanHash(diff: unknown): string {
-  const canonical = JSON.stringify(sortKeysDeep(diff));
-  return createHash("sha256").update(canonical).digest("hex");
+  return contentHash(diff);
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -980,6 +964,22 @@ interface ExecuteInput {
   namespace?: string;
 }
 
+/** The steps a confirmation dialog lists before it says "and N more". */
+const CONFIRMATION_STEP_LIMIT = 10;
+
+/**
+ * What an `execute` covers, for the confirmation dialog: the step count and source, then the first steps as
+ * `#<index> <domain> <operation> <subject>`.
+ */
+function promotionScope(source: string, steps: readonly ExecPlanStep[]): string {
+  const listed = steps
+    .slice(0, CONFIRMATION_STEP_LIMIT)
+    .map((step) => `#${step.index} ${step.domain} ${step.operation} ${step.subject}`)
+    .join("; ");
+  const more = steps.length > CONFIRMATION_STEP_LIMIT ? `; and ${steps.length - CONFIRMATION_STEP_LIMIT} more` : "";
+  return `${steps.length} step(s) from server '${source}': ${listed}${more}`;
+}
+
 /**
  * `execute` -- run an ALLOWLISTED subset of a prior `plan`'s steps against
  * `target`, behind the four refuse-before-any-write gates (AC 27.3.2), then
@@ -1183,6 +1183,14 @@ async function executeAction(input: ExecuteInput, ctx: ToolContext): Promise<Too
         "Check the profile's configured default namespace, or pass an explicit 'namespace' override. No changes were made.",
     );
   }
+
+  // Every check has passed and no write has been made: the person is asked (AD-34).
+  const outcome = await ctx.confirm?.({
+    operation: "promote changes to another server",
+    target: `server '${input.target}', namespace ${targetNs}`,
+    scope: promotionScope(input.source, orderedAllowed),
+  });
+  if (outcome !== undefined && !outcome.proceed) return outcome.result;
 
   const executed: ExecutedStep[] = [];
   let halted = false;

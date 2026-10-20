@@ -3,6 +3,8 @@
  *
  * A holding proxy sits between the BUILT dev server and fake IRIS listener A (127.0.0.1 only; no IRIS instance is reached): a read of
  * `Demo.Slow.cls` waits there until the test releases it, so a request is genuinely in flight while others are sent and answered.
+ * `release()` leaves a held read alone when its connection has closed, and `closedBeforeRelease()` counts the held connections that closed
+ * before they were released: since Story 43.3 (DW-642) a cancelled call aborts the IRIS request it has in flight.
  *  - Concurrency: a slow read, a fast read, a read of the other profile in another namespace, a denial, a listing, a schema-invalid
  *    call, a resource read and the profiles call are all written before any answer is read. The fast ones are answered while the slow
  *    one is held; every id is answered exactly once, by the tool it called (the three document reads return the same document, so
@@ -14,6 +16,8 @@
  *    cancel of an unknown id, of a finished request, and one
  *    without a `requestId` are ignored; the connection, the other requests and the gates are unaffected, on both eras, with and
  *    without the envelope on the notification.
+ *  - DW-642 (Story 43.3): a call cancelled while its IRIS request is held closes the held connection before the test releases it, sends
+ *    no answer, and is audited `error` with the fixed cancelled text, never `ok`.
  * The file fails, never skips, on a stale dist.
  */
 
@@ -56,15 +60,18 @@ function holdingProxy(): {
   interpose: (upstreamPort: number) => Promise<{ port: number; close: () => Promise<void> }>;
   held: () => number;
   replied: () => number;
+  closedBeforeRelease: () => number;
   release: () => void;
 } {
-  const waiting: Array<() => void> = [];
+  const waiting: Array<{ go: () => void; closed: boolean }> = [];
   let replied = 0;
+  let closedBeforeRelease = 0;
   return {
     held: () => waiting.length,
     replied: () => replied,
+    closedBeforeRelease: () => closedBeforeRelease,
     release: () => {
-      for (const go of waiting.splice(0)) go();
+      for (const entry of waiting.splice(0)) if (!entry.closed) entry.go();
     },
     interpose: async (upstreamPort) => {
       const forward = (req: http.IncomingMessage, res: http.ServerResponse, body: Buffer, rewrite: boolean): void => {
@@ -93,10 +100,15 @@ function holdingProxy(): {
         req.on("end", () => {
           const body = Buffer.concat(chunks);
           if (req.method === "GET" && (req.url ?? "").includes("/doc/Demo.Slow.cls")) {
+            const entry = { go: () => forward(req, res, body, true), closed: false };
             res.once("close", () => {
               replied += 1;
+              if (waiting.includes(entry)) {
+                entry.closed = true;
+                closedBeforeRelease += 1;
+              }
             });
-            waiting.push(() => forward(req, res, body, true));
+            waiting.push(entry);
           } else forward(req, res, body, false);
         });
       });
@@ -148,6 +160,15 @@ async function untilReplied(proxy: ReturnType<typeof holdingProxy>, count: numbe
   const deadline = Date.now() + 10_000;
   while (proxy.replied() < count) {
     if (Date.now() > deadline) throw new Error(`the proxy has written ${proxy.replied()} held replies, expected ${count}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+/** Wait until `count` held connections have closed before they were released, so the close is the server's doing. */
+async function untilClosed(proxy: ReturnType<typeof holdingProxy>, count: number): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (proxy.closedBeforeRelease() < count) {
+    if (Date.now() > deadline) throw new Error(`${proxy.closedBeforeRelease()} held connections closed before release, expected ${count}`);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
@@ -299,4 +320,73 @@ describe.each(["legacy", "modern"] as const)("cancellation on the %s era", (era)
       expect((await wire.response(21)).message.result.resultType).toBe("complete");
     });
   }
+});
+
+/** The audit error of a call that the client cancelled (Story 43.3, wave-8 decision 18). */
+const CANCELLED_CALL_TEXT =
+  "Cancelled by the client before a result was sent. An IRIS request still in flight was aborted; a write IRIS had already received may still have completed.";
+
+describe.each(["legacy", "modern"] as const)("DW-642: a call cancelled while its IRIS request is held, on the %s era", (era) => {
+  it("closes the held connection before it is released, sends no answer, and is audited error with the cancelled text", async () => {
+    const { rig, proxy, call } = await open(era);
+    const { wire } = rig;
+    call(10, "iris_doc_get", SLOW);
+    await untilHeld(proxy, 1);
+    expect(proxy.closedBeforeRelease(), "the connection is open while the request is held").toBe(0);
+
+    wire.send({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 10, reason: "DW-642" } });
+    await untilClosed(proxy, 1);
+    proxy.release();
+    await wire.quiet(400);
+
+    expect(proxy.closedBeforeRelease(), "the server closed the held connection, and did not wait for the reply").toBe(1);
+    expect(rig.requests.a().filter((request) => request.includes("/doc/")), "the held read was never forwarded to IRIS").toEqual([]);
+    expect(wire.responsesTo(10), "no answer goes out").toHaveLength(0);
+    const calls = (await rig.audit(2)).filter((entry) => entry.tool === "iris_doc_get");
+    expect(calls).toEqual([
+      {
+        seq: 1,
+        serverPkg: "@iris-mcp/dev",
+        tool: "iris_doc_get",
+        action: null,
+        profile: "default",
+        namespace: "HSCUSTOM",
+        outcome: "error",
+        paramKeys: ["name"],
+        params: SLOW,
+        profileSource: "env",
+        error: CANCELLED_CALL_TEXT,
+      },
+    ]);
+  });
+
+  it("control: the same call, not cancelled, is audited ok once its reply arrives", async () => {
+    const { rig, proxy, call } = await open(era);
+    const { wire } = rig;
+    call(10, "iris_doc_get", SLOW);
+    await untilHeld(proxy, 1);
+    proxy.release();
+    expect((await wire.response(10)).message.result.structuredContent.name).toBe("Demo.Sample.cls");
+
+    expect(proxy.closedBeforeRelease()).toBe(0);
+    const calls = (await rig.audit(2)).filter((entry) => entry.tool === "iris_doc_get");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ outcome: "ok" });
+    expect(Object.prototype.hasOwnProperty.call(calls[0], "error")).toBe(false);
+  });
+
+  it("the connection and the gates are intact after the cancel, and the next call is served and audited ok", async () => {
+    const { rig, proxy, call } = await open(era);
+    const { wire } = rig;
+    call(10, "iris_doc_get", SLOW);
+    await untilHeld(proxy, 1);
+    wire.send({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 10 } });
+    await untilClosed(proxy, 1);
+
+    call(11, "iris_doc_get", FAST);
+
+    expect((await wire.response(11)).message.result.structuredContent.name).toBe("Demo.Sample.cls");
+    const calls = (await rig.audit(3)).filter((entry) => entry.tool === "iris_doc_get");
+    expect(calls.map((entry) => entry.outcome).sort()).toEqual(["error", "ok"]);
+  });
 });

@@ -91,6 +91,11 @@ export const productionManageTool: ToolDefinition = {
 
 // ── iris_production_control ────────────────────────────────────
 
+/** What a `clean` with `killAppData` wipes, as the confirmation dialog states it. */
+const KILL_APP_DATA_SCOPE =
+  "all Ens.AppData business state: HL7 sequence numbers, file and FTP done-file tables, " +
+  "batch and control-number state; already-processed data can be ingested again";
+
 export const productionControlTool: ToolDefinition = {
   name: "iris_production_control",
   title: "Control Production",
@@ -205,6 +210,16 @@ export const productionControlTool: ToolDefinition = {
     const path = `${BASE_URL}/interop/production/control`;
 
     try {
+      // A `clean` that wipes the persistent state, with the `confirm` that IRIS requires for it, asks the
+      // person (AD-34) right before the request.
+      if (action === "clean" && killAppData === true && confirm === true) {
+        const outcome = await ctx.confirm?.({
+          operation: "clean the production and wipe its persistent business state",
+          target: `namespace ${ns}` + (name ? `, production ${name}` : ""),
+          scope: KILL_APP_DATA_SCOPE,
+        });
+        if (outcome !== undefined && !outcome.proceed) return outcome.result;
+      }
       const response = await ctx.http.post(path, body);
       const result = response.result;
       return {

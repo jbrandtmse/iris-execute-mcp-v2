@@ -2,10 +2,10 @@
 title: 'Story 43.3: Human Confirmation Through Elicitation'
 type: 'feature'
 created: '2026-10-20'
-status: 'in-review'
+status: 'done'
 baseline_revision: '0a5a3f89f4a2af37a59eef2c3d923563a923868a'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
@@ -44,6 +44,29 @@ deferred:
   - summary: 'The HTTP client clears its timeout once the response headers arrive, so a stalled body read is unbounded, and an abort by `destroy()` is reported as a TIMEOUT.'
     evidence: 'Plan-stage read, 2026-10-20: `http-client.ts:243` clears the timer; `:273-283` maps every AbortError to TIMEOUT.'
     location: 'packages/shared/src/http-client.ts:243'
+    severity: 'low'
+  - summary: >-
+      A `resendFiltered` whose read-only preview fails with anything but a refusal (a timeout, a connection error, a 5xx) shows no dialog
+      and sends the execute request, so the human gate fails open on an infrastructure error. For a lead decision: fail closed (end the
+      call with the preview's error) for every preview failure that is not an IRIS refusal (HTTP 4xx).
+    evidence: |-
+      Review pass 2026-10-20 (blind and edge-case layers): `message-resend.ts` swallows every preview error and returns `undefined`, and
+      `confirmOnWire` treats an `undefined` scope as "proceed". Task 12, the matrix row "resendFiltered preflight" and decision #16 say a
+      preview that throws shows no dialog, the README and CHANGELOG state it as a known limit, and `message-resend.test.ts` pins an
+      `ECONNREFUSED` preview to `undefined`; so it is spec-bound and was not changed. The count and the cap are re-checked by IRIS when
+      the execute request runs (at most `maxMessages` are resent).
+    location: 'packages/iris-interop-mcp/src/tools/message-resend.ts:609-636'
+    severity: 'medium'
+  - summary: >-
+      A promotion (`iris_env_promote` `execute`) resolves its source and target profile clients before the dialog, and the first use of a
+      profile runs the framework's one-time set-up (connection check and the ExecuteMCPv2 bootstrap), so a declined promotion can still
+      have deployed the ExecuteMCPv2 classes to a target it had not touched before.
+    evidence: |-
+      Review pass 2026-10-20 (edge-case layer): `executeAction` calls `ctx.resolveProfileClient` for both profiles (env-promote.ts) before
+      `ctx.confirm`, and `resolveProfileClient` is `getOrCreateClient(name, needsCustomRest)` (server-base.ts), which bootstraps on first
+      use. The behavior is the same for a client that is not asked, and the dialog needs the resolved namespace; the README and CHANGELOG
+      now state it as a known limit.
+    location: 'packages/iris-dev-mcp/src/tools/env-promote.ts:1151-1191'
     severity: 'low'
 ---
 
@@ -390,7 +413,58 @@ Line numbers are at HEAD `87bf941`.
   - **`epics.md`:** AC 43.3.6 is amended (the descriptions move to 43.4, per #17), a matching bullet is added under 43.4, and a DW-637 bullet under 42.1.
   - **Spine:** AD-3 (`confirm` in the handler list), AD-19 (logical calls, the unanswered dialog, decline as `denied`, cancel as `error`) and AD-34 ("As built": the six gates, the helper, binding, order).
 
+- 2026-10-20 (review pass, build-auto step 4): amendments outside the intent contract, each a patch to the finished implementation, not a re-derivation.
+  - **Template (task 1, decision #13).** `confirmationMessage` shows `target` and `scope` each on one line (control characters and Unicode line and paragraph separators become one space) and cuts both to 600 characters. The decided template cut `scope` only; a caller-supplied item, filter or subject could start a forged `Target:` or `Scope:` line, or push the real lines out of view (blind and edge-case layers).
+  - **Nonce lifetime (task 6).** The nonce registry remembers a nonce 602 s, not 600 s, because the codec counts a state's expiry in whole seconds: a state answered at once was replayable in the last second of its life.
+  - **Task 13.** The promotion `execute` (the sixth gate) gets stdio rows of its own on both eras, because it writes to a second server. The fake listener gains `POST .../action/compile`, and `openRig` an optional second listener.
+  - **New file.** `story-43-3-doc-claims.test.ts` pins AC 43.3.6 (docs) and the release bookkeeping, which had no pinning test (Rule 19).
+  - **AC "Back-compat (Rule #19)".** One assertion line besides `refusals.test.ts`'s key list changes: in `sdk-wire-compat.test.ts` the check that the number 777 never reaches an audit entry stringified the whole entry, so a session id, timestamp or counter containing the digits 777 (about 0.8% of runs) failed it. DW-649's criterion is 25 green runs in a row of that file, so the check now excludes the four generated fields (`session`, `ts`, `seq`, `durationMs`). It asserts no less about the arguments.
+  - **Stale text in the intent contract (not editable by this run).** The matrix row "Unanswered dialog" still says no audit entry is written. Lead decision #14 (above) replaced that with the `unanswered` entry of task 6b, which the code, the tests and the docs follow.
+
 ## Review Triage Log
+
+### 2026-10-20 — Review pass
+
+- verdicts: 37 findings — high 0, medium 10, low 21, false 5, maybe-false 1
+- layers: blind-hunter 11, edge-case-hunter 10, verification-gap 8, intent-alignment 8 (a descriptive report; each divergence it lists is one row). All four layers returned.
+- findings:
+  - `[low]` `[reject]` (blind) The promotion dialog's `Server:` line names the profile the call ran under, not the profile `execute` writes to — the `Target:` line names `server '<target>'`, the template is decision #13's, and a `server` override on `ConfirmationRequest` would add public surface; README and CHANGELOG now say what each line names. reopen_if: the live check shows the `Server:` line misread on a promotion.
+  - `[medium]` `[defer]` (blind) `resendFiltered` skips the dialog and sends the execute POST when its preview fails — real, but task 12, the matrix and decision #16 say a preview that throws shows no dialog, the docs state it, and a unit row pins it; recorded as a deferred decision for the lead (frontmatter item 9).
+  - `[medium]` `[patch]` (blind) The dialog text is built from caller-controlled strings with no neutralisation and `target` has no cap — a line break forges a `Target:`/`Scope:` line, a long `item` pushes the real lines out of view. Fixed: `dialogLine` in `confirmation.ts` (control characters to one space, 600-character cut for target and scope), 7 unit rows.
+  - `[medium]` `[defer]` (blind) `iris_doc_put` with `allowStorageRegeneration: true` drops Storage definitions with no dialog — already frontmatter item 1 (decision #12); not appended again; the README says other destructive tools are protected by governance only.
+  - `[medium]` `[patch]` (blind) `iris_env_promote` `execute`, the sixth gate, has no test through the real SDK client — same root cause as the verification-gap and intent-alignment rows below. Fixed: 12 stdio rows (6 per era) in `story-43-3-confirmation-both-eras.test.ts`.
+  - `[low]` `[patch]` (blind) The sweep-timer test title claims "no timer stays armed" and asserts only the audit lengths — title corrected to what it asserts; the timer stays armed (unref'd) until the lifetime passes and then sweeps nothing.
+  - `[low]` `[reject]` (blind) `CONFIRMATION_DECLINED.action` is a third convention (the bare sub-action, the tool name for a flat tool) — decision #13 specifies `deriveAuditAction(...) ?? tool.name`; changing it alters the decided payload. reopen_if: a consumer cannot tell two tools' refusals apart.
+  - `[low]` `[reject]` (blind) `tool_support.md` has no entry for this story — no tool, action or governance key is added, so rule #30 is not triggered; rule #43's minimal docs (task 18) shipped; the 40.x notes record governance default changes.
+  - `[maybe-false]` `[reject]` (blind) README and CHANGELOG state that `--permission-prompts none` cancels an unanswered elicitation, which nothing in the repo shows — the sentence restates the Claude Code hooks documentation read 2026-10-20 (decision #20) and the no-flag case is hedged; if the claim were wrong it would be a documentation inaccuracy (low), and the lead's live check #20 records it.
+  - `[low]` `[reject]` (blind) `pendingAsks` is unbounded and keeps each call's arguments for 10 minutes — no user-reachable failure: each entry is an unanswered dialog the person is looking at, and the map is swept at its lifetime. `wontfix-theoretical`; reopen_if a client is seen firing thousands of unanswered gate calls.
+  - `[low]` `[patch]` (blind) `doc-edit.test.ts` has two `import ... from "vitest"` statements — merged.
+  - `[low]` `[reject]` (edge) A retry round that ends before reaching `ctx.confirm` leaves the earlier ask in the pending map, so a second, `unanswered` entry follows later — rare (needs a check to refuse differently on the retry, or a client that cancels in the retry's first milliseconds) and benign (the entry says nothing was changed, which is true); the fix adds a state lookup to every round. reopen_if an audit shows two entries for one call.
+  - `[low]` `[reject]` (edge) The same finding, stated as a claim against task 6b — same root cause and disposition as the row above.
+  - `[medium]` `[defer]` (edge) A preview failure sends the execute request with no dialog — same root cause as the second row; one deferred entry.
+  - `[medium]` `[patch]` (edge) Caller text with newlines forges extra `Scope:`/`Target:` lines — same root cause as the third row; one fix.
+  - `[low]` `[patch]` (edge) The nonce registry forgets a nonce at 600 s from its use, but a state's expiry is counted in whole seconds, so a state answered within a second of minting could be replayed once in the last second of its life — verified against the codec (`exp = floor(now/1000) + ttl`, expired when `exp < floor(now/1000)`). Fixed: the registry remembers a nonce 602 s; one row, red when reverted.
+  - `[low]` `[defer]` (edge) A promotion resolves its profile clients (first-use bootstrap) before the dialog, so a declined promotion can have set up a never-touched target — real, framework behavior the fallback shares; deferred (frontmatter item 10) and now a README and CHANGELOG known limit.
+  - `[low]` `[reject]` (edge) A declined call can be repeated and asked again, so repeated prompts may tire the person — "never asked again" is per call (the refusal text tells the agent not to repeat it); a cooldown is a new feature outside the decided scope.
+  - `[low]` `[reject]` (edge) `pendingAsks` growth — same root cause and disposition as the blind row on it.
+  - `[low]` `[reject]` (edge) The 600-character cut can split a surrogate pair — cosmetic and unlikely in a name, filter or subject; a lone surrogate JSON-encodes as an escape and renders as a replacement character.
+  - `[low]` `[reject]` (edge) `ensureCsrfToken` passes only the signal, where task 5 says `options` — a recorded, deliberate deviation: a per-call `If-None-Match` header or timeout must not reach the CSRF HEAD, and a call with no signal keeps the HEAD byte-identical; pinned by the "not even the CSRF preflight" rows.
+  - `[medium]` `[patch]` (verification-gap) The abort signal on a client obtained by `ctx.resolveProfileClient` is pinned by no test (replace `bind(await base.resolveProfileClient(...))` with the bare client: every row stayed green) — a cancelled `execute` or `iris_env_diff` would go on writing. Fixed: 4 in-memory rows (aborted and live signal, both eras).
+  - `[medium]` `[patch]` (verification-gap) `execute` is never driven through the framework — the sentinel swap, the retry and the audit entry are untested for the highest-blast-radius gate. Same root cause as the blind row; one fix.
+  - `[medium]` `[patch]` (verification-gap) The per-process random key of the state is not pinned (`Buffer.alloc(32)` for `randomBytes(32)` left every row green). Fixed: a row that mints a state on one server and sends it to another.
+  - `[low]` `[patch]` (verification-gap) AC 43.3.6 (catalogue and docs), the release bookkeeping, the back-compat guard and the live leg have no `mutation:` line / pinning test. Fixed in-pass: the catalogue mutations were demonstrated (a description changed, a frozen tool key renamed), a new default-suite test `story-43-3-doc-claims.test.ts` pins the docs and the bookkeeping (3 mutations demonstrated), the back-compat guard is a command with its output recorded, and the live leg is the lead's.
+  - `[low]` `[patch]` (verification-gap) The `--sequence.shuffle` runs at seeds 11 and 22 and the diff checks were not recorded. Fixed: run and recorded under Verification.
+  - `[low]` `[patch]` (verification-gap) A raw-wire row's title says the profile is part of what the state binds, but the row changes the `server` argument, which the arguments hash already holds. Retitled to what it shows.
+  - `[low]` `[reject]` (verification-gap) The `isInputRequiredResult` early return in `callToolFromWire` is reachable by no tool (none declares an `outputSchema`) and no test — task 6 prescribes it, and it only skips a check that would wrongly reject a question. reopen_if a tool with an `outputSchema` gains a gate.
+  - `[low]` `[patch]` (verification-gap) The both-eras file says "the five gates" while there are six — header and describe titles corrected with the `execute` rows.
+  - `[medium]` `[patch]` (intent-alignment) `execute` is exercised only with a stub `ctx.confirm`, not at the surface the intent names (the wire) — same root cause as the blind row; one fix.
+  - `[low]` `[reject]` (intent-alignment) The matrix row "Unanswered dialog" says no audit entry is written, and the diff writes an `unanswered` entry — lead decision #14 (Spec Change Log, first entry) replaced the row; the frozen intent block was not edited; flagged in the Auto Run Result.
+  - `[false]` `[reject]` (intent-alignment) The binding covers the tool and the profile as well as the arguments — a superset of "bound to the exact arguments", and `server` is part of the validated arguments anyway; nothing is bound less.
+  - `[low]` `[reject]` (intent-alignment) The `Server:` line of a promotion names the calling profile — same root cause and disposition as the first row.
+  - `[false]` `[reject]` (intent-alignment) DW-637, DW-649, the pre-existing test files and the fake listener are outside the intent contract — they are named by the spec's Tasks 15-17 and the ledger inbox; the intent contract is not the whole spec.
+  - `[false]` `[reject]` (intent-alignment) Nothing exercises Claude Code's own dialog or hook handling — the intent defers that check to the lead's live run (decision #20); no `claude` run is allowed in this stage.
+  - `[false]` `[reject]` (intent-alignment) The gate set includes `resend` and `regenerateStorage`, which have no `confirm` parameter — decision #12 decided it (AD-34 and FR162).
+  - `[false]` `[reject]` (intent-alignment) On the 2025 era a call cancelled while its dialog is pending gets the delayed `unanswered` entry, not the cancelled-call text — that is task 6b's "legacy shim leg is cancelled" case, as built.
 
 ## Design Notes
 
@@ -813,10 +887,47 @@ Every test added or changed passes on a fresh environment, in either order. No I
 - mutation (DW-649): the SDK's list_changed debounce removed (`debouncedNotificationMethods: []`, so one call notifies more than once) -> `one call that removes tools sends exactly one list_changed` and `one call that adds tools ...` red in 6 of 6 runs.
 - mutation (DW-637): a non-test source file gains `ctx.mcpReq.elicitInput(` -> `none references elicitInput, ...` red, naming the file.
 - the 25-run loop of `sdk-wire-compat.test.ts` was green 25 of 25 after the change; the DW-649 rows are unchanged but for the barrier.
+- mutation (review pass, AC 43.3.2, the dialog text): `dialogLine` without its control-character replace -> `confirmation.test.ts` 6 red (the five scope rows and the target row); the target not passed through `dialogLine` -> 2 red (the 600/601-character target row and the target line-break row). Both reverted: the `shasum` of `confirmation.ts` matched.
+- mutation (review pass, AC 43.3.1, the sixth gate): the confirmation call of `execute` disabled (`(Math.abs(0) > 0 ? ctx.confirm : undefined)?.(`) -> over the rebuilt dev dist 8 red of the 12 promotion rows (accept, decline, cancel and unticked on both eras; the no-capability and Gate 1 rows stay green). A confirmation call placed before Gate 1 -> 4 red (the Gate 1 row and the accept row on both eras). `env-promote.ts` matched its `shasum` after the revert.
+- mutation (review pass, DW-642): the `resolveProfileClient` results of `wireToolContext` not bound to the signal -> `a client asked for by profile name carries the signal too: an aborted one reaches no fetch` red on both eras (2 red).
+- mutation (review pass, AC 43.3.4): the codec key `Buffer.alloc(32)` for `randomBytes(32)` -> `another server process never honors a state` red (1). The nonce lifetime 600 s for 602 s -> `replay: ... still refused in the last second of its life` red (1). `server-base.ts` matched its `shasum` after each revert.
+- mutation (review pass, AC 43.3.6, catalogue): the description of `iris_audit_manage` changed and `admin` rebuilt -> `pnpm gen:tools-list-snapshot:check` exit 1, naming `iris-admin-mcp iris_audit_manage.description`; the frozen tool key `iris_doc_put` renamed and `dev` rebuilt -> `pnpm gen:governance-baseline:check` exit 1, naming `iris_doc_put`. Reverted, rebuilt, both OK again; the baseline file was never written.
+- mutation (review pass, AC 43.3.6 docs and the release bookkeeping): the README refusal-table code cell `CONFIRMATION_DECLINED` changed -> `story-43-3-doc-claims` `lists CONFIRMATION_DECLINED in the refusal table` red; the changeset bump of `@iris-mcp/ops` changed to `minor` -> `the changeset is a patch for @iris-mcp/shared and the five servers` red; the clause "removes the person from the loop" removed from the admin README -> `admin: iris_audit_manage purge` red (1 red each). (Before the new file, none of the existing doc-claims tests went red on the missing README row.)
+- mutation (review pass, DW-649, re-verified): `debouncedNotificationMethods: []` -> the two "exactly one" rows red in 8 of 8 runs.
+- AC "Back-compat (Rule #19)", the diff guard: `git diff 0a5a3f8 --name-only` over `packages/*/src/__tests__/*`, `packages/iris-mcp-all/src/__tests__`, `extensions/iris-mcp-launcher/src/__tests__`, `scripts/lib` and `fixtures` lists exactly the eleven files of tasks 15-17; the removed or changed lines are the client type and option lines of `process-gate-helpers.ts`, three `holdingProxy` lines, the `refusals.test.ts` title and key list, in `sdk-wire-compat.test.ts` two import lines, the `boot()` and `startRaw()` signature and client lines and DW-649's three sleep lines plus the 777 check (see the Spec Change Log), the merged `vitest` import of `doc-edit.test.ts` and one comment line of the fake listener; no `fixtures/` file is touched.
+
+**Verification record (review pass).** Rebuilt all six packages (`tsconfig.tsbuildinfo` deleted so that a revert is rebuilt) and re-ran the `(loop)` lines: shared 274, the five gate files 38 + 208 + 163, the new wire files and the cancel file 169 (the sweeps skip nothing in `story-43-*`), the wire pins 602, all green. The `(once)` lines, after the last patch: per-package `test`, `type-check` and `lint` green for shared (2278 tests), dev (1408), admin (506), interop (741), ops (350), data (163) and client-config (1008), plus `type-check` and `lint` of `@iris-mcp/all`, with the one lint warning that was already in `cli/governance.ts`; the three `iris-mcp-all` thirds green (1249, 1100 and 929 tests, the live gates skipped); the launcher fails exactly the DW-532 set (5 tests in 3 files and 2 files that cannot load); `gen:governance-baseline:check` (141 keys, 71 post-foundation), `gen:tools-list-snapshot:check` (115 entries), `validate:prompts`, `gen:skills:check` and `gen:pack:check` OK; `sdk-wire-compat.test.ts` 25 of 25 green; `git diff --name-only 0a5a3f8` lists no `bootstrap-classes.ts`, `src/ExecuteMCPv2/`, `package.json`, `pnpm-lock.yaml` or `fixtures/*.json`; the added and changed tests green with `--sequence.shuffle` at seeds 11 and 22 in all five packages. Every command ran with `IRIS_HOST=127.0.0.1 IRIS_PORT=1` (the launcher also with `IRIS_TEST_HOST` and `IRIS_TEST_PORT`) or against the local fake listener; no IRIS instance was contacted and no live gate was armed.
 
 **Verification record (implement stage).** Baseline `0a5a3f8`. `BOOTSTRAP_VERSION` is unmoved at `d51856f74d6a`; no ObjectScript, `package.json`, lockfile or fixture JSON is in the diff. Per-package `test`, `type-check` and `lint` are green for shared (2264 tests), dev (1408), admin (506), interop (741), ops (350), data (163) and client-config (1008), with the one lint warning that was already in `cli/governance.ts`; the three `iris-mcp-all` thirds are green (1208, 1056 and 989 tests, the live gates skipped); the launcher fails exactly the DW-532 set (5 tests in 3 files and 2 files that cannot load); the governance baseline (141 keys), the tools-list snapshot (115), `validate:prompts`, `gen:skills:check` and `gen:pack:check` report OK. The no-capability literals of `story-43-3-confirmation-both-eras.test.ts` were captured at the baseline revision before any source edit, with a scratch driver outside the repo (the stale-edit literals after the edits, on a path that no edit touches). Deviation from task 5: `ensureCsrfToken` passes only the signal to its HEAD, not all of the call's options, so a per-call header (`If-None-Match`) and a per-call timeout never reach the CSRF HEAD and the HEAD stays byte-identical for a call with no signal.
 
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** Six gates (`iris_audit_manage` `purge`, `iris_env_promote` `execute`, `iris_production_control` `clean` with `killAppData`, `iris_message_resend` `resendFiltered` and `resend`, `iris_doc_edit` `regenerateStorage`) ask the person, through `ToolContext.confirm`, right before their first IRIS write when the calling client declares form elicitation: on the 2026-07-28 era through an `inputRequired` result, on the 2025 era through the SDK's legacy shim. The answer is bound to the tool, the profile and the exact arguments by a signed, single-use `requestState`; a decline, a dismissal or an unticked accept ends the call with the new refusal code `CONFIRMATION_DECLINED` (audited `denied`); a dialog nobody answers is written once as an `unanswered` `error` entry (lead decision #14, the pending-ask map, task 6b). A client without the capability keeps today's contract byte for byte. The request abort signal now reaches the HTTP call (DW-642), DW-649's fixed sleeps are a deterministic barrier (25 of 25 green), and DW-637 has its verdict and tripwire. The previous run's implementation was kept as it stood; this run re-verified it, reviewed it with four layers, and patched what they found. `BOOTSTRAP_VERSION` is unmoved (`d51856f74d6a`); no tool, action, key, preset row, annotation or description changed.
+
+**Files changed (this run's review pass; the implementation is the previous run's).**
+- `packages/shared/src/confirmation.ts`: the dialog text now shows `target` and `scope` on one line each (control characters to a space) and cuts both to 600 characters; the nonce clock reads `Date.now()` when asked.
+- `packages/shared/src/server-base.ts`: a nonce is remembered 602 s.
+- `scripts/lib/fake-iris-listener.mjs`: `POST .../action/compile`; header comment.
+- `packages/iris-mcp-all/src/__tests__/story-43-3-confirmation-both-eras.test.ts`: six stdio rows per era for the promotion `execute`, a second listener in `openRig`, header and titles.
+- `packages/shared/src/__tests__/sdk-wire-compat.test.ts`: rows for the signal on profile clients, the per-process key and the last-second replay; the 777 check no longer stringifies generated fields; one title.
+- `packages/shared/src/__tests__/confirmation.test.ts`: rows for line breaks, control characters and the target cut; one for the lazy clock.
+- `packages/iris-mcp-all/src/__tests__/story-43-3-doc-claims.test.ts` (NEW): pins AC 43.3.6 (docs) and the release bookkeeping.
+- `packages/iris-mcp-all/src/__tests__/story-43-3-confirmation-raw-wire.test.ts`, `packages/iris-dev-mcp/src/__tests__/doc-edit.test.ts`, `packages/iris-admin-mcp/src/__tests__/audit.test.ts`: a title, a merged import, an escaped dash.
+- `README.md`, `CHANGELOG.md`: the one-line dialog text, what the `Server:` and `Target:` lines name, and two known limits (a failed `resendFiltered` preview, a promotion's first-use set-up).
+- This spec: the triage log, the change log, two deferred items, the mutation lines and the verification record.
+
+**Review.** 37 findings from four layers: high 0, medium 10, low 21, false 5, maybe-false 1 (the log has one row each). Patches applied (4 medium, 7 low entries): the dialog-text hardening; the stdio rows for `execute`; the signal on `resolveProfileClient` clients; the per-process key; the nonce margin; and six test or document hygiene items. Deferred (frontmatter items 9 and 10): the `resendFiltered` fail-open on a failed preview (a decision for the lead; it is the decided behavior and is documented), and the first-use bootstrap before a promotion's dialog. Rejected with a reason: the `Server:` line of a promotion, the `action` payload convention, `tool_support.md`, the unbounded pending map, the extra `unanswered` entry on a rare multi-round divergence, a cooldown after a decline, the surrogate cut, the CSRF HEAD options, the unreachable `outputSchema` branch, the stale unanswered-dialog matrix row, and five findings that were false or answered by the spec.
+
+**Follow-up review recommendation: true.** Four medium entries were patched on this first pass (the dialog-text hardening, the `execute` stdio rows, the signal on profile clients, the per-process key). The unverified risk: `dialogLine` and the nonce margin are product code written during this review and read by no review layer; their only evidence is their own rows and the mutation lines above.
+
+**Verification.** See the mutation lines and the verification record under `## Verification`: the `(loop)` lines green after the last patch, every `(once)` line run once after it, DW-649 25 of 25, shuffled seeds 11 and 22 green, no IRIS contact.
+
+**Residual risks.**
+- `resendFiltered` ships a gate that fails open when its preview fails for a reason other than a refusal (deferred item 9).
+- The dialog stops the agent, not a compromised client: a client or hook that answers by itself removes the person.
+- The live check with `claude` (decision #20) has not run; whether Claude Code fires its `Elicitation` hook for a 2026-07-28 input-required elicitation, and what headless `claude -p` does with none, are the lead's to record at smoke.
+- The `<intent-contract>` matrix row "Unanswered dialog" is stale against lead decision #14; it was not edited.
+- The `Server:` line of a promotion names the profile the call ran under, not the one it writes to; the `Target:` line carries the target.
