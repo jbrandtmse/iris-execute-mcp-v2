@@ -24,6 +24,17 @@ export const deployAndTestClassPrompt: PromptDefinition = {
     "Deploy an ObjectScript class or package to IRIS (iris_doc_load, glob-path form), fix " +
     "compile errors, then run its unit tests (iris_execute_tests) with a total-count check and, " +
     "when asked, measure their line coverage (iris_test_coverage).",
+  skill: {
+    description:
+      "Deploys an ObjectScript class or package from local source files to IRIS with a glob-path load " +
+      "and compile, fixes compile errors in the source and loads it again, runs its unit tests, " +
+      "compares the returned total with the number of test methods because an early partial result " +
+      "looks like a green run, re-attaches to a run that is still going instead of starting a second " +
+      "one, and measures line coverage when the user asks for it. Use when the user wants to deploy, " +
+      "load or import ObjectScript source into IRIS, compile it, run its %UnitTest tests, or see their " +
+      "coverage.",
+    preset: "developer",
+  },
   arguments: [
     {
       name: "classOrPackage",

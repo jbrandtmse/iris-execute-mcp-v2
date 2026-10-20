@@ -16,6 +16,16 @@ export const checkSystemHealthPrompt: PromptDefinition = {
   description:
     "Run a full IRIS instance health check (iris_health_check) and interpret " +
     "every non-ok finding, naming the fixing tool for each one.",
+  skill: {
+    description:
+      "Runs one composite health check of an IRIS instance across its nine areas (journal, databases, " +
+      "license, locks, alerts, mirror, ECP, interoperability and the system) and follows each warning, " +
+      "critical or error finding to the tool that explains or fixes it, never running a destructive fix " +
+      "without the user's confirmation. Use when the user asks whether IRIS is healthy or wants a health " +
+      "or status check, or reports trouble with journal space, database size, the license, locks or " +
+      "alerts.",
+    preset: "full",
+  },
   arguments: [
     {
       name: "server",

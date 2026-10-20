@@ -129,6 +129,82 @@ export {
 } from "./engine.js";
 
 export {
+  CLAUDE_DESKTOP_REFUSAL,
+  GENERIC_AGENTS_TARGET_ID,
+  PACK_ROUTES,
+  PACK_ROUTE_IDS,
+  PACK_TARGETS,
+  PACK_TARGETS_CHECKED_ON,
+  packRouteFor,
+  packTargetFor,
+  type PackRoute,
+  type PackRouteId,
+  type PackRuleForm,
+  type PackRuleTarget,
+  type PackTarget,
+} from "./pack-targets.js";
+
+export {
+  describeAmbiguousRuleBlock,
+  hasUtf16Bom,
+  locateRuleBlock,
+  ruleBlockMarkers,
+  ruleSectionProblem,
+  withRuleBlock,
+  withoutRuleBlock,
+  type LineEndingAdded,
+  type RuleBlockLocation,
+  type RuleBlockMarkers,
+  type RuleBlockRefusal,
+  type WithRuleBlockResult,
+  type WithoutRuleBlockResult,
+} from "./rule-block.js";
+
+export {
+  DEFAULT_PACK_DIR,
+  LINK_DETAILS,
+  MANIFEST_PATH,
+  emptyManifest,
+  firstLinkOn,
+  installerPayloads,
+  loadPack,
+  parseManifest,
+  planPackChange,
+  renderManifest,
+  renderPlanPreview,
+  type InstallerPayload,
+  type LinkKind,
+  type LoadPackResult,
+  type LoadedPack,
+  type ManifestBlock,
+  type ManifestFile,
+  type PackAction,
+  type PackChange,
+  type PackManifest,
+  type PackPlan,
+  type PackRefusal,
+  type PackRule,
+  type PlanCounts,
+  type PlanInput,
+  type PlanItem,
+  type PlanWrite,
+  type ProjectView,
+} from "./pack-plan.js";
+
+export {
+  executePackPlan,
+  preparePackChange,
+  projectKey,
+  REAL_BYTES_FS,
+  type BytesFs,
+  type ExecuteOptions,
+  type ExecuteResult,
+  type PackContext,
+  type PrepareOptions,
+  type PrepareResult,
+} from "./pack-apply.js";
+
+export {
   synthesizeEntry,
   PKG_BY_SERVER,
   VSCODE_PASSWORD_INPUT_ID,

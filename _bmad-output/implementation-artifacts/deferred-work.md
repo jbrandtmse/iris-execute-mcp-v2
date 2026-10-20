@@ -2847,6 +2847,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: clientsEngine/governanceEngine assert Windows C:\git paths; constants/credentials tests cannot load @intersystems-community/intersystems-servermanager (absent from extension node_modules); clientsActivationFlow 33-3-3 times out at 60s; reproduced with launcher code at HEAD
 - 2026-10-15T13:36:58Z status=routed owner=burndown by=harvest note=pre-existing; blocks a green launcher suite before 42.7 publishes the extension
 - 2026-10-16T15:58:09Z status=routed owner=42-7-vs-code-extension-publish by=burndown note=overflow: the extension-publish story needs a green launcher suite on every platform; DW bullet in 42.7
+- 2026-10-19T22:31:15Z status=routed owner=42-7-vs-code-extension-publish by=harvest note=occurrence: 41.6 implement 2026-10-19 reproduced clientsActivationFlow 33-3-3 timing out at 60s on the working tree and on a baseline 3890fec copy (re-toggled roster never persists)
 
 ### DW-533: iris_production_manage delete removes ANY class given as name: the class-delete path never checks that the class extends Ens.Production
 - source: spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: high | footprint: in-story
@@ -3346,3 +3347,154 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-19T01:00:23Z status=decision-pending owner=burndown by=cr note=prompt-text amendment needs a lead call (AD-15, decision 62); decide at the Epic 40 decision sheet with DW-590 and DW-609
 - 2026-10-19T01:44:17Z status=routed owner=40-5-epic-40-burn-down by=merge_gate note=decided=orchestrator(Lead-away) decision 67: step 4 wording covers the unreadable-state refusal too (sanctioned AD-15 prompt change) in Story 40.5
 - 2026-10-19T04:15:02Z status=resolved-by:40-5-epic-40-burn-down by=adjudication note=the shared PRODUCTION_BUSY note covers both the running-production and the unreadable-state refusal in deploy-and-test-class and edit-and-test-class (decision 67); pinned against a live Unknown refusal; build 1fdda9e + review patches 506fd0c; mutation-verified (spec-40-5 Verification, Rule 48); lead smoke 116/116 armed + OS classes
+
+### DW-611: The real-tree provenance tests need client-config's built dist, but nothing orders @iris-mcp/all's test after @iris-mcp/client-config's build, and the turbo cache key of @iris-mcp/all's test omits the pack inputs (skills-pack-src/, skills/, scripts/)
+- source: _bmad-output/implementation-artifacts/spec-41-1-pack-layout-licensing-and-provenance.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 41.1 implement review 2026-10-19: packages/iris-mcp-all depends on the five servers, not client-config; turbo.json gives test no inputs; on a fresh clone the gatherer fails loudly (not a false green), and a cached green can replay after pack sources change
+- 2026-10-19T06:17:55Z status=routed owner=41-7-skills-pack-docs-and-capstone by=harvest note=the 41.7 capstone runs in the default suite and needs that ordering; add a workspace devDependency or turbo inputs, and pin it
+- 2026-10-19T07:08:11Z occurrence=41-1-pack-layout-licensing-and-provenance note=cr: inputs also miss packages/client-config/package.json, client-config/skills-pack/** and client-config dist
+- 2026-10-19T23:32:06Z occurrence=41-6-skills-and-rules-installer note=cr: check:provenance itself imports client-config dist/pack-plan.js with no freshness check (provenance-inputs.mjs gatherInstallerDistributions)
+- 2026-10-20T02:20:25Z status=resolved-by:41-7-skills-pack-docs-and-capstone owner=41-7-skills-pack-docs-and-capstone by=lead note=delivered: turbo.json every test task cache:false and @iris-mcp/all#test dependsOn @iris-mcp/client-config#build; story-41-7-turbo-test-graph.test.ts red under each turbo.json mutation; check:provenance fails closed on a client-config dist older than src (QA: touch src/index.ts -> exit 1, touch dist -> OK); QA real turbo 2.9.4 scratch run: old config replays 'cache hit' after a skills-pack-src byte change, new config 'cache bypass'
+
+### DW-612: Nothing on the publish path runs gen:pack --check or check:provenance; client-config's prepublishOnly runs only verify-iris-reachable, so a publish made without the default suite could ship a drifted pack or a tarball without the notice
+- source: _bmad-output/implementation-artifacts/spec-41-1-pack-layout-licensing-and-provenance.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.1 implement review 2026-10-19: packages/client-config/package.json scripts.prepublishOnly; Epic 42 owns the publish gates (AD-29)
+- 2026-10-19T06:17:55Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=harvest note=42.6's tarball smoke proves the pack and notice gate red on the real publish path (Rule 59)
+
+### DW-613: No pack check requires a SKILL.md to start with frontmatter, so an adaptation header placed above the frontmatter passes provenance while the skill loses its name and description
+- source: spec-41-1-pack-layout-licensing-and-provenance.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 41.1 CR 2026-10-19: hasValidAdaptationHeader (provenance-core.mjs:165) reads a file whose line 1 is not --- as frontmatter-less, so header-then-frontmatter passes; reproduced by 4 layers and QA; the frontmatter test reads root skills/ only
+- 2026-10-19T07:08:11Z status=routed owner=41-3-core-knowledge-skills by=cr note=add a default-suite check that every pack SKILL.md opens with frontmatter holding name and description; prove it red
+- 2026-10-19T13:25:46Z status=resolved-by:41-3-core-knowledge-skills by=adjudication note=check:provenance gained the skill-frontmatter rule (skillFrontmatterProblems): every pack SKILL.md opens with frontmatter on line 1 (no BOM) holding only name and description, name = directory; a header above the frontmatter is refused; proven red on the real tree (mutations) and as a real process on scratch copies (story-41-3-qa-frontmatter-process.test.ts); build baaf229 + review 41b2a79
+
+### DW-614: Provenance cannot yet cover an adapted rule: listAgentContentFiles labels a rule source packRel rules/<f>, a path the pack no longer has (the forms are rules/claude-code/ and rules/agents-md/), and the adaptation header's position inside the agents-md form is undecided
+- source: _bmad-output/implementation-artifacts/spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: 41.2 implement review 2026-10-19 (recorded as a residual risk); no story plans an adapted rule
+- 2026-10-19T09:16:29Z status=wontfix-accepted owner=41-2-always-on-objectscript-pre-write-rule by=harvest note=reopen_if=a story adds a rule adapted from third-party content, or check:provenance reports a rule:<f> path that does not exist in the pack
+- 2026-10-19T09:50:16Z occurrence=41-2-always-on-objectscript-pre-write-rule
+
+### DW-615: Live probes in Story 41.2 found the project's own agent rule files wrong in places: object-script-testing.md (typed MultiDimensional properties compile; %OnNew-Private holds only when the parent's %OnNew is public; the macro list omits AssertNotTrue and others), iris-objectscript-basics.md (an empty abstract body compiles; // is a valid comment; % names are a convention; the New $NAMESPACE example is environment-dependent) and project rule #7 (Use dev::("") clears the mnemonic but leaves redirection on)
+- source: _bmad-output/implementation-artifacts/spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.2 plan probes 2026-10-19 (26 Probe412 classes, IRIS 2026.2 build 221U); the full list is under Flagged for the retro in the spec; retros are skipped this run, so the flag would otherwise be lost
+- 2026-10-19T09:16:29Z status=decision-pending owner=burndown by=harvest note=human=the user decides whether to correct .claude/rules/object-script-testing.md, iris-objectscript-basics.md and project rule #7 (agent instruction files are the user's to edit)
+- 2026-10-19T14:21:30Z note=Story 41.4 plan probes add two facts the project rules do not yet carry: embedded SQL compiles only when it first runs, so a clean class compile proves nothing about it; and a %SQL.Statement result from a %SYS class query must be closed before switching back (the legacy %ResultSet the REST handlers use is unaffected). For the user to consider alongside the rule-file corrections.
+- 2026-10-20T04:44:12Z status=decision-pending owner=burndown by=merge_gate note=decision sheet (Lead away, unattended run): a user-owned decision about editing .claude/rules/*, which agents never edit; moved to sprint-status action_items as epic-41-decision-sheet-item-1-correct-the-agent-rule-files-dw-615 (owner user, open)
+
+### DW-616: The AGENTS.md marker-reading contract Story 41.2 defined has no owner in Story 41.6: report, never guess, on a missing or repeated own marker; a BOM before line 1; end the last line before appending; and the reader rows of story-41-2-qa-agents-md-consumer.test.ts run only a test-local reader
+- source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 41.2 code review 2026-10-19: AC 41.6.2 lists CRLF, BOM, no-final-newline and foreign-block fixtures but not two BEGIN or END lines of our own; 16 of the consumer test's 60 rows exercise only its own locateBlock
+- 2026-10-19T09:50:06Z status=routed owner=41-6-skills-and-rules-installer by=cr note=41.6 refuses (never guesses) an ambiguous own block and points the 41.2 consumer rows at its real locate/replace
+- 2026-10-19T23:36:30Z status=resolved-by:41-6-skills-and-rules-installer owner=41-6-skills-and-rules-installer by=lead note=delivered: packages/client-config/src/rule-block.ts reports missing/repeated/out-of-order own markers with line numbers and writes nothing, treats a BOM at byte 0 as not part of line 1 and keeps it there, ends an unterminated last line in the file's style and removes it on uninstall; story-41-2-qa-agents-md-consumer.test.ts runs its 88 rows against the built rule-block.js with no test-local reader (stale-dist guard); lead smoke: BOM+CRLF AGENTS.md with no final newline round-trips byte-identical through the built bin
+
+### DW-617: A prompts/get that omits the optional arguments field is refused with -32602 for every prompt whose arguments are all optional (audit-security-posture, recover-stuck-production, check-system-health, run-external-backup); CR 25.1-6 closed it as an SDK v1 limitation
+- source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: 41.2 QA over stdio saw -32602 on all four; server-base.ts registerPrompt passes an argsSchema whenever a prompt declares arguments; after the retirement no shipped prompt renders from an omitted arguments
+- 2026-10-19T09:50:06Z status=routed owner=43-1-framework-migration-to-sdk-v2 by=cr note=43.1 rewrites prompt registration on SDK v2: render all-optional prompts from an omitted arguments; pin it in AC 43.1.3
+- 2026-10-19T19:44:33Z occurrence=41-5-workflow-skills-refresh
+
+### DW-618: .changeset/epic35-defect-gate.md still says the objectscript-review prompt got a wording fix, so the first changeset version lists a fix to a prompt the same release removes
+- source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.2 code review 2026-10-19: .changeset/epic35-defect-gate.md:11; AC 41.2.2 names this file as one that may keep the name
+- 2026-10-19T09:50:16Z status=by-design owner=41-2-always-on-objectscript-pre-write-rule by=cr note=AC 41.2.2 exempts this file; it records a true Epic 35 change, and the 41.2 changeset records the removal
+
+### DW-619: gen:pack refuses a Finder .DS_Store (gitignored) in skills-pack-src/rules/ or at its top level, so gen:pack:check and the real-tree tests go red on a macOS checkout over a file git never shows
+- source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: 41.2 code review 2026-10-19: assemblePack refuses every rules/ entry that is not a flat <name>.md; skills-pack-rule.test.ts UNKNOWN_ENTRIES pins .DS_Store as refused; .gitignore:25
+- 2026-10-19T09:50:16Z status=by-design owner=41-2-always-on-objectscript-pre-write-rule by=cr note=spec matrix 'Unknown rule entry' refuses any non-.md file; the message names the file, so the remedy is to delete it
+
+### DW-620: The typed-out agents-md section oracle is written three times: sectionOf in skills-pack-rule.test.ts, expectedSection in story-41-1-qa-pack-scratch-cli.test.ts and sectionOf in story-41-2-qa-agents-md-consumer.test.ts
+- source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: 41.2 code review 2026-10-19 (Rule 2, weak reason): independence from skills-pack.mjs argues for one typed-out copy in pack-fixture.ts, not three
+- 2026-10-19T09:50:16Z status=wontfix-accepted owner=41-2-always-on-objectscript-pre-write-rule by=cr note=reopen_if=the IRIS-MCP-RULE marker grammar changes, or a fourth typed-out copy of the section oracle is added
+
+### DW-621: The changeset check of story-41-2-doc-claims.test.ts, like 9 other doc-claims files, skips when the changeset is missing, so a deleted or misnamed changeset leaves the suite green
+- source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: 41.2 code review 2026-10-19: it.skipIf(!changesetPresent) at story-41-2-doc-claims.test.ts:92; the skip exists because changeset version consumes the file
+- 2026-10-19T09:50:16Z status=wontfix-accepted owner=41-2-always-on-objectscript-pre-write-rule by=cr note=reopen_if=the Epic 42 release gate runs changeset version without checking each story changeset still exists
+
+### DW-622: SanitizeError strips only the English and Arabic ERROR #N: prefixes, but this instance also has French and German message tables (ERREUR, FEHLER), so a status read in those languages keeps its prefix and doubles when re-wrapped (project rule #13)
+- source: _bmad-output/implementation-artifacts/spec-41-3-core-knowledge-skills.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.3 plan probes 2026-10-19: GetErrorText(sc,fr)='ERREUR #5001: disk full', GetErrorText(sc,de)='FEHLER #5001: disk full'; src/ExecuteMCPv2/Utils.cls:179-185 loops over 'ERROR #' and the Arabic word only; the epic-11 retro predicted this
+- 2026-10-19T12:10:06Z status=routed owner=burndown by=harvest note=fix-pack-sized LOW (strip the localized prefix generically, a pinned test per locale, bootstrap moves): into the Epic 41 burn-down story if one is chartered, else wontfix-accepted with a probe at the gate
+- 2026-10-19T13:21:44Z occurrence=41-3-core-knowledge-skills
+- 2026-10-20T02:24:50Z status=routed owner=41-8-epic-41-burn-down by=burndown note=chartered at the Epic 41 burn-down gate (decision 43): strip one leading localized ERROR-#N prefix generically, a live-pinned row per instance locale, bootstrap moves
+- 2026-10-20T04:42:59Z status=resolved-by:41-8-epic-41-burn-down owner=41-8-epic-41-burn-down by=lead note=delivered: Utils:StripErrorPrefix strips one leading <1-16 char word without punctuation/control/whitespace/digit> #<digits>: (decision 45); SanitizeErrorLocaleTest 9/9 pins all 15 live %ObjectErrors languages and look-alike/<TOKEN> controls; Coverage.Job:SafeText fixed; live GET /global refusal fr/de/ja doubled before deploy, single after; armed gate 13/13; BOOTSTRAP_VERSION 5296a1c836f4 -> d51856f74d6a
+
+### DW-623: Story 41.5's pack-wide no-internal-references check must accept the exact adaptation header line of an adapted skill (it names the upstream project and IRIS-MCP-THIRD-PARTY-NOTICES.md), but that obligation is recorded only in the 41.4 spec's Consumed-by note
+- source: spec-41-4-platform-knowledge-skills.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: AD-28 requires the header as the first non-blank line after frontmatter; 41.4's knowledge test exempts exactly that line (a repository-file and tool-or-server-name match otherwise); the 41.5 'No internal references' AC in epics.md and the ledger carry no exemption, so a check built from the AC alone refuses the shipped iris-mcp-objectscript-sql
+- 2026-10-19T16:03:54Z status=routed owner=41-5-workflow-skills-refresh by=cr note=41.5's check accepts exactly ADAPTATION_HEADER as the first body line of an oracle-adapted skill, with negative controls
+- 2026-10-19T19:55:02Z status=resolved-by:41-5-workflow-skills-refresh owner=41-5-workflow-skills-refresh by=lead note=delivered: scripts/lib/provenance-core.mjs withoutAdaptationHeader exempts only the exact ADAPTATION_HEADER as the first body line of a provenance-row file; live validate:prompts on the real tree prints '2 adaptation header line(s) exempted' exit 0; validate-prompts-pack-checks CLI rows (second copy, header in iris-mcp-objectscript-gotchas, row removed) red then green; core controls (CRLF, (c), not first body line, prompt source) in validate-prompts.test.ts
+
+### DW-624: The pack docs read a declared tool preset as if the presets were nested, but they are not: provision-project-environment declares core and names iris_user_manage, which the admin server's developer preset hides, so a developer-preset user installs a core skill it cannot run
+- source: spec-41-5-workflow-skills-refresh.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 41.5 code review 2026-10-19: rosters from dist/tools/presets.js (admin core includes iris_user_manage, developer excludes it); the catalog intro, skills/README.md and README.md:830 state the first-of rule but never say a later preset can hide a tool; only the CHANGELOG Known limits says so
+- 2026-10-19T19:44:33Z status=routed owner=41-7-skills-pack-docs-and-capstone by=cr note=41.7's pack docs (root README section, the catalog that supersedes skills/README.md) say the presets are not nested
+- 2026-10-20T02:20:25Z status=resolved-by:41-7-skills-pack-docs-and-capstone owner=41-7-skills-pack-docs-and-capstone by=lead note=delivered: the pack catalog, the root README skills pack section and README:830 say the presets are not nested (first of core/developer/full that shows every named tool); a test pins the provision-project-environment / iris_user_manage example against the built admin presets (freshness-guarded)
+
+### DW-625: The installer's claude-code route installs the skills even when the Claude Code plugin is present (AD-28 Duplicates): no plugin exists yet to detect
+- source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.6 plan 2026-10-19: no .claude-plugin/plugin.json in the repo or pack; a detection branch now is unreachable (rule #54); packages/client-config/src/pack-plan.ts claude-code route
+- 2026-10-19T22:31:15Z status=routed owner=42-8-claude-code-plugin-and-registry-listings by=harvest note=42.8 creates the plugin and makes the claude-code route of iris-mcp-clients skills install install only the rule when it detects the plugin
+
+### DW-626: The MCP adapter data in adapters.ts is stale against the clients' docs read on 2026-10-19 (Pi, Kilo Code, Junie now document MCP; Kimi CLI archived; Roo Code shut down; Windsurf renamed Devin Desktop; the Goose docsUrl 404s)
+- source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.6 plan research 2026-10-19: Pi MCP since 0.99.0 (.pi/mcp.json), Kilo kilo.json[c] mcp key, Junie .junie/mcp/mcp.json, all still excluded/roadmap; adapters.ts:579-601, :480
+- 2026-10-19T22:31:15Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=re-disposition the three MCP-capable clients, rename or retire the stale rows, fix docsUrl, bump ADAPTER_DATA_VERSION with the certification table, before 1.0
+- 2026-10-20T02:12:59Z occurrence=41-7-skills-pack-docs-and-capstone by=cr note=PACK_TARGETS too: the gemini row's own note says Antigravity CLI replaced Gemini CLI for unpaid users; no row or id names it
+
+### DW-627: The default iris-mcp-all test sweep reaches a local IRIS: the live gates default to localhost:52773 / HSCUSTOM and run their legs whenever that instance answers, with no opt-in
+- source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: 41.6 implement 2026-10-19: the (once) sweep with no IRIS_* set ran 182 (third 0) and 195 (third 1) live-gate tests against the shared instance (no leftovers found); with IRIS_HOST=127.0.0.1 IRIS_PORT=1 they skip; epic35-defect-gate.test.ts:50 reads IRIS_HOST ?? localhost, as do the story-39/40 and epic38/40 capstone gates
+- 2026-10-19T22:31:15Z status=routed owner=42-2-bootstrap-downgrade-guard by=harvest note=same class as DW-518: a contributor's plain pnpm test must not touch an instance; gate every live leg on an explicit opt-in (IRIS_REQUIRE_LIVE or an IRIS_HOST the caller set) before 1.0, keeping the armed lead/CI runs
+- 2026-10-20T04:42:43Z status=routed owner=42-2-bootstrap-downgrade-guard by=lead note=reference: Story 41.8's story-41-8-qa-accept-language-live-gate.test.ts is the opt-in shape (legs run only with IRIS_REQUIRE_LIVE=1 and all five IRIS_*; a guard test proves zero requests unarmed); the prepublish gate must then export all five IRIS_* (42.6)
+
+### DW-628: The documented npx form npx -y @iris-mcp/client-config iris-mcp-clients <command> passes iris-mcp-clients to the CLI as its command (unknown-command once published) and carries no @1 pin
+- source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.7 plan 2026-10-20: clients-cli.ts:14 runCli(process.argv.slice(2)), clients.ts:1966 takes argv[0] as the command; the form is at packages/client-config/README.md:17, docs/client-config/README.md:5, docs/client-config/{claude-code,claude-desktop,cursor}.md:4; certification-docs.test.ts:88 pins it
+- 2026-10-20T01:15:16Z status=routed owner=42-1-pre-publish-package-fixes by=harvest note=42.1 (AC 42.1.6 owns the npx pin): likely npx -y -p @iris-mcp/client-config@1 iris-mcp-clients <command>, verified against the published package; move the certification-docs pin
+
+### DW-629: The why text of the cursor and vscode PACK_TARGETS rows never says the client reads .agents/skills/, the claim that justifies their route
+- source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.7 review 2026-10-20: the generated Skills pack targets table in packages/client-config/README.md; Cursor names .cursor/.claude/.codex skills, VS Code names .github/.claude skills; every other agents-route row states .agents/skills/
+- 2026-10-20T01:15:16Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=re-read both clients' skills docs with DW-626's re-dispositions, fix the two why texts in pack-targets.ts, re-render the table
+
+### DW-630: packages/client-config/package.json description still reads 'read-only foundation; writes arrive in Epic 33 Story 33.1' though the package writes client configs and installs the skills pack
+- source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.7 review 2026-10-20: packages/client-config/package.json:4; npm-facing summary before the first publish
+- 2026-10-20T01:15:16Z status=routed owner=42-1-pre-publish-package-fixes by=harvest note=rewrite the npm description with the other package.json metadata fixes (DW-31)
+- 2026-10-20T02:12:59Z occurrence=41-7-skills-pack-docs-and-capstone by=cr note=also packages/client-config/README.md:5 status line (Stories 33.0-33.4 only) and README.md:924 package summary omit the skills pack
+
+### DW-631: docs/client-config/* was left out of Story 41.7: no page points at iris-mcp-clients skills install, and claude-code.md:306, claude-desktop.md:273, cursor.md:304 link the broken anchor #read-only-mode-point-it-at-production-with-one-environment-variable
+- source: spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.7 review 2026-10-20: the spec's Never list excludes docs/client-config/*; the em-dash heading's anchor is #read-only-mode--point-...; grep -c 'skills install' docs/client-config/*.md is 0
+- 2026-10-20T02:12:59Z status=wontfix-accepted owner=41-7-skills-pack-docs-and-capstone by=cr note=reopen_if=a story edits docs/client-config/*.md (42.9 install docs) and the three anchors or the missing installer pointer are still there
+- 2026-10-20T02:20:25Z status=routed owner=42-9-install-docs-and-client-re-certification by=lead note=reopened before 1.0: 42.9 rewrites the install docs (AC 42.9.1); fix the three docs/client-config anchors (#read-only-mode--point-...) and add the skills install pointer to docs/client-config pages
+
+### DW-632: qa-41-7-doc-links checks only the 9 documents Story 41.7 changed; a repo-wide run of its checker finds broken relative links elsewhere (packages/shared/README.md:108 #server-manager-connections-iris_server_manager, three docs/known-bugs-* links, and the docs/client-config anchors of DW-631)
+- source: spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: 41.7 review 2026-10-20: the same checker over git ls-files '*.md' (130 files, _bmad and .claude excluded) reported 13 broken links before the review's 4 fixes
+- 2026-10-20T02:13:05Z status=wontfix-accepted owner=41-7-skills-pack-docs-and-capstone by=cr note=reopen_if=a user-facing README or docs/ page outside CHANGED_DOCS ships a broken relative link or anchor that a user reports or a doc story finds
+- 2026-10-20T02:20:25Z status=routed owner=42-9-install-docs-and-client-re-certification by=lead note=reopened before 1.0: run the qa-41-7-doc-links checker repo-wide (git ls-files *.md minus _bmad/.claude), fix the broken links it reports (packages/shared/README.md:108, the docs/known-bugs-* links), and widen the test's document set so it pins them
+
+### DW-633: The IRIS_ACCEPT_LANGUAGE docs (README.md:77, http-client.ts:183-193) describe a per-worker message-table mechanism the header does not affect, but %CSP.REST re-matches the message language from the header on every request; tool_support.md:21 also calls the Utils prefix-stripping English/Arabic-only and unmodified
+- source: _bmad-output/implementation-artifacts/spec-41-8-epic-41-burn-down.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.8 plan + implement 2026-10-20: irislib/%CSP/REST.cls:149-151 MatchLanguage per request (UseSession=0); live MatchLanguage(fr)=fr; tool_support.md:21 stale after StripErrorPrefix
+- 2026-10-20T03:43:34Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=rewrite the IRIS_ACCEPT_LANGUAGE paragraph and tool_support.md:21 against the per-request model and the 15-language StripErrorPrefix
+
+### DW-634: BaseTest:TestAllSixteenHandlersExtendBase pins 16 ExecuteMCPv2.REST handlers but 19 exist (MessageSearch, MessageBody, Coverage added later), so the OS test is red at HEAD
+- source: _bmad-output/implementation-artifacts/spec-41-8-epic-41-burn-down.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 41.8 implement 2026-10-20: src/ExecuteMCPv2/Tests/BaseTest.cls:299 asserts tCount=16; ls src/ExecuteMCPv2/REST/ and iris_doc_list show 21 classes (19 handlers); live BaseTest 6/7
+- 2026-10-20T03:43:34Z status=routed owner=41-8-epic-41-burn-down by=harvest note=fix in this story's review: derive the expected set from the REST/ source files or pin 19 with the names, redeploy BaseTest (this project's own test class) and run it 7/7
+- 2026-10-20T04:42:43Z status=resolved-by:41-8-epic-41-burn-down owner=41-8-epic-41-burn-down by=lead note=delivered: BaseTest:TestEveryRestHandlerExtendsBase reads ExecuteMCPv2.REST.* from %Dictionary.CompiledClass minus Base/Dispatch, checks each extends Base and equals HandlerNames() (19); basetest-rest-handlers.test.ts pins the list against src/ExecuteMCPv2/REST/; lead smoke: deployed BaseTest identical to src, iris_execute_tests 7/7 (total=7 Test* methods)
+
+### DW-635: No re-runnable automated check drives the one-argument SanitizeError/SafeText production path under a non-English request language; AC 41.8.8 rests on a recorded manual curl
+- source: _bmad-output/implementation-artifacts/spec-41-8-epic-41-burn-down.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 41.8 implement 2026-10-20: all 614 SanitizeError and 8 SafeText calls pass one argument; SanitizeErrorLocaleTest reaches only the pLanguage branch; collapsing the empty branch keeps every OS row green; no packages/** test sends a non-English Accept-Language to GET /global
+- 2026-10-20T03:43:35Z status=routed owner=41-8-epic-41-burn-down by=harvest note=QA adds an env-armed (IRIS_REQUIRE_LIVE) live gate: GET /global refusal with Accept-Language fr, de, ja expects exactly one prefix each, proven red by the collapsed-branch mutation
+- 2026-10-20T04:42:43Z status=resolved-by:41-8-epic-41-burn-down owner=41-8-epic-41-burn-down by=lead note=delivered: story-41-8-qa-accept-language-live-gate.test.ts, opt-in only (IRIS_REQUIRE_LIVE=1 plus all five IRIS_*), drives GET /global, POST classmethod <UNDEFINED> and Coverage.Job:SafeText with Accept-Language fr/de/ja + en-US control; red under the hard-coded en-us mutation and the restored two-word loop; guard test proves zero requests unarmed; lead smoke armed 13/13, unarmed 12 skipped
+
+### DW-636: Utils:StripErrorPrefix doc says the shape rule is safe because every IRIS rendering begins with its own prefix, which is false for Unknown status code renderings (the CHANGELOG was corrected, the comment was not)
+- source: spec-41-8-epic-41-burn-down.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: src/ExecuteMCPv2/Utils.cls StripErrorPrefix doc ends 'every IRIS rendering begins with its own prefix'; the 41.8 CHANGELOG Known limits says 'its own prefix or with Unknown status code'; behavior is safe (such text has no ' #digits: ' head)
+- 2026-10-20T04:34:25Z status=wontfix-accepted owner=41-8-epic-41-burn-down by=cr note=comment-only; fixing it moves BOOTSTRAP_VERSION again; reopen_if=the next story editing Utils.cls leaves that sentence in place

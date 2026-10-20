@@ -16,6 +16,15 @@ export const runExternalBackupPrompt: PromptDefinition = {
   description:
     "Freeze the IRIS instance for an external (OS/SAN-level) snapshot backup and thaw it " +
     "safely afterward — thaw ALWAYS runs, even if the snapshot step failed.",
+  skill: {
+    description:
+      "Freezes an IRIS instance for an external backup snapshot taken at the OS or SAN level, waits " +
+      "while the user takes the snapshot, and always thaws the instance afterwards, even when the " +
+      "snapshot fails, then confirms that journaling resumed and checks the run in the backup history. " +
+      "Use when the user wants to back up IRIS with an external OS-level or SAN snapshot, or asks to " +
+      "freeze and thaw IRIS database writes for a backup.",
+    preset: "full",
+  },
   arguments: [
     {
       name: "server",

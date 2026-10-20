@@ -10,6 +10,7 @@ import type { ZodObject } from "zod";
 import type { IrisHttpClient } from "./http-client.js";
 import type { IrisConnectionConfig } from "./config.js";
 import type { GovernanceConfig } from "./governance.js";
+import type { ToolPresetName } from "./tool-visibility.js";
 
 /** Result shape from pagination helpers. */
 export interface PaginateResult<T> {
@@ -187,6 +188,26 @@ export interface PromptArgumentDefinition {
 }
 
 /**
+ * The skill-only fields of a {@link PromptDefinition} (Story 41.5, AD-28): what the
+ * workflow skill generated from the prompt says about itself to the model that
+ * chooses skills, which the prompt's own `description` does not.
+ */
+export interface PromptSkillDefinition {
+  /**
+   * The skill's model-invocation description: what the skill covers, then a
+   * `Use when` sentence. Printable ASCII, at most 1,024 characters, with no `|`,
+   * no XML-like tag and no `iris_*` token.
+   */
+  description: string;
+  /**
+   * The first of `core`, `developer` and `full` under which every tool the
+   * skill names is visible on the server that owns it. `gen:skills` writes it
+   * as the skill's `metadata` `iris-tools-preset`, and `validate:prompts` checks it.
+   */
+  preset: ToolPresetName;
+}
+
+/**
  * Complete definition of an MCP **prompt** &mdash; a parameterized, named
  * workflow instruction discoverable via `prompts/list` and rendered via
  * `prompts/get` (Story 25.0, spec `03-skills-prompts-pack.md` §2).
@@ -212,6 +233,14 @@ export interface PromptDefinition {
   description: string;
   /** Ordered list of arguments the prompt accepts (may be empty). */
   arguments: PromptArgumentDefinition[];
+  /**
+   * The model-invocation fields of the workflow skill generated from this
+   * prompt (`gen:skills`): the skill's own `description` and the tool preset it
+   * needs. Only the skill generator and `validate:prompts` read them;
+   * {@link McpServerBase} never passes them to the SDK, so they never reach
+   * `prompts/list` or `prompts/get` (AD-15: optional and additive).
+   */
+  skill?: PromptSkillDefinition;
   /**
    * Render the prompt's user-role message text from the (SDK-validated)
    * arguments. Pure — no IRIS access, no side effects.

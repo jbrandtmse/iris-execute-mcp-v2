@@ -19,7 +19,7 @@
  *
  *   1. Every registered prompt's `name` appears in the root README.md.
  *   2. Each owning server's per-server README.md lists exactly its own
- *      prompts (ops 2, dev 5, interop 4, admin 2), and `iris-data-mcp`'s
+ *      prompts (ops 2, dev 4, interop 4, admin 2), and `iris-data-mcp`'s
  *      README does not claim any registered prompt name.
  *   3. The root README's "110 tools" claim is still present — a literal
  *      guard against prompts silently inflating the documented tool count
@@ -47,7 +47,7 @@ const root = resolve(__dirname, "../../../..");
 /** Expected prompt count per owning server package (Story 25.2 AC 25.2.1 / Task 2). */
 const EXPECTED_COUNTS: Record<string, number> = {
   "iris-ops-mcp": 2,
-  "iris-dev-mcp": 5,
+  "iris-dev-mcp": 4,
   "iris-interop-mcp": 4,
   "iris-admin-mcp": 2,
 };

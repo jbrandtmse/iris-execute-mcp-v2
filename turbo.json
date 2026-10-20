@@ -6,7 +6,12 @@
       "outputs": ["dist/**"]
     },
     "test": {
-      "dependsOn": ["build"]
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "@iris-mcp/all#test": {
+      "dependsOn": ["build", "@iris-mcp/client-config#build"],
+      "cache": false
     },
     "lint": {},
     "type-check": {

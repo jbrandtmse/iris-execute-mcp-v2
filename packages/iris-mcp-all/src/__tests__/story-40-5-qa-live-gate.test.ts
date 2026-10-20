@@ -41,6 +41,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadAllPrompts } from "../../../../scripts/lib/prompt-catalog.mjs";
 import {
   allText,
   assertDeployedBootstrapVersion,
@@ -694,8 +695,9 @@ describe("Story 40.5 QA: the three changed prompts through the built servers ove
     expect(text).not.toMatch(/iris_production_control|stop it/);
   }, 120000);
 
-  it("P6: each generated SKILL.md is the render of its prompt, with the description the server lists", async (testCtx) => {
+  it("P6: each generated SKILL.md is the render of its prompt, with its definition's skill description, while the server lists the unchanged prompt description", async (testCtx) => {
     if (skipReason) return skipTest(GATE_TAG, skipReason, testCtx);
+    const definitions = (await loadAllPrompts(REPO_ROOT)) as Array<{ prompt: { name: string; description: string; skill?: { description: string } } }>;
     const cases: Array<[string, WireSession, Record<string, string>]> = [
       [EDIT_PROMPT, plain, { className: "<className>", change: "<change>" }],
       [DEPLOY_PROMPT, plain, { classOrPackage: "<classOrPackage>" }],
@@ -709,7 +711,12 @@ describe("Story 40.5 QA: the three changed prompts through the built servers ove
       expect(/^name: (.+)$/m.exec(frontmatter)?.[1], `${name}: the skill name`).toBe(name);
       const description = /^description: (".*")$/m.exec(frontmatter)?.[1];
       expect(description, `${name}: a quoted description`).toBeDefined();
-      expect(JSON.parse(description as string), `${name}: the skill description is the one the server lists`).toBe((await listedPrompt(session, name)).description);
+      const definition = definitions.find((entry) => entry.prompt.name === name)?.prompt;
+      expect(definition?.skill, `${name}: the definition sets its skill field`).toBeDefined();
+      expect(JSON.parse(description as string), `${name}: the skill description is the definition's skill.description`).toBe(definition?.skill?.description);
+      const listedDescription = (await listedPrompt(session, name)).description;
+      expect(listedDescription, `${name}: the server lists the prompt's own, unchanged description`).toBe(definition?.description);
+      expect(listedDescription, `${name}: the server does not list the skill description`).not.toBe(definition?.skill?.description);
 
       const rendered = promptText(await session.getPrompt({ name, arguments: placeholders }));
       expect((parts?.[2] ?? "").trimEnd(), `${name}: the skill body is the render, placeholders included`).toBe(rendered.trimEnd());

@@ -416,16 +416,17 @@ export interface RawIrisAnswer {
  *
  * @param target - The IRIS instance to call.
  * @param urlPath - The path (and query string) below the web port, with its leading slash.
- * @param init - The method and, for a POST, the JSON body.
+ * @param init - The method, for a POST the JSON body, and the `Accept-Language` header (the suite's own
+ *   English value when omitted; IRIS reads the message language of each request from it).
  */
 export async function rawIrisRequest(
   target: IrisTarget,
   urlPath: string,
-  init: { method: "GET" | "POST"; body?: unknown },
+  init: { method: "GET" | "POST"; body?: unknown; acceptLanguage?: string },
 ): Promise<RawIrisAnswer> {
   const response = await fetch(`http://${target.host}:${target.port}${urlPath}`, {
     method: init.method,
-    headers: { ...rawJsonHeaders(target), "Accept-Language": "en-US,en;q=0.9" },
+    headers: { ...rawJsonHeaders(target), "Accept-Language": init.acceptLanguage ?? "en-US,en;q=0.9" },
     ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
     signal: AbortSignal.timeout(60000),
   });

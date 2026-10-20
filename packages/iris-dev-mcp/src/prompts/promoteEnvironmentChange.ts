@@ -35,6 +35,17 @@ export const promoteEnvironmentChangePrompt: PromptDefinition = {
     "using the review-before-write iris_env_diff -> iris_env_promote workflow (scoped diff, " +
     "plan, an explicit user-selected step allowlist, confirmed execute, re-diff verify). Never " +
     "acts on onlyInTarget warnings -- never deletes a target-only item, in any action.",
+  skill: {
+    description:
+      "Promotes configuration and code drift from one IRIS environment to another in " +
+      "review-before-write order, diff -> plan -> confirmed execute -> second diff: it compares " +
+      "mappings, System Default Settings, web applications, supported CPF settings and, given a spec, " +
+      "ObjectScript source, executes only the plan steps the user picks and confirms, and checks that " +
+      "the promoted drift is gone. It never removes an item that exists only on the target. Use when " +
+      "the user wants to compare two IRIS servers or environments, or to promote, sync or copy changes " +
+      "from one to another, such as from development to test.",
+    preset: "developer",
+  },
   arguments: [
     {
       name: "source",

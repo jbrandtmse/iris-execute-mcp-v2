@@ -81,3 +81,37 @@ export async function loadAllToolNames(root) {
   names.add('iris_server_profiles');
   return names;
 }
+
+/**
+ * Which package owns each tool, and each package's `core`/`developer` preset rosters, from the built dists
+ * (`dist/tools/index.js` and `dist/tools/presets.js`, as `tools-list-snapshot-core.mjs` reads them). The
+ * framework discovery tool (`iris_server_profiles`) is in no package's array, so it has no owner here.
+ *
+ * @param {string} root - Repository root (absolute path).
+ * @returns {Promise<{ owners: Map<string, string[]>, rosters: Record<string, { core: { include: string[], exclude: string[] }, developer: { include: string[], exclude: string[] } }> }>}
+ */
+export async function loadToolPresetCatalog(root) {
+  const owners = new Map();
+  for (const { pkg, tool } of await loadAllTools(root)) {
+    owners.set(tool.name, [...(owners.get(tool.name) ?? []), pkg]);
+  }
+  const rosters = {};
+  for (const pkg of SERVER_PACKAGES) {
+    const presetsEntry = resolve(root, `packages/${pkg}/dist/tools/presets.js`);
+    let mod;
+    try {
+      mod = await import(pathToFileURL(presetsEntry).href);
+    } catch (e) {
+      throw new Error(
+        `tool-catalog: could not import built tool presets from ${presetsEntry}.\n` +
+          `Did you run "pnpm turbo run build" first?\n` +
+          `Underlying error: ${e?.message ?? e}`,
+      );
+    }
+    if (mod.toolPresets === null || typeof mod.toolPresets !== 'object') {
+      throw new Error(`tool-catalog: ${pkg} dist/tools/presets.js does not export a "toolPresets" object.`);
+    }
+    rosters[pkg] = mod.toolPresets;
+  }
+  return { owners, rosters };
+}

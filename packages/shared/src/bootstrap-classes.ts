@@ -22,7 +22,7 @@
  * changes. Compared against `ExecuteMCPv2.Setup_GetBootstrapVersion()` at
  * MCP server startup to detect stale deployments.
  */
-export const BOOTSTRAP_VERSION = "5296a1c836f4";
+export const BOOTSTRAP_VERSION = "d51856f74d6a";
 
 export interface BootstrapClass {
   name: string;
@@ -155,16 +155,27 @@ ClassMethod ValidateBoolean(pValue As %String, pName As %String) As %Status
 /// Strip internal IRIS details from an error status.
 /// <p>Removes <code>$ZERROR</code> content, stack traces, and global references
 /// from the error text, returning a safe status suitable for external callers (NFR11).</p>
-ClassMethod SanitizeError(pStatus As %Status) As %Status
+/// <p>The status is read with <code>$System.Status.GetErrorText</code>: in the session language when
+/// <var>pLanguage</var> is empty, otherwise in the message-table language <var>pLanguage</var> (an RFC 1766
+/// tag such as <code>fr</code>; a tag with no table reads the English one). The lines of a combined or
+/// embedded status are joined by one space.</p>
+/// <p>The one leading <code>&lt;word&gt; #&lt;digits&gt;: </code> prefix of the text is removed by
+/// <method>StripErrorPrefix</method>, whatever message language the word is in, so the status this method
+/// returns carries exactly one prefix: its own.</p>
+ClassMethod SanitizeError(pStatus As %Status, pLanguage As %String = "") As %Status
 {
     If $$$ISOK(pStatus) Quit pStatus
-    ; Get the error text
-    Set tText = $System.Status.GetErrorText(pStatus)
-    ; Strip stack trace references like +5^RoutineName
-    Set tSafe = $ZStrip(tText, "*C")
-    ; Remove references to routines: +N^Name patterns
-    Set tSafe = $Replace(tSafe, $Char(13), "")
+    ; Get the error text in the session language, or in pLanguage when one is given
+    If pLanguage = "" {
+        Set tText = $System.Status.GetErrorText(pStatus)
+    } Else {
+        Set tText = $System.Status.GetErrorText(pStatus, pLanguage)
+    }
+    ; Join the lines of a combined or embedded status: drop CR and turn LF into a space
+    Set tSafe = $Replace(tText, $Char(13), "")
     Set tSafe = $Replace(tSafe, $Char(10), " ")
+    ; Strip the remaining control characters
+    Set tSafe = $ZStrip(tSafe, "*C")
     ; Strip ^GlobalName("key") and +N^RoutineName references
     Set tOffset = 1
     For {
@@ -210,22 +221,38 @@ ClassMethod SanitizeError(pStatus As %Status) As %Status
     If $ZStrip(tSafe, "<>W") = "" {
         Set tSafe = "An internal error occurred"
     }
-    ; Strip a single leading "ERROR #N: " or localized equivalent (e.g. Arabic "خطأ #N: ")
-    ; so the final $$$ERROR wrap does not produce a doubly-prefixed chain (Bug #11).
-    For tPrefix = "ERROR #", "خطأ #" {
-        If $Extract(tSafe, 1, $Length(tPrefix)) = tPrefix {
-            Set tRest = $Extract(tSafe, $Length(tPrefix) + 1, *)
-            Set tColon = $Find(tRest, ": ")
-            If tColon > 0 {
-                Set tCodeChunk = $Extract(tRest, 1, tColon - 3)
-                If tCodeChunk ? 1.N {
-                    Set tSafe = $Extract(tRest, tColon, *)
-                    Quit
-                }
-            }
-        }
-    }
+    ; Strip the one leading "<word> #<digits>: " prefix, in any message language, so the final
+    ; $$$ERROR wrap does not produce a doubly-prefixed chain
+    Set tSafe = ..StripErrorPrefix(tSafe)
     Quit $$$ERROR($$$GeneralError, tSafe)
+}
+
+/// Remove the one leading status prefix from <var>pText</var>, in any message language.
+/// <p>A prefix is a word, then <code> #</code>, digits and <code>: </code>, for example
+/// <code>ERROR #5001: </code> or <code>ERREUR #5001: </code>. The text after the first
+/// <code>: </code> is returned exactly when all of these hold, and <var>pText</var> is returned unchanged
+/// otherwise:</p>
+/// <ol>
+/// <li>the head (the text before that <code>: </code>) holds exactly one <code> #</code>;</li>
+/// <li>the part after the <code> #</code> is one or more digits;</li>
+/// <li>the word before it is 1 to 16 characters long and holds no punctuation, control, whitespace or digit
+/// character in any script.</li>
+/// </ol>
+/// <p>At most one prefix is removed. A <code>&lt;TOKEN&gt;</code> item such as <code>&lt;UNDEFINED&gt;</code>, a
+/// bracket domain code such as <code>&lt;Ens&gt;ErrGeneral</code> and a prefix that is not at the start of the
+/// text are never removed. The rule reads the shape only: a text that begins with a short word, <code> #</code>,
+/// digits and <code>: </code> is stripped whatever its origin, which is safe for the text of a status because
+/// every IRIS rendering begins with its own prefix.</p>
+ClassMethod StripErrorPrefix(pText As %String) As %String
+{
+    Set tColon = $Find(pText, ": ")
+    If tColon = 0 Quit pText
+    Set tHead = $Extract(pText, 1, tColon - 3)
+    If $Length(tHead, " #") '= 2 Quit pText
+    Set tWord = $Piece(tHead, " #", 1)
+    If ($Length(tWord) < 1) || ($Length(tWord) > 16) || ($ZStrip(tWord, "*PCWN") '= tWord) Quit pText
+    If $Piece(tHead, " #", 2) '? 1.N Quit pText
+    Quit $Extract(pText, tColon, *)
 }
 
 /// Story 34.6 AC 34.6.1 — truncate <var>pOutput</var> to the documented
@@ -1224,7 +1251,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// classes match the embedded classes. When they differ, the bootstrap
 /// automatically redeploys the classes (skipping the one-time web
 /// application registration and package mapping steps).</p>
-Parameter BOOTSTRAPVERSION = "5296a1c836f4";
+Parameter BOOTSTRAPVERSION = "d51856f74d6a";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -1775,12 +1802,11 @@ ClassMethod CleanStatusText(pText As %String) As %String [ Internal ]
             }
         }
     }
-    ; normalize the locale word on RESOLVED renderings ("خطأ <Ens>ErrGeneral: …" →
-    ; "ERROR <Ens>ErrGeneral: …"): GetErrorText picks the message-table language per
-    ; worker process (Rule #13 — English and Arabic tables are both loaded on this
-    ; project's instances), which otherwise makes the SAME session's diagram text vary
-    ; across REST workers (observed live 2026-07-03). Mirrors the two-variant list the
-    ; Rule #8 prefix handling uses; the bracket code itself is never touched.
+    ; normalize the Arabic word on RESOLVED renderings to "ERROR" (the Arabic word followed by
+    ; "<Ens>ErrGeneral: ..." becomes "ERROR <Ens>ErrGeneral: ..."); the bracket code itself is never
+    ; touched. Only the Arabic word is normalized: text rendered in any other message language keeps the
+    ; word it was rendered with, because rewriting a generic leading word would change legitimate text
+    ; such as "Value <x> invalid".
     If ($Extract(tText, 1, 4) = "خطأ ") && ($Extract(tText, 5) = "<") {
         Set tText = "ERROR "_$Extract(tText, 5, *)
     }
@@ -4492,7 +4518,11 @@ ClassMethod LoadedRoutinesFailure(pRunList As %List, pLoaded As %List) As %Strin
 /// Strip the sensitive parts of recorded error text for output: caret global references and control
 /// characters go through <method>ExecuteMCPv2.Utils:SanitizeError</method>, and the IRIS error code
 /// (<code>ERROR #N:</code>) is kept.
-ClassMethod SafeText(pText As %String) As %String
+/// <p>A leading English <code>ERROR #N: </code> is set aside and put back in front of the result. The rest is the
+/// message of the sanitized status, which has no prefix in any language, so text recorded in another message
+/// language keeps its own prefix and gains no wrapper prefix. <var>pLanguage</var> is the message language
+/// <method>ExecuteMCPv2.Utils:SanitizeError</method> reads the status in; empty is the session language.</p>
+ClassMethod SafeText(pText As %String, pLanguage As %String = "") As %String
 {
     Set tPrefix = ""
     If $Extract(pText, 1, 7) = "ERROR #" {
@@ -4503,10 +4533,8 @@ ClassMethod SafeText(pText As %String) As %String
             Set pText = $Extract(tRest, tColon, *)
         }
     }
-    Set tSafe = $System.Status.GetErrorText(##class(ExecuteMCPv2.Utils).SanitizeError($$$ERROR($$$GeneralError, pText)))
-    Set tMarker = "ERROR #5001: "
-    If $Extract(tSafe, 1, $Length(tMarker)) = tMarker Set tSafe = $Extract(tSafe, $Length(tMarker) + 1, *)
-    Quit tPrefix_tSafe
+    Set tSanitized = ##class(ExecuteMCPv2.Utils).SanitizeError($$$ERROR($$$GeneralError, pText), pLanguage)
+    Quit tPrefix_$System.Status.GetOneStatusText(tSanitized, 1)
 }
 
 /// The supervisor job entry point for run <var>pId</var> (<code>JOB</code>bed by the Start route).

@@ -259,8 +259,8 @@ describe("Story 39.6: the root README states the loop, the prompts and the snaps
     expect(audit).toContain("The declaration decides, never the parameter's name.");
   });
 
-  it("the prompts heading counts 13 prompts, and the table has the updated trace row and the new find row", () => {
-    expect(rootReadme).toMatch(/^### The v1 pack . 13 prompts, grouped by owning server$/m);
+  it("the prompts heading counts 12 prompts, and the table has the updated trace row and the new find row", () => {
+    expect(rootReadme).toMatch(/^### The v1 pack . 12 prompts, grouped by owning server$/m);
     const trace = lineStarting(rootReadme, "| `@iris-mcp/interop` | `trace-message-flow` |");
     expect(trace, "the trace-message-flow row").not.toBe("");
     for (const tool of ["`iris_production_messages`", "`iris_message_search`", "`iris_message_body`", "`iris_message_diagram`", "`iris_production_logs`"]) {
@@ -436,13 +436,13 @@ describe("Story 39.6: tool_support.md, the client guides and the epic history", 
     expect(later).toBeGreaterThan(earlier);
   });
 
-  it("the prompt-pack line counts 13 prompts and names the new prompt, and no earlier text carries a per-server prompt tally", () => {
+  it("the prompt-pack line counts 12 prompts and names the new prompt, and no earlier text carries a per-server prompt tally", () => {
     const flat = squash(toolSupport);
-    expect(flat).toContain("a pack of 13 **MCP prompts** (`ops` 2, `dev` 5, `interop` 4, `admin` 2; `data` none in v1)");
+    expect(flat).toContain("a pack of 12 **MCP prompts** (`ops` 2, `dev` 4, `interop` 4, `admin` 2; `data` none in v1)");
     expect(flat).toContain("`interop` gained `find-patient-messages` in Story 39.6");
     expect(flat).toContain("calls reads only, and adds no tool, key or default");
     // docs-prompt-sync reads the first `interop` N: the pack line must be that match.
-    const pack = toolSupport.indexOf("a pack of 13 **MCP prompts**");
+    const pack = toolSupport.indexOf("a pack of 12 **MCP prompts**");
     const firstTally = toolSupport.search(/`interop`\s+\d/);
     expect(pack).toBeGreaterThanOrEqual(0);
     expect(firstTally, "the first `interop` N tally is the prompt-pack line's").toBeGreaterThan(pack);

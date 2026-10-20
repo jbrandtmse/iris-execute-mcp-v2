@@ -5505,9 +5505,9 @@ This is the `/epic-cycle` burn-down story, chartered on 2026-10-19 at Epic 40's 
 
 **Constraints (licensing):** the competitor's kit is MIT, © 2025 InterSystems Corporation.
 
-- `THIRD_PARTY_NOTICES.md` carries their full MIT text and a provenance table mapping each derived file to its source at commit `b6205bb`.
+- `IRIS-MCP-THIRD-PARTY-NOTICES.md` carries their full MIT text and a provenance table mapping each derived file to its source at commit `b6205bb`. [AMENDED 2026-10-19 — see the story change log]
 - The notice ships wherever the skills ship.
-- Each derived `SKILL.md` carries one header line: "Adapted from intersystems-community/iris-agentic-dev (MIT, © 2025 InterSystems Corporation); see THIRD_PARTY_NOTICES".
+- Each derived `SKILL.md` carries one header line: "Adapted from intersystems-community/iris-agentic-dev (MIT, © 2025 InterSystems Corporation); see IRIS-MCP-THIRD-PARTY-NOTICES.md", as its first non-blank line after any frontmatter. [AMENDED 2026-10-19 — see the story change log]
 - The named authors, Tim Leavitt and Tom Dyar, are credited.
 - Nothing is derived from `kb/ipm-module-authoring.md` or `iris-objectscript-eval`.
 - The pack is never presented as InterSystems' and never implies endorsement. "IRIS" and "ObjectScript" may be used descriptively.
@@ -5530,7 +5530,7 @@ This is the `/epic-cycle` burn-down story, chartered on 2026-10-19 at Epic 40's 
 
   `gen:skills:check` keeps passing and never treats hand-authored files as stale.
 - **AC 41.1.2** — The competitor source is fetched at `b6205bb` into a scratch directory as untrusted data: read only, never executed.
-- **AC 41.1.3** — `THIRD_PARTY_NOTICES.md` holds:
+- **AC 41.1.3** — `IRIS-MCP-THIRD-PARTY-NOTICES.md` holds: [AMENDED 2026-10-19 — see the story change log]
   - their full MIT text;
   - the provenance table;
   - author credits;
@@ -5565,6 +5565,7 @@ ObjectScript gotchas, `%Status` and error handling, `%UnitTest`.
 - **AC 41.3.1** — Three `SKILL.md` files, each with `name` and a model-invocation `description` that says when to load it. They are written from our rules and retros. Any competitor-derived passage carries the header and a provenance row (41.1).
 - **AC 41.3.2** — Every factual claim is probed live, with a probe log. Code snippets are compiled in a disposable `ExecuteMCPv2.Temp.*` class, and test snippets run through `iris_execute_tests` with a total-count check (Rule #35). Then the fixtures are deleted.
 - **AC 41.3.3** — Tool-name tokens validate. No internal rule numbers or repository paths appear in user-facing text.
+- DW-613: no pack check requires a `SKILL.md` to start with frontmatter, so an adaptation header placed above the frontmatter passes provenance while the skill loses its `name` and `description`. Add a default-suite check that every pack `SKILL.md` opens with frontmatter holding `name` and `description` (and that an adapted skill's header comes after it), and prove it red. (ledger; routed by the Story 41.1 code review 2026-10-19)
 
 ### Story 41.4: Platform Knowledge Skills
 
@@ -5588,9 +5589,13 @@ Embedded SQL, IRIS system-class discipline, and interoperability patterns. Adapt
 
 ### Story 41.5: Workflow Skills Refresh
 
-- **AC 41.5.1** — The 11 generated workflow skills, plus every prompt added by 38.6, 39.6 and 40.4, are regenerated. Each description is rewritten for model invocation, because skills are chosen from their description. The MCP prompt text keeps its user-facing role.
+- **AC 41.5.1** — Every generated workflow skill is regenerated: the 12 prompts that remain after Story 41.2 retired `objectscript-review`. [AMENDED 2026-10-19 — see the Story 41.2 change log] Each description is rewritten for model invocation, because skills are chosen from their description. The MCP prompt text keeps its user-facing role.
 - **AC 41.5.2** — A generated pack catalog (README) lists the knowledge skills, the workflow skills and the rule, with what each is for.
 - **AC 41.5.3** — `gen:skills:check` and the extended `validate:prompts` pass.
+- **AC 41.5.4** *(added 2026-10-19 at the Story 41.1 spec gate, wave-7 decision #3)* — The pack-wide checks AD-28 names, both in the default suite and proven red (Rule #59):
+  - **Preset visibility:** every skill in the pack declares the preset it needs, and `validate:prompts` checks that every `iris_*` tool it names is visible under that preset.
+  - **No internal references:** no internal rule number, DW or AD id, or repository path appears in any agent content: skills, the rule, and the prompts. The generated skills' header comments are included, so a comment naming `packages/<pkg>/src/prompts/*.ts` has to move out of the agent-visible text.
+- DW-623: the pack-wide no-internal-references check must accept the exact adaptation header line of an adapted skill, which names the upstream project and `IRIS-MCP-THIRD-PARTY-NOTICES.md` (today `iris-mcp-objectscript-sql`). Accept exactly that line as the first body line of a skill the provenance table marks adapted, and nowhere else; add negative controls for a second copy and for the line in a non-adapted skill. (ledger; routed by the Story 41.4 code review 2026-10-19)
 
 ### Story 41.6: Skills and Rules Installer
 
@@ -5598,7 +5603,7 @@ Embedded SQL, IRIS system-class discipline, and interoperability patterns. Adapt
 
 - **AC 41.6.1** — A per-client disposition table covers **all 16 adapters** in `adapters.ts`. It is exhaustive as of a named date, with the documentation source for each row (Rule #56). For each client it gives the native skill location, the rule location and format, or "`AGENTS.md` fallback" with the reason. The minimum:
   - Claude Code → `.claude/skills/` and `.claude/rules/`;
-  - VS Code / Copilot → `.github/instructions/` (`*.instructions.md` with `applyTo:`);
+  - VS Code / Copilot → `.agents/skills/` and the `AGENTS.md` block. [AMENDED 2026-10-19, wave-7 decision #24: an `applyTo:` instructions file attaches only to files the agent creates or modifies, so it would never load for a class written through the MCP tools.]
   - Cursor → `.cursor/rules/`;
   - other agents → `.agents/skills/` and `AGENTS.md`.
 
@@ -5607,11 +5612,18 @@ Embedded SQL, IRIS system-class discipline, and interoperability patterns. Adapt
   - a dry-run diff before any write;
   - idempotent re-install;
   - update and uninstall of only the files it owns;
-  - `THIRD_PARTY_NOTICES.md` written alongside every installed copy of adapted content.
+  - `IRIS-MCP-THIRD-PARTY-NOTICES.md` written alongside every installed copy of adapted content. [AMENDED 2026-10-19 — see the Story 41.1 change log]
 
   An existing `AGENTS.md`, `CLAUDE.md` or instructions file is preserved byte for byte outside the marked block. The fixtures are varied (Rule #58): CRLF, a BOM, comments, no trailing newline, and an existing foreign block.
 - **AC 41.6.3** — When a project has a `CLAUDE.md`, the Claude Code route uses `.claude/rules/`, and the installer reports how to import `AGENTS.md` (`@AGENTS.md`) instead of assuming it is read.
 - **AC 41.6.4** — It is a CLI command on `iris-mcp-clients`. The extension UI is out of scope.
+- DW-616: the `AGENTS.md` marker-reading contract that Story 41.2 defined has no implementation owner until this installer exists. It must:
+  - report, and never guess, when its own marker is missing, repeated or out of order;
+  - decide whether a BOM before line 1 belongs to that line;
+  - end a last line that has no newline before appending a block;
+  - replace the test-local reader in `story-41-2-qa-agents-md-consumer.test.ts` with the installer's real one.
+
+  (ledger; routed by the Story 41.2 code review 2026-10-19)
 
 ### Story 41.7: Skills Pack Docs and Capstone
 
@@ -5625,6 +5637,20 @@ Embedded SQL, IRIS system-class discipline, and interoperability patterns. Adapt
 
   It is proven red (Rule #59).
 - **AC 41.7.3** — A one-time live check, recorded: a real Claude Code session in the temporary project lists the installed skills, and the rule activates for a `.cls` path.
+- DW-611: the real-tree provenance tests need client-config's built dist, but nothing orders `@iris-mcp/all`'s test after `@iris-mcp/client-config`'s build, and the turbo cache key of `@iris-mcp/all`'s test omits the pack inputs (`skills-pack-src/`, `skills/`, `scripts/`). The capstone runs in the default suite, so add the ordering (a workspace devDependency or turbo `inputs`) and pin that a pack-source change invalidates the cached green. The cache inputs must also cover client-config's `package.json`, its `skills-pack/**` and the built `dist/` the gate fixtures copy (widened by the Story 41.1 code review). (ledger; routed by harvest 2026-10-19)
+- DW-624: the pack docs read a declared tool preset as if the presets were nested, but they are not. `provision-project-environment` declares `core` and names `iris_user_manage`, which the admin server's `developer` preset hides, so a `developer`-preset user installs a `core` skill they can't run. The root README pack section and the catalog that supersedes `skills/README.md` say the presets are not nested, so a skill's preset names the smallest preset that shows its tools, not one that every larger preset includes. (ledger; routed by the Story 41.5 code review 2026-10-19)
+
+### Story 41.8: Epic 41 Burn-down
+
+This is the `/epic-cycle` burn-down story, chartered on 2026-10-20 at Epic 41's burn-down gate during the unattended run (orchestrator decision #43). Epic 41 left one story-closable ledger entry with the burn-down owner, and it is closed here. DW-615 is a human decision and goes to the decision sheet instead.
+
+- DW-622: `ExecuteMCPv2.Utils:SanitizeError` strips a leading `ERROR #N: ` prefix only in English and Arabic (`src/ExecuteMCPv2/Utils.cls`, the prefix loop). This instance also has French and German message tables (`ERREUR #5001: …`, `FEHLER #5001: …`, probed 2026-10-19), so a status read in those languages keeps its prefix and doubles when it is re-wrapped (project rules #8 and #13).
+  - **The fix.** Strip ONE leading localized prefix generically: a short word, then ` #`, digits and `: `. Never strip a `<TOKEN>`-style item.
+  - **Pins.** One pinned case per locale the instance has, taken from live `GetErrorText` output rather than hand-typed (Rule #36), plus negative controls for text that only looks like a prefix.
+  - **Bootstrap.** `ExecuteMCPv2.Utils` is bootstrapped, so `pnpm gen:bootstrap` runs in the same story and records `BOOTSTRAP_VERSION` from → to (Rule #24).
+  - (ledger; chartered at the burn-down gate 2026-10-20)
+- DW-634: `BaseTest:TestAllSixteenHandlersExtendBase` pins 16 `ExecuteMCPv2.REST.*` handlers, but 19 exist, so the OS test is red at HEAD. Derive the expected set from `src/ExecuteMCPv2/REST/`, or pin 19 by name, then redeploy `BaseTest` and run it 7/7. (ledger; routed by harvest 2026-10-20)
+- DW-635: no re-runnable check drives the one-argument `SanitizeError`/`SafeText` path under a non-English request language. Add an armed (`IRIS_REQUIRE_LIVE`) live gate that sends `GET /global` with `Accept-Language` `fr`, `de` and `ja` and expects exactly one prefix each, and prove it red with the collapsed-branch mutation. (ledger; routed by harvest 2026-10-20)
 
 ## Epic 42: Published Install & Distribution (added 2026-10-14)
 
@@ -5706,6 +5732,8 @@ The decision record's fix table, except DW-508 (42.2) and IPM (42.4). Ledger: DW
 - **AC 42.1.7** — The documented `npx … @iris-mcp/client-config iris-mcp-clients` command (`packages/client-config/README.md:17`) is corrected. The correct invocation of a scoped package with a differently named `bin` is probed, and every documented instance is fixed (Rule #56).
 - **AC 42.1.8** — The `npm pack --dry-run` file list for each package is recorded in the story record.
 - DW-560: correct the existing-tool annotation divergences before 1.0. `iris_sql_execute`, `iris_execute_command` and `iris_doc_put` get `destructiveHint: true`, because each can delete or overwrite state. This is a sanctioned AD-15 hint correction (orchestrator decision #18, Epic 38 decision sheet, 2026-10-16). Rule #44's cross-check and the annotation sweeps move with it, and the CHANGELOG records it. (ledger; routed by merge_gate 2026-10-16)
+- DW-628 (evidence for AC 42.1.7): `clients-cli.ts:14` passes `process.argv.slice(2)` to `runCli`, which takes the first argument as the command. So `npx -y @iris-mcp/client-config iris-mcp-clients <command>` fails as an unknown command once the package is published, and it has no `@1` pin. The form appears at `packages/client-config/README.md:17`, `docs/client-config/README.md:5` and `docs/client-config/{claude-code,claude-desktop,cursor}.md:4`, and `certification-docs.test.ts:88` pins it. (ledger; routed by harvest 2026-10-20)
+- DW-630: `packages/client-config/package.json`'s `description` still reads "read-only foundation; writes arrive in Epic 33 Story 33.1". Rewrite it with the other `package.json` metadata fixes (DW-31). (ledger; routed by harvest 2026-10-20)
 
 ### Story 42.2: Bootstrap Downgrade Guard
 
@@ -5721,6 +5749,7 @@ DW-508, HIGH. A dedicated story; it must land before 42.6 publishes.
 
   Proven red by reverting to equality comparison.
 - DW-518: the default-suite live gate `epic37-default-outage-gate` deploys the bootstrap to its target on first touch. Under this story's version-ordered guard, an older-sequenced branch must not redeploy over a newer deployment. Verify it, and record the gate's write footprint. (ledger; routed by x0 2026-10-15)
+- DW-627: the default `@iris-mcp/all` sweep reaches a local IRIS. The live gates default to `localhost:52773` and `HSCUSTOM`, and run their legs whenever that instance answers, so a contributor's plain `pnpm test` touches their instance. This is the same class as DW-518. Gate every live leg on an explicit opt-in (`IRIS_REQUIRE_LIVE`, or an `IRIS_HOST` the caller set), keeping the armed lead and CI runs, and pin that an unset environment runs no leg. (ledger; routed by harvest 2026-10-19)
 
 ### Story 42.3: CI Workflow
 
@@ -5790,6 +5819,7 @@ DW-47, DW-300, D2.
   - every package is at `1.0.0` with a provenance attestation;
   - `npx -y @iris-mcp/dev@1` starts in a clean environment;
   - the registry 404s are gone.
+- DW-612: nothing on the publish path runs `gen:pack --check` or `check:provenance`. client-config's `prepublishOnly` runs only `verify-iris-reachable`, so a publish made without the default suite could ship a drifted skills pack or a tarball without `IRIS-MCP-THIRD-PARTY-NOTICES.md`. Add both checks to the publish path and prove them red on that path (Rule #59). (ledger; routed by harvest 2026-10-19 from Story 41.1)
 
 ### Story 42.7: VS Code Extension Publish
 
@@ -5805,13 +5835,14 @@ DW-389, D5.
 - **AC 42.8.1** — `.claude-plugin/plugin.json` and a `marketplace.json` in this repo. The plugin brings:
   - all 5 MCP servers (`npx -y @iris-mcp/<pkg>@1`, with the IRIS connection supplied through the plugin's user configuration or environment);
   - Epic 41's skills pack;
-  - `THIRD_PARTY_NOTICES.md`.
+  - `IRIS-MCP-THIRD-PARTY-NOTICES.md`. [AMENDED 2026-10-19 by the wave-7 orchestrator, decision #2 — see the Story 41.1 change log]
 
   41.1's provenance check is extended to the plugin folder. The format is verified against the current Claude Code plugin docs (Rule #14).
 - **AC 42.8.2** — Rules cannot ride in a plugin. The plugin README points to the 41.6 installer for the always-on rule.
 - **AC 42.8.3** — The optional compile-on-save hook is evaluated, the result recorded, and the hook shipped as opt-in only if the Lead approves. Otherwise it is filed as a candidate.
 - **AC 42.8.4** — Live check: in a clean Claude Code, add the marketplace, install the plugin, and confirm the five servers connect and the skills list. The result is recorded.
 - **AC 42.8.5** — An MCP Registry listing (the current registry requirements are probed; namespace verification as required), and an Open Exchange listing for the IPM package. Listing needs the Lead's InterSystems Developer Community account.
+- DW-625: the 41.6 installer's `claude-code` route installs the skills even when the plugin is present (AD-28 Duplicates), because no plugin existed to detect. Once the plugin exists, make that route of `iris-mcp-clients skills install` install only the rule when it detects the plugin, with a test for each case. (ledger; routed by harvest 2026-10-19)
 
 ### Story 42.9: Install Docs and Client Re-Certification
 
@@ -5827,6 +5858,17 @@ DW-441.
 - **AC 42.9.3** — The CHANGELOG `1.0.0` release notes and the PRD's distribution section match what shipped.
 - DW-440: the Kimi Code VS Code extension half of its certification row. Re-certify it if an installed extension is available, otherwise mark the row human-only with the date (AC 42.9.2). (ledger; routed by x0 2026-10-15)
 - DW-442: the GitHub Copilot Chat certification row needs a consenting Copilot user. Mark it human-only with the date unless one is available (AC 42.9.2). (ledger; routed by x0 2026-10-15)
+- DW-626: the MCP adapter data in `adapters.ts` is stale against the clients' docs as read on 2026-10-19:
+  - Pi, Kilo Code and JetBrains Junie now document MCP setup but are still dispositioned excluded or roadmap;
+  - Kimi CLI is archived, and Roo Code shut down;
+  - Windsurf is now Devin Desktop;
+  - the Goose `docsUrl` returns 404.
+
+  Before re-certifying, re-disposition those clients and bump `ADAPTER_DATA_VERSION` with the certification table. (ledger; routed by harvest 2026-10-19)
+- DW-629: the `why` text of the `cursor` and `vscode` rows of `PACK_TARGETS` never says the client reads `.agents/skills/`, the folder the installer writes for both. Re-read both clients' skills docs together with DW-626, fix the two rows in `pack-targets.ts`, and re-render the client-config README table. (ledger; routed by harvest 2026-10-20)
+- DW-631: `docs/client-config/claude-code.md:306`, `claude-desktop.md:273` and `cursor.md:304` link the broken anchor `#read-only-mode-point-it-at-production-with-one-environment-variable`; the heading's real slug is `#read-only-mode--point-…`. No `docs/client-config/` page points at `iris-mcp-clients skills install` either. Fix both with the AC 42.9.1 rewrite. (ledger; routed by the lead 2026-10-20)
+- DW-632: `qa-41-7-doc-links.test.ts` checks only the 9 documents Story 41.7 changed, and a repo-wide run of its checker finds more broken relative links: `packages/shared/README.md:108`, three `docs/known-bugs-*` links, and the DW-631 anchors. Fix them, and widen the test's document set to every user-facing `*.md`, so it pins them before 1.0. (ledger; routed by the lead 2026-10-20)
+- DW-633: the `IRIS_ACCEPT_LANGUAGE` docs (`README.md:77`, `packages/shared/src/http-client.ts:183-193`) describe a per-worker message-table mechanism the header does not affect, but `%CSP.REST` matches the message language from the header on every request. `tool_support.md:21` also says the `Utils` prefix-stripping handles only English and Arabic and is unmodified. Rewrite both against the per-request model and Story 41.8's 15-language `StripErrorPrefix`. (ledger; routed by harvest 2026-10-20)
 
 ## Epic 43: MCP SDK v2 Migration (added 2026-10-15)
 
@@ -5886,6 +5928,7 @@ DW-441.
   - `bootstrap-classes.ts` is absent from the diff;
   - `pnpm audit` on production dependencies is recorded, and the HTTP-stack advisories that v1 carried are expected to drop.
 - DW-579: a `tools/call` that the MCP SDK rejects as schema-invalid never reaches `handleToolCall`, so it is never audited (AD-3 step 1, Zod validation; AD-19, one audit entry per call). This story rewrites the call path for SDK v2: make a schema-invalid call produce its single audit entry, outcome `error`, with no argument values logged. (ledger; routed by merge_gate 2026-10-17, orchestrator decision #33)
+- DW-617: a `prompts/get` that omits the optional `arguments` field is refused with -32602 for every prompt whose arguments are all optional (`audit-security-posture`, `recover-stuck-production`, `check-system-health`, `run-external-backup`). CR 25.1-6 closed this as an SDK v1 limitation because a fix meant rewriting prompt registration, which this story does. On SDK v2, make such a request render the prompt, and pin it with a real SDK client that omits `arguments` entirely (Rule #46). (ledger; routed by the Story 41.2 code review 2026-10-19)
 
 ### Story 43.2: Serve MCP Revision 2026-07-28
 

@@ -96,6 +96,7 @@ export type {
   PaginateResult,
   PromptDefinition,
   PromptArgumentDefinition,
+  PromptSkillDefinition,
 } from "./tool-types.js";
 export {
   McpServerBase,

@@ -398,7 +398,7 @@ Workflow-shaped [MCP prompts](../../README.md#workflow-prompts--agent-skills) (E
 | `resend-failed-messages` | Resends failed messages for a config item using the dry-run-first `iris_message_resend` workflow — preview the match count, review with the user, execute only on explicit approval, then verify the new headers. States the duplication hazard and that the write actions are default-disabled. |
 | `find-patient-messages` | Finds a patient's messages by a Search Table value such as a medical record number (`patientId` required; `from`, `to`, `searchTableClass` and `namespace` optional). It reads the profile's data policy with `iris_server_profiles`, asks for a window of at most 7 days, looks the patient up with `iris_message_search` (`searchTable`, `PatientID`), lists the header rows, and reads bodies with `iris_message_body` only when the user wants content, under the PHI data policy. Its main path is in the `core` preset. It reads only: `iris_message_search:searchTable` and `iris_message_body` are reads, enabled by default. A withheld body stays withheld: the prompt never loosens the policy and never reads a body another way. |
 
-Also installable as [Agent Skills](../../skills/README.md).
+Also installable as [Agent Skills](../../README.md#the-skills-pack).
 
 ---
 

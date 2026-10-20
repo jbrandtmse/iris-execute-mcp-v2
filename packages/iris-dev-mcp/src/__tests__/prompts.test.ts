@@ -28,15 +28,19 @@ import { diagnoseSlowQueryPrompt } from "../prompts/diagnoseSlowQuery.js";
  * The prompts this package (iris-dev-mcp) owns per Story 25.1 AC 25.1.1, plus
  * `promote-environment-change` (un-gated in Story 27.4 once `iris_env_diff`/
  * `iris_env_promote` shipped — mirrors the Epic 26 `resend-failed-messages`
- * un-gate precedent), and `edit-and-test-class` (Story 38.6).
+ * un-gate precedent), and `edit-and-test-class` (Story 38.6). The
+ * `objectscript-review` prompt was retired in Story 41.2: its checklist is the
+ * always-on rule in the skills pack.
  */
 const OWN_PROMPT_NAMES = [
   "diagnose-slow-query",
-  "objectscript-review",
   "deploy-and-test-class",
   "promote-environment-change",
   "edit-and-test-class",
 ];
+
+/** A prompt this package no longer registers (Story 41.2). */
+const RETIRED_PROMPT_NAMES = ["objectscript-review"];
 
 /** Every prompt name owned by a DIFFERENT package — must never leak here. */
 const FOREIGN_PROMPT_NAMES = [
@@ -92,11 +96,20 @@ describe("iris-dev-mcp real server prompts/list (AC 25.1.1, AC 25.0.3)", () => {
     expect(caps.prompts).toEqual({ listChanged: true });
   });
 
-  it("prompts/list returns EXACTLY this package's 5 owned prompt names, nothing else", async () => {
+  it("prompts/list returns EXACTLY this package's 4 owned prompt names, nothing else", async () => {
     const server = makeRealServer();
     const result = await callRequest(server, "prompts/list", {});
     const names = (result.prompts as Array<{ name: string }>).map((p) => p.name).sort();
     expect(names).toEqual([...OWN_PROMPT_NAMES].sort());
+  });
+
+  it("does not advertise a retired prompt (Story 41.2)", async () => {
+    const server = makeRealServer();
+    const result = await callRequest(server, "prompts/list", {});
+    const names = (result.prompts as Array<{ name: string }>).map((p) => p.name);
+    for (const retired of RETIRED_PROMPT_NAMES) {
+      expect(names).not.toContain(retired);
+    }
   });
 
   it("never advertises a prompt owned by another server package", async () => {

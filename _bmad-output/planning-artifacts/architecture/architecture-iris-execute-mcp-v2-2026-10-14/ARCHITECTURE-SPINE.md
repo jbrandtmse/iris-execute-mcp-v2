@@ -301,7 +301,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - storage-drop refusal on `iris_doc_put`;
     - the default `redact` policy over the resend preview (L-2);
     - the `iris_execute_tests` annotation correction;
-    - the possible retirement of the `objectscript-review` prompt;
+    - the retirement of the `objectscript-review` prompt (Story 41.2, wave-7 decision #4; its checklist is now the always-on rule);
     - the `@1` pin (D3) and the Node 22 floor (D4);
     - the human confirmation dialog on existing confirmation gates for elicitation-capable clients (AD-34, Story 43.3);
     - the `IRIS_NAMESPACE` default moving from `HSCUSTOM` to `USER` (the documented value, which exists on every IRIS instance), in `config.ts` and the VS Code launcher, recorded under CHANGELOG "Changed" (DW-469, Story 38.0). The orchestrator decided this under the Lead's delegation for the unattended run of 2026-10-15; see `orchestrator-decisions-wave-6.md` #5.
@@ -525,17 +525,27 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **Knowledge skills and the always-on rule.** Each hand-authored knowledge skill, and the always-on rule, has exactly one source.
     - The rule is unscoped (no `paths:`), so it loads in every session of a project that installed it.
     - Plugins cannot carry rules, so rules reach Claude Code only through the installer.
-  - **One pack.** Story 41.1 records which of these it is:
-    - **A committed, generated, DO-NOT-EDIT directory** with a `--check` drift test, at a path the plugin manifest names. The client-config tarball copies that same directory.
-    - **A plugin sourced from the npm tarball.**
+  - **One pack** *(decided in Story 41.1, orchestrator decision wave-7 #1)*. The pack is the committed, generated, DO-NOT-EDIT directory `packages/client-config/skills-pack/`. Only `pnpm gen:pack` writes it. `pnpm gen:pack:check` runs in the default suite and fails on any missing, changed or stray file.
+    - **Sources.** Each knowledge skill, the always-on rule and the notice has one hand-authored source in `skills-pack-src/`: skills under `knowledge/<name>/`, the rule under `rules/`, and the notice at the root. The workflow skills stay `gen:skills` output in `skills/`. `gen:skills` owns only `skills/`, so it never sees a hand-authored file. `gen:pack` copies both sources byte for byte, needs no build, and renders only the pack README (a catalog of the knowledge skills, the workflow skills and the rules, Story 41.5), each rule's `AGENTS.md` section form (Story 41.2, wave-7 decision #5) and each rule's Cursor form (Story 41.6, wave-7 decision #25).
+    - **The always-on rule's source** is `skills-pack-src/rules/iris-mcp-objectscript-pre-write.md` (Story 41.2): one flat `<name>.md` per rule, without frontmatter. It names no `iris_*` tool, so it declares no preset.
+    - **The core knowledge skills** (Story 41.3, wave-7 decisions #7 and #8) are `iris-mcp-objectscript-gotchas`, `iris-mcp-objectscript-error-handling` and `iris-mcp-objectscript-unit-tests`. Like the rule, they name no `iris_*` tool, so they declare no preset.
+    - **The platform knowledge skills** (Story 41.4, wave-7 decisions #12 to #14) are `iris-mcp-objectscript-sql`, `iris-mcp-system-classes` and `iris-mcp-interoperability`, which brings the knowledge-skill count to six. They are also tool-free. `iris-mcp-objectscript-sql` is adapted from upstream `objectscript-sql-patterns` at `b6205bb` and carries the pack's first provenance row; its one false explanation, that an object property set to `""` is not `NULL` in SQL, is corrected in the adapted text.
+    - **Skill frontmatter.** Every `SKILL.md` in the pack opens with frontmatter on its first line (no byte-order mark, wave-7 decision #10), holding `name` and `description` and, optionally, a `metadata` map whose one allowed key is `iris-tools-preset` (Story 41.5, wave-7 decision #16). `name` equals its directory and is lower-case letters and digits in hyphen-joined groups, at most 64 characters, without `claude` or `anthropic`. `description` is at most 1,024 characters, with no XML tag. `check:provenance` enforces this with its `skill-frontmatter` rule (Story 41.3). A later field, such as a preset declaration, extends that rule.
+    - **Shape.** The pack is a standard-layout Claude Code plugin root: `skills/<name>/SKILL.md` for every skill; `rules/claude-code/<name>.md` (the source bytes; no frontmatter, so no `paths:`), `rules/cursor/<name>.mdc` (`---`, `alwaysApply: true`, `---`, a blank line, then the source bytes) and `rules/agents-md/<name>.md` (`<!-- IRIS-MCP-RULE:<name>:BEGIN -->`, the source bytes, `<!-- IRIS-MCP-RULE:<name>:END -->`) for each rule's three forms; and the notice and a generated `README.md` at the root. A skill name defined in both sources fails the build.
+    - **Consumers.** `@iris-mcp/client-config` ships the directory through its npm `files`, with no lifecycle hook. The installer reads it from its own package, and the plugin uses the same directory. A plugin rooted at the repository root is ruled out, because Claude Code always scans a plugin's default `skills/` and would load the workflow skills twice.
+  - **Installer routes** *(Story 41.6, wave-7 decisions #23 to #26 and #29)*. `iris-mcp-clients skills install|uninstall --client <id>` installs the pack into one project, at project scope only. Each client maps to one of four routes:
+    - `claude-code`: `.claude/skills/` and `.claude/rules/`;
+    - `cursor`: `.agents/skills/` and `.cursor/rules/<name>.mdc`;
+    - `gemini`: `.agents/skills/` and the marked block in `GEMINI.md`;
+    - `agents`: `.agents/skills/` and the marked block in `AGENTS.md`. Every other client takes this route, VS Code / Copilot included: an `applyTo:` instructions file attaches only to files the agent creates or modifies.
 
-    Either way, the installer and the plugin consume one pack.
-  - **Duplicates.** The installer's Claude Code route installs rules only when it detects the plugin, so skills aren't installed twice.
-  - **Tool names and presets.** Every `iris_*` token in agent content names a real tool. Each skill declares the preset it needs, and `validate:prompts` checks visibility under that preset.
-  - **No internal references.** Internal rule numbers and repository paths never appear in any agent content, prompts included, and this is checked mechanically.
+    Claude Desktop has no route. The installer never writes `CLAUDE.md` or any client settings file. The notice is written in the directory of each installed file that carries the adaptation header, and a rule form never carries adapted content.
+  - **Duplicates.** The installer's Claude Code route installs rules only when it detects the plugin, so skills aren't installed twice. Until the plugin exists (Story 42.8), the route installs both.
+  - **Tool names and presets.** Every `iris_*` token in agent content names a real tool. Each skill declares the preset it needs, and `validate:prompts` checks visibility under that preset. A skill that names an `iris_*` tool declares, as `metadata` `iris-tools-preset`, the first of `core`, `developer` and `full` under which every tool it names is visible on the server that owns it (the presets are not nested, so "the smallest" is undefined). A skill or rule that names no tool declares none. The source of a workflow skill's preset and description is the prompt's `skill` field, which `registerPrompt` never sends (pinned over stdio) (Story 41.5, decisions #16 and #17).
+  - **No internal references.** Internal rule numbers and repository paths never appear in any agent content, prompts included, and this is checked mechanically. `validate:prompts` checks every prompt, its skill description included, and every agent content file against nine classes. The one exemption is the exact adaptation header as the first body line of a file the provenance table names (Story 41.5, decision #20; DW-623).
   - **Adapted content.** Third-party content or code is either a clean-room reimplementation or adapted under its licence. Adapted material:
-    - ships with its notice, under a suite-specific filename (for example `IRIS-MCP-THIRD-PARTY-NOTICES.md`), at a location no client auto-loads;
-    - carries a one-line adaptation header;
+    - ships with its notice as `IRIS-MCP-THIRD-PARTY-NOTICES.md` (wave-7 decision #2), at a location no client auto-loads;
+    - carries, as its first non-blank line after any frontmatter, the header `Adapted from intersystems-community/iris-agentic-dev (MIT, © 2025 InterSystems Corporation); see IRIS-MCP-THIRD-PARTY-NOTICES.md`;
     - has a provenance row pinned to the source commit (`b6205bb` for iris-agentic-dev).
 
     The MIT text is byte-exact and the authors are credited. Nothing is derived from `kb/ipm-module-authoring.md` or `iris-objectscript-eval`. All of this is checked mechanically in the default suite.
@@ -579,9 +589,13 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     5. restore automatically on failure;
     6. show a diff preview before confirmation.
   - **Ownership.** Only entries and marked blocks that the tool owns are written, and foreign content is preserved byte for byte, proven on varied fixtures.
-  - **The installer's manifest** *(lands in Story 41.6)*. The installer writes a per-target manifest of the paths and content hashes it installed.
-    - An update removes owned paths that are absent from the new pack.
-    - A file whose hash no longer matches is never overwritten without confirmation.
+  - **The installer's manifest** *(Story 41.6, wave-7 decision #27)*. The installer writes a per-target manifest of the paths and content hashes it installed: `.iris-mcp/skills-pack.json` in the project, deterministic, with each path's hash and the clients that need it.
+    - An update removes owned paths that are absent from the new pack. Uninstall deletes a shared path only when no client still needs it.
+    - A file whose hash no longer matches is never overwritten without confirmation (`--include-modified`, after a backup).
+    - A file byte-identical to the pack is adopted. Any other file at an owned path is a conflict, and a conflict refuses the whole run.
+    - Manifest paths are allow-listed to the installer's own locations, so a hand-edited manifest can never direct a delete elsewhere.
+    - A symbolic link at or above an owned path, dangling or not, or a file with a second hard link, refuses the run, so nothing is written or deleted outside the project or through a link (wave-7 decision #34).
+    - Pack files and block hosts are read and written as bytes, through the same protocol order as the MCP-entry writer.
   - **Re-install and uninstall.** Re-install is idempotent. Uninstall removes only owned content. Third-party entries are never logged.
 
 ### AD-31 — Authorization belongs to IRIS [ADOPTED] (core decision "Privilege Enforcement"; PRD Security)
@@ -646,7 +660,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 | Tool annotations | Follow the MCP definitions (AD-4). New tools declare all four hints truthfully, and existing hints change only through AD-15. |
 | Tool results | Return `structuredContent` alongside `content` for every tool that returns data. Documented defaults are sent explicitly. A field name keeps one meaning across every tool, so a new meaning takes a new name; a story that calls a field additive proves the name is absent today. `$HOROLOG` becomes ISO 8601 with a `<field>Raw` sibling, and malformed input yields `""`. New interop surfaces share one header-row shape, with UTC ISO 8601 `Z` timestamps in and out, and TypeScript normalizes offsets. An unconfigured area returns `notApplicable`, never an error. |
 | Refusals | A refusal is `isError: true` and changes nothing. `structuredContent.code` is a stable UPPER_SNAKE_CASE code from one catalog in `@iris-mcp/shared`, with a uniqueness test; the precedent is `GOVERNANCE_DISABLED`. The code comes with the fields a caller needs to act on it. Inside a successful multi-item read, a per-item outcome is a field. `notApplicable` and verdicts are successes. Existing refusal shapes are grandfathered. |
-| Error text | `<what happened>. <what to do about it>.` Strip one leading `ERROR #N:` prefix (English or localized) before re-wrapping, and propagate the real `%Status` through `SanitizeError`. Redact a submitted secret field-specifically, with a minimum-length gate. Name a global without its caret in sanitized text. A `dataPolicy`-governed tool never echoes a caller value or body content. |
+| Error text | `<what happened>. <what to do about it>.` Strip one leading `ERROR #N:` prefix (English or localized) before re-wrapping. A prefix is a 1–16 character word with no punctuation, control, whitespace or digit character, then ` #<digits>: `, which covers every message language the instance has (`ExecuteMCPv2.Utils:StripErrorPrefix`; Story 41.8, wave-7 decision #45), and propagate the real `%Status` through `SanitizeError`. Redact a submitted secret field-specifically, with a minimum-length gate. Name a global without its caret in sanitized text. A `dataPolicy`-governed tool never echoes a caller value or body content. |
 | Logging (TypeScript) | `console.error` only, because stdout carries MCP, with `[ERROR]`, `[WARN]`, `[INFO]` and `[DEBUG]` prefixes. Never log credentials, cookies, full request bodies or message-body content. |
 | TypeScript files | `kebab-case.ts`. These are grandfathered as camelCase: `src/prompts/`, `sqlAdvisor.ts`, `sqlAnalyze.ts` and `defaultSettings.ts`; the extension is exempt. Unit tests live in `__tests__/<module>.test.ts`. |
 | Live gates | Live-IRIS gates are armed by `IRIS_REQUIRE_LIVE` and listed in the owning package's `scripts/prepublish-gate.mjs` `gateTestFiles`. A package without a roster creates one, wired to `prepublishOnly`. Cross-package gates go in `iris-mcp-all`. An epic's capstone runs in the default suite. From Story 42.3, CI runs every roster. |
@@ -658,7 +672,10 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 | IRIS-side unit tests | `%UnitTest.TestCase` with `$$$Assert*` macros, under the `^UnitTestRoot` guard, with `/noload/nodelete`. Compare the reported `total` with the expected number of `Test*` methods. |
 | Configuration variables | `IRIS_` prefix. A malformed value fails fast at startup and names the variable; an unknown tool name only warns (AD-7). Each new variable is documented with its default. |
 | Probes and references | Verify a claim about an IRIS API, or about reusing internal code, live or in source before building on it. Disposable probe classes live under `ExecuteMCPv2.Temp.*` and are deleted before commit. `sources/`, `irislib/` and `irissys/` are read-only. A story that depends on an IRIS API records the earliest IRIS version it verified that API on. |
+| Pack names | Hand-authored pack content carries the suite prefix: `iris-mcp-<name>` for rules and knowledge skills, and `IRIS-MCP-THIRD-PARTY-NOTICES.md` for the notice, so an installed copy never collides with a user's own file or another kit's skill. Generated workflow skills keep their prompt names (AD-15). (Story 41.3) |
+| Marked blocks | A block the suite owns inside a user file (an `AGENTS.md` section) sits between `<!-- IRIS-MCP-RULE:<name>:BEGIN -->` and `<!-- IRIS-MCP-RULE:<name>:END -->`, matched as exact whole lines. The block between them is owned and replaced whole; everything outside it is preserved byte for byte (AD-30; Story 41.2). A UTF-8 BOM at byte 0 is not part of line 1 and stays at byte 0. Own markers that are not exactly one BEGIN line followed by one END line are reported with their line numbers, never guessed at, and nothing is written. A last line without a line ending gets one, in the file's own style, before a block is appended, and uninstall removes it again (Story 41.6, wave-7 decision #30; DW-616). The hosts are `AGENTS.md` and `GEMINI.md`. |
 | Live testing on a shared instance | Never stop or restart the shared development IRIS, and simulate outages with a closed local port. Writes go only to disposable `ExecuteMCPv2.Temp.*` artifacts, or to namespaces the story creates, and are removed afterwards. The one system-level write allowed is `^%SYS("Ensemble","InstalledNamespace",<disposable namespace>)` for a disposable `EXECMCPTMP*` namespace that must run a production. It is set and killed by a fixture method that refuses any other name, and it is part of the leftovers check; `EnableNamespace` is never called (Story 40.3, decision #59). Fixtures are synthetic: no real configuration names and no PHI. A story never reads another project's namespace or messages. |
+| Turbo test tasks | Turbo `test` tasks are never cached (`cache: false`), because the suites read repository files that no input list fully names. A test that needs another package's build gets a `pkg#task` `dependsOn` edge, never a package dependency, so AD-2 holds (Story 41.7, wave-7 decision #40; DW-611). |
 | Performance budgets | The PRD targets are: reads under 2 s, compile and deploy under 10 s, bootstrap under 60 s, and `tools/list` under 500 ms. A story that adds bootstrapped classes or a heavy read checks the relevant budget. |
 
 ## Stack
@@ -713,9 +730,11 @@ packages/
   iris-<domain>-mcp/    # dev | admin | interop | ops | data: src/tools, src/prompts, src/tools/presets.ts, scripts/prepublish-gate.mjs
   iris-mcp-all/         # meta-package, cross-package checks, prepublish gate
   client-config/        # client registry and installer (not a server runtime dependency)
+  client-config/skills-pack/  # the assembled skills pack (generated, DO-NOT-EDIT; gen:pack)
 extensions/iris-mcp-launcher/   # VS Code extension; spawns servers through npx
 src/ExecuteMCPv2/       # REST service and libraries (bootstrapped); Tests/ and QAFixtures/ (not bootstrapped)
 skills/                 # generated workflow skills (DO-NOT-EDIT)
+skills-pack-src/        # hand-authored pack sources: knowledge skills, the always-on rule, the notice
 scripts/                # generators and checks (gen-bootstrap, gen-skills, governance check, epics sync)
 ipm/                    # IPM module manifest (generated from Story 42.4)
 ```
@@ -732,7 +751,7 @@ ipm/                    # IPM module manifest (generated from Story 42.4)
 | Transport rejection (Epic 38) | `packages/shared/src/transport.ts` | AD-23, AD-8 |
 | Message forensics and PHI (Epic 39) | `iris-interop-mcp` tools; the shared search helper; the redaction engine and classifier | AD-26, AD-17, AD-19, AD-20, AD-12 |
 | Coverage and TestProduction (Epic 40) | `iris-dev-mcp` test tools; a coverage endpoint and its IRIS-side job | AD-27, AD-16, AD-4, AD-14 |
-| Skills and rules pack (Epic 41) | the pack source tree, `skills/`, the `client-config` installer | AD-28, AD-30, AD-2 |
+| Skills and rules pack (Epic 41) | `skills-pack-src/`, `skills/`, `packages/client-config/skills-pack/`, the `client-config` installer | AD-28, AD-30, AD-2 |
 | SDK v2 migration (Epic 43) | `packages/shared/src/server-base.ts` and the SDK-client tests | AD-32, AD-15, AD-3 |
 | Human confirmation (Epic 43) | the confirmation helper in `@iris-mcp/shared`; the gated tools | AD-34, AD-17, AD-4 |
 | Published install (Epic 42) | manifests, `.github/workflows/`, `ipm/`, the extension, the plugin | AD-29, AD-14, AD-28, AD-33 |

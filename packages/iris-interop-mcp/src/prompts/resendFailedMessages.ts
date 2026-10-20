@@ -22,6 +22,16 @@ export const resendFailedMessagesPrompt: PromptDefinition = {
     "iris_message_resend workflow — preview the match count before executing, then verify " +
     "the new headers via iris_production_messages. States the duplication hazard and that " +
     "resend/resendFiltered are governance-default-disabled writes.",
+  skill: {
+    description:
+      "Resends failed interoperability messages for one configuration item, dry run first: it previews " +
+      "the match count and a sample, resends only after the user approves with an explicit " +
+      "confirmation, and then checks the new message headers. It states that a resend delivers the data " +
+      "downstream again and that the resend actions are writes disabled by default. Use when the user " +
+      "wants to retry, replay or resend failed or errored messages in an IRIS interoperability " +
+      "production.",
+    preset: "core",
+  },
   arguments: [
     {
       name: "item",

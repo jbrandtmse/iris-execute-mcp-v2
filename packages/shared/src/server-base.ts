@@ -1017,7 +1017,7 @@ export class McpServerBase {
    * Omitting `argsSchema` makes the SDK wire the no-args callback form
    * (`cb(extra)`) and skip argument validation, so an omitted `arguments`
    * renders correctly. (This is the Dev-Notes fallback branch; it matters
-   * because Story 25.1 ships real no-arg prompts, e.g. `objectscript-review`.)
+   * because a prompt may legitimately declare no arguments.)
    *
    * The callback renders `def.build(args)` as a single **user**-role text
    * message (spec §2). Unknown-name and missing-required-argument errors are
