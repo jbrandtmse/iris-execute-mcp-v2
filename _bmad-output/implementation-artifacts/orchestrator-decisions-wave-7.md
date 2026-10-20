@@ -1,5 +1,7 @@
 # Orchestrator decisions — wave 7 (`/epic-cycle 41`)
 
+> **Epic 41 complete (2026-10-20).** Stories 41.1 to 41.8 are done, including the burn-down story 41.8, and merged into `feature/feature-wave-7-skills-pack` at `f02f0e3`. The epic branch is deleted. The wave branch is not merged into `main`; the Planner does that. One item waits for you: DW-615 (whether to correct the agent rule files), now an open action item in `sprint-status.yaml`.
+>
 > **Run started 2026-10-19 on `feature/feature-wave-7-skills-pack`**, on the Planner's start message and under the Project Lead's pre-authorization of 2026-10-17. The run is unattended: questions a stage escalates are decided here by the orchestrator, and each decision is recorded below. Retrospectives are skipped, and each epic branch is merged into the feature branch without pausing. The run never merges into `main`; the Planner does that.
 
 Each row: when it was decided (UTC), the gate that raised it, the question, the decision, why, and what it would take to reverse it.
