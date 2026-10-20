@@ -917,7 +917,11 @@ ClassMethod LoadedRoutinesFailure(pRunList As %List, pLoaded As %List) As %Strin
 /// Strip the sensitive parts of recorded error text for output: caret global references and control
 /// characters go through <method>ExecuteMCPv2.Utils:SanitizeError</method>, and the IRIS error code
 /// (<code>ERROR #N:</code>) is kept.
-ClassMethod SafeText(pText As %String) As %String
+/// <p>A leading English <code>ERROR #N: </code> is set aside and put back in front of the result. The rest is the
+/// message of the sanitized status, which has no prefix in any language, so text recorded in another message
+/// language keeps its own prefix and gains no wrapper prefix. <var>pLanguage</var> is the message language
+/// <method>ExecuteMCPv2.Utils:SanitizeError</method> reads the status in; empty is the session language.</p>
+ClassMethod SafeText(pText As %String, pLanguage As %String = "") As %String
 {
     Set tPrefix = ""
     If $Extract(pText, 1, 7) = "ERROR #" {
@@ -928,10 +932,8 @@ ClassMethod SafeText(pText As %String) As %String
             Set pText = $Extract(tRest, tColon, *)
         }
     }
-    Set tSafe = $System.Status.GetErrorText(##class(ExecuteMCPv2.Utils).SanitizeError($$$ERROR($$$GeneralError, pText)))
-    Set tMarker = "ERROR #5001: "
-    If $Extract(tSafe, 1, $Length(tMarker)) = tMarker Set tSafe = $Extract(tSafe, $Length(tMarker) + 1, *)
-    Quit tPrefix_tSafe
+    Set tSanitized = ##class(ExecuteMCPv2.Utils).SanitizeError($$$ERROR($$$GeneralError, pText), pLanguage)
+    Quit tPrefix_$System.Status.GetOneStatusText(tSanitized, 1)
 }
 
 /// The supervisor job entry point for run <var>pId</var> (<code>JOB</code>bed by the Start route).

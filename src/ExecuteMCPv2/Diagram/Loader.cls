@@ -209,12 +209,11 @@ ClassMethod CleanStatusText(pText As %String) As %String [ Internal ]
             }
         }
     }
-    ; normalize the locale word on RESOLVED renderings ("خطأ <Ens>ErrGeneral: …" →
-    ; "ERROR <Ens>ErrGeneral: …"): GetErrorText picks the message-table language per
-    ; worker process (Rule #13 — English and Arabic tables are both loaded on this
-    ; project's instances), which otherwise makes the SAME session's diagram text vary
-    ; across REST workers (observed live 2026-07-03). Mirrors the two-variant list the
-    ; Rule #8 prefix handling uses; the bracket code itself is never touched.
+    ; normalize the Arabic word on RESOLVED renderings to "ERROR" (the Arabic word followed by
+    ; "<Ens>ErrGeneral: ..." becomes "ERROR <Ens>ErrGeneral: ..."); the bracket code itself is never
+    ; touched. Only the Arabic word is normalized: text rendered in any other message language keeps the
+    ; word it was rendered with, because rewriting a generic leading word would change legitimate text
+    ; such as "Value <x> invalid".
     If ($Extract(tText, 1, 4) = "خطأ ") && ($Extract(tText, 5) = "<") {
         Set tText = "ERROR "_$Extract(tText, 5, *)
     }

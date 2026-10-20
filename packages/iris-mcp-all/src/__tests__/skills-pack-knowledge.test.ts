@@ -95,7 +95,7 @@ const SKILLS: Skill[] = [
   },
   {
     name: "iris-mcp-objectscript-error-handling",
-    sha256: "779cd9829c4fb65291898b97ef11d8d6cf2cc2334eed1b79dccebf06980e4434",
+    sha256: "fc3bdd1602d188da18209b4e80b053f169bf5485e30b664b6454d3140e0d52d8",
     description:
       "How %Status values and exceptions work in ObjectScript: making, testing, combining and reading a status, the Try and Catch method shape, ThrowOnError, ThrowStatus and AsStatus, what a runtime error looks like inside a Catch, and reading error text without its translated ERROR #N prefix. Use when writing a method that returns %Status, handling, rethrowing or logging an error, converting between exceptions and statuses, or putting error text that IRIS returned into a new error.",
     codeBlocks: 2,
@@ -111,6 +111,8 @@ const SKILLS: Skill[] = [
       `If $Piece(tText, tTag) '[ " " Set tText = $Piece(tText, tTag, 2, *)`,
       "`Order #12: `",
       "`ERROR <Ens>ErrGeneral: queue full`",
+      "`ERROR #00: (no error description)`",
+      "`GetErrorCodes` returns `6219`",
       "`ERROR #5001: ERROR #5001: file: missing`",
       "`ERROR #5001: Import failed: file: missing`",
       "`%Exception.SystemException` when the status holds an ObjectScript error",
@@ -520,8 +522,8 @@ describe("the knowledge skills, real tree (AC 41.3.1, 41.4.3)", () => {
     });
   });
 
-  it("the probe anchors total 170: 22, 27, 26, 32, 31 and 32", () => {
-    expect(SKILLS.map((skill) => skill.anchors.length)).toEqual([22, 27, 26, 32, 31, 32]);
+  it("the probe anchors total 172: 22, 29, 26, 32, 31 and 32", () => {
+    expect(SKILLS.map((skill) => skill.anchors.length)).toEqual([22, 29, 26, 32, 31, 32]);
   });
 
   it("the notice holds exactly the rows of the adapted skills (AC 41.3.1, 41.4.3)", () => {

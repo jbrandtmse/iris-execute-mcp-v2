@@ -35,7 +35,8 @@ ClassMethod ErrorMessage(pSC As %Status) As %String
 ```
 
 - It removes one prefix in any language and keeps the rest of the text as it was. `ERROR #5001: file: missing` becomes `file: missing`, and a message that itself contains `Order #12: ` keeps it. On a combined status only the first line loses its prefix.
-- That holds for a status whose code is a number, such as 5001. A code from the interoperability classes, such as `<Ens>ErrGeneral`, has no `#` before it: the text reads `ERROR <Ens>ErrGeneral: queue full`, and the method returns it unchanged.
+- That holds for a real error status whose code is a number, such as 5001. A code from the interoperability classes, such as `<Ens>ErrGeneral`, has no `#` before it: the text reads `ERROR <Ens>ErrGeneral: queue full`, and the method returns it unchanged.
+- An empty or `0` value is not a status: its text reads `ERROR #00: (no error description)` while `GetErrorCodes` returns `6219`, so the tag never matches and the prefix stays. `$$$ISERR` is 1 for such a value too, so compare it with `""` and `0` before you cut, or accept the prefix.
 - Wrapping the whole text in a new `$$$ERROR($$$GeneralError, ...)` gives `ERROR #5001: ERROR #5001: file: missing`. Wrap the message instead: `$$$ERROR($$$GeneralError, "Import failed: "_..ErrorMessage(tSC))` gives `ERROR #5001: Import failed: file: missing`.
 
 ## Exceptions
