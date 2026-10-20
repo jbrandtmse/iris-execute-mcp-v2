@@ -47,6 +47,14 @@ files, and the bootstrapped service at 35 classes. `BOOTSTRAP_VERSION` moves fro
   helper's accepted and refused shapes, and `SafeText` in every language). It builds every status in memory, writes no global and
   changes no session, process or NLS locale.
 - **`story-41-8-doc-claims.test.ts`**, which pins this section and the changeset (see Tests).
+- **`story-41-8-qa-accept-language-live-gate.test.ts`**, an opt-in live gate in the `@iris-mcp/all` prepublish roster: it reaches an
+  instance only when `IRIS_REQUIRE_LIVE=1` and all five of `IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD` and
+  `IRIS_NAMESPACE` are set, and armed it fails closed on any unmet prerequisite, including deployed classes whose
+  `BOOTSTRAP_VERSION` is not this tree's embed. It checks the one-argument `SanitizeError` and `SafeText` under the request
+  languages fr, de and ja and the English control, over raw HTTP, and writes nothing.
+- **`story-41-8-qa-gate-guard.test.ts`** (default suite, no IRIS), which runs that gate in its own process against a local
+  stand-in service and a closed port, and **`basetest-rest-handlers.test.ts`** (default suite), which ties the handler list
+  `BaseTest` pins to `src/ExecuteMCPv2/REST/`.
 
 ### Tests
 
@@ -57,6 +65,14 @@ files, and the bootstrapped service at 35 classes. `BOOTSTRAP_VERSION` moves fro
 - `skills-pack-knowledge.test.ts` moves the error-handling skill's sha256 and gains two probe anchors for the new sentence.
 - `story-41-8-doc-claims.test.ts` pins the section title, its place above Story 41.7's, the bootstrap move as history literals, the
   counts that do not move and the changeset's bump map.
+- The live gate sends `GET /global` with no `global` parameter and `POST /classmethod` of `%SYSTEM.Status:GetErrorText` with no
+  argument and of `ExecuteMCPv2.Coverage.Job:SafeText` with one recorded text. Each answer carries exactly one prefix in the request's
+  language, the status is read in that language, and `SafeText` returns the recorded text unchanged. It was shown red against the
+  pre-41.8 prefix loop, against a one-argument call that reads in a fixed language, and against `SafeText`'s pre-41.8 tail, which the
+  OS class does not see. The guard test shows that an unarmed run sends no request.
+- `BaseTest:TestAllSixteenHandlersExtendBase`, which pinned 16 REST handlers while the tree holds 19, is now
+  `TestEveryRestHandlerExtendsBase`. It derives the handlers from the compiled classes, asserts that each extends `ExecuteMCPv2.REST.Base`
+  and that they equal the 19 the source tree holds, and `BaseTest` passes 7 of 7 again.
 
 ### Known limits
 
@@ -72,7 +88,7 @@ files, and the bootstrapped service at 35 classes. `BOOTSTRAP_VERSION` moves fro
   independent of the header and that the existing prefix-stripping is unaffected. This story changes no README or `tool_support.md`
   text, so that correction is left for a later docs story.
 - The OS class passes the language as an argument, so it cannot run a request under a non-English session language. The
-  `Accept-Language` check of the one-argument call is a recorded manual HTTP run (see the story spec), not a repeatable test.
+  one-argument call under a request language is checked only by the opt-in live gate, which a plain test run skips.
 
 ## [Pre-release — 2026-10-19] — Story 41.7: Skills pack docs and capstone
 

@@ -100,6 +100,21 @@ describe("Story 41.8: the CHANGELOG section and the changeset", () => {
     expect(text).toContain("`GetLanguages(\"%ObjectErrors\", \"s\")` and `GetLanguages(\"%Utility\", \"s\")` lists equal the 15 pins");
   });
 
+  it("Added and Tests record the opt-in live gate, its guard and the BaseTest handler pin (DW-635, DW-634)", () => {
+    const text = squash(section);
+    expect(text).toContain("**`story-41-8-qa-accept-language-live-gate.test.ts`**, an opt-in live gate in the `@iris-mcp/all` prepublish roster");
+    expect(text).toContain(
+      "it reaches an instance only when `IRIS_REQUIRE_LIVE=1` and all five of `IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD` and `IRIS_NAMESPACE` are set",
+    );
+    expect(text).toContain("deployed classes whose `BOOTSTRAP_VERSION` is not this tree's embed");
+    expect(text).toContain("**`story-41-8-qa-gate-guard.test.ts`** (default suite, no IRIS)");
+    expect(text).toContain("**`basetest-rest-handlers.test.ts`** (default suite)");
+    expect(text).toContain("and against `SafeText`'s pre-41.8 tail, which the OS class does not see");
+    expect(text).toContain("The guard test shows that an unarmed run sends no request.");
+    expect(text).toContain("is now `TestEveryRestHandlerExtendsBase`");
+    expect(text).toContain("that they equal the 19 the source tree holds, and `BaseTest` passes 7 of 7 again");
+  });
+
   it("Known limits records the shape-only rule and the Arabic-only diagram word", () => {
     const text = squash(section);
     expect(text).toContain("`StripErrorPrefix` reads a shape");
@@ -107,11 +122,12 @@ describe("Story 41.8: the CHANGELOG section and the changeset", () => {
     expect(text).toContain("`CleanStatusText` still normalizes only the Arabic word");
   });
 
-  it("Known limits records the stale language docs and the manual Accept-Language check", () => {
+  it("Known limits records the stale language docs and that only the opt-in gate checks a request language", () => {
     const text = squash(section);
     expect(text).toContain("The `IRIS_ACCEPT_LANGUAGE` text in `README.md` and `tool_support.md` still says");
     expect(text).toContain("that correction is left for a later docs story");
-    expect(text).toContain("is a recorded manual HTTP run (see the story spec), not a repeatable test");
+    expect(text).toContain("The one-argument call under a request language is checked only by the opt-in live gate, which a plain test run skips.");
+    expect(text).not.toContain("not a repeatable test");
   });
 
   // `changeset version` consumes (deletes) the file and moves its text into the generated package

@@ -1,6 +1,6 @@
 /// Unit tests for <class>ExecuteMCPv2.REST.Base</class>.
 /// <p>Covers the <method>RenderResponseBody</method> pre-flight override (Story 34.4,
-/// AC 34.4.1/34.4.4) and pins the 15-handler re-parenting + the explicit
+/// AC 34.4.1/34.4.4) and pins that every REST handler is re-parented onto Base, plus the explicit
 /// <class>ExecuteMCPv2.REST.Dispatch</class> non-re-parent decision.</p>
 /// <p>Captures device output using the same label-based mnemonic pattern as
 /// <class>ExecuteMCPv2.Tests.CommandTest</class>, bound to THIS class's own compiled
@@ -269,34 +269,43 @@ Method TestPreflightFailureSubstitutesMinimalErrorEnvelope() As %Status
     Quit $$$OK
 }
 
-/// Pins that EVERY ExecuteMCPv2.REST.* handler extends the new base class.
-/// <p>The ENUMERATION is mechanical, not hand-maintained (Rules #51/#56): the class
-/// list is read from <class>%Dictionary.ClassDefinition</class> at run time, so a
-/// 17th handler shipped tomorrow extending <class>%Atelier.REST</class> directly
-/// FAILS this test. An earlier revision asserted <method>%Extends</method> over a
-/// literal <code>$ListBuild</code> of 15 names closed by
-/// <code>$$$AssertEquals($ListLength(tHandlers), 15)</code> — a live hierarchy read
-/// over a dead enumeration, which cannot see a class nobody added to the literal and
-/// whose closing assertion compared a literal against its own length. The two
-/// deliberate exclusions are named explicitly and asserted below.</p>
-Method TestAllSixteenHandlersExtendBase() As %Status
+/// The handler classes of the source tree <code>src/ExecuteMCPv2/REST/</code>: every class there except
+/// <class>ExecuteMCPv2.REST.Base</class> and <class>ExecuteMCPv2.REST.Dispatch</class>, by short name, comma-joined in
+/// name order.
+/// <p><code>packages/iris-mcp-all/src/__tests__/basetest-rest-handlers.test.ts</code> asserts that this list equals the
+/// source tree, so a handler added there without this list turns that default-suite test red.</p>
+ClassMethod HandlerNames() As %String
 {
-    Set tCount = 0
+    Quit "Analytics,Command,Config,Coverage,EnvSync,Global,Health,Interop,Loc,MessageBody,MessageResend,MessageSearch,Monitor,Security,Sql,SqlAdvisor,SystemConfig,Task,UnitTest"
+}
+
+/// Pins that every <code>ExecuteMCPv2.REST.*</code> handler extends <class>ExecuteMCPv2.REST.Base</class>.
+/// <p>The handler set is derived from what is compiled: every <code>ExecuteMCPv2.REST.*</code> class in
+/// <class>%Dictionary.CompiledClass</class> except Base itself and <class>ExecuteMCPv2.REST.Dispatch</class>, the
+/// deliberate non-re-parent pinned by <method>TestDispatchDeliberatelyNotReParented</method>. Each one must extend
+/// Base, so a handler that extends <class>%Atelier.REST</class> directly fails here. The derived set must also equal
+/// <method>HandlerNames</method>, the source tree's handlers, so a handler missing from the instance, a compiled class
+/// the tree does not hold, or an enumeration that returned nothing fails, naming the difference.</p>
+Method TestEveryRestHandlerExtendsBase() As %Status
+{
     Set tStmt = ##class(%SQL.Statement).%New()
-    Set tSC = tStmt.%Prepare("SELECT Name FROM %Dictionary.ClassDefinition WHERE Name %STARTSWITH ? ORDER BY Name")
+    Set tSC = tStmt.%Prepare("SELECT Name FROM %Dictionary.CompiledClass WHERE Name %STARTSWITH ?")
     Do $$$AssertStatusOK(tSC, "the handler enumeration query must prepare")
     Set tRS = tStmt.%Execute("ExecuteMCPv2.REST.")
     While tRS.%Next() {
         Set tName = tRS.%Get("Name")
-        ; Base itself is the superclass; Dispatch is the deliberate non-re-parent
-        ; pinned by TestDispatchDeliberatelyNotReParented.
         If (tName = "ExecuteMCPv2.REST.Base") || (tName = "ExecuteMCPv2.REST.Dispatch") Continue
-        Set tCount = tCount + 1
+        Set tCompiled($Piece(tName, ".", 3, *)) = ""
         Do $$$AssertTrue($ClassMethod(tName, "%Extends", "ExecuteMCPv2.REST.Base"), tName_" must extend ExecuteMCPv2.REST.Base")
     }
-    ; The count is a cross-check on the mechanical enumeration itself: if the query
-    ; silently returned nothing, the loop above would vacuously pass.
-    Do $$$AssertEquals(tCount, 16, "exactly 16 ExecuteMCPv2.REST.* handlers (excluding Base and Dispatch) are expected")
+    Set tJoined = ""
+    Set tShort = ""
+    For {
+        Set tShort = $Order(tCompiled(tShort))
+        If tShort = "" Quit
+        Set tJoined = tJoined_$Select(tJoined = "": "", 1: ",")_tShort
+    }
+    Do $$$AssertEquals(tJoined, ..HandlerNames(), "the compiled ExecuteMCPv2.REST.* handlers (excluding Base and Dispatch) equal the source tree's")
     Quit $$$OK
 }
 

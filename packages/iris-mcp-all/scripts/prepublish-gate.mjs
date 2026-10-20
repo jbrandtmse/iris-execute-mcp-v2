@@ -285,6 +285,14 @@ const gateTestFiles = [
   // it is idle with no ownership node, and no process is terminated. No production is started, and the only production state asked for is the bare EXECMCPTMP405R's, which cannot be read. Writes EXECMCPTMP405Q and EXECMCPTMP405R (their database files too), Story405Q.*, Story405QX.* and
   // Story405R.* inside them, and ExecuteMCPv2.Temp.Story391Fixture, which it removes, asserting nothing is left.
   "src/__tests__/story-40-5-qa-live-gate.test.ts",
+  // Story 41.8, DW-635: the ONE-argument `Utils.SanitizeError` and `Coverage.Job:SafeText` under a non-English request language. Raw HTTP `GET /api/executemcp/v2/global`
+  // with no `global` parameter, `POST /api/executemcp/v2/classmethod` of `%SYSTEM.Status:GetErrorText` with no argument (a real `<UNDEFINED>` exception) and of
+  // `ExecuteMCPv2.Coverage.Job:SafeText` with one recorded text, each with `Accept-Language` fr, de, ja and the English control: exactly one prefix, in that language, the
+  // status read in that language, and the recorded text unchanged. Opt-in only: it reaches an instance only with IRIS_REQUIRE_LIVE plus all five of IRIS_HOST,
+  // IRIS_PORT, IRIS_USERNAME, IRIS_PASSWORD and IRIS_NAMESPACE set (this script sets the first; the caller sets the target), and armed it fails closed on an unset
+  // variable and on deployed classes whose BOOTSTRAP_VERSION is not this tree's embed. Writes nothing, creates no fixture, starts no production and no Line-by-Line
+  // session, and needs no built dist.
+  "src/__tests__/story-41-8-qa-accept-language-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: the 38.4, 38.5 and capstone gates each spawn a built dev server whose startup
