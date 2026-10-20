@@ -554,7 +554,7 @@ development_status:
   epic-43: in-progress
   43-1-framework-migration-to-sdk-v2: done
   43-2-serve-mcp-revision-2026-07-28: done
-  43-3-human-confirmation-through-elicitation: ready-for-dev
+  43-3-human-confirmation-through-elicitation: in-progress
   43-4-sdk-v2-docs-smokes-and-capstone: backlog
   epic-43-retrospective: optional
 action_items:
