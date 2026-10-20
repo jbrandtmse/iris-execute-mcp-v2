@@ -3449,6 +3449,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 41.6 implement 2026-10-19: the (once) sweep with no IRIS_* set ran 182 (third 0) and 195 (third 1) live-gate tests against the shared instance (no leftovers found); with IRIS_HOST=127.0.0.1 IRIS_PORT=1 they skip; epic35-defect-gate.test.ts:50 reads IRIS_HOST ?? localhost, as do the story-39/40 and epic38/40 capstone gates
 - 2026-10-19T22:31:15Z status=routed owner=42-2-bootstrap-downgrade-guard by=harvest note=same class as DW-518: a contributor's plain pnpm test must not touch an instance; gate every live leg on an explicit opt-in (IRIS_REQUIRE_LIVE or an IRIS_HOST the caller set) before 1.0, keeping the armed lead/CI runs
 - 2026-10-20T04:42:43Z status=routed owner=42-2-bootstrap-downgrade-guard by=lead note=reference: Story 41.8's story-41-8-qa-accept-language-live-gate.test.ts is the opt-in shape (legs run only with IRIS_REQUIRE_LIVE=1 and all five IRIS_*; a guard test proves zero requests unarmed); the prepublish gate must then export all five IRIS_* (42.6)
+- 2026-10-20T07:58:39Z occurrence=43-1-framework-migration-to-sdk-v2 note=the two launcher SDK-client tests (governanceUiRoundTrip, localSpawnIntegration) read IRIS_TEST_HOST/IRIS_TEST_PORT defaulting to localhost:52773 HSCUSTOM and ignore IRIS_HOST/IRIS_PORT; a 43.1 plan probe reached the shared instance through them (read-only)
 
 ### DW-628: The documented npx form npx -y @iris-mcp/client-config iris-mcp-clients <command> passes iris-mcp-clients to the CLI as its command (unknown-command once published) and carries no @1 pin
 - source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: med | fix-risk: low | footprint: out-of-footprint
@@ -3499,3 +3500,23 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-41-8-epic-41-burn-down.md | severity: low | fix-risk: med | footprint: in-story
 - evidence: src/ExecuteMCPv2/Utils.cls StripErrorPrefix doc ends 'every IRIS rendering begins with its own prefix'; the 41.8 CHANGELOG Known limits says 'its own prefix or with Unknown status code'; behavior is safe (such text has no ' #digits: ' head)
 - 2026-10-20T04:34:25Z status=wontfix-accepted owner=41-8-epic-41-burn-down by=cr note=comment-only; fixing it moves BOOTSTRAP_VERSION again; reopen_if=the next story editing Utils.cls leaves that sentence in place
+
+### DW-637: pnpm audit cannot see the ajv 8.18.0, ajv-formats and fast-uri 3.1.0 bundled into @modelcontextprotocol/server 2.3.1's dist; they load as the default JSON-schema validator used for elicitation, and fast-uri was behind 9 of v1's advisories
+- source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 43.1 plan probe 2026-10-20: @modelcontextprotocol/server@2.3.1 dist ajvProvider-*.mjs bundles them; pnpm audit --prod reads only the lockfile
+- 2026-10-20T07:58:39Z status=routed owner=43-3-human-confirmation-through-elicitation by=harvest note=43.3 enables elicitation, the only user of the bundled validator: check the published advisories against ajv 8.18.0 and fast-uri 3.1.0 and record the verdict (or supply a validator) before the dialog ships
+
+### DW-638: The v2-client code in five iris-mcp-all local-copy gates and two launcher integration tests has never run against a server: each skips unless IRIS is reachable
+- source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: 43.1 review (verification-gap, unverified): epic37-default-outage-gate, host-guard-process-gate, server-manager-process-gate, server-manager-precedence-gate, governance-file-process-gate, launcher localSpawnIntegration and governanceUiRoundTrip ran unarmed only
+- 2026-10-20T07:58:39Z status=open owner=43-1-framework-migration-to-sdk-v2 by=harvest note=the lead's 43.1 smoke runs them armed against the explicit shared target (read traffic; BOOTSTRAP_VERSION current so no deploy)
+
+### DW-639: The 43.1 sdk-wire golden embeds the whole tool catalogue and governance policy map, so any later tool/action/description change turns the default suite red, and its header test forbids recapturing from v2
+- source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 43.1 review: fixtures/sdk-wire-golden.json tools-list and call:server-profiles lines; story-43-1-sdk-wire-golden.test.ts header test
+- 2026-10-20T07:58:39Z status=routed owner=43-4-sdk-v2-docs-smokes-and-capstone by=harvest note=43.4 decides how the frozen v1 oracle retires once the catalogue legitimately changes (compare only what a migration can change, or hand the tools-list rows to the tools-list snapshot); 43.2 reuses it unchanged
+
+### DW-640: A tools/call result with both isError and structuredContent serializes its members in a different order on SDK v2 (content, structuredContent, isError)
+- source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: 43.1 review: the SDK Server re-encodes the owned handler's result in its schema order; JSON value identical; no public option keeps v1 order
+- 2026-10-20T07:58:39Z status=by-design owner=43-1-framework-migration-to-sdk-v2 by=harvest note=sanctioned AD-15 exception, wave-8 decision 4; pinned by the sdk-wire-compat row

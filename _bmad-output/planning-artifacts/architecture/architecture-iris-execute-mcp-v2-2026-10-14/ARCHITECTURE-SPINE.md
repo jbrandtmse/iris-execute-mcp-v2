@@ -320,6 +320,8 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - **Story 43.1** (wave-8 decisions #1 and #2):
       - a `prompts/get` that omits `arguments` renders like `{}` for a prompt whose arguments are all optional, where v1 refused it with -32602 (DW-617);
       - a schema-invalid `tools/call` now writes its one audit entry: `outcome` `error`, the raw top-level key names only, never `params` (DW-579, AD-19). This is an additive audit behavior; the wire is unchanged.
+      - a `tools/call` result that carries both `isError` and `structuredContent` serializes its members as `content`, `structuredContent`, `isError` (v1: `content`, `isError`, `structuredContent`). The JSON value is identical, JSON object members are unordered, and no public SDK v2 option keeps v1's order (wave-8 decision #4);
+      - `addTools` sends one `notifications/tools/list_changed` per call instead of one per tool plus one. Nothing in production calls `addTools` or `removeTools` (wave-8 decision #4).
 
     Each change may land in the earliest story that needs it, and is named in `CHANGELOG.md` with that story. Prune this list into the CHANGELOG at the Epic 42 retro.
   - **After `1.0.0`.** A breaking change requires a new major version. Clients pinned to `@1` receive every 1.x release automatically.

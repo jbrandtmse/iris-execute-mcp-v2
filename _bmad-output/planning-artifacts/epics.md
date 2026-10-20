@@ -5988,6 +5988,7 @@ Added on 2026-10-15 by Project Lead decision. Today's `confirm: true` gates are 
   - each gated tool's description and the README say that clients supporting elicitation ask the human;
   - the docs say that a Claude Code `Elicitation` hook can auto-answer, which is the user's choice;
   - the fallback is documented.
+- DW-637: `pnpm audit` cannot see the ajv 8.18.0, ajv-formats and fast-uri 3.1.0 bundled into `@modelcontextprotocol/server` 2.3.1's dist. They load as the default JSON-schema validator, which only elicitation uses, and fast-uri was behind 9 of v1's advisories. Before the dialog ships, check the published advisories against those exact versions, record the verdict, and supply a validator if one applies. (ledger; routed by harvest 2026-10-20)
 
 ### Story 43.4: SDK v2 Docs, Smokes and Capstone
 
@@ -6001,3 +6002,4 @@ Added on 2026-10-15 by Project Lead decision. Today's `confirm: true` gates are 
   - `CHANGELOG.md` and a changeset are updated;
   - the architecture spine's Stack rows, AD-32 and AD-34 are updated (Rule 20);
   - the PRD's MCP compliance line is updated.
+- DW-639: Story 43.1's frozen v1 wire golden (`fixtures/sdk-wire-golden.json`) embeds the whole tool catalogue and governance policy map, so any later tool, action or description change turns the default suite red, and its header test forbids recapturing it from v2. Decide how it retires once the catalogue legitimately changes: compare only what a migration can change, or hand the `tools/list` rows to the tools-list snapshot. (ledger; routed by harvest 2026-10-20)
