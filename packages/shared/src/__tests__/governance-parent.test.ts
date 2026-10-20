@@ -390,7 +390,12 @@ async function readResource(server: any, uri: string): Promise<{ policy: Record<
   >;
   const handler = handlers.get("resources/read");
   if (!handler) throw new Error("No resources/read handler");
-  const extra = { signal: new AbortController().signal, sendNotification: async () => {}, sendRequest: async () => ({}) };
+  const extra = {
+    signal: new AbortController().signal,
+    sendNotification: async () => {},
+    sendRequest: async () => ({}),
+    mcpReq: { requestState: () => undefined },
+  };
   const result = await handler({ method: "resources/read", params: { uri } }, extra);
   return JSON.parse(result.contents[0].text);
 }

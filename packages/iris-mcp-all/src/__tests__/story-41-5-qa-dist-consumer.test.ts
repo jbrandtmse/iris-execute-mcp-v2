@@ -12,10 +12,9 @@
  *
  * The rendered text of a prompt for `arguments: {}` is pinned to the bytes of the generated skills at 9ae509b (before the
  * skill-only field existed): the sha256 of the text after each skill's frontmatter, without its final newline, captured with
- * `git show 9ae509b:skills/<name>/SKILL.md`. The omitted-`arguments` refusal is the wire's behavior at that commit: it comes
- * from the SDK and from the argument advertisement of `prompts/list`, and neither changed. That refusal is the known SDK v1
- * limitation DW-617: the SDK v2 migration that renders an all-optional prompt from an omitted `arguments` inverts the two
- * rows that pin it (the SDK row and the raw-frame row, both titled with DW-617).
+ * `git show 9ae509b:skills/<name>/SKILL.md`. A `prompts/get` that omits `arguments` entirely renders exactly the same bytes
+ * (DW-617): the framework serves `prompts/get` itself and counts an omitted `arguments` as `{}`; the SDK row and the
+ * raw-frame row, both titled with DW-617, pin it.
  *
  * Every server is started with `default` pointing at 127.0.0.1:9, a closed local port, and no tool is called, so no IRIS
  * instance is reached. The file fails, never skips, when a dist is missing or older than its source.
@@ -23,15 +22,14 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { REPO_ROOT } from "./pack-fixture";
 import { connectionEnv, distEntry, inheritedEnv, type IrisTarget, openWireSession, resolveSdkEsmDir, staleDistReason, type WireSession } from "./process-gate-helpers.js";
-import { promptRejection, promptText } from "./prompt-gate-helpers.js";
+import { promptText } from "./prompt-gate-helpers.js";
+import { handshake, openRawWire } from "../../../../scripts/lib/sdk-wire-golden-core.mjs";
 import { declaredDescription, declaredPreset, freshPromptDefinitions, PRESET_ORDER, PROMPT_PACKAGE_COUNTS } from "./story-41-5-qa-fixture";
 
-const INVALID_PARAMS = -32602;
 const CLOSED_TARGET: IrisTarget = { host: "127.0.0.1", port: "9", username: "qa", password: "qa", namespace: "HSCUSTOM" };
 
 /** The prompts whose arguments are all optional, in the order their servers list them. */
@@ -71,55 +69,12 @@ interface RawWire {
   close: () => Promise<void>;
 }
 
-/** Start the built server and speak JSON-RPC to it over stdio by hand: one JSON object per line, no SDK. */
-async function openRawWire(entry: string): Promise<RawWire> {
-  const child: ChildProcessWithoutNullStreams = spawn(process.execPath, [entry], {
-    env: { ...inheritedEnv(), ...connectionEnv(CLOSED_TARGET) },
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  const waiting = new Map<number, (frame: RawFrame) => void>();
-  let buffer = "";
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (chunk: string) => {
-    buffer += chunk;
-    for (let at = buffer.indexOf("\n"); at >= 0; at = buffer.indexOf("\n")) {
-      const line = buffer.slice(0, at);
-      buffer = buffer.slice(at + 1);
-      if (line.trim() === "") continue;
-      const message = JSON.parse(line) as RawFrame["message"];
-      if (typeof message.id === "number") waiting.get(message.id)?.({ line, message });
-    }
-  });
-  child.stderr.resume();
-  let nextId = 1;
-  const request = (method: string, params: Record<string, unknown> = {}): Promise<RawFrame> =>
-    new Promise<RawFrame>((resolve, reject) => {
-      const id = nextId++;
-      const timer = setTimeout(() => reject(new Error(`no answer to ${method} within 30 s`)), 30_000);
-      waiting.set(id, (frame) => {
-        clearTimeout(timer);
-        resolve(frame);
-      });
-      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
-    });
-  const initialized = await request("initialize", {
-    protocolVersion: "2025-06-18",
-    capabilities: {},
-    clientInfo: { name: "story-41-5-qa-raw", version: "0.0.0" },
-  });
+/** Start the built server and speak JSON-RPC to it over stdio by hand (the golden's driver): one JSON object per line, no SDK. */
+async function openRawSession(entry: string): Promise<RawWire> {
+  const wire = openRawWire({ entry, env: { ...inheritedEnv(), ...connectionEnv(CLOSED_TARGET) } });
+  const initialized = await handshake(wire, "2025-06-18", "story-41-5-qa-raw");
   expect(initialized.message.error, "the server accepted the handshake").toBeUndefined();
-  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
-  return {
-    request,
-    close: async () => {
-      child.stdin.end();
-      child.kill();
-      await new Promise<void>((resolve) => {
-        if (child.exitCode !== null || child.signalCode !== null) resolve();
-        else child.once("exit", () => resolve());
-      });
-    },
-  };
+  return wire as RawWire;
 }
 
 const sdk = new Map<string, WireSession>();
@@ -127,14 +82,14 @@ const raw = new Map<string, RawWire>();
 
 beforeAll(async () => {
   const sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
-  if (!sdkEsmDir) throw new Error("Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm - run pnpm install.");
+  if (!sdkEsmDir) throw new Error("Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm - run pnpm install.");
   const stale = ["shared", ...PROMPT_PACKAGE_COUNTS.map(([pkg]) => pkg)]
     .map((pkg) => [pkg, staleDistReason(REPO_ROOT, pkg)] as const)
     .filter(([, reason]) => reason !== undefined);
   if (stale.length > 0) throw new Error(`Build the packages first: ${stale.map(([pkg, reason]) => `${pkg}: ${reason}`).join("; ")}`);
   for (const [pkg] of PROMPT_PACKAGE_COUNTS) {
     sdk.set(pkg, await openWireSession({ sdkEsmDir, entry: distEntry(REPO_ROOT, pkg), target: CLOSED_TARGET, clientName: "story-41-5-qa-consumer" }));
-    raw.set(pkg, await openRawWire(distEntry(REPO_ROOT, pkg)));
+    raw.set(pkg, await openRawSession(distEntry(REPO_ROOT, pkg)));
   }
 }, 180_000);
 
@@ -208,17 +163,15 @@ describe("a real SDK client over stdio: prompts/get with `arguments` omitted ent
     expect(found.sort()).toEqual([...ALL_OPTIONAL].sort());
   });
 
-  it.each(PROMPT_PACKAGE_COUNTS)("%s: an all-optional prompt asked with no `arguments` key is an InvalidParams naming it (DW-617), and the connection answers the next request", async (pkg) => {
+  it.each(PROMPT_PACKAGE_COUNTS)("%s: an all-optional prompt asked with no `arguments` key renders exactly as with `arguments: {}` (DW-617), and the connection answers the next request", async (pkg) => {
     const session = sdkOf(pkg);
     const inPackage = ((await session.listPrompts()) as ListedPrompt[]).map((prompt) => prompt.name).filter((name) => ALL_OPTIONAL.includes(name));
     for (const name of inPackage) {
-      const refused = await promptRejection(session, { name });
-      expect(refused, `${name} omitted arguments`).toBeDefined();
-      expect(refused?.code, `${name} omitted arguments`).toBe(INVALID_PARAMS);
-      expect(refused?.message, `${name} omitted arguments`).toContain(name);
-      expect(refused?.message, `${name} refusal names no skill field`).not.toMatch(/skill|iris-tools-preset/i);
+      const omitted = promptText(await session.getPrompt({ name }));
+      expect(sha256Hex(omitted), `${name} omitted arguments`).toBe(BASELINE_BODY_SHA256[name]);
+      expect(omitted, `${name} omitted arguments equal an empty arguments object`).toBe(promptText(await session.getPrompt({ name, arguments: {} })));
       const next = await session.listPrompts();
-      expect(next.map((prompt) => prompt.name), `${pkg} still lists after the refusal of ${name}`).toContain(name);
+      expect(next.map((prompt) => prompt.name), `${pkg} still lists after ${name}`).toContain(name);
     }
   });
 
@@ -266,16 +219,15 @@ describe("the raw JSON-RPC frames of the built servers, read without the SDK (AD
     }
   });
 
-  it.each(PROMPT_PACKAGE_COUNTS)("%s: a prompts/get frame with no `arguments` member is an error frame naming the prompt for an all-optional prompt (DW-617), and `{}` renders the baseline bytes", async (pkg) => {
+  it.each(PROMPT_PACKAGE_COUNTS)("%s: a prompts/get frame with no `arguments` member renders the same frame as `{}` for an all-optional prompt (DW-617), and both are the baseline bytes", async (pkg) => {
     const names = ((await sdkOf(pkg).listPrompts()) as ListedPrompt[]).map((prompt) => prompt.name).filter((name) => ALL_OPTIONAL.includes(name));
     for (const name of names) {
       const omitted = await rawOf(pkg).request("prompts/get", { name });
-      expect(omitted.message.result, `${name} omitted arguments renders nothing`).toBeUndefined();
-      expect(omitted.message.error?.code, `${name} omitted arguments`).toBe(INVALID_PARAMS);
-      expect(omitted.message.error?.message, `${name} omitted arguments`).toContain(name);
+      expect(omitted.message.error, `${name} omitted arguments renders`).toBeUndefined();
       const empty = await rawOf(pkg).request("prompts/get", { name, arguments: {} });
       const text = (empty.message.result as { messages: Array<{ content: { text: string } }> }).messages[0]?.content.text ?? "";
       expect(sha256Hex(text), `${name} with an empty arguments object`).toBe(BASELINE_BODY_SHA256[name]);
+      expect(JSON.stringify(omitted.message.result), `${name} omitted arguments equal an empty arguments object`).toBe(JSON.stringify(empty.message.result));
     }
   });
 });

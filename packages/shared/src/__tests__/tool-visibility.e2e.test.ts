@@ -9,11 +9,11 @@
  * actually sees (`tools/list`, `tools/call`), and the seams a per-behavior
  * unit test cannot see in isolation:
  *
- *  1. A hidden tool is genuinely absent from the SDK's OWN `tools/list`
+ *  1. A hidden tool is genuinely absent from the real `tools/list`
  *     response (not just from the framework's internal registry helper),
  *     and its `tools/call` failure is STRUCTURALLY IDENTICAL to calling a
  *     name that was never passed to `options.tools` at all — proving it is
- *     the SDK's own standard branch, not a bespoke "hidden tool" code path.
+ *     the standard unknown-tool branch, not a bespoke "hidden tool" code path.
  *  2. The `IRIS_TOOLS_DISABLE=iris_x_*` + `IRIS_TOOLS_ENABLE=iris_x_get`
  *     family hole-punch, observed on the real wire (`tools/list` AND
  *     `tools/call`), not just the pure `resolveVisibleTools` function.
@@ -104,6 +104,7 @@ async function callRequest(server: any, method: string, params: unknown) {
     signal: new AbortController().signal,
     sendNotification: async () => {},
     sendRequest: async () => ({}),
+    mcpReq: { requestState: () => undefined },
   };
   return handler({ method, params }, extra);
 }
@@ -115,7 +116,7 @@ async function wireToolNames(server: any): Promise<string[]> {
   return (result.tools as Array<{ name: string }>).map((t) => t.name);
 }
 
-/** `tools/call` over the real wire (the SDK's own dispatch — not the framework's internal callback map). */
+/** `tools/call` over the real wire (the framework's registered request handler — not the internal callback map). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function wireCallTool(server: any, name: string, args: unknown = {}) {
   return callRequest(server, "tools/call", { name, arguments: args });

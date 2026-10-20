@@ -201,7 +201,7 @@ export async function captureToolsList(root) {
   });
 
   return {
-    sdkVersion: installedVersion(root, '@modelcontextprotocol/sdk'),
+    sdkVersion: installedVersion(root, '@modelcontextprotocol/server'),
     zodVersion: installedVersion(root, 'zod'),
     entryCount,
     servers: canonicalize(servers),

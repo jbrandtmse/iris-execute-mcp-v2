@@ -26,7 +26,7 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 
 ### MCP Server Base
 
-- **`McpServerBase`** -- Abstract base class for all IRIS MCP servers. Handles tool registration, input validation (Zod), stdio transport setup, health checking, and auto-bootstrap of custom REST classes.
+- **`McpServerBase`** -- Abstract base class for all IRIS MCP servers. Handles tool registration, input validation (Zod), stdio transport setup, health checking, and auto-bootstrap of custom REST classes. It owns the `tools/list`, `tools/call`, `prompts/get` and `resources/read` handlers on top of the MCP SDK v2, and its protocol errors are SDK `ProtocolError`s.
 - **`McpServerBaseOptions`** (type) -- Options for constructing an MCP server (name, version, tool definitions).
 - **`ToolDefinition`** (type) -- Tool definition interface including name, title, description, inputSchema (Zod), annotations, scope, and handler function.
 - **`ToolContext`** (type) -- Context passed to tool handlers: HTTP client, Atelier version, namespace resolver, paginator.
@@ -158,6 +158,8 @@ All five IRIS MCP server packages depend on `@iris-mcp/shared`:
 ```
 
 The shared package provides the HTTP communication layer, MCP protocol handling, and tool registration framework. Each server package defines its own tools (name, schema, handler) and passes them to `McpServerBase` for registration.
+
+`@iris-mcp/shared` is the only package that imports the MCP SDK. It runs on the SDK v2 server package (`@modelcontextprotocol/server`, pinned to an exact version), and `McpServerBase` serves `tools/list`, `tools/call`, `prompts/get` and `resources/read` itself, through the SDK's public `setRequestHandler`, so the bytes a 2025-11-25 client reads do not depend on how the SDK formats them. A `tools/call` is validated inside the audited call path, so a schema-invalid call writes its audit entry.
 
 The connection flow is:
 1. Server starts and loads configuration from environment variables

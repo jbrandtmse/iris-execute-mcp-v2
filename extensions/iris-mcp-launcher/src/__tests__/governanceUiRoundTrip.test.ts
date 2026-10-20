@@ -79,7 +79,11 @@ async function isIrisReachable(): Promise<boolean> {
   }
 }
 
-/** Mirror of the iris-mcp-all process gates' SDK resolution (pnpm store layout, iterated to exhaustion). */
+/**
+ * The ESM build of `@modelcontextprotocol/client` (its `dist/`, holding `index.mjs` and `stdio.mjs`) in the monorepo's
+ * pnpm store, iterated to exhaustion. The extension is outside the workspace and cannot import the iris-mcp-all test
+ * helper that does the same, so this file keeps its own copy.
+ */
 function resolveSdkEsmDir(): string | undefined {
   const pnpmDir = path.join(REPO_ROOT, "node_modules", ".pnpm");
   if (!existsSync(pnpmDir)) return undefined;
@@ -90,7 +94,7 @@ function resolveSdkEsmDir(): string | undefined {
     return undefined;
   }
   const candidates = entries
-    .filter((name) => name.startsWith("@modelcontextprotocol+sdk@"))
+    .filter((name) => name.startsWith("@modelcontextprotocol+client@"))
     .sort();
   for (const candidate of candidates) {
     const esmDir = path.join(
@@ -98,11 +102,10 @@ function resolveSdkEsmDir(): string | undefined {
       candidate,
       "node_modules",
       "@modelcontextprotocol",
-      "sdk",
+      "client",
       "dist",
-      "esm",
     );
-    if (existsSync(esmDir)) return esmDir;
+    if (existsSync(path.join(esmDir, "index.mjs")) && existsSync(path.join(esmDir, "stdio.mjs"))) return esmDir;
   }
   return undefined;
 }
@@ -184,7 +187,7 @@ beforeAll(async () => {
   sdkEsmDir = resolveSdkEsmDir();
   if (!sdkEsmDir) {
     skipReason =
-      "Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm — run pnpm install from the repo root.";
+      "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm — run pnpm install from the repo root.";
     return;
   }
   if (!(await isIrisReachable())) {
@@ -216,8 +219,8 @@ async function withServer(
   extraEnv: Record<string, string>,
   fn: (client: SdkClient) => Promise<void>,
 ): Promise<void> {
-  const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "client", "index.js")).href;
-  const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "client", "stdio.js")).href;
+  const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "index.mjs")).href;
+  const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "stdio.mjs")).href;
   const { Client } = (await import(sdkClientIndex)) as {
     Client: new (info: { name: string; version: string }) => SdkClient;
   };

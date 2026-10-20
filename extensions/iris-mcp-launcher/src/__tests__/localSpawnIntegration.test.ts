@@ -13,7 +13,7 @@
  *      `withOwnedVarsCleared` — to produce the REAL spawn env for a live IRIS
  *      connection.
  *   3. Spawns that command/args/env as a genuine child process via the real
- *      `@modelcontextprotocol/sdk` `StdioClientTransport`, completes a real
+ *      `@modelcontextprotocol/client` `StdioClientTransport`, completes a real
  *      `initialize` handshake with the real SDK `Client`, calls `listTools()`,
  *      and calls one read-only tool (`iris_server_info`, zero required args —
  *      `packages/iris-dev-mcp/src/tools/server.ts`) that reaches live IRIS
@@ -82,14 +82,16 @@ function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
 }
 
 /**
- * Resolve the ESM entry points of the installed `@modelcontextprotocol/sdk`
+ * Resolve the ESM entry points of the installed `@modelcontextprotocol/client`
  * WITHOUT hardcoding a version-pinned path (story Dev Notes: "resolve it
  * dynamically; do not hardcode a version-pinned path that will rot"). It
  * lives under the pnpm STORE layout —
- * `node_modules/.pnpm/@modelcontextprotocol+sdk@<version>_<peer-hash>/node_modules/@modelcontextprotocol/sdk/dist/esm/`
- * — not the flat `node_modules/@modelcontextprotocol/sdk` this extension's
- * OWN `node_modules` would use (it has no such dependency at all; this SDK
- * is only ever a transitive dependency of the monorepo's own packages).
+ * `node_modules/.pnpm/@modelcontextprotocol+client@<version>/node_modules/@modelcontextprotocol/client/dist/`
+ * — not the flat `node_modules/@modelcontextprotocol/client` this extension's
+ * OWN `node_modules` would use (it has no such dependency at all; the client
+ * is only ever a devDependency of the monorepo's own packages). The extension
+ * is outside the workspace and cannot import the iris-mcp-all test helper that
+ * does the same, so this file keeps its own copy.
  */
 function resolveSdkEsmDir(): string | undefined {
   const pnpmDir = path.join(REPO_ROOT, "node_modules", ".pnpm");
@@ -104,12 +106,12 @@ function resolveSdkEsmDir(): string | undefined {
 
   // Sorted for determinism and iterated to exhaustion: pnpm's store holds one
   // directory per (version, peer-hash) pair, so a version bump or a peer-dep
-  // split routinely yields several `@modelcontextprotocol+sdk@…` entries in
-  // readdir order. Taking `find()`'s first hit and giving up if ITS dist/esm is
+  // split routinely yields several `@modelcontextprotocol+client@…` entries in
+  // readdir order. Taking `find()`'s first hit and giving up if ITS dist is
   // absent would silently skip this whole test — and a skip is indistinguishable
   // from "IRIS is not running", so the rot would never be noticed.
   const candidates = entries
-    .filter((name) => name.startsWith("@modelcontextprotocol+sdk@"))
+    .filter((name) => name.startsWith("@modelcontextprotocol+client@"))
     .sort();
 
   for (const candidate of candidates) {
@@ -118,11 +120,10 @@ function resolveSdkEsmDir(): string | undefined {
       candidate,
       "node_modules",
       "@modelcontextprotocol",
-      "sdk",
+      "client",
       "dist",
-      "esm",
     );
-    if (existsSync(esmDir)) return esmDir;
+    if (existsSync(path.join(esmDir, "index.mjs")) && existsSync(path.join(esmDir, "stdio.mjs"))) return esmDir;
   }
   return undefined;
 }
@@ -143,7 +144,7 @@ async function isIrisReachable(): Promise<boolean> {
  * `withOwnedVarsCleared()`'s `null` entries mean "remove this variable" in
  * VS Code's `McpStdioServerDefinition.env` contract — but the real SDK
  * `StdioClientTransport` has no such convention; it merges `{
- * ...getDefaultEnvironment(), ...server.env }` verbatim (`client/stdio.js`),
+ * ...getDefaultEnvironment(), ...server.env }` verbatim (`stdio.mjs`),
  * so a `null` value would reach `cross-spawn` and get coerced to the literal
  * string `"null"`. Deleting the null-valued keys (never stringifying them)
  * is the correct real-process equivalent (story Dev Notes).
@@ -213,8 +214,8 @@ async function connectClient(
   planned: { command: string; args: string[] },
   spawnEnv: Record<string, string>,
 ): Promise<SdkClient> {
-  const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "client", "index.js")).href;
-  const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "client", "stdio.js")).href;
+  const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "index.mjs")).href;
+  const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "stdio.mjs")).href;
   const { Client } = (await import(sdkClientIndex)) as {
     Client: new (info: { name: string; version: string }) => SdkClient;
   };
@@ -247,7 +248,7 @@ beforeAll(async () => {
   sdkEsmDir = resolveSdkEsmDir();
   if (!sdkEsmDir) {
     skipReason =
-      "Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm — " +
+      "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm — " +
       "run pnpm install from the repo root.";
     return;
   }

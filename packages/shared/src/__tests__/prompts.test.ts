@@ -109,6 +109,7 @@ async function callRequest(server: any, method: string, params: unknown) {
     signal: new AbortController().signal,
     sendNotification: async () => {},
     sendRequest: async () => ({}),
+    mcpReq: { requestState: () => undefined },
   };
   return handler({ method, params }, extra);
 }
@@ -317,14 +318,13 @@ describe("Story 25.0 — prompts/get render (AC 25.0.2)", () => {
 });
 
 // ════════════════════════════════════════════════════════════════════
-// CR 25.1-6 (closed-by-decision, Story 26.4) — documented SDK limitation:
-// an ALL-OPTIONAL-argument prompt tolerates `arguments: {}` but rejects a
-// `prompts/get` that omits the `arguments` key ENTIRELY. Pinned here as the
-// accepted/documented behavior (see the `registerPrompt` doc comment), not a
-// regression target.
+// DW-617 (Story 43.1) - an ALL-OPTIONAL-argument prompt renders from a
+// `prompts/get` that omits the `arguments` key ENTIRELY exactly as it renders
+// from `arguments: {}`: the framework serves `prompts/get` itself and counts an
+// omitted `arguments` as `{}`.
 // ════════════════════════════════════════════════════════════════════
 
-describe("Story 26.4 — CR 25.1-6: documented SDK limitation for all-optional-arg prompts", () => {
+describe("Story 43.1 - DW-617: all-optional-arg prompts render from an omitted `arguments`", () => {
   it("renders correctly when the optional-args prompt is called with arguments:{}", async () => {
     const server = new McpServerBase(makeServerOpts(FIXTURE_PROMPTS));
     const result = await callRequest(server, "prompts/get", {
@@ -334,12 +334,16 @@ describe("Story 26.4 — CR 25.1-6: documented SDK limitation for all-optional-a
     expect(result.messages[0].content.text).toBe("detail=(none)");
   });
 
-  it("rejects cleanly (InvalidParams) when `arguments` is omitted ENTIRELY (no key at all)", async () => {
+  it("renders exactly as arguments:{} does when `arguments` is omitted ENTIRELY (no key at all)", async () => {
     const server = new McpServerBase(makeServerOpts(FIXTURE_PROMPTS));
+    const withEmpty = await callRequest(server, "prompts/get", {
+      name: "fixture-optional-arg",
+      arguments: {},
+    });
     // No `arguments` key at all -- distinct from `arguments: {}` above.
-    await expect(
-      callRequest(server, "prompts/get", { name: "fixture-optional-arg" }),
-    ).rejects.toMatchObject({ code: -32602 }); // ErrorCode.InvalidParams
+    const omitted = await callRequest(server, "prompts/get", { name: "fixture-optional-arg" });
+    expect(omitted).toEqual(withEmpty);
+    expect(omitted.messages[0].content.text).toBe("detail=(none)");
   });
 });
 
@@ -394,7 +398,7 @@ describe("Story 25.0 — per-server prompt assignment (AC 25.0.3)", () => {
 
 // ════════════════════════════════════════════════════════════════════
 // CR 25.0-4 (resolved Story 26.4) — a throwing build() is contained as a
-// clean, prompt-named McpError(InternalError), not an opaque raw -32603.
+// clean, prompt-named ProtocolError(InternalError), not an opaque raw -32603.
 // ════════════════════════════════════════════════════════════════════
 
 describe("Story 26.4 — CR 25.0-4: registerPrompt render containment", () => {
@@ -408,12 +412,12 @@ describe("Story 26.4 — CR 25.0-4: registerPrompt render containment", () => {
     },
   };
 
-  it("wraps a build() throw as a clean, prompt-named McpError(InternalError)", async () => {
+  it("wraps a build() throw as a clean, prompt-named ProtocolError(InternalError)", async () => {
     const server = new McpServerBase(makeServerOpts([throwingPrompt]));
     await expect(
       callRequest(server, "prompts/get", { name: "fixture-throwing", arguments: {} }),
     ).rejects.toMatchObject({
-      code: -32603, // ErrorCode.InternalError
+      code: -32603, // ProtocolErrorCode.InternalError
       message: expect.stringContaining("fixture-throwing"),
     });
     await expect(

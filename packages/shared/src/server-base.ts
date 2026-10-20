@@ -12,14 +12,15 @@ import { access } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { dirname } from "node:path";
 
-import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { McpServer, ProtocolErrorCode, ResourceTemplate } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import type {
   CallToolResult,
   ReadResourceResult,
   GetPromptResult,
-} from "@modelcontextprotocol/sdk/types.js";
-import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+  RegisteredTool,
+  Variables,
+} from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { ZodObject } from "zod";
 
@@ -93,6 +94,16 @@ import {
   resolveVisibleTools,
   assertPresetCoverage,
 } from "./tool-visibility.js";
+import type { ListedTool } from "./sdk-wire-compat.js";
+import {
+  checkWireInput,
+  checkWireOutput,
+  listedTool,
+  protocolError,
+  toolErrorResult,
+  v1ProtocolErrorText,
+  wireInputSchema,
+} from "./sdk-wire-compat.js";
 
 /** Default page size for tools/list pagination. */
 const DEFAULT_PAGE_SIZE = 50;
@@ -208,6 +219,25 @@ export interface McpServerBaseOptions {
 
 // PaginateResult is defined in tool-types.ts and re-exported from index.ts.
 export type { PaginateResult } from "./tool-types.js";
+
+/**
+ * A registered prompt as the framework's own `prompts/get` serves it: the render function and, for a prompt
+ * that declares arguments, the object schema that checks `arguments`. A prompt that declares none has no schema
+ * and ignores whatever `arguments` the request carries.
+ */
+interface PromptEntry {
+  render: (args: Record<string, string | undefined>) => GetPromptResult;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  argsSchema: ZodObject<any> | undefined;
+}
+
+/** A resource as the framework's own `resources/read` serves it: one exact URI, or every URI a template matches. */
+type ResourceReader =
+  | { kind: "exact"; uri: string; read: (uri: URL) => ReadResourceResult }
+  | { kind: "template"; template: ResourceTemplate; read: (uri: URL, variables: Variables) => ReadResourceResult };
+
+/** The paths into `handleToolCall`: the SDK-registered callback (in-process), and the wire request. */
+type ToolCallSource = "callback" | "wire";
 
 /**
  * Encode a pagination cursor from an offset number.
@@ -350,6 +380,21 @@ export class McpServerBase {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly extendedSchemas: Map<string, ZodObject<any>> = new Map();
+  /**
+   * Per-tool schema for the wire validation of a `tools/call`: the fields of the extended input schema without
+   * any refinement on the whole object (see {@link wireInputSchema}). Keyed by tool name, like
+   * {@link extendedSchemas}.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly wireSchemas: Map<string, ZodObject<any>> = new Map();
+  /** The `tools/list` entry of each tool, built on first use. Keyed by tool name. */
+  private readonly listedTools: Map<string, ListedTool> = new Map();
+  /** The SDK's handle on each registered tool, so a removed tool leaves the SDK registry through its public `remove()`. */
+  private readonly sdkTools: Map<string, RegisteredTool> = new Map();
+  /** The registered prompts, by name, for the framework's own `prompts/get`. */
+  private readonly promptEntries: Map<string, PromptEntry> = new Map();
+  /** The registered resources, in registration order, for the framework's own `resources/read`. */
+  private readonly resourceReaders: ResourceReader[] = [];
   /**
    * The default profile's connection config (the `IRIS_*`-derived config).
    * Retained under its original name so existing single-server behavior — and
@@ -574,6 +619,9 @@ export class McpServerBase {
         // connect time; reinforces the call-first guidance also in the discovery
         // tool's own description. Generic across all five servers.
         instructions: SERVER_DISCOVERY_INSTRUCTIONS,
+        // The SDK announces a change each time a tool is registered or removed; a call that changes
+        // several tools in one turn (addTools, removeTools) announces it once.
+        debouncedNotificationMethods: ["notifications/tools/list_changed"],
       },
     );
 
@@ -651,8 +699,8 @@ export class McpServerBase {
 
     // Register all initial tools — filtered to the visible subset (Epic 30).
     // A hidden tool never reaches registerTool: it is absent from the SDK
-    // registry, from tools/list, and uncallable (the SDK's own standard
-    // unknown-tool error). The governance rebuilds below
+    // registry, from tools/list, and uncallable (the standard unknown-tool
+    // result of the framework's tools/call). The governance rebuilds below
     // (rebuildMutatesLookup/rebuildGovernedKeys/assertGovernanceClassified)
     // read the live `this.tools` registry, which — because of this filter —
     // never contains a hidden tool's key: a hidden tool is invisible to
@@ -708,8 +756,8 @@ export class McpServerBase {
     this.registerGovernanceResource();
 
     // Register prompts (Story 25.0, framework plumbing for the Agent Skills
-    // Pack). Kept LAST in constructor ordering — after tool/discovery
-    // registration and the governance resource wiring — because prompts are
+    // Pack). Kept after tool/discovery registration and the governance
+    // resource wiring (and before the wire handlers are installed) because prompts are
     // independent of the governance machinery: they carry no `mutates`
     // classification and must not perturb the governed-key rebuilds above.
     //
@@ -725,6 +773,110 @@ export class McpServerBase {
     for (const prompt of options.prompts ?? []) {
       this.registerPrompt(prompt);
     }
+
+    // Install the framework's own handlers for the four methods whose SDK-served bytes differ from the
+    // 2025-11-25 wire (see sdk-wire-compat.ts). They come last: the SDK installs its own handlers when
+    // the first tool, resource or prompt is registered, and these replace them.
+    this.installWireHandlers();
+  }
+
+  /**
+   * Serve `tools/list`, `tools/call`, `prompts/get` and `resources/read` from the framework's own state, so
+   * the 2025-11-25 wire stays byte-identical (AD-15, AD-32). `prompts/get` is installed only when a prompt is
+   * registered, because the SDK advertises the `prompts` capability only then.
+   *
+   * The handlers read {@link tools}, {@link promptEntries} and {@link resourceReaders} at request time, so a
+   * tool added or removed later is served without reinstalling anything.
+   */
+  private installWireHandlers(): void {
+    const sdkServer = this.mcpServer.server;
+    sdkServer.setRequestHandler("tools/list", () => ({
+      tools: [...this.tools.values()].map((tool) => this.listedToolOf(tool)),
+    }));
+    sdkServer.setRequestHandler("tools/call", (request) => this.callToolFromWire(request.params));
+    sdkServer.setRequestHandler("resources/read", (request) => this.readResourceFromWire(request.params.uri));
+    if (this.promptEntries.size > 0) {
+      sdkServer.setRequestHandler("prompts/get", (request) => this.getPromptFromWire(request.params));
+    }
+  }
+
+  /** The `tools/list` entry of a registered tool, built once. */
+  private listedToolOf(tool: ToolDefinition): ListedTool {
+    const cached = this.listedTools.get(tool.name);
+    if (cached) return cached;
+    const extended = this.extendedSchemas.get(tool.name);
+    if (!extended) {
+      throw new Error(`Tool "${tool.name}" is not fully registered (missing extended schema).`);
+    }
+    const entry = listedTool(tool, extended);
+    this.listedTools.set(tool.name, entry);
+    return entry;
+  }
+
+  /**
+   * A `tools/call` request off the wire. A name that is not registered, or is hidden, gets the in-band error
+   * result for an unknown tool and nothing is audited (so a hidden name is never disclosed). Otherwise the
+   * call runs through {@link handleToolCall} as a wire call, and a declared `outputSchema` is checked on
+   * the way out. Anything that throws becomes an in-band error result.
+   */
+  private async callToolFromWire(params: {
+    name: string;
+    arguments?: Record<string, unknown> | undefined;
+  }): Promise<CallToolResult> {
+    const tool = this.tools.get(params.name);
+    if (!tool) {
+      return toolErrorResult(
+        v1ProtocolErrorText(ProtocolErrorCode.InvalidParams, `Tool ${params.name} not found`),
+      );
+    }
+    try {
+      const result = await this.handleToolCall(tool, params.arguments, "wire");
+      const outputProblem = checkWireOutput(tool.name, tool, result);
+      return outputProblem === undefined ? result : toolErrorResult(outputProblem);
+    } catch (error: unknown) {
+      return toolErrorResult(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /**
+   * A `prompts/get` request off the wire. `arguments` omitted counts as `{}`. A prompt that declares
+   * arguments has them checked against its schema; a prompt that declares none ignores them.
+   */
+  private getPromptFromWire(params: {
+    name: string;
+    arguments?: Record<string, string> | undefined;
+  }): GetPromptResult {
+    const entry = this.promptEntries.get(params.name);
+    if (!entry) {
+      throw protocolError(ProtocolErrorCode.InvalidParams, `Prompt ${params.name} not found`);
+    }
+    if (entry.argsSchema === undefined) return entry.render({});
+    const parsed = entry.argsSchema.safeParse(params.arguments ?? {});
+    if (!parsed.success) {
+      throw protocolError(
+        ProtocolErrorCode.InvalidParams,
+        `Invalid arguments for prompt ${params.name}: ${parsed.error.message}`,
+      );
+    }
+    return entry.render(parsed.data as Record<string, string | undefined>);
+  }
+
+  /**
+   * A `resources/read` request off the wire. An exact URI wins over a template, and the first template whose
+   * pattern matches serves the rest.
+   */
+  private readResourceFromWire(rawUri: string): ReadResourceResult {
+    const uri = new URL(rawUri);
+    const text = uri.toString();
+    for (const reader of this.resourceReaders) {
+      if (reader.kind === "exact" && reader.uri === text) return reader.read(uri);
+    }
+    for (const reader of this.resourceReaders) {
+      if (reader.kind !== "template") continue;
+      const variables = reader.template.uriTemplate.match(text);
+      if (variables) return reader.read(uri, variables);
+    }
+    throw protocolError(ProtocolErrorCode.InvalidParams, `Resource ${uri} not found`);
   }
 
   /**
@@ -839,14 +991,14 @@ export class McpServerBase {
    * default resource and the per-profile template read callbacks.
    *
    * Resolves the profile name against the registry FIRST so an unknown profile
-   * surfaces a structured {@link McpError} (mapped from {@link ProfileResolutionError})
+   * surfaces a structured protocol error (mapped from {@link ProfileResolutionError})
    * rather than silently returning a default-shaped map or crashing the server.
    * The default profile always resolves (it is reserved), so the static
    * `iris-governance://default` resource never errors on resolution.
    *
    * @param profileName - The profile whose effective policy to report.
    * @param uri         - The resource URI (echoed into the result `contents`).
-   * @throws {McpError} (InvalidParams) when `profileName` is not a registered profile.
+   * @throws {ProtocolError} (InvalidParams) when `profileName` is not a registered profile.
    */
   private buildGovernancePolicyResult(
     profileName: string,
@@ -861,13 +1013,13 @@ export class McpServerBase {
         resolveProfile(this.profiles, profileName);
       } catch (error: unknown) {
         if (error instanceof ProfileResolutionError) {
-          throw new McpError(ErrorCode.InvalidParams, error.message);
+          throw protocolError(ProtocolErrorCode.InvalidParams, error.message);
         }
         throw error;
       }
     } else if (profileName !== DEFAULT_PROFILE_NAME) {
-      throw new McpError(
-        ErrorCode.InvalidParams,
+      throw protocolError(
+        ProtocolErrorCode.InvalidParams,
         `Unknown server profile "${profileName}". The server is not yet initialised; only "${DEFAULT_PROFILE_NAME}" is available.`,
       );
     }
@@ -928,12 +1080,16 @@ export class McpServerBase {
    *   read, not enumeration of every profile); the SDK requires the field to be
    *   passed explicitly even when undefined.
    *
-   * Registering either resource auto-wires the SDK's `resources/list`,
-   * `resources/templates/list`, and `resources/read` handlers and (re)advertises
-   * the `resources` capability (already declared in the constructor).
+   * Registering either resource auto-wires the SDK's `resources/list` and
+   * `resources/templates/list` handlers and (re)advertises the `resources`
+   * capability (already declared in the constructor). `resources/read` is served
+   * by {@link readResourceFromWire} from {@link resourceReaders}, which this method
+   * fills with the same read callbacks.
    */
   private registerGovernanceResource(): void {
     // Static default/global policy resource → resources/list.
+    const readDefault = (uri: URL): ReadResourceResult =>
+      this.buildGovernancePolicyResult(DEFAULT_PROFILE_NAME, uri.toString());
     this.mcpServer.registerResource(
       GOVERNANCE_DEFAULT_RESOURCE_NAME,
       GOVERNANCE_DEFAULT_URI,
@@ -945,9 +1101,9 @@ export class McpServerBase {
           "resource is a read-only preview.",
         mimeType: "application/json",
       },
-      (uri: URL): ReadResourceResult =>
-        this.buildGovernancePolicyResult(DEFAULT_PROFILE_NAME, uri.toString()),
+      readDefault,
     );
+    this.resourceReaders.push({ kind: "exact", uri: GOVERNANCE_DEFAULT_URI, read: readDefault });
 
     // Per-profile policy template → resources/templates/list + resources/read.
     //
@@ -960,23 +1116,30 @@ export class McpServerBase {
     // built in start(); before start() (`this.profiles` undefined) it lists just
     // the reserved default, mirroring buildGovernancePolicyResult's pre-start
     // fallback. Was previously `undefined` (D6 minimal); now provided.
+    const profileTemplate = new ResourceTemplate(GOVERNANCE_TEMPLATE_URI, {
+      list: (): { resources: Array<{ uri: string; name: string }> } => {
+        const names = this.profiles
+          ? [...this.profiles.keys()]
+          : [DEFAULT_PROFILE_NAME];
+        return {
+          resources: names.map((name) => ({
+            uri: `${GOVERNANCE_URI_SCHEME}://${name}`,
+            name: `${GOVERNANCE_TEMPLATE_RESOURCE_NAME}-${name}`,
+            description: `Advisory governance policy for the "${name}" server profile.`,
+            mimeType: "application/json",
+          })),
+        };
+      },
+    });
+    const readProfile = (uri: URL, variables: Variables): ReadResourceResult => {
+      // The URI template binds {profile}; it may surface as string | string[].
+      const raw = variables.profile;
+      const profileName = Array.isArray(raw) ? String(raw[0]) : String(raw);
+      return this.buildGovernancePolicyResult(profileName, uri.toString());
+    };
     this.mcpServer.registerResource(
       GOVERNANCE_TEMPLATE_RESOURCE_NAME,
-      new ResourceTemplate(GOVERNANCE_TEMPLATE_URI, {
-        list: (): { resources: Array<{ uri: string; name: string }> } => {
-          const names = this.profiles
-            ? [...this.profiles.keys()]
-            : [DEFAULT_PROFILE_NAME];
-          return {
-            resources: names.map((name) => ({
-              uri: `${GOVERNANCE_URI_SCHEME}://${name}`,
-              name: `${GOVERNANCE_TEMPLATE_RESOURCE_NAME}-${name}`,
-              description: `Advisory governance policy for the "${name}" server profile.`,
-              mimeType: "application/json",
-            })),
-          };
-        },
-      }),
+      profileTemplate,
       {
         title: "IRIS governance policy (per profile)",
         description:
@@ -985,45 +1148,30 @@ export class McpServerBase {
           "enforcement gate is authoritative; this resource is a read-only preview.",
         mimeType: "application/json",
       },
-      (uri: URL, variables: Record<string, unknown>): ReadResourceResult => {
-        // The URI template binds {profile}; it may surface as string | string[].
-        const raw = variables.profile;
-        const profileName = Array.isArray(raw) ? String(raw[0]) : String(raw);
-        return this.buildGovernancePolicyResult(profileName, uri.toString());
-      },
+      readProfile,
     );
+    this.resourceReaders.push({ kind: "template", template: profileTemplate, read: readProfile });
   }
 
   // ── Prompt registration (Story 25.0) ───────────────────────────────
 
   /**
    * Register a single prompt with the MCP SDK (Story 25.0, spec
-   * `03-skills-prompts-pack.md` §2).
+   * `03-skills-prompts-pack.md` section 2) and with the framework's own `prompts/get`
+   * ({@link getPromptFromWire}).
    *
-   * For a prompt WITH arguments, builds a Zod **raw shape** (a plain object of
-   * Zod types, NOT a `z.object(...)`) from {@link PromptDefinition.arguments} —
-   * each argument becomes `z.string().describe(description)`, wrapped in
-   * `.optional()` when not required — and passes it as `argsSchema` so the SDK
-   * advertises the arguments in `prompts/list` and validates them on
-   * `prompts/get`.
+   * For a prompt WITH arguments, builds `z.object(argsShape)` from
+   * {@link PromptDefinition.arguments}: each argument becomes
+   * `z.string().describe(description)`, wrapped in `.optional()` when not
+   * required, and it is passed as `argsSchema`, so the SDK advertises the
+   * arguments in `prompts/list`. The same schema checks them on `prompts/get`.
    *
-   * For a prompt with NO arguments, passes **no** `argsSchema` on purpose. The
-   * MCP wire schema (`GetPromptRequestParamsSchema`) marks `params.arguments`
-   * OPTIONAL, so a spec-compliant client MAY omit it entirely for a no-arg
-   * prompt. Had we passed an empty `argsSchema: {}`, the SDK's `prompts/get`
-   * handler would run `safeParseAsync(z.object({}), request.params.arguments)`,
-   * and an object schema rejects `undefined` — so an omitted `arguments` would
-   * be refused with `InvalidParams`, a spurious error for a legitimate request.
-   * Omitting `argsSchema` makes the SDK wire the no-args callback form
-   * (`cb(extra)`) and skip argument validation, so an omitted `arguments`
-   * renders correctly. (This is the Dev-Notes fallback branch; it matters
-   * because a prompt may legitimately declare no arguments.)
+   * For a prompt with NO arguments, passes **no** `argsSchema` on purpose:
+   * `prompts/list` then carries no `arguments` entry for it, and `prompts/get`
+   * renders it whatever `arguments` the request holds.
    *
-   * The callback renders `def.build(args)` as a single **user**-role text
-   * message (spec §2). Unknown-name and missing-required-argument errors are
-   * NOT hand-rolled here — the SDK's own `prompts/get` handler already throws
-   * the correct `McpError(ErrorCode.InvalidParams, ...)` for both cases (see
-   * Dev Notes); a duplicate prompt name is likewise caught by the SDK's own
+   * The render function turns `def.build(args)` into a single **user**-role
+   * text message (spec section 2). A duplicate prompt name is caught by the SDK's own
    * `Prompt ${name} is already registered` guard in `registerPrompt`.
    */
   private registerPrompt(def: PromptDefinition): void {
@@ -1038,7 +1186,7 @@ export class McpServerBase {
     // unexpected shape); a throw here used to surface to the client as an
     // opaque JSON-RPC `-32603 InternalError` with the raw message, unlike the
     // tool path's structured `isError` containment. Wrap it and rethrow as a
-    // clean, prompt-named `McpError` so a render bug is diagnosable without
+    // clean, prompt-named protocol error so a render bug is diagnosable without
     // leaking implementation detail differently than the rest of the framework.
     const render = (
       args: Record<string, string | undefined>,
@@ -1048,8 +1196,8 @@ export class McpServerBase {
         text = def.build(args);
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
-        throw new McpError(
-          ErrorCode.InternalError,
+        throw protocolError(
+          ProtocolErrorCode.InternalError,
           `Prompt '${def.name}' failed to render: ${message}`,
         );
       }
@@ -1064,15 +1212,14 @@ export class McpServerBase {
     };
 
     // No-argument prompt: register WITHOUT an argsSchema (see the doc comment
-    // above — this is what lets a spec-compliant client omit `arguments`
-    // entirely). The SDK invokes the no-args callback form `cb(extra)`; we
-    // ignore `extra` and render with an empty args object.
+    // above), and render with an empty args object.
     if (def.arguments.length === 0) {
       this.mcpServer.registerPrompt(
         def.name,
         { title: def.title, description: def.description },
         (): GetPromptResult => render({}),
       );
+      this.promptEntries.set(def.name, { render, argsSchema: undefined });
       return;
     }
 
@@ -1092,56 +1239,31 @@ export class McpServerBase {
       }
       // Order matters: `.describe()` must be the OUTERMOST call. Zod v4's
       // `.optional()` returns a NEW wrapper schema whose own `.description`
-      // is empty even when the inner schema was `.describe()`d first — the
-      // SDK's `getSchemaDescription` reads `schema.description` off the
-      // schema it was actually given (the raw-shape value), so describing
-      // before wrapping silently drops the description for optional args.
+      // is empty even when the inner schema was `.describe()`d first, and the
+      // description `prompts/list` advertises is the one on the schema the
+      // object holds for that argument.
       const base: z.ZodTypeAny = arg.required ? z.string() : z.string().optional();
       argsShape[arg.name] = base.describe(arg.description);
     }
 
-    // CR 25.1-6 (closed-by-decision, Story 26.4 — SDK limitation, documented
-    // here rather than worked around): when EVERY declared argument is
-    // optional (e.g. `check-system-health`'s `server?`), a `prompts/get` that
-    // OMITS `arguments` entirely (no key at all, not even `{}`) is rejected
-    // with `-32602 InvalidParams` instead of rendering with every optional
-    // arg absent. Root cause is the SDK itself
-    // (`@modelcontextprotocol/sdk@1.29.0`): `_createRegisteredPrompt` always
-    // stores `objectFromShape(argsSchema)` — a plain `z.object(shape)` — and
-    // the `GetPrompt` handler runs `safeParseAsync(z.object(shape),
-    // request.params.arguments)`, which fails on `undefined` regardless of
-    // whether every property inside the shape is itself `.optional()`. The
-    // SDK offers exactly two mutually-exclusive modes: pass an `argsSchema`
-    // (args ADVERTISED + parsed, but an omitted top-level `arguments` is
-    // refused) or pass none (omission tolerated, but NO arg advertisement and
-    // no args ever reach the callback — the branch above, for genuinely
-    // zero-argument prompts). There is no SDK-supported schema that both
-    // advertises optional args AND tolerates an omitted top-level
-    // `arguments`. Impact is LOW and the failure mode is CLEAN: every
-    // all-optional-argument prompt renders correctly when called with
-    // `arguments: {}` (the normal path for a well-behaved client that builds
-    // an arguments object from the advertised arg list), and the strict
-    // omission case errors with a spec-conformant JSON-RPC error, never a
-    // crash or wrong render. A full fix would bypass `registerPrompt` for
-    // these prompts and register `ListPrompts`/`GetPrompt` handlers directly
-    // on the underlying `Server` (mirroring the D6 governance-resource
-    // wiring) to coerce an omitted `arguments` to `{}` before validation —
-    // deferred as disproportionate framework surgery for a clean-failure edge
-    // case.
+    // An omitted `arguments` counts as `{}` on `prompts/get`, so a prompt whose
+    // arguments are all optional renders from it (see getPromptFromWire).
+    const argsSchema = z.object(argsShape);
     this.mcpServer.registerPrompt(
       def.name,
       {
         title: def.title,
         description: def.description,
-        argsSchema: argsShape,
+        argsSchema,
       },
-      // The SDK's ShapeOutput<Args> generic from a Record<string, ZodTypeAny>
-      // raw shape resolves to a loosely-typed record; `any` here mirrors the
-      // existing `registerTool` callback pattern below.
+      // The SDK's callback argument type from a Record<string, ZodTypeAny>
+      // shape resolves to a loosely-typed record; `any` here mirrors the
+      // `registerTool` callback pattern below.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (args: any): GetPromptResult =>
         render(args as Record<string, string | undefined>),
     );
+    this.promptEntries.set(def.name, { render, argsSchema });
   }
 
   // ── Tool registration ──────────────────────────────────────────────
@@ -1149,9 +1271,12 @@ export class McpServerBase {
   /**
    * Register a single tool with the MCP SDK.
    *
-   * Passes the Zod object schema's `.shape` to the SDK's `registerTool`,
-   * which handles Zod v4 natively. Our handler performs independent Zod
-   * validation to produce structured error messages on failure.
+   * Passes the extended input schema (a Zod object) to the SDK's `registerTool`.
+   * The SDK-registered callback is the in-process path to {@link handleToolCall}
+   * (no wire request reaches it, because the framework serves `tools/call`
+   * itself); the wire path validates the arguments first, in
+   * {@link callToolFromWire}. Both validate independently to produce structured
+   * error messages on failure.
    */
   private registerTool(tool: ToolDefinition): void {
     this.tools.set(tool.name, tool);
@@ -1164,24 +1289,16 @@ export class McpServerBase {
     // it for free. outputSchema is untouched (additive, back-compat).
     const extendedInputSchema = withServerParam(tool.inputSchema, tool.name);
     this.extendedSchemas.set(tool.name, extendedInputSchema);
+    this.wireSchemas.set(tool.name, wireInputSchema(extendedInputSchema));
+    this.listedTools.delete(tool.name);
 
-    // The MCP SDK's registerTool accepts a ZodRawShapeCompat (Record<string, AnySchema>).
-    // ZodObject.shape in Zod v4 gives us exactly that. Advertise the EXTENDED
-    // shape so clients see the optional `server` field.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const inputShape = extendedInputSchema.shape as any;
-
-    // Convert outputSchema Zod shape for the SDK (mirrors inputSchema pattern)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const outputShape = tool.outputSchema ? (tool.outputSchema.shape as any) : undefined;
-
-    this.mcpServer.registerTool(
+    const registered = this.mcpServer.registerTool(
       tool.name,
       {
         title: tool.title,
         description: tool.description,
-        inputSchema: inputShape,
-        ...(outputShape !== undefined && { outputSchema: outputShape }),
+        inputSchema: extendedInputSchema,
+        ...(tool.outputSchema !== undefined && { outputSchema: tool.outputSchema }),
         annotations: {
           readOnlyHint: tool.annotations.readOnlyHint,
           destructiveHint: tool.annotations.destructiveHint,
@@ -1194,6 +1311,7 @@ export class McpServerBase {
         return this.handleToolCall(tool, args);
       },
     );
+    this.sdkTools.set(tool.name, registered);
   }
 
   /**
@@ -1268,17 +1386,39 @@ export class McpServerBase {
    * per-return-point changes. The audit write is enqueued (fire-and-forget)
    * and never awaited here — it must never slow or fail the tool call back to
    * the client (spec §5 ordering).
+   *
+   * `source` names the path in. A `"wire"` call comes from the framework's own
+   * `tools/call` handler: the arguments are checked against the tool's wire
+   * schema first, inside this wrapper (AD-3), so a schema-invalid call is
+   * audited. A valid one continues with the PARSED arguments, which the audit
+   * entry derives from; an invalid one returns the in-band error text without
+   * running governance or the handler, and its entry carries the raw top-level
+   * key names only, never `params`. The `"callback"` source is the
+   * SDK-registered callback (in-process): the arguments go straight to
+   * {@link dispatchToolCall}, whose own validation is step 1.
    */
   private async handleToolCall(
     tool: ToolDefinition,
     rawArgs: unknown,
+    source: ToolCallSource = "callback",
   ): Promise<CallToolResult> {
-    if (!this.auditLogger) {
-      return this.dispatchToolCall(tool, rawArgs);
-    }
     const auditLogger = this.auditLogger;
-    const start = Date.now();
-    const result = await this.dispatchToolCall(tool, rawArgs);
+    const start = auditLogger ? Date.now() : 0;
+    let args = rawArgs;
+    let result: CallToolResult | undefined;
+    if (source === "wire") {
+      const wireSchema = this.wireSchemas.get(tool.name);
+      if (wireSchema === undefined) {
+        throw new Error(`Tool "${tool.name}" is not fully registered (missing wire schema).`);
+      }
+      const checked = checkWireInput(tool.name, wireSchema, rawArgs);
+      if (checked.ok) args = checked.args;
+      else result = toolErrorResult(checked.text);
+    }
+    const schemaInvalid = result !== undefined;
+    result ??= await this.dispatchToolCall(tool, args);
+    if (!auditLogger) return result;
+
     const durationMs = Date.now() - start;
     // Fire-and-forget audit recording must NEVER throw into the tool path
     // (spec §5): the async file write is already swallowed inside the logger,
@@ -1288,7 +1428,7 @@ export class McpServerBase {
     // IRIS_AUDIT_LOG_PARAMS). Guard it so the tool result the client is owed
     // is returned regardless.
     try {
-      this.recordAuditEntry(auditLogger, tool, rawArgs, result, durationMs);
+      this.recordAuditEntry(auditLogger, tool, args, result, durationMs, schemaInvalid);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn(`Audit entry recording failed; entry dropped: ${message}`);
@@ -1668,6 +1808,13 @@ export class McpServerBase {
    * (`:~1194-1214`). An `"error"` outcome still carries only the sanitized
    * message text (never a stack/caret-global token). An `"ok"` outcome carries
    * neither field.
+   *
+   * `rawArgs` is the arguments of an in-process call or the PARSED arguments of
+   * a valid wire call. For a schema-invalid wire call (`schemaInvalid`) it is
+   * the raw `arguments` of the request: the entry lists the raw top-level key
+   * names and carries neither `params` nor a `dataPolicy` summary, because the
+   * values were refused before any policy ran and a refusal records no value
+   * (AD-19).
    */
   private recordAuditEntry(
     auditLogger: AuditLogger,
@@ -1675,6 +1822,7 @@ export class McpServerBase {
     rawArgs: unknown,
     result: CallToolResult,
     durationMs: number,
+    schemaInvalid = false,
   ): void {
     const argsRecord =
       rawArgs !== null && typeof rawArgs === "object"
@@ -1695,12 +1843,14 @@ export class McpServerBase {
       paramKeys: argsRecord
         ? Object.keys(argsRecord).filter((key) => key !== "server")
         : [],
-      params: this.redactPhiInputs(tool, argsRecord, resolvedProfile),
     };
-    // Story 39.2 (AD-19): what the PHI data policy did over a governed call. Counts only; the
-    // field never carries body content.
-    const dataPolicy = this.deriveAuditDataPolicy(tool, argsRecord, resolvedProfile, result);
-    if (dataPolicy !== undefined) entryInput.dataPolicy = dataPolicy;
+    if (!schemaInvalid) {
+      entryInput.params = this.redactPhiInputs(tool, argsRecord, resolvedProfile);
+      // Story 39.2 (AD-19): what the PHI data policy did over a governed call. Counts only; the
+      // field never carries body content.
+      const dataPolicy = this.deriveAuditDataPolicy(tool, argsRecord, resolvedProfile, result);
+      if (dataPolicy !== undefined) entryInput.dataPolicy = dataPolicy;
+    }
     // Story 31.3, AC 31.3.2: attribution ONLY — read straight from the
     // already-resolved profile's `source` field (same in-memory registry
     // lookup `deriveAuditNamespace` uses below), never fed into any
@@ -1963,16 +2113,15 @@ export class McpServerBase {
     let visibilityChanged = false;
     for (const name of names) {
       if (this.tools.delete(name)) {
-        // Drop the extended-schema entry too, so it does not leak after removal.
+        // Drop the schema and list-entry caches too, so they do not leak after removal.
         this.extendedSchemas.delete(name);
-        // Remove from the SDK's internal registry so the tool is no
-        // longer callable or listed.  The SDK does not expose a public
-        // unregister API, so we delete from the internal map directly.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const sdkTools = (this.mcpServer as any)._registeredTools;
-        if (sdkTools && typeof sdkTools === "object" && name in sdkTools) {
-          delete sdkTools[name];
-        }
+        this.wireSchemas.delete(name);
+        this.listedTools.delete(name);
+        // Remove from the SDK's registry through the handle `registerTool` returned, so the name can
+        // be registered again. The SDK announces each removal; the debounce on the server (see the
+        // constructor) joins those announcements and the one below into a single notification.
+        this.sdkTools.get(name)?.remove();
+        this.sdkTools.delete(name);
         removedCount++;
         visibilityChanged = true;
       } else if (this.hiddenToolNames.delete(name)) {

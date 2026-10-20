@@ -23,11 +23,11 @@
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
-import { existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
-import { inheritedEnv } from "./process-gate-helpers.js";
+import { inheritedEnv, resolveSdkEsmDir } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
@@ -52,40 +52,6 @@ async function isIrisReachable(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/**
- * Resolve the ESM build of the installed `@modelcontextprotocol/sdk` under
- * the pnpm store (mirrors the extension's `resolveSdkEsmDir` — this package
- * declares no SDK dependency of its own, so a bare-specifier import would not
- * resolve; iterated to exhaustion so a version-bumped first candidate cannot
- * silently skip the gate).
- */
-function resolveSdkEsmDir(): string | undefined {
-  const pnpmDir = path.join(REPO_ROOT, "node_modules", ".pnpm");
-  if (!existsSync(pnpmDir)) return undefined;
-  let entries: string[];
-  try {
-    entries = readdirSync(pnpmDir);
-  } catch {
-    return undefined;
-  }
-  const candidates = entries
-    .filter((name) => name.startsWith("@modelcontextprotocol+sdk@"))
-    .sort();
-  for (const candidate of candidates) {
-    const esmDir = path.join(
-      pnpmDir,
-      candidate,
-      "node_modules",
-      "@modelcontextprotocol",
-      "sdk",
-      "dist",
-      "esm",
-    );
-    if (existsSync(esmDir)) return esmDir;
-  }
-  return undefined;
 }
 
 interface RosterEntry {
@@ -113,10 +79,10 @@ beforeAll(async () => {
     skipReason = `packages/iris-dev-mcp/dist/index.js is not built (run "pnpm turbo run build" first). Looked at: ${DEV_MCP_ENTRY_POINT}`;
     return;
   }
-  sdkEsmDir = resolveSdkEsmDir();
+  sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
   if (!sdkEsmDir) {
     skipReason =
-      "Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm — run pnpm install from the repo root.";
+      "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm — run pnpm install from the repo root.";
     return;
   }
   if (!(await isIrisReachable())) {
@@ -148,8 +114,8 @@ beforeAll(async () => {
 
 /** Spawn the built server with the given IRIS_SERVER_MANAGER setting and return its iris_server_profiles roster. */
 async function rosterWithSwitch(serverManager: "auto" | "unset"): Promise<RosterEntry[]> {
-  const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "client", "index.js")).href;
-  const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "client", "stdio.js")).href;
+  const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "index.mjs")).href;
+  const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "stdio.mjs")).href;
   const { Client } = (await import(sdkClientIndex)) as {
     Client: new (info: { name: string; version: string }) => SdkClient;
   };

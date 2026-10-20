@@ -2,6 +2,90 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-20] — Story 43.1: Framework migration to SDK v2
+
+No tool, action, governance key, preset row, prompt, refusal code, environment variable or route is added or changed, and no
+ObjectScript class is touched, so no count moves: the suite stays at 115 advertised tools (33, 27, 25, 22 and 8), the frozen governance
+baseline stays at hash `1e62c5ad5bf7` (141 keys), and `BOOTSTRAP_VERSION` stays at `d51856f74d6a`. The two behavior changes are the two
+fixes below, and only them. The 2025-11-25 wire is otherwise unchanged, with the one limit under Known limits: the member order of a
+handler result that carries both `isError` and `structuredContent`.
+
+### Changed
+
+- **The framework runs on the MCP SDK v2 packages, and v1 is removed (AD-32).** `@iris-mcp/shared` depends on
+  `@modelcontextprotocol/server` 2.3.1, pinned exactly, and `@modelcontextprotocol/sdk` is listed by no `package.json` and installed
+  nowhere. The SDK-client tests use `@modelcontextprotocol/client` 2.3.1 as a devDependency (`@iris-mcp/all`, `@iris-mcp/dev` and
+  `@iris-mcp/shared`). `@modelcontextprotocol/core` 2.3.1 is a transitive dependency, `zod` stays at the one copy 4.3.6, and none of
+  the packages runs an install script. `McpError` and `ErrorCode` become `ProtocolError` and `ProtocolErrorCode`, and only
+  `packages/shared/src` imports the server package.
+- **The 2025-11-25 wire is unchanged.** The SDK's own `tools/list`, `tools/call`, `prompts/get` and `resources/read` would have changed
+  every tool's `$schema`, dropped `execution` and reworded the error texts, so `McpServerBase` serves those four methods itself from its
+  own state (`sdk-wire-compat.ts`), through the SDK's public `setRequestHandler`. A golden of 112 response lines, captured from the v1
+  build before the migration edit and replayed byte for byte against the five built v2 servers (and through a real v2 client), pins
+  `initialize`, `tools/list`, an unknown and a hidden tool, schema-invalid calls of four kinds, an omitted `arguments`, the governance
+  denial, a closed-port read, the prompt list and get, and the resource list, template list and read with both error rows.
+  `pnpm gen:tools-list-snapshot:check` passes against the untouched snapshot.
+- **The dependency tree shrinks.** `pnpm audit --prod` reports 18 advisories over 120 dependencies, where it reported 71 over 206:
+  4 critical, 18 high, 46 moderate and 3 low become 3 critical, 7 high and 8 moderate. The SDK advisory GHSA-6qxp-vccf-f47h and the
+  `express`, `hono`, `ajv` 8, `fast-uri` and `zod-to-json-schema` stacks are gone, and none is added; what remains is the Vitest 2.1.9
+  chain and `smol-toml`.
+- **`removeTools` removes a tool through the handle that `registerTool` returned.** It no longer deletes from the SDK's private
+  registry, and a call that removes several tools still sends exactly one `notifications/tools/list_changed`: the server joins the SDK's
+  announcements into one (`debouncedNotificationMethods`), and `addTools` is joined the same way.
+- **The tools-list snapshot script reads the installed server package.** `sdkVersion` in a regenerated snapshot is the version of
+  `@modelcontextprotocol/server`. The committed snapshot is untouched and keeps `1.29.0`, the version it was captured on; its 115 entries
+  equal the live ones. `story-39-6-qa-snapshot-cli.test.ts` compares the written `sdkVersion` with the installed one instead of the
+  committed one (three assertion lines).
+
+### Fixed
+
+- **A schema-invalid `tools/call` is audited (DW-579).** The SDK refused such a call before the audited chokepoint, so no entry was
+  written. The framework validates the arguments against `z.object(extended.shape)` inside the audit wrapper, so the refused call writes
+  its one entry: `outcome` `error`, the schema-invalid text as `error`, the raw top-level key names minus `server` as `paramKeys`, and no
+  `params` and no `dataPolicy` even with `IRIS_AUDIT_LOG_PARAMS=true`. Profile, namespace and action come from the existing derivations
+  (a non-string value falls back to `default`, the profile's namespace and `null`). A valid call's entry is unchanged, and an unknown or
+  hidden tool still writes none.
+- **A `prompts/get` that omits `arguments` renders like `{}` (DW-617).** The four prompts whose arguments are all optional
+  (`audit-security-posture`, `recover-stuck-production`, `check-system-health` and `run-external-backup`) were refused with `-32602`;
+  they render now, and a prompt with a required argument answers the error that `arguments: {}` gives.
+
+### Added
+
+- **`sdk-wire-golden.json`** and its capture script `scripts/capture-sdk-wire-golden.mjs` (it refuses to overwrite the fixture without
+  `--force`), with the SDK-free stdio driver and the exchange list in `scripts/lib/sdk-wire-golden-core.mjs`, which the pin test and
+  `story-41-5-qa-dist-consumer.test.ts` share.
+- **`story-43-1-sdk-wire-golden.test.ts`**, **`story-43-1-schema-invalid-audit.test.ts`**, **`story-43-1-sdk-client-resolution.test.ts`**
+  and the launcher's **`sdkClientResolution.test.ts`** (the last two fail, never skip, when the v2 client cannot be found), and
+  **`sdk-wire-compat.test.ts`** in `@iris-mcp/shared`, which drives a fixture server with a v2 client over an in-memory transport.
+  **`story-43-1-sdk-confinement.test.ts`** pins the dependency and import boundary (no v1 SDK in any manifest or the lockfile, exact
+  2.3.1 pins, only `packages/shared/src` imports an `@modelcontextprotocol` package, no install script on the three packages), and
+  **`story-43-1-raw-wire-driver.test.ts`** pins the contract of the SDK-free stdio driver. The golden's `initialize` rows compare
+  `serverInfo.version` with the package manifest's version, so a release does not turn the pin red.
+
+### Tests
+
+- The SDK-client suites load `@modelcontextprotocol/client` (legacy negotiation) and no assertion line changed, except the rows that
+  pinned the two fixed behaviors (`story-41-5-qa-dist-consumer.test.ts` and `prompts.test.ts`), the `ProtocolError` class identity,
+  the three snapshot-CLI lines above, and the assertion on the invalid call's entry in `story-39-3-body-search-live-gate.test.ts`.
+  The 41-2 data-server row reaches `prompts/list` through the session's `request`, because the v2 client answers an empty list to a
+  server that never advertised the capability instead of sending the request.
+- The in-process tests that call a registered request handler for `tools/call`, `prompts/get` or `resources/read` pass
+  `mcpReq: { requestState: () => undefined }`, because the SDK's `Server` reads `ctx.mcpReq.requestState()` for those three methods.
+
+### Known limits
+
+- The launcher suite still fails the five tests and two unloadable files of DW-532 on a host without the extension's dependencies; the
+  Story 43.1 files in it pass or skip for IRIS reachability.
+- The server package's dist bundles `ajv` 8.18.0, `ajv-formats` and `fast-uri` 3.1.0 as the default JSON Schema validator for
+  elicitation; `pnpm audit` cannot see them. Story 43.3 is the first user.
+- A client that sends `server/discover` gets `-32601`; serving the 2026-07-28 revision is Story 43.2.
+- **Member order of a result that carries both `isError` and `structuredContent`.** The SDK re-encodes a `tools/call` result in the
+  order of its result schema, so such a result lists `structuredContent` before `isError`, where the v1 wire listed `isError` first
+  (the dispatch builds `content`, `isError`, `structuredContent`). The JSON value is the same. A result without an `isError`
+  member, and the governance denial, keep their v1 order, and the golden pins both; a handler result with an explicit `isError`
+  needs a live instance, so only the armed live gates and `sdk-wire-compat.test.ts` (members and values) see it. No public SDK
+  option keeps the dispatch's order.
+
 ## [Pre-release — 2026-10-19] — Story 41.8: Epic 41 burn-down
 
 No tool, action, governance key, preset row, prompt, refusal code, environment variable or route is added or changed, so no count

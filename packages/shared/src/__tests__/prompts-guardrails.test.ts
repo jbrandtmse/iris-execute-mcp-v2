@@ -12,7 +12,7 @@
  *               the `tools/list` surface (the server-level analogue of
  *               Rule #31 — prompts are not tools).
  *   AC 25.0.2 — both `prompts/get` error paths are asserted to be REAL
- *               `McpError` instances carrying `ErrorCode.InvalidParams`
+ *               `ProtocolError` instances carrying `ProtocolErrorCode.InvalidParams`
  *               (`instanceof` + `.code`), not merely a message-matching regex
  *               — the story text explicitly requires "SDK-native InvalidParams".
  *   AC 25.0.3 — per-instance isolation strengthened at the REGISTRATION layer:
@@ -34,7 +34,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { McpError, ErrorCode, LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
+import { ProtocolError, ProtocolErrorCode, LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/server";
 import { McpServerBase } from "../server-base.js";
 import type { McpServerBaseOptions } from "../server-base.js";
 import type { PromptDefinition } from "../tool-types.js";
@@ -92,38 +92,39 @@ async function callRequest(server: any, method: string, params: unknown) {
     signal: new AbortController().signal,
     sendNotification: async () => {},
     sendRequest: async () => ({}),
+    mcpReq: { requestState: () => undefined },
   };
   return handler({ method, params }, extra);
 }
 
 // ════════════════════════════════════════════════════════════════════
-// AC 25.0.2 — error paths must be genuine SDK McpError/InvalidParams.
+// AC 25.0.2 — error paths must be genuine ProtocolError/InvalidParams.
 // ════════════════════════════════════════════════════════════════════
 
-describe("Story 25.0 guardrails — prompts/get error paths are real McpError (AC 25.0.2)", () => {
-  it("unknown prompt name rejects with an McpError carrying ErrorCode.InvalidParams", async () => {
+describe("Story 25.0 guardrails — prompts/get error paths are real ProtocolError (AC 25.0.2)", () => {
+  it("unknown prompt name rejects with a ProtocolError carrying ProtocolErrorCode.InvalidParams", async () => {
     const server = new McpServerBase(makeServerOpts(FIXTURE_PROMPTS));
     const promise = callRequest(server, "prompts/get", {
       name: "no-such-prompt",
       arguments: {},
     });
-    await expect(promise).rejects.toBeInstanceOf(McpError);
+    await expect(promise).rejects.toBeInstanceOf(ProtocolError);
     await expect(promise).rejects.toMatchObject({
-      code: ErrorCode.InvalidParams,
-      name: "McpError",
+      code: ProtocolErrorCode.InvalidParams,
+      name: "ProtocolError",
     });
   });
 
-  it("missing required argument rejects with an McpError carrying ErrorCode.InvalidParams", async () => {
+  it("missing required argument rejects with a ProtocolError carrying ProtocolErrorCode.InvalidParams", async () => {
     const server = new McpServerBase(makeServerOpts(FIXTURE_PROMPTS));
     const promise = callRequest(server, "prompts/get", {
       name: "guardrail-required-arg",
       arguments: {},
     });
-    await expect(promise).rejects.toBeInstanceOf(McpError);
+    await expect(promise).rejects.toBeInstanceOf(ProtocolError);
     await expect(promise).rejects.toMatchObject({
-      code: ErrorCode.InvalidParams,
-      name: "McpError",
+      code: ProtocolErrorCode.InvalidParams,
+      name: "ProtocolError",
     });
   });
 

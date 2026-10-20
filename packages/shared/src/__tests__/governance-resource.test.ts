@@ -166,6 +166,7 @@ async function callRequest(server: any, method: string, params: unknown) {
     signal: new AbortController().signal,
     sendNotification: async () => {},
     sendRequest: async () => ({}),
+    mcpReq: { requestState: () => undefined },
   };
   return handler({ method, params }, extra);
 }
@@ -378,7 +379,7 @@ describe("Story 14.5 — resources/read effective policy (AC 14.5.3)", () => {
     await server.start("stdio");
 
     // The template matches any authority, so an unknown profile resolves the
-    // template read callback → ProfileResolutionError → McpError (rejected).
+    // template read callback → ProfileResolutionError → ProtocolError (rejected).
     await expect(
       callRequest(server, "resources/read", { uri: "iris-governance://ghost" }),
     ).rejects.toThrow(/Unknown server profile "ghost"/);

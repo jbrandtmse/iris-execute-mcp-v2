@@ -190,7 +190,7 @@ beforeAll(async () => {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
     if (!sdkEsmDir) {
       skipReason =
-        "Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm - run pnpm install from the repo root.";
+        "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm - run pnpm install from the repo root.";
     } else if (!(await isIrisReachable(TARGET.host, TARGET.port))) {
       skipReason = `IRIS is not reachable at http://${TARGET.host}:${TARGET.port}/api/atelier/ (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
     }
@@ -1095,17 +1095,22 @@ describe.skipIf(CAPTURE)("Story 39.3: the audit trail redacts the filters and re
       );
       const result = await bodySearch(session, search);
       const invalid = await bodySearch(session, { filters: [filter("Code", `${MARKER}`, MARKER)] });
-      // The MCP SDK rejects the invalid op before the call reaches the audited chokepoint, so only the first call has an entry.
+      // The schema-invalid call is refused inside the audited chokepoint (DW-579), so both calls have an entry: the first call's, then
+      // the invalid call's, which lists the raw key names and carries neither `params` nor a `dataPolicy` summary.
       expect(invalid.isError, "a Zod-invalid op").toBe(true);
       expect(firstText(invalid), "the invalid call names the path").toContain("op");
 
-      const entries = await pollAuditEntries(file, { tool: "iris_message_search", count: 1, intervalMs: 50, timeoutMs: 10000, excerpt: 3000 });
-      const [entry] = entries as [Record<string, unknown>];
+      const entries = await pollAuditEntries(file, { tool: "iris_message_search", count: 2, intervalMs: 50, timeoutMs: 10000, excerpt: 3000 });
+      const [entry, invalidEntry] = entries as [Record<string, unknown>, Record<string, unknown>];
       expect(entry, row.policy).toMatchObject({
         action: "body",
         outcome: row.outcome,
         dataPolicy: { policy: row.policy, redacted: 0, blocked: 0 },
       });
+      expect(invalidEntry, `${row.policy}: the schema-invalid call is audited`).toMatchObject({ action: "body", outcome: "error" });
+      expect(invalidEntry["paramKeys"], `${row.policy}: the invalid call's raw key names`).toContain("filters");
+      expect(invalidEntry, `${row.policy}: the invalid call records no params`).not.toHaveProperty("params");
+      expect(invalidEntry, `${row.policy}: the invalid call records no data policy`).not.toHaveProperty("dataPolicy");
       const params = entry["params"] as Record<string, unknown>;
       if (row.redacted) {
         expect(params["filters"], `${row.policy}: the filters`).toBe("[REDACTED]");

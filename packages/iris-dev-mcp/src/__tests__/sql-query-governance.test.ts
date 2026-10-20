@@ -56,7 +56,12 @@ async function readGovernanceResource(server: any): Promise<{ policy: Record<str
   >;
   const handler = handlers.get("resources/read");
   if (!handler) throw new Error("No resources/read handler");
-  const extra = { signal: new AbortController().signal, sendNotification: async () => {}, sendRequest: async () => ({}) };
+  const extra = {
+    signal: new AbortController().signal,
+    sendNotification: async () => {},
+    sendRequest: async () => ({}),
+    mcpReq: { requestState: () => undefined },
+  };
   const result = await handler({ method: "resources/read", params: { uri: "iris-governance://default" } }, extra);
   return JSON.parse(result.contents[0].text);
 }
