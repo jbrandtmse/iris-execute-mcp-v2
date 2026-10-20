@@ -5854,6 +5854,8 @@ DW-441.
 
   Before re-certifying, re-disposition those clients and bump `ADAPTER_DATA_VERSION` with the certification table. (ledger; routed by harvest 2026-10-19)
 - DW-629: the `why` text of the `cursor` and `vscode` rows of `PACK_TARGETS` never says the client reads `.agents/skills/`, the folder the installer writes for both. Re-read both clients' skills docs together with DW-626, fix the two rows in `pack-targets.ts`, and re-render the client-config README table. (ledger; routed by harvest 2026-10-20)
+- DW-631: `docs/client-config/claude-code.md:306`, `claude-desktop.md:273` and `cursor.md:304` link the broken anchor `#read-only-mode-point-it-at-production-with-one-environment-variable`; the heading's real slug is `#read-only-mode--point-…`. No `docs/client-config/` page points at `iris-mcp-clients skills install` either. Fix both with the AC 42.9.1 rewrite. (ledger; routed by the lead 2026-10-20)
+- DW-632: `qa-41-7-doc-links.test.ts` checks only the 9 documents Story 41.7 changed, and a repo-wide run of its checker finds more broken relative links: `packages/shared/README.md:108`, three `docs/known-bugs-*` links, and the DW-631 anchors. Fix them, and widen the test's document set to every user-facing `*.md`, so it pins them before 1.0. (ledger; routed by the lead 2026-10-20)
 
 ## Epic 43: MCP SDK v2 Migration (added 2026-10-15)
 

@@ -3354,6 +3354,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-19T06:17:55Z status=routed owner=41-7-skills-pack-docs-and-capstone by=harvest note=the 41.7 capstone runs in the default suite and needs that ordering; add a workspace devDependency or turbo inputs, and pin it
 - 2026-10-19T07:08:11Z occurrence=41-1-pack-layout-licensing-and-provenance note=cr: inputs also miss packages/client-config/package.json, client-config/skills-pack/** and client-config dist
 - 2026-10-19T23:32:06Z occurrence=41-6-skills-and-rules-installer note=cr: check:provenance itself imports client-config dist/pack-plan.js with no freshness check (provenance-inputs.mjs gatherInstallerDistributions)
+- 2026-10-20T02:20:25Z status=resolved-by:41-7-skills-pack-docs-and-capstone owner=41-7-skills-pack-docs-and-capstone by=lead note=delivered: turbo.json every test task cache:false and @iris-mcp/all#test dependsOn @iris-mcp/client-config#build; story-41-7-turbo-test-graph.test.ts red under each turbo.json mutation; check:provenance fails closed on a client-config dist older than src (QA: touch src/index.ts -> exit 1, touch dist -> OK); QA real turbo 2.9.4 scratch run: old config replays 'cache hit' after a skills-pack-src byte change, new config 'cache bypass'
 
 ### DW-612: Nothing on the publish path runs gen:pack --check or check:provenance; client-config's prepublishOnly runs only verify-iris-reachable, so a publish made without the default suite could ship a drifted pack or a tarball without the notice
 - source: _bmad-output/implementation-artifacts/spec-41-1-pack-layout-licensing-and-provenance.md | severity: med | fix-risk: low | footprint: out-of-footprint
@@ -3426,6 +3427,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-41-5-workflow-skills-refresh.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 41.5 code review 2026-10-19: rosters from dist/tools/presets.js (admin core includes iris_user_manage, developer excludes it); the catalog intro, skills/README.md and README.md:830 state the first-of rule but never say a later preset can hide a tool; only the CHANGELOG Known limits says so
 - 2026-10-19T19:44:33Z status=routed owner=41-7-skills-pack-docs-and-capstone by=cr note=41.7's pack docs (root README section, the catalog that supersedes skills/README.md) say the presets are not nested
+- 2026-10-20T02:20:25Z status=resolved-by:41-7-skills-pack-docs-and-capstone owner=41-7-skills-pack-docs-and-capstone by=lead note=delivered: the pack catalog, the root README skills pack section and README:830 say the presets are not nested (first of core/developer/full that shows every named tool); a test pins the provision-project-environment / iris_user_manage example against the built admin presets (freshness-guarded)
 
 ### DW-625: The installer's claude-code route installs the skills even when the Claude Code plugin is present (AD-28 Duplicates): no plugin exists yet to detect
 - source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: low | footprint: out-of-footprint
@@ -3436,6 +3438,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: 41.6 plan research 2026-10-19: Pi MCP since 0.99.0 (.pi/mcp.json), Kilo kilo.json[c] mcp key, Junie .junie/mcp/mcp.json, all still excluded/roadmap; adapters.ts:579-601, :480
 - 2026-10-19T22:31:15Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=re-disposition the three MCP-capable clients, rename or retire the stale rows, fix docsUrl, bump ADAPTER_DATA_VERSION with the certification table, before 1.0
+- 2026-10-20T02:12:59Z occurrence=41-7-skills-pack-docs-and-capstone by=cr note=PACK_TARGETS too: the gemini row's own note says Antigravity CLI replaced Gemini CLI for unpaid users; no row or id names it
 
 ### DW-627: The default iris-mcp-all test sweep reaches a local IRIS: the live gates default to localhost:52773 / HSCUSTOM and run their legs whenever that instance answers, with no opt-in
 - source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3456,3 +3459,16 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 41.7 review 2026-10-20: packages/client-config/package.json:4; npm-facing summary before the first publish
 - 2026-10-20T01:15:16Z status=routed owner=42-1-pre-publish-package-fixes by=harvest note=rewrite the npm description with the other package.json metadata fixes (DW-31)
+- 2026-10-20T02:12:59Z occurrence=41-7-skills-pack-docs-and-capstone by=cr note=also packages/client-config/README.md:5 status line (Stories 33.0-33.4 only) and README.md:924 package summary omit the skills pack
+
+### DW-631: docs/client-config/* was left out of Story 41.7: no page points at iris-mcp-clients skills install, and claude-code.md:306, claude-desktop.md:273, cursor.md:304 link the broken anchor #read-only-mode-point-it-at-production-with-one-environment-variable
+- source: spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 41.7 review 2026-10-20: the spec's Never list excludes docs/client-config/*; the em-dash heading's anchor is #read-only-mode--point-...; grep -c 'skills install' docs/client-config/*.md is 0
+- 2026-10-20T02:12:59Z status=wontfix-accepted owner=41-7-skills-pack-docs-and-capstone by=cr note=reopen_if=a story edits docs/client-config/*.md (42.9 install docs) and the three anchors or the missing installer pointer are still there
+- 2026-10-20T02:20:25Z status=routed owner=42-9-install-docs-and-client-re-certification by=lead note=reopened before 1.0: 42.9 rewrites the install docs (AC 42.9.1); fix the three docs/client-config anchors (#read-only-mode--point-...) and add the skills install pointer to docs/client-config pages
+
+### DW-632: qa-41-7-doc-links checks only the 9 documents Story 41.7 changed; a repo-wide run of its checker finds broken relative links elsewhere (packages/shared/README.md:108 #server-manager-connections-iris_server_manager, three docs/known-bugs-* links, and the docs/client-config anchors of DW-631)
+- source: spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: 41.7 review 2026-10-20: the same checker over git ls-files '*.md' (130 files, _bmad and .claude excluded) reported 13 broken links before the review's 4 fixes
+- 2026-10-20T02:13:05Z status=wontfix-accepted owner=41-7-skills-pack-docs-and-capstone by=cr note=reopen_if=a user-facing README or docs/ page outside CHANGED_DOCS ships a broken relative link or anchor that a user reports or a doc story finds
+- 2026-10-20T02:20:25Z status=routed owner=42-9-install-docs-and-client-re-certification by=lead note=reopened before 1.0: run the qa-41-7-doc-links checker repo-wide (git ls-files *.md minus _bmad/.claude), fix the broken links it reports (packages/shared/README.md:108, the docs/known-bugs-* links), and widen the test's document set so it pins them
