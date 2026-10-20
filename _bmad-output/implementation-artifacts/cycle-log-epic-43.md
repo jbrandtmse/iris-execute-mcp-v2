@@ -57,3 +57,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-20T13:30:48Z	Story 43.2	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=557 result=pass_after_flake_rerun order=forward,reverse first_run=shared_forward_1_failed_of_55 reruns=main_3/3,fresh_worktree_5/5 flake=DW-649 model=claude-opus-5-5
 2026-10-20T13:31:02Z	Story 43.2	committed	sha=a190acc code_sha=3c606b2 build_sha=c245998 submodules= ci=none run=none branch=epic43 pushed=origin/epic43 verified=merge-base amendments=ARCHITECTURE-SPINE.md:AD-32,epics.md:43.2.1,43.3_DW-642/649+capability_note,43.4_DW-641/646
 2026-10-20T13:31:02Z	Story 43.2	story_cycle	plan_to_commit_min=192 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-20T13:38:43Z	Epic 43	epic_context_compiled	reason=planning_artifact_newer model=claude-opus-5-5 lines=266
+2026-10-20T13:38:43Z	Story 43.3	stage_spawned	stage=plan spawn_at=2026-10-20T13:38:43Z model=claude-opus-5-5 agent_name=43-3-human-confirmation-through-elicitation-plan-1 cycle_iteration=1
