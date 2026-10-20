@@ -628,6 +628,17 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - On the 2025-11-25 revision, behavior is byte-identical (AD-15).
     - The same process also serves revision `2026-07-28`, through `serveStdio(factory)` with the default `legacy: 'serve'`. This was verified by the live probe of 2026-10-15 (`research/mcp-sdk-v2-stdio-probe-2026-10-15.md`), and lands in Story 43.2.
     - On both eras, the logical content of every surface is identical, proven by a cross-era pin. Claude Code negotiates the modern era by default.
+      - **What the pin ignores** (Story 43.2, wave-8 decision #7). Exactly six things, each mandated by the `2026-07-28` revision:
+        - `resultType`;
+        - `ttlMs`/`cacheScope` on the cacheable methods;
+        - `_meta["io.modelcontextprotocol/serverInfo"]`;
+        - `tools[].execution` (Tasks moved to an extension);
+        - `server/discover` in place of `initialize`;
+        - the JSON-RPC `id`.
+
+        The SDK adds the first three itself, and they are also pinned by value. Every other field is compared.
+      - **The factory** (decision #8). The first factory call returns the server built at construction, and any later call builds a fresh one. Every client mode probed calls it exactly once per process. The only exception is a `server/discover` followed by an `initialize` on one connection, and the rebuilt server still serves the 2025 era byte for byte.
+      - **The era log line** (decision #10). Each factory call logs one stderr INFO line naming the negotiated era. No new environment variable is read.
     - Per-request `_meta` never bypasses the AD-3 chokepoint.
   - **Until Epic 43.** The v1 floor is `>=1.31.0`, out of the known high advisory range.
 

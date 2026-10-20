@@ -5941,7 +5941,7 @@ DW-441.
 All four saw identical `tools/list` and `instructions`.
 
 - **AC 43.2.1** — Design (verified):
-  - `McpServerBase` serves stdio through `serveStdio(factory)` from `@modelcontextprotocol/server/stdio`, with the default `legacy: 'serve'`. The factory builds the `McpServer` and registers every tool, prompt and resource. Over stdio, there is one connection per process, so the factory runs once per process.
+  - `McpServerBase` serves stdio through `serveStdio(factory)` from `@modelcontextprotocol/server/stdio`, with the default `legacy: 'serve'`. The factory builds the `McpServer` and registers every tool, prompt and resource. Over stdio, there is one connection per process, so in every client mode the factory runs once per process. The first call returns the server built at construction. The one exception is a `server/discover` followed by an `initialize` on one connection, which builds a fresh server that still serves the 2025 era byte for byte. [AMENDED 2026-10-20, wave-8 decision #8.]
   - Record which certified clients in client-config's 16-adapter registry negotiate `2026-07-28` today, and how `MCP_PROTOCOL_NEGOTIATION=legacy` forces Claude Code back to the old path.
 - **AC 43.2.2** — Every server answers both eras from one process:
   - a `2026-07-28` client (the v2 client, pinned to that revision) discovers capabilities with `server/discover` and calls tools;
