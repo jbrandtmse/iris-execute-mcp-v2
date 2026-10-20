@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-10-20'
 status: 'done'
 baseline_revision: '0a5a3f89f4a2af37a59eef2c3d923563a923868a'
+baseline_commit: '0a5a3f89f4a2af37a59eef2c3d923563a923868a'
 review_loop_iteration: 0
 followup_review_recommended: true
 context:
@@ -125,7 +126,7 @@ The answer is bound to the exact arguments by a signed, single-use `requestState
 | Tampered / replayed / expired state (modern) | One byte changed; an already used state; or the TTL of 600 s passed | Asked again. Never runs on that state. No wire error. | none |
 | Valid decline, capability dropped (modern) | Round 2 has a valid state and a decline, and its envelope declares no elicitation | `CONFIRMATION_DECLINED`: a valid answer is honored before the capability check | in-band |
 | `resendFiltered` preflight | Eliciting; `dryRun: false`, `confirm: true` | First a read-only POST with the same filters and `dryRun: true`, no `confirm`. If `1 <= matchCount <= maxMessages`, the dialog names the count, window and cap. Otherwise no dialog, and the execute POST is sent as today. | a refused preflight: no dialog, execute as today |
-| Unanswered dialog | Modern client never retries; legacy shim leg times out, is cancelled or fails | Nothing changes and no audit entry is written (known limit, decision #14) | SDK-owned text |
+| Unanswered dialog | Modern client never retries; legacy shim leg times out, is cancelled or fails | Nothing changes. One audit entry, `outcome: "error"` with `confirmation: "unanswered"`, is written after the 600 s TTL or at shutdown (lead decision #14, the pending-ask alternative; task 6b) [amended by the lead 2026-10-20] | SDK-owned text |
 | Cancelled call (DW-642) | `notifications/cancelled` while the call's IRIS request is in flight | The request is aborted: the listener sees its connection close before the reply. No answer goes out. One entry: `error`, `error` = `CANCELLED_CALL_TEXT`. | none |
 | Cancelled before the request | The signal is already aborted when the handler calls IRIS | No request reaches IRIS. The HTTP client rejects with `IrisConnectionError` code `CANCELLED`. | none |
 | In-process callback / stub ctx | `registerToolOn` callback, or the owned handler with a hand-made ctx | No `confirm` and no signal binding: exactly today's behavior | none |

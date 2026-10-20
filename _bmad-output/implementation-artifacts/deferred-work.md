@@ -3022,6 +3022,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: spine AD-4 Known divergences + Deferred (the Epic 38 gate routes them to one ledger entry with an owner); correcting a hint is an AD-15 sanctioned change (iris_execute_tests is already DW-498)
 - 2026-10-16T15:13:57Z status=decision-pending owner=burndown by=harvest note=product call for the decision sheet: sanction the hint correction (and in which story) or keep the grandfathered hints
 - 2026-10-16T15:58:09Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=decided=orchestrator(Lead-away) decision 18: sanction the destructiveHint correction before 1.0; DW bullet in 42.1
+- 2026-10-20T23:38:03Z occurrence=43-3-human-confirmation-through-elicitation note=43.3 plan inventory: iris_ldap_manage delete, iris_x509_manage delete and iris_service_manage enable/disable/set are annotated destructiveHint false although they delete or disable; fix with the same AD-15 annotation correction
 
 ### DW-561: Epic 38 capstone, the 38.4 and the 38.5 wire gates each carry their own fixture helpers (putDoc, compileDoc, lineNumber, fixtureDocuments, fixtureGlobals, removeFixtures) instead of one promoted set in process-gate-helpers.ts
 - source: _bmad-output/implementation-artifacts/spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3573,3 +3574,48 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 43.2 fresh check 2026-10-20: shared forward 1 failed|54 passed, reverse 55/55; reruns: main checkout 3/3, fresh worktree 5/5; the failing row name was lost to the summary grep; rows at sdk-wire-compat.test.ts:538-568 wait setTimeout(50) before reading the notification count
 - 2026-10-20T13:30:48Z status=routed owner=43-3-human-confirmation-through-elicitation by=harvest note=43.3 reworks this file: replace the fixed sleeps with a deterministic barrier (await the notification, or a client round trip before counting)
+
+### DW-650: iris_doc_put with allowStorageRegeneration: true drops Storage definitions on a flag the agent sets itself, the same capability iris_doc_edit:regenerateStorage gates, but under the default-enabled iris_doc_put and outside AD-34's gate set
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: 43.3 plan inventory 2026-10-20 (decision 12 candidate): gating it needs an extra GET to name the dropped Storage
+- 2026-10-20T23:38:03Z status=escalated owner=burndown by=harvest note=for the decision sheet: add to the AD-34 gate set in a later epic, or accept
+
+### DW-651: iris_mapping_manage force: true overrides an IRIS-side guard on system-global base mappings on a flag the agent sets; TS cannot tell when the guard applies, so 43.3 asks no human for it
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 43.3 plan inventory: Config.cls:643 IsGuardedBaseMapping decides IRIS-side
+- 2026-10-20T23:38:03Z status=wontfix-accepted owner=43-3-human-confirmation-through-elicitation by=harvest note=reopen_if=IRIS exposes the guard condition to TS, or a user reports an unwanted base-mapping override
+
+### DW-652: The Storage guard covers only iris_doc_put and iris_doc_edit; iris_doc_load, the iris_doc_xml_export import and iris_env_promote's document writes (env-promote.ts:869, ?ignoreConflict=1) can drop a Storage definition unguarded
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: 43.3 plan inventory 2026-10-20
+- 2026-10-20T23:38:03Z status=escalated owner=burndown by=harvest note=for the decision sheet: extend the Story 38.4 Storage guard to every document-write path, or accept
+
+### DW-653: The resend-failed-messages prompt says an over-cap match is refused and omitting dryRun or confirm is refused; a dry run returns the full matchCount and omitting dryRun previews; the prompt text is pinned by the frozen 43.1 golden
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 43.3 plan research 2026-10-20
+- 2026-10-20T23:38:03Z status=routed owner=43-4-sdk-v2-docs-smokes-and-capstone by=harvest note=correct the prompt text with DW-639's golden retirement (sanctioned AD-15 prompt-text fix) and regenerate the skill
+
+### DW-654: Audit entries for %SYS-scoped tools record the profile's default namespace (for example HSCUSTOM), not %SYS
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 43.3 plan probe 2026-10-20
+- 2026-10-20T23:38:03Z status=escalated owner=burndown by=harvest note=for the decision sheet: AD-19 accuracy; record the effective namespace for %SYS-scoped handlers, or accept
+
+### DW-655: prd.md:86 says All 86 consolidated tools; the suite has 115
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 43.3 plan
+- 2026-10-20T23:38:03Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=AC 42.9.3 aligns the PRD with what shipped
+
+### DW-656: The HTTP client clears its timeout once response headers arrive, so a stalled body read is unbounded, and an abort by destroy() is reported as TIMEOUT
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 43.3 plan reading of http-client.ts
+- 2026-10-20T23:38:03Z status=wontfix-accepted owner=43-3-human-confirmation-through-elicitation by=harvest note=reopen_if=a stalled body read is observed (the Web Gateway's own timeout bounds it in practice) or a cancelled call is reported as TIMEOUT to a user
+
+### DW-657: resendFiltered fails open: a read-only preview that fails with anything but an IRIS refusal (timeout, connection error, 5xx) shows no dialog and the execute request is sent
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: 43.3 review 2026-10-20: message-resend.ts:609-636 swallows every preview error and returns undefined; confirmOnWire treats undefined scope as proceed
+- 2026-10-20T23:38:03Z status=open owner=43-3-human-confirmation-through-elicitation by=harvest note=wave-8 decision 21: fail closed on an eliciting client for any preview failure that is not an IRIS 4xx refusal; code review applies it in-story
+
+### DW-658: A declined promotion can still have run the first-use set-up (connection check, ExecuteMCPv2 bootstrap) on a target profile, because env-promote resolves both profile clients before the dialog
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: 43.3 review: env-promote.ts:1151-1191 executeAction resolves before ctx.confirm
+- 2026-10-20T23:38:03Z status=wontfix-accepted owner=43-3-human-confirmation-through-elicitation by=harvest note=wave-8 decision 22: documented known limit; reopen_if=a deploy to a declined target is reported as harmful or the bootstrap gains a user-data write
