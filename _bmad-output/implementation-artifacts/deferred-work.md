@@ -2848,6 +2848,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-15T13:36:58Z status=routed owner=burndown by=harvest note=pre-existing; blocks a green launcher suite before 42.7 publishes the extension
 - 2026-10-16T15:58:09Z status=routed owner=42-7-vs-code-extension-publish by=burndown note=overflow: the extension-publish story needs a green launcher suite on every platform; DW bullet in 42.7
 - 2026-10-19T22:31:15Z status=routed owner=42-7-vs-code-extension-publish by=harvest note=occurrence: 41.6 implement 2026-10-19 reproduced clientsActivationFlow 33-3-3 timing out at 60s on the working tree and on a baseline 3890fec copy (re-toggled roster never persists)
+- 2026-10-20T09:40:41Z occurrence=43-1-framework-migration-to-sdk-v2 by=cr note=43.1 cr: launcher tsc --noEmit red on this host, 11 errors, all missing vscode/servermanager modules; none in a 43.1 file
 
 ### DW-533: iris_production_manage delete removes ANY class given as name: the class-delete path never checks that the class extends Ens.Production
 - source: spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: high | footprint: in-story
@@ -3152,6 +3153,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: server-base.ts:1178 registerTool passes inputSchema, so the SDK validates before the audited chokepoint; the 39.3 gate audit row (story-39-3-body-search-live-gate.test.ts:1120) sees an entry for the valid call only
 - 2026-10-17T09:11:02Z status=escalated owner=burndown by=cr note=decide: validate inside the chokepoint (permissive SDK schema) or amend AD-3/AD-19; recheck after the Epic 43 SDK move
 - 2026-10-17T18:31:10Z status=routed owner=43-1-framework-migration-to-sdk-v2 by=merge_gate note=decided=orchestrator(Lead-away) decision 33: the SDK v2 call-path rewrite audits schema-invalid calls (one entry, outcome error, no argument values); DW bullet in 43.1
+- 2026-10-20T09:47:18Z status=resolved-by:43-1-framework-migration-to-sdk-v2 owner=43-1-framework-migration-to-sdk-v2 by=lead note=delivered: validation runs inside the audit wrapper of the owned tools/call; a schema-invalid call writes one entry (outcome error, paramKeys only, never params even with IRIS_AUDIT_LOG_PARAMS=true; unknown/hidden unaudited); pinned by story-43-1-schema-invalid-audit, story-43-1-qa-dw579-process, the handler golden and compat rows; lead smoke: armed story-39-3 live gates pass
 
 ### DW-580: iris_message_search searchTable matches only headers whose body class is exactly the Search Table's DOCCLASS; indexed bodies of a DOCCLASS subclass are left out unless bodyClass names that subclass
 - source: spec-39-4-search-table-lookup.md | severity: med | fix-risk: med | footprint: in-story
@@ -3392,6 +3394,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 41.2 QA over stdio saw -32602 on all four; server-base.ts registerPrompt passes an argsSchema whenever a prompt declares arguments; after the retirement no shipped prompt renders from an omitted arguments
 - 2026-10-19T09:50:06Z status=routed owner=43-1-framework-migration-to-sdk-v2 by=cr note=43.1 rewrites prompt registration on SDK v2: render all-optional prompts from an omitted arguments; pin it in AC 43.1.3
 - 2026-10-19T19:44:33Z occurrence=41-5-workflow-skills-refresh
+- 2026-10-20T09:47:19Z status=resolved-by:43-1-framework-migration-to-sdk-v2 owner=43-1-framework-migration-to-sdk-v2 by=lead note=delivered: prompts/get treats an omitted arguments as {}; the 7 DW-617 golden rows equal their {} rows on the raw wire and through a v2 Client getPrompt({name}); QA: a real @modelcontextprotocol/sdk 1.29.0 client against the 5 built v2 servers 214/214 (v1 baseline fails exactly the 11 omitted rows)
 
 ### DW-618: .changeset/epic35-defect-gate.md still says the objectscript-review prompt got a wording fix, so the first changeset version lists a fix to a prompt the same release removes
 - source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3510,13 +3513,16 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: med | fix-risk: low | footprint: in-story
 - evidence: 43.1 review (verification-gap, unverified): epic37-default-outage-gate, host-guard-process-gate, server-manager-process-gate, server-manager-precedence-gate, governance-file-process-gate, launcher localSpawnIntegration and governanceUiRoundTrip ran unarmed only
 - 2026-10-20T07:58:39Z status=open owner=43-1-framework-migration-to-sdk-v2 by=harvest note=the lead's 43.1 smoke runs them armed against the explicit shared target (read traffic; BOOTSTRAP_VERSION current so no deploy)
+- 2026-10-20T09:47:19Z status=resolved-by:43-1-framework-migration-to-sdk-v2 owner=43-1-framework-migration-to-sdk-v2 by=lead note=lead smoke 2026-10-20 armed against the explicit shared target: epic37-default-outage-gate, host-guard-process-gate, server-manager-process-gate, server-manager-precedence-gate, governance-file-process-gate and both story-39-3 live gates 146 passed 1 skipped; launcher localSpawnIntegration + governanceUiRoundTrip 3/3 with IRIS_TEST_* explicit
 
 ### DW-639: The 43.1 sdk-wire golden embeds the whole tool catalogue and governance policy map, so any later tool/action/description change turns the default suite red, and its header test forbids recapturing from v2
 - source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 43.1 review: fixtures/sdk-wire-golden.json tools-list and call:server-profiles lines; story-43-1-sdk-wire-golden.test.ts header test
 - 2026-10-20T07:58:39Z status=routed owner=43-4-sdk-v2-docs-smokes-and-capstone by=harvest note=43.4 decides how the frozen v1 oracle retires once the catalogue legitimately changes (compare only what a migration can change, or hand the tools-list rows to the tools-list snapshot); 43.2 reuses it unchanged
+- 2026-10-20T09:40:41Z occurrence=43-1-framework-migration-to-sdk-v2 by=cr note=QA's fixtures/sdk-handler-golden.json is a second frozen v1 oracle (handler texts, startup requests, BOOTSTRAP_VERSION); retire both together
 
 ### DW-640: A tools/call result with both isError and structuredContent serializes its members in a different order on SDK v2 (content, structuredContent, isError)
 - source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: low | fix-risk: low | footprint: in-story
 - evidence: 43.1 review: the SDK Server re-encodes the owned handler's result in its schema order; JSON value identical; no public option keeps v1 order
 - 2026-10-20T07:58:39Z status=by-design owner=43-1-framework-migration-to-sdk-v2 by=harvest note=sanctioned AD-15 exception, wave-8 decision 4; pinned by the sdk-wire-compat row
+- 2026-10-20T08:51:38Z status=dropped owner=43-1-framework-migration-to-sdk-v2 by=lead note=invalid premise (wave-8 decision 5): QA showed v1's SDK server already re-encoded every tools/call result in schema order (content, structuredContent, isError); v1 baseline vs v2 byte-identical on 22 handler-golden rows and 90 sweep results
