@@ -1,0 +1,678 @@
+---
+title: 'Story 41.7: Skills Pack Docs and Capstone'
+type: 'feature'
+created: '2026-10-19'
+status: 'ready-for-dev'
+review_loop_iteration: 0
+followup_review_recommended: false
+context:
+  - '{project-root}/.claude/rules/project-rules.md'
+  - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
+warnings:
+  - oversized
+deferred:
+  - summary: 'The documented npx form `npx -y @iris-mcp/client-config iris-mcp-clients <command>` would pass `iris-mcp-clients` to the CLI as its command, and it carries no `@1` pin.'
+    evidence: '`packages/client-config/src/cli/clients-cli.ts:14` runs `runCli(process.argv.slice(2))`, and `runCli` takes the first argument as the command (`clients.ts:1966`). So once the package is published, the documented line fails with an unknown-command error. The form appears at `packages/client-config/README.md:17`, `docs/client-config/README.md:5` and `docs/client-config/{claude-code,claude-desktop,cursor}.md:4`, and `certification-docs.test.ts:88` pins the exact string. Story 42.1 (AC 42.1.6) owns the npx spec pin and the unpinned-spec test. The likely fix is `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients <command>`, verified against the published package. This story adds no npx form.'
+    location: 'packages/client-config/README.md:17; docs/client-config/*.md'
+    severity: 'med'
+---
+
+<intent-contract>
+
+## Intent
+
+**Problem:** The skills pack and its installer exist, but the docs still describe the old state:
+- The root README tells users to copy `skills/` by hand and says "The installer arrives in Story 41.6."
+- `skills/README.md` duplicates the catalog with `cp -r` instructions.
+- Nothing documents where each client's files go.
+- The pack docs read the tool presets as if they were nested (DW-624).
+
+The epic also has no default-suite gate that drives the built installer for every client. In addition, `@iris-mcp/all`'s tests can run against a stale or unbuilt client-config dist, or replay a cached green after the pack sources change (DW-611).
+
+**Approach:**
+- **Docs.** Write the docs from the real sources:
+  - a root README "The skills pack" section, pinned by tests that read the bin's output, `PACK_TARGETS`/`PACK_ROUTES`, the pack tree and the presets;
+  - a client-config README per-client table generated from `PACK_TARGETS`, with `--check`;
+  - `skills/README.md` reduced to a generated pointer;
+  - the not-nested presets stated in the root README and the catalog.
+- **The capstone.** Add the Epic 41 capstone: one default-suite test that drives the built `iris-mcp-clients` bin for all 17 client ids and is proven red on the built-bin path.
+- **DW-611.** Order `@iris-mcp/all#test` after `@iris-mcp/client-config#build`. Stop a cached test green from outliving a change to what the tests read (D6: no test result is cached). Give the installer probe a freshness guard.
+- **The live check.** Specify AC 41.7.3's one-time live Claude Code check for the lead to run.
+
+## Boundaries & Constraints
+
+**Always:**
+- **Every doc claim this story adds is pinned.** Each pin is a test that reads the real source of truth: the built bin's output, `PACK_TARGETS`/`PACK_ROUTES`/`MANIFEST_PATH`/`LINK_DETAILS` from client-config's dist, the pack tree on disk, or the preset rosters (Rule #51). The claim-to-pin map is in Design Notes.
+- **Generated files change only through their generators (AD-14):**
+  - `skills/README.md` through `pnpm gen:skills`;
+  - the catalog through `pnpm gen:pack`;
+  - the client-config README marker sections through `node packages/client-config/scripts/render-certification-table.mjs`.
+- **The capstone:**
+  - It drives only the BUILT bin, in a fresh child process per call, with `HOME`/`USERPROFILE`/`APPDATA` set to a temp home and `cwd` set to a temp project.
+  - Its oracles are independent of the bin: `PACK_TARGETS`, `PACK_ROUTES` and the constants come from client-config's `src/` modules, the pack bytes from disk, and frontmatter is read through `readSkillFrontmatter` from `scripts/lib/skills-pack.mjs`.
+- **Temp directories only.** Tests and probes write only under OS temp directories they create and delete. Every child process gets a temp `HOME`. Nothing is written to the real repository root (`.claude/`, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.agents/`, `.cursor/`, `.iris-mcp/`) or to the real `$HOME`.
+- **No IRIS contact in iris-mcp-all runs.** Every `@iris-mcp/all` run sets `IRIS_HOST=127.0.0.1 IRIS_PORT=1` (DW-627).
+- **Source text.** New `.ts`/`.mjs` code is ASCII; any non-ASCII is written as escapes, and test bytes are built from numbers (Rule 14). Files are written with the file tools, never a heredoc (#55).
+
+**Never:**
+- **The installer is not reopened.** No change to its write path, plan, manifest, routes, `PACK_TARGETS` rows or CLI behavior (the seam with 41.6, Rule #52). The installer's `src/` modules are read, never edited.
+- **No surface change.** No MCP tool, action, governance key, preset roster, prompt, refusal code or bootstrapped class changes. No ObjectScript (`src/`) changes. Tools stay at 110 package / 115 advertised, the prompts stay byte-identical on the wire, the baseline stays `1e62c5ad5bf7`/141, and `BOOTSTRAP_VERSION` stays `5296a1c836f4`.
+- **No npx form, and no new package dependency.** Add no `npx` command line anywhere (42.1 owns the `@1` pin). Add no workspace dependency between packages (AD-2).
+- **Files not to touch:**
+  - `.claude/rules/*`, `CLAUDE.md`, the spine, `epics.md`, `irislib/`, `irissys/`, the installer-managed `.claude/skills/bmad-*`, earlier `CHANGELOG.md` sections, and `docs/client-config/*`;
+  - the npx line at `packages/client-config/README.md:17-19` (it is pinned and deferred).
+- **Out of scope:** DW-622 and DW-615 (the lead's at the burn-down gate).
+- **The implement, QA and review stages:**
+  - They never run `claude`. The lead runs AC 41.7.3 at smoke.
+  - They make no IRIS call.
+  - They never run `git commit`, `git push`, `git reset` or `git rebase`.
+
+## I/O & Edge-Case Matrix
+
+| Scenario | Input / State | Expected Output / Behavior | Error Handling |
+|----------|--------------|---------------------------|----------------|
+| Capstone, a routed client (Integration: CLI; 16 legs) | A temp project seeded with foreign content (Design Notes "Capstone fixtures"), then `skills install --client <id> --yes` | Exit 0. The tree diff is exactly: the pack's skill files under `PACK_ROUTES[route].skillsDir`; the notice beside each file that carries the adaptation header; the rule file, or our block in the host; the manifest; the created directories. Every installed file is byte-equal to the pack. Every installed `SKILL.md` passes `readSkillFrontmatter` with no problem and `name` = its directory: 12 declare a preset, 6 declare none. Every foreign file is byte-identical | No error expected |
+| Capstone, re-install | The same project with file mtimes aged, then the same install again | Exit 0, `Nothing to change for <displayName>: the skills pack is already installed.` The tree and every mtime are unchanged, the manifest bytes are unchanged, and the backup count under the temp home is unchanged | No error expected |
+| Capstone, uninstall | `skills uninstall --client <id> --yes` | Exit 0. The tree (with modes) equals the pre-install snapshot exactly, so every foreign byte is intact | No error expected |
+| Capstone, Claude Desktop (1 leg) | Seeded project; `skills install` and `skills uninstall --client claude-desktop --yes` | Exit 2 each. stdout is empty, stderr starts `Error: <CLAUDE_DESKTOP_REFUSAL>` followed by a blank line and `Usage: iris-mcp-clients skills install\|uninstall`. The tree is unchanged, with no manifest and no backup | Refused |
+| Generated table (Integration: `certification-docs.test.ts` reads the renderer) | `render-certification-table.mjs --check` on the real package | `render --check: README.md marker sections are in sync`, exit 0. The `PACK-TARGETS-TABLE` section has 17 rows in `PACK_TARGETS` order | A hand edit inside the markers, or a `PACK_TARGETS` change without a re-render: exit 1 with the OUT OF SYNC line. A roster violation: exit 2 |
+| Root README claims (Integration: docs against tool output) | `story-41-7-doc-claims.test.ts` | Each documented `skills` command runs with `--dry-run --project <temp>` and exits 0 with nothing written. The 4 route rows equal the rows rendered from `PACK_ROUTES`/`PACK_TARGETS`. The counts match the pack tree, the not-nested example matches the admin rosters, and each known limit matches the bin's output | A drifted row or claim fails the test, naming the line |
+| `skills/README.md` | `pnpm gen:skills`, then `gen:skills:check` | The generated pointer (golden in Design Notes), with no skill table and no `cp -r`. `13 generated file(s) match source` | A hand edit: DRIFT, exit 1 |
+| Turbo graph (Integration: turbo reads `turbo.json`, DW-611) | `turbo run test --dry=json --cwd <temp copy of the working-tree manifests>` | `@iris-mcp/all#test` depends on `@iris-mcp/all#build` and `@iris-mcp/client-config#build`. Every `#test` task's resolved definition has `cache: false` | Reverting either change makes the test red |
+| Probe freshness (Integration: `check:provenance` reads the probe, DW-611) | A scratch root with client-config's `package.json`, `dist/` and a `src/` file newer than `dist/` | `[distribution] installer: the installer payloads could not be computed (<stale reason>); build @iris-mcp/client-config first`, exit 1. A root without client-config's `src/` (every existing scratch root) and the fresh real tree are unchanged | Fail-closed |
+| Live check (AC 41.7.3; the lead, at smoke) | The Design Notes procedure: positive leg, uninstall, contrast leg | The positive leg's init `skills` list includes all 18 names, and an `InstructionsLoaded` for the installed rule (`session_start`) comes before the `.cls` `iris_doc_put` `PreToolUse` in the same session. The contrast leg has neither, while the `PreToolUse` still fires. No IRIS write happens | The fallbacks are in the procedure. A leg over USD 1 is stopped by `--max-budget-usd` |
+
+</intent-contract>
+
+## Code Map
+
+**Root and package docs:**
+- `README.md`:
+  - **The section to extend.** `## Workflow Prompts & Agent Skills` runs `:800-831` (`---` at `:832`). `:806-823` is the 12-prompt table, `:825` the retirement sentence, and `:827-830` `### Using the prompts`.
+  - **The bullet to rewrite.** `:830` says to copy `skills/` into `.claude/skills/`, links `skills/README.md` twice, and calls the preset "the tool preset under which every tool it names is visible" (DW-624's nested misreading).
+  - **Anchor links.** `:471`, `:492`, `:512` and `tool_support.md:450` link `#workflow-prompts--agent-skills`. Keep that heading.
+  - **The manager section.** `:229-250` `#### The manager: iris-mcp-clients (recommended)`. It uses the built-bin form `node packages/client-config/dist/cli/clients-cli.js <cmd>` (`:233-238`) after "Not yet published to npm…" (`:231`).
+  - No table of contents. "110 tools" at `:21`, `:718`, `:804`.
+- `packages/iris-dev-mcp/README.md:271`: the same retirement sentence. `:273`, plus admin `:259`, interop `:401` and ops `:199`: `Also installable as [Agent Skills](../../skills/README.md).`
+- `tool_support.md:450`: one long line. It holds the `TOOL_SUPPORT_NOTE` substring and ends "…and the generated [`skills/`](skills/README.md) install pack."
+- `packages/client-config/README.md`:
+  - **The CLI section.** `:15`; `:17-19` is the npx line plus its caveat, which is pinned (do not touch). The command block is `:32-41`, with the `skills` line at `:40`.
+  - **The installer docs.** `## Installing the skills pack` `:66-105` (routes, scope, preview, ownership, `--include-modified`, the record, exit codes, notice; `:105` points to `--help`). `## Doctor` follows at `:107`.
+  - **Generated sections.** `## Adapter table (generated)` `:219` (markers `:221`/`:241`) and `## Certification dispositions (generated)` `:243` (markers `:269`/`:386`).
+
+**Generators:**
+- `packages/client-config/scripts/render-certification-table.mjs` (225 lines):
+  - **Inputs.** It imports `../dist/adapters.js` (`:29`) and reads `scripts/certification-results.json`; its marker constants are at `:32-35`.
+  - **Guards and renderers.** Roster guards exit 2 (`:41-71`). `renderAdapterTable` `:121-140`, `renderCertificationDetails` `:146-195`, `splice` `:201-209` (exit 2 on a missing pair). Composition is at `:211-213`.
+  - **Modes.** `--check` (`:215-222`) prints `render --check: README.md marker sections are in sync` or the OUT OF SYNC line (exit 1). Write mode is `:224-225`.
+- `packages/client-config/src/__tests__/certification-docs.test.ts`:
+  - `:32` runs the renderer `--check` as a child process and expects status 0;
+  - **Trap:** `:70-83` takes the FIRST line that starts `| ` and includes `` (`<id>`) ``. A new table placed earlier in the README must not use that cell form;
+  - `:86-92` pins the npx caveat.
+- `packages/client-config/src/__tests__/certification-process.test.ts:276-300`: `makePkgSandbox` copies only the renderer, the results, `dist/adapters.js` ("zero imports") and the README.
+- `scripts/gen-skills.mjs`:
+  - **Rendering.** `doNotEditHeader` `:51-56`; `renderReadme` `:58-89` (the table row at `:62`). `computeExpectedFiles` puts `README.md` in the expected map at `:109`.
+  - **Check and write.** `--check` prints `${files.size} generated file(s) match source` (`:138`) and reports MISSING, DRIFT or STRAY. `writeTree` deletes stray files (`:146-147`). The header comment is `:20-21`.
+- `scripts/lib/skills-pack.mjs`: `renderPackReadme` `:247`, intro `:251-258` (the first-of preset sentence ends "`full`, the default, shows every tool."), Layout `:268-274`, Third-party `:275-278`. The file keeps exactly its three imports. `readSkillFrontmatter(text, dirName)` `:350` returns `{fields, metadata, problems}` (a BOM is a problem).
+- `packages/client-config/skills-pack/README.md`: generated; today 11859 bytes, 49 lines, sha256 `00004f56…`.
+
+**Doc and generated-file pins** (all in `packages/iris-mcp-all/src/__tests__/`):
+- **`story-41-2-doc-claims.test.ts`:**
+  - `RETIREMENT_SENTENCE` `:44-46` must be a whole line in both READMEs (`:118-125`);
+  - `TOOL_SUPPORT_NOTE` `:49` is a substring check (`:127-131`);
+  - the sweep `:133-169`: a line naming `objectscript-review` must equal `RETIREMENT_SENTENCE`. `.changeset/` is scanned except two files; `CHANGELOG.md` is not scanned.
+- `skills-generated-frontmatter.test.ts:230-243` (`skills/README.md`: banner, generator name, `| Skill | Server | Tool preset | Description |`, 12 rows, catalog path) and `:204` (comment: the generator pointer lives in `skills/README.md`).
+- `skills-pack-rule.test.ts:495-500` (`skills/README.md` has 12 `` | `name` | `` rows, none retired).
+- **Still green under D1:**
+  - `story-41-5-qa-gen-skills-refusal.test.ts:125,151` (deletes and regenerates `skills/README.md`);
+  - `story-41-1-qa-pack-scratch-cli.test.ts:358,363,383` (`13 generated file(s)`, `MISSING generated file: skills/README.md`);
+  - `story-39-6-doc-claims.test.ts:480-500` (scans every `packages/*/README.md` and `skills/README.md` for `doc-claims-patterns.ts:8-19` claims).
+- `skills-pack.test.ts`: `README_INTRO` `:130-131`, `README_LAYOUT` `:135`, `ruleLine` `:151`, `expectedReadme` `:155-182`, and the golden `:480-485` (bytes, lines, sha).
+- `docs-prompt-sync.test.ts` (prompt names, `110 tools` `:127`, `12 prompts` `:149-157`; unchanged claims).
+
+**Installer surface the tests read** (`packages/client-config/src/`):
+- **`pack-targets.ts`:**
+  - types `:19-34`; `RULE_FORM_DIRS` `:37`, `RULE_FORM_EXTENSIONS` `:44`, `NOTICE_FILENAME` `:51`, `ADAPTATION_MARKER` `:54`;
+  - `PACK_ROUTES` `:57-78` (`{id, skillsDir, rule: {kind:"file", form, dir} | {kind:"block", host}}`), `PACK_ROUTE_IDS` `:81`;
+  - `CLAUDE_DESKTOP_REFUSAL` `:114-116`;
+  - `PACK_TARGETS` `:128-348`, 17 rows in this order: claude-code, claude-desktop (route `null`), cursor, vscode, cline, roo-code, windsurf, codex, gemini, zed, goose, kimi, kimi-code, pi, jetbrains-junie, kilo-code, agents.
+- **Exports.** `index.ts:131-145` exports the targets, routes and refusal, but NOT `NOTICE_FILENAME`, `RULE_FORM_*` or `ADAPTATION_MARKER`; import those from the module itself. `pack-plan.ts:54` `MANIFEST_PATH`, `:162` `LINK_DETAILS` (exported through `index.ts:164-166`).
+- **`cli/clients.ts`:**
+  - `cmdSkills` `:1821`; a null route refuses through `usageError` (`:1849-1851`, `:596-598`): `Error: <msg>\n\nUsage: <SKILLS_USAGE>\n`, exit 2, no JSON envelope;
+  - `runCli` `:1958`; the first argument is the command (`:1966`).
+- **`__tests__/qa-41-6-helpers.ts`:** `BIN`, `REPO_ROOT`, `PACK_ON_DISK`, `RULE_STEM`, `NOTICE`, `MANIFEST`, `ADAPTED`, `SPAWN_TEST_TIMEOUT` (180 s), `BACKUP_ROOT`, `assertBinFresh()`, `runBin(sandbox, args, {cwd})` (from-scratch env with a temp home, 90 s timeout), `lstatTree(dir, {modes})`, `treeDiff`, `packSkillFiles`, `packNotice`, `packRuleForms`, `expectedSkillFiles(skillsDir)` (the skills plus the notice beside adapted files), `filesUnder`, `backupsOf(home, rel)`.
+- **`__tests__/pack-test-helpers.ts`:**
+  - `makeSandbox()` / `removeSandboxes()`, `BOM`;
+  - `hostFixtures(stem)` returns 16 fixtures: lf, crlf, bom+lf, bom+crlf, no final newline (lf and crlf), bom with no final newline, lone cr at the end, whitespace-only (terminated and unterminated), single newline, empty, bom only, comments and look-alike markers, another rule's and another tool's block, and non-ascii with invalid utf-8.
+- **What 41.6's process suites drive** (`skills-cli-process`, `qa-41-6-routes-process`, `qa-41-6-byte-fixtures-process`, `qa-41-6-safety-process`):
+  - only claude-code, codex, cursor and gemini, plus claude-desktop (a partial `toContain`) and an unknown id;
+  - none loops over `PACK_TARGETS`, and none calls `readSkillFrontmatter`;
+  - 12 agents-route ids never run end to end.
+- **Config and conventions.**
+  - **Runtime import from `scripts/lib`:** `pack-targets.test.ts:29-30,155` (`pathToFileURL(path.join(REPO_ROOT,"scripts","lib","skills-pack.mjs"))`).
+  - **client-config vitest:** includes `src/**/*.test.ts`, excludes `*.integration.test.ts`, sets no `testTimeout` (5 s default), and runs files in parallel.
+  - **The header convention:** `packages/iris-mcp-all/src/__tests__/epic40-capstone-gate.test.ts:1-45` ("Epic N capstone gate: … in the default suite (project rule #21), each row naming the path it guards (rule #59)"; one "Path:" per row).
+
+**Presets (DW-624 oracle):**
+- `scripts/lib/tool-catalog.mjs:93` `loadToolPresetCatalog(root)` returns `{owners, rosters[pkg][preset].{include,exclude}}` from the built `dist/tools/presets.js`.
+- `scripts/lib/validate-prompts-core.mjs:80` `declaredToolPreset(text, packRel)`, and the visibility rule `:200`.
+- `packages/iris-admin-mcp/src/tools/presets.ts:28` (`core.include` holds `iris_user_manage`) and `:68` (`developer.exclude` holds it).
+- `packages/iris-admin-mcp/src/prompts/provisionProjectEnvironment.ts:26` (`preset: "core"`) and `:49` (names `iris_user_manage`). It is the only skill that a preset other than its declared one hides a tool from.
+
+**DW-611:**
+- **`turbo.json`** (whole file): `build` `{dependsOn:["^build"], outputs:["dist/**"]}`, `test` `{dependsOn:["build"]}`, `lint` `{}`, `type-check` `{dependsOn:["^build"]}`.
+- **turbo 2.9.4.** `node_modules/turbo/bin/turbo` is the Node launcher. It supports `$TURBO_ROOT$`/`$TURBO_DEFAULT$` inputs, root `pkg#task` keys (which do not inherit the generic task) and `dependsOn: ["pkg#task"]`. `.gitignore:29` ignores `.turbo/`.
+- **Today's dry run.** `@iris-mcp/all#test` has `dependencies ["@iris-mcp/all#build"]` (a `<NONEXISTENT>` placeholder that orders the five server builds) and 149 inputs, none outside the package. `@iris-mcp/client-config#build` is absent.
+- **The dry-run JSON shape.** Top-level keys: `id, version, turboVersion, monorepo, globalCacheInputs, packages, envMode, frameworkInference, tasks, user, scm`. Per-task keys: `taskId, task, package, hash, inputs, …, dependencies, dependents, resolvedTaskDefinition, …`. A scratch copy without `node_modules` works through `--cwd` in under 0.1 s and hashes by content.
+- **Root reads.** `@iris-mcp/all` tests read the repo root broadly: `README.md` (32 files), `CHANGELOG.md` (24), `.changeset/` (22), `tool_support.md` (21), `docs/` (13), `.claude` (27), `src/` (11), `extensions/` (7), plus `scripts/` (~80), `skills/` (~20) and `skills-pack-src/`. Shared (9 files), dev (2) and client-config (4) tests also read root paths (`scripts/lib/*.mjs`, `docs/client-config/`).
+- **`scripts/lib/installer-payload-probe.mjs:32-36`:** imports `<root>/packages/client-config/dist/pack-plan.js`, exit 1 with one stderr line on failure.
+- **`scripts/lib/provenance-inputs.mjs:177-213`:** `gatherInstallerDistributions` / `runInstallerProbe` turn a probe failure into the fail-closed `installer` distribution.
+- **`scripts/lib/dist-freshness.mjs`:** `checkDistFresh(pkgDir, pkgName)` never throws. A package without `src/` passes; `src/` newer than `dist/` (ignoring `__tests__`) is stale.
+- **`story-41-1-qa-fixture.ts:37-52`:** `makeScratchRepo({clientConfigManifest:true})` copies only client-config's `package.json` and `dist/`, never `src/`. So the guard cannot fire on existing scratch roots.
+- **`story-41-6-qa-installer-provenance-cli.test.ts`:** the green control `:56-61` (`5 distribution(s).`), the fail-closed rows `:91-127`, and the `FAIL_CLOSED` regex `:92`.
+- **`packages/iris-mcp-all/src/__tests__/pack-fixture.ts`:**
+  - `REPO_ROOT` `:17`, `makeTempRoot` `:30`, `removeTempRoot` `:34`, `put` `:39`;
+  - `runNode(cwd, script, args, {env, timeout})` `:60`, whose env merges `process.env`.
+
+**Release and back-compat:**
+- **CHANGELOG and changesets.** `CHANGELOG.md:5` is the newest section (41.6), with Added/Changed/Tests/Known limits and the installer's known limits at `:87-100`. Precedent changesets: `.changeset/story-41-6-skills-and-rules-installer.md` (`minor`) and `story-40-4-*.md` (`patch`, a docs/capstone story).
+- **Tool counts:**
+  - each server's `src/__tests__/index.test.ts`: admin `:48` 27, data `:59` 8, dev `:86` 33, interop `:48` 25, ops `:49` 22;
+  - `story-41-5-qa-preset-oracle.test.ts:101-109` (total 115 under `full`), `story-40-1-doc-claims.test.ts:146,161`;
+  - `tools-list-snapshot.test.ts` plus `pnpm gen:tools-list-snapshot:check` (`fixtures/tools-list-snapshot.json`), and `story-39-6-qa-snapshot-cli.test.ts:148` (115 entries).
+- **The prompt wire.** `story-41-2-qa-prompts-stdio-wire.test.ts:280-313` holds `WIRE_GOLDEN`, the 16 hashes captured at `26dc8b2`.
+- **Governance.** `packages/shared/src/__tests__/governance-baseline-check.test.ts:72,84`.
+- **Bootstrap.** `packages/shared/src/bootstrap-classes.ts:25` (`5296a1c836f4`).
+- **The closed-port server env:** `epic37-default-outage-gate.test.ts:216-219` (`IRIS_HOST=127.0.0.1`, `IRIS_PORT=9`, dummy user and password). Servers start with an unreachable IRIS ("an unreachable peer never does" fail startup).
+
+## Tasks & Acceptance
+
+**Execution** (in dependency order):
+
+- `scripts/gen-skills.mjs` -- D1 (AD-14).
+  - **The README.** `renderReadme` renders the golden pointer (Design Notes); the entries argument may stay unused or be dropped.
+  - **Comments.** Update the `:58` docstring and the header comment to "a pointer to the catalog and the installer".
+  - **Run.** `pnpm gen:skills` (13 files).
+- `scripts/lib/skills-pack.mjs` -- DW-624 (AD-28).
+  - **The intro.** `renderPackReadme` gains the golden not-nested sentence after "`full`, the default, shows every tool.", keeping exactly the three imports.
+  - **Run.** `pnpm gen:pack` (23 files), then record the catalog's new bytes, lines and sha256 from the file.
+- `packages/client-config/scripts/render-certification-table.mjs` -- D2 (AD-14; extends the renderer, Rule 2).
+  - **The section.** Add the `PACK-TARGETS-TABLE` section: import `../dist/pack-targets.js`, read the rule stems from `../skills-pack/rules/claude-code/*.md`, render the golden table, and splice it.
+  - **The guard.** Exit 2 on a roster violation:
+    - not 17 rows, or a duplicate id;
+    - a routed row whose route has no `PACK_ROUTES` entry;
+    - a `null` route without `noRouteReason`;
+    - a row without an `https://` source.
+  - **The header comment** names the third section.
+- `packages/client-config/README.md` -- AC 41.7.1:
+  - add the `## Skills pack targets (generated)` section with its marker pair directly after `## Installing the skills pack`;
+  - in `## Installing the skills pack`, add the golden example block and the link line;
+  - run the renderer in write mode, then `--check`.
+- `README.md` -- AC 41.7.1, DW-624 (D3, D4):
+  - **The new section.** Add `### The skills pack` (golden) after `### Using the prompts`, inside `## Workflow Prompts & Agent Skills`.
+  - **Rewrites.** Replace `:825` with the golden retirement sentence, and rewrite the `:830` bullet (golden).
+  - **The manager section.** Add the golden one-sentence pointer at the end of the `:240` paragraph ("`apply` prints the pending diff first…").
+- `packages/iris-dev-mcp/README.md` -- `:271` becomes the golden retirement sentence. In the dev, admin, interop and ops READMEs, the `Also installable as [Agent Skills](../../skills/README.md).` line becomes `Also installable as [Agent Skills](../../README.md#the-skills-pack).`
+- `tool_support.md` -- `:450`: replace only the closing clause "and the generated [`skills/`](skills/README.md) install pack." with "and the [skills pack](README.md#the-skills-pack), which installs these workflows as Agent Skills." The `TOOL_SUPPORT_NOTE` substring stays intact.
+- `packages/client-config/src/__tests__/epic41-capstone-gate.test.ts` (new) -- AC 41.7.2 (the epic-done gate, Rule #21). It is the design in Design Notes "Capstone":
+  - **Structure.** `beforeAll(assertBinFresh)`, then one `it` per `PACK_TARGETS` row (17), each in its own sandbox with `SPAWN_TEST_TIMEOUT`, plus one completeness `it`.
+  - **Header.** It follows the epic capstone convention, naming the path each row guards.
+  - **Reuse.** It reuses `qa-41-6-helpers.ts` and `pack-test-helpers.ts`, and copies nothing.
+- `packages/client-config/src/__tests__/skills-docs.test.ts` (new) -- AC 41.7.1, client-config README:
+  - **Command lines.** Every `iris-mcp-clients skills …` line of the README (the `:40` command line and the new example block) passes three checks:
+    - its flags are a subset of the flags of the bin's own `Usage: iris-mcp-clients skills …` line (from `runBin(sandbox, ["skills"])`, exit 2);
+    - its `--client` value is a routed `PACK_TARGETS` id;
+    - each example runs with `--dry-run`, appended unless present, and `--project <temp>` replacing any project, and exits 0 with nothing written.
+  - **The table.** It holds 17 body rows whose `--client` cells equal the `PACK_TARGETS` ids in order.
+  - **Anchors.** `#skills-pack-targets-generated` and `#installing-the-skills-pack` resolve to headings.
+- `packages/client-config/src/__tests__/certification-process.test.ts` -- extend `makePkgSandbox` to also copy `dist/pack-targets.js` and `skills-pack/rules/`. Add a row: a sandbox README whose `PACK-TARGETS-TABLE` row is edited makes `--check` exit 1, and a re-render restores it (the red proof of the generated table on its real `--check` path).
+- `packages/iris-mcp-all/src/__tests__/story-41-7-doc-claims.test.ts` (new) -- AC 41.7.1 and DW-624:
+  - **Scope.** Every row of the Design Notes claim-to-pin map for the root README, the catalog sentence, the package README links and `tool_support.md`.
+  - **Freshness and imports.** `beforeAll` runs `checkDistFresh` for client-config, then imports `dist/pack-targets.js` and `dist/pack-plan.js` by `pathToFileURL`.
+  - **Bin runs.** It runs the bin with `runNode` (`{env: {HOME, USERPROFILE, APPDATA}}` set to temp dirs, `cwd` a temp project).
+  - **Presets.** `loadToolPresetCatalog(REPO_ROOT)` gives the rosters.
+- `packages/iris-mcp-all/src/__tests__/story-41-2-doc-claims.test.ts` -- `RETIREMENT_SENTENCE` becomes the golden 41.7 sentence. Every other assertion stays.
+- `packages/iris-mcp-all/src/__tests__/skills-generated-frontmatter.test.ts:230-243` and `skills-pack-rule.test.ts:495-500` -- D1.
+  - **The pointer.** The `skills/README.md` pin becomes the pointer shape. It contains `DO NOT EDIT`, `gen-skills.mjs`, `packages/<server>/src/prompts/`, `packages/client-config/skills-pack/README.md`, `iris-mcp-clients skills install` and `#the-skills-pack`. It does not contain `| Skill |`, `cp -r` or `objectscript-review`.
+  - **The 12-row check moves to the catalog.** Its `## Workflow skills` section lists exactly the 12 `skills/*` names, and none is retired.
+  - **The `:204` comment** stays true.
+- `packages/iris-mcp-all/src/__tests__/skills-pack.test.ts` -- `README_INTRO` gains the golden sentence. The golden (`:480-485`) takes the byte, line and sha256 values from the regenerated file (Rule #51).
+- `turbo.json` -- DW-611 (D6): the golden config.
+- `packages/iris-mcp-all/src/__tests__/story-41-7-turbo-test-graph.test.ts` (new) -- DW-611 (the design is in Design Notes "DW-611").
+- `scripts/lib/installer-payload-probe.mjs` -- DW-611 occurrence (41.6 review): before the import, run `checkDistFresh(<root>/packages/client-config, "@iris-mcp/client-config")`, imported from `./dist-freshness.mjs` (reuse; no new freshness logic). On `!ok`, write one stderr line `client-config's dist is not fresh: <reason>` and exit 1.
+- `packages/iris-mcp-all/src/__tests__/story-41-6-qa-installer-provenance-cli.test.ts` -- extend it with the stale-`src/` row. It sits in a scratch root from `makeScratchRepo({clientConfigManifest:true})`, plus `packages/client-config/src/index.ts` with an mtime 10 s after the newest `dist/` file. `check-provenance.mjs` must exit 1, `problemPairs` must equal `["distribution installer"]`, and stderr must match `FAIL_CLOSED` and contain `not fresh`.
+- `CHANGELOG.md`, `.changeset/story-41-7-skills-pack-docs-and-capstone.md` -- AD-29 (D8):
+  - **The changeset** is `"@iris-mcp/client-config": patch`. It must not name the retired prompt (the 41.2 sweep scans `.changeset/`).
+  - **The CHANGELOG section** goes on top: `## [Pre-release — YYYY-MM-DD] — Story 41.7: Skills pack docs and capstone`, dated the day the implement stage runs, with Added, Changed, Tests and Known limits (Design Notes), and the counts paragraph.
+- `_bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md` (`## Verification`) -- AC 41.7.3, the implement stage's part. Run only steps 2 and 5 of the Design Notes live procedure in a scratch directory, with the built bin and a temp `HOME`: the install gives 18 skill directories and the rule, and the uninstall leaves only `.claude/settings.json`. Record the result. If the bin's output differs, correct the procedure text. Never run `claude`, and never write the hook or `mcp.json` files; the lead does that at smoke.
+
+**Acceptance Criteria:**
+
+- **AC 41.7.1, the docs.** Given the built client-config dist, the pack and the built server dists, when `story-41-7-doc-claims.test.ts`, `skills-docs.test.ts`, `certification-docs.test.ts`, `certification-process.test.ts` and `story-41-2-doc-claims.test.ts` run, then:
+  - every root README claim matches its source, the documented commands run;
+  - the client-config table is in sync with `PACK_TARGETS`, and a hand edit fails `--check`;
+  - `skills/README.md` is the generated pointer, so the catalog is the only skill list.
+- **DW-624.** Given the admin rosters, when the doc test runs, then the root README section and the catalog both say the presets are not nested. Their `provision-project-environment` / `iris_user_manage` example holds: `core` shows the tool, `developer` hides it, and the skill declares `core`.
+- **AC 41.7.2, the capstone.** Given the built bin, when `epic41-capstone-gate.test.ts` runs in client-config's default suite, then:
+  - all 17 legs pass as in the I/O matrix;
+  - each Design Notes capstone mutation, applied on the built-bin path, turns it red;
+  - each red is recorded as a `mutation:` line naming the path.
+- **AC 41.7.3, the live check.** Given the Design Notes procedure, when the lead runs it once at the smoke step, then the positive leg meets both oracles, and the contrast leg meets neither while its `.cls` `PreToolUse` still fires. The lead appends the record under `## Verification`: CLI version, commands without secrets, the init `skills` excerpt, the reduced hook log, `total_cost_usd` per leg, and the cleanup.
+- **DW-611, ordering and cache.** Given the working-tree `turbo.json`, when `story-41-7-turbo-test-graph.test.ts` runs, then `@iris-mcp/all#test` depends on `@iris-mcp/client-config#build` and no `#test` task is cacheable. Reverting either change turns it red.
+- **DW-611, the probe.** Given a client-config `src/` newer than its dist, when `check:provenance` runs, then it fails closed as `installer`.
+- **Back-compat, the epic close.** Given the epic base `25e10bda15a3376c8fff8f55b56dd6c625174f49`, when the (once) epic-close checks run, then every Design Notes "Epic close" proof holds with the listed values.
+
+## Spec Change Log
+
+- 2026-10-20 (lead spec gate): D1–D8 were taken as recommended (wave-7 decisions #35–#42). D6's spine row "Turbo test tasks" is added to the Consistency Conventions (Rule 20), and the spine lint passed. The plan-stage `deferred:` item (the npx form) is harvested at dev complete to `42-1-pre-publish-package-fixes`. The lead runs the AC 41.7.3 live check at smoke (D7).
+
+## Review Triage Log
+
+## Design Notes
+
+**Governing architecture** (Rule 6). None of the ACs contradicts an AD Rule.
+
+- **AD-28:** one pack (the catalog renders through `gen:pack` only), the installer routes (documented exactly as the four routes), the catalog's preset wording (AD-28 already says "the presets are not nested"), and Duplicates (until 42.8 the claude-code route installs both; this is documented as a limit).
+- **AD-30:** observed, never changed. The capstone pins ownership, idempotence and the preservation of foreign bytes end to end.
+- **AD-14:** every generated file changes only through its generator.
+- **AD-2:**
+  - The cross-package doc and turbo checks live in `packages/iris-mcp-all`.
+  - The capstone is single-package (client-config's own bin plus the repo's `scripts/lib`, which client-config tests already import at run time), so it lives in client-config.
+  - DW-611 adds no package dependency: the ordering is a turbo `pkg#task` edge.
+- **AD-29:** a `patch` changeset, no version or publish, and no new npx form.
+- **AD-15:** no wire change; the epic-close proof is below.
+- **Conventions:** "Pack names" and "Marked blocks" (documented, not changed).
+
+**Orchestrator decisions needed** (the Lead's calls, delegated; the next wave-7 number is #35). The plan follows each recommendation.
+
+- **D1. Orchestrator decision needed: the end state of `skills/README.md` (AC 41.7.1).** Recommended: reduce it to a generated pointer. It stays the 13th `gen:skills` file, with no skill table and no `cp -r`. Why:
+  - **The contributor pointer.** Decision #19 moved the generator and prompt-source pointer there, and `skills/` stays a generated contributor directory.
+  - **Superseded.** The table and the copy instructions are exactly what the catalog and the installer now supersede, so dropping them meets "superseded".
+  - **Fewer pins move.** Two pins move (`skills-generated-frontmatter:230`, `skills-pack-rule:495`). Retiring the file would move four test files and the `13 → 12` count, break 7 doc links, and leave a stray-file trap.
+  - Alternative: retire it from `gen:skills` (12 files; `writeTree` deletes the committed file). The generator pointer then moves into `skills-pack-src/README.md`.
+- **D2. Orchestrator decision needed: where the per-client table comes from (AC 41.7.1, AD-14).** Recommended: generate the 17-row table into the client-config README from `PACK_TARGETS`, by extending `render-certification-table.mjs` with a `PACK-TARGETS-TABLE` marker pair. Its `--check` already runs in client-config's default suite (`certification-docs.test.ts:32`). The root README carries a hand-written 4-row route summary pinned by a sync test that renders the rows from `PACK_ROUTES`/`PACK_TARGETS`. Why:
+  - It reuses the precedent and its guard, and keeps the table next to its data.
+  - A client-config script writing the root README would make one package's generator own a root file.
+  - A 4-row summary is cheap to sync-test.
+  - Alternative: a root `scripts/` generator for a table in the root README.
+- **D3. Orchestrator decision needed: the root README pack section's shape.** Recommended: the golden section below, as `### The skills pack` inside `## Workflow Prompts & Agent Skills`, so the four existing anchors stay valid.
+  - **Commands.** They use the built-bin form `node packages/client-config/dist/cli/clients-cli.js skills …`, the root README's own convention (`:231-238`). That adds no unpinned npx form for 42.1 to rewrite (AD-29).
+  - **Known limits.** Five bullets, each pinned, plus a link to the client-config README's full list.
+- **D4. Orchestrator decision needed: the new retirement sentence** (`README.md:825` and `packages/iris-dev-mcp/README.md:271`, one whole line in both). Recommended: the golden sentence below. It names where `iris-mcp-clients skills install` puts the rule for each route, and those locations are pinned against `PACK_ROUTES`.
+- **D5. Orchestrator decision needed: the capstone's home and shape (AC 41.7.2).** Recommended: `packages/client-config/src/__tests__/epic41-capstone-gate.test.ts`, with one sandbox per client and oracles from `src/`, the pack on disk and `readSkillFrontmatter`. Why:
+  - client-config's own `test` task depends on its own `build`, so the bin is fresh.
+  - The 41.6 helpers live there.
+  - Earlier capstones sit in iris-mcp-all only because they span the servers.
+  - Alternative: iris-mcp-all, importing client-config's test helpers across packages.
+- **D6. Orchestrator decision needed: the DW-611 fix.** Recommended: two changes, both fully in force once made.
+  - Make every turbo `test` task uncacheable (`cache: false`).
+  - Add `"@iris-mcp/all#test": {dependsOn: ["build", "@iris-mcp/client-config#build"], cache: false}`.
+
+  Why:
+  - **The inputs span the repo.** The suite reads far more of the root than the ledger names (README 32 files, CHANGELOG 24, `.changeset/` 22, `docs/` 13, `.claude` 27, `src/` 11, `extensions/` 7). Shared, dev and client-config tests read root files too. So any input list is incomplete by construction (Rule #56), and an unlisted path replays a stale green.
+  - **Nothing cached means nothing replayed.** With nothing cached, "a pack-source change invalidates the cached green" holds for every input.
+  - **The cost is small here.** There is no CI, the parallel turbo run flakes, and per-package runs are the norm.
+  - **The ordering** is a turbo edge, so AD-2 is untouched.
+
+  Alternative (the ledger's literal wording): keep caching and give `@iris-mcp/all#test` `inputs: ["$TURBO_DEFAULT$", "$TURBO_ROOT$/skills-pack-src/**", "$TURBO_ROOT$/skills/**", "$TURBO_ROOT$/scripts/**", "$TURBO_ROOT$/packages/client-config/package.json", "$TURBO_ROOT$/packages/client-config/skills-pack/**", "$TURBO_ROOT$/packages/client-config/dist/**"]`.
+  - Verified on a scratch copy: a one-byte `skills-pack-src` change moves the hash only under this config (`18e94a6cf789df3e` → `cea15e1acdfc264b`); today it does not.
+  - The residual is that the doc-claims, CHANGELOG, `.changeset`, `src/`, `extensions/` and `.claude` reads stay outside the key, and shared, dev and client-config keep their gaps.
+  - A workspace devDependency alone orders the build but hashes no root input, and it contradicts 41.6's reading of AD-2.
+
+  **Spine follow-up for the lead (Rule 20), if D6 is taken:** a Consistency Conventions row: "Turbo `test` tasks are never cached; a test that needs another package's build gets a `pkg#task` `dependsOn` edge, never a package dependency."
+- **D7. Orchestrator decision needed: AC 41.7.3, how the live check runs.** Recommended: the procedure below. Why:
+  - **The installed artifact.** It installs with the built bin, so it checks the installed pack, not a hand copy.
+  - **The contrast is an uninstall.** That proves both oracles see the installer's effect and can fail (#59).
+  - **No IRIS contact.** The iris-dev server runs against a closed port with dummy credentials (the epic 37 gate's env), and the `PreToolUse` hook logs and then denies the `iris_doc_put` call. No IRIS write and no credential copy is needed. If something slips, the only reachable name is the disposable `ExecuteMCPv2.Temp.Probe417Live`.
+  - **The fallback.** If the closed-port server does not advertise `iris_doc_put`, the procedure falls back to 41.2's write path, with the class deleted and leftovers `[]`.
+  - Alternative: 41.2's procedure verbatim, with real credentials and one disposable write per leg.
+- **D8. Orchestrator decision needed: the changeset.** Recommended: `"@iris-mcp/client-config": patch`. The README and catalog that ship in the package change, and no API or behavior does. The precedent is `story-40-4` (`patch`). `@iris-mcp/all` ships no files.
+
+**AC interpretations** (apply and report):
+- AC 41.7.2 "for every client route": every one of the 17 `PACK_TARGETS` ids, covering all four routes and claude-desktop's refusal.
+- AC 41.7.3 "the rule activates for a `.cls` path" (defined under the live check below).
+- AC 41.7.1 "superseded by the generated catalog" (D1).
+
+**Ledger inbox:** DW-611 is addressed (turbo task, probe guard, two tests). DW-624 is addressed (catalog sentence, root README paragraph, the `:830` rewording, the doc pin). Nothing is declined.
+
+**Golden: the root README section** (inserted before the `---` at `:832`):
+
+~~~markdown
+### The skills pack
+
+The skills pack gives an agent the suite's ObjectScript know-how where the agent looks for it: 18 Agent Skills (6 knowledge skills and the 12 workflow skills above) and 1 always-on rule, the ObjectScript pre-write checklist. It ships inside [`@iris-mcp/client-config`](packages/client-config/README.md) as `packages/client-config/skills-pack/`, whose [catalog](packages/client-config/skills-pack/README.md) lists every skill with what it is for and its tool preset. `iris-mcp-clients skills install` copies the pack into one project, into the folders the chosen client reads:
+
+| Route | `--client` | Skills go to | The always-on rule goes to |
+|---|---|---|---|
+| Claude Code | `claude-code` | `.claude/skills/` | `.claude/rules/iris-mcp-objectscript-pre-write.md` |
+| Cursor | `cursor` | `.agents/skills/` | `.cursor/rules/iris-mcp-objectscript-pre-write.mdc` |
+| Gemini CLI | `gemini` | `.agents/skills/` | a marked block in `GEMINI.md` |
+| Every other client | `vscode`, `cline`, `roo-code`, `windsurf`, `codex`, `zed`, `goose`, `kimi`, `kimi-code`, `pi`, `jetbrains-junie`, `kilo-code`, `agents` | `.agents/skills/` | a marked block in `AGENTS.md` |
+
+Claude Desktop (`claude-desktop`) has no route: it takes skills only as an uploaded ZIP, so the installer refuses it. The per-client table, with each client's reason and documentation sources, is generated from the installer's own data in the [client-config README](packages/client-config/README.md#skills-pack-targets-generated).
+
+From the repository root (the package is not yet published to npm), preview the plan first, then install:
+
+```bash
+node packages/client-config/dist/cli/clients-cli.js skills install --client claude-code --project /path/to/your/project --dry-run
+node packages/client-config/dist/cli/clients-cli.js skills install --client claude-code --project /path/to/your/project
+node packages/client-config/dist/cli/clients-cli.js skills install --client cursor --project /path/to/your/project
+node packages/client-config/dist/cli/clients-cli.js skills install --client gemini --project /path/to/your/project
+node packages/client-config/dist/cli/clients-cli.js skills install --client codex --project /path/to/your/project
+node packages/client-config/dist/cli/clients-cli.js skills uninstall --client claude-code --project /path/to/your/project
+```
+
+The installer prints its plan and asks before it writes (`--yes` skips the question). It writes only the files it installs and its own marked block, records them in `.iris-mcp/skills-pack.json` in the project, and leaves every other byte, `CLAUDE.md` included, as it was. Running the same install again changes nothing, and `uninstall` removes only what the installer put there.
+
+**Tool presets are not nested.** A workflow skill declares, as `metadata.iris-tools-preset`, the first of `core`, `developer` and `full` under which every tool it names is visible. `developer` is not `core` plus more tools: it hides some tools that `core` shows. So a skill runs under its declared preset and under `full`, the default, but not necessarily under the other one. For example, `provision-project-environment` declares `core` and uses `iris_user_manage`, which the admin server's `developer` preset hides.
+
+**Known limits:**
+
+- Project scope only: `--scope user` is refused.
+- Claude Desktop has no route, as above.
+- The Claude Code route always installs both the skills and the rule; it does not detect a Claude Code plugin.
+- A symbolic link at or above a path the installer would write, or a second hard link to such a file, refuses the run.
+- A file you edit after installing is kept; `--include-modified` replaces or removes it after a backup under `~/.iris-mcp/client-manager/backups/skills-pack/`.
+
+The full list is in the [client-config README](packages/client-config/README.md#installing-the-skills-pack).
+~~~
+
+**Golden: the other root-README and package-README lines.**
+
+- **The retirement sentence (D4)**, one line, identical in `README.md` and `packages/iris-dev-mcp/README.md`:
+
+  ``objectscript-review` was retired in Story 41.2: its checklist is now the always-on rule in the skills pack, which `iris-mcp-clients skills install` puts where each client loads it (`.claude/rules/` for Claude Code, `.cursor/rules/` for Cursor, a marked block in `GEMINI.md` for Gemini CLI and in `AGENTS.md` for every other client).`
+- **`:830`.** Replace "and `metadata.iris-tools-preset`, the tool preset under which every tool it names is visible." with "and `metadata.iris-tools-preset`, the first of `core`, `developer` and `full` under which every tool it names is visible (the presets are not nested)." Then replace "Copy the skills you want into your project's `.claude/skills/` directory (see [`skills/README.md`](skills/README.md) for details);" with "Install them, with the knowledge skills and the always-on rule, through `iris-mcp-clients skills install` (see [The skills pack](#the-skills-pack));". The rest of the line stays.
+- **The manager-section pointer.** "It also installs the skills pack into a project: see [The skills pack](#the-skills-pack)."
+
+**Golden: `skills/README.md`** (the full output of `renderReadme`; lines 1-2 keep today's banner):
+
+~~~markdown
+<!-- DO NOT EDIT — generated by scripts/gen-skills.mjs from the registered PromptDefinitions across packages/*/src/prompts/*.ts.
+     Regenerate via: pnpm gen:skills -->
+
+# Generated workflow skills
+
+This directory is **generated** from the suite's MCP prompts. Each `<name>/SKILL.md` is the text `prompts/get` renders for the prompt of the same name; its `description` and `metadata.iris-tools-preset` come from the prompt's `skill` field in `packages/<server>/src/prompts/`. To change a skill, edit its prompt, then run `pnpm gen:skills` and `pnpm gen:pack`.
+
+These files are a source of the skills pack, not the copy you install. The [skills pack catalog](../packages/client-config/skills-pack/README.md) (`packages/client-config/skills-pack/README.md`) lists every skill with its tool preset, and `iris-mcp-clients skills install --client <id>` installs the pack into a project: see [The skills pack](../README.md#the-skills-pack) in the root README.
+~~~
+
+**Golden: the catalog sentence (DW-624)**, appended to the intro paragraph after "`full`, the default, shows every tool.":
+
+`The presets are not nested: \`developer\` is not \`core\` plus more tools, and it hides some tools that \`core\` shows, so a skill runs under its own preset and under \`full\`, but not necessarily under the other one. For example, \`provision-project-environment\` declares \`core\` and uses \`iris_user_manage\`, which the admin server's \`developer\` preset hides.`
+
+**Golden: the client-config README.**
+
+- **The example block**, added under `## Installing the skills pack` after its first paragraph:
+
+  ```text
+  iris-mcp-clients skills install --client claude-code --dry-run      # preview the plan for the current directory
+  iris-mcp-clients skills install --client claude-code                # install; asks first (--yes skips the question)
+  iris-mcp-clients skills install --client codex --project ../my-app  # an AGENTS.md client, in another project
+  iris-mcp-clients skills uninstall --client claude-code              # remove what the installer put there
+  ```
+- **The link line.** "Each `--client` id, with the folders it installs into and why, is listed in [Skills pack targets](#skills-pack-targets-generated)."
+- **The generated section**, `## Skills pack targets (generated)`. Inside `<!-- PACK-TARGETS-TABLE:BEGIN -->` … `<!-- PACK-TARGETS-TABLE:END -->`:
+  - **The intro line:** "Generated from `PACK_TARGETS` (client documentation checked 2026-10-19) by `scripts/render-certification-table.mjs`; do not edit by hand." The date comes from `PACK_TARGETS_CHECKED_ON`.
+  - **The table header:** `| Client | --client | Skills go to | The always-on rule goes to | Why | Sources |`. The `--client` header cell is written in backticks.
+  - **Then one row per target,** in `PACK_TARGETS` order.
+  - **Cells:**
+    - `displayName`, then `` `id` ``. Never `Display (`id`)`, the cell form `certification-docs.test.ts:70-83` matches.
+    - `` `<skillsDir>/` `` or `none`.
+    - `` `<dir>/<stem><ext>` `` for a file rule, ``a marked block in `<host>` `` for a block rule, or `none`.
+    - `why`, then ` Installer note: <note>` for each note, then ` Refused: <noRouteReason>` when the route is null.
+    - `[1](<url>), [2](<url>)` for the sources.
+  - **Escaping:** a `|` inside a cell is written `\|`.
+  - **Example rows** (here `…` shortens a field; the renderer writes the whole text):
+    - `| Claude Code | \`claude-code\` | \`.claude/skills/\` | \`.claude/rules/iris-mcp-objectscript-pre-write.md\` | Claude Code never reads .agents/. … | [1](https://code.claude.com/docs/en/skills), [2](https://code.claude.com/docs/en/memory) |`
+    - `| Claude Desktop | \`claude-desktop\` | none | none | Skills are only uploaded as a ZIP … Refused: Claude Desktop has no project folder … | [1](…), [2](…) |`
+    - `| Gemini CLI | \`gemini\` | \`.agents/skills/\` | a marked block in \`GEMINI.md\` | … Installer note: For unpaid-tier … | … |`
+
+**Claim-to-pin map** (`story-41-7-doc-claims.test.ts` unless noted):
+
+| Doc claim | The source of truth the test reads |
+|---|---|
+| 18 skills (6 knowledge, 12 workflow) and 1 rule | The pack tree: `skills-pack/skills/*` (18), `skills-pack-src/knowledge/*` (6), `skills/*/SKILL.md` (12), `skills-pack/rules/claude-code/*.md` (1) |
+| The 4 route rows | Rows rendered from `PACK_ROUTES` + `PACK_TARGETS` (dist) + the pack's rule stems. Label: the single client's `displayName`, or `Every other client`. Each row is a whole README line, and the table has exactly 4 body rows |
+| Claude Desktop has no route | `PACK_TARGETS` null-route ids equal `["claude-desktop"]`. The bin's `skills install --client claude-desktop` exits 2 with stderr starting `Error: ` + `CLAUDE_DESKTOP_REFUSAL` |
+| The six commands | Each line parses into an action, flags that are a subset of the bin's `skills` usage flags (tool output) and a routed `--client`. Each runs with `--dry-run` and `--project <temp>` and exits 0, with the temp tree unchanged |
+| `.iris-mcp/skills-pack.json` | `MANIFEST_PATH` (dist) |
+| The presets are not nested, and the example (README and catalog) | `loadToolPresetCatalog`: admin `core.include` holds `iris_user_manage` and `developer.include` does not. `declaredToolPreset(text, "skills/provision-project-environment/SKILL.md")` on the pack copy is `core`, and its body names `iris_user_manage`. Both sentences are present |
+| `--scope user` is refused | The bin exits 2 with stderr starting `Error: skills supports only --scope project` |
+| The Claude Code route installs both | `PACK_ROUTES["claude-code"]`: `skillsDir` `.claude/skills` and rule `{kind:"file", dir:".claude/rules"}` |
+| Links refuse the run | POSIX only: a temp project whose `AGENTS.md` is a symlink to `CLAUDE.md`. `--client codex --yes` exits 1, the output contains the `LINK_DETAILS` symbolic text (dist), and both files are byte-identical |
+| `--include-modified` and the backups path | The bin's `--help` stdout contains `--include-modified` and `Skills-pack backups live under ~/.iris-mcp/client-manager/backups/skills-pack/.` |
+| The retirement sentence's locations | `.claude/rules/` and `.cursor/rules/` equal the file-rule dirs plus `/`. `GEMINI.md` and `AGENTS.md` are the block hosts of the gemini and agents routes |
+| The `#the-skills-pack` links (`:830`, the manager sentence, 4 package READMEs, `tool_support.md:450`) | `### The skills pack` occurs exactly once in `README.md`, and each line holds the link. The `:830` line no longer holds "Copy the skills" |
+| The client-config anchors | The headings exist in `packages/client-config/README.md` |
+| The client-config commands and table | `skills-docs.test.ts` (above); the table bytes come from `--check` (`certification-docs.test.ts`) |
+
+**Capstone** (`epic41-capstone-gate.test.ts`).
+
+- **Fixtures (Rule #58).** Routed client *i* (0–15, in `PACK_TARGETS` order without claude-desktop) gets `F = hostFixtures(RULE_STEM)[(i + 1) % 16]`, so the 16 legs together cover all 16 byte shapes.
+  - **The resulting hosts.** 13 of the 14 block-route legs get a pre-existing host holding F. Among them: vscode's BOM+CRLF, roo-code's unterminated CRLF, codex's lone CR, kimi's empty file, kimi-code's BOM-only file, pi's look-alike markers, jetbrains-junie's foreign blocks and kilo-code's invalid UTF-8.
+  - **Foreign content only.** claude-code's CRLF and cursor's BOM+LF fixtures are foreign content.
+  - **Each project is seeded with:**
+    - `CLAUDE.md` = F;
+    - `.claude/settings.json` = `{"hooks":{}}\n`;
+    - every block host that is not this route's (`AGENTS.md` and/or `GEMINI.md`) = F;
+    - for block routes, this route's host = F, except in the `agents` leg, where it is absent (the create-then-delete path);
+    - when *i* is even, a foreign skill `<skillsDir>/team-notes/SKILL.md` (CRLF, no final newline). When *i* is odd, no skills directory at all (the created-directories path);
+    - for file-rule routes, a foreign rule `<ruleDir>/team.md` (`team.mdc` for cursor);
+    - when *i* % 3 = 0, `.iris-mcp/notes.txt` (a pre-existing `.iris-mcp/`).
+- **Each routed leg**, all through `runBin`:
+  1. Snapshot the project with `lstatTree(project, {modes:true})`.
+  2. Install with `--yes`, then assert the I/O matrix rows:
+     - The `treeDiff` lines equal exactly the expected set: `expectedSkillFiles(skillsDir)`, the rule file or host, `MANIFEST`, and the ancestor directories that did not exist before.
+     - The bytes match the pack on disk.
+     - For a host, the section occurs exactly once. The bytes before it equal F, or F plus one line ending, and nothing follows it. A created host equals the section.
+     - `readSkillFrontmatter` passes on all 18, with 12 presets and 6 none.
+     - The notice is present beside `iris-mcp-objectscript-sql/SKILL.md`.
+     - stdout has the line `Done: <n> path(s) changed for <displayName>.`, with `<n>` read from the output and `<displayName>` from `PACK_TARGETS`.
+  3. Age every file mtime, then re-install. Expect the `Nothing to change` line, an unchanged tree, mtimes and manifest bytes, and an equal count of files under `<home>/.iris-mcp/client-manager/backups/skills-pack/`.
+  4. Uninstall with `--yes`. `treeDiff(snapshot, after)` is empty.
+- **The claude-desktop leg:** the same seeding with `hostFixtures(RULE_STEM)[0]`. `install --yes` and `uninstall --yes` each exit 2, with the exact stderr prefix, an empty stdout, the tree unchanged and no backup.
+- **The completeness `it`:**
+  - 17 unique ids;
+  - every `PACK_ROUTE_IDS` route is used;
+  - exactly one null route.
+- **Oracles.**
+  - `PACK_TARGETS`, `PACK_ROUTES`, `PACK_ROUTE_IDS`, `CLAUDE_DESKTOP_REFUSAL`, `NOTICE_FILENAME`, `ADAPTATION_MARKER`, `RULE_FORM_DIRS` and `RULE_FORM_EXTENSIONS` come from `../pack-targets.js` (src).
+  - The pack bytes come from `PACK_ON_DISK`.
+  - `readSkillFrontmatter` is imported at run time from `scripts/lib/skills-pack.mjs`.
+  - Only the bin is the subject, so an edit made only in `dist/` stays visible.
+- **Overlap with 41.6.**
+  - 41.6's process suites drive four ids and own the adversarial matrices: 29-fixture byte round trips, ambiguous markers, links, the manifest allow-list, rollback, `--include-modified`, shared refcount and `--json`.
+  - The capstone is the only test that runs every id end to end (12 agents-route ids for the first time), checks installed frontmatter through `readSkillFrontmatter`, and pins the full claude-desktop refusal.
+  - It repeats only the re-install and uninstall checks, once per client, as the AC requires. It repeats none of the matrices.
+- **Mutations** (the implement stage applies each, observes red, restores, and writes a `mutation:` line naming the path):
+  - **MC-1, the compiled route table** (Rule #59, the built-bin path). Edit only `dist/pack-targets.js`, so that the cursor rule dir is `.cursor/rule` (src untouched, and the dist stays fresh). The cursor leg goes red.
+  - **MC-2, the same path.** In `dist/pack-targets.js`, map `cline` to route `cursor`. The cline leg goes red.
+  - **MC-3** (src, then rebuild). Drop the notice placement in `pack-plan.ts`. The 16 routed legs go red.
+  - **MC-4** (src, then rebuild). Normalise CRLF to LF outside the block in `rule-block.ts`. The vscode (BOM+CRLF host) and roo-code (unterminated CRLF host) legs go red, either as a refused install or as an uninstall that is not byte-identical; record which.
+  - **MC-5** (src, then rebuild). Plan the manifest as an `update` on every run. The re-install step goes red on all 16.
+  - **MC-6** (dist only). Give claude-desktop route `agents`. Its leg goes red.
+  - **MC-7** (dist only). Prefix each planned `SKILL.md` with a BOM in `dist/pack-plan.js`. The frontmatter and byte checks go red.
+
+  Restore each with a clean rebuild (delete `dist/` and `tsconfig.tsbuildinfo`). The sha256 of each restored file must equal the clean build.
+
+**DW-611** (`story-41-7-turbo-test-graph.test.ts`).
+
+- **The golden `turbo.json` (D6):**
+
+  ```json
+  {
+    "$schema": "https://turbo.build/schema.json",
+    "tasks": {
+      "build": { "dependsOn": ["^build"], "outputs": ["dist/**"] },
+      "test": { "dependsOn": ["build"], "cache": false },
+      "@iris-mcp/all#test": { "dependsOn": ["build", "@iris-mcp/client-config#build"], "cache": false },
+      "lint": {},
+      "type-check": { "dependsOn": ["^build"] }
+    }
+  }
+  ```
+- **The test:**
+  1. Copy the working tree's root `package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `turbo.json` and every `packages/*/package.json` into a `makeTempRoot` directory.
+  2. Run `process.execPath <REPO_ROOT>/node_modules/turbo/bin/turbo run test --dry=json --cwd <copy>` with `HOME` set to a temp dir, `TURBO_TELEMETRY_DISABLED=1`, `DO_NOT_TRACK=1` and a 60 s timeout.
+  3. Parse stdout and assert:
+     - `@iris-mcp/all#test.dependencies` contains `@iris-mcp/all#build` and `@iris-mcp/client-config#build`;
+     - the `test` tasks include `@iris-mcp/all#test` and `@iris-mcp/client-config#test` (a non-vacuous set);
+     - every task whose `task` is `test` resolves `cache` to `false`. Read the field name the 2.9.4 dry-run JSON actually carries, and verify it first.
+  4. Delete the copy in `afterAll`.
+
+  The real tree is never touched.
+- **"A pack-source change invalidates the cached green"** is pinned as "no test green is ever cached".
+- **Mutations** (on the real `turbo.json` the test copies, which is the path turbo reads):
+  - drop `@iris-mcp/client-config#build` → red;
+  - drop `cache: false` from `test` → red;
+  - delete the `@iris-mcp/all#test` entry → red.
+- **The probe guard's mutation:** remove the `checkDistFresh` branch → the stale-`src/` row exits 0 → red.
+
+**AC 41.7.3, the live procedure** (the lead, at smoke; D7). `<S>` is `<the lead's session scratchpad>/s417-live`, never the repository. Scripts live in `<S>`, and the whole directory is deleted at the end.
+
+- **What "activates for a `.cls` path" means.** The shipped rule has no `paths:`, so Claude Code loads it at session start for every path, and no path-triggered load exists to observe. The rule "activates for a `.cls` path" when it is in the session's context before the agent writes a `.cls` document. Observably:
+  - an `InstructionsLoaded` event whose `file_path` ends `/proj/.claude/rules/iris-mcp-objectscript-pre-write.md`, with `load_reason` `session_start`;
+  - earlier (by the logged `t`) and in the same `session_id` as the `PreToolUse` event for `mcp__iris-dev__iris_doc_put` whose `tool_input.name` ends `.cls`.
+
+  **It is false if** the positive leg logs no such `InstructionsLoaded`, logs it only after that `PreToolUse`, logs it with `path_glob_match` (a scoped copy was installed), or logs it from a path outside `<S>/proj`. **It is void if** the contrast leg logs it too.
+- **"Lists the installed skills".** The first stream event `{"type":"system","subtype":"init"}` has a `skills` array (Agent SDK `SDKSystemMessage`).
+  - Positive: it includes all 18 names of `packages/client-config/skills-pack/skills/*`.
+  - Contrast: it includes none of them.
+  - **Fallbacks:** if `skills` is absent in both legs, use `slash_commands`. If neither field is present, use the final reply: the positive leg names all 18, the contrast leg none.
+- **Steps:**
+  1. **The project.** Create `<S>/home/` and `<S>/proj/`, with no `CLAUDE.md`.
+     - Write `proj/.claude/settings.json` (pre-existing foreign content) registering `InstructionsLoaded` and `PreToolUse` command hooks as 41.2 did. Each runs `node <S>/log-hook.mjs`, which appends `{t: Date.now(), ...stdinJson}` to `<S>/hooks.jsonl`.
+     - When `tool_name` starts `mcp__iris-dev__`, the hook writes `blocked by the live check` to stderr and exits 2 (a deny). Otherwise it exits 0.
+  2. **Install.** Build client-config fresh, then run `HOME=<S>/home USERPROFILE=<S>/home node /Users/jbrandt/git/iris-execute-mcp-v2/packages/client-config/dist/cli/clients-cli.js skills install --client claude-code --project <S>/proj --yes`. Expect exit 0, 18 skill directories and the rule.
+  3. **The MCP config.** `<S>/mcp.json` holds only `iris-dev`: `node /Users/jbrandt/git/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js`, with env `IRIS_HOST=127.0.0.1`, `IRIS_PORT=9`, `IRIS_USERNAME=live417`, `IRIS_PASSWORD=live417`, `IRIS_NAMESPACE=HSCUSTOM`. No real credential, no `IRIS_SERVER_MANAGER`/`IRIS_SM_WORKSPACE`.
+  4. **The positive leg.** From `<S>/proj`, run `perl -e 'alarm 300; exec @ARGV' -- env -u CLAUDECODE claude -p --model haiku --max-budget-usd 1 --strict-mcp-config --mcp-config ../mcp.json --setting-sources project --allowedTools mcp__iris-dev__iris_doc_put --disallowedTools Read,Write,Edit,Bash --output-format stream-json --verbose "<P>" > ../positive.jsonl`.
+
+     `<P>` = "First list the name of every skill available to you, one per line. Then, using only the iris_doc_put tool on server default, namespace HSCUSTOM, create the class ExecuteMCPv2.Temp.Probe417Live (document ExecuteMCPv2.Temp.Probe417Live.cls) with one ClassMethod Ping() As %String that returns "pong". Do not create, read or edit any local file. If the tool call is refused, do not retry. Then reply DONE."
+  5. **Uninstall.** Run `HOME=<S>/home node …/clients-cli.js skills uninstall --client claude-code --project <S>/proj --yes`. Expect exit 0, and `proj/` back to only `.claude/settings.json`.
+  6. **The contrast leg.** Move `hooks.jsonl` aside, then run the same command to `../contrast.jsonl`.
+  7. **The checker** (`<S>/check.mjs`) applies both oracles to the two legs. There must be no `PreToolUse` for `Read`, `Write`, `Edit` or `Bash`, and each leg's `total_cost_usd` (its `result` event) must be ≤ 1.
+
+     **If `InstructionsLoaded` never fires in either leg,** re-run both legs with 41.2's quote oracle: before any tool call, ask the model to quote verbatim the rule bullet that starts "Stop capturing output" (rule line 22). The positive leg must match it exactly, and the contrast leg must not. Record which oracle decided.
+  8. **Cleanup.** Delete `<S>`. Read-only confirmation: `iris_doc_list` with `server:"default"`, `namespace:"HSCUSTOM"`, filter `Probe417`, `generated:true` returns `[]`.
+  9. **Fallback** (no `iris_doc_put` `PreToolUse` in the positive leg, so the closed-port server did not offer the tool):
+     - use 41.2's step 2 env, copied by a script from the user-scope `iris-dev` entry and never printed, and drop the deny branch;
+     - the only write is `ExecuteMCPv2.Temp.Probe417Live`, deleted with `iris_doc_delete` after each leg;
+     - leftovers are `[]`, and the copied credentials are deleted with `<S>`.
+- **Cost:** two haiku sessions, each capped at USD 1 (41.2 spent USD 0.0112 in all). The `claude` process uses the user's own `HOME` only for authentication. `--setting-sources project` keeps user skills and settings out of the session.
+
+**Epic close: the back-compat proof** (Epic 41 base `25e10bda15a3376c8fff8f55b56dd6c625174f49`):
+
+- **Tools, 110 package / 115 advertised:**
+  - the per-server `index.test.ts` counts (admin 27, data 8, dev 33, interop 25, ops 22, each including `iris_server_profiles`);
+  - `story-41-5-qa-preset-oracle.test.ts:101-109` (115 under `full` on the built dists);
+  - `story-40-1-doc-claims.test.ts:146,161`;
+  - `pnpm gen:tools-list-snapshot:check` with `tools-list-snapshot.test.ts` (115 entries). `fixtures/tools-list-snapshot.json` is unchanged since the base (`git diff --stat` is empty), and so is every server's `src/tools/` outside `__tests__`.
+- **The prompts on the wire:** `story-41-2-qa-prompts-stdio-wire.test.ts` `WIRE_GOLDEN`, captured at `26dc8b2`.
+  - **List hashes:**
+    - admin `bd531fad56f723fc0bdb547d4a38bec717139f2724a3ddd3df1616488a3aa827`;
+    - dev `a1317b095ad7720e2caae07d57e3658a308a1bf42d2c3c6272d897520eade217`;
+    - interop `71984e9be366489028552861bb096415ad6d2673f683029e35d7d94bf9785164`;
+    - ops `a8a37a4ec55f819cfdfd6d9106a7ddbca413b47e3da758816119cb5398ff55bb`.
+  - **Get hashes** (12):
+    - provision-project-environment `72cd7ebd…ce215`, audit-security-posture `fed7d6bd…eb116`;
+    - diagnose-slow-query `b038a8c1…42abb`, deploy-and-test-class `a33adecb…eb15d`, promote-environment-change `31c9e03e…3704f`, edit-and-test-class `f97413b0…4173e`;
+    - trace-message-flow `d774181e…e0482`, recover-stuck-production `186084eb…4b4f`, resend-failed-messages `af4ac020…5211a`, find-patient-messages `9f1b22aa…f080d`;
+    - check-system-health `3cdb4da3…48d7`, run-external-backup `70c81a1f…9e0a`.
+  - **Against the base,** the prompt sources differ only by the 12 `skill:` fields (never sent) and the sanctioned retirement of `objectscript-review` (decision #4, AD-15).
+- **Governance:** `pnpm gen:governance-baseline:check` (141 frozen keys, `1e62c5ad5bf7`).
+- **Bootstrap:** `BOOTSTRAP_VERSION` `5296a1c836f4`, as at the base. No ObjectScript changed in the epic.
+- **For the reviewer before the epic merges:**
+  - the prompt-source diff above (`git diff 25e10bda15a3376c8fff8f55b56dd6c625174f49 HEAD -- ':(glob)packages/*/src/prompts/**' ':(exclude,glob)**/__tests__/**'` shows only `skill:` additions and the retirement);
+  - the AC 41.7.3 record is present under `## Verification`;
+  - 41.6's `followup_review_recommended: true` (`pack-plan.ts` `removeFileRecord`/`keptDirs`, `pack-apply.ts` `outsideBlocksKept`), which the capstone exercises end to end on every route except the kept-notice path;
+  - the routed items stay open by design: DW-612, DW-617, DW-625, DW-626, DW-627, and the new npx `deferred:` item for 42.1;
+  - DW-622 and DW-615 are the lead's at the burn-down gate;
+  - the D6 spine row (Rule 20).
+
+**Reuse (Rule 2):**
+- **The capstone** extends `qa-41-6-helpers.ts` and `pack-test-helpers.ts`.
+- **The table** extends `render-certification-table.mjs` (`splice`, `--check`) and the `makePkgSandbox` test.
+- **The doc tests** follow `story-41-2-doc-claims.test.ts`'s pattern and reuse `pack-fixture.ts` `runNode`/`makeTempRoot`, `loadToolPresetCatalog`, `declaredToolPreset` and `checkDistFresh`.
+- **The probe** reuses `checkDistFresh`.
+- **The generators** change in place.
+- **The DW-611 test** is new (no test runs turbo today) and reuses `makeTempRoot`/`removeTempRoot`.
+
+**Integration and linkage (Rules 1 and 2).**
+- **Integration rows** are in the I/O matrix:
+  - certification-docs → the renderer;
+  - the doc tests → the bin, `PACK_TARGETS` and the presets;
+  - turbo → `turbo.json`;
+  - `check:provenance` → the probe;
+  - the capstone → the bin.
+- **Consumes:** 41.6's built bin, `PACK_TARGETS`, `PACK_ROUTES`, `MANIFEST_PATH` and `LINK_DETAILS`; 41.5's catalog and presets; 41.1's provenance probe.
+- **Consumed-by:**
+  - 42.1: the npx pin, `deferred:`;
+  - 42.8: the plugin, which changes the claude-code route's known limit;
+  - 42.9: the README install path and DW-626's re-dispositions, which re-render the generated table.
+
+**CHANGELOG** (the 41.7 section).
+- **Added:** the Epic 41 capstone gate; `### The skills pack` in the root README; the generated `Skills pack targets` table and the example commands in the client-config README; the doc-claims, skills-docs and turbo-graph tests.
+- **Changed:**
+  - `skills/README.md` is a pointer to the catalog and the installer;
+  - the catalog says the presets are not nested;
+  - the retirement sentence, the `:830` bullet and the `Agent Skills` links point to the installer;
+  - turbo never caches test results, and orders `@iris-mcp/all`'s tests after client-config's build;
+  - `check:provenance` fails closed on a stale client-config dist.
+- **Known limits:**
+  - the live check ran once, against the recorded CLI version and model;
+  - the per-client table reflects the client docs read on 2026-10-19;
+  - the root README commands use the built bin until the package is published.
+- **The counts paragraph.** Moved: the catalog's bytes, lines and sha256 (from the file). Unchanged:
+  - tools 110/115; 12 prompts (16 wire hashes); baseline `1e62c5ad5bf7`/141; `BOOTSTRAP_VERSION` `5296a1c836f4`;
+  - `gen:skills` 13 files; pack 23 files; 40 agent files; `validate:prompts` 52 sources; 12 distributions.
+
+## Verification
+
+**Commands** (repository root `/Users/jbrandt/git/iris-execute-mcp-v2`; each runs in the foreground with `timeout: 600000`; every `@iris-mcp/all` run is prefixed `IRIS_HOST=127.0.0.1 IRIS_PORT=1`):
+
+- (loop) `pnpm gen:skills && pnpm gen:skills:check` -- expected: `gen-skills --check: OK — 13 generated file(s) match source, no drift.`
+- (loop) `pnpm gen:pack && pnpm gen:pack:check` -- expected: `… 23 pack file(s) match their sources, no drift.`
+- (loop) `pnpm --filter @iris-mcp/client-config build`, then `node packages/client-config/scripts/render-certification-table.mjs` and `… --check` -- expected: `render --check: README.md marker sections are in sync`.
+- (loop) `pnpm --filter @iris-mcp/client-config exec vitest run src/__tests__/epic41-capstone-gate.test.ts src/__tests__/skills-docs.test.ts src/__tests__/certification-docs.test.ts src/__tests__/certification-process.test.ts` -- expected: all pass, the capstone with 18 tests.
+- (loop) `IRIS_HOST=127.0.0.1 IRIS_PORT=1 pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-41-7-doc-claims.test.ts src/__tests__/story-41-7-turbo-test-graph.test.ts src/__tests__/story-41-2-doc-claims.test.ts src/__tests__/skills-generated-frontmatter.test.ts src/__tests__/skills-pack-rule.test.ts src/__tests__/skills-pack.test.ts src/__tests__/story-41-6-qa-installer-provenance-cli.test.ts src/__tests__/story-41-6-qa-installer-provenance.test.ts src/__tests__/story-39-6-doc-claims.test.ts src/__tests__/docs-prompt-sync.test.ts` -- expected: all pass.
+- (loop) `pnpm check:provenance` and `pnpm validate:prompts` -- expected: unchanged, `… 1 provenance row(s), 40 agent file(s), 12 distribution(s).` and `52 source(s) checked …` (take the values from the output, Rule #51).
+- (once) `pnpm --filter @iris-mcp/client-config test`, then `… type-check`, then `… lint` -- expected: green.
+- (once) From `packages/iris-mcp-all`: `IRIS_HOST=127.0.0.1 IRIS_PORT=1 pnpm exec vitest run $(ls src/__tests__/*.test.ts | awk 'NR%3==0')`, then `NR%3==1`, then `NR%3==2` (three calls) -- expected: green, with the live gates skipped.
+- (once) `pnpm --filter <server> exec vitest run src/__tests__/index.test.ts` for each of `@iris-mcp/admin`, `@iris-mcp/data`, `@iris-mcp/dev`, `@iris-mcp/interop` and `@iris-mcp/ops` (one call each), plus `pnpm gen:tools-list-snapshot:check` and `pnpm gen:governance-baseline:check` -- expected: the counts and hashes in "Epic close". Never run the bare baseline generator (#25).
+- (once) The added and changed test files with `--sequence.shuffle`, seeds 11 and 22, in both packages -- expected: green, in either order.
+
+**Mutation lines.** The implement stage writes one `mutation:` line per AC here. Each line names what was changed, the path it guards, and which test went red. The required lines are:
+- MC-1 through MC-7 (the capstone);
+- the `PACK-TARGETS-TABLE` sandbox edit and a dist-only `why` edit (the table);
+- a dist-only `PACK_ROUTES` rule-dir edit, which turns `story-41-7-doc-claims` red (the root README);
+- a dist-only admin `developer.include` edit that adds `iris_user_manage` (DW-624);
+- `renderReadme` emitting the old table (D1);
+- the three `turbo.json` edits and the probe guard (DW-611).
+
+After each restore, `git status --short` and the restored files' sha256 must be unchanged.
+
+**Shared surfaces:**
+- the root README section text, `:825`, `:830` and the manager section, and the four package READMEs' Agent Skills line plus dev `:271`;
+- `tool_support.md:450`;
+- `RETIREMENT_SENTENCE` (`story-41-2-doc-claims.test.ts`) and the 41.2 sweep (`.changeset/`);
+- the `skills/README.md` content (`skills-generated-frontmatter:230`, `skills-pack-rule:495`, the `story-39-6` scan);
+- the catalog's bytes, lines and sha256, and `README_INTRO` (`skills-pack.test.ts`);
+- the client-config README marker sections and the `certification-process` sandbox file list;
+- the `turbo.json` test task definitions (every package's `pnpm test` caching);
+- the probe's failure text (`FAIL_CLOSED`);
+- the top `CHANGELOG.md` section (the section-order checks).
+
+Every test added or changed passes on a fresh environment, in either order. Every capstone and doc-test leg creates and deletes its own temp project and home. No IRIS instance is touched by any stage before smoke, and no `ExecuteMCPv2.Temp.*` fixture is needed; the live check's only possible write is the disposable `ExecuteMCPv2.Temp.Probe417Live` on its fallback path. No stateful OS test class is added.
+
+**Manual checks:**
+- `git status --short --ignored` shows no created or changed path under the real `.claude/`, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.agents/`, `.cursor/` or `.iris-mcp/`, and the real `~/.iris-mcp/client-manager/backups/` has no `skills-pack` entry.
+- The AC 41.7.3 record: the lead appends it here at smoke, under the heading "Live check (AC 41.7.3)".
+
+## Auto Run Result
+
+Status: ready-for-dev
+Blocking condition: none
+
+Planning HALT (invoked with "Halt after planning."). The spec passed the READY FOR DEVELOPMENT gate. The ledger inbox (DW-611, DW-624) is addressed in Tasks & Acceptance. D1–D8 are recorded as orchestrator decisions with recommendations; the plan follows each. One `deferred:` item (the npx doc form) is for harvest, suggested owner 42.1.
