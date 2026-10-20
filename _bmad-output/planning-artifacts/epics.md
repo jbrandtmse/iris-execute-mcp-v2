@@ -5649,6 +5649,8 @@ This is the `/epic-cycle` burn-down story, chartered on 2026-10-20 at Epic 41's 
   - **Pins.** One pinned case per locale the instance has, taken from live `GetErrorText` output rather than hand-typed (Rule #36), plus negative controls for text that only looks like a prefix.
   - **Bootstrap.** `ExecuteMCPv2.Utils` is bootstrapped, so `pnpm gen:bootstrap` runs in the same story and records `BOOTSTRAP_VERSION` from → to (Rule #24).
   - (ledger; chartered at the burn-down gate 2026-10-20)
+- DW-634: `BaseTest:TestAllSixteenHandlersExtendBase` pins 16 `ExecuteMCPv2.REST.*` handlers, but 19 exist, so the OS test is red at HEAD. Derive the expected set from `src/ExecuteMCPv2/REST/`, or pin 19 by name, then redeploy `BaseTest` and run it 7/7. (ledger; routed by harvest 2026-10-20)
+- DW-635: no re-runnable check drives the one-argument `SanitizeError`/`SafeText` path under a non-English request language. Add an armed (`IRIS_REQUIRE_LIVE`) live gate that sends `GET /global` with `Accept-Language` `fr`, `de` and `ja` and expects exactly one prefix each, and prove it red with the collapsed-branch mutation. (ledger; routed by harvest 2026-10-20)
 
 ## Epic 42: Published Install & Distribution (added 2026-10-14)
 
@@ -5866,6 +5868,7 @@ DW-441.
 - DW-629: the `why` text of the `cursor` and `vscode` rows of `PACK_TARGETS` never says the client reads `.agents/skills/`, the folder the installer writes for both. Re-read both clients' skills docs together with DW-626, fix the two rows in `pack-targets.ts`, and re-render the client-config README table. (ledger; routed by harvest 2026-10-20)
 - DW-631: `docs/client-config/claude-code.md:306`, `claude-desktop.md:273` and `cursor.md:304` link the broken anchor `#read-only-mode-point-it-at-production-with-one-environment-variable`; the heading's real slug is `#read-only-mode--point-…`. No `docs/client-config/` page points at `iris-mcp-clients skills install` either. Fix both with the AC 42.9.1 rewrite. (ledger; routed by the lead 2026-10-20)
 - DW-632: `qa-41-7-doc-links.test.ts` checks only the 9 documents Story 41.7 changed, and a repo-wide run of its checker finds more broken relative links: `packages/shared/README.md:108`, three `docs/known-bugs-*` links, and the DW-631 anchors. Fix them, and widen the test's document set to every user-facing `*.md`, so it pins them before 1.0. (ledger; routed by the lead 2026-10-20)
+- DW-633: the `IRIS_ACCEPT_LANGUAGE` docs (`README.md:77`, `packages/shared/src/http-client.ts:183-193`) describe a per-worker message-table mechanism the header does not affect, but `%CSP.REST` matches the message language from the header on every request. `tool_support.md:21` also says the `Utils` prefix-stripping handles only English and Arabic and is unmodified. Rewrite both against the per-request model and Story 41.8's 15-language `StripErrorPrefix`. (ledger; routed by harvest 2026-10-20)
 
 ## Epic 43: MCP SDK v2 Migration (added 2026-10-15)
 
