@@ -12,7 +12,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, utimesSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -182,6 +182,50 @@ export function filesUnder(dir: string): Map<string, Buffer> {
 
 /** Where the installer keeps backups, below the sandbox home (the default state directory). */
 export const BACKUP_ROOT = ".iris-mcp/client-manager/backups/skills-pack";
+
+/** The files below the temp home that are NOT inside the backup directory (the installer writes nothing else there). */
+export function filesOutsideBackups(home: string): string[] {
+  return [...filesUnder(home).keys()].filter((key) => !key.startsWith(`${BACKUP_ROOT}/`)).sort();
+}
+
+/** The ancestor directories of a project-relative POSIX path, shallow first. */
+export function ancestors(rel: string): string[] {
+  const parts = rel.split("/").slice(0, -1);
+  return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
+}
+
+/** Every non-directory entry below `dir` with its mtime in ms; links are not followed. */
+export function mtimes(dir: string): Map<string, number> {
+  const out = new Map<string, number>();
+  const walk = (current: string, prefix: string): void => {
+    for (const name of readdirSync(current).sort()) {
+      const full = path.join(current, name);
+      const rel = prefix === "" ? name : `${prefix}/${name}`;
+      if (lstatSync(full).isDirectory()) walk(full, rel);
+      else out.set(rel, lstatSync(full).mtimeMs);
+    }
+  };
+  walk(dir, "");
+  return out;
+}
+
+/**
+ * Set the mtime of every regular file below `dir` far in the past, so any later rewrite shows as a newer mtime, and
+ * return `mtimes(dir)`. Links are neither followed nor changed.
+ */
+export function ageAllFiles(dir: string): Map<string, number> {
+  const past = new Date("2001-01-01T00:00:00Z");
+  const walk = (current: string): void => {
+    for (const name of readdirSync(current)) {
+      const full = path.join(current, name);
+      const stat = lstatSync(full);
+      if (stat.isDirectory()) walk(full);
+      else if (stat.isFile()) utimesSync(full, past, past);
+    }
+  };
+  walk(dir);
+  return mtimes(dir);
+}
 
 /** The bytes of every backup the installer took of the project-relative path `rel`, found below the temp home. */
 export function backupsOf(home: string, rel: string): Buffer[] {

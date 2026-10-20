@@ -1,6 +1,7 @@
 /**
  * Shared fixtures for the skills-pack tests (`skills-pack.test.ts`, `pack-provenance.test.ts`,
- * `validate-prompts.test.ts`): disposable temp roots, file placement, and a real `node` child process.
+ * `validate-prompts.test.ts`) and the skills-pack documentation tests: disposable temp roots, file placement, a real
+ * `node` child process, and the anchors of a Markdown file's headings.
  *
  * Every temp root is created under `os.tmpdir()` and removed by the test that made it.
  */
@@ -54,6 +55,39 @@ export interface NodeRunOptions {
   env?: Record<string, string>;
   /** Milliseconds after which the child is killed; no limit when omitted. */
   timeout?: number;
+}
+
+/** The GitHub-style anchor of one heading's text, with `seen` numbering repeated headings (`-1`, `-2`, ...). */
+function headingAnchor(heading: string, seen: Map<string, number>): string {
+  const text = heading
+    .replace(/<[^>]*>/g, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[`*~]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\p{M}\s_-]/gu, "")
+    .replace(/\s/g, "-");
+  const count = seen.get(text) ?? 0;
+  seen.set(text, count + 1);
+  return count === 0 ? text : `${text}-${count}`;
+}
+
+/**
+ * The GitHub-style anchors of every ATX heading of a Markdown text: letters, digits and marks of any script are kept,
+ * other punctuation is dropped, each whitespace character becomes a hyphen, and a repeated heading gets `-1`, `-2`, ....
+ * A `#` line inside fenced code is not a heading.
+ */
+export function markdownHeadingSlugs(text: string): Set<string> {
+  const slugs = new Set<string>();
+  const seen = new Map<string, number>();
+  let fenced = false;
+  for (const line of text.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+    if (fenced) continue;
+    const match = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+    if (match !== null) slugs.add(headingAnchor(match[2] as string, seen));
+  }
+  return slugs;
 }
 
 /** Run `node <script> <args>` with `cwd` as the working directory, in a real child process. */

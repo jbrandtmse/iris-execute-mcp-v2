@@ -9,13 +9,15 @@
  * Oracles are independent of the installer: the pack is walked with plain `fs`, and every route path is a literal.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { makeSandbox, removeSandboxes, writeProjectFile, type Sandbox } from "./pack-test-helpers.js";
 import {
+  ageAllFiles,
+  ancestors,
   assertBinFresh,
   BACKUP_ROOT,
   backupsOf,
@@ -24,6 +26,7 @@ import {
   filesUnder,
   lstatTree,
   MANIFEST,
+  mtimes,
   packRuleForms,
   RULE_STEM,
   runBin as spawnBin,
@@ -115,45 +118,6 @@ const ROUTES: RouteCase[] = [
 
 function seedProject(sandbox: Sandbox, route: RouteCase): void {
   for (const [rel, bytes] of route.seed) writeProjectFile(sandbox.project, rel, bytes);
-}
-
-/** Every file under `dir` with its mtime set far in the past, so any later rewrite shows as a newer mtime. */
-function ageAllFiles(dir: string): Map<string, number> {
-  const past = new Date("2001-01-01T00:00:00Z");
-  const out = new Map<string, number>();
-  const walk = (current: string, prefix: string): void => {
-    for (const name of readdirSync(current).sort()) {
-      const full = path.join(current, name);
-      const rel = prefix === "" ? name : `${prefix}/${name}`;
-      if (statSync(full).isDirectory()) walk(full, rel);
-      else {
-        utimesSync(full, past, past);
-        out.set(rel, statSync(full).mtimeMs);
-      }
-    }
-  };
-  walk(dir, "");
-  return out;
-}
-
-function mtimes(dir: string): Map<string, number> {
-  const out = new Map<string, number>();
-  const walk = (current: string, prefix: string): void => {
-    for (const name of readdirSync(current).sort()) {
-      const full = path.join(current, name);
-      const rel = prefix === "" ? name : `${prefix}/${name}`;
-      if (statSync(full).isDirectory()) walk(full, rel);
-      else out.set(rel, statSync(full).mtimeMs);
-    }
-  };
-  walk(dir, "");
-  return out;
-}
-
-/** The ancestor directories of a file path, shallow first. */
-function ancestors(rel: string): string[] {
-  const parts = rel.split("/").slice(0, -1);
-  return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
 }
 
 describe("the built bin exists", () => {

@@ -28,6 +28,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { loadAllPrompts } from "../../../../scripts/lib/prompt-catalog.mjs";
 import { promptSkillProblems, renderWorkflowSkill, WORKFLOW_SKILL_COMMENT } from "../../../../scripts/lib/workflow-skills.mjs";
+import { markdownHeadingSlugs } from "./pack-fixture";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
@@ -252,18 +253,7 @@ describe("generated skills/ directory structure (AC 25.1.2, AC 41.5.1)", () => {
       const target = resolve(skillsDir, file);
       expect(existsSync(target), `${link} resolves from skills/`).toBe(true);
       if (anchor !== undefined) {
-        const slugs = readFileSync(target, "utf-8")
-          .split("\n")
-          .filter((line) => /^#{1,6} /.test(line))
-          .map((line) =>
-            line
-              .replace(/^#+ /, "")
-              .toLowerCase()
-              .replace(/[^a-z0-9 _-]/g, "")
-              .trim()
-              .replace(/ /g, "-"),
-          );
-        expect(slugs, `${link} names a heading`).toContain(anchor);
+        expect(markdownHeadingSlugs(readFileSync(target, "utf-8")).has(anchor), `${link} names a heading`).toBe(true);
       }
     }
   });

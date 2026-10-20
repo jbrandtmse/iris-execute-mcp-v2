@@ -110,6 +110,16 @@ Each `--client` id, with the folders it installs into and why, is listed in [Ski
   `2` for a usage error.
 - The notice for adapted content (`IRIS-MCP-THIRD-PARTY-NOTICES.md`) is installed beside every skill that carries it, and
   stays while a file you changed remains in that skill's directory.
+- **Known limits.** Besides the refusals above (`--scope user`, `claude-desktop`, links):
+  - The `claude-code` route always installs both the skills and the rule; it does not detect a Claude Code plugin.
+  - `--project` is not compared with your home directory: `--project ~`, or a run from `~`, installs the rule where every
+    project's session loads it.
+  - Only the project directory is checked for a `CLAUDE.md`; a `CLAUDE.md` in a parent directory is not seen.
+  - An edit inside the installer's own block is replaced on the next install.
+  - Installing for one client never updates the files of another client that it does not share.
+  - The notes about a client that reads a skill or the rule twice are fixed text; the installer does not deduplicate.
+  - Skills-pack backups are never pruned, `doctor` does not list them and `restore` does not read them; copy a backup back
+    by hand.
 
 Run `iris-mcp-clients --help` for every option.
 

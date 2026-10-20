@@ -11,8 +11,10 @@
  * Every command the section documents is run with `--dry-run` and `--project` pointed at a temp project; each exits 0 and
  * writes nothing. The bin runs with HOME, USERPROFILE and APPDATA set to temp directories, so nothing reaches the real home.
  *
- * Needs the built client-config dist and the built server dists (the preset rosters); a stale client-config dist fails the
- * file with the remedy. No IRIS is contacted. Cross-package documentation checks live in `@iris-mcp/all` (rule #45).
+ * Needs the built client-config dist and the built server dists (the preset rosters); a stale client-config or admin dist
+ * (the two dists whose data the claims are checked against) fails the file with the remedy. A run that must refuse
+ * without writing gets a project folder of its own. No IRIS is contacted. Cross-package documentation checks live in
+ * `@iris-mcp/all` (rule #45).
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -32,9 +34,10 @@ import { pathToFileURL } from "node:url";
 import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
 import { loadToolPresetCatalog } from "../../../../scripts/lib/tool-catalog.mjs";
 import { declaredToolPreset } from "../../../../scripts/lib/validate-prompts-core.mjs";
-import { makeTempRoot, REPO_ROOT, removeTempRoot, runNode } from "./pack-fixture";
+import { makeTempRoot, markdownHeadingSlugs, REPO_ROOT, removeTempRoot, runNode } from "./pack-fixture";
 
 const CLIENT_CONFIG = path.join(REPO_ROOT, "packages", "client-config");
+const ADMIN = path.join(REPO_ROOT, "packages", "iris-admin-mcp");
 const PACK = path.join(CLIENT_CONFIG, "skills-pack");
 const DOC_BIN = "packages/client-config/dist/cli/clients-cli.js";
 const BIN = path.join(REPO_ROOT, ...DOC_BIN.split("/"));
@@ -91,27 +94,19 @@ function skillsPackSection(readme: string): string {
   return readme.slice(start + 1, end);
 }
 
-/** GitHub's heading slug: lower case, punctuation dropped, spaces to hyphens. */
-function slug(heading: string): string {
-  return heading
-    .toLowerCase()
-    .replace(/[^a-z0-9 _-]/g, "")
-    .trim()
-    .replace(/ /g, "-");
-}
-
-function headingSlugs(markdown: string): string[] {
-  return markdown
-    .split("\n")
-    .filter((line) => /^#{1,6} /.test(line))
-    .map((line) => slug(line.replace(/^#+ /, "")));
-}
-
-function runBin(args: string[], env: Record<string, string> = {}) {
-  return runNode(project, BIN, args, {
-    env: { HOME: home, USERPROFILE: home, APPDATA: path.join(home, "AppData", "Roaming"), ...env },
+/** Run the built bin in `cwd` (default: the shared, never-written project) with the temp home. */
+function runBin(args: string[], cwd: string = project) {
+  return runNode(cwd, BIN, args, {
+    env: { HOME: home, USERPROFILE: home, APPDATA: path.join(home, "AppData", "Roaming") },
     timeout: 90_000,
   });
+}
+
+/** A new empty project folder of this test's own, for a run that must not share state with another test. */
+function ownProject(name: string): string {
+  const dir = path.join(temp, name);
+  mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 /** Every entry below `dir` as `<kind> <path>`, sorted; links are not followed. */
@@ -134,9 +129,14 @@ function flagsIn(text: string): string[] {
 }
 
 beforeAll(async () => {
-  const fresh = checkDistFresh(CLIENT_CONFIG, "@iris-mcp/client-config");
-  if (!fresh.ok || fresh.skipped === true) {
-    throw new Error(`${fresh.reason ?? "client-config is not built."} Run "pnpm --filter @iris-mcp/client-config build" and retry.`);
+  for (const [dir, name] of [
+    [CLIENT_CONFIG, "@iris-mcp/client-config"],
+    [ADMIN, "@iris-mcp/admin"],
+  ] as const) {
+    const fresh = checkDistFresh(dir, name);
+    if (!fresh.ok || fresh.skipped === true) {
+      throw new Error(`${fresh.reason ?? `${name} is not built.`} Run "pnpm --filter ${name} build" and retry.`);
+    }
   }
   targets = (await import(pathToFileURL(path.join(CLIENT_CONFIG, "dist", "pack-targets.js")).href)) as PackTargetsModule;
   plan = (await import(pathToFileURL(path.join(CLIENT_CONFIG, "dist", "pack-plan.js")).href)) as PackPlanModule;
@@ -197,10 +197,13 @@ describe("the root README's `### The skills pack` section: what the pack holds",
     expect(targets.PACK_TARGETS.filter((target) => target.route === null).map((target) => target.id)).toEqual(["claude-desktop"]);
     const section = skillsPackSection(read("README.md"));
     expect(section).toContain("Claude Desktop (`claude-desktop`) has no route");
-    const refused = runBin(["skills", "install", "--client", "claude-desktop", "--yes"]);
+    const own = ownProject("desktop-refused");
+    const refused = runBin(["skills", "install", "--client", "claude-desktop", "--yes"], own);
     expect(refused.status).toBe(2);
     expect(refused.stderr.startsWith(`Error: ${targets.CLAUDE_DESKTOP_REFUSAL}`)).toBe(true);
+    expect(readdirSync(own), "the refused install wrote nothing").toEqual([]);
     expect(section).toContain("it takes skills only as an uploaded ZIP");
+    expect(targets.CLAUDE_DESKTOP_REFUSAL).toContain("upload skills as a ZIP");
   });
 
   it("names the record the installer writes by its manifest path", () => {
@@ -252,8 +255,9 @@ describe("the root README's documented commands run", () => {
     const usage = runBin(["skills"]);
     expect(flagsIn(usage.stderr.split("\n").find((line) => line.startsWith("Usage: iris-mcp-clients skills")) ?? "")).toContain("--yes");
 
+    const own = ownProject("asks-first");
     const before = treeOf(temp);
-    const run = runBin(["skills", "install", "--client", "claude-code", "--project", project]);
+    const run = runBin(["skills", "install", "--client", "claude-code", "--project", own]);
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(2);
     expect(run.stdout).toMatch(/\d+ to create, 0 to update/);
     expect(run.stderr).toContain("needs confirmation before writing");
@@ -266,9 +270,11 @@ describe("the root README's known limits", () => {
 
   it("`--scope user` is refused by the bin", () => {
     expect(section()).toContain("- Project scope only: `--scope user` is refused.");
-    const run = runBin(["skills", "install", "--client", "codex", "--scope", "user", "--yes"]);
+    const own = ownProject("scope-user-refused");
+    const run = runBin(["skills", "install", "--client", "codex", "--scope", "user", "--yes"], own);
     expect(run.status).toBe(2);
     expect(run.stderr.startsWith("Error: skills supports only --scope project")).toBe(true);
+    expect(readdirSync(own), "the refused install wrote nothing").toEqual([]);
   });
 
   it("the Claude Code route installs both the skills and the rule, as its route row says", () => {
@@ -288,10 +294,7 @@ describe("the root README's known limits", () => {
     writeFileSync(path.join(linked, "CLAUDE.md"), claude);
     symlinkSync("CLAUDE.md", path.join(linked, "AGENTS.md"));
 
-    const run = runNode(linked, BIN, ["skills", "install", "--client", "codex", "--yes"], {
-      env: { HOME: home, USERPROFILE: home, APPDATA: path.join(home, "AppData", "Roaming") },
-      timeout: 90_000,
-    });
+    const run = runBin(["skills", "install", "--client", "codex", "--yes"], linked);
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(1);
     expect(`${run.stdout}${run.stderr}`).toContain(plan.LINK_DETAILS.symbolic);
     expect(readFileSync(path.join(linked, "CLAUDE.md")).equals(claude)).toBe(true);
@@ -308,10 +311,7 @@ describe("the root README's known limits", () => {
     mkdirSync(path.join(linked, "real", "skills"), { recursive: true });
     symlinkSync("real", path.join(linked, ".claude"));
 
-    const run = runNode(linked, BIN, ["skills", "install", "--client", "claude-code", "--yes"], {
-      env: { HOME: home, USERPROFILE: home, APPDATA: path.join(home, "AppData", "Roaming") },
-      timeout: 90_000,
-    });
+    const run = runBin(["skills", "install", "--client", "claude-code", "--yes"], linked);
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(1);
     expect(`${run.stdout}${run.stderr}`).toContain(`.claude (${plan.LINK_DETAILS.symbolic})`);
     expect(readdirSync(path.join(linked, "real"))).toEqual(["skills"]);
@@ -327,14 +327,13 @@ describe("the root README's known limits", () => {
     writeFileSync(path.join(linked, "CLAUDE.md"), claude);
     linkSync(path.join(linked, "CLAUDE.md"), path.join(linked, "AGENTS.md"));
 
-    const run = runNode(linked, BIN, ["skills", "install", "--client", "codex", "--yes"], {
-      env: { HOME: home, USERPROFILE: home, APPDATA: path.join(home, "AppData", "Roaming") },
-      timeout: 90_000,
-    });
+    const run = runBin(["skills", "install", "--client", "codex", "--yes"], linked);
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(1);
     expect(`${run.stdout}${run.stderr}`).toContain(plan.LINK_DETAILS.hard);
     expect(readFileSync(path.join(linked, "CLAUDE.md")).equals(claude)).toBe(true);
     expect(readFileSync(path.join(linked, "AGENTS.md")).equals(claude)).toBe(true);
+    expect(lstatSync(path.join(linked, "AGENTS.md")).ino, "the two names are still one file").toBe(lstatSync(path.join(linked, "CLAUDE.md")).ino);
+    expect(lstatSync(path.join(linked, "CLAUDE.md")).nlink).toBe(2);
     expect(existsSync(path.join(linked, ".agents"))).toBe(false);
     expect(existsSync(path.join(linked, ".iris-mcp"))).toBe(false);
   });
@@ -352,10 +351,10 @@ describe("the root README's known limits", () => {
 
   it("links the client-config README anchors that exist as headings there", () => {
     const text = section();
-    const slugs = headingSlugs(read("packages/client-config/README.md"));
+    const slugs = markdownHeadingSlugs(read("packages/client-config/README.md"));
     for (const anchor of ["skills-pack-targets-generated", "installing-the-skills-pack"]) {
       expect(text, anchor).toContain(`(packages/client-config/README.md#${anchor})`);
-      expect(slugs, anchor).toContain(anchor);
+      expect(slugs.has(anchor), anchor).toBe(true);
     }
   });
 
@@ -425,14 +424,18 @@ describe("the retirement sentence and the `#the-skills-pack` links", () => {
   it("`### The skills pack` is one heading, and every document that points at it holds the link", () => {
     const readme = read("README.md");
     expect(readme.split("\n").filter((line) => line === "### The skills pack")).toHaveLength(1);
-    expect(headingSlugs(readme)).toContain("the-skills-pack");
+    expect(markdownHeadingSlugs(readme).has("the-skills-pack")).toBe(true);
 
     const lines = readme.split("\n");
     const bullet = lines.find((line) => line.startsWith("- **As installable Agent Skills**")) ?? "";
     expect(bullet).toContain("(see [The skills pack](#the-skills-pack))");
     expect(bullet).not.toContain("Copy the skills");
+    // The manager paragraph is about `apply`, which writes only MCP entries; the pointer names the command that installs the pack.
     const manager = lines.find((line) => line.startsWith("`apply` prints the pending diff first")) ?? "";
-    expect(manager).toContain("It also installs the skills pack into a project: see [The skills pack](#the-skills-pack).");
+    expect(manager).toContain(
+      "`iris-mcp-clients skills install` also installs the skills pack into a project: see [The skills pack](#the-skills-pack).",
+    );
+    expect(manager).not.toContain("It also installs the skills pack");
 
     for (const server of ["admin", "dev", "interop", "ops"]) {
       const text = read(`packages/iris-${server}-mcp/README.md`);

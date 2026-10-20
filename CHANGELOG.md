@@ -51,6 +51,13 @@ catalog (`packages/client-config/skills-pack/README.md`) goes from 11859 bytes t
 - **`check:provenance` fails closed on a stale client-config dist** (DW-611): when the repository holds client-config's `src/` and a
   file there is newer than `dist/`, the installer probe reports `[distribution] installer` instead of describing an installer that no
   longer exists. A root without those sources is checked as before.
+- **The client-config README's installer section lists the installer's known limits**, so the root README's "full list" link is
+  true: the `claude-code` route installs both the skills and the rule, `--project ~` is not refused, only the project directory is
+  checked for a `CLAUDE.md`, an edit inside the installer's block is replaced, one client's install never updates another client's
+  files, the duplicate-read notes are fixed text, and skills-pack backups are never pruned (`doctor` and `restore` ignore them).
+- **The root README's manager section names `iris-mcp-clients skills install`** as the command that installs the skills pack (it
+  read as if `apply` did), and the four links to the read-only mode section in the root and dev READMEs use the heading's real
+  anchor, `#read-only-mode--point-it-at-production-with-one-environment-variable`.
 
 ### Tests
 
@@ -66,6 +73,12 @@ catalog (`packages/client-config/skills-pack/README.md`) goes from 11859 bytes t
   and its control.
 - The 41.2 retirement sentence, the `skills/README.md` pin, the catalog golden and the workflow-skills row check moved with the
   documents they pin.
+- `skills-docs.test.ts` checks each known limit of the client-config README on the built bin, beside a control run.
+- `qa-41-7-capstone-safety.test.ts` drives the built bin for each of the 16 routed clients and checks what the capstone does not: the
+  backups an install and an uninstall take, byte for byte, a home that holds only backups, and the plain `lf`, `crlf` and `bom+lf`
+  hosts on the block routes. `qa-41-7-generated-table-gate.test.ts` runs the table's `--check` only on a fresh dist and checks the
+  committed table's cells the way GFM splits them. `qa-41-7-doc-links.test.ts` resolves every relative link and anchor of the nine
+  documents this story changed.
 
 ### Known limits
 

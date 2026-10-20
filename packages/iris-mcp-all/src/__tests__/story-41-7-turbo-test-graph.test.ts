@@ -9,9 +9,9 @@
  *    tests read from outside the package (the suites read repository files that no input list fully names).
  *
  * The test copies the manifests turbo needs (the root `package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml` and
- * `turbo.json`, and every `packages/*` `package.json`) into a temp directory and runs `turbo run test --dry=json --cwd <copy>`
- * from the repository's own turbo with a temp HOME and telemetry off. The dry run runs no task, and the real tree is never
- * written. Needs no IRIS and no build.
+ * `turbo.json`, and every `packages/*` `package.json` and package-level `turbo.json[c]`) into a temp directory and runs
+ * `turbo run test --dry=json --cwd <copy>` from the repository's own turbo with a temp HOME and telemetry off. The dry
+ * run runs no task, and the real tree is never written. Needs no IRIS and no build.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -53,6 +53,11 @@ beforeAll(() => {
     if (!entry.isDirectory() || !existsSync(manifest)) continue;
     mkdirSync(path.join(copy, "packages", entry.name), { recursive: true });
     copyFileSync(manifest, path.join(copy, "packages", entry.name, "package.json"));
+    // A package-level turbo config overrides the root's task definitions, so turbo must see it too.
+    for (const config of ["turbo.json", "turbo.jsonc"]) {
+      const source = path.join(REPO_ROOT, "packages", entry.name, config);
+      if (existsSync(source)) copyFileSync(source, path.join(copy, "packages", entry.name, config));
+    }
     workspaceNames.push((JSON.parse(readFileSync(manifest, "utf8")) as { name: string }).name);
   }
 

@@ -25,10 +25,14 @@
  * `src/` modules, the pack bytes are read from disk, and frontmatter is read through the pack generator's own reader. A
  * defect in the compiled `dist/` alone (a route, a planner, a block editor) therefore turns a row red.
  *
+ * The gate's companion in the same default suite, `qa-41-7-capstone-safety.test.ts`, drives the same bin per routed client
+ * for what this file does not assert: the backups an install and an uninstall take, a home that holds only backups after
+ * an uninstall, and the three plain host shapes (`lf`, `crlf`, `bom+lf`) on the block routes.
+ *
  * Needs no IRIS. Writes only under OS temp directories it creates and removes.
  */
 
-import { lstatSync, readdirSync, utimesSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -54,12 +58,15 @@ import {
   type Sandbox,
 } from "./pack-test-helpers.js";
 import {
+  ageAllFiles,
+  ancestors,
   assertBinFresh,
-  BACKUP_ROOT,
   expectedSkillFiles,
+  filesOutsideBackups,
   filesUnder,
   lstatTree,
   MANIFEST,
+  mtimes,
   PACK_ON_DISK,
   packNotice,
   packRuleForms,
@@ -98,12 +105,6 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** The ancestor directories of a project-relative path, shallow first. */
-function ancestors(rel: string): string[] {
-  const parts = rel.split("/").slice(0, -1);
-  return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
-}
-
 /** The pack's names, read from the directories under `skills-pack/skills/`. */
 function packSkillNames(): string[] {
   return readdirSync(path.join(PACK_ON_DISK, "skills"), { withFileTypes: true })
@@ -119,31 +120,10 @@ function lineEndingAdded(host: Buffer): string {
   return host.includes(Buffer.from("\r\n")) ? "\r\n" : "\n";
 }
 
-/** Every file's mtime in ms (links are not followed), optionally after setting each one far in the past. */
-function mtimesOf(dir: string, age: boolean): Map<string, number> {
-  const out = new Map<string, number>();
-  const past = new Date("2001-01-01T00:00:00Z");
-  const walk = (current: string, prefix: string): void => {
-    for (const name of readdirSync(current).sort()) {
-      const full = path.join(current, name);
-      const rel = prefix === "" ? name : `${prefix}/${name}`;
-      const stat = lstatSync(full);
-      if (stat.isDirectory()) {
-        walk(full, rel);
-      } else {
-        if (age) utimesSync(full, past, past);
-        out.set(rel, lstatSync(full).mtimeMs);
-      }
-    }
-  };
-  walk(dir, "");
-  return out;
-}
-
+/** The number of files under the temp home, every one of which must be a backup. */
 function backupCount(home: string): number {
-  const files = [...filesUnder(home).keys()];
-  for (const key of files) expect(key.startsWith(`${BACKUP_ROOT}/`), `${key} is outside the backup directory`).toBe(true);
-  return files.length;
+  expect(filesOutsideBackups(home), "files under the home outside the backup directory").toEqual([]);
+  return filesUnder(home).size;
 }
 
 /**
@@ -270,12 +250,12 @@ describe("Epic 41 capstone: the skills pack for every client id on the built bin
         const afterInstall = lstatTree(sandbox.project, { modes: true });
         const manifestBytes = readProjectFile(sandbox.project, MANIFEST);
         const backupsAfterInstall = backupCount(sandbox.home);
-        const aged = mtimesOf(sandbox.project, true);
+        const aged = ageAllFiles(sandbox.project);
         const again = runBin(sandbox, ["skills", "install", "--client", target.id, "--yes"]);
         expect(again.status, `${again.stdout}${again.stderr}`).toBe(0);
         expect(again.stdout).toContain(`Nothing to change for ${target.displayName}: the skills pack is already installed.\n`);
         expect(treeDiff(afterInstall, lstatTree(sandbox.project, { modes: true }))).toEqual([]);
-        expect(mtimesOf(sandbox.project, false)).toEqual(aged);
+        expect(mtimes(sandbox.project)).toEqual(aged);
         expect(readProjectFile(sandbox.project, MANIFEST).equals(manifestBytes)).toBe(true);
         expect(backupCount(sandbox.home), "a no-op re-install takes no backup").toBe(backupsAfterInstall);
 

@@ -78,7 +78,7 @@ All servers use the same environment variables:
 | `MCP_TRANSPORT` | `stdio` | **Optional.** Only `stdio` is supported (`--transport` is equivalent); any other value fails startup naming it. |
 | `IRIS_PROFILES` | *(unset)* | **Optional.** JSON map of named IRIS instances for multi-server use. Omit for single-server — the `IRIS_*` vars above define the reserved `default` profile. See [Multiple Servers & Governance](#multiple-servers--governance). |
 | `IRIS_GOVERNANCE` | *(unset)* | **Optional.** JSON policy that enables/disables individual tool actions per profile. Omit to leave every tool enabled (today's behavior). See [Multiple Servers & Governance](#multiple-servers--governance). |
-| `IRIS_GOVERNANCE_PRESET` | *(unset)* | **Optional.** `"read-only"` or `"full"` — a one-word safety preset that blocks every write action suite-wide. Omit (or `"full"`) for today's behavior. See [Read-only mode](#read-only-mode-point-it-at-production-with-one-environment-variable). |
+| `IRIS_GOVERNANCE_PRESET` | *(unset)* | **Optional.** `"read-only"` or `"full"` — a one-word safety preset that blocks every write action suite-wide. Omit (or `"full"`) for today's behavior. See [Read-only mode](#read-only-mode--point-it-at-production-with-one-environment-variable). |
 | `IRIS_GOVERNANCE_FILE` | *(unset — inert)* | **Optional.** Path to a JSON file of the same shape as `IRIS_GOVERNANCE`, so one policy is portable across every MCP client. The file's layers sit strictly *below* the `IRIS_GOVERNANCE` env layers (an env setting always wins). **Unset ⇒ inert**: no file is ever read and behavior is byte-for-byte today's. Read once at startup (restart to apply edits); a missing/unreadable/malformed file fails startup naming the var and the path. See [Governance file](#governance-file-iris_governance_file). |
 | `IRIS_AUDIT_LOG` | *(unset — OFF)* | **Optional.** Absolute path to a JSONL audit file recording every MCP tool call (who-ish/session, what, outcome, denials). Omit for today's behavior — a mechanical no-op, zero filesystem writes. See [Compliance & Auditability](#compliance--auditability). |
 | `IRIS_AUDIT_LOG_MAX_MB` | `50` | **Optional.** Rotates the audit file at this size — the current file is renamed to `<path>.1` (single generation, overwriting a prior one) and a fresh file is started. Only relevant when `IRIS_AUDIT_LOG` is set. |
@@ -237,7 +237,7 @@ node packages/client-config/dist/cli/clients-cli.js apply --client claude-code -
 node packages/client-config/dist/cli/clients-cli.js doctor                    # env refs, parseability, drift, backups, stashes
 ```
 
-`apply` prints the pending diff first and requires confirmation (`--yes` to skip); every successful write takes a timestamped backup and prints the client's restart hint. It also installs the skills pack into a project: see [The skills pack](#the-skills-pack).
+`apply` prints the pending diff first and requires confirmation (`--yes` to skip); every successful write takes a timestamped backup and prints the client's restart hint. `iris-mcp-clients skills install` also installs the skills pack into a project: see [The skills pack](#the-skills-pack).
 
 **The zero-secrets end state** — three composable pieces, each covering a different secret class:
 
@@ -388,7 +388,7 @@ A governance **key** is the tool name for single-operation tools (e.g. `iris_met
 effective = env.profile(key) ?? env.global(key) ?? file.profile(key) ?? file.global(key) ?? inheritedDisable(key) ?? presetSeed(key) ?? defaultSeed(key)
 ```
 
-That is: a per-profile `IRIS_GOVERNANCE` setting wins; otherwise the global `IRIS_GOVERNANCE` setting; otherwise the governance *file's* per-profile setting; otherwise the file's global setting (see [Governance file](#governance-file-iris_governance_file) — with no file configured, both file layers are simply absent); otherwise a disable **inherited from the key's parent key** (only a key that declares a parent has one — see [Parent keys](#parent-keys-a-new-tool-that-re-exposes-an-existing-one)); otherwise the [preset](#read-only-mode-point-it-at-production-with-one-environment-variable); otherwise the **default seed**. **All env layers sit above all file layers** — a pre-existing `IRIS_GOVERNANCE` setting can never be overridden by a governance file introduced later.
+That is: a per-profile `IRIS_GOVERNANCE` setting wins; otherwise the global `IRIS_GOVERNANCE` setting; otherwise the governance *file's* per-profile setting; otherwise the file's global setting (see [Governance file](#governance-file-iris_governance_file) — with no file configured, both file layers are simply absent); otherwise a disable **inherited from the key's parent key** (only a key that declares a parent has one — see [Parent keys](#parent-keys-a-new-tool-that-re-exposes-an-existing-one)); otherwise the [preset](#read-only-mode--point-it-at-production-with-one-environment-variable); otherwise the **default seed**. **All env layers sit above all file layers** — a pre-existing `IRIS_GOVERNANCE` setting can never be overridden by a governance file introduced later.
 
 **The default seed** (what happens when neither `global` nor `profiles` mentions a key):
 
