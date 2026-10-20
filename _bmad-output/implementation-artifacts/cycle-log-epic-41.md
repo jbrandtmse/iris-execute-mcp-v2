@@ -165,3 +165,7 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-20T04:43:26Z	Story 41.8	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=286 result=pass order=forward,reverse files=5 note=gate_unarmed_12_skipped_armed_in_smoke model=claude-opus-5-5
 2026-10-20T04:43:28Z	Story 41.8	committed	sha=a812f3c code_sha=91fc91b build_sha=04dc213 submodules= ci=none run=none branch=epic41 pushed=origin/epic41 verified=merge-base amendments=ARCHITECTURE-SPINE.md:conv_error_text,epics.md:41.8_DW-634/635,42.9_DW-633
 2026-10-20T04:43:28Z	Story 41.8	story_cycle	plan_to_commit_min=132 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-20T04:44:12Z	Epic 41	epic_status_done	stories=8
+2026-10-20T04:44:12Z	Epic 41	model_tier_checkpoint	armed=false stack_risk=none review_tier=full-opus implement_model=claude-sonnet-5-5 high_med_avg=5.38 unresolved_high_med_avg=0.5(all_routed_to_named_stories) metric=unresolved rework_stories=0 rework_iterations=0 review_high=1 review_med=42 result=hold applied=false note=derived_mechanically_from_cr_complete_lines
+2026-10-20T04:44:12Z	Epic 41	epic_retro_skipped	reason=user_directed_skip_unattended_run
+2026-10-20T04:44:12Z	Epic 41	decision_sheet_recorded	decided=1 to_action_items=1(DW-615,owner_user) to_x0=0 routed_to_burndown_story=0 decided_by=orchestrator(Lead-away) decisions=43(burndown_charter) escalated=0 decision_pending=1_human
