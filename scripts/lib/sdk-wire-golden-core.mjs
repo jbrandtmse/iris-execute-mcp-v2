@@ -241,12 +241,16 @@ export function goldenLabels(pkg) {
  *   requestFrame: (fields: { method: string, params?: unknown }) => Promise<{ line: string, message: any }>,
  *   notify: (method: string, params?: object) => void,
  *   stderr: () => string,
+ *   closedStderr: () => Promise<string>,
  *   endInput: () => void,
  *   exit: () => Promise<{ code: number | null, signal: string | null }>,
  *   close: () => Promise<void> }}
  *   `request` always sends `params` (`{}` when omitted); `requestFrame` sends exactly the members it is given after
- *   `jsonrpc` and `id`, so a request without `params` can be written. `endInput` closes the server's stdin, as a client
- *   does when it is done; `exit` resolves with how the process ended, whenever it does.
+ *   `jsonrpc` and `id`, so a request without `params` can be written. `stderr` is what has arrived so far: stderr and
+ *   stdout are separate pipes, so a line the server wrote before an answer may still be in flight when the answer is
+ *   read. `closedStderr` resolves with all of stderr once the process has ended and its streams have closed (after
+ *   `close`, or once `exit` resolves). `endInput` closes the server's stdin, as a client does when it is done; `exit`
+ *   resolves with how the process ended, whenever it does.
  */
 export function openRawWire({ entry, env, timeoutMs = REQUEST_TIMEOUT_MS }) {
   const child = spawn(process.execPath, [entry], { env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -283,6 +287,7 @@ export function openRawWire({ entry, env, timeoutMs = REQUEST_TIMEOUT_MS }) {
   child.stderr.on('data', (chunk) => {
     stderr += chunk;
   });
+  const streamsClosed = new Promise((resolve) => child.once('close', () => resolve()));
   child.once('exit', (code, signal) => {
     ended = true;
     failAll(new Error(`the server exited (code ${code}, signal ${signal}) before it answered; stderr: ${stderr.slice(0, 500)}`));
@@ -320,6 +325,10 @@ export function openRawWire({ entry, env, timeoutMs = REQUEST_TIMEOUT_MS }) {
     requestFrame,
     notify: (method, params) => send(params === undefined ? { jsonrpc: '2.0', method } : { jsonrpc: '2.0', method, params }),
     stderr: () => stderr,
+    closedStderr: async () => {
+      await streamsClosed;
+      return stderr;
+    },
     endInput: () => child.stdin.end(),
     exit: () =>
       new Promise((resolve) => {
@@ -361,29 +370,29 @@ export async function handshake(wire, protocolVersion, clientName) {
 /**
  * Run one session against a built server and return its rows and its stderr: the handshake response first,
  * then one row per exchange, each with the response line verbatim. With `probeFirst`, a `server/discover`
- * opening precedes the handshake on the same connection.
+ * opening precedes the handshake on the same connection. The stderr is all of it, read once the process has
+ * ended, so a line written just before the last answer is never missed.
  */
 async function runSession({ entry, baseEnv, session, probeFirst }) {
   const wire = openRawWire({ entry, env: { ...baseEnv, ...CLOSED_PORT_ENV, ...session.env } });
+  const rows = [];
   try {
     if (probeFirst) await discoverHandshake(wire, 'sdk-wire-golden');
     const initialized = await handshake(wire, session.protocolVersion, 'sdk-wire-golden');
-    const rows = [
-      {
-        label: 'initialize',
-        method: 'initialize',
-        params: { protocolVersion: session.protocolVersion, capabilities: {}, clientInfo: { name: 'sdk-wire-golden', version: '0.0.0' } },
-        line: initialized.line,
-      },
-    ];
+    rows.push({
+      label: 'initialize',
+      method: 'initialize',
+      params: { protocolVersion: session.protocolVersion, capabilities: {}, clientInfo: { name: 'sdk-wire-golden', version: '0.0.0' } },
+      line: initialized.line,
+    });
     for (const exchange of session.exchanges) {
       const frame = await wire.request(exchange.method, exchange.params);
       rows.push({ ...exchange, line: frame.line });
     }
-    return { rows, stderr: wire.stderr() };
   } finally {
     await wire.close();
   }
+  return { rows, stderr: await wire.closedStderr() };
 }
 
 /**
@@ -425,6 +434,9 @@ export const MODERN_CACHEABLE_METHODS = Object.freeze([
 /**
  * What the 2026-07-28 revision adds to or removes from a response, and therefore the only differences the
  * cross-era comparison ignores (wave-8 decision #7; AD-32). `value` is what each added field must carry.
+ * {@link withoutMandatedFields}, {@link withoutExecution} and {@link mandatedFieldProblems} read the first four
+ * entries' field names and values from here. The last two are applied by the caller: a modern session opens
+ * with `server/discover` ({@link runModernGoldenSession}), and a comparison sets the JSON-RPC `id` itself.
  */
 export const MANDATED_MODERN_FIELDS = Object.freeze([
   Object.freeze({ id: 'resultType', applies: 'every result', change: 'added', field: 'resultType', value: 'complete' }),
@@ -440,6 +452,7 @@ export const MANDATED_MODERN_FIELDS = Object.freeze([
     applies: 'every result',
     change: 'added',
     field: `_meta[${SERVER_INFO_META_KEY}]`,
+    metaKey: SERVER_INFO_META_KEY,
     value: 'the serverInfo of the 2025 initialize result',
   }),
   Object.freeze({ id: 'toolExecution', applies: 'tools/list', change: 'removed', field: 'tools[].execution', member: 'execution' }),
@@ -447,7 +460,7 @@ export const MANDATED_MODERN_FIELDS = Object.freeze([
   Object.freeze({ id: 'jsonRpcId', applies: 'every frame', change: 'substituted' }),
 ]);
 
-/** The entry of {@link MANDATED_MODERN_FIELDS} with this id: the one place the functions below read the field names and pinned values from. */
+/** The entry of {@link MANDATED_MODERN_FIELDS} with this id: where the functions below read its field names and pinned values. */
 function mandatedEntry(id) {
   const entry = MANDATED_MODERN_FIELDS.find((candidate) => candidate.id === id);
   if (entry === undefined) throw new Error(`MANDATED_MODERN_FIELDS has no entry ${id}`);
@@ -456,6 +469,7 @@ function mandatedEntry(id) {
 
 const RESULT_TYPE = mandatedEntry('resultType');
 const CACHE_HINTS = mandatedEntry('cacheHints');
+const SERVER_INFO_META = mandatedEntry('serverInfoMeta');
 const TOOL_EXECUTION = mandatedEntry('toolExecution');
 
 /**
@@ -500,6 +514,17 @@ export async function discoverHandshake(wire, clientName) {
 }
 
 /**
+ * A response line with its JSON-RPC `id` set to 0 and every other byte as written, for comparing two answers to
+ * different requests byte for byte. The id follows `jsonrpc` at the start of an error frame and ends a result frame.
+ *
+ * @param {string} line - A response line as the server wrote it.
+ * @returns {string}
+ */
+export function rawWithIdZero(line) {
+  return line.replace(/^\{"jsonrpc":"2\.0","id":\d+,/, '{"jsonrpc":"2.0","id":0,').replace(/"id":\d+\}$/, '"id":0}');
+}
+
+/**
  * A parsed response with `execution` removed from every `tools/list` entry; every other member and the member
  * order are kept.
  *
@@ -535,7 +560,7 @@ export function withoutMandatedFields(method, message) {
   }
   if (stripped._meta !== null && typeof stripped._meta === 'object') {
     const meta = { ...stripped._meta };
-    delete meta[SERVER_INFO_META_KEY];
+    delete meta[SERVER_INFO_META.metaKey];
     if (Object.keys(meta).length === 0) delete stripped._meta;
     else stripped._meta = meta;
   }
@@ -565,8 +590,8 @@ export function mandatedFieldProblems(method, message, serverInfo) {
     }
   }
   if (!cacheable && CACHE_HINTS.fields.some((field) => field in result)) problems.push(`${method} carries cache hints it should not`);
-  if (JSON.stringify(result._meta?.[SERVER_INFO_META_KEY]) !== JSON.stringify(serverInfo)) {
-    problems.push(`_meta[${SERVER_INFO_META_KEY}] is ${JSON.stringify(result._meta?.[SERVER_INFO_META_KEY])}, not the initialize serverInfo`);
+  if (JSON.stringify(result._meta?.[SERVER_INFO_META.metaKey]) !== JSON.stringify(serverInfo)) {
+    problems.push(`${SERVER_INFO_META.field} is ${JSON.stringify(result._meta?.[SERVER_INFO_META.metaKey])}, not the initialize serverInfo`);
   }
   if (Array.isArray(result.tools) && result.tools.some((tool) => tool !== null && typeof tool === 'object' && TOOL_EXECUTION.member in tool)) {
     problems.push('a tool entry carries execution');
@@ -586,18 +611,19 @@ export function mandatedFieldProblems(method, message, serverInfo) {
  */
 export async function runModernGoldenSession({ entry, baseEnv, session }) {
   const wire = openRawWire({ entry, env: { ...baseEnv, ...CLOSED_PORT_ENV, ...session.env } });
+  const rows = [];
   try {
     const envelope = modernEnvelope('sdk-wire-golden');
     const discovered = await discoverHandshake(wire, 'sdk-wire-golden');
-    const rows = [{ label: 'server/discover', method: 'server/discover', line: discovered.line }];
+    rows.push({ label: 'server/discover', method: 'server/discover', line: discovered.line });
     for (const exchange of session.exchanges) {
       const frame = await wire.request(exchange.method, withEnvelope(exchange.params ?? {}, envelope));
       rows.push({ ...exchange, line: frame.line });
     }
-    return { rows, stderr: wire.stderr() };
   } finally {
     await wire.close();
   }
+  return { rows, stderr: await wire.closedStderr() };
 }
 
 /**

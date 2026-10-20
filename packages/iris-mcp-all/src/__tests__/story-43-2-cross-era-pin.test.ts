@@ -8,7 +8,9 @@
  *  - (a) the raw driver (`scripts/lib/sdk-wire-golden-core.mjs`) opens each golden session with `server/discover`, sends each golden
  *    request with the per-request envelope, and compares each response LINE with the golden's, byte for byte, once
  *    `withoutMandatedFields` has removed the live line's mandated fields and `withoutExecution` the golden's `execution`, with the
- *    JSON-RPC `id` substituted. Those six differences are the whole ignore list (wave-8 decision #7, `MANDATED_MODERN_FIELDS`);
+ *    JSON-RPC `id` substituted. Removing a member needs a parse, so both lines are first shown to be canonical JSON (re-serializing
+ *    them changes no byte); the re-serialized comparison is then a byte comparison. Those six differences are the whole ignore list
+ *    (wave-8 decision #7, `MANDATED_MODERN_FIELDS`);
  *  - (b) the values of the fields that the revision adds are pinned separately, so ignoring them in (a) hides nothing;
  *  - (c) `server/discover` carries the golden `initialize` result's `capabilities` and `instructions`;
  *  - (d) a `server/discover` probe followed by an `initialize` on one connection discards the probe, and the instance the factory builds
@@ -40,6 +42,7 @@ import {
   modernEnvelope,
   openRawWire,
   packageVersion,
+  rawWithIdZero,
   runModernGoldenSession,
   runProbeDiscardSession,
   withEnvelope,
@@ -95,13 +98,6 @@ const countOf = (text: string, needle: string): number => text.split(needle).len
 
 /** A response line re-serialized with its JSON-RPC `id` set to 0, for comparing two responses to different requests. */
 const withIdZero = (message: unknown): string => JSON.stringify({ ...(message as Record<string, unknown>), id: 0 });
-
-/**
- * A response line with its JSON-RPC `id` set to 0 and every other byte as written. The id follows `jsonrpc` at the start of an error frame
- * and ends a result frame.
- */
-const rawWithIdZero = (line: string): string =>
-  line.replace(/^\{"jsonrpc":"2\.0","id":\d+,/, '{"jsonrpc":"2.0","id":0,').replace(/"id":\d+\}$/, '"id":0}');
 
 /** The server's log level in every child: the era line is an INFO line, and a developer shell may set a stricter `LOG_LEVEL`. */
 const SERVER_LOG_LEVEL = "INFO";
@@ -286,6 +282,8 @@ describe.each(GOLDEN_PACKAGES)("cross-era pin: %s", (pkg) => {
         for (const row of recorded) {
           const seen = live.find((candidate) => candidate.label === row.label)!;
           const expectedLine = row.dw617Of ? recorded.find((candidate) => candidate.label === row.dw617Of)!.line : row.line;
+          expect(JSON.stringify(JSON.parse(seen.line)), `${sessionId}/${row.label}: the live line is canonical JSON`).toBe(seen.line);
+          expect(JSON.stringify(JSON.parse(expectedLine)), `${sessionId}/${row.label}: the golden line is canonical JSON`).toBe(expectedLine);
           const now = withoutMandatedFields(row.method, JSON.parse(seen.line));
           const then = withoutExecution(JSON.parse(expectedLine));
           expect(withIdZero(now), `${sessionId}/${row.label}`).toBe(withIdZero(then));
