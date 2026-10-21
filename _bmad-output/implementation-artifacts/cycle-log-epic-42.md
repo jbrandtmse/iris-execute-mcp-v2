@@ -16,3 +16,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-21T05:49:59Z	Epic 42	sprint_planning_complete	gate=CONCERNS concerns=lead_only_prereqs_42.5-42.8,first_publish_auth_lead_decision,42.1_v1_floor_not_applicable model=claude-opus-5-5
 2026-10-21T05:50:39Z	Epic 42	retro_review_skipped	reason=no_retro(epic43_retro_skipped_by_user)+ledger_nonterminal_all_owned_by_named_epic42_stories_with_bullets(33)+burndown_overflow_0+action_items_open=3_user_owned(DW-538,DW-615,epic43_vscode_dialog)_not_in_scope x0=none
 2026-10-21T05:50:39Z	Epic 42	planning_amended	file=_bmad-output/planning-artifacts/epics.md lines=5686,5731 decision=33 reason=v1_floor_not_applicable+D1_done
+2026-10-21T05:53:15Z	Epic 42	epic_context_compiled	reason=initial model=claude-opus-5-5 lines=86
