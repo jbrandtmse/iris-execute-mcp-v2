@@ -333,9 +333,14 @@ describe("JSON/JSONC edits (jsonc-parser modify — the 33.1 apply set)", () => 
     if (parsed.ok) expect(parsed.entries["iris-admin-mcp"]).toEqual(shaped);
   });
 
-  it("Zed re-apply over the legacy fixture's unpinned entry pins the owned command.args; every byte after the entry is identical (AD-30, Story 42.1)", () => {
+  it("Zed re-apply over the legacy fixture's unpinned entry pins the owned command.args; every byte before and after the entry is identical (AD-30, Story 42.1)", () => {
     const adapter = adapterOf("zed");
     const content = readFixture("zed/settings.json");
+    expect(content).toContain('"args": ["-y", "@iris-mcp/dev"]'); // npx-pin-exempt: the unpinned entry this test upgrades
+    const ownedStart = '    "iris-dev-mcp": {';
+    const foreignStart = '    "linear": {';
+    expect(content.indexOf(ownedStart)).toBeGreaterThan(-1);
+    expect(content.indexOf(foreignStart)).toBeGreaterThan(-1);
     const result = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "apply"));
     expect(result.mechanism).toBe("update");
     const after = applyEdits(content, (result.native as JsoncNativeEdit).edits);
@@ -345,7 +350,7 @@ describe("JSON/JSONC edits (jsonc-parser modify — the 33.1 apply set)", () => 
     const command = (parsed.entries["iris-dev-mcp"] as { command: { path: string; args: string[] } }).command;
     expect(command.path).toBe("npx");
     expect(command.args).toEqual(["-y", "@iris-mcp/dev@1"]);
-    const foreignStart = '    "linear": {';
+    expect(after.slice(0, after.indexOf(ownedStart))).toBe(content.slice(0, content.indexOf(ownedStart)));
     expect(after.slice(after.indexOf(foreignStart))).toBe(content.slice(content.indexOf(foreignStart)));
   });
 });
@@ -400,8 +405,9 @@ describe("TOML section splices (Codex — owned tables only)", () => {
     expect(native.spans ?? []).toHaveLength(1);
     const legacyArgsLine = 'args = ["-y", "@iris-mcp/dev"]'; // npx-pin-exempt: the unpinned line this test upgrades
     expect(content).toContain(legacyArgsLine);
-    // Every other byte, the foreign context7 entry and the trusted-project table included, is untouched.
-    expect(applyTomlSplice(content, native)).toBe(content.replace(legacyArgsLine, 'args = ["-y", "@iris-mcp/dev@1"]'));
+    // Every other byte, the foreign context7 entry and the trusted-project table included, is untouched, by the
+    // production executor itself.
+    expect(executeNativeEdit(content, native)).toBe(content.replace(legacyArgsLine, 'args = ["-y", "@iris-mcp/dev@1"]'));
   });
 
   it("remove renders a remove-region covering ONLY the owned tables (env sub-table included)", () => {
@@ -660,13 +666,17 @@ describe("YAML CST ops (Goose)", () => {
   it("re-apply over the legacy fixture's unpinned entry pins the owned args; the bytes before and after the entry are identical (AD-30, Story 42.1)", () => {
     const adapter = adapterOf("goose");
     const content = readFixture("goose/config.yaml");
+    const legacy = (parseDocument(content).toJS() as { extensions: Record<string, Record<string, unknown>> }).extensions["iris-data-mcp"] as Record<string, unknown>;
+    expect(legacy.args).toEqual(["-y", "@iris-mcp/data"]); // npx-pin-exempt: the unpinned entry this test upgrades
+    const ownedStart = "  # The iris-mcp data server, managed by iris-mcp.";
+    const foreignStart = "  # Present but disabled via the native flag.";
+    expect(content.indexOf(ownedStart)).toBeGreaterThan(-1);
+    expect(content.indexOf(foreignStart)).toBeGreaterThan(-1);
     const result = expectOk(diff(content, canonicalEntry("iris-data-mcp"), adapter, "user", "apply"));
     expect(result.mechanism).toBe("update");
     const after = executeNativeEdit(content, result.native);
     const entry = (parseDocument(after).toJS() as { extensions: Record<string, Record<string, unknown>> }).extensions["iris-data-mcp"] as Record<string, unknown>;
     expect(entry.args).toEqual(["-y", "@iris-mcp/data@1"]);
-    const ownedStart = "  # The iris-mcp data server, managed by iris-mcp.";
-    const foreignStart = "  # Present but disabled via the native flag.";
     expect(after.slice(0, after.indexOf(ownedStart))).toBe(content.slice(0, content.indexOf(ownedStart)));
     expect(after.slice(after.indexOf(foreignStart))).toBe(content.slice(content.indexOf(foreignStart)));
   });

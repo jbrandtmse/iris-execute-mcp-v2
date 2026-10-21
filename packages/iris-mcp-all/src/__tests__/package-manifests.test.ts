@@ -24,6 +24,7 @@ import { REPO_ROOT } from "./pack-fixture";
 
 interface Manifest {
   name: string;
+  displayName?: string;
   description?: string;
   keywords?: unknown;
   homepage?: unknown;
@@ -103,6 +104,11 @@ describe("the Node floor (AC 42.1.1, AD-29)", () => {
 
   it("the root declares one >=22.x.y floor", () => {
     expect(floor).toMatch(FLOOR_PATTERN);
+  });
+
+  // 22.17.0 is where `fs.globSync`, used by iris_doc_load, is stable (spine Stack row, wave-8 decision #35).
+  it("the floor is exactly >=22.17.0", () => {
+    expect(floor).toBe(">=22.17.0");
   });
 
   it.each(PACKAGES.map((entry) => [label(entry), entry] as const))("%s declares engines.node equal to the root floor", (_name, entry) => {
@@ -203,6 +209,7 @@ describe("mcpName (AC 42.1.5, AD-29 decision #37)", () => {
 describe("AD-28 deny-list: nothing presents the suite as InterSystems' or endorsed", () => {
   const surfaces = (entry: Entry): Array<[string, string]> => [
     ["name", entry.manifest.name],
+    ["displayName", entry.manifest.displayName ?? ""],
     ["description", entry.manifest.description ?? ""],
     ...((Array.isArray(entry.manifest.keywords) ? (entry.manifest.keywords as string[]) : []).map((keyword): [string, string] => ["keyword", keyword])),
   ];
@@ -250,8 +257,8 @@ describe("the license text each package ships (AC 42.1.5)", () => {
   });
 });
 
-/** The documents' mentions of Node 18 or 20 as a supported runtime (`Node 18+`, `Node.js 20 or later`). */
-const OLD_NODE_MENTION = /\bNode(?:\.js)?(?:\*\*|\]\([^)]*\))?\s*v?(?:18|20)(?!\d)/i;
+/** The documents' mentions of Node 18 or 20 as a supported runtime (`Node 18+`, `Node.js 20 or later`, `Node >=18`, `Node.js: 20`). */
+const OLD_NODE_MENTION = /\bNode(?:\.js)?(?:\*\*|\]\([^)]*\))?(?::\s+|\s*)(?:>=\s*|\u2265\s*)?v?(?:18|20)(?!\d)/i;
 
 describe("the documented Node floor (AC 42.1.1)", () => {
   const floor = /^>=(\d+\.\d+)\.\d+$/.exec(String(ROOT.engines?.node))?.[1] ?? "";
@@ -275,7 +282,7 @@ describe("the documented Node floor (AC 42.1.1)", () => {
   });
 
   it("the mention matcher flags Node 18 and 20 in the forms documents use, and passes the floor", () => {
-    for (const text of ["Node.js 18 or later", "- **Node.js** 18+", "requires Node 20", "Node.js v20.1", "[Node.js](https://nodejs.org/) 18+"]) {
+    for (const text of ["Node.js 18 or later", "- **Node.js** 18+", "requires Node 20", "Node.js v20.1", "[Node.js](https://nodejs.org/) 18+", "Node >=18", "Node.js: 20", "Node \u2265 20"]) {
       expect(OLD_NODE_MENTION.test(text), text).toBe(true);
     }
     for (const text of ["Node.js 22.17 or later", "Node 22", "node:18-alpine is not used", "version 18.2 of the tool"]) {

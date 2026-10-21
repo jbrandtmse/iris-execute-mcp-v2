@@ -2,10 +2,11 @@
  * Story 42.1 (AC 42.1.6, DW-260; AD-29, Rule #45, Rule #59) - every `npx` spec the suite writes, spawns or documents
  * carries the pinned major, taken from one constant.
  *
- *  1. The scan. `scripts/lib/npx-pin-scan.mjs` reads every tracked text file (documents, source, scripts, manifests,
- *     fixtures and the skills pack; lockfiles and the planning and IRIS-source folders apart) and finds each
- *     `@iris-mcp/<name>` spec that does not end in `@1`: a shell line, a JSON or TOML argument array (also across
- *     lines), a YAML list, `-p`, `--package=` and `npm exec`. A failure names `file:line`.
+ *  1. The scan. `scripts/lib/npx-pin-scan.mjs` reads every tracked or untracked-but-not-ignored text file (documents,
+ *     source, scripts, manifests, fixtures and the skills pack; lockfiles and the planning, agent and IRIS-source folders
+ *     apart) and finds each `@iris-mcp/<name>` spec that does not end in `@1`: a shell line, a JSON or TOML argument
+ *     array (also across lines, with or without `-y`), a YAML list, `-p`, `--package=` and `npm exec`. A failure names
+ *     `file:line`.
  *  2. The reasoned exemptions (CHANGELOG history, the dated certification captures, the legacy-input fixtures, the
  *     pin tooling's own synthetic input) are checked for rot: each must still match something.
  *  3. What the code writes. The built `synthesizeEntry` is asserted for all five servers in every mode on every
@@ -27,6 +28,7 @@ import {
   EXEMPTIONS,
   findUnpinnedSpecs,
   INLINE_EXEMPTION_MARKER,
+  isExcludedPath,
   listScanSurface,
   PIN_TOOLING_FILES,
   scanFiles,
@@ -181,8 +183,17 @@ describe("the scan surface", () => {
     ]) {
       expect(surface, expected).toContain(expected);
     }
-    expect(surface.filter((file) => /^(_bmad|\.claude|irislib|irissys|sources)/.test(file))).toEqual([]);
+    expect(surface.filter((file) => /^(_bmad[^/]*|\.claude)\//.test(file))).toEqual([]);
     expect(surface.filter((file) => /(^|\/)(pnpm-lock\.yaml|package-lock\.json)$/.test(file))).toEqual([]);
+  });
+
+  it("excludes exactly the planning, agent and IRIS-source folders: a sibling such as .claude-plugin/ is scanned", () => {
+    for (const excluded of ["_bmad/config.yaml", "_bmad-output/a.md", ".claude/rules/x.md", "irislib/a.cls", "irissys/a.cls", "sources/a.md"]) {
+      expect(isExcludedPath(excluded), excluded).toBe(true);
+    }
+    for (const scanned of [".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", "sources-notes.md", "docs/_bmad.md", "README.md"]) {
+      expect(isExcludedPath(scanned), scanned).toBe(false);
+    }
   });
 });
 
@@ -285,6 +296,9 @@ describe("the scan finds every form (Rule #59 controls)", () => {
     ["a JSON array across lines", '"args": [\n  "-y",\n  "@iris-mcp/ops"\n]', ["@iris-mcp/ops"]],
     ["a TOML array", 'args = ["-y", "@iris-mcp/data"]', ["@iris-mcp/data"]],
     ["a YAML list", 'args:\n  - -y\n  - "@iris-mcp/interop"', ["@iris-mcp/interop"]],
+    ["a JSON array without -y", '"command": "npx", "args": ["@iris-mcp/dev"]', ["@iris-mcp/dev"]],
+    ["a TOML array without -y", 'args = ["@iris-mcp/data"]', ["@iris-mcp/data"]],
+    ["a YAML list without -y", 'args:\n  - "@iris-mcp/interop"', ["@iris-mcp/interop"]],
     ["a floating tag", "npx -y @iris-mcp/dev@latest", ["@iris-mcp/dev@latest"]],
     ["a caret range", "npx -y @iris-mcp/dev@^1", ["@iris-mcp/dev@^1"]],
     ["another major", "npx -y @iris-mcp/dev@2", ["@iris-mcp/dev@2"]],
@@ -304,6 +318,7 @@ describe("the scan finds every form (Rule #59 controls)", () => {
     ["an install command", "npm install -g @iris-mcp/all"],
     ["a package name in prose", "the @iris-mcp/dev package ships the server"],
     ["a filter command", "pnpm --filter @iris-mcp/dev build"],
+    ["a package-name constant", 'const PKG = "@iris-mcp/dev";'],
     ["a foreign package", 'npx -y @upstash/context7-mcp'],
   ])("passes %s", (_form, text) => {
     expect(unpinned(text)).toEqual([]);
@@ -320,15 +335,20 @@ describe("the scan finds every form (Rule #59 controls)", () => {
     expect(scanFiles(root, ["docs/guide.md", "docs/other.md"], "1")).toEqual([]);
   });
 
-  it("an inline marker with a reason exempts its line, and a bare marker does not", () => {
-    const root = tempTree({
-      "a.ts": 'const legacy = ["-y", "@iris-mcp/dev"]; // npx-pin-exempt: the legacy input this test upgrades\n',
-      "b.ts": 'const legacy = ["-y", "@iris-mcp/dev"]; // npx-pin-exempt:\n',
-    });
-    const hits = scanFiles(root, ["a.ts", "b.ts"], "1");
+  it("an inline marker with a reason exempts its line of a test file; a bare marker, or a marker in a document or shipped source, does not", () => {
+    const files = {
+      "src/__tests__/a.ts": 'const legacy = ["-y", "@iris-mcp/dev"]; // npx-pin-exempt: the legacy input this test upgrades\n',
+      "src/__tests__/b.ts": 'const legacy = ["-y", "@iris-mcp/dev"]; // npx-pin-exempt:\n',
+      "docs/c.md": "npx -y @iris-mcp/dev <!-- npx-pin-exempt: a document cannot exempt itself -->\n",
+      "src/d.ts": 'const spec = ["-y", "@iris-mcp/dev"]; // npx-pin-exempt: shipped source cannot exempt itself\n',
+    };
+    const root = tempTree(files);
+    const hits = scanFiles(root, Object.keys(files), "1");
     expect(hits.map((hit) => [hit.file, hit.exemption?.kind ?? null])).toEqual([
-      ["a.ts", "inline"],
-      ["b.ts", null],
+      ["src/__tests__/a.ts", "inline"],
+      ["src/__tests__/b.ts", null],
+      ["docs/c.md", null],
+      ["src/d.ts", null],
     ]);
     expect(INLINE_EXEMPTION_MARKER.test("// npx-pin-exempt: a reason")).toBe(true);
   });

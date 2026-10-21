@@ -5824,6 +5824,7 @@ DW-47, DW-300, D2.
   - the registry 404s are gone.
 - DW-612: nothing on the publish path runs `gen:pack --check` or `check:provenance`. client-config's `prepublishOnly` runs only `verify-iris-reachable`, so a publish made without the default suite could ship a drifted skills pack or a tarball without `IRIS-MCP-THIRD-PARTY-NOTICES.md`. Add both checks to the publish path and prove them red on that path (Rule #59). (ledger; routed by harvest 2026-10-19 from Story 41.1)
 - DW-665: each package keeps a tracked `CHANGELOG.md` that `changeset version` fills, but `pnpm pack` does not ship it (`files` names only `dist`, plus `skills-pack` for client-config). Decide whether the `1.0.0` tarballs carry their changelog, before publishing. (ledger; routed by harvest 2026-10-21)
+- DW-637 (residual from 42.1, re-owned at adjudication 2026-10-21): `@modelcontextprotocol/server` 2.3.1 is still the newest release and the upstream fast-uri fix (typescript-sdk PR #2973) is unmerged. Re-check right before the `1.0.0` tag: if a release pins fast-uri 3.1.8 or later, bump the exact pin and re-run the epic-43 wire goldens; otherwise record the check and its date. (ledger; routed by adjudication 2026-10-21)
 
 ### Story 42.7: VS Code Extension Publish
 

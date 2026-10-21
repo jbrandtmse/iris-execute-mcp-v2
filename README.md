@@ -22,7 +22,7 @@ The IRIS MCP Server Suite is a collection of five specialized [Model Context Pro
 
 ### Meta-package
 
-Once published, `@iris-mcp/all` installs the five servers as dependencies of one package, but it launches nothing: a global install (`npm install -g @iris-mcp/all`) links no command, and a project install puts the seven commands of its dependencies in `node_modules/.bin`. MCP clients start servers with `npx -y @iris-mcp/<server>@1`, one entry per server. See the [meta-package README](packages/iris-mcp-all/README.md) for details.
+Once published, `@iris-mcp/all` installs the five servers as dependencies of one package, but it launches nothing: a global install (`npm install -g @iris-mcp/all`) links no command, and an npm project install puts the seven commands of its dependencies in `node_modules/.bin`. MCP clients start servers with `npx -y @iris-mcp/<server>@1`, one entry per server. See the [meta-package README](packages/iris-mcp-all/README.md) for details.
 
 ---
 

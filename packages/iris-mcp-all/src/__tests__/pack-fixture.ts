@@ -7,7 +7,7 @@
  * Every temp root is created under `os.tmpdir()` and removed by the test that made it.
  */
 
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -139,13 +139,15 @@ function walkRelative(root: string, directory = ""): string[] {
 
 /**
  * Pack `packageDir` with `pnpm pack` (the packer that publishing goes through: only pnpm applies `publishConfig` overrides such as
- * `exports`) into `destination`, and extract the tarball next to it. Nothing is written outside `destination`.
+ * `exports`) into `destination`, and extract the tarball next to it. Nothing is written outside `destination`. Lifecycle scripts
+ * (`prepack`, `prepare`, `postpack`) are not run, as with the `npm pack --ignore-scripts` siblings: the tarball is built from the
+ * dist the caller has already checked is fresh, and no publish gate runs inside the default suite.
  *
  * @param packageDir - Absolute path of the package directory.
  * @param destination - A directory under `os.tmpdir()` that holds no other tarball (pnpm creates it when it is missing); the tarball goes in it, and `extracted/` holds its contents.
  */
 export function pnpmPack(packageDir: string, destination: string): PnpmPack {
-  const packed = runTool("pnpm", ["pack", "--pack-destination", destination], packageDir);
+  const packed = runTool("pnpm", ["--config.ignore-scripts=true", "pack", "--pack-destination", destination], packageDir);
   if (packed.status !== 0) throw new Error(`pnpm pack failed in ${packageDir}: ${packed.stderr || packed.stdout}`);
   const tarballs = readdirSync(destination).filter((name) => name.endsWith(".tgz"));
   if (tarballs.length !== 1) throw new Error(`pnpm pack in ${packageDir} wrote ${tarballs.length} tarballs to ${destination}`);
@@ -162,4 +164,36 @@ export function pnpmPack(packageDir: string, destination: string): PnpmPack {
     files: walkRelative(root),
     manifest: JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as Record<string, unknown>,
   };
+}
+
+/**
+ * Give the extracted `pack` a `node_modules` that holds exactly what a registry install of it would: each declared
+ * `dependencies` entry (taken from the repository's install of `packages/<dir>`), each installed optional dependency, and
+ * `workspaceLinks` in place of the `@iris-mcp/*` packages. A dependency the repository has not installed is an error naming it.
+ *
+ * @param pack - A package packed and extracted by {@link pnpmPack}.
+ * @param dir - The package's directory name under `packages/`.
+ * @param workspaceLinks - Absolute directories to link in for `@iris-mcp/*` dependencies, keyed by package name.
+ */
+export function installDeclaredDependencies(pack: PnpmPack, dir: string, workspaceLinks: Record<string, string>): void {
+  const manifest = pack.manifest as { dependencies?: Record<string, string>; optionalDependencies?: Record<string, string> };
+  const link = (name: string, to: string): void => {
+    const destination = join(pack.root, "node_modules", name);
+    mkdirSync(dirname(destination), { recursive: true });
+    symlinkSync(to, destination, "junction");
+  };
+  for (const name of Object.keys(manifest.dependencies ?? {})) {
+    const workspace = workspaceLinks[name];
+    if (workspace !== undefined) {
+      link(name, workspace);
+      continue;
+    }
+    const installed = join(REPO_ROOT, "packages", dir, "node_modules", name);
+    if (!existsSync(installed)) throw new Error(`${String(pack.manifest["name"])} declares ${name}, which packages/${dir}/node_modules does not hold`);
+    link(name, realpathSync(installed));
+  }
+  for (const name of Object.keys(manifest.optionalDependencies ?? {})) {
+    const installed = join(REPO_ROOT, "packages", dir, "node_modules", name);
+    if (existsSync(installed)) link(name, realpathSync(installed));
+  }
 }

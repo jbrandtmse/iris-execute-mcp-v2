@@ -17,8 +17,9 @@
  *    what moves the result.
  *  - On the real tree: no pending changeset declares `major` (AD-29: no major before Story 42.6) and no `pre.json` exists.
  *
- * Once the packages are released (every version is at least 1.0.0) the template has been applied and the fixture runs
- * are skipped; the checks on the real tree keep running.
+ * Once the packages are released (every version is at least 1.0.0) the template has been applied: the fixture runs, the
+ * template check and the no-major check are skipped (after 1.0.0 a breaking change takes a new major, AD-15); the
+ * `pre.json` check keeps running.
  */
 
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
@@ -89,7 +90,7 @@ function changesetVersion(cwd: string): { status: number | null; stdout: string;
 }
 
 describe("the real tree (AD-29: no major before Story 42.6)", () => {
-  it("no pending changeset declares a major bump", () => {
+  it.skipIf(released)("no pending changeset declares a major bump", () => {
     const offenders: string[] = [];
     for (const name of pendingChangesets(join(REPO_ROOT, ".changeset"))) {
       const frontmatter = /^---\n([\s\S]*?)\n---/.exec(readFileSync(join(REPO_ROOT, ".changeset", name), "utf8"))?.[1] ?? "";
@@ -147,8 +148,9 @@ describe.skipIf(released)("changeset version in a throwaway fixture (AC 42.1.4)"
     const run = changesetVersion(root);
     expect(run.status, run.stderr || run.stdout).toBe(0);
     const bumps = pendingChangesets(join(REPO_ROOT, ".changeset")).map((name) => readFileSync(join(REPO_ROOT, ".changeset", name), "utf8"));
-    const anyMinor = bumps.some((text) => /^"@iris-mcp\/[a-z-]+":\s*minor\s*$/m.test(text));
-    const anyPatch = bumps.some((text) => /^"@iris-mcp\/[a-z-]+":\s*patch\s*$/m.test(text));
+    const frontmatterOf = (text: string): string => /^---\n([\s\S]*?)\n---/.exec(text)?.[1] ?? "";
+    const anyMinor = bumps.some((text) => /:\s*["']?minor["']?\s*$/m.test(frontmatterOf(text)));
+    const anyPatch = bumps.some((text) => /:\s*["']?patch["']?\s*$/m.test(frontmatterOf(text)));
     for (const dir of PACKAGE_DIRS) {
       const version = manifestOf(root, dir).version;
       expect(version, dir).not.toBe("1.0.0");

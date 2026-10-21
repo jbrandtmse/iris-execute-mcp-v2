@@ -159,6 +159,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Pre-existing publish-readiness concern across all packages; later routed to the publishing checklist item A2.
 - 2026-10-14T10:47:49Z status=wontfix-accepted owner=8-6-meta-package-iris-mcp-all by=migration note=reopen_if=the npm publish decision is taken and a package.json still lacks license/repository/author
 - 2026-10-15T02:51:51Z status=routed owner=42-1-pre-publish-package-fixes by=correct-course note=reopened - reopen_if fired: npm publish decided (decision-record-2026-10-14)
+- 2026-10-21T14:28:59Z status=resolved-by:42-1-pre-publish-package-fixes by=adjudication note=all_8_packages_carry_license_MIT+repository.directory+author+keywords+homepage+bugs(+LICENSE_copy);package-manifests.test.ts_pins_them_with_AD-28_deny-list
 
 ### DW-32: [L8.retro-post-project-1-npm-publishing-session] Retro Post-Project Action #1: npm publishing session
 - source: legacy:8.0 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -1347,6 +1348,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Both halves are publish-coupled product decisions assigned to the end-of-Epic-32 merge gate with the @iris-mcp/* publish decision; minimum remediation named (neutral cwd + packageVersion setting).
 - 2026-10-14T10:47:53Z status=wontfix-accepted owner=31-4-broker-extension by=migration note=reopen_if=the @iris-mcp/* publish decision is taken and the launcher spawns published packages
 - 2026-10-15T02:51:51Z status=routed owner=42-1-pre-publish-package-fixes by=correct-course note=reopened - reopen_if fired: publish decided; D3 (decision-record-2026-10-14) major pin @1; neutral-cwd half probed in 42.1
+- 2026-10-21T14:28:59Z status=resolved-by:42-1-pre-publish-package-fixes by=adjudication note=every_npx_spec_pinned_@1_from_IRIS_MCP_MAJOR(synthesize.ts:37;extension_mirror_definitions.ts:15_pinned_equal);npx-pin.test.ts_scans_tracked_text;cwd_verdict:extension_definitions_home_cwd,synthesized_entries_mitigated_by_@1(spec_Design_Notes)
 
 ### DW-261: [31-4-8] extension.exports cached without shape validation: a truthy-but-wrong Server Manager API is cached permanently
 - source: legacy:31.4 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -2031,6 +2033,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-14T10:47:57Z status=decision-pending owner=burndown by=migration note=human=Project Lead decides the initial minor/patch version boundary before the first npm publish
 - 2026-10-15T02:51:51Z status=routed owner=42-1-pre-publish-package-fixes by=correct-course note=decided D2 (decision-record-2026-10-14): align every @iris-mcp/* package at 1.0.0
 - 2026-10-18T17:35:49Z occurrence=40-3-testproduction-runs
+- 2026-10-21T14:28:59Z status=resolved-by:42-1-pre-publish-package-fixes by=adjudication note=1.0.0_mechanism:major_changeset_template_scripts/release/changeset-1.0.0.md_makes_the_fixed_group_land_on_1.0.0_whatever_the_patch/minor_labels(release-1-0-0-mechanism.test.ts_runs_real_changeset_version_in_a_throwaway);42.6_applies_it
 
 ### DW-395: [34-6-CR-20] Documentation and bookkeeping accuracy cluster: (a) error envelope can carry truncated:true for an absent output
 - source: legacy:34.6 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -2685,6 +2688,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-16T23:53:09Z occurrence=39-0-epic-38-deferred-cleanup
 - 2026-10-16T23:53:09Z note=39.0 implement: AC-7 pack-content gate deferred here; npm pack must list no __tests__/env-harness/startup-env path and no dist/test-helpers (Story 42.1 AC 42.1.3)
 - 2026-10-17T00:45:43Z occurrence=39-0-epic-38-deferred-cleanup
+- 2026-10-21T14:28:59Z status=resolved-by:42-1-pre-publish-package-fixes by=adjudication note=shared_publishConfig.exports_keeps_only_root_export;published-tarballs.test.ts_compares_pnpm_pack_list_vs_exports+story-42-1-qa-packed-servers_starts_5_packed_servers_on_packed_shared
 
 ### DW-507: [36-4-QA-1] BuildGlobalRef strips leading/trailing whitespace (incl. TAB) BEFORE the new control-character rejection runs
 - source: legacy:36.4 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2851,6 +2855,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-19T22:31:15Z status=routed owner=42-7-vs-code-extension-publish by=harvest note=occurrence: 41.6 implement 2026-10-19 reproduced clientsActivationFlow 33-3-3 timing out at 60s on the working tree and on a baseline 3890fec copy (re-toggled roster never persists)
 - 2026-10-20T09:40:41Z occurrence=43-1-framework-migration-to-sdk-v2 by=cr note=43.1 cr: launcher tsc --noEmit red on this host, 11 errors, all missing vscode/servermanager modules; none in a 43.1 file
 - 2026-10-21T13:14:16Z occurrence=42-1-pre-publish-package-fixes note=same_5_macOS_failures_seen_at_42.1_implement_on_pristine_baseline(4_C:_path_pins_not_absolute_on_POSIX;_33-3-3_clientsActivationFlow_timeout)
+- 2026-10-21T14:27:37Z occurrence=42-1-pre-publish-package-fixes
 
 ### DW-533: iris_production_manage delete removes ANY class given as name: the class-delete path never checks that the class extends Ens.Production
 - source: spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: high | footprint: in-story
@@ -3464,6 +3469,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: 41.7 plan 2026-10-20: clients-cli.ts:14 runCli(process.argv.slice(2)), clients.ts:1966 takes argv[0] as the command; the form is at packages/client-config/README.md:17, docs/client-config/README.md:5, docs/client-config/{claude-code,claude-desktop,cursor}.md:4; certification-docs.test.ts:88 pins it
 - 2026-10-20T01:15:16Z status=routed owner=42-1-pre-publish-package-fixes by=harvest note=42.1 (AC 42.1.6 owns the npx pin): likely npx -y -p @iris-mcp/client-config@1 iris-mcp-clients <command>, verified against the published package; move the certification-docs pin
+- 2026-10-21T14:28:59Z status=resolved-by:42-1-pre-publish-package-fixes by=adjudication note=documented_form_now_npx_-y_-p_@iris-mcp/client-config@1_iris-mcp-clients;story-42-1-qa-packed-clis.test.ts_runs_bins_from_packed_tarballs(new_form_exit0,old_exit2)
 
 ### DW-629: The why text of the cursor and vscode PACK_TARGETS rows never says the client reads .agents/skills/, the claim that justifies their route
 - source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3475,6 +3481,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 41.7 review 2026-10-20: packages/client-config/package.json:4; npm-facing summary before the first publish
 - 2026-10-20T01:15:16Z status=routed owner=42-1-pre-publish-package-fixes by=harvest note=rewrite the npm description with the other package.json metadata fixes (DW-31)
 - 2026-10-20T02:12:59Z occurrence=41-7-skills-pack-docs-and-capstone by=cr note=also packages/client-config/README.md:5 status line (Stories 33.0-33.4 only) and README.md:924 package summary omit the skills pack
+- 2026-10-21T14:28:59Z status=resolved-by:42-1-pre-publish-package-fixes by=adjudication note=client-config_description_rewritten(config_manager+skills-pack_installer)
 
 ### DW-631: docs/client-config/* was left out of Story 41.7: no page points at iris-mcp-clients skills install, and claude-code.md:306, claude-desktop.md:273, cursor.md:304 link the broken anchor #read-only-mode-point-it-at-production-with-one-environment-variable
 - source: spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3515,6 +3522,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 43.1 plan probe 2026-10-20: @modelcontextprotocol/server@2.3.1 dist ajvProvider-*.mjs bundles them; pnpm audit --prod reads only the lockfile
 - 2026-10-20T07:58:39Z status=routed owner=43-3-human-confirmation-through-elicitation by=harvest note=43.3 enables elicitation, the only user of the bundled validator: check the published advisories against ajv 8.18.0 and fast-uri 3.1.0 and record the verdict (or supply a validator) before the dialog ships
 - 2026-10-21T01:44:35Z status=routed owner=42-1-pre-publish-package-fixes by=lead note=43.3 delivered the verdict (fast-uri 3.1.0 advisories unreachable: constant schema, bundled validator never invoked) and the story-43-3-validator-unreachable tripwire; residual: before 1.0, bump the exact SDK pin if a release pins fast-uri >=3.1.8 (typescript-sdk#2966/PR #2973); DW-637 bullet under 42.1
+- 2026-10-21T14:28:59Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=adjudication note=residual:@modelcontextprotocol/server_2.3.1_still_latest_on_2026-10-21_and_upstream_fast-uri_fix(PR_2973)_unmerged;re-check_right_before_the_1.0.0_publish;if_a_release_pins_fast-uri>=3.1.8_bump_the_exact_pin_and_re-run_the_epic-43_wire_goldens
 
 ### DW-638: The v2-client code in five iris-mcp-all local-copy gates and two launcher integration tests has never run against a server: each skips unless IRIS is reachable
 - source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: med | fix-risk: low | footprint: in-story

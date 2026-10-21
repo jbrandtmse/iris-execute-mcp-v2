@@ -39,7 +39,7 @@ byte-unchanged, and no ObjectScript class is touched.
   `publishConfig.exports`, which pnpm applies when it packs); the three `./test-helpers` subpaths stay in the source manifest for the
   in-repo test imports. The tarball no longer ships `dist/test-helpers`, any source map or any vitest peer declaration; `@iris-mcp/shared`
   and `@iris-mcp/client-config` no longer declare vitest as an optional peer.
-- **`@iris-mcp/all` is documented as what it is.** It is a meta-package with no `bin`: a global install links no command, and a project
+- **`@iris-mcp/all` is documented as what it is.** It is a meta-package with no `bin`: a global install links no command, and an npm project
   install puts the seven commands of its dependencies in `node_modules/.bin`. MCP clients start servers with
   `npx -y @iris-mcp/<server>@1`. The root README, the meta-package README, the extension README, the `iris-mcp-clients` documentation and
   the certification records no longer say that `@iris-mcp/all` links commands, can be launched, or is an aggregate server.

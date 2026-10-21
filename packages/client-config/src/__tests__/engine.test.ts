@@ -119,6 +119,9 @@ describe("apply (AC 33.1.1 + I1)", () => {
   it("re-apply over a previously applied UNPINNED entry pins the owned args; every foreign byte is identical (AD-30, Story 42.1)", () => {
     const fs = new MemFs();
     const original = readFixture("claude-code/user.json");
+    expect(original).toContain('"args": ["-y", "@iris-mcp/dev"]'); // npx-pin-exempt: the unpinned entry this test upgrades
+    const foreignStart = '    "github-mcp": {';
+    expect(original.indexOf(foreignStart)).toBeGreaterThan(-1);
     const path = seedUser(fs, "claude-code", original);
     const result = apply(ctx(), "claude-code", "user", canonicalEntryForTest("iris-dev-mcp"), {
       fs,
@@ -132,7 +135,6 @@ describe("apply (AC 33.1.1 + I1)", () => {
     expect(parsed.entries["iris-dev-mcp"]?.args).toEqual(["-y", "@iris-mcp/dev@1"]);
     // The owned entry is rewritten in place; everything after it (the foreign github-mcp entry with its secret,
     // and the unrelated top-level key) and everything before its `args` keeps its exact bytes.
-    const foreignStart = '    "github-mcp": {';
     expect(after.slice(after.indexOf(foreignStart))).toBe(original.slice(original.indexOf(foreignStart)));
     const ownedPrefix = '{\n  "mcpServers": {\n    "iris-dev-mcp": {\n      "command": "npx",\n      "args": ';
     expect(after.startsWith(ownedPrefix)).toBe(true);

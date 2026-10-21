@@ -73,6 +73,8 @@ function tarballProblems(manifest: PackedManifest, files: readonly string[]): st
   for (const target of manifestTargets(manifest)) {
     if (!present.has(target.replace(/^\.\//, ""))) problems.push(`${name}: manifest target ${target} is not in the tarball`);
   }
+  // `pnpm pack` copies the workspace root's LICENSE into a package that has none, so on this path the LICENSE row holds
+  // while the root file exists; the per-package copy is pinned by package-manifests.test.ts (a byte copy of the root).
   for (const required of ["LICENSE", "README.md", "package.json"]) {
     if (!present.has(required)) problems.push(`${name}: ${required} is missing from the tarball`);
   }

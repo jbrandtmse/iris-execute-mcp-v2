@@ -35,6 +35,16 @@ const RUNS_THROUGH_NPX = [
   /\bnpx\s+(?:(?:-y|--yes)\s+)*@iris-mcp\/all(?![\w/-])/,
   /"-y",\s*"@iris-mcp\/all(?:@[^"]*)?"/,
 ];
+/**
+ * A global install of the meta-package, in the forms npm, pnpm and yarn take: `-g` or `--global` before or after the package
+ * (only other flags in between), `npm -g install`, and `yarn global add`.
+ */
+const GLOBAL_INSTALL = [
+  /\b(?:install|i|add)\s+(?:-\S+\s+)*?(?:-g|--global)\s+(?:-\S+\s+)*@iris-mcp\/all\b/,
+  /\b(?:install|i|add)\s+(?:-\S+\s+)*@iris-mcp\/all\b(?:\s+-\S+)*?\s+(?:-g|--global)\b/,
+  /\b(?:-g|--global)\s+(?:install|i|add)\s+(?:-\S+\s+)*@iris-mcp\/all\b/,
+  /\byarn\s+global\s+add\s+(?:-\S+\s+)*@iris-mcp\/all\b/,
+];
 
 /** Everything in `text` that claims `@iris-mcp/all` links or launches a command. */
 function metaPackageProblems(text: string): string[] {
@@ -47,7 +57,7 @@ function metaPackageProblems(text: string): string[] {
     }
   });
   for (const paragraph of text.split(/\n\s*\n/)) {
-    if (/install\s+-g\s+@iris-mcp\/all\b/.test(paragraph) && !/\bno command\b/i.test(squash(paragraph))) {
+    if (GLOBAL_INSTALL.some((pattern) => pattern.test(squash(paragraph))) && !/\bno command\b/i.test(squash(paragraph))) {
       problems.push("a paragraph installs @iris-mcp/all globally without saying it links no command");
     }
   }
@@ -82,7 +92,7 @@ describe("the two places that describe a global install", () => {
     const text = squash(read("packages/iris-mcp-all/README.md"));
     expect(text).toContain("It launches nothing and links no command.");
     expect(text).toContain("A **global** install (`npm install -g @iris-mcp/all`) links no command at all");
-    expect(text).toContain("A project install links the seven commands of its dependencies into `node_modules/.bin`");
+    expect(text).toContain("An npm project install links the seven commands of its dependencies into `node_modules/.bin`");
     expect(text).toContain("`npx -y @iris-mcp/<server>@1`");
     expect(text).toContain("It is not a server and cannot be started");
   });
@@ -115,6 +125,12 @@ describe("no document or source claims @iris-mcp/all links or launches a command
     expect(metaPackageProblems("Run `npx -y @iris-mcp/all@1` to start everything.")).toHaveLength(1);
     expect(metaPackageProblems('"args": ["-y", "@iris-mcp/all"],')).toHaveLength(1);
     expect(metaPackageProblems("Once published, install it with `npm install -g @iris-mcp/all`.")).toHaveLength(1);
+    expect(metaPackageProblems("Install everything: `npm i -g @iris-mcp/all`.")).toHaveLength(1);
+    expect(metaPackageProblems("Install everything: `npm install --global @iris-mcp/all`.")).toHaveLength(1);
+    expect(metaPackageProblems("Install everything: `npm install @iris-mcp/all -g`.")).toHaveLength(1);
+    expect(metaPackageProblems("Install everything: `pnpm add -g @iris-mcp/all`.")).toHaveLength(1);
+    expect(metaPackageProblems("Install everything: `yarn global add @iris-mcp/all`.")).toHaveLength(1);
+    expect(metaPackageProblems("Install a server: npm install -g @iris-mcp/dev; @iris-mcp/all is a meta-package.")).toEqual([]);
 
     expect(metaPackageProblems("`npx -y @iris-mcp/all@1` could never start a server.")).toEqual([]);
     expect(metaPackageProblems("`npx -y @iris-mcp/all@1` has no executable to run.")).toEqual([]);

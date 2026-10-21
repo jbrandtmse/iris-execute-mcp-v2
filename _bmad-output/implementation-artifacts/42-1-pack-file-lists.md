@@ -12,7 +12,7 @@ tarball's `package/` folder, sorted. Packages are in publishing order. Counts an
 | `@iris-mcp/dev` | `packages/iris-dev-mcp` | 0.0.2 | 73 | 233665 |
 | `@iris-mcp/interop` | `packages/iris-interop-mcp` | 0.0.2 | 45 | 78086 |
 | `@iris-mcp/ops` | `packages/iris-ops-mcp` | 0.0.2 | 37 | 44063 |
-| `@iris-mcp/all` | `packages/iris-mcp-all` | 0.0.2 | 3 | 5714 |
+| `@iris-mcp/all` | `packages/iris-mcp-all` | 0.0.2 | 3 | 5745 |
 
 ## @iris-mcp/client-config (64 files, 174366 bytes)
 
@@ -387,7 +387,7 @@ tarball's `package/` folder, sorted. Packages are in publishing order. Counts an
 - `dist/tools/task.js`
 - `package.json`
 
-## @iris-mcp/all (3 files, 5714 bytes)
+## @iris-mcp/all (3 files, 5745 bytes)
 
 - `LICENSE`
 - `README.md`

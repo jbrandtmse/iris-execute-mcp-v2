@@ -3,11 +3,12 @@
 //
 // WHAT IS A SPEC. A token `@iris-mcp/<name>` in the position `npx`, `npm exec` or an
 // `npx` flag takes a package: directly after `npx`, `exec`, `-y`, `--yes`, `-p` or
-// `--package`, or as `--package=@iris-mcp/<name>`. The scan tokenizes whole files, so a
-// JSON/TOML argument array (`"-y", "@iris-mcp/dev"`), a multi-line array and a YAML list
-// (`- -y` then `- "@iris-mcp/dev"`) are found the same way as a shell line in Markdown. A
-// bare `@iris-mcp/<name>` elsewhere (an import, a package name in prose, an install
-// command) is not a spec.
+// `--package`, as `--package=@iris-mcp/<name>`, or as the first element of an `args`
+// array. The scan tokenizes whole files, so a JSON/TOML argument array (`"-y", "@iris-mcp/dev"`
+// or `args = ["@iris-mcp/dev"]`), a multi-line array and a YAML list (`- -y` then
+// `- "@iris-mcp/dev"`) are found the same way as a shell line in Markdown. A bare
+// `@iris-mcp/<name>` elsewhere (an import, a package name in prose, an install command) is
+// not a spec.
 //
 // WHAT IS PINNED. Exactly `@iris-mcp/<name>@1`, the major exported by `@iris-mcp/client-config`
 // as `IRIS_MCP_MAJOR`. `@latest`, a missing version and `^1` are all unpinned. The scan itself
@@ -23,8 +24,8 @@ import { join } from 'node:path';
 /** A spec of the suite: `@iris-mcp/<name>` with an optional `@<version>` (a placeholder name such as `<pkg>` counts). */
 const SUITE_TOKEN = /^@iris-mcp\/([^@\s]+)(?:@(.*))?$/;
 
-/** Tokens after which `npx` / `npm exec` take a package. */
-const SPEC_INTRODUCERS = new Set(['npx', 'exec', '-y', '--yes', '-p', '--package']);
+/** Tokens after which `npx` / `npm exec` take a package, and the key of a client entry's argument array. */
+const SPEC_INTRODUCERS = new Set(['npx', 'exec', '-y', '--yes', '-p', '--package', 'args']);
 
 /** Characters that separate tokens: whitespace, quotes, backticks and the punctuation of arrays, tables and calls. */
 const TOKEN = /[^\s`"',[\](){}|;]+/g;
@@ -32,8 +33,24 @@ const TOKEN = /[^\s`"',[\](){}|;]+/g;
 /** Text files the scan reads. */
 const TEXT_EXTENSIONS = /\.(?:md|mdc|ts|mts|cts|js|mjs|cjs|json|jsonc|toml|ya?ml)$/;
 
-/** Repository paths (prefixes) that are never scanned: planning/agent material and read-only IRIS source snapshots. */
-const EXCLUDED_PREFIXES = ['_bmad', '.claude', 'irislib', 'irissys', 'sources'];
+/**
+ * Repository folders that are never scanned: planning material (`_bmad`, `_bmad-output`, any `_bmad*`), agent material
+ * (`.claude/` exactly; a sibling such as `.claude-plugin/` IS scanned) and the read-only IRIS source snapshots.
+ */
+const EXCLUDED_FOLDER = /^(?:_bmad[^/]*|\.claude|irislib|irissys|sources)\//;
+
+/**
+ * Whether the repository-relative `file` lies in a folder the scan never reads.
+ *
+ * @param {string} file
+ * @returns {boolean}
+ */
+export function isExcludedPath(file) {
+  return EXCLUDED_FOLDER.test(file);
+}
+
+/** A test file: the only place an inline `npx-pin-exempt:` marker is honoured. */
+const TEST_FILE = /(?:^|\/)__tests__\//;
 
 /** The files of the pin tooling itself: the scan, and the two tests whose controls feed the checkers synthetic specs. */
 export const PIN_TOOLING_FILES =
@@ -104,7 +121,7 @@ export function findUnpinnedSpecs(text, major) {
   for (const match of text.matchAll(TOKEN)) {
     // Trailing sentence punctuation is not part of a spec ("... @iris-mcp/dev@1.").
     const raw = match[0].replace(/[.:!?]+$/, '');
-    if (raw === '' || raw === '-' || raw === '--') continue; // list markers and bare separators
+    if (raw === '' || raw === '-' || raw === '--' || raw === '=') continue; // list markers, bare separators, TOML `=`
     let token = raw;
     let introduced = SPEC_INTRODUCERS.has(previous);
     const flagged = /^--package=(.+)$/.exec(raw);
@@ -123,11 +140,14 @@ export function findUnpinnedSpecs(text, major) {
   return hits;
 }
 
-/** A source line that carries this marker followed by a reason is exempt: it holds a legacy input a test upgrades. */
+/**
+ * A line of a test file (a path under a `__tests__/` folder) that carries this marker followed by a reason is exempt: it
+ * holds a legacy input a test upgrades. The marker means nothing in a document or in shipped source.
+ */
 export const INLINE_EXEMPTION_MARKER = /npx-pin-exempt:\s*\S/;
 
 /**
- * How `hit` (from a file at repository-relative `file`) is exempt: an inline marker on its line, or an
+ * How `hit` (from a file at repository-relative `file`) is exempt: an inline marker on its line of a test file, or an
  * {@link EXEMPTIONS} entry (by index). `null` when it is not exempt.
  *
  * @param {string} file
@@ -136,7 +156,7 @@ export const INLINE_EXEMPTION_MARKER = /npx-pin-exempt:\s*\S/;
  * @returns {{ kind: 'inline' } | { kind: 'list', index: number } | null}
  */
 export function exemptionFor(file, hit, exemptions = EXEMPTIONS) {
-  if (INLINE_EXEMPTION_MARKER.test(hit.text)) return { kind: 'inline' };
+  if (TEST_FILE.test(file) && INLINE_EXEMPTION_MARKER.test(hit.text)) return { kind: 'inline' };
   const index = exemptions.findIndex((entry) => entry.file.test(file) && (entry.line === undefined || entry.line.test(hit.text)));
   return index === -1 ? null : { kind: 'list', index };
 }
@@ -162,16 +182,16 @@ const LOCKFILE = /(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json)$/;
 
 /**
  * The surfaces that write, spawn or document a spec, as repository-relative paths: every
- * tracked text file (documents, source, scripts, manifests, fixtures, the skills pack) outside
- * the excluded prefixes, lockfiles apart. The list is exhaustive as of the file types in
+ * tracked or untracked-but-not-ignored text file (documents, source, scripts, manifests,
+ * fixtures, the skills pack) outside the excluded folders, lockfiles apart, so a new file is
+ * scanned before it is committed. The list is exhaustive as of the file types in
  * {@link TEXT_EXTENSIONS}; a new file type that can hold a spec is added there.
  *
  * @param {string} root
  * @returns {string[]}
  */
 export function listScanSurface(root) {
-  const excluded = (file) => EXCLUDED_PREFIXES.some((prefix) => file === prefix || file.startsWith(`${prefix}/`) || file.startsWith(`${prefix}-`));
-  return listRepoFiles(root).filter((file) => TEXT_EXTENSIONS.test(file) && !excluded(file) && !LOCKFILE.test(file));
+  return listRepoFiles(root).filter((file) => TEXT_EXTENSIONS.test(file) && !isExcludedPath(file) && !LOCKFILE.test(file));
 }
 
 /**

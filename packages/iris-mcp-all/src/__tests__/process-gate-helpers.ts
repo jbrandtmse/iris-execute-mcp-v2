@@ -9,7 +9,7 @@
 import { spawn } from "node:child_process";
 import http from "node:http";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import type { AddressInfo } from "node:net";
+import { createServer, type AddressInfo } from "node:net";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Readable } from "node:stream";
@@ -68,6 +68,19 @@ export async function isIrisReachable(host: string, port: string): Promise<boole
   } catch {
     return false;
   }
+}
+
+/** A local port nothing listens on: bind an ephemeral port on 127.0.0.1, then release it. */
+export async function reserveClosedPort(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address !== null ? address.port : 0;
+      server.close(() => resolve(String(port)));
+    });
+  });
 }
 
 /**

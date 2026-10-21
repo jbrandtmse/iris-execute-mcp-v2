@@ -19,7 +19,7 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 npm install @iris-mcp/all
 ```
 
-A project install links the seven commands of its dependencies into `node_modules/.bin`: `iris-dev-mcp`, `iris-admin-mcp`, `iris-interop-mcp`, `iris-ops-mcp`, `iris-data-mcp`, and the `iris-mcp-credentials` and `iris-mcp-governance` commands of `@iris-mcp/shared`. A **global** install (`npm install -g @iris-mcp/all`) links no command at all, because this package has no `bin`; the dependencies land in a nested `node_modules` that is not on your `PATH`. To use the servers from an MCP client, point each client entry at `npx -y @iris-mcp/<server>@1` as shown under [MCP Client Configuration](#mcp-client-configuration).
+An npm project install links the seven commands of its dependencies into `node_modules/.bin`: `iris-dev-mcp`, `iris-admin-mcp`, `iris-interop-mcp`, `iris-ops-mcp`, `iris-data-mcp`, and the `iris-mcp-credentials` and `iris-mcp-governance` commands of `@iris-mcp/shared` (pnpm links only the commands of a project's direct dependencies, so there it links none). A **global** install (`npm install -g @iris-mcp/all`) links no command at all, because this package has no `bin`; the dependencies land in a nested `node_modules` that is not on your `PATH`. To use the servers from an MCP client, point each client entry at `npx -y @iris-mcp/<server>@1` as shown under [MCP Client Configuration](#mcp-client-configuration).
 
 The five servers it depends on:
 
