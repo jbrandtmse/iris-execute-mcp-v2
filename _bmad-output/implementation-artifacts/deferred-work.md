@@ -3721,3 +3721,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-11-storage-guard-on-every-document-write.md | severity: low | fix-risk: med | footprint: in-story
 - evidence: 42.11 cr: Rule 2 weak reason - per-gate fixture ownership needs only a per-gate class list, not copied code; a prefix-parameterised helper in live-doc-helpers.ts would serve every gate
 - 2026-10-21T19:52:21Z status=wontfix-accepted owner=42-11-storage-guard-on-every-document-write by=cr note=reopen_if=a fix to one gate's cleanup or leftover check is missed in a sibling gate (red run or review finding naming the drift)
+
+### DW-672: AC 42.2.5's live legs (newer, foreign, DW-518, older, legacy) against a throwaway iris-community container run nowhere yet: Story 42.2 writes the gate and scripts/throwaway-iris.mjs but runs no docker locally (agent rules forbid docker commands); CI must run pnpm live:bootstrap-guard
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 42.2 spec gate (wave-8 decision 49): %ALL maps the ExecuteMCPv2 package to HSCUSTOM, so no namespace of the shared instance isolates a deploy; .claude/rules/iris-objectscript-basics.md:167 forbids docker
+- 2026-10-21T20:47:03Z status=routed owner=42-3-ci-workflow by=spec_gate note=42.3's throwaway job extends scripts/throwaway-iris.mjs (Rule 2), runs pnpm live:bootstrap-guard armed with IRIS_THROWAWAY, proves it red once by reverting the probe to equality (AC 42.3.6), and records the run URL; the live proof of DW-508 (Rule 48)

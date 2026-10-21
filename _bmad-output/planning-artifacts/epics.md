@@ -5749,6 +5749,8 @@ DW-508, HIGH. A dedicated story; it must land before 42.6 publishes.
   - an older deployment is upgraded.
 
   Proven red by reverting to equality comparison.
+
+  *(Amended 2026-10-21 at the 42.2 spec gate, wave-8 decision #49.)* No namespace of the shared instance can isolate this: the `%ALL` mapping sends the `ExecuteMCPv2` package to HSCUSTOM. The check runs in a throwaway container instead. Story 42.2 writes the gate and `scripts/throwaway-iris.mjs` and proves the guard hermetically against a fake Atelier, without running docker on the development machine (its agent rules forbid docker commands). Story 42.3's CI runs the gate live (DW-672).
 - DW-518: the default-suite live gate `epic37-default-outage-gate` deploys the bootstrap to its target on first touch. Under this story's version-ordered guard, an older-sequenced branch must not redeploy over a newer deployment. Verify it, and record the gate's write footprint. (ledger; routed by x0 2026-10-15)
 - DW-627: the default `@iris-mcp/all` sweep reaches a local IRIS. The live gates default to `localhost:52773` and `HSCUSTOM`, and run their legs whenever that instance answers, so a contributor's plain `pnpm test` touches their instance. This is the same class as DW-518. Gate every live leg on an explicit opt-in (`IRIS_REQUIRE_LIVE`, or an `IRIS_HOST` the caller set), keeping the armed lead and CI runs, and pin that an unset environment runs no leg. (ledger; routed by harvest 2026-10-19)
 
@@ -5780,6 +5782,7 @@ DW-443. A secret-free `.github/workflows/ci.yml`.
   - a self-test asserts the pins and that the checks declared in code equal the workflow's `run:` steps.
 - **AC 42.3.5** — DW-443: the publish-time gates also run at a point the tarball path actually reaches (`prepack` and/or CI as the gate), and they are proven red on the tarball path specifically (Rule #59).
 - **AC 42.3.6** — Each self-test and gate is broken once in a throwaway branch and the run goes red. The run URLs are recorded.
+- DW-672 (from the 42.2 spec gate, wave-8 decision #49): run Story 42.2's throwaway bootstrap-guard live check in CI. The throwaway job extends `scripts/throwaway-iris.mjs` (Rule 2) and runs `pnpm live:bootstrap-guard` armed with `IRIS_THROWAWAY`; the newer, foreign and DW-518 legs leave every class byte-identical and the older and legacy legs upgrade. Prove it red once by reverting the probe to equality (AC 42.3.6) and record the run URL. This is the live proof of DW-508 (Rule #48). (ledger; routed by spec_gate 2026-10-21)
 - DW-666: `pnpm --filter @iris-mcp/shared lint` warns about an unused `eslint-disable` directive for `@typescript-eslint/no-dynamic-delete` (`packages/shared/src/cli/governance.ts:935`). Remove it when lint becomes a CI gate, so the gate carries no standing warning. (ledger; routed by harvest 2026-10-21)
 
 ### Story 42.4: IPM Package Revival
