@@ -131,7 +131,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **Frozen-baseline tools.** An `action` enum is never added to a frozen-baseline tool, because that renames its key. A new operation goes on a companion tool instead.
   - **Annotations.** Annotations follow the MCP definitions. "Destructive" means the tool can delete, or irreversibly overwrite, existing state.
     - New tools and new actions declare all four hints truthfully, independently of `mutates` and `defaultEnabled`.
-    - An existing tool's hint changes only through a sanctioned AD-15 change. Known divergences: `iris_sql_execute`, `iris_execute_command` and `iris_doc_put` declare `destructiveHint: false`. (`iris_execute_tests`' `readOnlyHint: true` and `idempotentHint: true` were corrected to false in Story 40.4, DW-498. No write-classified key's tool now declares `readOnlyHint: true`, and a reverse-direction pin keeps it so.)
+    - An existing tool's hint changes only through a sanctioned AD-15 change. Story 42.10 corrected 13 existing tools to `destructiveHint: true` (DW-560, wave-8 decision #39). A non-read-only tool that declares `destructiveHint: false` is on a justified list, and no tool with a delete, remove, purge, kill or clean action may declare it; both are checked mechanically. (`iris_execute_tests`' `readOnlyHint: true` and `idempotentHint: true` were corrected to false in Story 40.4, DW-498. No write-classified key's tool now declares `readOnlyHint: true`, and a reverse-direction pin keeps it so.)
     - Hand-curated classifications are cross-checked mechanically against `readOnlyHint`.
 
 ### AD-5 — The governance baseline is frozen [ADOPTED] (D3, H1; Rules #20, #23 and #25)
@@ -330,6 +330,10 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
       - `S-43.4-prompt-text`: the `resend-failed-messages` prompt's steps 3 and 4 say that an over-cap count is refused when the resend executes, and that leaving out `dryRun` previews again (DW-653). Its name, title, description and arguments are unchanged.
 
       The frozen Story 43.1 goldens stay byte-unchanged: each change to bytes they hold is one entry of `fixtures/sdk-golden-sanctioned-changes.json` (DW-639).
+    - **Story 42.10** (wave-8 decisions #38 to #40):
+      - `S-42.10-annotations`: 13 existing tools change `destructiveHint` from `false` to `true`: `iris_doc_put`, `iris_sql_execute`, `iris_global_set`, `iris_execute_command`, `iris_execute_classmethod`, `iris_doc_load`, `iris_doc_export`, `iris_env_promote`, `iris_service_manage`, `iris_ldap_manage`, `iris_x509_manage`, `iris_production_item` and `iris_task_run` (DW-560).
+      - `S-42.10-resend-text`: the `iris_message_resend` description and its `maxMessages` and `confirm` texts are corrected, not appended: executing needs `dryRun: false` and `confirm: true`, `dryRun: false` without `confirm` is refused, a call that leaves out `dryRun` previews, and only an executing over-cap call is refused (DW-662).
+      - `S-42.10-audit-namespace`: the audit entry of a `SYS`-scoped tool records `%SYS` (DW-654, AD-19).
 
     Each change may land in the earliest story that needs it, and is named in `CHANGELOG.md` with that story. Prune this list into the CHANGELOG at the Epic 42 retro.
   - **After `1.0.0`.** A breaking change requires a new major version. Clients pinned to `@1` receive every 1.x release automatically.
@@ -384,7 +388,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - **A call the client cancels** is `error`, with a fixed text saying an in-flight IRIS request was aborted.
   - **Secrets.** They are redacted before an entry is queued.
   - **Failure handling.** The writer never fails or delays a tool call. Only an unwritable path at startup fails fast.
-  - **Schema.** `outcome` keeps its closed domain (`ok`, `error`, `denied`). New fields are additive.
+  - **Schema.** `outcome` keeps its closed domain (`ok`, `error`, `denied`). New fields are additive. `namespace` is the namespace the call ran in: `%SYS` for a `SYS`-scoped tool, otherwise the call's override or the profile's default (Story 42.10, DW-654).
   - **PHI** *(lands in Story 39.2)*:
     - Policy effects go in a new additive field, and a policy refusal is `error` with its own refusal code.
     - PHI-bearing inputs are declared on the `ToolDefinition` with a schema-level marker. Audit redacts by that declaration, under the profile's policy, never by matching parameter names.
@@ -721,7 +725,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 | Marked blocks | A block the suite owns inside a user file (an `AGENTS.md` section) sits between `<!-- IRIS-MCP-RULE:<name>:BEGIN -->` and `<!-- IRIS-MCP-RULE:<name>:END -->`, matched as exact whole lines. The block between them is owned and replaced whole; everything outside it is preserved byte for byte (AD-30; Story 41.2). A UTF-8 BOM at byte 0 is not part of line 1 and stays at byte 0. Own markers that are not exactly one BEGIN line followed by one END line are reported with their line numbers, never guessed at, and nothing is written. A last line without a line ending gets one, in the file's own style, before a block is appended, and uninstall removes it again (Story 41.6, wave-7 decision #30; DW-616). The hosts are `AGENTS.md` and `GEMINI.md`. |
 | Live testing on a shared instance | Never stop or restart the shared development IRIS, and simulate outages with a closed local port. Writes go only to disposable `ExecuteMCPv2.Temp.*` artifacts, or to namespaces the story creates, and are removed afterwards. The one system-level write allowed is `^%SYS("Ensemble","InstalledNamespace",<disposable namespace>)` for a disposable `EXECMCPTMP*` namespace that must run a production. It is set and killed by a fixture method that refuses any other name, and it is part of the leftovers check; `EnableNamespace` is never called (Story 40.3, decision #59). Fixtures are synthetic: no real configuration names and no PHI. A story never reads another project's namespace or messages. |
 | Turbo test tasks | Turbo `test` tasks are never cached (`cache: false`), because the suites read repository files that no input list fully names. A test that needs another package's build gets a `pkg#task` `dependsOn` edge, never a package dependency, so AD-2 holds (Story 41.7, wave-7 decision #40; DW-611). |
-| Frozen goldens | A frozen golden is never edited or recaptured. A sanctioned change to bytes it holds is one entry in `fixtures/sdk-golden-sanctioned-changes.json`: the golden, the row, a JSON pointer, the exact frozen value, the exact new value, and the sanction id its CHANGELOG entry names. The tests apply the entries and compare every other byte unchanged, and a description change only appends (Story 43.4, wave-8 decision #23; DW-639). |
+| Frozen goldens | A frozen golden is never edited or recaptured. A sanctioned change to bytes it holds is one entry in `fixtures/sdk-golden-sanctioned-changes.json`: the golden, the row, a JSON pointer, the exact frozen value, the exact new value, and the sanction id its CHANGELOG entry names. The tests apply the entries and compare every other byte unchanged. An entry may come from any story after the capture. A description change appends, unless its sanction is a recorded correction, which replaces the text. A handler entry can address the server's `audit` array (Story 43.4, wave-8 decision #23, DW-639; Story 42.10, decision #40). |
 | Performance budgets | The PRD targets are: reads under 2 s, compile and deploy under 10 s, bootstrap under 60 s, and `tools/list` under 500 ms. A story that adds bootstrapped classes or a heavy read checks the relevant budget. |
 
 ## Stack
@@ -824,6 +828,5 @@ ipm/                    # IPM module manifest (generated from Story 42.4)
   - the policy for a bad release (fix-forward or `npm deprecate`) and a `SECURITY.md` disclosure channel (Story 42.5);
   - the version policies for the extension, the plugin and IPM (Stories 42.7, 42.8 and 42.4);
   - the first-publish route under npm trusted publishing (Story 42.5). A staged publish creates a `0.0.0-stage` placeholder, which conflicts with D2, so the choice goes to the Lead.
-- **Annotation divergences of existing tools** (AD-4). The Epic 38 gate routes them to one ledger entry with an owner. The `iris_execute_tests` divergence was closed in Story 40.4 (DW-498); the `destructiveHint: false` divergences remain.
 - **Development toolchain staleness** (Vitest 2, TypeScript 5.9, Turborepo, pnpm 9). Revisit at the Epic 42 gate. Story 42.5 pins whatever the release path needs.
 - **Declined on 2026-10-14:** G8, G17, G41, G45 and G47. The reasons are in the research gap register, and reopening one needs a Project Lead decision.

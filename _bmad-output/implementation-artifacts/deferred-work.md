@@ -3609,6 +3609,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-20T23:38:03Z status=escalated owner=burndown by=harvest note=for the decision sheet: extend the Story 38.4 Storage guard to every document-write path, or accept
 - 2026-10-21T05:27:11Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=wave-8 decision 30: fix before 1.0, extend the Story 38.4 Storage guard to doc_load, XML import and env_promote document writes; DW-652 bullet under 42.1
 - 2026-10-21T06:26:44Z owner=42-10-pre-1-0-tool-surface-corrections by=spec_gate note=moved_from_42-1_by_wave8_decision_34_split(frozen-goldens_machinery+feature-sized_DW-652)
+- 2026-10-21T14:59:04Z owner=42-11-storage-guard-on-every-document-write by=spec_gate note=moved_from_42-10_by_wave8_decision_38(feature-sized:three_guard_designs,new_override_param_on_three_tools,new_live_gate)
 
 ### DW-653: The resend-failed-messages prompt says an over-cap match is refused and omitting dryRun or confirm is refused; a dry run returns the full matchCount and omitting dryRun previews; the prompt text is pinned by the frozen 43.1 golden
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: in-epic
