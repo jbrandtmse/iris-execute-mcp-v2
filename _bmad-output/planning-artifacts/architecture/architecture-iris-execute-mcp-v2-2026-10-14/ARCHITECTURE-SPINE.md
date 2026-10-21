@@ -7,7 +7,7 @@ paradigm: 'Layered ports-and-adapters with a single call-time interceptor chain'
 scope: 'The five MCP servers, the @iris-mcp/shared framework, the IRIS-side ExecuteMCPv2 REST service, and the distribution tooling (client-config, VS Code launcher, skills pack, CI and release)'
 status: final
 created: '2026-10-14'
-updated: '2026-10-15'
+updated: '2026-10-21'
 binds: ['FR1-FR162', 'Epics 38-43']
 sources:
   - '../../architecture.md'
@@ -324,6 +324,12 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
       - a malformed `tools/call` request (no `params`, `name` missing or not a string, `arguments` not an object) is refused with `-32602 Invalid tools/call request: …`, where v1 answered `-32603` with the bare schema text (wave-8 decision #6);
       - a `tools/call` that carries a `task` parameter runs as a plain call, because the server advertises no `tasks` capability, where v1 refused it with `-32603 Server does not support task creation` (wave-8 decision #6). Only a client that ignores the capability list sends either request.
       - The result member order is NOT a change: v1 already re-encoded every `tools/call` result in its schema order (`content`, `structuredContent`, `isError`), so the exception decision #4 also recorded was withdrawn (wave-8 decision #5).
+    - **Story 43.4** (wave-8 decisions #23 and #24):
+      - `S-43.4-descriptions`: the descriptions of `iris_audit_manage`, `iris_env_promote`, `iris_production_control`, `iris_message_resend` and `iris_doc_edit` each gain one appended sentence that names the confirmation dialog. No other byte of any description changes.
+      - `S-43.4-governance-resource`: `resources/list` lists `iris-governance://default` once, as the static resource, where the per-profile resource template's list repeated it (DW-646).
+      - `S-43.4-prompt-text`: the `resend-failed-messages` prompt's steps 3 and 4 say that an over-cap count is refused when the resend executes, and that leaving out `dryRun` previews again (DW-653). Its name, title, description and arguments are unchanged.
+
+      The frozen Story 43.1 goldens stay byte-unchanged: each change to bytes they hold is one entry of `fixtures/sdk-golden-sanctioned-changes.json` (DW-639).
 
     Each change may land in the earliest story that needs it, and is named in `CHANGELOG.md` with that story. Prune this list into the CHANGELOG at the Epic 42 retro.
   - **After `1.0.0`.** A breaking change requires a new major version. Clients pinned to `@1` receive every 1.x release automatically.
@@ -619,7 +625,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **Permission failures.** The servers never pre-check IRIS privileges. A permission failure propagates IRIS's own error text through `SanitizeError`, plus resource guidance where IRIS identifies the resource.
   - **Operator policy is separate.** Governance, visibility and `dataPolicy` are operator policy, never a substitute for IRIS authorization. Bootstrap's detection of privilege tiers, which chooses the fallback instructions, is the only exception.
 
-### AD-32 — The MCP SDK and protocol revisions [ADOPTED] (Lead decision 2026-10-15; MCP specification `2026-07-28`) *(lands in Epic 43)*
+### AD-32 — The MCP SDK and protocol revisions [ADOPTED] (Lead decision 2026-10-15; MCP specification `2026-07-28`) *(landed in Epic 43, Stories 43.1 to 43.4)*
 
 - **Binds:** `packages/shared/src/server-base.ts`, every `package.json` that lists an MCP SDK, the SDK-client test suites; FR161
 - **Prevents:** the first public release shipping on the SDK's maintenance line, and SDK types leaking into handlers
@@ -631,7 +637,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - Tool-input validation runs inside the audited call path, so a schema-invalid call is audited (DW-579).
   - **Protocol revisions.**
     - On the 2025-11-25 revision, behavior is byte-identical (AD-15).
-    - The same process also serves revision `2026-07-28`, through `serveStdio(factory)` with the default `legacy: 'serve'`. This was verified by the live probe of 2026-10-15 (`research/mcp-sdk-v2-stdio-probe-2026-10-15.md`), and lands in Story 43.2.
+    - The same process also serves revision `2026-07-28`, through `serveStdio(factory)` with `legacy: 'serve'`, passed explicitly. This was verified by the live probe of 2026-10-15 (`research/mcp-sdk-v2-stdio-probe-2026-10-15.md`), and lands in Story 43.2.
     - On both eras, the logical content of every surface is identical, proven by a cross-era pin. Claude Code negotiates the modern era by default.
       - **What the pin ignores** (Story 43.2, wave-8 decision #7). Exactly six things, each mandated by the `2026-07-28` revision:
         - `resultType`;
@@ -645,7 +651,11 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
       - **The factory** (decision #8). The first factory call returns the server built at construction, and any later call builds a fresh one. Every client mode probed calls it exactly once per process. The only exception is a `server/discover` followed by an `initialize` on one connection, and the rebuilt server still serves the 2025 era byte for byte.
       - **The era log line** (decision #10). Each factory call logs one stderr INFO line naming the negotiated era. No new environment variable is read.
     - Per-request `_meta` never bypasses the AD-3 chokepoint.
-  - **Until Epic 43.** The v1 floor is `>=1.31.0`, out of the known high advisory range.
+  - **v1.** `@modelcontextprotocol/sdk` was removed in Story 43.1. Its 1.29.0 build survives only as the provenance of the frozen goldens, which retire through the sanctioned-change ledger (Conventions, Frozen goldens).
+  - **Clients** *(Story 43.4)*.
+    - Claude Code 2.1.292 and later negotiates `2026-07-28` by default and probes on the same connection. `MCP_PROTOCOL_NEGOTIATION=legacy` in Claude Code's environment keeps `2025-11-25`.
+    - A TypeScript SDK v2 client on `auto` or a pinned revision probes in a short-lived sibling process. So the server starts twice per connect, and the probe process is ended by SIGTERM (DW-641, documented in the client docs).
+    - The epic gate is `epic43-capstone-gate.test.ts`.
 
 ### AD-33 — IRIS-side REST routes are wire-compatible within a major [ADOPTED] (consequence of D3 and DW-508)
 
@@ -655,7 +665,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **Additive only.** Within a major version, custom REST routes are additive-only. An existing route accepts every older request shape, and returns a superset of its older response. A pin proves this for every route a story changes.
   - **Non-additive changes.** A change that isn't additive needs a new major version.
 
-### AD-34 — Confirmation gates ask the human through elicitation when the client can [ADOPTED] (Lead decision 2026-10-15; probe `research/mcp-sdk-v2-stdio-probe-2026-10-15.md`) *(lands in Story 43.3)*
+### AD-34 — Confirmation gates ask the human through elicitation when the client can [ADOPTED] (Lead decision 2026-10-15; probe `research/mcp-sdk-v2-stdio-probe-2026-10-15.md`) *(landed in Story 43.3; descriptions in Story 43.4)*
 
 - **Binds:** every confirmation gate:
   - `iris_audit_manage:purge`;
@@ -681,6 +691,9 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - **The helper.** It is `ToolContext.confirm` (`confirmation.ts`). It sends one required boolean `confirm` in the form, and only an accept with `confirm: true` proceeds. It reads the client's capabilities by era: the request envelope on the modern era, and the `initialize` declaration on the legacy era, never a request's `_meta`.
     - **Binding.** Through signed, single-use `requestState`: an HMAC codec with a per-process key and a 600 s TTL. The state covers the tool, the resolved profile and a hash of the validated arguments, plus a nonce consumed on the deciding round. Forged, replayed, expired or changed-argument state asks again.
     - **Order.** Each handler asks immediately before its first IRIS write, after all its own checks. `resendFiltered` asks only for 1 ≤ match count ≤ cap, from a read-only preflight. `clean` asks only under IRIS's own pass condition.
+    - **Descriptions** *(Story 43.4, wave-8 decision #24)*. Each gated tool's description names the dialog in one appended sentence.
+    - **Hooks, as observed** (Claude Code 2.1.296, decision #20). The `Elicitation` hook fires on both eras. Headless `claude -p` with no hook, or with `--permission-prompts none`, cancels the dialog (`CONFIRMATION_DECLINED`, `response: "cancel"`).
+    - **Clients, as observed.** Claude Code declares form elicitation on both eras. MCP Inspector CLI 2.9.0 declares none and gets the fallback.
 
 ## Consistency Conventions
 
@@ -707,6 +720,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 | Marked blocks | A block the suite owns inside a user file (an `AGENTS.md` section) sits between `<!-- IRIS-MCP-RULE:<name>:BEGIN -->` and `<!-- IRIS-MCP-RULE:<name>:END -->`, matched as exact whole lines. The block between them is owned and replaced whole; everything outside it is preserved byte for byte (AD-30; Story 41.2). A UTF-8 BOM at byte 0 is not part of line 1 and stays at byte 0. Own markers that are not exactly one BEGIN line followed by one END line are reported with their line numbers, never guessed at, and nothing is written. A last line without a line ending gets one, in the file's own style, before a block is appended, and uninstall removes it again (Story 41.6, wave-7 decision #30; DW-616). The hosts are `AGENTS.md` and `GEMINI.md`. |
 | Live testing on a shared instance | Never stop or restart the shared development IRIS, and simulate outages with a closed local port. Writes go only to disposable `ExecuteMCPv2.Temp.*` artifacts, or to namespaces the story creates, and are removed afterwards. The one system-level write allowed is `^%SYS("Ensemble","InstalledNamespace",<disposable namespace>)` for a disposable `EXECMCPTMP*` namespace that must run a production. It is set and killed by a fixture method that refuses any other name, and it is part of the leftovers check; `EnableNamespace` is never called (Story 40.3, decision #59). Fixtures are synthetic: no real configuration names and no PHI. A story never reads another project's namespace or messages. |
 | Turbo test tasks | Turbo `test` tasks are never cached (`cache: false`), because the suites read repository files that no input list fully names. A test that needs another package's build gets a `pkg#task` `dependsOn` edge, never a package dependency, so AD-2 holds (Story 41.7, wave-7 decision #40; DW-611). |
+| Frozen goldens | A frozen golden is never edited or recaptured. A sanctioned change to bytes it holds is one entry in `fixtures/sdk-golden-sanctioned-changes.json`: the golden, the row, a JSON pointer, the exact frozen value, the exact new value, and the sanction id its CHANGELOG entry names. The tests apply the entries and compare every other byte unchanged, and a description change only appends (Story 43.4, wave-8 decision #23; DW-639). |
 | Performance budgets | The PRD targets are: reads under 2 s, compile and deploy under 10 s, bootstrap under 60 s, and `tools/list` under 500 ms. A story that adds bootstrapped classes or a heavy read checks the relevant budget. |
 
 ## Stack
@@ -717,9 +731,9 @@ Versions are the tested lockfile versions as of 2026-10-14. The code owns them a
 | --- | --- |
 | Node.js (runtime floor) | 22 (`engines.node >=22`; Story 42.1 fixes the minor, and 22.17.0 is where `fs.globSync` is stable; CI legs 22.x, 24.x and 26.x) |
 | TypeScript | 5.9.3 |
-| @modelcontextprotocol/sdk (v1, removed in Epic 43) | 1.29.0 (`npx` consumers resolve 1.32.1) |
-| @modelcontextprotocol/server, client and core (v2, from Epic 43) | 2.3.1 (latest on 2026-10-05; Story 43.1 pins it) |
-| MCP specification | 2025-11-25 served today; 2026-07-28 is current (Story 43.2) |
+| @modelcontextprotocol/sdk (v1) | Removed in Story 43.1; 1.29.0 is only the provenance of the frozen goldens |
+| @modelcontextprotocol/server (runtime, `@iris-mcp/shared` only) and client (tests: shared, dev, `iris-mcp-all`) | 2.3.1, pinned exactly (Story 43.1). `core` is not a direct dependency. The next bump waits for a release that pins fast-uri 3.1.8 or later (DW-637, Story 42.1) |
+| MCP specification | 2025-11-25 and 2026-07-28, both served over stdio by one process (Story 43.2), with form elicitation for the confirmation gates on both (Story 43.3) |
 | zod | 4.3.6 |
 | pnpm | 9.15.0 (the release path may need 10 or later; see Story 42.5) |
 | Turborepo | 2.9.4 |
@@ -796,7 +810,7 @@ ipm/                    # IPM module manifest (generated from Story 42.4)
   - **Multi-round-trip requests beyond confirmation:** sampling, roots and URL-mode elicitation.
 - **An operator setting that requires a human for confirmation gates** (AD-34). It would refuse clients that can't elicit. It waits for a request from an operator.
 - **WebSocket terminal and debug tools** (FR106–FR107; gaps G18 and G19). P2: they need a stateful session design.
-- **The SDK `extra` argument** (progress notifications and the cancellation signal). No handler consumes it until a target client honors progress (L1).
+- **Progress notifications** through the SDK `extra` argument. No handler sends progress until a target client honors it (L1). The cancellation signal has been forwarded since Story 43.3 (DW-642).
 - **Toggling visibility at runtime.** Configuration is static at startup (I1).
 - **An explicit opt-in for the Server Manager workspace candidate.** It is breaking, so it is reserved for a future major release, with real-user evidence (J1).
 - **An audit query tool** (`iris_audit_sessions`). It is a framework tool with tool-count implications (H3).
