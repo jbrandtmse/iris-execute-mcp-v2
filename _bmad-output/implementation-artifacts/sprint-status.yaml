@@ -541,7 +541,7 @@ development_status:
 
   epic-42: in-progress
   42-1-pre-publish-package-fixes: done
-  42-2-bootstrap-downgrade-guard: ready-for-dev
+  42-2-bootstrap-downgrade-guard: in-progress
   42-3-ci-workflow: backlog
   42-4-ipm-package-revival: backlog
   42-5-release-workflow: backlog
