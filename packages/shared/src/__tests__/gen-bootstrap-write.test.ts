@@ -235,6 +235,23 @@ describe("gen-bootstrap stamps <semver>+<sequence>.<hash> (DW-508)", () => {
     expect(sequenceOf(readFileSync(embedPath, "utf8"))).toBe(JSON.parse(stateBefore).sequence);
   });
 
+  it("the hand-committed first state (sequence 0, empty hash) makes the first run sequence 1 and records the hash, and the run after that keeps both", () => {
+    writeFileSync(statePath, '{"sequence": 0, "hash": ""}\n');
+
+    const first = runGenerator();
+    expect(first.status, first.stderr).toBe(0);
+    const embed = readFileSync(embedPath, "utf8");
+
+    expect(sequenceOf(embed)).toBe(1);
+    expect(stateOf()).toEqual({ sequence: 1, hash: hashOf(embed) });
+
+    const stateAfter = readFileSync(statePath, "utf8");
+    const second = runGenerator();
+    expect(second.status, second.stderr).toBe(0);
+    expect(second.stdout).toMatch(/unchanged/i);
+    expect(readFileSync(statePath, "utf8")).toBe(stateAfter);
+  });
+
   it("a class edit raises the sequence by exactly 1, records the new hash, and a rerun then keeps both", () => {
     const before = stateOf();
     appendFileSync(join(scratch, "src", "ExecuteMCPv2", "Utils.cls"), "\n// scratch change\n");

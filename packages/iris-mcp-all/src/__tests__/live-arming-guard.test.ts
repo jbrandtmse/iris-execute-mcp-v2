@@ -10,6 +10,8 @@
  *      no `IRIS_*` variable in its environment, under a preload that refuses and logs every connect to port 52773 or 1972 (and to the
  *      inert host of an unarmed leg). Each child exits 0 and its connect log is empty. The integration files run through the package's
  *      `vitest.integration.config.ts`.
+ *  (b2) THE SAME RUNS WITH A TARGET SET. `IRIS_HOST` and `IRIS_PORT` set without `IRIS_REQUIRE_LIVE`, and all five variables set with
+ *      `IRIS_REQUIRE_LIVE=0`: neither arms a leg, so each child still exits 0 with an empty connect log. The target port is watched.
  *  (c) CONTROL. A control test connects to a stand-in listener whose port the preload watches: the connect is logged and never reaches
  *      the listener. The same control without the preload reaches the listener and logs nothing, so the oracle of (b) can tell the two apart.
  *  (d) HELPER TABLE. `resolveLiveTarget`, `isLiveArmed` and `liveGateTarget` over an empty environment, `IRIS_REQUIRE_LIVE` alone,
@@ -147,6 +149,63 @@ describe("(a) static scan: no test source defaults a live target or names a reti
 /** The live-capable test files, as absolute paths. */
 const liveCapable = sources.filter((file) => file.endsWith(".test.ts") && LIVE_CAPABLE.test(readSource(file)));
 
+/** The number N of "Test Files  ... (N)" in a vitest summary, or -1. */
+const filesRun = (output: string): number => Number(/Test Files[^\n]*\((\d+)\)/.exec(output)?.[1] ?? -1);
+
+/**
+ * Register, in the describe block being defined, one test per package: the package's default-suite live-capable files run in
+ * a child `vitest run`, and its integration files (`vitest.integration.config.ts`) in another. `runVitestUnderPreload` removes
+ * every `IRIS_*` variable from the child's environment; `extraEnv` is added after that, and `watchPorts` are refused by the
+ * preload besides 52773 and 1972. Each child must exit 0 and leave an empty connect log.
+ */
+function registerPackageRuns(extraEnv: Record<string, string>, watchPorts: string[]): void {
+  const byPackage = new Map<string, string[]>();
+  for (const file of liveCapable) {
+    const rel = relative(file);
+    if (!rel.startsWith("packages/")) continue;
+    const owner = rel.split("/")[1] as string;
+    byPackage.set(owner, [...(byPackage.get(owner) ?? []), file]);
+  }
+
+  for (const [owner, files] of [...byPackage.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const packageDir = path.join(PACKAGES_DIR, owner);
+    const defaultFiles = files.filter((file) => !file.endsWith(".integration.test.ts"));
+    const integrationFiles = files.filter((file) => file.endsWith(".integration.test.ts"));
+
+    if (defaultFiles.length > 0) {
+      it(`${owner}: its ${defaultFiles.length} default-suite live-capable files pass and connect to nothing`, async () => {
+        const run = await runVitestUnderPreload({
+          packageDir,
+          args: defaultFiles.map((file) => path.relative(packageDir, file).split(path.sep).join("/")),
+          env: extraEnv,
+          watchPorts,
+          timeoutMs: 520_000,
+        });
+
+        expect(run.status, run.output.slice(-3000)).toBe(0);
+        expect(run.connects, "connects the preload refused").toEqual([]);
+        expect(filesRun(run.output), "every listed file ran").toBe(defaultFiles.length);
+      }, 540_000);
+    }
+
+    if (integrationFiles.length > 0) {
+      it(`${owner}: its integration files (vitest.integration.config.ts) skip and connect to nothing`, async () => {
+        const run = await runVitestUnderPreload({
+          packageDir,
+          args: ["--config", "vitest.integration.config.ts"],
+          env: extraEnv,
+          watchPorts,
+          timeoutMs: 300_000,
+        });
+
+        expect(run.status, run.output.slice(-3000)).toBe(0);
+        expect(run.connects, "connects the preload refused").toEqual([]);
+        expect(filesRun(run.output), "the integration files ran").toBeGreaterThanOrEqual(integrationFiles.length);
+      }, 320_000);
+    }
+  }
+}
+
 describe("(b) behavioral run: every live-capable test file, with no arming variable, connects to nothing (DW-627)", () => {
   it("the scan finds at least 63 live-capable files, across the packages and the launcher", () => {
     expect(liveCapable.length).toBeGreaterThanOrEqual(63);
@@ -165,50 +224,32 @@ describe("(b) behavioral run: every live-capable test file, with no arming varia
     }
   });
 
-  const byPackage = new Map<string, string[]>();
-  for (const file of liveCapable) {
-    const rel = relative(file);
-    if (!rel.startsWith("packages/")) continue;
-    const owner = rel.split("/")[1] as string;
-    byPackage.set(owner, [...(byPackage.get(owner) ?? []), file]);
-  }
+  registerPackageRuns({}, []);
+});
 
-  /** The number N of "Test Files  ... (N)" in a vitest summary, or -1. */
-  const filesRun = (output: string): number => Number(/Test Files[^\n]*\((\d+)\)/.exec(output)?.[1] ?? -1);
+/**
+ * (b2) The same runs with a target in the environment but no arming. A contributor exports `IRIS_HOST` to run the servers, and
+ * the pipeline runs every suite with a closed-port `IRIS_HOST`, so "no arming variable" must also hold when the target
+ * variables are set: `IRIS_HOST` alone does not arm a leg (decision #51), and neither does `IRIS_REQUIRE_LIVE=0`. The target
+ * is a port nothing is expected to serve, and the preload watches it, so a leg that wrongly arms is refused and logged.
+ */
+describe("(b2) behavioral run with a target set and no arming: every live-capable test file still connects to nothing (DW-627)", () => {
+  const UNARMED_TARGET_PORT = "59999";
+  const target = {
+    IRIS_HOST: "127.0.0.1",
+    IRIS_PORT: UNARMED_TARGET_PORT,
+    IRIS_USERNAME: "arming-guard",
+    IRIS_PASSWORD: "arming-guard",
+    IRIS_NAMESPACE: "ARMINGGUARD",
+  };
 
-  for (const [owner, files] of [...byPackage.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    const packageDir = path.join(PACKAGES_DIR, owner);
-    const defaultFiles = files.filter((file) => !file.endsWith(".integration.test.ts"));
-    const integrationFiles = files.filter((file) => file.endsWith(".integration.test.ts"));
+  describe("IRIS_HOST and IRIS_PORT set, IRIS_REQUIRE_LIVE unset", () => {
+    registerPackageRuns({ IRIS_HOST: target.IRIS_HOST, IRIS_PORT: target.IRIS_PORT }, [UNARMED_TARGET_PORT]);
+  });
 
-    if (defaultFiles.length > 0) {
-      it(`${owner}: its ${defaultFiles.length} default-suite live-capable files pass and connect to nothing`, async () => {
-        const run = await runVitestUnderPreload({
-          packageDir,
-          args: defaultFiles.map((file) => path.relative(packageDir, file).split(path.sep).join("/")),
-          timeoutMs: 520_000,
-        });
-
-        expect(run.status, run.output.slice(-3000)).toBe(0);
-        expect(run.connects, "connects the preload refused").toEqual([]);
-        expect(filesRun(run.output), "every listed file ran").toBe(defaultFiles.length);
-      }, 540_000);
-    }
-
-    if (integrationFiles.length > 0) {
-      it(`${owner}: its integration files (vitest.integration.config.ts) skip and connect to nothing`, async () => {
-        const run = await runVitestUnderPreload({
-          packageDir,
-          args: ["--config", "vitest.integration.config.ts"],
-          timeoutMs: 300_000,
-        });
-
-        expect(run.status, run.output.slice(-3000)).toBe(0);
-        expect(run.connects, "connects the preload refused").toEqual([]);
-        expect(filesRun(run.output), "the integration files ran").toBeGreaterThanOrEqual(integrationFiles.length);
-      }, 320_000);
-    }
-  }
+  describe("all five target variables set, IRIS_REQUIRE_LIVE=0", () => {
+    registerPackageRuns({ ...target, IRIS_REQUIRE_LIVE: "0" }, [UNARMED_TARGET_PORT]);
+  });
 });
 
 describe("(c) control: the connect log and the preload can tell a run that connects from one that does not", () => {
