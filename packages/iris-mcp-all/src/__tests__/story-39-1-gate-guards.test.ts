@@ -113,7 +113,7 @@ function expectedSkipReason(gate: Gate): string {
   return (
     reason ??
     (resolveSdkEsmDir(REPO_ROOT) === undefined
-      ? "Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm"
+      ? "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm"
       : `IRIS is not reachable at http://127.0.0.1:${closedPort}/api/atelier/`)
   );
 }

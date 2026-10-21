@@ -61,12 +61,12 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import type { Readable } from "node:stream";
-import { inheritedEnv, spawnAndWaitForExit } from "./process-gate-helpers.js";
+import { inheritedEnv, resolveSdkEsmDir, spawnAndWaitForExit } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
@@ -101,34 +101,6 @@ async function isIrisReachable(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/** Mirror of `server-manager-process-gate.test.ts`'s SDK resolution (pnpm store layout, iterated to exhaustion). */
-function resolveSdkEsmDir(): string | undefined {
-  const pnpmDir = path.join(REPO_ROOT, "node_modules", ".pnpm");
-  if (!existsSync(pnpmDir)) return undefined;
-  let entries: string[];
-  try {
-    entries = readdirSync(pnpmDir);
-  } catch {
-    return undefined;
-  }
-  const candidates = entries
-    .filter((name) => name.startsWith("@modelcontextprotocol+sdk@"))
-    .sort();
-  for (const candidate of candidates) {
-    const esmDir = path.join(
-      pnpmDir,
-      candidate,
-      "node_modules",
-      "@modelcontextprotocol",
-      "sdk",
-      "dist",
-      "esm",
-    );
-    if (existsSync(esmDir)) return esmDir;
-  }
-  return undefined;
 }
 
 interface RosterEntry {
@@ -187,10 +159,10 @@ beforeAll(async () => {
     liveSkipReason = distSkipReason;
     return;
   }
-  sdkEsmDir = resolveSdkEsmDir();
+  sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
   if (!sdkEsmDir) {
     liveSkipReason =
-      "Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm — run pnpm install from the repo root.";
+      "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm — run pnpm install from the repo root.";
   } else if (!(await isIrisReachable())) {
     liveSkipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/ (set IRIS_TEST_* to point at a live instance).`;
   }
@@ -332,8 +304,8 @@ describe("Story 32.3 QA — Server Manager precedence/drop process gate (built s
         return;
       }
 
-      const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "client", "index.js")).href;
-      const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "client", "stdio.js")).href;
+      const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "index.mjs")).href;
+      const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "stdio.mjs")).href;
       const { Client } = (await import(sdkClientIndex)) as {
         Client: new (info: { name: string; version: string }) => SdkClient;
       };
@@ -485,8 +457,8 @@ describe("Story 32.3 QA — Server Manager precedence/drop process gate (built s
         return;
       }
 
-      const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "client", "index.js")).href;
-      const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "client", "stdio.js")).href;
+      const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "index.mjs")).href;
+      const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "stdio.mjs")).href;
       const { Client } = (await import(sdkClientIndex)) as {
         Client: new (info: { name: string; version: string }) => SdkClient;
       };

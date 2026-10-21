@@ -42,8 +42,9 @@ type ToolDefinition = import("../tool-types.js").ToolDefinition;
 describe("the refusal-code catalog (Story 38.3, AC-9)", () => {
   const entries = Object.entries(REFUSAL_CODES);
 
-  it("holds exactly the codes the suite returns today, the two Story 38.5 adds, NOT_IMPLEMENTED (Story 39.1), DATA_POLICY_BLOCKED (Story 39.2), MONITOR_BUSY (Story 40.1) and PRODUCTION_BUSY (Story 40.3)", () => {
+  it("holds exactly the codes the suite returns today, the two Story 38.5 adds, NOT_IMPLEMENTED (Story 39.1), DATA_POLICY_BLOCKED (Story 39.2), MONITOR_BUSY (Story 40.1), PRODUCTION_BUSY (Story 40.3) and CONFIRMATION_DECLINED (Story 43.3)", () => {
     expect(Object.keys(REFUSAL_CODES).sort()).toEqual([
+      "CONFIRMATION_DECLINED",
       "DATA_POLICY_BLOCKED",
       "DOCUMENT_CONFLICT",
       "GOVERNANCE_DISABLED",

@@ -14,5 +14,8 @@
     "@iris-mcp/interop": "workspace:*",
     "@iris-mcp/ops": "workspace:*",
     "@iris-mcp/data": "workspace:*"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.3.1"
   }
 }

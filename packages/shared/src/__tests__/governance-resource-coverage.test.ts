@@ -17,7 +17,7 @@
  *   3. resources/list EXACT shape — uri + name + mimeType, and that the static
  *      governance resource is the ONLY governance entry in `resources/list`
  *      (the template does not leak into the static list).
- *   4. Unknown-profile read → the error is a structured `McpError` with code
+ *   4. Unknown-profile read → the error is a structured `ProtocolError` with code
  *      `InvalidParams` (-32602) — not merely a message match, and not a crash.
  *   5. A malformed `iris-governance://` URI (NO profile / empty authority) →
  *      clean structured rejection (the SDK matches neither the static resource
@@ -37,7 +37,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
-import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
 import type { BootstrapResult } from "../bootstrap.js";
 import { makeEnvHarness } from "./env-harness.js";
 // Import governance ENGINE values from their direct modules (not the `../index.js`
@@ -180,6 +180,7 @@ async function callRequest(server: any, method: string, params: unknown) {
     signal: new AbortController().signal,
     sendNotification: async () => {},
     sendRequest: async () => ({}),
+    mcpReq: { requestState: () => undefined },
   };
   return handler({ method, params }, extra);
 }
@@ -376,15 +377,15 @@ describe("Story 14.5 — resources/list and templates/list exact shapes (AC 14.5
 });
 
 // ════════════════════════════════════════════════════════════════════
-// 4. Unknown-profile read → McpError with code InvalidParams (not just text).
+// 4. Unknown-profile read → ProtocolError with code InvalidParams (not just text).
 // ════════════════════════════════════════════════════════════════════
 
-describe("Story 14.5 — unknown-profile read surfaces McpError(InvalidParams) (AC 14.5.3)", () => {
+describe("Story 14.5 — unknown-profile read surfaces ProtocolError(InvalidParams) (AC 14.5.3)", () => {
   const env = makeEnvHarness(ENV_OPTIONS);
   beforeEach(env.setup);
   afterEach(env.teardown);
 
-  it("the rejection is an McpError whose code is InvalidParams (-32602), carrying the bad profile name", async () => {
+  it("the rejection is a ProtocolError whose code is InvalidParams (-32602), carrying the bad profile name", async () => {
     setDefaultEnv();
     process.env.IRIS_PROFILES = JSON.stringify({
       prod: { host: "prod.example.com" },
@@ -403,10 +404,10 @@ describe("Story 14.5 — unknown-profile read surfaces McpError(InvalidParams) (
     } catch (e: unknown) {
       caught = e;
     }
-    expect(caught).toBeInstanceOf(McpError);
-    expect((caught as McpError).code).toBe(ErrorCode.InvalidParams);
-    expect((caught as McpError).code).toBe(-32602);
-    expect((caught as McpError).message).toMatch(/ghost/);
+    expect(caught).toBeInstanceOf(ProtocolError);
+    expect((caught as ProtocolError).code).toBe(ProtocolErrorCode.InvalidParams);
+    expect((caught as ProtocolError).code).toBe(-32602);
+    expect((caught as ProtocolError).message).toMatch(/ghost/);
   });
 });
 
@@ -419,7 +420,7 @@ describe("Story 14.5 — a malformed iris-governance:// URI (no profile) is a cl
   beforeEach(env.setup);
   afterEach(env.teardown);
 
-  it("read of iris-governance:// (empty authority) rejects with McpError(InvalidParams); the server stays usable", async () => {
+  it("read of iris-governance:// (empty authority) rejects with ProtocolError(InvalidParams); the server stays usable", async () => {
     setDefaultEnv();
     stageDefaultStartup(env.fetchMock);
     const server = new McpServerBase(makeServerOpts([makeEchoTool("iris_doc_get")]));
@@ -427,8 +428,8 @@ describe("Story 14.5 — a malformed iris-governance:// URI (no profile) is a cl
 
     // `iris-governance://` matches NEITHER the static `iris-governance://default`
     // resource NOR the `{profile}` template (the SDK UriTemplate yields no match
-    // for an empty authority), so the SDK's own read dispatch raises a structured
-    // "Resource ... not found" McpError(InvalidParams) — a clean error, not a crash.
+    // for an empty authority), so the framework's read dispatch raises a structured
+    // "Resource ... not found" ProtocolError(InvalidParams) — a clean error, not a crash.
     let caught: unknown;
     try {
       await callRequest(server, "resources/read", {
@@ -437,8 +438,8 @@ describe("Story 14.5 — a malformed iris-governance:// URI (no profile) is a cl
     } catch (e: unknown) {
       caught = e;
     }
-    expect(caught).toBeInstanceOf(McpError);
-    expect((caught as McpError).code).toBe(ErrorCode.InvalidParams);
+    expect(caught).toBeInstanceOf(ProtocolError);
+    expect((caught as ProtocolError).code).toBe(ProtocolErrorCode.InvalidParams);
 
     // Server still healthy: a subsequent valid default read returns the map.
     const ok = await callRequest(server, "resources/read", {

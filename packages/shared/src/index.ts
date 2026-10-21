@@ -47,6 +47,7 @@ export {
 } from "./lines.js";
 export { REFUSAL_CODES, refusalResult } from "./refusals.js";
 export type { RefusalCode, RefusalResult } from "./refusals.js";
+export { contentHash } from "./confirmation.js";
 export {
   DATA_POLICIES,
   DEFAULT_DATA_POLICY,
@@ -88,6 +89,8 @@ export {
   storageDroppedRefusal,
 } from "./storage-guard.js";
 export type {
+  ConfirmationOutcome,
+  ConfirmationRequest,
   ToolAnnotations,
   ToolDefinition,
   ToolContext,

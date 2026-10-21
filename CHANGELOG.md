@@ -2,6 +2,336 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-20] — Story 43.4: SDK v2 docs, smokes and capstone
+
+Story 43.4 closes Epic 43, the move to the MCP TypeScript SDK v2. It appends one passage about the confirmation dialog to the description of
+each of the five gated tools, lists each governance URI once in `resources/list`, corrects two steps of the `resend-failed-messages`
+prompt, retires the two frozen SDK v1 goldens into a ledger of sanctioned changes, adds the epic's capstone gate, and documents the
+protocol revisions, the probe copy that an SDK v2 client starts, and the dialog for each client. The suite stays at 115 advertised tools
+(33, 27, 25, 22 and 8; 110 package tools), the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and `BOOTSTRAP_VERSION`
+stays at `d51856f74d6a`. No ObjectScript class is touched, and no tool, action, governance key, preset row, annotation, refusal code or
+environment variable is added.
+
+### Changed (AD-15 sanctioned)
+
+- **`S-43.4-descriptions`.** The descriptions of `iris_audit_manage`, `iris_env_promote`, `iris_production_control`, `iris_message_resend`
+  and `iris_doc_edit` each gain one appended passage. It names the confirmation dialog that a client declaring form elicitation is shown,
+  says that a decline or a dismissal returns `CONFIRMATION_DECLINED` with nothing changed, tells the agent not to repeat the call unless
+  the person asks, and says that a client without elicitation is not asked. No existing byte of any description changes, and no other
+  tool's description changes.
+- **`S-43.4-governance-resource` (DW-646).** `resources/list` lists `iris-governance://default` once, as the static resource named
+  `iris-governance-default`. The per-profile resource template's list repeated it under a second name, `iris-governance-profile-default`;
+  it now lists only the other configured profiles (a profile `prod` is still `iris-governance://prod`, named `iris-governance-profile-prod`).
+  `resources/read` of every URI and `resources/templates/list` are unchanged.
+- **`S-43.4-prompt-text` (DW-653).** Step 3 of the `resend-failed-messages` prompt says that the preview always reports the full match
+  count and that the executing call is refused over `maxMessages`, not the preview. Step 4 says that `dryRun: false` without
+  `confirm: true` is refused with no changes made, and that leaving `dryRun` out only previews again, because it defaults to `true`. The
+  prompt's name, title, description and arguments are unchanged, and the two generated `SKILL.md` copies are regenerated.
+- **The frozen goldens retire into a ledger (DW-639).** `sdk-wire-golden.json` and `sdk-handler-golden.json` stay byte-unchanged, pinned by
+  SHA-256. Each sanctioned change to bytes they hold is one entry of `fixtures/sdk-golden-sanctioned-changes.json` (the golden, the row, a
+  JSON pointer, the exact frozen value and the exact new value). `scripts/lib/golden-sanctioned-changes.mjs` applies the entries, and the
+  golden tests compare every other byte unchanged. This story's 11 entries are 6 description entries (one per gated tool, plus a second
+  one for `iris_doc_edit` in the dev server's `core-preset` listing) and the 5 removed duplicates of the governance resource.
+
+### Added
+
+- **The epic-done gate, `epic43-capstone-gate.test.ts`.** In the default suite, one test per negotiation mode (`legacy`, a pinned
+  `2026-07-28`, and `auto`, which must land on `2026-07-28`) walks one built admin server through the real SDK client: the era it landed
+  on, the listings against the sanctioned golden, a read against the handler golden, a governance denial, a validation error, an accepted
+  and a declined confirmation dialog, and the audit trail. It fails, never skips, on a stale dist or a missing client. The rig it shares
+  with the Story 43.3 rows is `sdk-confirmation-rig.ts`.
+- **Documentation.** The root `README.md` (the human-confirmation section, the governance resource and the protocol paragraph),
+  `docs/client-config/README.md` (a section on the protocol revisions and the dialogs) and `docs/client-config/claude-code.md` (a section on
+  `MCP_PROTOCOL_NEGOTIATION=legacy`, the `Elicitation` hook and headless runs) state the behavior as observed on Claude Code 2.1.296 and
+  MCP Inspector CLI 2.9.0.
+
+### Unchanged
+
+- The 2025-11-25 wire is byte-identical to the frozen v1 capture, apart from the sanctioned changes listed under Changed and the earlier
+  ones listed below. A client that does not declare form elicitation gets exactly the previous contract.
+- No tool, action, governance key, preset row, annotation, refusal code or environment variable is added. The governance baseline is
+  `1e62c5ad5bf7` (141 keys), and `BOOTSTRAP_VERSION` stays at `d51856f74d6a`.
+- No `ctx.confirm` call site, the confirmation helper, the `serveStdio` options or the era factory changes.
+
+### Epic 43 at close
+
+- **Counts.** 110 package tools and 115 advertised (33, 27, 25, 22 and 8).
+- **Governance.** The baseline is `1e62c5ad5bf7` (141 keys).
+- **Bootstrap.** `BOOTSTRAP_VERSION` stays at `d51856f74d6a`, and nothing under `src/` or in the embed changed since the epic began.
+- **Sanctioned wire changes.**
+  - **Story 43.1.** An omitted-`arguments` `prompts/get` renders like `{}` (DW-617). A schema-invalid call is audited (DW-579). `addTools`
+    sends one `list_changed`. A malformed `tools/call` gets `-32602 Invalid tools/call request`. A `task` parameter runs a plain call.
+  - **Story 43.2.** Revision 2026-07-28 is served in addition; the 2025-11-25 wire is unchanged.
+  - **Story 43.3.** The dialog for clients that declare form elicitation (AD-34). A cancelled call aborts its IRIS request and is audited
+    `error` (DW-642). Clients without the capability are byte-identical.
+  - **Story 43.4.** `S-43.4-descriptions`, `S-43.4-governance-resource` and `S-43.4-prompt-text`, above.
+
+### Known limits
+
+- **A probe copy starts the server twice (DW-641).** A client built on the TypeScript MCP SDK v2 client, in `auto` mode or pinned to a
+  revision (for example MCP Inspector 2.x with `--protocol-era auto` or `modern`), first starts a short-lived probe copy of the server. The
+  probe runs the whole startup, answers `server/discover`, and is ended by SIGTERM. So the server starts twice per connect,
+  `IRIS_AUDIT_LOG` gains a second `sessionStart` line, the only line of the probe's session (no stdio session writes a `shutdown` line),
+  and the probe's stderr is discarded. Claude Code probes on the same connection and starts the server once. This is documented in `docs/client-config/README.md`; nothing in the server can avoid it.
+- **A probe that times out.** An SDK v2 client on `auto` whose probe is not answered within its request timeout (60 seconds by default)
+  treats the server as 2025-11-25.
+- **Clients not verified.** The dialog and the protocol revisions are observed on Claude Code 2.1.296 and MCP Inspector CLI 2.9.0 only. The
+  client matrix's certification covers the configuration lifecycle, not protocol negotiation or dialog behavior.
+- **The README payload table is not re-measured.** Its byte figures are Story 40.4's measurement and predate the appended descriptions,
+  which add about 2.3 KB of description text across the dev, admin and interop servers.
+
+## [Pre-release — 2026-10-20] — Story 43.3: Human confirmation through elicitation
+
+No tool, action, governance key, preset row, annotation, description, prompt, `instructions` text or environment variable is added or
+changed, and no ObjectScript class is touched: the suite stays at 115 advertised tools (33, 27, 25, 22 and 8; 110 package tools), the
+frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and `BOOTSTRAP_VERSION` stays at `d51856f74d6a`. The 2025-11-25 wire
+is byte-identical for a client that does not declare form elicitation: the same requests to IRIS, the same result and the same audit
+entry for every call that runs to its end. The one behavior change for such a client is a call the client cancels, under Added.
+
+### Added
+
+- **Six gates ask the person before they change anything (the AD-15 sanctioned change for elicitation-capable clients, per AD-34).** When
+  the calling client declares form elicitation (`elicitation: {}`, `{form: {}}` or `{form: {}, url: {}}`; `{url: {}}` alone does not
+  count), these gates show a confirmation form right before their first IRIS write: `iris_audit_manage` `purge`, `iris_env_promote`
+  `execute`, `iris_production_control` `clean` with `killAppData: true`, `iris_message_resend` `resendFiltered` (to execute),
+  `iris_message_resend` `resend` and `iris_doc_edit` `regenerateStorage`. Default states are unchanged: `purge`, `execute`, `resendFiltered`,
+  `resend` and `regenerateStorage` are default-disabled writes, and `clean` is a default-enabled write. Argument validation, profile
+  resolution, the governance gate and every check of the tool itself (bounds, dry run, caps, `confirm: true`, `dryRun: false`, plan gates)
+  run first and refuse exactly as before, so the dialog is an additional gate and never a replacement for `confirm: true`. The form names
+  the operation, the target, the scope and the server, and has one required boolean, `confirm`, unticked by default; only an accept with it
+  ticked runs the call. The target and the scope each show on one line (control characters and invisible format characters, such as
+  bidirectional overrides, in a value the call supplies become a space, and a text over 600 characters is cut there and ends in `...`).
+  For `resendFiltered` the server first sends a read-only preview of the same filters, and the dialog names the live
+  match count, the window and the `maxMessages` cap; it is shown only for 1 to `maxMessages` matches. A preview that fails other than by
+  an IRIS refusal (a timeout, a connection error, an HTTP 5xx) ends the call with that error and sends nothing (wave-8 decision #21); a
+  client that cannot be asked sends no preview. `resend` and `regenerateStorage` have no
+  `confirm` parameter, so for a client without elicitation governance remains their only gate.
+- **The confirmation is bound and single-use.** It is bound to the tool, the resolved server profile and a hash of the exact validated
+  arguments, through a signed state (HMAC-SHA256, per-process random key) that can be used once and lives 10 minutes. A forged, altered,
+  expired, replayed or other-arguments state is never honored; the person is asked again. A 2025-11-25 connection reads the capabilities
+  the client declared at `initialize`, a 2026-07-28 connection reads them from each request's envelope, and a 2025-11-25 request's `_meta`
+  is never trusted.
+- **New refusal code `CONFIRMATION_DECLINED`.** A decline, a dismissal, or an accept without ticking Confirm ends the call with
+  `isError: true` and `structuredContent` `{code, action, response}`, where `response` is `decline`, `cancel` or `unconfirmed`. Nothing
+  changes, the person is never asked again for that call, and the refusal text tells the agent not to repeat the call unless the person
+  asks again. Changing any argument asks again for the new arguments. It is a catalog code in `REFUSAL_CODES`, not a governance key.
+- **The audit entry records the answer (AD-19).** One entry per logical call, written by the round that ends it. A decline is
+  `outcome: "denied"` with `denyReason: "CONFIRMATION_DECLINED"`. The new additive field `confirmation` is `accepted`, `declined`,
+  `cancelled`, `unconfirmed` or `unanswered`. A dialog nobody answers (a client that never retries, a 2025-11-25 leg that times out, is
+  cancelled or fails) changes nothing and is written as an `error` entry with `confirmation: "unanswered"` and the text
+  `The confirmation dialog was not answered. Nothing was changed.`, after the 10-minute lifetime, when the client closes the connection,
+  or when the server is stopped gracefully; an answer that arrives after that entry is written is asked again.
+- **A cancelled call aborts its IRIS request, and is audited `error` (DW-642).** A call the client cancels (`notifications/cancelled`)
+  now aborts the IRIS request it has in flight and is audited `error` with the text
+  `Cancelled by the client before a result was sent. An IRIS request still in flight was aborted; a write IRIS had already received may still have completed.`
+  Before this story such a call still ran to the end and was audited `ok`. A call cancelled after the person accepted keeps
+  `confirmation: "accepted"` on that entry; one cancelled before its dialog was shown is that entry, written at once. A cancelled call is
+  not logged as a failure. `RequestOptions.signal` carries the abort: an already aborted signal sends no request, and
+  an abort in flight aborts the request, both rejecting with `IrisConnectionError` code `CANCELLED`.
+- **Library surface of `@iris-mcp/shared`.** `REFUSAL_CODES.CONFIRMATION_DECLINED`; the optional `ToolContext.confirm(request)`, present
+  only on a call off the wire, returning `{proceed: true}` or `{proceed: false; result}` (handlers call it after their own checks and
+  return `result` unchanged), with the types `ConfirmationRequest` and `ConfirmationOutcome`; `RequestOptions.signal`; and
+  `contentHash(value)`, the SHA-256 of key-sorted JSON.
+- **Claude Code `Elicitation` hooks.** A hook under `hooks.Elicitation`, matched on the MCP server name such as `iris-admin`, can accept
+  or decline a dialog automatically; whether to install one that answers by itself is the user's choice, and it removes the person from
+  the loop. In headless `claude -p` hooks run, so a hook answers; with `--permission-prompts none` an elicitation no hook answers is
+  cancelled, which the server reports as `CONFIRMATION_DECLINED` with `response: "cancel"`. The dialog stops the agent from proceeding on
+  its own; it is only as strong as the client software that relays the person's answer. See the README section *Human confirmation
+  (elicitation)*.
+- **Tests and helpers.** Both-eras stdio tests through the real SDK client and a hand-wire raw-protocol test, an in-memory test, unit tests
+  per gate, an HTTP-client signal test, and rows for DW-649 (the `sdk-wire-compat` flake: three fixed 50 ms waits replaced by a
+  deterministic barrier) and DW-642 (cancel). `scripts/lib/fake-iris-listener.mjs` gains the write routes of the gates, and the test
+  helpers `process-gate-helpers.ts` and `story-43-2-qa-hand-wire.ts` gain a client that declares elicitation and answers the dialog.
+
+### Unchanged
+
+- No tool, action, governance key, preset row, annotation, description, prompt, `instructions` text or environment variable. The
+  governance baseline (141 keys, hash `1e62c5ad5bf7`), `BOOTSTRAP_VERSION` (`d51856f74d6a`) and every default state are as before.
+- A client that does not declare form elicitation, including every 2025-11-25 client that declared none and any request whose `_meta`
+  claims otherwise, gets exactly the previous contract.
+- Only the six gates ask. Other destructive tools stay protected by governance, not by a dialog.
+
+### Known limits
+
+- The match count of `resendFiltered` can change between the preview and the run: IRIS counts again when it runs and never exceeds
+  `maxMessages`.
+- A dialog can be accepted and then refused by IRIS, for example by the production-running check of `resendFiltered` (which the preview
+  skips) or by bad header IDs on `resend`. Nothing changes.
+- On both eras the round that decides the call runs the tool's own checks again (on 2026-07-28 the client sends the call again; on
+  2025-11-25 the SDK's shim runs the handler again), so a check can still refuse a call the person has just accepted.
+- A `resendFiltered` at zero matches, over the cap, or whose preview IRIS refuses shows no dialog, and the execute request is sent as
+  before: IRIS resends nothing, or refuses.
+- When a `resendFiltered` omits `to`, IRIS takes the end of the window as the time it runs, so the execute counts up to a later time than
+  the dialog shows (still at most `maxMessages`).
+- A dialog that is still open when the server is killed by a signal (SIGTERM or SIGINT, with its input still open) gets no `unanswered`
+  entry; a client that closes the server's input first gets it.
+- A promotion (`execute`) resolves its source and target profiles before the dialog. The first use of a profile in a session sets it up as
+  for any other call (the connection check and, once, the deployment of the ExecuteMCPv2 classes), so a declined promotion can still have
+  done that. It writes no document, mapping, setting, web application or configuration.
+- Tool descriptions are not changed in this release; they change together with the golden retirement in Story 43.4. Until then the README
+  section and the dialog itself are where an agent learns of the dialog.
+- With no `Elicitation` hook and no flag, Claude Code does not document what headless `claude -p` does with an elicitation; check it
+  before relying on it.
+
+### Security
+
+- **DW-637, the SDK's bundled JSON-schema validator: no change, verdict recorded.** The SDK's default validator bundles ajv 8.18.0,
+  ajv-formats 3.0.1 and fast-uri 3.1.0 (invisible to `pnpm audit`). ajv and the others have no applicable advisory. fast-uri 3.1.0 is
+  affected by nine (GHSA-q3j6-qgpj-74h6, GHSA-v39h-62p7-jpjc, GHSA-4c8g-83qw-93j6, GHSA-v2hh-gcrm-f6hx, GHSA-7p8r-x3mc-p8w7,
+  GHSA-f65p-4m7j-42xc, GHSA-jqff-g426-hqxp, GHSA-qw65-cvwx-89v3 and GHSA-hrr3-gc8f-f4qj), fixed in 3.1.8. They are unreachable here: they
+  need attacker-controlled URLs that are normalized or compared, ajv uses fast-uri only for schema `$id` and `$ref`, our one schema is a
+  constant, and the server never invokes the validator (no `elicitInput`, no `fromJsonSchema`, no 3-argument `acceptedContent`); a new
+  default-suite test fails if any source file adds one. Upstream tracks the pin in modelcontextprotocol/typescript-sdk issue 2966 and PR
+  2973; bump the SDK when a release pins fast-uri 3.1.8 or later.
+
+## [Pre-release — 2026-10-20] — Story 43.2: Serve MCP revision 2026-07-28
+
+The change is additive. No tool, action, governance key, preset row, annotation, prompt, refusal code, environment variable or route is
+added or changed, and no ObjectScript class is touched: the suite stays at 115 advertised tools (33, 27, 25, 22 and 8), the frozen
+governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and `BOOTSTRAP_VERSION` stays at `d51856f74d6a`. **The 2025-11-25 wire is
+unchanged**: every golden line of Story 43.1 and every pin passes with its fixture and assertion lines as they were, so no AD-15 sanction
+is needed.
+
+### Added
+
+- **Every server also serves MCP revision 2026-07-28 over stdio (AD-32).** `McpServerBase.start()` serves stdio through the SDK's
+  `serveStdio` with `legacy: "serve"` and the transport passed explicitly. The client's first message chooses the revision: an
+  `initialize` is the 2025-11-25 handshake, and a `server/discover` with the per-request `_meta` envelope is 2026-07-28. One builder makes
+  each SDK instance from the framework's state (the visible tools, the governance resources, the prompts and the framework's own
+  handlers), and the factory `serveStdio` calls hands out the instance built at construction first, so `server` is the instance that
+  serves. A `server/discover` probe followed by an `initialize` on one connection discards the probe and builds a second, complete
+  instance for the 2025-11-25 handshake. At the default log level, each factory call writes one stderr `[INFO]` line naming the era of
+  the message the connection opened with (`server/discover` or `initialize`).
+- **The two revisions answer the same content.** The 2026-07-28 wire is the 2025-11-25 wire plus the fields that revision mandates
+  (`resultType` and the server identity in `_meta` on every result, `ttlMs` and `cacheScope` on the cacheable methods), minus the tools'
+  `execution`, with `server/discover` in place of `initialize` and the JSON-RPC `id` as framing. `story-43-2-cross-era-pin.test.ts` pins this on all
+  five built servers against the frozen 43.1 golden, byte for byte, and pins the mandated fields by value; it also runs SDK clients on
+  `{ pin: "2026-07-28" }` and on `auto` against a legacy one, and the probe-discard path.
+- **A per-request `_meta` key never bypasses the call-time chokepoint (AD-3).** `story-43-2-chokepoint-both-eras.test.ts` drives `server`
+  and namespace resolution, the governance gate, visibility and the audit entry on both revisions against two fake IRIS profiles, with
+  `_meta` keys that try to steer each of them.
+- **Claude Code switches to 2026-07-28 with this release.** Claude Code 2.1.292 and later negotiate 2026-07-28 with stdio servers by
+  default, and fell back to 2025-11-25 against earlier servers. `MCP_PROTOCOL_NEGOTIATION=legacy`, set in Claude Code's own environment
+  (not in a server entry's `env`), keeps the 2025-11-25 handshake. A client that speaks only 2025-11-25 is unaffected, and any other
+  client that negotiates 2026-07-28 is now served that revision.
+- **Test helpers.** `scripts/lib/sdk-wire-golden-core.mjs` gains the modern-era driver (`MODERN_ERA`, `modernEnvelope`, `withEnvelope`,
+  `discoverHandshake`, `runModernGoldenSession`, `runProbeDiscardSession`), the list of mandated fields (`MANDATED_MODERN_FIELDS`) and the
+  functions that apply it (`withoutMandatedFields`, `withoutExecution`, `mandatedFieldProblems`); `connectSdkClient` takes a
+  `versionNegotiation` mode (default legacy, sent explicitly).
+
+### Known limits
+
+All three are the SDK's, and none changes a 2025-11-25 client.
+
+- On the 2026-07-28 revision a `ping` is answered `-32601`.
+- On the 2026-07-28 revision `notifications/tools/list_changed` reaches only a client that opened a `subscriptions/listen`
+  subscription. Nothing in production adds or removes tools after startup.
+- A v2 SDK client on `auto` or `{ pin }` that uses the SDK's stdio transport starts a short-lived probe process from the same command for
+  each connect, which runs the server's whole startup once more.
+
+## [Pre-release — 2026-10-20] — Story 43.1: Framework migration to SDK v2
+
+No tool, action, governance key, preset row, prompt, refusal code, environment variable or route is added or changed, and no
+ObjectScript class is touched, so no count moves: the suite stays at 115 advertised tools (33, 27, 25, 22 and 8), the frozen governance
+baseline stays at hash `1e62c5ad5bf7` (141 keys), and `BOOTSTRAP_VERSION` stays at `d51856f74d6a`. The behavior changes are the two
+fixes below and three changes under Changed that AD-15 sanctions (wave-8 decisions #4 and #6): `addTools` sends one `list_changed` per
+call, a malformed `tools/call` request is refused with `-32602`, and a `tools/call` that carries `task` runs as a plain call. Every other
+response on the 2025-11-25 wire is byte-identical to the v1 build's.
+
+### Changed
+
+- **The framework runs on the MCP SDK v2 packages, and v1 is removed (AD-32).** `@iris-mcp/shared` depends on
+  `@modelcontextprotocol/server` 2.3.1, pinned exactly, and `@modelcontextprotocol/sdk` is listed by no `package.json` and installed
+  nowhere. The SDK-client tests use `@modelcontextprotocol/client` 2.3.1 as a devDependency (`@iris-mcp/all`, `@iris-mcp/dev` and
+  `@iris-mcp/shared`). `@modelcontextprotocol/core` 2.3.1 is a transitive dependency, `zod` stays at the one copy 4.3.6, and none of
+  the packages runs an install script. `McpError` and `ErrorCode` become `ProtocolError` and `ProtocolErrorCode`, and only
+  `packages/shared/src` imports the server package.
+- **The 2025-11-25 wire is unchanged for every request a client that follows the protocol sends.** The SDK's own `tools/list`, `tools/call`, `prompts/get` and `resources/read` would have changed
+  every tool's `$schema`, dropped `execution` and reworded the error texts, so `McpServerBase` serves those four methods itself from its
+  own state (`sdk-wire-compat.ts`), through the SDK's public `setRequestHandler`. A golden of 112 response lines, captured from the v1
+  build before the migration edit and replayed byte for byte against the five built v2 servers (and through a real v2 client), pins
+  `initialize`, `tools/list`, an unknown and a hidden tool, schema-invalid calls of four kinds, an omitted `arguments`, the governance
+  denial, a closed-port read, the prompt list and get, and the resource list, template list and read with both error rows.
+  `pnpm gen:tools-list-snapshot:check` passes against the untouched snapshot.
+- **The dependency tree shrinks.** `pnpm audit --prod` reports 18 advisories over 120 dependencies, where it reported 71 over 206:
+  4 critical, 18 high, 46 moderate and 3 low become 3 critical, 7 high and 8 moderate. The SDK advisory GHSA-6qxp-vccf-f47h and the
+  `express`, `hono`, `ajv` 8, `fast-uri` and `zod-to-json-schema` stacks are gone, and none is added; what remains is the Vitest 2.1.9
+  chain and `smol-toml`.
+- **`removeTools` removes a tool through the handle that `registerTool` returned.** It no longer deletes from the SDK's private
+  registry, and a call that removes several tools still sends exactly one `notifications/tools/list_changed`: the server joins the SDK's
+  announcements into one (`debouncedNotificationMethods`).
+- **`addTools` sends one `notifications/tools/list_changed` per call (AD-15, wave-8 decision #4).** It sent one per tool plus one; the
+  same debounce joins them. Nothing in production calls `addTools` or `removeTools`.
+- **A malformed `tools/call` request is refused with `-32602` (AD-15, wave-8 decision #6).** A request with no `params`, a `name` that is
+  missing or not a string, or `arguments` that is not an object is answered `-32602` `Invalid tools/call request: <the schema issues>`,
+  where v1 answered `-32603` with the bare schema issues. The SDK checks the request before the framework's `tools/call` runs. Only a
+  client that breaks the MCP request schema sends one; `story-43-1-sanctioned-wire-changes.test.ts` pins the exact responses.
+- **A `tools/call` that carries a `task` parameter runs as a plain call (AD-15, wave-8 decision #6).** The servers advertise no `tasks`
+  capability. v1 refused such a call with `-32603` `Server does not support task creation (required for tools/call)`; v2 serves it as if
+  `task` were absent. Only a client that ignores the capability list sends one; the same test pins the response, byte for byte, as the
+  plain call's.
+- **The tools-list snapshot script reads the installed server package.** `sdkVersion` in a regenerated snapshot is the version of
+  `@modelcontextprotocol/server`. The committed snapshot is untouched and keeps `1.29.0`, the version it was captured on; its 115 entries
+  equal the live ones. `story-39-6-qa-snapshot-cli.test.ts` compares the written `sdkVersion` with the installed one instead of the
+  committed one (three assertion lines).
+
+### Fixed
+
+- **A schema-invalid `tools/call` is audited (DW-579).** The SDK refused such a call before the audited chokepoint, so no entry was
+  written. The framework validates the arguments against `z.object(extended.shape)` inside the audit wrapper, so the refused call writes
+  its one entry: `outcome` `error`, the schema-invalid text as `error`, the raw top-level key names minus `server` as `paramKeys`, and no
+  `params` and no `dataPolicy` even with `IRIS_AUDIT_LOG_PARAMS=true`. Profile, namespace and action come from the existing derivations
+  (a non-string value falls back to `default`, the profile's namespace and `null`). A valid call's entry is unchanged, and an unknown or
+  hidden tool still writes none. A call whose fields pass and that fails only a refinement on the whole object (for example
+  `iris_production_control` `start` with no `name`) is refused by the dispatch and audited like any other call, as before.
+- **A `prompts/get` that omits `arguments` renders like `{}` (DW-617).** The four prompts whose arguments are all optional
+  (`audit-security-posture`, `recover-stuck-production`, `check-system-health` and `run-external-backup`) were refused with `-32602`;
+  they render now, and a prompt with a required argument answers the error that `arguments: {}` gives.
+
+### Added
+
+- **`sdk-wire-golden.json`** and its capture script `scripts/capture-sdk-wire-golden.mjs` (it refuses to overwrite the fixture without
+  `--force`), with the SDK-free stdio driver and the exchange list in `scripts/lib/sdk-wire-golden-core.mjs`, which the pin test and
+  `story-41-5-qa-dist-consumer.test.ts` share.
+- **`story-43-1-sdk-wire-golden.test.ts`**, **`story-43-1-schema-invalid-audit.test.ts`**, **`story-43-1-sdk-client-resolution.test.ts`**
+  and the launcher's **`sdkClientResolution.test.ts`** (the last two fail, never skip, when the v2 client cannot be found), and
+  **`sdk-wire-compat.test.ts`** in `@iris-mcp/shared`, which drives a fixture server with a v2 client over an in-memory transport.
+  **`story-43-1-sdk-confinement.test.ts`** pins the dependency and import boundary (no v1 SDK in any manifest or the lockfile, exact
+  2.3.1 pins, only `packages/shared/src` imports an `@modelcontextprotocol` package, no install script on the three packages), and
+  **`story-43-1-raw-wire-driver.test.ts`** pins the contract of the SDK-free stdio driver. The golden's `initialize` rows compare
+  `serverInfo.version` with the package manifest's version, so a release does not turn the pin red.
+- **`sdk-handler-golden.json`**, captured from the v1 build by `scripts/capture-sdk-handler-golden.mjs` (core
+  `scripts/lib/sdk-handler-golden-core.mjs`) against the fake IRIS of `scripts/lib/fake-iris-listener.mjs`, and
+  **`story-43-1-qa-handler-golden.test.ts`**, which replays it: the response line of 22 handler results, the requests each server makes to
+  IRIS and the audit entries, byte for byte against the v1 build, apart from the DW-579 entry. Its audit `sessionStart` lines compare
+  `version` with the package manifest's version, as the wire golden's `initialize` rows do. Both capture scripts share their command line
+  in `scripts/lib/golden-capture-cli.mjs`.
+- **`story-43-1-qa-dw579-process.test.ts`** (DW-579 for every tool of the five built servers, with the parameter log on and off),
+  **`story-43-1-qa-pack-confinement.test.ts`** (what `npm pack` would publish: no v1 SDK, the SDK imported only by shared, exact pins),
+  **`story-43-1-qa-stdio-lifecycle.test.ts`** (each built server exits by itself when its client closes stdin) and
+  **`story-43-1-sanctioned-wire-changes.test.ts`** (the exact responses of the two decision-#6 changes above). The launcher's two SDK-client
+  tests and its resolution test share one store lookup, `src/__tests__/sdkClientStore.ts`.
+
+### Tests
+
+- The SDK-client suites load `@modelcontextprotocol/client` (legacy negotiation) and no assertion line changed, except the rows that
+  pinned the two fixed behaviors (`story-41-5-qa-dist-consumer.test.ts` and `prompts.test.ts`), the `ProtocolError` class identity,
+  the three snapshot-CLI lines above, and the assertion on the invalid call's entry in `story-39-3-body-search-live-gate.test.ts`.
+  The 41-2 data-server row reaches `prompts/list` through the session's `request`, because the v2 client answers an empty list to a
+  server that never advertised the capability instead of sending the request.
+- The in-process tests that call a registered request handler for `tools/call`, `prompts/get` or `resources/read` pass
+  `mcpReq: { requestState: () => undefined }`, because the SDK's `Server` reads `ctx.mcpReq.requestState()` for those three methods.
+
+### Known limits
+
+- The launcher suite still fails the five tests and two unloadable files of DW-532 on a host without the extension's dependencies; the
+  Story 43.1 files in it pass or skip for IRIS reachability.
+- The server package's dist bundles `ajv` 8.18.0, `ajv-formats` and `fast-uri` 3.1.0 as the default JSON Schema validator for
+  elicitation; `pnpm audit` cannot see them. Story 43.3 is the first user.
+- A client that sends `server/discover` gets `-32601`; serving the 2026-07-28 revision is Story 43.2.
+- The v2 SDK packages declare `engines.node >=20`, while the root manifest and README still say Node 18 or later. Story 42.1 sets the
+  floor (`>=22`, AD-29); nothing is published before it.
+
 ## [Pre-release — 2026-10-19] — Story 41.8: Epic 41 burn-down
 
 No tool, action, governance key, preset row, prompt, refusal code, environment variable or route is added or changed, so no count

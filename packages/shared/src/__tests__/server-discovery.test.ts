@@ -653,3 +653,76 @@ function makeWriteTool(name: string): ToolDefinition {
     }),
   };
 }
+
+// ====================================================================
+// Story 43.4 (DW-646, AD-15): no governance URI is listed twice.
+// ====================================================================
+
+describe("Story 43.4: resources/list names each governance URI once (DW-646)", () => {
+  const env = makeEnvHarness(ENV_OPTIONS);
+  beforeEach(env.setup);
+  afterEach(env.teardown);
+
+  /** `resources/read` through the registered request handler, with the request context that `callRequest` leaves out. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async function readResource(server: any, uri: string) {
+    const handlers = server.server.server._requestHandlers as Map<
+      string,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (req: any, extra: any) => Promise<any>
+    >;
+    const handler = handlers.get("resources/read");
+    if (!handler) throw new Error('No request handler for "resources/read"');
+    const extra = {
+      signal: new AbortController().signal,
+      sendNotification: async () => {},
+      sendRequest: async () => ({}),
+      mcpReq: { requestState: () => undefined },
+    };
+    return handler({ method: "resources/read", params: { uri } }, extra);
+  }
+
+  /** The governance entries of a `resources/list` result, as `[uri, name]` pairs in listed order. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const governanceEntries = (result: any): Array<[string, string]> =>
+    (result.resources as Array<{ uri: string; name: string }>)
+      .filter((entry) => entry.uri.startsWith("iris-governance://"))
+      .map((entry): [string, string] => [entry.uri, entry.name]);
+
+  it("one profile: exactly one governance entry, the static default named iris-governance-default", async () => {
+    setDefaultEnv();
+    stageDefaultStartup(env.fetchMock);
+    const server = new McpServerBase(makeServerOpts([makeEchoTool("iris_doc_get")]));
+    await server.start("stdio");
+
+    const result = await callRequest(server, "resources/list", {});
+    expect(governanceEntries(result)).toEqual([["iris-governance://default", "iris-governance-default"]]);
+  });
+
+  it("two profiles: the static default plus prod named by the template, no URI twice, and both URIs read as before", async () => {
+    setDefaultEnv();
+    process.env.IRIS_PROFILES = JSON.stringify({
+      prod: { host: "prod.example.com", namespace: "PRODNS" },
+    });
+    stageDefaultStartup(env.fetchMock);
+    const server = new McpServerBase(makeServerOpts([makeEchoTool("iris_doc_get")]));
+    await server.start("stdio");
+
+    const result = await callRequest(server, "resources/list", {});
+    const entries = governanceEntries(result);
+    expect(entries).toEqual([
+      ["iris-governance://default", "iris-governance-default"],
+      ["iris-governance://prod", "iris-governance-profile-prod"],
+    ]);
+    const uris = (result.resources as Array<{ uri: string }>).map((entry) => entry.uri);
+    expect(new Set(uris).size, "no URI is listed twice").toBe(uris.length);
+
+    for (const uri of ["iris-governance://default", "iris-governance://prod"]) {
+      const read = await readResource(server, uri);
+      const contents = read.contents as Array<{ uri: string; mimeType: string; text: string }>;
+      expect(contents, uri).toHaveLength(1);
+      expect(contents[0]).toMatchObject({ uri, mimeType: "application/json" });
+      expect(Object.keys(JSON.parse(contents[0]!.text) as object), uri).toEqual(["policy", "configSource"]);
+    }
+  });
+});

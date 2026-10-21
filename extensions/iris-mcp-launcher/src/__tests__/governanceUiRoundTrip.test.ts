@@ -36,7 +36,7 @@
  * defaults (the 31-6-5 convention).
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync, readdirSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -48,6 +48,7 @@ import {
 } from "../governanceEngine.js";
 import type { DiffJson } from "../governanceView.js";
 import type { LauncherSettings } from "../types.js";
+import { resolveSdkEsmDir } from "./sdkClientStore.js";
 
 // src/__tests__ → repo root is four levels up.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -77,34 +78,6 @@ async function isIrisReachable(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/** Mirror of the iris-mcp-all process gates' SDK resolution (pnpm store layout, iterated to exhaustion). */
-function resolveSdkEsmDir(): string | undefined {
-  const pnpmDir = path.join(REPO_ROOT, "node_modules", ".pnpm");
-  if (!existsSync(pnpmDir)) return undefined;
-  let entries: string[];
-  try {
-    entries = readdirSync(pnpmDir);
-  } catch {
-    return undefined;
-  }
-  const candidates = entries
-    .filter((name) => name.startsWith("@modelcontextprotocol+sdk@"))
-    .sort();
-  for (const candidate of candidates) {
-    const esmDir = path.join(
-      pnpmDir,
-      candidate,
-      "node_modules",
-      "@modelcontextprotocol",
-      "sdk",
-      "dist",
-      "esm",
-    );
-    if (existsSync(esmDir)) return esmDir;
-  }
-  return undefined;
 }
 
 interface CallToolResult {
@@ -184,7 +157,7 @@ beforeAll(async () => {
   sdkEsmDir = resolveSdkEsmDir();
   if (!sdkEsmDir) {
     skipReason =
-      "Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm — run pnpm install from the repo root.";
+      "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm — run pnpm install from the repo root.";
     return;
   }
   if (!(await isIrisReachable())) {
@@ -216,8 +189,8 @@ async function withServer(
   extraEnv: Record<string, string>,
   fn: (client: SdkClient) => Promise<void>,
 ): Promise<void> {
-  const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "client", "index.js")).href;
-  const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "client", "stdio.js")).href;
+  const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "index.mjs")).href;
+  const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "stdio.mjs")).href;
   const { Client } = (await import(sdkClientIndex)) as {
     Client: new (info: { name: string; version: string }) => SdkClient;
   };

@@ -450,6 +450,7 @@ describe("Story 14.5 AC 14.5.6(b) — uniform governance enforcement across two 
         signal: new AbortController().signal,
         sendNotification: async () => {},
         sendRequest: async () => ({}),
+        mcpReq: { requestState: () => undefined },
       };
       const result = await handler(
         { method: "resources/read", params: { uri: "iris-governance://default" } },

@@ -16,9 +16,10 @@ import type { Readable } from "node:stream";
 import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
 
 /**
- * The MCP SDK's ESM build in the pnpm store of the monorepo at `repoRoot`
- * (this package does not depend on the SDK itself), or `undefined` when no
- * installed SDK version has one.
+ * The ESM build of `@modelcontextprotocol/client` (its `dist/` directory, holding `index.mjs` and
+ * `stdio.mjs`) in the pnpm store of the monorepo at `repoRoot`, or `undefined` when no installed
+ * client version has one. The client is a devDependency of this package; the servers under test
+ * never load it.
  *
  * @param repoRoot - Absolute path of the monorepo root.
  */
@@ -26,11 +27,11 @@ export function resolveSdkEsmDir(repoRoot: string): string | undefined {
   const pnpmDir = path.join(repoRoot, "node_modules", ".pnpm");
   if (!existsSync(pnpmDir)) return undefined;
   const candidates = readdirSync(pnpmDir)
-    .filter((name) => name.startsWith("@modelcontextprotocol+sdk@"))
+    .filter((name) => name.startsWith("@modelcontextprotocol+client@"))
     .sort();
   for (const candidate of candidates) {
-    const esmDir = path.join(pnpmDir, candidate, "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm");
-    if (existsSync(esmDir)) return esmDir;
+    const esmDir = path.join(pnpmDir, candidate, "node_modules", "@modelcontextprotocol", "client", "dist");
+    if (existsSync(path.join(esmDir, "index.mjs")) && existsSync(path.join(esmDir, "stdio.mjs"))) return esmDir;
   }
   return undefined;
 }
@@ -219,13 +220,28 @@ export interface WirePromptRequest {
   arguments?: Record<string, string>;
 }
 
-interface SdkClient {
+/** The part of the SDK client that the gates drive. */
+export interface SdkClient {
   connect: (transport: unknown) => Promise<void>;
   close: () => Promise<void>;
-  callTool: (params: { name: string; arguments: Record<string, unknown> }) => Promise<WireToolResult>;
+  /** `arguments` is sent exactly as given, so an omitted one stays omitted on the wire. */
+  callTool: (params: { name: string; arguments?: Record<string, unknown> }) => Promise<WireToolResult>;
   listTools: () => Promise<{ tools: WireTool[] }>;
   listPrompts: () => Promise<{ prompts: WirePrompt[] }>;
   getPrompt: (params: WirePromptRequest) => Promise<WirePromptResult>;
+  listResources: () => Promise<{ resources: Array<Record<string, unknown>> }>;
+  listResourceTemplates: () => Promise<{ resourceTemplates: Array<Record<string, unknown>> }>;
+  readResource: (params: { uri: string }) => Promise<{ contents: Array<Record<string, unknown>> }>;
+  getServerCapabilities: () => Record<string, unknown> | undefined;
+  getServerVersion: () => { name: string; version: string } | undefined;
+  getInstructions: () => string | undefined;
+  getNegotiatedProtocolVersion: () => string | undefined;
+  /** The era the connect negotiated (`modern` for 2026-07-28, `legacy` for the 2025 handshake), once connected. */
+  getProtocolEra: () => "legacy" | "modern" | undefined;
+  /** The `server/discover` result a probing or pinned connect adopted; `undefined` on a legacy connect. */
+  getDiscoverResult: () => Record<string, unknown> | undefined;
+  /** Send a request exactly as given. Unlike the typed methods above, it is not skipped for a capability the server never advertised. */
+  request: (request: { method: string; params?: Record<string, unknown> }) => Promise<unknown>;
 }
 
 /** A connected client of one spawned server. */
@@ -240,12 +256,25 @@ export interface WireSession {
   listPrompts: () => Promise<WirePrompt[]>;
   /** Render a prompt; a refusal rejects with the SDK's error (its `code` is the JSON-RPC error code). */
   getPrompt: (request: WirePromptRequest) => Promise<WirePromptResult>;
+  /**
+   * Send a request exactly as given and resolve with the raw result. The typed methods above skip the request for a capability the
+   * server never advertised (`listPrompts` on a server without prompts answers an empty list); this one always sends it, so the
+   * server's own answer is what rejects.
+   */
+  request: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
   close: () => Promise<void>;
 }
 
+/** How the SDK client negotiates the protocol revision: `legacy` is the plain 2025 handshake, `auto` probes, `pin` requires the revision. */
+export type SdkVersionNegotiation = {
+  mode: "legacy" | "auto" | { pin: string };
+  /** The probe policy of `auto` and a pinned revision (milliseconds before a silent probe is given up on); omitted, the SDK's defaults apply. */
+  probe?: { timeoutMs?: number; maxRetries?: number };
+};
+
 /** What a wire session needs to start a built server and name its target. */
 export interface WireSessionOptions {
-  /** The MCP SDK's ESM build (see {@link resolveSdkEsmDir}). */
+  /** The MCP client's ESM build (see {@link resolveSdkEsmDir}). */
   sdkEsmDir: string;
   /** Absolute path of the built server's `index.js`. */
   entry: string;
@@ -255,21 +284,56 @@ export interface WireSessionOptions {
   clientName: string;
   /** Receives each chunk the server writes to stderr (its log); omitted, the chunks are discarded. */
   onStderr?: (chunk: string) => void;
+  /** The client's negotiation mode; omitted, `{ mode: "legacy" }` is sent explicitly. */
+  versionNegotiation?: SdkVersionNegotiation;
+  /**
+   * The capabilities the client declares (for example `{ elicitation: { form: {} } }`); omitted, the client sends
+   * no `capabilities` option and its handshake is unchanged.
+   */
+  clientCapabilities?: Record<string, unknown>;
+  /**
+   * Answers each `elicitation/create` request the server sends. Registered only when `clientCapabilities` declares
+   * `elicitation`; then, omitted, every request is cancelled.
+   */
+  onElicitation?: (request: ElicitationRequest) => Promise<ElicitationAnswer> | ElicitationAnswer;
+}
+
+/** The params of an `elicitation/create` request, as the server sent them. */
+export interface ElicitationRequest {
+  message: string;
+  requestedSchema: unknown;
+  mode?: string;
+  [member: string]: unknown;
+}
+
+/** An answer to an `elicitation/create` request. */
+export interface ElicitationAnswer {
+  action: "accept" | "decline" | "cancel";
+  content?: Record<string, unknown>;
 }
 
 /**
- * Spawn the built server with `extraEnv` on top of the explicit connection settings, and connect an
- * SDK client to it over stdio. The server's startup bootstrap has run before the connection is
- * accepted.
+ * Spawn the built server with `extraEnv` on top of the explicit connection settings, and connect the
+ * SDK client to it over stdio in `options.versionNegotiation` (default legacy: the plain 2025-11-25
+ * connect, with no probe and no 2026-07-28 headers). Resolves with the connected client; the caller
+ * closes it.
  */
-export async function openWireSession(
+export async function connectSdkClient(
   options: WireSessionOptions,
   extraEnv: Record<string, string> = {},
-): Promise<WireSession> {
-  const sdkClientIndex = pathToFileURL(path.join(options.sdkEsmDir, "client", "index.js")).href;
-  const sdkClientStdio = pathToFileURL(path.join(options.sdkEsmDir, "client", "stdio.js")).href;
+): Promise<SdkClient> {
+  const sdkClientIndex = pathToFileURL(path.join(options.sdkEsmDir, "index.mjs")).href;
+  const sdkClientStdio = pathToFileURL(path.join(options.sdkEsmDir, "stdio.mjs")).href;
   const { Client } = (await import(sdkClientIndex)) as {
-    Client: new (info: { name: string; version: string }) => SdkClient;
+    Client: new (
+      info: { name: string; version: string },
+      options: { versionNegotiation: SdkVersionNegotiation; capabilities?: Record<string, unknown> },
+    ) => SdkClient & {
+      setRequestHandler: (
+        method: "elicitation/create",
+        handler: (request: { params: ElicitationRequest }) => Promise<ElicitationAnswer> | ElicitationAnswer,
+      ) => void;
+    };
   };
   const { StdioClientTransport } = (await import(sdkClientStdio)) as {
     StdioClientTransport: new (params: {
@@ -291,9 +355,32 @@ export async function openWireSession(
     options.onStderr?.(chunk.toString());
   });
 
-  const namespace = options.target.namespace;
-  const client = new Client({ name: options.clientName, version: "0.0.0" });
+  const client = new Client(
+    { name: options.clientName, version: "0.0.0" },
+    {
+      versionNegotiation: options.versionNegotiation ?? { mode: "legacy" },
+      ...(options.clientCapabilities !== undefined ? { capabilities: options.clientCapabilities } : {}),
+    },
+  );
+  // The client refuses a handler for a request it did not declare, so it is registered only with `elicitation`.
+  if (options.clientCapabilities?.["elicitation"] !== undefined) {
+    const answer = options.onElicitation ?? ((): ElicitationAnswer => ({ action: "cancel" }));
+    client.setRequestHandler("elicitation/create", (request) => answer(request.params));
+  }
   await client.connect(transport);
+  return client;
+}
+
+/**
+ * {@link connectSdkClient} behind the session interface the gates use. The server's startup
+ * bootstrap has run before the connection is accepted.
+ */
+export async function openWireSession(
+  options: WireSessionOptions,
+  extraEnv: Record<string, string> = {},
+): Promise<WireSession> {
+  const client = await connectSdkClient(options, extraEnv);
+  const namespace = options.target.namespace;
   return {
     call: (name, args) => client.callTool({ name, arguments: { server: "default", namespace, ...args } }),
     callOn: (server, name, args) => client.callTool({ name, arguments: { server, namespace, ...args } }),
@@ -301,6 +388,7 @@ export async function openWireSession(
     listTools: async () => (await client.listTools()).tools,
     listPrompts: async () => (await client.listPrompts()).prompts,
     getPrompt: (request) => client.getPrompt(request),
+    request: (method, params = {}) => client.request({ method, params }),
     close: () => client.close().catch(() => {}),
   };
 }

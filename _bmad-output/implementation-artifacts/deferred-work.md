@@ -2848,6 +2848,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-15T13:36:58Z status=routed owner=burndown by=harvest note=pre-existing; blocks a green launcher suite before 42.7 publishes the extension
 - 2026-10-16T15:58:09Z status=routed owner=42-7-vs-code-extension-publish by=burndown note=overflow: the extension-publish story needs a green launcher suite on every platform; DW bullet in 42.7
 - 2026-10-19T22:31:15Z status=routed owner=42-7-vs-code-extension-publish by=harvest note=occurrence: 41.6 implement 2026-10-19 reproduced clientsActivationFlow 33-3-3 timing out at 60s on the working tree and on a baseline 3890fec copy (re-toggled roster never persists)
+- 2026-10-20T09:40:41Z occurrence=43-1-framework-migration-to-sdk-v2 by=cr note=43.1 cr: launcher tsc --noEmit red on this host, 11 errors, all missing vscode/servermanager modules; none in a 43.1 file
 
 ### DW-533: iris_production_manage delete removes ANY class given as name: the class-delete path never checks that the class extends Ens.Production
 - source: spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: high | footprint: in-story
@@ -3021,6 +3022,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: spine AD-4 Known divergences + Deferred (the Epic 38 gate routes them to one ledger entry with an owner); correcting a hint is an AD-15 sanctioned change (iris_execute_tests is already DW-498)
 - 2026-10-16T15:13:57Z status=decision-pending owner=burndown by=harvest note=product call for the decision sheet: sanction the hint correction (and in which story) or keep the grandfathered hints
 - 2026-10-16T15:58:09Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=decided=orchestrator(Lead-away) decision 18: sanction the destructiveHint correction before 1.0; DW bullet in 42.1
+- 2026-10-20T23:38:03Z occurrence=43-3-human-confirmation-through-elicitation note=43.3 plan inventory: iris_ldap_manage delete, iris_x509_manage delete and iris_service_manage enable/disable/set are annotated destructiveHint false although they delete or disable; fix with the same AD-15 annotation correction
 
 ### DW-561: Epic 38 capstone, the 38.4 and the 38.5 wire gates each carry their own fixture helpers (putDoc, compileDoc, lineNumber, fixtureDocuments, fixtureGlobals, removeFixtures) instead of one promoted set in process-gate-helpers.ts
 - source: _bmad-output/implementation-artifacts/spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3152,6 +3154,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: server-base.ts:1178 registerTool passes inputSchema, so the SDK validates before the audited chokepoint; the 39.3 gate audit row (story-39-3-body-search-live-gate.test.ts:1120) sees an entry for the valid call only
 - 2026-10-17T09:11:02Z status=escalated owner=burndown by=cr note=decide: validate inside the chokepoint (permissive SDK schema) or amend AD-3/AD-19; recheck after the Epic 43 SDK move
 - 2026-10-17T18:31:10Z status=routed owner=43-1-framework-migration-to-sdk-v2 by=merge_gate note=decided=orchestrator(Lead-away) decision 33: the SDK v2 call-path rewrite audits schema-invalid calls (one entry, outcome error, no argument values); DW bullet in 43.1
+- 2026-10-20T09:47:18Z status=resolved-by:43-1-framework-migration-to-sdk-v2 owner=43-1-framework-migration-to-sdk-v2 by=lead note=delivered: validation runs inside the audit wrapper of the owned tools/call; a schema-invalid call writes one entry (outcome error, paramKeys only, never params even with IRIS_AUDIT_LOG_PARAMS=true; unknown/hidden unaudited); pinned by story-43-1-schema-invalid-audit, story-43-1-qa-dw579-process, the handler golden and compat rows; lead smoke: armed story-39-3 live gates pass
 
 ### DW-580: iris_message_search searchTable matches only headers whose body class is exactly the Search Table's DOCCLASS; indexed bodies of a DOCCLASS subclass are left out unless bodyClass names that subclass
 - source: spec-39-4-search-table-lookup.md | severity: med | fix-risk: med | footprint: in-story
@@ -3379,6 +3382,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-19T09:16:29Z status=decision-pending owner=burndown by=harvest note=human=the user decides whether to correct .claude/rules/object-script-testing.md, iris-objectscript-basics.md and project rule #7 (agent instruction files are the user's to edit)
 - 2026-10-19T14:21:30Z note=Story 41.4 plan probes add two facts the project rules do not yet carry: embedded SQL compiles only when it first runs, so a clean class compile proves nothing about it; and a %SQL.Statement result from a %SYS class query must be closed before switching back (the legacy %ResultSet the REST handlers use is unaffected). For the user to consider alongside the rule-file corrections.
 - 2026-10-20T04:44:12Z status=decision-pending owner=burndown by=merge_gate note=decision sheet (Lead away, unattended run): a user-owned decision about editing .claude/rules/*, which agents never edit; moved to sprint-status action_items as epic-41-decision-sheet-item-1-correct-the-agent-rule-files-dw-615 (owner user, open)
+- 2026-10-20T05:03:55Z status=dropped owner=burndown by=merge_gate note=action_item:epic-41-decision-sheet-item-1-correct-the-agent-rule-files-dw-615 (the human-owned decision lives in sprint-status action_items; grammar correction of the Epic 41 sheet trailer)
 
 ### DW-616: The AGENTS.md marker-reading contract Story 41.2 defined has no owner in Story 41.6: report, never guess, on a missing or repeated own marker; a BOM before line 1; end the last line before appending; and the reader rows of story-41-2-qa-agents-md-consumer.test.ts run only a test-local reader
 - source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: med | fix-risk: low | footprint: in-epic
@@ -3391,6 +3395,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 41.2 QA over stdio saw -32602 on all four; server-base.ts registerPrompt passes an argsSchema whenever a prompt declares arguments; after the retirement no shipped prompt renders from an omitted arguments
 - 2026-10-19T09:50:06Z status=routed owner=43-1-framework-migration-to-sdk-v2 by=cr note=43.1 rewrites prompt registration on SDK v2: render all-optional prompts from an omitted arguments; pin it in AC 43.1.3
 - 2026-10-19T19:44:33Z occurrence=41-5-workflow-skills-refresh
+- 2026-10-20T09:47:19Z status=resolved-by:43-1-framework-migration-to-sdk-v2 owner=43-1-framework-migration-to-sdk-v2 by=lead note=delivered: prompts/get treats an omitted arguments as {}; the 7 DW-617 golden rows equal their {} rows on the raw wire and through a v2 Client getPrompt({name}); QA: a real @modelcontextprotocol/sdk 1.29.0 client against the 5 built v2 servers 214/214 (v1 baseline fails exactly the 11 omitted rows)
 
 ### DW-618: .changeset/epic35-defect-gate.md still says the objectscript-review prompt got a wording fix, so the first changeset version lists a fix to a prompt the same release removes
 - source: spec-41-2-always-on-objectscript-pre-write-rule.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3442,12 +3447,15 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 41.6 plan research 2026-10-19: Pi MCP since 0.99.0 (.pi/mcp.json), Kilo kilo.json[c] mcp key, Junie .junie/mcp/mcp.json, all still excluded/roadmap; adapters.ts:579-601, :480
 - 2026-10-19T22:31:15Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=re-disposition the three MCP-capable clients, rename or retire the stale rows, fix docsUrl, bump ADAPTER_DATA_VERSION with the certification table, before 1.0
 - 2026-10-20T02:12:59Z occurrence=41-7-skills-pack-docs-and-capstone by=cr note=PACK_TARGETS too: the gemini row's own note says Antigravity CLI replaced Gemini CLI for unpaid users; no row or id names it
+- 2026-10-20T12:12:41Z occurrence=43-2-serve-mcp-revision-2026-07-28 note=43.2 plan research 2026-10-20: pi MCP since 0.99.0 (stdio+streamable HTTP, ~/.pi/agent/mcp.json, .pi/mcp.json; npm now @earendil-works/pi-coding-agent); windsurf adapter may write a config Devin Desktop ignores (Cascade removed v3.9.19 2026-09-08; mcp_config.json legacy-Cascade-only); goose repo now aaif-goose/goose, docs goose-docs.ai
 
 ### DW-627: The default iris-mcp-all test sweep reaches a local IRIS: the live gates default to localhost:52773 / HSCUSTOM and run their legs whenever that instance answers, with no opt-in
 - source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: 41.6 implement 2026-10-19: the (once) sweep with no IRIS_* set ran 182 (third 0) and 195 (third 1) live-gate tests against the shared instance (no leftovers found); with IRIS_HOST=127.0.0.1 IRIS_PORT=1 they skip; epic35-defect-gate.test.ts:50 reads IRIS_HOST ?? localhost, as do the story-39/40 and epic38/40 capstone gates
 - 2026-10-19T22:31:15Z status=routed owner=42-2-bootstrap-downgrade-guard by=harvest note=same class as DW-518: a contributor's plain pnpm test must not touch an instance; gate every live leg on an explicit opt-in (IRIS_REQUIRE_LIVE or an IRIS_HOST the caller set) before 1.0, keeping the armed lead/CI runs
 - 2026-10-20T04:42:43Z status=routed owner=42-2-bootstrap-downgrade-guard by=lead note=reference: Story 41.8's story-41-8-qa-accept-language-live-gate.test.ts is the opt-in shape (legs run only with IRIS_REQUIRE_LIVE=1 and all five IRIS_*; a guard test proves zero requests unarmed); the prepublish gate must then export all five IRIS_* (42.6)
+- 2026-10-20T07:58:39Z occurrence=43-1-framework-migration-to-sdk-v2 note=the two launcher SDK-client tests (governanceUiRoundTrip, localSpawnIntegration) read IRIS_TEST_HOST/IRIS_TEST_PORT defaulting to localhost:52773 HSCUSTOM and ignore IRIS_HOST/IRIS_PORT; a 43.1 plan probe reached the shared instance through them (read-only)
+- 2026-10-20T12:12:41Z occurrence=43-2-serve-mcp-revision-2026-07-28 note=43.2 implement handoff ran pnpm --filter @iris-mcp/dev test with no IRIS_* set; dev's live gates wrote and removed their disposable ExecuteMCPv2.Temp.QaStory* fixtures on the shared instance (lead verified no leftovers)
 
 ### DW-628: The documented npx form npx -y @iris-mcp/client-config iris-mcp-clients <command> passes iris-mcp-clients to the CLI as its command (unknown-command once published) and carries no @1 pin
 - source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: med | fix-risk: low | footprint: out-of-footprint
@@ -3498,3 +3506,148 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-41-8-epic-41-burn-down.md | severity: low | fix-risk: med | footprint: in-story
 - evidence: src/ExecuteMCPv2/Utils.cls StripErrorPrefix doc ends 'every IRIS rendering begins with its own prefix'; the 41.8 CHANGELOG Known limits says 'its own prefix or with Unknown status code'; behavior is safe (such text has no ' #digits: ' head)
 - 2026-10-20T04:34:25Z status=wontfix-accepted owner=41-8-epic-41-burn-down by=cr note=comment-only; fixing it moves BOOTSTRAP_VERSION again; reopen_if=the next story editing Utils.cls leaves that sentence in place
+
+### DW-637: pnpm audit cannot see the ajv 8.18.0, ajv-formats and fast-uri 3.1.0 bundled into @modelcontextprotocol/server 2.3.1's dist; they load as the default JSON-schema validator used for elicitation, and fast-uri was behind 9 of v1's advisories
+- source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 43.1 plan probe 2026-10-20: @modelcontextprotocol/server@2.3.1 dist ajvProvider-*.mjs bundles them; pnpm audit --prod reads only the lockfile
+- 2026-10-20T07:58:39Z status=routed owner=43-3-human-confirmation-through-elicitation by=harvest note=43.3 enables elicitation, the only user of the bundled validator: check the published advisories against ajv 8.18.0 and fast-uri 3.1.0 and record the verdict (or supply a validator) before the dialog ships
+- 2026-10-21T01:44:35Z status=routed owner=42-1-pre-publish-package-fixes by=lead note=43.3 delivered the verdict (fast-uri 3.1.0 advisories unreachable: constant schema, bundled validator never invoked) and the story-43-3-validator-unreachable tripwire; residual: before 1.0, bump the exact SDK pin if a release pins fast-uri >=3.1.8 (typescript-sdk#2966/PR #2973); DW-637 bullet under 42.1
+
+### DW-638: The v2-client code in five iris-mcp-all local-copy gates and two launcher integration tests has never run against a server: each skips unless IRIS is reachable
+- source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: 43.1 review (verification-gap, unverified): epic37-default-outage-gate, host-guard-process-gate, server-manager-process-gate, server-manager-precedence-gate, governance-file-process-gate, launcher localSpawnIntegration and governanceUiRoundTrip ran unarmed only
+- 2026-10-20T07:58:39Z status=open owner=43-1-framework-migration-to-sdk-v2 by=harvest note=the lead's 43.1 smoke runs them armed against the explicit shared target (read traffic; BOOTSTRAP_VERSION current so no deploy)
+- 2026-10-20T09:47:19Z status=resolved-by:43-1-framework-migration-to-sdk-v2 owner=43-1-framework-migration-to-sdk-v2 by=lead note=lead smoke 2026-10-20 armed against the explicit shared target: epic37-default-outage-gate, host-guard-process-gate, server-manager-process-gate, server-manager-precedence-gate, governance-file-process-gate and both story-39-3 live gates 146 passed 1 skipped; launcher localSpawnIntegration + governanceUiRoundTrip 3/3 with IRIS_TEST_* explicit
+
+### DW-639: The 43.1 sdk-wire golden embeds the whole tool catalogue and governance policy map, so any later tool/action/description change turns the default suite red, and its header test forbids recapturing from v2
+- source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 43.1 review: fixtures/sdk-wire-golden.json tools-list and call:server-profiles lines; story-43-1-sdk-wire-golden.test.ts header test
+- 2026-10-20T07:58:39Z status=routed owner=43-4-sdk-v2-docs-smokes-and-capstone by=harvest note=43.4 decides how the frozen v1 oracle retires once the catalogue legitimately changes (compare only what a migration can change, or hand the tools-list rows to the tools-list snapshot); 43.2 reuses it unchanged
+- 2026-10-20T09:40:41Z occurrence=43-1-framework-migration-to-sdk-v2 by=cr note=QA's fixtures/sdk-handler-golden.json is a second frozen v1 oracle (handler texts, startup requests, BOOTSTRAP_VERSION); retire both together
+- 2026-10-21T05:23:05Z status=resolved-by:43-4-sdk-v2-docs-smokes-and-capstone owner=43-4-sdk-v2-docs-smokes-and-capstone by=lead note=delivered: fixtures/sdk-golden-sanctioned-changes.json (11 entries) read by golden-sanctioned-changes.mjs; both frozen goldens SHA-256 pinned and byte-unchanged; the five golden tests read through the loader; loader refuses no-op, non-append description, wrong old, unknown key, duplicate id, out-of-row pointer, unnamed diff and missing CHANGELOG sanction id (QA 26 mutations); spine conventions row Frozen goldens
+
+### DW-640: A tools/call result with both isError and structuredContent serializes its members in a different order on SDK v2 (content, structuredContent, isError)
+- source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: 43.1 review: the SDK Server re-encodes the owned handler's result in its schema order; JSON value identical; no public option keeps v1 order
+- 2026-10-20T07:58:39Z status=by-design owner=43-1-framework-migration-to-sdk-v2 by=harvest note=sanctioned AD-15 exception, wave-8 decision 4; pinned by the sdk-wire-compat row
+- 2026-10-20T08:51:38Z status=dropped owner=43-1-framework-migration-to-sdk-v2 by=lead note=invalid premise (wave-8 decision 5): QA showed v1's SDK server already re-encoded every tools/call result in schema order (content, structuredContent, isError); v1 baseline vs v2 byte-identical on 22 handler-golden rows and 90 sweep results
+
+### DW-641: A TS SDK v2 client on auto or pin negotiation (Claude Code since 2.1.292) spawns a short-lived probe process from the same command on every connect, which runs the server's whole startup (bootstrap probe, config load) once more
+- source: _bmad-output/implementation-artifacts/spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 43.2 plan probe 2026-10-20: one factory call per process per client mode; the extra process is the client's version probe, predates 43.2
+- 2026-10-20T12:12:41Z status=routed owner=43-4-sdk-v2-docs-smokes-and-capstone by=harvest note=43.4 documents it in the client docs (startup cost, log lines appearing twice) and checks the probe process exits cleanly in its live smoke
+- 2026-10-21T05:23:05Z status=resolved-by:43-4-sdk-v2-docs-smokes-and-capstone owner=43-4-sdk-v2-docs-smokes-and-capstone by=lead note=delivered: client docs describe the probe as observed; lead smoke 2026-10-21: Claude Code 2.1.296 starts each of the five servers once per session on both eras (one sessionStart), Inspector 2.9.0 pinned era starts once per invocation; QA story-43-4-qa-probe-copy pins the TS SDK v2 auto/pin sibling probe process (two starts, SIGTERM-reaped, no survivors)
+
+### DW-642: A cancelled tools/call still runs its IRIS call to the end and is audited ok on both eras: the owned handlers get request.params only, never the SDK abort signal, so a cancelled write still happens
+- source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: QA 2026-10-20 story-43-2-qa-concurrency-cancel: the cancelled id gets no answer but its held read is forwarded and audited ok; server-base.ts:874 passes request.params only (pre-existing, both eras)
+- 2026-10-20T13:22:16Z status=routed owner=43-3-human-confirmation-through-elicitation by=cr note=43.3 forwards ctx: forward the abort signal to the HTTP call; pin a cancelled call never reaches IRIS or is not audited ok
+- 2026-10-21T01:44:35Z status=resolved-by:43-3-human-confirmation-through-elicitation owner=43-3-human-confirmation-through-elicitation by=lead note=delivered: ctx.mcpReq.signal forwarded through bindSignal to ctx.http and resolveProfileClient clients; a cancel before the request never reaches IRIS (in-memory/unit pins), a cancel mid-flight closes the held connection and is audited error with CANCELLED_CALL_TEXT (real stdio both eras, QA cancel-audit + concurrency-cancel); a call cancelled before its dialog is audited as cancelled (CR HIGH fix)
+
+### DW-643: On a modern-pinned stdio connection the SDK does not re-check each request's _meta protocolVersion: a request claiming 2025-11-25, 2099-01-01 or garbage is served where the revision (basic/versioning) says -32022 MUST be returned
+- source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: high | footprint: out-of-footprint
+- evidence: QA 2026-10-20 story-43-2-qa-mixed-eras per-request protocolVersion row: every claim served as the modern era; no claim reached a different profile, namespace, gate or audit outcome (SDK 2.3.1-owned)
+- 2026-10-20T13:22:21Z status=wontfix-accepted owner=43-2-serve-mcp-revision-2026-07-28 by=cr note=reopen_if=an SDK release answers -32022 to a mismatched per-request protocolVersion, or a client depends on -32022
+
+### DW-644: An unknown tool on the 2026-07-28 era is an in-band isError result (MCP error -32602: Tool X not found), where the revision's server/tools lists it as a JSON-RPC protocol error
+- source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: QA 2026-10-20 story-43-2-qa-revision-oracle unknown-tool row; the cross-era pin and the 43.1 golden pin the in-band result byte for byte on both eras
+- 2026-10-20T13:22:27Z status=by-design owner=43-2-serve-mcp-revision-2026-07-28 by=cr note=wave-8 decision #1 and the cross-era equivalence pin keep it identical to the frozen 2025 golden on both eras
+
+### DW-645: An initialize that carries a valid 2026-07-28 _meta envelope is refused -32601 without data.supported, where the revision says a modern-only server SHOULD name its versions in any initialize error (the envelope-less initialize does, -32022)
+- source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: high | footprint: out-of-footprint
+- evidence: QA 2026-10-20 story-43-2-qa-mixed-eras row: an initialize with a valid modern envelope is a JSON-RPC error with no data.supported (SDK 2.3.1-owned)
+- 2026-10-20T13:22:30Z status=wontfix-accepted owner=43-2-serve-mcp-revision-2026-07-28 by=cr note=reopen_if=a client fails on the -32601 answer to an enveloped initialize because it lacks data.supported
+
+### DW-646: resources/list lists iris-governance://default twice on both eras: the static default resource and the iris-governance://{profile} template's list entry for the default profile
+- source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: registerGovernanceResource (server-base.ts:1166-1215): the static iris-governance-default plus the template list callback naming every profile incl. default; in the frozen v1 golden for all 5 servers
+- 2026-10-20T13:22:33Z status=routed owner=43-4-sdk-v2-docs-smokes-and-capstone by=cr note=decide with DW-639's golden retirement: a fix changes the frozen 2025 wire and needs an AD-15 sanction
+- 2026-10-21T05:23:05Z status=resolved-by:43-4-sdk-v2-docs-smokes-and-capstone owner=43-4-sdk-v2-docs-smokes-and-capstone by=lead note=delivered: S-43.4-governance-resource; resources/list lists iris-governance://default once on all five servers (5 ledger entries, unit rows in server-discovery.test.ts, QA raw-wire both eras incl. a two-profile row)
+
+### DW-647: Stdio lines that are not JSON-RPC requests (not JSON, [], {}, a batch array) are dropped with no output, where JSON-RPC expects -32700 or -32600
+- source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: high | footprint: out-of-footprint
+- evidence: QA 2026-10-20 story-43-2-qa-mixed-eras junk-line row; the review pinned it: stdout holds only the answers to ids 1 and 2 (SDK 2.3.1-owned)
+- 2026-10-20T13:22:36Z status=wontfix-accepted owner=43-2-serve-mcp-revision-2026-07-28 by=cr note=reopen_if=the qa-mixed-eras junk-line row goes red (the SDK writes -32700/-32600) or a client needs those errors
+
+### DW-648: After a legacy initialize, a request carrying a 2026-07-28 _meta envelope is served as the 2025 era (no resultType), and server/discover answers -32601
+- source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: QA 2026-10-20 story-43-2-qa-mixed-eras legacy-then-modern row; the review pinned the 2025 shape (no resultType) in its served branches
+- 2026-10-20T13:22:39Z status=by-design owner=43-2-serve-mcp-revision-2026-07-28 by=cr note=the legacy pin: a connection's era is fixed by its opening message (serveStdio legacy: serve)
+
+### DW-649: flake: packages/shared sdk-wire-compat.test.ts failed 1 of 55 in the Story 43.2 fresh check (forward order, clean worktree) and passed on 8 unchanged reruns; the likely cause is the removeTools/addTools rows asserting a list_changed count after a fixed 50 ms sleep
+- source: _bmad-output/implementation-artifacts/spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 43.2 fresh check 2026-10-20: shared forward 1 failed|54 passed, reverse 55/55; reruns: main checkout 3/3, fresh worktree 5/5; the failing row name was lost to the summary grep; rows at sdk-wire-compat.test.ts:538-568 wait setTimeout(50) before reading the notification count
+- 2026-10-20T13:30:48Z status=routed owner=43-3-human-confirmation-through-elicitation by=harvest note=43.3 reworks this file: replace the fixed sleeps with a deterministic barrier (await the notification, or a client round trip before counting)
+- 2026-10-21T01:44:35Z status=resolved-by:43-3-human-confirmation-through-elicitation owner=43-3-human-confirmation-through-elicitation by=lead note=delivered: sdk-wire-compat removeTools/addTools rows await the notification then a round trip; 25/25 back-to-back runs green (implement + review); the double-notify mutation turns the exactly-one rows red 8/8
+
+### DW-650: iris_doc_put with allowStorageRegeneration: true drops Storage definitions on a flag the agent sets itself, the same capability iris_doc_edit:regenerateStorage gates, but under the default-enabled iris_doc_put and outside AD-34's gate set
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: 43.3 plan inventory 2026-10-20 (decision 12 candidate): gating it needs an extra GET to name the dropped Storage
+- 2026-10-20T23:38:03Z status=escalated owner=burndown by=harvest note=for the decision sheet: add to the AD-34 gate set in a later epic, or accept
+- 2026-10-21T05:27:11Z status=wontfix-accepted owner=burndown by=merge_gate note=wave-8 decision 29: explicit default-off flag, governance-gated; reopen_if=a reported unwanted Storage drop through iris_doc_put, or the AD-34 gate set is extended
+
+### DW-651: iris_mapping_manage force: true overrides an IRIS-side guard on system-global base mappings on a flag the agent sets; TS cannot tell when the guard applies, so 43.3 asks no human for it
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 43.3 plan inventory: Config.cls:643 IsGuardedBaseMapping decides IRIS-side
+- 2026-10-20T23:38:03Z status=wontfix-accepted owner=43-3-human-confirmation-through-elicitation by=harvest note=reopen_if=IRIS exposes the guard condition to TS, or a user reports an unwanted base-mapping override
+
+### DW-652: The Storage guard covers only iris_doc_put and iris_doc_edit; iris_doc_load, the iris_doc_xml_export import and iris_env_promote's document writes (env-promote.ts:869, ?ignoreConflict=1) can drop a Storage definition unguarded
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: 43.3 plan inventory 2026-10-20
+- 2026-10-20T23:38:03Z status=escalated owner=burndown by=harvest note=for the decision sheet: extend the Story 38.4 Storage guard to every document-write path, or accept
+- 2026-10-21T05:27:11Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=wave-8 decision 30: fix before 1.0, extend the Story 38.4 Storage guard to doc_load, XML import and env_promote document writes; DW-652 bullet under 42.1
+
+### DW-653: The resend-failed-messages prompt says an over-cap match is refused and omitting dryRun or confirm is refused; a dry run returns the full matchCount and omitting dryRun previews; the prompt text is pinned by the frozen 43.1 golden
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 43.3 plan research 2026-10-20
+- 2026-10-20T23:38:03Z status=routed owner=43-4-sdk-v2-docs-smokes-and-capstone by=harvest note=correct the prompt text with DW-639's golden retirement (sanctioned AD-15 prompt-text fix) and regenerate the skill
+- 2026-10-21T05:23:05Z status=resolved-by:43-4-sdk-v2-docs-smokes-and-capstone owner=43-4-sdk-v2-docs-smokes-and-capstone by=lead note=delivered: S-43.4-prompt-text; resend-failed-messages steps 3-4 corrected, skills regenerated (gen:skills:check, gen:pack:check, validate:prompts OK), three prompt hash pins moved; QA proves only steps 3-4 changed (old steps restore the pre-story body hash); remaining tool-description wording is DW-662 (42.1)
+
+### DW-654: Audit entries for %SYS-scoped tools record the profile's default namespace (for example HSCUSTOM), not %SYS
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 43.3 plan probe 2026-10-20
+- 2026-10-20T23:38:03Z status=escalated owner=burndown by=harvest note=for the decision sheet: AD-19 accuracy; record the effective namespace for %SYS-scoped handlers, or accept
+- 2026-10-21T05:27:11Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=wave-8 decision 31: record the effective namespace for %SYS-scoped handlers in audit entries; DW-654 bullet under 42.1
+
+### DW-655: prd.md:86 says All 86 consolidated tools; the suite has 115
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 43.3 plan
+- 2026-10-20T23:38:03Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=AC 42.9.3 aligns the PRD with what shipped
+
+### DW-656: The HTTP client clears its timeout once response headers arrive, so a stalled body read is unbounded, and an abort by destroy() is reported as TIMEOUT
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 43.3 plan reading of http-client.ts
+- 2026-10-20T23:38:03Z status=wontfix-accepted owner=43-3-human-confirmation-through-elicitation by=harvest note=reopen_if=a stalled body read is observed (the Web Gateway's own timeout bounds it in practice) or a cancelled call is reported as TIMEOUT to a user
+
+### DW-657: resendFiltered fails open: a read-only preview that fails with anything but an IRIS refusal (timeout, connection error, 5xx) shows no dialog and the execute request is sent
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: 43.3 review 2026-10-20: message-resend.ts:609-636 swallows every preview error and returns undefined; confirmOnWire treats undefined scope as proceed
+- 2026-10-20T23:38:03Z status=open owner=43-3-human-confirmation-through-elicitation by=harvest note=wave-8 decision 21: fail closed on an eliciting client for any preview failure that is not an IRIS 4xx refusal; code review applies it in-story
+- 2026-10-21T01:44:35Z status=resolved-by:43-3-human-confirmation-through-elicitation owner=43-3-human-confirmation-through-elicitation by=lead note=delivered (decision 21 as corrected): a resendFiltered preview that fails other than an IRIS error response below 500 rejects ctx.confirm and ends the call with that error, no execute POST; fake-listener Demo.PreviewDown (500) and Demo.Refused (HTTP 200 refusal) rows on both eras; fail-open mutation red
+
+### DW-658: A declined promotion can still have run the first-use set-up (connection check, ExecuteMCPv2 bootstrap) on a target profile, because env-promote resolves both profile clients before the dialog
+- source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: 43.3 review: env-promote.ts:1151-1191 executeAction resolves before ctx.confirm
+- 2026-10-20T23:38:03Z status=wontfix-accepted owner=43-3-human-confirmation-through-elicitation by=harvest note=wave-8 decision 22: documented known limit; reopen_if=a deploy to a declined target is reported as harmful or the bootstrap gains a user-data write
+
+### DW-659: A confirmation dialog still open when a server is killed by SIGTERM or SIGINT with its stdin open gets no unanswered audit entry: no signal handler runs stop(); only stdin EOF, the 600 s sweep or stop() flush pending asks
+- source: spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: 43.3 CR 2026-10-20: no process.on(SIGTERM|SIGINT) in packages/*/src; flushPendingAsks runs only from server.onclose, the sweep timer and stop(); QA saw a SIGTERM'd server write none; a handler would add a shutdown audit line to every signal-ended session
+- 2026-10-21T01:41:48Z status=wontfix-accepted owner=43-3-human-confirmation-through-elicitation by=cr note=reopen_if=a client is seen SIGTERMing a server with stdin open, or an audit shows an asked dialog with no entry
+
+### DW-660: The fake IRIS listener answers the purge, clean and resendFiltered refusals with HTTP 400, where the ExecuteMCPv2 handlers refuse with HTTP 200 and the error in the envelope, so pinned refusal texts read 'IRIS returned HTTP 400' instead of 'IRIS reported errors'
+- source: spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: 43.3 CR 2026-10-20: fake-iris-listener.mjs replies 400 for those refusals; RenderResponseBody (irislib/%Atelier/REST.cls:129-169) sets no HTTP status; the task-0 baseline literals were captured against this fake, so a fix recaptures them
+- 2026-10-21T01:41:48Z status=wontfix-accepted owner=43-3-human-confirmation-through-elicitation by=cr note=reopen_if=a TS path branches on IrisApiError.statusCode for a gate route pinned only by a 400-answering fake route
+
+### DW-661: The README payload table (README.md:778-790) says byte counts are not test-pinned, but story-40-4-doc-claims pins the dev row and three 39.x doc-claims tests require the Last re-measured story to be 39.x or 40.x; its figures predate the Story 43.4 description sentences (about +2.3 KB)
+- source: _bmad-output/implementation-artifacts/spec-43-4-sdk-v2-docs-smokes-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 43.4 plan inventory 2026-10-20: story-40-4-doc-claims.test.ts:216-217, story-39-4/39-1/39-5 doc-claims
+- 2026-10-21T03:57:59Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=re-measure the payload table in the 42.9 README rewrite and move its doc-claims pins with it
+
+### DW-662: The iris_message_resend description, its maxMessages schema text and the interop README still say executing needs both dryRun false and confirm true or the call is refused, and that an over-cap count is refused, though MessageResend.cls refuses only when dryRun is false and previews when dryRun is omitted
+- source: _bmad-output/implementation-artifacts/spec-43-4-sdk-v2-docs-smokes-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 43.4 review 2026-10-20 (blind hunter): message-resend.ts:364-369, :434; packages/iris-interop-mcp/README.md:302; Story 43.4 fixed only the resend-failed-messages prompt (DW-653)
+- 2026-10-21T03:57:59Z status=routed owner=42-1-pre-publish-package-fixes by=harvest note=a sanctioned AD-15 tool-text correction before 1.0, with DW-560's annotation corrections: one sanctioned-change ledger entry per changed byte (a replace, so the Frozen goldens convention needs its sanction to name a correction), the tools-list snapshot regenerated
+- 2026-10-21T05:15:12Z occurrence=43-4-sdk-v2-docs-smokes-and-capstone by=cr note=appendOnly is optional, so a description replace under a later sanction passes the loader and the S-43.4-only append row; 42.1 decides

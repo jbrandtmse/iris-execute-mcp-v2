@@ -1602,3 +1602,529 @@ describe("iris_env_promote:execute", () => {
     });
   });
 });
+
+// ══════════════════════════════════════════════════════════════════
+// Story 43.3: the person is asked once, after every check and before the first IRIS call
+// ══════════════════════════════════════════════════════════════════
+
+type PromoteConfirm = NonNullable<ToolContext["confirm"]>;
+type PromoteConfirmRequest = Parameters<PromoteConfirm>[0];
+type PromoteConfirmOutcome = Awaited<ReturnType<PromoteConfirm>>;
+
+/** The result a declining person ends the call with. The gate must return this very object. */
+const DECLINED_RESULT = {
+  content: [{ type: "text" as const, text: "The person declined the confirmation." }],
+  structuredContent: { code: "CONFIRMATION_DECLINED" },
+  isError: true,
+};
+
+/** A `ctx.confirm` that answers `proceed: true`. */
+function proceedingConfirm() {
+  return vi.fn(async (_request: PromoteConfirmRequest): Promise<PromoteConfirmOutcome> => ({ proceed: true }));
+}
+
+/** A `ctx.confirm` that answers with a decline. */
+function decliningConfirm() {
+  return vi.fn(
+    async (_request: PromoteConfirmRequest): Promise<PromoteConfirmOutcome> => ({
+      proceed: false,
+      result: DECLINED_RESULT,
+    }),
+  );
+}
+
+/** Where a mock's first call falls among the calls of all mocks: a call made later has a larger number. */
+function firstCallOrder(fn: { mock: { invocationCallOrder: number[] } }): number {
+  const order = fn.mock.invocationCallOrder[0];
+  expect(order).toBeDefined();
+  return order as number;
+}
+
+/** The arguments of an `execute` call over `fourStepDiff` (indices 1-4), allowing `steps` unless overridden. */
+async function promoteExecuteArgs(extra: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  const diff = fourStepDiff();
+  const plan = await buildPlan(diff);
+  return { action: "execute", source: "source", target: "target", diff, plan, steps: [1], confirm: true, ...extra };
+}
+
+/** A diff of `count` mapping steps, `global::G01`, `global::G02`, ..., all `createMapping`, indices 1 to `count`. */
+function manyMappingsDiff(count: number): Record<string, unknown> {
+  const keys = Array.from({ length: count }, (_, i) => `global::G${String(i + 1).padStart(2, "0")}`);
+  return {
+    source: { profile: "source", namespace: "HSCUSTOM" },
+    target: { profile: "target", namespace: "SADEMO" },
+    domains: { mappings: { onlyInSource: keys, onlyInTarget: [], differs: [], identical: 0 } },
+    summary: { driftCount: count, identicalCount: 0 },
+  };
+}
+
+/** A diff of two document steps: 1 `Changed.cls`, 2 `New.cls`. */
+function twoDocumentsDiff(): Record<string, unknown> {
+  return {
+    source: { profile: "source", namespace: "HSCUSTOM" },
+    target: { profile: "target", namespace: "SADEMO" },
+    domains: {
+      documents: {
+        onlyInSource: ["New.cls"],
+        onlyInTarget: [],
+        differs: [
+          { name: "Changed.cls", sourceHash: "a".repeat(64), targetHash: "b".repeat(64), sourceTs: "t1", targetTs: "t2" },
+        ],
+        identical: 0,
+      },
+    },
+    summary: { driftCount: 2, identicalCount: 0 },
+  };
+}
+
+describe("Story 43.3: confirmation (execute)", () => {
+  const originalGovernance = process.env.IRIS_GOVERNANCE;
+  let sourceHttp: ReturnType<typeof createMockHttp>;
+  let targetHttp: ReturnType<typeof createMockHttp>;
+  let ctx: ToolContext;
+
+  /** Fresh clients and a context with no `confirm`, as a unit test builds it. */
+  function wire(sourceNamespace = "HSCUSTOM", targetNamespace = "SADEMO"): void {
+    sourceHttp = createMockHttp(sourceNamespace);
+    targetHttp = createMockHttp(targetNamespace);
+    ctx = createMockCtx(sourceHttp);
+    ctx.resolveProfileClient = vi.fn(async (name: string) => {
+      if (name === "source") return sourceHttp;
+      if (name === "target") return targetHttp;
+      throw new ProfileResolutionError(name, ["default", "source", "target"]);
+    });
+  }
+
+  beforeEach(() => {
+    wire();
+  });
+
+  afterEach(() => {
+    if (originalGovernance === undefined) delete process.env.IRIS_GOVERNANCE;
+    else process.env.IRIS_GOVERNANCE = originalGovernance;
+  });
+
+  /** Every call made on the source and target clients, by method. */
+  function recordedCalls() {
+    const of = (http: typeof sourceHttp) => ({
+      get: [...http.get.mock.calls],
+      post: [...http.post.mock.calls],
+      put: [...http.put.mock.calls],
+      delete: [...http.delete.mock.calls],
+      head: [...http.head.mock.calls],
+    });
+    return { source: of(sourceHttp), target: of(targetHttp) };
+  }
+
+  /** Neither client was called at all: nothing was read and nothing was written. */
+  function expectNoIrisCalls(): void {
+    const none = { get: [], post: [], put: [], delete: [], head: [] };
+    expect(recordedCalls()).toEqual({ source: none, target: none });
+  }
+
+  /** The source re-fetches and target writes of a run that allows mapping 1, web application 3 and config 4. */
+  function arrangeSubset(): void {
+    sourceHttp.get.mockImplementation(async (path: string) => {
+      if (path.includes("/config/mapping/global")) {
+        return envelope([{ name: "NewGlobal", type: "global", namespace: "HSCUSTOM", database: "IRISDB" }]);
+      }
+      if (path.includes("/security/webapp")) {
+        return envelope([
+          {
+            name: "/api/new",
+            namespace: "HSCUSTOM",
+            dispatchClass: "My.Dispatch",
+            description: "",
+            enabled: true,
+            authEnabled: 32,
+            isNameSpaceDefault: false,
+            cspZenEnabled: false,
+            recurse: false,
+            matchRoles: "",
+            cookiePath: "/x",
+          },
+        ]);
+      }
+      return envelope([]);
+    });
+    sourceHttp.post.mockResolvedValue(envelope({ section: "config", properties: { Maxprocesses: 500 } }));
+    targetHttp.post.mockResolvedValue(envelope({ success: true }));
+  }
+
+  /** Run `execute` allowing steps 4, 1 and 3 (config, mapping, web application), listed out of plan order. */
+  async function executeSubset(extra: Record<string, unknown> = {}) {
+    return envPromoteTool.handler(await promoteExecuteArgs({ steps: [4, 1, 3], ...extra }), ctx);
+  }
+
+  /** The source and target document traffic of a run over `twoDocumentsDiff`. */
+  function arrangeDocuments(): void {
+    sourceHttp.get.mockImplementation(async (path: string) => {
+      if (path === "/api/atelier/") return versionResponse();
+      if (path.includes("doc/New.cls")) return envelope({ name: "New.cls", content: ["Class New {}"] });
+      if (path.includes("doc/Changed.cls")) return envelope({ name: "Changed.cls", content: ["Class Changed {}"] });
+      throw new Error(`unexpected sourceHttp.get ${path}`);
+    });
+    targetHttp.get.mockImplementation(async (path: string) => {
+      if (path === "/api/atelier/") return versionResponse();
+      throw new Error(`unexpected targetHttp.get ${path}`);
+    });
+    targetHttp.put.mockResolvedValue(envelope({}));
+    targetHttp.post.mockImplementation(async (path: string, body: unknown) => {
+      if (path.includes("/action/compile")) {
+        return envelope({ content: (body as string[]).map((name) => ({ name, errors: [] })) });
+      }
+      throw new Error(`unexpected targetHttp.post ${path}`);
+    });
+  }
+
+  // ── asked once, with the strings of the spec, before the first IRIS call ──
+
+  it("asks once with the operation, the target and the allowed steps in plan order, before the first read or write", async () => {
+    arrangeSubset();
+    const confirm = proceedingConfirm();
+    ctx.confirm = confirm;
+
+    const result = await executeSubset();
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm.mock.calls[0]?.[0]).toEqual({
+      operation: "promote changes to another server",
+      target: "server 'target', namespace SADEMO",
+      scope:
+        "3 step(s) from server 'source': #1 mappings createMapping global::NewGlobal; " +
+        "#3 webapps modifyWebApp /api/new; #4 config setConfig Maxprocesses",
+    });
+    expect(result.isError).toBeFalsy();
+    expect(targetHttp.post).toHaveBeenCalledTimes(3);
+    const asked = firstCallOrder(confirm);
+    expect(asked).toBeLessThan(firstCallOrder(sourceHttp.get));
+    expect(asked).toBeLessThan(firstCallOrder(sourceHttp.post));
+    expect(asked).toBeLessThan(firstCallOrder(targetHttp.post));
+  });
+
+  it("asks before the first document is read, put or compiled", async () => {
+    arrangeDocuments();
+    const confirm = proceedingConfirm();
+    ctx.confirm = confirm;
+    const diff = twoDocumentsDiff();
+    const plan = await buildPlan(diff);
+
+    const result = await envPromoteTool.handler(
+      { action: "execute", source: "source", target: "target", diff, plan, steps: [2, 1], confirm: true },
+      ctx,
+    );
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm.mock.calls[0]?.[0]).toEqual({
+      operation: "promote changes to another server",
+      target: "server 'target', namespace SADEMO",
+      scope:
+        "2 step(s) from server 'source': #1 documents putAndCompile Changed.cls; #2 documents putAndCompile New.cls",
+    });
+    expect(result.isError).toBeFalsy();
+    expect(targetHttp.put).toHaveBeenCalledTimes(2);
+    const asked = firstCallOrder(confirm);
+    expect(asked).toBeLessThan(firstCallOrder(sourceHttp.get));
+    expect(asked).toBeLessThan(firstCallOrder(targetHttp.get));
+    expect(asked).toBeLessThan(firstCallOrder(targetHttp.put));
+    expect(asked).toBeLessThan(firstCallOrder(targetHttp.post));
+  });
+
+  it("names the namespace override as the target namespace", async () => {
+    const confirm = decliningConfirm();
+    ctx.confirm = confirm;
+
+    await executeSubset({ namespace: "OVERRIDE" });
+
+    expect(confirm.mock.calls[0]?.[0]?.target).toBe("server 'target', namespace OVERRIDE");
+  });
+
+  const TEN =
+    "#1 mappings createMapping global::G01; #2 mappings createMapping global::G02; " +
+    "#3 mappings createMapping global::G03; #4 mappings createMapping global::G04; " +
+    "#5 mappings createMapping global::G05; #6 mappings createMapping global::G06; " +
+    "#7 mappings createMapping global::G07; #8 mappings createMapping global::G08; " +
+    "#9 mappings createMapping global::G09; #10 mappings createMapping global::G10";
+  const scopeCases: Array<{ title: string; steps: number[]; scope: string }> = [
+    {
+      title: "12 allowed steps list the first 10, then say how many more",
+      steps: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+      scope: `12 step(s) from server 'source': ${TEN}; and 2 more`,
+    },
+    {
+      title: "11 allowed steps list the first 10 and 1 more",
+      steps: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      scope: `11 step(s) from server 'source': ${TEN}; and 1 more`,
+    },
+    {
+      title: "10 allowed steps are all listed, with no 'more'",
+      steps: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      scope: `10 step(s) from server 'source': ${TEN}`,
+    },
+    {
+      title: "the count and the listing cover the allowed steps only, in plan order",
+      steps: [12, 2, 7],
+      scope:
+        "3 step(s) from server 'source': #2 mappings createMapping global::G02; " +
+        "#7 mappings createMapping global::G07; #12 mappings createMapping global::G12",
+    },
+    {
+      title: "one allowed step",
+      steps: [5],
+      scope: "1 step(s) from server 'source': #5 mappings createMapping global::G05",
+    },
+  ];
+  for (const scopeCase of scopeCases) {
+    it(`scope of a 12-step plan: ${scopeCase.title}`, async () => {
+      const diff = manyMappingsDiff(12);
+      const plan = await buildPlan(diff);
+      expect(plan.steps).toHaveLength(12);
+      const confirm = decliningConfirm();
+      ctx.confirm = confirm;
+
+      await envPromoteTool.handler(
+        { action: "execute", source: "source", target: "target", diff, plan, steps: scopeCase.steps, confirm: true },
+        ctx,
+      );
+
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(confirm.mock.calls[0]?.[0]?.scope).toBe(scopeCase.scope);
+    });
+  }
+
+  // ── never asked when a check of the gate refuses first ──
+
+  interface RefusalCase {
+    title: string;
+    text: string;
+    args: () => Promise<Record<string, unknown>>;
+    arrange?: () => void;
+  }
+  const refusalCases: RefusalCase[] = [
+    {
+      title: "Gate 1: 'confirm' omitted",
+      text: "Gate 1 (confirm): 'confirm' must be true to execute. No changes were made.",
+      args: () => promoteExecuteArgs({ confirm: undefined }),
+    },
+    {
+      title: "Gate 1: 'confirm' false",
+      text: "Gate 1 (confirm): 'confirm' must be true to execute. No changes were made.",
+      args: () => promoteExecuteArgs({ confirm: false }),
+    },
+    {
+      title: "no plan",
+      text:
+        "'plan' is required for action 'execute' (pass the structuredContent from a prior " +
+        "iris_env_promote 'plan' call). No changes were made.",
+      args: () => promoteExecuteArgs({ plan: undefined }),
+    },
+    {
+      title: "a plan without a planHash",
+      text:
+        "'plan' is missing a 'planHash' string -- pass the structuredContent from a prior " +
+        "iris_env_promote 'plan' call. No changes were made.",
+      args: () => promoteExecuteArgs({ plan: { steps: [] } }),
+    },
+    {
+      title: "a plan without a valid steps array",
+      text:
+        "'plan' is missing a valid 'steps' array -- pass the structuredContent from a prior " +
+        "iris_env_promote 'plan' call. No changes were made.",
+      args: () => promoteExecuteArgs({ plan: { planHash: "abc", steps: "none" } }),
+    },
+    {
+      title: "Gate 2: 'steps' omitted",
+      text:
+        "Gate 2 (steps allowlist): 'steps' (a non-empty array of plan step indices) is required " +
+        "for action 'execute'. No changes were made.",
+      args: () => promoteExecuteArgs({ steps: undefined }),
+    },
+    {
+      title: "Gate 2: 'steps' empty",
+      text:
+        "Gate 2 (steps allowlist): 'steps' (a non-empty array of plan step indices) is required " +
+        "for action 'execute'. No changes were made.",
+      args: () => promoteExecuteArgs({ steps: [] }),
+    },
+    {
+      title: "Gate 2: an index outside the plan",
+      text:
+        "Gate 2 (steps allowlist): 'steps' contains index/indices not present in 'plan.steps': 99. " +
+        "No changes were made.",
+      args: () => promoteExecuteArgs({ steps: [1, 99] }),
+    },
+    {
+      title: "Gate 3: 'diff' omitted",
+      text:
+        "Gate 3 (plan-hash freshness): 'diff' is required for action 'execute' too -- pass the SAME " +
+        "'diff' that produced 'plan' so the plan's freshness can be verified. No changes were made.",
+      args: () => promoteExecuteArgs({ diff: undefined }),
+    },
+    {
+      title: "Gate 3: a 'diff' that is not an env diff",
+      text:
+        "'diff' is missing a 'domains' object -- pass the structuredContent from a prior iris_env_diff call. " +
+        "No changes were made.",
+      args: () => promoteExecuteArgs({ diff: {} }),
+    },
+    {
+      title: "Gate 3: a stale plan",
+      text:
+        "Gate 3 (plan-hash freshness): stale plan -- regenerate the plan from the current diff " +
+        "('diff' no longer matches 'plan.planHash'). No changes were made.",
+      args: () => promoteExecuteArgs({ diff: { ...fourStepDiff(), summary: { driftCount: 999, identicalCount: 0 } } }),
+    },
+    {
+      title: "Gate 3b: a plan whose step subject was swapped",
+      text:
+        "Gate 3 (plan/diff consistency): 'plan.steps' do not match the steps derived from 'diff' -- " +
+        "the plan appears hand-edited or was generated from a different diff. Regenerate the plan from " +
+        "the current diff. No changes were made.",
+      args: async () => {
+        const plan = await buildPlan(fourStepDiff());
+        return promoteExecuteArgs({
+          plan: {
+            ...plan,
+            steps: plan.steps.map((s) => (s.operation === "createMapping" ? { ...s, subject: "global::EvilGlobal" } : s)),
+          },
+        });
+      },
+    },
+    {
+      title: "Gate 3c: a source that is not the diff's source",
+      text:
+        "Gate 3 (diff/profile match): 'diff' was generated for source 'source', but 'source' is 'other'. " +
+        "Regenerate the diff/plan for the intended source. No changes were made.",
+      args: () => promoteExecuteArgs({ source: "other" }),
+    },
+    {
+      title: "Gate 3c: a target that is not the diff's target",
+      text:
+        "Gate 3 (diff/profile match): 'diff' was generated for target 'target', but 'target' is 'prod'. " +
+        "Refusing to execute a plan against a DIFFERENT target than it was reviewed for. " +
+        "Regenerate the diff/plan for the intended target. No changes were made.",
+      args: () => promoteExecuteArgs({ target: "prod" }),
+    },
+    {
+      title: "Gate 4: the target profile's governance disables a write key of the allowed steps",
+      text:
+        "Gate 4 (target-profile governance): target profile 'target' governance disables " +
+        "iris_config_manage:set -- execution refused. No changes were made.",
+      args: () => promoteExecuteArgs({ steps: [4] }),
+      arrange: () => {
+        process.env.IRIS_GOVERNANCE = JSON.stringify({ profiles: { target: { "iris_config_manage:set": false } } });
+      },
+    },
+    {
+      title: "a profile that cannot be resolved",
+      text: new ProfileResolutionError("target", ["default", "source"]).message,
+      args: () => promoteExecuteArgs(),
+      arrange: () => {
+        ctx.resolveProfileClient = vi.fn(async (name: string) => {
+          if (name === "source") return sourceHttp;
+          throw new ProfileResolutionError(name, ["default", "source"]);
+        });
+      },
+    },
+    {
+      title: "a blank source namespace",
+      text:
+        "Cannot execute: the resolved namespace is blank (source='', target='SADEMO'). " +
+        "Check the profile's configured default namespace, or pass an explicit 'namespace' override. " +
+        "No changes were made.",
+      args: () => promoteExecuteArgs(),
+      arrange: () => wire("", "SADEMO"),
+    },
+    {
+      title: "a blank target namespace",
+      text:
+        "Cannot execute: the resolved namespace is blank (source='HSCUSTOM', target=''). " +
+        "Check the profile's configured default namespace, or pass an explicit 'namespace' override. " +
+        "No changes were made.",
+      args: () => promoteExecuteArgs(),
+      arrange: () => wire("HSCUSTOM", ""),
+    },
+  ];
+  for (const refusal of refusalCases) {
+    it(`is not asked when the gate refuses first -- ${refusal.title}: the refusal text is unchanged and nothing is called`, async () => {
+      refusal.arrange?.();
+      const confirm = proceedingConfirm();
+      ctx.confirm = confirm;
+
+      const result = await envPromoteTool.handler(await refusal.args(), ctx);
+
+      expect(result).toEqual({ content: [{ type: "text", text: refusal.text }], isError: true });
+      expect(confirm).not.toHaveBeenCalled();
+      expectNoIrisCalls();
+    });
+  }
+
+  // ── a decline ends the call; a proceed and a missing confirm leave today's behavior ──
+
+  it("returns a declined outcome unchanged, and reads and writes nothing", async () => {
+    arrangeSubset();
+    const confirm = decliningConfirm();
+    ctx.confirm = confirm;
+
+    const result = await executeSubset();
+
+    expect(result).toBe(DECLINED_RESULT);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expectNoIrisCalls();
+  });
+
+  it("returns a declined outcome unchanged on a documents run: nothing is read, put or compiled", async () => {
+    arrangeDocuments();
+    const confirm = decliningConfirm();
+    ctx.confirm = confirm;
+    const diff = twoDocumentsDiff();
+    const plan = await buildPlan(diff);
+
+    const result = await envPromoteTool.handler(
+      { action: "execute", source: "source", target: "target", diff, plan, steps: [1, 2], confirm: true },
+      ctx,
+    );
+
+    expect(result).toBe(DECLINED_RESULT);
+    expectNoIrisCalls();
+  });
+
+  it("executes exactly as a context without confirm when the outcome is proceed: the same result, reads and writes", async () => {
+    arrangeSubset();
+    const withoutConfirm = await executeSubset();
+    const withoutConfirmCalls = recordedCalls();
+
+    wire();
+    arrangeSubset();
+    const confirm = proceedingConfirm();
+    ctx.confirm = confirm;
+    const withConfirm = await executeSubset();
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(withConfirm).toEqual(withoutConfirm);
+    expect(recordedCalls()).toEqual(withoutConfirmCalls);
+    expect(withConfirm.isError).toBeFalsy();
+    const executed = withConfirm.structuredContent as unknown as ExecuteResultSC;
+    expect(executed.summary).toEqual({ completed: 3, failed: 0, skipped: 0 });
+  });
+
+  it("writes as today when the context has no confirm: no question, the allowed steps run in plan order", async () => {
+    arrangeSubset();
+    expect(ctx.confirm).toBeUndefined();
+
+    const result = await executeSubset();
+
+    expect(result.isError).toBeFalsy();
+    const executed = result.structuredContent as unknown as ExecuteResultSC;
+    expect(executed.executed.map((step) => `${step.index}:${step.status}`)).toEqual([
+      "1:completed",
+      "3:completed",
+      "4:completed",
+    ]);
+    expect(targetHttp.post.mock.calls.map((call) => call[0])).toEqual([
+      "/api/executemcp/v2/config/mapping/global",
+      "/api/executemcp/v2/security/webapp",
+      "/api/executemcp/v2/system/config",
+    ]);
+  });
+});

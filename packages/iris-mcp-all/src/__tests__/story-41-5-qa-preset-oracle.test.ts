@@ -67,7 +67,7 @@ const listing = (pkg: string, preset: Preset): Set<string> => {
 
 beforeAll(async () => {
   const sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
-  if (!sdkEsmDir) throw new Error("Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm - run pnpm install.");
+  if (!sdkEsmDir) throw new Error("Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm - run pnpm install.");
   const stale = ["shared", ...SERVERS].map((pkg) => [pkg, staleDistReason(REPO_ROOT, pkg)] as const).filter(([, reason]) => reason !== undefined);
   if (stale.length > 0) throw new Error(`Build the packages first: ${stale.map(([pkg, reason]) => `${pkg}: ${reason}`).join("; ")}`);
   for (const preset of PRESET_ORDER) {

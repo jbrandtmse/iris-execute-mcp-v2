@@ -116,7 +116,7 @@ const opened: Connection[] = [];
 beforeAll(async () => {
   const sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
   if (!sdkEsmDir) {
-    throw new Error("Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm - run pnpm install.");
+    throw new Error("Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm - run pnpm install.");
   }
   const load = async (file: string): Promise<Record<string, unknown>> => {
     try {
@@ -126,10 +126,8 @@ beforeAll(async () => {
     }
   };
 
-  const { Client } = (await load(path.join(sdkEsmDir, "client", "index.js"))) as {
+  const { Client, InMemoryTransport } = (await load(path.join(sdkEsmDir, "index.mjs"))) as {
     Client: new (info: { name: string; version: string }) => SdkClient;
-  };
-  const { InMemoryTransport } = (await load(path.join(sdkEsmDir, "inMemory.js"))) as {
     InMemoryTransport: { createLinkedPair: () => [unknown, unknown] };
   };
   const { McpServerBase } = (await load(path.join(REPO_ROOT, "packages", "shared", "dist", "index.js"))) as {
