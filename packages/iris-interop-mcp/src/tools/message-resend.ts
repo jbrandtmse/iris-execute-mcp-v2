@@ -375,7 +375,15 @@ export const messageResendTool: ToolDefinition = {
     "DUPLICATION HAZARD: resending an already-processed message delivers its " +
     "data again downstream — the target sees a brand-new message, not a " +
     "correction. Always preview first and confirm the message is actually " +
-    "worth retrying (e.g. a genuinely failed Request, not a completed one).",
+    "worth retrying (e.g. a genuinely failed Request, not a completed one).\n\n" +
+    "HUMAN CONFIRMATION: when the MCP client supports form elicitation, " +
+    "'resend' and an executing 'resendFiltered' (when its read-only preview " +
+    "matches 1 to maxMessages messages) also ask the person in a confirmation " +
+    "dialog, after every check above and right before anything is resent; only " +
+    "an accept with Confirm ticked proceeds, and a decline or a dismissal " +
+    "returns CONFIRMATION_DECLINED with nothing changed (do not repeat the call " +
+    "unless the person asks). A client without elicitation is not asked, and " +
+    "the call works as described above.",
   inputSchema: z.object({
     action: z
       .enum(["preview", "resend", "resendFiltered"])

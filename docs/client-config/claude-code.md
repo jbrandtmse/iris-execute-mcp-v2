@@ -446,6 +446,34 @@ $env:IRIS_HTTPS = "false"
 
 ---
 
+## Protocol revision and confirmation dialogs
+
+Each server is one stdio process that serves two MCP protocol revisions, `2025-11-25` and `2026-07-28`, and the client's first message chooses between them. Nothing is configured on the server.
+
+- **Protocol revision.** Claude Code 2.1.292 and later negotiates `2026-07-28` by default. To keep `2025-11-25`, set `MCP_PROTOCOL_NEGOTIATION=legacy` in Claude Code's own environment.
+- **Where to set it.** Set it in the shell that starts Claude Code (`export MCP_PROTOCOL_NEGOTIATION=legacy`, or in front of `claude`), or in the `env` object of Claude Code's `settings.json`. Do not set it in the `env` block of an MCP server entry in `.mcp.json`: that block configures the server process, and Claude Code makes the choice before the server starts.
+- **One server start.** Claude Code probes on the same connection, so it starts each server once per session on either revision (observed on Claude Code 2.1.296). A client built on the TypeScript MCP SDK v2 client starts a probe copy of the server first; see [Protocol revisions and confirmation dialogs](README.md#protocol-revisions-and-confirmation-dialogs).
+- **Confirmation dialogs.** Claude Code declares form elicitation on both revisions, so six destructive gates (`iris_audit_manage` `purge`, `iris_env_promote` `execute`, `iris_production_control` `clean` with `killAppData`, `iris_message_resend` `resend` and `resendFiltered`, and `iris_doc_edit` `regenerateStorage`) show you a confirmation form before they change anything; see [Human confirmation (elicitation)](../../README.md#human-confirmation-elicitation). Declining, dismissing or accepting without ticking Confirm changes nothing.
+- **An `Elicitation` hook can answer for you.** Claude Code runs a hook configured under `hooks.Elicitation`, with a matcher on the MCP server name such as `iris-admin`:
+
+  ```json
+  {
+    "hooks": {
+      "Elicitation": [
+        {
+          "matcher": "iris-admin",
+          "hooks": [{ "type": "command", "command": "node /path/to/answer-elicitation.mjs" }]
+        }
+      ]
+    }
+  }
+  ```
+
+  The command exits 0 and prints `{"hookSpecificOutput":{"hookEventName":"Elicitation","action":"accept","content":{"confirm":true}}}` to accept, or the same with `"action":"decline"` to decline; printing nothing leaves the dialog to you. **A hook that answers by itself removes the person from the loop, and whether to install one is your choice.**
+- **Headless `claude -p`.** Hooks run, so a hook answers. With no hook, Claude Code 2.1.296 cancels the dialog (the call ends with `CONFIRMATION_DECLINED` and `response: "cancel"`, and nothing changes), and `--permission-prompts none` cancels it too.
+
+---
+
 ## Verification
 
 After saving the config, start (or restart) Claude Code. Then ask:

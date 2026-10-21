@@ -65,7 +65,13 @@ export const auditManageTool: ToolDefinition = {
     "IRIS_GOVERNANCE; status/view are reads and enabled by default. " +
     "COMPLEMENTS the read-only iris_audit_events tool (a thin audit-log " +
     "reader): 'view' here is the same log read with richer filters, plus this " +
-    "tool adds audit configuration and log lifecycle management.",
+    "tool adds audit configuration and log lifecycle management. " +
+    "HUMAN CONFIRMATION: when the MCP client supports form elicitation, 'purge' " +
+    "also asks the person in a confirmation dialog, after every check above and " +
+    "right before any record is deleted; only an accept with Confirm ticked " +
+    "proceeds, and a decline or a dismissal returns CONFIRMATION_DECLINED with " +
+    "nothing changed (do not repeat the call unless the person asks). A client " +
+    "without elicitation is not asked, and the call works as described above.",
   inputSchema: z.object({
     action: z
       .enum([

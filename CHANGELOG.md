@@ -2,6 +2,83 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-20] — Story 43.4: SDK v2 docs, smokes and capstone
+
+Story 43.4 closes Epic 43, the move to the MCP TypeScript SDK v2. It appends one sentence about the confirmation dialog to the description of
+each of the five gated tools, lists each governance URI once in `resources/list`, corrects two steps of the `resend-failed-messages`
+prompt, retires the two frozen SDK v1 goldens into a ledger of sanctioned changes, adds the epic's capstone gate, and documents the
+protocol revisions, the probe copy that an SDK v2 client starts, and the dialog for each client. The suite stays at 115 advertised tools
+(33, 27, 25, 22 and 8; 110 package tools), the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and `BOOTSTRAP_VERSION`
+stays at `d51856f74d6a`. No ObjectScript class is touched, and no tool, action, governance key, preset row, annotation, refusal code or
+environment variable is added.
+
+### Changed (AD-15 sanctioned)
+
+- **`S-43.4-descriptions`.** The descriptions of `iris_audit_manage`, `iris_env_promote`, `iris_production_control`, `iris_message_resend`
+  and `iris_doc_edit` each gain one appended sentence. It names the confirmation dialog that a client declaring form elicitation is shown,
+  says that a decline or a dismissal returns `CONFIRMATION_DECLINED` with nothing changed, and tells the agent not to repeat the call unless
+  the person asks. No existing byte of any description changes, and no other tool's description changes.
+- **`S-43.4-governance-resource` (DW-646).** `resources/list` lists `iris-governance://default` once, as the static resource named
+  `iris-governance-default`. The per-profile resource template's list repeated it under a second name, `iris-governance-profile-default`;
+  it now lists only the other configured profiles (a profile `prod` is still `iris-governance://prod`, named `iris-governance-profile-prod`).
+  `resources/read` of every URI and `resources/templates/list` are unchanged.
+- **`S-43.4-prompt-text` (DW-653).** Step 3 of the `resend-failed-messages` prompt says that the preview always reports the full match
+  count and that the executing call is refused over `maxMessages`, not the preview. Step 4 says that `dryRun: false` without
+  `confirm: true` is refused with no changes made, and that leaving `dryRun` out only previews again, because it defaults to `true`. The
+  prompt's name, title, description and arguments are unchanged, and the two generated `SKILL.md` copies are regenerated.
+- **The frozen goldens retire into a ledger (DW-639).** `sdk-wire-golden.json` and `sdk-handler-golden.json` stay byte-unchanged, pinned by
+  SHA-256. Each sanctioned change to bytes they hold is one entry of `fixtures/sdk-golden-sanctioned-changes.json` (the golden, the row, a
+  JSON pointer, the exact frozen value and the exact new value). `scripts/lib/golden-sanctioned-changes.mjs` applies the entries, and the
+  golden tests compare every other byte unchanged. This story's 11 entries are the 6 descriptions and the 5 removed duplicates of the
+  governance resource.
+
+### Added
+
+- **The epic-done gate, `epic43-capstone-gate.test.ts`.** In the default suite, one test per negotiation mode (`legacy`, a pinned
+  `2026-07-28`, and `auto`, which must land on `2026-07-28`) walks one built admin server through the real SDK client: the era it landed
+  on, the listings against the sanctioned golden, a read against the handler golden, a governance denial, a validation error, an accepted
+  and a declined confirmation dialog, and the audit trail. It fails, never skips, on a stale dist or a missing client. The rig it shares
+  with the Story 43.3 rows is `sdk-confirmation-rig.ts`.
+- **Documentation.** The root `README.md` (the human-confirmation section, the governance resource and the protocol paragraph),
+  `docs/client-config/README.md` (a section on the protocol revisions and the dialogs) and `docs/client-config/claude-code.md` (a section on
+  `MCP_PROTOCOL_NEGOTIATION=legacy`, the `Elicitation` hook and headless runs) state the behavior as observed on Claude Code 2.1.296 and
+  MCP Inspector CLI 2.9.0.
+
+### Unchanged
+
+- The 2025-11-25 wire is byte-identical to the frozen v1 capture, apart from the sanctioned changes listed under Changed and the earlier
+  ones listed below. A client that does not declare form elicitation gets exactly the previous contract.
+- No tool, action, governance key, preset row, annotation, refusal code or environment variable is added. The governance baseline is
+  `1e62c5ad5bf7` (141 keys), and `BOOTSTRAP_VERSION` stays at `d51856f74d6a`.
+- No `ctx.confirm` call site, the confirmation helper, the `serveStdio` options or the era factory changes.
+
+### Epic 43 at close
+
+- **Counts.** 110 package tools and 115 advertised (33, 27, 25, 22 and 8).
+- **Governance.** The baseline is `1e62c5ad5bf7` (141 keys).
+- **Bootstrap.** `BOOTSTRAP_VERSION` stays at `d51856f74d6a`, and nothing under `src/` or in the embed changed since the epic began.
+- **Sanctioned wire changes.**
+  - **Story 43.1.** An omitted-`arguments` `prompts/get` renders like `{}` (DW-617). A schema-invalid call is audited (DW-579). `addTools`
+    sends one `list_changed`. A malformed `tools/call` gets `-32602 Invalid tools/call request`. A `task` parameter runs a plain call.
+  - **Story 43.2.** Revision 2026-07-28 is served in addition; the 2025-11-25 wire is unchanged.
+  - **Story 43.3.** The dialog for clients that declare form elicitation (AD-34). A cancelled call aborts its IRIS request and is audited
+    `error` (DW-642). Clients without the capability are byte-identical.
+  - **Story 43.4.** `S-43.4-descriptions`, `S-43.4-governance-resource` and `S-43.4-prompt-text`, above.
+
+### Known limits
+
+- **A probe copy starts the server twice (DW-641).** A client built on the TypeScript MCP SDK v2 client, in `auto` mode or pinned to a
+  revision (for example MCP Inspector 2.x with `--protocol-era auto` or `modern`), first starts a short-lived probe copy of the server. The
+  probe runs the whole startup, answers `server/discover`, and is ended by SIGTERM. So the server starts twice per connect,
+  `IRIS_AUDIT_LOG` gains a second `sessionStart` line with no `shutdown` line, and the probe's stderr is discarded. Claude Code probes on
+  the same connection and starts the server once. This is documented in `docs/client-config/README.md`; nothing in the server can avoid it.
+- **A probe that times out.** An SDK v2 client on `auto` whose probe is not answered within its request timeout (60 seconds by default)
+  treats the server as 2025-11-25.
+- **Clients not verified.** The dialog and the protocol revisions are observed on Claude Code 2.1.296 and MCP Inspector CLI 2.9.0 only. The
+  client matrix's certification covers the configuration lifecycle, not protocol negotiation or dialog behavior.
+- **The README payload table is not re-measured.** Its byte figures are Story 40.4's measurement and predate the appended descriptions,
+  which add about 2.3 KB of description text across the dev, admin and interop servers.
+
 ## [Pre-release — 2026-10-20] — Story 43.3: Human confirmation through elicitation
 
 No tool, action, governance key, preset row, annotation, description, prompt, `instructions` text or environment variable is added or

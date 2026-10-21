@@ -113,7 +113,7 @@ const SKILLS: SkillOracle[] = [
     preset: "core",
     description:
       "Resends failed interoperability messages for one configuration item, dry run first: it previews the match count and a sample, resends only after the user approves with an explicit confirmation, and then checks the new message headers. It states that a resend delivers the data downstream again and that the resend actions are writes disabled by default. Use when the user wants to retry, replay or resend failed or errored messages in an IRIS interoperability production.",
-    sha256: "b9e38324de5fdf454f74f45b951000bc124ee5e56465fffef41dd8cb7a5b8ccf",
+    sha256: "d8fbf3cb599dccd51483c14d465af51d11853ae614279c86b2ac36da9cc4723c",
   },
   {
     name: "run-external-backup",

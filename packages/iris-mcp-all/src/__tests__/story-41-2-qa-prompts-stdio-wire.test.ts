@@ -299,7 +299,7 @@ const WIRE_GOLDEN: Record<string, { list: string; get: Record<string, string> }>
     get: {
       "trace-message-flow": "d774181ef6d285aeaf14fd41abdf83422a67d01e82705d125e19b92e3e1d0482",
       "recover-stuck-production": "186084eb03b610917a641d521db127596107ee7d5b97c402fea9c11a11eb4b4f",
-      "resend-failed-messages": "af4ac020ae0c2e8baace9ff5686431f60f3cb812fc479543569c36261da5211a",
+      "resend-failed-messages": "0ea05c8e4d79ef1bed288fccc12b7e600aa6780696adec01d2f28b9901694a2d",
       "find-patient-messages": "9f1b22aa8fc71c837b2a792f759b854ac7bc5e42bb2f1e822ddbc873401f080d",
     },
   },

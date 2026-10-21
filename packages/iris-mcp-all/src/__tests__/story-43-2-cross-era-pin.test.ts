@@ -2,8 +2,9 @@
  * Story 43.2 (AC 43.2.1, 43.2.2, 43.2.2a; AD-15, AD-32; Rules #10, #19, #36, #46, #59) - every surface of the five BUILT servers is the
  * same on the 2025-11-25 era and on revision 2026-07-28, apart from the fields the revision mandates.
  *
- * The 2025-11-25 era is the frozen golden of Story 43.1 (`fixtures/sdk-wire-golden.json`, captured from the SDK v1 build and never edited).
- * The 2026-07-28 era is observed three ways against the same built server entry points, all started against 127.0.0.1:1, a closed local
+ * The 2025-11-25 era is the golden of Story 43.1: the frozen capture `fixtures/sdk-wire-golden.json` (taken from the SDK v1 build, never edited)
+ * plus the sanctioned changes of `fixtures/sdk-golden-sanctioned-changes.json` (Story 43.4, DW-639), applied by
+ * `scripts/lib/golden-sanctioned-changes.mjs` to the rows they name. The 2026-07-28 era is observed three ways against the same built server entry points, all started against 127.0.0.1:1, a closed local
  * port, so no IRIS instance is reached:
  *  - (a) the raw driver (`scripts/lib/sdk-wire-golden-core.mjs`) opens each golden session with `server/discover`, sends each golden
  *    request with the per-request envelope, and compares each response LINE with the golden's, byte for byte, once
@@ -24,13 +25,10 @@
  */
 
 import { beforeAll, describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { REPO_ROOT } from "./pack-fixture";
 import {
   CLOSED_PORT_ENV,
   GOLDEN_PACKAGES,
-  GOLDEN_RELATIVE_PATH,
   MODERN_ERA,
   NEWER_ERA_REQUEST,
   SERVER_INFO_META_KEY,
@@ -49,6 +47,7 @@ import {
   withoutExecution,
   withoutMandatedFields,
 } from "../../../../scripts/lib/sdk-wire-golden-core.mjs";
+import { readSanctionedGolden } from "../../../../scripts/lib/golden-sanctioned-changes.mjs";
 import { connectSdkClient, distEntry, resolveSdkEsmDir, staleDistReason, type IrisTarget, type SdkClient, type SdkVersionNegotiation } from "./process-gate-helpers.js";
 
 interface GoldenRow {
@@ -86,7 +85,7 @@ interface ClientView {
   stderr: string;
 }
 
-const golden = JSON.parse(readFileSync(path.join(REPO_ROOT, GOLDEN_RELATIVE_PATH), "utf8")) as Golden;
+const golden = readSanctionedGolden(REPO_ROOT, "wire") as Golden;
 const CLOSED_TARGET: IrisTarget = { host: "127.0.0.1", port: "1", username: "qa", password: "qa", namespace: "HSCUSTOM" };
 
 const MODERN_ERA_LINE = "[INFO] Serving MCP protocol revision 2026-07-28 (server/discover)";

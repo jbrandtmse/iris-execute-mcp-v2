@@ -2,9 +2,10 @@
 title: 'Story 43.4: SDK v2 Docs, Smokes and Capstone'
 type: 'feature'
 created: '2026-10-20'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'b841530ffdd325f74e91762de85717d8f0a014bd'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
@@ -17,6 +18,13 @@ deferred:
     evidence: 'Plan-stage inventory, 2026-10-20: `story-40-4-doc-claims.test.ts:216-217`, `story-39-4-doc-claims.test.ts:149`, `story-39-1-doc-claims.test.ts:154`, `story-39-5-doc-claims.test.ts:188`.'
     location: 'README.md:778-790'
     severity: 'low'
+  - summary: >-
+      The `iris_message_resend` tool description, its `maxMessages` schema text and `packages/iris-interop-mcp/README.md` still say that executing needs both `dryRun: false` and `confirm: true` "otherwise the call is refused" and that an over-cap count is refused, although `MessageResend.cls` only refuses when `dryRun` is false and previews when `dryRun` is left out (Story 43.4 fixed the `resend-failed-messages` prompt text only).
+    evidence: |-
+      Review pass 2026-10-20 (Blind Hunter), verified against the spec's own DW-653 evidence: the over-cap guard runs only when `dryRun` is false, and the tool description says `dryRun` defaults to true. The intent forbids any change to an existing description byte outside the 11 sanctioned entries, so this story cannot take it.
+    location: >-
+      packages/iris-interop-mcp/src/tools/message-resend.ts:364-369 and :434; packages/iris-interop-mcp/README.md:302
+    severity: low
 ---
 
 <intent-contract>
@@ -291,6 +299,43 @@ Line numbers are at HEAD `d14aa50`.
   - **The plan-stage `deferred:` LOW** (the README payload table) is harvested at dev complete.
 
 ## Review Triage Log
+
+### 2026-10-20 — Review pass
+- verdicts: 33 findings — high 0, medium 5, low 25, false 3, maybe-false 0
+- findings (Blind Hunter B1-B10, Edge Case Hunter E1-E9, Verification Gap V1-V6, Intent Alignment IA1-IA8):
+  - `[medium]` `[patch]` B1 "exactly the bytes it always saw" in `docs/client-config/README.md` (new) and `README.md:934` overclaims 2025-11-25 byte-identity — this story's own sanctioned changes alter five descriptions and `resources/list`; both sentences now say "apart from the sanctioned changes the CHANGELOG lists". No test pinned either sentence.
+  - `[low]` `[defer]` B2 the `iris_message_resend` description (`message-resend.ts` about 364-369), its `maxMessages` schema text and `packages/iris-interop-mcp/README.md:302` keep the pre-DW-653 wording — pre-existing text; the intent forbids changing any existing description byte, so the sanctioned set cannot take it. Deferred (frontmatter).
+  - `[medium]` `[patch]` B3 the new docs say a client that cannot be asked "gets the `confirm: true` contract", but `resend` and `regenerateStorage` have no `confirm: true` (governance alone) — a reader could believe those two are stopped by `confirm: true`. Reworded in `README.md` and `docs/client-config/README.md`; the two pins in `story-43-4-doc-claims.test.ts` follow. (`claude-code.md` carries no such sentence.)
+  - `[low]` `[reject]` B4 "one appended sentence" is two sentences — the intent contract itself says "one appended sentence"; cosmetic, and the fix is a wording change across README, CHANGELOG, changeset and pins with no named harm.
+  - `[low]` `[patch]` B5 four ledger lines held raw U+2014 (Rule 14) — replaced by `—` escapes (14 occurrences; file is ASCII, still parses, loader compares parsed values; the sibling goldens and snapshot use escapes).
+  - `[low]` `[reject]` B6 nothing ties gated tools to description sentences — `story-43-3-confirmation-both-eras` ("exactly six call sites ask the person") fails on any new `ctx.confirm` site, and the snapshot and golden rows fail on any removed sentence, so a sixth gate cannot ship silently; the residual (an action added to an existing site) is theoretical.
+  - `[low]` `[reject]` B7 the capstone never connects a client without form elicitation, and omits the cancel path — decision #27 fixes the walk (a form-declaring client); the fallback and the cancel are pinned by the 43.3 files on both eras, and `auto` lands on the same modern path as `pinned`.
+  - `[low]` `[reject]` B8 the ledger test's "old is the frozen value" row looks entries up in the wire golden only — no handler entry exists, and the first one fails that row loudly (naming the cause) in the same change that adds it; the handler path is exercised by the in-memory entry.
+  - `[low]` `[reject]` B9 unused rig API (`firstAnswer`, three exports), a second `isWrite` in `story-43-3-qa-wire.ts`, and `readResource` next to `callRequest` — `firstAnswer` is in the spec's task 9 signature; the unused exports are lifted helpers; `story-43-3-qa-wire.ts` is outside the twelve files the diff guard allows; `readResource` needs `mcpReq.requestState`, which `callRequest` does not supply, and task 8 says additive only.
+  - `[low]` `[reject]` B10 prompts and skills that drive gated actions do not mention the dialog — decision #24: "The prompt does not gain a dialog sentence: the refusal text already tells the agent not to repeat a declined call."
+  - `[low]` `[reject]` E1 `story-43-4-doc-claims` pins "Story 43.4 is the top CHANGELOG entry" and breaks when the next story prepends one — task 12 and the mutation table prescribe this pin, as 43.3's own pin was; the red is immediate and names the cause.
+  - `[low]` `[reject]` E2 `story-43-3-doc-claims` "directly below the Story 43.4 entry" has the same property — prescribed verbatim by task 13.
+  - `[low]` `[reject]` E3 `indexOf` of a renamed reference heading returns -1 and the ordering row passes vacuously — the section's own presence is asserted by `between()`, and the other bound (the env block) still pins; the fix adds a guard for an unlikely rename.
+  - `[low]` `[reject]` E4 the rig's setup does not close a first listener if the second fails to start — a bind failure on 127.0.0.1 port 0 is theoretical, and the vitest worker ends the process.
+  - `[medium]` `[patch]` E5 the capstone reads `rig.stderr()` right after `listTools()` resolves, and stderr and stdout are separate pipes — on `pinned` and `auto` the era line is written when the first request arrives, so the gate could read 0 lines. Step 1 now waits (25 ms steps, 5 s deadline) for the expected era line before counting.
+  - `[medium]` `[patch]` E7 duplicate of B1 (the 2025-11-25 byte-identity sentence in `docs/client-config/README.md:96`) — fixed with B1.
+  - `[low]` `[reject]` E6 `applySanctionedChanges` called directly with an unknown `op` deletes the value — every production path goes through `readSanctionedGolden`, which validates; the tests call it with entries that carry a valid `op`.
+  - `[low]` `[reject]` E8 the loader imports the two golden cores, so it is not a `node:fs`/`node:path`-only leaf — Design Notes "Extend, don't copy" says the loader reuses their constants; the cores import no SDK.
+  - `[false]` `[reject]` E9 `gen:tools-list-snapshot --force` moved the header (`capturedAt`, `sdkVersion`) — the generator stamps both; it re-pinned exactly the five descriptions (`gen:tools-list-snapshot:check` OK), and `sdkVersion` 2.3.1 is now true.
+  - `[medium]` `[patch]` V1 same root cause as E5 (capstone step 1 reads stderr without waiting) — fixed with E5. The race has no deterministic mutation; M2 was re-run after the patch and `legacy` still fails at step 1 (see Verification).
+  - `[low]` `[reject]` V2 ACs and legs with no `mutation:` line — Rule 19 asks one demonstrated mutation per AC; AC 43.4.1 and the records AC have no pinning test (lead-run), and each other AC has at least one line.
+  - `[low]` `[reject]` V3 the two top-entry pins are time-fragile — duplicate of E1/E2.
+  - `[false]` `[reject]` V4 the capstone and rig depend on built dists and the installed SDK client — they fail, never skip, which is the AC (M4 proves it).
+  - `[low]` `[reject]` V5 the ledger-test row with `old = new = "abc"` and `appendOnly` reaches the no-op guard first, and the `length <=` half of the append guard is unreachable — a throw naming the id happens either way, and the spec lists "not longer" literally.
+  - `[low]` `[reject]` V6 the ledger-test row comparing `readSanctionedChanges` with a raw parse cannot catch a dropped entry — the ids row (`STORY_43_4_IDS`) does.
+  - `[low]` `[reject]` IA1 two-profile `resources/list` is unit-tested in process, not over a built dist on each era — both eras register through `registerResourceOn` and the same `list` closure; task 8 prescribes the unit rows.
+  - `[low]` `[reject]` IA2 before `start()` the template `list` now returns nothing — the static resource lists `default`, so no URI is missing or doubled.
+  - `[low]` `[reject]` IA3 the "112 rows round-trip" property is not asserted for unnamed rows — only named rows are re-serialized, and the loader refuses a non-canonical named row.
+  - `[low]` `[reject]` IA4 the three prompt hash pins are not ledger entries — no golden holds the prompt body; the pins are re-pinned from rebuilt output as the spec says (Rule #36).
+  - `[false]` `[reject]` IA5 the snapshot header moved as a side effect — duplicate of E9.
+  - `[low]` `[reject]` IA6 agent comprehension of the new sentences is checked as text presence only — comprehension is not deterministic; the append, `form elicitation` and `CONFIRMATION_DECLINED` are pinned.
+  - `[low]` `[reject]` IA7 the live-smoke procedure, the spine and the PRD are not in the diff — lead actions by the Boundaries.
+  - `[low]` `[reject]` IA8 the docs record facts taken from the spec, not from the diff — they are observations of Claude Code 2.1.296 and Inspector 2.9.0 from the 43.2/43.3 live checks, and the lead's smoke confirms them.
 
 ## Design Notes
 
@@ -623,7 +668,63 @@ Every test added or changed passes on a fresh environment, in either order. No I
 - After the lead's spec-gate edits: `grep -n 'S-43.4-descriptions' <spine>`, `grep -n 'Frozen goldens' <spine>`, `grep -n 'landed in Epic 43' <spine>` and `grep -n 'both served over stdio by one process' _bmad-output/planning-artifacts/prd.md` each find a line, and `uv run --no-cache .claude/skills/bmad-architecture/scripts/lint_spine.py --workspace <spine-dir>` reports no blocking finding.
 - `git status --short` shows nothing under `irislib/`, `irissys/` or `extensions/iris-mcp-launcher/package-lock.json`, and no temp script.
 
+**Rule 19 evidence (implement stage, 2026-10-20).** `BOOTSTRAP_VERSION` is unchanged: `d51856f74d6a` -> `d51856f74d6a` (`git diff 9a2f515 -- src/ packages/shared/src/bootstrap-classes.ts` is empty). Each mutation below was applied with the file tools, run, then reverted, and the file's SHA-256 was checked against its value before the mutation (a generated skill copy was regenerated instead); every dist involved was rebuilt after the revert (`tsconfig.tsbuildinfo` deleted where the compiler would otherwise not re-emit).
+
+- mutation: `epic43-capstone-gate` M1, `legacy: "serve"` -> `"reject"` in `McpServerBase.start()`'s `serveStdio` call (shared rebuilt) -> `legacy` red at connect ("Unsupported protocol version: 2025-11-25"); `pinned` and `auto` stayed green.
+- mutation: `epic43-capstone-gate` M2, the `serveStdio(...)` statement replaced by `this.mcpServer.connect(new StdioServerTransport())` (shared rebuilt) -> `pinned` red at connect ("did not offer pinned protocol version 2026-07-28"), `auto` red at step 1 (era `legacy`, not `modern`), and `legacy` ALSO red at step 1 ("one legacy era line on stderr: expected 0 to be 1"), because a plain connect never builds an instance through the factory and so writes no era line; the spec predicted `legacy` green, which conflicts with its own step 1 (the era line), so the header of the file states the observed result.
+- mutation: `epic43-capstone-gate` M3, `classifyConfirmationResponse` returning `"accepted"` for a decline (`confirmation.ts`, shared rebuilt) -> step 7 red on `legacy`, `pinned` and `auto` ("the decline result").
+- mutation: `epic43-capstone-gate` M4, `touch packages/shared/src/confirmation.ts` with no rebuild -> all three modes fail with "Build the packages first: shared: ... STALE"; none skipped. Shared was rebuilt with `tsconfig.tsbuildinfo` deleted, and the capstone was green again.
+- mutation: `story-43-4-sanctioned-golden-changes` SHA-256 rows, one byte of `sdk-wire-golden.json` (`zodVersion` 4.3.6 -> 4.3.7) -> "sdk-wire-golden.json is byte-unchanged" red; restored, `shasum -a 256` is `602231cc...edbc9` again and `git status` does not list the file.
+- mutation: ledger and loader consumers, the `43.4/description/iris_production_control@interop-main` entry removed from the ledger -> `story-43-1-sdk-wire-golden` interop `tools-list` (raw line and v2 client), `story-43-2-cross-era-pin` interop (a) and (d) `main`, and the ledger test's ids row went red (5 failures); the ledger's SHA-256 was identical after the restore.
+- mutation: ledger and loader consumers, one character of `old` in `43.4/governance-resource/dev` -> the loader threw "Sanctioned change '43.4/governance-resource/dev': old is not the value ..." at import of `story-43-1-sdk-wire-golden`, `story-43-1-sanctioned-wire-changes`, `story-43-2-cross-era-pin` and `epic43-capstone-gate`, in the two `call 7` rows of `story-43-2-chokepoint-both-eras`, and in the ledger test's `old`, "sanctioned descriptions" and "differs in exactly the rows" rows; `story-43-1-qa-handler-golden` stayed green, because it applies only handler entries and the handler golden has none.
+- mutation: `story-43-4-sanctioned-golden-changes` validation rows, a no-op entry (`old` equal to `new`) appended to the ledger -> the "passes the loader's own validation", ids, `old`, "no entry is a no-op", "differs in exactly the rows", "handler golden has no entry" and "sanctioned descriptions" rows red (7 failures), each naming `43.4/noop`.
+- mutation: `story-43-4-sanctioned-golden-changes` sanction-id row and `story-43-4-doc-claims`, both `S-43.4-governance-resource` mentions removed from the CHANGELOG entry -> "each sanction id appears, in backticks, in the entry of its story", "names each sanction id in backticks" and "enumerates every sanctioned wire change" red.
+- mutation: `story-43-3-doc-claims` "sits directly below the Story 43.4 entry" and `story-43-4-doc-claims` "is the top entry", a copy of the Story 43.3 heading placed above the Story 43.4 heading -> both rows red.
+- mutation: `story-43-4-doc-claims` probe row, the DW-641 bullet removed from `docs/client-config/README.md` -> "describes the probe copy of an SDK v2 client as observed" red.
+- mutation: `story-43-4-doc-claims` README and Claude Code page rows, "No other byte of any description changed." removed from `README.md` and the headless sentence of `docs/client-config/claude-code.md` reworded -> "says that the five gated tools' descriptions name the dialog" and "covers headless claude -p" red.
+- mutation: `server-discovery` DW-646 rows and the five `resources-list` golden rows, the template `list` without the `default` filter (shared rebuilt) -> both `Story 43.4: resources/list names each governance URI once` rows red; `story-43-1-sdk-wire-golden` `resources-list` (raw line and v2 client) red for all five servers; `story-43-2-cross-era-pin` (a) and (d) `main` red for all five servers; all three capstone modes red (23 failures in the two golden files and the capstone).
+- mutation: description rows and the tools-list snapshot, `HUMAN CONFIRMATION:` -> `HUMAN CONFIRMATIONS:` in the `iris_audit_manage` description (admin rebuilt) -> `story-43-1-sdk-wire-golden` admin `tools-list` (raw line and v2 client), `tools-list-snapshot.test.ts` (3 rows), `gen:tools-list-snapshot:check` ("DIFFERS ... 1 problem") and all three capstone modes red.
+- mutation: the DW-653 prompt text and the three hash pins, step 4's old parenthetical restored in `resendFailedMessages.ts` (interop rebuilt, `pnpm gen:skills` and `pnpm gen:pack` run on the mutated source) -> interop `prompts.test.ts` "dryRun:false without confirm:true is refused" and "no longer says ... omitting either parameter is refused" red; `story-41-5-qa-dist-consumer` body hash, `story-41-2-qa-prompts-stdio-wire` `prompts/get` hash and `skills-generated-frontmatter` file hash red. After the revert, interop was rebuilt, both generators were run again, and the source and both `SKILL.md` copies matched their pre-mutation SHA-256.
+- mutation: `epic43-capstone-gate` step 1 after the review patch (it waits up to 5 s for the expected era line before counting), M2 re-run: the `serveStdio(...)` statement replaced by a plain `connect(new StdioServerTransport())` (shared rebuilt) -> `legacy` red at step 1 after the wait ("one legacy era line on stderr: expected +0 to be 1"), `pinned` red at connect ("did not offer pinned protocol version 2026-07-28"), `auto` red at step 1 ("the client's era: expected 'legacy' to be 'modern'"); `server-base.ts` SHA-256 `1a1b50ef...ad329` before and after the revert, shared rebuilt, capstone green. The stderr/stdout ordering race itself is non-deterministic and has no mutation.
+- mutation: `story-43-4-doc-claims` fallback-contract rows after the review patch, the root README Inspector sentence and the client-docs bullet restored to "gets the `confirm: true` contract" -> "states what Claude Code and MCP Inspector were observed to declare" and "states the dialog per client as observed" red (2 failures); both files byte-identical after the revert (SHA-256 `6488fd70...` and `efc2f6a8...`).
+- mutation: `golden-sanctioned-changes.mjs` guards, the `old` comparison, the canonical-JSON check and the append-only check each disabled in turn (`false &&`) -> "a wrong old" and "changes to one row apply in file order", "a frozen line that is not canonical JSON", and "a duplicate id, a no-op, an append that is not an append ..." red, one mutation at a time; the file was restored (no `false &&` left).
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary of the change.**
+- The two frozen SDK v1 goldens retire into a sanctioned-change ledger. `scripts/lib/golden-sanctioned-changes.mjs` applies the 11 entries of `fixtures/sdk-golden-sanctioned-changes.json`, all five golden tests load through it, and `story-43-4-sanctioned-golden-changes.test.ts` pins both frozen files by SHA-256 and keeps the ledger honest. The frozen files are byte-unchanged.
+- The five gated tool descriptions gain their decision #24 appended passage, the duplicate governance resource is gone (the template `list` omits `default`, DW-646), and steps 3 and 4 of `resend-failed-messages` are corrected (DW-653). The two `SKILL.md` copies, `tools-list-snapshot.json` (the five descriptions) and the three prompt hash constants are regenerated from rebuilt output.
+- The default-suite epic gate `epic43-capstone-gate.test.ts` walks the built admin server through the real SDK client on `legacy`, a pinned `2026-07-28` and `auto`, on the lifted `sdk-confirmation-rig.ts`.
+- Docs and records: the README confirmation section, `docs/client-config/README.md` and `claude-code.md` (protocol revisions, the DW-641 probe copy as observed, the hook, headless runs), the CHANGELOG entry (2026-10-20) and `.changeset/story-43-4-sdk-v2-close.md`.
+- `BOOTSTRAP_VERSION` is unchanged: `d51856f74d6a` -> `d51856f74d6a`. Tools stay 110/115, the baseline stays 141 keys.
+
+**Files changed.**
+- New: `scripts/lib/golden-sanctioned-changes.mjs` (the loader), `packages/iris-mcp-all/src/__tests__/fixtures/sdk-golden-sanctioned-changes.json` (the ledger), `sdk-confirmation-rig.ts` (the lifted rig), `epic43-capstone-gate.test.ts`, `story-43-4-sanctioned-golden-changes.test.ts`, `story-43-4-doc-claims.test.ts`, `.changeset/story-43-4-sdk-v2-close.md`.
+- Source: `packages/shared/src/server-base.ts` (the template `list`), `audit.ts`, `env-promote.ts`, `doc-edit.ts`, `production.ts`, `message-resend.ts` (descriptions), `resendFailedMessages.ts` (prompt).
+- Generated: both `resend-failed-messages/SKILL.md` copies, `fixtures/tools-list-snapshot.json` (also its `capturedAt` and `sdkVersion` header, which the generator stamps).
+- Existing tests, the twelve of decision #28c: the five golden loaders, `story-43-3-confirmation-both-eras` (the rig move; 104 tests before and after), `story-43-3-doc-claims` (two rows), three hash constants, and the additive describes in `server-discovery.test.ts` and interop `prompts.test.ts`.
+- Docs: `README.md`, `CHANGELOG.md`, `docs/client-config/README.md`, `docs/client-config/claude-code.md`.
+
+**Review findings.** 33 findings from four layers: high 0, medium 5, low 25, false 3.
+- Patched (4 entries): the 2025-11-25 byte-identity overclaim in `README.md:934` and `docs/client-config/README.md` (B1/E7); the "gets the `confirm: true` contract" wording for clients that cannot be asked, which is wrong for `resend` and `regenerateStorage` (B3); raw U+2014 in the ledger, now `—` escapes (B5); the capstone's step 1 read of stderr, which now waits up to 5 s for the era line (E5/V1).
+- Deferred (1): the `iris_message_resend` description, its `maxMessages` text and the interop README keep pre-DW-653 wording (B2); the intent forbids touching an existing description byte outside the 11 sanctioned entries.
+- Rejected (28), each with its reason in the Review Triage Log: spec-prescribed pins and wording (the top-entry CHANGELOG pins, "one sentence", no dialog sentence in prompts, the capstone walk), theoretical or loud-failing latent cases, and Rule 19's one-mutation-per-AC bar.
+
+**Follow-up review recommendation: true.** Three medium entries were patched (the byte-identity wording, the fallback-contract wording, the stderr wait). The named unverified risk is the stderr wait: the pipe-ordering race it guards is non-deterministic and cannot be mutated, so only its "still fails when the line is absent" half is demonstrated (M2 re-run). Patched counts by verdict: high 0, medium 3 entries (5 findings), low 1.
+
+**Verification performed** (every command with `IRIS_HOST=127.0.0.1 IRIS_PORT=1`; no IRIS instance, `claude` or Inspector contacted; no live gate armed).
+- Loop lines, on the final tree: seven builds exit 0; `gen:skills:check`, `gen:pack:check`, `gen:tools-list-snapshot:check` (115 entries) and `validate:prompts` OK; units shared 166, admin 38, dev 208, interop 221; new and lifted files 165 tests; golden pins 464; catalogue, prompt and doc pins 525. All pass, nothing skipped in them.
+- Diff guard: only the twelve files plus `tools-list-snapshot.json`; the only changed assertion lines are the three hash constants and the two `story-43-3-doc-claims` rows.
+- Once lines, after the last patch: shared 2289 tests, dev 1408 (307 live skips), admin 506 (8 skips), interop 751, ops 350, data 163 (2 skips), client-config 1008, each with `type-check` and `lint` exit 0 (only the pre-existing `cli/governance.ts` warning). `iris-mcp-all` sweep in thirds: 159 files pass (live gates skipped). Launcher: 5 tests in 3 files and 2 unloadable files fail, exactly the DW-532 set. `gen:governance-baseline:check` OK (141 frozen keys). Goldens match their SHA-256; `git diff 9a2f515 -- src/ packages/shared/src/bootstrap-classes.ts` is empty; nothing forbidden in `git diff --name-only`. Shuffled seeds 11 and 22: 726 tests in the 13 iris-mcp-all files, plus `server-discovery` (24) and interop `prompts` (28), all green. The spine greps find their lines and `lint_spine.py` reports 0 findings.
+- Mutation evidence for every pinning test is under Verification (M1 to M4 of decision #27, the ledger, docs, resource, description and prompt mutations, plus the two review patches).
+- `@iris-mcp/all` has no `type-check` or `lint` script, so the spec's line for it cannot run; a strict `tsc` over the new and changed test files reports 0 errors.
+
+**Residual risks and notes for the lead.**
+- AC 43.4.1 (live smokes: Claude Code and Inspector on both eras, DW-641 start counts) is the lead's and is not run here. The docs state the observed facts from the 43.2/43.3 live checks; the smoke confirms them.
+- M2 differs from decision #27's prediction: with a plain 2025-only connect, `legacy` also goes red (at step 1, since no era line is written without the factory), not green. The capstone header records it.
+- The appended description text is about 2.3 KB across dev, admin and interop, not the spec's 1.9 KB. The README payload table is not re-measured (decision #28b; the `deferred:` LOW).
+- The capstone's walk uses a form-declaring client only. The no-capability fallback and the cancel path are pinned on `legacy` and a pinned revision by the 43.3 files.
+- The pre-DW-653 wording in `iris_message_resend`'s own description is deferred (frontmatter), so the tool description and the corrected prompt still disagree on what a `dryRun`-less `confirm: true` call does.

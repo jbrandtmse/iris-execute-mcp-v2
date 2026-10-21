@@ -13,18 +13,16 @@
  */
 
 import { beforeAll, describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { REPO_ROOT } from "./pack-fixture";
 import {
   CLOSED_PORT_ENV,
   GOLDEN_PACKAGES,
-  GOLDEN_RELATIVE_PATH,
   WIRE_ERA,
   handshake,
   inheritedGoldenEnv,
   openRawWire,
 } from "../../../../scripts/lib/sdk-wire-golden-core.mjs";
+import { readSanctionedGolden } from "../../../../scripts/lib/golden-sanctioned-changes.mjs";
 import { distEntry, staleDistReason } from "./process-gate-helpers.js";
 
 interface Frame {
@@ -36,7 +34,7 @@ interface Golden {
   servers: Record<string, { sessions: Record<string, { rows: Array<{ label: string; line: string }> }> }>;
 }
 
-const golden = JSON.parse(readFileSync(path.join(REPO_ROOT, GOLDEN_RELATIVE_PATH), "utf8")) as Golden;
+const golden = readSanctionedGolden(REPO_ROOT, "wire") as Golden;
 
 /** The message of the SDK's refusal of a malformed `tools/call` whose one issue sits at `params.<pathTail>`. */
 function invalidRequestMessage(pathTail: string[], expected: string, received: string): string {

@@ -4,8 +4,10 @@
  *
  * `story-43-1-sdk-wire-golden.test.ts` cannot reach a handler's result, because a handler needs an IRIS instance. This file runs each
  * built server against the fake IRIS in `scripts/lib/fake-iris-listener.mjs` (a listener on 127.0.0.1 inside this process; no IRIS
- * instance is reached) and compares three things with `fixtures/sdk-handler-golden.json`, which `scripts/capture-sdk-handler-golden.mjs`
- * captured from the SDK v1 build of the baseline revision:
+ * instance is reached) and compares three things with the handler golden: the frozen capture `fixtures/sdk-handler-golden.json`, which
+ * `scripts/capture-sdk-handler-golden.mjs` took from the SDK v1 build of the baseline revision, plus the sanctioned changes of
+ * `fixtures/sdk-golden-sanctioned-changes.json` (Story 43.4, DW-639), applied by `scripts/lib/golden-sanctioned-changes.mjs` to the rows
+ * they name (none yet):
  *  - the response line of each `tools/call`, byte for byte (a success, an `isError` result with and without `structuredContent`, a
  *    handler that throws, an HTTP error envelope, a governance denial);
  *  - the requests the server made to IRIS while it answered (they prove the handler received the parsed arguments); and
@@ -13,17 +15,14 @@
  *
  * The one sanctioned difference is the audit entry of the final, schema-invalid call (DW-579): the v1 build wrote none. The audit
  * `sessionStart` line's `version` is compared with the package manifest's version, which a release changes; every other byte is as
- * captured. The golden is the v1 capture and is never edited to match a newer build. The file fails, never skips, when a dist is missing
+ * captured. The frozen capture is never edited or recaptured to match a newer build. The file fails, never skips, when a dist is missing
  * or older than its source.
  */
 
 import { beforeAll, describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { REPO_ROOT } from "./pack-fixture";
 import {
   GOLDEN_PACKAGES,
-  HANDLER_GOLDEN_RELATIVE_PATH,
   diffHandlerSession,
   handlerExchanges,
   readBootstrapVersion,
@@ -31,6 +30,7 @@ import {
   withSessionVersion,
 } from "../../../../scripts/lib/sdk-handler-golden-core.mjs";
 import { inheritedGoldenEnv, packageVersion } from "../../../../scripts/lib/sdk-wire-golden-core.mjs";
+import { readSanctionedGolden } from "../../../../scripts/lib/golden-sanctioned-changes.mjs";
 import { distEntry, staleDistReason } from "./process-gate-helpers.js";
 
 interface UpstreamRequest {
@@ -62,7 +62,7 @@ interface HandlerGolden {
   servers: Record<string, HandlerSession>;
 }
 
-const golden = JSON.parse(readFileSync(path.join(REPO_ROOT, HANDLER_GOLDEN_RELATIVE_PATH), "utf8")) as HandlerGolden;
+const golden = readSanctionedGolden(REPO_ROOT, "handler") as HandlerGolden;
 
 /** The member names of the `result` object of a response line, in the order the line writes them. */
 const resultKeys = (line: string): string[] => Object.keys((JSON.parse(line) as { result?: object }).result ?? {});

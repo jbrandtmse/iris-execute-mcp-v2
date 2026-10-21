@@ -99,7 +99,6 @@ describe("Story 43.3: the root README", () => {
     expect(section).toContain("**Known limits.**");
     expect(section).toContain("The match count of `resendFiltered` can change between the preview and the run");
     expect(section).toContain("a declined promotion can still have done that");
-    expect(section).toContain("Tool descriptions are not changed in this release");
   });
 
   it("states that the dialog shows a call's values on one line, cut at 600 characters", () => {
@@ -150,9 +149,10 @@ describe("Story 43.3: the CHANGELOG entry and the changeset", () => {
   /** The top entry of the CHANGELOG, up to the next `## ` heading. */
   const entry = squash(/^## \[Pre-release [^\]]*\] \S Story 43\.3: Human confirmation through elicitation$[\s\S]*?(?=^## )/m.exec(changelog)?.[0] ?? "");
 
-  it("is the top entry", () => {
-    const firstHeading = changelog.split("\n").find((line) => line.startsWith("## "));
-    expect(firstHeading).toContain("Story 43.3: Human confirmation through elicitation");
+  it("sits directly below the Story 43.4 entry", () => {
+    const headings = changelog.split("\n").filter((line) => line.startsWith("## "));
+    expect(headings[0]).toContain("Story 43.4:");
+    expect(headings[1]).toContain("Story 43.3: Human confirmation through elicitation");
     expect(entry.length).toBeGreaterThan(1000);
   });
 

@@ -115,7 +115,14 @@ export const productionControlTool: ToolDefinition = {
     "'recover', and 'clean'.\n\n" +
     "The 'clean' action is a write but is ENABLED by default under tool governance " +
     "(like the grandfathered lifecycle actions); an operator can disable it via an " +
-    "explicit IRIS_GOVERNANCE override.",
+    "explicit IRIS_GOVERNANCE override.\n\n" +
+    "HUMAN CONFIRMATION: when the MCP client supports form elicitation, 'clean' " +
+    "with killAppData:true and confirm:true also asks the person in a " +
+    "confirmation dialog right before the production is cleaned; only an accept " +
+    "with Confirm ticked proceeds, and a decline or a dismissal returns " +
+    "CONFIRMATION_DECLINED with nothing changed (do not repeat the call unless " +
+    "the person asks). A client without elicitation is not asked, and the call " +
+    "works as described above.",
   inputSchema: z.object({
     action: z
       .enum(["start", "stop", "restart", "update", "recover", "clean"])

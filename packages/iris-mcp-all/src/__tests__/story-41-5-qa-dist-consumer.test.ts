@@ -46,7 +46,7 @@ const BASELINE_BODY_SHA256: Record<string, string> = {
   "promote-environment-change": "08c3eccd1fa4eb24287f94c4ba16170334541f7f55e2feb53c3d600d1c672454",
   "provision-project-environment": "29e831684c069a88b31aaede2dd98afcfc4e74cbbbd57cdef072c1eccb36167c",
   "recover-stuck-production": "64395fdac525550ee29ce2d35e988600a7061a0d410688778a59a176922fed89",
-  "resend-failed-messages": "c4518b571d2a01b031ae88410ea3c01ef89b03cf8eaa91554cd1a175d47b9beb",
+  "resend-failed-messages": "2a08eb10d16ce9110f4d526109318900543353b8a462fa27bbfa834921ec0ea3",
   "run-external-backup": "028e5ff841258f03053d4fd340e04bdf92710193c836f86a5de67bfc7c4bc4d5",
   "trace-message-flow": "bfbc9039db39a6129944645d23671c1fbd7abbe21c199f4fec76c1ccaa494557",
 };

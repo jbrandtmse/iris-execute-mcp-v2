@@ -1,6 +1,8 @@
 /**
  * Story 43.1 (AC 43.1.3, AD-15, AD-32; Rules #19, #36, #46, #59) - the 2025-11-25 wire of the five BUILT servers,
- * pinned to the golden that `scripts/capture-sdk-wire-golden.mjs` captured from the SDK v1 build before the migration.
+ * pinned to the golden: the frozen capture that `scripts/capture-sdk-wire-golden.mjs` took from the SDK v1 build before the migration,
+ * plus the sanctioned changes of `fixtures/sdk-golden-sanctioned-changes.json` (Story 43.4, DW-639), which
+ * `scripts/lib/golden-sanctioned-changes.mjs` applies to the rows they name. Every other byte is the frozen capture.
  *
  * Each server's sessions run twice, each view independent of the other:
  *  - the raw driver (`scripts/lib/sdk-wire-golden-core.mjs`, no SDK) writes the golden's requests and compares each
@@ -13,24 +15,22 @@
  * with the package manifest's version, which a release changes; every other byte of them is as captured.
  *
  * The file fails, never skips, when the client is not installed or a dist is missing or older than its source (Rule #59).
- * Every server is started against 127.0.0.1:1, a closed local port, so no IRIS instance is reached. The golden is the
- * v1 capture; it is never edited to match a newer build.
+ * Every server is started against 127.0.0.1:1, a closed local port, so no IRIS instance is reached. The frozen capture is never
+ * edited or recaptured to match a newer build; a sanctioned change is an entry of the ledger.
  */
 
 import { beforeAll, describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { REPO_ROOT } from "./pack-fixture";
 import {
   CLOSED_PORT_ENV,
   GOLDEN_PACKAGES,
-  GOLDEN_RELATIVE_PATH,
   goldenLabels,
   goldenSessions,
   inheritedGoldenEnv,
   packageVersion,
   runGoldenSession,
 } from "../../../../scripts/lib/sdk-wire-golden-core.mjs";
+import { readSanctionedGolden } from "../../../../scripts/lib/golden-sanctioned-changes.mjs";
 import { connectSdkClient, distEntry, resolveSdkEsmDir, staleDistReason, type IrisTarget, type SdkClient } from "./process-gate-helpers.js";
 
 interface GoldenRow {
@@ -63,7 +63,7 @@ interface Frame {
 /** What a client call came to: the parsed result, or the error code and message the rejection carries. */
 type Outcome = { kind: "result"; value: unknown } | { kind: "error"; code: unknown; message: string };
 
-const golden = JSON.parse(readFileSync(path.join(REPO_ROOT, GOLDEN_RELATIVE_PATH), "utf8")) as Golden;
+const golden = readSanctionedGolden(REPO_ROOT, "wire") as Golden;
 
 const CLOSED_TARGET: IrisTarget = { host: "127.0.0.1", port: "1", username: "qa", password: "qa", namespace: "HSCUSTOM" };
 const METHOD_NOT_FOUND = -32601;

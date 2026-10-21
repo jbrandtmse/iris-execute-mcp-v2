@@ -27,21 +27,13 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { REPO_ROOT } from "./pack-fixture";
-import { startFakeIris } from "../../../../scripts/lib/fake-iris-listener.mjs";
-import { normalizeAuditEntry, readBootstrapVersion } from "../../../../scripts/lib/sdk-handler-golden-core.mjs";
 import { loadAllTools } from "../../../../scripts/lib/tool-catalog.mjs";
-import {
-  connectSdkClient,
-  distEntry,
-  pollAuditEntries,
-  resolveSdkEsmDir,
-  staleDistReason,
-} from "./process-gate-helpers.js";
-import type { AuditEntry, ElicitationAnswer, ElicitationRequest, SdkClient, SdkVersionNegotiation, WireToolResult } from "./process-gate-helpers.js";
+import { closeSdkRigs, openSdkRig } from "./sdk-confirmation-rig.js";
+import type { SdkRig } from "./sdk-confirmation-rig.js";
+import type { ElicitationAnswer, SdkVersionNegotiation } from "./process-gate-helpers.js";
 
 type Era = "legacy" | "modern";
 
@@ -402,145 +394,23 @@ const governanceOf = (promote: boolean): string =>
 
 // -- the rig ---------------------------------------------------------------------------------------------------------------------------
 
-/** What one call did, as the client, the listener and the audit file saw it. */
-interface Exchange {
-  /** The tool result, without the 2026-07-28 server identity in `_meta`. */
-  result: WireToolResult;
-  /** The write requests that the call caused. */
-  writes: string[];
-  /** The dialogs the call put to the client. */
-  asks: ElicitationRequest[];
-}
+type Rig = SdkRig;
 
-interface Rig {
-  port: number;
-  asked: ElicitationRequest[];
-  auditFile: string;
-  /** Set how the client answers the next dialogs; `"never"` leaves them unanswered. */
-  answer: (answer: ElicitationAnswer | "never") => void;
-  call: (tool: string, args: Record<string, unknown>) => Promise<Exchange>;
-  /** The normalized tool entries of the audit file once it holds `count` of them, without `seq`. */
-  entries: (count: number) => Promise<Array<Record<string, unknown>>>;
-  /** All write requests the listener has received. */
-  writes: () => string[];
-  /** All write requests the second listener (the profile `other`, a promotion's target) has received; empty on a rig without one. */
-  otherWrites: () => string[];
-  close: () => Promise<void>;
-  client: SdkClient;
-}
-
-const cleanups: Array<() => Promise<void>> = [];
-
-afterEach(async () => {
-  for (const cleanup of cleanups.splice(0)) await cleanup().catch(() => undefined);
-});
-
-const isWrite = (request: { method: string; url: string }): boolean =>
-  ["POST", "PUT", "DELETE"].includes(request.method) && !request.url.endsWith("/action/query");
-
-const writeLine = (request: { method: string; url: string; body: string }): string =>
-  `${request.method} ${request.url}${request.body === "" ? "" : ` ${request.body}`}`;
-
-function withoutMeta(result: WireToolResult): WireToolResult {
-  const { _meta: _identity, ...rest } = result as WireToolResult & { _meta?: unknown };
-  return rest;
-}
+afterEach(closeSdkRigs);
 
 /** Start `pkg`'s built server against a fake listener and connect a client that declares `capabilities`. */
-async function openRig(
+function openRig(
   pkg: string,
   negotiation: SdkVersionNegotiation,
   options: { capabilities?: Record<string, unknown>; governed?: boolean; promote?: boolean } = {},
 ): Promise<Rig> {
-  const stale = ["shared", pkg].map((name) => [name, staleDistReason(REPO_ROOT, name)] as const).filter(([, reason]) => reason !== undefined);
-  if (stale.length > 0) throw new Error(`Build the packages first: ${stale.map(([name, reason]) => `${name}: ${reason}`).join("; ")}`);
-  const sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
-  if (sdkEsmDir === undefined) throw new Error("The MCP SDK client is not installed.");
-
-  const fake = await startFakeIris({ bootstrapVersion: readBootstrapVersion(REPO_ROOT) });
   const promote = options.promote === true;
-  const otherFake = promote ? await startFakeIris({ bootstrapVersion: readBootstrapVersion(REPO_ROOT) }) : undefined;
-  const directory = mkdtempSync(path.join(tmpdir(), "story-43-3-"));
-  const auditFile = path.join(directory, "audit.jsonl");
-  const asked: ElicitationRequest[] = [];
-  let next: ElicitationAnswer | "never" = TICKED;
-  const client = await connectSdkClient(
-    {
-      sdkEsmDir,
-      entry: distEntry(REPO_ROOT, pkg),
-      target: { host: "127.0.0.1", port: String(fake.port), username: "qa", password: "qa", namespace: "HSCUSTOM" },
-      clientName: "story-43-3",
-      versionNegotiation: negotiation,
-      ...(options.capabilities !== undefined ? { clientCapabilities: options.capabilities } : {}),
-      onElicitation: (request) => {
-        asked.push(request);
-        return next === "never" ? new Promise<ElicitationAnswer>(() => undefined) : next;
-      },
-    },
-    {
-      IRIS_AUDIT_LOG: auditFile,
-      IRIS_AUDIT_LOG_PARAMS: "true",
-      ...(options.governed === false ? {} : { IRIS_GOVERNANCE: governanceOf(promote) }),
-      ...(otherFake !== undefined
-        ? { IRIS_PROFILES: JSON.stringify({ other: { host: "127.0.0.1", port: otherFake.port, username: "qa", password: "qa", namespace: "HSCUSTOM" } }) }
-        : {}),
-    },
-  );
-  let closed = false;
-  const close = async (): Promise<void> => {
-    if (closed) return;
-    closed = true;
-    await client.close().catch(() => undefined);
-    await fake.close();
-    await otherFake?.close();
-    rmSync(directory, { recursive: true, force: true });
-  };
-  cleanups.push(close);
-
-  return {
-    port: fake.port,
-    asked,
-    auditFile,
-    client,
-    answer: (answer) => {
-      next = answer;
-    },
-    call: async (tool, args) => {
-      const before = fake.requests.length;
-      const askedBefore = asked.length;
-      const result = await client.callTool({ name: tool, arguments: args });
-      return {
-        result: withoutMeta(result),
-        writes: fake.requests.slice(before).filter(isWrite).map(writeLine),
-        asks: asked.slice(askedBefore),
-      };
-    },
-    entries: async (count) => {
-      const read = async (): Promise<Array<Record<string, unknown>>> =>
-        (
-          await pollAuditEntries(auditFile, {
-            count,
-            isWanted: (entry: AuditEntry) => typeof entry["tool"] === "string",
-            returnAll: true,
-            intervalMs: 25,
-            timeoutMs: 10_000,
-            excerpt: 600,
-          })
-        )
-          .filter((entry) => typeof entry["tool"] === "string")
-          .map((entry) => {
-            const { seq: _seq, ...rest } = normalizeAuditEntry(entry) as Record<string, unknown>;
-            return rest;
-          });
-      // The entries are written after the reply: read again after a pause, so an entry written late is seen too.
-      await read();
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      return read();
-    },
-    writes: () => fake.requests.filter(isWrite).map(writeLine),
-    otherWrites: () => (otherFake?.requests ?? []).filter(isWrite).map(writeLine),
-    close,
-  };
+  return openSdkRig(pkg, negotiation, {
+    ...(options.capabilities !== undefined ? { capabilities: options.capabilities } : {}),
+    ...(options.governed === false ? {} : { governance: governanceOf(promote) }),
+    secondListener: promote,
+    clientName: "story-43-3",
+  });
 }
 
 /** The audit entry of a Literal, without `seq`. */

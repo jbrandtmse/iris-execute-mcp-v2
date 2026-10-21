@@ -1389,7 +1389,14 @@ export const envPromoteTool: ToolDefinition = {
     '{"global": {"iris_env_promote:execute": true}}\n\n' +
     "SAFETY -- direction is always sourceToTarget (promote source's state onto " +
     "target); nothing on the target is EVER deleted by this tool, in any " +
-    "action, in any version.",
+    "action, in any version.\n\n" +
+    "HUMAN CONFIRMATION -- when the MCP client supports form elicitation, " +
+    "'execute' also asks the person in a confirmation dialog, after all four " +
+    "gates pass and right before the first write to 'target'; only an accept " +
+    "with Confirm ticked proceeds, and a decline or a dismissal returns " +
+    "CONFIRMATION_DECLINED with nothing changed (do not repeat the call unless " +
+    "the person asks). A client without elicitation is not asked, and the call " +
+    "works as described above.",
   inputSchema: z.object({
     action: z
       .enum(["plan", "execute"])

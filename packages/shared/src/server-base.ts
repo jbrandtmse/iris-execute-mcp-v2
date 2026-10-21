@@ -1255,7 +1255,8 @@ export class McpServerBase {
    *   policy, so `resources/list` advertises a concrete entry.
    * - A `ResourceTemplate` `iris-governance://{profile}` for any profile, serving
    *   `resources/read` and listed under `resources/templates/list`. Its `list`
-   *   callback enumerates the configured profiles.
+   *   callback enumerates the configured profiles other than `default`, which
+   *   the static resource lists, so each governance URI appears once.
    *
    * Both go into {@link resourceReaders}. The instance builder registers them on
    * each SDK instance ({@link registerResourceOn}), which auto-wires the SDK's
@@ -1285,20 +1286,21 @@ export class McpServerBase {
 
     // Per-profile policy template → resources/templates/list + resources/read.
     //
-    // The `list` callback (Epic 19, decision E1 optional companion / AC 19.0.7)
-    // enumerates one concrete `iris-governance://<profile>` resource per
-    // configured profile, so resource-reading clients can ALSO discover the
-    // profile roster (by name) via `resources/list` — closing the same
-    // enumeration hole the discovery tool closes for tool-calling clients. It
-    // reads `this.profiles` at CALL TIME (closure), so it reflects the registry
-    // built in start(); before start() (`this.profiles` undefined) it lists just
-    // the reserved default, mirroring buildGovernancePolicyResult's pre-start
-    // fallback. Was previously `undefined` (D6 minimal); now provided.
+    // The `list` callback (decision E1 optional companion / AC 19.0.7)
+    // enumerates one concrete `iris-governance://<profile>` resource for every
+    // configured profile EXCEPT the reserved default, so resource-reading
+    // clients can also discover the profile roster (by name) via
+    // `resources/list`. The reserved default is omitted because the static
+    // resource above already lists `iris-governance://default`, so no URI is
+    // listed twice. It reads `this.profiles` at CALL TIME (closure), so it
+    // reflects the registry built in start(); before start() (`this.profiles`
+    // undefined) it lists nothing. `resources/read` of every URI, the default
+    // included, and `resources/templates/list` do not depend on this callback.
     const profileTemplate = new ResourceTemplate(GOVERNANCE_TEMPLATE_URI, {
       list: (): { resources: Array<{ uri: string; name: string }> } => {
         const names = this.profiles
-          ? [...this.profiles.keys()]
-          : [DEFAULT_PROFILE_NAME];
+          ? [...this.profiles.keys()].filter((name) => name !== DEFAULT_PROFILE_NAME)
+          : [];
         return {
           resources: names.map((name) => ({
             uri: `${GOVERNANCE_URI_SCHEME}://${name}`,

@@ -22,7 +22,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { REPO_ROOT } from "./pack-fixture";
@@ -35,7 +35,6 @@ import {
 } from "../../../../scripts/lib/sdk-handler-golden-core.mjs";
 import {
   CLOSED_PORT_ENV,
-  GOLDEN_RELATIVE_PATH,
   WIRE_ERA,
   discoverHandshake,
   handshake,
@@ -47,6 +46,7 @@ import {
   withoutExecution,
   withoutMandatedFields,
 } from "../../../../scripts/lib/sdk-wire-golden-core.mjs";
+import { readSanctionedGolden } from "../../../../scripts/lib/golden-sanctioned-changes.mjs";
 import { distEntry, staleDistReason } from "./process-gate-helpers.js";
 
 type Era = "legacy" | "modern";
@@ -321,7 +321,7 @@ describe.each(["legacy", "modern"] as const)("the chokepoint on the %s era", (er
   });
 
   it("call 7: under the core preset, tools/list returns the 15 core tools, and a hidden tool is not found, with or without _meta { visible: true }", () => {
-    const golden = JSON.parse(readFileSync(path.join(REPO_ROOT, GOLDEN_RELATIVE_PATH), "utf8")) as {
+    const golden = readSanctionedGolden(REPO_ROOT, "wire") as {
       servers: Record<string, { sessions: Record<string, { rows: Array<{ label: string; line: string }> }> }>;
     };
     const coreRow = golden.servers[PKG]!.sessions["core-preset"]!.rows.find((row) => row.label === "tools-list")!;

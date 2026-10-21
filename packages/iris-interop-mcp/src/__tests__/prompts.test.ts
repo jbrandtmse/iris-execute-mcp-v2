@@ -31,6 +31,7 @@ import { prompts } from "../prompts/index.js";
 import { recoverStuckProductionPrompt } from "../prompts/recoverStuckProduction.js";
 import { traceMessageFlowPrompt } from "../prompts/traceMessageFlow.js";
 import { findPatientMessagesPrompt } from "../prompts/findPatientMessages.js";
+import { resendFailedMessagesPrompt } from "../prompts/resendFailedMessages.js";
 
 /** The prompts this package (iris-interop-mcp) owns per Story 25.1 AC 25.1.1, Story 26.3 and Story 39.6. */
 const OWN_PROMPT_NAMES = [
@@ -403,5 +404,26 @@ describe("find-patient-messages \u2014 contract and flow (Story 39.6)", () => {
   it("keeps iris_server_profiles out of the namespace note, because that tool takes no namespace", () => {
     const named = findPatientMessagesPrompt.build({ patientId: "X", namespace: "USER" });
     expect(named).toContain('pass `namespace: "USER"` on every tool call below except `iris_server_profiles`, which takes none.');
+  });
+});
+
+describe("Story 43.4: resend-failed-messages states what IRIS refuses (DW-653)", () => {
+  const text = resendFailedMessagesPrompt.build({ item: "X", since: "2026-01-01" });
+
+  it("says that the preview reports the full match count and that only the executing call is refused over the cap", () => {
+    expect(text).toContain(
+      "3. The preview always reports the full match count. If it exceeds `maxMessages` (default 100, hard cap 500), the executing call in step 4 would be refused rather than truncated-and-executed",
+    );
+  });
+
+  it("says that dryRun:false without confirm:true is refused, and that leaving dryRun out only previews again", () => {
+    expect(text).toContain(
+      "(`dryRun: false` without `confirm: true` is refused with no changes made; leaving `dryRun` out only previews again, because it defaults to `true`)",
+    );
+  });
+
+  it("no longer says that the preview call is refused over the cap, or that omitting either parameter is refused", () => {
+    expect(text).not.toContain("omitting either is refused");
+    expect(text).not.toContain("the call is refused rather than truncated-and-executed");
   });
 });

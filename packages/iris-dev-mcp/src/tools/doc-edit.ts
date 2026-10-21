@@ -466,7 +466,11 @@ export const docEditTool: ToolDefinition = {
     "The tool does not compile: run `iris_doc_compile` next. " +
     "Governance: `apply` is a write that is enabled by default. It is disabled when `iris_doc_put` is explicitly disabled " +
     "(unless `iris_doc_edit:apply` is set explicitly) and under the read-only preset. `regenerateStorage` runs the same edits " +
-    "without the Storage guard and is disabled by default.",
+    "without the Storage guard and is disabled by default. " +
+    "Human confirmation: when the MCP client supports form elicitation, `regenerateStorage` also asks the person in a " +
+    "confirmation dialog, after every check above and right before the document is saved; only an accept with Confirm " +
+    "ticked proceeds, and a decline or a dismissal returns CONFIRMATION_DECLINED with nothing changed (do not repeat the " +
+    "call unless the person asks). A client without elicitation is not asked, and the call works as described above.",
   inputSchema: z.object({
     action: z
       .enum(["apply", "regenerateStorage"])
