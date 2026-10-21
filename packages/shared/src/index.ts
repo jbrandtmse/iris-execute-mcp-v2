@@ -47,7 +47,7 @@ export {
 } from "./lines.js";
 export { REFUSAL_CODES, refusalResult } from "./refusals.js";
 export type { RefusalCode, RefusalResult } from "./refusals.js";
-export { contentHash } from "./confirmation.js";
+export { CONFIRMATION_TEXT_LIMIT, contentHash } from "./confirmation.js";
 export {
   DATA_POLICIES,
   DEFAULT_DATA_POLICY,

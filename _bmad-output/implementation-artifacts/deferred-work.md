@@ -2930,16 +2930,19 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: load.ts:447-456 sends PUT ?ignoreConflict=1 per file (the default) with no Storage guard; Story 38.3 AD-24 write-path verdict: excluded, because loading files from source control is the sanctioned flow and the file is the source of truth for the class text
 - 2026-10-15T18:19:47Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=implement note=reopen_if=a class loses its Storage after iris_doc_load uploads a file without it (user report or ledger occurrence)
+- 2026-10-21T20:02:57Z status=resolved-by:42-11-storage-guard-on-every-document-write by=adjudication note=wave-8_decision_46:the_excluded_path_is_now_guarded_by_default;reopen_if_trigger_prevented_by_the_live-pinned_refusal(storage-guard-write-paths-live-gate)
 
 ### DW-545: iris_env_promote execute copies each source document to the target with ignoreConflict=1 and has no Storage check, so a sync replaces the target class's Storage definitions with the source copy's
 - source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: env-promote.ts:868-869 PUTs the source content to ...?ignoreConflict=1; a sync replaces the target's whole class, Storage included, by design. Story 38.3 AD-24 write-path verdict: excluded, because execute is plan-gated (the plan embeds the content hash of its source diff, AD-17) and default-disabled
 - 2026-10-15T18:19:52Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=implement note=reopen_if=promote execute replaces a target class that has Storage with a source copy that has none (report)
+- 2026-10-21T20:02:57Z status=resolved-by:42-11-storage-guard-on-every-document-write by=adjudication note=wave-8_decision_46:the_excluded_path_is_now_guarded_by_default;reopen_if_trigger_prevented_by_the_live-pinned_refusal(storage-guard-write-paths-live-gate)
 
 ### DW-546: iris_doc_xml_export import loads an XML export through action/xml/load with no Storage check, so an import replaces the stored class, including its Storage definitions, with the export's
 - source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: format.ts:218 POSTs the XML to action/xml/load; an XML export carries its own <Storage> elements, so an import replaces the stored definitions with the exported ones. Story 38.3 AD-24 write-path verdict: excluded (orchestrator decision 8 at the spec gate, 2026-10-15), because the export is the source of truth for the class it describes
 - 2026-10-15T18:19:52Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=implement note=reopen_if=an XML import replaces a class that has Storage with a definition that has none (report)
+- 2026-10-21T20:02:57Z status=resolved-by:42-11-storage-guard-on-every-document-write by=adjudication note=wave-8_decision_46:the_excluded_path_is_now_guarded_by_default;reopen_if_trigger_prevented_by_the_live-pinned_refusal(storage-guard-write-paths-live-gate)
 
 ### DW-547: Storage-drop scanner loses brace sync without reporting it in embedded &html</&js< blocks, string-bearing [ ] keyword values and ( ) defaults, XData bodies, and some contrived headers, so a drop after such a member is not refused (fails open = pre-38.3 behavior)
 - source: _bmad-output/implementation-artifacts/spec-38-3-storage-block-drop-guard.md | severity: low | fix-risk: med | footprint: in-epic
@@ -3465,6 +3468,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-20T04:42:43Z status=routed owner=42-2-bootstrap-downgrade-guard by=lead note=reference: Story 41.8's story-41-8-qa-accept-language-live-gate.test.ts is the opt-in shape (legs run only with IRIS_REQUIRE_LIVE=1 and all five IRIS_*; a guard test proves zero requests unarmed); the prepublish gate must then export all five IRIS_* (42.6)
 - 2026-10-20T07:58:39Z occurrence=43-1-framework-migration-to-sdk-v2 note=the two launcher SDK-client tests (governanceUiRoundTrip, localSpawnIntegration) read IRIS_TEST_HOST/IRIS_TEST_PORT defaulting to localhost:52773 HSCUSTOM and ignore IRIS_HOST/IRIS_PORT; a 43.1 plan probe reached the shared instance through them (read-only)
 - 2026-10-20T12:12:41Z occurrence=43-2-serve-mcp-revision-2026-07-28 note=43.2 implement handoff ran pnpm --filter @iris-mcp/dev test with no IRIS_* set; dev's live gates wrote and removed their disposable ExecuteMCPv2.Temp.QaStory* fixtures on the shared instance (lead verified no leftovers)
+- 2026-10-21T19:52:21Z occurrence=42-11-storage-guard-on-every-document-write by=cr note=both new dev gates (storage-guard-write-paths-live-gate, story-42-11-qa-live-gate) run their legs unarmed whenever localhost:52773 answers
 
 ### DW-628: The documented npx form npx -y @iris-mcp/client-config iris-mcp-clients <command> passes iris-mcp-clients to the CLI as its command (unknown-command once published) and carries no @1 pin
 - source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: med | fix-risk: low | footprint: out-of-footprint
@@ -3611,6 +3615,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-21T05:27:11Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=wave-8 decision 30: fix before 1.0, extend the Story 38.4 Storage guard to doc_load, XML import and env_promote document writes; DW-652 bullet under 42.1
 - 2026-10-21T06:26:44Z owner=42-10-pre-1-0-tool-surface-corrections by=spec_gate note=moved_from_42-1_by_wave8_decision_34_split(frozen-goldens_machinery+feature-sized_DW-652)
 - 2026-10-21T14:59:04Z owner=42-11-storage-guard-on-every-document-write by=spec_gate note=moved_from_42-10_by_wave8_decision_38(feature-sized:three_guard_designs,new_override_param_on_three_tools,new_live_gate)
+- 2026-10-21T20:02:57Z status=resolved-by:42-11-storage-guard-on-every-document-write by=adjudication note=Storage_guard_on_iris_doc_load(GET_before_PUT+409_read),iris_doc_xml_export_import(whole-import_refusal),iris_env_promote_execute(GET-only_preflight_before_dialog);allowStorageRegeneration+storageDrops;8_sanctioned_entries;lead_smoke_live_gates_7/7+5/5_real_Atelier_HSCUSTOM_no_leftovers
 
 ### DW-653: The resend-failed-messages prompt says an over-cap match is refused and omitting dryRun or confirm is refused; a dry run returns the full matchCount and omitting dryRun previews; the prompt text is pinned by the frozen 43.1 golden
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3705,3 +3710,14 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-11-storage-guard-on-every-document-write.md | severity: low | fix-risk: med | footprint: in-epic
 - evidence: 42.11 implement: the deploy-and-test-class loop handles compile errors only; a refusal is a failures entry; prompt text is a frozen prompts/get golden (sanctioned entry needed)
 - 2026-10-21T19:00:28Z status=wontfix-accepted owner=42-11-storage-guard-on-every-document-write by=harvest note=reopen_if=an agent following deploy-and-test-class or promote-environment-change misses a STORAGE_DROPPED refusal (report or ledger occurrence); the refusal text itself names the override and the result counts the failure
+- 2026-10-21T19:52:21Z occurrence=42-11-storage-guard-on-every-document-write by=cr note=cr blind layer: deploy-and-test-class step 2 exits on zero compile errors, which a STORAGE_DROPPED file meets (not compiled), so step 3 tests the stale copy
+
+### DW-670: On a client that answers the confirmation dialog in a second request, iris_env_promote execute re-runs its Storage preflight in the accepting round and writes the drops that round finds, while the confirmation binds only the tool and the argument hash (AD-34), so drops that appeared during the dialog are written unseen
+- source: spec-42-11-storage-guard-on-every-document-write.md | severity: med | fix-risk: high | footprint: out-of-footprint
+- evidence: 42.11 cr: server-base.ts confirmOnWire (2133-2143) proceeds on an echoed state matching tool+args hash without recomputing the scope; env-promote.ts executeAction re-runs preflightClassSteps every round, so round two's planned drops are never compared with round one's dialog
+- 2026-10-21T19:52:11Z status=escalated owner=burndown by=cr note=decision sheet: bind a scope digest into the confirmation state (shared helper, all six gates; an AD-34 amendment) or accept the dialog-window race
+
+### DW-671: The QA live gate story-42-11-qa-live-gate.test.ts copies the write-paths gate's ~90-line cleanup and fixture skeleton verbatim (listFixtureGlobals, killFixtureGlobals, listFixtureDocuments, removeFixtures, createFixture, beforeAll/afterAll), a pattern now repeated across six dev live gates
+- source: spec-42-11-storage-guard-on-every-document-write.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: 42.11 cr: Rule 2 weak reason - per-gate fixture ownership needs only a per-gate class list, not copied code; a prefix-parameterised helper in live-doc-helpers.ts would serve every gate
+- 2026-10-21T19:52:21Z status=wontfix-accepted owner=42-11-storage-guard-on-every-document-write by=cr note=reopen_if=a fix to one gate's cleanup or leftover check is missed in a sibling gate (red run or review finding naming the drift)

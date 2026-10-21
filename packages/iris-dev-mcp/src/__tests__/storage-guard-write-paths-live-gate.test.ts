@@ -27,7 +27,8 @@
  * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, defaulting to the dev instance at
  * localhost:52773 / HSCUSTOM. Writes only the disposable `ExecuteMCPv2.Temp.QaStory4211Load.cls`, `...Xml.cls` and `...Prom.cls`
  * (persistent, compiled, no data rows) and a scratch directory under the OS temp directory. Before and after the run the gate
- * removes every document and every data global whose name contains `QaStory4211` and asserts that none is left. Skips when IRIS
+ * removes its three classes and every data global whose name contains `QaStory4211`, and asserts that no document of its classes
+ * and no such global is left (the QA gate's `QaStory4211Nd*` classes are not counted, so the two gates never block each other). Skips when IRIS
  * is unreachable; fails instead when `IRIS_REQUIRE_LIVE` is armed (listed in `scripts/prepublish-gate.mjs` `gateTestFiles`).
  */
 
@@ -132,11 +133,16 @@ async function killFixtureGlobals(): Promise<void> {
   }
 }
 
-/** The documents IRIS lists for `QaStory4211`, generated documents included. */
+/**
+ * The documents of this gate's classes that IRIS lists, generated documents included. The other Story 42.11 gate's
+ * `QaStory4211Nd*` classes are not this gate's, so either gate can run while the other's fixtures exist.
+ */
 async function listFixtureDocuments(): Promise<string[]> {
   const listed = await docListTool.handler({ filter: "QaStory4211", generated: true, namespace: IRIS_NAMESPACE }, ctx);
   expect(listed.isError, "the leftover listing").toBeUndefined();
-  return (listed.structuredContent as { items: Array<{ name: string }> }).items.map((item) => item.name);
+  return (listed.structuredContent as { items: Array<{ name: string }> }).items
+    .map((item) => item.name)
+    .filter((name) => [LOAD, XML, PROM].some((className) => name.startsWith(`${className}.`)));
 }
 
 /** Remove everything the gate writes: the data globals, then the documents. */
@@ -202,14 +208,14 @@ beforeAll(async () => {
   if (skipReason) return;
 
   await removeFixtures();
-  expect(await listFixtureDocuments(), "no QaStory4211 document before the run").toEqual([]);
+  expect(await listFixtureDocuments(), "no document of this gate's QaStory4211 classes before the run").toEqual([]);
   expect(await listFixtureGlobals(), "no QaStory4211 global before the run").toEqual([]);
 }, 60000);
 
 afterAll(async () => {
   if (skipReason) return;
   await removeFixtures();
-  expect(await listFixtureDocuments(), "no QaStory4211 document after the run").toEqual([]);
+  expect(await listFixtureDocuments(), "no document of this gate's QaStory4211 classes after the run").toEqual([]);
   expect(await listFixtureGlobals(), "no QaStory4211 global after the run").toEqual([]);
 }, 60000);
 
@@ -545,4 +551,5 @@ describe("iris_env_promote execute on a persistent class that has Storage on the
 });
 
 // Nothing left behind (Story 42.11, AC 42.11.3): the `beforeAll` and `afterAll` above remove the QaStory4211 fixtures
-// and assert that no document, generated routine or global named QaStory4211 remains, whatever order the tests ran in.
+// and assert that no document or generated routine of this gate's classes, and no global named QaStory4211, remains, whatever
+// order the tests ran in.

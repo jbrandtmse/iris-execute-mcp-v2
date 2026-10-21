@@ -390,11 +390,13 @@ HTTP 200 response) is returned as an error carrying IRIS's text; nothing is stor
   - `iris_env_promote` `execute` reads the source and target copy of each class before its confirmation dialog, and
     refuses the whole execute when a source copy lacks a definition the target class has. It writes the source text it
     read. With the override the dialog and the result's `storageDrops` name the dropped definitions. When the drops and
-    the steps together are longer than the dialog shows (600 characters), fewer steps are listed (`and N more`) so that
-    the drops stay visible.
-  - Each class is read once, one GET after another, before it is written. A change made to the class between that
-    read and the write is not seen, and on a promote the read comes before the confirmation dialog and before the
-    mapping steps of the same plan. A very large load, import or promote makes proportionally more requests.
+    the steps together are longer than the dialog shows (600 characters), fewer steps are listed, then fewer dropped
+    classes, each list ending `and N more`, so that the drops stay visible.
+  - Each call reads each class once, one GET after another, before it writes it. A change made to the class between
+    that read and the write is not seen. On a promote the read comes before the confirmation dialog and before the
+    mapping steps of the same plan; a client that answers the dialog in a second request runs the call again, so that
+    request reads each class again and writes what it read, without comparing it with the drops the dialog named. A
+    very large load, import or promote makes proportionally more requests.
 - **Document-write paths.** The guard covers `iris_doc_put`, `iris_doc_edit` (action `apply`), `iris_doc_load`, the
   `iris_doc_xml_export` import and the `iris_env_promote` `execute` sync; `iris_doc_edit` is overridden by its
   `regenerateStorage` action instead of the parameter. The bootstrap's own classes have no Storage definitions.
@@ -660,7 +662,8 @@ class's Storage definitions is not stored, and its `failures[]` entry carries `c
 names in `droppedStorage`; the other files continue, and a refused file is not compiled. `allowStorageRegeneration:
 true` (default **false**) uploads it anyway, and the result gains `storageDrops`, for example
 `[{"name": "MyApp.Model.cls", "droppedStorage": ["Default"]}]`. A new class, a non-class document and a file that keeps
-every definition upload exactly as before.
+every definition upload exactly as before. A read that fails (other than a 404, which means a new class), or a class
+that cannot be read as text, fails that file with the read's error and nothing is stored for it; the other files continue.
 
 **Refused input (trap-shaped glob):**
 ```json
@@ -1001,7 +1004,8 @@ class that exists lacks one of the `<Storage>` elements it has now, the whole im
 (`structuredContent` is `{code, namespace, storageDrops}`) and nothing is loaded; export the classes with
 `iris_doc_xml_export` first to keep their `<Storage>` elements. `allowStorageRegeneration: true` (default **false**)
 loads the XML anyway, and the result gains `storageDrops`. An XML with no `<Class>`, a new class and a class that keeps
-every definition import exactly as before.
+every definition import exactly as before. A read that fails (other than a 404, which means a new class), or a class
+that cannot be read as text, ends the call with the read's error before the POST, and nothing is loaded.
 
 **Input:**
 ```json

@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { ToolContext } from "@iris-mcp/shared";
-import { ProfileResolutionError } from "@iris-mcp/shared";
+import { CONFIRMATION_TEXT_LIMIT, IrisApiError, ProfileResolutionError } from "@iris-mcp/shared";
 import { STORAGE_FIXTURES } from "@iris-mcp/shared/test-helpers/storage-guard-fixtures";
 import { envPromoteTool } from "../tools/env-promote.js";
 import { currentClass, notFound } from "./conflict-fakes.js";
@@ -243,14 +243,18 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
     });
 
     it("a renamed definition and a case change are drops, and changed content is not", async () => {
-      sourceDocs["Changed.cls"] = withStorage("Changed").map((line) => (line === "Storage Default" ? "Storage default" : line));
+      for (const newName of ["Alt", "default"]) {
+        wire();
+        sourceDocs["Changed.cls"] = withStorage("Changed").map((line) => (line === "Storage Default" ? `Storage ${newName}` : line));
+        arrange();
 
-      const renamed = await execute(mixedDiff(), [2]);
+        const renamed = await execute(mixedDiff(), [2]);
 
-      expect(renamed.isError).toBe(true);
-      expect((renamed.structuredContent as { storageDrops: unknown }).storageDrops).toEqual([
-        { name: "Changed.cls", droppedStorage: ["Default"] },
-      ]);
+        expect(renamed.isError, newName).toBe(true);
+        expect((renamed.structuredContent as { storageDrops: unknown }).storageDrops, newName).toEqual([
+          { name: "Changed.cls", droppedStorage: ["Default"] },
+        ]);
+      }
 
       wire();
       sourceDocs["Changed.cls"] = withStorage("Changed").map((line) =>
@@ -417,11 +421,31 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
         const scope = String(confirm.mock.calls[0]?.[0]?.scope);
         const dropped = droppingIndexes.map((i) => `${names[i - 1]}.cls ('Default')`).join("; ");
         const shown = (scope.match(/#\d+ documents putAndCompile/g) ?? []).length;
-        expect(scope.length).toBeLessThanOrEqual(600);
+        expect(scope.length).toBeLessThanOrEqual(CONFIRMATION_TEXT_LIMIT);
         expect(shown).toBeGreaterThanOrEqual(1);
         expect(shown).toBeLessThan(10);
         expect(scope.startsWith(`10 step(s) from server 'source': #1 documents putAndCompile ${names[0]}.cls`)).toBe(true);
         expect(scope.endsWith(`; and ${10 - shown} more; drops Storage definitions: ${dropped}`)).toBe(true);
+      });
+
+      it("when the drops alone are longer than the dialog shows, one step is listed and fewer dropped documents, with how many more", async () => {
+        arrangeNamedClasses();
+        names.forEach((name) => {
+          sourceDocs[`${name}.cls`] = withoutStorage(name);
+        });
+        const confirm = proceedingConfirm();
+        ctx.confirm = confirm;
+
+        await execute(namedClassesDiff(), names.map((_, i) => i + 1), { allowStorageRegeneration: true });
+
+        // One step and ten drops make 646 characters, nine drops 607: eight drops make the scope 556.
+        const dropped = names.slice(0, 8).map((name) => `${name}.cls ('Default')`).join("; ");
+        const scope = String(confirm.mock.calls[0]?.[0]?.scope);
+        expect(scope).toBe(
+          `10 step(s) from server 'source': #1 documents putAndCompile ${names[0]}.cls; and 9 more; ` +
+            `drops Storage definitions: ${dropped}; and 2 more`,
+        );
+        expect(scope.length).toBeLessThanOrEqual(CONFIRMATION_TEXT_LIMIT);
       });
 
       it("without a drop the scope lists ten steps whatever its length, as before", async () => {
@@ -532,7 +556,7 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
     it("a target read that fails (not a 404) fails that step with the target-read text, and nothing is written for it", async () => {
       targetHttp.get.mockImplementation(async (path: string) => {
         if (path === "/api/atelier/") return envelope({ content: { api: 8 } });
-        throw new Error("the target is unreachable");
+        throw new IrisApiError(500, [], path, `IRIS returned HTTP 500 for GET ${path}. Check the request parameters and try again.`);
       });
 
       const result = await execute(mixedDiff(), [1, 2, 3, 4]);
@@ -541,7 +565,8 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
       const executed = (result.structuredContent as { executed: Array<{ subject: string; status: string; error?: string }> }).executed;
       expect(executed.map((step) => step.status)).toEqual(["completed", "failed", "skipped", "skipped"]);
       expect(executed[1]?.error).toBe(
-        "Could not read the target's copy of 'Changed.cls' to check its Storage definitions: the target is unreachable. " +
+        "Could not read the target's copy of 'Changed.cls' to check its Storage definitions: " +
+          `IRIS returned HTTP 500 for GET ${TGT}Changed.cls. Check the request parameters and try again. ` +
           "Nothing was written for this document.",
       );
       expect(targetHttp.put.mock.calls).toEqual([]);
@@ -557,7 +582,11 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
 
       const executed = (result.structuredContent as { executed: Array<{ status: string; error?: string }> }).executed;
       expect(executed[0]?.status).toBe("failed");
-      expect(executed[0]?.error).toContain("Could not read the target's copy of 'Changed.cls'");
+      expect(executed[0]?.error).toBe(
+        "Could not read the target's copy of 'Changed.cls' to check its Storage definitions: Document 'Changed.cls' could not " +
+          "be read in namespace 'SADEMO': it is a binary document. Check the document name and namespace, then retry. " +
+          "Nothing was written for this document.",
+      );
       expect(targetHttp.put.mock.calls).toEqual([]);
     });
   });
@@ -589,7 +618,7 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
         "and the call works as described above.";
 
       expect(envPromoteTool.description.endsWith(`${confirmation}\n\n${guard}`)).toBe(true);
-      expect(guard.toLowerCase()).not.toContain("human confirmation");
+      expect(envPromoteTool.description.toLowerCase().split("human confirmation")).toHaveLength(2);
     });
 
     it("the parameter is optional with no default, so the confirmation hash of the arguments does not move", () => {

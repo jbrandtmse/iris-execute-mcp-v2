@@ -63,7 +63,7 @@ export const UNANSWERED_CONFIRMATION_TEXT =
   "The confirmation dialog was not answered. Nothing was changed.";
 
 /** The longest target or scope the dialog shows; a longer one is cut here and ends in `...`. */
-const MAX_TEXT_CHARACTERS = 600;
+export const CONFIRMATION_TEXT_LIMIT = 600;
 
 /** The words the dialog needs from a gate, resolved: the operation, what it targets and what it covers. */
 export interface ConfirmationText {
@@ -88,7 +88,7 @@ export interface ConfirmationServer {
  */
 function dialogLine(value: string): string {
   const line = value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, " ");
-  return line.length > MAX_TEXT_CHARACTERS ? `${line.slice(0, MAX_TEXT_CHARACTERS)}...` : line;
+  return line.length > CONFIRMATION_TEXT_LIMIT ? `${line.slice(0, CONFIRMATION_TEXT_LIMIT)}...` : line;
 }
 
 /** The dialog message of a gate. `target` and `scope` are one line each, cut to 600 characters, then `...` is appended. */

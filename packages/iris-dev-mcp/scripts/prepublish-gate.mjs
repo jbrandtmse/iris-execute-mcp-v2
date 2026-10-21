@@ -103,6 +103,10 @@ const gateTestFiles = [
   // import and `iris_env_promote` execute against the real Atelier: writes only the disposable ExecuteMCPv2.Temp.QaStory4211Load,
   // ...Xml and ...Prom documents (persistent, compiled, no data rows), and removes them and any global that carries the name.
   "src/__tests__/storage-guard-write-paths-live-gate.test.ts",
+  // Story 42.11 QA: what the same guard does NOT refuse on the real Atelier (a file that keeps the Storage under both `ignoreConflict`
+  // values, a class that is new, the import of the tool's own export, a promotion whose source keeps the Storage): writes only the
+  // disposable ExecuteMCPv2.Temp.QaStory4211NdLoad, ...NdNew, ...NdXml and ...NdProm documents (persistent, no data rows), and removes them.
+  "src/__tests__/story-42-11-qa-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: these files all drive ONE live IRIS instance and share its

@@ -58,6 +58,7 @@ import type {
   StorageDrop,
 } from "@iris-mcp/shared";
 import {
+  CONFIRMATION_TEXT_LIMIT,
   IrisApiError,
   ProfileResolutionError,
   atelierDocStatusError,
@@ -843,10 +844,10 @@ async function readSourceContent(
  */
 type ClassPreflight = { content: string[]; dropped: string[] } | { error: string };
 
-/** The failure text of a step whose target read failed in the preflight. */
+/** The failure text of a step whose target read failed in the preflight; one closing period of `message` is dropped. */
 function targetReadFailure(subject: string, message: string): string {
   return (
-    `Could not read the target's copy of '${subject}' to check its Storage definitions: ${message}. ` +
+    `Could not read the target's copy of '${subject}' to check its Storage definitions: ${message.replace(/\.$/, "")}. ` +
     "Nothing was written for this document."
   );
 }
@@ -1069,29 +1070,32 @@ function promoteStorageOpening(target: string, targetNs: string): string {
   return `Promotion to server '${target}', namespace '${targetNs}' was not run and no changes were made`;
 }
 
-/** The longest scope the confirmation dialog shows; the dialog of `@iris-mcp/shared` cuts a longer one. */
-const CONFIRMATION_SCOPE_LIMIT = 600;
-
 /**
  * What an `execute` covers, for the confirmation dialog: the step count and source, then the first steps as
- * `#<index> <domain> <operation> <subject>`, then `suffix`.
+ * `#<index> <domain> <operation> <subject>`, then, when the execute drops Storage definitions,
+ * `; drops Storage definitions: <describeStorageDrops>`.
  *
- * A non-empty `suffix` always survives the dialog's cut: fewer steps are listed (`and N more`) until the
- * whole scope fits {@link CONFIRMATION_SCOPE_LIMIT}, down to one step. An empty `suffix` lists up to
- * {@link CONFIRMATION_STEP_LIMIT} steps.
+ * Without drops it lists up to {@link CONFIRMATION_STEP_LIMIT} steps. With drops it lists up to that many steps and
+ * dropped documents; when the scope is longer than the dialog shows ({@link CONFIRMATION_TEXT_LIMIT}), it lists fewer
+ * steps, down to one, then fewer dropped documents, down to one, each list ending `; and N more`. Only a scope that is
+ * still longer with one of each is cut by the dialog.
  */
-function promotionScope(source: string, steps: readonly ExecPlanStep[], suffix = ""): string {
-  const describe = (shown: number): string => {
+function promotionScope(source: string, steps: readonly ExecPlanStep[], drops: readonly StorageDrop[] = []): string {
+  const describe = (shown: number, dropsShown: number): string => {
     const listed = steps
       .slice(0, shown)
       .map((step) => `#${step.index} ${step.domain} ${step.operation} ${step.subject}`)
       .join("; ");
     const more = steps.length > shown ? `; and ${steps.length - shown} more` : "";
-    return `${steps.length} step(s) from server '${source}': ${listed}${more}${suffix}`;
+    const dropped = drops.length > 0 ? `; drops Storage definitions: ${describeStorageDrops(drops, dropsShown)}` : "";
+    return `${steps.length} step(s) from server '${source}': ${listed}${more}${dropped}`;
   };
   let shown = Math.min(steps.length, CONFIRMATION_STEP_LIMIT);
-  while (suffix !== "" && shown > 1 && describe(shown).length > CONFIRMATION_SCOPE_LIMIT) shown -= 1;
-  return describe(shown);
+  let dropsShown = Math.min(drops.length, CONFIRMATION_STEP_LIMIT);
+  const tooLong = (): boolean => describe(shown, dropsShown).length > CONFIRMATION_TEXT_LIMIT;
+  while (drops.length > 0 && shown > 1 && tooLong()) shown -= 1;
+  while (dropsShown > 1 && tooLong()) dropsShown -= 1;
+  return describe(shown, dropsShown);
 }
 
 /**
@@ -1339,13 +1343,7 @@ async function executeAction(input: ExecuteInput, ctx: ToolContext): Promise<Too
   const outcome = await ctx.confirm?.({
     operation: "promote changes to another server",
     target: `server '${input.target}', namespace ${targetNs}`,
-    scope: promotionScope(
-      input.source,
-      orderedAllowed,
-      planned.length > 0
-        ? `; drops Storage definitions: ${describeStorageDrops(planned, CONFIRMATION_STEP_LIMIT)}`
-        : "",
-    ),
+    scope: promotionScope(input.source, orderedAllowed, planned),
   });
   if (outcome !== undefined && !outcome.proceed) return outcome.result;
 

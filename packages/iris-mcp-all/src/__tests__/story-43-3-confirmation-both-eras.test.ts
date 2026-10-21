@@ -419,7 +419,7 @@ const auditOf = (literal: Literal, extra: Record<string, unknown> = {}): Record<
 
 // -- the rows --------------------------------------------------------------------------------------------------------------------------
 
-describe("AC 43.3.1: the gate inventory, exhaustive as of 2026-10-20 (Rule #56)", () => {
+describe("AC 43.3.1: the gate inventory, exhaustive as of 2026-10-21 (Rule #56)", () => {
   /** The parameters whose presence makes a tool a candidate for the inventory. */
   const GATING_PARAMETERS = ["confirm", "force", "killAppData", "dryRun", "allowStorageRegeneration", "ignoreConflict", "overwrite", "allowWide"];
 
