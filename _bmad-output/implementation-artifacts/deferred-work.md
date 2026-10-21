@@ -3633,3 +3633,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: med | footprint: in-story
 - evidence: 43.3 CR 2026-10-20: fake-iris-listener.mjs replies 400 for those refusals; RenderResponseBody (irislib/%Atelier/REST.cls:129-169) sets no HTTP status; the task-0 baseline literals were captured against this fake, so a fix recaptures them
 - 2026-10-21T01:41:48Z status=wontfix-accepted owner=43-3-human-confirmation-through-elicitation by=cr note=reopen_if=a TS path branches on IrisApiError.statusCode for a gate route pinned only by a 400-answering fake route
+
+### DW-661: The README payload table (README.md:778-790) says byte counts are not test-pinned, but story-40-4-doc-claims pins the dev row and three 39.x doc-claims tests require the Last re-measured story to be 39.x or 40.x; its figures predate the Story 43.4 description sentences (about +2.3 KB)
+- source: _bmad-output/implementation-artifacts/spec-43-4-sdk-v2-docs-smokes-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 43.4 plan inventory 2026-10-20: story-40-4-doc-claims.test.ts:216-217, story-39-4/39-1/39-5 doc-claims
+- 2026-10-21T03:57:59Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=re-measure the payload table in the 42.9 README rewrite and move its doc-claims pins with it
+
+### DW-662: The iris_message_resend description, its maxMessages schema text and the interop README still say executing needs both dryRun false and confirm true or the call is refused, and that an over-cap count is refused, though MessageResend.cls refuses only when dryRun is false and previews when dryRun is omitted
+- source: _bmad-output/implementation-artifacts/spec-43-4-sdk-v2-docs-smokes-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: 43.4 review 2026-10-20 (blind hunter): message-resend.ts:364-369, :434; packages/iris-interop-mcp/README.md:302; Story 43.4 fixed only the resend-failed-messages prompt (DW-653)
+- 2026-10-21T03:57:59Z status=routed owner=42-1-pre-publish-package-fixes by=harvest note=a sanctioned AD-15 tool-text correction before 1.0, with DW-560's annotation corrections: one sanctioned-change ledger entry per changed byte (a replace, so the Frozen goldens convention needs its sanction to name a correction), the tools-list snapshot regenerated
