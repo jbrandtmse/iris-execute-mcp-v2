@@ -200,9 +200,8 @@ describe("BASELINE_ACTION_CLASSIFICATIONS readOnlyHint cross-check (CR 24.0-1 / 
 /**
  * Story 42.10, DW-560 / Rule #44: the `destructiveHint` cross-check.
  *
- * AD-4: "destructive" means the tool can delete, or irreversibly overwrite, existing state. Before Story 42.10 no test compared
- * `destructiveHint` with any independent signal, and 13 tools that can delete or overwrite state declared `false`. Two mechanical checks
- * keep that from recurring:
+ * AD-4: "destructive" means the tool can delete, or irreversibly overwrite, existing state. Two mechanical checks hold `destructiveHint`
+ * to an independent signal:
  *  - a tool that is not read-only and declares `destructiveHint: false` must be on {@link JUSTIFIED_NON_DESTRUCTIVE_WRITES}, with a reason
  *    (the list is the sweep of 2026-10-21 over every such tool, Rule #56); an entry whose tool no longer fits is stale and fails;
  *  - a tool that owns an action named `delete`, `remove`, `purge`, `kill` or `clean` (the action of a multi-action tool, or the last word

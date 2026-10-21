@@ -674,7 +674,7 @@ describe("the audit trail (DW-579, AD-19)", () => {
     expect(valid).toMatchObject({ tool: "iris_wire_echo", outcome: "ok", profile: "default", namespace: "HSCUSTOM", paramKeys: ["name"], params: { name: "doc" } });
   });
 
-  it("a SYS-scoped call records %SYS whether it ends ok or fails its schema on the wire; an NS call keeps its namespace argument (Story 42.10, DW-654)", async () => {
+  it("a SYS-scoped call records %SYS and its namespace argument as targetNamespace whether it ends ok or fails its schema on the wire; an NS call keeps its namespace argument (Story 42.10, DW-654, DW-667)", async () => {
     const file = join(workDir, "audit.jsonl");
     process.env.IRIS_AUDIT_LOG = file;
     process.env.IRIS_AUDIT_LOG_PARAMS = "true";
@@ -685,11 +685,12 @@ describe("the audit trail (DW-579, AD-19)", () => {
     await client.callTool({ name: "iris_wire_echo", arguments: { namespace: "USER", name: "doc" } });
 
     const lines = await toolEntries(file, 3);
-    expect(lines.map((entry) => [entry.tool, entry.outcome, entry.namespace])).toEqual([
-      ["iris_wire_sys", "error", "%SYS"],
-      ["iris_wire_sys", "ok", "%SYS"],
-      ["iris_wire_echo", "ok", "USER"],
+    expect(lines.map((entry) => [entry.tool, entry.outcome, entry.namespace, entry.targetNamespace])).toEqual([
+      ["iris_wire_sys", "error", "%SYS", "USER"],
+      ["iris_wire_sys", "ok", "%SYS", "USER"],
+      ["iris_wire_echo", "ok", "USER", undefined],
     ]);
+    expect(Object.prototype.hasOwnProperty.call(lines[2], "targetNamespace"), "an NS entry has no targetNamespace").toBe(false);
     expect(Object.prototype.hasOwnProperty.call(lines[0], "params"), "a schema-invalid entry carries no params").toBe(false);
     expect(lines[1]).toMatchObject({ paramKeys: ["name", "namespace"], params: { name: "doc", namespace: "USER" } });
   });

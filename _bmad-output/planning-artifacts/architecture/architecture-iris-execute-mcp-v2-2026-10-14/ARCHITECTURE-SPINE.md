@@ -388,7 +388,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - **A call the client cancels** is `error`, with a fixed text saying an in-flight IRIS request was aborted.
   - **Secrets.** They are redacted before an entry is queued.
   - **Failure handling.** The writer never fails or delays a tool call. Only an unwritable path at startup fails fast.
-  - **Schema.** `outcome` keeps its closed domain (`ok`, `error`, `denied`). New fields are additive. For a `SYS`-scoped tool, `namespace` is `%SYS`, where the call runs; when such a call's `namespace` argument names the namespace it acts on, the additive `targetNamespace` field records that argument, whatever `IRIS_AUDIT_LOG_PARAMS` says. For every other tool, `namespace` is the call's override or the profile's default (Story 42.10, DW-654, wave-8 decision #41).
+  - **Schema.** `outcome` keeps its closed domain (`ok`, `error`, `denied`). New fields are additive. For a `SYS`-scoped tool, `namespace` is `%SYS`, where the call runs; when such a call has a non-empty string `namespace` argument, the additive `targetNamespace` field records it, whatever `IRIS_AUDIT_LOG_PARAMS` says. That includes the tools that document the argument as having no effect. For every other tool, `namespace` is the call's override or the profile's default (Story 42.10, DW-654, wave-8 decision #41).
   - **PHI** *(lands in Story 39.2)*:
     - Policy effects go in a new additive field, and a policy refusal is `error` with its own refusal code.
     - PHI-bearing inputs are declared on the `ToolDefinition` with a schema-level marker. Audit redacts by that declaration, under the profile's policy, never by matching parameter names.

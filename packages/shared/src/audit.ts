@@ -167,6 +167,12 @@ export interface AuditEntryInput {
   profileSource?: ProfileSource;
   /** Resolved namespace. */
   namespace: string;
+  /**
+   * The namespace a call to a `SYS`-scoped tool acts on: its non-empty `namespace` argument, while `namespace` records `%SYS`
+   * (AD-19). Written on every outcome, whatever `includeParams` says. Absent for every other scope and for a call with no such
+   * argument.
+   */
+  targetNamespace?: string;
   /** Call outcome. */
   outcome: AuditOutcome;
   /** Wall-clock call duration in milliseconds. */
@@ -220,6 +226,7 @@ interface AuditEntry {
   profile: string;
   profileSource?: ProfileSource;
   namespace: string;
+  targetNamespace?: string;
   outcome: AuditOutcome;
   durationMs: number;
   paramKeys: string[];
@@ -294,6 +301,7 @@ export class AuditLogger {
       action: input.action,
       profile: input.profile,
       namespace: input.namespace,
+      ...(input.targetNamespace === undefined ? {} : { targetNamespace: input.targetNamespace }),
       outcome: input.outcome,
       durationMs: input.durationMs,
       paramKeys: input.paramKeys,

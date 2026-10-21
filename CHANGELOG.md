@@ -31,8 +31,10 @@ entries of `fixtures/sdk-golden-sanctioned-changes.json`, one per moved golden v
   was refused, which the tool never did. The tool's behavior, `dryRun`'s text and the Story 43.4 dialog passage are unchanged.
 - **`S-42.10-audit-namespace` (DW-654, AD-19).** The audit entry of a `SYS`-scoped tool (the 25 SYS-scoped tools of `@iris-mcp/admin`)
   records `"namespace":"%SYS"`, where it recorded the call's `namespace` argument or the profile's default namespace, which is not where
-  the call ran. The argument still appears in `paramKeys` and, with `IRIS_AUDIT_LOG_PARAMS=true`, in `params`. The entries of `NS`, `BOTH`
-  and `NONE` tools are byte-identical to before.
+  the call ran. When the call has a non-empty `namespace` argument, the new additive field `targetNamespace` records it, on every outcome
+  and whatever `IRIS_AUDIT_LOG_PARAMS` says, so the entry still names the namespace that `iris_mapping_manage`, `iris_mapping_list`,
+  `iris_webapp_manage`, `iris_resource_manage` or `iris_user_manage` acts on (decision #41, DW-667); a call without one has no
+  `targetNamespace`. The entries of `NS`, `BOTH` and `NONE` tools are byte-identical to before and never carry `targetNamespace`.
 
 ### Changed
 

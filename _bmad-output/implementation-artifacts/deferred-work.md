@@ -3031,6 +3031,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-16T15:58:09Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=decided=orchestrator(Lead-away) decision 18: sanction the destructiveHint correction before 1.0; DW bullet in 42.1
 - 2026-10-20T23:38:03Z occurrence=43-3-human-confirmation-through-elicitation note=43.3 plan inventory: iris_ldap_manage delete, iris_x509_manage delete and iris_service_manage enable/disable/set are annotated destructiveHint false although they delete or disable; fix with the same AD-15 annotation correction
 - 2026-10-21T06:26:44Z owner=42-10-pre-1-0-tool-surface-corrections by=spec_gate note=moved_from_42-1_by_wave8_decision_34_split(frozen-goldens_machinery+feature-sized_DW-652)
+- 2026-10-21T16:59:07Z status=resolved-by:42-10-pre-1-0-tool-surface-corrections by=adjudication note=13_tools_now_destructiveHint_true(verdict_table,decision_39);19_S-42.10-annotations_ledger_entries;destructiveHint_cross-check_in_readonly-hint-crosscheck.test.ts;lead_smoke_built_servers_49/115_destructive_all_13_flipped
 
 ### DW-561: Epic 38 capstone, the 38.4 and the 38.5 wire gates each carry their own fixture helpers (putDoc, compileDoc, lineNumber, fixtureDocuments, fixtureGlobals, removeFixtures) instead of one promoted set in process-gate-helpers.ts
 - source: _bmad-output/implementation-artifacts/spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3623,6 +3624,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-20T23:38:03Z status=escalated owner=burndown by=harvest note=for the decision sheet: AD-19 accuracy; record the effective namespace for %SYS-scoped handlers, or accept
 - 2026-10-21T05:27:11Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=wave-8 decision 31: record the effective namespace for %SYS-scoped handlers in audit entries; DW-654 bullet under 42.1
 - 2026-10-21T06:26:44Z owner=42-10-pre-1-0-tool-surface-corrections by=spec_gate note=moved_from_42-1_by_wave8_decision_34_split(frozen-goldens_machinery+feature-sized_DW-652)
+- 2026-10-21T16:59:07Z status=resolved-by:42-10-pre-1-0-tool-surface-corrections by=adjudication note=SYS-scoped_audit_namespace=%SYS_plus_additive_targetNamespace(decision_41,DW-667);pinned_shared_unit+wire+story-42-10-qa-audit-namespace-built;lead_smoke_iris_mapping_list_namespace=USER_audited_%SYS+targetNamespace=USER
 
 ### DW-655: prd.md:86 says All 86 consolidated tools; the suite has 115
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3666,6 +3668,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-21T03:57:59Z status=routed owner=42-1-pre-publish-package-fixes by=harvest note=a sanctioned AD-15 tool-text correction before 1.0, with DW-560's annotation corrections: one sanctioned-change ledger entry per changed byte (a replace, so the Frozen goldens convention needs its sanction to name a correction), the tools-list snapshot regenerated
 - 2026-10-21T05:15:12Z occurrence=43-4-sdk-v2-docs-smokes-and-capstone by=cr note=appendOnly is optional, so a description replace under a later sanction passes the loader and the S-43.4-only append row; 42.1 decides
 - 2026-10-21T06:26:44Z owner=42-10-pre-1-0-tool-surface-corrections by=spec_gate note=moved_from_42-1_by_wave8_decision_34_split(frozen-goldens_machinery+feature-sized_DW-652)
+- 2026-10-21T16:59:07Z status=resolved-by:42-10-pre-1-0-tool-surface-corrections by=adjudication note=resend_description+maxMessages+confirm_corrected_as_S-42.10-resend-text(3_correction_entries)+interop_README:302;lead_smoke_reads_corrected_texts_from_built_interop
 
 ### DW-663: Extension CLI spawns (clientsEngine.ts:341, governanceEngine.ts:324) pass no cwd, so the clients CLI treats the extension host's cwd as the project and the MCP Clients view's project scope depends on how VS Code was launched; a project-local 1.x client-config copy can shadow the pinned spec
 - source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3691,6 +3694,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-10-pre-1-0-tool-surface-corrections.md | severity: med | fix-risk: low | footprint: in-story
 - evidence: 42.10 implement review (3 of 4 layers): deriveAuditNamespace server-base.ts:2402 returns %SYS for SYS scope; paramKeys holds names only; before 42.10 the entry carried the argument
 - 2026-10-21T16:12:40Z status=open owner=42-10-pre-1-0-tool-surface-corrections by=harvest note=wave-8 decision 41: add the additive targetNamespace field (the call's namespace argument, when set) for SYS-scoped tools; spine AD-19 amended; code review patches it in-story with a pin, or it takes the story's one rework iteration
+- 2026-10-21T16:56:09Z status=resolved-by:42-10-pre-1-0-tool-surface-corrections by=cr note=targetNamespace added (audit.ts, server-base.ts); pinned in shared + built QA tests; 2 mutations red; golden unmoved
 
 ### DW-668: Audit namespace for NONE- and BOTH-scoped tools still records the call's namespace argument or the profile default: the 21 ops tools run in %SYS server-side but record the profile namespace, and iris_backup_manage, iris_database_action and iris_process_manage record a namespace argument documented as having no effect
 - source: spec-42-10-pre-1-0-tool-surface-corrections.md | severity: low | fix-risk: med | footprint: in-epic

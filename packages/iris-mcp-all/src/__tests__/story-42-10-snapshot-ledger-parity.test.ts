@@ -3,8 +3,8 @@
  *
  * Two artifacts hold the bytes of a tool's `tools/list` entry: the generated snapshot (`fixtures/tools-list-snapshot.json`, regenerated
  * only by `pnpm gen:tools-list-snapshot --force` after a rebuild) and the frozen SDK v1 wire golden plus its ledger of sanctioned changes
- * (`readSanctionedGolden`). Nothing linked them, so a regenerated snapshot could move a byte that no ledger entry sanctions, and a ledger
- * entry could name a change the snapshot does not show. This file reads documents only (no dist, no IRIS) and checks, for every server:
+ * (`readSanctionedGolden`). This file keeps them equal, so that a regenerated snapshot cannot move a byte that no ledger entry sanctions,
+ * and a ledger entry cannot name a change the snapshot does not show. It reads documents only (no dist, no IRIS) and checks, for every server:
  *  - each tool the golden's `main` tools-list lists has a snapshot entry whose title, description, input schema and annotations are
  *    exactly the sanctioned golden's, so a moved value without an entry, and an entry the snapshot does not show, both fail naming
  *    server, tool and field;

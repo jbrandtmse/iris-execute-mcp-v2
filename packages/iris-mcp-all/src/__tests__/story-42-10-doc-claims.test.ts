@@ -6,10 +6,11 @@
  *  - the README Annotations cell of each of the 13 flipped tools names `destructive`;
  *  - the interop README bullet and the built `iris_message_resend` tool carry the corrected dry-run and cap wording, and neither keeps the
  *    clause "otherwise the call is refused";
- *  - the root README says what the audit `namespace` is, and scopes its Story 43.4 sentence about descriptions;
- *  - the CHANGELOG entry of Story 42.10 names the three sanction ids and the 13 tools, and the facts that bound the story;
- *  - `tool_support.md` has the Story 42.10 note, the CHANGELOG and that note state the number of SYS-scoped tools that the built catalog
- *    declares, `docs/tool-annotation-audit.md` is marked historical, and the changeset is a patch for the five packages the story changes.
+ *  - the root README says what the audit `namespace` and `targetNamespace` are, and scopes its Story 43.4 sentence about descriptions;
+ *  - the CHANGELOG entry of Story 42.10 names the three sanction ids, the 13 tools and `targetNamespace`, and the facts that bound the story;
+ *  - `tool_support.md` has the Story 42.10 note, the CHANGELOG and that note state the numbers of SYS-scoped tools and of justified
+ *    non-destructive writes that the built catalog declares, `docs/tool-annotation-audit.md` is marked historical, and the changeset is a
+ *    patch for the five packages the story changes.
  * Needs no IRIS. The built dists are read for the resend text and the SYS-scoped tool count; a stale dist fails the gate tests that own it.
  */
 
@@ -90,7 +91,7 @@ describe("Story 42.10: the corrected resend wording (DW-662)", () => {
   const CONFIRM =
     "(resendFiltered) Must be true together with dryRun:false to execute the resend; dryRun:false without confirm:true is refused with no changes made. Ignored while dryRun is true or omitted (the call previews).";
 
-  it("the interop README bullet says that only dryRun:false without confirm:true is refused, that omitting dryRun previews, and that only an executing call is refused over the cap", () => {
+  it("the interop README bullet says that dryRun:false without confirm:true is refused, that omitting dryRun previews, and that an over-cap count is refused only when executing", () => {
     const readme = squash(read("packages/iris-interop-mcp/README.md"));
     expect(readme).toContain(BULLET);
     expect(readme).not.toContain("otherwise the call is refused with no changes made");
@@ -121,11 +122,12 @@ describe("Story 42.10: the corrected resend wording (DW-662)", () => {
 describe("Story 42.10: the root README", () => {
   const rootReadme = read("README.md");
 
-  it("says what the audit namespace is", () => {
+  it("says what the audit namespace and targetNamespace are", () => {
     expect(squash(rootReadme)).toContain(
-      "`namespace` is `%SYS` for a `SYS`-scoped tool, which always runs there (the `SYS`-scoped tools of `@iris-mcp/admin`, whatever their `namespace` argument says; the argument still appears in `paramKeys` and, with `IRIS_AUDIT_LOG_PARAMS=true`, in `params`). For every other tool it is the call's `namespace` argument or, when it has none, the profile's default namespace; that value names the call's target and does not say where the call ran (the `@iris-mcp/ops` tools have no namespace concept and record the profile's default, as in the entry above) (Story 42.10).",
+      "`namespace` is `%SYS` for a `SYS`-scoped tool, which always runs there (the `SYS`-scoped tools of `@iris-mcp/admin`, whatever their `namespace` argument says). When such a call has a non-empty `namespace` argument, the entry also carries `targetNamespace` with that argument, for example the namespace whose mappings `iris_mapping_manage` changes: on every outcome, a refused call included, and whatever `IRIS_AUDIT_LOG_PARAMS` says. A call without one has no `targetNamespace`, and no other tool's entry carries it. For every other tool `namespace` is the call's `namespace` argument or, when it has none, the profile's default namespace; that value names the call's target and does not say where the call ran (an `@iris-mcp/ops` tool records its `namespace` argument when a call gives one, else the profile's default, as in the entry above) (Story 42.10).",
     );
     expect(squash(rootReadme)).not.toContain("is the namespace the call ran in");
+    expect(squash(rootReadme), "the ops tools record a namespace argument they are given").not.toContain("have no namespace concept and record the profile's default");
   });
 
   it("scopes the Story 43.4 sentence about descriptions to that story, and names the later correction", () => {
@@ -159,6 +161,10 @@ describe("Story 42.10: the CHANGELOG entry", () => {
     for (const tool of FLIPPED) expect(sanctioned, tool).toContain(`\`${tool}\``);
   });
 
+  it("names the additive targetNamespace field under the sanctioned heading (DW-667)", () => {
+    expect(sanctioned).toContain("When the call has a non-empty `namespace` argument, the new additive field `targetNamespace` records it");
+  });
+
   it("states what bounds the story: the snapshot was regenerated, the goldens are byte-unchanged with 23 new entries, the baseline stays, DW-652 is Story 42.11", () => {
     const text = squash(entry);
     expect(text).toContain("The tools-list snapshot was regenerated through its generator");
@@ -176,6 +182,20 @@ describe("Story 42.10: tool_support.md, the annotation audit and the changeset",
     expect(note).toContain("no tool, action or governance key is added, so no default state and no tool count moves (110 package tools, 115 advertised;");
     expect(note).toContain("13 existing tools now declare `destructiveHint: true`");
     expect(note).toContain("the audit entry of a `SYS`-scoped tool (the 25 SYS-scoped tools of `@iris-mcp/admin`) records `namespace: \"%SYS\"`");
+    expect(note).toContain("the additive `targetNamespace` field records it whatever `IRIS_AUDIT_LOG_PARAMS` says");
+    expect(note, "the resend texts do not say only").not.toContain("now say that only `dryRun: false`");
+  });
+
+  it("the number of justified non-destructive writes that the CHANGELOG and tool_support.md state is the number of built tools that are not read-only and declare destructiveHint:false (Rule #51)", async () => {
+    const all = (await loadAllTools(REPO_ROOT)) as Array<{ tool: { annotations?: Record<string, unknown> } }>;
+    const count = all.filter(({ tool }) => tool.annotations?.readOnlyHint === false && tool.annotations?.destructiveHint === false).length;
+    const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+    expect(count, "the sweep sees the justified writes").toBeGreaterThan(0);
+    const stated = `must be on a justified list (${NUMBER_WORDS[count] ?? String(count)} tools today)`;
+    const changelog = read("CHANGELOG.md");
+    const from = changelog.indexOf("Story 42.10: Pre-1.0 Tool-Surface Corrections");
+    expect(squash(changelog.slice(from, changelog.indexOf("\n## ", from))), "the CHANGELOG entry of Story 42.10").toContain(stated);
+    expect(squash(read("tool_support.md")), "the tool_support.md note").toContain(stated);
   });
 
   it("the number of SYS-scoped tools that the CHANGELOG and tool_support.md state is the number the built catalog declares, all in @iris-mcp/admin (Rule #51)", async () => {

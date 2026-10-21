@@ -282,8 +282,9 @@ describe("audit interceptor (Epic 29, Story 29.0)", () => {
     expect(appendFileMock).not.toHaveBeenCalled();
   });
 
-  // Story 42.10 (DW-654, AD-19): `namespace` is where the call ran. A SYS-scoped tool always runs in %SYS, so its
-  // entry says so whatever its `namespace` argument holds; every other scope keeps the argument-or-profile derivation.
+  // Story 42.10 (DW-654, DW-667, AD-19), with IRIS_AUDIT_LOG_PARAMS unset: a SYS-scoped tool always runs in %SYS, so its
+  // entry's `namespace` says so whatever its `namespace` argument holds, and `targetNamespace` carries that argument when it
+  // is a non-empty string. Every other scope keeps the argument-or-profile derivation and never has `targetNamespace`.
   describe("the audit namespace follows the tool's scope (Story 42.10, DW-654)", () => {
     /** A tool of `scope` that takes an optional `namespace`; `mutates: "write"` makes it default-disabled (a denial). */
     function makeScopedTool(scope: ToolDefinition["scope"], mutates: "read" | "write" = "read"): ToolDefinition {
@@ -317,40 +318,51 @@ describe("audit interceptor (Epic 29, Story 29.0)", () => {
       }
     }
 
-    it("a SYS-scoped call records %SYS, with and without a namespace argument", async () => {
-      const entries = await auditedEntries(makeScopedTool("SYS"), [{}, { namespace: "USER" }]);
-      expect(entries.map((entry) => [entry.outcome, entry.namespace])).toEqual([
-        ["ok", "%SYS"],
-        ["ok", "%SYS"],
+    it("a SYS-scoped call records %SYS, with and without a namespace argument, and the argument as targetNamespace", async () => {
+      const entries = await auditedEntries(makeScopedTool("SYS"), [{}, { namespace: "USER" }, { namespace: "" }]);
+      expect(entries.map((entry) => [entry.outcome, entry.namespace, entry.targetNamespace])).toEqual([
+        ["ok", "%SYS", undefined],
+        ["ok", "%SYS", "USER"],
+        ["ok", "%SYS", undefined],
       ]);
-      // The argument is still recorded as a parameter key; only the namespace the call ran in changed.
-      expect(entries.map((entry) => entry.paramKeys)).toEqual([[], ["namespace"]]);
+      expect(entries.map((entry) => "targetNamespace" in entry), "no key without a non-empty argument").toEqual([false, true, false]);
+      // The argument is still named in `paramKeys`; its value is in `targetNamespace`, not in `params`.
+      expect(entries.map((entry) => entry.paramKeys)).toEqual([[], ["namespace"], ["namespace"]]);
+      expect(entries.map((entry) => "params" in entry)).toEqual([false, false, false]);
+      // `targetNamespace` follows `namespace` in the entry.
+      const keys = Object.keys(entries[1]!);
+      expect(keys.indexOf("targetNamespace")).toBe(keys.indexOf("namespace") + 1);
     });
 
-    it("a denied SYS-scoped call records %SYS", async () => {
-      const entries = await auditedEntries(makeScopedTool("SYS", "write"), [{ namespace: "USER" }]);
-      expect(entries).toHaveLength(1);
-      expect(entries[0]).toMatchObject({ outcome: "denied", denyReason: "GOVERNANCE_DISABLED", namespace: "%SYS" });
+    it("a denied SYS-scoped call records %SYS and its namespace argument as targetNamespace", async () => {
+      const entries = await auditedEntries(makeScopedTool("SYS", "write"), [{ namespace: "USER" }, {}]);
+      expect(entries).toHaveLength(2);
+      expect(entries[0]).toMatchObject({ outcome: "denied", denyReason: "GOVERNANCE_DISABLED", namespace: "%SYS", targetNamespace: "USER" });
+      expect(entries[1]).toMatchObject({ outcome: "denied", namespace: "%SYS" });
+      expect(entries[1]).not.toHaveProperty("targetNamespace");
     });
 
-    it("a SYS-scoped call that fails its schema records %SYS", async () => {
+    it("a SYS-scoped call that fails its schema records %SYS, and no targetNamespace for a namespace that is not a string", async () => {
       const entries = await auditedEntries(makeScopedTool("SYS"), [{ namespace: 5 }]);
       expect(entries).toHaveLength(1);
       expect(entries[0]).toMatchObject({ outcome: "error", namespace: "%SYS" });
+      expect(entries[0]).not.toHaveProperty("targetNamespace");
     });
 
-    it.each(["NS", "BOTH", "NONE"] as const)("a %s-scoped call records its namespace argument, else the profile's default (as before)", async (scope) => {
+    it.each(["NS", "BOTH", "NONE"] as const)("a %s-scoped call records its namespace argument, else the profile's default (as before), and never targetNamespace", async (scope) => {
       const entries = await auditedEntries(makeScopedTool(scope), [{}, { namespace: "USER" }]);
       expect(entries.map((entry) => [entry.outcome, entry.namespace])).toEqual([
         ["ok", "HSCUSTOM"],
         ["ok", "USER"],
       ]);
+      for (const entry of entries) expect(entry).not.toHaveProperty("targetNamespace");
     });
 
-    it.each(["NS", "BOTH", "NONE"] as const)("a denied %s-scoped call records its namespace argument (as before)", async (scope) => {
+    it.each(["NS", "BOTH", "NONE"] as const)("a denied %s-scoped call records its namespace argument (as before), and never targetNamespace", async (scope) => {
       const entries = await auditedEntries(makeScopedTool(scope, "write"), [{ namespace: "USER" }]);
       expect(entries).toHaveLength(1);
       expect(entries[0]).toMatchObject({ outcome: "denied", namespace: "USER" });
+      expect(entries[0]).not.toHaveProperty("targetNamespace");
     });
   });
 });

@@ -276,8 +276,6 @@ describe.each(GOLDEN_PACKAGES as string[])("%s: the sanctioned changes on the wi
         const then = before[index] as Tool;
         expect(tool, `${tool.name} is its frozen entry plus its sanctioned changes`).toEqual(sanctionedTool(pkg, then));
         if (sanctioned[tool.name] === undefined) continue;
-        const { separator, sentence } = sanctioned[tool.name] as { separator: string; sentence: string };
-        expect(tool.description.endsWith(`${separator}${sentence}`), `${tool.name}: the description ends with the spec's separator and sentence`).toBe(true);
         expect(markerCount(then.description), `${tool.name}: the frozen text never named the dialog`).toBe(0);
         expect(markerCount(tool.description), `${tool.name}: the dialog is named once`).toBe(1);
       }
