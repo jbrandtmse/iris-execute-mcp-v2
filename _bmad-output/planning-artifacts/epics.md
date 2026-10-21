@@ -5780,6 +5780,7 @@ DW-443. A secret-free `.github/workflows/ci.yml`.
   - a self-test asserts the pins and that the checks declared in code equal the workflow's `run:` steps.
 - **AC 42.3.5** — DW-443: the publish-time gates also run at a point the tarball path actually reaches (`prepack` and/or CI as the gate), and they are proven red on the tarball path specifically (Rule #59).
 - **AC 42.3.6** — Each self-test and gate is broken once in a throwaway branch and the run goes red. The run URLs are recorded.
+- DW-666: `pnpm --filter @iris-mcp/shared lint` warns about an unused `eslint-disable` directive for `@typescript-eslint/no-dynamic-delete` (`packages/shared/src/cli/governance.ts:935`). Remove it when lint becomes a CI gate, so the gate carries no standing warning. (ledger; routed by harvest 2026-10-21)
 
 ### Story 42.4: IPM Package Revival
 
@@ -5803,6 +5804,7 @@ DW-387, D7. New, with no OcuPilot precedent.
 - **AC 42.5.2** — A root pre-flight release script runs the full gate set once, then publishes in dependency order (client-config, shared, admin, data, dev, interop, ops, all) with npm provenance. It is the only supported publish command (DW-387).
 - **AC 42.5.3** — After npm: the extension to both stores (42.7), then the IPM package (42.4). A failed step stops the rest and reports which channels were published.
 - **AC 42.5.4** — A dry-run mode exercises every step without publishing, and is proven before the first real run.
+- DW-387 (occurrence from 42.1, 2026-10-21): publishing has to go through pnpm. `pnpm publish` runs each package's `prepublishOnly` (`verify-iris-reachable.mjs`, `prepublish-gate.mjs`), which fails in a release environment with no IRIS, and only pnpm applies `publishConfig.exports` and rewrites `workspace:*`; a direct `npm publish` would ship the dev-only exports and unresolvable `workspace:*` dependencies. The release script owns both. (ledger; occurrence added by harvest 2026-10-21)
 
 ### Story 42.6: Tarball Smoke and 1.0.0 Publish
 
@@ -5821,6 +5823,7 @@ DW-47, DW-300, D2.
   - `npx -y @iris-mcp/dev@1` starts in a clean environment;
   - the registry 404s are gone.
 - DW-612: nothing on the publish path runs `gen:pack --check` or `check:provenance`. client-config's `prepublishOnly` runs only `verify-iris-reachable`, so a publish made without the default suite could ship a drifted skills pack or a tarball without `IRIS-MCP-THIRD-PARTY-NOTICES.md`. Add both checks to the publish path and prove them red on that path (Rule #59). (ledger; routed by harvest 2026-10-19 from Story 41.1)
+- DW-665: each package keeps a tracked `CHANGELOG.md` that `changeset version` fills, but `pnpm pack` does not ship it (`files` names only `dist`, plus `skills-pack` for client-config). Decide whether the `1.0.0` tarballs carry their changelog, before publishing. (ledger; routed by harvest 2026-10-21)
 
 ### Story 42.7: VS Code Extension Publish
 
@@ -5830,6 +5833,7 @@ DW-389, D5.
 - **AC 42.7.2** — The extension launches `npx -y @iris-mcp/<pkg>@1` (from 42.1). It is published to the VS Code Marketplace and to Open VSX through the release workflow, after npm `1.0.0`.
 - **AC 42.7.3** — Install from each store into a clean VS Code and into an Open VSX client (VSCodium or Cursor). The extension starts the servers, and the result is recorded.
 - DW-532: the launcher's full test suite is red on macOS at its baseline: Windows-only path assertions, an `@intersystems-community/intersystems-servermanager` import the extension's `node_modules` lack, and a 60 s timeout in `clientsActivationFlow`. Make it green on every platform before publishing the extension. (ledger; routed by merge_gate 2026-10-16)
+- DW-663: the extension's two CLI spawns (`clientsEngine.ts:341`, `governanceEngine.ts:324`) pass no `cwd`, so the clients CLI treats the extension host's cwd as the project (`clients.ts:165`): the MCP Clients view's project scope depends on how VS Code was launched, and a project-local 1.x client-config copy can shadow the pinned spec. Pass the workspace folder explicitly or a neutral `cwd`, with a test. (ledger; routed by harvest 2026-10-21)
 
 ### Story 42.8: Claude Code Plugin and Registry Listings
 
@@ -5872,6 +5876,7 @@ DW-441.
 - DW-631: `docs/client-config/claude-code.md:306`, `claude-desktop.md:273` and `cursor.md:304` link the broken anchor `#read-only-mode-point-it-at-production-with-one-environment-variable`; the heading's real slug is `#read-only-mode--point-…`. No `docs/client-config/` page points at `iris-mcp-clients skills install` either. Fix both with the AC 42.9.1 rewrite. (ledger; routed by the lead 2026-10-20)
 - DW-632: `qa-41-7-doc-links.test.ts` checks only the 9 documents Story 41.7 changed, and a repo-wide run of its checker finds more broken relative links: `packages/shared/README.md:108`, three `docs/known-bugs-*` links, and the DW-631 anchors. Fix them, and widen the test's document set to every user-facing `*.md`, so it pins them before 1.0. (ledger; routed by the lead 2026-10-20)
 - DW-633: the `IRIS_ACCEPT_LANGUAGE` docs (`README.md:77`, `packages/shared/src/http-client.ts:183-193`) describe a per-worker message-table mechanism the header does not affect, but `%CSP.REST` matches the message language from the header on every request. `tool_support.md:21` also says the `Utils` prefix-stripping handles only English and Arabic and is unmodified. Rewrite both against the per-request model and Story 41.8's 15-language `StripErrorPrefix`. (ledger; routed by harvest 2026-10-20)
+- DW-664: seven READMEs say `IRIS_USERNAME` defaults to `_SYSTEM` (`README.md:73`, `packages/iris-*-mcp/README.md:31`, `packages/iris-mcp-all/README.md:69`), but `config.ts:162-169` treats it as required and the server exits without it. Fix with the AC 42.9.1 README rewrite. (ledger; routed by harvest 2026-10-21)
 
 ### Story 42.10: Pre-1.0 Tool-Surface Corrections
 

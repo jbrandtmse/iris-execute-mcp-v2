@@ -1986,6 +1986,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Publish order client-config, shared, admin, data, dev, interop, ops, all; add a root-level pre-flight release script that runs the full gate set once before pnpm -r publish.
 - 2026-10-14T10:47:57Z status=decision-pending owner=burndown by=migration note=call: add a root-level pre-flight release script as the sole supported publish command
 - 2026-10-15T02:51:51Z status=routed owner=42-5-release-workflow by=correct-course note=decided D7 (decision-record-2026-10-14): release workflow with root pre-flight script as sole publish command
+- 2026-10-21T13:14:16Z occurrence=42-1-pre-publish-package-fixes note=publishing_must_go_through_pnpm:_pnpm_publish_runs_each_prepublishOnly(verify-iris-reachable,prepublish-gate)_which_fails_with_no_IRIS;_only_pnpm_applies_publishConfig.exports_and_rewrites_workspace:*;_direct_npm_publish_ships_dev_exports+workspace:*_deps(42.1_plan_probe;_release_script_owns_both)
 
 ### DW-388: [34-6-CR-13] verify-iris-reachable.mjs silently falls back to hard-coded local dev credentials when env vars are unset
 - source: legacy:34.6 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2849,6 +2850,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-16T15:58:09Z status=routed owner=42-7-vs-code-extension-publish by=burndown note=overflow: the extension-publish story needs a green launcher suite on every platform; DW bullet in 42.7
 - 2026-10-19T22:31:15Z status=routed owner=42-7-vs-code-extension-publish by=harvest note=occurrence: 41.6 implement 2026-10-19 reproduced clientsActivationFlow 33-3-3 timing out at 60s on the working tree and on a baseline 3890fec copy (re-toggled roster never persists)
 - 2026-10-20T09:40:41Z occurrence=43-1-framework-migration-to-sdk-v2 by=cr note=43.1 cr: launcher tsc --noEmit red on this host, 11 errors, all missing vscode/servermanager modules; none in a 43.1 file
+- 2026-10-21T13:14:16Z occurrence=42-1-pre-publish-package-fixes note=same_5_macOS_failures_seen_at_42.1_implement_on_pristine_baseline(4_C:_path_pins_not_absolute_on_POSIX;_33-3-3_clientsActivationFlow_timeout)
 
 ### DW-533: iris_production_manage delete removes ANY class given as name: the class-delete path never checks that the class extends Ens.Production
 - source: spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: high | footprint: in-story
@@ -3655,3 +3657,23 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-21T03:57:59Z status=routed owner=42-1-pre-publish-package-fixes by=harvest note=a sanctioned AD-15 tool-text correction before 1.0, with DW-560's annotation corrections: one sanctioned-change ledger entry per changed byte (a replace, so the Frozen goldens convention needs its sanction to name a correction), the tools-list snapshot regenerated
 - 2026-10-21T05:15:12Z occurrence=43-4-sdk-v2-docs-smokes-and-capstone by=cr note=appendOnly is optional, so a description replace under a later sanction passes the loader and the S-43.4-only append row; 42.1 decides
 - 2026-10-21T06:26:44Z owner=42-10-pre-1-0-tool-surface-corrections by=spec_gate note=moved_from_42-1_by_wave8_decision_34_split(frozen-goldens_machinery+feature-sized_DW-652)
+
+### DW-663: Extension CLI spawns (clientsEngine.ts:341, governanceEngine.ts:324) pass no cwd, so the clients CLI treats the extension host's cwd as the project and the MCP Clients view's project scope depends on how VS Code was launched; a project-local 1.x client-config copy can shadow the pinned spec
+- source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 42.1 plan probe 2026-10-20: npm exec resolves a local copy from the nearest ancestor (libnpmexec index.js:41-69); clients.ts:165 uses process.cwd()
+- 2026-10-21T13:14:16Z status=routed owner=42-7-vs-code-extension-publish by=harvest note=the extension publish story touches both engines; pass an explicit project dir or neutral cwd
+
+### DW-664: Seven READMEs say IRIS_USERNAME defaults to _SYSTEM, but config.ts treats it as required and the server exits with 'IRIS_USERNAME environment variable is required'
+- source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 42.1 plan probe: local install of the packed meta-package; README.md:73, packages/iris-*-mcp/README.md:31, packages/iris-mcp-all/README.md:69 vs packages/shared/src/config.ts:162-169
+- 2026-10-21T13:14:16Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=fix with the AC 42.9.1 README rewrite
+
+### DW-665: Each package keeps a tracked CHANGELOG.md that changeset version fills, but pnpm pack does not ship it (files lists only dist, plus skills-pack for client-config); published 1.0.0 tarballs would carry no changelog
+- source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 42.1 implement: pnpm pack lists in 42-1-pack-file-lists.md show only LICENSE, README.md, package.json added
+- 2026-10-21T13:14:16Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=harvest note=decide add CHANGELOG.md to files before the 1.0.0 publish
+
+### DW-666: pnpm --filter @iris-mcp/shared lint warns about an unused eslint-disable directive for @typescript-eslint/no-dynamic-delete
+- source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: packages/shared/src/cli/governance.ts:935; seen at the 42.1 full lint run
+- 2026-10-21T13:14:16Z status=routed owner=42-3-ci-workflow by=harvest note=the CI lint gate must not carry a standing warning; remove the directive when wiring lint into CI

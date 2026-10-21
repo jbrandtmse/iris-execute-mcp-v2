@@ -23,3 +23,7 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-21T06:27:19Z	Epic 42	spine_updated	ad=AD-29,stack reason=spec_gate_decisions_35_36_37 by=lead story=42-1-pre-publish-package-fixes lint=ok
 2026-10-21T06:27:19Z	Epic 42	ledger_routed_planned	story=42-10-pre-1-0-tool-surface-corrections entries=4 excess=0 by=spec_gate
 2026-10-21T06:27:31Z	Story 42.1	stage_spawned	stage=implement spawn_at=2026-10-21T06:27:31Z model=claude-sonnet-5-5 agent_name=42-1-pre-publish-package-fixes-implement-1 cycle_iteration=1
+2026-10-21T13:14:51Z	Story 42.1	dev_complete	spawn_at=2026-10-21T06:27:31Z model=claude-sonnet-5-5 build_sha=346ddc9 baseline_revision=063416b review_loop_iteration=0 followup_review_recommended=true deferred=6(new:DW-663,DW-664,DW-665,DW-666;occurrence:DW-387,DW-532) files=103 loc_added=3203 loc_removed=395 nfr_tripwires=0 adr_violations_surfaced=0 cycle_iteration=1 note=extension_suite_5_macOS_failures_preexisting(DW-532)
+2026-10-21T13:14:51Z	Epic 42	ledger_routed_planned	story=42-3,42-5,42-6,42-7,42-9 entries=5(DW-666,DW-387occ,DW-665,DW-663,DW-664) excess=0 by=harvest
+2026-10-21T13:14:51Z	Story 42.1	adr_verifications_complete	tool=none acs=none result=none_required evidence= mutations=none note=AD-2/14/15/28/29/30/32_are_rules_not_tool_stacks;checked_by_QA+CR model=claude-opus-5-5
+2026-10-21T13:14:58Z	Story 42.1	stage_spawned	stage=qa spawn_at=2026-10-21T13:14:58Z model=claude-sonnet-5-5 agent_name=42-1-pre-publish-package-fixes-qa-1 cycle_iteration=1
