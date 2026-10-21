@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-10-21'
 status: 'done'
 baseline_revision: '0d65b22bc544804c5cbf8ec5dd9eca90ae08f4ad'
+baseline_commit: '0d65b22bc544804c5cbf8ec5dd9eca90ae08f4ad'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -294,7 +295,11 @@ Embedded marker `E` = `0.0.2+1.<h>` in the examples.
 - **DW-518:** Given a newer deployment on the target, when the epic37 shape's first `other` call bootstraps lazily, then nothing is redeployed. The gate's header records its write footprint.
 - **Shared instance:** Given each stage's end, when `SELECT ExecuteMCPv2.Setup_GetBootstrapVersion()` runs read-only in HSCUSTOM, then it returns `d51856f74d6a`. The one exception is when the lead has run the upgrade in Orchestrator decision 4, or a restart of the session's own MCP servers did it; record which.
 
+- [ ] [Decision #54] DW-673 (lead, after implement, 2026-10-21): given a deployment whose version read fails or comes back empty for any reason other than a positive absence (a 5xx, a timeout, a privilege error, an empty value while the REST route and the `Setup` class exist), when the bootstrap probes or re-reads before a compile, then the result is `unknown`: no PUT, no compile, one warning naming the failure and the remedy, and the server continues with what is deployed. Only a positive absence (the REST route or the `Setup` class provably missing) is `absent` and installs. This supersedes the matrix row that treats a failed or empty read as absent. Pin it with a hermetic case against the fake Atelier per failure kind, prove it red by restoring "failed = absent", and record its `mutation:` line.
+
 ## Spec Change Log
+
+- 2026-10-21, lead, after the implement stage (wave-8 decision #54): added the `[Decision #54] DW-673` acceptance item; a failed or empty version read is `unknown`, not `absent`.
 
 - 2026-10-21 (implement): the DW-518 write footprint under Design Notes gains the `unconfigured` line (marker matches, web app absent): recompile, configure, map, `^UnitTestRoot`, no PUT. The original list omitted a state `bootstrap()` has always had; the `epic37-default-outage-gate` header records all five.
 - 2026-10-21 (implement): an unarmed leg's inert target (`UNARMED_LIVE_TARGET`) uses port 9999, not 9, because `fetch` refuses port 9 before it connects and the connect-refusing preload could then not log a leg that wrongly contacts it. Intent unchanged.

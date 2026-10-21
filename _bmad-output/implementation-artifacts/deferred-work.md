@@ -3726,3 +3726,30 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 42.2 spec gate (wave-8 decision 49): %ALL maps the ExecuteMCPv2 package to HSCUSTOM, so no namespace of the shared instance isolates a deploy; .claude/rules/iris-objectscript-basics.md:167 forbids docker
 - 2026-10-21T20:47:03Z status=routed owner=42-3-ci-workflow by=spec_gate note=42.3's throwaway job extends scripts/throwaway-iris.mjs (Rule 2), runs pnpm live:bootstrap-guard armed with IRIS_THROWAWAY, proves it red once by reverting the probe to equality (AC 42.3.6), and records the run URL; the live proof of DW-508 (Rule 48)
+- 2026-10-21T22:44:16Z occurrence=42-2-bootstrap-downgrade-guard note=42.2_implement:extend_scripts/throwaway-iris.mjs(Rule2);first_real_docker_run_is_CI:verify_the_35_classes_compile_in_plain-IRIS_USER(else_--image_irishealth),readiness_loop,docker_port_read-back,teardown_on_INT/TERM;pinned_digest_is_arm64:x86_runners_need_a_multi-arch_or_amd64_digest_via_--image
+
+### DW-673: A failed version read is treated as an absent deployment, so the full install runs and the pre-compile re-read lets the compile proceed on an empty value: a transient 5xx, timeout or privilege error on the version query while a newer build is deployed lets an older server upload its classes over it (the downgrade DW-508 prevents)
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: 42.2 implement review: packages/shared/src/bootstrap.ts readDeployedVersion, probeCustomRest, markerAllowsCompile; the matrix specified failed-or-empty = absent; unverified against a real instance
+- 2026-10-21T22:44:16Z status=open owner=42-2-bootstrap-downgrade-guard by=harvest note=wave-8 decision 54: only a positive absence (the REST route or the Setup class provably missing) counts as absent; any other failed or empty read is unknown: no PUT, no compile, one warning naming the failure and the remedy; spec matrix amended; code review patches it in-story with a hermetic pin or it takes the story's one rework iteration
+
+### DW-674: AD-14 Ownership and IPM-upgrade bullets are not implemented: bootstrap does not detect IPM-installed classes, and the IPM install/upgrade path has no IRIS-side no-downgrade check
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: 42.2 implement: decision 53 routes them to 42.4; reuse 42.2's marker grammar and ordering table, with a parity test between the TS comparator and the IRIS-side one
+- 2026-10-21T22:44:16Z status=routed owner=42-4-ipm-package-revival by=harvest note=IPM packaging lands in 42.4 (decision 53)
+
+### DW-675: Armed live gates now fail closed unless all five IRIS_HOST/PORT/USERNAME/PASSWORD/NAMESPACE are set; the release path (prepublishOnly -> prepublish-gate.mjs, the 42.5 release script, the 42.6 publish) must export all five or the gates go red
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 42.2 implement: resolveLiveTarget throws naming the missing variables when IRIS_REQUIRE_LIVE is set (decision 51)
+- 2026-10-21T22:44:16Z status=routed owner=42-5-release-workflow by=harvest note=the release script exports all five IRIS_* for its gate run, and 42.6 publishes through it
+
+### DW-676: Story 42.3's armed CI run could go green by skipping: armed integration-setup files and the launcher's two live files skip when IRIS does not answer, the armed side of the migrated family C/D/E files has no default-suite test, and the launcher's arming guard runs only under npm --prefix
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 42.2 implement review; packages/*/src/__tests__/integration-setup.ts; extensions/iris-mcp-launcher/src/__tests__
+- 2026-10-21T22:44:16Z status=routed owner=42-3-ci-workflow by=harvest note=CI fails an armed run that skipped a leg (a skip counter or a fail-on-skip flag), and runs the launcher guard; proven red once (Rule 59)
+- 2026-10-21T22:44:16Z occurrence=42-2-bootstrap-downgrade-guard note=also:5_process_gates(credentials-cli,governance-file,host-guard,server-manager-precedence,server-manager-process)_arm_on_IRIS_REQUIRE_LIVE_but_are_off_every_prepublish_roster;42.3_decides_whether_CI_runs_them
+
+### DW-677: Concurrency residual: the re-probe before compile stops this server compiling over a newer build that compiled first, but cannot undo source PUTs two builds interleaved, so the namespace can hold mixed source under a newer compiled marker
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: low | fix-risk: high | footprint: in-story
+- evidence: 42.2 implement: packages/shared/src/bootstrap.ts; the next unconfigured self-heal recompile would compile that source
+- 2026-10-21T22:44:16Z status=wontfix-accepted owner=42-2-bootstrap-downgrade-guard by=harvest note=reopen_if=a deployment is observed with mixed-build source under one marker (report, or a source-vs-embed drift check failing on a live instance)

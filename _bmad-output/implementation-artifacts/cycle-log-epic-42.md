@@ -79,3 +79,8 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-21T20:47:45Z	Epic 42	spine_updated	ad=AD-14,AD-15,conv_live_gates,conv_live_testing reason=spec_gate_decisions_49-53 by=lead story=42-2-bootstrap-downgrade-guard lint=ok
 2026-10-21T20:47:45Z	Epic 42	ledger_routed_planned	story=42-3-ci-workflow entries=1(DW-672) excess=0 by=spec_gate
 2026-10-21T20:47:57Z	Story 42.2	stage_spawned	stage=implement spawn_at=2026-10-21T20:47:57Z model=claude-sonnet-5-5 agent_name=42-2-bootstrap-downgrade-guard-implement-1 cycle_iteration=1
+2026-10-21T22:45:02Z	Story 42.2	dev_complete	spawn_at=2026-10-21T20:47:57Z model=claude-sonnet-5-5 build_sha=4fd0acb baseline_revision=0d65b22 review_loop_iteration=0 followup_review_recommended=false deferred=9(new:DW-673_open_in-story_med_decision54,DW-674->42-4,DW-675->42-5,DW-676->42-3,DW-677_wontfix-accepted;occurrences:DW-672x3,DW-676x1) files=119 loc_added=6462 loc_removed=1221 bootstrap_version=d51856f74d6a->0.0.2+1.995fbbb1055d hscustom_marker_unchanged=d51856f74d6a nfr_tripwires=0 adr_violations_surfaced=0 cycle_iteration=1 note=Rule55_heredoc+node-e_edits_by_handoff;one_multi-suite_call_in_review
+2026-10-21T22:45:02Z	Epic 42	ledger_routed_planned	story=42-3,42-4,42-5 entries=3(DW-676,DW-674,DW-675) excess=0 by=harvest
+2026-10-21T22:45:02Z	Epic 42	spine_updated	ad=AD-14 reason=dev_complete_decision_54 by=lead story=42-2-bootstrap-downgrade-guard lint=ok
+2026-10-21T22:45:02Z	Story 42.2	adr_verifications_complete	tool=none acs=none result=none_required evidence= mutations=none model=claude-opus-5-5
+2026-10-21T22:45:02Z	Story 42.2	stage_spawned	stage=qa spawn_at=2026-10-21T22:45:02Z model=claude-sonnet-5-5 agent_name=42-2-bootstrap-downgrade-guard-qa-1 cycle_iteration=1

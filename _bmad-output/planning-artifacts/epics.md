@@ -5783,6 +5783,7 @@ DW-443. A secret-free `.github/workflows/ci.yml`.
 - **AC 42.3.5** — DW-443: the publish-time gates also run at a point the tarball path actually reaches (`prepack` and/or CI as the gate), and they are proven red on the tarball path specifically (Rule #59).
 - **AC 42.3.6** — Each self-test and gate is broken once in a throwaway branch and the run goes red. The run URLs are recorded.
 - DW-672 (from the 42.2 spec gate, wave-8 decision #49): run Story 42.2's throwaway bootstrap-guard live check in CI. The throwaway job extends `scripts/throwaway-iris.mjs` (Rule 2) and runs `pnpm live:bootstrap-guard` armed with `IRIS_THROWAWAY`; the newer, foreign and DW-518 legs leave every class byte-identical and the older and legacy legs upgrade. Prove it red once by reverting the probe to equality (AC 42.3.6) and record the run URL. This is the live proof of DW-508 (Rule #48). (ledger; routed by spec_gate 2026-10-21)
+- DW-676: an armed CI run must not go green by skipping. Today armed integration-setup files and the launcher's two live files skip when IRIS does not answer, the armed side of the migrated family C/D/E files has no default-suite test, and the launcher's arming guard runs only under `npm --prefix`. Make CI fail an armed run that skipped a leg, run the launcher guard, and prove it red once (Rule #59). Also decide whether CI runs the five process gates that arm on `IRIS_REQUIRE_LIVE` but sit on no roster (credentials-cli, governance-file, host-guard, server-manager-precedence, server-manager-process). (ledger; routed by harvest 2026-10-21)
 - DW-666: `pnpm --filter @iris-mcp/shared lint` warns about an unused `eslint-disable` directive for `@typescript-eslint/no-dynamic-delete` (`packages/shared/src/cli/governance.ts:935`). Remove it when lint becomes a CI gate, so the gate carries no standing warning. (ledger; routed by harvest 2026-10-21)
 
 ### Story 42.4: IPM Package Revival
@@ -5798,6 +5799,7 @@ DW-34, D6.
   It runs on both `iris-community` and `irishealth-community` (edition matrix).
 - **AC 42.4.3** — The bootstrap's `zpm "install iris-execute-mcp-v2"` fallback message (`bootstrap.ts:95-96`) is made accurate for the published package.
 - **AC 42.4.4** — Publishing to the IPM registry happens in 42.5's release workflow; the Open Exchange listing is in 42.8.
+- DW-674 (wave-8 decision #53): implement AD-14's Ownership and IPM-upgrade bullets. Bootstrap detects IPM-installed classes and never redeploys them (it reports the mismatch and the `zpm` command), and the IPM install/upgrade path runs the same no-downgrade check IRIS-side, reusing Story 42.2's marker grammar and ordering table, with a parity test between the TypeScript comparator and the IRIS-side one. (ledger; routed by harvest 2026-10-21)
 
 ### Story 42.5: Release Workflow
 
@@ -5808,6 +5810,7 @@ DW-387, D7. New, with no OcuPilot precedent.
 - **AC 42.5.3** — After npm: the extension to both stores (42.7), then the IPM package (42.4). A failed step stops the rest and reports which channels were published.
 - **AC 42.5.4** — A dry-run mode exercises every step without publishing, and is proven before the first real run.
 - DW-387 (occurrence from 42.1, 2026-10-21): publishing has to go through pnpm. `pnpm publish` runs each package's `prepublishOnly` (`verify-iris-reachable.mjs`, `prepublish-gate.mjs`), which fails in a release environment with no IRIS, and only pnpm applies `publishConfig.exports` and rewrites `workspace:*`; a direct `npm publish` would ship the dev-only exports and unresolvable `workspace:*` dependencies. The release script owns both. (ledger; occurrence added by harvest 2026-10-21)
+- DW-675: armed live gates fail closed unless all five `IRIS_HOST`/`PORT`/`USERNAME`/`PASSWORD`/`NAMESPACE` are set (Story 42.2, decision #51). The release script exports all five for its gate run, and 42.6 publishes through it. (ledger; routed by harvest 2026-10-21)
 
 ### Story 42.6: Tarball Smoke and 1.0.0 Publish
 
