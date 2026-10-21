@@ -539,8 +539,8 @@ development_status:
   41-8-epic-41-burn-down: done
   epic-41-retrospective: optional
 
-  epic-42: backlog
-  42-1-pre-publish-package-fixes: ready-for-dev
+  epic-42: in-progress
+  42-1-pre-publish-package-fixes: in-progress
   42-2-bootstrap-downgrade-guard: backlog
   42-3-ci-workflow: backlog
   42-4-ipm-package-revival: backlog
