@@ -32,6 +32,11 @@ const LINE_SEPARATOR = String.fromCharCode(0x2028);
 const PARAGRAPH_SEPARATOR = String.fromCharCode(0x2029);
 const NEXT_LINE = String.fromCharCode(0x85);
 const E_ACUTE = String.fromCharCode(0xe9);
+const RIGHT_TO_LEFT_OVERRIDE = String.fromCharCode(0x202e);
+const POP_DIRECTIONAL = String.fromCharCode(0x202c);
+const RIGHT_TO_LEFT_ISOLATE = String.fromCharCode(0x2067);
+const POP_ISOLATE = String.fromCharCode(0x2069);
+const ZERO_WIDTH_SPACE = String.fromCharCode(0x200b);
 
 describe("the dialog text", () => {
   it("renders the template with the operation, target, scope and server", () => {
@@ -85,6 +90,8 @@ describe("the dialog text", () => {
     ["a run of control characters", "a\n\n\t" + String.fromCharCode(0) + String.fromCharCode(0x1b) + "[2Kb", "a [2Kb"],
     ["a line and a paragraph separator", `a${LINE_SEPARATOR}b${PARAGRAPH_SEPARATOR}c`, "a b c"],
     ["a C1 control character", `a${NEXT_LINE}b`, "a b"],
+    ["a right-to-left override and its pop", `user=${RIGHT_TO_LEFT_OVERRIDE}nigeb${POP_DIRECTIONAL}, end=x`, "user= nigeb , end=x"],
+    ["a run of isolates and a zero-width space", `a${RIGHT_TO_LEFT_ISOLATE}${ZERO_WIDTH_SPACE}b${POP_ISOLATE}c`, "a b c"],
   ])("keeps %s in a scope on the one Scope line", (_label, scope, expected) => {
     const lines = confirmationMessage({ operation: "o", target: "t", scope }, SERVER).split("\n");
     expect(lines).toEqual([
@@ -94,6 +101,11 @@ describe("the dialog text", () => {
       "Server: default (localhost:52773)",
       "Tick Confirm and accept to run it now. Decline or cancel to change nothing.",
     ]);
+  });
+
+  it("neutralises a bidirectional override in a target", () => {
+    const lines = confirmationMessage({ operation: "o", target: `production ${RIGHT_TO_LEFT_OVERRIDE}lacol`, scope: "s" }, SERVER).split("\n");
+    expect(lines[1]).toBe("Target: production  lacol");
   });
 
   it("keeps a line break in a target on the one Target line", () => {

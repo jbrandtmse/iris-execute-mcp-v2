@@ -80,12 +80,14 @@ export interface ConfirmationServer {
 }
 
 /**
- * A value that a call supplied, as one line of dialog text: each run of control characters (a line break included)
- * and of Unicode line and paragraph separators becomes one space, so the value cannot start a line of its own, and a
- * value longer than 600 characters is cut there and ends in `...`, so it cannot push the other lines out of view.
+ * A value that a call supplied, as one line of dialog text: each run of control characters (a line break included),
+ * of invisible format characters (bidirectional overrides and isolates, zero-width characters) and of Unicode line
+ * and paragraph separators becomes one space, so the value cannot start a line of its own or reorder or hide the rest
+ * of its line, and a value longer than 600 characters is cut there and ends in `...`, so it cannot push the other
+ * lines out of view.
  */
 function dialogLine(value: string): string {
-  const line = value.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ");
+  const line = value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, " ");
   return line.length > MAX_TEXT_CHARACTERS ? `${line.slice(0, MAX_TEXT_CHARACTERS)}...` : line;
 }
 

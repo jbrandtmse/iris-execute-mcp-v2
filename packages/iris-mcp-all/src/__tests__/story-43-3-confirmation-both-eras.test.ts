@@ -10,7 +10,9 @@
  *   - accept, decline, cancel and an accept without the tick: the form request the handler receives (the template and the schema), the
  *     result, the write requests the listener received, and the audit entry;
  *   - a client with no capability: the result, the write requests and the audit entry equal the literals below;
- *   - the calls that an existing check refuses first (and the calls that need no dialog): no form request reaches the client.
+ *   - the calls that an existing check refuses first (and the calls that need no dialog): no form request reaches the client;
+ *   - a `resendFiltered` whose read-only preview fails (HTTP 500) ends with that error and never sends the execute request, while one
+ *     whose preview IRIS refuses (HTTP 200 with the error in the envelope, as IRIS refuses) sends the execute request as before.
  * A last row per era leaves the dialog unanswered and closes the client: one `unanswered` entry, and no write.
  *
  * The no-capability literals were captured (Rule #36) at baseline revision 0a5a3f8, before any source edit, by running this call list
@@ -218,6 +220,19 @@ const FILTERED_ZERO: Literal = {
   writes: [FILTERED("Demo.Zero", EXECUTE_TAIL)],
   audit: { ...base("@iris-mcp/interop", "iris_message_resend", "resendFiltered", ZERO_ARGS), outcome: "ok" },
 };
+
+/** A `resendFiltered` whose preview fails with an HTTP 500 (the fake's `Demo.PreviewDown`); its execute would run. */
+const PREVIEW_DOWN_ARGS = { ...FILTERED_ARGS, item: "Demo.PreviewDown" };
+const PREVIEW_DOWN_TEXT =
+  "Error performing 'resendFiltered' on iris_message_resend: IRIS returned HTTP 500 for POST /api/executemcp/v2/interop/message/resend. " +
+  "Check the request parameters and try again. Details: ERROR #5002: the fake IRIS preview failed";
+
+/** A `resendFiltered` that IRIS refuses, preview and execute alike, as the ExecuteMCPv2 handlers refuse: HTTP 200, error in the envelope. */
+const REFUSED_ARGS = { ...FILTERED_ARGS, item: "Demo.Refused" };
+const REFUSED_TEXT =
+  "Error performing 'resendFiltered' on iris_message_resend: IRIS reported errors for POST /api/executemcp/v2/interop/message/resend. " +
+  "Review the error details and correct the request. Details: ERROR #5001: The 'from'/'to' window spans approximately 9.00 days, " +
+  "exceeding the maximum allowed window of 7 days; narrow the range and retry. No changes were made.";
 
 const RESEND_OK: Literal = {
   result: {
@@ -756,6 +771,59 @@ describe.each(ERAS)("Story 43.3 on the %s era: five of the six gates ask the per
         expect(exchange.result).toEqual(FILTERED_ZERO.result);
         expect(exchange.writes).toEqual([FILTERED("Demo.Zero", PREFLIGHT_TAIL), ...FILTERED_ZERO.writes]);
         expect(await rig.entries(1)).toEqual([auditOf(FILTERED_ZERO)]);
+      },
+      60_000,
+    );
+
+    it(
+      "interop: a resendFiltered whose preview fails with an HTTP 500 asks nothing, ends with that error and never sends the execute request",
+      async () => {
+        const rig = await openRig("iris-interop-mcp", negotiation, { capabilities: FORM });
+
+        const exchange = await rig.call("iris_message_resend", PREVIEW_DOWN_ARGS);
+
+        expect(exchange.asks).toEqual([]);
+        expect(exchange.result).toEqual({ content: [{ type: "text", text: PREVIEW_DOWN_TEXT }], isError: true });
+        expect(exchange.writes).toEqual([FILTERED("Demo.PreviewDown", PREFLIGHT_TAIL)]);
+        expect(await rig.entries(1)).toEqual([
+          { ...base("@iris-mcp/interop", "iris_message_resend", "resendFiltered", PREVIEW_DOWN_ARGS), outcome: "error", error: PREVIEW_DOWN_TEXT },
+        ]);
+      },
+      60_000,
+    );
+
+    it(
+      "interop: a resendFiltered whose preview IRIS refuses asks nothing; the execute request is sent as before and IRIS refuses it too",
+      async () => {
+        const rig = await openRig("iris-interop-mcp", negotiation, { capabilities: FORM });
+
+        const exchange = await rig.call("iris_message_resend", REFUSED_ARGS);
+
+        expect(exchange.asks).toEqual([]);
+        expect(exchange.result).toEqual({ content: [{ type: "text", text: REFUSED_TEXT }], isError: true });
+        expect(exchange.writes).toEqual([FILTERED("Demo.Refused", PREFLIGHT_TAIL), FILTERED("Demo.Refused", EXECUTE_TAIL)]);
+        expect(await rig.entries(1)).toEqual([
+          { ...base("@iris-mcp/interop", "iris_message_resend", "resendFiltered", REFUSED_ARGS), outcome: "error", error: REFUSED_TEXT },
+        ]);
+      },
+      60_000,
+    );
+
+    it(
+      "interop: without a capability a resendFiltered whose preview would fail sends no preview and runs as before",
+      async () => {
+        const rig = await openRig("iris-interop-mcp", negotiation);
+
+        const exchange = await rig.call("iris_message_resend", PREVIEW_DOWN_ARGS);
+
+        expect(exchange.result).toEqual({
+          content: [{ type: "text", text: "resendFiltered: 3 matched, 3/3 succeeded, 0 failed" }],
+          structuredContent: { action: "resendFiltered", dryRun: false, matchCount: 3, results: [], summary: { total: 3, succeeded: 3, failed: 0 } },
+        });
+        expect(exchange.writes).toEqual([FILTERED("Demo.PreviewDown", EXECUTE_TAIL)]);
+        expect(await rig.entries(1)).toEqual([
+          { ...base("@iris-mcp/interop", "iris_message_resend", "resendFiltered", PREVIEW_DOWN_ARGS), outcome: "ok" },
+        ]);
       },
       60_000,
     );

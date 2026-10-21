@@ -6,10 +6,12 @@
  * JSON-RPC lines it is given, keeps EVERY stdout line (a response,
  * a notification, or a line that is not JSON at all) and all of stderr, and never filters or reshapes a server message, so a key the
  * server writes is a key the test can see. The envelope constants follow the revision's text (`basic/index#_meta`: `protocolVersion`
- * and `clientCapabilities` are required, `clientInfo` is optional). `startRig` adds the two fake IRIS listeners and the audit file.
+ * and `clientCapabilities` are required, `clientInfo` is optional). `startRig` adds the two fake IRIS listeners and the audit file, and
+ * `holdingProxy` holds chosen requests between a server and a listener until the test releases them.
  */
 
 import { spawn } from "node:child_process";
+import http from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -321,4 +323,86 @@ export function withoutModernFields(result: Json): Json {
 /** A `tools/call` request's params on the modern era: the call plus a `_meta` that merges `meta` over the minimal envelope. */
 export function modernCall(name: string, args: Record<string, unknown> | undefined, meta: Record<string, unknown> = {}): Json {
   return { name, ...(args !== undefined ? { arguments: args } : {}), _meta: { ...MINIMAL_META, ...meta } };
+}
+
+/** A proxy between a server and a fake IRIS listener that holds some requests until the test releases them. */
+export interface HoldingProxy {
+  /** Start the proxy in front of the listener on `upstreamPort`; `startRig`'s `interpose` option takes it. */
+  interpose: (upstreamPort: number) => Promise<{ port: number; close: () => Promise<void> }>;
+  /** The held requests not yet released. */
+  held: () => number;
+  /** The held requests whose exchange with the server has ended: the reply was written back, or the server closed the connection first. */
+  replied: () => number;
+  /** The held connections the server closed before they were released; `release()` leaves those alone. */
+  closedBeforeRelease: () => number;
+  /** Forward every held request whose connection is still open. */
+  release: () => void;
+  /** Every POST the proxy received, as `METHOD url body`, held or not. */
+  seen: () => string[];
+}
+
+/**
+ * A {@link HoldingProxy} that holds each request `hold` picks and forwards it, on release, to `rewrite` of its URL; every other request is
+ * forwarded at once, unchanged.
+ */
+export function holdingProxy(
+  hold: (method: string, url: string, body: string) => boolean,
+  rewrite: (url: string) => string = (url) => url,
+): HoldingProxy {
+  const waiting: Array<{ go: () => void; closed: boolean }> = [];
+  const seen: string[] = [];
+  let replied = 0;
+  let closedBeforeRelease = 0;
+  return {
+    held: () => waiting.length,
+    replied: () => replied,
+    closedBeforeRelease: () => closedBeforeRelease,
+    seen: () => seen,
+    release: () => {
+      for (const entry of waiting.splice(0)) if (!entry.closed) entry.go();
+    },
+    interpose: async (upstreamPort) => {
+      const forward = (req: http.IncomingMessage, res: http.ServerResponse, body: Buffer, url: string): void => {
+        const upstream = http.request({ host: "127.0.0.1", port: upstreamPort, method: req.method, path: url, headers: req.headers }, (reply) => {
+          res.writeHead(reply.statusCode ?? 502, reply.headers);
+          reply.pipe(res);
+        });
+        upstream.on("error", () => {
+          res.writeHead(502);
+          res.end();
+        });
+        upstream.end(body);
+      };
+      const server = http.createServer((req, res) => {
+        const chunks: Buffer[] = [];
+        req.on("data", (chunk: Buffer) => chunks.push(chunk));
+        req.on("end", () => {
+          const body = Buffer.concat(chunks);
+          const method = req.method ?? "";
+          const url = req.url ?? "";
+          if (method === "POST") seen.push(`${method} ${url} ${body.toString()}`);
+          if (hold(method, url, body.toString())) {
+            const entry = { go: () => forward(req, res, body, rewrite(url)), closed: false };
+            res.once("close", () => {
+              replied += 1;
+              if (waiting.includes(entry)) {
+                entry.closed = true;
+                closedBeforeRelease += 1;
+              }
+            });
+            waiting.push(entry);
+          } else forward(req, res, body, url);
+        });
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      return {
+        port: (server.address() as { port: number }).port,
+        close: () =>
+          new Promise<void>((resolve) => {
+            server.closeAllConnections();
+            server.close(() => resolve());
+          }),
+      };
+    },
+  };
 }

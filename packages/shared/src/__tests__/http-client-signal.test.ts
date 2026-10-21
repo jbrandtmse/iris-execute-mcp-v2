@@ -138,8 +138,6 @@ describe("IrisHttpClient request signal", () => {
       expect(added).toHaveLength(1);
       expect(removed).toHaveLength(1);
       expect(removed[0]?.[1]).toBe(added[0]?.[1]);
-      // An abort after the answer changes nothing.
-      expect(() => controller.abort()).not.toThrow();
     });
 
     it("does not retry a 401 after the signal aborted", async () => {

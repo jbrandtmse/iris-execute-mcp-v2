@@ -30,7 +30,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import type { ToolContext } from "@iris-mcp/shared";
-import { IrisApiError } from "@iris-mcp/shared";
+import { IrisApiError, IrisConnectionError } from "@iris-mcp/shared";
 import { messageResendTool } from "../tools/message-resend.js";
 import { createMockHttp, createMockCtx, envelope } from "@iris-mcp/shared/test-helpers";
 
@@ -1288,10 +1288,11 @@ describe("Story 43.3: confirmation (resend)", () => {
       ["no message matches", async () => envelope(dryRunReply({ matchCount: 0 }))],
       ["more messages match than the cap allows", async () => envelope(dryRunReply({ matchCount: 101, maxMessages: 100 }))],
       [
+        // The ExecuteMCPv2 handlers refuse with HTTP 200 and the error in the envelope.
         "the preflight is refused by IRIS",
         async () => {
           throw new IrisApiError(
-            500,
+            200,
             [{ error: "The from/to window may not exceed 7 days; narrow the window and retry. No changes were made." }],
             RESEND_PATH,
             "The from/to window may not exceed 7 days.",
@@ -1299,9 +1300,9 @@ describe("Story 43.3: confirmation (resend)", () => {
         },
       ],
       [
-        "the preflight fails with another error",
+        "the preflight is refused with an HTTP 400",
         async () => {
-          throw new Error("ECONNREFUSED");
+          throw new IrisApiError(400, [], RESEND_PATH, "IRIS returned HTTP 400.");
         },
       ],
       ["the reply is not a dry-run reply", async () => envelope(EXECUTE_REPLY)],
@@ -1311,6 +1312,60 @@ describe("Story 43.3: confirmation (resend)", () => {
       preflightAnswer = answer;
 
       await expect(scopeOf(requests)()).resolves.toBeUndefined();
+    });
+
+    const connectionRefused = new Error("ECONNREFUSED");
+    const timedOut = new IrisConnectionError("TIMEOUT", "Connection to IRIS timed out after 60000ms", "Check the port");
+    const cancelledPreview = new IrisConnectionError("CANCELLED", "Request POST /x was cancelled by the client", "No answer");
+    const serverError = new IrisApiError(500, [{ error: "ERROR #5002: the preview failed" }], RESEND_PATH, "IRIS returned HTTP 500.");
+    const unavailable = new IrisApiError(503, [], RESEND_PATH, "IRIS returned HTTP 503 with a non-JSON response.");
+    it.each([
+      ["the preflight fails with a connection error", connectionRefused],
+      ["the preflight times out", timedOut],
+      ["the preflight is cancelled", cancelledPreview],
+      ["the preflight fails with an HTTP 500", serverError],
+      ["the preflight fails with an HTTP 503", unavailable],
+    ])("the scope function rejects with the preflight's error when %s", async (_label, failure) => {
+      const { confirm, requests } = recordingConfirm(proceed);
+      await messageResendTool.handler(FILTER_ARGS, { ...ctx, confirm });
+      preflightAnswer = async () => {
+        throw failure;
+      };
+
+      await expect(scopeOf(requests)()).rejects.toBe(failure);
+    });
+
+    it("a preflight that fails with a server error ends the call with that error; the execute POST is never made", async () => {
+      preflightAnswer = async () => {
+        throw serverError;
+      };
+      const { confirm } = recordingConfirm(async (request) => {
+        if (typeof request.scope === "function") await request.scope();
+        return { proceed: true };
+      });
+
+      const result = await messageResendTool.handler(FILTER_ARGS, { ...ctx, confirm });
+
+      expect(result).toStrictEqual({
+        content: [{ type: "text", text: `Error performing 'resendFiltered' on iris_message_resend: ${serverError.message}` }],
+        isError: true,
+      });
+      expect(mockHttp.post.mock.calls).toStrictEqual([[RESEND_PATH, FILTER_PREFLIGHT_BODY]]);
+      expect(postsWithDryRun(false)).toHaveLength(0);
+    });
+
+    it("a preflight that fails with a connection error rejects with that error; the execute POST is never made", async () => {
+      preflightAnswer = async () => {
+        throw connectionRefused;
+      };
+      const { confirm } = recordingConfirm(async (request) => {
+        if (typeof request.scope === "function") await request.scope();
+        return { proceed: true };
+      });
+
+      await expect(messageResendTool.handler(FILTER_ARGS, { ...ctx, confirm })).rejects.toBe(connectionRefused);
+      expect(mockHttp.post.mock.calls).toStrictEqual([[RESEND_PATH, FILTER_PREFLIGHT_BODY]]);
+      expect(postsWithDryRun(false)).toHaveLength(0);
     });
 
     const notAsked: Array<[string, Record<string, unknown>, Record<string, unknown>]> = [

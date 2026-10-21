@@ -14,7 +14,9 @@
 //   Every reply is a function of the request alone: two runs against fresh listeners that make the same requests get
 //   the same bytes. The SQL endpoint and the product routes choose their reply from marker values in the request
 //   (`SELECT boom` answers an HTTP 500 error envelope, `filter=throw` answers a non-JSON page, namespace `ERRNS`
-//   answers an HTTP 500 error envelope); a document called `Demo.Missing.cls` is absent.
+//   answers an HTTP 500 error envelope; a `resendFiltered` of item `Demo.Refused` is refused as IRIS refuses, HTTP 200
+//   with the error in the envelope, and one of item `Demo.PreviewDown` answers its preview with an HTTP 500 error
+//   envelope); a document called `Demo.Missing.cls` is absent.
 
 import http from 'node:http';
 
@@ -236,7 +238,22 @@ export async function startFakeIris({ bootstrapVersion }) {
     if (method === 'POST' && path === '/api/executemcp/v2/interop/message/resend' && body?.action === 'resendFiltered') {
       const matchCount = matchCountOf(body.item);
       const maxMessages = body.maxMessages ?? 100;
-      if (body.dryRun === undefined || body.dryRun === true) {
+      const preview = body.dryRun === undefined || body.dryRun === true;
+      // `Demo.Refused`: IRIS refuses the preview and the execute alike, the way the ExecuteMCPv2 handlers refuse
+      // (HTTP 200 with the error in the envelope). `Demo.PreviewDown`: the preview fails with a server error, and the
+      // execute would run.
+      if (body.item === 'Demo.Refused') {
+        reply(res, 200, errorEnvelope(
+          "ERROR #5001: The 'from'/'to' window spans approximately 9.00 days, exceeding the maximum allowed window of 7 days; narrow the range and retry. No changes were made.",
+          5001,
+        ));
+        return;
+      }
+      if (body.item === 'Demo.PreviewDown' && preview) {
+        reply(res, 500, errorEnvelope('ERROR #5002: the fake IRIS preview failed', 5002));
+        return;
+      }
+      if (preview) {
         reply(res, 200, envelope({
           action: 'resendFiltered',
           dryRun: true,

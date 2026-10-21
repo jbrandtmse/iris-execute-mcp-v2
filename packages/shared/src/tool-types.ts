@@ -365,7 +365,8 @@ export interface ConfirmationRequest {
   target: string;
   /**
    * What the call covers. A function is resolved only when the client can be asked, and may return `undefined`
-   * to say there is nothing to ask (the call then proceeds as it would without a dialog).
+   * to say there is nothing to ask (the call then proceeds as it would without a dialog). When it throws,
+   * `confirm` rejects with that error and nothing is asked, so the gate ends the call with it.
    */
   scope: string | (() => Promise<string | undefined>);
 }

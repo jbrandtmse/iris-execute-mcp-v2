@@ -605,7 +605,10 @@ export const messageResendTool: ToolDefinition = {
 
       // An execute that IRIS will let through (dryRun false with confirm true) asks the person (AD-34). The
       // dialog names the match count, which a read-only preview of the same filters provides: it is shown only
-      // when 1 <= count <= cap, and otherwise the execute request goes out as it always did.
+      // when 1 <= count <= cap, and otherwise the execute request goes out as it always did. A preview that IRIS
+      // refuses (an error envelope, HTTP status below 500) means IRIS refuses the execute the same way, so the
+      // execute goes out as before. A preview that fails any other way (a timeout, a connection error, a 5xx, a
+      // cancel) ends the call with that error and sends nothing: the person cannot be shown what would be resent.
       if (input.dryRun === false && input.confirm === true) {
         const preview = async (): Promise<string | undefined> => {
           try {
@@ -621,8 +624,9 @@ export const messageResendTool: ToolDefinition = {
               `${matchCount} message(s) match now (status ${found.status}, from ${found.from} to ${found.to}); ` +
               `IRIS counts again when it runs and resends at most ${maxMessages}`
             );
-          } catch {
-            return undefined;
+          } catch (error: unknown) {
+            if (error instanceof IrisApiError && error.statusCode < 500) return undefined;
+            throw error;
           }
         };
         const outcome = await ctx.confirm?.({

@@ -1649,6 +1649,10 @@ export class McpServerBase {
     }
     const schemaInvalid = result !== undefined;
     result ??= await this.dispatchToolCall(tool, args, wireCall);
+    // A call the client cancelled is audited `error`, never `ok`, whatever its handler went on to return. A
+    // question it asked is never put to the client, so it ends here as that cancelled call, not as a pending ask.
+    const cancelled = wireCall !== undefined && requestView(wireCall)?.signal?.aborted === true;
+    if (cancelled && isInputRequiredResult(result)) result = toolErrorResult(CANCELLED_CALL_TEXT);
     // A question for the client ends no call: the round that ends it writes the entry (AD-19), and a dialog
     // nobody answers gets its entry from the pending-ask map.
     if (isInputRequiredResult(result)) {
@@ -1660,8 +1664,6 @@ export class McpServerBase {
     if (!auditLogger) return result;
 
     const durationMs = Date.now() - start;
-    // A call the client cancelled is audited `error`, never `ok`, whatever its handler went on to return.
-    const cancelled = wireCall !== undefined && requestView(wireCall)?.signal?.aborted === true;
     const audited = cancelled ? toolErrorResult(CANCELLED_CALL_TEXT) : result;
     // Fire-and-forget audit recording must NEVER throw into the tool path
     // (spec §5): the async file write is already swallowed inside the logger,
@@ -2033,7 +2035,10 @@ export class McpServerBase {
     } catch (error: unknown) {
       const message =
         error instanceof Error ? error.message : String(error);
-      logger.error(`Tool ${tool.name} failed: ${message}`);
+      // A call the client cancelled has not failed: its audit entry says it was cancelled, and nothing is logged.
+      if (wireCall === undefined || requestView(wireCall)?.signal?.aborted !== true) {
+        logger.error(`Tool ${tool.name} failed: ${message}`);
+      }
       return {
         content: [{ type: "text" as const, text: `Tool error: ${message}` }],
         isError: true,
@@ -2139,6 +2144,9 @@ export class McpServerBase {
           result: confirmationDeclinedResult(actionKey, request.operation, response),
         };
       }
+      // A retry of this call with no answer: the call goes on below, asked again or not at all, so the ask it
+      // echoes no longer ends as an entry of its own.
+      this.pendingAsks.delete(state.nonce);
     }
 
     if (!declaresFormElicitation(this.clientCapabilitiesOf(wireCall))) return { proceed: true };
@@ -2191,13 +2199,15 @@ export class McpServerBase {
 
   /**
    * Write the `unanswered` audit entry of each pending ask that has expired (or of every one, when `all`), and
-   * forget it. Never throws.
+   * forget it. Its nonce counts as used from then on, so an answer that arrives in the last second of the state's
+   * life, which the codec counts in whole seconds, is asked again and never contradicts the entry. Never throws.
    */
   private sweepPendingAsks(all: boolean): void {
     const now = Date.now();
     for (const [nonce, ask] of this.pendingAsks) {
       if (!all && ask.expiresAt > now) continue;
       this.pendingAsks.delete(nonce);
+      this.confirmationNonces.markUsed(nonce);
       const auditLogger = this.auditLogger;
       if (!auditLogger) continue;
       try {

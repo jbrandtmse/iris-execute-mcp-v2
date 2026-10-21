@@ -318,6 +318,7 @@ describe("revision 2026-07-28", () => {
 
     expect(other.resultType).toBe("input_required");
     expect(purgesOf(rig)).toEqual([]);
+    expect(rig.requests.b().filter((request) => request.includes(PURGE_PATH)), "nothing reached the profile 'other' either").toEqual([]);
   });
 
   it("a tampered state is asked again, and never runs", async () => {

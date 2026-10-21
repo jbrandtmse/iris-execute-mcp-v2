@@ -1328,6 +1328,61 @@ describe("Story 43.2: both eras over serveStdio", () => {
         expect(result.content[0]?.text).toBe("reached");
         expect(env.fetchMock.mock.calls.length).toBeGreaterThan(before);
       });
+
+      it.each(ERAS)("%s: a call cancelled after IRIS answered, whose handler then succeeds, is still audited error with the cancelled text, never ok", async (_era, negotiation) => {
+        const file = auditOn();
+        const { server, client } = await boot({ tools: [reachTool, echoTool] }, negotiation);
+        const live = new AbortController();
+        // IRIS answers, and the cancel lands while the answer is on its way: the request has completed, so nothing aborts it.
+        env.fetchMock.mockImplementationOnce(async () => {
+          live.abort();
+          return new Response(JSON.stringify({ status: { errors: [] }, console: [], result: {} }), { status: 200 });
+        });
+
+        const result = await callWith(
+          server,
+          { name: "iris_wire_reach", arguments: { name: "A.cls" } },
+          { signal: live.signal, mcpReq: { requestState: () => undefined, signal: live.signal } },
+        );
+
+        expect(result.content[0]?.text, "the handler ran to its end").toBe("reached");
+        const entries = await entriesAfterMarker((name, args) => client.callTool({ name, arguments: args }), file);
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({ tool: "iris_wire_reach", outcome: "error", error: CANCELLED_TEXT });
+      });
+
+      it.each(ERAS)("%s: a call cancelled before its dialog is shown is audited at once as the cancelled call, and leaves no pending ask", async (_era, negotiation) => {
+        governed();
+        auditOn();
+        const log = vi.spyOn(AuditLogger.prototype, "log");
+        const { server } = await boot({ tools: [confirmTool] }, negotiation, {
+          capabilities: FORM,
+          onElicitation: (params) => {
+            asked.push(params);
+            return TICKED;
+          },
+        });
+        const aborted = new AbortController();
+        aborted.abort();
+
+        const result = await callWith(
+          server,
+          { name: "iris_wire_confirm", arguments: { value: "a" } },
+          { signal: aborted.signal, mcpReq: { requestState: () => undefined, signal: aborted.signal, envelope: ASKING_ENVELOPE } },
+        );
+
+        expect(result).toStrictEqual({ content: [{ type: "text", text: CANCELLED_TEXT }], isError: true });
+        expect(asked).toEqual([]);
+        expect(executions).toEqual([]);
+        const calls = (): Array<Record<string, unknown>> =>
+          log.mock.calls.map((call) => call[0] as unknown as Record<string, unknown>).filter((entry) => entry.tool === "iris_wire_confirm");
+        expect(calls()).toHaveLength(1);
+        expect(calls()[0]).toMatchObject({ outcome: "error", error: CANCELLED_TEXT });
+        expect(calls()[0]).not.toHaveProperty("confirmation");
+
+        await server.stop();
+        expect(calls(), "no unanswered entry follows at shutdown").toHaveLength(1);
+      });
     });
 
     describe("on the modern era, over raw frames", () => {
@@ -1730,6 +1785,51 @@ describe("Story 43.2: both eras over serveStdio", () => {
         } finally {
           vi.useRealTimers();
         }
+      });
+
+      it("an answer that arrives after its dialog was written unanswered is asked again and never runs, though the state has half a second left", async () => {
+        governed();
+        auditOn();
+        const log = vi.spyOn(AuditLogger.prototype, "log");
+        const { request } = await startRaw([confirmTool]);
+        await request("server/discover", { _meta: ENVELOPE });
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+        try {
+          // A whole second: the state counts its life in whole seconds, so it is still good until 601 seconds from now.
+          vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+          const call = (extra: Record<string, unknown> = {}) =>
+            request("tools/call", { name: "iris_wire_confirm", arguments: { value: "a" }, _meta: ASKING_ENVELOPE, ...extra });
+          const first = await call();
+          await vi.advanceTimersByTimeAsync(600_000);
+          expect(loggedEntries(log)).toHaveLength(1);
+          expect(loggedEntries(log)[0]).toMatchObject({ outcome: "error", confirmation: "unanswered" });
+
+          await vi.advanceTimersByTimeAsync(500);
+          const late = await call({ inputResponses: { confirm: TICKED }, requestState: first.result?.requestState });
+
+          expect(late.result?.resultType).toBe("input_required");
+          expect(executions).toEqual([]);
+          expect(loggedEntries(log), "the entry that says nothing changed stays the only one").toHaveLength(1);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("a retry that echoes its state with no answer is asked again, and the call still ends as one entry", async () => {
+        const { server, log, first, round } = await asked600();
+        const state = first.result?.requestState as string;
+
+        const again = await round({ value: "a" }, { requestState: state });
+        expect(again.result?.resultType).toBe("input_required");
+        expect(again.result?.requestState).not.toBe(state);
+        const declined = await round({ value: "a" }, { inputResponses: { confirm: { action: "decline" } }, requestState: again.result?.requestState });
+        expect(declined.result?.isError).toBe(true);
+        await server.stop();
+
+        const entries = loggedEntries(log);
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({ tool: "iris_wire_confirm", outcome: "denied", confirmation: "declined" });
+        expect(executions).toEqual([]);
       });
 
       it("stop() writes every pending ask before the audit writer shuts down", async () => {

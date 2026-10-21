@@ -21,9 +21,12 @@ entry for every call that runs to its end. The one behavior change for such a cl
   resolution, the governance gate and every check of the tool itself (bounds, dry run, caps, `confirm: true`, `dryRun: false`, plan gates)
   run first and refuse exactly as before, so the dialog is an additional gate and never a replacement for `confirm: true`. The form names
   the operation, the target, the scope and the server, and has one required boolean, `confirm`, unticked by default; only an accept with it
-  ticked runs the call. The target and the scope each show on one line (control characters in a value the call supplies become a space,
-  and a text over 600 characters is cut there and ends in `...`). For `resendFiltered` the server first sends a read-only preview of the same filters, and the dialog names the live
-  match count, the window and the `maxMessages` cap; it is shown only for 1 to `maxMessages` matches. `resend` and `regenerateStorage` have no
+  ticked runs the call. The target and the scope each show on one line (control characters and invisible format characters, such as
+  bidirectional overrides, in a value the call supplies become a space, and a text over 600 characters is cut there and ends in `...`).
+  For `resendFiltered` the server first sends a read-only preview of the same filters, and the dialog names the live
+  match count, the window and the `maxMessages` cap; it is shown only for 1 to `maxMessages` matches. A preview that fails other than by
+  an IRIS refusal (a timeout, a connection error, an HTTP 5xx) ends the call with that error and sends nothing (wave-8 decision #21); a
+  client that cannot be asked sends no preview. `resend` and `regenerateStorage` have no
   `confirm` parameter, so for a client without elicitation governance remains their only gate.
 - **The confirmation is bound and single-use.** It is bound to the tool, the resolved server profile and a hash of the exact validated
   arguments, through a signed state (HMAC-SHA256, per-process random key) that can be used once and lives 10 minutes. A forged, altered,
@@ -38,11 +41,14 @@ entry for every call that runs to its end. The one behavior change for such a cl
   `outcome: "denied"` with `denyReason: "CONFIRMATION_DECLINED"`. The new additive field `confirmation` is `accepted`, `declined`,
   `cancelled`, `unconfirmed` or `unanswered`. A dialog nobody answers (a client that never retries, a 2025-11-25 leg that times out, is
   cancelled or fails) changes nothing and is written as an `error` entry with `confirmation: "unanswered"` and the text
-  `The confirmation dialog was not answered. Nothing was changed.`, after the 10-minute lifetime or when the server stops.
+  `The confirmation dialog was not answered. Nothing was changed.`, after the 10-minute lifetime, when the client closes the connection,
+  or when the server is stopped gracefully; an answer that arrives after that entry is written is asked again.
 - **A cancelled call aborts its IRIS request, and is audited `error` (DW-642).** A call the client cancels (`notifications/cancelled`)
   now aborts the IRIS request it has in flight and is audited `error` with the text
   `Cancelled by the client before a result was sent. An IRIS request still in flight was aborted; a write IRIS had already received may still have completed.`
-  Before this story such a call still ran to the end and was audited `ok`. `RequestOptions.signal` carries the abort: an already aborted signal sends no request, and
+  Before this story such a call still ran to the end and was audited `ok`. A call cancelled after the person accepted keeps
+  `confirmation: "accepted"` on that entry; one cancelled before its dialog was shown is that entry, written at once. A cancelled call is
+  not logged as a failure. `RequestOptions.signal` carries the abort: an already aborted signal sends no request, and
   an abort in flight aborts the request, both rejecting with `IrisConnectionError` code `CANCELLED`.
 - **Library surface of `@iris-mcp/shared`.** `REFUSAL_CODES.CONFIRMATION_DECLINED`; the optional `ToolContext.confirm(request)`, present
   only on a call off the wire, returning `{proceed: true}` or `{proceed: false; result}` (handlers call it after their own checks and
@@ -73,9 +79,14 @@ entry for every call that runs to its end. The one behavior change for such a cl
   `maxMessages`.
 - A dialog can be accepted and then refused by IRIS, for example by the production-running check of `resendFiltered` (which the preview
   skips) or by bad header IDs on `resend`. Nothing changes.
-- On 2026-07-28 each round re-runs the tool's own checks.
-- A `resendFiltered` whose preview fails (a timeout or a server error) shows no dialog, and the execute request is sent as before; the
-  same holds at zero matches and over the cap, where IRIS resends nothing or refuses.
+- On both eras the round that decides the call runs the tool's own checks again (on 2026-07-28 the client sends the call again; on
+  2025-11-25 the SDK's shim runs the handler again), so a check can still refuse a call the person has just accepted.
+- A `resendFiltered` at zero matches, over the cap, or whose preview IRIS refuses shows no dialog, and the execute request is sent as
+  before: IRIS resends nothing, or refuses.
+- When a `resendFiltered` omits `to`, IRIS takes the end of the window as the time it runs, so the execute counts up to a later time than
+  the dialog shows (still at most `maxMessages`).
+- A dialog that is still open when the server is killed by a signal (SIGTERM or SIGINT, with its input still open) gets no `unanswered`
+  entry; a client that closes the server's input first gets it.
 - A promotion (`execute`) resolves its source and target profiles before the dialog. The first use of a profile in a session sets it up as
   for any other call (the connection check and, once, the deployment of the ExecuteMCPv2 classes), so a declined promotion can still have
   done that. It writes no document, mapping, setting, web application or configuration.

@@ -134,7 +134,7 @@ export type AuditOutcome = "ok" | "error" | "denied";
 /**
  * How the person answered the confirmation dialog of a gate (AD-34, AD-19): `accepted`, `declined`, `cancelled`
  * (dismissed), `unconfirmed` (accepted without ticking Confirm), or `unanswered` (nobody answered before the state
- * expired or the server stopped).
+ * expired, the client closed the connection or the server was stopped).
  */
 export type AuditConfirmation = "accepted" | "declined" | "cancelled" | "unconfirmed" | "unanswered";
 

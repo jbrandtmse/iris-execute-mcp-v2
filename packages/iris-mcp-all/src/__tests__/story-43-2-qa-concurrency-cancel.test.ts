@@ -22,17 +22,18 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import http from "node:http";
 import { REPO_ROOT } from "./pack-fixture";
 import { GOLDEN_PACKAGES } from "../../../../scripts/lib/sdk-wire-golden-core.mjs";
 import { staleDistReason } from "./process-gate-helpers.js";
 import {
   EXAMPLE_META,
   MINIMAL_META,
+  holdingProxy,
   legacyInitializeParams,
   modernCall,
   startRig,
   withoutModernFields,
+  type HoldingProxy,
   type Json,
   type Rig,
 } from "./story-43-2-qa-hand-wire";
@@ -56,74 +57,11 @@ if (stale.length > 0) throw new Error(`Build the packages first: ${stale.map(([p
  * `replied` counts the held reads whose reply exchange with the server has ended: the proxy finished writing the reply back, or the
  * server closed that connection first.
  */
-function holdingProxy(): {
-  interpose: (upstreamPort: number) => Promise<{ port: number; close: () => Promise<void> }>;
-  held: () => number;
-  replied: () => number;
-  closedBeforeRelease: () => number;
-  release: () => void;
-} {
-  const waiting: Array<{ go: () => void; closed: boolean }> = [];
-  let replied = 0;
-  let closedBeforeRelease = 0;
-  return {
-    held: () => waiting.length,
-    replied: () => replied,
-    closedBeforeRelease: () => closedBeforeRelease,
-    release: () => {
-      for (const entry of waiting.splice(0)) if (!entry.closed) entry.go();
-    },
-    interpose: async (upstreamPort) => {
-      const forward = (req: http.IncomingMessage, res: http.ServerResponse, body: Buffer, rewrite: boolean): void => {
-        const upstream = http.request(
-          {
-            host: "127.0.0.1",
-            port: upstreamPort,
-            method: req.method,
-            path: rewrite ? (req.url ?? "").replace("Demo.Slow.cls", "Demo.Sample.cls") : req.url,
-            headers: req.headers,
-          },
-          (reply) => {
-            res.writeHead(reply.statusCode ?? 502, reply.headers);
-            reply.pipe(res);
-          },
-        );
-        upstream.on("error", () => {
-          res.writeHead(502);
-          res.end();
-        });
-        upstream.end(body);
-      };
-      const server = http.createServer((req, res) => {
-        const chunks: Buffer[] = [];
-        req.on("data", (chunk: Buffer) => chunks.push(chunk));
-        req.on("end", () => {
-          const body = Buffer.concat(chunks);
-          if (req.method === "GET" && (req.url ?? "").includes("/doc/Demo.Slow.cls")) {
-            const entry = { go: () => forward(req, res, body, true), closed: false };
-            res.once("close", () => {
-              replied += 1;
-              if (waiting.includes(entry)) {
-                entry.closed = true;
-                closedBeforeRelease += 1;
-              }
-            });
-            waiting.push(entry);
-          } else forward(req, res, body, false);
-        });
-      });
-      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-      return {
-        port: (server.address() as { port: number }).port,
-        close: () =>
-          new Promise<void>((resolve) => {
-            server.closeAllConnections();
-            server.close(() => resolve());
-          }),
-      };
-    },
-  };
-}
+const slowReadProxy = (): HoldingProxy =>
+  holdingProxy(
+    (method, url) => method === "GET" && url.includes("/doc/Demo.Slow.cls"),
+    (url) => url.replace("Demo.Slow.cls", "Demo.Sample.cls"),
+  );
 
 const rigs: Rig[] = [];
 afterEach(async () => {
@@ -131,8 +69,8 @@ afterEach(async () => {
 });
 
 /** Start the rig behind the holding proxy and open the connection on `era`. */
-async function open(era: Era): Promise<{ rig: Rig; proxy: ReturnType<typeof holdingProxy>; call: (id: number, name: string, args: Json, meta?: Json) => void }> {
-  const proxy = holdingProxy();
+async function open(era: Era): Promise<{ rig: Rig; proxy: HoldingProxy; call: (id: number, name: string, args: Json, meta?: Json) => void }> {
+  const proxy = slowReadProxy();
   const rig = await startRig({ interpose: proxy.interpose });
   rigs.push(rig);
   const { wire } = rig;
@@ -147,7 +85,7 @@ async function open(era: Era): Promise<{ rig: Rig; proxy: ReturnType<typeof hold
   return { rig, proxy, call };
 }
 
-async function untilHeld(proxy: ReturnType<typeof holdingProxy>, count: number): Promise<void> {
+async function untilHeld(proxy: HoldingProxy, count: number): Promise<void> {
   const deadline = Date.now() + 10_000;
   while (proxy.held() < count) {
     if (Date.now() > deadline) throw new Error(`the proxy holds ${proxy.held()} requests, expected ${count}`);
@@ -156,7 +94,7 @@ async function untilHeld(proxy: ReturnType<typeof holdingProxy>, count: number):
 }
 
 /** Wait until the proxy has written `count` released replies back to the server, so a silence after that is the server's. */
-async function untilReplied(proxy: ReturnType<typeof holdingProxy>, count: number): Promise<void> {
+async function untilReplied(proxy: HoldingProxy, count: number): Promise<void> {
   const deadline = Date.now() + 10_000;
   while (proxy.replied() < count) {
     if (Date.now() > deadline) throw new Error(`the proxy has written ${proxy.replied()} held replies, expected ${count}`);
@@ -165,7 +103,7 @@ async function untilReplied(proxy: ReturnType<typeof holdingProxy>, count: numbe
 }
 
 /** Wait until `count` held connections have closed before they were released, so the close is the server's doing. */
-async function untilClosed(proxy: ReturnType<typeof holdingProxy>, count: number): Promise<void> {
+async function untilClosed(proxy: HoldingProxy, count: number): Promise<void> {
   const deadline = Date.now() + 10_000;
   while (proxy.closedBeforeRelease() < count) {
     if (Date.now() > deadline) throw new Error(`${proxy.closedBeforeRelease()} held connections closed before release, expected ${count}`);
