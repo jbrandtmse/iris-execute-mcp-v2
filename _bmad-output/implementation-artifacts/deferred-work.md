@@ -3023,6 +3023,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-16T15:13:57Z status=decision-pending owner=burndown by=harvest note=product call for the decision sheet: sanction the hint correction (and in which story) or keep the grandfathered hints
 - 2026-10-16T15:58:09Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=decided=orchestrator(Lead-away) decision 18: sanction the destructiveHint correction before 1.0; DW bullet in 42.1
 - 2026-10-20T23:38:03Z occurrence=43-3-human-confirmation-through-elicitation note=43.3 plan inventory: iris_ldap_manage delete, iris_x509_manage delete and iris_service_manage enable/disable/set are annotated destructiveHint false although they delete or disable; fix with the same AD-15 annotation correction
+- 2026-10-21T06:26:44Z owner=42-10-pre-1-0-tool-surface-corrections by=spec_gate note=moved_from_42-1_by_wave8_decision_34_split(frozen-goldens_machinery+feature-sized_DW-652)
 
 ### DW-561: Epic 38 capstone, the 38.4 and the 38.5 wire gates each carry their own fixture helpers (putDoc, compileDoc, lineNumber, fixtureDocuments, fixtureGlobals, removeFixtures) instead of one promoted set in process-gate-helpers.ts
 - source: _bmad-output/implementation-artifacts/spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3597,6 +3598,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 43.3 plan inventory 2026-10-20
 - 2026-10-20T23:38:03Z status=escalated owner=burndown by=harvest note=for the decision sheet: extend the Story 38.4 Storage guard to every document-write path, or accept
 - 2026-10-21T05:27:11Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=wave-8 decision 30: fix before 1.0, extend the Story 38.4 Storage guard to doc_load, XML import and env_promote document writes; DW-652 bullet under 42.1
+- 2026-10-21T06:26:44Z owner=42-10-pre-1-0-tool-surface-corrections by=spec_gate note=moved_from_42-1_by_wave8_decision_34_split(frozen-goldens_machinery+feature-sized_DW-652)
 
 ### DW-653: The resend-failed-messages prompt says an over-cap match is refused and omitting dryRun or confirm is refused; a dry run returns the full matchCount and omitting dryRun previews; the prompt text is pinned by the frozen 43.1 golden
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3609,6 +3611,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 43.3 plan probe 2026-10-20
 - 2026-10-20T23:38:03Z status=escalated owner=burndown by=harvest note=for the decision sheet: AD-19 accuracy; record the effective namespace for %SYS-scoped handlers, or accept
 - 2026-10-21T05:27:11Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=wave-8 decision 31: record the effective namespace for %SYS-scoped handlers in audit entries; DW-654 bullet under 42.1
+- 2026-10-21T06:26:44Z owner=42-10-pre-1-0-tool-surface-corrections by=spec_gate note=moved_from_42-1_by_wave8_decision_34_split(frozen-goldens_machinery+feature-sized_DW-652)
 
 ### DW-655: prd.md:86 says All 86 consolidated tools; the suite has 115
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3651,3 +3654,4 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 43.4 review 2026-10-20 (blind hunter): message-resend.ts:364-369, :434; packages/iris-interop-mcp/README.md:302; Story 43.4 fixed only the resend-failed-messages prompt (DW-653)
 - 2026-10-21T03:57:59Z status=routed owner=42-1-pre-publish-package-fixes by=harvest note=a sanctioned AD-15 tool-text correction before 1.0, with DW-560's annotation corrections: one sanctioned-change ledger entry per changed byte (a replace, so the Frozen goldens convention needs its sanction to name a correction), the tools-list snapshot regenerated
 - 2026-10-21T05:15:12Z occurrence=43-4-sdk-v2-docs-smokes-and-capstone by=cr note=appendOnly is optional, so a description replace under a later sanction passes the loader and the S-43.4-only append row; 42.1 decides
+- 2026-10-21T06:26:44Z owner=42-10-pre-1-0-tool-surface-corrections by=spec_gate note=moved_from_42-1_by_wave8_decision_34_split(frozen-goldens_machinery+feature-sized_DW-652)

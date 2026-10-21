@@ -18,3 +18,7 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-21T05:50:39Z	Epic 42	planning_amended	file=_bmad-output/planning-artifacts/epics.md lines=5686,5731 decision=33 reason=v1_floor_not_applicable+D1_done
 2026-10-21T05:53:15Z	Epic 42	epic_context_compiled	reason=initial model=claude-opus-5-5 lines=86
 2026-10-21T05:53:31Z	Story 42.1	stage_spawned	stage=plan spawn_at=2026-10-21T05:53:31Z model=claude-opus-5-5 agent_name=42-1-pre-publish-package-fixes-plan-1 cycle_iteration=1
+2026-10-21T06:27:19Z	Story 42.1	story_created	spawn_at=2026-10-21T05:53:31Z model=claude-opus-5-5 path=_bmad-output/implementation-artifacts/spec-42-1-pre-publish-package-fixes.md build_status=ready-for-dev warnings=multiple-goals,oversized epic_context=reused
+2026-10-21T06:27:19Z	Story 42.1	spec_validated	service_introducing=true integration_ac=present(io_rows_synthesized_entry+extension_definitions) adr_constrained_acs=AD-2,AD-14,AD-15,AD-28,AD-29,AD-30,AD-32 decision_dependency=none sections_created=none owned_ledger=DW-31,DW-260,DW-394,DW-506,DW-628,DW-630,DW-637 addressed=7 declined=4(DW-560,DW-662,DW-652,DW-654_reowned_42-10_by_spec_gate) orchestrator_decisions=34,35,36,37 spine_updated=AD-29,stack mutates_shared_runtime=false model=claude-opus-5-5
+2026-10-21T06:27:19Z	Epic 42	spine_updated	ad=AD-29,stack reason=spec_gate_decisions_35_36_37 by=lead story=42-1-pre-publish-package-fixes lint=ok
+2026-10-21T06:27:19Z	Epic 42	ledger_routed_planned	story=42-10-pre-1-0-tool-surface-corrections entries=4 excess=0 by=spec_gate

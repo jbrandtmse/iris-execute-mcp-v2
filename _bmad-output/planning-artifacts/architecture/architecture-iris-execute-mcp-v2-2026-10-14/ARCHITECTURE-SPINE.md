@@ -579,8 +579,9 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - npm is the primary channel. Every `@iris-mcp/*` package shares one version through the Changesets `fixed` group, starting at `1.0.0`, with no prerelease tag.
     - Until Story 42.6, changesets use `patch` or `minor`, and no story runs `changeset version` or publishes. Story 42.1 owns the mechanism that produces `1.0.0`.
   - **Pins and runtime.**
-    - Every `npx` spec the suite writes, spawns or documents carries the pinned major (`@1`), taken from one exported constant, and a test finds any unpinned spec. This covers servers, the client-config CLI and the governance CLI.
-    - Every package declares `engines.node >=22`, and `@types/node` is pinned to the floor major.
+    - Every `npx` spec the suite writes, spawns or documents carries the pinned major (`@1`), taken from one exported constant, and a test finds any unpinned spec. This covers servers, the client-config CLI and the governance CLI. The constant lives in `@iris-mcp/client-config`. The VS Code extension, which has no runtime dependencies and no bundler, keeps one literal copy that a cross-package test pins equal to it (wave-8 decision #36).
+    - Every published package declares `engines.node >=22.17.0` (decision #35), and `@types/node` is pinned to the floor major. The extension declares no `engines.node`; `engines.vscode` governs it.
+    - Each server package's `mcpName` is `io.github.jbrandtmse/<bin>`, the name its MCP Registry `server.json` must carry. It is set before `1.0.0`, because the registry checks it against the published version (decision #37).
     - The extension persists the server major at first activation, and never moves it without the user's confirmation [ASSUMPTION; Story 42.7 confirms].
     - The plugin marketplace entry pins the release tag of the same version as npm.
   - **Native code.** No published package has a required native or compiled dependency. A native module is allowed only as an `optionalDependency` with a graceful skip.
@@ -729,7 +730,7 @@ Versions are the tested lockfile versions as of 2026-10-14. The code owns them a
 
 | Name | Version |
 | --- | --- |
-| Node.js (runtime floor) | 22 (`engines.node >=22`; Story 42.1 fixes the minor, and 22.17.0 is where `fs.globSync` is stable; CI legs 22.x, 24.x and 26.x) |
+| Node.js (runtime floor) | 22.17.0 (`engines.node >=22.17.0` in every published package, fixed by Story 42.1, wave-8 decision #35: 22.17.0 is where `fs.globSync`, used by `iris_doc_load`, is stable; CI legs 22.x, 24.x and 26.x, the 22 leg at 22.17.0). The VS Code extension declares no `engines.node`; `engines.vscode` governs it |
 | TypeScript | 5.9.3 |
 | @modelcontextprotocol/sdk (v1) | Removed in Story 43.1; 1.29.0 is only the provenance of the frozen goldens |
 | @modelcontextprotocol/server (runtime, `@iris-mcp/shared` only) and client (tests: shared, dev, `iris-mcp-all`) | 2.3.1, pinned exactly (Story 43.1). `core` is not a direct dependency. The next bump waits for a release that pins fast-uri 3.1.8 or later (DW-637, Story 42.1) |
