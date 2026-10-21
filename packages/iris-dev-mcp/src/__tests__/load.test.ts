@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { IrisApiError, type ToolContext } from "@iris-mcp/shared";
 import { docLoadTool, filePathToDocName, extractBaseDir, docNameToFilePath, extractDeclaredIdentity } from "../tools/load.js";
-import { conflict, currentClass, TS_CURRENT } from "./conflict-fakes.js";
+import { conflict, currentClass, notFound, TS_CURRENT } from "./conflict-fakes.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
 // ── Mock node:fs ──────────────────────────────────────────────────────
@@ -15,6 +15,16 @@ import { readFileSync, globSync } from "node:fs";
 
 const mockReadFileSync = readFileSync as ReturnType<typeof vi.fn>;
 const mockGlobSync = globSync as unknown as ReturnType<typeof vi.fn>;
+
+/**
+ * Every GET answers 404: each class a test uploads is new, so the Storage guard's read finds nothing to
+ * drop and the test's own expectations stay about what it is pinning.
+ */
+function everyDocumentIsNew(http: ReturnType<typeof createMockHttp>): void {
+  http.get.mockImplementation(async (path: string) => {
+    throw notFound(path);
+  });
+}
 
 // ── Helper functions ──────────────────────────────────────────────────
 
@@ -183,6 +193,7 @@ describe("iris_doc_load", () => {
     mockHttp = createMockHttp();
     ctx = createMockCtx(mockHttp);
     vi.clearAllMocks();
+    everyDocumentIsNew(mockHttp);
   });
 
   it("should return empty result when no files match the glob pattern", async () => {
@@ -445,9 +456,10 @@ describe("iris_doc_load", () => {
       );
     });
 
-    it("the default (ignoreConflict true) is one PUT with ?ignoreConflict=1 and nothing else, even when it is a 409", async () => {
+    it("the default (ignoreConflict true) is one GET of the class and then one PUT with ?ignoreConflict=1, even when the PUT is a 409", async () => {
       mockHttp.put.mockResolvedValue(envelope({ name: "Test.cls", status: "" }));
       await docLoadTool.handler({ path: "c:/src/**/*.cls" }, ctx);
+      expect(mockHttp.get.mock.calls).toEqual([[PUT_PATH]]);
       expect(mockHttp.put.mock.calls).toEqual([[`${PUT_PATH}?ignoreConflict=1`, BODY]]);
 
       mockHttp.put.mockReset();
@@ -461,7 +473,7 @@ describe("iris_doc_load", () => {
       const shape = docLoadTool.inputSchema.shape as Record<string, { description?: string }>;
 
       expect(shape.ignoreConflict?.description).toBe(
-        "If true (default), each file overwrites its server copy unconditionally. " +
+        "If true (default), each file overwrites its server copy without a version check. " +
           "If false, a file whose document already exists is saved under a version check: it is overwritten " +
           "unless the document changes on the server while it is being saved, in which case that file fails " +
           "with DOCUMENT_CONFLICT and the others continue.",
@@ -633,6 +645,7 @@ describe("iris_doc_load identity cross-validation (Story 35.9)", () => {
     mockHttp = createMockHttp();
     ctx = createMockCtx(mockHttp);
     vi.clearAllMocks();
+    everyDocumentIsNew(mockHttp);
   });
 
   it("refuses the transcript's exact trap-glob repro, naming BOTH names and both remedies, uploading nothing", async () => {
@@ -961,6 +974,7 @@ describe("iris_doc_load — review-added adversarial edges (Story 35.9 code revi
     mockHttp = createMockHttp();
     ctx = createMockCtx(mockHttp);
     vi.clearAllMocks();
+    everyDocumentIsNew(mockHttp);
   });
 
   it("refuses a BOM-bearing file under a trap glob instead of silently skipping the cross-check (35-9-QA-1)", async () => {
@@ -1035,6 +1049,7 @@ describe("iris_doc_load — QA adversarial edges", () => {
     mockHttp = createMockHttp();
     ctx = createMockCtx(mockHttp);
     vi.clearAllMocks();
+    everyDocumentIsNew(mockHttp);
   });
 
   it("a baseDir that does not match the glob's files replaces inference and is caught by the cross-check", async () => {
@@ -1092,6 +1107,7 @@ describe("iris_doc_load — BOM strip + string-status failure (Story 35.9 rework
     mockHttp = createMockHttp();
     ctx = createMockCtx(mockHttp);
     vi.clearAllMocks();
+    everyDocumentIsNew(mockHttp);
   });
 
   it("strips a leading UTF-8 BOM from the uploaded content (wire body carries no BOM)", async () => {

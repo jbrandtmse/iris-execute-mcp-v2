@@ -2,6 +2,58 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-21] — Story 42.11: Storage Guard on Every Document Write
+
+Story 42.11 extends the Storage-drop guard that Stories 38.3 and 38.4 gave `iris_doc_put` and `iris_doc_edit` to the three other paths that
+can replace an existing class: `iris_doc_load`, the `iris_doc_xml_export` import and the `iris_env_promote` `execute` sync (DW-652). Before
+this, each of them could store text that lacks one of a class's Storage definitions with no flag, and IRIS then generated new storage at the
+next compile, which can change how existing rows are read; a probe on 2026-10-21 confirmed it for the XML import. Nothing is published,
+versioned or tagged. No tool, action, governance key, preset row, annotation, refusal code or ObjectScript class is added, removed or
+changed, no tool count moves (110 package tools, 115 advertised), the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys),
+and `BOOTSTRAP_VERSION` is unchanged. `sdk-wire-golden.json` and `sdk-handler-golden.json` are byte-unchanged (their SHA-256 pins stay); the
+changes to bytes they hold are 8 new entries of `fixtures/sdk-golden-sanctioned-changes.json`, one per moved golden value, and the
+tools-list snapshot was regenerated through its generator (`pnpm gen:tools-list-snapshot --force` after a rebuild of every package): apart
+from the header's `capturedAt`, only the values named below moved.
+
+### Changed (AD-15 sanctioned)
+
+- **The default refusal on three more paths (DW-652; wave-8 decisions #30 and #38).** Each path now refuses by default a write that would
+  drop one of the Storage definitions the existing class has, naming the definitions and the override, with `STORAGE_DROPPED` and nothing
+  changed. Names are compared exactly (a rename is a drop; changing a definition's content is allowed), only `.cls` documents are guarded,
+  and a new class is never refused. A write that drops nothing sends the requests it sent before, apart from the GETs that read the class,
+  and returns the fields it returned before.
+  - `iris_doc_load` reads each class file's class before its `?ignoreConflict=1` PUT (one GET; with `ignoreConflict: false` the 409 of the
+    first PUT is the read) and refuses per file, as a `failures` entry with `code: "STORAGE_DROPPED"` and `droppedStorage`; the other files
+    continue and a refused file is not compiled.
+  - The `iris_doc_xml_export` import reads each `<Class>` of the XML before its one POST and refuses the whole import, with
+    `structuredContent` `{code, namespace, storageDrops}`.
+  - `iris_env_promote` `execute` runs a GET-only preflight after its gates and the blank-namespace check and before the confirmation dialog,
+    and refuses the whole execute, with `structuredContent` `{code, source, target, storageDrops}`, before any write in any domain. Each class
+    is written with the source text the preflight read. A preflight read that fails fails its step when its turn comes.
+- **`allowStorageRegeneration` on the three tools (default `false`).** With `true` the write goes ahead, IRIS generates new storage at the
+  next compile, and the result gains `storageDrops` (`[{name, droppedStorage}]`) and a text line naming what was dropped. The dialog of
+  `iris_env_promote` names the drops too. The parameter has no default in the schema, so the arguments of a call, and the hash of them that
+  binds a confirmation, are what they were when it is left out.
+- **`S-42.11-storage-guard-schema`.** The three `inputSchema`s gain the optional `allowStorageRegeneration` boolean, just before the
+  framework's `server` member, and the `iris_doc_load` `ignoreConflict` text says each file overwrites its server copy "without a version
+  check", where it said "unconditionally". The `iris_doc_load` text was true only until this story.
+- **`S-42.11-storage-guard-text`.** One sentence is appended to the description of each of the three tools (after the Story 43.4 dialog
+  passage, for `iris_env_promote`), saying that the write is refused when it drops a Storage definition and that `allowStorageRegeneration`
+  lets it through.
+- **DW-544, DW-545 and DW-546 are superseded.** The three exclusions that Story 38.3 recorded are guarded now, and the write-path roster has
+  no `excluded` entry.
+
+### Added
+
+- `@iris-mcp/shared` exports `droppedStorageNames`, `xmlClassStorageNames`, `storageDroppedText`, `storageDroppedDetail`, `storageDrop`,
+  `describeStorageDrops` and `storageDropsRefusal`, with the types `StorageDroppedDetail` and `StorageDrop`; the one guard owns every name
+  comparison and every refusal and drop field.
+
+### Changed
+
+- **Documentation.** The dev README rows and Storage-guard bullets, the root README bullet and its `STORAGE_DROPPED` row, and
+  `tool_support.md` (rows 7, 12 and 28, and a Story 42.11 note) describe the guard on every path.
+
 ## [Pre-release — 2026-10-21] — Story 42.10: Pre-1.0 Tool-Surface Corrections
 
 Story 42.10 corrects three wire and audit truths before 1.0 publishes, and widens the sanctioned-change ledger so that the frozen SDK

@@ -25,7 +25,15 @@ import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { REPO_ROOT } from "./pack-fixture";
+import {
+  IGNORE_CONFLICT_AFTER,
+  IGNORE_CONFLICT_BEFORE,
+  STORAGE_GUARD_PROPERTY,
+  STORAGE_GUARD_SENTENCE,
+  STORAGE_GUARD_TOOLS,
+} from "./story-42-11-texts";
 import { GOLDEN_RELATIVE_PATH } from "../../../../scripts/lib/sdk-wire-golden-core.mjs";
 import { HANDLER_GOLDEN_RELATIVE_PATH } from "../../../../scripts/lib/sdk-handler-golden-core.mjs";
 import {
@@ -84,10 +92,26 @@ const STORY_42_10_IDS = [
   "42.10/audit-namespace/iris_namespace_list@admin-handler",
 ];
 
+/**
+ * The Story 42.11 entries (wave-8 decisions #43 to #45), in ledger order: the four `inputSchema.properties` replacements, then the four
+ * description appends, each for `iris_doc_load` (main, core preset), `iris_doc_xml_export` and `iris_env_promote`.
+ */
+const STORY_42_11_IDS = [
+  "42.11/storage-guard-schema/iris_doc_load@dev-main",
+  "42.11/storage-guard-schema/iris_doc_load@dev-core-preset",
+  "42.11/storage-guard-schema/iris_doc_xml_export@dev-main",
+  "42.11/storage-guard-schema/iris_env_promote@dev-main",
+  "42.11/storage-guard-text/iris_doc_load@dev-main",
+  "42.11/storage-guard-text/iris_doc_load@dev-core-preset",
+  "42.11/storage-guard-text/iris_doc_xml_export@dev-main",
+  "42.11/storage-guard-text/iris_env_promote@dev-main",
+];
+
 /** The entry ids of each story, in the order the ledger lists the stories (landing order). */
 const STORIES: Array<[string, string[]]> = [
   ["43.4", STORY_43_4_IDS],
   ["42.10", STORY_42_10_IDS],
+  ["42.11", STORY_42_11_IDS],
 ];
 
 /** The 13 tools Story 42.10 flips to `destructiveHint: true` (decision #39), by server. Written from the spec, never read from the ledger. */
@@ -222,7 +246,41 @@ function frozenValueAt(change: Change): unknown {
 /** `[problem]` when `violated`, else no problem. */
 const unmet = (violated: boolean, problem: string): string[] => (violated ? [problem] : []);
 
-/** The five sanctions the ledger registers, written from the specs of Stories 43.4 and 42.10. */
+const isPlainRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * What is wrong with an `inputSchema.properties` entry of Story 42.11: `new` must be `old` (the frozen object) with the one member
+ * `allowStorageRegeneration` inserted just before the framework's `server`, the Design Notes property in it, every other member
+ * deep-equal to the frozen one, and, for `iris_doc_load` only, the `ignoreConflict` text corrected.
+ */
+function storagePropertiesProblems(change: Change, toolName: string | undefined): string[] {
+  const before = change.old;
+  const after = change.new;
+  if (!isPlainRecord(before) || !isPlainRecord(after) || toolName === undefined) return [`${change.id}: old and new must be the properties objects of a named tool`];
+  const oldKeys = Object.keys(before);
+  const expectedKeys = [...oldKeys.slice(0, -1), "allowStorageRegeneration", "server"];
+  const problems = [
+    ...unmet(oldKeys[oldKeys.length - 1] !== "server", `${change.id}: the frozen properties end with the framework's server`),
+    ...unmet(oldKeys.includes("allowStorageRegeneration"), `${change.id}: the frozen properties have no allowStorageRegeneration`),
+    ...unmet(
+      JSON.stringify(Object.keys(after)) !== JSON.stringify(expectedKeys),
+      `${change.id}: new must be the frozen members with allowStorageRegeneration just before server (got ${Object.keys(after).join(",")})`,
+    ),
+    ...unmet(!isDeepStrictEqual(after["allowStorageRegeneration"], STORAGE_GUARD_PROPERTY[toolName]), `${change.id}: the new member is not the Design Notes property of ${toolName}`),
+  ];
+  for (const key of oldKeys) {
+    const frozenMember = before[key];
+    const corrected = toolName === "iris_doc_load" && key === "ignoreConflict";
+    if (corrected) {
+      problems.push(...unmet(!isPlainRecord(frozenMember) || frozenMember["description"] !== IGNORE_CONFLICT_BEFORE, `${change.id}: the frozen ignoreConflict text is not the one Story 42.11 corrects`));
+    }
+    const wanted = corrected && isPlainRecord(frozenMember) ? { ...frozenMember, description: IGNORE_CONFLICT_AFTER } : frozenMember;
+    problems.push(...unmet(!isDeepStrictEqual(after[key], wanted), `${change.id}: member ${key} must be ${corrected ? "the frozen member with the corrected text" : "unchanged"}`));
+  }
+  return problems;
+}
+
+/** The seven sanctions the ledger registers, written from the specs of Stories 43.4, 42.10 and 42.11. */
 const SANCTIONS: Record<string, Shape> = {
   "S-43.4-descriptions": {
     story: "43.4",
@@ -274,6 +332,38 @@ const SANCTIONS: Record<string, Shape> = {
       ...unmet(change.server !== "iris-admin-mcp" || change.section !== "audit" || change.pointer !== "/1/namespace", `${change.id}: must change /1/namespace of the admin audit array`),
       ...unmet(change.old !== "HSCUSTOM" || change.new !== "%SYS", `${change.id}: must change the namespace from HSCUSTOM to %SYS`),
     ],
+  },
+  "S-42.11-storage-guard-schema": {
+    story: "42.11",
+    count: 4,
+    golden: "wire",
+    op: "replace",
+    text: "none",
+    check: (change, toolName) => [
+      ...unmet(change.server !== "iris-dev-mcp" || change.label !== "tools-list", `${change.id}: must change a tools-list row of the dev server`),
+      ...unmet(!/^\/result\/tools\/\d+\/inputSchema\/properties$/.test(change.pointer), `${change.id}: must replace one tool's inputSchema properties object`),
+      ...unmet(!(STORAGE_GUARD_TOOLS as readonly string[]).includes(String(toolName)), `${change.id}: the tool at its pointer (${String(toolName)}) must be one of the three storage-guard tools`),
+      ...storagePropertiesProblems(change, toolName),
+    ],
+  },
+  "S-42.11-storage-guard-text": {
+    story: "42.11",
+    count: 4,
+    golden: "wire",
+    op: "replace",
+    text: "append",
+    check: (change, toolName) => {
+      const sentence = toolName === undefined ? undefined : STORAGE_GUARD_SENTENCE[toolName];
+      return [
+        ...unmet(change.server !== "iris-dev-mcp" || change.label !== "tools-list", `${change.id}: must append to a tools-list row of the dev server`),
+        ...unmet(!/^\/result\/tools\/\d+\/description$/.test(change.pointer), `${change.id}: must point at a tool's description`),
+        ...unmet(sentence === undefined, `${change.id}: the tool at its pointer (${String(toolName)}) must be one of the three storage-guard tools`),
+        ...unmet(
+          sentence !== undefined && change.new !== `${String(change.old)}${sentence.separator}${sentence.sentence}`,
+          `${change.id}: new must be old, the spec's separator and the spec's sentence`,
+        ),
+      ];
+    },
   },
 };
 
@@ -350,13 +440,14 @@ describe("the ledger", () => {
     expect(readSanctionedChanges(REPO_ROOT)).toHaveLength(changes.length);
   });
 
-  it("holds the entries of Story 43.4 and then Story 42.10, each story's ids in order, and no other entry", () => {
+  it("holds the entries of Story 43.4, then Story 42.10, then Story 42.11, each story's ids in order, and no other entry", () => {
     expect(changes.map((change) => change.id)).toEqual(STORIES.flatMap(([, ids]) => ids));
     for (const [story, ids] of STORIES) {
       expect(changes.filter((change) => change.story === story).map((change) => change.id), `Story ${story}`).toEqual(ids);
     }
     expect(STORY_43_4_IDS).toHaveLength(11);
     expect(STORY_42_10_IDS).toHaveLength(23);
+    expect(STORY_42_11_IDS).toHaveLength(8);
     expect(SANCTIONED_CHANGES_RELATIVE_PATH).toBe("packages/iris-mcp-all/src/__tests__/fixtures/sdk-golden-sanctioned-changes.json");
   });
 
@@ -414,6 +505,46 @@ describe("the ledger", () => {
     expect(expected).toHaveLength(19);
   });
 
+  it("each Story 42.11 sanction holds one entry for each storage-guard tool in each frozen dev tools-list row that lists it, and none for any other tool", () => {
+    const expected: string[] = [];
+    for (const [key, row] of wireRows(frozenWire)) {
+      if (!key.startsWith("iris-dev-mcp/") || !key.endsWith("/tools-list")) continue;
+      const session = key.split("/")[1] as string;
+      const listed = (JSON.parse(row.line) as { result: { tools: Array<{ name: string }> } }).result.tools.map((tool) => tool.name);
+      for (const tool of STORAGE_GUARD_TOOLS) if (listed.includes(tool)) expected.push(`${session}/${tool}`);
+    }
+    for (const sanction of ["S-42.11-storage-guard-schema", "S-42.11-storage-guard-text"]) {
+      const entered = changes.filter((change) => change.sanction === sanction).map((change) => `${change.session}/${frozenToolName(change)}`);
+      expect(entered.sort(), sanction).toEqual([...expected].sort());
+    }
+    expect(expected).toHaveLength(4);
+  });
+
+  it("a Story 42.11 schema entry holds the frozen properties as old, and the frozen properties lack the new member", () => {
+    for (const change of changes.filter((candidate) => candidate.sanction === "S-42.11-storage-guard-schema")) {
+      const old = change.old as Record<string, unknown>;
+      expect(Object.keys(old), `${change.id}: the frozen properties do not have the parameter`).not.toContain("allowStorageRegeneration");
+      expect(old, `${change.id}: old is the frozen object`).toEqual(frozenValueAt(change));
+      expect(Object.keys(old).at(-1), `${change.id}: the framework's server is last`).toBe("server");
+    }
+  });
+
+  it("the Story 42.11 shape checks fail on a member after server, a changed member, a wrong text, a wrong separator and a wrong tool", () => {
+    const schemaEntry = changes.find((change) => change.id === "42.11/storage-guard-schema/iris_doc_xml_export@dev-main")!;
+    const properties = schemaEntry.new as Record<string, unknown>;
+    const { allowStorageRegeneration, server, ...others } = properties;
+    const afterServer = { ...others, server, allowStorageRegeneration };
+    const textEntry = changes.find((change) => change.id === "42.11/storage-guard-text/iris_doc_xml_export@dev-main")!;
+    const problemsOf = (entry: Change): string => shapeProblems(changes.map((change) => (change.id === entry.id ? entry : change)), SANCTIONS, frozenToolName).join("\n");
+
+    expect(problemsOf({ ...schemaEntry, new: afterServer })).toContain("must be the frozen members with allowStorageRegeneration just before server");
+    expect(problemsOf({ ...schemaEntry, new: { ...properties, action: { type: "string" } } })).toContain("member action must be unchanged");
+    expect(problemsOf({ ...schemaEntry, new: { ...properties, allowStorageRegeneration: { description: "x", type: "boolean" } } })).toContain("the new member is not the Design Notes property");
+    expect(problemsOf({ ...textEntry, new: `${String(textEntry.old)}\n\n${STORAGE_GUARD_SENTENCE["iris_doc_xml_export"]!.sentence}` })).toContain("new must be old, the spec's separator and the spec's sentence");
+    expect(problemsOf({ ...textEntry, new: `${String(textEntry.old)}${STORAGE_GUARD_SENTENCE["iris_doc_xml_export"]!.separator}x` })).toContain("new must be old, the spec's separator and the spec's sentence");
+    expect(problemsOf({ ...schemaEntry, pointer: "/result/tools/0/inputSchema/properties" })).toContain("must be one of the three storage-guard tools");
+  });
+
   it("the shape check fails on an unregistered sanction, a correction under an append-only sanction, a wrong story and a wrong count", () => {
     const entry = changes.find((change) => change.id === "42.10/resend-text/description@interop-main")!;
     const none = (): undefined => undefined;
@@ -430,7 +561,8 @@ describe("the ledger", () => {
     expect(shapeProblems(changes.map((change) => (change === entry ? { ...entry, story: "43.4" } : change)), SANCTIONS, frozenToolName)).toContain(
       "42.10/resend-text/description@interop-main: story 43.4, but S-42.10-resend-text belongs to Story 42.10",
     );
-    expect(shapeProblems(changes.slice(0, -1), SANCTIONS, frozenToolName)).toContain("S-42.10-audit-namespace: 0 entries, registered 1");
+    const audit = changes.find((change) => change.id === "42.10/audit-namespace/iris_namespace_list@admin-handler")!;
+    expect(shapeProblems(changes.filter((change) => change !== audit), SANCTIONS, frozenToolName)).toContain("S-42.10-audit-namespace: 0 entries, registered 1");
     const flipped = changes.find((change) => change.id === "42.10/annotations/iris_task_run@ops-main")!;
     expect(shapeProblems(changes.map((change) => (change === flipped ? { ...flipped, server: "iris-dev-mcp" } : change)), SANCTIONS, frozenToolName).join("\n")).toContain(
       "42.10/annotations/iris_task_run@ops-main: the tool at its pointer",
@@ -553,6 +685,8 @@ describe("the CHANGELOG names every sanction", () => {
       "42.10 S-42.10-annotations",
       "42.10 S-42.10-audit-namespace",
       "42.10 S-42.10-resend-text",
+      "42.11 S-42.11-storage-guard-schema",
+      "42.11 S-42.11-storage-guard-text",
       "43.4 S-43.4-descriptions",
       "43.4 S-43.4-governance-resource",
     ]);

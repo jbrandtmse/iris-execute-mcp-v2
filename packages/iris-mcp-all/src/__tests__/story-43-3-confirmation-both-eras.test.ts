@@ -431,7 +431,8 @@ describe("AC 43.3.1: the gate inventory, exhaustive as of 2026-10-20 (Rule #56)"
     iris_message_resend: "gate: resendFiltered execute",
     iris_doc_put: "not gated, a candidate: allowStorageRegeneration; ignoreConflict is a version-check override",
     iris_mapping_manage: "not gated, a candidate: force",
-    iris_doc_load: "not gated: ignoreConflict is a version-check override",
+    iris_doc_load: "not gated, a candidate: allowStorageRegeneration; ignoreConflict is a version-check override",
+    iris_doc_xml_export: "not gated, a candidate: allowStorageRegeneration (import)",
     iris_doc_export: "not gated: overwrite is a local-disk override",
     iris_env_diff: "not gated: allowWide is a read",
   };

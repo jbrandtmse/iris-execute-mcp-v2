@@ -99,6 +99,10 @@ const gateTestFiles = [
   // Story 39.0 QA: the examples of the shared `type` description against the real Atelier docnames route, through
   // `iris_doc_list` and `iris_package_list` (read-only GETs; writes nothing).
   "src/__tests__/doc-type-description-live-gate.test.ts",
+  // Story 42.11: the Storage-drop guard on `iris_doc_load` (the GET read, the 409 read, the override), the `iris_doc_xml_export`
+  // import and `iris_env_promote` execute against the real Atelier: writes only the disposable ExecuteMCPv2.Temp.QaStory4211Load,
+  // ...Xml and ...Prom documents (persistent, compiled, no data rows), and removes them and any global that carries the name.
+  "src/__tests__/storage-guard-write-paths-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: these files all drive ONE live IRIS instance and share its

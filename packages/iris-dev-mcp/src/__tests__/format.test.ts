@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { ToolContext } from "@iris-mcp/shared";
 import { docConvertTool, docXmlExportTool } from "../tools/format.js";
+import { notFound } from "./conflict-fakes.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
 // ── iris_doc_convert ──────────────────────────────────────────────────
@@ -138,6 +139,14 @@ describe("iris_doc_xml_export", () => {
   // ── import action ─────────────────────────────────────────────────
 
   describe("action=import", () => {
+    // The Storage guard reads each `<Class>` of the XML before the POST: every class here is new (HTTP 404),
+    // so the read finds nothing to drop and the request and result are the ones these tests pin.
+    beforeEach(() => {
+      mockHttp.get.mockImplementation(async (path: string) => {
+        throw notFound(path);
+      });
+    });
+
     // Rule #36/#54 oracle: response shapes pinned from the LIVE Atelier
     // action/xml/load capture on IRIS 2026.1 (2026-08-18, Story 35.6 Task 1
     // probe): a successful load carries per-file status "" (NOT "OK" as the

@@ -159,7 +159,7 @@ describe("Story 38.7: the dev README and tool_support.md state the refusal, the 
 
   it("iris_doc_load says what ignoreConflict true and false do", () => {
     const row = squash(lineStarting(devReadme, "| `iris_doc_load` |"));
-    expect(row).toContain("each file overwrites its server copy unconditionally");
+    expect(row).toContain("each file overwrites its server copy without a version check");
     expect(row).toContain("**false**: a file whose document already exists is saved under a version check");
     expect(row).toContain("`DOCUMENT_CONFLICT`");
   });

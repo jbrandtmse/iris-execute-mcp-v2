@@ -41,6 +41,7 @@ import { join } from "node:path";
 import type { ToolContext } from "@iris-mcp/shared";
 import { IrisApiError, ProfileResolutionError, loadGovernanceFile } from "@iris-mcp/shared";
 import { envPromoteTool } from "../tools/env-promote.js";
+import { notFound } from "./conflict-fakes.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
 // ── shared fixture helpers ───────────────────────────────────────────
@@ -918,6 +919,8 @@ describe("iris_env_promote:execute", () => {
       });
       targetHttp.get.mockImplementation(async (path: string) => {
         if (path === "/api/atelier/") return versionResponse();
+        // The Storage guard reads the target's copy of each class: every class here is new on the target.
+        if (path.includes("/doc/")) throw notFound(path);
         throw new Error(`unexpected targetHttp.get ${path}`);
       });
       targetHttp.put.mockResolvedValue(envelope({}));
@@ -975,6 +978,8 @@ describe("iris_env_promote:execute", () => {
       });
       targetHttp.get.mockImplementation(async (path: string) => {
         if (path === "/api/atelier/") return versionResponse();
+        // The Storage guard reads the target's copy of each class: every class here is new on the target.
+        if (path.includes("/doc/")) throw notFound(path);
         throw new Error(`unexpected targetHttp.get ${path}`);
       });
       // First doc's PUT succeeds; second doc's PUT fails.
@@ -1019,6 +1024,8 @@ describe("iris_env_promote:execute", () => {
       });
       targetHttp.get.mockImplementation(async (path: string) => {
         if (path === "/api/atelier/") return versionResponse();
+        // The Storage guard reads the target's copy of each class: every class here is new on the target.
+        if (path.includes("/doc/")) throw notFound(path);
         throw new Error(`unexpected targetHttp.get ${path}`);
       });
       // The live shape of a document IRIS refuses inside an HTTP 200 envelope (doc-put-bom-live-gate.test.ts,
@@ -1068,6 +1075,8 @@ describe("iris_env_promote:execute", () => {
       });
       targetHttp.get.mockImplementation(async (path: string) => {
         if (path === "/api/atelier/") return versionResponse();
+        // The Storage guard reads the target's copy of each class: every class here is new on the target.
+        if (path.includes("/doc/")) throw notFound(path);
         throw new Error(`unexpected targetHttp.get ${path}`);
       });
       targetHttp.put.mockResolvedValue(envelope({}));
@@ -1120,6 +1129,8 @@ describe("iris_env_promote:execute", () => {
       });
       targetHttp.get.mockImplementation(async (path: string) => {
         if (path === "/api/atelier/") return versionResponse();
+        // The Storage guard reads the target's copy of each class: every class here is new on the target.
+        if (path.includes("/doc/")) throw notFound(path);
         throw new Error(`unexpected targetHttp.get ${path}`);
       });
       targetHttp.put.mockResolvedValue(envelope({}));
@@ -1766,6 +1777,8 @@ describe("Story 43.3: confirmation (execute)", () => {
     });
     targetHttp.get.mockImplementation(async (path: string) => {
       if (path === "/api/atelier/") return versionResponse();
+      // Every class is new on the target, so the Storage guard's read finds nothing to drop.
+      if (path.includes("/doc/")) throw notFound(path);
       throw new Error(`unexpected targetHttp.get ${path}`);
     });
     targetHttp.put.mockResolvedValue(envelope({}));
@@ -1802,7 +1815,7 @@ describe("Story 43.3: confirmation (execute)", () => {
     expect(asked).toBeLessThan(firstCallOrder(targetHttp.post));
   });
 
-  it("asks before the first document is read, put or compiled", async () => {
+  it("asks after the GET-only preflight and before the first document is put or compiled", async () => {
     arrangeDocuments();
     const confirm = proceedingConfirm();
     ctx.confirm = confirm;
@@ -1824,8 +1837,12 @@ describe("Story 43.3: confirmation (execute)", () => {
     expect(result.isError).toBeFalsy();
     expect(targetHttp.put).toHaveBeenCalledTimes(2);
     const asked = firstCallOrder(confirm);
-    expect(asked).toBeLessThan(firstCallOrder(sourceHttp.get));
-    expect(asked).toBeLessThan(firstCallOrder(targetHttp.get));
+    // The preflight reads (the Atelier versions, each class's source and target copy) come first, and
+    // the document source is not read a second time by the batch.
+    expect(firstCallOrder(sourceHttp.get)).toBeLessThan(asked);
+    expect(firstCallOrder(targetHttp.get)).toBeLessThan(asked);
+    expect(sourceHttp.get.mock.calls.filter(([path]) => String(path).includes("/doc/"))).toHaveLength(2);
+    // The first write comes after the dialog.
     expect(asked).toBeLessThan(firstCallOrder(targetHttp.put));
     expect(asked).toBeLessThan(firstCallOrder(targetHttp.post));
   });
@@ -2073,7 +2090,7 @@ describe("Story 43.3: confirmation (execute)", () => {
     expectNoIrisCalls();
   });
 
-  it("returns a declined outcome unchanged on a documents run: nothing is read, put or compiled", async () => {
+  it("returns a declined outcome unchanged on a documents run: the preflight reads were made, and nothing is put or compiled", async () => {
     arrangeDocuments();
     const confirm = decliningConfirm();
     ctx.confirm = confirm;
@@ -2086,7 +2103,12 @@ describe("Story 43.3: confirmation (execute)", () => {
     );
 
     expect(result).toBe(DECLINED_RESULT);
-    expectNoIrisCalls();
+    const calls = recordedCalls();
+    expect(calls.source.get.length).toBeGreaterThan(0);
+    expect(calls.target.get.length).toBeGreaterThan(0);
+    const none = { post: [], put: [], delete: [], head: [] };
+    expect({ ...calls.source, get: [] }).toEqual({ ...none, get: [] });
+    expect({ ...calls.target, get: [] }).toEqual({ ...none, get: [] });
   });
 
   it("executes exactly as a context without confirm when the outcome is proceed: the same result, reads and writes", async () => {

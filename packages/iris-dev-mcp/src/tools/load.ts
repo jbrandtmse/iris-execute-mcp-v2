@@ -15,15 +15,22 @@ import {
   atelierDocRequest,
   atelierDocStatusError,
   atelierPath,
+  droppedStorageDefinitions,
   IrisApiError,
+  isClassDocument,
   REFUSAL_CODES,
   splitLines,
+  storageDrop,
+  storageDroppedDetail,
+  storageDroppedText,
   stripLeadingBom,
   type AtelierEnvelope,
+  type StorageDrop,
+  type StorageDroppedDetail,
   type ToolDefinition,
 } from "@iris-mcp/shared";
 import { z } from "zod";
-import { currentDocument } from "./doc.js";
+import { currentClassLines, currentDocument, storageDropsNote } from "./doc.js";
 import { booleanParam } from "./zod-helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -284,13 +291,18 @@ export function docNameToFilePath(
 
 // ── Types ─────────────────────────────────────────────────────────────
 
-interface UploadFailure {
+/** One file that was not stored, and why. */
+type UploadFailure = {
   file: string;
   docName: string;
   error: string;
-  /** Present on a version-checked save that lost to a concurrent change (see {@link REFUSAL_CODES}). */
-  code?: string;
-}
+} & (
+  | {
+      /** Present on a version-checked save that lost to a concurrent change (see {@link REFUSAL_CODES}). */
+      code?: typeof REFUSAL_CODES.DOCUMENT_CONFLICT;
+    }
+  | StorageDroppedDetail
+);
 
 interface CompilationResult {
   success: boolean;
@@ -309,6 +321,11 @@ const CONFLICT_ERROR =
   "The document changed on the server while this tool was saving it, so nothing was stored. " +
   "Run iris_doc_load again to replace the current version.";
 
+/** The closing sentence of a file's failure text when the file would drop Storage definitions. */
+const LOAD_STORAGE_REMEDY =
+  "Keep the Storage definitions in the file (read the class with iris_doc_get first), " +
+  "or pass allowStorageRegeneration: true to let IRIS regenerate the storage.";
+
 // ── iris_doc_load ─────────────────────────────────────────────────────
 
 export const docLoadTool: ToolDefinition = {
@@ -324,7 +341,11 @@ export const docLoadTool: ToolDefinition = {
     "with both names named — this guards against trap-shaped globs (wildcard AFTER the package directory, e.g. " +
     "'src/MyPkg/*.cls') silently stripping the package prefix. A leading UTF-8 BOM is stripped before upload, and " +
     "a per-document error reported by the server in the PUT response (e.g. an illegal header line) is surfaced as " +
-    "an upload failure rather than counted as a success.",
+    "an upload failure rather than counted as a success. " +
+    "For an existing class, a file whose content drops one of the class's Storage definitions is refused and " +
+    "nothing is stored for that file (a failures entry with code STORAGE_DROPPED; the other files continue), " +
+    "because IRIS would generate new storage at the next compile, which can change how existing rows are read; " +
+    "allowStorageRegeneration (default false) lets it through, and the result names the dropped definitions.",
   inputSchema: z.object({
     path: z
       .string()
@@ -359,10 +380,20 @@ export const docLoadTool: ToolDefinition = {
     ignoreConflict: booleanParam
       .optional()
       .describe(
-        "If true (default), each file overwrites its server copy unconditionally. " +
+        "If true (default), each file overwrites its server copy without a version check. " +
           "If false, a file whose document already exists is saved under a version check: it is overwritten " +
           "unless the document changes on the server while it is being saved, in which case that file fails " +
           "with DOCUMENT_CONFLICT and the others continue.",
+      ),
+    allowStorageRegeneration: booleanParam
+      .optional()
+      .describe(
+        "Boolean (true/false), default false. When false, a class file whose content drops one of the Storage " +
+          "definitions the class has now is refused (a failures entry with code STORAGE_DROPPED; nothing is stored " +
+          "for that file, and the other files continue); changing a Storage definition's content is allowed. " +
+          "When true, the file is uploaded, IRIS generates new storage at the next compile (which can change how " +
+          "existing rows are read), and the result's storageDrops names the dropped definitions. " +
+          "No effect on a new class or on other document types.",
       ),
   }),
   annotations: {
@@ -380,6 +411,7 @@ export const docLoadTool: ToolDefinition = {
       flags,
       namespace,
       ignoreConflict,
+      allowStorageRegeneration,
     } = args as {
       path: string;
       baseDir?: string;
@@ -387,6 +419,7 @@ export const docLoadTool: ToolDefinition = {
       flags?: string;
       namespace?: string;
       ignoreConflict?: boolean;
+      allowStorageRegeneration?: boolean;
     };
 
     const ns = ctx.resolveNamespace(namespace);
@@ -417,6 +450,8 @@ export const docLoadTool: ToolDefinition = {
 
     const uploaded: string[] = [];
     const failures: UploadFailure[] = [];
+    // The Storage definitions that stored files dropped under allowStorageRegeneration.
+    const storageDrops: StorageDrop[] = [];
 
     // Upload each file via Atelier PUT /doc
     for (const filePath of files) {
@@ -471,6 +506,26 @@ export const docLoadTool: ToolDefinition = {
           (qs ? `?${qs}` : "");
 
         const body = { enc: false, content: lines };
+        const guardsStorage = isClassDocument(docName);
+        // The Storage definitions this file's save drops from the class that exists now.
+        let dropped: string[] = [];
+
+        // A class is read before an unversioned save, so that a drop is found before anything is
+        // written. With ignoreConflict false the read is the 409 that Atelier answers the first PUT with.
+        if (guardsStorage && ignoreConflictFlag) {
+          const existing = await currentClassLines(ctx.http, ctx.atelierVersion, ns, docName);
+          if (existing !== undefined) dropped = droppedStorageDefinitions(existing, lines);
+          if (dropped.length > 0 && allowStorageRegeneration !== true) {
+            failures.push({
+              file: String(filePath),
+              docName,
+              error: storageDroppedText(docName, ns, dropped, LOAD_STORAGE_REMEDY),
+              ...storageDroppedDetail(dropped),
+            });
+            continue;
+          }
+        }
+
         let putResponse: AtelierEnvelope;
         try {
           // A document name IRIS refuses is answered HTTP 400 with the reason in `result.status`; it is read below.
@@ -481,6 +536,18 @@ export const docLoadTool: ToolDefinition = {
           // against that version. Any other failure, and a 409 with no readable document, is thrown.
           const current = ignoreConflictFlag ? undefined : currentDocument(putError);
           if (current === undefined) throw putError;
+          if (guardsStorage) {
+            dropped = droppedStorageDefinitions(current.content, lines);
+            if (dropped.length > 0 && allowStorageRegeneration !== true) {
+              failures.push({
+                file: String(filePath),
+                docName,
+                error: storageDroppedText(docName, ns, dropped, LOAD_STORAGE_REMEDY),
+                ...storageDroppedDetail(dropped),
+              });
+              continue;
+            }
+          }
           try {
             putResponse = await ctx.http.put(apiPath, body, { headers: { "If-None-Match": current.ts } });
           } catch (saveError: unknown) {
@@ -516,6 +583,7 @@ export const docLoadTool: ToolDefinition = {
           continue;
         }
         uploaded.push(docName);
+        if (dropped.length > 0) storageDrops.push(storageDrop(docName, dropped));
       } catch (error: unknown) {
         failures.push({
           file: String(filePath),
@@ -583,6 +651,7 @@ export const docLoadTool: ToolDefinition = {
       uploaded: uploaded.length,
       failed: failures.length,
       ...(failures.length > 0 ? { failures } : {}),
+      ...(storageDrops.length > 0 ? { storageDrops } : {}),
       ...(compilationResult ? { compilationResult } : {}),
     };
 
@@ -592,6 +661,9 @@ export const docLoadTool: ToolDefinition = {
     );
     if (failures.length > 0) {
       parts.push(`${failures.length} file(s) failed to upload.`);
+    }
+    if (storageDrops.length > 0) {
+      parts.push(storageDropsNote(storageDrops));
     }
     if (compilationResult) {
       parts.push(

@@ -14,6 +14,7 @@ import {
   atelierDocRequest,
   atelierDocStatusError,
   atelierPath,
+  describeStorageDrops,
   documentLines,
   droppedStorageDefinitions,
   formatNumberedLines,
@@ -27,6 +28,8 @@ import {
   stripLeadingBom,
   stripLeadingBomFromLines,
   type AtelierEnvelope,
+  type IrisHttpClient,
+  type StorageDrop,
   type ToolDefinition,
   type ToolResult,
 } from "@iris-mcp/shared";
@@ -352,6 +355,49 @@ export function currentDocument(error: unknown): CurrentDocument | undefined {
   if (atelierDocStatusError(result) !== undefined) return undefined;
   if (!Array.isArray(result.content) || typeof result.ts !== "string") return undefined;
   return { content: result.content as string[], ts: result.ts };
+}
+
+/**
+ * The current lines of a class document, read with one `GET /doc`: the read that the Storage guard of
+ * `iris_doc_load`, the XML import and `iris_env_promote` compares a write against.
+ *
+ * @param http - The client of the instance that holds the class.
+ * @param atelierVersion - The Atelier version negotiated for that client.
+ * @param namespace - The namespace to read from.
+ * @param name - The document name, such as `Pkg.A.cls`.
+ * @returns The document's lines, or `undefined` when the document does not exist (HTTP 404).
+ * @throws An `Error` carrying {@link unreadableDocumentText} when IRIS cannot return the document as
+ *   text (a soft error, no line content, or a binary document); any other failure is rethrown as is.
+ */
+export async function currentClassLines(
+  http: IrisHttpClient,
+  atelierVersion: number,
+  namespace: string,
+  name: string,
+): Promise<string[] | undefined> {
+  const path = atelierPath(atelierVersion, namespace, `doc/${encodeURIComponent(name)}`);
+  let read: TextDocumentRead;
+  try {
+    read = readTextDocument((await atelierDocRequest(() => http.get(path))).result as DocGetResult | undefined);
+  } catch (error: unknown) {
+    if (error instanceof IrisApiError && error.statusCode === 404) return undefined;
+    throw error;
+  }
+  if (read.kind === "text") return read.lines;
+  throw new Error(unreadableDocumentText(name, namespace, read.kind === "binary" ? "it is a binary document" : read.reason));
+}
+
+/**
+ * The result text line that names the Storage definitions a write dropped under `allowStorageRegeneration`,
+ * shared by `iris_doc_load`, the XML import and `iris_env_promote`.
+ *
+ * @param drops - The dropped definitions, at least one document.
+ */
+export function storageDropsNote(drops: readonly StorageDrop[]): string {
+  return (
+    "Storage definitions dropped (allowStorageRegeneration; IRIS generates new storage at the next compile): " +
+    `${describeStorageDrops(drops)}.`
+  );
 }
 
 export const docPutTool: ToolDefinition = {

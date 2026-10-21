@@ -55,6 +55,7 @@ import type {
   ToolResult,
   IrisHttpClient,
   MutatesLookup,
+  StorageDrop,
 } from "@iris-mcp/shared";
 import {
   IrisApiError,
@@ -62,14 +63,20 @@ import {
   atelierDocStatusError,
   atelierPath,
   contentHash,
+  describeStorageDrops,
+  droppedStorageDefinitions,
+  isClassDocument,
   negotiateVersion,
   parseGovernanceConfig,
   parseGovernancePreset,
   effective,
+  storageDrop,
+  storageDropsRefusal,
   GOVERNANCE_BASELINE,
   BASELINE_ACTION_CLASSIFICATIONS,
 } from "@iris-mcp/shared";
 import { z } from "zod";
+import { currentClassLines, storageDropsNote } from "./doc.js";
 import {
   fetchMappings,
   fetchDefaultSettings,
@@ -803,19 +810,103 @@ interface CompileDocResult {
 }
 
 /**
- * Execute a CONTIGUOUS run of allowlisted `putAndCompile` steps: GET (source)
- * + PUT (target) each doc SEQUENTIALLY, halting immediately on the first
- * put/get failure (no compile is attempted for a batch with any failure --
- * halt-on-first-error means no further writes at all, and compile is a
- * write); then, if every put succeeded, ONE batched `POST /action/compile`
- * for the whole batch (mirrors `load.ts:286,309`). Docs that succeeded their
- * PUT but never got compiled (because a LATER doc's put failed first) are
- * reported "skipped" -- their write is incomplete without compilation, so
- * "completed" would misrepresent the outcome.
+ * Read the source's copy of a `putAndCompile` step's document.
+ *
+ * Fails CLOSED rather than returning `[]` (a PUT of which would blank + recompile the target document
+ * -- a destructive write the tool must never perform on an anomalous/absent source response). A
+ * genuinely-missing source doc already 404s and throws; this also guards the 200-without-content shape
+ * (proxy/anomaly), preserving the "never destroy target state" promise.
+ *
+ * @returns The document's lines, exactly as the source returned them.
+ */
+async function readSourceContent(
+  step: ExecPlanStep,
+  sourceClient: IrisHttpClient,
+  srcNs: string,
+  sourceAtelierVersion: number,
+): Promise<string[]> {
+  const getPath = atelierPath(sourceAtelierVersion, srcNs, `doc/${encodeURIComponent(step.subject)}`);
+  const getResp = await sourceClient.get<{ content?: unknown }>(getPath);
+  if (!Array.isArray(getResp.result?.content)) {
+    throw new Error(
+      `Source returned no document content for '${step.subject}' -- refusing to overwrite the ` +
+        "target document with empty content.",
+    );
+  }
+  return getResp.result.content as string[];
+}
+
+/**
+ * What the preflight found for one class step of an `execute`: the source text the step will write and
+ * the Storage definitions that write drops from the target's class, or the failure its read carried
+ * (the step then fails with that text when its turn comes).
+ */
+type ClassPreflight = { content: string[]; dropped: string[] } | { error: string };
+
+/** The failure text of a step whose target read failed in the preflight. */
+function targetReadFailure(subject: string, message: string): string {
+  return (
+    `Could not read the target's copy of '${subject}' to check its Storage definitions: ${message}. ` +
+    "Nothing was written for this document."
+  );
+}
+
+/**
+ * The GET-only preflight of an `execute`: for each class step, read the source's copy (as the write
+ * itself will) and the target's copy, and record the source text to write and the Storage definitions
+ * that write would drop. A failed read is recorded on that step and carried to its turn. Nothing is
+ * written.
+ */
+async function preflightClassSteps(
+  steps: readonly ExecPlanStep[],
+  sourceClient: IrisHttpClient,
+  targetClient: IrisHttpClient,
+  srcNs: string,
+  targetNs: string,
+  sourceAtelierVersion: number,
+  targetAtelierVersion: number,
+): Promise<Map<number, ClassPreflight>> {
+  const preflight = new Map<number, ClassPreflight>();
+  const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+  for (const step of steps) {
+    let content: string[];
+    try {
+      content = await readSourceContent(step, sourceClient, srcNs, sourceAtelierVersion);
+    } catch (error: unknown) {
+      preflight.set(step.index, { error: messageOf(error) });
+      continue;
+    }
+    let existing: string[] | undefined;
+    try {
+      existing = await currentClassLines(targetClient, targetAtelierVersion, targetNs, step.subject);
+    } catch (error: unknown) {
+      preflight.set(step.index, { error: targetReadFailure(step.subject, messageOf(error)) });
+      continue;
+    }
+    preflight.set(step.index, {
+      content,
+      dropped: existing === undefined ? [] : droppedStorageDefinitions(existing, content),
+    });
+  }
+  return preflight;
+}
+
+/**
+ * Execute a CONTIGUOUS run of allowlisted `putAndCompile` steps: PUT each doc
+ * to the target SEQUENTIALLY (a class step with the source text its preflight
+ * checked, any other document with a GET of the source first), halting
+ * immediately on the first put/get failure (no compile is attempted for a
+ * batch with any failure -- halt-on-first-error means no further writes at
+ * all, and compile is a write); then, if every put succeeded, ONE batched
+ * `POST /action/compile` for the whole batch (mirrors `load.ts:286,309`).
+ * Docs that succeeded their PUT but never got compiled (because a LATER doc's
+ * put failed first) are reported "skipped" -- their write is incomplete
+ * without compilation, so "completed" would misrepresent the outcome.
  *
  * Pushes a finalized {@link ExecutedStep} for EVERY step in `batch`, in
  * INDEX order, and returns whether the batch ended in a failure (halting
- * subsequent steps/domains in the caller's loop).
+ * subsequent steps/domains in the caller's loop). A class whose Storage
+ * definitions the PUT dropped is added to `storageDrops`.
  */
 async function runDocumentsBatch(
   batch: ExecPlanStep[],
@@ -826,6 +917,8 @@ async function runDocumentsBatch(
   targetNs: string,
   sourceAtelierVersion: number,
   targetAtelierVersion: number,
+  preflight: ReadonlyMap<number, ClassPreflight>,
+  storageDrops: StorageDrop[],
 ): Promise<boolean> {
   const putOk: ExecPlanStep[] = [];
   let putFailedAt = -1;
@@ -835,21 +928,12 @@ async function runDocumentsBatch(
     const step = batch[idx] as ExecPlanStep;
     try {
       const encodedName = encodeURIComponent(step.subject);
-      const getPath = atelierPath(sourceAtelierVersion, srcNs, `doc/${encodedName}`);
-      const getResp = await sourceClient.get<{ content?: unknown }>(getPath);
-      if (!Array.isArray(getResp.result?.content)) {
-        // Fail CLOSED rather than PUT `[]` (which would blank + recompile the
-        // target document -- a destructive write the tool must never perform on
-        // an anomalous/absent source response). A genuinely-missing source doc
-        // already 404s and throws above; this guards the 200-without-content
-        // shape (proxy/anomaly), preserving the "never destroy target state"
-        // promise.
-        throw new Error(
-          `Source returned no document content for '${step.subject}' -- refusing to overwrite the ` +
-            "target document with empty content.",
-        );
-      }
-      const content = getResp.result.content as string[];
+      const checked = preflight.get(step.index);
+      if (checked !== undefined && "error" in checked) throw new Error(checked.error);
+      const content =
+        checked !== undefined
+          ? checked.content
+          : await readSourceContent(step, sourceClient, srcNs, sourceAtelierVersion);
       const putPath = `${atelierPath(targetAtelierVersion, targetNs, `doc/${encodedName}`)}?ignoreConflict=1`;
       const putResp = await targetClient.put(putPath, { enc: false, content });
       // IRIS can refuse a document inside an HTTP 200 envelope, reporting the reason only as a string
@@ -862,6 +946,9 @@ async function runDocumentsBatch(
         );
       }
       putOk.push(step);
+      if (checked !== undefined && "dropped" in checked && checked.dropped.length > 0) {
+        storageDrops.push(storageDrop(step.subject, checked.dropped));
+      }
     } catch (error: unknown) {
       putFailedAt = idx;
       putFailedMessage = error instanceof Error ? error.message : String(error);
@@ -928,6 +1015,7 @@ function renderExecuteResult(result: {
   planHash: string;
   executed: ExecutedStep[];
   summary: { completed: number; failed: number; skipped: number };
+  storageDrops?: StorageDrop[];
 }): string {
   const lines: string[] = [
     `Promotion execute: source='${result.source.profile}' (${result.source.namespace}) -> ` +
@@ -949,6 +1037,9 @@ function renderExecuteResult(result: {
     `Summary: ${result.summary.completed} completed, ${result.summary.failed} failed, ` +
       `${result.summary.skipped} skipped. No item that exists only on the target was ever removed.`,
   );
+  if (result.storageDrops !== undefined && result.storageDrops.length > 0) {
+    lines.push(storageDropsNote(result.storageDrops));
+  }
   return lines.join("\n");
 }
 
@@ -962,22 +1053,45 @@ interface ExecuteInput {
   steps?: number[];
   confirm?: boolean;
   namespace?: string;
+  allowStorageRegeneration?: boolean;
 }
 
 /** The steps a confirmation dialog lists before it says "and N more". */
 const CONFIRMATION_STEP_LIMIT = 10;
 
+/** The closing sentence of the refusal for an `execute` that would drop Storage definitions. */
+const PROMOTE_STORAGE_REMEDY =
+  "Promote source copies that keep those Storage definitions, or pass allowStorageRegeneration: true " +
+  "to let IRIS regenerate the storage on the target.";
+
+/** What an `execute` refused for a Storage drop did not do, without a closing period. */
+function promoteStorageOpening(target: string, targetNs: string): string {
+  return `Promotion to server '${target}', namespace '${targetNs}' was not run and no changes were made`;
+}
+
+/** The longest scope the confirmation dialog shows; the dialog of `@iris-mcp/shared` cuts a longer one. */
+const CONFIRMATION_SCOPE_LIMIT = 600;
+
 /**
  * What an `execute` covers, for the confirmation dialog: the step count and source, then the first steps as
- * `#<index> <domain> <operation> <subject>`.
+ * `#<index> <domain> <operation> <subject>`, then `suffix`.
+ *
+ * A non-empty `suffix` always survives the dialog's cut: fewer steps are listed (`and N more`) until the
+ * whole scope fits {@link CONFIRMATION_SCOPE_LIMIT}, down to one step. An empty `suffix` lists up to
+ * {@link CONFIRMATION_STEP_LIMIT} steps.
  */
-function promotionScope(source: string, steps: readonly ExecPlanStep[]): string {
-  const listed = steps
-    .slice(0, CONFIRMATION_STEP_LIMIT)
-    .map((step) => `#${step.index} ${step.domain} ${step.operation} ${step.subject}`)
-    .join("; ");
-  const more = steps.length > CONFIRMATION_STEP_LIMIT ? `; and ${steps.length - CONFIRMATION_STEP_LIMIT} more` : "";
-  return `${steps.length} step(s) from server '${source}': ${listed}${more}`;
+function promotionScope(source: string, steps: readonly ExecPlanStep[], suffix = ""): string {
+  const describe = (shown: number): string => {
+    const listed = steps
+      .slice(0, shown)
+      .map((step) => `#${step.index} ${step.domain} ${step.operation} ${step.subject}`)
+      .join("; ");
+    const more = steps.length > shown ? `; and ${steps.length - shown} more` : "";
+    return `${steps.length} step(s) from server '${source}': ${listed}${more}${suffix}`;
+  };
+  let shown = Math.min(steps.length, CONFIRMATION_STEP_LIMIT);
+  while (suffix !== "" && shown > 1 && describe(shown).length > CONFIRMATION_SCOPE_LIMIT) shown -= 1;
+  return describe(shown);
 }
 
 /**
@@ -1184,18 +1298,60 @@ async function executeAction(input: ExecuteInput, ctx: ToolContext): Promise<Too
     );
   }
 
+  let sourceAtelierVersion: number | undefined;
+  let targetAtelierVersion: number | undefined;
+
+  // The Storage guard's preflight: reads only. Each class step's source text is read once (the batch
+  // writes that text), and compared with the target's class. A drop refuses the whole execute here,
+  // before the dialog and before a write in any domain, unless allowStorageRegeneration lets it through.
+  const classSteps = orderedAllowed.filter(
+    (step) => step.operation === "putAndCompile" && isClassDocument(step.subject),
+  );
+  let preflight = new Map<number, ClassPreflight>();
+  const planned: StorageDrop[] = [];
+  if (classSteps.length > 0) {
+    sourceAtelierVersion = await negotiateVersion(sourceClient);
+    targetAtelierVersion = await negotiateVersion(targetClient);
+    preflight = await preflightClassSteps(
+      classSteps,
+      sourceClient,
+      targetClient,
+      srcNs,
+      targetNs,
+      sourceAtelierVersion,
+      targetAtelierVersion,
+    );
+    for (const step of classSteps) {
+      const checked = preflight.get(step.index);
+      if (checked !== undefined && "dropped" in checked && checked.dropped.length > 0) {
+        planned.push(storageDrop(step.subject, checked.dropped));
+      }
+    }
+    if (planned.length > 0 && input.allowStorageRegeneration !== true) {
+      return storageDropsRefusal(promoteStorageOpening(input.target, targetNs), planned, PROMOTE_STORAGE_REMEDY, {
+        source: { profile: input.source, namespace: srcNs },
+        target: { profile: input.target, namespace: targetNs },
+      });
+    }
+  }
+
   // Every check has passed and no write has been made: the person is asked (AD-34).
   const outcome = await ctx.confirm?.({
     operation: "promote changes to another server",
     target: `server '${input.target}', namespace ${targetNs}`,
-    scope: promotionScope(input.source, orderedAllowed),
+    scope: promotionScope(
+      input.source,
+      orderedAllowed,
+      planned.length > 0
+        ? `; drops Storage definitions: ${describeStorageDrops(planned, CONFIRMATION_STEP_LIMIT)}`
+        : "",
+    ),
   });
   if (outcome !== undefined && !outcome.proceed) return outcome.result;
 
   const executed: ExecutedStep[] = [];
+  const storageDrops: StorageDrop[] = [];
   let halted = false;
-  let sourceAtelierVersion: number | undefined;
-  let targetAtelierVersion: number | undefined;
 
   let i = 0;
   while (i < orderedAllowed.length) {
@@ -1227,6 +1383,8 @@ async function executeAction(input: ExecuteInput, ctx: ToolContext): Promise<Too
         targetNs,
         sourceAtelierVersion,
         targetAtelierVersion,
+        preflight,
+        storageDrops,
       );
       if (batchHalted) halted = true;
       continue;
@@ -1255,6 +1413,7 @@ async function executeAction(input: ExecuteInput, ctx: ToolContext): Promise<Too
     planHash: parsedPlan.planHash,
     executed,
     summary,
+    ...(storageDrops.length > 0 ? { storageDrops } : {}),
   };
 
   return {
@@ -1396,7 +1555,13 @@ export const envPromoteTool: ToolDefinition = {
     "with Confirm ticked proceeds, and a decline or a dismissal returns " +
     "CONFIRMATION_DECLINED with nothing changed (do not repeat the call unless " +
     "the person asks). A client without elicitation is not asked, and the call " +
-    "works as described above.",
+    "works as described above.\n\n" +
+    "STORAGE GUARD -- before the confirmation dialog and before any write, 'execute' reads the source and " +
+    "target copy of each class it would promote; if a source copy lacks one of the Storage definitions the " +
+    "target class has now, the whole execute is refused with STORAGE_DROPPED and nothing changes, because IRIS " +
+    "would generate new storage on the target at the next compile, which can change how existing rows are read. " +
+    "allowStorageRegeneration (default false) lets it through; the dialog and the result then name the dropped " +
+    "definitions.",
   inputSchema: z.object({
     action: z
       .enum(["plan", "execute"])
@@ -1453,6 +1618,16 @@ export const envPromoteTool: ToolDefinition = {
           "iris_env_diff's 'namespace' convention). Omit to use each profile's own configured default namespace " +
           "independently. Not used by 'plan' (namespaces come from the diff/plan content instead).",
       ),
+    allowStorageRegeneration: z
+      .boolean()
+      .optional()
+      .describe(
+        "For action 'execute' only. Boolean (true/false), default false. When false, 'execute' is refused before any " +
+          "write (STORAGE_DROPPED) if the source copy of a promoted class lacks one of the Storage definitions the " +
+          "target class has now; changing a definition's content is allowed. When true, the classes are promoted, " +
+          "IRIS generates new storage on the target at the next compile (which can change how existing rows are " +
+          "read), and the confirmation dialog and the result's storageDrops name the dropped definitions.",
+      ),
   }),
   annotations: {
     readOnlyHint: false,
@@ -1480,6 +1655,7 @@ export const envPromoteTool: ToolDefinition = {
       steps?: number[];
       confirm?: boolean;
       namespace?: string;
+      allowStorageRegeneration?: boolean;
     };
 
     if (input.action === "execute") {

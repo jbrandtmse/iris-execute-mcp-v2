@@ -45,6 +45,7 @@ import {
   withoutMandatedFields,
 } from "../../../../scripts/lib/sdk-wire-golden-core.mjs";
 import { distEntry } from "./process-gate-helpers.js";
+import { IGNORE_CONFLICT_AFTER, IGNORE_CONFLICT_BEFORE, STORAGE_GUARD_PROPERTY, STORAGE_GUARD_SENTENCE } from "./story-42-11-texts";
 import { requireFreshDists } from "./story-43-3-qa-wire.js";
 
 type Era = "legacy" | "modern";
@@ -164,6 +165,22 @@ function sanctionedTool(pkg: string, then: Tool): Tool {
   }
   const gated = SANCTIONED[pkg]?.[then.name];
   if (gated !== undefined) expected.description = `${expected.description}${gated.separator}${gated.sentence}`;
+  // Story 42.11 (DW-652): one parameter just before the framework's `server`, one sentence after the 43.4 passage, and the corrected
+  // `iris_doc_load` `ignoreConflict` text.
+  const guarded = pkg === "iris-dev-mcp" ? STORAGE_GUARD_SENTENCE[then.name] : undefined;
+  if (guarded !== undefined) {
+    expected.description = `${expected.description}${guarded.separator}${guarded.sentence}`;
+    const members = Object.entries(expected.inputSchema.properties);
+    expect(members.map(([name]) => name), `${then.name}: the frozen properties lack the parameter and end with server`).not.toContain("allowStorageRegeneration");
+    expect(members[members.length - 1]?.[0], `${then.name}: the frozen properties end with server`).toBe("server");
+    const withParameter = [...members.slice(0, -1), ["allowStorageRegeneration", STORAGE_GUARD_PROPERTY[then.name]], members[members.length - 1]] as Array<[string, { description: string } & Json]>;
+    expected.inputSchema.properties = Object.fromEntries(withParameter);
+    if (then.name === "iris_doc_load") {
+      const ignoreConflict = expected.inputSchema.properties["ignoreConflict"] as { description: string };
+      expect(ignoreConflict.description, "the frozen ignoreConflict text").toBe(IGNORE_CONFLICT_BEFORE);
+      ignoreConflict.description = IGNORE_CONFLICT_AFTER;
+    }
+  }
   if (FLIPPED[pkg]?.includes(then.name)) {
     expect(expected.annotations["destructiveHint"], `${then.name}: the frozen entry declares destructiveHint false`).toBe(false);
     expected.annotations["destructiveHint"] = true;
@@ -275,6 +292,11 @@ describe.each(GOLDEN_PACKAGES as string[])("%s: the sanctioned changes on the wi
       for (const [index, tool] of after.entries()) {
         const then = before[index] as Tool;
         expect(tool, `${tool.name} is its frozen entry plus its sanctioned changes`).toEqual(sanctionedTool(pkg, then));
+        if (pkg === "iris-dev-mcp" && STORAGE_GUARD_SENTENCE[tool.name] !== undefined) {
+          const names = Object.keys((tool["inputSchema"] as Schema).properties);
+          expect(names.indexOf("allowStorageRegeneration"), `${tool.name}: the parameter sits just before server`).toBe(names.length - 2);
+          expect(names[names.length - 1], `${tool.name}: server is last`).toBe("server");
+        }
         if (sanctioned[tool.name] === undefined) continue;
         expect(markerCount(then.description), `${tool.name}: the frozen text never named the dialog`).toBe(0);
         expect(markerCount(tool.description), `${tool.name}: the dialog is named once`).toBe(1);

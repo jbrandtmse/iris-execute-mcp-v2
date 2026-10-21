@@ -164,8 +164,12 @@ describe("the tools/list snapshot and the sanctioned golden", () => {
   it("every chain of ledger entries ends at a value other than the frozen one, with at most one entry per sanction", () => {
     expect(chainProblems(changes)).toEqual([]);
     const chains = [...chainsOf(changes).values()];
-    expect(Math.max(...chains.map((chain) => chain.length)), "a corrected pointer is a chain of two entries").toBe(2);
-    expect(chains.filter((chain) => chain.length === 2).map((chain) => chain[1]?.sanction)).toEqual(["S-42.10-resend-text"]);
+    expect(Math.max(...chains.map((chain) => chain.length)), "a corrected or extended pointer is a chain of two entries").toBe(2);
+    // The resend description (Story 43.4's sentence, then Story 42.10's correction) and the iris_env_promote description (Story 43.4's
+    // sentence, then Story 42.11's Storage-guard paragraph) are the two chains of two.
+    const chained = chains.filter((chain) => chain.length === 2);
+    expect(chained.map((chain) => chain[1]?.sanction).sort()).toEqual(["S-42.10-resend-text", "S-42.11-storage-guard-text"]);
+    expect(chained.map((chain) => chain[0]?.sanction).sort()).toEqual(["S-43.4-descriptions", "S-43.4-descriptions"]);
   });
 });
 

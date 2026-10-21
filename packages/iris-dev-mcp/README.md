@@ -147,7 +147,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | `iris_doc_edit` | Surgical line edits of an existing class, routine or include file: `insert`, `delete` or `replace` lines addressed by the numbers of a ranged `iris_doc_get`, each guarded by its `expected` text; all edits apply or none, in one version-checked save, and the answer (a unified diff, an excerpt per edit, `totalLines`, `ts`) comes from a re-read. Does not compile. **`apply` is a write that is enabled by default** (Project Lead decision S-3: every edit is guarded by `expected`, the save is version-checked and never retried, and a class edit that would drop a Storage definition is refused); disable it with `{"global": {"iris_doc_edit:apply": false}}`, or by disabling `iris_doc_put`. `regenerateStorage` (the Storage-guard override) is **disabled by default** | `action` (`apply` \| `regenerateStorage`), `name`, `edits` (each: `op`, `afterLine?`, `startLine?`, `endLine?`, `text?`, `expected`), `namespace?` | destructive |
 | `iris_doc_delete` | Delete one or more documents | `name` (string or array), `namespace?` | destructive, idempotent |
 | `iris_doc_list` | List documents with optional filters | `category?`, `type?`, `filter?`, `generated?`, `namespace?`, `modifiedSince?` (**refused**: IRIS cannot filter documents by modification time, so a call with a non-empty value is refused and lists nothing; compare the `ts` of the listed documents instead), `cursor?` | readOnly, idempotent |
-| `iris_doc_load` | Bulk upload files from disk into IRIS | `path` (glob), `baseDir?`, `compile?`, `flags?`, `namespace?`, `ignoreConflict?` (default: **true**: each file overwrites its server copy unconditionally; **false**: a file whose document already exists is saved under a version check, and fails with `DOCUMENT_CONFLICT` if the document changes on the server while it is being saved, while the other files continue) | destructive, idempotent |
+| `iris_doc_load` | Bulk upload files from disk into IRIS | `path` (glob), `baseDir?`, `compile?`, `flags?`, `namespace?`, `ignoreConflict?` (default: **true**: each file overwrites its server copy without a version check; **false**: a file whose document already exists is saved under a version check, and fails with `DOCUMENT_CONFLICT` if the document changes on the server while it is being saved, while the other files continue), `allowStorageRegeneration?` (default: **false**: a class file whose content drops one of the Storage definitions the existing class has is refused as a `failures` entry with `STORAGE_DROPPED`, nothing is stored for that file and the other files continue; **true**: the file is uploaded, IRIS generates new storage at the next compile, and the result's `storageDrops` names the dropped definitions) | destructive, idempotent |
 | `iris_doc_export` | Bulk-download documents to a local directory (inverse of `iris_doc_load`) | `destinationDir`, `prefix?`, `category?`, `type?`, `generated?`, `system?`, `modifiedSince?` (**refused**, as for `iris_doc_list`), `namespace?`, `includeManifest?`, `ignoreErrors?`, `useShortPaths?`, `overwrite?`, `continueDownloadOnTimeout?` | destructive, idempotent |
 
 ### Package Browsing Tools
@@ -176,7 +176,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_doc_convert` | Convert document between UDL and XML | `name`, `targetFormat`, `namespace?` | readOnly, idempotent |
-| `iris_doc_xml_export` | Export, import, or list documents in XML format. Import loads definitions WITHOUT compiling by default (the response says so); pass `compile: true` to compile in the same call | `action`, `docs?`, `content?`, `compile?`, `flags?`, `namespace?` | destructive (import), not idempotent |
+| `iris_doc_xml_export` | Export, import, or list documents in XML format. Import loads definitions WITHOUT compiling by default (the response says so); pass `compile: true` to compile in the same call. An import that would drop a Storage definition an existing class has (its XML lacks it) is refused with `STORAGE_DROPPED` before anything is loaded | `action`, `docs?`, `content?`, `compile?`, `flags?`, `namespace?`, `allowStorageRegeneration?` (default: **false**: the import is refused if the XML of an existing class lacks one of the Storage definitions the class has; **true**: the import goes ahead, IRIS generates new storage at the next compile, and the result's `storageDrops` names the dropped definitions; import only) | destructive (import), not idempotent |
 
 ### SQL Tools
 
@@ -235,11 +235,13 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_env_diff` | Compare two configured IRIS profiles (`source` vs `target`) across up to five domains — `documents`, `mappings`, `defaultSettings`, `webapps`, `config` — and report a structured drift report. Default `domains` (no `spec` needed): `mappings`, `defaultSettings`, `webapps`, `config`; `documents` is opt-in only and requires `spec` (a bare `*` is refused unless `allowWide` is set). Credential-ish System Default Settings values are redacted | `source`, `target`, `domains?`, `spec?`, `allowWide?`, `namespace?`, `ignoreTimestamps?` | readOnly, idempotent |
-| `iris_env_promote` | Turn a prior `iris_env_diff` result into an ordered promotion plan (`action: "plan"`), or execute an allowlisted subset of that plan against `target` (`action: "execute"`) behind four refuse-before-any-write gates: `confirm`, a `steps` allowlist, plan-hash freshness (the same `diff` re-hashed), and the target profile's own governance. Halts on the first failed step; never deletes a target-only item | `action`, `source`, `target`, `diff?`, `plan?`, `steps?`, `confirm?`, `namespace?` | destructive |
+| `iris_env_promote` | Turn a prior `iris_env_diff` result into an ordered promotion plan (`action: "plan"`), or execute an allowlisted subset of that plan against `target` (`action: "execute"`) behind four refuse-before-any-write gates: `confirm`, a `steps` allowlist, plan-hash freshness (the same `diff` re-hashed), and the target profile's own governance. Halts on the first failed step; never deletes a target-only item. Before the confirmation dialog and any write, `execute` reads the source and target copy of each class it would promote, and a source copy that drops a Storage definition the target class has refuses the whole execute with `STORAGE_DROPPED` | `action`, `source`, `target`, `diff?`, `plan?`, `steps?`, `confirm?`, `namespace?`, `allowStorageRegeneration?` (default: **false**: `execute` is refused before any write if a source class lacks a Storage definition the target class has; **true**: the classes are promoted, IRIS generates new storage on the target at the next compile, and the dialog and the result's `storageDrops` name the dropped definitions; `execute` only) | destructive |
 
 > **Governance defaults:** `iris_env_diff` and `iris_env_promote`'s `plan` action are classified `read` and are therefore **enabled by default** — neither is gated behind `IRIS_GOVERNANCE`. `iris_env_promote`'s `execute` action is truthfully classified `write` and is **DEFAULT-DISABLED** (unlike `iris_production_control:clean`, it deliberately does not use the `defaultEnabled` mechanism — promotion is a real environment-mutating write, not a recovery action); enable it via `IRIS_GOVERNANCE`, e.g. `{"global":{"iris_env_promote:execute":true}}` — `execute` ALSO requires the **target** profile's own governance to allow the underlying write families it uses (a fourth gate on top of this one). **Safety:** nothing on the target is ever deleted — items that exist on the target only (`onlyInTarget`) are always informational warnings, never steps — and System Default Settings values that look like credentials are redacted in both diff and plan/execute output; their plaintext never appears in any tool result. Credentials/users/roles promotion is out of scope entirely.
 
 > **Human confirmation (Story 43.3):** `iris_env_promote` action `execute` (a write, default-disabled) also asks the person right before its first write, after the four gates pass, when the MCP client declares form elicitation; any other client keeps today's contract (`confirm: true` and the gates), and declining ends the call with `CONFIRMATION_DECLINED` and changes nothing. A Claude Code `Elicitation` hook can answer the dialog for the person, which is the user's choice and removes the person from the loop. See [Human confirmation (elicitation)](../../README.md#human-confirmation-elicitation).
+
+> **Storage guard (Story 42.11):** `execute` runs a read-only preflight after its four gates and the blank-namespace check, and before the confirmation dialog: for each allowlisted class step it reads the source copy and the target copy of the class. A source copy that lacks a Storage definition the target class has refuses the whole execute with `STORAGE_DROPPED` (`structuredContent` is `{code, source, target, storageDrops}`) and nothing is changed in any domain. `allowStorageRegeneration: true` (default **false**) lets it through; the dialog's scope then names the drops (`; drops Storage definitions: ...`) and the result gains `storageDrops`. Each class is written with the source text the preflight read, so the text checked is the text written. A preflight read that fails fails that step when its turn comes, as today's source-read failure does; a declined dialog leaves reads only.
 
 ### Test Status Tools
 
@@ -370,18 +372,34 @@ HTTP 200 response) is returned as an error carrying IRIS's text; nothing is stor
   document changed meanwhile: the tool returns a `DOCUMENT_CONFLICT` refusal (nothing stored) and never retries.
   `ignoreConflict` (default **false**) skips the version check. No path sends an extra GET or HEAD.
 - **Storage guard.** A persistent class keeps its Storage definitions (the map from properties to the globals that
-  hold its rows) in its source. A put to an existing class whose content drops one of those definitions is refused
+  hold its rows) in its source. A write to an existing class whose content drops one of those definitions is refused
   with `STORAGE_DROPPED` and nothing is stored, because IRIS would generate new storage at the next compile, which can
   change how existing rows are read. Names are compared exactly: a rename is a drop, and changing a definition's
-  content is allowed. `allowStorageRegeneration: true` (default **false**) lets the put through, and then the
-  next compile regenerates the storage. The guard applies to `.cls` documents only, in UDL or XML form. It reads the
-  class text the way IRIS does for the forms it is tested against; in a few hand-written forms (a brace hidden in
-  embedded SQL or HTML, for example) it can miss a drop.
-- **Unguarded paths.** The guard covers `iris_doc_put` and `iris_doc_edit` (action `apply`). `iris_doc_load` (a file is the source of truth for its
-  class, uploaded with `ignoreConflict` on by default), the `iris_env_promote` `execute` sync (it replaces the target
-  class by design) and the `iris_doc_xml_export` import (an XML export carries its own Storage) do not run it. The
-  bootstrap's own classes have no Storage definitions. `iris_docdb_document` and `iris_global_set` write DocDB
-  records and global nodes, not documents. A test lists every document-writing path with its verdict.
+  content is allowed. `allowStorageRegeneration: true` (default **false**) lets the write through, and then the
+  next compile regenerates the storage. The guard applies to `.cls` documents only, in UDL or XML form, and a new
+  class is never refused. It reads the class text the way IRIS does for the forms it is tested against; in a few
+  hand-written forms (a brace hidden in embedded SQL or HTML, for example) it can miss a drop. The same guard covers
+  every path that can replace an existing class, each with the same parameter:
+  - `iris_doc_put` refuses the write, as above.
+  - `iris_doc_load` reads each class file's class before its upload (one GET; with `ignoreConflict: false` the 409 of
+    the first PUT is the read), and refuses a file that drops a definition as a `failures` entry with
+    `STORAGE_DROPPED` while the other files continue. With `allowStorageRegeneration: true` the result's `storageDrops`
+    names what was dropped.
+  - The `iris_doc_xml_export` import reads each `<Class>` of the XML before its one POST, and refuses the whole import
+    when a class lacks a definition the class has now. With the override the result's `storageDrops` names them.
+  - `iris_env_promote` `execute` reads the source and target copy of each class before its confirmation dialog, and
+    refuses the whole execute when a source copy lacks a definition the target class has. It writes the source text it
+    read. With the override the dialog and the result's `storageDrops` name the dropped definitions. When the drops and
+    the steps together are longer than the dialog shows (600 characters), fewer steps are listed (`and N more`) so that
+    the drops stay visible.
+  - Each class is read once, one GET after another, before it is written. A change made to the class between that
+    read and the write is not seen, and on a promote the read comes before the confirmation dialog and before the
+    mapping steps of the same plan. A very large load, import or promote makes proportionally more requests.
+- **Document-write paths.** The guard covers `iris_doc_put`, `iris_doc_edit` (action `apply`), `iris_doc_load`, the
+  `iris_doc_xml_export` import and the `iris_env_promote` `execute` sync; `iris_doc_edit` is overridden by its
+  `regenerateStorage` action instead of the parameter. The bootstrap's own classes have no Storage definitions.
+  `iris_docdb_document` and `iris_global_set` write DocDB records and global nodes, not documents. A test lists every
+  document-writing path with its verdict.
 
 **Input:**
 ```json
@@ -635,6 +653,14 @@ before upload (IRIS rejects a BOM'd first line as an illegal header). And a PUT 
 HTTP 200 can still fail per-document — Atelier reports it only as a string `status` field in the
 per-doc result (e.g. `ERROR #16021: Illegal Header Line: ...`) while storing nothing. The tool
 surfaces that string as an upload failure in `failures[]` instead of counting the file as uploaded.
+
+**Storage guard (Story 42.11).** For a `.cls` file, the tool reads the class that exists now before it uploads (one
+GET; with `ignoreConflict: false` the 409 of the unversioned PUT is that read). A file whose content drops one of the
+class's Storage definitions is not stored, and its `failures[]` entry carries `code: "STORAGE_DROPPED"` and the dropped
+names in `droppedStorage`; the other files continue, and a refused file is not compiled. `allowStorageRegeneration:
+true` (default **false**) uploads it anyway, and the result gains `storageDrops`, for example
+`[{"name": "MyApp.Model.cls", "droppedStorage": ["Default"]}]`. A new class, a non-class document and a file that keeps
+every definition upload exactly as before.
 
 **Refused input (trap-shaped glob):**
 ```json
@@ -969,6 +995,13 @@ The `content` string contains the routine body as IRIS compiled it (newline-join
 <summary><strong>iris_doc_xml_export</strong> -- Import from XML (with compile)</summary>
 
 An import **loads definitions without compiling them** by default — the response then includes a note saying the documents are NOT compiled (remedy: `compile: true`, or `iris_doc_compile` afterwards). Pass `compile: true` to compile in the same call; `flags` (e.g. `"cku"`) is honoured only when `compile` is true, and the `c` compile qualifier is folded in automatically when absent or explicitly negated (IRIS qualifier letters are case-insensitive; `-c` negates, so `-c` becomes `-cc` — the last `c` wins). A compile failure still returns HTTP-level success from IRIS — the error text surfaces in the response as a `Per-file status (...)` note.
+
+**Storage guard (Story 42.11).** Before its one POST the import reads each `<Class>` of the XML from the namespace. If a
+class that exists lacks one of the `<Storage>` elements it has now, the whole import is refused with `STORAGE_DROPPED`
+(`structuredContent` is `{code, namespace, storageDrops}`) and nothing is loaded; export the classes with
+`iris_doc_xml_export` first to keep their `<Storage>` elements. `allowStorageRegeneration: true` (default **false**)
+loads the XML anyway, and the result gains `storageDrops`. An XML with no `<Class>`, a new class and a class that keeps
+every definition import exactly as before.
 
 **Input:**
 ```json

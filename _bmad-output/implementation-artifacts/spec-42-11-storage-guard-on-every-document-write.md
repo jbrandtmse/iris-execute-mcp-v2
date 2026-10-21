@@ -2,15 +2,23 @@
 title: 'Story 42.11: Storage Guard on Every Document Write'
 type: 'feature'
 created: '2026-10-21'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '4e492cfdba193d08d323c03f36fae0f5f1b1d63f'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
   - '{project-root}/_bmad-output/implementation-artifacts/epic-42-context.md'
 warnings:
   - oversized
-deferred: []
+deferred:
+  - summary: >-
+      The agent-facing prompts and skills (deploy-and-test-class, promote-environment-change and their skills-pack copies) do not mention the new STORAGE_DROPPED refusals or the allowStorageRegeneration override.
+    evidence: |-
+      The deploy-and-test-class loop handles compile errors only, so a file refused with STORAGE_DROPPED (a failures entry, not a compile error) can leave the loop testing against the stale server copy; only edit-and-test-class carries a "never use regenerateStorage unless asked" rule and only that prompt is pinned by prompt-safety-invariants. This story's intent excludes any prompt or skills-pack text change (frozen prompts/get bytes), so it was not changed here.
+    location: >-
+      packages/iris-dev-mcp/src/prompts/deployAndTestClass.ts, packages/iris-dev-mcp/src/prompts/promoteEnvironmentChange.ts, skills/deploy-and-test-class/SKILL.md
+    severity: low
 ---
 
 <intent-contract>
@@ -298,6 +306,38 @@ All paths are from the repo root. `D/` is `packages/iris-dev-mcp/src/`, and `T/`
 
 ## Review Triage Log
 
+### 2026-10-21 — Review pass
+- verdicts: 28 findings — high 0, medium 4, low 20, false 4, maybe-false 0
+- findings:
+  - `[low]` `[defer]` (blind 1) Agent prompts and skills (`deploy-and-test-class`, `promote-environment-change`) say nothing about the new `STORAGE_DROPPED` refusals — the intent's Never list excludes any prompt or skills-pack text change (frozen `prompts/get` bytes), so it is out of scope here; deferred to the docs re-certification (Story 42.9).
+  - `[low]` `[reject]` (blind 2) A refused file in a mixed `iris_doc_load` batch reads as a near-success (`isError: false`) — spec-bound: the matrix makes a refusal a per-file `failures` entry with the other files continuing, exactly as `DOCUMENT_CONFLICT` already is; the result carries `failed`, `failures[].code` and the remedy.
+  - `[false]` `[reject]` (blind 3) The root README confirmation section is stale for `iris_env_promote` — the preflight is "a check of the tool itself" that "runs first" (README "The order" bullet), the dialog still comes after the four gates and right before the first write, and "the same requests" for a client that cannot be asked compares with and without the dialog.
+  - `[low]` `[patch]` (blind 4, edge 13, edge 16) The guard is check-then-write and the window is undocumented (load and import send an unconditional write after the read; on promote the read comes before the dialog and the mapping steps) — a sentence added to the dev README "Storage guard" bullet; a second target read at write time is out of design (AD-34 reads before the dialog; Design Notes decision 2 accepts the window).
+  - `[low]` `[reject]` (blind 5) Read-failure texts differ and an unreadable class blocks even the override — spec-bound: the matrix says the file "fails with the error text" (load, import), the promote target-read text is given verbatim, and the read is needed to name `storageDrops`.
+  - `[low]` `[reject]` (blind 6) The live gate has no leg that writes a genuinely new class or a class that keeps its Storage — the real 404 reading is the one `doc.ts` (`iris_doc_get`) has used since earlier epics, the unit rows pin both paths, and the spec fixes seven legs.
+  - `[low]` `[patch]` (blind 7) The `xmlClassStorageNames` comment asserts how IRIS treats a class named twice, which no probe backs — the comment now states only the function's contract ("keeps the later element's names").
+  - `[low]` `[patch]` (blind 8, edge 14, edge 15) One sequential GET per class (two per class step on promote) adds requests and Web Gateway timeout risk, undocumented — a sentence added to the dev README bullet; capping or concurrency would change the matrix's "one GET per `<Class>`".
+  - `[low]` `[reject]` (blind 9) `allowStorageRegeneration` is `booleanParam` on `iris_doc_load` but `z.boolean()` on the import and promote — spec-bound: the schema of each tool is given in Tasks, follows that tool's own sibling parameters, and is pinned by the sanctioned wire entries.
+  - `[low]` `[reject]` (blind 10) The refusal text and `storageDrops` list every dropped class while the dialog caps at ten — spec-bound: the `storageDropsRefusal` template lists every drop; a hundreds-of-classes refusal is rare.
+  - `[medium]` `[patch]` (edge 11, edge 17) The dialog cuts a scope at 600 characters, so with ten realistic class steps the appended drops are lost and the person confirms blind (and the docs claim the dialog names the drops) — `promotionScope` now takes the drops suffix and lists fewer steps (`and N more`) until the whole scope fits 600 characters; with no drop it is byte-identical; the 12-class dialog row is re-derived (eight steps, 580 characters) and a long-names row added.
+  - `[low]` `[reject]` (edge 12, verification-gap other 1) The import override names drops when the per-file status shows a failure — IRIS sets a non-empty status for a compile error on a class that was loaded, so it cannot tell a failed load from a failed compile; the line states what the XML omitted and the status text is surfaced beside it.
+  - `[low]` `[patch]` (edge 13) see the entry of blind 4 (a promote target that changes after the preflight, for example through a mapping step of the same plan, is documented).
+  - `[low]` `[patch]` (edge 14) see the entry of blind 8 (the import's sequential GETs).
+  - `[low]` `[patch]` (edge 15) see the entry of blind 8 (the promote preflight's two GETs per class step).
+  - `[low]` `[patch]` (edge 16) see the entry of blind 4 (the load's GET-to-PUT window).
+  - `[medium]` `[patch]` (edge 17) see the entry of edge 11 (the claim that the dialog names the drops).
+  - `[medium]` `[patch]` (verification-gap 1) No test varies the Atelier version per side on promote, so a swap in the preflight or the batch would silently disable the guard (a v7 target is read from a v8 route and a 404 reads as a new class) — a source v8, target v7 row added; the two swaps were applied and went red.
+  - `[low]` `[patch]` (verification-gap 2) AC 42.11.2's pinning tests for the import result and the promote result had no `mutation:` line — the three mutations (import result, promote result, drop recorded before the PUT) were applied, went red and are recorded.
+  - `[low]` `[reject]` (verification-gap other 1) see the entry of edge 12 (the import override result after a failed per-file status).
+  - `[low]` `[patch]` (verification-gap other 2) The `format.ts` comment says `structuredContent` stays the untouched API result either way — replaced by the contract with the `storageDrops` exception.
+  - `[low]` `[reject]` (intent D1) `tools/call` over the built server is not exercised by the new tests — spec-bound: the live gate is in-process handlers on the real Atelier (the doc-put precedent), the `tools/list` wire is covered by the ledger and goldens, and the existing 43.3 wire baselines cover the no-drop `tools/call`.
+  - `[false]` `[reject]` (intent D2) The dialog is tested at the handler boundary, not the wire's two-round flow — on the wire each round re-runs the handler, so round two runs its own preflight and writes that text; nothing diverges.
+  - `[false]` `[reject]` (intent D3) "Byte-identical apart from GETs" is not observable at the 43.3 wire baseline — the baseline records writes only and stayed green, and the request equality is pinned in the "nothing dropped" rows; the rewritten 43.3 handler rows are the spec's own "tests that break".
+  - `[low]` `[reject]` (intent D4) The live promote legs are one instance playing both sides with a rewritten source read — spec-prescribed (Tasks, leg 6). Spec error recorded for the retro: the matrix row "Each override leg leaves no Storage block" cannot hold for promote, because `execute` compiles and the compile regenerates `Storage Default`; leg 7 asserts the true shape (no Storage in the PUT body, `storageDrops`, regenerated storage).
+  - `[low]` `[reject]` (intent D5) Mutation evidence is at the handler path, not a wire gate — same as D1; the spec's Verification prescribes handler-path mutations.
+  - `[medium]` `[patch]` (intent D6) The override text line is written out three times (`load.ts`, `format.ts`, `env-promote.ts`) and the `storageDrops` key by hand at three sites — the three copies of the one sentence now call `storageDropsNote` in `doc.ts` (internal to `@iris-mcp/dev`, next to `currentClassLines`; no new package export); the key name at each result stays, as the Tasks prescribe it.
+  - `[false]` `[reject]` (intent D7) The diff edits the 38.3 and 38.7 doc-claims tests and the `iris_doc_put` README bullets, and the new gate has no `checkDistFresh` — the Tasks list those edits by name, and none of the sibling live gates calls `checkDistFresh`.
+
 ## Design Notes
 
 **Governing ADs (Rule 6):**
@@ -428,6 +468,38 @@ Build after each source change. Before the snapshot or golden tests: `pnpm --fil
 - Goldens: move `allowStorageRegeneration` after `server` in one `new` → red: the schema shape row and the wire raw-line row. Delete one `S-42.11-storage-guard-text` entry → red: the ledger count row and the parity test.
 - AC 42.11.2 (the classification is unchanged): set `iris_env_promote`'s `mutates.execute` to `"read"` (dev rebuilt) → red: the dev governance tests that refuse a default `execute` (`env-promote-governance.test.ts`; record which rows). Then add `.default(false)` to the new `iris_env_promote` parameter → red: `story-43-1-sdk-wire-golden.test.ts` (the emitted schema gains `default`) and `pnpm gen:tools-list-snapshot:check`.
 
+**Mutation results (implement pass, 2026-10-21).** Each change was applied to the real file, run on the path it guards (the unit rows closed-port; the live legs through `live-run.sh`, one call each), then restored from a scratchpad copy; `cmp` confirmed every restored file byte-identical and `git status --short` was unchanged. Dev and shared `dist/` were deleted and rebuilt afterwards (a restored source is newer than its unchanged dist).
+- mutation: `load.ts` GET read, `dropped = droppedStorageDefinitions(existing, lines)` → `dropped = []` → red: `load-storage-guard.test.ts` (6 rows: the four GET-read rows and two override rows) and live leg 1 (and leg 3, which lost `storageDrops`).
+- mutation: `load.ts` 409 read, `dropped = droppedStorageDefinitions(current.content, lines)` → `dropped = []` → red: `load-storage-guard.test.ts` (the 409 refusal row and the `ignoreConflict: false` override row) and live leg 2.
+- mutation: `format.ts` import refusal, `if (drops.length > 0 && …)` → `if (false && …)` → red: `format-storage-guard.test.ts` (4 rows) and live leg 4.
+- mutation: `env-promote.ts` preflight refusal, `if (planned.length > 0 && …)` → `if (false && …)` → red: `env-promote-storage-guard.test.ts` (5 refusal rows) and live leg 6 (the target class was overwritten).
+- mutation: `env-promote.ts` batch reads the source again instead of using the preflight text → red: `env-promote-storage-guard.test.ts` "writes the source text the preflight checked", `env-promote-execute.test.ts` "asks after the GET-only preflight" (the source's second document GET) and live leg 7 (two source GETs of the class).
+- mutation: `load.ts` result drops `storageDrops` → red: `load-storage-guard.test.ts` (3 override rows) and live leg 3.
+- mutation: `document-write-paths.test.ts` `format.ts` verdict back to `"excluded"` → red: "all five agent class-write paths are guarded, and no path is excluded", "only a guarded path names guard calls", "every entry has a reason, and each exclusion names its own ledger id", and the 38.3 README roster row.
+- mutation: `storageDropsRefusal(` renamed out of the `env-promote.ts` source → red: `document-write-paths.test.ts` "every guarded path is found, and its source runs the shared guard calls that its entry names".
+- mutation: ledger `new` of `42.11/storage-guard-schema/iris_doc_xml_export@dev-main` with `allowStorageRegeneration` after `server` → red: `story-43-4-sanctioned-golden-changes.test.ts` "every sanction is registered with a shape" and `story-43-1-sdk-wire-golden.test.ts` "tools-list: the raw response line is byte-identical to the golden" (iris-dev-mcp main).
+- mutation: ledger entry `42.11/storage-guard-text/iris_doc_xml_export@dev-main` deleted → red: `story-43-4-sanctioned-golden-changes.test.ts` (the id-order, shape-count and per-tool rows) and `story-42-10-snapshot-ledger-parity.test.ts` (the parity and the three non-vacuity rows).
+- mutation: `iris_env_promote` `mutates.execute` `"write"` → `"read"` (dev rebuilt) → red: `env-promote-governance.test.ts`, "under EMPTY IRIS_GOVERNANCE, `execute` is DENIED with GOVERNANCE_DISABLED; handler NOT called" and "an explicit IRIS_GOVERNANCE disable of `plan` overrides its read default-enable".
+- mutation: `.default(false)` on the `iris_env_promote` parameter (dev rebuilt) → red: `story-43-1-sdk-wire-golden.test.ts` (the raw tools-list line and "the v2 client sees the golden result") and `pnpm gen:tools-list-snapshot:check` ("allowStorageRegeneration.default: snapshot (absent) / live false").
+- mutation: `storage-guard.ts` `xmlClassStorageNames` no longer ends the class scope at `</Class>` → red: `storage-guard.test.ts` ("a Storage element outside a class does not count…" and "names are exact: a class named twice…").
+- mutation: `storage-guard.ts` `describeStorageDrops` without the `; and N more` tail → red: `storage-guard.test.ts` "describeStorageDrops with a limit lists the first documents and then says how many more".
+- mutation: `storage-guard.ts` `droppedStorageNames` compares case-insensitively → red: `storage-guard.test.ts` ("a rename is a drop, and names are case-sensitive" and "droppedStorageNames … compares exactly").
+- mutation: `env-promote.ts` dialog scope without the drops suffix → red: `env-promote-storage-guard.test.ts` ("asks with the drops in the scope…" and "lists the first ten dropped documents in the dialog…").
+- mutation: `env-promote.ts` target-read failure without its text → red: `env-promote-storage-guard.test.ts` ("a target read that fails…" and "an unreadable or binary target copy…").
+- mutation: `doc.ts` `currentClassLines` maps HTTP 410, not 404, to `undefined` → red: 10 rows across `load-storage-guard.test.ts`, `format-storage-guard.test.ts` and `env-promote-storage-guard.test.ts` (every new-class row).
+- mutation: dev README `iris_env_promote` row without `allowStorageRegeneration?` → red: `story-42-11-doc-claims.test.ts` "each of the three rows lists allowStorageRegeneration? …".
+- mutation: CHANGELOG without the backticks around `S-42.11-storage-guard-text` → red: `story-43-4-sanctioned-golden-changes.test.ts` "each sanction id appears, in backticks…" and `story-42-11-doc-claims.test.ts` "has the sanctioned-change heading…".
+- mutation: the new live gate removed from `prepublish-gate.mjs` `gateTestFiles` → red: `live-gate-roster.test.ts` "iris-dev-mcp: every armed test file is in … gateTestFiles".
+
+**Mutation results (review pass, 2026-10-21).** Same procedure: applied to the real file, run closed-port, restored from a scratchpad copy, `cmp` byte-identical, `git status --short` unchanged.
+- mutation: `env-promote.ts` `promotionScope` without the budget loop (the drops suffix is cut by the dialog again) → red: `env-promote-storage-guard.test.ts` "lists the first ten dropped documents in the dialog … so that the drops fit the dialog" and "long class names > the drops survive the dialog's cut".
+- mutation: `env-promote.ts` preflight call passes the target version for the source read and the source version for the target read → red: `env-promote-storage-guard.test.ts` "reads and writes each side with the Atelier version that side negotiated: source v8, target v7".
+- mutation: `env-promote.ts` batch call passes the two Atelier versions swapped → red: the same row (the PUT path is v8, not v7).
+- mutation: `format.ts` import override result without `storageDrops` (AC 42.11.2, import) → red: `format-storage-guard.test.ts` "posts as today, and the result is the API result plus storageDrops …" and "with compile: true the load carries the compile flags and the drops are still named".
+- mutation: `env-promote.ts` result without the `storageDrops` field (AC 42.11.2, promote) → red: `env-promote-storage-guard.test.ts` "the result adds storageDrops after summary …", "names a class in storageDrops only when its PUT succeeded" and the 12-class dialog row.
+- mutation: `env-promote.ts` records a drop before its PUT succeeds → red: `env-promote-storage-guard.test.ts` "names a class in storageDrops only when its PUT succeeded".
+- mutation: `doc.ts` `storageDropsNote` text "Storage definitions dropped" → "Storage definition dropped" → red: the load, import and promote override-text rows (one each).
+
 **Shared surfaces:**
 - `tools-list-snapshot.json`.
 - `sdk-golden-sanctioned-changes.json` and its id lists, shape table and CHANGELOG pairs.
@@ -448,7 +520,7 @@ Build after each source change. Before the snapshot or golden tests: `pnpm --fil
 
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
 
 **Plan stage (2026-10-21).** The plan halted after planning, as the invocation directed. The spec meets the READY FOR DEVELOPMENT standard.
@@ -462,3 +534,17 @@ Blocking condition: none
   6. A promote preflight read that fails is carried to its step.
 - **Live probe:** run on `localhost:52773`/`HSCUSTOM` (IRIS 2026.2 Build 221U). An XML import without `<Storage>` drops the stored definition. The probe class was removed, and no leftovers remain.
 - **Deferred:** none.
+
+**Implement pass (2026-10-21).** The implementation, the tests, the rosters, the eight ledger entries, the regenerated snapshot, the docs, the changeset and the live gate; the mutation lines are under `## Verification`. Two points where the spec text and the live system differ (spec errors for the retro):
+- Leg (7) cannot leave "no Storage on the target": `iris_env_promote` compiles each promoted class (`flags=cuk`), and the compile regenerates a `Storage Default` block. The live leg asserts what is true instead: the PUT body has no Storage, `storageDrops` names the drop, and the regenerated storage reads the properties in the new order. Legs (3) and (5) (no compile) do leave no Storage block.
+- The snapshot holds the `full` preset (115 entries), so its diff shows three description sentences and three new properties, not four; the fourth is the `iris_doc_load` row of the dev `core-preset` session, which only the sanctioned wire golden (eight entries) holds.
+
+**Review pass (2026-10-21).**
+- **Summary of the change:** the one shared guard in `@iris-mcp/shared` now covers `iris_doc_load` (per file, after a GET of the class or the 409 read), the `iris_doc_xml_export` import (one GET per `<Class>`, the whole import refused before its one POST) and the `iris_env_promote` `execute` sync (a GET-only preflight before the dialog, refusal before any write, the source text checked is the text written). Each takes `allowStorageRegeneration` (default false; with it the result's `storageDrops` and a text line name what was dropped). Eight sanctioned ledger entries move the three `inputSchema`s and four descriptions; both frozen goldens are byte-unchanged and the snapshot is regenerated.
+- **Files changed (33):** shared `storage-guard.ts` and `index.ts`; dev `doc.ts` (`currentClassLines`, `storageDropsNote`), `load.ts`, `format.ts`, `env-promote.ts`; three new dev unit suites and one live gate (`storage-guard-write-paths-live-gate.test.ts`, in `prepublish-gate.mjs`); updated dev tests; the `iris-mcp-all` roster, doc-claims, ledger, shape, oracle and parity tests, the 42.11 doc-claims test and its texts file; the sanctioned-change ledger and the regenerated snapshot; the dev and root READMEs, `tool_support.md`, `CHANGELOG.md`, the changeset; this spec.
+- **Review findings:** 28 findings from four layers (high 0, medium 4, low 20, false 4). Patches applied, 3 medium and 5 low entries: the dialog scope keeps the drops visible within 600 characters; a mixed-Atelier-version promote test; the three-way duplicated override text line is one `storageDropsNote`; an unprobed claim removed from a comment; a stale comment replaced; three missing mutation lines written; the dev README says the read is once, sequential, and before the write. Deferred: 1 (prompts and skills text, excluded by the intent). Rejected with a recorded reason: 14 rows (spec-bound, theoretical or refuted; see the Review Triage Log; the patched rows are 13 and the deferred row is 1).
+- **Follow-up review recommended:** true (three medium entries patched). The unverified risk: `promotionScope` repeats the dialog's 600-character cut as a local constant (`CONFIRMATION_SCOPE_LIMIT`), because the shared `confirmationMessage` does not export it; a change to the shared limit would not move it.
+- **Verification performed:** every `(loop)` command after the last patch, and every `(once)` command after it, green: shared 2317, dev 1470 passed (314 skipped), admin 506, data 163, interop 751, ops 350, client-config 1015, all 3903 (2705 + 1198; 675 skipped), type-check and lint clean (the one `cli/governance.ts` warning pre-exists), governance baseline, skills, pack, provenance, prompts, snapshot checks and `lint_spine.py` (0 findings) clean, both frozen goldens `git diff` empty. Live on `localhost:52773`/`HSCUSTOM` (IRIS 2026.2 Build 221U) through the wrapper, one suite per call: the new gate 7 of 7, the 38.7 gate 8 of 8, the doc-put gate 114 of 114; no `QaStory` document or global remained (checked with the doc and global list tools after the runs).
+- **Mutation evidence:** 28 mutation lines in `## Verification` (two blocks), each red on the path it guards and restored byte-identical.
+- **Residual risks:** the guard is check-then-write (documented); the dev unit tests read `@iris-mcp/shared` through its dist, and a restored source is newer than an unchanged dist, so a package must be rebuilt from a deleted `dist/` and `tsconfig.tsbuildinfo` before the snapshot check; the matrix row "Each override leg leaves no Storage block" cannot hold for promote (spec error above); the live gate has no leg for a new class on the real Atelier.
+- **Deferred:** 1 item in the frontmatter `deferred:` list.

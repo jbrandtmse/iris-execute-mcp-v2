@@ -85,9 +85,17 @@ export type { Hl7RedactionResult, Hl7SafeHarborField } from "./hl7-redaction.js"
 export {
   isClassDocument,
   storageDefinitionNames,
+  droppedStorageNames,
   droppedStorageDefinitions,
+  xmlClassStorageNames,
+  storageDroppedText,
   storageDroppedRefusal,
+  storageDroppedDetail,
+  storageDrop,
+  describeStorageDrops,
+  storageDropsRefusal,
 } from "./storage-guard.js";
+export type { StorageDroppedDetail, StorageDrop } from "./storage-guard.js";
 export type {
   ConfirmationOutcome,
   ConfirmationRequest,

@@ -472,6 +472,432 @@
       "op": "replace",
       "old": "HSCUSTOM",
       "new": "%SYS"
+    },
+    {
+      "id": "42.11/storage-guard-schema/iris_doc_load@dev-main",
+      "sanction": "S-42.11-storage-guard-schema",
+      "story": "42.11",
+      "golden": "wire",
+      "server": "iris-dev-mcp",
+      "session": "main",
+      "label": "tools-list",
+      "pointer": "/result/tools/21/inputSchema/properties",
+      "op": "replace",
+      "old": {
+        "path": {
+          "type": "string",
+          "description": "Glob pattern for files to upload (e.g., 'c:/projects/src/**/*.cls'). The directory prefix before the first glob metacharacter is used as the base for document name mapping \u2014 so the wildcard must come BEFORE the package directory: 'c:/projects/src/**/*.cls' maps MyPkg/ClassA.cls to 'MyPkg.ClassA.cls', but 'c:/projects/src/MyPkg/*.cls' swallows MyPkg into the base and would map to the unqualified 'ClassA.cls'. Mismatched uploads are refused when the file's own Class/ROUTINE declaration disagrees; pass baseDir to state the package root deterministically."
+        },
+        "baseDir": {
+          "description": "Optional. Directory used verbatim as the base for document name mapping, INSTEAD of inferring the base from the glob pattern's first wildcard segment (e.g. baseDir='c:/projects/src' with path='c:/projects/src/MyPkg/*.cls' maps MyPkg/ClassA.cls to 'MyPkg.ClassA.cls'). Use it to state the package root deterministically when the glob's wildcard cannot precede the package directory.",
+          "type": "string"
+        },
+        "compile": {
+          "description": "When true, compile all successfully uploaded documents after upload (default: false)",
+          "type": "boolean"
+        },
+        "flags": {
+          "description": "Compilation flags (e.g., 'ck', 'cku'). Only used when compile is true",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Target namespace (default: configured)",
+          "type": "string"
+        },
+        "ignoreConflict": {
+          "description": "If true (default), each file overwrites its server copy unconditionally. If false, a file whose document already exists is saved under a version check: it is overwritten unless the document changes on the server while it is being saved, in which case that file fails with DOCUMENT_CONFLICT and the others continue.",
+          "type": "boolean"
+        },
+        "server": {
+          "description": "Named server profile to target for this call (from `IRIS_PROFILES`). Omit to use the default server.",
+          "type": "string"
+        }
+      },
+      "new": {
+        "path": {
+          "type": "string",
+          "description": "Glob pattern for files to upload (e.g., 'c:/projects/src/**/*.cls'). The directory prefix before the first glob metacharacter is used as the base for document name mapping \u2014 so the wildcard must come BEFORE the package directory: 'c:/projects/src/**/*.cls' maps MyPkg/ClassA.cls to 'MyPkg.ClassA.cls', but 'c:/projects/src/MyPkg/*.cls' swallows MyPkg into the base and would map to the unqualified 'ClassA.cls'. Mismatched uploads are refused when the file's own Class/ROUTINE declaration disagrees; pass baseDir to state the package root deterministically."
+        },
+        "baseDir": {
+          "description": "Optional. Directory used verbatim as the base for document name mapping, INSTEAD of inferring the base from the glob pattern's first wildcard segment (e.g. baseDir='c:/projects/src' with path='c:/projects/src/MyPkg/*.cls' maps MyPkg/ClassA.cls to 'MyPkg.ClassA.cls'). Use it to state the package root deterministically when the glob's wildcard cannot precede the package directory.",
+          "type": "string"
+        },
+        "compile": {
+          "description": "When true, compile all successfully uploaded documents after upload (default: false)",
+          "type": "boolean"
+        },
+        "flags": {
+          "description": "Compilation flags (e.g., 'ck', 'cku'). Only used when compile is true",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Target namespace (default: configured)",
+          "type": "string"
+        },
+        "ignoreConflict": {
+          "description": "If true (default), each file overwrites its server copy without a version check. If false, a file whose document already exists is saved under a version check: it is overwritten unless the document changes on the server while it is being saved, in which case that file fails with DOCUMENT_CONFLICT and the others continue.",
+          "type": "boolean"
+        },
+        "allowStorageRegeneration": {
+          "description": "Boolean (true/false), default false. When false, a class file whose content drops one of the Storage definitions the class has now is refused (a failures entry with code STORAGE_DROPPED; nothing is stored for that file, and the other files continue); changing a Storage definition's content is allowed. When true, the file is uploaded, IRIS generates new storage at the next compile (which can change how existing rows are read), and the result's storageDrops names the dropped definitions. No effect on a new class or on other document types.",
+          "type": "boolean"
+        },
+        "server": {
+          "description": "Named server profile to target for this call (from `IRIS_PROFILES`). Omit to use the default server.",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "id": "42.11/storage-guard-schema/iris_doc_load@dev-core-preset",
+      "sanction": "S-42.11-storage-guard-schema",
+      "story": "42.11",
+      "golden": "wire",
+      "server": "iris-dev-mcp",
+      "session": "core-preset",
+      "label": "tools-list",
+      "pointer": "/result/tools/11/inputSchema/properties",
+      "op": "replace",
+      "old": {
+        "path": {
+          "type": "string",
+          "description": "Glob pattern for files to upload (e.g., 'c:/projects/src/**/*.cls'). The directory prefix before the first glob metacharacter is used as the base for document name mapping \u2014 so the wildcard must come BEFORE the package directory: 'c:/projects/src/**/*.cls' maps MyPkg/ClassA.cls to 'MyPkg.ClassA.cls', but 'c:/projects/src/MyPkg/*.cls' swallows MyPkg into the base and would map to the unqualified 'ClassA.cls'. Mismatched uploads are refused when the file's own Class/ROUTINE declaration disagrees; pass baseDir to state the package root deterministically."
+        },
+        "baseDir": {
+          "description": "Optional. Directory used verbatim as the base for document name mapping, INSTEAD of inferring the base from the glob pattern's first wildcard segment (e.g. baseDir='c:/projects/src' with path='c:/projects/src/MyPkg/*.cls' maps MyPkg/ClassA.cls to 'MyPkg.ClassA.cls'). Use it to state the package root deterministically when the glob's wildcard cannot precede the package directory.",
+          "type": "string"
+        },
+        "compile": {
+          "description": "When true, compile all successfully uploaded documents after upload (default: false)",
+          "type": "boolean"
+        },
+        "flags": {
+          "description": "Compilation flags (e.g., 'ck', 'cku'). Only used when compile is true",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Target namespace (default: configured)",
+          "type": "string"
+        },
+        "ignoreConflict": {
+          "description": "If true (default), each file overwrites its server copy unconditionally. If false, a file whose document already exists is saved under a version check: it is overwritten unless the document changes on the server while it is being saved, in which case that file fails with DOCUMENT_CONFLICT and the others continue.",
+          "type": "boolean"
+        },
+        "server": {
+          "description": "Named server profile to target for this call (from `IRIS_PROFILES`). Omit to use the default server.",
+          "type": "string"
+        }
+      },
+      "new": {
+        "path": {
+          "type": "string",
+          "description": "Glob pattern for files to upload (e.g., 'c:/projects/src/**/*.cls'). The directory prefix before the first glob metacharacter is used as the base for document name mapping \u2014 so the wildcard must come BEFORE the package directory: 'c:/projects/src/**/*.cls' maps MyPkg/ClassA.cls to 'MyPkg.ClassA.cls', but 'c:/projects/src/MyPkg/*.cls' swallows MyPkg into the base and would map to the unqualified 'ClassA.cls'. Mismatched uploads are refused when the file's own Class/ROUTINE declaration disagrees; pass baseDir to state the package root deterministically."
+        },
+        "baseDir": {
+          "description": "Optional. Directory used verbatim as the base for document name mapping, INSTEAD of inferring the base from the glob pattern's first wildcard segment (e.g. baseDir='c:/projects/src' with path='c:/projects/src/MyPkg/*.cls' maps MyPkg/ClassA.cls to 'MyPkg.ClassA.cls'). Use it to state the package root deterministically when the glob's wildcard cannot precede the package directory.",
+          "type": "string"
+        },
+        "compile": {
+          "description": "When true, compile all successfully uploaded documents after upload (default: false)",
+          "type": "boolean"
+        },
+        "flags": {
+          "description": "Compilation flags (e.g., 'ck', 'cku'). Only used when compile is true",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Target namespace (default: configured)",
+          "type": "string"
+        },
+        "ignoreConflict": {
+          "description": "If true (default), each file overwrites its server copy without a version check. If false, a file whose document already exists is saved under a version check: it is overwritten unless the document changes on the server while it is being saved, in which case that file fails with DOCUMENT_CONFLICT and the others continue.",
+          "type": "boolean"
+        },
+        "allowStorageRegeneration": {
+          "description": "Boolean (true/false), default false. When false, a class file whose content drops one of the Storage definitions the class has now is refused (a failures entry with code STORAGE_DROPPED; nothing is stored for that file, and the other files continue); changing a Storage definition's content is allowed. When true, the file is uploaded, IRIS generates new storage at the next compile (which can change how existing rows are read), and the result's storageDrops names the dropped definitions. No effect on a new class or on other document types.",
+          "type": "boolean"
+        },
+        "server": {
+          "description": "Named server profile to target for this call (from `IRIS_PROFILES`). Omit to use the default server.",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "id": "42.11/storage-guard-schema/iris_doc_xml_export@dev-main",
+      "sanction": "S-42.11-storage-guard-schema",
+      "story": "42.11",
+      "golden": "wire",
+      "server": "iris-dev-mcp",
+      "session": "main",
+      "label": "tools-list",
+      "pointer": "/result/tools/9/inputSchema/properties",
+      "op": "replace",
+      "old": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "export",
+            "import",
+            "list"
+          ],
+          "description": "Action to perform: \"export\", \"import\", or \"list\""
+        },
+        "docs": {
+          "description": "Document names to export (required for action \"export\", e.g., ['MyApp.Service.cls'])",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "content": {
+          "description": "XML content for import or list actions (required for action \"import\" and \"list\")",
+          "type": "string"
+        },
+        "compile": {
+          "description": "For action \"import\" only. When true, compile the imported documents in the same call via the Atelier load flags (the 'c' qualifier). Default false: documents are loaded but NOT compiled, and the response says so.",
+          "type": "boolean"
+        },
+        "flags": {
+          "description": "For action \"import\" only. Atelier load/compile flags (e.g., 'ck', 'cku'). Only used when compile is true; the 'c' (compile) qualifier is folded in automatically when absent or explicitly negated (e.g. '-c' becomes '-cc' \u2014 IRIS qualifier negation, last c wins).",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Target namespace (default: configured)",
+          "type": "string"
+        },
+        "server": {
+          "description": "Named server profile to target for this call (from `IRIS_PROFILES`). Omit to use the default server.",
+          "type": "string"
+        }
+      },
+      "new": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "export",
+            "import",
+            "list"
+          ],
+          "description": "Action to perform: \"export\", \"import\", or \"list\""
+        },
+        "docs": {
+          "description": "Document names to export (required for action \"export\", e.g., ['MyApp.Service.cls'])",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "content": {
+          "description": "XML content for import or list actions (required for action \"import\" and \"list\")",
+          "type": "string"
+        },
+        "compile": {
+          "description": "For action \"import\" only. When true, compile the imported documents in the same call via the Atelier load flags (the 'c' qualifier). Default false: documents are loaded but NOT compiled, and the response says so.",
+          "type": "boolean"
+        },
+        "flags": {
+          "description": "For action \"import\" only. Atelier load/compile flags (e.g., 'ck', 'cku'). Only used when compile is true; the 'c' (compile) qualifier is folded in automatically when absent or explicitly negated (e.g. '-c' becomes '-cc' \u2014 IRIS qualifier negation, last c wins).",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Target namespace (default: configured)",
+          "type": "string"
+        },
+        "allowStorageRegeneration": {
+          "description": "For action \"import\" only. Boolean (true/false), default false. When false, an import is refused (STORAGE_DROPPED, nothing loaded) if the XML of a class lacks one of the Storage definitions that class has now; changing a definition's content is allowed. When true, the import goes ahead, IRIS generates new storage at the next compile (which can change how existing rows are read), and the result's storageDrops names the dropped definitions. No effect on a new class or on other document types.",
+          "type": "boolean"
+        },
+        "server": {
+          "description": "Named server profile to target for this call (from `IRIS_PROFILES`). Omit to use the default server.",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "id": "42.11/storage-guard-schema/iris_env_promote@dev-main",
+      "sanction": "S-42.11-storage-guard-schema",
+      "story": "42.11",
+      "golden": "wire",
+      "server": "iris-dev-mcp",
+      "session": "main",
+      "label": "tools-list",
+      "pointer": "/result/tools/27/inputSchema/properties",
+      "op": "replace",
+      "old": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "plan",
+            "execute"
+          ],
+          "description": "Action to perform: 'plan' (read) or 'execute' (write, default-disabled; behind 4 gates -- see description)."
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Source profile name -- should match the 'source' used to produce 'diff' (from a prior iris_env_diff call). 'execute' re-fetches the CURRENT value from this profile live, for every allowlisted step."
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Target profile name -- should match the 'target' used to produce 'diff'. 'execute' writes ONLY to this profile, and Gate 4 evaluates governance against THIS profile's policy."
+        },
+        "diff": {
+          "description": "A prior iris_env_diff 'structuredContent' result. REQUIRED for BOTH actions: for 'plan' it is transformed into steps; for 'execute' it is RE-HASHED and compared against 'plan.planHash' (Gate 3, stale-plan protection) -- pass the SAME 'diff' that produced 'plan'.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "plan": {
+          "description": "Required for action 'execute': a prior 'plan' action's structuredContent result. Its 'planHash' is verified (Gate 3) against a fresh hash of 'diff' before any step runs, and its 'steps' array is the allowlist-checked, ordered source of truth for what 'steps' may reference.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "steps": {
+          "description": "Required for action 'execute' (Gate 2): a non-empty allowlist of 1-based 'plan.steps' indices to run. Every index must exist in 'plan.steps' or execution is refused naming the out-of-range index/indices.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "confirm": {
+          "description": "Required (must be true) for action 'execute' (Gate 1) -- the inner intent gate, on top of the outer governance default-disable that already gates the whole 'execute' action.",
+          "type": "boolean"
+        },
+        "namespace": {
+          "description": "Namespace override applied to BOTH 'source' and 'target' resolution for 'execute' writes (mirrors iris_env_diff's 'namespace' convention). Omit to use each profile's own configured default namespace independently. Not used by 'plan' (namespaces come from the diff/plan content instead).",
+          "type": "string"
+        },
+        "server": {
+          "description": "Named server profile to target for this call (from `IRIS_PROFILES`). Omit to use the default server.",
+          "type": "string"
+        }
+      },
+      "new": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "plan",
+            "execute"
+          ],
+          "description": "Action to perform: 'plan' (read) or 'execute' (write, default-disabled; behind 4 gates -- see description)."
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Source profile name -- should match the 'source' used to produce 'diff' (from a prior iris_env_diff call). 'execute' re-fetches the CURRENT value from this profile live, for every allowlisted step."
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Target profile name -- should match the 'target' used to produce 'diff'. 'execute' writes ONLY to this profile, and Gate 4 evaluates governance against THIS profile's policy."
+        },
+        "diff": {
+          "description": "A prior iris_env_diff 'structuredContent' result. REQUIRED for BOTH actions: for 'plan' it is transformed into steps; for 'execute' it is RE-HASHED and compared against 'plan.planHash' (Gate 3, stale-plan protection) -- pass the SAME 'diff' that produced 'plan'.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "plan": {
+          "description": "Required for action 'execute': a prior 'plan' action's structuredContent result. Its 'planHash' is verified (Gate 3) against a fresh hash of 'diff' before any step runs, and its 'steps' array is the allowlist-checked, ordered source of truth for what 'steps' may reference.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "steps": {
+          "description": "Required for action 'execute' (Gate 2): a non-empty allowlist of 1-based 'plan.steps' indices to run. Every index must exist in 'plan.steps' or execution is refused naming the out-of-range index/indices.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "confirm": {
+          "description": "Required (must be true) for action 'execute' (Gate 1) -- the inner intent gate, on top of the outer governance default-disable that already gates the whole 'execute' action.",
+          "type": "boolean"
+        },
+        "namespace": {
+          "description": "Namespace override applied to BOTH 'source' and 'target' resolution for 'execute' writes (mirrors iris_env_diff's 'namespace' convention). Omit to use each profile's own configured default namespace independently. Not used by 'plan' (namespaces come from the diff/plan content instead).",
+          "type": "string"
+        },
+        "allowStorageRegeneration": {
+          "description": "For action 'execute' only. Boolean (true/false), default false. When false, 'execute' is refused before any write (STORAGE_DROPPED) if the source copy of a promoted class lacks one of the Storage definitions the target class has now; changing a definition's content is allowed. When true, the classes are promoted, IRIS generates new storage on the target at the next compile (which can change how existing rows are read), and the confirmation dialog and the result's storageDrops name the dropped definitions.",
+          "type": "boolean"
+        },
+        "server": {
+          "description": "Named server profile to target for this call (from `IRIS_PROFILES`). Omit to use the default server.",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "id": "42.11/storage-guard-text/iris_doc_load@dev-main",
+      "sanction": "S-42.11-storage-guard-text",
+      "story": "42.11",
+      "golden": "wire",
+      "server": "iris-dev-mcp",
+      "session": "main",
+      "label": "tools-list",
+      "pointer": "/result/tools/21/description",
+      "op": "replace",
+      "appendOnly": true,
+      "old": "Upload multiple ObjectScript files from a local directory into IRIS. Accepts a glob pattern to match files. File paths are mapped to IRIS document names (path separators become dots). Optionally compiles all uploaded documents afterward. This is the preferred way to deploy ObjectScript classes to IRIS \u2014 always create or edit .cls files on disk first, then use this tool to upload and compile. This ensures all code is source-controlled and reviewable. Uploads whose path-derived document name disagrees with the file's own Class/ROUTINE declaration are refused with both names named \u2014 this guards against trap-shaped globs (wildcard AFTER the package directory, e.g. 'src/MyPkg/*.cls') silently stripping the package prefix. A leading UTF-8 BOM is stripped before upload, and a per-document error reported by the server in the PUT response (e.g. an illegal header line) is surfaced as an upload failure rather than counted as a success.",
+      "new": "Upload multiple ObjectScript files from a local directory into IRIS. Accepts a glob pattern to match files. File paths are mapped to IRIS document names (path separators become dots). Optionally compiles all uploaded documents afterward. This is the preferred way to deploy ObjectScript classes to IRIS \u2014 always create or edit .cls files on disk first, then use this tool to upload and compile. This ensures all code is source-controlled and reviewable. Uploads whose path-derived document name disagrees with the file's own Class/ROUTINE declaration are refused with both names named \u2014 this guards against trap-shaped globs (wildcard AFTER the package directory, e.g. 'src/MyPkg/*.cls') silently stripping the package prefix. A leading UTF-8 BOM is stripped before upload, and a per-document error reported by the server in the PUT response (e.g. an illegal header line) is surfaced as an upload failure rather than counted as a success. For an existing class, a file whose content drops one of the class's Storage definitions is refused and nothing is stored for that file (a failures entry with code STORAGE_DROPPED; the other files continue), because IRIS would generate new storage at the next compile, which can change how existing rows are read; allowStorageRegeneration (default false) lets it through, and the result names the dropped definitions."
+    },
+    {
+      "id": "42.11/storage-guard-text/iris_doc_load@dev-core-preset",
+      "sanction": "S-42.11-storage-guard-text",
+      "story": "42.11",
+      "golden": "wire",
+      "server": "iris-dev-mcp",
+      "session": "core-preset",
+      "label": "tools-list",
+      "pointer": "/result/tools/11/description",
+      "op": "replace",
+      "appendOnly": true,
+      "old": "Upload multiple ObjectScript files from a local directory into IRIS. Accepts a glob pattern to match files. File paths are mapped to IRIS document names (path separators become dots). Optionally compiles all uploaded documents afterward. This is the preferred way to deploy ObjectScript classes to IRIS \u2014 always create or edit .cls files on disk first, then use this tool to upload and compile. This ensures all code is source-controlled and reviewable. Uploads whose path-derived document name disagrees with the file's own Class/ROUTINE declaration are refused with both names named \u2014 this guards against trap-shaped globs (wildcard AFTER the package directory, e.g. 'src/MyPkg/*.cls') silently stripping the package prefix. A leading UTF-8 BOM is stripped before upload, and a per-document error reported by the server in the PUT response (e.g. an illegal header line) is surfaced as an upload failure rather than counted as a success.",
+      "new": "Upload multiple ObjectScript files from a local directory into IRIS. Accepts a glob pattern to match files. File paths are mapped to IRIS document names (path separators become dots). Optionally compiles all uploaded documents afterward. This is the preferred way to deploy ObjectScript classes to IRIS \u2014 always create or edit .cls files on disk first, then use this tool to upload and compile. This ensures all code is source-controlled and reviewable. Uploads whose path-derived document name disagrees with the file's own Class/ROUTINE declaration are refused with both names named \u2014 this guards against trap-shaped globs (wildcard AFTER the package directory, e.g. 'src/MyPkg/*.cls') silently stripping the package prefix. A leading UTF-8 BOM is stripped before upload, and a per-document error reported by the server in the PUT response (e.g. an illegal header line) is surfaced as an upload failure rather than counted as a success. For an existing class, a file whose content drops one of the class's Storage definitions is refused and nothing is stored for that file (a failures entry with code STORAGE_DROPPED; the other files continue), because IRIS would generate new storage at the next compile, which can change how existing rows are read; allowStorageRegeneration (default false) lets it through, and the result names the dropped definitions."
+    },
+    {
+      "id": "42.11/storage-guard-text/iris_doc_xml_export@dev-main",
+      "sanction": "S-42.11-storage-guard-text",
+      "story": "42.11",
+      "golden": "wire",
+      "server": "iris-dev-mcp",
+      "session": "main",
+      "label": "tools-list",
+      "pointer": "/result/tools/9/description",
+      "op": "replace",
+      "appendOnly": true,
+      "old": "Export, import, or list ObjectScript documents in legacy XML format. Use action \"export\" to export documents to XML, \"import\" to import from XML content, or \"list\" to list documents contained in XML without importing. By default an import LOADS definitions WITHOUT compiling them \u2014 an imported class is not usable until compiled (pass compile: true to compile in the same call, or use iris_doc_compile afterwards). When compile is not requested the response states plainly that the documents are uncompiled. Non-empty per-file status text reported by IRIS (e.g. a compile error) is surfaced in the response.",
+      "new": "Export, import, or list ObjectScript documents in legacy XML format. Use action \"export\" to export documents to XML, \"import\" to import from XML content, or \"list\" to list documents contained in XML without importing. By default an import LOADS definitions WITHOUT compiling them \u2014 an imported class is not usable until compiled (pass compile: true to compile in the same call, or use iris_doc_compile afterwards). When compile is not requested the response states plainly that the documents are uncompiled. Non-empty per-file status text reported by IRIS (e.g. a compile error) is surfaced in the response. An import that would drop one of the Storage definitions a class has now (its XML lacks that definition) is refused with STORAGE_DROPPED and nothing is loaded, because IRIS would generate new storage at the next compile, which can change how existing rows are read; allowStorageRegeneration (default false) lets it through, and the result names the dropped definitions."
+    },
+    {
+      "id": "42.11/storage-guard-text/iris_env_promote@dev-main",
+      "sanction": "S-42.11-storage-guard-text",
+      "story": "42.11",
+      "golden": "wire",
+      "server": "iris-dev-mcp",
+      "session": "main",
+      "label": "tools-list",
+      "pointer": "/result/tools/27/description",
+      "op": "replace",
+      "appendOnly": true,
+      "old": "Turn a prior iris_env_diff result into an ordered, reviewable promotion PLAN (source -> target), or EXECUTE an allowlisted subset of that plan against 'target'. Actions:\n\n- **plan** (read, enabled by default): a PURE TRANSFORM of a prior iris_env_diff 'structuredContent' result -- pass it as 'diff'. No IRIS connection is made; the result is deterministic and idempotent given the same diff. Steps are grouped by domain in DEPENDENCY ORDER: mappings -> documents (put+compile, batched) -> defaultSettings -> webapps -> config; within a domain, steps are ordered by subject. Each step is {index, domain, operation, subject, detail, direction:'sourceToTarget'}. Every 'onlyInTarget' item from the diff (something exists on the target only) is emitted as a WARNING, never a step -- NO delete/remove operation exists anywhere in any plan, in this or any future version. A credential-redacted value from the diff (e.g. '[REDACTED:differs]') survives into the plan's 'detail' text unchanged -- the plaintext never appears in plan output. The plan embeds a 'planHash' (SHA-256 of the source diff, canonical/key-sorted JSON) that 'execute' uses to detect and refuse a stale plan (one generated from a diff that has since changed).\n- **execute** (write, DEFAULT-DISABLED): run ONLY the allowlisted 'steps' indices from 'plan', IN PLAN ORDER, against 'target' -- behind FOUR refuse-before-any-write gates, each mutating NOTHING on failure: (1) 'confirm' must be true; (2) 'steps' must be a non-empty array whose every index exists in 'plan.steps' (out-of-range indices are refused); (3) plan-hash freshness -- pass the SAME 'diff' that produced 'plan'; if it no longer hashes to 'plan.planHash' the plan is STALE and execution is refused (regenerate the plan first); (4) the TARGET profile's OWN governance policy must enable every write family used by the allowlisted steps (e.g. iris_config_manage:set, iris_doc_put/iris_doc_compile, iris_mapping_manage:create[/:delete for an update], iris_default_settings_manage:set, iris_webapp_manage:modify) -- a disabled key refuses execution NAMING that key, which is what stops a caller on an unrestricted profile from writing into a governance-locked target. Once all four gates pass, steps run IN PLAN ORDER and HALT ON THE FIRST FAILURE: that step is 'failed', every step after it is 'skipped' (never attempted), every step before it is 'completed' -- a partial apply is always reported, never hidden (per-step {index,domain,operation,subject,status,error?} in the 'executed' array). EVERY write RE-FETCHES the CURRENT value from 'source' live at execute time (the plan carries no write data -- it is a spec, not a data snapshot); a credential System Default Settings value is re-fetched live and forwarded to 'target' WITHOUT ever appearing in this tool's output. 'documents' steps are PUT sequentially (source -> target) then COMPILED in ONE batched call. 'execute' NEVER deletes a target-only item in any version -- the ONLY delete it ever issues is the intra-'updateMapping' delete+create REPLACE of a mapping 'source' also has.\n\nGOVERNANCE -- 'execute' is a default-disabled write (a real environment-mutating action, NOT a recovery-of-last-resort like iris_production_control:clean). Enable via IRIS_GOVERNANCE, e.g.:\n{\"global\": {\"iris_env_promote:execute\": true}}\n\nSAFETY -- direction is always sourceToTarget (promote source's state onto target); nothing on the target is EVER deleted by this tool, in any action, in any version.\n\nHUMAN CONFIRMATION -- when the MCP client supports form elicitation, 'execute' also asks the person in a confirmation dialog, after all four gates pass and right before the first write to 'target'; only an accept with Confirm ticked proceeds, and a decline or a dismissal returns CONFIRMATION_DECLINED with nothing changed (do not repeat the call unless the person asks). A client without elicitation is not asked, and the call works as described above.",
+      "new": "Turn a prior iris_env_diff result into an ordered, reviewable promotion PLAN (source -> target), or EXECUTE an allowlisted subset of that plan against 'target'. Actions:\n\n- **plan** (read, enabled by default): a PURE TRANSFORM of a prior iris_env_diff 'structuredContent' result -- pass it as 'diff'. No IRIS connection is made; the result is deterministic and idempotent given the same diff. Steps are grouped by domain in DEPENDENCY ORDER: mappings -> documents (put+compile, batched) -> defaultSettings -> webapps -> config; within a domain, steps are ordered by subject. Each step is {index, domain, operation, subject, detail, direction:'sourceToTarget'}. Every 'onlyInTarget' item from the diff (something exists on the target only) is emitted as a WARNING, never a step -- NO delete/remove operation exists anywhere in any plan, in this or any future version. A credential-redacted value from the diff (e.g. '[REDACTED:differs]') survives into the plan's 'detail' text unchanged -- the plaintext never appears in plan output. The plan embeds a 'planHash' (SHA-256 of the source diff, canonical/key-sorted JSON) that 'execute' uses to detect and refuse a stale plan (one generated from a diff that has since changed).\n- **execute** (write, DEFAULT-DISABLED): run ONLY the allowlisted 'steps' indices from 'plan', IN PLAN ORDER, against 'target' -- behind FOUR refuse-before-any-write gates, each mutating NOTHING on failure: (1) 'confirm' must be true; (2) 'steps' must be a non-empty array whose every index exists in 'plan.steps' (out-of-range indices are refused); (3) plan-hash freshness -- pass the SAME 'diff' that produced 'plan'; if it no longer hashes to 'plan.planHash' the plan is STALE and execution is refused (regenerate the plan first); (4) the TARGET profile's OWN governance policy must enable every write family used by the allowlisted steps (e.g. iris_config_manage:set, iris_doc_put/iris_doc_compile, iris_mapping_manage:create[/:delete for an update], iris_default_settings_manage:set, iris_webapp_manage:modify) -- a disabled key refuses execution NAMING that key, which is what stops a caller on an unrestricted profile from writing into a governance-locked target. Once all four gates pass, steps run IN PLAN ORDER and HALT ON THE FIRST FAILURE: that step is 'failed', every step after it is 'skipped' (never attempted), every step before it is 'completed' -- a partial apply is always reported, never hidden (per-step {index,domain,operation,subject,status,error?} in the 'executed' array). EVERY write RE-FETCHES the CURRENT value from 'source' live at execute time (the plan carries no write data -- it is a spec, not a data snapshot); a credential System Default Settings value is re-fetched live and forwarded to 'target' WITHOUT ever appearing in this tool's output. 'documents' steps are PUT sequentially (source -> target) then COMPILED in ONE batched call. 'execute' NEVER deletes a target-only item in any version -- the ONLY delete it ever issues is the intra-'updateMapping' delete+create REPLACE of a mapping 'source' also has.\n\nGOVERNANCE -- 'execute' is a default-disabled write (a real environment-mutating action, NOT a recovery-of-last-resort like iris_production_control:clean). Enable via IRIS_GOVERNANCE, e.g.:\n{\"global\": {\"iris_env_promote:execute\": true}}\n\nSAFETY -- direction is always sourceToTarget (promote source's state onto target); nothing on the target is EVER deleted by this tool, in any action, in any version.\n\nHUMAN CONFIRMATION -- when the MCP client supports form elicitation, 'execute' also asks the person in a confirmation dialog, after all four gates pass and right before the first write to 'target'; only an accept with Confirm ticked proceeds, and a decline or a dismissal returns CONFIRMATION_DECLINED with nothing changed (do not repeat the call unless the person asks). A client without elicitation is not asked, and the call works as described above.\n\nSTORAGE GUARD -- before the confirmation dialog and before any write, 'execute' reads the source and target copy of each class it would promote; if a source copy lacks one of the Storage definitions the target class has now, the whole execute is refused with STORAGE_DROPPED and nothing changes, because IRIS would generate new storage on the target at the next compile, which can change how existing rows are read. allowStorageRegeneration (default false) lets it through; the dialog and the result then name the dropped definitions."
     }
   ]
 }

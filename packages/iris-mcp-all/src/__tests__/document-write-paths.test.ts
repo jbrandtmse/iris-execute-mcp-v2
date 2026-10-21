@@ -7,7 +7,7 @@
  * requires the found set to equal `DOCUMENT_WRITE_PATHS` exactly: a new write path turns it red, and so
  * does a roster entry whose path is gone.
  *
- * The roster is exhaustive as of 2026-10-15 (Story 38.3). To add a path, add a roster entry with one of
+ * The roster is exhaustive as of 2026-10-21 (Story 42.11). To add a path, add a roster entry with one of
  * the four verdicts:
  *  - `guarded`: the Storage-drop guard covers it;
  *  - `excluded`: no guard, by decision, with a ledger id whose `reopen_if` says when to reopen it;
@@ -36,6 +36,8 @@ interface WritePath {
   reason: string;
   /** The deferred-work ledger id of an `excluded` path. */
   ledger?: string;
+  /** The shared-guard calls a `guarded` path's source must contain. */
+  guard?: readonly string[];
 }
 
 type Language = "typescript" | "objectscript";
@@ -68,7 +70,7 @@ const FORBIDDEN: Array<{ label: string; expression: RegExp }> = [
 
 const INTEROP = "src/ExecuteMCPv2/REST/Interop.cls";
 
-/** Every document-writing path as of 2026-10-15, in the order the verdicts are recorded. */
+/** Every document-writing path as of 2026-10-21 (Story 42.11), in the order the verdicts are recorded. */
 export const DOCUMENT_WRITE_PATHS: readonly WritePath[] = [
   {
     file: "packages/iris-dev-mcp/src/tools/doc.ts",
@@ -76,6 +78,7 @@ export const DOCUMENT_WRITE_PATHS: readonly WritePath[] = [
     count: 4,
     verdict: "guarded",
     reason: "iris_doc_put: for a class without allowStorageRegeneration, the 409 that the unversioned PUT draws feeds the Storage-drop guard before any write (a refused drop sends no write); a non-class document, and a class with allowStorageRegeneration, are not guarded",
+    guard: ["droppedStorageDefinitions(", "storageDroppedRefusal("],
   },
   {
     file: "packages/iris-dev-mcp/src/tools/doc-edit.ts",
@@ -83,30 +86,31 @@ export const DOCUMENT_WRITE_PATHS: readonly WritePath[] = [
     count: 1,
     verdict: "guarded",
     reason: "iris_doc_edit: the edits are applied to the one read of the class, and for action apply the Storage-drop guard compares that read with the edited lines before the one version-checked PUT (a refused drop sends no write); action regenerateStorage is the default-disabled override, and a non-class document is not guarded",
+    guard: ["droppedStorageDefinitions(", "storageDroppedRefusal("],
   },
   {
     file: "packages/iris-dev-mcp/src/tools/load.ts",
     pattern: "put",
     count: 2,
-    verdict: "excluded",
-    reason: "iris_doc_load uploads files with ignoreConflict on by default and the file is the source of truth for the class text; with ignoreConflict false the second PUT is the version-checked repeat of the first (Story 38.7, DW-549), which changes the version handling and not the Storage handling",
-    ledger: "DW-544",
+    verdict: "guarded",
+    reason: "iris_doc_load: for a class file without allowStorageRegeneration, a GET of the class (ignoreConflict true) or the 409 of the unversioned PUT (ignoreConflict false) feeds the Storage-drop guard before any write; a refused file is a failures entry with code STORAGE_DROPPED, the other files continue, and the PUT sequence of a file that drops nothing is unchanged (the second PUT is the version-checked repeat of the first, Story 38.7, DW-549); a new class, a non-class document and a class with allowStorageRegeneration are not refused",
+    guard: ["droppedStorageDefinitions(", "storageDroppedDetail("],
   },
   {
     file: "packages/iris-dev-mcp/src/tools/env-promote.ts",
     pattern: "put",
     count: 1,
-    verdict: "excluded",
-    reason: "iris_env_promote execute: a sync replaces the target's class, Storage included, by design; plan-gated and default-disabled",
-    ledger: "DW-545",
+    verdict: "guarded",
+    reason: "iris_env_promote execute: before the confirmation dialog and before any write, a GET-only preflight reads the source and target copy of each class step; a source copy that drops a Storage definition the target class has refuses the whole execute unless allowStorageRegeneration is set, and the batch PUTs the source text the preflight checked; a non-class document is not guarded",
+    guard: ["droppedStorageDefinitions(", "storageDropsRefusal("],
   },
   {
     file: "packages/iris-dev-mcp/src/tools/format.ts",
     pattern: "xmlLoad",
     count: 1,
-    verdict: "excluded",
-    reason: "iris_doc_xml_export import: an XML export carries its own Storage elements and is the source of truth for the class it describes",
-    ledger: "DW-546",
+    verdict: "guarded",
+    reason: "iris_doc_xml_export import: before the one POST, a GET of each <Class> of the XML is compared with the Storage elements the XML holds for it; a class that drops a definition refuses the whole import unless allowStorageRegeneration is set; a new class and an XML with no class are not refused, and export and list write nothing",
+    guard: ["xmlClassStorageNames(", "storageDropsRefusal("],
   },
   {
     file: "packages/shared/src/bootstrap.ts",
@@ -295,23 +299,32 @@ describe("every document-writing path has a recorded verdict (Story 38.3, AC-6, 
     expect(new Set(ledgerIds).size, "each exclusion has its own ledger row").toBe(ledgerIds.length);
   });
 
-  it("the guarded path is found, and its source runs the shared guard (a non-empty guarded set needs a real put)", () => {
+  it("every guarded path is found, and its source runs the shared guard calls that its entry names (a non-empty guarded set needs a real put)", () => {
     const guarded = DOCUMENT_WRITE_PATHS.filter((entry) => entry.verdict === "guarded");
     expect(guarded.length).toBeGreaterThan(0);
     for (const entry of guarded) {
+      expect(entry.guard?.length ?? 0, `${key(entry)} names the shared guard calls its source must contain`).toBeGreaterThan(0);
       expect(found.map(key), `${key(entry)} is found on disk`).toContain(key(entry));
       const source = readFileSync(path.join(REPO_ROOT, entry.file), "utf8");
-      expect(source).toContain("droppedStorageDefinitions(");
-      expect(source).toContain("storageDroppedRefusal(");
+      for (const call of entry.guard ?? []) expect(source, `${entry.file} calls ${call}`).toContain(call);
     }
   });
 
-  it("the three recorded exclusions are the Story 38.3 set: iris_doc_load, the iris_env_promote execute sync and the XML import", () => {
-    const excluded = DOCUMENT_WRITE_PATHS.filter((entry) => entry.verdict === "excluded").map((entry) => entry.file);
-    expect(excluded).toEqual([
+  it("all five agent class-write paths are guarded, and no path is excluded (Story 42.11: the Story 38.3 exclusions are gone)", () => {
+    const guarded = DOCUMENT_WRITE_PATHS.filter((entry) => entry.verdict === "guarded").map((entry) => entry.file);
+    expect(guarded).toEqual([
+      "packages/iris-dev-mcp/src/tools/doc.ts",
+      "packages/iris-dev-mcp/src/tools/doc-edit.ts",
       "packages/iris-dev-mcp/src/tools/load.ts",
       "packages/iris-dev-mcp/src/tools/env-promote.ts",
       "packages/iris-dev-mcp/src/tools/format.ts",
     ]);
+    expect(DOCUMENT_WRITE_PATHS.filter((entry) => entry.verdict === "excluded")).toEqual([]);
+  });
+
+  it("only a guarded path names guard calls", () => {
+    for (const entry of DOCUMENT_WRITE_PATHS) {
+      if (entry.verdict !== "guarded") expect(entry.guard, `${key(entry)} is not guarded`).toBeUndefined();
+    }
   });
 });
