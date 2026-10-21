@@ -1,5 +1,7 @@
 # Orchestrator decisions — wave 8 (`/epic-cycle 43`, then `/epic-cycle 42`)
 
+> **Paused 2026-10-21 for an account switch (user request, weekly quota at 97%).** Stories 42.1, 42.10 and 42.11 are committed. Story 42.2 is at `qa_complete`: its code review is the next stage. The tree is clean, and `epic42` is pushed.
+>
 > **Epic 42 in progress (started 2026-10-21).** The Planner's start message arrived, and `epic42` was cut from `feature/feature-wave-8-published-install` at `ebd1b33`. Lead-only steps (the release-environment approval, the GitHub environment and npm trusted publishing or a token, the Marketplace publisher and Open VSX namespace, the Developer Community account, and human-only re-certification rows) are requested through the Planner session `iris-execute-mcp-v2-14` when the run reaches them.
 >
 > **Epic 43 complete (2026-10-21).** Stories 43.1 to 43.4 are done and merged into `feature/feature-wave-8-published-install` at `31d2796`, and `epic43` is deleted. No main merge happens between 43 and 42. User action items opened: one VS Code Copilot confirmation-dialog run (decision #32). DW-615 is still open from wave 7.
