@@ -550,7 +550,7 @@ development_status:
   42-8-claude-code-plugin-and-registry-listings: backlog
   42-9-install-docs-and-client-re-certification: backlog
   42-10-pre-1-0-tool-surface-corrections: done
-  42-11-storage-guard-on-every-document-write: ready-for-dev
+  42-11-storage-guard-on-every-document-write: in-progress
   epic-42-retrospective: optional
 
   epic-43: done
