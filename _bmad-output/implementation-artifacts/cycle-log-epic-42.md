@@ -47,3 +47,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-21T16:13:20Z	Epic 42	spine_updated	ad=AD-19,AD-15 reason=dev_complete_decision_41 by=lead story=42-10-pre-1-0-tool-surface-corrections lint=ok
 2026-10-21T16:13:20Z	Story 42.10	adr_verifications_complete	tool=none acs=none result=none_required evidence= mutations=none model=claude-opus-5-5
 2026-10-21T16:13:20Z	Story 42.10	stage_spawned	stage=qa spawn_at=2026-10-21T16:13:20Z model=claude-sonnet-5-5 agent_name=42-10-pre-1-0-tool-surface-corrections-qa-1 cycle_iteration=1
+2026-10-21T16:26:23Z	Story 42.10	qa_complete	spawn_at=2026-10-21T16:13:20Z model=claude-sonnet-5-5 tests_added=1_file(8_tests) mutations_demonstrated=3 first_run_failures=0 clarifications=0 closing_sections_present=true cycle_iteration=1 note=Rule55_python_heredoc_used_once_for_a_test_edit(verified_ascii+lint)
+2026-10-21T16:26:23Z	Story 42.10	stage_spawned	stage=code-review spawn_at=2026-10-21T16:26:23Z model=claude-opus-5-5 agent_name=42-10-pre-1-0-tool-surface-corrections-code-review-1 cycle_iteration=1
