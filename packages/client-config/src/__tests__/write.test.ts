@@ -30,11 +30,11 @@ import {
 import { MemFs, fixedNow, readFixture } from "./helpers.js";
 
 const PKG: Record<CanonicalServerName, string> = {
-  "iris-dev-mcp": "@iris-mcp/dev",
-  "iris-admin-mcp": "@iris-mcp/admin",
-  "iris-ops-mcp": "@iris-mcp/ops",
-  "iris-interop-mcp": "@iris-mcp/interop",
-  "iris-data-mcp": "@iris-mcp/data",
+  "iris-dev-mcp": "@iris-mcp/dev@1",
+  "iris-admin-mcp": "@iris-mcp/admin@1",
+  "iris-ops-mcp": "@iris-mcp/ops@1",
+  "iris-interop-mcp": "@iris-mcp/interop@1",
+  "iris-data-mcp": "@iris-mcp/data@1",
 };
 
 function canonicalEntryForTest(name: CanonicalServerName): CanonicalEntry {
@@ -115,7 +115,7 @@ describe("executeNativeEdit (AC 33.1.1)", () => {
 
   it("33-1-R2 / 33-5-R1: toml set-flag splices a CRLF-terminated line into a CRLF file — no bare LF introduced", () => {
     const adapter = adapterOf("codex");
-    const content = ["[mcp_servers.iris-dev-mcp]", 'command = "npx"', 'args = ["-y", "@iris-mcp/dev"]', ""].join("\r\n");
+    const content = ["[mcp_servers.iris-dev-mcp]", 'command = "npx"', 'args = ["-y", "@iris-mcp/dev@1"]', ""].join("\r\n");
     const disable = diff(content, canonicalEntryForTest("iris-dev-mcp"), adapter, "user", "disable");
     if (!disable.ok) throw new Error("diff must succeed");
     const after = executeNativeEdit(content, disable.native);
@@ -201,7 +201,7 @@ describe("executeNativeEdit (AC 33.1.1)", () => {
       const parsed = parseToml(executeNativeEdit(content, result.native)) as { mcp_servers: Record<string, Record<string, unknown>> };
       const written = parsed.mcp_servers["iris-dev-mcp"] ?? {};
       expect(written.command).toBe("npx");
-      expect(written.args).toEqual(["-y", "@iris-mcp/dev"]);
+      expect(written.args).toEqual(["-y", "@iris-mcp/dev@1"]);
       expect(written.env).toEqual({ IRIS_NAMESPACE: "HSCUSTOM" }); // pre-fix: { IRIS_NAMESPACE, args: [...] }
     }
   });
@@ -215,7 +215,7 @@ describe("executeNativeEdit (AC 33.1.1)", () => {
     const parsed = parseToml(after) as { mcp_servers: Record<string, Record<string, unknown>> };
     const written = parsed.mcp_servers["iris-dev-mcp"] ?? {};
     expect(written.command).toBe("npx");
-    expect(written.args).toEqual(["-y", "@iris-mcp/dev"]);
+    expect(written.args).toEqual(["-y", "@iris-mcp/dev@1"]);
     expect(after.indexOf("command = ")).toBeLessThan(after.indexOf("args = "));
   });
 

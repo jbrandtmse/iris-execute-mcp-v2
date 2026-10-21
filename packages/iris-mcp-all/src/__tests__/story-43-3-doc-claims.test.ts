@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,7 +25,9 @@ const squash = (text: string): string => text.replace(/\s+/g, " ");
 const rootReadme = read("README.md");
 const sharedReadme = read("packages/shared/README.md");
 const changelog = read("CHANGELOG.md");
-const changeset = read(".changeset/story-43-3-human-confirmation.md");
+// `changeset version` consumes (deletes) the file, so the bump map is read and checked while it exists.
+const changesetPresent = existsSync(path.join(REPO_ROOT, ".changeset/story-43-3-human-confirmation.md"));
+const changeset = changesetPresent ? read(".changeset/story-43-3-human-confirmation.md") : "";
 
 /** The first line of `text` that starts with `prefix`; fails the test when there is none. */
 function lineStarting(text: string, prefix: string): string {
@@ -151,8 +153,9 @@ describe("Story 43.3: the CHANGELOG entry and the changeset", () => {
 
   it("sits directly below the Story 43.4 entry", () => {
     const headings = changelog.split("\n").filter((line) => line.startsWith("## "));
-    expect(headings[0]).toContain("Story 43.4:");
-    expect(headings[1]).toContain("Story 43.3: Human confirmation through elicitation");
+    const index = headings.findIndex((heading) => heading.includes("Story 43.4:"));
+    expect(index, "the CHANGELOG has the Story 43.4 entry").toBeGreaterThanOrEqual(0);
+    expect(headings[index + 1]).toContain("Story 43.3: Human confirmation through elicitation");
     expect(entry.length).toBeGreaterThan(1000);
   });
 
@@ -168,7 +171,7 @@ describe("Story 43.3: the CHANGELOG entry and the changeset", () => {
     expect(entry).toContain("the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys)");
   });
 
-  it("the changeset is a patch for @iris-mcp/shared and the five servers, and nothing else", () => {
+  it.skipIf(!changesetPresent)("the changeset is a patch for @iris-mcp/shared and the five servers, and nothing else", () => {
     const frontmatter = /^---\n([\s\S]*?)\n---/.exec(changeset)?.[1] ?? "";
     const bumps = frontmatter.split("\n").map((line) => line.trim());
     expect(bumps).toEqual([

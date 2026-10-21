@@ -47,25 +47,30 @@ function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
 }
 
 describe("resolveGovernanceCli — resolution order mirrors 31.6", () => {
-  it("published mode (default): npx -y -p @iris-mcp/shared iris-mcp-governance", async () => {
+  it("published mode (default): npx -y -p @iris-mcp/shared@1 iris-mcp-governance", async () => {
     const resolution = await resolveGovernanceCli(settings(), false);
     expect(resolution).toEqual({
       ok: true,
       target: {
         command: "npx",
-        baseArgs: ["-y", "-p", GOVERNANCE_CLI_NPM_PACKAGE, GOVERNANCE_CLI_BIN_NAME],
+        baseArgs: ["-y", "-p", "@iris-mcp/shared@1", GOVERNANCE_CLI_BIN_NAME],
         extraEnv: {},
         mode: "npx",
       },
     });
+    expect(GOVERNANCE_CLI_NPM_PACKAGE).toBe("@iris-mcp/shared");
   });
 
   it("published mode for `universe` additionally -p-installs the five server packages (DERIVED from PACKAGE_NPM_NAME — never a hand-maintained roster), so the CLI finds their built dist as npm siblings", async () => {
     const resolution = await resolveGovernanceCli(settings(), true);
     if (!resolution.ok) throw new Error("expected ok resolution");
     const expectedPackages = [
-      GOVERNANCE_CLI_NPM_PACKAGE,
-      ...Object.values(PACKAGE_NPM_NAME),
+      "@iris-mcp/shared@1",
+      "@iris-mcp/admin@1",
+      "@iris-mcp/data@1",
+      "@iris-mcp/dev@1",
+      "@iris-mcp/interop@1",
+      "@iris-mcp/ops@1",
     ];
     const expectedArgs = ["-y"];
     for (const pkg of expectedPackages) expectedArgs.push("-p", pkg);
@@ -253,7 +258,7 @@ describe("runGovernanceCli — captured output, never throws", () => {
     };
   }
 
-  const target = { command: "npx", baseArgs: ["-y", "-p", "@iris-mcp/shared", "iris-mcp-governance"], extraEnv: {}, mode: "npx" as const };
+  const target = { command: "npx", baseArgs: ["-y", "-p", "@iris-mcp/shared@1", "iris-mcp-governance"], extraEnv: {}, mode: "npx" as const };
 
   it("spawns command + baseArgs + command argv, captures stdout/stderr/status (POSIX shape — no shell wrapping)", async () => {
     let seen: { command: string; args: string[] } | undefined;
@@ -274,7 +279,7 @@ describe("runGovernanceCli — captured output, never throws", () => {
     expect(result).toEqual<GovernanceCliResult>({ status: 0, stdout: "Set ok\n", stderr: "" });
     expect(seen?.command).toBe("npx");
     expect(seen?.args).toEqual([
-      "-y", "-p", "@iris-mcp/shared", "iris-mcp-governance",
+      "-y", "-p", "@iris-mcp/shared@1", "iris-mcp-governance",
       "set", "iris_doc_put", "false", "--file", "/p/g.json", "--profile", "prod",
     ]);
   });
@@ -298,7 +303,7 @@ describe("runGovernanceCli — captured output, never throws", () => {
     expect(seen?.command.toLowerCase()).toContain("cmd.exe");
     expect(seen?.args).toEqual([
       "/d", "/s", "/c", "npx",
-      "-y", "-p", "@iris-mcp/shared", "iris-mcp-governance",
+      "-y", "-p", "@iris-mcp/shared@1", "iris-mcp-governance",
       "universe", "--json", "--profile", "default",
     ]);
   });

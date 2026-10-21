@@ -19,7 +19,13 @@
  */
 import { stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import { planDefinitions, PACKAGE_DIR_NAME, PACKAGE_NPM_NAME, type DefinitionPlan } from "./definitions.js";
+import {
+  planDefinitions,
+  pinnedSpec,
+  PACKAGE_DIR_NAME,
+  PACKAGE_NPM_NAME,
+  type DefinitionPlan,
+} from "./definitions.js";
 import { resolveServerCredentials, type CredentialResult } from "./credentials.js";
 import { synthesizeIrisEnv, buildGovernanceEnv, withOwnedVarsCleared } from "./env.js";
 import type {
@@ -338,7 +344,7 @@ export class LauncherProvider {
   }
 
   /**
-   * Choose `npx -y @iris-mcp/<pkg>` or `node <developmentRepoPath>/packages/<dir>/dist/index.js`
+   * Choose `npx -y @iris-mcp/<pkg>@1` or `node <developmentRepoPath>/packages/<dir>/dist/index.js`
    * per plan (AC 31.6.1), fail-closed on a bad `developmentRepoPath` or a
    * missing per-package build (AC 31.6.3): the offending package (or, if the
    * repo path itself is invalid, every package) registers no definition, and
@@ -359,7 +365,7 @@ export class LauncherProvider {
         definitions.push({
           label: plan.label,
           command: NPX_COMMAND,
-          args: ["-y", PACKAGE_NPM_NAME[plan.packageKey]],
+          args: ["-y", pinnedSpec(PACKAGE_NPM_NAME[plan.packageKey])],
         });
         acceptedPlans.push({ plan, localSpawn: false });
       }

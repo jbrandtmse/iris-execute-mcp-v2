@@ -15,7 +15,7 @@ npm install -g @iris-mcp/admin
 Or run directly without installing:
 
 ```bash
-npx @iris-mcp/admin
+npx -y @iris-mcp/admin@1
 ```
 
 ---
@@ -65,7 +65,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
   "mcpServers": {
     "iris-admin-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/admin"],
+      "args": ["-y", "@iris-mcp/admin@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -85,7 +85,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
   "mcpServers": {
     "iris-admin-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/admin"],
+      "args": ["-y", "@iris-mcp/admin@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -104,7 +104,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
 {
   "iris-admin-mcp": {
     "command": "npx",
-    "args": ["-y", "@iris-mcp/admin"],
+    "args": ["-y", "@iris-mcp/admin@1"],
     "env": {
       "IRIS_HOST": "localhost",
       "IRIS_PORT": "52773",

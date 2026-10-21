@@ -29,6 +29,9 @@ function read(relative: string): string {
   return readFileSync(path.join(REPO_ROOT, relative), "utf8");
 }
 
+// `changeset version` consumes (deletes) the file, so its checks run only while it exists.
+const CHANGESET_PRESENT = existsSync(path.join(REPO_ROOT, ".changeset/story-40-5-epic-40-burn-down.md"));
+
 const squash = (text: string): string => text.replace(/\s+/g, " ");
 
 /** The em dash the documents use in headings and notes, by code point. */
@@ -175,7 +178,7 @@ describe("Story 40.5: the CHANGELOG section and the changeset", () => {
     }
   });
 
-  it("the changeset bumps @iris-mcp/shared, dev and interop by a patch and records the bootstrap move", () => {
+  it.skipIf(!CHANGESET_PRESENT)("the changeset bumps @iris-mcp/shared, dev and interop by a patch and records the bootstrap move", () => {
     const dir = path.join(REPO_ROOT, ".changeset");
     expect(existsSync(dir)).toBe(true);
     const file = readdirSync(dir).find((name) => name === "story-40-5-epic-40-burn-down.md");
@@ -197,7 +200,7 @@ describe("Story 40.5: no new text claims regulatory compliance", () => {
 
   for (const [name, text] of [
     ["the CHANGELOG section", section],
-    ["the changeset", read(".changeset/story-40-5-epic-40-burn-down.md")],
+    ...(CHANGESET_PRESENT ? ([["the changeset", read(".changeset/story-40-5-epic-40-burn-down.md")]] as const) : []),
     ["skills/recover-stuck-production/SKILL.md", read("skills/recover-stuck-production/SKILL.md")],
     ["skills/edit-and-test-class/SKILL.md", read("skills/edit-and-test-class/SKILL.md")],
     ["skills/deploy-and-test-class/SKILL.md", read("skills/deploy-and-test-class/SKILL.md")],

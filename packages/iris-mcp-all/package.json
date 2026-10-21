@@ -1,9 +1,30 @@
 {
   "name": "@iris-mcp/all",
   "version": "0.0.2",
-  "description": "Meta-package that installs all five IRIS MCP server packages",
+  "description": "Meta-package that installs the five IRIS MCP server packages as dependencies; it has no command of its own",
+  "keywords": [
+    "iris",
+    "mcp",
+    "model-context-protocol",
+    "meta-package",
+    "ai-agents"
+  ],
+  "homepage": "https://github.com/jbrandtmse/iris-execute-mcp-v2/tree/main/packages/iris-mcp-all#readme",
+  "bugs": {
+    "url": "https://github.com/jbrandtmse/iris-execute-mcp-v2/issues"
+  },
+  "license": "MIT",
+  "author": "jbrandtmse (https://github.com/jbrandtmse)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jbrandtmse/iris-execute-mcp-v2.git",
+    "directory": "packages/iris-mcp-all"
+  },
   "type": "module",
   "files": [],
+  "engines": {
+    "node": ">=22.17.0"
+  },
   "scripts": {
     "test": "vitest run",
     "prepublishOnly": "node scripts/prepublish-gate.mjs"

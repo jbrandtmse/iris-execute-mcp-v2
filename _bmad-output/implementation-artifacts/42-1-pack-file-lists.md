@@ -1,0 +1,394 @@
+# Story 42.1: pack file lists
+
+The file list of each package's tarball, as `pnpm pack` writes it from the final tree of Story 42.1 (AC 42.1.8). Paths are relative to the
+tarball's `package/` folder, sorted. Packages are in publishing order. Counts and sizes are of the tarball, not the unpacked tree.
+
+| Package | Directory | Version | Files | Tarball bytes |
+|---|---|---|---:|---:|
+| `@iris-mcp/client-config` | `packages/client-config` | 0.0.1 | 64 | 174366 |
+| `@iris-mcp/shared` | `packages/shared` | 0.0.2 | 73 | 521250 |
+| `@iris-mcp/admin` | `packages/iris-admin-mcp` | 0.0.2 | 43 | 50793 |
+| `@iris-mcp/data` | `packages/iris-data-mcp` | 0.0.2 | 17 | 25545 |
+| `@iris-mcp/dev` | `packages/iris-dev-mcp` | 0.0.2 | 73 | 233665 |
+| `@iris-mcp/interop` | `packages/iris-interop-mcp` | 0.0.2 | 45 | 78086 |
+| `@iris-mcp/ops` | `packages/iris-ops-mcp` | 0.0.2 | 37 | 44063 |
+| `@iris-mcp/all` | `packages/iris-mcp-all` | 0.0.2 | 3 | 5714 |
+
+## @iris-mcp/client-config (64 files, 174366 bytes)
+
+- `LICENSE`
+- `README.md`
+- `dist/adapters.d.ts`
+- `dist/adapters.js`
+- `dist/cli/clients-cli.d.ts`
+- `dist/cli/clients-cli.js`
+- `dist/cli/clients.d.ts`
+- `dist/cli/clients.js`
+- `dist/cli/host-probes.d.ts`
+- `dist/cli/host-probes.js`
+- `dist/detect.d.ts`
+- `dist/detect.js`
+- `dist/diff.d.ts`
+- `dist/diff.js`
+- `dist/engine.d.ts`
+- `dist/engine.js`
+- `dist/index.d.ts`
+- `dist/index.js`
+- `dist/pack-apply.d.ts`
+- `dist/pack-apply.js`
+- `dist/pack-plan.d.ts`
+- `dist/pack-plan.js`
+- `dist/pack-targets.d.ts`
+- `dist/pack-targets.js`
+- `dist/paths.d.ts`
+- `dist/paths.js`
+- `dist/readers.d.ts`
+- `dist/readers.js`
+- `dist/rule-block.d.ts`
+- `dist/rule-block.js`
+- `dist/state.d.ts`
+- `dist/state.js`
+- `dist/status.d.ts`
+- `dist/status.js`
+- `dist/synthesize.d.ts`
+- `dist/synthesize.js`
+- `dist/types.d.ts`
+- `dist/types.js`
+- `dist/write.d.ts`
+- `dist/write.js`
+- `package.json`
+- `skills-pack/IRIS-MCP-THIRD-PARTY-NOTICES.md`
+- `skills-pack/README.md`
+- `skills-pack/rules/agents-md/iris-mcp-objectscript-pre-write.md`
+- `skills-pack/rules/claude-code/iris-mcp-objectscript-pre-write.md`
+- `skills-pack/rules/cursor/iris-mcp-objectscript-pre-write.mdc`
+- `skills-pack/skills/audit-security-posture/SKILL.md`
+- `skills-pack/skills/check-system-health/SKILL.md`
+- `skills-pack/skills/deploy-and-test-class/SKILL.md`
+- `skills-pack/skills/diagnose-slow-query/SKILL.md`
+- `skills-pack/skills/edit-and-test-class/SKILL.md`
+- `skills-pack/skills/find-patient-messages/SKILL.md`
+- `skills-pack/skills/iris-mcp-interoperability/SKILL.md`
+- `skills-pack/skills/iris-mcp-objectscript-error-handling/SKILL.md`
+- `skills-pack/skills/iris-mcp-objectscript-gotchas/SKILL.md`
+- `skills-pack/skills/iris-mcp-objectscript-sql/SKILL.md`
+- `skills-pack/skills/iris-mcp-objectscript-unit-tests/SKILL.md`
+- `skills-pack/skills/iris-mcp-system-classes/SKILL.md`
+- `skills-pack/skills/promote-environment-change/SKILL.md`
+- `skills-pack/skills/provision-project-environment/SKILL.md`
+- `skills-pack/skills/recover-stuck-production/SKILL.md`
+- `skills-pack/skills/resend-failed-messages/SKILL.md`
+- `skills-pack/skills/run-external-backup/SKILL.md`
+- `skills-pack/skills/trace-message-flow/SKILL.md`
+
+## @iris-mcp/shared (73 files, 521250 bytes)
+
+- `LICENSE`
+- `README.md`
+- `dist/atelier.d.ts`
+- `dist/atelier.js`
+- `dist/audit.d.ts`
+- `dist/audit.js`
+- `dist/baseline-classifications.d.ts`
+- `dist/baseline-classifications.js`
+- `dist/bootstrap-classes.d.ts`
+- `dist/bootstrap-classes.js`
+- `dist/bootstrap.d.ts`
+- `dist/bootstrap.js`
+- `dist/cli/credentials-cli.d.ts`
+- `dist/cli/credentials-cli.js`
+- `dist/cli/credentials.d.ts`
+- `dist/cli/credentials.js`
+- `dist/cli/governance-cli.d.ts`
+- `dist/cli/governance-cli.js`
+- `dist/cli/governance.d.ts`
+- `dist/cli/governance.js`
+- `dist/config.d.ts`
+- `dist/config.js`
+- `dist/confirmation.d.ts`
+- `dist/confirmation.js`
+- `dist/credential-chain.d.ts`
+- `dist/credential-chain.js`
+- `dist/data-policy.d.ts`
+- `dist/data-policy.js`
+- `dist/errors.d.ts`
+- `dist/errors.js`
+- `dist/governance-baseline-derivation.d.ts`
+- `dist/governance-baseline-derivation.js`
+- `dist/governance-baseline.d.ts`
+- `dist/governance-baseline.js`
+- `dist/governance.d.ts`
+- `dist/governance.js`
+- `dist/health.d.ts`
+- `dist/health.js`
+- `dist/hl7-redaction.d.ts`
+- `dist/hl7-redaction.js`
+- `dist/http-client.d.ts`
+- `dist/http-client.js`
+- `dist/index.d.ts`
+- `dist/index.js`
+- `dist/lines.d.ts`
+- `dist/lines.js`
+- `dist/logger.d.ts`
+- `dist/logger.js`
+- `dist/profiles.d.ts`
+- `dist/profiles.js`
+- `dist/prompt-helpers.d.ts`
+- `dist/prompt-helpers.js`
+- `dist/refusals.d.ts`
+- `dist/refusals.js`
+- `dist/sdk-wire-compat.d.ts`
+- `dist/sdk-wire-compat.js`
+- `dist/server-base.d.ts`
+- `dist/server-base.js`
+- `dist/server-discovery.d.ts`
+- `dist/server-discovery.js`
+- `dist/server-manager-source.d.ts`
+- `dist/server-manager-source.js`
+- `dist/storage-guard.d.ts`
+- `dist/storage-guard.js`
+- `dist/tool-types.d.ts`
+- `dist/tool-types.js`
+- `dist/tool-visibility.d.ts`
+- `dist/tool-visibility.js`
+- `dist/transport.d.ts`
+- `dist/transport.js`
+- `dist/zod-helpers.d.ts`
+- `dist/zod-helpers.js`
+- `package.json`
+
+## @iris-mcp/admin (43 files, 50793 bytes)
+
+- `LICENSE`
+- `README.md`
+- `dist/index.d.ts`
+- `dist/index.js`
+- `dist/prompts/auditSecurityPosture.d.ts`
+- `dist/prompts/auditSecurityPosture.js`
+- `dist/prompts/index.d.ts`
+- `dist/prompts/index.js`
+- `dist/prompts/provisionProjectEnvironment.d.ts`
+- `dist/prompts/provisionProjectEnvironment.js`
+- `dist/tools/audit.d.ts`
+- `dist/tools/audit.js`
+- `dist/tools/database.d.ts`
+- `dist/tools/database.js`
+- `dist/tools/index.d.ts`
+- `dist/tools/index.js`
+- `dist/tools/ldap.d.ts`
+- `dist/tools/ldap.js`
+- `dist/tools/mapping.d.ts`
+- `dist/tools/mapping.js`
+- `dist/tools/namespace.d.ts`
+- `dist/tools/namespace.js`
+- `dist/tools/oauth.d.ts`
+- `dist/tools/oauth.js`
+- `dist/tools/permission.d.ts`
+- `dist/tools/permission.js`
+- `dist/tools/presets.d.ts`
+- `dist/tools/presets.js`
+- `dist/tools/resource.d.ts`
+- `dist/tools/resource.js`
+- `dist/tools/role.d.ts`
+- `dist/tools/role.js`
+- `dist/tools/service.d.ts`
+- `dist/tools/service.js`
+- `dist/tools/ssl.d.ts`
+- `dist/tools/ssl.js`
+- `dist/tools/user.d.ts`
+- `dist/tools/user.js`
+- `dist/tools/webapp.d.ts`
+- `dist/tools/webapp.js`
+- `dist/tools/x509.d.ts`
+- `dist/tools/x509.js`
+- `package.json`
+
+## @iris-mcp/data (17 files, 25545 bytes)
+
+- `LICENSE`
+- `README.md`
+- `dist/index.d.ts`
+- `dist/index.js`
+- `dist/tools/analytics.d.ts`
+- `dist/tools/analytics.js`
+- `dist/tools/debug.d.ts`
+- `dist/tools/debug.js`
+- `dist/tools/docdb.d.ts`
+- `dist/tools/docdb.js`
+- `dist/tools/index.d.ts`
+- `dist/tools/index.js`
+- `dist/tools/presets.d.ts`
+- `dist/tools/presets.js`
+- `dist/tools/rest.d.ts`
+- `dist/tools/rest.js`
+- `package.json`
+
+## @iris-mcp/dev (73 files, 233665 bytes)
+
+- `LICENSE`
+- `README.md`
+- `dist/index.d.ts`
+- `dist/index.js`
+- `dist/prompts/deployAndTestClass.d.ts`
+- `dist/prompts/deployAndTestClass.js`
+- `dist/prompts/diagnoseSlowQuery.d.ts`
+- `dist/prompts/diagnoseSlowQuery.js`
+- `dist/prompts/editAndTestClass.d.ts`
+- `dist/prompts/editAndTestClass.js`
+- `dist/prompts/index.d.ts`
+- `dist/prompts/index.js`
+- `dist/prompts/productionBusyNote.d.ts`
+- `dist/prompts/productionBusyNote.js`
+- `dist/prompts/promoteEnvironmentChange.d.ts`
+- `dist/prompts/promoteEnvironmentChange.js`
+- `dist/tools/cobertura.d.ts`
+- `dist/tools/cobertura.js`
+- `dist/tools/compile.d.ts`
+- `dist/tools/compile.js`
+- `dist/tools/coverage-report.d.ts`
+- `dist/tools/coverage-report.js`
+- `dist/tools/doc-edit.d.ts`
+- `dist/tools/doc-edit.js`
+- `dist/tools/doc.d.ts`
+- `dist/tools/doc.js`
+- `dist/tools/env-diff.d.ts`
+- `dist/tools/env-diff.js`
+- `dist/tools/env-promote.d.ts`
+- `dist/tools/env-promote.js`
+- `dist/tools/execute.d.ts`
+- `dist/tools/execute.js`
+- `dist/tools/export.d.ts`
+- `dist/tools/export.js`
+- `dist/tools/format.d.ts`
+- `dist/tools/format.js`
+- `dist/tools/global.d.ts`
+- `dist/tools/global.js`
+- `dist/tools/index.d.ts`
+- `dist/tools/index.js`
+- `dist/tools/intelligence.d.ts`
+- `dist/tools/intelligence.js`
+- `dist/tools/load.d.ts`
+- `dist/tools/load.js`
+- `dist/tools/loc.d.ts`
+- `dist/tools/loc.js`
+- `dist/tools/local-path.d.ts`
+- `dist/tools/local-path.js`
+- `dist/tools/packages.d.ts`
+- `dist/tools/packages.js`
+- `dist/tools/presets.d.ts`
+- `dist/tools/presets.js`
+- `dist/tools/routine.d.ts`
+- `dist/tools/routine.js`
+- `dist/tools/server.d.ts`
+- `dist/tools/server.js`
+- `dist/tools/sql.d.ts`
+- `dist/tools/sql.js`
+- `dist/tools/sqlAdvisor.d.ts`
+- `dist/tools/sqlAdvisor.js`
+- `dist/tools/sqlAnalyze.d.ts`
+- `dist/tools/sqlAnalyze.js`
+- `dist/tools/test-coverage.d.ts`
+- `dist/tools/test-coverage.js`
+- `dist/tools/test-production-guard.d.ts`
+- `dist/tools/test-production-guard.js`
+- `dist/tools/test-status.d.ts`
+- `dist/tools/test-status.js`
+- `dist/tools/unit-test-results.d.ts`
+- `dist/tools/unit-test-results.js`
+- `dist/tools/zod-helpers.d.ts`
+- `dist/tools/zod-helpers.js`
+- `package.json`
+
+## @iris-mcp/interop (45 files, 78086 bytes)
+
+- `LICENSE`
+- `README.md`
+- `dist/index.d.ts`
+- `dist/index.js`
+- `dist/prompts/findPatientMessages.d.ts`
+- `dist/prompts/findPatientMessages.js`
+- `dist/prompts/index.d.ts`
+- `dist/prompts/index.js`
+- `dist/prompts/recoverStuckProduction.d.ts`
+- `dist/prompts/recoverStuckProduction.js`
+- `dist/prompts/resendFailedMessages.d.ts`
+- `dist/prompts/resendFailedMessages.js`
+- `dist/prompts/traceMessageFlow.d.ts`
+- `dist/prompts/traceMessageFlow.js`
+- `dist/tools/credential.d.ts`
+- `dist/tools/credential.js`
+- `dist/tools/defaultSettings.d.ts`
+- `dist/tools/defaultSettings.js`
+- `dist/tools/diagram.d.ts`
+- `dist/tools/diagram.js`
+- `dist/tools/index.d.ts`
+- `dist/tools/index.js`
+- `dist/tools/item.d.ts`
+- `dist/tools/item.js`
+- `dist/tools/lookup.d.ts`
+- `dist/tools/lookup.js`
+- `dist/tools/message-body.d.ts`
+- `dist/tools/message-body.js`
+- `dist/tools/message-resend.d.ts`
+- `dist/tools/message-resend.js`
+- `dist/tools/message-search.d.ts`
+- `dist/tools/message-search.js`
+- `dist/tools/monitor.d.ts`
+- `dist/tools/monitor.js`
+- `dist/tools/presets.d.ts`
+- `dist/tools/presets.js`
+- `dist/tools/production.d.ts`
+- `dist/tools/production.js`
+- `dist/tools/rest.d.ts`
+- `dist/tools/rest.js`
+- `dist/tools/rule.d.ts`
+- `dist/tools/rule.js`
+- `dist/tools/transform.d.ts`
+- `dist/tools/transform.js`
+- `package.json`
+
+## @iris-mcp/ops (37 files, 44063 bytes)
+
+- `LICENSE`
+- `README.md`
+- `dist/index.d.ts`
+- `dist/index.js`
+- `dist/prompts/checkSystemHealth.d.ts`
+- `dist/prompts/checkSystemHealth.js`
+- `dist/prompts/index.d.ts`
+- `dist/prompts/index.js`
+- `dist/prompts/runExternalBackup.d.ts`
+- `dist/prompts/runExternalBackup.js`
+- `dist/tools/alerts.d.ts`
+- `dist/tools/alerts.js`
+- `dist/tools/backup.d.ts`
+- `dist/tools/backup.js`
+- `dist/tools/config.d.ts`
+- `dist/tools/config.js`
+- `dist/tools/database.d.ts`
+- `dist/tools/database.js`
+- `dist/tools/health.d.ts`
+- `dist/tools/health.js`
+- `dist/tools/index.d.ts`
+- `dist/tools/index.js`
+- `dist/tools/infrastructure.d.ts`
+- `dist/tools/infrastructure.js`
+- `dist/tools/jobs.d.ts`
+- `dist/tools/jobs.js`
+- `dist/tools/metrics.d.ts`
+- `dist/tools/metrics.js`
+- `dist/tools/presets.d.ts`
+- `dist/tools/presets.js`
+- `dist/tools/process.d.ts`
+- `dist/tools/process.js`
+- `dist/tools/system.d.ts`
+- `dist/tools/system.js`
+- `dist/tools/task.d.ts`
+- `dist/tools/task.js`
+- `package.json`
+
+## @iris-mcp/all (3 files, 5714 bytes)
+
+- `LICENSE`
+- `README.md`
+- `package.json`

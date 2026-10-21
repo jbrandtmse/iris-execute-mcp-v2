@@ -2,12 +2,33 @@
   "name": "@iris-mcp/dev",
   "version": "0.0.2",
   "description": "IRIS Development Tools MCP Server",
+  "keywords": [
+    "iris",
+    "mcp",
+    "model-context-protocol",
+    "mcp-server",
+    "objectscript",
+    "development",
+    "ai-agents"
+  ],
+  "homepage": "https://github.com/jbrandtmse/iris-execute-mcp-v2/tree/main/packages/iris-dev-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/jbrandtmse/iris-execute-mcp-v2/issues"
+  },
+  "license": "MIT",
+  "author": "jbrandtmse (https://github.com/jbrandtmse)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jbrandtmse/iris-execute-mcp-v2.git",
+    "directory": "packages/iris-dev-mcp"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
     "iris-dev-mcp": "./dist/index.js"
   },
+  "mcpName": "io.github.jbrandtmse/iris-dev-mcp",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -16,8 +37,12 @@
   },
   "files": [
     "dist",
-    "!dist/**/__tests__"
+    "!dist/**/__tests__",
+    "!dist/**/*.map"
   ],
+  "engines": {
+    "node": ">=22.17.0"
+  },
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "test": "vitest run",
@@ -31,6 +56,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "2.3.1"
+    "@modelcontextprotocol/client": "2.3.1",
+    "@types/node": "^22.17.0"
   }
 }

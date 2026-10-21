@@ -701,7 +701,7 @@ describe("doctor", () => {
         mcpServers: {
           "iris-dev-mcp": {
             command: "npx",
-            args: ["-y", "@iris-mcp/dev", "--pidfile", "/tmp/app-$$LEGACY_SUFFIX.pid"],
+            args: ["-y", "@iris-mcp/dev@1", "--pidfile", "/tmp/app-$$LEGACY_SUFFIX.pid"],
             env: { REAL_REF: "$REAL_MISSING_VAR" },
           },
         },
@@ -722,7 +722,7 @@ describe("doctor", () => {
         mcpServers: {
           "iris-dev-mcp": {
             command: "npx",
-            args: ["-y", "@iris-mcp/dev", "--tag", "$$$ODD_RUN_MISSING", "--tag2", "$$$$EVEN_RUN_LITERAL"],
+            args: ["-y", "@iris-mcp/dev@1", "--tag", "$$$ODD_RUN_MISSING", "--tag2", "$$$$EVEN_RUN_LITERAL"],
             env: {},
           },
         },
@@ -732,7 +732,7 @@ describe("doctor", () => {
       `${HOME}/.claude.json`,
       JSON.stringify({
         mcpServers: {
-          "iris-dev-mcp": { command: "npx", args: ["-y", "@iris-mcp/dev"], env: { SECRET: "$${CLAUDE_MODE_MISSING}" } },
+          "iris-dev-mcp": { command: "npx", args: ["-y", "@iris-mcp/dev@1"], env: { SECRET: "$${CLAUDE_MODE_MISSING}" } },
         },
       }),
     );
@@ -839,7 +839,7 @@ describe("doctor", () => {
     seedFamilies(h.fs);
     // Plant an iris- namespaced non-canonical entry (the state.json-loss orphan).
     const config = JSON.parse(h.fs.readFile(`${HOME}/.claude.json`)) as { mcpServers: Record<string, unknown> };
-    config.mcpServers["iris-dev-mcp2"] = { command: "npx", args: ["-y", "@iris-mcp/dev"] };
+    config.mcpServers["iris-dev-mcp2"] = { command: "npx", args: ["-y", "@iris-mcp/dev@1"] };
     h.fs.seed(`${HOME}/.claude.json`, JSON.stringify(config, null, 2));
     expect(await h.run(["doctor"])).toBe(1);
     expect(h.stdout.text).toContain("unrecorded-entries");
@@ -863,7 +863,7 @@ describe("doctor", () => {
     });
     seedFamilies(h.fs);
     const config = JSON.parse(h.fs.readFile(`${HOME}/.claude.json`)) as { mcpServers: Record<string, unknown> };
-    config.mcpServers["iris-dev-mcp2"] = { command: "npx", args: ["-y", "@iris-mcp/dev"] };
+    config.mcpServers["iris-dev-mcp2"] = { command: "npx", args: ["-y", "@iris-mcp/dev@1"] };
     h.fs.seed(`${HOME}/.claude.json`, JSON.stringify(config, null, 2));
 
     expect(await h.run(["doctor", "--repair", "--yes-i-mean-it"])).toBe(0);
@@ -1230,7 +1230,7 @@ describe("review: doctor no-expansion check respects runtime defaults (MEDIUM)",
     const h = harness(); // nothing in env
     h.fs.seed(
       `${HOME}/.cursor/mcp.json`,
-      JSON.stringify({ mcpServers: { "iris-dev-mcp": { command: "npx", args: ["-y", "@iris-mcp/dev"], env: { IRIS_HOST: "h" } } } }),
+      JSON.stringify({ mcpServers: { "iris-dev-mcp": { command: "npx", args: ["-y", "@iris-mcp/dev@1"], env: { IRIS_HOST: "h" } } } }),
     );
     expect(await h.run(["doctor"])).toBe(1);
     expect(h.stdout.text).toContain("IRIS_USERNAME");

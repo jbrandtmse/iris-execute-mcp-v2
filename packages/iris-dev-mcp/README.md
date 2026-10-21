@@ -15,7 +15,7 @@ npm install -g @iris-mcp/dev
 Or run directly without installing:
 
 ```bash
-npx @iris-mcp/dev
+npx -y @iris-mcp/dev@1
 ```
 
 ---
@@ -69,7 +69,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
   "mcpServers": {
     "iris-dev-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -89,7 +89,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
   "mcpServers": {
     "iris-dev-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -110,7 +110,7 @@ Add to your Cursor MCP settings:
 {
   "iris-dev-mcp": {
     "command": "npx",
-    "args": ["-y", "@iris-mcp/dev"],
+    "args": ["-y", "@iris-mcp/dev@1"],
     "env": {
       "IRIS_HOST": "localhost",
       "IRIS_PORT": "52773",

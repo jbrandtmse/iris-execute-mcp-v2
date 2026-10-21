@@ -22,7 +22,7 @@
  *   path is relative or the CLI is not built — never fall back silently to
  *   npx (a guessed fallback would run a DIFFERENT engine version than the
  *   user pinned).
- * - Otherwise → `npx -y -p @iris-mcp/client-config iris-mcp-clients`.
+ * - Otherwise → `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients`.
  *
  * **Credential containment (the governanceEngine discipline, Integration AC
  * 33.3-I1).** The spawned environment scrubs EVERY `IRIS_*` variable from the
@@ -58,6 +58,7 @@
 import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
+import { pinnedSpec } from "./definitions.js";
 import {
   DEFAULT_CLI_TIMEOUT_MS,
   resolveSpawnCommand,
@@ -152,7 +153,7 @@ export async function resolveClientsCli(
     ok: true,
     target: {
       command: "npx",
-      baseArgs: ["-y", "-p", CLIENTS_CLI_NPM_PACKAGE, CLIENTS_CLI_BIN_NAME],
+      baseArgs: ["-y", "-p", pinnedSpec(CLIENTS_CLI_NPM_PACKAGE), CLIENTS_CLI_BIN_NAME],
       extraEnv: {},
       mode: "npx",
     },

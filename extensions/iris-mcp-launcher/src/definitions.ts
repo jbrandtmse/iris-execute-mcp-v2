@@ -4,7 +4,22 @@
  */
 import type { LauncherSettings, SuitePackageKey } from "./types.js";
 
-/** npm package name for each suite package key (Task 1 Project Structure Notes). */
+/**
+ * The npm major every `npx` spec this extension spawns is pinned to: a literal
+ * mirror of `IRIS_MCP_MAJOR` exported by `@iris-mcp/client-config`. The VSIX
+ * has no runtime dependencies and no bundler, so it cannot import that
+ * package; `npx-pin.test.ts` in `@iris-mcp/all` pins the two values equal.
+ * Specs use `@1`, never `^1`, because `^` is cmd.exe's escape character on the
+ * win32 spawn path.
+ */
+export const IRIS_MCP_MAJOR = "1";
+
+/** `<pkg>@<major>`: the pinned form of an npm package name. */
+export function pinnedSpec(pkg: string): string {
+  return `${pkg}@${IRIS_MCP_MAJOR}`;
+}
+
+/** npm package name for each suite package key (Task 1 Project Structure Notes). Bare names; the spawn target is `pinnedSpec(<name>)`. */
 export const PACKAGE_NPM_NAME: Record<SuitePackageKey, string> = {
   admin: "@iris-mcp/admin",
   data: "@iris-mcp/data",
@@ -26,7 +41,7 @@ export const PACKAGE_LABEL: Record<SuitePackageKey, string> = {
  * Directory name under a monorepo checkout's `packages/` for each suite
  * package key (Story 31.6, AC 31.6.2) — used ONLY for
  * `irisMcpLauncher.developmentRepoPath` (local `node <path>/dist/index.js`
- * spawn), never for the published `npx -y @iris-mcp/<pkg>` path above.
+ * spawn), never for the published `npx -y @iris-mcp/<pkg>@1` path above.
  *
  * **Deliberately an EXPLICIT map, never derived from {@link PACKAGE_NPM_NAME}
  * or `SuitePackageKey`.** All five surviving keys DO happen to follow the

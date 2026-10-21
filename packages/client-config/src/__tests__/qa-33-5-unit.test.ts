@@ -46,7 +46,7 @@ function adapterOf(id: string): ClientAdapter {
 const ENTRY: CanonicalEntry = {
   name: "iris-dev-mcp",
   command: "npx",
-  args: ["-y", "@iris-mcp/dev"],
+  args: ["-y", "@iris-mcp/dev@1"],
   env: { IRIS_NAMESPACE: "HSCUSTOM" },
 };
 
@@ -104,7 +104,7 @@ describe("comment-only JSONC insertion (QA-stage fix, engine level)", () => {
     expect(after.startsWith("{")).toBe(true); // no trivia prefix invented
     expect(parseJsonc(after)).toEqual({
       mcpServers: {
-        "iris-dev-mcp": { command: "npx", args: ["-y", "@iris-mcp/dev"], env: { IRIS_NAMESPACE: "HSCUSTOM" } },
+        "iris-dev-mcp": { command: "npx", args: ["-y", "@iris-mcp/dev@1"], env: { IRIS_NAMESPACE: "HSCUSTOM" } },
       },
     });
   });
@@ -141,7 +141,7 @@ describe("per-key apply-update surgery (QA-stage fix, engine level)", () => {
     const parsed = parseJsonc(after) as { mcpServers: Record<string, Record<string, unknown>> };
     const entry = parsed.mcpServers["iris-dev-mcp"] as Record<string, unknown>;
     expect(entry.command).toBe("npx");
-    expect(entry.args).toEqual(["-y", "@iris-mcp/dev"]);
+    expect(entry.args).toEqual(["-y", "@iris-mcp/dev@1"]);
     expect((entry.env as Record<string, unknown>).IRIS_NAMESPACE).toBe("HSCUSTOM");
   });
 
@@ -211,7 +211,7 @@ describe("per-key apply-update surgery (QA-stage fix, engine level)", () => {
         mcpServers: {
           "iris-dev-mcp": {
             command: "npx",
-            args: ["-y", "@iris-mcp/dev"],
+            args: ["-y", "@iris-mcp/dev@1"],
             disabled: true,
             env: { IRIS_NAMESPACE: "HSCUSTOM" },
           },

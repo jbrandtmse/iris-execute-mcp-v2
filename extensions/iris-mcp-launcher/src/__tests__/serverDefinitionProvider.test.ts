@@ -117,7 +117,7 @@ function makeDeps(opts: {
 }
 
 describe("LauncherProvider.providePlannedDefinitions", () => {
-  it("builds one npx -y @iris-mcp/<pkg> definition per (package, server)", async () => {
+  it("builds one npx -y @iris-mcp/<pkg>@1 definition per (package, server)", async () => {
     const { deps } = makeDeps({
       serverNames: ["a", "b"],
       getSettings: () => settings({ packages: ["dev", "admin"] }),
@@ -132,10 +132,10 @@ describe("LauncherProvider.providePlannedDefinitions", () => {
       expect(def.args[0]).toBe("-y");
     }
     expect(planned.map((d) => d.args[1]).sort()).toEqual([
-      "@iris-mcp/admin",
-      "@iris-mcp/admin",
-      "@iris-mcp/dev",
-      "@iris-mcp/dev",
+      "@iris-mcp/admin@1",
+      "@iris-mcp/admin@1",
+      "@iris-mcp/dev@1",
+      "@iris-mcp/dev@1",
     ]);
   });
 
@@ -619,14 +619,14 @@ describe("LauncherProvider.providePlannedDefinitions — irisMcpLauncher.develop
     writeFileSync(path.join(distDir, "index.js"), "// fake built entry point\n", "utf8");
   }
 
-  it("developmentRepoPath unset (default) -> npx args, byte-identical to Story 31.5's spawn shape", async () => {
+  it("developmentRepoPath unset (default) -> npx args with the @1 pin, otherwise Story 31.5's spawn shape", async () => {
     const { deps } = makeDeps({ serverNames: ["a"] });
     const provider = new LauncherProvider(deps);
 
     const planned = await provider.providePlannedDefinitions();
 
     expect(planned).toEqual([
-      { label: "IRIS Dev Tools — a", command: "npx", args: ["-y", "@iris-mcp/dev"] },
+      { label: "IRIS Dev Tools — a", command: "npx", args: ["-y", "@iris-mcp/dev@1"] },
     ]);
   });
 
@@ -1087,7 +1087,7 @@ describe("LauncherProvider.providePlannedDefinitions — removed 'all' package k
     const planned = await provider.providePlannedDefinitions();
 
     expect(planned).toEqual([
-      { label: "IRIS Dev Tools — a", command: "npx", args: ["-y", "@iris-mcp/dev"] },
+      { label: "IRIS Dev Tools — a", command: "npx", args: ["-y", "@iris-mcp/dev@1"] },
     ]);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("all");
@@ -1136,7 +1136,7 @@ describe("LauncherProvider.providePlannedDefinitions — removed 'all' package k
  * here would reintroduce exactly that blind spot for this story's new
  * `developmentRepoPath`/`hadStaleAllPackage` fields.
  */
-describe("Rule #19 whole-object back-compat — developmentRepoPath unset is byte-identical to Story 31.5 (AC 31.6.6)", () => {
+describe("Rule #19 whole-object back-compat — developmentRepoPath unset matches Story 31.5 except the sanctioned @1 pin (AC 31.6.6)", () => {
   it("command/args/env for a combineProfiles, multi-server, governance-bearing definition match the pre-31.6 shape EXACTLY", async () => {
     const api: ServerManagerApi = {
       getServerNames: () => [
@@ -1176,7 +1176,7 @@ describe("Rule #19 whole-object back-compat — developmentRepoPath unset is byt
       {
         label: "IRIS Dev Tools (prod, staging)",
         command: "npx",
-        args: ["-y", "@iris-mcp/dev"],
+        args: ["-y", "@iris-mcp/dev@1"],
       },
     ]);
 

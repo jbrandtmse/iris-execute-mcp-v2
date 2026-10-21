@@ -39,11 +39,11 @@ import {
 import { MemFs, fixedNow, readFixture } from "./helpers.js";
 
 const PKG: Record<CanonicalServerName, string> = {
-  "iris-dev-mcp": "@iris-mcp/dev",
-  "iris-admin-mcp": "@iris-mcp/admin",
-  "iris-ops-mcp": "@iris-mcp/ops",
-  "iris-interop-mcp": "@iris-mcp/interop",
-  "iris-data-mcp": "@iris-mcp/data",
+  "iris-dev-mcp": "@iris-mcp/dev@1",
+  "iris-admin-mcp": "@iris-mcp/admin@1",
+  "iris-ops-mcp": "@iris-mcp/ops@1",
+  "iris-interop-mcp": "@iris-mcp/interop@1",
+  "iris-data-mcp": "@iris-mcp/data@1",
 };
 
 function canonicalEntryForTest(name: CanonicalServerName): CanonicalEntry {
@@ -114,6 +114,28 @@ describe("apply (AC 33.1.1 + I1)", () => {
       name: "iris-ops-mcp",
       containsSecret: false,
     });
+  });
+
+  it("re-apply over a previously applied UNPINNED entry pins the owned args; every foreign byte is identical (AD-30, Story 42.1)", () => {
+    const fs = new MemFs();
+    const original = readFixture("claude-code/user.json");
+    const path = seedUser(fs, "claude-code", original);
+    const result = apply(ctx(), "claude-code", "user", canonicalEntryForTest("iris-dev-mcp"), {
+      fs,
+      now: fixedNow(1),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.mechanism).toBe("update");
+    const after = fs.readFile(path);
+    const parsed = readConfigEntries(adapterOf("claude-code"), after);
+    if (!parsed.ok) throw new Error("written file must parse");
+    expect(parsed.entries["iris-dev-mcp"]?.args).toEqual(["-y", "@iris-mcp/dev@1"]);
+    // The owned entry is rewritten in place; everything after it (the foreign github-mcp entry with its secret,
+    // and the unrelated top-level key) and everything before its `args` keeps its exact bytes.
+    const foreignStart = '    "github-mcp": {';
+    expect(after.slice(after.indexOf(foreignStart))).toBe(original.slice(original.indexOf(foreignStart)));
+    const ownedPrefix = '{\n  "mcpServers": {\n    "iris-dev-mcp": {\n      "command": "npx",\n      "args": ';
+    expect(after.startsWith(ownedPrefix)).toBe(true);
   });
 
   it("apply on a MISSING file treats it as an empty document (creates the file, no backup)", () => {
@@ -197,7 +219,7 @@ describe("enable/disable mechanics (AC 33.1.3)", () => {
   "mcpServers": {
     "iris-dev-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "alwaysAllow": ["iris_doc_list"],
       "note": "user-added key"
     }

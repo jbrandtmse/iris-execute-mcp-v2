@@ -2,7 +2,7 @@
   "name": "iris-mcp-suite",
   "private": true,
   "version": "0.0.0",
-  "description": "InterSystems IRIS MCP Server Suite — a monorepo of specialized MCP servers for IRIS",
+  "description": "Monorepo of Model Context Protocol servers for IRIS: five stdio servers, their shared framework, a client configuration manager and a skills pack",
   "scripts": {
     "build": "turbo run build",
     "test": "turbo run test",
@@ -40,6 +40,6 @@
   },
   "packageManager": "pnpm@9.15.0",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.17.0"
   }
 }

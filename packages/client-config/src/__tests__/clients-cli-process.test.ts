@@ -568,7 +568,7 @@ describe("E2E doctor finding classes (AC 33.2.1)", () => {
             client: "claude-code",
             scope: "user",
             name: "iris-dev-mcp",
-            entry: { command: "npx", args: ["-y", "@iris-mcp/dev"] },
+            entry: { command: "npx", args: ["-y", "@iris-mcp/dev@1"] },
             disabledAt: "2026-07-01T00:00:00.000Z",
           },
         ],
@@ -615,7 +615,7 @@ describe("E2E doctor finding classes (AC 33.2.1)", () => {
     // Plant an iris- namespaced non-canonical entry (the state.json-loss orphan).
     const target = sandbox.configPath("claude-code");
     const config = JSON.parse(readFileSync(target, "utf8")) as { mcpServers: Record<string, unknown> };
-    config.mcpServers["iris-dev-mcp2"] = { command: "npx", args: ["-y", "@iris-mcp/dev"] };
+    config.mcpServers["iris-dev-mcp2"] = { command: "npx", args: ["-y", "@iris-mcp/dev@1"] };
     writeFileSync(target, JSON.stringify(config, null, 2));
 
     // Detected: exit 1, names the entry + the repair invocation; github-mcp never flagged.

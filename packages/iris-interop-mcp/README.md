@@ -15,7 +15,7 @@ npm install -g @iris-mcp/interop
 Or run directly without installing:
 
 ```bash
-npx @iris-mcp/interop
+npx -y @iris-mcp/interop@1
 ```
 
 ---
@@ -82,7 +82,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
   "mcpServers": {
     "iris-interop-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/interop"],
+      "args": ["-y", "@iris-mcp/interop@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -102,7 +102,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
   "mcpServers": {
     "iris-interop-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/interop"],
+      "args": ["-y", "@iris-mcp/interop@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -121,7 +121,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
 {
   "iris-interop-mcp": {
     "command": "npx",
-    "args": ["-y", "@iris-mcp/interop"],
+    "args": ["-y", "@iris-mcp/interop@1"],
     "env": {
       "IRIS_HOST": "localhost",
       "IRIS_PORT": "52773",

@@ -1,6 +1,6 @@
 # @iris-mcp/all
 
-**Meta-package that installs all five IRIS MCP server packages** with a single command.
+**Meta-package that pulls in all five IRIS MCP server packages as dependencies.** It launches nothing and links no command.
 
 Part of the [IRIS MCP Server Suite](../../README.md).
 
@@ -8,17 +8,20 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 
 ## What Is This?
 
-`@iris-mcp/all` is a convenience meta-package. It contains no source code of its own -- it simply declares all five IRIS MCP servers as dependencies so you can install them in one step instead of five.
+`@iris-mcp/all` is a convenience meta-package. It contains no source code of its own and has no `bin`: it simply declares all five IRIS MCP servers as dependencies, so one project install fetches all five. It is not a server and cannot be started, and an MCP client never needs it: a client entry runs one server through `npx -y @iris-mcp/<server>@1`, which downloads the server on first use.
 
 ---
 
 ## Installation
 
 ```bash
-npm install -g @iris-mcp/all
+# in a project: puts the seven commands of the dependencies in node_modules/.bin
+npm install @iris-mcp/all
 ```
 
-This installs all five servers:
+A project install links the seven commands of its dependencies into `node_modules/.bin`: `iris-dev-mcp`, `iris-admin-mcp`, `iris-interop-mcp`, `iris-ops-mcp`, `iris-data-mcp`, and the `iris-mcp-credentials` and `iris-mcp-governance` commands of `@iris-mcp/shared`. A **global** install (`npm install -g @iris-mcp/all`) links no command at all, because this package has no `bin`; the dependencies land in a nested `node_modules` that is not on your `PATH`. To use the servers from an MCP client, point each client entry at `npx -y @iris-mcp/<server>@1` as shown under [MCP Client Configuration](#mcp-client-configuration).
+
+The five servers it depends on:
 
 | Package | Domain | Tools | Description |
 |---------|--------|------:|-------------|
@@ -82,7 +85,7 @@ Optionally, set `IRIS_GOVERNANCE_FILE` to the path of a JSON file of the same sh
 
 ## MCP Client Configuration
 
-Each MCP server runs as a separate process. After installing `@iris-mcp/all`, configure your MCP client to launch each server you need.
+Each MCP server runs as a separate process, started by your MCP client with `npx -y @iris-mcp/<server>@1`. Installing `@iris-mcp/all` is not a prerequisite. Add one entry per server you need.
 
 ### Claude Code (`.mcp.json`)
 
@@ -93,7 +96,7 @@ Create a `.mcp.json` file in your project root with all five servers:
   "mcpServers": {
     "iris-dev-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -104,7 +107,7 @@ Create a `.mcp.json` file in your project root with all five servers:
     },
     "iris-admin-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/admin"],
+      "args": ["-y", "@iris-mcp/admin@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -115,7 +118,7 @@ Create a `.mcp.json` file in your project root with all five servers:
     },
     "iris-interop-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/interop"],
+      "args": ["-y", "@iris-mcp/interop@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -126,7 +129,7 @@ Create a `.mcp.json` file in your project root with all five servers:
     },
     "iris-ops-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/ops"],
+      "args": ["-y", "@iris-mcp/ops@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -137,7 +140,7 @@ Create a `.mcp.json` file in your project root with all five servers:
     },
     "iris-data-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/data"],
+      "args": ["-y", "@iris-mcp/data@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -160,7 +163,7 @@ Add all five servers to your Claude Desktop configuration using the same structu
 
 ## Do I Need All Five?
 
-If you only need a subset, install individual packages instead:
+If you only need a subset, add an entry for each server you need:
 
 | Your Role | Recommended Server(s) |
 |-----------|----------------------|
@@ -169,7 +172,7 @@ If you only need a subset, install individual packages instead:
 | **Integration engineer** | `@iris-mcp/interop` |
 | **Operations / SRE** | `@iris-mcp/ops` |
 | **Data / BI analyst** | `@iris-mcp/data` |
-| **Full-stack / getting started** | `@iris-mcp/all` (this package) |
+| **Full-stack / getting started** | `@iris-mcp/dev` + `@iris-mcp/admin`, or all five servers (one client entry each) |
 
 ---
 

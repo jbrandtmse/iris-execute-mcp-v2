@@ -55,11 +55,11 @@ import {
 import { fixturePath, readFixture } from "./helpers.js";
 
 const PKG_BY_SERVER: Record<CanonicalServerName, string> = {
-  "iris-dev-mcp": "@iris-mcp/dev",
-  "iris-admin-mcp": "@iris-mcp/admin",
-  "iris-ops-mcp": "@iris-mcp/ops",
-  "iris-interop-mcp": "@iris-mcp/interop",
-  "iris-data-mcp": "@iris-mcp/data",
+  "iris-dev-mcp": "@iris-mcp/dev@1",
+  "iris-admin-mcp": "@iris-mcp/admin@1",
+  "iris-ops-mcp": "@iris-mcp/ops@1",
+  "iris-interop-mcp": "@iris-mcp/interop@1",
+  "iris-data-mcp": "@iris-mcp/data@1",
 };
 
 function canonicalEntry(name: CanonicalServerName): CanonicalEntry {
@@ -414,7 +414,7 @@ describe("adversarial: iris-looking rootKey collisions that are NOT canonical", 
     const content = [
       "[mcp_servers.iris-dev-mcp]",
       'command = "npx"',
-      'args = ["-y", "@iris-mcp/dev"]',
+      'args = ["-y", "@iris-mcp/dev@1"]',
       "",
       "[mcp_servers.iris-dev-mcp-extras]",
       'command = "npx"',
@@ -449,7 +449,7 @@ describe("adversarial: iris-looking rootKey collisions that are NOT canonical", 
     const content = [
       "[mcp_servers.iris-dev-mcp]",
       'command = "npx"',
-      'args = ["-y", "@iris-mcp/dev"]',
+      'args = ["-y", "@iris-mcp/dev@1"]',
       "enabled = false",
       "",
     ].join("\n");
@@ -524,7 +524,7 @@ describe("adversarial: surgical JSON removal when the owned entry is LAST", () =
     const content = `{
   "mcpServers": {
     "github-mcp": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] },
-    "iris-dev-mcp": { "command": "npx", "args": ["-y", "@iris-mcp/dev"] }
+    "iris-dev-mcp": { "command": "npx", "args": ["-y", "@iris-mcp/dev@1"] }
   }
 }`;
     const disable = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "disable"));
@@ -551,7 +551,7 @@ describe("adversarial: surgical JSON removal when the owned entry is LAST", () =
   // comment
   "servers": {
     "microsoft-learn": { "command": "npx", "args": ["-y", "@microsoft/learn-mcp"] },
-    "iris-dev-mcp": { "command": "npx", "args": ["-y", "@iris-mcp/dev"] },
+    "iris-dev-mcp": { "command": "npx", "args": ["-y", "@iris-mcp/dev@1"] },
   }
 }`;
     const disable = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "disable"));
@@ -576,7 +576,7 @@ describe("adversarial: deeply-nested and unicode-named foreign entries", () => {
     const secret = "sk-unicodeForeignSecret";
     const content = `{
   "mcpServers": {
-    "iris-dev-mcp": { "command": "npx", "args": ["-y", "@iris-mcp/dev"] },
+    "iris-dev-mcp": { "command": "npx", "args": ["-y", "@iris-mcp/dev@1"] },
     "検索サーバー": {
       "command": "npx",
       "args": ["-y", "@foreign/search"],

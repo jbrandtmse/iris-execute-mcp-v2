@@ -211,6 +211,8 @@ describe("Story 40.3: tool_support.md", () => {
 });
 
 describe("Story 40.3: the CHANGELOG section and the changeset", () => {
+  // `changeset version` consumes (deletes) the file, so its checks run only while it exists.
+  const changesetPresent = existsSync(path.join(REPO_ROOT, ".changeset/story-40-3-testproduction-runs.md"));
   const sections = sectionsOf(read("CHANGELOG.md"));
   const section = sections.find((candidate) => CHANGELOG_TITLE.test(candidate.split("\n")[0] ?? "")) ?? "";
 
@@ -260,7 +262,7 @@ describe("Story 40.3: the CHANGELOG section and the changeset", () => {
     expect(text).toContain("Earliest IRIS version verified: 2026.2 build 221U");
   });
 
-  it("the changeset bumps @iris-mcp/dev by a minor and @iris-mcp/shared by a patch, and records the default state, the code and the bootstrap move", () => {
+  it.skipIf(!changesetPresent)("the changeset bumps @iris-mcp/dev by a minor and @iris-mcp/shared by a patch, and records the default state, the code and the bootstrap move", () => {
     const dir = path.join(REPO_ROOT, ".changeset");
     expect(existsSync(dir)).toBe(true);
     const file = readdirSync(dir).find((name) => name === "story-40-3-testproduction-runs.md");
@@ -279,7 +281,7 @@ describe("Story 40.3: the CHANGELOG section and the changeset", () => {
     const texts = [
       section,
       lineStarting(toolSupport, "> **Story 40.3"),
-      read(".changeset/story-40-3-testproduction-runs.md"),
+      ...(changesetPresent ? [read(".changeset/story-40-3-testproduction-runs.md")] : []),
       lineStarting(read("README.md"), "| `PRODUCTION_BUSY`"),
     ];
     for (const text of texts) {

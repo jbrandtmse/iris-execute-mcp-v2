@@ -417,9 +417,40 @@ export const lm = {
   },
 };
 
-/** Mirrors the declared `vscode.McpStdioServerDefinition` (readonly `label`, mutable `env`). */
+/**
+ * Mirrors the `vscode.Uri.file()` surface the extension uses. `fsPath` is the
+ * platform-native path (a win32 drive letter is lower-cased, as the real
+ * implementation does); `path` is the slash-separated form with a leading
+ * slash. Declared in `@types/vscode` 1.125.0.
+ */
+export class Uri {
+  readonly scheme = "file";
+  readonly authority = "";
+  readonly query = "";
+  readonly fragment = "";
+
+  private constructor(
+    readonly path: string,
+    readonly fsPath: string,
+  ) {}
+
+  static file(fsPath: string): Uri {
+    const isDrivePath = /^[A-Za-z]:/.test(fsPath);
+    const lowered = isDrivePath ? `${fsPath.charAt(0).toLowerCase()}${fsPath.slice(1)}` : fsPath;
+    const slashed = lowered.replace(/\\/g, "/");
+    const path = slashed.startsWith("/") ? slashed : `/${slashed}`;
+    return new Uri(path, isDrivePath ? lowered.replace(/\//g, "\\") : lowered);
+  }
+
+  toString(): string {
+    return `file://${this.path}`;
+  }
+}
+
+/** Mirrors the declared `vscode.McpStdioServerDefinition` (readonly `label`, mutable `cwd` and `env`). */
 export class McpStdioServerDefinition {
   readonly label: string;
+  cwd?: Uri;
   command: string;
   args: string[];
   env: Record<string, string | number | null>;

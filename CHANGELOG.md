@@ -2,6 +2,83 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-21] — Story 42.1: Pre-Publish Package Fixes
+
+Story 42.1 makes the eight `@iris-mcp/*` packages publishable and pins every `npx` spec the suite writes, spawns or documents to the
+major. Nothing is published, versioned or tagged: no `1.0.0` section is written here (Story 42.6 writes it), and no pending changeset
+declares a major. No tool, action, governance key, preset row, annotation, description, schema, refusal code or environment variable is
+added or changed, the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), the tools-list snapshot and the SDK goldens are
+byte-unchanged, and no ObjectScript class is touched.
+
+### Changed (AD-15 sanctioned)
+
+- **The `@1` pin (D3, DW-260).** Every `npx` spec the suite writes, spawns or documents now ends in `@1`, taken from one constant:
+  `@iris-mcp/client-config` exports `IRIS_MCP_MAJOR` (`"1"`) and `pinnedSpec()`. The entries `iris-mcp-clients apply` writes are
+  `{"command": "npx", "args": ["-y", "@iris-mcp/<pkg>@1"]}` (the byte goldens of the four adapter families are re-captured from the built
+  engine). **Re-apply pins existing managed entries:** applying an entry that an earlier version wrote unpinned rewrites only its owned
+  `args` (and `command` and `env`, as before); foreign entries and every byte outside the owned entry keep their exact bytes (AD-30). The
+  VS Code extension keeps a literal mirror of the major (it has no runtime dependencies and no bundler), pinned equal to the constant by a
+  test in `@iris-mcp/all`. It spawns `npx -y @iris-mcp/<pkg>@1`, reaches the clients CLI as
+  `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients` and the governance CLI as `npx -y -p @iris-mcp/shared@1 iris-mcp-governance`
+  (`universe` also installs each server as `-p @iris-mcp/<pkg>@1`). Every server definition it provides starts in the user's home
+  directory, which is VS Code's own default made explicit. Specs use `@1`, never `^1`, because `^` is cmd.exe's escape character on win32.
+  Clients on `@1` receive every 1.x release automatically.
+- **The Node floor (D4).** The root manifest and all eight packages declare `engines.node >=22.17.0`: the packages had no `engines`, and
+  the root said `>=18.0.0`. 22.17.0 is where `fs.globSync`, which `iris_doc_load` uses, is stable. `@types/node` is major 22 in the seven
+  TypeScript packages (it was 25 in `@iris-mcp/shared` and `@iris-mcp/client-config` and undeclared in the five servers) and in the
+  extension (`^22.15.0`, the Node of VS Code 1.101's Electron; it was `^20`). The extension declares no `engines.node`; `engines.vscode`
+  governs it. The README prerequisites say Node.js 22.17 or later.
+
+### Fixed
+
+- **The documented clients CLI form (DW-628).** `npx -y @iris-mcp/client-config iris-mcp-clients <command>` hands `iris-mcp-clients` to the
+  CLI as its command, which it refuses as unknown. The documented form is `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients <command>`,
+  in `packages/client-config/README.md`, `docs/client-config/README.md` and the three per-client guides. The credentials and governance
+  recipes use `-p @iris-mcp/shared@1`.
+- **`@iris-mcp/shared` no longer advertises unshipped exports (DW-506).** Its published `exports` holds only `"."` (through
+  `publishConfig.exports`, which pnpm applies when it packs); the three `./test-helpers` subpaths stay in the source manifest for the
+  in-repo test imports. The tarball no longer ships `dist/test-helpers`, any source map or any vitest peer declaration; `@iris-mcp/shared`
+  and `@iris-mcp/client-config` no longer declare vitest as an optional peer.
+- **`@iris-mcp/all` is documented as what it is.** It is a meta-package with no `bin`: a global install links no command, and a project
+  install puts the seven commands of its dependencies in `node_modules/.bin`. MCP clients start servers with
+  `npx -y @iris-mcp/<server>@1`. The root README, the meta-package README, the extension README, the `iris-mcp-clients` documentation and
+  the certification records no longer say that `@iris-mcp/all` links commands, can be launched, or is an aggregate server.
+- **Package descriptions (DW-630).** `@iris-mcp/client-config` no longer describes itself as a read-only foundation, and its README and the
+  root README name the skills pack. The root description no longer reads as a product title.
+
+### Added
+
+- **Registry metadata (DW-31).** All eight packages declare `license` (MIT, with a `LICENSE` file in each tarball), `repository` (with the
+  package's directory), `author`, `homepage`, `bugs` and `keywords`; the five servers declare `mcpName`
+  (`io.github.jbrandtmse/<bin>`), the name the MCP Registry checks against the published version. No name, description or keyword presents
+  the suite as InterSystems' or implies endorsement (AD-28). The extension gains `author`.
+- **Publish-path tests in `@iris-mcp/all`.** `package-manifests.test.ts` (the floor, `@types/node`, the metadata, `mcpName` and the AD-28
+  deny-list), `published-tarballs.test.ts` (`pnpm pack` of all eight packages: every `exports`, `main`, `types` and `bin` target is in the
+  tarball, `LICENSE` and `README.md` are present, no test helper, test, source map or source file ships), `npx-pin.test.ts` (the
+  unpinned-spec scan, `scripts/lib/npx-pin-scan.mjs`, and the extension mirror), `release-1-0-0-mechanism.test.ts` and
+  `meta-package-docs.test.ts` (no document claims that `@iris-mcp/all` links or launches a command); the extension suite gains
+  `pinnedDefinitionsActivationFlow.test.ts` (every provided definition carries the `@1` pin and the home-directory `cwd`).
+- **The release changeset template (DW-394).** `scripts/release/changeset-1.0.0.md` names all eight packages as `major`. It lives outside
+  `.changeset/`, which Changesets would consume, and Story 42.6 applies it once. A test runs the repository's real `changeset version` in a
+  throwaway fixture and asserts that all eight packages land on exactly `1.0.0` (and on `0.1.0` without the template).
+- **The changeset-reading doc tests skip once their changeset is consumed** instead of failing with `ENOENT`.
+
+### Unchanged
+
+- No tool, action, governance key, preset row, annotation, description, schema, refusal code or environment variable changes, and the
+  2025-11-25 and 2026-07-28 wire is byte-identical. The frozen SDK goldens, `sdk-golden-sanctioned-changes.json` and
+  `tools-list-snapshot.json` are untouched.
+- The SDK pins stay exact at `2.3.1`. The newest release is still 2.3.1, which bundles fast-uri 3.1.0 (the fix, upstream PR #2973, is not
+  released), so there is no bump to make (DW-637).
+
+### Known limits
+
+- The extension's two CLI spawns (clients and governance) pass no `cwd`, so they inherit the extension host's working directory. A
+  project-local copy of `@iris-mcp/client-config` or `@iris-mcp/shared` at major 1 can shadow the pinned spec there (deferred, severity low).
+- Publishing must go through pnpm: `pnpm publish` applies `publishConfig.exports` and rewrites `workspace:*`, and a direct `npm publish`
+  would ship the source exports and unresolvable `workspace:*` dependencies. Story 42.5's release script owns this.
+- Seven READMEs still say that `IRIS_USERNAME` defaults to `_SYSTEM`; the server treats it as required (deferred, severity low).
+
 ## [Pre-release — 2026-10-20] — Story 43.4: SDK v2 docs, smokes and capstone
 
 Story 43.4 closes Epic 43, the move to the MCP TypeScript SDK v2. It appends one passage about the confirmation dialog to the description of

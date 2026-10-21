@@ -15,7 +15,7 @@ npm install -g @iris-mcp/data
 Or run directly without installing:
 
 ```bash
-npx @iris-mcp/data
+npx -y @iris-mcp/data@1
 ```
 
 ---
@@ -63,7 +63,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
   "mcpServers": {
     "iris-data-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/data"],
+      "args": ["-y", "@iris-mcp/data@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -83,7 +83,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
   "mcpServers": {
     "iris-data-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/data"],
+      "args": ["-y", "@iris-mcp/data@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -102,7 +102,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
 {
   "iris-data-mcp": {
     "command": "npx",
-    "args": ["-y", "@iris-mcp/data"],
+    "args": ["-y", "@iris-mcp/data@1"],
     "env": {
       "IRIS_HOST": "localhost",
       "IRIS_PORT": "52773",

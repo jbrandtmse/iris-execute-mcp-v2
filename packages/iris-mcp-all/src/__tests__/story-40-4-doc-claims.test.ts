@@ -33,6 +33,9 @@ function read(relative: string): string {
   return readFileSync(path.join(REPO_ROOT, relative), "utf8");
 }
 
+// `changeset version` consumes (deletes) the file, so its checks run only while it exists.
+const CHANGESET_PRESENT = existsSync(path.join(REPO_ROOT, ".changeset/story-40-4-test-depth-docs-prompt-and-capstone.md"));
+
 const squash = (text: string): string => text.replace(/\s+/g, " ");
 
 /** The right arrow the documents use between two versions, by code point. */
@@ -337,7 +340,7 @@ describe("Story 40.4: the CHANGELOG section and the changeset", () => {
     expect(flat).toContain("`iris_execute_tests` stays enabled by default (a baseline key, classified `write`), and `iris_test_coverage` stays a write, DEFAULT-DISABLED; the guard has no switch and adds no key");
   });
 
-  it("the changeset bumps @iris-mcp/dev and @iris-mcp/shared by a patch and records the default states and the bootstrap move", () => {
+  it.skipIf(!CHANGESET_PRESENT)("the changeset bumps @iris-mcp/dev and @iris-mcp/shared by a patch and records the default states and the bootstrap move", () => {
     const dir = path.join(REPO_ROOT, ".changeset");
     expect(existsSync(dir)).toBe(true);
     const file = readdirSync(dir).find((name) => name === "story-40-4-test-depth-docs-prompt-and-capstone.md");
@@ -356,7 +359,7 @@ describe("Story 40.4: the CHANGELOG section and the changeset", () => {
 describe("Story 40.4: no document still calls iris_execute_tests a read, and no new text claims regulatory compliance", () => {
   const sections = sectionsOf(read("CHANGELOG.md"));
   const section = sections.find((candidate) => CHANGELOG_TITLE.test(candidate.split("\n")[0] ?? "")) ?? "";
-  const changeset = read(".changeset/story-40-4-test-depth-docs-prompt-and-capstone.md");
+  const changeset = CHANGESET_PRESENT ? read(".changeset/story-40-4-test-depth-docs-prompt-and-capstone.md") : "";
 
   it("none of the documents says iris_execute_tests stays a read", () => {
     const documents: Array<[string, string]> = [
@@ -378,7 +381,7 @@ describe("Story 40.4: no document still calls iris_execute_tests a read, and no 
     ["the CHANGELOG section", section],
     ["the Story 40.4 note of tool_support.md", lineStarting(toolSupport, "> **Story 40.4")],
     ["the root README section", rootReadme.slice(rootReadme.indexOf("### Test coverage (Epic 40)"), rootReadme.indexOf("### Worked example"))],
-    ["the changeset", changeset],
+    ...(CHANGESET_PRESENT ? ([["the changeset", changeset]] as const) : []),
     ["skills/deploy-and-test-class/SKILL.md", read("skills/deploy-and-test-class/SKILL.md")],
   ] as const) {
     it(`${name} makes no compliance claim`, () => {

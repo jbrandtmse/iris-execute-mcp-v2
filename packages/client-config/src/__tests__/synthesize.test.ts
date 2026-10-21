@@ -15,8 +15,10 @@ import { describe, it, expect } from "vitest";
 import {
   CANONICAL_SERVERS,
   CLIENT_ADAPTERS,
+  IRIS_MCP_MAJOR,
   PKG_BY_SERVER,
   VSCODE_PASSWORD_INPUT_ID,
+  pinnedSpec,
   synthesizeEntry,
   type ClientAdapter,
   type EnvMode,
@@ -44,7 +46,7 @@ describe("server-manager mode", () => {
     expect(result.entry).toEqual({
       name: "iris-dev-mcp",
       command: "npx",
-      args: ["-y", "@iris-mcp/dev"],
+      args: ["-y", "@iris-mcp/dev@1"],
       env: { IRIS_SERVER_MANAGER: "auto", IRIS_SM_SERVERS: "prod,dr" },
     });
     expect(result.containsSecret).toBe(false);
@@ -206,13 +208,52 @@ describe("explicit mode (typed confirmation + contains-secret)", () => {
   });
 });
 
+/** The launch spec each canonical server must synthesize to: literals, so the pin helper cannot validate itself. */
+const PINNED_SPEC_BY_SERVER: Record<(typeof CANONICAL_SERVERS)[number], string> = {
+  "iris-dev-mcp": "@iris-mcp/dev@1",
+  "iris-admin-mcp": "@iris-mcp/admin@1",
+  "iris-ops-mcp": "@iris-mcp/ops@1",
+  "iris-interop-mcp": "@iris-mcp/interop@1",
+  "iris-data-mcp": "@iris-mcp/data@1",
+};
+
+describe("the @1 pin (AC 42.1.6, AD-29)", () => {
+  it("IRIS_MCP_MAJOR is '1' and pinnedSpec appends it with '@', never '^' (cmd.exe escape character)", () => {
+    expect(IRIS_MCP_MAJOR).toBe("1");
+    expect(pinnedSpec("@iris-mcp/dev")).toBe("@iris-mcp/dev@1");
+    expect(pinnedSpec("@iris-mcp/dev")).not.toContain("^");
+  });
+
+  it("PKG_BY_SERVER keeps the bare package names", () => {
+    for (const server of CANONICAL_SERVERS) {
+      expect(PKG_BY_SERVER[server]).toBe(PINNED_SPEC_BY_SERVER[server].replace(/@1$/, ""));
+    }
+  });
+
+  it("every adapter x server x non-explicit mode synthesizes `npx -y <pkg>@1`", () => {
+    const nonExplicit: EnvMode[] = ["server-manager", "env-reference"];
+    let checked = 0;
+    for (const adapter of Object.values(CLIENT_ADAPTERS)) {
+      for (const server of CANONICAL_SERVERS) {
+        for (const mode of nonExplicit) {
+          const result = expectOk(synthesizeEntry(server, mode, { adapter, profile: PROFILE }));
+          expect(result.entry.command).toBe("npx");
+          expect(result.entry.args).toEqual(["-y", PINNED_SPEC_BY_SERVER[server]]);
+          checked += 1;
+        }
+      }
+    }
+    expect(checked).toBe(Object.keys(CLIENT_ADAPTERS).length * CANONICAL_SERVERS.length * nonExplicit.length);
+  });
+});
+
 describe("mechanical sweeps (Rule #51)", () => {
   it("PKG_BY_SERVER covers exactly the canonical server set", () => {
     expect(Object.keys(PKG_BY_SERVER).sort()).toEqual([...CANONICAL_SERVERS].sort());
     for (const server of CANONICAL_SERVERS) {
       const result = expectOk(synthesizeEntry(server, "server-manager", { adapter: adapterOf("cursor") }));
       expect(result.entry.command).toBe("npx");
-      expect(result.entry.args).toEqual(["-y", PKG_BY_SERVER[server]]);
+      expect(result.entry.args).toEqual(["-y", PINNED_SPEC_BY_SERVER[server]]);
     }
   });
 

@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,7 +32,9 @@ const rootReadme = read("README.md");
 const clientIndex = read("docs/client-config/README.md");
 const claudeCode = read("docs/client-config/claude-code.md");
 const changelog = read("CHANGELOG.md");
-const changeset = read(".changeset/story-43-4-sdk-v2-close.md");
+// `changeset version` consumes (deletes) the file, so the bump map is read and checked while it exists.
+const changesetPresent = existsSync(path.join(REPO_ROOT, ".changeset/story-43-4-sdk-v2-close.md"));
+const changeset = changesetPresent ? read(".changeset/story-43-4-sdk-v2-close.md") : "";
 
 /** The text of `document` from the heading line `heading` up to the next heading line that starts with `until`, or to its end when `until` is null. */
 function between(document: string, heading: string, until: string | null): string {
@@ -208,10 +210,11 @@ describe("Story 43.4: docs/client-config/claude-code.md", () => {
 });
 
 describe("Story 43.4: the CHANGELOG entry and the changeset", () => {
-  it("is the top entry, directly above the Story 43.3 entry", () => {
+  it("sits directly above the Story 43.3 entry", () => {
     const headings = changelog.split("\n").filter((line) => line.startsWith("## "));
-    expect(headings[0]).toMatch(/^## \[Pre-release [^\]]*\] \S Story 43\.4: SDK v2 docs, smokes and capstone$/);
-    expect(headings[1]).toContain("Story 43.3: Human confirmation through elicitation");
+    const index = headings.findIndex((heading) => /^## \[Pre-release [^\]]*\] \S Story 43\.4: SDK v2 docs, smokes and capstone$/.test(heading));
+    expect(index, "the CHANGELOG has the Story 43.4 entry").toBeGreaterThanOrEqual(0);
+    expect(headings[index + 1]).toContain("Story 43.3: Human confirmation through elicitation");
     expect(squash(entry).length).toBeGreaterThan(1000);
   });
 
@@ -265,7 +268,7 @@ describe("Story 43.4: the CHANGELOG entry and the changeset", () => {
     expect(limits).toContain("observed on Claude Code 2.1.296 and MCP Inspector CLI 2.9.0 only");
   });
 
-  it("the changeset is a patch for @iris-mcp/shared, client-config and the five servers, and nothing else", () => {
+  it.skipIf(!changesetPresent)("the changeset is a patch for @iris-mcp/shared, client-config and the five servers, and nothing else", () => {
     const frontmatter = /^---\n([\s\S]*?)\n---/.exec(changeset)?.[1] ?? "";
     const bumps = frontmatter.split("\n").map((line) => line.trim());
     expect(bumps).toEqual([

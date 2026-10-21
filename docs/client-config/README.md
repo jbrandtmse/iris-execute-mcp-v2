@@ -2,7 +2,7 @@
 
 How to point any MCP client at the IRIS MCP Server Suite, plus the two credential caveats that surprise people most.
 
-> **The fast path is the manager (Epic 33):** `npx -y @iris-mcp/client-config iris-mcp-clients`
+> **The fast path is the manager (Epic 33):** `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients`
 > detects your installed clients (`detect`), previews the exact edit (`diff`), writes it through the
 > backup-on-write engine (`apply`), toggles entries (`enable`/`disable`/`remove`), rolls back
 > (`restore`), and diagnoses the result (`doctor`). *(Not yet published to npm — until then run the
@@ -118,7 +118,7 @@ IRIS_SERVER_MANAGER=auto
 IRIS_SM_WORKSPACE=/path/to/your/workspace
 ```
 
-> **`@iris-mcp/*` is not yet published to npm.** `npx -y @iris-mcp/dev` will fail. Until publication, point clients at a local build: `node /path/to/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js`. Every snippet below uses the local form; swap in `npx -y @iris-mcp/dev` once published.
+> **`@iris-mcp/*` is not yet published to npm.** `npx -y @iris-mcp/dev@1` will fail. Until publication, point clients at a local build: `node /path/to/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js`. Every snippet below uses the local form; swap in `npx -y @iris-mcp/dev@1` once published.
 
 ---
 

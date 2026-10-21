@@ -21,7 +21,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@iris-mcp/ops"
+        "@iris-mcp/ops@1"
       ],
       "env": {
         "IRIS_HOST": "iris.example.com",

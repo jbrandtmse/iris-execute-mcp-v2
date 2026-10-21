@@ -34,8 +34,9 @@ function mockResponse(
 ): Response {
   const { status = 200, headers: extraHeaders = {}, setCookie = [] } = init;
   const headersObj = new Headers(extraHeaders);
-  // getSetCookie is part of the Headers API in Node 20+
-  // For testing we patch it onto the response.
+  // `Headers.getSetCookie` is part of the Node runtime this package requires
+  // (engines.node), but a constructor-set `Set-Cookie` is not reliably
+  // retrievable through it, so the tests patch it onto the response.
   const resp = new Response(JSON.stringify(body), {
     status,
     headers: headersObj,

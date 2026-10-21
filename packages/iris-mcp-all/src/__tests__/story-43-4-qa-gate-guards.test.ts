@@ -180,9 +180,27 @@ describe("the epic capstone and the Story 43.4 tests are in the default suite an
   });
 
   it("the capstone and the Story 43.4 tests contain no skip construct and never read IRIS_REQUIRE_LIVE", () => {
+    // The one sanctioned construct (Story 42.1): `changeset version` consumes the story's changeset, so the doc test that reads its bump map
+    // runs only while the file exists. It depends on the presence of a repository file, never on IRIS or the environment.
+    const SANCTIONED = { file: `${TESTS}/story-43-4-doc-claims.test.ts`, construct: "it.skipIf", count: 1 };
     for (const file of NEW_FILES) {
       if (file.endsWith("story-43-4-qa-gate-guards.test.ts")) continue;
-      expect(skipConstructs(readFileSync(path.join(REPO_ROOT, file), "utf8")), `${file} has no skip construct`).toEqual([]);
+      const source = readFileSync(path.join(REPO_ROOT, file), "utf8");
+      const found = skipConstructs(source);
+      const allowed = file === SANCTIONED.file ? found.filter((construct) => construct === SANCTIONED.construct) : [];
+      if (file === SANCTIONED.file) {
+        expect(allowed, `${file} holds exactly the sanctioned changeset-presence guard`).toHaveLength(SANCTIONED.count);
+        expect(source, "the sanctioned guard skips only when the changeset file is absent").toContain(
+          'it.skipIf(!changesetPresent)("the changeset is a patch for @iris-mcp/shared, client-config and the five servers, and nothing else"',
+        );
+        expect(source, "changesetPresent is the existence of the story's own changeset file").toContain(
+          'const changesetPresent = existsSync(path.join(REPO_ROOT, ".changeset/story-43-4-sdk-v2-close.md"));',
+        );
+      }
+      expect(
+        found.filter((construct) => !allowed.includes(construct)),
+        `${file} has no skip construct`,
+      ).toEqual([]);
     }
   });
 });

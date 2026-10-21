@@ -1,7 +1,7 @@
 # Claude Code Configuration
 
 > **Superseded by the manager (Epic 33):** the fastest, safest way to wire Claude Code is
-> `npx -y @iris-mcp/client-config iris-mcp-clients apply --client claude-code --servers iris-dev-mcp`
+> `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply --client claude-code --servers iris-dev-mcp`
 > — it previews the exact diff, writes through the backup-on-write engine, and `iris-mcp-clients doctor`
 > verifies the result. *(Not yet published to npm — until then: `node packages/client-config/dist/cli/clients-cli.js apply …`.)*
 > This page remains as the **manual fallback** (and as the reference for what the
@@ -53,7 +53,7 @@ Create a `.mcp.json` file in your project root.
   "mcpServers": {
     "iris-dev-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -71,11 +71,11 @@ To use a different server, swap the package name in `args`:
 
 | Server | `args` value |
 |--------|-------------|
-| Development | `["-y", "@iris-mcp/dev"]` |
-| Administration | `["-y", "@iris-mcp/admin"]` |
-| Interoperability | `["-y", "@iris-mcp/interop"]` |
-| Operations | `["-y", "@iris-mcp/ops"]` |
-| Data & Analytics | `["-y", "@iris-mcp/data"]` |
+| Development | `["-y", "@iris-mcp/dev@1"]` |
+| Administration | `["-y", "@iris-mcp/admin@1"]` |
+| Interoperability | `["-y", "@iris-mcp/interop@1"]` |
+| Operations | `["-y", "@iris-mcp/ops@1"]` |
+| Data & Analytics | `["-y", "@iris-mcp/data@1"]` |
 
 ### All Five Servers
 
@@ -84,7 +84,7 @@ To use a different server, swap the package name in `args`:
   "mcpServers": {
     "iris-dev-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -96,7 +96,7 @@ To use a different server, swap the package name in `args`:
     },
     "iris-admin-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/admin"],
+      "args": ["-y", "@iris-mcp/admin@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -108,7 +108,7 @@ To use a different server, swap the package name in `args`:
     },
     "iris-interop-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/interop"],
+      "args": ["-y", "@iris-mcp/interop@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -120,7 +120,7 @@ To use a different server, swap the package name in `args`:
     },
     "iris-ops-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/ops"],
+      "args": ["-y", "@iris-mcp/ops@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -132,7 +132,7 @@ To use a different server, swap the package name in `args`:
     },
     "iris-data-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/data"],
+      "args": ["-y", "@iris-mcp/data@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -168,7 +168,7 @@ Both are **optional** — omit them for a single-server, fully-enabled install. 
   "mcpServers": {
     "iris-admin-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/admin"],
+      "args": ["-y", "@iris-mcp/admin@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -243,7 +243,7 @@ If you already curate IRIS connections in the [InterSystems Server Manager](http
 1. Store the password for a connection in your OS keychain (Windows Credential Manager / macOS Keychain / libsecret) — never typed into a config file:
 
    ```bash
-   npx -y -p @iris-mcp/shared iris-mcp-credentials set myserver
+   npx -y -p @iris-mcp/shared@1 iris-mcp-credentials set myserver
    ```
 
    > **Pre-release:** the suite is not published to npm yet, so the `npx` form above will not resolve today. Until it is, run the built bin directly from a clone: `node /path/to/iris-execute-mcp-v2/packages/shared/dist/cli/credentials-cli.js set myserver`. (`-p` is required in the `npx` form because the bin name differs from the package name.)
@@ -255,7 +255,7 @@ If you already curate IRIS connections in the [InterSystems Server Manager](http
      "mcpServers": {
        "iris-dev-mcp": {
          "command": "npx",
-         "args": ["-y", "@iris-mcp/dev"],
+         "args": ["-y", "@iris-mcp/dev@1"],
          "env": {
            "IRIS_SERVER_MANAGER": "auto"
          }
@@ -286,7 +286,7 @@ Point a server at production in **read-only mode** with one environment variable
   "mcpServers": {
     "iris-dev-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -322,7 +322,7 @@ One optional environment variable trims which tools a server advertises on `tool
   "mcpServers": {
     "iris-dev-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -356,7 +356,7 @@ Three optional environment variables turn on a secrets-free, structured JSONL lo
   "mcpServers": {
     "iris-dev-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -396,7 +396,7 @@ To make servers available across all projects in VS Code, add the `mcpServers` b
   "mcpServers": {
     "iris-dev-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",

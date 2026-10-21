@@ -1,7 +1,27 @@
 {
   "name": "@iris-mcp/client-config",
   "version": "0.0.1",
-  "description": "Multi-client MCP configuration manager for the iris-mcp suite — declarative ClientAdapter registry, detection, native-format readers, status matrix, and pure diff renderer (read-only foundation; writes arrive in Epic 33 Story 33.1)",
+  "description": "Client configuration manager and skills-pack installer for the IRIS MCP servers: detects MCP clients, writes and removes server entries with backups, and installs the skills pack into a project",
+  "keywords": [
+    "iris",
+    "mcp",
+    "model-context-protocol",
+    "mcp-client",
+    "configuration",
+    "agent-skills",
+    "ai-agents"
+  ],
+  "homepage": "https://github.com/jbrandtmse/iris-execute-mcp-v2/tree/main/packages/client-config#readme",
+  "bugs": {
+    "url": "https://github.com/jbrandtmse/iris-execute-mcp-v2/issues"
+  },
+  "license": "MIT",
+  "author": "jbrandtmse (https://github.com/jbrandtmse)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jbrandtmse/iris-execute-mcp-v2.git",
+    "directory": "packages/client-config"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,8 +37,12 @@
   "files": [
     "dist",
     "!dist/**/__tests__",
+    "!dist/**/*.map",
     "skills-pack"
   ],
+  "engines": {
+    "node": ">=22.17.0"
+  },
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "test": "vitest run",
@@ -32,14 +56,6 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@types/node": "^25.5.2"
-  },
-  "peerDependencies": {
-    "vitest": ">=2.0.0"
-  },
-  "peerDependenciesMeta": {
-    "vitest": {
-      "optional": true
-    }
+    "@types/node": "^22.17.0"
   }
 }

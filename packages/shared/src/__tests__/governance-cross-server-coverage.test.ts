@@ -186,12 +186,12 @@ function makeHostAwareFetch() {
         status: 200,
         headers: responseHeaders,
       });
-      // Patch getSetCookie for older supported Node versions / the test
-      // environment: a constructor-set `Set-Cookie` is NOT reliably retrievable
-      // through `Headers.getSetCookie()` across the supported Node range
-      // (engines.node >= 18). The production client reads cookies ONLY via
+      // Patch getSetCookie onto the mock response: a constructor-set `Set-Cookie`
+      // is NOT reliably retrievable through `Headers.getSetCookie()` in the test
+      // environment (it follows the runtime's undici, not this package's
+      // `engines.node` floor). The production client reads cookies ONLY via
       // `response.headers.getSetCookie()`, so without this patch the per-profile
-      // cookie jars would stay empty on Node 18 and the D1 isolation assertions
+      // cookie jars would stay empty and the D1 isolation assertions
       // would fail. Mirrors every other cookie-bearing mock in this package.
       if (hostCookie) {
         const original = response.headers.getSetCookie?.bind(response.headers);

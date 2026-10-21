@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -349,7 +349,8 @@ describe("Story 38.6: the CHANGELOG top section and the changeset", () => {
     expect(top).not.toMatch(/(?:full|core|developer)\s*`?\s*\d+\/\d+\/\d+\/\d+\/\d+/);
   });
 
-  it("the changeset bumps exactly @iris-mcp/dev, minor (AD-29)", () => {
+  // `changeset version` consumes (deletes) the file, so the bump map is checked while it exists.
+  it.skipIf(!existsSync(path.join(REPO_ROOT, ".changeset/story-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md")))("the changeset bumps exactly @iris-mcp/dev, minor (AD-29)", () => {
     const changeset = read(".changeset/story-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md");
     const frontMatter = /^---\n([\s\S]*?)\n---/.exec(changeset)?.[1] ?? "";
     const bumps = Object.fromEntries(

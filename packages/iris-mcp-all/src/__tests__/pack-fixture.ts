@@ -1,12 +1,13 @@
 /**
  * Shared fixtures for the skills-pack tests (`skills-pack.test.ts`, `pack-provenance.test.ts`,
  * `validate-prompts.test.ts`) and the skills-pack documentation tests: disposable temp roots, file placement, a real
- * `node` child process, and the anchors of a Markdown file's headings.
+ * `node` child process, the anchors of a Markdown file's headings, and a real `pnpm pack` (the packer that
+ * publishing uses) with its tarball extracted.
  *
  * Every temp root is created under `os.tmpdir()` and removed by the test that made it.
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -99,4 +100,66 @@ export function runNode(cwd: string, script: string, args: string[] = [], option
     timeout: options.timeout,
   });
   return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+}
+
+/** One package packed by `pnpm pack` and extracted: the tarball, its files and its packed manifest. */
+export interface PnpmPack {
+  /** Absolute path of the tarball. */
+  tarball: string;
+  /** Size of the tarball in bytes. */
+  bytes: number;
+  /** Absolute path of the extracted `package/` directory. */
+  root: string;
+  /** Forward-slash paths, relative to the package root, of every file in the tarball, sorted. */
+  files: string[];
+  /** The `package.json` that was packed (after `publishConfig` overrides). */
+  manifest: Record<string, unknown>;
+}
+
+function runTool(command: string, args: string[], cwd: string): { status: number | null; stdout: string; stderr: string } {
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, npm_config_update_notifier: "false", NO_UPDATE_NOTIFIER: "1" },
+    timeout: 120_000,
+    shell: process.platform === "win32" && command !== "tar",
+  });
+  return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+}
+
+function walkRelative(root: string, directory = ""): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(join(root, directory), { withFileTypes: true })) {
+    const rel = directory === "" ? entry.name : `${directory}/${entry.name}`;
+    if (entry.isDirectory()) found.push(...walkRelative(root, rel));
+    else found.push(rel);
+  }
+  return found.sort();
+}
+
+/**
+ * Pack `packageDir` with `pnpm pack` (the packer that publishing goes through: only pnpm applies `publishConfig` overrides such as
+ * `exports`) into `destination`, and extract the tarball next to it. Nothing is written outside `destination`.
+ *
+ * @param packageDir - Absolute path of the package directory.
+ * @param destination - A directory under `os.tmpdir()` that holds no other tarball (pnpm creates it when it is missing); the tarball goes in it, and `extracted/` holds its contents.
+ */
+export function pnpmPack(packageDir: string, destination: string): PnpmPack {
+  const packed = runTool("pnpm", ["pack", "--pack-destination", destination], packageDir);
+  if (packed.status !== 0) throw new Error(`pnpm pack failed in ${packageDir}: ${packed.stderr || packed.stdout}`);
+  const tarballs = readdirSync(destination).filter((name) => name.endsWith(".tgz"));
+  if (tarballs.length !== 1) throw new Error(`pnpm pack in ${packageDir} wrote ${tarballs.length} tarballs to ${destination}`);
+  const tarball = join(destination, tarballs[0] as string);
+  const extractDir = join(destination, "extracted");
+  mkdirSync(extractDir);
+  const extracted = runTool("tar", ["-xzf", tarball, "-C", extractDir], destination);
+  if (extracted.status !== 0) throw new Error(`tar could not extract ${tarball}: ${extracted.stderr}`);
+  const root = join(extractDir, "package");
+  return {
+    tarball,
+    bytes: statSync(tarball).size,
+    root,
+    files: walkRelative(root),
+    manifest: JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as Record<string, unknown>,
+  };
 }

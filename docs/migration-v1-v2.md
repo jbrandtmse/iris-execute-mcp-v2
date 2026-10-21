@@ -24,7 +24,7 @@ Both v1 projects (`iris-execute-mcp` by jbrandtmse and `mcp-server-iris` by Care
 |------|----|----|
 | **Connection** | SuperServer port `1972` (native IRIS binary protocol) | Web port `52773` (HTTP/HTTPS via Atelier REST API) |
 | **Runtime** | Python (FastMCP / uvx) | Node.js / TypeScript (npx) |
-| **Installation** | `pip install` / venv / `uvx` | `npx -y @iris-mcp/<package>` (no install step) |
+| **Installation** | `pip install` / venv / `uvx` | `npx -y @iris-mcp/<package>@1` (no install step) |
 | **Tool naming** | `execute_command`, `get_global`, etc. | Underscore-namespaced: `iris_execute_command`, `iris_global_get`, etc. |
 | **Architecture** | Single server, 8 tools | 5 servers, 110 tools total |
 | **IRIS classes** | `ExecuteMCP.*` (manual import required) | `ExecuteMCPv2.*` (auto-bootstrapped on first connection) |
@@ -152,7 +152,7 @@ If you were using `mcp-server-iris` for ObjectScript execution and SQL, the `@ir
     "iris-dev-mcp": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -174,7 +174,7 @@ If you were using `mcp-server-iris` for ObjectScript execution and SQL, the `@ir
     "iris-dev-mcp": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -187,7 +187,7 @@ If you were using `mcp-server-iris` for ObjectScript execution and SQL, the `@ir
     "iris-admin-mcp": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@iris-mcp/admin"],
+      "args": ["-y", "@iris-mcp/admin@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -200,7 +200,7 @@ If you were using `mcp-server-iris` for ObjectScript execution and SQL, the `@ir
     "iris-interop-mcp": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@iris-mcp/interop"],
+      "args": ["-y", "@iris-mcp/interop@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -213,7 +213,7 @@ If you were using `mcp-server-iris` for ObjectScript execution and SQL, the `@ir
     "iris-ops-mcp": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@iris-mcp/ops"],
+      "args": ["-y", "@iris-mcp/ops@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -226,7 +226,7 @@ If you were using `mcp-server-iris` for ObjectScript execution and SQL, the `@ir
     "iris-data-mcp": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@iris-mcp/data"],
+      "args": ["-y", "@iris-mcp/data@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -243,7 +243,7 @@ If you were using `mcp-server-iris` for ObjectScript execution and SQL, the `@ir
 **Key changes to note in the config:**
 
 1. `command` changes from a Python path to `npx`
-2. `args` changes from a script path to `["-y", "@iris-mcp/<package>"]`
+2. `args` changes from a script path to `["-y", "@iris-mcp/<package>@1"]`
 3. `IRIS_HOSTNAME` becomes `IRIS_HOST`
 4. `IRIS_PORT` value changes from `1972` to `52773`
 5. New `IRIS_HTTPS` variable (set to `"true"` if using HTTPS)

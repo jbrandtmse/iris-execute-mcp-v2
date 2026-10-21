@@ -22,7 +22,7 @@ The IRIS MCP Server Suite is a collection of five specialized [Model Context Pro
 
 ### Meta-package
 
-Once published, all servers will be installable at once with `npm install -g @iris-mcp/all`. See the [meta-package README](packages/iris-mcp-all/README.md) for details.
+Once published, `@iris-mcp/all` installs the five servers as dependencies of one package, but it launches nothing: a global install (`npm install -g @iris-mcp/all`) links no command, and a project install puts the seven commands of its dependencies in `node_modules/.bin`. MCP clients start servers with `npx -y @iris-mcp/<server>@1`, one entry per server. See the [meta-package README](packages/iris-mcp-all/README.md) for details.
 
 ---
 
@@ -41,7 +41,7 @@ Once published, all servers will be installable at once with `npm install -g @ir
 
 ## Prerequisites
 
-- **Node.js** 18 or later
+- **Node.js** 22.17 or later
 - **InterSystems IRIS** 2023.1 or later (including IRIS for Health, HealthShare)
 - **IRIS web port** accessible (default `52773`)
 
@@ -60,7 +60,7 @@ pnpm install
 pnpm turbo run build
 ```
 
-> **Requires:** [Node.js](https://nodejs.org/) 18+ and [pnpm](https://pnpm.io/) 9+. Install pnpm with `npm install -g pnpm` if needed.
+> **Requires:** [Node.js](https://nodejs.org/) 22.17+ and [pnpm](https://pnpm.io/) 9+. Install pnpm with `npm install -g pnpm` if needed.
 
 ### 2. Set Environment Variables
 
@@ -973,7 +973,7 @@ Each server has its own README with a complete tool reference:
 Two supporting packages ship no MCP tools of their own but carry user-facing surfaces:
 
 - [`@iris-mcp/shared`](packages/shared/README.md) — the connection/governance/audit engine every server sits on, plus the `iris-mcp-credentials` and `iris-mcp-governance` CLIs.
-- [`@iris-mcp/client-config`](packages/client-config/README.md) — the 13-client adapter registry, the `iris-mcp-clients` manager CLI, and the per-adapter certification dispositions.
+- [`@iris-mcp/client-config`](packages/client-config/README.md) — the 13-client adapter registry, the `iris-mcp-clients` manager CLI, the per-adapter certification dispositions, and the [skills pack](#the-skills-pack) with its installer.
 
 And two documentation sets sit alongside them:
 

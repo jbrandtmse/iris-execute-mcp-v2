@@ -24,7 +24,7 @@ extensions:
     cmd: npx
     args:
       - -y
-      - "@iris-mcp/interop"
+      - "@iris-mcp/interop@1"
     envs:
       IRIS_HOST: iris.example.com
       IRIS_PORT: "52773"
