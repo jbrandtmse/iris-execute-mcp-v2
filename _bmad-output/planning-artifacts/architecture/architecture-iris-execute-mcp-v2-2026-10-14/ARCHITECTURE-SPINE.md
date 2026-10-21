@@ -334,6 +334,9 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
       - `S-42.10-annotations`: 13 existing tools change `destructiveHint` from `false` to `true`: `iris_doc_put`, `iris_sql_execute`, `iris_global_set`, `iris_execute_command`, `iris_execute_classmethod`, `iris_doc_load`, `iris_doc_export`, `iris_env_promote`, `iris_service_manage`, `iris_ldap_manage`, `iris_x509_manage`, `iris_production_item` and `iris_task_run` (DW-560).
       - `S-42.10-resend-text`: the `iris_message_resend` description and its `maxMessages` and `confirm` texts are corrected, not appended: executing needs `dryRun: false` and `confirm: true`, `dryRun: false` without `confirm` is refused, a call that leaves out `dryRun` previews, and only an executing over-cap call is refused (DW-662).
       - `S-42.10-audit-namespace`: the audit entry of a `SYS`-scoped tool records `%SYS`, and the additive `targetNamespace` field carries the call's `namespace` argument when it has one (DW-654, AD-19, decision #41).
+    - **Story 42.11** (wave-8 decisions #30, #38 and #43 to #48): the Storage-drop refusal on `iris_doc_load`, the `iris_doc_xml_export` import and `iris_env_promote` `execute`, with the optional `allowStorageRegeneration` parameter on each (AD-24).
+      - `S-42.11-storage-guard-schema`: adds the parameter to each of the three `inputSchema`s, by replacing the frozen `properties` object (the old object plus exactly one member, just before `server`), and drops "unconditionally" from `iris_doc_load`'s `ignoreConflict` text.
+      - `S-42.11-storage-guard-text`: appends one sentence to each of the three descriptions (DW-652; DW-544, DW-545 and DW-546 superseded).
 
     Each change may land in the earliest story that needs it, and is named in `CHANGELOG.md` with that story. Prune this list into the CHANGELOG at the Epic 42 retro.
   - **After `1.0.0`.** A breaking change requires a new major version. Clients pinned to `@1` receive every 1.x release automatically.
@@ -430,7 +433,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - An HTTP transport is added only together with an authentication, bind-address and session design.
   - Story 38.1 (commit `5f8b1e0`) enforces this. Every configured value (each `--transport` value, and `MCP_TRANSPORT` when it is non-empty) must be exactly `stdio`, and anything else is rejected with exit 1 before any IRIS traffic. An empty `MCP_TRANSPORT` means not configured. Before 38.1, `transport.ts` accepted `http`, and an unknown value fell back to stdio with a warning.
 
-### AD-24 — Agent document writes are guarded and minimal [ADOPTED] (N2, S-3) *(lands in Stories 38.2 to 38.4)*
+### AD-24 — Agent document writes are guarded and minimal [ADOPTED] (N2, S-3) *(lands in Stories 38.2 to 38.4 and 42.11)*
 
 - **Binds:** `iris_doc_get`, `iris_doc_put`, `iris_doc_edit`, and every document-writing path; FR146–FR148
 - **Prevents:** reads and edits disagreeing about lines, edits that overwrite unseen changes, and silent loss of storage
@@ -449,9 +452,10 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **Edits.**
     - Every edit is guarded by expected text and applied all-or-nothing.
     - The response is computed from a re-read after the PUT, never from the locally applied array.
-  - **Storage guard.** One shared Storage-drop guard covers `iris_doc_put` and `iris_doc_edit`.
-    - Story 38.3 enumerates every document-writing path (Atelier PUT, `xml/load`, bootstrap PUT), exhaustive as of a named date, and gives each a verdict.
-    - Recorded exclusions so far: `iris_doc_load`, the `iris_env_promote` `execute` sync, and the `iris_doc_xml_export` import (`xml/load`), each with a ledger reopen trigger. The xml import was added at the Story 38.3 spec gate, 2026-10-15, as orchestrator decision #8 under the Lead's delegation.
+  - **Storage guard.** One shared Storage-drop guard in `@iris-mcp/shared` covers every agent path that can replace an existing class: `iris_doc_put`, `iris_doc_edit`, `iris_doc_load`, the `iris_doc_xml_export` import and the `iris_env_promote` `execute` sync (Story 42.11, DW-652, wave-8 decisions #30, #38 and #43 to #48). By default each refuses, with `STORAGE_DROPPED` and nothing changed, a write that would drop a Storage definition the class has now.
+    - **Overrides.** `iris_doc_put`, `iris_doc_load`, the import and `execute` take the `allowStorageRegeneration` parameter. With it the write proceeds, and on the last three the result's `storageDrops` names what was dropped. `iris_doc_edit` uses its `regenerateStorage` action (AD-4).
+    - **Reads.** `iris_doc_load` reads each class with a GET before its `?ignoreConflict=1` PUT, or from the 409 when `ignoreConflict` is false. The import GETs each `<Class>` before its one `xml/load` POST and refuses the whole import. `execute` runs a GET-only preflight before its confirmation dialog and writes the source text it checked; a preflight read that fails fails that step at its turn, and only a detected drop refuses the whole execute.
+    - Story 38.3 enumerates every document-writing path (Atelier PUT, `xml/load`, bootstrap PUT), exhaustive as of a named date (last 2026-10-21), and gives each a verdict. No agent path is excluded. The bootstrap PUT is not applicable, because its classes have no Storage.
     - **Existing documents (Story 38.3, DW-540).** Without `If-None-Match`, Atelier refuses a PUT to an existing document with a 409 that carries the current document and its `ts`, and writes nothing. `iris_doc_put` uses that 409 as the guard's read and as the version token: it retries the save once with `If-None-Match: <ts>`. A 409 on that version-checked save is a conflict, and it is never retried.
     - A grep test fails on any new path that has no verdict.
   - **`iris_doc_edit`.** It exposes `apply`, a `defaultEnabled` write, and `regenerateStorage`, a default-disabled override action (AD-4).
