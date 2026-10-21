@@ -3585,6 +3585,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: 43.3 plan inventory 2026-10-20 (decision 12 candidate): gating it needs an extra GET to name the dropped Storage
 - 2026-10-20T23:38:03Z status=escalated owner=burndown by=harvest note=for the decision sheet: add to the AD-34 gate set in a later epic, or accept
+- 2026-10-21T05:27:11Z status=wontfix-accepted owner=burndown by=merge_gate note=wave-8 decision 29: explicit default-off flag, governance-gated; reopen_if=a reported unwanted Storage drop through iris_doc_put, or the AD-34 gate set is extended
 
 ### DW-651: iris_mapping_manage force: true overrides an IRIS-side guard on system-global base mappings on a flag the agent sets; TS cannot tell when the guard applies, so 43.3 asks no human for it
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3595,6 +3596,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: 43.3 plan inventory 2026-10-20
 - 2026-10-20T23:38:03Z status=escalated owner=burndown by=harvest note=for the decision sheet: extend the Story 38.4 Storage guard to every document-write path, or accept
+- 2026-10-21T05:27:11Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=wave-8 decision 30: fix before 1.0, extend the Story 38.4 Storage guard to doc_load, XML import and env_promote document writes; DW-652 bullet under 42.1
 
 ### DW-653: The resend-failed-messages prompt says an over-cap match is refused and omitting dryRun or confirm is refused; a dry run returns the full matchCount and omitting dryRun previews; the prompt text is pinned by the frozen 43.1 golden
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3606,6 +3608,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 43.3 plan probe 2026-10-20
 - 2026-10-20T23:38:03Z status=escalated owner=burndown by=harvest note=for the decision sheet: AD-19 accuracy; record the effective namespace for %SYS-scoped handlers, or accept
+- 2026-10-21T05:27:11Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=wave-8 decision 31: record the effective namespace for %SYS-scoped handlers in audit entries; DW-654 bullet under 42.1
 
 ### DW-655: prd.md:86 says All 86 consolidated tools; the suite has 115
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint

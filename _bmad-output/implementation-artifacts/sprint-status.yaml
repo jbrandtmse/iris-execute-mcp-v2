@@ -124,7 +124,7 @@
 # put new epic notes in epics.md, not here.
 
 generated: '2026-04-05'
-last_updated: '10-20-2026 22:17'
+last_updated: '10-20-2026 22:27'
 previous_update: '2026-09-16 (Story 37.1 dev complete via bmad-dev-story - ready-for-dev
   -> review. Fixed McpServerBase.start(): a default-profile health-check rejection
   no longer calls process.exit(1) - it logs (health-check-failed line + a new continuation
@@ -551,7 +551,7 @@ development_status:
   42-9-install-docs-and-client-re-certification: backlog
   epic-42-retrospective: optional
 
-  epic-43: in-progress
+  epic-43: done
   43-1-framework-migration-to-sdk-v2: done
   43-2-serve-mcp-revision-2026-07-28: done
   43-3-human-confirmation-through-elicitation: done
@@ -577,3 +577,13 @@ action_items:
     owner: "user"
     status: open
     ref: "DW-615"
+  - id: "epic-43-decision-sheet-item-1-vs-code-copilot-confirmation-dialog-run"
+    epic: 43
+    action: "Run one AD-34 confirmation in VS Code Copilot Chat against a throwaway
+      project (fake IRIS or a disposable instance, never shared data), and record
+      whether the elicitation dialog appears and what accept and decline do. AC 43.4.1's
+      second-client check; the Inspector CLI covered the no-dialog fallback unattended
+      (wave-8 decisions #25 and #32)"
+    owner: "user"
+    status: open
+    ref: "AC 43.4.1"
