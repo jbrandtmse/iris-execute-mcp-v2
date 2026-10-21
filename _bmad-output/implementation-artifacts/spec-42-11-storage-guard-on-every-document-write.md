@@ -501,6 +501,31 @@ Build after each source change. Before the snapshot or golden tests: `pnpm --fil
 - mutation: `env-promote.ts` records a drop before its PUT succeeds → red: `env-promote-storage-guard.test.ts` "names a class in storageDrops only when its PUT succeeded".
 - mutation: `doc.ts` `storageDropsNote` text "Storage definitions dropped" → "Storage definition dropped" → red: the load, import and promote override-text rows (one each).
 
+**QA pass (2026-10-21).** Gap analysis against the matrix and the ACs, then the files below `(QA)`. Mutations were applied to the real file, run on the path they guard (unit rows and the hermetic wire file on a closed port, the live gate through `live-run.sh`, one call), restored from a scratchpad copy, and `cmp` confirmed each restored file byte-identical with `git status --short` unchanged; the dev `dist/` was rebuilt after each wire mutation and from a deleted `dist/` and `tsconfig.tsbuildinfo` at the end.
+- `(QA)` `packages/iris-dev-mcp/src/__tests__/story-42-11-qa-load-import-gaps.test.ts` (13 rows): the `namespace` argument on load and import, several dropping files or classes in one call, a refusal leaves nothing to compile, a version-checked save that loses names no drop, the GET and PUT address the same escaped document name.
+- `(QA)` `packages/iris-dev-mcp/src/__tests__/story-42-11-qa-promote-gaps.test.ts` (6 rows): the `namespace` argument replaces both sides' namespace, `steps` is an allowlist and the refusal names drops in plan order, a drop beats a failed preflight read.
+- `(QA)` `packages/iris-mcp-all/src/__tests__/story-42-11-qa-storage-guard-wire.test.ts` (20 rows, 10 on each era): the three paths through the BUILT iris-dev server over stdio, the hand driver, and real HTTP to local listeners and a proxy (default suite, no IRIS): refusal, override, the `"true"` string form on load, the 409 read, the promote dialog (never put on a refusal; names the drop on the override), the PUT body that is the checked source text, a decline.
+- `(QA)` `packages/iris-dev-mcp/src/__tests__/story-42-11-qa-live-gate.test.ts` (5 legs, in `prepublish-gate.mjs` `gateTestFiles`): what the guard does NOT refuse on the real Atelier: a file that keeps the Storage under both `ignoreConflict` values (the real 409), a class that is new (the real 404), the import of the tool's own export, a promotion whose source keeps the Storage. Writes only `ExecuteMCPv2.Temp.QaStory4211Nd{Load,New,Xml,Prom}`; no `QaStory4211` document or global remained after any run.
+- mutation: `load.ts` GET read uses the default namespace → red: `story-42-11-qa-load-import-gaps.test.ts` (3 namespace rows).
+- mutation: `format.ts` import GET uses the default namespace → red: `story-42-11-qa-load-import-gaps.test.ts` (2 namespace rows).
+- mutation: `load.ts` refusal falls through and counts the file as uploaded → red: "a call whose every file is refused sends no compile request".
+- mutation: `load.ts` `storageDrops.unshift` → red: "several dropping files are named in file order".
+- mutation: `load.ts` 409 branch records the drop before the version-checked save → red: "a version-checked save that loses is DOCUMENT_CONFLICT and names no drop" (no earlier row sees it).
+- mutation: `doc.ts` `currentClassLines` does not escape the name → red: "the read and the save address the same document for a name that needs escaping" (no earlier row sees it).
+- mutation: `format.ts` classes visited in sorted order → red: the import override row that names only the dropping class, and "the refusal lists the classes in the order of the XML".
+- mutation: `env-promote.ts` preflight reads with the profiles' namespaces, not the argument → red: `story-42-11-qa-promote-gaps.test.ts` (3 namespace rows).
+- mutation: `env-promote.ts` preflight covers every plan step, not the allowlist → red: "a class step that is not selected is neither read nor refused" (and 3 rows of `env-promote-storage-guard.test.ts`).
+- mutation: `env-promote.ts` preflight order follows the allowlist, not the plan → red: "the selected classes that drop are named in plan order" (no earlier row sees it).
+- mutation: `env-promote.ts` refusal skipped when a preflight read failed → red: "the drop refuses the whole execute" (no earlier row sees it).
+- mutation: `load.ts` GET read `dropped = []` (dev rebuilt) → red: the wire file's load refusal and override rows, on both eras (4 rows).
+- mutation: `load.ts` 409 read `dropped = []` (dev rebuilt) → red: the wire file's two `ignoreConflict: false` rows, on both eras (4 rows).
+- mutation: `format.ts` import refusal `if (false && …)` (dev rebuilt) → red: the wire file's import refusal row, on both eras.
+- mutation: `env-promote.ts` preflight refusal `if (false && …)` (dev rebuilt) → red: the wire file's promote refusal row, on both eras.
+- mutation: `env-promote.ts` result without `storageDrops` (dev rebuilt) → red: the wire file's promote override row, on both eras.
+- mutation: `load.ts` `allowStorageRegeneration` is `z.boolean()`, not `booleanParam` (dev rebuilt) → red: the wire file's load override row (the `"true"` form), on both eras.
+- mutation: the four paths compare against an empty kept set, so every class that has Storage is a drop (one change in each of `load.ts` twice, `format.ts` and `env-promote.ts`; the live run) → red: live legs A, B, D and E; leg C (a new class) stays green.
+- mutation: the new live gate removed from `prepublish-gate.mjs` `gateTestFiles` → red: `live-gate-roster.test.ts` "iris-dev-mcp: every armed test file is in … gateTestFiles".
+
 **Shared surfaces:**
 - `tools-list-snapshot.json`.
 - `sdk-golden-sanctioned-changes.json` and its id lists, shape table and CHANGELOG pairs.
