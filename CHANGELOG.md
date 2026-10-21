@@ -4,7 +4,7 @@ All notable changes to the IRIS MCP Server Suite are documented in this file.
 
 ## [Pre-release — 2026-10-20] — Story 43.4: SDK v2 docs, smokes and capstone
 
-Story 43.4 closes Epic 43, the move to the MCP TypeScript SDK v2. It appends one sentence about the confirmation dialog to the description of
+Story 43.4 closes Epic 43, the move to the MCP TypeScript SDK v2. It appends one passage about the confirmation dialog to the description of
 each of the five gated tools, lists each governance URI once in `resources/list`, corrects two steps of the `resend-failed-messages`
 prompt, retires the two frozen SDK v1 goldens into a ledger of sanctioned changes, adds the epic's capstone gate, and documents the
 protocol revisions, the probe copy that an SDK v2 client starts, and the dialog for each client. The suite stays at 115 advertised tools
@@ -15,9 +15,10 @@ environment variable is added.
 ### Changed (AD-15 sanctioned)
 
 - **`S-43.4-descriptions`.** The descriptions of `iris_audit_manage`, `iris_env_promote`, `iris_production_control`, `iris_message_resend`
-  and `iris_doc_edit` each gain one appended sentence. It names the confirmation dialog that a client declaring form elicitation is shown,
-  says that a decline or a dismissal returns `CONFIRMATION_DECLINED` with nothing changed, and tells the agent not to repeat the call unless
-  the person asks. No existing byte of any description changes, and no other tool's description changes.
+  and `iris_doc_edit` each gain one appended passage. It names the confirmation dialog that a client declaring form elicitation is shown,
+  says that a decline or a dismissal returns `CONFIRMATION_DECLINED` with nothing changed, tells the agent not to repeat the call unless
+  the person asks, and says that a client without elicitation is not asked. No existing byte of any description changes, and no other
+  tool's description changes.
 - **`S-43.4-governance-resource` (DW-646).** `resources/list` lists `iris-governance://default` once, as the static resource named
   `iris-governance-default`. The per-profile resource template's list repeated it under a second name, `iris-governance-profile-default`;
   it now lists only the other configured profiles (a profile `prod` is still `iris-governance://prod`, named `iris-governance-profile-prod`).
@@ -29,8 +30,8 @@ environment variable is added.
 - **The frozen goldens retire into a ledger (DW-639).** `sdk-wire-golden.json` and `sdk-handler-golden.json` stay byte-unchanged, pinned by
   SHA-256. Each sanctioned change to bytes they hold is one entry of `fixtures/sdk-golden-sanctioned-changes.json` (the golden, the row, a
   JSON pointer, the exact frozen value and the exact new value). `scripts/lib/golden-sanctioned-changes.mjs` applies the entries, and the
-  golden tests compare every other byte unchanged. This story's 11 entries are the 6 descriptions and the 5 removed duplicates of the
-  governance resource.
+  golden tests compare every other byte unchanged. This story's 11 entries are 6 description entries (one per gated tool, plus a second
+  one for `iris_doc_edit` in the dev server's `core-preset` listing) and the 5 removed duplicates of the governance resource.
 
 ### Added
 
@@ -70,8 +71,8 @@ environment variable is added.
 - **A probe copy starts the server twice (DW-641).** A client built on the TypeScript MCP SDK v2 client, in `auto` mode or pinned to a
   revision (for example MCP Inspector 2.x with `--protocol-era auto` or `modern`), first starts a short-lived probe copy of the server. The
   probe runs the whole startup, answers `server/discover`, and is ended by SIGTERM. So the server starts twice per connect,
-  `IRIS_AUDIT_LOG` gains a second `sessionStart` line with no `shutdown` line, and the probe's stderr is discarded. Claude Code probes on
-  the same connection and starts the server once. This is documented in `docs/client-config/README.md`; nothing in the server can avoid it.
+  `IRIS_AUDIT_LOG` gains a second `sessionStart` line, the only line of the probe's session (no stdio session writes a `shutdown` line),
+  and the probe's stderr is discarded. Claude Code probes on the same connection and starts the server once. This is documented in `docs/client-config/README.md`; nothing in the server can avoid it.
 - **A probe that times out.** An SDK v2 client on `auto` whose probe is not answered within its request timeout (60 seconds by default)
   treats the server as 2025-11-25.
 - **Clients not verified.** The dialog and the protocol revisions are observed on Claude Code 2.1.296 and MCP Inspector CLI 2.9.0 only. The

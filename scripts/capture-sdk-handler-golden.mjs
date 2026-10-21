@@ -7,19 +7,23 @@
 //   tools/call in scripts/lib/sdk-handler-golden-core.mjs, the requests the server made to IRIS while it
 //   answered, and the audit entries it wrote. The default-suite test
 //   packages/iris-mcp-all/src/__tests__/story-43-1-qa-handler-golden.test.ts replays the same sessions
-//   against the built servers.
+//   against the built servers and compares them with the golden plus the sanctioned changes of
+//   packages/iris-mcp-all/src/__tests__/fixtures/sdk-golden-sanctioned-changes.json
+//   (scripts/lib/golden-sanctioned-changes.mjs).
 //
 // WHEN IT IS CAPTURED
 //   Once, from the build that is the oracle: the tree BEFORE the MCP SDK migration (SDK v1). That tree does not
 //   have this script, so run the script from the migrated tree and point --dist-root at the oracle build, for
 //   example a `git worktree` of the baseline revision after `pnpm install --frozen-lockfile` and a build of
-//   shared and the five servers. The file is never edited by hand and never regenerated from a newer build.
+//   shared and the five servers. The file is frozen: never edited by hand, never regenerated, and pinned
+//   by its SHA-256 in story-43-4-sanctioned-golden-changes.test.ts. A sanctioned change to bytes it holds
+//   is an entry of the sanctioned-change ledger, never a recapture.
 //
 // USAGE (the command line of scripts/lib/golden-capture-cli.mjs; --dist-root is required here)
 //   node scripts/capture-sdk-handler-golden.mjs --dist-root <oracle checkout> [--baseline-revision <sha>]
 //       Writes the golden. REFUSES (exit 2, nothing written) when the fixture already exists.
 //   node scripts/capture-sdk-handler-golden.mjs --dist-root <dir> --force
-//       Overwrites an existing fixture. Legitimate only when the oracle itself is being replaced.
+//       Overwrites an existing fixture; with the committed golden frozen, use it only with --out.
 //   node scripts/capture-sdk-handler-golden.mjs --dist-root <dir> --out <path>
 //       Writes to <path> instead (a second capture of one build, or a capture of the current build for comparison).
 //

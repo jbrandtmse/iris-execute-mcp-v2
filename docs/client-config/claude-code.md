@@ -454,14 +454,14 @@ Each server is one stdio process that serves two MCP protocol revisions, `2025-1
 - **Where to set it.** Set it in the shell that starts Claude Code (`export MCP_PROTOCOL_NEGOTIATION=legacy`, or in front of `claude`), or in the `env` object of Claude Code's `settings.json`. Do not set it in the `env` block of an MCP server entry in `.mcp.json`: that block configures the server process, and Claude Code makes the choice before the server starts.
 - **One server start.** Claude Code probes on the same connection, so it starts each server once per session on either revision (observed on Claude Code 2.1.296). A client built on the TypeScript MCP SDK v2 client starts a probe copy of the server first; see [Protocol revisions and confirmation dialogs](README.md#protocol-revisions-and-confirmation-dialogs).
 - **Confirmation dialogs.** Claude Code declares form elicitation on both revisions, so six destructive gates (`iris_audit_manage` `purge`, `iris_env_promote` `execute`, `iris_production_control` `clean` with `killAppData`, `iris_message_resend` `resend` and `resendFiltered`, and `iris_doc_edit` `regenerateStorage`) show you a confirmation form before they change anything; see [Human confirmation (elicitation)](../../README.md#human-confirmation-elicitation). Declining, dismissing or accepting without ticking Confirm changes nothing.
-- **An `Elicitation` hook can answer for you.** Claude Code runs a hook configured under `hooks.Elicitation`, with a matcher on the MCP server name such as `iris-admin`:
+- **An `Elicitation` hook can answer for you.** Claude Code runs a hook configured under `hooks.Elicitation`, with a matcher on the MCP server name, which is the key of its entry under `mcpServers` (`iris-admin-mcp` in the configs above):
 
   ```json
   {
     "hooks": {
       "Elicitation": [
         {
-          "matcher": "iris-admin",
+          "matcher": "iris-admin-mcp",
           "hooks": [{ "type": "command", "command": "node /path/to/answer-elicitation.mjs" }]
         }
       ]

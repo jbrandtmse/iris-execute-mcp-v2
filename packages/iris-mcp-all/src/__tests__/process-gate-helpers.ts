@@ -266,7 +266,11 @@ export interface WireSession {
 }
 
 /** How the SDK client negotiates the protocol revision: `legacy` is the plain 2025 handshake, `auto` probes, `pin` requires the revision. */
-export type SdkVersionNegotiation = { mode: "legacy" | "auto" | { pin: string } };
+export type SdkVersionNegotiation = {
+  mode: "legacy" | "auto" | { pin: string };
+  /** The probe policy of `auto` and a pinned revision (milliseconds before a silent probe is given up on); omitted, the SDK's defaults apply. */
+  probe?: { timeoutMs?: number; maxRetries?: number };
+};
 
 /** What a wire session needs to start a built server and name its target. */
 export interface WireSessionOptions {

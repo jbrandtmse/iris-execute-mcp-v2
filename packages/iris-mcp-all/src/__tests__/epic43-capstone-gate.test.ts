@@ -15,6 +15,7 @@
  *   6. Accept: the purge asks once, with the dialog template and the form schema, and runs once, returning the 43.3 baseline's purge result.
  *   7. Decline: the same purge asks once, is declined, returns `CONFIRMATION_DECLINED` and writes nothing.
  *   8. Audit: exactly five tool entries, in call order, with the outcomes and the confirmation answers of the walk.
+ *   9. Era line again: after the whole walk the stderr still holds exactly one era line, of the session's era, and none of the other.
  *
  * Oracles: the golden is the frozen SDK v1 capture plus the sanctioned changes of `fixtures/sdk-golden-sanctioned-changes.json`; the
  * purge success and its write are `BASELINE["admin: purge ok"]` of `story-43-3-qa-baseline.ts` (captured before Story 43.3); the dialog
@@ -35,6 +36,8 @@
  *     `confirmOnWire` -> `classifyConfirmationResponse` in the shared dist the admin process loads, reached on 2025-11-25 through the SDK
  *     shim and on 2026-07-28 through the client's retry.
  *   - M4 a source file of `@iris-mcp/shared` touched without a rebuild: the file fails with "Build the packages first" and skips nothing.
+ *   - M5 each `tools/call` writing one more era line (a later instance build in the same session): step 1 cannot see it, because the line is
+ *     counted right after the first request; step 9 fails on all three modes. Path: the `tools/call` handler of the shared dist the admin process loads.
  *
  * Not pinned here: how many times the server starts per connect. A probe copy is ended by SIGTERM, so its lines race; the live smoke records it.
  */
@@ -47,10 +50,9 @@ import { closeSdkRigs, openSdkRig } from "./sdk-confirmation-rig.js";
 import type { SdkRig } from "./sdk-confirmation-rig.js";
 import type { SdkVersionNegotiation } from "./process-gate-helpers.js";
 import { BASELINE } from "./story-43-3-qa-baseline";
+import { LEGACY_ERA_LINE, MODERN_ERA_LINE } from "./story-43-2-qa-hand-wire.js";
 
 const PKG = "iris-admin-mcp";
-const LEGACY_ERA_LINE = "[INFO] Serving the 2025-era MCP handshake (initialize)";
-const MODERN_ERA_LINE = "[INFO] Serving MCP protocol revision 2026-07-28 (server/discover)";
 
 interface Mode {
   name: string;
@@ -130,6 +132,21 @@ async function stderrWith(rig: SdkRig, line: string, timeoutMs = 5_000): Promise
   const deadline = Date.now() + timeoutMs;
   while (!rig.stderr().includes(line) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 25));
   return rig.stderr();
+}
+
+/** The server's stderr once nothing has been added to it for `quietMs`, or what it holds when `timeoutMs` has passed. */
+async function settledStderr(rig: SdkRig, quietMs = 250, timeoutMs = 5_000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let seen = rig.stderr();
+  let quietSince = Date.now();
+  while (Date.now() - quietSince < quietMs && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    if (rig.stderr() !== seen) {
+      seen = rig.stderr();
+      quietSince = Date.now();
+    }
+  }
+  return seen;
 }
 
 /** The members of an audit entry that the walk asserts. */
@@ -222,6 +239,12 @@ async function walk(mode: Mode): Promise<void> {
     { tool: "iris_audit_manage", outcome: "ok", confirmation: "accepted" },
     { tool: "iris_audit_manage", outcome: "denied", denyReason: "CONFIRMATION_DECLINED", confirmation: "declined" },
   ]);
+
+  // 9. Era line, once per session: no request of the walk may have written another line, of either era. The stderr is read once it
+  //    has been quiet for a moment, because a line the last call wrote can arrive after that call's reply.
+  const finalStderr = await settledStderr(rig);
+  expect(countOf(finalStderr, eraLine), `${mode.name} step 9: still one ${mode.era} era line after the whole walk`).toBe(1);
+  expect(countOf(finalStderr, otherLine), `${mode.name} step 9: still no line of the other era after the whole walk`).toBe(0);
 }
 
 describe("Epic 43 capstone: the built admin server, through the real SDK client, on every negotiation mode", () => {

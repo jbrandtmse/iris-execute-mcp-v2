@@ -87,7 +87,11 @@ export function handlerExchanges(pkg) {
   return exchanges;
 }
 
-/** The `BOOTSTRAP_VERSION` a build embeds, read from its built shared package. */
+/**
+ * The `BOOTSTRAP_VERSION` a build embeds, read from its built shared package; throws when the built file does not hold one.
+ * @param {string} distRoot
+ * @returns {string}
+ */
 export function readBootstrapVersion(distRoot) {
   const text = readFileSync(join(distRoot, 'packages', 'shared', 'dist', 'bootstrap-classes.js'), 'utf8');
   const match = text.match(/BOOTSTRAP_VERSION\s*=\s*"([0-9a-f]+)"/);

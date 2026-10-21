@@ -3,8 +3,8 @@
  *
  * The capstone and the unit suites pin behavior; none of them reads a document. This file reads them, one sentence per fact:
  *  - the root README: the human-confirmation section (the scope of the "adds no ..." list, the descriptions that name the dialog, what
- *    Claude Code and MCP Inspector were observed to do, the headless no-hook case), the governance resource entry and the architecture
- *    paragraph's link;
+ *    Claude Code and MCP Inspector were observed to do, the headless no-hook case), the governance resource entry, the architecture
+ *    paragraph's link and its 2025-11-25 sentence, and what the audit log writes when a stdio server ends (no `shutdown` line);
  *  - `docs/client-config/README.md`: the section on the protocol revisions, the probe copy of an SDK v2 client (DW-641), the probe
  *    timeout, the dialog per client and what the client matrix certifies;
  *  - `docs/client-config/claude-code.md`: the section on `MCP_PROTOCOL_NEGOTIATION=legacy`, the `Elicitation` hook, headless runs and the
@@ -57,18 +57,33 @@ const claudeSection = between(claudeCode, "## Protocol revision and confirmation
 const entry = /^## \[Pre-release [^\]]*\] \S Story 43\.4: SDK v2 docs, smokes and capstone$[\s\S]*?(?=^## )/m.exec(changelog)?.[0] ?? "";
 
 describe("Story 43.4: the root README", () => {
-  it("scopes the 'adds no ...' list to Story 43.3, and says that Story 43.4 appended a sentence to five descriptions", () => {
+  it("scopes the 'adds no ...' list to Story 43.3, and says that Story 43.4 appended a passage to five descriptions", () => {
     expect(confirmation).toContain(
-      "Story 43.3 added no tool, action, governance key, preset row, annotation, description, prompt or environment variable (Story 43.4 then appended one sentence about the dialog to the description of each of the five gated tools)",
+      "Story 43.3 added no tool, action, governance key, preset row, annotation, description, prompt or environment variable (Story 43.4 then appended one passage about the dialog to the description of each of the five gated tools)",
     );
   });
 
   it("says that the five gated tools' descriptions name the dialog, and no longer says that descriptions are unchanged", () => {
     expect(confirmation).toContain(
-      "Since Story 43.4, the description of each of the five gated tools (`iris_audit_manage`, `iris_env_promote`, `iris_production_control`, `iris_message_resend` and `iris_doc_edit`) ends with one sentence that names the dialog",
+      "Since Story 43.4, the description of each of the five gated tools (`iris_audit_manage`, `iris_env_promote`, `iris_production_control`, `iris_message_resend` and `iris_doc_edit`) ends with one appended passage that names the dialog",
     );
-    expect(confirmation).toContain("No other byte of any description changed.");
+    expect(confirmation).toContain("and says that a client without elicitation is not asked. No other byte of any description changed.");
     expect(squash(rootReadme)).not.toContain("Tool descriptions are not changed in this release");
+  });
+
+  it("says that a 2025-11-25 client sees its old bytes apart from the sanctioned changes, never that every byte is the same", () => {
+    expect(squash(rootReadme)).toContain("A client that speaks only 2025-11-25 sees the bytes it saw before, apart from the sanctioned changes the CHANGELOG lists");
+    expect(indexSection).toContain("A client that speaks only `2025-11-25` sees the bytes it always saw, apart from the sanctioned changes the CHANGELOG lists");
+  });
+
+  it("says that no stdio server writes the audit log's shutdown line, and what each way of ending a server writes", () => {
+    const compliance = between(rootReadme, "## Compliance & Auditability", "## ");
+    expect(compliance).toContain("is written only when a program that embeds the server calls its `stop()` method");
+    expect(compliance).toContain(
+      "The stdio servers never call it: when the client closes the server's input, the server writes the `unanswered` entry of any confirmation dialog still open and no `shutdown` line, and a server ended by a signal (SIGTERM or SIGINT) writes neither",
+    );
+    expect(compliance).not.toContain("On shutdown, the writer flushes its queue");
+    expect(confirmation).not.toContain("or when the server is stopped gracefully");
   });
 
   it("states what Claude Code and MCP Inspector were observed to declare, and that other clients are not verified", () => {
@@ -125,9 +140,13 @@ describe("Story 43.4: docs/client-config/README.md", () => {
     expect(indexSection).toContain("A client built on the TypeScript MCP SDK v2 client, in `auto` mode or pinned to a revision");
     expect(indexSection).toContain("MCP Inspector 2.x with `--protocol-era auto` or `modern`");
     expect(indexSection).toContain("first starts a short-lived probe copy of the server");
-    expect(indexSection).toContain("The probe runs the whole startup (configuration load, connection check, bootstrap version query), answers `server/discover`, and is ended by the client with SIGTERM.");
+    expect(indexSection).toContain(
+      "The probe runs the whole startup (configuration load, connection check, bootstrap version query, and the deployment of the ExecuteMCPv2 classes when they are missing or out of date), answers `server/discover`, and is ended by the client with SIGTERM.",
+    );
     expect(indexSection).toContain("So the server starts twice per connect");
-    expect(indexSection).toContain("`IRIS_AUDIT_LOG` gains a second `sessionStart` line with no `shutdown` line");
+    expect(indexSection).toContain(
+      "`IRIS_AUDIT_LOG` gains a second `sessionStart` line, which is the only line of the probe's session (no stdio session writes a `shutdown` line;",
+    );
     expect(indexSection).toContain("the probe's stderr is discarded, so its log lines are not shown");
     expect(indexSection).toContain("Claude Code probes on the same connection and starts the server once.");
   });
@@ -167,7 +186,14 @@ describe("Story 43.4: docs/client-config/claude-code.md", () => {
   });
 
   it("shows the Elicitation hook and warns that a hook that answers removes the person from the loop", () => {
-    expect(claudeSection).toContain("Claude Code runs a hook configured under `hooks.Elicitation`, with a matcher on the MCP server name such as `iris-admin`");
+    expect(claudeSection).toContain(
+      "Claude Code runs a hook configured under `hooks.Elicitation`, with a matcher on the MCP server name, which is the key of its entry under `mcpServers` (`iris-admin-mcp` in the configs above)",
+    );
+    // The example's matcher is a server name this page configures, character for character.
+    const matcher = /"matcher": "([^"]+)"/.exec(claudeSection)?.[1];
+    expect(matcher, "the hook example has a matcher").toBeDefined();
+    expect(claudeCode, `the matcher ${matcher} is the key of a server entry the page configures`).toContain(`\n    "${matcher}": {\n      "command": "npx",`);
+    expect(squash(rootReadme)).toContain("with a matcher on the MCP server name, which is the key of the server's entry in the MCP configuration, such as `iris-admin-mcp`");
     expect(claudeSection).toContain('"hookEventName":"Elicitation","action":"accept","content":{"confirm":true}');
     expect(claudeSection).toContain("**A hook that answers by itself removes the person from the loop, and whether to install one is your choice.**");
     expect(claudeCode).toContain('"Elicitation": [');

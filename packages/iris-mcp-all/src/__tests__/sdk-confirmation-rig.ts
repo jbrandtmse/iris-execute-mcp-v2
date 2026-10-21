@@ -18,7 +18,8 @@ import path from "node:path";
 import { REPO_ROOT } from "./pack-fixture";
 import { startFakeIris } from "../../../../scripts/lib/fake-iris-listener.mjs";
 import { normalizeAuditEntry, readBootstrapVersion } from "../../../../scripts/lib/sdk-handler-golden-core.mjs";
-import { connectSdkClient, distEntry, pollAuditEntries, resolveSdkEsmDir, staleDistReason } from "./process-gate-helpers.js";
+import { connectSdkClient, distEntry, pollAuditEntries, resolveSdkEsmDir } from "./process-gate-helpers.js";
+import { requireFreshDists } from "./story-43-3-qa-wire.js";
 import type { AuditEntry, ElicitationAnswer, ElicitationRequest, SdkClient, SdkVersionNegotiation, WireToolResult } from "./process-gate-helpers.js";
 
 /** The answer a dialog gets until {@link SdkRig.answer} says otherwise: an accept with Confirm ticked. */
@@ -70,6 +71,8 @@ export interface SdkRigOptions {
   firstAnswer?: ElicitationAnswer;
   /** Further environment variables of the server process, applied last. */
   env?: Record<string, string>;
+  /** The script the client starts instead of `pkg`'s built entry point, for example a launcher that records each start and then imports it. */
+  entry?: string;
 }
 
 const rigs: Array<() => Promise<void>> = [];
@@ -98,8 +101,7 @@ export function withoutMeta(result: WireToolResult): WireToolResult {
  * `options.capabilities`.
  */
 export async function openSdkRig(pkg: string, negotiation: SdkVersionNegotiation, options: SdkRigOptions): Promise<SdkRig> {
-  const stale = ["shared", pkg].map((name) => [name, staleDistReason(REPO_ROOT, name)] as const).filter(([, reason]) => reason !== undefined);
-  if (stale.length > 0) throw new Error(`Build the packages first: ${stale.map(([name, reason]) => `${name}: ${reason}`).join("; ")}`);
+  requireFreshDists(pkg);
   const sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
   if (sdkEsmDir === undefined) throw new Error("The MCP SDK client is not installed.");
 
@@ -115,7 +117,7 @@ export async function openSdkRig(pkg: string, negotiation: SdkVersionNegotiation
     client = await connectSdkClient(
       {
         sdkEsmDir,
-        entry: distEntry(REPO_ROOT, pkg),
+        entry: options.entry ?? distEntry(REPO_ROOT, pkg),
         target: { host: "127.0.0.1", port: String(fake.port), username: "qa", password: "qa", namespace: "HSCUSTOM" },
         clientName: options.clientName,
         versionNegotiation: negotiation,

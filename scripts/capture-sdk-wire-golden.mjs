@@ -6,18 +6,22 @@
 //   servers, the verbatim response line to every request in the exchange list of
 //   scripts/lib/sdk-wire-golden-core.mjs, on the 2025-11-25 era. The default-suite test
 //   packages/iris-mcp-all/src/__tests__/story-43-1-sdk-wire-golden.test.ts replays the same list
-//   against the built servers and compares byte for byte.
+//   against the built servers and compares each line byte for byte with the golden plus the sanctioned
+//   changes of packages/iris-mcp-all/src/__tests__/fixtures/sdk-golden-sanctioned-changes.json
+//   (scripts/lib/golden-sanctioned-changes.mjs).
 //
 // WHEN IT IS CAPTURED
 //   Once, from the build that is the oracle: the tree BEFORE the MCP SDK migration edits anything.
-//   The file is never edited by hand and never regenerated to match a newer build.
+//   The file is frozen: never edited by hand, never regenerated, and pinned by its SHA-256 in
+//   story-43-4-sanctioned-golden-changes.test.ts. A sanctioned change to bytes it holds is an entry
+//   of the sanctioned-change ledger, never a recapture.
 //
 // USAGE (the command line of scripts/lib/golden-capture-cli.mjs)
 //   node scripts/capture-sdk-wire-golden.mjs
 //       Captures from the built dists of this checkout and writes the golden. REFUSES (exit 2, nothing
 //       written) when the fixture already exists.
 //   node scripts/capture-sdk-wire-golden.mjs --force
-//       Overwrites an existing fixture. Legitimate only when the oracle itself is being replaced.
+//       Overwrites an existing fixture; with the committed golden frozen, use it only with --out.
 //   node scripts/capture-sdk-wire-golden.mjs --dist-root <dir>
 //       Captures from the built dists of another checkout, for example a `git worktree` of the oracle revision.
 //   node scripts/capture-sdk-wire-golden.mjs --out <path>
