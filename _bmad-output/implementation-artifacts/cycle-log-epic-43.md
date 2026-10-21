@@ -81,3 +81,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-21T01:55:58Z	Story 43.3	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build_closed_port tests=2042 result=pass order=forward,reverse packages=shared,admin,dev,interop,iris-mcp-all first_run=stopped_preemptively(shared-target_env) model=claude-opus-5-5
 2026-10-21T01:56:00Z	Story 43.3	committed	sha=1cb1409 code_sha=0c903e4 build_sha=9521312 submodules= ci=none run=none branch=epic43 pushed=origin/epic43 verified=merge-base amendments=ARCHITECTURE-SPINE.md:AD-3,AD-19,AD-34,epics.md:43.3.6,43.3_DW-657,43.4_desc+DW-653,42.1_DW-637,42.9_DW-655
 2026-10-21T01:56:00Z	Story 43.3	story_cycle	plan_to_commit_min=737 implement_passes=2(first_interrupted) reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-21T02:03:21Z	Epic 43	epic_context_compiled	reason=planning_artifact_newer model=claude-opus-5-5 lines=246
+2026-10-21T02:03:21Z	Story 43.4	stage_spawned	stage=plan spawn_at=2026-10-21T02:03:21Z model=claude-opus-5-5 agent_name=43-4-sdk-v2-docs-smokes-and-capstone-plan-1 cycle_iteration=1
