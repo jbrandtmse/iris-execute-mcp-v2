@@ -3524,6 +3524,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 43.1 review: fixtures/sdk-wire-golden.json tools-list and call:server-profiles lines; story-43-1-sdk-wire-golden.test.ts header test
 - 2026-10-20T07:58:39Z status=routed owner=43-4-sdk-v2-docs-smokes-and-capstone by=harvest note=43.4 decides how the frozen v1 oracle retires once the catalogue legitimately changes (compare only what a migration can change, or hand the tools-list rows to the tools-list snapshot); 43.2 reuses it unchanged
 - 2026-10-20T09:40:41Z occurrence=43-1-framework-migration-to-sdk-v2 by=cr note=QA's fixtures/sdk-handler-golden.json is a second frozen v1 oracle (handler texts, startup requests, BOOTSTRAP_VERSION); retire both together
+- 2026-10-21T05:23:05Z status=resolved-by:43-4-sdk-v2-docs-smokes-and-capstone owner=43-4-sdk-v2-docs-smokes-and-capstone by=lead note=delivered: fixtures/sdk-golden-sanctioned-changes.json (11 entries) read by golden-sanctioned-changes.mjs; both frozen goldens SHA-256 pinned and byte-unchanged; the five golden tests read through the loader; loader refuses no-op, non-append description, wrong old, unknown key, duplicate id, out-of-row pointer, unnamed diff and missing CHANGELOG sanction id (QA 26 mutations); spine conventions row Frozen goldens
 
 ### DW-640: A tools/call result with both isError and structuredContent serializes its members in a different order on SDK v2 (content, structuredContent, isError)
 - source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: low | fix-risk: low | footprint: in-story
@@ -3535,6 +3536,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 43.2 plan probe 2026-10-20: one factory call per process per client mode; the extra process is the client's version probe, predates 43.2
 - 2026-10-20T12:12:41Z status=routed owner=43-4-sdk-v2-docs-smokes-and-capstone by=harvest note=43.4 documents it in the client docs (startup cost, log lines appearing twice) and checks the probe process exits cleanly in its live smoke
+- 2026-10-21T05:23:05Z status=resolved-by:43-4-sdk-v2-docs-smokes-and-capstone owner=43-4-sdk-v2-docs-smokes-and-capstone by=lead note=delivered: client docs describe the probe as observed; lead smoke 2026-10-21: Claude Code 2.1.296 starts each of the five servers once per session on both eras (one sessionStart), Inspector 2.9.0 pinned era starts once per invocation; QA story-43-4-qa-probe-copy pins the TS SDK v2 auto/pin sibling probe process (two starts, SIGTERM-reaped, no survivors)
 
 ### DW-642: A cancelled tools/call still runs its IRIS call to the end and is audited ok on both eras: the owned handlers get request.params only, never the SDK abort signal, so a cancelled write still happens
 - source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: med | fix-risk: med | footprint: in-epic
@@ -3561,6 +3563,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: med | fix-risk: med | footprint: in-epic
 - evidence: registerGovernanceResource (server-base.ts:1166-1215): the static iris-governance-default plus the template list callback naming every profile incl. default; in the frozen v1 golden for all 5 servers
 - 2026-10-20T13:22:33Z status=routed owner=43-4-sdk-v2-docs-smokes-and-capstone by=cr note=decide with DW-639's golden retirement: a fix changes the frozen 2025 wire and needs an AD-15 sanction
+- 2026-10-21T05:23:05Z status=resolved-by:43-4-sdk-v2-docs-smokes-and-capstone owner=43-4-sdk-v2-docs-smokes-and-capstone by=lead note=delivered: S-43.4-governance-resource; resources/list lists iris-governance://default once on all five servers (5 ledger entries, unit rows in server-discovery.test.ts, QA raw-wire both eras incl. a two-profile row)
 
 ### DW-647: Stdio lines that are not JSON-RPC requests (not JSON, [], {}, a batch array) are dropped with no output, where JSON-RPC expects -32700 or -32600
 - source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: high | footprint: out-of-footprint
@@ -3597,6 +3600,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 43.3 plan research 2026-10-20
 - 2026-10-20T23:38:03Z status=routed owner=43-4-sdk-v2-docs-smokes-and-capstone by=harvest note=correct the prompt text with DW-639's golden retirement (sanctioned AD-15 prompt-text fix) and regenerate the skill
+- 2026-10-21T05:23:05Z status=resolved-by:43-4-sdk-v2-docs-smokes-and-capstone owner=43-4-sdk-v2-docs-smokes-and-capstone by=lead note=delivered: S-43.4-prompt-text; resend-failed-messages steps 3-4 corrected, skills regenerated (gen:skills:check, gen:pack:check, validate:prompts OK), three prompt hash pins moved; QA proves only steps 3-4 changed (old steps restore the pre-story body hash); remaining tool-description wording is DW-662 (42.1)
 
 ### DW-654: Audit entries for %SYS-scoped tools record the profile's default namespace (for example HSCUSTOM), not %SYS
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3643,3 +3647,4 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-43-4-sdk-v2-docs-smokes-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 43.4 review 2026-10-20 (blind hunter): message-resend.ts:364-369, :434; packages/iris-interop-mcp/README.md:302; Story 43.4 fixed only the resend-failed-messages prompt (DW-653)
 - 2026-10-21T03:57:59Z status=routed owner=42-1-pre-publish-package-fixes by=harvest note=a sanctioned AD-15 tool-text correction before 1.0, with DW-560's annotation corrections: one sanctioned-change ledger entry per changed byte (a replace, so the Frozen goldens convention needs its sanction to name a correction), the tools-list snapshot regenerated
+- 2026-10-21T05:15:12Z occurrence=43-4-sdk-v2-docs-smokes-and-capstone by=cr note=appendOnly is optional, so a description replace under a later sanction passes the loader and the S-43.4-only append row; 42.1 decides

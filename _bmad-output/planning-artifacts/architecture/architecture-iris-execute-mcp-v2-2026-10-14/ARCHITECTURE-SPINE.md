@@ -325,7 +325,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
       - a `tools/call` that carries a `task` parameter runs as a plain call, because the server advertises no `tasks` capability, where v1 refused it with `-32603 Server does not support task creation` (wave-8 decision #6). Only a client that ignores the capability list sends either request.
       - The result member order is NOT a change: v1 already re-encoded every `tools/call` result in its schema order (`content`, `structuredContent`, `isError`), so the exception decision #4 also recorded was withdrawn (wave-8 decision #5).
     - **Story 43.4** (wave-8 decisions #23 and #24):
-      - `S-43.4-descriptions`: the descriptions of `iris_audit_manage`, `iris_env_promote`, `iris_production_control`, `iris_message_resend` and `iris_doc_edit` each gain one appended sentence that names the confirmation dialog. No other byte of any description changes.
+      - `S-43.4-descriptions`: the descriptions of `iris_audit_manage`, `iris_env_promote`, `iris_production_control`, `iris_message_resend` and `iris_doc_edit` each gain one appended passage that names the confirmation dialog. No other byte of any description changes.
       - `S-43.4-governance-resource`: `resources/list` lists `iris-governance://default` once, as the static resource, where the per-profile resource template's list repeated it (DW-646).
       - `S-43.4-prompt-text`: the `resend-failed-messages` prompt's steps 3 and 4 say that an over-cap count is refused when the resend executes, and that leaving out `dryRun` previews again (DW-653). Its name, title, description and arguments are unchanged.
 
@@ -691,7 +691,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - **The helper.** It is `ToolContext.confirm` (`confirmation.ts`). It sends one required boolean `confirm` in the form, and only an accept with `confirm: true` proceeds. It reads the client's capabilities by era: the request envelope on the modern era, and the `initialize` declaration on the legacy era, never a request's `_meta`.
     - **Binding.** Through signed, single-use `requestState`: an HMAC codec with a per-process key and a 600 s TTL. The state covers the tool, the resolved profile and a hash of the validated arguments, plus a nonce consumed on the deciding round. Forged, replayed, expired or changed-argument state asks again.
     - **Order.** Each handler asks immediately before its first IRIS write, after all its own checks. `resendFiltered` asks only for 1 ≤ match count ≤ cap, from a read-only preflight. `clean` asks only under IRIS's own pass condition.
-    - **Descriptions** *(Story 43.4, wave-8 decision #24)*. Each gated tool's description names the dialog in one appended sentence.
+    - **Descriptions** *(Story 43.4, wave-8 decision #24)*. Each gated tool's description names the dialog in one appended passage.
     - **Hooks, as observed** (Claude Code 2.1.296, decision #20). The `Elicitation` hook fires on both eras. Headless `claude -p` with no hook, or with `--permission-prompts none`, cancels the dialog (`CONFIRMATION_DECLINED`, `response: "cancel"`).
     - **Clients, as observed.** Claude Code declares form elicitation on both eras. MCP Inspector CLI 2.9.0 declares none and gets the fallback.
 

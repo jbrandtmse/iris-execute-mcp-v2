@@ -292,6 +292,43 @@ Line numbers are at HEAD `d14aa50`.
   - `BOOTSTRAP_VERSION` is `d51856f74d6a`, and `git diff 9a2f515 -- src/ packages/shared/src/bootstrap-classes.ts` is empty;
   - the CHANGELOG's "Epic 43 at close" enumerates every sanctioned wire change of Stories 43.1–43.4.
 
+### Review Findings
+
+Code review 2026-10-20 (`bmad-code-review`, tier full-opus; Blind Hunter, Edge Case Hunter, Verification Gap and Acceptance Auditor all delivered). Frozen diff: `git diff b841530` plus QA's untracked files. 36 raw findings; 0 HIGH. Each line: severity, fix-risk, footprint, disposition.
+
+- [x] [Review][Patch] The `Elicitation` hook example matched `iris-admin`, but every documented server entry and the installer name the server `iris-admin-mcp`, so a copied hook may never fire [docs/client-config/claude-code.md:464, README.md:679] — med; fix-risk low (doc text and a pin); in-story. The example and both sentences now use `iris-admin-mcp`, described as the key of the server's entry; `story-43-4-doc-claims` pins that the matcher is a key the page configures. QA stance 1.
+- [x] [Review][Patch] No stdio server ever writes the audit `shutdown` line (no entry point calls `stop()`), yet `README.md:842` said the writer appends it "on shutdown", `README.md:676` named a graceful stop, and the DW-641 text (client docs, CHANGELOG) set the probe's "no `shutdown` line" against sessions that have one; QA's two probe-copy assertions could not fail (one read a live session, the other ran before the probe was reaped behind a launcher that exited on SIGTERM first) [README.md:842, docs/client-config/README.md:98, CHANGELOG.md:73, story-43-4-qa-probe-copy.test.ts] — med; fix-risk low; in-story. The README now says what each exit path writes (stdin close: `unanswered` entries and no `shutdown` line; a signal: neither; only an embedding program's `stop()` writes it, DW-659 unchanged); the DW-641 text says the probe's `sessionStart` is its session's only line; the assertions run after the client closed and every process exited, and the launcher exits on SIGTERM only when it is the sole listener. QA stance 2.
+- [x] [Review][Patch] Rule 2: the QA files and the rig re-implemented `requireFreshDists` (`story-43-3-qa-wire.ts:49`), three files redefined the era-line constants that `story-43-2-qa-hand-wire.ts:300-301` exports, and the probe-copy harness repeated `openSdkRig`'s setup [story-43-4-qa-docs-runtime.test.ts:42, story-43-4-qa-sanctioned-wire.test.ts:167, story-43-4-qa-probe-copy.test.ts:90, epic43-capstone-gate.test.ts:55, sdk-confirmation-rig.ts:101] — med; fix-risk low; in-story. They import the helpers; `openSdkRig` gains an `entry` option and the probe-copy file runs on it.
+- [x] [Review][Patch] Rule 19 hermeticity: the probe-copy modern rows counted the era line after a fixed 300 ms sleep (the stdout/stderr race the capstone's E5 patch fixed) [story-43-4-qa-probe-copy.test.ts:176-188] — med; fix-risk low; in-story. They now wait for the line.
+- [x] [Review][Patch] "One appended sentence" is a two-sentence passage, and `README.md:677` said each description "ends with one sentence" [README.md:646, README.md:677, CHANGELOG.md:7, CHANGELOG.md:18, .changeset/story-43-4-sdk-v2-close.md:13, docs/client-config/README.md:96] — low; fix-risk low; in-story. All say "one appended passage"; README:677 and the CHANGELOG also name the second sentence; the two pins follow. The spine's AD-15/AD-34 wording is the lead's. QA stance 4.
+- [x] [Review][Patch] `readBootstrapVersion` infers `string | undefined` under the repo's strict settings, so the rig (`:106-107`) and the nine sites it mirrors in five 43.1–43.3 files fail TS2322 (11 errors) [scripts/lib/sdk-handler-golden-core.mjs:91] — low; fix-risk low (JSDoc only); in-epic. It declares `@returns {string}` (it throws otherwise); a strict `tsc` reports none of the 11 afterwards. The remaining strict-`tsc` errors (TS2835 extensionless imports, two 43.1/43.2 `object[]` and two 43.3 implicit-any) predate this story; `@iris-mcp/all` has no type-check script. QA stance 3.
+- [x] [Review][Patch] The probe paragraph listed only "bootstrap version query", but the probe copy also deploys the ExecuteMCPv2 classes when they are missing or out of date, with its log discarded [docs/client-config/README.md:98] — low; fix-risk low; in-story. Added, and pinned.
+- [x] [Review][Patch] The two capture scripts' headers still described a byte-for-byte compare and a "legitimate" `--force` [scripts/capture-sdk-wire-golden.mjs:7-20, scripts/capture-sdk-handler-golden.mjs:8-22] — low; fix-risk low (comments); in-epic. They now name the ledger and the SHA-256 pin; the scripts were not run.
+- [x] [Review][Patch] The silent-probe row was named "…and the silent probe is ended" but only checks that no process outlives the client [story-43-4-qa-probe-copy.test.ts:201] — low; fix-risk low; in-story. Renamed to what it checks.
+- [x] [Review][Patch] The CHANGELOG's "6 descriptions" next to "five gated tools" was unexplained [CHANGELOG.md:32] — low; fix-risk low; in-story. It names the `iris_doc_edit` `core-preset` entry.
+- [x] [Review][Patch] Capstone step 9 read stderr with no wait of its own, relying on `entries()`'s 200 ms pause [epic43-capstone-gate.test.ts:230] — low; fix-risk low; in-story. It reads once stderr has been quiet for 250 ms.
+- [x] [Review][Patch] The 2025-11-25 byte-identity correction (implement review B1) had no pin [README.md:934, docs/client-config/README.md:96] — low; fix-risk low; in-story. Pinned.
+- [x] [Review][Patch] The back-compat diff-guard record is stale: QA changed `qa-41-7-doc-links.test.ts` and `process-gate-helpers.ts`, outside decision #28c [Verification] — low; fix-risk low; in-story. Verified harmless (the `KNOWN_BROKEN` filter applies only to the newly checked `claude-code.md`; `probe` is an optional type member); the guard is re-recorded under Verification, with this review's JSDoc line in `sdk-handler-golden-core.mjs`.
+- [x] [Review][Defer] `appendOnly` is optional, so a description `replace` under a later sanction passes both the loader and the S-43.4-only append row [scripts/lib/golden-sanctioned-changes.mjs] — low; spec-bound (`by-design`); DW-662's planned 42.1 replace is where the Frozen-goldens rule gets decided — `occurrence` appended to DW-662 (owner `42-1-pre-publish-package-fixes`).
+
+**Rejected (10).**
+- E2, low: the rig leaks its first listener if the second `startFakeIris` or `mkdtempSync` throws. A bind on 127.0.0.1 port 0 or a tmpdir failure is theoretical.
+- E3, low: the rig's `close` leaks if `fake.close()` rejects. The `closed` flag runs close once, so the listener cannot be "not running".
+- E4, low: the doc-claims ordering row passes vacuously if a reference heading is renamed. `between()` asserts the section itself. The fix is a guard for an unlikely rename (the implement review rejected the same case).
+- E5, low: `applySanctionedChanges` called with unvalidated entries. Every production path goes through `readSanctionedGolden`, which validates.
+- E6, low: the gate-guards comment stripper would swallow code after a string holding `/*`. This is unlikely in the six consumers, and a tokenizer is out of proportion.
+- E7, low: the skip scanner misses `it.concurrent.skip`, `it.fails` and a context `skip()`. These are unlikely, and vitest reports skips. Fixing it means extending a guard.
+- E8, low: a `KNOWN_BROKEN` target that appears twice gives a misleading hint. The failure is still loud.
+- E9, low: the probe-timeout row pins the SDK constant, not its wiring. The SDK is pinned exactly at 2.3.1, and a bump re-verifies.
+- B4 (part), low: the docs-runtime era-line describe overlaps `story-43-2-qa-era-log-line`. That is overlapping coverage, not a code copy, and the describe pins the doc claim.
+- V4, spec-bound: AC 43.4.1 and AC 43.4.3 (records) have no in-suite pin. Decisions #26 and #28 make them the lead's smoke and spec-gate checks. Back-compat and Epic close are verified by the "(once)" commands, re-run below.
+
+**Adjudication evidence for the lead (Rule 17).**
+- DW-639 is addressed: the ledger, the loader, five loaders, SHA-256 rows and mutation lines.
+- DW-646 is addressed: the template filter, the unit rows, five `remove` entries and the QA rows on both eras.
+- DW-653 is addressed: steps 3–4, regenerated skills, three hash pins and the interop rows. The residual is DW-662, owned by 42.1.
+- DW-641 is addressed in the docs. The QA probe-copy file now observes the doc claim falsifiably, with the shutdown wording corrected. Its live half (Claude Code's single start, Inspector) is AC 43.4.1, the lead's smoke.
+
 ## Spec Change Log
 
 - 2026-10-21 (lead spec gate): decisions #23–#28 were taken as recommended. The lead applied #28(a)'s Rule-20 actions to the spine and PRD: AD-15's Story 43.4 bullet, the Frozen goldens conventions row, AD-32, AD-34, the Stack rows, the Deferred entry, `prd.md:88` and the spine's `updated:` field.
@@ -689,6 +726,91 @@ Every test added or changed passes on a fresh environment, in either order. No I
 - mutation: `epic43-capstone-gate` step 1 after the review patch (it waits up to 5 s for the expected era line before counting), M2 re-run: the `serveStdio(...)` statement replaced by a plain `connect(new StdioServerTransport())` (shared rebuilt) -> `legacy` red at step 1 after the wait ("one legacy era line on stderr: expected +0 to be 1"), `pinned` red at connect ("did not offer pinned protocol version 2026-07-28"), `auto` red at step 1 ("the client's era: expected 'legacy' to be 'modern'"); `server-base.ts` SHA-256 `1a1b50ef...ad329` before and after the revert, shared rebuilt, capstone green. The stderr/stdout ordering race itself is non-deterministic and has no mutation.
 - mutation: `story-43-4-doc-claims` fallback-contract rows after the review patch, the root README Inspector sentence and the client-docs bullet restored to "gets the `confirm: true` contract" -> "states what Claude Code and MCP Inspector were observed to declare" and "states the dialog per client as observed" red (2 failures); both files byte-identical after the revert (SHA-256 `6488fd70...` and `efc2f6a8...`).
 - mutation: `golden-sanctioned-changes.mjs` guards, the `old` comparison, the canonical-JSON check and the append-only check each disabled in turn (`false &&`) -> "a wrong old" and "changes to one row apply in file order", "a frozen line that is not canonical JSON", and "a duplicate id, a no-op, an append that is not an append ..." red, one mutation at a time; the file was restored (no `false &&` left).
+
+**QA (2026-10-21).** Every command ran with `IRIS_HOST=127.0.0.1 IRIS_PORT=1` (launcher runs also `IRIS_TEST_HOST`/`IRIS_TEST_PORT`) against a closed port or the in-process fake listener; no `claude`, Inspector or IRIS instance was contacted. Each mutation was applied with the file tools, run, reverted, and the file's SHA-256 (or `git status --short`) was checked against its value before; every dist involved was rebuilt after the revert. Not redone, because the implement stage recorded them above: the SHA-256 pin row, the CHANGELOG sanction-id row, the no-op entry, the removed entry and the one-character `old` of a resource entry.
+
+Tests added (QA):
+- `packages/iris-mcp-all/src/__tests__/story-43-4-qa-sanctioned-wire.test.ts` (QA, 44 tests): five servers on both eras over the raw driver, against the RAW frozen golden, the spec's sentences and the pre-story body hash, not the loader.
+- `packages/iris-mcp-all/src/__tests__/story-43-4-qa-probe-copy.test.ts` (QA, 5 tests): the DW-641 probe copy and the probe timeout, on the real SDK client.
+- `packages/iris-mcp-all/src/__tests__/story-43-4-qa-docs-runtime.test.ts` (QA, 10 tests): the documented hook output, the revisions and the era line, against the built servers.
+- `packages/iris-mcp-all/src/__tests__/story-43-4-qa-gate-guards.test.ts` (QA, 6 tests): the five golden tests read through the ledger; the capstone is in the default suite and cannot skip.
+- Changed by QA: `epic43-capstone-gate.test.ts` (step 9, the era line again), `qa-41-7-doc-links.test.ts` (the two client docs, and `KNOWN_BROKEN` for DW-631), `process-gate-helpers.ts` (an optional `probe` member of `SdkVersionNegotiation`, a type only).
+
+- mutation: ledger test + five golden tests + capstone, a 12th ledger entry on a row no sanction names (admin `prompts-list`, a valid `old`) -> the ledger test's ids row and "only appends" row, `story-43-1-sdk-wire-golden` admin `prompts-list` (raw line and client), `story-43-2-cross-era-pin` admin (a) and (d), and the capstone on all three modes (10 failures).
+- mutation: ledger, a description entry that replaces instead of appends (`appendOnly` dropped, `new` not starting with `old`) -> the ledger test's "a description entry only appends" row, the admin `tools-list` golden rows, cross-era admin and the capstone on all three modes (8 failures); the loader's own validation cannot catch it, because `appendOnly` is optional.
+- mutation: ledger, `old` and the prefix of `new` both changed by one character in the admin description entry (the append check still passes) -> the loader threw "old is not the value at /result/tools/25/description" at import of the four golden tests and the capstone, and the ledger test's `old`, "differs in exactly" and "sanctioned descriptions" rows went red; `story-43-1-qa-handler-golden` stayed green, because it applies only handler entries.
+- mutation: ledger, the id of entry 2 set to entry 1's id -> "id is not unique" at import of all seven consumers, plus the ledger test's validation and ids rows (7 failures).
+- mutation: ledger, the admin description pointer set to `/result/tools/99/description` -> "pointer ... resolves to nothing" at import of the golden tests and the capstone, and the ledger test's `old` row.
+- mutation: ledger, a stray key `note` on an entry -> "unknown key 'note'" at import of all seven consumers and the ledger test's validation row.
+- mutation: `story-43-1-sdk-wire-golden`, the load line pointed at the raw `sdk-wire-golden.json` instead of `readSanctionedGolden` -> exactly the 18 sanctioned rows went red (the `tools-list` of dev `main`, dev `core-preset`, admin and interop, and the `resources-list` of all five servers, each raw line and v2 client); the 214 other tests stayed green.
+- mutation: `golden-sanctioned-changes.mjs`, the loader also rewrites the first row of the golden (a space appended) -> the ledger test's "differs in exactly the rows the entries name" and "a handler entry rewrites only the line of its row" rows, `story-43-1-sdk-wire-golden` dev `initialize` and `story-43-2-cross-era-pin` dev (d) went red.
+- mutation: `golden-sanctioned-changes.mjs`, the loader adds a field to each named row -> "differs in exactly the rows the entries name" and "a handler entry rewrites only the line of its row" went red.
+- mutation: `epic43-capstone-gate` (the gap QA found), `McpServerBase.installWireHandlers` writing one more era line per `tools/call` -> the capstone STAYED GREEN on all three modes before QA's step 9 (step 1 counts the line right after the first request); with step 9 added, `legacy` ("expected 8 to be 1"), `pinned` and `auto` ("expected 7 to be 0") went red.
+- mutation: `epic43-capstone-gate`, the audit writer drops the `confirmation` field (`audit.ts`, shared rebuilt) -> step 8 red on all three modes; not a gap.
+- mutation: `epic43-capstone-gate`, `Input validation error` -> `Input validation failure` in `sdk-wire-compat.ts` (shared rebuilt) -> step 5 red on all three modes; not a gap.
+- mutation: `epic43-capstone-gate`, the modern era line text changed (`server/discover` -> `server discover`) -> step 1 red on `pinned` and `auto`, `legacy` green; not a gap.
+- mutation: `story-43-4-qa-sanctioned-wire`, a word of the `iris_audit_manage` sentence changed in `audit.ts` AND in the ledger entry's `new` (admin rebuilt) -> the ledger test, `story-43-1-sdk-wire-golden`, `story-43-2-cross-era-pin` and the capstone stayed green (406 tests, 2 failures: only this file), the QA `tools-list` row red on both eras; the independence the file exists for.
+- mutation: `story-43-4-qa-sanctioned-wire`, the template `list` without the `default` filter (shared rebuilt) -> the `resources/list` and the two-profile rows red on all five servers and both eras (20 failures).
+- mutation: `story-43-4-qa-sanctioned-wire`, step 4 of `resendFailedMessages.ts` restored to its old parenthetical (interop rebuilt) -> the `prompts/get` row red on both eras (the new step 4 text is absent).
+- mutation: `story-43-4-qa-probe-copy`, `serveStdio(...)` replaced by a plain `connect(new StdioServerTransport())` (shared rebuilt) -> `pinned` red at connect ("did not offer pinned protocol version"), `auto` red ("expected 'legacy' to be 'modern'"), the silent-probe row red; `legacy` green.
+- mutation: `story-43-4-qa-probe-copy`, the silent-probe row's launcher delay set to 0 -> that row red ("expected 'modern' to be 'legacy'"), so the row can see the property.
+- mutation: `story-43-4-qa-docs-runtime`, the hook's `content` key renamed `confirm` -> `confirmed` in both documents -> the "same hook output" row and both live rows (2025-11-25 and `auto`) red ("the key the hook prints is a field of the form").
+- mutation: `story-43-4-qa-docs-runtime`, `legacy: "serve"` -> `"reject"` in `start()` (shared rebuilt) -> the live hook row on the 2025-11-25 handshake, the five server rows and both era-line rows red (8 failures).
+- mutation: `story-43-4-qa-docs-runtime`, the era line written with `logger.debug` (shared rebuilt) -> both era-line rows red.
+- mutation: `story-43-4-qa-gate-guards`, `story-43-1-qa-handler-golden.test.ts` pointed at the raw `sdk-handler-golden.json` -> the routing row red, naming the file; the handler golden test itself stayed GREEN (72 tests), which is the gap the guard closes.
+- mutation: `story-43-4-qa-gate-guards`, `it.each(MODES)` -> `it.skip.each(MODES)` in the capstone -> the no-skip row red ("expected ['it.skip'] to deeply equal []"); vitest reports the capstone as 3 skipped and the run as green.
+- mutation: `story-43-4-qa-gate-guards`, `src/**/epic43-*.test.ts` added to `exclude` in `vitest.config.ts` -> the default-suite row red ("epic43-capstone-gate.test.ts is in the default suite: expected false to be true").
+- mutation: `qa-41-7-doc-links`, `README.md#protocol-revisions-and-confirmation-dialogs` -> `...dialogz` in `docs/client-config/claude-code.md` -> that document's row red, naming the line.
+- mutation: `qa-41-7-doc-links`, the DW-631 anchor in `claude-code.md` fixed (two hyphens) -> that row red ("the known broken links are still broken; remove an entry of KNOWN_BROKEN"), so the exception cannot outlive the defect.
+
+QA runs: the four new files 65 tests, the capstone 3, the link checker 12; `iris-mcp-all` in thirds, 163 files (54, 55, 54) green with the live gates skipped; the new and changed tests shuffled at seeds 11 and 22: 8 files, 125 tests, green; `gen:skills:check`, `gen:pack:check`, `gen:tools-list-snapshot:check` (115 entries) and `validate:prompts` OK; the two frozen goldens match their SHA-256.
+
+**Code review (2026-10-20).** Every command ran with `IRIS_HOST=127.0.0.1 IRIS_PORT=1` against a closed port or the in-process fake listener; no `claude`, Inspector or IRIS instance was contacted. Each mutation was applied with the file tools, run, and reverted, and the file's SHA-256 was checked; `server-base.ts` is `1a1b50ef...ad329` before and after each, and shared was rebuilt with `tsconfig.tsbuildinfo` deleted.
+- mutation: `story-43-4-qa-probe-copy` shutdown rows (after the review patch), `process.stdin.once("end", () => void this.stop())` added after the `serveStdio` call in `McpServerBase.start()` (shared rebuilt) -> legacy "a session its client closes writes no shutdown line" and pinned/auto "neither session writes a shutdown line" red (3 failures); the silent-probe and timeout-constant rows green.
+- mutation: `story-43-4-qa-probe-copy` probe-session row, `process.once("SIGTERM", () => void this.stop().then(() => process.exit(143)))` in the same place (shared rebuilt) -> pinned/auto "the probe's sessionStart is the only line of its session" red (the launcher no longer exits before a server-side SIGTERM handler); legacy green, because its client closes stdin and the server exits without a signal.
+- mutation: `epic43-capstone-gate` step 9 (after the review's quiet-period wait), the `tools/call` handler logging the 2025 era line 50 ms after each call (shared rebuilt) -> step 9 red on `legacy` ("expected 8 to be 1"), `pinned` and `auto` ("expected 7 to be +0").
+- mutation: `story-43-4-doc-claims` review pins, all three at once, each pinning its own row:
+  - the `claude-code.md` hook matcher set back to `iris-admin`;
+  - the README `shutdown` sentence set back to "is written on shutdown";
+  - the client-docs 2025-11-25 sentence set back to "sees exactly the bytes it always saw".
+
+  -> the matcher row ("the matcher iris-admin is the key of a server entry the page configures"), the shutdown row and the byte-identity row went red (3 failures). The three files' SHA-256 matched after the revert.
+- Diff guard, re-recorded after QA and this review (`git diff b841530 --name-status` over the guarded trees):
+  - **Changed pre-existing files:** the twelve of decision #28c, plus `fixtures/tools-list-snapshot.json`, plus QA's `qa-41-7-doc-links.test.ts` and `process-gate-helpers.ts`, plus this review's `scripts/lib/sdk-handler-golden-core.mjs`.
+  - **Assertion changes outside the task 13 rows and the three hash constants:**
+    - `qa-41-7-doc-links` filters `KNOWN_BROKEN` targets, which exist only for the newly checked `docs/client-config/claude-code.md` (DW-631), and adds one row. No pre-existing document loses coverage.
+    - The other two files change no assertion: an optional type member, and a JSDoc return type.
+  - Both goldens are unchanged: `602231cc...` and `6abbd4b3...`.
+- Review runs:
+  - The changed files passed: doc-claims 27, 43.3 doc-claims 13, the link checker 12, the ledger test 20, probe-copy 5, docs-runtime 10, the capstone 3, sanctioned-wire 44, gate-guards 6, and `story-43-3-confirmation-both-eras` 104 (the rig consumer).
+  - The `iris-mcp-all` sweep in thirds: 54, 55 and 54 files green, with the live gates skipped.
+  - Six changed files, shuffled at seeds 11 and 22: 95 tests each, green.
+  - `gen:governance-baseline:check` OK (141 frozen keys). `gen:tools-list-snapshot:check` OK (115). `gen:skills:check` and `gen:pack:check` OK.
+  - `git diff 9a2f515 -- src/ packages/shared/src/bootstrap-classes.ts` is empty, and `BOOTSTRAP_VERSION` is `d51856f74d6a`.
+
+**Lead live smoke (decision #26, AC 43.4.1, DW-641; the lead, 2026-10-21): PASS.**
+
+- **Setup.**
+  - CLI `2.1.296 (Claude Code)`, with all dists rebuilt first (`turbo run build`, 7/7).
+  - `<S>` = `<lead scratchpad>/s434-live`, holding `tap.mjs` (the 43.2 contract, plus SIGTERM/SIGINT forwarding), `hook.mjs` and `smoke.mjs` (one `startFakeIris` per leg, and an `IRIS_AUDIT_LOG` per server per leg). The fake listener on 127.0.0.1 is the only IRIS; the shared instance was never touched.
+  - **Leftover check:** this repo's server-dist PIDs are listed before and after each run, because other sessions' long-lived servers share the command line. No new PID survived any run.
+- **Claude Code reads, all five servers.**
+  - **`cc-read-modern`:** every server opens with `server/discover` 2026-07-28. `tools/list` lengths are 33/27/25/22/8. Each server gets one `iris_server_profiles` call with no `isError`, one era line, an audit with exactly ONE `sessionStart` (DW-641: Claude Code starts each server once), and one `ok` entry. All connected, `success`, USD 0.0127.
+  - **`cc-read-legacy`:** the same, with every opening `initialize` 2025-11-25. USD 0.0086.
+- **Capabilities.** On both eras Claude Code declares `{roots: {listChanged: true}, elicitation: {form: {}, url: {}}}`.
+- **Claude Code confirmations** (admin, hook on `iris-admin`, purge enabled only in the throwaway config). One `sessionStart` per leg throughout.
+  - `modern-accept`: 2 `tools/call` rounds, 1 hook event, 1 purge POST, audit `ok` / `accepted`. USD 0.0040.
+  - `modern-decline`: 1 hook event, 0 POSTs, final `isError`, audit `denied` / `declined` / `CONFIRMATION_DECLINED`. USD 0.0042.
+  - `legacy-accept`: 1 `tools/call` through the shim, 1 hook event, 1 POST, `ok` / `accepted`. USD 0.0041.
+  - `legacy-decline`: 1 hook event, 0 POSTs, `denied` / `declined` / `CONFIRMATION_DECLINED`. USD 0.0042.
+- **MCP Inspector CLI** (`@modelcontextprotocol/inspector@2.9.0`, published 2026-10-14 with npm provenance; installed with `--ignore-scripts` into `<S>/inspector`, run with a throwaway `HOME`, `MCP_INSPECTOR_SECRET_STORE=memory` and catalog and client paths in `<S>`; `~/.mcp-inspector` was never created).
+  - **The finding that matters for the docs:** the 2.9.0 CLI needs the target command FIRST, with options after it. Options before the target fail with "No servers found in config file".
+  - **Per server and era** (`--protocol-era legacy`, and `modern`): `--method tools/list` exits 0 with 33/27/25/22/8 tools, and `--method tools/call --tool-name iris_server_profiles` exits 0 with no `isError`. The legacy openings are `initialize` 2025-11-25 and the modern ones `server/discover` 2026-07-28, with the era line present.
+  - **Process starts:** each CLI invocation starts the server once. With the era pinned there is no sibling probe process; the probe described in DW-641 belongs to `auto`/pin SDK clients, which QA pinned in `story-43-4-qa-probe-copy`.
+  - **Purge, per era, with governance enabling it:** exit 0, the purge success, exactly 1 purge POST, and audit `ok` with NO `confirmation` field: the no-dialog fallback. Inspector declares `{roots, extensions: {tasks, skills}}` and no elicitation.
+  - **Leftovers and shutdown:** no leftover process after any run, and no `shutdown` audit line on any exit path (matching the corrected README).
+- **Totals.** USD 0.038 for the six Claude Code legs; Inspector is free. Every listener was closed, and `<S>` (with the Inspector install) deleted.
+- **Not covered:** a VS Code (Copilot) dialog run (GUI-only). It becomes a dated user action item at the epic decision sheet (decision #25).
 
 ## Auto Run Result
 
