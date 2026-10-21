@@ -5683,7 +5683,7 @@ This is the `/epic-cycle` burn-down story, chartered on 2026-10-20 at Epic 41's 
 
 | Account | Needed by |
 |---|---|
-| npm account with 2FA and the `iris-mcp` organization (D1) | 42.5. Confirm or create it before 42.1, because the scope is baked into every pin |
+| npm account with 2FA and the `iris-mcp` organization (D1) | 42.5. Confirm or create it before 42.1, because the scope is baked into every pin. **Done:** the Lead reserved the `iris-mcp` organization on 2026-10-15; the `@iris-mcp` scope stays |
 | VS Code Marketplace publisher | 42.7 |
 | Open VSX namespace | 42.7 |
 | InterSystems Developer Community account | 42.8 |
@@ -5728,7 +5728,7 @@ The decision record's fix table, except DW-508 (42.2) and IPM (42.4). Ledger: DW
   - the plugin's server entries (42.8).
 
   A test searches the extension, `client-config` and the docs for an unpinned `@iris-mcp/` spec. The other half of DW-260, the launcher's missing neutral `cwd` (a local `node_modules` can shadow the package), is probed with a recorded verdict and fixed if it is real. Certification fixtures and docs are updated.
-  - Before `1.0.0`, also raise the SDK floor out of the high advisory range (`>=1.31.0` on the v1 line until Epic 43 replaces it) and refresh the lockfile. `@types/node` is pinned to the floor major, so code cannot type-check against APIs that don't exist on Node 22.
+  - ~~Before `1.0.0`, also raise the SDK floor out of the high advisory range (`>=1.31.0` on the v1 line until Epic 43 replaces it) and refresh the lockfile.~~ **Not applicable** (wave-8 decision #33, 2026-10-21): Epic 43 removed SDK v1, and `@modelcontextprotocol/server` / `client` are pinned exactly at `2.3.1` (spine AD-32); the remaining SDK advisory follow-up is DW-637. Still in scope: `@types/node` is pinned to the floor major, so code cannot type-check against APIs that don't exist on Node 22.
 - **AC 42.1.7** — The documented `npx … @iris-mcp/client-config iris-mcp-clients` command (`packages/client-config/README.md:17`) is corrected. The correct invocation of a scoped package with a differently named `bin` is probed, and every documented instance is fixed (Rule #56).
 - **AC 42.1.8** — The `npm pack --dry-run` file list for each package is recorded in the story record.
 - DW-560: correct the existing-tool annotation divergences before 1.0. `iris_sql_execute`, `iris_execute_command` and `iris_doc_put` get `destructiveHint: true`, because each can delete or overwrite state. This is a sanctioned AD-15 hint correction (orchestrator decision #18, Epic 38 decision sheet, 2026-10-16). Rule #44's cross-check and the annotation sweeps move with it, and the CHANGELOG records it. (ledger; routed by merge_gate 2026-10-16)
