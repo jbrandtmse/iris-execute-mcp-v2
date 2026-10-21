@@ -114,7 +114,7 @@ export const x509ManageTool: ToolDefinition = {
     // The tool can mutate (import/delete). MCP annotations are tool-scoped; the
     // per-action read/write distinction is realized through `mutates` below.
     readOnlyHint: false,
-    destructiveHint: false,
+    destructiveHint: true,
     idempotentHint: false,
     openWorldHint: false,
   },

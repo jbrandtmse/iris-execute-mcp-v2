@@ -176,7 +176,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 |------|-------------|----------------|-------------|
 | `iris_task_manage` | Create, modify, or delete a scheduled task | `action`, `id?`, `name?`, `taskClass?`, `namespace?`, `suspended?` | destructive |
 | `iris_task_list` | List all scheduled tasks with details | *(none)* | readOnly, idempotent |
-| `iris_task_run` | Trigger immediate task execution | `id` | -- |
+| `iris_task_run` | Trigger immediate task execution | `id` | destructive |
 | `iris_task_history` | View task execution history | `taskId?`, `maxRows?` | readOnly, idempotent |
 
 ### System Configuration Tools

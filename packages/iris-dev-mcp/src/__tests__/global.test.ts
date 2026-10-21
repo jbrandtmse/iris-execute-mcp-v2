@@ -199,10 +199,10 @@ describe("iris_global_set", () => {
     ).rejects.toThrow("ECONNREFUSED");
   });
 
-  it("should have correct annotations (destructiveHint: false)", () => {
+  it("should have correct annotations (destructiveHint: true)", () => {
     expect(globalSetTool.annotations).toEqual({
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       idempotentHint: true,
       openWorldHint: false,
     });

@@ -1456,7 +1456,7 @@ export const envPromoteTool: ToolDefinition = {
   }),
   annotations: {
     readOnlyHint: false,
-    destructiveHint: false,
+    destructiveHint: true,
     idempotentHint: false,
     openWorldHint: false,
   },

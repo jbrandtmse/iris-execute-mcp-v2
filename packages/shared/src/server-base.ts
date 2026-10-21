@@ -2286,7 +2286,7 @@ export class McpServerBase {
       tool: tool.name,
       action: this.deriveAuditAction(tool, argsRecord),
       profile: profileName,
-      namespace: this.deriveAuditNamespace(argsRecord, profileName),
+      namespace: this.deriveAuditNamespace(tool, argsRecord, profileName),
       outcome,
       durationMs,
       paramKeys: argsRecord
@@ -2386,15 +2386,20 @@ export class McpServerBase {
   }
 
   /**
-   * `rawArgs.namespace` when present (per-call override), else the resolved
-   * profile's default namespace read from the already-built, in-memory
-   * profile registry. Basic derivation only (Dev Notes): never establishes a
-   * connection just to learn a namespace — a denied call must not connect.
+   * The namespace the call ran in (AD-19): `"%SYS"` for a `SYS`-scoped tool,
+   * which always executes there whatever its `namespace` argument says.
+   * Every other scope records `rawArgs.namespace` when present (per-call
+   * override), else the resolved profile's default namespace read from the
+   * already-built, in-memory profile registry. Basic derivation only: never
+   * establishes a connection just to learn a namespace, because a denied call
+   * must not connect.
    */
   private deriveAuditNamespace(
+    tool: ToolDefinition,
     argsRecord: Record<string, unknown> | undefined,
     profileName: string,
   ): string {
+    if (tool.scope === "SYS") return "%SYS";
     const override = argsRecord?.namespace;
     if (typeof override === "string" && override.length > 0) return override;
     return this.profiles?.get(profileName)?.namespace ?? "";

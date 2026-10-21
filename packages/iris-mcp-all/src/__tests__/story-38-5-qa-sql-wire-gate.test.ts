@@ -12,7 +12,7 @@
  * carry the `BOOTSTRAP_VERSION` of the built shared dist (the version check of `process-gate-helpers.ts`):
  *
  *  - `tools/list` shows both tools' schemas and annotations (no `readOnly`/`maxRowsAffected` on
- *    `iris_sql_query`, the frozen annotations on `iris_sql_execute`), and `iris_server_profiles`
+ *    `iris_sql_query`, the annotations of `iris_sql_execute` with `destructiveHint` true since Story 42.10), and `iris_server_profiles`
  *    reports the default verdicts;
  *  - with no SQL variable set, a query and a DML statement answer as the Atelier `action/query` route
  *    does (the oracle), `rowsAffected` is the change IRIS made, and `countOnly` equals a `COUNT(*)`;
@@ -311,10 +311,10 @@ describe("the SQL tools on the wire, no SQL variable set (Story 38.5, AC-4, AC-5
       ["countOnly", "maxRows", "maxRowsAffected", "namespace", "parameters", "query", "readOnly", "server"],
     );
     expect(execute?.inputSchema.required).toEqual(["query"]);
-    // The frozen tool keeps its annotations and gains no `action` enum.
+    // The frozen tool declares destructiveHint true since Story 42.10 (DW-560), keeps its other hints and gains no `action` enum.
     expect(execute?.annotations).toMatchObject({
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       idempotentHint: false,
       openWorldHint: false,
     });

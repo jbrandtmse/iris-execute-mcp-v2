@@ -2,6 +2,48 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-21] — Story 42.10: Pre-1.0 Tool-Surface Corrections
+
+Story 42.10 corrects three wire and audit truths before 1.0 publishes, and widens the sanctioned-change ledger so that the frozen SDK
+goldens can record the corrections. Nothing is published, versioned or tagged. No tool, action, governance key, preset row, input-schema
+key, refusal code, environment variable or ObjectScript class is added, removed or changed, the frozen governance baseline stays at hash
+`1e62c5ad5bf7` (141 keys), and `BOOTSTRAP_VERSION` is unchanged. The tools-list snapshot was regenerated through its generator
+(`pnpm gen:tools-list-snapshot --force` after a rebuild of every package): apart from the header's `capturedAt`, only the values named
+below moved. `sdk-wire-golden.json` and `sdk-handler-golden.json` are byte-unchanged (their SHA-256 pins stay); the corrections are 23 new
+entries of `fixtures/sdk-golden-sanctioned-changes.json`, one per moved golden value (19 annotations, 3 resend texts, 1 audit
+`namespace`). DW-652 (the Storage guard on three more document-write paths) is not in this story: it moved to Story 42.11.
+
+### Changed (AD-15 sanctioned)
+
+- **`S-42.10-annotations` (DW-560).** 13 existing tools change `destructiveHint` from `false` to `true`, because each can delete, or
+  irreversibly overwrite, existing state (AD-4): `iris_doc_put`, `iris_sql_execute`, `iris_global_set`, `iris_execute_command`,
+  `iris_execute_classmethod`, `iris_doc_load`, `iris_doc_export`, `iris_env_promote`, `iris_service_manage`, `iris_ldap_manage`,
+  `iris_x509_manage`, `iris_production_item` and `iris_task_run`. The other three hints of each tool, every tool name, title, input-schema
+  key, governance key and `mutates` classification stay as they were, and `iris_execute_tests` keeps `destructiveHint: false` (Story 40.4).
+  49 of the 110 package tools are now destructive (36 before). Nothing in this suite reads the hints, but a client that does may now ask
+  for approval before these calls. A cross-check in `@iris-mcp/all` keeps the set honest: a tool that is not read-only and declares
+  `destructiveHint: false` must be on a justified list (five tools today), and no tool with a `delete`, `remove`, `purge`, `kill` or
+  `clean` action may declare it.
+- **`S-42.10-resend-text` (DW-662).** The `iris_message_resend` description and its `maxMessages` and `confirm` texts are corrected, not
+  appended. They now say that executing needs `dryRun: false` and `confirm: true`, that `dryRun: false` without `confirm: true` is refused
+  with no changes made, that a call that leaves out `dryRun` previews, and that only an executing call whose match count is over the cap
+  is refused, while a preview reports the full count. They said that a preview without `confirm` was refused and that an over-cap preview
+  was refused, which the tool never did. The tool's behavior, `dryRun`'s text and the Story 43.4 dialog passage are unchanged.
+- **`S-42.10-audit-namespace` (DW-654, AD-19).** The audit entry of a `SYS`-scoped tool (the 25 SYS-scoped tools of `@iris-mcp/admin`)
+  records `"namespace":"%SYS"`, where it recorded the call's `namespace` argument or the profile's default namespace, which is not where
+  the call ran. The argument still appears in `paramKeys` and, with `IRIS_AUDIT_LOG_PARAMS=true`, in `params`. The entries of `NS`, `BOTH`
+  and `NONE` tools are byte-identical to before.
+
+### Changed
+
+- **The sanctioned-change ledger accepts later stories, corrections and the handler golden's `audit` array.** An entry may come from any
+  story after the capture; a description entry appends unless its sanction is a recorded correction (`S-42.10-resend-text` is the first);
+  and a handler entry with `section: "audit"` changes one member of one audit call entry. The ledger test names a shape for each of the
+  five sanctions, and a new test in `@iris-mcp/all` checks the tools-list snapshot against the sanctioned golden without a build.
+- **Documentation.** The README Annotations cells of the 13 tools say `destructive`; the interop README carries the corrected resend
+  wording; the root README carries one paragraph on the audit `namespace` and its Story 43.4 sentence no longer says that no other
+  description byte changed; `docs/tool-annotation-audit.md` is marked historical; `tool_support.md` has a Story 42.10 note.
+
 ## [Pre-release — 2026-10-21] — Story 42.1: Pre-Publish Package Fixes
 
 Story 42.1 makes the eight `@iris-mcp/*` packages publishable and pins every `npx` spec the suite writes, spawns or documents to the

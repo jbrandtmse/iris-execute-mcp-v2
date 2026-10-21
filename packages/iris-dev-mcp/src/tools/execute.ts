@@ -84,7 +84,7 @@ export const executeCommandTool: ToolDefinition = {
   }),
   annotations: {
     readOnlyHint: false,
-    destructiveHint: false,
+    destructiveHint: true,
     idempotentHint: false,
     openWorldHint: false,
   },
@@ -1477,7 +1477,7 @@ export const executeClassMethodTool: ToolDefinition = {
   }),
   annotations: {
     readOnlyHint: false,
-    destructiveHint: false,
+    destructiveHint: true,
     idempotentHint: false,
     openWorldHint: false,
   },

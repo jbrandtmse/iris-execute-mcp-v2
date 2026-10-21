@@ -281,4 +281,76 @@ describe("audit interceptor (Epic 29, Story 29.0)", () => {
     expect(exitMock).toHaveBeenCalledWith(1);
     expect(appendFileMock).not.toHaveBeenCalled();
   });
+
+  // Story 42.10 (DW-654, AD-19): `namespace` is where the call ran. A SYS-scoped tool always runs in %SYS, so its
+  // entry says so whatever its `namespace` argument holds; every other scope keeps the argument-or-profile derivation.
+  describe("the audit namespace follows the tool's scope (Story 42.10, DW-654)", () => {
+    /** A tool of `scope` that takes an optional `namespace`; `mutates: "write"` makes it default-disabled (a denial). */
+    function makeScopedTool(scope: ToolDefinition["scope"], mutates: "read" | "write" = "read"): ToolDefinition {
+      return {
+        name: `iris_scope_${scope.toLowerCase()}_${mutates}`,
+        title: `${scope} ${mutates}`,
+        description: `A ${scope}-scoped ${mutates} tool.`,
+        inputSchema: z.object({ namespace: z.string().optional().describe("Target namespace") }),
+        annotations: { readOnlyHint: mutates === "read", destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        scope,
+        mutates,
+        handler: async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+      };
+    }
+
+    /** Run the `calls` against a started server with auditing on, and return the tool-call entries in call order. */
+    async function auditedEntries(tool: ToolDefinition, calls: Array<Record<string, unknown>>): Promise<Array<Record<string, unknown>>> {
+      const dir = mkdtempSync(join(tmpdir(), "iris-audit-scope-test-"));
+      const auditPath = join(dir, "audit.log");
+      process.env.IRIS_AUDIT_LOG = auditPath;
+      try {
+        fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+        fetchMock.mockResolvedValueOnce(versionResponse());
+        const server = new McpServerBase(makeServerOpts([tool], makeConfig()));
+        await server.start("stdio");
+        for (const args of calls) await invokeTool(server, tool.name, args);
+        const lines = await waitForLineCount(auditPath, calls.length + 1);
+        return lines.map((line) => JSON.parse(line) as Record<string, unknown>).filter((entry) => entry.tool === tool.name);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+
+    it("a SYS-scoped call records %SYS, with and without a namespace argument", async () => {
+      const entries = await auditedEntries(makeScopedTool("SYS"), [{}, { namespace: "USER" }]);
+      expect(entries.map((entry) => [entry.outcome, entry.namespace])).toEqual([
+        ["ok", "%SYS"],
+        ["ok", "%SYS"],
+      ]);
+      // The argument is still recorded as a parameter key; only the namespace the call ran in changed.
+      expect(entries.map((entry) => entry.paramKeys)).toEqual([[], ["namespace"]]);
+    });
+
+    it("a denied SYS-scoped call records %SYS", async () => {
+      const entries = await auditedEntries(makeScopedTool("SYS", "write"), [{ namespace: "USER" }]);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({ outcome: "denied", denyReason: "GOVERNANCE_DISABLED", namespace: "%SYS" });
+    });
+
+    it("a SYS-scoped call that fails its schema records %SYS", async () => {
+      const entries = await auditedEntries(makeScopedTool("SYS"), [{ namespace: 5 }]);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({ outcome: "error", namespace: "%SYS" });
+    });
+
+    it.each(["NS", "BOTH", "NONE"] as const)("a %s-scoped call records its namespace argument, else the profile's default (as before)", async (scope) => {
+      const entries = await auditedEntries(makeScopedTool(scope), [{}, { namespace: "USER" }]);
+      expect(entries.map((entry) => [entry.outcome, entry.namespace])).toEqual([
+        ["ok", "HSCUSTOM"],
+        ["ok", "USER"],
+      ]);
+    });
+
+    it.each(["NS", "BOTH", "NONE"] as const)("a denied %s-scoped call records its namespace argument (as before)", async (scope) => {
+      const entries = await auditedEntries(makeScopedTool(scope, "write"), [{ namespace: "USER" }]);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({ outcome: "denied", namespace: "USER" });
+    });
+  });
 });

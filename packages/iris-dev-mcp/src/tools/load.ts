@@ -367,7 +367,7 @@ export const docLoadTool: ToolDefinition = {
   }),
   annotations: {
     readOnlyHint: false,
-    destructiveHint: false,
+    destructiveHint: true,
     idempotentHint: true,
     openWorldHint: false,
   },

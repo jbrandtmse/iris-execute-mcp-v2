@@ -69,7 +69,10 @@ describe("Story 43.4: the root README", () => {
     expect(confirmation).toContain(
       "Since Story 43.4, the description of each of the five gated tools (`iris_audit_manage`, `iris_env_promote`, `iris_production_control`, `iris_message_resend` and `iris_doc_edit`) ends with one appended passage that names the dialog",
     );
-    expect(confirmation).toContain("and says that a client without elicitation is not asked. No other byte of any description changed.");
+    expect(confirmation).toContain(
+      "and says that a client without elicitation is not asked. Story 43.4 changed no other byte of any description; Story 42.10 later corrected the dry-run and cap wording of `iris_message_resend` (see the CHANGELOG).",
+    );
+    expect(confirmation).not.toContain("No other byte of any description changed.");
     expect(squash(rootReadme)).not.toContain("Tool descriptions are not changed in this release");
   });
 

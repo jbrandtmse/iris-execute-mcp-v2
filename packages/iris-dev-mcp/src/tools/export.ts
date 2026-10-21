@@ -287,7 +287,7 @@ export const docExportTool: ToolDefinition = {
   }),
   annotations: {
     readOnlyHint: false,
-    destructiveHint: false,
+    destructiveHint: true,
     idempotentHint: true,
     openWorldHint: false,
   },

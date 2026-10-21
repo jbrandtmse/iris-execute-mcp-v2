@@ -647,7 +647,7 @@ describe("iris_doc_export", () => {
     expect(docExportTool.scope).toBe("NS");
     expect(docExportTool.annotations).toEqual({
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       idempotentHint: true,
       openWorldHint: false,
     });

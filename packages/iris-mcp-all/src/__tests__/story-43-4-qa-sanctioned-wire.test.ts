@@ -7,10 +7,14 @@
  * the same built servers over the raw stdio driver, with three independent references:
  *  - the RAW frozen golden (`sdk-wire-golden.json`, parsed here and never passed through the loader);
  *  - the sentences of wave-8 decision #24, written below from the spec rather than read from the ledger or the sources;
+ *  - the 13 tools of wave-8 decision #39 whose `destructiveHint` Story 42.10 flips, and the corrected `iris_message_resend` texts of Story
+ *    42.10 (DW-662), written below from that spec;
  *  - the sha256 that the `resend-failed-messages` body had before Story 43.4 (`story-41-5-qa-dist-consumer` at its baseline).
  *
  * Per server and era it asserts that:
- *  - every tool equals its frozen entry, and a gated tool's description is the frozen text plus the spec's separator and sentence, once;
+ *  - every tool equals its frozen entry, apart from what the specs sanction: a gated tool's description is the frozen text plus the spec's
+ *    separator and sentence, once (Story 43.4); the 13 flipped tools declare `destructiveHint: true` and nothing else of them moves; and
+ *    `iris_message_resend` carries the corrected passage, `maxMessages` text and `confirm` text (Story 42.10);
  *  - `resources/list` names `iris-governance://default` exactly once, as the static resource, and equals the frozen list without its
  *    second entry; `resources/templates/list` and every `resources/read` answer are the frozen ones;
  *  - `prompts/list` is the frozen one; on the interop server `resend-failed-messages` renders the spec's steps 3 and 4 and, with the old steps put
@@ -110,8 +114,64 @@ const SANCTIONED: Record<string, Record<string, { separator: string; sentence: s
   },
 };
 
-/** The `resend-failed-messages` steps 3 and 4 as Story 43.4 wrote them (decision #24), and as they stood before. */
 const EM_DASH = String.fromCharCode(0x2014);
+
+/** Wave-8 decision #39 (Story 42.10, DW-560): the tools whose `destructiveHint` moves from false to true, by server. */
+const FLIPPED: Record<string, string[]> = {
+  "iris-dev-mcp": [
+    "iris_doc_put",
+    "iris_sql_execute",
+    "iris_global_set",
+    "iris_execute_command",
+    "iris_execute_classmethod",
+    "iris_doc_load",
+    "iris_doc_export",
+    "iris_env_promote",
+  ],
+  "iris-admin-mcp": ["iris_service_manage", "iris_ldap_manage", "iris_x509_manage"],
+  "iris-interop-mcp": ["iris_production_item"],
+  "iris-ops-mcp": ["iris_task_run"],
+};
+
+/** Story 42.10 (DW-662): the passage of the `iris_message_resend` description that the frozen text carries, and the one that replaces it. */
+const RESEND_PASSAGE_BEFORE = `executing requires BOTH dryRun:false AND confirm:true, otherwise the call is refused with no changes made. maxMessages caps the batch (default 100, HARD CAP 500) ${EM_DASH} a match count over the cap is refused (not truncated-and-executed); narrow the window or item filter and retry.`;
+const RESEND_PASSAGE_AFTER = `executing requires BOTH dryRun:false AND confirm:true: dryRun:false without confirm:true is refused with no changes made, and leaving dryRun out previews again. maxMessages caps the batch (default 100, HARD CAP 500) ${EM_DASH} an executing call whose match count is over the cap is refused (not truncated-and-executed), while a preview reports the full count; narrow the window or item filter and retry.`;
+const MAX_MESSAGES_BEFORE = "(resendFiltered) Cap on matched/resent messages (default: 100, HARD CAP: 500). A match count over this cap is refused, not truncated-and-executed.";
+const MAX_MESSAGES_AFTER =
+  "(resendFiltered) Cap on matched/resent messages (default: 100, HARD CAP: 500). An executing call whose match count is over this cap is refused, not truncated-and-executed; a preview reports the full count.";
+const CONFIRM_BEFORE = "(resendFiltered) Must be true together with dryRun:false to execute the resend; otherwise the call is refused with no changes made.";
+const CONFIRM_AFTER =
+  "(resendFiltered) Must be true together with dryRun:false to execute the resend; dryRun:false without confirm:true is refused with no changes made. Ignored while dryRun is true or omitted (the call previews).";
+
+interface Schema extends Json {
+  properties: Record<string, { description: string } & Json>;
+}
+
+/**
+ * The tool that `pkg`'s server must list for the frozen entry `then`: the frozen entry, plus what Stories 43.4 and 42.10 sanction for
+ * it and nothing else. Fails when a frozen text the sanction replaces is not what the golden holds, so a stale oracle cannot pass.
+ */
+function sanctionedTool(pkg: string, then: Tool): Tool {
+  const expected = structuredClone(then) as Tool & { annotations: Record<string, unknown>; inputSchema: Schema };
+  if (pkg === "iris-interop-mcp" && then.name === "iris_message_resend") {
+    expect(countOf(then.description, RESEND_PASSAGE_BEFORE), "the frozen resend description holds the old passage once").toBe(1);
+    expected.description = then.description.replace(RESEND_PASSAGE_BEFORE, RESEND_PASSAGE_AFTER);
+    const { maxMessages, confirm } = expected.inputSchema.properties as Record<string, { description: string }>;
+    expect(maxMessages?.description, "the frozen maxMessages text").toBe(MAX_MESSAGES_BEFORE);
+    expect(confirm?.description, "the frozen confirm text").toBe(CONFIRM_BEFORE);
+    (maxMessages as { description: string }).description = MAX_MESSAGES_AFTER;
+    (confirm as { description: string }).description = CONFIRM_AFTER;
+  }
+  const gated = SANCTIONED[pkg]?.[then.name];
+  if (gated !== undefined) expected.description = `${expected.description}${gated.separator}${gated.sentence}`;
+  if (FLIPPED[pkg]?.includes(then.name)) {
+    expect(expected.annotations["destructiveHint"], `${then.name}: the frozen entry declares destructiveHint false`).toBe(false);
+    expected.annotations["destructiveHint"] = true;
+  }
+  return expected;
+}
+
+/** The `resend-failed-messages` steps 3 and 4 as Story 43.4 wrote them (decision #24), and as they stood before. */
 const NEW_STEP_3 = `3. The preview always reports the full match count. If it exceeds \`maxMessages\` (default 100, hard cap 500), the executing call in step 4 would be refused rather than truncated-and-executed ${EM_DASH} narrow the \`from\`/\`to\` window or the \`item\` filter and repeat step 1; do not raise \`maxMessages\` past what the user has reviewed.`;
 const OLD_STEP_3 = `3. If the match count exceeds \`maxMessages\` (default 100, hard cap 500), the call is refused rather than truncated-and-executed ${EM_DASH} narrow the \`from\`/\`to\` window or the \`item\` filter and repeat step 1; do not raise \`maxMessages\` past what the user has reviewed.`;
 const NEW_STEP_4_PAREN =
@@ -207,25 +267,36 @@ describe.each(GOLDEN_PACKAGES as string[])("%s: the sanctioned changes on the wi
       return answer;
     };
 
-    it("tools/list: every tool is its frozen entry, and only the gated tools' descriptions grew, by the spec's separator and sentence, once", () => {
+    it("tools/list: every tool is its frozen entry plus what the specs sanction (the dialog sentence, the 13 destructiveHint flips, the corrected resend texts) and nothing else", () => {
       const before = frozenTools(pkg, "main", era);
       const after = (live("tools-list").frame.result as { tools: Tool[] }).tools;
       expect(after.map((tool) => tool.name), "the same tools in the same order").toEqual(before.map((tool) => tool.name));
       const sanctioned = SANCTIONED[pkg] ?? {};
       for (const [index, tool] of after.entries()) {
         const then = before[index] as Tool;
-        if (sanctioned[tool.name] === undefined) {
-          expect(tool, `${tool.name} is its frozen entry`).toEqual(then);
-          continue;
-        }
+        expect(tool, `${tool.name} is its frozen entry plus its sanctioned changes`).toEqual(sanctionedTool(pkg, then));
+        if (sanctioned[tool.name] === undefined) continue;
         const { separator, sentence } = sanctioned[tool.name] as { separator: string; sentence: string };
-        expect({ ...tool, description: "" }, `${tool.name}: every member but the description is frozen`).toEqual({ ...then, description: "" });
-        expect(tool.description, `${tool.name}: the frozen description plus the spec's separator and sentence`).toBe(`${then.description}${separator}${sentence}`);
+        expect(tool.description.endsWith(`${separator}${sentence}`), `${tool.name}: the description ends with the spec's separator and sentence`).toBe(true);
         expect(markerCount(then.description), `${tool.name}: the frozen text never named the dialog`).toBe(0);
         expect(markerCount(tool.description), `${tool.name}: the dialog is named once`).toBe(1);
       }
       const named = after.filter((tool) => markerCount(tool.description) > 0).map((tool) => tool.name);
       expect(named.sort(), "no other tool names the dialog").toEqual(Object.keys(sanctioned).sort());
+    });
+
+    it("tools/list: exactly the flipped tools of this server declare destructiveHint true where the frozen entry said false, and every other hint is frozen", () => {
+      const before = frozenTools(pkg, "main", era);
+      const after = (live("tools-list").frame.result as { tools: Tool[] }).tools;
+      const moved: string[] = [];
+      for (const [index, tool] of after.entries()) {
+        const then = before[index] as Tool;
+        const now = tool["annotations"] as Record<string, unknown>;
+        const was = then["annotations"] as Record<string, unknown>;
+        if (now["destructiveHint"] !== was["destructiveHint"]) moved.push(tool.name);
+        for (const hint of ["readOnlyHint", "idempotentHint", "openWorldHint"]) expect(now[hint], `${tool.name}: ${hint} is frozen`).toBe(was[hint]);
+      }
+      expect(moved.sort()).toEqual([...(FLIPPED[pkg] ?? [])].sort());
     });
 
     it("resources/list: iris-governance://default is listed exactly once, as the static resource, and the second entry is gone", () => {
@@ -299,11 +370,15 @@ describe("iris-dev-mcp under the core preset: the iris_doc_edit description on t
       const before = frozenTools("iris-dev-mcp", "core-preset", era);
       expect(after.map((tool) => tool.name)).toEqual(before.map((tool) => tool.name));
       const { separator, sentence } = (SANCTIONED["iris-dev-mcp"] as Record<string, { separator: string; sentence: string }>)["iris_doc_edit"] as { separator: string; sentence: string };
+      const flipped: string[] = [];
       for (const [index, tool] of after.entries()) {
         const then = before[index] as Tool;
         if (tool.name === "iris_doc_edit") expect(tool.description).toBe(`${then.description}${separator}${sentence}`);
-        else expect(tool, `${tool.name} is its frozen entry`).toEqual(then);
+        expect(tool, `${tool.name} is its frozen entry plus its sanctioned changes`).toEqual(sanctionedTool("iris-dev-mcp", then));
+        if ((tool["annotations"] as Record<string, unknown>)["destructiveHint"] !== (then["annotations"] as Record<string, unknown>)["destructiveHint"]) flipped.push(tool.name);
       }
+      // Six of the 13 flipped tools are in the core preset.
+      expect(flipped.sort()).toEqual(["iris_doc_load", "iris_doc_put", "iris_execute_classmethod", "iris_execute_command", "iris_global_set", "iris_sql_execute"]);
       expect(after.map((tool) => tool.name)).toContain("iris_doc_edit");
     } finally {
       await conn.close();

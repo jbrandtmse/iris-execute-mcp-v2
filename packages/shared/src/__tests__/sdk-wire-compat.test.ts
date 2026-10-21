@@ -102,6 +102,18 @@ const refinedTool: ToolDefinition = {
   handler: async () => ({ content: [{ type: "text" as const, text: "refined ok" }] }),
 };
 
+/** A SYS-scoped tool: it always runs in %SYS, whatever its `namespace` argument says (Story 42.10, DW-654). */
+const sysTool: ToolDefinition = {
+  name: "iris_wire_sys",
+  title: "Wire sys",
+  description: "Always runs in %SYS.",
+  inputSchema: z.object({ name: z.string(), namespace: z.string().optional() }),
+  annotations: READ_ANNOTATIONS,
+  scope: "SYS",
+  mutates: "read",
+  handler: async () => ({ content: [{ type: "text" as const, text: "sys ok" }] }),
+};
+
 const writeTool: ToolDefinition = {
   name: "iris_wire_write",
   title: "Wire write",
@@ -660,6 +672,26 @@ describe("the audit trail (DW-579, AD-19)", () => {
     expect(JSON.stringify(content)).not.toContain("777");
 
     expect(valid).toMatchObject({ tool: "iris_wire_echo", outcome: "ok", profile: "default", namespace: "HSCUSTOM", paramKeys: ["name"], params: { name: "doc" } });
+  });
+
+  it("a SYS-scoped call records %SYS whether it ends ok or fails its schema on the wire; an NS call keeps its namespace argument (Story 42.10, DW-654)", async () => {
+    const file = join(workDir, "audit.jsonl");
+    process.env.IRIS_AUDIT_LOG = file;
+    process.env.IRIS_AUDIT_LOG_PARAMS = "true";
+    const { client } = await boot({ tools: [echoTool, sysTool] });
+    const invalid = await client.callTool({ name: "iris_wire_sys", arguments: { namespace: "USER", name: 777 } });
+    expect(invalid.isError).toBe(true);
+    await client.callTool({ name: "iris_wire_sys", arguments: { namespace: "USER", name: "doc" } });
+    await client.callTool({ name: "iris_wire_echo", arguments: { namespace: "USER", name: "doc" } });
+
+    const lines = await toolEntries(file, 3);
+    expect(lines.map((entry) => [entry.tool, entry.outcome, entry.namespace])).toEqual([
+      ["iris_wire_sys", "error", "%SYS"],
+      ["iris_wire_sys", "ok", "%SYS"],
+      ["iris_wire_echo", "ok", "USER"],
+    ]);
+    expect(Object.prototype.hasOwnProperty.call(lines[0], "params"), "a schema-invalid entry carries no params").toBe(false);
+    expect(lines[1]).toMatchObject({ paramKeys: ["name", "namespace"], params: { name: "doc", namespace: "USER" } });
   });
 
   it("a call with arguments omitted entirely writes the same single entry, with no key names", async () => {

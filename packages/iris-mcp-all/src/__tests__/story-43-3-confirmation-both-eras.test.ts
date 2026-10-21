@@ -31,6 +31,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { REPO_ROOT } from "./pack-fixture";
 import { loadAllTools } from "../../../../scripts/lib/tool-catalog.mjs";
+import { SYS_SCOPED_GATE_TOOLS, auditNamespace } from "./story-43-3-qa-gates";
 import { closeSdkRigs, openSdkRig } from "./sdk-confirmation-rig.js";
 import type { SdkRig } from "./sdk-confirmation-rig.js";
 import type { ElicitationAnswer, SdkVersionNegotiation } from "./process-gate-helpers.js";
@@ -103,7 +104,7 @@ const base = (pkg: string, tool: string, action: string, args: Record<string, un
   tool,
   action,
   profile: "default",
-  namespace: "HSCUSTOM",
+  namespace: auditNamespace(tool),
   paramKeys: Object.keys(args),
   profileSource: "env",
   params: args,
@@ -435,15 +436,19 @@ describe("AC 43.3.1: the gate inventory, exhaustive as of 2026-10-20 (Rule #56)"
     iris_env_diff: "not gated: allowWide is a read",
   };
 
-  it("names every tool that carries a gating parameter, and the suite still has 110 package tools of which 36 are destructive", async () => {
-    const all = (await loadAllTools(REPO_ROOT)) as Array<{ pkg: string; tool: { name: string; inputSchema?: { shape?: Record<string, unknown> }; annotations?: { destructiveHint?: boolean } } }>;
+  it("names every tool that carries a gating parameter, and the suite has 110 package tools of which 49 are destructive (36 before Story 42.10 flipped 13)", async () => {
+    const all = (await loadAllTools(REPO_ROOT)) as Array<{ pkg: string; tool: { name: string; scope?: string; inputSchema?: { shape?: Record<string, unknown> }; annotations?: { destructiveHint?: boolean } } }>;
     const carrying = all
       .filter(({ tool }) => Object.keys(tool.inputSchema?.shape ?? {}).some((key) => GATING_PARAMETERS.includes(key)))
       .map(({ tool }) => tool.name)
       .sort();
     expect(carrying).toEqual(Object.keys(NAMED).sort());
     expect(all).toHaveLength(110);
-    expect(all.filter(({ tool }) => tool.annotations?.destructiveHint === true)).toHaveLength(36);
+    expect(all.filter(({ tool }) => tool.annotations?.destructiveHint === true)).toHaveLength(49);
+    // The audit entries these tests expect say %SYS for exactly the gated tools that declare `scope: "SYS"` (Story 42.10, DW-654).
+    const gated = [...Object.entries(NAMED).filter(([, verdict]) => verdict.startsWith("gate:")).map(([name]) => name), "iris_doc_edit"];
+    const sysScoped = all.filter(({ tool }) => tool.scope === "SYS" && gated.includes(tool.name)).map(({ tool }) => tool.name);
+    expect(sysScoped.sort()).toEqual([...SYS_SCOPED_GATE_TOOLS].sort());
   });
 
   it("exactly six call sites ask the person: purge, execute, regenerateStorage, clean, resend and resendFiltered, and no other", () => {

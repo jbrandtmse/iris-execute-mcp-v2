@@ -86,7 +86,7 @@ export const productionItemTool: ToolDefinition = {
   }),
   annotations: {
     readOnlyHint: false,
-    destructiveHint: false,
+    destructiveHint: true,
     idempotentHint: false,
     openWorldHint: false,
   },

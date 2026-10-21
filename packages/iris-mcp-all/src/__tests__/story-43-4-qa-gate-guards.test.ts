@@ -1,9 +1,9 @@
 /**
  * Story 43.4 QA (DW-639, AC 43.4.2; Rules #21, #59) - the two gates of Story 43.4 are proven to guard the path they claim to guard.
  *
- * 1. The five golden tests read THROUGH the ledger. A test that pointed at the raw golden would go red on the sanctioned rows of the wire
- *    golden, but the handler golden holds no sanctioned entry yet, so `story-43-1-qa-handler-golden.test.ts` would stay green on a raw
- *    read and the ledger would be bypassed unseen. This file therefore checks the routing itself: every test that loads a frozen golden
+ * 1. The golden tests read THROUGH the ledger. A consumer that read a raw golden would compare against the frozen bytes and bypass the
+ *    ledger: the wire golden's sanctioned rows and the handler golden's one sanctioned audit member (Story 42.10) exist only there. This
+ *    file therefore checks the routing itself: every test that loads a frozen golden
  *    does so with `readSanctionedGolden(REPO_ROOT, "<kind>")` for the kinds it needs, a new consumer must be named here, and no test but
  *    the three that pin the frozen bytes (the ledger test, the independent wire test and this file) reads the frozen files or their path
  *    constants.
@@ -34,6 +34,7 @@ const CONSUMERS: Record<string, Array<"wire" | "handler">> = {
   [`${TESTS}/story-43-2-chokepoint-both-eras.test.ts`]: ["wire"],
   [`${TESTS}/story-43-1-qa-handler-golden.test.ts`]: ["handler"],
   [`${TESTS}/epic43-capstone-gate.test.ts`]: ["wire", "handler"],
+  [`${TESTS}/story-42-10-snapshot-ledger-parity.test.ts`]: ["wire"],
 };
 
 /** The test files that pin or read the frozen bytes on purpose (and so may also name the frozen files). */

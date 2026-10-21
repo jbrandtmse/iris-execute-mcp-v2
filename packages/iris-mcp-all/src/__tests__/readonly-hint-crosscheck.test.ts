@@ -196,3 +196,87 @@ describe("BASELINE_ACTION_CLASSIFICATIONS readOnlyHint cross-check (CR 24.0-1 / 
     expect(offenders).toEqual([]);
   });
 });
+
+/**
+ * Story 42.10, DW-560 / Rule #44: the `destructiveHint` cross-check.
+ *
+ * AD-4: "destructive" means the tool can delete, or irreversibly overwrite, existing state. Before Story 42.10 no test compared
+ * `destructiveHint` with any independent signal, and 13 tools that can delete or overwrite state declared `false`. Two mechanical checks
+ * keep that from recurring:
+ *  - a tool that is not read-only and declares `destructiveHint: false` must be on {@link JUSTIFIED_NON_DESTRUCTIVE_WRITES}, with a reason
+ *    (the list is the sweep of 2026-10-21 over every such tool, Rule #56); an entry whose tool no longer fits is stale and fails;
+ *  - a tool that owns an action named `delete`, `remove`, `purge`, `kill` or `clean` (the action of a multi-action tool, or the last word
+ *    of a single-operation tool's name) never declares `destructiveHint: false`, and no list can excuse it.
+ */
+const JUSTIFIED_NON_DESTRUCTIVE_WRITES: Record<string, string> = {
+  iris_analytics_cubes: "build and sync replace derived cube data, which the source class rebuilds.",
+  iris_doc_compile: "regenerates derived code from unchanged source.",
+  iris_execute_tests: "runs with /noload/nodelete; kept by Story 40.4 (decision #63).",
+  iris_production_autostart: "sets one setting that `get` returns and `set` restores.",
+  iris_transform_test: "runs a transform in memory and persists nothing.",
+};
+
+/** The operation names that make a tool destructive whatever else it does. */
+const DESTRUCTIVE_OPERATION_NAMES = ["delete", "remove", "purge", "kill", "clean"];
+
+describe("destructiveHint cross-check (Story 42.10, DW-560 / Rule #44)", () => {
+  /** Every built tool with its package. */
+  async function builtTools(): Promise<Array<{ pkg: string; tool: { name: string; annotations?: Record<string, unknown> } }>> {
+    return (await loadAllTools(root)) as Array<{ pkg: string; tool: { name: string; annotations?: Record<string, unknown> } }>;
+  }
+
+  it("every tool that is not read-only and declares destructiveHint:false is on the justified list", async () => {
+    const all = await builtTools();
+    const writes = all.filter(({ tool }) => tool.annotations?.readOnlyHint === false);
+    const unexplained = writes
+      .filter(({ tool }) => tool.annotations?.destructiveHint === false && !(tool.name in JUSTIFIED_NON_DESTRUCTIVE_WRITES))
+      .map(({ tool }) => tool.name);
+    // The sweep is not vacuous: it sees the whole write surface, most of it destructive, and every justified tool.
+    expect(all).toHaveLength(110);
+    expect(writes.length).toBeGreaterThan(50);
+    expect(writes.filter(({ tool }) => tool.annotations?.destructiveHint === true).length).toBeGreaterThan(40);
+    expect(writes.filter(({ tool }) => tool.name in JUSTIFIED_NON_DESTRUCTIVE_WRITES)).toHaveLength(Object.keys(JUSTIFIED_NON_DESTRUCTIVE_WRITES).length);
+    expect(unexplained).toEqual([]);
+  });
+
+  it("every justified entry is still a tool that is not read-only and declares destructiveHint:false (no stale entry), and carries a reason", async () => {
+    const all = await builtTools();
+    for (const [name, reason] of Object.entries(JUSTIFIED_NON_DESTRUCTIVE_WRITES)) {
+      const tool = all.find((candidate) => candidate.tool.name === name)?.tool;
+      expect(tool, `${name} has no owning live tool; remove its stale entry`).toBeDefined();
+      expect(tool?.annotations?.readOnlyHint, `${name} is read-only now; remove its stale entry`).toBe(false);
+      expect(tool?.annotations?.destructiveHint, `${name} no longer declares destructiveHint:false; remove its stale entry`).toBe(false);
+      expect(reason.length, `${name}: a justification`).toBeGreaterThan(10);
+    }
+  });
+
+  it("no tool that owns an action named delete, remove, purge, kill or clean declares destructiveHint:false, and no list excuses one", async () => {
+    const { deriveKeysForTool } = await import(pathToFileURL(resolve(sharedDist, "governance-baseline-derivation.js")).href);
+    const all = await builtTools();
+    const owners: string[] = [];
+    const offenders: string[] = [];
+    for (const { pkg, tool } of all) {
+      for (const key of deriveKeysForTool(tool, pkg) as string[]) {
+        const operation = key.includes(":") ? key.slice(key.indexOf(":") + 1) : (key.split("_").at(-1) as string);
+        if (!DESTRUCTIVE_OPERATION_NAMES.includes(operation)) continue;
+        owners.push(key);
+        if (tool.annotations?.destructiveHint === false) offenders.push(key);
+      }
+    }
+    // The sweep is not vacuous: it finds the multi-action deletes of all five servers, a purge, a clean and the two single-operation tools.
+    expect(owners).toEqual(
+      expect.arrayContaining([
+        "iris_ldap_manage:delete",
+        "iris_x509_manage:delete",
+        "iris_production_item:remove",
+        "iris_audit_manage:purge",
+        "iris_production_control:clean",
+        "iris_docdb_document:delete",
+        "iris_doc_delete",
+        "iris_global_kill",
+      ]),
+    );
+    expect(owners.length).toBeGreaterThan(20);
+    expect(offenders).toEqual([]);
+  });
+});

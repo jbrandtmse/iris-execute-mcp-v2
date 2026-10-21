@@ -543,10 +543,10 @@ describe("iris_doc_load", () => {
     expect(structured.compilationResult.errors[0]?.error).toContain("Compile timeout");
   });
 
-  it("should have correct tool annotations", () => {
+  it("should have correct tool annotations (destructiveHint: true, Story 42.10)", () => {
     expect(docLoadTool.annotations).toEqual({
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       idempotentHint: true,
       openWorldHint: false,
     });
