@@ -549,7 +549,7 @@ development_status:
   42-7-vs-code-extension-publish: backlog
   42-8-claude-code-plugin-and-registry-listings: backlog
   42-9-install-docs-and-client-re-certification: backlog
-  42-10-pre-1-0-tool-surface-corrections: ready-for-dev
+  42-10-pre-1-0-tool-surface-corrections: in-progress
   42-11-storage-guard-on-every-document-write: backlog
   epic-42-retrospective: optional
 
