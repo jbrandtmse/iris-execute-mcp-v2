@@ -42,9 +42,11 @@
  * **Never fails on a pristine checkout:** an unbuilt `packages/shared/dist`
  * SKIPS with a logged reason; a machine where `@napi-rs/keyring` cannot load
  * skips cases 1/2 (the bin's own "OS keychain is unavailable" exit-1 is the
- * detection signal); the live-IRIS case skips when the instance is
- * unreachable. Credentials come from `IRIS_TEST_*` with the documented local
- * dev defaults (the `31-6-5` convention).
+ * detection signal). The live-IRIS case runs only when `IRIS_REQUIRE_LIVE` is
+ * `1` or `true`, against `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/
+ * `IRIS_NAMESPACE` (all required, none defaulted); unarmed it skips with the
+ * opt-in reason before any probe or spawn, and armed it skips when the
+ * instance is unreachable. The other cases reach no IRIS.
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
@@ -53,6 +55,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
+import { irisTargetFromEnv, isIrisReachable, liveArmingSkipReason } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
@@ -67,11 +70,12 @@ const CREDENTIALS_DIST_MODULE = path.join(
   "credentials.js",
 );
 
-const IRIS_HOST = process.env.IRIS_TEST_HOST ?? "localhost";
-const IRIS_PORT = Number(process.env.IRIS_TEST_PORT ?? 52773);
-const IRIS_USERNAME = process.env.IRIS_TEST_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_TEST_PASSWORD ?? "SYS";
-const IRIS_NAMESPACE = process.env.IRIS_TEST_NAMESPACE ?? "HSCUSTOM";
+const TARGET = irisTargetFromEnv();
+const IRIS_HOST = TARGET.host;
+const IRIS_PORT = Number(TARGET.port);
+const IRIS_USERNAME = TARGET.username;
+const IRIS_PASSWORD = TARGET.password;
+const IRIS_NAMESPACE = TARGET.namespace;
 
 /** Test-unique names that can never collide with a real keychain account or profile. */
 const CAP_NAME = "qaCliGateCap";
@@ -83,26 +87,17 @@ const REPLACE_NAME = "qaCliGateReplace";
 let binSkipReason: string | undefined;
 let liveSkipReason: string | undefined;
 
-/** Any HTTP response — even a 401 — proves the IRIS Web Gateway is reachable. */
-async function isIrisReachable(): Promise<boolean> {
-  try {
-    const response = await fetch(`http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/`, {
-      signal: AbortSignal.timeout(3000),
-    });
-    return typeof response.status === "number";
-  } catch {
-    return false;
-  }
-}
-
 beforeAll(async () => {
   if (!existsSync(CREDENTIALS_BIN) || !existsSync(CREDENTIALS_DIST_MODULE)) {
     binSkipReason = `packages/shared/dist CLI is not built (run "pnpm turbo run build" first). Looked at: ${CREDENTIALS_BIN}`;
     liveSkipReason = binSkipReason;
     return;
   }
-  if (!(await isIrisReachable())) {
-    liveSkipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/ (set IRIS_TEST_* to point at a live instance).`;
+  // Arming comes before the reachability probe: an unarmed run reaches no IRIS.
+  liveSkipReason = liveArmingSkipReason();
+  if (liveSkipReason) return;
+  if (!(await isIrisReachable(TARGET.host, TARGET.port))) {
+    liveSkipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/ (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
   }
 });
 

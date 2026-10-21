@@ -7,26 +7,29 @@
  *  - This package's default suite runs its test files one at a time (`fileParallelism: false` in its vitest
  *    config), because its live gates bootstrap and write on one shared IRIS instance. A child run of two inert
  *    probe files under the package's own config observes whether the files ever execute at the same time.
- *  - The capstone (`epic38-capstone-gate.test.ts`), run against an IRIS that is not reachable (a closed local
- *    port), skips every test when it is not armed, and fails in `beforeAll` with "may not be skipped" when
- *    `IRIS_REQUIRE_LIVE` is set, each time with the reason its `beforeAll` derives on this machine (a stale
- *    shared or iris-dev-mcp dist first, then the SDK, then the closed port). Each case runs the capstone file in
- *    its own vitest process, so the real `beforeAll` branches execute.
- *  - The capstone and the Story 38.4 and 38.5 wire gates each derive their skip reason from the freshness of
- *    the shared and the iris-dev-mcp dist before their first built-server session opens, and each call
- *    `assertDeployedBootstrapVersion` right after that session has opened, before any test. The check itself is
- *    pinned by `bootstrap-version-check.test.ts`; the live passing path by the gates.
+ *  - The capstone (`epic38-capstone-gate.test.ts`), run with a full `IRIS_*` target at a closed local port under
+ *    the connection-refusing preload: without `IRIS_REQUIRE_LIVE` it skips every test with the opt-in reason and
+ *    the preload logs no connect; with `IRIS_REQUIRE_LIVE` it fails in `beforeAll` with "may not be skipped",
+ *    each time with the reason its `beforeAll` derives on this machine (a stale shared or iris-dev-mcp dist
+ *    first, then the SDK, then the closed port); with `IRIS_REQUIRE_LIVE` and a target variable unset it fails
+ *    naming the unset variables and logs no connect. Each case runs the capstone file in its own vitest
+ *    process, so the real `beforeAll` branches execute.
+ *  - The capstone and the Story 38.4, 38.5 and 38.7 wire gates each check the arming first, then derive their
+ *    skip reason from the freshness of the shared and the iris-dev-mcp dist, before their reachability probe
+ *    and before their first built-server session opens, and each call `assertDeployedBootstrapVersion` right
+ *    after that session has opened, before any test. The check itself is pinned by
+ *    `bootstrap-version-check.test.ts`; the live passing path by the gates.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
 import { createRequire } from "node:module";
 import { availableParallelism, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { inheritedEnv, resolveSdkEsmDir, staleDistReason } from "./process-gate-helpers.js";
+import { runLiveGateFile } from "./live-gate-child-run.js";
+import { inheritedEnv, reserveClosedPort, resolveSdkEsmDir, staleDistReason } from "./process-gate-helpers.js";
 import { SERIAL_PROBE_DIR_VAR } from "./serial-probe.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -34,7 +37,7 @@ const PACKAGE_DIR = path.resolve(__dirname, "..", "..");
 const REPO_ROOT = path.resolve(PACKAGE_DIR, "..", "..");
 const TESTS_DIR = __dirname;
 
-const CAPSTONE = "src/__tests__/epic38-capstone-gate.test.ts";
+const CAPSTONE_FILE = "epic38-capstone-gate.test.ts";
 const GATES_WITH_VERSION_CHECK = [
   "epic38-capstone-gate.test.ts",
   "story-38-4-qa-doc-edit-wire-gate.test.ts",
@@ -50,19 +53,6 @@ const VITEST_ENTRY = path.join(
 
 let closedPort = "";
 
-/** A local port nothing listens on: bind an ephemeral port, then release it. */
-async function reserveClosedPort(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port = typeof address === "object" && address !== null ? address.port : 0;
-      server.close(() => resolve(String(port)));
-    });
-  });
-}
-
 /** The reason the capstone's `beforeAll` derives here, in its order: a stale dist, the SDK, the closed port. */
 function expectedSkipReason(): string {
   return (
@@ -72,26 +62,6 @@ function expectedSkipReason(): string {
       ? "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm"
       : `IRIS is not reachable at http://127.0.0.1:${closedPort}/api/atelier/`)
   );
-}
-
-/** Run the capstone file in its own vitest process against the closed port; the output is both streams. */
-function runCapstone(armed: boolean): { status: number | null; output: string } {
-  const outcome = spawnSync(process.execPath, [VITEST_ENTRY, "run", CAPSTONE], {
-    cwd: PACKAGE_DIR,
-    env: {
-      ...inheritedEnv(["VITEST", "VITEST_WORKER_ID", "VITEST_POOL_ID", "VITEST_MODE", "TEST", "NODE_ENV"]),
-      IRIS_HOST: "127.0.0.1",
-      IRIS_PORT: closedPort,
-      IRIS_USERNAME: "_SYSTEM",
-      IRIS_PASSWORD: "SYS",
-      IRIS_NAMESPACE: "HSCUSTOM",
-      IRIS_HTTPS: "false",
-      ...(armed ? { IRIS_REQUIRE_LIVE: "1" } : {}),
-    },
-    encoding: "utf8",
-    timeout: 90000,
-  });
-  return { status: outcome.status, output: `${outcome.stdout ?? ""}\n${outcome.stderr ?? ""}` };
 }
 
 const SERIAL_PROBES = ["src/__tests__/serial-probe-a.test.ts", "src/__tests__/serial-probe-b.test.ts"];
@@ -134,20 +104,35 @@ afterAll(() => {
 });
 
 describe("Story 38.6: the capstone's arming guard, on its own real path (I/O matrix: unarmed and armed prerequisites)", () => {
-  it("unarmed, with IRIS not reachable: every capstone test is skipped with the reason, and the run passes", () => {
-    const { status, output } = runCapstone(false);
+  it("unarmed, with a full target at a closed port: every capstone test is skipped with the opt-in reason, the run passes, and nothing connects", () => {
+    const { status, output, connects } = runLiveGateFile(CAPSTONE_FILE, "unarmed", closedPort);
 
-    expect(output).toContain(`[SKIP] epic38-capstone-gate: ${expectedSkipReason()}`);
+    expect(output).toContain("[SKIP] epic38-capstone-gate: opt-in live leg: set IRIS_REQUIRE_LIVE=1 and IRIS_HOST");
     expect(output).toMatch(/6 skipped/);
     expect(output).not.toContain("may not be skipped");
     expect(status, output).toBe(0);
+    expect(connects, "the unarmed capstone attempted no connect to the target or to a default instance").toEqual([]);
   }, 120000);
 
   it("armed, with IRIS not reachable: the capstone fails in beforeAll with 'may not be skipped: <reason>'", () => {
-    const { status, output } = runCapstone(true);
+    const { status, output, connects } = runLiveGateFile(CAPSTONE_FILE, "armed", closedPort);
 
     expect(output).toContain(`Epic 38 capstone gate may not be skipped: ${expectedSkipReason()}`);
     expect(status, "the armed run must not pass").not.toBe(0);
+    if (expectedSkipReason().startsWith("IRIS is not reachable")) {
+      expect(
+        connects.some((line) => line.endsWith(`:${closedPort}`)),
+        "the preload observes the armed capstone's reachability probe, so an empty log in the unarmed case is meaningful",
+      ).toBe(true);
+    }
+  }, 120000);
+
+  it("armed with only IRIS_HOST and IRIS_PORT: the capstone fails naming the unset variables, and nothing connects", () => {
+    const { status, output, connects } = runLiveGateFile(CAPSTONE_FILE, "armedIncomplete", closedPort);
+
+    expect(output).toContain("IRIS_USERNAME, IRIS_PASSWORD, IRIS_NAMESPACE are not set");
+    expect(status, "the armed run must not pass").not.toBe(0);
+    expect(connects, "the capstone attempted no connect with an incomplete target").toEqual([]);
   }, 120000);
 });
 
@@ -170,15 +155,19 @@ describe("Story 38.7: this package's default suite runs its test files one at a 
 
 describe("Story 38.6: every Epic 38 wire gate refuses a stale shared or iris-dev-mcp dist (I/O matrix: prerequisites)", () => {
   for (const file of GATES_WITH_VERSION_CHECK) {
-    it(`${file} derives its skip reason from both dists' freshness before its first built-server session`, () => {
+    it(`${file} checks the arming first, then both dists' freshness, before its reachability probe and its first built-server session`, () => {
       const source = readFileSync(path.join(TESTS_DIR, file), "utf8");
 
       const shared = source.indexOf('const sharedStale = staleDistReason(REPO_ROOT, "shared");');
-      const dev = source.search(/(?:skipReason|distSkipReason) = sharedStale \?\? staleDistReason\(REPO_ROOT, "iris-dev-mcp"\);/);
+      const dev = source.search(
+        /(?:skipReason|distSkipReason) = liveArmingSkipReason\(\) \?\? sharedStale \?\? staleDistReason\(REPO_ROOT, "iris-dev-mcp"\);/,
+      );
+      const probe = source.search(/await isIrisReachable\(/);
       const session = source.search(/admin = await open\w*Session\(/);
       expect(shared, `${file} checks the shared dist`).toBeGreaterThan(-1);
-      expect(dev, `${file} checks the iris-dev-mcp dist after the shared one`).toBeGreaterThan(shared);
-      expect(session, `${file} opens its first session after both checks`).toBeGreaterThan(dev);
+      expect(dev, `${file} takes the arming reason first, then the shared and iris-dev-mcp dist checks`).toBeGreaterThan(shared);
+      expect(probe, `${file} probes reachability only after the arming and dist checks`).toBeGreaterThan(dev);
+      expect(session, `${file} opens its first session after every check`).toBeGreaterThan(probe);
     });
   }
 });

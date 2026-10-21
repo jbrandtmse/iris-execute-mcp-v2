@@ -28,8 +28,8 @@
  *  6. With `IRIS_SQL_MAX_ROWS_AFFECTED` below the seeded row count, an `iris_sql_execute` DELETE of every
  *     row is refused with `SQL_ROWS_AFFECTED_CAP` (`capSource: "operator"`) and the rows are intact.
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, defaulting to the
- * dev instance at localhost:52773 / HSCUSTOM. Writes only the disposable
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none
+ * defaulted, and only when `IRIS_REQUIRE_LIVE` arms the run (without it every test skips before any request). Writes only the disposable
  * `ExecuteMCPv2.Temp.QaStory386CapEdit.cls` (non-persistent) and `ExecuteMCPv2.Temp.QaStory386CapRows.cls`
  * (persistent, compiled, six rows, `^ExecuteMCPv2.QaStory386CapR*`) documents, the table and the globals
  * of the second one. They are removed, and their absence asserted, in `beforeAll` and in `afterAll`.
@@ -53,6 +53,7 @@ import {
   irisTargetFromEnv,
   isIrisReachable,
   lineNumber,
+  liveArmingSkipReason,
   openWireSession,
   resolveSdkEsmDir,
   skipTest,
@@ -208,7 +209,7 @@ async function expectNoFixtures(when: string): Promise<void> {
 
 beforeAll(async () => {
   const sharedStale = staleDistReason(REPO_ROOT, "shared");
-  skipReason = sharedStale ?? staleDistReason(REPO_ROOT, "iris-dev-mcp");
+  skipReason = liveArmingSkipReason() ?? sharedStale ?? staleDistReason(REPO_ROOT, "iris-dev-mcp");
   if (!skipReason) {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
     if (!sdkEsmDir) {

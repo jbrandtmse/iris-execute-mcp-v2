@@ -71,6 +71,8 @@ const REPLACED_NAMES = [
   "toolTokens",
   "promptText",
   "promptRejection",
+  "isIrisReachable",
+  "reserveClosedPort",
 ] as const;
 
 /** Replaced names that are never a local variable, so a declaration at any depth is a copy. */
@@ -89,6 +91,8 @@ const NEVER_LOCAL = [
   "batchUnits",
   "wellFormed",
   "HEADER_COLUMNS",
+  "isIrisReachable",
+  "reserveClosedPort",
 ] as const;
 
 /**

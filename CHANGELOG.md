@@ -2,6 +2,62 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-21] — Story 42.2: Bootstrap Downgrade Guard
+
+Story 42.2 stops the bootstrap from redeploying the `ExecuteMCPv2` classes over a newer deployment (DW-508: an older server on a shared
+instance could reinstall classes that a later build had replaced) and makes every live test leg opt-in (DW-627, DW-518). Nothing is
+published, versioned or tagged. No tool, action, governance key, preset row, annotation, refusal code, product environment variable, REST
+route or REST response is added, removed or changed, no tool count moves (110 package tools, 115 advertised), the frozen governance
+baseline stays at hash `1e62c5ad5bf7` (141 keys), and the frozen SDK goldens and the tools-list snapshot are
+byte-unchanged. `BOOTSTRAP_VERSION` moves from `d51856f74d6a` to `0.0.2+1.995fbbb1055d`: the doc comments of `ExecuteMCPv2.Setup` changed
+(no behavior of any class did) and the marker gained its semver and sequence.
+
+### Changed (AD-14)
+
+- **The bootstrap never downgrades.** It reads the marker stamped into the deployed `ExecuteMCPv2.Setup` and orders it against its own, by
+  semver and then by sequence. An absent deployment gets the full install, and an older one (a lower semver; the same semver and a lower
+  sequence; or a bare 12-character hash from a build before this release) takes today's `stale` upgrade flow. A newer deployment, and a
+  foreign one (the same semver and sequence with a different hash, `dev`, or any value that is not a marker), is left alone: no upload, no
+  compile, no web-application or mapping change, and one `[WARN]` on stderr names both markers and the remedy. For a newer deployment the
+  remedy is to upgrade this server to a build at least as new as the deployed one and to run the same or a newer build on every client that
+  shares the instance; for a foreign one it is to run one build per instance, or to delete class `ExecuteMCPv2.Setup` in the namespace and
+  restart the server to install this server's classes deliberately. The marker is read again immediately before each compile, so a newer or
+  foreign deployment that appears in the meantime is not compiled over.
+- **The marker format and `scripts/bootstrap-sequence.json`.** `BOOTSTRAP_VERSION` is `<semver>+<sequence>.<hash>`: the version of
+  `@iris-mcp/shared`, a sequence number and the 12-character content hash. The sequence lives in the new `scripts/bootstrap-sequence.json`;
+  `pnpm gen:bootstrap` raises it by exactly 1 when the hash changes and leaves it alone otherwise (an unchanged rerun is byte-identical, and a
+  missing file is an error). The drift test also asserts that the semver equals the `packages/shared/package.json` version and that the
+  sequence and hash equal the state file's. `@iris-mcp/shared` exports `classifyDeployedMarker` and `parseBootstrapMarker`.
+- **Sanctioned change to an existing behavior (AD-15).** An instance whose deployed marker is `dev` (a hand-loaded deployment from `src/`) or
+  otherwise foreign is no longer overwritten at the next start; it was before. Every other probe path is as it was: an absent deployment
+  installs, an equal marker is `current` or `unconfigured`, and an older deployment upgrades, apart from the one marker read before each
+  compile.
+- **Builds from before this release still downgrade.** The guard runs in the server that is about to deploy, so an earlier server compares
+  for equality only and redeploys over a newer deployment. Upgrade every client that shares an instance together (README, Known
+  Limitations, "Shared Instances: Upgrade Every Client Together").
+
+### Changed
+
+- **Live test legs are opt-in (DW-627, DW-518).** A leg that can reach IRIS runs only when `IRIS_REQUIRE_LIVE` is `1` or `true`. Armed, it
+  needs all five of `IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD` and `IRIS_NAMESPACE`, with no default target, and a set
+  `IRIS_HOST` alone arms nothing. The `IRIS_TEST_HOST`, `IRIS_TEST_PORT`, `IRIS_TEST_USERNAME`, `IRIS_TEST_PASSWORD` and
+  `IRIS_TEST_NAMESPACE` target variables are retired (`IRIS_TEST_TIMEOUT` is a different setting and is unchanged). A plain `pnpm test`
+  therefore touches no IRIS instance, and `scripts/lib/no-live-iris-preload.mjs` lets a run prove that it connected to none. The prepublish
+  gates arm with `IRIS_REQUIRE_LIVE=1`, so a release run exports the five variables too.
+- **Documentation.** The root README has the "Shared Instances: Upgrade Every Client Together" subsection under Known Limitations and a
+  short note on running the tests; the `@iris-mcp/shared` README and `tool_support.md` describe the ordered marker where they said that every
+  restart reconciles the handlers with the embedded classes.
+
+### Added
+
+- **Test and release tooling, none of it shipped.** `scripts/throwaway-iris.mjs` runs one command against a disposable, digest-pinned IRIS
+  container that it starts on a dynamic loopback port and always removes, and refuses port 52773 or 1972, the shared instance's name and any
+  floating image tag; `pnpm live:bootstrap-guard` runs the throwaway bootstrap-guard gate through it (Story 42.3's CI runs it; nothing in
+  this story runs docker). A hermetic orchestration test drives the built `iris-dev-mcp` against a stateful fake Atelier for the same legs
+  (newer, foreign, older, legacy, current, and the lazy `other` profile of DW-518). `@iris-mcp/shared/test-helpers/live-target` is the one
+  place a test leg resolves its arming and target (in-repo only: it is not in `publishConfig.exports`), and `live-arming-guard.test.ts`
+  pins that no test source defaults a target and that every live-capable test file connects to nothing when unarmed.
+
 ## [Pre-release — 2026-10-21] — Story 42.11: Storage Guard on Every Document Write
 
 Story 42.11 extends the Storage-drop guard that Stories 38.3 and 38.4 gave `iris_doc_put` and `iris_doc_edit` to the three other paths that

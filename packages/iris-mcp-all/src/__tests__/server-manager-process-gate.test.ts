@@ -17,9 +17,11 @@
  *
  * **Never fails on a pristine/offline checkout** (mirrors the extension's
  * Integration AC 31.6.8 contract): an unbuilt dist, an unresolvable SDK, or
- * an unreachable IRIS SKIPS with a logged reason. Credentials come from
- * `IRIS_TEST_*` env vars with the documented local dev defaults as fallback
- * (the `31-6-5` convention, Story 32.3).
+ * an unreachable IRIS SKIPS with a logged reason. The gate runs only when
+ * `IRIS_REQUIRE_LIVE` is `1` or `true`, against `IRIS_HOST`/`IRIS_PORT`/
+ * `IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (all required, none
+ * defaulted); unarmed it skips with the opt-in reason before any probe or
+ * spawn.
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
@@ -27,32 +29,27 @@ import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
-import { inheritedEnv, resolveSdkEsmDir } from "./process-gate-helpers.js";
+import {
+  inheritedEnv,
+  irisTargetFromEnv,
+  isIrisReachable,
+  liveArmingSkipReason,
+  resolveSdkEsmDir,
+} from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const DEV_MCP_ENTRY_POINT = path.join(REPO_ROOT, "packages", "iris-dev-mcp", "dist", "index.js");
 
-const IRIS_HOST = process.env.IRIS_TEST_HOST ?? "localhost";
-const IRIS_PORT = Number(process.env.IRIS_TEST_PORT ?? 52773);
-const IRIS_USERNAME = process.env.IRIS_TEST_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_TEST_PASSWORD ?? "SYS";
-const IRIS_NAMESPACE = process.env.IRIS_TEST_NAMESPACE ?? "HSCUSTOM";
+const TARGET = irisTargetFromEnv();
+const IRIS_HOST = TARGET.host;
+const IRIS_PORT = Number(TARGET.port);
+const IRIS_USERNAME = TARGET.username;
+const IRIS_PASSWORD = TARGET.password;
+const IRIS_NAMESPACE = TARGET.namespace;
 
 const SM_PROFILE_NAME = "smGate";
-
-/** Any HTTP response — even a 401 — proves the IRIS Web Gateway is reachable. A network error/timeout does not. */
-async function isIrisReachable(): Promise<boolean> {
-  try {
-    const response = await fetch(`http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/`, {
-      signal: AbortSignal.timeout(3000),
-    });
-    return typeof response.status === "number";
-  } catch {
-    return false;
-  }
-}
 
 interface RosterEntry {
   name: string;
@@ -75,6 +72,9 @@ let fixtureDir: string | undefined;
 let fixtureSettingsPath: string | undefined;
 
 beforeAll(async () => {
+  // Arming comes before everything else: an unarmed run probes and spawns nothing.
+  skipReason = liveArmingSkipReason();
+  if (skipReason) return;
   if (!existsSync(DEV_MCP_ENTRY_POINT)) {
     skipReason = `packages/iris-dev-mcp/dist/index.js is not built (run "pnpm turbo run build" first). Looked at: ${DEV_MCP_ENTRY_POINT}`;
     return;
@@ -85,8 +85,8 @@ beforeAll(async () => {
       "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm — run pnpm install from the repo root.";
     return;
   }
-  if (!(await isIrisReachable())) {
-    skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/ (set IRIS_TEST_* to point at a live instance).`;
+  if (!(await isIrisReachable(TARGET.host, TARGET.port))) {
+    skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/ (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
     return;
   }
 

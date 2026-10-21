@@ -39,8 +39,8 @@
  * Expected values come from the live Atelier route and from the Story 38.5 intent contract (the
  * texts and shapes), never from the implementation (Rule #36).
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, defaulting to the
- * dev instance at localhost:52773 / HSCUSTOM; every call names `server: "default"` (or the profile it
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none
+ * defaulted, and only when `IRIS_REQUIRE_LIVE` arms the run (without it every test skips before any request); every call names `server: "default"` (or the profile it
  * tests) and the namespace. Writes only the disposable `ExecuteMCPv2.Temp.QaStory385Wire.cls`
  * (persistent, compiled, six rows) document, its data globals and the marker global
  * `^ExecuteMCPv2.QaStory385WireM`, plus `ExecuteMCPv2.Temp.QaStory385WireDdl` if a DDL refusal were to
@@ -69,6 +69,7 @@ import {
   inheritedEnv,
   irisTargetFromEnv,
   isIrisReachable,
+  liveArmingSkipReason,
   openWireSession,
   resolveSdkEsmDir,
   spawnAndWaitForExit,
@@ -216,7 +217,7 @@ async function seed(): Promise<void> {
 
 beforeAll(async () => {
   const sharedStale = staleDistReason(REPO_ROOT, "shared");
-  distSkipReason = sharedStale ?? staleDistReason(REPO_ROOT, "iris-dev-mcp");
+  distSkipReason = liveArmingSkipReason() ?? sharedStale ?? staleDistReason(REPO_ROOT, "iris-dev-mcp");
   if (!distSkipReason) {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
     if (!sdkEsmDir) {

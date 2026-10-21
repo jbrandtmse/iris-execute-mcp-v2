@@ -26,9 +26,10 @@
  * sentence fails the gate until it is paired and probed (Rule #56). `iris_doc_export` shares the constant and the
  * route and is not driven here, because it writes local files.
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, defaulting to the dev instance
- * at localhost:52773 / HSCUSTOM; the namespace is named in every call. Skips when IRIS is unreachable; fails
- * instead when `IRIS_REQUIRE_LIVE` is armed (same arming convention as the other live gates in this directory).
+ * Arming: the live examples run only with `IRIS_REQUIRE_LIVE=1` (or `true`), against the target named by
+ * `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (all required, none defaulted;
+ * `@iris-mcp/shared/test-helpers/live-target`); the namespace is named in every call. Unarmed, they skip before
+ * any request; armed, an unreachable IRIS fails the gate instead of skipping it.
  */
 
 import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
@@ -42,14 +43,16 @@ import {
   ping,
   type ToolContext,
 } from "@iris-mcp/shared";
+import { liveConnectionEnv, liveGateTarget } from "@iris-mcp/shared/test-helpers/live-target";
 import { DOC_TYPE_DESCRIPTION, docListTool } from "../tools/doc.js";
 import { packageListTool } from "../tools/packages.js";
 
-const IRIS_HOST = process.env.IRIS_HOST ?? "localhost";
-const IRIS_PORT = process.env.IRIS_PORT ?? "52773";
-const IRIS_USERNAME = process.env.IRIS_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_PASSWORD ?? "SYS";
-const IRIS_NAMESPACE = process.env.IRIS_NAMESPACE ?? "HSCUSTOM";
+const LIVE = liveGateTarget();
+const IRIS_HOST = LIVE.target.host;
+const IRIS_PORT = LIVE.target.port;
+const IRIS_USERNAME = LIVE.target.username;
+const IRIS_PASSWORD = LIVE.target.password;
+const IRIS_NAMESPACE = LIVE.target.namespace;
 
 const REQUIRE_LIVE =
   process.env.IRIS_REQUIRE_LIVE === "1" || process.env.IRIS_REQUIRE_LIVE === "true";
@@ -102,25 +105,21 @@ async function wireRead(category: string, type: string, filter?: string): Promis
 }
 
 beforeAll(async () => {
-  try {
-    const config = loadConfig({
-      IRIS_HOST,
-      IRIS_PORT,
-      IRIS_USERNAME,
-      IRIS_PASSWORD,
-      IRIS_NAMESPACE,
-      IRIS_HTTPS: "false",
-    });
-    const client = new IrisHttpClient(config);
-    if (!(await ping(client, 3000))) {
-      skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
-    } else {
-      baseUrl = config.baseUrl;
-      version = await negotiateVersion(client);
-      ctx = buildToolContext("NS", config, client, version);
+  skipReason = LIVE.skipReason;
+  if (skipReason === undefined) {
+    try {
+      const config = loadConfig(liveConnectionEnv(LIVE.target));
+      const client = new IrisHttpClient(config);
+      if (!(await ping(client, 3000))) {
+        skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (check IRIS_HOST/IRIS_PORT).`;
+      } else {
+        baseUrl = config.baseUrl;
+        version = await negotiateVersion(client);
+        ctx = buildToolContext("NS", config, client, version);
+      }
+    } catch (error) {
+      skipReason = `IRIS availability probe failed: ${error instanceof Error ? error.message : String(error)}`;
     }
-  } catch (error) {
-    skipReason = `IRIS availability probe failed: ${error instanceof Error ? error.message : String(error)}`;
   }
   if (skipReason && REQUIRE_LIVE) {
     throw new Error(`IRIS_REQUIRE_LIVE is set, so this gate may not be skipped: ${skipReason}`);

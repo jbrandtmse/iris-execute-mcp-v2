@@ -1,32 +1,29 @@
 /**
  * Shared helpers for integration tests that run against a real IRIS instance.
  *
- * Integration tests use env vars (IRIS_HOST, IRIS_PORT, etc.) with sensible
- * defaults for a local development IRIS install.
+ * Integration tests are opt-in: they reach IRIS only when `IRIS_REQUIRE_LIVE` is `1`
+ * or `true`, and then at the target named by `IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`,
+ * `IRIS_PASSWORD` and `IRIS_NAMESPACE` (all required, none defaulted; see
+ * `../test-helpers/live-target.ts`). Unarmed, {@link isIrisAvailable} answers `false`
+ * without a request and a client built here points at an inert target that is never
+ * contacted.
  */
 
 import { IrisHttpClient } from "../http-client.js";
-import { loadConfig, IrisConnectionConfig } from "../config.js";
 import { ping } from "../health.js";
+import { getIntegrationConfig } from "../test-helpers/integration-config.js";
+import { isLiveArmed } from "../test-helpers/live-target.js";
 
 /**
- * Build an {@link IrisConnectionConfig} from env vars with local-dev defaults.
+ * The integration config for the live target, with `overrides` (`IRIS_*`
+ * settings) applied on top: `getIntegrationConfig` of
+ * `../test-helpers/integration-config.ts`, re-exported for the integration files
+ * of this package.
  *
- * Falls back to localhost:52773, _SYSTEM / SYS when env vars are not set.
+ * @throws When `IRIS_REQUIRE_LIVE` arms the run and any of the five target
+ *   variables is missing.
  */
-export function getIntegrationConfig(
-  overrides?: Partial<Record<string, string>>,
-): IrisConnectionConfig {
-  return loadConfig({
-    IRIS_HOST: process.env.IRIS_HOST ?? "localhost",
-    IRIS_PORT: process.env.IRIS_PORT ?? "52773",
-    IRIS_USERNAME: process.env.IRIS_USERNAME ?? "_SYSTEM",
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD ?? "SYS",
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE ?? "HSCUSTOM",
-    IRIS_HTTPS: process.env.IRIS_HTTPS ?? "false",
-    ...overrides,
-  });
-}
+export { getIntegrationConfig };
 
 /**
  * Create a fully-configured {@link IrisHttpClient} for integration tests.
@@ -39,11 +36,14 @@ export function createIntegrationClient(
 }
 
 /**
- * Probe whether a local IRIS instance is reachable.
+ * Probe whether the live IRIS instance is reachable.
  *
- * Returns `true` when IRIS responds within 3 seconds, `false` otherwise.
+ * Returns `false` without a request when the run is not armed
+ * (`IRIS_REQUIRE_LIVE` is not `1` or `true`). Armed, returns `true` when IRIS
+ * responds within 3 seconds, `false` otherwise.
  */
 export async function isIrisAvailable(): Promise<boolean> {
+  if (!isLiveArmed()) return false;
   const client = createIntegrationClient();
   try {
     return await ping(client, 3000);
@@ -51,4 +51,3 @@ export async function isIrisAvailable(): Promise<boolean> {
     client.destroy();
   }
 }
-

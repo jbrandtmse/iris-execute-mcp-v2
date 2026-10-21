@@ -59,8 +59,9 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 
 ### Bootstrap
 
-- **`bootstrap()`** -- Auto-deploys the custom REST service (`ExecuteMCPv2.REST.Dispatch`) to IRIS on first connection. Checks if the endpoint exists, deploys ObjectScript handler classes if missing, and configures the web application.
-- **`probeCustomRest()`** -- Checks if the custom REST endpoint is already available.
+- **`bootstrap()`** -- Auto-deploys the custom REST service (`ExecuteMCPv2.REST.Dispatch`) to IRIS on first connection. It reads the version marker stamped into the deployed `ExecuteMCPv2.Setup` class and orders it against the embedded `BOOTSTRAP_VERSION` (`<semver>+<sequence>.<hash>`; semver first, then sequence). An absent deployment gets the full install and an older one (including a bare 12-character hash from a build that predates the sequence) is redeployed and recompiled. A newer or foreign deployment (same semver and sequence with another hash, `dev`, or an unparseable value) is never redeployed: nothing is uploaded or compiled, and one `[WARN]` names both markers and the remedy. The marker is read again immediately before each compile. A server built before this release still redeploys over a newer deployment, so every client that shares an instance is upgraded together.
+- **`probeCustomRest()`** -- Reads the deployed marker and the web application registration and reports `missing`, `current`, `unconfigured`, `stale` (an older deployment), `newer` or `foreign`.
+- **`classifyDeployedMarker()`** / **`parseBootstrapMarker()`** -- The ordering of two markers (`current`, `older`, `newer` or `foreign`) and the parse of one, shared by the probe and the live gates.
 - **`deployClasses()`** -- Deploys ObjectScript classes to IRIS via the Atelier PUT /doc API.
 - **`compileClasses()`** -- Compiles deployed classes via the Atelier compile API.
 - **`configureWebApp()`** -- Creates or updates the web application for the custom REST endpoint.
@@ -171,7 +172,7 @@ The connection flow is:
 1. Server starts and loads configuration from environment variables
 2. `McpServerBase` initializes the MCP transport (stdio)
 3. On first tool call, the HTTP client connects to IRIS and negotiates the Atelier API version
-4. Bootstrap checks for the custom REST endpoint and deploys it if missing
+4. Bootstrap compares the deployed version marker with the embedded one and installs or upgrades the custom REST classes when they are absent or older (a newer or foreign deployment is left alone with a warning)
 5. Tools execute via the Atelier REST API or custom REST endpoint as appropriate
 
 ---

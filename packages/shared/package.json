@@ -42,6 +42,10 @@
       "types": "./src/test-helpers/integration-config.ts",
       "import": "./src/test-helpers/integration-config.ts"
     },
+    "./test-helpers/live-target": {
+      "types": "./src/test-helpers/live-target.ts",
+      "import": "./src/test-helpers/live-target.ts"
+    },
     "./test-helpers/storage-guard-fixtures": {
       "types": "./src/__tests__/storage-guard-fixtures.ts",
       "import": "./src/__tests__/storage-guard-fixtures.ts"

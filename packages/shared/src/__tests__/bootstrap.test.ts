@@ -20,8 +20,72 @@ import {
   BOOTSTRAP_VERSION,
   getBootstrapClasses,
 } from "../bootstrap-classes.js";
+import { parseBootstrapMarker } from "../bootstrap-version.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * The embedded marker moved by `change`: each number is added to the matching
+ * part of `BOOTSTRAP_VERSION`, and `hash` replaces its hash.
+ */
+function embeddedMarkerMoved(change: {
+  major?: number;
+  minor?: number;
+  patch?: number;
+  sequence?: number;
+  hash?: string;
+}): string {
+  const parsed = parseBootstrapMarker(BOOTSTRAP_VERSION);
+  if (parsed.kind !== "stamped") throw new Error(`the embedded marker ${BOOTSTRAP_VERSION} is not stamped`);
+  const [major, minor, patch] = parsed.semver;
+  return (
+    `${Number(major) + (change.major ?? 0)}.${Number(minor) + (change.minor ?? 0)}.${Number(patch) + (change.patch ?? 0)}` +
+    `+${Number(parsed.sequence) + (change.sequence ?? 0)}.${change.hash ?? parsed.hash}`
+  );
+}
+
+/** An Atelier reply to the `Setup_GetBootstrapVersion()` query. */
+function versionReply(version: string): Response {
+  return mockResponse(envelope({ content: [{ Version: version }] }));
+}
+
+/** An Atelier reply to a query whose method does not exist, as a missing deployment answers it. */
+function missingMethodReply(): Response {
+  return mockResponse(
+    {
+      status: { errors: [{ error: "Method not found" }], summary: "Error" },
+      console: [],
+      result: null,
+    },
+    { status: 400 },
+  );
+}
+
+/** Every `[WARN]` line written to the (mocked) console.error since the test began. */
+function warnLines(): string[] {
+  return vi
+    .mocked(console.error)
+    .mock.calls.map((call) => String(call[0]))
+    .filter((line) => line.startsWith("[WARN]"));
+}
+
+/** The number of recorded fetch calls that are PUTs. */
+function putCount(fetchMock: ReturnType<typeof vi.fn>): number {
+  return fetchMock.mock.calls.filter((call: unknown[]) => (call[1] as { method?: string }).method === "PUT").length;
+}
+
+/** The number of recorded fetch calls that compile. */
+function compileCount(fetchMock: ReturnType<typeof vi.fn>): number {
+  return fetchMock.mock.calls.filter((call: unknown[]) => String(call[0]).includes("action/compile")).length;
+}
+
+/** The number of recorded fetch calls whose body names `Setup_<name>(` or `Setup_<name>()`. */
+function setupCallCount(fetchMock: ReturnType<typeof vi.fn>, name: string): number {
+  return fetchMock.mock.calls.filter((call: unknown[]) => {
+    const body = (call[1] as { body?: unknown }).body;
+    return typeof body === "string" && body.includes(`Setup_${name}(`);
+  }).length;
+}
 
 function makeConfig(): IrisConnectionConfig {
   return {
@@ -186,6 +250,46 @@ describe("bootstrap", () => {
 
       const result = await probeCustomRest(http, config, 7);
       expect(result).toEqual({ status: "stale", deployedVersion: "abcdef123456" });
+
+      http.destroy();
+    });
+
+    // The deployed marker is ORDERED against the embedded one: only an older
+    // deployment is stale (redeployable); a newer or foreign one is left alone,
+    // and neither makes an IsConfigured() call (CSRF preflight + one version query).
+    it.each([
+      { label: "a higher major", deployed: embeddedMarkerMoved({ major: 1 }), expected: "newer" },
+      { label: "a higher minor", deployed: embeddedMarkerMoved({ minor: 1 }), expected: "newer" },
+      { label: "a higher patch", deployed: embeddedMarkerMoved({ patch: 1 }), expected: "newer" },
+      { label: "the same semver and a higher sequence", deployed: embeddedMarkerMoved({ sequence: 1 }), expected: "newer" },
+      { label: "a higher semver with a lower sequence", deployed: embeddedMarkerMoved({ major: 1, sequence: -1 }), expected: "newer" },
+      { label: "the same semver and sequence with a different hash", deployed: embeddedMarkerMoved({ hash: "ffffffffffff" }), expected: "foreign" },
+      { label: "the dev placeholder", deployed: "dev", expected: "foreign" },
+      { label: "an unparseable value", deployed: "not a marker", expected: "foreign" },
+    ])("should return {status: '$expected'} without an IsConfigured call for $label", async ({ deployed, expected }) => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      setupCsrfThenRequest(envelope({ content: [{ Version: deployed }] }));
+
+      const result = await probeCustomRest(http, config, 7);
+      expect(result).toEqual({ status: expected, deployedVersion: deployed });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      http.destroy();
+    });
+
+    it.each([
+      { label: "a legacy bare hash", deployed: "abcdef123456" },
+      { label: "a lower semver with a higher sequence", deployed: "0.0.0+999999.aaaaaaaaaaaa" },
+      { label: "the same semver and a lower sequence", deployed: embeddedMarkerMoved({ sequence: -1 }) },
+    ])("should return {status: 'stale'} for an older deployment: $label", async ({ deployed }) => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      setupCsrfThenRequest(envelope({ content: [{ Version: deployed }] }));
+
+      expect(await probeCustomRest(http, config, 7)).toEqual({ status: "stale", deployedVersion: deployed });
 
       http.destroy();
     });
@@ -576,6 +680,8 @@ describe("bootstrap", () => {
         mockResponse(envelope({ content: [{ Configured: 0 }] })),
       );
 
+      // Re-probe immediately before the compile: the marker is still the embedded one
+      fetchMock.mockResolvedValueOnce(versionReply(BOOTSTRAP_VERSION));
       // Recompile: POST action/compile response (NO deploy PUTs — source is current)
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
       // Configure: POST response
@@ -612,8 +718,8 @@ describe("bootstrap", () => {
       });
       expect(compileCalls.length).toBe(1);
 
-      // 1 CSRF + 1 version SQL + 1 IsConfigured SQL + compile + configure + mapping + ensureRoot = 7
-      expect(fetchMock).toHaveBeenCalledTimes(7);
+      // 1 CSRF + 1 version SQL + 1 IsConfigured SQL + 1 re-probe + compile + configure + mapping + ensureRoot = 8
+      expect(fetchMock).toHaveBeenCalledTimes(8);
 
       http.destroy();
     });
@@ -635,6 +741,8 @@ describe("bootstrap", () => {
         mockResponse(envelope({ content: [{ Configured: 0 }] })),
       );
 
+      // Re-probe immediately before the compile: the marker is still the embedded one
+      fetchMock.mockResolvedValueOnce(versionReply(BOOTSTRAP_VERSION));
       // Recompile: POST action/compile response (runs before Configure on unconfigured)
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
       // Configure: fails with 403 (no %Admin_Manage)
@@ -704,6 +812,9 @@ describe("bootstrap", () => {
         );
       }
 
+      // Re-probe immediately before the compile: still no deployment
+      fetchMock.mockResolvedValueOnce(missingMethodReply());
+
       // Compile: POST response
       fetchMock.mockResolvedValueOnce(
         mockResponse(envelope({ result: [] })),
@@ -751,9 +862,9 @@ describe("bootstrap", () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
-      // Probe: CSRF + SQL returning an OLD version hash
+      // Probe: CSRF + SQL returning an OLD (legacy bare hash) version
       setupCsrfThenRequest(
-        envelope({ content: [{ Version: "oldhash12345" }] }),
+        envelope({ content: [{ Version: "abcdef123456" }] }),
       );
 
       // Deploy: PUT responses for each class (CSRF already established)
@@ -762,6 +873,9 @@ describe("bootstrap", () => {
           mockResponse(envelope({ result: [] })),
         );
       }
+
+      // Re-probe immediately before the compile: the compiled marker is still the old one
+      fetchMock.mockResolvedValueOnce(versionReply("abcdef123456"));
 
       // Compile: POST response
       fetchMock.mockResolvedValueOnce(
@@ -801,9 +915,9 @@ describe("bootstrap", () => {
       expect(result.errors).toHaveLength(0);
       expect(result.manualInstructions).toBeUndefined();
 
-      // 1 CSRF + 1 probe SQL + 20 PUTs + 1 compile + 1 IsConfigured + 1 EnsureUnitTestRoot = 25
+      // 1 CSRF + 1 probe SQL + one PUT per class + 1 re-probe + 1 compile + 1 IsConfigured + 1 EnsureUnitTestRoot
       // (no configure, no mapping)
-      const expectedCallCount = 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1;
+      const expectedCallCount = 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 1;
       expect(fetchMock).toHaveBeenCalledTimes(expectedCallCount);
 
       http.destroy();
@@ -818,9 +932,9 @@ describe("bootstrap", () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
-      // Probe: CSRF + SQL returning an OLD version hash
+      // Probe: CSRF + SQL returning an OLD (legacy bare hash) version
       setupCsrfThenRequest(
-        envelope({ content: [{ Version: "oldhash12345" }] }),
+        envelope({ content: [{ Version: "abcdef123456" }] }),
       );
 
       // Deploy: PUT responses for each class
@@ -829,6 +943,8 @@ describe("bootstrap", () => {
           mockResponse(envelope({ result: [] })),
         );
       }
+      // Re-probe immediately before the compile: the compiled marker is still the old one
+      fetchMock.mockResolvedValueOnce(versionReply("abcdef123456"));
       // Compile: POST response
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
       // IsConfigured check on the stale path — web app ABSENT (0) → self-heal
@@ -869,8 +985,8 @@ describe("bootstrap", () => {
       });
       expect(configureCalls.length).toBe(1);
 
-      // 1 CSRF + 1 probe SQL + 20 PUTs + 1 compile + 1 IsConfigured + configure + mapping + ensureRoot = 27
-      const expectedCallCount = 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 1 + 1;
+      // 1 CSRF + 1 probe SQL + one PUT per class + 1 re-probe + 1 compile + 1 IsConfigured + configure + mapping + ensureRoot
+      const expectedCallCount = 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 1 + 1 + 1;
       expect(fetchMock).toHaveBeenCalledTimes(expectedCallCount);
 
       http.destroy();
@@ -906,6 +1022,9 @@ describe("bootstrap", () => {
           mockResponse(envelope({ result: [] })),
         );
       }
+
+      // Re-probe immediately before the compile: still no deployment
+      fetchMock.mockResolvedValueOnce(missingMethodReply());
 
       // Compile: POST response
       fetchMock.mockResolvedValueOnce(
@@ -1002,6 +1121,242 @@ describe("bootstrap", () => {
       expect(result.configured).toBe(false);
       expect(result.errors.length).toBeGreaterThan(0);
       expect(result.errors[0]).toContain("Deploy failed");
+
+      http.destroy();
+    });
+  });
+
+  // ── The downgrade guard (DW-508) ─────────────────────────────────
+
+  describe("bootstrap never replaces a newer or foreign deployment", () => {
+    function queuePutReplies(): void {
+      for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
+        fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      }
+    }
+
+    const NEWER_SEQUENCE = embeddedMarkerMoved({ sequence: 1 });
+    const NEWER_MAJOR = embeddedMarkerMoved({ major: 1 });
+    const FOREIGN_HASH = embeddedMarkerMoved({ hash: "ffffffffffff" });
+
+    it.each([
+      { label: "the same semver and a higher sequence", deployed: NEWER_SEQUENCE, status: "newer" },
+      { label: "a higher semver", deployed: NEWER_MAJOR, status: "newer" },
+      { label: "the same semver and sequence with a different hash", deployed: FOREIGN_HASH, status: "foreign" },
+      { label: "the dev placeholder", deployed: "dev", status: "foreign" },
+      { label: "an unparseable value", deployed: "garbage", status: "foreign" },
+    ])("a $status deployment ($label): no PUT, no compile, no Configure, no mapping, no ^UnitTestRoot, one warning naming both markers", async ({ deployed, status }) => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: deployed }] }));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe(status);
+      expect(result.probeFound).toBe(true);
+      expect(result.deployedVersion).toBe(deployed);
+      expect(result.deployed).toBe(false);
+      expect(result.compiled).toBe(false);
+      expect(result.configured).toBe(false);
+      expect(result.mapped).toBe(false);
+      expect(result.unitTestRootEnsured).toBe(false);
+      expect(result.errors).toEqual([]);
+      expect(result.manualInstructions).toBeUndefined();
+
+      // Only the CSRF preflight and the version query: nothing was written or asked.
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(putCount(fetchMock)).toBe(0);
+      expect(compileCount(fetchMock)).toBe(0);
+      for (const name of ["IsConfigured", "Configure", "ConfigureMapping", "EnsureUnitTestRoot"]) {
+        expect(setupCallCount(fetchMock, name), `Setup_${name}`).toBe(0);
+      }
+
+      const warnings = warnLines();
+      expect(warnings, "exactly one warning").toHaveLength(1);
+      expect(warnings[0]).toContain(deployed);
+      expect(warnings[0]).toContain(BOOTSTRAP_VERSION);
+      expect(warnings[0]).toContain("'USER'");
+
+      http.destroy();
+    });
+
+    it("the warning for a newer deployment names the remedy: upgrade to the deployed semver and sequence, on every client", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: NEWER_SEQUENCE }] }));
+
+      await bootstrap(http, config, 7);
+
+      const parsed = parseBootstrapMarker(NEWER_SEQUENCE);
+      if (parsed.kind !== "stamped") throw new Error("the fixture marker must be stamped");
+      const [warning] = warnLines();
+      expect(warning).toContain("is newer than this server's");
+      expect(warning).toContain("Upgrade this server to a build at least as new as the deployed one");
+      expect(warning).toContain(`(semver ${parsed.semver.join(".")}, sequence ${parsed.sequence})`);
+      expect(warning).toContain("run the same or a newer build on every client that shares the instance");
+
+      http.destroy();
+    });
+
+    it("the warning for a foreign deployment names the remedy: one build per instance, or delete ExecuteMCPv2.Setup and restart", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: FOREIGN_HASH }] }));
+
+      await bootstrap(http, config, 7);
+
+      const [warning] = warnLines();
+      expect(warning).toContain("cannot be ordered against this server's");
+      expect(warning).toContain("Run one build per instance");
+      expect(warning).toContain("delete class ExecuteMCPv2.Setup in 'USER' and restart this server");
+
+      http.destroy();
+    });
+
+    it("a deployed marker is quoted and cut at 80 characters, and a line break inside it stays inside the one warning line", async () => {
+      const longMarker = "x".repeat(300);
+      const multiLineMarker = "x\n[ERROR] injected line";
+      for (const deployed of [longMarker, multiLineMarker]) {
+        vi.mocked(console.error).mockClear();
+        const config = makeConfig();
+        const http = new IrisHttpClient(config);
+        setupCsrfThenRequest(envelope({ content: [{ Version: deployed }] }));
+
+        await bootstrap(http, config, 7);
+
+        const warnings = warnLines();
+        expect(warnings, "exactly one warning").toHaveLength(1);
+        expect(warnings[0]).not.toContain("\n");
+        const written = vi.mocked(console.error).mock.calls.map((call) => String(call[0]));
+        expect(written.filter((line) => line.startsWith("[ERROR]") || line.includes("\n"))).toEqual([]);
+        if (deployed === longMarker) {
+          expect(warnings[0]).toContain(JSON.stringify(`${"x".repeat(80)}...`));
+          expect(warnings[0]).not.toContain("x".repeat(81));
+        } else {
+          expect(warnings[0]).toContain(JSON.stringify(multiLineMarker));
+        }
+
+        http.destroy();
+      }
+    });
+
+    it("an older deployment logs no warning and is upgraded as before", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: "abcdef123456" }] }));
+      queuePutReplies();
+      fetchMock.mockResolvedValueOnce(versionReply("abcdef123456"));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 1 }] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("stale");
+      expect(result.deployedVersion).toBe("abcdef123456");
+      expect(putCount(fetchMock)).toBe(BOOTSTRAP_CLASSES.size);
+      expect(compileCount(fetchMock)).toBe(1);
+      expect(warnLines()).toEqual([]);
+
+      http.destroy();
+    });
+
+    // Race: a newer build compiled between this server's probe and its compile.
+    it("an older probe followed by a newer re-read: the classes were uploaded, but no compile and nothing later runs; one warning", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: "abcdef123456" }] }));
+      queuePutReplies();
+      fetchMock.mockResolvedValueOnce(versionReply(NEWER_SEQUENCE));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("newer");
+      expect(result.deployedVersion).toBe(NEWER_SEQUENCE);
+      expect(result.deployed).toBe(true);
+      expect(result.compiled).toBe(false);
+      expect(result.configured).toBe(false);
+      expect(result.mapped).toBe(false);
+      expect(result.unitTestRootEnsured).toBe(false);
+      expect(result.errors).toEqual([]);
+      expect(compileCount(fetchMock)).toBe(0);
+      for (const name of ["IsConfigured", "Configure", "ConfigureMapping", "EnsureUnitTestRoot"]) {
+        expect(setupCallCount(fetchMock, name), `Setup_${name}`).toBe(0);
+      }
+      // CSRF + probe + one PUT per class + the re-read, and nothing after it.
+      expect(fetchMock).toHaveBeenCalledTimes(1 + 1 + BOOTSTRAP_CLASSES.size + 1);
+
+      const warnings = warnLines();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("found just before compiling");
+      expect(warnings[0]).toContain(NEWER_SEQUENCE);
+      expect(warnings[0]).toContain(BOOTSTRAP_VERSION);
+
+      http.destroy();
+    });
+
+    it("a missing probe followed by a foreign re-read (dev): no compile, no Configure; one warning", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      fetchMock.mockResolvedValueOnce(
+        mockResponse("", { status: 200, headers: { "X-CSRF-Token": "t" }, setCookie: ["CSPSESSIONID=s1; path=/"] }),
+      );
+      fetchMock.mockResolvedValueOnce(missingMethodReply());
+      queuePutReplies();
+      fetchMock.mockResolvedValueOnce(versionReply("dev"));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("foreign");
+      expect(result.deployedVersion).toBe("dev");
+      expect(result.deployed).toBe(true);
+      expect(result.compiled).toBe(false);
+      expect(compileCount(fetchMock)).toBe(0);
+      expect(setupCallCount(fetchMock, "Configure")).toBe(0);
+      const warnings = warnLines();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('"dev"');
+      expect(warnings[0]).toContain(BOOTSTRAP_VERSION);
+
+      http.destroy();
+    });
+
+    it("an unconfigured probe followed by a newer re-read: no compile and nothing later; one warning", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 0 }] })));
+      fetchMock.mockResolvedValueOnce(versionReply(NEWER_SEQUENCE));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("newer");
+      expect(result.deployed).toBe(false);
+      expect(result.compiled).toBe(false);
+      expect(putCount(fetchMock)).toBe(0);
+      expect(compileCount(fetchMock)).toBe(0);
+      expect(setupCallCount(fetchMock, "Configure")).toBe(0);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      expect(warnLines()).toHaveLength(1);
+
+      http.destroy();
+    });
+
+    it("a re-read that cannot read the marker does not block the compile", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: "abcdef123456" }] }));
+      queuePutReplies();
+      fetchMock.mockResolvedValueOnce(missingMethodReply());
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 1 }] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.compiled).toBe(true);
+      expect(compileCount(fetchMock)).toBe(1);
+      expect(warnLines()).toEqual([]);
 
       http.destroy();
     });
@@ -1226,11 +1581,13 @@ describe("bootstrap", () => {
   // ── BOOTSTRAP_VERSION ───────────────────────────────────────────
 
   describe("BOOTSTRAP_VERSION", () => {
-    it("should be a non-empty hex string", () => {
+    it("should be a marker <semver>+<sequence>.<hash>", () => {
       expect(typeof BOOTSTRAP_VERSION).toBe("string");
       expect(BOOTSTRAP_VERSION.length).toBeGreaterThan(0);
-      // 12-char short SHA-256 is the current format (gen-bootstrap.mjs)
-      expect(BOOTSTRAP_VERSION).toMatch(/^[0-9a-f]{12}$/);
+      // The semver of @iris-mcp/shared, the generator's sequence and the
+      // 12-char short SHA-256 (gen-bootstrap.mjs)
+      expect(BOOTSTRAP_VERSION).toMatch(/^\d+\.\d+\.\d+\+\d+\.[0-9a-f]{12}$/);
+      expect(parseBootstrapMarker(BOOTSTRAP_VERSION).kind).toBe("stamped");
     });
 
     it("should be injected into the embedded Setup.cls BOOTSTRAPVERSION parameter", () => {
@@ -1306,7 +1663,8 @@ describe("bootstrap", () => {
     const VERSION_PLACEHOLDER_LINE = 'Parameter BOOTSTRAPVERSION = "dev";';
     const DRIFT_HINT =
       "bootstrap-classes.ts is out of sync with disk. " +
-      "Run `npm run gen:bootstrap` and commit the regenerated file.";
+      "Run `pnpm gen:bootstrap` and commit the regenerated files " +
+      "(the embed and scripts/bootstrap-sequence.json).";
 
     /**
      * Read a .cls file and normalize line endings to LF, mirroring the
@@ -1345,7 +1703,16 @@ describe("bootstrap", () => {
       }
     });
 
-    it("BOOTSTRAP_VERSION matches SHA-256 hash of concatenated disk contents", () => {
+    /** The embedded marker's parts; fails the test when the marker is not in the current grammar. */
+    const markerParts = (): { semver: string; sequence: number; hash: string } => {
+      const parsed = parseBootstrapMarker(BOOTSTRAP_VERSION);
+      if (parsed.kind !== "stamped") {
+        throw new Error(`BOOTSTRAP_VERSION ${BOOTSTRAP_VERSION} is not <semver>+<sequence>.<hash>. ${DRIFT_HINT}`);
+      }
+      return { semver: parsed.semver.join("."), sequence: Number(parsed.sequence), hash: parsed.hash };
+    };
+
+    it("the marker's hash is the SHA-256 hash of concatenated disk contents", () => {
       // Re-compute the hash with the same formula as gen-bootstrap.mjs.
       // If a dev edits any .cls file without running gen:bootstrap, this
       // test fails with a clear instruction.
@@ -1354,12 +1721,34 @@ describe("bootstrap", () => {
         hasher.update(readClsNormalized(relPath));
         hasher.update("\n--CLASS-SEPARATOR--\n");
       }
-      const expectedVersion = hasher.digest("hex").substring(0, 12);
+      const expectedHash = hasher.digest("hex").substring(0, 12);
 
       expect(
-        BOOTSTRAP_VERSION,
+        markerParts().hash,
         `BOOTSTRAP_VERSION drift: ${DRIFT_HINT}`,
-      ).toBe(expectedVersion);
+      ).toBe(expectedHash);
+    });
+
+    it("the marker's semver is the version of packages/shared/package.json", () => {
+      const manifest = JSON.parse(readFileSync(resolve(repoRoot, "packages/shared/package.json"), "utf-8")) as {
+        version: string;
+      };
+
+      expect(
+        markerParts().semver,
+        `BOOTSTRAP_VERSION semver drift (a packages/shared/package.json version change needs a regeneration): ${DRIFT_HINT}`,
+      ).toBe(manifest.version);
+    });
+
+    it("the marker's sequence and hash are the ones recorded in scripts/bootstrap-sequence.json", () => {
+      const state = JSON.parse(readFileSync(resolve(repoRoot, "scripts/bootstrap-sequence.json"), "utf-8")) as {
+        sequence: number;
+        hash: string;
+      };
+      const { sequence, hash } = markerParts();
+
+      expect(sequence, `BOOTSTRAP_VERSION sequence drift: ${DRIFT_HINT}`).toBe(state.sequence);
+      expect(hash, `BOOTSTRAP_VERSION hash drift: ${DRIFT_HINT}`).toBe(state.hash);
     });
   });
 });

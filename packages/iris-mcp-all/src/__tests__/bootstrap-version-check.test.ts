@@ -73,7 +73,7 @@ afterAll(async () => {
 describe("Story 38.6: assertDeployedBootstrapVersion (DW-559)", () => {
   it("passes, and returns the version, when the deployed version equals the shipped one; it sends the Setup_GetBootstrapVersion query", async () => {
     const shipped = await shippedBootstrapVersion(REPO_ROOT);
-    expect(shipped).toMatch(/^[0-9a-f]{12}$/);
+    expect(shipped).toMatch(/^\d+\.\d+\.\d+\+\d+\.[0-9a-f]{12}$/);
     versionRows = [{ Version: shipped }];
     received = [];
 
@@ -100,7 +100,7 @@ describe("Story 38.6: assertDeployedBootstrapVersion (DW-559)", () => {
       expect(outcome).toContain(`BOOTSTRAP_VERSION "${deployed}"`);
       expect(outcome).toContain(`"${shipped}"`);
       expect(outcome).toContain("this gate would test classes other than the shipped ones");
-      expect(outcome).toContain("that bootstrap failed or did not run");
+      expect(outcome).toContain("that bootstrap failed or did not run, or refused to replace a newer or foreign deployment");
     });
   }
 

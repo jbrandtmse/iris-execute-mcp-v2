@@ -34,8 +34,8 @@
  * values that must survive contain `KEEPME395Q`; times fall on 2001-02-03 UTC. No message of HSCUSTOM is read: every
  * call names the scratch namespace, and the audit entries are checked for it.
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (defaults: localhost:52773,
- * `_SYSTEM`, HSCUSTOM). Writes only the namespace and database `EXECMCPTMP395Q` and the HSCUSTOM class
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none defaulted, and
+ * only when `IRIS_REQUIRE_LIVE` arms the run (without it every row skips before any request). Writes only the namespace and database `EXECMCPTMP395Q` and the HSCUSTOM class
  * `ExecuteMCPv2.Temp.Story391Fixture`. No production is started. A missing or stale dist, an unresolvable SDK or an
  * unreachable IRIS skips each row with the reason, or fails with "may not be skipped" when `IRIS_REQUIRE_LIVE` is
  * armed (listed in `scripts/prepublish-gate.mjs` `gateTestFiles`).
@@ -55,6 +55,7 @@ import {
   irisClassMethod,
   irisTargetFromEnv,
   isIrisReachable,
+  liveArmingSkipReason,
   openAuditedSession,
   openWireSession,
   postEnvelope,
@@ -516,7 +517,7 @@ const HL7_WITHHELD = /^The HL7 v2 body (could not be parsed \(.+\)|could not be 
 // -- Setup and teardown ----------------------------------------------------------------------------------------------
 
 beforeAll(async () => {
-  skipReason = staleDistReason(REPO_ROOT, "shared");
+  skipReason = liveArmingSkipReason() ?? staleDistReason(REPO_ROOT, "shared");
   for (const pkg of ["iris-dev-mcp", "iris-admin-mcp", "iris-interop-mcp"]) skipReason ??= staleDistReason(REPO_ROOT, pkg);
   if (!skipReason) {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);

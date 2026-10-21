@@ -16,7 +16,10 @@
  *
  * This file is NOT named `*.integration.test.ts`, so it IS collected by the
  * default `vitest.config.ts` include glob and runs in `pnpm turbo run test`;
- * it is also armed in `scripts/prepublish-gate.mjs` (`IRIS_REQUIRE_LIVE=1`). It
+ * it is also armed in `scripts/prepublish-gate.mjs` (`IRIS_REQUIRE_LIVE=1`).
+ * It runs live only when armed with `IRIS_REQUIRE_LIVE=1` (or `true`) against the target named by
+ * `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (all required, none defaulted;
+ * `@iris-mcp/shared/test-helpers/live-target`); unarmed, every test skips before any request. It
  * drives the REAL production handlers (`globalGetTool`/`globalSetTool`/
  * `globalKillTool`) over real HTTP against disposable `^ZZ364Gate*` globals:
  *  - every injection payload is WRITE-shaped (`$Increment`) and names a side
@@ -69,23 +72,18 @@ import {
   type McpServerBaseOptions,
   type ToolDefinition,
 } from "@iris-mcp/shared";
+import { liveConnectionEnv, liveGateTarget } from "@iris-mcp/shared/test-helpers/live-target";
 import { globalGetTool, globalSetTool, globalKillTool } from "../tools/global.js";
 
-const IRIS_HOST = process.env.IRIS_HOST ?? "localhost";
-const IRIS_PORT = process.env.IRIS_PORT ?? "52773";
-const IRIS_USERNAME = process.env.IRIS_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_PASSWORD ?? "SYS";
-const IRIS_NAMESPACE = process.env.IRIS_NAMESPACE ?? "HSCUSTOM";
+const LIVE = liveGateTarget();
+const IRIS_HOST = LIVE.target.host;
+const IRIS_PORT = LIVE.target.port;
+const IRIS_USERNAME = LIVE.target.username;
+const IRIS_PASSWORD = LIVE.target.password;
+const IRIS_NAMESPACE = LIVE.target.namespace;
 
 function getConfig() {
-  return loadConfig({
-    IRIS_HOST,
-    IRIS_PORT,
-    IRIS_USERNAME,
-    IRIS_PASSWORD,
-    IRIS_NAMESPACE,
-    IRIS_HTTPS: "false",
-  });
+  return loadConfig(liveConnectionEnv(LIVE.target));
 }
 
 /**
@@ -100,18 +98,21 @@ let ctx: ToolContext;
 let client: IrisHttpClient;
 
 beforeAll(async () => {
-  try {
-    const config = getConfig();
-    client = new IrisHttpClient(config);
-    const available = await ping(client, 3000);
-    if (!available) {
-      skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
-    } else {
-      const version = await negotiateVersion(client);
-      ctx = buildToolContext("NS", config, client, version);
+  skipReason = LIVE.skipReason;
+  if (skipReason === undefined) {
+    try {
+      const config = getConfig();
+      client = new IrisHttpClient(config);
+      const available = await ping(client, 3000);
+      if (!available) {
+        skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (check IRIS_HOST/IRIS_PORT).`;
+      } else {
+        const version = await negotiateVersion(client);
+        ctx = buildToolContext("NS", config, client, version);
+      }
+    } catch (error) {
+      skipReason = `IRIS availability probe failed: ${error instanceof Error ? error.message : String(error)}`;
     }
-  } catch (error) {
-    skipReason = `IRIS availability probe failed: ${error instanceof Error ? error.message : String(error)}`;
   }
   if (skipReason && REQUIRE_LIVE) {
     throw new Error(
@@ -421,7 +422,7 @@ describe("global subscript-injection epic-done gate (Story 36.4, ledger 36-2-CR-
       process.env.IRIS_USERNAME = IRIS_USERNAME;
       process.env.IRIS_PASSWORD = IRIS_PASSWORD;
       process.env.IRIS_NAMESPACE = IRIS_NAMESPACE;
-      process.env.IRIS_HTTPS = "false";
+      process.env.IRIS_HTTPS = String(LIVE.target.https);
       let server: McpServerBase | undefined;
       try {
         server = new McpServerBase(makeServerOpts([globalGetTool, globalSetTool, globalKillTool]));

@@ -26,8 +26,8 @@
  *  - the built `iris-mcp-governance universe --json` process reports the same policy and source as
  *    the server's `iris_server_profiles` for every key the server knows, `parent` included.
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, defaulting to the
- * dev instance at localhost:52773 / HSCUSTOM; every call names `server: "default"` and the namespace.
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none
+ * defaulted, and only when `IRIS_REQUIRE_LIVE` arms the run (without it every test skips before any request); every call names `server: "default"` and the namespace.
  * Writes only the disposable `ExecuteMCPv2.Temp.QaStory384WireEdit.cls` and `...WireStore.cls`
  * (persistent, compiled, no rows) documents, removes them and any data global of theirs before and
  * after the run, and asserts that nothing named `QaStory384Wire` is left.
@@ -50,6 +50,7 @@ import {
   irisTargetFromEnv,
   isIrisReachable,
   lineNumber,
+  liveArmingSkipReason,
   openWireSession,
   resolveSdkEsmDir,
   staleDistReason,
@@ -177,7 +178,7 @@ async function removeFixtures(): Promise<void> {
 
 beforeAll(async () => {
   const sharedStale = staleDistReason(REPO_ROOT, "shared");
-  skipReason = sharedStale ?? staleDistReason(REPO_ROOT, "iris-dev-mcp");
+  skipReason = liveArmingSkipReason() ?? sharedStale ?? staleDistReason(REPO_ROOT, "iris-dev-mcp");
   if (!skipReason) {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
     if (!sdkEsmDir) {

@@ -61,6 +61,10 @@
  * "build" branch runs unconditionally for both outcomes (see
  * `Analytics.cls`'s `CubeAction` — the null-device redirect wraps the
  * `%BuildCube` call itself, before the success/error branch is known).
+ *
+ * ARMING. The live legs run only with `IRIS_REQUIRE_LIVE=1` (or `true`), against the target named by
+ * `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (all required, none defaulted;
+ * `@iris-mcp/shared/test-helpers/live-target`). Unarmed, every leg skips before any request.
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
@@ -71,24 +75,17 @@ import {
   ping,
   negotiateVersion,
 } from "@iris-mcp/shared";
+import { liveConnectionEnv, liveGateTarget } from "@iris-mcp/shared/test-helpers/live-target";
 
-const IRIS_HOST = process.env.IRIS_HOST ?? "localhost";
-const IRIS_PORT = process.env.IRIS_PORT ?? "52773";
-const IRIS_USERNAME = process.env.IRIS_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_PASSWORD ?? "SYS";
-const IRIS_NAMESPACE = process.env.IRIS_NAMESPACE ?? "HSCUSTOM";
+const LIVE = liveGateTarget();
+const IRIS_HOST = LIVE.target.host;
+const IRIS_PORT = LIVE.target.port;
+const IRIS_NAMESPACE = LIVE.target.namespace;
 
 const BASE_URL = "/api/executemcp/v2";
 
 function getConfig() {
-  return loadConfig({
-    IRIS_HOST,
-    IRIS_PORT,
-    IRIS_USERNAME,
-    IRIS_PASSWORD,
-    IRIS_NAMESPACE,
-    IRIS_HTTPS: "false",
-  });
+  return loadConfig(liveConnectionEnv(LIVE.target));
 }
 
 /**
@@ -124,20 +121,23 @@ async function customRestIsDeployed(): Promise<boolean> {
 }
 
 beforeAll(async () => {
-  try {
-    const config = getConfig();
-    client = new IrisHttpClient(config);
-    const available = await ping(client, 3000);
-    if (!available) {
-      skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
-    } else {
-      await negotiateVersion(client);
-      if (!(await customRestIsDeployed())) {
-        skipReason = `ExecuteMCPv2's custom REST service is not deployed in ${IRIS_NAMESPACE} (404 from ${BASE_URL}/analytics/cubes). Load src/ExecuteMCPv2/ to run this gate.`;
+  skipReason = LIVE.skipReason;
+  if (skipReason === undefined) {
+    try {
+      const config = getConfig();
+      client = new IrisHttpClient(config);
+      const available = await ping(client, 3000);
+      if (!available) {
+        skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (check IRIS_HOST/IRIS_PORT).`;
+      } else {
+        await negotiateVersion(client);
+        if (!(await customRestIsDeployed())) {
+          skipReason = `ExecuteMCPv2's custom REST service is not deployed in ${IRIS_NAMESPACE} (404 from ${BASE_URL}/analytics/cubes). Load src/ExecuteMCPv2/ to run this gate.`;
+        }
       }
+    } catch (error) {
+      skipReason = `IRIS availability probe failed: ${error instanceof Error ? error.message : String(error)}`;
     }
-  } catch (error) {
-    skipReason = `IRIS availability probe failed: ${error instanceof Error ? error.message : String(error)}`;
   }
   if (skipReason && REQUIRE_LIVE) {
     throw new Error(

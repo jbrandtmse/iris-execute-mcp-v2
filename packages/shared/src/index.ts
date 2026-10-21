@@ -127,6 +127,8 @@ export {
   MANUAL_INSTRUCTIONS,
 } from "./bootstrap.js";
 export type { BootstrapResult } from "./bootstrap.js";
+export { classifyDeployedMarker, parseBootstrapMarker } from "./bootstrap-version.js";
+export type { DeployedMarkerClassification, ParsedBootstrapMarker } from "./bootstrap-version.js";
 export { BOOTSTRAP_CLASSES, getBootstrapClasses } from "./bootstrap-classes.js";
 export type { BootstrapClass } from "./bootstrap-classes.js";
 export { resolveTransport } from "./transport.js";

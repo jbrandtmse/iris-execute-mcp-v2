@@ -2,8 +2,9 @@
  * Integration tests for iris-admin-mcp tools against a real IRIS instance.
  *
  * These tests exercise every administration tool end-to-end via the custom
- * ExecuteMCPv2 REST service. They are skipped automatically when IRIS is
- * not reachable (see integration-setup.ts).
+ * ExecuteMCPv2 REST service. They run only when armed (`IRIS_REQUIRE_LIVE`
+ * plus the five `IRIS_*` target variables) and IRIS is reachable, and skip
+ * otherwise (see integration-setup.ts).
  *
  * Resources are created in dependency order and cleaned up in reverse
  * dependency order to avoid conflicts. All test resources use the
@@ -21,12 +22,12 @@ import { describe, it, expect, afterAll, beforeAll } from "vitest";
 import {
   IrisHttpClient,
   IrisApiError,
-  loadConfig,
   negotiateVersion,
   buildToolContext,
   type ToolContext,
   type IrisConnectionConfig,
 } from "@iris-mcp/shared";
+import { getIntegrationConfig } from "@iris-mcp/shared/test-helpers/integration-config";
 
 import { databaseManageTool, databaseListTool } from "../tools/database.js";
 import { namespaceManageTool, namespaceListTool } from "../tools/namespace.js";
@@ -113,17 +114,6 @@ const attempted = {
 
 // ── Setup / Teardown ─────────────────────────────────────────────────
 
-function getConfig(): IrisConnectionConfig {
-  return loadConfig({
-    IRIS_HOST: process.env.IRIS_HOST ?? "localhost",
-    IRIS_PORT: process.env.IRIS_PORT ?? "52773",
-    IRIS_USERNAME: process.env.IRIS_USERNAME ?? "_SYSTEM",
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD ?? "SYS",
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE ?? "HSCUSTOM",
-    IRIS_HTTPS: process.env.IRIS_HTTPS ?? "false",
-  });
-}
-
 /** Safely attempt a delete, ignoring errors. */
 async function safeDelete(
   tool: { handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown> },
@@ -139,7 +129,7 @@ async function safeDelete(
 
 describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
   beforeAll(async () => {
-    config = getConfig();
+    config = getIntegrationConfig();
     client = new IrisHttpClient(config);
     const version = await negotiateVersion(client);
     ctx = buildToolContext("SYS", config, client, version);

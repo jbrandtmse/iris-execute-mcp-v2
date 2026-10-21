@@ -22,11 +22,11 @@ function read(relative: string): string {
 }
 
 /** A documented move, in either wording the CHANGELOG uses: "moves from `a` to `b`", "moves `a` to `b`" or "moves `a` → `b`". */
-const MOVE = /`BOOTSTRAP_VERSION` moves (?:from )?`([0-9a-f]{12})` (?:to|→) `([0-9a-f]{12})`/;
+const MOVE = /`BOOTSTRAP_VERSION` moves (?:from )?`((?:\d+\.\d+\.\d+\+\d+\.)?[0-9a-f]{12})` (?:to|\u2192) `((?:\d+\.\d+\.\d+\+\d+\.)?[0-9a-f]{12})`/;
 
 describe("the CHANGELOG names the BOOTSTRAP_VERSION of the committed embed", () => {
   it("the newest section that names a BOOTSTRAP_VERSION move ends at the version the committed embed carries", () => {
-    const embed = /export const BOOTSTRAP_VERSION = "([0-9a-f]{12})"/.exec(read("packages/shared/src/bootstrap-classes.ts"))?.[1] ?? "";
+    const embed = /export const BOOTSTRAP_VERSION = "((?:\d+\.\d+\.\d+\+\d+\.)?[0-9a-f]{12})"/.exec(read("packages/shared/src/bootstrap-classes.ts"))?.[1] ?? "";
     expect(embed, "the embed's BOOTSTRAP_VERSION line is found").not.toBe("");
 
     const sections = read("CHANGELOG.md").split(/^(?=## \[)/m).slice(1);

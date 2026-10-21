@@ -58,6 +58,7 @@ import {
   isIrisReachable,
   rawIrisRequest,
   skipTest,
+  type IrisTarget,
   type RawIrisAnswer,
 } from "./process-gate-helpers.js";
 
@@ -69,7 +70,12 @@ const GATE_TAG = "story-41-8-qa-accept-language-live-gate";
 const REQUIRE_LIVE = process.env.IRIS_REQUIRE_LIVE === "1" || process.env.IRIS_REQUIRE_LIVE === "true";
 /** The variables an armed run must set: the gate never falls back to a default instance. */
 const TARGET_VARIABLES = ["IRIS_HOST", "IRIS_PORT", "IRIS_USERNAME", "IRIS_PASSWORD", "IRIS_NAMESPACE"] as const;
-const TARGET = irisTargetFromEnv();
+/**
+ * The target, assigned by {@link liveSkipReason} once the gate is armed and every target variable is set. A row reaches it
+ * only after `liveSkipReason` returned no reason, and an armed run with a variable unset fails in `beforeAll` naming
+ * the variables (it never resolves a target).
+ */
+let TARGET: IrisTarget;
 
 /** A row's own wait: longer than the 60-second abort of its request, so a stalled request reports its own error. */
 const ROW_TIMEOUT_MS = 90_000;
@@ -175,7 +181,7 @@ function pinnedWordsFromOsClass(): Map<string, string> {
 /** The `BOOTSTRAP_VERSION` of this tree's checked-in embed; `""` when the file holds none. */
 function embedBootstrapVersion(): string {
   const source = readFileSync(path.join(REPO_ROOT, "packages", "shared", "src", "bootstrap-classes.ts"), "utf8");
-  return /^export const BOOTSTRAP_VERSION = "([0-9a-f]+)";$/m.exec(source)?.[1] ?? "";
+  return /^export const BOOTSTRAP_VERSION = "((?:\d+\.\d+\.\d+\+\d+\.)?[0-9a-f]+)";$/m.exec(source)?.[1] ?? "";
 }
 
 /**
@@ -190,6 +196,7 @@ async function liveSkipReason(): Promise<string | undefined> {
   if (missing.length > 0) {
     return `${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not set, and this gate never falls back to a default instance.`;
   }
+  TARGET = irisTargetFromEnv();
   if (!(await isIrisReachable(TARGET.host, TARGET.port))) {
     return `IRIS is not reachable at http://${TARGET.host}:${TARGET.port} (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
   }

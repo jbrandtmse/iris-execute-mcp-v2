@@ -164,6 +164,7 @@ describe("@iris-mcp/shared (AC 42.1.3, DW-506)", () => {
       ".",
       "./test-helpers",
       "./test-helpers/integration-config",
+      "./test-helpers/live-target",
       "./test-helpers/storage-guard-fixtures",
     ]);
   });

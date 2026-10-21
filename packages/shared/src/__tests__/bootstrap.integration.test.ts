@@ -3,9 +3,12 @@
  *
  * Verifies that {@link probeCustomRest} detects an already-configured REST
  * service and that the full {@link bootstrap} function returns an idempotent
- * skip result (probeFound=true, all steps marked as already done).
+ * skip result (probeFound=true, all steps marked as already done); a
+ * deployment from a newer or foreign build is left in place (probeFound=true,
+ * no step run).
  *
- * Skipped automatically when IRIS is not reachable.
+ * Skipped unless the run is armed (`IRIS_REQUIRE_LIVE` and the five `IRIS_*`
+ * target variables) and IRIS is reachable.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -44,20 +47,36 @@ describe.skipIf(!globalThis.__IRIS_AVAILABLE__)(
     it("probeCustomRest returns a ProbeResult reflecting deployment + configuration state", async () => {
       const probe = await probeCustomRest(client, config, version);
       // The probe returns a discriminated union, not a boolean. Its status
-      // is one of the four states. On a healthy CI/dev instance this is
+      // is one of the six states. On a healthy CI/dev instance this is
       // "current" (classes match AND web app registered); a version-stamped
-      // but web-app-absent instance reports "unconfigured".
-      expect(["missing", "current", "unconfigured", "stale"]).toContain(
-        probe.status,
-      );
+      // but web-app-absent instance reports "unconfigured"; a deployment from
+      // a newer or unorderable build reports "newer" or "foreign".
+      expect([
+        "missing",
+        "current",
+        "unconfigured",
+        "stale",
+        "newer",
+        "foreign",
+      ]).toContain(probe.status);
     });
 
     it("bootstrap() returns idempotent skip when service is already configured", async () => {
       const result = await bootstrap(client, config, version);
 
-      // If the custom REST service is already deployed, bootstrap should detect
-      // it and skip all deploy/compile/configure steps.
-      if (result.probeFound) {
+      if (result.probeStatus === "newer" || result.probeStatus === "foreign") {
+        // A deployment from a newer or unorderable build is never replaced:
+        // found, but no step ran and nothing failed.
+        expect(result.probeFound).toBe(true);
+        expect(result.deployedVersion).toEqual(expect.any(String));
+        expect(result.deployed).toBe(false);
+        expect(result.compiled).toBe(false);
+        expect(result.configured).toBe(false);
+        expect(result.mapped).toBe(false);
+        expect(result.errors).toHaveLength(0);
+      } else if (result.probeFound) {
+        // If the custom REST service is already deployed, bootstrap should detect
+        // it and skip all deploy/compile/configure steps.
         expect(result.deployed).toBe(true);
         expect(result.compiled).toBe(true);
         expect(result.configured).toBe(true);

@@ -1,7 +1,7 @@
 /**
  * Integration tests for health check and ping utilities against a real IRIS instance.
  *
- * Skipped automatically when IRIS is not reachable.
+ * Skipped unless the run is armed (`IRIS_REQUIRE_LIVE` and the five `IRIS_*` target variables) and IRIS is reachable.
  */
 
 import { describe, it, expect, afterAll } from "vitest";

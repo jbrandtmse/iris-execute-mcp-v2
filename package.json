@@ -21,6 +21,7 @@
     "gen:pack:check": "node scripts/gen-pack.mjs --check",
     "check:provenance": "node scripts/check-provenance.mjs",
     "validate:prompts": "node scripts/validate-prompts.mjs",
+    "live:bootstrap-guard": "node scripts/throwaway-iris.mjs run -- pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-42-2-bootstrap-guard-live-gate.test.ts",
     "measure:tools-payload": "node scripts/measure-tools-payload.mjs",
     "gen:tools-list-snapshot": "node scripts/gen-tools-list-snapshot.mjs",
     "gen:tools-list-snapshot:check": "node scripts/gen-tools-list-snapshot.mjs --check",

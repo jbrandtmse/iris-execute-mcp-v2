@@ -26,34 +26,36 @@
  * (`process.exit(1)` before the transport connects) is a property of the
  * `start()` call inside a real process, not of a tool handler.
  *
- * **Never fails on a pristine/offline checkout** (absent an armed
- * `IRIS_REQUIRE_LIVE`): an unbuilt dist, an unresolvable SDK, or an
- * unreachable `other` IRIS instance SKIPS each leg with a logged reason.
+ * **Opt-in.** Unarmed (`IRIS_REQUIRE_LIVE` not `1` or `true`), every leg skips
+ * with the opt-in reason before any probe or spawn, so a pristine checkout never
+ * fails and no IRIS is touched. Armed, the `other` target is `IRIS_HOST`/
+ * `IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and
+ * none defaulted, and an unbuilt dist, an unresolvable SDK or an unreachable
+ * `other` IRIS instance fails `beforeAll` instead of skipping.
  *
  * **The shared instance is never stopped.** `default` is ALWAYS `127.0.0.1:9`
  * (a closed local port — nothing this gate does can reach or affect the real
- * instance through it); `other` is the real instance. Credentials come from
- * `IRIS_TEST_*` env vars with the documented local dev defaults as fallback
- * (the `31-6-5` convention).
+ * instance through it); `other` is the instance the armed `IRIS_*` variables name.
  *
- * **What the `other` leg actually does to that instance (corrected by the
- * Story 37.1 code review — this header previously claimed "read-only traffic
- * only", which the code contradicts).** The tool calls themselves
- * (`iris_server_info`, `iris_license_info`) are reads, but they are the FIRST
- * TOUCH of the `other` profile, and `handleToolCall` passes
- * `needsCustomRest` as `needsBootstrap` (`server-base.ts`) — which is `true`
- * on all five servers. So the first `other` call runs the standard one-time
- * custom-REST bootstrap (`establishProfile` → `attemptProfileBootstrap` →
- * `bootstrap()`). On an instance whose deployed `ExecuteMCPv2` matches the
- * embedded `BOOTSTRAP_VERSION`, `bootstrap()` short-circuits at the `current`
- * probe and writes NOTHING; on a `missing`/`stale`/`unconfigured` instance it
- * deploys, compiles and configures — architecture decision D8's documented
- * mutate-on-first-use. That is the same thing any real MCP client does on its
- * first call, and it is unavoidable here because AC 37.1.8 requires proving a
- * `server:"other"` call SERVES while `default` is down (a non-establishing
- * call such as `iris_server_profiles` — what the sibling process-gates use —
- * would not prove that). Point `IRIS_TEST_*` at an instance you are willing
- * to have bootstrapped; see ledger item `37-1-CR-4`.
+ * **Write footprint of the `other` leg (DW-518).** The legs themselves
+ * (`iris_server_info`, `iris_license_info`) only read. The one write is the
+ * first-touch lazy bootstrap of the `other` profile: `handleToolCall` passes
+ * `needsCustomRest` as `needsBootstrap` (`server-base.ts`), which is `true` on
+ * all five servers, so the first `other` call runs `establishProfile` →
+ * `attemptProfileBootstrap` → `bootstrap()`. The first touch is unavoidable
+ * here, because AC 37.1.8 requires proving that a `server:"other"` call SERVES
+ * while `default` is down (a non-establishing call such as
+ * `iris_server_profiles`, which the sibling process-gates use, would not prove
+ * that). By the deployment that `other` holds:
+ *  - `current`, `newer` or `foreign`: nothing is written;
+ *  - `unconfigured` (the marker matches, the web app is absent): it recompiles,
+ *    then configures the web app, maps the package and ensures `^UnitTestRoot`;
+ *  - `stale`: it PUTs the 35 classes and compiles them (plus `Setup_Configure`
+ *    and `Setup_ConfigureMapping` if the web app is absent), then ensures
+ *    `^UnitTestRoot`;
+ *  - `missing`: it PUTs, compiles, configures, maps the package to `%All` and
+ *    ensures `^UnitTestRoot`.
+ * Point `IRIS_*` only at an instance you are willing to have bootstrapped.
  *
  * **Keychain note:** no test touches the OS keychain — every profile here is
  * configured entirely via `IRIS_*`/`IRIS_PROFILES` env vars passed to the
@@ -65,33 +67,28 @@ import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import type { Readable } from "node:stream";
 import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
-import { inheritedEnv, resolveSdkEsmDir } from "./process-gate-helpers.js";
+import {
+  inheritedEnv,
+  irisTargetFromEnv,
+  isIrisReachable,
+  liveArmingSkipReason,
+  resolveSdkEsmDir,
+} from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 
-const IRIS_HOST = process.env.IRIS_TEST_HOST ?? "localhost";
-const IRIS_PORT = Number(process.env.IRIS_TEST_PORT ?? 52773);
-const IRIS_USERNAME = process.env.IRIS_TEST_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_TEST_PASSWORD ?? "SYS";
-const IRIS_NAMESPACE = process.env.IRIS_TEST_NAMESPACE ?? "HSCUSTOM";
+const TARGET = irisTargetFromEnv();
+const IRIS_HOST = TARGET.host;
+const IRIS_PORT = Number(TARGET.port);
+const IRIS_USERNAME = TARGET.username;
+const IRIS_PASSWORD = TARGET.password;
+const IRIS_NAMESPACE = TARGET.namespace;
 
 /** Opt-in packaging-path escalation: skip -> hard failure (mirrors epic35-defect-gate.test.ts). */
 const REQUIRE_LIVE =
   process.env.IRIS_REQUIRE_LIVE === "1" || process.env.IRIS_REQUIRE_LIVE === "true";
-
-/** Any HTTP response — even a 401 — proves the IRIS Web Gateway is reachable. A network error/timeout does not. */
-async function isIrisReachable(): Promise<boolean> {
-  try {
-    const response = await fetch(`http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/`, {
-      signal: AbortSignal.timeout(3000),
-    });
-    return typeof response.status === "number";
-  } catch {
-    return false;
-  }
-}
 
 interface SdkClient {
   connect: (transport: unknown) => Promise<void>;
@@ -126,7 +123,10 @@ function staleDistReason(pkgDir: string): string | undefined {
 }
 
 beforeAll(async () => {
-  // Build freshness comes FIRST, ahead of the SDK resolution and the
+  // Arming comes before everything else: an unarmed run probes and spawns nothing.
+  skipReason = liveArmingSkipReason();
+  if (skipReason) return;
+  // Build freshness comes FIRST (after arming), ahead of the SDK resolution and the
   // reachability probe (DW-524): the gate proves the code that ships, so a
   // missing or stale dist (a `src/` file newer than its build output) is
   // reported by name before any IRIS call - a skip on a pristine checkout, a
@@ -143,8 +143,8 @@ beforeAll(async () => {
   if (!sdkEsmDir) {
     skipReason =
       "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm — run pnpm install from the repo root.";
-  } else if (!(await isIrisReachable())) {
-    skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/ (set IRIS_TEST_* to point at a live instance).`;
+  } else if (!(await isIrisReachable(TARGET.host, TARGET.port))) {
+    skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/ (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
   }
   if (skipReason && REQUIRE_LIVE) {
     throw new Error(

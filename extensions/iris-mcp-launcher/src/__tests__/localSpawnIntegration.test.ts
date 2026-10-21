@@ -24,12 +24,13 @@
  * adds — it does not close the gap for the `npx`/credential-prompt path,
  * which still has no automated real-runtime coverage.
  *
- * **Never fails on a pristine/offline checkout.** `packages/iris-dev-mcp/dist/`
- * may not be built yet, the pnpm SDK store layout may differ, or IRIS may not
- * be running — any of those SKIPS (with a logged reason) rather than failing,
- * so this suite stays green without a live IRIS instance. Verified locally
- * against `localhost:52773`, `_SYSTEM`/`SYS`, namespace `HSCUSTOM` (story Dev
- * Notes).
+ * **Opt-in, and never fails on a pristine/offline checkout.** The legs run only
+ * with `IRIS_REQUIRE_LIVE=1` (or `true`) and the five `IRIS_HOST`/`IRIS_PORT`/
+ * `IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` target variables (all
+ * required, none defaulted; `liveArming.ts`); unarmed they SKIP before any
+ * probe or spawn, and a set `IRIS_HOST` alone does not arm them. Armed, an
+ * unbuilt `packages/iris-dev-mcp/dist/`, a different pnpm SDK store layout or
+ * an unreachable IRIS also SKIPS (with a logged reason) rather than failing.
  */
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -37,6 +38,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { LauncherProvider } from "../serverDefinitionProvider.js";
 import type { AuthApi, LauncherSettings, ServerManagerApi } from "../types.js";
+import { liveGateTarget } from "./liveArming.js";
 import { resolveSdkEsmDir } from "./sdkClientStore.js";
 
 // Repo root — 4 levels up from src/__tests__ (__tests__ -> src ->
@@ -47,19 +49,18 @@ import { resolveSdkEsmDir } from "./sdkClientStore.js";
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const DEV_MCP_ENTRY_POINT = path.join(REPO_ROOT, "packages", "iris-dev-mcp", "dist", "index.js");
 
-// 31-6-5 (Story 32.3): credentials come from IRIS_TEST_* env vars with the
-// documented local dev defaults as fallback — a failure prints the fallback,
-// not an operator's real credential, and CI can point at a different instance
-// without editing a committed file.
+// The target comes from the armed `IRIS_*` variables (`liveArming.ts`), never
+// from a default, so a failure prints the operator's own explicit target.
 // REPO-WIDE DECISION (recorded in deferred-work.md, 31-6-5): `__tests__/`
 // stays OUT of containment.test.ts's credential-grep roster — test fixtures
-// are not shipped code, and env-with-fallback (not grep enforcement) is the
+// are not shipped code, and env-driven targets (not grep enforcement) are the
 // containment mechanism for test-tier credentials.
-const IRIS_HOST = process.env.IRIS_TEST_HOST ?? "localhost";
-const IRIS_PORT = Number(process.env.IRIS_TEST_PORT ?? 52773);
-const IRIS_USERNAME = process.env.IRIS_TEST_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_TEST_PASSWORD ?? "SYS";
-const IRIS_NAMESPACE = process.env.IRIS_TEST_NAMESPACE ?? "HSCUSTOM";
+const LIVE = liveGateTarget();
+const IRIS_HOST = LIVE.target.host;
+const IRIS_PORT = LIVE.target.port;
+const IRIS_USERNAME = LIVE.target.username;
+const IRIS_PASSWORD = LIVE.target.password;
+const IRIS_NAMESPACE = LIVE.target.namespace;
 
 function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
   return {
@@ -194,6 +195,11 @@ async function connectClient(
 }
 
 beforeAll(async () => {
+  if (LIVE.skipReason !== undefined) {
+    skipReason = LIVE.skipReason;
+    return;
+  }
+
   if (!existsSync(DEV_MCP_ENTRY_POINT)) {
     skipReason = `packages/iris-dev-mcp/dist/index.js is not built (run "pnpm --filter @iris-mcp/dev build" from the repo root). Looked at: ${DEV_MCP_ENTRY_POINT}`;
     return;
@@ -208,7 +214,7 @@ beforeAll(async () => {
   }
 
   if (!(await isIrisReachable())) {
-    skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/ (expected the local dev instance from the story's Dev Notes).`;
+    skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/ (check IRIS_HOST/IRIS_PORT).`;
     return;
   }
 });

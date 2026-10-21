@@ -54,7 +54,7 @@ const VITEST_ENTRY = path.join(
 
 /** The `BOOTSTRAP_VERSION` of this tree's checked-in embed, which the gate compares the deployment with. */
 const EMBED_VERSION =
-  /^export const BOOTSTRAP_VERSION = "([0-9a-f]+)";$/m.exec(
+  /^export const BOOTSTRAP_VERSION = "((?:\d+\.\d+\.\d+\+\d+\.)?[0-9a-f]+)";$/m.exec(
     readFileSync(path.join(REPO_ROOT, "packages", "shared", "src", "bootstrap-classes.ts"), "utf8"),
   )?.[1] ?? "";
 
@@ -291,7 +291,9 @@ const rowOf = (header: string): string => `Accept-Language ${header}:`;
 const CONTROL = "Accept-Language en-US,en;q=0.9";
 
 beforeAll(() => {
-  expect(EMBED_VERSION, "the embed's BOOTSTRAP_VERSION was read from packages/shared/src/bootstrap-classes.ts").toMatch(/^[0-9a-f]{12}$/);
+  expect(EMBED_VERSION, "the embed's BOOTSTRAP_VERSION was read from packages/shared/src/bootstrap-classes.ts").toMatch(
+    /^\d+\.\d+\.\d+\+\d+\.[0-9a-f]{12}$/,
+  );
 });
 
 describe("Story 41.8 (DW-635): the Accept-Language live gate is opt-in and fails closed, on its own real path", () => {

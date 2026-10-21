@@ -7,6 +7,10 @@
  * which runs it with `IRIS_REQUIRE_LIVE=1` (the `epic35-defect-gate.test.ts`
  * arrangement), so a publish fails closed if IRIS or a fixture is missing.
  *
+ * Arming: the live legs run only with `IRIS_REQUIRE_LIVE=1` (or `true`), against the target named by
+ * `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (all required, none defaulted;
+ * `@iris-mcp/shared/test-helpers/live-target`). Unarmed, every leg skips before any request.
+ *
  * Test 1 — the round trip this epic exists to close, on Story 36.1's
  * single-method fixture (`LongRunningTest`, 10 s `Hang`):
  *   Leg 1  `iris_execute_tests` (timeout 5) ⇒ `running` + jobId + runIndex.
@@ -62,24 +66,19 @@ import {
   type McpServerBaseOptions,
   type ToolDefinition,
 } from "@iris-mcp/shared";
+import { liveConnectionEnv, liveGateTarget } from "@iris-mcp/shared/test-helpers/live-target";
 import { createExecuteTestsHandler } from "../tools/execute.js";
 import { testStatusTool } from "../tools/test-status.js";
 
-const IRIS_HOST = process.env.IRIS_HOST ?? "localhost";
-const IRIS_PORT = process.env.IRIS_PORT ?? "52773";
-const IRIS_USERNAME = process.env.IRIS_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_PASSWORD ?? "SYS";
-const IRIS_NAMESPACE = process.env.IRIS_NAMESPACE ?? "HSCUSTOM";
+const LIVE = liveGateTarget();
+const IRIS_HOST = LIVE.target.host;
+const IRIS_PORT = LIVE.target.port;
+const IRIS_USERNAME = LIVE.target.username;
+const IRIS_PASSWORD = LIVE.target.password;
+const IRIS_NAMESPACE = LIVE.target.namespace;
 
 function getConfig() {
-  return loadConfig({
-    IRIS_HOST,
-    IRIS_PORT,
-    IRIS_USERNAME,
-    IRIS_PASSWORD,
-    IRIS_NAMESPACE,
-    IRIS_HTTPS: "false",
-  });
+  return loadConfig(liveConnectionEnv(LIVE.target));
 }
 
 /** Deliberately OUTSIDE `ExecuteMCPv2.Tests` — see each fixture class's own banner. */
@@ -209,27 +208,30 @@ async function pollUntilCompleted(jobId: string, deadlineMs: number): Promise<Re
 }
 
 beforeAll(async () => {
-  try {
-    const config = getConfig();
-    client = new IrisHttpClient(config);
-    recordWorkResponses(client);
-    const available = await ping(client, 3000);
-    if (!available) {
-      skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
-    } else {
-      const version = await negotiateVersion(client);
-      ctx = buildToolContext("NS", config, client, version);
-      for (const fixture of [FIXTURE, DELTA_FIXTURE]) {
-        if (!(await fixtureIsDeployed(version, ctx.resolveNamespace(), fixture))) {
-          skipReason =
-            `The QA fixture is not deployed in ${ctx.resolveNamespace()} (${fixture} not found via the ` +
-            `Atelier API). Load src/ExecuteMCPv2/QAFixtures/*.cls to run this gate.`;
-          break;
+  skipReason = LIVE.skipReason;
+  if (skipReason === undefined) {
+    try {
+      const config = getConfig();
+      client = new IrisHttpClient(config);
+      recordWorkResponses(client);
+      const available = await ping(client, 3000);
+      if (!available) {
+        skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (check IRIS_HOST/IRIS_PORT).`;
+      } else {
+        const version = await negotiateVersion(client);
+        ctx = buildToolContext("NS", config, client, version);
+        for (const fixture of [FIXTURE, DELTA_FIXTURE]) {
+          if (!(await fixtureIsDeployed(version, ctx.resolveNamespace(), fixture))) {
+            skipReason =
+              `The QA fixture is not deployed in ${ctx.resolveNamespace()} (${fixture} not found via the ` +
+              `Atelier API). Load src/ExecuteMCPv2/QAFixtures/*.cls to run this gate.`;
+            break;
+          }
         }
       }
+    } catch (error) {
+      skipReason = `IRIS availability probe failed: ${error instanceof Error ? error.message : String(error)}`;
     }
-  } catch (error) {
-    skipReason = `IRIS availability probe failed: ${error instanceof Error ? error.message : String(error)}`;
   }
   if (skipReason && REQUIRE_LIVE) {
     throw new Error(`IRIS_REQUIRE_LIVE is set, so the epic-done gate may not be skipped: ${skipReason}`);
@@ -347,7 +349,7 @@ describe("iris_test_status live round-trip capstone (Story 36.2 AC 36.2.4, Rule 
           process.env.IRIS_USERNAME = IRIS_USERNAME;
           process.env.IRIS_PASSWORD = IRIS_PASSWORD;
           process.env.IRIS_NAMESPACE = IRIS_NAMESPACE;
-          process.env.IRIS_HTTPS = "false";
+          process.env.IRIS_HTTPS = String(LIVE.target.https);
           delete process.env.IRIS_GOVERNANCE;
 
           // DEFAULT governance: cancel must be REFUSED on the real gate, and

@@ -2,8 +2,9 @@
  * Integration tests for iris-data-mcp tools against a real IRIS instance.
  *
  * These tests exercise DocDB lifecycle, analytics, and REST management
- * tools end-to-end. They are skipped automatically when the required
- * IRIS APIs are not reachable (see integration-setup.ts).
+ * tools end-to-end. They run only when armed (`IRIS_REQUIRE_LIVE` plus the
+ * five `IRIS_*` target variables) and the required IRIS APIs are reachable,
+ * and skip otherwise (see integration-setup.ts).
  *
  * DocDB lifecycle: create database -> create property -> create index ->
  *   insert document -> get document -> update document -> find with filter ->

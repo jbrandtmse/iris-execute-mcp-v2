@@ -24,8 +24,8 @@
  * 2001-02-03 UTC; `Story394.SearchTable` compiled inside), in its own scratch namespace `EXECMCPTMP394Q`, which is
  * removed in `afterAll` with nothing-left assertions. Every identifying value contains `SYNTHPHI394`.
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD` (defaults: localhost:52773, `_SYSTEM`). Writes only
- * the namespace and database `EXECMCPTMP394Q` and the HSCUSTOM class `ExecuteMCPv2.Temp.Story391Fixture`; reads
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none defaulted,
+ * and only when `IRIS_REQUIRE_LIVE` arms the run (without it every row skips before any request). Writes only the namespace and database `EXECMCPTMP394Q` and the HSCUSTOM class `ExecuteMCPv2.Temp.Story391Fixture`; reads
  * HSCUSTOM's `Ens_Config.SearchTableProp` row count and sends the HSCUSTOM lookups described above. A missing or
  * stale dist, an unresolvable SDK or an unreachable IRIS skips each row with the reason, or fails with "may not be
  * skipped" when `IRIS_REQUIRE_LIVE` is armed (listed in `scripts/prepublish-gate.mjs` `gateTestFiles`).
@@ -43,6 +43,7 @@ import {
   headerIds,
   irisTargetFromEnv,
   isIrisReachable,
+  liveArmingSkipReason,
   openWireSession,
   postEnvelope,
   resolveSdkEsmDir,
@@ -111,7 +112,7 @@ const filter = (property: string, op: string, value?: string | number | boolean)
 // -- Setup and teardown ------------------------------------------------
 
 beforeAll(async () => {
-  skipReason = staleDistReason(REPO_ROOT, "shared");
+  skipReason = liveArmingSkipReason() ?? staleDistReason(REPO_ROOT, "shared");
   for (const pkg of ["iris-dev-mcp", "iris-admin-mcp", "iris-interop-mcp"]) skipReason ??= staleDistReason(REPO_ROOT, pkg);
   if (!skipReason) {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);

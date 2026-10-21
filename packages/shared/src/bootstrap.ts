@@ -6,7 +6,9 @@
  * the web application -- all via the Atelier REST API.
  *
  * The bootstrap is idempotent: if the service is already configured,
- * all steps are skipped.
+ * all steps are skipped. It never downgrades: the deployed version marker is
+ * ordered against this build's marker (see `bootstrap-version.ts`), and only an
+ * absent or older deployment is redeployed.
  */
 
 import { IrisHttpClient } from "./http-client.js";
@@ -14,20 +16,20 @@ import type { IrisConnectionConfig } from "./config.js";
 import { atelierPath } from "./atelier.js";
 import { logger } from "./logger.js";
 import { BOOTSTRAP_CLASSES, BOOTSTRAP_VERSION } from "./bootstrap-classes.js";
+import { classifyDeployedMarker, parseBootstrapMarker } from "./bootstrap-version.js";
 
 /**
- * Probe result quad-state.
+ * Probe result.
  *
  * - `missing`: the REST service is not deployed (probe query failed —
  *    either the class does not exist or the web application isn't
  *    registered yet). Bootstrap runs the full deploy + compile + configure
  *    + mapping flow.
  *
- * - `current`: the deployed classes match the embedded classes exactly
- *    (version hash matches) AND the web application is registered. Bootstrap
- *    skips everything.
+ * - `current`: the deployed classes carry the embedded marker AND the web
+ *    application is registered. Bootstrap skips everything.
  *
- * - `unconfigured`: the deployed classes match the embedded version, but the
+ * - `unconfigured`: the deployed classes carry the embedded marker, but the
  *    `/api/executemcp/v2` web application is NOT registered. The version
  *    stamp lives inside the Setup class and is present the moment
  *    deploy+compile succeed — independent of the separate, %Admin_Manage-
@@ -39,24 +41,40 @@ import { BOOTSTRAP_CLASSES, BOOTSTRAP_VERSION } from "./bootstrap-classes.js";
  *    ^UnitTestRoot) — it does NOT redeploy or recompile, since the classes
  *    are already current. This is the self-healing path.
  *
- * - `stale`: the REST service is deployed but the classes don't match
- *    what's embedded in this MCP server build. Bootstrap redeploys and
- *    recompiles the classes, but skips the one-time privileged steps
- *    (web app registration + package mapping), because those aren't
- *    affected by class-content drift.
+ * - `stale`: the REST service is deployed from an OLDER build than this one
+ *    (a lower semver, the same semver with a lower sequence, or a legacy bare
+ *    hash). Bootstrap redeploys and recompiles the classes, but skips the
+ *    one-time privileged steps (web app registration + package mapping),
+ *    because those aren't affected by class-content drift.
+ *
+ * - `newer`: the REST service is deployed from a NEWER build than this one.
+ *    Bootstrap changes nothing and warns, so an older server on a shared
+ *    instance can never downgrade the classes.
+ *
+ * - `foreign`: the deployed marker cannot be ordered against this build's:
+ *    the same semver and sequence with a different hash, the `dev`
+ *    placeholder, or an unparseable value. Bootstrap changes nothing and warns.
  */
 export type ProbeResult =
   | { status: "missing" }
   | { status: "current" }
   | { status: "unconfigured" }
-  | { status: "stale"; deployedVersion: string };
+  | { status: "stale"; deployedVersion: string }
+  | { status: "newer"; deployedVersion: string }
+  | { status: "foreign"; deployedVersion: string };
 
 /** Result of a full bootstrap run. */
 export interface BootstrapResult {
   /** Whether the probe detected the REST service is already configured. */
   probeFound: boolean;
-  /** The probe result — lets callers distinguish first-time install from auto-upgrade. */
-  probeStatus: "missing" | "current" | "unconfigured" | "stale";
+  /**
+   * The probe result — lets callers distinguish first-time install from
+   * auto-upgrade. When the marker re-read just before a compile finds a newer
+   * or foreign deployment, this names that finding instead.
+   */
+  probeStatus: "missing" | "current" | "unconfigured" | "stale" | "newer" | "foreign";
+  /** The marker found on the instance, when it was `stale`, `newer` or `foreign`. */
+  deployedVersion?: string;
   /** Whether class deployment succeeded. */
   deployed: boolean;
   /** Whether class compilation succeeded. */
@@ -96,26 +114,58 @@ To complete setup manually, choose one of:
    zpm "install iris-execute-mcp-v2"`;
 
 /**
+ * Read the version marker stamped into the deployed `ExecuteMCPv2.Setup`
+ * class by calling `ExecuteMCPv2.Setup_GetBootstrapVersion()` via the
+ * Atelier SQL endpoint.
+ *
+ * Returns `""` when nothing can be read: the query throws (the class or the
+ * method does not exist, or any other error), or it returns no row or an
+ * empty value. Never throws.
+ */
+async function readDeployedVersion(
+  http: IrisHttpClient,
+  config: IrisConnectionConfig,
+  version: number,
+): Promise<string> {
+  try {
+    const path = atelierPath(version, config.namespace, "action/query");
+    const body = {
+      query: "SELECT ExecuteMCPv2.Setup_GetBootstrapVersion() AS Version",
+    };
+    const response = await http.post(path, body);
+    const content = (
+      response.result as { content?: Record<string, unknown>[] }
+    )?.content;
+    if (Array.isArray(content) && content.length > 0) {
+      const row = content[0] as Record<string, unknown>;
+      return String(row["Version"] ?? "");
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Probe the custom REST service deployment status on IRIS.
  *
- * Calls `ExecuteMCPv2.Setup_GetBootstrapVersion()` via the Atelier SQL
- * endpoint, which returns the short SHA-256 hash baked into the deployed
- * Setup class at generation time. The hash is compared against the
- * embedded {@link BOOTSTRAP_VERSION} constant to determine whether the
- * IRIS-side classes match the classes embedded in this MCP server.
+ * Reads the marker stamped into the deployed Setup class
+ * (`ExecuteMCPv2.Setup_GetBootstrapVersion()` via the Atelier SQL endpoint)
+ * and orders it against the embedded {@link BOOTSTRAP_VERSION} with
+ * `classifyDeployedMarker`.
  *
- * Three outcomes:
+ * Outcomes:
  *
  * - SQL query throws (class doesn't exist, method doesn't exist, or any
- *   other error) → `{ status: "missing" }`. The most common cause is a
- *   first-time install where nothing has been deployed yet. A less
- *   common but important case: an existing deployment from a
- *   pre-version-stamp commit that lacks `GetBootstrapVersion()` — the
+ *   other error) or returns an empty value → `{ status: "missing" }`. The
+ *   most common cause is a first-time install where nothing has been
+ *   deployed yet. A less common but important case: an existing deployment
+ *   from a pre-version-stamp commit that lacks `GetBootstrapVersion()` — the
  *   SQL call fails with "no such method" and we treat it as missing,
  *   which triggers a full bootstrap that upgrades the stale classes.
  *   This is the one-shot upgrade path for existing beta users.
  *
- * - Returned hash matches `BOOTSTRAP_VERSION` → the classes are current,
+ * - Returned marker equals `BOOTSTRAP_VERSION` → the classes are current,
  *   but a matching version does NOT prove the web application is
  *   registered (the version stamp lives in the Setup class and is present
  *   the moment deploy+compile succeed, independent of the privileged
@@ -132,59 +182,51 @@ To complete setup manually, choose one of:
  *     `{ status: "current" }` rather than spam privileged Configure attempts
  *     for an indeterminate state.
  *
- * - Returned hash differs from `BOOTSTRAP_VERSION` → `{ status: "stale", deployedVersion }`.
- *   Someone already ran bootstrap with a different class version; we
- *   need to redeploy and recompile but the webapp registration and
- *   package mapping (privileged, one-time operations) can be skipped.
+ * - Returned marker is OLDER (a legacy bare hash, a lower semver, or the same
+ *   semver with a lower sequence) → `{ status: "stale", deployedVersion }`.
+ *   An older build ran bootstrap; we need to redeploy and recompile but the
+ *   webapp registration and package mapping (privileged, one-time
+ *   operations) can be skipped.
+ *
+ * - Returned marker is NEWER → `{ status: "newer", deployedVersion }`, and
+ *   FOREIGN (same semver and sequence with another hash, `dev`, anything
+ *   unparseable) → `{ status: "foreign", deployedVersion }`. Neither makes an
+ *   `IsConfigured()` call: bootstrap leaves the deployment alone.
  */
 export async function probeCustomRest(
   http: IrisHttpClient,
   config: IrisConnectionConfig,
   version: number,
 ): Promise<ProbeResult> {
-  try {
-    const path = atelierPath(version, config.namespace, "action/query");
-    const body = {
-      query: "SELECT ExecuteMCPv2.Setup_GetBootstrapVersion() AS Version",
-    };
-    const response = await http.post(path, body);
-    const content = (
-      response.result as { content?: Record<string, unknown>[] }
-    )?.content;
-    if (Array.isArray(content) && content.length > 0) {
-      const row = content[0] as Record<string, unknown>;
-      const deployedVersion = String(row["Version"] ?? "");
-      if (deployedVersion === "") {
-        // SQL succeeded but no row / empty version — treat as missing
-        return { status: "missing" };
-      }
-      if (deployedVersion === BOOTSTRAP_VERSION) {
-        // Version matches, but that only proves the classes are present —
-        // not that the privileged web-app registration ever completed.
-        // Verify the actual configured state before declaring "current".
-        let configured: boolean;
-        try {
-          configured = await isConfigured(http, config, version);
-        } catch {
-          // IsConfigured() cannot be missing on a version-matched
-          // deployment, so a throw here means an indeterminate SQL/infra
-          // failure — not evidence the web app is absent. Preserve the
-          // fast skip path rather than re-attempting privileged steps.
-          return { status: "current" };
-        }
-        return configured ? { status: "current" } : { status: "unconfigured" };
-      }
-      return { status: "stale", deployedVersion };
-    }
-    return { status: "missing" };
-  } catch {
-    // SQL failure usually means the class or method doesn't exist.
-    // For users upgrading from a pre-version-stamp deployment, this is
-    // the entry point — their old Setup.cls has IsConfigured but not
-    // GetBootstrapVersion, the query throws, and we fall back to a full
-    // bootstrap that replaces their stale classes.
+  // A failed or empty read is `missing`. For users upgrading from a
+  // pre-version-stamp deployment, a failed read is the entry point — their old
+  // Setup.cls has IsConfigured but not GetBootstrapVersion, the query throws,
+  // and we fall back to a full bootstrap that replaces their stale classes.
+  const deployedVersion = await readDeployedVersion(http, config, version);
+  if (deployedVersion === "") {
     return { status: "missing" };
   }
+  const classification = classifyDeployedMarker(deployedVersion, BOOTSTRAP_VERSION);
+  if (classification === "older") {
+    return { status: "stale", deployedVersion };
+  }
+  if (classification === "newer" || classification === "foreign") {
+    return { status: classification, deployedVersion };
+  }
+  // The marker matches, but that only proves the classes are present —
+  // not that the privileged web-app registration ever completed.
+  // Verify the actual configured state before declaring "current".
+  let configured: boolean;
+  try {
+    configured = await isConfigured(http, config, version);
+  } catch {
+    // IsConfigured() cannot be missing on a version-matched
+    // deployment, so a throw here means an indeterminate SQL/infra
+    // failure — not evidence the web app is absent. Preserve the
+    // fast skip path rather than re-attempting privileged steps.
+    return { status: "current" };
+  }
+  return configured ? { status: "current" } : { status: "unconfigured" };
 }
 
 /**
@@ -419,6 +461,70 @@ async function ensureUnitTestRootStep(
   }
 }
 
+/** Render a marker read from the instance for a log line: quoted, escaped and at most 80 characters. */
+function describeMarker(marker: string): string {
+  return JSON.stringify(marker.length > 80 ? `${marker.slice(0, 80)}...` : marker);
+}
+
+/**
+ * Log the one warning for a deployment that bootstrap leaves alone. It names
+ * the deployed marker, this build's marker and the remedy. `beforeCompile`
+ * marks a deployment found by the re-check that precedes each compile.
+ */
+function warnDeploymentLeftAlone(
+  kind: "newer" | "foreign",
+  deployed: string,
+  namespace: string,
+  beforeCompile: boolean,
+): void {
+  const where = beforeCompile ? " (found just before compiling, so nothing was compiled)" : "";
+  if (kind === "newer") {
+    const parsed = parseBootstrapMarker(deployed);
+    const order =
+      parsed.kind === "stamped"
+        ? ` (semver ${parsed.semver.join(".")}, sequence ${parsed.sequence})`
+        : "";
+    logger.warn(
+      `Bootstrap: leaving the ExecuteMCPv2 classes in '${namespace}' alone${where}: the deployed marker ${describeMarker(deployed)} ` +
+        `is newer than this server's ${BOOTSTRAP_VERSION}. Upgrade this server to a build at least as new as the deployed one${order}, ` +
+        "and run the same or a newer build on every client that shares the instance.",
+    );
+    return;
+  }
+  logger.warn(
+    `Bootstrap: leaving the ExecuteMCPv2 classes in '${namespace}' alone${where}: the deployed marker ${describeMarker(deployed)} ` +
+      `cannot be ordered against this server's ${BOOTSTRAP_VERSION}. Run one build per instance. To install this server's classes ` +
+      `deliberately, delete class ExecuteMCPv2.Setup in '${namespace}' and restart this server.`,
+  );
+}
+
+/**
+ * Re-read the deployed marker immediately before a compile. Another build may
+ * have compiled a newer deployment since the probe, and compiling over it would
+ * downgrade it. A newer or foreign reading logs the warning, records it in
+ * `result` and returns `false`; anything else (absent, older, current, or a read
+ * that fails) returns `true`.
+ *
+ * The check cannot undo source documents that two builds uploaded interleaved:
+ * it stops this server compiling over a deployment that compiled first.
+ */
+async function markerAllowsCompile(
+  http: IrisHttpClient,
+  config: IrisConnectionConfig,
+  version: number,
+  result: BootstrapResult,
+): Promise<boolean> {
+  const deployed = await readDeployedVersion(http, config, version);
+  if (deployed === "") return true;
+  const classification = classifyDeployedMarker(deployed, BOOTSTRAP_VERSION);
+  if (classification !== "newer" && classification !== "foreign") return true;
+  result.probeStatus = classification;
+  result.probeFound = true;
+  result.deployedVersion = deployed;
+  warnDeploymentLeftAlone(classification, deployed, config.namespace, true);
+  return false;
+}
+
 /**
  * Full bootstrap orchestration.
  *
@@ -430,13 +536,18 @@ async function ensureUnitTestRootStep(
  *    absent means %SYS diverged from the code DB (migration / %SYS reset), which
  *    can also leave stale or version-incompatible compiled objects even though
  *    the source hash matches — verified live, the dispatch 500s until recompiled.
- * 4. `stale` → redeploy + recompile. The privileged steps are normally
- *    already done, so they're skipped — BUT we verify the web app is actually
- *    registered first (same root cause as the reported bug); if it's absent,
- *    we run the privileged steps too, so a divergent instance self-heals in
- *    one restart instead of two.
+ * 4. `stale` (an OLDER deployment) → redeploy + recompile. The privileged steps
+ *    are normally already done, so they're skipped — BUT we verify the web app
+ *    is actually registered first (same root cause as the reported bug); if it's
+ *    absent, we run the privileged steps too, so a divergent instance self-heals
+ *    in one restart instead of two.
  * 5. `missing` → full install (deploy + compile + configure + mapping + UnitTestRoot).
- * 6. Return result with step-level tracking.
+ * 6. `newer` or `foreign` → change nothing, make no further request, log one
+ *    warning naming both markers and the remedy. Every step flag stays false
+ *    and `probeFound` is true.
+ * 7. Before each compile the marker is re-read; a newer or foreign reading
+ *    skips the compile and every later step, with the same warning.
+ * 8. Return result with step-level tracking.
  *
  * If the configure step fails (e.g. insufficient privileges), the result
  * includes manual instructions but does not throw. Because the probe checks
@@ -472,6 +583,16 @@ export async function bootstrap(
   result.probeStatus = probe.status;
   result.probeFound = probe.status !== "missing";
 
+  // A newer or foreign deployment is never replaced: change nothing, say why once.
+  if (probe.status === "newer" || probe.status === "foreign") {
+    result.deployedVersion = probe.deployedVersion;
+    warnDeploymentLeftAlone(probe.status, probe.deployedVersion, config.namespace, false);
+    return result;
+  }
+  if (probe.status === "stale") {
+    result.deployedVersion = probe.deployedVersion;
+  }
+
   // If already current (deployed version matches embedded version), skip everything.
   if (probe.status === "current") {
     result.deployed = true;
@@ -497,6 +618,9 @@ export async function bootstrap(
     // the source hash matches — verified live: a migrated code DB dispatches
     // <NULL VALUE> 500s until recompiled. So recompile (cheap, idempotent)
     // before the privileged steps; skip deploy since the source is current.
+    if (!(await markerAllowsCompile(http, config, version, result))) {
+      return result;
+    }
     result.deployed = true;
     logger.info(
       `Bootstrap: REST classes present at version ${BOOTSTRAP_VERSION} but web application not registered — recompiling and running configuration steps`,
@@ -538,7 +662,11 @@ export async function bootstrap(
       return result;
     }
 
-    // Step 3: Compile — required for both `missing` and `stale` cases.
+    // Step 3: Compile — required for both `missing` and `stale` cases. A newer
+    // build may have compiled since the probe: re-read the marker first.
+    if (!(await markerAllowsCompile(http, config, version, result))) {
+      return result;
+    }
     try {
       await compileClasses(http, config, version);
       result.compiled = true;

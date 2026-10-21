@@ -10,6 +10,7 @@
 
 import { loadConfig } from "../config.js";
 import type { IrisConnectionConfig } from "../config.js";
+import { liveConnectionEnv, liveGateTarget } from "./live-target.js";
 
 declare global {
   var __IRIS_AVAILABLE__: boolean;
@@ -20,20 +21,24 @@ declare global {
 }
 
 /**
- * Build an {@link IrisConnectionConfig} from environment variables with
- * sensible defaults for local IRIS development instances.
+ * Build an {@link IrisConnectionConfig} for the integration tests from the
+ * armed live target (`resolveLiveTarget`): `IRIS_REQUIRE_LIVE` 1/true plus the
+ * five `IRIS_*` variables, none defaulted. When the run is not armed the
+ * config points at the inert, never-contacted target and every integration
+ * file skips on `__IRIS_AVAILABLE__ === false`; when it is armed with a
+ * variable missing this throws, naming it.
  *
  * This is the canonical integration test config factory shared across
- * all MCP server packages.
+ * all MCP server packages. `overrides` replace individual `IRIS_*` settings
+ * of the resolved target (a test that needs a second namespace).
  */
-export function getIntegrationConfig(): IrisConnectionConfig {
+export function getIntegrationConfig(
+  overrides?: Partial<Record<string, string>>,
+): IrisConnectionConfig {
+  const { target } = liveGateTarget();
   return loadConfig({
-    IRIS_HOST: process.env.IRIS_HOST ?? "localhost",
-    IRIS_PORT: process.env.IRIS_PORT ?? "52773",
-    IRIS_USERNAME: process.env.IRIS_USERNAME ?? "_SYSTEM",
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD ?? "SYS",
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE ?? "HSCUSTOM",
-    IRIS_HTTPS: process.env.IRIS_HTTPS ?? "false",
+    ...liveConnectionEnv(target),
+    ...overrides,
     // Forwarded so an operator can reproduce locale-dependent %Status
     // rendering through the integration suite (Story 35.3 review). Left
     // undefined when unexported — `loadConfig` then applies its documented

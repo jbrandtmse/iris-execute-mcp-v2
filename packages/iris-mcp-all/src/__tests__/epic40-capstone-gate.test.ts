@@ -36,8 +36,8 @@
  * (`StopIfList`, which proves the session before it stops it), removes the namespace, the database files, the fixture class and the
  * temporary directory, and asserts that nothing is left.
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (defaults: localhost:52773, `_SYSTEM`, HSCUSTOM).
- * Writes only the namespace and database `EXECMCPTMP402C` (with the `Story402` and `Story404` classes inside it), a temporary
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none defaulted, and only when `IRIS_REQUIRE_LIVE` arms
+ * the run (without it every row skips before any request). Writes only the namespace and database `EXECMCPTMP402C` (with the `Story402` and `Story404` classes inside it), a temporary
  * directory and the HSCUSTOM class `ExecuteMCPv2.Temp.Story391Fixture`.
  *
  * Placement (rule #45): `@iris-mcp/all` spawns built dists. A missing or stale `shared`, dev, admin or interop dist, an unresolvable SDK
@@ -59,6 +59,7 @@ import {
   fixtureDocumentNames,
   irisTargetFromEnv,
   isIrisReachable,
+  liveArmingSkipReason,
   openWireSession,
   rawIrisRequest,
   resolveSdkEsmDir,
@@ -308,7 +309,7 @@ function coberturaLines(xml: string): Map<string, Array<[number, number]>> {
 // -- Setup and teardown ------------------------------------------------------------------
 
 beforeAll(async () => {
-  skipReason = staleDistReason(REPO_ROOT, "shared");
+  skipReason = liveArmingSkipReason() ?? staleDistReason(REPO_ROOT, "shared");
   for (const pkg of ["iris-dev-mcp", "iris-admin-mcp", "iris-interop-mcp"]) skipReason ??= staleDistReason(REPO_ROOT, pkg);
   if (!skipReason) {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);

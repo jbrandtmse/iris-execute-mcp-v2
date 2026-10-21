@@ -94,7 +94,7 @@ export function handlerExchanges(pkg) {
  */
 export function readBootstrapVersion(distRoot) {
   const text = readFileSync(join(distRoot, 'packages', 'shared', 'dist', 'bootstrap-classes.js'), 'utf8');
-  const match = text.match(/BOOTSTRAP_VERSION\s*=\s*"([0-9a-f]+)"/);
+  const match = text.match(/BOOTSTRAP_VERSION\s*=\s*"((?:\d+\.\d+\.\d+\+\d+\.)?[0-9a-f]+)"/);
   if (!match) throw new Error('sdk-handler-golden: BOOTSTRAP_VERSION not found in packages/shared/dist/bootstrap-classes.js.');
   return match[1];
 }

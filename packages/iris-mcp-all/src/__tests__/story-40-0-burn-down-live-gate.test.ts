@@ -26,8 +26,8 @@
  * `beforeAll` removes leftovers by name and asserts there are none; `afterAll` removes both namespaces, their
  * database files and the fixture class, and asserts nothing is left.
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (defaults: localhost:52773,
- * `_SYSTEM`, HSCUSTOM). Writes only the namespaces and databases `EXECMCPTMP400A` and `EXECMCPTMP400B` and the
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none defaulted, and
+ * only when `IRIS_REQUIRE_LIVE` arms the run (without it every row skips before any request). Writes only the namespaces and databases `EXECMCPTMP400A` and `EXECMCPTMP400B` and the
  * HSCUSTOM class `ExecuteMCPv2.Temp.Story391Fixture`; the Atelier oracle reads the dictionary of HSCUSTOM. A missing
  * or stale dist, an unresolvable SDK or an unreachable IRIS skips each row with the reason, or fails with "may not be
  * skipped" when `IRIS_REQUIRE_LIVE` is armed (listed in `scripts/prepublish-gate.mjs` `gateTestFiles`).
@@ -44,6 +44,7 @@ import {
   fixtureDocumentNames,
   irisTargetFromEnv,
   isIrisReachable,
+  liveArmingSkipReason,
   openWireSession,
   rawIrisRequest,
   resolveSdkEsmDir,
@@ -178,7 +179,7 @@ async function liveLogTypes(): Promise<Array<{ name: string; value: number }>> {
 // -- Setup and teardown ------------------------------------------------
 
 beforeAll(async () => {
-  skipReason = staleDistReason(REPO_ROOT, "shared");
+  skipReason = liveArmingSkipReason() ?? staleDistReason(REPO_ROOT, "shared");
   for (const pkg of ["iris-dev-mcp", "iris-admin-mcp", "iris-interop-mcp"]) skipReason ??= staleDistReason(REPO_ROOT, pkg);
   skipReason ??= staleDistReason(REPO_ROOT, "iris-ops-mcp");
   if (!skipReason) {

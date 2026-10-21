@@ -4,7 +4,7 @@
  * These tests verify authentication, session management, CSRF handling,
  * and the Atelier envelope round-trip over the network.
  *
- * Skipped automatically when IRIS is not reachable.
+ * Skipped unless the run is armed (`IRIS_REQUIRE_LIVE` and the five `IRIS_*` target variables) and IRIS is reachable.
  */
 
 import { describe, it, expect, afterAll } from "vitest";

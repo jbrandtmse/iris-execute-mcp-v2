@@ -332,7 +332,7 @@ if (result.error) {
 if (result.status !== 0) {
   console.error(
     "[prepublish-gate] FAILED CLOSED: a live-IRIS gate did not pass with IRIS_REQUIRE_LIVE=1. " +
-      "Publishing must not proceed. Point IRIS_HOST/IRIS_PORT/IRIS_USERNAME/IRIS_PASSWORD at a " +
+      "Publishing must not proceed. Point IRIS_HOST/IRIS_PORT/IRIS_USERNAME/IRIS_PASSWORD/IRIS_NAMESPACE at a " +
       "reachable IRIS instance with src/ExecuteMCPv2/ (including src/ExecuteMCPv2/Tests/) loaded, then retry.",
   );
 }

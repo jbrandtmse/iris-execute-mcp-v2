@@ -25,14 +25,15 @@
  * Atelier v8, `default` profile, HSCUSTOM) by running this file armed and reading the values it
  * reported; they are not edited to match the implementation (Rule #36).
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, defaulting to the dev
- * instance at localhost:52773 / HSCUSTOM. Writes only the disposable
+ * Arming: runs only with `IRIS_REQUIRE_LIVE=1` (or `true`), against the target named by
+ * `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (all required, none defaulted;
+ * `@iris-mcp/shared/test-helpers/live-target`). Unarmed, every test skips before any request; armed, an
+ * unreachable IRIS fails the gate instead of skipping it. Writes only the disposable
  * `ExecuteMCPv2.Temp.QaStory383Guard.cls` (persistent, compiled, two rows), `...Multi.cls`,
  * `...NoStorage.cls`, `...Shape.cls` and `...Rtn.mac` documents. Only `Guard` is compiled. Before and
  * after the run the gate removes the Guard data with `%KillExtent()`, every data global whose name starts
  * `ExecuteMCPv` and contains `QaStory383`, and the documents, then asserts that nothing named
- * `QaStory383` is left. Skips when IRIS is unreachable; fails instead when `IRIS_REQUIRE_LIVE` is armed
- * (same arming convention as the other live gates in this directory).
+ * `QaStory383` is left.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
@@ -47,6 +48,7 @@ import {
   storageDefinitionNames,
   type ToolContext,
 } from "@iris-mcp/shared";
+import { liveConnectionEnv, liveGateTarget } from "@iris-mcp/shared/test-helpers/live-target";
 import { STORAGE_FIXTURES } from "@iris-mcp/shared/test-helpers/storage-guard-fixtures";
 import { docGetTool, docListTool, docPutTool } from "../tools/doc.js";
 import { executeClassMethodTool } from "../tools/execute.js";
@@ -62,11 +64,10 @@ import {
   type AtelierDocResult,
 } from "./live-doc-helpers.js";
 
-const IRIS_HOST = process.env.IRIS_HOST ?? "localhost";
-const IRIS_PORT = process.env.IRIS_PORT ?? "52773";
-const IRIS_USERNAME = process.env.IRIS_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_PASSWORD ?? "SYS";
-const IRIS_NAMESPACE = process.env.IRIS_NAMESPACE ?? "HSCUSTOM";
+const LIVE = liveGateTarget();
+const IRIS_HOST = LIVE.target.host;
+const IRIS_PORT = LIVE.target.port;
+const IRIS_NAMESPACE = LIVE.target.namespace;
 
 const REQUIRE_LIVE =
   process.env.IRIS_REQUIRE_LIVE === "1" || process.env.IRIS_REQUIRE_LIVE === "true";
@@ -245,24 +246,20 @@ function echoedStorageNames(result: AtelierDocResult): string[] {
 }
 
 beforeAll(async () => {
-  try {
-    const config = loadConfig({
-      IRIS_HOST,
-      IRIS_PORT,
-      IRIS_USERNAME,
-      IRIS_PASSWORD,
-      IRIS_NAMESPACE,
-      IRIS_HTTPS: "false",
-    });
-    client = new IrisHttpClient(config);
-    if (!(await ping(client, 3000))) {
-      skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
-    } else {
-      version = await negotiateVersion(client);
-      ctx = buildToolContext("NS", config, client, version);
+  skipReason = LIVE.skipReason;
+  if (skipReason === undefined) {
+    try {
+      const config = loadConfig(liveConnectionEnv(LIVE.target));
+      client = new IrisHttpClient(config);
+      if (!(await ping(client, 3000))) {
+        skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (check IRIS_HOST/IRIS_PORT).`;
+      } else {
+        version = await negotiateVersion(client);
+        ctx = buildToolContext("NS", config, client, version);
+      }
+    } catch (error) {
+      skipReason = `IRIS availability probe failed: ${error instanceof Error ? error.message : String(error)}`;
     }
-  } catch (error) {
-    skipReason = `IRIS availability probe failed: ${error instanceof Error ? error.message : String(error)}`;
   }
   if (skipReason && REQUIRE_LIVE) {
     throw new Error(`IRIS_REQUIRE_LIVE is set, so this gate may not be skipped: ${skipReason}`);

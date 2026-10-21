@@ -478,7 +478,7 @@ Per-server totals below count each server's PACKAGE tools (its `tools/index.ts` 
 
 ### Four servers are fully dependent on the custom REST handlers
 
-`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global/LOC/environment-diff work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 85 of the 110 tools (77% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — it guarantees that every server restart reconciles the IRIS-side handlers with the embedded classes.
+`@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` — and effectively `@iris-mcp/dev` for any command/global/LOC/environment-diff work — depend entirely on the ExecuteMCPv2 handlers. **If the bootstrap fails on an install, 85 of the 110 tools (77% of the suite) stop working.** This is why the auto-upgrading bootstrap mechanism (version-stamped probe introduced in commit `6538b20`, HTTP 409 fix in `66a4cbd`) is load-bearing infrastructure — on every server start it installs the embedded classes when they are absent and upgrades them when the deployed ones are older. It never downgrades: the version marker `<semver>+<sequence>.<hash>` is ordered by semver, then sequence, and a newer or foreign deployment (same semver and sequence with another hash, `dev`, or an unparseable value) is left alone with one `[WARN]` naming both markers and the remedy. Builds from before Story 42.2 still redeploy over a newer deployment, so every client that shares an instance is upgraded together.
 
 ### `@iris-mcp/data` is the outlier — multi-API
 
@@ -492,7 +492,7 @@ If DocDB or the Management API aren't enabled on the IRIS instance, 5 of the 7 d
 
 ### Pre-publish implication: bootstrap is critical infrastructure
 
-Because 85 of 110 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
+Because 85 of 110 tools depend on the ExecuteMCPv2 custom REST classes being deployed and current, the version-stamped auto-upgrade mechanism (older deployments are upgraded, newer or foreign ones are never overwritten) is not optional nice-to-have — it's a requirement for any change to any handler class to actually reach beta users without manual intervention. That's why Epic 9's bootstrap hardening (commits `6538b20`, `66a4cbd`, and the drift-check regression test) landed before first npm publish.
 
 ---
 

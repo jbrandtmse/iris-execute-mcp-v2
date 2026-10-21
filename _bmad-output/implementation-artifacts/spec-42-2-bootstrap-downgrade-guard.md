@@ -2,7 +2,8 @@
 title: 'Story 42.2: Bootstrap Downgrade Guard'
 type: 'feature'
 created: '2026-10-21'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '0d65b22bc544804c5cbf8ec5dd9eca90ae08f4ad'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -28,6 +29,42 @@ deferred:
     evidence: 'Plan 2026-10-21: each Atelier request is a separate IRIS process, so no lock can span the 35 PUTs and the compile (bootstrap.ts:244-271).'
     location: 'packages/shared/src/bootstrap.ts'
     severity: 'low'
+  - summary: 'Unverified until Story 42.3''s first CI run: whether the 35 classes compile in plain-IRIS `USER` on the throwaway container, and the docker paths of `scripts/throwaway-iris.mjs` (readiness loop, `docker port` read-back, teardown on INT and TERM). If the seed compile fails, rerun with `--image` set to the exported `IRISHEALTH_COMMUNITY_IMAGE` and record the compile errors, because they bear on the 2023.1+ plain-IRIS support claim.'
+    evidence: 'Implement 2026-10-21: no stage may run docker (decision #49). The hermetic orchestration test proves the guard against a stateful fake Atelier; the helpers, the refusals and the teardown ordering are unit-tested with injected dependencies; the live legs have not run.'
+    location: 'Story 42.3; scripts/throwaway-iris.mjs; packages/iris-mcp-all/src/__tests__/story-42-2-bootstrap-guard-live-gate.test.ts'
+    severity: 'med'
+  - summary: 'The pinned throwaway image digest is the arm64 build recorded in the spec; a CI runner on x86 needs a multi-arch or amd64 digest passed with `--image`.'
+    evidence: 'Plan 2026-10-21: the Code Map names the local image as arm64. `validateImage` accepts any digest-pinned reference.'
+    location: 'Story 42.3 (scripts/ci-throwaway.sh, .github/workflows/ci.yml)'
+    severity: 'low'
+  - summary: 'Five default-suite process gates arm on `IRIS_REQUIRE_LIVE` now but stay skip-only and off every prepublish roster, so they run only in an armed full-suite run: credentials-cli-process-gate, governance-file-process-gate, host-guard-process-gate, server-manager-precedence-gate, server-manager-process-gate. Story 42.3 decides whether CI''s armed run covers them or they join `packages/iris-mcp-all/scripts/prepublish-gate.mjs`.'
+    evidence: 'Implement 2026-10-21: they never had an `IRIS_REQUIRE_LIVE` skip-to-throw (their contract is "never fails on a pristine or offline checkout"), so `live-gate-roster.test.ts` does not detect them; moving them to the roster would change that contract.'
+    location: 'Story 42.3; packages/iris-mcp-all/scripts/prepublish-gate.mjs'
+    severity: 'low'
+  - summary: >-
+      A version read that fails for any reason is treated as an absent deployment, so the full install runs, and the
+      re-read before a compile lets the compile proceed on an empty value. A transient 5xx, timeout or privilege error
+      on the version query while a newer build is deployed can therefore let an older server upload its classes over it.
+    evidence: |-
+      The I/O matrix "Absent" row specifies "version query fails or is empty -> missing: full install, as today", and the
+      pre-fix probe mapped every throw to `missing` (the entry point for the pre-version-stamp upgrade). Telling "the SQL
+      function does not exist" from "the query could not be asked" needs the IRIS error text, which is locale-dependent
+      (project rule #13), and the fix changes a specified matrix row. Whether the real system produces an unreadable
+      marker while a deployment exists is unverified.
+    location: 'packages/shared/src/bootstrap.ts readDeployedVersion, probeCustomRest, markerAllowsCompile'
+    severity: 'medium (unverified)'
+  - summary: >-
+      Story 42.3's armed CI run should not go green by skipping: an armed integration run (the six integration-setup
+      files) and the launcher's two live files skip when IRIS does not answer, and the armed side of the migrated
+      family C, D and E files has no default-suite test. The launcher's arming guard runs only under
+      `npm --prefix extensions/iris-mcp-launcher test`, which no root script or task runs.
+    evidence: |-
+      The matrix "Armed, complete" row keeps "unreachable: skip, or throw under IRIS_REQUIRE_LIVE, as today", and
+      `epic38-gate-guards`/`story-39-1-gate-guards` cover the armed side only for the A gates. CI should assert that the
+      target answers before the armed run, run the launcher suite, and treat a fully skipped armed run as a failure
+      (Rule #59: a gate must be proven to fail on the path it guards).
+    location: 'Story 42.3; packages/*/src/__tests__/integration-setup.ts; extensions/iris-mcp-launcher/src/__tests__'
+    severity: 'medium'
 ---
 
 <intent-contract>
@@ -259,7 +296,58 @@ Embedded marker `E` = `0.0.2+1.<h>` in the examples.
 
 ## Spec Change Log
 
+- 2026-10-21 (implement): the DW-518 write footprint under Design Notes gains the `unconfigured` line (marker matches, web app absent): recompile, configure, map, `^UnitTestRoot`, no PUT. The original list omitted a state `bootstrap()` has always had; the `epic37-default-outage-gate` header records all five.
+- 2026-10-21 (implement): an unarmed leg's inert target (`UNARMED_LIVE_TARGET`) uses port 9999, not 9, because `fetch` refuses port 9 before it connects and the connect-refusing preload could then not log a leg that wrongly contacts it. Intent unchanged.
+- 2026-10-21 (implement): `errors.integration.test.ts` "Connection Errors" now skip unless armed. They reached `192.0.2.1` and the (now inert) target without an instance; the zero-connect oracle of the Unarmed row requires every integration test to skip.
+
 ## Review Triage Log
+
+### 2026-10-21 — Review pass
+- verdicts: 39 findings — high 0, medium 7, low 28, false 3, maybe-false 1
+- findings:
+  - Blind Hunter
+    - `[medium]` `[defer]` A failed version read becomes `missing` and the full install runs, so a transient 5xx, timeout or privilege error while a newer build is deployed lets an older server upload over it — the mapping is the matrix "Absent" row and the pre-fix probe; telling "does not exist" from "could not ask" needs locale-dependent error text (rule #13) and changes a specified row. Deferred (frontmatter item 8), grouped with the Edge Case Hunter reads and the Verification Gap "failed version read" row.
+    - `[low]` `[reject]` Two branches that each change a bootstrapped class both emit sequence N+1 with different hashes, so the second to deploy sees `foreign` — this is the matrix "Foreign" row (same semver and sequence, other hash) decided at the spec gate (#50), the remedy is in the warning and the README, and a merge forces a regeneration; fixing it edits the intent contract.
+    - `[low]` `[patch]` The race outcome (uploads that landed before the pre-compile re-read stay) is described only in a code comment and the ledger, and the warning's truncation is untested — README sentence added (clause on the uploaded documents and the delete-`Setup` remedy); the truncation test is the Verification Gap `describeMarker` row.
+    - `[medium]` `[defer]` An armed run does not fail closed when IRIS is unreachable (six integration-setup files and the launcher's two live files skip), and `requireLive` is a constant `true` — the matrix keeps "unreachable: skip, or throw under IRIS_REQUIRE_LIVE, as today". Deferred (frontmatter item 9) to Story 42.3's armed CI; the `live-target.ts` doc comment that claimed "an armed leg fails instead of skipping" is corrected in this pass.
+    - `[low]` `[reject]` `IRIS_HTTPS` is honored in some helpers and dropped in others — no armed run in this repo or in the throwaway harness uses TLS, and an armed run pointed at a TLS-only port fails loudly ("not reachable"), never silently.
+    - `[low]` `[reject]` `throwaway-iris.mjs` spawns `pnpm` without a shell, so Windows cannot run `live:bootstrap-guard` — the gate needs docker, which this project's macOS dev host forbids and CI runs on Linux; the fix adds a platform branch no stage here can exercise.
+    - `[low]` `[reject]` The unarmed proof rests on lexical selection and an untested preload — `connectTargetOf` handles the call shapes it is given and the control proves the interception, the epic38/story-39 `if (expectedSkipReason().startsWith("IRIS is not reachable"))` branch is real (a stale dist produces a different reason and no connect), and a destructuring default in a test file is not something the repo has.
+    - `[low]` `[patch]` Operator and contributor guidance: the four `prepublish-gate.mjs` failure hints omit `IRIS_NAMESPACE` — fixed in all four; the `dev`-is-foreign guidance is already in the README table and warning, so nothing else changed.
+    - `[low]` `[patch]` Copies: `stateful-fake-atelier.ts` re-declared the `envelope`/`errorEnvelope` helpers of `scripts/lib/fake-iris-listener.mjs` and narrated "a copy" in its header — now imports them and the header states the contract; the looser marker regexes keep `[0-9a-f]+`-equivalent behavior the spec asked for ("widen to the grammar"), and the per-gate `IRIS_REQUIRE_LIVE` constants are the spec's "keep each gate's own skip-to-throw and roster detectability".
+    - `[low]` `[reject]` The pinned image digests and the harness's docker paths have never run — spec gate decision #49 forbids docker in this story; already deferred (frontmatter item 5).
+  - Edge Case Hunter
+    - `[medium]` `[defer]` `readDeployedVersion` swallows every error and returns `""` — same root cause as the first Blind Hunter row (deferred item 8).
+    - `[maybe-false]` `[defer]` The re-read before a compile returns empty after the probe read an older marker, and the compile proceeds — would be `medium` if a real instance answers empty while a deployment exists (not demonstrated; the `missing` path needs an empty re-read to compile); settled by a live probe of the version query during a concurrent recompile. Grouped with deferred item 8.
+    - `[low]` `[reject]` The check runs after the last PUT, so a newer build that compiles in between leaves older source under newer compiled classes — the recorded concurrency residual (frontmatter item 4); a re-read before the first PUT only narrows the window.
+    - `[low]` `[reject]` One 520 s child run covers the gate-guard files and could be killed on a slow machine — measured 33 s for the whole file here, 15x under the cap.
+    - `[low]` `[reject]` On SIGINT/SIGTERM the harness forwards the signal and removes the container at once, so the command can outlive it for a moment — the command receives the same terminal signal and exits; no state outside the removed container is at risk.
+    - `[low]` `[reject]` The launcher's arming copy ignores `IRIS_HTTPS` — same root cause as the Blind Hunter `IRIS_HTTPS` row.
+    - `[medium]` `[defer]` An armed integration setup with IRIS unreachable skips everything and exits 0 — same root cause as the Blind Hunter armed-unreachable row (deferred item 9).
+    - `[low]` `[patch]` README says a newer or foreign deployment is never uploaded, but the re-read race can leave uploads — the README race sentence now says the uploaded documents stay (same patch as the Blind Hunter race row).
+    - `[low]` `[reject]` `seedText` applies the seed line to every embedded document, not only `Setup.cls` — stronger than the spec's oracle (every document differs from the embed, so a rewrite shows in content as well as `ts`), no harm.
+  - Verification Gap
+    - `[low]` `[patch]` `describeMarker`'s 80-character cut and quoting are unpinned — test added to `bootstrap.test.ts` (a 300-character marker and a line-break marker yield one `[WARN]` line); mutation recorded in `## Verification`.
+    - `[medium]` `[defer]` The armed side of about 40 migrated family C, D and E files has no default-suite test — it needs a live instance or a stub per file; deferred (item 9) to Story 42.3's armed run.
+    - `[low]` `[defer]` The launcher's arming guard runs only under `npm --prefix extensions/iris-mcp-launcher test`, which no root script runs — deferred with item 9 (42.3 CI runs the launcher suite); the launcher sources are covered by the static scan.
+    - `[low]` `[patch]` The control fixture asserts `outcome === "reached" || outcome === "refused"`, which cannot fail — removed; the parent test pins the logged connect, the listener count and the printed outcome.
+    - `[low]` `[patch]` The recorded mutation lines lack the `mutation:` token and the "Shared instance" AC records no mutation — token added to every line; the AC is recorded as procedural (read-only probe).
+    - `[low]` `[patch]` The four `prepublish-gate.mjs` hints name the wrong variables — same patch as the Blind Hunter operator-guidance row.
+    - `[medium]` `[defer]` A failed version read is treated as absent — same root cause as deferred item 8.
+    - `[low]` `[reject]` `warnDeploymentLeftAlone` has a fallback for a non-stamped `newer` marker that no caller reaches — a type-narrowing ternary (`newer` implies a stamped deployed marker), not a handler of a real state; deleting it needs a cast.
+    - `[low]` `[patch]` Literal non-ASCII on changed lines (`errors.integration.test.ts`, `changelog-bootstrap-move.test.ts`) — converted to `—` and `→`; the other flagged characters are in comments, which Rule 14 exempts.
+  - Intent Alignment (descriptive divergences)
+    - `[low]` `[reject]` The live rows (newer, DW-518, older, legacy) are authored but unrun; the in-story observation is a stateful fake — AC 42.2.5 was amended at the spec gate (#49); the live run is Story 42.3's CI.
+    - `[low]` `[reject]` The harness's real docker paths are unobserved — same as the digest row (deferred item 5).
+    - `[low]` `[reject]` No leg deletes `Setup` and restarts to prove the foreign remedy — the remedy text is pinned and the `missing`-from-absent-`Setup` path is covered by the probe unit tests and the fake's "function absent until first compile" state.
+    - `[low]` `[reject]` The race re-read reads the compiled marker, not the uploaded source marker — recorded in the code comment and in deferred item 4.
+    - `[low]` `[reject]` A build from before this change still downgrades — decided: the comparator lives in the deploying server (no IRIS-side comparator here, Story 42.4); stated in the README and CHANGELOG.
+    - `[false]` The probe maps an empty read to `missing` while `classifyDeployedMarker("")` says `foreign` — the probe tests the empty value first and both behaviors are pinned by their own tests.
+    - `[low]` `[reject]` The unarmed run asserts a clean exit, an empty connect log and the file count, not that each leg reported a skip — the intent's observable is "connects to nothing".
+    - `[medium]` `[defer]` Per-file armed behavior is kept "as today" (gates throw, integration setups and launcher files skip) — same root cause as the armed-unreachable rows (deferred item 9); `IRIS_REQUIRE_LIVE=0`/`yes` unarmed is the matrix.
+    - `[low]` `[reject]` The release path exports only `IRIS_REQUIRE_LIVE` — recorded in frontmatter item 3 (Stories 42.5/42.6).
+    - `[false]` `bootstrap-sequence.json` is both generator input and output — the task prescribes exactly that (commit it, the first run makes sequence 1) and a missing file throws.
+    - `[false]` The default-suite orchestration test needs built dists — it fails loudly instead of skipping, `turbo.json` makes `@iris-mcp/all#test` depend on `build`, and it binds only ephemeral ports.
 
 ## Design Notes
 
@@ -293,7 +381,10 @@ Embedded marker `E` = `0.0.2+1.<h>` in the examples.
 - `irisTargetFromEnv` and `getIntegrationConfig` delegate to it.
 - The 42.2 gate reuses `process-gate-helpers.ts` (spawn, `atelierQuery`, doc GET, `shippedBootstrapVersion`).
 - The preload follows `hide-changesets-preload.mjs`.
-- The launcher's arming copy is justified by AD-2.
+- The launcher's arming copy is justified by AD-2: one helper (`extensions/iris-mcp-launcher/src/__tests__/liveArming.ts`, not a suite) serves both launcher live files.
+- The hermetic orchestration test and the throwaway gate run ONE set of legs (`bootstrap-guard-legs.ts`) against two targets. `stateful-fake-atelier.ts` is a copy of the idea of `scripts/lib/fake-iris-listener.mjs` with state, because that fake is a frozen-golden fixture whose every reply is a function of the request alone, and the guard needs documents and a compiled marker that persist between requests.
+- `live-gate-child-run.ts` gained `runVitestUnderPreload`, which `live-arming-guard.test.ts` uses; its two earlier consumers keep `runLiveGateFile`.
+- `getIntegrationConfig` of `packages/shared/src/__tests__/integration-helpers.ts` re-exports the one of `packages/shared/src/test-helpers/integration-config.ts`, which gained the `overrides` parameter.
 - The comparator is new: `atelier.ts:231-237` `parseVersionString` reads only the major number, and no semver dependency exists.
 
 **Integration ACs:** the matrix rows "Live: newer" and "Live: DW-518" (the built `iris-dev-mcp` consumes `bootstrap()` and the comparator, and the observable effect is unchanged classes plus a stderr warning), and the "Unarmed" row (every live gate consumes `resolveLiveTarget`; the effect is zero connections).
@@ -306,6 +397,7 @@ Embedded marker `E` = `0.0.2+1.<h>` in the examples.
 
 **DW-518 write footprint:** `epic37-default-outage-gate`'s legs (`iris_server_info`, `iris_license_info`) only read. Its one write is the first-touch bootstrap of `other`:
 - `current`, `newer`, `foreign`: nothing;
+- `unconfigured` (the marker matches, the web app is absent): recompile, then `Setup_Configure`, `Setup_ConfigureMapping` and `^UnitTestRoot`, with no PUT;
 - `stale`: PUT 35 classes and compile them, plus `Setup_Configure` and `Setup_ConfigureMapping` if the web app is absent, then `^UnitTestRoot`;
 - `missing`: PUT, compile, Configure, the `%ALL` mapping and `^UnitTestRoot`.
 
@@ -379,6 +471,8 @@ Run every command from `/Users/jbrandt/git/iris-execute-mcp-v2`, with `timeout: 
 - the `assertDeployedBootstrapVersion` message;
 - the arming of all 63 live files and the four arming-meta tests;
 - the `live-gate-roster` exemption list;
+- the `published-tarballs.test.ts` roster of the shared in-repo exports, and the `story-38-0-qa-doc-claims.test.ts` scan of `IRIS_NAMESPACE` fallbacks (the arming migration removed the inline `?? "HSCUSTOM"` defaults it counted);
+- `UNARMED_LIVE_TARGET` (port 9999) and the launcher's `liveArming.ts` inert target;
 - the shared in-repo `exports` (`./test-helpers/live-target`; `publishConfig.exports` unchanged);
 - `.changeset/` (the new file is read by guarded readers);
 - the `CHANGELOG.md` top section.
@@ -389,7 +483,57 @@ The bootstrap rosters, `tools-list-snapshot.json`, the SDK goldens and the gover
 
 **IRIS:** nothing in this story writes to the shared instance, so no `ExecuteMCPv2.Temp.*` fixture and no OS `%UnitTest` class runs there. ObjectScript changes are comments only, compiled only inside the throwaway container by the live check.
 
+**Results (implement, 2026-10-21; every command unarmed):**
+- `BOOTSTRAP_VERSION` moved `d51856f74d6a` -> `0.0.2+1.995fbbb1055d`; `scripts/bootstrap-sequence.json` is `{"sequence": 1, "hash": "995fbbb1055d"}`. A second `pnpm gen:bootstrap` printed "Unchanged ... (not rewritten)". The rosters, `tools-list-snapshot.json`, the SDK goldens and the governance baseline are unchanged (`gen:governance-baseline:check`, `gen:tools-list-snapshot:check`, `gen:pack:check`, `gen:skills:check`, `check:provenance`, `validate:prompts` all OK; baseline `1e62c5ad5bf7`/141).
+- Suites: shared 85 files / 2413 tests; dev 75/1490 (+319 skipped); admin 35/506; interop 30/751; ops 20/350; data 9/163; client-config 37/1015; `@iris-mcp/all` 183 files / 4116 tests (688 skipped; about 8 minutes in one call); launcher 31 files with the 5 baseline macOS failures (`clientsActivationFlow` 1, `clientsEngine` 2, `governanceEngine` 2) and nothing else. `type-check` clean for the 7 TypeScript packages and the launcher; `lint` clean (one pre-existing warning, `shared/src/cli/governance.ts:935`).
+- `live-arming-guard.test.ts` (b): 63 or more live-capable files (the scan finds 64 in `packages/*` plus the launcher's three, 67 in all), each package run in a child `vitest` with every `IRIS_*` variable removed, exit 0, connect log empty. `node --check` passes on `scripts/throwaway-iris.mjs`, `scripts/lib/no-live-iris-preload.mjs` and `scripts/gen-bootstrap.mjs`. No docker command was run.
+- HSCUSTOM `SELECT ExecuteMCPv2.Setup_GetBootstrapVersion()` (`server:"default"`, `namespace:"HSCUSTOM"`): `d51856f74d6a` before the stage and after it. No built 42.2 server touched the shared instance, and the session's own MCP servers were not restarted; they run `packages/*/dist/index.js`, which is now the 42.2 build, so a restart would upgrade HSCUSTOM (decision #52).
+
+**Mutations (Rule 19; each applied, red observed, reverted, working tree checked byte-identical with `git status --short` plus a hash of `git diff` and of every untracked file):**
+- mutation: AC 42.2.1 / 42.2.2: `classifyDeployedMarker` returns `older` for every mismatch -> `bootstrap-version.test.ts` (every newer and foreign row, the reflexive and antisymmetry cases) and `bootstrap.test.ts` (the probe rows and the "a newer or foreign deployment" orchestration tests): 38 red.
+- mutation: AC 42.2.2 (the re-check): `markerAllowsCompile` always allows the compile -> `bootstrap.test.ts` "an older probe followed by a newer re-read", "a missing probe followed by a foreign re-read (dev)", "an unconfigured probe followed by a newer re-read".
+- mutation: AC 42.2.3: `packages/shared/package.json` version 0.0.2 -> 0.0.3 without regenerating -> `bootstrap.test.ts` "the marker's semver is the version of packages/shared/package.json". One character of the `Setup.cls` doc comment edited without regenerating -> "embedded class contents match disk .cls files" and "the marker's hash is the SHA-256 hash of concatenated disk contents". `scripts/bootstrap-sequence.json` sequence 1 -> 5 -> "the marker's sequence and hash are the ones recorded in scripts/bootstrap-sequence.json".
+- mutation: AC 42.2.3 (generator): the sequence raised on every run -> `gen-bootstrap-write.test.ts` 7 red (the unchanged-run, hand-edit, reversal, clean-tree and unchanged-rerun cases); raised by 2 -> "a class edit raises the sequence by exactly 1 ..." and the reversal case; the missing-state check disabled -> "a missing state file is an error that says to restore it from git, and writes nothing".
+- mutation: AC 42.2.3 (format): the embed's `BOOTSTRAP_VERSION` set to a bare hash -> `bootstrap.test.ts` (fails at collection: the embed is not stamped), `story-41-8-qa-gate-guard.test.ts` `beforeAll`, and `changelog-bootstrap-move.test.ts` (the newest move no longer ends at the embed).
+- mutation: AC 42.2.4: the README sentence "Upgrade every client that shares an instance together ..." deleted -> `story-42-2-doc-claims.test.ts` "says that a server built before this release still downgrades and that every client that shares an instance is upgraded together". The changeset bump `minor` -> `major` -> "bumps @iris-mcp/shared minor, and nothing else". The `epic37-default-outage-gate` header paragraph "Write footprint of the `other` leg (DW-518)" retitled -> "records the write footprint of the first-touch bootstrap of the other profile ...".
+- mutation: AC 42.2.5: the probe reverted to `deployedVersion === BOOTSTRAP_VERSION ? current : stale` and shared rebuilt (`tsc`) -> `story-42-2-bootstrap-guard-orchestration.test.ts` `newer-startup`, `newer-lazy-other` (DW-518), `foreign-hash` and `foreign-dev` red (4), every older and legacy leg and both race tests green. The comparator returning `newer` for every older marker, shared rebuilt -> `older-sequence`, `older-lazy-other`, `legacy-bare-hash`, `current-after-upgrade` and the three race tests red (7). After both, shared was rebuilt from the restored source and the file passed 23 of 23. The oracles of the orchestration test: the `runServer` startup branch returned `""` -> 9 red (every leg that reads stderr); the fake's PUT used a constant `ts` -> "a downgrade ... turns the snapshot oracle red"; `snapshotDifferences` ignored the compiled marker -> the downgrade test and the `snapshotDifferences` self-test; `contentDifferences` always `[]` -> 11 red; `summarizeRequests` not counting PUTs -> the four upgrade legs, both race tests and the downgrade test (7); the `newer-startup` leg seeded with sequence - 1 -> `newer-startup`; the dist check pointed at a missing package -> the file fails at `beforeAll`, not a skip.
+- mutation: AC 42.2.5 (throwaway harness): `REFUSED_HOST_PORTS` without `'1972'` -> `throwaway-iris.test.ts` 6 red; `IMAGE_PATTERN` with the digest optional -> 7 red; `createTeardown.run` a no-op -> 10 red.
+- mutation: DW-627: `doc-type-description-live-gate.test.ts` back to inline `?? "localhost"` defaults with no arming -> `live-arming-guard.test.ts` (a) "no test source reads ... with a ?? or || default" (names the file) and (b) "iris-dev-mcp: its 14 default-suite live-capable files ..." (the connect log is `['localhost:52773']`, refused by the preload). `isLiveArmed` treating an empty environment as armed -> (d) "an empty environment is not armed ..." and "unarmed, the gate's target is the inert one ...".
+- mutation: DW-627 (gate arming, by agent): the `epic38-capstone-gate` without `liveArmingSkipReason() ??` -> `epic38-gate-guards.test.ts` "unarmed ..." and "checks the arming first ..."; the same gate's `TARGET` back to `process.env.IRIS_HOST ?? "localhost"` -> "unarmed ..." and "armed with only IRIS_HOST and IRIS_PORT ..."; the gate probing before its arming line -> "unarmed ..." on the logged connect (`['127.0.0.1:52200']`) and the source-order test; `story-39-2-data-policy-live-gate` back to env defaults -> `story-39-1-gate-guards.test.ts` (unarmed, armed-incomplete and source-order rows for Story 39.2); the 41.8 gate's `TARGET` back to an import-time constant -> `story-41-8-qa-gate-guard.test.ts` "armed with only IRIS_HOST and IRIS_PORT"; private `isIrisReachable` and `reserveClosedPort` declarations added to a gate -> `gate-helper-copies.test.ts` "no gate declares a replaced name".
+- mutation: DW-627 (launcher): `liveGateTarget` armed by a set `IRIS_HOST` -> `liveArming.test.ts` "is not armed by IRIS_HOST alone ..." and the `IRIS_REQUIRE_LIVE=%j` rows; `IRIS_NAMESPACE` dropped from the missing-variable check -> the two "throws naming ..." tests.
+- mutation: Shared surfaces: the `live-target` export removed from `packages/shared/package.json` (dist mtime refreshed so the freshness check passes) -> `published-tarballs.test.ts` "keeps the source manifest's test-helper exports for the in-repo imports"; a scratch file with `process.env.IRIS_NAMESPACE ?? "OTHER"` -> `story-38-0-qa-doc-claims.test.ts` "every helper and script that defaults IRIS_NAMESPACE ..."; the `NAMED_EXEMPTIONS` entry pointed at another file -> `live-gate-roster.test.ts` (the armed-files-in-the-roster case and the exemption case); the guard sentence removed from `assertDeployedBootstrapVersion`'s message -> `bootstrap-version-check.test.ts` 4 red.
+- mutation: AC 42.2.2 (the warning's bound; review pass): `describeMarker` returning `JSON.stringify(marker)` with no 80-character cut -> `bootstrap.test.ts` "a deployed marker is quoted and cut at 80 characters, and a line break inside it stays inside the one warning line" (1 red; `packages/shared/src/bootstrap.ts` restored byte-identical).
+- Shared instance AC: procedural, with no pinning test and no mutation. It is pinned by the read-only HSCUSTOM probe listed under Commands, run before and after each stage.
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** The bootstrap now orders the deployed `ExecuteMCPv2.Setup` marker against its own and redeploys only an absent or older deployment. A newer or foreign one (including `dev`) is left alone with one `[WARN]` naming both markers and the remedy, and the marker is read again immediately before each compile. `BOOTSTRAP_VERSION` moved `d51856f74d6a` -> `0.0.2+1.995fbbb1055d`; a second `pnpm gen:bootstrap` reports "Unchanged". Every live test leg is armed by `IRIS_REQUIRE_LIVE` (`1`/`true`) alone, takes its target from the five `IRIS_*` variables, and a connection-refusing preload plus a behavioral guard prove an unarmed run connects to nothing. The throwaway harness and gate are written and unit-tested but never run (decision #49); the guard is proven here by a hermetic orchestration test that drives the built `iris-dev-mcp` against a stateful fake Atelier.
+
+**Files changed (119).**
+- `packages/shared/src/bootstrap-version.ts`, `bootstrap.ts`, `index.ts`: the comparator, the widened probe and the re-check before compile.
+- `scripts/gen-bootstrap.mjs`, `scripts/bootstrap-sequence.json`, `packages/shared/src/bootstrap-classes.ts`, `src/ExecuteMCPv2/Setup.cls` (comments only): the marker generator, its state file and the regenerated embed.
+- `packages/shared/src/test-helpers/live-target.ts` (new, in-repo export), `integration-config.ts`, `integration-helpers.ts` and the six `integration-setup.ts`: the one arming helper and its integration users.
+- About 64 live-capable test files in `packages/*` and 3 in the launcher: resolve their target only through the helper; the epic37 gate header records its write footprint (DW-518).
+- `scripts/lib/no-live-iris-preload.mjs`, `packages/iris-mcp-all/src/__tests__/live-arming-guard.test.ts` and the launcher's guard: the connect-refusing oracle and the unarmed behavioral run.
+- `scripts/throwaway-iris.mjs`, `story-42-2-bootstrap-guard-live-gate.test.ts`, `story-42-2-bootstrap-guard-orchestration.test.ts`, `bootstrap-guard-legs.ts`, `stateful-fake-atelier.ts`, `throwaway-iris.test.ts`: the harness, the gate and the hermetic proof.
+- `README.md`, `packages/shared/README.md`, `tool_support.md`, `CHANGELOG.md`, `.changeset/story-42-2-bootstrap-downgrade-guard.md`, `story-42-2-doc-claims.test.ts`: documentation and its pins.
+- The marker-format regexes, the four arming-meta tests, `live-gate-roster.test.ts`, `published-tarballs.test.ts`, `process-gate-helpers.ts` and the four `prepublish-gate.mjs` hints.
+
+**Review findings (this pass, 39 rows; see the Review Triage Log).** high 0, medium 7, low 28, false 3, maybe-false 1. By route (counted from the log): patch 9 rows (7 root causes, all low), defer 9 rows (2 root causes), reject 18 rows, false 3 rows.
+- Patches applied: README sentence on the uploads that survive a race and the delete-`Setup` remedy; `IRIS_NAMESPACE` added to the four `prepublish-gate.mjs` hints; `stateful-fake-atelier.ts` imports `envelope`/`errorEnvelope` from `fake-iris-listener.mjs` and its header states the contract (Rule 2: the fixture is separate because the golden fixture answers each request as a pure function of the request, and the guard needs one that remembers what was written); the `describeMarker` bound test with its mutation line; the unfalsifiable control assertion removed; the `mutation:` token on every recorded line plus the procedural note for the Shared-instance AC; two literal non-ASCII characters in code converted to escapes; the `live-target.ts` comment about what an armed leg does when IRIS does not answer corrected.
+- Deferred (frontmatter items 8 and 9): a failed or empty version read is treated as an absent deployment (specified by the matrix, medium, unverified); Story 42.3's armed CI must not go green by skipping (armed integration and launcher files skip when IRIS does not answer, the armed side of the migrated files has no default-suite test, the launcher guard runs only under `npm --prefix`).
+- Rejected, each with its recorded reason in the log: two branches at one sequence make each other `foreign` (the matrix row); `IRIS_HTTPS` helpers; Windows `pnpm` spawn; preload call-shape coverage; unrun digests and docker paths (decision #49, item 5); the post-PUT race window (item 4); the 520 s child-run cap; signal-forwarding order; the seed line on every document; the unreachable `newer` fallback; the unrun live rows, remedy end-to-end, compiled-marker re-read, pre-fix builds, skip-vs-pass wording, release-path variables (item 3); and the three `false` rows.
+
+**Follow-up review recommendation:** `false` (first pass; no patched entry was `high`, none `medium`; patched entries by verdict: low 7).
+
+**Verification performed (every suite unarmed).**
+- `pnpm gen:bootstrap` twice: "Unchanged". `node --check` on `throwaway-iris.mjs`, `no-live-iris-preload.mjs`, `gen-bootstrap.mjs` and the four `prepublish-gate.mjs`. Spine lint: 0 findings.
+- Shared three-file loop: 148 + 1 tests green. `@iris-mcp/all` eleven-file loop (the ten named plus the orchestration test): 351 tests green, the guard's connect log empty. Launcher: 438 passed, the 5 baseline macOS failures only.
+- Per package (once, after the last patch): shared 85 files / 2414 tests; dev 75 / 1490; admin 35 / 506; interop 30 / 751; ops 20 / 350; data 9 / 163; client-config 37 / 1015; `@iris-mcp/all` 183 files / 4116 tests in two shards. `type-check` clean for the seven packages; `lint` clean apart from the one pre-existing warning at `shared/src/cli/governance.ts:935`.
+- `gen:governance-baseline:check` (baseline `1e62c5ad5bf7`/141), `gen:tools-list-snapshot:check`, `gen:pack:check`, `gen:skills:check`, `check:provenance`, `validate:prompts`: all OK.
+- HSCUSTOM `SELECT ExecuteMCPv2.Setup_GetBootstrapVersion()` (`server:"default"`, `namespace:"HSCUSTOM"`, read-only): `d51856f74d6a` before the stage and after the review. No docker command, no armed gate and no write to the shared instance ran. The session's own MCP servers run `packages/*/dist/index.js`, now the 42.2 build, and were not restarted: a restart would upgrade HSCUSTOM (decision #52).
+
+**Residual risks.** The throwaway gate and `scripts/throwaway-iris.mjs` have never run against docker; the first real run is Story 42.3's CI (deferred items 2, 5, 6). Parallel branches that each change a bootstrapped class at one sequence will classify each other as `foreign` until the merge regenerates the marker. The release path (`prepublish-gate.mjs`, Stories 42.5/42.6) must export all five `IRIS_*` (item 3).

@@ -27,10 +27,13 @@
  * to the JSON body), which any JSON-parsing client masks (see the 35.2 gate's
  * own header for why no other shape can see it).
  *
- * DEGRADATION CONTRACT. No IRIS / no ExecuteMCPv2 REST app / missing dists →
- * every leg skips with a logged reason (never fails a pristine checkout);
- * `IRIS_REQUIRE_LIVE=1` (the armed packaging path) throws in `beforeAll`
- * instead. Two legs carry per-leg degradation of their own, documented inline:
+ * ARMING AND DEGRADATION CONTRACT. A leg runs only when `IRIS_REQUIRE_LIVE` is
+ * `1` or `true`, against `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/
+ * `IRIS_NAMESPACE` (all required, none defaulted: `irisTargetFromEnv`). Unarmed,
+ * every leg skips with a logged reason before any request (never fails a
+ * pristine checkout). Armed, no IRIS / no ExecuteMCPv2 REST app / missing dists
+ * throws in `beforeAll` instead (the armed packaging path). Two legs carry
+ * per-leg degradation of their own, documented inline:
  * F1 needs the Story 35.1 fixture production deployed (a publish-path failure
  * if absent — the fixtures ship in `src/ExecuteMCPv2/Tests/`), and F5 can only
  * exhibit its contract while `%Service_DocDB` is DISABLED (an operator-enabled
@@ -42,16 +45,18 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
+import { irisTargetFromEnv, liveArmingSkipReason, skipTest } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 
-const IRIS_HOST = process.env.IRIS_HOST ?? "localhost";
-const IRIS_PORT = process.env.IRIS_PORT ?? "52773";
-const IRIS_USERNAME = process.env.IRIS_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_PASSWORD ?? "SYS";
-const IRIS_NAMESPACE = process.env.IRIS_NAMESPACE ?? "HSCUSTOM";
+const TARGET = irisTargetFromEnv();
+const IRIS_HOST = TARGET.host;
+const IRIS_PORT = TARGET.port;
+const IRIS_USERNAME = TARGET.username;
+const IRIS_PASSWORD = TARGET.password;
+const IRIS_NAMESPACE = TARGET.namespace;
 
 const BASE_URL = "/api/executemcp/v2";
 
@@ -151,15 +156,19 @@ async function f1FixtureIsDeployed(version: number, ns: string): Promise<boolean
   }
 }
 
-/** Per-test skip helper: log the reason, then mark the test skipped. */
-function skip(testCtx: { skip: () => void }, leg: string, reason: string) {
-  // eslint-disable-next-line no-console
-  console.log(`[SKIP] epic35-defect-gate (${leg}): ${reason}`);
-  testCtx.skip();
+/** Per-leg skip: `skipTest` under this gate's tag, with the leg named. */
+function skipLeg(testCtx: { skip: () => void }, leg: string, reason: string) {
+  skipTest(`epic35-defect-gate (${leg})`, reason, testCtx);
 }
 
 beforeAll(async () => {
   try {
+    // Arming comes before anything else: an unarmed run reaches no IRIS.
+    const unarmed = liveArmingSkipReason();
+    if (unarmed) {
+      skipReason = unarmed;
+      throw new Error("__handled__");
+    }
     // 0. Build freshness, BEFORE any dist is imported and before any IRIS call
     //    (DW-524). The gate exercises the code that ships, so a missing OR
     //    stale dist (a `src/` file newer than its build output) must not be
@@ -244,13 +253,13 @@ describe("Epic 35 defect gate — all nine corrected contracts, live (Story 35.8
   // either failed or landed on the wrong row. RED proof: deployed-class revert
   // of Interop.cls to the pre-35.1 shape (see the story's Dev Agent Record).
   it("F1 — production_item get→set→get readback on the fixture production, with restore", async (testCtx) => {
-    if (skipReason) return skip(testCtx, "F1", skipReason);
+    if (skipReason) return skipLeg(testCtx, "F1", skipReason);
     if (f1FixtureSkip) {
       // A publish-gate run (IRIS_REQUIRE_LIVE=1) MUST have the test fixtures
       // deployed — a missing fixture there is a broken gate environment, not a
       // pass.
       if (REQUIRE_LIVE) throw new Error(`IRIS_REQUIRE_LIVE is set: ${f1FixtureSkip}`);
-      return skip(testCtx, "F1", f1FixtureSkip);
+      return skipLeg(testCtx, "F1", f1FixtureSkip);
     }
     const item = gateTool("iris_production_item");
 
@@ -319,7 +328,7 @@ describe("Epic 35 defect gate — all nine corrected contracts, live (Story 35.8
   // stream, which any JSON-parsing client (and the tool handler) would mask.
   // RED proof: deployed-class revert of Analytics.cls (story Dev Agent Record).
   it("F2 — analytics_cubes:build on a nonexistent cube returns a raw wire body that parses as JSON (no prepended device text)", async (testCtx) => {
-    if (skipReason) return skip(testCtx, "F2", skipReason);
+    if (skipReason) return skipLeg(testCtx, "F2", skipReason);
     const config = getConfig();
     const auth = Buffer.from(`${config.username}:${config.password}`).toString("base64");
     const response = await fetch(`${config.baseUrl}${BASE_URL}/analytics/cubes`, {
@@ -365,7 +374,7 @@ describe("Epic 35 defect gate — all nine corrected contracts, live (Story 35.8
   // http-client.ts, rebuild shared, leg renders "خطأ #5001" → RED; restore →
   // GREEN (story Dev Agent Record).
   it("F3 — an erroring tool call renders the English `ERROR #` prefix through the tool layer (locale pinned)", async (testCtx) => {
-    if (skipReason) return skip(testCtx, "F3", skipReason);
+    if (skipReason) return skipLeg(testCtx, "F3", skipReason);
     const executeCommand = gateTool("iris_execute_command");
     const result = await executeCommand.handler({ command: "Set x = 1/0" }, ctx);
     expect(result.isError).toBe(true);
@@ -386,7 +395,7 @@ describe("Epic 35 defect gate — all nine corrected contracts, live (Story 35.8
   // count, and maxRows bounds the real rows. RED proof: deployed-class revert
   // of Security.cls (story Dev Agent Record).
   it("F4 — listPrivileges with grantee=_SYSTEM and maxRows=5 returns 5 rows with rowsCapped and the %All omission note", async (testCtx) => {
-    if (skipReason) return skip(testCtx, "F4", skipReason);
+    if (skipReason) return skipLeg(testCtx, "F4", skipReason);
     const resourceManage = gateTool("iris_resource_manage");
     const result = await resourceManage.handler(
       { action: "listPrivileges", grantee: "_SYSTEM", maxRows: 5 },
@@ -418,14 +427,14 @@ describe("Epic 35 defect gate — all nine corrected contracts, live (Story 35.8
   // visible in the transcript. RED proof: source revert of the docdb.ts
   // translation + rebuild of @iris-mcp/data (story Dev Agent Record).
   it("F5 — docdb_manage:list on a disabled %Service_DocDB renders the actionable error", async (testCtx) => {
-    if (skipReason) return skip(testCtx, "F5", skipReason);
+    if (skipReason) return skipLeg(testCtx, "F5", skipReason);
     // Precondition, read live through the same route the translation consults.
     const svc = await client.get(
       `${BASE_URL}/security/service?name=${encodeURIComponent("%Service_DocDB")}`,
     );
     const enabled = (svc as any).result?.enabled;
     if (enabled === true) {
-      return skip(
+      return skipLeg(
         testCtx,
         "F5",
         `%Service_DocDB is ENABLED on this instance (operator-enabled) — the disabled-service contract cannot be exhibited without toggling it, which this gate deliberately never does (Story 35.8 leg F5 rule).`,
@@ -464,7 +473,7 @@ describe("Epic 35 defect gate — all nine corrected contracts, live (Story 35.8
   // blindly. RED proof: deployed-class revert of Security.cls (story Dev Agent
   // Record).
   it("F6 — oauth_manage create-client with a nonexistent serverName fails with a clean precondition error (no <PARAMETER>)", async (testCtx) => {
-    if (skipReason) return skip(testCtx, "F6", skipReason);
+    if (skipReason) return skipLeg(testCtx, "F6", skipReason);
     const oauthManage = gateTool("iris_oauth_manage");
     const result = await oauthManage.handler(
       {
@@ -493,7 +502,7 @@ describe("Epic 35 defect gate — all nine corrected contracts, live (Story 35.8
   // (the text that ships). RED proof: source revert of the description in
   // interop rest.ts + rebuild of @iris-mcp/interop (story Dev Agent Record).
   it("F7 — interop_rest's name parameter documents the package-name contract, and the path form is rejected cleanly", async (testCtx) => {
-    if (skipReason) return skip(testCtx, "F7", skipReason);
+    if (skipReason) return skipLeg(testCtx, "F7", skipReason);
     const interopRest = gateTool("iris_interop_rest");
     const nameDescribe: string =
       interopRest.inputSchema.shape.name.description ?? "";
@@ -527,7 +536,7 @@ describe("Epic 35 defect gate — all nine corrected contracts, live (Story 35.8
   // source revert of the flags forwarding in dev format.ts + rebuild of
   // @iris-mcp/dev (story Dev Agent Record).
   it("F8 — doc_xml_export import with compile:true produces a callable class; compile omitted states the NOT-compiled note", async (testCtx) => {
-    if (skipReason) return skip(testCtx, "F8", skipReason);
+    if (skipReason) return skipLeg(testCtx, "F8", skipReason);
     const xmlExport = gateTool("iris_doc_xml_export");
     const executeClassMethod = gateTool("iris_execute_classmethod");
     const docDelete = gateTool("iris_doc_delete");
@@ -596,7 +605,7 @@ describe("Epic 35 defect gate — all nine corrected contracts, live (Story 35.8
   // revert of the legacy fallback in data rest.ts + rebuild of @iris-mcp/data
   // (story Dev Agent Record).
   it("F9 — rest_manage:get on the legacy /api/executemcp/v2 app returns the legacy detail shape with swaggerSpec null", async (testCtx) => {
-    if (skipReason) return skip(testCtx, "F9", skipReason);
+    if (skipReason) return skipLeg(testCtx, "F9", skipReason);
     const restManage = gateTool("iris_rest_manage");
     const result = await restManage.handler(
       { action: "get", application: "/api/executemcp/v2" },
