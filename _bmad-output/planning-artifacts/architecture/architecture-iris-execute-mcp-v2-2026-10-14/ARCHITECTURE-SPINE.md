@@ -333,7 +333,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - **Story 42.10** (wave-8 decisions #38 to #40):
       - `S-42.10-annotations`: 13 existing tools change `destructiveHint` from `false` to `true`: `iris_doc_put`, `iris_sql_execute`, `iris_global_set`, `iris_execute_command`, `iris_execute_classmethod`, `iris_doc_load`, `iris_doc_export`, `iris_env_promote`, `iris_service_manage`, `iris_ldap_manage`, `iris_x509_manage`, `iris_production_item` and `iris_task_run` (DW-560).
       - `S-42.10-resend-text`: the `iris_message_resend` description and its `maxMessages` and `confirm` texts are corrected, not appended: executing needs `dryRun: false` and `confirm: true`, `dryRun: false` without `confirm` is refused, a call that leaves out `dryRun` previews, and only an executing over-cap call is refused (DW-662).
-      - `S-42.10-audit-namespace`: the audit entry of a `SYS`-scoped tool records `%SYS` (DW-654, AD-19).
+      - `S-42.10-audit-namespace`: the audit entry of a `SYS`-scoped tool records `%SYS`, and the additive `targetNamespace` field carries the call's `namespace` argument when it has one (DW-654, AD-19, decision #41).
 
     Each change may land in the earliest story that needs it, and is named in `CHANGELOG.md` with that story. Prune this list into the CHANGELOG at the Epic 42 retro.
   - **After `1.0.0`.** A breaking change requires a new major version. Clients pinned to `@1` receive every 1.x release automatically.
@@ -388,7 +388,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - **A call the client cancels** is `error`, with a fixed text saying an in-flight IRIS request was aborted.
   - **Secrets.** They are redacted before an entry is queued.
   - **Failure handling.** The writer never fails or delays a tool call. Only an unwritable path at startup fails fast.
-  - **Schema.** `outcome` keeps its closed domain (`ok`, `error`, `denied`). New fields are additive. `namespace` is the namespace the call ran in: `%SYS` for a `SYS`-scoped tool, otherwise the call's override or the profile's default (Story 42.10, DW-654).
+  - **Schema.** `outcome` keeps its closed domain (`ok`, `error`, `denied`). New fields are additive. For a `SYS`-scoped tool, `namespace` is `%SYS`, where the call runs; when such a call's `namespace` argument names the namespace it acts on, the additive `targetNamespace` field records that argument, whatever `IRIS_AUDIT_LOG_PARAMS` says. For every other tool, `namespace` is the call's override or the profile's default (Story 42.10, DW-654, wave-8 decision #41).
   - **PHI** *(lands in Story 39.2)*:
     - Policy effects go in a new additive field, and a policy refusal is `error` with its own refusal code.
     - PHI-bearing inputs are declared on the `ToolDefinition` with a schema-level marker. Audit redacts by that declaration, under the profile's policy, never by matching parameter names.

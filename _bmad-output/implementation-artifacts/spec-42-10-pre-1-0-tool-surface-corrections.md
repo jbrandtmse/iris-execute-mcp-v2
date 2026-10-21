@@ -4,6 +4,7 @@ type: 'bugfix'
 created: '2026-10-21'
 status: 'done'
 baseline_revision: '3f79dab29841e4b63869817ef72b922db2dd75c4'
+baseline_commit: '3f79dab29841e4b63869817ef72b922db2dd75c4'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -151,6 +152,7 @@ All paths are from the repo root; `T/` is `packages/iris-mcp-all/src/__tests__/`
 - Given an `iris_message_resend` client, when it reads the tool description and the `maxMessages`/`confirm` schema texts, then they say that only `dryRun: false` without `confirm: true` is refused, that omitting `dryRun` previews, and that an over-cap count is refused only when executing.
 - Given `IRIS_AUDIT_LOG` and a SYS-scoped admin call (with or without a `namespace` argument), when the call ends ok, denied or schema-invalid, then its entry records `"namespace":"%SYS"`, and NS/BOTH/NONE entries are byte-identical to before.
 - Given the default suite, when `pnpm gen:governance-baseline:check` runs, then it is clean, and no input-schema key, tool, action or governance key was added or removed.
+- [ ] [Decision #41] DW-667 (lead, after implement, 2026-10-21): given `IRIS_AUDIT_LOG` with `IRIS_AUDIT_LOG_PARAMS` unset and a SYS-scoped admin call that has a `namespace` argument (for example `iris_mapping_manage`), when the call ends ok, denied or schema-invalid, then its entry records `"namespace":"%SYS"` AND the additive `"targetNamespace":"<that argument>"`; a SYS-scoped call with no `namespace` argument has no `targetNamespace` key, and NS/BOTH/NONE entries never carry it. Spine AD-19 (amended) is the rule. If the handler golden's audit row moves, each moved byte is one sanctioned entry under `S-42.10-audit-namespace`. Pin it and record its `mutation:` line.
 
 ## Spec Change Log
 

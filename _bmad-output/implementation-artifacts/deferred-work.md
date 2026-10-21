@@ -3686,3 +3686,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: packages/shared/src/cli/governance.ts:935; seen at the 42.1 full lint run
 - 2026-10-21T13:14:16Z status=routed owner=42-3-ci-workflow by=harvest note=the CI lint gate must not carry a standing warning; remove the directive when wiring lint into CI
+
+### DW-667: SYS-scoped tools whose namespace argument is the call's subject (iris_mapping_manage, iris_mapping_list, iris_webapp_manage, iris_resource_manage, iris_user_manage) now audit namespace %SYS, so with the default IRIS_AUDIT_LOG_PARAMS=false the namespace they act on no longer appears in the entry
+- source: spec-42-10-pre-1-0-tool-surface-corrections.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: 42.10 implement review (3 of 4 layers): deriveAuditNamespace server-base.ts:2402 returns %SYS for SYS scope; paramKeys holds names only; before 42.10 the entry carried the argument
+- 2026-10-21T16:12:40Z status=open owner=42-10-pre-1-0-tool-surface-corrections by=harvest note=wave-8 decision 41: add the additive targetNamespace field (the call's namespace argument, when set) for SYS-scoped tools; spine AD-19 amended; code review patches it in-story with a pin, or it takes the story's one rework iteration
+
+### DW-668: Audit namespace for NONE- and BOTH-scoped tools still records the call's namespace argument or the profile default: the 21 ops tools run in %SYS server-side but record the profile namespace, and iris_backup_manage, iris_database_action and iris_process_manage record a namespace argument documented as having no effect
+- source: spec-42-10-pre-1-0-tool-surface-corrections.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: 42.10 plan probe: deriveAuditNamespace server-base.ts:2394-2401; ToolScope NONE means no namespace concept (tool-types.ts:38-46); handler golden records HSCUSTOM for ops iris_metrics_system
+- 2026-10-21T16:12:40Z status=wontfix-accepted owner=42-10-pre-1-0-tool-surface-corrections by=harvest note=reopen_if=an operator reports a misleading namespace in an ops or webapp_list audit entry, or AD-19 adopts per-scope recording; spine AD-19 now states the non-SYS rule exactly (decision 41)

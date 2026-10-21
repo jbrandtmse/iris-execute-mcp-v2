@@ -43,3 +43,7 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-21T14:59:32Z	Epic 42	spine_updated	ad=AD-4,AD-15,AD-19,conv_frozen_goldens,deferred reason=spec_gate_decisions_38_39_40 by=lead story=42-10-pre-1-0-tool-surface-corrections lint=ok
 2026-10-21T14:59:32Z	Epic 42	ledger_routed_planned	story=42-11-storage-guard-on-every-document-write entries=1(DW-652) excess=0 by=spec_gate
 2026-10-21T14:59:43Z	Story 42.10	stage_spawned	stage=implement spawn_at=2026-10-21T14:59:43Z model=claude-sonnet-5-5 agent_name=42-10-pre-1-0-tool-surface-corrections-implement-1 cycle_iteration=1
+2026-10-21T16:13:20Z	Story 42.10	dev_complete	spawn_at=2026-10-21T14:59:43Z model=claude-sonnet-5-5 build_sha=ebeee9e baseline_revision=3f79dab review_loop_iteration=0 followup_review_recommended=false deferred=2(DW-667_open_in-story_med_decision41,DW-668_wontfix-accepted_low) files=48 loc_added=1770 loc_removed=155 nfr_tripwires=0 adr_violations_surfaced=1(AD-19_wording_overclaim->spine_amended_decision41) cycle_iteration=1
+2026-10-21T16:13:20Z	Epic 42	spine_updated	ad=AD-19,AD-15 reason=dev_complete_decision_41 by=lead story=42-10-pre-1-0-tool-surface-corrections lint=ok
+2026-10-21T16:13:20Z	Story 42.10	adr_verifications_complete	tool=none acs=none result=none_required evidence= mutations=none model=claude-opus-5-5
+2026-10-21T16:13:20Z	Story 42.10	stage_spawned	stage=qa spawn_at=2026-10-21T16:13:20Z model=claude-sonnet-5-5 agent_name=42-10-pre-1-0-tool-surface-corrections-qa-1 cycle_iteration=1
