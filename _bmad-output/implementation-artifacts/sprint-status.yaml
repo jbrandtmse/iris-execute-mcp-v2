@@ -555,7 +555,7 @@ development_status:
   43-1-framework-migration-to-sdk-v2: done
   43-2-serve-mcp-revision-2026-07-28: done
   43-3-human-confirmation-through-elicitation: done
-  43-4-sdk-v2-docs-smokes-and-capstone: ready-for-dev
+  43-4-sdk-v2-docs-smokes-and-capstone: in-progress
   epic-43-retrospective: optional
 action_items:
   - id: "epic-38-retro-item-1-decide-whether-to-build-a-streamable-htt"
