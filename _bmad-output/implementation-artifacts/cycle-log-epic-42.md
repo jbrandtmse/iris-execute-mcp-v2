@@ -27,3 +27,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-21T13:14:51Z	Epic 42	ledger_routed_planned	story=42-3,42-5,42-6,42-7,42-9 entries=5(DW-666,DW-387occ,DW-665,DW-663,DW-664) excess=0 by=harvest
 2026-10-21T13:14:51Z	Story 42.1	adr_verifications_complete	tool=none acs=none result=none_required evidence= mutations=none note=AD-2/14/15/28/29/30/32_are_rules_not_tool_stacks;checked_by_QA+CR model=claude-opus-5-5
 2026-10-21T13:14:58Z	Story 42.1	stage_spawned	stage=qa spawn_at=2026-10-21T13:14:58Z model=claude-sonnet-5-5 agent_name=42-1-pre-publish-package-fixes-qa-1 cycle_iteration=1
+2026-10-21T13:41:02Z	Story 42.1	qa_complete	spawn_at=2026-10-21T13:14:58Z model=claude-sonnet-5-5 tests_added=6_files(33_tests)+1_helper mutations_demonstrated=12 first_run_failures=0 clarifications=0 closing_sections_present=true cycle_iteration=1
+2026-10-21T13:41:02Z	Story 42.1	stage_spawned	stage=code-review spawn_at=2026-10-21T13:41:02Z model=claude-opus-5-5 agent_name=42-1-pre-publish-package-fixes-code-review-1 cycle_iteration=1
