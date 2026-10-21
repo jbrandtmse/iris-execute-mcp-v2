@@ -3700,3 +3700,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-10-pre-1-0-tool-surface-corrections.md | severity: low | fix-risk: med | footprint: in-epic
 - evidence: 42.10 plan probe: deriveAuditNamespace server-base.ts:2394-2401; ToolScope NONE means no namespace concept (tool-types.ts:38-46); handler golden records HSCUSTOM for ops iris_metrics_system
 - 2026-10-21T16:12:40Z status=wontfix-accepted owner=42-10-pre-1-0-tool-surface-corrections by=harvest note=reopen_if=an operator reports a misleading namespace in an ops or webapp_list audit entry, or AD-19 adopts per-scope recording; spine AD-19 now states the non-SYS rule exactly (decision 41)
+
+### DW-669: The agent prompts and skills deploy-and-test-class and promote-environment-change (and their skills-pack copies) do not mention the STORAGE_DROPPED refusal or the allowStorageRegeneration override, so the deploy loop may test against the stale server copy of a refused file
+- source: spec-42-11-storage-guard-on-every-document-write.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: 42.11 implement: the deploy-and-test-class loop handles compile errors only; a refusal is a failures entry; prompt text is a frozen prompts/get golden (sanctioned entry needed)
+- 2026-10-21T19:00:28Z status=wontfix-accepted owner=42-11-storage-guard-on-every-document-write by=harvest note=reopen_if=an agent following deploy-and-test-class or promote-environment-change misses a STORAGE_DROPPED refusal (report or ledger occurrence); the refusal text itself names the override and the result counts the failure
