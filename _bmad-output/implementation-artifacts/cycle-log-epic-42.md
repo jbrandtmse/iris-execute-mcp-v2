@@ -73,3 +73,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-21T20:08:10Z	Story 42.11	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=1230_both_orders(dev_12_skipped=two_live_gates_unarmed_closed_port;armed_at_lead_smoke_7/7+5/5) result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
 2026-10-21T20:08:12Z	Story 42.11	committed	sha=5ce40c2 code_sha=47df55a build_sha=394b35f submodules= ci=none run=none branch=epic42 pushed=origin/epic42 verified=merge-base amendments=spine:AD-24,AD-15
 2026-10-21T20:08:12Z	Story 42.11	story_cycle	plan_to_commit_min=186 implement_passes=1 reviews=1 rework=0 first_ci=none models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-21T20:08:19Z	Story 42.2	stage_spawned	stage=plan spawn_at=2026-10-21T20:08:19Z model=claude-opus-5-5 agent_name=42-2-bootstrap-downgrade-guard-plan-1 cycle_iteration=1
