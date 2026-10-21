@@ -3511,6 +3511,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 43.1 plan probe 2026-10-20: @modelcontextprotocol/server@2.3.1 dist ajvProvider-*.mjs bundles them; pnpm audit --prod reads only the lockfile
 - 2026-10-20T07:58:39Z status=routed owner=43-3-human-confirmation-through-elicitation by=harvest note=43.3 enables elicitation, the only user of the bundled validator: check the published advisories against ajv 8.18.0 and fast-uri 3.1.0 and record the verdict (or supply a validator) before the dialog ships
+- 2026-10-21T01:44:35Z status=routed owner=42-1-pre-publish-package-fixes by=lead note=43.3 delivered the verdict (fast-uri 3.1.0 advisories unreachable: constant schema, bundled validator never invoked) and the story-43-3-validator-unreachable tripwire; residual: before 1.0, bump the exact SDK pin if a release pins fast-uri >=3.1.8 (typescript-sdk#2966/PR #2973); DW-637 bullet under 42.1
 
 ### DW-638: The v2-client code in five iris-mcp-all local-copy gates and two launcher integration tests has never run against a server: each skips unless IRIS is reachable
 - source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: med | fix-risk: low | footprint: in-story
@@ -3539,6 +3540,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: med | fix-risk: med | footprint: in-epic
 - evidence: QA 2026-10-20 story-43-2-qa-concurrency-cancel: the cancelled id gets no answer but its held read is forwarded and audited ok; server-base.ts:874 passes request.params only (pre-existing, both eras)
 - 2026-10-20T13:22:16Z status=routed owner=43-3-human-confirmation-through-elicitation by=cr note=43.3 forwards ctx: forward the abort signal to the HTTP call; pin a cancelled call never reaches IRIS or is not audited ok
+- 2026-10-21T01:44:35Z status=resolved-by:43-3-human-confirmation-through-elicitation owner=43-3-human-confirmation-through-elicitation by=lead note=delivered: ctx.mcpReq.signal forwarded through bindSignal to ctx.http and resolveProfileClient clients; a cancel before the request never reaches IRIS (in-memory/unit pins), a cancel mid-flight closes the held connection and is audited error with CANCELLED_CALL_TEXT (real stdio both eras, QA cancel-audit + concurrency-cancel); a call cancelled before its dialog is audited as cancelled (CR HIGH fix)
 
 ### DW-643: On a modern-pinned stdio connection the SDK does not re-check each request's _meta protocolVersion: a request claiming 2025-11-25, 2099-01-01 or garbage is served where the revision (basic/versioning) says -32022 MUST be returned
 - source: spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: high | footprint: out-of-footprint
@@ -3574,6 +3576,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-43-2-serve-mcp-revision-2026-07-28.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 43.2 fresh check 2026-10-20: shared forward 1 failed|54 passed, reverse 55/55; reruns: main checkout 3/3, fresh worktree 5/5; the failing row name was lost to the summary grep; rows at sdk-wire-compat.test.ts:538-568 wait setTimeout(50) before reading the notification count
 - 2026-10-20T13:30:48Z status=routed owner=43-3-human-confirmation-through-elicitation by=harvest note=43.3 reworks this file: replace the fixed sleeps with a deterministic barrier (await the notification, or a client round trip before counting)
+- 2026-10-21T01:44:35Z status=resolved-by:43-3-human-confirmation-through-elicitation owner=43-3-human-confirmation-through-elicitation by=lead note=delivered: sdk-wire-compat removeTools/addTools rows await the notification then a round trip; 25/25 back-to-back runs green (implement + review); the double-notify mutation turns the exactly-one rows red 8/8
 
 ### DW-650: iris_doc_put with allowStorageRegeneration: true drops Storage definitions on a flag the agent sets itself, the same capability iris_doc_edit:regenerateStorage gates, but under the default-enabled iris_doc_put and outside AD-34's gate set
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3614,8 +3617,19 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: med | fix-risk: low | footprint: in-story
 - evidence: 43.3 review 2026-10-20: message-resend.ts:609-636 swallows every preview error and returns undefined; confirmOnWire treats undefined scope as proceed
 - 2026-10-20T23:38:03Z status=open owner=43-3-human-confirmation-through-elicitation by=harvest note=wave-8 decision 21: fail closed on an eliciting client for any preview failure that is not an IRIS 4xx refusal; code review applies it in-story
+- 2026-10-21T01:44:35Z status=resolved-by:43-3-human-confirmation-through-elicitation owner=43-3-human-confirmation-through-elicitation by=lead note=delivered (decision 21 as corrected): a resendFiltered preview that fails other than an IRIS error response below 500 rejects ctx.confirm and ends the call with that error, no execute POST; fake-listener Demo.PreviewDown (500) and Demo.Refused (HTTP 200 refusal) rows on both eras; fail-open mutation red
 
 ### DW-658: A declined promotion can still have run the first-use set-up (connection check, ExecuteMCPv2 bootstrap) on a target profile, because env-promote resolves both profile clients before the dialog
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: in-story
 - evidence: 43.3 review: env-promote.ts:1151-1191 executeAction resolves before ctx.confirm
 - 2026-10-20T23:38:03Z status=wontfix-accepted owner=43-3-human-confirmation-through-elicitation by=harvest note=wave-8 decision 22: documented known limit; reopen_if=a deploy to a declined target is reported as harmful or the bootstrap gains a user-data write
+
+### DW-659: A confirmation dialog still open when a server is killed by SIGTERM or SIGINT with its stdin open gets no unanswered audit entry: no signal handler runs stop(); only stdin EOF, the 600 s sweep or stop() flush pending asks
+- source: spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: 43.3 CR 2026-10-20: no process.on(SIGTERM|SIGINT) in packages/*/src; flushPendingAsks runs only from server.onclose, the sweep timer and stop(); QA saw a SIGTERM'd server write none; a handler would add a shutdown audit line to every signal-ended session
+- 2026-10-21T01:41:48Z status=wontfix-accepted owner=43-3-human-confirmation-through-elicitation by=cr note=reopen_if=a client is seen SIGTERMing a server with stdin open, or an audit shows an asked dialog with no entry
+
+### DW-660: The fake IRIS listener answers the purge, clean and resendFiltered refusals with HTTP 400, where the ExecuteMCPv2 handlers refuse with HTTP 200 and the error in the envelope, so pinned refusal texts read 'IRIS returned HTTP 400' instead of 'IRIS reported errors'
+- source: spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: 43.3 CR 2026-10-20: fake-iris-listener.mjs replies 400 for those refusals; RenderResponseBody (irislib/%Atelier/REST.cls:129-169) sets no HTTP status; the task-0 baseline literals were captured against this fake, so a fix recaptures them
+- 2026-10-21T01:41:48Z status=wontfix-accepted owner=43-3-human-confirmation-through-elicitation by=cr note=reopen_if=a TS path branches on IrisApiError.statusCode for a gate route pinned only by a 400-answering fake route

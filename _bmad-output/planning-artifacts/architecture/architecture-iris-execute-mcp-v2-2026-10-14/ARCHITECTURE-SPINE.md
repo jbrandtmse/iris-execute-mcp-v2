@@ -372,7 +372,8 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 - **Rule:**
   - **Writing entries.** One JSONL entry is written per call from the chokepoint (AD-3). Audit cannot be expressed in `IRIS_GOVERNANCE`.
     - **Multi-round calls** *(Story 43.3, wave-8 decisions #14 and #18)*. A multi-round request, such as an AD-34 confirmation, is one logical call. Its one entry is written by the round that ends it, and an asking round writes none.
-    - **A confirmation never answered** is written as `error`, with `confirmation: "unanswered"`, after its 600 s TTL or at shutdown, so every asked dialog has its entry.
+    - **A confirmation never answered** is written as `error`, with `confirmation: "unanswered"`, after its 600 s TTL, when the client closes the connection, or at a graceful `stop()`, so every asked dialog has its entry. A server killed by a signal writes none (DW-659, accepted: MCP stdio clients close stdin first).
+    - **A call cancelled before its dialog is shown** is audited at once as the cancelled call, and leaves no pending ask.
     - **A decline** (`CONFIRMATION_DECLINED`) is `denied`. The additive `confirmation` field records `accepted`, `declined`, `cancelled`, `unconfirmed` or `unanswered`.
     - **A call the client cancels** is `error`, with a fixed text saying an in-flight IRIS request was aborted.
   - **Secrets.** They are redacted before an entry is queued.
