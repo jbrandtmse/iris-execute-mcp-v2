@@ -19,6 +19,8 @@
  *    on any other ref; the sysctl step reserves exactly the registry's host ports and none is refused; `logs` runs on
  *    `failure() || cancelled()` and `down` on `always()`; the jobs' timeouts are the registry's.
  *  - DW-443 (42.3.5): `package` needs `gates` and `throwaway`, and every package with a `prepublishOnly` has its suite step.
+ *  - IPM (42.4): the `ipm` job is a job of the registry like the others (steps, timeout, runner, floor Node, no strategy, no `if`), and it
+ *    needs `gates` and `throwaway`, so no archive is built from a red commit.
  */
 
 import { parse } from "yaml";
@@ -229,7 +231,7 @@ export function workflowProblems(text: string, context: WorkflowContext): string
   if (String(setupNodeOf("gates")?.with?.["node-version"]) !== "${{ matrix.node }}") {
     problems.push("gates does not run on its matrix leg: the node-version of its setup-node step is not ${{ matrix.node }}");
   }
-  for (const name of ["throwaway", "package"]) {
+  for (const name of ["throwaway", "package", "ipm"]) {
     if (String(setupNodeOf(name)?.with?.["node-version"]) !== floor) problems.push(`${name} does not run on Node ${floor}`);
   }
 
@@ -240,6 +242,8 @@ export function workflowProblems(text: string, context: WorkflowContext): string
     [/\bsecrets\b/, "a secrets reference"],
     [/pull_request_target/, "pull_request_target"],
     [/\b(?:npm|pnpm|yarn)\s+publish\b|\bchangeset\s+(?:publish|version)\b|\b(?:vsce|ovsx)\s+publish\b|\bnpm\s+login\b|\bgit\s+(?:push|tag)\b|\bgh\s+release\b|\bdocker\s+push\b/, "a publish, tag or push command"],
+    [/\bupload-(?:artifact|release-asset)\b|\bactions\/cache\b/, "an upload or cache step"],
+    [/\b(?:zpm|ipm)[ \t]+["']?(?:publish|install|repo|enable|update)\b/, "an IPM verb other than load, package and list"],
   ] as Array<[RegExp, string]>) {
     if (pattern.test(bare)) problems.push(`the workflow contains ${what}`);
   }
@@ -289,10 +293,12 @@ export function workflowProblems(text: string, context: WorkflowContext): string
     if (jobs[name]?.["timeout-minutes"] !== minutes) problems.push(`${name} has timeout-minutes ${jobs[name]?.["timeout-minutes"]}, not ${minutes}`);
   }
 
-  // DW-443
-  const needs: string[] = Array.isArray(jobs["package"]?.needs) ? jobs["package"].needs : [jobs["package"]?.needs];
-  for (const required of ["gates", "throwaway"]) {
-    if (!needs.includes(required)) problems.push(`the package job does not need ${required}`);
+  // DW-443, and Story 42.4 for the ipm job: no tarball and no archive is built from a red commit.
+  const needsOf = (job: string): string[] => (Array.isArray(jobs[job]?.needs) ? (jobs[job].needs as string[]) : [jobs[job]?.needs]);
+  for (const job of ["package", "ipm"]) {
+    for (const required of ["gates", "throwaway"]) {
+      if (!needsOf(job).includes(required)) problems.push(`the ${job} job does not need ${required}`);
+    }
   }
   const throwawayRuns = throwawaySteps.map((step) => step.run ?? "").join("\n");
   for (const pkg of context.packages.filter((candidate) => candidate.prepublishOnly !== undefined)) {

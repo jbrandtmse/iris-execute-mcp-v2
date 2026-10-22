@@ -3,8 +3,11 @@
 //
 // USE
 //   node scripts/throwaway-iris.mjs run [--image <ref>] [--host-port <port>] -- <command> [args...]
-//   node scripts/throwaway-iris.mjs up --image <ref> --namespace <NS> --host-port <port> --state <file>
+//   node scripts/throwaway-iris.mjs up --image <ref> --namespace <NS> --host-port <port> [--mount <dir>:/opt/iris-mcp/<name>] --state <file>
+//   node scripts/throwaway-iris.mjs up --image <ref> --namespace <NS> --network none [--mount <dir>:/opt/iris-mcp/<name>] --state <file>
 //   node scripts/throwaway-iris.mjs exec --state <file> -- <command> [args...]
+//   node scripts/throwaway-iris.mjs session --state <file> --namespace <NS> --script <file>
+//   node scripts/throwaway-iris.mjs cp --state <file> --from <container path under /tmp/iris-mcp-> --to <host path>
 //   node scripts/throwaway-iris.mjs logs --state <file>
 //   node scripts/throwaway-iris.mjs down --state <file>
 //
@@ -36,6 +39,17 @@
 //      IRIS_THROWAWAY=<container name>; every other ambient IRIS_* variable is dropped. The script exits with the
 //      command's exit code.
 //   7. A missing docker exits non-zero with a message. The script never skips.
+//   8. `up --network none` (Story 42.4) starts the container with `docker run -d --network none` and no `-p`, so it has a
+//      loopback interface and nothing else, and it is ready when the session loop and the password unexpiry have answered:
+//      there is no web port to poll. `--network none` and `--host-port` exclude each other. The state file is `{name, id,
+//      image, namespace, network: "none"}`, mode 0600. `--mount <dir>:/opt/iris-mcp/<name>` (either mode) adds a read-only
+//      bind mount `-v <dir>:/opt/iris-mcp/<name>:ro`; the host directory must be absolute, plain (no `..`, `.` or trailing
+//      slash), a real directory and not a symbolic link, and the container path is `/opt/iris-mcp/<[a-z0-9-]+>`.
+//   9. `session` pipes a script file into `docker exec -i <id> iris session iris -U <NS>` of the recorded container, prints
+//      what the session prints, and exits with docker's status. `cp` runs `docker cp <id>:<from> <to>`, and `<from>` must
+//      be a plain path under `/tmp/iris-mcp-`. Both re-inspect the container first, as `exec` does; a state with
+//      `network: "none"` is inspected for `HostConfig.NetworkMode === "none"` and no published port instead of a port.
+//      `exec` refuses a `--network none` state (exit 2): such a container has no port for the command to reach.
 //
 // EXIT CODES
 //   2 usage or a refused image, name, namespace, port, state file or container on the command line; 3 docker not found
@@ -49,14 +63,16 @@
 //   `execHarness`, `logsHarness` and `downHarness` take every side effect as a dependency.
 //
 // PURE HELPERS EXPORTED FOR THE GATES AND THE CI SCRIPTS
-//   validateImage, validateHostPort, validateNamespace, validateContainerName, generateContainerName, buildRunArgv,
-//   buildPortArgv, parseDockerPort, buildSessionArgv, buildInspectArgv, buildLogsArgv, buildTeardownArgv,
+//   validateImage, validateHostPort, validateNamespace, validateSessionNamespace, validateContainerName,
+//   generateContainerName, validateMount, validateCopySource, validateCopyDestination, buildRunArgv, buildPortArgv,
+//   parseDockerPort, buildSessionArgv, buildCopyArgv, buildInspectArgv, buildLogsArgv, buildTeardownArgv,
 //   buildChildEnv, throwawayEnvProblems, assertThrowawayEnv, parseCli, parseState, findExecutable, inspectProblems,
 //   assertThrowawayInspect, createTeardown. The constants name the images and the safety limits.
+//   `sessionHarness` and `copyHarness` are the two subcommand functions the CI scripts drive with `defaultDeps()`.
 
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { accessSync, chmodSync, constants, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, chmodSync, constants, lstatSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { isEntryPoint, spawnInherited } from './lib/script-process.mjs';
@@ -70,15 +86,17 @@ export const IRIS_COMMUNITY_IMAGE =
   'intersystems/iris-community:2026.2@sha256:cd2ebcab02d1ef80ec155def4418399f353d867162688c36a3705760e750bdaa';
 
 /**
- * The oldest IRIS Community tag that still starts, pinned by its manifest list digest (linux/amd64 `3dfa0ee6...`,
- * linux/arm64 `afca69c6...`). Source: `hub.docker.com/v2/repositories/intersystems/iris-community/tags`, fetched 2026-10-22.
- * A Community image carries a time-limited license key and refuses to start once it has expired ("Invalid Community Edition
- * license"), so the oldest testable tag moves forward over time. On 2026-10-22 the keys of 2024.3, 2025.1 and 2025.2 had
- * expired; 2025.3 starts and passes the bootstrap guard, and its key expires on 2026-11-13. The next tag, 2026.1
- * (`sha256:c57b65b2b454494091e7b3e49f6a53b3335f40adf475bcfcee0866083f35a7c2`), passes too, and its key expires on 2027-03-27.
+ * The oldest IRIS Community tag whose license key is valid for months ahead, pinned by its manifest list digest. A Community
+ * image carries a time-limited license key and refuses to start once it has expired ("Invalid Community Edition license"), so the
+ * oldest testable tag moves forward before its key expires (DW-686). The dated floor:
+ *  - On 2026-10-22 the keys of 2024.3, 2025.1 and 2025.2 had expired.
+ *  - 2025.3 passed every bootstrap-guard leg in CI run 39749804619 (commit `6a8574f`, 2026-10-22), and its key expires on
+ *    2026-11-13, so this constant moved off it.
+ *  - 2026.1 (IRIS 2026.1 Build 234U, IPM 0.10.5) is the oldest tag now tested; its key is valid to 2027-03-27.
+ * Source: `hub.docker.com/v2/repositories/intersystems/iris-community/tags`, fetched 2026-10-22.
  */
 export const OLDEST_IRIS_COMMUNITY_IMAGE =
-  'intersystems/iris-community:2025.3@sha256:f456892d143d54a1cf3f202f04b672c7d594ec3cde5f47a69dbf5451329dc300';
+  'intersystems/iris-community:2026.1@sha256:c57b65b2b454494091e7b3e49f6a53b3335f40adf475bcfcee0866083f35a7c2';
 
 /**
  * IRIS for Health Community 2026.2, pinned by its multi-arch manifest list digest (linux/amd64 `788c8626...`): the
@@ -103,6 +121,13 @@ export const REFUSED_HOST_PORTS = Object.freeze(['52773', '1972']);
 export const CONTAINER_WEB_PORT = '52773';
 export const LOOPBACK_HOST = '127.0.0.1';
 
+/** The one network mode `up` takes besides a published loopback port: a loopback interface inside the container and nothing else. */
+export const NETWORK_NONE = 'none';
+
+/** Where a bind mount appears inside the container, and the prefix of the only container paths `cp` reads. */
+export const MOUNT_CONTAINER_ROOT = '/opt/iris-mcp';
+export const COPY_SOURCE_PREFIX = '/tmp/iris-mcp-';
+
 /** The account, password, namespace and transport the command receives. */
 export const THROWAWAY_USERNAME = '_SYSTEM';
 export const THROWAWAY_PASSWORD = 'SYS';
@@ -117,6 +142,8 @@ const IMAGE_PATTERN = /^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$/;
 const NAME_PATTERN = /^iris-mcp-throwaway-[0-9a-f]{12}$/;
 const CONTAINER_ID_PATTERN = /^[0-9a-f]{64}$/;
 const NAMESPACE_PATTERN = /^[A-Z][A-Z0-9]{0,63}$/;
+const MOUNT_CONTAINER_PATTERN = /^\/opt\/iris-mcp\/[a-z0-9-]+$/;
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
 
 /** A refusal raised by validation: the request names something this harness never uses. */
 export class ThrowawayRefusal extends Error {
@@ -181,6 +208,75 @@ export function validateNamespace(namespace) {
 }
 
 /**
+ * The namespace an `iris session` opens: {@link validateNamespace}, or `%SYS`.
+ *
+ * @param {unknown} namespace
+ * @returns {string}
+ */
+export function validateSessionNamespace(namespace) {
+  return namespace === '%SYS' ? namespace : validateNamespace(namespace);
+}
+
+/**
+ * The read-only bind mount `<absolute host directory>:/opt/iris-mcp/<name>`, split into its two sides. The text must hold
+ * exactly one colon, so a drive letter or a third (mode) part is refused; the host directory must be absolute and plain, as
+ * `path.resolve` would write it (no `..`, no `.`, no repeated or trailing slash), with no control character; the container
+ * path must be `/opt/iris-mcp/<[a-z0-9-]+>`. Only the text is checked: that the directory exists, is a directory and is not a
+ * symbolic link is {@link defaultDeps}'s `checkMountDirectory`.
+ *
+ * @param {unknown} spec
+ * @returns {{ host: string, container: string, spec: string }}
+ */
+export function validateMount(spec) {
+  const refuse = (reason) =>
+    new ThrowawayRefusal(
+      `refusing the mount ${JSON.stringify(spec)}: ${reason} A mount is <absolute host directory>:${MOUNT_CONTAINER_ROOT}/<name>, with the name in [a-z0-9-].`,
+    );
+  if (typeof spec !== 'string' || spec === '') throw refuse('it is not text.');
+  const parts = spec.split(':');
+  if (parts.length !== 2) throw refuse('it must hold exactly one ":" (no drive letter, no mode).');
+  const [host, container] = parts;
+  if (CONTROL_CHARACTER_PATTERN.test(spec)) throw refuse('it holds a control character.');
+  if (!path.isAbsolute(host)) throw refuse('the host directory is not absolute.');
+  if (host.split(/[\\/]/).includes('..')) throw refuse('the host directory holds "..".');
+  if (host !== path.resolve(host)) throw refuse('the host directory is not plain (no ".", repeated slash or trailing slash).');
+  if (!MOUNT_CONTAINER_PATTERN.test(container)) throw refuse(`the container path is not ${MOUNT_CONTAINER_ROOT}/<name>.`);
+  return { host, container, spec };
+}
+
+/**
+ * The container path `cp` reads: absolute, under {@link COPY_SOURCE_PREFIX}, with no `..` segment, no colon and no control character.
+ *
+ * @param {unknown} from
+ * @returns {string}
+ */
+export function validateCopySource(from) {
+  const refuse = (reason) =>
+    new ThrowawayRefusal(`refusing to copy ${JSON.stringify(from)}: ${reason} A copy reads a path that starts with ${COPY_SOURCE_PREFIX}.`);
+  if (typeof from !== 'string' || !from.startsWith(COPY_SOURCE_PREFIX) || from.length === COPY_SOURCE_PREFIX.length) {
+    throw refuse('it is not under that prefix.');
+  }
+  if (from.includes(':') || CONTROL_CHARACTER_PATTERN.test(from)) throw refuse('it holds a colon or a control character.');
+  if (from.split('/').includes('..')) throw refuse('it holds "..".');
+  return from;
+}
+
+/**
+ * The host path `cp` writes: non-empty text with no colon (docker reads `name:path` as a container path) and no control character.
+ *
+ * @param {unknown} to
+ * @returns {string}
+ */
+export function validateCopyDestination(to) {
+  if (typeof to !== 'string' || to === '' || to.includes(':') || CONTROL_CHARACTER_PATTERN.test(to)) {
+    throw new ThrowawayRefusal(
+      `refusing to copy to ${JSON.stringify(to)}: the destination must be a host path with no colon (docker would read it as a container path) and no control character.`,
+    );
+  }
+  return to;
+}
+
+/**
  * The container name, when this script could have generated it (`iris-mcp-throwaway-<12 hex>`).
  * The shared instance's name, and every name this script did not create, are refused.
  *
@@ -214,12 +310,27 @@ export function generateContainerName(random = randomBytes) {
 
 /**
  * The `docker run` arguments (without the `docker` command): detached, named, labelled, with the container's web port
- * published on the loopback address only: on `hostPort` when one is given, else on a dynamic port.
+ * published on the loopback address only: on `hostPort` when one is given, else on a dynamic port. With `network: 'none'`
+ * the container has no network and no `-p`, and a `hostPort` is refused. A `mount` adds a read-only `-v` before the image.
  *
- * @param {{ image: string, name: string, hostPort?: string | number }} options
+ * @param {{ image: string, name: string, hostPort?: string | number, network?: 'none', mount?: string }} options
  * @returns {string[]}
  */
-export function buildRunArgv({ image, name, hostPort }) {
+export function buildRunArgv({ image, name, hostPort, network, mount }) {
+  const mounted = [];
+  if (mount !== undefined) {
+    const { host, container } = validateMount(mount);
+    mounted.push('-v', `${host}:${container}:ro`);
+  }
+  if (network !== undefined) {
+    if (network !== NETWORK_NONE) {
+      throw new ThrowawayRefusal(`refusing the network ${JSON.stringify(network)}: the only network mode this harness takes is "${NETWORK_NONE}".`);
+    }
+    if (hostPort !== undefined) {
+      throw new ThrowawayRefusal('refusing a host port with --network none: a container with no network publishes no port.');
+    }
+    return ['run', '-d', '--name', validateContainerName(name), '--label', OWNER_LABEL, '--network', NETWORK_NONE, ...mounted, validateImage(image)];
+  }
   const published = hostPort === undefined ? '' : validateHostPort(hostPort);
   return [
     'run',
@@ -230,6 +341,7 @@ export function buildRunArgv({ image, name, hostPort }) {
     OWNER_LABEL,
     '-p',
     `${LOOPBACK_HOST}:${published}:${CONTAINER_WEB_PORT}`,
+    ...mounted,
     validateImage(image),
   ];
 }
@@ -245,13 +357,27 @@ export function buildPortArgv(containerId) {
 }
 
 /**
- * The `docker exec` arguments that open an IRIS terminal session in %SYS, reading its commands from stdin.
+ * The `docker exec` arguments that open an IRIS terminal session in `namespace` (`%SYS` by default), reading its commands
+ * from stdin.
  *
  * @param {string} containerId
+ * @param {string} [namespace]
  * @returns {string[]}
  */
-export function buildSessionArgv(containerId) {
-  return ['exec', '-i', validateContainerId(containerId), 'iris', 'session', 'iris', '-U', '%SYS'];
+export function buildSessionArgv(containerId, namespace = '%SYS') {
+  return ['exec', '-i', validateContainerId(containerId), 'iris', 'session', 'iris', '-U', validateSessionNamespace(namespace)];
+}
+
+/**
+ * The `docker cp` arguments that copy one file out of the container: `<id>:<from>` to the host path `to`.
+ *
+ * @param {string} containerId
+ * @param {string} from - A container path under {@link COPY_SOURCE_PREFIX}.
+ * @param {string} to - A host path.
+ * @returns {string[]}
+ */
+export function buildCopyArgv(containerId, from, to) {
+  return ['cp', `${validateContainerId(containerId)}:${validateCopySource(from)}`, validateCopyDestination(to)];
 }
 
 /**
@@ -388,29 +514,39 @@ export function assertThrowawayEnv(env) {
  *
  * - `run [--image <ref>] [--host-port <port>] -- <command> [args...]`: `{ image, command }`, plus `hostPort` when the flag is
  *   given. The image defaults to {@link IRIS_COMMUNITY_IMAGE}.
- * - `up --image <ref> --namespace <NS> --host-port <port> --state <file>`: `{ subcommand: 'up', image, namespace, hostPort, state }`.
+ * - `up --image <ref> --namespace <NS> --host-port <port> [--mount <spec>] --state <file>`:
+ *   `{ subcommand: 'up', image, namespace, hostPort, state }`, plus `mount` when the flag is given.
+ * - `up --image <ref> --namespace <NS> --network none [--mount <spec>] --state <file>`:
+ *   `{ subcommand: 'up', image, namespace, network: 'none', state }`, plus `mount`. `--network` and `--host-port` exclude each other.
  * - `exec --state <file> -- <command> [args...]`: `{ subcommand: 'exec', state, command }`.
+ * - `session --state <file> --namespace <NS> --script <file>`: `{ subcommand: 'session', state, namespace, script }`.
+ * - `cp --state <file> --from <container path> --to <host path>`: `{ subcommand: 'cp', state, from, to }`.
  * - `logs --state <file>` and `down --state <file>`: `{ subcommand, state }`.
  *
  * Every value is validated.
  *
  * @param {readonly string[]} argv
- * @returns {{ image: string, command: string[], hostPort?: string } | { subcommand: 'up', image: string, namespace: string, hostPort: string, state: string } | { subcommand: 'exec', state: string, command: string[] } | { subcommand: 'logs' | 'down', state: string }}
+ * @returns {{ image: string, command: string[], hostPort?: string } | { subcommand: 'up', image: string, namespace: string, hostPort?: string, network?: 'none', mount?: string, state: string } | { subcommand: 'exec', state: string, command: string[] } | { subcommand: 'session', state: string, namespace: string, script: string } | { subcommand: 'cp', state: string, from: string, to: string } | { subcommand: 'logs' | 'down', state: string }}
  */
 export function parseCli(argv) {
   const usage =
     'usage: node scripts/throwaway-iris.mjs run [--image <digest-pinned ref>] [--host-port <port>] -- <command> [args...]\n' +
-    '       node scripts/throwaway-iris.mjs up --image <digest-pinned ref> --namespace <NS> --host-port <port> --state <file>\n' +
+    '       node scripts/throwaway-iris.mjs up --image <digest-pinned ref> --namespace <NS> --host-port <port> [--mount <dir>:/opt/iris-mcp/<name>] --state <file>\n' +
+    '       node scripts/throwaway-iris.mjs up --image <digest-pinned ref> --namespace <NS> --network none [--mount <dir>:/opt/iris-mcp/<name>] --state <file>\n' +
     '       node scripts/throwaway-iris.mjs exec --state <file> -- <command> [args...]\n' +
+    '       node scripts/throwaway-iris.mjs session --state <file> --namespace <NS> --script <file>\n' +
+    '       node scripts/throwaway-iris.mjs cp --state <file> --from <container path under /tmp/iris-mcp-> --to <host path>\n' +
     '       node scripts/throwaway-iris.mjs logs --state <file>\n' +
     '       node scripts/throwaway-iris.mjs down --state <file>';
   const subcommand = argv[0];
-  if (!['run', 'up', 'exec', 'logs', 'down'].includes(subcommand)) throw new ThrowawayRefusal(usage);
+  if (!['run', 'up', 'exec', 'session', 'cp', 'logs', 'down'].includes(subcommand)) throw new ThrowawayRefusal(usage);
 
   const allowed = {
     run: ['--image', '--host-port'],
-    up: ['--image', '--namespace', '--host-port', '--state'],
+    up: ['--image', '--namespace', '--host-port', '--network', '--mount', '--state'],
     exec: ['--state'],
+    session: ['--state', '--namespace', '--script'],
+    cp: ['--state', '--from', '--to'],
     logs: ['--state'],
     down: ['--state'],
   }[subcommand];
@@ -443,15 +579,41 @@ export function parseCli(argv) {
     return parsed;
   }
   if (subcommand === 'up') {
-    return {
+    const network = values['--network'];
+    if (network !== undefined && network !== NETWORK_NONE) {
+      throw new ThrowawayRefusal(`refusing --network ${JSON.stringify(network)}: the only network mode this harness takes is "${NETWORK_NONE}"; ${usage}`);
+    }
+    if (network !== undefined && values['--host-port'] !== undefined) {
+      throw new ThrowawayRefusal(`--network none and --host-port exclude each other: a container with no network publishes no port; ${usage}`);
+    }
+    const parsed = {
       subcommand,
       image: validateImage(require('--image')),
       namespace: validateNamespace(require('--namespace')),
-      hostPort: validateHostPort(require('--host-port')),
-      state: require('--state'),
     };
+    if (network === undefined) parsed.hostPort = validateHostPort(require('--host-port'));
+    else parsed.network = network;
+    parsed.state = require('--state');
+    if (values['--mount'] !== undefined) parsed.mount = validateMount(values['--mount']).spec;
+    return parsed;
   }
   if (subcommand === 'exec') return { subcommand, state: require('--state'), command };
+  if (subcommand === 'session') {
+    return {
+      subcommand,
+      state: require('--state'),
+      namespace: validateSessionNamespace(require('--namespace')),
+      script: require('--script'),
+    };
+  }
+  if (subcommand === 'cp') {
+    return {
+      subcommand,
+      state: require('--state'),
+      from: validateCopySource(require('--from')),
+      to: validateCopyDestination(require('--to')),
+    };
+  }
   return { subcommand, state: require('--state') };
 }
 
@@ -489,21 +651,31 @@ export function findExecutable(command, pathValue, platform = process.platform) 
  * on the loopback address at `port`. An empty list means the container is the throwaway. With `allowStopped`, a
  * container that is not running is accepted when it carries the name and the label, and its published port is not checked.
  *
+ * With `network: 'none'` in place of `port`, the container must instead have `HostConfig.NetworkMode === "none"` and publish
+ * no port at all (neither `HostConfig.PortBindings` nor `NetworkSettings.Ports` binds anything), whether it runs or not.
+ * Exactly one of `port` and `network` is given.
+ *
  * @param {unknown} inspected - The parsed JSON of `docker inspect`.
- * @param {{ name: string, port: string | number, allowStopped?: boolean }} expected
+ * @param {{ name: string, port?: string | number, network?: 'none', allowStopped?: boolean }} expected
  * @returns {string[]}
  */
-export function inspectProblems(inspected, { name, port, allowStopped = false }) {
+export function inspectProblems(inspected, { name, port, network, allowStopped = false }) {
   const problems = [];
+  const isolated = network !== undefined;
   try {
     validateContainerName(name);
   } catch (error) {
     problems.push(error.message);
   }
-  try {
-    validateHostPort(port);
-  } catch (error) {
-    problems.push(error.message);
+  if (isolated) {
+    if (network !== NETWORK_NONE) problems.push(`the network ${JSON.stringify(network)} is not "${NETWORK_NONE}".`);
+    if (port !== undefined) problems.push('a container is published on a port or runs with --network none, never both.');
+  } else {
+    try {
+      validateHostPort(port);
+    } catch (error) {
+      problems.push(error.message);
+    }
   }
   if (!Array.isArray(inspected) || inspected.length !== 1) {
     problems.push(`docker inspect must describe exactly one container, but returned ${Array.isArray(inspected) ? inspected.length : typeof inspected}.`);
@@ -520,7 +692,20 @@ export function inspectProblems(inspected, { name, port, allowStopped = false })
   if (!running && !allowStopped) {
     problems.push('the container is not running.');
   }
-  if (running || !allowStopped) {
+  if (isolated) {
+    const mode = container.HostConfig?.NetworkMode;
+    if (mode !== NETWORK_NONE) {
+      problems.push(`the container's network mode is ${JSON.stringify(mode)}, not "${NETWORK_NONE}".`);
+    }
+    const bound = (ports) =>
+      Object.entries(ports ?? {})
+        .filter(([, bindings]) => Array.isArray(bindings) && bindings.length > 0)
+        .map(([key]) => key);
+    const published = [...bound(container.HostConfig?.PortBindings), ...bound(container.NetworkSettings?.Ports)];
+    if (published.length > 0) {
+      problems.push(`the container publishes ${[...new Set(published)].join(', ')}, but a --network none container publishes no port.`);
+    }
+  } else if (running || !allowStopped) {
     const bindings = container.NetworkSettings?.Ports?.[`${CONTAINER_WEB_PORT}/tcp`];
     const published =
       Array.isArray(bindings) &&
@@ -536,7 +721,7 @@ export function inspectProblems(inspected, { name, port, allowStopped = false })
  * Throw when {@link inspectProblems} finds any problem.
  *
  * @param {unknown} inspected
- * @param {{ name: string, port: string | number, allowStopped?: boolean }} expected
+ * @param {{ name: string, port?: string | number, network?: 'none', allowStopped?: boolean }} expected
  */
 export function assertThrowawayInspect(inspected, expected) {
   const problems = inspectProblems(inspected, expected);
@@ -546,10 +731,11 @@ export function assertThrowawayInspect(inspected, expected) {
 }
 
 /**
- * The state of a throwaway that `up` keeps: parsed from the state file's text and validated field by field.
+ * The state of a throwaway that `up` keeps: parsed from the state file's text and validated field by field. It records
+ * exactly one of `port` (a published loopback port) and `network` (`"none"`), and a `mount` when `up` was given one.
  *
  * @param {string} text
- * @returns {{ name: string, id: string, port: string, image: string, namespace: string }}
+ * @returns {{ name: string, id: string, port: string, image: string, namespace: string, mount?: string } | { name: string, id: string, image: string, namespace: string, network: 'none', mount?: string }}
  */
 export function parseState(text) {
   let parsed;
@@ -561,13 +747,26 @@ export function parseState(text) {
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new ThrowawayRefusal('the state file is not a JSON object.');
   }
-  return {
+  const hasPort = parsed.port !== undefined;
+  const hasNetwork = parsed.network !== undefined;
+  if (hasPort === hasNetwork) {
+    throw new ThrowawayRefusal('the state file must record exactly one of "port" and "network".');
+  }
+  if (hasNetwork && parsed.network !== NETWORK_NONE) {
+    throw new ThrowawayRefusal(`the state file records the network ${JSON.stringify(parsed.network)}, not "${NETWORK_NONE}".`);
+  }
+  const common = {
     name: validateContainerName(parsed.name),
     id: validateContainerId(parsed.id),
-    port: validateHostPort(parsed.port),
+  };
+  const rest = {
     image: validateImage(parsed.image),
     namespace: validateNamespace(parsed.namespace),
   };
+  const mount = parsed.mount === undefined ? {} : { mount: validateMount(parsed.mount).spec };
+  return hasPort
+    ? { ...common, port: validateHostPort(parsed.port), ...rest, ...mount }
+    : { ...common, ...rest, network: NETWORK_NONE, ...mount };
 }
 
 /**
@@ -617,6 +816,8 @@ const DEFAULT_LIMITS = Object.freeze({
   sessionReadyMs: 300_000,
   sessionStepMs: 5_000,
   sessionCallMs: 60_000,
+  sessionRunMs: 540_000,
+  copyMs: 120_000,
   webReadyMs: 120_000,
   webStepMs: 2_000,
   dockerCallMs: 120_000,
@@ -630,14 +831,18 @@ class StartFailure extends Error {}
  * the password unexpiry and the HTTP poll. Throws {@link StartFailure} (or a refusal) on any failure; the caller's
  * teardown removes the container.
  *
- * @returns {Promise<{ name: string, containerId: string, port: string }>}
+ * With `network: 'none'` the container publishes no port: there is no `docker port` read-back and no HTTP poll, and it is
+ * ready when the session loop and the password unexpiry have answered. `port` is then `undefined`.
+ *
+ * @returns {Promise<{ name: string, containerId: string, port: string | undefined }>}
  */
-async function startContainer({ image, hostPort }, deps, teardown, limits) {
+async function startContainer({ image, hostPort, network, mount }, deps, teardown, limits) {
   const name = generateContainerName();
   const docker = (args, callOptions) => deps.docker(args, { timeoutMs: limits.dockerCallMs, ...callOptions });
+  const isolated = network !== undefined;
 
   teardown.arm(name);
-  const started = docker(buildRunArgv({ image, name, hostPort }), { timeoutMs: limits.runMs });
+  const started = docker(buildRunArgv({ image, name, hostPort, network, mount }), { timeoutMs: limits.runMs });
   if (started.status !== 0) {
     throw new StartFailure(`docker run failed (${started.error?.message ?? `exit ${started.status}`}): ${started.stderr.trim()}`);
   }
@@ -648,13 +853,18 @@ async function startContainer({ image, hostPort }, deps, teardown, limits) {
   teardown.arm(containerId);
   deps.log(`throwaway-iris: started ${name} from ${image}`);
 
-  const reported = docker(buildPortArgv(containerId));
-  if (reported.status !== 0) throw new StartFailure(`docker port failed: ${reported.stderr.trim()}`);
-  const port = parseDockerPort(reported.stdout);
-  if (hostPort !== undefined && port !== validateHostPort(hostPort)) {
-    throw new StartFailure(`${name} publishes the web port on ${LOOPBACK_HOST}:${port}, not on the requested ${validateHostPort(hostPort)}.`);
+  let port;
+  if (isolated) {
+    deps.log(`throwaway-iris: ${name} runs with --network ${NETWORK_NONE}: it publishes no port`);
+  } else {
+    const reported = docker(buildPortArgv(containerId));
+    if (reported.status !== 0) throw new StartFailure(`docker port failed: ${reported.stderr.trim()}`);
+    port = parseDockerPort(reported.stdout);
+    if (hostPort !== undefined && port !== validateHostPort(hostPort)) {
+      throw new StartFailure(`${name} publishes the web port on ${LOOPBACK_HOST}:${port}, not on the requested ${validateHostPort(hostPort)}.`);
+    }
+    deps.log(`throwaway-iris: ${name} publishes the web port on ${LOOPBACK_HOST}:${port}`);
   }
-  deps.log(`throwaway-iris: ${name} publishes the web port on ${LOOPBACK_HOST}:${port}`);
 
   const session = (script) => docker(buildSessionArgv(containerId), { input: script, timeoutMs: limits.sessionCallMs });
 
@@ -674,12 +884,14 @@ async function startContainer({ image, hostPort }, deps, teardown, limits) {
       throw new StartFailure(`UnExpireUserPasswords("_SYSTEM") did not report OK: ${`${unexpired.stdout}${unexpired.stderr}`.trim().slice(-400)}`);
     }
 
-    const webDeadline = deps.now() + limits.webReadyMs;
-    while ((await deps.webStatus(port)) !== 200) {
-      if (deps.now() >= webDeadline) {
-        throw new StartFailure(`GET /api/atelier/ on ${LOOPBACK_HOST}:${port} never answered HTTP 200 within ${limits.webReadyMs / 1000}s.`);
+    if (!isolated) {
+      const webDeadline = deps.now() + limits.webReadyMs;
+      while ((await deps.webStatus(port)) !== 200) {
+        if (deps.now() >= webDeadline) {
+          throw new StartFailure(`GET /api/atelier/ on ${LOOPBACK_HOST}:${port} never answered HTTP 200 within ${limits.webReadyMs / 1000}s.`);
+        }
+        await deps.sleep(limits.webStepMs);
       }
-      await deps.sleep(limits.webStepMs);
     }
   } catch (error) {
     printContainerLogs(deps, docker, containerId, RUN_LOG_TAIL);
@@ -752,10 +964,11 @@ export async function runHarness(options, deps, teardown) {
 
 /**
  * Start a container, keep it, and record it in the state file. Nothing is kept on a failure: the container is removed
- * and no state is written.
+ * and no state is written. With `network: 'none'` (and no `hostPort`) the container publishes no port; a `mount` adds a
+ * read-only bind mount whose host directory `deps.checkMountDirectory` has found to be a real directory and not a link.
  *
- * @param {{ image: string, namespace: string, hostPort: string, state: string, env: Record<string, string | undefined>, limits?: Partial<typeof DEFAULT_LIMITS> }} options
- * @param {Parameters<typeof runHarness>[1] & { fileExists: (file: string) => boolean, writeState: (file: string, text: string) => void }} deps
+ * @param {{ image: string, namespace: string, hostPort?: string, network?: 'none', mount?: string, state: string, env: Record<string, string | undefined>, limits?: Partial<typeof DEFAULT_LIMITS> }} options
+ * @param {Parameters<typeof runHarness>[1] & { fileExists: (file: string) => boolean, writeState: (file: string, text: string) => void, checkMountDirectory: (directory: string) => string | undefined }} deps
  * @param {ReturnType<typeof createTeardown>} teardown
  * @returns {Promise<number>}
  */
@@ -764,10 +977,26 @@ export async function upHarness(options, deps, teardown) {
   let image;
   let namespace;
   let hostPort;
+  let network;
+  let mount;
   try {
     image = validateImage(options.image);
     namespace = validateNamespace(options.namespace);
-    hostPort = validateHostPort(options.hostPort);
+    if (options.network !== undefined) {
+      if (options.network !== NETWORK_NONE) throw new ThrowawayRefusal(`refusing the network ${JSON.stringify(options.network)}: the only network mode this harness takes is "${NETWORK_NONE}".`);
+      if (options.hostPort !== undefined) throw new ThrowawayRefusal('--network none and --host-port exclude each other: a container with no network publishes no port.');
+      network = NETWORK_NONE;
+    } else {
+      hostPort = validateHostPort(options.hostPort);
+    }
+    if (options.mount !== undefined) {
+      mount = validateMount(options.mount);
+      if (typeof deps.checkMountDirectory !== 'function') {
+        throw new ThrowawayRefusal('a mount needs the host-directory check (deps.checkMountDirectory), and none was supplied.');
+      }
+      const problem = deps.checkMountDirectory(mount.host);
+      if (problem !== undefined) throw new ThrowawayRefusal(`refusing the mount ${JSON.stringify(options.mount)}: ${problem}`);
+    }
     if (typeof options.state !== 'string' || options.state === '') throw new ThrowawayRefusal('--state needs a file path.');
     if (deps.fileExists(options.state)) {
       throw new ThrowawayRefusal(`the state file ${options.state} already exists: run "down --state" on it first, or remove it.`);
@@ -782,13 +1011,19 @@ export async function upHarness(options, deps, teardown) {
   }
 
   try {
-    const started = await startContainer({ image, hostPort }, deps, teardown, limits);
-    deps.writeState(
-      options.state,
-      `${JSON.stringify({ name: started.name, id: started.containerId, port: started.port, image, namespace }, null, 2)}\n`,
-    );
+    const started = await startContainer({ image, hostPort, network, mount: mount?.spec }, deps, teardown, limits);
+    const recorded =
+      network === undefined
+        ? { name: started.name, id: started.containerId, port: started.port, image, namespace }
+        : { name: started.name, id: started.containerId, image, namespace, network };
+    if (mount !== undefined) recorded.mount = mount.spec;
+    deps.writeState(options.state, `${JSON.stringify(recorded, null, 2)}\n`);
     teardown.disarm();
-    deps.log(`throwaway-iris: ${started.name} is up on ${LOOPBACK_HOST}:${started.port} (namespace ${namespace}); state in ${options.state}`);
+    deps.log(
+      network === undefined
+        ? `throwaway-iris: ${started.name} is up on ${LOOPBACK_HOST}:${started.port} (namespace ${namespace}); state in ${options.state}`
+        : `throwaway-iris: ${started.name} is up with --network ${NETWORK_NONE} (namespace ${namespace}); state in ${options.state}`,
+    );
     return 0;
   } catch (error) {
     deps.log(`throwaway-iris: ${error instanceof Error ? error.message : String(error)}`);
@@ -799,11 +1034,13 @@ export async function upHarness(options, deps, teardown) {
 }
 
 /**
- * The throwaway that a state file records, after `docker inspect` showed it is still that container.
+ * The throwaway that a state file records, after `docker inspect` showed it is still that container: a published port at the
+ * state's port, or `--network none` and no published port at all, as the state records. With `needsPort`, a state that records
+ * `--network none` is refused with exit code 2 before docker is called, because such a container has no port to reach.
  *
  * @returns {{ state: ReturnType<typeof parseState> } | { missing: true } | { code: number }} `missing` means there is no state file; a `code` means the state or the container was refused.
  */
-function loadThrowaway(options, deps, { allowStopped }) {
+function loadThrowaway(options, deps, { allowStopped, needsPort = false }) {
   let text;
   try {
     text = deps.readState(options.state);
@@ -819,6 +1056,12 @@ function loadThrowaway(options, deps, { allowStopped }) {
     deps.log(`throwaway-iris: ${options.state}: ${error.message}`);
     return { code: 2 };
   }
+  if (needsPort && state.network !== undefined) {
+    deps.log(
+      `throwaway-iris: ${state.name} runs with --network ${NETWORK_NONE} and publishes no port, so there is no IRIS_PORT for a command to reach: use "session" or "cp".`,
+    );
+    return { code: 2 };
+  }
   if (deps.findDocker(options.env) === undefined) {
     deps.log('throwaway-iris: docker was not found on PATH. This harness needs docker and never skips.');
     return { code: 3 };
@@ -829,7 +1072,8 @@ function loadThrowaway(options, deps, { allowStopped }) {
     return { code: 2 };
   }
   try {
-    assertThrowawayInspect(JSON.parse(inspected.stdout), { name: state.name, port: state.port, allowStopped });
+    const expected = state.network === undefined ? { name: state.name, port: state.port } : { name: state.name, network: state.network };
+    assertThrowawayInspect(JSON.parse(inspected.stdout), { ...expected, allowStopped });
   } catch (error) {
     deps.log(`throwaway-iris: ${error.message}`);
     return { code: 2 };
@@ -845,7 +1089,7 @@ function loadThrowaway(options, deps, { allowStopped }) {
  * @returns {Promise<number>}
  */
 export async function execHarness(options, deps) {
-  const loaded = loadThrowaway(options, deps, { allowStopped: false });
+  const loaded = loadThrowaway(options, deps, { allowStopped: false, needsPort: true });
   if (loaded.missing) {
     deps.log(`throwaway-iris: the state file ${options.state} does not exist: run "up --state" first.`);
     return 2;
@@ -858,6 +1102,76 @@ export async function execHarness(options, deps) {
     deps.log(`throwaway-iris: ${error instanceof Error ? error.message : String(error)}`);
     return 4;
   }
+}
+
+/**
+ * Pipe a script file into an IRIS terminal session of the container the state file records (`docker exec -i <id> iris
+ * session iris -U <NS>`), print what the session prints, and return docker's exit status. The container is re-inspected
+ * first, and the script and the namespace are checked before docker is called. Exit 2: a refused namespace, script, state or
+ * container; 4: docker did not run the session (including a timeout).
+ *
+ * @param {{ state: string, namespace: string, script: string, env: Record<string, string | undefined>, limits?: Partial<typeof DEFAULT_LIMITS> }} options
+ * @param {Parameters<typeof runHarness>[1] & { readState: (file: string) => string | undefined, readScript: (file: string) => string, out: (text: string) => void }} deps
+ * @returns {Promise<number>}
+ */
+export async function sessionHarness(options, deps) {
+  const limits = { ...DEFAULT_LIMITS, ...options.limits };
+  let namespace;
+  let script;
+  try {
+    namespace = validateSessionNamespace(options.namespace);
+    if (typeof options.script !== 'string' || options.script === '') throw new ThrowawayRefusal('--script needs a file path.');
+    script = deps.readScript(options.script);
+  } catch (error) {
+    deps.log(`throwaway-iris: ${error instanceof Error ? error.message : String(error)}`);
+    return 2;
+  }
+  const loaded = loadThrowaway(options, deps, { allowStopped: false });
+  if (loaded.missing) {
+    deps.log(`throwaway-iris: the state file ${options.state} does not exist: run "up --state" first.`);
+    return 2;
+  }
+  if (loaded.code !== undefined) return loaded.code;
+  const result = deps.docker(buildSessionArgv(loaded.state.id, namespace), { input: script, timeoutMs: limits.sessionRunMs });
+  deps.out(result.stdout);
+  if (result.stderr.trim() !== '') deps.log(`throwaway-iris: the session wrote to stderr: ${result.stderr.trim()}`);
+  if (result.status === null || result.error !== undefined) {
+    deps.log(`throwaway-iris: the session did not finish (${result.error?.message ?? 'no exit status'}).`);
+    return 4;
+  }
+  return result.status;
+}
+
+/**
+ * Copy one file out of the container the state file records (`docker cp <id>:<from> <to>`), after the container has been
+ * re-inspected. Exit 0 when docker copied it, 2 for a refused path, state or container, 4 when docker failed.
+ *
+ * @param {{ state: string, from: string, to: string, env: Record<string, string | undefined>, limits?: Partial<typeof DEFAULT_LIMITS> }} options
+ * @param {Parameters<typeof runHarness>[1] & { readState: (file: string) => string | undefined }} deps
+ * @returns {Promise<number>}
+ */
+export async function copyHarness(options, deps) {
+  const limits = { ...DEFAULT_LIMITS, ...options.limits };
+  try {
+    validateCopySource(options.from);
+    validateCopyDestination(options.to);
+  } catch (error) {
+    deps.log(`throwaway-iris: ${error.message}`);
+    return 2;
+  }
+  const loaded = loadThrowaway(options, deps, { allowStopped: false });
+  if (loaded.missing) {
+    deps.log(`throwaway-iris: the state file ${options.state} does not exist: run "up --state" first.`);
+    return 2;
+  }
+  if (loaded.code !== undefined) return loaded.code;
+  const copied = deps.docker(buildCopyArgv(loaded.state.id, options.from, options.to), { timeoutMs: limits.copyMs });
+  if (copied.status !== 0) {
+    deps.log(`throwaway-iris: docker cp failed (${copied.error?.message ?? `exit ${copied.status}`}): ${copied.stderr.trim()}`);
+    return 4;
+  }
+  deps.log(`throwaway-iris: copied ${options.from} out of ${loaded.state.name} to ${options.to}`);
+  return 0;
 }
 
 /**
@@ -974,6 +1288,21 @@ export function defaultDeps(env) {
     removeState: (file) => {
       rmSync(file, { force: true });
     },
+    readScript: (file) => readFileSync(file, 'utf8'),
+    out: (text) => {
+      process.stdout.write(text);
+    },
+    /** A reason the host directory of a bind mount is refused, or `undefined` when it is a real directory and not a symbolic link. */
+    checkMountDirectory: (directory) => {
+      try {
+        const entry = lstatSync(directory);
+        if (entry.isSymbolicLink()) return `${directory} is a symbolic link, and a mount follows what it points at.`;
+        if (!entry.isDirectory()) return `${directory} is not a directory.`;
+        return undefined;
+      } catch (error) {
+        return error?.code === 'ENOENT' ? `${directory} does not exist.` : `${directory} cannot be read (${error?.message ?? error}).`;
+      }
+    },
   };
 }
 
@@ -996,7 +1325,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const deps = defaultDeps(env);
   const subcommand = cli.subcommand ?? 'run';
 
-  if (subcommand === 'logs' || subcommand === 'down' || subcommand === 'exec') {
+  if (['logs', 'down', 'exec', 'session', 'cp'].includes(subcommand)) {
     if (subcommand === 'exec') {
       // The container outlives this process: a signal reaches the command only.
       for (const signal of ['SIGINT', 'SIGTERM']) {
@@ -1007,6 +1336,8 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     }
     const options = { ...cli, state: path.resolve(cli.state), env };
     if (subcommand === 'exec') return execHarness(options, deps);
+    if (subcommand === 'session') return sessionHarness({ ...options, script: path.resolve(cli.script) }, deps);
+    if (subcommand === 'cp') return copyHarness({ ...options, to: path.resolve(cli.to) }, deps);
     if (subcommand === 'logs') return logsHarness(options, deps);
     return downHarness(options, deps);
   }

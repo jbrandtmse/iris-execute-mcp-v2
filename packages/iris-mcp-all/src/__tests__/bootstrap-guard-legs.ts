@@ -14,6 +14,9 @@
  *   on the same instance, read back through the same route. Comparing with a reference read from the instance, not with
  *   the embed text, keeps the oracle independent of how IRIS re-renders a class on read.
  * - A current deployment must come out byte-identical, with no warning.
+ * - An IPM-owned deployment (an older marker and the IPM-only `ExecuteMCPv2.InstallGuard` document, Story 42.4) must come out
+ *   byte-identical, the guard document included, with exactly one `[WARN]` line that says IPM installed the classes, names both
+ *   markers and the `zpm` commands.
  *
  * Every seed adds a leading `/// seed` line to every document, so a document the server rewrote differs from a document it
  * left alone, whatever IRIS does with a save of identical text.
@@ -34,6 +37,15 @@ import { isLiveArmed } from "../../../shared/src/test-helpers/live-target.js";
 
 /** The document that carries the version marker. */
 export const SETUP_DOC = "ExecuteMCPv2.Setup.cls";
+
+/**
+ * The IPM-only install guard's document: its presence on an instance is the ownership signal (Story 42.4, DW-674). A leg that
+ * expects `ipm` seeds a stub of it (a class document, not compiled); every other leg's seed removes it, so the legs stay independent.
+ */
+export const GUARD_DOC = "ExecuteMCPv2.InstallGuard.cls";
+
+/** The stub the `ipm` leg stores under {@link GUARD_DOC}. */
+export const GUARD_STUB_LINES: readonly string[] = ["/// A stub of the IPM install guard, seeded by the bootstrap-guard legs.", "Class ExecuteMCPv2.InstallGuard Extends %RegisteredObject", "{", "}"];
 
 /** The statement the bootstrap probe runs, and the legs use as the compiled-marker oracle. */
 export const VERSION_QUERY = "SELECT ExecuteMCPv2.Setup_GetBootstrapVersion() AS Version";
@@ -114,7 +126,7 @@ interface AtelierAnswer {
   text: string;
 }
 
-async function atelierWrite(target: IrisTarget, method: "PUT" | "POST", subpath: string, body: unknown): Promise<AtelierAnswer> {
+async function atelierWrite(target: IrisTarget, method: "PUT" | "POST" | "DELETE", subpath: string, body?: unknown): Promise<AtelierAnswer> {
   const response = await fetch(`http://${target.host}:${target.port}/api/atelier/v8/${target.namespace}/${subpath}`, {
     method,
     headers: {
@@ -122,7 +134,7 @@ async function atelierWrite(target: IrisTarget, method: "PUT" | "POST", subpath:
       Accept: "application/json",
       Authorization: `Basic ${Buffer.from(`${target.username}:${target.password}`).toString("base64")}`,
     },
-    body: JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(300_000),
   });
   const text = await response.text();
@@ -153,15 +165,28 @@ export class SeedCompileError extends Error {}
 /**
  * Put the embed on the instance under `options.marker`, compile it, and run `Setup_Configure` and
  * `Setup_ConfigureMapping` for the target's namespace, as an installation does. With `options.perturb` every document
- * also carries {@link SEED_LINE}.
+ * also carries {@link SEED_LINE}. With `options.guard` the instance also carries a stub of the IPM install guard
+ * ({@link GUARD_DOC}); without it the seed removes that document, so a guard left by an earlier leg never reaches this one.
  *
  * @throws {SeedCompileError} When the compile reports an error; the message carries the compile errors.
  */
 export async function seedInstance(
   target: IrisTarget,
   embedded: EmbeddedBootstrap,
-  options: { marker: string; perturb: boolean },
+  options: { marker: string; perturb: boolean; guard?: boolean },
 ): Promise<void> {
+  if (options.guard === true) {
+    const stored = await atelierWrite(target, "PUT", `doc/${encodeURIComponent(GUARD_DOC)}?ignoreConflict=1`, { enc: false, content: [...GUARD_STUB_LINES] });
+    const storedFailure = failureOf(stored, [200, 201]);
+    if (storedFailure !== undefined) throw new Error(`seeding ${GUARD_DOC}: ${storedFailure}`);
+  } else {
+    // 200 when the guard was there, 404 when it was not: both leave the instance without it.
+    const removed = await atelierWrite(target, "DELETE", `doc/${encodeURIComponent(GUARD_DOC)}`);
+    if (removed.status !== 404) {
+      const removedFailure = failureOf(removed, [200]);
+      if (removedFailure !== undefined) throw new Error(`removing ${GUARD_DOC}: ${removedFailure}`);
+    }
+  }
   for (const [name, text] of embedded.classes) {
     const answer = await atelierWrite(target, "PUT", `doc/${encodeURIComponent(name)}?ignoreConflict=1`, {
       enc: false,
@@ -301,12 +326,19 @@ export const REMEDY = {
   newer: ["Upgrade this server to a build at least as new as the deployed one", "every client that shares the instance"],
   foreign: ["Run one build per instance", "delete class ExecuteMCPv2.Setup"],
   unknown: ["Check that the instance answers and that this user can run SQL", "delete class ExecuteMCPv2.Setup"],
+  // IPM ownership (Story 42.4, DW-674): the classes were installed by IPM, this server never redeploys them, and the way back.
+  ipm: [
+    "the classes were installed by IPM (class ExecuteMCPv2.InstallGuard is present)",
+    "this server never redeploys an IPM installation",
+    'run zpm "install iris-execute-mcp-v2 ',
+    'run zpm "uninstall iris-execute-mcp-v2" there and restart this server',
+  ],
 } as const;
 
 // -- Legs -------------------------------------------------------------------------------
 
-/** What a server start must do to the instance. */
-export type Expectation = "newer" | "foreign" | "upgraded" | "current";
+/** What a server start must do to the instance. `ipm`: leave an IPM installation alone and say so (Story 42.4). */
+export type Expectation = "newer" | "foreign" | "upgraded" | "current" | "ipm";
 
 /** One leg: a seed, the path the server reaches the instance by, and what each server start must do. */
 export interface LegSpec {
@@ -318,6 +350,8 @@ export interface LegSpec {
   seedMarker: (embedded: StampedBootstrapMarker) => string;
   /** Whether the seed adds {@link SEED_LINE} to every document. */
   perturb: boolean;
+  /** Whether the instance also carries the IPM install guard document ({@link GUARD_DOC}). */
+  guard?: boolean;
   /** One entry per server start of the leg, in order. */
   expect: readonly Expectation[];
 }
@@ -362,6 +396,7 @@ export const LEGS: readonly LegSpec[] = [
   { id: "older-sequence", title: "older at startup: a lower sequence", via: "startup", seedMarker: older, perturb: true, expect: ["upgraded"] },
   { id: "older-lazy-other", title: "older through the lazy `other` profile: a lower sequence", via: "other", seedMarker: older, perturb: true, expect: ["upgraded"] },
   { id: "legacy-bare-hash", title: "legacy at startup: a bare 12-hex hash", via: "startup", seedMarker: legacyHash, perturb: true, expect: ["upgraded"] },
+  { id: "ipm-owned-older", title: "IPM-owned at startup: an older marker and the InstallGuard document (DW-674)", via: "startup", seedMarker: older, perturb: true, guard: true, expect: ["ipm"] },
   { id: "current", title: "current at startup: the embedded marker itself", via: "startup", seedMarker: (embedded) => render(embedded.semver, embedded.sequence, embedded.hash), perturb: false, expect: ["current"] },
   { id: "current-after-upgrade", title: "a second start right after an upgrade changes nothing", via: "startup", seedMarker: older, perturb: true, expect: ["upgraded", "current"] },
 ];
@@ -468,8 +503,9 @@ export async function referenceSnapshot(target: IrisTarget, embedded: EmbeddedBo
 /** Seed the instance for `leg`, take the snapshots, and run each server start of the leg. */
 export async function runLeg(leg: LegSpec, ctx: LegContext): Promise<LegOutcome> {
   const seedMarker = leg.seedMarker(stampedEmbedded(ctx.embedded));
-  await seedInstance(ctx.target, ctx.embedded, { marker: seedMarker, perturb: leg.perturb });
-  const names = [...ctx.embedded.classes.keys()];
+  await seedInstance(ctx.target, ctx.embedded, { marker: seedMarker, perturb: leg.perturb, guard: leg.guard === true });
+  // The guard document is snapshotted with the classes when the leg seeds it: left alone means it too is byte-identical.
+  const names = [...ctx.embedded.classes.keys(), ...(leg.guard === true ? [GUARD_DOC] : [])];
   const seeded = await snapshotInstance(ctx.target, names);
   const runs: LegRun[] = [];
   for (let start = 0; start < leg.expect.length; start += 1) {
@@ -515,7 +551,7 @@ export function verifyLeg(outcome: LegOutcome, embedded: EmbeddedBootstrap, refe
     const leaving = leavingLines(run.stderr);
     const unchanged = snapshotDifferences(before, run.after);
 
-    if (expectation === "newer" || expectation === "foreign") {
+    if (expectation === "newer" || expectation === "foreign" || expectation === "ipm") {
       if (unchanged.length > 0) problems.push(`${label}: the instance changed: ${unchanged.join("; ")}`);
       if (leaving.length !== 1) {
         problems.push(`${label}: expected exactly one "Bootstrap: leaving the ExecuteMCPv2 classes" line, found ${leaving.length}`);
@@ -526,6 +562,14 @@ export function verifyLeg(outcome: LegOutcome, embedded: EmbeddedBootstrap, refe
         if (!line.includes(embedded.marker)) problems.push(`${label}: the warning does not name the embedded marker ${embedded.marker}`);
         for (const remedy of REMEDY[expectation]) {
           if (!line.includes(remedy)) problems.push(`${label}: the warning does not carry the remedy text ${JSON.stringify(remedy)}`);
+        }
+        if (expectation === "ipm") {
+          // The zpm command names this build's package version: the semver of the embedded marker.
+          const install = `zpm "install iris-execute-mcp-v2 ${embedded.marker.split("+")[0]}"`;
+          if (!line.includes(install)) problems.push(`${label}: the warning does not carry the command ${install}`);
+          if (line.includes("had already uploaded") || line.includes("found just before compiling")) {
+            problems.push(`${label}: the warning is the re-check's, but an IPM installation is found at startup, before anything is uploaded: ${line}`);
+          }
         }
       }
       if (run.stderr.includes("Bootstrap: upgrading REST service")) problems.push(`${label}: the server upgraded a deployment it must leave alone`);

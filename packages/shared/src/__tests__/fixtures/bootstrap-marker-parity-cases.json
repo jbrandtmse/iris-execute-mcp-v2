@@ -1,0 +1,422 @@
+[
+  {
+    "note": "stamped: the identical marker",
+    "deployed": "1.2.3+4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "current"
+  },
+  {
+    "note": "stamped: a lower major",
+    "deployed": "0.9.9+99.bbbbbbbbbbbb",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "older"
+  },
+  {
+    "note": "stamped: a higher major",
+    "deployed": "2.0.0+0.bbbbbbbbbbbb",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "newer"
+  },
+  {
+    "note": "stamped: a lower minor",
+    "deployed": "1.1.9+9.bbbbbbbbbbbb",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "older"
+  },
+  {
+    "note": "stamped: a higher minor",
+    "deployed": "1.3.0+0.bbbbbbbbbbbb",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "newer"
+  },
+  {
+    "note": "stamped: a lower patch",
+    "deployed": "1.2.2+9.bbbbbbbbbbbb",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "older"
+  },
+  {
+    "note": "stamped: a higher patch",
+    "deployed": "1.2.4+0.bbbbbbbbbbbb",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "newer"
+  },
+  {
+    "note": "stamped: the same semver, a lower sequence, the same hash",
+    "deployed": "1.2.3+3.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "older"
+  },
+  {
+    "note": "stamped: the same semver, a lower sequence, another hash",
+    "deployed": "1.2.3+3.bbbbbbbbbbbb",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "older"
+  },
+  {
+    "note": "stamped: the same semver, a higher sequence, the same hash",
+    "deployed": "1.2.3+5.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "newer"
+  },
+  {
+    "note": "stamped: the same semver, a higher sequence, another hash",
+    "deployed": "1.2.3+5.bbbbbbbbbbbb",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "newer"
+  },
+  {
+    "note": "stamped: the same semver and sequence, another hash",
+    "deployed": "1.2.3+4.bbbbbbbbbbbb",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "stamped: the semver outranks the sequence (lower semver, higher sequence)",
+    "deployed": "1.2.2+99.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "older"
+  },
+  {
+    "note": "stamped: the semver outranks the sequence (higher semver, lower sequence)",
+    "deployed": "1.2.4+0.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "newer"
+  },
+  {
+    "note": "stamped: leading zeros are meaningless (equal)",
+    "deployed": "01.02.03+04.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "current"
+  },
+  {
+    "note": "stamped: leading zeros, lower sequence",
+    "deployed": "01.02.03+0003.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "older"
+  },
+  {
+    "note": "stamped: leading zeros, higher major",
+    "deployed": "001.2.3+00005.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "newer"
+  },
+  {
+    "note": "stamped: zero everywhere against a higher embedded marker",
+    "deployed": "0.0.0+0.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "older"
+  },
+  {
+    "note": "stamped: zeros of any width equal one zero",
+    "deployed": "000.000.000+000.aaaaaaaaaaaa",
+    "embedded": "0.0.0+0.aaaaaaaaaaaa",
+    "expected": "current"
+  },
+  {
+    "note": "stamped: a major past 2^53, newer by 1",
+    "deployed": "9007199254740993.0.0+0.aaaaaaaaaaaa",
+    "embedded": "9007199254740992.0.0+0.aaaaaaaaaaaa",
+    "expected": "newer"
+  },
+  {
+    "note": "stamped: a major past 2^53, older by 1",
+    "deployed": "9007199254740992.0.0+0.aaaaaaaaaaaa",
+    "embedded": "9007199254740993.0.0+0.aaaaaaaaaaaa",
+    "expected": "older"
+  },
+  {
+    "note": "stamped: a sequence past 2^53, newer by 1",
+    "deployed": "1.2.3+9007199254740993.aaaaaaaaaaaa",
+    "embedded": "1.2.3+9007199254740992.aaaaaaaaaaaa",
+    "expected": "newer"
+  },
+  {
+    "note": "stamped: a sequence past 19 digits, newer",
+    "deployed": "1.2.3+12345678901234567890123.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "newer"
+  },
+  {
+    "note": "stamped: an embedded sequence past 19 digits, older",
+    "deployed": "1.2.3+4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+12345678901234567890123.aaaaaaaaaaaa",
+    "expected": "older"
+  },
+  {
+    "note": "stamped: 20-digit sequences differing in the last digit",
+    "deployed": "1.2.3+99999999999999999998.aaaaaaaaaaaa",
+    "embedded": "1.2.3+99999999999999999999.aaaaaaaaaaaa",
+    "expected": "older"
+  },
+  {
+    "note": "stamped: a long sequence of leading zeros equals a short one",
+    "deployed": "1.2.3+000000000000000000004.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "current"
+  },
+  {
+    "note": "stamped: a minor past 2^53 against a small one",
+    "deployed": "1.9007199254740993.3+4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "newer"
+  },
+  {
+    "note": "stamped: hashes that look like numbers but differ as text",
+    "deployed": "1.2.3+4.1e0000000000",
+    "embedded": "1.2.3+4.01e000000000",
+    "expected": "foreign"
+  },
+  {
+    "note": "stamped: all-digit hashes that differ",
+    "deployed": "1.2.3+4.000000000010",
+    "embedded": "1.2.3+4.000000000100",
+    "expected": "foreign"
+  },
+  {
+    "note": "legacy: a bare 12-hex marker is older",
+    "deployed": "0123456789ab",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "older"
+  },
+  {
+    "note": "legacy: even with the embedded hash",
+    "deployed": "aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "older"
+  },
+  {
+    "note": "legacy: uppercase hex is not a marker",
+    "deployed": "0123456789AB",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "legacy: 11 hex digits",
+    "deployed": "0123456789a",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "legacy: 13 hex digits",
+    "deployed": "0123456789abc",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "legacy embedded: the identical marker",
+    "deployed": "0123456789ab",
+    "embedded": "0123456789ab",
+    "expected": "current"
+  },
+  {
+    "note": "legacy embedded: another legacy marker",
+    "deployed": "ba9876543210",
+    "embedded": "0123456789ab",
+    "expected": "foreign"
+  },
+  {
+    "note": "legacy embedded: a stamped deployment",
+    "deployed": "1.2.3+4.aaaaaaaaaaaa",
+    "embedded": "0123456789ab",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable embedded: the identical value",
+    "deployed": "dev",
+    "embedded": "dev",
+    "expected": "current"
+  },
+  {
+    "note": "unparseable embedded: a stamped deployment",
+    "deployed": "1.2.3+4.aaaaaaaaaaaa",
+    "embedded": "dev",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable embedded: an empty value, identical",
+    "deployed": "",
+    "embedded": "",
+    "expected": "current"
+  },
+  {
+    "note": "unparseable embedded: a stamped deployment against an empty embedded marker",
+    "deployed": "1.2.3+4.aaaaaaaaaaaa",
+    "embedded": "",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: the dev placeholder",
+    "deployed": "dev",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: an empty value",
+    "deployed": "",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: a leading space",
+    "deployed": " 1.2.3+4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: a trailing space",
+    "deployed": "1.2.3+4.aaaaaaaaaaaa ",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: a trailing line feed",
+    "deployed": "1.2.3+4.aaaaaaaaaaaa\n",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: a trailing carriage return and line feed",
+    "deployed": "1.2.3+4.aaaaaaaaaaaa\r\n",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: a line feed inside the hash",
+    "deployed": "1.2.3+4.aaa\naaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: uppercase hex in the hash",
+    "deployed": "1.2.3+4.AAAAAAAAAAAA",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: a non-hex hash",
+    "deployed": "1.2.3+4.gggggggggggg",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: a prerelease semver",
+    "deployed": "1.2.3-beta.1+4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: two parts of semver",
+    "deployed": "1.2+4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: four parts of semver",
+    "deployed": "1.2.3.4+4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: no build part",
+    "deployed": "1.2.3",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: no hash",
+    "deployed": "1.2.3+4",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: an 11-digit hash",
+    "deployed": "1.2.3+4.aaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: a 13-digit hash",
+    "deployed": "1.2.3+4.aaaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: an empty sequence",
+    "deployed": "1.2.3+.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: an empty semver part",
+    "deployed": "1..3+4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: two plus signs",
+    "deployed": "1.2.3+4.aaaaaaaaaaaa+5.bbbbbbbbbbbb",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: no semver",
+    "deployed": "+4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: a negative sequence",
+    "deployed": "1.2.3+-4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: Arabic-Indic digits throughout (U+0661 to U+0664)",
+    "deployed": "\u0661.\u0662.\u0663+\u0664.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: one Arabic-Indic digit in the patch (U+0663)",
+    "deployed": "1.2.\u0663+4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: an Arabic-Indic digit in the sequence (U+0664)",
+    "deployed": "1.2.3+\u0664.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: Arabic-Indic zero (U+0660)",
+    "deployed": "\u0660.2.3+4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: Arabic-Indic nine (U+0669)",
+    "deployed": "1.2.3+\u0669.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: Extended Arabic-Indic four (U+06F4)",
+    "deployed": "1.2.3+\u06f4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: a fullwidth digit (U+FF11)",
+    "deployed": "\uff11.2.3+4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable embedded: Arabic-Indic digits in the embedded marker",
+    "deployed": "1.2.3+4.aaaaaaaaaaaa",
+    "embedded": "\u0661.\u0662.\u0663+\u0664.aaaaaaaaaaaa",
+    "expected": "foreign"
+  }
+]

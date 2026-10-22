@@ -68,6 +68,21 @@ const FORBIDDEN: Array<{ label: string; expression: RegExp }> = [
   { label: "%Routine / %RoutineMgr %New", expression: /##class\(%(?:Library\.)?(?:Routine|RoutineMgr)\)\.%New\(/g },
 ];
 
+/**
+ * Files that hold a forbidden construct on purpose, each with the exact constructs (label and count, as the scan reports them) and
+ * its reason. A construct is exempt only in a file that no agent tool and no user instance can reach, and only as often as listed:
+ * a further construct, or one more of a listed kind, in that file is forbidden again, and an entry the file no longer matches fails
+ * as stale.
+ */
+const FORBIDDEN_EXEMPTIONS: Readonly<Record<string, { constructs: readonly string[]; reason: string }>> = {
+  "scripts/lib/ipm-archive.mjs": {
+    constructs: ["OBJ.Load* / OBJ.Import* x2"],
+    reason:
+      "builds the terminal sessions of the IPM archive proof (scripts/ci-ipm-archive.mjs, Story 42.4): `$System.OBJ.Load` imports IPM from the image's own " +
+      "copy and loads a synthetic Setup class, both inside a throwaway container that scripts/throwaway-iris.mjs started with no network; no agent tool and no user instance ever runs them",
+  },
+};
+
 const INTEROP = "src/ExecuteMCPv2/REST/Interop.cls";
 
 /** Every document-writing path as of 2026-10-21 (Story 42.11), in the order the verdicts are recorded. */
@@ -212,6 +227,8 @@ function scannedFiles(): Array<{ file: string; language: Language }> {
     walk("src/ExecuteMCPv2", (f) => f.endsWith(".cls") && !f.startsWith("src/ExecuteMCPv2/Tests/")),
     "objectscript",
   );
+  // The IPM-only install guard (Story 42.4) is IRIS-side source that sits outside src/.
+  add(walk("ipm/preload", (f) => f.endsWith(".cls")), "objectscript");
   return files;
 }
 
@@ -223,9 +240,10 @@ interface Found {
   count: number;
 }
 
-function scan(): { found: Found[]; scanned: number; forbidden: string[] } {
+function scan(): { found: Found[]; scanned: number; forbidden: string[]; exempted: string[] } {
   const found: Found[] = [];
   const forbidden: string[] = [];
+  const exempted: string[] = [];
   const files = scannedFiles();
   for (const { file, language } of files) {
     const text = readFileSync(path.join(REPO_ROOT, file), "utf8");
@@ -236,16 +254,19 @@ function scan(): { found: Found[]; scanned: number; forbidden: string[] } {
     }
     for (const { label, expression } of FORBIDDEN) {
       const count = countOf(text, expression);
-      if (count > 0) forbidden.push(`${file}: ${label} x${count}`);
+      if (count === 0) continue;
+      const construct = `${label} x${count}`;
+      const exempt = Object.hasOwn(FORBIDDEN_EXEMPTIONS, file) && FORBIDDEN_EXEMPTIONS[file]?.constructs.includes(construct) === true;
+      (exempt ? exempted : forbidden).push(`${file}: ${construct}`);
     }
   }
-  return { found, scanned: files.length, forbidden };
+  return { found, scanned: files.length, forbidden, exempted };
 }
 
 const key = (entry: Found): string => `${entry.file} :: ${entry.pattern} x${entry.count}`;
 
 describe("every document-writing path has a recorded verdict (Story 38.3, AC-6, AD-24)", () => {
-  const { found, scanned, forbidden } = scan();
+  const { found, scanned, forbidden, exempted } = scan();
 
   it("the scan reads the packages' sources, the scripts, the extension and the IRIS-side classes (an empty scan would pass everything below)", () => {
     expect(scanned).toBeGreaterThan(100);
@@ -287,6 +308,20 @@ describe("every document-writing path has a recorded verdict (Story 38.3, AC-6, 
 
   it("no construct the roster does not model (OBJ.Load*, OBJ.Import*, ImportDir, SetTextFrom*, %Routine %New) exists in the scanned sources", () => {
     expect(forbidden).toEqual([]);
+  });
+
+  it("every exemption from that rule names a scanned file, the exact constructs it still holds, and a reason (a stale or widened one fails)", () => {
+    const scannedPaths = scannedFiles().map(({ file }) => file);
+    const listed: string[] = [];
+    for (const [file, { constructs, reason }] of Object.entries(FORBIDDEN_EXEMPTIONS)) {
+      expect(scannedPaths, `${file} is scanned`).toContain(file);
+      expect(constructs.length, `${file} lists its constructs`).toBeGreaterThan(0);
+      expect(reason.length, `${file} has a reason`).toBeGreaterThan(60);
+      listed.push(...constructs.map((construct) => `${file}: ${construct}`));
+    }
+    // Equal both ways: a listed construct the file no longer holds is stale, and the file holding more (or other) constructs than listed
+    // puts them in `forbidden` above, so the exemption never covers a construct nobody reviewed.
+    expect([...exempted].sort()).toEqual([...listed].sort());
   });
 
   it("every entry has a reason, and each exclusion names its own ledger id", () => {

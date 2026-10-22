@@ -11,6 +11,11 @@
  * provably absent or an older deployment is (re)deployed. A marker that cannot
  * be read while the `ExecuteMCPv2.Setup` class is not provably absent is
  * `unknown`, and nothing is deployed over it.
+ *
+ * It never redeploys an IPM installation either: when the IPM-only
+ * `ExecuteMCPv2.InstallGuard` class is present, IPM owns the classes, and a
+ * deployment that would write (`stale`, `unconfigured`, `missing`) writes nothing
+ * and logs one warning naming the `zpm` command.
  */
 
 import { IrisHttpClient, type AtelierEnvelope } from "./http-client.js";
@@ -18,11 +23,14 @@ import type { IrisConnectionConfig } from "./config.js";
 import { atelierPath } from "./atelier.js";
 import { IrisApiError } from "./errors.js";
 import { logger } from "./logger.js";
-import { BOOTSTRAP_CLASSES, BOOTSTRAP_VERSION } from "./bootstrap-classes.js";
+import { BOOTSTRAP_CLASSES, BOOTSTRAP_VERSION, IPM_INSTALL_GUARD, IPM_MODULE_NAME } from "./bootstrap-classes.js";
 import { classifyDeployedMarker, parseBootstrapMarker } from "./bootstrap-version.js";
 
 /** The Atelier document that carries the version marker. */
 const SETUP_DOCUMENT = "ExecuteMCPv2.Setup.cls";
+
+/** The semver of this build's marker: the version of `@iris-mcp/shared`, and the version of the IPM package. */
+const PACKAGE_SEMVER = BOOTSTRAP_VERSION.split("+")[0] as string;
 
 /**
  * Probe result.
@@ -90,8 +98,17 @@ export interface BootstrapResult {
   probeStatus: "missing" | "current" | "unconfigured" | "stale" | "newer" | "foreign" | "unknown";
   /** The marker found on the instance, when it was `stale`, `newer` or `foreign`. */
   deployedVersion?: string;
-  /** Why the deployed marker could not be read, when `probeStatus` is `unknown`. */
+  /**
+   * Why the deployed marker could not be read, or why the IPM ownership of the
+   * classes could not be checked, when `probeStatus` is `unknown`.
+   */
   readFailure?: string;
+  /**
+   * `true` when the IPM-only `ExecuteMCPv2.InstallGuard` class is present: IPM
+   * installed the classes there, so a deployment that would write left them
+   * alone. Present only when `true`.
+   */
+  ipmOwned?: boolean;
   /** Whether class deployment succeeded. */
   deployed: boolean;
   /** Whether class compilation succeeded. */
@@ -127,8 +144,12 @@ To complete setup manually, choose one of:
    - Allowed Authentication: Password
    - Resource Required: %Development
 
-3. IPM: If IPM is installed, run in any namespace:
-   zpm "install iris-execute-mcp-v2"`;
+3. IPM (InterSystems Package Manager 0.10 or later, installed in the target namespace): in the target
+   namespace, as a user with %Admin_Manage, run:
+   zpm "install ${IPM_MODULE_NAME} ${PACKAGE_SEMVER}"
+   If zpm "repo -list" shows no registry, run this first:
+   zpm "repo -r -n registry -reset-defaults"
+   IPM then owns the classes there, and this server never redeploys them.`;
 
 /** What reading the deployed marker produced: the marker, or why none was read. */
 type MarkerRead = { kind: "marker"; marker: string } | { kind: "unread"; reason: string };
@@ -152,7 +173,7 @@ function describeFailure(error: unknown): string {
  * Returns `unread` with the reason when no marker can be read: the query
  * fails (for any reason, whatever HTTP status or error text IRIS answers
  * with), or it returns no row or an empty value. Never throws. A failed read
- * says nothing about whether a deployment exists; {@link setupClassAbsence}
+ * says nothing about whether a deployment exists; {@link documentAbsence}
  * decides that.
  */
 async function readDeployedVersion(
@@ -181,27 +202,58 @@ async function readDeployedVersion(
 }
 
 /**
- * Whether the `ExecuteMCPv2.Setup` class is provably absent: the Atelier
- * document route answers HTTP 404 for `ExecuteMCPv2.Setup.cls` (Atelier's
- * `GetDoc` answers 404 exactly when the document does not exist). Any other
- * answer is not a positive absence: a found document, or a request that
- * failed some other way, which `reason` names. Never throws.
+ * What the Atelier document route says about one class document: `absent` when
+ * it is provably missing, `found` when it exists, `unreadable` when the request
+ * failed some other way.
  */
-async function setupClassAbsence(
+type DocumentAbsence =
+  | { absent: true }
+  | { absent: false; found: true; reason: string }
+  | { absent: false; found: false; reason: string };
+
+/**
+ * Whether a class document is provably absent: the Atelier document route
+ * answers HTTP 404 for it (Atelier's `GetDoc` answers 404 exactly when the
+ * document does not exist). Any other answer is not a positive absence: a
+ * found document, or a request that failed some other way, which `reason`
+ * names. Never throws.
+ */
+async function documentAbsence(
   http: IrisHttpClient,
   config: IrisConnectionConfig,
   version: number,
-): Promise<{ absent: true } | { absent: false; reason: string }> {
+  document: string,
+): Promise<DocumentAbsence> {
+  const subject = `the ${document.replace(/\.cls$/, "")} class`;
   try {
-    await http.get(atelierPath(version, config.namespace, `doc/${SETUP_DOCUMENT}`));
-    return { absent: false, reason: "the ExecuteMCPv2.Setup class exists" };
+    await http.get(atelierPath(version, config.namespace, `doc/${document}`));
+    return { absent: false, found: true, reason: `${subject} exists` };
   } catch (error: unknown) {
     if (error instanceof IrisApiError && error.statusCode === 404) return { absent: true };
     return {
       absent: false,
-      reason: `whether the ExecuteMCPv2.Setup class exists could not be checked: ${describeFailure(error)}`,
+      found: false,
+      reason: `whether ${subject} exists could not be checked: ${describeFailure(error)}`,
     };
   }
+}
+
+/** Who owns the classes on an instance: IPM (the install guard is present), nobody in particular, or not known. */
+type IpmOwnership = { owner: "ipm" } | { owner: "none" } | { owner: "unknown"; reason: string };
+
+/**
+ * Whether IPM installed the classes: the IPM-only `ExecuteMCPv2.InstallGuard`
+ * document answers 200 (`ipm`) or is provably absent with a 404 (`none`). Any
+ * other failure is `unknown`, with the reason. Never throws.
+ */
+async function ipmOwnership(
+  http: IrisHttpClient,
+  config: IrisConnectionConfig,
+  version: number,
+): Promise<IpmOwnership> {
+  const guard = await documentAbsence(http, config, version, IPM_INSTALL_GUARD.name);
+  if (guard.absent) return { owner: "none" };
+  return guard.found ? { owner: "ipm" } : { owner: "unknown", reason: guard.reason };
 }
 
 /**
@@ -216,7 +268,7 @@ async function setupClassAbsence(
  *
  * - No marker can be read (the SQL query fails for any reason, or returns no
  *   row or an empty value). The probe then asks whether the `Setup` class is
- *   provably absent ({@link setupClassAbsence}):
+ *   provably absent ({@link documentAbsence}):
  *   - the document route answers 404 → `{ status: "missing" }`, the full
  *     install. This is a first-time install where nothing has been deployed.
  *   - anything else → `{ status: "unknown", reason }`. The class exists (or
@@ -263,7 +315,7 @@ export async function probeCustomRest(
   // exists (or cannot be checked) is `unknown`, never `missing`.
   const read = await readDeployedVersion(http, config, version);
   if (read.kind === "unread") {
-    const absence = await setupClassAbsence(http, config, version);
+    const absence = await documentAbsence(http, config, version, SETUP_DOCUMENT);
     if (absence.absent) return { status: "missing" };
     return { status: "unknown", reason: `${read.reason}, and ${absence.reason}` };
   }
@@ -537,11 +589,17 @@ function describeMarker(marker: string): string {
   return JSON.stringify(marker.length > 80 ? `${marker.slice(0, 80)}...` : marker);
 }
 
-/** A deployment that bootstrap leaves alone: a newer or foreign marker, or a marker that could not be read. */
+/**
+ * A deployment that bootstrap leaves alone: a newer or foreign marker, a marker
+ * (or an ownership) that could not be read, or an IPM installation. For `ipm`,
+ * `state` is what the probe found (the path that would have written) and
+ * `deployed` is the marker on the instance, absent when no `Setup` class exists.
+ */
 type LeftAlone =
   | { kind: "newer"; deployed: string }
   | { kind: "foreign"; deployed: string }
-  | { kind: "unknown"; reason: string };
+  | { kind: "unknown"; reason: string }
+  | { kind: "ipm"; state: "stale" | "unconfigured" | "missing"; deployed: string | undefined };
 
 /**
  * Log the one warning for a deployment that bootstrap leaves alone. It names
@@ -562,11 +620,25 @@ function warnDeploymentLeftAlone(
   const deliberate =
     `To install this server's classes deliberately, delete class ExecuteMCPv2.Setup in '${namespace}' and restart this server.`;
   const afterUpload = uploaded
-    ? " This server had already uploaded its class documents, so the namespace can hold its source under the deployed compiled " +
-      `classes; to reinstall cleanly, delete class ExecuteMCPv2.Setup in '${namespace}' and restart the build that should own this instance.`
+    ? found.kind === "ipm"
+      ? " This server had already uploaded its class documents, which stay in place until the package is reinstalled with zpm."
+      : " This server had already uploaded its class documents, so the namespace can hold its source under the deployed compiled " +
+        `classes; to reinstall cleanly, delete class ExecuteMCPv2.Setup in '${namespace}' and restart the build that should own this instance.`
     : "";
   let finding: string;
-  if (found.kind === "newer") {
+  if (found.kind === "ipm") {
+    const remedy =
+      found.state === "stale"
+        ? `To bring '${namespace}' up to this server's build, run zpm "install ${IPM_MODULE_NAME} ${PACKAGE_SEMVER}" there as a user with %Admin_Manage.`
+        : found.state === "unconfigured"
+          ? `To register the web application, run Do ##class(ExecuteMCPv2.Setup).Configure("${namespace}") as a user with %Admin_Manage.`
+          : `The installation holds no ExecuteMCPv2.Setup class, so uninstall and reinstall the package with zpm.`;
+    finding =
+      `the classes were installed by IPM (class ${IPM_INSTALL_GUARD.name.replace(/\.cls$/, "")} is present), ` +
+      "and this server never redeploys an IPM installation. " +
+      `The deployed marker is ${found.deployed === undefined ? "absent" : describeMarker(found.deployed)}; this server's is ${BOOTSTRAP_VERSION}. ` +
+      `${remedy} To hand '${namespace}' back to this server, run zpm "uninstall ${IPM_MODULE_NAME}" there and restart this server.`;
+  } else if (found.kind === "newer") {
     const parsed = parseBootstrapMarker(found.deployed);
     const order =
       parsed.kind === "stamped"
@@ -601,6 +673,11 @@ function warnDeploymentLeftAlone(
  * `stale` or `unconfigured` probe a marker was readable moments earlier, so a
  * failed read is `unknown`.
  *
+ * A reading that allows the compile is followed by the same ownership check as
+ * at startup: IPM may have installed the classes since the probe, and compiling
+ * over them would take them from IPM. An IPM installation records `ipmOwned`
+ * and returns `false`; an ownership that cannot be read is `unknown`.
+ *
  * The check cannot undo source documents that two builds uploaded interleaved:
  * it stops this server compiling over a deployment that compiled first.
  */
@@ -614,21 +691,58 @@ async function markerAllowsCompile(
 ): Promise<boolean> {
   const read = await readDeployedVersion(http, config, version);
   if (read.kind === "unread") {
-    if (probeStatus === "missing") return true;
-    result.probeStatus = "unknown";
-    result.probeFound = true;
-    result.readFailure = read.reason;
-    delete result.deployedVersion;
-    warnDeploymentLeftAlone({ kind: "unknown", reason: read.reason }, config, true, uploaded);
-    return false;
+    if (probeStatus !== "missing") {
+      result.probeStatus = "unknown";
+      result.probeFound = true;
+      result.readFailure = read.reason;
+      delete result.deployedVersion;
+      warnDeploymentLeftAlone({ kind: "unknown", reason: read.reason }, config, true, uploaded);
+      return false;
+    }
+  } else {
+    const classification = classifyDeployedMarker(read.marker, BOOTSTRAP_VERSION);
+    if (classification === "newer" || classification === "foreign") {
+      result.probeStatus = classification;
+      result.probeFound = true;
+      result.deployedVersion = read.marker;
+      warnDeploymentLeftAlone({ kind: classification, deployed: read.marker }, config, true, uploaded);
+      return false;
+    }
   }
-  const classification = classifyDeployedMarker(read.marker, BOOTSTRAP_VERSION);
-  if (classification !== "newer" && classification !== "foreign") return true;
-  result.probeStatus = classification;
+  return !(await leftToIpm(http, config, version, result, probeStatus, read.kind === "marker" ? read.marker : undefined, true, uploaded));
+}
+
+/**
+ * Check who owns the classes before a write. When IPM does (the install guard
+ * is present), record `ipmOwned` and `probeFound`, log the one warning and
+ * return `true`; when the ownership cannot be read, record `unknown` with the
+ * reason, log the existing unknown warning and return `true`. `false` means no
+ * IPM ownership was found and the write may go on. `deployed` is the marker on
+ * the instance, when one was read.
+ */
+async function leftToIpm(
+  http: IrisHttpClient,
+  config: IrisConnectionConfig,
+  version: number,
+  result: BootstrapResult,
+  state: "stale" | "unconfigured" | "missing",
+  deployed: string | undefined,
+  beforeCompile: boolean,
+  uploaded: boolean,
+): Promise<boolean> {
+  const ownership = await ipmOwnership(http, config, version);
+  if (ownership.owner === "none") return false;
   result.probeFound = true;
-  result.deployedVersion = read.marker;
-  warnDeploymentLeftAlone({ kind: classification, deployed: read.marker }, config, true, uploaded);
-  return false;
+  if (ownership.owner === "ipm") {
+    result.ipmOwned = true;
+    warnDeploymentLeftAlone({ kind: "ipm", state, deployed }, config, beforeCompile, uploaded);
+    return true;
+  }
+  result.probeStatus = "unknown";
+  result.readFailure = ownership.reason;
+  delete result.deployedVersion;
+  warnDeploymentLeftAlone({ kind: "unknown", reason: ownership.reason }, config, beforeCompile, uploaded);
+  return true;
 }
 
 /**
@@ -659,7 +773,16 @@ async function markerAllowsCompile(
  * 8. Before each compile the marker is re-read; a newer or foreign reading, or
  *    (after a `stale` or `unconfigured` probe) a failed read, skips the compile
  *    and every later step, with the same warning.
- * 9. Return result with step-level tracking.
+ * 9. Before any write (on `stale`, `unconfigured` and `missing`, and again at
+ *    the re-check before compile) the IPM-only `ExecuteMCPv2.InstallGuard`
+ *    document is asked for: present → IPM owns the classes, change nothing and
+ *    log one warning naming the `zpm` command (`ipmOwned: true`, `probeFound:
+ *    true`, every step flag false); a 404 → carry on; any other failure → change
+ *    nothing, `probeStatus: "unknown"` with the reason in `readFailure`. The
+ *    guard found only at the re-check comes after the class documents were
+ *    uploaded: those stay (`deployed` true), and the compile and every later step
+ *    are skipped.
+ * 10. Return result with step-level tracking.
  *
  * If the configure step fails (e.g. insufficient privileges), the result
  * includes manual instructions but does not throw. Because the probe checks
@@ -720,6 +843,14 @@ export async function bootstrap(
     logger.info(
       `Bootstrap: REST service is current (version ${BOOTSTRAP_VERSION}), skipping deploy`,
     );
+    return result;
+  }
+
+  // Every path below writes. An IPM installation owns its classes, so it is never written over; an
+  // ownership that cannot be read is not a licence to write either.
+  const probedMarker =
+    probe.status === "stale" ? probe.deployedVersion : probe.status === "unconfigured" ? BOOTSTRAP_VERSION : undefined;
+  if (await leftToIpm(http, config, version, result, probe.status, probedMarker, false, false)) {
     return result;
   }
 

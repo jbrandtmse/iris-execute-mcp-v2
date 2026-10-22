@@ -51,7 +51,7 @@ export const CI_HOST_PORTS = Object.freeze({ guard: '52790', live: '52791' });
 export const LIVE_NAMESPACE = 'HSCUSTOM';
 
 /** The `timeout-minutes` of each job. */
-export const JOB_TIMEOUT_MINUTES = Object.freeze({ gates: 60, throwaway: 150, package: 30 });
+export const JOB_TIMEOUT_MINUTES = Object.freeze({ gates: 60, throwaway: 150, package: 30, ipm: 45 });
 
 /** The images the workflow and the suites may name: the harness's digest constants. */
 export const CI_IMAGES = Object.freeze([IRIS_COMMUNITY_IMAGE, OLDEST_IRIS_COMMUNITY_IMAGE, IRISHEALTH_COMMUNITY_IMAGE]);
@@ -328,7 +328,11 @@ function buildDeclaredSteps() {
 
   const packageJob = [{ run: 'pnpm install --frozen-lockfile' }, { run: 'pnpm build' }, { run: 'node scripts/ci-package-smoke.mjs' }];
 
-  return { gates, throwaway, package: packageJob };
+  // Story 42.4: builds the IPM archive from the generated embed and installs it offline on both editions. It needs the built
+  // shared dist, and no launcher, no reserved port (its containers have no network) and no suite.
+  const ipm = [{ run: 'pnpm install --frozen-lockfile' }, { run: 'pnpm build' }, { run: 'node scripts/ci-ipm-archive.mjs' }];
+
+  return { gates, throwaway, package: packageJob, ipm };
 }
 
 /** Per job, the ordered `run` steps of the workflow (see the header). */

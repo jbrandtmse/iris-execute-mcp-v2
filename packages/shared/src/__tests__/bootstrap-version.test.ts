@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { classifyDeployedMarker, parseBootstrapMarker } from "../bootstrap-version.js";
 
 // The expected values below are the rows of the Story 42.2 I/O matrix and the ordering rule of AD-14
@@ -151,5 +154,79 @@ describe("classifyDeployedMarker", () => {
 
     expect(classifyDeployedMarker(EMBEDDED, released)).toBe("older");
     expect(classifyDeployedMarker(released, EMBEDDED)).toBe("newer");
+  });
+});
+
+// DW-674 (Story 42.4): the IPM install guard ports `classifyDeployedMarker` to ObjectScript, because the IPM install path
+// has no TypeScript. This table is the oracle both sides run: `ExecuteMCPv2.InstallGuard.Classify` is held equal to it on
+// the throwaway IRIS editions by `scripts/ci-ipm-archive.mjs`, and the TypeScript side is pinned to it here.
+//
+// Every `expected` was captured by running the reference, not by hand (Rule #36): `classifyDeployedMarker(deployed, embedded)`
+// of packages/shared/dist/bootstrap-version.js, built from bootstrap-version.ts, called from node over each case's pair
+// (Story 42.4 implement stage, 2026-10-22). Non-ASCII digits appear in the JSON as backslash-u escapes (Rule 14).
+interface ParityCase {
+  note: string;
+  deployed: string;
+  embedded: string;
+  expected: string;
+}
+
+const PARITY_CASES = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "bootstrap-marker-parity-cases.json"), "utf8"),
+) as ParityCase[];
+
+describe("the shared parity case table (DW-674)", () => {
+  it.each(PARITY_CASES.map((entry, index) => ({ ...entry, index })))(
+    "case $index ($note): the comparator says $expected",
+    ({ deployed, embedded, expected }) => {
+      expect(classifyDeployedMarker(deployed, embedded)).toBe(expected);
+    },
+  );
+
+  it("is a table of at least 40 cases whose fields are all strings and whose notes are unique", () => {
+    expect(PARITY_CASES.length).toBeGreaterThanOrEqual(40);
+    for (const entry of PARITY_CASES) {
+      expect(Object.keys(entry).sort()).toEqual(["deployed", "embedded", "expected", "note"]);
+      for (const value of Object.values(entry)) expect(typeof value).toBe("string");
+    }
+    expect(new Set(PARITY_CASES.map((entry) => entry.note)).size).toBe(PARITY_CASES.length);
+  });
+
+  it("covers every classification and every parse kind, in both roles, plus a number past 2^53 and a non-ASCII digit", () => {
+    expect(new Set(PARITY_CASES.map((entry) => entry.expected))).toEqual(new Set(["current", "older", "newer", "foreign"]));
+    for (const role of ["deployed", "embedded"] as const) {
+      const kinds = new Set(PARITY_CASES.map((entry) => parseBootstrapMarker(entry[role]).kind));
+      // The comparator only reads a legacy deployed marker; an embedded legacy marker is covered as a role of its own.
+      expect(kinds, `${role} markers`).toEqual(new Set(["stamped", "legacy", "unparseable"]));
+    }
+    expect(
+      PARITY_CASES.some((entry) =>
+        [entry.deployed, entry.embedded].some((marker) => /\d{16,}/.test(marker) && Number(/\d{16,}/.exec(marker)?.[0]) > Number.MAX_SAFE_INTEGER),
+      ),
+      "a case with a number past 2^53",
+    ).toBe(true);
+    expect(
+      PARITY_CASES.some((entry) => /\d{20,}/.test(entry.deployed) || /\d{20,}/.test(entry.embedded)),
+      "a case with a number past 19 digits",
+    ).toBe(true);
+    expect(
+      PARITY_CASES.some((entry) => /[\u0080-\uFFFF]/.test(entry.deployed + entry.embedded)),
+      "a case with a non-ASCII digit",
+    ).toBe(true);
+    for (const wanted of ["dev", "", " 1.2.3+4.aaaaaaaaaaaa", "1.2.3+4.aaaaaaaaaaaa\n", "1.2.3-beta.1+4.aaaaaaaaaaaa"]) {
+      expect(
+        PARITY_CASES.some((entry) => entry.deployed === wanted),
+        `a case with the deployed value ${JSON.stringify(wanted)}`,
+      ).toBe(true);
+    }
+    expect(PARITY_CASES.some((entry) => /^[0-9a-f]{11}$/.test(entry.deployed)), "an 11-hex legacy marker").toBe(true);
+    expect(PARITY_CASES.some((entry) => /^[0-9a-f]{13}$/.test(entry.deployed)), "a 13-hex legacy marker").toBe(true);
+    expect(PARITY_CASES.some((entry) => /[A-F]{12}/.test(entry.deployed)), "an uppercase hash").toBe(true);
+  });
+
+  it("holds no literal non-ASCII character: the JSON carries escapes (Rule 14)", () => {
+    const raw = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "bootstrap-marker-parity-cases.json"), "utf8");
+    expect(/[\u0080-\uFFFF]/.test(raw)).toBe(false);
+    expect(raw).toContain("\\u0661");
   });
 });

@@ -8,14 +8,21 @@
 #              run: the launcher's full test suite (Story 42.7, DW-532) and prettier's format:check, which the tree does not pass.
 #   throwaway  Everything that needs a live IRIS, against throwaway containers that scripts/throwaway-iris.mjs starts, labels
 #              and removes (it refuses ports 52773 and 1972 and any image that is not pinned by digest). The bootstrap-guard
-#              gate runs on iris-community 2026.2 and on the oldest tag that still starts (2025.3; a Community image's license
-#              key expires, so the tag moves forward), each in a container of its own. An
+#              gate runs on iris-community 2026.2 and on the oldest tag that is tested (2026.1, whose Community license key is
+#              valid to 2027-03-27; 2025.3 passed the gate in run 39749804619 on 2026-10-22 and its key expires on 2026-11-13,
+#              and a key expires, so the tag moves forward before then), each in a container of its own. An
 #              irishealth-community 2026.2 container is then started in HSCUSTOM and seeded (the real bootstrap, then the
 #              test and fixture classes), and every package's prepublishOnly, every integration suite, the five process
 #              gates and the launcher's live files run against it through scripts/ci-live-suite.mjs, which fails a suite in
 #              which any test skipped without an allowlist entry.
 #   package    Packs the 8 packages, installs the tarballs together, and starts every bin. It needs gates and throwaway,
 #              so no tarball is built from a red commit; CI, not a prepack hook, is the publish-time gate (DW-443).
+#   ipm        Builds the IPM archive of the ExecuteMCPv2 package from the generated embed on a throwaway container with no
+#              network, and installs that one archive offline on iris-community 2026.2 (USER) and irishealth-community
+#              2026.2 (HSCUSTOM), each on a container of its own with no network. On the community container it proves
+#              the install guard refuses a newer, dev or marker-less Setup; on both, that the classes compile, that the REST
+#              application is configured, that nothing was fetched, and that InstallGuard.Classify equals the TypeScript comparator. It needs gates and
+#              throwaway, so no archive comes from a red commit, and it runs in parallel with package. It publishes nothing.
 #
 # The steps are declared in scripts/lib/ci-checks.mjs, and packages/iris-mcp-all/src/__tests__/ci-workflow.test.ts holds this
 # file equal to that registry. Every action is pinned by commit, with its release tag in the trailing comment.
@@ -221,3 +228,24 @@ jobs:
         run: pnpm build
       - name: package smoke
         run: node scripts/ci-package-smoke.mjs
+
+  ipm:
+    name: ipm
+    needs: [gates, throwaway]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22.17.0"
+          cache: pnpm
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: build
+        run: pnpm build
+      - name: ipm archive
+        run: node scripts/ci-ipm-archive.mjs

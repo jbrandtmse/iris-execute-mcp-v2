@@ -21,7 +21,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -349,5 +349,180 @@ describe("up as a process keeps nothing on a failure", () => {
     expect(up.stderr).toMatch(/already exists/);
     expect(fake.calls()).toEqual([]);
     expect(readFileSync(state, "utf8")).toBe('{"keep":"me"}\n');
+  }, 60_000);
+});
+
+// Story 42.4 (AC 42.4.2): `up --network none`, `--mount`, `session` and `cp`, as a real process against the scripted docker. The
+// scripted docker refuses a `-p` together with `--network none`, answers `docker port` for a container with no port the way docker
+// does (exit 1), and reports `HostConfig.NetworkMode`, so a harness that still asked for a port or skipped the network check fails here.
+describe("up --network none, session and cp as a process against a scripted docker (Story 42.4)", () => {
+  const noneUp = (state: string, extra: string[] = []): string[] => ["up", "--image", COMMUNITY, "--namespace", "USER", "--network", "none", "--state", state, ...extra];
+
+  function stageDirectory(): string {
+    const directory = path.join(root, "stage");
+    mkdirSync(directory, { recursive: true });
+    return directory;
+  }
+
+  it.skipIf(process.platform === "win32")("starts the container with no network and no port, readies it with no web poll, and records a state with no port", async () => {
+    const state = path.join(root, "isolated.json");
+    const stage = stageDirectory();
+
+    const up = await harness(noneUp(state, ["--mount", `${stage}:/opt/iris-mcp/stage`]));
+
+    expect(up.status, up.stderr).toBe(0);
+    const recorded = JSON.parse(readFileSync(state, "utf8")) as Record<string, string>;
+    expect(Object.keys(recorded)).toEqual(["name", "id", "image", "namespace", "network", "mount"]);
+    expect(recorded).toEqual({ name: recorded.name, id: expect.stringMatching(/^[0-9a-f]{64}$/), image: COMMUNITY, namespace: "USER", network: "none", mount: `${stage}:/opt/iris-mcp/stage` });
+    expect(recorded.name).toMatch(NAME_PATTERN);
+    expect(statSync(state).mode & 0o777, "the state file is private").toBe(0o600);
+
+    const { name, id } = recorded;
+    const calls = fake.calls();
+    expect(calls[0]?.argv).toEqual(["run", "-d", "--name", name, "--label", "iris-mcp.owner=throwaway", "--network", "none", "-v", `${stage}:/opt/iris-mcp/stage:ro`, COMMUNITY]);
+    expect(argvLines(calls).slice(1), "no `docker port`: the readiness is the two sessions alone").toEqual([`exec -i ${id} iris session iris -U %SYS`, `exec -i ${id} iris session iris -U %SYS`]);
+    expect(webRequests, "and no web poll").toEqual([]);
+    expect(fake.containers()[id]).toMatchObject({ network: "none", mount: `${stage}:/opt/iris-mcp/stage:ro` });
+  }, 120_000);
+
+  it.skipIf(process.platform === "win32")("exec refuses it; session pipes the script in and returns docker's status; cp copies a file out; logs and down work", async () => {
+    const state = path.join(root, "isolated.json");
+    const up = await harness(noneUp(state));
+    expect(up.status, up.stderr).toBe(0);
+    const { id } = JSON.parse(readFileSync(state, "utf8")) as { id: string };
+    const upCalls = fake.calls().length;
+
+    // exec: refused with exit 2, no docker call, the command never ran.
+    const probeOut = path.join(root, "probe.json");
+    const exec = await harness(["exec", "--state", state, "--", process.execPath, probeScript(), probeOut, "0"]);
+    expect(exec.status).toBe(2);
+    expect(exec.stderr).toMatch(/publishes no port/);
+    expect(existsSync(probeOut)).toBe(false);
+    expect(fake.calls().length, "exec calls no docker for a --network none state").toBe(upCalls);
+
+    // session: the script is the session's stdin, the output reaches stdout, the status is docker's.
+    const script = path.join(root, "ipm.mos");
+    const scriptText = 'Write "IRISMCP-"_"X-START:"_1_":IRISMCP-"_"X-END",!\nHalt\n';
+    writeFileSync(script, scriptText, "utf8");
+    const session = await harness(["session", "--state", state, "--namespace", "USER", "--script", script]);
+    expect(session.status, session.stderr).toBe(0);
+    expect(session.stdout).toContain("scripted session in USER");
+    expect(session.stdout).toContain(scriptText);
+    const sessionCalls = fake.calls().slice(upCalls);
+    expect(argvLines(sessionCalls)).toEqual([`inspect ${id}`, `exec -i ${id} iris session iris -U USER`]);
+    expect(sessionCalls[1]?.stdin).toBe(scriptText);
+
+    const failing = await harness(["session", "--state", state, "--namespace", "USER", "--script", script], { FAKE_DOCKER_SESSION_STATUS: "3" });
+    expect(failing.status, "the harness exits with docker's status").toBe(3);
+
+    // cp: the file arrives at the destination, by `docker cp <id>:<from> <to>`.
+    const copied = path.join(root, "copied.tgz");
+    const cp = await harness(["cp", "--state", state, "--from", "/tmp/iris-mcp-ipm-out/iris-execute-mcp-v2.tgz", "--to", copied], { FAKE_DOCKER_CP_CONTENT: "archive-bytes" });
+    expect(cp.status, cp.stderr).toBe(0);
+    expect(readFileSync(copied, "utf8")).toBe("archive-bytes");
+    expect(fake.calls().at(-1)?.argv).toEqual(["cp", `${id}:/tmp/iris-mcp-ipm-out/iris-execute-mcp-v2.tgz`, copied]);
+
+    const refusedCopy = await harness(["cp", "--state", state, "--from", "/etc/passwd", "--to", path.join(root, "nope")]);
+    expect(refusedCopy.status).toBe(2);
+    const failedCopy = await harness(["cp", "--state", state, "--from", "/tmp/iris-mcp-ipm-out/missing.tgz", "--to", path.join(root, "x.tgz")], { FAKE_DOCKER_CP_FAIL: "1" });
+    expect(failedCopy.status).toBe(4);
+    expect(existsSync(path.join(root, "x.tgz"))).toBe(false);
+
+    // logs and down accept the isolated state; down removes the container and the state file.
+    const logs = await harness(["logs", "--state", state]);
+    expect(logs.status, logs.stderr).toBe(0);
+    for (const line of FAKE_DOCKER_LOG_LINES) expect(logs.stderr).toContain(line);
+    const down = await harness(["down", "--state", state]);
+    expect(down.status, down.stderr).toBe(0);
+    expect(fake.containers()).toEqual({});
+    expect(existsSync(state)).toBe(false);
+  }, 180_000);
+
+  it.skipIf(process.platform === "win32")("session and cp re-inspect first: an unlabelled container, a container that has gained a port and a missing container are refused, and nothing is run or copied", async () => {
+    const state = path.join(root, "isolated.json");
+    const up = await harness(noneUp(state));
+    expect(up.status, up.stderr).toBe(0);
+    const { id } = JSON.parse(readFileSync(state, "utf8")) as { id: string };
+    const script = path.join(root, "ipm.mos");
+    writeFileSync(script, "Halt\n", "utf8");
+    const original = fake.containers();
+    const container = original[id] as NonNullable<(typeof original)[string]>;
+    const attempt = async (): Promise<Array<{ status: number | null; stderr: string }>> => {
+      const before = fake.calls().length;
+      const results = [
+        await harness(["session", "--state", state, "--namespace", "USER", "--script", script]),
+        await harness(["cp", "--state", state, "--from", "/tmp/iris-mcp-x/y", "--to", path.join(root, "y")]),
+      ];
+      const verbs = argvLines(fake.calls().slice(before)).map((line) => line.split(" ")[0]);
+      expect(verbs, "only inspections ran").toEqual(["inspect", "inspect"]);
+      expect(existsSync(path.join(root, "y"))).toBe(false);
+      return results;
+    };
+
+    fake.setContainers({ [id]: { ...container, labels: {} } });
+    for (const result of await attempt()) {
+      expect(result.status).toBe(2);
+      expect(result.stderr).toMatch(/does not carry the label/);
+    }
+
+    // JSON drops the undefined network, so the container reads as one on the default network with a published port.
+    fake.setContainers({ [id]: { ...container, network: undefined, hostPort: "49153" } });
+    for (const result of await attempt()) {
+      expect(result.status).toBe(2);
+      expect(result.stderr).toMatch(/network mode is "default", not "none"/);
+    }
+
+    fake.setContainers({});
+    for (const result of await Promise.all([
+      harness(["session", "--state", state, "--namespace", "USER", "--script", script]),
+      harness(["cp", "--state", state, "--from", "/tmp/iris-mcp-x/y", "--to", path.join(root, "y")]),
+    ])) {
+      expect(result.status).toBe(2);
+    }
+    fake.setContainers(original);
+  }, 180_000);
+
+  it.skipIf(process.platform === "win32")("refuses a mount whose host directory is a symbolic link, missing, relative or holding .. with exit 2, and calls no docker", async () => {
+    const real = stageDirectory();
+    const link = path.join(root, "stage-link");
+    symlinkSync(real, link);
+    for (const [label, hostDirectory, problem] of [
+      ["a symbolic link", link, /symbolic link/],
+      ["a missing directory", path.join(root, "missing"), /does not exist/],
+      ["a file", (() => { const file = path.join(root, "a-file"); writeFileSync(file, "x", "utf8"); return file; })(), /not a directory/],
+      ["a relative path", "stage", /not absolute/],
+      ["a path with ..", `${real}/../stage`, /holds "\.\."/],
+    ] as Array<[string, string, RegExp]>) {
+      const state = path.join(root, `refused-${label.replace(/\W+/g, "-")}.json`);
+      const up = await harness(noneUp(state, ["--mount", `${hostDirectory}:/opt/iris-mcp/stage`]));
+      expect(up.status, `${label}: ${up.stderr}`).toBe(2);
+      expect(up.stderr, label).toMatch(problem);
+      expect(existsSync(state), label).toBe(false);
+    }
+    expect(fake.calls(), "docker was never called").toEqual([]);
+  }, 60_000);
+
+  it("refuses --network none together with --host-port, and a network other than none, with exit 2 and no docker call", async () => {
+    const state = path.join(root, "never.json");
+
+    const both = await harness(noneUp(state, ["--host-port", port]));
+    expect(both.status).toBe(2);
+    expect(both.stderr).toMatch(/exclude each other/);
+    const host = await harness(["up", "--image", COMMUNITY, "--namespace", "USER", "--network", "host", "--state", state]);
+    expect(host.status).toBe(2);
+    expect(fake.calls()).toEqual([]);
+    expect(existsSync(state)).toBe(false);
+  }, 60_000);
+
+  it("removes the generated container name and writes no state when docker refuses to start the isolated container", async () => {
+    const state = path.join(root, "refused.json");
+
+    const up = await harness(noneUp(state), { FAKE_DOCKER_RUN_FAIL: "1" });
+
+    expect(up.status).toBe(4);
+    const calls = fake.calls();
+    expect(calls[0]?.argv[0]).toBe("run");
+    expect(calls[1]?.argv, "the name it asked docker to create is removed").toEqual(["rm", "-f", "-v", calls[0]?.argv[3]]);
+    expect(existsSync(state)).toBe(false);
   }, 60_000);
 });

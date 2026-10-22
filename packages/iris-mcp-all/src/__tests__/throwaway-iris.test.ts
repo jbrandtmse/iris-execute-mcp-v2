@@ -19,7 +19,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -28,18 +28,21 @@ import {
   IRISHEALTH_COMMUNITY_IMAGE,
   IRIS_COMMUNITY_IMAGE,
   NAME_PREFIX,
+  NETWORK_NONE,
   OLDEST_IRIS_COMMUNITY_IMAGE,
   OWNER_LABEL,
   SHARED_INSTANCE_CONTAINER,
   assertThrowawayEnv,
   assertThrowawayInspect,
   buildChildEnv,
+  buildCopyArgv,
   buildInspectArgv,
   buildLogsArgv,
   buildPortArgv,
   buildRunArgv,
   buildSessionArgv,
   buildTeardownArgv,
+  copyHarness,
   createTeardown,
   defaultDeps,
   downHarness,
@@ -52,12 +55,17 @@ import {
   parseDockerPort,
   parseState,
   runHarness,
+  sessionHarness,
   throwawayEnvProblems,
   upHarness,
   validateContainerName,
+  validateCopyDestination,
+  validateCopySource,
   validateHostPort,
   validateImage,
+  validateMount,
   validateNamespace,
+  validateSessionNamespace,
 } from "../../../../scripts/throwaway-iris.mjs";
 import { throwawayGatePlan } from "./bootstrap-guard-legs.js";
 import { runScriptUnderPreload } from "./live-gate-child-run.js";
@@ -94,13 +102,15 @@ describe("throwaway-iris: the images", () => {
     expect(validateImage(IRISHEALTH_COMMUNITY_IMAGE)).toBe(IRISHEALTH_COMMUNITY_IMAGE);
   });
 
-  // The oldest tag whose license key had not expired on 2026-10-22 (2024.3, 2025.1 and 2025.2 refused to start); captured by
-  // running the bootstrap-guard gate through `throwaway-iris.mjs run --image <ref>` for each tag, in that order.
-  it("pins the oldest IRIS Community tag that still starts (2025.3) by its manifest-list digest", () => {
+  // DW-686 (Story 42.4): 2025.3 passed every guard leg in CI run 39749804619 (commit 6a8574f, 2026-10-22) and its license key
+  // expires on 2026-11-13, so the oldest tested tag is 2026.1, whose key is valid to 2027-03-27. The digest is the manifest list
+  // the plan stage pulled and the implement stage ran the throwaway proofs on (IRIS 2026.1 Build 234U, IPM 0.10.5).
+  it("pins the oldest IRIS Community tag whose key is valid for months ahead (2026.1) by its manifest-list digest", () => {
     expect(OLDEST_IRIS_COMMUNITY_IMAGE).toBe(
-      "intersystems/iris-community:2025.3@sha256:f456892d143d54a1cf3f202f04b672c7d594ec3cde5f47a69dbf5451329dc300",
+      "intersystems/iris-community:2026.1@sha256:c57b65b2b454494091e7b3e49f6a53b3335f40adf475bcfcee0866083f35a7c2",
     );
     expect(validateImage(OLDEST_IRIS_COMMUNITY_IMAGE)).toBe(OLDEST_IRIS_COMMUNITY_IMAGE);
+    expect(OLDEST_IRIS_COMMUNITY_IMAGE, "no longer the 2025.3 digest whose key expires on 2026-11-13").not.toContain("f456892d143d54a1");
   });
 
 
@@ -535,20 +545,36 @@ function defaultStartReply(args: string[], input: string | undefined): { status:
 function recordingHarness(overrides: { dockerReply?: (args: string[], input: string | undefined) => { status: number | null; stdout?: string; stderr?: string } } = {}) {
   const events: string[] = [];
   const dockerCalls: string[][] = [];
+  const dockerInputs: Array<string | undefined> = [];
+  const dockerTimeouts: Array<number | undefined> = [];
   const logs: string[] = [];
   const commands: Array<{ command: string[]; env: Record<string, string> }> = [];
   const files = new Map<string, string>();
+  const scripts = new Map<string, string>();
+  const output: string[] = [];
+  const mountProblems = new Map<string, string>();
   let clock = 0;
   let exitCode = 7;
 
   const deps = {
     findDocker: (): string | undefined => "/fake/docker",
-    docker: (args: string[], options: { input?: string } = {}) => {
+    docker: (args: string[], options: { input?: string; timeoutMs?: number } = {}) => {
       dockerCalls.push(args);
+      dockerInputs.push(options.input);
+      dockerTimeouts.push(options.timeoutMs);
       events.push(`docker ${args[0]}`);
       const reply = (overrides.dockerReply ?? defaultStartReply)(args, options.input);
       return { status: reply.status, stdout: reply.stdout ?? "", stderr: reply.stderr ?? "" };
     },
+    readScript: (file: string): string => {
+      const text = scripts.get(file);
+      if (text === undefined) throw new Error(`ENOENT: no such file ${file}`);
+      return text;
+    },
+    out: (text: string): void => {
+      output.push(text);
+    },
+    checkMountDirectory: (directory: string): string | undefined => mountProblems.get(directory),
     webStatus: async (): Promise<number> => 200,
     runCommand: async (command: string[], env: Record<string, string>): Promise<number> => {
       events.push("command");
@@ -579,9 +605,14 @@ function recordingHarness(overrides: { dockerReply?: (args: string[], input: str
     teardown,
     events,
     dockerCalls,
+    dockerInputs,
+    dockerTimeouts,
     logs,
     commands,
     files,
+    scripts,
+    output,
+    mountProblems,
     setExitCode: (code: number): void => {
       exitCode = code;
     },
@@ -1245,5 +1276,572 @@ describe("throwaway-iris: the state file the real writer produces", () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+});
+
+// ── Story 42.4 (AC 42.4.2): `up --network none`, `--mount`, `session` and `cp` ─────────────────────────────────────────
+
+const MOUNT_HOST = "/virtual/stage";
+const MOUNT_SPEC = `${MOUNT_HOST}:/opt/iris-mcp/stage`;
+const NONE_STATE = { name: GENERATED_NAME, id: CONTAINER_ID, image: IRIS_COMMUNITY_IMAGE, namespace: "USER", network: "none" };
+
+/** The parsed output of `docker inspect` for a healthy `--network none` throwaway: the web port is exposed by the image but bound to nothing. */
+function inspectedIsolated(overrides: Record<string, unknown> = {}): unknown[] {
+  return [
+    {
+      Name: `/${GENERATED_NAME}`,
+      State: { Running: true },
+      Config: { Labels: { "iris-mcp.owner": "throwaway" } },
+      HostConfig: { NetworkMode: "none", PortBindings: {} },
+      NetworkSettings: { Ports: { "52773/tcp": null } },
+      ...overrides,
+    },
+  ];
+}
+
+/** A docker stand-in whose `inspect` reports a `--network none` throwaway with `overrides`. */
+const isolatedReply =
+  (overrides: Record<string, unknown> = {}) =>
+  (args: string[], input: string | undefined) =>
+    args[0] === "inspect" ? { status: 0, stdout: JSON.stringify(inspectedIsolated(overrides)) } : defaultStartReply(args, input);
+
+/** A harness whose state file records a `--network none` throwaway. */
+function isolatedHarness(overrides: Parameters<typeof recordingHarness>[0] = {}, state: Record<string, unknown> = NONE_STATE) {
+  const harness = recordingHarness({ dockerReply: overrides.dockerReply ?? isolatedReply() });
+  harness.files.set(STATE_FILE, JSON.stringify(state));
+  return harness;
+}
+
+describe("throwaway-iris: `docker run --network none` and the read-only mount", () => {
+  it("builds the isolated argv: no -p, the network, no mount unless asked for, and the image last", () => {
+    expect(buildRunArgv({ image: IRIS_COMMUNITY_IMAGE, name: GENERATED_NAME, network: "none" })).toEqual([
+      "run", "-d", "--name", GENERATED_NAME, "--label", OWNER_LABEL, "--network", "none", IRIS_COMMUNITY_IMAGE,
+    ]);
+    const mounted = buildRunArgv({ image: IRIS_COMMUNITY_IMAGE, name: GENERATED_NAME, network: "none", mount: MOUNT_SPEC });
+    expect(mounted).toEqual([
+      "run", "-d", "--name", GENERATED_NAME, "--label", OWNER_LABEL, "--network", "none", "-v", `${MOUNT_HOST}:/opt/iris-mcp/stage:ro`, IRIS_COMMUNITY_IMAGE,
+    ]);
+    expect(mounted, "an isolated container publishes nothing").not.toContain("-p");
+  });
+
+  it("leaves `run`'s argv byte-identical when neither a network nor a mount is given, and adds only the read-only -v for a mount", () => {
+    expect(buildRunArgv({ image: IRIS_COMMUNITY_IMAGE, name: GENERATED_NAME })).toEqual([
+      "run", "-d", "--name", GENERATED_NAME, "--label", OWNER_LABEL, "-p", "127.0.0.1::52773", IRIS_COMMUNITY_IMAGE,
+    ]);
+    expect(buildRunArgv({ image: IRIS_COMMUNITY_IMAGE, name: GENERATED_NAME, hostPort: "49153", mount: MOUNT_SPEC })).toEqual([
+      "run", "-d", "--name", GENERATED_NAME, "--label", OWNER_LABEL, "-p", "127.0.0.1:49153:52773", "-v", `${MOUNT_HOST}:/opt/iris-mcp/stage:ro`, IRIS_COMMUNITY_IMAGE,
+    ]);
+  });
+
+  it.each([
+    ["a host port with --network none", { network: "none", hostPort: "49153" }, /publishes no port/],
+    ["a network other than none", { network: "host" }, /only network mode this harness takes is "none"/],
+    ["a mount with a second colon", { network: "none", mount: `${MOUNT_HOST}:/opt/iris-mcp/stage:rw` }, /exactly one ":"/],
+  ])("refuses %s", (_label, extra, problem) => {
+    expect(() => buildRunArgv({ image: IRIS_COMMUNITY_IMAGE, name: GENERATED_NAME, ...extra })).toThrow(problem);
+  });
+
+  it("accepts the mount <absolute plain directory>:/opt/iris-mcp/<name>", () => {
+    expect(validateMount(MOUNT_SPEC)).toEqual({ host: MOUNT_HOST, container: "/opt/iris-mcp/stage", spec: MOUNT_SPEC });
+    expect(validateMount("/tmp/a b/c:/opt/iris-mcp/install-1").host).toBe("/tmp/a b/c");
+  });
+
+  it.each([
+    ["an empty value", ""],
+    ["a non-string", undefined],
+    ["no container side", MOUNT_HOST],
+    ["a third (mode) part", `${MOUNT_SPEC}:rw`],
+    ["a relative host directory", "stage:/opt/iris-mcp/stage"],
+    ["a host directory with ..", "/virtual/../etc:/opt/iris-mcp/stage"],
+    ["a host directory ending in ..", "/virtual/stage/..:/opt/iris-mcp/stage"],
+    ["a host directory with .", "/virtual/./stage:/opt/iris-mcp/stage"],
+    ["a host directory with a repeated slash", "/virtual//stage:/opt/iris-mcp/stage"],
+    ["a host directory with a trailing slash", "/virtual/stage/:/opt/iris-mcp/stage"],
+    ["a Windows drive letter", "C:\\stage:/opt/iris-mcp/stage"],
+    ["a control character", "/virtual/st\nage:/opt/iris-mcp/stage"],
+    ["a container path outside /opt/iris-mcp", `${MOUNT_HOST}:/etc`],
+    ["a container path that is /opt/iris-mcp itself", `${MOUNT_HOST}:/opt/iris-mcp`],
+    ["a container path with an upper-case name", `${MOUNT_HOST}:/opt/iris-mcp/Stage`],
+    ["a container path with a nested directory", `${MOUNT_HOST}:/opt/iris-mcp/a/b`],
+    ["a container path with ..", `${MOUNT_HOST}:/opt/iris-mcp/..`],
+  ])("refuses %s as a mount", (_label, spec) => {
+    expect(() => validateMount(spec)).toThrow(/refusing the mount/);
+  });
+});
+
+describe("throwaway-iris: the command line of `up --network none`, `session` and `cp`", () => {
+  const state = "/tmp/throwaway-ipm.json";
+  const noneUp = ["up", "--image", IRIS_COMMUNITY_IMAGE, "--namespace", "USER", "--network", "none", "--state", state];
+
+  it("parses `up --network none`, with and without a mount, and `up --host-port` as before", () => {
+    expect(parseCli(noneUp)).toEqual({ subcommand: "up", image: IRIS_COMMUNITY_IMAGE, namespace: "USER", network: "none", state });
+    expect(Object.keys(parseCli(noneUp))).not.toContain("hostPort");
+    expect(parseCli([...noneUp, "--mount", MOUNT_SPEC])).toEqual({ subcommand: "up", image: IRIS_COMMUNITY_IMAGE, namespace: "USER", network: "none", state, mount: MOUNT_SPEC });
+    const published = parseCli(["up", "--image", IRIS_COMMUNITY_IMAGE, "--namespace", "USER", "--host-port", "52791", "--mount", MOUNT_SPEC, "--state", state]);
+    expect(published).toEqual({ subcommand: "up", image: IRIS_COMMUNITY_IMAGE, namespace: "USER", hostPort: "52791", state, mount: MOUNT_SPEC });
+    expect(Object.keys(published)).not.toContain("network");
+  });
+
+  it.each([
+    ["--network none with --host-port", [...noneUp, "--host-port", "52791"]],
+    ["a network other than none", ["up", "--image", IRIS_COMMUNITY_IMAGE, "--namespace", "USER", "--network", "host", "--state", state]],
+    ["a --network with no value", ["up", "--image", IRIS_COMMUNITY_IMAGE, "--namespace", "USER", "--state", state, "--network"]],
+    ["a bad mount", [...noneUp, "--mount", "/virtual/../x:/opt/iris-mcp/stage"]],
+    ["a repeated --mount", [...noneUp, "--mount", MOUNT_SPEC, "--mount", MOUNT_SPEC]],
+    ["no --host-port and no --network", ["up", "--image", IRIS_COMMUNITY_IMAGE, "--namespace", "USER", "--state", state]],
+    ["--network on run", ["run", "--network", "none", "--", "true"]],
+    ["--mount on run", ["run", "--mount", MOUNT_SPEC, "--", "true"]],
+  ])("refuses %s", (_label, argv) => {
+    expect(() => parseCli(argv as string[])).toThrow();
+  });
+
+  it("parses `session` and `cp` with their state file, and validates each value", () => {
+    expect(parseCli(["session", "--state", "s.json", "--namespace", "USER", "--script", "s.mos"])).toEqual({
+      subcommand: "session", state: "s.json", namespace: "USER", script: "s.mos",
+    });
+    expect(parseCli(["session", "--state", "s.json", "--namespace", "%SYS", "--script", "s.mos"]).namespace).toBe("%SYS");
+    expect(parseCli(["cp", "--state", "s.json", "--from", "/tmp/iris-mcp-ipm-out/x.tgz", "--to", "out/x.tgz"])).toEqual({
+      subcommand: "cp", state: "s.json", from: "/tmp/iris-mcp-ipm-out/x.tgz", to: "out/x.tgz",
+    });
+    for (const argv of [
+      ["session", "--state", "s.json", "--namespace", "USER"],
+      ["session", "--state", "s.json", "--script", "s.mos"],
+      ["session", "--namespace", "USER", "--script", "s.mos"],
+      ["session", "--state", "s.json", "--namespace", "user", "--script", "s.mos"],
+      ["session", "--state", "s.json", "--namespace", "USER", "--script", "s.mos", "--", "true"],
+      ["cp", "--state", "s.json", "--from", "/tmp/iris-mcp-x/y"],
+      ["cp", "--state", "s.json", "--to", "y"],
+      ["cp", "--state", "s.json", "--from", "/etc/passwd", "--to", "y"],
+      ["cp", "--state", "s.json", "--from", "/tmp/iris-mcp-x/../../etc/passwd", "--to", "y"],
+      ["cp", "--state", "s.json", "--from", "/tmp/iris-mcp-x/y", "--to", "other-container:/y"],
+      ["cp", "--state", "s.json", "--from", "/tmp/iris-mcp-x/y", "--to", "y", "extra"],
+    ]) {
+      expect(() => parseCli(argv), argv.join(" ")).toThrow();
+    }
+  });
+
+  it("prints a usage that names every subcommand", () => {
+    let usage = "";
+    try {
+      parseCli(["start"]);
+    } catch (error) {
+      usage = (error as Error).message;
+    }
+    for (const line of ["run ", "up ", "--network none", "--mount", "exec ", "session ", "cp ", "logs ", "down "]) {
+      expect(usage, line).toContain(line);
+    }
+  });
+});
+
+describe("throwaway-iris: session and cp argv", () => {
+  it("opens the session in the namespace asked for, %SYS by default, and refuses anything else", () => {
+    expect(buildSessionArgv(CONTAINER_ID)).toEqual(["exec", "-i", CONTAINER_ID, "iris", "session", "iris", "-U", "%SYS"]);
+    expect(buildSessionArgv(CONTAINER_ID, "USER")).toEqual(["exec", "-i", CONTAINER_ID, "iris", "session", "iris", "-U", "USER"]);
+    expect(validateSessionNamespace("%SYS")).toBe("%SYS");
+    for (const namespace of ["%sys", "user", "%ALL", "USER;x", ""]) {
+      expect(() => buildSessionArgv(CONTAINER_ID, namespace), namespace).toThrow(/refusing the namespace/);
+    }
+  });
+
+  it("copies one file out by container id, under the prefix, and refuses any other source or destination", () => {
+    expect(buildCopyArgv(CONTAINER_ID, "/tmp/iris-mcp-ipm-out/x.tgz", "/host/x.tgz")).toEqual(["cp", `${CONTAINER_ID}:/tmp/iris-mcp-ipm-out/x.tgz`, "/host/x.tgz"]);
+    expect(validateCopySource("/tmp/iris-mcp-a")).toBe("/tmp/iris-mcp-a");
+    for (const from of ["/tmp/other/x", "/tmp/iris-mcp-", "tmp/iris-mcp-x", "/tmp/iris-mcp-x/../y", "/tmp/iris-mcp-x:y", "/tmp/iris-mcp-x\ny", undefined, ""]) {
+      expect(() => validateCopySource(from), String(from)).toThrow(/refusing to copy/);
+    }
+    for (const to of ["", "c:/x", "container:/x", "x\ny", undefined]) {
+      expect(() => validateCopyDestination(to), String(to)).toThrow(/refusing to copy to/);
+    }
+    expect(() => buildCopyArgv("not-an-id", "/tmp/iris-mcp-x", "/host/x")).toThrow(/container id/);
+  });
+});
+
+describe("throwaway-iris: up --network none keeps a container that has no web port", () => {
+  const upOptions = (harness: ReturnType<typeof recordingHarness>, extra: Record<string, unknown> = {}) => ({
+    image: IRIS_COMMUNITY_IMAGE,
+    namespace: "USER",
+    network: "none",
+    state: STATE_FILE,
+    env: harness.options().env,
+    ...extra,
+  });
+
+  it("starts the container with --network none, readies it by the session loop and the unexpiry alone (no docker port, no web poll), and writes a state with no port", async () => {
+    const harness = recordingHarness();
+    let polled = 0;
+    harness.deps.webStatus = async () => {
+      polled += 1;
+      return 200;
+    };
+
+    const code = await upHarness(upOptions(harness), harness.deps, harness.teardown);
+
+    expect(code).toBe(0);
+    expect(harness.events).toEqual(["docker run", "docker exec", "docker exec", "write state"]);
+    expect(polled, "no web port to poll").toBe(0);
+    const runArgs = harness.dockerCalls[0] as string[];
+    expect(runArgs).toEqual(["run", "-d", "--name", runArgs[3], "--label", OWNER_LABEL, "--network", "none", IRIS_COMMUNITY_IMAGE]);
+    expect(harness.dockerInputs[1]).toContain("READY");
+    expect(harness.dockerInputs[2]).toContain("UnExpireUserPasswords");
+    const recorded = JSON.parse(harness.files.get(STATE_FILE) as string) as Record<string, string>;
+    expect(Object.keys(recorded)).toEqual(["name", "id", "image", "namespace", "network"]);
+    expect(recorded).toEqual({ name: runArgs[3], id: CONTAINER_ID, image: IRIS_COMMUNITY_IMAGE, namespace: "USER", network: "none" });
+    expect(parseState(harness.files.get(STATE_FILE) as string)).toEqual(recorded);
+    expect(harness.teardown.armed, "nothing is left armed").toBeUndefined();
+    expect(harness.logs.join("\n")).toContain("--network none");
+  });
+
+  it("adds the read-only mount to the docker run and records it in the state, once the directory is found to be real", async () => {
+    const harness = recordingHarness();
+
+    const code = await upHarness(upOptions(harness, { mount: MOUNT_SPEC }), harness.deps, harness.teardown);
+
+    expect(code).toBe(0);
+    expect(harness.dockerCalls[0]).toEqual([
+      "run", "-d", "--name", (harness.dockerCalls[0] as string[])[3], "--label", OWNER_LABEL, "--network", "none", "-v", `${MOUNT_HOST}:/opt/iris-mcp/stage:ro`, IRIS_COMMUNITY_IMAGE,
+    ]);
+    const recorded = JSON.parse(harness.files.get(STATE_FILE) as string) as Record<string, string>;
+    expect(Object.keys(recorded)).toEqual(["name", "id", "image", "namespace", "network", "mount"]);
+    expect(recorded.mount).toBe(MOUNT_SPEC);
+    expect(parseState(harness.files.get(STATE_FILE) as string).mount).toBe(MOUNT_SPEC);
+  });
+
+  it("keeps the published-port state exactly as it was when a mount is given with a host port", async () => {
+    const harness = recordingHarness();
+
+    const code = await upHarness(upOptions(harness, { network: undefined, hostPort: "49153", mount: MOUNT_SPEC }), harness.deps, harness.teardown);
+
+    expect(code).toBe(0);
+    expect(harness.events).toEqual(["docker run", "docker port", "docker exec", "docker exec", "write state"]);
+    expect(Object.keys(JSON.parse(harness.files.get(STATE_FILE) as string))).toEqual(["name", "id", "port", "image", "namespace", "mount"]);
+  });
+
+  it.each([
+    ["a host port as well", { hostPort: "49153" }, undefined],
+    ["a network other than none", { network: "host" }, undefined],
+    ["a mount host directory that is a symbolic link", { mount: MOUNT_SPEC }, "is a symbolic link"],
+    ["a mount host directory that is missing", { mount: MOUNT_SPEC }, "does not exist"],
+    ["a mount with .. in the host directory", { mount: "/virtual/../x:/opt/iris-mcp/stage" }, undefined],
+    ["a mount with a colon in the host directory", { mount: "/virtual/a:b:/opt/iris-mcp/stage" }, undefined],
+    ["a state file that already exists", { existing: true }, undefined],
+  ] as Array<[string, Record<string, unknown>, string | undefined]>)("refuses %s with exit 2, before docker is looked for", async (_label, extra, problem) => {
+    const harness = recordingHarness();
+    if ("existing" in extra) harness.files.set(STATE_FILE, "{}");
+    if (problem !== undefined) harness.mountProblems.set(MOUNT_HOST, `${MOUNT_HOST} ${problem}.`);
+    let looked = false;
+    harness.deps.findDocker = () => {
+      looked = true;
+      return "/fake/docker";
+    };
+
+    expect(await upHarness(upOptions(harness, extra), harness.deps, harness.teardown)).toBe(2);
+    expect(looked).toBe(false);
+    expect(harness.dockerCalls).toEqual([]);
+    if (problem !== undefined) expect(harness.logs.join("\n")).toContain(problem);
+  });
+
+  it("never skips the host-directory check: a mount with no checker in the dependencies is refused with exit 2 and no docker call, and a start with no mount needs none", async () => {
+    const refused = recordingHarness();
+    delete (refused.deps as { checkMountDirectory?: unknown }).checkMountDirectory;
+    expect(await upHarness(upOptions(refused, { mount: MOUNT_SPEC }), refused.deps, refused.teardown)).toBe(2);
+    expect(refused.dockerCalls).toEqual([]);
+    expect(refused.logs.join("\n")).toContain("deps.checkMountDirectory");
+
+    const plain = recordingHarness();
+    delete (plain.deps as { checkMountDirectory?: unknown }).checkMountDirectory;
+    expect(await upHarness(upOptions(plain), plain.deps, plain.teardown)).toBe(0);
+  });
+
+  it("removes the container and writes no state when the session never answers, printing the log tail first", async () => {
+    const harness = recordingHarness({ dockerReply: (args, input) => (args[0] === "exec" ? { status: 1, stderr: "not ready" } : defaultStartReply(args, input)) });
+
+    const code = await upHarness(upOptions(harness, { limits: { sessionReadyMs: 10_000, sessionStepMs: 5_000 } }), harness.deps, harness.teardown);
+
+    expect(code).toBe(4);
+    expect(harness.events.slice(-2)).toEqual(["docker logs", "docker rm"]);
+    expect(harness.files.size).toBe(0);
+  });
+
+  it("removes the container and writes no state when docker run fails", async () => {
+    const harness = recordingHarness({ dockerReply: (args, input) => (args[0] === "run" ? { status: 125, stderr: "no such image" } : defaultStartReply(args, input)) });
+
+    expect(await upHarness(upOptions(harness), harness.deps, harness.teardown)).toBe(4);
+    expect(harness.events).toEqual(["docker run", "docker rm"]);
+    expect(harness.files.size).toBe(0);
+  });
+});
+
+describe("throwaway-iris: the inspection of a --network none container", () => {
+  const expected = { name: GENERATED_NAME, network: "none" };
+
+  it("accepts a labelled container whose network mode is none and which publishes nothing", () => {
+    expect(inspectProblems(inspectedIsolated(), expected)).toEqual([]);
+    expect(inspectProblems(inspectedIsolated({ NetworkSettings: { Ports: {} } }), expected)).toEqual([]);
+    expect(() => assertThrowawayInspect(inspectedIsolated(), expected)).not.toThrow();
+  });
+
+  it.each([
+    ["the default bridge network", { HostConfig: { NetworkMode: "default", PortBindings: {} } }, /network mode is "default", not "none"/],
+    ["the host network", { HostConfig: { NetworkMode: "host", PortBindings: {} } }, /network mode is "host"/],
+    ["no host config at all", { HostConfig: undefined }, /network mode is undefined/],
+    ["a published port in the network settings", { NetworkSettings: { Ports: { "52773/tcp": [{ HostIp: "127.0.0.1", HostPort: "49153" }] } } }, /publishes 52773\/tcp, but a --network none container publishes no port/],
+    ["a published port in the host config", { HostConfig: { NetworkMode: "none", PortBindings: { "52773/tcp": [{ HostIp: "", HostPort: "49153" }] } } }, /publishes 52773\/tcp/],
+    ["no owner label", { Config: { Labels: {} } }, /does not carry the label/],
+    ["another container name", { Name: "/iris-community-edition" }, /is named/],
+    ["a stopped container", { State: { Running: false } }, /not running/],
+  ])("refuses %s", (_label, overrides, problem) => {
+    expect(inspectProblems(inspectedIsolated(overrides), expected).join(" ")).toMatch(problem);
+    expect(() => assertThrowawayInspect(inspectedIsolated(overrides), expected)).toThrow(/is not a throwaway container this harness started/);
+  });
+
+  it("checks the network mode of a stopped container too, when a stopped one is allowed", () => {
+    expect(inspectProblems(inspectedIsolated({ State: { Running: false } }), { ...expected, allowStopped: true })).toEqual([]);
+    expect(
+      inspectProblems(inspectedIsolated({ State: { Running: false }, HostConfig: { NetworkMode: "bridge", PortBindings: {} } }), { ...expected, allowStopped: true }).join(" "),
+    ).toMatch(/network mode is "bridge"/);
+  });
+
+  it("refuses a container that publishes a port when the state says --network none, and the reverse", () => {
+    expect(inspectProblems(inspectedThrowaway(), expected).join(" ")).toMatch(/network mode is undefined/);
+    expect(inspectProblems(inspectedIsolated(), { name: GENERATED_NAME, port: "49153" }).join(" ")).toMatch(/does not publish/);
+  });
+
+  it("takes exactly one of a port and a network", () => {
+    expect(inspectProblems(inspectedIsolated(), { name: GENERATED_NAME, network: "none", port: "49153" }).join(" ")).toMatch(/never both/);
+    expect(inspectProblems(inspectedIsolated(), { name: GENERATED_NAME, network: "host" }).join(" ")).toMatch(/is not "none"/);
+    expect(inspectProblems(inspectedIsolated(), { name: GENERATED_NAME }).join(" ")).toMatch(/refusing the host port/);
+  });
+});
+
+describe("throwaway-iris: the state of a --network none container", () => {
+  it("reads the state `up` writes: exactly one of port and network, an optional mount, every field validated", () => {
+    expect(parseState(JSON.stringify(NONE_STATE))).toEqual(NONE_STATE);
+    expect(parseState(JSON.stringify({ ...NONE_STATE, mount: MOUNT_SPEC }))).toEqual({ ...NONE_STATE, mount: MOUNT_SPEC });
+    expect(parseState(JSON.stringify({ ...KEPT_STATE, mount: MOUNT_SPEC }))).toEqual({ ...KEPT_STATE, mount: MOUNT_SPEC });
+    expect(parseState(JSON.stringify(KEPT_STATE)), "a published-port state is as it was").toEqual(KEPT_STATE);
+    for (const [label, state] of [
+      ["both a port and a network", { ...NONE_STATE, port: "49153" }],
+      ["neither a port nor a network", { name: GENERATED_NAME, id: CONTAINER_ID, image: IRIS_COMMUNITY_IMAGE, namespace: "USER" }],
+      ["a network other than none", { ...NONE_STATE, network: "host" }],
+      ["a bad mount", { ...NONE_STATE, mount: "/virtual/../x:/opt/iris-mcp/stage" }],
+      ["the shared instance's container", { ...NONE_STATE, name: SHARED_INSTANCE_CONTAINER }],
+      ["a floating image", { ...NONE_STATE, image: "intersystems/iris-community:2026.2" }],
+    ] as Array<[string, Record<string, unknown>]>) {
+      expect(() => parseState(JSON.stringify(state)), label).toThrow();
+    }
+  });
+
+  it("exports the network constant the state records", () => {
+    expect(NETWORK_NONE).toBe("none");
+  });
+});
+
+describe("throwaway-iris: exec, logs and down on a --network none state", () => {
+  it("exec refuses a state with no port with exit 2, before docker is called, and runs nothing", async () => {
+    const harness = isolatedHarness();
+
+    const code = await execHarness({ ...stateOptions(), command: ["node", "x.mjs"] }, harness.deps);
+
+    expect(code).toBe(2);
+    expect(harness.dockerCalls).toEqual([]);
+    expect(harness.commands).toEqual([]);
+    expect(harness.logs.join("\n")).toMatch(/publishes no port/);
+  });
+
+  it("logs reads the log of an isolated container after one inspection", async () => {
+    const harness = isolatedHarness();
+
+    expect(await logsHarness(stateOptions(), harness.deps)).toBe(0);
+    expect(harness.dockerCalls).toEqual([["inspect", CONTAINER_ID], ["logs", "--tail", "400", CONTAINER_ID]]);
+  });
+
+  it("down removes an isolated container and the state file", async () => {
+    const harness = isolatedHarness();
+
+    expect(await downHarness(stateOptions(), harness.deps)).toBe(0);
+    expect(harness.dockerCalls).toEqual([["inspect", CONTAINER_ID], ["rm", "-f", "-v", CONTAINER_ID]]);
+    expect(harness.files.size).toBe(0);
+  });
+
+  it.each([
+    ["a container with a published port", { NetworkSettings: { Ports: { "52773/tcp": [{ HostIp: "127.0.0.1", HostPort: "49153" }] } } }, /publishes 52773\/tcp/],
+    ["a container on another network", { HostConfig: { NetworkMode: "bridge", PortBindings: {} } }, /network mode is "bridge"/],
+    ["an unlabelled container", { Config: { Labels: {} } }, /does not carry the label/],
+  ])("down refuses %s with exit 2: nothing is removed and the state file stays", async (_label, overrides, problem) => {
+    const harness = isolatedHarness({ dockerReply: isolatedReply(overrides) });
+
+    expect(await downHarness(stateOptions(), harness.deps)).toBe(2);
+    expect(harness.dockerCalls.map((call) => call[0])).toEqual(["inspect"]);
+    expect(harness.files.has(STATE_FILE)).toBe(true);
+    expect(harness.logs.join("\n")).toMatch(problem);
+  });
+});
+
+describe("throwaway-iris: session pipes a script into the recorded container", () => {
+  const SCRIPT_FILE = "/virtual/ipm-script.mos";
+  const SCRIPT_TEXT = 'Write "IRISMCP-"_"X-START:"_1_":IRISMCP-"_"X-END",!\nHalt\n';
+  const sessionOptions = (extra: Record<string, unknown> = {}) => ({ ...stateOptions(), namespace: "USER", script: SCRIPT_FILE, ...extra });
+  /** Answers the session with `stdout` and `status`; every other docker call is the isolated container's. */
+  const sessionReply = (stdout: string, status = 0, stderr = "") => (args: string[], input: string | undefined) =>
+    args[0] === "exec" ? { status, stdout, stderr } : isolatedReply()(args, input);
+
+  it("re-inspects, runs `docker exec -i <id> iris session iris -U <NS>` with the script on stdin, prints the output and returns docker's status", async () => {
+    const harness = isolatedHarness({ dockerReply: sessionReply("IRISMCP-X-START:1:IRISMCP-X-END\n", 0) });
+    harness.scripts.set(SCRIPT_FILE, SCRIPT_TEXT);
+
+    const code = await sessionHarness(sessionOptions(), harness.deps);
+
+    expect(code).toBe(0);
+    expect(harness.dockerCalls).toEqual([["inspect", CONTAINER_ID], ["exec", "-i", CONTAINER_ID, "iris", "session", "iris", "-U", "USER"]]);
+    expect(harness.dockerInputs[1], "the script is the session's stdin, byte for byte").toBe(SCRIPT_TEXT);
+    expect(harness.dockerTimeouts[1], "a session may run longer than a readiness call").toBeGreaterThan(60_000);
+    expect(harness.output.join("")).toBe("IRISMCP-X-START:1:IRISMCP-X-END\n");
+  });
+
+  it("runs in %SYS when asked, and on a published-port state as well", async () => {
+    const harness = keptHarness({ dockerReply: (args, input) => (args[0] === "exec" ? { status: 0, stdout: "ok\n" } : defaultStartReply(args, input)) });
+    harness.scripts.set(SCRIPT_FILE, SCRIPT_TEXT);
+
+    expect(await sessionHarness(sessionOptions({ namespace: "%SYS" }), harness.deps)).toBe(0);
+    expect(harness.dockerCalls[1]).toEqual(["exec", "-i", CONTAINER_ID, "iris", "session", "iris", "-U", "%SYS"]);
+  });
+
+  it("exits with docker's status when the session fails, and still prints what it printed", async () => {
+    const harness = isolatedHarness({ dockerReply: sessionReply("partial output\n", 3, "boom") });
+    harness.scripts.set(SCRIPT_FILE, SCRIPT_TEXT);
+
+    expect(await sessionHarness(sessionOptions(), harness.deps)).toBe(3);
+    expect(harness.output.join("")).toBe("partial output\n");
+    expect(harness.logs.join("\n")).toContain("boom");
+  });
+
+  it("exits 4 when docker did not finish the session (no exit status)", async () => {
+    const harness = isolatedHarness({ dockerReply: sessionReply("", null as unknown as number) });
+    harness.scripts.set(SCRIPT_FILE, SCRIPT_TEXT);
+
+    expect(await sessionHarness(sessionOptions(), harness.deps)).toBe(4);
+  });
+
+  it.each([
+    ["a lower-case namespace", { namespace: "user" }],
+    ["a namespace with a semicolon", { namespace: "USER;x" }],
+    ["no script path", { script: "" }],
+    ["a script file that does not exist", { script: "/virtual/missing.mos" }],
+  ])("refuses %s with exit 2, before docker is called", async (_label, extra) => {
+    const harness = isolatedHarness();
+    harness.scripts.set(SCRIPT_FILE, SCRIPT_TEXT);
+
+    expect(await sessionHarness(sessionOptions(extra), harness.deps)).toBe(2);
+    expect(harness.dockerCalls).toEqual([]);
+  });
+
+  it("refuses a missing state file with exit 2, and calls no docker", async () => {
+    const harness = recordingHarness();
+    harness.scripts.set(SCRIPT_FILE, SCRIPT_TEXT);
+
+    expect(await sessionHarness(sessionOptions(), harness.deps)).toBe(2);
+    expect(harness.dockerCalls).toEqual([]);
+    expect(harness.logs.join("\n")).toMatch(/does not exist/);
+  });
+
+  it.each([
+    ["an unlabelled container", { Config: { Labels: {} } }, /does not carry the label/],
+    ["a container with a published port", { NetworkSettings: { Ports: { "52773/tcp": [{ HostIp: "127.0.0.1", HostPort: "49153" }] } } }, /publishes 52773\/tcp/],
+    ["a container that is not running", { State: { Running: false } }, /not running/],
+  ])("refuses %s with exit 2: it inspects, and never opens the session", async (_label, overrides, problem) => {
+    const harness = isolatedHarness({ dockerReply: isolatedReply(overrides) });
+    harness.scripts.set(SCRIPT_FILE, SCRIPT_TEXT);
+
+    expect(await sessionHarness(sessionOptions(), harness.deps)).toBe(2);
+    expect(harness.dockerCalls.map((call) => call[0])).toEqual(["inspect"]);
+    expect(harness.output).toEqual([]);
+    expect(harness.logs.join("\n")).toMatch(problem);
+  });
+
+  it("exits 3 when docker is not on PATH", async () => {
+    const harness = isolatedHarness();
+    harness.scripts.set(SCRIPT_FILE, SCRIPT_TEXT);
+    harness.deps.findDocker = () => undefined;
+
+    expect(await sessionHarness(sessionOptions(), harness.deps)).toBe(3);
+    expect(harness.dockerCalls).toEqual([]);
+  });
+});
+
+describe("throwaway-iris: cp copies one file out of the recorded container", () => {
+  const FROM = "/tmp/iris-mcp-ipm-out/iris-execute-mcp-v2.tgz";
+  const copyOptions = (extra: Record<string, unknown> = {}) => ({ ...stateOptions(), from: FROM, to: "/host/out/archive.tgz", ...extra });
+
+  it("re-inspects, then runs `docker cp <id>:<from> <to>` and exits 0", async () => {
+    const harness = isolatedHarness();
+
+    const code = await copyHarness(copyOptions(), harness.deps);
+
+    expect(code).toBe(0);
+    expect(harness.dockerCalls).toEqual([["inspect", CONTAINER_ID], ["cp", `${CONTAINER_ID}:${FROM}`, "/host/out/archive.tgz"]]);
+    expect(harness.logs.join("\n")).toContain("copied");
+  });
+
+  it("exits 4 and says why when docker cp fails", async () => {
+    const harness = isolatedHarness({ dockerReply: (args, input) => (args[0] === "cp" ? { status: 1, stderr: "Could not find the file" } : isolatedReply()(args, input)) });
+
+    expect(await copyHarness(copyOptions(), harness.deps)).toBe(4);
+    expect(harness.logs.join("\n")).toContain("Could not find the file");
+  });
+
+  it.each([
+    ["a source outside /tmp/iris-mcp-", { from: "/etc/passwd" }],
+    ["a source with ..", { from: "/tmp/iris-mcp-x/../../etc/passwd" }],
+    ["a destination that docker would read as a container path", { to: "iris-community-edition:/etc" }],
+  ])("refuses %s with exit 2, before docker is called", async (_label, extra) => {
+    const harness = isolatedHarness();
+
+    expect(await copyHarness(copyOptions(extra), harness.deps)).toBe(2);
+    expect(harness.dockerCalls).toEqual([]);
+  });
+
+  it("refuses a missing state file and an unlabelled container with exit 2, and copies nothing", async () => {
+    const missing = recordingHarness();
+    expect(await copyHarness(copyOptions(), missing.deps)).toBe(2);
+    expect(missing.dockerCalls).toEqual([]);
+
+    const unlabelled = isolatedHarness({ dockerReply: isolatedReply({ Config: { Labels: {} } }) });
+    expect(await copyHarness(copyOptions(), unlabelled.deps)).toBe(2);
+    expect(unlabelled.dockerCalls.map((call) => call[0])).toEqual(["inspect"]);
+  });
+
+  it("exits 3 when docker is not on PATH", async () => {
+    const harness = isolatedHarness();
+    harness.deps.findDocker = () => undefined;
+
+    expect(await copyHarness(copyOptions(), harness.deps)).toBe(3);
+    expect(harness.dockerCalls).toEqual([]);
+  });
+});
+
+describe("throwaway-iris: the real mount-directory check", () => {
+  it.skipIf(process.platform === "win32")("accepts a real directory, and refuses a symbolic link to one, a file and a missing path", () => {
+    const base = scratchDir();
+    const real = path.join(base, "real");
+    const link = path.join(base, "link");
+    const file = path.join(base, "file");
+    mkdirSync(real);
+    symlinkSync(real, link);
+    writeFileSync(file, "x", "utf8");
+    const deps = defaultDeps({});
+
+    expect(deps.checkMountDirectory(real)).toBeUndefined();
+    expect(deps.checkMountDirectory(link)).toMatch(/symbolic link/);
+    expect(deps.checkMountDirectory(file)).toMatch(/not a directory/);
+    expect(deps.checkMountDirectory(path.join(base, "missing"))).toMatch(/does not exist/);
+  });
+
+  it("reads a script file as text", () => {
+    const base = scratchDir();
+    const file = path.join(base, "s.mos");
+    writeFileSync(file, "Halt\n", "utf8");
+
+    expect(defaultDeps({}).readScript(file)).toBe("Halt\n");
+    expect(() => defaultDeps({}).readScript(path.join(base, "none.mos"))).toThrow(/ENOENT/);
   });
 });

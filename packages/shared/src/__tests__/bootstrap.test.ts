@@ -18,6 +18,8 @@ import {
 import {
   BOOTSTRAP_CLASSES,
   BOOTSTRAP_VERSION,
+  IPM_INSTALL_GUARD,
+  IPM_MODULE_NAME,
   getBootstrapClasses,
 } from "../bootstrap-classes.js";
 import { parseBootstrapMarker } from "../bootstrap-version.js";
@@ -81,6 +83,28 @@ function setupFoundReply(): Response {
 function setupDocGetCount(fetchMock: ReturnType<typeof vi.fn>): number {
   return fetchMock.mock.calls.filter(
     (call: unknown[]) => (call[1] as { method?: string }).method === "GET" && String(call[0]).endsWith("/doc/ExecuteMCPv2.Setup.cls"),
+  ).length;
+}
+
+/**
+ * The Atelier reply to `GET doc/ExecuteMCPv2.InstallGuard.cls` when the IPM-only guard class does not exist (HTTP 404, as
+ * for the Setup document): nothing installed the classes through IPM, and the bootstrap may write.
+ */
+function guardAbsentReply(): Response {
+  return setupAbsentReply();
+}
+
+/** The Atelier reply to `GET doc/ExecuteMCPv2.InstallGuard.cls` when the guard class exists: IPM installed the classes. */
+function guardFoundReply(): Response {
+  return mockResponse(
+    envelope({ name: "ExecuteMCPv2.InstallGuard.cls", cat: "CLS", ts: "2026-10-21 12:00:00.000", status: "", enc: false, content: ["Class ExecuteMCPv2.InstallGuard", "{", "}"] }),
+  );
+}
+
+/** The number of recorded fetch calls that GET the `ExecuteMCPv2.InstallGuard.cls` document. */
+function guardDocGetCount(fetchMock: ReturnType<typeof vi.fn>): number {
+  return fetchMock.mock.calls.filter(
+    (call: unknown[]) => (call[1] as { method?: string }).method === "GET" && String(call[0]).endsWith("/doc/ExecuteMCPv2.InstallGuard.cls"),
   ).length;
 }
 
@@ -763,9 +787,13 @@ describe("bootstrap", () => {
       fetchMock.mockResolvedValueOnce(
         mockResponse(envelope({ content: [{ Configured: 0 }] })),
       );
+      // Ownership before the first write: the IPM-only guard class does not exist (404)
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Re-probe immediately before the compile: the marker is still the embedded one
       fetchMock.mockResolvedValueOnce(versionReply(BOOTSTRAP_VERSION));
+      // Ownership again at the re-check: still not IPM's
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
       // Recompile: POST action/compile response (NO deploy PUTs — source is current)
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
       // Configure: POST response
@@ -802,8 +830,11 @@ describe("bootstrap", () => {
       });
       expect(compileCalls.length).toBe(1);
 
-      // 1 CSRF + 1 version SQL + 1 IsConfigured SQL + 1 re-probe + compile + configure + mapping + ensureRoot = 8
-      expect(fetchMock).toHaveBeenCalledTimes(8);
+      // 1 CSRF + 1 version SQL + 1 IsConfigured SQL + 1 ownership + 1 re-probe + 1 ownership + compile + configure + mapping + ensureRoot = 10
+      expect(fetchMock).toHaveBeenCalledTimes(10);
+      expect(guardDocGetCount(fetchMock), "ownership is asked at startup and again at the re-check").toBe(2);
+      expect(result.ipmOwned, "an unowned deployment carries no ipmOwned key").toBeUndefined();
+      expect("ipmOwned" in result).toBe(false);
 
       http.destroy();
     });
@@ -824,9 +855,13 @@ describe("bootstrap", () => {
       fetchMock.mockResolvedValueOnce(
         mockResponse(envelope({ content: [{ Configured: 0 }] })),
       );
+      // Ownership before the first write: not IPM's (404)
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Re-probe immediately before the compile: the marker is still the embedded one
       fetchMock.mockResolvedValueOnce(versionReply(BOOTSTRAP_VERSION));
+      // Ownership at the re-check: still not IPM's
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
       // Recompile: POST action/compile response (runs before Configure on unconfigured)
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
       // Configure: fails with 403 (no %Admin_Manage)
@@ -861,6 +896,9 @@ describe("bootstrap", () => {
       expect(result.manualInstructions).toBeDefined();
       expect(result.manualInstructions).toContain("Terminal");
       expect(result.manualInstructions).toContain("USER");
+      expect(result.manualInstructions, "AC 42.4.3: the IPM fallback names this build's package version").toContain(
+        `zpm "install ${IPM_MODULE_NAME} ${BOOTSTRAP_VERSION.split("+")[0]}"`,
+      );
 
       http.destroy();
     });
@@ -890,6 +928,8 @@ describe("bootstrap", () => {
       );
       // Probe: GET doc/ExecuteMCPv2.Setup.cls answers 404 — the class is provably absent
       fetchMock.mockResolvedValueOnce(setupAbsentReply());
+      // Ownership before the first write: not IPM's (404)
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Deploy: PUT responses for each class (CSRF already established)
       for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
@@ -901,6 +941,8 @@ describe("bootstrap", () => {
       // Re-probe immediately before the compile: the uploaded classes are not
       // compiled yet, so no marker exists — the expected state after a positive absence
       fetchMock.mockResolvedValueOnce(missingMethodReply());
+      // Ownership at the re-check: still not IPM's
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Compile: POST response
       fetchMock.mockResolvedValueOnce(
@@ -937,6 +979,8 @@ describe("bootstrap", () => {
       expect(result.errors).toHaveLength(0);
       expect(result.manualInstructions).toBeUndefined();
       expect(setupDocGetCount(fetchMock), "the probe proved the Setup class absent").toBe(1);
+      expect(guardDocGetCount(fetchMock), "ownership is asked at startup and again at the re-check").toBe(2);
+      expect("ipmOwned" in result, "an unowned deployment carries no ipmOwned key").toBe(false);
       expect(warnLines()).toEqual([]);
 
       http.destroy();
@@ -955,6 +999,8 @@ describe("bootstrap", () => {
       setupCsrfThenRequest(
         envelope({ content: [{ Version: "abcdef123456" }] }),
       );
+      // Ownership before the first write: not IPM's (404)
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Deploy: PUT responses for each class (CSRF already established)
       for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
@@ -965,6 +1011,8 @@ describe("bootstrap", () => {
 
       // Re-probe immediately before the compile: the compiled marker is still the old one
       fetchMock.mockResolvedValueOnce(versionReply("abcdef123456"));
+      // Ownership at the re-check: still not IPM's
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Compile: POST response
       fetchMock.mockResolvedValueOnce(
@@ -1004,9 +1052,9 @@ describe("bootstrap", () => {
       expect(result.errors).toHaveLength(0);
       expect(result.manualInstructions).toBeUndefined();
 
-      // 1 CSRF + 1 probe SQL + one PUT per class + 1 re-probe + 1 compile + 1 IsConfigured + 1 EnsureUnitTestRoot
+      // 1 CSRF + 1 probe SQL + 1 ownership + one PUT per class + 1 re-probe + 1 ownership + 1 compile + 1 IsConfigured + 1 EnsureUnitTestRoot
       // (no configure, no mapping)
-      const expectedCallCount = 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 1;
+      const expectedCallCount = 1 + 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 1 + 1;
       expect(fetchMock).toHaveBeenCalledTimes(expectedCallCount);
 
       http.destroy();
@@ -1025,6 +1073,8 @@ describe("bootstrap", () => {
       setupCsrfThenRequest(
         envelope({ content: [{ Version: "abcdef123456" }] }),
       );
+      // Ownership before the first write: not IPM's (404)
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Deploy: PUT responses for each class
       for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
@@ -1034,6 +1084,8 @@ describe("bootstrap", () => {
       }
       // Re-probe immediately before the compile: the compiled marker is still the old one
       fetchMock.mockResolvedValueOnce(versionReply("abcdef123456"));
+      // Ownership at the re-check: still not IPM's
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
       // Compile: POST response
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
       // IsConfigured check on the stale path — web app ABSENT (0) → self-heal
@@ -1074,8 +1126,8 @@ describe("bootstrap", () => {
       });
       expect(configureCalls.length).toBe(1);
 
-      // 1 CSRF + 1 probe SQL + one PUT per class + 1 re-probe + 1 compile + 1 IsConfigured + configure + mapping + ensureRoot
-      const expectedCallCount = 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 1 + 1 + 1;
+      // 1 CSRF + 1 probe SQL + 1 ownership + one PUT per class + 1 re-probe + 1 ownership + 1 compile + 1 IsConfigured + configure + mapping + ensureRoot
+      const expectedCallCount = 1 + 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 1 + 1 + 1 + 1;
       expect(fetchMock).toHaveBeenCalledTimes(expectedCallCount);
 
       http.destroy();
@@ -1106,6 +1158,8 @@ describe("bootstrap", () => {
       );
       // Probe: GET doc/ExecuteMCPv2.Setup.cls answers 404 — the class is provably absent
       fetchMock.mockResolvedValueOnce(setupAbsentReply());
+      // Ownership before the first write: not IPM's (404)
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Deploy: PUT responses for each class
       for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
@@ -1116,6 +1170,8 @@ describe("bootstrap", () => {
 
       // Re-probe immediately before the compile: still no deployment
       fetchMock.mockResolvedValueOnce(missingMethodReply());
+      // Ownership at the re-check: still not IPM's
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Compile: POST response
       fetchMock.mockResolvedValueOnce(
@@ -1161,6 +1217,9 @@ describe("bootstrap", () => {
       expect(result.manualInstructions).toContain("Terminal");
       expect(result.manualInstructions).toContain("Management Portal");
       expect(result.manualInstructions).toContain("IPM");
+      expect(result.manualInstructions, "AC 42.4.3: the IPM fallback names this build's package version").toContain(
+        `zpm "install ${IPM_MODULE_NAME} ${BOOTSTRAP_VERSION.split("+")[0]}"`,
+      );
 
       http.destroy();
     });
@@ -1190,6 +1249,8 @@ describe("bootstrap", () => {
       );
       // Probe: GET doc/ExecuteMCPv2.Setup.cls answers 404 — the class is provably absent
       fetchMock.mockResolvedValueOnce(setupAbsentReply());
+      // Ownership before the first write: not IPM's (404)
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Deploy: first PUT fails with 500
       fetchMock.mockResolvedValueOnce(
@@ -1338,8 +1399,10 @@ describe("bootstrap", () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
       setupCsrfThenRequest(envelope({ content: [{ Version: "abcdef123456" }] }));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
       queuePutReplies();
       fetchMock.mockResolvedValueOnce(versionReply("abcdef123456"));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 1 }] })));
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })));
@@ -1360,6 +1423,7 @@ describe("bootstrap", () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
       setupCsrfThenRequest(envelope({ content: [{ Version: "abcdef123456" }] }));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
       queuePutReplies();
       fetchMock.mockResolvedValueOnce(versionReply(NEWER_SEQUENCE));
 
@@ -1377,8 +1441,10 @@ describe("bootstrap", () => {
       for (const name of ["IsConfigured", "Configure", "ConfigureMapping", "EnsureUnitTestRoot"]) {
         expect(setupCallCount(fetchMock, name), `Setup_${name}`).toBe(0);
       }
-      // CSRF + probe + one PUT per class + the re-read, and nothing after it.
-      expect(fetchMock).toHaveBeenCalledTimes(1 + 1 + BOOTSTRAP_CLASSES.size + 1);
+      // CSRF + probe + the startup ownership read + one PUT per class + the re-read, and nothing after it
+      // (a newer reading ends the re-check before the ownership read).
+      expect(fetchMock).toHaveBeenCalledTimes(1 + 1 + 1 + BOOTSTRAP_CLASSES.size + 1);
+      expect(guardDocGetCount(fetchMock)).toBe(1);
 
       const warnings = warnLines();
       expect(warnings).toHaveLength(1);
@@ -1401,6 +1467,7 @@ describe("bootstrap", () => {
       );
       fetchMock.mockResolvedValueOnce(missingMethodReply());
       fetchMock.mockResolvedValueOnce(setupAbsentReply());
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
       queuePutReplies();
       fetchMock.mockResolvedValueOnce(versionReply("dev"));
 
@@ -1428,6 +1495,7 @@ describe("bootstrap", () => {
       const http = new IrisHttpClient(config);
       setupCsrfThenRequest(envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }));
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 0 }] })));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
       fetchMock.mockResolvedValueOnce(versionReply(NEWER_SEQUENCE));
 
       const result = await bootstrap(http, config, 7);
@@ -1438,7 +1506,7 @@ describe("bootstrap", () => {
       expect(putCount(fetchMock)).toBe(0);
       expect(compileCount(fetchMock)).toBe(0);
       expect(setupCallCount(fetchMock, "Configure")).toBe(0);
-      expect(fetchMock).toHaveBeenCalledTimes(4);
+      expect(fetchMock).toHaveBeenCalledTimes(5);
       expect(warnLines()).toHaveLength(1);
       expect(warnLines()[0], "nothing was uploaded on the unconfigured path").not.toContain("had already uploaded");
 
@@ -1576,8 +1644,10 @@ describe("bootstrap", () => {
       queueCsrf();
       fetchMock.mockResolvedValueOnce(mockResponse({ status: { errors: [{ error: "Internal error" }], summary: "Error" }, console: [], result: null }, { status: 500 }));
       fetchMock.mockResolvedValueOnce(setupAbsentReply());
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
       queuePutReplies();
       fetchMock.mockResolvedValueOnce(missingMethodReply());
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
@@ -1602,6 +1672,7 @@ describe("bootstrap", () => {
         const config = makeConfig();
         const http = new IrisHttpClient(config);
         setupCsrfThenRequest(envelope({ content: [{ Version: "abcdef123456" }] }));
+        fetchMock.mockResolvedValueOnce(guardAbsentReply());
         queuePutReplies();
         queue();
 
@@ -1619,8 +1690,8 @@ describe("bootstrap", () => {
         for (const name of ["IsConfigured", "Configure", "ConfigureMapping", "EnsureUnitTestRoot"]) {
           expect(setupCallCount(fetchMock, name), `Setup_${name}`).toBe(0);
         }
-        // CSRF + probe + one PUT per class + the re-read, and nothing after it.
-        expect(fetchMock).toHaveBeenCalledTimes(1 + 1 + BOOTSTRAP_CLASSES.size + 1);
+        // CSRF + probe + the startup ownership read + one PUT per class + the re-read, and nothing after it.
+        expect(fetchMock).toHaveBeenCalledTimes(1 + 1 + 1 + BOOTSTRAP_CLASSES.size + 1);
 
         const warnings = warnLines();
         expect(warnings).toHaveLength(1);
@@ -1637,6 +1708,7 @@ describe("bootstrap", () => {
       const http = new IrisHttpClient(config);
       setupCsrfThenRequest(envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }));
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 0 }] })));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
       fetchMock.mockResolvedValueOnce(mockResponse({ status: { errors: [{ error: "Internal error" }], summary: "Error" }, console: [], result: null }, { status: 500 }));
 
       const result = await bootstrap(http, config, 7);
@@ -1649,11 +1721,340 @@ describe("bootstrap", () => {
       expect(putCount(fetchMock)).toBe(0);
       expect(compileCount(fetchMock)).toBe(0);
       expect(setupCallCount(fetchMock, "Configure")).toBe(0);
-      expect(fetchMock).toHaveBeenCalledTimes(4);
+      expect(fetchMock).toHaveBeenCalledTimes(5);
       const warnings = warnLines();
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toContain("found just before compiling, so nothing was compiled");
       expect(warnings[0]).not.toContain("had already uploaded");
+
+      http.destroy();
+    });
+  });
+
+  // ── IPM ownership (DW-674, Story 42.4) ───────────────────────────
+
+  describe("bootstrap never writes over an IPM installation (DW-674)", () => {
+    function queuePutReplies(): void {
+      for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
+        fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      }
+    }
+
+    function queueCsrf(): void {
+      fetchMock.mockResolvedValueOnce(
+        mockResponse("", { status: 200, headers: { "X-CSRF-Token": "t" }, setCookie: ["CSPSESSIONID=s1; path=/"] }),
+      );
+    }
+
+    const SEMVER = BOOTSTRAP_VERSION.split("+")[0] as string;
+    const OLD_MARKER = "abcdef123456";
+
+    /** How each write path reaches its ownership read at startup, and what the warning must name. */
+    const STARTUP_PATHS = [
+      {
+        probe: "stale" as const,
+        queue: () => {
+          setupCsrfThenRequest(envelope({ content: [{ Version: OLD_MARKER }] }));
+        },
+        requests: 3,
+        deployed: JSON.stringify(OLD_MARKER),
+        remedy: `run zpm "install ${IPM_MODULE_NAME} ${SEMVER}" there as a user with %Admin_Manage`,
+      },
+      {
+        probe: "unconfigured" as const,
+        queue: () => {
+          setupCsrfThenRequest(envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }));
+          fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 0 }] })));
+        },
+        requests: 4,
+        deployed: JSON.stringify(BOOTSTRAP_VERSION),
+        remedy: 'run Do ##class(ExecuteMCPv2.Setup).Configure("USER") as a user with %Admin_Manage',
+      },
+      {
+        probe: "missing" as const,
+        queue: () => {
+          queueCsrf();
+          fetchMock.mockResolvedValueOnce(missingMethodReply());
+          fetchMock.mockResolvedValueOnce(setupAbsentReply());
+        },
+        requests: 4,
+        deployed: "absent",
+        remedy: "uninstall and reinstall the package with zpm",
+      },
+    ];
+
+    function assertNothingWritten(): void {
+      expect(putCount(fetchMock)).toBe(0);
+      expect(compileCount(fetchMock)).toBe(0);
+      for (const name of ["Configure", "ConfigureMapping", "EnsureUnitTestRoot"]) {
+        expect(setupCallCount(fetchMock, name), `Setup_${name}`).toBe(0);
+      }
+    }
+
+    it.each(STARTUP_PATHS)(
+      "an IPM installation found at startup on the $probe path: nothing is written, ipmOwned is true, and one warning names the zpm command",
+      async ({ probe, queue, requests, deployed, remedy }) => {
+        const config = makeConfig();
+        const http = new IrisHttpClient(config);
+        queue();
+        fetchMock.mockResolvedValueOnce(guardFoundReply());
+
+        const result = await bootstrap(http, config, 7);
+
+        expect(result).toStrictEqual({
+          probeFound: true,
+          probeStatus: probe,
+          ...(probe === "stale" ? { deployedVersion: OLD_MARKER } : {}),
+          ipmOwned: true,
+          deployed: false,
+          compiled: false,
+          configured: false,
+          mapped: false,
+          unitTestRootEnsured: false,
+          errors: [],
+        });
+        assertNothingWritten();
+        expect(fetchMock, "the probe's requests and the one ownership read, then nothing").toHaveBeenCalledTimes(requests);
+        expect(guardDocGetCount(fetchMock)).toBe(1);
+
+        const warnings = warnLines();
+        expect(warnings, "exactly one warning").toHaveLength(1);
+        const [warning] = warnings as [string];
+        expect(warning).not.toContain("\n");
+        expect(warning).toContain("Bootstrap: leaving the ExecuteMCPv2 classes in 'USER' on localhost:52773 alone: the classes were installed by IPM");
+        expect(warning).toContain("(class ExecuteMCPv2.InstallGuard is present)");
+        expect(warning).toContain("this server never redeploys an IPM installation");
+        expect(warning).toContain(`The deployed marker is ${deployed}; this server's is ${BOOTSTRAP_VERSION}.`);
+        expect(warning).toContain(remedy);
+        expect(warning).toContain(`To hand 'USER' back to this server, run zpm "uninstall ${IPM_MODULE_NAME}" there and restart this server.`);
+        expect(warning, "nothing was uploaded, and it was not found at a re-check").not.toContain("had already uploaded");
+        expect(warning).not.toContain("found just before compiling");
+
+        http.destroy();
+      },
+    );
+
+    it("an IPM installation found at the re-check before compile (stale): the classes were uploaded, but no compile and nothing later; one warning", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: OLD_MARKER }] }));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      queuePutReplies();
+      fetchMock.mockResolvedValueOnce(versionReply(OLD_MARKER));
+      fetchMock.mockResolvedValueOnce(guardFoundReply());
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("stale");
+      expect(result.probeFound).toBe(true);
+      expect(result.ipmOwned).toBe(true);
+      expect(result.deployedVersion).toBe(OLD_MARKER);
+      expect(result.deployed).toBe(true);
+      expect(result.compiled).toBe(false);
+      expect(result.configured).toBe(false);
+      expect(result.mapped).toBe(false);
+      expect(result.unitTestRootEnsured).toBe(false);
+      expect(result.errors).toEqual([]);
+      expect(compileCount(fetchMock)).toBe(0);
+      for (const name of ["Configure", "ConfigureMapping", "EnsureUnitTestRoot"]) {
+        expect(setupCallCount(fetchMock, name), `Setup_${name}`).toBe(0);
+      }
+      // CSRF + probe + ownership + one PUT per class + the re-read + the second ownership read, and nothing after it.
+      expect(fetchMock).toHaveBeenCalledTimes(1 + 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1);
+      expect(guardDocGetCount(fetchMock)).toBe(2);
+
+      const warnings = warnLines();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("alone (found just before compiling, so nothing was compiled): the classes were installed by IPM");
+      expect(warnings[0]).toContain(`The deployed marker is ${JSON.stringify(OLD_MARKER)}; this server's is ${BOOTSTRAP_VERSION}.`);
+      expect(warnings[0]).toContain("This server had already uploaded its class documents, which stay in place until the package is reinstalled with zpm.");
+
+      http.destroy();
+    });
+
+    it("an IPM installation found at the re-check before compile (unconfigured): no compile and nothing later; one warning", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 0 }] })));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      fetchMock.mockResolvedValueOnce(versionReply(BOOTSTRAP_VERSION));
+      fetchMock.mockResolvedValueOnce(guardFoundReply());
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("unconfigured");
+      expect(result.ipmOwned).toBe(true);
+      expect(result.probeFound).toBe(true);
+      expect(result.deployed).toBe(false);
+      expect(result.compiled).toBe(false);
+      expect(putCount(fetchMock)).toBe(0);
+      expect(compileCount(fetchMock)).toBe(0);
+      expect(setupCallCount(fetchMock, "Configure")).toBe(0);
+      expect(fetchMock).toHaveBeenCalledTimes(6);
+      const warnings = warnLines();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("found just before compiling, so nothing was compiled");
+      expect(warnings[0]).not.toContain("had already uploaded");
+
+      http.destroy();
+    });
+
+    it("an IPM installation found at the re-check before compile (missing): the failed marker read is the expected state, and the guard still stops the compile", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      queueCsrf();
+      fetchMock.mockResolvedValueOnce(missingMethodReply());
+      fetchMock.mockResolvedValueOnce(setupAbsentReply());
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      queuePutReplies();
+      fetchMock.mockResolvedValueOnce(missingMethodReply());
+      fetchMock.mockResolvedValueOnce(guardFoundReply());
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("missing");
+      expect(result.probeFound).toBe(true);
+      expect(result.ipmOwned).toBe(true);
+      expect(result.deployed).toBe(true);
+      expect(result.compiled).toBe(false);
+      expect(compileCount(fetchMock)).toBe(0);
+      expect(setupCallCount(fetchMock, "Configure")).toBe(0);
+      const warnings = warnLines();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("The deployed marker is absent;");
+      expect(warnings[0]).toContain("uninstall and reinstall the package with zpm");
+
+      http.destroy();
+    });
+
+    it("no guard document (404): the result is deep-equal to today's, with no ipmOwned key", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: OLD_MARKER }] }));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      queuePutReplies();
+      fetchMock.mockResolvedValueOnce(versionReply(OLD_MARKER));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 1 }] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })));
+
+      const result = await bootstrap(http, config, 7);
+
+      // The pre-42.4 shape of an upgrade: every field, and no new key.
+      expect(result).toStrictEqual({
+        probeFound: true,
+        probeStatus: "stale",
+        deployedVersion: OLD_MARKER,
+        deployed: true,
+        compiled: true,
+        configured: true,
+        mapped: true,
+        unitTestRootEnsured: true,
+        unitTestRoot: "/iris/mgr/",
+        errors: [],
+      });
+      expect(warnLines()).toEqual([]);
+
+      http.destroy();
+    });
+
+    const OWNERSHIP_FAILURES: Array<{ label: string; queue: () => void; named: string }> = [
+      {
+        label: "an HTTP 500",
+        queue: () => fetchMock.mockResolvedValueOnce(mockResponse({ status: { errors: [{ error: "Internal error" }], summary: "Error" }, console: [], result: null }, { status: 500 })),
+        named: "IRIS returned HTTP 500",
+      },
+      {
+        label: "a timeout",
+        queue: () => fetchMock.mockRejectedValueOnce(new DOMException("The operation was aborted.", "AbortError")),
+        named: "Connection to IRIS timed out",
+      },
+    ];
+
+    it.each(OWNERSHIP_FAILURES)(
+      "the ownership read fails at startup ($label): unknown, nothing is written, one warning naming the failure",
+      async ({ queue, named }) => {
+        const config = makeConfig();
+        const http = new IrisHttpClient(config);
+        setupCsrfThenRequest(envelope({ content: [{ Version: OLD_MARKER }] }));
+        queue();
+
+        const result = await bootstrap(http, config, 7);
+
+        expect(result.probeStatus).toBe("unknown");
+        expect(result.probeFound).toBe(true);
+        expect(result.readFailure).toContain("whether the ExecuteMCPv2.InstallGuard class exists could not be checked");
+        expect(result.readFailure).toContain(named);
+        expect(result.deployedVersion).toBeUndefined();
+        expect("ipmOwned" in result).toBe(false);
+        expect(result.deployed).toBe(false);
+        expect(result.compiled).toBe(false);
+        expect(result.configured).toBe(false);
+        expect(result.mapped).toBe(false);
+        expect(result.unitTestRootEnsured).toBe(false);
+        assertNothingWritten();
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+
+        const warnings = warnLines();
+        expect(warnings, "exactly one warning").toHaveLength(1);
+        expect(warnings[0]).toContain("the deployed marker could not be read (whether the ExecuteMCPv2.InstallGuard class exists could not be checked");
+        expect(warnings[0]).toContain(named);
+
+        http.destroy();
+      },
+    );
+
+    it("the ownership read fails at the re-check before compile: unknown, no compile and nothing later; one warning", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: OLD_MARKER }] }));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      queuePutReplies();
+      fetchMock.mockResolvedValueOnce(versionReply(OLD_MARKER));
+      fetchMock.mockResolvedValueOnce(mockResponse({ status: { errors: [{ error: "Internal error" }], summary: "Error" }, console: [], result: null }, { status: 500 }));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("unknown");
+      expect(result.probeFound).toBe(true);
+      expect(result.readFailure).toContain("whether the ExecuteMCPv2.InstallGuard class exists could not be checked");
+      expect(result.deployedVersion).toBeUndefined();
+      expect(result.deployed).toBe(true);
+      expect(result.compiled).toBe(false);
+      expect(compileCount(fetchMock)).toBe(0);
+      expect(setupCallCount(fetchMock, "Configure")).toBe(0);
+      const warnings = warnLines();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("alone (found just before compiling, so nothing was compiled)");
+      expect(warnings[0]).toContain("This server had already uploaded its class documents");
+
+      http.destroy();
+    });
+
+    it.each([
+      { label: "current", queue: () => {
+          setupCsrfThenRequest(envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }));
+          fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 1 }] })));
+        }, requests: 3 },
+      { label: "newer", queue: () => setupCsrfThenRequest(envelope({ content: [{ Version: embeddedMarkerMoved({ sequence: 1 }) }] })), requests: 2 },
+      { label: "foreign", queue: () => setupCsrfThenRequest(envelope({ content: [{ Version: "dev" }] })), requests: 2 },
+      { label: "unknown", queue: () => {
+          queueCsrf();
+          fetchMock.mockResolvedValueOnce(missingMethodReply());
+          fetchMock.mockResolvedValueOnce(setupFoundReply());
+        }, requests: 3 },
+    ])("a $label probe makes no ownership request", async ({ queue, requests }) => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      queue();
+
+      const result = await bootstrap(http, config, 7);
+
+      expect("ipmOwned" in result).toBe(false);
+      expect(guardDocGetCount(fetchMock)).toBe(0);
+      expect(fetchMock).toHaveBeenCalledTimes(requests);
 
       http.destroy();
     });
@@ -1669,6 +2070,41 @@ describe("bootstrap", () => {
       expect(MANUAL_INSTRUCTIONS).toContain(
         "ExecuteMCPv2.Setup",
       );
+    });
+
+    // AC 42.4.3 (Story 42.4): item 3 names the IPM package as ipm/module.xml declares it.
+    describe("item 3 names the package IPM installs (AC 42.4.3)", () => {
+      const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+      const manifest = readFileSync(resolve(repoRoot, "ipm/module.xml"), "utf-8");
+      const manifestName = /<Name>([^<]+)<\/Name>/.exec(manifest)?.[1];
+      const manifestVersion = /<Version>([^<]+)<\/Version>/.exec(manifest)?.[1];
+      const item3 = MANUAL_INSTRUCTIONS.slice(MANUAL_INSTRUCTIONS.indexOf("\n3. IPM"));
+
+      it("names the install command with the module name and the semver of BOOTSTRAP_VERSION", () => {
+        const semver = BOOTSTRAP_VERSION.split("+")[0];
+        expect(item3).toContain(`zpm "install ${IPM_MODULE_NAME} ${semver}"`);
+        expect(item3).not.toContain("any namespace");
+      });
+
+      it("takes the name and the version from ipm/module.xml: either changing in one place only fails here", () => {
+        expect(manifestName, "ipm/module.xml carries a <Name>").toBeDefined();
+        expect(manifestVersion, "ipm/module.xml carries a <Version>").toBeDefined();
+        expect(item3).toContain(`zpm "install ${manifestName} ${manifestVersion}"`);
+      });
+
+      it("states the prerequisites: the target namespace, %Admin_Manage, IPM 0.10 or later there, and the registry command", () => {
+        expect(item3).toContain("IPM (InterSystems Package Manager 0.10 or later, installed in the target namespace)");
+        expect(item3).toContain("in the target\n   namespace, as a user with %Admin_Manage, run:");
+        expect(item3).toContain('If zpm "repo -list" shows no registry, run this first:');
+        expect(item3).toContain('zpm "repo -r -n registry -reset-defaults"');
+        expect(item3).toContain("IPM then owns the classes there, and this server never redeploys them.");
+      });
+
+      it("leaves items 1 and 2 as they were, so the first NAMESPACE is still item 1's", () => {
+        const item1 = MANUAL_INSTRUCTIONS.slice(MANUAL_INSTRUCTIONS.indexOf("1. Terminal"), MANUAL_INSTRUCTIONS.indexOf("2. Management Portal"));
+        expect(item1).toContain('Do ##class(ExecuteMCPv2.Setup).Configure("NAMESPACE")');
+        expect(item3, "item 3 holds no NAMESPACE token that a replacement could hit").not.toContain("NAMESPACE");
+      });
     });
   });
 
@@ -1957,6 +2393,9 @@ describe("bootstrap", () => {
       ["ExecuteMCPv2.REST.Dispatch.cls", "src/ExecuteMCPv2/REST/Dispatch.cls"],
     ];
 
+    // The IPM-only install guard: hashed after the classes, stamped like Setup, outside classes[] (Story 42.4).
+    const GUARD_PATH = "ipm/preload/ExecuteMCPv2/InstallGuard.cls";
+
     const VERSION_PLACEHOLDER_LINE = 'Parameter BOOTSTRAPVERSION = "dev";';
     const DRIFT_HINT =
       "bootstrap-classes.ts is out of sync with disk. " +
@@ -2000,6 +2439,23 @@ describe("bootstrap", () => {
       }
     });
 
+    it("the embedded IPM install guard is the disk source with the marker stamped in (AD-14)", () => {
+      const diskContent = readClsNormalized(GUARD_PATH);
+      expect(diskContent, "the disk source keeps the dev placeholder").toContain(VERSION_PLACEHOLDER_LINE);
+
+      expect(IPM_INSTALL_GUARD.name).toBe("ExecuteMCPv2.InstallGuard.cls");
+      expect(IPM_INSTALL_GUARD.content, `${DRIFT_HINT} (the IPM install guard)`).toBe(
+        diskContent.replace(VERSION_PLACEHOLDER_LINE, `Parameter BOOTSTRAPVERSION = "${BOOTSTRAP_VERSION}";`),
+      );
+      expect(IPM_INSTALL_GUARD.content).not.toContain(VERSION_PLACEHOLDER_LINE);
+    });
+
+    it("the install guard is not a bootstrapped class: it is never deployed, and its presence marks an IPM installation", () => {
+      expect(BOOTSTRAP_CLASSES.has(IPM_INSTALL_GUARD.name)).toBe(false);
+      expect(getBootstrapClasses().map((entry) => entry.name)).not.toContain(IPM_INSTALL_GUARD.name);
+      expect(IPM_MODULE_NAME).toBe("iris-execute-mcp-v2");
+    });
+
     /** The embedded marker's parts; fails the test when the marker is not in the current grammar. */
     const markerParts = (): { semver: string; sequence: number; hash: string } => {
       const parsed = parseBootstrapMarker(BOOTSTRAP_VERSION);
@@ -2009,12 +2465,12 @@ describe("bootstrap", () => {
       return { semver: parsed.semver.join("."), sequence: Number(parsed.sequence), hash: parsed.hash };
     };
 
-    it("the marker's hash is the SHA-256 hash of concatenated disk contents", () => {
+    it("the marker's hash is the SHA-256 hash of concatenated disk contents, the IPM install guard last", () => {
       // Re-compute the hash with the same formula as gen-bootstrap.mjs.
-      // If a dev edits any .cls file without running gen:bootstrap, this
-      // test fails with a clear instruction.
+      // If a dev edits any .cls file (or the IPM install guard) without
+      // running gen:bootstrap, this test fails with a clear instruction.
       const hasher = createHash("sha256");
-      for (const [, relPath] of classPaths) {
+      for (const relPath of [...classPaths.map(([, path]) => path), GUARD_PATH]) {
         hasher.update(readClsNormalized(relPath));
         hasher.update("\n--CLASS-SEPARATOR--\n");
       }

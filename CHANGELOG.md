@@ -2,6 +2,67 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-22] — Story 42.4: IPM Package Revival
+
+Story 42.4 makes the IPM package real: its manifest is generated, an install guard keeps an IPM install from downgrading a newer
+deployment, the bootstrap leaves an IPM installation alone, and a new CI job proves that one archive installs offline on both IRIS
+editions. Nothing is published, versioned or tagged by this story. No tool, action, governance key, preset row, annotation, refusal
+code, product environment variable, REST route or REST response is added, removed or changed, no tool count moves (110 package tools,
+115 advertised), the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and the frozen SDK goldens and the tools-list
+snapshot are byte-unchanged. `BOOTSTRAP_VERSION` moves from `0.0.2+1.995fbbb1055d` to `0.0.2+2.244fe8623c76`: the marker's hash now covers
+the install guard as well as the 35 classes, so the sequence rises by one. `classes[]` is unchanged (35 classes).
+
+### Added
+
+- **A generated IPM manifest (AC 42.4.1, DW-34).** `ipm/module.xml` was a hand-written `0.1.0` manifest of 13 classes and some test classes
+  that had never been installed. It is now written by `scripts/gen-bootstrap.mjs` (`pnpm gen:bootstrap`) from `classes[]`, plus one IPM-only
+  preloaded class, and carries a DO-NOT-EDIT header. It declares 36 resources (the guard, then the 35 classes in compile order), the
+  module `iris-execute-mcp-v2` at the version of `@iris-mcp/shared`, and three invokes: the guard's `Check` at `Initialize`/`After` (with `CheckStatus`, which IPM 0.10.0 to 0.10.4 need to act on the error a refusal returns; IPM 0.10.5 and later check it by default), then
+  `ExecuteMCPv2.Setup.Configure` and `ConfigureMapping`. It has no `<WebApplication>`, no application role and no `MatchRoles`. It is
+  rewritten only when its content changes, like the embed. `ipm-manifest.test.ts` and the generator drift test in the default suite fail on a
+  hand edit, or on a `classes[]`, shared-version or guard change that skipped the regeneration. The embed gains `IPM_MODULE_NAME` and
+  `IPM_INSTALL_GUARD`, outside `BOOTSTRAP_CLASSES`.
+- **`ExecuteMCPv2.InstallGuard` (DW-674, the IPM-upgrade half).** Its source is `ipm/preload/ExecuteMCPv2/InstallGuard.cls`, outside `src/`,
+  so a `src/**` load can never plant it. IPM preloads it and runs `Check` at the end of `Initialize`, before it reloads any class. `Check`
+  orders the marker of the `ExecuteMCPv2.Setup` already in the namespace against its own stamped marker with the Story 42.2 table, and refuses the
+  install, inside IPM's transaction and with nothing installed, over a newer, `dev` or unreadable one; an absent, older or equal one installs.
+  IPM's own downgrade check ignores the `+<sequence>.<hash>` part of a version and never sees a deployment made by the bootstrap. `Classify` is a
+  port of `classifyDeployedMarker`, held equal to it by a parity table of 70 cases (leading zeros, numbers past 2^53 and past 19 digits,
+  non-ASCII digits, trailing line breaks, uppercase hex, legacy markers) that `bootstrap-version.test.ts` pins on the TypeScript side and that CI
+  runs on both editions.
+- **The bootstrap leaves an IPM installation alone (DW-674, the ownership half).** When the document `ExecuteMCPv2.InstallGuard.cls` answers
+  200, IPM installed the classes there: at startup, on every path that would write (`stale`, `unconfigured`, `missing`) the server uploads,
+  compiles and configures nothing and logs one `[WARN]` line that says so, names the deployed marker and this server's, and gives
+  `zpm "install iris-execute-mcp-v2 <version>"` and `zpm "uninstall iris-execute-mcp-v2"`. The marker is read again before each compile, and the
+  document is asked for again there: a guard that appears only then (another client installing at the same moment) comes after this server's
+  class documents were uploaded, so those stay, and the compile and every later step are skipped. `BootstrapResult` gains `ipmOwned`, present only
+  when `true`. A 404 for the document is the positive absence and the result is deep-equal to before, with no new key. Any other failure of the read
+  is unknown: nothing is written, and the existing unreadable-marker warning names it. A current, newer, foreign or unreadable deployment makes no ownership
+  request. The `ipm-owned-older` leg of the bootstrap-guard gate runs this against a real IRIS in CI.
+- **The `ipm` CI job and `scripts/ci-ipm-archive.mjs` (AC 42.4.2).** It builds the archive with IPM's `load -dev` and `package` on a throwaway
+  `iris-community` 2026.2 container with no network, from the stamped embed and never from `src/`, and installs that one archive on fresh
+  no-network containers of `iris-community` 2026.2 (`USER`) and `irishealth-community` 2026.2 (`HSCUSTOM`). On the community edition it shows that the three guard refusals
+  (a newer, `dev` and marker-less `Setup`) leave the deployment as it was, with no module listed, and that an older `Setup` is upgraded; on both editions it shows that 36 classes compile,
+  that the web application has the install namespace, `ExecuteMCPv2.REST.Dispatch`, `Enabled=1` and no `MatchRoles`, that `%ALL` maps the package, that a
+  GET of the application from inside the container answers 200, that `%IPM_Repo.Definition` holds 0 rows at every read, and that the parity table agrees. The only IPM verbs it issues are `load`, `package` and `list` (AC 42.4.4); it publishes nothing, uploads nothing and reads no secret. The job needs
+  `gates` and `throwaway` and has a 45-minute budget. `scripts/lib/ipm-archive.mjs` holds the pure helpers.
+- **The throwaway harness learns to run without a network.** `up --network none` starts a container with no `-p`, ready when its session answers (there is
+  no web port to poll); `--mount <dir>:/opt/iris-mcp/<name>` adds a read-only bind mount whose host directory must be absolute, plain and a real directory, not a link; `session`
+  pipes a script into `iris session` of the recorded container; `cp` copies a file out of it. Each re-inspects the container first, a `--network none` state is checked
+  for the network mode and for no published port, and `exec` refuses such a state. `run`'s argv and `pnpm live:bootstrap-guard` are unchanged.
+
+### Changed
+
+- **The oldest CI image moves to `iris-community:2026.1` (DW-686).** A Community image's license key expires: 2025.3 passed every bootstrap-guard leg in CI
+  run 39749804619 (commit `6a8574f`, 2026-10-22) and its key expires on 2026-11-13, so `bootstrap-guard-oldest` runs on 2026.1 (key valid to 2027-03-27), pinned by
+  digest `sha256:c57b65b2b454494091e7b3e49f6a53b3335f40adf475bcfcee0866083f35a7c2`. The oldest green tag remains the tested floor that Story 42.9 states.
+- **The `zpm` fallback text is accurate (AC 42.4.3).** When the bootstrap's Configure step fails, `manualInstructions` item 3 now says to run, in the target
+  namespace, as a user with `%Admin_Manage` and IPM 0.10 or later, `zpm "install iris-execute-mcp-v2 <version>"` (the version of this build), to add the community
+  registry first with `zpm "repo -r -n registry -reset-defaults"` when `zpm "repo -list"` shows none, and that IPM then owns the classes and the server never redeploys them. The text
+  is logged, never sent on a tool wire. Until the first release publishes the package the install finds nothing, which is expected.
+- **Documentation.** The root README has an "Optional: Install the IRIS-Side Classes with IPM" subsection after "Verify", an IPM-owned row and remedy in "Shared Instances", and a
+  Continuous Integration section of four jobs with the 2026.1 floor.
+
 ## [Pre-release — 2026-10-22] — Story 42.3: CI Workflow
 
 Story 42.3 adds the first CI of the repository, `.github/workflows/ci.yml`, and the checks that hold it honest. It is secret-free and

@@ -23,6 +23,7 @@ import {
   CI_LIVE_EXEMPTIONS,
   DECLARED_STEPS,
   HARNESS_SUITE_IDS,
+  JOB_TIMEOUT_MINUTES,
   LAUNCHER_LIVE_FILES,
   LIVE_SUITES,
   NODE_LEGS,
@@ -96,16 +97,20 @@ function collectionTimeConditions(source: string): string[] {
 /** The first checkout line of the file, which every job has. */
 const CHECKOUT = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0";
 
+/** The head of the package job and of the ipm job, each of which `needs` the gates and throwaway jobs (a mutation names one job). */
+const PACKAGE_NEEDS = "  package:\n    name: package\n    needs: [gates, throwaway]\n";
+const IPM_NEEDS = "  ipm:\n    name: ipm\n    needs: [gates, throwaway]\n";
+
 describe("AC 42.3.1: the workflow is the registry's workflow", () => {
   it("the real ci.yml has no problem", () => {
     expect(workflowProblems(text, context)).toEqual([]);
   });
 
-  it("runs the three jobs, the gates job on exactly the three Node legs, and the package job after the other two", () => {
-    expect(Object.keys(DECLARED_STEPS)).toEqual(["gates", "throwaway", "package"]);
+  it("runs the four jobs, the gates job on exactly the three Node legs, and the package and ipm jobs after the other two", () => {
+    expect(Object.keys(DECLARED_STEPS)).toEqual(["gates", "throwaway", "package", "ipm"]);
     expect([...NODE_LEGS]).toEqual(["22.17.0", "24.0.0", "26.0.0"]);
     expect(workflowProblems(text, context).filter((problem) => /matrix|does not need/.test(problem))).toEqual([]);
-    expect(workflowProblems(mutate(text, "needs: [gates, throwaway]", "needs: [gates]"), context).filter((problem) => /matrix|does not need/.test(problem))).toEqual(["the package job does not need throwaway"]);
+    expect(workflowProblems(mutate(text, PACKAGE_NEEDS, PACKAGE_NEEDS.replace("[gates, throwaway]", "[gates]")), context).filter((problem) => /matrix|does not need/.test(problem))).toEqual(["the package job does not need throwaway"]);
   });
 
   it.each([
@@ -132,7 +137,7 @@ describe("AC 42.3.1: the workflow is the registry's workflow", () => {
       /package does not run on Node 22\.17\.0/,
     ],
     ["a run-name without the head sha", () => mutate(text, "run-name: ci ${{ github.ref_name }} ${{ github.event.pull_request.head.sha || github.sha }}", "run-name: ci ${{ github.ref_name }}"), /run-name does not carry the head sha/],
-    ["a job the registry does not declare", () => mutate(text, "  package:\n    name: package\n", "  extra:\n    name: extra\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo extra\n  package:\n    name: package\n"), /the jobs are gates, throwaway, extra, package/],
+    ["a job the registry does not declare", () => mutate(text, "  package:\n    name: package\n", "  extra:\n    name: extra\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo extra\n  package:\n    name: package\n"), /the jobs are gates, throwaway, extra, package, ipm/],
     ["a uses: line hidden in a run block", () => mutate(text, "        run: node scripts/ci-package-smoke.mjs\n", "        run: |\n          node scripts/ci-package-smoke.mjs\n          uses: evil/action@v1\n"), /uses: lines but the jobs have/],
   ] as Array<[string, () => string, RegExp]>)("fails on %s, naming the difference", (_label, apply, expected) => {
     expect(workflowProblems(apply(), context).join("\n")).toMatch(expected);
@@ -222,13 +227,13 @@ describe("AC 42.3.4: the pins and the hygiene of the workflow", () => {
 
 describe("AC 42.3.5 / DW-443: no tarball is built from a red commit, and every prepublishOnly is run", () => {
   it("fails when the package job does not need the throwaway job, or the gates job", () => {
-    expect(workflowProblems(mutate(text, "needs: [gates, throwaway]", "needs: [gates]"), context).join("\n")).toMatch(/package job does not need throwaway/);
-    expect(workflowProblems(mutate(text, "needs: [gates, throwaway]", "needs: [throwaway]"), context).join("\n")).toMatch(/package job does not need gates/);
-    expect(workflowProblems(mutate(text, "    needs: [gates, throwaway]\n", ""), context).join("\n")).toMatch(/package job does not need/);
+    expect(workflowProblems(mutate(text, PACKAGE_NEEDS, PACKAGE_NEEDS.replace("[gates, throwaway]", "[gates]")), context).join("\n")).toMatch(/package job does not need throwaway/);
+    expect(workflowProblems(mutate(text, PACKAGE_NEEDS, PACKAGE_NEEDS.replace("[gates, throwaway]", "[throwaway]")), context).join("\n")).toMatch(/package job does not need gates/);
+    expect(workflowProblems(mutate(text, PACKAGE_NEEDS, PACKAGE_NEEDS.replace("    needs: [gates, throwaway]\n", "")), context).join("\n")).toMatch(/package job does not need/);
   });
 
   it("fails when a job has a condition of its own, which could run the package job after a red job, or skip a job", () => {
-    expect(workflowProblems(mutate(text, "    needs: [gates, throwaway]\n", "    needs: [gates, throwaway]\n    if: ${{ always() }}\n"), context).join("\n")).toMatch(/job package has its own if/);
+    expect(workflowProblems(mutate(text, PACKAGE_NEEDS, `${PACKAGE_NEEDS}    if: \${{ always() }}\n`), context).join("\n")).toMatch(/job package has its own if/);
     expect(workflowProblems(mutate(text, "    name: throwaway\n", "    name: throwaway\n    if: ${{ github.event_name == 'push' }}\n"), context).join("\n")).toMatch(/job throwaway has its own if/);
     expect(workflowProblems(mutate(text, `${CHECKOUT}\n        with:`, `${CHECKOUT}\n        if: false\n        with:`), context).join("\n")).toMatch(/the step actions\/checkout@\S+ has an if: condition/);
   });
@@ -257,6 +262,43 @@ describe("AC 42.3.5 / DW-443: no tarball is built from a red commit, and every p
     expect(runs[runs.length - 1]).toContain("throwaway-iris.mjs down");
     expect(workflowProblems(mutate(text, '"${{ always() }}"', '"${{ success() }}"'), context).join("\n")).toMatch(/down step does not run on always/);
     expect(workflowProblems(mutate(text, '"${{ failure() || cancelled() }}"', '"${{ failure() }}"'), context).join("\n")).toMatch(/logs step does not run on failure/);
+  });
+});
+
+describe("Story 42.4 (AC 42.4.2, AC 42.4.4): the ipm job builds and installs the IPM archive after the other two jobs", () => {
+  const IPM_STEP = "      - name: ipm archive\n        run: node scripts/ci-ipm-archive.mjs\n";
+  const IPM_NODE =
+    'node-version: "22.17.0"\n          cache: pnpm\n      - name: install\n        run: pnpm install --frozen-lockfile\n      - name: build\n        run: pnpm build\n      - name: ipm archive';
+
+  it("is registered with install, build and the archive proof, a 45-minute budget, and no strategy, condition or launcher step", () => {
+    expect((DECLARED_STEPS.ipm as Array<{ run: string }>).map((step) => step.run)).toEqual(["pnpm install --frozen-lockfile", "pnpm build", "node scripts/ci-ipm-archive.mjs"]);
+    expect(JOB_TIMEOUT_MINUTES.ipm).toBe(45);
+    expect(workflowProblems(text, context)).toEqual([]);
+    expect(text).toContain(IPM_NEEDS);
+    expect(text).toContain(IPM_STEP);
+  });
+
+  it.each([
+    ["the ipm job removed", () => text.slice(0, text.indexOf("\n  ipm:")) + "\n", /the jobs are gates, throwaway, package, the registry declares gates, throwaway, package, ipm/],
+    ["the archive step removed", () => mutate(text, IPM_STEP, ""), /declared step is not in the workflow.*ci-ipm-archive/],
+    ["the archive step run for one edition only", () => mutate(text, "run: node scripts/ci-ipm-archive.mjs\n", "run: node scripts/ci-ipm-archive.mjs --edition health\n"), /declared step is not in the workflow.*ci-ipm-archive/],
+    ["the build step removed", () => mutate(text, `      - name: build\n        run: pnpm build\n${IPM_STEP}`, IPM_STEP), /declared step is not in the workflow.*pnpm build/],
+    ["an ipm job that needs only gates", () => mutate(text, IPM_NEEDS, IPM_NEEDS.replace("[gates, throwaway]", "[gates]")), /ipm job does not need throwaway/],
+    ["an ipm job that needs only throwaway", () => mutate(text, IPM_NEEDS, IPM_NEEDS.replace("[gates, throwaway]", "[throwaway]")), /ipm job does not need gates/],
+    ["an ipm job that needs nothing", () => mutate(text, IPM_NEEDS, IPM_NEEDS.replace("    needs: [gates, throwaway]\n", "")), /ipm job does not need gates/],
+    ["an ipm job on another Node", () => mutate(text, IPM_NODE, IPM_NODE.replace('"22.17.0"', '"24.0.0"')), /ipm does not run on Node 22\.17\.0/],
+    ["an ipm job on another runner", () => mutate(text, "runs-on: ubuntu-24.04\n    timeout-minutes: 45", "runs-on: ubuntu-latest\n    timeout-minutes: 45"), /ipm does not run on ubuntu-24\.04/],
+    ["an ipm job with another budget", () => mutate(text, "timeout-minutes: 45", "timeout-minutes: 90"), /ipm has timeout-minutes 90, not 45/],
+    ["an ipm job with a matrix", () => mutate(text, "timeout-minutes: 45\n", 'timeout-minutes: 45\n    strategy:\n      matrix:\n        node: ["22.17.0"]\n'), /job ipm has a strategy/],
+    ["an ipm job with a condition of its own", () => mutate(text, IPM_NEEDS, `${IPM_NEEDS}    if: \${{ always() }}\n`), /job ipm has its own if/],
+    ["an ipm job that widens the permissions", () => mutate(text, "timeout-minutes: 45\n", "timeout-minutes: 45\n    permissions:\n      contents: write\n"), /job ipm sets its own permissions/],
+    ["an ipm step that uploads the archive", () => mutate(text, IPM_STEP, `${IPM_STEP}      - name: keep\n        uses: actions/upload-artifact@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0\n`), /upload or cache step/],
+    ["an ipm step that reads a secret", () => mutate(text, "run: node scripts/ci-ipm-archive.mjs\n", "run: node scripts/ci-ipm-archive.mjs ${{ secrets.IPM_TOKEN }}\n"), /secrets reference/],
+    ["an ipm step that publishes the archive", () => mutate(text, IPM_STEP, `${IPM_STEP}      - name: publish\n        run: zpm "publish iris-execute-mcp-v2"\n`), /IPM verb other than load, package and list/],
+    ["an ipm step that installs from the registry", () => mutate(text, IPM_STEP, `${IPM_STEP}      - name: install\n        run: zpm "install iris-execute-mcp-v2"\n`), /IPM verb other than load, package and list/],
+    ["an ipm step that pushes", () => mutate(text, "run: node scripts/ci-ipm-archive.mjs\n", "run: node scripts/ci-ipm-archive.mjs && git push origin HEAD\n"), /publish, tag or push command/],
+  ] as Array<[string, () => string, RegExp]>)("fails on %s", (_label, apply, expected) => {
+    expect(workflowProblems(apply(), context).join("\n")).toMatch(expected);
   });
 });
 

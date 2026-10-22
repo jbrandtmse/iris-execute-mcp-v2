@@ -41,6 +41,8 @@ const REPO_ROOT = resolve(__dirname, "../../../..");
 const EMBED_RELATIVE_PATH = join("packages", "shared", "src", "bootstrap-classes.ts");
 const MANIFEST_RELATIVE_PATH = join("packages", "shared", "package.json");
 const STATE_RELATIVE_PATH = join("scripts", "bootstrap-sequence.json");
+const IPM_MANIFEST_RELATIVE_PATH = join("ipm", "module.xml");
+const IPM_GUARD_RELATIVE_PATH = join("ipm", "preload", "ExecuteMCPv2", "InstallGuard.cls");
 const PAST_SECONDS = 1_000_000_000; // 2001-09-09, well before any real write
 
 let scratch = "";
@@ -48,6 +50,8 @@ let script = "";
 let embedPath = "";
 let statePath = "";
 let manifestPath = "";
+let ipmManifestPath = "";
+let guardPath = "";
 
 function runGenerator(): { status: number | null; stdout: string; stderr: string } {
   const result = spawnSync(process.execPath, [script], { encoding: "utf8", cwd: scratch, timeout: 60000 });
@@ -81,12 +85,15 @@ describe("gen-bootstrap writes the embed only when its content changes (DW-591)"
     script = join(scratch, "scripts", "gen-bootstrap.mjs");
     copyFileSync(join(REPO_ROOT, "scripts", "gen-bootstrap.mjs"), script);
     cpSync(join(REPO_ROOT, "src", "ExecuteMCPv2"), join(scratch, "src", "ExecuteMCPv2"), { recursive: true });
+    cpSync(join(REPO_ROOT, "ipm"), join(scratch, "ipm"), { recursive: true });
     mkdirSync(join(scratch, "packages", "shared", "src"), { recursive: true });
     manifestPath = join(scratch, MANIFEST_RELATIVE_PATH);
     copyFileSync(join(REPO_ROOT, MANIFEST_RELATIVE_PATH), manifestPath);
     statePath = join(scratch, STATE_RELATIVE_PATH);
     copyFileSync(join(REPO_ROOT, STATE_RELATIVE_PATH), statePath);
     embedPath = join(scratch, EMBED_RELATIVE_PATH);
+    ipmManifestPath = join(scratch, IPM_MANIFEST_RELATIVE_PATH);
+    guardPath = join(scratch, IPM_GUARD_RELATIVE_PATH);
   });
 
   afterEach(() => {
@@ -128,7 +135,8 @@ describe("gen-bootstrap writes the embed only when its content changes (DW-591)"
     const run = runGenerator();
     expect(run.status, run.stderr).toBe(0);
     expect(run.stdout).toContain("Generated");
-    expect(run.stdout).not.toMatch(/unchanged/i);
+    // The embed line only: the manifest does not depend on class content, so its own line says Unchanged.
+    expect(run.stdout).not.toMatch(/Unchanged .*bootstrap-classes\.ts/);
 
     const after = readFileSync(embedPath, "utf8");
     expect(statSync(embedPath).mtimeMs, "the rewritten embed has a new mtime").toBeGreaterThan(pinned);
@@ -153,7 +161,7 @@ describe("gen-bootstrap writes the embed only when its content changes (DW-591)"
     const run = runGenerator();
     expect(run.status, run.stderr).toBe(0);
     expect(run.stdout).toContain("Generated");
-    expect(run.stdout).not.toMatch(/unchanged/i);
+    expect(run.stdout).not.toMatch(/Unchanged .*bootstrap-classes\.ts/);
     expect(readFileSync(embedPath, "utf8"), "the hand edit is gone").toBe(generated);
     expect(statSync(embedPath).mtimeMs, "the rewrite has a new mtime").toBeGreaterThan(pinned);
     expect(hashOf(generated), "and the hand edit did not move the sequence").toBe(stateOf().hash);
@@ -211,12 +219,15 @@ describe("gen-bootstrap stamps <semver>+<sequence>.<hash> (DW-508)", () => {
     script = join(scratch, "scripts", "gen-bootstrap.mjs");
     copyFileSync(join(REPO_ROOT, "scripts", "gen-bootstrap.mjs"), script);
     cpSync(join(REPO_ROOT, "src", "ExecuteMCPv2"), join(scratch, "src", "ExecuteMCPv2"), { recursive: true });
+    cpSync(join(REPO_ROOT, "ipm"), join(scratch, "ipm"), { recursive: true });
     mkdirSync(join(scratch, "packages", "shared", "src"), { recursive: true });
     manifestPath = join(scratch, MANIFEST_RELATIVE_PATH);
     copyFileSync(join(REPO_ROOT, MANIFEST_RELATIVE_PATH), manifestPath);
     statePath = join(scratch, STATE_RELATIVE_PATH);
     copyFileSync(join(REPO_ROOT, STATE_RELATIVE_PATH), statePath);
     embedPath = join(scratch, EMBED_RELATIVE_PATH);
+    ipmManifestPath = join(scratch, IPM_MANIFEST_RELATIVE_PATH);
+    guardPath = join(scratch, IPM_GUARD_RELATIVE_PATH);
   });
 
   afterEach(() => {
@@ -349,5 +360,181 @@ describe("gen-bootstrap stamps <semver>+<sequence>.<hash> (DW-508)", () => {
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain("MAJOR.MINOR.PATCH");
     expect(existsSync(embedPath)).toBe(false);
+  });
+});
+
+// Story 42.4 (AD-14, DW-674): the generator also owns ipm/module.xml and the IPM install guard. The manifest is output-only,
+// written only when its content changes (the dist freshness check is mtime-based, DW-591); the guard is stamped like Setup and
+// its content joins the marker's hash.
+describe("gen-bootstrap writes ipm/module.xml and stamps the IPM install guard (Story 42.4)", () => {
+  beforeEach(() => {
+    scratch = mkdtempSync(join(tmpdir(), "gen-bootstrap-ipm-"));
+    mkdirSync(join(scratch, "scripts"), { recursive: true });
+    script = join(scratch, "scripts", "gen-bootstrap.mjs");
+    copyFileSync(join(REPO_ROOT, "scripts", "gen-bootstrap.mjs"), script);
+    cpSync(join(REPO_ROOT, "src", "ExecuteMCPv2"), join(scratch, "src", "ExecuteMCPv2"), { recursive: true });
+    cpSync(join(REPO_ROOT, "ipm"), join(scratch, "ipm"), { recursive: true });
+    mkdirSync(join(scratch, "packages", "shared", "src"), { recursive: true });
+    manifestPath = join(scratch, MANIFEST_RELATIVE_PATH);
+    copyFileSync(join(REPO_ROOT, MANIFEST_RELATIVE_PATH), manifestPath);
+    statePath = join(scratch, STATE_RELATIVE_PATH);
+    copyFileSync(join(REPO_ROOT, STATE_RELATIVE_PATH), statePath);
+    embedPath = join(scratch, EMBED_RELATIVE_PATH);
+    ipmManifestPath = join(scratch, IPM_MANIFEST_RELATIVE_PATH);
+    guardPath = join(scratch, IPM_GUARD_RELATIVE_PATH);
+  });
+
+  afterEach(() => {
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it("the checked-in ipm/module.xml is exactly what the generator writes, so a run on a clean tree rewrites neither the embed nor the manifest", () => {
+    // The scratch tree holds copies of the real embed, manifest, guard, classes and state: the real files are only read.
+    copyFileSync(join(REPO_ROOT, EMBED_RELATIVE_PATH), embedPath);
+    const checkedIn = readFileSync(ipmManifestPath, "utf8");
+    expect(checkedIn, "the scratch copy is the checked-in manifest").toBe(readFileSync(join(REPO_ROOT, IPM_MANIFEST_RELATIVE_PATH), "utf8"));
+    utimesSync(ipmManifestPath, PAST_SECONDS, PAST_SECONDS);
+    utimesSync(embedPath, PAST_SECONDS, PAST_SECONDS);
+
+    const run = runGenerator();
+
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout, "the embed is out of date: run pnpm gen:bootstrap").toMatch(/Unchanged .*bootstrap-classes\.ts/);
+    expect(run.stdout, "ipm/module.xml differs from the generator's output: run pnpm gen:bootstrap").toMatch(/Unchanged .*module\.xml/);
+    expect(run.stdout, "the generator rewrote an output: run pnpm gen:bootstrap and commit the result").not.toContain("Generated");
+    expect(readFileSync(ipmManifestPath, "utf8"), "the manifest keeps its content").toBe(checkedIn);
+    expect(statSync(ipmManifestPath).mtimeMs, "and its mtime").toBe(PAST_SECONDS * 1000);
+    expect(statSync(embedPath).mtimeMs).toBe(PAST_SECONDS * 1000);
+  });
+
+  it("an unchanged run keeps the manifest's mtime and content, and a changed run rewrites it", () => {
+    rmSync(ipmManifestPath);
+    const first = runGenerator();
+    expect(first.status, first.stderr).toBe(0);
+    expect(first.stdout).toMatch(/Generated .*module\.xml/);
+    const written = readFileSync(ipmManifestPath, "utf8");
+    expect(written, "ipm/module.xml differs from the generator's output: run pnpm gen:bootstrap").toBe(readFileSync(join(REPO_ROOT, IPM_MANIFEST_RELATIVE_PATH), "utf8"));
+    utimesSync(ipmManifestPath, PAST_SECONDS, PAST_SECONDS);
+
+    const second = runGenerator();
+    expect(second.status, second.stderr).toBe(0);
+    expect(second.stdout).toMatch(/Unchanged .*module\.xml/);
+    expect(readFileSync(ipmManifestPath, "utf8")).toBe(written);
+    expect(statSync(ipmManifestPath).mtimeMs, "the unchanged manifest keeps its mtime").toBe(PAST_SECONDS * 1000);
+  });
+
+  it("a manifest edited by hand is written back to the generated content", () => {
+    const first = runGenerator();
+    expect(first.status, first.stderr).toBe(0);
+    const generated = readFileSync(ipmManifestPath, "utf8");
+    const edited = generated.replace('<Resource Name="ExecuteMCPv2.Utils.CLS"/>', '<Resource Name="ExecuteMCPv2.Utilz.CLS"/>');
+    expect(edited, "the edit changed the manifest").not.toBe(generated);
+    writeFileSync(ipmManifestPath, edited);
+    utimesSync(ipmManifestPath, PAST_SECONDS, PAST_SECONDS);
+
+    const run = runGenerator();
+
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toMatch(/Generated .*module\.xml/);
+    expect(readFileSync(ipmManifestPath, "utf8"), "the hand edit is gone").toBe(generated);
+    expect(statSync(ipmManifestPath).mtimeMs, "the rewrite has a new mtime").toBeGreaterThan(PAST_SECONDS * 1000);
+  });
+
+  it("a changed shared version moves <Version> and the marker's semver, and nothing else in the manifest", () => {
+    const first = runGenerator();
+    expect(first.status, first.stderr).toBe(0);
+    const before = readFileSync(ipmManifestPath, "utf8");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { version: string };
+    expect(before).toContain(`<Version>${manifest.version}</Version>`);
+
+    writeFileSync(manifestPath, JSON.stringify({ ...manifest, version: "7.8.9" }));
+    const run = runGenerator();
+
+    expect(run.status, run.stderr).toBe(0);
+    const after = readFileSync(ipmManifestPath, "utf8");
+    expect(after).toContain("<Version>7.8.9</Version>");
+    expect(after.replace("<Version>7.8.9</Version>", `<Version>${manifest.version}</Version>`)).toBe(before);
+    expect(versionOf(readFileSync(embedPath, "utf8"))).toMatch(/^7\.8\.9\+/);
+  });
+
+  it("an install guard without the placeholder line is an error that names the file and writes nothing", () => {
+    const guard = readFileSync(guardPath, "utf8");
+    writeFileSync(guardPath, guard.replace('Parameter BOOTSTRAPVERSION = "dev";', 'Parameter BOOTSTRAPVERSION = "stamped by hand";'));
+    const manifestBefore = readFileSync(ipmManifestPath, "utf8");
+    const stateBefore = readFileSync(statePath, "utf8");
+
+    const run = runGenerator();
+
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain("placeholder not found in InstallGuard.cls");
+    expect(run.stderr).toContain("ipm/preload/ExecuteMCPv2/InstallGuard.cls");
+    expect(run.stderr).toContain('Parameter BOOTSTRAPVERSION = "dev";');
+    expect(existsSync(embedPath), "no embed was written").toBe(false);
+    expect(readFileSync(ipmManifestPath, "utf8"), "the manifest is untouched").toBe(manifestBefore);
+    expect(readFileSync(statePath, "utf8"), "and so is the sequence state").toBe(stateBefore);
+  });
+
+  it("a Setup class without the placeholder line is still an error that names its file and writes nothing", () => {
+    const setupPath = join(scratch, "src", "ExecuteMCPv2", "Setup.cls");
+    writeFileSync(setupPath, readFileSync(setupPath, "utf8").replace('Parameter BOOTSTRAPVERSION = "dev";', 'Parameter BOOTSTRAPVERSION = "stamped by hand";'));
+    const stateBefore = readFileSync(statePath, "utf8");
+
+    const run = runGenerator();
+
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain("placeholder not found in Setup.cls");
+    expect(run.stderr).toContain("src/ExecuteMCPv2/Setup.cls");
+    expect(existsSync(embedPath)).toBe(false);
+    expect(readFileSync(statePath, "utf8")).toBe(stateBefore);
+  });
+
+  it("a missing install guard is an error that names the file and writes nothing", () => {
+    rmSync(guardPath);
+    const manifestBefore = readFileSync(ipmManifestPath, "utf8");
+
+    const run = runGenerator();
+
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain("InstallGuard.cls");
+    expect(existsSync(embedPath)).toBe(false);
+    expect(readFileSync(ipmManifestPath, "utf8")).toBe(manifestBefore);
+  });
+
+  it("the guard's content joins the marker: editing it raises the sequence by 1, moves the hash and reaches the embedded guard, not Setup", () => {
+    const baseline = runGenerator();
+    expect(baseline.status, baseline.stderr).toBe(0);
+    const before = readFileSync(embedPath, "utf8");
+
+    appendFileSync(guardPath, "\n/// scratch change\n");
+    const run = runGenerator();
+
+    expect(run.status, run.stderr).toBe(0);
+    const after = readFileSync(embedPath, "utf8");
+    expect(sequenceOf(after)).toBe(sequenceOf(before) + 1);
+    expect(hashOf(after)).not.toBe(hashOf(before));
+    expect(stateOf()).toEqual({ sequence: sequenceOf(after), hash: hashOf(after) });
+    expect(after).toContain("/// scratch change");
+  });
+
+  it("the marker is stamped into the embedded guard as well as Setup, and the placeholder on disk is left alone", () => {
+    const run = runGenerator();
+    expect(run.status, run.stderr).toBe(0);
+    const embed = readFileSync(embedPath, "utf8");
+    const marker = versionOf(embed);
+
+    const guardBlock = embed.slice(embed.indexOf("export const IPM_INSTALL_GUARD"));
+    expect(guardBlock).toContain(`Parameter BOOTSTRAPVERSION = "${marker}";`);
+    expect(guardBlock).not.toContain('Parameter BOOTSTRAPVERSION = "dev";');
+    expect(embed).toContain('export const IPM_MODULE_NAME = "iris-execute-mcp-v2";');
+    expect(readFileSync(guardPath, "utf8"), "the disk copy keeps the placeholder").toContain('Parameter BOOTSTRAPVERSION = "dev";');
+  });
+
+  it("the install guard stays out of classes[]: the embed holds the same 35 bootstrapped classes", () => {
+    const run = runGenerator();
+    expect(run.status, run.stderr).toBe(0);
+    const embed = readFileSync(embedPath, "utf8");
+    const classBlock = embed.slice(embed.indexOf("export const BOOTSTRAP_CLASSES"), embed.indexOf("export function getBootstrapClasses"));
+    expect(classBlock).not.toContain("ExecuteMCPv2.InstallGuard");
+    expect(embed).toContain("Contains all 35 production classes");
   });
 });

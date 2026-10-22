@@ -9,6 +9,7 @@
  * - `PUT  /api/atelier/v<N>/<ns>/doc/<name>?ignoreConflict=1`: stores the document's lines and gives it a new `ts`. An
  *   existing document without `ignoreConflict=1` is refused with HTTP 409, as IRIS refuses a stale save.
  * - `GET  /api/atelier/v<N>/<ns>/doc/<name>`: `{ts, content}`, or a 404 envelope for a missing document.
+ * - `DELETE /api/atelier/v<N>/<ns>/doc/<name>`: removes the stored document (200), or a 404 envelope when there is none.
  * - `POST /api/atelier/v<N>/<ns>/action/compile` (a JSON array of names): compiling `ExecuteMCPv2.Setup.cls` makes the
  *   COMPILED marker the one in the stored `Parameter BOOTSTRAPVERSION = "..."` line, as IRIS would. A missing document
  *   is an HTTP 500 error envelope and changes nothing.
@@ -324,6 +325,15 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
           return;
         }
         reply(res, 200, envelope({ name, db: namespace, ts: stored.ts, upd: false, cat: "CLS", status: "", enc: false, flags: 0, content: stored.lines }));
+        return;
+      }
+      if (method === "DELETE") {
+        // A missing document is a 404, as Atelier answers; a stored one is gone (its compiled form, if any, is not modelled).
+        if (!state.docs.delete(name)) {
+          reply(res, 404, errorEnvelope(`ERROR #16005: Document '${name}' does not exist`, 16005));
+          return;
+        }
+        reply(res, 200, envelope({ name, ts: "", status: "", enc: false, content: [] }));
         return;
       }
     }

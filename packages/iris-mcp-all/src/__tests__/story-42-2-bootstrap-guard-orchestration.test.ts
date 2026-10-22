@@ -9,6 +9,8 @@
  * - older (a lower sequence, at startup and through `other`) and legacy (a bare hash): every embedded class is PUT once
  *   with `ignoreConflict=1`, compiled once, and each document ends up equal to a clean deployment of the embed;
  * - current: nothing is written, and a second start right after an upgrade changes nothing;
+ * - ipm (Story 42.4, DW-674): an older marker over the IPM-only `ExecuteMCPv2.InstallGuard` document is left alone, the guard
+ *   document included, with one warning that says IPM installed the classes and names the `zpm` commands;
  * - race: a newer or foreign marker that appears between the uploads and the compile stops the compile;
  * - unknown (decision #54, DW-673): a version read that fails (HTTP 500, a privilege error, HTTP 403, an empty value, a
  *   timeout) over a newer deployment uploads and compiles nothing and warns once, naming the failure and the remedy; a
@@ -28,7 +30,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { reserveClosedPort, resolveSdkEsmDir, staleDistReason, type IrisTarget } from "./process-gate-helpers.js";
+import { classifyDeployedMarker } from "../../../shared/src/bootstrap-version.js";
 import {
+  GUARD_DOC,
+  GUARD_STUB_LINES,
   LEGS,
   REMEDY,
   VERSION_QUERY,
@@ -111,6 +116,11 @@ afterAll(async () => {
   await Promise.all(openFakes.splice(0).map((fake) => fake.close()));
 });
 
+/** The requests that ask the instance whether the IPM install guard document exists (the ownership read, Story 42.4). */
+function guardReads(summary: ReturnType<typeof summarizeRequests>): string[] {
+  return summary.others.filter((other) => other.endsWith(`/doc/${GUARD_DOC}`));
+}
+
 /** Check the requests the server itself made in one start (the window between `start` and `stop`). */
 function assertServerRequests(expectation: Expectation, window: readonly FakeRequest[], names: readonly string[]): void {
   const summary = summarizeRequests(window);
@@ -121,6 +131,14 @@ function assertServerRequests(expectation: Expectation, window: readonly FakeReq
     expect(summary.puts, "no PUT").toEqual([]);
     expect(summary.compiles, "no compile").toBe(0);
     expect(summary.queries, "only the one probe query: no IsConfigured, Configure, mapping or ^UnitTestRoot").toEqual([VERSION_QUERY]);
+    expect(guardReads(summary), "no ownership read: a newer or foreign deployment is left alone whoever installed it").toEqual([]);
+    return;
+  }
+  if (expectation === "ipm") {
+    expect(summary.puts, "no PUT").toEqual([]);
+    expect(summary.compiles, "no compile").toBe(0);
+    expect(summary.queries, "only the one probe query: the classes are IPM's, so nothing else runs").toEqual([VERSION_QUERY]);
+    expect(guardReads(summary), "exactly one ownership read, at startup, which found the guard document").toEqual([`GET /api/atelier/v8/${NAMESPACE}/doc/${GUARD_DOC}`]);
     return;
   }
   if (expectation === "upgraded") {
@@ -131,11 +149,13 @@ function assertServerRequests(expectation: Expectation, window: readonly FakeReq
     ).toBe(true);
     expect(summary.compiles, "one compile of the whole embed").toBe(1);
     expect(versionReads, "the probe, and the re-check before the compile").toBe(2);
+    expect(guardReads(summary).length, "the ownership read at startup and again at the re-check, both answered 404").toBe(2);
     return;
   }
   expect(summary.puts, "no PUT").toEqual([]);
   expect(summary.compiles, "no compile").toBe(0);
   expect(summary.queries, "the probe and the IsConfigured check only").toEqual([VERSION_QUERY, IS_CONFIGURED_QUERY]);
+  expect(guardReads(summary), "a current deployment makes no ownership read").toEqual([]);
 }
 
 describe("Story 42.2 AC 42.2.5: the real built server against a stateful fake Atelier", () => {
@@ -328,7 +348,11 @@ describe("Story 42.2 decision #54 (DW-673): a marker that cannot be read is unkn
     const summary = summarizeRequests(window);
     expect([...summary.puts].sort(), "every embedded class is PUT").toEqual([...embedded.classes.keys()].sort());
     expect(summary.compiles, "one compile").toBe(1);
-    expect(summary.others.filter((other) => other.includes("/doc/")), "the absence was proven by the document route").toEqual([SETUP_DOC_GET]);
+    expect(summary.others.filter((other) => other.includes("/doc/")), "the absence was proven by the document route, and the ownership read (Story 42.4) found no guard, at startup and at the re-check").toEqual([
+      SETUP_DOC_GET,
+      `GET /api/atelier/v8/${NAMESPACE}/doc/${GUARD_DOC}`,
+      `GET /api/atelier/v8/${NAMESPACE}/doc/${GUARD_DOC}`,
+    ]);
     expect(fake.state.compiledMarker).toBe(embedded.marker);
     expect(fake.state.configured).toBe(true);
     expect(fake.state.mapped).toBe(true);
@@ -481,9 +505,9 @@ describe("Story 42.2 AC 42.2.5: the oracles can go red", () => {
     if (leg === undefined) throw new Error(`no leg ${legId}`);
     const fake = await startFake();
     const target = targetOf(fake);
-    const names = [...embedded.classes.keys()];
+    const names = [...embedded.classes.keys(), ...(leg.guard === true ? [GUARD_DOC] : [])];
     const seedMarker = leg.seedMarker(stampedEmbedded(embedded));
-    await seedInstance(target, embedded, { marker: seedMarker, perturb: leg.perturb });
+    await seedInstance(target, embedded, { marker: seedMarker, perturb: leg.perturb, guard: leg.guard === true });
     const seeded = await snapshotInstance(target, names);
     return { leg, seedMarker, seeded, runs: leg.expect.map(() => ({ stderr, after: seeded })) };
   }
@@ -516,6 +540,74 @@ describe("Story 42.2 AC 42.2.5: the oracles can go red", () => {
 
     expect(verifyLeg(await idleOutcome("older-sequence", warning), embedded, reference).some((problem) => problem.includes("left the classes alone"))).toBe(true);
     expect(verifyLeg(await idleOutcome("foreign-dev", warning + warning), embedded, reference).some((problem) => problem.includes("found 2"))).toBe(true);
+  });
+
+  // -- Story 42.4 (DW-674): the IPM-owned leg and its oracles ---------------------------------
+
+  it("the ipm-owned-older leg seeds an older marker AND the guard document, snapshots both, and expects exactly the ipm outcome", async () => {
+    const leg = LEGS.find((candidate) => candidate.id === "ipm-owned-older");
+
+    expect(leg).toBeDefined();
+    expect(leg?.expect).toEqual(["ipm"]);
+    expect(leg?.guard).toBe(true);
+    const outcome = await idleOutcome("ipm-owned-older", "");
+    expect(Object.keys(outcome.seeded.docs)).toContain(GUARD_DOC);
+    expect(classifyDeployedMarker(outcome.seedMarker, embedded.marker), "the marker it seeds is older, so without the guard it would upgrade").toBe("older");
+  });
+
+  it("every leg but the ipm one seeds no guard document, and a seed removes a guard an earlier leg left (the legs stay independent)", async () => {
+    for (const leg of LEGS) expect(leg.guard === true, leg.id).toBe(leg.id === "ipm-owned-older");
+
+    const fake = await startFake();
+    const target = targetOf(fake);
+    await seedInstance(target, embedded, { marker: embedded.marker, perturb: false, guard: true });
+    expect(fake.state.docs.has(GUARD_DOC)).toBe(true);
+    expect(fake.state.docs.get(GUARD_DOC)?.lines).toEqual([...GUARD_STUB_LINES]);
+
+    await seedInstance(target, embedded, { marker: embedded.marker, perturb: false });
+    expect(fake.state.docs.has(GUARD_DOC), "the next seed removed it").toBe(false);
+
+    await seedInstance(target, embedded, { marker: embedded.marker, perturb: false });
+    expect(fake.state.docs.has(GUARD_DOC), "removing a guard that is not there is not an error").toBe(false);
+  });
+
+  it("verifyLeg: an ipm leg whose server stayed silent is red on the missing warning", async () => {
+    const problems = verifyLeg(await idleOutcome("ipm-owned-older", ""), embedded, reference);
+
+    expect(problems).toEqual([expect.stringContaining("expected exactly one")]);
+  });
+
+  it("verifyLeg: an ipm leg whose warning is another kind, or the re-check's, or lacks the zpm commands, is red on each", async () => {
+    const newerWarning = `[WARN] Bootstrap: leaving the ExecuteMCPv2 classes in 'USER' on h:1 alone: the deployed marker ${JSON.stringify("x")} is newer than this server's ${embedded.marker}.\n`;
+    const problems = verifyLeg(await idleOutcome("ipm-owned-older", newerWarning), embedded, reference);
+
+    for (const remedy of REMEDY.ipm) expect(problems.some((problem) => problem.includes(JSON.stringify(remedy))), remedy).toBe(true);
+    expect(problems.some((problem) => problem.includes(`zpm "install iris-execute-mcp-v2 ${embedded.marker.split("+")[0]}"`))).toBe(true);
+
+    const recheck =
+      `[WARN] Bootstrap: leaving the ExecuteMCPv2 classes in 'USER' on h:1 alone (found just before compiling, so nothing was compiled): the classes were installed by IPM ` +
+      `(class ExecuteMCPv2.InstallGuard is present), and this server never redeploys an IPM installation. The deployed marker is ${JSON.stringify((await idleOutcome("ipm-owned-older", "")).seedMarker)}; ` +
+      `this server's is ${embedded.marker}. run zpm "install iris-execute-mcp-v2 ${embedded.marker.split("+")[0]}" there. run zpm "uninstall iris-execute-mcp-v2" there and restart this server\n`;
+    const rechecked = verifyLeg(await idleOutcome("ipm-owned-older", recheck), embedded, reference);
+    expect(rechecked.some((problem) => problem.includes("the warning is the re-check's"))).toBe(true);
+  });
+
+  it("verifyLeg: an ipm leg whose server redeployed over the IPM installation is red on the instance, whatever it printed", async () => {
+    const leg = LEGS.find((candidate) => candidate.id === "ipm-owned-older");
+    if (leg === undefined) throw new Error("the ipm-owned-older leg is missing");
+    const fake = await startFake();
+    const target = targetOf(fake);
+    const names = [...embedded.classes.keys(), GUARD_DOC];
+    const seedMarker = leg.seedMarker(stampedEmbedded(embedded));
+    await seedInstance(target, embedded, { marker: seedMarker, perturb: true, guard: true });
+    const seeded = await snapshotInstance(target, names);
+    // What a server without the ownership check does to an IPM installation: upload, compile, restamp.
+    await seedInstance(target, embedded, { marker: embedded.marker, perturb: false, guard: true });
+    const after = await snapshotInstance(target, names);
+
+    const problems = verifyLeg({ leg, seedMarker, seeded, runs: [{ stderr: "", after }] }, embedded, reference);
+
+    expect(problems.some((problem) => problem.includes("the instance changed"))).toBe(true);
   });
 
   it("verifyLeg: a seed that did not perturb every document is red, so an unchanged document cannot pass as an upgraded one", async () => {
