@@ -544,7 +544,7 @@ development_status:
   42-2-bootstrap-downgrade-guard: done
   42-3-ci-workflow: done
   42-4-ipm-package-revival: done
-  42-5-release-workflow: ready-for-dev
+  42-5-release-workflow: in-progress
   42-6-tarball-smoke-and-1-0-0-publish: backlog
   42-7-vs-code-extension-publish: backlog
   42-8-claude-code-plugin-and-registry-listings: backlog
