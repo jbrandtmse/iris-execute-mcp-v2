@@ -149,3 +149,6 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-22T20:03:41Z	Story 42.4	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=2042_both_orders result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
 2026-10-22T20:03:41Z	Story 42.4	committed	sha=ff56c62 code_sha=ff56c62 build_sha=8fd093b,b854de9 submodules= ci=success run=39819176668 branch=epic42 pushed=origin/epic42 verified=merge-base+headSha amendments=spec_matrix_row(lead);epics.md:DW-689/690/693_bullets;spine:AD-14,AD-12,AD-29,stack,deferred
 2026-10-22T20:03:42Z	Story 42.4	story_cycle	plan_to_commit_min=598 implement_passes=2 reviews=2 rework=1 first_ci=story models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-22T20:06:51Z	Epic 42	epic_context_compiled	reason=planning_artifact_newer(42.4_spine+DW_bullets) model=claude-opus-5-5 lines=170
+2026-10-22T20:06:51Z	Epic 42	lead_input_requested	route=planner_unreachable(iris-execute-mcp-v2-14_not_in_ListAgents)->asked_the_user_directly items=release_env,npm_first_publish_route,npm_org_2fa,vsce_publisher+ovsx_namespace,devcommunity_account,human_recert_rows blocking_from=42.6
+2026-10-22T20:06:51Z	Story 42.5	stage_spawned	stage=plan spawn_at=2026-10-22T20:06:51Z model=claude-opus-5-5 agent_name=42-5-release-workflow-plan-1 cycle_iteration=1
