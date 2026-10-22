@@ -287,7 +287,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - **Ownership.** Each deployment has one owner. When `ExecuteMCPv2.InstallGuard` is present, IPM installed the classes: bootstrap writes nothing on any path that would write, and logs one warning naming the `zpm` command. A 404 for it is the positive absence; any other failure is unknown, and nothing is written (decision #67).
     - **IPM upgrades.** The preloaded guard runs at IPM's `Initialize/After`, before Reload. It orders the deployed `ExecuteMCPv2.Setup` marker against its own stamped one with the Story 42.2 table, and refuses newer, foreign and unknown inside IPM's transaction. IPM's own version check ignores build metadata and never sees a bootstrap deployment. Installs never use `-dev`.
     - **Concurrency.** Deployment re-checks the marker immediately before each compile.
-  - **Version-embedding artifacts** *(lands in Story 42.5)*. A root `version` script, run by the Changesets version step, regenerates every artifact that embeds the version. The tag commit passes every `:check`.
+  - **Version-embedding artifacts** *(Story 42.5)*. A root `version` script, run by the Changesets version step, regenerates every artifact that embeds the version. The tag commit passes every `:check`. The script is run as `pnpm run version` (`-- --first-release` once), and refuses to run as the `npm version` hook.
 
 ### AD-15 — Backward compatibility is proven mechanically [ADOPTED] (D2, Rule #19, PRD Security release gate)
 
@@ -605,6 +605,10 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - The root release script is the only way to publish.
     - Every listing that carries a version is a release step, or is declared version-less.
     - Nothing publishes before Story 42.2's downgrade guard and Epic 43's SDK migration land.
+    - **The release workflow** *(Story 42.5, wave-8 decisions #75 to #81)*. `release.yml` runs `ci-gate`, `prepare`, `rehearse` and `publish`. Only `publish` holds the `release` environment, `id-token: write` and secrets, and only on a `v*` tag push; the dry run (a `release-dry-run/**` branch or a dispatch) cannot reach it. `prepare` runs every `prepublishOnly` once, armed on a seeded IRIS for Health throwaway, before anything is packed. Packing and uploading run no lifecycle script: pnpm packs and npm 11 uploads with provenance, in the order client-config, shared, admin, data, dev, interop, ops, all, stopping at the first failure.
+    - **npm credentials.** The 1.0.0 publish uses a short-lived granular token, the `release` environment's `NPM_TOKEN` secret; then trusted publishing is bound to `release.yml` and `release` per package, and the token is deleted (decision #75, provisional until the Lead provisions it; the fallback is an interactive 2FA publish by the Lead, recorded as an exception).
+    - **Channels.** npm, then the Marketplace, then Open VSX, then IPM, each enabled by its story (42.7, 42.8); `v1.0.0` is npm only (decision #77). IPM reaches the registry through the packaging repository `jbrandtmse/iris-execute-mcp-v2-ipm`, and the Open Exchange release press is a manual release step (decision #76).
+    - **A bad release** is fixed forward; a harmful version is `npm deprecate`d, never unpublished. Vulnerabilities are reported through GitHub private vulnerability reporting (`SECURITY.md`, no email address published) (decisions #78 and #79).
 
 ### AD-30 — client-config writes only what it owns [ADOPTED] (FR141, AC 41.6.2, Rule #58)
 
@@ -741,17 +745,17 @@ Versions are the tested lockfile versions as of 2026-10-14. The code owns them a
 
 | Name | Version |
 | --- | --- |
-| Node.js (runtime floor) | 22.17.0 (`engines.node >=22.17.0` in every published package, fixed by Story 42.1, wave-8 decision #35: 22.17.0 is where `fs.globSync`, used by `iris_doc_load`, is stable; CI legs 22.x, 24.x and 26.x, the 22 leg at 22.17.0). The VS Code extension declares no `engines.node`; `engines.vscode` governs it |
+| Node.js (runtime floor) | 22.17.0 (`engines.node >=22.17.0` in every published package, fixed by Story 42.1, wave-8 decision #35: 22.17.0 is where `fs.globSync`, used by `iris_doc_load`, is stable; CI legs 22.x, 24.x and 26.x, the 22 leg at 22.17.0). The VS Code extension declares no `engines.node`; `engines.vscode` governs it. The release's `rehearse` and `publish` jobs run 26.0.0, whose bundled npm 11.12.1 meets trusted publishing's 11.5.1 (Story 42.5) |
 | IRIS CI images | `intersystems/iris-community:2026.2` and `:2026.1` (the bootstrap guard, `USER`; Community license keys expire, so the oldest leg uses the oldest tag whose key is still valid for months ahead: 2024.3 to 2025.2 had expired by 2026-10-22; 2025.3 passed the guard in CI run 39749804619 on 2026-10-22, but its key expires 2026-11-13, so Story 42.4 moved the leg to 2026.1, valid to 2027-03-27; every CI image is moved forward before its key expires, DW-686, wave-8 decisions #65 and #66), and `intersystems/irishealth-community:2026.2` (the armed rosters, integration suites, process gates and launcher live files, `HSCUSTOM`), each pinned by its manifest-list digest (Story 42.3, wave-8 decisions #56 and #60). The oldest green tag is the tested floor that Story 42.9 states |
 | TypeScript | 5.9.3 |
 | @modelcontextprotocol/sdk (v1) | Removed in Story 43.1; 1.29.0 is only the provenance of the frozen goldens |
 | @modelcontextprotocol/server (runtime, `@iris-mcp/shared` only) and client (tests: shared, dev, `iris-mcp-all`) | 2.3.1, pinned exactly (Story 43.1). `core` is not a direct dependency. The next bump waits for a release that pins fast-uri 3.1.8 or later (DW-637, Story 42.1) |
 | MCP specification | 2025-11-25 and 2026-07-28, both served over stdio by one process (Story 43.2), with form elicitation for the confirmation gates on both (Story 43.3) |
 | zod | 4.3.6 |
-| pnpm | 9.15.0 (the release path may need 10 or later; see Story 42.5) |
+| pnpm | 9.15.0; the release packs with it and npm uploads, so no pnpm upgrade is needed (Story 42.5) |
 | Turborepo | 2.9.4 |
 | Vitest | 2.1.9 (an end-of-life major, used in dev only) |
-| @changesets/cli | 2.30.0 (the 3.x line carries the OIDC publish fix; see Story 42.5) |
+| @changesets/cli | 2.30.0, versioning only: `changeset publish` is not used, so its OIDC fix does not apply (Story 42.5) |
 | jsonc-parser | 3.3.1 |
 | yaml | 2.9.0 |
 | smol-toml | 1.7.1 |
@@ -832,8 +836,7 @@ ipm/                    # IPM module manifest (generated from Story 42.4)
 - **Server-side source-control integration** (G4). It waits for an Atelier PUT hook probe.
 - **OAuth2 for the MCP servers themselves.** No hosted deployment needs it.
 - **Release operations.** These are decided in the stories named:
-  - the policy for a bad release (fix-forward or `npm deprecate`) and a `SECURITY.md` disclosure channel (Story 42.5);
   - the version policies for the extension and the plugin (Stories 42.7 and 42.8); IPM's is settled, since the module version equals the npm version (AD-14);
-  - the first-publish route under npm trusted publishing (Story 42.5). A staged publish creates a `0.0.0-stage` placeholder, which conflicts with D2, so the choice goes to the Lead.
-- **Development toolchain staleness** (Vitest 2, TypeScript 5.9, Turborepo, pnpm 9). Revisit at the Epic 42 gate. Story 42.5 pins whatever the release path needs.
+  - the bad-release policy, `SECURITY.md` and the first-publish route were decided in Story 42.5 (AD-29; the token route is provisional until the Lead provisions it).
+- **Development toolchain staleness** (Vitest 2, TypeScript 5.9, Turborepo, pnpm 9). Revisit at the Epic 42 gate. Story 42.5 recorded the release path's pins; no upgrade was needed.
 - **Declined on 2026-10-14:** G8, G17, G41, G45 and G47. The reasons are in the research gap register, and reopening one needs a Project Lead decision.
