@@ -2,11 +2,11 @@
 title: 'Story 42.4: IPM Package Revival'
 type: 'feature'
 created: '2026-10-22'
-status: 'in-progress'
-baseline_revision: 'b37cec5d1d509f30ac22f570e92fd738bf9ef703'
+status: 'done'
+baseline_revision: '2ba29b0fb665610dc73352c4acfa4c3d438036ef'
 baseline_commit: 'b37cec5d1d509f30ac22f570e92fd738bf9ef703'
 review_loop_iteration: 0
-followup_review_recommended: true
+followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
   - '{project-root}/_bmad-output/implementation-artifacts/epic-42-context.md'
@@ -36,6 +36,18 @@ deferred:
       to `Setup.Configure` (no application roles, no MatchRoles).
     location: 'scripts/gen-bootstrap.mjs (module.xml Invokes); src/ExecuteMCPv2/Setup.cls Uninstall'
     severity: low
+  - summary: >-
+      Several readers of an audit JSON-lines file still split the raw text and `JSON.parse` every non-blank line, so a read that lands
+      while the server is writing its last entry throws the `SyntaxError: Unterminated string in JSON` that `pollAuditEntries` no
+      longer can. `settledAuditEntries` has four default-suite consumers; the other two sites are one test's reader and one armed-only
+      `afterAll`.
+    evidence: >-
+      The audit writer appends each entry as `${line}\n` in one `appendFile` call (`packages/shared/src/audit.ts`), so a line without its
+      newline is an entry still being written. `settledAuditEntries` polls every 50 ms and parses each line it sees (verification-gap
+      layer, Story 42.4 rework 1); the fix is one shared reader that takes only newline-terminated lines. `completeAuditLines` of
+      `process-gate-helpers.ts` is that reader for TypeScript; an `.mjs` script cannot import it, so it has to move to `scripts/lib`.
+    location: 'scripts/lib/sdk-handler-golden-core.mjs:120-137 (settledAuditEntries; consumers story-43-2-chokepoint-both-eras.test.ts, story-43-2-qa-hand-wire.ts, story-43-3-qa-wire.ts, runHandlerSession); packages/iris-mcp-all/src/__tests__/story-43-4-qa-probe-copy.test.ts (audit reader); packages/iris-mcp-all/src/__tests__/story-39-5-qa-live-gate.test.ts (afterAll)'
+    severity: medium
 ---
 
 <intent-contract>
@@ -362,8 +374,31 @@ deferred:
 - **DW-686:** Given the story commit's CI run, when `bootstrap-guard-oldest` runs, then it runs on `iris-community:2026.1@sha256:c57b65b2…7c2` and passes every leg. The CHANGELOG, the README CI section and the harness comment record 2025.3's green run 39749804619 of 2026-10-22.
 - **Shared instance:** Given each stage's end, when `SELECT ExecuteMCPv2.Setup_GetBootstrapVersion()` runs read-only (`server:"default"`, `namespace:"HSCUSTOM"`), then it returns `0.0.2+1.995fbbb1055d`.
 
-- [ ] [CI] gates (node 24.0.0 and 26.0.0) / test @iris-mcp/all: 48 tests of `ci-ipm-archive.test.ts` ("as a process against a scripted docker") fail at the archive phase with `tar (child): gzip: Cannot exec: No such file or directory` — on Linux, GNU tar execs an external `gzip`, and the tests give the script a PATH that holds only the stand-in `docker` directory (macOS bsdtar has gzip built in, so it passed locally) — https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39798458188 — make the scripted runs pass on Linux and macOS alike (for example: list and read the archive with Node's `zlib`/tar parsing instead of the `tar` binary, or put the real `tar` and `gzip` directories on the child PATH next to the stand-in, keeping a real `docker` unreachable), and pin it so a gzip-less PATH cannot hide the archive phase again.
-- [ ] [CI] flake, gates (node 24.0.0) / test @iris-mcp/all: `story-43-1-qa-dw579-process.test.ts` ("DW-579 on the real process: iris-admin-mcp") fails with `SyntaxError: Unterminated string in JSON` at `process-gate-helpers.ts:950`: `pollAuditEntries` parses the audit file while the server is still writing its last line — same run — parse only newline-terminated lines (leave a trailing partial line for the next poll), with a test that feeds a partial last line.
+- [x] [CI] gates (node 24.0.0 and 26.0.0) / test @iris-mcp/all: 48 tests of `ci-ipm-archive.test.ts` ("as a process against a scripted docker") fail at the archive phase with `tar (child): gzip: Cannot exec: No such file or directory` — on Linux, GNU tar execs an external `gzip`, and the tests give the script a PATH that holds only the stand-in `docker` directory (macOS bsdtar has gzip built in, so it passed locally) — https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39798458188 — make the scripted runs pass on Linux and macOS alike (for example: list and read the archive with Node's `zlib`/tar parsing instead of the `tar` binary, or put the real `tar` and `gzip` directories on the child PATH next to the stand-in, keeping a real `docker` unreachable), and pin it so a gzip-less PATH cannot hide the archive phase again.
+  - Rework 1 scope: work ONLY these two [CI] items and the tests they name. Everything else in this spec is implemented, committed and reviewed; do not re-derive, widen or re-verify it.
+  - Approach, chosen over putting `tar` and `gzip` on the child PATH (that keeps the proof dependent on the host's `tar` flavour and on a `gzip` binary): the archive phase stops spawning `tar`.
+    - `scripts/lib/ipm-archive.mjs` gains `readTgz(buffer)` and `extractEntries(entries, directory)`. `checkArchive` in `scripts/ci-ipm-archive.mjs` calls them in place of `tar tzf` and `tar xzf`, and drops the `node:child_process` import. `archiveProblems` and its signature are unchanged.
+    - `readTgz` gunzips with `node:zlib` and reads the tar in-process, returning `{ name, type, data }` per member in archive order, where `type` is `file`, `directory` or `other`:
+      - a POSIX `ustar\0` header's name is `prefix` + `/` + `name`, with no second slash when the prefix already ends in one (a GNU header's prefix bytes are not a prefix);
+      - a pax `x` header's `path` and `size` records and a GNU `L` long name override it, and pax `g` and GNU `K` headers are consumed and ignored;
+      - numeric fields are octal (leading blanks and NULs skipped, reading stops at the first non-octal byte) or GNU base-256;
+      - typeflag `5`, or a regular file whose name ends in `/`, is a `directory` and its name ends in `/`; hard and symbolic links and other types carry no data;
+      - the header checksum is verified (unsigned or signed sum, the checksum field read as blanks);
+      - reading ends at the first all-zero block or at the end of the data: IPM's `%IPM.Utils.FileBinaryTar` (github.com/intersystems/ipm, `src/cls/IPM/Utils/FileBinaryTar.cls`) writes no end marker, writes each numeric field as octal followed by a blank, and splits a path into a `prefix` and a name of at most 99 characters;
+      - a file that is not gzip, a bad checksum and a member cut short each throw an `Error` that names the problem.
+    - `extractEntries` writes the `file` members and creates the `directory` members under the directory it is given, after collapsing repeated slashes and a leading `./`; a name that is absolute or has a `..` segment throws.
+    - The scripted-run harness's child PATH is the scripted docker's directory ALONE: the `toolsDir` and its `tar` symlink in `ci-ipm-archive.test.ts` go, so a `tar` or `gzip` spawn anywhere in the script fails on every host, not only on Linux.
+  - Tests:
+    - the scripted full run (existing) passes on that PATH on this host and in CI;
+    - a new `packages/iris-mcp-all/src/__tests__/ci-ipm-archive-tgz.test.ts` (default suite) holds `readTgz` and `extractEntries` against the host `tar` as the oracle (Rule #36): for each of the default, `ustar`, `pax`, `gnu` and `v7` formats the host can write, the members equal `tar tzf` and every file's bytes equal what `tar xzf` extracts, over the staged real embed plus, except for `v7`, a path over 100 characters;
+    - the same file holds hand-built edge archives (a pax `path` override, a GNU `L` name, a base-256 size, a pax `g` header, an archive with no end marker, a typeflag-5 name without a slash) and an archive built the way IPM's writer builds one (prefix with a trailing slash, octal fields ending in a blank, no end marker), which `archiveProblems` accepts over the real embed with no host `tar`;
+    - the refusals: not gzip, a bad checksum, a member cut short, a `..` name, an absolute name;
+    - a real IPM archive, `fixtures/ipm-real-package.tgz` (the output of IPM's `package` for a two-class module, captured byte for byte in the plan probes): `readTgz` returns its ten members with the sizes `tar tzvf` printed, agrees with the host `tar` on names and bytes, and its manifest reads through `manifestDeclarations`.
+  - Reproduction (this host's bsdtar has gzip built in, so the failure hides here): `/private/tmp/claude-501/-Users-jbrandt-git-iris-execute-mcp-v2/03eb9a39-2d9e-4087-85ac-363a9bb86d2a/scratchpad/gnu-tar-shim/tar` acts like GNU tar (`-z` needs a `gzip` on PATH, else `tar (child): gzip: Cannot exec`). Before the fix, `PATH="<that directory>:$PATH" UNARMED CI=true pnpm --filter @iris-mcp/all exec vitest run src/__tests__/ci-ipm-archive.test.ts` fails 48 tests, as CI did; after the fix it is green with and without the shim.
+  - Rule 19: write a `mutation:` line for each pinning test you add, in this spec's `## Verification` under a `Rework 1 (CI)` heading (apply the mutation, observe red, revert, tree byte-identical). Candidate mutations: re-adding a `tar` spawn to `checkArchive` (the scripted runs go red on every host, since the child PATH holds no `tar`); `readTgz` ignoring a pax `path` record or a GNU `L` name; skipping the checksum check; `completeAuditLines` returning the partial last line.
+- [x] [CI] flake, gates (node 24.0.0) / test @iris-mcp/all: `story-43-1-qa-dw579-process.test.ts` ("DW-579 on the real process: iris-admin-mcp") fails with `SyntaxError: Unterminated string in JSON` at `process-gate-helpers.ts:950`: `pollAuditEntries` parses the audit file while the server is still writing its last line — same run — parse only newline-terminated lines (leave a trailing partial line for the next poll), with a test that feeds a partial last line.
+  - Approach: `process-gate-helpers.ts` exports `completeAuditLines(text)`, the non-blank lines of `text` that end in a newline, in order; `pollAuditEntries`, `settledAuditCount` and the `readEntries` of `story-43-1-qa-dw579-process.test.ts` read through it. The audit writer appends each entry as `${line}\n` in one `appendFile` call (`packages/shared/src/audit.ts`), so a line without its newline is an entry still being written, and the next poll sees it whole. A newline-terminated line that does not parse still throws (a corrupt line is not skipped). The timeout excerpt is unchanged.
+  - Tests (`process-gate-helpers.test.ts`, the DW-561 `pollAuditEntries` block): a file ending in a partial line resolves with the complete entries and no `SyntaxError`; a poll that waits for 2 entries picks up the one whose last bytes arrive later; a terminated corrupt line still rejects; `completeAuditLines` over an empty text, a text with no newline, blank lines and a trailing partial line.
 
 ### Review Findings
 
@@ -397,6 +432,7 @@ _Code review 2026-10-22 (bmad-code-review, review tier full-opus; layers blind-h
 ## Spec Change Log
 
 - 2026-10-22, lead, at the smoke: CI run https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39798458188 (sha 08d343d) was red; two [CI] items added for rework iteration 1 (wave-8 decision #73).
+- 2026-10-22, implement (rework 1): the first [CI] item takes its first option (an in-process `zlib` and tar reader) rather than putting `tar` and `gzip` on the child PATH, so the proof depends on no host binary; Design Notes step 3 of the `ipm` CI flow is amended to say so, and the approach is written under both [CI] items.
 
 ## Review Triage Log
 
@@ -438,6 +474,31 @@ _Code review 2026-10-22 (bmad-code-review, review tier full-opus; layers blind-h
   - IA8 `[low]` `[patch]` The parity failure listed the first 20 mismatches; the matrix says every mismatch. It now lists all; tested with 68 mismatches.
   - IA9 `[false]` `[reject]` Whether `bootstrap-guard-oldest` passes on 2026.1 is a CI fact. It was also run through the harness on the 2026.1 image in this pass: 10 of 10 legs, `ipm-owned-older` included.
   - IA10 `[false]` `[reject]` The `FORBIDDEN_EXEMPTIONS` entry is outside the intent's text: forced by the existing AD-24 scan, which flags `$System.OBJ.Load` in the proof's session scripts; it is now exact (BH3).
+
+### 2026-10-22 — Review pass
+Rework iteration 1 (follow-up pass; the diff since `2ba29b0`: the two [CI] items). Layers: blind-hunter (BH), edge-case-hunter (EH), verification-gap (VG), intent-alignment (IA); all four delivered.
+- verdicts: 20 findings — high 0, medium 5, low 15, false 0, maybe-false 0
+- findings:
+  - BH1 `[medium]` `[patch]` No real IPM archive was an oracle for `readTgz`: the tests' IPM-writer archive came from the implementer's reading of `FileBinaryTar.cls`, so the first run on a real IPM archive would have been CI. True of the diff. Patched: `fixtures/ipm-real-package.tgz`, a genuine `package` output captured in the plan probes, is pinned by three tests (the ten members and sizes `tar tzvf` printed, agreement with the host `tar`, the manifest read through `manifestDeclarations`); the mutations show it ends with no marker and uses the ustar prefix; and `ci-ipm-archive.mjs --edition community` passed on a fresh real archive (48 members).
+  - BH2 `[low]` `[patch]` `hostFormats()` could silently shrink to the default and ustar formats on a host that does write the others. The guard test now expects all five formats when `tar --version` reports GNU tar or bsdtar (mutation recorded).
+  - BH3 `[medium]` `[patch]` `settledAuditCount` and the `readEntries` of the DW-579 test still counted or parsed a partial last line. The sites in this story's footprint (the helper file and the test the [CI] item names) now read through `completeAuditLines`, with a new `settledAuditCount` test and a mutation. The sites in other stories' files are VG1.
+  - BH4 `[low]` `[patch]` `archiveOf` built its archive with raw host-`tar` spawns and fed `archiveProblems` the `tar tzf` list, not what the script passes. It now uses `tarGz`, `readTgz` and `extractEntries`.
+  - BH5 `[low]` `[reject]` A pax `x`, GNU `L` or `K` header followed by no member is dropped, and a second `x` header replaces the first: no writer the proof meets makes either (IPM writes neither; GNU tar and bsdtar write a meta header only with its member), and a guard adds a branch.
+  - BH6 `[low]` `[patch]` The `extractEntries` JSDoc said the directory "must exist", but the code creates it: corrected. The rest (every extraction failure reads "could not be read") is rejected: the system error (`EEXIST`, `ENOTDIR`, `EACCES`) follows in the message, and an IPM archive holds no file and directory of one name.
+  - BH7 `[low]` `[reject]` The spec's Reproduction line cites a scratchpad shim. The fix edits this build's spec; the red-proof that needs no shim is the recorded `tar`-spawn mutation (52 red on this host).
+  - BH8 `[low]` `[reject]` The replaced `## Auto Run Result` drops the story-level content, and the flags disagree with the prose. The fix edits this build's spec; the dispatch requires a this-pass-only result (Rule 14); the flag follows the follow-up-pass rule.
+  - EH1 `[low]` `[reject]` A typeflag-5 header with a non-zero size would swallow the next members. No tar the proof meets writes one (IPM sets `size = 0` for a directory, GNU tar and bsdtar write 0; rule #54).
+  - EH2 `[low]` `[reject]` `module.xml` as a link member is listed but not extracted, so the manifest comparison is skipped. IPM writes it as a regular file (the real archive shows it), and the skip is unchanged from the `tar xzf` flow.
+  - EH3 `[medium]` `[patch]` Same root cause as BH1 (a real IPM archive is not shown to read): see BH1.
+  - VG1 `[medium]` `[defer]` Other readers of an audit file still parse raw lines: `settledAuditEntries` of `scripts/lib/sdk-handler-golden-core.mjs` (four consumers), the audit reader of `story-43-4-qa-probe-copy.test.ts` and the armed-only `afterAll` of `story-39-5-qa-live-gate.test.ts`. They belong to Epic 39 and 43 files, not to this story, and one shared helper has to live where an `.mjs` script and the TypeScript tests can both import it. Deferred (frontmatter `deferred:`, severity medium); the sites in this story's footprint are BH3's patch.
+  - VG2 `[low]` `[patch]` Pinning tests with no `mutation:` line (the reader's no-end-marker, zero-block, directory, link, signed-checksum, gzip, cut-short, malformed-pax and `K` cases; the extraction order and the `..` names; the unreadable-archive runs; the blank-line case; the format guard). Each mutation was applied, observed red and reverted; the lines are in `## Verification`.
+  - VG3 `[low]` `[reject]` The `pax` and default oracle cases on bsdtar carry only time and attribute records, so the pax `path` and `size` handling rests on the hand-built cases on this host. A true observation, not a defect: the hand-built cases pin both, and the Linux run adds GNU tar's own `L` and `PaxHeaders` members (residual risk).
+  - VG4 `[low]` `[patch]` Other finding: `archiveOf` still spawns host `tar` next to the new `tarGz`. Same root cause as BH4, patched there.
+  - VG5 `[low]` `[patch]` Other finding: the spec's "160 tests with the tgz file" disagrees with a count. Recounted: 164 (130 and 34, with the shim and without), corrected in `## Verification` (rule #51).
+  - IA1 `[medium]` `[patch]` The tar item's expectations live on a real IPM archive through a real `docker cp`, and the diff's tests used host-`tar` and hand-built archives only. Same root cause as BH1: the real fixture and the real-path run. The auditor's own read-only parse of two earlier real archives (43 members, every checksum valid) agrees.
+  - IA2 `[low]` `[reject]` The flake item's tests write the partial last line from the same process and do not reproduce the cross-process race. A partial last line is the only state that race can produce (`audit.ts` appends `${line}\n` in one `appendFile` call), and the same-process write sets that state deterministically.
+  - IA3 `[low]` `[patch]` The test fixture's IPM mode wrote the checksum field as digits and two blanks, where the real archive has digits, a blank and a NUL. It now writes `NNNNNN` and a blank and a NUL.
+  - IA4 `[low]` `[reject]` The earlier `## Auto Run Result` was replaced by this pass's, as the rework dispatch requires (Rule 14); the earlier tally stays in git history.
 
 ## Design Notes
 
@@ -515,7 +576,7 @@ Items 1 and 2 and the first-occurrence `NAMESPACE` replacement are unchanged. Fo
    1. `up` the community 2026.2 image (`--network none`, stage mounted).
    2. In a session: import IPM, read the repository count (0), `load -dev /opt/iris-mcp/stage`, empty `/tmp/iris-mcp-ipm-out`, then `package iris-execute-mcp-v2 -path /tmp/iris-mcp-ipm-out/iris-execute-mcp-v2`.
    3. Read the repository count (0), list the output directory (exactly one `.tgz`), `cp` it out, and `down` the container.
-3. **Check the archive on the host.** `tar tzf`, then extract it. Compare the declarations and the members against the embed.
+3. **Check the archive on the host.** Read the `.tgz` in-process (`readTgz`: `node:zlib` and a tar reader, no `tar` or `gzip` binary) and extract it (`extractEntries`). Compare the declarations and the members against the embed.
 4. **Install on community** (`USER`, archive and fixtures mounted).
    1. Import IPM and read the repository count (0).
    2. Run the guard legs: newer, `dev`, unknown. Each one loads a synthetic Setup with `$System.OBJ.Load(…,"ck")`, then requires `load /opt/iris-mcp/install/<tgz>` to fail with the guard text. It then reads Setup's marker (unchanged), `list` (no module) and the repository count (0), and deletes the synthetic Setup.
@@ -736,11 +797,57 @@ Mutations added in the code review. Each was applied, observed red and reverted,
   - mutation: the CHANGELOG's "parity table of 91 cases" changed to 92 -> red: `story-42-4-qa-parity-table.test.ts` "states in the Story 42.4 CHANGELOG section the 91 cases the table held…".
   - mutation: the first case removed from the fixture -> the same test red ("the fixture holds 90").
 
+Rework 1 (CI). Reproduction first: with the committed (HEAD) `scripts/ci-ipm-archive.mjs` and `ci-ipm-archive.test.ts` and the GNU-tar shim on PATH, `ci-ipm-archive.test.ts` failed 48 of 126 tests at the archive phase with `tar (child): gzip: Cannot exec: No such file or directory`, as CI did. After the fix the same file is green with the shim and without it (130 tests; 164 together with `ci-ipm-archive-tgz.test.ts`, 34 tests, recounted in the review pass). Each mutation below was applied, observed red and reverted from a backup, and the fingerprint of `git status --short`, the diff and every untracked file's hash was identical afterwards:
+- AC 42.4.2 (the archive phase needs no `tar` or `gzip` on any host):
+  - mutation: `checkArchive` of `scripts/ci-ipm-archive.mjs` with a `spawnSync('tar', ['tzf', ...])` call and the `node:child_process` import added back -> `ci-ipm-archive.test.ts` 52 of 130 red on this host (the child PATH holds only the scripted docker): "passes a full run: one archive built on a no-network community container, installed on community and health, every container removed", "reads the archive in-process: the run passes on a PATH that holds the scripted docker alone, where neither tar nor gzip resolves", "issues exactly the verbs load, package and list in the sessions of a full run, and no other", every scripted fault case that reaches the archive phase ("tar could not list the archive: spawnSync tar ENOENT") and the source pin "spawns no process of its own: neither the script nor its helpers import child_process, so no tar or gzip binary is needed on any host".
+- `readTgz` and `extractEntries` (`ci-ipm-archive-tgz.test.ts`, 34 tests; the oracle is the host `tar`, which is bsdtar here):
+  - mutation: the pax `path` record ignored (`name = longName ?? name`) -> "reads the path of a pax x header in bytes, not characters, over the short name of the member" red (1).
+  - mutation: the pax `size` record ignored -> "reads the size of a pax x header over a header size of 0, and applies a pax record to the next member only" red (1).
+  - mutation: the GNU `L` long name not stored -> "reads a GNU L long name over the truncated name of the member that follows" and the oracle case "the gnu format" red (2).
+  - mutation: pax `g` headers not consumed -> "consumes pax g and GNU K headers and ignores them: a global path or size record changes no member" red (1).
+  - mutation: GNU base-256 numbers not read -> "reads a GNU base-256 size, and octal sizes with leading blanks, a trailing blank or NULs, or a stop at the first non-octal byte" red (1).
+  - mutation: the POSIX prefix not joined to the name -> the oracle cases of the default, ustar and pax formats, "joins a POSIX prefix and a name with one slash, and reads the prefix bytes of a GNU or v7 header as no prefix" and "an archive built the way IPM's writer builds one: is read, extracted and accepted by archiveProblems over the real embed, with no host tar" red (5).
+  - mutation: the header checksum not verified -> "refuses a header whose checksum is wrong, naming the member and both sums" red (1).
+  - mutation: the gzip magic check removed -> "refuses a file that is not gzip, an uncompressed tar included, naming it" red (1).
+  - mutation: the `..` segment check of `memberPath` removed -> the three ".. segment" cases of "extractEntries" red; the absolute-path check removed -> the three absolute-path and drive-letter cases red.
+- `completeAuditLines` and `pollAuditEntries` (`process-gate-helpers.test.ts`, 36 tests):
+  - mutation: `completeAuditLines` returning the text split on every newline (the partial last line included) -> 5 red: "reads only newline-terminated lines: a file that ends in a partial line resolves with the complete entries and no SyntaxError", "picks up an entry whose last bytes arrive later: a poll for 2 entries waits for the newline of the second", "quotes the raw start of the file, a partial last line included, when the entries never appear" and the two `completeAuditLines` cases.
+  - mutation: `pollAuditEntries` reading the raw text instead of `completeAuditLines` -> the first three of those red (3).
+  - mutation: `pollAuditEntries` skipping a newline-terminated line that does not parse -> "still throws on a newline-terminated line that does not parse: a corrupt line is never skipped" red (1).
+
+Rework 1 (CI), mutations closed in the review pass (Rule 19). Each was applied by a scratch harness outside the repository, which restored every touched file and compared its sha-256 with the one before; each run ended byte-identical, with `git status --short` unchanged:
+- A real IPM archive (`fixtures/ipm-real-package.tgz`, 1085 bytes, sha-256 `354ed5c0...f152dd8`, `package` of a probe module on `iris-community:2026.2`, captured byte for byte in the plan probes): `readTgz` agrees with `tar tzvf` on its ten members and sizes. It ends with no end marker, directories are typeflag 5 with no trailing slash, and nested names use the ustar prefix, as the mutations below show.
+  - mutation: `readTgz` requiring an end marker -> "reads an archive that has no end marker as it reads one that has", "an archive built the way IPM's writer builds one: is read, extracted and accepted by archiveProblems…" and all three "readTgz over a real IPM package archive" cases red (5).
+  - mutation: the ustar prefix never joined (`if (false && block.subarray(257, 263)…`) -> the oracle cases of the default, ustar and pax formats, "joins a POSIX prefix and a name with one slash…", the IPM-writer case and two of the real-archive cases red (7).
+  - mutation: a typeflag-5 name left without its trailing slash -> "names a typeflag-5 member with no slash as a directory…" and the real archive's "reads the ten members IPM wrote…" red (2).
+- Reader rules:
+  - mutation: reading continues past the first all-zero block -> "stops at the first all-zero block: nothing after it is a member" red (1).
+  - mutation: a link's size field read as data (`isLink = false`) -> "reports links and other types as `other` with no data…" red (1).
+  - mutation: only the unsigned checksum accepted -> "accepts a checksum stored as the sum of signed bytes…" red (1).
+  - mutation: a GNU `K` header not consumed -> "consumes pax g and GNU K headers and ignores them…" red (1).
+  - mutation: an octal field read past its first non-octal digit -> "reads a GNU base-256 size, and octal sizes with leading blanks, a trailing blank or NULs, or a stop at the first non-octal byte" red (1).
+- Refusals:
+  - mutation: a truncated gzip stream flushed instead of refused (`finishFlush: Z_SYNC_FLUSH`) -> "refuses a gzip stream that is cut short or damaged" red (1) and, in `ci-ipm-archive.test.ts`, "an archive that cannot be read ends the run in the archive phase > a gzip stream cut in the middle" red (1).
+  - mutation: the member data bounds check removed -> "refuses a member whose data is cut short, and a header that is cut short" red (1).
+  - mutation: the pax record length check removed -> "refuses a pax header with a malformed record" red (1).
+  - mutation: `checkArchive` rethrowing the reader's `Error` (no `PhaseFailure`) -> both cases of "an archive that cannot be read ends the run in the archive phase" red (2).
+- `extractEntries`:
+  - mutation: each file written while its name is validated -> the six refusal cases "refuses %s, and writes nothing, not even the members before it" red (6).
+  - mutation: any name containing two dots refused -> "extracts a member whose name merely starts with two dots" red (1).
+- The audit readers:
+  - mutation: `completeAuditLines` keeping blank lines -> "skips blank lines, whitespace-only ones included" red (1).
+  - mutation: `settledAuditCount` counting every non-blank line again -> "settledAuditCount counts only newline-terminated lines: a partial last line is no entry until its newline lands" red (1).
+  - Not pinned by a deterministic test: `readEntries` of `story-43-1-qa-dw579-process.test.ts` reading through `completeAuditLines`. The helper's own tests pin the rule, and the reader's race window (after the poll and the settled count) is narrower than the poll's.
+- The host formats:
+  - mutation: the `pax` format made unwritable on the host (`--format=nosuch`) -> "the host tar can write at least the default and the ustar formats… and every format when it is GNU tar or bsdtar" red (1).
+
 Real-path runs (code review, throwaways through the harness only, no image pulled):
 - `ci-ipm-archive.mjs --edition community` exited 0, with the archive phase holding `CheckStatus` in IPM 0.10.5's re-serialized manifest and parity 94/94. Containers: `iris-mcp-throwaway-aa249d8aa8a6` (build) and `-f21fcfaf7d26` (install), both removed.
 - `ci-ipm-archive.mjs --edition health` exited 0. Containers: `-2408bdf2d4af` and `-0622bef00cdd`, both removed.
 - An uninstall probe of the README hand-back on `iris-community:2026.2` (`-113b7732f594`, removed): a non-dev `load` of the packaged `.tgz` left 36 `ExecuteMCPv2.*` class definitions, the guard included; `zpm "uninstall iris-execute-mcp-v2"` then left 0, with no guard and no `Setup`.
 - Shared HSCUSTOM: `SELECT ExecuteMCPv2.Setup_GetBootstrapVersion()` read `0.0.2+1.995fbbb1055d`.
+
+Real-path run (rework 1, review pass; a throwaway through the harness only, no image pulled): `node scripts/ci-ipm-archive.mjs --edition community` exited 0 with the in-process reader on the archive IPM's `package` wrote: 48 members, the 35 classes and the guard equal to the embed, the manifest equal to `ipm/module.xml`, parity 94/94. Containers `iris-mcp-throwaway-4e93ae203ab9` (build) and `-f0d27fec44d5` (install), both removed. `--edition health` was not re-run: the archive phase runs once per run, on the community build, and the health install does not read the archive on the host.
 
 Shared surfaces (QA): the parity table now holds 91 cases (`bootstrap-version.test.ts`, `ci-ipm-archive.test.ts`'s scripted table, `ci-ipm-archive.mjs`'s parity run); the shared `src/` mtime moved, so a local run of the scripted-run block or the live gates needs the shared dist at least as new (`touch packages/shared/dist/bootstrap.js` after a checkout, since `tsc` does not re-emit an unchanged file).
 
@@ -779,30 +886,33 @@ Shared surfaces (QA): the parity table now holds 91 cases (`bootstrap-version.te
 Status: done
 Blocking condition: none
 
-**Summary.** Story 42.4 makes the IPM package real and proves it offline.
-- `ipm/module.xml` is now generated by `scripts/gen-bootstrap.mjs` from `classes[]` plus one IPM-only, preloaded class, `ExecuteMCPv2.InstallGuard` (source `ipm/preload/ExecuteMCPv2/InstallGuard.cls`, outside `src/`). The guard orders the deployed `Setup` marker against its own at IPM's `Initialize/After` and refuses a newer, `dev` or unreadable one.
-- The bootstrap treats the guard document's presence as IPM ownership: on `stale`, `unconfigured` and `missing` it writes nothing and warns once (also on the re-check before a compile). `BootstrapResult` gains `ipmOwned`; a 404 leaves the result deep-equal to before.
-- `MANUAL_INSTRUCTIONS` item 3 names `zpm "install iris-execute-mcp-v2 <semver>"`, its prerequisites and the registry command.
-- The new `ipm` CI job (`scripts/ci-ipm-archive.mjs`, `scripts/lib/ipm-archive.mjs`) builds one archive from the stamped embed on a `--network none` container and installs it on fresh `--network none` containers of both editions. The harness gained `up --network none`, `--mount`, `session` and `cp`.
-- The oldest CI image is `iris-community:2026.1` (DW-686).
-- `BOOTSTRAP_VERSION` moved from `0.0.2+1.995fbbb1055d` to `0.0.2+2.244fe8623c76` (sequence 2; the guard joins the hash).
+**Rework 1 (CI), this pass only.** Both [CI] items of CI run 39798458188 (sha 08d343d) are closed. `BOOTSTRAP_VERSION` did not move (`0.0.2+2.244fe8623c76`); `pnpm gen:bootstrap` printed "Unchanged" for the embed and the manifest. Nothing else in the story was touched.
 
-**Files changed.** 31 files (30 plus this spec, counted from `git diff --stat` against the baseline, untracked files included): the generator, the embed, the sequence state and the manifest; `InstallGuard.cls`; `bootstrap.ts`; the harness, the proof script and its helpers; `ci-checks.mjs` and `ci.yml`; the README, CHANGELOG and changeset; the new and changed tests and fixtures (`ipm-manifest`, `ci-ipm-archive`, `story-42-4-doc-claims`, the parity table, and the bootstrap, generator, harness, workflow, scripted-docker and guard-leg tests).
+**Summary.**
+- **Root cause, [CI] 1 (48 scripted-run tests red).** `scripts/ci-ipm-archive.mjs` listed and extracted the archive by spawning `tar tzf` and `tar xzf`. GNU tar execs an external `gzip` for `-z`; the scripted-run harness gave the script a PATH of the scripted docker's directory plus a directory holding only `tar`, so on a Linux runner `gzip` was not found. This host's bsdtar has gzip built in, so the failure was invisible here.
+- **Fix, [CI] 1.** The archive phase spawns nothing: `scripts/lib/ipm-archive.mjs` gains `readTgz` (`node:zlib` gunzip and an in-process tar reader: ustar prefix, pax `x`/`g`, GNU `L`/`K`, octal and base-256 numbers, checksum, no end marker) and `extractEntries` (a name that is absolute or has a `..` segment throws before anything is written). `checkArchive` calls them, and the `node:child_process` import is gone. The scripted-run harness's child PATH is now the scripted docker's directory alone, so a `tar` or `gzip` spawn anywhere in the script fails on every host.
+- **Independent of the host's tar flavour.** The reader uses no `tar` binary at all, and the scripted runs now pass with neither `tar` nor `gzip` on the PATH. `readTgz` is checked against the host `tar` (default, ustar, pax, gnu and v7 formats, paths over 100 characters), against hand-built pax, GNU and base-256 archives, and against a real IPM `package` archive captured in the plan probes (`fixtures/ipm-real-package.tgz`). It also read a fresh real archive in `ci-ipm-archive.mjs --edition community` (48 members, exit 0).
+- **Root cause, [CI] 2 (flake).** `pollAuditEntries` parsed every non-blank line of the audit file, including a last line the server was still writing (each entry is one `appendFile` of `${line}\n`). `process-gate-helpers.ts` exports `completeAuditLines`, which keeps only newline-terminated lines; `pollAuditEntries`, `settledAuditCount` and the `readEntries` of `story-43-1-qa-dw579-process.test.ts` read through it, and a terminated line that does not parse still throws.
 
-**Review.** Four layers, 35 findings: high 0, medium 14, low 15, false 6, maybe-false 0 (mechanically recounted from the triage log). Patched in this pass, grouped by root cause: seven medium groups and six low ones. Nothing deferred; no new `deferred:` item. Rejected with a recorded reason: BH5, BH7, BH8, EH2, EH6, IA2 (low) and EH9, IA1, IA3, IA4, IA9, IA10 (false).
-- One patch extends the spec's Task text: the Check invoke carries `CheckStatus="true"` (IPM 0.10.0 to 0.10.4 ignore a refusal without it; source-verified, run on 0.10.5 only).
-- One matrix row is imprecise: "no PUT" on the re-check before a compile cannot hold for `stale` and `missing` (IA5). The implementation writes nothing further; the lead should amend the row.
+**Files changed.**
+- `scripts/lib/ipm-archive.mjs`: `readTgz`, `extractEntries`.
+- `scripts/ci-ipm-archive.mjs`: `checkArchive` reads in-process; no `child_process`.
+- `packages/iris-mcp-all/src/__tests__/ci-ipm-archive.test.ts`: the child PATH, 4 new cases (130 tests), `archiveOf` on `tarGz` and `readTgz`.
+- `packages/iris-mcp-all/src/__tests__/ci-ipm-archive-tgz.test.ts` (new, 34 tests) and `ipm-archive-fixture.ts` (new: `realEmbed`, `filesUnder`, `tarGz`).
+- `packages/iris-mcp-all/src/__tests__/fixtures/ipm-real-package.tgz` (new, 1085 bytes, a real IPM `package` output).
+- `packages/iris-mcp-all/src/__tests__/process-gate-helpers.ts`, `process-gate-helpers.test.ts` (36 tests) and `story-43-1-qa-dw579-process.test.ts`: `completeAuditLines` and its readers.
+- This spec.
 
-**Follow-up review recommendation: true.** Seven medium entries were patched. Unverified risks: the `CheckStatus` effect on IPM 0.10.0 to 0.10.4 (read from IPM source, not run); the signal-during-start test depends on a scripted-docker signal on the first readiness session.
+**Review.** Four layers, all delivered: 20 findings — high 0, medium 5, low 15, false 0, maybe-false 0 (mechanically recounted from the triage log). Patched, grouped by root cause: 11 findings (medium 4, low 7): the real IPM archive fixture and run (BH1, EH3, IA1), the audit readers in this story's footprint (BH3), the format guard (BH2), `archiveOf` (BH4, VG4), the `extractEntries` JSDoc (BH6), the missing mutation lines (VG2), the test count (VG5) and the fixture's checksum bytes (IA3). Deferred: 1 (medium, VG1: the audit readers of Epic 39 and 43 files). Rejected with a recorded reason: BH5, BH7, BH8, EH1, EH2, VG3, IA2, IA4 (all low).
+
+**Follow-up review recommendation: false.** A follow-up pass; none of the patched entries was `high` (patched by verdict: high 0, medium 4, low 7), so the work has converged.
 
 **Verification.**
-- `(loop)`, on the final tree: syntax checks; `pnpm gen:bootstrap` twice ("Unchanged" for the embed and the manifest on both runs, nothing else changed); the three shared suites (269 tests); the 12 `@iris-mcp/all` story files, `document-write-paths` included (661 tests); shared lint clean. `@iris-mcp/all` has no `lint` script (pre-existing), so its changed test files were linted ad hoc: clean.
-- `(once)`, after the last patch: shared 2554, client-config 1015, admin 506, data 163, dev 1490, interop 751, ops 350, `@iris-mcp/all` shard 1 2773 and shard 2 2029 tests, all green; root lint, type-check and the launcher type-check green; the seven root checks OK (governance baseline unchanged); `ci-package-smoke` exit 0; spine lint 0 findings.
-- Real throwaway runs on the final tree, all through the harness: `ci-ipm-archive.mjs --edition community` and `--edition health` exit 0 (guard refusals on newer, `dev` and marker-less `Setup`; older upgrade; 36 classes compiled; REST app with no `MatchRoles`, `%ALL` mapped, GET 200; `%IPM_Repo.Definition` 0 rows at every read; parity 94 of 94 (73 at implement; QA grew the table to 91 cases plus 3 runtime cases) on each edition). `pnpm live:bootstrap-guard`: 10 of 10 legs, `ipm-owned-older` included. The guard gate on the `iris-community:2026.1` digest: 10 of 10 legs.
-- Shared HSCUSTOM: `SELECT ExecuteMCPv2.Setup_GetBootstrapVersion()` read `0.0.2+1.995fbbb1055d` before and after; nothing else touched it.
+- Reproduction: the committed (HEAD) script and test with a GNU-tar-like shim first on PATH failed 48 of 126 tests with `tar (child): gzip: Cannot exec: No such file or directory`, as CI did. After the fix `ci-ipm-archive.test.ts` and `ci-ipm-archive-tgz.test.ts` are green with the shim and without it (164 tests).
+- `(loop)`, on the final tree: syntax checks; `pnpm gen:bootstrap` ("Unchanged" for the embed and the manifest); the three shared suites (290 tests); the 15 `@iris-mcp/all` story, helper and flake files (770 tests). The changed TypeScript files lint clean apart from pre-existing warnings in the DW-579 test, which this pass did not touch (`@iris-mcp/all` has no `lint` or `type-check` script).
+- `(once)`, after the last patch: `@iris-mcp/all` shard 1 of 2 (100 files, 2803 passed, 359 skipped) and shard 2 of 2 (100 files, 2076 passed, 330 skipped), all unarmed, 0 failed; the root checks (`gen:governance-baseline:check`, `gen:skills:check`, `gen:pack:check`, `validate:prompts`, `check:provenance`, `gen:tools-list-snapshot:check`, `check-epics-sync`) all OK. The other packages and the shared `src/` are unchanged and were not re-run.
+- Mutations: 30 recorded under "Rework 1 (CI)" in `## Verification` (13 by the implement stage, 17 closed in the review pass), each applied, observed red and reverted with the touched files compared by sha-256.
+- Real path: `node scripts/ci-ipm-archive.mjs --edition community` exited 0 (build, archive, guard refusals, older upgrade, 36 classes, REST app, parity 94/94). Containers `iris-mcp-throwaway-4e93ae203ab9` (build) and `-f0d27fec44d5` (install), both removed through the harness; no image pulled.
+- The shared HSCUSTOM IRIS was not touched by this pass; no push was made.
 
-**Containers (all started and removed through `scripts/throwaway-iris.mjs`; no image pulled).**
-- Implement-stage exploratory and final runs: `iris-mcp-throwaway-d84377cd1776`, `-e01af370a076`, `-a17d0cebbd4a`, `-8f92a5dd17bc`, `-5906f3cde328`, `-32a19d14877e`, `-6733d2c496f3`, `-c576a8ece1fb`, `-15e10461e474`.
-- Review pass: `-2695d820b8f5` (uninstall probe, `down`); `-a54b0e4373a1` (a 2026.1 guard run that failed on a stale dist, removed by `run`); `-bad1f183b9d6` (the 2026.1 guard run); `-7d930f148a03`, `-41cfa4fd63b4` (community proof); `-d3c967cb6d1e`, `-2cd78f8c9aa7` (health proof); `-2b3ae58ce553` (`live:bootstrap-guard`).
-
-Residual risks: the real IPM `Check` on older IPM versions; the lead's first CI run of the `ipm` job and the six red branches of the lead checklist remain the proof on the real runner.
+**Residual risk.** The Linux CI `gates` run is the first run of `ci-ipm-archive-tgz.test.ts` against GNU tar's own output (`L` long names, `PaxHeaders` members, the five `--format` spellings); the hand-built archives and the format guard are what hold until then. The live `ipm` job has not run on a Linux runner; its archive phase no longer needs `tar` or `gzip`.

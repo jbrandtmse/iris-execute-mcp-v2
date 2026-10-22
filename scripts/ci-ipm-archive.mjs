@@ -16,9 +16,10 @@
 //      verb: it must hold 0 rows each time.
 //   3. BUILD. The embed is staged (`stageModule`: `module.xml`, `src/cls/**`, `preload/src/cls/ExecuteMCPv2/InstallGuard.cls`) and
 //      mounted read-only into a fresh `iris-community:2026.2` container (`USER`). There IPM runs `load -dev` and then `package`;
-//      exactly one `.tgz` must appear in the emptied output directory, and it is copied out. The archive is read on the host: the
-//      member set must equal the embed (35 classes, the guard, no test or fixture member), each member must equal the embed after
-//      LF and trailing-whitespace normalization, and the manifest it carries must declare what `ipm/module.xml` declares.
+//      exactly one `.tgz` must appear in the emptied output directory, and it is copied out. The archive is read on the host, in-process
+//      (`readTgz` and `extractEntries` of `scripts/lib/ipm-archive.mjs`: `node:zlib` and a tar reader, so no `tar` or `gzip` binary is
+//      spawned): the member set must equal the embed (35 classes, the guard, no test or fixture member), each member must equal the
+//      embed after LF and trailing-whitespace normalization, and the manifest it carries must declare what `ipm/module.xml` declares.
 //   4. INSTALL, community (`USER`): on a fresh container, three synthetic `ExecuteMCPv2.Setup` classes (marker newer, `dev`,
 //      no `BOOTSTRAPVERSION`) are each loaded and the archive's `load` must FAIL with the install guard's text, leaving Setup's
 //      marker as it was, no module in `list`, and no repository row; a synthetic older Setup then installs. The checks of the I/O
@@ -47,7 +48,6 @@
 //   dependencies as options.
 
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, copyFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -75,6 +75,7 @@ import {
   archiveProblems,
   deleteSetupScript,
   embedProblems,
+  extractEntries,
   importIpmScript,
   installChecksScript,
   ipmCommandScript,
@@ -89,6 +90,7 @@ import {
   outputDirectoryScript,
   parityProblems,
   parityScript,
+  readTgz,
   seedMarkers,
   setupStateScript,
   stageModule,
@@ -279,11 +281,14 @@ export function startRun(options = {}) {
 
   function checkArchive(embed, directories) {
     const phase = 'archive';
-    const listing = spawnSync('tar', ['tzf', directories.archive], { encoding: 'utf8' });
-    need(listing.status === 0, phase, undefined, `tar could not list the archive: ${listing.stderr ?? listing.error?.message}`);
-    const members = listing.stdout.split('\n').filter((line) => line !== '');
-    const extracted = spawnSync('tar', ['xzf', directories.archive, '-C', directories.extract], { encoding: 'utf8' });
-    need(extracted.status === 0, phase, undefined, `tar could not extract the archive: ${extracted.stderr ?? extracted.error?.message}`);
+    let entries;
+    try {
+      entries = readTgz(readFileSync(directories.archive));
+      extractEntries(entries, directories.extract);
+    } catch (error) {
+      throw new PhaseFailure(phase, `the archive could not be read: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const members = entries.map((entry) => entry.name);
     const problems = archiveProblems(members, directories.extract, embed);
     const archivedManifest = path.join(directories.extract, 'module.xml');
     if (existsSync(archivedManifest)) {

@@ -12,6 +12,7 @@ import {
   allText,
   atelierScalar,
   batchUnits,
+  completeAuditLines,
   distEntry,
   firstText,
   fixtureDocumentNames,
@@ -352,12 +353,81 @@ describe("DW-561: pollAuditEntries", () => {
     );
   });
 
+  it("reads only newline-terminated lines: a file that ends in a partial line resolves with the complete entries and no SyntaxError", async () => {
+    const file = path.join(scratch, "audit-partial.jsonl");
+    writeFileSync(file, line({ tool: "t1", n: 1 }) + line({ tool: "t1", n: 2 }) + '{"tool":"t1","n":3,"te');
+    const options = { intervalMs: 5, timeoutMs: 500, excerpt: 100 };
+
+    await expect(pollAuditEntries(file, { ...options, tool: "t1", count: 2 })).resolves.toEqual([
+      { tool: "t1", n: 1 },
+      { tool: "t1", n: 2 },
+    ]);
+    await expect(pollAuditEntries(file, { ...options, count: 2, returnAll: true })).resolves.toHaveLength(2);
+  });
+
+  it("picks up an entry whose last bytes arrive later: a poll for 2 entries waits for the newline of the second", async () => {
+    const file = path.join(scratch, "audit-arriving.jsonl");
+    const second = JSON.stringify({ tool: "t1", n: 2, text: "written in two appends" });
+    writeFileSync(file, line({ tool: "t1", n: 1 }) + second.slice(0, 25));
+    const pending = pollAuditEntries(file, { tool: "t1", count: 2, intervalMs: 5, timeoutMs: 2000, excerpt: 100 });
+    setTimeout(() => appendFileSync(file, `${second.slice(25)}\n`), 60);
+
+    await expect(pending).resolves.toEqual([
+      { tool: "t1", n: 1 },
+      { tool: "t1", n: 2, text: "written in two appends" },
+    ]);
+  });
+
+  it("still throws on a newline-terminated line that does not parse: a corrupt line is never skipped", async () => {
+    const file = path.join(scratch, "audit-corrupt.jsonl");
+    writeFileSync(file, `${line({ tool: "t1", n: 1 })}{"tool":"t1",\n`);
+
+    await expect(pollAuditEntries(file, { tool: "t1", count: 2, intervalMs: 5, timeoutMs: 200, excerpt: 100 })).rejects.toThrow(SyntaxError);
+  });
+
+  it("quotes the raw start of the file, a partial last line included, when the entries never appear", async () => {
+    const file = path.join(scratch, "audit-partial-timeout.jsonl");
+    writeFileSync(file, `${line({ tool: "t1", n: 1 })}{"tool":"t1","n":2`);
+
+    await expect(pollAuditEntries(file, { tool: "t1", count: 2, intervalMs: 5, timeoutMs: 60, excerpt: 60 })).rejects.toThrow(
+      `fewer than 2 t1 entries in ${file}: {"tool":"t1","n":1}\n{"tool":"t1","n":2`,
+    );
+  });
+
   it("settledAuditCount counts an entry that lands after the first read, and is 0 for no file", async () => {
     const file = path.join(scratch, "audit-d.jsonl");
     writeFileSync(file, line({ tool: "t1", n: 1 }));
     setTimeout(() => appendFileSync(file, line({ tool: "t1", n: 2 })), 15);
     await expect(settledAuditCount(file, 20, 3)).resolves.toBe(2);
     await expect(settledAuditCount(path.join(scratch, "no-such-d.jsonl"), 5, 2)).resolves.toBe(0);
+  });
+
+  it("settledAuditCount counts only newline-terminated lines: a partial last line is no entry until its newline lands", async () => {
+    const partial = path.join(scratch, "audit-e.jsonl");
+    writeFileSync(partial, line({ tool: "t1", n: 1 }) + '{"tool":"t1","n":2');
+    await expect(settledAuditCount(partial, 5, 2)).resolves.toBe(1);
+
+    const arriving = path.join(scratch, "audit-f.jsonl");
+    writeFileSync(arriving, line({ tool: "t1", n: 1 }) + '{"tool":"t1","n":2,"te');
+    setTimeout(() => appendFileSync(arriving, 'xt":"x"}\n'), 15);
+    await expect(settledAuditCount(arriving, 20, 3)).resolves.toBe(2);
+  });
+});
+
+describe("DW-561: completeAuditLines", () => {
+  it("is empty for an empty text and for a text with no newline: a lone partial line is an entry still being written", () => {
+    expect(completeAuditLines("")).toEqual([]);
+    expect(completeAuditLines('{"a":1}')).toEqual([]);
+  });
+
+  it("returns the newline-terminated lines in order and leaves a trailing partial line out", () => {
+    expect(completeAuditLines('{"a":1}\n{"b":2}\n')).toEqual(['{"a":1}', '{"b":2}']);
+    expect(completeAuditLines('{"a":1}\n{"b":2}\n{"c":')).toEqual(['{"a":1}', '{"b":2}']);
+  });
+
+  it("skips blank lines, whitespace-only ones included", () => {
+    expect(completeAuditLines('\n\n  \n{"a":1}\n\n\t\n')).toEqual(['{"a":1}']);
+    expect(completeAuditLines("\n")).toEqual([]);
   });
 });
 

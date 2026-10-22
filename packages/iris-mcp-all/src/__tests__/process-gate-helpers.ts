@@ -937,17 +937,29 @@ export interface AuditPollOptions {
 }
 
 /**
+ * The non-blank lines of the audit file text `text` that end in a newline, in order. The audit writer appends each entry as
+ * `${line}\n` in one `appendFile` call (`packages/shared/src/audit.ts`), so a last line without its newline is an entry still being
+ * written: it is left out, and a later read sees it whole.
+ */
+export function completeAuditLines(text: string): string[] {
+  const end = text.lastIndexOf("\n");
+  if (end === -1) return [];
+  return text
+    .slice(0, end)
+    .split("\n")
+    .filter((line) => line.trim() !== "");
+}
+
+/**
  * Read the JSON-lines audit file `file` until it holds the entries `options` asks for, and return them.
- * Throws, quoting the start of the file, when they have not appeared within `timeoutMs`.
+ * Only newline-terminated lines are read (see {@link completeAuditLines}); a terminated line that does not parse still throws.
+ * Throws, quoting the start of the file, when the entries have not appeared within `timeoutMs`.
  */
 export async function pollAuditEntries(file: string, options: AuditPollOptions): Promise<AuditEntry[]> {
   const wanted = options.count ?? 1;
   const deadline = Date.now() + options.timeoutMs;
   const read = (): AuditEntry[] =>
-    (existsSync(file) ? readFileSync(file, "utf8") : "")
-      .split("\n")
-      .filter((line) => line.trim() !== "")
-      .map((line) => JSON.parse(line) as AuditEntry);
+    completeAuditLines(existsSync(file) ? readFileSync(file, "utf8") : "").map((line) => JSON.parse(line) as AuditEntry);
   const ofTool = (entry: AuditEntry): boolean => options.tool === undefined || entry["tool"] === options.tool;
   for (;;) {
     const entries = read();
@@ -967,11 +979,11 @@ export async function pollAuditEntries(file: string, options: AuditPollOptions):
 /**
  * The number of entries the JSON-lines audit file `file` holds once no entry has landed for `stableReads` reads
  * `intervalMs` apart (0 when there is no file). The server writes an entry after it has sent the reply, so a test
- * that asserts on the entries its own calls add takes this count first and then reads only what follows it.
+ * that asserts on the entries its own calls add takes this count first and then reads only what follows it. An entry
+ * counts once its newline has landed (see {@link completeAuditLines}), as it does for {@link pollAuditEntries}.
  */
 export async function settledAuditCount(file: string, intervalMs = 50, stableReads = 3): Promise<number> {
-  const count = (): number =>
-    (existsSync(file) ? readFileSync(file, "utf8") : "").split("\n").filter((line) => line.trim() !== "").length;
+  const count = (): number => completeAuditLines(existsSync(file) ? readFileSync(file, "utf8") : "").length;
   let last = count();
   for (let stable = 0; stable < stableReads; ) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));

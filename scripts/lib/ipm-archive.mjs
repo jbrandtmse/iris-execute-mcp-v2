@@ -14,10 +14,15 @@
 // archive), `package` and `list`. None of them uploads anything: `package` writes a local archive. There is no `install`, `update`,
 // `publish`, `repo` or `enable` anywhere in this file (AC 42.4.4); `ci-ipm-archive.test.ts` holds that set equal to the verbs of
 // the scripts a full run feeds to the sessions.
+//
+// READING THE ARCHIVE. `readTgz` and `extractEntries` read a `.tgz` in-process (`node:zlib` and a tar reader), so the proof depends on
+// no `tar` or `gzip` binary and on no host's flavour of either.
 
+import { Buffer } from 'node:buffer';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 
 import { CONTAINER_WEB_PORT, THROWAWAY_PASSWORD, THROWAWAY_USERNAME } from '../throwaway-iris.mjs';
 
@@ -257,7 +262,7 @@ export function manifestProblems(declared, archived) {
 // -- The archive ------------------------------------------------------------------------
 
 /**
- * What is wrong with an archive, given its member list (as `tar tzf` lists it) and the directory it was extracted to: it must carry
+ * What is wrong with an archive, given its member names (as {@link readTgz} returns them) and the directory it was extracted to: it must carry
  * `module.xml`, one `src/cls/<path>.cls` member per embedded class and no other under `src/cls/`, the preloaded guard, and no test
  * or fixture member; and every class member must equal the embed after LF and trailing-whitespace normalization. A repeated slash
  * in a member name (IPM joins `src/` and `cls` with a doubled one) is collapsed first.
@@ -303,6 +308,206 @@ export function archiveProblems(members, extractedDir, embed, options = {}) {
   }
   if (!names.some((member) => member.startsWith('preload/'))) problems.push('the archive carries no preload member: the guard would not run.');
   return problems;
+}
+
+// -- Reading a .tgz without a tar binary ---------------------------------------------------
+
+const TAR_BLOCK = 512;
+const GZIP_MAGIC = [0x1f, 0x8b];
+/** The magic of a POSIX ustar header (`ustar` and a NUL); a GNU header's is `ustar` and two blanks, and its prefix bytes are no prefix. */
+const USTAR_MAGIC = Buffer.from('ustar\0', 'latin1');
+
+/** The text of a NUL-terminated header field, as UTF-8. */
+function tarString(bytes, offset, length) {
+  const field = bytes.subarray(offset, offset + length);
+  const end = field.indexOf(0);
+  return field.subarray(0, end === -1 ? field.length : end).toString('utf8');
+}
+
+/**
+ * A numeric header field: octal (leading blanks and NULs skipped, reading stops at the first byte that is not an octal digit, so a
+ * field that ends in a blank or a NUL reads the same) or GNU base-256 (the first byte has its top bit set; the rest is a big-endian
+ * number).
+ */
+function tarNumber(bytes, offset, length, what) {
+  const field = bytes.subarray(offset, offset + length);
+  if ((field[0] & 0x80) !== 0) {
+    if ((field[0] & 0x40) !== 0) throw new Error(`the tar ${what} is a negative base-256 number.`);
+    let value = BigInt(field[0] & 0x3f);
+    for (let index = 1; index < field.length; index += 1) value = (value << 8n) | BigInt(field[index]);
+    if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error(`the tar ${what} is larger than 2^53 bytes.`);
+    return Number(value);
+  }
+  let index = 0;
+  while (index < field.length && (field[index] === 0x20 || field[index] === 0)) index += 1;
+  let value = 0;
+  for (; index < field.length && field[index] >= 0x30 && field[index] <= 0x37; index += 1) value = value * 8 + (field[index] - 0x30);
+  return value;
+}
+
+/** The `key=value` records of a pax extended header (`<length> <key>=<value>\n`, the length counting its own digits, in bytes). */
+function paxRecords(data) {
+  const records = new Map();
+  let position = 0;
+  while (position < data.length) {
+    const space = data.indexOf(0x20, position);
+    const digits = space === -1 ? '' : data.subarray(position, space).toString('latin1');
+    if (!/^[0-9]+$/.test(digits)) throw new Error(`a pax extended header holds a malformed record at byte ${position}.`);
+    const length = Number(digits);
+    if (length < space - position + 3 || position + length > data.length || data[position + length - 1] !== 0x0a) {
+      throw new Error(`a pax extended header holds a malformed record at byte ${position}.`);
+    }
+    const record = data.subarray(space + 1, position + length - 1).toString('utf8');
+    const equals = record.indexOf('=');
+    if (equals === -1) throw new Error(`a pax extended header holds a record with no "=" at byte ${position}.`);
+    records.set(record.slice(0, equals), record.slice(equals + 1));
+    position += length;
+  }
+  return records;
+}
+
+/**
+ * Read a `.tgz` in-process: `node:zlib` gunzips it and a tar reader walks the blocks, so no `tar` or `gzip` binary is spawned. Returns
+ * `{ name, type, data }` for every member in archive order. `type` is `file`, `directory` (typeflag `5`, or a regular file whose name
+ * ends in `/`; its name ends in `/`) or `other` (hard and symbolic links and every other type; they carry no data).
+ *
+ * A POSIX `ustar` header's name is its `prefix`, a `/` (none when the prefix already ends in one) and its name. A pax `x` header's
+ * `path` and `size` records and a GNU `L` long name override the next member's header; pax `g` and GNU `K` headers are consumed and
+ * ignored. Numeric fields are octal or GNU base-256, and the header checksum (as the unsigned or the signed sum) is verified. Reading ends
+ * at the first all-zero block or at the end of the data: IPM's `%IPM.Utils.FileBinaryTar` writes no end marker. A file that is not gzip,
+ * a bad checksum and a member cut short throw an `Error` naming the problem.
+ *
+ * @param {Uint8Array} buffer - The bytes of the `.tgz`.
+ * @returns {Array<{ name: string, type: 'file' | 'directory' | 'other', data: Buffer }>}
+ */
+export function readTgz(buffer) {
+  const compressed = Buffer.from(buffer);
+  if (compressed.length < 2 || compressed[0] !== GZIP_MAGIC[0] || compressed[1] !== GZIP_MAGIC[1]) {
+    throw new Error('the archive is not a gzip file: it does not start with the gzip magic number 1f 8b.');
+  }
+  let tar;
+  try {
+    tar = gunzipSync(compressed);
+  } catch (error) {
+    throw new Error(`the archive's gzip stream is damaged (${error instanceof Error ? error.message : String(error)}).`);
+  }
+
+  const entries = [];
+  let offset = 0;
+  let longName;
+  let pax;
+  /** The `size` bytes of data after the header at `offset`, and the offset of the next header. */
+  const takeData = (size, label) => {
+    const start = offset + TAR_BLOCK;
+    if (start + size > tar.length) {
+      throw new Error(`the tar member ${JSON.stringify(label)} is cut short: its header says ${size} byte(s) and the archive holds ${tar.length - start}.`);
+    }
+    offset = start + Math.ceil(size / TAR_BLOCK) * TAR_BLOCK;
+    return tar.subarray(start, start + size);
+  };
+
+  while (offset < tar.length) {
+    const block = tar.subarray(offset, offset + TAR_BLOCK);
+    if (block.every((byte) => byte === 0)) break;
+    if (block.length < TAR_BLOCK) throw new Error(`the tar stream is cut short inside the header at byte ${offset} (${block.length} of ${TAR_BLOCK} bytes).`);
+
+    let unsigned = 0;
+    let signed = 0;
+    for (let index = 0; index < TAR_BLOCK; index += 1) {
+      const byte = index >= 148 && index < 156 ? 0x20 : block[index];
+      unsigned += byte;
+      signed += byte > 127 ? byte - 256 : byte;
+    }
+    const stored = tarNumber(block, 148, 8, 'header checksum');
+    let name = tarString(block, 0, 100);
+    if (stored !== unsigned && stored !== signed) {
+      throw new Error(`the tar header at byte ${offset}${name === '' ? '' : ` (${JSON.stringify(name)})`} has a bad checksum: it stores ${stored} and the header sums to ${unsigned}.`);
+    }
+    if (block.subarray(257, 263).equals(USTAR_MAGIC)) {
+      const prefix = tarString(block, 345, 155);
+      if (prefix !== '') name = prefix.endsWith('/') ? `${prefix}${name}` : `${prefix}/${name}`;
+    }
+    const typeflag = block[156] === 0 ? '0' : String.fromCharCode(block[156]);
+    const headerSize = tarNumber(block, 124, 12, 'member size');
+
+    if (typeflag === 'x') {
+      pax = paxRecords(takeData(headerSize, name));
+      continue;
+    }
+    if (typeflag === 'g' || typeflag === 'K') {
+      takeData(headerSize, name);
+      continue;
+    }
+    if (typeflag === 'L') {
+      const data = takeData(headerSize, name);
+      longName = tarString(data, 0, data.length);
+      continue;
+    }
+
+    name = pax?.get('path') ?? longName ?? name;
+    let size = headerSize;
+    if (pax?.has('size')) {
+      const declared = pax.get('size');
+      if (!/^[0-9]+$/.test(declared)) throw new Error(`the pax size record of ${JSON.stringify(name)} is not a number: ${JSON.stringify(declared)}.`);
+      size = Number(declared);
+    }
+    pax = undefined;
+    longName = undefined;
+
+    const isLink = typeflag === '1' || typeflag === '2';
+    const data = takeData(isLink ? 0 : size, name);
+    if (typeflag === '5' || ((typeflag === '0' || typeflag === '7') && name.endsWith('/'))) {
+      entries.push({ name: name.endsWith('/') ? name : `${name}/`, type: 'directory', data: Buffer.alloc(0) });
+    } else if (typeflag === '0' || typeflag === '7') {
+      entries.push({ name, type: 'file', data });
+    } else {
+      entries.push({ name, type: 'other', data: Buffer.alloc(0) });
+    }
+  }
+  return entries;
+}
+
+/** A member name as a relative path of `/`-separated segments: repeated slashes, a leading `./` and a trailing `/` collapsed; an absolute name or a `..` segment throws. */
+function memberPath(name) {
+  let relative = String(name).replace(/\/\/+/g, '/');
+  while (relative.startsWith('./')) relative = relative.slice(2);
+  relative = relative.replace(/\/$/, '');
+  if (relative === '.') relative = '';
+  if (relative.startsWith('/') || /^[A-Za-z]:/.test(relative)) throw new Error(`the archive member ${JSON.stringify(name)} has an absolute path, so it is not extracted.`);
+  if (relative.split(/[\\/]/).includes('..')) throw new Error(`the archive member ${JSON.stringify(name)} has a ".." segment, so it is not extracted.`);
+  return relative;
+}
+
+/**
+ * Write the `file` members of {@link readTgz} and create its `directory` members under `directory` (created when missing), after
+ * collapsing repeated slashes and a leading `./` in each name; `other` members are skipped. A name that is absolute or has a `..`
+ * segment throws before anything is written.
+ *
+ * @param {ReadonlyArray<{ name: string, type: string, data: Uint8Array }>} entries
+ * @param {string} directory
+ * @returns {{ files: string[], directories: string[] }} The relative names written, in archive order.
+ */
+export function extractEntries(entries, directory) {
+  const root = path.resolve(directory);
+  const plan = [];
+  for (const entry of entries) {
+    if (entry.type !== 'file' && entry.type !== 'directory') continue;
+    const relative = memberPath(entry.name);
+    if (relative === '') continue;
+    plan.push({ entry, relative, target: path.join(root, ...relative.split('/')) });
+  }
+  const written = { files: [], directories: [] };
+  for (const { entry, relative, target } of plan) {
+    if (entry.type === 'directory') {
+      mkdirSync(target, { recursive: true });
+      written.directories.push(relative);
+    } else {
+      mkdirSync(path.dirname(target), { recursive: true });
+      writeFileSync(target, entry.data);
+      written.files.push(relative);
+    }
+  }
+  return written;
 }
 
 // -- Session scripts --------------------------------------------------------------------

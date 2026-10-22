@@ -17,8 +17,8 @@
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { EDITIONS, PhaseFailure, parseArgs, runIpmArchive } from "../../../../scripts/ci-ipm-archive.mjs";
@@ -34,6 +34,7 @@ import {
   classPathSegments,
   deleteSetupScript,
   embedProblems,
+  extractEntries,
   importIpmScript,
   installChecksScript,
   ipmCommandScript,
@@ -50,6 +51,7 @@ import {
   outputDirectoryScript,
   parityProblems,
   parityScript,
+  readTgz,
   repositoriesScript,
   seedMarkers,
   sessionScript,
@@ -59,14 +61,10 @@ import {
   synthesizedSetup,
 } from "../../../../scripts/lib/ipm-archive.mjs";
 import { REPO_ROOT } from "../../../../scripts/lib/live-gate-scan.mjs";
-import {
-  BOOTSTRAP_CLASSES,
-  BOOTSTRAP_VERSION,
-  IPM_INSTALL_GUARD,
-  IPM_MODULE_NAME,
-} from "../../../shared/src/bootstrap-classes.js";
+import { BOOTSTRAP_CLASSES, BOOTSTRAP_VERSION, IPM_INSTALL_GUARD } from "../../../shared/src/bootstrap-classes.js";
 import { classifyDeployedMarker, parseBootstrapMarker } from "../../../shared/src/bootstrap-version.js";
 import { installFakeDocker, type FakeDocker } from "./fake-docker";
+import { filesUnder, realEmbed, tarGz, type Embed } from "./ipm-archive-fixture";
 import { staleDistReason } from "./process-gate-helpers.js";
 
 const SCRIPT = path.join(REPO_ROOT, "scripts", "ci-ipm-archive.mjs");
@@ -78,21 +76,6 @@ interface ParityCase {
   embedded: string;
   expected: string;
 }
-
-/** The real embed, from the sources of `@iris-mcp/shared` (the scripted run uses the built dist, which holds the same). */
-function realEmbed() {
-  return {
-    marker: BOOTSTRAP_VERSION,
-    classes: BOOTSTRAP_CLASSES,
-    guard: IPM_INSTALL_GUARD,
-    moduleName: IPM_MODULE_NAME,
-    moduleXml: readFileSync(path.join(REPO_ROOT, "ipm", "module.xml"), "utf8"),
-    classify: classifyDeployedMarker,
-    parse: parseBootstrapMarker,
-  };
-}
-
-type Embed = ReturnType<typeof realEmbed>;
 
 const scratch: string[] = [];
 function scratchDir(): string {
@@ -134,13 +117,6 @@ function syntheticEmbed(overrides: Partial<Embed> = {}): Embed {
     parse: parseBootstrapMarker,
     ...overrides,
   };
-}
-
-/** Every file under `directory`, relative, with forward slashes. */
-function filesUnder(directory: string, base = directory): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>
-    entry.isDirectory() ? filesUnder(path.join(directory, entry.name), base) : [path.relative(base, path.join(directory, entry.name)).split(path.sep).join("/")],
-  );
 }
 
 // -- the helpers ---------------------------------------------------------------------------
@@ -274,10 +250,10 @@ describe("archiveProblems over a real tar czf of a staged module", () => {
     stageModule(stage, embed);
     mutate(stage);
     const archive = path.join(scratchDir(), "module.tgz");
-    expect(spawnSync("tar", ["czf", archive, "-C", stage, "."]).status).toBe(0);
-    const members = (spawnSync("tar", ["tzf", archive], { encoding: "utf8" }).stdout ?? "").split("\n").filter((line) => line !== "");
-    expect(spawnSync("tar", ["xzf", archive, "-C", extracted]).status).toBe(0);
-    return { members, extracted };
+    expect(tarGz(archive, stage)).toBe(0);
+    const entries = readTgz(readFileSync(archive));
+    extractEntries(entries, extracted);
+    return { members: entries.map((entry) => entry.name), extracted };
   }
 
   it("finds nothing wrong with an archive of the embed", () => {
@@ -518,6 +494,13 @@ describe("the IPM verbs the proof issues (AC 42.4.4)", () => {
     expect([...verbs].sort(), "and every verb is used").toEqual([...IPM_VERBS].sort());
   });
 
+  it("spawns no process of its own: neither the script nor its helpers import child_process, so no tar or gzip binary is needed on any host", () => {
+    for (const file of ["scripts/ci-ipm-archive.mjs", "scripts/lib/ipm-archive.mjs"]) {
+      const source = readFileSync(path.join(REPO_ROOT, file), "utf8");
+      expect(source, file).not.toMatch(/child_process|\bspawn(?:Sync)?\(/);
+    }
+  });
+
   it("publishes, uploads and reads no secret: the script and its helpers hold none of those words as a statement", () => {
     for (const file of ["scripts/ci-ipm-archive.mjs", "scripts/lib/ipm-archive.mjs"]) {
       const source = readFileSync(path.join(REPO_ROOT, file), "utf8");
@@ -667,7 +650,6 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
   let fake: FakeDocker;
   let tmp = "";
   let archiveSource = "";
-  let toolsDir = "";
   let embed: Embed;
   let cases: ParityCase[];
 
@@ -684,7 +666,7 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     mkdirSync(stage);
     stageModule(stage, embed);
     archiveSource = path.join(root, "good.tgz");
-    expect(spawnSync("tar", ["czf", archiveSource, "-C", stage, "."]).status).toBe(0);
+    expect(tarGz(archiveSource, stage)).toBe(0);
 
     // What the comparator answers for every case the run will send: the fixture's and the three built from the embedded marker.
     const fixture = JSON.parse(readFileSync(PARITY_FIXTURE, "utf8")) as ParityCase[];
@@ -701,13 +683,6 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     for (const marker of [seeds.newer, seeds.older, "dev"]) relations[marker] = classifyDeployedMarker(marker, embed.marker);
     writeFileSync(path.join(root, "handler.cjs"), SESSION_HANDLER, "utf8");
     writeConfig({ table, relations });
-
-    // The script lists and extracts the archive with `tar`; the harness's PATH holds the scripted docker and a directory with nothing but tar.
-    const tar = findExecutable("tar", process.env.PATH);
-    expect(tar, "tar is on this machine's PATH").toBeDefined();
-    toolsDir = path.join(root, "tools");
-    mkdirSync(toolsDir);
-    symlinkSync(tar as string, path.join(toolsDir, "tar"));
   });
 
   /** (Re)write the handler's configuration, adding `extra` to the fixed part. */
@@ -727,12 +702,15 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     stderr: string;
   }
 
-  /** Run the script as a process whose PATH is the scripted docker's directory alone and whose temp directory is `tmp`. */
+  /**
+   * Run the script as a process whose PATH is the scripted docker's directory alone and whose temp directory is `tmp`. No `tar` and no
+   * `gzip` resolves on that PATH on any host, so a spawn of either by the script fails here as it would on a runner without them.
+   */
   function runScript(args: string[], env: Record<string, string> = {}, afterStart?: () => void): Promise<Run> {
     return new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [SCRIPT, ...args], {
         env: {
-          PATH: `${fake.binDir}${path.delimiter}${toolsDir}`,
+          PATH: fake.binDir,
           TMPDIR: tmp,
           FAKE_DOCKER_DIR: fake.dir,
           FAKE_DOCKER_SESSION_HANDLER: path.join(root, "handler.cjs"),
@@ -793,6 +771,18 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     expect(dockerVerbs().filter((verb) => verb === "rm")).toHaveLength(3);
     expect(dockerVerbs().filter((verb) => verb === "cp")).toHaveLength(1);
     expect(dockerVerbs().filter((verb) => verb === "logs"), "no log is read when everything passes").toHaveLength(0);
+    expectCleanEnd();
+  }, 120_000);
+
+  it("reads the archive in-process: the run passes on a PATH that holds the scripted docker alone, where neither tar nor gzip resolves", async () => {
+    expect(findExecutable("tar", fake.binDir), "no tar on the script's PATH").toBeUndefined();
+    expect(findExecutable("gzip", fake.binDir), "no gzip on the script's PATH").toBeUndefined();
+
+    const run = await runScript(["--edition", "community"]);
+
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stderr).toMatch(/\[archive\] \d+ members: module\.xml, 35 classes equal to the embed/);
+    expect(run.stderr).not.toMatch(/\b(?:tar|gzip)\b/);
     expectCleanEnd();
   }, 120_000);
 
@@ -898,7 +888,7 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
       stageModule(stage, embed);
       mutate(stage);
       const bad = path.join(root, "bad.tgz");
-      expect(spawnSync("tar", ["czf", bad, "-C", stage, "."]).status).toBe(0);
+      expect(tarGz(bad, stage)).toBe(0);
       archiveSource = bad;
     }
 
@@ -920,6 +910,26 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
       expect(run.status, run.stderr).toBe(1);
       expect(run.stderr).toContain("FAILED in the archive phase");
       expect(run.stderr).toContain(reason);
+      expect(run.stderr, "no install container was started").not.toContain("[install-community]");
+      expect(fake.calls().filter((call) => call.argv[0] === "run")).toHaveLength(1);
+      expectCleanEnd();
+    }, 120_000);
+  });
+
+  describe("an archive that cannot be read ends the run in the archive phase", () => {
+    it.each([
+      ["a file that is not gzip", () => Buffer.from("this is not an archive"), "the archive is not a gzip file"],
+      ["a gzip stream cut in the middle", (good: Buffer) => good.subarray(0, Math.floor(good.length / 2)), "the archive's gzip stream is damaged"],
+    ])("%s", async (_label, make, reason) => {
+      const bad = path.join(root, "unreadable.tgz");
+      writeFileSync(bad, make(readFileSync(archiveSource)));
+      archiveSource = bad;
+
+      const run = await runScript(["--edition", "community"]);
+
+      expect(run.status, run.stderr).toBe(1);
+      expect(run.stderr).toContain("FAILED in the archive phase");
+      expect(run.stderr).toContain(`the archive could not be read: ${reason}`);
       expect(run.stderr, "no install container was started").not.toContain("[install-community]");
       expect(fake.calls().filter((call) => call.argv[0] === "run")).toHaveLength(1);
       expectCleanEnd();
