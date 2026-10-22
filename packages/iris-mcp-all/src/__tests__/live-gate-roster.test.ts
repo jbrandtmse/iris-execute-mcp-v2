@@ -11,54 +11,19 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  ARMED_GATE,
+  NAMED_EXEMPTIONS,
+  PACKAGES_DIR,
+  armedTestFiles,
+  isNamedExemption as isExempt,
+  listedGateFiles,
+  workspacePackageDirs,
+} from "../../../../scripts/lib/live-gate-scan.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PACKAGES_DIR = path.resolve(__dirname, "..", "..", "..");
-
-/** The quoted entries of a gate script's `const gateTestFiles = [ ... ];` literal, comments removed. */
-function listedGateFiles(scriptSource: string): string[] {
-  const literal = /const gateTestFiles = \[([\s\S]*?)\];/.exec(scriptSource)?.[1] ?? "";
-  const withoutComments = literal.replace(/\/\/[^\n]*/g, "");
-  return [...withoutComments.matchAll(/"([^"]+)"/g)].map((match) => match[1] ?? "");
-}
-
-/**
- * What marks a test file as an armed live gate: it compares the arming variable (`... IRIS_REQUIRE_LIVE === ...`), or its
- * import-time constants come from the throwaway plan (a `const` at the start of a line), the arming of the throwaway
- * bootstrap-guard gate through `IRIS_THROWAWAY`.
- */
-const ARMED_GATE = /process\.env\.IRIS_REQUIRE_LIVE\s*===|^const \w+ = throwawayGatePlan\(/m;
-
-/**
- * Armed live gates that are off every roster by design. Each is armed by something a package's prepublish run does not
- * set, so listing it in `gateTestFiles` would run it where it can only fail or skip.
- */
-const NAMED_EXEMPTIONS: ReadonlyArray<{ pkg: string; file: string; reason: string }> = [
-  {
-    pkg: "iris-mcp-all",
-    file: "src/__tests__/story-42-2-bootstrap-guard-live-gate.test.ts",
-    reason:
-      "armed by IRIS_THROWAWAY, which only scripts/throwaway-iris.mjs sets (pnpm live:bootstrap-guard, Story 42.3's CI); it refuses any target that already holds ExecuteMCPv2 classes, so a prepublish run against a real instance could never pass it",
-  },
-];
-
-const isExempt = (pkg: string, file: string): boolean =>
-  NAMED_EXEMPTIONS.some((exemption) => exemption.pkg === pkg && exemption.file === file);
-
-/** The package's test files that are armed live gates (see {@link ARMED_GATE}), as `src/__tests__/<name>`. */
-function armedTestFiles(pkgDir: string): string[] {
-  const testsDir = path.join(pkgDir, "src", "__tests__");
-  if (!existsSync(testsDir)) return [];
-  return readdirSync(testsDir)
-    .filter((name) => name.endsWith(".test.ts"))
-    .filter((name) => ARMED_GATE.test(readFileSync(path.join(testsDir, name), "utf8")))
-    .map((name) => `src/__tests__/${name}`);
-}
-
-const packages = readdirSync(PACKAGES_DIR).filter((name) => existsSync(path.join(PACKAGES_DIR, name, "package.json")));
+const packages: string[] = workspacePackageDirs();
 const armed = packages
   .map((pkg) => ({ pkg, files: armedTestFiles(path.join(PACKAGES_DIR, pkg)) }))
   .filter(({ files }) => files.length > 0);

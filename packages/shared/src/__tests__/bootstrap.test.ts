@@ -557,11 +557,62 @@ describe("bootstrap", () => {
 
       http.destroy();
     });
+
+    // A caller that deploys documents of its own (the CI seed's test fixtures) passes its own map; the bootstrap
+    // flow passes none and keeps today's requests.
+    it("deploys exactly the documents of the map it is given, with the same URL shape", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      fetchMock.mockResolvedValueOnce(
+        mockResponse("", {
+          status: 200,
+          headers: { "X-CSRF-Token": "test-csrf-token" },
+          setCookie: ["CSPSESSIONID=s1; path=/"],
+        }),
+      );
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+
+      await deployClasses(
+        http,
+        config,
+        7,
+        new Map([
+          ["ExecuteMCPv2.Tests.First.cls", "Class ExecuteMCPv2.Tests.First {\n}"],
+          ["ExecuteMCPv2.QAFixtures.Second.cls", "Class ExecuteMCPv2.QAFixtures.Second {\n}"],
+        ]),
+      );
+
+      const putCalls = fetchMock.mock.calls.filter((call: unknown[]) => (call[1] as { method: string }).method === "PUT");
+      expect(putCalls.map((call: unknown[]) => call[0] as string)).toEqual([
+        expect.stringMatching(/\/api\/atelier\/v7\/USER\/doc\/ExecuteMCPv2\.Tests\.First\.cls\?ignoreConflict=1$/),
+        expect.stringMatching(/\/api\/atelier\/v7\/USER\/doc\/ExecuteMCPv2\.QAFixtures\.Second\.cls\?ignoreConflict=1$/),
+      ]);
+      expect(JSON.parse(putCalls[0]![1].body as string)).toEqual({ enc: false, content: ["Class ExecuteMCPv2.Tests.First {", "}"] });
+
+      http.destroy();
+    });
   });
 
   // ── compileClasses ──────────────────────────────────────────────
 
   describe("compileClasses", () => {
+    it("compiles the names it is given and returns the Atelier response", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      const reply = envelope({ content: [{ name: "ExecuteMCPv2.Tests.First.cls", status: "" }] });
+      setupCsrfThenRequest(reply);
+
+      const response = await compileClasses(http, config, 7, ["ExecuteMCPv2.Tests.First.cls"]);
+
+      const postCalls = fetchMock.mock.calls.filter((call: unknown[]) => (call[1] as { method: string }).method === "POST");
+      expect(postCalls.length).toBe(1);
+      expect(JSON.parse(postCalls[0]![1].body as string)).toEqual(["ExecuteMCPv2.Tests.First.cls"]);
+      expect(response.result).toEqual({ content: [{ name: "ExecuteMCPv2.Tests.First.cls", status: "" }] });
+
+      http.destroy();
+    });
+
     it("should POST with all class names", async () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);

@@ -5,15 +5,21 @@
  * process-level run launches the script with a PATH that holds no docker, so the script's own docker lookup fails first.
  *
  * Pins: the pinned image constants; the refusals of a floating image, host port 52773 or 1972, the shared instance's
- * container name and any name the script did not generate; the `docker run` argv (dynamic loopback port, owner label);
- * the `docker port` parser; the teardown argv (only the created container); the command's environment; the readiness
- * loops are bounded; the teardown runs on every path out; a missing docker exits non-zero; importing the module spawns
- * nothing. The `docker inspect` checker the live gate uses is covered here too.
+ * container name, a bad namespace and any name the script did not generate; the `docker run` argv (dynamic or fixed loopback
+ * port, owner label); the `docker port` parser; the teardown argv (only the created container); the command's environment
+ * (including `IRIS_HTTPS` and the namespace); the readiness loops are bounded; the teardown runs on every path out; a
+ * missing docker exits non-zero; importing the module spawns nothing. The `docker inspect` checker the live gate uses is
+ * covered here too.
+ *
+ * The CI subcommands (`up`, `exec`, `logs`, `down`, Story 42.3) are driven with injected dependencies, so nothing here
+ * runs docker: `up` keeps its container only on success, `exec`, `logs` and `down` re-inspect the container and refuse one
+ * that is not a throwaway this harness started, `run` prints the container log when its command fails, and the
+ * environment the harness hands a command satisfies `scripts/verify-iris-reachable.mjs` under `CI=true`.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -22,29 +28,43 @@ import {
   IRISHEALTH_COMMUNITY_IMAGE,
   IRIS_COMMUNITY_IMAGE,
   NAME_PREFIX,
+  OLDEST_IRIS_COMMUNITY_IMAGE,
   OWNER_LABEL,
   SHARED_INSTANCE_CONTAINER,
+  assertThrowawayEnv,
   assertThrowawayInspect,
   buildChildEnv,
+  buildInspectArgv,
+  buildLogsArgv,
   buildPortArgv,
   buildRunArgv,
   buildSessionArgv,
   buildTeardownArgv,
   createTeardown,
+  defaultDeps,
+  downHarness,
+  execHarness,
   findExecutable,
   generateContainerName,
   inspectProblems,
+  logsHarness,
   parseCli,
   parseDockerPort,
+  parseState,
   runHarness,
+  throwawayEnvProblems,
+  upHarness,
   validateContainerName,
   validateHostPort,
   validateImage,
+  validateNamespace,
 } from "../../../../scripts/throwaway-iris.mjs";
 import { throwawayGatePlan } from "./bootstrap-guard-legs.js";
+import { reserveClosedPort } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SCRIPT = path.resolve(__dirname, "..", "..", "..", "..", "scripts", "throwaway-iris.mjs");
+const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
+const SCRIPT = path.resolve(REPO_ROOT, "scripts", "throwaway-iris.mjs");
 
 const CONTAINER_ID = "a".repeat(64);
 const GENERATED_NAME = `${NAME_PREFIX}0123456789ab`;
@@ -72,6 +92,14 @@ describe("throwaway-iris: the images", () => {
     expect(validateImage(IRIS_COMMUNITY_IMAGE)).toBe(IRIS_COMMUNITY_IMAGE);
     expect(validateImage(IRISHEALTH_COMMUNITY_IMAGE)).toBe(IRISHEALTH_COMMUNITY_IMAGE);
   });
+
+  it("pins the oldest pullable IRIS Community tag (2024.3) by its manifest-list digest", () => {
+    expect(OLDEST_IRIS_COMMUNITY_IMAGE).toBe(
+      "intersystems/iris-community:2024.3@sha256:0d6dbb91f71c69a65d8577741647e961168e90699e26d158e984a2a2919a874d",
+    );
+    expect(validateImage(OLDEST_IRIS_COMMUNITY_IMAGE)).toBe(OLDEST_IRIS_COMMUNITY_IMAGE);
+  });
+
 
   it.each([
     ["the floating :latest tag", "intersystems/iris-community:latest"],
@@ -107,6 +135,14 @@ describe("throwaway-iris: ports and names", () => {
     expect(validateHostPort("49153")).toBe("49153");
   });
 
+  it.each(["USER", "HSCUSTOM", "A", "ABC123", `A${"B".repeat(63)}`])("accepts the namespace %j", (namespace) => {
+    expect(validateNamespace(namespace)).toBe(namespace);
+  });
+
+  it.each(["", "user", "1ABC", "ABC-DEF", "AB CD", "ABC;rm", "%SYS", "A".repeat(65), undefined, 5])("refuses %j as a namespace", (namespace) => {
+    expect(() => validateNamespace(namespace)).toThrow(/refusing the namespace/);
+  });
+
   it("refuses the shared instance's container name, and names it", () => {
     expect(() => validateContainerName(SHARED_INSTANCE_CONTAINER)).toThrow(/iris-community-edition.*shared IRIS instance/);
   });
@@ -140,9 +176,32 @@ describe("throwaway-iris: the docker arguments", () => {
     expect(argv).not.toContain("--network=host");
   });
 
+  it("publishes on the requested loopback port when one is given, and builds today's argv when it is omitted", () => {
+    const fixed = buildRunArgv({ image: IRIS_COMMUNITY_IMAGE, name: GENERATED_NAME, hostPort: "52790" });
+
+    expect(fixed).toEqual(["run", "-d", "--name", GENERATED_NAME, "--label", OWNER_LABEL, "-p", "127.0.0.1:52790:52773", IRIS_COMMUNITY_IMAGE]);
+    expect(buildRunArgv({ image: IRIS_COMMUNITY_IMAGE, name: GENERATED_NAME, hostPort: 52791 })[7]).toBe("127.0.0.1:52791:52773");
+    expect(buildRunArgv({ image: IRIS_COMMUNITY_IMAGE, name: GENERATED_NAME })[7]).toBe("127.0.0.1::52773");
+  });
+
+  it.each(["52773", 52773, "1972", "0", "65536", "abc", ""])("refuses to publish on the host port %j", (hostPort) => {
+    expect(() => buildRunArgv({ image: IRIS_COMMUNITY_IMAGE, name: GENERATED_NAME, hostPort })).toThrow(/refusing (the )?host port/);
+  });
+
   it("refuses to build a run for a floating image or for a name it did not generate", () => {
     expect(() => buildRunArgv({ image: "intersystems/iris-community:latest", name: GENERATED_NAME })).toThrow(/digest/);
     expect(() => buildRunArgv({ image: IRIS_COMMUNITY_IMAGE, name: SHARED_INSTANCE_CONTAINER })).toThrow(/shared IRIS instance/);
+  });
+
+  it("inspects and reads the log of one container by id or generated name, and refuses any other reference", () => {
+    expect(buildInspectArgv(CONTAINER_ID)).toEqual(["inspect", CONTAINER_ID]);
+    expect(buildInspectArgv(GENERATED_NAME)).toEqual(["inspect", GENERATED_NAME]);
+    expect(buildLogsArgv(CONTAINER_ID, 400)).toEqual(["logs", "--tail", "400", CONTAINER_ID]);
+    for (const other of [SHARED_INSTANCE_CONTAINER, "ocupilot-slot-1", "$(docker ps -q)", ""]) {
+      expect(() => buildInspectArgv(other), other).toThrow();
+      expect(() => buildLogsArgv(other, 400), other).toThrow();
+    }
+    expect(() => buildLogsArgv(CONTAINER_ID, 0)).toThrow(/log tail/);
   });
 
   it("reads the published port from `docker port` of the container id, and opens the session on the same id", () => {
@@ -197,13 +256,56 @@ describe("throwaway-iris: the command's environment", () => {
       IRIS_USERNAME: "_SYSTEM",
       IRIS_PASSWORD: "SYS",
       IRIS_NAMESPACE: "USER",
+      IRIS_HTTPS: "false",
       IRIS_THROWAWAY: GENERATED_NAME,
     });
+  });
+
+  it("takes the namespace of the throwaway, USER when none is given", () => {
+    expect(buildChildEnv({}, { port: "49153", name: GENERATED_NAME }).IRIS_NAMESPACE).toBe("USER");
+    expect(buildChildEnv({}, { port: "49153", name: GENERATED_NAME, namespace: "HSCUSTOM" }).IRIS_NAMESPACE).toBe("HSCUSTOM");
+    expect(() => buildChildEnv({}, { port: "49153", name: GENERATED_NAME, namespace: "hscustom" })).toThrow(/refusing the namespace/);
   });
 
   it("refuses the shared instance's port and a name it did not generate", () => {
     expect(() => buildChildEnv({}, { port: "52773", name: GENERATED_NAME })).toThrow(/shared IRIS instance/);
     expect(() => buildChildEnv({}, { port: "49153", name: SHARED_INSTANCE_CONTAINER })).toThrow(/shared IRIS instance/);
+  });
+});
+
+describe("throwaway-iris: the environment of a throwaway target (assertThrowawayEnv)", () => {
+  const harnessEnv = buildChildEnv({ PATH: "/usr/bin" }, { port: "52790", name: GENERATED_NAME, namespace: "HSCUSTOM" });
+
+  it("accepts the environment the harness builds, for any namespace", () => {
+    expect(throwawayEnvProblems(harnessEnv)).toEqual([]);
+    expect(() => assertThrowawayEnv(harnessEnv)).not.toThrow();
+  });
+
+  it.each([
+    ["no arming variable", { IRIS_REQUIRE_LIVE: undefined }, /IRIS_REQUIRE_LIVE/],
+    ["IRIS_REQUIRE_LIVE=true", { IRIS_REQUIRE_LIVE: "true" }, /IRIS_REQUIRE_LIVE/],
+    ["IRIS_REQUIRE_LIVE=0", { IRIS_REQUIRE_LIVE: "0" }, /IRIS_REQUIRE_LIVE/],
+    ["no IRIS_THROWAWAY", { IRIS_THROWAWAY: undefined }, /IRIS_THROWAWAY/],
+    ["a container name the harness did not generate", { IRIS_THROWAWAY: "ocupilot-slot-1" }, /IRIS_THROWAWAY.*only handles names it generates/],
+    ["the shared instance's container name", { IRIS_THROWAWAY: SHARED_INSTANCE_CONTAINER }, /IRIS_THROWAWAY.*shared IRIS instance/],
+    ["another host", { IRIS_HOST: "prod.example" }, /IRIS_HOST/],
+    ["localhost, which is not the loopback address", { IRIS_HOST: "localhost" }, /IRIS_HOST/],
+    ["no host", { IRIS_HOST: undefined }, /IRIS_HOST/],
+    ["port 52773", { IRIS_PORT: "52773" }, /IRIS_PORT.*shared IRIS instance/],
+    ["port 1972", { IRIS_PORT: "1972" }, /IRIS_PORT.*shared IRIS instance/],
+    ["no port", { IRIS_PORT: undefined }, /IRIS_PORT/],
+    ["a port that is not a number", { IRIS_PORT: "abc" }, /IRIS_PORT/],
+  ])("refuses %s", (_label, change, problem) => {
+    const env: Record<string, string | undefined> = { ...harnessEnv, ...change };
+
+    expect(throwawayEnvProblems(env).join(" ")).toMatch(problem);
+    expect(() => assertThrowawayEnv(env)).toThrow(/does not target a throwaway IRIS container/);
+  });
+
+  it("names every problem at once", () => {
+    const problems = throwawayEnvProblems({ IRIS_HOST: "prod.example", IRIS_PORT: "52773" });
+
+    expect(problems.length).toBe(4);
   });
 });
 
@@ -226,6 +328,82 @@ describe("throwaway-iris: the command line", () => {
     ["an image option with no value", ["run", "--image"]],
   ])("refuses %s", (_label, argv) => {
     expect(() => parseCli(argv)).toThrow();
+  });
+
+  it("adds the host port to the result of `run` only when the flag is given", () => {
+    expect(parseCli(["run", "--host-port", "52790", "--", "true"])).toEqual({ image: IRIS_COMMUNITY_IMAGE, command: ["true"], hostPort: "52790" });
+    expect(parseCli(["run", "--image", OLDEST_IRIS_COMMUNITY_IMAGE, "--host-port", "52790", "--", "pnpm", "test"])).toEqual({
+      image: OLDEST_IRIS_COMMUNITY_IMAGE,
+      command: ["pnpm", "test"],
+      hostPort: "52790",
+    });
+    expect(Object.keys(parseCli(["run", "--", "true"]))).toEqual(["image", "command"]);
+  });
+
+  it.each(["52773", "1972", "0", "65536", "abc"])("refuses `run --host-port %s`", (port) => {
+    expect(() => parseCli(["run", "--host-port", port, "--", "true"])).toThrow(/refusing (the )?host port/);
+  });
+
+  it("parses `up`: every option is required, and each is validated", () => {
+    const state = "/tmp/throwaway-live.json";
+
+    expect(parseCli(["up", "--image", IRISHEALTH_COMMUNITY_IMAGE, "--namespace", "HSCUSTOM", "--host-port", "52791", "--state", state])).toEqual({
+      subcommand: "up",
+      image: IRISHEALTH_COMMUNITY_IMAGE,
+      namespace: "HSCUSTOM",
+      hostPort: "52791",
+      state,
+    });
+    for (const [label, argv] of [
+      ["no image", ["up", "--namespace", "USER", "--host-port", "52791", "--state", state]],
+      ["no namespace", ["up", "--image", IRIS_COMMUNITY_IMAGE, "--host-port", "52791", "--state", state]],
+      ["no host port", ["up", "--image", IRIS_COMMUNITY_IMAGE, "--namespace", "USER", "--state", state]],
+      ["no state", ["up", "--image", IRIS_COMMUNITY_IMAGE, "--namespace", "USER", "--host-port", "52791"]],
+      ["a floating image", ["up", "--image", "intersystems/iris-community:2026.2", "--namespace", "USER", "--host-port", "52791", "--state", state]],
+      ["a lower-case namespace", ["up", "--image", IRIS_COMMUNITY_IMAGE, "--namespace", "user", "--host-port", "52791", "--state", state]],
+      ["port 52773", ["up", "--image", IRIS_COMMUNITY_IMAGE, "--namespace", "USER", "--host-port", "52773", "--state", state]],
+      ["port 1972", ["up", "--image", IRIS_COMMUNITY_IMAGE, "--namespace", "USER", "--host-port", "1972", "--state", state]],
+      ["a repeated option", ["up", "--image", IRIS_COMMUNITY_IMAGE, "--image", IRIS_COMMUNITY_IMAGE, "--namespace", "USER", "--host-port", "52791", "--state", state]],
+      ["a command", ["up", "--image", IRIS_COMMUNITY_IMAGE, "--namespace", "USER", "--host-port", "52791", "--state", state, "--", "true"]],
+    ] as Array<[string, string[]]>) {
+      expect(() => parseCli(argv), label).toThrow();
+    }
+  });
+
+  it("parses `exec`, `logs` and `down` with their state file", () => {
+    expect(parseCli(["exec", "--state", "s.json", "--", "node", "x.mjs"])).toEqual({ subcommand: "exec", state: "s.json", command: ["node", "x.mjs"] });
+    expect(parseCli(["logs", "--state", "s.json"])).toEqual({ subcommand: "logs", state: "s.json" });
+    expect(parseCli(["down", "--state", "s.json"])).toEqual({ subcommand: "down", state: "s.json" });
+    for (const argv of [
+      ["exec", "--", "true"],
+      ["exec", "--state", "s.json"],
+      ["exec", "--state", "s.json", "--"],
+      ["exec", "--image", IRIS_COMMUNITY_IMAGE, "--state", "s.json", "--", "true"],
+      ["logs"],
+      ["down"],
+      ["logs", "--state", "s.json", "--", "true"],
+      ["down", "--state", "s.json", "extra"],
+    ]) {
+      expect(() => parseCli(argv), argv.join(" ")).toThrow();
+    }
+  });
+
+  it("validates the state file the harness reads: every field is one it writes", () => {
+    const state = { name: GENERATED_NAME, id: CONTAINER_ID, port: "52791", image: IRISHEALTH_COMMUNITY_IMAGE, namespace: "HSCUSTOM" };
+
+    expect(parseState(JSON.stringify(state))).toEqual(state);
+    for (const [label, change] of [
+      ["the shared instance's container", { name: SHARED_INSTANCE_CONTAINER }],
+      ["a container id that is not 64 hex digits", { id: "iris-community-edition" }],
+      ["port 52773", { port: "52773" }],
+      ["a floating image", { image: "intersystems/iris-community:latest" }],
+      ["a lower-case namespace", { namespace: "hscustom" }],
+      ["a missing field", { name: undefined }],
+    ] as Array<[string, Record<string, unknown>]>) {
+      expect(() => parseState(JSON.stringify({ ...state, ...change })), label).toThrow();
+    }
+    expect(() => parseState("not json")).toThrow(/not JSON/);
+    expect(() => parseState("[]")).toThrow(/not a JSON object/);
   });
 });
 
@@ -332,36 +510,40 @@ describe("throwaway-iris: the teardown", () => {
   });
 });
 
+/** The reply of the stand-in docker to the calls that start and ready a container (inspect and logs included). */
+function defaultStartReply(args: string[], input: string | undefined): { status: number | null; stdout?: string; stderr?: string } {
+  switch (args[0]) {
+    case "run":
+      return { status: 0, stdout: `${CONTAINER_ID}\n` };
+    case "port":
+      return { status: 0, stdout: "127.0.0.1:49153\n" };
+    case "exec":
+      return { status: 0, stdout: input?.includes("UnExpireUserPasswords") ? "IRISMCP-UNEXPIRE:OK:END\n" : "IRISMCP-READY\n" };
+    case "logs":
+      return { status: 0, stdout: "container log tail" };
+    case "inspect":
+      return { status: 0, stdout: JSON.stringify(inspectedThrowaway()) };
+    default:
+      return { status: 0, stdout: "" };
+  }
+}
+
 /** A recording stand-in for every side effect of the harness; no docker, no network, no process. */
 function recordingHarness(overrides: { dockerReply?: (args: string[], input: string | undefined) => { status: number | null; stdout?: string; stderr?: string } } = {}) {
   const events: string[] = [];
   const dockerCalls: string[][] = [];
   const logs: string[] = [];
   const commands: Array<{ command: string[]; env: Record<string, string> }> = [];
+  const files = new Map<string, string>();
   let clock = 0;
   let exitCode = 7;
-
-  const defaultReply = (args: string[], input: string | undefined): { status: number | null; stdout?: string; stderr?: string } => {
-    switch (args[0]) {
-      case "run":
-        return { status: 0, stdout: `${CONTAINER_ID}\n` };
-      case "port":
-        return { status: 0, stdout: "127.0.0.1:49153\n" };
-      case "exec":
-        return { status: 0, stdout: input?.includes("UnExpireUserPasswords") ? "IRISMCP-UNEXPIRE:OK:END\n" : "IRISMCP-READY\n" };
-      case "logs":
-        return { status: 0, stdout: "container log tail" };
-      default:
-        return { status: 0, stdout: "" };
-    }
-  };
 
   const deps = {
     findDocker: (): string | undefined => "/fake/docker",
     docker: (args: string[], options: { input?: string } = {}) => {
       dockerCalls.push(args);
       events.push(`docker ${args[0]}`);
-      const reply = (overrides.dockerReply ?? defaultReply)(args, options.input);
+      const reply = (overrides.dockerReply ?? defaultStartReply)(args, options.input);
       return { status: reply.status, stdout: reply.stdout ?? "", stderr: reply.stderr ?? "" };
     },
     webStatus: async (): Promise<number> => 200,
@@ -377,6 +559,16 @@ function recordingHarness(overrides: { dockerReply?: (args: string[], input: str
     log: (line: string): void => {
       logs.push(line);
     },
+    fileExists: (file: string): boolean => files.has(file),
+    readState: (file: string): string | undefined => files.get(file),
+    writeState: (file: string, text: string): void => {
+      events.push("write state");
+      files.set(file, text);
+    },
+    removeState: (file: string): void => {
+      events.push("remove state");
+      files.delete(file);
+    },
   };
   const teardown = createTeardown((args: string[]) => deps.docker(args));
   return {
@@ -386,6 +578,7 @@ function recordingHarness(overrides: { dockerReply?: (args: string[], input: str
     dockerCalls,
     logs,
     commands,
+    files,
     setExitCode: (code: number): void => {
       exitCode = code;
     },
@@ -399,13 +592,13 @@ function recordingHarness(overrides: { dockerReply?: (args: string[], input: str
 }
 
 describe("throwaway-iris: the orchestration, with every side effect stood in for", () => {
-  it("starts the container, reads the port, waits for readiness, runs the command with the throwaway environment, returns its exit code, and removes the container last", async () => {
+  it("starts the container, reads the port, waits for readiness, runs the command with the throwaway environment, returns its exit code, and removes the container last (the log tail first, as the command failed)", async () => {
     const harness = recordingHarness();
 
     const code = await runHarness(harness.options(), harness.deps, harness.teardown);
 
     expect(code).toBe(7);
-    expect(harness.events).toEqual(["docker run", "docker port", "docker exec", "docker exec", "command", "docker rm"]);
+    expect(harness.events).toEqual(["docker run", "docker port", "docker exec", "docker exec", "command", "docker logs", "docker rm"]);
     const runArgs = harness.dockerCalls[0] as string[];
     const name = runArgs[runArgs.indexOf("--name") + 1] as string;
     expect(runArgs).toEqual(["run", "-d", "--name", name, "--label", OWNER_LABEL, "-p", "127.0.0.1::52773", IRIS_COMMUNITY_IMAGE]);
@@ -423,6 +616,7 @@ describe("throwaway-iris: the orchestration, with every side effect stood in for
           IRIS_USERNAME: "_SYSTEM",
           IRIS_PASSWORD: "SYS",
           IRIS_NAMESPACE: "USER",
+          IRIS_HTTPS: "false",
           IRIS_THROWAWAY: name,
         },
       },
@@ -447,12 +641,47 @@ describe("throwaway-iris: the orchestration, with every side effect stood in for
     expect(harness.dockerCalls.filter((call) => call[0] === "exec").every((call) => call.includes("%SYS"))).toBe(true);
   });
 
-  it("returns a failing command's exit code and still removes the container", async () => {
+  it("returns a failing command's exit code, prints the container log tail before it removes the container", async () => {
     const harness = recordingHarness();
     harness.setExitCode(3);
 
     expect(await runHarness(harness.options(), harness.deps, harness.teardown)).toBe(3);
-    expect(harness.events.slice(-2)).toEqual(["command", "docker rm"]);
+    expect(harness.events.slice(-3)).toEqual(["command", "docker logs", "docker rm"]);
+    expect(harness.dockerCalls[harness.dockerCalls.length - 2]).toEqual(["logs", "--tail", "200", CONTAINER_ID]);
+    expect(harness.logs.join("\n")).toContain("container log tail");
+  });
+
+  it("prints no container log when the command succeeds", async () => {
+    const harness = recordingHarness();
+    harness.setExitCode(0);
+
+    expect(await runHarness(harness.options(), harness.deps, harness.teardown)).toBe(0);
+    expect(harness.events).toEqual(["docker run", "docker port", "docker exec", "docker exec", "command", "docker rm"]);
+  });
+
+  it("publishes on the requested host port, and ends the run when docker reports another one", async () => {
+    const same = recordingHarness({
+      dockerReply: (args, input) => (args[0] === "port" ? { status: 0, stdout: "127.0.0.1:52790\n" } : defaultStartReply(args, input)),
+    });
+    same.setExitCode(0);
+    expect(await runHarness(same.options({ hostPort: "52790" }), same.deps, same.teardown)).toBe(0);
+    expect((same.dockerCalls[0] as string[])[7]).toBe("127.0.0.1:52790:52773");
+    expect(same.commands[0]?.env.IRIS_PORT).toBe("52790");
+
+    const other = recordingHarness();
+    expect(await runHarness(other.options({ hostPort: "52790" }), other.deps, other.teardown)).toBe(4);
+    expect(other.logs.join("\n")).toMatch(/not on the requested 52790/);
+    expect(other.commands).toEqual([]);
+    expect(other.events.slice(-1)).toEqual(["docker rm"]);
+  });
+
+  it("refuses a requested host port of 52773 or 1972 before it looks for docker", async () => {
+    for (const hostPort of ["52773", "1972"]) {
+      const harness = recordingHarness();
+
+      expect(await runHarness(harness.options({ hostPort }), harness.deps, harness.teardown)).toBe(2);
+      expect(harness.dockerCalls).toEqual([]);
+    }
   });
 
   it("removes the container when the command cannot be run at all", async () => {
@@ -543,7 +772,7 @@ describe("throwaway-iris: the orchestration, with every side effect stood in for
     expect(polls).toBeLessThanOrEqual(6);
     expect(harness.logs.join("\n")).toMatch(/never answered HTTP 200/);
     expect(harness.commands).toEqual([]);
-    expect(harness.dockerCalls[harness.dockerCalls.length - 1]).toEqual(["rm", "-f", "-v", CONTAINER_ID]);
+    expect(harness.dockerCalls.slice(-2), "the log tail is printed before the container is removed").toEqual([["logs", "--tail", "200", CONTAINER_ID], ["rm", "-f", "-v", CONTAINER_ID]]);
   });
 
   it("exits non-zero with a message and calls no docker when docker is not on PATH: it never skips", async () => {
@@ -572,6 +801,321 @@ describe("throwaway-iris: the orchestration, with every side effect stood in for
     expect(looked).toBe(false);
     expect(harness.dockerCalls).toEqual([]);
     expect(harness.logs.join("\n")).toMatch(/digest/);
+  });
+});
+
+const STATE_FILE = "/virtual/throwaway-live.json";
+const KEPT_STATE = { name: GENERATED_NAME, id: CONTAINER_ID, port: "49153", image: IRISHEALTH_COMMUNITY_IMAGE, namespace: "HSCUSTOM" };
+const AMBIENT_ENV = { PATH: "/usr/bin", IRIS_HOST: "prod.example", IRIS_PASSWORD: "secret", IRIS_HTTPS: "true" } as Record<string, string | undefined>;
+
+/** A harness whose state file already records a throwaway (what `up` leaves behind). */
+function keptHarness(overrides: Parameters<typeof recordingHarness>[0] = {}) {
+  const harness = recordingHarness(overrides);
+  harness.files.set(STATE_FILE, JSON.stringify(KEPT_STATE));
+  return harness;
+}
+
+const stateOptions = () => ({ state: STATE_FILE, env: AMBIENT_ENV });
+
+/** A docker stand-in whose `inspect` reports the throwaway with `overrides`, or the raw `stdout` / failure given. */
+const inspectReply =
+  (reply: { overrides?: Record<string, unknown>; stdout?: string; status?: number; stderr?: string }) =>
+  (args: string[], input: string | undefined) =>
+    args[0] === "inspect"
+      ? { status: reply.status ?? 0, stdout: reply.stdout ?? JSON.stringify(inspectedThrowaway(reply.overrides)), stderr: reply.stderr ?? "" }
+      : defaultStartReply(args, input);
+
+/** Containers `exec`, `logs` and `down` must refuse: each is something other than the throwaway the state file records. */
+const NOT_THE_THROWAWAY: Array<[string, { overrides?: Record<string, unknown>; stdout?: string }, RegExp]> = [
+  ["an unlabelled container", { overrides: { Config: { Labels: {} } } }, /does not carry the label iris-mcp\.owner=throwaway/],
+  ["a container with another owner label", { overrides: { Config: { Labels: { "iris-mcp.owner": "someone" } } } }, /does not carry the label/],
+  ["another container name", { overrides: { Name: "/iris-community-edition" } }, /is named/],
+  ["a container that publishes another port", { overrides: { NetworkSettings: { Ports: { "52773/tcp": [{ HostIp: "127.0.0.1", HostPort: "52773" }] } } } }, /does not publish/],
+  ["two containers", { stdout: JSON.stringify([...inspectedThrowaway(), ...inspectedThrowaway()]) }, /exactly one container/],
+];
+
+describe("throwaway-iris: up keeps its container only on success", () => {
+  const upOptions = (harness: ReturnType<typeof recordingHarness>, extra: Record<string, unknown> = {}) => ({
+    image: IRISHEALTH_COMMUNITY_IMAGE,
+    namespace: "HSCUSTOM",
+    hostPort: "49153",
+    state: STATE_FILE,
+    env: harness.options().env,
+    ...extra,
+  });
+
+  it("starts the container on the requested loopback port, readies it, writes the state and removes nothing", async () => {
+    const harness = recordingHarness();
+
+    const code = await upHarness(upOptions(harness), harness.deps, harness.teardown);
+
+    expect(code).toBe(0);
+    expect(harness.events).toEqual(["docker run", "docker port", "docker exec", "docker exec", "write state"]);
+    const runArgs = harness.dockerCalls[0] as string[];
+    expect(runArgs).toEqual(["run", "-d", "--name", runArgs[3], "--label", OWNER_LABEL, "-p", "127.0.0.1:49153:52773", IRISHEALTH_COMMUNITY_IMAGE]);
+    const state = JSON.parse(harness.files.get(STATE_FILE) as string) as Record<string, string>;
+    expect(state).toEqual({ name: runArgs[3], id: CONTAINER_ID, port: "49153", image: IRISHEALTH_COMMUNITY_IMAGE, namespace: "HSCUSTOM" });
+    expect(parseState(harness.files.get(STATE_FILE) as string)).toEqual(state);
+    expect(harness.commands, "up runs no command").toEqual([]);
+    expect(harness.teardown.armed, "nothing is left armed for the exit handler").toBeUndefined();
+    harness.teardown.run();
+    expect(harness.events, "a later teardown run removes nothing").not.toContain("docker rm");
+  });
+
+  it.each([
+    ["docker run fails", (args: string[], input?: string) => (args[0] === "run" ? { status: 125, stderr: "no such image" } : defaultStartReply(args, input)), ["docker run", "docker rm"]],
+    ["docker prints no container id", (args: string[], input?: string) => (args[0] === "run" ? { status: 0, stdout: "WARNING\n" } : defaultStartReply(args, input)), ["docker run", "docker rm"]],
+    ["docker publishes another port than the requested one", (args: string[], input?: string) => (args[0] === "port" ? { status: 0, stdout: "127.0.0.1:50000\n" } : defaultStartReply(args, input)), ["docker run", "docker port", "docker rm"]],
+    ["docker publishes the shared instance's port", (args: string[], input?: string) => (args[0] === "port" ? { status: 0, stdout: "127.0.0.1:52773\n" } : defaultStartReply(args, input)), ["docker run", "docker port", "docker rm"]],
+    ["the unexpiry does not report OK", (args: string[], input?: string) => (args[0] === "exec" && input?.includes("UnExpireUserPasswords") ? { status: 0, stdout: "IRISMCP-UNEXPIRE:FAILED:x:END\n" } : defaultStartReply(args, input)), ["docker run", "docker port", "docker exec", "docker exec", "docker logs", "docker rm"]],
+  ])("removes the container and writes no state when %s", async (_label, dockerReply, events) => {
+    const harness = recordingHarness({ dockerReply });
+
+    expect(await upHarness(upOptions(harness), harness.deps, harness.teardown)).toBe(4);
+    expect(harness.events).toEqual(events);
+    expect(harness.files.size, "no state file").toBe(0);
+    expect(harness.dockerCalls[harness.dockerCalls.length - 1]).toEqual(["rm", "-f", "-v", (harness.dockerCalls[harness.dockerCalls.length - 1] as string[])[3]]);
+  });
+
+  it("removes the container and writes no state when the session never answers", async () => {
+    const harness = recordingHarness({ dockerReply: (args, input) => (args[0] === "exec" ? { status: 1, stderr: "not ready" } : defaultStartReply(args, input)) });
+
+    const code = await upHarness(upOptions(harness, { limits: { sessionReadyMs: 10_000, sessionStepMs: 5_000 } }), harness.deps, harness.teardown);
+
+    expect(code).toBe(4);
+    expect(harness.events.slice(-2), "the log tail is printed before the container is removed").toEqual(["docker logs", "docker rm"]);
+    expect(harness.logs.join("\n")).toContain("container log tail");
+    expect(harness.files.size).toBe(0);
+  });
+
+  it("removes the container and writes no state when the web port never answers 200, printing the log tail first", async () => {
+    const harness = recordingHarness();
+    harness.deps.webStatus = async () => 503;
+
+    const code = await upHarness(upOptions(harness, { limits: { webReadyMs: 4_000, webStepMs: 2_000 } }), harness.deps, harness.teardown);
+
+    expect(code).toBe(4);
+    expect(harness.dockerCalls.slice(-2)).toEqual([["logs", "--tail", "200", CONTAINER_ID], ["rm", "-f", "-v", CONTAINER_ID]]);
+    expect(harness.logs.join("\n")).toContain("container log tail");
+    expect(harness.files.size).toBe(0);
+  });
+
+  it("removes the container when the state file cannot be written", async () => {
+    const harness = recordingHarness();
+    harness.deps.writeState = () => {
+      throw new Error("EACCES");
+    };
+
+    expect(await upHarness(upOptions(harness), harness.deps, harness.teardown)).toBe(4);
+    expect(harness.events[harness.events.length - 1]).toBe("docker rm");
+    expect(harness.files.size).toBe(0);
+  });
+
+  it.each([
+    ["a floating image", { image: "intersystems/iris-community:2026.2" }],
+    ["a lower-case namespace", { namespace: "hscustom" }],
+    ["host port 52773", { hostPort: "52773" }],
+    ["host port 1972", { hostPort: "1972" }],
+    ["a state file that already exists", { state: STATE_FILE, existing: true }],
+  ])("refuses %s with exit 2, before docker is looked for", async (_label, extra) => {
+    const harness = recordingHarness();
+    if ("existing" in extra) harness.files.set(STATE_FILE, "{}");
+    let looked = false;
+    harness.deps.findDocker = () => {
+      looked = true;
+      return "/fake/docker";
+    };
+
+    expect(await upHarness(upOptions(harness, extra), harness.deps, harness.teardown)).toBe(2);
+    expect(looked).toBe(false);
+    expect(harness.dockerCalls).toEqual([]);
+  });
+
+  it("exits 3 and calls no docker when docker is not on PATH", async () => {
+    const harness = recordingHarness();
+    harness.deps.findDocker = () => undefined;
+
+    expect(await upHarness(upOptions(harness), harness.deps, harness.teardown)).toBe(3);
+    expect(harness.dockerCalls).toEqual([]);
+    expect(harness.files.size).toBe(0);
+  });
+});
+
+describe("throwaway-iris: exec re-inspects the container and runs the command with the throwaway environment", () => {
+  it("runs the command with the namespace of the state, IRIS_HTTPS=false and the throwaway name, after one docker inspect", async () => {
+    const harness = keptHarness();
+    harness.setExitCode(5);
+
+    const code = await execHarness({ ...stateOptions(), command: ["node", "scripts/ci-seed-throwaway.mjs"] }, harness.deps);
+
+    expect(code, "the command's exit code").toBe(5);
+    expect(harness.dockerCalls).toEqual([["inspect", CONTAINER_ID]]);
+    expect(harness.commands).toEqual([
+      {
+        command: ["node", "scripts/ci-seed-throwaway.mjs"],
+        env: {
+          PATH: "/usr/bin",
+          IRIS_REQUIRE_LIVE: "1",
+          IRIS_HOST: "127.0.0.1",
+          IRIS_PORT: "49153",
+          IRIS_USERNAME: "_SYSTEM",
+          IRIS_PASSWORD: "SYS",
+          IRIS_NAMESPACE: "HSCUSTOM",
+          IRIS_HTTPS: "false",
+          IRIS_THROWAWAY: GENERATED_NAME,
+        },
+      },
+    ]);
+  });
+
+  it.each(NOT_THE_THROWAWAY)("refuses %s with exit 2 and runs nothing", async (_label, reply, problem) => {
+    const harness = keptHarness({ dockerReply: inspectReply(reply) });
+
+    const code = await execHarness({ ...stateOptions(), command: ["node", "x.mjs"] }, harness.deps);
+
+    expect(code).toBe(2);
+    expect(harness.commands).toEqual([]);
+    expect(harness.logs.join("\n")).toMatch(problem);
+  });
+
+  it("refuses a container that is not running", async () => {
+    const harness = keptHarness({ dockerReply: inspectReply({ overrides: { State: { Running: false } } }) });
+
+    expect(await execHarness({ ...stateOptions(), command: ["node", "x.mjs"] }, harness.deps)).toBe(2);
+    expect(harness.commands).toEqual([]);
+    expect(harness.logs.join("\n")).toMatch(/not running/);
+  });
+
+  it("refuses when docker inspect fails", async () => {
+    const harness = keptHarness({ dockerReply: inspectReply({ status: 1, stdout: "", stderr: "No such object" }) });
+
+    expect(await execHarness({ ...stateOptions(), command: ["node", "x.mjs"] }, harness.deps)).toBe(2);
+    expect(harness.commands).toEqual([]);
+  });
+
+  it.each([
+    ["no state file", undefined],
+    ["a state file that is not JSON", "not json"],
+    ["a state file that names the shared instance's container", JSON.stringify({ ...KEPT_STATE, name: SHARED_INSTANCE_CONTAINER })],
+    ["a state file with the shared instance's port", JSON.stringify({ ...KEPT_STATE, port: "52773" })],
+  ])("refuses %s with exit 2, before any docker call", async (_label, text) => {
+    const harness = recordingHarness();
+    if (text !== undefined) harness.files.set(STATE_FILE, text);
+
+    expect(await execHarness({ ...stateOptions(), command: ["node", "x.mjs"] }, harness.deps)).toBe(2);
+    expect(harness.dockerCalls).toEqual([]);
+    expect(harness.commands).toEqual([]);
+  });
+
+  it("exits 3 when docker is not on PATH", async () => {
+    const harness = keptHarness();
+    harness.deps.findDocker = () => undefined;
+
+    expect(await execHarness({ ...stateOptions(), command: ["node", "x.mjs"] }, harness.deps)).toBe(3);
+    expect(harness.commands).toEqual([]);
+  });
+});
+
+describe("throwaway-iris: logs prints the container log, and a missing state file is nothing to do", () => {
+  it("prints the last 400 lines of the container the state file records", async () => {
+    const harness = keptHarness();
+
+    expect(await logsHarness(stateOptions(), harness.deps)).toBe(0);
+    expect(harness.dockerCalls).toEqual([["inspect", CONTAINER_ID], ["logs", "--tail", "400", CONTAINER_ID]]);
+    expect(harness.logs.join("\n")).toContain("container log tail");
+  });
+
+  it("reads the log of a stopped container that still carries the name and the label", async () => {
+    const harness = keptHarness({ dockerReply: inspectReply({ overrides: { State: { Running: false }, NetworkSettings: { Ports: {} } } }) });
+
+    expect(await logsHarness(stateOptions(), harness.deps)).toBe(0);
+    expect(harness.dockerCalls.map((call) => call[0])).toEqual(["inspect", "logs"]);
+  });
+
+  it.each(NOT_THE_THROWAWAY)("refuses %s with exit 2 and reads no log", async (_label, reply, problem) => {
+    const harness = keptHarness({ dockerReply: inspectReply(reply) });
+
+    expect(await logsHarness(stateOptions(), harness.deps)).toBe(2);
+    expect(harness.dockerCalls.map((call) => call[0])).toEqual(["inspect"]);
+    expect(harness.logs.join("\n")).toMatch(problem);
+  });
+
+  it("exits 0 and calls no docker when there is no state file", async () => {
+    const harness = recordingHarness();
+
+    expect(await logsHarness(stateOptions(), harness.deps)).toBe(0);
+    expect(harness.dockerCalls).toEqual([]);
+  });
+});
+
+describe("throwaway-iris: down removes the recorded container, once", () => {
+  it("removes the container by id and the state file, and a second down is a no-op", async () => {
+    const harness = keptHarness();
+
+    expect(await downHarness(stateOptions(), harness.deps)).toBe(0);
+    expect(harness.dockerCalls).toEqual([["inspect", CONTAINER_ID], ["rm", "-f", "-v", CONTAINER_ID]]);
+    expect(harness.files.size, "the state file is gone").toBe(0);
+
+    expect(await downHarness(stateOptions(), harness.deps)).toBe(0);
+    expect(harness.dockerCalls.length, "the second down calls no docker").toBe(2);
+  });
+
+  it("removes a stopped container that still carries the name and the label", async () => {
+    const harness = keptHarness({ dockerReply: inspectReply({ overrides: { State: { Running: false }, NetworkSettings: { Ports: {} } } }) });
+
+    expect(await downHarness(stateOptions(), harness.deps)).toBe(0);
+    expect(harness.dockerCalls[harness.dockerCalls.length - 1]).toEqual(["rm", "-f", "-v", CONTAINER_ID]);
+  });
+
+  it.each(NOT_THE_THROWAWAY)("refuses %s with exit 2: nothing is removed and the state file stays", async (_label, reply, problem) => {
+    const harness = keptHarness({ dockerReply: inspectReply(reply) });
+
+    expect(await downHarness(stateOptions(), harness.deps)).toBe(2);
+    expect(harness.dockerCalls.map((call) => call[0]), "no docker rm").toEqual(["inspect"]);
+    expect(harness.files.has(STATE_FILE)).toBe(true);
+    expect(harness.logs.join("\n")).toMatch(problem);
+  });
+
+  it("keeps the state file and exits 4 when docker rm fails", async () => {
+    const harness = keptHarness({ dockerReply: (args, input) => (args[0] === "rm" ? { status: 1, stderr: "daemon error" } : defaultStartReply(args, input)) });
+
+    expect(await downHarness(stateOptions(), harness.deps)).toBe(4);
+    expect(harness.files.has(STATE_FILE)).toBe(true);
+  });
+
+  it("exits 0 and calls no docker when there is no state file", async () => {
+    const harness = recordingHarness();
+
+    expect(await downHarness(stateOptions(), harness.deps)).toBe(0);
+    expect(harness.dockerCalls).toEqual([]);
+  });
+});
+
+describe("throwaway-iris: the environment it hands a command satisfies verify-iris-reachable under CI=true", () => {
+  it("reports IRIS unreachable at a closed port, and never an unset IRIS_HTTPS", async () => {
+    const port = await reserveClosedPort();
+    const scratch = scratchDir();
+    const connectLog = path.join(scratch, "connects.log");
+    const env = {
+      ...buildChildEnv({ PATH: process.env.PATH, CI: "true" }, { port, name: GENERATED_NAME, namespace: "HSCUSTOM" }),
+      NODE_OPTIONS: `--import=${pathToFileURL(path.join(REPO_ROOT, "scripts", "lib", "no-live-iris-preload.mjs")).href}`,
+      IRIS_MCP_CONNECT_LOG: connectLog,
+      IRIS_MCP_WATCH_PORTS: `${port},52773,1972`,
+    } as Record<string, string>;
+
+    const result = spawnSync(process.execPath, [path.join(REPO_ROOT, "scripts", "verify-iris-reachable.mjs")], {
+      cwd: path.join(REPO_ROOT, "packages", "iris-mcp-all"),
+      env,
+      encoding: "utf8",
+      timeout: 60_000,
+    });
+
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toMatch(/FAILED CLOSED: IRIS is not reachable/);
+    expect(result.stderr).not.toMatch(/IRIS_HTTPS|CI is set but/);
+    const connects = existsSync(connectLog) ? readFileSync(connectLog, "utf8").split("\n").filter((line) => line !== "") : [];
+    expect(connects.length, "the check did try the closed port").toBeGreaterThan(0);
+    expect(connects.every((line) => line === `127.0.0.1:${port}`), connects.join(",")).toBe(true);
   });
 });
 
@@ -639,6 +1183,37 @@ describe("throwaway-iris: running the script as a process (a PATH with no docker
     expect(result.stderr).toMatch(/usage: node scripts\/throwaway-iris\.mjs run/);
   });
 
+  it("exits 3 for `up` when docker is not on PATH, and 2 when `up` or `run` is given a refused value, without a state file written", () => {
+    const state = path.join(scratchDir(), "state.json");
+    const up = (extra: string[]) => runScript(["up", "--image", IRISHEALTH_COMMUNITY_IMAGE, "--namespace", "HSCUSTOM", "--host-port", "52791", "--state", state, ...extra]);
+
+    expect(up([]).status).toBe(3);
+    expect(runScript(["up", "--image", IRISHEALTH_COMMUNITY_IMAGE, "--namespace", "HSCUSTOM", "--host-port", "52773", "--state", state]).status).toBe(2);
+    expect(runScript(["run", "--host-port", "1972", "--", "true"]).status).toBe(2);
+    expect(existsSync(state)).toBe(false);
+  });
+
+  it("exits 2 for `exec` and 0 for `logs` and `down` when there is no state file, and calls no docker", () => {
+    const state = path.join(scratchDir(), "missing.json");
+
+    expect(runScript(["exec", "--state", state, "--", "true"]).status).toBe(2);
+    expect(runScript(["logs", "--state", state]).status).toBe(0);
+    expect(runScript(["down", "--state", state]).status).toBe(0);
+  });
+
+  it("refuses a state file that names the shared instance's container, with exit 2, before docker is looked for", () => {
+    const state = path.join(scratchDir(), "shared.json");
+    writeFileSync(state, JSON.stringify({ ...KEPT_STATE, name: SHARED_INSTANCE_CONTAINER }), "utf8");
+
+    for (const subcommand of ["logs", "down"]) {
+      const result = runScript([subcommand, "--state", state]);
+
+      expect(result.status, subcommand).toBe(2);
+      expect(result.stderr).toMatch(/shared IRIS instance/);
+    }
+    expect(existsSync(state)).toBe(true);
+  });
+
   it("spawns and starts nothing when it is only imported", () => {
     const result = spawnSync(
       process.execPath,
@@ -649,5 +1224,28 @@ describe("throwaway-iris: running the script as a process (a PATH with no docker
     expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe("imported");
     expect(result.stderr).toBe("");
+  });
+});
+
+describe("throwaway-iris: the state file the real writer produces", () => {
+  it.skipIf(process.platform === "win32")("is written with mode 0600, never over an existing file, and removed by removeState", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "throwaway-state-"));
+    try {
+      const file = path.join(directory, "state.json");
+      const deps = defaultDeps({});
+
+      deps.writeState(file, '{"first":true}\n');
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+
+      expect(() => deps.writeState(file, '{"second":true}\n')).toThrow(/EEXIST/);
+      expect(readFileSync(file, "utf8")).toBe('{"first":true}\n');
+
+      expect(deps.readState(file)).toBe('{"first":true}\n');
+      deps.removeState(file);
+      expect(existsSync(file)).toBe(false);
+      expect(deps.readState(file), "a missing state file reads as undefined").toBeUndefined();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

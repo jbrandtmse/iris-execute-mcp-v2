@@ -1,52 +1,86 @@
 #!/usr/bin/env node
-// Throwaway IRIS container harness: runs one command against a fresh, disposable IRIS instance.
+// Throwaway IRIS container harness: runs commands against a fresh, disposable IRIS instance.
 //
 // USE
-//   node scripts/throwaway-iris.mjs run [--image <ref>] -- <command> [args...]
+//   node scripts/throwaway-iris.mjs run [--image <ref>] [--host-port <port>] -- <command> [args...]
+//   node scripts/throwaway-iris.mjs up --image <ref> --namespace <NS> --host-port <port> --state <file>
+//   node scripts/throwaway-iris.mjs exec --state <file> -- <command> [args...]
+//   node scripts/throwaway-iris.mjs logs --state <file>
+//   node scripts/throwaway-iris.mjs down --state <file>
 //
 // CONTRACT
 //   1. Validation comes first, before anything is spawned: the image must be digest-pinned
 //      (`<repo>[:<tag>]@sha256:<64 hex>`), the container name is one this script generates
-//      (`iris-mcp-throwaway-<12 hex>`), and the host port is never 52773 or 1972.
-//   2. `docker run -d --name <name> --label iris-mcp.owner=throwaway -p 127.0.0.1::52773 <image>` starts the
-//      container with a dynamic loopback host port, read back with `docker port`. The shared instance
-//      (container `iris-community-edition`, localhost:52773) is never named, probed or touched.
-//   3. Teardown, `docker rm -f -v <id>`, runs on normal exit, error, INT and TERM. It removes only the container id
-//      this script created (the generated name until the id is known), never anything else.
-//   4. Readiness: a bounded `docker exec -i <id> iris session iris -U %SYS` loop, then
+//      (`iris-mcp-throwaway-<12 hex>`), the namespace is upper-case letters and digits, and the host port is never
+//      52773 or 1972. The images are multi-arch manifest lists (linux/amd64 and linux/arm64), so one digest serves a
+//      developer machine and an x86 runner.
+//   2. `docker run -d --name <name> --label iris-mcp.owner=throwaway -p 127.0.0.1:<port>:52773 <image>` starts the
+//      container. `<port>` is the `--host-port` value, or empty (a dynamic loopback port), read back with `docker port`.
+//      The shared instance (container `iris-community-edition`, localhost:52773) is never named, probed or touched.
+//   3. Readiness: a bounded `docker exec -i <id> iris session iris -U %SYS` loop, then
 //      `Security.Users.UnExpireUserPasswords("_SYSTEM")`, then a bounded poll of `GET /api/atelier/` until HTTP 200.
-//   5. The command then runs with IRIS_REQUIRE_LIVE=1, IRIS_HOST=127.0.0.1, IRIS_PORT=<dynamic port>,
-//      IRIS_USERNAME=_SYSTEM, IRIS_PASSWORD=SYS, IRIS_NAMESPACE=USER and IRIS_THROWAWAY=<container name>; every other
-//      ambient IRIS_* variable is dropped. The script exits with the command's exit code.
-//   6. A missing docker exits non-zero with a message. The script never skips.
+//      A container that does not become ready has `docker logs --tail 200` printed before it is removed, in `run` and `up`.
+//   4. `run` starts a container, runs the command against it, prints `docker logs --tail 200` when the command fails,
+//      and removes the container, `docker rm -f -v <id>`, on normal exit, error, INT and TERM. It removes only the
+//      container id this script created (the generated name until the id is known), never anything else.
+//   5. `up` starts the same container, keeps it on success and writes the state file (JSON `{name, id, port, image,
+//      namespace}`, mode 0600, never over an existing file). On any failure it removes the container and writes no
+//      state. `exec`, `logs` and `down` read the state file and run `docker inspect` on the container first: it must
+//      be one running container with that name, carrying the owner label, with its web port published on
+//      127.0.0.1:<port>, or the command is refused and nothing else happens (`logs` and `down` also accept a stopped
+//      container that carries the name and the label). `exec` runs the command with the throwaway environment, `logs`
+//      prints `docker logs --tail 400`, and `down` removes the container and the state file. A missing state file
+//      means `logs` and `down` have nothing to do and exit 0.
+//   6. The command runs with IRIS_REQUIRE_LIVE=1, IRIS_HOST=127.0.0.1, IRIS_PORT=<port>, IRIS_USERNAME=_SYSTEM,
+//      IRIS_PASSWORD=SYS, IRIS_NAMESPACE=<namespace, USER by default>, IRIS_HTTPS=false and
+//      IRIS_THROWAWAY=<container name>; every other ambient IRIS_* variable is dropped. The script exits with the
+//      command's exit code.
+//   7. A missing docker exits non-zero with a message. The script never skips.
 //
 // EXIT CODES
-//   2 usage or a refused image, name or port on the command line; 3 docker not found on PATH; 4 the container did not
-//   start or become ready, including a published host port that `docker port` reads back as a refused one (52773 or
-//   1972); otherwise the command's own exit code (128 + n when a signal ended it).
+//   2 usage or a refused image, name, namespace, port, state file or container on the command line; 3 docker not found
+//   on PATH; 4 the container did not start or become ready, including a published host port that `docker port` reads
+//   back as a refused one (52773 or 1972) or as another one than the one requested; otherwise the command's own exit
+//   code (128 + n when a signal ended it).
 //
 // IMPORT
 //   Importing this module spawns nothing. Every process-spawning step sits behind `defaultDeps()`, which only
-//   `main()` calls, and `main()` runs only when this file is the entry point. `runHarness(options, deps, teardown)`
-//   takes every side effect as a dependency.
+//   `main()` calls, and `main()` runs only when this file is the entry point. `runHarness`, `upHarness`,
+//   `execHarness`, `logsHarness` and `downHarness` take every side effect as a dependency.
 //
-// PURE HELPERS EXPORTED FOR STORY 42.3 AND THE GATES
-//   validateImage, validateHostPort, validateContainerName, generateContainerName, buildRunArgv, buildPortArgv,
-//   parseDockerPort, buildSessionArgv, buildTeardownArgv, buildChildEnv, parseCli, findExecutable, inspectProblems,
-//   assertThrowawayInspect, createTeardown, runHarness. The constants name the images and the safety limits.
+// PURE HELPERS EXPORTED FOR THE GATES AND THE CI SCRIPTS
+//   validateImage, validateHostPort, validateNamespace, validateContainerName, generateContainerName, buildRunArgv,
+//   buildPortArgv, parseDockerPort, buildSessionArgv, buildInspectArgv, buildLogsArgv, buildTeardownArgv,
+//   buildChildEnv, throwawayEnvProblems, assertThrowawayEnv, parseCli, parseState, findExecutable, inspectProblems,
+//   assertThrowawayInspect, createTeardown. The constants name the images and the safety limits.
 
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { accessSync, constants, realpathSync, statSync } from 'node:fs';
+import { accessSync, chmodSync, constants, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-/** The default image: IRIS Community 2026.2, pinned by digest. */
+/**
+ * The default image: IRIS Community 2026.2, pinned by its multi-arch manifest list digest (linux/amd64 `d4331089...`,
+ * linux/arm64 `31d0ef38...`). Source: `registry-1.docker.io/v2/intersystems/iris-community/manifests/<digest>`,
+ * content-type `manifest.list.v2`, fetched 2026-10-21.
+ */
 export const IRIS_COMMUNITY_IMAGE =
   'intersystems/iris-community:2026.2@sha256:cd2ebcab02d1ef80ec155def4418399f353d867162688c36a3705760e750bdaa';
 
-/** The alternative a gate selects when plain IRIS cannot compile the ExecuteMCPv2 classes: IRIS for Health Community, pinned by digest. */
+/**
+ * The oldest IRIS Community tag Docker Hub serves, pinned by its manifest list digest (linux/amd64 `6167245b...`,
+ * linux/arm64 `dd991c1b...`). Source: `hub.docker.com/v2/repositories/intersystems/iris-community/tags`, and the
+ * manifest at `registry-1.docker.io/v2/intersystems/iris-community/manifests/<digest>`, fetched 2026-10-21.
+ */
+export const OLDEST_IRIS_COMMUNITY_IMAGE =
+  'intersystems/iris-community:2024.3@sha256:0d6dbb91f71c69a65d8577741647e961168e90699e26d158e984a2a2919a874d';
+
+/**
+ * IRIS for Health Community 2026.2, pinned by its multi-arch manifest list digest (linux/amd64 `788c8626...`): the
+ * image a gate selects when it needs the interoperability namespaces that plain IRIS lacks (`HSCUSTOM`).
+ */
 export const IRISHEALTH_COMMUNITY_IMAGE =
   'intersystems/irishealth-community:2026.2@sha256:462de1fb3597272fde0e03afad006af1b18b59c90f1c1fb5566c79b027a7af0a';
 
@@ -66,14 +100,20 @@ export const REFUSED_HOST_PORTS = Object.freeze(['52773', '1972']);
 export const CONTAINER_WEB_PORT = '52773';
 export const LOOPBACK_HOST = '127.0.0.1';
 
-/** The account, password and namespace the command receives. */
+/** The account, password, namespace and transport the command receives. */
 export const THROWAWAY_USERNAME = '_SYSTEM';
 export const THROWAWAY_PASSWORD = 'SYS';
 export const THROWAWAY_NAMESPACE = 'USER';
+export const THROWAWAY_HTTPS = 'false';
+
+/** How many lines of the container log `run` and `logs` print. */
+export const RUN_LOG_TAIL = 200;
+export const LOGS_LOG_TAIL = 400;
 
 const IMAGE_PATTERN = /^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$/;
 const NAME_PATTERN = /^iris-mcp-throwaway-[0-9a-f]{12}$/;
 const CONTAINER_ID_PATTERN = /^[0-9a-f]{64}$/;
+const NAMESPACE_PATTERN = /^[A-Z][A-Z0-9]{0,63}$/;
 
 /** A refusal raised by validation: the request names something this harness never uses. */
 export class ThrowawayRefusal extends Error {
@@ -122,6 +162,22 @@ export function validateHostPort(port) {
 }
 
 /**
+ * The namespace, when it is an IRIS namespace name this harness hands to a command: an upper-case letter followed by
+ * up to 63 upper-case letters and digits (`USER`, `HSCUSTOM`).
+ *
+ * @param {unknown} namespace
+ * @returns {string}
+ */
+export function validateNamespace(namespace) {
+  if (typeof namespace !== 'string' || !NAMESPACE_PATTERN.test(namespace)) {
+    throw new ThrowawayRefusal(
+      `refusing the namespace ${JSON.stringify(namespace)}: it must be an upper-case letter followed by up to 63 upper-case letters or digits.`,
+    );
+  }
+  return namespace;
+}
+
+/**
  * The container name, when this script could have generated it (`iris-mcp-throwaway-<12 hex>`).
  * The shared instance's name, and every name this script did not create, are refused.
  *
@@ -155,12 +211,13 @@ export function generateContainerName(random = randomBytes) {
 
 /**
  * The `docker run` arguments (without the `docker` command): detached, named, labelled, with the container's web port
- * published on a dynamic port of the loopback address only.
+ * published on the loopback address only: on `hostPort` when one is given, else on a dynamic port.
  *
- * @param {{ image: string, name: string }} options
+ * @param {{ image: string, name: string, hostPort?: string | number }} options
  * @returns {string[]}
  */
-export function buildRunArgv({ image, name }) {
+export function buildRunArgv({ image, name, hostPort }) {
+  const published = hostPort === undefined ? '' : validateHostPort(hostPort);
   return [
     'run',
     '-d',
@@ -169,7 +226,7 @@ export function buildRunArgv({ image, name }) {
     '--label',
     OWNER_LABEL,
     '-p',
-    `${LOOPBACK_HOST}::${CONTAINER_WEB_PORT}`,
+    `${LOOPBACK_HOST}:${published}:${CONTAINER_WEB_PORT}`,
     validateImage(image),
   ];
 }
@@ -192,6 +249,28 @@ export function buildPortArgv(containerId) {
  */
 export function buildSessionArgv(containerId) {
   return ['exec', '-i', validateContainerId(containerId), 'iris', 'session', 'iris', '-U', '%SYS'];
+}
+
+/**
+ * The `docker inspect` arguments for one container: its id, or its generated name.
+ *
+ * @param {string} containerRef
+ * @returns {string[]}
+ */
+export function buildInspectArgv(containerRef) {
+  return ['inspect', CONTAINER_ID_PATTERN.test(String(containerRef)) ? containerRef : validateContainerName(containerRef)];
+}
+
+/**
+ * The `docker logs` arguments for one container this script created: the last `tail` lines.
+ *
+ * @param {string} containerRef
+ * @param {number} tail
+ * @returns {string[]}
+ */
+export function buildLogsArgv(containerRef, tail) {
+  if (!Number.isInteger(tail) || tail < 1) throw new ThrowawayRefusal(`refusing the log tail ${JSON.stringify(tail)}: it is not a positive integer.`);
+  return ['logs', '--tail', String(tail), CONTAINER_ID_PATTERN.test(String(containerRef)) ? containerRef : validateContainerName(containerRef)];
 }
 
 /**
@@ -241,10 +320,10 @@ export function parseDockerPort(output) {
  * target and the arming variable.
  *
  * @param {Record<string, string | undefined>} baseEnv
- * @param {{ port: string | number, name: string }} throwaway
+ * @param {{ port: string | number, name: string, namespace?: string }} throwaway
  * @returns {Record<string, string>}
  */
-export function buildChildEnv(baseEnv, { port, name }) {
+export function buildChildEnv(baseEnv, { port, name, namespace = THROWAWAY_NAMESPACE }) {
   const env = {};
   for (const [key, value] of Object.entries(baseEnv)) {
     if (typeof value !== 'string' || key.toUpperCase().startsWith('IRIS_')) continue;
@@ -257,33 +336,119 @@ export function buildChildEnv(baseEnv, { port, name }) {
     IRIS_PORT: validateHostPort(port),
     IRIS_USERNAME: THROWAWAY_USERNAME,
     IRIS_PASSWORD: THROWAWAY_PASSWORD,
-    IRIS_NAMESPACE: THROWAWAY_NAMESPACE,
+    IRIS_NAMESPACE: validateNamespace(namespace),
+    IRIS_HTTPS: THROWAWAY_HTTPS,
     IRIS_THROWAWAY: validateContainerName(name),
   };
 }
 
 /**
- * Parse `run [--image <ref>] -- <command> [args...]`. The image defaults to {@link IRIS_COMMUNITY_IMAGE} and is validated.
+ * What is wrong with an environment that is supposed to target a throwaway container this harness started: it must be
+ * armed with `IRIS_REQUIRE_LIVE=1`, name a container this harness generates in `IRIS_THROWAWAY`, target
+ * `IRIS_HOST=127.0.0.1`, and carry an `IRIS_PORT` that is a port and not 52773 or 1972. An empty list means it is one.
+ *
+ * @param {Record<string, string | undefined>} env
+ * @returns {string[]}
+ */
+export function throwawayEnvProblems(env) {
+  const problems = [];
+  if (env.IRIS_REQUIRE_LIVE !== '1') problems.push(`IRIS_REQUIRE_LIVE is ${JSON.stringify(env.IRIS_REQUIRE_LIVE)}, not "1".`);
+  try {
+    validateContainerName(env.IRIS_THROWAWAY);
+  } catch (error) {
+    problems.push(`IRIS_THROWAWAY: ${error.message}`);
+  }
+  if (env.IRIS_HOST !== LOOPBACK_HOST) problems.push(`IRIS_HOST is ${JSON.stringify(env.IRIS_HOST)}, not ${LOOPBACK_HOST}.`);
+  try {
+    validateHostPort(env.IRIS_PORT);
+  } catch (error) {
+    problems.push(`IRIS_PORT: ${error.message}`);
+  }
+  return problems;
+}
+
+/**
+ * Throw a {@link ThrowawayRefusal} unless `env` targets a throwaway container (see {@link throwawayEnvProblems}).
+ *
+ * @param {Record<string, string | undefined>} env
+ */
+export function assertThrowawayEnv(env) {
+  const problems = throwawayEnvProblems(env);
+  if (problems.length > 0) {
+    throw new ThrowawayRefusal(`the environment does not target a throwaway IRIS container: ${problems.join(' ')}`);
+  }
+}
+
+/**
+ * Parse the command line.
+ *
+ * - `run [--image <ref>] [--host-port <port>] -- <command> [args...]`: `{ image, command }`, plus `hostPort` when the flag is
+ *   given. The image defaults to {@link IRIS_COMMUNITY_IMAGE}.
+ * - `up --image <ref> --namespace <NS> --host-port <port> --state <file>`: `{ subcommand: 'up', image, namespace, hostPort, state }`.
+ * - `exec --state <file> -- <command> [args...]`: `{ subcommand: 'exec', state, command }`.
+ * - `logs --state <file>` and `down --state <file>`: `{ subcommand, state }`.
+ *
+ * Every value is validated.
  *
  * @param {readonly string[]} argv
- * @returns {{ image: string, command: string[] }}
+ * @returns {{ image: string, command: string[], hostPort?: string } | { subcommand: 'up', image: string, namespace: string, hostPort: string, state: string } | { subcommand: 'exec', state: string, command: string[] } | { subcommand: 'logs' | 'down', state: string }}
  */
 export function parseCli(argv) {
-  const usage = 'usage: node scripts/throwaway-iris.mjs run [--image <digest-pinned ref>] -- <command> [args...]';
-  if (argv[0] !== 'run') throw new ThrowawayRefusal(usage);
-  let image = IRIS_COMMUNITY_IMAGE;
+  const usage =
+    'usage: node scripts/throwaway-iris.mjs run [--image <digest-pinned ref>] [--host-port <port>] -- <command> [args...]\n' +
+    '       node scripts/throwaway-iris.mjs up --image <digest-pinned ref> --namespace <NS> --host-port <port> --state <file>\n' +
+    '       node scripts/throwaway-iris.mjs exec --state <file> -- <command> [args...]\n' +
+    '       node scripts/throwaway-iris.mjs logs --state <file>\n' +
+    '       node scripts/throwaway-iris.mjs down --state <file>';
+  const subcommand = argv[0];
+  if (!['run', 'up', 'exec', 'logs', 'down'].includes(subcommand)) throw new ThrowawayRefusal(usage);
+
+  const allowed = {
+    run: ['--image', '--host-port'],
+    up: ['--image', '--namespace', '--host-port', '--state'],
+    exec: ['--state'],
+    logs: ['--state'],
+    down: ['--state'],
+  }[subcommand];
+  const values = {};
   let index = 1;
   while (index < argv.length && argv[index] !== '--') {
-    if (argv[index] === '--image' && index + 1 < argv.length) {
-      image = argv[index + 1];
+    const flag = argv[index];
+    if (allowed.includes(flag) && index + 1 < argv.length && values[flag] === undefined) {
+      values[flag] = argv[index + 1];
       index += 2;
     } else {
-      throw new ThrowawayRefusal(`unknown argument ${JSON.stringify(argv[index])}; ${usage}`);
+      throw new ThrowawayRefusal(`unknown argument ${JSON.stringify(flag)}; ${usage}`);
     }
   }
+  const takesCommand = subcommand === 'run' || subcommand === 'exec';
   const command = argv.slice(index + 1);
-  if (argv[index] !== '--' || command.length === 0) throw new ThrowawayRefusal(`no command after "--"; ${usage}`);
-  return { image: validateImage(image), command };
+  if (takesCommand) {
+    if (argv[index] !== '--' || command.length === 0) throw new ThrowawayRefusal(`no command after "--"; ${usage}`);
+  } else if (index < argv.length) {
+    throw new ThrowawayRefusal(`unexpected "--"; ${usage}`);
+  }
+  const require = (flag) => {
+    if (values[flag] === undefined) throw new ThrowawayRefusal(`${subcommand} needs ${flag}; ${usage}`);
+    return values[flag];
+  };
+
+  if (subcommand === 'run') {
+    const parsed = { image: validateImage(values['--image'] ?? IRIS_COMMUNITY_IMAGE), command };
+    if (values['--host-port'] !== undefined) parsed.hostPort = validateHostPort(values['--host-port']);
+    return parsed;
+  }
+  if (subcommand === 'up') {
+    return {
+      subcommand,
+      image: validateImage(require('--image')),
+      namespace: validateNamespace(require('--namespace')),
+      hostPort: validateHostPort(require('--host-port')),
+      state: require('--state'),
+    };
+  }
+  if (subcommand === 'exec') return { subcommand, state: require('--state'), command };
+  return { subcommand, state: require('--state') };
 }
 
 /**
@@ -317,13 +482,14 @@ export function findExecutable(command, pathValue, platform = process.platform) 
 /**
  * What is wrong with the parsed output of `docker inspect <name>` for a container that must be a throwaway publishing
  * `port`: it is exactly one running container with that name, carrying the owner label, with its web port published
- * on the loopback address at `port`. An empty list means the container is the throwaway.
+ * on the loopback address at `port`. An empty list means the container is the throwaway. With `allowStopped`, a
+ * container that is not running is accepted when it carries the name and the label, and its published port is not checked.
  *
  * @param {unknown} inspected - The parsed JSON of `docker inspect`.
- * @param {{ name: string, port: string | number }} expected
+ * @param {{ name: string, port: string | number, allowStopped?: boolean }} expected
  * @returns {string[]}
  */
-export function inspectProblems(inspected, { name, port }) {
+export function inspectProblems(inspected, { name, port, allowStopped = false }) {
   const problems = [];
   try {
     validateContainerName(name);
@@ -346,15 +512,18 @@ export function inspectProblems(inspected, { name, port }) {
   if (container.Config?.Labels?.[OWNER_LABEL_KEY] !== OWNER_LABEL_VALUE) {
     problems.push(`the container does not carry the label ${OWNER_LABEL}, so it was not started by scripts/throwaway-iris.mjs.`);
   }
-  if (container.State?.Running !== true) {
+  const running = container.State?.Running === true;
+  if (!running && !allowStopped) {
     problems.push('the container is not running.');
   }
-  const bindings = container.NetworkSettings?.Ports?.[`${CONTAINER_WEB_PORT}/tcp`];
-  const published =
-    Array.isArray(bindings) &&
-    bindings.some((binding) => binding?.HostIp === LOOPBACK_HOST && String(binding?.HostPort) === String(port));
-  if (!published) {
-    problems.push(`the container does not publish ${CONTAINER_WEB_PORT}/tcp on ${LOOPBACK_HOST}:${port}.`);
+  if (running || !allowStopped) {
+    const bindings = container.NetworkSettings?.Ports?.[`${CONTAINER_WEB_PORT}/tcp`];
+    const published =
+      Array.isArray(bindings) &&
+      bindings.some((binding) => binding?.HostIp === LOOPBACK_HOST && String(binding?.HostPort) === String(port));
+    if (!published) {
+      problems.push(`the container does not publish ${CONTAINER_WEB_PORT}/tcp on ${LOOPBACK_HOST}:${port}.`);
+    }
   }
   return problems;
 }
@@ -363,7 +532,7 @@ export function inspectProblems(inspected, { name, port }) {
  * Throw when {@link inspectProblems} finds any problem.
  *
  * @param {unknown} inspected
- * @param {{ name: string, port: string | number }} expected
+ * @param {{ name: string, port: string | number, allowStopped?: boolean }} expected
  */
 export function assertThrowawayInspect(inspected, expected) {
   const problems = inspectProblems(inspected, expected);
@@ -373,8 +542,34 @@ export function assertThrowawayInspect(inspected, expected) {
 }
 
 /**
+ * The state of a throwaway that `up` keeps: parsed from the state file's text and validated field by field.
+ *
+ * @param {string} text
+ * @returns {{ name: string, id: string, port: string, image: string, namespace: string }}
+ */
+export function parseState(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new ThrowawayRefusal('the state file is not JSON.');
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new ThrowawayRefusal('the state file is not a JSON object.');
+  }
+  return {
+    name: validateContainerName(parsed.name),
+    id: validateContainerId(parsed.id),
+    port: validateHostPort(parsed.port),
+    image: validateImage(parsed.image),
+    namespace: validateNamespace(parsed.namespace),
+  };
+}
+
+/**
  * A teardown that removes exactly one container, once. `arm(ref)` records the container this script created (first its
- * generated name, then its id); `run()` removes it synchronously, so it is safe in an `exit` handler, and is idempotent.
+ * generated name, then its id); `run()` removes it synchronously, so it is safe in an `exit` handler, and is idempotent;
+ * `disarm()` forgets the container, for a container that is kept on purpose.
  *
  * @param {(args: string[]) => unknown} docker - Runs `docker <args>` synchronously.
  */
@@ -394,6 +589,9 @@ export function createTeardown(docker) {
       } catch {
         // removal is best effort; a failure is reported by the docker call's own output
       }
+    },
+    disarm() {
+      ref = undefined;
     },
     /** The container the teardown would remove, or `undefined`. */
     get armed() {
@@ -420,11 +618,88 @@ const DEFAULT_LIMITS = Object.freeze({
   dockerCallMs: 120_000,
 });
 
+/** A failure to start or ready the container: the run ends with exit code 4. */
+class StartFailure extends Error {}
+
+/**
+ * Start a container from `image` and wait until it is ready: the docker calls, the port read-back, the session loop,
+ * the password unexpiry and the HTTP poll. Throws {@link StartFailure} (or a refusal) on any failure; the caller's
+ * teardown removes the container.
+ *
+ * @returns {Promise<{ name: string, containerId: string, port: string }>}
+ */
+async function startContainer({ image, hostPort }, deps, teardown, limits) {
+  const name = generateContainerName();
+  const docker = (args, callOptions) => deps.docker(args, { timeoutMs: limits.dockerCallMs, ...callOptions });
+
+  teardown.arm(name);
+  const started = docker(buildRunArgv({ image, name, hostPort }), { timeoutMs: limits.runMs });
+  if (started.status !== 0) {
+    throw new StartFailure(`docker run failed (${started.error?.message ?? `exit ${started.status}`}): ${started.stderr.trim()}`);
+  }
+  const containerId = started.stdout.trim().split(/\r?\n/).pop() ?? '';
+  if (!CONTAINER_ID_PATTERN.test(containerId)) {
+    throw new StartFailure(`docker run printed ${JSON.stringify(started.stdout.trim())}, not a container id.`);
+  }
+  teardown.arm(containerId);
+  deps.log(`throwaway-iris: started ${name} from ${image}`);
+
+  const reported = docker(buildPortArgv(containerId));
+  if (reported.status !== 0) throw new StartFailure(`docker port failed: ${reported.stderr.trim()}`);
+  const port = parseDockerPort(reported.stdout);
+  if (hostPort !== undefined && port !== validateHostPort(hostPort)) {
+    throw new StartFailure(`${name} publishes the web port on ${LOOPBACK_HOST}:${port}, not on the requested ${validateHostPort(hostPort)}.`);
+  }
+  deps.log(`throwaway-iris: ${name} publishes the web port on ${LOOPBACK_HOST}:${port}`);
+
+  const session = (script) => docker(buildSessionArgv(containerId), { input: script, timeoutMs: limits.sessionCallMs });
+
+  try {
+    const sessionDeadline = deps.now() + limits.sessionReadyMs;
+    for (;;) {
+      const attempt = session(READY_SCRIPT);
+      if (attempt.status === 0 && attempt.stdout.includes('IRISMCP-READY')) break;
+      if (deps.now() >= sessionDeadline) {
+        throw new StartFailure(`${name} never answered an iris session within ${limits.sessionReadyMs / 1000}s.`);
+      }
+      await deps.sleep(limits.sessionStepMs);
+    }
+
+    const unexpired = session(UNEXPIRE_SCRIPT);
+    if (unexpired.status !== 0 || !/IRISMCP-UNEXPIRE:OK:END/.test(unexpired.stdout)) {
+      throw new StartFailure(`UnExpireUserPasswords("_SYSTEM") did not report OK: ${`${unexpired.stdout}${unexpired.stderr}`.trim().slice(-400)}`);
+    }
+
+    const webDeadline = deps.now() + limits.webReadyMs;
+    while ((await deps.webStatus(port)) !== 200) {
+      if (deps.now() >= webDeadline) {
+        throw new StartFailure(`GET /api/atelier/ on ${LOOPBACK_HOST}:${port} never answered HTTP 200 within ${limits.webReadyMs / 1000}s.`);
+      }
+      await deps.sleep(limits.webStepMs);
+    }
+  } catch (error) {
+    printContainerLogs(deps, docker, containerId, RUN_LOG_TAIL);
+    throw error;
+  }
+  return { name, containerId, port };
+}
+
+/** The container log tail, printed through `deps.log` (best effort). */
+function printContainerLogs(deps, docker, containerId, tail) {
+  try {
+    const logs = docker(buildLogsArgv(containerId, tail));
+    deps.log(`throwaway-iris: docker logs --tail ${tail} ${containerId}:\n${`${logs.stdout}${logs.stderr}`.trimEnd()}`);
+  } catch (error) {
+    deps.log(`throwaway-iris: could not read the container log: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 /**
  * Run `options.command` against a fresh throwaway container and return its exit code (or one of the codes in the
- * header). Every side effect goes through `deps`; `teardown` removes the container on every path out.
+ * header). Every side effect goes through `deps`; `teardown` removes the container on every path out. When the command
+ * fails, the last {@link RUN_LOG_TAIL} lines of the container log are printed before the container is removed.
  *
- * @param {{ image: string, command: string[], env: Record<string, string | undefined>, limits?: Partial<typeof DEFAULT_LIMITS> }} options
+ * @param {{ image: string, command: string[], hostPort?: string, env: Record<string, string | undefined>, limits?: Partial<typeof DEFAULT_LIMITS> }} options
  * @param {{
  *   findDocker: (env: Record<string, string | undefined>) => string | undefined,
  *   docker: (args: string[], options?: { input?: string, timeoutMs?: number }) => { status: number | null, stdout: string, stderr: string, error?: Error },
@@ -440,10 +715,9 @@ const DEFAULT_LIMITS = Object.freeze({
 export async function runHarness(options, deps, teardown) {
   const limits = { ...DEFAULT_LIMITS, ...options.limits };
   let image;
-  let name;
   try {
     image = validateImage(options.image);
-    name = generateContainerName();
+    if (options.hostPort !== undefined) validateHostPort(options.hostPort);
   } catch (error) {
     deps.log(`throwaway-iris: ${error.message}`);
     return 2;
@@ -453,69 +727,182 @@ export async function runHarness(options, deps, teardown) {
     return 3;
   }
   const docker = (args, callOptions) => deps.docker(args, { timeoutMs: limits.dockerCallMs, ...callOptions });
-  const failed = (message) => {
-    deps.log(`throwaway-iris: ${message}`);
-    return 4;
-  };
+  let containerId;
 
   try {
-    teardown.arm(name);
-    const started = docker(buildRunArgv({ image, name }), { timeoutMs: limits.runMs });
-    if (started.status !== 0) {
-      return failed(`docker run failed (${started.error?.message ?? `exit ${started.status}`}): ${started.stderr.trim()}`);
-    }
-    const containerId = started.stdout.trim().split(/\r?\n/).pop() ?? '';
-    if (!CONTAINER_ID_PATTERN.test(containerId)) {
-      return failed(`docker run printed ${JSON.stringify(started.stdout.trim())}, not a container id.`);
-    }
-    teardown.arm(containerId);
-    deps.log(`throwaway-iris: started ${name} from ${image}`);
+    const started = await startContainer({ image, hostPort: options.hostPort }, deps, teardown, limits);
+    containerId = started.containerId;
+    deps.log(`throwaway-iris: ${started.name} answers HTTP 200 on /api/atelier/; running ${options.command.join(' ')}`);
 
-    const reported = docker(buildPortArgv(containerId));
-    if (reported.status !== 0) return failed(`docker port failed: ${reported.stderr.trim()}`);
-    const port = parseDockerPort(reported.stdout);
-    deps.log(`throwaway-iris: ${name} publishes the web port on ${LOOPBACK_HOST}:${port}`);
-
-    const session = (script) =>
-      docker(buildSessionArgv(containerId), { input: script, timeoutMs: limits.sessionCallMs });
-
-    const sessionDeadline = deps.now() + limits.sessionReadyMs;
-    for (;;) {
-      const attempt = session(READY_SCRIPT);
-      if (attempt.status === 0 && attempt.stdout.includes('IRISMCP-READY')) break;
-      if (deps.now() >= sessionDeadline) {
-        const logs = docker(['logs', '--tail', '40', containerId]);
-        deps.log(`${logs.stdout}${logs.stderr}`.trim());
-        return failed(`${name} never answered an iris session within ${limits.sessionReadyMs / 1000}s.`);
-      }
-      await deps.sleep(limits.sessionStepMs);
-    }
-
-    const unexpired = session(UNEXPIRE_SCRIPT);
-    if (unexpired.status !== 0 || !/IRISMCP-UNEXPIRE:OK:END/.test(unexpired.stdout)) {
-      return failed(`UnExpireUserPasswords("_SYSTEM") did not report OK: ${`${unexpired.stdout}${unexpired.stderr}`.trim().slice(-400)}`);
-    }
-
-    const webDeadline = deps.now() + limits.webReadyMs;
-    while ((await deps.webStatus(port)) !== 200) {
-      if (deps.now() >= webDeadline) {
-        return failed(`GET /api/atelier/ on ${LOOPBACK_HOST}:${port} never answered HTTP 200 within ${limits.webReadyMs / 1000}s.`);
-      }
-      await deps.sleep(limits.webStepMs);
-    }
-    deps.log(`throwaway-iris: ${name} answers HTTP 200 on /api/atelier/; running ${options.command.join(' ')}`);
-
-    return await deps.runCommand(options.command, buildChildEnv(options.env, { port, name }));
+    const code = await deps.runCommand(options.command, buildChildEnv(options.env, { port: started.port, name: started.name }));
+    if (code !== 0) printContainerLogs(deps, docker, containerId, RUN_LOG_TAIL);
+    return code;
   } catch (error) {
-    return failed(error instanceof Error ? error.message : String(error));
+    deps.log(`throwaway-iris: ${error instanceof Error ? error.message : String(error)}`);
+    if (containerId !== undefined) printContainerLogs(deps, docker, containerId, RUN_LOG_TAIL);
+    return 4;
   } finally {
     teardown.run();
   }
 }
 
 /**
- * The real side effects of {@link runHarness}. Calling this spawns nothing by itself; each function spawns only when it
- * is called.
+ * Start a container, keep it, and record it in the state file. Nothing is kept on a failure: the container is removed
+ * and no state is written.
+ *
+ * @param {{ image: string, namespace: string, hostPort: string, state: string, env: Record<string, string | undefined>, limits?: Partial<typeof DEFAULT_LIMITS> }} options
+ * @param {Parameters<typeof runHarness>[1] & { fileExists: (file: string) => boolean, writeState: (file: string, text: string) => void }} deps
+ * @param {ReturnType<typeof createTeardown>} teardown
+ * @returns {Promise<number>}
+ */
+export async function upHarness(options, deps, teardown) {
+  const limits = { ...DEFAULT_LIMITS, ...options.limits };
+  let image;
+  let namespace;
+  let hostPort;
+  try {
+    image = validateImage(options.image);
+    namespace = validateNamespace(options.namespace);
+    hostPort = validateHostPort(options.hostPort);
+    if (typeof options.state !== 'string' || options.state === '') throw new ThrowawayRefusal('--state needs a file path.');
+    if (deps.fileExists(options.state)) {
+      throw new ThrowawayRefusal(`the state file ${options.state} already exists: run "down --state" on it first, or remove it.`);
+    }
+  } catch (error) {
+    deps.log(`throwaway-iris: ${error.message}`);
+    return 2;
+  }
+  if (deps.findDocker(options.env) === undefined) {
+    deps.log('throwaway-iris: docker was not found on PATH. This harness needs docker to start the throwaway IRIS container and never skips.');
+    return 3;
+  }
+
+  try {
+    const started = await startContainer({ image, hostPort }, deps, teardown, limits);
+    deps.writeState(
+      options.state,
+      `${JSON.stringify({ name: started.name, id: started.containerId, port: started.port, image, namespace }, null, 2)}\n`,
+    );
+    teardown.disarm();
+    deps.log(`throwaway-iris: ${started.name} is up on ${LOOPBACK_HOST}:${started.port} (namespace ${namespace}); state in ${options.state}`);
+    return 0;
+  } catch (error) {
+    deps.log(`throwaway-iris: ${error instanceof Error ? error.message : String(error)}`);
+    return 4;
+  } finally {
+    teardown.run();
+  }
+}
+
+/**
+ * The throwaway that a state file records, after `docker inspect` showed it is still that container.
+ *
+ * @returns {{ state: ReturnType<typeof parseState> } | { missing: true } | { code: number }} `missing` means there is no state file; a `code` means the state or the container was refused.
+ */
+function loadThrowaway(options, deps, { allowStopped }) {
+  let text;
+  try {
+    text = deps.readState(options.state);
+  } catch (error) {
+    deps.log(`throwaway-iris: could not read the state file ${options.state}: ${error instanceof Error ? error.message : String(error)}`);
+    return { code: 2 };
+  }
+  if (text === undefined) return { missing: true };
+  let state;
+  try {
+    state = parseState(text);
+  } catch (error) {
+    deps.log(`throwaway-iris: ${options.state}: ${error.message}`);
+    return { code: 2 };
+  }
+  if (deps.findDocker(options.env) === undefined) {
+    deps.log('throwaway-iris: docker was not found on PATH. This harness needs docker and never skips.');
+    return { code: 3 };
+  }
+  const inspected = deps.docker(buildInspectArgv(state.id), { timeoutMs: DEFAULT_LIMITS.dockerCallMs });
+  if (inspected.status !== 0) {
+    deps.log(`throwaway-iris: docker inspect ${state.id} failed (${inspected.error?.message ?? `exit ${inspected.status}`}): ${inspected.stderr.trim()}`);
+    return { code: 2 };
+  }
+  try {
+    assertThrowawayInspect(JSON.parse(inspected.stdout), { name: state.name, port: state.port, allowStopped });
+  } catch (error) {
+    deps.log(`throwaway-iris: ${error.message}`);
+    return { code: 2 };
+  }
+  return { state };
+}
+
+/**
+ * Run a command with the throwaway environment of the container the state file records.
+ *
+ * @param {{ state: string, command: string[], env: Record<string, string | undefined> }} options
+ * @param {Parameters<typeof runHarness>[1] & { readState: (file: string) => string | undefined }} deps
+ * @returns {Promise<number>}
+ */
+export async function execHarness(options, deps) {
+  const loaded = loadThrowaway(options, deps, { allowStopped: false });
+  if (loaded.missing) {
+    deps.log(`throwaway-iris: the state file ${options.state} does not exist: run "up --state" first.`);
+    return 2;
+  }
+  if (loaded.code !== undefined) return loaded.code;
+  const { state } = loaded;
+  try {
+    return await deps.runCommand(options.command, buildChildEnv(options.env, { port: state.port, name: state.name, namespace: state.namespace }));
+  } catch (error) {
+    deps.log(`throwaway-iris: ${error instanceof Error ? error.message : String(error)}`);
+    return 4;
+  }
+}
+
+/**
+ * Print the last {@link LOGS_LOG_TAIL} lines of the log of the container the state file records. A missing state file
+ * means there is no container, and exits 0.
+ *
+ * @param {{ state: string, env: Record<string, string | undefined> }} options
+ * @param {Parameters<typeof runHarness>[1] & { readState: (file: string) => string | undefined }} deps
+ * @returns {Promise<number>}
+ */
+export async function logsHarness(options, deps) {
+  const loaded = loadThrowaway(options, deps, { allowStopped: true });
+  if (loaded.missing) {
+    deps.log(`throwaway-iris: no state file at ${options.state}: no container to read.`);
+    return 0;
+  }
+  if (loaded.code !== undefined) return loaded.code;
+  printContainerLogs(deps, (args, callOptions) => deps.docker(args, { timeoutMs: DEFAULT_LIMITS.dockerCallMs, ...callOptions }), loaded.state.id, LOGS_LOG_TAIL);
+  return 0;
+}
+
+/**
+ * Remove the container the state file records, and the state file. A missing state file means there is nothing to
+ * remove, and exits 0, so the command can run again after a success.
+ *
+ * @param {{ state: string, env: Record<string, string | undefined> }} options
+ * @param {Parameters<typeof runHarness>[1] & { readState: (file: string) => string | undefined, removeState: (file: string) => void }} deps
+ * @returns {Promise<number>}
+ */
+export async function downHarness(options, deps) {
+  const loaded = loadThrowaway(options, deps, { allowStopped: true });
+  if (loaded.missing) {
+    deps.log(`throwaway-iris: no state file at ${options.state}: no container to remove.`);
+    return 0;
+  }
+  if (loaded.code !== undefined) return loaded.code;
+  const removed = deps.docker(buildTeardownArgv(loaded.state.id), { timeoutMs: DEFAULT_LIMITS.dockerCallMs });
+  if (removed.status !== 0) {
+    deps.log(`throwaway-iris: docker rm failed (${removed.error?.message ?? `exit ${removed.status}`}): ${removed.stderr.trim()}`);
+    return 4;
+  }
+  deps.removeState(options.state);
+  deps.log(`throwaway-iris: removed ${loaded.state.name}`);
+  return 0;
+}
+
+/**
+ * The real side effects of the harness functions. Calling this spawns nothing by itself; each function spawns only when
+ * it is called.
  *
  * @param {Record<string, string | undefined>} env
  */
@@ -563,11 +950,35 @@ export function defaultDeps(env) {
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     now: () => Date.now(),
     log: (line) => process.stderr.write(`${line}\n`),
+    fileExists: (file) => {
+      try {
+        statSync(file);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    readState: (file) => {
+      try {
+        return readFileSync(file, 'utf8');
+      } catch (error) {
+        if (error?.code === 'ENOENT') return undefined;
+        throw error;
+      }
+    },
+    writeState: (file, text) => {
+      writeFileSync(file, text, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      chmodSync(file, 0o600);
+    },
+    removeState: (file) => {
+      rmSync(file, { force: true });
+    },
   };
 }
 
 /**
- * The entry point: parse the command line, install the teardown on exit, INT and TERM, and run the harness.
+ * The entry point: parse the command line, install the teardown on exit, INT and TERM for the subcommands that start a
+ * container, and run the subcommand.
  *
  * @param {readonly string[]} [argv]
  * @param {Record<string, string | undefined>} [env]
@@ -582,6 +993,23 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     return 2;
   }
   const deps = defaultDeps(env);
+  const subcommand = cli.subcommand ?? 'run';
+
+  if (subcommand === 'logs' || subcommand === 'down' || subcommand === 'exec') {
+    if (subcommand === 'exec') {
+      // The container outlives this process: a signal reaches the command only.
+      for (const signal of ['SIGINT', 'SIGTERM']) {
+        process.once(signal, () => {
+          deps.killCommand(signal);
+        });
+      }
+    }
+    const options = { ...cli, state: path.resolve(cli.state), env };
+    if (subcommand === 'exec') return execHarness(options, deps);
+    if (subcommand === 'logs') return logsHarness(options, deps);
+    return downHarness(options, deps);
+  }
+
   const teardown = createTeardown((args) => deps.docker(args, { timeoutMs: DEFAULT_LIMITS.dockerCallMs }));
   process.once('exit', () => teardown.run());
   for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
@@ -596,7 +1024,10 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     teardown.run();
     process.exit(1);
   });
-  return runHarness({ image: cli.image, command: cli.command, env }, deps, teardown);
+  if (subcommand === 'up') {
+    return upHarness({ ...cli, state: path.resolve(cli.state), env }, deps, teardown);
+  }
+  return runHarness({ image: cli.image, command: cli.command, hostPort: cli.hostPort, env }, deps, teardown);
 }
 
 function isEntryPoint() {

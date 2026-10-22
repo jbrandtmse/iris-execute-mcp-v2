@@ -2,6 +2,65 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-22] — Story 42.3: CI Workflow
+
+Story 42.3 adds the first CI of the repository, `.github/workflows/ci.yml`, and the checks that hold it honest. It is secret-free and
+publishes nothing, and nothing is published, versioned or tagged by this story. No tool, action, governance key, preset row,
+annotation, refusal code, product environment variable, REST route or REST response is added, removed or changed, no tool count moves
+(110 package tools, 115 advertised), the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), the frozen SDK goldens and
+the tools-list snapshot are byte-unchanged, and `BOOTSTRAP_VERSION` stays `0.0.2+1.995fbbb1055d` (no bootstrapped class changed).
+
+### Added
+
+- **The CI workflow.** Three jobs run on every push to any branch or tag, on pull requests and on manual dispatch, and every action is
+  pinned by commit.
+  - `gates` runs on Node 22.17.0, 24.0.0 and 26.0.0: install, build, lint, type-check, the tests of the 8 packages (the Story 42.1 package
+    checks among them), the governance-baseline, skills, pack, prompts, provenance, tools-list and epics-sync checks, and the launcher
+    extension's install, type-check, build and arming guard.
+  - `throwaway` runs the armed suites against throwaway containers: the bootstrap-guard gate on `iris-community` 2026.2 and 2024.3 in
+    `USER` (DW-672, the live proof of DW-508), and then, against a seeded `irishealth-community` 2026.2 in `HSCUSTOM`, every package's
+    `prepublishOnly`, every integration suite, the five process gates and the launcher's live files. A run on `main` is never cancelled; a
+    superseded run elsewhere is, and `gh run list --workflow ci.yml --commit <sha>` still finds it.
+  - `package` runs only after both are green (DW-443): it packs the 8 packages, installs the tarballs together with every `@iris-mcp/*`
+    dependency resolved to a local tarball, starts each server bin through `npx --no` (`initialize` and a `tools/list` with the snapshot's
+    tool count) and runs each CLI bin.
+- **A registry and a self-test.** `scripts/lib/ci-checks.mjs` declares the pins, the steps and the armed suites; `ci-workflow.test.ts`
+  holds `ci.yml` equal to it in both directions and fails on an unpinned action, `continue-on-error`, `|| true`, a `secrets.` reference,
+  wider permissions, a removed concurrency block, a missing or wrong `sysctl` reservation, a dropped or undeclared step, a moved Node
+  floor, a `package` job that does not need `throwaway`, a `prepublishOnly` with no suite, and a live-capable test file that no suite runs.
+- **`scripts/ci-live-suite.mjs` (DW-676).** An armed suite fails when any test in it was skipped, pending, todo or disabled, unless an
+  allowlist entry names the test and gives a reason; an entry that matches no skipped test fails as stale, and a report that is missing,
+  holds 0 tests or lacks an expected file fails too. The allowlist starts with the 4 golden-capture legs and the 2 OAuth tests of
+  `admin.integration.test.ts`, which never run (their `skipIf` is evaluated before `beforeAll` sets its flag).
+- **`scripts/ci-seed-throwaway.mjs`.** It runs the real `bootstrap()`, fails closed unless `Ens.Director` is visible in the namespace, and
+  deploys and compiles the 62 classes of `src/ExecuteMCPv2/Tests` and `QAFixtures`, never a bootstrapped class from `src/` (AD-14).
+- **`scripts/ci-package-smoke.mjs` (DW-443).** The tarball path that `prepublishOnly` does not guard, run locally with
+  `node scripts/ci-package-smoke.mjs` after `pnpm build`.
+
+### Changed
+
+- **`scripts/throwaway-iris.mjs`** gains `up`, `exec`, `logs` and `down` (each re-inspects the container and refuses one that is not a
+  throwaway it started), `run --host-port`, the oldest image `OLDEST_IRIS_COMMUNITY_IMAGE` (`2024.3`), `validateNamespace`,
+  `assertThrowawayEnv`, and a namespace in the command's environment. The environment it hands a command now includes
+  `IRIS_HTTPS=false`, which `scripts/verify-iris-reachable.mjs` requires under `CI`. `run` prints the container log before removing the
+  container when its command fails, and `run` and `up` print it when the container does not become ready. `parseCli(["run", ...])` and `pnpm live:bootstrap-guard` are unchanged. The image comments now say
+  what they are: multi-arch manifest lists, so one digest serves an arm64 development machine and an amd64 runner (Story 42.2 recorded the
+  default as arm64 only).
+- **The four `prepublish-gate.mjs` scripts** forward their command-line arguments to `vitest run`, so the CI wrapper can ask for the JSON
+  reporter; with no argument they behave as before, and no `prepublishOnly` changed. Their headers no longer say the repository has no CI.
+- **Lint.** The `lint` script of the 7 packages that have one is `eslint src/ --max-warnings 0`, and the unused `eslint-disable`
+  directive at `packages/shared/src/cli/governance.ts` is removed (DW-666), so the gate carries no standing warning.
+- **Tooling that is not shipped.** The roster and live-capable scans moved to `scripts/lib/live-gate-scan.mjs`, `pnpmPack` to
+  `scripts/lib/pnpm-pack.mjs` (with an option to run the package's lifecycle scripts), and `openRawWire` can start an installed bin. The
+  `@iris-mcp/all` tests gain the `yaml` 2.9.0 development dependency, already in the lockfile. `deployClasses` and `compileClasses` of
+  `@iris-mcp/shared` take an optional class list, and `compileClasses` returns the Atelier response (changeset, patch).
+- **Tests under `CI=true`.** Running the suites with `CI=true`, as GitHub Actions does, showed that vitest then colors the output of a child
+  `vitest run`, which broke every guard test that reads that output as text (22 cases of the Story 39.1 gate guards, and the same pattern in
+  the Story 41.8 and launcher guards). The `vitest.config.ts` of `@iris-mcp/all` and of the launcher extension now set `NO_COLOR=1` for the
+  tests, which the children they start inherit. The Story 38.6 text pin of the `@iris-mcp/all` gate's `vitestArgs` line follows the
+  forwarded arguments.
+- **Documentation.** The root README has a "Continuous Integration" subsection under Contributing.
+
 ## [Pre-release — 2026-10-21] — Story 42.2: Bootstrap Downgrade Guard
 
 Story 42.2 stops the bootstrap from redeploying the `ExecuteMCPv2` classes over a newer deployment (DW-508: an older server on a shared

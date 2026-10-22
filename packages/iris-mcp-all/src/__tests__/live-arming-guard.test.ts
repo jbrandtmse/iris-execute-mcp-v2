@@ -23,12 +23,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { runVitestUnderPreload } from "./live-gate-child-run.js";
 import {
   UNARMED_LIVE_TARGET,
@@ -37,18 +36,13 @@ import {
   liveGateTarget,
   resolveLiveTarget,
 } from "../../../shared/src/test-helpers/live-target.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
-const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
-const PACKAGES_DIR = path.join(REPO_ROOT, "packages");
-const LAUNCHER_DIR = path.join(REPO_ROOT, "extensions", "iris-mcp-launcher");
-
-/** The two guard files: they name the patterns they scan for. */
-const GUARD_FILES = [
-  "packages/iris-mcp-all/src/__tests__/live-arming-guard.test.ts",
-  "extensions/iris-mcp-launcher/src/__tests__/live-arming-guard.test.ts",
-];
+import {
+  PACKAGES_DIR,
+  liveCapableTestFiles,
+  relativeToRepo as relative,
+  testSources,
+  workspacePackageDirs,
+} from "../../../../scripts/lib/live-gate-scan.mjs";
 
 /** A read of a target variable with a default. */
 const DEFAULTED_READ =
@@ -57,44 +51,7 @@ const DEFAULTED_READ =
 /** A retired target variable, by name. `IRIS_TEST_TIMEOUT` is a product variable and is not one. */
 const RETIRED_NAME = /\bIRIS_TEST_(?:HOST|PORT|USERNAME|PASSWORD|NAMESPACE)\b/;
 
-/** A test file that can reach IRIS: it resolves a live target or an integration config, or it reads the availability flag. */
-const LIVE_CAPABLE =
-  /process\.env\.IRIS_(?:TEST_)?HOST\s*\?\?|\birisTargetFromEnv\(|\bliveGateTarget\(|\bliveArmingSkipReason\(|\bresolveLiveTarget\(|\bgetIntegrationConfig\(|__IRIS_AVAILABLE__/;
-
-const SKIPPED_DIRECTORIES = new Set(["node_modules", "dist", ".git", "coverage"]);
-
-/** Every file under `dir` whose extension is one of `extensions`. */
-function walk(dir: string, extensions: readonly string[]): string[] {
-  if (!existsSync(dir)) return [];
-  const found: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    if (SKIPPED_DIRECTORIES.has(entry)) continue;
-    const full = path.join(dir, entry);
-    if (statSync(full).isDirectory()) found.push(...walk(full, extensions));
-    else if (extensions.some((extension) => entry.endsWith(extension))) found.push(full);
-  }
-  return found;
-}
-
-const relative = (file: string): string => path.relative(REPO_ROOT, file).split(path.sep).join("/");
-
-const packageNames = readdirSync(PACKAGES_DIR).filter((name) => existsSync(path.join(PACKAGES_DIR, name, "package.json")));
-
-/** Test sources: every `.test.ts` and every `.ts` or `.mjs` helper under a `__tests__` or `test-helpers` directory. */
-function testSources(): string[] {
-  const roots = [
-    ...packageNames.flatMap((name) => [path.join(PACKAGES_DIR, name, "src"), path.join(PACKAGES_DIR, name, "tests")]),
-    path.join(LAUNCHER_DIR, "src"),
-  ];
-  return roots
-    .flatMap((root) => walk(root, [".ts", ".mts", ".mjs"]))
-    .filter((file) => {
-      const rel = relative(file);
-      return /(^|\/)(__tests__|test-helpers)\//.test(rel) || rel.endsWith(".test.ts");
-    })
-    .filter((file) => !GUARD_FILES.includes(relative(file)))
-    .sort();
-}
+const packageNames: string[] = workspacePackageDirs();
 
 const sources = testSources();
 const readSource = (file: string): string => readFileSync(file, "utf8");
@@ -149,7 +106,7 @@ describe("(a) static scan: no test source defaults a live target or names a reti
 });
 
 /** The live-capable test files, as absolute paths. */
-const liveCapable = sources.filter((file) => file.endsWith(".test.ts") && LIVE_CAPABLE.test(readSource(file)));
+const liveCapable: string[] = liveCapableTestFiles();
 
 /** The number N of "Test Files  ... (N)" in a vitest summary, or -1. */
 const filesRun = (output: string): number => Number(/Test Files[^\n]*\((\d+)\)/.exec(output)?.[1] ?? -1);

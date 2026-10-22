@@ -13,6 +13,13 @@
  * keeps that script's checks (the target resolution and its CI refusal, `checkDistFresh`, the
  * reachability ping); this script adds only the armed gate run.
  *
+ * ARGUMENTS AND CI. Every command-line argument after the script name is forwarded to `vitest run`,
+ * after the gate files, so a caller can ask for a reporter (`--reporter=json --outputFile.json=<file>`);
+ * with no extra argument the run is what it always was. CI (`.github/workflows/ci.yml`) runs this
+ * script through `pnpm run prepublishOnly` and `scripts/ci-live-suite.mjs prepublish-admin`, armed, against a
+ * seeded throwaway IRIS (`scripts/throwaway-iris.mjs`), and fails the suite when a test of the roster
+ * skipped without an allowlist entry.
+ *
  * Spawned through `cmd.exe /d /s /c` on Windows for the reason documented in
  * `packages/iris-dev-mcp/scripts/prepublish-gate.mjs`: an env-var prefix on the script line
  * does not work under the bare `cmd.exe` npm/pnpm use there, so the variable is passed
@@ -31,7 +38,7 @@ const gateTestFiles = [
   "src/__tests__/resource-listprivileges-live-gate.test.ts",
 ];
 
-const vitestArgs = ["exec", "vitest", "run", ...gateTestFiles];
+const vitestArgs = ["exec", "vitest", "run", ...gateTestFiles, ...process.argv.slice(2)];
 
 const env = { ...process.env, IRIS_REQUIRE_LIVE: "1" };
 

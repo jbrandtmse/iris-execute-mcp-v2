@@ -7,7 +7,7 @@
  * Every temp root is created under `os.tmpdir()` and removed by the test that made it.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -116,55 +116,12 @@ export interface PnpmPack {
   manifest: Record<string, unknown>;
 }
 
-function runTool(command: string, args: string[], cwd: string): { status: number | null; stdout: string; stderr: string } {
-  const result = spawnSync(command, args, {
-    cwd,
-    encoding: "utf8",
-    env: { ...process.env, npm_config_update_notifier: "false", NO_UPDATE_NOTIFIER: "1" },
-    timeout: 120_000,
-    shell: process.platform === "win32" && command !== "tar",
-  });
-  return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
-}
-
-function walkRelative(root: string, directory = ""): string[] {
-  const found: string[] = [];
-  for (const entry of readdirSync(join(root, directory), { withFileTypes: true })) {
-    const rel = directory === "" ? entry.name : `${directory}/${entry.name}`;
-    if (entry.isDirectory()) found.push(...walkRelative(root, rel));
-    else found.push(rel);
-  }
-  return found.sort();
-}
-
 /**
  * Pack `packageDir` with `pnpm pack` (the packer that publishing goes through: only pnpm applies `publishConfig` overrides such as
- * `exports`) into `destination`, and extract the tarball next to it. Nothing is written outside `destination`. Lifecycle scripts
- * (`prepack`, `prepare`, `postpack`) are not run, as with the `npm pack --ignore-scripts` siblings: the tarball is built from the
- * dist the caller has already checked is fresh, and no publish gate runs inside the default suite.
- *
- * @param packageDir - Absolute path of the package directory.
- * @param destination - A directory under `os.tmpdir()` that holds no other tarball (pnpm creates it when it is missing); the tarball goes in it, and `extracted/` holds its contents.
+ * `exports`) into `destination`, and extract the tarball next to it. The implementation is `scripts/lib/pnpm-pack.mjs`, shared with
+ * `scripts/ci-package-smoke.mjs`; lifecycle scripts are not run here, as with the `npm pack --ignore-scripts` siblings.
  */
-export function pnpmPack(packageDir: string, destination: string): PnpmPack {
-  const packed = runTool("pnpm", ["--config.ignore-scripts=true", "pack", "--pack-destination", destination], packageDir);
-  if (packed.status !== 0) throw new Error(`pnpm pack failed in ${packageDir}: ${packed.stderr || packed.stdout}`);
-  const tarballs = readdirSync(destination).filter((name) => name.endsWith(".tgz"));
-  if (tarballs.length !== 1) throw new Error(`pnpm pack in ${packageDir} wrote ${tarballs.length} tarballs to ${destination}`);
-  const tarball = join(destination, tarballs[0] as string);
-  const extractDir = join(destination, "extracted");
-  mkdirSync(extractDir);
-  const extracted = runTool("tar", ["-xzf", tarball, "-C", extractDir], destination);
-  if (extracted.status !== 0) throw new Error(`tar could not extract ${tarball}: ${extracted.stderr}`);
-  const root = join(extractDir, "package");
-  return {
-    tarball,
-    bytes: statSync(tarball).size,
-    root,
-    files: walkRelative(root),
-    manifest: JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as Record<string, unknown>,
-  };
-}
+export { pnpmPack } from "../../../../scripts/lib/pnpm-pack.mjs";
 
 /**
  * Give the extracted `pack` a `node_modules` that holds exactly what a registry install of it would: each declared

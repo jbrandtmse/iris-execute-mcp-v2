@@ -932,7 +932,6 @@ async function cmdUnset(args: string[], deps: ResolvedDeps): Promise<number> {
     );
     return 1;
   }
-  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   delete (layer as Record<string, unknown>)[key];
 
   try {

@@ -1,0 +1,221 @@
+# CI for the IRIS MCP Server Suite (Story 42.3). It is secret-free and publishes nothing: no secret is read, no package, tag or
+# release is created, and the token is read-only.
+#
+# What runs
+#   gates      The repository's gates, on a Node matrix: install, build, lint, type-check, the tests of the 8 packages
+#              (which include the Story 42.1 package checks), the governance, skills, pack, prompt, provenance and tools-list
+#              checks, the epics-sync check, and the launcher extension's install, type-check, build and arming guard. Not
+#              run: the launcher's full test suite (Story 42.7, DW-532) and prettier's format:check, which the tree does not pass.
+#   throwaway  Everything that needs a live IRIS, against throwaway containers that scripts/throwaway-iris.mjs starts, labels
+#              and removes (it refuses ports 52773 and 1972 and any image that is not pinned by digest). The bootstrap-guard
+#              gate runs on iris-community 2026.2 and on the oldest tag (2024.3), each in a container of its own. An
+#              irishealth-community 2026.2 container is then started in HSCUSTOM and seeded (the real bootstrap, then the
+#              test and fixture classes), and every package's prepublishOnly, every integration suite, the five process
+#              gates and the launcher's live files run against it through scripts/ci-live-suite.mjs, which fails a suite in
+#              which any test skipped without an allowlist entry.
+#   package    Packs the 8 packages, installs the tarballs together, and starts every bin. It needs gates and throwaway,
+#              so no tarball is built from a red commit; CI, not a prepack hook, is the publish-time gate (DW-443).
+#
+# The steps are declared in scripts/lib/ci-checks.mjs, and packages/iris-mcp-all/src/__tests__/ci-workflow.test.ts holds this
+# file equal to that registry. Every action is pinned by commit, with its release tag in the trailing comment.
+
+name: ci
+
+run-name: ci ${{ github.ref_name }} ${{ github.event.pull_request.head.sha || github.sha }}
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A superseded run on any ref but main is cancelled; it stays findable by its commit (gh run list --workflow ci.yml --commit <sha>).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  gates:
+    name: gates (node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22.17.0", "24.0.0", "26.0.0"]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: build
+        run: pnpm build
+      - name: lint
+        run: pnpm lint
+      - name: type-check
+        run: pnpm type-check
+      - name: test @iris-mcp/shared
+        run: pnpm --filter @iris-mcp/shared test
+      - name: test @iris-mcp/client-config
+        run: pnpm --filter @iris-mcp/client-config test
+      - name: test @iris-mcp/admin
+        run: pnpm --filter @iris-mcp/admin test
+      - name: test @iris-mcp/data
+        run: pnpm --filter @iris-mcp/data test
+      - name: test @iris-mcp/dev
+        run: pnpm --filter @iris-mcp/dev test
+      - name: test @iris-mcp/interop
+        run: pnpm --filter @iris-mcp/interop test
+      - name: test @iris-mcp/ops
+        run: pnpm --filter @iris-mcp/ops test
+      - name: test @iris-mcp/all
+        run: pnpm --filter @iris-mcp/all test
+      - name: governance baseline check
+        run: pnpm gen:governance-baseline:check
+      - name: skills check
+        run: pnpm gen:skills:check
+      - name: pack check
+        run: pnpm gen:pack:check
+      - name: validate prompts
+        run: pnpm validate:prompts
+      - name: provenance check
+        run: pnpm check:provenance
+      - name: tools-list snapshot check
+        run: pnpm gen:tools-list-snapshot:check
+      - name: epics sync check
+        run: node scripts/check-epics-sync.mjs
+      - name: launcher install
+        run: npm ci
+        working-directory: extensions/iris-mcp-launcher
+      - name: launcher type-check
+        run: npm run type-check
+        working-directory: extensions/iris-mcp-launcher
+      - name: launcher build
+        run: npm run build
+        working-directory: extensions/iris-mcp-launcher
+      - name: launcher arming guard
+        run: npx --no -- vitest run src/__tests__/live-arming-guard.test.ts src/__tests__/liveArming.test.ts
+        working-directory: extensions/iris-mcp-launcher
+
+  throwaway:
+    name: throwaway
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22.17.0"
+          cache: pnpm
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: build
+        run: pnpm build
+      - name: launcher install
+        run: npm ci
+        working-directory: extensions/iris-mcp-launcher
+      - name: ephemeral port range
+        run: cat /proc/sys/net/ipv4/ip_local_port_range
+      - name: reserve the host ports of the throwaway containers
+        id: setup
+        run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=52790,52791
+      - name: suite bootstrap-guard
+        if: "${{ !cancelled() && steps.setup.outcome == 'success' }}"
+        run: node scripts/ci-live-suite.mjs bootstrap-guard
+      - name: suite bootstrap-guard-oldest
+        if: "${{ !cancelled() && steps.setup.outcome == 'success' }}"
+        run: node scripts/ci-live-suite.mjs bootstrap-guard-oldest
+      - name: start the seeded throwaway
+        id: up
+        if: "${{ !cancelled() && steps.setup.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs up --image intersystems/irishealth-community:2026.2@sha256:462de1fb3597272fde0e03afad006af1b18b59c90f1c1fb5566c79b027a7af0a --namespace HSCUSTOM --host-port 52791 --state ${{ runner.temp }}/throwaway-live.json
+      - name: seed
+        id: seed
+        if: "${{ !cancelled() && steps.up.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-seed-throwaway.mjs
+      - name: suite prepublish-shared
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs prepublish-shared
+      - name: suite prepublish-client-config
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs prepublish-client-config
+      - name: suite prepublish-admin
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs prepublish-admin
+      - name: suite prepublish-data
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs prepublish-data
+      - name: suite prepublish-dev
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs prepublish-dev
+      - name: suite prepublish-interop
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs prepublish-interop
+      - name: suite prepublish-ops
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs prepublish-ops
+      - name: suite prepublish-all
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs prepublish-all
+      - name: suite integration-shared
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs integration-shared
+      - name: suite integration-admin
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs integration-admin
+      - name: suite integration-data
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs integration-data
+      - name: suite integration-dev
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs integration-dev
+      - name: suite integration-interop
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs integration-interop
+      - name: suite integration-ops
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs integration-ops
+      - name: suite process-gates
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs process-gates
+      - name: suite launcher-live
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs launcher-live
+      - name: container log
+        if: "${{ failure() || cancelled() }}"
+        run: node scripts/throwaway-iris.mjs logs --state ${{ runner.temp }}/throwaway-live.json
+      - name: remove the throwaway
+        if: "${{ always() }}"
+        run: node scripts/throwaway-iris.mjs down --state ${{ runner.temp }}/throwaway-live.json
+
+  package:
+    name: package
+    needs: [gates, throwaway]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22.17.0"
+          cache: pnpm
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: build
+        run: pnpm build
+      - name: package smoke
+        run: node scripts/ci-package-smoke.mjs

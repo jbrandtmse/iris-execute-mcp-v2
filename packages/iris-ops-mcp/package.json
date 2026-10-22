@@ -46,7 +46,7 @@
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "test": "vitest run",
-    "lint": "eslint src/",
+    "lint": "eslint src/ --max-warnings 0",
     "type-check": "tsc --noEmit",
     "prepublishOnly": "node ../../scripts/verify-iris-reachable.mjs"
   },

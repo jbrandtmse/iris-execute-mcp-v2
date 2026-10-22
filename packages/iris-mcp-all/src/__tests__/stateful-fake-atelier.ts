@@ -21,6 +21,17 @@
  * Every other request is answered with a clean 404 envelope, so nothing a started server asks ever hangs. Every request
  * is recorded (method, url, body).
  *
+ * `SELECT Name FROM %Dictionary.CompiledClass WHERE Name = '<class>'` answers one row when `<class>` is one of the options'
+ * `visibleClasses` and none otherwise: the check that a namespace can see `Ens.Director`.
+ *
+ * `failCompile`, when a test sets it, is called with the names of each compile request; the errors it returns make that
+ * compile fail as IRIS fails one, with HTTP 200 and the errors in the envelope's `status.errors` (the client throws on them),
+ * and nothing is compiled.
+ *
+ * `compileConsole`, when a test sets it, is called with the names of each compile request; the lines it returns are the console
+ * of the answer, with HTTP 200 and no status error, and nothing is compiled: how IRIS answers a compile in which some classes
+ * failed, because `General.Compile` replaces the compile status with the status of the documents it updated.
+ *
  * `failVersionQuery`, when a test sets it, answers the `Setup_GetBootstrapVersion()` query as a deployment whose marker
  * cannot be read: an HTTP status and envelope of the test's choosing, or no answer at all (`hang`, a timeout of the
  * client). It is called with the number of version queries since it was set, so a test can fail only the re-read.
@@ -62,6 +73,8 @@ export interface FakeAtelierState {
 export interface FakeAtelierOptions {
   /** The one namespace the fake serves. */
   namespace: string;
+  /** The classes `%Dictionary.CompiledClass` lists in this namespace; none when omitted. */
+  visibleClasses?: readonly string[];
   /**
    * Called after each stored document, with that document's name and the number of documents stored since the fake
    * started. It may change the state, which is how a test models another client that compiled while this one was
@@ -84,6 +97,10 @@ export interface StatefulFakeAtelier {
    * from it (or an unset hook) answers normally. Setting it restarts the count.
    */
   failVersionQuery: ((count: number) => VersionQueryFailure | undefined) | undefined;
+  /** Set to fail a compile request: called with the names it carries; a non-empty list of error texts fails it. */
+  failCompile: ((names: string[]) => string[] | undefined) | undefined;
+  /** Set to answer a compile with these console lines and no status error: called with the names it carries; an array answers that way. */
+  compileConsole: ((names: string[]) => string[] | undefined) | undefined;
   close: () => Promise<void>;
 }
 
@@ -139,7 +156,10 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
   let putCount = 0;
   let tick = 0;
   let failVersionQuery: StatefulFakeAtelier["failVersionQuery"];
+  let failCompile: StatefulFakeAtelier["failCompile"];
+  let compileConsole: StatefulFakeAtelier["compileConsole"];
   let versionQueries = 0;
+  const visibleClasses = new Set(options.visibleClasses ?? []);
 
   /** Strictly increasing, deterministic Atelier-style timestamps. */
   const nextTimestamp = (): string => {
@@ -196,6 +216,12 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
       }
       return;
     }
+    const dictionary = /^\s*SELECT Name FROM %Dictionary\.CompiledClass WHERE Name = '([^']+)'\s*$/i.exec(statement);
+    if (dictionary) {
+      const name = dictionary[1] as string;
+      reply(res, 200, envelope({ content: visibleClasses.has(name) ? [{ Name: name }] : [] }));
+      return;
+    }
     reply(res, 404, errorEnvelope(`the fake IRIS does not run: ${statement}`, 404));
   };
 
@@ -248,6 +274,16 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
 
     if (method === "POST" && action === "action/compile") {
       const names = Array.isArray(body) ? (body as unknown[]).map(String) : [];
+      const failures = failCompile?.(names);
+      if (failures !== undefined && failures.length > 0) {
+        reply(res, 200, { status: { errors: failures.map((error) => ({ error })), summary: "" }, console: [], result: { content: [] } });
+        return;
+      }
+      const output = compileConsole?.(names);
+      if (output !== undefined) {
+        reply(res, 200, { status: { errors: [], summary: "" }, console: output, result: { content: [] } });
+        return;
+      }
       const missing = names.filter((name) => !state.docs.has(name));
       if (missing.length > 0) {
         reply(res, 500, errorEnvelope(`ERROR #5373: Class '${missing[0]}' does not exist`, 5373));
@@ -332,6 +368,18 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
     set failVersionQuery(hook) {
       failVersionQuery = hook;
       versionQueries = 0;
+    },
+    get failCompile() {
+      return failCompile;
+    },
+    set failCompile(hook) {
+      failCompile = hook;
+    },
+    get compileConsole() {
+      return compileConsole;
+    },
+    set compileConsole(hook) {
+      compileConsole = hook;
     },
     close: () =>
       new Promise<void>((resolve) => {

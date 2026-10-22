@@ -19,5 +19,8 @@ export default defineConfig({
     // The live gates bootstrap, write and remove fixtures on ONE shared IRIS instance, so no two test
     // files may run at the same time; epic38-gate-guards.test.ts proves this on a child run.
     fileParallelism: false,
+    // Some tests run a child vitest and read its output as plain text. Under CI=true (GitHub Actions sets it) vitest colors that
+    // output unless NO_COLOR is set; the tests, and the children they start from this environment, inherit the variable.
+    env: { NO_COLOR: "1" },
   },
 });

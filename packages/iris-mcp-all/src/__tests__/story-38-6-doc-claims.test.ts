@@ -373,7 +373,7 @@ describe("Story 38.6: the @iris-mcp/all prepublish gate runs the capstone, one f
     expect(listed).toContain("src/__tests__/epic38-capstone-gate.test.ts");
   });
 
-  it("vitest runs the gate files with --no-file-parallelism, ahead of the file list", () => {
-    expect(script).toContain('const vitestArgs = ["exec", "vitest", "run", "--no-file-parallelism", ...gateTestFiles];');
+  it("vitest runs the gate files with --no-file-parallelism, ahead of the file list and of any argument the caller passes", () => {
+    expect(script).toContain('const vitestArgs = ["exec", "vitest", "run", "--no-file-parallelism", ...gateTestFiles, ...process.argv.slice(2)];');
   });
 });

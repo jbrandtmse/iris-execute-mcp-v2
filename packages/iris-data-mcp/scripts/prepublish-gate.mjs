@@ -13,10 +13,16 @@
  * `prepublishOnly` ran `scripts/verify-iris-reachable.mjs`, which only pings IRIS and
  * never runs the gate, while the one script that does arm the variable
  * (`packages/iris-dev-mcp/scripts/prepublish-gate.mjs`) runs vitest from
- * `packages/iris-dev-mcp` over two `@iris-mcp/dev` files. This repo has no CI
- * (`.github/workflows` absent), so the packaging boundary is the only enforcement
- * surface — meaning the story's sole permanent regression test could silently skip
- * forever and the defect could ship reintroduced.
+ * `packages/iris-dev-mcp` over two `@iris-mcp/dev` files. The packaging boundary is
+ * an enforcement surface of its own — the story's sole permanent regression test
+ * could otherwise silently skip forever and the defect could ship reintroduced.
+ *
+ * ARGUMENTS AND CI. Every command-line argument after the script name is forwarded to `vitest run`,
+ * after the gate files, so a caller can ask for a reporter (`--reporter=json --outputFile.json=<file>`);
+ * with no extra argument the run is what it always was. CI (`.github/workflows/ci.yml`) runs this
+ * script through `pnpm run prepublishOnly` and `scripts/ci-live-suite.mjs prepublish-data`, armed, against a
+ * seeded throwaway IRIS (`scripts/throwaway-iris.mjs`), and fails the suite when a test of the roster
+ * skipped without an allowlist entry.
  *
  * That is Rule #59's named disqualifier verbatim ("an arming env var nothing sets"),
  * and a direct recurrence of the Epic 34 incident already recorded as ledger
@@ -63,7 +69,7 @@ console.log(
 // that can never fail closed at the packaging boundary.
 const gateTestFiles = ["src/__tests__/analytics-cubes-wire-gate.test.ts"];
 
-const vitestArgs = ["exec", "vitest", "run", ...gateTestFiles];
+const vitestArgs = ["exec", "vitest", "run", ...gateTestFiles, ...process.argv.slice(2)];
 
 const env = { ...process.env, IRIS_REQUIRE_LIVE: "1" };
 

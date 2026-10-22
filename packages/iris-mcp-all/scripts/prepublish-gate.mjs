@@ -10,11 +10,17 @@
  * that skip into a hard failure, and it must be armed SOMEWHERE on the
  * packaging path or the gate protects nothing (Rule #59's named disqualifier —
  * "an arming env var nothing sets" — Epic 34 retro incident #6; the same gap
- * Story 35.2's review closed for @iris-mcp/data as `35-2-CR-1`). This repo has
- * no CI (`.github/workflows` absent), so `prepublishOnly` IS the packaging
- * boundary. Until this story, `@iris-mcp/all`'s `prepublishOnly` ran only
+ * Story 35.2's review closed for @iris-mcp/data as `35-2-CR-1`). `prepublishOnly`
+ * IS the packaging boundary: before this gate, `@iris-mcp/all`'s `prepublishOnly` ran only
  * `scripts/verify-iris-reachable.mjs` — a bare ping that never ran a single
  * gate leg.
+ *
+ * ARGUMENTS AND CI. Every command-line argument after the script name is forwarded to `vitest run`,
+ * after the gate files, so a caller can ask for a reporter (`--reporter=json --outputFile.json=<file>`);
+ * with no extra argument the run is what it always was. CI (`.github/workflows/ci.yml`) runs this
+ * script through `pnpm run prepublishOnly` and `scripts/ci-live-suite.mjs prepublish-all`, armed, against a
+ * seeded throwaway IRIS (`scripts/throwaway-iris.mjs`), and fails the suite when a test of the roster
+ * skipped without an allowlist entry.
  *
  * SUPERSEDES `scripts/verify-iris-reachable.mjs` for this package, losing
  * nothing: the dist-freshness check below runs FIRST (stronger — see the next
@@ -300,7 +306,7 @@ const gateTestFiles = [
 // deployed version differs from the shipped one. Run in parallel (vitest's default), one gate's version
 // check or legs can overlap another gate's redeploy, and the gate fails on that interleaving rather than on
 // a defect. Sequential file execution lets each file's bootstrap finish before the next file starts.
-const vitestArgs = ["exec", "vitest", "run", "--no-file-parallelism", ...gateTestFiles];
+const vitestArgs = ["exec", "vitest", "run", "--no-file-parallelism", ...gateTestFiles, ...process.argv.slice(2)];
 
 const env = { ...process.env, IRIS_REQUIRE_LIVE: "1" };
 

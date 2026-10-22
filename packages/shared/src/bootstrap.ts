@@ -13,7 +13,7 @@
  * `unknown`, and nothing is deployed over it.
  */
 
-import { IrisHttpClient } from "./http-client.js";
+import { IrisHttpClient, type AtelierEnvelope } from "./http-client.js";
 import type { IrisConnectionConfig } from "./config.js";
 import { atelierPath } from "./atelier.js";
 import { IrisApiError } from "./errors.js";
@@ -344,13 +344,18 @@ export async function isConfigured(
  * this issue because it skipped deploy entirely for existing installs; the
  * tri-state probe exposed it because stale upgrades always land on
  * already-present documents.
+ *
+ * `classes` (document name to source text) defaults to the embedded
+ * bootstrap classes; a caller that deploys other documents (the CI seed's
+ * test fixtures) passes its own map.
  */
 export async function deployClasses(
   http: IrisHttpClient,
   config: IrisConnectionConfig,
   version: number,
+  classes: ReadonlyMap<string, string> = BOOTSTRAP_CLASSES,
 ): Promise<void> {
-  for (const [name, content] of BOOTSTRAP_CLASSES.entries()) {
+  for (const [name, content] of classes.entries()) {
     const path =
       atelierPath(version, config.namespace, `doc/${name}`) +
       "?ignoreConflict=1";
@@ -362,16 +367,20 @@ export async function deployClasses(
 }
 
 /**
- * Compile all deployed classes via the Atelier POST /action/compile endpoint.
+ * Compile deployed classes via the Atelier POST /action/compile endpoint.
+ *
+ * `names` defaults to every embedded bootstrap class. The Atelier response
+ * is returned, so a caller that compiles other documents can read the
+ * compile output; the bootstrap flow ignores it.
  */
 export async function compileClasses(
   http: IrisHttpClient,
   config: IrisConnectionConfig,
   version: number,
-): Promise<void> {
-  const docNames = [...BOOTSTRAP_CLASSES.keys()];
+  names: readonly string[] = [...BOOTSTRAP_CLASSES.keys()],
+): Promise<AtelierEnvelope<unknown>> {
   const path = atelierPath(version, config.namespace, "action/compile");
-  await http.post(path, docNames);
+  return http.post(path, [...names]);
 }
 
 /**
