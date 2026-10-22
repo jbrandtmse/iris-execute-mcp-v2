@@ -632,7 +632,7 @@ function warnDeploymentLeftAlone(
         ? `To bring '${namespace}' up to this server's build, run zpm "install ${IPM_MODULE_NAME} ${PACKAGE_SEMVER}" there as a user with %Admin_Manage.`
         : found.state === "unconfigured"
           ? `To register the web application, run Do ##class(ExecuteMCPv2.Setup).Configure("${namespace}") as a user with %Admin_Manage.`
-          : `The installation holds no ExecuteMCPv2.Setup class, so uninstall and reinstall the package with zpm.`;
+          : `The installation holds no ExecuteMCPv2.Setup class, so uninstall and reinstall the package with zpm: run zpm "uninstall ${IPM_MODULE_NAME}" and then zpm "install ${IPM_MODULE_NAME} ${PACKAGE_SEMVER}" there as a user with %Admin_Manage.`;
     finding =
       `the classes were installed by IPM (class ${IPM_INSTALL_GUARD.name.replace(/\.cls$/, "")} is present), ` +
       "and this server never redeploys an IPM installation. " +

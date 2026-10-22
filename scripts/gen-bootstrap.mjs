@@ -284,7 +284,8 @@ const manifestLines = [
   '      <SourcesRoot>src</SourcesRoot>',
   `      <Resource Name="${ipmGuard.name.replace(/\.cls$/, '.CLS')}" Preload="true"/>`,
   ...classes.map((cls) => `      <Resource Name="${escapeForXml(cls.name.replace(/\.cls$/, '.CLS'))}"/>`),
-  // CheckStatus makes IPM 0.10.0 to 0.10.4 act on the %Status that Check returns; IPM 0.10.5 and later check a %Status by default.
+  // CheckStatus makes IPM 0.10.0 to 0.10.4 act on the %Status that Check returns; IPM 0.10.5 and later check a %Status by default
+  // and mark the property [Deprecated], but still read it. The ipm proof holds the built archive's manifest to carry it.
   `      <Invoke Class="${ipmGuard.name.replace(/\.cls$/, '')}" Method="Check" Phase="Initialize" When="After" CheckStatus="true"/>`,
   '      <Invoke Class="ExecuteMCPv2.Setup" Method="Configure"/>',
   '      <Invoke Class="ExecuteMCPv2.Setup" Method="ConfigureMapping"/>',

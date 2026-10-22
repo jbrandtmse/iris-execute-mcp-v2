@@ -162,8 +162,10 @@ describe("classifyDeployedMarker", () => {
 // the throwaway IRIS editions by `scripts/ci-ipm-archive.mjs`, and the TypeScript side is pinned to it here.
 //
 // Every `expected` was captured by running the reference, not by hand (Rule #36): `classifyDeployedMarker(deployed, embedded)`
-// of packages/shared/dist/bootstrap-version.js, built from bootstrap-version.ts, called from node over each case's pair
-// (Story 42.4 implement stage, 2026-10-22). Non-ASCII digits appear in the JSON as backslash-u escapes (Rule 14).
+// of the built packages/shared/dist/bootstrap-version.js (bootstrap-version.ts as of commit 4fd0acb, @iris-mcp/shared 0.0.2), over
+// each case's pair, with this command from the repository root (it prints the case count and 0 mismatches):
+//   node --input-type=module -e "import { readFileSync } from 'node:fs'; import { classifyDeployedMarker } from './packages/shared/dist/bootstrap-version.js'; const cases = JSON.parse(readFileSync('packages/shared/src/__tests__/fixtures/bootstrap-marker-parity-cases.json', 'utf8')); let bad = 0; for (const c of cases) { const got = classifyDeployedMarker(c.deployed, c.embedded); if (got !== c.expected) { bad++; console.log('MISMATCH', c.note, got, c.expected); } } console.log(cases.length, 'cases,', bad, 'mismatches');"
+// A new case takes its `expected` from the same command's output. Non-ASCII digits appear in the JSON as backslash-u escapes (Rule 14).
 interface ParityCase {
   note: string;
   deployed: string;

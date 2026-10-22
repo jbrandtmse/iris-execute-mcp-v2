@@ -418,5 +418,131 @@
     "deployed": "1.2.3+4.aaaaaaaaaaaa",
     "embedded": "\u0661.\u0662.\u0663+\u0664.aaaaaaaaaaaa",
     "expected": "foreign"
+  },
+  {
+    "note": "boundary digits: the character before 0 (\"/\") as the major",
+    "deployed": "/.2.3+4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "boundary digits: the character after 9 (\":\") as the major",
+    "deployed": ":.2.3+4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "boundary digits: the character before 0 (\"/\") as the sequence",
+    "deployed": "1.2.3+/.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "boundary digits: the character after 9 (\":\") as the sequence",
+    "deployed": "1.2.3+:.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "boundary digits: a bad character after a good digit in the major",
+    "deployed": "1x.2.3+4.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "boundary digits: a bad character after a good digit in the sequence",
+    "deployed": "1.2.3+4x.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "boundary hash: the character before 0 (\"/\") ends the hash",
+    "deployed": "1.2.2+4.aaaaaaaaaaa/",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "boundary hash: the character after 9 (\":\") ends the hash",
+    "deployed": "1.2.2+4.aaaaaaaaaaa:",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "boundary hash: the character before a (backtick) ends the hash",
+    "deployed": "1.2.2+4.aaaaaaaaaaa`",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "boundary hash: a bad first character (\"/\")",
+    "deployed": "1.2.2+4./aaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "boundary hash: a hash of the letter f is a valid hash",
+    "deployed": "1.2.2+4.ffffffffffff",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "older"
+  },
+  {
+    "note": "boundary legacy: the character before 0 (\"/\") ends a bare 12-character marker",
+    "deployed": "aaaaaaaaaaa/",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "boundary legacy: the character after 9 (\":\") ends a bare 12-character marker",
+    "deployed": "aaaaaaaaaaa:",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "boundary legacy: the character before a (backtick) ends a bare 12-character marker",
+    "deployed": "aaaaaaaaaaa`",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "boundary legacy: a bad first character (\"/\") in a bare 12-character marker",
+    "deployed": "/aaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "boundary legacy: a bare marker of the letter f is a valid legacy marker",
+    "deployed": "ffffffffffff",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "older"
+  },
+  {
+    "note": "unparseable: a third part after the hash",
+    "deployed": "1.2.3+4.aaaaaaaaaaaa.5",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable embedded: the character after 9 (\":\") ends the embedded hash",
+    "deployed": "1.2.3+3.aaaaaaaaaaaa",
+    "embedded": "1.2.3+4.aaaaaaaaaaa:",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable embedded: the character after 9 (\":\") as the embedded sequence",
+    "deployed": "1.2.3+3.aaaaaaaaaaaa",
+    "embedded": "1.2.3+:.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: a NUL character ends the hash",
+    "deployed": "1.2.2+4.aaaaaaaaaaa\u0000",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
+  },
+  {
+    "note": "unparseable: a Latin-1 letter (U+00E9) ends the hash",
+    "deployed": "1.2.2+4.aaaaaaaaaaa\u00e9",
+    "embedded": "1.2.3+4.aaaaaaaaaaaa",
+    "expected": "foreign"
   }
 ]

@@ -1779,7 +1779,7 @@ describe("bootstrap", () => {
         },
         requests: 4,
         deployed: "absent",
-        remedy: "uninstall and reinstall the package with zpm",
+        remedy: `uninstall and reinstall the package with zpm: run zpm "uninstall ${IPM_MODULE_NAME}" and then zpm "install ${IPM_MODULE_NAME} ${SEMVER}" there as a user with %Admin_Manage`,
       },
     ];
 

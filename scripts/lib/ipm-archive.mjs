@@ -32,11 +32,19 @@ export const IPM_IMPORT_FILE = '/usr/irissys/dist/install/misc/zpm.xml';
 export const STAGE_MOUNT = '/opt/iris-mcp/stage';
 export const INSTALL_MOUNT = '/opt/iris-mcp/install';
 export const OUTPUT_DIRECTORY = '/tmp/iris-mcp-ipm-out';
-export const ARCHIVE_PATH_STEM = `${OUTPUT_DIRECTORY}/iris-execute-mcp-v2`;
 
 /** The web application the module's `Configure` registers, and a route that answers without a request body. */
 export const REST_APP = '/api/executemcp/v2';
 export const REST_PROBE_ROUTE = `${REST_APP}/config/namespace`;
+
+/**
+ * The Atelier routes the server's bootstrap reads to learn who owns the classes (the install guard's document answers 200 when IPM
+ * installed them, and a document that does not exist answers 404), at the lowest API version every IRIS serves. The namespace is the
+ * session's, appended by the script that makes the request.
+ */
+export const GUARD_DOCUMENT_ROUTE = '/api/atelier/v1/';
+export const GUARD_DOCUMENT = 'ExecuteMCPv2.InstallGuard.cls';
+export const ABSENT_DOCUMENT = 'ExecuteMCPv2.NoSuchGuard.cls';
 
 /** The words the install guard's refusal carries (`ipm/preload/ExecuteMCPv2/InstallGuard.cls`). */
 export const GUARD_REFUSAL_TEXT = 'ExecuteMCPv2.InstallGuard refused the install';
@@ -182,12 +190,12 @@ function elementText(xml, tag) {
 
 /**
  * What a module manifest declares, read as text: the module name, version and sources root, each `<Resource>`'s name and `Preload`
- * flag, and each `<Invoke>`'s class, method, phase and moment. IPM re-serializes a manifest on export (attribute order, defaults,
- * the default `<Packaging>`), so the comparison is over declarations and never over bytes. An absent `Phase` is `Configure`, an
- * absent `When` is `After`, and an absent `Preload` is `false`.
+ * flag, and each `<Invoke>`'s class, method, phase, moment and `CheckStatus`. IPM re-serializes a manifest on export (attribute order,
+ * defaults, the default `<Packaging>`), so the comparison is over declarations and never over bytes. An absent `Phase` is `Configure`,
+ * an absent `When` is `After`, an absent `Preload` is `false`, and an absent `CheckStatus` is `undefined` (`true` or `1` is `true`).
  *
  * @param {string} xml
- * @returns {{ name?: string, version?: string, sourcesRoot?: string, resources: Array<{ name: string, preload: boolean }>, invokes: Array<{ class: string, method: string, phase: string, when: string }> }}
+ * @returns {{ name?: string, version?: string, sourcesRoot?: string, resources: Array<{ name: string, preload: boolean }>, invokes: Array<{ class: string, method: string, phase: string, when: string, checkStatus?: boolean }> }}
  */
 export function manifestDeclarations(xml) {
   const text = String(xml).replace(/<!--[\s\S]*?-->/g, '');
@@ -202,14 +210,18 @@ export function manifestDeclarations(xml) {
       method: attributes.Method,
       phase: attributes.Phase ?? 'Configure',
       when: attributes.When ?? 'After',
+      checkStatus: attributes.CheckStatus === undefined ? undefined : /^(true|1)$/i.test(attributes.CheckStatus),
     })),
   };
 }
 
 /**
  * What differs between the manifest the repository declares and the one the archive carries. Resources compare as sets (IPM may
- * order them as it likes); invokes compare in order, because `Check` must run before `Configure`. Fewer declarations than the
- * repository manifest holds is a problem of its own: a comparison that read less than the file holds passes having compared nothing.
+ * order them as it likes); invokes compare in order, because `Check` must run before `Configure`. An invoke the repository declares
+ * with `CheckStatus` must carry it in the archive too: IPM 0.10.0 to 0.10.4 act on a returned `%Status` only then, so without it the
+ * install guard's refusal is ignored there (IPM may write the attribute on other invokes, which is not a problem). Fewer declarations
+ * than the repository manifest holds is a problem of its own: a comparison that read less than the file holds passes having compared
+ * nothing.
  *
  * @param {ReturnType<typeof manifestDeclarations>} declared
  * @param {ReturnType<typeof manifestDeclarations>} archived
@@ -234,6 +246,11 @@ export function manifestProblems(declared, archived) {
   if (JSON.stringify(wantInvokes) !== JSON.stringify(haveInvokes)) {
     problems.push(`invokes: the repository declares [${wantInvokes.join(', ')}], the archive [${haveInvokes.join(', ')}].`);
   }
+  declared.invokes.forEach((entry, index) => {
+    if (entry.checkStatus === true && archived.invokes[index]?.checkStatus !== true) {
+      problems.push(`invoke ${invoke(entry)}: the repository sets CheckStatus, the archive's manifest does not, so IPM 0.10.0 to 0.10.4 would ignore the status it returns.`);
+    }
+  });
   return problems;
 }
 
@@ -400,10 +417,13 @@ export function setupStateScript() {
  * The install checks of the matrix, in the session's namespace: `LISTED` (not used here; the `list` verb answers that), `COMPILED`
  * (the compiled, up-to-date `ExecuteMCPv2.*` classes that no other class generated), `TESTCLASSES` (how many of them are test or
  * fixture classes), `VERSION` (`GetBootstrapVersion()`), `APP` (the web application's namespace, dispatch class, enabled flag and
- * match roles, `|`-separated), `MAPPED` (whether `%ALL` maps the package) and `HTTP` (the status of a GET on {@link REST_PROBE_ROUTE}
- * made from inside the container, as `_SYSTEM`).
+ * match roles, `|`-separated), `MAPPED` (whether `%ALL` maps the package), `HTTP` (the status of a GET on {@link REST_PROBE_ROUTE}
+ * made from inside the container, as `_SYSTEM`), and `GUARDDOC` and `ABSENTDOC` (the status of an Atelier GET of the install guard's
+ * document, which the bootstrap reads as the ownership signal, and of a document that does not exist, through the same route).
  */
 export function installChecksScript() {
+  // A request object of its own per application: the cookie the REST application sets is not the Atelier application's to read.
+  const newRequest = `Set tReq = ##class(%Net.HttpRequest).%New() Set tReq.Server = "127.0.0.1" Set tReq.Port = ${CONTAINER_WEB_PORT} Do tReq.SetHeader("Authorization","Basic "_$System.Encryption.Base64Encode("${THROWAWAY_USERNAME}:${THROWAWAY_PASSWORD}"))`;
   return sessionScript([
     'Set tRS = ##class(%SQL.Statement).%ExecDirect(,"SELECT Name FROM %Dictionary.CompiledClass WHERE Name %STARTSWITH \'ExecuteMCPv2.\' AND (GeneratedBy IS NULL OR GeneratedBy = \'\')") Set tN = 0, tTest = 0 For  Quit:\'tRS.%Next()  Set tN = tN + \'\'$System.OBJ.IsUpToDate(tRS.%GetData(1)), tTest = tTest + ((tRS.%GetData(1) [ "ExecuteMCPv2.Tests.") || (tRS.%GetData(1) [ "QAFixtures"))',
     markerStatement('COMPILED', 'tN'),
@@ -412,9 +432,14 @@ export function installChecksScript() {
     `Set tHere = $Namespace Set $Namespace = "%SYS" Set tSC = ##class(Security.Applications).Get("${REST_APP}",.tProps) Set tApp = $Get(tProps("NameSpace"))_"|"_$Get(tProps("DispatchClass"))_"|"_$Get(tProps("Enabled"))_"|"_$Get(tProps("MatchRoles")) Set tMapped = ##class(Config.MapPackages).Exists("%ALL","ExecuteMCPv2") Set $Namespace = tHere`,
     markerStatement('APP', 'tApp'),
     markerStatement('MAPPED', 'tMapped'),
-    `Set tReq = ##class(%Net.HttpRequest).%New() Set tReq.Server = "127.0.0.1" Set tReq.Port = ${CONTAINER_WEB_PORT} Do tReq.SetHeader("Authorization","Basic "_$System.Encryption.Base64Encode("${THROWAWAY_USERNAME}:${THROWAWAY_PASSWORD}"))`,
+    newRequest,
     `Set tSC = tReq.Get("${REST_PROBE_ROUTE}")`,
     markerStatement('HTTP', '$Select($IsObject(tReq.HttpResponse):tReq.HttpResponse.StatusCode,1:"none")'),
+    newRequest,
+    `Set tSC = tReq.Get("${GUARD_DOCUMENT_ROUTE}"_$Namespace_"/doc/${GUARD_DOCUMENT}")`,
+    markerStatement('GUARDDOC', '$Select($IsObject(tReq.HttpResponse):tReq.HttpResponse.StatusCode,1:"none")'),
+    `Set tSC = tReq.Get("${GUARD_DOCUMENT_ROUTE}"_$Namespace_"/doc/${ABSENT_DOCUMENT}")`,
+    markerStatement('ABSENTDOC', '$Select($IsObject(tReq.HttpResponse):tReq.HttpResponse.StatusCode,1:"none")'),
   ]);
 }
 

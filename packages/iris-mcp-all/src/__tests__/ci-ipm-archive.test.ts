@@ -24,7 +24,9 @@ import path from "node:path";
 import { EDITIONS, PhaseFailure, parseArgs, runIpmArchive } from "../../../../scripts/ci-ipm-archive.mjs";
 import { findExecutable } from "../../../../scripts/throwaway-iris.mjs";
 import {
+  ABSENT_DOCUMENT,
   FORBIDDEN_IPM_VERBS,
+  GUARD_DOCUMENT,
   GUARD_REFUSAL_TEXT,
   IPM_VERBS,
   archiveNames,
@@ -210,6 +212,12 @@ describe("stageModule (AD-14: the archive is built from the embed, never from sr
     expect(IPM_INSTALL_GUARD.content).toContain(`"${GUARD_REFUSAL_TEXT} in namespace '"`);
     expect(GUARD_REFUSAL_TEXT.startsWith("ExecuteMCPv2.InstallGuard")).toBe(true);
   });
+
+  it("reads the ownership signal under the name the bootstrap reads: the document of the embedded install guard", () => {
+    expect(GUARD_DOCUMENT).toBe(IPM_INSTALL_GUARD.name);
+    expect(ABSENT_DOCUMENT, "the control is another document").not.toBe(IPM_INSTALL_GUARD.name);
+    expect(ABSENT_DOCUMENT.endsWith(".cls")).toBe(true);
+  });
 });
 
 describe("manifestDeclarations and manifestProblems (IPM re-serializes a manifest on export)", () => {
@@ -221,14 +229,16 @@ describe("manifestDeclarations and manifestProblems (IPM re-serializes a manifes
     expect(declared.sourcesRoot).toBe("src");
     expect(declared.resources).toHaveLength(36);
     expect(declared.resources[0]).toEqual({ name: "ExecuteMCPv2.InstallGuard.CLS", preload: true });
+    expect(declared.invokes[0], "the guard's Check carries CheckStatus").toStrictEqual({ class: "ExecuteMCPv2.InstallGuard", method: "Check", phase: "Initialize", when: "After", checkStatus: true });
     expect(declared.invokes[1]).toEqual({ class: "ExecuteMCPv2.Setup", method: "Configure", phase: "Configure", when: "After" });
+    expect(declared.invokes[1]?.checkStatus, "an invoke with no CheckStatus attribute").toBeUndefined();
   });
 
   it("ignores comments, attribute order, the default packaging and explicit defaults: the same declarations", () => {
     const reserialized = `<?xml version="1.0"?><Export><Document name="x"><Module>
       <Name>iris-execute-mcp-v2</Name><Version>${markerSemver(BOOTSTRAP_VERSION)}</Version><SourcesRoot>src</SourcesRoot>
       ${declared.resources.map((resource) => `<Resource ${resource.preload ? 'Preload="true" ' : 'Preload="false" '}Name="${resource.name}"></Resource>`).join("\n")}
-      ${declared.invokes.map((entry) => `<Invoke When="${entry.when}" Phase="${entry.phase}" Method="${entry.method}" Class="${entry.class}"/>`).join("\n")}
+      ${declared.invokes.map((entry) => `<Invoke ${entry.checkStatus === undefined ? "" : `CheckStatus="${entry.checkStatus ? 1 : 0}" `}When="${entry.when}" Phase="${entry.phase}" Method="${entry.method}" Class="${entry.class}"/>`).join("\n")}
     </Module></Document></Export>`;
 
     expect(manifestDeclarations(reserialized)).toEqual(declared);
@@ -242,6 +252,8 @@ describe("manifestDeclarations and manifestProblems (IPM re-serializes a manifes
     ["swapped invokes", (m: typeof declared) => ({ ...m, invokes: [...m.invokes].reverse() }), /invokes:/],
     ["a dropped invoke", (m: typeof declared) => ({ ...m, invokes: m.invokes.slice(1) }), /invokes:/],
     ["another phase", (m: typeof declared) => ({ ...m, invokes: m.invokes.map((e, i) => (i === 0 ? { ...e, phase: "Reload" } : e)) }), /Initialize\/After/],
+    ["a guard invoke that lost CheckStatus", (m: typeof declared) => ({ ...m, invokes: m.invokes.map((e, i) => (i === 0 ? { ...e, checkStatus: undefined } : e)) }), /Check Initialize\/After: the repository sets CheckStatus, the archive's manifest does not/],
+    ["a guard invoke with CheckStatus off", (m: typeof declared) => ({ ...m, invokes: m.invokes.map((e, i) => (i === 0 ? { ...e, checkStatus: false } : e)) }), /the repository sets CheckStatus, the archive's manifest does not/],
     ["another version", (m: typeof declared) => ({ ...m, version: "9.9.9" }), /version:/],
     ["another name", (m: typeof declared) => ({ ...m, name: "other" }), /name:/],
   ])("reports %s", (_label, change, problem) => {
@@ -375,9 +387,13 @@ describe("session scripts and their markers", () => {
   it("builds the install checks of the matrix: compiled classes, test classes, version, application, mapping and an in-container GET", () => {
     const script = installChecksScript();
 
-    for (const marker of ["COMPILED", "TESTCLASSES", "VERSION", "APP", "MAPPED", "HTTP"]) expect(script, marker).toContain(`"${marker}-START:"`);
+    for (const marker of ["COMPILED", "TESTCLASSES", "VERSION", "APP", "MAPPED", "HTTP", "GUARDDOC", "ABSENTDOC"]) expect(script, marker).toContain(`"${marker}-START:"`);
     expect(script).toContain("GetBootstrapVersion()");
     expect(script).toContain("/api/executemcp/v2/config/namespace");
+    // The ownership signal, read through the Atelier route in the session's own namespace, with a document that does not exist as the control.
+    expect(script).toContain('Get("/api/atelier/v1/"_$Namespace_"/doc/ExecuteMCPv2.InstallGuard.cls")');
+    expect(script).toContain('Get("/api/atelier/v1/"_$Namespace_"/doc/ExecuteMCPv2.NoSuchGuard.cls")');
+    expect(script.match(/%Net\.HttpRequest\)\.%New\(\)/g), "a request object of its own for the REST application and for Atelier").toHaveLength(2);
     expect(script).toContain("MatchRoles");
     expect(script).toContain("%STARTSWITH 'ExecuteMCPv2.'");
     expect(script).toContain("GeneratedBy");
@@ -621,6 +637,7 @@ module.exports = function handler(namespace, stdin, { dir, container }) {
     out += marker("COMPILED", fail === "compiled-count" ? "35" : "36") + marker("TESTCLASSES", fail === "test-classes" ? "2" : "0");
     const version = fail === "version-call-wrong" ? "not-the-marker" : state.setup === null ? "" : state.setup;
     out += marker("VERSION", version) + marker("APP", app) + marker("MAPPED", fail === "not-mapped" ? "0" : "1") + marker("HTTP", fail === "http-500" ? "500" : "200");
+    out += marker("GUARDDOC", fail === "guard-document-missing" ? "404" : fail === "guard-document-unauthorized" ? "401" : "200") + marker("ABSENTDOC", fail === "absent-document-found" ? "200" : "404");
   } else if (stdin.includes("%FromJSONFile")) {
     const cases = JSON.parse(fs.readFileSync(path.join(mountHost, "cases.json"), "utf8"));
     const results = cases.map((entry, index) => {
@@ -836,6 +853,12 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     ["health-not-fresh", "health", "install-health", "health", "already has a Setup class"],
     ["parity-mismatch", "health", "parity-health", "health", "InstallGuard.Classify says"],
     ["http-500", "health", "install-health", "health", 'answered "500", not 200'],
+    // The ownership signal the server's bootstrap reads: the install guard's document answers 200 through Atelier, a missing one 404.
+    ["guard-document-missing", "community", "install-community", "community", 'of ExecuteMCPv2.InstallGuard.cls in USER from inside the container answered "404", not 200'],
+    ["guard-document-unauthorized", "community", "install-community", "community", 'answered "401", not 200'],
+    ["absent-document-found", "community", "install-community", "community", 'of ExecuteMCPv2.NoSuchGuard.cls answered "200", not 404'],
+    ["guard-document-missing", "health", "install-health", "health", 'of ExecuteMCPv2.InstallGuard.cls in HSCUSTOM from inside the container answered "404", not 200'],
+    ["absent-document-found", "health", "install-health", "health", 'of ExecuteMCPv2.NoSuchGuard.cls answered "200", not 404'],
     // Each of these is the only thing wrong in its run, so each clause of the script's checks is shown to be able to fail.
     ["outdir-fails", "community", "build", "community", "could not be emptied and created"],
     ["synth-fails", "community", "guard-newer", "community", "synthetic Setup could not be loaded"],
@@ -888,6 +911,7 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
       }, "test or fixture member"],
       ["a manifest at another version", (stage: string) => writeFileSync(path.join(stage, "module.xml"), readFileSync(path.join(stage, "module.xml"), "utf8").replace(/<Version>[^<]*<\/Version>/, "<Version>9.9.9</Version>")), "version:"],
       ["a manifest that lost its invokes", (stage: string) => writeFileSync(path.join(stage, "module.xml"), readFileSync(path.join(stage, "module.xml"), "utf8").replace(/<Invoke [^>]*>/g, "")), "invokes:"],
+      ["a manifest whose guard invoke lost CheckStatus", (stage: string) => writeFileSync(path.join(stage, "module.xml"), readFileSync(path.join(stage, "module.xml"), "utf8").replace(' CheckStatus="true"', "")), "the repository sets CheckStatus, the archive's manifest does not"],
     ])("%s", async (_label, mutate, reason) => {
       archiveWith(mutate);
 

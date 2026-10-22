@@ -59,9 +59,9 @@ describe("ipm/module.xml is generated from classes[] plus the install guard (AC 
       '<Invoke Class="ExecuteMCPv2.Setup" Method="ConfigureMapping"/>',
     ]);
     expect(declared.invokes, HINT).toEqual([
-      { class: "ExecuteMCPv2.InstallGuard", method: "Check", phase: "Initialize", when: "After" },
-      { class: "ExecuteMCPv2.Setup", method: "Configure", phase: "Configure", when: "After" },
-      { class: "ExecuteMCPv2.Setup", method: "ConfigureMapping", phase: "Configure", when: "After" },
+      { class: "ExecuteMCPv2.InstallGuard", method: "Check", phase: "Initialize", when: "After", checkStatus: true },
+      { class: "ExecuteMCPv2.Setup", method: "Configure", phase: "Configure", when: "After", checkStatus: undefined },
+      { class: "ExecuteMCPv2.Setup", method: "ConfigureMapping", phase: "Configure", when: "After", checkStatus: undefined },
     ]);
   });
 

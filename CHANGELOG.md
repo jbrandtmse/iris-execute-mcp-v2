@@ -17,7 +17,7 @@ the install guard as well as the 35 classes, so the sequence rises by one. `clas
 - **A generated IPM manifest (AC 42.4.1, DW-34).** `ipm/module.xml` was a hand-written `0.1.0` manifest of 13 classes and some test classes
   that had never been installed. It is now written by `scripts/gen-bootstrap.mjs` (`pnpm gen:bootstrap`) from `classes[]`, plus one IPM-only
   preloaded class, and carries a DO-NOT-EDIT header. It declares 36 resources (the guard, then the 35 classes in compile order), the
-  module `iris-execute-mcp-v2` at the version of `@iris-mcp/shared`, and three invokes: the guard's `Check` at `Initialize`/`After` (with `CheckStatus`, which IPM 0.10.0 to 0.10.4 need to act on the error a refusal returns; IPM 0.10.5 and later check it by default), then
+  module `iris-execute-mcp-v2` at the version of `@iris-mcp/shared`, and three invokes: the guard's `Check` at `Initialize`/`After` (with `CheckStatus`, which IPM 0.10.0 to 0.10.4 need to act on the error a refusal returns; IPM 0.10.5 and later check it by default and mark the attribute deprecated; the `ipm` job checks that the built archive's manifest keeps it), then
   `ExecuteMCPv2.Setup.Configure` and `ConfigureMapping`. It has no `<WebApplication>`, no application role and no `MatchRoles`. It is
   rewritten only when its content changes, like the embed. `ipm-manifest.test.ts` and the generator drift test in the default suite fail on a
   hand edit, or on a `classes[]`, shared-version or guard change that skipped the regeneration. The embed gains `IPM_MODULE_NAME` and
@@ -27,8 +27,8 @@ the install guard as well as the 35 classes, so the sequence rises by one. `clas
   orders the marker of the `ExecuteMCPv2.Setup` already in the namespace against its own stamped marker with the Story 42.2 table, and refuses the
   install, inside IPM's transaction and with nothing installed, over a newer, `dev` or unreadable one; an absent, older or equal one installs.
   IPM's own downgrade check ignores the `+<sequence>.<hash>` part of a version and never sees a deployment made by the bootstrap. `Classify` is a
-  port of `classifyDeployedMarker`, held equal to it by a parity table of 70 cases (leading zeros, numbers past 2^53 and past 19 digits,
-  non-ASCII digits, trailing line breaks, uppercase hex, legacy markers) that `bootstrap-version.test.ts` pins on the TypeScript side and that CI
+  port of `classifyDeployedMarker`, held equal to it by a parity table of 91 cases (leading zeros, numbers past 2^53 and past 19 digits,
+  non-ASCII digits, trailing line breaks, uppercase hex, legacy markers, the characters either side of the digit and hex ranges) that `bootstrap-version.test.ts` pins on the TypeScript side and that CI
   runs on both editions.
 - **The bootstrap leaves an IPM installation alone (DW-674, the ownership half).** When the document `ExecuteMCPv2.InstallGuard.cls` answers
   200, IPM installed the classes there: at startup, on every path that would write (`stale`, `unconfigured`, `missing`) the server uploads,
@@ -37,14 +37,14 @@ the install guard as well as the 35 classes, so the sequence rises by one. `clas
   document is asked for again there: a guard that appears only then (another client installing at the same moment) comes after this server's
   class documents were uploaded, so those stay, and the compile and every later step are skipped. `BootstrapResult` gains `ipmOwned`, present only
   when `true`. A 404 for the document is the positive absence and the result is deep-equal to before, with no new key. Any other failure of the read
-  is unknown: nothing is written, and the existing unreadable-marker warning names it. A current, newer, foreign or unreadable deployment makes no ownership
+  is unknown: nothing more is written (at the re-check, the documents already uploaded stay), and the existing unreadable-marker warning names it. A current, newer, foreign or unreadable deployment makes no ownership
   request. The `ipm-owned-older` leg of the bootstrap-guard gate runs this against a real IRIS in CI.
 - **The `ipm` CI job and `scripts/ci-ipm-archive.mjs` (AC 42.4.2).** It builds the archive with IPM's `load -dev` and `package` on a throwaway
   `iris-community` 2026.2 container with no network, from the stamped embed and never from `src/`, and installs that one archive on fresh
   no-network containers of `iris-community` 2026.2 (`USER`) and `irishealth-community` 2026.2 (`HSCUSTOM`). On the community edition it shows that the three guard refusals
   (a newer, `dev` and marker-less `Setup`) leave the deployment as it was, with no module listed, and that an older `Setup` is upgraded; on both editions it shows that 36 classes compile,
   that the web application has the install namespace, `ExecuteMCPv2.REST.Dispatch`, `Enabled=1` and no `MatchRoles`, that `%ALL` maps the package, that a
-  GET of the application from inside the container answers 200, that `%IPM_Repo.Definition` holds 0 rows at every read, and that the parity table agrees. The only IPM verbs it issues are `load`, `package` and `list` (AC 42.4.4); it publishes nothing, uploads nothing and reads no secret. The job needs
+  GET of the application from inside the container answers 200, that an Atelier GET of the guard's document `ExecuteMCPv2.InstallGuard.cls` (the ownership signal the bootstrap reads) answers 200 while a document that does not exist answers 404, that `%IPM_Repo.Definition` holds 0 rows at every read, and that the parity table agrees. The only IPM verbs it issues are `load`, `package` and `list` (AC 42.4.4); it publishes nothing, uploads nothing and reads no secret. The job needs
   `gates` and `throwaway` and has a 45-minute budget. `scripts/lib/ipm-archive.mjs` holds the pure helpers.
 - **The throwaway harness learns to run without a network.** `up --network none` starts a container with no `-p`, ready when its session answers (there is
   no web port to poll); `--mount <dir>:/opt/iris-mcp/<name>` adds a read-only bind mount whose host directory must be absolute, plain and a real directory, not a link; `session`

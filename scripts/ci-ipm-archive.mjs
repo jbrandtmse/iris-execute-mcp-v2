@@ -25,7 +25,8 @@
 //      matrix follow: `list` names the module and version; exactly 36 compiled, up-to-date `ExecuteMCPv2.*` classes and none a
 //      test or fixture class; `GetBootstrapVersion()` is `BOOTSTRAP_VERSION`; the web application has the install namespace,
 //      `ExecuteMCPv2.REST.Dispatch`, `Enabled=1` and empty `MatchRoles`; `%ALL` maps the package; a GET of the application
-//      from inside the container answers 200.
+//      from inside the container answers 200; an Atelier GET of the install guard's document `ExecuteMCPv2.InstallGuard.cls` (the
+//      ownership signal the server's bootstrap reads) answers 200, and one of a document that does not exist answers 404.
 //   5. INSTALL, health (`HSCUSTOM`, `irishealth-community`): a fresh container with no Setup installs the same archive, and the
 //      same checks hold.
 //   6. PARITY. In each install container `ExecuteMCPv2.InstallGuard.Classify` is run over every case of the shared table
@@ -63,6 +64,8 @@ import {
   upHarness,
 } from './throwaway-iris.mjs';
 import {
+  ABSENT_DOCUMENT,
+  GUARD_DOCUMENT,
   GUARD_REFUSAL_TEXT,
   INSTALL_MOUNT,
   OUTPUT_DIRECTORY,
@@ -103,8 +106,8 @@ export const EDITIONS = Object.freeze({
 /** The relative path of the shared case table. */
 const PARITY_CASES_FILE = path.join('packages', 'shared', 'src', '__tests__', 'fixtures', 'bootstrap-marker-parity-cases.json');
 
-/** The name of the archive inside the install directory. */
-const ARCHIVE_NAME = 'iris-execute-mcp-v2.tgz';
+/** The name of the archive on the host and inside the install directory: the embed's module name. */
+const archiveName = (embed) => `${embed.moduleName}.tgz`;
 
 /** A failed phase: the exit code and the message that names the phase and the edition. */
 export class PhaseFailure extends Error {
@@ -293,8 +296,10 @@ export function startRun(options = {}) {
 
   /** Write the install directory: the archive, the synthetic Setup classes and the parity cases. */
   function prepareInstallDirectory(embed, directories) {
+    // The mode of mkdirSync is masked by the umask; the read-only mount must be readable by the IRIS user, as the stage is.
     mkdirSync(directories.install, { recursive: true, mode: 0o755 });
-    copyFileSync(directories.archive, path.join(directories.install, ARCHIVE_NAME));
+    chmodSync(directories.install, 0o755);
+    copyFileSync(directories.archive, path.join(directories.install, archiveName(embed)));
     const seeds = seedMarkers(embed.marker, embed.parse);
     for (const [leg, marker] of Object.entries(seeds)) {
       writeFileSync(path.join(directories.install, `setup-${leg}.cls`), synthesizedSetup(marker), 'utf8');
@@ -308,11 +313,11 @@ export function startRun(options = {}) {
     const cases = [...fixture, ...runtime];
     const text = JSON.stringify(cases, null, 2).replace(/[\u0080-\uFFFF]/g, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
     writeFileSync(path.join(directories.install, 'cases.json'), `${text}\n`, 'utf8');
-    for (const entry of ['cases.json', ...Object.keys(seeds).map((leg) => `setup-${leg}.cls`), ARCHIVE_NAME]) chmodSync(path.join(directories.install, entry), 0o644);
+    for (const entry of ['cases.json', ...Object.keys(seeds).map((leg) => `setup-${leg}.cls`), archiveName(embed)]) chmodSync(path.join(directories.install, entry), 0o644);
     return { cases, seeds };
   }
 
-  const archiveInContainer = `${INSTALL_MOUNT}/${ARCHIVE_NAME}`;
+  const archiveInContainer = (embed) => `${INSTALL_MOUNT}/${archiveName(embed)}`;
 
   /** One guard leg: seed a synthetic Setup, and the archive's `load` must be refused with nothing changed. */
   async function guardLeg(container, embed, leg, seedMarker, edition) {
@@ -322,7 +327,7 @@ export function startRun(options = {}) {
     const before = value(await session(container, setupStateScript(), phase, edition), 'SETUP');
     need(before !== undefined && before.startsWith('compiled:'), phase, edition, `the synthetic Setup is not compiled (the namespace reports ${JSON.stringify(before)}).`);
 
-    const loaded = await ipm(container, `load ${archiveInContainer}`, phase, edition);
+    const loaded = await ipm(container, `load ${archiveInContainer(embed)}`, phase, edition);
     const failure = loaded.outcome ?? '';
     need(failure.startsWith('FAILED:'), phase, edition, `load of the archive over a Setup marked ${JSON.stringify(seedMarker)} succeeded or printed no outcome (${JSON.stringify(failure.slice(0, 200))}); the guard must refuse it.`);
     need(failure.includes(GUARD_REFUSAL_TEXT), phase, edition, `the load failed, but not with the install guard's text (${GUARD_REFUSAL_TEXT}): ${failure.slice(0, 400)}`);
@@ -357,7 +362,9 @@ export function startRun(options = {}) {
     need(value(output, 'APP') === expectedApp, phase, edition, `the web application ${REST_APP} reads ${JSON.stringify(value(output, 'APP'))}, not ${JSON.stringify(expectedApp)} (namespace, dispatch class, enabled, no MatchRoles).`);
     need(value(output, 'MAPPED') === '1', phase, edition, 'the %ALL namespace does not map the ExecuteMCPv2 package.');
     need(value(output, 'HTTP') === '200', phase, edition, `a GET of ${REST_APP}/config/namespace from inside the container answered ${JSON.stringify(value(output, 'HTTP'))}, not 200.`);
-    say(`[${phase}] list: ${embed.moduleName} ${semver}; ${expectedClasses} classes compiled (none a test or fixture); marker ${embed.marker}; ${REST_APP} in ${container.namespace} with no MatchRoles, %ALL mapped, GET answers 200`);
+    need(value(output, 'GUARDDOC') === '200', phase, edition, `an Atelier GET of ${GUARD_DOCUMENT} in ${container.namespace} from inside the container answered ${JSON.stringify(value(output, 'GUARDDOC'))}, not 200: the server's bootstrap would not see that IPM installed the classes.`);
+    need(value(output, 'ABSENTDOC') === '404', phase, edition, `an Atelier GET of ${ABSENT_DOCUMENT} answered ${JSON.stringify(value(output, 'ABSENTDOC'))}, not 404: a 200 for the guard document would then show nothing about the guard.`);
+    say(`[${phase}] list: ${embed.moduleName} ${semver}; ${expectedClasses} classes compiled (none a test or fixture); marker ${embed.marker}; ${REST_APP} in ${container.namespace} with no MatchRoles, %ALL mapped, GET answers 200; the guard document answers 200 through Atelier (the bootstrap's ownership signal) and a missing one 404`);
 
     const parity = await session(container, parityScript(`${INSTALL_MOUNT}/cases.json`), `parity-${edition}`, edition);
     const raw = value(parity, 'PARITY');
@@ -376,7 +383,7 @@ export function startRun(options = {}) {
 
     const seeded = await session(container, loadSyntheticSetupScript(`${INSTALL_MOUNT}/setup-older.cls`), 'install-community', edition);
     need(value(seeded, 'SYNTH') === 'OK', 'install-community', edition, `the older synthetic Setup could not be loaded: ${value(seeded, 'SYNTH')}`);
-    const loaded = await ipm(container, `load ${archiveInContainer}`, 'install-community', edition);
+    const loaded = await ipm(container, `load ${archiveInContainer(embed)}`, 'install-community', edition);
     need(loaded.outcome === 'OK', 'install-community', edition, `load of the archive over an older Setup (${install.seeds.older}) did not succeed: ${loaded.outcome ?? tail(loaded.output, 20)}`);
     const state = await session(container, setupStateScript(), 'install-community', edition);
     need(value(state, 'SETUP') === `compiled:${embed.marker}`, 'install-community', edition, `Setup reads ${JSON.stringify(value(state, 'SETUP'))} after the upgrade, not compiled:${embed.marker}.`);
@@ -391,7 +398,7 @@ export function startRun(options = {}) {
     await importIpm(container, 'install-health', edition);
     const before = await session(container, setupStateScript(), 'install-health', edition);
     need(value(before, 'SETUP') === 'absent', 'install-health', edition, `the fresh container already has a Setup class (${JSON.stringify(value(before, 'SETUP'))}).`);
-    const loaded = await ipm(container, `load ${archiveInContainer}`, 'install-health', edition);
+    const loaded = await ipm(container, `load ${archiveInContainer(embed)}`, 'install-health', edition);
     need(loaded.outcome === 'OK', 'install-health', edition, `load of the archive on a fresh container did not succeed: ${loaded.outcome ?? tail(loaded.output, 20)}`);
     say(`[install-health] the archive installed on a fresh ${EDITIONS.health.image.split('@')[0]} in ${container.namespace}`);
     await installChecks(container, embed, edition, install.cases);
@@ -418,7 +425,7 @@ export function startRun(options = {}) {
       stage: path.join(root, 'stage'),
       install: path.join(root, 'install'),
       extract: path.join(root, 'extract'),
-      archive: path.join(root, 'built', ARCHIVE_NAME),
+      archive: path.join(root, 'built', archiveName(embed)),
     };
     for (const directory of [directories.stage, directories.extract, path.dirname(directories.archive)]) mkdirSync(directory, { recursive: true, mode: 0o755 });
     chmodSync(directories.stage, 0o755);

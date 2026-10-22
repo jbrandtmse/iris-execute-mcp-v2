@@ -3840,3 +3840,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-4-ipm-package-revival.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 42.4 plan probe; nothing calls Setup.Uninstall() on the IPM path
 - 2026-10-22T13:06:14Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=two-way door for the docs story: state the manual cleanup in the IPM uninstall docs (or wire an Unconfigure Invoke to Setup.Uninstall if cheap)
+
+### DW-691: A failed IPM-ownership read (guard document 5xx or timeout) logs the unreadable-marker warning: it says the deployed marker could not be read, names SQL as the privilege to check, suggests deleting Setup, and drops the deployedVersion it had read
+- source: spec-42-4-ipm-package-revival.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: 42.4 cr (blind+vg+auditor): bootstrap.ts leftToIpm unknown branch reuses warnDeploymentLeftAlone kind unknown; pinned at bootstrap.test.ts ownership-read-fails cases
+- 2026-10-22T14:43:11Z status=by-design owner=42-4-ipm-package-revival by=cr note=spec Task (b) binds: log the existing unknown warning with that reason; reopen via a spec amendment only
+
+### DW-692: The ci-ipm-archive scripted-run block (and every process gate on checkDistFresh) fails in beforeAll after an mtime-only touch of a shared src file, which pnpm build cannot clear because composite tsc re-emits nothing unchanged
+- source: spec-42-4-ipm-package-revival.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: 42.4 cr (vg): ci-ipm-archive.test.ts:657-660 staleDistReason throws; reproduced in this review after a mutation revert; touching packages/shared/dist cleared it
+- 2026-10-22T14:43:11Z status=wontfix-accepted owner=42-4-ipm-package-revival by=cr note=reopen_if=a fresh CI checkout+build reports a stale shared dist, or a red with no source change is seen twice in one epic
