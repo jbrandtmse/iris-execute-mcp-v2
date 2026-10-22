@@ -33,7 +33,8 @@ function listOf(value, fallback) {
 }
 
 const watchedPorts = listOf(process.env.IRIS_MCP_WATCH_PORTS, DEFAULT_WATCH_PORTS);
-const watchedHosts = listOf(process.env.IRIS_MCP_WATCH_HOSTS, DEFAULT_WATCH_HOSTS);
+// Host names compare case-insensitively: both sides are lowercased.
+const watchedHosts = new Set([...listOf(process.env.IRIS_MCP_WATCH_HOSTS, DEFAULT_WATCH_HOSTS)].map((host) => host.toLowerCase()));
 const logPath = process.env.IRIS_MCP_CONNECT_LOG;
 
 /**

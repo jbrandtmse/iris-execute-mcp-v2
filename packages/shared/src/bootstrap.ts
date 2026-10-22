@@ -7,24 +7,37 @@
  *
  * The bootstrap is idempotent: if the service is already configured,
  * all steps are skipped. It never downgrades: the deployed version marker is
- * ordered against this build's marker (see `bootstrap-version.ts`), and only an
- * absent or older deployment is redeployed.
+ * ordered against this build's marker (see `bootstrap-version.ts`), and only a
+ * provably absent or an older deployment is (re)deployed. A marker that cannot
+ * be read while the `ExecuteMCPv2.Setup` class is not provably absent is
+ * `unknown`, and nothing is deployed over it.
  */
 
 import { IrisHttpClient } from "./http-client.js";
 import type { IrisConnectionConfig } from "./config.js";
 import { atelierPath } from "./atelier.js";
+import { IrisApiError } from "./errors.js";
 import { logger } from "./logger.js";
 import { BOOTSTRAP_CLASSES, BOOTSTRAP_VERSION } from "./bootstrap-classes.js";
 import { classifyDeployedMarker, parseBootstrapMarker } from "./bootstrap-version.js";
 
+/** The Atelier document that carries the version marker. */
+const SETUP_DOCUMENT = "ExecuteMCPv2.Setup.cls";
+
 /**
  * Probe result.
  *
- * - `missing`: the REST service is not deployed (probe query failed —
- *    either the class does not exist or the web application isn't
- *    registered yet). Bootstrap runs the full deploy + compile + configure
- *    + mapping flow.
+ * - `missing`: the REST service is provably not deployed: the version query
+ *    returned no marker AND the Atelier document route answers HTTP 404 for
+ *    `ExecuteMCPv2.Setup.cls` (the class does not exist). Bootstrap runs the
+ *    full deploy + compile + configure + mapping flow.
+ *
+ * - `unknown`: the version query failed or returned no marker (an HTTP error,
+ *    a timeout, a privilege error, an empty value, or a `Setup` class from
+ *    before the version stamp that has no `GetBootstrapVersion` method), and
+ *    the `Setup` class is NOT provably absent (the document route found it, or
+ *    could not be asked). The deployment may be newer than this build, so
+ *    bootstrap changes nothing and warns, naming the failure and the remedy.
  *
  * - `current`: the deployed classes carry the embedded marker AND the web
  *    application is registered. Bootstrap skips everything.
@@ -61,7 +74,8 @@ export type ProbeResult =
   | { status: "unconfigured" }
   | { status: "stale"; deployedVersion: string }
   | { status: "newer"; deployedVersion: string }
-  | { status: "foreign"; deployedVersion: string };
+  | { status: "foreign"; deployedVersion: string }
+  | { status: "unknown"; reason: string };
 
 /** Result of a full bootstrap run. */
 export interface BootstrapResult {
@@ -70,11 +84,14 @@ export interface BootstrapResult {
   /**
    * The probe result — lets callers distinguish first-time install from
    * auto-upgrade. When the marker re-read just before a compile finds a newer
-   * or foreign deployment, this names that finding instead.
+   * or foreign deployment, or cannot read the marker, this names that finding
+   * instead.
    */
-  probeStatus: "missing" | "current" | "unconfigured" | "stale" | "newer" | "foreign";
+  probeStatus: "missing" | "current" | "unconfigured" | "stale" | "newer" | "foreign" | "unknown";
   /** The marker found on the instance, when it was `stale`, `newer` or `foreign`. */
   deployedVersion?: string;
+  /** Why the deployed marker could not be read, when `probeStatus` is `unknown`. */
+  readFailure?: string;
   /** Whether class deployment succeeded. */
   deployed: boolean;
   /** Whether class compilation succeeded. */
@@ -113,20 +130,36 @@ To complete setup manually, choose one of:
 3. IPM: If IPM is installed, run in any namespace:
    zpm "install iris-execute-mcp-v2"`;
 
+/** What reading the deployed marker produced: the marker, or why none was read. */
+type MarkerRead = { kind: "marker"; marker: string } | { kind: "unread"; reason: string };
+
+/** `text` on one line, cut at `limit` characters, for a log line. */
+function oneLine(text: string, limit: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > limit ? `${flat.slice(0, limit)}...` : flat;
+}
+
+/** A failed request as one short line. */
+function describeFailure(error: unknown): string {
+  return oneLine(error instanceof Error ? error.message : String(error), 200);
+}
+
 /**
  * Read the version marker stamped into the deployed `ExecuteMCPv2.Setup`
  * class by calling `ExecuteMCPv2.Setup_GetBootstrapVersion()` via the
  * Atelier SQL endpoint.
  *
- * Returns `""` when nothing can be read: the query throws (the class or the
- * method does not exist, or any other error), or it returns no row or an
- * empty value. Never throws.
+ * Returns `unread` with the reason when no marker can be read: the query
+ * fails (for any reason, whatever HTTP status or error text IRIS answers
+ * with), or it returns no row or an empty value. Never throws. A failed read
+ * says nothing about whether a deployment exists; {@link setupClassAbsence}
+ * decides that.
  */
 async function readDeployedVersion(
   http: IrisHttpClient,
   config: IrisConnectionConfig,
   version: number,
-): Promise<string> {
+): Promise<MarkerRead> {
   try {
     const path = atelierPath(version, config.namespace, "action/query");
     const body = {
@@ -138,11 +171,36 @@ async function readDeployedVersion(
     )?.content;
     if (Array.isArray(content) && content.length > 0) {
       const row = content[0] as Record<string, unknown>;
-      return String(row["Version"] ?? "");
+      const marker = String(row["Version"] ?? "");
+      if (marker !== "") return { kind: "marker", marker };
     }
-    return "";
-  } catch {
-    return "";
+    return { kind: "unread", reason: "the version query returned no marker" };
+  } catch (error: unknown) {
+    return { kind: "unread", reason: `the version query failed: ${describeFailure(error)}` };
+  }
+}
+
+/**
+ * Whether the `ExecuteMCPv2.Setup` class is provably absent: the Atelier
+ * document route answers HTTP 404 for `ExecuteMCPv2.Setup.cls` (Atelier's
+ * `GetDoc` answers 404 exactly when the document does not exist). Any other
+ * answer is not a positive absence: a found document, or a request that
+ * failed some other way, which `reason` names. Never throws.
+ */
+async function setupClassAbsence(
+  http: IrisHttpClient,
+  config: IrisConnectionConfig,
+  version: number,
+): Promise<{ absent: true } | { absent: false; reason: string }> {
+  try {
+    await http.get(atelierPath(version, config.namespace, `doc/${SETUP_DOCUMENT}`));
+    return { absent: false, reason: "the ExecuteMCPv2.Setup class exists" };
+  } catch (error: unknown) {
+    if (error instanceof IrisApiError && error.statusCode === 404) return { absent: true };
+    return {
+      absent: false,
+      reason: `whether the ExecuteMCPv2.Setup class exists could not be checked: ${describeFailure(error)}`,
+    };
   }
 }
 
@@ -156,14 +214,17 @@ async function readDeployedVersion(
  *
  * Outcomes:
  *
- * - SQL query throws (class doesn't exist, method doesn't exist, or any
- *   other error) or returns an empty value → `{ status: "missing" }`. The
- *   most common cause is a first-time install where nothing has been
- *   deployed yet. A less common but important case: an existing deployment
- *   from a pre-version-stamp commit that lacks `GetBootstrapVersion()` — the
- *   SQL call fails with "no such method" and we treat it as missing,
- *   which triggers a full bootstrap that upgrades the stale classes.
- *   This is the one-shot upgrade path for existing beta users.
+ * - No marker can be read (the SQL query fails for any reason, or returns no
+ *   row or an empty value). The probe then asks whether the `Setup` class is
+ *   provably absent ({@link setupClassAbsence}):
+ *   - the document route answers 404 → `{ status: "missing" }`, the full
+ *     install. This is a first-time install where nothing has been deployed.
+ *   - anything else → `{ status: "unknown", reason }`. The class exists (or
+ *     its existence could not be checked), so the failed read may be a
+ *     transient 5xx, a timeout or a privilege error over a newer deployment,
+ *     and bootstrap leaves it alone. A deployment from before the version
+ *     stamp (a `Setup` class with no `GetBootstrapVersion()` method) lands
+ *     here too; deleting the class `ExecuteMCPv2.Setup` makes it absent.
  *
  * - Returned marker equals `BOOTSTRAP_VERSION` → the classes are current,
  *   but a matching version does NOT prove the web application is
@@ -198,14 +259,15 @@ export async function probeCustomRest(
   config: IrisConnectionConfig,
   version: number,
 ): Promise<ProbeResult> {
-  // A failed or empty read is `missing`. For users upgrading from a
-  // pre-version-stamp deployment, a failed read is the entry point — their old
-  // Setup.cls has IsConfigured but not GetBootstrapVersion, the query throws,
-  // and we fall back to a full bootstrap that replaces their stale classes.
-  const deployedVersion = await readDeployedVersion(http, config, version);
-  if (deployedVersion === "") {
-    return { status: "missing" };
+  // Only a positive absence installs: a read that fails while the Setup class
+  // exists (or cannot be checked) is `unknown`, never `missing`.
+  const read = await readDeployedVersion(http, config, version);
+  if (read.kind === "unread") {
+    const absence = await setupClassAbsence(http, config, version);
+    if (absence.absent) return { status: "missing" };
+    return { status: "unknown", reason: `${read.reason}, and ${absence.reason}` };
   }
+  const deployedVersion = read.marker;
   const classification = classifyDeployedMarker(deployedVersion, BOOTSTRAP_VERSION);
   if (classification === "older") {
     return { status: "stale", deployedVersion };
@@ -466,44 +528,69 @@ function describeMarker(marker: string): string {
   return JSON.stringify(marker.length > 80 ? `${marker.slice(0, 80)}...` : marker);
 }
 
+/** A deployment that bootstrap leaves alone: a newer or foreign marker, or a marker that could not be read. */
+type LeftAlone =
+  | { kind: "newer"; deployed: string }
+  | { kind: "foreign"; deployed: string }
+  | { kind: "unknown"; reason: string };
+
 /**
  * Log the one warning for a deployment that bootstrap leaves alone. It names
- * the deployed marker, this build's marker and the remedy. `beforeCompile`
- * marks a deployment found by the re-check that precedes each compile.
+ * the namespace and instance, the deployed marker (or why none was read), this
+ * build's marker and the remedy. `beforeCompile` marks a finding of the
+ * re-check that precedes each compile; `uploaded` says this server had already
+ * uploaded its class documents, which stay in place.
  */
 function warnDeploymentLeftAlone(
-  kind: "newer" | "foreign",
-  deployed: string,
-  namespace: string,
+  found: LeftAlone,
+  config: IrisConnectionConfig,
   beforeCompile: boolean,
+  uploaded: boolean,
 ): void {
+  const namespace = config.namespace;
   const where = beforeCompile ? " (found just before compiling, so nothing was compiled)" : "";
-  if (kind === "newer") {
-    const parsed = parseBootstrapMarker(deployed);
+  const subject = `Bootstrap: leaving the ExecuteMCPv2 classes in '${namespace}' on ${config.host}:${config.port} alone${where}: `;
+  const deliberate =
+    `To install this server's classes deliberately, delete class ExecuteMCPv2.Setup in '${namespace}' and restart this server.`;
+  const afterUpload = uploaded
+    ? " This server had already uploaded its class documents, so the namespace can hold its source under the deployed compiled " +
+      `classes; to reinstall cleanly, delete class ExecuteMCPv2.Setup in '${namespace}' and restart the build that should own this instance.`
+    : "";
+  let finding: string;
+  if (found.kind === "newer") {
+    const parsed = parseBootstrapMarker(found.deployed);
     const order =
       parsed.kind === "stamped"
         ? ` (semver ${parsed.semver.join(".")}, sequence ${parsed.sequence})`
         : "";
-    logger.warn(
-      `Bootstrap: leaving the ExecuteMCPv2 classes in '${namespace}' alone${where}: the deployed marker ${describeMarker(deployed)} ` +
-        `is newer than this server's ${BOOTSTRAP_VERSION}. Upgrade this server to a build at least as new as the deployed one${order}, ` +
-        "and run the same or a newer build on every client that shares the instance.",
-    );
-    return;
+    finding =
+      `the deployed marker ${describeMarker(found.deployed)} is newer than this server's ${BOOTSTRAP_VERSION}. ` +
+      `Upgrade this server to a build at least as new as the deployed one${order}, ` +
+      "and run the same or a newer build on every client that shares the instance.";
+  } else if (found.kind === "foreign") {
+    finding =
+      `the deployed marker ${describeMarker(found.deployed)} cannot be ordered against this server's ${BOOTSTRAP_VERSION}. ` +
+      `Run one build per instance. ${deliberate}`;
+  } else {
+    finding =
+      `the deployed marker could not be read (${found.reason}), so it cannot be ordered against this server's ${BOOTSTRAP_VERSION}. ` +
+      `Check that the instance answers and that this user can run SQL in '${namespace}', then restart this server. ${deliberate}`;
   }
-  logger.warn(
-    `Bootstrap: leaving the ExecuteMCPv2 classes in '${namespace}' alone${where}: the deployed marker ${describeMarker(deployed)} ` +
-      `cannot be ordered against this server's ${BOOTSTRAP_VERSION}. Run one build per instance. To install this server's classes ` +
-      `deliberately, delete class ExecuteMCPv2.Setup in '${namespace}' and restart this server.`,
-  );
+  logger.warn(subject + finding + afterUpload);
 }
 
 /**
  * Re-read the deployed marker immediately before a compile. Another build may
  * have compiled a newer deployment since the probe, and compiling over it would
- * downgrade it. A newer or foreign reading logs the warning, records it in
- * `result` and returns `false`; anything else (absent, older, current, or a read
- * that fails) returns `true`.
+ * downgrade it. A newer or foreign reading, or a read that fails, logs the
+ * warning, records it in `result` and returns `false`; an older, current or
+ * absent reading returns `true`.
+ *
+ * After a `missing` probe a failed read is the expected state, not a failure:
+ * the probe proved the `Setup` class absent, and the classes this server has
+ * just uploaded are not compiled yet, so no marker exists to read. After a
+ * `stale` or `unconfigured` probe a marker was readable moments earlier, so a
+ * failed read is `unknown`.
  *
  * The check cannot undo source documents that two builds uploaded interleaved:
  * it stops this server compiling over a deployment that compiled first.
@@ -513,15 +600,25 @@ async function markerAllowsCompile(
   config: IrisConnectionConfig,
   version: number,
   result: BootstrapResult,
+  probeStatus: "missing" | "stale" | "unconfigured",
+  uploaded: boolean,
 ): Promise<boolean> {
-  const deployed = await readDeployedVersion(http, config, version);
-  if (deployed === "") return true;
-  const classification = classifyDeployedMarker(deployed, BOOTSTRAP_VERSION);
+  const read = await readDeployedVersion(http, config, version);
+  if (read.kind === "unread") {
+    if (probeStatus === "missing") return true;
+    result.probeStatus = "unknown";
+    result.probeFound = true;
+    result.readFailure = read.reason;
+    delete result.deployedVersion;
+    warnDeploymentLeftAlone({ kind: "unknown", reason: read.reason }, config, true, uploaded);
+    return false;
+  }
+  const classification = classifyDeployedMarker(read.marker, BOOTSTRAP_VERSION);
   if (classification !== "newer" && classification !== "foreign") return true;
   result.probeStatus = classification;
   result.probeFound = true;
-  result.deployedVersion = deployed;
-  warnDeploymentLeftAlone(classification, deployed, config.namespace, true);
+  result.deployedVersion = read.marker;
+  warnDeploymentLeftAlone({ kind: classification, deployed: read.marker }, config, true, uploaded);
   return false;
 }
 
@@ -541,13 +638,19 @@ async function markerAllowsCompile(
  *    is actually registered first (same root cause as the reported bug); if it's
  *    absent, we run the privileged steps too, so a divergent instance self-heals
  *    in one restart instead of two.
- * 5. `missing` → full install (deploy + compile + configure + mapping + UnitTestRoot).
+ * 5. `missing` (the `Setup` class is provably absent) → full install (deploy +
+ *    compile + configure + mapping + UnitTestRoot).
  * 6. `newer` or `foreign` → change nothing, make no further request, log one
  *    warning naming both markers and the remedy. Every step flag stays false
  *    and `probeFound` is true.
- * 7. Before each compile the marker is re-read; a newer or foreign reading
- *    skips the compile and every later step, with the same warning.
- * 8. Return result with step-level tracking.
+ * 7. `unknown` (no marker could be read, and the `Setup` class is not provably
+ *    absent) → change nothing, log one warning naming the failure and the
+ *    remedy; the server goes on with what is deployed. Every step flag stays
+ *    false and `probeFound` is true.
+ * 8. Before each compile the marker is re-read; a newer or foreign reading, or
+ *    (after a `stale` or `unconfigured` probe) a failed read, skips the compile
+ *    and every later step, with the same warning.
+ * 9. Return result with step-level tracking.
  *
  * If the configure step fails (e.g. insufficient privileges), the result
  * includes manual instructions but does not throw. Because the probe checks
@@ -570,14 +673,13 @@ export async function bootstrap(
     errors: [],
   };
 
-  // Step 1: Probe — distinguishes missing, current, unconfigured, and stale deployments.
+  // Step 1: Probe — distinguishes missing, current, unconfigured, stale, newer, foreign and unknown deployments.
+  // `probeCustomRest` catches its own request failures; a throw that still escapes is not a positive absence.
   let probe: ProbeResult;
   try {
     probe = await probeCustomRest(http, config, version);
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error);
-    result.errors.push(`Probe failed: ${msg}`);
-    probe = { status: "missing" };
+    probe = { status: "unknown", reason: `the probe failed: ${describeFailure(error)}` };
   }
 
   result.probeStatus = probe.status;
@@ -586,7 +688,13 @@ export async function bootstrap(
   // A newer or foreign deployment is never replaced: change nothing, say why once.
   if (probe.status === "newer" || probe.status === "foreign") {
     result.deployedVersion = probe.deployedVersion;
-    warnDeploymentLeftAlone(probe.status, probe.deployedVersion, config.namespace, false);
+    warnDeploymentLeftAlone({ kind: probe.status, deployed: probe.deployedVersion }, config, false, false);
+    return result;
+  }
+  // Nor is a deployment whose marker cannot be read: it may be newer.
+  if (probe.status === "unknown") {
+    result.readFailure = probe.reason;
+    warnDeploymentLeftAlone({ kind: "unknown", reason: probe.reason }, config, false, false);
     return result;
   }
   if (probe.status === "stale") {
@@ -618,7 +726,7 @@ export async function bootstrap(
     // the source hash matches — verified live: a migrated code DB dispatches
     // <NULL VALUE> 500s until recompiled. So recompile (cheap, idempotent)
     // before the privileged steps; skip deploy since the source is current.
-    if (!(await markerAllowsCompile(http, config, version, result))) {
+    if (!(await markerAllowsCompile(http, config, version, result, "unconfigured", false))) {
       return result;
     }
     result.deployed = true;
@@ -664,7 +772,7 @@ export async function bootstrap(
 
     // Step 3: Compile — required for both `missing` and `stale` cases. A newer
     // build may have compiled since the probe: re-read the marker first.
-    if (!(await markerAllowsCompile(http, config, version, result))) {
+    if (!(await markerAllowsCompile(http, config, version, result, probe.status, true))) {
       return result;
     }
     try {

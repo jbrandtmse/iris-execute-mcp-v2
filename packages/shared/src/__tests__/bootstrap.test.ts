@@ -61,6 +61,29 @@ function missingMethodReply(): Response {
   );
 }
 
+/**
+ * The Atelier reply to `GET doc/ExecuteMCPv2.Setup.cls` when the class does not exist: HTTP 404, as Atelier's GetDoc
+ * answers a missing document (live check 2026-10-22: `iris_doc_get` of a missing document in HSCUSTOM took its
+ * `statusCode === 404` branch). Only the status decides; the envelope carries no error.
+ */
+function setupAbsentReply(): Response {
+  return mockResponse({ status: { errors: [], summary: "" }, console: [], result: {} }, { status: 404 });
+}
+
+/** The Atelier reply to `GET doc/ExecuteMCPv2.Setup.cls` when the class exists. */
+function setupFoundReply(): Response {
+  return mockResponse(
+    envelope({ name: "ExecuteMCPv2.Setup.cls", cat: "CLS", ts: "2026-10-21 12:00:00.000", status: "", enc: false, content: ["Class ExecuteMCPv2.Setup", "{", "}"] }),
+  );
+}
+
+/** The number of recorded fetch calls that GET the `ExecuteMCPv2.Setup.cls` document. */
+function setupDocGetCount(fetchMock: ReturnType<typeof vi.fn>): number {
+  return fetchMock.mock.calls.filter(
+    (call: unknown[]) => (call[1] as { method?: string }).method === "GET" && String(call[0]).endsWith("/doc/ExecuteMCPv2.Setup.cls"),
+  ).length;
+}
+
 /** Every `[WARN]` line written to the (mocked) console.error since the test began. */
 function warnLines(): string[] {
   return vi
@@ -294,7 +317,7 @@ describe("bootstrap", () => {
       http.destroy();
     });
 
-    it("should return {status: 'missing'} when SQL fails (class/method not found)", async () => {
+    it("should return {status: 'missing'} when SQL fails AND the Setup document route answers 404 (a positive absence)", async () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
@@ -306,21 +329,27 @@ describe("bootstrap", () => {
           setCookie: ["CSPSESSIONID=s1; path=/"],
         }),
       );
-      // SQL call fails with 400 — this is the pre-version-stamp upgrade
-      // path, where old Setup.cls lacks GetBootstrapVersion()
-      fetchMock.mockResolvedValueOnce(
-        mockResponse(
-          {
-            status: {
-              errors: [{ error: "Method not found" }],
-              summary: "Error",
-            },
-            console: [],
-            result: null,
-          },
-          { status: 400 },
-        ),
+      // SQL call fails: the GetBootstrapVersion function does not exist
+      fetchMock.mockResolvedValueOnce(missingMethodReply());
+      // GET doc/ExecuteMCPv2.Setup.cls: 404, the class does not exist
+      fetchMock.mockResolvedValueOnce(setupAbsentReply());
+
+      const result = await probeCustomRest(http, config, 7);
+      expect(result).toEqual({ status: "missing" });
+      expect(setupDocGetCount(fetchMock)).toBe(1);
+      expect(String(fetchMock.mock.calls[2]?.[0])).toBe("http://localhost:52773/api/atelier/v7/USER/doc/ExecuteMCPv2.Setup.cls");
+
+      http.destroy();
+    });
+
+    it("should return {status: 'missing'} when SQL returns an empty version string AND the Setup document route answers 404", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      setupCsrfThenRequest(
+        envelope({ content: [{ Version: "" }] }),
       );
+      fetchMock.mockResolvedValueOnce(setupAbsentReply());
 
       const result = await probeCustomRest(http, config, 7);
       expect(result).toEqual({ status: "missing" });
@@ -328,16 +357,20 @@ describe("bootstrap", () => {
       http.destroy();
     });
 
-    it("should return {status: 'missing'} when SQL returns empty version string", async () => {
+    it("should return {status: 'unknown'} when SQL fails while the Setup class exists, naming both findings (DW-673)", async () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
-      setupCsrfThenRequest(
-        envelope({ content: [{ Version: "" }] }),
-      );
+      setupCsrfThenRequest({ status: { errors: [{ error: "Internal error" }], summary: "Error" }, console: [], result: null }, 500);
+      fetchMock.mockResolvedValueOnce(setupFoundReply());
 
       const result = await probeCustomRest(http, config, 7);
-      expect(result).toEqual({ status: "missing" });
+      expect(result.status).toBe("unknown");
+      const reason = (result as { reason: string }).reason;
+      expect(reason).toContain("the version query failed: IRIS returned HTTP 500");
+      expect(reason).toContain("and the ExecuteMCPv2.Setup class exists");
+      // No IsConfigured call: CSRF, the version query and the document GET only.
+      expect(fetchMock).toHaveBeenCalledTimes(3);
 
       http.destroy();
     });
@@ -804,6 +837,8 @@ describe("bootstrap", () => {
           { status: 400 },
         ),
       );
+      // Probe: GET doc/ExecuteMCPv2.Setup.cls answers 404 — the class is provably absent
+      fetchMock.mockResolvedValueOnce(setupAbsentReply());
 
       // Deploy: PUT responses for each class (CSRF already established)
       for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
@@ -812,7 +847,8 @@ describe("bootstrap", () => {
         );
       }
 
-      // Re-probe immediately before the compile: still no deployment
+      // Re-probe immediately before the compile: the uploaded classes are not
+      // compiled yet, so no marker exists — the expected state after a positive absence
       fetchMock.mockResolvedValueOnce(missingMethodReply());
 
       // Compile: POST response
@@ -849,6 +885,8 @@ describe("bootstrap", () => {
       expect(result.unitTestRoot).toBe("/iris/mgr/");
       expect(result.errors).toHaveLength(0);
       expect(result.manualInstructions).toBeUndefined();
+      expect(setupDocGetCount(fetchMock), "the probe proved the Setup class absent").toBe(1);
+      expect(warnLines()).toEqual([]);
 
       http.destroy();
     });
@@ -1015,6 +1053,8 @@ describe("bootstrap", () => {
           { status: 400 },
         ),
       );
+      // Probe: GET doc/ExecuteMCPv2.Setup.cls answers 404 — the class is provably absent
+      fetchMock.mockResolvedValueOnce(setupAbsentReply());
 
       // Deploy: PUT responses for each class
       for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
@@ -1097,6 +1137,8 @@ describe("bootstrap", () => {
           { status: 400 },
         ),
       );
+      // Probe: GET doc/ExecuteMCPv2.Setup.cls answers 404 — the class is provably absent
+      fetchMock.mockResolvedValueOnce(setupAbsentReply());
 
       // Deploy: first PUT fails with 500
       fetchMock.mockResolvedValueOnce(
@@ -1175,7 +1217,8 @@ describe("bootstrap", () => {
       expect(warnings, "exactly one warning").toHaveLength(1);
       expect(warnings[0]).toContain(deployed);
       expect(warnings[0]).toContain(BOOTSTRAP_VERSION);
-      expect(warnings[0]).toContain("'USER'");
+      expect(warnings[0], "the namespace and the instance").toContain("in 'USER' on localhost:52773 alone");
+      expect(warnings[0], "nothing was uploaded").not.toContain("had already uploaded");
 
       http.destroy();
     });
@@ -1291,6 +1334,10 @@ describe("bootstrap", () => {
       expect(warnings[0]).toContain("found just before compiling");
       expect(warnings[0]).toContain(NEWER_SEQUENCE);
       expect(warnings[0]).toContain(BOOTSTRAP_VERSION);
+      expect(warnings[0], "the uploads that already landed, and how to reinstall cleanly").toContain(
+        "This server had already uploaded its class documents, so the namespace can hold its source under the deployed compiled classes; " +
+          "to reinstall cleanly, delete class ExecuteMCPv2.Setup in 'USER' and restart the build that should own this instance.",
+      );
 
       http.destroy();
     });
@@ -1302,6 +1349,7 @@ describe("bootstrap", () => {
         mockResponse("", { status: 200, headers: { "X-CSRF-Token": "t" }, setCookie: ["CSPSESSIONID=s1; path=/"] }),
       );
       fetchMock.mockResolvedValueOnce(missingMethodReply());
+      fetchMock.mockResolvedValueOnce(setupAbsentReply());
       queuePutReplies();
       fetchMock.mockResolvedValueOnce(versionReply("dev"));
 
@@ -1317,6 +1365,9 @@ describe("bootstrap", () => {
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toContain('"dev"');
       expect(warnings[0]).toContain(BOOTSTRAP_VERSION);
+      expect(warnings[0], "the uploads that already landed, and how to reinstall cleanly").toContain(
+        "This server had already uploaded its class documents",
+      );
 
       http.destroy();
     });
@@ -1338,25 +1389,220 @@ describe("bootstrap", () => {
       expect(setupCallCount(fetchMock, "Configure")).toBe(0);
       expect(fetchMock).toHaveBeenCalledTimes(4);
       expect(warnLines()).toHaveLength(1);
+      expect(warnLines()[0], "nothing was uploaded on the unconfigured path").not.toContain("had already uploaded");
+
+      http.destroy();
+    });
+  });
+
+  // ── A marker that cannot be read (DW-673, decision #54) ──────────
+
+  describe("a marker that cannot be read is unknown: nothing is deployed or compiled over it (DW-673)", () => {
+    function queuePutReplies(): void {
+      for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
+        fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      }
+    }
+
+    function queueCsrf(): void {
+      fetchMock.mockResolvedValueOnce(
+        mockResponse("", { status: 200, headers: { "X-CSRF-Token": "t" }, setCookie: ["CSPSESSIONID=s1; path=/"] }),
+      );
+    }
+
+    /** One way the version query can fail to yield a marker, and the text that names it in the reason. */
+    const READ_FAILURES: Array<{ label: string; queue: () => void; named: string }> = [
+      {
+        label: "an HTTP 500 error envelope",
+        queue: () => fetchMock.mockResolvedValueOnce(mockResponse({ status: { errors: [{ error: "ERROR #5002: ObjectScript error: <STORE>" }], summary: "Error" }, console: [], result: null }, { status: 500 })),
+        named: "IRIS returned HTTP 500",
+      },
+      {
+        label: "an HTTP 200 envelope reporting a privilege error",
+        queue: () => fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] }, [{ error: "ERROR #5540: SQLCODE: -99 Message: User testuser is not privileged for the operation" }]))),
+        named: "SQLCODE: -99",
+      },
+      {
+        label: "an HTTP 403",
+        queue: () => fetchMock.mockResolvedValueOnce(mockResponse({ status: { errors: [], summary: "" }, console: [], result: null }, { status: 403 })),
+        named: "IRIS returned HTTP 403",
+      },
+      {
+        label: "a timeout",
+        queue: () => fetchMock.mockRejectedValueOnce(new DOMException("The operation was aborted.", "AbortError")),
+        named: "Connection to IRIS timed out",
+      },
+      {
+        label: "a connection failure",
+        queue: () => fetchMock.mockRejectedValueOnce(new TypeError("fetch failed")),
+        named: "Failed to connect to IRIS at localhost:52773",
+      },
+      {
+        label: "an empty value",
+        queue: () => fetchMock.mockResolvedValueOnce(versionReply("")),
+        named: "the version query returned no marker",
+      },
+      {
+        label: "no row",
+        queue: () => fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] }))),
+        named: "the version query returned no marker",
+      },
+      {
+        label: "a Setup class from before the version stamp (no GetBootstrapVersion method)",
+        queue: () => fetchMock.mockResolvedValueOnce(missingMethodReply()),
+        named: "IRIS returned HTTP 400",
+      },
+    ];
+
+    it.each(READ_FAILURES)(
+      "the probe's read fails ($label) while the Setup class exists: unknown, no PUT, no compile, no Setup_ call, one warning naming the failure and the remedy",
+      async ({ queue, named }) => {
+        const config = makeConfig();
+        const http = new IrisHttpClient(config);
+        queueCsrf();
+        queue();
+        fetchMock.mockResolvedValueOnce(setupFoundReply());
+
+        const result = await bootstrap(http, config, 7);
+
+        expect(result.probeStatus).toBe("unknown");
+        expect(result.probeFound).toBe(true);
+        expect(result.readFailure).toContain(named);
+        expect(result.readFailure).toContain("and the ExecuteMCPv2.Setup class exists");
+        expect(result.deployedVersion).toBeUndefined();
+        expect(result.deployed).toBe(false);
+        expect(result.compiled).toBe(false);
+        expect(result.configured).toBe(false);
+        expect(result.mapped).toBe(false);
+        expect(result.unitTestRootEnsured).toBe(false);
+        expect(result.errors).toEqual([]);
+        expect(result.manualInstructions).toBeUndefined();
+
+        // The CSRF preflight, the version query and the Setup document GET: nothing written, nothing else asked.
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(setupDocGetCount(fetchMock)).toBe(1);
+        expect(putCount(fetchMock)).toBe(0);
+        expect(compileCount(fetchMock)).toBe(0);
+        for (const name of ["IsConfigured", "Configure", "ConfigureMapping", "EnsureUnitTestRoot"]) {
+          expect(setupCallCount(fetchMock, name), `Setup_${name}`).toBe(0);
+        }
+
+        const warnings = warnLines();
+        expect(warnings, "exactly one warning").toHaveLength(1);
+        const [warning] = warnings as [string];
+        expect(warning).not.toContain("\n");
+        expect(warning).toContain("Bootstrap: leaving the ExecuteMCPv2 classes in 'USER' on localhost:52773 alone: the deployed marker could not be read (");
+        expect(warning).toContain(named);
+        expect(warning).toContain(`so it cannot be ordered against this server's ${BOOTSTRAP_VERSION}`);
+        expect(warning).toContain("Check that the instance answers and that this user can run SQL in 'USER', then restart this server.");
+        expect(warning).toContain("delete class ExecuteMCPv2.Setup in 'USER' and restart this server");
+
+        http.destroy();
+      },
+    );
+
+    it("the read fails and the Setup class check fails too (HTTP 500): unknown, not a positive absence; nothing is deployed", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      queueCsrf();
+      fetchMock.mockResolvedValueOnce(missingMethodReply());
+      fetchMock.mockResolvedValueOnce(mockResponse({ status: { errors: [{ error: "Internal error" }], summary: "Error" }, console: [], result: null }, { status: 500 }));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("unknown");
+      expect(result.readFailure).toContain("whether the ExecuteMCPv2.Setup class exists could not be checked: IRIS returned HTTP 500");
+      expect(putCount(fetchMock)).toBe(0);
+      expect(compileCount(fetchMock)).toBe(0);
+      expect(warnLines()).toHaveLength(1);
 
       http.destroy();
     });
 
-    it("a re-read that cannot read the marker does not block the compile", async () => {
+    it("the read fails and the Setup document route answers 404 (a positive absence): the full install runs, with no warning", async () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
-      setupCsrfThenRequest(envelope({ content: [{ Version: "abcdef123456" }] }));
+      queueCsrf();
+      fetchMock.mockResolvedValueOnce(mockResponse({ status: { errors: [{ error: "Internal error" }], summary: "Error" }, console: [], result: null }, { status: 500 }));
+      fetchMock.mockResolvedValueOnce(setupAbsentReply());
       queuePutReplies();
       fetchMock.mockResolvedValueOnce(missingMethodReply());
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
-      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 1 }] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })));
 
       const result = await bootstrap(http, config, 7);
 
-      expect(result.compiled).toBe(true);
-      expect(compileCount(fetchMock)).toBe(1);
+      expect(result.probeStatus).toBe("missing");
+      expect(result.probeFound).toBe(false);
+      expect(putCount(fetchMock)).toBe(BOOTSTRAP_CLASSES.size);
+      expect(compileCount(fetchMock), "the failed re-read after a positive absence is the not-yet-compiled state").toBe(1);
+      expect(result.configured).toBe(true);
+      expect(result.mapped).toBe(true);
       expect(warnLines()).toEqual([]);
+
+      http.destroy();
+    });
+
+    it.each(READ_FAILURES.filter((failure) => ["an HTTP 500 error envelope", "a timeout", "an empty value"].includes(failure.label)))(
+      "an older probe followed by a re-read that fails ($label): the uploads landed, but no compile and nothing later; one warning",
+      async ({ queue, named }) => {
+        const config = makeConfig();
+        const http = new IrisHttpClient(config);
+        setupCsrfThenRequest(envelope({ content: [{ Version: "abcdef123456" }] }));
+        queuePutReplies();
+        queue();
+
+        const result = await bootstrap(http, config, 7);
+
+        expect(result.probeStatus).toBe("unknown");
+        expect(result.probeFound).toBe(true);
+        expect(result.readFailure).toContain(named);
+        expect(result.deployedVersion).toBeUndefined();
+        expect(result.deployed).toBe(true);
+        expect(result.compiled).toBe(false);
+        expect(result.configured).toBe(false);
+        expect(result.unitTestRootEnsured).toBe(false);
+        expect(compileCount(fetchMock)).toBe(0);
+        for (const name of ["IsConfigured", "Configure", "ConfigureMapping", "EnsureUnitTestRoot"]) {
+          expect(setupCallCount(fetchMock, name), `Setup_${name}`).toBe(0);
+        }
+        // CSRF + probe + one PUT per class + the re-read, and nothing after it.
+        expect(fetchMock).toHaveBeenCalledTimes(1 + 1 + BOOTSTRAP_CLASSES.size + 1);
+
+        const warnings = warnLines();
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain("alone (found just before compiling, so nothing was compiled): the deployed marker could not be read (");
+        expect(warnings[0]).toContain(named);
+        expect(warnings[0]).toContain("This server had already uploaded its class documents");
+
+        http.destroy();
+      },
+    );
+
+    it("an unconfigured probe followed by a re-read that fails: no compile, no Configure, nothing later; one warning", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 0 }] })));
+      fetchMock.mockResolvedValueOnce(mockResponse({ status: { errors: [{ error: "Internal error" }], summary: "Error" }, console: [], result: null }, { status: 500 }));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("unknown");
+      expect(result.readFailure).toContain("IRIS returned HTTP 500");
+      expect(result.deployed).toBe(false);
+      expect(result.compiled).toBe(false);
+      expect(result.configured).toBe(false);
+      expect(putCount(fetchMock)).toBe(0);
+      expect(compileCount(fetchMock)).toBe(0);
+      expect(setupCallCount(fetchMock, "Configure")).toBe(0);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      const warnings = warnLines();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("found just before compiling, so nothing was compiled");
+      expect(warnings[0]).not.toContain("had already uploaded");
 
       http.destroy();
     });

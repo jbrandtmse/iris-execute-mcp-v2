@@ -224,15 +224,20 @@ describe("gen-bootstrap stamps <semver>+<sequence>.<hash> (DW-508)", () => {
   });
 
   it("an unchanged rerun keeps the sequence and leaves the state file byte-identical", () => {
-    const stateBefore = readFileSync(statePath, "utf8");
-
+    // The baseline is the state the first run leaves, so the check holds whether or not the copied state matched the
+    // copied classes (that match is the drift test's job, in bootstrap.test.ts).
     const first = runGenerator();
     expect(first.status, first.stderr).toBe(0);
+    const stateAfterFirst = readFileSync(statePath, "utf8");
+    const embedAfterFirst = readFileSync(embedPath, "utf8");
+
     const second = runGenerator();
     expect(second.status, second.stderr).toBe(0);
 
-    expect(readFileSync(statePath, "utf8")).toBe(stateBefore);
-    expect(sequenceOf(readFileSync(embedPath, "utf8"))).toBe(JSON.parse(stateBefore).sequence);
+    expect(second.stdout).toMatch(/unchanged/i);
+    expect(readFileSync(statePath, "utf8")).toBe(stateAfterFirst);
+    expect(readFileSync(embedPath, "utf8")).toBe(embedAfterFirst);
+    expect(sequenceOf(embedAfterFirst)).toBe(JSON.parse(stateAfterFirst).sequence);
   });
 
   it("the hand-committed first state (sequence 0, empty hash) makes the first run sequence 1 and records the hash, and the run after that keeps both", () => {

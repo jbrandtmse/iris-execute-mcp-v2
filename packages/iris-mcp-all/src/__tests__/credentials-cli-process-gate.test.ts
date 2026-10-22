@@ -55,7 +55,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
-import { irisTargetFromEnv, isIrisReachable, liveArmingSkipReason } from "./process-gate-helpers.js";
+import { inheritedEnv, irisTargetFromEnv, isIrisReachable, liveArmingSkipReason } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
@@ -102,16 +102,13 @@ beforeAll(async () => {
 });
 
 /**
- * Child-process env: inherit the ambient env (PATH etc.) minus EVERY IRIS_*
- * variable, then layer the test's explicit values — a developer shell's own
- * suite configuration can never leak into a spawned CLI invocation.
+ * Child-process env: inherit the ambient env (PATH etc.) minus every IRIS_*
+ * variable (`inheritedEnv`, which keeps only the connection-refusing preload's
+ * own settings), then layer the test's explicit values — a developer shell's
+ * own suite configuration can never leak into a spawned CLI invocation.
  */
 function childEnv(extra: Record<string, string>): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === "string" && !key.startsWith("IRIS_")) env[key] = value;
-  }
-  return { ...env, ...extra };
+  return { ...inheritedEnv(), ...extra };
 }
 
 interface BinOutcome {

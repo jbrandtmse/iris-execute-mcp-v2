@@ -296,10 +296,11 @@ export function leavingLines(stderr: string): string[] {
   return stderr.split(/\r?\n/).filter((line) => line.includes("Bootstrap: leaving the ExecuteMCPv2 classes"));
 }
 
-/** The remedy texts of the two warnings (the strings the spec's I/O matrix names). */
+/** The remedy texts of the warnings (the strings the spec's I/O matrix and decision #54 name). */
 export const REMEDY = {
   newer: ["Upgrade this server to a build at least as new as the deployed one", "every client that shares the instance"],
   foreign: ["Run one build per instance", "delete class ExecuteMCPv2.Setup"],
+  unknown: ["Check that the instance answers and that this user can run SQL", "delete class ExecuteMCPv2.Setup"],
 } as const;
 
 // -- Legs -------------------------------------------------------------------------------
@@ -405,8 +406,13 @@ function closedDefaultTarget(namespace: string): IrisTarget {
  * Start a fresh built `iris-dev-mcp`, make one read call so the bootstrap has run, close it, and return what it wrote to
  * stderr. `startup`: the instance is the `default` profile, which the server bootstraps before it serves. `other`: the
  * `default` profile is a closed port and the instance is `other`, whose first call bootstraps lazily (DW-518).
+ * `extraEnv` is added to the server's environment (for example a short `IRIS_TIMEOUT`).
  */
-export async function runServer(via: LegSpec["via"], ctx: Pick<LegContext, "repoRoot" | "sdkEsmDir" | "target">): Promise<string> {
+export async function runServer(
+  via: LegSpec["via"],
+  ctx: Pick<LegContext, "repoRoot" | "sdkEsmDir" | "target">,
+  extraEnv: Record<string, string> = {},
+): Promise<string> {
   let stderr = "";
   const options = {
     sdkEsmDir: ctx.sdkEsmDir,
@@ -417,7 +423,7 @@ export async function runServer(via: LegSpec["via"], ctx: Pick<LegContext, "repo
     },
   };
   if (via === "startup") {
-    const session = await openWireSession({ ...options, target: ctx.target });
+    const session = await openWireSession({ ...options, target: ctx.target }, extraEnv);
     try {
       const result = await session.raw("iris_server_info", {});
       if (result.isError) throw new Error(`iris_server_info failed: ${JSON.stringify(result.content)}`);
@@ -429,6 +435,7 @@ export async function runServer(via: LegSpec["via"], ctx: Pick<LegContext, "repo
   const session = await openWireSession(
     { ...options, target: closedDefaultTarget(ctx.target.namespace) },
     {
+      ...extraEnv,
       IRIS_PROFILES: JSON.stringify({
         other: {
           host: ctx.target.host,

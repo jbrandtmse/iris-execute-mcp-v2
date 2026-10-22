@@ -2700,6 +2700,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: probeCustomRest compares deployed hash vs embedded BOOTSTRAP_VERSION for equality only; fix: embed a monotonic seq:hash, add a newer status so bootstrap() does not redeploy; servers already built without it will always downgrade.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=probeCustomRest compares deployed hash vs embedded BOOTSTRAP_VERSION for equality
 - 2026-10-15T02:51:51Z status=routed owner=42-2-bootstrap-downgrade-guard by=correct-course note=pre-publish fix table (decision-record-2026-10-14); must land before 42.6 publishes
+- 2026-10-22T01:54:30Z status=resolved-by:42-2-bootstrap-downgrade-guard by=adjudication note=marker_<semver>+<sequence>.<hash>+ordering(newer/foreign/unknown=no_redeploy+one_warning);lead_smoke_2026-10-22:throwaway_iris-community:2026.2_container_9/9_legs_green(newer,foreign-hash,foreign-dev,older,legacy,current,current-after-upgrade,DW-518_lazy_other);equality-revert_mutation_turned_the_4_newer/foreign_legs_red_on_the_live_container;HSCUSTOM_current_case_observed_live(no_redeploy,Setup_etag_unchanged)
 
 ### DW-509: [36-4-CR-2] BuildGlobalRef's numeric test tSub = (+tSub) throws <MAXNUMBER> for a string key whose numeric prefix overflows (e.g. 1E999)
 - source: legacy:36.4 | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -2762,6 +2763,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Unavoidable inside AC 37.1.8; harmless at the embedded BOOTSTRAP_VERSION; interacts with open HIGH 36-4-CR-1 (running from an older branch could reinstall a pre-36.4 Global.cls)
 - 2026-10-14T10:47:59Z status=decision-pending owner=burndown by=migration note=call: may a default-suite test deploy? else gate the 'other' leg on IRIS_REQUIRE_LIVE
 - 2026-10-15T11:47:35Z status=routed owner=42-2-bootstrap-downgrade-guard by=x0 note=decided=orchestrator(Lead-away) owned by named story (orchestrator decision 2): first-touch deploy = every server's normal bootstrap, idempotent at equal version; the harmful half (older branch reinstalling pre-36.4 Global.cls) is DW-508, closed by AC 42.2.2
+- 2026-10-22T01:54:30Z status=resolved-by:42-2-bootstrap-downgrade-guard by=adjudication note=epic37_gate_header_records_its_write_footprint;the_lazy_other-profile_bootstrap_against_a_newer_deployment_redeploys_nothing(throwaway_live_leg_newer-lazy-other_green;red_under_the_equality_revert)
 
 ### DW-519: [37-1-CR-5] The headline 'recovers automatically, no restart' promise has no LIVE proof
 - source: legacy:37.1 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3469,6 +3471,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-20T07:58:39Z occurrence=43-1-framework-migration-to-sdk-v2 note=the two launcher SDK-client tests (governanceUiRoundTrip, localSpawnIntegration) read IRIS_TEST_HOST/IRIS_TEST_PORT defaulting to localhost:52773 HSCUSTOM and ignore IRIS_HOST/IRIS_PORT; a 43.1 plan probe reached the shared instance through them (read-only)
 - 2026-10-20T12:12:41Z occurrence=43-2-serve-mcp-revision-2026-07-28 note=43.2 implement handoff ran pnpm --filter @iris-mcp/dev test with no IRIS_* set; dev's live gates wrote and removed their disposable ExecuteMCPv2.Temp.QaStory* fixtures on the shared instance (lead verified no leftovers)
 - 2026-10-21T19:52:21Z occurrence=42-11-storage-guard-on-every-document-write by=cr note=both new dev gates (storage-guard-write-paths-live-gate, story-42-11-qa-live-gate) run their legs unarmed whenever localhost:52773 answers
+- 2026-10-22T01:54:30Z status=resolved-by:42-2-bootstrap-downgrade-guard by=adjudication note=only_IRIS_REQUIRE_LIVE_arms(decision_51);armed_needs_all_five_IRIS_*;63_live_files_resolve_through_resolveLiveTarget;live-arming-guard+no-live-iris-preload_pin_that_an_unarmed_run_connects_to_nothing(child-process_preload);42.11_and_43.1_occurrences_included
 
 ### DW-628: The documented npx form npx -y @iris-mcp/client-config iris-mcp-clients <command> passes iris-mcp-clients to the CLI as its command (unknown-command once published) and carries no @1 pin
 - source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: med | fix-risk: low | footprint: out-of-footprint
@@ -3728,16 +3731,19 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-21T20:47:03Z status=routed owner=42-3-ci-workflow by=spec_gate note=42.3's throwaway job extends scripts/throwaway-iris.mjs (Rule 2), runs pnpm live:bootstrap-guard armed with IRIS_THROWAWAY, proves it red once by reverting the probe to equality (AC 42.3.6), and records the run URL; the live proof of DW-508 (Rule 48)
 - 2026-10-21T22:44:16Z occurrence=42-2-bootstrap-downgrade-guard note=42.2_implement:extend_scripts/throwaway-iris.mjs(Rule2);first_real_docker_run_is_CI:verify_the_35_classes_compile_in_plain-IRIS_USER(else_--image_irishealth),readiness_loop,docker_port_read-back,teardown_on_INT/TERM;pinned_digest_is_arm64:x86_runners_need_a_multi-arch_or_amd64_digest_via_--image
 - 2026-10-22T01:01:05Z note=wave-8_decision_55:the_Lead_authorized_a_local_throwaway_container_2026-10-22;the_lead_runs_pnpm_live:bootstrap-guard_at_the_42.2_smoke;CI_must_still_run_it_in_42.3(the_platform_the_project_ships_from)
+- 2026-10-22T01:54:30Z note=partial:the_lead_ran_pnpm_live:bootstrap-guard_locally_2026-10-22(9/9;equality-revert_4_red;container_removed);42.3_still_runs_it_in_CI_on_the_platform_the_project_ships_from(amd64_digest;fail-on-skip_DW-676)
 
 ### DW-673: A failed version read is treated as an absent deployment, so the full install runs and the pre-compile re-read lets the compile proceed on an empty value: a transient 5xx, timeout or privilege error on the version query while a newer build is deployed lets an older server upload its classes over it (the downgrade DW-508 prevents)
 - source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: med | footprint: in-story
 - evidence: 42.2 implement review: packages/shared/src/bootstrap.ts readDeployedVersion, probeCustomRest, markerAllowsCompile; the matrix specified failed-or-empty = absent; unverified against a real instance
 - 2026-10-21T22:44:16Z status=open owner=42-2-bootstrap-downgrade-guard by=harvest note=wave-8 decision 54: only a positive absence (the REST route or the Setup class provably missing) counts as absent; any other failed or empty read is unknown: no PUT, no compile, one warning naming the failure and the remedy; spec matrix amended; code review patches it in-story with a hermetic pin or it takes the story's one rework iteration
+- 2026-10-22T01:48:21Z status=resolved-by:42-2-bootstrap-downgrade-guard by=cr note=unknown status; only GET doc/Setup 404 installs; 14 unit+9 hermetic cases; failed=absent mutation red 19 unit, 8 dist
 
 ### DW-674: AD-14 Ownership and IPM-upgrade bullets are not implemented: bootstrap does not detect IPM-installed classes, and the IPM install/upgrade path has no IRIS-side no-downgrade check
 - source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: med | footprint: in-epic
 - evidence: 42.2 implement: decision 53 routes them to 42.4; reuse 42.2's marker grammar and ordering table, with a parity test between the TS comparator and the IRIS-side one
 - 2026-10-21T22:44:16Z status=routed owner=42-4-ipm-package-revival by=harvest note=IPM packaging lands in 42.4 (decision 53)
+- 2026-10-22T01:48:21Z occurrence=42-2-bootstrap-downgrade-guard
 
 ### DW-675: Armed live gates now fail closed unless all five IRIS_HOST/PORT/USERNAME/PASSWORD/NAMESPACE are set; the release path (prepublishOnly -> prepublish-gate.mjs, the 42.5 release script, the 42.6 publish) must export all five or the gates go red
 - source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: low | footprint: in-epic
@@ -3749,8 +3755,25 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 42.2 implement review; packages/*/src/__tests__/integration-setup.ts; extensions/iris-mcp-launcher/src/__tests__
 - 2026-10-21T22:44:16Z status=routed owner=42-3-ci-workflow by=harvest note=CI fails an armed run that skipped a leg (a skip counter or a fail-on-skip flag), and runs the launcher guard; proven red once (Rule 59)
 - 2026-10-21T22:44:16Z occurrence=42-2-bootstrap-downgrade-guard note=also:5_process_gates(credentials-cli,governance-file,host-guard,server-manager-precedence,server-manager-process)_arm_on_IRIS_REQUIRE_LIVE_but_are_off_every_prepublish_roster;42.3_decides_whether_CI_runs_them
+- 2026-10-22T01:48:21Z occurrence=42-2-bootstrap-downgrade-guard
 
 ### DW-677: Concurrency residual: the re-probe before compile stops this server compiling over a newer build that compiled first, but cannot undo source PUTs two builds interleaved, so the namespace can hold mixed source under a newer compiled marker
 - source: spec-42-2-bootstrap-downgrade-guard.md | severity: low | fix-risk: high | footprint: in-story
 - evidence: 42.2 implement: packages/shared/src/bootstrap.ts; the next unconfigured self-heal recompile would compile that source
 - 2026-10-21T22:44:16Z status=wontfix-accepted owner=42-2-bootstrap-downgrade-guard by=harvest note=reopen_if=a deployment is observed with mixed-build source under one marker (report, or a source-vs-embed drift check failing on a live instance)
+- 2026-10-22T01:48:21Z occurrence=42-2-bootstrap-downgrade-guard
+
+### DW-678: A Setup.cls hand-loaded from src/ (an iris_doc_load of src/**/*.cls, Rule #17) stamps the dev marker, which Story 42.2 classifies foreign, so the bootstrap leaves the namespace (the shared HSCUSTOM included) at dev until ExecuteMCPv2.Setup is deleted
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: 42.2 cr: AD-14 dev=foreign; .claude/rules project-rules #17 loads src/**/*.cls; the in-story hints (2 prepublish-gate.mjs, 3 gate skip texts) were reworded by cr; the rule files are the Lead's
+- 2026-10-22T01:48:34Z status=decision-pending owner=burndown by=cr note=human=Lead: add to Rule #17 that a hand-loaded Setup.cls pins dev; delete ExecuteMCPv2.Setup and restart after
+
+### DW-679: The family-C live gates each carry the same ~20-line probe block (loadConfig, ping, negotiateVersion, buildToolContext, catch) instead of one shared helper
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: 42.2 cr: pre-existing per-gate copies, each re-touched by the arming migration (doc-edit-live-gate, doc-get-range-live-gate, resource-listprivileges-live-gate, analytics-cubes-wire-gate, others)
+- 2026-10-22T01:48:34Z status=wontfix-accepted owner=42-2-bootstrap-downgrade-guard by=cr note=reopen_if=a story (e.g. 42.3's DW-676 fail-on-skip) must edit that probe block in more than 3 gate files
+
+### DW-680: The launcher guard's runUnarmed is a near-copy of runVitestUnderPreload (env scrub, the preload NODE_OPTIONS, the connect-log parse); the spec's AD-2 reason covers only liveArming.ts
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: 42.2 cr: extensions/iris-mcp-launcher/src/__tests__/live-arming-guard.test.ts vs packages/iris-mcp-all/src/__tests__/live-gate-child-run.ts; a runner in scripts/lib/ could serve both
+- 2026-10-22T01:48:34Z status=wontfix-accepted owner=42-2-bootstrap-downgrade-guard by=cr note=reopen_if=the two env-scrub lists diverge, or a third copy of the preload child runner appears

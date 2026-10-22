@@ -48,13 +48,16 @@
  * `iris_server_profiles`, which the sibling process-gates use, would not prove
  * that). By the deployment that `other` holds:
  *  - `current`, `newer` or `foreign`: nothing is written;
+ *  - `unknown` (the marker cannot be read and `Setup` is not provably
+ *    absent): nothing is written;
  *  - `unconfigured` (the marker matches, the web app is absent): it recompiles,
  *    then configures the web app, maps the package and ensures `^UnitTestRoot`;
  *  - `stale`: it PUTs the 35 classes and compiles them (plus `Setup_Configure`
  *    and `Setup_ConfigureMapping` if the web app is absent), then ensures
  *    `^UnitTestRoot`;
  *  - `missing`: it PUTs, compiles, configures, maps the package to `%All` and
- *    ensures `^UnitTestRoot`.
+ *    ensures `^UnitTestRoot`. Only a provably absent `Setup` class (its
+ *    document route answers 404) is `missing`.
  * Point `IRIS_*` only at an instance you are willing to have bootstrapped.
  *
  * **Keychain note:** no test touches the OS keychain — every profile here is

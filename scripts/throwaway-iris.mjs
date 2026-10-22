@@ -21,8 +21,9 @@
 //   6. A missing docker exits non-zero with a message. The script never skips.
 //
 // EXIT CODES
-//   2 usage or a refused image, name or port; 3 docker not found on PATH; 4 the container did not start or become
-//   ready; otherwise the command's own exit code (128 + n when a signal ended it).
+//   2 usage or a refused image, name or port on the command line; 3 docker not found on PATH; 4 the container did not
+//   start or become ready, including a published host port that `docker port` reads back as a refused one (52773 or
+//   1972); otherwise the command's own exit code (128 + n when a signal ended it).
 //
 // IMPORT
 //   Importing this module spawns nothing. Every process-spawning step sits behind `defaultDeps()`, which only

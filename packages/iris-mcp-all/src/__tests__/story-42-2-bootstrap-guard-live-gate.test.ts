@@ -2,7 +2,8 @@
  * Story 42.2, AC 42.2.5 -- the live gate of the bootstrap downgrade guard, run against a THROWAWAY IRIS container.
  * `pnpm live:bootstrap-guard` runs it through `scripts/throwaway-iris.mjs`, which starts a labelled container on a dynamic
  * loopback port, sets the arming and target variables and `IRIS_THROWAWAY=<container name>`, and removes the container on
- * every exit. Story 42.3's CI job runs that script; nothing else may run this gate.
+ * every exit. Only that script runs this gate: Story 42.3's CI job, or the Lead on a development machine when authorized
+ * (wave-8 decisions #49 and #55).
  *
  * It runs the SAME legs as `story-42-2-bootstrap-guard-orchestration.test.ts` (`bootstrap-guard-legs.ts`), against the real
  * instance instead of the fake: each leg seeds the embed under a chosen marker, starts a fresh BUILT `iris-dev-mcp`,

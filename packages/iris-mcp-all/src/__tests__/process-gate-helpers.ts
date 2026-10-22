@@ -85,22 +85,31 @@ export async function reserveClosedPort(): Promise<string> {
 }
 
 /**
+ * The settings of the connection-refusing preload (`scripts/lib/no-live-iris-preload.mjs`). They configure the test
+ * oracle, never a server, so {@link inheritedEnv} hands them to a spawned child: a child that inherits the preload
+ * through `NODE_OPTIONS` then also logs its refused connects to the same file.
+ */
+export const PRELOAD_SETTINGS: readonly string[] = ["IRIS_MCP_CONNECT_LOG", "IRIS_MCP_WATCH_PORTS", "IRIS_MCP_WATCH_HOSTS"];
+
+/**
  * The test runner's environment for a spawned server: everything it inherits
  * (PATH, and SystemRoot on Windows), minus every variable that configures the
  * suite -- each `IRIS_*` key and `MCP_TRANSPORT` -- and minus each name in
  * `alsoDrop`. Names match case-insensitively, as Windows treats them, so an
- * ambient lowercase `iris_host` is dropped too. A gate layers its own explicit
+ * ambient lowercase `iris_host` is dropped too. The {@link PRELOAD_SETTINGS}
+ * are kept unless `alsoDrop` names them. A gate layers its own explicit
  * values on top of the result.
  *
  * @param alsoDrop - Further variable names to drop (case-insensitive).
  */
 export function inheritedEnv(alsoDrop: readonly string[] = []): Record<string, string> {
   const dropped = new Set(["MCP_TRANSPORT", ...alsoDrop.map((name) => name.toUpperCase())]);
+  const kept = new Set(PRELOAD_SETTINGS);
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value !== "string") continue;
     const upper = key.toUpperCase();
-    if (upper.startsWith("IRIS_") || dropped.has(upper)) continue;
+    if (dropped.has(upper) || (upper.startsWith("IRIS_") && !kept.has(upper))) continue;
     env[key] = value;
   }
   return env;

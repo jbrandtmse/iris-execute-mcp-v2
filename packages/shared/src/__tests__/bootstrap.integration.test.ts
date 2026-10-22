@@ -47,10 +47,11 @@ describe.skipIf(!globalThis.__IRIS_AVAILABLE__)(
     it("probeCustomRest returns a ProbeResult reflecting deployment + configuration state", async () => {
       const probe = await probeCustomRest(client, config, version);
       // The probe returns a discriminated union, not a boolean. Its status
-      // is one of the six states. On a healthy CI/dev instance this is
+      // is one of the seven states. On a healthy CI/dev instance this is
       // "current" (classes match AND web app registered); a version-stamped
       // but web-app-absent instance reports "unconfigured"; a deployment from
-      // a newer or unorderable build reports "newer" or "foreign".
+      // a newer or unorderable build reports "newer" or "foreign"; a marker
+      // that cannot be read while the Setup class exists reports "unknown".
       expect([
         "missing",
         "current",
@@ -58,6 +59,7 @@ describe.skipIf(!globalThis.__IRIS_AVAILABLE__)(
         "stale",
         "newer",
         "foreign",
+        "unknown",
       ]).toContain(probe.status);
     });
 

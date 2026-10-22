@@ -213,7 +213,7 @@ beforeAll(async () => {
     if (!(await customRestIsDeployed())) {
       skipReason =
         `ExecuteMCPv2's custom REST service is not deployed in ${IRIS_NAMESPACE} ` +
-        `(404 from ${BASE_URL}/analytics/cubes). Load src/ExecuteMCPv2/ to run this gate.`;
+        `(404 from ${BASE_URL}/analytics/cubes). Start a built server against this namespace so its bootstrap deploys the ExecuteMCPv2 classes, then run this gate.`;
       throw new Error("__handled__");
     }
 

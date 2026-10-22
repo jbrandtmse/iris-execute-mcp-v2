@@ -288,6 +288,19 @@ describe("IRIS_MCP_WATCH_PORTS and IRIS_MCP_WATCH_HOSTS replace the defaults", (
     expect(outcomes["default-host"], "unarmed.invalid is no longer watched").not.toBe(REFUSED);
     expect(logged).toEqual(["iris-stand-in.invalid:9998"]);
   });
+
+  it("IRIS_MCP_WATCH_HOSTS compares case-insensitively: a mixed-case entry watches the lowercase host", () => {
+    const log = path.join(scratchDir(), "connects.log");
+
+    const { outcomes, logged } = connectUnderPreload(
+      [{ id: "listed", shape: "port-host", host: "iris-stand-in.invalid", port: 9998 }],
+      { IRIS_MCP_WATCH_HOSTS: "IRIS-Stand-In.invalid" },
+      log,
+    );
+
+    expect(outcomes["listed"]).toBe(REFUSED);
+    expect(logged).toEqual(["iris-stand-in.invalid:9998"]);
+  });
 });
 
 describe("the connect log", () => {

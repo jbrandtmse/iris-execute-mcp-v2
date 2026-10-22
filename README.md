@@ -1013,6 +1013,8 @@ The auto-bootstrap detects deployment state by checking **both** the deployed cl
 
 On the next server start, the bootstrap recognizes this `unconfigured` state and **self-heals**: it re-registers the web application (and package mapping), then **recompiles** the classes. The recompile is deliberate — a deployed version marker equal to the build's proves the *source* is current, but it does **not** prove the *compiled objects* are valid. A code database migrated across IRIS versions keeps the source while carrying stale or version-incompatible compiled objects, which otherwise dispatch as `<NULL VALUE>` HTTP 500 errors until recompiled. No manual steps are required, provided the connecting user has `%Admin_Manage`.
 
+The self-heal runs only in a server whose own marker equals the deployed one (or is newer, which upgrades the classes). A server that finds a newer, foreign or unreadable deployment changes nothing, the web application included (see the next subsection): start a build that matches the deployed marker, or, for a `dev` or foreign deployment, delete the class `ExecuteMCPv2.Setup` and restart, which installs the classes and registers the web application.
+
 If the connecting user lacks `%Admin_Manage`, the web application cannot be created; the bootstrap reports `configured: false` with manual instructions, and a later launch by a privileged user self-heals automatically.
 
 ### Shared Instances: Upgrade Every Client Together
@@ -1021,18 +1023,21 @@ The `ExecuteMCPv2.*` classes in a namespace are deployed once, by whichever serv
 
 | Deployed marker | What the server does |
 | --- | --- |
-| None (no `ExecuteMCPv2.Setup` class, or its version query fails) | Installs the classes. |
+| None: no `ExecuteMCPv2.Setup` class (its document route answers HTTP 404) | Installs the classes. |
+| **Unreadable**: the version query fails or returns no marker (an HTTP error, a timeout, a privilege error, an empty value, or a `Setup` class from before the version stamp) while the `ExecuteMCPv2.Setup` class exists or cannot be checked | **Redeploys nothing.** One `[WARN]` line on stderr names the failure and the remedy. |
 | The same marker | Deploys nothing (the web application check above still applies). |
 | **Older**: a lower semver; the same semver and a lower sequence; or a bare 12-character hex hash, the marker of a build from before this release | Redeploys and recompiles its classes, the upgrade flow of earlier releases. |
 | **Newer**: a higher semver, or the same semver and a higher sequence | **Redeploys nothing.** One `[WARN]` line on stderr names both markers and the remedy. |
 | **Foreign**: the same semver and sequence with a different hash; `dev`, the placeholder of a deployment loaded by hand from `src/`; or any value that is not a marker | **Redeploys nothing.** One `[WARN]` line on stderr names both markers and the remedy. |
 
-For a newer or foreign deployment the server uploads no class, compiles nothing and changes no web application or mapping, and its tools keep using the classes that are already there. The marker is read again immediately before each compile, so a server that finds a newer or foreign deployment appear in the meantime compiles nothing and warns once. The class documents it had already uploaded stay uploaded, so in that race the namespace can hold this server's source under the newer compiled classes; deleting the class `ExecuteMCPv2.Setup` and restarting a build that is as new as the deployed one reinstalls its classes cleanly.
+For a newer, foreign or unreadable deployment the server uploads no class, compiles nothing and changes no web application or mapping, and its tools keep using the classes that are already there. Only a provably absent `Setup` class installs: a version query that fails while the class exists may be a transient error over a newer deployment, so it is never treated as "nothing deployed". The marker is read again immediately before each compile, so a server that finds a newer or foreign deployment appear in the meantime, or can no longer read the marker it read a moment before, compiles nothing and warns once. The class documents it had already uploaded stay uploaded, so in that race the namespace can hold this server's source under the newer compiled classes; deleting the class `ExecuteMCPv2.Setup` and restarting a build that is as new as the deployed one reinstalls its classes cleanly.
 
 **A server built before this release still downgrades.** The guard runs in the server that is about to deploy. Earlier builds compare for equality only, so they redeploy their own classes over any deployment whose version differs, a newer one included. Upgrade every client that shares an instance together: one older client left running replaces the newer classes the next time it connects to that namespace.
 
 - **The warning says the deployed marker is newer:** upgrade this server to a build at least as new as the deployed one (the warning gives its semver and sequence), and run the same or a newer build on every client that shares the instance.
 - **The warning says the deployed marker cannot be ordered (foreign):** run one build per instance. To install this server's classes deliberately, delete the class `ExecuteMCPv2.Setup` in the namespace and restart the server; with no `Setup` class left, the next start installs the classes from scratch.
+- **The warning says the deployed marker could not be read:** check that the instance answers and that the connecting user can run SQL in the namespace, then restart the server. A deployment from before the version stamp reads this way every time; to replace it, delete the class `ExecuteMCPv2.Setup` in the namespace and restart the server.
+- **The warning says this server had already uploaded its class documents:** the namespace can hold this server's source under the deployed compiled classes. Delete the class `ExecuteMCPv2.Setup` in the namespace and restart the build that should own the instance, which reinstalls its classes cleanly.
 
 ### Non-ASCII Request-Body Content Was Mis-Decoded (Fixed in Story 34.8)
 

@@ -9,7 +9,11 @@
  * - older (a lower sequence, at startup and through `other`) and legacy (a bare hash): every embedded class is PUT once
  *   with `ignoreConflict=1`, compiled once, and each document ends up equal to a clean deployment of the embed;
  * - current: nothing is written, and a second start right after an upgrade changes nothing;
- * - race: a newer or foreign marker that appears between the uploads and the compile stops the compile.
+ * - race: a newer or foreign marker that appears between the uploads and the compile stops the compile;
+ * - unknown (decision #54, DW-673): a version read that fails (HTTP 500, a privilege error, HTTP 403, an empty value, a
+ *   timeout) over a newer deployment uploads and compiles nothing and warns once, naming the failure and the remedy; a
+ *   positive absence (no `Setup` document) installs; a failed re-read before the compile, after an older or an
+ *   unconfigured probe, stops the compile; and the unconfigured self-heal still recompiles and configures.
  *
  * The legs are the ones `story-42-2-bootstrap-guard-live-gate.test.ts` runs against a throwaway IRIS container
  * (`bootstrap-guard-legs.ts`). The older, legacy and current legs are the negative twins of the newer and foreign legs: the
@@ -47,11 +51,14 @@ import {
   type Snapshot,
 } from "./bootstrap-guard-legs.js";
 import {
+  SETUP_DOCUMENT,
   startStatefulFakeAtelier,
   summarizeRequests,
   type FakeRequest,
   type StatefulFakeAtelier,
+  type VersionQueryFailure,
 } from "./stateful-fake-atelier.js";
+import { envelope, errorEnvelope } from "../../../../scripts/lib/fake-iris-listener.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
@@ -230,6 +237,147 @@ describe("Story 42.2 AC 42.2.5: a marker that turns newer or foreign between the
 
     expect(summarizeRequests(fake.requests.slice(start)).compiles).toBe(1);
     expect(fake.state.compiledMarker).toBe(embedded.marker);
+    expect(leavingLines(stderr)).toEqual([]);
+  }, TEST_TIMEOUT_MS);
+});
+
+describe("Story 42.2 decision #54 (DW-673): a marker that cannot be read is unknown, and nothing is deployed or compiled over it", () => {
+  /** The server's request timeout in these legs, so a version query that never answers is a timeout within the test. */
+  const SHORT_TIMEOUT = { IRIS_TIMEOUT: "2000" };
+  const SETUP_DOC_GET = `GET /api/atelier/v8/${NAMESPACE}/doc/${SETUP_DOCUMENT}`;
+  const SERVER_ERROR: VersionQueryFailure = { kind: "reply", status: 500, body: errorEnvelope("ERROR #5002: ObjectScript error: <STORE>", 5002) };
+
+  /** Each way a real instance can fail to answer the version query with a marker, and the text that names it. */
+  const FAILURES: ReadonlyArray<{ label: string; failure: VersionQueryFailure; named: string }> = [
+    { label: "HTTP 500", failure: SERVER_ERROR, named: "IRIS returned HTTP 500" },
+    {
+      label: "a privilege error (HTTP 200 with an SQL error)",
+      failure: { kind: "reply", status: 200, body: errorEnvelope("ERROR #5540: SQLCODE: -99 Message: User fake is not privileged for the operation", 5540) },
+      named: "SQLCODE: -99",
+    },
+    { label: "HTTP 403", failure: { kind: "reply", status: 403, body: errorEnvelope("", 403) }, named: "IRIS returned HTTP 403" },
+    { label: "an empty value", failure: { kind: "reply", status: 200, body: envelope({ content: [{ Version: "" }] }) }, named: "the version query returned no marker" },
+    { label: "a timeout (no answer)", failure: { kind: "hang" }, named: "Connection to IRIS timed out after 2000ms" },
+  ];
+
+  function legSeed(id: string): string {
+    const leg = LEGS.find((candidate) => candidate.id === id);
+    if (leg === undefined) throw new Error(`no leg ${id}`);
+    return leg.seedMarker(stampedEmbedded(embedded));
+  }
+
+  /** Start the server once against `fake` with `failVersionQuery` armed for exactly that start; return its stderr and requests. */
+  async function startOnce(
+    fake: StatefulFakeAtelier,
+    failVersionQuery: StatefulFakeAtelier["failVersionQuery"],
+  ): Promise<{ stderr: string; window: FakeRequest[] }> {
+    const start = fake.requests.length;
+    fake.failVersionQuery = failVersionQuery;
+    let stderr: string;
+    try {
+      stderr = await runServer("startup", { repoRoot: REPO_ROOT, sdkEsmDir, target: targetOf(fake) }, SHORT_TIMEOUT);
+    } finally {
+      fake.failVersionQuery = undefined;
+    }
+    return { stderr, window: fake.requests.slice(start) };
+  }
+
+  /** The one `leaving ... alone` line of `stderr`, checked for the unknown warning's shape. */
+  function unknownWarning(stderr: string, named: string, beforeCompile: boolean): string {
+    const lines = leavingLines(stderr);
+    expect(lines, "exactly one leaving-alone warning").toHaveLength(1);
+    const line = lines[0] as string;
+    expect(line.startsWith("[WARN] ")).toBe(true);
+    expect(line).toContain(`${beforeCompile ? " (found just before compiling, so nothing was compiled)" : ""}: the deployed marker could not be read (`);
+    expect(line).toContain(named);
+    expect(line).toContain(embedded.marker);
+    for (const remedy of REMEDY.unknown) expect(line).toContain(remedy);
+    return line;
+  }
+
+  for (const { label, failure, named } of FAILURES) {
+    it(
+      `the probe's version read fails (${label}) over a newer deployment: no PUT, no compile, the instance byte-identical, one warning naming the failure; the server serves`,
+      async () => {
+        const fake = await startFake();
+        const names = [...embedded.classes.keys()];
+        await seedInstance(targetOf(fake), embedded, { marker: legSeed("newer-startup"), perturb: true });
+        const seeded = await snapshotInstance(targetOf(fake), names);
+
+        // runServer throws unless iris_server_info answers: the server goes on with what is deployed.
+        const { stderr, window } = await startOnce(fake, () => failure);
+
+        expect(snapshotDifferences(seeded, await snapshotInstance(targetOf(fake), names))).toEqual([]);
+        const summary = summarizeRequests(window);
+        expect(summary.puts, "no PUT").toEqual([]);
+        expect(summary.compiles, "no compile").toBe(0);
+        expect(summary.queries, "the probe's version query only: no IsConfigured, Configure, mapping or ^UnitTestRoot").toEqual([VERSION_QUERY]);
+        expect(summary.others.filter((other) => other.includes("/doc/")), "the one check that the Setup class exists").toEqual([SETUP_DOC_GET]);
+        expect(unknownWarning(stderr, named, false)).not.toContain("had already uploaded");
+        expect(stderr).not.toContain("Bootstrap: REST service not found");
+      },
+      TEST_TIMEOUT_MS,
+    );
+  }
+
+  it("a positive absence (no Setup document: the route answers 404) gets the full install, with no warning", async () => {
+    const fake = await startFake();
+
+    const { stderr, window } = await startOnce(fake, undefined);
+
+    const summary = summarizeRequests(window);
+    expect([...summary.puts].sort(), "every embedded class is PUT").toEqual([...embedded.classes.keys()].sort());
+    expect(summary.compiles, "one compile").toBe(1);
+    expect(summary.others.filter((other) => other.includes("/doc/")), "the absence was proven by the document route").toEqual([SETUP_DOC_GET]);
+    expect(fake.state.compiledMarker).toBe(embedded.marker);
+    expect(fake.state.configured).toBe(true);
+    expect(fake.state.mapped).toBe(true);
+    expect(leavingLines(stderr)).toEqual([]);
+    expect(stderr).toContain("Bootstrap: REST service not found, running full install");
+  }, TEST_TIMEOUT_MS);
+
+  it("an older probe followed by a re-read that fails (HTTP 500): the uploads landed, but no compile and nothing later; one warning", async () => {
+    const fake = await startFake();
+    const seedMarker = legSeed("older-sequence");
+    await seedInstance(targetOf(fake), embedded, { marker: seedMarker, perturb: true });
+
+    const { stderr, window } = await startOnce(fake, (count) => (count >= 2 ? SERVER_ERROR : undefined));
+
+    const summary = summarizeRequests(window);
+    expect([...summary.puts].sort(), "the uploads had already landed").toEqual([...embedded.classes.keys()].sort());
+    expect(summary.compiles, "no compile").toBe(0);
+    expect(summary.queries, "the probe and the re-read only").toEqual([VERSION_QUERY, VERSION_QUERY]);
+    expect(fake.state.compiledMarker, "the compiled marker is still the seeded one").toBe(seedMarker);
+    expect(unknownWarning(stderr, "IRIS returned HTTP 500", true)).toContain("This server had already uploaded its class documents");
+  }, TEST_TIMEOUT_MS);
+
+  it("an unconfigured probe followed by a re-read that fails (HTTP 500): no compile, no Configure, nothing later; one warning", async () => {
+    const fake = await startFake();
+    await seedInstance(targetOf(fake), embedded, { marker: embedded.marker, perturb: false });
+    fake.state.configured = false;
+
+    const { stderr, window } = await startOnce(fake, (count) => (count >= 2 ? SERVER_ERROR : undefined));
+
+    const summary = summarizeRequests(window);
+    expect(summary.puts).toEqual([]);
+    expect(summary.compiles).toBe(0);
+    expect(summary.queries, "the probe, IsConfigured and the re-read only").toEqual([VERSION_QUERY, IS_CONFIGURED_QUERY, VERSION_QUERY]);
+    expect(fake.state.configured, "the web application was not configured").toBe(false);
+    expect(unknownWarning(stderr, "IRIS returned HTTP 500", true)).not.toContain("had already uploaded");
+  }, TEST_TIMEOUT_MS);
+
+  it("the unconfigured self-heal is unchanged: an equal marker with the web application absent recompiles and configures, with no warning", async () => {
+    const fake = await startFake();
+    await seedInstance(targetOf(fake), embedded, { marker: embedded.marker, perturb: false });
+    fake.state.configured = false;
+
+    const { stderr, window } = await startOnce(fake, undefined);
+
+    const summary = summarizeRequests(window);
+    expect(summary.puts).toEqual([]);
+    expect(summary.compiles, "one recompile").toBe(1);
+    expect(summary.queries.slice(0, 3)).toEqual([VERSION_QUERY, IS_CONFIGURED_QUERY, VERSION_QUERY]);
+    expect(fake.state.configured).toBe(true);
     expect(leavingLines(stderr)).toEqual([]);
   }, TEST_TIMEOUT_MS);
 });

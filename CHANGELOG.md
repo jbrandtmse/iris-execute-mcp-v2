@@ -23,15 +23,23 @@ byte-unchanged. `BOOTSTRAP_VERSION` moves from `d51856f74d6a` to `0.0.2+1.995fbb
   shares the instance; for a foreign one it is to run one build per instance, or to delete class `ExecuteMCPv2.Setup` in the namespace and
   restart the server to install this server's classes deliberately. The marker is read again immediately before each compile, so a newer or
   foreign deployment that appears in the meantime is not compiled over.
+- **A marker that cannot be read is `unknown`, not absent (wave-8 decision #54, DW-673).** Only a provably absent `ExecuteMCPv2.Setup`
+  class (its Atelier document route answers HTTP 404) gets the full install. A version query that fails or returns no marker (an HTTP
+  error, a timeout, a privilege error, an empty value) while the class exists, or while its existence cannot be checked, uploads and
+  compiles nothing and logs one `[WARN]` naming the failure and the remedy; the server goes on with what is deployed. The same holds for the
+  read before each compile after an older or unconfigured probe. `BootstrapResult.probeStatus` gains `unknown`, and the optional
+  `readFailure` field carries the reason.
 - **The marker format and `scripts/bootstrap-sequence.json`.** `BOOTSTRAP_VERSION` is `<semver>+<sequence>.<hash>`: the version of
   `@iris-mcp/shared`, a sequence number and the 12-character content hash. The sequence lives in the new `scripts/bootstrap-sequence.json`;
   `pnpm gen:bootstrap` raises it by exactly 1 when the hash changes and leaves it alone otherwise (an unchanged rerun is byte-identical, and a
   missing file is an error). The drift test also asserts that the semver equals the `packages/shared/package.json` version and that the
   sequence and hash equal the state file's. `@iris-mcp/shared` exports `classifyDeployedMarker` and `parseBootstrapMarker`.
 - **Sanctioned change to an existing behavior (AD-15).** An instance whose deployed marker is `dev` (a hand-loaded deployment from `src/`) or
-  otherwise foreign is no longer overwritten at the next start; it was before. Every other probe path is as it was: an absent deployment
-  installs, an equal marker is `current` or `unconfigured`, and an older deployment upgrades, apart from the one marker read before each
-  compile.
+  otherwise foreign is no longer overwritten at the next start; it was before. Nor is a deployment whose version query fails while its
+  `Setup` class exists, which used to get the full install; a deployment from before the version stamp (a `Setup` class with no
+  `GetBootstrapVersion` method) is one of these, and deleting the class `ExecuteMCPv2.Setup` makes it installable again. Every other probe
+  path is as it was: an absent deployment installs, an equal marker is `current` or `unconfigured`, and an older deployment upgrades, apart
+  from the one marker read before each compile.
 - **Builds from before this release still downgrade.** The guard runs in the server that is about to deploy, so an earlier server compares
   for equality only and redeploys over a newer deployment. Upgrade every client that shares an instance together (README, Known
   Limitations, "Shared Instances: Upgrade Every Client Together").
@@ -52,8 +60,8 @@ byte-unchanged. `BOOTSTRAP_VERSION` moves from `d51856f74d6a` to `0.0.2+1.995fbb
 
 - **Test and release tooling, none of it shipped.** `scripts/throwaway-iris.mjs` runs one command against a disposable, digest-pinned IRIS
   container that it starts on a dynamic loopback port and always removes, and refuses port 52773 or 1972, the shared instance's name and any
-  floating image tag; `pnpm live:bootstrap-guard` runs the throwaway bootstrap-guard gate through it (Story 42.3's CI runs it; nothing in
-  this story runs docker). A hermetic orchestration test drives the built `iris-dev-mcp` against a stateful fake Atelier for the same legs
+  floating image tag; `pnpm live:bootstrap-guard` runs the throwaway bootstrap-guard gate through it (Story 42.3's CI runs it; on a
+  development machine it runs only as the Lead authorizes, wave-8 decisions #49 and #55). A hermetic orchestration test drives the built `iris-dev-mcp` against a stateful fake Atelier for the same legs
   (newer, foreign, older, legacy, current, and the lazy `other` profile of DW-518). `@iris-mcp/shared/test-helpers/live-target` is the one
   place a test leg resolves its arming and target (in-repo only: it is not in `publishConfig.exports`), and `live-arming-guard.test.ts`
   pins that no test source defaults a target and that every live-capable test file connects to nothing when unarmed.

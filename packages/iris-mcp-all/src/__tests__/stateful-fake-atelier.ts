@@ -20,6 +20,10 @@
  *
  * Every other request is answered with a clean 404 envelope, so nothing a started server asks ever hangs. Every request
  * is recorded (method, url, body).
+ *
+ * `failVersionQuery`, when a test sets it, answers the `Setup_GetBootstrapVersion()` query as a deployment whose marker
+ * cannot be read: an HTTP status and envelope of the test's choosing, or no answer at all (`hang`, a timeout of the
+ * client). It is called with the number of version queries since it was set, so a test can fail only the re-read.
  */
 
 import http from "node:http";
@@ -66,12 +70,20 @@ export interface FakeAtelierOptions {
   onPut?: (name: string, putCount: number, state: FakeAtelierState) => void;
 }
 
+/** How the fake answers one version query instead of reading the compiled marker. */
+export type VersionQueryFailure = { kind: "reply"; status: number; body: unknown } | { kind: "hang" };
+
 /** A running fake. */
 export interface StatefulFakeAtelier {
   port: number;
   namespace: string;
   requests: FakeRequest[];
   state: FakeAtelierState;
+  /**
+   * Set to fail the version query: called with the 1-based number of version queries since it was set; `undefined`
+   * from it (or an unset hook) answers normally. Setting it restarts the count.
+   */
+  failVersionQuery: ((count: number) => VersionQueryFailure | undefined) | undefined;
   close: () => Promise<void>;
 }
 
@@ -126,6 +138,8 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
   const requests: FakeRequest[] = [];
   let putCount = 0;
   let tick = 0;
+  let failVersionQuery: StatefulFakeAtelier["failVersionQuery"];
+  let versionQueries = 0;
 
   /** Strictly increasing, deterministic Atelier-style timestamps. */
   const nextTimestamp = (): string => {
@@ -152,6 +166,15 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
       return;
     }
     if (statement.includes("Setup_GetBootstrapVersion")) {
+      if (failVersionQuery !== undefined) {
+        versionQueries += 1;
+        const failure = failVersionQuery(versionQueries);
+        if (failure?.kind === "hang") return;
+        if (failure?.kind === "reply") {
+          reply(res, failure.status, failure.body);
+          return;
+        }
+      }
       if (state.compiledMarker === undefined) return missingFunction(res, "EXECUTEMCPV2.SETUP_GETBOOTSTRAPVERSION");
       reply(res, 200, envelope({ content: [{ Version: state.compiledMarker }] }));
       return;
@@ -303,6 +326,13 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
     namespace,
     requests,
     state,
+    get failVersionQuery() {
+      return failVersionQuery;
+    },
+    set failVersionQuery(hook) {
+      failVersionQuery = hook;
+      versionQueries = 0;
+    },
     close: () =>
       new Promise<void>((resolve) => {
         server.closeAllConnections();

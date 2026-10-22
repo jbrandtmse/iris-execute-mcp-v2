@@ -13,7 +13,9 @@
  *  (b2) THE SAME RUNS WITH A TARGET SET. `IRIS_HOST` and `IRIS_PORT` set without `IRIS_REQUIRE_LIVE`, and all five variables set with
  *      `IRIS_REQUIRE_LIVE=0`: neither arms a leg, so each child still exits 0 with an empty connect log. The target port is watched.
  *  (c) CONTROL. A control test connects to a stand-in listener whose port the preload watches: the connect is logged and never reaches
- *      the listener. The same control without the preload reaches the listener and logs nothing, so the oracle of (b) can tell the two apart.
+ *      the listener. A child it starts with `inheritedEnv()`, the environment every gate hands the servers it starts, connects to a
+ *      second watched listener, and that connect is logged to the same file. The same control without the preload reaches both
+ *      listeners and logs nothing, so the oracle of (b) can tell the two apart.
  *  (d) HELPER TABLE. `resolveLiveTarget`, `isLiveArmed` and `liveGateTarget` over an empty environment, `IRIS_REQUIRE_LIVE` alone,
  *      `IRIS_HOST` alone, and all five variables.
  *
@@ -256,17 +258,32 @@ describe("(c) control: the connect log and the preload can tell a run that conne
   const controlFile = "src/__tests__/fixtures/live-arming-control.control.ts";
   const packageDir = path.join(PACKAGES_DIR, "iris-mcp-all");
 
-  /** Run the control test against a stand-in HTTP listener; report what the run logged and what the listener saw. */
-  async function runControl(withoutPreload: boolean): Promise<{ output: string; connects: string[]; reached: number; status: number | null }> {
-    const scratch = mkdtempSync(path.join(tmpdir(), "mcp-arming-control-"));
+  /** A stand-in HTTP listener on 127.0.0.1 that counts the requests it is sent. */
+  async function startStandIn(): Promise<{ port: string; reached: () => number; close: () => Promise<void> }> {
     let reached = 0;
-    const standIn = http.createServer((_request, response) => {
+    const server = http.createServer((_request, response) => {
       reached += 1;
       response.end("ok");
     });
-    await new Promise<void>((resolve) => standIn.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return {
+      port: String((server.address() as AddressInfo).port),
+      reached: () => reached,
+      close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    };
+  }
+
+  /**
+   * Run the control test against two stand-in HTTP listeners (one for the test worker's connect, one for the connect of
+   * the child it starts with `inheritedEnv()`); report what the run logged and what each listener saw.
+   */
+  async function runControl(
+    withoutPreload: boolean,
+  ): Promise<{ output: string; connects: string[]; reached: number; childReached: number; childPort: string; status: number | null }> {
+    const scratch = mkdtempSync(path.join(tmpdir(), "mcp-arming-control-"));
+    const standIn = await startStandIn();
+    const childStandIn = await startStandIn();
     try {
-      const port = String((standIn.address() as AddressInfo).port);
       const config = path.join(scratch, "vitest.control.config.mjs");
       writeFileSync(
         config,
@@ -275,14 +292,22 @@ describe("(c) control: the connect log and the preload can tell a run that conne
       const run = await runVitestUnderPreload({
         packageDir,
         args: ["--config", config, "--root", packageDir],
-        watchPorts: [port],
-        env: { LIVE_ARMING_CONTROL_PORT: port },
+        watchPorts: [standIn.port, childStandIn.port],
+        env: { LIVE_ARMING_CONTROL_PORT: standIn.port, LIVE_ARMING_CONTROL_CHILD_PORT: childStandIn.port },
         withoutPreload,
         timeoutMs: 120_000,
       });
-      return { output: run.output, connects: run.connects, reached, status: run.status };
+      return {
+        output: run.output,
+        connects: run.connects,
+        reached: standIn.reached(),
+        childReached: childStandIn.reached(),
+        childPort: childStandIn.port,
+        status: run.status,
+      };
     } finally {
-      await new Promise<void>((resolve) => standIn.close(() => resolve()));
+      await standIn.close();
+      await childStandIn.close();
       rmSync(scratch, { recursive: true, force: true });
     }
   }
@@ -297,13 +322,24 @@ describe("(c) control: the connect log and the preload can tell a run that conne
     expect(run.reached, "the listener saw nothing").toBe(0);
   }, 150_000);
 
-  it("without the preload, the same connect reaches the listener and nothing is logged (so an empty log means something)", async () => {
+  it("under the preload, a child started with inheritedEnv() (as every gate starts a server) is refused AND logged to the same file", async () => {
+    const run = await runControl(false);
+
+    expect(run.status, run.output.slice(-2000)).toBe(0);
+    expect(run.output).toContain("LIVE_ARMING_CONTROL child refused");
+    expect(run.connects, "the child's refused connect is in the parent's log").toContain(`127.0.0.1:${run.childPort}`);
+    expect(run.childReached, "the child's listener saw nothing").toBe(0);
+  }, 150_000);
+
+  it("without the preload, the same connects reach the listeners and nothing is logged (so an empty log means something)", async () => {
     const run = await runControl(true);
 
     expect(run.status, run.output.slice(-2000)).toBe(0);
     expect(run.output).toContain("LIVE_ARMING_CONTROL reached");
+    expect(run.output).toContain("LIVE_ARMING_CONTROL child reached");
     expect(run.connects).toEqual([]);
     expect(run.reached).toBe(1);
+    expect(run.childReached).toBe(1);
   }, 150_000);
 });
 

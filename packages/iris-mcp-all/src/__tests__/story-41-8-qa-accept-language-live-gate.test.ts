@@ -207,7 +207,7 @@ async function liveSkipReason(): Promise<string | undefined> {
     return `IRIS at http://${TARGET.host}:${TARGET.port} answered HTTP ${control.status}: the IRIS_USERNAME/IRIS_PASSWORD given are not accepted.`;
   }
   if (control.status === 404) {
-    return `ExecuteMCPv2's REST service is not deployed at http://${TARGET.host}:${TARGET.port} (HTTP 404 from ${ROUTE}). Load src/ExecuteMCPv2/ to run this gate.`;
+    return `ExecuteMCPv2's REST service is not deployed at http://${TARGET.host}:${TARGET.port} (HTTP 404 from ${ROUTE}). Start a built server against this namespace so its bootstrap deploys the ExecuteMCPv2 classes, then run this gate.`;
   }
   if (envelopeOf(control)?.status === undefined) {
     return `${ROUTE} answered HTTP ${control.status} with a body that is not the ExecuteMCPv2 envelope.`;
