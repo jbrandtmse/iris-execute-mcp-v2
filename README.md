@@ -1097,3 +1097,34 @@ A plain `pnpm test` touches no IRIS instance. The test legs that need one are op
 An armed suite fails if any test in it was skipped (skipped, pending, todo or disabled), unless an `allowedSkips` entry in `scripts/lib/ci-checks.mjs` names the test and gives the reason. The allowlist holds the four golden-capture legs, which run only under the capture CLI, and the nine DocDB lifecycle tests of the data integration suite, so CI never runs that lifecycle: on a fresh instance `%Service_DocDB` is disabled, and a database the REST API creates has no `Security.DocDBs` record. An entry that no longer matches a skipped test fails too. An armed run therefore cannot go green on a test that vitest reports as skipped; a test that returns early without asserting is reported as passed, which the wrapper cannot see. A new check is registered in `scripts/lib/ci-checks.mjs` and in `ci.yml`, and `ci-workflow.test.ts` fails when the two differ.
 
 `pnpm live:bootstrap-guard` runs the bootstrap-guard gate against a throwaway IRIS container. It needs Docker and the pinned image, and it removes its own container on every exit.
+
+### Releasing
+
+A release is published only by `.github/workflows/release.yml`, which runs `node scripts/release.mjs` (alias `pnpm release`). Nothing else publishes: no workflow step and no `package.json` script holds a publish command, and `release-workflow.test.ts` fails on one. The steps of a release:
+
+1. Run `pnpm run version`. It runs `changeset version`, then regenerates every artifact that embeds the version (`pnpm gen:bootstrap`: the embed, its `BOOTSTRAP_VERSION` marker and `ipm/module.xml`), and prints the `BOOTSTRAP_VERSION` move. Run it as `pnpm run version`, because `pnpm version` hands over to `npm version`, and the script refuses to run as that hook. For the first release only, run `pnpm run version -- --first-release`, which first copies the 1.0.0 template (`scripts/release/changeset-1.0.0.md`) into `.changeset/` so that all eight packages land on 1.0.0.
+2. Write the root `CHANGELOG.md` section of the release, naming the `BOOTSTRAP_VERSION` move that step 1 printed.
+3. Commit, push, and wait for CI to be green on the commit.
+4. Tag the commit `v<MAJOR.MINOR.PATCH>` (for example `v1.0.0`) and push the tag.
+5. Approve the run in the `release` environment: the **Review deployments** button on the run page approves it. The environment itself (Settings, Environments) holds the required reviewer and the secrets.
+
+The workflow has four jobs. `ci-gate` waits for a green `ci.yml` run on the tagged commit and refuses a tag run unless the `release` environment is protected (a required reviewer, no administrator bypass, and exactly one tag rule, `v*`). `prepare` runs the root checks, then every package's `prepublishOnly` once, armed on a seeded IRIS for Health throwaway, and only then packs the eight tarballs with `pnpm pack` (no lifecycle script), the extension's vsix and the IPM tree, with a manifest of their hashes. `rehearse` verifies the hashes and runs `npm publish --dry-run` on each tarball; it has no environment, no OIDC permission and no secret. `publish` runs only on a tag push and only after the other three, behind the `release` environment: it uploads the exact bytes that `rehearse` exercised, in the order `client-config`, `shared`, `admin`, `data`, `dev`, `interop`, `ops`, `all`, with npm provenance. A version that is already on the registry is skipped, and the first failure stops everything after it; the report names every package and channel as published, already published, failed, not attempted or skipped.
+
+**A publish that stops part-way.** If a publish stops part-way, fix the cause and run the release again: versions already on the registry are skipped. If the fix changes a package, release a new patch version.
+
+The channels, in publish order, and their default state:
+
+| Channel | Default state | Enabled by |
+| --- | --- | --- |
+| npm (`@iris-mcp/*`) | enabled | |
+| VS Code Marketplace (the extension's vsix) | disabled: `skipped: not enabled (Story 42.7)` | Story 42.7 |
+| Open VSX (the same vsix) | disabled: `skipped: not enabled (Story 42.7)` | Story 42.7 |
+| IPM (the packaging repository `jbrandtmse/iris-execute-mcp-v2-ipm`) | disabled: `skipped: not enabled (Story 42.8)` | Story 42.8 |
+
+A disabled channel still runs its read-only dry step in a rehearsal and reports whether it is ready (for example, the extension's publisher is still `TBD-at-publish-time`). The IPM registry reads the default branch of the packaging repository, so the IPM channel pushes the staged tree there and tags it; listing the new version on Open Exchange is a manual release step (its "Release app" press has no API), done after the push.
+
+**The dry run.** A push to a `release-dry-run/**` branch, or a manual dispatch of the workflow (once the file is on the default branch), runs every job except `publish`, so the whole path is proven before a tag exists: `git push origin <sha>:refs/heads/release-dry-run/<name>`. A tag is never a dry run, because a tag matches the environment's tag rule. A dry run publishes nothing: before the first release, `npm view @iris-mcp/shared` still answers E404 afterwards.
+
+**npm authentication.** The `publish` job uses npm trusted publishing (OIDC) whenever no token is set. Until each package has a trusted publisher (npm cannot configure one for a package that does not exist yet), the first release uses a short-lived granular token, scoped to `@iris-mcp`, stored as the `NPM_TOKEN` secret of the `release` environment: the script writes it to a 0600 temporary userconfig that it deletes on every exit path, and never prints it. After the first publish, configure trusted publishing for each package (npm 11.15 or later, with two-factor authentication: `npm trust github @iris-mcp/<package> --file release.yml --repo jbrandtmse/iris-execute-mcp-v2 --env release --allow-publish`), delete the `NPM_TOKEN` secret, and no workflow change is needed.
+
+**A bad release** is fixed forward: the fix is a new patch release through the same workflow, so `@1` clients receive it. A version with a security, data-loss or broken-install defect is also marked with `npm deprecate @iris-mcp/<package>@<version> "<reason>; use >=<fixed version>"`. A release is never removed with `npm unpublish`, which breaks installs. For the extension and the IPM package there is no rollback: the fix is published as the next version. The security reporting route is in [SECURITY.md](SECURITY.md).

@@ -13,8 +13,11 @@ import { createServer, type AddressInfo } from "node:net";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Readable } from "node:stream";
+import { completeAuditLines, readAuditEntries } from "../../../../scripts/lib/audit-lines.mjs";
 import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
 import { liveGateTarget } from "../../../shared/src/test-helpers/live-target.js";
+
+export { completeAuditLines };
 
 /**
  * The ESM build of `@modelcontextprotocol/client` (its `dist/` directory, holding `index.mjs` and
@@ -937,29 +940,14 @@ export interface AuditPollOptions {
 }
 
 /**
- * The non-blank lines of the audit file text `text` that end in a newline, in order. The audit writer appends each entry as
- * `${line}\n` in one `appendFile` call (`packages/shared/src/audit.ts`), so a last line without its newline is an entry still being
- * written: it is left out, and a later read sees it whole.
- */
-export function completeAuditLines(text: string): string[] {
-  const end = text.lastIndexOf("\n");
-  if (end === -1) return [];
-  return text
-    .slice(0, end)
-    .split("\n")
-    .filter((line) => line.trim() !== "");
-}
-
-/**
  * Read the JSON-lines audit file `file` until it holds the entries `options` asks for, and return them.
- * Only newline-terminated lines are read (see {@link completeAuditLines}); a terminated line that does not parse still throws.
- * Throws, quoting the start of the file, when the entries have not appeared within `timeoutMs`.
+ * Only newline-terminated lines are read (see `completeAuditLines` in `scripts/lib/audit-lines.mjs`); a terminated line that does
+ * not parse still throws. Throws, quoting the start of the file, when the entries have not appeared within `timeoutMs`.
  */
 export async function pollAuditEntries(file: string, options: AuditPollOptions): Promise<AuditEntry[]> {
   const wanted = options.count ?? 1;
   const deadline = Date.now() + options.timeoutMs;
-  const read = (): AuditEntry[] =>
-    completeAuditLines(existsSync(file) ? readFileSync(file, "utf8") : "").map((line) => JSON.parse(line) as AuditEntry);
+  const read = (): AuditEntry[] => readAuditEntries(file) as AuditEntry[];
   const ofTool = (entry: AuditEntry): boolean => options.tool === undefined || entry["tool"] === options.tool;
   for (;;) {
     const entries = read();

@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -18,6 +18,9 @@ import { McpServerBase } from "../server-base.js";
 import type { McpServerBaseOptions } from "../server-base.js";
 import type { ToolDefinition } from "../tool-types.js";
 import type { IrisConnectionConfig } from "../config.js";
+import { completeAuditLines } from "../../../../scripts/lib/audit-lines.mjs";
+import { waitForAuditLines } from "./test-helpers.js";
+import type { AuditRecord } from "./test-helpers.js";
 
 // ── Helpers (mirrors audit-interceptor.test.ts's harness) ──────────────
 
@@ -134,26 +137,8 @@ async function invokeTool(
   return callback(args);
 }
 
-/** Poll (bounded) until the file has at least `minLines` non-empty lines. */
-async function waitForLineCount(
-  filePath: string,
-  minLines: number,
-  timeoutMs = 2000,
-): Promise<string[]> {
-  const start = Date.now();
-  for (;;) {
-    if (existsSync(filePath)) {
-      const lines = readFileSync(filePath, "utf-8")
-        .split("\n")
-        .filter((line) => line.trim().length > 0);
-      if (lines.length >= minLines) return lines;
-    }
-    if (Date.now() - start > timeoutMs) {
-      throw new Error(`Timed out waiting for ${minLines} line(s) in ${filePath}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
+/** The wait for the audit file, in milliseconds. */
+const AUDIT_WAIT_MS = 2000;
 
 // ── Tests ───────────────────────────────────────────────────────────
 
@@ -219,8 +204,8 @@ describe("audit outcome fidelity (Epic 29, Story 29.1)", () => {
       presetApplied: "read-only",
     });
 
-    const lines = await waitForLineCount(auditPath, 2);
-    const entry = JSON.parse(lines[1] as string);
+    const lines = await waitForAuditLines(auditPath, 2, AUDIT_WAIT_MS);
+    const entry = lines[1] as AuditRecord;
     expect(entry.outcome).toBe("denied");
     expect(entry.denyReason).toBe("GOVERNANCE_DISABLED");
     expect(entry.presetApplied).toBe("read-only");
@@ -254,8 +239,8 @@ describe("audit outcome fidelity (Epic 29, Story 29.1)", () => {
     expect(result.structuredContent).toMatchObject({ code: "GOVERNANCE_DISABLED" });
     expect(result.structuredContent.presetApplied).toBeUndefined();
 
-    const lines = await waitForLineCount(auditPath, 2);
-    const entry = JSON.parse(lines[1] as string);
+    const lines = await waitForAuditLines(auditPath, 2, AUDIT_WAIT_MS);
+    const entry = lines[1] as AuditRecord;
     expect(entry.outcome).toBe("denied");
     expect(entry.denyReason).toBe("GOVERNANCE_DISABLED");
     expect(entry.presetApplied).toBeUndefined();
@@ -279,8 +264,8 @@ describe("audit outcome fidelity (Epic 29, Story 29.1)", () => {
     const result = await invokeTool(server, "iris_no_action", { name: "Foo" });
     expect(result.isError).toBeFalsy();
 
-    const lines = await waitForLineCount(auditPath, 2);
-    const entry = JSON.parse(lines[1] as string);
+    const lines = await waitForAuditLines(auditPath, 2, AUDIT_WAIT_MS);
+    const entry = lines[1] as AuditRecord;
     expect(entry.outcome).toBe("ok");
     expect(entry.denyReason).toBeUndefined();
     expect(entry.presetApplied).toBeUndefined();
@@ -307,8 +292,8 @@ describe("audit outcome fidelity (Epic 29, Story 29.1)", () => {
     const result = await invokeTool(server, "iris_doc_get", { name: "Foo.cls" });
     expect(result.isError).toBe(true);
 
-    const lines = await waitForLineCount(auditPath, 2);
-    const entry = JSON.parse(lines[1] as string);
+    const lines = await waitForAuditLines(auditPath, 2, AUDIT_WAIT_MS);
+    const entry = lines[1] as AuditRecord;
     expect(entry.outcome).toBe("error");
     expect(entry.error).toBe(
       "Tool error: boom: simulated handler failure\n" +
@@ -319,11 +304,12 @@ describe("audit outcome fidelity (Epic 29, Story 29.1)", () => {
     // #8/#9/#33) — this handler's message never named one, but pin the
     // invariant on the serialized line as a whole (not just error.message)
     // so a future redaction regression on the write path is caught here too.
-    expect(lines[1] as string).not.toMatch(/\^[A-Za-z%]/);
+    const rawLines = completeAuditLines(readFileSync(auditPath, "utf-8"));
+    expect(rawLines[1] as string).not.toMatch(/\^[A-Za-z%]/);
     // And never the literal `.stack` property's "Error: <message>\n    at ..."
     // V8 header form appended twice (i.e. we must not have serialized
     // `error.stack` in addition to `error.message`).
-    expect((lines[1] as string).match(/simulated handler failure/g)).toHaveLength(1);
+    expect((rawLines[1] as string).match(/simulated handler failure/g)).toHaveLength(1);
 
     rmSync(dir, { recursive: true, force: true });
   });
@@ -351,8 +337,8 @@ describe("audit outcome fidelity (Epic 29, Story 29.1)", () => {
     });
     expect(result.isError).toBeFalsy();
 
-    const lines = await waitForLineCount(auditPath, 2);
-    const entry = JSON.parse(lines[1] as string);
+    const lines = await waitForAuditLines(auditPath, 2, AUDIT_WAIT_MS);
+    const entry = lines[1] as AuditRecord;
     expect(entry.action).toBeNull();
 
     rmSync(dir, { recursive: true, force: true });
@@ -374,8 +360,8 @@ describe("audit outcome fidelity (Epic 29, Story 29.1)", () => {
     const result = await invokeTool(server, "iris_multi_action", { action: "bar" });
     expect(result.isError).toBeFalsy();
 
-    const lines = await waitForLineCount(auditPath, 2);
-    const entry = JSON.parse(lines[1] as string);
+    const lines = await waitForAuditLines(auditPath, 2, AUDIT_WAIT_MS);
+    const entry = lines[1] as AuditRecord;
     expect(entry.action).toBe("bar");
 
     rmSync(dir, { recursive: true, force: true });
@@ -397,8 +383,8 @@ describe("audit outcome fidelity (Epic 29, Story 29.1)", () => {
     const result = await invokeTool(server, "iris_no_action", { name: "Foo" });
     expect(result.isError).toBeFalsy();
 
-    const lines = await waitForLineCount(auditPath, 2);
-    const entry = JSON.parse(lines[1] as string);
+    const lines = await waitForAuditLines(auditPath, 2, AUDIT_WAIT_MS);
+    const entry = lines[1] as AuditRecord;
     expect(entry.action).toBeNull();
 
     rmSync(dir, { recursive: true, force: true });
@@ -423,8 +409,8 @@ describe("audit outcome fidelity (Epic 29, Story 29.1)", () => {
     const result = await invokeTool(server, "iris_multi_action", { action: "baz" });
     expect(result.isError).toBe(true);
 
-    const lines = await waitForLineCount(auditPath, 2);
-    const entry = JSON.parse(lines[1] as string);
+    const lines = await waitForAuditLines(auditPath, 2, AUDIT_WAIT_MS);
+    const entry = lines[1] as AuditRecord;
     expect(entry.action).toBeNull();
 
     rmSync(dir, { recursive: true, force: true });

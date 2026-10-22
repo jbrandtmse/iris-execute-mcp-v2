@@ -21,12 +21,13 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdirSync, readdirSync, realpathSync, utimesSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import path from "node:path";
-import { SMOKE_PROTOCOL, smokePackages } from "../../../../scripts/ci-package-smoke.mjs";
+import { SMOKE_PROTOCOL } from "../../../../scripts/ci-package-smoke.mjs";
 import { pnpmPack } from "../../../../scripts/lib/pnpm-pack.mjs";
 import { handshake, openRawWire } from "../../../../scripts/lib/sdk-wire-golden-core.mjs";
 import { makeTempRoot, put, removeTempRoot } from "./pack-fixture";
+import { cliSource, serverSource, smokeOffline, writeRepo, type PackageSpec } from "./smoke-repo-fixture";
 
 const roots: string[] = [];
 
@@ -41,77 +42,9 @@ afterEach(() => {
   for (const directory of roots.splice(0)) removeTempRoot(directory);
 });
 
-/** A stdio MCP server stand-in with `count` tools; `shebang` is the file's first line, or none. */
-function serverSource(count: number, shebang: boolean): string {
-  return [
-    ...(shebang ? ["#!/usr/bin/env node"] : []),
-    'const readline = require("node:readline");',
-    `const tools = Array.from({ length: ${count} }, (_, index) => ({ name: "tool" + index, description: "stand-in", inputSchema: { type: "object" } }));`,
-    "const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: \"2.0\", id, result }) + \"\\n\");",
-    "readline.createInterface({ input: process.stdin }).on(\"line\", (line) => {",
-    "  if (line.trim() === \"\") return;",
-    "  const message = JSON.parse(line);",
-    '  if (message.method === "initialize") reply(message.id, { protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "stand-in", version: "1.0.0" } });',
-    '  else if (message.method === "tools/list") reply(message.id, { tools });',
-    '  else if (message.id !== undefined) process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "unsupported" } }) + "\\n");',
-    "});",
-    "",
-  ].join("\n");
-}
-
-/** A CLI stand-in: `--help` prints `help` and exits `helpExit`; any other call prints `{}`. */
-function cliSource(help: string, helpExit: number): string {
-  return [
-    "#!/usr/bin/env node",
-    `if (process.argv[2] === "--help") { process.stdout.write(${JSON.stringify(`${help}\n`)}); process.exit(${helpExit}); }`,
-    'process.stdout.write("{}\\n");',
-    "",
-  ].join("\n");
-}
-
-interface PackageSpec {
-  dir: string;
-  name: string;
-  bin: string;
-  source: string;
-  /** Make `src/` newer than `dist/`. */
-  stale?: boolean;
-  private?: boolean;
-}
-
-/** Write a repository: `packages/<dir>/` with a manifest and a fresh `dist/`, and the tools-list snapshot with `servers[bin]` tools. */
-function writeRepo(repo: string, packages: PackageSpec[], servers: Record<string, number>): void {
-  for (const spec of packages) {
-    const packageDir = path.join(repo, "packages", spec.dir);
-    const manifest: Record<string, unknown> = { name: spec.name, version: "1.0.0", ...(spec.private ? { private: true } : {}), bin: { [spec.bin]: "./dist/bin.js" }, files: ["dist"] };
-    put(packageDir, "package.json", `${JSON.stringify(manifest, null, 2)}\n`);
-    const dist = put(packageDir, "dist/bin.js", spec.source);
-    const src = put(packageDir, "src/index.ts", "export {};\n");
-    const now = Date.now() / 1000;
-    utimesSync(spec.stale ? dist : src, now - 600, now - 600);
-    utimesSync(spec.stale ? src : dist, now - 60, now - 60);
-  }
-  const snapshot = Object.fromEntries(Object.entries(servers).map(([bin, count]) => [bin, Object.fromEntries(Array.from({ length: count }, (_, index) => [`tool${index}`, {}]))]));
-  put(repo, "packages/iris-mcp-all/src/__tests__/fixtures/tools-list-snapshot.json", `${JSON.stringify({ servers: snapshot })}\n`);
-  mkdirSync(path.join(repo, "packages", "not-a-package"), { recursive: true });
-}
-
 /** Smoke `repo` offline, with the temporary directory pointed at a directory the test can list afterwards. */
 async function smoke(repo: string): Promise<{ code: number; log: string; leftovers: string[] }> {
-  const observed = scratch("qa-42-3-smoke-tmp");
-  const saved = { TMPDIR: process.env["TMPDIR"], offline: process.env["npm_config_offline"] };
-  process.env["TMPDIR"] = observed;
-  process.env["npm_config_offline"] = "true";
-  try {
-    const lines: string[] = [];
-    const code = await smokePackages({ repoRoot: repo, log: (line: string) => lines.push(line) });
-    return { code, log: lines.join("\n"), leftovers: readdirSync(observed).filter((name) => name.startsWith("ci-package-smoke-")) };
-  } finally {
-    for (const [key, value] of [["TMPDIR", saved.TMPDIR], ["npm_config_offline", saved.offline]] as const) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  }
+  return smokeOffline(repo, scratch("qa-42-3-smoke-tmp"));
 }
 
 const GOOD_SERVER: PackageSpec = { dir: "iris-fake-mcp", name: "@iris-mcp/fake", bin: "iris-fake-mcp", source: serverSource(2, true) };

@@ -73,6 +73,8 @@ const REPLACED_NAMES = [
   "promptRejection",
   "isIrisReachable",
   "reserveClosedPort",
+  "completeAuditLines",
+  "readAuditEntries",
 ] as const;
 
 /** Replaced names that are never a local variable, so a declaration at any depth is a copy. */
@@ -93,6 +95,8 @@ const NEVER_LOCAL = [
   "HEADER_COLUMNS",
   "isIrisReachable",
   "reserveClosedPort",
+  "completeAuditLines",
+  "readAuditEntries",
 ] as const;
 
 /**
@@ -226,6 +230,12 @@ describe("DW-561: no gate re-declares a helper that process-gate-helpers.ts expo
     const local = "  it('x', async () => {\n    const entries = await pollAuditEntries(file, { intervalMs: 5, timeoutMs: 50, excerpt: 10 });\n  });\n";
     expect(copiesIn("some-gate.test.ts", local)).toEqual([]);
     expect(copiesIn("some-gate.test.ts", "function entries(file) {}\n")).toEqual([{ file: "some-gate.test.ts", name: "entries" }]);
+  });
+
+  it("refuses a local copy of the audit readers (DW-693): they live in scripts/lib/audit-lines.mjs", () => {
+    expect(copiesIn("some-gate.test.ts", "function readAuditEntries(file: string) {\n  return [];\n}\n")).toEqual([{ file: "some-gate.test.ts", name: "readAuditEntries" }]);
+    expect(copiesIn("some-gate.test.ts", "  const completeAuditLines = (text: string) => [];\n")).toEqual([{ file: "some-gate.test.ts", name: "completeAuditLines" }]);
+    expect(copiesIn("some-gate.test.ts", "const lines = completeAuditLines(text);\nconst rows = readAuditEntries(file);\n")).toEqual([]);
   });
 
   it("finds an importer whatever the quote style and suffix", () => {

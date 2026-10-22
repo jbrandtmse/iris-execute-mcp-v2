@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -33,6 +33,9 @@ import { McpServerBase } from "../server-base.js";
 import type { McpServerBaseOptions } from "../server-base.js";
 import type { ToolDefinition } from "../tool-types.js";
 import type { IrisConnectionConfig } from "../config.js";
+import { readAuditEntries } from "../../../../scripts/lib/audit-lines.mjs";
+import { waitForAuditLines } from "./test-helpers.js";
+import type { AuditRecord } from "./test-helpers.js";
 
 // ── Helpers (mirrors audit-interceptor.test.ts's harness) ──────────────
 
@@ -114,26 +117,8 @@ async function invokeTool(
   return callback(args);
 }
 
-/** Poll (bounded) until the file has at least `minLines` non-empty lines. */
-async function waitForLineCount(
-  filePath: string,
-  minLines: number,
-  timeoutMs = 5000,
-): Promise<string[]> {
-  const start = Date.now();
-  for (;;) {
-    if (existsSync(filePath)) {
-      const lines = readFileSync(filePath, "utf-8")
-        .split("\n")
-        .filter((line) => line.trim().length > 0);
-      if (lines.length >= minLines) return lines;
-    }
-    if (Date.now() - start > timeoutMs) {
-      throw new Error(`Timed out waiting for ${minLines} line(s) in ${filePath}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
+/** The wait for the audit file, in milliseconds. */
+const AUDIT_WAIT_MS = 5000;
 
 // ── Tests ───────────────────────────────────────────────────────────
 
@@ -199,8 +184,8 @@ describe("audit mixed-outcome + denial/action interaction (Epic 29, Story 29.1 �
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toMatchObject({ code: "GOVERNANCE_DISABLED" });
 
-    const lines = await waitForLineCount(auditPath, 2);
-    const entry = JSON.parse(lines[1] as string);
+    const lines = await waitForAuditLines(auditPath, 2, AUDIT_WAIT_MS);
+    const entry = lines[1] as AuditRecord;
     expect(entry.outcome).toBe("denied");
     expect(entry.action).toBe("writeDenied");
     expect(entry.denyReason).toBe("GOVERNANCE_DISABLED");
@@ -243,11 +228,11 @@ describe("audit mixed-outcome + denial/action interaction (Epic 29, Story 29.1 �
     expect(okCount).toBe(N / 3);
     expect(errCount).toBe((2 * N) / 3);
 
-    const lines = await waitForLineCount(auditPath, N + 1);
+    const lines = await waitForAuditLines(auditPath, N + 1, AUDIT_WAIT_MS);
     expect(lines).toHaveLength(N + 1);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parsed: any[] = lines.map((line) => JSON.parse(line));
+    const parsed: any[] = lines;
     expect(parsed[0].type).toBe("sessionStart");
     const entries = parsed.slice(1);
     expect(entries).toHaveLength(N);
@@ -295,11 +280,9 @@ describe("audit mixed-outcome + denial/action interaction (Epic 29, Story 29.1 �
     }
 
     await server.stop();
-    const finalLines = readFileSync(auditPath, "utf-8")
-      .split("\n")
-      .filter((line) => line.trim().length > 0);
+    const finalLines = readAuditEntries(auditPath) as AuditRecord[];
     expect(finalLines).toHaveLength(N + 2); // header + N entries + shutdown
-    const shutdownLine = JSON.parse(finalLines[finalLines.length - 1] as string);
+    const shutdownLine = finalLines[finalLines.length - 1] as AuditRecord;
     expect(shutdownLine.type).toBe("shutdown");
     expect(shutdownLine.droppedEntries).toBe(0);
 

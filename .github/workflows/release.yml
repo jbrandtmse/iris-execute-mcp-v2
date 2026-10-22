@@ -1,0 +1,137 @@
+# The release workflow of the IRIS MCP Server Suite (Story 42.5; AD-29). It runs on a `v*` tag and publishes only from that tag, only after
+# CI is green on the tagged commit, and only through the approved `release` environment. A push to a `release-dry-run/**` branch, or a
+# manual dispatch, runs every job except `publish`, so the whole path is proven before a tag exists.
+#
+# What runs
+#   ci-gate   Waits for a green ci.yml run on the commit (up to 180 minutes) and reads the `release` environment: a tag run stops here unless
+#             the environment is protected (a required reviewer, no administrator bypass, exactly one tag rule `v*`); GitHub would
+#             otherwise create an unprotected environment when `publish` first named it. It holds `actions: read` and the read-only token.
+#   prepare   Checks the version state and the generated files, runs every package's prepublishOnly ONCE, armed on a seeded IRIS for Health
+#             throwaway (scripts/throwaway-iris.mjs), and only then packs: eight tarballs with pnpm (no lifecycle script), the extension's
+#             vsix and the IPM tree, with a manifest of hashes. It uploads them as the one artifact the later jobs use.
+#   rehearse  The dry run of the upload: it verifies the hashes and runs `npm publish --dry-run` on each tarball, in order. It has no
+#             environment, no OIDC permission and no secret.
+#   publish   Behind the `release` environment, on a tag push only. It uploads the exact bytes that `rehearse` exercised, with npm
+#             provenance, in the order client-config, shared, admin, data, dev, interop, ops, all, then each enabled channel.
+#
+# The jobs are declared in scripts/lib/release-checks.mjs, and packages/iris-mcp-all/src/__tests__/release-workflow.test.ts holds this file
+# equal to that declaration. Every action is pinned by commit, with its release tag in the trailing comment. The only way to publish is
+# `node scripts/release.mjs publish` (alias `pnpm release`).
+
+name: release
+
+run-name: release ${{ github.ref_name }} ${{ github.sha }}
+
+on:
+  push:
+    tags: ["v*"]
+    branches: ["release-dry-run/**"]
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci-gate:
+    name: ci-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 200
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22.17.0"
+      - name: wait for CI and check the release environment
+        run: node scripts/release.mjs ci-gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  prepare:
+    name: prepare
+    needs: [ci-gate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22.17.0"
+          cache: pnpm
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: build
+        run: pnpm build
+      - name: launcher install
+        run: npm ci
+        working-directory: extensions/iris-mcp-launcher
+      - name: reserve the host port of the throwaway container
+        run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=52791
+      - name: prepare the artifacts
+        run: node scripts/release.mjs prepare --out ${{ runner.temp }}/release-artifacts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-artifacts
+          path: ${{ runner.temp }}/release-artifacts
+          if-no-files-found: error
+
+  rehearse:
+    name: rehearse
+    needs: [prepare]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "26.0.0"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-artifacts
+          path: ${{ runner.temp }}/release-artifacts
+      - name: rehearse the upload
+        run: node scripts/release.mjs publish --dry-run --artifacts ${{ runner.temp }}/release-artifacts
+
+  publish:
+    name: publish
+    needs: [ci-gate, prepare, rehearse]
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    environment: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "26.0.0"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-artifacts
+          path: ${{ runner.temp }}/release-artifacts
+      - name: publish
+        run: node scripts/release.mjs publish --artifacts ${{ runner.temp }}/release-artifacts
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}

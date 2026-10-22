@@ -25,7 +25,9 @@
     "measure:tools-payload": "node scripts/measure-tools-payload.mjs",
     "gen:tools-list-snapshot": "node scripts/gen-tools-list-snapshot.mjs",
     "gen:tools-list-snapshot:check": "node scripts/gen-tools-list-snapshot.mjs --check",
-    "changeset": "changeset"
+    "changeset": "changeset",
+    "version": "node scripts/release-version.mjs",
+    "release": "node scripts/release.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",

@@ -10,6 +10,7 @@
  * `changeset version` rewrites the files it runs on, so it runs ONLY in a throwaway fixture under `os.tmpdir()`: the
  * root manifest, the workspace file, `.changeset/` (with every pending changeset), and each package's manifest and
  * changelog, plus a `node_modules` link to the repository's. The real tree is never versioned. Nothing is published.
+ * The fixture builder is `release-fixture.ts`, which the version-step test (`release-version.test.ts`) shares.
  *
  *  - With the template: all eight packages are exactly `1.0.0`, each changelog's first `## ` is its only `## 1.0.0` and
  *    holds the release line, `workspace:*` is untouched, and the pending files are consumed.
@@ -22,59 +23,17 @@
  * `pre.json` check keeps running.
  */
 
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterAll, describe, expect, it } from "vitest";
 import { REPO_ROOT } from "./pack-fixture";
+import { PACKAGE_DIRS, TEMPLATE, makeFixture, manifestOf, pendingChangesets, removeFixtures } from "./release-fixture";
 
-interface Manifest {
-  name: string;
-  version: string;
-  dependencies?: Record<string, string>;
-}
-
-const TEMPLATE = join(REPO_ROOT, "scripts/release/changeset-1.0.0.md");
 const RELEASE_LINE = "First public release: every `@iris-mcp/*` package is published at 1.0.0 together.";
-const PACKAGE_DIRS = readdirSync(join(REPO_ROOT, "packages"), { withFileTypes: true })
-  .filter((entry) => entry.isDirectory() && existsSync(join(REPO_ROOT, "packages", entry.name, "package.json")))
-  .map((entry) => entry.name)
-  .sort();
-const pendingChangesets = (directory: string): string[] =>
-  existsSync(directory) ? readdirSync(directory).filter((name) => name.endsWith(".md") && name !== "README.md").sort() : [];
-
-const manifestOf = (root: string, dir: string): Manifest => JSON.parse(readFileSync(join(root, "packages", dir, "package.json"), "utf8")) as Manifest;
 const released = PACKAGE_DIRS.every((dir) => Number(manifestOf(REPO_ROOT, dir).version.split(".")[0]) >= 1);
 
-const tempDirs: string[] = [];
-afterAll(() => {
-  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
-
-/**
- * A fixture copy of what `changeset version` reads and writes, under `os.tmpdir()`. The repository's `node_modules`
- * is linked in so the real `@changesets/cli` and its modules resolve.
- */
-function makeFixture(options: { withTemplate: boolean }): string {
-  const root = mkdtempSync(join(tmpdir(), "release-1-0-0-"));
-  tempDirs.push(root);
-  const copy = (rel: string): void => {
-    mkdirSync(dirname(join(root, rel)), { recursive: true });
-    cpSync(join(REPO_ROOT, rel), join(root, rel));
-  };
-  copy("package.json");
-  copy("pnpm-workspace.yaml");
-  copy(".changeset/config.json");
-  for (const name of pendingChangesets(join(REPO_ROOT, ".changeset"))) copy(`.changeset/${name}`);
-  for (const dir of PACKAGE_DIRS) {
-    copy(`packages/${dir}/package.json`);
-    if (existsSync(join(REPO_ROOT, "packages", dir, "CHANGELOG.md"))) copy(`packages/${dir}/CHANGELOG.md`);
-  }
-  if (options.withTemplate) cpSync(TEMPLATE, join(root, ".changeset", "release-1-0-0.md"));
-  symlinkSync(join(REPO_ROOT, "node_modules"), join(root, "node_modules"), "junction");
-  return root;
-}
+afterAll(removeFixtures);
 
 /** Run the repository's own `changeset version` (the target of `node_modules/.bin/changeset`) in `cwd`. */
 function changesetVersion(cwd: string): { status: number | null; stdout: string; stderr: string } {

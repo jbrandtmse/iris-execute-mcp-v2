@@ -19,11 +19,12 @@
 // re-parses every `tools/call` result with its result schema, so the v1 wire already wrote
 // `content, structuredContent, isError`.
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
+import { readAuditEntries } from './audit-lines.mjs';
 import { startFakeIris } from './fake-iris-listener.mjs';
 import { CLOSED_PORT_ENV, GOLDEN_PACKAGES, WIRE_ERA, handshake, openRawWire } from './sdk-wire-golden-core.mjs';
 
@@ -118,11 +119,7 @@ export function withSessionVersion(entries, version) {
 
 /** Wait until the audit file holds at least `minimum` lines and has stopped growing, then return its entries. */
 export async function settledAuditEntries(file, minimum) {
-  const read = () =>
-    (existsSync(file) ? readFileSync(file, 'utf8') : '')
-      .split('\n')
-      .filter((line) => line.trim() !== '')
-      .map((line) => JSON.parse(line));
+  const read = () => readAuditEntries(file);
   const deadline = Date.now() + 15_000;
   let last = read();
   for (let stable = 0; stable < 8; ) {

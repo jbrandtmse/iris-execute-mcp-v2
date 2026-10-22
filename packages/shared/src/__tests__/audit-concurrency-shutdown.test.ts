@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -16,6 +16,9 @@ import { McpServerBase } from "../server-base.js";
 import type { McpServerBaseOptions } from "../server-base.js";
 import type { ToolDefinition } from "../tool-types.js";
 import type { IrisConnectionConfig } from "../config.js";
+import { readAuditEntries } from "../../../../scripts/lib/audit-lines.mjs";
+import { waitForAuditLines } from "./test-helpers.js";
+import type { AuditRecord } from "./test-helpers.js";
 
 // ── Helpers (mirrors audit-interceptor.test.ts's harness) ──────────────
 
@@ -86,26 +89,8 @@ async function invokeTool(
   return callback(args);
 }
 
-/** Poll (bounded) until the file has at least `minLines` non-empty lines. */
-async function waitForLineCount(
-  filePath: string,
-  minLines: number,
-  timeoutMs = 5000,
-): Promise<string[]> {
-  const start = Date.now();
-  for (;;) {
-    if (existsSync(filePath)) {
-      const lines = readFileSync(filePath, "utf-8")
-        .split("\n")
-        .filter((line) => line.trim().length > 0);
-      if (lines.length >= minLines) return lines;
-    }
-    if (Date.now() - start > timeoutMs) {
-      throw new Error(`Timed out waiting for ${minLines} line(s) in ${filePath}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
+/** The wait for the audit file, in milliseconds. */
+const AUDIT_WAIT_MS = 5000;
 
 // ── Tests ───────────────────────────────────────────────────────────
 
@@ -168,13 +153,13 @@ describe("audit concurrency + shutdown flush (Epic 29, Story 29.1, AC 29.1.3)", 
     }
 
     // header + N entries.
-    const lines = await waitForLineCount(auditPath, N + 1);
+    const lines = await waitForAuditLines(auditPath, N + 1, AUDIT_WAIT_MS);
     expect(lines).toHaveLength(N + 1);
 
     // Every line parses as one complete, valid JSON object — the write
     // queue's serialization means no line is ever split or merged.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parsed: any[] = lines.map((line) => JSON.parse(line));
+    const parsed: any[] = lines;
 
     expect(parsed[0].type).toBe("sessionStart");
     const entries = parsed.slice(1);
@@ -195,11 +180,9 @@ describe("audit concurrency + shutdown flush (Epic 29, Story 29.1, AC 29.1.3)", 
     // present by the time we read the file back (no polling needed for it).
     await server.stop();
 
-    const finalLines = readFileSync(auditPath, "utf-8")
-      .split("\n")
-      .filter((line) => line.trim().length > 0);
+    const finalLines = readAuditEntries(auditPath) as AuditRecord[];
     expect(finalLines).toHaveLength(N + 2); // header + N entries + shutdown
-    const shutdownLine = JSON.parse(finalLines[finalLines.length - 1] as string);
+    const shutdownLine = finalLines[finalLines.length - 1] as AuditRecord;
     expect(shutdownLine.type).toBe("shutdown");
     expect(shutdownLine.droppedEntries).toBe(0);
 
@@ -226,11 +209,9 @@ describe("audit concurrency + shutdown flush (Epic 29, Story 29.1, AC 29.1.3)", 
 
     // No polling: stop() must have awaited the write queue draining, so the
     // shutdown line is guaranteed on disk synchronously after it resolves.
-    const lines = readFileSync(auditPath, "utf-8")
-      .split("\n")
-      .filter((line) => line.trim().length > 0);
+    const lines = readAuditEntries(auditPath) as AuditRecord[];
     expect(lines).toHaveLength(3); // header + 1 entry + shutdown
-    const shutdownLine = JSON.parse(lines[2] as string);
+    const shutdownLine = lines[2] as AuditRecord;
     expect(shutdownLine.type).toBe("shutdown");
     expect(shutdownLine.droppedEntries).toBe(0);
 

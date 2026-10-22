@@ -2,6 +2,57 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Pre-release — 2026-10-22] — Story 42.5: Release Workflow
+
+Story 42.5 adds the release machinery: a workflow that publishes only from a tagged, CI-green commit through an approved protected
+environment, the script that is the only way to publish, the version step, and the security policy. Nothing is published, versioned,
+tagged or released by this story, and it adds no changeset: no package content changes. No tool, action, governance key, preset row,
+annotation, refusal code, product environment variable, REST route or REST response is added, removed or changed, no tool count moves
+(110 package tools, 115 advertised), the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and the frozen SDK goldens
+and the tools-list snapshot are byte-unchanged. `BOOTSTRAP_VERSION` does not move (it stays `0.0.2+2.244fe8623c76`); `classes[]` is
+unchanged (35 classes).
+
+### Added
+
+- **`.github/workflows/release.yml` (AC 42.5.1 to 42.5.4; DW-387, DW-675).** It runs on a `v*` tag and has four jobs. `ci-gate` waits for a green
+  `ci.yml` run on the tagged commit and refuses a tag run unless the `release` environment is protected. `prepare` runs the root checks and then
+  every package's `prepublishOnly` once, armed on a seeded IRIS for Health throwaway, before it packs the eight tarballs (with `pnpm pack`, no
+  lifecycle script), the vsix and the IPM tree. `rehearse` is the dry run: it has no environment, no OIDC permission and no secret. `publish` is
+  behind the approved `release` environment, runs only on a tag push, and uploads the exact rehearsed bytes with npm provenance, in the order
+  client-config, shared, admin, data, dev, interop, ops, all. A push to a `release-dry-run/**` branch, or a manual dispatch, runs every job
+  except `publish`. Only `publish` holds the environment, `id-token: write` and a secret; every action is pinned by commit.
+- **`scripts/release.mjs` (alias `pnpm release`) and `scripts/lib/release-core.mjs`.** `ci-gate`, `prepare` and `publish [--dry-run]`. The
+  publish skips a version that is already on the registry, stops at the first failure, and reports every package and channel as published,
+  already published, failed, not attempted or skipped. The extension and IPM channels are implemented and dry-run, and ship disabled: they are
+  enabled by Stories 42.7 and 42.8. The IPM channel pushes the staged tree to the packaging repository `jbrandtmse/iris-execute-mcp-v2-ipm`
+  (DW-689) and refuses a version the IPM registry already lists. The script's modules that `ci-gate`, `rehearse` and `publish` use import only
+  Node builtins, so those jobs run without `pnpm install`.
+- **`pnpm run version [-- --first-release]` (AD-14).** `scripts/release-version.mjs` runs `changeset version` and then `pnpm gen:bootstrap`,
+  so the embed, its marker and `ipm/module.xml` carry the new version with the sequence and hash unchanged, and prints the `BOOTSTRAP_VERSION`
+  move. `--first-release` copies the 1.0.0 template into `.changeset/` first. It refuses to run as the `npm version` hook.
+- **`SECURITY.md`.** Supported versions (the latest `1.x`), reporting through GitHub private vulnerability reporting (no email address), the
+  scope, and the handling: fix forward, then an advisory, then `npm deprecate`. The README has a `### Releasing` section with the steps, the
+  channels and their default states, the dry run, the npm authentication route, and the bad-release policy (never `npm unpublish`).
+- **`smokePackages` accepts prebuilt tarballs.** `scripts/ci-package-smoke.mjs` installs exactly the tarballs it is given, so `prepare` smokes the
+  files that would be published. With no options its behavior, and the command line, are unchanged.
+
+### Changed
+
+- **The audit reader is one function (DW-693).** CI runs 39819176668 and 39838191935 showed a flake: a test read an audit file while the server
+  was writing it and parsed a half-written last line. `scripts/lib/audit-lines.mjs` holds the newline-terminated reader (`completeAuditLines`,
+  `readAuditEntries`), and every test and script that reads `IRIS_AUDIT_LOG` goes through it. The six private `waitForLineCount` copies became
+  one `waitForAuditLines`. `audit-reader-guard.test.ts` fails on a raw split-and-parse reader in any test or script that mentions audit.
+- **`story-43-4-qa-probe-copy` observes the SIGTERM the client sends (DW-693).** The SDK ends a probe copy's stdin and then sends SIGTERM, and a
+  loaded probe that sees the end of input first exits before its own SIGTERM listener runs, so the test recorded no SIGTERM. A
+  `ChildProcess.prototype.kill` spy now records what the client sent.
+
+### Tests
+
+- `release-workflow.test.ts` holds `release.yml` equal to `scripts/lib/release-checks.mjs` and goes red for each defect the acceptance criteria
+  name; `release-core.test.ts`, `release-script.test.ts` (stand-in `npm`, `git`, `vsce` and `ovsx` on `PATH`, and a fake GitHub API),
+  `release-prepare.test.ts` (the real throwaway harness over a scripted docker) and `release-version.test.ts` (the real `changeset version`
+  and generator in a git fixture) cover every row of the story's matrix. `audit-lines.test.ts` and `audit-reader-guard.test.ts` pin DW-693.
+
 ## [Pre-release — 2026-10-22] — Story 42.4: IPM Package Revival
 
 Story 42.4 makes the IPM package real: its manifest is generated, an install guard keeps an IPM install from downgrading a newer

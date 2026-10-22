@@ -81,6 +81,7 @@ import {
   removeInteropNamespace,
 } from "./interop-namespace-fixture.js";
 import { checkRedactedPositions, separatorCharacters } from "../../../shared/src/__tests__/hl7-redaction-fixtures.js";
+import { readAuditEntries } from "../../../../scripts/lib/audit-lines.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -570,11 +571,7 @@ afterAll(async () => {
         // One more round trip, so every line the server wrote to stderr while it handled the calls has been read.
         await probed.session.listTools();
         const raw = existsSync(probed.auditFile) ? readFileSync(probed.auditFile, "utf8") : "";
-        const entries = raw
-          .split("\n")
-          .filter((line) => line.trim() !== "")
-          .map((line) => JSON.parse(line) as Item)
-          .filter((entry) => entry.tool === "iris_message_body");
+        const entries = (readAuditEntries(probed.auditFile) as Item[]).filter((entry) => entry.tool === "iris_message_body");
         for (const entry of entries) {
           expect([NS_Q, NS_Z], "every audited call named the scratch namespace").toContain((entry.params as Item | undefined)?.namespace);
         }

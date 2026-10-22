@@ -175,12 +175,14 @@ function checkCli(bin, installDir, env) {
 }
 
 /**
- * Pack, install and start every package, and return the exit code.
+ * Pack, install and start every package, and return the exit code. With `tarballs` (Story 42.5: the release's own, packed once with
+ * `pnpm pack` and scripts ignored) it packs nothing and installs exactly those files; each entry is
+ * `{ name, tarball, manifest, files? }` as `pnpmPack` returns it, and a package without an entry fails the smoke.
  *
- * @param {{ repoRoot?: string, log?: (line: string) => void }} [options]
+ * @param {{ repoRoot?: string, log?: (line: string) => void, tarballs?: ReadonlyArray<{ name: string, tarball: string, manifest: Record<string, any>, files?: readonly string[] }> }} [options]
  * @returns {Promise<number>}
  */
-export async function smokePackages({ repoRoot = REPO_ROOT, log = (line) => process.stderr.write(`${line}\n`) } = {}) {
+export async function smokePackages({ repoRoot = REPO_ROOT, log = (line) => process.stderr.write(`${line}\n`), tarballs: prebuilt } = {}) {
   const packages = publishablePackages(repoRoot);
   const failures = [];
   const fail = (what, problems) => {
@@ -203,14 +205,28 @@ export async function smokePackages({ repoRoot = REPO_ROOT, log = (line) => proc
 
     const tarballs = [];
     for (const pkg of packages) {
-      const destination = path.join(work, 'packs', pkg.dir);
-      const packed = pnpmPack(path.join(repoRoot, 'packages', pkg.dir), destination, { ignoreScripts: false });
+      let packed;
+      if (prebuilt === undefined) {
+        const destination = path.join(work, 'packs', pkg.dir);
+        packed = pnpmPack(path.join(repoRoot, 'packages', pkg.dir), destination, { ignoreScripts: false });
+        log(`ci-package-smoke: packed ${pkg.name} (${packed.bytes} bytes)`);
+      } else {
+        packed = prebuilt.find((entry) => entry.name === pkg.name);
+        if (packed === undefined) {
+          fail(pkg.name, ['no prebuilt tarball was given for this package.']);
+          continue;
+        }
+        log(`ci-package-smoke: using the prebuilt tarball of ${pkg.name}`);
+      }
       tarballs.push({ name: pkg.name, tarball: packed.tarball, manifest: packed.manifest });
       for (const bin of binsOf(packed.manifest)) {
         const target = typeof packed.manifest.bin === 'string' ? packed.manifest.bin : packed.manifest.bin[bin];
-        if (!packed.files.includes(String(target).replace(/^\.\//, ''))) fail(bin, [`the tarball of ${pkg.name} does not hold its bin file ${target}.`]);
+        if (packed.files !== undefined && !packed.files.includes(String(target).replace(/^\.\//, ''))) fail(bin, [`the tarball of ${pkg.name} does not hold its bin file ${target}.`]);
       }
-      log(`ci-package-smoke: packed ${pkg.name} (${packed.bytes} bytes)`);
+    }
+    if (tarballs.length < packages.length) {
+      log(`ci-package-smoke: ${failures.length} problem(s):\n  - ${failures.join('\n  - ')}`);
+      return 1;
     }
 
     const installDir = path.join(work, 'install');

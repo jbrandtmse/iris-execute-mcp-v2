@@ -135,6 +135,35 @@ function versionOf(text: string | undefined): string | undefined {
   return text === undefined ? undefined : /(\d+\.\d+\.\d+)/.exec(text)?.[1];
 }
 
+/** One action the workflow may use: `<owner>/<repo>`, the commit its release tag points at, and that tag. */
+export interface AllowedAction {
+  action: string;
+  sha: string;
+  tag: string;
+}
+
+/**
+ * What is wrong with the `uses:` lines of a workflow: each must be `<action>@<40-hex commit> # <tag>`, with the action registered in
+ * `allowed`, at its registered commit, and with its registered tag in the trailing comment.
+ */
+export function actionPinProblems(usesLines: readonly string[], allowed: readonly AllowedAction[]): string[] {
+  const problems: string[] = [];
+  const pinned = new Map(allowed.map((entry) => [entry.action, entry]));
+  for (const line of usesLines) {
+    const match = /^\s*-?\s*uses:\s*([^\s@#]+)@(\S+?)\s*(?:#\s*(\S+))?\s*$/.exec(line);
+    if (match === null) {
+      problems.push(`unpinned or unreadable uses: line: ${line.trim()}`);
+      continue;
+    }
+    const [, action, ref, tag] = match as unknown as [string, string, string, string | undefined];
+    const entry = pinned.get(action);
+    if (entry === undefined) problems.push(`${action} is not a registered action`);
+    else if (!/^[0-9a-f]{40}$/.test(ref) || ref !== entry.sha) problems.push(`${action} is not pinned to its registered commit ${entry.sha} (${line.trim()})`);
+    else if (tag !== entry.tag) problems.push(`${action} lacks its trailing tag comment # ${entry.tag} (${line.trim()})`);
+  }
+  return problems;
+}
+
 /** What is wrong with the workflow text. An empty list means it is the registry's workflow. */
 export function workflowProblems(text: string, context: WorkflowContext): string[] {
   let workflow: Record<string, any>;
@@ -186,22 +215,10 @@ export function workflowProblems(text: string, context: WorkflowContext): string
   }
 
   // PINS
-  const pinned = new Map(PINNED_ACTIONS.map((entry: { action: string; sha: string; tag: string }) => [entry.action, entry]));
   const usesLines = text.split("\n").filter((line) => /^\s*-?\s*uses:/.test(line));
   const usesInJobs = Object.values(jobs).flatMap((job) => ((job as { steps?: Array<{ uses?: string }> }).steps ?? []).filter((step) => step.uses !== undefined));
   if (usesLines.length !== usesInJobs.length) problems.push(`the text has ${usesLines.length} uses: lines but the jobs have ${usesInJobs.length} uses steps`);
-  for (const line of usesLines) {
-    const match = /^\s*-?\s*uses:\s*([^\s@#]+)@(\S+?)\s*(?:#\s*(\S+))?\s*$/.exec(line);
-    if (match === null) {
-      problems.push(`unpinned or unreadable uses: line: ${line.trim()}`);
-      continue;
-    }
-    const [, action, ref, tag] = match as unknown as [string, string, string, string | undefined];
-    const entry = pinned.get(action);
-    if (entry === undefined) problems.push(`${action} is not a registered action`);
-    else if (!/^[0-9a-f]{40}$/.test(ref) || ref !== entry.sha) problems.push(`${action} is not pinned to its registered commit ${entry.sha} (${line.trim()})`);
-    else if (tag !== entry.tag) problems.push(`${action} lacks its trailing tag comment # ${entry.tag} (${line.trim()})`);
-  }
+  problems.push(...actionPinProblems(usesLines, PINNED_ACTIONS));
   for (const [name, job] of Object.entries(jobs)) {
     if ((job as { "runs-on"?: unknown })["runs-on"] !== RUNNER) problems.push(`${name} does not run on ${RUNNER}`);
   }

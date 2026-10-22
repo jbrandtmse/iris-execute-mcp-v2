@@ -28,7 +28,8 @@ import {
   inheritedGoldenEnv,
   openRawWire,
 } from "../../../../scripts/lib/sdk-wire-golden-core.mjs";
-import { completeAuditLines, distEntry, pollAuditEntries, settledAuditCount, staleDistReason } from "./process-gate-helpers.js";
+import { readAuditEntries } from "../../../../scripts/lib/audit-lines.mjs";
+import { distEntry, pollAuditEntries, settledAuditCount, staleDistReason } from "./process-gate-helpers.js";
 
 /** An invented secret: it appears nowhere in a tool's schema, a message or a default. */
 const SECRET = "QA431-secret-9f3a7c1d-never-log-me";
@@ -86,7 +87,7 @@ function argumentsOf(variant: "server" | "objects" | "strings", tool: ListedTool
 }
 
 function readEntries(file: string): AuditEntry[] {
-  return completeAuditLines(readFileSync(file, "utf8")).map((line) => JSON.parse(line) as AuditEntry);
+  return readAuditEntries(file) as AuditEntry[];
 }
 
 /** Start the built server of `pkg`, call every tool it lists once per variant, and read what it audited and logged. */

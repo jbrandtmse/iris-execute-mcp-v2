@@ -104,6 +104,11 @@ export function stripComments(source) {
   return lex(source).code;
 }
 
+/** The two views of a source that {@link lex} makes: `code` without comments, and `masked` without the inside of literals. */
+export function lexSource(source) {
+  return lex(source);
+}
+
 /** The text between the parenthesis that opens at `open` and its match, or the rest of the source when it never closes. */
 function balancedArgument(source, open) {
   let depth = 0;

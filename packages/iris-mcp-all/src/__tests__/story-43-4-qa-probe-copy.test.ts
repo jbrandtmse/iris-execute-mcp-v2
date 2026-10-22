@@ -11,6 +11,8 @@
  * the behavior, per negotiation mode:
  *  - the process starts, through a launcher that records its pid and every SIGTERM before it hands over to the built server (the
  *    launcher exits on SIGTERM only when no other SIGTERM listener exists, so a handler the server installs still runs);
+ *  - the SIGTERM that ends the probe is observed on the client side, by a `ChildProcess.prototype.kill` spy, because the SDK ends the
+ *    probe's stdin first and a loaded probe that sees the EOF exits before its own SIGTERM listener runs;
  *  - the `sessionStart` and `shutdown` lines of the audit file, read again after the client has closed and every process has exited,
  *    and the bootstrap version queries the listener receives;
  *  - the startup lines on the stderr that the client forwards (the probe's are discarded);
@@ -23,11 +25,13 @@
  * client fails the file.
  */
 
-import { afterEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
+import { ChildProcess } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { readAuditEntries } from "../../../../scripts/lib/audit-lines.mjs";
 import { REPO_ROOT } from "./pack-fixture";
 import { distEntry, resolveSdkEsmDir } from "./process-gate-helpers.js";
 import { sleep } from "./monitor-gate-helpers.js";
@@ -61,11 +65,16 @@ interface Harness {
   audit: () => Array<{ type: string; session: string }>;
   /** The bootstrap version queries the listener has received. */
   bootstrapQueries: () => number;
+  /** Every `kill` the client made on a child process before `open()` resolved: the process and the signal sent to it. */
+  signalsSentBeforeOpen: Array<{ pid: number | undefined; signal: NodeJS.Signals | number | undefined }>;
 }
 
 const directories: string[] = [];
+let killSpy: MockInstance | undefined;
 
 afterEach(async () => {
+  killSpy?.mockRestore();
+  killSpy = undefined;
   await closeSdkRigs();
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
@@ -97,6 +106,15 @@ async function open(negotiation: SdkVersionNegotiation, delayFirstStartMs = 0): 
   const launcher = path.join(directory, "launcher.mjs");
   const eventsFile = path.join(directory, "events.jsonl");
   writeFileSync(launcher, LAUNCHER);
+  // The client ends a probe copy with SIGTERM right after stdin EOF. A loaded probe sees the EOF first and exits before its own
+  // SIGTERM listener runs, so what the client SENT is observed on the client side, in this process.
+  const kills: Harness["signalsSentBeforeOpen"] = [];
+  const kill = ChildProcess.prototype.kill;
+  killSpy?.mockRestore();
+  killSpy = vi.spyOn(ChildProcess.prototype, "kill").mockImplementation(function (this: ChildProcess, signal?: NodeJS.Signals | number) {
+    kills.push({ pid: this.pid, signal });
+    return kill.call(this, signal);
+  });
   const rig = await openSdkRig(PKG, negotiation, {
     clientName: "story-43-4-probe",
     entry: launcher,
@@ -108,12 +126,13 @@ async function open(negotiation: SdkVersionNegotiation, delayFirstStartMs = 0): 
       LOG_LEVEL: "INFO",
     },
   });
-  const lines = (file: string): string[] => (existsSync(file) ? readFileSync(file, "utf8").split("\n").filter((line) => line !== "") : []);
+  const signalsSentBeforeOpen = kills.slice();
   return {
     client: rig.client,
     stderr: rig.stderr,
-    events: () => lines(eventsFile).map((line) => JSON.parse(line) as { event: "start" | "SIGTERM"; pid: number }),
-    audit: () => lines(rig.auditFile).map((line) => JSON.parse(line) as { type: string; session: string }),
+    events: () => readAuditEntries(eventsFile) as unknown as Array<{ event: "start" | "SIGTERM"; pid: number }>,
+    audit: () => readAuditEntries(rig.auditFile) as unknown as Array<{ type: string; session: string }>,
+    signalsSentBeforeOpen,
     bootstrapQueries: () => rig.requests().filter((request) => request.method === "POST" && request.url.endsWith("/action/query") && request.body.includes("Setup_GetBootstrapVersion")).length,
   };
 }
@@ -163,10 +182,12 @@ describe("a client on the TypeScript MCP SDK v2: how many times the built server
     expect(countOf(stderr, MODERN_ERA_LINE), "and one era line").toBe(1);
     expect(countOf(harness.stderr(), LEGACY_ERA_LINE), "and none of the other era").toBe(0);
 
-    // The probe is ended by the client with SIGTERM, before the session is over.
+    // The probe is ended by the client with SIGTERM before open() resolved: the client sent it to the probe's pid, which is the first
+    // process the launcher started.
     const probe = pids[0] as number;
-    const events = await settle(harness.events, (entries) => entries.some((entry) => entry.event === "SIGTERM" && entry.pid === probe));
-    expect(events.filter((entry) => entry.event === "SIGTERM").map((entry) => entry.pid), "the first process, the probe, got SIGTERM").toContain(probe);
+    const sigtermPids = harness.signalsSentBeforeOpen.filter((sent) => sent.signal === "SIGTERM").map((sent) => sent.pid);
+    expect(sigtermPids, "the client sent SIGTERM to the probe, and to nothing else, before open() resolved").toEqual([probe]);
+    expect(pids, "and the probe is one of the processes the launcher started").toContain(sigtermPids[0]);
     expect(await settle(() => alive(probe), (isAlive) => !isAlive), "the probe is gone while the session goes on").toBe(false);
     expect(alive(pids[1] as number), "the serving process is still up").toBe(true);
 

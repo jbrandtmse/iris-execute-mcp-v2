@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, rmdirSync, readFileSync, existsSync } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { completeAuditLines, readAuditEntries } from "../../../../scripts/lib/audit-lines.mjs";
 import { AuditLogger, parseAuditConfig, redactValue } from "../audit.js";
 import type { AuditEntryInput } from "../audit.js";
 import { logger as sharedLogger } from "../logger.js";
@@ -28,10 +29,7 @@ async function drain(auditLogger: AuditLogger): Promise<void> {
 }
 
 function readLines(filePath: string): Array<Record<string, unknown>> {
-  return readFileSync(filePath, "utf-8")
-    .split("\n")
-    .filter((line) => line.trim().length > 0)
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  return readAuditEntries(filePath);
 }
 
 function baseEntry(overrides: Partial<AuditEntryInput> = {}): AuditEntryInput {
@@ -359,9 +357,7 @@ describe("AuditLogger", () => {
     auditLogger.log(baseEntry({ params }));
     await drain(auditLogger);
 
-    const rawLines = readFileSync(filePath, "utf-8")
-      .split("\n")
-      .filter((line) => line.trim().length > 0);
+    const rawLines = completeAuditLines(readFileSync(filePath, "utf-8"));
     const entryLine = rawLines[1];
     expect(entryLine).toBeDefined();
     expect(entryLine as string).not.toContain(secretValue);

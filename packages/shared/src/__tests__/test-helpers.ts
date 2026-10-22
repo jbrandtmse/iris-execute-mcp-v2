@@ -8,8 +8,8 @@
  * etc.) can import them from a single location.
  */
 
-import { existsSync, readFileSync } from "node:fs";
 import { vi } from "vitest";
+import { readAuditEntries } from "../../../../scripts/lib/audit-lines.mjs";
 import type { IrisHttpClient, ToolContext, IrisConnectionConfig, AtelierEnvelope, PaginateResult } from "../index.js";
 
 // The one env harness, re-exported because `@iris-mcp/shared/test-helpers` is the
@@ -52,22 +52,31 @@ export async function effectivePolicy(server: any): Promise<Record<string, boole
   return (result.structuredContent as { governance: { policy: Record<string, boolean> } }).governance.policy;
 }
 
+/** One parsed audit entry, whose members a test reads freely. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AuditRecord = Record<string, any>;
+
 /**
- * The JSON entries of the audit file at `filePath`, once it holds at least `minLines` non-empty lines. Polls for
- * up to 3 seconds (the audit writer is asynchronous), then throws.
+ * The parsed entries of the audit file at `filePath`, once it holds at least `minLines` complete (newline-terminated) lines.
+ * Polls every 10 ms for up to `timeoutMs` (the audit writer is asynchronous), then throws. The one reader of an audit file is
+ * `scripts/lib/audit-lines.mjs` (DW-693).
  */
-export async function auditLines(filePath: string, minLines: number): Promise<Array<Record<string, unknown>>> {
-  const deadline = Date.now() + 3000;
+export async function waitForAuditLines(filePath: string, minLines: number, timeoutMs: number): Promise<AuditRecord[]> {
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
-    if (existsSync(filePath)) {
-      const lines = readFileSync(filePath, "utf-8")
-        .split("\n")
-        .filter((line) => line.trim().length > 0);
-      if (lines.length >= minLines) return lines.map((line) => JSON.parse(line) as Record<string, unknown>);
-    }
+    const entries = readAuditEntries(filePath) as AuditRecord[];
+    if (entries.length >= minLines) return entries;
     if (Date.now() > deadline) throw new Error(`Timed out waiting for ${minLines} line(s) in ${filePath}`);
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+}
+
+/**
+ * The JSON entries of the audit file at `filePath`, once it holds at least `minLines` complete lines. Polls for
+ * up to 3 seconds (the audit writer is asynchronous), then throws.
+ */
+export async function auditLines(filePath: string, minLines: number): Promise<AuditRecord[]> {
+  return waitForAuditLines(filePath, minLines, 3000);
 }
 
 /**

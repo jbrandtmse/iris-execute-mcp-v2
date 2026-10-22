@@ -3,9 +3,7 @@ import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
   copyFileSync,
-  cpSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -16,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { copyGeneratorInputs } from "./gen-bootstrap-scratch.js";
 
 // Story 40.5 (DW-591): scripts/gen-bootstrap.mjs rewrites
 // packages/shared/src/bootstrap-classes.ts only when the generated content
@@ -81,16 +80,10 @@ describe("gen-bootstrap writes the embed only when its content changes (DW-591)"
   // Each test builds its own scratch tree, so it passes alone, filtered or in any order.
   beforeEach(() => {
     scratch = mkdtempSync(join(tmpdir(), "gen-bootstrap-write-"));
-    mkdirSync(join(scratch, "scripts"), { recursive: true });
+    copyGeneratorInputs(scratch, REPO_ROOT);
     script = join(scratch, "scripts", "gen-bootstrap.mjs");
-    copyFileSync(join(REPO_ROOT, "scripts", "gen-bootstrap.mjs"), script);
-    cpSync(join(REPO_ROOT, "src", "ExecuteMCPv2"), join(scratch, "src", "ExecuteMCPv2"), { recursive: true });
-    cpSync(join(REPO_ROOT, "ipm"), join(scratch, "ipm"), { recursive: true });
-    mkdirSync(join(scratch, "packages", "shared", "src"), { recursive: true });
     manifestPath = join(scratch, MANIFEST_RELATIVE_PATH);
-    copyFileSync(join(REPO_ROOT, MANIFEST_RELATIVE_PATH), manifestPath);
     statePath = join(scratch, STATE_RELATIVE_PATH);
-    copyFileSync(join(REPO_ROOT, STATE_RELATIVE_PATH), statePath);
     embedPath = join(scratch, EMBED_RELATIVE_PATH);
     ipmManifestPath = join(scratch, IPM_MANIFEST_RELATIVE_PATH);
     guardPath = join(scratch, IPM_GUARD_RELATIVE_PATH);
@@ -215,16 +208,10 @@ describe("gen-bootstrap writes the embed only when its content changes (DW-591)"
 describe("gen-bootstrap stamps <semver>+<sequence>.<hash> (DW-508)", () => {
   beforeEach(() => {
     scratch = mkdtempSync(join(tmpdir(), "gen-bootstrap-marker-"));
-    mkdirSync(join(scratch, "scripts"), { recursive: true });
+    copyGeneratorInputs(scratch, REPO_ROOT);
     script = join(scratch, "scripts", "gen-bootstrap.mjs");
-    copyFileSync(join(REPO_ROOT, "scripts", "gen-bootstrap.mjs"), script);
-    cpSync(join(REPO_ROOT, "src", "ExecuteMCPv2"), join(scratch, "src", "ExecuteMCPv2"), { recursive: true });
-    cpSync(join(REPO_ROOT, "ipm"), join(scratch, "ipm"), { recursive: true });
-    mkdirSync(join(scratch, "packages", "shared", "src"), { recursive: true });
     manifestPath = join(scratch, MANIFEST_RELATIVE_PATH);
-    copyFileSync(join(REPO_ROOT, MANIFEST_RELATIVE_PATH), manifestPath);
     statePath = join(scratch, STATE_RELATIVE_PATH);
-    copyFileSync(join(REPO_ROOT, STATE_RELATIVE_PATH), statePath);
     embedPath = join(scratch, EMBED_RELATIVE_PATH);
     ipmManifestPath = join(scratch, IPM_MANIFEST_RELATIVE_PATH);
     guardPath = join(scratch, IPM_GUARD_RELATIVE_PATH);
@@ -369,16 +356,10 @@ describe("gen-bootstrap stamps <semver>+<sequence>.<hash> (DW-508)", () => {
 describe("gen-bootstrap writes ipm/module.xml and stamps the IPM install guard (Story 42.4)", () => {
   beforeEach(() => {
     scratch = mkdtempSync(join(tmpdir(), "gen-bootstrap-ipm-"));
-    mkdirSync(join(scratch, "scripts"), { recursive: true });
+    copyGeneratorInputs(scratch, REPO_ROOT);
     script = join(scratch, "scripts", "gen-bootstrap.mjs");
-    copyFileSync(join(REPO_ROOT, "scripts", "gen-bootstrap.mjs"), script);
-    cpSync(join(REPO_ROOT, "src", "ExecuteMCPv2"), join(scratch, "src", "ExecuteMCPv2"), { recursive: true });
-    cpSync(join(REPO_ROOT, "ipm"), join(scratch, "ipm"), { recursive: true });
-    mkdirSync(join(scratch, "packages", "shared", "src"), { recursive: true });
     manifestPath = join(scratch, MANIFEST_RELATIVE_PATH);
-    copyFileSync(join(REPO_ROOT, MANIFEST_RELATIVE_PATH), manifestPath);
     statePath = join(scratch, STATE_RELATIVE_PATH);
-    copyFileSync(join(REPO_ROOT, STATE_RELATIVE_PATH), statePath);
     embedPath = join(scratch, EMBED_RELATIVE_PATH);
     ipmManifestPath = join(scratch, IPM_MANIFEST_RELATIVE_PATH);
     guardPath = join(scratch, IPM_GUARD_RELATIVE_PATH);

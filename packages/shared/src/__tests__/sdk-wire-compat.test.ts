@@ -13,7 +13,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -41,6 +41,7 @@ import type { IrisConnectionConfig } from "../config.js";
 import { logger } from "../logger.js";
 import type { PromptDefinition, ToolDefinition } from "../tool-types.js";
 import { AuditLogger } from "../audit.js";
+import { readAuditEntries } from "../../../../scripts/lib/audit-lines.mjs";
 import { auditLines, callTool, stageDefaultStartup } from "./test-helpers.js";
 import { makeEnvHarness } from "./env-harness.js";
 
@@ -1117,13 +1118,7 @@ describe("Story 43.2: both eras over serveStdio", () => {
       await call("iris_wire_echo", { name: "marker" });
       const deadline = Date.now() + 3000;
       for (;;) {
-        const entries = existsSync(file)
-          ? readFileSync(file, "utf-8")
-              .split("\n")
-              .filter((line) => line.trim().length > 0)
-              .map((line) => JSON.parse(line) as Record<string, unknown>)
-              .filter((entry) => typeof entry.tool === "string")
-          : [];
+        const entries = readAuditEntries(file).filter((entry) => typeof entry.tool === "string");
         const marker = entries.findIndex((entry) => entry.tool === "iris_wire_echo");
         if (marker >= 0) return entries.slice(0, marker);
         if (Date.now() > deadline) throw new Error("the marker entry never reached the audit file");
