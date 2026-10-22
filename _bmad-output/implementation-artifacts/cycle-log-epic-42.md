@@ -121,3 +121,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-22T10:02:24Z	Story 42.3	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=1326_both_orders(admin/data/dev_changes_are_integration_files:_ran_armed_green_in_CI_run_39749804619) result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
 2026-10-22T10:02:24Z	Story 42.3	committed	sha=6a8574f code_sha=6a8574f build_sha=22757b7,3215c73 submodules= ci=success run=39749804619 ci_rerun=success(attempt2) branch=epic42 pushed=origin/epic42 verified=merge-base+headSha amendments=epics.md:AC42.3.6,DW-686_bullet_moved;spine:AD-29,live_gates,live_testing,stack
 2026-10-22T10:02:24Z	Story 42.3	story_cycle	plan_to_commit_min=480 implement_passes=2 reviews=2 rework=1 first_ci=story models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-10-22T10:04:52Z	Epic 42	epic_context_compiled	reason=planning_artifact_newer(42.3_spine+DW-686_bullet) model=claude-opus-5-5 lines=122
+2026-10-22T10:04:52Z	Story 42.4	stage_spawned	stage=plan spawn_at=2026-10-22T10:04:52Z model=claude-opus-5-5 agent_name=42-4-ipm-package-revival-plan-1 cycle_iteration=1
