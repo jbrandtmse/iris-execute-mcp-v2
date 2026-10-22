@@ -2858,6 +2858,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-20T09:40:41Z occurrence=43-1-framework-migration-to-sdk-v2 by=cr note=43.1 cr: launcher tsc --noEmit red on this host, 11 errors, all missing vscode/servermanager modules; none in a 43.1 file
 - 2026-10-21T13:14:16Z occurrence=42-1-pre-publish-package-fixes note=same_5_macOS_failures_seen_at_42.1_implement_on_pristine_baseline(4_C:_path_pins_not_absolute_on_POSIX;_33-3-3_clientsActivationFlow_timeout)
 - 2026-10-21T14:27:37Z occurrence=42-1-pre-publish-package-fixes
+- 2026-10-22T04:35:01Z occurrence=42-3-ci-workflow note=CI_runs_only_the_launcher_arming_guard,liveArming.test.ts,type-check,build_and_its_two_live_files;the_full_suite_stays_out_of_CI_until_42.7_(4_baseline_failures_pin_C:_paths_and_fail_on_Linux_too)
 
 ### DW-533: iris_production_manage delete removes ANY class given as name: the class-delete path never checks that the class extends Ens.Production
 - source: spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: high | footprint: in-story
@@ -3777,3 +3778,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-2-bootstrap-downgrade-guard.md | severity: low | fix-risk: low | footprint: in-story
 - evidence: 42.2 cr: extensions/iris-mcp-launcher/src/__tests__/live-arming-guard.test.ts vs packages/iris-mcp-all/src/__tests__/live-gate-child-run.ts; a runner in scripts/lib/ could serve both
 - 2026-10-22T01:48:34Z status=wontfix-accepted owner=42-2-bootstrap-downgrade-guard by=cr note=reopen_if=the two env-scrub lists diverge, or a third copy of the preload child runner appears
+
+### DW-681: The two OAuth tests in admin.integration.test.ts never run anywhere: it.skipIf(!oauthAvailable) is evaluated at collection, before beforeAll sets the flag, so CI allowlists both skips
+- source: spec-42-3-ci-workflow.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: 42.3 implement review: packages/iris-admin-mcp/src/__tests__/admin.integration.test.ts; the ci-live-suite allowlist names both skips with this reason
+- 2026-10-22T04:35:01Z status=open owner=42-3-ci-workflow by=harvest note=code review patches it in-story: evaluate the condition at run time (ctx.skip inside the test, or a describe gated after setup) and drop the two allowlist entries, or it takes the story's one rework iteration
+
+### DW-682: A burst of pushes to main can lose CI runs of the middle commits: with cancel-in-progress false, GitHub still cancels an earlier PENDING run of the same concurrency group when a newer run queues, so a tag target on main could have no completed run
+- source: spec-42-3-ci-workflow.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: 42.3 implement review, against the GitHub concurrency docs; .github/workflows/ci.yml concurrency block
+- 2026-10-22T04:35:01Z status=open owner=42-3-ci-workflow by=harvest note=two-way door: give main a per-sha concurrency group so no main run is ever superseded, and pin it in the workflow self-test; code review patches it
+
+### DW-683: Locally, pnpm live:bootstrap-guard publishes a dynamic host port chosen by Docker's own allocator, which ignores net.ipv4.ip_local_reserved_ports, so about 1 run in 28,000 lands on a refused port and fails closed (exit 4)
+- source: spec-42-3-ci-workflow.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: 42.3 implement: scripts/throwaway-iris.mjs run mode; CI uses fixed reserved ports instead
+- 2026-10-22T04:35:01Z status=wontfix-accepted owner=42-3-ci-workflow by=harvest note=reopen_if=a local live:bootstrap-guard run exits 4 on a refused port (the failure is closed and the rerun succeeds)

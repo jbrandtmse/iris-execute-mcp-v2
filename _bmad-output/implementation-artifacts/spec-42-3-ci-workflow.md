@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-10-21'
 status: 'done'
 baseline_revision: '23ffa9aef4050b6bc4cbbdb5bba26676d860199b'
+baseline_commit: '23ffa9aef4050b6bc4cbbdb5bba26676d860199b'
 review_loop_iteration: 0
 followup_review_recommended: true
 context:
@@ -303,8 +304,12 @@ deferred:
   - Given the probe reverted to equality on lead branch 5, when its run executes, then they fail, and the run URL is recorded.
 - **DW-666:** Given this story's diff, when `pnpm --filter @iris-mcp/shared lint` runs, then it exits 0 with no warning. Given the directive re-added, then lint exits non-zero.
 - **Shared instance:** Given each stage's end, when `SELECT ExecuteMCPv2.Setup_GetBootstrapVersion()` runs read-only (`server:"default"`, `namespace:"HSCUSTOM"`), then it returns `0.0.2+1.995fbbb1055d`.
+- [ ] [Lead, after implement] DW-681: given the admin integration suite armed against the throwaway, when its OAuth tests are collected, then their skip condition is evaluated at run time (after `beforeAll`), so they run when OAuth is available and skip with a reason otherwise. The two `ci-live-suite` allowlist entries for them are removed (or kept only for the genuinely unavailable case, with that reason). Pin it, and record its `mutation:` line.
+- [ ] [Lead, after implement] DW-682: given a burst of pushes to `main`, when a newer run queues, then no earlier `main` run is cancelled or superseded: `main` gets a per-sha concurrency group, and the workflow self-test pins it while keeping cancel-in-progress for other refs. Record its `mutation:` line.
 
 ## Spec Change Log
+
+- 2026-10-22, lead, after the implement stage: added the DW-681 and DW-682 acceptance items (deferred findings that are in-story and small). Code review patches them, or they take the story's one rework iteration.
 
 ## Review Triage Log
 
