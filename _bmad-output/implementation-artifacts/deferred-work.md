@@ -176,6 +176,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Publishing activity; belongs to the publishing checklist and post-project planning.
 - 2026-10-14T10:47:49Z status=dropped owner=8-0-epic-7-deferred-cleanup by=migration note=not pipeline work: IPM publishing
 - 2026-10-15T02:51:51Z status=routed owner=42-4-ipm-package-revival by=correct-course note=reopened by D6 (decision-record-2026-10-14): revive IPM, generated manifest, offline install proof, publish
+- 2026-10-22T20:03:33Z status=resolved-by:42-4-ipm-package-revival by=adjudication note=IPM_package_revived:ipm/module.xml_generated_from_classes[]+InstallGuard;offline_install_proof_on_both_editions_in_CI_ipm_job(https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39819176668);publishing_half=42.5_release(DW-689_route)+42.8_Open_Exchange_listing
 
 ### DW-35: [L8.retro-followthrough-mcp-test-harness] Retro Follow-Through: MCP test harness
 - source: legacy:8.0 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3748,6 +3749,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 42.2 implement: decision 53 routes them to 42.4; reuse 42.2's marker grammar and ordering table, with a parity test between the TS comparator and the IRIS-side one
 - 2026-10-21T22:44:16Z status=routed owner=42-4-ipm-package-revival by=harvest note=IPM packaging lands in 42.4 (decision 53)
 - 2026-10-22T01:48:21Z occurrence=42-2-bootstrap-downgrade-guard
+- 2026-10-22T20:03:33Z status=resolved-by:42-4-ipm-package-revival by=adjudication note=ownership=InstallGuard_present(bootstrap_writes_nothing+zpm_warning);IRIS-side_guard_at_Initialize/After_refuses_newer/foreign/unknown;parity_94/94_both_editions;red_branches:guard=https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39838191935(ipm@guard-newer),parity=https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39838197468(ipm@parity),ipm-owned=https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39838209264(throwaway@ipm-owned-older)
 
 ### DW-675: Armed live gates now fail closed unless all five IRIS_HOST/PORT/USERNAME/PASSWORD/NAMESPACE are set; the release path (prepublishOnly -> prepublish-gate.mjs, the 42.5 release script, the 42.6 publish) must export all five or the gates go red
 - source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: low | footprint: in-epic
@@ -3819,6 +3821,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-22T08:17:18Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=harvest note=before tagging v1.0.0 (CI must be green on that commit): if the date is on or after 2026-11-13, move OLDEST_IRIS_COMMUNITY_IMAGE to 2026.1 and update the Stack row and 42.9's tested floor
 - 2026-10-22T08:37:52Z occurrence=42-3-ci-workflow note=cr: red on every CI run from 2026-11-13, not just at the v1.0.0 tag; 2026.2 keys expire ~2027-06-26; 42.9 dates its floor
 - 2026-10-22T08:42:32Z owner=42-4-ipm-package-revival by=cr_followup note=decision_66:the_expiry_turns_every_CI_run_red_from_2026-11-13,not_only_the_tag;42.4_(next_story,edits_CI)_moves_the_oldest_leg_to_2026.1_now;all_CI_image_keys_expire(2026.2_~2027-06-26)_so_moving_images_forward_is_a_standing_maintenance_step(decision_sheet_action_item)
+- 2026-10-22T20:03:33Z status=resolved-by:42-4-ipm-package-revival by=adjudication note=oldest_leg_moved_to_iris-community:2026.1(key_to_2027-03-27);bootstrap-guard-oldest_10/10_in_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39819176668;2025.3_green_run_39749804619_kept_as_evidence
 
 ### DW-687: The nine DocDB lifecycle tests of data.integration.test.ts never run in CI: a fresh instance has no enabled %Service_DocDB and no Security.DocDBs record for the test database, and enabling the service in the seed would make the Epic 35 F5 gate skip
 - source: spec-42-3-ci-workflow.md | severity: low | fix-risk: med | footprint: in-epic
@@ -3857,3 +3860,5 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-22T16:31:24Z status=routed owner=burndown by=harvest note=flake class (CI run 39798458188 hit it once in story-43-1-qa-dw579-process); move the newline-terminated reader to scripts/lib and route every audit reader through it
 - 2026-10-22T16:59:16Z occurrence=42-4-ipm-package-revival
 - 2026-10-22T16:59:16Z status=routed owner=burndown by=cr note=also 42-10 audit-namespace test:66, shared test-helpers auditLines (11 calls); pin dw579 readEntries; out-of-footprint
+- 2026-10-22T19:13:03Z occurrence=42-4-ipm-package-revival note=flake_hit_again:run_39819176668_attempt2(unchanged_green_head_ff56c62)_gates_node22.17.0:story-43-4-qa-probe-copy.test.ts_'the_first_process,the_probe,got_SIGTERM:expected_[]_to_include_<pid>';attempt1_green;priority_for_the_burn-down
+- 2026-10-22T19:43:58Z owner=42-5-release-workflow by=lead note=decision_74:third_hit_today(run_39838191935_gates_node26:story-43-4-qa-probe-copy_'the_probe_got_SIGTERM:expected_[]_to_include_<pid>');recurring_CI_flake_blocks_dependent_jobs;fix_before_the_release_workflow_relies_on_green_CI(also_check_the_probe-copy_test's_signal/exit_bookkeeping,not_only_partial_lines)
