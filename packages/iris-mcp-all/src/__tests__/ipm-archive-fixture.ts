@@ -42,8 +42,9 @@ export function filesUnder(directory: string, base = directory): string[] {
 /**
  * `tar czf <archive> [extra...] -C <directory> .`, with `COPYFILE_DISABLE=1` so that a macOS `tar` stores no AppleDouble `._` member
  * next to a file that carries an extended attribute: such a member is a real member of the archive, which no IPM archive holds.
- * Returns the exit status.
+ * Returns the exit status and what `tar` wrote to stderr (or why it could not be started), for an assertion message.
  */
-export function tarGz(archive: string, directory: string, extra: string[] = []): number | null {
-  return spawnSync("tar", ["czf", archive, ...extra, "-C", directory, "."], { env: { ...process.env, COPYFILE_DISABLE: "1" } }).status;
+export function tarGz(archive: string, directory: string, extra: string[] = []): { status: number | null; stderr: string } {
+  const made = spawnSync("tar", ["czf", archive, ...extra, "-C", directory, "."], { encoding: "utf8", env: { ...process.env, COPYFILE_DISABLE: "1" } });
+  return { status: made.status, stderr: `${made.stderr ?? ""}${made.error?.message ?? ""}` };
 }

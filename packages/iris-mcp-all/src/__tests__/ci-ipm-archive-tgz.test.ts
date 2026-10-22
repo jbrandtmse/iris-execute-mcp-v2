@@ -51,7 +51,10 @@ interface HeaderSpec {
   prefix?: string;
   /** `posix` writes `ustar\0` and `00` (the default), `gnu` writes `ustar  \0`, `none` writes no magic (v7). */
   magic?: "posix" | "gnu" | "none";
-  /** Write every numeric field as IPM's writer does: octal digits and a blank, in a field padded with NULs. */
+  /**
+   * Write the numeric fields as IPM's writer does (as `fixtures/ipm-real-package.tgz` holds them): the mode, size and mtime as octal
+   * digits and a blank, in a field padded with NULs, and the uid and gid as NULs only.
+   */
   ipm?: boolean;
   /** Store the checksum as the sum of signed bytes, as some historic tars do. */
   signedChecksum?: boolean;
@@ -63,8 +66,10 @@ function header(spec: HeaderSpec): Buffer {
   const number = (value: number, digits: number): string => `${value.toString(8).padStart(digits, "0")}${end}`;
   block.write(spec.name, 0, 100, "utf8");
   block.write(number(0o644, 6), 100, "latin1");
-  block.write(number(0, 6), 108, "latin1");
-  block.write(number(0, 6), 116, "latin1");
+  if (spec.ipm !== true) {
+    block.write(number(0, 6), 108, "latin1");
+    block.write(number(0, 6), 116, "latin1");
+  }
   if (spec.sizeField !== undefined) spec.sizeField.copy(block, 124);
   else block.write(number(spec.size ?? 0, 11), 124, "latin1");
   block.write(number(0, 11), 136, "latin1");
@@ -140,30 +145,41 @@ const FORMATS: FormatSpec[] = [
   { name: "v7", spellings: [["--format=v7"], ["--format=v7tar"], ["--format=oldtar"]], honored: (header) => header.subarray(257, 263).every((byte) => byte === 0), longPaths: false },
 ];
 
-/** The formats this host's `tar` can write, with the option that writes each (probed on a one-file directory). */
-function hostFormats(): Array<FormatSpec & { flags: string[] }> {
+/**
+ * The formats this host's `tar` can write, with the option that writes each (probed on a one-file directory), and why each spelling
+ * that was tried and dropped was dropped.
+ */
+function hostFormats(): { formats: Array<FormatSpec & { flags: string[] }>; dropped: string[] } {
   const probe = mkdtempSync(path.join(tmpdir(), "ci-ipm-archive-probe-"));
   const out = mkdtempSync(path.join(tmpdir(), "ci-ipm-archive-probe-out-"));
   try {
     writeFileSync(path.join(probe, "a.txt"), "a");
     const formats: Array<FormatSpec & { flags: string[] }> = [];
+    const dropped: string[] = [];
     for (const format of FORMATS) {
       for (const flags of format.spellings) {
         const archive = path.join(out, `${format.name}.tgz`);
-        if (tarGz(archive, probe, flags) !== 0) continue;
-        if (format.honored !== undefined && !format.honored(gunzipSync(readFileSync(archive)).subarray(0, BLOCK))) continue;
+        const made = tarGz(archive, probe, flags);
+        if (made.status !== 0) {
+          dropped.push(`${format.name} [${flags.join(" ")}]: exit ${made.status}: ${made.stderr.trim()}`);
+          continue;
+        }
+        if (format.honored !== undefined && !format.honored(gunzipSync(readFileSync(archive)).subarray(0, BLOCK))) {
+          dropped.push(`${format.name} [${flags.join(" ")}]: the first header does not carry the format's mark`);
+          continue;
+        }
         formats.push({ ...format, flags });
         break;
       }
     }
-    return formats;
+    return { formats, dropped };
   } finally {
     rmSync(probe, { recursive: true, force: true });
     rmSync(out, { recursive: true, force: true });
   }
 }
 
-const HOST_FORMATS = hostFormats();
+const { formats: HOST_FORMATS, dropped: HOST_FORMATS_DROPPED } = hostFormats();
 
 /** Components of 40 characters, so that a path over 100 characters splits into a ustar prefix and a name. */
 const LONG_PATHS = [
@@ -176,7 +192,7 @@ describe("readTgz and extractEntries against the host tar (Rule #36)", () => {
     const names = HOST_FORMATS.map((format) => format.name);
     expect(names).toEqual(expect.arrayContaining(["default", "ustar"]));
     const version = spawnSync("tar", ["--version"], { encoding: "utf8" }).stdout ?? "";
-    if (/GNU tar|bsdtar/.test(version)) expect(names, version.split("\n")[0]).toEqual(FORMATS.map((format) => format.name));
+    if (/GNU tar|bsdtar/.test(version)) expect(names, [version.split("\n")[0], ...HOST_FORMATS_DROPPED].join("; ")).toEqual(FORMATS.map((format) => format.name));
   });
 
   describe.each(HOST_FORMATS.map((format) => [format.name, format] as const))("the %s format", (_name, format) => {
@@ -195,7 +211,8 @@ describe("readTgz and extractEntries against the host tar (Rule #36)", () => {
         }
       }
       const archive = path.join(scratchDir(), "oracle.tgz");
-      expect(tarGz(archive, stage, format.flags)).toBe(0);
+      const made = tarGz(archive, stage, format.flags);
+      expect(made.status, made.stderr).toBe(0);
 
       const listed = spawnSync("tar", ["tzf", archive], { encoding: "utf8" });
       expect(listed.status, listed.stderr).toBe(0);
@@ -207,7 +224,8 @@ describe("readTgz and extractEntries against the host tar (Rule #36)", () => {
       }
 
       const hostDirectory = scratchDir();
-      expect(spawnSync("tar", ["xzf", archive, "-C", hostDirectory]).status).toBe(0);
+      const extracted = spawnSync("tar", ["xzf", archive, "-C", hostDirectory], { encoding: "utf8" });
+      expect(extracted.status, extracted.stderr).toBe(0);
       const ownDirectory = scratchDir();
       extractEntries(entries, ownDirectory);
       const files = filesUnder(hostDirectory);
@@ -346,18 +364,17 @@ describe("readTgz over hand-built archives", () => {
 });
 
 /**
- * An archive built the way `%IPM.Utils.FileBinaryTar` builds one: a prefix that ends in a slash (and joins `src/` and `cls` with a doubled
- * one), a name of at most 99 characters, octal fields that end in a blank, `ustar` and `00`, each file's data padded to a block, and no end
- * marker.
+ * An archive built the way `%IPM.Utils.FileBinaryTar` builds one (as `fixtures/ipm-real-package.tgz` holds it): each member's directory
+ * as a ustar prefix that ends in a slash (`src/cls/`), a name of at most 99 characters, numeric fields as the `ipm` header writes them,
+ * `ustar` and `00`, each file's data padded to a block, and no end marker.
  */
 function ipmArchive(stage: string): Buffer {
   const parts: Buffer[] = [];
-  const walk = (directory: string, relative: string): void => {
+  const walk = (directory: string, prefix: string): void => {
     for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      const prefix = relative.replace(/^src\//, "src//");
       if (entry.isDirectory()) {
         parts.push(header({ name: entry.name, prefix, typeflag: "5", ipm: true }));
-        walk(path.join(directory, entry.name), `${relative}${entry.name}/`);
+        walk(path.join(directory, entry.name), `${prefix}${entry.name}/`);
       } else {
         parts.push(member({ name: entry.name, prefix, ipm: true }, readFileSync(path.join(directory, entry.name))));
       }
@@ -374,7 +391,7 @@ describe("an archive built the way IPM's writer builds one", () => {
     stageModule(stage, embed);
     const entries = readTgz(ipmArchive(stage));
 
-    expect(entries.map((entry) => entry.name)).toContain("src//cls/ExecuteMCPv2/Utils.cls");
+    expect(entries.map((entry) => entry.name)).toContain("src/cls/ExecuteMCPv2/Utils.cls");
     expect(entries.map((entry) => entry.name)).toContain("preload/src/cls/ExecuteMCPv2/InstallGuard.cls");
     expect(entries.filter((entry) => entry.type === "file")).toHaveLength(embed.classes.size + 2);
     const extracted = scratchDir();
@@ -390,8 +407,9 @@ describe("an archive built the way IPM's writer builds one", () => {
 /**
  * What IPM's `package` wrote for a module of two classes, one of them preloaded: `fixtures/ipm-real-package.tgz` (sha-256
  * 354ed5c06a5b257d17693a702e417f956a6b8f7f3a17b32376deb3758f152dd8), captured byte for byte on a throwaway iris-community:2026.2
- * container during the Story 42.4 plan probes. The expected members and sizes are what `tar tzvf` (bsdtar 3.5.3) printed for it. IPM
- * writes a directory as typeflag 5 without a trailing slash and ends the archive with no end marker.
+ * container during the Story 42.4 plan probes. The expected members and sizes are what `tar tzvf` (bsdtar 3.5.3) printed for it, each
+ * directory named as `readTgz` names it, with a trailing slash. IPM writes a directory as typeflag 5 without a trailing slash and ends the
+ * archive with no end marker.
  */
 const REAL_ARCHIVE = path.join(REPO_ROOT, "packages", "iris-mcp-all", "src", "__tests__", "fixtures", "ipm-real-package.tgz");
 const REAL_MEMBERS: Array<[string, "file" | "directory", number]> = [
@@ -502,6 +520,13 @@ describe("extractEntries", () => {
     expect(filesUnder(target)).toEqual(["deep/er/B.cls", "src/cls/A.cls"]);
     expect(readFileSync(path.join(target, "src/cls/A.cls"), "utf8")).toBe("a");
     expect(written).toEqual({ files: ["src/cls/A.cls", "deep/er/B.cls"], directories: ["src/cls"] });
+  });
+
+  it("creates the directory when it is missing, even for an archive with nothing to write", () => {
+    const target = path.join(scratchDir(), "missing", "extract");
+
+    expect(extractEntries([{ name: "link", type: "other", data: Buffer.alloc(0) }], target)).toEqual({ files: [], directories: [] });
+    expect(readdirSync(target)).toEqual([]);
   });
 
   it.each([

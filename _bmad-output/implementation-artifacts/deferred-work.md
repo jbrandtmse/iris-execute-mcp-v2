@@ -3855,3 +3855,5 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-4-ipm-package-revival.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 42.4 rework 1: completeAuditLines now guards pollAuditEntries/settledAuditCount; the .mjs script cannot import the TS helper, so the reader must move to scripts/lib
 - 2026-10-22T16:31:24Z status=routed owner=burndown by=harvest note=flake class (CI run 39798458188 hit it once in story-43-1-qa-dw579-process); move the newline-terminated reader to scripts/lib and route every audit reader through it
+- 2026-10-22T16:59:16Z occurrence=42-4-ipm-package-revival
+- 2026-10-22T16:59:16Z status=routed owner=burndown by=cr note=also 42-10 audit-namespace test:66, shared test-helpers auditLines (11 calls); pin dw579 readEntries; out-of-footprint

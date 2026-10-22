@@ -250,7 +250,8 @@ describe("archiveProblems over a real tar czf of a staged module", () => {
     stageModule(stage, embed);
     mutate(stage);
     const archive = path.join(scratchDir(), "module.tgz");
-    expect(tarGz(archive, stage)).toBe(0);
+    const made = tarGz(archive, stage);
+    expect(made.status, made.stderr).toBe(0);
     const entries = readTgz(readFileSync(archive));
     extractEntries(entries, extracted);
     return { members: entries.map((entry) => entry.name), extracted };
@@ -494,7 +495,7 @@ describe("the IPM verbs the proof issues (AC 42.4.4)", () => {
     expect([...verbs].sort(), "and every verb is used").toEqual([...IPM_VERBS].sort());
   });
 
-  it("spawns no process of its own: neither the script nor its helpers import child_process, so no tar or gzip binary is needed on any host", () => {
+  it("imports no child_process in the script or its archive helpers: the archive is read in-process, so no tar or gzip binary is needed on any host (docker is spawned by the harness alone)", () => {
     for (const file of ["scripts/ci-ipm-archive.mjs", "scripts/lib/ipm-archive.mjs"]) {
       const source = readFileSync(path.join(REPO_ROOT, file), "utf8");
       expect(source, file).not.toMatch(/child_process|\bspawn(?:Sync)?\(/);
@@ -666,7 +667,8 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     mkdirSync(stage);
     stageModule(stage, embed);
     archiveSource = path.join(root, "good.tgz");
-    expect(tarGz(archiveSource, stage)).toBe(0);
+    const made = tarGz(archiveSource, stage);
+    expect(made.status, made.stderr).toBe(0);
 
     // What the comparator answers for every case the run will send: the fixture's and the three built from the embedded marker.
     const fixture = JSON.parse(readFileSync(PARITY_FIXTURE, "utf8")) as ParityCase[];
@@ -700,6 +702,8 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     status: number | null;
     stdout: string;
     stderr: string;
+    /** The PATH the script ran with. */
+    path: string;
   }
 
   /**
@@ -707,16 +711,17 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
    * `gzip` resolves on that PATH on any host, so a spawn of either by the script fails here as it would on a runner without them.
    */
   function runScript(args: string[], env: Record<string, string> = {}, afterStart?: () => void): Promise<Run> {
+    const childEnv: Record<string, string> = {
+      PATH: fake.binDir,
+      TMPDIR: tmp,
+      FAKE_DOCKER_DIR: fake.dir,
+      FAKE_DOCKER_SESSION_HANDLER: path.join(root, "handler.cjs"),
+      FAKE_DOCKER_CP_SOURCE: archiveSource,
+      ...env,
+    };
     return new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [SCRIPT, ...args], {
-        env: {
-          PATH: fake.binDir,
-          TMPDIR: tmp,
-          FAKE_DOCKER_DIR: fake.dir,
-          FAKE_DOCKER_SESSION_HANDLER: path.join(root, "handler.cjs"),
-          FAKE_DOCKER_CP_SOURCE: archiveSource,
-          ...env,
-        },
+        env: childEnv,
         stdio: ["ignore", "pipe", "pipe"],
       });
       let stdout = "";
@@ -724,7 +729,7 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
       child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString("utf8")));
       child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString("utf8")));
       child.once("error", reject);
-      child.once("close", (status) => resolve({ status, stdout, stderr }));
+      child.once("close", (status) => resolve({ status, stdout, stderr, path: childEnv.PATH as string }));
       afterStart?.();
     });
   }
@@ -775,11 +780,10 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
   }, 120_000);
 
   it("reads the archive in-process: the run passes on a PATH that holds the scripted docker alone, where neither tar nor gzip resolves", async () => {
-    expect(findExecutable("tar", fake.binDir), "no tar on the script's PATH").toBeUndefined();
-    expect(findExecutable("gzip", fake.binDir), "no gzip on the script's PATH").toBeUndefined();
-
     const run = await runScript(["--edition", "community"]);
 
+    expect(findExecutable("tar", run.path), `no tar on the script's PATH (${run.path})`).toBeUndefined();
+    expect(findExecutable("gzip", run.path), `no gzip on the script's PATH (${run.path})`).toBeUndefined();
     expect(run.status, run.stderr).toBe(0);
     expect(run.stderr).toMatch(/\[archive\] \d+ members: module\.xml, 35 classes equal to the embed/);
     expect(run.stderr).not.toMatch(/\b(?:tar|gzip)\b/);
@@ -888,7 +892,8 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
       stageModule(stage, embed);
       mutate(stage);
       const bad = path.join(root, "bad.tgz");
-      expect(tarGz(bad, stage)).toBe(0);
+      const made = tarGz(bad, stage);
+      expect(made.status, made.stderr).toBe(0);
       archiveSource = bad;
     }
 

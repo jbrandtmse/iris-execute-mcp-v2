@@ -265,7 +265,7 @@ export function manifestProblems(declared, archived) {
  * What is wrong with an archive, given its member names (as {@link readTgz} returns them) and the directory it was extracted to: it must carry
  * `module.xml`, one `src/cls/<path>.cls` member per embedded class and no other under `src/cls/`, the preloaded guard, and no test
  * or fixture member; and every class member must equal the embed after LF and trailing-whitespace normalization. A repeated slash
- * in a member name (IPM joins `src/` and `cls` with a doubled one) is collapsed first.
+ * in a member name is collapsed first.
  *
  * @param {readonly string[]} members
  * @param {string} extractedDir
@@ -496,6 +496,7 @@ export function extractEntries(entries, directory) {
     if (relative === '') continue;
     plan.push({ entry, relative, target: path.join(root, ...relative.split('/')) });
   }
+  mkdirSync(root, { recursive: true });
   const written = { files: [], directories: [] };
   for (const { entry, relative, target } of plan) {
     if (entry.type === 'directory') {
