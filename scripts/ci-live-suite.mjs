@@ -24,15 +24,14 @@
 // IMPORT
 //   Importing this module runs nothing. `runSuite(id, options)` takes the process-spawning and file-reading steps as options.
 
-import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
-import { constants as osConstants, tmpdir } from 'node:os';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 import { ThrowawayRefusal, assertThrowawayEnv } from './throwaway-iris.mjs';
 import { LIVE_SUITES, reporterArgs } from './lib/ci-checks.mjs';
 import { REPO_ROOT } from './lib/live-gate-scan.mjs';
+import { isEntryPoint, spawnInherited } from './lib/script-process.mjs';
 
 /** The statuses of a test that did not run, as vitest 2 reports them. */
 const SKIP_STATUSES = new Set(['skipped', 'pending', 'todo', 'disabled']);
@@ -87,22 +86,16 @@ function describeReport(report) {
   return `${count('numTotalTests')} tests, ${count('numPassedTests')} passed, ${count('numFailedTests')} failed, ${count('numPendingTests')} skipped, ${count('numTodoTests')} todo`;
 }
 
-/** Run `argv` in `cwd` with `env`, output inherited; resolve with its exit code (128 + n for a signal, 127 when it cannot start). */
-function spawnInherited(argv, { cwd, env }) {
-  return new Promise((resolve) => {
-    const child = spawn(argv[0], argv.slice(1), { cwd, env, stdio: 'inherit' });
-    const forward = (signal) => () => child.kill(signal);
-    const handlers = ['SIGINT', 'SIGTERM'].map((signal) => [signal, forward(signal)]);
-    for (const [signal, handler] of handlers) process.on(signal, handler);
-    const done = (code) => {
-      for (const [signal, handler] of handlers) process.off(signal, handler);
-      resolve(code);
-    };
-    child.once('error', (error) => {
-      process.stderr.write(`ci-live-suite: could not run ${argv[0]}: ${error.message}\n`);
-      done(127);
-    });
-    child.once('close', (code, signal) => done(code ?? 128 + (osConstants.signals[signal] ?? 1)));
+/** Run `argv` in `cwd` with `env`, output inherited, forwarding INT and TERM to it while it runs; resolve with its exit code. */
+function spawnForwarding(argv, { cwd, env }) {
+  let child;
+  const handlers = ['SIGINT', 'SIGTERM'].map((signal) => [signal, () => child?.kill(signal)]);
+  for (const [signal, handler] of handlers) process.on(signal, handler);
+  const onChild = (spawned) => {
+    child = spawned;
+  };
+  return spawnInherited(argv, { label: 'ci-live-suite', cwd, env, onChild }).finally(() => {
+    for (const [signal, handler] of handlers) process.off(signal, handler);
   });
 }
 
@@ -124,7 +117,7 @@ export async function runSuite(id, options = {}) {
     env = process.env,
     suites = LIVE_SUITES,
     repoRoot = REPO_ROOT,
-    spawnCommand = spawnInherited,
+    spawnCommand = spawnForwarding,
     log = (line) => process.stderr.write(`${line}\n`),
   } = options;
 
@@ -200,15 +193,6 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   return runSuite(argv[0], { env });
 }
 
-function isEntryPoint() {
-  if (process.argv[1] === undefined) return false;
-  try {
-    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
-  } catch {
-    return false;
-  }
-}
-
-if (isEntryPoint()) {
+if (isEntryPoint(import.meta.url)) {
   main().then((code) => process.exit(code));
 }

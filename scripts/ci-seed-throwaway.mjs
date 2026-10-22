@@ -6,8 +6,10 @@
 //   The environment is the throwaway's (IRIS_REQUIRE_LIVE=1, IRIS_THROWAWAY, IRIS_HOST=127.0.0.1, the five IRIS_* target variables).
 //
 // CONTRACT
-//   1. Refusal comes first (exit 2), before the shared dist is loaded or a request is made: the environment must target a
-//      throwaway container this harness started (`assertThrowawayEnv`).
+//   1. Refusal comes first (exit 2), before the shared dist is loaded or a request is made: the environment must have the
+//      shape `throwaway-iris.mjs exec` gives it (`assertThrowawayEnv`: IRIS_REQUIRE_LIVE=1, a harness-shaped IRIS_THROWAWAY,
+//      IRIS_HOST=127.0.0.1, a port that is not 52773 or 1972). The check reads the environment only; `exec` is what ties the
+//      name to a labelled, running container that publishes that port.
 //   2. The real `bootstrap()` of the built `@iris-mcp/shared` deploys, compiles and configures the ExecuteMCPv2 classes in the
 //      target namespace, as a server does on its first start. The seed fails unless the result has no error and either the
 //      probe found the deployment current, or `deployed`, `compiled`, `configured` and `mapped` are all true (AD-14: the
@@ -26,12 +28,13 @@
 //   Importing this module runs nothing. `seedThrowaway(options)` takes the environment, the repository root and the loader of the
 //   shared dist as options.
 
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { ThrowawayRefusal, assertThrowawayEnv } from './throwaway-iris.mjs';
 import { REPO_ROOT, walk } from './lib/live-gate-scan.mjs';
+import { isEntryPoint } from './lib/script-process.mjs';
 
 /** The directories whose documents the seed deploys, relative to `src/`. */
 const SEED_DIRECTORIES = ['ExecuteMCPv2/Tests', 'ExecuteMCPv2/QAFixtures'];
@@ -58,8 +61,8 @@ export function bootstrapRoster(repoRoot = REPO_ROOT) {
 /**
  * The documents the seed deploys, each as `{ name, path, content }`: `name` is the Atelier document name
  * (`ExecuteMCPv2.Tests.UtilsTest.cls`), `path` the file relative to the repository root, `content` its text with `\n` line
- * ends. The list is sorted by path. It throws when it is empty, when a file is not a class, or when it shares a document or
- * a path with the bootstrap roster.
+ * ends. The list is sorted by path, and a dotfile (`.DS_Store`) is not a document. It throws when it is empty, when a file is
+ * not a class, or when it shares a document or a path with the bootstrap roster.
  *
  * @param {string} repoRoot
  * @returns {Array<{ name: string, path: string, content: string }>}
@@ -67,6 +70,7 @@ export function bootstrapRoster(repoRoot = REPO_ROOT) {
 export function seedDocuments(repoRoot = REPO_ROOT) {
   const sourceRoot = path.join(repoRoot, 'src');
   const documents = SEED_DIRECTORIES.flatMap((directory) => walk(path.join(sourceRoot, directory), ['']))
+    .filter((file) => !path.basename(file).startsWith('.'))
     .sort()
     .map((file) => {
       const relative = path.relative(sourceRoot, file).split(path.sep).join('/');
@@ -227,15 +231,6 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   return seedThrowaway({ env });
 }
 
-function isEntryPoint() {
-  if (process.argv[1] === undefined) return false;
-  try {
-    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
-  } catch {
-    return false;
-  }
-}
-
-if (isEntryPoint()) {
+if (isEntryPoint(import.meta.url)) {
   main().then((code) => process.exit(code));
 }

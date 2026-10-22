@@ -24,14 +24,14 @@
 //   `lockfileProblems`) are exported for the tests.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 import { checkDistFresh } from './lib/dist-freshness.mjs';
 import { REPO_ROOT } from './lib/live-gate-scan.mjs';
 import { pnpmPack } from './lib/pnpm-pack.mjs';
+import { isEntryPoint } from './lib/script-process.mjs';
 import { CLOSED_PORT_ENV, handshake, openRawWire } from './lib/sdk-wire-golden-core.mjs';
 
 /** The protocol revision the smoke asks the servers for. */
@@ -109,9 +109,13 @@ export function lockfileProblems(lock, names) {
       problems.push(`${name} was resolved from ${JSON.stringify(entry.resolved)}, not from a local tarball.`);
     }
   }
-  for (const key of Object.keys(entries)) {
+  for (const [key, entry] of Object.entries(entries)) {
     const match = /(?:^|\/)node_modules\/(@iris-mcp\/[^/]+)$/.exec(key);
-    if (match && !names.includes(match[1])) problems.push(`${match[1]} is in the lockfile but is no package of this repository.`);
+    if (match === null) continue;
+    if (!names.includes(match[1])) problems.push(`${match[1]} is in the lockfile but is no package of this repository.`);
+    else if (key !== `node_modules/${match[1]}` && (typeof entry?.resolved !== 'string' || !entry.resolved.startsWith('file:'))) {
+      problems.push(`${match[1]} at ${key} was resolved from ${JSON.stringify(entry?.resolved)}, not from a local tarball.`);
+    }
   }
   return problems;
 }
@@ -257,15 +261,6 @@ export async function main(argv = process.argv.slice(2)) {
   return smokePackages();
 }
 
-function isEntryPoint() {
-  if (process.argv[1] === undefined) return false;
-  try {
-    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
-  } catch {
-    return false;
-  }
-}
-
-if (isEntryPoint()) {
+if (isEntryPoint(import.meta.url)) {
   main().then((code) => process.exit(code));
 }

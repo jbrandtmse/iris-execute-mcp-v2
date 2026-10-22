@@ -93,8 +93,27 @@ export interface PreloadedRun {
   status: number | null;
   /** Both streams of the child. */
   output: string;
+  /** The child's standard output alone. */
+  stdout: string;
+  /** The child's standard error alone. */
+  stderr: string;
   /** One `<host>:<port>` line per connect the preload refused. */
   connects: string[];
+}
+
+/**
+ * The inherited environment with NO arming or target variable: every `IRIS_*` key is removed (case-insensitively), and so
+ * is every variable that makes a child think it is nested in a test run (`VITEST*`, `TEST`, `NODE_ENV`, `NODE_OPTIONS`).
+ */
+export function scrubbedEnv(): Record<string, string> {
+  const base: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    const upper = key.toUpperCase();
+    if (typeof value !== "string" || upper.startsWith("IRIS_") || upper.startsWith("VITEST")) continue;
+    if (["TEST", "NODE_ENV", "NODE_OPTIONS"].includes(upper)) continue;
+    base[key] = value;
+  }
+  return base;
 }
 
 /** How to run vitest under the preload. */
@@ -119,21 +138,37 @@ export interface PreloadedRunOptions {
  * default IRIS ports and `watchPorts`, so the returned `connects` lists every attempt to reach an instance.
  */
 export function runVitestUnderPreload(options: PreloadedRunOptions): Promise<PreloadedRun> {
-  const scratch = mkdtempSync(path.join(tmpdir(), "mcp-preloaded-run-"));
-  const connectLog = path.join(scratch, "connects.log");
   const vitestEntry = path.join(
     path.dirname(createRequire(path.join(options.packageDir, "package.json")).resolve("vitest/package.json")),
     "vitest.mjs",
   );
-  const base: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    const upper = key.toUpperCase();
-    if (typeof value !== "string" || upper.startsWith("IRIS_") || upper.startsWith("VITEST")) continue;
-    if (["TEST", "NODE_ENV", "NODE_OPTIONS"].includes(upper)) continue;
-    base[key] = value;
-  }
+  return runNodeUnderPreload([vitestEntry, "run", ...options.args], options.packageDir, options);
+}
+
+/** How to run a Node script under the preload. */
+export interface PreloadedScriptOptions extends Omit<PreloadedRunOptions, "packageDir" | "args"> {
+  /** The script, by absolute path. */
+  script: string;
+  /** Its arguments. */
+  args: readonly string[];
+  /** The directory it runs in. */
+  cwd: string;
+}
+
+/** Run `node <script> <args>` in `cwd` the way {@link runVitestUnderPreload} runs vitest: scrubbed, under the preload. */
+export function runScriptUnderPreload(options: PreloadedScriptOptions): Promise<PreloadedRun> {
+  return runNodeUnderPreload([options.script, ...options.args], options.cwd, options);
+}
+
+function runNodeUnderPreload(
+  argv: readonly string[],
+  cwd: string,
+  options: Pick<PreloadedRunOptions, "watchPorts" | "env" | "withoutPreload" | "timeoutMs">,
+): Promise<PreloadedRun> {
+  const scratch = mkdtempSync(path.join(tmpdir(), "mcp-preloaded-run-"));
+  const connectLog = path.join(scratch, "connects.log");
   const env: Record<string, string> = {
-    ...base,
+    ...scrubbedEnv(),
     ...(options.withoutPreload === true
       ? {}
       : {
@@ -144,10 +179,18 @@ export function runVitestUnderPreload(options: PreloadedRunOptions): Promise<Pre
     ...options.env,
   };
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [vitestEntry, "run", ...options.args], { cwd: options.packageDir, env });
+    const child = spawn(process.execPath, [...argv], { cwd, env });
     const chunks: string[] = [];
-    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk.toString("utf8")));
-    child.stderr.on("data", (chunk: Buffer) => chunks.push(chunk.toString("utf8")));
+    const out: string[] = [];
+    const err: string[] = [];
+    child.stdout.on("data", (chunk: Buffer) => {
+      chunks.push(chunk.toString("utf8"));
+      out.push(chunk.toString("utf8"));
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      chunks.push(chunk.toString("utf8"));
+      err.push(chunk.toString("utf8"));
+    });
     const timer = setTimeout(() => child.kill("SIGKILL"), options.timeoutMs);
     child.once("error", (error) => {
       clearTimeout(timer);
@@ -162,7 +205,7 @@ export function runVitestUnderPreload(options: PreloadedRunOptions): Promise<Pre
             .filter((line) => line !== "")
         : [];
       rmSync(scratch, { recursive: true, force: true });
-      resolve({ status, output: chunks.join(""), connects });
+      resolve({ status, output: chunks.join(""), stdout: out.join(""), stderr: err.join(""), connects });
     });
   });
 }

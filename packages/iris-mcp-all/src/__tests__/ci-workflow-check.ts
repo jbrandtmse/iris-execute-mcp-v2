@@ -10,10 +10,13 @@
  *    runs on the registered runner; every `intersystems/` image is one of the harness's digest constants; no `@latest`, no `npx -y`.
  *  - MATRIX (42.3.1): the Node legs are the registry's, the first is the `engines.node` floor of the root and of every package, the
  *    others rise by 2 from it, `gates` runs each leg (its setup-node uses `matrix.node`), and every other job uses the floor.
- *  - HYGIENE (42.3.4, 42.3.5), over the text without comments: no `continue-on-error`, `|| true`, secret, `pull_request_target`
+ *  - KEYS (42.3.1, 42.3.4): the workflow, each job, each step and each action's inputs use only the keys the registry's
+ *    workflow uses, and the gates matrix has only `node`: an `env`, a `defaults`, a step `shell`, a matrix `exclude` or an
+ *    action input such as `ref` changes what runs without changing a declared step.
+ *  - HYGIENE (42.3.4, 42.3.5), over the text without comments and over the parsed values: no `continue-on-error`, `|| true`, secret, `pull_request_target`
  *    or publish, tag or push command; no job and no action step has an `if`; the permissions are exactly `contents: read` and no
- *    job widens them; the concurrency
- *    cancels except on main; the sysctl step reserves exactly the registry's host ports and none is refused; `logs` runs on
+ *    job widens them; the concurrency gives each run on main a group of its own (its commit) and cancels a superseded run
+ *    on any other ref; the sysctl step reserves exactly the registry's host ports and none is refused; `logs` runs on
  *    `failure() || cancelled()` and `down` on `always()`; the jobs' timeouts are the registry's.
  *  - DW-443 (42.3.5): `package` needs `gates` and `throwaway`, and every package with a `prepublishOnly` has its suite step.
  */
@@ -59,6 +62,24 @@ interface DeclaredStep {
   if?: string;
   id?: string;
 }
+
+/**
+ * The concurrency group: the commit for a run on `main`, so that GitHub never cancels a pending run on `main` in favour of a
+ * newer one, and the ref for every other run, so that a newer push supersedes an older run of the same ref.
+ */
+export const CONCURRENCY_GROUP = "ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}";
+
+/** The keys the registry's workflow uses, at each level. */
+const WORKFLOW_KEYS = ["name", "run-name", "on", "permissions", "concurrency", "jobs"];
+const JOB_KEYS = ["name", "runs-on", "timeout-minutes", "strategy", "needs", "steps"];
+const RUN_STEP_KEYS = ["name", "run", "working-directory", "if", "id"];
+const ACTION_STEP_KEYS = ["name", "uses", "with"];
+/** The inputs each pinned action is given. */
+const ACTION_INPUTS: Record<string, readonly string[]> = {
+  "actions/checkout": ["persist-credentials"],
+  "actions/setup-node": ["node-version", "cache"],
+  "pnpm/action-setup": [],
+};
 
 /** The text without YAML comments (a `#` at the start of a line or after whitespace, to the end of the line). */
 export function stripComments(text: string): string {
@@ -122,8 +143,30 @@ export function workflowProblems(text: string, context: WorkflowContext): string
   }
   if (workflow === null || typeof workflow !== "object" || typeof workflow["jobs"] !== "object") return ["ci.yml has no jobs."];
   const problems: string[] = [];
-  const bare = stripComments(text);
+  // The text without comments, and the parsed values, which also hold what follows a " #" inside a quoted value.
+  const bare = `${stripComments(text)}\n${JSON.stringify(workflow)}`;
   const jobs = workflow["jobs"] as Record<string, any>;
+
+  // KEYS: a key the registry's workflow does not use (an env, a defaults, a step shell, a matrix exclude, an action input)
+  // changes what runs without changing a declared step.
+  const unknownKeys = (where: string, value: unknown, allowed: readonly string[]): void => {
+    if (value === null || typeof value !== "object") return;
+    for (const key of Object.keys(value)) {
+      if (!allowed.includes(key)) problems.push(`${where} sets ${key}, which the registry's workflow does not use`);
+    }
+  };
+  unknownKeys("the workflow", workflow, WORKFLOW_KEYS);
+  for (const [name, job] of Object.entries(jobs)) {
+    unknownKeys(`job ${name}`, job, JOB_KEYS);
+    if (name !== "gates" && job?.strategy !== undefined) problems.push(`job ${name} has a strategy: only gates runs a matrix`);
+    for (const step of (job?.steps ?? []) as Array<Record<string, any>>) {
+      const action = typeof step?.["uses"] === "string" ? (step["uses"] as string).split("@")[0] : undefined;
+      unknownKeys(`job ${name}: the step ${action ?? JSON.stringify(step?.["run"])}`, step, action === undefined ? RUN_STEP_KEYS : ACTION_STEP_KEYS);
+      if (action !== undefined) unknownKeys(`job ${name}: the inputs of ${action}`, step["with"], ACTION_INPUTS[action] ?? []);
+    }
+  }
+  unknownKeys("the gates strategy", jobs["gates"]?.strategy, ["fail-fast", "matrix"]);
+  unknownKeys("the gates matrix", jobs["gates"]?.strategy?.matrix, ["node"]);
 
   // STEPS
   const declaredJobs = Object.keys(DECLARED_STEPS);
@@ -213,7 +256,9 @@ export function workflowProblems(text: string, context: WorkflowContext): string
   const concurrency = workflow["concurrency"] as { group?: string; "cancel-in-progress"?: unknown } | undefined;
   if (concurrency === undefined) problems.push("the concurrency block is missing");
   else {
-    if (!String(concurrency.group).includes("${{ github.ref }}")) problems.push("the concurrency group does not include github.ref");
+    if (concurrency.group !== CONCURRENCY_GROUP) {
+      problems.push(`the concurrency group is ${JSON.stringify(concurrency.group)}, not ${CONCURRENCY_GROUP}: each run on main needs a group of its own, every other ref one group`);
+    }
     if (concurrency["cancel-in-progress"] !== "${{ github.ref != 'refs/heads/main' }}") {
       problems.push(`cancel-in-progress is ${JSON.stringify(concurrency["cancel-in-progress"])}, not an expression that spares refs/heads/main`);
     }

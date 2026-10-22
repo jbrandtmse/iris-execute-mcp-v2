@@ -60,6 +60,7 @@ import {
   validateNamespace,
 } from "../../../../scripts/throwaway-iris.mjs";
 import { throwawayGatePlan } from "./bootstrap-guard-legs.js";
+import { runScriptUnderPreload } from "./live-gate-child-run.js";
 import { reserveClosedPort } from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1094,26 +1095,21 @@ describe("throwaway-iris: down removes the recorded container, once", () => {
 describe("throwaway-iris: the environment it hands a command satisfies verify-iris-reachable under CI=true", () => {
   it("reports IRIS unreachable at a closed port, and never an unset IRIS_HTTPS", async () => {
     const port = await reserveClosedPort();
-    const scratch = scratchDir();
-    const connectLog = path.join(scratch, "connects.log");
-    const env = {
-      ...buildChildEnv({ PATH: process.env.PATH, CI: "true" }, { port, name: GENERATED_NAME, namespace: "HSCUSTOM" }),
-      NODE_OPTIONS: `--import=${pathToFileURL(path.join(REPO_ROOT, "scripts", "lib", "no-live-iris-preload.mjs")).href}`,
-      IRIS_MCP_CONNECT_LOG: connectLog,
-      IRIS_MCP_WATCH_PORTS: `${port},52773,1972`,
-    } as Record<string, string>;
+    const env = buildChildEnv({ PATH: process.env.PATH, CI: "true" }, { port, name: GENERATED_NAME, namespace: "HSCUSTOM" }) as Record<string, string>;
 
-    const result = spawnSync(process.execPath, [path.join(REPO_ROOT, "scripts", "verify-iris-reachable.mjs")], {
+    const result = await runScriptUnderPreload({
+      script: path.join(REPO_ROOT, "scripts", "verify-iris-reachable.mjs"),
+      args: [],
       cwd: path.join(REPO_ROOT, "packages", "iris-mcp-all"),
       env,
-      encoding: "utf8",
-      timeout: 60_000,
+      watchPorts: [port],
+      timeoutMs: 60_000,
     });
 
     expect(result.status, result.stderr).toBe(1);
     expect(result.stderr).toMatch(/FAILED CLOSED: IRIS is not reachable/);
     expect(result.stderr).not.toMatch(/IRIS_HTTPS|CI is set but/);
-    const connects = existsSync(connectLog) ? readFileSync(connectLog, "utf8").split("\n").filter((line) => line !== "") : [];
+    const { connects } = result;
     expect(connects.length, "the check did try the closed port").toBeGreaterThan(0);
     expect(connects.every((line) => line === `127.0.0.1:${port}`), connects.join(",")).toBe(true);
   });

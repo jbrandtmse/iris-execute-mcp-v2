@@ -628,11 +628,15 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
   });
 
   // ── 12. OAuth2 config create & verify (conditional) ──────────────
+  //
+  // oauthAvailable is set by beforeAll, after the file is collected, so each
+  // test reads it when it runs (testContext.skip), never through skipIf.
 
   describe("oauth management", () => {
-    it.skipIf(!oauthAvailable)(
+    it(
       "creates a test OAuth2 server configuration",
-      async () => {
+      async (testContext) => {
+        if (!oauthAvailable) testContext.skip();
         attempted.oauth = true;
         try {
           const result = await oauthManageTool.handler(
@@ -662,9 +666,10 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
       },
     );
 
-    it.skipIf(!oauthAvailable)(
+    it(
       "verifies OAuth2 config in oauth.list",
-      async () => {
+      async (testContext) => {
+        if (!oauthAvailable) testContext.skip();
         const result = await oauthListTool.handler({}, ctx);
 
         expect(result.content[0]?.text).toBeDefined();

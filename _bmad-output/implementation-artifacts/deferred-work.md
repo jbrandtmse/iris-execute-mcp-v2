@@ -3778,18 +3778,32 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-2-bootstrap-downgrade-guard.md | severity: low | fix-risk: low | footprint: in-story
 - evidence: 42.2 cr: extensions/iris-mcp-launcher/src/__tests__/live-arming-guard.test.ts vs packages/iris-mcp-all/src/__tests__/live-gate-child-run.ts; a runner in scripts/lib/ could serve both
 - 2026-10-22T01:48:34Z status=wontfix-accepted owner=42-2-bootstrap-downgrade-guard by=cr note=reopen_if=the two env-scrub lists diverge, or a third copy of the preload child runner appears
+- 2026-10-22T05:51:03Z occurrence=42-3-ci-workflow
+- 2026-10-22T05:51:03Z status=wontfix-accepted owner=42-2-bootstrap-downgrade-guard by=cr note=42.3 copies folded into live-gate-child-run.ts; reopen_if=a preload runner copy appears outside the launcher
 
 ### DW-681: The two OAuth tests in admin.integration.test.ts never run anywhere: it.skipIf(!oauthAvailable) is evaluated at collection, before beforeAll sets the flag, so CI allowlists both skips
 - source: spec-42-3-ci-workflow.md | severity: med | fix-risk: low | footprint: in-story
 - evidence: 42.3 implement review: packages/iris-admin-mcp/src/__tests__/admin.integration.test.ts; the ci-live-suite allowlist names both skips with this reason
 - 2026-10-22T04:35:01Z status=open owner=42-3-ci-workflow by=harvest note=code review patches it in-story: evaluate the condition at run time (ctx.skip inside the test, or a describe gated after setup) and drop the two allowlist entries, or it takes the story's one rework iteration
+- 2026-10-22T05:51:03Z status=resolved-by:42-3-ci-workflow by=cr note=OAuth tests read oauthAvailable at run time (ctx.skip); allowlist entries dropped; scan pin red on revert
 
 ### DW-682: A burst of pushes to main can lose CI runs of the middle commits: with cancel-in-progress false, GitHub still cancels an earlier PENDING run of the same concurrency group when a newer run queues, so a tag target on main could have no completed run
 - source: spec-42-3-ci-workflow.md | severity: low | fix-risk: low | footprint: in-story
 - evidence: 42.3 implement review, against the GitHub concurrency docs; .github/workflows/ci.yml concurrency block
 - 2026-10-22T04:35:01Z status=open owner=42-3-ci-workflow by=harvest note=two-way door: give main a per-sha concurrency group so no main run is ever superseded, and pin it in the workflow self-test; code review patches it
+- 2026-10-22T05:51:03Z status=resolved-by:42-3-ci-workflow by=cr note=main runs get group ci-<sha>; self-test pins the exact group; reverting ci.yml turns the real-file case red
 
 ### DW-683: Locally, pnpm live:bootstrap-guard publishes a dynamic host port chosen by Docker's own allocator, which ignores net.ipv4.ip_local_reserved_ports, so about 1 run in 28,000 lands on a refused port and fails closed (exit 4)
 - source: spec-42-3-ci-workflow.md | severity: low | fix-risk: med | footprint: in-epic
 - evidence: 42.3 implement: scripts/throwaway-iris.mjs run mode; CI uses fixed reserved ports instead
 - 2026-10-22T04:35:01Z status=wontfix-accepted owner=42-3-ci-workflow by=harvest note=reopen_if=a local live:bootstrap-guard run exits 4 on a refused port (the failure is closed and the rerun succeeds)
+
+### DW-684: Armed integration suites can go green without testing: guard returns (interop.integration.test.ts:204,219,239 if (!created.production) return;) report passed after a create test that tolerates isError, and ci-live-suite sees only skip statuses
+- source: spec-42-3-ci-workflow.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: 42.3 cr (blind layer): vitest reports an early return as passed (spec Code Map); admin.integration create/verify tests use the same tolerate-then-return pattern
+- 2026-10-22T05:51:10Z status=escalated owner=burndown by=cr note=decide per suite: ctx.skip() with an allowlist reason, or a hard assertion; README and CHANGELOG claims narrowed in 42.3
+
+### DW-685: bootstrap() reports compiled=true whatever the compile console says: bootstrap.ts:746,788 ignore the Atelier envelope, and General.Compile answers HTTP 200 when only some classes failed
+- source: spec-42-3-ci-workflow.md | severity: med | fix-risk: high | footprint: out-of-footprint
+- evidence: 42.3 cr (edge layer): compileClasses now returns the envelope but bootstrap drops it; the CI seed checks the console of its fixture compile only, so a broken bootstrapped class surfaces later as 404/500 from the suites
+- 2026-10-22T05:51:10Z status=escalated owner=burndown by=cr note=fix-risk high: the success and ERROR lines are localized (Rule #13), so a console check must hold on every NLS locale of the 2023.1+ range

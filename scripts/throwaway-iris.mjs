@@ -54,12 +54,12 @@
 //   buildChildEnv, throwawayEnvProblems, assertThrowawayEnv, parseCli, parseState, findExecutable, inspectProblems,
 //   assertThrowawayInspect, createTeardown. The constants name the images and the safety limits.
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { accessSync, chmodSync, constants, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { constants as osConstants } from 'node:os';
+import { accessSync, chmodSync, constants, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+
+import { isEntryPoint, spawnInherited } from './lib/script-process.mjs';
 
 /**
  * The default image: IRIS Community 2026.2, pinned by its multi-arch manifest list digest (linux/amd64 `d4331089...`,
@@ -344,8 +344,9 @@ export function buildChildEnv(baseEnv, { port, name, namespace = THROWAWAY_NAMES
 
 /**
  * What is wrong with an environment that is supposed to target a throwaway container this harness started: it must be
- * armed with `IRIS_REQUIRE_LIVE=1`, name a container this harness generates in `IRIS_THROWAWAY`, target
- * `IRIS_HOST=127.0.0.1`, and carry an `IRIS_PORT` that is a port and not 52773 or 1972. An empty list means it is one.
+ * armed with `IRIS_REQUIRE_LIVE=1`, carry a name of the shape this harness generates in `IRIS_THROWAWAY`, target
+ * `IRIS_HOST=127.0.0.1`, and carry an `IRIS_PORT` that is a port and not 52773 or 1972. An empty list means it has that
+ * shape. Only the environment is read: `exec` ties the name to a labelled, running container ({@link assertThrowawayInspect}).
  *
  * @param {Record<string, string | undefined>} env
  * @returns {string[]}
@@ -933,15 +934,12 @@ export function defaultDeps(env) {
       }
     },
     runCommand: (command, commandEnv) =>
-      new Promise((resolve) => {
-        child = spawn(command[0], command.slice(1), { env: commandEnv, stdio: 'inherit' });
-        child.once('error', (error) => {
-          process.stderr.write(`throwaway-iris: could not run ${command[0]}: ${error.message}\n`);
-          resolve(127);
-        });
-        child.once('close', (code, signal) => {
-          resolve(code ?? 128 + (osConstants.signals[signal] ?? 1));
-        });
+      spawnInherited(command, {
+        label: 'throwaway-iris',
+        env: commandEnv,
+        onChild: (spawned) => {
+          child = spawned;
+        },
       }),
     /** Forward a signal to the running command. */
     killCommand: (signal) => {
@@ -1030,15 +1028,6 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   return runHarness({ image: cli.image, command: cli.command, hostPort: cli.hostPort, env }, deps, teardown);
 }
 
-function isEntryPoint() {
-  if (process.argv[1] === undefined) return false;
-  try {
-    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
-  } catch {
-    return false;
-  }
-}
-
-if (isEntryPoint()) {
+if (isEntryPoint(import.meta.url)) {
   main().then((code) => process.exit(code));
 }

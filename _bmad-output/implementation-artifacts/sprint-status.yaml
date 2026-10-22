@@ -124,7 +124,7 @@
 # put new epic notes in epics.md, not here.
 
 generated: '2026-04-05'
-last_updated: '10-21-2026 21:35'
+last_updated: '10-21-2026 22:52'
 previous_update: '2026-09-16 (Story 37.1 dev complete via bmad-dev-story - ready-for-dev
   -> review. Fixed McpServerBase.start(): a default-profile health-check rejection
   no longer calls process.exit(1) - it logs (health-check-failed line + a new continuation
@@ -542,7 +542,7 @@ development_status:
   epic-42: in-progress
   42-1-pre-publish-package-fixes: done
   42-2-bootstrap-downgrade-guard: done
-  42-3-ci-workflow: review
+  42-3-ci-workflow: done
   42-4-ipm-package-revival: backlog
   42-5-release-workflow: backlog
   42-6-tarball-smoke-and-1-0-0-publish: backlog

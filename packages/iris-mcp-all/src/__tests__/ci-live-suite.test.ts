@@ -20,16 +20,14 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { classifyVitestReport, runSuite } from "../../../../scripts/ci-live-suite.mjs";
 import { LIVE_SUITES } from "../../../../scripts/lib/ci-checks.mjs";
 import { REPO_ROOT, readRoster } from "../../../../scripts/lib/live-gate-scan.mjs";
-import { runVitestUnderPreload } from "./live-gate-child-run.js";
+import { runScriptUnderPreload, runVitestUnderPreload, scrubbedEnv } from "./live-gate-child-run.js";
 import { reserveClosedPort } from "./process-gate-helpers.js";
 
 const PACKAGE_DIR = path.join(REPO_ROOT, "packages", "iris-mcp-all");
 const SCRIPT = path.join(REPO_ROOT, "scripts", "ci-live-suite.mjs");
-const PRELOAD = pathToFileURL(path.join(REPO_ROOT, "scripts", "lib", "no-live-iris-preload.mjs")).href;
 const FAKE_THROWAWAY = "iris-mcp-throwaway-0123456789ab";
 
 type Report = Record<string, unknown>;
@@ -344,11 +342,32 @@ describe("runSuite with its spawn stood in for", () => {
     expect(clean.logs.join("\n")).toMatch(/0 unlisted skips \(0 allowlisted\)/);
   });
 
-  it("holds the allowlisted skips of the registry: the capture legs and the two OAuth tests", () => {
+  it("holds the allowlisted skips of the registry: the four capture legs, and nothing else", () => {
     expect(LIVE_SUITES["prepublish-all"].allowedSkips.length).toBe(4);
-    expect(LIVE_SUITES["integration-admin"].allowedSkips.length).toBe(2);
-    expect(Object.entries(LIVE_SUITES).filter(([, suite]) => suite.allowedSkips.length > 0).map(([id]) => id)).toEqual(["prepublish-all", "integration-admin"]);
+    expect(Object.entries(LIVE_SUITES).filter(([, suite]) => suite.allowedSkips.length > 0).map(([id]) => id)).toEqual(["prepublish-all"]);
   });
+});
+
+describe("DW-681: skipIf is decided when the file is collected, ctx.skip() when the test runs", () => {
+  it("a flag that beforeAll sets is still unset for skipIf and already set for ctx.skip(), in vitest's own report", async () => {
+    const source = [
+      "let ready = false;",
+      "beforeAll(() => { ready = true; });",
+      'describe("fixture hook", () => {',
+      '  it.skipIf(!ready)("decided at collection", () => {});',
+      '  it("decided at run time", (ctx) => { if (!ready) ctx.skip(); });',
+      "});",
+      "",
+    ].join("\n");
+    writeFileSync(path.join(scratch, "hook-flag.test.mjs"), source, "utf8");
+
+    const report = await realReport(["hook-flag.test.mjs"], "hook-flag");
+    const statuses = (report["testResults"] as Array<{ assertionResults: Array<{ status: string; fullName: string }> }>).flatMap((file) =>
+      file.assertionResults.map((test) => [test.fullName, test.status]),
+    );
+
+    expect(Object.fromEntries(statuses)).toEqual({ "fixture hook decided at collection": "skipped", "fixture hook decided at run time": "passed" });
+  }, 120_000);
 });
 
 describe("AC 42.3.5: the four prepublish gates forward their arguments to vitest", () => {
@@ -371,14 +390,9 @@ describe("AC 42.3.5: the four prepublish gates forward their arguments to vitest
       "utf8",
     );
     chmodSync(path.join(bin, "pnpm"), 0o755);
-    const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(process.env)) {
-      const upper = key.toUpperCase();
-      if (typeof value === "string" && !upper.startsWith("IRIS_") && !upper.startsWith("VITEST") && upper !== "NODE_OPTIONS") env[key] = value;
-    }
     const result = spawnSync(process.execPath, [path.join(REPO_ROOT, "packages", dir, "scripts", "prepublish-gate.mjs"), ...args], {
       cwd: path.join(REPO_ROOT, "packages", dir),
-      env: { ...env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`, FAKE_PNPM_LOG: log },
+      env: { ...scrubbedEnv(), PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`, FAKE_PNPM_LOG: log },
       encoding: "utf8",
       timeout: 60_000,
     });
@@ -404,27 +418,12 @@ describe("AC 42.3.5: the four prepublish gates forward their arguments to vitest
 
 describe("the real path: ci-live-suite.mjs integration-admin against a closed port (Rule #59)", () => {
   /** Run the script as a process with `env` added to a scrubbed environment, under the connect-refusing preload. */
-  function runScript(args: string[], env: Record<string, string>, connectLog: string, watchPort: string) {
-    const base: Record<string, string> = {};
-    for (const [key, value] of Object.entries(process.env)) {
-      const upper = key.toUpperCase();
-      if (typeof value !== "string" || upper.startsWith("IRIS_") || upper.startsWith("VITEST") || ["NODE_OPTIONS", "TEST", "NODE_ENV"].includes(upper)) continue;
-      base[key] = value;
-    }
-    return spawnSync(process.execPath, [SCRIPT, ...args], {
-      cwd: REPO_ROOT,
-      env: { ...base, NODE_OPTIONS: `--import=${PRELOAD}`, IRIS_MCP_CONNECT_LOG: connectLog, IRIS_MCP_WATCH_PORTS: `${watchPort},52773,1972`, ...env },
-      encoding: "utf8",
-      timeout: 280_000,
-    });
-  }
-
-  const readConnects = (file: string): string[] => (existsSync(file) ? readFileSync(file, "utf8").split("\n").filter((line) => line !== "") : []);
+  const runScript = (args: string[], env: Record<string, string>, watchPort: string) =>
+    runScriptUnderPreload({ script: SCRIPT, args, cwd: REPO_ROOT, env, watchPorts: [watchPort], timeoutMs: 280_000 });
 
   it("exits 1 naming every skipped test, because the admin setup cannot reach IRIS and vitest itself exits 0", async () => {
     const port = await reserveClosedPort();
-    const connectLog = path.join(scratch, "real-path-connects.log");
-    const result = runScript(
+    const result = await runScript(
       ["integration-admin"],
       {
         IRIS_REQUIRE_LIVE: "1",
@@ -436,7 +435,6 @@ describe("the real path: ci-live-suite.mjs integration-admin against a closed po
         IRIS_NAMESPACE: "USER",
         IRIS_HTTPS: "false",
       },
-      connectLog,
       port,
     );
 
@@ -447,16 +445,14 @@ describe("the real path: ci-live-suite.mjs integration-admin against a closed po
     expect(skipped, "vitest itself reported skipped tests").toBeGreaterThan(allowlisted);
     expect(problems, "every skipped test but the allowlisted ones is a problem").toBe(skipped - allowlisted);
     expect(result.stderr).toContain("unlisted skip (skipped): packages/iris-admin-mcp/src/__tests__/admin.integration.test.ts :: iris-admin-mcp integration database management creates a test database");
-    expect(result.stderr, "the two allowlisted OAuth tests are not offenders").not.toMatch(/unlisted skip.*oauth management/);
-    expect(result.stderr, "and neither is stale").not.toMatch(/stale allowlist entry/);
-    const connects = readConnects(connectLog);
-    expect(connects.every((line) => line === `127.0.0.1:${port}`), connects.join(",")).toBe(true);
-    expect(connects.some((line) => /:(52773|1972)$/.test(line))).toBe(false);
+    expect(result.stderr, "the OAuth tests skip at run time here, and nothing allowlists them").toMatch(/unlisted skip \(skipped\): \S+admin\.integration\.test\.ts :: iris-admin-mcp integration oauth management verifies OAuth2 config in oauth\.list/);
+    expect(result.stderr, "no allowlist entry is stale").not.toMatch(/stale allowlist entry/);
+    expect(result.connects.every((line) => line === `127.0.0.1:${port}`), result.connects.join(",")).toBe(true);
+    expect(result.connects.some((line) => /:(52773|1972)$/.test(line))).toBe(false);
   }, 300_000);
 
   it("refuses with exit 2 before spawning anything when the environment is not a throwaway target", async () => {
     const port = await reserveClosedPort();
-    const connectLog = path.join(scratch, "refusal-connects.log");
 
     for (const [label, env, args] of [
       ["no arming", { IRIS_THROWAWAY: FAKE_THROWAWAY, IRIS_HOST: "127.0.0.1", IRIS_PORT: port }, ["integration-admin"]],
@@ -464,11 +460,11 @@ describe("the real path: ci-live-suite.mjs integration-admin against a closed po
       ["no suite id", {}, []],
       ["an unknown suite id", {}, ["not-a-suite"]],
     ] as Array<[string, Record<string, string>, string[]]>) {
-      const result = runScript(args, env, connectLog, port);
+      const result = await runScript(args, env, port);
 
       expect(result.status, label).toBe(2);
       expect(result.stdout, `${label}: nothing ran`).not.toMatch(/RUN|vitest/);
+      expect(result.connects, `${label}: no refusal reached a network`).toEqual([]);
     }
-    expect(readConnects(connectLog), "no refusal reached a network").toEqual([]);
   }, 120_000);
 });

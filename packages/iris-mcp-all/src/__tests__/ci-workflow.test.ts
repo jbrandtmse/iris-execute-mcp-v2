@@ -38,6 +38,7 @@ import {
   validateImage,
 } from "../../../../scripts/throwaway-iris.mjs";
 import {
+  LIVE_CAPABLE,
   PACKAGES_DIR,
   REPO_ROOT,
   liveCapableTestFiles,
@@ -71,6 +72,27 @@ function mutate(source: string, from: string, to: string): string {
   return parts.join(to);
 }
 
+/**
+ * The `skipIf`/`runIf` calls of a test source whose condition reads a `let` binding of the file. Such a condition is evaluated
+ * when the file is collected, before any hook can set the binding, so the test is decided before the run it depends on.
+ */
+function collectionTimeConditions(source: string): string[] {
+  const lets = new Set([...source.matchAll(/\blet\s+([A-Za-z_$][\w$]*)/g)].map((match) => match[1] as string));
+  const found: string[] = [];
+  for (const call of source.matchAll(/\.(skipIf|runIf)\(/g)) {
+    const start = (call.index as number) + call[0].length;
+    let end = start;
+    for (let depth = 1; end < source.length && depth > 0; end += 1) {
+      if (source[end] === "(") depth += 1;
+      else if (source[end] === ")") depth -= 1;
+    }
+    const condition = source.slice(start, end - 1).trim();
+    const read = [...condition.matchAll(/[A-Za-z_$][\w$]*/g)].map((match) => match[0]).filter((name) => lets.has(name));
+    if (read.length > 0) found.push(`${call[1]}(${condition}) reads let ${read.join(", ")}`);
+  }
+  return found;
+}
+
 /** The first checkout line of the file, which every job has. */
 const CHECKOUT = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0";
 
@@ -82,7 +104,8 @@ describe("AC 42.3.1: the workflow is the registry's workflow", () => {
   it("runs the three jobs, the gates job on exactly the three Node legs, and the package job after the other two", () => {
     expect(Object.keys(DECLARED_STEPS)).toEqual(["gates", "throwaway", "package"]);
     expect([...NODE_LEGS]).toEqual(["22.17.0", "24.0.0", "26.0.0"]);
-    expect(workflowProblems(text, context).filter((problem) => /matrix|needs/.test(problem))).toEqual([]);
+    expect(workflowProblems(text, context).filter((problem) => /matrix|does not need/.test(problem))).toEqual([]);
+    expect(workflowProblems(mutate(text, "needs: [gates, throwaway]", "needs: [gates]"), context).filter((problem) => /matrix|does not need/.test(problem))).toEqual(["the package job does not need throwaway"]);
   });
 
   it.each([
@@ -150,7 +173,9 @@ describe("AC 42.3.4: the pins and the hygiene of the workflow", () => {
     ["wider permissions", () => mutate(text, "permissions:\n  contents: read\n", "permissions:\n  contents: write\n"), /not exactly contents: read/],
     ["a permission added", () => mutate(text, "permissions:\n  contents: read\n", "permissions:\n  contents: read\n  id-token: write\n"), /not exactly contents: read/],
     ["a job that widens the permissions", () => mutate(text, "    timeout-minutes: 30\n", "    timeout-minutes: 30\n    permissions:\n      contents: write\n"), /sets its own permissions/],
-    ["the concurrency block removed", () => mutate(text, "concurrency:\n  group: ci-${{ github.ref }}\n  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}\n", ""), /concurrency block is missing/],
+    ["the concurrency block removed", () => mutate(text, "concurrency:\n  group: ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}\n  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}\n", ""), /concurrency block is missing/],
+    ["a concurrency group that every run on main shares", () => mutate(text, "group: ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}", "group: ci-${{ github.ref }}"), /concurrency group is "ci-\$\{\{ github\.ref \}\}".*run on main needs a group of its own/],
+    ["a concurrency group per commit on every ref", () => mutate(text, "group: ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}", "group: ci-${{ github.sha }}"), /concurrency group is "ci-\$\{\{ github\.sha \}\}"/],
     ["a concurrency that also cancels main", () => mutate(text, "cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}", "cancel-in-progress: true"), /cancel-in-progress/],
     ["the sysctl step removed", () => mutate(text, "      - name: reserve the host ports of the throwaway containers\n        id: setup\n        run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=52790,52791\n", ""), /sysctl steps, not 1/],
     ["a sysctl step that reserves 52773", () => mutate(text, "ip_local_reserved_ports=52790,52791", "ip_local_reserved_ports=52773,52791"), /reserves .*52773|belongs to the shared IRIS instance/],
@@ -162,6 +187,14 @@ describe("AC 42.3.4: the pins and the hygiene of the workflow", () => {
     ["a git push step", () => mutate(text, "run: node scripts/ci-package-smoke.mjs", "run: git push origin HEAD"), /publish, tag or push command/],
     ["a filtered push trigger", () => mutate(text, "on:\n  push:\n", "on:\n  push:\n    branches: [main]\n"), /push trigger is filtered/],
     ["a longer timeout", () => mutate(text, "timeout-minutes: 150", "timeout-minutes: 360"), /throwaway has timeout-minutes 360/],
+    ["a secret after a hash inside a quoted value", () => mutate(text, "        run: pnpm lint\n", "        run: pnpm lint\n      - name: note\n        run: 'echo \"a #${{ secrets.TOKEN }}\"'\n"), /secrets reference/],
+    ["a workflow env", () => mutate(text, "permissions:\n  contents: read\n", "env:\n  CI: false\npermissions:\n  contents: read\n"), /the workflow sets env/],
+    ["a job defaults that replaces the shell", () => mutate(text, "    timeout-minutes: 60\n", '    timeout-minutes: 60\n    defaults:\n      run:\n        shell: "true {0}"\n'), /job gates sets defaults/],
+    ["a step shell", () => mutate(text, "        run: pnpm lint\n", '        run: pnpm lint\n        shell: "true {0}"\n'), /the step "pnpm lint" sets shell/],
+    ["a matrix exclude that drops a leg", () => mutate(text, '        node: ["22.17.0", "24.0.0", "26.0.0"]\n', '        node: ["22.17.0", "24.0.0", "26.0.0"]\n        exclude:\n          - node: "26.0.0"\n'), /the gates matrix sets exclude/],
+    ["another strategy setting", () => mutate(text, "      fail-fast: false\n", "      fail-fast: false\n      max-parallel: 1\n"), /the gates strategy sets max-parallel/],
+    ["a strategy on another job", () => mutate(text, "    timeout-minutes: 30\n", '    timeout-minutes: 30\n    strategy:\n      matrix:\n        node: ["22.17.0"]\n'), /job package has a strategy/],
+    ["a checkout of another ref", () => mutate(text, `${CHECKOUT}\n        with:\n          persist-credentials: false\n`, `${CHECKOUT}\n        with:\n          persist-credentials: false\n          ref: main\n`), /the inputs of actions\/checkout sets ref/],
   ] as Array<[string, () => string, RegExp]>)("fails on %s", (_label, apply, expected) => {
     expect(workflowProblems(apply(), context).join("\n")).toMatch(expected);
   });
@@ -292,7 +325,7 @@ describe("DW-676: every armed file runs in a suite, and a skip is never silent",
     const entries = (Object.entries(LIVE_SUITES) as Array<[string, { expectedFiles: () => string[]; allowedSkips: Array<{ file: string; test: string; reason: string }> }]>).flatMap(([id, suite]) =>
       suite.allowedSkips.map((entry) => ({ id, suite, ...entry })),
     );
-    expect(entries.length, "the 4 capture legs and the 2 OAuth tests").toBe(6);
+    expect(entries.length, "the 4 capture legs").toBe(4);
     for (const { id, suite, file, test, reason } of entries) {
       expect(existsSync(path.join(REPO_ROOT, file)), `${id}: ${file} exists`).toBe(true);
       expect(suite.expectedFiles(), `${id}: ${file} is a file the suite runs`).toContain(file);
@@ -303,11 +336,25 @@ describe("DW-676: every armed file runs in a suite, and a skip is never silent",
     }
   });
 
-  it("a scratch live-capable test file that no suite runs is a finding", () => {
+  it("a scratch file whose source resolves a live target is live-capable, and a finding while no suite runs it", () => {
     const exempt = new Set<string>(CI_LIVE_EXEMPTIONS.map((entry: { file: string }) => entry.file));
     const scratch = "packages/iris-mcp-all/src/__tests__/scratch-live-capable.test.ts";
+    // Joined at run time, so that this file's own text does not hold the call the scan looks for.
+    const sources: Record<string, string> = { [scratch]: ["const target = liveGateTarget", "(process.env);\n"].join("") };
+    const read = (file: string): string => sources[file] ?? readFileSync(path.join(REPO_ROOT, file), "utf8");
 
-    expect([...liveCapableTestFiles().map(relativeToRepo), scratch].filter((file) => !covered.has(file) && !exempt.has(file))).toEqual([scratch]);
+    const live = [...liveCapableTestFiles().map(relativeToRepo), scratch].filter((file) => LIVE_CAPABLE.test(read(file)));
+    expect(live.filter((file) => !covered.has(file) && !exempt.has(file))).toEqual([scratch]);
+  });
+
+  it("no armed file decides a skip at collection from a binding a hook sets: no skipIf or runIf condition reads a let (DW-681)", () => {
+    const found = coveredTestFiles().flatMap((file: string) => collectionTimeConditions(readFileSync(path.join(REPO_ROOT, file), "utf8")).map((what) => `${file}: ${what}`));
+    expect(found).toEqual([]);
+  });
+
+  it("the collection-time scan finds a skipIf whose condition reads a let that a hook sets, and passes a constant", () => {
+    const source = 'let ready = false;\nbeforeAll(() => { ready = true; });\nit.skipIf(!ready)("leg", () => {});\nconst FIXED = true;\nit.runIf(FIXED)("other", () => {});\n';
+    expect(collectionTimeConditions(source)).toEqual(["skipIf(!ready) reads let ready"]);
   });
 
   it("only the registry's suites skip nothing: no suite lists an allowlist entry for a file it does not expect", () => {

@@ -19,19 +19,21 @@ the tools-list snapshot are byte-unchanged, and `BOOTSTRAP_VERSION` stays `0.0.2
     extension's install, type-check, build and arming guard.
   - `throwaway` runs the armed suites against throwaway containers: the bootstrap-guard gate on `iris-community` 2026.2 and 2024.3 in
     `USER` (DW-672, the live proof of DW-508), and then, against a seeded `irishealth-community` 2026.2 in `HSCUSTOM`, every package's
-    `prepublishOnly`, every integration suite, the five process gates and the launcher's live files. A run on `main` is never cancelled; a
-    superseded run elsewhere is, and `gh run list --workflow ci.yml --commit <sha>` still finds it.
+    `prepublishOnly`, every integration suite, the five process gates and the launcher's live files. A run on `main` is never cancelled:
+    each has a concurrency group of its own (its commit). A superseded run elsewhere is, and `gh run list --workflow ci.yml --commit <sha>`
+    still finds it.
   - `package` runs only after both are green (DW-443): it packs the 8 packages, installs the tarballs together with every `@iris-mcp/*`
     dependency resolved to a local tarball, starts each server bin through `npx --no` (`initialize` and a `tools/list` with the snapshot's
     tool count) and runs each CLI bin.
 - **A registry and a self-test.** `scripts/lib/ci-checks.mjs` declares the pins, the steps and the armed suites; `ci-workflow.test.ts`
   holds `ci.yml` equal to it in both directions and fails on an unpinned action, `continue-on-error`, `|| true`, a `secrets.` reference,
-  wider permissions, a removed concurrency block, a missing or wrong `sysctl` reservation, a dropped or undeclared step, a moved Node
+  wider permissions, a removed concurrency block or a concurrency group that runs on `main` share, a missing or wrong `sysctl` reservation,
+  a key the registry's workflow does not use (an `env`, a `defaults`, a step `shell`, a matrix `exclude`, an action input), a dropped or undeclared step, a moved Node
   floor, a `package` job that does not need `throwaway`, a `prepublishOnly` with no suite, and a live-capable test file that no suite runs.
 - **`scripts/ci-live-suite.mjs` (DW-676).** An armed suite fails when any test in it was skipped, pending, todo or disabled, unless an
   allowlist entry names the test and gives a reason; an entry that matches no skipped test fails as stale, and a report that is missing,
-  holds 0 tests or lacks an expected file fails too. The allowlist starts with the 4 golden-capture legs and the 2 OAuth tests of
-  `admin.integration.test.ts`, which never run (their `skipIf` is evaluated before `beforeAll` sets its flag).
+  holds 0 tests or lacks an expected file fails too. The allowlist holds the 4 golden-capture legs. A test that returns early without
+  asserting is reported as passed, which the wrapper cannot see.
 - **`scripts/ci-seed-throwaway.mjs`.** It runs the real `bootstrap()`, fails closed unless `Ens.Director` is visible in the namespace, and
   deploys and compiles the 62 classes of `src/ExecuteMCPv2/Tests` and `QAFixtures`, never a bootstrapped class from `src/` (AD-14).
 - **`scripts/ci-package-smoke.mjs` (DW-443).** The tarball path that `prepublishOnly` does not guard, run locally with

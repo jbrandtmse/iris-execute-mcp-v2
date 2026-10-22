@@ -29,14 +29,15 @@ import {
 } from "../../../../scripts/ci-seed-throwaway.mjs";
 import { REPO_ROOT } from "../../../../scripts/lib/live-gate-scan.mjs";
 import { BOOTSTRAP_CLASSES, BOOTSTRAP_VERSION } from "../../../shared/src/bootstrap-classes.js";
+import { scrubbedEnv } from "./live-gate-child-run.js";
 import { startStatefulFakeAtelier, summarizeRequests } from "./stateful-fake-atelier";
 
 const FAKE_THROWAWAY = "iris-mcp-throwaway-0123456789ab";
 const SCRIPT = path.join(REPO_ROOT, "scripts", "ci-seed-throwaway.mjs");
 
-/** Every file under `directory`, relative to `base`, with forward slashes. */
+/** Every file under `directory` but a dotfile, relative to `base`, with forward slashes. */
 function filesUnder(directory: string, base: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return readdirSync(directory, { withFileTypes: true }).filter((entry) => !entry.name.startsWith(".")).flatMap((entry) => {
     const full = path.join(directory, entry.name);
     return entry.isDirectory() ? filesUnder(full, base) : [path.relative(base, full).split(path.sep).join("/")];
   });
@@ -101,9 +102,9 @@ describe("seedDocuments: the classes the seed deploys", () => {
     }
     const roster = "  { name: 'ExecuteMCPv2.Utils.cls', path: 'src/ExecuteMCPv2/Utils.cls' },\n  { name: 'ExecuteMCPv2.Setup.cls', path: 'src/ExecuteMCPv2/Setup.cls' },";
 
-    it("maps nested directories to dotted document names, sorts by path, and normalizes the text", () => {
+    it("maps nested directories to dotted document names, sorts by path, normalizes the text, and leaves a dotfile out", () => {
       const root = syntheticRepo(
-        { "src/ExecuteMCPv2/Tests/ATest.cls": "Class A {\r\n}\r\n\r\n", "src/ExecuteMCPv2/Tests/Sub/BTest.cls": "Class B {}\n", "src/ExecuteMCPv2/QAFixtures/C.cls": "Class C {}" },
+        { "src/ExecuteMCPv2/Tests/ATest.cls": "Class A {\r\n}\r\n\r\n", "src/ExecuteMCPv2/Tests/Sub/BTest.cls": "Class B {}\n", "src/ExecuteMCPv2/QAFixtures/C.cls": "Class C {}", "src/ExecuteMCPv2/Tests/.DS_Store": "Finder metadata" },
         roster,
       );
       try {
@@ -354,12 +355,7 @@ describe("seeding the stateful fake Atelier with the real shared dist", () => {
     await withFake({}, async (fake) => {
       const run = (env: Record<string, string>): Promise<{ status: number | null; stderr: string }> =>
         new Promise((resolve, reject) => {
-          const base: Record<string, string> = {};
-          for (const [key, value] of Object.entries(process.env)) {
-            const upper = key.toUpperCase();
-            if (typeof value === "string" && !upper.startsWith("IRIS_") && !upper.startsWith("VITEST") && !["NODE_OPTIONS", "TEST", "NODE_ENV"].includes(upper)) base[key] = value;
-          }
-          const child = spawn(process.execPath, [SCRIPT], { cwd: REPO_ROOT, env: { ...base, ...env } });
+          const child = spawn(process.execPath, [SCRIPT], { cwd: REPO_ROOT, env: { ...scrubbedEnv(), ...env } });
           let stderr = "";
           child.stderr.on("data", (chunk: Buffer) => {
             stderr += chunk.toString("utf8");

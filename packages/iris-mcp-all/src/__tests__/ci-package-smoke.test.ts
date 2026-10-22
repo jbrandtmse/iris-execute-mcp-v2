@@ -137,6 +137,21 @@ describe("the lockfile check that proves the install used the tarballs", () => {
     ]);
   });
 
+  it("names a nested copy of a repository package that was resolved from the registry", () => {
+    const problems = lockfileProblems(
+      lock({
+        "node_modules/@iris-mcp/shared": { resolved: "file:../packs/shared.tgz" },
+        "node_modules/@iris-mcp/dev": { resolved: "file:../packs/dev.tgz" },
+        "node_modules/@iris-mcp/dev/node_modules/@iris-mcp/shared": { resolved: "https://registry.npmjs.org/@iris-mcp/shared/-/shared-1.0.0.tgz" },
+      }),
+      names,
+    );
+
+    expect(problems).toEqual([
+      '@iris-mcp/shared at node_modules/@iris-mcp/dev/node_modules/@iris-mcp/shared was resolved from "https://registry.npmjs.org/@iris-mcp/shared/-/shared-1.0.0.tgz", not from a local tarball.',
+    ]);
+  });
+
   it("treats a lockfile with no packages as missing every package", () => {
     expect(lockfileProblems({}, names)).toHaveLength(2);
   });

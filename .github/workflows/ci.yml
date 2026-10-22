@@ -31,9 +31,10 @@ on:
 permissions:
   contents: read
 
-# A superseded run on any ref but main is cancelled; it stays findable by its commit (gh run list --workflow ci.yml --commit <sha>).
+# A run on main has a group of its own (its commit), so no run on main is ever cancelled or superseded. On any other ref a newer
+# run cancels the older one, which stays findable by its commit (gh run list --workflow ci.yml --commit <sha>).
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:

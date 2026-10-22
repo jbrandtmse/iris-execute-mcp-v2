@@ -14,8 +14,9 @@
 //     `cwd` and every file name are relative to the repository root; `expectedFiles()` are the test files that must appear
 //     in the report; `allowedSkips` are `{ file, test, reason }` entries naming a test that always skips, by its full name.
 //   - CI_LIVE_EXEMPTIONS. Live-capable `*.test.ts` files that run in no armed suite, each with its reason.
-//   Everything derived from the workspace (the packages, their rosters, their integration files) is read from disk when this
-//   module is imported, so a new package or a new gate file changes the registry without anyone editing it.
+//   The packages are listed by hand in `PACKAGE_DIRS`, which the self-test holds equal to the workspace, so a new package fails
+//   the self-test until it is added there. What each package has (its scripts, its roster, its integration files) is read from
+//   disk when this module is imported, so a new gate file changes the registry without anyone editing it.
 //   Importing this module runs nothing and writes nothing.
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -139,14 +140,6 @@ const CAPTURE_SKIPS = [
   ['story-39-4-search-table-live-gate', 'Story 39.4: the headers and body wire is unchanged (AD-15, AD-33) capture: replay the request list against A and C and write the baseline'],
 ].map(([file, test]) => Object.freeze({ file: `packages/iris-mcp-all/src/__tests__/${file}.test.ts`, test, reason: CAPTURE_REASON }));
 
-const OAUTH_REASON =
-  'skipIf(!oauthAvailable) is evaluated when the file is collected, before beforeAll sets the flag, so the test never runs anywhere (deferred: Story 42.3 item 2)';
-
-const OAUTH_SKIPS = [
-  'iris-admin-mcp integration oauth management creates a test OAuth2 server configuration',
-  'iris-admin-mcp integration oauth management verifies OAuth2 config in oauth.list',
-].map((test) => Object.freeze({ file: 'packages/iris-admin-mcp/src/__tests__/admin.integration.test.ts', test, reason: OAUTH_REASON }));
-
 /** The reporter options CI appends to a vitest run; the JSON report lands where `--outputFile.json` says. */
 export function reporterArgs(reportFile) {
   return ['--reporter=default', '--reporter=json', `--outputFile.json=${reportFile}`];
@@ -194,7 +187,7 @@ function buildLiveSuites() {
       cwd: `packages/${pkg.dir}`,
       command: ['pnpm', 'exec', 'vitest', 'run', '--config', 'vitest.integration.config.ts'],
       expectedFiles: () => integrationFiles(pkg.dir),
-      allowedSkips: pkg.dir === 'iris-admin-mcp' ? OAUTH_SKIPS : [],
+      allowedSkips: [],
     };
   }
 

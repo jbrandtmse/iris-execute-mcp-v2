@@ -756,7 +756,6 @@ Versions are the tested lockfile versions as of 2026-10-14. The code owns them a
 | smol-toml | 1.7.1 |
 | @napi-rs/keyring (optional dependency) | 1.3.0 |
 | InterSystems IRIS (support claim) | 2023.1, best effort below the oldest CI-tested image (Lead decision 2026-10-15). InterSystems' own minimum is 2024.1 |
-| IRIS CI images | intersystems/iris-community:2026.2, intersystems/irishealth-community:2026.2 |
 | VS Code engine (launcher extension) | ^1.101.0 |
 
 ## Structural Seed
