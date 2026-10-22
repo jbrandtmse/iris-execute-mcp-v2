@@ -2314,6 +2314,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Correctly inert for a git clone + build beta hand-off; add the gates to prepack/prepare and prove the gate RED on the tarball path specifically (Rule #59).
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=Correctly inert for a git clone + build beta hand-off; add the gates to prepack/prepare and prove the gate RED
 - 2026-10-15T02:51:51Z status=routed owner=42-3-ci-workflow by=correct-course note=D7 (decision-record-2026-10-14): CI gates; prove RED on the tarball path (Rule #59)
+- 2026-10-22T10:02:10Z status=resolved-by:42-3-ci-workflow by=adjudication note=CI_is_the_publish-time_gate(decision_57):package_job_needs_gates+throwaway;CI_runs_every_prepublishOnly_armed;red_on_the_tarball_path:roster_branch_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39753197961_prepublish-admin_red,package_skipped;package_branch_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39753202734_only_package_red_at_smoke
 
 ### DW-444: [35-1-DEV-1] The full parallel turbo run build test lint is not reliably green in this dev environment
 - source: legacy:35.1 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3698,6 +3699,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: packages/shared/src/cli/governance.ts:935; seen at the 42.1 full lint run
 - 2026-10-21T13:14:16Z status=routed owner=42-3-ci-workflow by=harvest note=the CI lint gate must not carry a standing warning; remove the directive when wiring lint into CI
+- 2026-10-22T10:02:10Z status=resolved-by:42-3-ci-workflow by=adjudication note=directive_removed;all_7_lint_scripts_--max-warnings_0;lint_branch_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39753177232_red_at_lint_on_all_3_Node_legs
 
 ### DW-667: SYS-scoped tools whose namespace argument is the call's subject (iris_mapping_manage, iris_mapping_list, iris_webapp_manage, iris_resource_manage, iris_user_manage) now audit namespace %SYS, so with the default IRIS_AUDIT_LOG_PARAMS=false the namespace they act on no longer appears in the entry
 - source: spec-42-10-pre-1-0-tool-surface-corrections.md | severity: med | fix-risk: low | footprint: in-story
@@ -3733,6 +3735,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-21T22:44:16Z occurrence=42-2-bootstrap-downgrade-guard note=42.2_implement:extend_scripts/throwaway-iris.mjs(Rule2);first_real_docker_run_is_CI:verify_the_35_classes_compile_in_plain-IRIS_USER(else_--image_irishealth),readiness_loop,docker_port_read-back,teardown_on_INT/TERM;pinned_digest_is_arm64:x86_runners_need_a_multi-arch_or_amd64_digest_via_--image
 - 2026-10-22T01:01:05Z note=wave-8_decision_55:the_Lead_authorized_a_local_throwaway_container_2026-10-22;the_lead_runs_pnpm_live:bootstrap-guard_at_the_42.2_smoke;CI_must_still_run_it_in_42.3(the_platform_the_project_ships_from)
 - 2026-10-22T01:54:30Z note=partial:the_lead_ran_pnpm_live:bootstrap-guard_locally_2026-10-22(9/9;equality-revert_4_red;container_removed);42.3_still_runs_it_in_CI_on_the_platform_the_project_ships_from(amd64_digest;fail-on-skip_DW-676)
+- 2026-10-22T10:02:10Z status=resolved-by:42-3-ci-workflow by=adjudication note=CI_runs_pnpm_live:bootstrap-guard_on_iris-community_2026.2_and_the_oldest_leg(2025.3),9/9_each_in_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39749804619;guard_branch(equality_revert)_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39753259452_red_at_bootstrap-guard_and_bootstrap-guard-oldest;amd64_on_hosted_runners
 
 ### DW-673: A failed version read is treated as an absent deployment, so the full install runs and the pre-compile re-read lets the compile proceed on an empty value: a transient 5xx, timeout or privilege error on the version query while a newer build is deployed lets an older server upload its classes over it (the downgrade DW-508 prevents)
 - source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: med | footprint: in-story
@@ -3757,6 +3760,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-21T22:44:16Z status=routed owner=42-3-ci-workflow by=harvest note=CI fails an armed run that skipped a leg (a skip counter or a fail-on-skip flag), and runs the launcher guard; proven red once (Rule 59)
 - 2026-10-21T22:44:16Z occurrence=42-2-bootstrap-downgrade-guard note=also:5_process_gates(credentials-cli,governance-file,host-guard,server-manager-precedence,server-manager-process)_arm_on_IRIS_REQUIRE_LIVE_but_are_off_every_prepublish_roster;42.3_decides_whether_CI_runs_them
 - 2026-10-22T01:48:21Z occurrence=42-2-bootstrap-downgrade-guard
+- 2026-10-22T10:02:10Z status=resolved-by:42-3-ci-workflow by=adjudication note=ci-live-suite_fails_any_armed_suite_with_an_unlisted_skip;14_live_suites_0_unlisted_skips_in_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39749804619;skip_branch_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39753187494_red_at_integration-admin(vitest_exit_0,skips_listed);process_gates_run_as_a_CI-only_armed_suite(25_passed);launcher_guard_in_gates
 
 ### DW-677: Concurrency residual: the re-probe before compile stops this server compiling over a newer build that compiled first, but cannot undo source PUTs two builds interleaved, so the namespace can hold mixed source under a newer compiled marker
 - source: spec-42-2-bootstrap-downgrade-guard.md | severity: low | fix-risk: high | footprint: in-story
