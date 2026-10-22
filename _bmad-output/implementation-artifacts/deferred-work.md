@@ -3850,3 +3850,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-4-ipm-package-revival.md | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: 42.4 cr (vg): ci-ipm-archive.test.ts:657-660 staleDistReason throws; reproduced in this review after a mutation revert; touching packages/shared/dist cleared it
 - 2026-10-22T14:43:11Z status=wontfix-accepted owner=42-4-ipm-package-revival by=cr note=reopen_if=a fresh CI checkout+build reports a stale shared dist, or a red with no source change is seen twice in one epic
+
+### DW-693: flake: other audit readers still parse raw audit lines and can hit a half-written last line: settledAuditEntries in scripts/lib/sdk-handler-golden-core.mjs (four consumers), and the readers in story-43-4-qa-probe-copy.test.ts and story-39-5-qa-live-gate.test.ts
+- source: spec-42-4-ipm-package-revival.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 42.4 rework 1: completeAuditLines now guards pollAuditEntries/settledAuditCount; the .mjs script cannot import the TS helper, so the reader must move to scripts/lib
+- 2026-10-22T16:31:24Z status=routed owner=burndown by=harvest note=flake class (CI run 39798458188 hit it once in story-43-1-qa-dw579-process); move the newline-terminated reader to scripts/lib and route every audit reader through it
