@@ -3802,8 +3802,19 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-3-ci-workflow.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: 42.3 cr (blind layer): vitest reports an early return as passed (spec Code Map); admin.integration create/verify tests use the same tolerate-then-return pattern
 - 2026-10-22T05:51:10Z status=escalated owner=burndown by=cr note=decide per suite: ctx.skip() with an allowlist reason, or a hard assertion; README and CHANGELOG claims narrowed in 42.3
+- 2026-10-22T08:17:18Z occurrence=42-3-ci-workflow note=admin.integration_resource_and_role_list_tests_assert_nothing_when_the_create_did_not_succeed(expect_inside_if(!result.isError&&created.resource))
 
 ### DW-685: bootstrap() reports compiled=true whatever the compile console says: bootstrap.ts:746,788 ignore the Atelier envelope, and General.Compile answers HTTP 200 when only some classes failed
 - source: spec-42-3-ci-workflow.md | severity: med | fix-risk: high | footprint: out-of-footprint
 - evidence: 42.3 cr (edge layer): compileClasses now returns the envelope but bootstrap drops it; the CI seed checks the console of its fixture compile only, so a broken bootstrapped class surfaces later as 404/500 from the suites
 - 2026-10-22T05:51:10Z status=escalated owner=burndown by=cr note=fix-risk high: the success and ERROR lines are localized (Rule #13), so a console check must hold on every NLS locale of the 2023.1+ range
+
+### DW-686: The CI oldest-image leg goes red again on 2026-11-13: iris-community:2025.3, the oldest tag that still starts, carries a Community license key that expires that day, and an expired Community image refuses to start
+- source: spec-42-3-ci-workflow.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 42.3 rework: 2024.3, 2025.1 and 2025.2 keys already expired (harness probes 2026-10-22); 2026.1 (sha256:c57b65b2b454494091e7b3e49f6a53b3335f40adf475bcfcee0866083f35a7c2) passes the guard, key to 2027-03-27
+- 2026-10-22T08:17:18Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=harvest note=before tagging v1.0.0 (CI must be green on that commit): if the date is on or after 2026-11-13, move OLDEST_IRIS_COMMUNITY_IMAGE to 2026.1 and update the Stack row and 42.9's tested floor
+
+### DW-687: The nine DocDB lifecycle tests of data.integration.test.ts never run in CI: a fresh instance has no enabled %Service_DocDB and no Security.DocDBs record for the test database, and enabling the service in the seed would make the Epic 35 F5 gate skip
+- source: spec-42-3-ci-workflow.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: 42.3 rework: the setup probe reads ERROR #822 as unavailable; ci-checks.mjs allowlists the 9 by name
+- 2026-10-22T08:17:18Z status=wontfix-accepted owner=42-3-ci-workflow by=harvest note=reopen_if=a DocDB regression ships that the shared-instance runs missed, or a story adds a seeded DocDB fixture that keeps the F5 gate armed

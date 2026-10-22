@@ -5696,7 +5696,7 @@ This is the `/epic-cycle` burn-down story, chartered on 2026-10-20 at Epic 41's 
 - There is no beta tag (D2).
 - The pin is major-only: `@1` (D3).
 - The floor is Node 22+ (D4).
-- **The IRIS support claim stays 2023.1+, labelled best effort** below the oldest image CI can test (Project Lead decision, 2026-10-15). InterSystems' own minimum supported version is 2024.1 (since 2026-07-01), and the oldest Docker Hub community image is 2024.3. Story 42.3 tests the oldest image it can pull, and Story 42.9's README states the claim and the tested range.
+- **The IRIS support claim stays 2023.1+, labelled best effort** below the oldest image CI can test (Project Lead decision, 2026-10-15). InterSystems' own minimum supported version is 2024.1 (since 2026-07-01), and the oldest Docker Hub community image is 2024.3 *(2026-10-22, decision #65: Community license keys expire, so the oldest tag that still starts is 2025.3, whose key expires 2026-11-13)*. Story 42.3 tests the oldest image it can pull, and Story 42.9's README states the claim and the tested range.
 
 **Out of scope:**
 
@@ -5833,6 +5833,7 @@ DW-47, DW-300, D2.
 - DW-612: nothing on the publish path runs `gen:pack --check` or `check:provenance`. client-config's `prepublishOnly` runs only `verify-iris-reachable`, so a publish made without the default suite could ship a drifted skills pack or a tarball without `IRIS-MCP-THIRD-PARTY-NOTICES.md`. Add both checks to the publish path and prove them red on that path (Rule #59). (ledger; routed by harvest 2026-10-19 from Story 41.1)
 - DW-665: each package keeps a tracked `CHANGELOG.md` that `changeset version` fills, but `pnpm pack` does not ship it (`files` names only `dist`, plus `skills-pack` for client-config). Decide whether the `1.0.0` tarballs carry their changelog, before publishing. (ledger; routed by harvest 2026-10-21)
 - DW-637 (residual from 42.1, re-owned at adjudication 2026-10-21): `@modelcontextprotocol/server` 2.3.1 is still the newest release and the upstream fast-uri fix (typescript-sdk PR #2973) is unmerged. Re-check right before the `1.0.0` tag: if a release pins fast-uri 3.1.8 or later, bump the exact pin and re-run the epic-43 wire goldens; otherwise record the check and its date. (ledger; routed by adjudication 2026-10-21)
+- DW-686 (wave-8 decision #65): the CI oldest-image leg uses `iris-community:2025.3`, whose Community license key expires on 2026-11-13. Before tagging `v1.0.0` (CI must be green on that commit), if the date is on or after 2026-11-13, move `OLDEST_IRIS_COMMUNITY_IMAGE` to 2026.1 (`sha256:c57b65b2b454494091e7b3e49f6a53b3335f40adf475bcfcee0866083f35a7c2`) and update the Stack row and 42.9's tested floor. (ledger; routed by harvest 2026-10-22)
 
 ### Story 42.7: VS Code Extension Publish
 
