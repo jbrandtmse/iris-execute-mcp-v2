@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-10-22'
 status: 'done'
 baseline_revision: 'b37cec5d1d509f30ac22f570e92fd738bf9ef703'
+baseline_commit: 'b37cec5d1d509f30ac22f570e92fd738bf9ef703'
 review_loop_iteration: 0
 followup_review_recommended: true
 context:
@@ -99,7 +100,7 @@ deferred:
 | Guard: older | Synthetic Setup with `<semver>+<seq-1>.<hash>` | The install succeeds and the marker becomes `BOOTSTRAP_VERSION` | — |
 | Guard: absent | Fresh health container (no Setup) | The install succeeds | — |
 | Parity (DW-674) | Every case of the shared case table, run through `##class(ExecuteMCPv2.InstallGuard).Classify(d, e)` in each install container | Each result equals `classifyDeployedMarker(d, e)` from the shared dist | exit 1 listing every mismatch |
-| Bootstrap, IPM-owned (DW-674) | The guard document answers 200 and the probe is `stale`, `unconfigured` or `missing`, at startup or on the re-check before compile | No PUT, compile, Configure, mapping or `^UnitTestRoot`. One `[WARN]` "Bootstrap: leaving the ExecuteMCPv2 classes in '<ns>' on <host>:<port> alone: …" naming "installed by IPM", the deployed marker (or absent), this build's marker, `zpm "install iris-execute-mcp-v2 <semver>"` and the `zpm "uninstall …"` hand-back. Result: `ipmOwned: true`, `probeFound: true`, every step flag false | — |
+| Bootstrap, IPM-owned (DW-674) | The guard document answers 200 and the probe is `stale`, `unconfigured` or `missing`, at startup or on the re-check before compile | At startup: no PUT, compile, Configure, mapping or `^UnitTestRoot`. On the re-check before compile *(amended by the lead after implement, 2026-10-22: the PUTs of `stale` and `missing` precede the re-check, so "no PUT" cannot hold there)*: nothing further is written (no compile, Configure, mapping or `^UnitTestRoot`); documents already uploaded stay. One `[WARN]` "Bootstrap: leaving the ExecuteMCPv2 classes in '<ns>' on <host>:<port> alone: …" naming "installed by IPM", the deployed marker (or absent), this build's marker, `zpm "install iris-execute-mcp-v2 <semver>"` and the `zpm "uninstall …"` hand-back. Result: `ipmOwned: true`, `probeFound: true`, every step flag false | — |
 | Bootstrap, not IPM-owned | The guard document answers 404 | The result is deep-equal to today's (no `ipmOwned` key) | — |
 | Bootstrap, ownership unread | The guard GET fails another way (5xx, timeout) | No write. `probeStatus: "unknown"` with `readFailure` naming it, and one warning (decision #54) | — |
 | Bootstrap, current / newer / foreign / unknown | As today | Unchanged; no ownership request | — |

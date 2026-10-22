@@ -3830,3 +3830,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-3-ci-workflow.md | severity: med | fix-risk: high | footprint: out-of-footprint
 - evidence: irislib/%Api/DocDB/v1.cls:299-313 (httpPostDatabase) only calls CreateDatabase, while every other route runs CheckAccess^%SYS.DOCDB, which fails with no SECURITY(DocDBsD,name,ns) (irislib/%SYS/DOCDB.int:15). Ens.Setting.Report.base:629 calls $$Create^%SYS.DOCDB itself. The 42.3 rework reproduced it on a 2026.2 throwaway (spec deferred item 6). translateDocDbAccessDenied passes #822 through when the service is enabled, and the data README names only the service
 - 2026-10-22T08:37:47Z status=escalated owner=burndown by=cr note=decide before the 1.0.0 publish (42.6): register the record on create (a %SYS write, bootstrap) or document it (42.9)
+
+### DW-689: The public IPM registry is fed only through Open Exchange, which reads module.xml from the ROOT of a GitHub repository; that collides with AD-14 (archives built from the generator's stamped output, never from src/) and with the manifest's ipm/ location
+- source: spec-42-4-ipm-package-revival.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: 42.4 plan probe; ipm/module.xml is generated and stamped, the archive is CI-built
+- 2026-10-22T13:06:14Z status=routed owner=42-5-release-workflow by=harvest note=decision 72: 42.5's plan picks the registry route (a published-artifact repo or branch, a stamped root manifest, or another channel) and probes the current Open Exchange rules; 42.8 lists it
+
+### DW-690: zpm uninstall iris-execute-mcp-v2 removes the classes but leaves the /api/executemcp/v2 web application and the %ALL package mapping, because the manifest configures them through Invoke methods with no Unconfigure counterpart
+- source: spec-42-4-ipm-package-revival.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 42.4 plan probe; nothing calls Setup.Uninstall() on the IPM path
+- 2026-10-22T13:06:14Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=two-way door for the docs story: state the manual cleanup in the IPM uninstall docs (or wire an Unconfigure Invoke to Setup.Uninstall if cheap)

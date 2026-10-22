@@ -5814,6 +5814,7 @@ DW-387, D7. New, with no OcuPilot precedent.
 - **AC 42.5.4** — A dry-run mode exercises every step without publishing, and is proven before the first real run.
 - DW-387 (occurrence from 42.1, 2026-10-21): publishing has to go through pnpm. `pnpm publish` runs each package's `prepublishOnly` (`verify-iris-reachable.mjs`, `prepublish-gate.mjs`), which fails in a release environment with no IRIS, and only pnpm applies `publishConfig.exports` and rewrites `workspace:*`; a direct `npm publish` would ship the dev-only exports and unresolvable `workspace:*` dependencies. The release script owns both. (ledger; occurrence added by harvest 2026-10-21)
 - DW-675: armed live gates fail closed unless all five `IRIS_HOST`/`PORT`/`USERNAME`/`PASSWORD`/`NAMESPACE` are set (Story 42.2, decision #51). The release script exports all five for its gate run, and 42.6 publishes through it. (ledger; routed by harvest 2026-10-21)
+- DW-689 (wave-8 decision #72): pick the IPM registry route. The public IPM registry is fed through Open Exchange, which reads `module.xml` from a GitHub repository root; that collides with AD-14 (archives from the generator's stamped output, never from `src/`) and the manifest's `ipm/` location. Probe the current Open Exchange rules and choose (a published-artifact repository or branch, a stamped root manifest, or another channel); 42.8 lists it. (ledger; routed by harvest 2026-10-22)
 
 ### Story 42.6: Tarball Smoke and 1.0.0 Publish
 
@@ -5887,6 +5888,7 @@ DW-441.
 - DW-632: `qa-41-7-doc-links.test.ts` checks only the 9 documents Story 41.7 changed, and a repo-wide run of its checker finds more broken relative links: `packages/shared/README.md:108`, three `docs/known-bugs-*` links, and the DW-631 anchors. Fix them, and widen the test's document set to every user-facing `*.md`, so it pins them before 1.0. (ledger; routed by the lead 2026-10-20)
 - DW-633: the `IRIS_ACCEPT_LANGUAGE` docs (`README.md:77`, `packages/shared/src/http-client.ts:183-193`) describe a per-worker message-table mechanism the header does not affect, but `%CSP.REST` matches the message language from the header on every request. `tool_support.md:21` also says the `Utils` prefix-stripping handles only English and Arabic and is unmodified. Rewrite both against the per-request model and Story 41.8's 15-language `StripErrorPrefix`. (ledger; routed by harvest 2026-10-20)
 - DW-664: seven READMEs say `IRIS_USERNAME` defaults to `_SYSTEM` (`README.md:73`, `packages/iris-*-mcp/README.md:31`, `packages/iris-mcp-all/README.md:69`), but `config.ts:162-169` treats it as required and the server exits without it. Fix with the AC 42.9.1 README rewrite. (ledger; routed by harvest 2026-10-21)
+- DW-690: `zpm uninstall iris-execute-mcp-v2` leaves the `/api/executemcp/v2` web application and the `%ALL` mapping in place (no Unconfigure counterpart). State the manual cleanup in the IPM uninstall docs, or wire an Unconfigure invoke to `Setup.Uninstall` if it is cheap. (ledger; routed by harvest 2026-10-22)
 
 ### Story 42.10: Pre-1.0 Tool-Surface Corrections
 
