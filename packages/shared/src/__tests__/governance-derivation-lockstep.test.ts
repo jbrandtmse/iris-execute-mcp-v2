@@ -34,14 +34,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../../../..");
 const scriptPath = resolve(repoRoot, "scripts/gen-governance-baseline.mjs");
 
-/** Run the generator CLI with the given args; return { status, stdout, stderr }. */
+/**
+ * Run the generator CLI with the given args; return { status, stdout, stderr }. The child runs with type stripping off, as Node 22.17.0
+ * (the floor) does by default, so a generator that imports a `.ts` file fails here on every Node.
+ */
 function runCli(args: string[]): {
   status: number;
   stdout: string;
   stderr: string;
 } {
   try {
-    const stdout = execFileSync("node", [scriptPath, ...args], {
+    const stdout = execFileSync("node", ["--no-experimental-strip-types", scriptPath, ...args], {
       cwd: repoRoot,
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"],

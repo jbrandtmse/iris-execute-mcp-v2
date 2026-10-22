@@ -70,12 +70,15 @@ export const IRIS_COMMUNITY_IMAGE =
   'intersystems/iris-community:2026.2@sha256:cd2ebcab02d1ef80ec155def4418399f353d867162688c36a3705760e750bdaa';
 
 /**
- * The oldest IRIS Community tag Docker Hub serves, pinned by its manifest list digest (linux/amd64 `6167245b...`,
- * linux/arm64 `dd991c1b...`). Source: `hub.docker.com/v2/repositories/intersystems/iris-community/tags`, and the
- * manifest at `registry-1.docker.io/v2/intersystems/iris-community/manifests/<digest>`, fetched 2026-10-21.
+ * The oldest IRIS Community tag that still starts, pinned by its manifest list digest (linux/amd64 `3dfa0ee6...`,
+ * linux/arm64 `afca69c6...`). Source: `hub.docker.com/v2/repositories/intersystems/iris-community/tags`, fetched 2026-10-22.
+ * A Community image carries a time-limited license key and refuses to start once it has expired ("Invalid Community Edition
+ * license"), so the oldest testable tag moves forward over time. On 2026-10-22 the keys of 2024.3, 2025.1 and 2025.2 had
+ * expired; 2025.3 starts and passes the bootstrap guard, and its key expires on 2026-11-13. The next tag, 2026.1
+ * (`sha256:c57b65b2b454494091e7b3e49f6a53b3335f40adf475bcfcee0866083f35a7c2`), passes too, and its key expires on 2027-03-27.
  */
 export const OLDEST_IRIS_COMMUNITY_IMAGE =
-  'intersystems/iris-community:2024.3@sha256:0d6dbb91f71c69a65d8577741647e961168e90699e26d158e984a2a2919a874d';
+  'intersystems/iris-community:2025.3@sha256:f456892d143d54a1cf3f202f04b672c7d594ec3cde5f47a69dbf5451329dc300';
 
 /**
  * IRIS for Health Community 2026.2, pinned by its multi-arch manifest list digest (linux/amd64 `788c8626...`): the

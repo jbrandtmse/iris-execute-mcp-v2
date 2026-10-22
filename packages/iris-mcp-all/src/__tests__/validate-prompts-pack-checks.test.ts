@@ -26,11 +26,11 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { KNOWLEDGE_SOURCE_DIR, NOTICE_FILENAME, PACK_DIR, PACK_SOURCE_DIR, RULES_SOURCE_DIR } from "../../../../scripts/lib/skills-pack.mjs";
 import { ADAPTATION_HEADER } from "../../../../scripts/lib/provenance-core.mjs";
-import { REPO_ROOT } from "./pack-fixture";
+import { removeLink, REPO_ROOT } from "./pack-fixture";
 import { makeScratchRepo, problemPairs, removeScratchRepo, runScript, sha256, treeLines } from "./story-41-1-qa-fixture";
 import { stubPromptSource, VALID_STUB_SKILL } from "./story-41-5-qa-fixture";
 
@@ -74,7 +74,7 @@ function scratch(): string {
 afterEach(() => {
   for (const root of scratches.splice(0)) {
     // Unlink the stub's link to the real built tools first; the recursive removal then never meets it.
-    if (stubbed.has(root)) rmSync(join(root, OPS_PACKAGE, "dist", "tools"), { force: true });
+    if (stubbed.has(root)) removeLink(join(root, OPS_PACKAGE, "dist", "tools"));
     removeScratchRepo(root);
   }
   stubbed.clear();
@@ -361,7 +361,7 @@ describe("gen:skills and validate:prompts CLI, scratch copy: the prompts themsel
     const dir = join(root, OPS_PACKAGE);
     if (!stubbed.has(root)) {
       expect(lstatSync(dir).isSymbolicLink(), "the scratch link to the real ops package, unlinked and never followed").toBe(true);
-      rmSync(dir, { force: true });
+      removeLink(dir);
       mkdirSync(join(dir, "dist", "prompts"), { recursive: true });
       symlinkSync(join(REPO_ROOT, OPS_PACKAGE, "dist", "tools"), join(dir, "dist", "tools"), "junction");
       stubbed.add(root);

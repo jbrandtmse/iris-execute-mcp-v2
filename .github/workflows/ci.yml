@@ -8,7 +8,8 @@
 #              run: the launcher's full test suite (Story 42.7, DW-532) and prettier's format:check, which the tree does not pass.
 #   throwaway  Everything that needs a live IRIS, against throwaway containers that scripts/throwaway-iris.mjs starts, labels
 #              and removes (it refuses ports 52773 and 1972 and any image that is not pinned by digest). The bootstrap-guard
-#              gate runs on iris-community 2026.2 and on the oldest tag (2024.3), each in a container of its own. An
+#              gate runs on iris-community 2026.2 and on the oldest tag that still starts (2025.3; a Community image's license
+#              key expires, so the tag moves forward), each in a container of its own. An
 #              irishealth-community 2026.2 container is then started in HSCUSTOM and seeded (the real bootstrap, then the
 #              test and fixture classes), and every package's prepublishOnly, every integration suite, the five process
 #              gates and the launcher's live files run against it through scripts/ci-live-suite.mjs, which fails a suite in

@@ -131,7 +131,7 @@ const CAPTURE_REASON = 'runs only under the golden-capture CLI (its STORY_39_<n>
 
 /**
  * Tests that skip in every armed run, by full name. An entry that matches no skipped test of its suite fails the suite as
- * stale. An environmental skip (DocDB, a keyring, a container user) is never listed before a run shows it.
+ * stale. An environmental skip (a keyring, a container user) is never listed before a run on a throwaway shows it.
  */
 const CAPTURE_SKIPS = [
   ['story-39-1-message-search-live-gate', 'Story 39.1: the resendFiltered wire (AD-17, AD-33) capture: replay the resendFiltered request list against A and write the baseline'],
@@ -139,6 +139,26 @@ const CAPTURE_SKIPS = [
   ['story-39-3-body-search-live-gate', 'Story 39.3: the headers wire is unchanged (AD-15, AD-33) capture: replay the headers request list against A and C and write the baseline'],
   ['story-39-4-search-table-live-gate', 'Story 39.4: the headers and body wire is unchanged (AD-15, AD-33) capture: replay the request list against A and C and write the baseline'],
 ].map(([file, test]) => Object.freeze({ file: `packages/iris-mcp-all/src/__tests__/${file}.test.ts`, test, reason: CAPTURE_REASON }));
+
+/** The `reason` of a DocDB lifecycle test: it needs an operator's setup that a fresh instance lacks, and one gate needs it absent. */
+const DOCDB_REASON =
+  'the DocDB REST routes answer ERROR #822 (Access Denied) until an operator enables %Service_DocDB and registers a Security.DocDBs record for the database, ' +
+  'and a fresh instance has neither; the Epic 35 F5 gate of the all roster needs the service disabled, so the seed leaves it so (probed on irishealth-community 2026.2)';
+
+/** The DocDB lifecycle of `data.integration.test.ts`: its probe finds the service disabled and skips the whole `describe`. */
+const DOCDB_SKIPS = [
+  'creates a test database',
+  'creates a property on the test database',
+  'creates an index on the property',
+  'inserts a test document',
+  'gets the document by ID and verifies content',
+  'updates the document and verifies changes',
+  'finds documents with filter',
+  'deletes the document by ID',
+  'drops the test database',
+].map((test) =>
+  Object.freeze({ file: 'packages/iris-data-mcp/src/__tests__/data.integration.test.ts', test: `DocDB lifecycle integration ${test}`, reason: DOCDB_REASON }),
+);
 
 /** The reporter options CI appends to a vitest run; the JSON report lands where `--outputFile.json` says. */
 export function reporterArgs(reportFile) {
@@ -187,7 +207,7 @@ function buildLiveSuites() {
       cwd: `packages/${pkg.dir}`,
       command: ['pnpm', 'exec', 'vitest', 'run', '--config', 'vitest.integration.config.ts'],
       expectedFiles: () => integrationFiles(pkg.dir),
-      allowedSkips: [],
+      allowedSkips: pkg.dir === 'iris-data-mcp' ? DOCDB_SKIPS : [],
     };
   }
 

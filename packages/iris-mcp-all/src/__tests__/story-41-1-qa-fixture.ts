@@ -12,10 +12,10 @@
  */
 
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { cpSync, mkdirSync, readdirSync, readFileSync, symlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { PACK_DIR, PACK_SOURCE_DIR, WORKFLOW_SKILLS_DIR } from "../../../../scripts/lib/skills-pack.mjs";
-import { makeTempRoot, type NodeRun, removeTempRoot, REPO_ROOT, runNode } from "./pack-fixture";
+import { makeTempRoot, type NodeRun, removeLink, removeTempRoot, REPO_ROOT, runNode } from "./pack-fixture";
 
 /** The five server packages the prompt and tool catalogs import (their built `dist/`). */
 export const SERVER_PACKAGE_DIRS = ["iris-admin-mcp", "iris-data-mcp", "iris-dev-mcp", "iris-interop-mcp", "iris-ops-mcp"];
@@ -62,13 +62,8 @@ export function makeScratchRepo(options: ScratchOptions = {}): string {
 
 /** Remove a scratch repository; the links to the real server packages are unlinked before anything else. */
 export function removeScratchRepo(root: string): void {
-  for (const dir of SERVER_PACKAGE_DIRS) {
-    try {
-      rmSync(join(root, "packages", dir), { force: true });
-    } catch {
-      // Not a link (or already gone): the recursive removal below handles it.
-    }
-  }
+  // A directory that replaced a link is not unlinked; the recursive removal below handles it.
+  for (const dir of SERVER_PACKAGE_DIRS) removeLink(join(root, "packages", dir));
   removeTempRoot(root);
 }
 

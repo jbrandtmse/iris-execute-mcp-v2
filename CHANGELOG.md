@@ -17,7 +17,7 @@ the tools-list snapshot are byte-unchanged, and `BOOTSTRAP_VERSION` stays `0.0.2
   - `gates` runs on Node 22.17.0, 24.0.0 and 26.0.0: install, build, lint, type-check, the tests of the 8 packages (the Story 42.1 package
     checks among them), the governance-baseline, skills, pack, prompts, provenance, tools-list and epics-sync checks, and the launcher
     extension's install, type-check, build and arming guard.
-  - `throwaway` runs the armed suites against throwaway containers: the bootstrap-guard gate on `iris-community` 2026.2 and 2024.3 in
+  - `throwaway` runs the armed suites against throwaway containers: the bootstrap-guard gate on `iris-community` 2026.2 and 2025.3 in
     `USER` (DW-672, the live proof of DW-508), and then, against a seeded `irishealth-community` 2026.2 in `HSCUSTOM`, every package's
     `prepublishOnly`, every integration suite, the five process gates and the launcher's live files. A run on `main` is never cancelled:
     each has a concurrency group of its own (its commit). A superseded run elsewhere is, and `gh run list --workflow ci.yml --commit <sha>`
@@ -32,7 +32,7 @@ the tools-list snapshot are byte-unchanged, and `BOOTSTRAP_VERSION` stays `0.0.2
   floor, a `package` job that does not need `throwaway`, a `prepublishOnly` with no suite, and a live-capable test file that no suite runs.
 - **`scripts/ci-live-suite.mjs` (DW-676).** An armed suite fails when any test in it was skipped, pending, todo or disabled, unless an
   allowlist entry names the test and gives a reason; an entry that matches no skipped test fails as stale, and a report that is missing,
-  holds 0 tests or lacks an expected file fails too. The allowlist holds the 4 golden-capture legs. A test that returns early without
+  holds 0 tests or lacks an expected file fails too. The allowlist holds the 4 golden-capture legs and the 9 DocDB lifecycle tests (see Fixed). A test that returns early without
   asserting is reported as passed, which the wrapper cannot see.
 - **`scripts/ci-seed-throwaway.mjs`.** It runs the real `bootstrap()`, fails closed unless `Ens.Director` is visible in the namespace, and
   deploys and compiles the 62 classes of `src/ExecuteMCPv2/Tests` and `QAFixtures`, never a bootstrapped class from `src/` (AD-14).
@@ -42,7 +42,7 @@ the tools-list snapshot are byte-unchanged, and `BOOTSTRAP_VERSION` stays `0.0.2
 ### Changed
 
 - **`scripts/throwaway-iris.mjs`** gains `up`, `exec`, `logs` and `down` (each re-inspects the container and refuses one that is not a
-  throwaway it started), `run --host-port`, the oldest image `OLDEST_IRIS_COMMUNITY_IMAGE` (`2024.3`), `validateNamespace`,
+  throwaway it started), `run --host-port`, the oldest image `OLDEST_IRIS_COMMUNITY_IMAGE` (`2025.3`, see Fixed), `validateNamespace`,
   `assertThrowawayEnv`, and a namespace in the command's environment. The environment it hands a command now includes
   `IRIS_HTTPS=false`, which `scripts/verify-iris-reachable.mjs` requires under `CI`. `run` prints the container log before removing the
   container when its command fails, and `run` and `up` print it when the container does not become ready. `parseCli(["run", ...])` and `pnpm live:bootstrap-guard` are unchanged. The image comments now say
@@ -62,6 +62,35 @@ the tools-list snapshot are byte-unchanged, and `BOOTSTRAP_VERSION` stays `0.0.2
   tests, which the children they start inherit. The Story 38.6 text pin of the `@iris-mcp/all` gate's `vitestArgs` line follows the
   forwarded arguments.
 - **Documentation.** The root README has a "Continuous Integration" subsection under Contributing.
+
+### Fixed (rework after the first CI run)
+
+The first CI run (sha `221181a`) was red in six places. None of them touches a product behavior, a tool, a route or a bootstrapped class.
+
+- **The governance baseline check runs on Node 22.17.0.** `scripts/gen-governance-baseline.mjs --check` imported
+  `packages/shared/src/governance-baseline.ts`, and Node strips types from a `.ts` import only from 22.18, so the floor leg failed
+  with `ERR_UNKNOWN_FILE_EXTENSION` while 24 and 26 passed. It now reads the built `packages/shared/dist/governance-baseline.js`. A new scan,
+  `scripts/lib/script-ts-import-scan.mjs`, finds a `.ts` import in any repository script (a literal specifier, or a path variable that
+  reaches `import()` or `require()`), and `script-ts-imports.test.ts` runs it; the two shared tests that run the generator now start
+  it with `--no-experimental-strip-types`, so on any Node they fail the way the floor does.
+- **The tests remove a link to a directory with `unlink`.** `rmSync(link, { force: true })` is refused by Node 24.0.0 ("Path is a
+  directory"), which failed 22 cases of the Story 41.5 scratch-copy tests on that leg. `removeLink` in the test fixtures does the unlink,
+  and `symlink-removal.test.ts` fails on any test file that makes links and calls `rmSync` with `force` alone.
+- **The oldest image is `iris-community:2025.3`, not `2024.3`.** A Community image carries a time-limited license key and refuses to
+  start once it has expired ("Invalid Community Edition license, may have exceeded core limit"), so the oldest testable tag moves
+  forward over time. On 2026-10-22 the keys of 2024.3, 2025.1 and 2025.2 had expired. 2025.3 starts and passes the nine bootstrap-guard
+  legs, and its key expires on 2026-11-13, so the leg turns red again that day; 2026.1 passes too (its key expires on 2027-03-27) and is the
+  next move. The oldest tag that passes is the tested floor that Story 42.9 states.
+- **Three integration tests that only a fresh instance exposed.** `admin.integration.test.ts` looked for the resource and the role it had
+  created on the first page of a 50-row list, and a fresh IRIS for Health holds more of both; it follows `nextCursor` now. The `iris_sql_execute`
+  case in `tools.integration.test.ts` named a table `NonExistent.Table.…`, and `TABLE` is a reserved word, so IRIS answered a syntax error
+  (SQLCODE -1) instead of -30; the names are not reserved now. `data.integration.test.ts` named its DocDB database `MCPDataTest_DocDB`, and IRIS
+  refuses an underscore in a DocDB name ("it must be a valid Class Name").
+- **The DocDB lifecycle skips on a fresh instance, by name.** The DocDB REST routes answer `ERROR #822: Access Denied` until an operator enables
+  `%Service_DocDB`, and then for every database that has no `Security.DocDBs` record, which creating a database through the REST route does
+  not make. A fresh instance has neither, and the Epic 35 F5 gate needs the service disabled, so the seed leaves it so. The data setup file's
+  probe now reads the `#822` answer (IRIS 2026.2 sends it with HTTP 200, not 403) as "not available", the nine lifecycle tests skip, and
+  `scripts/lib/ci-checks.mjs` allowlists them by name with that reason.
 
 ## [Pre-release — 2026-10-21] — Story 42.2: Bootstrap Downgrade Guard
 

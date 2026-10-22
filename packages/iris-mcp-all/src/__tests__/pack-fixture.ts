@@ -7,7 +7,7 @@
  * Every temp root is created under `os.tmpdir()` and removed by the test that made it.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -35,6 +35,15 @@ export function makeTempRoot(prefix: string): string {
 
 export function removeTempRoot(root: string): void {
   rmSync(root, { recursive: true, force: true });
+}
+
+/**
+ * Remove a symbolic link or junction itself, never what it points at; a path that is not a link is left alone and a missing path is
+ * a no-op. `rmSync` without `recursive` is not a way to do this: Node 24.0.0 refuses a link to a directory ("Path is a directory"),
+ * where Node 22 and 26 remove it.
+ */
+export function removeLink(linkPath: string): void {
+  if (lstatSync(linkPath, { throwIfNoEntry: false })?.isSymbolicLink()) unlinkSync(linkPath);
 }
 
 /** Write `content` at `rel` under `root`, creating the directories. Strings are written as UTF-8. */

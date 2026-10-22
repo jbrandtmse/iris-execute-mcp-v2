@@ -94,9 +94,11 @@ describe("throwaway-iris: the images", () => {
     expect(validateImage(IRISHEALTH_COMMUNITY_IMAGE)).toBe(IRISHEALTH_COMMUNITY_IMAGE);
   });
 
-  it("pins the oldest pullable IRIS Community tag (2024.3) by its manifest-list digest", () => {
+  // The oldest tag whose license key had not expired on 2026-10-22 (2024.3, 2025.1 and 2025.2 refused to start); captured by
+  // running the bootstrap-guard gate through `throwaway-iris.mjs run --image <ref>` for each tag, in that order.
+  it("pins the oldest IRIS Community tag that still starts (2025.3) by its manifest-list digest", () => {
     expect(OLDEST_IRIS_COMMUNITY_IMAGE).toBe(
-      "intersystems/iris-community:2024.3@sha256:0d6dbb91f71c69a65d8577741647e961168e90699e26d158e984a2a2919a874d",
+      "intersystems/iris-community:2025.3@sha256:f456892d143d54a1cf3f202f04b672c7d594ec3cde5f47a69dbf5451329dc300",
     );
     expect(validateImage(OLDEST_IRIS_COMMUNITY_IMAGE)).toBe(OLDEST_IRIS_COMMUNITY_IMAGE);
   });

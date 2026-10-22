@@ -41,7 +41,7 @@ const DOCDB_OK = globalThis.__DOCDB_AVAILABLE__;
 
 // ── Test constants ────────────────────────────────────────────────────
 
-const TEST_DB = "MCPDataTest_DocDB";
+const TEST_DB = "MCPDataTestDocDB";
 
 // ── Shared state ──────────────────────────────────────────────────────
 

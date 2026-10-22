@@ -376,13 +376,14 @@ describe.skipIf(!IRIS_OK)("iris-dev-mcp integration", () => {
 
     it("iris_sql_execute with invalid SQL returns error", async () => {
       const result = await sqlExecuteTool.handler(
-        { query: "SELECT * FROM NonExistent.Table.ThatDoesNotExist12345" },
+        { query: "SELECT * FROM NoSuchSchema12345.NoSuchTable12345" },
         ctx,
       );
 
       expect(result.isError).toBe(true);
       expect(result.content[0]?.text).toContain("SQL error");
-      // The SQLCODE proves IRIS ran the prepare; a missing /dev/sql/execute route would also say "SQL error".
+      // The SQLCODE proves IRIS ran the prepare; a missing /dev/sql/execute route would also say "SQL error". The names are not
+      // reserved words (TABLE is one: it parses as a syntax error, SQLCODE -1) and name no schema or table that exists.
       expect(result.content[0]?.text).toContain("SQLCODE: -30");
     });
 

@@ -70,7 +70,10 @@ async function probeCustomRest(): Promise<boolean> {
  * Sends a GET to `/api/docdb/v1/{namespace}`. A successful response
  * indicates the API is available. A 403 means %Service_DocDB is
  * disabled; a 404 means the web app is not deployed. Both indicate
- * the DocDB API is not usable.
+ * the DocDB API is not usable. IRIS 2026.2 answers a disabled service
+ * with HTTP 200 and `ERROR #822: Access Denied` in the body, which the
+ * HTTP client raises as an error that carries that code; the code is
+ * matched without its prefix, which a localized instance words differently.
  */
 async function probeDocDb(): Promise<boolean> {
   const config = getIntegrationConfig();
@@ -80,6 +83,7 @@ async function probeDocDb(): Promise<boolean> {
     await client.get(`/api/docdb/v1/${encodeURIComponent(ns)}`);
     return true;
   } catch (error: unknown) {
+    if (error instanceof Error && /#822\b/.test(error.message)) return false;
     if (error && typeof error === "object" && "statusCode" in error) {
       const statusCode = (error as { statusCode: number }).statusCode;
       // 404 = web app not deployed; 403 = %Service_DocDB disabled

@@ -325,7 +325,8 @@ describe("DW-676: every armed file runs in a suite, and a skip is never silent",
     const entries = (Object.entries(LIVE_SUITES) as Array<[string, { expectedFiles: () => string[]; allowedSkips: Array<{ file: string; test: string; reason: string }> }]>).flatMap(([id, suite]) =>
       suite.allowedSkips.map((entry) => ({ id, suite, ...entry })),
     );
-    expect(entries.length, "the 4 capture legs").toBe(4);
+    expect(entries.length, "the 4 capture legs and the 9 DocDB lifecycle tests").toBe(13);
+    expect(entries.filter(({ id }) => id === "integration-data").length, "the DocDB lifecycle of data.integration.test.ts, all of it").toBe(9);
     for (const { id, suite, file, test, reason } of entries) {
       expect(existsSync(path.join(REPO_ROOT, file)), `${id}: ${file} exists`).toBe(true);
       expect(suite.expectedFiles(), `${id}: ${file} is a file the suite runs`).toContain(file);
