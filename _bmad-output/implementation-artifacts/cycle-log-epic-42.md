@@ -104,3 +104,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-22T04:35:19Z	Story 42.3	protocol_violation	stage=implement depth=3 agent=handoff violation=ran_docker_--version_despite_no-docker_rule consequence=none(client-side_version_query,no_container_or_registry_action) detected_by=implement_self_report outcome=noted
 2026-10-22T04:35:19Z	Story 42.3	adr_verifications_complete	tool=none acs=none result=none_required evidence= mutations=none note=CI_live_proof_is_the_lead_smoke_checklist model=claude-opus-5-5
 2026-10-22T04:35:19Z	Story 42.3	stage_spawned	stage=qa spawn_at=2026-10-22T04:35:19Z model=claude-sonnet-5-5 agent_name=42-3-ci-workflow-qa-1 cycle_iteration=1
+2026-10-22T05:04:46Z	Story 42.3	qa_complete	spawn_at=2026-10-22T04:35:19Z model=claude-sonnet-5-5 tests_added=3_files(25_tests)+fake-docker_helper mutations_demonstrated=9 first_run_failures=0 clarifications=0 closing_sections_present=true cycle_iteration=1 note=no_docker(fake_docker_on_PATH);Rule55_heredoc_once
+2026-10-22T05:04:46Z	Story 42.3	stage_spawned	stage=code-review spawn_at=2026-10-22T05:04:46Z model=claude-opus-5-5 agent_name=42-3-ci-workflow-code-review-1 cycle_iteration=1
