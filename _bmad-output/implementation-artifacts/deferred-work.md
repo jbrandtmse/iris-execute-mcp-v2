@@ -3862,3 +3862,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-22T16:59:16Z status=routed owner=burndown by=cr note=also 42-10 audit-namespace test:66, shared test-helpers auditLines (11 calls); pin dw579 readEntries; out-of-footprint
 - 2026-10-22T19:13:03Z occurrence=42-4-ipm-package-revival note=flake_hit_again:run_39819176668_attempt2(unchanged_green_head_ff56c62)_gates_node22.17.0:story-43-4-qa-probe-copy.test.ts_'the_first_process,the_probe,got_SIGTERM:expected_[]_to_include_<pid>';attempt1_green;priority_for_the_burn-down
 - 2026-10-22T19:43:58Z owner=42-5-release-workflow by=lead note=decision_74:third_hit_today(run_39838191935_gates_node26:story-43-4-qa-probe-copy_'the_probe_got_SIGTERM:expected_[]_to_include_<pid>');recurring_CI_flake_blocks_dependent_jobs;fix_before_the_release_workflow_relies_on_green_CI(also_check_the_probe-copy_test's_signal/exit_bookkeeping,not_only_partial_lines)
+
+### DW-694: No gate installs the IPM artifact the registry actually serves: Open Exchange tars the packaging repository's root as-is, while CI's ipm job proves IPM's own package output
+- source: spec-42-5-release-workflow.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 42.5 plan: the release pushes the stamped module to jbrandtmse/iris-execute-mcp-v2-ipm (decision 76); the registry serves a tar of that repository root
+- 2026-10-22T23:44:29Z status=routed owner=42-8-claude-code-plugin-and-registry-listings by=harvest note=42.8 adds a gate that tars the packaging repository root the way Open Exchange does and installs it offline, before the listing goes live

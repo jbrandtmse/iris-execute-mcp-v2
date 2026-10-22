@@ -5860,6 +5860,7 @@ DW-389, D5.
 - **AC 42.8.4** — Live check: in a clean Claude Code, add the marketplace, install the plugin, and confirm the five servers connect and the skills list. The result is recorded.
 - **AC 42.8.5** — An MCP Registry listing (the current registry requirements are probed; namespace verification as required), and an Open Exchange listing for the IPM package. Listing needs the Lead's InterSystems Developer Community account.
 - DW-625: the 41.6 installer's `claude-code` route installs the skills even when the plugin is present (AD-28 Duplicates), because no plugin existed to detect. Once the plugin exists, make that route of `iris-mcp-clients skills install` install only the rule when it detects the plugin, with a test for each case. (ledger; routed by harvest 2026-10-19)
+- DW-694: no gate installs the IPM artifact the registry actually serves. Open Exchange tars the packaging repository root as-is (decision #76), while CI's `ipm` job proves IPM's own `package` output. Add a gate that tars the packaging repository root the same way and installs it offline, before the listing goes live. (ledger; routed by harvest 2026-10-22)
 
 ### Story 42.9: Install Docs and Client Re-Certification
 
