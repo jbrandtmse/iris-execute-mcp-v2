@@ -1,12 +1,14 @@
 /**
- * A test removes a link to a directory with `unlink`, never with `rmSync(link, { force: true })`. Node 24.0.0 refuses that call on a
- * link to a directory ("Path is a directory"), where Node 22 and 26 remove the link, so a test that does it passes on a developer
- * machine and fails on the 24.0.0 leg of CI's `gates` job.
+ * A test removes a link to a directory with `unlink`, never with `rmSync`. Node 24.0.0 refuses every non-recursive `rmSync` of a
+ * link to a directory ("Path is a directory"), whatever its options (`force`, `maxRetries`, `recursive: false` or none), where Node 22
+ * and 26 remove the link, so a test that does it passes on a developer machine and fails on the 24.0.0 leg of CI's `gates` job.
  *
  * Two parts. `removeLink` (the helper the scratch-copy tests use) is shown on a real link to a real directory; its cases pass on
  * every Node but 24.0.0, whatever the helper does. And a scan of the test sources finds any file that makes links and also calls
- * `rmSync` or `rm` with `force: true` and no `recursive`, in any layout prettier gives the call, which is the call that fails; on
- * every other Node the scan is what fails when the helper's `unlinkSync` is replaced by that call.
+ * `rmSync` or `rm` with `force: true` and no `recursive`, in any layout prettier gives the call: the form the scratch-copy tests
+ * used. On every other Node the scan is what fails when the helper's `unlinkSync` is replaced by that call. The scan does not flag
+ * a non-recursive call without `force`, because the same files remove regular files that way; such a call on a link fails on the
+ * 24.0.0 leg alone.
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -41,7 +43,8 @@ describe("removeLink removes the link and nothing it points at", () => {
     expect(readFileSync(path.join(target, "kept.txt"), "utf8")).toBe("kept\n");
   });
 
-  it("a link to a file and a dangling link go too", () => {
+  // A file or dangling symbolic link needs the symlink privilege on Windows (EPERM without it); a junction does not.
+  it.skipIf(process.platform === "win32")("a link to a file and a dangling link go too", () => {
     const root = scratch();
     writeFileSync(path.join(root, "file.txt"), "x\n");
     symlinkSync(path.join(root, "file.txt"), path.join(root, "to-file"));

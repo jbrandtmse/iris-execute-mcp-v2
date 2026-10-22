@@ -375,6 +375,80 @@ Code review 2026-10-22 (four layers, all delivered: Blind Hunter, Edge Case Hunt
 - `[low]` `parseCli(["run", …])` now refuses a repeated flag. This was already adjudicated at the implement review with a reopen_if, and every valid call is pinned byte-identical.
 - `[false]` The em-dashes in `prepublish-gate.mjs` are in comments carried over from existing text. Rule 14 exempts prose comments.
 
+### Review Findings (rework re-review, iteration 1 of 3)
+
+Code review 2026-10-22, on the rework diff `eaa56ff..HEAD`. Four layers ran and all delivered (Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor); review tier full-opus; none of them edited or committed anything. 36 rows: 14 rejected (appendix below), and 22 kept in 13 root-cause entries (high 0, medium 4, low 9). Each entry lists severity, fix-risk and disposition (Rule 15).
+
+**The six `[CI]` items:**
+- Items 1, 2, 3, 4 and 6 are confirmed fixed. After this pass's patches, the floor checks ran on the real Node 24.0.0 and 22.17.0 binaries (Verification below).
+- Item 5 is resolved as the item allowed: a skip with an allowlisted reason. The defect it uncovered in the product is ledgered as DW-688.
+- The amd64 run of 2025.3 is still proven only by the lead's next CI run.
+
+**Patches (all applied):**
+- [x] [Review][Patch] **Windows symlink guard.** The case "a link to a file and a dangling link go too" makes file and dangling symlinks with no Windows guard. Without the symlink privilege, Windows answers EPERM; the sibling tests skip there. The case now runs under `it.skipIf(process.platform === "win32")`. [packages/iris-mcp-all/src/__tests__/symlink-removal.test.ts:47]
+  - low; fix-risk low; in-story
+- [x] [Review][Patch] **The symlink-removal header named the wrong failing call.** It said the call that fails is `rmSync` with `force` and no `recursive`.
+  - The probe on real binaries: Node 24.0.0 throws `ERR_FS_EISDIR` on every non-recursive `rmSync` of a directory link (no options, `force`, `maxRetries`, `recursive: false`), and 22.17.0 removes the link in all four forms.
+  - The header now states that condition, and says why the scan matches only the force-only form: the same files remove regular files non-recursively, and the 24.0.0 leg catches any other form.
+  - [packages/iris-mcp-all/src/__tests__/symlink-removal.test.ts:1-12]
+  - low; fix-risk low; in-story
+- [x] [Review][Patch] **The scan header left out four forms the scan misses.** They are an initializer continued after a trailing operator, a second declarator in one statement, a `createRequire` require, and an import after a regular expression placed right after `)`. A probe of each returns `[]`. No script uses any of them: every `.ts` literal in the script directories is a comment or a vitest file argument. The header now lists them. [scripts/lib/script-ts-import-scan.mjs:15-20]
+  - low; fix-risk low; in-story
+- [x] [Review][Patch] **Rule 14: a test title narrated history.** It read "the generator as it stood in the first CI run is found". It is now titled by what it checks. The fixture constant keeps its provenance comment (Rule #36). [packages/iris-mcp-all/src/__tests__/script-ts-imports.test.ts:59]
+  - low; fix-risk low; in-story
+- [x] [Review][Patch] **The floor-leg checks were not pinned into the default suite.** Unlike the 42.1 checks, `script-ts-imports` and `symlink-removal` had no pin keeping them in the default suite of `@iris-mcp/all`. A later exclude could drop the only checks for items 1 and 2 with nothing red (Rule #59). A new `it.each` case pins both (mutation recorded). [packages/iris-mcp-all/src/__tests__/ci-workflow.test.ts:429]
+  - low; fix-risk low; in-story
+- [x] [Review][Patch] **The README did not say the DocDB lifecycle never runs in CI.** Its CI section said every integration suite runs, but not that the 9 DocDB lifecycle tests are allowlisted skips. The allowedSkips paragraph now names the allowlist's content and the reason. [README.md:1077]
+  - low; fix-risk low; in-story
+- [x] [Review][Patch] **The generator's text did not say what `--check` reads.** Its header and inline comment did not say that `--check` reads the built shared dist, or that a direct `node` run reads whatever dist was built last. Both now say so.
+  - The stdout label `(committed)` stays: a test pins it, and it names where the frozen set comes from.
+  - [scripts/gen-governance-baseline.mjs:19-22,175-177]
+  - low; fix-risk low; in-story
+- [x] [Review][Patch] **The final tree had not run on the floor binaries.** After the rework's own review patches, its floor checks had run only on the host Node.
+  - Now run on real Node 24.0.0: 4 files, 135 passed.
+  - And on 22.17.0: 3 files, 118 passed; the shared generator tests, 5 passed; `pnpm gen:governance-baseline:check`, OK at 141.
+  - low; fix-risk low; in-story
+
+**Deferred (each ledgered or handed to the lead):**
+- [x] [Review][Defer] **A DocDB database created through `iris_docdb_manage create` is unusable on IRIS 2026.2.**
+  - The REST create (`httpPostDatabase`, `irislib/%Api/DocDB/v1.cls:299-313`) registers no `Security.DocDBs` record. Every other route runs `CheckAccess^%SYS.DOCDB`, which refuses a database without one (`irislib/%SYS/DOCDB.int:15`). So every property, document, find and drop call answers a raw `#822`, even with `%Service_DocDB` enabled.
+  - InterSystems' own `Ens.Setting.Report.base:629` calls `$$Create^%SYS.DOCDB` itself. The data README names only the service as the prerequisite.
+  - This is a product defect that predates 42.3. This story's Never list forbids touching the tool surface and the bootstrapped classes.
+  - med; fix-risk high (a real fix is a `%SYS` write on create); out-of-footprint; escalated (DW-688, owner burndown; decide before the 1.0.0 publish)
+- [x] [Review][Defer] **The DocDB lifecycle now runs nowhere.** CI allowlists it, and the shared IRIS skips it too, because the service is disabled there (read-only `iris_docdb_manage list`). So the `TEST_DB` rename and the probe's "unavailable" side cannot be shown red, and the first clause of DW-687's `reopen_if` cannot fire.
+  - med; fix-risk med; in-epic; DW-687 occurrence (fixing DW-688 makes the lifecycle runnable in CI)
+- [x] [Review][Defer] **Community license expiry is handled as a one-time step for one image.**
+  - From 2026-11-13, `bootstrap-guard-oldest` turns `throwaway` red and skips `package` on every CI run on every ref, not only at the `v1.0.0` tag. Under decision #63, that red would land on an unrelated story's commit.
+  - The 2026.2 pins' keys expire too: the shared IRIS for Health 2026.2 Community key runs to 2027-06-26 (read-only `iris_license_info`).
+  - Story 42.9 must state the tested floor as a dated value.
+  - med; fix-risk low; in-epic; DW-686 occurrence (owner 42-6). Lead attention: decision #65 is the lead's.
+- [x] [Review][Defer] **The resource and role list tests assert nothing when the create did not succeed.** Already ledgered as a DW-684 occurrence at 08:17:18Z, so no new line was added.
+  - med; fix-risk med; out-of-footprint; escalated (DW-684, owner burndown)
+- [x] [Review][Defer] **A spine convention is stale.** "Live testing on a shared instance" still says only the lead starts a throwaway, while decision #64 let the rework stage start them.
+  - low; out-of-footprint; lead action under Rule 20, no ledger entry
+
+**Rejected:**
+- `[low]` **Three other page-1 list checks** in `admin.integration.test.ts` (database, namespace, web app): outside the rework range and not HIGH. A missed row there is a false red, never a false green, and the fresh-instance run passed all three (28/0). reopen_if: an armed `integration-admin` run fails one of them on an instance with more than 50 rows.
+- `[low]` **`probeDocDb` matches the `#822` text instead of `errors[].code`:**
+  - the `#n` token is the part of the message that is stable across locales;
+  - the text match was proven on a throwaway;
+  - a code check cannot be verified live in this review.
+  - reopen_if: the probe misreads an `#822` answer.
+- `[low]` **The prefix-free `#822` match is unpinned.** Pinning it means extracting the probe from a setup file that probes on import, and the match handles a localized prefix by construction.
+- `[low]` **The symlink scan misses forms without `force`.** This is real (probed), but in the link-making test files every non-recursive `rm` removes a regular file, so widening the scan would flag them. The 24.0.0 leg catches such a call; the header is corrected (above).
+- `[low]` **`MAKES_LINKS` does not list `installDeclaredDependencies`.** Its two users remove only recursively.
+- `[low]` ×4 **The scan's blind spots** (trailing operator, second declarator, `createRequire`, regex after `)`): no script uses any of them, a fix adds lexer branches, and the 22.17.0 leg is the real gate. The header now lists them.
+- `[low]` **`listAllNames` follows a positional cursor.** The CI throwaway has no concurrent writer, and a fix adds a retry. reopen_if: a resource or role list verification flakes on an armed run.
+- `[low]` **`removeScratchRepo` lost its try/catch.** Already adjudicated at the rework's own review, with a `reopen_if`.
+- `[false]` **The governance tests need the built shared dist.** The generator already needed the five server dists, and CI builds first.
+- `[low]` **The Verification loops do not list the new files.** The fix edits the spec's command list. Both files run in the default `@iris-mcp/all` suite, and this pass's runs are recorded under Verification.
+- `[false]` **Rule #55 was breached.** The heredoc-written file is intact (ASCII, no NUL bytes, `node --check` passes, 26 tests green). The deviation is already in the cycle log for the retro.
+
+**Not a finding:**
+- Rule 3: this is a build-pipeline story, so it is exempt.
+- Rule 6: AD-29 holds. The new allowlist entries carry a reason, and the 2025.3 pin is a manifest-list digest that the Stack row names.
+- Rule 2: there is no shared pagination helper or JS lexer to extend.
+
 ## Spec Change Log
 
 - 2026-10-22, lead, at the smoke: the first CI run (https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39730712530, sha 221181a) was red; six [CI] items added for rework iteration 1 (wave-8 decisions #63 and #64).
@@ -649,6 +723,24 @@ Run from `/Users/jbrandt/git/iris-execute-mcp-v2`, one command per foreground ca
   - mutation: (item 2, scan half, on Node 26.8.1) `removeLink` in `pack-fixture.ts` made `rmSync(linkPath, { force: true })` again → `symlink-removal.test.ts` 2 red: the scan, naming `iris-mcp-all/src/__tests__/pack-fixture.ts`, and the real-directory case (on Node 26 the call throws on a real directory); the two link cases stay green on every Node but 24.0.0, so the scan is what fails there
   - mutation: (item 3) `OLDEST_IRIS_COMMUNITY_IMAGE` put back to the 2024.3 digest → `throwaway-iris.test.ts` 1 red, the oldest-image pin
   - not pinned by a test that can fail: the page-error throw of `listAllNames` (diagnostic text only; the item 4 line covers its pagination), the prefix-free `#822` match (the item 5 line covers the match), and the `--check` message wording
+
+**Code review pass, rework re-review iteration 1 (2026-10-22).**
+- Every run used `UNARMED CI=true` and nothing else: no docker, no throwaway, no push, no CI, nothing armed.
+- The real floor binaries were `scratchpad/node24` (v24.0.0) and `scratchpad/node22` (v22.17.0), from the rework, with `PATH` set to each.
+- After the revert, `git diff | shasum` matched the fingerprint taken before the mutation (`3ba3c02d…`).
+- Runs:
+  - `node --check` passes on `scripts/gen-governance-baseline.mjs` and `scripts/lib/script-ts-import-scan.mjs`.
+  - Host Node 26.8.1: `ci-workflow.test.ts` 86 passed (84 plus the 2 new floor-leg pins), `symlink-removal.test.ts` 6, `script-ts-imports.test.ts` 26.
+  - Node 24.0.0: `symlink-removal`, `script-ts-imports`, `ci-workflow` and `validate-prompts-pack-checks`, 4 files, 135 passed.
+  - Node 22.17.0:
+    - the first three of those files: 3 files, 118 passed;
+    - shared `governance-baseline-check` and `governance-derivation-lockstep`: 5 passed;
+    - `pnpm gen:governance-baseline:check`: OK, 141 frozen keys, baseline file unchanged.
+  - The read-only marker probe returns `0.0.2+1.995fbbb1055d`.
+- Probe (not a mutation), on real binaries, of `rmSync` on a link to a directory:
+  - Node 24.0.0 throws `ERR_FS_EISDIR` with no options, with `force`, with `maxRetries` and with `recursive: false`;
+  - 22.17.0 removes the link in all four forms.
+- mutation: (the floor-leg pin) `src/__tests__/symlink-removal.test.ts` added to the `exclude` of `packages/iris-mcp-all/vitest.config.ts` → `ci-workflow.test.ts` 1 red, `symlink-removal.test.ts, a floor-leg check, exists and is inside the include and outside the exclude`.
 
 **Lead checklist (AC 42.3.6; lead only, after the story commit is pushed to `epic42`):**
 1. Wait for the story commit's run, and record its URL and per-job durations.

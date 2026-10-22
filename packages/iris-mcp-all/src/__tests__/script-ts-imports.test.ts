@@ -56,7 +56,7 @@ describe("no repository script imports a TypeScript file", () => {
     expect(scriptTsImportProblems()).toEqual([]);
   });
 
-  it("the generator as it stood in the first CI run is found, naming the line and the variable", () => {
+  it("a .ts path that reaches import() through a variable is found, naming the line and the variable", () => {
     expect(tsImportProblems(DEFECTIVE_GENERATOR, "gen-governance-baseline.mjs")).toEqual([
       "gen-governance-baseline.mjs:10 imports a TypeScript file: 'packages/shared/src/governance-baseline.ts' (through outPath)",
     ]);

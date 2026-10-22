@@ -3813,8 +3813,16 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-3-ci-workflow.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 42.3 rework: 2024.3, 2025.1 and 2025.2 keys already expired (harness probes 2026-10-22); 2026.1 (sha256:c57b65b2b454494091e7b3e49f6a53b3335f40adf475bcfcee0866083f35a7c2) passes the guard, key to 2027-03-27
 - 2026-10-22T08:17:18Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=harvest note=before tagging v1.0.0 (CI must be green on that commit): if the date is on or after 2026-11-13, move OLDEST_IRIS_COMMUNITY_IMAGE to 2026.1 and update the Stack row and 42.9's tested floor
+- 2026-10-22T08:37:52Z occurrence=42-3-ci-workflow note=cr: red on every CI run from 2026-11-13, not just at the v1.0.0 tag; 2026.2 keys expire ~2027-06-26; 42.9 dates its floor
+- 2026-10-22T08:42:32Z owner=42-4-ipm-package-revival by=cr_followup note=decision_66:the_expiry_turns_every_CI_run_red_from_2026-11-13,not_only_the_tag;42.4_(next_story,edits_CI)_moves_the_oldest_leg_to_2026.1_now;all_CI_image_keys_expire(2026.2_~2027-06-26)_so_moving_images_forward_is_a_standing_maintenance_step(decision_sheet_action_item)
 
 ### DW-687: The nine DocDB lifecycle tests of data.integration.test.ts never run in CI: a fresh instance has no enabled %Service_DocDB and no Security.DocDBs record for the test database, and enabling the service in the seed would make the Epic 35 F5 gate skip
 - source: spec-42-3-ci-workflow.md | severity: low | fix-risk: med | footprint: in-epic
 - evidence: 42.3 rework: the setup probe reads ERROR #822 as unavailable; ci-checks.mjs allowlists the 9 by name
 - 2026-10-22T08:17:18Z status=wontfix-accepted owner=42-3-ci-workflow by=harvest note=reopen_if=a DocDB regression ships that the shared-instance runs missed, or a story adds a seeded DocDB fixture that keeps the F5 gate armed
+- 2026-10-22T08:37:52Z occurrence=42-3-ci-workflow note=cr: reopen_if clause 1 cannot fire (the shared IRIS skips the lifecycle too); DW-688 is the DocDB defect no run caught
+
+### DW-688: A DocDB database created through iris_docdb_manage create is unusable on IRIS 2026.2: the REST create registers no Security.DocDBs record, so every property, document, find and drop call then answers a raw ERROR #822 even with %Service_DocDB enabled
+- source: spec-42-3-ci-workflow.md | severity: med | fix-risk: high | footprint: out-of-footprint
+- evidence: irislib/%Api/DocDB/v1.cls:299-313 (httpPostDatabase) only calls CreateDatabase, while every other route runs CheckAccess^%SYS.DOCDB, which fails with no SECURITY(DocDBsD,name,ns) (irislib/%SYS/DOCDB.int:15). Ens.Setting.Report.base:629 calls $$Create^%SYS.DOCDB itself. The 42.3 rework reproduced it on a 2026.2 throwaway (spec deferred item 6). translateDocDbAccessDenied passes #822 through when the service is enabled, and the data README names only the service
+- 2026-10-22T08:37:47Z status=escalated owner=burndown by=cr note=decide before the 1.0.0 publish (42.6): register the record on create (a %SYS write, bootstrap) or document it (42.9)

@@ -13,8 +13,11 @@
 //       literal (`const outPath = resolve(root, 'a/b.ts'); await import(pathToFileURL(outPath).href)`). A variable that is only
 //       written to or read as text is not reported, and neither is an argument the scan cannot trace (a parameter).
 //   The scan is lexical, so it does not find: a path assigned after its declaration, a literal that spans lines or sits inside a
-//   template's `${...}`, a statement that shares its line with another, or a bare specifier whose package `exports` target is a
-//   `.ts` file. A variable name is matched wherever the file declares it, whatever the scope.
+//   template's `${...}`, an initializer continued after a trailing operator (`root +` then the literal on the next line), a second
+//   declarator of one statement (`const a = 1, p = './x.ts'`), a require made by `createRequire`, an import that follows a regular
+//   expression placed right after a `)` (the `/` is read as division), a statement that shares its line with another, or a bare
+//   specifier whose package `exports` target is a `.ts` file. A variable name is matched wherever the file declares it, whatever
+//   the scope.
 //   Every scan reads files and never runs anything.
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';

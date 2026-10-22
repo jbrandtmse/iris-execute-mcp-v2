@@ -19,7 +19,9 @@
 //
 //   node scripts/gen-governance-baseline.mjs --check
 //       SAFE. Re-derives the LIVE governance keys from the built server dists
-//       and verifies the FROZEN committed baseline ONE-DIRECTIONALLY (mirrors
+//       and verifies the FROZEN committed baseline, read from the built shared
+//       dist (build @iris-mcp/shared first; the pnpm script's pre-hook does),
+//       ONE-DIRECTIONALLY (mirrors
 //       the governance.test.ts drift guard): every frozen foundation key must
 //       still exist in the live surface (a vanished key is a real back-compat
 //       regression → exit 1). New post-foundation keys are EXPECTED and allowed
@@ -173,7 +175,8 @@ function computeHash(sortedKeys) {
 
 const outPath = resolve(root, 'packages/shared/src/governance-baseline.ts');
 // --check reads the BUILT module, never `outPath`: Node strips types from a `.ts` import only from 22.18, and the floor is
-// 22.17.0. The shared dist is built by the pre-hook (and by `pnpm build`) from `outPath`, so it holds the same frozen set.
+// 22.17.0. The shared dist is built from `outPath` by the `pnpm gen:governance-baseline:check` pre-hook and by `pnpm build`, so
+// after a build it holds the same frozen set; a direct `node` run reads whatever dist was built last.
 const builtBaselinePath = resolve(root, 'packages/shared/dist/governance-baseline.js');
 
 // VANISHED_HINT is imported from the shared derivation module (single source of truth,

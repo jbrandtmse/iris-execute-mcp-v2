@@ -5802,6 +5802,7 @@ DW-34, D6.
 - **AC 42.4.3** — The bootstrap's `zpm "install iris-execute-mcp-v2"` fallback message (`bootstrap.ts:95-96`) is made accurate for the published package.
 - **AC 42.4.4** — Publishing to the IPM registry happens in 42.5's release workflow; the Open Exchange listing is in 42.8.
 - DW-674 (wave-8 decision #53): implement AD-14's Ownership and IPM-upgrade bullets. Bootstrap detects IPM-installed classes and never redeploys them (it reports the mismatch and the `zpm` command), and the IPM install/upgrade path runs the same no-downgrade check IRIS-side, reusing Story 42.2's marker grammar and ordering table, with a parity test between the TypeScript comparator and the IRIS-side one. (ledger; routed by harvest 2026-10-21)
+- DW-686 (wave-8 decisions #65 and #66): Community license keys expire. The CI oldest-image leg uses `iris-community:2025.3`, whose key expires on 2026-11-13; from then every CI run on every branch would go red. Move `OLDEST_IRIS_COMMUNITY_IMAGE` to `2026.1` (`sha256:c57b65b2b454494091e7b3e49f6a53b3335f40adf475bcfcee0866083f35a7c2`, key valid to 2027-03-27) in this story, which edits CI anyway, and keep 2025.3's green guard run of 2026-10-22 on record as support-claim evidence. (ledger; routed by harvest 2026-10-22, re-owned from 42.6 by decision #66)
 
 ### Story 42.5: Release Workflow
 
@@ -5833,7 +5834,6 @@ DW-47, DW-300, D2.
 - DW-612: nothing on the publish path runs `gen:pack --check` or `check:provenance`. client-config's `prepublishOnly` runs only `verify-iris-reachable`, so a publish made without the default suite could ship a drifted skills pack or a tarball without `IRIS-MCP-THIRD-PARTY-NOTICES.md`. Add both checks to the publish path and prove them red on that path (Rule #59). (ledger; routed by harvest 2026-10-19 from Story 41.1)
 - DW-665: each package keeps a tracked `CHANGELOG.md` that `changeset version` fills, but `pnpm pack` does not ship it (`files` names only `dist`, plus `skills-pack` for client-config). Decide whether the `1.0.0` tarballs carry their changelog, before publishing. (ledger; routed by harvest 2026-10-21)
 - DW-637 (residual from 42.1, re-owned at adjudication 2026-10-21): `@modelcontextprotocol/server` 2.3.1 is still the newest release and the upstream fast-uri fix (typescript-sdk PR #2973) is unmerged. Re-check right before the `1.0.0` tag: if a release pins fast-uri 3.1.8 or later, bump the exact pin and re-run the epic-43 wire goldens; otherwise record the check and its date. (ledger; routed by adjudication 2026-10-21)
-- DW-686 (wave-8 decision #65): the CI oldest-image leg uses `iris-community:2025.3`, whose Community license key expires on 2026-11-13. Before tagging `v1.0.0` (CI must be green on that commit), if the date is on or after 2026-11-13, move `OLDEST_IRIS_COMMUNITY_IMAGE` to 2026.1 (`sha256:c57b65b2b454494091e7b3e49f6a53b3335f40adf475bcfcee0866083f35a7c2`) and update the Stack row and 42.9's tested floor. (ledger; routed by harvest 2026-10-22)
 
 ### Story 42.7: VS Code Extension Publish
 

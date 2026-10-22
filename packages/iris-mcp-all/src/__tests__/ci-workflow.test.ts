@@ -425,6 +425,14 @@ describe("the 42.1 package checks run in the default suite of @iris-mcp/all (AC 
     expect(runs(file), file).toBe(true);
   });
 
+  // The checks that only the 22.17.0 and 24.0.0 legs of `gates` would otherwise catch: a script's `.ts` import, a link removed by `rmSync`.
+  it.each(["script-ts-imports", "symlink-removal"])("%s.test.ts, a floor-leg check, exists and is inside the include and outside the exclude", (name) => {
+    const file = `src/__tests__/${name}.test.ts`;
+
+    expect(existsSync(path.join(PACKAGES_DIR, "iris-mcp-all", file))).toBe(true);
+    expect(runs(file), file).toBe(true);
+  });
+
   it("the include and exclude matcher tells the default suite from an integration file", () => {
     expect(runs("src/__tests__/anything.test.ts")).toBe(true);
     expect(runs("src/__tests__/anything.integration.test.ts")).toBe(false);
