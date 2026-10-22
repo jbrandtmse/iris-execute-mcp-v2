@@ -2,7 +2,7 @@
 title: 'Story 42.3: CI Workflow'
 type: 'feature'
 created: '2026-10-21'
-status: 'done'
+status: 'in-progress'
 baseline_revision: '23ffa9aef4050b6bc4cbbdb5bba26676d860199b'
 baseline_commit: '23ffa9aef4050b6bc4cbbdb5bba26676d860199b'
 review_loop_iteration: 0
@@ -306,6 +306,12 @@ deferred:
 - **Shared instance:** Given each stage's end, when `SELECT ExecuteMCPv2.Setup_GetBootstrapVersion()` runs read-only (`server:"default"`, `namespace:"HSCUSTOM"`), then it returns `0.0.2+1.995fbbb1055d`.
 - [x] [Lead, after implement] DW-681: given the admin integration suite armed against the throwaway, when its OAuth tests are collected, then their skip condition is evaluated at run time (after `beforeAll`), so they run when OAuth is available and skip with a reason otherwise. The two `ci-live-suite` allowlist entries for them are removed (or kept only for the genuinely unavailable case, with that reason). Pin it, and record its `mutation:` line.
 - [x] [Lead, after implement] DW-682: given a burst of pushes to `main`, when a newer run queues, then no earlier `main` run is cancelled or superseded: `main` gets a per-sha concurrency group, and the workflow self-test pins it while keeping cancel-in-progress for other refs. Record its `mutation:` line.
+- [ ] [CI] gates (node 22.17.0) / test @iris-mcp/shared: `governance-baseline-check.test.ts` (3) and `governance-derivation-lockstep.test.ts` (1) fail because `scripts/gen-governance-baseline.mjs --check` imports `packages/shared/src/governance-baseline.ts` directly ("Unknown file extension .ts"); Node strips types by default only from 22.18, and the floor is 22.17.0 — https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39730712530 — make every repo script that imports a `.ts` file work on the 22.17.0 floor (import the built `.js`, or run it with the flag the floor needs), and add a check that catches a `.ts` import from a script on the floor.
+- [ ] [CI] gates (node 24.0.0) / test @iris-mcp/all: 22 tests of `story-41-5-qa-gen-skills-refusal.test.ts` (and its sibling `gen:skills and validate:prompts CLI, scratch copy`) fail with "Path is a directory" at `rmSync(dir, { force: true })` on a symlink to a directory (`:105`, `stubOps`) — Node 24.0.0's `rmSync` refuses a symlinked directory — same run — remove a symlink with `unlinkSync` (or `rmSync` only after `lstat` says it is not a link) everywhere the tests do this.
+- [ ] [CI] throwaway / suite bootstrap-guard-oldest: `intersystems/iris-community:2024.3` never starts: "Invalid Community Edition license, may have exceeded core limit" — same run — move `OLDEST_IRIS_COMMUNITY_IMAGE` forward to the oldest tag that starts and passes the bootstrap guard (candidates in order: 2025.1, 2025.2, 2025.3, 2026.1; manifest-list digests from Docker Hub), and record the reason (Community licenses expire, so the oldest testable tag moves forward over time) in the spec and the CHANGELOG for Story 42.9's tested floor.
+- [ ] [CI] throwaway / suite integration-admin: `admin.integration.test.ts:341` (resource in `resource.list`) and `:379` (role in `role.list`) expect the created resource and role in the list and get `false`, on a fresh `irishealth-community:2026.2` seeded into `HSCUSTOM` — same run — find why on a fresh instance (list paging, a default filter, or the create landing elsewhere) and fix the test or the code, whichever is wrong.
+- [ ] [CI] throwaway / suite integration-data: all 6 `DocDB lifecycle integration` tests of `data.integration.test.ts` fail from `:107` (creating the test database returns `isError: true`) on the same fresh instance — same run — read the actual error, then fix the cause (a missing setup step, privilege or edition prerequisite on a fresh instance) or, if DocDB genuinely cannot run there, skip with a reason that `ci-live-suite`'s allowlist names.
+- [ ] [CI] throwaway / suite integration-dev: `tools.integration.test.ts:386` expects `SQLCODE: -30` but gets `SQLCODE: -1 ... IDENTIFIER expected, reserved word TABLE found` — the fixture's table name contains the reserved word `TABLE` — same run — use a non-reserved, non-existent table name so IRIS reports -30.
 
 ### Review Findings
 
@@ -350,6 +356,7 @@ Code review 2026-10-22 (four layers, all delivered: Blind Hunter, Edge Case Hunt
 
 ## Spec Change Log
 
+- 2026-10-22, lead, at the smoke: the first CI run (https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39730712530, sha 221181a) was red; six [CI] items added for rework iteration 1 (wave-8 decisions #63 and #64).
 - 2026-10-22, lead, after the implement stage: added the DW-681 and DW-682 acceptance items (deferred findings that are in-story and small). Code review patches them, or they take the story's one rework iteration.
 
 ## Review Triage Log
