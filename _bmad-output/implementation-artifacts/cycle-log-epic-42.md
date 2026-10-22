@@ -131,3 +131,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-10-22T13:06:25Z	Epic 42	ledger_routed_planned	story=42-5,42-9 entries=2(DW-689,DW-690) excess=0 by=harvest
 2026-10-22T13:06:25Z	Story 42.4	adr_verifications_complete	tool=none acs=none result=none_required evidence= mutations=none model=claude-opus-5-5
 2026-10-22T13:06:25Z	Story 42.4	stage_spawned	stage=qa spawn_at=2026-10-22T13:06:25Z model=claude-sonnet-5-5 agent_name=42-4-ipm-package-revival-qa-1 cycle_iteration=1
+2026-10-22T14:05:32Z	Story 42.4	qa_complete	spawn_at=2026-10-22T13:06:25Z model=claude-sonnet-5-5 tests_added=1_file+parity_table_70->91+seam_checks_in_ci-ipm-archive mutations_demonstrated=31(17_real_IRIS/IPM) first_run_failures=0 clarifications=0 closing_sections_present=true throwaways=via_harness_0_left images_pulled=none cycle_iteration=1 note=qa_extended_scripts/ci-ipm-archive.mjs(+lib)_with_Atelier_guard-doc_GET_seam_check
+2026-10-22T14:05:32Z	Story 42.4	stage_spawned	stage=code-review spawn_at=2026-10-22T14:05:32Z model=claude-opus-5-5 agent_name=42-4-ipm-package-revival-code-review-1 cycle_iteration=1

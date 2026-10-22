@@ -647,6 +647,37 @@ Added in the review pass (each applied, observed red, reverted; `git status --sh
   - mutation: a second forbidden token (`ImportDir`) added to a comment of `scripts/lib/ipm-archive.mjs` -> `document-write-paths.test.ts` "no construct the roster does not model (OBJ.Load*, OBJ.Import*, ImportDir, SetTextFrom*, %Routine %New) exists in the scanned sources" went red.
 - The IRIS-side `InstallGuard` (`Classify`, `Check`) has no default-suite host by design: its red-proofs are the lead's CI branches `guard` and `parity` (lead checklist 2.2 and 2.3).
 
+**QA additions (QA).** Files:
+- `packages/iris-mcp-all/src/__tests__/story-42-4-qa-parity-table.test.ts` (new, default suite): the parity table keeps 21 boundary cases (the ASCII neighbours of 0-9 and a-f, a bad character after a good digit and a bad first character, a hash of f, a third part after the hash, an embedded marker with a neighbour character, NUL, a Latin-1 letter), and the CHANGELOG's case count equals the fixture's length (Rule #51).
+- `packages/shared/src/__tests__/fixtures/bootstrap-marker-parity-cases.json`: 70 to 91 cases; `expected` from a run of `classifyDeployedMarker` in `packages/shared/dist/bootstrap-version.js` over each pair (Rule #36).
+- `scripts/lib/ipm-archive.mjs`, `scripts/ci-ipm-archive.mjs`, `packages/iris-mcp-all/src/__tests__/ci-ipm-archive.test.ts`: the install checks also read the install guard's document through Atelier from inside the container (200) and a document that does not exist (404), so the real IPM-installed guard is shown to be what the bootstrap's ownership read sees; 5 fault rows and 1 name case added.
+- `CHANGELOG.md`: the case count and the new check.
+
+Real-path runs (QA; throwaways through the harness only): `ci-ipm-archive.mjs` on both editions, 94/94 parity cases on each; `pnpm live:bootstrap-guard` 10/10; the guard gate on the `iris-community:2026.1` digest 10/10 (`ipm-owned-older` included).
+
+Mutations of the IRIS-side `InstallGuard` (the dist copy of the embedded guard was patched, `ci-ipm-archive.mjs --edition community` run on real IRIS and IPM, and the dist restored by checksum; none leaked):
+- mutation: `IsDigits` accepting ":" (`> 57` to `> 58`), "/" (`< 48` to `< 47`), and `IsHash` accepting "/" (`>= 48` to `>= 47`), ":" (`<= 57` to `<= 58`) or a backtick (`>= 97` to `>= 96`) -> all five PASSED against the 70-case table (the gap) and each went red at `parity-community` against the 91-case table, naming cases 70 to 83.
+- mutation: `IsHash` rejecting "f" (`<= 102` to `<= 101`) -> red at `install-community`: the guard refused the older leg, whose hash holds an f (the table's f cases hold the gap open for a marker whose hash has none).
+- mutation: `Check` accepting a newer / `dev` / marker-less `Setup` -> red at `guard-newer` / `guard-dev` / `guard-unknown`.
+- mutation: `Check` also refusing a current deployment -> red at `build` (`package` re-runs Initialize over the dev-loaded classes); also refusing an absent one -> red at `build` (`load -dev` on a fresh namespace).
+- mutation: `Classify` comparing the sequence before the semver -> red at `parity-community` (8 cases); the length comparison of `CompareDigits` removed -> cases 22 and 23; the leading-zero strip removed -> 4 cases.
+- mutation: the `Configure` invoke removed from `ipm/module.xml` -> red at `install-community` (the web application reads `|||`); the `ConfigureMapping` invoke removed -> red at `install-community` (`%ALL` does not map the package).
+- mutation (live, DW-674 ownership): the startup `leftToIpm` check disabled in `packages/shared/dist/bootstrap.js` -> `pnpm live:bootstrap-guard` red on exactly the `ipm-owned-older` leg; restored by checksum.
+
+Mutations of the default suite (each applied, observed red, reverted; the tree fingerprint of `git status --short` plus `git diff` was identical afterwards):
+- mutation: `ExecuteMCPv2.Utils.CLS` hand-edited to `Utilz.CLS` in `ipm/module.xml` -> `ipm-manifest.test.ts` "lists the guard as the only preloaded resource, first, followed by exactly classes[] in order as .CLS".
+- mutation: `${PACKAGE_SEMVER}` of `MANUAL_INSTRUCTIONS` item 3 replaced by `9.9.9` -> 4 cases of `bootstrap.test.ts`; `<Version>` of the manifest alone changed to 0.0.3 -> "takes the name and the version from ipm/module.xml: either changing in one place only fails here".
+- mutation: an ownership request made on every probe outcome in `bootstrap()` -> 44 cases of `bootstrap.test.ts`, among them "a 'current' / 'newer' / 'foreign' / 'unknown' probe makes no ownership request".
+- mutation: a `repo -list` Shell statement in `importIpmScript` -> `ci-ipm-archive.test.ts` verb-set cases (3), the scripted run's verb case included.
+- mutation: the dev-placeholder refusal of `embedProblems` disabled -> "refuses a class that still holds the dev placeholder" and "refuses a guard that still holds the dev placeholder".
+- mutation: `OLDEST_IRIS_COMMUNITY_IMAGE` back to the 2025.3 digest -> `throwaway-iris.test.ts` "pins the oldest IRIS Community tag ... (2026.1) by its manifest-list digest" (and no other case: the pin is the only guard).
+- mutation: `JOB_TIMEOUT_MINUTES.ipm` 45 to 60 in `scripts/lib/ci-checks.mjs` -> 4 cases of `ci-workflow.test.ts`.
+- mutation: the README heading of the IPM subsection renamed -> 7 cases of `story-42-4-doc-claims.test.ts`.
+- mutation (QA): the "/"-as-major case of the parity table changed -> `story-42-4-qa-parity-table.test.ts` "holds a case for the character before 0 ("/") as the major"; the CHANGELOG count 91 changed to 90 -> "states in the CHANGELOG the number of cases the fixture holds (Rule #51)".
+- mutation (QA, seam): the `GUARDDOC` check removed from `scripts/ci-ipm-archive.mjs` -> the 3 `guard-document-*` fault cases of `ci-ipm-archive.test.ts`; `GUARD_DOCUMENT` renamed in `scripts/lib/ipm-archive.mjs` -> "reads the ownership signal under the name the bootstrap reads" and, on the real path, red at `install-community` (the Atelier GET answers 404).
+
+Shared surfaces (QA): the parity table now holds 91 cases (`bootstrap-version.test.ts`, `ci-ipm-archive.test.ts`'s scripted table, `ci-ipm-archive.mjs`'s parity run); the shared `src/` mtime moved, so a local run of the scripted-run block or the live gates needs the shared dist at least as new (`touch packages/shared/dist/bootstrap.js` after a checkout, since `tsc` does not re-emit an unchanged file).
+
 **Lead checklist (after the story commit is pushed to `epic42`; lead only):**
 1. **First run.** Record the run URL and per-job durations. Check that:
    - the `ipm` job shows the build, both installs, the three guard refusals, the older upgrade, parity N/N and repository count 0 at every read;
