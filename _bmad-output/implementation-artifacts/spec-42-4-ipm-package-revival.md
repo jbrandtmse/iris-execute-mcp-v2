@@ -2,7 +2,7 @@
 title: 'Story 42.4: IPM Package Revival'
 type: 'feature'
 created: '2026-10-22'
-status: 'done'
+status: 'in-progress'
 baseline_revision: 'b37cec5d1d509f30ac22f570e92fd738bf9ef703'
 baseline_commit: 'b37cec5d1d509f30ac22f570e92fd738bf9ef703'
 review_loop_iteration: 0
@@ -362,6 +362,9 @@ deferred:
 - **DW-686:** Given the story commit's CI run, when `bootstrap-guard-oldest` runs, then it runs on `iris-community:2026.1@sha256:c57b65b2…7c2` and passes every leg. The CHANGELOG, the README CI section and the harness comment record 2025.3's green run 39749804619 of 2026-10-22.
 - **Shared instance:** Given each stage's end, when `SELECT ExecuteMCPv2.Setup_GetBootstrapVersion()` runs read-only (`server:"default"`, `namespace:"HSCUSTOM"`), then it returns `0.0.2+1.995fbbb1055d`.
 
+- [ ] [CI] gates (node 24.0.0 and 26.0.0) / test @iris-mcp/all: 48 tests of `ci-ipm-archive.test.ts` ("as a process against a scripted docker") fail at the archive phase with `tar (child): gzip: Cannot exec: No such file or directory` — on Linux, GNU tar execs an external `gzip`, and the tests give the script a PATH that holds only the stand-in `docker` directory (macOS bsdtar has gzip built in, so it passed locally) — https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39798458188 — make the scripted runs pass on Linux and macOS alike (for example: list and read the archive with Node's `zlib`/tar parsing instead of the `tar` binary, or put the real `tar` and `gzip` directories on the child PATH next to the stand-in, keeping a real `docker` unreachable), and pin it so a gzip-less PATH cannot hide the archive phase again.
+- [ ] [CI] flake, gates (node 24.0.0) / test @iris-mcp/all: `story-43-1-qa-dw579-process.test.ts` ("DW-579 on the real process: iris-admin-mcp") fails with `SyntaxError: Unterminated string in JSON` at `process-gate-helpers.ts:950`: `pollAuditEntries` parses the audit file while the server is still writing its last line — same run — parse only newline-terminated lines (leave a trailing partial line for the next poll), with a test that feeds a partial last line.
+
 ### Review Findings
 
 _Code review 2026-10-22 (bmad-code-review, review tier full-opus; layers blind-hunter, edge-case-hunter, verification-gap and acceptance-auditor, all four delivered). 32 raw rows; after grouping, 13 entries (high 0, medium 1, low 12) and 9 rejected._ **Review Outcome:** CLEAN. The story status is `done`: all 11 patches are applied, and the 2 deferred findings are closed terminal (DW-691, DW-692).
@@ -392,6 +395,8 @@ _Code review 2026-10-22 (bmad-code-review, review tier full-opus; layers blind-h
 - AA8 (low): an IPM-installed guard of the same semver and a higher sequence is replaced by the preload before `Check` runs. Releases have distinct semvers, IPM's own check stops a lower one, and a refusal rolls back; it becomes real only if same-semver archives were ever distributed. Recording `CheckStatus` in the Spec Change Log (AA5's second half) is the lead's spec edit.
 
 ## Spec Change Log
+
+- 2026-10-22, lead, at the smoke: CI run https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39798458188 (sha 08d343d) was red; two [CI] items added for rework iteration 1 (wave-8 decision #73).
 
 ## Review Triage Log
 
