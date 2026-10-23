@@ -3867,3 +3867,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-5-release-workflow.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 42.5 plan: the release pushes the stamped module to jbrandtmse/iris-execute-mcp-v2-ipm (decision 76); the registry serves a tar of that repository root
 - 2026-10-22T23:44:29Z status=routed owner=42-8-claude-code-plugin-and-registry-listings by=harvest note=42.8 adds a gate that tars the packaging repository root the way Open Exchange does and installs it offline, before the listing goes live
+
+### DW-695: publish uploads whatever path the manifest names (channels[].packages[].tarball, vsix.file, ipm.tree) without checking it is one of the hash-verified files, so the AC 'uploads the exact rehearsed bytes' is not enforced
+- source: spec-42-5-release-workflow.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: 42.5 QA probe: a manifest whose npm entry is ../outside.tgz published that unhashed file (exit 0); today the manifest comes from prepare in the same run
+- 2026-10-23T00:43:09Z status=open owner=42-5-release-workflow by=harvest note=code review patches it in-story: artifactProblems requires every uploaded path to be one of the manifest's hash-verified files, resolved inside the artifact directory; pin it with the ../outside.tgz case
