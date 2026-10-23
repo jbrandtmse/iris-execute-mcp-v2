@@ -9,6 +9,8 @@
  *  - With the tarballs that `pnpmPack` made (scripts ignored, as `prepare` packs them) the smoke exits 0, says that it used the prebuilt
  *    tarball of each of the eight packages, packs none itself, removes its temporary directories, and installs the files it was given:
  *    after the tarballs are made, the repository's `dist/` of one server is broken, and the smoke still passes.
+ *  - The real `pnpm pack` names each tarball as `packedTarballName` (`scripts/release.mjs`) does, the name `publish` holds each npm entry
+ *    of the manifest to.
  *
  * Everything is written under `os.tmpdir()` and removed by the test that made it. No network is used.
  */
@@ -16,6 +18,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import path from "node:path";
 import { pnpmPack } from "../../../../scripts/lib/pnpm-pack.mjs";
+import { packedTarballName } from "../../../../scripts/release.mjs";
 import { makeTempRoot, put, removeTempRoot } from "./pack-fixture";
 import { cliSource, serverSource, smokeOffline, writeRepo, type PackageSpec, type PrebuiltTarball } from "./smoke-repo-fixture";
 
@@ -60,6 +63,11 @@ describe("smokePackages({ tarballs }) over a synthetic repository of eight packa
   it("packed the eight packages, one tarball each, with scripts ignored", () => {
     expect(tarballs.map((entry) => entry.name)).toEqual(PACKAGES.map((spec) => spec.name));
     expect(tarballs.every((entry) => entry.tarball.endsWith(".tgz"))).toBe(true);
+  });
+
+  it("the real pnpm pack names each tarball as packedTarballName does, which publish holds every npm entry of the manifest to (DW-695)", () => {
+    expect(tarballs.map((entry) => path.basename(entry.tarball))).toEqual(tarballs.map((entry) => packedTarballName(entry.manifest["name"], entry.manifest["version"])));
+    expect(path.basename(tarballs[0]?.tarball as string)).toMatch(/^iris-mcp-fake-admin-\d+\.\d+\.\d+\.tgz$/);
   });
 
   it("with no prebuilt tarball it fails (exit 1) naming every package, and packs nothing and installs nothing", async () => {

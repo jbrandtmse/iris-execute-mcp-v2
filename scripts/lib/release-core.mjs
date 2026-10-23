@@ -280,8 +280,8 @@ export function environmentSummary(environment, policies) {
 // -- the publish refusals ---------------------------------------------------------------------------------------
 
 /**
- * Why a real publish must be refused before any upload: it runs only for a `push` of the tag `v<manifest.version>`, on the sha the
- * manifest was prepared from, from a manifest prepared in release mode.
+ * Why a real publish must be refused before any upload: it runs only for a `push` of the tag `v<manifest.version>`, on the sha (a
+ * 40-hex commit) the manifest was prepared from, from a manifest prepared in release mode.
  *
  * @param {Record<string, string | undefined>} env
  * @param {{ version?: string, sha?: string, mode?: string }} manifest
@@ -293,7 +293,7 @@ export function publishRefusals(env, manifest) {
   const ref = env.GITHUB_REF ?? '';
   if (event !== 'push') refusals.push(`the event is ${JSON.stringify(event)}, not push. Publish only from the push of a release tag.`);
   if (ref !== `refs/tags/v${manifest?.version}`) refusals.push(`the ref is ${JSON.stringify(ref)}, not refs/tags/v${manifest?.version}. Publish only from the tag of the prepared version.`);
-  if (typeof manifest?.sha !== 'string' || (env.GITHUB_SHA ?? '') !== manifest.sha) {
+  if (typeof manifest?.sha !== 'string' || !/^[0-9a-f]{40}$/.test(manifest.sha) || (env.GITHUB_SHA ?? '') !== manifest.sha) {
     refusals.push(`GITHUB_SHA is ${JSON.stringify(env.GITHUB_SHA ?? '')}, but the artifacts were prepared from ${JSON.stringify(manifest?.sha)}. Prepare and publish the same commit.`);
   }
   if (manifest?.mode !== 'release') refusals.push(`the artifacts were prepared in ${JSON.stringify(manifest?.mode)} mode, not release. Prepare them from the tag push.`);

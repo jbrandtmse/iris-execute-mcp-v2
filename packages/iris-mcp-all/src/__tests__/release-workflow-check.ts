@@ -10,8 +10,9 @@
  *    `workflow_run` or `schedule`; `permissions: {}` at the top; a concurrency group per ref that never cancels a started release.
  *  - JOBS (42.5.1): the jobs, their runner, timeout, `needs`, permissions, environment, condition and ordered steps (an action with its
  *    inputs, or a command with its environment and directory) are the declaration's, in both directions.
- *  - EXCLUSIVITY (42.5.1, 42.5.4): `environment`, `id-token: write` and `secrets.` occur in the `publish` job only; `github.token` occurs
- *    in `ci-gate` and `publish` only. So `rehearse` has no environment, no OIDC permission and no secret.
+ *  - EXCLUSIVITY (42.5.1, 42.5.4): `environment`, `id-token: write` and `secrets.` (or `secrets[...]`) occur in the `publish` job only;
+ *    `github.token` (or `github['token']`) occurs in `ci-gate` and `publish` only. So `rehearse` has no environment, no OIDC permission
+ *    and no secret.
  *  - CALLS (42.5.1, 42.5.4): `release.mjs ci-gate` runs only in `ci-gate`, `prepare` only in `prepare`, `publish --dry-run` only in
  *    `rehearse`, and a `publish` without `--dry-run` only in `publish`.
  *  - PINS and HYGIENE (42.5.2): every `uses:` is a registered action at its registered commit with its tag in a trailing comment; no
@@ -81,9 +82,22 @@ function declaredShape(step: DeclaredReleaseStep): NormalizedStep {
   return step.uses === undefined ? (step as NormalizedStep) : { uses: step.uses, with: step.with ?? {} };
 }
 
-/** Whether a `run:` text holds a raw publish, push or tag verb. */
-const RAW_VERB =
-  /\b(?:npm|pnpm|yarn)\s+(?:publish|stage|login|adduser|deprecate|unpublish|access|token)\b|\bchangeset\s+(?:publish|version)\b|\b(?:vsce|ovsx)\s+publish\b|\bgit\s+(?:push|tag)\b|\bgh\s+(?:release|secret|workflow)\b|\bdocker\s+push\b|\b(?:zpm|ipm)[ \t]+["']?(?:publish|install|repo|enable|update)\b/;
+/** The arguments of one command between its tool and its verb (`-r`, `--filter x`, `-C dist`): words that are not a command separator. */
+const ARGS = String.raw`(?:\s+[^\s;&|]+)*?`;
+
+/**
+ * Whether a command text (a workflow `run:`, a `package.json` script) holds a raw publish, push or tag verb, with or without flags between
+ * the tool and the verb (`pnpm -r publish`, `npm -w packages/shared publish`, `git -C dist push`).
+ */
+export const RAW_VERB = new RegExp(
+  String.raw`\b(?:npm|pnpm|yarn)\b${ARGS}\s+(?:publish|stage|login|adduser|deprecate|unpublish|access|token|dist-tag|owner|trust)\b` +
+    String.raw`|\bchangeset\b${ARGS}\s+(?:publish|version)\b` +
+    String.raw`|\b(?:vsce|ovsx)\b${ARGS}\s+publish\b` +
+    String.raw`|\bgit\b${ARGS}\s+(?:push|tag)\b` +
+    String.raw`|\bgh\b${ARGS}\s+(?:release|secret|workflow)\b` +
+    String.raw`|\bdocker\b${ARGS}\s+push\b` +
+    String.raw`|\b(?:zpm|ipm)[ \t]+["']?(?:publish|install|repo|enable|update)\b`,
+);
 
 /** What is wrong with the workflow text. An empty list means it is the declared release workflow. */
 export function releaseWorkflowProblems(text: string): string[] {
@@ -153,18 +167,20 @@ export function releaseWorkflowProblems(text: string): string[] {
     if (String(setupNode?.with?.["node-version"]) !== expected.node) problems.push(`job ${name} does not run on Node ${expected.node}`);
   }
 
-  // EXCLUSIVITY: what only `publish` may hold.
+  // EXCLUSIVITY: what only `publish` may hold. An expression may name a property with a dot or with brackets (`secrets['NPM_TOKEN']`).
   const holds = (value: unknown, pattern: RegExp): boolean => pattern.test(JSON.stringify(value) ?? "");
+  const SECRET = /\bsecrets\s*(?:\.|\[)/;
+  const GITHUB_TOKEN = /\bgithub\s*(?:\.\s*token\b|\[\s*\\?['"]token\\?['"]\s*\])/;
   for (const [name, job] of Object.entries(jobs)) {
     if (name !== "publish") {
       if (job?.environment !== undefined) problems.push(`job ${name} has an environment: only publish may`);
       if (job?.permissions?.["id-token"] !== undefined) problems.push(`job ${name} has id-token permission: only publish may`);
-      if (holds(job, /secrets\./)) problems.push(`job ${name} reads a secret: only publish may`);
+      if (holds(job, SECRET)) problems.push(`job ${name} reads a secret: only publish may`);
     }
-    if (name !== "publish" && name !== "ci-gate" && holds(job, /github\.token/)) problems.push(`job ${name} reads github.token: only ci-gate and publish may`);
+    if (name !== "publish" && name !== "ci-gate" && holds(job, GITHUB_TOKEN)) problems.push(`job ${name} reads github.token: only ci-gate and publish may`);
   }
   const outside = { ...workflow, jobs: undefined };
-  if (holds(outside, /secrets\.|github\.token|id-token/)) problems.push("the workflow level (outside the jobs) names a secret, github.token or id-token");
+  if (holds(outside, SECRET) || holds(outside, GITHUB_TOKEN) || holds(outside, /id-token/)) problems.push("the workflow level (outside the jobs) names a secret, github.token or id-token");
 
   // CALLS: which job runs which command of the release script.
   for (const [name, job] of Object.entries(jobs)) {

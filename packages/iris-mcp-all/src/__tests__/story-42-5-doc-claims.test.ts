@@ -138,6 +138,8 @@ describe("Story 42.5: the README Releasing subsection", () => {
   it("explains the npm authentication route: a short-lived token for the first release, then trusted publishing, and the token never printed", () => {
     expect(section).toContain("trusted publishing (OIDC) whenever no token is set");
     expect(section).toContain("short-lived granular token, scoped to `@iris-mcp`, stored as the `NPM_TOKEN` secret of the `release` environment");
+    expect(section, "the token a workflow can publish with (decision #75)").toContain('read and write access to the `@iris-mcp` scope, with "Bypass two-factor authentication" turned on');
+    expect(section).toContain("an expiry of 7 days or less; npm ends direct publishing with such a token in January 2027");
     expect(section).toContain("0600 temporary userconfig that it deletes on every exit path, and never prints it");
     expect(section).toContain("`npm trust github @iris-mcp/<package> --file release.yml --repo jbrandtmse/iris-execute-mcp-v2 --env release --allow-publish`");
     expect(section).toContain("delete the `NPM_TOKEN` secret");

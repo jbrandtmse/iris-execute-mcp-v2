@@ -4,7 +4,7 @@
  * `npm publish`, `git push` or store upload can run. A stand-in never starts a process and never touches the network.
  *
  * What a stand-in does, per call:
- *  - It appends `{ seq, argv, cwd, env, stdin, userconfig? }` to `<state>/<name>.calls.log`. `seq` is a clock that all stand-ins of one
+ *  - It appends `{ seq, pid, argv, cwd, env, stdin, userconfig? }` to `<state>/<name>.calls.log`. `seq` is a clock that all stand-ins of one
  *    directory share, so the order of calls across tools can be read back. `env` is the full environment the tool was started with, so a
  *    test can prove that a secret never reached it. When an argument is `--userconfig <file>`, the file's mode and text AT THE TIME OF
  *    THE CALL are recorded too (the release deletes it afterwards).
@@ -34,6 +34,8 @@ export interface StandInRule {
 export interface StandInCall {
   seq: number;
   tool: string;
+  /** The process id of the stand-in, so that a test can tell whether the script killed it. */
+  pid: number;
   argv: string[];
   cwd: string;
   env: Record<string, string>;
@@ -67,7 +69,7 @@ function snapshot(file) {
     return undefined;
   }
 }
-const call = { seq, tool, argv, cwd: process.cwd(), env: { ...process.env }, stdin: readStdin() };
+const call = { seq, tool, pid: process.pid, argv, cwd: process.cwd(), env: { ...process.env }, stdin: readStdin() };
 const configIndex = argv.indexOf("--userconfig");
 if (configIndex >= 0 && argv[configIndex + 1]) call.userconfig = snapshot(argv[configIndex + 1]);
 const key = /-i (\S+)/.exec(process.env.GIT_SSH_COMMAND || "");

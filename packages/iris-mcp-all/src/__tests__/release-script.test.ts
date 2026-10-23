@@ -14,13 +14,14 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { REPO_ROOT } from "../../../../scripts/lib/live-gate-scan.mjs";
 import { stripComments } from "../../../../scripts/lib/script-ts-import-scan.mjs";
 import { NPM_PUBLISH_ORDER, RELEASE_CHANNELS } from "../../../../scripts/lib/release-core.mjs";
-import { ciGate, createCleanups, defaultDeps, parseArgs, publish } from "../../../../scripts/release.mjs";
+import { ciGate, createCleanups, defaultDeps, isContainedPath, npmFailureDetail, packedTarballName, parseArgs, publish, redact } from "../../../../scripts/release.mjs";
 import { installStandIns, type StandInCall, type StandInRule, type StandIns } from "./stand-in-clis";
 import {
   SHA,
@@ -54,6 +55,21 @@ function scratch(prefix = "release-script-"): string {
   const root = mkdtempSync(path.join(tmpdir(), prefix));
   roots.push(root);
   return root;
+}
+
+/**
+ * Run `body` with `os.tmpdir()` pointing at `directory` (it reads TMPDIR on every call), so that a test sees only the temporary
+ * directories that the in-process run made, never another process's in the shared temporary directory.
+ */
+async function withTmpdir<T>(directory: string, body: () => Promise<T>): Promise<T> {
+  const saved = process.env["TMPDIR"];
+  process.env["TMPDIR"] = directory;
+  try {
+    return await body();
+  } finally {
+    if (saved === undefined) delete process.env["TMPDIR"];
+    else process.env["TMPDIR"] = saved;
+  }
 }
 
 // -- the script's own contract ---------------------------------------------------------------------------------------
@@ -126,9 +142,14 @@ describe("the script runs with no node_modules (Boundaries: ci-gate, rehearse an
     expect(parseArgs(["publish", "--artifacts", "/x"])).toEqual({ command: "publish", options: { artifacts: "/x", dryRun: false } });
     expect(parseArgs(["publish", "--dry-run", "--artifacts", "/x"])).toEqual({ command: "publish", options: { artifacts: "/x", dryRun: true } });
     expect(parseArgs(["publish", "--artifacts", "/x", "--dry-run"]).options).toEqual({ artifacts: "/x", dryRun: true });
-    for (const bad of [[], ["verify"], ["prepare"], ["publish"], ["publish", "--artifacts"], ["ci-gate", "--timeout-minutes", "0"], ["ci-gate", "--timeout-minutes", "x"], ["prepare", "--dry-run", "--out", "/x"], ["publish", "--artifacts", "/x", "--force"], ["publish", "--dry-run", "--dry-run", "--artifacts", "/x"]]) {
+    for (const bad of [[], ["verify"], ["prepare"], ["publish"], ["publish", "--artifacts"], ["ci-gate", "--timeout-minutes", "0"], ["ci-gate", "--timeout-minutes", "x"], ["prepare", "--dry-run", "--out", "/x"], ["publish", "--artifacts", "/x", "--force"], ["publish", "--dry-run", "--dry-run", "--artifacts", "/x"], ["--"], ["--", "--", "ci-gate"]]) {
       expect(() => parseArgs(bad), JSON.stringify(bad)).toThrow(/usage: node scripts\/release\.mjs/);
     }
+  });
+
+  it("`pnpm release -- <command>` works: pnpm 9.15 hands the script a literal `--`, and one leading `--` is dropped", () => {
+    expect(parseArgs(["--", "publish", "--dry-run", "--artifacts", "/x"])).toEqual(parseArgs(["publish", "--dry-run", "--artifacts", "/x"]));
+    expect(parseArgs(["--", "ci-gate"])).toEqual({ command: "ci-gate", options: {} });
   });
 });
 
@@ -251,6 +272,16 @@ describe("CI gate (AC 42.5.1)", () => {
     expect(red.sleeps).toEqual([]);
     expect(red.lines.join("\n")).toContain("https://x/2: failure");
     expect(red.lines.join("\n"), "the pull-request run is not one of the commit's runs").not.toContain("https://x/9");
+  });
+
+  it("a run that throws still appends its lines to the step summary, as exit 1, and the error reaches the caller", async () => {
+    const github = newFakeGithub();
+    const { deps } = gateDeps(github);
+    const summary = path.join(scratch(), "ci-gate-summary.md");
+    const broken = { ...deps, now: () => { throw new Error("the clock broke"); } };
+    await expect(ciGate({ env: { ...TAG_ENV, GITHUB_STEP_SUMMARY: summary } }, broken)).rejects.toThrow(/the clock broke/);
+    expect(readFileSync(summary, "utf8")).toContain("### ci-gate (exit 1)");
+    expect(readFileSync(summary, "utf8"), "the lines before the throw").toContain("environment release: protected");
   });
 
   it("a malformed tag, or a missing token, repository or sha, is a refusal (exit 2) that reads nothing", async () => {
@@ -608,6 +639,320 @@ describe("Publish refusals (exit 2 before any upload) (AC 42.5.2, AC 42.5.4)", (
   });
 });
 
+describe("Publish refusals, more shapes of a run that is not the tag push of the prepared version (QA, AC 42.5.1, AC 42.5.4)", () => {
+  it.each([
+    ["a tag without the v", { GITHUB_REF: "refs/tags/1.0.0" }, /ref is "refs\/tags\/1\.0\.0", not refs\/tags\/v1\.0\.0/],
+    ["a branch that is named like the tag", { GITHUB_REF: "refs/heads/v1.0.0" }, /ref is "refs\/heads\/v1\.0\.0", not refs\/tags\/v1\.0\.0/],
+    ["a prerelease tag of the same version", { GITHUB_REF: "refs/tags/v1.0.0-rc.1" }, /ref is "refs\/tags\/v1\.0\.0-rc\.1", not refs\/tags\/v1\.0\.0/],
+    ["a tag that only starts like the version", { GITHUB_REF: "refs/tags/v1.0.00" }, /ref is "refs\/tags\/v1\.0\.00", not refs\/tags\/v1\.0\.0\./],
+    ["a pull request", { GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/7/merge" }, /event is "pull_request", not push/],
+    ["a scheduled run on the tag's ref", { GITHUB_EVENT_NAME: "schedule" }, /event is "schedule", not push/],
+    ["a repository dispatch on the tag's ref", { GITHUB_EVENT_NAME: "repository_dispatch" }, /event is "repository_dispatch", not push/],
+    ["a release event on the tag's ref", { GITHUB_EVENT_NAME: "release" }, /event is "release", not push/],
+    ["a developer machine that has no GitHub variable at all", { GITHUB_EVENT_NAME: undefined, GITHUB_REF: undefined, GITHUB_SHA: undefined }, /event is "", not push/],
+  ] as Array<[string, Record<string, string | undefined>, RegExp]>)("%s: exit 2 naming the condition, before npm, a store, git or GitHub is asked anything", async (_label, overrides, expected) => {
+    const world = newWorld();
+    expect(await world.run({ env: overrides })).toBe(2);
+    expect(world.lines.join("\n")).toMatch(expected);
+    expect(world.standIns.allCalls()).toEqual([]);
+    expect(world.github.requests).toEqual([]);
+  });
+
+  it("the control: the same world on the push of the tag is a real run, so each refusal above comes from its own condition", async () => {
+    const world = newWorld();
+    expect(await world.run()).toBe(0);
+    expect(world.published()).toHaveLength(8);
+  });
+});
+
+describe("Publish integrity: a manifest that verifies nothing, and a channel that the manifest does not describe (QA, AC 42.5.2, AC 42.5.3)", () => {
+  it.each([
+    ["an empty file list", (manifest: ArtifactManifest): Record<string, unknown> => ({ ...manifest, files: [] })],
+    [
+      "no file list at all",
+      (manifest: ArtifactManifest): Record<string, unknown> => {
+        const { files: _gone, ...rest } = manifest;
+        void _gone;
+        return rest;
+      },
+    ],
+  ])("%s verifies no hash, so it is refused (exit 2 in real mode, exit 1 in a dry run) before any upload", async (_label, change) => {
+    for (const dryRun of [false, true]) {
+      const world = newWorld();
+      writeFileSync(path.join(world.artifacts, "release-manifest.json"), `${JSON.stringify(change(world.manifest), null, 2)}\n`);
+      expect(await world.run({ dryRun }), `dryRun ${dryRun}`).toBe(dryRun ? 1 : 2);
+      expect(world.lines.join("\n")).toContain("release-manifest.json lists no file. Prepare the artifacts again.");
+      expect(world.published()).toEqual([]);
+    }
+  });
+
+  it("an enabled channel that the manifest does not describe is a failed channel in the report, after the eight packages and the channel before it, and it stops the channel after it (exit 1)", async () => {
+    const world = newWorld({ publisher: "acme" });
+    world.standIns.script("git", [
+      { match: ["clone"], effects: [{ mkdir: "$LAST" }, { mkdir: "$LAST/.git" }] },
+      { match: ["write-tree"], stdout: "tree-new\n" },
+      { match: ["rev-parse"], status: 1 },
+    ]);
+    world.manifest.channels = world.manifest.channels.filter((channel) => channel["id"] !== "open-vsx");
+    writeManifest(world.artifacts, world.manifest);
+    expect(await world.run({ channels: ALL_ENABLED, env: { IPM_DIST_DEPLOY_KEY: "-----BEGIN KEY-----\nabc\n-----END KEY-----" } })).toBe(1);
+    expect(world.published()).toHaveLength(8);
+    expect(world.standIns.calls("vsce"), "the channel before it was published").toHaveLength(1);
+    expect(world.standIns.calls("ovsx"), "nothing can be uploaded for a channel that has no entry").toEqual([]);
+    expect(world.standIns.calls("git"), "the IPM channel would have succeeded, and is not attempted").toEqual([]);
+    const report = world.lines.join("\n");
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@0.1.0: published");
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@?: failed (the manifest has no open-vsx entry. Prepare the artifacts again.)");
+    expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: not attempted");
+  });
+});
+
+describe("Publish uploads only the manifest's hash-verified files, inside the artifacts directory (DW-695; AC 42.5.2: the exact rehearsed bytes)", () => {
+  const KEY = "-----BEGIN OPENSSH PRIVATE KEY-----\nBINDKEYBODY\n-----END OPENSSH PRIVATE KEY-----";
+  /** Bytes next to the artifacts directory that no manifest ever hashed. */
+  const outside = (world: PublishWorld, name: string): string => {
+    const file = path.join(world.root, name);
+    writeFileSync(file, "bytes that were never hashed\n");
+    return file;
+  };
+  const channelOf = (world: PublishWorld, id: string): Record<string, any> => world.manifest.channels.find((channel) => channel["id"] === id) as Record<string, any>;
+  const npmEntry = (world: PublishWorld, name: string): Record<string, any> => (channelOf(world, "npm")["packages"] as Array<Record<string, any>>).find((entry) => entry["name"] === name) as Record<string, any>;
+
+  it.each([
+    ["an npm tarball outside the directory (../outside.tgz)", (world: PublishWorld) => {
+      outside(world, "outside.tgz");
+      npmEntry(world, "@iris-mcp/shared")["tarball"] = "../outside.tgz";
+    }, /@iris-mcp\/shared@1\.0\.0: its tarball "\.\.\/outside\.tgz" is not a hash-verified file of release-manifest\.json/],
+    ["an npm tarball at an absolute path", (world: PublishWorld) => {
+      npmEntry(world, "@iris-mcp/admin")["tarball"] = outside(world, "iris-mcp-admin-1.0.0.tgz");
+    }, /@iris-mcp\/admin@1\.0\.0: its tarball ".*iris-mcp-admin-1\.0\.0\.tgz" is not a hash-verified file/],
+    ["a file outside the directory that the manifest lists with its true hash", (world: PublishWorld) => {
+      const file = outside(world, "outside.tgz");
+      const bytes = readFileSync(file);
+      world.manifest.files.push({ path: "../outside.tgz", bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") });
+      npmEntry(world, "@iris-mcp/shared")["tarball"] = "../outside.tgz";
+    }, /lists the file "\.\.\/outside\.tgz", which is not a path inside the artifacts directory/],
+    ["an npm entry that names another package's tarball", (world: PublishWorld) => {
+      npmEntry(world, "@iris-mcp/shared")["tarball"] = npmEntry(world, "@iris-mcp/admin")["tarball"];
+    }, /@iris-mcp\/shared@1\.0\.0: its tarball npm\/iris-mcp-admin-1\.0\.0\.tgz is not iris-mcp-shared-1\.0\.0\.tgz, the one pnpm pack makes for it/],
+    ["an npm entry at another version than the release", (world: PublishWorld) => {
+      npmEntry(world, "@iris-mcp/ops")["version"] = "0.0.9";
+    }, /@iris-mcp\/ops@0\.0\.9 is not at the release version 1\.0\.0/],
+    ["a Marketplace vsix outside the directory", (world: PublishWorld) => {
+      outside(world, "outside.vsix");
+      channelOf(world, "vscode-marketplace")["file"] = "../outside.vsix";
+    }, /vscode-marketplace: its vsix "\.\.\/outside\.vsix" is not a hash-verified \.vsix/],
+    ["an Open VSX vsix that is not a listed file", (world: PublishWorld) => {
+      channelOf(world, "open-vsx")["file"] = "vsix/another.vsix";
+    }, /open-vsx: its vsix "vsix\/another\.vsix" is not a hash-verified \.vsix/],
+    ["an IPM tree outside the directory", (world: PublishWorld) => {
+      channelOf(world, "ipm")["tree"] = "..";
+    }, /ipm: its tree "\.\." is not a directory of release-manifest\.json that holds module\.xml/],
+    ["an IPM tree that is not the module (the npm tarballs)", (world: PublishWorld) => {
+      channelOf(world, "ipm")["tree"] = "npm";
+    }, /ipm: its tree "npm" is not a directory of release-manifest\.json that holds module\.xml/],
+  ] as Array<[string, (world: PublishWorld) => void, RegExp]>)("%s is refused before any upload: exit 2 in a real run, exit 1 in a dry run, and no npm publish, store CLI or git call", async (_label, change, expected) => {
+    for (const dryRun of [false, true]) {
+      const world = newWorld({ publisher: "acme" });
+      change(world);
+      writeManifest(world.artifacts, world.manifest);
+      expect(await world.run({ dryRun, channels: ALL_ENABLED, env: { IPM_DIST_DEPLOY_KEY: KEY } }), `dryRun ${dryRun}`).toBe(dryRun ? 1 : 2);
+      expect(world.lines.join("\n")).toMatch(expected);
+      expect(world.standIns.allCalls().map((call) => `${call.tool} ${call.argv[0]}`), "only npm --version ran").toEqual(["npm --version"]);
+      expect(world.github.requests, "the refusal comes before the environment is asked").toEqual([]);
+    }
+  });
+
+  it("the control: the manifest as prepare writes it, with every channel enabled, passes the check and uploads every artifact", async () => {
+    const world = newWorld({ publisher: "acme" });
+    world.standIns.script("git", [
+      { match: ["clone"], effects: [{ mkdir: "$LAST" }, { mkdir: "$LAST/.git" }] },
+      { match: ["write-tree"], stdout: "tree-new\n" },
+      { match: ["rev-parse"], status: 1 },
+    ]);
+    expect(await world.run({ channels: ALL_ENABLED, env: { IPM_DIST_DEPLOY_KEY: KEY } })).toBe(0);
+    expect(world.published().map((call) => tarballOf(call, world.artifacts))).toEqual(NPM_PUBLISH_ORDER.map((name: string) => `npm/${packedTarballName(name, "1.0.0")}`));
+    expect(world.standIns.calls("vsce")).toHaveLength(1);
+    expect(world.standIns.calls("ovsx")).toHaveLength(1);
+    expect(world.standIns.calls("git").some((call) => call.argv.includes("push"))).toBe(true);
+  });
+
+  it("isContainedPath accepts the paths prepare writes and nothing that leaves the directory", () => {
+    for (const ok of ["npm/iris-mcp-shared-1.0.0.tgz", "vsix/iris-mcp-launcher-0.1.0.vsix", "ipm", "ipm/src/cls/ExecuteMCPv2/Utils.cls"]) expect(isContainedPath(ok), ok).toBe(true);
+    for (const bad of ["../outside.tgz", "npm/../../x", "/abs/x.tgz", "C:/x.tgz", "npm\\x.tgz", "./npm/x.tgz", "npm//x.tgz", "", ".", "..", "npm/", "a\0b", undefined, 7]) expect(isContainedPath(bad), String(bad)).toBe(false);
+  });
+});
+
+describe("Publish stops at the first failure even when every later step would succeed (QA, AC 42.5.3)", () => {
+  const KEY = "-----BEGIN OPENSSH PRIVATE KEY-----\nSTOPKEYBODY\n-----END OPENSSH PRIVATE KEY-----";
+
+  /** A world in which each enabled channel succeeds if it is reached: a real publisher, both store CLIs, a deploy key's git steps. */
+  const workingWorld = (): PublishWorld => {
+    const world = newWorld({ publisher: "acme" });
+    world.standIns.script("git", [
+      { match: ["clone"], effects: [{ mkdir: "$LAST" }, { mkdir: "$LAST/.git" }] },
+      { match: ["write-tree"], stdout: "tree-new\n" },
+      { match: ["rev-parse"], status: 1 },
+    ]);
+    return world;
+  };
+  const toolsRun = (world: PublishWorld): string[] => [...new Set(world.standIns.allCalls().filter((call) => call.tool !== "npm").map((call) => call.tool))];
+
+  it("the control: with nothing failing every channel is reached, so the stops below are real", async () => {
+    const world = workingWorld();
+    expect(await world.run({ channels: ALL_ENABLED, env: { IPM_DIST_DEPLOY_KEY: KEY } })).toBe(0);
+    expect(world.published()).toHaveLength(8);
+    expect(toolsRun(world).sort()).toEqual(["git", "ovsx", "vsce"]);
+    expect(world.standIns.calls("git").some((call) => call.argv.includes("push"))).toBe(true);
+  });
+
+  it("a package that fails to upload stops every channel after npm: no store CLI and no git call runs, and each channel and package after it is `not attempted` exactly once", async () => {
+    const world = workingWorld();
+    world.standIns.script("npm", [{ match: ["publish", "~iris-mcp-ops"], status: 1, stderr: "npm error code E403\nnpm error 403 Forbidden\n" }, ...NPM_DEFAULT]);
+    expect(await world.run({ channels: ALL_ENABLED, env: { IPM_DIST_DEPLOY_KEY: KEY } })).toBe(1);
+    expect(world.published()).toHaveLength(7);
+    expect(toolsRun(world), "no store CLI and no git").toEqual([]);
+    const report = world.lines.join("\n");
+    for (const name of ["client-config", "shared", "admin", "data", "dev", "interop"]) expect(report, name).toContain(`@iris-mcp/${name}@1.0.0: published`);
+    expect(report).toMatch(/@iris-mcp\/ops@1\.0\.0: failed \(npm error code E403/);
+    expect(report).toContain("@iris-mcp/all@1.0.0: not attempted");
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@0.1.0: not attempted");
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@0.1.0: not attempted");
+    expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: not attempted");
+    expect(report.match(/iris-mcp-launcher@0\.1\.0: /g), "one line per channel, never a second result for a channel that was skipped over").toHaveLength(2);
+  });
+
+  it("an Open VSX upload that fails stops the IPM channel that would have succeeded: no git call, and the Marketplace stays published", async () => {
+    const world = workingWorld();
+    world.standIns.script("ovsx", [{ match: ["publish"], status: 1, stderr: "ovsx error 401\n" }]);
+    expect(await world.run({ channels: ALL_ENABLED, env: { IPM_DIST_DEPLOY_KEY: KEY } })).toBe(1);
+    expect(toolsRun(world).sort()).toEqual(["ovsx", "vsce"]);
+    expect(world.standIns.calls("git")).toEqual([]);
+    const report = world.lines.join("\n");
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@0.1.0: published");
+    expect(report).toMatch(/open-vsx\n {2}iris-mcp-launcher@0\.1\.0: failed \(ovsx error 401/);
+    expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: not attempted");
+  });
+});
+
+describe("The registry check reads npm's own words (QA, AC 42.5.2; transcripts captured from npm 11.19.0 on 2026-10-22 with `npm view <name>@<version> version`, the debug-log line left out)", () => {
+  // `npm view @iris-mcp/shared@0.0.2 version`: a package that has never been published.
+  const NEVER_PUBLISHED = [
+    "npm error code E404",
+    "npm error 404 Not Found - GET https://registry.npmjs.org/@iris-mcp%2fshared - Not found",
+    "npm error 404",
+    "npm error 404  The requested resource '@iris-mcp/shared@0.0.2' could not be found or you do not have permission to access it.",
+    "npm error 404",
+    "npm error 404 Note that you can also install from a",
+    "npm error 404 tarball, folder, http url, or git url.",
+    "",
+  ].join("\n");
+  // `npm view lodash@999.0.0 version`: a package that exists, at a version it does not have (every release after the first).
+  const VERSION_ABSENT = [
+    "npm error code E404",
+    "npm error 404 No match found for version 999.0.0",
+    "npm error 404",
+    "npm error 404  The requested resource 'lodash@999.0.0' could not be found or you do not have permission to access it.",
+    "npm error 404",
+    "npm error 404 Note that you can also install from a",
+    "npm error 404 tarball, folder, http url, or git url.",
+    "",
+  ].join("\n");
+  // `npm view lodash@4.17.21 version --registry http://127.0.0.1:1`: a registry that cannot be reached.
+  const UNREACHABLE = [
+    "npm error code ECONNREFUSED",
+    "npm error syscall connect",
+    "npm error errno ECONNREFUSED",
+    "npm error FetchError: request to http://127.0.0.1:1/lodash failed, reason: connect ECONNREFUSED 127.0.0.1:1",
+    "npm error     at ClientRequest.<anonymous> (/opt/homebrew/lib/node_modules/npm/node_modules/minipass-fetch/lib/index.js:130:14)",
+    "npm error     at ClientRequest.emit (node:events:514:20)",
+    "npm error     at emitErrorEvent (node:_http_client:114:11)",
+    "npm error     at _destroy (node:_http_client:1169:9)",
+    "npm error     at onSocketNT (node:_http_client:1190:5)",
+    "npm error     at process.processTicksAndRejections (node:internal/process/task_queues:91:21) {",
+    "npm error   code: 'ECONNREFUSED',",
+    "npm error   errno: 'ECONNREFUSED',",
+    "npm error   syscall: 'connect',",
+    "npm error   address: '127.0.0.1',",
+    "npm error   port: 1,",
+    "npm error   type: 'system'",
+    "npm error }",
+    "npm error",
+    "npm error If you are behind a proxy, please make sure that the 'proxy' config is set properly.  See: 'npm help config'",
+    "npm error A complete log of this run can be found in: /home/runner/.npm/_logs/debug-0.log",
+    "",
+  ].join("\n");
+
+  it.each([
+    ["a package that was never published", NEVER_PUBLISHED],
+    ["a package that exists without the version", VERSION_ABSENT],
+  ])("npm's answer for %s means `not published`: all eight are uploaded", async (_label, transcript) => {
+    const world = newWorld();
+    world.standIns.script("npm", [{ match: ["view"], status: 1, stderr: transcript }, ...NPM_DEFAULT]);
+    expect(await world.run()).toBe(0);
+    expect(world.published()).toHaveLength(8);
+    expect(world.lines.join("\n")).not.toContain("could not ask the registry");
+  });
+
+  it("npm's answer for a registry that cannot be reached is not an answer: nothing is uploaded, the first package is reported failed and the rest not attempted (exit 1)", async () => {
+    const world = newWorld();
+    world.standIns.script("npm", [{ match: ["view"], status: 1, stderr: UNREACHABLE }, ...NPM_DEFAULT]);
+    expect(await world.run()).toBe(1);
+    expect(world.published()).toEqual([]);
+    const report = world.lines.join("\n");
+    expect(report).toContain("@iris-mcp/client-config@1.0.0: could not ask the registry whether it is published. Nothing after it is attempted.");
+    expect(report).toContain("@iris-mcp/client-config@1.0.0: failed (could not ask the registry:");
+    expect(report, "the code line leads the detail, though the transcript ends in its stack and log path").toContain("@iris-mcp/client-config@1.0.0: failed (could not ask the registry: npm error code ECONNREFUSED\n");
+    expect(report).toContain("@iris-mcp/all@1.0.0: not attempted");
+  });
+
+  it("an upload that fails the same way is reported with npm's code line too, and the log says how to resume", async () => {
+    const world = newWorld();
+    world.standIns.script("npm", [{ match: ["publish", "~iris-mcp-shared"], status: 1, stderr: UNREACHABLE }, ...NPM_DEFAULT]);
+    expect(await world.run()).toBe(1);
+    const report = world.lines.join("\n");
+    expect(report).toContain("@iris-mcp/shared@1.0.0: failed (npm error code ECONNREFUSED\nnpm error }\nnpm error\n");
+    expect(report).toContain("A complete log of this run can be found in");
+    expect(report).toContain("@iris-mcp/shared@1.0.0: npm publish failed (exit 1). Nothing after it is attempted. Fix the cause and run the release again: versions already on the registry are skipped.");
+  });
+
+  it("npmFailureDetail keeps the tail alone when it already holds the code line, and adds nothing when there is none", () => {
+    expect(npmFailureDetail({ status: 1, stdout: "", stderr: "npm error code E403\nnpm error 403 Forbidden\n" }, 4)).toBe("npm error code E403\nnpm error 403 Forbidden");
+    expect(npmFailureDetail({ status: null, stdout: "", stderr: "", error: new Error("spawn npm ENOENT") }, 4)).toBe("spawn npm ENOENT");
+  });
+});
+
+describe("A rehearsal runs in a job that holds no GitHub token (QA, AC 42.5.4)", () => {
+  it("publish --dry-run without GITHUB_TOKEN, GITHUB_REPOSITORY or GITHUB_API_URL (the rehearse job has none of them) passes, and asks GitHub nothing", async () => {
+    const world = newWorld();
+    expect(await world.run({ dryRun: true, env: { GITHUB_TOKEN: undefined, GITHUB_REPOSITORY: undefined, GITHUB_API_URL: undefined } }), world.lines.join("\n")).toBe(0);
+    expect(world.github.requests, "a rehearsal reads no environment and no run").toEqual([]);
+    expect(world.published(), "eight dry-run uploads").toHaveLength(8);
+    expect(world.published().every((call) => call.argv.includes("--dry-run"))).toBe(true);
+  });
+
+  it("the control: a real run in the same world does ask GitHub, so the empty request list above is a property of the dry run", async () => {
+    const world = newWorld();
+    expect(await world.run()).toBe(0);
+    expect(world.github.requests).toEqual(["/repos/o/r/environments/release", "/repos/o/r/environments/release/deployment-branch-policies"]);
+  });
+});
+
+describe("redact: a secret never reaches a log line, and a short one never corrupts it (QA, project rule #9)", () => {
+  it("replaces every occurrence of a secret of four characters or more", () => {
+    expect(redact("write npm_abcd failed; retry with npm_abcd", ["npm_abcd"])).toBe("write *** failed; retry with ***");
+    expect(redact("two secrets: abcd and wxyz!", ["abcd", "wxyz"])).toBe("two secrets: *** and ***!");
+  });
+
+  it("leaves a secret of one to three characters alone, because replacing it would rewrite every such letter of the message", () => {
+    expect(redact("a banana and ab abc", ["a", "ab", "abc"])).toBe("a banana and ab abc");
+  });
+
+  it("ignores an empty or missing secret", () => {
+    expect(redact("nothing to hide", ["", undefined as never, "gone"])).toBe("nothing to hide");
+  });
+});
+
 describe("Publish auth (AC 42.5.2; Decision #75)", () => {
   it("NPM_TOKEN set: a 0600 userconfig holds the token and is passed as --userconfig to every upload; it is gone afterwards; the log says auth: token and never the token", async () => {
     const world = newWorld();
@@ -643,6 +988,24 @@ describe("Publish auth (AC 42.5.2; Decision #75)", () => {
       }
       expect(world.lines.join("\n")).toContain("auth: oidc");
     }
+  });
+
+  it("the job's OIDC request variables reach npm publish and no other child: not npm --version, npm view, a store CLI or git", async () => {
+    const OIDC = { ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-request-SECRET-0123456789", ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.actions.example.invalid/x" };
+    const world = newWorld({ publisher: "acme" });
+    world.standIns.script("git", [
+      { match: ["clone"], effects: [{ mkdir: "$LAST" }, { mkdir: "$LAST/.git" }] },
+      { match: ["write-tree"], stdout: "tree-new\n" },
+      { match: ["rev-parse"], status: 1 },
+    ]);
+    expect(await world.run({ channels: ALL_ENABLED, env: { ...OIDC, IPM_DIST_DEPLOY_KEY: "-----BEGIN KEY-----\nabc\n-----END KEY-----" } })).toBe(0);
+    const holds = (call: StandInCall): boolean => call.env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"] !== undefined || call.env["ACTIONS_ID_TOKEN_REQUEST_URL"] !== undefined;
+    const uploads = world.published();
+    expect(uploads).toHaveLength(8);
+    expect(uploads.every((call) => call.env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"] === OIDC.ACTIONS_ID_TOKEN_REQUEST_TOKEN && call.env["ACTIONS_ID_TOKEN_REQUEST_URL"] === OIDC.ACTIONS_ID_TOKEN_REQUEST_URL), "npm publish asks GitHub for its OIDC token with them").toBe(true);
+    const others = world.standIns.allCalls().filter((call) => !(call.tool === "npm" && call.argv[0] === "publish"));
+    expect(others.map((call) => `${call.tool} ${call.argv[0]}`)).toEqual(expect.arrayContaining(["npm --version", "npm view", "vsce publish", "ovsx publish", "git clone", "git push"]));
+    expect(others.filter(holds).map((call) => `${call.tool} ${call.argv[0]}`), "no other child holds them").toEqual([]);
   });
 
   it("the userconfig is deleted when an upload fails, too", async () => {
@@ -884,6 +1247,7 @@ describe("The IPM channel (DW-689; Decision #76)", () => {
     clone.standIns.script("git", [{ match: ["clone"], status: 128, stderr: "fatal: repository not found\n" }]);
     expect(await clone.run({ channels: IPM_ONLY, env: { IPM_DIST_DEPLOY_KEY: KEY } })).toBe(1);
     expect(clone.lines.join("\n")).toContain("git clone failed (exit 128): fatal: repository not found");
+    expect(clone.lines.join("\n"), "the failure says what to do").toContain("Fix the packaging repository or its deploy key, then run the release again.");
 
     const push = ipmWorld();
     push.standIns.script("git", [
@@ -910,39 +1274,44 @@ describe("The IPM channel (DW-689; Decision #76)", () => {
     const world = ipmWorld();
     const run = defaultDeps().run;
     const attempts: string[][] = [];
-    const before = readdirSync(tmpdir()).filter((name) => name.startsWith("release-ipm-"));
-    const code = await world.run({
-      channels: IPM_ONLY,
-      env: { IPM_DIST_DEPLOY_KEY: KEY, NPM_TOKEN: TOKEN },
-      deps: {
-        run: (argv: string[], options: Parameters<typeof run>[1]) => {
-          if (argv[0] !== "git") return run(argv, options);
-          attempts.push(argv);
-          throw new Error(`ENOSPC: no space left on device, write ${TOKEN}`);
+    const during: string[] = [];
+    const privateTmp = scratch("release-private-tmp-");
+    const code = await withTmpdir(privateTmp, () =>
+      world.run({
+        channels: IPM_ONLY,
+        env: { IPM_DIST_DEPLOY_KEY: KEY, NPM_TOKEN: TOKEN },
+        deps: {
+          run: (argv: string[], options: Parameters<typeof run>[1]) => {
+            if (argv[0] !== "git") return run(argv, options);
+            attempts.push(argv);
+            during.push(...readdirSync(privateTmp));
+            throw new Error(`ENOSPC: no space left on device, write ${TOKEN}`);
+          },
         },
-      },
-    });
+      }),
+    );
     expect(code).toBe(1);
+    expect(during.some((name) => name.startsWith("release-ipm-")), "the channel had made its working directory when it threw").toBe(true);
     expect(attempts, "the first git call of the channel threw").toHaveLength(1);
     expect(world.published()).toHaveLength(8);
     const report = world.lines.join("\n");
     for (const name of NPM_PUBLISH_ORDER) expect(report, name).toContain(`${name}@1.0.0: published`);
     expect(report).toMatch(/ipm\n {2}iris-execute-mcp-v2@1\.0\.0: failed \(ENOSPC: no space left on device, write \*\*\*\)/);
     expect(report, "the redaction of the report").not.toContain(TOKEN);
-    expect(readdirSync(tmpdir()).filter((name) => name.startsWith("release-ipm-")), "the channel's working directory is removed").toEqual(before);
+    expect(readdirSync(privateTmp), "the channel's working directory and the token's userconfig are removed").toEqual([]);
   });
 });
 
 describe("Rehearse: publish --dry-run (AC 42.5.4)", () => {
   it("one `npm publish <tgz> ... --dry-run` per package, in order; NPM_TOKEN is never read: no userconfig, no auth line, the value nowhere", async () => {
     const world = newWorld();
-    const before = readdirSync(tmpdir()).filter((name) => name.startsWith("release-npm-"));
-    expect(await world.run({ dryRun: true, env: { NPM_TOKEN: TOKEN } })).toBe(0);
+    const privateTmp = scratch("release-private-tmp-");
+    expect(await withTmpdir(privateTmp, () => world.run({ dryRun: true, env: { NPM_TOKEN: TOKEN } }))).toBe(0);
     const uploads = world.published();
     expect(uploads.map((call) => call.argv.slice(2))).toEqual(NPM_PUBLISH_ORDER.map(() => ["--access", "public", "--provenance", "--ignore-scripts", "--dry-run"]));
     expect(uploads.map((call) => tarballOf(call, world.artifacts))).toEqual(NPM_PUBLISH_ORDER.map((name: string) => `npm/iris-mcp-${name.replace(/^@iris-mcp\//, "")}-1.0.0.tgz`));
     expect(world.standIns.calls("npm").every((call) => !call.argv.includes("--userconfig"))).toBe(true);
-    expect(readdirSync(tmpdir()).filter((name) => name.startsWith("release-npm-")), "no userconfig directory was made").toEqual(before);
+    expect(readdirSync(privateTmp), "no userconfig directory was made").toEqual([]);
     expect(world.lines.join("\n")).toContain("auth: none (dry run)");
     expect(world.lines.join("\n")).not.toContain(TOKEN);
     expect(JSON.stringify(world.standIns.allCalls())).not.toContain(TOKEN);
@@ -1124,10 +1493,23 @@ describe("scripted runs of `node scripts/release.mjs` with the stand-ins as the 
     expect(world.published().length, "the upload started").toBeGreaterThan(0);
     const config = world.published()[0]?.argv[(world.published()[0]?.argv.indexOf("--userconfig") as number) + 1] as string;
     expect(existsSync(config), "the userconfig exists while the upload runs").toBe(true);
+    const upload = world.published()[0]?.pid as number;
+    const alive = (target: number): boolean => {
+      try {
+        process.kill(target, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    expect(alive(upload), "the upload's process runs (it sleeps for 30 seconds)").toBe(true);
     process.kill(pid, "SIGTERM");
     const result = await running;
     expect(result.status).toBe(143);
     expect(existsSync(config), "the userconfig is deleted on SIGTERM").toBe(false);
+    const until = Date.now() + 5_000;
+    while (alive(upload) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(alive(upload), "main()'s signal handler killed the running upload, which would otherwise sleep on").toBe(false);
   }, 60_000);
 
   it("ci-gate as a real process: green exits 0, red exits 1, and an API failure exits 1", async () => {

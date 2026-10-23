@@ -27,10 +27,11 @@ import {
   RELEASE_NODE,
   RELEASE_TRIGGERS,
 } from "../../../../scripts/lib/release-checks.mjs";
-import { NPM_PUBLISH_ORDER, RELEASE_CHANNELS } from "../../../../scripts/lib/release-core.mjs";
+import { NPM_PUBLISH_ORDER, RELEASE_CHANNELS, npmVersionProblems } from "../../../../scripts/lib/release-core.mjs";
 import { REPO_ROOT } from "../../../../scripts/lib/live-gate-scan.mjs";
 import { parseArgs } from "../../../../scripts/release.mjs";
-import { releaseWorkflowProblems } from "./release-workflow-check";
+import { stripComments } from "../../../../scripts/lib/script-ts-import-scan.mjs";
+import { RAW_VERB, releaseWorkflowProblems } from "./release-workflow-check";
 
 const WORKFLOWS = path.join(REPO_ROOT, ".github", "workflows");
 const text = readFileSync(path.join(WORKFLOWS, "release.yml"), "utf8");
@@ -91,6 +92,11 @@ describe("AC 42.5.1: release.yml is the declaration", () => {
     expect(["ci-gate", "prepare", "rehearse", "publish"].map(nodeOf)).toEqual(["22.17.0", "22.17.0", "26.0.0", "26.0.0"]);
   });
 
+  it("the refusal of an old npm names the Node that the upload jobs run, so a move of RELEASE_NODE.upload moves the advice with it", () => {
+    expect(npmVersionProblems("11.4.0")).toHaveLength(1);
+    expect(npmVersionProblems("11.4.0")[0]).toContain(`Run the release on Node ${RELEASE_NODE.upload}`);
+  });
+
   it.each([
     ["rehearse given id-token: write", () => mutate(text, REHEARSE_HEAD, `${REHEARSE_HEAD}      id-token: write\n`), /job rehearse has permissions .*id-token|job rehearse has id-token permission/],
     ["publish without its push clause", () => mutate(text, PUBLISH_IF, "    if: ${{ startsWith(github.ref, 'refs/tags/v') }}\n"), /job publish has the condition/],
@@ -101,6 +107,10 @@ describe("AC 42.5.1: release.yml is the declaration", () => {
     ["a secret read in prepare", () => mutate(text, "        run: pnpm build\n", "        run: pnpm build\n        env:\n          T: ${{ secrets.NPM_TOKEN }}\n"), /job prepare reads a secret: only publish may/],
     ["github.token read in prepare", () => mutate(text, "        run: pnpm build\n", "        run: pnpm build\n        env:\n          T: ${{ github.token }}\n"), /job prepare reads github\.token: only ci-gate and publish may/],
     ["github.token read in rehearse", () => mutate(text, DRY_RUN, `${DRY_RUN}        env:\n          GITHUB_TOKEN: \${{ github.token }}\n`), /job rehearse reads github\.token/],
+    // QA: a step's name is compared with nothing, so a secret named there in its bracket form must still be found.
+    ["a secret in its bracket form in a step name of rehearse", () => mutate(text, "      - name: rehearse the upload\n", "      - name: rehearse the upload ${{ secrets['NPM_TOKEN'] }}\n"), /job rehearse reads a secret: only publish may/],
+    ["github.token in its bracket form in a step name of prepare", () => mutate(text, "      - name: build\n", "      - name: build ${{ github['token'] }}\n"), /job prepare reads github\.token: only ci-gate and publish may/],
+    ["a secret in its bracket form at the workflow level", () => mutate(text, RUN_NAME, "run-name: release ${{ secrets['NPM_TOKEN'] }}\n"), OUTSIDE_THE_JOBS],
     ["publish needing only prepare", () => mutate(text, "    needs: [ci-gate, prepare, rehearse]\n", "    needs: [prepare]\n"), /job publish needs prepare, not ci-gate, prepare, rehearse|job publish needs prepare, not/],
     ["a pull_request trigger", () => mutate(text, "on:\n  push:\n", "on:\n  pull_request:\n  push:\n"), /the triggers are pull_request, push, workflow_dispatch|pull_request trigger/],
     ["a schedule trigger", () => mutate(text, "  workflow_dispatch: {}\n", "  workflow_dispatch: {}\n  schedule:\n    - cron: '0 0 * * *'\n"), /the triggers are push, schedule, workflow_dispatch|schedule trigger/],
@@ -110,6 +120,16 @@ describe("AC 42.5.1: release.yml is the declaration", () => {
     ["the dispatch dropped", () => mutate(text, "  workflow_dispatch: {}\n", ""), /the triggers are push, not push, workflow_dispatch/],
     ["a workflow-level permission", () => mutate(text, "permissions: {}\n", "permissions:\n  contents: read\n"), /the workflow permissions are/],
     ["a concurrency that cancels a started release", () => mutate(text, "cancel-in-progress: false", "cancel-in-progress: true"), /the concurrency is/],
+    // QA: the ways a red job, a dry run or a branch push could still reach the publish job or its secrets (a status function in a condition lifts `needs`).
+    ["publish given always() ahead of its tag test (a status function lifts needs, so a red job would still publish)", () => mutate(text, "if: ${{ github.event_name == 'push'", "if: ${{ always() && github.event_name == 'push'"), /job publish has the condition/],
+    ["publish given failure() beside its tag test", () => mutate(text, "startsWith(github.ref, 'refs/tags/v') }}\n    environment", "startsWith(github.ref, 'refs/tags/v') || failure() }}\n    environment"), /job publish has the condition/],
+    ["a step-level condition on the publish step", () => mutate(text, "      - name: publish\n", "      - name: publish\n        if: always()\n"), /sets if, which the declaration does not use/],
+    ["a dispatch that takes inputs", () => mutate(text, "  workflow_dispatch: {}\n", "  workflow_dispatch:\n    inputs:\n      publish:\n        type: boolean\n"), /workflow_dispatch is/],
+    ["a repository_dispatch trigger", () => mutate(text, "  workflow_dispatch: {}\n", "  workflow_dispatch: {}\n  repository_dispatch:\n    types: [release]\n"), /the triggers are push, repository_dispatch, workflow_dispatch/],
+    ["a release trigger", () => mutate(text, "  workflow_dispatch: {}\n", "  workflow_dispatch: {}\n  release:\n    types: [published]\n"), /the triggers are push, release, workflow_dispatch/],
+    ["the environment in its object form on rehearse", () => mutate(text, REHEARSE_HEAD, `${REHEARSE_HEAD}    environment:\n      name: release\n`), /job rehearse has an environment: only publish may/],
+    ["write-all permissions on rehearse", () => mutate(text, REHEARSE_HEAD, "    needs: [prepare]\n    runs-on: ubuntu-24.04\n    timeout-minutes: 20\n    permissions: write-all\n"), /job rehearse has permissions "write-all"/],
+    ["a reusable workflow in place of rehearse's body, with every secret inherited", () => mutate(text, "  rehearse:\n    name: rehearse\n", "  rehearse:\n    uses: ./.github/workflows/other.yml\n    secrets: inherit\n    name: rehearse\n"), /job rehearse sets uses, which the declaration does not use/],
     ["a bare publish in rehearse", () => mutate(text, DRY_RUN, "        run: node scripts/release.mjs publish --artifacts ${{ runner.temp }}/release-artifacts\n"), /job rehearse runs release\.mjs publish: only publish may/],
     ["a dry-run publish in the publish job", () => mutate(text, BARE_PUBLISH, "        run: node scripts/release.mjs publish --dry-run --artifacts ${{ runner.temp }}/release-artifacts\n        env:\n"), /job publish runs release\.mjs publish --dry-run: only rehearse may/],
     ["ci-gate run in prepare", () => mutate(text, "        run: pnpm build\n", "        run: pnpm build && node scripts/release.mjs ci-gate\n"), /job prepare runs release\.mjs ci-gate: only ci-gate may/],
@@ -193,7 +213,17 @@ describe("AC 42.5.1: the run lines of the declaration are command lines that the
 
 describe("AC 42.5.2: the repository holds no other way to publish", () => {
   const readJson = <T>(file: string): T => JSON.parse(readFileSync(file, "utf8")) as T;
-  const PUBLISH_VERB = /\b(?:npm|pnpm|yarn)\s+(?:publish|stage|deprecate|unpublish)\b|\bchangeset\s+(?:publish|version)\b|\b(?:vsce|ovsx)\s+publish\b|\bgit\s+(?:push|tag)\b|\bgh\s+release\b|\bnpm\s+(?:login|adduser)\b/;
+
+  /** An argv array literal that forms a publish, push or tag: the verb first, or a tool and its string arguments before it. */
+  const ARGV_VERB =
+    /\[\s*(?:['"`](?:npm|pnpm|yarn|vsce|ovsx|changeset|git)['"`]\s*,\s*(?:['"`][^'"`\n]*['"`]\s*,\s*)*)?['"`](?:publish|stage|unpublish|deprecate|dist-tag|push|tag)['"`]|\[\s*['"`]gh['"`]\s*,\s*(?:['"`][^'"`\n]*['"`]\s*,\s*)*['"`](?:release|secret|workflow)['"`]/;
+  /** A command string handed to a process API, such as `execSync('npm publish x')`. */
+  const STRING_COMMAND = /\b(?:execSync|exec|execFileSync|execFile|spawnSync|spawn)\s*\(\s*(['"`])((?:(?!\1)[^\n])*)\1/g;
+  /** Whether a script's comment-free source forms a publish, push or tag outside an argv builder. */
+  const formsPublishVerb = (source: string): boolean => {
+    const code = stripComments(source);
+    return ARGV_VERB.test(code) || [...code.matchAll(STRING_COMMAND)].some((match) => RAW_VERB.test(match[2] as string));
+  };
 
   /** Every `package.json` of the repository's workspaces and its extension, with its scripts. */
   function manifests(): Array<{ file: string; scripts: Record<string, string> }> {
@@ -211,23 +241,46 @@ describe("AC 42.5.2: the repository holds no other way to publish", () => {
     expect(readFileSync(path.join(WORKFLOWS, "ci.yml"), "utf8").replace(/^\s*#.*$/gm, "")).not.toMatch(/secrets\./);
   });
 
-  it("no package.json script holds a publish, push or tag verb", () => {
-    const found = manifests().flatMap(({ file, scripts }) => Object.entries(scripts).filter(([, command]) => PUBLISH_VERB.test(command)).map(([name]) => `${file}: ${name}`));
+  it("no package.json script holds a publish, push or tag verb (the workflow check's own detector)", () => {
+    const found = manifests().flatMap(({ file, scripts }) => Object.entries(scripts).filter(([, command]) => RAW_VERB.test(command)).map(([name]) => `${file}: ${name}`));
     expect(found).toEqual([]);
     const root = manifests()[0]?.scripts ?? {};
     expect(root["release"]).toBe("node scripts/release.mjs");
     expect(root["version"]).toBe("node scripts/release-version.mjs");
   });
 
-  it("the detector finds a publish verb in a script", () => {
-    for (const command of ["npm publish", "pnpm publish -r", "changeset publish", "pnpm exec changeset version", "vsce publish", "ovsx publish x", "git push origin main", "git tag v1", "gh release create v1", "npm stage publish"]) {
-      expect(PUBLISH_VERB.test(command), command).toBe(true);
+  it("the detector finds a publish verb in a script, with flags between the tool and the verb too", () => {
+    for (const command of [
+      "npm publish",
+      "pnpm publish -r",
+      "pnpm -r publish --access public",
+      "pnpm --filter @iris-mcp/shared publish",
+      "npm -w packages/shared publish",
+      "npm --workspaces publish",
+      "npm dist-tag add @iris-mcp/shared@1.0.0 latest",
+      "npm trust github @iris-mcp/shared --file release.yml",
+      "changeset publish",
+      "pnpm exec changeset version",
+      "vsce publish",
+      "npx vsce publish",
+      "ovsx publish x",
+      "git push origin main",
+      "git -C dist push",
+      "git -c user.name=x push origin",
+      "git tag v1",
+      "gh release create v1",
+      "gh secret set NPM_TOKEN",
+      "npm stage publish",
+      "pnpm build && npm publish",
+    ]) {
+      expect(RAW_VERB.test(command), command).toBe(true);
     }
-    expect(PUBLISH_VERB.test("node scripts/release.mjs publish --dry-run")).toBe(false);
-    expect(PUBLISH_VERB.test("node scripts/prepublish-gate.mjs")).toBe(false);
+    for (const command of ["node scripts/release.mjs publish --dry-run", "node scripts/prepublish-gate.mjs", "pnpm run prepublishOnly", "pnpm install --frozen-lockfile", "npm ci", "git status --porcelain", "git log --tags", "pnpm build && echo publish"]) {
+      expect(RAW_VERB.test(command), command).toBe(false);
+    }
   });
 
-  it("only scripts/lib/release-core.mjs forms a publish argv: no other script writes an array that starts with 'publish'", () => {
+  it("only scripts/lib/release-core.mjs forms a publish argv: no other script writes one, as an argv array or as a command string", () => {
     const scriptsDir = path.join(REPO_ROOT, "scripts");
     const walk = (directory: string): string[] =>
       readdirSync(directory, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? walk(path.join(directory, entry.name)) : entry.name.endsWith(".mjs") ? [path.join(directory, entry.name)] : []));
@@ -235,11 +288,36 @@ describe("AC 42.5.2: the repository holds no other way to publish", () => {
     const lists = [path.join("scripts", "lib", "release-core.mjs"), path.join("scripts", "lib", "ipm-archive.mjs")];
     const offenders = walk(scriptsDir)
       .filter((file) => !lists.includes(path.relative(REPO_ROOT, file)))
-      .filter((file) => /\[\s*['"]publish['"]/.test(readFileSync(file, "utf8")))
+      .filter((file) => formsPublishVerb(readFileSync(file, "utf8")))
       .map((file) => path.relative(REPO_ROOT, file));
     expect(offenders).toEqual([]);
     expect(readFileSync(path.join(scriptsDir, "lib", "ipm-archive.mjs"), "utf8")).toMatch(/FORBIDDEN_IPM_VERBS = Object\.freeze\(\['publish'/);
     expect(readFileSync(path.join(scriptsDir, "lib", "release-core.mjs"), "utf8")).toMatch(/\[\s*'publish'/);
+  });
+
+  it("the argv detector finds the shapes this repository spawns with, and not the ones it uses for other work", () => {
+    for (const source of [
+      "await deps.run(['npm', 'publish', tgz]);",
+      'await runCaptured(["pnpm", "--filter", "x", "publish"]);',
+      "spawnSync('git', ['push', 'origin', 'main']);",
+      "run(['git', '-C', 'dist', 'tag', 'v1']);",
+      "run(['gh', 'release', 'create', 'v1']);",
+      "execSync('npm publish x.tgz');",
+      "execSync(`git -C dist push`);",
+      "const argv = ['publish', tarball];",
+    ]) {
+      expect(formsPublishVerb(source), source).toBe(true);
+    }
+    for (const source of [
+      "await deps.run(['npm', ...npmPublishArgv(tarball)]);",
+      "await deps.run(['git', 'status', '--porcelain']);",
+      "spawnSync('git', ['rev-parse', 'HEAD']);",
+      "say('npm publish failed (exit 1). Nothing after it is attempted.');",
+      "// run(['npm', 'publish', tgz]) is what release-core builds",
+      "execSync('git status --porcelain');",
+    ]) {
+      expect(formsPublishVerb(source), source).toBe(false);
+    }
   });
 });
 

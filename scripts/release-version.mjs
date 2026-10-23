@@ -77,6 +77,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, root
   const firstRelease = args.includes('--first-release');
   if (env.npm_command === 'version') {
     say('this script ran as the npm version lifecycle hook. Run pnpm run version instead; pnpm version hands over to npm version.');
+    say('npm version has already changed the version in package.json: restore it with git checkout -- package.json first.');
     return 2;
   }
   const status = spawnSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' });
@@ -122,10 +123,14 @@ export async function main(argv = process.argv.slice(2), env = process.env, root
     say(`changeset version failed (exit ${versioned}). Fix the changeset it names, then run it again.`);
     return 1;
   }
+  /** After `changeset version` the tree holds a partial version, which a second run refuses as a dirty tree. */
+  const partial = () =>
+    say('the tree now holds a partial version: discard it with git restore . && git clean -fd (the tree was clean when this run began), fix the problem above, then run pnpm run version again.');
   const afterChangesets = stateOf(root);
   const first = [...afterChangesets.facts.problems, ...versionProblems(afterChangesets, 'dry-run')];
   if (first.length > 0) {
     for (const problem of first) say(`problem: ${problem}`);
+    partial();
     return 1;
   }
 
@@ -138,6 +143,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, root
   const problems = [...after.facts.problems, ...versionProblems(after, 'dry-run'), ...embeddedVersionProblems(after.facts)];
   if (problems.length > 0) {
     for (const problem of problems) say(`problem: ${problem}`);
+    partial();
     return 1;
   }
 

@@ -79,6 +79,8 @@ interface Behaviors {
   suites: Record<string, unknown>;
   /** Changes the embed before it is checked. */
   embed: (embed: Record<string, any>) => Record<string, any>;
+  /** The extension's three commands: the exit code of its build, of `npm run package` and of `vsce ls`, and the vsix files that packaging leaves. */
+  vsix: { build: number; package: number; ls: number; files: string[] };
 }
 
 interface PrepareWorld {
@@ -96,7 +98,7 @@ interface PrepareWorld {
   packArgumentCounts: number[];
   behaviors: Behaviors;
   env: (overrides?: Record<string, string | undefined>) => Record<string, string>;
-  run: (options?: { env?: Record<string, string | undefined>; out?: string }) => Promise<number>;
+  run: (options?: { env?: Record<string, string | undefined>; out?: string; deps?: Record<string, unknown> }) => Promise<number>;
 }
 
 /** A world: a synthetic repository, a fake docker, scripted commands, and the real harness's functions. */
@@ -113,7 +115,17 @@ function newWorld(repoOptions: RepoOptions = {}): PrepareWorld {
   const runs: PrepareWorld["runs"] = [];
   const smoked: PrepareWorld["smoked"] = [];
   const packArgumentCounts: number[] = [];
-  const behaviors: Behaviors = { failChecks: new Set(), genStatus: 0, dirty: "", suiteCodes: {}, packed: {}, smokeStatus: 0, suites: checks.LIVE_SUITES as Record<string, unknown>, embed: (embed) => embed };
+  const behaviors: Behaviors = {
+    failChecks: new Set(),
+    genStatus: 0,
+    dirty: "",
+    suiteCodes: {},
+    packed: {},
+    smokeStatus: 0,
+    suites: checks.LIVE_SUITES as Record<string, unknown>,
+    embed: (embed) => embed,
+    vsix: { build: 0, package: 0, ls: 0, files: ["iris-mcp-launcher-0.1.0.vsix"] },
+  };
   const baseEnv = (overrides: Record<string, string | undefined> = {}): Record<string, string> => {
     const env: Record<string, string | undefined> = {
       PATH: docker.binDir,
@@ -133,14 +145,17 @@ function newWorld(repoOptions: RepoOptions = {}): PrepareWorld {
     if (key === "pnpm run gen:bootstrap") return { status: behaviors.genStatus, stdout: "", stderr: behaviors.genStatus === 0 ? "" : "generator exploded\n" };
     if (key === "git status --porcelain") return { status: 0, stdout: behaviors.dirty, stderr: "" };
     if (argv[0] === "pnpm" && argv[1] === "run") return behaviors.failChecks.has(argv[2] as string) ? { status: 1, stdout: "", stderr: `${argv[2]} found a difference\n` } : { status: 0, stdout: "", stderr: "" };
-    if (key === "npm run build") return { status: 0, stdout: "", stderr: "" };
+    if (key === "npm run build") return behaviors.vsix.build === 0 ? { status: 0, stdout: "", stderr: "" } : { status: behaviors.vsix.build, stdout: "", stderr: "tsc: error TS2307 cannot find module\n" };
     if (key.startsWith("npm run package -- --out ")) {
+      if (behaviors.vsix.package !== 0) return { status: behaviors.vsix.package, stdout: "", stderr: "vsce: ERROR missing publisher\n" };
       const directory = argv[argv.length - 1] as string;
       mkdirSync(directory, { recursive: true });
-      writeFileSync(path.join(directory, "iris-mcp-launcher-0.1.0.vsix"), "synthetic vsix\n");
+      for (const name of behaviors.vsix.files) writeFileSync(path.join(directory, name), "synthetic vsix\n");
       return { status: 0, stdout: "", stderr: "" };
     }
-    if (key === "npm exec -- vsce ls") return { status: 0, stdout: "package.json\ndist/extension.js\nLICENSE\n", stderr: "" };
+    if (key === "npm exec -- vsce ls") {
+      return behaviors.vsix.ls === 0 ? { status: 0, stdout: "package.json\ndist/extension.js\nLICENSE\n", stderr: "" } : { status: behaviors.vsix.ls, stdout: "", stderr: "vsce: ERROR cannot list the files\n" };
+    }
     throw new Error(`unscripted command: ${key}`);
   };
 
@@ -218,7 +233,7 @@ function newWorld(repoOptions: RepoOptions = {}): PrepareWorld {
       const proc = { once: () => undefined, off: () => undefined, exit: () => undefined };
       return prepare(
         { out: runOptions.out ?? out, env, repoRoot: repo },
-        { ...defaultDeps(), log: (line: string) => lines.push(line), run: script as never, loadModules: async () => modules(), harnessDeps, proc } as never,
+        { ...defaultDeps(), log: (line: string) => lines.push(line), run: script as never, loadModules: async () => modules(), harnessDeps, proc, ...(runOptions.deps ?? {}) } as never,
       );
     },
   };
@@ -267,6 +282,14 @@ describe("Prepare: the gate set runs every prepublishOnly once, through the harn
     const failedSummary = path.join(failing.root, "failed-summary.md");
     expect(await failing.run({ env: { GITHUB_STEP_SUMMARY: failedSummary } })).toBe(1);
     expect(readFileSync(failedSummary, "utf8")).toContain("### prepare (exit 1)");
+  });
+
+  it("a run that throws (the modules cannot be loaded) still appends its lines to the step summary, as exit 1, and the error reaches the caller", async () => {
+    const world = newWorld();
+    const summary = path.join(world.root, "thrown-summary.md");
+    await expect(world.run({ env: { GITHUB_STEP_SUMMARY: summary }, deps: { loadModules: async () => Promise.reject(new Error("Cannot find module scripts/throwaway-iris.mjs")) } })).rejects.toThrow(/Cannot find module/);
+    expect(readFileSync(summary, "utf8")).toContain("### prepare (exit 1)");
+    expect(readFileSync(summary, "utf8"), "the lines before the throw").toContain("prepare: gen:skills:check: ok");
   });
 
   it("the command of each suite is the CI registry's, and each id is a suite of the real registry (so ci-live-suite.mjs accepts it)", async () => {
@@ -602,6 +625,68 @@ describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
   });
 });
 
+describe("Prepare: the extension's vsix is an artifact that fails by name (I/O matrix: Prepare, artifacts -- exit 1 naming the artifact) (QA)", () => {
+  const LAUNCHER = path.join("extensions", "iris-mcp-launcher");
+  const ranPackage = (world: PrepareWorld): boolean => world.runs.some((run) => run.argv.join(" ").startsWith("npm run package"));
+  const ranList = (world: PrepareWorld): boolean => world.runs.some((run) => run.argv.join(" ") === "npm exec -- vsce ls");
+
+  /** What every failed vsix step leaves behind: the gate set ran and its container is gone, but there is no manifest and no IPM tree. */
+  const expectNoManifest = (world: PrepareWorld): void => {
+    expect(world.events.filter((event) => event.startsWith("exec ")), "the gate set ran first").toHaveLength(9);
+    expect(world.docker.containers(), "the container is removed").toEqual({});
+    expect(existsSync(path.join(world.out, "release-manifest.json")), "no manifest is written").toBe(false);
+    expect(world.events, "the IPM tree is not staged after a failed vsix").not.toContain("embed");
+  };
+
+  it("an extension that does not build is exit 1 naming the build and the directory, and packaging never starts", async () => {
+    const world = newWorld();
+    world.behaviors.vsix.build = 1;
+    expect(await world.run()).toBe(1);
+    expect(world.lines.join("\n")).toContain(`problem: the extension did not build (exit 1): tsc: error TS2307 cannot find module Run npm ci in ${LAUNCHER}, then build it.`);
+    expect(ranPackage(world)).toBe(false);
+    expectNoManifest(world);
+  });
+
+  it("an extension that does not package is exit 1 carrying the packager's message, and the file list is never asked for", async () => {
+    const world = newWorld();
+    world.behaviors.vsix.package = 1;
+    expect(await world.run()).toBe(1);
+    expect(world.lines.join("\n")).toContain("problem: the extension did not package (exit 1): vsce: ERROR missing publisher");
+    expect(world.lines.join("\n"), "the error says what to do").toContain("Run npm run package in extensions/iris-mcp-launcher and fix the error it names.");
+    expect(ranList(world)).toBe(false);
+    expectNoManifest(world);
+  });
+
+  it.each([
+    ["two vsix files", ["iris-mcp-launcher-0.1.0.vsix", "iris-mcp-launcher-0.1.1.vsix"], 2],
+    ["no vsix file", [], 0],
+  ])("%s left by packaging is exit 1 saying how many, and no vsix is picked", async (_label, files, count) => {
+    const world = newWorld();
+    world.behaviors.vsix.files = files;
+    expect(await world.run()).toBe(1);
+    expect(world.lines.join("\n")).toMatch(new RegExp(`problem: packaging the extension left ${count} vsix files in .*vsix, not one\\. Empty the directory and package again\\.`));
+    expect(ranList(world), "the listing of an ambiguous vsix is not recorded").toBe(false);
+    expectNoManifest(world);
+  });
+
+  it("a vsce ls that fails is exit 1 carrying its message, so a vsix without a file list is never released", async () => {
+    const world = newWorld();
+    world.behaviors.vsix.ls = 1;
+    expect(await world.run()).toBe(1);
+    expect(world.lines.join("\n")).toContain("problem: vsce ls failed (exit 1): vsce: ERROR cannot list the files");
+    expect(world.lines.join("\n"), "the error says what to do").toContain("Run npm exec -- vsce ls in extensions/iris-mcp-launcher and fix the error it names.");
+    expectNoManifest(world);
+  });
+
+  it("the controls: the same world with a working extension is exit 0, so each refusal above comes from its own step", async () => {
+    const world = newWorld();
+    expect(await world.run()).toBe(0);
+    expect(ranPackage(world)).toBe(true);
+    expect(ranList(world)).toBe(true);
+    expect(existsSync(path.join(world.out, "release-manifest.json"))).toBe(true);
+  });
+});
+
 describe("the real loadModules, which only prepare runs (a runner without node_modules never does)", () => {
   it("loads the five modules from the repository root, with every member that prepare and runGateSet call", async () => {
     const modules = await defaultDeps().loadModules(REPO_ROOT);
@@ -813,5 +898,17 @@ describe("installSignalHandlers, which main() installs before any command runs (
     expect(result.error?.message).toBe("ended by SIGTERM");
     proc.emit("exit");
     expect(cleaned, "the cleanups run once, however many times they are asked").toBe(1);
+  });
+
+  it("an exit that no signal started runs the cleanups through the exit handler alone", () => {
+    const proc = fakeProcess();
+    const cleanups = createCleanups();
+    let cleaned = 0;
+    cleanups.add(() => (cleaned += 1));
+    installSignalHandlers(cleanups, proc as never);
+    expect(cleaned, "nothing has run yet").toBe(0);
+    proc.emit("exit");
+    expect(cleaned, "the exit handler ran the cleanups").toBe(1);
+    expect(proc.exits, "the exit handler ends nothing itself").toEqual([]);
   });
 });

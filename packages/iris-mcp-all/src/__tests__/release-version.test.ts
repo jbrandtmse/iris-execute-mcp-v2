@@ -17,14 +17,17 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { REPO_ROOT, removeLink } from "./pack-fixture";
-import { PACKAGE_DIRS, SYNTHETIC_CHANGESET, commitFixture, fixtureStatus, fixtureTreeHash, makeVersionFixture, manifestOf, pendingChangesets, removeFixtures } from "./release-fixture";
+import { FIXTURE_GIT_ENV, PACKAGE_DIRS, SYNTHETIC_CHANGESET, commitFixture, fixtureStatus, fixtureTreeHash, makeVersionFixture, manifestOf, pendingChangesets, removeFixtures } from "./release-fixture";
 import { embeddedVersionProblems, readReleaseFacts } from "../../../../scripts/release.mjs";
 import { versionProblems } from "../../../../scripts/lib/release-core.mjs";
 
 afterAll(removeFixtures);
 
-/** The environment of a script run: PATH and HOME only, so that no ambient `npm_command` or token reaches it. */
-const cleanEnv = (extra: Record<string, string> = {}): Record<string, string> => ({ PATH: process.env["PATH"] ?? "", HOME: process.env["HOME"] ?? "", ...extra });
+/**
+ * The environment of a script run: PATH and HOME only, so that no ambient `npm_command` or token reaches it, and the fixture's git
+ * isolation, so that the script's own `git status` never reads the developer's git configuration.
+ */
+const cleanEnv = (extra: Record<string, string> = {}): Record<string, string> => ({ PATH: process.env["PATH"] ?? "", HOME: process.env["HOME"] ?? "", ...FIXTURE_GIT_ENV, ...extra });
 
 interface Run {
   status: number | null;
@@ -165,6 +168,7 @@ describe("pnpm run version refuses, with the files unchanged", () => {
     const result = run(root, "release-version.mjs", ["--first-release"], cleanEnv({ npm_command: "version" }));
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("this script ran as the npm version lifecycle hook. Run pnpm run version instead; pnpm version hands over to npm version.");
+    expect(result.stderr, "npm bumps package.json before it runs the hook").toContain("npm version has already changed the version in package.json: restore it with git checkout -- package.json first.");
     expect(fixtureTreeHash(root)).toBe(hash);
     expect(fixtureStatus(root)).toBe("");
   });
@@ -265,6 +269,51 @@ describe("--first-release leaves no copy of the template behind when the version
     expect(result.stderr).toContain("changeset version failed (exit ");
     expect(existsSync(join(root, ".changeset", "release-1-0-0.md")), "the copy is removed").toBe(false);
     expect(fixtureStatus(root), "the tree is as it was").toBe("");
+  }, 180_000);
+});
+
+describe("pnpm run version exits 1 naming what it finds wrong after a step (I/O matrix, version step: mixed or prerelease versions) (QA)", () => {
+  it("prerelease mode (.changeset/pre.json): every package lands on a prerelease version, and the script exits 1 naming each one, before it runs the generator", () => {
+    const root = makeVersionFixture();
+    const before = generatorMarker(root);
+    const initialVersions = Object.fromEntries(PACKAGE_DIRS.map((dir) => [manifestOf(root, dir).name, manifestOf(root, dir).version]));
+    writeFileSync(join(root, ".changeset", "pre.json"), `${JSON.stringify({ mode: "pre", tag: "next", initialVersions, changesets: [] }, null, 2)}\n`);
+    commitFixture(root, "prerelease mode");
+    const result = run(root, "release-version.mjs");
+    expect(result.status, result.stderr).toBe(1);
+    for (const dir of PACKAGE_DIRS) {
+      expect(manifestOf(root, dir).version, `${dir}: changeset version put a prerelease on it`).toBe("0.0.3-next.0");
+      expect(result.stderr, dir).toContain(`${manifestOf(root, dir).name} is at "0.0.3-next.0", which is not a plain MAJOR.MINOR.PATCH version`);
+    }
+    expect(result.stderr).not.toContain("next steps");
+    expect(stamps(root), "the generator did not run on a prerelease: the embed still carries the marker from before").toEqual([before, before]);
+  }, 180_000);
+
+  it("packages that do not move together (a fixed group that is gone): exit 1 naming every package and version, before it runs the generator", () => {
+    const root = makeVersionFixture();
+    const before = generatorMarker(root);
+    const config = join(root, ".changeset", "config.json");
+    writeFileSync(config, readFileSync(config, "utf8").replace('"fixed": [["@iris-mcp/*"]]', '"fixed": []'));
+    expect(readFileSync(config, "utf8"), "the fixture's changeset config lost its fixed group").toContain('"fixed": []');
+    commitFixture(root, "no fixed group");
+    const result = run(root, "release-version.mjs");
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain("the packages are not at one shared version (@iris-mcp/client-config@0.0.2, @iris-mcp/shared@0.0.3,");
+    expect(result.stderr).toContain("Run pnpm run version so that the fixed group moves them together.");
+    expect(result.stderr, "a second run would refuse the dirty tree, so it says how to discard the partial version first").toContain("the tree now holds a partial version: discard it with git restore . && git clean -fd");
+    expect(result.stderr).not.toContain("next steps");
+    expect(stamps(root), "the generator did not run on mixed versions").toEqual([before, before]);
+  }, 180_000);
+
+  it("a generator that fails (exit 3): exit 1 naming the step and carrying the generator's own message, with no next steps", () => {
+    const root = makeVersionFixture();
+    writeFileSync(join(root, "scripts", "gen-bootstrap.mjs"), "process.stderr.write('generator exploded\\n');\nprocess.exit(3);\n");
+    commitFixture(root, "a generator that fails");
+    const result = run(root, "release-version.mjs");
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain("generator exploded");
+    expect(result.stderr).toContain("version: gen-bootstrap failed (exit 3). Fix the generator error, then run pnpm gen:bootstrap.");
+    expect(result.stderr).not.toContain("next steps");
   }, 180_000);
 });
 

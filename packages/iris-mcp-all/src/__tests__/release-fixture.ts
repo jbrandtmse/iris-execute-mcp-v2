@@ -77,9 +77,15 @@ export function makeFixture(options: { withTemplate: boolean; prefix?: string })
   return root;
 }
 
+/**
+ * The environment of every git process a version fixture starts, its own and the version script's: the developer's global and system git
+ * configuration are not read (a hook path, a signing rule or `status.showUntrackedFiles` there would change what the tests see).
+ */
+export const FIXTURE_GIT_ENV = Object.freeze({ GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" });
+
 /** Run `git` in `cwd`; throws with its output when it fails. */
 function git(cwd: string, args: string[]): string {
-  const result = spawnSync("git", ["-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8" });
+  const result = spawnSync("git", ["-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8", env: { ...process.env, ...FIXTURE_GIT_ENV } });
   if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${result.stderr}`);
   return result.stdout;
 }

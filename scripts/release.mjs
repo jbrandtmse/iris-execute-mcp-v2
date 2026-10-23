@@ -20,7 +20,8 @@
 //      (`scripts/throwaway-iris.mjs exec ... node scripts/ci-live-suite.mjs prepublish-<short>`, which exports IRIS_REQUIRE_LIVE=1 and all
 //      five IRIS_* variables), and only then packs: eight tarballs with `pnpm pack` (no lifecycle script), the vsix, and the IPM tree,
 //      with `release-manifest.json` (version, sha, mode, channels, files, sha256). The container is removed on every exit path.
-//   4. PUBLISH verifies the manifest's hashes and the version of npm, then uploads the exact tarballs: `npm publish <tgz> --access public
+//   4. PUBLISH verifies the manifest's hashes and the version of npm, and that every path it would upload (each npm tarball, an enabled
+//      channel's vsix or IPM tree) is one of those hash-verified files inside the artifacts directory; then uploads the exact tarballs: `npm publish <tgz> --access public
 //      --provenance --ignore-scripts`, in NPM_PUBLISH_ORDER, then each enabled channel in order. A version already on the registry is
 //      skipped. The first failure stops everything after it (a channel that throws is a failed channel), and the report names every
 //      package and channel as published, already published, failed, not attempted or skipped. A real run refuses, with exit 2 and
@@ -29,7 +30,8 @@
 //      `git push` and no userconfig write.
 //   5. AUTH. NPM_TOKEN set: a 0600 temporary userconfig holds it and is passed as `--userconfig`; it is removed on every exit path and the
 //      token is never printed. NPM_TOKEN empty: no userconfig, npm uses OIDC (trusted publishing). The token, GITHUB_TOKEN and the IPM
-//      deploy key are removed from the environment of every child process.
+//      deploy key are removed from the environment of every child process, and the job's OIDC request variables
+//      (ACTIONS_ID_TOKEN_REQUEST_TOKEN and _URL) reach only `npm publish`.
 //   6. Each phase prints a line, and the report is appended to $GITHUB_STEP_SUMMARY when it is set.
 //   7. SIGINT and SIGTERM kill the child processes that are running, run the cleanups and end the run with 130 or 143
 //      (`installSignalHandlers`); the gate set's own handlers, registered later, forward the signal to its command and remove the container.
@@ -106,8 +108,11 @@ export const MANIFEST_NAME = 'release-manifest.json';
 /** The extension the vsix and the stores' CLIs live in. */
 const LAUNCHER_RELATIVE = path.join('extensions', 'iris-mcp-launcher');
 
+/** The variables with which npm asks GitHub for the job's OIDC token (trusted publishing and provenance): only `npm publish` gets them. */
+const OIDC_VARIABLES = Object.freeze(['ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'ACTIONS_ID_TOKEN_REQUEST_URL']);
+
 /** The variables that never reach a child process: each reaches only the code that needs it. */
-const SECRET_VARIABLES = Object.freeze(['NPM_TOKEN', 'GITHUB_TOKEN', 'IPM_DIST_DEPLOY_KEY']);
+const SECRET_VARIABLES = Object.freeze(['NPM_TOKEN', 'GITHUB_TOKEN', 'IPM_DIST_DEPLOY_KEY', ...OIDC_VARIABLES]);
 
 /** A usage error or a refusal that ends the run with exit code 2. */
 export class Refusal extends Error {}
@@ -147,6 +152,17 @@ export function listFiles(root, directory = '') {
 
 /** The last `count` lines of a text, for a failure message. */
 const tail = (text, count) => String(text).trimEnd().split('\n').slice(-count).join('\n');
+
+/**
+ * The failure detail of an npm call: the last `count` lines of its output, led by npm's `npm error code <CODE>` line when the tail does
+ * not hold it (a stack-bearing failure ends in its stack and log path, far below the code).
+ */
+export function npmFailureDetail(result, count) {
+  const text = String(result.stderr || result.error?.message || result.stdout);
+  const last = tail(text, count);
+  const code = /^npm error code \S+$/m.exec(text)?.[0];
+  return code === undefined || last.includes(code) ? last : `${code}\n${last}`;
+}
 
 /** Append a report to the step summary of the run, when GitHub gave the run one. */
 export function appendSummary(env, text) {
@@ -341,9 +357,13 @@ function withSummary(deps, env, title) {
  */
 export async function ciGate(options, deps) {
   const summary = withSummary(deps, options.env, 'ci-gate');
-  const code = await runCiGate(options, summary.deps);
-  summary.finish(code);
-  return code;
+  let code = 1;
+  try {
+    code = await runCiGate(options, summary.deps);
+    return code;
+  } finally {
+    summary.finish(code);
+  }
 }
 
 async function runCiGate({ env, timeoutMinutes = 180, pollMs = 60_000 }, deps) {
@@ -534,11 +554,11 @@ async function packVsix({ repoRoot, out, env, deps, say }) {
   const built = await deps.run(['npm', 'run', 'build'], { cwd: dir, env });
   if (built.status !== 0) throw new Error(`the extension did not build (${built.error?.message ?? `exit ${built.status}`}): ${tail(built.stderr || built.stdout, 15)} Run npm ci in ${LAUNCHER_RELATIVE}, then build it.`);
   const packed = await deps.run(['npm', 'run', 'package', '--', '--out', `${vsixDir}${path.sep}`], { cwd: dir, env });
-  if (packed.status !== 0) throw new Error(`the extension did not package (${packed.error?.message ?? `exit ${packed.status}`}): ${tail(packed.stderr || packed.stdout, 15)}`);
+  if (packed.status !== 0) throw new Error(`the extension did not package (${packed.error?.message ?? `exit ${packed.status}`}): ${tail(packed.stderr || packed.stdout, 15)} Run npm run package in ${LAUNCHER_RELATIVE} and fix the error it names.`);
   const vsixes = readdirSync(vsixDir).filter((name) => name.endsWith('.vsix'));
   if (vsixes.length !== 1) throw new Error(`packaging the extension left ${vsixes.length} vsix files in ${vsixDir}, not one. Empty the directory and package again.`);
   const listing = await deps.run(['npm', 'exec', '--', 'vsce', 'ls'], { cwd: dir, env });
-  if (listing.status !== 0) throw new Error(`vsce ls failed (${listing.error?.message ?? `exit ${listing.status}`}): ${tail(listing.stderr || listing.stdout, 10)}`);
+  if (listing.status !== 0) throw new Error(`vsce ls failed (${listing.error?.message ?? `exit ${listing.status}`}): ${tail(listing.stderr || listing.stdout, 10)} Run npm exec -- vsce ls in ${LAUNCHER_RELATIVE} and fix the error it names.`);
   const files = listing.stdout.split('\n').map((line) => line.trim()).filter((line) => line !== '');
   say(`the extension ${manifest.name}@${manifest.version} (publisher ${manifest.publisher}): ${vsixes[0]}, ${files.length} files`);
   return { file: `vsix/${vsixes[0]}`, name: manifest.name, version: manifest.version, publisher: manifest.publisher, files };
@@ -567,9 +587,13 @@ async function stageIpm({ repoRoot, out, version, modules, say }) {
  */
 export async function prepare(options, deps) {
   const summary = withSummary(deps, options.env, 'prepare');
-  const code = await runPrepare(options, summary.deps);
-  summary.finish(code);
-  return code;
+  let code = 1;
+  try {
+    code = await runPrepare(options, summary.deps);
+    return code;
+  } finally {
+    summary.finish(code);
+  }
 }
 
 async function runPrepare({ out, env, repoRoot = REPO_ROOT }, deps) {
@@ -718,19 +742,84 @@ async function runPrepare({ out, env, repoRoot = REPO_ROOT }, deps) {
 
 // -- publish ---------------------------------------------------------------------------------------------------
 
-/** What is wrong with the files in the artifacts directory: each listed file must exist with its hash, and nothing else may be there. */
+/**
+ * Whether `relative` names a file inside a directory, as `prepare` writes every path of its manifest: forward slashes, no empty, `.` or
+ * `..` segment, not absolute, and no backslash or NUL.
+ */
+export function isContainedPath(relative) {
+  return (
+    typeof relative === 'string' &&
+    relative !== '' &&
+    !/[\\\0]/.test(relative) &&
+    !relative.startsWith('/') &&
+    !/^[A-Za-z]:/.test(relative) &&
+    relative.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..')
+  );
+}
+
+/** The name `pnpm pack` gives the tarball of `name@version`: the scope without its `@`, a `-` in place of the `/`, then `-<version>.tgz`. */
+export const packedTarballName = (name, version) => `${String(name).replace(/^@/, '').replace('/', '-')}-${version}.tgz`;
+
+/**
+ * What is wrong with the files in the artifacts directory: each listed file must be a path inside it and exist with its hash, and nothing
+ * else may be there.
+ */
 export function artifactProblems(artifacts, manifest) {
   const problems = [];
   const listed = Array.isArray(manifest?.files) ? manifest.files : [];
   if (listed.length === 0) problems.push(`${MANIFEST_NAME} lists no file. Prepare the artifacts again.`);
   for (const entry of listed) {
+    if (!isContainedPath(entry?.path)) {
+      problems.push(`${MANIFEST_NAME} lists the file ${JSON.stringify(entry?.path)}, which is not a path inside the artifacts directory. Prepare the artifacts again.`);
+      continue;
+    }
     const file = path.join(artifacts, entry.path);
     if (!existsSync(file)) problems.push(`${entry.path} is listed in ${MANIFEST_NAME} but missing. Download the artifacts again.`);
     else if (sha256OfFile(file) !== entry.sha256) problems.push(`${entry.path} does not match its sha256 in ${MANIFEST_NAME}. Prepare the artifacts again; they changed after they were rehearsed.`);
   }
-  const names = new Set(listed.map((entry) => entry.path));
+  const names = new Set(listed.map((entry) => entry?.path));
   for (const file of existsSync(artifacts) ? listFiles(artifacts) : []) {
     if (file !== MANIFEST_NAME && !names.has(file)) problems.push(`${file} is in the artifacts directory but not in ${MANIFEST_NAME}. Remove it, or prepare the artifacts again.`);
+  }
+  return problems;
+}
+
+/**
+ * What is wrong with the paths a run would upload: each is one of the manifest's hash-verified files, inside the artifacts directory.
+ * An npm entry's tarball is the one `pnpm pack` names for its package and version (so no two entries share one), and in a release every
+ * entry is at the manifest's version. An enabled store channel uploads a listed `.vsix`; an enabled IPM channel pushes a listed directory that
+ * holds `module.xml`. A channel that is not enabled uploads nothing, so its paths are not checked.
+ *
+ * @param {Record<string, any>} manifest
+ * @param {ReadonlyArray<{ id: string, enabled: boolean }>} channels
+ * @returns {string[]}
+ */
+export function uploadPathProblems(manifest, channels) {
+  const problems = [];
+  const verified = new Set((Array.isArray(manifest?.files) ? manifest.files : []).map((entry) => entry?.path).filter(isContainedPath));
+  const detailOf = (id) => (Array.isArray(manifest?.channels) ? manifest.channels.find((entry) => entry?.id === id) : undefined);
+  const npmPackages = Array.isArray(detailOf('npm')?.packages) ? detailOf('npm').packages : [];
+  for (const entry of npmPackages) {
+    const item = `${entry?.name}@${entry?.version}`;
+    const tarball = entry?.tarball;
+    if (!isContainedPath(tarball) || !verified.has(tarball)) {
+      problems.push(`${item}: its tarball ${JSON.stringify(tarball)} is not a hash-verified file of ${MANIFEST_NAME}. Prepare the artifacts again.`);
+    } else if (path.posix.basename(tarball) !== packedTarballName(entry.name, entry.version)) {
+      problems.push(`${item}: its tarball ${tarball} is not ${packedTarballName(entry.name, entry.version)}, the one pnpm pack makes for it. Prepare the artifacts again.`);
+    }
+    if (manifest?.mode === 'release' && entry?.version !== manifest.version) problems.push(`${item} is not at the release version ${manifest.version}. Prepare the artifacts again.`);
+  }
+  for (const channel of channels) {
+    const detail = channel.enabled && channel.id !== 'npm' ? detailOf(channel.id) : undefined;
+    if (detail === undefined) continue;
+    if (channel.id === 'ipm') {
+      const tree = detail.tree ?? 'ipm';
+      if (!isContainedPath(tree) || !verified.has(`${tree}/module.xml`)) {
+        problems.push(`${channel.id}: its tree ${JSON.stringify(tree)} is not a directory of ${MANIFEST_NAME} that holds module.xml. Prepare the artifacts again.`);
+      }
+    } else if (!isContainedPath(detail.file) || !verified.has(detail.file) || !detail.file.endsWith('.vsix')) {
+      problems.push(`${channel.id}: its vsix ${JSON.stringify(detail.file)} is not a hash-verified .vsix of ${MANIFEST_NAME}. Prepare the artifacts again.`);
+    }
   }
   return problems;
 }
@@ -787,7 +876,7 @@ export async function publish({ artifacts, dryRun = false, env, repoRoot = REPO_
     }
     const npmChannel = Array.isArray(manifest.channels) ? manifest.channels.find((entry) => entry.id === 'npm') : undefined;
     const npmPackages = Array.isArray(npmChannel?.packages) ? npmChannel.packages : [];
-    const checks = [...artifactProblems(dir, manifest)];
+    const checks = [...artifactProblems(dir, manifest), ...uploadPathProblems(manifest, channels)];
     if (JSON.stringify(npmPackages.map((entry) => entry.name)) !== JSON.stringify(NPM_PUBLISH_ORDER)) {
       checks.push(`the manifest's packages are ${npmPackages.map((entry) => entry.name).join(', ')}, not ${NPM_PUBLISH_ORDER.join(', ')}. Prepare the artifacts again.`);
     }
@@ -833,6 +922,8 @@ export async function publish({ artifacts, dryRun = false, env, repoRoot = REPO_
       say('auth: oidc');
     }
     const npmEnv = childEnv(env);
+    const publishEnv = { ...npmEnv, ...Object.fromEntries(OIDC_VARIABLES.filter((name) => typeof env[name] === 'string').map((name) => [name, env[name]])) };
+    secrets.push(env.ACTIONS_ID_TOKEN_REQUEST_TOKEN);
     const quote = (text) => redact(text, secrets);
 
     // npm, in order; the first failure stops everything after it.
@@ -852,18 +943,18 @@ export async function publish({ artifacts, dryRun = false, env, repoRoot = REPO_
       }
       if (outcome === 'unknown') {
         failed = true;
-        results.push({ channel: 'npm', item, status: STATUS.failed, detail: `could not ask the registry: ${quote(tail(viewed.stderr || viewed.error?.message || viewed.stdout, 3))}` });
+        results.push({ channel: 'npm', item, status: STATUS.failed, detail: `could not ask the registry: ${quote(npmFailureDetail(viewed, 3))}` });
         say(`${item}: could not ask the registry whether it is published. Nothing after it is attempted.`);
         continue;
       }
-      const uploaded = await deps.run(['npm', ...npmPublishArgv(path.join(dir, entry.tarball), { dryRun, ...(userconfig === undefined ? {} : { userconfig }) })], { cwd: dir, env: npmEnv });
+      const uploaded = await deps.run(['npm', ...npmPublishArgv(path.join(dir, entry.tarball), { dryRun, ...(userconfig === undefined ? {} : { userconfig }) })], { cwd: dir, env: publishEnv });
       if (uploaded.status === 0) {
         results.push({ channel: 'npm', item, status: dryRun ? STATUS.wouldPublish : STATUS.published });
         say(`${item}: ${dryRun ? 'dry run ok' : 'published'}`);
       } else {
         failed = true;
-        results.push({ channel: 'npm', item, status: STATUS.failed, detail: quote(tail(uploaded.stderr || uploaded.error?.message || uploaded.stdout, 4)) });
-        say(`${item}: npm publish failed (exit ${uploaded.status ?? 'none'}). Nothing after it is attempted.`);
+        results.push({ channel: 'npm', item, status: STATUS.failed, detail: quote(npmFailureDetail(uploaded, 4)) });
+        say(`${item}: npm publish failed (exit ${uploaded.status ?? 'none'}). Nothing after it is attempted. Fix the cause and run the release again: versions already on the registry are skipped.`);
       }
     }
 
@@ -982,7 +1073,10 @@ async function publishIpm(detail, { dir, env, deps, cleanups, version, sha, quot
   const plan = ipmPushPlan(tree, version, sha, { url: `git@github.com:${IPM_DIST_REPOSITORY}.git`, clone });
   const gitEnv = childEnv(env, { GIT_SSH_COMMAND: `ssh -i ${keyFile} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new`, GIT_TERMINAL_PROMPT: '0' });
   const git = (argv, cwd) => deps.run(['git', ...argv], { cwd, env: gitEnv });
-  const failedAt = (step, result) => ({ status: STATUS.failed, detail: `git ${step} failed (exit ${result.status ?? 'none'}): ${quote(tail(result.stderr || result.error?.message || result.stdout, 3))}` });
+  const failedAt = (step, result) => ({
+    status: STATUS.failed,
+    detail: `git ${step} failed (exit ${result.status ?? 'none'}): ${quote(tail(result.stderr || result.error?.message || result.stdout, 3))}. Fix the packaging repository or its deploy key, then run the release again.`,
+  });
 
   const cloned = await git(plan.cloneArgv, work);
   if (cloned.status !== 0) return failedAt('clone', cloned);
@@ -1018,12 +1112,13 @@ const USAGE =
   '       node scripts/release.mjs publish --artifacts <dir> [--dry-run]';
 
 /**
- * Parse the command line into `{ command, options }`; a bad line throws a {@link Refusal} that holds the usage.
+ * Parse the command line into `{ command, options }`; a bad line throws a {@link Refusal} that holds the usage. One leading `--` is
+ * dropped, because `pnpm release -- <command>` hands the script a literal `--` (pnpm 9.15).
  *
  * @param {readonly string[]} argv
  */
 export function parseArgs(argv) {
-  const [command, ...rest] = argv;
+  const [command, ...rest] = argv[0] === '--' ? argv.slice(1) : argv;
   const allowed = { 'ci-gate': ['--timeout-minutes'], prepare: ['--out'], publish: ['--artifacts'] }[command];
   if (allowed === undefined) throw new Refusal(`unknown command ${JSON.stringify(command)}. ${USAGE}`);
   const values = {};
