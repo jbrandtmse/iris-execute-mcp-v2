@@ -117,15 +117,16 @@ export async function main(argv = process.argv.slice(2), env = process.env, root
     say(`copied ${FIRST_RELEASE_TEMPLATE} to .changeset/${FIRST_RELEASE_CHANGESET}`);
   }
 
+  /** A tree that a step left changed holds a partial version, which a second run refuses as a dirty tree. */
+  const partial = () =>
+    say('the tree now holds a partial version: discard it with git restore . && git clean -fd (the tree was clean when this run began), fix the problem above, then run pnpm run version again.');
   const versioned = await spawnInherited([process.execPath, bin, 'version'], { label: 'version', env: { ...env, CI: 'true' }, cwd: root });
   if (versioned !== 0) {
     if (firstRelease) rmSync(copy, { force: true });
     say(`changeset version failed (exit ${versioned}). Fix the changeset it names, then run it again.`);
+    if (spawnSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).stdout?.trim()) partial();
     return 1;
   }
-  /** After `changeset version` the tree holds a partial version, which a second run refuses as a dirty tree. */
-  const partial = () =>
-    say('the tree now holds a partial version: discard it with git restore . && git clean -fd (the tree was clean when this run began), fix the problem above, then run pnpm run version again.');
   const afterChangesets = stateOf(root);
   const first = [...afterChangesets.facts.problems, ...versionProblems(afterChangesets, 'dry-run')];
   if (first.length > 0) {
@@ -136,7 +137,8 @@ export async function main(argv = process.argv.slice(2), env = process.env, root
 
   const generated = await spawnInherited([process.execPath, path.join(root, 'scripts', 'gen-bootstrap.mjs')], { label: 'version', env, cwd: root });
   if (generated !== 0) {
-    say(`gen-bootstrap failed (exit ${generated}). Fix the generator error, then run pnpm gen:bootstrap.`);
+    say(`gen-bootstrap failed (exit ${generated}). Fix the generator error.`);
+    partial();
     return 1;
   }
   const after = stateOf(root);

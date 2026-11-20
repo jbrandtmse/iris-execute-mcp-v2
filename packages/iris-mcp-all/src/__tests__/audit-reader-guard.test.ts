@@ -13,7 +13,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { REPO_ROOT, relativeToRepo } from "../../../../scripts/lib/live-gate-scan.mjs";
+import { GUARD_FILES, REPO_ROOT, relativeToRepo } from "../../../../scripts/lib/live-gate-scan.mjs";
 import { AUDIT_READER_KEPT, auditReaderFindings, auditReaderScan, auditScanFiles, unkeptFindings } from "../../../../scripts/lib/audit-reader-scan.mjs";
 
 const read = (relative: string): string => readFileSync(path.join(REPO_ROOT, relative), "utf8");
@@ -102,6 +102,7 @@ describe("the repository has no raw audit reader", () => {
       expect(/audit/i.test(read(file)), `${file} mentions audit, so the scan reads it`).toBe(true);
     }
     expect(scanned.some((file) => file.startsWith("extensions/iris-mcp-launcher/src/")), "the extension's tests").toBe(true);
+    for (const guard of GUARD_FILES) expect(scanned, `${guard}: a test source that testSources() leaves out for the live-gate scan`).toContain(guard);
     expect(scanned.some((file) => file.endsWith(".d.mts")), "no declaration file").toBe(false);
   });
 

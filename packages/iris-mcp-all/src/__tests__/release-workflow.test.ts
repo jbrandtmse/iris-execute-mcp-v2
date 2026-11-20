@@ -111,6 +111,10 @@ describe("AC 42.5.1: release.yml is the declaration", () => {
     ["a secret in its bracket form in a step name of rehearse", () => mutate(text, "      - name: rehearse the upload\n", "      - name: rehearse the upload ${{ secrets['NPM_TOKEN'] }}\n"), /job rehearse reads a secret: only publish may/],
     ["github.token in its bracket form in a step name of prepare", () => mutate(text, "      - name: build\n", "      - name: build ${{ github['token'] }}\n"), /job prepare reads github\.token: only ci-gate and publish may/],
     ["a secret in its bracket form at the workflow level", () => mutate(text, RUN_NAME, "run-name: release ${{ secrets['NPM_TOKEN'] }}\n"), OUTSIDE_THE_JOBS],
+    // `toJSON(secrets)` hands over every secret, and `toJSON(github)` the token, with neither a dot nor a bracket.
+    ["every secret through toJSON(secrets) in a step name of rehearse", () => mutate(text, "      - name: rehearse the upload\n", "      - name: rehearse the upload ${{ toJSON(secrets) }}\n"), /job rehearse reads a secret: only publish may/],
+    ["github.token through toJSON(github) in a step name of prepare", () => mutate(text, "      - name: build\n", "      - name: build ${{ toJSON(github) }}\n"), /job prepare reads github\.token: only ci-gate and publish may/],
+    ["every secret through toJSON(secrets) at the workflow level", () => mutate(text, RUN_NAME, "run-name: release ${{ toJSON(secrets) }}\n"), OUTSIDE_THE_JOBS],
     ["publish needing only prepare", () => mutate(text, "    needs: [ci-gate, prepare, rehearse]\n", "    needs: [prepare]\n"), /job publish needs prepare, not ci-gate, prepare, rehearse|job publish needs prepare, not/],
     ["a pull_request trigger", () => mutate(text, "on:\n  push:\n", "on:\n  pull_request:\n  push:\n"), /the triggers are pull_request, push, workflow_dispatch|pull_request trigger/],
     ["a schedule trigger", () => mutate(text, "  workflow_dispatch: {}\n", "  workflow_dispatch: {}\n  schedule:\n    - cron: '0 0 * * *'\n"), /the triggers are push, schedule, workflow_dispatch|schedule trigger/],

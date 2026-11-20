@@ -460,8 +460,8 @@ describe("Publish refusals: a real run only for a push of the tag, on the prepar
   it("a manifest sha that is not a commit is refused even when GITHUB_SHA is unset too (both empty is no match)", () => {
     const { GITHUB_SHA: _sha, ...withoutSha } = env();
     void _sha;
-    expect(publishRefusals(withoutSha, { ...manifest, sha: "" }).join("\n")).toMatch(/GITHUB_SHA is "", but the artifacts were prepared from ""/);
-    expect(publishRefusals(env({ GITHUB_SHA: "HEAD" }), { ...manifest, sha: "HEAD" }).join("\n")).toMatch(/GITHUB_SHA is "HEAD", but the artifacts were prepared from "HEAD"/);
+    expect(publishRefusals(withoutSha, { ...manifest, sha: "" })).toEqual(['the artifacts name the commit "", which is not a 40-hex commit sha. Prepare them again from the tag push.']);
+    expect(publishRefusals(env({ GITHUB_SHA: "HEAD" }), { ...manifest, sha: "HEAD" })).toEqual(['the artifacts name the commit "HEAD", which is not a 40-hex commit sha. Prepare them again from the tag push.']);
   });
 });
 

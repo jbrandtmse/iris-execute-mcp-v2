@@ -847,7 +847,19 @@ function vsixReadiness(channel, repoRoot, cliName) {
  * @param {ReturnType<typeof defaultDeps> & { cleanups?: ReturnType<typeof createCleanups> }} deps
  * @returns {Promise<number>}
  */
-export async function publish({ artifacts, dryRun = false, env, repoRoot = REPO_ROOT, channels = RELEASE_CHANNELS }, deps) {
+export async function publish(options, deps) {
+  const summary = withSummary(deps, options.env, options.dryRun === true ? 'publish --dry-run' : 'publish');
+  let reported = false;
+  let code = 1;
+  try {
+    code = await runPublish(options, { ...summary.deps, reported: () => { reported = true; } });
+    return code;
+  } finally {
+    if (!reported) summary.finish(code);
+  }
+}
+
+async function runPublish({ artifacts, dryRun = false, env, repoRoot = REPO_ROOT, channels = RELEASE_CHANNELS }, deps) {
   const say = (line) => deps.log(`publish${dryRun ? ' (dry run)' : ''}: ${line}`);
   const cleanups = deps.cleanups ?? createCleanups();
   const results = [];
@@ -986,6 +998,7 @@ export async function publish({ artifacts, dryRun = false, env, repoRoot = REPO_
     const report = releaseReport(results);
     deps.log(report);
     appendSummary(env, `### ${dryRun ? 'Rehearsal' : 'Publish'} ${manifest.version}\n\n\`\`\`\n${report}\`\`\``);
+    deps.reported?.();
     return failed ? 1 : 0;
   } finally {
     cleanups.run();

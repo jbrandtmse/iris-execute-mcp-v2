@@ -3872,3 +3872,24 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-5-release-workflow.md | severity: med | fix-risk: low | footprint: in-story
 - evidence: 42.5 QA probe: a manifest whose npm entry is ../outside.tgz published that unhashed file (exit 0); today the manifest comes from prepare in the same run
 - 2026-10-23T00:43:09Z status=open owner=42-5-release-workflow by=harvest note=code review patches it in-story: artifactProblems requires every uploaded path to be one of the manifest's hash-verified files, resolved inside the artifact directory; pin it with the ../outside.tgz case
+- 2026-11-20T21:58:23Z status=resolved-by:42-5-release-workflow by=cr note=uploadPathProblems binds npm/vsix/ipm paths to hash-verified files inside the dir; ../outside.tgz+per-channel rows; mutations M1-M6,M19 red
+
+### DW-696: ci-gate does not check that the tagged commit is on main: a v* tag on an unmerged branch commit with a green push run reaches approval, the reviewer the only guard
+- source: spec-42-5-release-workflow.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: ci.yml runs on every push, so ciGateDecision accepts a feature-branch run on the sha; the env tag rule binds the tag name, not the commit
+- 2026-11-20T21:58:32Z status=decision-pending owner=burndown by=cr note=product call: require the sha reachable from main (compare API) vs allow maintenance branches such as release/1.x
+
+### DW-697: an enabled store channel reports published when vsce/ovsx --skip-duplicate skipped an existing version (exit 0)
+- source: spec-42-5-release-workflow.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: runChannel maps exit 0 to published; --skip-duplicate exits 0 for a version already on the store; the skip text is unverified
+- 2026-11-20T21:58:32Z status=wontfix-accepted owner=42-5-release-workflow by=cr note=reopen_if=Story 42.7 enables a store channel without telling a skipped duplicate from an upload
+
+### DW-698: the IPM channel refuses a version the registry lists before its tag-tree check, so a re-run after a landed push exits 1 instead of already published
+- source: spec-42-5-release-workflow.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: publishIpm returns failed on listing.listed before the tagTreeArgv comparison; the matrix row says refuse when the registry lists the version
+- 2026-11-20T21:58:32Z status=by-design owner=42-5-release-workflow by=cr note=spec-bound (I/O matrix Publish channels, IPM); Story 42.8 enables the channel and may amend the row
+
+### DW-699: RAW_VERB in release-workflow-check.ts repeats and widens the verb pattern of ci-workflow-check.ts:261 (Rule 2 copy)
+- source: spec-42-5-release-workflow.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: the spec freezes every ci.yml assertion, so the release check carries its own wider copy (flags between tool and verb)
+- 2026-11-20T21:58:32Z status=wontfix-accepted owner=42-5-release-workflow by=cr note=reopen_if=a verb with flags before it (pnpm -r publish) lands in ci.yml and ci-workflow.test.ts stays green

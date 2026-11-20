@@ -293,8 +293,10 @@ export function publishRefusals(env, manifest) {
   const ref = env.GITHUB_REF ?? '';
   if (event !== 'push') refusals.push(`the event is ${JSON.stringify(event)}, not push. Publish only from the push of a release tag.`);
   if (ref !== `refs/tags/v${manifest?.version}`) refusals.push(`the ref is ${JSON.stringify(ref)}, not refs/tags/v${manifest?.version}. Publish only from the tag of the prepared version.`);
-  if (typeof manifest?.sha !== 'string' || !/^[0-9a-f]{40}$/.test(manifest.sha) || (env.GITHUB_SHA ?? '') !== manifest.sha) {
-    refusals.push(`GITHUB_SHA is ${JSON.stringify(env.GITHUB_SHA ?? '')}, but the artifacts were prepared from ${JSON.stringify(manifest?.sha)}. Prepare and publish the same commit.`);
+  if (typeof manifest?.sha !== 'string' || !/^[0-9a-f]{40}$/.test(manifest.sha)) {
+    refusals.push(`the artifacts name the commit ${JSON.stringify(manifest?.sha)}, which is not a 40-hex commit sha. Prepare them again from the tag push.`);
+  } else if ((env.GITHUB_SHA ?? '') !== manifest.sha) {
+    refusals.push(`GITHUB_SHA is ${JSON.stringify(env.GITHUB_SHA ?? '')}, but the artifacts were prepared from ${JSON.stringify(manifest.sha)}. Prepare and publish the same commit.`);
   }
   if (manifest?.mode !== 'release') refusals.push(`the artifacts were prepared in ${JSON.stringify(manifest?.mode)} mode, not release. Prepare them from the tag push.`);
   return refusals;

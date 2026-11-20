@@ -10,8 +10,9 @@
  *    `workflow_run` or `schedule`; `permissions: {}` at the top; a concurrency group per ref that never cancels a started release.
  *  - JOBS (42.5.1): the jobs, their runner, timeout, `needs`, permissions, environment, condition and ordered steps (an action with its
  *    inputs, or a command with its environment and directory) are the declaration's, in both directions.
- *  - EXCLUSIVITY (42.5.1, 42.5.4): `environment`, `id-token: write` and `secrets.` (or `secrets[...]`) occur in the `publish` job only;
- *    `github.token` (or `github['token']`) occurs in `ci-gate` and `publish` only. So `rehearse` has no environment, no OIDC permission
+ *  - EXCLUSIVITY (42.5.1, 42.5.4): `environment`, `id-token: write` and any mention of `secrets` (`secrets.X`, `secrets['X']`,
+ *    `toJSON(secrets)`) occur in the `publish` job only; `github.token` (or `github['token']`, or `toJSON(github)`) occurs in `ci-gate`
+ *    and `publish` only. So `rehearse` has no environment, no OIDC permission
  *    and no secret.
  *  - CALLS (42.5.1, 42.5.4): `release.mjs ci-gate` runs only in `ci-gate`, `prepare` only in `prepare`, `publish --dry-run` only in
  *    `rehearse`, and a `publish` without `--dry-run` only in `publish`.
@@ -167,10 +168,11 @@ export function releaseWorkflowProblems(text: string): string[] {
     if (String(setupNode?.with?.["node-version"]) !== expected.node) problems.push(`job ${name} does not run on Node ${expected.node}`);
   }
 
-  // EXCLUSIVITY: what only `publish` may hold. An expression may name a property with a dot or with brackets (`secrets['NPM_TOKEN']`).
+  // EXCLUSIVITY: what only `publish` may hold. An expression may name a property with a dot or with brackets (`secrets['NPM_TOKEN']`), or
+  // hand over the whole context (`toJSON(secrets)`, and `toJSON(github)`, which holds the token), so any mention of `secrets` counts.
   const holds = (value: unknown, pattern: RegExp): boolean => pattern.test(JSON.stringify(value) ?? "");
-  const SECRET = /\bsecrets\s*(?:\.|\[)/;
-  const GITHUB_TOKEN = /\bgithub\s*(?:\.\s*token\b|\[\s*\\?['"]token\\?['"]\s*\])/;
+  const SECRET = /\bsecrets\b/;
+  const GITHUB_TOKEN = /\bgithub\s*(?:\.\s*token\b|\[\s*\\?['"]token\\?['"]\s*\])|\btoJSON\s*\(\s*github\s*\)/;
   for (const [name, job] of Object.entries(jobs)) {
     if (name !== "publish") {
       if (job?.environment !== undefined) problems.push(`job ${name} has an environment: only publish may`);

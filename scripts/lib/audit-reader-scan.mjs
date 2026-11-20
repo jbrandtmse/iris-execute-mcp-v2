@@ -16,13 +16,14 @@
 //   The scan is lexical. It does not find: a file read through a wrapper (`read(path)` that calls `readFileSync`), a variable that is
 //   passed on before it is split, a `split` on a value that was assigned after its declaration, or a function parameter that shadows
 //   an earlier declaration of its name. A reader that is kept on purpose is listed in `AUDIT_READER_KEPT`.
-//   Scan roots: the test sources of `packages/*` and of `extensions/*`, and every `.mjs`, `.js` or `.cjs` file under `scripts/`.
+//   Scan roots: the test sources of `packages/*` and of `extensions/*` (the live-arming guard files that `testSources()` leaves out
+//   included), and every `.mjs`, `.js` or `.cjs` file under `scripts/`.
 //   Every scan reads files and never runs anything.
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
-import { REPO_ROOT, testSources, walk } from './live-gate-scan.mjs';
+import { GUARD_FILES, REPO_ROOT, testSources, walk } from './live-gate-scan.mjs';
 import { lexSource } from './script-ts-import-scan.mjs';
 
 /**
@@ -155,6 +156,7 @@ export function auditScanFiles(repoRoot = REPO_ROOT) {
     : [];
   const files = [
     ...testSources(),
+    ...GUARD_FILES.map((relative) => path.join(REPO_ROOT, relative)).filter((file) => existsSync(file)),
     ...extensionSources.filter((file) => isTestSource(path.relative(repoRoot, file).split(path.sep).join('/'))),
     ...walk(path.join(repoRoot, 'scripts'), ['.mjs', '.js', '.cjs']),
   ].filter((file) => !/\.d\.m?ts$/.test(file));

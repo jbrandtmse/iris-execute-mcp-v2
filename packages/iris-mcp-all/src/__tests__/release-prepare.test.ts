@@ -623,6 +623,26 @@ describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
     expect(standIns.calls("npm").filter((call) => call.argv[0] === "publish")).toHaveLength(8);
     expect(lines.join("\n")).toContain("8 packages at 1.0.0: hashes verified, npm 11.12.1");
   });
+
+  it("a dry-run manifest of packages at different versions (client-config 0.0.1, the rest 0.0.2, as today) is one publish --dry-run accepts: the release-version bind holds only in a release", async () => {
+    const world = newWorld({ version: "0.0.2", versions: { "@iris-mcp/client-config": "0.0.1" }, pending: ["one.md"] });
+    expect(await world.run()).toBe(0);
+    const standIns = installStandIns(path.join(world.root, "stand-ins"), ["npm", "git"]);
+    standIns.script("npm", [
+      { match: ["--version"], stdout: "11.12.1\n" },
+      { match: ["view"], status: 1, stderr: "npm error code E404\n" },
+    ]);
+    const lines: string[] = [];
+    const code = await publish(
+      { artifacts: world.out, dryRun: true, env: { PATH: standIns.binDir, STAND_IN_DIR: standIns.dir }, repoRoot: world.repo },
+      { ...defaultDeps(), log: (line: string) => lines.push(line), fetch: (async () => new Response(null, { status: 404 })) as unknown as typeof fetch },
+    );
+    expect(code, lines.join("\n")).toBe(0);
+    expect(lines.join("\n")).not.toContain("is not at the release version");
+    const published = standIns.calls("npm").filter((call) => call.argv[0] === "publish");
+    expect(published.map((call) => path.basename(call.argv[1] as string))).toEqual(NPM_PUBLISH_ORDER.map((name: string) => `${name.replace(/^@/, "").replace("/", "-")}-${name === "@iris-mcp/client-config" ? "0.0.1" : "0.0.2"}.tgz`));
+    expect(published.every((call) => call.argv.includes("--dry-run"))).toBe(true);
+  });
 });
 
 describe("Prepare: the extension's vsix is an artifact that fails by name (I/O matrix: Prepare, artifacts -- exit 1 naming the artifact) (QA)", () => {

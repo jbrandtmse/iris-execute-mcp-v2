@@ -269,6 +269,7 @@ describe("--first-release leaves no copy of the template behind when the version
     expect(result.stderr).toContain("changeset version failed (exit ");
     expect(existsSync(join(root, ".changeset", "release-1-0-0.md")), "the copy is removed").toBe(false);
     expect(fixtureStatus(root), "the tree is as it was").toBe("");
+    expect(result.stderr, "a clean tree holds no partial version to discard").not.toContain("partial version");
   }, 180_000);
 });
 
@@ -312,8 +313,24 @@ describe("pnpm run version exits 1 naming what it finds wrong after a step (I/O 
     const result = run(root, "release-version.mjs");
     expect(result.status, result.stderr).toBe(1);
     expect(result.stderr).toContain("generator exploded");
-    expect(result.stderr).toContain("version: gen-bootstrap failed (exit 3). Fix the generator error, then run pnpm gen:bootstrap.");
+    expect(result.stderr).toContain("version: gen-bootstrap failed (exit 3). Fix the generator error.");
+    expect(result.stderr, "changeset version already moved the packages, so a second run would refuse the dirty tree").toContain("the tree now holds a partial version: discard it with git restore . && git clean -fd");
     expect(result.stderr).not.toContain("next steps");
+  }, 180_000);
+
+  it("a generator that exits 0 but stamps nothing: exit 1 naming the marker and ipm/module.xml, with the partial-version line and no next steps", () => {
+    const root = makeVersionFixture();
+    const before = generatorMarker(root);
+    writeFileSync(join(root, "scripts", "gen-bootstrap.mjs"), "process.exit(0);\n");
+    commitFixture(root, "a generator that writes nothing");
+    const result = run(root, "release-version.mjs");
+    expect(result.status, result.stderr).toBe(1);
+    for (const dir of PACKAGE_DIRS) expect(manifestOf(root, dir).version, dir).toBe("0.0.3");
+    expect(result.stderr).toContain(`problem: BOOTSTRAP_VERSION is "${before}", whose semver is not the shared version 0.0.3.`);
+    expect(result.stderr).toContain('problem: ipm/module.xml is at "0.0.2", not the shared version 0.0.3.');
+    expect(result.stderr).toContain("the tree now holds a partial version: discard it with git restore . && git clean -fd");
+    expect(result.stderr).not.toContain("next steps");
+    expect(result.stderr).not.toContain("the embed carry it");
   }, 180_000);
 });
 

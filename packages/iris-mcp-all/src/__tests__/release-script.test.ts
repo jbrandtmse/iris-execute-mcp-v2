@@ -570,6 +570,25 @@ describe("Publish refusals (exit 2 before any upload) (AC 42.5.2, AC 42.5.4)", (
     }
   });
 
+  it("a run that stops before its report still appends its lines to the step summary; a run with a report appends the report once", async () => {
+    const refused = newWorld();
+    const refusedSummary = path.join(refused.root, "summary-refused.md");
+    expect(await refused.run({ env: { GITHUB_REF: "refs/tags/v1.0.1", GITHUB_STEP_SUMMARY: refusedSummary } })).toBe(2);
+    expect(readFileSync(refusedSummary, "utf8")).toMatch(/^### publish \(exit 2\)\n[\s\S]*publish: refusing: the ref is "refs\/tags\/v1\.0\.1", not refs\/tags\/v1\.0\.0/);
+
+    const tampered = newWorld();
+    writeFileSync(path.join(tampered.artifacts, "npm", "iris-mcp-shared-1.0.0.tgz"), "tampered\n");
+    const tamperedSummary = path.join(tampered.root, "summary-tampered.md");
+    expect(await tampered.run({ dryRun: true, env: { GITHUB_STEP_SUMMARY: tamperedSummary } })).toBe(1);
+    expect(readFileSync(tamperedSummary, "utf8")).toMatch(/^### publish --dry-run \(exit 1\)\n[\s\S]*problem: npm\/iris-mcp-shared-1\.0\.0\.tgz does not match its sha256/);
+
+    const green = newWorld();
+    const greenSummary = path.join(green.root, "summary-green.md");
+    expect(await green.run({ dryRun: true, env: { GITHUB_STEP_SUMMARY: greenSummary } })).toBe(0);
+    expect(readFileSync(greenSummary, "utf8").match(/^### /gm), "one heading: the report, and no second block of lines").toEqual(["### "]);
+    expect(readFileSync(greenSummary, "utf8")).toContain("### Rehearsal 1.0.0");
+  });
+
   it("a missing file, and a file the manifest does not list, are refused", async () => {
     const missing = newWorld();
     rmSync(path.join(missing.artifacts, "ipm", "README.md"));
@@ -745,6 +764,9 @@ describe("Publish uploads only the manifest's hash-verified files, inside the ar
     ["an Open VSX vsix that is not a listed file", (world: PublishWorld) => {
       channelOf(world, "open-vsx")["file"] = "vsix/another.vsix";
     }, /open-vsx: its vsix "vsix\/another\.vsix" is not a hash-verified \.vsix/],
+    ["a Marketplace entry that names a listed, hash-verified file that is not a vsix (an npm tarball)", (world: PublishWorld) => {
+      channelOf(world, "vscode-marketplace")["file"] = npmEntry(world, "@iris-mcp/shared")["tarball"];
+    }, /vscode-marketplace: its vsix "npm\/iris-mcp-shared-1\.0\.0\.tgz" is not a hash-verified \.vsix/],
     ["an IPM tree outside the directory", (world: PublishWorld) => {
       channelOf(world, "ipm")["tree"] = "..";
     }, /ipm: its tree "\.\." is not a directory of release-manifest\.json that holds module\.xml/],
@@ -1006,6 +1028,16 @@ describe("Publish auth (AC 42.5.2; Decision #75)", () => {
     const others = world.standIns.allCalls().filter((call) => !(call.tool === "npm" && call.argv[0] === "publish"));
     expect(others.map((call) => `${call.tool} ${call.argv[0]}`)).toEqual(expect.arrayContaining(["npm --version", "npm view", "vsce publish", "ovsx publish", "git clone", "git push"]));
     expect(others.filter(holds).map((call) => `${call.tool} ${call.argv[0]}`), "no other child holds them").toEqual([]);
+  });
+
+  it("an upload whose output echoes the OIDC request token is reported with the token replaced by ***", async () => {
+    const TOKEN = "oidc-request-SECRET-0123456789";
+    const world = newWorld();
+    world.standIns.script("npm", [{ match: ["publish", "~iris-mcp-shared"], status: 1, stderr: `npm error code E401\nnpm error OIDC exchange failed for token ${TOKEN}\n` }, ...NPM_DEFAULT]);
+    expect(await world.run({ env: { ACTIONS_ID_TOKEN_REQUEST_TOKEN: TOKEN, ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.actions.example.invalid/x" } })).toBe(1);
+    const report = world.lines.join("\n");
+    expect(report).toContain("@iris-mcp/shared@1.0.0: failed (npm error code E401\nnpm error OIDC exchange failed for token ***");
+    expect(report).not.toContain(TOKEN);
   });
 
   it("the userconfig is deleted when an upload fails, too", async () => {

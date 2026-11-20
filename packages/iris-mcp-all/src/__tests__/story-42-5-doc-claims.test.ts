@@ -90,7 +90,8 @@ describe("Story 42.5: the README Releasing subsection", () => {
 
   it("says what to do when a publish stops part-way: run the release again, and release a new patch version if the fix changes a package", () => {
     expect(section).toContain("If a publish stops part-way, fix the cause and run the release again: versions already on the registry are skipped.");
-    expect(section).toContain("If the fix changes a package, release a new patch version.");
+    expect(section).toContain("use **Re-run failed jobs** on the same run, which reuses its rehearsed artifacts.");
+    expect(section).toContain("a fix to either of them, like a fix that changes a package, needs a new patch version: release that version instead.");
   });
 
   it("names the four jobs, the only entry point and the publish order", () => {
@@ -131,7 +132,8 @@ describe("Story 42.5: the README Releasing subsection", () => {
     expect(section).toContain("A push to a `release-dry-run/**` branch, or a manual dispatch of the workflow");
     expect(section).toContain("`git push origin <sha>:refs/heads/release-dry-run/<name>`");
     expect(section).toContain("runs every job except `publish`");
-    expect(section).toContain("A tag is never a dry run");
+    expect(section).toContain("A tag push is never a dry run: it is the release itself");
+    expect(section).toContain("A manual dispatch on a tag ref is a dry run, because `publish` runs only for a push.");
     expect(section).toContain("`npm view @iris-mcp/shared` still answers E404");
   });
 
