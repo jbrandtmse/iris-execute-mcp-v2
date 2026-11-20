@@ -1,6 +1,6 @@
 # Orchestrator decisions — wave 8 (`/epic-cycle 43`, then `/epic-cycle 42`)
 
-> **Paused 2026-10-22 (quota).** Stories 42.1, 42.10, 42.11, 42.2, 42.3 and 42.4 are committed. Story 42.5 was interrupted in code review: its patches are committed as a checkpoint, and the review re-runs on resume, followed by the GitHub release dry run. The Lead-only inputs (release environment, `NPM_TOKEN`, publisher accounts, packaging repository) were asked of the Lead directly, because the Planner session is unreachable.
+> **Resumed 2026-11-20** on the Lead's go, now taking instructions from the "MCP Server Suite Planner" session. Story 42.5's code review re-runs from baseline `ade31b5`; its interrupted patches are in the `c6aad31` checkpoint, whose CI run 39884213686 was green.
 >
 > **Epic 42 in progress (started 2026-10-21).** The Planner's start message arrived, and `epic42` was cut from `feature/feature-wave-8-published-install` at `ebd1b33`. Lead-only steps (the release-environment approval, the GitHub environment and npm trusted publishing or a token, the Marketplace publisher and Open VSX namespace, the Developer Community account, and human-only re-certification rows) are requested through the Planner session `iris-execute-mcp-v2-14` when the run reaches them.
 >
