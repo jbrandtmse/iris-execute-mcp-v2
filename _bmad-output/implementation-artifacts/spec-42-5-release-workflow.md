@@ -2,7 +2,7 @@
 title: 'Story 42.5: Release Workflow'
 type: 'feature'
 created: '2026-10-22'
-status: 'done'
+status: 'in-progress'
 baseline_revision: 'ade31b5ac2b6f5daa4b6bb8ea6654d8e17e198e8'
 baseline_commit: 'ade31b5ac2b6f5daa4b6bb8ea6654d8e17e198e8'
 review_loop_iteration: 0
@@ -340,6 +340,8 @@ deferred:
 - [x] [Review] G13 `release-workflow-check.ts`, `release-workflow.test.ts`, `release-script.test.ts` -- (a) the `declared["ci-gate"].node !== RELEASE_NODE.floor` check compares the declaration with the constant it is built from and cannot fail; (b) the workflow-level check (a secret, `github.token` or `id-token` outside the jobs), the release-asset regex and the `ipm` / `gh release` branches of `RAW_VERB` have no red case; (c) the "a reordered list fails the dependency check" fixture duplicates `admin` and drops `client-config`; (d) a `calls("git").every(argv[0] === "ls-remote")` assertion passes with zero git calls -- delete (a); add red cases for (b) (a workflow-level `run-name` -- an allowed key -- that holds `secrets.NPM_TOKEN`, `github.token` or `id-token`, each asserting the "outside the jobs" problem; an `upload-release-asset` step; `ipm publish`; `gh release create`; each pattern first checked against `RAW_VERB`'s source); use a real permutation in (c) (`client-config`, `admin`, `shared`, ...) and assert the violation count; assert at least one git call in (d).
 - [x] [Review] G14 spec `## Verification` -- Rule 19 mutation lines are missing for pinning tests of: AC 42.5.2 (the `exports` branch of `tarballProblems`; a publish verb in a workflow `run:` or a `package.json` script; the gate set before packing), AC 42.5.3 (the skipped text of a disabled channel; the channel order), AC 42.5.4 (a dry run that runs a channel publish), AD-14 (the dirty-tree refusal), DW-689 (the dry step never pushes), DW-693 (a scan detector, for example the variable kind; `waitForAuditLines`), the doc claims, and every test added by G1-G13 -- apply each mutation, observe red, revert (the tree byte-identical, checked with `git ls-files -m -o` hashes and `git diff --stat`), and record `mutation: <change> -> <red test>` under the "Recorded mutations" block. Several mutations in different source files may share one test run when each red test is attributed to its own mutation by name.
 
+- [ ] [Smoke] release.yml / ci-gate (and rehearse, publish): every release run (dry run https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44826582644, red-ci 44826587280, tag v0.0.2 44826601890) failed at `actions/setup-node` with "Unable to locate executable file: pnpm": setup-node v5 turns on `package-manager-cache` by default from `package.json`'s `packageManager` (pnpm), and the ci-gate, rehearse and publish jobs install no pnpm. Set `package-manager-cache: false` on every setup-node step of a job that installs no pnpm (or install pnpm first where the job needs it), pin it in the release-workflow self-test (a setup-node step in a pnpm-less job without `package-manager-cache: false` is refused), and record its mutation line. The lead re-runs the dry run, the red-ci release leg and the v0.0.2 tag refusal.
+
 ### Review Findings
 
 Code review (`bmad-code-review`, 2026-11-20), the re-run of review iteration 1 after the 2026-10-22 quota pause. It reviewed the whole story diff from `ade31b5` (implement `eb3c13a`, QA's tests and the interrupted review's patches in checkpoint `c6aad31`, all treated as unreviewed). Tier `full-opus`; four layers ran and all delivered: Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor. Rows 29 (Blind 9, Edge 11, Verification Gap 7, Auditor 2), plus 2 from the reviewer; 16 entries survived triage (high 0, medium 3, low 13) and 10 were rejected.
@@ -375,6 +377,8 @@ Rejected:
 - `low` AA2: `isContainedPath` checks the text of a path and does not resolve symlinks -- `download-artifact` writes no symlinks, so only a hand-made directory reaches it (wontfix-theoretical).
 
 ## Spec Change Log
+
+- 2026-11-20, lead, at the smoke: every release run failed at setup-node (pnpm cache auto-enabled, no pnpm in the job); one [Smoke] item added for rework iteration 1 (wave-8 decision #84).
 
 ## Review Triage Log
 

@@ -3878,6 +3878,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-5-release-workflow.md | severity: med | fix-risk: med | footprint: in-story
 - evidence: ci.yml runs on every push, so ciGateDecision accepts a feature-branch run on the sha; the env tag rule binds the tag name, not the commit
 - 2026-11-20T21:58:32Z status=decision-pending owner=burndown by=cr note=product call: require the sha reachable from main (compare API) vs allow maintenance branches such as release/1.x
+- 2026-11-20T22:39:01Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=merge_gate note=OWNER_RULING_2026-11-20(via_Planner):'I_agree_we_should_require_tagged_commits_to_be_on_main';release_ci-gate_refuses_a_v*_tag_whose_commit_is_not_reachable_from_main(compare_main...sha_identical/behind_or_equivalent)_before_the_environment_approval_is_requested;no_maintenance-branch_allowance;pin+one_red_proof_on_the_real_path(Rule59:_a_v*_tag_on_an_unmerged_branch_commit_with_a_green_push_run_is_refused);land_before_the_v1.0.0_tag(decision_82)
 
 ### DW-697: an enabled store channel reports published when vsce/ovsx --skip-duplicate skipped an existing version (exit 0)
 - source: spec-42-5-release-workflow.md | severity: low | fix-risk: med | footprint: in-story
