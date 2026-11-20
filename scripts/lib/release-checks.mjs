@@ -51,6 +51,11 @@ export const RELEASE_CONCURRENCY = Object.freeze({ group: 'release-${{ github.re
 
 const checkout = Object.freeze({ uses: 'actions/checkout', with: Object.freeze({ 'persist-credentials': false }) });
 const setupNode = (version, extra = {}) => Object.freeze({ uses: 'actions/setup-node', with: Object.freeze({ 'node-version': version, ...extra }) });
+/**
+ * The input of a setup-node step in a job that installs no pnpm. setup-node v5 turns its package-manager cache on from the `packageManager`
+ * field of `package.json` (pnpm), and the step then fails with "Unable to locate executable file: pnpm" where no pnpm is installed.
+ */
+export const NO_PACKAGE_MANAGER_CACHE = Object.freeze({ 'package-manager-cache': false });
 const download = Object.freeze({ uses: 'actions/download-artifact', with: Object.freeze({ name: ARTIFACT_NAME, path: ARTIFACT_DIRECTORY }) });
 
 /** The jobs of the workflow, in order (see the header). */
@@ -62,7 +67,7 @@ export const RELEASE_JOBS = Object.freeze({
     timeoutMinutes: RELEASE_JOB_TIMEOUT_MINUTES['ci-gate'],
     steps: Object.freeze([
       checkout,
-      setupNode(RELEASE_NODE.floor),
+      setupNode(RELEASE_NODE.floor, NO_PACKAGE_MANAGER_CACHE),
       Object.freeze({ run: 'node scripts/release.mjs ci-gate', env: Object.freeze({ GITHUB_TOKEN: '${{ github.token }}' }) }),
     ]),
   }),
@@ -90,7 +95,7 @@ export const RELEASE_JOBS = Object.freeze({
     timeoutMinutes: RELEASE_JOB_TIMEOUT_MINUTES.rehearse,
     steps: Object.freeze([
       checkout,
-      setupNode(RELEASE_NODE.upload),
+      setupNode(RELEASE_NODE.upload, NO_PACKAGE_MANAGER_CACHE),
       download,
       Object.freeze({ run: `node scripts/release.mjs publish --dry-run --artifacts ${ARTIFACT_DIRECTORY}` }),
     ]),
@@ -104,7 +109,7 @@ export const RELEASE_JOBS = Object.freeze({
     timeoutMinutes: RELEASE_JOB_TIMEOUT_MINUTES.publish,
     steps: Object.freeze([
       checkout,
-      setupNode(RELEASE_NODE.upload),
+      setupNode(RELEASE_NODE.upload, NO_PACKAGE_MANAGER_CACHE),
       download,
       Object.freeze({
         run: `node scripts/release.mjs publish --artifacts ${ARTIFACT_DIRECTORY}`,

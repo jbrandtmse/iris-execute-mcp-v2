@@ -82,8 +82,25 @@ describe("AC 42.5.1: release.yml is the declaration", () => {
 
   it("the setup-node step of publish takes no registry-url, so npm's own authentication decides (OIDC or the token userconfig)", () => {
     for (const step of workflow.jobs["publish"]?.["steps"] as Array<Record<string, any>>) {
-      if (typeof step["uses"] === "string" && step["uses"].startsWith("actions/setup-node@")) expect(Object.keys(step["with"])).toEqual(["node-version"]);
+      if (typeof step["uses"] === "string" && step["uses"].startsWith("actions/setup-node@")) {
+        expect(Object.keys(step["with"]).sort()).toEqual(["node-version", "package-manager-cache"]);
+      }
     }
+  });
+
+  it("every setup-node step of a job that installs no pnpm switches the package-manager cache off (setup-node v5 would look for pnpm and fail); prepare installs pnpm first", () => {
+    const setupNodes = (job: string): Array<Record<string, any>> => (workflow.jobs[job]?.["steps"] as Array<Record<string, any>>).filter((step) => String(step["uses"]).startsWith("actions/setup-node@"));
+    for (const job of ["ci-gate", "rehearse", "publish"]) {
+      const steps = workflow.jobs[job]?.["steps"] as Array<Record<string, any>>;
+      expect(steps.some((step) => String(step["uses"]).startsWith("pnpm/action-setup@")), `${job} installs no pnpm`).toBe(false);
+      expect(setupNodes(job)).toHaveLength(1);
+      for (const step of setupNodes(job)) expect(step["with"]["package-manager-cache"], `${job}: package-manager-cache`).toBe(false);
+    }
+    const prepare = workflow.jobs["prepare"]?.["steps"] as Array<Record<string, any>>;
+    const pnpmAt = prepare.findIndex((step) => String(step["uses"]).startsWith("pnpm/action-setup@"));
+    const nodeAt = prepare.findIndex((step) => String(step["uses"]).startsWith("actions/setup-node@"));
+    expect(pnpmAt).toBeGreaterThanOrEqual(0);
+    expect(pnpmAt).toBeLessThan(nodeAt);
   });
 
   it("the Node versions: ci-gate and prepare on the floor, rehearse and publish on 26.0.0 (npm 11.12.1)", () => {
@@ -168,6 +185,11 @@ describe("AC 42.5.1: release.yml is the declaration", () => {
     ["the upload that may find no file", () => mutate(text, "          if-no-files-found: error\n", "          if-no-files-found: warn\n"), /job prepare: step 9 is/],
     ["rehearse on another Node", () => mutate(text, 'node-version: "26.0.0"', 'node-version: "24.0.0"'), /job rehearse does not run on Node 26\.0\.0/],
     ["prepare on another Node", () => mutate(text, 'node-version: "22.17.0"\n          cache: pnpm', 'node-version: "24.0.0"\n          cache: pnpm'), /job prepare does not run on Node 22\.17\.0/],
+    // A setup-node in a job with no pnpm, left on setup-node v5's default package-manager cache, fails looking for pnpm.
+    ["ci-gate's setup-node without package-manager-cache: false", () => mutate(text, 'node-version: "22.17.0"\n          package-manager-cache: false\n', 'node-version: "22.17.0"\n'), /job ci-gate: step 2 is a setup-node with no pnpm installed before it and without package-manager-cache: false/],
+    ["the setup-node of rehearse and of publish without package-manager-cache: false", () => mutate(text, 'node-version: "26.0.0"\n          package-manager-cache: false\n', 'node-version: "26.0.0"\n'), /job rehearse: step 2 is a setup-node with no pnpm[\s\S]*job publish: step 2 is a setup-node with no pnpm/],
+    ["package-manager-cache: true on the setup-node of ci-gate", () => mutate(text, 'node-version: "22.17.0"\n          package-manager-cache: false\n', 'node-version: "22.17.0"\n          package-manager-cache: true\n'), /job ci-gate: step 2 is a setup-node with no pnpm installed before it/],
+    ["prepare's setup-node ahead of its pnpm step", () => mutate(text, "      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0\n      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0\n", "      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0\n      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0\n"), /job prepare: step 2 is a setup-node with no pnpm installed before it/],
     ["another runner", () => mutate(text, "runs-on: ubuntu-24.04\n    timeout-minutes: 20", "runs-on: ubuntu-latest\n    timeout-minutes: 20"), /job rehearse does not run on ubuntu-24\.04/],
     ["another budget", () => mutate(text, "timeout-minutes: 90", "timeout-minutes: 360"), /job prepare has timeout-minutes 360, not 90/],
     ["a job the declaration does not have", () => mutate(text, "  rehearse:\n    name: rehearse\n", "  extra:\n    name: extra\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo extra\n  rehearse:\n    name: rehearse\n"), /the jobs are ci-gate, prepare, extra, rehearse, publish/],

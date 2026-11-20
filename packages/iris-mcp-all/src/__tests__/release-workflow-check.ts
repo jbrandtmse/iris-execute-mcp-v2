@@ -166,6 +166,17 @@ export function releaseWorkflowProblems(text: string): string[] {
     });
     const setupNode = actual.find((step) => step.uses === "actions/setup-node");
     if (String(setupNode?.with?.["node-version"]) !== expected.node) problems.push(`job ${name} does not run on Node ${expected.node}`);
+
+    // setup-node v5 caches the package manager named by `packageManager` in package.json (pnpm) unless told not to, and fails where no
+    // pnpm is installed ("Unable to locate executable file: pnpm"). A setup-node step with no pnpm/action-setup before it must switch it off.
+    const pnpmAt = actual.findIndex((step) => step.uses === "pnpm/action-setup");
+    actual.forEach((step, index) => {
+      if (step.uses !== "actions/setup-node") return;
+      const hasPnpm = pnpmAt !== -1 && pnpmAt < index;
+      if (!hasPnpm && step.with?.["package-manager-cache"] !== false) {
+        problems.push(`job ${name}: step ${index + 1} is a setup-node with no pnpm installed before it and without package-manager-cache: false, so it fails looking for pnpm`);
+      }
+    });
   }
 
   // EXCLUSIVITY: what only `publish` may hold. An expression may name a property with a dot or with brackets (`secrets['NPM_TOKEN']`), or
