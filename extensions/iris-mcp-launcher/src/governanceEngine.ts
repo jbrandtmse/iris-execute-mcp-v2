@@ -22,7 +22,7 @@
  *   CLI is not built — never fall back silently to npx, exactly the 31.6
  *   discipline (a guessed fallback would run a DIFFERENT engine version than
  *   the user pinned).
- * - Otherwise → `npx -y -p @iris-mcp/shared iris-mcp-governance`. The
+ * - Otherwise → `npx -y -p @iris-mcp/shared@1 iris-mcp-governance`. The
  *   `universe` command additionally `-p`-installs the five server packages,
  *   because it derives the full key universe from their built dist and npm
  *   lays sibling packages out side-by-side under the same `node_modules/@iris-mcp/`.
@@ -46,7 +46,7 @@
 import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import { PACKAGE_NPM_NAME } from "./definitions.js";
+import { PACKAGE_NPM_NAME, pinnedSpec } from "./definitions.js";
 import type { LauncherSettings, SuitePackageKey } from "./types.js";
 
 /** Repo-relative path of the built governance CLI inside a monorepo checkout. */
@@ -138,7 +138,7 @@ export async function resolveGovernanceCli(
     };
   }
 
-  const packages = [GOVERNANCE_CLI_NPM_PACKAGE];
+  const packages = [pinnedSpec(GOVERNANCE_CLI_NPM_PACKAGE)];
   if (forUniverse) {
     // `universe` derives the full key universe from the five server packages'
     // built dist; under npm those must be installed alongside @iris-mcp/shared
@@ -146,7 +146,7 @@ export async function resolveGovernanceCli(
     // package list is DERIVED from the same PACKAGE_NPM_NAME map the server
     // spawn path uses — never a hand-maintained duplicate roster.
     for (const key of Object.keys(PACKAGE_NPM_NAME) as SuitePackageKey[]) {
-      packages.push(PACKAGE_NPM_NAME[key]);
+      packages.push(pinnedSpec(PACKAGE_NPM_NAME[key]));
     }
   }
   const baseArgs = ["-y"];

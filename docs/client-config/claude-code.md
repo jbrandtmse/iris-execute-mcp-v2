@@ -1,7 +1,7 @@
 # Claude Code Configuration
 
 > **Superseded by the manager (Epic 33):** the fastest, safest way to wire Claude Code is
-> `npx -y @iris-mcp/client-config iris-mcp-clients apply --client claude-code --servers iris-dev-mcp`
+> `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply --client claude-code --servers iris-dev-mcp`
 > — it previews the exact diff, writes through the backup-on-write engine, and `iris-mcp-clients doctor`
 > verifies the result. *(Not yet published to npm — until then: `node packages/client-config/dist/cli/clients-cli.js apply …`.)*
 > This page remains as the **manual fallback** (and as the reference for what the
@@ -53,7 +53,7 @@ Create a `.mcp.json` file in your project root.
   "mcpServers": {
     "iris-dev-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -71,11 +71,11 @@ To use a different server, swap the package name in `args`:
 
 | Server | `args` value |
 |--------|-------------|
-| Development | `["-y", "@iris-mcp/dev"]` |
-| Administration | `["-y", "@iris-mcp/admin"]` |
-| Interoperability | `["-y", "@iris-mcp/interop"]` |
-| Operations | `["-y", "@iris-mcp/ops"]` |
-| Data & Analytics | `["-y", "@iris-mcp/data"]` |
+| Development | `["-y", "@iris-mcp/dev@1"]` |
+| Administration | `["-y", "@iris-mcp/admin@1"]` |
+| Interoperability | `["-y", "@iris-mcp/interop@1"]` |
+| Operations | `["-y", "@iris-mcp/ops@1"]` |
+| Data & Analytics | `["-y", "@iris-mcp/data@1"]` |
 
 ### All Five Servers
 
@@ -84,7 +84,7 @@ To use a different server, swap the package name in `args`:
   "mcpServers": {
     "iris-dev-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -96,7 +96,7 @@ To use a different server, swap the package name in `args`:
     },
     "iris-admin-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/admin"],
+      "args": ["-y", "@iris-mcp/admin@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -108,7 +108,7 @@ To use a different server, swap the package name in `args`:
     },
     "iris-interop-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/interop"],
+      "args": ["-y", "@iris-mcp/interop@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -120,7 +120,7 @@ To use a different server, swap the package name in `args`:
     },
     "iris-ops-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/ops"],
+      "args": ["-y", "@iris-mcp/ops@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -132,7 +132,7 @@ To use a different server, swap the package name in `args`:
     },
     "iris-data-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/data"],
+      "args": ["-y", "@iris-mcp/data@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -168,7 +168,7 @@ Both are **optional** — omit them for a single-server, fully-enabled install. 
   "mcpServers": {
     "iris-admin-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/admin"],
+      "args": ["-y", "@iris-mcp/admin@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -243,7 +243,7 @@ If you already curate IRIS connections in the [InterSystems Server Manager](http
 1. Store the password for a connection in your OS keychain (Windows Credential Manager / macOS Keychain / libsecret) — never typed into a config file:
 
    ```bash
-   npx -y -p @iris-mcp/shared iris-mcp-credentials set myserver
+   npx -y -p @iris-mcp/shared@1 iris-mcp-credentials set myserver
    ```
 
    > **Pre-release:** the suite is not published to npm yet, so the `npx` form above will not resolve today. Until it is, run the built bin directly from a clone: `node /path/to/iris-execute-mcp-v2/packages/shared/dist/cli/credentials-cli.js set myserver`. (`-p` is required in the `npx` form because the bin name differs from the package name.)
@@ -255,7 +255,7 @@ If you already curate IRIS connections in the [InterSystems Server Manager](http
      "mcpServers": {
        "iris-dev-mcp": {
          "command": "npx",
-         "args": ["-y", "@iris-mcp/dev"],
+         "args": ["-y", "@iris-mcp/dev@1"],
          "env": {
            "IRIS_SERVER_MANAGER": "auto"
          }
@@ -286,7 +286,7 @@ Point a server at production in **read-only mode** with one environment variable
   "mcpServers": {
     "iris-dev-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -322,7 +322,7 @@ One optional environment variable trims which tools a server advertises on `tool
   "mcpServers": {
     "iris-dev-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -356,7 +356,7 @@ Three optional environment variables turn on a secrets-free, structured JSONL lo
   "mcpServers": {
     "iris-dev-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -396,7 +396,7 @@ To make servers available across all projects in VS Code, add the `mcpServers` b
   "mcpServers": {
     "iris-dev-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/dev"],
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -443,6 +443,34 @@ $env:IRIS_HTTPS = "false"
 ```
 
 > When both `env` in the config and system environment variables are set, the config values take precedence.
+
+---
+
+## Protocol revision and confirmation dialogs
+
+Each server is one stdio process that serves two MCP protocol revisions, `2025-11-25` and `2026-07-28`, and the client's first message chooses between them. Nothing is configured on the server.
+
+- **Protocol revision.** Claude Code 2.1.292 and later negotiates `2026-07-28` by default. To keep `2025-11-25`, set `MCP_PROTOCOL_NEGOTIATION=legacy` in Claude Code's own environment.
+- **Where to set it.** Set it in the shell that starts Claude Code (`export MCP_PROTOCOL_NEGOTIATION=legacy`, or in front of `claude`), or in the `env` object of Claude Code's `settings.json`. Do not set it in the `env` block of an MCP server entry in `.mcp.json`: that block configures the server process, and Claude Code makes the choice before the server starts.
+- **One server start.** Claude Code probes on the same connection, so it starts each server once per session on either revision (observed on Claude Code 2.1.296). A client built on the TypeScript MCP SDK v2 client starts a probe copy of the server first; see [Protocol revisions and confirmation dialogs](README.md#protocol-revisions-and-confirmation-dialogs).
+- **Confirmation dialogs.** Claude Code declares form elicitation on both revisions, so six destructive gates (`iris_audit_manage` `purge`, `iris_env_promote` `execute`, `iris_production_control` `clean` with `killAppData`, `iris_message_resend` `resend` and `resendFiltered`, and `iris_doc_edit` `regenerateStorage`) show you a confirmation form before they change anything; see [Human confirmation (elicitation)](../../README.md#human-confirmation-elicitation). Declining, dismissing or accepting without ticking Confirm changes nothing.
+- **An `Elicitation` hook can answer for you.** Claude Code runs a hook configured under `hooks.Elicitation`, with a matcher on the MCP server name, which is the key of its entry under `mcpServers` (`iris-admin-mcp` in the configs above):
+
+  ```json
+  {
+    "hooks": {
+      "Elicitation": [
+        {
+          "matcher": "iris-admin-mcp",
+          "hooks": [{ "type": "command", "command": "node /path/to/answer-elicitation.mjs" }]
+        }
+      ]
+    }
+  }
+  ```
+
+  The command exits 0 and prints `{"hookSpecificOutput":{"hookEventName":"Elicitation","action":"accept","content":{"confirm":true}}}` to accept, or the same with `"action":"decline"` to decline; printing nothing leaves the dialog to you. **A hook that answers by itself removes the person from the loop, and whether to install one is your choice.**
+- **Headless `claude -p`.** Hooks run, so a hook answers. With no hook, Claude Code 2.1.296 cancels the dialog (the call ends with `CONFIRMATION_DECLINED` and `response: "cancel"`, and nothing changes), and `--permission-prompts none` cancels it too.
 
 ---
 

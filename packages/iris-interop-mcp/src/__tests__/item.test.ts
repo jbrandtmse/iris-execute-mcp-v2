@@ -197,10 +197,10 @@ describe("iris_production_item", () => {
 
   // ── annotations ──
 
-  it("should have readOnlyHint: false and destructiveHint: false annotations", () => {
+  it("should have readOnlyHint: false and destructiveHint: true annotations (Story 42.10, DW-560)", () => {
     expect(productionItemTool.annotations).toEqual({
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       idempotentHint: false,
       openWorldHint: false,
     });

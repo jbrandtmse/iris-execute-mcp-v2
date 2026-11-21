@@ -15,7 +15,7 @@ npm install -g @iris-mcp/interop
 Or run directly without installing:
 
 ```bash
-npx @iris-mcp/interop
+npx -y @iris-mcp/interop@1
 ```
 
 ---
@@ -82,7 +82,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
   "mcpServers": {
     "iris-interop-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/interop"],
+      "args": ["-y", "@iris-mcp/interop@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -102,7 +102,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
   "mcpServers": {
     "iris-interop-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/interop"],
+      "args": ["-y", "@iris-mcp/interop@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -121,7 +121,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
 {
   "iris-interop-mcp": {
     "command": "npx",
-    "args": ["-y", "@iris-mcp/interop"],
+    "args": ["-y", "@iris-mcp/interop@1"],
     "env": {
       "IRIS_HOST": "localhost",
       "IRIS_PORT": "52773",
@@ -154,7 +154,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
 | `iris_production_manage` | Create or delete a production; `delete` refuses the namespace's current production unless it is Stopped, accepts only a production class (one that extends `Ens.Production`; any other class is refused and nothing is deleted), and removes an orphan `Ens.Config.Production` row (class gone) with `orphanRemoved: true` | `action`, `name`, `namespace?` | destructive |
-| `iris_production_control` | Start, stop, restart, update, recover, or clean | `action`, `name?`, `timeout?`, `force?`, `killAppData?`, `confirm?`, `namespace?` | destructive |
+| `iris_production_control` | Start, stop, restart, update, recover, or clean (`clean` with `killAppData: true` also asks the person first on a client that supports elicitation; see the details below) | `action`, `name?`, `timeout?`, `force?`, `killAppData?`, `confirm?`, `namespace?` | destructive |
 | `iris_production_status` | Get production status with optional detail | `detail?`, `namespace?` | readOnly, idempotent |
 | `iris_production_summary` | Cross-namespace production summary | `cursor?` | readOnly, idempotent |
 
@@ -162,7 +162,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_production_item` | Add, remove, enable, disable, get, or set config item settings (set/add accept arbitrary host/adapter settings); `get` reports the item's `production`; enable/disable skip an item whose host class no longer resolves (repair it with `set` + `settings.className` first) | `action`, `itemName`, `className?`, `production?`, `settings?`, `namespace?` | -- |
+| `iris_production_item` | Add, remove, enable, disable, get, or set config item settings (set/add accept arbitrary host/adapter settings); `get` reports the item's `production`; enable/disable skip an item whose host class no longer resolves (repair it with `set` + `settings.className` first) | `action`, `itemName`, `className?`, `production?`, `settings?`, `namespace?` | destructive |
 | `iris_production_autostart` | Get or set auto-start configuration | `action`, `productionName?`, `namespace?` | -- |
 | `iris_default_settings_manage` | List, get, set, or delete Interoperability System Default Settings (`Ens.Config.DefaultSettings`) | `action`, `production?`, `item?`, `hostClass?`, `setting?`, `value?`, `description?`, `deployable?`, `namespace?` | destructive |
 
@@ -178,7 +178,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | `iris_message_diagram` | Mermaid sequence diagram from a message-trace session (Visual Trace as renderable text) | `sessionIds`, `labelMode?`, `maxRows?`, `dedup?`, `namespace?` | readOnly, idempotent |
 | `iris_message_search` | Search message headers in a required window of at most 7 days (`headers`), or by what the bodies hold (`body`: structured filters), or by an indexed Search Table value such as an HL7 medical record number (`searchTable`: structured filters over a Search Table class); `body` and `searchTable` are under the PHI data policy: enabled by default, refused under `block` | `action`, `from`, `to?`, `item?`, `source?`, `target?`, `status?`, `sessionId?`, `bodyClass?`, `searchTableClass?`, `filters?`, `errorOnly?`, `limit?`, `cursor?`, `namespace?` | readOnly, idempotent |
 | `iris_message_body` | Read the bodies of 1 to 20 messages by header ID, rendered by kind (HL7 v2 as ER7, XML, JSON, text); a read, enabled by default, under the PHI data policy: `redact` shows an HL7 v2 body redacted and withholds every other body | `headerIds`, `maxChars?`, `dataPolicy?`, `namespace?` | readOnly, idempotent |
-| `iris_message_resend` | Resend/replay Interoperability messages (`preview` read; `resend`/`resendFiltered` writes) | `action`, `headerIds?`, `item?`, `status?`, `from?`, `to?`, `maxMessages?`, `dryRun?`, `confirm?`, `namespace?` | destructive |
+| `iris_message_resend` | Resend/replay Interoperability messages (`preview` read; `resend`/`resendFiltered` writes, which also ask the person first on a client that supports elicitation; see the details below) | `action`, `headerIds?`, `item?`, `status?`, `from?`, `to?`, `maxMessages?`, `dryRun?`, `confirm?`, `namespace?` | destructive |
 | `iris_production_adapters` | List available adapter types | `category?`, `namespace?` | readOnly, idempotent |
 
 #### `iris_message_diagram` — Message Trace Sequence Diagram
@@ -299,7 +299,7 @@ Resends messages via the pinned `Ens.MessageHeader:ResendDuplicatedMessage` API 
 
   > **Data policy:** the body summary follows the profile's `dataPolicy` (`IRIS_DATA_POLICY`, an `IRIS_PROFILES` entry's `dataPolicy`, or the governance file; default **`redact`**). Under `redact` an HL7 v2 body shows only its class name (`(non-stream body; class=EnsLib.HL7.Message)`) and every other body, a stream included, is withheld with a reason (`bodySummary` is `""`); `block` withholds every body; `allow` returns the summary as before, field for field. A header with no readable body (a missing class, a literal body, a body that does not open) reports `bodyPolicy: {outcome: "none"}`. Under `redact` and `block` each found item carries `bodyKind` and `bodyPolicy`, and the result carries `dataPolicy: {policy, redacted, blocked}`; under `allow` none of these fields appears. `iris_server_profiles` reports each profile's `dataPolicy`. See the suite README's [PHI data policy](../../README.md#phi-data-policy). The data policy reduces exposure of message-body data; it is not a compliance certification.
 - **`resend`** (write) — resend up to 100 explicit `headerIds` directly. Per-header result `{originalId, newHeaderId?, ok, error?}`; a bad header does not abort the batch.
-- **`resendFiltered`** (write) — resend messages matching `item` (required — matches source or target config item) + `status` (default `'Errored'`) + a `from`/`to` time window (required `from`, max 7 days). **Dry-run-first**: `dryRun` defaults to `true` and returns only the match count + a first-20 sample, resending NOTHING; executing requires **both** `dryRun:false` AND `confirm:true`, otherwise the call is refused with no changes made. `maxMessages` caps the batch (default 100, hard cap 500) — a match count over the cap is refused (not truncated-and-executed).
+- **`resendFiltered`** (write) — resend messages matching `item` (required — matches source or target config item) + `status` (default `'Errored'`) + a `from`/`to` time window (required `from`, max 7 days). **Dry-run-first**: `dryRun` defaults to `true` and returns only the match count + a first-20 sample, resending NOTHING; executing requires **both** `dryRun:false` AND `confirm:true` — `dryRun:false` without `confirm:true` is refused with no changes made, and leaving `dryRun` out previews again. `maxMessages` caps the batch (default 100, hard cap 500) — an executing call whose match count is over the cap is refused (not truncated-and-executed), while a preview reports the full count.
 
 > **DUPLICATION HAZARD:** resending an already-processed message delivers its data again downstream — the target sees a brand-new message, not a correction. Always `preview` first and confirm the message is genuinely worth retrying.
 
@@ -308,6 +308,8 @@ Resends messages via the pinned `Ens.MessageHeader:ResendDuplicatedMessage` API 
 ```json
 {"global": {"iris_message_resend:resend": true, "iris_message_resend:resendFiltered": true}}
 ```
+
+**Human confirmation (Story 43.3):** `resend` and `resendFiltered` (to execute: `dryRun: false` with `confirm: true`) also ask the person right before the first resend, when the MCP client declares form elicitation. For `resendFiltered` the dialog names the live match count, the window and the `maxMessages` cap, from a read-only preview of the same filters; it is shown only for 1 to `maxMessages` matches, and at zero matches, over the cap or when IRIS refuses the preview the execute request is sent as before (IRIS refuses an over-cap run and resends nothing at zero), while a preview that fails any other way (a timeout, a connection error, an HTTP 5xx) ends the call with that error and resends nothing. `resend` has no `confirm` parameter, so for a client without elicitation governance is its only gate. Any other client keeps today's contract, and declining ends the call with `CONFIRMATION_DECLINED` and resends nothing. A Claude Code `Elicitation` hook can answer the dialog for the person, which is the user's choice and removes the person from the loop. See [Human confirmation (elicitation)](../../README.md#human-confirmation-elicitation).
 
 **Input (resendFiltered, dry run):**
 ```json
@@ -435,6 +437,8 @@ Six actions (`start`, `stop`, `restart`, `update`, `recover`, `clean`) are verif
 `clean` clears a **stopped** production's stale runtime state (queues, job-status, suspended messages) to unwedge a production that `recover` cannot fix. For a troubled production, prefer `recover` first; use `clean` only as a **last resort**. By default `clean` touches only transient runtime state; setting `killAppData: true` (with `confirm: true`) **also** wipes the persistent `^Ens.AppData` business state — HL7 sequence numbers, file/FTP done-file tables (→ duplicate re-ingestion), and RecordMap/X12 batch/control state. `killAppData: true` without `confirm: true` is refused and changes nothing.
 
 **Governance:** `start`/`stop`/`restart`/`update`/`recover` are grandfathered (always enabled). `clean` is a **write but enabled by default** (via the `defaultEnabled` marker, Epic 20 decision F2) — a recovery operation an operator expects available — while remaining truthfully `mutates: "write"`. An operator can still disable it with an explicit `IRIS_GOVERNANCE` override (e.g. `{"global":{"iris_production_control:clean":false}}`).
+
+**Human confirmation (Story 43.3):** `clean` with `killAppData: true` and `confirm: true` (the combination IRIS accepts) also asks the person right before the wipe, when the MCP client declares form elicitation; a `clean` without `killAppData` never asks. Any other client keeps today's `confirm: true` contract, and declining ends the call with `CONFIRMATION_DECLINED` and changes nothing. A Claude Code `Elicitation` hook can answer the dialog for the person, which is the user's choice and removes the person from the loop. See [Human confirmation (elicitation)](../../README.md#human-confirmation-elicitation).
 
 **Input:**
 ```json

@@ -144,7 +144,7 @@ export const ldapManageTool: ToolDefinition = {
     // tool-scoped; the per-action read/write distinction is realized through
     // `mutates` below.
     readOnlyHint: false,
-    destructiveHint: false,
+    destructiveHint: true,
     idempotentHint: false,
     openWorldHint: false,
   },

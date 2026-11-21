@@ -9,16 +9,21 @@
 import { spawn } from "node:child_process";
 import http from "node:http";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import type { AddressInfo } from "node:net";
+import { createServer, type AddressInfo } from "node:net";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Readable } from "node:stream";
+import { completeAuditLines, readAuditEntries } from "../../../../scripts/lib/audit-lines.mjs";
 import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
+import { liveGateTarget } from "../../../shared/src/test-helpers/live-target.js";
+
+export { completeAuditLines };
 
 /**
- * The MCP SDK's ESM build in the pnpm store of the monorepo at `repoRoot`
- * (this package does not depend on the SDK itself), or `undefined` when no
- * installed SDK version has one.
+ * The ESM build of `@modelcontextprotocol/client` (its `dist/` directory, holding `index.mjs` and
+ * `stdio.mjs`) in the pnpm store of the monorepo at `repoRoot`, or `undefined` when no installed
+ * client version has one. The client is a devDependency of this package; the servers under test
+ * never load it.
  *
  * @param repoRoot - Absolute path of the monorepo root.
  */
@@ -26,11 +31,11 @@ export function resolveSdkEsmDir(repoRoot: string): string | undefined {
   const pnpmDir = path.join(repoRoot, "node_modules", ".pnpm");
   if (!existsSync(pnpmDir)) return undefined;
   const candidates = readdirSync(pnpmDir)
-    .filter((name) => name.startsWith("@modelcontextprotocol+sdk@"))
+    .filter((name) => name.startsWith("@modelcontextprotocol+client@"))
     .sort();
   for (const candidate of candidates) {
-    const esmDir = path.join(pnpmDir, candidate, "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm");
-    if (existsSync(esmDir)) return esmDir;
+    const esmDir = path.join(pnpmDir, candidate, "node_modules", "@modelcontextprotocol", "client", "dist");
+    if (existsSync(path.join(esmDir, "index.mjs")) && existsSync(path.join(esmDir, "stdio.mjs"))) return esmDir;
   }
   return undefined;
 }
@@ -69,23 +74,45 @@ export async function isIrisReachable(host: string, port: string): Promise<boole
   }
 }
 
+/** A local port nothing listens on: bind an ephemeral port on 127.0.0.1, then release it. */
+export async function reserveClosedPort(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address !== null ? address.port : 0;
+      server.close(() => resolve(String(port)));
+    });
+  });
+}
+
+/**
+ * The settings of the connection-refusing preload (`scripts/lib/no-live-iris-preload.mjs`). They configure the test
+ * oracle, never a server, so {@link inheritedEnv} hands them to a spawned child: a child that inherits the preload
+ * through `NODE_OPTIONS` then also logs its refused connects to the same file.
+ */
+export const PRELOAD_SETTINGS: readonly string[] = ["IRIS_MCP_CONNECT_LOG", "IRIS_MCP_WATCH_PORTS", "IRIS_MCP_WATCH_HOSTS"];
+
 /**
  * The test runner's environment for a spawned server: everything it inherits
  * (PATH, and SystemRoot on Windows), minus every variable that configures the
  * suite -- each `IRIS_*` key and `MCP_TRANSPORT` -- and minus each name in
  * `alsoDrop`. Names match case-insensitively, as Windows treats them, so an
- * ambient lowercase `iris_host` is dropped too. A gate layers its own explicit
+ * ambient lowercase `iris_host` is dropped too. The {@link PRELOAD_SETTINGS}
+ * are kept unless `alsoDrop` names them. A gate layers its own explicit
  * values on top of the result.
  *
  * @param alsoDrop - Further variable names to drop (case-insensitive).
  */
 export function inheritedEnv(alsoDrop: readonly string[] = []): Record<string, string> {
   const dropped = new Set(["MCP_TRANSPORT", ...alsoDrop.map((name) => name.toUpperCase())]);
+  const kept = new Set(PRELOAD_SETTINGS);
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value !== "string") continue;
     const upper = key.toUpperCase();
-    if (upper.startsWith("IRIS_") || dropped.has(upper)) continue;
+    if (dropped.has(upper) || (upper.startsWith("IRIS_") && !kept.has(upper))) continue;
     env[key] = value;
   }
   return env;
@@ -161,17 +188,31 @@ export interface IrisTarget {
 }
 
 /**
- * The target named by `IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD` and
- * `IRIS_NAMESPACE`, each defaulting to the dev instance at localhost:52773 as `_SYSTEM` in HSCUSTOM.
+ * The target of an armed run: `IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD` and
+ * `IRIS_NAMESPACE`, all required, none defaulted (`resolveLiveTarget`). A run that `IRIS_REQUIRE_LIVE`
+ * does not arm gets an inert target under the reserved `.invalid` TLD that is never contacted: every
+ * gate checks {@link liveArmingSkipReason} before its first probe, spawn or request.
+ *
+ * @throws When `IRIS_REQUIRE_LIVE` arms the run and any of the five variables is missing.
  */
 export function irisTargetFromEnv(): IrisTarget {
+  const { target } = liveGateTarget();
   return {
-    host: process.env.IRIS_HOST ?? "localhost",
-    port: process.env.IRIS_PORT ?? "52773",
-    username: process.env.IRIS_USERNAME ?? "_SYSTEM",
-    password: process.env.IRIS_PASSWORD ?? "SYS",
-    namespace: process.env.IRIS_NAMESPACE ?? "HSCUSTOM",
+    host: target.host,
+    port: target.port,
+    username: target.username,
+    password: target.password,
+    namespace: target.namespace,
   };
+}
+
+/**
+ * Why a live gate must not run: `IRIS_REQUIRE_LIVE` (`1` or `true`) is not set, so the gate reaches
+ * no IRIS. `undefined` when armed. A set `IRIS_HOST` does not arm a gate. A gate skips with this
+ * reason before any probe, spawn or request.
+ */
+export function liveArmingSkipReason(): string | undefined {
+  return liveGateTarget().skipReason;
 }
 
 /** The connection settings of a spawned server's `default` profile. */
@@ -219,13 +260,28 @@ export interface WirePromptRequest {
   arguments?: Record<string, string>;
 }
 
-interface SdkClient {
+/** The part of the SDK client that the gates drive. */
+export interface SdkClient {
   connect: (transport: unknown) => Promise<void>;
   close: () => Promise<void>;
-  callTool: (params: { name: string; arguments: Record<string, unknown> }) => Promise<WireToolResult>;
+  /** `arguments` is sent exactly as given, so an omitted one stays omitted on the wire. */
+  callTool: (params: { name: string; arguments?: Record<string, unknown> }) => Promise<WireToolResult>;
   listTools: () => Promise<{ tools: WireTool[] }>;
   listPrompts: () => Promise<{ prompts: WirePrompt[] }>;
   getPrompt: (params: WirePromptRequest) => Promise<WirePromptResult>;
+  listResources: () => Promise<{ resources: Array<Record<string, unknown>> }>;
+  listResourceTemplates: () => Promise<{ resourceTemplates: Array<Record<string, unknown>> }>;
+  readResource: (params: { uri: string }) => Promise<{ contents: Array<Record<string, unknown>> }>;
+  getServerCapabilities: () => Record<string, unknown> | undefined;
+  getServerVersion: () => { name: string; version: string } | undefined;
+  getInstructions: () => string | undefined;
+  getNegotiatedProtocolVersion: () => string | undefined;
+  /** The era the connect negotiated (`modern` for 2026-07-28, `legacy` for the 2025 handshake), once connected. */
+  getProtocolEra: () => "legacy" | "modern" | undefined;
+  /** The `server/discover` result a probing or pinned connect adopted; `undefined` on a legacy connect. */
+  getDiscoverResult: () => Record<string, unknown> | undefined;
+  /** Send a request exactly as given. Unlike the typed methods above, it is not skipped for a capability the server never advertised. */
+  request: (request: { method: string; params?: Record<string, unknown> }) => Promise<unknown>;
 }
 
 /** A connected client of one spawned server. */
@@ -240,12 +296,25 @@ export interface WireSession {
   listPrompts: () => Promise<WirePrompt[]>;
   /** Render a prompt; a refusal rejects with the SDK's error (its `code` is the JSON-RPC error code). */
   getPrompt: (request: WirePromptRequest) => Promise<WirePromptResult>;
+  /**
+   * Send a request exactly as given and resolve with the raw result. The typed methods above skip the request for a capability the
+   * server never advertised (`listPrompts` on a server without prompts answers an empty list); this one always sends it, so the
+   * server's own answer is what rejects.
+   */
+  request: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
   close: () => Promise<void>;
 }
 
+/** How the SDK client negotiates the protocol revision: `legacy` is the plain 2025 handshake, `auto` probes, `pin` requires the revision. */
+export type SdkVersionNegotiation = {
+  mode: "legacy" | "auto" | { pin: string };
+  /** The probe policy of `auto` and a pinned revision (milliseconds before a silent probe is given up on); omitted, the SDK's defaults apply. */
+  probe?: { timeoutMs?: number; maxRetries?: number };
+};
+
 /** What a wire session needs to start a built server and name its target. */
 export interface WireSessionOptions {
-  /** The MCP SDK's ESM build (see {@link resolveSdkEsmDir}). */
+  /** The MCP client's ESM build (see {@link resolveSdkEsmDir}). */
   sdkEsmDir: string;
   /** Absolute path of the built server's `index.js`. */
   entry: string;
@@ -255,21 +324,56 @@ export interface WireSessionOptions {
   clientName: string;
   /** Receives each chunk the server writes to stderr (its log); omitted, the chunks are discarded. */
   onStderr?: (chunk: string) => void;
+  /** The client's negotiation mode; omitted, `{ mode: "legacy" }` is sent explicitly. */
+  versionNegotiation?: SdkVersionNegotiation;
+  /**
+   * The capabilities the client declares (for example `{ elicitation: { form: {} } }`); omitted, the client sends
+   * no `capabilities` option and its handshake is unchanged.
+   */
+  clientCapabilities?: Record<string, unknown>;
+  /**
+   * Answers each `elicitation/create` request the server sends. Registered only when `clientCapabilities` declares
+   * `elicitation`; then, omitted, every request is cancelled.
+   */
+  onElicitation?: (request: ElicitationRequest) => Promise<ElicitationAnswer> | ElicitationAnswer;
+}
+
+/** The params of an `elicitation/create` request, as the server sent them. */
+export interface ElicitationRequest {
+  message: string;
+  requestedSchema: unknown;
+  mode?: string;
+  [member: string]: unknown;
+}
+
+/** An answer to an `elicitation/create` request. */
+export interface ElicitationAnswer {
+  action: "accept" | "decline" | "cancel";
+  content?: Record<string, unknown>;
 }
 
 /**
- * Spawn the built server with `extraEnv` on top of the explicit connection settings, and connect an
- * SDK client to it over stdio. The server's startup bootstrap has run before the connection is
- * accepted.
+ * Spawn the built server with `extraEnv` on top of the explicit connection settings, and connect the
+ * SDK client to it over stdio in `options.versionNegotiation` (default legacy: the plain 2025-11-25
+ * connect, with no probe and no 2026-07-28 headers). Resolves with the connected client; the caller
+ * closes it.
  */
-export async function openWireSession(
+export async function connectSdkClient(
   options: WireSessionOptions,
   extraEnv: Record<string, string> = {},
-): Promise<WireSession> {
-  const sdkClientIndex = pathToFileURL(path.join(options.sdkEsmDir, "client", "index.js")).href;
-  const sdkClientStdio = pathToFileURL(path.join(options.sdkEsmDir, "client", "stdio.js")).href;
+): Promise<SdkClient> {
+  const sdkClientIndex = pathToFileURL(path.join(options.sdkEsmDir, "index.mjs")).href;
+  const sdkClientStdio = pathToFileURL(path.join(options.sdkEsmDir, "stdio.mjs")).href;
   const { Client } = (await import(sdkClientIndex)) as {
-    Client: new (info: { name: string; version: string }) => SdkClient;
+    Client: new (
+      info: { name: string; version: string },
+      options: { versionNegotiation: SdkVersionNegotiation; capabilities?: Record<string, unknown> },
+    ) => SdkClient & {
+      setRequestHandler: (
+        method: "elicitation/create",
+        handler: (request: { params: ElicitationRequest }) => Promise<ElicitationAnswer> | ElicitationAnswer,
+      ) => void;
+    };
   };
   const { StdioClientTransport } = (await import(sdkClientStdio)) as {
     StdioClientTransport: new (params: {
@@ -291,9 +395,32 @@ export async function openWireSession(
     options.onStderr?.(chunk.toString());
   });
 
-  const namespace = options.target.namespace;
-  const client = new Client({ name: options.clientName, version: "0.0.0" });
+  const client = new Client(
+    { name: options.clientName, version: "0.0.0" },
+    {
+      versionNegotiation: options.versionNegotiation ?? { mode: "legacy" },
+      ...(options.clientCapabilities !== undefined ? { capabilities: options.clientCapabilities } : {}),
+    },
+  );
+  // The client refuses a handler for a request it did not declare, so it is registered only with `elicitation`.
+  if (options.clientCapabilities?.["elicitation"] !== undefined) {
+    const answer = options.onElicitation ?? ((): ElicitationAnswer => ({ action: "cancel" }));
+    client.setRequestHandler("elicitation/create", (request) => answer(request.params));
+  }
   await client.connect(transport);
+  return client;
+}
+
+/**
+ * {@link connectSdkClient} behind the session interface the gates use. The server's startup
+ * bootstrap has run before the connection is accepted.
+ */
+export async function openWireSession(
+  options: WireSessionOptions,
+  extraEnv: Record<string, string> = {},
+): Promise<WireSession> {
+  const client = await connectSdkClient(options, extraEnv);
+  const namespace = options.target.namespace;
   return {
     call: (name, args) => client.callTool({ name, arguments: { server: "default", namespace, ...args } }),
     callOn: (server, name, args) => client.callTool({ name, arguments: { server, namespace, ...args } }),
@@ -301,6 +428,7 @@ export async function openWireSession(
     listTools: async () => (await client.listTools()).tools,
     listPrompts: async () => (await client.listPrompts()).prompts,
     getPrompt: (request) => client.getPrompt(request),
+    request: (method, params = {}) => client.request({ method, params }),
     close: () => client.close().catch(() => {}),
   };
 }
@@ -516,9 +644,9 @@ export async function shippedBootstrapVersion(repoRoot: string): Promise<string>
  * ships, so a gate that drives a built server is not testing some other build.
  *
  * Call it once the gate's first built-server session has connected: that server's startup
- * bootstrap redeploys any deployment whose version differs, so a mismatch after the connection means
- * the deployment is not the shipped embed. The deployed value is read over the raw Atelier route,
- * independently of the bootstrap code that decides the redeploy.
+ * bootstrap redeploys an older deployment and leaves a newer or foreign one alone, so a mismatch
+ * after the connection means the deployment is not the shipped embed. The deployed value is read
+ * over the raw Atelier route, independently of the bootstrap code that decides the redeploy.
  *
  * @returns The version, once it matches.
  * @throws When the deployed version differs from the shipped one, naming both.
@@ -532,7 +660,8 @@ export async function assertDeployedBootstrapVersion(repoRoot: string, target: I
       `The deployed ExecuteMCPv2 classes report BOOTSTRAP_VERSION "${deployed}" but the shipped embed ` +
         `(packages/shared/dist/bootstrap-classes.js) is "${shipped}", so this gate would test classes ` +
         "other than the shipped ones. The gate's own built server has connected, and its startup bootstrap " +
-        "redeploys a deployment whose version differs, so that bootstrap failed or did not run. Its report " +
+        "redeploys an older deployment, so that bootstrap failed or did not run, or refused to replace a " +
+        "newer or foreign deployment. Its report " +
         "goes to the server's stderr, which the gate does not show: start the built server by hand against " +
         "this instance to read it, fix the cause, then rerun the gate.",
     );
@@ -812,16 +941,13 @@ export interface AuditPollOptions {
 
 /**
  * Read the JSON-lines audit file `file` until it holds the entries `options` asks for, and return them.
- * Throws, quoting the start of the file, when they have not appeared within `timeoutMs`.
+ * Only newline-terminated lines are read (see `completeAuditLines` in `scripts/lib/audit-lines.mjs`); a terminated line that does
+ * not parse still throws. Throws, quoting the start of the file, when the entries have not appeared within `timeoutMs`.
  */
 export async function pollAuditEntries(file: string, options: AuditPollOptions): Promise<AuditEntry[]> {
   const wanted = options.count ?? 1;
   const deadline = Date.now() + options.timeoutMs;
-  const read = (): AuditEntry[] =>
-    (existsSync(file) ? readFileSync(file, "utf8") : "")
-      .split("\n")
-      .filter((line) => line.trim() !== "")
-      .map((line) => JSON.parse(line) as AuditEntry);
+  const read = (): AuditEntry[] => readAuditEntries(file) as AuditEntry[];
   const ofTool = (entry: AuditEntry): boolean => options.tool === undefined || entry["tool"] === options.tool;
   for (;;) {
     const entries = read();
@@ -841,11 +967,11 @@ export async function pollAuditEntries(file: string, options: AuditPollOptions):
 /**
  * The number of entries the JSON-lines audit file `file` holds once no entry has landed for `stableReads` reads
  * `intervalMs` apart (0 when there is no file). The server writes an entry after it has sent the reply, so a test
- * that asserts on the entries its own calls add takes this count first and then reads only what follows it.
+ * that asserts on the entries its own calls add takes this count first and then reads only what follows it. An entry
+ * counts once its newline has landed (see {@link completeAuditLines}), as it does for {@link pollAuditEntries}.
  */
 export async function settledAuditCount(file: string, intervalMs = 50, stableReads = 3): Promise<number> {
-  const count = (): number =>
-    (existsSync(file) ? readFileSync(file, "utf8") : "").split("\n").filter((line) => line.trim() !== "").length;
+  const count = (): number => completeAuditLines(existsSync(file) ? readFileSync(file, "utf8") : "").length;
   let last = count();
   for (let stable = 0; stable < stableReads; ) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));

@@ -1,5 +1,5 @@
 /**
- * Synthesizes the spawn environment for `npx -y @iris-mcp/<pkg>` (AC 31.4.2,
+ * Synthesizes the spawn environment for `npx -y @iris-mcp/<pkg>@1` (AC 31.4.2,
  * Integration AC 31.4.5).
  *
  * Pure functions only — no `vscode` dependency — so the exact variable names

@@ -338,6 +338,9 @@ function renderResendSummary(summary: ResendSummary | undefined | null): string 
 
 // ── iris_message_resend ─────────────────────────────────────
 
+/** The header IDs a `resend` confirmation dialog lists before it says "and N more". */
+const CONFIRMATION_HEADER_LIMIT = 20;
+
 export const messageResendTool: ToolDefinition = {
   name: "iris_message_resend",
   title: "Resend Interoperability Messages",
@@ -360,9 +363,11 @@ export const messageResendTool: ToolDefinition = {
     "item + status (default 'Errored') + a from/to time window (max 7 days). " +
     "DRY-RUN-FIRST WORKFLOW: dryRun defaults to true and returns only the " +
     "match count + first-20 sample, resending NOTHING; executing requires " +
-    "BOTH dryRun:false AND confirm:true, otherwise the call is refused with " +
-    "no changes made. maxMessages caps the batch (default 100, HARD CAP 500) " +
-    "— a match count over the cap is refused (not truncated-and-executed); " +
+    "BOTH dryRun:false AND confirm:true: dryRun:false without confirm:true is " +
+    "refused with no changes made, and leaving dryRun out previews again. " +
+    "maxMessages caps the batch (default 100, HARD CAP 500) " +
+    "\u2014 an executing call whose match count is over the cap is refused " +
+    "(not truncated-and-executed), while a preview reports the full count; " +
     "narrow the window or item filter and retry.\n\n" +
     "GOVERNANCE — resend/resendFiltered are default-disabled writes (resend " +
     "duplicates data flow downstream; it is not a last-resort recovery action " +
@@ -372,7 +377,15 @@ export const messageResendTool: ToolDefinition = {
     "DUPLICATION HAZARD: resending an already-processed message delivers its " +
     "data again downstream — the target sees a brand-new message, not a " +
     "correction. Always preview first and confirm the message is actually " +
-    "worth retrying (e.g. a genuinely failed Request, not a completed one).",
+    "worth retrying (e.g. a genuinely failed Request, not a completed one).\n\n" +
+    "HUMAN CONFIRMATION: when the MCP client supports form elicitation, " +
+    "'resend' and an executing 'resendFiltered' (when its read-only preview " +
+    "matches 1 to maxMessages messages) also ask the person in a confirmation " +
+    "dialog, after every check above and right before anything is resent; only " +
+    "an accept with Confirm ticked proceeds, and a decline or a dismissal " +
+    "returns CONFIRMATION_DECLINED with nothing changed (do not repeat the call " +
+    "unless the person asks). A client without elicitation is not asked, and " +
+    "the call works as described above.",
   inputSchema: z.object({
     action: z
       .enum(["preview", "resend", "resendFiltered"])
@@ -420,7 +433,8 @@ export const messageResendTool: ToolDefinition = {
       .optional()
       .describe(
         "(resendFiltered) Cap on matched/resent messages (default: 100, HARD CAP: 500). " +
-          "A match count over this cap is refused, not truncated-and-executed.",
+          "An executing call whose match count is over this cap is refused, not truncated-and-executed; " +
+          "a preview reports the full count.",
       ),
     dryRun: z
       .boolean()
@@ -434,7 +448,8 @@ export const messageResendTool: ToolDefinition = {
       .optional()
       .describe(
         "(resendFiltered) Must be true together with dryRun:false to execute " +
-          "the resend; otherwise the call is refused with no changes made.",
+          "the resend; dryRun:false without confirm:true is refused with no changes made. " +
+          "Ignored while dryRun is true or omitted (the call previews).",
       ),
     namespace: z
       .string()
@@ -545,6 +560,18 @@ export const messageResendTool: ToolDefinition = {
             "'headerIds' is required for action 'resend' (1-100 numeric header IDs).",
           );
         }
+        // Every check has passed and nothing has been resent: the person is asked (AD-34).
+        const ids = input.headerIds;
+        const outcome = await ctx.confirm?.({
+          operation: "resend messages by header ID",
+          target: `namespace ${ns}`,
+          scope:
+            `${ids.length} header ID(s): ${ids.slice(0, CONFIRMATION_HEADER_LIMIT).join(", ")}` +
+            (ids.length > CONFIRMATION_HEADER_LIMIT ? ` and ${ids.length - CONFIRMATION_HEADER_LIMIT} more` : "") +
+            (input.headOfQueue ? "; each goes to the head of its queue" : ""),
+        });
+        if (outcome !== undefined && !outcome.proceed) return outcome.result;
+
         const body: Record<string, unknown> = {
           action: "resend",
           headerIds: input.headerIds,
@@ -587,6 +614,40 @@ export const messageResendTool: ToolDefinition = {
       if (input.maxMessages !== undefined) body.maxMessages = input.maxMessages;
       if (input.dryRun !== undefined) body.dryRun = input.dryRun;
       if (input.confirm !== undefined) body.confirm = input.confirm;
+
+      // An execute that IRIS will let through (dryRun false with confirm true) asks the person (AD-34). The
+      // dialog names the match count, which a read-only preview of the same filters provides: it is shown only
+      // when 1 <= count <= cap, and otherwise the execute request goes out as it always did. A preview that IRIS
+      // refuses (an error envelope, HTTP status below 500) means IRIS refuses the execute the same way, so the
+      // execute goes out as before. A preview that fails any other way (a timeout, a connection error, a 5xx, a
+      // cancel) ends the call with that error and sends nothing: the person cannot be shown what would be resent.
+      if (input.dryRun === false && input.confirm === true) {
+        const preview = async (): Promise<string | undefined> => {
+          try {
+            const previewBody: Record<string, unknown> = { ...body, dryRun: true };
+            delete previewBody.confirm;
+            const found = (
+              await ctx.http.post<ResendFilteredDryRunResult>(`${BASE_URL}/interop/message/resend`, previewBody)
+            ).result;
+            const { matchCount, maxMessages } = found;
+            if (typeof matchCount !== "number" || typeof maxMessages !== "number") return undefined;
+            if (matchCount < 1 || matchCount > maxMessages) return undefined;
+            return (
+              `${matchCount} message(s) match now (status ${found.status}, from ${found.from} to ${found.to}); ` +
+              `IRIS counts again when it runs and resends at most ${maxMessages}`
+            );
+          } catch (error: unknown) {
+            if (error instanceof IrisApiError && error.statusCode < 500) return undefined;
+            throw error;
+          }
+        };
+        const outcome = await ctx.confirm?.({
+          operation: "resend the messages that match a filter",
+          target: `item ${input.item}, namespace ${ns}`,
+          scope: preview,
+        });
+        if (outcome !== undefined && !outcome.proceed) return outcome.result;
+      }
 
       const response = await ctx.http.post<ResendFilteredResult>(
         `${BASE_URL}/interop/message/resend`,

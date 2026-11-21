@@ -11,10 +11,17 @@
 
 import {
   atelierPath,
+  droppedStorageNames,
   requireMinVersion,
+  storageDefinitionNames,
+  storageDrop,
+  storageDropsRefusal,
+  xmlClassStorageNames,
+  type StorageDrop,
   type ToolDefinition,
 } from "@iris-mcp/shared";
 import { z } from "zod";
+import { currentClassLines, storageDropsNote } from "./doc.js";
 
 /**
  * Story 35.6 (AC 35.6.2): guarantee the `c` (compile) qualifier is EFFECTIVE
@@ -40,6 +47,16 @@ function foldCompileFlag(flags: string | undefined): string {
   if (lastC > 0 && userFlags[lastC - 1] === "-") return `${userFlags}c`;
   return userFlags;
 }
+
+/** What an import refused for a Storage drop did not do, without a closing period. */
+function importStorageOpening(namespace: string): string {
+  return `The XML was not imported into namespace '${namespace}' and nothing was stored`;
+}
+
+/** The closing sentence of the refusal for an import that would drop Storage definitions. */
+const IMPORT_STORAGE_REMEDY =
+  "Keep each class's Storage elements in the XML (export the classes with iris_doc_xml_export first), " +
+  "or pass allowStorageRegeneration: true to let IRIS regenerate the storage.";
 
 // ── iris_doc_convert ──────────────────────────────────────────────────
 
@@ -108,7 +125,11 @@ export const docXmlExportTool: ToolDefinition = {
     "is not usable until compiled (pass compile: true to compile in the same call, or use " +
     "iris_doc_compile afterwards). When compile is not requested the response states " +
     "plainly that the documents are uncompiled. Non-empty per-file status text reported by " +
-    "IRIS (e.g. a compile error) is surfaced in the response.",
+    "IRIS (e.g. a compile error) is surfaced in the response. " +
+    "An import that would drop one of the Storage definitions a class has now (its XML lacks that definition) " +
+    "is refused with STORAGE_DROPPED and nothing is loaded, because IRIS would generate new storage at the next " +
+    "compile, which can change how existing rows are read; allowStorageRegeneration (default false) lets it " +
+    "through, and the result names the dropped definitions.",
   inputSchema: z.object({
     action: z
       .enum(["export", "import", "list"])
@@ -145,6 +166,16 @@ export const docXmlExportTool: ToolDefinition = {
       .string()
       .optional()
       .describe("Target namespace (default: configured)"),
+    allowStorageRegeneration: z
+      .boolean()
+      .optional()
+      .describe(
+        'For action "import" only. Boolean (true/false), default false. When false, an import is refused ' +
+          "(STORAGE_DROPPED, nothing loaded) if the XML of a class lacks one of the Storage definitions that " +
+          "class has now; changing a definition's content is allowed. When true, the import goes ahead, IRIS " +
+          "generates new storage at the next compile (which can change how existing rows are read), and the " +
+          "result's storageDrops names the dropped definitions. No effect on a new class or on other document types.",
+      ),
   }),
   annotations: {
     // Use most restrictive annotations since import is destructive
@@ -155,13 +186,14 @@ export const docXmlExportTool: ToolDefinition = {
   },
   scope: "NS",
   handler: async (args, ctx) => {
-    const { action, docs, content, compile, flags, namespace } = args as {
+    const { action, docs, content, compile, flags, namespace, allowStorageRegeneration } = args as {
       action: "export" | "import" | "list";
       docs?: string[];
       content?: string;
       compile?: boolean;
       flags?: string;
       namespace?: string;
+      allowStorageRegeneration?: boolean;
     };
 
     requireMinVersion(ctx.atelierVersion, 7, "iris_doc_xml_export");
@@ -207,6 +239,26 @@ export const docXmlExportTool: ToolDefinition = {
           };
         }
 
+        const lines = content.split(/\r?\n/);
+
+        // The Storage guard: each `<Class>` of the XML is compared with the class the namespace has
+        // now. A drop refuses the whole import before its one POST, unless allowStorageRegeneration
+        // lets it through; then the drops are named in the result. A read that fails throws, and
+        // nothing is posted.
+        const drops: StorageDrop[] = [];
+        for (const [className, keptNames] of xmlClassStorageNames(lines)) {
+          const docName = `${className}.cls`;
+          const existing = await currentClassLines(ctx.http, ctx.atelierVersion, ns, docName);
+          if (existing === undefined) continue;
+          const dropped = droppedStorageNames(storageDefinitionNames(existing), keptNames);
+          if (dropped.length > 0) drops.push(storageDrop(docName, dropped));
+        }
+        if (drops.length > 0 && allowStorageRegeneration !== true) {
+          return storageDropsRefusal(importStorageOpening(ns), drops, IMPORT_STORAGE_REMEDY, {
+            namespace: ns,
+          });
+        }
+
         // POST /action/xml/load with file/content payload.
         // Story 35.6: `compile: true` sends the native Atelier `flags` query
         // param with the `c` qualifier folded in (see foldCompileFlag), so the
@@ -221,7 +273,6 @@ export const docXmlExportTool: ToolDefinition = {
           params.set("flags", foldCompileFlag(flags));
           path += `?${params.toString()}`;
         }
-        const lines = content.split(/\r?\n/);
         const body = [{ file: "import.xml", content: lines }];
         const response = await ctx.http.post(path, body);
 
@@ -241,8 +292,8 @@ export const docXmlExportTool: ToolDefinition = {
         // Surface non-empty per-file status text: a load that fails to compile
         // still answers HTTP 200 with an empty status.errors — the error text
         // appears ONLY in the per-file `status` field (live-pinned broken-XML
-        // oracle, Story 35.6 Task 1). structuredContent stays the untouched
-        // API result either way.
+        // oracle, Story 35.6 Task 1). structuredContent is the untouched API
+        // result either way, except that an allowed Storage drop adds storageDrops.
         const resultObj = response.result as
           | { content?: Array<{ file?: unknown; status?: unknown }> }
           | undefined;
@@ -262,6 +313,14 @@ export const docXmlExportTool: ToolDefinition = {
               text: `Per-file status (${fileName}): ${entry.status}`,
             });
           }
+        }
+
+        if (drops.length > 0) {
+          contentBlocks.push({ type: "text", text: storageDropsNote(drops) });
+          return {
+            content: contentBlocks,
+            structuredContent: { ...(response.result as Record<string, unknown>), storageDrops: drops },
+          };
         }
 
         return {

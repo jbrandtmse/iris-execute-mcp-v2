@@ -22,8 +22,8 @@
  *    `INFORMATION_SCHEMA.STATEMENTS` after real calls, selects the twelve header columns and nothing of the
  *    body, reads `Ens.MessageHeader` first through `%INORDER`, and reads the body table by its ID.
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (defaults: localhost:52773,
- * `_SYSTEM`, HSCUSTOM). Writes only the namespace and database `EXECMCPTMP393Q` and the HSCUSTOM class
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none defaulted, and
+ * only when `IRIS_REQUIRE_LIVE` arms the run (without it every row skips before any request). Writes only the namespace and database `EXECMCPTMP393Q` and the HSCUSTOM class
  * `ExecuteMCPv2.Temp.Story391Fixture`. A missing or stale dist, an unresolvable SDK or an unreachable IRIS skips
  * each row with the reason, or fails with "may not be skipped" when `IRIS_REQUIRE_LIVE` is armed (listed in
  * `scripts/prepublish-gate.mjs` `gateTestFiles`).
@@ -42,6 +42,7 @@ import {
   headerIds,
   irisTargetFromEnv,
   isIrisReachable,
+  liveArmingSkipReason,
   openWireSession,
   postEnvelope,
   resolveSdkEsmDir,
@@ -175,13 +176,13 @@ const QTARGET = { ...TARGET, namespace: NS_Q };
 // -- Setup and teardown ------------------------------------------------
 
 beforeAll(async () => {
-  skipReason = staleDistReason(REPO_ROOT, "shared");
+  skipReason = liveArmingSkipReason() ?? staleDistReason(REPO_ROOT, "shared");
   for (const pkg of ["iris-dev-mcp", "iris-admin-mcp", "iris-interop-mcp"]) skipReason ??= staleDistReason(REPO_ROOT, pkg);
   if (!skipReason) {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
     if (!sdkEsmDir) {
       skipReason =
-        "Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm - run pnpm install from the repo root.";
+        "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm - run pnpm install from the repo root.";
     } else if (!(await isIrisReachable(TARGET.host, TARGET.port))) {
       skipReason = `IRIS is not reachable at http://${TARGET.host}:${TARGET.port}/api/atelier/ (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
     }

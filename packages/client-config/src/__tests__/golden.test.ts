@@ -12,6 +12,9 @@
  * (built dist, real fs, tmp HOME) — capture command:
  *   node packages/client-config/tmp-33-1-capture-golden.mjs  (2026-07-27,
  *   script deleted after capture per the disposable-script pattern)
+ * and stages 1-3 were re-captured the same way for the `@1` pin:
+ *   node capture-golden-42-1.mjs <repo root>  (2026-10-20, against the built
+ *   client-config dist; the script was deleted after capture)
  * — and are NOT trusted on capture alone: this test also asserts the
  * AC 33.1.3 cross-stage byte oracles (stash: disable == initial; all:
  * enable == added, remove == initial), that every stage re-parses with the

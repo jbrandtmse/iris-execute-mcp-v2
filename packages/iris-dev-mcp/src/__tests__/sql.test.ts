@@ -156,10 +156,10 @@ describe("iris_sql_execute", () => {
     );
   });
 
-  it("should have correct annotations (readOnlyHint: false)", () => {
+  it("should have correct annotations (readOnlyHint: false, destructiveHint: true)", () => {
     expect(sqlExecuteTool.annotations).toEqual({
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       idempotentHint: false,
       openWorldHint: false,
     });

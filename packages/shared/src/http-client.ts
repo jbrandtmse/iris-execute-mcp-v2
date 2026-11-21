@@ -21,6 +21,11 @@ export interface RequestOptions {
   headers?: Record<string, string>;
   /** Per-request timeout in milliseconds (overrides client default). */
   timeout?: number;
+  /**
+   * Cancels the request when aborted: a request whose signal is already aborted is not sent, and one in flight is
+   * aborted. Either rejects with an {@link IrisConnectionError} whose code is `CANCELLED`.
+   */
+  signal?: AbortSignal;
 }
 
 /** Shape of the Atelier-style JSON response envelope. */
@@ -124,9 +129,9 @@ export class IrisHttpClient {
    * HEAD request to `/api/atelier/` which establishes the session
    * (cookie + auth) and extracts the CSRF token as a side effect.
    */
-  private async ensureCsrfToken(): Promise<void> {
+  private async ensureCsrfToken(signal?: AbortSignal): Promise<void> {
     if (this.csrfToken) return;
-    await this.headRequest("/api/atelier/");
+    await this.headRequest("/api/atelier/", signal === undefined ? undefined : { signal });
     if (!this.csrfToken) {
       // 31-7-1 (Story 32.3): this is EXPECTED on a stock Atelier endpoint —
       // not a malfunction. Probed live 2026-07-26 (IRIS 2026.1): a HEAD to
@@ -176,9 +181,24 @@ export class IrisHttpClient {
   ): Promise<Response> {
     const url = `${this.config.baseUrl}${path}`;
     const timeout = options?.timeout ?? this.defaultTimeout;
+    const callerSignal = options?.signal;
+    const cancelled = (): IrisConnectionError =>
+      new IrisConnectionError(
+        "CANCELLED",
+        `Request ${method} ${path} was cancelled by the client`,
+        "No answer is expected for a cancelled call",
+      );
+    if (callerSignal?.aborted) throw cancelled();
     const controller = new AbortController();
     this.activeControllers.add(controller);
     const timer = setTimeout(() => controller.abort(), timeout);
+    const onCallerAbort = (): void => controller.abort();
+    callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
+    const settle = (): void => {
+      clearTimeout(timer);
+      callerSignal?.removeEventListener("abort", onCallerAbort);
+      this.activeControllers.delete(controller);
+    };
 
     // Story 35.3: pin the request locale explicitly (`IRIS_ACCEPT_LANGUAGE`,
     // default English) so `%Status` error text renders predictably. Setting
@@ -240,8 +260,7 @@ export class IrisHttpClient {
         keepalive: true,
       });
 
-      clearTimeout(timer);
-      this.activeControllers.delete(controller);
+      settle();
       const duration = Date.now() - start;
 
       // Extract session cookie and CSRF token from response
@@ -263,12 +282,14 @@ export class IrisHttpClient {
       logger.info(`${method} ${path} completed in ${duration}ms`);
       return response;
     } catch (error: unknown) {
-      clearTimeout(timer);
-      this.activeControllers.delete(controller);
+      settle();
 
       // Re-throw our own error types
       if (error instanceof IrisApiError) throw error;
       if (error instanceof IrisConnectionError) throw error;
+
+      // The caller cancelled: not a timeout, whatever fetch reported
+      if (callerSignal?.aborted) throw cancelled();
 
       // Timeout
       if (
@@ -311,7 +332,7 @@ export class IrisHttpClient {
   ): Promise<AtelierEnvelope<T>> {
     // Ensure CSRF token is available for mutating methods
     if (["POST", "PUT", "DELETE"].includes(method) && !this.csrfToken && !isRetry) {
-      await this.ensureCsrfToken();
+      await this.ensureCsrfToken(options?.signal);
     }
 
     const extraHeaders: Record<string, string> = {
@@ -503,4 +524,36 @@ export class IrisHttpClient {
     this.csrfToken = undefined;
     this.sessionEstablished = false;
   }
+}
+
+/**
+ * A view of `client` whose requests carry `signal`: `get`, `post`, `put`, `delete` and `head` merge it into their
+ * options, so a call whose signal aborts cancels the requests it made (a request already in flight is aborted, a
+ * later one is not sent). Every other member, `namespace` included, is the client's own. The client and its session
+ * are shared, never changed, because concurrent calls use the same client.
+ */
+export function bindSignal(client: IrisHttpClient, signal: AbortSignal): IrisHttpClient {
+  const withSignal = (options?: RequestOptions): RequestOptions => ({ ...options, signal });
+  return new Proxy(client, {
+    get(target, property) {
+      switch (property) {
+        case "get":
+        case "delete":
+        case "head": {
+          const method = target[property] as (path: string, options?: RequestOptions) => unknown;
+          return (path: string, options?: RequestOptions) => method.call(target, path, withSignal(options));
+        }
+        case "post":
+        case "put": {
+          const method = target[property] as (path: string, body: unknown, options?: RequestOptions) => unknown;
+          return (path: string, body: unknown, options?: RequestOptions) =>
+            method.call(target, path, body, withSignal(options));
+        }
+        default: {
+          const value: unknown = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+      }
+    },
+  });
 }

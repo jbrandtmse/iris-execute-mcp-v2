@@ -6,6 +6,13 @@ All notable changes to the IRIS MCP Launcher VS Code extension are documented in
 
 ### Changed
 
+- **Every `npx` spec the launcher spawns is pinned to the suite's major** (Story 42.1, DW-260): a server starts as
+  `npx -y @iris-mcp/<pkg>@1`, the clients view as `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients`, and the
+  governance editor as `npx -y -p @iris-mcp/shared@1 iris-mcp-governance` (`universe` also installs each server as
+  `-p @iris-mcp/<pkg>@1`), so a later major never reaches an installed launcher unasked. The major is a literal mirror of
+  `IRIS_MCP_MAJOR` from `@iris-mcp/client-config`, pinned equal by a test in `@iris-mcp/all`. Every server definition
+  the launcher provides also starts in the user's home directory (VS Code's own default, now explicit). The clients and
+  governance CLI spawns still pass no working directory.
 - **The launcher clears `MCP_TRANSPORT` in every server it starts** (Story 38.7, DW-539): `MCP_TRANSPORT` joins the
   launcher-owned variables, so a definition's `env` carries `MCP_TRANSPORT: null`, which removes the variable from the
   extension host's own environment. The launcher spawns only stdio servers, and a server refuses any other configured

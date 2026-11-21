@@ -22,6 +22,7 @@ export async function callRequest(server, method, params) {
     signal: new AbortController().signal,
     sendNotification: async () => {},
     sendRequest: async () => ({}),
+    mcpReq: { requestState: () => undefined },
   };
   return handler({ method, params }, extra);
 }

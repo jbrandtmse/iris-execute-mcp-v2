@@ -33,6 +33,8 @@ export const REFUSAL_CODES = {
   MONITOR_BUSY: "MONITOR_BUSY",
   /** A run that includes %UnitTest.TestProduction tests was not started because a different production runs in the namespace. */
   PRODUCTION_BUSY: "PRODUCTION_BUSY",
+  /** The person declined, dismissed or did not tick the confirmation dialog of a gate, so nothing was changed. */
+  CONFIRMATION_DECLINED: "CONFIRMATION_DECLINED",
 } as const;
 
 /** One of the {@link REFUSAL_CODES} values. */

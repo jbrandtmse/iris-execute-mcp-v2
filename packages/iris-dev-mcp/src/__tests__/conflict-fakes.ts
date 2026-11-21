@@ -28,6 +28,11 @@ export function currentClass(lines: string[], ts = TS_CURRENT): Record<string, u
   };
 }
 
+/** The HTTP 404 the shared client throws for a GET of a document that does not exist. */
+export function notFound(path: string): IrisApiError {
+  return new IrisApiError(404, [], path, `IRIS returned HTTP 404 for GET ${path}.`, null);
+}
+
 /** The HTTP 409 the shared client throws for a put to an existing document that carries no version token. */
 export function conflict(path: string, result: unknown): IrisApiError {
   return new IrisApiError(

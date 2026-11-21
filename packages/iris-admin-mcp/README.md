@@ -15,7 +15,7 @@ npm install -g @iris-mcp/admin
 Or run directly without installing:
 
 ```bash
-npx @iris-mcp/admin
+npx -y @iris-mcp/admin@1
 ```
 
 ---
@@ -65,7 +65,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
   "mcpServers": {
     "iris-admin-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/admin"],
+      "args": ["-y", "@iris-mcp/admin@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -85,7 +85,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
   "mcpServers": {
     "iris-admin-mcp": {
       "command": "npx",
-      "args": ["-y", "@iris-mcp/admin"],
+      "args": ["-y", "@iris-mcp/admin@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -104,7 +104,7 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
 {
   "iris-admin-mcp": {
     "command": "npx",
-    "args": ["-y", "@iris-mcp/admin"],
+    "args": ["-y", "@iris-mcp/admin@1"],
     "env": {
       "IRIS_HOST": "localhost",
       "IRIS_PORT": "52773",
@@ -244,6 +244,8 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 > **Note:** `iris_audit_manage` configures auditing and manages the audit *log*. It is distinct from `@iris-mcp/ops`'s read-only `iris_audit_events`, which only queries audit events.
 
 > **Governance defaults (service / LDAP / X.509 / audit):** the **write** actions of these tools are classified `write` and are **disabled by default** under an `IRIS_GOVERNANCE` policy until explicitly allowed — `iris_service_manage:enable`/`:disable`/`:set`, `iris_ldap_manage:create`/`:modify`/`:delete`, `iris_x509_manage:import`/`:delete`, and `iris_audit_manage:enable`/`:disable`/`:configureEvent`/`:purge`/`:export`. Their **read** actions are **enabled by default** — `:list`/`:get`/`:test`/`:status`/`:view`. (`iris_resource_manage:grant`/`:revoke` follow the same rule; see the SQL-privilege governance note above.)
+
+> **Human confirmation (Story 43.3):** `iris_audit_manage` action `purge` (a write, default-disabled) also asks the person before it deletes audit-log records, when the MCP client declares form elicitation; any other client keeps today's `confirm: true` contract, and declining ends the call with `CONFIRMATION_DECLINED` and changes nothing. A Claude Code `Elicitation` hook can answer the dialog for the person, which is the user's choice and removes the person from the loop. See [Human confirmation (elicitation)](../../README.md#human-confirmation-elicitation).
 
 ---
 

@@ -4,6 +4,7 @@
   "description": "Registers the IRIS MCP Server Suite with VS Code, resolving credentials from the InterSystems Server Manager extension at spawn time. Copilot-family agents only — see README for the client-coverage boundary.",
   "version": "0.1.0",
   "publisher": "TBD-at-publish-time",
+  "author": "jbrandtmse (https://github.com/jbrandtmse)",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -107,7 +108,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "description": "DEVELOPMENT ONLY. Absolute path to a local monorepo checkout of the IRIS MCP suite. Empty (default) spawns the published packages via 'npx -y @iris-mcp/<pkg>'. Non-empty spawns 'node <path>/packages/<dir>/dist/index.js' instead, for testing local changes before publishing. This executes an arbitrary local file path, so it is machine-scoped: it can only be set in your own User/Machine settings, never by a workspace's .vscode/settings.json. Only set it to a checkout you trust. A relative path is rejected — it must be absolute. A missing or unbuilt package registers no definition for that package and produces one warning; other selected packages still register."
+          "description": "DEVELOPMENT ONLY. Absolute path to a local monorepo checkout of the IRIS MCP suite. Empty (default) spawns the published packages via 'npx -y @iris-mcp/<pkg>@1'. Non-empty spawns 'node <path>/packages/<dir>/dist/index.js' instead, for testing local changes before publishing. This executes an arbitrary local file path, so it is machine-scoped: it can only be set in your own User/Machine settings, never by a workspace's .vscode/settings.json. Only set it to a checkout you trust. A relative path is rejected — it must be absolute. A missing or unbuilt package registers no definition for that package and produces one warning; other selected packages still register."
         },
         "irisMcpLauncher.governance": {
           "type": "string",
@@ -166,7 +167,7 @@
   },
   "devDependencies": {
     "@intersystems-community/intersystems-servermanager": "^3.10.2",
-    "@types/node": "^20.0.0",
+    "@types/node": "^22.15.0",
     "@types/vscode": "^1.101.0",
     "@vscode/vsce": "^3.2.0",
     "typescript": "^5.7.0",

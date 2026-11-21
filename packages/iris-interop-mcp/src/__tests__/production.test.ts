@@ -716,3 +716,179 @@ describe("iris_production_summary", () => {
     expect(shape).toHaveProperty("cursor");
   });
 });
+
+// -- Story 43.3: confirmation (clean) --------------------------
+
+describe("Story 43.3: confirmation (clean)", () => {
+  const CONTROL_PATH = "/api/executemcp/v2/interop/production/control";
+  const WIPE_OPERATION = "clean the production and wipe its persistent business state";
+  const WIPE_SCOPE =
+    "all Ens.AppData business state: HL7 sequence numbers, file and FTP done-file tables, " +
+    "batch and control-number state; already-processed data can be ingested again";
+  const WIPE_ARGS = { action: "clean", killAppData: true, confirm: true };
+
+  type ConfirmFn = NonNullable<ToolContext["confirm"]>;
+  type ConfirmRequest = Parameters<ConfirmFn>[0];
+  type ConfirmOutcome = Awaited<ReturnType<ConfirmFn>>;
+
+  let mockHttp: ReturnType<typeof createMockHttp>;
+  let ctx: ToolContext;
+
+  beforeEach(() => {
+    mockHttp = createMockHttp();
+    mockHttp.post.mockResolvedValue(envelope({ action: "cleaned", killAppData: 1 }));
+    ctx = createMockCtx(mockHttp);
+  });
+
+  /**
+   * A hand-written confirm that records every request, and how many POSTs had been made when it was
+   * asked, and answers with `answer`.
+   */
+  function recordingConfirm(answer: ConfirmOutcome) {
+    const requests: ConfirmRequest[] = [];
+    const postsBefore: number[] = [];
+    const confirm: ConfirmFn = async (request) => {
+      requests.push(request);
+      postsBefore.push(mockHttp.post.mock.calls.length);
+      return answer;
+    };
+    return { confirm, requests, postsBefore };
+  }
+
+  it("asks once with the fixed operation, the namespace target and the wipe scope, before the POST", async () => {
+    const { confirm, requests, postsBefore } = recordingConfirm({ proceed: true });
+
+    await productionControlTool.handler(WIPE_ARGS, { ...ctx, confirm });
+
+    expect(requests).toStrictEqual([
+      { operation: WIPE_OPERATION, target: "namespace USER", scope: WIPE_SCOPE },
+    ]);
+    expect(postsBefore).toEqual([0]);
+    expect(mockHttp.post).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["a name", { ...WIPE_ARGS, name: "MyApp.Production" }, "namespace USER, production MyApp.Production"],
+    ["an explicit namespace", { ...WIPE_ARGS, namespace: "MYNS" }, "namespace MYNS"],
+    [
+      "a name and an explicit namespace",
+      { ...WIPE_ARGS, name: "MyApp.Production", namespace: "MYNS" },
+      "namespace MYNS, production MyApp.Production",
+    ],
+  ])("states the target when the call gives %s", async (_label, args, target) => {
+    const { confirm, requests } = recordingConfirm({ proceed: true });
+
+    await productionControlTool.handler(args, { ...ctx, confirm });
+
+    expect(requests).toStrictEqual([{ operation: WIPE_OPERATION, target, scope: WIPE_SCOPE }]);
+  });
+
+  const notAsked: Array<[string, Record<string, unknown>, Record<string, unknown>]> = [
+    ["clean without killAppData", { action: "clean" }, { action: "clean", namespace: "USER" }],
+    [
+      "clean with confirm and no killAppData",
+      { action: "clean", confirm: true },
+      { action: "clean", namespace: "USER", confirm: true },
+    ],
+    [
+      "clean with killAppData false",
+      { action: "clean", killAppData: false, confirm: true },
+      { action: "clean", namespace: "USER", killAppData: false, confirm: true },
+    ],
+    [
+      "clean with killAppData true and confirm missing",
+      { action: "clean", killAppData: true },
+      { action: "clean", namespace: "USER", killAppData: true },
+    ],
+    [
+      "clean with killAppData true and confirm false",
+      { action: "clean", killAppData: true, confirm: false },
+      { action: "clean", namespace: "USER", killAppData: true, confirm: false },
+    ],
+  ];
+
+  it.each(notAsked)("does not ask for %s, and the request still goes to IRIS", async (_label, args, body) => {
+    const { confirm, requests } = recordingConfirm({ proceed: true });
+
+    await productionControlTool.handler(args, { ...ctx, confirm });
+
+    expect(requests).toHaveLength(0);
+    expect(mockHttp.post.mock.calls).toStrictEqual([[CONTROL_PATH, body]]);
+  });
+
+  const otherActions: Array<[string, Record<string, unknown>, Record<string, unknown>]> = [
+    ["start", { action: "start", name: "P.Prod" }, { action: "start", namespace: "USER", name: "P.Prod" }],
+    ["stop", { action: "stop" }, { action: "stop", namespace: "USER" }],
+    ["restart", { action: "restart", name: "P.Prod" }, { action: "restart", namespace: "USER", name: "P.Prod" }],
+    ["update", { action: "update" }, { action: "update", namespace: "USER" }],
+    ["recover", { action: "recover" }, { action: "recover", namespace: "USER" }],
+  ];
+
+  it.each(otherActions)("does not ask for %s", async (_label, args, body) => {
+    const { confirm, requests } = recordingConfirm({ proceed: true });
+
+    await productionControlTool.handler(args, { ...ctx, confirm });
+
+    expect(requests).toHaveLength(0);
+    expect(mockHttp.post.mock.calls).toStrictEqual([[CONTROL_PATH, body]]);
+  });
+
+  it.each(otherActions)("does not ask for %s even when killAppData and confirm are true", async (_label, args, body) => {
+    const { confirm, requests } = recordingConfirm({ proceed: true });
+
+    await productionControlTool.handler({ ...args, killAppData: true, confirm: true }, { ...ctx, confirm });
+
+    expect(requests).toHaveLength(0);
+    expect(mockHttp.post.mock.calls).toStrictEqual([
+      [CONTROL_PATH, { ...body, killAppData: true, confirm: true }],
+    ]);
+  });
+
+  it("returns a declined outcome unchanged and makes no POST", async () => {
+    const declinedResult = {
+      content: [{ type: "text" as const, text: "The person declined the confirmation." }],
+      isError: true,
+    };
+    const { confirm, requests } = recordingConfirm({ proceed: false, result: declinedResult });
+
+    const result = await productionControlTool.handler(WIPE_ARGS, { ...ctx, confirm });
+
+    expect(result).toBe(declinedResult);
+    expect(requests).toHaveLength(1);
+    expect(mockHttp.post).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["no name", WIPE_ARGS, { action: "clean", namespace: "USER", killAppData: true, confirm: true }],
+    [
+      "a name",
+      { ...WIPE_ARGS, name: "MyApp.Production" },
+      { action: "clean", namespace: "USER", name: "MyApp.Production", killAppData: true, confirm: true },
+    ],
+  ])("posts exactly as it does without a confirm when the outcome is proceed (%s)", async (_label, args, body) => {
+    const without = await productionControlTool.handler(args, ctx);
+    const withoutCalls = [...mockHttp.post.mock.calls];
+    mockHttp.post.mockClear();
+
+    const { confirm } = recordingConfirm({ proceed: true });
+    const result = await productionControlTool.handler(args, { ...ctx, confirm });
+
+    expect(withoutCalls).toStrictEqual([[CONTROL_PATH, body]]);
+    expect(mockHttp.post.mock.calls).toStrictEqual(withoutCalls);
+    expect(result).toStrictEqual(without);
+    expect(result.structuredContent).toEqual({ action: "cleaned", killAppData: 1 });
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("runs as it does today when the context has no confirm", async () => {
+    expect(ctx.confirm).toBeUndefined();
+
+    const result = await productionControlTool.handler(WIPE_ARGS, ctx);
+
+    expect(mockHttp.post.mock.calls).toStrictEqual([
+      [CONTROL_PATH, { action: "clean", namespace: "USER", killAppData: true, confirm: true }],
+    ]);
+    expect(result.structuredContent).toEqual({ action: "cleaned", killAppData: 1 });
+    expect(result.isError).toBeUndefined();
+  });
+});

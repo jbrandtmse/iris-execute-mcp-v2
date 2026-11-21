@@ -32,72 +32,42 @@
  * **Never fails on a pristine/offline checkout** (mirrors the existing
  * process gates): an unbuilt dist, an unresolvable SDK, or an unreachable
  * IRIS SKIPS with a logged reason (cases A/B/C are dist-only; case D needs
- * the startup health check → live IRIS). Credentials come from `IRIS_TEST_*`
- * env vars with the documented local dev defaults as fallback (the `31-6-5`
- * convention).
+ * the startup health check → live IRIS). Case D runs only when
+ * `IRIS_REQUIRE_LIVE` is `1` or `true`, against `IRIS_HOST`/`IRIS_PORT`/
+ * `IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (all required, none
+ * defaulted); unarmed it skips with the opt-in reason before any probe or
+ * spawn.
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import type { Readable } from "node:stream";
-import { inheritedEnv, spawnAndWaitForExit } from "./process-gate-helpers.js";
+import {
+  inheritedEnv,
+  irisTargetFromEnv,
+  isIrisReachable,
+  liveArmingSkipReason,
+  resolveSdkEsmDir,
+  spawnAndWaitForExit,
+} from "./process-gate-helpers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/iris-mcp-all/src/__tests__/ -> repo root is 4 levels up.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const DEV_MCP_ENTRY_POINT = path.join(REPO_ROOT, "packages", "iris-dev-mcp", "dist", "index.js");
 
-const IRIS_HOST = process.env.IRIS_TEST_HOST ?? "localhost";
-const IRIS_PORT = Number(process.env.IRIS_TEST_PORT ?? 52773);
-const IRIS_USERNAME = process.env.IRIS_TEST_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_TEST_PASSWORD ?? "SYS";
-const IRIS_NAMESPACE = process.env.IRIS_TEST_NAMESPACE ?? "HSCUSTOM";
+const TARGET = irisTargetFromEnv();
+const IRIS_HOST = TARGET.host;
+const IRIS_PORT = Number(TARGET.port);
+const IRIS_USERNAME = TARGET.username;
+const IRIS_PASSWORD = TARGET.password;
+const IRIS_NAMESPACE = TARGET.namespace;
 
 /** Deliberately unique marker credentials that must NEVER be echoed into any error output. */
 const HOST_USERINFO_SECRET = "hunter2qaMarker";
 const PROFILE_USERINFO_SECRET = "s3cretQaMarker";
-
-/** Any HTTP response — even a 401 — proves the IRIS Web Gateway is reachable. A network error/timeout does not. */
-async function isIrisReachable(): Promise<boolean> {
-  try {
-    const response = await fetch(`http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/`, {
-      signal: AbortSignal.timeout(3000),
-    });
-    return typeof response.status === "number";
-  } catch {
-    return false;
-  }
-}
-
-/** Mirror of the sibling gates' SDK resolution (pnpm store layout, iterated to exhaustion). */
-function resolveSdkEsmDir(): string | undefined {
-  const pnpmDir = path.join(REPO_ROOT, "node_modules", ".pnpm");
-  if (!existsSync(pnpmDir)) return undefined;
-  let entries: string[];
-  try {
-    entries = readdirSync(pnpmDir);
-  } catch {
-    return undefined;
-  }
-  const candidates = entries
-    .filter((name) => name.startsWith("@modelcontextprotocol+sdk@"))
-    .sort();
-  for (const candidate of candidates) {
-    const esmDir = path.join(
-      pnpmDir,
-      candidate,
-      "node_modules",
-      "@modelcontextprotocol",
-      "sdk",
-      "dist",
-      "esm",
-    );
-    if (existsSync(esmDir)) return esmDir;
-  }
-  return undefined;
-}
 
 interface RosterEntry {
   name: string;
@@ -143,12 +113,14 @@ beforeAll(async () => {
     liveSkipReason = distSkipReason;
     return;
   }
-  sdkEsmDir = resolveSdkEsmDir();
-  if (!sdkEsmDir) {
+  sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
+  // Arming comes before the reachability probe: an unarmed run reaches no IRIS.
+  liveSkipReason = liveArmingSkipReason();
+  if (!liveSkipReason && !sdkEsmDir) {
     liveSkipReason =
-      "Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm — run pnpm install from the repo root.";
-  } else if (!(await isIrisReachable())) {
-    liveSkipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/ (set IRIS_TEST_* to point at a live instance).`;
+      "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm — run pnpm install from the repo root.";
+  } else if (!liveSkipReason && !(await isIrisReachable(TARGET.host, TARGET.port))) {
+    liveSkipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/ (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
   }
 });
 
@@ -253,8 +225,8 @@ describe("Story 32.4 QA — 32-3-R6 host-guard process gate (built server)", () 
         return;
       }
 
-      const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "client", "index.js")).href;
-      const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "client", "stdio.js")).href;
+      const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "index.mjs")).href;
+      const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "stdio.mjs")).href;
       const { Client } = (await import(sdkClientIndex)) as {
         Client: new (info: { name: string; version: string }) => SdkClient;
       };

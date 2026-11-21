@@ -2,15 +2,21 @@
 /**
  * Story 34.6 AC 34.6.3 — the packaging/prepublish enforcement surface.
  *
- * This repo has no CI (`.github/workflows` does not exist — verified 2026-08-15), and
  * `IRIS_REQUIRE_LIVE` (the opt-in switch that turns the epic-done gate's graceful skip
- * into a hard failure — see `src/__tests__/execute-classmethod-epic-gate.test.ts`) was
- * previously armed nowhere in the repository. That combination meant a release could be
- * packaged with IRIS completely unreachable, all six gate legs silently skipped, and the
+ * into a hard failure — see `src/__tests__/execute-classmethod-epic-gate.test.ts`) is set
+ * by this script and by nothing else on this package's packaging path. Without it a release
+ * could be packaged with IRIS completely unreachable, all six gate legs silently skipped, and the
  * suite reporting green throughout. `npm`/`pnpm` invoke a package's `prepublishOnly`
  * script automatically before `npm publish`/`pnpm publish` (and `--dry-run` still runs
  * it, without uploading anything) — that hook IS the packaging boundary for this
  * package, so it is where the gate gets armed.
+ *
+ * ARGUMENTS AND CI. Every command-line argument after the script name is forwarded to `vitest run`,
+ * after the gate files, so a caller can ask for a reporter (`--reporter=json --outputFile.json=<file>`);
+ * with no extra argument the run is what it always was. CI (`.github/workflows/ci.yml`) runs this
+ * script through `pnpm run prepublishOnly` and `scripts/ci-live-suite.mjs prepublish-dev`, armed, against a
+ * seeded throwaway IRIS (`scripts/throwaway-iris.mjs`), and fails the suite when a test of the roster
+ * skipped without an allowlist entry.
  *
  * Implemented as a plain Node script rather than an inline
  * `IRIS_REQUIRE_LIVE=1 vitest run ...` `package.json` command: that POSIX
@@ -99,13 +105,21 @@ const gateTestFiles = [
   // Story 39.0 QA: the examples of the shared `type` description against the real Atelier docnames route, through
   // `iris_doc_list` and `iris_package_list` (read-only GETs; writes nothing).
   "src/__tests__/doc-type-description-live-gate.test.ts",
+  // Story 42.11: the Storage-drop guard on `iris_doc_load` (the GET read, the 409 read, the override), the `iris_doc_xml_export`
+  // import and `iris_env_promote` execute against the real Atelier: writes only the disposable ExecuteMCPv2.Temp.QaStory4211Load,
+  // ...Xml and ...Prom documents (persistent, compiled, no data rows), and removes them and any global that carries the name.
+  "src/__tests__/storage-guard-write-paths-live-gate.test.ts",
+  // Story 42.11 QA: what the same guard does NOT refuse on the real Atelier (a file that keeps the Storage under both `ignoreConflict`
+  // values, a class that is new, the import of the tool's own export, a promotion whose source keeps the Storage): writes only the
+  // disposable ExecuteMCPv2.Temp.QaStory4211NdLoad, ...NdNew, ...NdXml and ...NdProm documents (persistent, no data rows), and removes them.
+  "src/__tests__/story-42-11-qa-live-gate.test.ts",
 ];
 
 // `--no-file-parallelism`: these files all drive ONE live IRIS instance and share its
 // Atelier async work queue and the QAFixtures classes. Run in parallel (vitest's default),
 // two files' test runs overlap on that shared state and a gate fails on an interleaving
 // rather than on a defect (DW-511). Sequential file execution makes each file see only its own runs.
-const vitestArgs = ["exec", "vitest", "run", "--no-file-parallelism", ...gateTestFiles];
+const vitestArgs = ["exec", "vitest", "run", "--no-file-parallelism", ...gateTestFiles, ...process.argv.slice(2)];
 
 const env = { ...process.env, IRIS_REQUIRE_LIVE: "1" };
 
@@ -136,7 +150,7 @@ if (result.error) {
 if (result.status !== 0) {
   console.error(
     "[prepublish-gate] FAILED CLOSED: a live-IRIS gate did not pass with IRIS_REQUIRE_LIVE=1. " +
-      "Publishing must not proceed. Point IRIS_HOST/IRIS_PORT/IRIS_USERNAME/IRIS_PASSWORD at a " +
+      "Publishing must not proceed. Point IRIS_HOST/IRIS_PORT/IRIS_USERNAME/IRIS_PASSWORD/IRIS_NAMESPACE at a " +
       "reachable IRIS instance with src/ExecuteMCPv2/Tests/ loaded, then retry.",
   );
 }

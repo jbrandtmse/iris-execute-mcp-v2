@@ -247,7 +247,7 @@ describe("QA 33.5: the lead's original reproductions are dead (Dev Notes P1/P2, 
     };
     const entry = after.mcpServers["iris-dev-mcp"] as Record<string, unknown>;
     expect(entry.command).toBe("npx"); // manager-owned overwritten
-    expect(entry.args).toEqual(["-y", "@iris-mcp/dev"]);
+    expect(entry.args).toEqual(["-y", "@iris-mcp/dev@1"]);
     expect(entry.disabled).toBe(true); // enablement NEVER changes on apply
     expect(entry.autoApprove).toEqual(["iris_server_info"]);
     expect(entry.timeout).toBe(45);

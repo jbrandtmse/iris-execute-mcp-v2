@@ -4,13 +4,17 @@
  * These tests deliberately use bad credentials and unreachable hosts to verify
  * that the client produces the correct error types with actionable messages.
  *
+ * The run is armed by `IRIS_REQUIRE_LIVE` and the five `IRIS_*` target variables; unarmed,
+ * every test here skips without a request.
  * The "invalid credentials" test is skipped when IRIS is unavailable because
  * we need a running server to distinguish auth failures from connection failures.
- * The connection-error tests run unconditionally since they target unreachable hosts.
+ * The connection-error tests need no running IRIS: armed, they run whether or not it answers,
+ * since they target unreachable hosts.
  */
 
 import { describe, it, expect } from "vitest";
 import { IrisApiError, IrisConnectionError } from "../errors.js";
+import { isLiveArmed } from "../test-helpers/live-target.js";
 import { createIntegrationClient } from "./integration-helpers.js";
 
 // ── Invalid credentials (requires running IRIS) ────────────────────
@@ -34,9 +38,9 @@ describe.skipIf(!globalThis.__IRIS_AVAILABLE__)(
   },
 );
 
-// ── Connection errors (no IRIS required) ───────────────────────────
+// ── Connection errors (no IRIS required, armed runs only) ──────────
 
-describe("Error Scenarios — Connection Errors", () => {
+describe.skipIf(!isLiveArmed())("Error Scenarios \u2014 Connection Errors", () => {
   it("throws IrisConnectionError for invalid host within 2 seconds", async () => {
     // 192.0.2.1 is a documentation-only IP (RFC 5737) — guaranteed non-routable.
     const badClient = createIntegrationClient(

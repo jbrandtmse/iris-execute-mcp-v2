@@ -381,3 +381,344 @@ describe("iris_audit_manage", () => {
     expect(auditManageTool.description).toContain("iris_audit_events");
   });
 });
+
+// ── Story 43.3: confirmation (the purge gate) ───────────────────
+
+type ConfirmFn = NonNullable<ToolContext["confirm"]>;
+type ConfirmRequest = Parameters<ConfirmFn>[0];
+type ConfirmOutcome = Awaited<ReturnType<ConfirmFn>>;
+
+const AUDIT_PATH = "/api/executemcp/v2/security/audit";
+const END_ONLY = { action: "purge", confirm: true, end: "2026-01-01 00:00:00" };
+
+/** The confirmation request the purge gate must make for `scope`. */
+function purgeAsk(scope: string): ConfirmRequest {
+  return {
+    operation: "permanently delete audit-log records",
+    target: "the IRIS audit log",
+    scope,
+  };
+}
+
+describe("Story 43.3: confirmation", () => {
+  let mockHttp: ReturnType<typeof createMockHttp>;
+  let ctx: ToolContext;
+  /** Every `confirm` and every POST, in the order they happened. */
+  let log: string[];
+  let requests: ConfirmRequest[];
+
+  /** Put a `confirm` on `ctx` that records its request and answers `outcome`. */
+  function answerWith(outcome: ConfirmOutcome): void {
+    ctx.confirm = async (request: ConfirmRequest) => {
+      log.push("confirm");
+      requests.push(request);
+      return outcome;
+    };
+  }
+
+  /** A fresh context with no `confirm` and its own HTTP mock, for a "today's behavior" reference run. */
+  function bareContext(): {
+    http: ReturnType<typeof createMockHttp>;
+    ctx: ToolContext;
+  } {
+    const http = createMockHttp();
+    http.post.mockResolvedValue(
+      envelope({ action: "purge", deleted: 3, success: true }),
+    );
+    return { http, ctx: createMockCtx(http) };
+  }
+
+  /** A refusal-shaped result, the shape `ctx.confirm` hands back on a decline. */
+  function declinedResult() {
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text:
+            "The person declined the confirmation for: permanently delete " +
+            "audit-log records. Nothing was changed. Do not repeat this call " +
+            "unless the person asks for it again.",
+        },
+      ],
+      structuredContent: {
+        code: "CONFIRMATION_DECLINED",
+        action: "purge",
+        response: "decline",
+      },
+      isError: true as const,
+    };
+  }
+
+  beforeEach(() => {
+    log = [];
+    requests = [];
+    mockHttp = createMockHttp();
+    mockHttp.post.mockImplementation(async () => {
+      log.push("post");
+      return envelope({ action: "purge", deleted: 3, success: true });
+    });
+    ctx = createMockCtx(mockHttp);
+  });
+
+  // ── purge asks, then writes ───────────────────────────────────
+
+  it("purge: asks exactly once with the fixed operation/target and a one-filter scope, then POSTs", async () => {
+    answerWith({ proceed: true });
+
+    await auditManageTool.handler({ ...END_ONLY }, ctx);
+
+    expect(requests).toEqual([
+      {
+        operation: "permanently delete audit-log records",
+        target: "the IRIS audit log",
+        scope: "records matching end=2026-01-01 00:00:00",
+      },
+    ]);
+    expect(log).toEqual(["confirm", "post"]);
+    expect(mockHttp.post).toHaveBeenCalledTimes(1);
+  });
+
+  it("purge: scope lists all six filters in the order begin, end, user, event, source, type", async () => {
+    answerWith({ proceed: true });
+
+    // The argument keys are deliberately NOT in scope order.
+    await auditManageTool.handler(
+      {
+        action: "purge",
+        confirm: true,
+        type: "%Login",
+        source: "%System",
+        event: "Login",
+        user: "alice",
+        end: "2026-06-30 23:59:59",
+        begin: "2026-01-01 00:00:00",
+      },
+      ctx,
+    );
+
+    expect(requests).toEqual([
+      purgeAsk(
+        "records matching begin=2026-01-01 00:00:00, " +
+          "end=2026-06-30 23:59:59, user=alice, event=Login, " +
+          "source=%System, type=%Login",
+      ),
+    ]);
+    expect(log).toEqual(["confirm", "post"]);
+  });
+
+  it("purge: scope leaves out empty-string filters", async () => {
+    answerWith({ proceed: true });
+
+    await auditManageTool.handler(
+      {
+        action: "purge",
+        confirm: true,
+        begin: "",
+        end: "2026-01-01 00:00:00",
+        user: "",
+        event: "Login",
+        source: "",
+        type: "",
+      },
+      ctx,
+    );
+
+    expect(requests).toEqual([
+      purgeAsk("records matching end=2026-01-01 00:00:00, event=Login"),
+    ]);
+  });
+
+  it("purge: a supplied '*' wildcard is shown in the scope as user=*", async () => {
+    answerWith({ proceed: true });
+
+    await auditManageTool.handler(
+      {
+        action: "purge",
+        confirm: true,
+        end: "2026-01-01 00:00:00",
+        user: "*",
+      },
+      ctx,
+    );
+
+    expect(requests).toEqual([
+      purgeAsk("records matching end=2026-01-01 00:00:00, user=*"),
+    ]);
+    expect(log).toEqual(["confirm", "post"]);
+  });
+
+  // ── purge refuses before it asks ──────────────────────────────
+
+  it("purge: confirm missing refuses as today and never asks", async () => {
+    answerWith({ proceed: true });
+    const bare = bareContext();
+    const args = { action: "purge", end: "2026-01-01 00:00:00" };
+
+    const result = await auditManageTool.handler({ ...args }, ctx);
+    const today = await auditManageTool.handler({ ...args }, bare.ctx);
+
+    expect(result).toEqual({
+      content: [
+        {
+          type: "text",
+          text: "Error: 'purge' is destructive and requires confirm:true to proceed.",
+        },
+      ],
+      isError: true,
+    });
+    expect(result).toEqual(today);
+    expect(requests).toEqual([]);
+    expect(log).toEqual([]);
+    expect(mockHttp.post).not.toHaveBeenCalled();
+  });
+
+  it("purge: confirm:false refuses as today and never asks", async () => {
+    answerWith({ proceed: true });
+    const bare = bareContext();
+    const args = { action: "purge", confirm: false, end: "2026-01-01 00:00:00" };
+
+    const result = await auditManageTool.handler({ ...args }, ctx);
+    const today = await auditManageTool.handler({ ...args }, bare.ctx);
+
+    expect(result).toEqual({
+      content: [
+        {
+          type: "text",
+          text: "Error: 'purge' is destructive and requires confirm:true to proceed.",
+        },
+      ],
+      isError: true,
+    });
+    expect(result).toEqual(today);
+    expect(requests).toEqual([]);
+    expect(log).toEqual([]);
+    expect(mockHttp.post).not.toHaveBeenCalled();
+  });
+
+  it("purge: no bound at all (only a '*' wildcard) refuses as today and never asks", async () => {
+    answerWith({ proceed: true });
+    const bare = bareContext();
+    const args = { action: "purge", confirm: true, source: "*" };
+
+    const result = await auditManageTool.handler({ ...args }, ctx);
+    const today = await auditManageTool.handler({ ...args }, bare.ctx);
+
+    expect(result).toEqual({
+      content: [
+        {
+          type: "text",
+          text:
+            "Error: 'purge' requires a bounded scope " +
+            String.fromCharCode(0x2014) +
+            " supply at least " +
+            "one of begin, end, or a non-wildcard user, event, source, or type.",
+        },
+      ],
+      isError: true,
+    });
+    expect(result).toEqual(today);
+    expect(requests).toEqual([]);
+    expect(log).toEqual([]);
+    expect(mockHttp.post).not.toHaveBeenCalled();
+    expect(bare.http.post).not.toHaveBeenCalled();
+  });
+
+  // ── the answer decides ────────────────────────────────────────
+
+  it("purge: a declined outcome returns its result unchanged and writes nothing", async () => {
+    const declined = declinedResult();
+    answerWith({ proceed: false, result: declined });
+
+    const result = await auditManageTool.handler({ ...END_ONLY }, ctx);
+
+    expect(result).toBe(declined);
+    expect(log).toEqual(["confirm"]);
+    expect(mockHttp.post).not.toHaveBeenCalled();
+  });
+
+  it("purge: a proceed outcome POSTs the same path and body as a context with no confirm", async () => {
+    const bare = bareContext();
+    const args = {
+      action: "purge",
+      confirm: true,
+      end: "2026-01-01 00:00:00",
+      user: "alice",
+    };
+    const today = await auditManageTool.handler({ ...args }, bare.ctx);
+
+    answerWith({ proceed: true });
+    const result = await auditManageTool.handler({ ...args }, ctx);
+
+    expect(bare.http.post).toHaveBeenCalledTimes(1);
+    expect(mockHttp.post).toHaveBeenCalledTimes(1);
+    expect(mockHttp.post.mock.calls[0]).toEqual(bare.http.post.mock.calls[0]);
+    expect(mockHttp.post.mock.calls[0]).toEqual([
+      AUDIT_PATH,
+      {
+        action: "purge",
+        confirm: true,
+        end: "2026-01-01 00:00:00",
+        user: "alice",
+      },
+    ]);
+    expect(result).toEqual(today);
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toEqual({
+      action: "purge",
+      deleted: 3,
+      success: true,
+    });
+  });
+
+  it("purge: with no ctx.confirm on the context it writes as today", async () => {
+    expect(ctx.confirm).toBeUndefined();
+
+    const result = await auditManageTool.handler({ ...END_ONLY }, ctx);
+
+    expect(mockHttp.post).toHaveBeenCalledTimes(1);
+    expect(mockHttp.post).toHaveBeenCalledWith(AUDIT_PATH, {
+      action: "purge",
+      confirm: true,
+      end: "2026-01-01 00:00:00",
+    });
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toEqual({
+      action: "purge",
+      deleted: 3,
+      success: true,
+    });
+    expect(log).toEqual(["post"]);
+  });
+
+  // ── no other action asks ──────────────────────────────────────
+
+  it.each([
+    ["status", { action: "status" }],
+    ["view", { action: "view" }],
+    ["enable", { action: "enable" }],
+    ["disable", { action: "disable" }],
+    [
+      "configureEvent",
+      {
+        action: "configureEvent",
+        source: "%System",
+        type: "%Login",
+        name: "Login",
+        enabled: false,
+      },
+    ],
+    ["export", { action: "export", fileName: "dump.xml", user: "bob" }],
+  ])("%s: never calls confirm", async (_name, args) => {
+    // A decline would end the call, so a stray ask is visible in the result too.
+    answerWith({ proceed: false, result: declinedResult() });
+    mockHttp.get.mockResolvedValue(
+      envelope({ auditEnabled: true, events: [], eventCount: 0, count: 0 }),
+    );
+
+    const result = await auditManageTool.handler({ ...args }, ctx);
+
+    expect(requests).toEqual([]);
+    expect(log).not.toContain("confirm");
+    expect(result.isError).toBeUndefined();
+  });
+});

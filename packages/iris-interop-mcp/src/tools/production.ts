@@ -91,6 +91,11 @@ export const productionManageTool: ToolDefinition = {
 
 // ── iris_production_control ────────────────────────────────────
 
+/** What a `clean` with `killAppData` wipes, as the confirmation dialog states it. */
+const KILL_APP_DATA_SCOPE =
+  "all Ens.AppData business state: HL7 sequence numbers, file and FTP done-file tables, " +
+  "batch and control-number state; already-processed data can be ingested again";
+
 export const productionControlTool: ToolDefinition = {
   name: "iris_production_control",
   title: "Control Production",
@@ -110,7 +115,14 @@ export const productionControlTool: ToolDefinition = {
     "'recover', and 'clean'.\n\n" +
     "The 'clean' action is a write but is ENABLED by default under tool governance " +
     "(like the grandfathered lifecycle actions); an operator can disable it via an " +
-    "explicit IRIS_GOVERNANCE override.",
+    "explicit IRIS_GOVERNANCE override.\n\n" +
+    "HUMAN CONFIRMATION: when the MCP client supports form elicitation, 'clean' " +
+    "with killAppData:true and confirm:true also asks the person in a " +
+    "confirmation dialog right before the production is cleaned; only an accept " +
+    "with Confirm ticked proceeds, and a decline or a dismissal returns " +
+    "CONFIRMATION_DECLINED with nothing changed (do not repeat the call unless " +
+    "the person asks). A client without elicitation is not asked, and the call " +
+    "works as described above.",
   inputSchema: z.object({
     action: z
       .enum(["start", "stop", "restart", "update", "recover", "clean"])
@@ -205,6 +217,16 @@ export const productionControlTool: ToolDefinition = {
     const path = `${BASE_URL}/interop/production/control`;
 
     try {
+      // A `clean` that wipes the persistent state, with the `confirm` that IRIS requires for it, asks the
+      // person (AD-34) right before the request.
+      if (action === "clean" && killAppData === true && confirm === true) {
+        const outcome = await ctx.confirm?.({
+          operation: "clean the production and wipe its persistent business state",
+          target: `namespace ${ns}` + (name ? `, production ${name}` : ""),
+          scope: KILL_APP_DATA_SCOPE,
+        });
+        if (outcome !== undefined && !outcome.proceed) return outcome.result;
+      }
       const response = await ctx.http.post(path, body);
       const result = response.result;
       return {

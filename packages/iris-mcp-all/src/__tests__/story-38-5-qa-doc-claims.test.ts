@@ -130,7 +130,9 @@ const devReadme = read("packages/iris-dev-mcp/README.md");
 const toolSupport = read("tool_support.md");
 const changelogSection =
   /^## \[Pre-release[^\]]*\] . Story 38\.5: SQL write safety$[\s\S]*?(?=\n## \[)/m.exec(read("CHANGELOG.md"))?.[0] ?? "";
-const changeset = read(".changeset/story-38-5-sql-write-safety.md");
+// `changeset version` consumes (deletes) the file, so the bump map is read and checked while it exists.
+const changesetPresent = existsSync(path.join(REPO_ROOT, ".changeset/story-38-5-sql-write-safety.md"));
+const changeset = changesetPresent ? read(".changeset/story-38-5-sql-write-safety.md") : "";
 const squash = (text: string): string => text.replace(/\s+/g, " ");
 
 /** The cells of the markdown table row of `table` that starts with `startsWith`. */
@@ -450,7 +452,7 @@ describe("Story 38.5: the route, the default state and the release bumps", () =>
     expect(query.description).toContain("this tool is enabled by default");
   });
 
-  it("the changeset bumps exactly @iris-mcp/shared and @iris-mcp/dev, both minor (AD-29)", () => {
+  it.skipIf(!changesetPresent)("the changeset bumps exactly @iris-mcp/shared and @iris-mcp/dev, both minor (AD-29)", () => {
     const frontMatter = /^---\n([\s\S]*?)\n---/.exec(changeset)?.[1] ?? "";
     const bumps = Object.fromEntries(
       frontMatter

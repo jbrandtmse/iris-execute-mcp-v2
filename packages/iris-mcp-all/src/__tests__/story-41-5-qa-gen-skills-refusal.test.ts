@@ -23,7 +23,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { REPO_ROOT } from "./pack-fixture";
+import { removeLink, REPO_ROOT } from "./pack-fixture";
 import { makeScratchRepo, removeScratchRepo, runScript, sha256, treeLines } from "./story-41-1-qa-fixture";
 import { stubPromptSource, VALID_STUB_SKILL } from "./story-41-5-qa-fixture";
 
@@ -102,7 +102,7 @@ afterEach(() => {
 function stubOps(root: string, stubs: Stub[]): void {
   const dir = join(root, OPS_PACKAGE);
   if (lstatSync(dir).isSymbolicLink()) {
-    rmSync(dir, { force: true });
+    removeLink(dir);
     mkdirSync(join(dir, "dist", "prompts"), { recursive: true });
   }
   const sources = stubs.map(([name, skill]) => stubPrompt(name, skill)).join(",");

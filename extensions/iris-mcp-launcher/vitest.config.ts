@@ -15,5 +15,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/__tests__/**/*.test.ts"],
+    // The arming guard runs a child vitest and reads its output as plain text. Under CI=true (GitHub Actions sets it) vitest
+    // colors that output unless NO_COLOR is set; the tests, and the children they start from this environment, inherit it.
+    env: { NO_COLOR: "1" },
   },
 });

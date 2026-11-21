@@ -22,8 +22,8 @@
  *  2. Byte identity: replay every captured request against the current classes; each raw response text
  *     equals its capture, and the capture predates the `BOOTSTRAP_VERSION` the gate runs on.
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (defaults: localhost:52773,
- * `_SYSTEM`, HSCUSTOM). Writes only the three `EXECMCPTMP393*` namespaces and databases, and the HSCUSTOM
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none defaulted, and
+ * only when `IRIS_REQUIRE_LIVE` arms the run (without it every row skips before any request). Writes only the three `EXECMCPTMP393*` namespaces and databases, and the HSCUSTOM
  * class `ExecuteMCPv2.Temp.Story391Fixture`. A missing or stale dist, an unresolvable SDK or an
  * unreachable IRIS skips each row with the reason, or fails with "may not be skipped" when
  * `IRIS_REQUIRE_LIVE` is armed (listed in `scripts/prepublish-gate.mjs` `gateTestFiles`).
@@ -44,6 +44,7 @@ import {
   headerIds,
   irisTargetFromEnv,
   isIrisReachable,
+  liveArmingSkipReason,
   openWireSession,
   pollAuditEntries,
   postEnvelope,
@@ -184,13 +185,13 @@ const sendSearch = (body: Record<string, unknown>): Promise<{ status: number; te
 // -- Setup and teardown ------------------------------------------------
 
 beforeAll(async () => {
-  skipReason = staleDistReason(REPO_ROOT, "shared");
+  skipReason = liveArmingSkipReason() ?? staleDistReason(REPO_ROOT, "shared");
   for (const pkg of ["iris-dev-mcp", "iris-admin-mcp", "iris-interop-mcp"]) skipReason ??= staleDistReason(REPO_ROOT, pkg);
   if (!skipReason) {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
     if (!sdkEsmDir) {
       skipReason =
-        "Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm - run pnpm install from the repo root.";
+        "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm - run pnpm install from the repo root.";
     } else if (!(await isIrisReachable(TARGET.host, TARGET.port))) {
       skipReason = `IRIS is not reachable at http://${TARGET.host}:${TARGET.port}/api/atelier/ (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
     }
@@ -1095,17 +1096,22 @@ describe.skipIf(CAPTURE)("Story 39.3: the audit trail redacts the filters and re
       );
       const result = await bodySearch(session, search);
       const invalid = await bodySearch(session, { filters: [filter("Code", `${MARKER}`, MARKER)] });
-      // The MCP SDK rejects the invalid op before the call reaches the audited chokepoint, so only the first call has an entry.
+      // The schema-invalid call is refused inside the audited chokepoint (DW-579), so both calls have an entry: the first call's, then
+      // the invalid call's, which lists the raw key names and carries neither `params` nor a `dataPolicy` summary.
       expect(invalid.isError, "a Zod-invalid op").toBe(true);
       expect(firstText(invalid), "the invalid call names the path").toContain("op");
 
-      const entries = await pollAuditEntries(file, { tool: "iris_message_search", count: 1, intervalMs: 50, timeoutMs: 10000, excerpt: 3000 });
-      const [entry] = entries as [Record<string, unknown>];
+      const entries = await pollAuditEntries(file, { tool: "iris_message_search", count: 2, intervalMs: 50, timeoutMs: 10000, excerpt: 3000 });
+      const [entry, invalidEntry] = entries as [Record<string, unknown>, Record<string, unknown>];
       expect(entry, row.policy).toMatchObject({
         action: "body",
         outcome: row.outcome,
         dataPolicy: { policy: row.policy, redacted: 0, blocked: 0 },
       });
+      expect(invalidEntry, `${row.policy}: the schema-invalid call is audited`).toMatchObject({ action: "body", outcome: "error" });
+      expect(invalidEntry["paramKeys"], `${row.policy}: the invalid call's raw key names`).toContain("filters");
+      expect(invalidEntry, `${row.policy}: the invalid call records no params`).not.toHaveProperty("params");
+      expect(invalidEntry, `${row.policy}: the invalid call records no data policy`).not.toHaveProperty("dataPolicy");
       const params = entry["params"] as Record<string, unknown>;
       if (row.redacted) {
         expect(params["filters"], `${row.policy}: the filters`).toBe("[REDACTED]");

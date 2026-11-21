@@ -14,7 +14,7 @@
  * the two header lines replaced (Rule #36).
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   IrisApiError,
   REFUSAL_CODES,
@@ -1640,4 +1640,480 @@ describe("iris_doc_edit (Story 38.4)", () => {
       });
     });
   });
+});
+
+// Story 43.3: regenerateStorage asks the person once, after every check and before the save.
+
+type EditConfirm = NonNullable<ToolContext["confirm"]>;
+type EditConfirmRequest = Parameters<EditConfirm>[0];
+type EditConfirmOutcome = Awaited<ReturnType<EditConfirm>>;
+
+/** The result a declining person ends the call with. The tool must return this very object. */
+const EDIT_DECLINED_RESULT = {
+  content: [{ type: "text" as const, text: "The person declined the confirmation." }],
+  structuredContent: { code: "CONFIRMATION_DECLINED" },
+  isError: true,
+};
+
+/** A `ctx.confirm` that answers `proceed: true`. */
+function proceedingConfirm() {
+  return vi.fn(async (_request: EditConfirmRequest): Promise<EditConfirmOutcome> => ({ proceed: true }));
+}
+
+/** A `ctx.confirm` that answers with a decline. */
+function decliningConfirm() {
+  return vi.fn(
+    async (_request: EditConfirmRequest): Promise<EditConfirmOutcome> => ({
+      proceed: false,
+      result: EDIT_DECLINED_RESULT,
+    }),
+  );
+}
+
+/** Where a mock's first call falls among the calls of all mocks: a call made later has a larger number. */
+function firstCallOrder(fn: { mock: { invocationCallOrder: number[] } }): number {
+  const order = fn.mock.invocationCallOrder[0];
+  expect(order).toBeDefined();
+  return order as number;
+}
+
+describe("Story 43.3: confirmation (regenerateStorage)", () => {
+  const STORE_NAME = "Test.Store.cls";
+  const STORE_PATH = "/api/atelier/v7/USER/doc/Test.Store.cls";
+  /** A persistent class with two Storage definitions, Default (lines 5-8) and Second (lines 10-13). 16 lines. */
+  const TWO_STORAGE_LINES = [
+    "Class Test.Store Extends %Persistent",
+    "{",
+    "Property Name As %String;",
+    "",
+    "Storage Default",
+    "{",
+    "<Type>%Storage.Persistent</Type>",
+    "}",
+    "",
+    "Storage Second",
+    "{",
+    "<Type>%Storage.Persistent</Type>",
+    "}",
+    "",
+    "}",
+    "",
+  ];
+  const DELETE_BOTH = {
+    op: "delete",
+    startLine: 4,
+    endLine: 13,
+    expected: TWO_STORAGE_LINES.slice(3, 13).join("\n"),
+  };
+  const WITHOUT_BOTH = [...TWO_STORAGE_LINES.slice(0, 3), ...TWO_STORAGE_LINES.slice(13)];
+  const DELETE_SECOND = {
+    op: "delete",
+    startLine: 9,
+    endLine: 13,
+    expected: TWO_STORAGE_LINES.slice(8, 13).join("\n"),
+  };
+  const WITHOUT_SECOND = [...TWO_STORAGE_LINES.slice(0, 8), ...TWO_STORAGE_LINES.slice(13)];
+  const RETYPE_PROPERTY = {
+    op: "replace",
+    startLine: 3,
+    endLine: 3,
+    text: "Property Name As %Integer;",
+    expected: "Property Name As %String;",
+  };
+  const RETYPED = [...TWO_STORAGE_LINES.slice(0, 2), "Property Name As %Integer;", ...TWO_STORAGE_LINES.slice(3)];
+  /** A routine whose text looks like a Storage definition. 5 lines. */
+  const ROUTINE_WITH_STORAGE_TEXT = ["ROUTINE Test.Edit", "Storage Default", "{", "}", "    Quit"];
+  const DELETE_STORAGE_TEXT = { op: "delete", startLine: 2, endLine: 4, expected: "Storage Default\n{\n}" };
+  const WITHOUT_STORAGE_TEXT = ["ROUTINE Test.Edit", "    Quit"];
+
+  const OPERATION = "save a document without the Storage guard";
+
+  let mockHttp: ReturnType<typeof createMockHttp>;
+  let ctx: ToolContext;
+
+  beforeEach(() => {
+    mockHttp = createMockHttp();
+    ctx = createMockCtx(mockHttp);
+  });
+
+  /** Queue the read, the save and (when given) the re-read of a document. */
+  function arrange(options: { read: string[]; reread?: string[]; name?: string; cat?: string }): void {
+    const name = options.name ?? CLASS_NAME;
+    const cat = options.cat ?? "CLS";
+    mockHttp.get.mockResolvedValueOnce(envelope(docResult(name, options.read, TS_READ, cat)));
+    if (options.reread !== undefined) {
+      mockHttp.get.mockResolvedValueOnce(envelope(docResult(name, options.reread, TS_SAVED, cat)));
+    }
+    mockHttp.put.mockResolvedValue(envelope(saveResult(name, TS_SAVED, cat)));
+  }
+
+  function run(
+    edits: unknown[],
+    extra: { action?: string; name?: string; namespace?: string } = {},
+  ): Promise<ToolResult> {
+    return docEditTool.handler({ action: "regenerateStorage", name: CLASS_NAME, edits, ...extra }, ctx);
+  }
+
+  /** Every call made on the client, by method. */
+  function recordedCalls() {
+    return {
+      get: [...mockHttp.get.mock.calls],
+      put: [...mockHttp.put.mock.calls],
+      post: [...mockHttp.post.mock.calls],
+      delete: [...mockHttp.delete.mock.calls],
+      head: [...mockHttp.head.mock.calls],
+    };
+  }
+
+  /** Nothing was written: no PUT, POST or DELETE. */
+  function expectNoWrites(): void {
+    expect(mockHttp.put.mock.calls).toEqual([]);
+    expect(mockHttp.post.mock.calls).toEqual([]);
+    expect(mockHttp.delete.mock.calls).toEqual([]);
+  }
+
+  // -- asked once, with the strings of the spec, between the read and the save --
+
+  it("asks once, after the read and before the save, naming the Storage definitions the edits drop", async () => {
+    arrange({ read: TWO_STORAGE_LINES, reread: WITHOUT_BOTH, name: STORE_NAME });
+    const confirm = proceedingConfirm();
+    ctx.confirm = confirm;
+
+    const result = await run([DELETE_BOTH], { name: STORE_NAME });
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm.mock.calls[0]?.[0]).toEqual({
+      operation: OPERATION,
+      target: "document Test.Store.cls, namespace USER",
+      scope: "1 edit(s); drops Storage definition(s): Default, Second",
+    });
+    expect(result.isError).toBeUndefined();
+    expect(sc(result).changed).toBe(true);
+    expect(mockHttp.get.mock.calls).toEqual([[STORE_PATH], [STORE_PATH]]);
+    expect(mockHttp.put.mock.calls).toHaveLength(1);
+    const asked = firstCallOrder(confirm);
+    expect(firstCallOrder(mockHttp.get)).toBeLessThan(asked);
+    expect(asked).toBeLessThan(firstCallOrder(mockHttp.put));
+  });
+
+  it("names the namespace the caller gives", async () => {
+    arrange({ read: TWO_STORAGE_LINES, name: STORE_NAME });
+    const confirm = decliningConfirm();
+    ctx.confirm = confirm;
+
+    await run([DELETE_SECOND], { name: STORE_NAME, namespace: "OTHER" });
+
+    expect(confirm.mock.calls[0]?.[0]?.target).toBe("document Test.Store.cls, namespace OTHER");
+    expect(mockHttp.get.mock.calls).toEqual([["/api/atelier/v7/OTHER/doc/Test.Store.cls"]]);
+  });
+
+  const scopeCases: Array<{
+    title: string;
+    name: string;
+    cat: string;
+    read: string[];
+    edits: unknown[];
+    scope: string;
+  }> = [
+    {
+      title: "a class whose edit drops one of two Storage definitions",
+      name: STORE_NAME,
+      cat: "CLS",
+      read: TWO_STORAGE_LINES,
+      edits: [DELETE_SECOND],
+      scope: "1 edit(s); drops Storage definition(s): Second",
+    },
+    {
+      title: "a class where two edits together drop one Storage definition",
+      name: STORE_NAME,
+      cat: "CLS",
+      read: TWO_STORAGE_LINES,
+      edits: [RETYPE_PROPERTY, DELETE_SECOND],
+      scope: "2 edit(s); drops Storage definition(s): Second",
+    },
+    {
+      title: "a class whose edit keeps every Storage definition",
+      name: STORE_NAME,
+      cat: "CLS",
+      read: TWO_STORAGE_LINES,
+      edits: [RETYPE_PROPERTY],
+      scope: "1 edit(s); drops no Storage definition",
+    },
+    {
+      title: "a class that has no Storage definition",
+      name: CLASS_NAME,
+      cat: "CLS",
+      read: CLASS_LINES,
+      edits: S2_EDITS,
+      scope: "3 edit(s); drops no Storage definition",
+    },
+    {
+      title: "a routine whose deleted text looks like a Storage definition",
+      name: RTN_NAME,
+      cat: "RTN",
+      read: ROUTINE_WITH_STORAGE_TEXT,
+      edits: [DELETE_STORAGE_TEXT],
+      scope: "1 edit(s); drops no Storage definition",
+    },
+    {
+      title: "an include file whose deleted text looks like a Storage definition",
+      name: "Test.Edit.inc",
+      cat: "RTN",
+      read: ROUTINE_WITH_STORAGE_TEXT,
+      edits: [DELETE_STORAGE_TEXT],
+      scope: "1 edit(s); drops no Storage definition",
+    },
+  ];
+  for (const scopeCase of scopeCases) {
+    it(`scope for ${scopeCase.title}`, async () => {
+      arrange({ read: scopeCase.read, name: scopeCase.name, cat: scopeCase.cat });
+      const confirm = decliningConfirm();
+      ctx.confirm = confirm;
+
+      await run(scopeCase.edits, { name: scopeCase.name });
+
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(confirm.mock.calls[0]?.[0]).toEqual({
+        operation: OPERATION,
+        target: `document ${scopeCase.name}, namespace USER`,
+        scope: scopeCase.scope,
+      });
+    });
+  }
+
+  // -- never asked when a check of the tool refuses first, or for apply --
+
+  it("is not asked for apply: an apply that saves, and an apply that the Storage guard refuses", async () => {
+    arrange({ read: TWO_STORAGE_LINES, reread: RETYPED, name: STORE_NAME });
+    const confirm = proceedingConfirm();
+    ctx.confirm = confirm;
+
+    const saved = await run([RETYPE_PROPERTY], { action: "apply", name: STORE_NAME });
+
+    expect(saved.isError).toBeUndefined();
+    expect(mockHttp.put.mock.calls).toHaveLength(1);
+    expect(confirm).not.toHaveBeenCalled();
+
+    mockHttp = createMockHttp();
+    ctx = createMockCtx(mockHttp);
+    ctx.confirm = confirm;
+    arrange({ read: TWO_STORAGE_LINES, name: STORE_NAME });
+
+    const refused = await run([DELETE_BOTH], { action: "apply", name: STORE_NAME });
+
+    expect(sc(refused).code).toBe("STORAGE_DROPPED");
+    expect(sc(refused).droppedStorage).toEqual(["Default", "Second"]);
+    expectNoWrites();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  interface NotAskedCase {
+    title: string;
+    arrange: () => void;
+    edits: unknown[];
+    extra?: { name?: string };
+    check: (result: ToolResult) => void;
+    getPaths: string[];
+  }
+  const notAskedCases: NotAskedCase[] = [
+    {
+      title: "an edit that addresses a line past the end",
+      arrange: () => arrange({ read: CLASS_LINES }),
+      edits: [{ op: "replace", startLine: 12, endLine: 14, text: "x", expected: "y" }],
+      check: (result) =>
+        expect(result).toEqual({
+          content: [
+            {
+              type: "text",
+              text: "Edit 1 (replace) addresses line 14, but document 'Test.Edit.cls' has 13 lines. Read the lines again with iris_doc_get and address lines 1 to 13.",
+            },
+          ],
+          isError: true,
+        }),
+      getPaths: [CLASS_PATH],
+    },
+    {
+      title: "an expected text that no longer matches (STALE_CONTENT)",
+      arrange: () => arrange({ read: CLASS_LINES }),
+      edits: [{ op: "replace", startLine: 8, endLine: 9, text: "x", expected: "    Set tSC = $$$OK\n    Quit 1" }],
+      check: (result) => {
+        expect(result.isError).toBe(true);
+        expect(sc(result).code).toBe("STALE_CONTENT");
+        expect(result.content[0]?.text).toContain(
+          "Document 'Test.Edit.cls' was not changed in namespace 'USER': the expected text of edit 1 does not match the document now. Nothing was stored.",
+        );
+      },
+      getPaths: [CLASS_PATH],
+    },
+    {
+      title: "edits that leave the document as it is",
+      arrange: () => arrange({ read: CLASS_LINES }),
+      edits: [{ op: "replace", startLine: 8, endLine: 8, text: "    Set tSC = $$$OK\n", expected: "    Set tSC = $$$OK" }],
+      check: (result) =>
+        expect(result).toEqual({
+          content: [
+            {
+              type: "text",
+              text: `Document 'Test.Edit.cls' in namespace 'USER' already has the edited text, so nothing was saved; it has 13 lines (ts ${TS_READ}).`,
+            },
+          ],
+          structuredContent: {
+            name: CLASS_NAME,
+            namespace: "USER",
+            ts: TS_READ,
+            totalLines: 13,
+            changed: false,
+            unifiedDiff: "",
+            excerpts: [{ edit: 1, op: "replace", startLine: 5, endLine: 11, lines: CLASS_LINES.slice(4, 11) }],
+          },
+        }),
+      getPaths: [CLASS_PATH],
+    },
+    {
+      title: "malformed edits",
+      arrange: () => undefined,
+      edits: [{ op: "insert", text: "x", expected: "y" }],
+      check: (result) =>
+        expect(result).toEqual({
+          content: [
+            {
+              type: "text",
+              text: "Edit 1 (insert) is missing afterLine. An insert takes afterLine, text and expected.",
+            },
+          ],
+          isError: true,
+        }),
+      getPaths: [],
+    },
+    {
+      title: "a document that does not exist",
+      arrange: () => {
+        mockHttp.get.mockRejectedValueOnce(new IrisApiError(404, [], CLASS_PATH, "not found", null));
+      },
+      edits: [{ op: "delete", startLine: 1, endLine: 1, expected: "x" }],
+      check: (result) =>
+        expect(result).toEqual({
+          content: [
+            {
+              type: "text",
+              text: "Document 'Test.Edit.cls' not found in namespace 'USER'. iris_doc_edit changes an existing document; create it with iris_doc_put.",
+            },
+          ],
+          isError: true,
+        }),
+      getPaths: [CLASS_PATH],
+    },
+    {
+      title: "a document name with a path traversal",
+      arrange: () => undefined,
+      edits: [{ op: "delete", startLine: 1, endLine: 1, expected: "x" }],
+      extra: { name: "../Secret.cls" },
+      check: (result) => {
+        expect(result.isError).toBe(true);
+        expect(result.content[0]?.text).toContain("must not contain '..'");
+      },
+      getPaths: [],
+    },
+  ];
+  for (const notAsked of notAskedCases) {
+    it(`is not asked when the tool refuses first -- ${notAsked.title}: the refusal is unchanged and nothing is written`, async () => {
+      notAsked.arrange();
+      const confirm = proceedingConfirm();
+      ctx.confirm = confirm;
+
+      const result = await run(notAsked.edits, notAsked.extra);
+
+      notAsked.check(result);
+      expect(confirm).not.toHaveBeenCalled();
+      expect(mockHttp.get.mock.calls).toEqual(notAsked.getPaths.map((path) => [path]));
+      expectNoWrites();
+      expect(mockHttp.head.mock.calls).toEqual([]);
+    });
+  }
+
+  // -- a decline ends the call; a proceed and a missing confirm leave today's behavior --
+
+  it("returns a declined outcome unchanged, and never saves", async () => {
+    arrange({ read: TWO_STORAGE_LINES, reread: WITHOUT_BOTH, name: STORE_NAME });
+    const confirm = decliningConfirm();
+    ctx.confirm = confirm;
+
+    const result = await run([DELETE_BOTH], { name: STORE_NAME });
+
+    expect(result).toBe(EDIT_DECLINED_RESULT);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(recordedCalls()).toEqual({ get: [[STORE_PATH]], put: [], post: [], delete: [], head: [] });
+  });
+
+  const saveScenarios: Array<{
+    title: string;
+    name: string;
+    cat: string;
+    read: string[];
+    reread: string[];
+    edits: unknown[];
+  }> = [
+    {
+      title: "a class that drops both Storage definitions",
+      name: STORE_NAME,
+      cat: "CLS",
+      read: TWO_STORAGE_LINES,
+      reread: WITHOUT_BOTH,
+      edits: [DELETE_BOTH],
+    },
+    {
+      title: "a class that drops one Storage definition",
+      name: STORE_NAME,
+      cat: "CLS",
+      read: TWO_STORAGE_LINES,
+      reread: WITHOUT_SECOND,
+      edits: [DELETE_SECOND],
+    },
+    {
+      title: "a routine whose deleted text looks like a Storage definition",
+      name: RTN_NAME,
+      cat: "RTN",
+      read: ROUTINE_WITH_STORAGE_TEXT,
+      reread: WITHOUT_STORAGE_TEXT,
+      edits: [DELETE_STORAGE_TEXT],
+    },
+  ];
+  for (const scenario of saveScenarios) {
+    /** Run the scenario on fresh mocks, with `confirm` on the context when given. */
+    const saveOnce = async (confirm?: ReturnType<typeof proceedingConfirm>) => {
+      mockHttp = createMockHttp();
+      ctx = createMockCtx(mockHttp);
+      if (confirm !== undefined) ctx.confirm = confirm;
+      arrange({ read: scenario.read, reread: scenario.reread, name: scenario.name, cat: scenario.cat });
+      const result = await run(scenario.edits, { name: scenario.name });
+      return { result, calls: recordedCalls() };
+    };
+    const path = `/api/atelier/v7/USER/doc/${encodeURIComponent(scenario.name)}`;
+
+    it(`saves exactly as a context without confirm when the outcome is proceed -- ${scenario.title}`, async () => {
+      const withoutConfirm = await saveOnce();
+      const confirm = proceedingConfirm();
+      const withConfirm = await saveOnce(confirm);
+
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(withConfirm.result).toEqual(withoutConfirm.result);
+      expect(withConfirm.calls).toEqual(withoutConfirm.calls);
+      expect(withConfirm.result.isError).toBeUndefined();
+      expect(withConfirm.calls.put).toEqual([
+        [path, { enc: false, content: scenario.reread }, { headers: { "If-None-Match": TS_READ } }],
+      ]);
+    });
+
+    it(`saves as today when the context has no confirm -- ${scenario.title}`, async () => {
+      const { result, calls } = await saveOnce();
+
+      expect(ctx.confirm).toBeUndefined();
+      expect(result.isError).toBeUndefined();
+      expect(sc(result).changed).toBe(true);
+      expect(calls.get).toEqual([[path], [path]]);
+      expect(calls.put).toEqual([
+        [path, { enc: false, content: scenario.reread }, { headers: { "If-None-Match": TS_READ } }],
+      ]);
+    });
+  }
 });

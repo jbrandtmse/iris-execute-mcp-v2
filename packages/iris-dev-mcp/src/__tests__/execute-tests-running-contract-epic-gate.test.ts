@@ -38,6 +38,10 @@
  * `beforeAll` availability probe + a per-test `ctx.skip()`, exactly like the
  * `iris-mcp-all` process gates and `execute-classmethod-epic-gate.test.ts`.
  *
+ * Arming: the live legs run only with `IRIS_REQUIRE_LIVE=1` (or `true`), against the target named by
+ * `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (all required, none defaulted;
+ * `@iris-mcp/shared/test-helpers/live-target`). Unarmed, every leg skips before any request.
+ *
  * FIXTURE PLACEMENT (deliberate, QA decision — see the fixture class's own
  * banner): `ExecuteMCPv2.QAFixtures.LongRunningTest` lives OUTSIDE the
  * `ExecuteMCPv2.Tests` package specifically so a package-level run targeting
@@ -70,23 +74,15 @@ import {
   type RequestOptions,
   type ToolContext,
 } from "@iris-mcp/shared";
+import { liveConnectionEnv, liveGateTarget } from "@iris-mcp/shared/test-helpers/live-target";
 import { createExecuteTestsHandler } from "../tools/execute.js";
 
-const IRIS_HOST = process.env.IRIS_HOST ?? "localhost";
-const IRIS_PORT = process.env.IRIS_PORT ?? "52773";
-const IRIS_USERNAME = process.env.IRIS_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_PASSWORD ?? "SYS";
-const IRIS_NAMESPACE = process.env.IRIS_NAMESPACE ?? "HSCUSTOM";
+const LIVE = liveGateTarget();
+const IRIS_HOST = LIVE.target.host;
+const IRIS_PORT = LIVE.target.port;
 
 function getConfig() {
-  return loadConfig({
-    IRIS_HOST,
-    IRIS_PORT,
-    IRIS_USERNAME,
-    IRIS_PASSWORD,
-    IRIS_NAMESPACE,
-    IRIS_HTTPS: "false",
-  });
+  return loadConfig(liveConnectionEnv(LIVE.target));
 }
 
 /** Deliberately OUTSIDE `ExecuteMCPv2.Tests` — see this file's banner. */
@@ -173,24 +169,27 @@ async function queryTestInstance(
 }
 
 beforeAll(async () => {
-  try {
-    const config = getConfig();
-    client = new IrisHttpClient(config);
-    recordWorkResponses(client);
-    const available = await ping(client, 3000);
-    if (!available) {
-      skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
-    } else {
-      const version = await negotiateVersion(client);
-      ctx = buildToolContext("NS", config, client, version);
-      if (!(await fixtureIsDeployed(version, ctx.resolveNamespace()))) {
-        skipReason =
-          `The QA fixture is not deployed in ${ctx.resolveNamespace()} (${FIXTURE} not found via the ` +
-          `Atelier API). Load src/ExecuteMCPv2/QAFixtures/LongRunningTest.cls to run this gate.`;
+  skipReason = LIVE.skipReason;
+  if (skipReason === undefined) {
+    try {
+      const config = getConfig();
+      client = new IrisHttpClient(config);
+      recordWorkResponses(client);
+      const available = await ping(client, 3000);
+      if (!available) {
+        skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (check IRIS_HOST/IRIS_PORT).`;
+      } else {
+        const version = await negotiateVersion(client);
+        ctx = buildToolContext("NS", config, client, version);
+        if (!(await fixtureIsDeployed(version, ctx.resolveNamespace()))) {
+          skipReason =
+            `The QA fixture is not deployed in ${ctx.resolveNamespace()} (${FIXTURE} not found via the ` +
+            `Atelier API). Load src/ExecuteMCPv2/QAFixtures/LongRunningTest.cls to run this gate.`;
+        }
       }
+    } catch (error) {
+      skipReason = `IRIS availability probe failed: ${error instanceof Error ? error.message : String(error)}`;
     }
-  } catch (error) {
-    skipReason = `IRIS availability probe failed: ${error instanceof Error ? error.message : String(error)}`;
   }
   if (skipReason && REQUIRE_LIVE) {
     throw new Error(

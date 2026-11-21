@@ -2,8 +2,9 @@
  * Integration tests for iris-interop-mcp tools against a real IRIS instance.
  *
  * These tests exercise every interoperability tool end-to-end via the custom
- * ExecuteMCPv2 REST service. They are skipped automatically when IRIS is
- * not reachable (see integration-setup.ts).
+ * ExecuteMCPv2 REST service. They run only when armed (`IRIS_REQUIRE_LIVE`
+ * plus the five `IRIS_*` target variables) and IRIS is reachable, and skip
+ * otherwise (see integration-setup.ts).
  *
  * Resources are created in dependency order and cleaned up in reverse
  * dependency order to avoid conflicts. All test resources use the

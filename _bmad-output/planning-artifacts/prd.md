@@ -85,7 +85,7 @@ Target users are IRIS developers using AI coding assistants (primary), system ad
 
 - All 86 consolidated tools implemented and functional across all 5 servers
 - Zero SuperServer/native driver dependencies — web port HTTP only
-- MCP specification compliance: revision 2025-11-25 (pagination, tool annotations, listChanged, structured output), plus revision 2026-07-28 over stdio from Epic 43 (FR161)
+- MCP specification compliance: revisions 2025-11-25 (pagination, tool annotations, listChanged, structured output) and 2026-07-28, both served over stdio by one process on the MCP TypeScript SDK v2 (FR161), with form elicitation for the confirmation gates on clients that declare it (FR162; Epic 43)
 - Self-bootstrap succeeds fully with %Admin_Manage privileges; degrades gracefully with %Development only
 - Each server's *advertised* tool set stays within the MCP best-practice range through visibility presets (Epic 30, FR138). The `core` preset targets about 13 runtime tools per server; that is a guideline, not a hard limit (Project Lead, 2026-10-14). A server's full catalog may exceed the original 25-tool threshold: dev had 29 tools at Epic 37's close and is planned at 31 after Epic 38.
 - Tool response times under 2 seconds for read operations, under 10 seconds for compilation/deployment

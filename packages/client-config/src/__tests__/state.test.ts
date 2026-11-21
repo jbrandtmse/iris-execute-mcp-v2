@@ -109,7 +109,7 @@ describe("managed-entry roster (AC 33.1.4 ownership ledger)", () => {
 describe("stash records (AC 33.1.3, spec §3.4 shape)", () => {
   it("addStash stores {client, scope, name, entry, disabledAt}; findStash/dropStash round-trip", () => {
     let state = EMPTY_STATE;
-    const entry = { command: "npx", args: ["-y", "@iris-mcp/dev"], autoApprove: ["iris_doc_list"] };
+    const entry = { command: "npx", args: ["-y", "@iris-mcp/dev@1"], autoApprove: ["iris_doc_list"] };
     state = addStash(state, { client: "claude-code", scope: "user", name: "iris-dev-mcp", entry }, NOW);
     const stash = findStash(state, "claude-code", "user", "iris-dev-mcp");
     expect(stash).toEqual({

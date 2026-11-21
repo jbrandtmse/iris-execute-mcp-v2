@@ -131,6 +131,13 @@ export function redactValue(value: unknown): unknown {
 /** Outcome of a single tool call, as recorded in the audit entry (spec §3). */
 export type AuditOutcome = "ok" | "error" | "denied";
 
+/**
+ * How the person answered the confirmation dialog of a gate (AD-34, AD-19): `accepted`, `declined`, `cancelled`
+ * (dismissed), `unconfirmed` (accepted without ticking Confirm), or `unanswered` (nobody answered before the state
+ * expired, the client closed the connection or the server was stopped).
+ */
+export type AuditConfirmation = "accepted" | "declined" | "cancelled" | "unconfirmed" | "unanswered";
+
 /** Input to {@link AuditLogger.log} — the pre-redaction facts of one tool call. */
 export interface AuditEntryInput {
   /** The tool name (`ToolDefinition.name`). */
@@ -160,6 +167,12 @@ export interface AuditEntryInput {
   profileSource?: ProfileSource;
   /** Resolved namespace. */
   namespace: string;
+  /**
+   * The namespace a call to a `SYS`-scoped tool acts on: its non-empty `namespace` argument, while `namespace` records `%SYS`
+   * (AD-19). Written on every outcome, whatever `includeParams` says. Absent for every other scope and for a call with no such
+   * argument.
+   */
+  targetNamespace?: string;
   /** Call outcome. */
   outcome: AuditOutcome;
   /** Wall-clock call duration in milliseconds. */
@@ -195,6 +208,11 @@ export interface AuditEntryInput {
    * resolved. Additive: `outcome` keeps its domain. It never holds body content.
    */
   dataPolicy?: DataPolicySummary;
+  /**
+   * The person's answer to the confirmation dialog of a gate (Story 43.3, AD-19). Present only on the entry of a
+   * call that was asked; additive, and `outcome` keeps its domain.
+   */
+  confirmation?: AuditConfirmation;
 }
 
 /** One JSON line written to the audit file (spec §3 entry format). */
@@ -208,6 +226,7 @@ interface AuditEntry {
   profile: string;
   profileSource?: ProfileSource;
   namespace: string;
+  targetNamespace?: string;
   outcome: AuditOutcome;
   durationMs: number;
   paramKeys: string[];
@@ -216,6 +235,7 @@ interface AuditEntry {
   denyReason?: string;
   presetApplied?: string;
   dataPolicy?: DataPolicySummary;
+  confirmation?: AuditConfirmation;
 }
 
 /**
@@ -281,6 +301,7 @@ export class AuditLogger {
       action: input.action,
       profile: input.profile,
       namespace: input.namespace,
+      ...(input.targetNamespace === undefined ? {} : { targetNamespace: input.targetNamespace }),
       outcome: input.outcome,
       durationMs: input.durationMs,
       paramKeys: input.paramKeys,
@@ -302,6 +323,9 @@ export class AuditLogger {
     }
     if (input.dataPolicy !== undefined) {
       entry.dataPolicy = input.dataPolicy;
+    }
+    if (input.confirmation !== undefined) {
+      entry.confirmation = input.confirmation;
     }
     this.enqueueWrite(JSON.stringify(entry));
   }

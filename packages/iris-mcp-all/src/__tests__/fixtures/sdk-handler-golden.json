@@ -1,0 +1,911 @@
+{
+  "capturedAt": "2026-10-20T08:31:12.180Z",
+  "baselineRevision": "39fd0ea525fdfd5545249f610361ecd6f667bedd",
+  "sdkPackage": "@modelcontextprotocol/sdk",
+  "sdkVersion": "1.29.0",
+  "zodVersion": "4.3.6",
+  "node": "v26.8.1",
+  "bootstrapVersion": "d51856f74d6a",
+  "rowCount": 22,
+  "servers": {
+    "iris-dev-mcp": {
+      "startup": [
+        {
+          "method": "HEAD",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "GET",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "HEAD",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "url": "/api/atelier/v8/HSCUSTOM/action/query",
+          "body": "{\"query\":\"SELECT ExecuteMCPv2.Setup_GetBootstrapVersion() AS Version\"}"
+        },
+        {
+          "method": "HEAD",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "url": "/api/atelier/v8/HSCUSTOM/action/query",
+          "body": "{\"query\":\"SELECT ExecuteMCPv2.Setup_IsConfigured() AS Configured\"}"
+        }
+      ],
+      "rows": [
+        {
+          "label": "doc-get:range",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_doc_get",
+            "arguments": {
+              "name": "Demo.Sample.cls",
+              "startLine": "2",
+              "endLine": "3",
+              "bogus": "dropped"
+            }
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Document 'Demo.Sample.cls' in namespace 'HSCUSTOM': lines 2-3 of 6 (ts 2026-01-01 00:00:00.000)\\n     2\\t{\\n     3\\tMethod A()\"}],\"structuredContent\":{\"name\":\"Demo.Sample.cls\",\"ts\":\"2026-01-01 00:00:00.000\",\"startLine\":2,\"endLine\":3,\"totalLines\":6,\"lines\":[\"{\",\"Method A()\"]}},\"jsonrpc\":\"2.0\",\"id\":2}",
+          "upstream": [
+            {
+              "method": "GET",
+              "url": "/api/atelier/v8/HSCUSTOM/doc/Demo.Sample.cls",
+              "body": ""
+            }
+          ]
+        },
+        {
+          "label": "doc-get:full",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_doc_get",
+            "arguments": {
+              "name": "Demo.Sample.cls"
+            }
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"name\\\": \\\"Demo.Sample.cls\\\",\\n  \\\"db\\\": \\\"HSCUSTOM\\\",\\n  \\\"ts\\\": \\\"2026-01-01 00:00:00.000\\\",\\n  \\\"upd\\\": false,\\n  \\\"cat\\\": \\\"CLS\\\",\\n  \\\"status\\\": \\\"\\\",\\n  \\\"enc\\\": false,\\n  \\\"flags\\\": 0,\\n  \\\"content\\\": [\\n    \\\"Class Demo.Sample Extends %RegisteredObject\\\",\\n    \\\"{\\\",\\n    \\\"Method A()\\\",\\n    \\\"{\\\",\\n    \\\"}\\\",\\n    \\\"}\\\"\\n  ]\\n}\"}],\"structuredContent\":{\"name\":\"Demo.Sample.cls\",\"db\":\"HSCUSTOM\",\"ts\":\"2026-01-01 00:00:00.000\",\"upd\":false,\"cat\":\"CLS\",\"status\":\"\",\"enc\":false,\"flags\":0,\"content\":[\"Class Demo.Sample Extends %RegisteredObject\",\"{\",\"Method A()\",\"{\",\"}\",\"}\"]}},\"jsonrpc\":\"2.0\",\"id\":3}",
+          "upstream": [
+            {
+              "method": "GET",
+              "url": "/api/atelier/v8/HSCUSTOM/doc/Demo.Sample.cls",
+              "body": ""
+            }
+          ]
+        },
+        {
+          "label": "doc-get:not-found",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_doc_get",
+            "arguments": {
+              "name": "Demo.Missing.cls"
+            }
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Document 'Demo.Missing.cls' not found in namespace 'HSCUSTOM'\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":4}",
+          "upstream": [
+            {
+              "method": "GET",
+              "url": "/api/atelier/v8/HSCUSTOM/doc/Demo.Missing.cls",
+              "body": ""
+            }
+          ]
+        },
+        {
+          "label": "doc-get:metadata-only",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_doc_get",
+            "arguments": {
+              "name": "Demo.Sample.cls",
+              "metadataOnly": "true"
+            }
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"exists\\\": true,\\n  \\\"name\\\": \\\"Demo.Sample.cls\\\",\\n  \\\"etag\\\": \\\"\\\\\\\"2026-01-01 00:00:00.000\\\\\\\"\\\"\\n}\"}],\"structuredContent\":{\"exists\":true,\"name\":\"Demo.Sample.cls\",\"etag\":\"\\\"2026-01-01 00:00:00.000\\\"\"}},\"jsonrpc\":\"2.0\",\"id\":5}",
+          "upstream": [
+            {
+              "method": "HEAD",
+              "url": "/api/atelier/v8/HSCUSTOM/doc/Demo.Sample.cls",
+              "body": ""
+            }
+          ]
+        },
+        {
+          "label": "doc-get:metadata-missing",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_doc_get",
+            "arguments": {
+              "name": "Demo.Missing.cls",
+              "metadataOnly": "true"
+            }
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"exists\\\": false,\\n  \\\"name\\\": \\\"Demo.Missing.cls\\\"\\n}\"}],\"structuredContent\":{\"exists\":false,\"name\":\"Demo.Missing.cls\"},\"isError\":false},\"jsonrpc\":\"2.0\",\"id\":6}",
+          "upstream": [
+            {
+              "method": "HEAD",
+              "url": "/api/atelier/v8/HSCUSTOM/doc/Demo.Missing.cls",
+              "body": ""
+            }
+          ]
+        },
+        {
+          "label": "doc-list:coerced",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_doc_list",
+            "arguments": {
+              "category": "CLS",
+              "generated": "false",
+              "filter": "Demo"
+            }
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"items\\\": [\\n    {\\n      \\\"name\\\": \\\"Demo.Other.cls\\\",\\n      \\\"cat\\\": \\\"CLS\\\",\\n      \\\"ts\\\": \\\"2026-01-02 00:00:00.000\\\",\\n      \\\"upd\\\": false,\\n      \\\"db\\\": \\\"HSCUSTOM\\\",\\n      \\\"gen\\\": false\\n    },\\n    {\\n      \\\"name\\\": \\\"Demo.Sample.cls\\\",\\n      \\\"cat\\\": \\\"CLS\\\",\\n      \\\"ts\\\": \\\"2026-01-01 00:00:00.000\\\",\\n      \\\"upd\\\": false,\\n      \\\"db\\\": \\\"HSCUSTOM\\\",\\n      \\\"gen\\\": false\\n    }\\n  ]\\n}\"}],\"structuredContent\":{\"items\":[{\"name\":\"Demo.Other.cls\",\"cat\":\"CLS\",\"ts\":\"2026-01-02 00:00:00.000\",\"upd\":false,\"db\":\"HSCUSTOM\",\"gen\":false},{\"name\":\"Demo.Sample.cls\",\"cat\":\"CLS\",\"ts\":\"2026-01-01 00:00:00.000\",\"upd\":false,\"db\":\"HSCUSTOM\",\"gen\":false}]}},\"jsonrpc\":\"2.0\",\"id\":7}",
+          "upstream": [
+            {
+              "method": "GET",
+              "url": "/api/atelier/v8/HSCUSTOM/docnames/CLS/*?filter=Demo&generated=0",
+              "body": ""
+            }
+          ]
+        },
+        {
+          "label": "doc-list:handler-throws",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_doc_list",
+            "arguments": {
+              "filter": "throw"
+            }
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Tool error: IRIS returned a non-JSON response for GET /api/atelier/v8/HSCUSTOM/docnames/*/*?filter=throw. Expected an Atelier envelope but could not parse the body.\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":8}",
+          "upstream": [
+            {
+              "method": "GET",
+              "url": "/api/atelier/v8/HSCUSTOM/docnames/*/*?filter=throw",
+              "body": ""
+            }
+          ]
+        },
+        {
+          "label": "sql-query:ok",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_sql_query",
+            "arguments": {
+              "query": "SELECT 1 AS A",
+              "maxRows": "1"
+            }
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"columns\\\": [\\n    \\\"A\\\",\\n    \\\"B\\\"\\n  ],\\n  \\\"rows\\\": [\\n    [\\n      1,\\n      \\\"two\\\"\\n    ]\\n  ],\\n  \\\"rowCount\\\": 1,\\n  \\\"truncated\\\": true,\\n  \\\"totalAvailable\\\": 2\\n}\"}],\"structuredContent\":{\"columns\":[\"A\",\"B\"],\"rows\":[[1,\"two\"]],\"rowCount\":1,\"truncated\":true,\"totalAvailable\":2}},\"jsonrpc\":\"2.0\",\"id\":9}",
+          "upstream": [
+            {
+              "method": "HEAD",
+              "url": "/api/atelier/",
+              "body": ""
+            },
+            {
+              "method": "POST",
+              "url": "/api/executemcp/v2/dev/sql/execute",
+              "body": "{\"query\":\"SELECT 1 AS A\",\"namespace\":\"HSCUSTOM\",\"readOnly\":true,\"countOnly\":false,\"maxRowsAffected\":null}"
+            }
+          ]
+        },
+        {
+          "label": "sql-query:refusal",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_sql_query",
+            "arguments": {
+              "query": "INSERT INTO T VALUES (1)"
+            }
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Statement was not run in namespace 'HSCUSTOM': it is a INSERT statement, and read-only mode runs only queries (SELECT). Nothing was changed. iris_sql_query runs only queries; run other statements with iris_sql_execute.\"}],\"structuredContent\":{\"code\":\"SQL_READ_ONLY\",\"namespace\":\"HSCUSTOM\",\"statementType\":\"INSERT\",\"readOnlySource\":\"tool\"},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":10}",
+          "upstream": [
+            {
+              "method": "HEAD",
+              "url": "/api/atelier/",
+              "body": ""
+            },
+            {
+              "method": "POST",
+              "url": "/api/executemcp/v2/dev/sql/execute",
+              "body": "{\"query\":\"INSERT INTO T VALUES (1)\",\"namespace\":\"HSCUSTOM\",\"readOnly\":true,\"countOnly\":false,\"maxRowsAffected\":null}"
+            }
+          ]
+        },
+        {
+          "label": "sql-query:rest-error",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_sql_query",
+            "arguments": {
+              "query": "SELECT boom"
+            }
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"SQL error: IRIS returned HTTP 500 for POST /api/executemcp/v2/dev/sql/execute. Check the request parameters and try again. Details: ERROR #5540: SQLCODE: -29 Field 'BOOM' not found in the applicable tables\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":11}",
+          "upstream": [
+            {
+              "method": "HEAD",
+              "url": "/api/atelier/",
+              "body": ""
+            },
+            {
+              "method": "POST",
+              "url": "/api/executemcp/v2/dev/sql/execute",
+              "body": "{\"query\":\"SELECT boom\",\"namespace\":\"HSCUSTOM\",\"readOnly\":true,\"countOnly\":false,\"maxRowsAffected\":null}"
+            }
+          ]
+        },
+        {
+          "label": "server-info",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_server_info",
+            "arguments": {}
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"content\\\": {\\n    \\\"version\\\": \\\"IRIS for UNIX (Fake) 2026.2 (Build 221U)\\\",\\n    \\\"id\\\": \\\"FAKE-IRIS-0001\\\",\\n    \\\"api\\\": 8,\\n    \\\"features\\\": [\\n      {\\n        \\\"name\\\": \\\"DEEPSEE\\\",\\n        \\\"enabled\\\": \\\"false\\\"\\n      }\\n    ],\\n    \\\"namespaces\\\": [\\n      \\\"HSCUSTOM\\\",\\n      \\\"%SYS\\\"\\n    ]\\n  }\\n}\"}],\"structuredContent\":{\"content\":{\"version\":\"IRIS for UNIX (Fake) 2026.2 (Build 221U)\",\"id\":\"FAKE-IRIS-0001\",\"api\":8,\"features\":[{\"name\":\"DEEPSEE\",\"enabled\":\"false\"}],\"namespaces\":[\"HSCUSTOM\",\"%SYS\"]}}},\"jsonrpc\":\"2.0\",\"id\":12}",
+          "upstream": [
+            {
+              "method": "GET",
+              "url": "/api/atelier/",
+              "body": ""
+            }
+          ]
+        },
+        {
+          "label": "denial",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_env_promote",
+            "arguments": {
+              "action": "execute",
+              "source": "A",
+              "target": "B"
+            }
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"action 'iris_env_promote:execute' is disabled by governance policy for server 'default'\"}],\"structuredContent\":{\"code\":\"GOVERNANCE_DISABLED\",\"action\":\"iris_env_promote:execute\",\"server\":\"default\"},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":13}",
+          "upstream": []
+        },
+        {
+          "label": "schema-invalid",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_doc_get",
+            "arguments": {
+              "name": 12345
+            }
+          },
+          "schemaInvalid": true,
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool iris_doc_get: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"name\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":14}",
+          "upstream": []
+        }
+      ],
+      "audit": [
+        {
+          "type": "sessionStart",
+          "serverPkg": "@iris-mcp/dev",
+          "version": "0.0.2"
+        },
+        {
+          "seq": 1,
+          "serverPkg": "@iris-mcp/dev",
+          "tool": "iris_doc_get",
+          "action": null,
+          "profile": "default",
+          "namespace": "HSCUSTOM",
+          "outcome": "ok",
+          "paramKeys": [
+            "name",
+            "startLine",
+            "endLine"
+          ],
+          "profileSource": "env",
+          "params": {
+            "name": "Demo.Sample.cls",
+            "startLine": 2,
+            "endLine": 3
+          }
+        },
+        {
+          "seq": 2,
+          "serverPkg": "@iris-mcp/dev",
+          "tool": "iris_doc_get",
+          "action": null,
+          "profile": "default",
+          "namespace": "HSCUSTOM",
+          "outcome": "ok",
+          "paramKeys": [
+            "name"
+          ],
+          "profileSource": "env",
+          "params": {
+            "name": "Demo.Sample.cls"
+          }
+        },
+        {
+          "seq": 3,
+          "serverPkg": "@iris-mcp/dev",
+          "tool": "iris_doc_get",
+          "action": null,
+          "profile": "default",
+          "namespace": "HSCUSTOM",
+          "outcome": "error",
+          "paramKeys": [
+            "name"
+          ],
+          "profileSource": "env",
+          "params": {
+            "name": "Demo.Missing.cls"
+          },
+          "error": "Document 'Demo.Missing.cls' not found in namespace 'HSCUSTOM'"
+        },
+        {
+          "seq": 4,
+          "serverPkg": "@iris-mcp/dev",
+          "tool": "iris_doc_get",
+          "action": null,
+          "profile": "default",
+          "namespace": "HSCUSTOM",
+          "outcome": "ok",
+          "paramKeys": [
+            "name",
+            "metadataOnly"
+          ],
+          "profileSource": "env",
+          "params": {
+            "name": "Demo.Sample.cls",
+            "metadataOnly": true
+          }
+        },
+        {
+          "seq": 5,
+          "serverPkg": "@iris-mcp/dev",
+          "tool": "iris_doc_get",
+          "action": null,
+          "profile": "default",
+          "namespace": "HSCUSTOM",
+          "outcome": "ok",
+          "paramKeys": [
+            "name",
+            "metadataOnly"
+          ],
+          "profileSource": "env",
+          "params": {
+            "name": "Demo.Missing.cls",
+            "metadataOnly": true
+          }
+        },
+        {
+          "seq": 6,
+          "serverPkg": "@iris-mcp/dev",
+          "tool": "iris_doc_list",
+          "action": null,
+          "profile": "default",
+          "namespace": "HSCUSTOM",
+          "outcome": "ok",
+          "paramKeys": [
+            "category",
+            "filter",
+            "generated"
+          ],
+          "profileSource": "env",
+          "params": {
+            "category": "CLS",
+            "filter": "Demo",
+            "generated": false
+          }
+        },
+        {
+          "seq": 7,
+          "serverPkg": "@iris-mcp/dev",
+          "tool": "iris_doc_list",
+          "action": null,
+          "profile": "default",
+          "namespace": "HSCUSTOM",
+          "outcome": "error",
+          "paramKeys": [
+            "filter"
+          ],
+          "profileSource": "env",
+          "params": {
+            "filter": "throw"
+          },
+          "error": "Tool error: IRIS returned a non-JSON response for GET /api/atelier/v8/HSCUSTOM/docnames/*/*?filter=throw. Expected an Atelier envelope but could not parse the body."
+        },
+        {
+          "seq": 8,
+          "serverPkg": "@iris-mcp/dev",
+          "tool": "iris_sql_query",
+          "action": null,
+          "profile": "default",
+          "namespace": "HSCUSTOM",
+          "outcome": "ok",
+          "paramKeys": [
+            "query",
+            "maxRows"
+          ],
+          "profileSource": "env",
+          "params": {
+            "query": "SELECT 1 AS A",
+            "maxRows": 1
+          }
+        },
+        {
+          "seq": 9,
+          "serverPkg": "@iris-mcp/dev",
+          "tool": "iris_sql_query",
+          "action": null,
+          "profile": "default",
+          "namespace": "HSCUSTOM",
+          "outcome": "error",
+          "paramKeys": [
+            "query"
+          ],
+          "profileSource": "env",
+          "params": {
+            "query": "INSERT INTO T VALUES (1)"
+          },
+          "error": "Statement was not run in namespace 'HSCUSTOM': it is a INSERT statement, and read-only mode runs only queries (SELECT). Nothing was changed. iris_sql_query runs only queries; run other statements with iris_sql_execute."
+        },
+        {
+          "seq": 10,
+          "serverPkg": "@iris-mcp/dev",
+          "tool": "iris_sql_query",
+          "action": null,
+          "profile": "default",
+          "namespace": "HSCUSTOM",
+          "outcome": "error",
+          "paramKeys": [
+            "query"
+          ],
+          "profileSource": "env",
+          "params": {
+            "query": "SELECT boom"
+          },
+          "error": "SQL error: IRIS returned HTTP 500 for POST /api/executemcp/v2/dev/sql/execute. Check the request parameters and try again. Details: ERROR #5540: SQLCODE: -29 Field 'BOOM' not found in the applicable tables"
+        },
+        {
+          "seq": 11,
+          "serverPkg": "@iris-mcp/dev",
+          "tool": "iris_server_info",
+          "action": null,
+          "profile": "default",
+          "namespace": "HSCUSTOM",
+          "outcome": "ok",
+          "paramKeys": [],
+          "profileSource": "env",
+          "params": {}
+        },
+        {
+          "seq": 12,
+          "serverPkg": "@iris-mcp/dev",
+          "tool": "iris_env_promote",
+          "action": "execute",
+          "profile": "default",
+          "namespace": "HSCUSTOM",
+          "outcome": "denied",
+          "paramKeys": [
+            "action",
+            "source",
+            "target"
+          ],
+          "profileSource": "env",
+          "params": {
+            "action": "execute",
+            "source": "A",
+            "target": "B"
+          },
+          "denyReason": "GOVERNANCE_DISABLED"
+        }
+      ]
+    },
+    "iris-admin-mcp": {
+      "startup": [
+        {
+          "method": "HEAD",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "GET",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "HEAD",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "url": "/api/atelier/v8/HSCUSTOM/action/query",
+          "body": "{\"query\":\"SELECT ExecuteMCPv2.Setup_GetBootstrapVersion() AS Version\"}"
+        },
+        {
+          "method": "HEAD",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "url": "/api/atelier/v8/HSCUSTOM/action/query",
+          "body": "{\"query\":\"SELECT ExecuteMCPv2.Setup_IsConfigured() AS Configured\"}"
+        }
+      ],
+      "rows": [
+        {
+          "label": "namespace-list",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_namespace_list",
+            "arguments": {}
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"namespaces\\\": [\\n    {\\n      \\\"name\\\": \\\"HSCUSTOM\\\",\\n      \\\"globals\\\": \\\"HSCUSTOM\\\",\\n      \\\"routines\\\": \\\"HSCUSTOM\\\",\\n      \\\"library\\\": \\\"IRISLIB\\\",\\n      \\\"tempGlobals\\\": \\\"IRISTEMP\\\"\\n    },\\n    {\\n      \\\"name\\\": \\\"%SYS\\\",\\n      \\\"globals\\\": \\\"IRISSYS\\\",\\n      \\\"routines\\\": \\\"IRISSYS\\\",\\n      \\\"library\\\": \\\"IRISLIB\\\",\\n      \\\"tempGlobals\\\": \\\"IRISTEMP\\\"\\n    }\\n  ],\\n  \\\"count\\\": 2\\n}\"}],\"structuredContent\":{\"namespaces\":[{\"name\":\"HSCUSTOM\",\"globals\":\"HSCUSTOM\",\"routines\":\"HSCUSTOM\",\"library\":\"IRISLIB\",\"tempGlobals\":\"IRISTEMP\"},{\"name\":\"%SYS\",\"globals\":\"IRISSYS\",\"routines\":\"IRISSYS\",\"library\":\"IRISLIB\",\"tempGlobals\":\"IRISTEMP\"}],\"count\":2}},\"jsonrpc\":\"2.0\",\"id\":2}",
+          "upstream": [
+            {
+              "method": "GET",
+              "url": "/api/executemcp/v2/config/namespace",
+              "body": ""
+            }
+          ]
+        },
+        {
+          "label": "schema-invalid",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_namespace_manage",
+            "arguments": {
+              "action": "create",
+              "name": 12345
+            }
+          },
+          "schemaInvalid": true,
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool iris_namespace_manage: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"name\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":3}",
+          "upstream": []
+        }
+      ],
+      "audit": [
+        {
+          "type": "sessionStart",
+          "serverPkg": "@iris-mcp/admin",
+          "version": "0.0.2"
+        },
+        {
+          "seq": 1,
+          "serverPkg": "@iris-mcp/admin",
+          "tool": "iris_namespace_list",
+          "action": null,
+          "profile": "default",
+          "namespace": "HSCUSTOM",
+          "outcome": "ok",
+          "paramKeys": [],
+          "profileSource": "env",
+          "params": {}
+        }
+      ]
+    },
+    "iris-interop-mcp": {
+      "startup": [
+        {
+          "method": "HEAD",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "GET",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "HEAD",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "url": "/api/atelier/v8/HSCUSTOM/action/query",
+          "body": "{\"query\":\"SELECT ExecuteMCPv2.Setup_GetBootstrapVersion() AS Version\"}"
+        },
+        {
+          "method": "HEAD",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "url": "/api/atelier/v8/HSCUSTOM/action/query",
+          "body": "{\"query\":\"SELECT ExecuteMCPv2.Setup_IsConfigured() AS Configured\"}"
+        }
+      ],
+      "rows": [
+        {
+          "label": "production-status:detail",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_production_status",
+            "arguments": {
+              "detail": true
+            }
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"production\\\": \\\"Demo.Production\\\",\\n  \\\"state\\\": \\\"Running\\\",\\n  \\\"stateCode\\\": 1\\n}\"}],\"structuredContent\":{\"production\":\"Demo.Production\",\"state\":\"Running\",\"stateCode\":1}},\"jsonrpc\":\"2.0\",\"id\":2}",
+          "upstream": [
+            {
+              "method": "GET",
+              "url": "/api/executemcp/v2/interop/production/status?detail=1&namespace=HSCUSTOM",
+              "body": ""
+            }
+          ]
+        },
+        {
+          "label": "production-status:rest-error",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_production_status",
+            "arguments": {
+              "namespace": "ERRNS"
+            }
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Error getting production status: IRIS returned HTTP 500 for GET /api/executemcp/v2/interop/production/status?namespace=ERRNS. Check the request parameters and try again. Details: ERROR #5001: the namespace has no production\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":3}",
+          "upstream": [
+            {
+              "method": "GET",
+              "url": "/api/executemcp/v2/interop/production/status?namespace=ERRNS",
+              "body": ""
+            }
+          ]
+        },
+        {
+          "label": "schema-invalid",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_production_manage",
+            "arguments": {
+              "action": "create",
+              "name": 12345
+            }
+          },
+          "schemaInvalid": true,
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool iris_production_manage: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"name\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":4}",
+          "upstream": []
+        }
+      ],
+      "audit": [
+        {
+          "type": "sessionStart",
+          "serverPkg": "@iris-mcp/interop",
+          "version": "0.0.2"
+        },
+        {
+          "seq": 1,
+          "serverPkg": "@iris-mcp/interop",
+          "tool": "iris_production_status",
+          "action": null,
+          "profile": "default",
+          "namespace": "HSCUSTOM",
+          "outcome": "ok",
+          "paramKeys": [
+            "detail"
+          ],
+          "profileSource": "env",
+          "params": {
+            "detail": true
+          }
+        },
+        {
+          "seq": 2,
+          "serverPkg": "@iris-mcp/interop",
+          "tool": "iris_production_status",
+          "action": null,
+          "profile": "default",
+          "namespace": "ERRNS",
+          "outcome": "error",
+          "paramKeys": [
+            "namespace"
+          ],
+          "profileSource": "env",
+          "params": {
+            "namespace": "ERRNS"
+          },
+          "error": "Error getting production status: IRIS returned HTTP 500 for GET /api/executemcp/v2/interop/production/status?namespace=ERRNS. Check the request parameters and try again. Details: ERROR #5001: the namespace has no production"
+        }
+      ]
+    },
+    "iris-ops-mcp": {
+      "startup": [
+        {
+          "method": "HEAD",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "GET",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "HEAD",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "url": "/api/atelier/v8/HSCUSTOM/action/query",
+          "body": "{\"query\":\"SELECT ExecuteMCPv2.Setup_GetBootstrapVersion() AS Version\"}"
+        },
+        {
+          "method": "HEAD",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "url": "/api/atelier/v8/HSCUSTOM/action/query",
+          "body": "{\"query\":\"SELECT ExecuteMCPv2.Setup_IsConfigured() AS Configured\"}"
+        }
+      ],
+      "rows": [
+        {
+          "label": "metrics-system",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_metrics_system",
+            "arguments": {}
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"# HELP iris_fake_gauge A fake gauge\\n# TYPE iris_fake_gauge gauge\\niris_fake_gauge 7\\n# HELP iris_db_size_mb Database size in megabytes\\n# TYPE iris_db_size_mb gauge\\niris_db_size_mb{db=\\\"HSCUSTOM\\\"} 10\\n# HELP iris_db_max_size_mb Database max size in megabytes\\n# TYPE iris_db_max_size_mb gauge\\niris_db_max_size_mb{db=\\\"HSCUSTOM\\\"} 100\"}],\"structuredContent\":{\"metrics\":[{\"name\":\"iris_fake_gauge\",\"help\":\"A fake gauge\",\"type\":\"gauge\",\"value\":7}],\"databases\":[{\"name\":\"HSCUSTOM\",\"directory\":\"/fake/db\",\"sizeMB\":10,\"maxSizeMB\":100}]}},\"jsonrpc\":\"2.0\",\"id\":2}",
+          "upstream": [
+            {
+              "method": "GET",
+              "url": "/api/executemcp/v2/monitor/system",
+              "body": ""
+            }
+          ]
+        },
+        {
+          "label": "schema-invalid",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_database_action",
+            "arguments": {
+              "action": "mount",
+              "directory": 12345
+            }
+          },
+          "schemaInvalid": true,
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool iris_database_action: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"directory\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":3}",
+          "upstream": []
+        }
+      ],
+      "audit": [
+        {
+          "type": "sessionStart",
+          "serverPkg": "@iris-mcp/ops",
+          "version": "0.0.2"
+        },
+        {
+          "seq": 1,
+          "serverPkg": "@iris-mcp/ops",
+          "tool": "iris_metrics_system",
+          "action": null,
+          "profile": "default",
+          "namespace": "HSCUSTOM",
+          "outcome": "ok",
+          "paramKeys": [],
+          "profileSource": "env",
+          "params": {}
+        }
+      ]
+    },
+    "iris-data-mcp": {
+      "startup": [
+        {
+          "method": "HEAD",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "GET",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "HEAD",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "url": "/api/atelier/v8/HSCUSTOM/action/query",
+          "body": "{\"query\":\"SELECT ExecuteMCPv2.Setup_GetBootstrapVersion() AS Version\"}"
+        },
+        {
+          "method": "HEAD",
+          "url": "/api/atelier/",
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "url": "/api/atelier/v8/HSCUSTOM/action/query",
+          "body": "{\"query\":\"SELECT ExecuteMCPv2.Setup_IsConfigured() AS Configured\"}"
+        }
+      ],
+      "rows": [
+        {
+          "label": "docdb-find",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_docdb_find",
+            "arguments": {
+              "database": "d",
+              "filter": {
+                "name": "alpha"
+              }
+            }
+          },
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"[\\n  {\\n    \\\"_id\\\": 1,\\n    \\\"name\\\": \\\"alpha\\\"\\n  },\\n  {\\n    \\\"_id\\\": 2,\\n    \\\"name\\\": \\\"beta\\\"\\n  }\\n]\"}],\"structuredContent\":{\"items\":[{\"_id\":1,\"name\":\"alpha\"},{\"_id\":2,\"name\":\"beta\"}],\"count\":2}},\"jsonrpc\":\"2.0\",\"id\":2}",
+          "upstream": [
+            {
+              "method": "HEAD",
+              "url": "/api/atelier/",
+              "body": ""
+            },
+            {
+              "method": "POST",
+              "url": "/api/docdb/v1/HSCUSTOM/find/d",
+              "body": "{\"restriction\":[\"name\",\"alpha\",\"=\"]}"
+            }
+          ]
+        },
+        {
+          "label": "schema-invalid",
+          "method": "tools/call",
+          "params": {
+            "name": "iris_docdb_document",
+            "arguments": {
+              "action": "get",
+              "database": 12345
+            }
+          },
+          "schemaInvalid": true,
+          "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool iris_docdb_document: [\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"database\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received number\\\"\\n  }\\n]\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":3}",
+          "upstream": []
+        }
+      ],
+      "audit": [
+        {
+          "type": "sessionStart",
+          "serverPkg": "@iris-mcp/data",
+          "version": "0.0.2"
+        },
+        {
+          "seq": 1,
+          "serverPkg": "@iris-mcp/data",
+          "tool": "iris_docdb_find",
+          "action": null,
+          "profile": "default",
+          "namespace": "HSCUSTOM",
+          "outcome": "ok",
+          "paramKeys": [
+            "database",
+            "filter"
+          ],
+          "profileSource": "env",
+          "params": {
+            "database": "d",
+            "filter": {
+              "name": "alpha"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

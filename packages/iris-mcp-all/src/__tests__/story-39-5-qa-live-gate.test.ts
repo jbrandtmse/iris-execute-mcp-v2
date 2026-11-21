@@ -34,8 +34,8 @@
  * values that must survive contain `KEEPME395Q`; times fall on 2001-02-03 UTC. No message of HSCUSTOM is read: every
  * call names the scratch namespace, and the audit entries are checked for it.
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (defaults: localhost:52773,
- * `_SYSTEM`, HSCUSTOM). Writes only the namespace and database `EXECMCPTMP395Q` and the HSCUSTOM class
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none defaulted, and
+ * only when `IRIS_REQUIRE_LIVE` arms the run (without it every row skips before any request). Writes only the namespace and database `EXECMCPTMP395Q` and the HSCUSTOM class
  * `ExecuteMCPv2.Temp.Story391Fixture`. No production is started. A missing or stale dist, an unresolvable SDK or an
  * unreachable IRIS skips each row with the reason, or fails with "may not be skipped" when `IRIS_REQUIRE_LIVE` is
  * armed (listed in `scripts/prepublish-gate.mjs` `gateTestFiles`).
@@ -55,6 +55,7 @@ import {
   irisClassMethod,
   irisTargetFromEnv,
   isIrisReachable,
+  liveArmingSkipReason,
   openAuditedSession,
   openWireSession,
   postEnvelope,
@@ -80,6 +81,7 @@ import {
   removeInteropNamespace,
 } from "./interop-namespace-fixture.js";
 import { checkRedactedPositions, separatorCharacters } from "../../../shared/src/__tests__/hl7-redaction-fixtures.js";
+import { readAuditEntries } from "../../../../scripts/lib/audit-lines.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -516,13 +518,13 @@ const HL7_WITHHELD = /^The HL7 v2 body (could not be parsed \(.+\)|could not be 
 // -- Setup and teardown ----------------------------------------------------------------------------------------------
 
 beforeAll(async () => {
-  skipReason = staleDistReason(REPO_ROOT, "shared");
+  skipReason = liveArmingSkipReason() ?? staleDistReason(REPO_ROOT, "shared");
   for (const pkg of ["iris-dev-mcp", "iris-admin-mcp", "iris-interop-mcp"]) skipReason ??= staleDistReason(REPO_ROOT, pkg);
   if (!skipReason) {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
     if (!sdkEsmDir) {
       skipReason =
-        "Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm - run pnpm install from the repo root.";
+        "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm - run pnpm install from the repo root.";
     } else if (!(await isIrisReachable(TARGET.host, TARGET.port))) {
       skipReason = `IRIS is not reachable at http://${TARGET.host}:${TARGET.port}/api/atelier/ (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
     }
@@ -569,11 +571,7 @@ afterAll(async () => {
         // One more round trip, so every line the server wrote to stderr while it handled the calls has been read.
         await probed.session.listTools();
         const raw = existsSync(probed.auditFile) ? readFileSync(probed.auditFile, "utf8") : "";
-        const entries = raw
-          .split("\n")
-          .filter((line) => line.trim() !== "")
-          .map((line) => JSON.parse(line) as Item)
-          .filter((entry) => entry.tool === "iris_message_body");
+        const entries = (readAuditEntries(probed.auditFile) as Item[]).filter((entry) => entry.tool === "iris_message_body");
         for (const entry of entries) {
           expect([NS_Q, NS_Z], "every audited call named the scratch namespace").toContain((entry.params as Item | undefined)?.namespace);
         }

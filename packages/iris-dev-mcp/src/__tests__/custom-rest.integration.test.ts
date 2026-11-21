@@ -3,7 +3,8 @@
  * a real IRIS instance with the ExecuteMCPv2 REST service deployed.
  *
  * These tests exercise the tools that call `/api/executemcp/v2/*` endpoints.
- * They are skipped when IRIS is not reachable OR when the custom REST
+ * They run only when armed (`IRIS_REQUIRE_LIVE` plus the five `IRIS_*` target
+ * variables) and skip when IRIS is not reachable OR when the custom REST
  * service is not available (e.g. web app not registered).
  *
  * Test globals use the prefix `ExecuteMCPv2Test` to avoid collisions.
@@ -12,12 +13,11 @@
 import { describe, it, expect, beforeAll, afterEach, afterAll } from "vitest";
 import {
   IrisHttpClient,
-  loadConfig,
   negotiateVersion,
   buildToolContext,
   type ToolContext,
-  type IrisConnectionConfig,
 } from "@iris-mcp/shared";
+import { getIntegrationConfig } from "@iris-mcp/shared/test-helpers/integration-config";
 
 import {
   globalGetTool,
@@ -45,17 +45,6 @@ const CUSTOM_REST_OK = globalThis.__CUSTOM_REST_AVAILABLE__ ?? false;
 
 const TEST_GLOBAL = "ExecuteMCPv2TestInteg";
 
-function getConfig(): IrisConnectionConfig {
-  return loadConfig({
-    IRIS_HOST: process.env.IRIS_HOST ?? "localhost",
-    IRIS_PORT: process.env.IRIS_PORT ?? "52773",
-    IRIS_USERNAME: process.env.IRIS_USERNAME ?? "_SYSTEM",
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD ?? "SYS",
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE ?? "HSCUSTOM",
-    IRIS_HTTPS: process.env.IRIS_HTTPS ?? "false",
-  });
-}
-
 // ── Shared state ─────────────────────────────────────────────────────
 
 let client: IrisHttpClient;
@@ -76,7 +65,7 @@ describe.skipIf(!IRIS_OK || !CUSTOM_REST_OK)(
   "custom REST integration",
   () => {
     beforeAll(async () => {
-      const config = getConfig();
+      const config = getIntegrationConfig();
       client = new IrisHttpClient(config);
       const version = await negotiateVersion(client);
       ctx = buildToolContext("NS", config, client, version);

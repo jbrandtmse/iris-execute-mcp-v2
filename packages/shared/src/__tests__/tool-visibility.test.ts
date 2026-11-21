@@ -5,8 +5,8 @@
  * / `resolveVisibleTools` / `assertPresetCoverage`), plus a construction-level
  * proof that the {@link McpServerBase} constructor filter (AC 30.0.2) actually
  * removes a hidden tool from the SDK registry — absent from `getToolNames()`
- * AND uncallable via the real `tools/call` wire path with the SDK's OWN
- * standard unknown-tool error (never a custom `GOVERNANCE_DISABLED`-shaped
+ * AND uncallable via the real `tools/call` wire path with the standard
+ * unknown-tool error (never a custom `GOVERNANCE_DISABLED`-shaped
  * envelope) — and that `addTools` applies the identical filter to a
  * dynamically-added tool.
  *
@@ -64,6 +64,7 @@ async function callRequest(server: any, method: string, params: unknown) {
     signal: new AbortController().signal,
     sendNotification: async () => {},
     sendRequest: async () => ({}),
+    mcpReq: { requestState: () => undefined },
   };
   return handler({ method, params }, extra);
 }
@@ -470,7 +471,7 @@ describe("McpServerBase constructor tool-visibility filter (AC 30.0.2)", () => {
     }
   });
 
-  it("calling a hidden tool via the real tools/call wire returns the SDK's standard unknown-tool error, not a GOVERNANCE_DISABLED envelope", async () => {
+  it("calling a hidden tool via the real tools/call wire returns the standard unknown-tool error, not a GOVERNANCE_DISABLED envelope", async () => {
     delete process.env.IRIS_TOOLS_PRESET;
     process.env.IRIS_TOOLS_DISABLE = "iris_vis_hidden2";
     delete process.env.IRIS_TOOLS_ENABLE;
@@ -481,12 +482,11 @@ describe("McpServerBase constructor tool-visibility filter (AC 30.0.2)", () => {
         tools: [makeTool("iris_vis_hidden2"), makeTool("iris_vis_shown2")],
       });
 
-      // The SDK's own CallToolRequestSchema handler resolves an unknown-tool
-      // call to a standard, uncustomized error result (it never reaches our
-      // registerTool callback, since the hidden tool was never registered) —
-      // the SDK internally maps its thrown `McpError(InvalidParams, "Tool …
-      // not found")` to this shape. The key assertions: the SDK's own "not
-      // found" wording is present, and NONE of the governance denial's
+      // The framework's own tools/call handler resolves an unknown-tool call
+      // to the in-band `MCP error -32602: Tool … not found` result (it never
+      // reaches our registerTool callback, since the hidden tool was never
+      // registered). The key assertions: the "not found" wording is present,
+      // and NONE of the governance denial's
       // structured envelope (`structuredContent.code === "GOVERNANCE_DISABLED"`)
       // appears — proving this is a DIFFERENT failure surface, not a reachable
       // (but denied) governed call.

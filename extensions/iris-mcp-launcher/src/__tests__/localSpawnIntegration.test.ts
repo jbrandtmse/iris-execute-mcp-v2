@@ -13,7 +13,7 @@
  *      `withOwnedVarsCleared` — to produce the REAL spawn env for a live IRIS
  *      connection.
  *   3. Spawns that command/args/env as a genuine child process via the real
- *      `@modelcontextprotocol/sdk` `StdioClientTransport`, completes a real
+ *      `@modelcontextprotocol/client` `StdioClientTransport`, completes a real
  *      `initialize` handshake with the real SDK `Client`, calls `listTools()`,
  *      and calls one read-only tool (`iris_server_info`, zero required args —
  *      `packages/iris-dev-mcp/src/tools/server.ts`) that reaches live IRIS
@@ -24,19 +24,22 @@
  * adds — it does not close the gap for the `npx`/credential-prompt path,
  * which still has no automated real-runtime coverage.
  *
- * **Never fails on a pristine/offline checkout.** `packages/iris-dev-mcp/dist/`
- * may not be built yet, the pnpm SDK store layout may differ, or IRIS may not
- * be running — any of those SKIPS (with a logged reason) rather than failing,
- * so this suite stays green without a live IRIS instance. Verified locally
- * against `localhost:52773`, `_SYSTEM`/`SYS`, namespace `HSCUSTOM` (story Dev
- * Notes).
+ * **Opt-in, and never fails on a pristine/offline checkout.** The legs run only
+ * with `IRIS_REQUIRE_LIVE=1` (or `true`) and the five `IRIS_HOST`/`IRIS_PORT`/
+ * `IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` target variables (all
+ * required, none defaulted; `liveArming.ts`); unarmed they SKIP before any
+ * probe or spawn, and a set `IRIS_HOST` alone does not arm them. Armed, an
+ * unbuilt `packages/iris-dev-mcp/dist/`, a different pnpm SDK store layout or
+ * an unreachable IRIS also SKIPS (with a logged reason) rather than failing.
  */
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { LauncherProvider } from "../serverDefinitionProvider.js";
 import type { AuthApi, LauncherSettings, ServerManagerApi } from "../types.js";
+import { liveGateTarget } from "./liveArming.js";
+import { resolveSdkEsmDir } from "./sdkClientStore.js";
 
 // Repo root — 4 levels up from src/__tests__ (__tests__ -> src ->
 // iris-mcp-launcher -> extensions -> repo root), matching the pattern
@@ -46,19 +49,18 @@ import type { AuthApi, LauncherSettings, ServerManagerApi } from "../types.js";
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const DEV_MCP_ENTRY_POINT = path.join(REPO_ROOT, "packages", "iris-dev-mcp", "dist", "index.js");
 
-// 31-6-5 (Story 32.3): credentials come from IRIS_TEST_* env vars with the
-// documented local dev defaults as fallback — a failure prints the fallback,
-// not an operator's real credential, and CI can point at a different instance
-// without editing a committed file.
+// The target comes from the armed `IRIS_*` variables (`liveArming.ts`), never
+// from a default, so a failure prints the operator's own explicit target.
 // REPO-WIDE DECISION (recorded in deferred-work.md, 31-6-5): `__tests__/`
 // stays OUT of containment.test.ts's credential-grep roster — test fixtures
-// are not shipped code, and env-with-fallback (not grep enforcement) is the
+// are not shipped code, and env-driven targets (not grep enforcement) are the
 // containment mechanism for test-tier credentials.
-const IRIS_HOST = process.env.IRIS_TEST_HOST ?? "localhost";
-const IRIS_PORT = Number(process.env.IRIS_TEST_PORT ?? 52773);
-const IRIS_USERNAME = process.env.IRIS_TEST_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_TEST_PASSWORD ?? "SYS";
-const IRIS_NAMESPACE = process.env.IRIS_TEST_NAMESPACE ?? "HSCUSTOM";
+const LIVE = liveGateTarget();
+const IRIS_HOST = LIVE.target.host;
+const IRIS_PORT = LIVE.target.port;
+const IRIS_USERNAME = LIVE.target.username;
+const IRIS_PASSWORD = LIVE.target.password;
+const IRIS_NAMESPACE = LIVE.target.namespace;
 
 function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
   return {
@@ -81,52 +83,6 @@ function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
   };
 }
 
-/**
- * Resolve the ESM entry points of the installed `@modelcontextprotocol/sdk`
- * WITHOUT hardcoding a version-pinned path (story Dev Notes: "resolve it
- * dynamically; do not hardcode a version-pinned path that will rot"). It
- * lives under the pnpm STORE layout —
- * `node_modules/.pnpm/@modelcontextprotocol+sdk@<version>_<peer-hash>/node_modules/@modelcontextprotocol/sdk/dist/esm/`
- * — not the flat `node_modules/@modelcontextprotocol/sdk` this extension's
- * OWN `node_modules` would use (it has no such dependency at all; this SDK
- * is only ever a transitive dependency of the monorepo's own packages).
- */
-function resolveSdkEsmDir(): string | undefined {
-  const pnpmDir = path.join(REPO_ROOT, "node_modules", ".pnpm");
-  if (!existsSync(pnpmDir)) return undefined;
-
-  let entries: string[];
-  try {
-    entries = readdirSync(pnpmDir);
-  } catch {
-    return undefined;
-  }
-
-  // Sorted for determinism and iterated to exhaustion: pnpm's store holds one
-  // directory per (version, peer-hash) pair, so a version bump or a peer-dep
-  // split routinely yields several `@modelcontextprotocol+sdk@…` entries in
-  // readdir order. Taking `find()`'s first hit and giving up if ITS dist/esm is
-  // absent would silently skip this whole test — and a skip is indistinguishable
-  // from "IRIS is not running", so the rot would never be noticed.
-  const candidates = entries
-    .filter((name) => name.startsWith("@modelcontextprotocol+sdk@"))
-    .sort();
-
-  for (const candidate of candidates) {
-    const esmDir = path.join(
-      pnpmDir,
-      candidate,
-      "node_modules",
-      "@modelcontextprotocol",
-      "sdk",
-      "dist",
-      "esm",
-    );
-    if (existsSync(esmDir)) return esmDir;
-  }
-  return undefined;
-}
-
 /** Any HTTP response — even a 401 — proves the IRIS Web Gateway is reachable. A network error/timeout does not. */
 async function isIrisReachable(): Promise<boolean> {
   try {
@@ -143,7 +99,7 @@ async function isIrisReachable(): Promise<boolean> {
  * `withOwnedVarsCleared()`'s `null` entries mean "remove this variable" in
  * VS Code's `McpStdioServerDefinition.env` contract — but the real SDK
  * `StdioClientTransport` has no such convention; it merges `{
- * ...getDefaultEnvironment(), ...server.env }` verbatim (`client/stdio.js`),
+ * ...getDefaultEnvironment(), ...server.env }` verbatim (`stdio.mjs`),
  * so a `null` value would reach `cross-spawn` and get coerced to the literal
  * string `"null"`. Deleting the null-valued keys (never stringifying them)
  * is the correct real-process equivalent (story Dev Notes).
@@ -213,8 +169,8 @@ async function connectClient(
   planned: { command: string; args: string[] },
   spawnEnv: Record<string, string>,
 ): Promise<SdkClient> {
-  const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "client", "index.js")).href;
-  const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "client", "stdio.js")).href;
+  const sdkClientIndex = pathToFileURL(path.join(sdkEsmDir!, "index.mjs")).href;
+  const sdkClientStdio = pathToFileURL(path.join(sdkEsmDir!, "stdio.mjs")).href;
   const { Client } = (await import(sdkClientIndex)) as {
     Client: new (info: { name: string; version: string }) => SdkClient;
   };
@@ -239,6 +195,11 @@ async function connectClient(
 }
 
 beforeAll(async () => {
+  if (LIVE.skipReason !== undefined) {
+    skipReason = LIVE.skipReason;
+    return;
+  }
+
   if (!existsSync(DEV_MCP_ENTRY_POINT)) {
     skipReason = `packages/iris-dev-mcp/dist/index.js is not built (run "pnpm --filter @iris-mcp/dev build" from the repo root). Looked at: ${DEV_MCP_ENTRY_POINT}`;
     return;
@@ -247,13 +208,13 @@ beforeAll(async () => {
   sdkEsmDir = resolveSdkEsmDir();
   if (!sdkEsmDir) {
     skipReason =
-      "Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm — " +
+      "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm — " +
       "run pnpm install from the repo root.";
     return;
   }
 
   if (!(await isIrisReachable())) {
-    skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/ (expected the local dev instance from the story's Dev Notes).`;
+    skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/ (check IRIS_HOST/IRIS_PORT).`;
     return;
   }
 });

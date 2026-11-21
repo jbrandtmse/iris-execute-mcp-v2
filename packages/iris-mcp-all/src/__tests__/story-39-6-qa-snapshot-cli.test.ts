@@ -16,7 +16,7 @@
  *    and the first differing path, and a pinned tool the live servers do not list exits 1 naming it; the bytes and
  *    the modification time of the tree's snapshot are unchanged after each;
  *  - `--force` writes the generator's own file: the six header and body members, ASCII 2-space JSON with one trailing
- *    newline, the live capture's entries (equal to the committed snapshot's on this tree), the SDK and zod versions,
+ *    newline, the live capture's entries (equal to the committed snapshot's on this tree), the installed SDK server and zod versions,
  *    and a fresh `capturedAt`; it names the entries it re-pins; it also writes when no snapshot exists; and the
  *    file it wrote passes `--check` in the same tree;
  *  - the capture is preset `full` whatever `IRIS_TOOLS_*` holds in the operator's environment.
@@ -44,6 +44,16 @@ const LIB_MODULES = ["tools-list-snapshot-core.mjs", "dist-freshness.mjs", "meas
 const DEV = "iris-dev-mcp";
 const TOOL = "iris_doc_get";
 const GHOST = "iris_ghost_tool";
+
+/**
+ * The version of the MCP SDK server package that the shared package resolves, which is what a live capture records as `sdkVersion`.
+ * The committed snapshot keeps the version it was captured on, so the two differ after an SDK migration while every entry stays equal.
+ */
+const INSTALLED_SDK_VERSION = (
+  JSON.parse(readFileSync(path.join(REPO_ROOT, "packages", "shared", "node_modules", "@modelcontextprotocol", "server", "package.json"), "utf8")) as {
+    version: string;
+  }
+).version;
 
 interface Entry {
   title: string;
@@ -311,7 +321,7 @@ describe("Story 39.6 QA: the tools/list snapshot CLI, three modes, on throwaway 
       expect(/[^ -~\n]/.test(text), "printable ASCII and line ends only").toBe(false);
       expect(written.entryCount).toBe(115);
       expect(written.servers, "the live capture is the committed snapshot's entries on this tree").toEqual(committed.servers);
-      expect(written.sdkVersion).toBe(committed.sdkVersion);
+      expect(written.sdkVersion).toBe(INSTALLED_SDK_VERSION);
       expect(written.zodVersion).toBe(committed.zodVersion);
       expect(written.comment).toBe(committed.comment);
       expect(Date.parse(written.capturedAt), "capturedAt is a fresh ISO timestamp").toBeGreaterThanOrEqual(startedAt - 2000);
@@ -338,7 +348,7 @@ describe("Story 39.6 QA: the tools/list snapshot CLI, three modes, on throwaway 
       }
     });
 
-    it("re-pinning a copy that is already current rewrites the file and changes only capturedAt", () => {
+    it("re-pinning a copy that is already current rewrites the file and changes only capturedAt and the recorded sdkVersion", () => {
       const startedAt = Date.now();
       const tree = makeTree(committedText);
 
@@ -350,7 +360,8 @@ describe("Story 39.6 QA: the tools/list snapshot CLI, three modes, on throwaway 
       const written = JSON.parse(readFileSync(snapshotOf(tree), "utf8")) as SnapshotDocument;
       expect(written.capturedAt, "the file was rewritten").not.toBe(committed.capturedAt);
       expect(Date.parse(written.capturedAt)).toBeGreaterThanOrEqual(startedAt - 2000);
-      expect({ ...written, capturedAt: "" }).toEqual({ ...committed, capturedAt: "" });
+      expect(written.sdkVersion).toBe(INSTALLED_SDK_VERSION);
+      expect({ ...written, capturedAt: "", sdkVersion: "" }).toEqual({ ...committed, capturedAt: "", sdkVersion: "" });
     });
   });
 });

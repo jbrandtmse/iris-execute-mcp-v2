@@ -85,7 +85,7 @@ describe("certification docs are generated + exhaustive (AC 33.4.1/33.4.3, Rule 
 
   it("33-5-16: the CLI npx header carries the not-yet-published caveat", () => {
     const readme = readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8");
-    const header = readme.split("\n").find((line) => line.includes("npx -y @iris-mcp/client-config iris-mcp-clients <command>"));
+    const header = readme.split("\n").find((line) => line.includes("npx -y -p @iris-mcp/client-config@1 iris-mcp-clients <command>"));
     expect(header).toBeDefined();
     const nextLines = readme.slice(readme.indexOf(header ?? ""), (readme.indexOf(header ?? "")) + 300);
     expect(nextLines).toContain("Not yet published to npm");

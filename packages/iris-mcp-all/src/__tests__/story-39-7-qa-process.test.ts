@@ -175,7 +175,7 @@ beforeAll(async () => {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
     if (!sdkEsmDir) {
       skipReason =
-        "Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm - run pnpm install from the repo root.";
+        "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm - run pnpm install from the repo root.";
     }
   }
   if (skipReason && REQUIRE_LIVE) {

@@ -13,10 +13,17 @@ import { describe, it, expect } from "vitest";
 import { BOOTSTRAP_CLASSES } from "../bootstrap-classes.js";
 import { REFUSAL_CODES } from "../refusals.js";
 import {
+  describeStorageDrops,
   droppedStorageDefinitions,
+  droppedStorageNames,
   isClassDocument,
   storageDefinitionNames,
+  storageDrop,
+  storageDroppedDetail,
   storageDroppedRefusal,
+  storageDroppedText,
+  storageDropsRefusal,
+  xmlClassStorageNames,
 } from "../storage-guard.js";
 import { STORAGE_FIXTURES } from "./storage-guard-fixtures.js";
 
@@ -280,6 +287,211 @@ describe("storageDroppedRefusal (AC-3, AC-9)", () => {
     const result = storageDroppedRefusal("A.B.cls", "USER", dropped, REMEDY);
     dropped.push("Late");
     expect(result.structuredContent.droppedStorage).toEqual(["Default"]);
+  });
+});
+
+describe("droppedStorageNames (Story 42.11): the one comparison rule", () => {
+  it("returns the current names the kept names lack, in the order of the current names, each once", () => {
+    expect(droppedStorageNames(["Zeta", "Default", "Second"], ["Default"])).toEqual(["Zeta", "Second"]);
+    expect(droppedStorageNames(["Default", "Default"], [])).toEqual(["Default"]);
+  });
+
+  it("compares exactly: a rename and a case change are drops, an added name and an unchanged set are not", () => {
+    expect(droppedStorageNames(["Default"], ["Main"])).toEqual(["Default"]);
+    expect(droppedStorageNames(["Default"], ["default"])).toEqual(["Default"]);
+    expect(droppedStorageNames(["Default"], ["Default", "Extra"])).toEqual([]);
+    expect(droppedStorageNames([], ["Default"])).toEqual([]);
+  });
+
+  it("droppedStorageDefinitions delegates to it", () => {
+    const current = classWithStorage("Zeta", "Default");
+    expect(droppedStorageDefinitions(current, classWithStorage("Default"))).toEqual(
+      droppedStorageNames(storageDefinitionNames(current), storageDefinitionNames(classWithStorage("Default"))),
+    );
+  });
+});
+
+describe("xmlClassStorageNames (Story 42.11): the Storage names of each <Class> of an XML export", () => {
+  const storage = (name: string): string => `<Storage name="${name}"><Type>%Storage.Persistent</Type></Storage>`;
+
+  it("maps each class to its Storage names in source order, across several classes", () => {
+    const lines = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<Export generator="IRIS" version="26">',
+      '<Class name="Pkg.A">',
+      "<Super>%Persistent</Super>",
+      storage("Default"),
+      storage("Alt"),
+      "</Class>",
+      '<Class name="Pkg.B"><Super>%Persistent</Super></Class>',
+      '<Class name="Pkg.C">',
+      storage("Default"),
+      "</Class>",
+      "</Export>",
+    ];
+
+    const classes = xmlClassStorageNames(lines);
+
+    expect([...classes.keys()]).toEqual(["Pkg.A", "Pkg.B", "Pkg.C"]);
+    expect(classes.get("Pkg.A")).toEqual(["Default", "Alt"]);
+    expect(classes.get("Pkg.B")).toEqual([]);
+    expect(classes.get("Pkg.C")).toEqual(["Default"]);
+  });
+
+  it("a class without a Storage element maps to an empty list, and a self-closing class does not swallow the next one's Storage", () => {
+    const classes = xmlClassStorageNames(['<Export><Class name="A.One"/>', '<Class name="A.Two">', storage("Default"), "</Class></Export>"]);
+
+    expect(classes.get("A.One")).toEqual([]);
+    expect(classes.get("A.Two")).toEqual(["Default"]);
+  });
+
+  it("a Storage element inside a comment or a CDATA section does not count", () => {
+    const classes = xmlClassStorageNames([
+      '<Export><Class name="A.B">',
+      `<!-- ${storage("Commented")} -->`,
+      `<Method name="M"><Implementation><![CDATA[ ${storage("InCdata")} ]]></Implementation></Method>`,
+      storage("Real"),
+      "</Class></Export>",
+    ]);
+
+    expect(classes.get("A.B")).toEqual(["Real"]);
+  });
+
+  it("a Storage element outside a class does not count, and neither does an element that only starts with Class", () => {
+    const classes = xmlClassStorageNames([
+      `<Export>${storage("Stray")}`,
+      '<ClassMethod name="X">',
+      `${storage("AlsoStray")}</ClassMethod>`,
+      '<Class name="A.B">',
+      storage("Default"),
+      "</Class>",
+      `${storage("After")}</Export>`,
+    ]);
+
+    expect([...classes.keys()]).toEqual(["A.B"]);
+    expect(classes.get("A.B")).toEqual(["Default"]);
+  });
+
+  it("a routine or a project element is not a class", () => {
+    const classes = xmlClassStorageNames([
+      '<?xml version="1.0"?><Export>',
+      '<Routine name="R" type="MAC"><![CDATA[ line ]]></Routine>',
+      '<Project name="P"><Items><ProjectItem name="A.B" type="CLS"/></Items></Project>',
+      "</Export>",
+    ]);
+
+    expect(classes.size).toBe(0);
+  });
+
+  it("names are exact: a class named twice keeps the later element's names, and an unnamed class is skipped", () => {
+    const classes = xmlClassStorageNames([
+      '<Export><Class name="A.B">',
+      storage("Default"),
+      "</Class>",
+      '<Class name="A.B">',
+      storage("Other"),
+      "</Class>",
+      `<Class>${storage("Anon")}</Class><Class name="">${storage("Blank")}</Class></Export>`,
+    ]);
+
+    expect([...classes.keys()]).toEqual(["A.B"]);
+    expect(classes.get("A.B")).toEqual(["Other"]);
+  });
+
+  it("handles a BOM, single-quoted attributes and CRLF-split lines", () => {
+    const text = `\uFEFF<Export><Class name='A.B' languagemode="0">\r\n${storage("Default")}\r\n</Class></Export>`;
+
+    expect(xmlClassStorageNames(text.split(/\r?\n/)).get("A.B")).toEqual(["Default"]);
+  });
+
+  it("text that is not XML, and an empty text, yield no class", () => {
+    expect(xmlClassStorageNames(classWithStorage("Default")).size).toBe(0);
+    expect(xmlClassStorageNames([]).size).toBe(0);
+  });
+});
+
+describe("the drop texts and fields (Story 42.11)", () => {
+  const REMEDY = "Do the remedy.";
+
+  it("storageDroppedText is the refusal text of storageDroppedRefusal", () => {
+    const text = storageDroppedText("A.B.cls", "USER", ["Default", "Second"], REMEDY);
+
+    expect(text).toBe(
+      "Document 'A.B.cls' was not saved in namespace 'USER': the content drops the Storage definitions 'Default', 'Second' that the class has now, " +
+        "and IRIS would generate new storage at the next compile, which can change how existing rows are read. Nothing was stored. Do the remedy.",
+    );
+    expect(storageDroppedRefusal("A.B.cls", "USER", ["Default", "Second"], REMEDY).content[0]?.text).toBe(text);
+  });
+
+  it("storageDroppedDetail is the code and a copy of the names, and storageDrop is the name and a copy of the names", () => {
+    const names = ["Default"];
+
+    expect(storageDroppedDetail(names)).toEqual({ code: REFUSAL_CODES.STORAGE_DROPPED, droppedStorage: ["Default"] });
+    expect(storageDrop("A.B.cls", names)).toEqual({ name: "A.B.cls", droppedStorage: ["Default"] });
+    expect(storageDroppedDetail(names).droppedStorage).not.toBe(names);
+    expect(storageDrop("A.B.cls", names).droppedStorage).not.toBe(names);
+  });
+
+  it("describeStorageDrops lists each document with its names, separated by '; '", () => {
+    const drops = [storageDrop("Pkg.A.cls", ["Default"]), storageDrop("Pkg.B.cls", ["Default", "Alt"])];
+
+    expect(describeStorageDrops(drops)).toBe("Pkg.A.cls ('Default'); Pkg.B.cls ('Default', 'Alt')");
+    expect(describeStorageDrops([])).toBe("");
+  });
+
+  it("describeStorageDrops with a limit lists the first documents and then says how many more", () => {
+    const drops = ["A", "B", "C", "D"].map((name) => storageDrop(`Pkg.${name}.cls`, ["Default"]));
+
+    expect(describeStorageDrops(drops, 2)).toBe("Pkg.A.cls ('Default'); Pkg.B.cls ('Default'); and 2 more");
+    expect(describeStorageDrops(drops, 3)).toBe("Pkg.A.cls ('Default'); Pkg.B.cls ('Default'); Pkg.C.cls ('Default'); and 1 more");
+    expect(describeStorageDrops(drops, 4)).toBe(describeStorageDrops(drops));
+    expect(describeStorageDrops(drops, 10)).toBe(describeStorageDrops(drops));
+  });
+
+  it("storageDropsRefusal names one drop: 'the class has', the code first, the fields, then storageDrops", () => {
+    const result = storageDropsRefusal(
+      "The XML was not imported into namespace 'USER' and nothing was stored",
+      [storageDrop("Pkg.A.cls", ["Default"])],
+      REMEDY,
+      { namespace: "USER" },
+    );
+
+    expect(result).toEqual({
+      content: [
+        {
+          type: "text",
+          text:
+            "The XML was not imported into namespace 'USER' and nothing was stored: it drops the Storage definition 'Default' of 'Pkg.A.cls' " +
+            "that the class has now, and IRIS would generate new storage at the next compile, which can change how existing rows are read. Do the remedy.",
+        },
+      ],
+      structuredContent: { code: "STORAGE_DROPPED", namespace: "USER", storageDrops: [{ name: "Pkg.A.cls", droppedStorage: ["Default"] }] },
+      isError: true,
+    });
+    expect(Object.keys(result.structuredContent)).toEqual(["code", "namespace", "storageDrops"]);
+  });
+
+  it("storageDropsRefusal names several drops: each document with its definitions, joined by '; ', 'the classes have'", () => {
+    const result = storageDropsRefusal(
+      "Promotion to server 'qa', namespace 'USER' was not run and no changes were made",
+      [storageDrop("Pkg.A.cls", ["Default"]), storageDrop("Pkg.B.cls", ["Default", "Alt"])],
+      REMEDY,
+      { source: { profile: "dev", namespace: "USER" }, target: { profile: "qa", namespace: "USER" } },
+    );
+
+    expect(result.content[0]?.text).toBe(
+      "Promotion to server 'qa', namespace 'USER' was not run and no changes were made: it drops " +
+        "the Storage definition 'Default' of 'Pkg.A.cls'; the Storage definitions 'Default', 'Alt' of 'Pkg.B.cls' " +
+        "that the classes have now, and IRIS would generate new storage at the next compile, which can change how existing rows are read. Do the remedy.",
+    );
+    expect(Object.keys(result.structuredContent)).toEqual(["code", "source", "target", "storageDrops"]);
+    expect(result.isError).toBe(true);
+  });
+
+  it("storageDropsRefusal never lets a field replace the code", () => {
+    const result = storageDropsRefusal("Opening", [storageDrop("A.cls", ["Default"])], REMEDY, { code: "OTHER" });
+
+    expect(result.structuredContent.code).toBe(REFUSAL_CODES.STORAGE_DROPPED);
   });
 });
 

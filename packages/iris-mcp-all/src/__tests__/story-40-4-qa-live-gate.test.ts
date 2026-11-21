@@ -31,8 +31,8 @@
  * behind (`StopIfList`, which proves the session before it stops it), removes both namespaces (their database files too), the fixture class
  * and the temporary directory, and asserts that nothing is left.
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (defaults: localhost:52773, `_SYSTEM`, HSCUSTOM). Writes
- * only the namespaces and databases `EXECMCPTMP404Q` and `EXECMCPTMP404R`, a temporary directory and the HSCUSTOM class
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none defaulted, and only when
+ * `IRIS_REQUIRE_LIVE` arms the run (without it every row skips before any request). Writes only the namespaces and databases `EXECMCPTMP404Q` and `EXECMCPTMP404R`, a temporary directory and the HSCUSTOM class
  * `ExecuteMCPv2.Temp.Story391Fixture`.
  *
  * Placement (rule #45): `@iris-mcp/all` spawns built dists. A missing or stale `shared`, dev, admin or interop dist, an unresolvable SDK or
@@ -57,6 +57,7 @@ import {
   governanceReport,
   irisTargetFromEnv,
   isIrisReachable,
+  liveArmingSkipReason,
   openWireSession,
   rawIrisRequest,
   resolveSdkEsmDir,
@@ -533,13 +534,13 @@ async function seedQaFixture(): Promise<void> {
 // -- Setup and teardown ------------------------------------------------------------------
 
 beforeAll(async () => {
-  skipReason = staleDistReason(REPO_ROOT, "shared");
+  skipReason = liveArmingSkipReason() ?? staleDistReason(REPO_ROOT, "shared");
   for (const pkg of ["iris-dev-mcp", "iris-admin-mcp", "iris-interop-mcp"]) skipReason ??= staleDistReason(REPO_ROOT, pkg);
   if (!skipReason) {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
     if (!sdkEsmDir) {
       skipReason =
-        "Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm - run pnpm install from the repo root.";
+        "Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm - run pnpm install from the repo root.";
     } else if (!(await isIrisReachable(TARGET.host, TARGET.port))) {
       skipReason = `IRIS is not reachable at http://${TARGET.host}:${TARGET.port}/api/atelier/ (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
     }

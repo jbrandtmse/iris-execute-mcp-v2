@@ -1,14 +1,20 @@
 /**
  * Vitest setupFile for iris-ops-mcp integration tests.
  *
- * Runs before any test file is loaded, probes whether IRIS is reachable,
+ * Runs before any test file is loaded. The integration run is opt-in: unless
+ * `IRIS_REQUIRE_LIVE` is `1` or `true`, it sets every availability flag to
+ * `false` without making a request, so every integration test skips. Armed, the
+ * target is the five `IRIS_*` variables (all required, none defaulted; a missing
+ * one fails the run naming it), and the setup probes whether IRIS is reachable,
  * negotiates the Atelier API version, and checks whether the custom REST
  * service (ExecuteMCPv2) is available. Results are stored on `globalThis`
  * so that `describe.skipIf()` and `it.skipIf()` can reference them
  * synchronously at module load time.
  */
 
-import { IrisHttpClient, loadConfig, ping, negotiateVersion } from "@iris-mcp/shared";
+import { IrisHttpClient, ping, negotiateVersion } from "@iris-mcp/shared";
+import { getIntegrationConfig } from "@iris-mcp/shared/test-helpers/integration-config";
+import { isLiveArmed } from "@iris-mcp/shared/test-helpers/live-target";
 
 declare global {
   var __IRIS_AVAILABLE__: boolean;
@@ -16,19 +22,9 @@ declare global {
   var __CUSTOM_REST_AVAILABLE__: boolean;
 }
 
-function getConfig() {
-  return loadConfig({
-    IRIS_HOST: process.env.IRIS_HOST ?? "localhost",
-    IRIS_PORT: process.env.IRIS_PORT ?? "52773",
-    IRIS_USERNAME: process.env.IRIS_USERNAME ?? "_SYSTEM",
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD ?? "SYS",
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE ?? "HSCUSTOM",
-    IRIS_HTTPS: process.env.IRIS_HTTPS ?? "false",
-  });
-}
-
 async function probeIris(): Promise<{ available: boolean; version: number }> {
-  const config = getConfig();
+  if (!isLiveArmed()) return { available: false, version: 0 };
+  const config = getIntegrationConfig();
   const client = new IrisHttpClient(config);
   try {
     const available = await ping(client, 3000);
@@ -50,7 +46,7 @@ async function probeIris(): Promise<{ available: boolean; version: number }> {
  * or 404 indicate the service is not available.
  */
 async function probeCustomRest(): Promise<boolean> {
-  const config = getConfig();
+  const config = getIntegrationConfig();
   const client = new IrisHttpClient(config);
   try {
     await client.get("/api/executemcp/v2/monitor/system");

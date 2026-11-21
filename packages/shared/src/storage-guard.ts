@@ -41,6 +41,28 @@ export function storageDefinitionNames(lines: readonly string[]): string[] {
 }
 
 /**
+ * The names in `currentNames` that `keptNames` lacks: the one rule every Storage-drop comparison uses.
+ *
+ * Names are compared exactly (case-sensitive), so a rename is a drop; a name that appears twice in
+ * `currentNames` is reported once.
+ *
+ * @param currentNames - The Storage definition names of the class as it is now.
+ * @param keptNames - The Storage definition names of the text that would replace it.
+ * @returns The dropped names, in the order of `currentNames`; empty when nothing is dropped.
+ */
+export function droppedStorageNames(
+  currentNames: readonly string[],
+  keptNames: readonly string[],
+): string[] {
+  const kept = new Set(keptNames);
+  const dropped: string[] = [];
+  for (const name of currentNames) {
+    if (!kept.has(name) && !dropped.includes(name)) dropped.push(name);
+  }
+  return dropped;
+}
+
+/**
  * The Storage definitions that `current` has and `proposed` lacks.
  *
  * @param current - The class text as it is now.
@@ -51,22 +73,44 @@ export function droppedStorageDefinitions(
   current: readonly string[],
   proposed: readonly string[],
 ): string[] {
-  const kept = new Set(storageDefinitionNames(proposed));
-  const dropped: string[] = [];
-  for (const name of storageDefinitionNames(current)) {
-    if (!kept.has(name) && !dropped.includes(name)) dropped.push(name);
-  }
-  return dropped;
+  return droppedStorageNames(storageDefinitionNames(current), storageDefinitionNames(proposed));
+}
+
+/** The names of the Storage definitions inside quotes: `the Storage definition 'A'` or `the Storage definitions 'A', 'B'`. */
+function definitionsPhrase(dropped: readonly string[]): string {
+  const quoted = dropped.map((definition) => `'${definition}'`).join(", ");
+  return dropped.length === 1 ? `the Storage definition ${quoted}` : `the Storage definitions ${quoted}`;
+}
+
+/**
+ * The text of the refusal for a single document whose write drops Storage definitions:
+ * `Document '<name>' was not saved in namespace '<namespace>': the content drops <the Storage
+ * definition 'A' | the Storage definitions 'A', 'B'> that the class has now, and IRIS would generate
+ * new storage at the next compile, which can change how existing rows are read. Nothing was stored.
+ * <remedy>`.
+ *
+ * @param name - The document name.
+ * @param namespace - The namespace the write targeted.
+ * @param dropped - The dropped names, at least one (see {@link droppedStorageDefinitions}).
+ * @param remedy - The closing sentence: what the caller can do about it.
+ */
+export function storageDroppedText(
+  name: string,
+  namespace: string,
+  dropped: readonly string[],
+  remedy: string,
+): string {
+  return (
+    `Document '${name}' was not saved in namespace '${namespace}': the content drops ${definitionsPhrase(dropped)} ` +
+    "that the class has now, and IRIS would generate new storage at the next compile, " +
+    "which can change how existing rows are read. Nothing was stored. " +
+    remedy
+  );
 }
 
 /**
  * The refusal for a write that drops Storage definitions: `STORAGE_DROPPED`, `isError: true`, and
- * nothing stored.
- *
- * The text is `Document '<name>' was not saved in namespace '<namespace>': the content drops <the
- * Storage definition 'A' | the Storage definitions 'A', 'B'> that the class has now, and IRIS would
- * generate new storage at the next compile, which can change how existing rows are read. Nothing
- * was stored. <remedy>`.
+ * nothing stored. The text is {@link storageDroppedText}.
  *
  * @param name - The document name.
  * @param namespace - The namespace the write targeted.
@@ -79,18 +123,93 @@ export function storageDroppedRefusal(
   dropped: readonly string[],
   remedy: string,
 ): RefusalResult {
-  const quoted = dropped.map((definition) => `'${definition}'`).join(", ");
-  const subject =
-    dropped.length === 1 ? `the Storage definition ${quoted}` : `the Storage definitions ${quoted}`;
-  const text =
-    `Document '${name}' was not saved in namespace '${namespace}': the content drops ${subject} ` +
-    "that the class has now, and IRIS would generate new storage at the next compile, " +
-    "which can change how existing rows are read. Nothing was stored. " +
-    remedy;
-  return refusalResult(REFUSAL_CODES.STORAGE_DROPPED, text, {
+  return refusalResult(REFUSAL_CODES.STORAGE_DROPPED, storageDroppedText(name, namespace, dropped, remedy), {
     name,
     namespace,
-    droppedStorage: [...dropped],
+    ...storageDroppedDetail(dropped),
+  });
+}
+
+/** The fields of one dropped-Storage failure: the catalog code and the dropped definition names. */
+export interface StorageDroppedDetail {
+  code: typeof REFUSAL_CODES.STORAGE_DROPPED;
+  droppedStorage: string[];
+}
+
+/**
+ * The fields that mark one document's failure as a dropped-Storage refusal.
+ *
+ * @param dropped - The dropped names, at least one.
+ * @returns `{code: STORAGE_DROPPED, droppedStorage}`, with a copy of `dropped`.
+ */
+export function storageDroppedDetail(dropped: readonly string[]): StorageDroppedDetail {
+  return { code: REFUSAL_CODES.STORAGE_DROPPED, droppedStorage: [...dropped] };
+}
+
+/** The Storage definitions one document's write drops. */
+export interface StorageDrop {
+  /** The document name, such as `Pkg.A.cls`. */
+  name: string;
+  /** The dropped definition names, at least one. */
+  droppedStorage: string[];
+}
+
+/**
+ * One document's drops, as a result entry.
+ *
+ * @param name - The document name.
+ * @param dropped - The dropped names, at least one.
+ * @returns `{name, droppedStorage}`, with a copy of `dropped`.
+ */
+export function storageDrop(name: string, dropped: readonly string[]): StorageDrop {
+  return { name, droppedStorage: [...dropped] };
+}
+
+/**
+ * The drops as one line of prose: `Pkg.A.cls ('Default'); Pkg.B.cls ('Default', 'Alt')`.
+ *
+ * @param drops - The drops, in the order to list them.
+ * @param limit - When given, only the first `limit` documents are listed and the rest become
+ *   `; and N more`.
+ */
+export function describeStorageDrops(drops: readonly StorageDrop[], limit?: number): string {
+  const shown = limit === undefined ? drops : drops.slice(0, limit);
+  const listed = shown
+    .map((drop) => `${drop.name} (${drop.droppedStorage.map((definition) => `'${definition}'`).join(", ")})`)
+    .join("; ");
+  const hidden = drops.length - shown.length;
+  return hidden > 0 ? `${listed}; and ${hidden} more` : listed;
+}
+
+/**
+ * The refusal for a write that would drop Storage definitions from one or more documents at once:
+ * `STORAGE_DROPPED`, `isError: true`, and nothing stored.
+ *
+ * The text is `<opening>: it drops <list> that <the class has | the classes have> now, and IRIS would
+ * generate new storage at the next compile, which can change how existing rows are read. <remedy>`,
+ * where `<list>` is each drop as `the Storage definition 'A' of 'Pkg.X.cls'` (or `the Storage
+ * definitions 'A', 'B' of 'Pkg.X.cls'`), joined by `; `. `structuredContent` is
+ * `{code, ...fields, storageDrops}`.
+ *
+ * @param opening - What was not done, without a closing period.
+ * @param drops - The drops, at least one.
+ * @param remedy - The closing sentence: what the caller can do about it.
+ * @param fields - The fields placed between `code` and `storageDrops`.
+ */
+export function storageDropsRefusal(
+  opening: string,
+  drops: readonly StorageDrop[],
+  remedy: string,
+  fields: Record<string, unknown> = {},
+): RefusalResult {
+  const list = drops.map((drop) => `${definitionsPhrase(drop.droppedStorage)} of '${drop.name}'`).join("; ");
+  const owner = drops.length === 1 ? "the class has" : "the classes have";
+  const text =
+    `${opening}: it drops ${list} that ${owner} now, and IRIS would generate new storage at the next compile, ` +
+    `which can change how existing rows are read. ${remedy}`;
+  return refusalResult(REFUSAL_CODES.STORAGE_DROPPED, text, {
+    ...fields,
+    storageDrops: drops.map((drop) => storageDrop(drop.name, drop.droppedStorage)),
   });
 }
 
@@ -127,8 +246,11 @@ function attributeValue(attributes: string, attribute: string): string | undefin
   return undefined;
 }
 
-function xmlStorageNames(text: string): string[] {
-  const names: string[] = [];
+/**
+ * Call `visit` with the text between `<` and `>` of every tag in `text`, in source order. Comments and
+ * CDATA sections are skipped, and an unterminated one (or tag) ends the scan.
+ */
+function scanXmlTags(text: string, visit: (tag: string) => void): void {
   let i = 0;
   while (i < text.length) {
     const open = text.indexOf("<", i);
@@ -147,14 +269,69 @@ function xmlStorageNames(text: string): string[] {
     }
     const close = endOfTag(text, open);
     if (close < 0) break;
-    const tag = text.slice(open + 1, close);
-    if (tag.startsWith("Storage") && /^[\s/]/.test(tag.slice("Storage".length))) {
-      const name = attributeValue(tag.slice("Storage".length), "name");
-      if (name !== undefined) names.push(name);
-    }
+    visit(text.slice(open + 1, close));
     i = close + 1;
   }
+}
+
+/** The attribute text after the element name when `tag` opens `element` (`Storage name="Default"`), else `undefined`. */
+function openingAttributes(tag: string, element: string): string | undefined {
+  if (!tag.startsWith(element)) return undefined;
+  const attributes = tag.slice(element.length);
+  return /^[\s/]/.test(attributes) ? attributes : undefined;
+}
+
+function xmlStorageNames(text: string): string[] {
+  const names: string[] = [];
+  scanXmlTags(text, (tag) => {
+    const attributes = openingAttributes(tag, "Storage");
+    if (attributes === undefined) return;
+    const name = attributeValue(attributes, "name");
+    if (name !== undefined) names.push(name);
+  });
   return names;
+}
+
+/**
+ * The Storage definition names of every `<Class>` in an XML export, by class name.
+ *
+ * The XML is an Atelier or `$SYSTEM.OBJ` export: `<Export>` holding `<Class name="Pkg.X">` elements,
+ * each holding its `<Storage name="...">` elements. Names are listed in source order and compared
+ * exactly. A `<Storage>` outside a `<Class>`, a comment or a CDATA section never counts, and an
+ * element other than `Class` (a `<Routine>`, a `<Project>`) is not a class. A class with no
+ * `<Storage>` maps to `[]`; a class named twice keeps the later element's names. One leading BOM
+ * is ignored.
+ *
+ * @param lines - The XML text as the lines of an import's `content`.
+ * @returns A map from class name (`Pkg.X`, without `.cls`) to its Storage names; empty when the
+ *   text has no `<Class>`.
+ */
+export function xmlClassStorageNames(lines: readonly string[]): Map<string, string[]> {
+  const classes = new Map<string, string[]>();
+  let current: string[] | undefined;
+  scanXmlTags(stripLeadingBomFromLines([...lines]).join("\n"), (tag) => {
+    const classAttributes = openingAttributes(tag, "Class");
+    if (classAttributes !== undefined) {
+      const name = attributeValue(classAttributes, "name");
+      current = undefined;
+      if (name !== undefined && name !== "") {
+        const names: string[] = [];
+        classes.set(name, names);
+        if (!classAttributes.trimEnd().endsWith("/")) current = names;
+      }
+      return;
+    }
+    if (/^\/Class\s*$/.test(tag)) {
+      current = undefined;
+      return;
+    }
+    if (current === undefined) return;
+    const storageAttributes = openingAttributes(tag, "Storage");
+    if (storageAttributes === undefined) return;
+    const name = attributeValue(storageAttributes, "name");
+    if (name !== undefined) current.push(name);
+  });
+  return classes;
 }
 
 // --- UDL ---

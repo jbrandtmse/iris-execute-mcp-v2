@@ -108,7 +108,7 @@ const sessions = new Map<string, WireSession>();
 beforeAll(async () => {
   const sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
   if (!sdkEsmDir) {
-    throw new Error("Could not resolve the @modelcontextprotocol/sdk ESM build under node_modules/.pnpm - run pnpm install.");
+    throw new Error("Could not resolve the @modelcontextprotocol/client ESM build under node_modules/.pnpm - run pnpm install.");
   }
   const stale = ["shared", ...SERVERS.map((server) => server.pkg)]
     .map((pkg) => [pkg, staleDistReason(REPO_ROOT, pkg)] as const)
@@ -178,7 +178,7 @@ describe("the built servers keep their prompts over stdio, 12 in all (AC 41.2.2)
 
   it("iris-data-mcp registers no prompt: prompts/list and prompts/get are MethodNotFound", async () => {
     const session = sessionOf("iris-data-mcp");
-    const listRefusal = await session.listPrompts().then(
+    const listRefusal = await session.request("prompts/list").then(
       () => undefined,
       (error: unknown) => error as { code?: number },
     );
@@ -271,7 +271,7 @@ describe("every remaining prompt renders over stdio and none points at the retir
 
 /**
  * The wire bytes of every prompt, captured at 26dc8b2 (before Story 41.5 gave a prompt a skill-only field) from the
- * built dists over stdio, with a scratch Node script on the SDK `@modelcontextprotocol/sdk@1.29.0` (`StdioClientTransport`
+ * built dists over stdio, with a scratch Node script on the v1 MCP SDK client 1.29.0 (`StdioClientTransport`
  * against `packages/<pkg>/dist/index.js`, `IRIS_HOST=127.0.0.1`, `IRIS_PORT=9`). Each value is
  * `sha256(JSON.stringify(x))`: `list` hashes `(await client.listPrompts()).prompts`, and each `get` value hashes the whole
  * `getPrompt` result for `arguments` = every declared argument set to `v-<name>`. The oracle is the pre-change server,
@@ -299,7 +299,7 @@ const WIRE_GOLDEN: Record<string, { list: string; get: Record<string, string> }>
     get: {
       "trace-message-flow": "d774181ef6d285aeaf14fd41abdf83422a67d01e82705d125e19b92e3e1d0482",
       "recover-stuck-production": "186084eb03b610917a641d521db127596107ee7d5b97c402fea9c11a11eb4b4f",
-      "resend-failed-messages": "af4ac020ae0c2e8baace9ff5686431f60f3cb812fc479543569c36261da5211a",
+      "resend-failed-messages": "0ea05c8e4d79ef1bed288fccc12b7e600aa6780696adec01d2f28b9901694a2d",
       "find-patient-messages": "9f1b22aa8fc71c837b2a792f759b854ac7bc5e42bb2f1e822ddbc873401f080d",
     },
   },

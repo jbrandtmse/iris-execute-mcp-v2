@@ -45,7 +45,12 @@ async function callTool(server: any, name: string, args: unknown) {
 async function callToolOverWire(server: any, name: string, args: unknown) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handler = (server.server.server as any)._requestHandlers.get("tools/call");
-  const extra = { signal: new AbortController().signal, sendNotification: async () => {}, sendRequest: async () => ({}) };
+  const extra = {
+    signal: new AbortController().signal,
+    sendNotification: async () => {},
+    sendRequest: async () => ({}),
+    mcpReq: { requestState: () => undefined },
+  };
   return handler({ method: "tools/call", params: { name, arguments: args } }, extra);
 }
 

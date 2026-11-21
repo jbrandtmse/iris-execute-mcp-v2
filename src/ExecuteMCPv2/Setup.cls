@@ -13,17 +13,24 @@ Class ExecuteMCPv2.Setup Extends %RegisteredObject
 /// Default web application name for the ExecuteMCPv2 REST service.
 Parameter WEBAPP = "/api/executemcp/v2";
 
-/// Bootstrap version stamp — a short SHA-256 hash of the concatenated
-/// content of all embedded ObjectScript handler classes, injected by
-/// <code>scripts/gen-bootstrap.mjs</code> at generation time.
+/// Bootstrap version marker, injected by <code>scripts/gen-bootstrap.mjs</code>
+/// at generation time. The marker is
+/// <code>&lt;semver&gt;+&lt;sequence&gt;.&lt;hash&gt;</code>: the version of
+/// <code>@iris-mcp/shared</code>, a sequence that rises by one whenever the
+/// hash changes, and a short SHA-256 hash of the concatenated content of all
+/// embedded ObjectScript classes.
 /// <p>The value on disk is <code>"dev"</code> (a placeholder for local
-/// development). The bootstrap generator replaces it with the real hash
+/// development). The bootstrap generator replaces it with the real marker
 /// before embedding the class source into
 /// <code>packages/shared/src/bootstrap-classes.ts</code>.</p>
-/// <p>Used by the auto-bootstrap flow to detect whether the deployed
-/// classes match the embedded classes. When they differ, the bootstrap
-/// automatically redeploys the classes (skipping the one-time web
-/// application registration and package mapping steps).</p>
+/// <p>Used by the auto-bootstrap flow to order the deployed classes against
+/// the embedded ones: semver first, then sequence. A bare 12-hex marker
+/// (written by a build that predates the sequence) is older. The bootstrap
+/// redeploys the classes only over an absent or older deployment (skipping the
+/// one-time web application registration and package mapping steps). A newer
+/// deployment, an equal semver and sequence with a different hash, the
+/// <code>"dev"</code> placeholder and any unparseable value are left in place
+/// with a warning.</p>
 Parameter BOOTSTRAPVERSION = "dev";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
@@ -205,11 +212,12 @@ ClassMethod EnsureUnitTestRoot() As %String [ SqlProc ]
     Quit ^UnitTestRoot
 }
 
-/// Return the bootstrap version stamp baked into this class at embed time.
+/// Return the bootstrap version marker baked into this class at embed time.
 /// <p>The auto-bootstrap flow calls this via the Atelier SQL endpoint to
-/// determine whether the classes deployed on IRIS match the classes
-/// embedded in the currently-running MCP server. A mismatch triggers an
-/// automatic redeploy of all 13 handler classes.</p>
+/// order the classes deployed on IRIS against the classes embedded in the
+/// currently-running MCP server. An older deployment triggers an automatic
+/// redeploy of every embedded class; a newer or foreign one is left in
+/// place.</p>
 /// <p>If this method does not exist on the deployed Setup class (because
 /// the user is running an older version that predates the version-stamp
 /// mechanism), the SQL query throws and the bootstrap treats the

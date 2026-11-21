@@ -217,10 +217,10 @@ describe("iris_execute_command", () => {
     expect(result.structuredContent).toEqual({ output: "legacy" });
   });
 
-  it("should have correct annotations (readOnlyHint: false, destructiveHint: false)", () => {
+  it("should have correct annotations (readOnlyHint: false, destructiveHint: true)", () => {
     expect(executeCommandTool.annotations).toEqual({
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       idempotentHint: false,
       openWorldHint: false,
     });
@@ -446,10 +446,10 @@ describe("iris_execute_classmethod", () => {
     ).rejects.toThrow("ECONNREFUSED");
   });
 
-  it("should have correct annotations (readOnlyHint: false, destructiveHint: false)", () => {
+  it("should have correct annotations (readOnlyHint: false, destructiveHint: true)", () => {
     expect(executeClassMethodTool.annotations).toEqual({
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       idempotentHint: false,
       openWorldHint: false,
     });
