@@ -40,6 +40,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { skipUnbuilt } from "./builtDist.js";
 import {
   buildGovernanceCliEnv,
   parseCliJson,
@@ -127,11 +128,7 @@ afterAll(() => {
 });
 
 function skipIf(ctx: { skip: () => void }, label: string): boolean {
-  if (!skipReason) return false;
-  // eslint-disable-next-line no-console
-  console.log(`[SKIP] governance engine real-CLI e2e (${label}): ${skipReason}`);
-  ctx.skip();
-  return true;
+  return skipUnbuilt(ctx, `governance engine real-CLI e2e (${label})`, skipReason);
 }
 
 /** Run one engine command against the real CLI and require exit 0 + parseable JSON. */

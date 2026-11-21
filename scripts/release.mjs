@@ -37,8 +37,9 @@
 //      published (the Marketplace's vsix, `application/vsix`; Open VSX's JSON naming the namespace, name and version) is `already
 //      published` with no upload, absent (404) uploads with `--skip-duplicate` (a CLI line ending `is already published. Skipping
 //      publish.` after an exit 0 is still `already published`), and a lookup that cannot be judged (another status, a 200 that is not
-//      the store's answer, a network error, a 30 s stall) fails closed: nothing is uploaded and nothing after it is attempted. Open VSX also needs its namespace
-//      (`GET https://open-vsx.org/api/<publisher>`): absent is `not ready` in a rehearsal and `failed` before its upload in a release.
+//      the store's answer, a network error, a 30 s stall) fails closed: nothing is uploaded to that store and nothing after it is attempted (the channels before it
+//      have already run). Open VSX also needs its namespace (`GET https://open-vsx.org/api/<publisher>`, a 200 only when it is JSON):
+//      absent is `not ready` in a rehearsal and `failed` before its upload in a release.
 //      The CLIs are the exact pins in the launcher's `node_modules/.bin`; `vsce publish --oidc` is trusted publishing, and `ovsx publish`
 //      uses trusted publishing too unless OVSX_PAT is set (the first publish). In release mode the vsix must be at the manifest's version.
 //   5. AUTH. NPM_TOKEN set: a 0600 temporary userconfig holds it and is passed as `--userconfig`; it is removed on every exit path and the
@@ -956,15 +957,18 @@ async function storeLookup(deps, store, detail, version) {
 /** Ask Open VSX (read-only) whether the namespace exists: `{ state: 'present' | 'absent' | 'unknown', problem? }`. */
 async function openVsxNamespaceState(deps, publisher) {
   const answer = await readStatus(deps, openVsxNamespaceUrl(publisher), { Accept: 'application/json', 'User-Agent': 'iris-mcp-release' });
-  if (answer.status === 200) return { state: 'present' };
+  const type = String(answer.contentType ?? '').trim();
+  // Like a version lookup, a 200 is the namespace only when it is Open VSX's JSON, not a proxy or captive-portal page.
+  if (answer.status === 200 && /^application\/json\s*(?:;|$)/i.test(type)) return { state: 'present' };
   if (answer.status === 404) {
     return { state: 'absent', problem: `the Open VSX namespace ${publisher} does not exist. Create it once with npx ovsx create-namespace ${publisher} (owner step O1).` };
   }
-  return { state: 'unknown', problem: `the Open VSX namespace ${publisher} could not be read (${answer.error ?? `HTTP ${answer.status}`}). Check the network and open-vsx.org, then run the release again.` };
+  const why = answer.error ?? (answer.status === 200 ? `HTTP 200, but the answer is ${type === '' ? 'untyped' : type}, not JSON, so it is not the store's answer` : `HTTP ${answer.status}`);
+  return { state: 'unknown', problem: `the Open VSX namespace ${publisher} could not be read (${why}). Check the network and open-vsx.org, then run the release again.` };
 }
 
 /** The sentence for a lookup that could not be judged: the release stops, because it cannot tell an upload from a duplicate. */
-const lookupProblem = (store, item, why) => `could not ask ${store} whether ${item} is published (${why}). Nothing was uploaded; check the network and the store, then run the release again.`;
+const lookupProblem = (store, item, why) => `could not ask ${store} whether ${item} is published (${why}). Nothing was uploaded to ${store}; check the network and the store, then run the release again.`;
 
 /**
  * Rehearse (`--dry-run`) or perform the upload of a prepared artifacts directory (see the header).
@@ -1205,7 +1209,7 @@ async function runChannel(channel, detail, ctx) {
   const item = `${detail.name}@${detail.version}`;
   if (channel.id === 'open-vsx') {
     const namespace = await openVsxNamespaceState(deps, detail.publisher);
-    if (namespace.state !== 'present') return { status: STATUS.failed, detail: `${namespace.problem} Nothing was uploaded.` };
+    if (namespace.state !== 'present') return { status: STATUS.failed, detail: `${namespace.problem} Nothing was uploaded to open-vsx.` };
   }
   const lookup = await storeLookup(deps, channel.id, detail, detail.version);
   if (lookup.outcome === 'published') return { status: STATUS.alreadyPublished };

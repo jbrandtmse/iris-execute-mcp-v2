@@ -124,7 +124,7 @@
         "irisMcpLauncher.governanceFile": {
           "type": "string",
           "default": "",
-          "description": "Passed through UNCHANGED as IRIS_GOVERNANCE_FILE to every spawned server (path to the shared governance policy file). ALSO the file the 'IRIS MCP Launcher: Open Governance Editor' view edits. Empty = unset (no governance file; the editor shows an empty state). Explicit path only, never discovered; prefer an absolute path. Servers read the file once at startup — restart a server to apply edits."
+          "description": "Passed through UNCHANGED as IRIS_GOVERNANCE_FILE to every spawned server (path to the shared governance policy file). ALSO the file the 'IRIS MCP Launcher: Open Governance Editor' view edits. Empty = unset (no governance file; the editor shows an empty state). Explicit path only, never discovered; prefer an absolute path (a relative one is read from your home directory). Servers read the file once at startup — restart a server to apply edits."
         },
         "irisMcpLauncher.auditLog": {
           "type": "string",

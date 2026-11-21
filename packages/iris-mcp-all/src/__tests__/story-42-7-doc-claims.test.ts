@@ -83,6 +83,9 @@ describe("Story 42.7: the root README Releasing subsection", () => {
     expect(flat).toContain("the `OVSX_PAT` secret of the `release` environment");
     expect(flat).toContain("`OVSX_PAT=<token> npx ovsx create-namespace iris-mcp`");
     expect(flat, "the token is never in a documented command's arguments").not.toMatch(/create-namespace [^`]*-p <token>/);
+    // A `VAR=value cmd` line is saved in the shell history as typed: the README may not promise otherwise.
+    expect(flat).not.toContain("not in the shell history");
+    expect(flat).toContain("the shell still records the line as typed");
     expect(flat).toContain("The OIDC variables of the job reach only the three publish commands (`npm publish`, `vsce publish`, `ovsx publish`)");
     expect(flat).toContain("`OVSX_PAT` reaches only `ovsx publish` (as an environment variable, never in its arguments)");
     expect(flat).toContain("`VSCE_PAT` is never passed on");

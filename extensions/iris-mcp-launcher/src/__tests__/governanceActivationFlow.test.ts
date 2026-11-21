@@ -290,13 +290,15 @@ describe("DW-663: the working directory of the governance CLI spawn (real extens
       [
         'const fs = require("node:fs");',
         'const path = require("node:path");',
-        'fs.appendFileSync(path.join(__dirname, "cwd.log"), process.cwd() + "\\n");',
-        'fs.appendFileSync(path.join(__dirname, "argv.log"), process.argv[2] + "\\n");',
+        // One start line per run (its command and working directory), and one end line when it exits.
+        'const log = path.join(__dirname, "runs.log");',
+        'fs.appendFileSync(log, JSON.stringify({ start: process.argv[2], cwd: process.cwd() }) + "\\n");',
+        'process.on("exit", () => fs.appendFileSync(log, JSON.stringify({ end: process.argv[2] }) + "\\n"));',
         'process.stdout.write("{}\\n");',
         "",
       ].join("\n"),
     );
-    const log = path.join(cliDir, "cwd.log");
+    const log = path.join(cliDir, "runs.log");
     // A relative governanceFile lives in the home directory, the one the CLI runs in.
     const policy = relativeFile ? path.join(home, "policy.json") : path.join(repo, "policy.json");
     writeFileSync(policy, "{}\n");
@@ -315,19 +317,27 @@ describe("DW-663: the working directory of the governance CLI spawn (real extens
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
       expect(existsSync(log), "the stub governance CLI must record its working directory").toBe(true);
-      const lines = (): string[] => readFileSync(log, "utf8").split("\n").filter((line) => line !== "");
-      // The panel's later spawns (`universe` after `validate`) run in the same directories: wait until the count has held still for
-      // 400 ms, as the clients flow does, so that every spawn is recorded and none outlives the temp directories (EBUSY on Windows).
-      let last = -1;
-      for (let still = 0; still < 4; ) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        const count = lines().length;
-        still = count === last ? still + 1 : 0;
-        last = count;
+      type Run = { start?: string; cwd?: string; end?: string };
+      const runs = (): Run[] => readFileSync(log, "utf8").split("\n").filter((line) => line !== "").map((line) => JSON.parse(line) as Run);
+      // The panel's refresh ends with `universe` (after `validate` when the file exists), and every spawn runs in these temp
+      // directories: wait until `universe` has started and every run that started has exited, so that none outlives the
+      // directories (EBUSY on Windows) and none is missed. A timing guess (a quiet period) is not a signal on a slow runner.
+      const done = (): boolean => {
+        const all = runs();
+        const starts = all.filter((run) => run.start !== undefined);
+        return starts.some((run) => run.start === "universe") && all.filter((run) => run.end !== undefined).length === starts.length;
+      };
+      const deadline = Date.now() + 30000;
+      while (!done() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
       }
+      expect(done(), `the panel's universe run must start and every run must exit within 30 s: ${readFileSync(log, "utf8")}`).toBe(true);
+      // An exited process releases its working directory as it ends; let the engine see each close before the directories go.
       await flushEditor();
-      const cwds = lines().map((line) => realpathSync.native(line));
-      const commands = readFileSync(path.join(cliDir, "argv.log"), "utf8").split("\n").filter((line) => line !== "");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const startedRuns = runs().filter((run) => run.start !== undefined);
+      const cwds = startedRuns.map((run) => realpathSync.native(run.cwd as string));
+      const commands = startedRuns.map((run) => run.start as string);
       return { cwds, home: realpathSync.native(home), commands };
     } finally {
       for (const key of ["HOME", "USERPROFILE"] as const) {

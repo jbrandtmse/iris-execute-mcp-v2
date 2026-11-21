@@ -33,6 +33,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { skipUnbuilt } from "./builtDist.js";
 import {
   applyJson,
   availableModes,
@@ -133,11 +134,7 @@ afterAll(() => {
 });
 
 function skipIf(ctx: { skip: () => void }, label: string): boolean {
-  if (!skipReason) return false;
-  // eslint-disable-next-line no-console
-  console.log(`[SKIP] clients engine real-CLI e2e (${label}): ${skipReason}`);
-  ctx.skip();
-  return true;
+  return skipUnbuilt(ctx, `clients engine real-CLI e2e (${label})`, skipReason);
 }
 
 /** Plant the claude-code fixture at its real user-scope path inside the sandbox. */

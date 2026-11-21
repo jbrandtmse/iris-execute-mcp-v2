@@ -29,6 +29,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
+import { onCi } from "./builtDist.js";
 import { synthesizeIrisEnv } from "../env.js";
 import { readSettings } from "../settings.js";
 import type { ResolvedConnectionProfile } from "../types.js";
@@ -196,5 +197,10 @@ describe("Integration AC 31.4.5 — oracle availability", () => {
     // build yet); this pins the PATH, so moving packages/shared without
     // updating this file surfaces here rather than silently skipping forever.
     expect(SHARED_DIST.replace(/\\/g, "/")).toMatch(/\/packages\/shared\/dist$/);
+  });
+
+  it("on CI, where the launcher job builds every package first, the oracle is built, so the two contract suites above ran", () => {
+    // Off CI an unbuilt checkout may skip them; on CI a skip would hide a broken dist (Story 42.7 code review, Rule #59).
+    if (onCi()) expect(ORACLE_AVAILABLE, `the oracle is not built: ${CONFIG_JS}, ${PROFILES_JS}`).toBe(true);
   });
 });

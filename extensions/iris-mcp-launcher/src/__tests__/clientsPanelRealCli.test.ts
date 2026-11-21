@@ -36,6 +36,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { skipUnbuilt } from "./builtDist.js";
 import {
   applyJson,
   availableModes,
@@ -277,11 +278,7 @@ async function openPanel(harness: PanelHarness): Promise<string> {
 }
 
 function skipAll(ctx: { skip: () => void }, label: string): boolean {
-  if (!skipReason) return false;
-  // eslint-disable-next-line no-console
-  console.log(`[SKIP] clients panel real-CLI journeys (${label}): ${skipReason}`);
-  ctx.skip();
-  return true;
+  return skipUnbuilt(ctx, `clients panel real-CLI journeys (${label})`, skipReason);
 }
 
 // ════════════════════════════════════════════════════════════════════

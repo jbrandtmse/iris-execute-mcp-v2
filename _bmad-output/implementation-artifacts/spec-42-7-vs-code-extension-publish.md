@@ -235,7 +235,7 @@ deferred: []
 
 ### Review Findings
 
-The code review of 2026-11-21 (frozen diff `19eaf1a..c87662a`) is recorded under `## Review` at the end of this file: 1 high, 6 medium and 16 low entries, every one dispositioned.
+The code review of 2026-11-21 (frozen diff `19eaf1a..c87662a`) is recorded under `## Review` at the end of this file: 1 high, 6 medium and 16 low entries, every one dispositioned. The scoped re-review of the patch commit (`c87662a..ed84b21`, iteration 2) is under `### Re-review (iteration 2)` there: 0 high, 2 medium and 5 low entries patched, 8 entries rejected.
 
 ## Spec Change Log
 
@@ -543,7 +543,9 @@ Every test added or changed passes on a fresh environment, in either order, and 
 - mutation: `release-version.mjs` heading rename without keeping the line's `\r` → `release-version.test.ts` "a changelog with CRLF line endings keeps them ..." red.
 
 **Recorded mutations (code review, 2026-11-21):** each applied, observed red, reverted, the file `cmp`-identical to its saved copy.
-- mutation: `storeOutcome` returns `published` for any 200/206 (the status-only shape) → `release-core.test.ts` the four "a Marketplace 200 that is ... is `unknown`" rows and six "an Open VSX answer that is ... is `unknown`" rows, and `release-script.test.ts` "a Marketplace 200 that is not the store's answer ..." and "in a rehearsal, a store 200 that is not the store's answer ..." red (12).
+- mutation: `storeOutcome` returns `published` for any 200/206 (the status-only shape) → `release-core.test.ts` the four "a Marketplace 200 that is ... is `unknown`" rows and six "an Open VSX answer that is ... is `unknown`" rows, and `release-script.test.ts` "a Marketplace 200 that is not the store's answer ..." and "in a rehearsal, a store 200 that is not the store's answer ..." red (12). Recounted mechanically in the re-review (Rule #51), the same mutation turns 16 rows red: `release-core.test.ts` 4 Marketplace and 7 Open VSX rows (the 206 row too), and `release-script.test.ts` 5 (the Marketplace HTML row, the three "an Open VSX 200 that is ..." rows and the rehearsal row).
+- mutation (re-review): with `packages/iris-ops-mcp/dist/tools/index.js` hidden and `CI=true`, `governanceEngineRealCli.test.ts` fails 4 of 4 ("... may not skip on CI, where the launcher job builds every package first: ..."); without `CI`, 4 skipped; restored, `shasum` identical. With `packages/shared/dist/profiles.js` hidden and `CI=true`, `envContract.test.ts` "on CI ... the oracle is built ..." red; without `CI`, it passes and the two contract suites skip.
+- mutation (re-review): `openVsxNamespaceState` back to any 200 → `release-script.test.ts` "an Open VSX namespace 200 that is not JSON ..." red.
 - mutation: `storeOutcome`'s Open VSX `namespace`/`name`/`version` check always passes → `release-script.test.ts` "an Open VSX 200 that is JSON for another version ..." and "... JSON with no version ..." red.
 - mutation: `storeLookup` asks `readStatus` for no JSON (`json: false`) → `release-script.test.ts` "Already on a store ..." red (a real Open VSX hit is no longer read).
 - mutation: the store-CLI failure detail without the `ended with no output` fallback → `release-script.test.ts` "a store CLI that exits non-zero with no output ..." red.
@@ -726,3 +728,54 @@ Code review, 2026-11-21, of the frozen diff `git diff 19eaf1a c87662a` (the lock
 **Re-review recommended:** yes. H1's proof is the first CI run (A1). M1 to M3 and L2 change behavior.
 
 **For the lead:** at A1, record each `launcher` leg's counts and expect exactly 3 skipped (the two unarmed live files). A Windows red there is likely test hygiene, not product (the M3 fix is proven on macOS only). O1 must come before any tag after the epic-end merge (M6). DW-702 is for the decision sheet.
+
+### Re-review (iteration 2)
+
+Scoped re-review, 2026-11-21, of the frozen diff `git diff c87662a ed84b21` (the first review's patch commit). Four layers ran, tier `full-opus`, and all four delivered: Blind Hunter (12 rows), Edge Case Hunter (9), Verification Gap (2 gaps and 2 other findings), Acceptance Auditor (4). That is 29 rows, grouped into 15 entries. Review outcome: no HIGH, and both MEDIUMs patched.
+
+**Per-patch verdicts (each mutation re-run in this pass: reverted, observed red, restored, tree identical):**
+- **H1 holds.** `ci.yml`, `ci-checks.mjs` and the self-test agree on `run: pnpm build`. That is turbo's build of every `packages/*`, including the five servers' `dist/tools/index.js` and the shared and client-config CLIs. Locally, after a full build, the launcher suite is 452 passed and 3 skipped. The skips are exactly the two live files: `governanceUiRoundTrip` has 1 test and `localSpawnIntegration` has 2. The same holds under `CI=true`. Mutation: narrowing `ci.yml` alone turns 5 `ci-workflow.test.ts` rows red. The cause H1 exposed (a silent skip) now also fails on CI: see R1.
+- **M1 holds.** `storeOutcome` gives `published` only for a Marketplace 200/206 typed `application/vsix`, or an Open VSX 200 typed `application/json` with matching `namespace`, `name` and `version`. A 404 is `absent`, and everything else is `unknown`. The fakes use the real types and bodies; the auditor re-probed both stores read-only and they match. Mutation (status-only): 16 rows red, not the 12 recorded. The `## Verification` line is corrected (Rule #51).
+- **M2 holds.** The governance CLI reads the path as given, relative to its cwd (home). The panel's `fileExists` now resolves against `os.homedir()`. Mutation: back to `stat(candidatePath)` turns the relative-file row red (`expected [ 'universe' ] to include 'validate'`).
+- **M3: not enough. Re-patched (R2).**
+- **M4 holds.** Mutation: a `## [0.9.0]` first heading in the real extension CHANGELOG turns the row red.
+- **L1 holds.** It reads the right exit. A whitespace-only stderr is rejected below.
+- **L2 holds.** The precheck runs after the git, changeset and CLI checks and before the first write. Mutation (precheck disabled): the 3 refusal rows go red, each through its `git status --porcelain` assertion.
+- **L3: the README overclaimed. Re-patched (R4).**
+- **L4 to L7: hold.** L4's runtime sentence is now scoped to its store (R5).
+
+**New entries:**
+- **R1 (MEDIUM; verification-gap + blind; fix-risk low).** The cause of H1 survived it. A real-CLI file whose dist is missing, or whose local-mode resolution fails, still skips silently on CI, with a green leg. **Patched.**
+  - The fix is a new helper, `extensions/iris-mcp-launcher/src/__tests__/builtDist.ts` (`skipUnbuilt`, `onCi`). On CI (`CI=true`, which GitHub Actions sets on every runner) it throws, naming the reason. Off CI it still skips, so an unbuilt clone runs. The `skipIf`/`skipAll` of `governanceEngineRealCli`, `clientsEngineRealCli` and `clientsPanelRealCli` now call it, and `envContract` asserts its oracle is built on CI.
+  - The two live files keep their own arming, so they skip unarmed on CI as before. The helper's rows are in `builtDist.test.ts`.
+  - Mutations on the guarded path are recorded under `## Verification`. Premise change: the first review rejected "no guard for silently skipped real-CLI files" before H1 showed that the mechanism had hidden a real defect.
+- **R2 (MEDIUM, Rule 19 hermeticity; verification-gap + edge + blind + auditor; fix-risk low).** `governanceCwds` waited for a 400 ms quiet period, not for a signal, and had no deadline of its own.
+  - The panel spawns `universe` only after `validate` exits, so on a slow Windows runner the gap can exceed 400 ms. The temp directories were then deleted under a live spawn (EBUSY), and the spawn was missed.
+  - **Patched:** the stub now writes a start line (command and cwd) and an exit line to one log. The helper waits, with a 30 s deadline and a named failure, until `universe` has started and every started run has exited. One log also removes the `cwd.log`/`argv.log` read race.
+  - The clients helper's quiet period (L16) was not flagged and is unchanged.
+- **R3 (LOW; edge + verification-gap + blind; patched).** `openVsxNamespaceState` read any 200 as `present`, which is M1's sibling. A 200 is now `present` only when it is JSON. Otherwise it is `could not be read (HTTP 200, but the answer is <type>, not JSON ...)`. New row in `release-script.test.ts`.
+  - The child-process `STORE_STUB` now types its answers as the real stores do (JSON). Untyped, the real-process rows would have read the namespace as unknown.
+- **R4 (LOW; blind + auditor; patched).** The root README said that `OVSX_PAT=<token> npx ...` keeps the token out of the shell history. The shell records the typed line. It now says what is true (not in the arguments or the process list), and how to keep the line out of the history. Pinned in `story-42-7-doc-claims.test.ts`.
+- **R5 (LOW; edge + blind; patched).** The store row's sentence "Nothing was uploaded" read as global while npm (and the Marketplace) had already uploaded. It is now "Nothing was uploaded to <store>". The `release.mjs` header says the earlier channels have already run. The three pinning rows are updated.
+- **R6 (LOW, Rule #51; blind + auditor; closed).** The M1 mutation tally is corrected from 12 to 16 under `## Verification`.
+- **R7 (LOW; blind; patched).** The relative `governanceFile` rule (read from home) is now in the extension README settings row and in the setting's description in `package.json`, not only in the CHANGELOG.
+
+**Rejected:**
+- Spec text stale (Code Map :115 `storeOutcome(status)`, :150 the narrowed build, Task 10 "200/206 → published", and the matrix's "Lookup unreadable" row) (auditor + blind). The fix edits the spec under review, and the matrix is inside the frozen intent block. It is for the lead (below).
+- Spec O1 step 4 still has `-p <token>` (blind). This is a spec edit: for the lead.
+- The first store release: "the next release after 1.0.0" against decision #95's v1.1.0 (blind). DW-704 (by-design) stands; nothing new.
+- The Open VSX "JSON that did not parse" reads "does not name ..." (blind). It fails closed either way, the case is rare, and the fix adds a branch.
+- A whitespace-only stderr hides a signal in the L1 fallback (edge). The real CLIs print text on failure, and the case is rare.
+- The doc-claims row "its first section records the story" will need an update when a later story adds a section (edge + blind). By design: it pins this story's docs, as L6 asked, and the story that adds a section updates it.
+- The L2 refusal message form (auditor). Nothing is mis-stated, by the auditor's own reading.
+- The real-process `STORE_STUB` answered untyped (verification-gap other). The in-process path covers the typed branches with real `Response` objects, and the stub is now typed anyway (R3).
+
+**Runs on the patched tree:**
+- Launcher, unarmed: 32 files, 457 passed and 3 skipped. The same under `CI=true`.
+- `@iris-mcp/all`: `ci-workflow`, `release-core`, `release-script`, `release-version`, `story-42-7-doc-claims` and `package-manifests`, 606 passed.
+- `node --check` passes on the four changed or touched scripts. The launcher's `tsc --noEmit` is clean.
+
+**Re-review recommended:** no. **For the lead:**
+- At A1, a `launcher` leg now fails, rather than skips, if any real-CLI dist is missing. Expect 3 skipped per leg.
+- R2 makes the A1 Windows leg's governance rows wait on exit signals. The clients rows still use the quiet period.
+- Rule #42: amend Code Map :115 and :150, Task 10, and O1 step 4 (`OVSX_PAT=<token> npx ovsx create-namespace iris-mcp`) at Phase C.

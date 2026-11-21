@@ -1471,7 +1471,7 @@ describe("Publish: the extension stores (Story 42.7)", () => {
     const report = reportOf(world);
     expect(report).toMatch(/vscode-marketplace\n {2}iris-mcp-launcher@1\.0\.0: failed \(could not ask vscode-marketplace whether iris-mcp-launcher@1\.0\.0 is published/);
     expect(report).toMatch(cause);
-    expect(report).toContain("Nothing was uploaded; check the network and the store, then run the release again.");
+    expect(report).toContain("Nothing was uploaded to vscode-marketplace; check the network and the store, then run the release again.");
     expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
     expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: skipped: not enabled (Story 42.8)");
   });
@@ -1564,7 +1564,7 @@ describe("Publish: the extension stores (Story 42.7)", () => {
     expect(world.standIns.calls("vsce")).toHaveLength(1);
     expect(world.standIns.calls("ovsx"), "nothing uploaded to a namespace that does not exist").toEqual([]);
     expect(world.stores.requests.map((request) => request.url)).toEqual([MARKETPLACE_LOOKUP, OPEN_VSX_NAMESPACE]);
-    expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: failed (the Open VSX namespace iris-mcp does not exist. Create it once with npx ovsx create-namespace iris-mcp (owner step O1). Nothing was uploaded.)");
+    expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: failed (the Open VSX namespace iris-mcp does not exist. Create it once with npx ovsx create-namespace iris-mcp (owner step O1). Nothing was uploaded to open-vsx.)");
   });
 
   it("an Open VSX namespace that cannot be read is `failed` too, with the status", async () => {
@@ -1572,7 +1572,19 @@ describe("Publish: the extension stores (Story 42.7)", () => {
     world.stores.namespace = { status: 502 };
     expect(await world.run()).toBe(1);
     expect(world.standIns.calls("ovsx")).toEqual([]);
-    expect(reportOf(world)).toMatch(/open-vsx\n {2}iris-mcp-launcher@1\.0\.0: failed \(the Open VSX namespace iris-mcp could not be read \(HTTP 502\)\. Check the network and open-vsx\.org, then run the release again\. Nothing was uploaded\./);
+    expect(reportOf(world)).toMatch(/open-vsx\n {2}iris-mcp-launcher@1\.0\.0: failed \(the Open VSX namespace iris-mcp could not be read \(HTTP 502\)\. Check the network and open-vsx\.org, then run the release again\. Nothing was uploaded to open-vsx\./);
+  });
+
+  it("an Open VSX namespace 200 that is not JSON (a captive-portal or proxy page) is not the namespace: `failed`, ovsx does not run", async () => {
+    const world = newWorld();
+    world.stores.namespace = HTML_PAGE;
+    expect(await world.run()).toBe(1);
+    expect(world.standIns.calls("vsce"), "the Marketplace still uploads").toHaveLength(1);
+    expect(world.standIns.calls("ovsx")).toEqual([]);
+    expect(world.stores.requests.map((request) => request.url), "the version is not asked after a namespace that cannot be judged").toEqual([MARKETPLACE_LOOKUP, OPEN_VSX_NAMESPACE]);
+    expect(reportOf(world)).toContain(
+      "open-vsx\n  iris-mcp-launcher@1.0.0: failed (the Open VSX namespace iris-mcp could not be read (HTTP 200, but the answer is text/html; charset=utf-8, not JSON, so it is not the store's answer). Check the network and open-vsx.org, then run the release again. Nothing was uploaded to open-vsx.)",
+    );
   });
 
   describe("the rehearsal", () => {
@@ -2086,7 +2098,8 @@ describe("scripted runs of `node scripts/release.mjs` with the stand-ins as the 
     '  if (url.host === "marketplace.visualstudio.com" || url.host === "open-vsx.org") {',
     "    appendFileSync(process.env.STORE_STUB_LOG, JSON.stringify({ url: url.href, headers: init?.headers ?? {} }) + String.fromCharCode(10));",
     '    const namespace = url.host === "open-vsx.org" && url.pathname.split("/").filter(Boolean).length === 2;',
-    "    return Promise.resolve(new Response(null, { status: namespace ? 200 : 404 }));",
+    // Typed as the real stores type these answers (JSON for the namespace and for both 404s, 2026-11-21).
+    '    return Promise.resolve(new Response(namespace ? JSON.stringify({ extensions: {} }) : JSON.stringify({ error: "not found" }), { status: namespace ? 200 : 404, headers: { "Content-Type": "application/json" } }));',
     "  }",
     "  return real(input, init);",
     "};",
