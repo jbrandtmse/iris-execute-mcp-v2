@@ -180,3 +180,5 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-11-21T00:38:39Z	Story 42.5	fresh_check	env=clean-checkout_worktree_frozen_install_turbo_build tests=1360_both_orders result=pass order=forward,shuffle_seed7 model=claude-opus-5-5
 2026-11-21T00:38:39Z	Story 42.5	committed	sha=661d291 code_sha=661d291 build_sha=eb3c13a,45458c8 submodules= ci=success run=44841738584 branch=epic42 pushed=origin/epic42 verified=merge-base+headSha amendments=spec_items(lead);epics.md:DW-694/DW-696_bullets;spine:AD-29,AD-14,stack,deferred
 2026-11-21T00:38:39Z	Story 42.5	story_cycle	plan_to_commit_min=42031 implement_passes=2 reviews=3 rework=1 first_ci=success models=plan:claude-opus-5-5,implement:claude-sonnet-5-5,qa:claude-sonnet-5-5,cr:claude-opus-5-5
+2026-11-21T00:40:29Z	Epic 42	epic_context_compiled	reason=planning_artifact_newer(DW-696_bullet,42.5_done) model=claude-opus-5-5 lines=85
+2026-11-21T00:40:29Z	Story 42.6	stage_spawned	stage=plan spawn_at=2026-11-21T00:40:29Z model=claude-opus-5-5 agent_name=42-6-tarball-smoke-and-1-0-0-publish-plan-1 cycle_iteration=1
