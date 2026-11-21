@@ -308,17 +308,17 @@ describe("Story 42.4 (AC 42.4.2, AC 42.4.4): the ipm job builds and installs the
 describe("Story 42.7 (DW-532): the launcher job runs the extension's whole suite on three operating systems", () => {
   const LAUNCHER_HEAD = "  launcher:\n    name: launcher (${{ matrix.os }})\n    runs-on: ${{ matrix.os }}\n    timeout-minutes: 30\n";
   const OS_MATRIX = '        os: ["ubuntu-24.04", "macos-15", "windows-2025"]\n';
-  const DISTS_STEP = "      - name: build the CLIs the tests run\n        run: pnpm --filter @iris-mcp/client-config --filter @iris-mcp/shared build\n";
+  const DISTS_STEP = "      - name: build the dists the tests read\n        run: pnpm build\n";
   const TEST_STEP = "      - name: launcher tests\n        run: npx --no -- vitest run\n        working-directory: extensions/iris-mcp-launcher\n";
   const LAUNCHER_NODE =
-    'node-version: "22.17.0"\n          cache: pnpm\n      - name: install\n        run: pnpm install --frozen-lockfile\n      - name: build the CLIs the tests run';
+    'node-version: "22.17.0"\n          cache: pnpm\n      - name: install\n        run: pnpm install --frozen-lockfile\n      - name: build the dists the tests read';
 
   it("the registry declares the job: the three runners in order, 30 minutes, and the five steps that run the whole suite", () => {
     expect([...LAUNCHER_RUNNERS]).toEqual(["ubuntu-24.04", "macos-15", "windows-2025"]);
     expect(JOB_TIMEOUT_MINUTES.launcher).toBe(30);
     expect(DECLARED_STEPS.launcher).toEqual([
       { run: "pnpm install --frozen-lockfile" },
-      { run: "pnpm --filter @iris-mcp/client-config --filter @iris-mcp/shared build" },
+      { run: "pnpm build" },
       { run: "npm ci", workingDirectory: "extensions/iris-mcp-launcher" },
       { run: "npm run build", workingDirectory: "extensions/iris-mcp-launcher" },
       { run: "npx --no -- vitest run", workingDirectory: "extensions/iris-mcp-launcher" },
@@ -350,7 +350,8 @@ describe("Story 42.7 (DW-532): the launcher job runs the extension's whole suite
     ["a longer launcher budget", () => mutate(text, "timeout-minutes: 30\n    strategy:", "timeout-minutes: 60\n    strategy:"), /launcher has timeout-minutes 60, not 30/],
     ["the whole suite narrowed to one file", () => mutate(text, "run: npx --no -- vitest run\n", "run: npx --no -- vitest run src/__tests__/live-arming-guard.test.ts\n"), /launcher: the declared step is not in the workflow.*vitest run/],
     ["the test step removed", () => mutate(text, TEST_STEP, ""), /launcher: the declared step is not in the workflow.*vitest run/],
-    ["the dist build step removed", () => mutate(text, DISTS_STEP, ""), /launcher: the declared step is not in the workflow.*client-config/],
+    ["the dist build step removed", () => mutate(text, DISTS_STEP, ""), /launcher: the declared step is not in the workflow.*pnpm build/],
+    ["the build narrowed to two of the packages (the governance real-CLI file would skip)", () => mutate(text, DISTS_STEP, DISTS_STEP.replace("run: pnpm build", "run: pnpm --filter @iris-mcp/client-config --filter @iris-mcp/shared build")), /launcher: the declared step is not in the workflow.*pnpm build/],
     ["a launcher test step that may fail", () => mutate(text, "run: npx --no -- vitest run\n", "run: npx --no -- vitest run || true\n"), /\|\| true/],
   ] as Array<[string, () => string, RegExp]>)("fails on %s", (_label, apply, expected) => {
     expect(workflowProblems(apply(), context).join("\n")).toMatch(expected);

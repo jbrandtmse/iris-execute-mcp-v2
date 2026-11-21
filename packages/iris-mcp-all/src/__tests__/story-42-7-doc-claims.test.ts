@@ -75,13 +75,14 @@ describe("Story 42.7: the root README Releasing subsection", () => {
     expect(flat).toContain("and the Open VSX namespace, which Open VSX matches case-sensitively");
     expect(flat).toContain("asks the store, read-only, whether it already holds the version");
     expect(flat).toContain("is `already published` and nothing is uploaded");
-    expect(flat).toContain("an answer that cannot be read stops the release before any upload");
+    expect(flat).toContain("an answer that cannot be judged (an unreadable store, or a 200 that is not the store's own answer) stops the release before that store's upload");
     expect(flat).toContain("The Marketplace uses trusted publishing (`vsce publish --oidc`");
     expect(flat).toContain("Azure DevOps global personal access tokens stop working on 2026-12-01");
     expect(flat).toContain("there is no Marketplace secret");
     expect(flat).toContain("Open VSX needs an access token for the first publish of an extension");
     expect(flat).toContain("the `OVSX_PAT` secret of the `release` environment");
-    expect(flat).toContain("`npx ovsx create-namespace iris-mcp -p <token>`");
+    expect(flat).toContain("`OVSX_PAT=<token> npx ovsx create-namespace iris-mcp`");
+    expect(flat, "the token is never in a documented command's arguments").not.toMatch(/create-namespace [^`]*-p <token>/);
     expect(flat).toContain("The OIDC variables of the job reach only the three publish commands (`npm publish`, `vsce publish`, `ovsx publish`)");
     expect(flat).toContain("`OVSX_PAT` reaches only `ovsx publish` (as an environment variable, never in its arguments)");
     expect(flat).toContain("`VSCE_PAT` is never passed on");
@@ -171,6 +172,7 @@ describe("Story 42.7: the extension CHANGELOG", () => {
   it("has no section headed as unpublished 0.1.0, and its first section records the story", () => {
     expect(sectionsOfExtension.map((section) => section.split("\n")[0])).not.toContain("## [0.1.0] \u2014 Unreleased (not yet published)");
     expect(current).not.toBe("");
+    expect(sectionsOfExtension[0]?.includes("(Story 42.7)"), "the first section is the one that records the story").toBe(true);
   });
 
   it("records the publisher and `private`, the lockstep, the working directory and the green suite", () => {

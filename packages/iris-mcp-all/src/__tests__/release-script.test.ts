@@ -34,7 +34,10 @@ import {
   startGithubServer,
   startHangingServer,
   fakeFetch,
+  HTML_PAGE,
+  marketplaceHit,
   newFakeStores,
+  openVsxHit,
   storeAnswerFor,
   writeManifest,
   type ArtifactManifest,
@@ -1419,7 +1422,7 @@ describe("Publish: the extension stores (Story 42.7)", () => {
   it("Already on a store: a lookup that finds the version (200, or 206 for the one byte) is `already published` with no CLI publish call, and the other store goes on", async () => {
     for (const found of [200, 206]) {
       const world = newWorld();
-      world.stores.marketplace = { status: found };
+      world.stores.marketplace = marketplaceHit(found);
       expect(await world.run()).toBe(0);
       expect(world.standIns.calls("vsce"), `status ${found}: no upload`).toEqual([]);
       expect(world.standIns.calls("ovsx"), "Open VSX still uploads").toHaveLength(1);
@@ -1427,8 +1430,8 @@ describe("Publish: the extension stores (Story 42.7)", () => {
       expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: published (auth: oidc)");
     }
     const both = newWorld();
-    both.stores.marketplace = { status: 200 };
-    both.stores.openVsx = { status: 200, body: { version: "1.0.0" } };
+    both.stores.marketplace = marketplaceHit();
+    both.stores.openVsx = openVsxHit();
     expect(await both.run()).toBe(0);
     expect(both.standIns.calls("vsce")).toEqual([]);
     expect(both.standIns.calls("ovsx")).toEqual([]);
@@ -1484,6 +1487,44 @@ describe("Publish: the extension stores (Story 42.7)", () => {
     expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: published (auth: oidc)");
     expect(report).toMatch(/open-vsx\n {2}iris-mcp-launcher@1\.0\.0: failed \(could not ask open-vsx whether iris-mcp-launcher@1\.0\.0 is published \(HTTP 503\)/);
     expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: not attempted");
+  });
+
+  it("a Marketplace 200 that is not the store's answer (a captive-portal or proxy HTML page) is `failed`, never `already published`: nothing uploaded, nothing after it attempted, exit 1", async () => {
+    const world = newWorld();
+    world.stores.marketplace = HTML_PAGE;
+    expect(await world.run()).toBe(1);
+    expect(world.standIns.calls("vsce"), "nothing uploaded").toEqual([]);
+    expect(world.standIns.calls("ovsx"), "nothing after it attempted").toEqual([]);
+    const report = reportOf(world);
+    expect(report).not.toContain("already published");
+    expect(report).toContain(
+      "vscode-marketplace\n  iris-mcp-launcher@1.0.0: failed (could not ask vscode-marketplace whether iris-mcp-launcher@1.0.0 is published (HTTP 200, but the content type is text/html; charset=utf-8, not application/vsix, so it is not the store's answer).",
+    );
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
+  });
+
+  it.each([
+    ["an HTML page", HTML_PAGE],
+    ["JSON for another version", openVsxHit("0.9.0")],
+    ["JSON with no version (a proxy's own JSON)", { status: 200, body: { ok: true } }],
+  ] as Array<[string, FakeAnswer]>)("an Open VSX 200 that is %s is `failed`, never `already published`, and ovsx does not run", async (_label, answer) => {
+    const world = newWorld();
+    world.stores.openVsx = answer;
+    expect(await world.run()).toBe(1);
+    expect(world.standIns.calls("vsce"), "the Marketplace still uploads").toHaveLength(1);
+    expect(world.standIns.calls("ovsx"), "nothing uploaded").toEqual([]);
+    const report = reportOf(world);
+    expect(report).not.toContain("already published");
+    expect(report).toMatch(/open-vsx\n {2}iris-mcp-launcher@1\.0\.0: failed \(could not ask open-vsx whether iris-mcp-launcher@1\.0\.0 is published \(HTTP 200, but .*so it is not the store's answer\)/);
+  });
+
+  it("in a rehearsal, a store 200 that is not the store's answer is `not ready`, never `ready (would be already published)`", async () => {
+    const world = newWorld();
+    world.stores.marketplace = HTML_PAGE;
+    expect(await world.run({ dryRun: true })).toBe(1);
+    const report = reportOf(world);
+    expect(report).not.toContain("would be already published");
+    expect(report).toMatch(/vscode-marketplace\n {2}iris-mcp-launcher@1\.0\.0: not ready \(could not ask vscode-marketplace whether iris-mcp-launcher@1\.0\.0 is published \(HTTP 200, but the content type is text\/html/);
   });
 
   it("Lookup unreadable by a stall: a store that never answers is cut off by the 30 s guard of the deps, and the release fails closed", async () => {
@@ -1548,7 +1589,7 @@ describe("Publish: the extension stores (Story 42.7)", () => {
 
     it("a version that a store already holds reads `ready (would be already published)`", async () => {
       const world = newWorld();
-      world.stores.marketplace = { status: 206 };
+      world.stores.marketplace = marketplaceHit(206);
       expect(await world.run({ dryRun: true })).toBe(0);
       expect(reportOf(world)).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: ready (would be already published)");
       expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0)");
@@ -1723,6 +1764,16 @@ describe("Publish: the extension stores, QA gaps (Story 42.7, Rules #54, #59)", 
     const report = reportOf(world);
     expect(report).toMatch(/vscode-marketplace\n {2}iris-mcp-launcher@1\.0\.0: failed \(spawn .*vsce ENOEXEC \(token \*\*\*\)\)/);
     expect(report).not.toContain(OVSX_PAT);
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
+  });
+
+  it("a store CLI that exits non-zero with no output is `failed` with how it ended, never an empty `failed ()`", async () => {
+    const world = newWorld();
+    world.standIns.script("vsce", [{ match: ["publish"], status: 3 }]);
+    expect(await world.run()).toBe(1);
+    const report = reportOf(world);
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: failed (vsce ended with no output (exit 3))");
+    expect(report).not.toContain("failed ()");
     expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
   });
 

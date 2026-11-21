@@ -18,8 +18,8 @@ after it, once the owner has created the publisher and the namespace.
   by default; the IPM channel stays disabled until Story 42.8. The two store CLIs are exact `devDependencies` of the extension (`@vscode/vsce`
   `4.1.1`, `ovsx` `1.4.0`), installed in `rehearse` and `publish` with `npm ci --ignore-scripts`.
 - **A read-only store lookup before each upload.** A version already on a store reads `already published` with no upload (a rerun of the same
-  tag), an exit 0 that printed `is already published. Skipping publish.` is also `already published`, and an answer that cannot be read stops
-  the release before any upload. The Open VSX namespace is read too: a missing one is `not ready` in a rehearsal and `failed` in a release.
+  tag), an exit 0 that printed `is already published. Skipping publish.` is also `already published`, and an answer that cannot be judged (an
+  unreadable store, or a 200 that is not the store's own answer) stops the release before that store's upload. The Open VSX namespace is read too: a missing one is `not ready` in a rehearsal and `failed` in a release.
   The OIDC variables reach only `npm publish`, `vsce publish` and `ovsx publish`, `OVSX_PAT` reaches only `ovsx publish`, and `VSCE_PAT` and
   `OVSX_PAT` join the secrets that no other child process sees.
 - **The extension follows the shared version.** `pnpm run version` stamps the extension's `package.json` and `package-lock.json` and renames the

@@ -21,6 +21,16 @@ export interface FakeAnswer {
   body?: unknown;
   /** When set, the request fails with this message instead of answering (a network error, or the stall guard of 30 seconds). */
   fail?: string;
+  /** The answer's `Content-Type` (default `application/json`, the type of every GitHub, registry and store JSON answer). */
+  contentType?: string;
+  /** A body that is not JSON, sent as is in place of `body` (a vsix, an HTML page). */
+  raw?: string;
+}
+
+/** The `Response` of a fake answer: `raw` as is, else `body` as JSON, typed `contentType` or `application/json`. */
+function responseOf(answer: FakeAnswer): Response {
+  const body = answer.raw ?? (answer.body === undefined ? null : JSON.stringify(answer.body));
+  return new Response(body, { status: answer.status, headers: { "Content-Type": answer.contentType ?? "application/json" } });
 }
 
 /** The state of the fake GitHub API. */
@@ -107,7 +117,7 @@ export function fakeFetch(github: FakeGithub, extra: (url: string, init?: FakeIn
     const other = extra(url, init);
     const answer = other ?? (url.startsWith("https://api.github.com") ? answerFor(github, url, init?.headers?.["Authorization"] ?? "") : { status: 599, body: { message: `no route for ${url}` } });
     if (answer.fail !== undefined) throw new Error(answer.fail);
-    return new Response(answer.body === undefined ? null : JSON.stringify(answer.body), { status: answer.status, headers: { "Content-Type": "application/json" } });
+    return responseOf(answer);
   }) as unknown as typeof fetch;
 }
 
@@ -154,12 +164,32 @@ export interface FakeStores {
   requests: Array<{ url: string; headers: Record<string, string>; signal: boolean; method: string; hasBody: boolean }>;
 }
 
-/** Fake stores on which the extension is not published and the namespace exists. */
+/**
+ * The Marketplace's answer for a version it holds: the vsix itself (a zip, `PK\u0003\u0004`), typed as the real store types it
+ * (`application/vsix; api-version=7.2-preview.1`, read-only GETs of five extensions on 2026-11-21). `status` 206 is the one-byte read the
+ * request asks for; the real store ignores the Range header and answers 200.
+ */
+export function marketplaceHit(status = 200): FakeAnswer {
+  return { status, contentType: "application/vsix; api-version=7.2-preview.1", raw: "PK\u0003\u0004" };
+}
+
+/**
+ * Open VSX's answer for a version it holds: JSON that names it (`namespace`, `name`, `version`, among about 40 other fields; read-only GET
+ * of `intersystems-community/servermanager/3.10.2` on 2026-11-21, `application/json`).
+ */
+export function openVsxHit(version = "1.0.0", namespace = "iris-mcp", name = "iris-mcp-launcher"): FakeAnswer {
+  return { status: 200, contentType: "application/json", body: { namespace, name, version, downloadable: true, targetPlatform: "universal" } };
+}
+
+/** A captive-portal or proxy page: 200, HTML, nothing of the store's. */
+export const HTML_PAGE: FakeAnswer = { status: 200, contentType: "text/html; charset=utf-8", raw: "<!doctype html><title>Sign in to the network</title>" };
+
+/** Fake stores on which the extension is not published and the namespace exists (the real 404 bodies, 2026-11-21). */
 export function newFakeStores(): FakeStores {
   return {
-    marketplace: { status: 404, body: { message: "not found" } },
-    openVsx: { status: 404, body: { error: "Extension not found: iris-mcp.iris-mcp-launcher" } },
-    namespace: { status: 200, body: { name: "iris-mcp" } },
+    marketplace: { status: 404, contentType: "application/json; charset=utf-8", body: { $id: "1", innerException: null, message: "Resource not found", typeKey: "ExtensionAssetNotFoundException" } },
+    openVsx: { status: 404, body: { deprecated: false, downloadable: false, error: "Extension not found: iris-mcp.iris-mcp-launcher 1.0.0" } },
+    namespace: { status: 200, body: { extensions: {} } },
     requests: [],
   };
 }
@@ -184,7 +214,7 @@ export function fakeStoresFetch(stores: FakeStores = newFakeStores()): typeof fe
   return (async (input: unknown, init?: FakeInit) => {
     const answer = storeAnswerFor(stores, String(input), init) ?? { status: 599, body: { message: `no route for ${String(input)}` } };
     if (answer.fail !== undefined) throw new Error(answer.fail);
-    return new Response(answer.body === undefined ? null : JSON.stringify(answer.body), { status: answer.status });
+    return responseOf(answer);
   }) as unknown as typeof fetch;
 }
 

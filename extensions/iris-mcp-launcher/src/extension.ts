@@ -47,6 +47,7 @@
 import * as vscode from "vscode";
 import { stat } from "node:fs/promises";
 import * as os from "node:os";
+import * as path from "node:path";
 
 import { SERVER_MANAGER_EXTENSION_ID } from "./constants.js";
 import {
@@ -394,8 +395,10 @@ export function activate(context: vscode.ExtensionContext): void {
     fileExists: async (candidatePath) => {
       // 32-2-R1: async stat (the 31-6-2 discipline) — a UNC governance-file
       // path must never stall the extension host on panel open/refresh.
+      // A relative path is the one the governance CLI reads: it runs in the
+      // user's home directory (DW-663), so the check resolves against it too.
       try {
-        return (await stat(candidatePath)).isFile();
+        return (await stat(path.resolve(os.homedir(), candidatePath))).isFile();
       } catch {
         return false;
       }

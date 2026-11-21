@@ -491,6 +491,10 @@ describe("Publish refusals: a real run only for a push of the tag, on the prepar
  *   Marketplace  3.10.2 -> 200 (application/vsix; the Range header was ignored)   0.0.1 -> 404 (application/json)
  *   Open VSX     3.10.2 -> 200 (application/json)                                 0.0.1 -> 404 (application/json)
  *   Open VSX namespace intersystems-community -> 200, iris-mcp -> 404 (the owner has not created it yet)
+ * Re-read on 2026-11-21 for the evidence `storeOutcome` requires: every Marketplace hit (servermanager 3.10.2, ms-python.python 2024.0.0,
+ * esbenp.prettier-vscode 10.1.0, vscode-objectscript 2.12.0, redhat.vscode-yaml 1.14.0) is 200 `application/vsix; api-version=7.2-preview.1`
+ * with no redirect; its 404 is `application/json; charset=utf-8` (`ExtensionAssetNotFoundException`). Open VSX's 3.10.2 hit is
+ * `application/json` with `namespace` "intersystems-community", `name` "servermanager", `version` "3.10.2"; its 404 is JSON with `error`.
  */
 describe("The store lookups (Story 42.7)", () => {
   it("the Open VSX URL is the metadata of the version, and the Marketplace URL is the vspackage of the version", () => {
@@ -515,9 +519,11 @@ describe("The store lookups (Story 42.7)", () => {
     expect(storeLookupHeaders("open-vsx")).toEqual({ Accept: "application/json", "User-Agent": "iris-mcp-release" });
   });
 
+  const EXPECTED = { publisher: "iris-mcp", name: "iris-mcp-launcher", version: "1.0.0" };
+  const VSIX = "application/vsix; api-version=7.2-preview.1";
+  const OPEN_VSX_BODY = { namespace: "iris-mcp", name: "iris-mcp-launcher", version: "1.0.0", downloadable: true };
+
   it.each([
-    [200, "published"],
-    [206, "published"],
     [404, "absent"],
     [403, "unknown"],
     [401, "unknown"],
@@ -527,8 +533,45 @@ describe("The store lookups (Story 42.7)", () => {
     [503, "unknown"],
     [301, "unknown"],
     [undefined, "unknown"],
-  ])("the status %s is %s", (status, expected) => {
-    expect(storeOutcome(status as number | undefined)).toBe(expected);
+  ])("the status %s is %s on both stores, whatever the body", (status, expected) => {
+    for (const store of ["vscode-marketplace", "open-vsx"] as const) {
+      expect(storeOutcome(store, { status: status as number | undefined, contentType: "application/json" }, EXPECTED).outcome).toBe(expected);
+    }
+  });
+
+  it("the Marketplace's 200 or 206 is `published` only when it carries the vsix (application/vsix, the real store's type)", () => {
+    expect(storeOutcome("vscode-marketplace", { status: 200, contentType: VSIX }, EXPECTED)).toEqual({ outcome: "published" });
+    expect(storeOutcome("vscode-marketplace", { status: 206, contentType: "application/vsix" }, EXPECTED)).toEqual({ outcome: "published" });
+  });
+
+  it.each([
+    ["an HTML page (a captive portal or a proxy)", "text/html; charset=utf-8", /the content type is text\/html; charset=utf-8, not application\/vsix/],
+    ["JSON", "application/json; charset=utf-8", /not application\/vsix/],
+    ["a look-alike type", "application/vsixfoo", /not application\/vsix/],
+    ["no content type", null, /the content type is missing/],
+  ])("a Marketplace 200 that is %s is `unknown`, so the release does not skip the upload", (_label, contentType, why) => {
+    const judged = storeOutcome("vscode-marketplace", { status: 200, contentType }, EXPECTED);
+    expect(judged.outcome).toBe("unknown");
+    expect(judged.why).toMatch(/^HTTP 200, but /);
+    expect(judged.why).toMatch(why);
+  });
+
+  it("Open VSX's 200 is `published` only when it is JSON that names the namespace, the name and the version asked for", () => {
+    expect(storeOutcome("open-vsx", { status: 200, contentType: "application/json", body: OPEN_VSX_BODY }, EXPECTED)).toEqual({ outcome: "published" });
+  });
+
+  it.each([
+    ["an HTML page", { status: 200, contentType: "text/html", body: undefined }, /the answer is text\/html, not JSON/],
+    ["JSON that did not parse", { status: 200, contentType: "application/json", body: undefined }, /does not name iris-mcp\.iris-mcp-launcher@1\.0\.0/],
+    ["another version", { status: 200, contentType: "application/json", body: { ...OPEN_VSX_BODY, version: "0.9.0" } }, /does not name/],
+    ["another namespace (Open VSX matches it case-sensitively)", { status: 200, contentType: "application/json", body: { ...OPEN_VSX_BODY, namespace: "IRIS-MCP" } }, /does not name/],
+    ["another name", { status: 200, contentType: "application/json", body: { ...OPEN_VSX_BODY, name: "other" } }, /does not name/],
+    ["a JSON array", { status: 200, contentType: "application/json", body: [OPEN_VSX_BODY] }, /does not name/],
+    ["a 206 (Open VSX is not asked for a range)", { status: 206, contentType: "application/json", body: OPEN_VSX_BODY }, /^HTTP 206$/],
+  ])("an Open VSX answer that is %s is `unknown`", (_label, answer, why) => {
+    const judged = storeOutcome("open-vsx", answer, EXPECTED);
+    expect(judged.outcome).toBe("unknown");
+    expect(judged.why).toMatch(why);
   });
 });
 
@@ -578,8 +621,10 @@ describe("extensionChangelogProblems (Story 42.7): the first `## [` heading name
   it("the real changelog of the extension is not at a release heading while it is Unreleased, and is once it is versioned", () => {
     const text = readFileSync(path.join(REPO_ROOT, EXTENSION_CHANGELOG_PATH), "utf8");
     const first = /^## \[([^\]]*)\]/m.exec(text)?.[1];
-    expect(first).toBeDefined();
-    expect(extensionChangelogProblems(text, first as string)).toEqual([]);
+    const manifest = JSON.parse(readFileSync(path.join(REPO_ROOT, "extensions", "iris-mcp-launcher", "package.json"), "utf8")) as { version: string };
+    // Between releases the first heading is [Unreleased]; on a version commit it is the extension's own version. Nothing else.
+    expect(first === "Unreleased" || first === manifest.version, `the first heading is [${first}]`).toBe(true);
+    expect(extensionChangelogProblems(text, manifest.version)).toHaveLength(first === "Unreleased" ? 1 : 0);
     expect(extensionChangelogProblems(text, "99.0.0")).toHaveLength(1);
   });
 });

@@ -241,9 +241,11 @@ describe("Story 33.3 — MCP Clients activation flow (real extension.ts, faked e
       );
       expect(memento.store.get(CLIENT_ROSTER_STATE_KEY)).toEqual(["claude-code"]);
     } finally {
-      process.env.HOME = prior.HOME;
-      process.env.USERPROFILE = prior.USERPROFILE;
-      process.env.APPDATA = prior.APPDATA;
+      // An absent variable is deleted again, never left as the string "undefined" for the tests after this one.
+      for (const key of ["HOME", "USERPROFILE", "APPDATA"] as const) {
+        if (prior[key] === undefined) delete process.env[key];
+        else process.env[key] = prior[key];
+      }
       rmSync(home, { recursive: true, force: true });
     }
   }, 120000);

@@ -34,10 +34,11 @@
 //      release mode, and unless the environment guard passes again. `--dry-run` runs `npm publish --dry-run`, never reads NPM_TOKEN, and runs no `vsce`/`ovsx` publish, no
 //      `git push` and no userconfig write; its store steps make read-only GETs only.
 //      THE STORES (Story 42.7). Each store channel (the Marketplace, then Open VSX) asks the store, read-only, whether it holds the version:
-//      published is `already published` with no upload, absent uploads with `--skip-duplicate` (a CLI line ending `is already published.
-//      Skipping publish.` after an exit 0 is still `already published`), and a lookup that cannot be read (another status, a network
-//      error, a 30 s stall) fails closed: nothing is uploaded and nothing after it is attempted. Open VSX also needs its namespace
-//      (`GET https://open-vsx.org/api/<publisher>`): absent is `not ready` in a rehearsal and `failed` before any upload in a release.
+//      published (the Marketplace's vsix, `application/vsix`; Open VSX's JSON naming the namespace, name and version) is `already
+//      published` with no upload, absent (404) uploads with `--skip-duplicate` (a CLI line ending `is already published. Skipping
+//      publish.` after an exit 0 is still `already published`), and a lookup that cannot be judged (another status, a 200 that is not
+//      the store's answer, a network error, a 30 s stall) fails closed: nothing is uploaded and nothing after it is attempted. Open VSX also needs its namespace
+//      (`GET https://open-vsx.org/api/<publisher>`): absent is `not ready` in a rehearsal and `failed` before its upload in a release.
 //      The CLIs are the exact pins in the launcher's `node_modules/.bin`; `vsce publish --oidc` is trusted publishing, and `ovsx publish`
 //      uses trusted publishing too unless OVSX_PAT is set (the first publish). In release mode the vsix must be at the manifest's version.
 //   5. AUTH. NPM_TOKEN set: a 0600 temporary userconfig holds it and is passed as `--userconfig`; it is removed on every exit path and the
@@ -919,16 +920,27 @@ function vsixReadiness(channel, repoRoot, cliName) {
 /** The OIDC request variables of the job that are set: what a publish CLI needs to ask GitHub for its token. */
 const oidcEnv = (env) => Object.fromEntries(OIDC_VARIABLES.filter((name) => typeof env[name] === 'string').map((name) => [name, env[name]]));
 
-/** The HTTP status of a read-only GET (the body is not read), or `{ error }` when it failed or stalled. */
-async function readStatus(deps, url, headers) {
+/**
+ * The HTTP status and content type of a read-only GET, or `{ error }` when it failed or stalled. With `json`, a 200 that says it is JSON
+ * has its body parsed into `body` (left out when it does not parse); every other body is cancelled unread.
+ */
+async function readStatus(deps, url, headers, { json = false } = {}) {
   try {
     const response = await deps.fetch(url, { headers });
+    const contentType = response.headers.get('content-type');
+    if (json && response.status === 200 && /^application\/json\s*(?:;|$)/i.test(String(contentType ?? '').trim())) {
+      try {
+        return { status: response.status, contentType, body: await response.json() };
+      } catch {
+        return { status: response.status, contentType };
+      }
+    }
     try {
       await response.body?.cancel();
     } catch {
-      // only the status is read
+      // only the status and the content type are read
     }
-    return { status: response.status };
+    return { status: response.status, contentType };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
@@ -936,9 +948,9 @@ async function readStatus(deps, url, headers) {
 
 /** Ask a store (read-only) whether it holds `detail.name@version`: `{ outcome: 'published' | 'absent' | 'unknown', why? }`. */
 async function storeLookup(deps, store, detail, version) {
-  const answer = await readStatus(deps, storeLookupUrl(store, detail.publisher, detail.name, version), storeLookupHeaders(store));
-  const outcome = storeOutcome(answer.status);
-  return outcome === 'unknown' ? { outcome, why: answer.error ?? `HTTP ${answer.status}` } : { outcome };
+  const answer = await readStatus(deps, storeLookupUrl(store, detail.publisher, detail.name, version), storeLookupHeaders(store), { json: store === 'open-vsx' });
+  if (answer.error !== undefined) return { outcome: 'unknown', why: answer.error };
+  return storeOutcome(store, answer, { publisher: detail.publisher, name: detail.name, version });
 }
 
 /** Ask Open VSX (read-only) whether the namespace exists: `{ state: 'present' | 'absent' | 'unknown', problem? }`. */
@@ -1202,7 +1214,11 @@ async function runChannel(channel, detail, ctx) {
   const useToken = channel.id === 'open-vsx' && typeof env.OVSX_PAT === 'string' && env.OVSX_PAT !== '';
   const argv = [cli, ...(channel.id === 'vscode-marketplace' ? vsceArgv(vsix) : ovsxArgv(vsix, { token: useToken }))];
   const uploaded = await deps.run(argv, { cwd: path.join(repoRoot, LAUNCHER_RELATIVE), env: childEnv(env, { ...oidcEnv(env), ...(useToken ? { OVSX_PAT: env.OVSX_PAT } : {}) }) });
-  if (uploaded.status !== 0) return { status: STATUS.failed, detail: quote(tail(uploaded.stderr || uploaded.error?.message || uploaded.stdout, 4)) };
+  if (uploaded.status !== 0) {
+    const said = tail(uploaded.stderr || uploaded.error?.message || uploaded.stdout, 4);
+    // A CLI that ends silently (a non-zero exit with no output) still says how it ended.
+    return { status: STATUS.failed, detail: quote(said === '' ? `${cliName} ended with no output (exit ${uploaded.status ?? 'none'})` : said) };
+  }
   // `--skip-duplicate` exits 0 for an upload and for a skip alike: the CLI's own line tells them apart.
   if (skippedDuplicate(uploaded.stdout)) return { status: STATUS.alreadyPublished };
   return { status: STATUS.published, detail: channel.id === 'open-vsx' && useToken ? 'auth: token' : 'auth: oidc' };

@@ -233,6 +233,10 @@ deferred: []
 - Given the MCP Clients view opened with a workspace folder, when it runs any clients CLI command, then the spawned process's `cwd` is that folder's path; with no folder, the user's home (DW-663).
 - Given the lead checklist, when the next release tag publishes, then both stores list `iris-mcp.iris-mcp-launcher@<v>`, and installs from the Marketplace into a clean VS Code and from Open VSX into VSCodium (or Cursor) start the servers, with the result recorded (AC 42.7.2, AC 42.7.3; lead and owner, after npm 1.0.0 is live).
 
+### Review Findings
+
+The code review of 2026-11-21 (frozen diff `19eaf1a..c87662a`) is recorded under `## Review` at the end of this file: 1 high, 6 medium and 16 low entries, every one dispositioned.
+
 ## Spec Change Log
 
 ## Review Triage Log
@@ -538,6 +542,17 @@ Every test added or changed passes on a fresh environment, in either order, and 
 - mutation: `uploadPathProblems` version check without the `manifest?.mode === 'release'` condition → `release-script.test.ts` "the version check is a release's ..." red.
 - mutation: `release-version.mjs` heading rename without keeping the line's `\r` → `release-version.test.ts` "a changelog with CRLF line endings keeps them ..." red.
 
+**Recorded mutations (code review, 2026-11-21):** each applied, observed red, reverted, the file `cmp`-identical to its saved copy.
+- mutation: `storeOutcome` returns `published` for any 200/206 (the status-only shape) → `release-core.test.ts` the four "a Marketplace 200 that is ... is `unknown`" rows and six "an Open VSX answer that is ... is `unknown`" rows, and `release-script.test.ts` "a Marketplace 200 that is not the store's answer ..." and "in a rehearsal, a store 200 that is not the store's answer ..." red (12).
+- mutation: `storeOutcome`'s Open VSX `namespace`/`name`/`version` check always passes → `release-script.test.ts` "an Open VSX 200 that is JSON for another version ..." and "... JSON with no version ..." red.
+- mutation: `storeLookup` asks `readStatus` for no JSON (`json: false`) → `release-script.test.ts` "Already on a store ..." red (a real Open VSX hit is no longer read).
+- mutation: the store-CLI failure detail without the `ended with no output` fallback → `release-script.test.ts` "a store CLI that exits non-zero with no output ..." red.
+- mutation: the `launcher` build step back to `pnpm --filter @iris-mcp/client-config --filter @iris-mcp/shared build` in `ci-checks.mjs` and `ci.yml` → `ci-workflow.test.ts` "the registry declares the job ...", "fails on the dist build step removed" and "fails on the build narrowed to two of the packages" red. The real path: with `packages/iris-ops-mcp/dist/tools/index.js` hidden, `governanceEngineRealCli.test.ts` reports 4 of 4 skipped (the CI state before the fix); restored, 4 passed.
+- mutation: the panel's `fileExists` adapter back to `stat(candidatePath)` → `governanceActivationFlow.test.ts` "a relative governanceFile is found where the CLI reads it ..." red (`expected [ 'universe' ] to include 'validate'`).
+- mutation: the version step's extension precheck disabled → `release-version.test.ts` "a changelog whose first `## ` heading is not `## [Unreleased]` ...", "an `## [Unreleased]` heading that is not the first ..." and "a lock with fewer version fields ..." red (the tree is left changed).
+- mutation: a `## [0.2.0]` section put above `## [Unreleased]` in the real extension CHANGELOG → `release-core.test.ts` "the real changelog of the extension is not at a release heading ..." red (`the first heading is [0.2.0]`).
+- mutation: the real extension `package.json` at `1.0.1` → `story-42-6-qa-gate-verify.test.ts` "reads all eight packages at one plain version ..." red (AC 42.7.1's real-tree lockstep).
+
 **Lead checklist** (stages do none of it; record every URL and result here).
 
 *Phase A, on `epic42`, after the story commit; no npm dependency:*
@@ -669,3 +684,45 @@ QA stage (2026-11-20), against build commit `62c34ec`. Method: a gap analysis of
 - deferred (low): a store CLI killed by a signal or by the 30-minute `runCaptured` timeout returns `status: null` with no `error` and no output, so the row reads `failed ()` with an empty detail; the exit code is still 1 and the status is `failed`. A fallback such as `exited without a status` would read better.
 - note: the fake `fetch` answers a 301 as a final status; the real `fetch` follows redirects, so a `(HTTP 301)` cause can only come from a redirect with no usable `Location`. The branch is fail-closed either way and harmless.
 - containers used: none. Shared IRIS: not touched. No store, registry or GitHub call other than public read-only GETs (curl) to `open-vsx.org` and `marketplace.visualstudio.com`.
+
+## Review
+
+Code review, 2026-11-21, of the frozen diff `git diff 19eaf1a c87662a` (the lockfile checked mechanically, the rest by four layers: Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor; tier `full-opus`, every layer delivered). Fix-risk is given per entry. Patch commit: see the closing report.
+
+**Lockfile (mechanical):** `@vscode/vsce` 4.1.1 and `ovsx` 1.4.0 resolve exactly; the lock's `version` and `packages[""].version` are `1.0.0`; every entry resolves from `registry.npmjs.org`; the additions are vsce 4.x's and ovsx's own dependencies (`@napi-rs/keyring` replacing `keytar`, `@inquirer/*`, `@node-rs/crc32`, `yauzl-promise`); install scripts only in `@vscode/vsce-sign`, `esbuild`, `fsevents`, which `--ignore-scripts` skips in `rehearse` and `publish`.
+
+**Checks that held:** `id-token: write` and `secrets.` only in `publish`; `launcher` in `DECLARED_STEPS`, `ci.yml` and the self-test; a red leg fails `ci-gate` (whole-run `conclusion`); the real tree is in lockstep (extension, lock and shared all `1.0.0`); the lead checklist publishes nothing before O3, and B1/Phase C wait on npm 1.0.0; OIDC variables and `OVSX_PAT` reach only their CLIs; no test was weakened by the DW-532 or DW-663 changes (Rule 3: the release script, the CI self-test and the launcher flows run as real processes and through the real `activate()`).
+
+**High**
+- H1 — The `launcher` job built only client-config and shared, so `governanceEngineRealCli.test.ts` (which needs all five servers' `dist/tools/index.js`) skipped 4 of 4 on every leg, against AC 1 ("the only skips are the two live files") and #59 (blind, edge, verification-gap, auditor). **Patched**: the step is `pnpm build` (the gates/throwaway/package sibling), in `ci-checks.mjs`, `ci.yml` and the self-test, plus a narrowed-build mutation row; the CI header and root README corrected. Fix-risk low (tsc-only builds, portable). Proven only by CI: see the lead items.
+
+**Medium**
+- M1 — (lead-routed, QA) A store lookup read only the status, so a proxy or captive-portal 200 read as `already published` and the release skipped the upload with exit 0 (blind, auditor, verification-gap). **Patched**: `storeOutcome(store, answer, expected)` needs the store's own evidence: Marketplace 200/206 typed `application/vsix`; Open VSX 200 `application/json` whose `namespace`, `name` and `version` match; 404 stays `absent`; anything else `unknown` (fail closed). The fakes now answer the real content types and bodies (re-probed 2026-11-21, five Marketplace extensions, recorded in the `release-core.test.ts` header). Fix-risk low.
+- M2 — With a relative `governanceFile`, the panel's `fileExists` checked the extension host's directory while the CLI (now in home, DW-663) read home (blind). **Patched**: the adapter resolves against `os.homedir()`; a `governanceActivationFlow` row proves the editor runs `validate` on a relative file. Fix-risk low.
+- M3 — `governanceCwds` deleted its temp directories while the panel's `universe` spawn could still run in them (Windows EBUSY), and read the log after the first spawn only (blind, edge, verification-gap). **Patched**: the clients helper's 400 ms hold-still wait (a near-copy: the two activation-flow files share no helper module). Fix-risk low.
+- M4 — "the real changelog of the extension ..." could not fail: it compared the file's first heading with itself (verification-gap). **Patched**: it asserts the first heading is `[Unreleased]` or the manifest's version. Fix-risk low.
+- M5 — With no folder open, Cursor's project scope (`.cursor/mcp.json` in home) is its user file (`~/.cursor/mcp.json`) (auditor). **decision-pending**, DW-702 (owner burndown): refuse or flag project scope when the project directory is home, or document it. Fix-risk med; out of footprint (client-config).
+- M6 — A store not ready in `rehearse` (no Open VSX namespace before O1, or a store outage) blocks `publish`, npm included (blind, edge). **by-design**, DW-704: the matrix row "Open VSX namespace absent" makes the dry run exit 1. Consequence for the lead: O1 must come before any post-merge tag, a 1.0.x fix included.
+
+**Low**
+- L1 — (QA) A store CLI ending non-zero with no output read `failed ()`. **Patched**: `<cli> ended with no output (exit N)`. (A signal already carries `ended by <signal>` from `runCaptured`.)
+- L2 — The version step found a bad extension heading or lock only after `changeset version` and gen-bootstrap had changed the tree, and could stamp one file but not another (blind, edge x2, auditor). **Patched**: a read-only precheck of all three before anything is written; the refusal rows now assert a clean tree.
+- L3 — The root README told the owner `ovsx create-namespace ... -p <token>` (token in argv) (blind). **Patched**: `OVSX_PAT=<token> npx ovsx create-namespace iris-mcp`, pinned. The spec's O1 step 4 keeps the old form (intent text, not edited here).
+- L4 — "an answer that cannot be read stops the release before any upload" was untrue (npm, and maybe the Marketplace, upload first) (edge). **Patched** in the README, root CHANGELOG and `release.mjs` header.
+- L5 — The extension CHANGELOG line "until then the extension installs only from a `.vsix`" would be wrong in the section that ships to the stores (auditor). **Patched**.
+- L6 — The doc-claims row "its first section records the story" searched every section (auditor). **Patched**.
+- L7 — 33-3-3 restored `HOME`/`USERPROFILE`/`APPDATA` by assigning `undefined` (verification-gap). **Patched**.
+- L8 — A first Open VSX publish with `OVSX_PAT` unset fails after npm and the Marketplace (blind, edge). **wontfix-accepted**, DW-703 (O2 sets the secret; re-run failed jobs recovers).
+- L9 — Invalid JSON in the extension manifest or lock crashes `readReleaseFacts` uncaught (edge). **wontfix-theoretical**: the crash still exits non-zero; real if a non-JSON manifest could be committed past CI.
+- L10 — The clients CLI's `npx` now runs in the workspace, so a workspace `.npmrc` applies (edge). **by-design** (decision #98): the extension declares no `untrustedWorkspaces` support, so it runs only in trusted workspaces.
+- L11 — Nothing checks the skip count on the CI legs (auditor). **Patched at the cause** (H1); the lead's A1 records it.
+- L12 — The extension CHANGELOG says the suite passes on Windows before a Windows run (auditor). **by-design**: A1/A1b is the gate; reword if A1's Windows leg is red.
+- L13 — Spec frontmatter `status: done` vs "stays `in-progress`" (auditor). **by-design**: frontmatter is build-auto state; sprint-status stays `in-progress` until C4.
+- L14 — The fake 301 row is a final 3xx, which the real `fetch` returns only for a redirect with no `Location` (blind, verification-gap). **wontfix-theoretical**: fail-closed either way; the reachable case (a redirect to a 200 page) is now `unknown` under M1, and the probed store URLs do not redirect.
+- L15 — AC 42.7.1's real-tree lockstep row had no `mutation:` line (verification-gap). **Closed**: applied and recorded under `## Verification`.
+- L16 — (Rule 2, on this review's own M3 patch) the hold-still loop copies the clients helper's. Kept: about eight lines, and no shared test-helper module exists.
+- Dismissed: "a `v1.0.0` tag cut after this merge publishes nothing" (edge). `v1.0.0` is tagged on `main` `55ae0eb`, which predates the enabled store channels.
+
+**Re-review recommended:** yes. H1's proof is the first CI run (A1). M1 to M3 and L2 change behavior.
+
+**For the lead:** at A1, record each `launcher` leg's counts and expect exactly 3 skipped (the two unarmed live files). A Windows red there is likely test hygiene, not product (the M3 fix is proven on macOS only). O1 must come before any tag after the epic-end merge (M6). DW-702 is for the decision sheet.

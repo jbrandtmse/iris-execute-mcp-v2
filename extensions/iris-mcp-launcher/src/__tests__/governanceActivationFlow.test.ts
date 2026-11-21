@@ -277,9 +277,10 @@ describe("Story 32.2 QA — governance editor activation flow (real extension.ts
 describe("DW-663: the working directory of the governance CLI spawn (real extension.ts, stub CLI in a temp repo)", () => {
   /**
    * Open the editor through the real command with a stub governance CLI that records its own working directory, with HOME sandboxed to
-   * a temp directory, and return the directories it ran in and the sandboxed home. `folder` is what `workspace.workspaceFolders` holds.
+   * a temp directory, and return the directories it ran in, the sandboxed home and the command of each run (its first argument).
+   * `folder` is what `workspace.workspaceFolders` holds; with `relativeFile` the governanceFile setting is `policy.json`, kept in home.
    */
-  async function governanceCwds(folder?: string): Promise<{ cwds: string[]; home: string }> {
+  async function governanceCwds(folder?: string, { relativeFile = false }: { relativeFile?: boolean } = {}): Promise<{ cwds: string[]; home: string; commands: string[] }> {
     const repo = mkdtempSync(path.join(tmpdir(), "governance-cwd-repo-"));
     const home = mkdtempSync(path.join(tmpdir(), "governance-cwd-home-"));
     const cliDir = path.join(repo, "packages", "shared", "dist", "cli");
@@ -290,19 +291,21 @@ describe("DW-663: the working directory of the governance CLI spawn (real extens
         'const fs = require("node:fs");',
         'const path = require("node:path");',
         'fs.appendFileSync(path.join(__dirname, "cwd.log"), process.cwd() + "\\n");',
+        'fs.appendFileSync(path.join(__dirname, "argv.log"), process.argv[2] + "\\n");',
         'process.stdout.write("{}\\n");',
         "",
       ].join("\n"),
     );
     const log = path.join(cliDir, "cwd.log");
-    const policy = path.join(repo, "policy.json");
+    // A relative governanceFile lives in the home directory, the one the CLI runs in.
+    const policy = relativeFile ? path.join(home, "policy.json") : path.join(repo, "policy.json");
     writeFileSync(policy, "{}\n");
     const prior = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
     process.env.HOME = home;
     process.env.USERPROFILE = home;
     try {
       mockState.configStore.set(`${CONFIG}.developmentRepoPath`, repo);
-      mockState.configStore.set(`${CONFIG}.governanceFile`, policy);
+      mockState.configStore.set(`${CONFIG}.governanceFile`, relativeFile ? "policy.json" : policy);
       if (folder !== undefined) mockState.workspaceFolders = [{ uri: Uri.file(folder), name: "workspace", index: 0 }];
       activate(fakeContext());
       await flushEditor();
@@ -312,13 +315,20 @@ describe("DW-663: the working directory of the governance CLI spawn (real extens
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
       expect(existsSync(log), "the stub governance CLI must record its working directory").toBe(true);
-      // Let the panel's remaining spawns finish before the directories go away.
+      const lines = (): string[] => readFileSync(log, "utf8").split("\n").filter((line) => line !== "");
+      // The panel's later spawns (`universe` after `validate`) run in the same directories: wait until the count has held still for
+      // 400 ms, as the clients flow does, so that every spawn is recorded and none outlives the temp directories (EBUSY on Windows).
+      let last = -1;
+      for (let still = 0; still < 4; ) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const count = lines().length;
+        still = count === last ? still + 1 : 0;
+        last = count;
+      }
       await flushEditor();
-      const cwds = readFileSync(log, "utf8")
-        .split("\n")
-        .filter((line) => line !== "")
-        .map((line) => realpathSync.native(line));
-      return { cwds, home: realpathSync.native(home) };
+      const cwds = lines().map((line) => realpathSync.native(line));
+      const commands = readFileSync(path.join(cliDir, "argv.log"), "utf8").split("\n").filter((line) => line !== "");
+      return { cwds, home: realpathSync.native(home), commands };
     } finally {
       for (const key of ["HOME", "USERPROFILE"] as const) {
         if (prior[key] === undefined) delete process.env[key];
@@ -344,5 +354,11 @@ describe("DW-663: the working directory of the governance CLI spawn (real extens
     } finally {
       rmSync(folder, { recursive: true, force: true });
     }
+  }, 120000);
+
+  it("a relative governanceFile is found where the CLI reads it, the home directory: the editor validates it", async () => {
+    const { cwds, home, commands } = await governanceCwds(undefined, { relativeFile: true });
+    expect(cwds).toEqual(cwds.map(() => home));
+    expect(commands, "the panel saw the file and ran validate on it").toContain("validate");
   }, 120000);
 });

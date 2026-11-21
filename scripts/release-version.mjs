@@ -61,9 +61,10 @@ const EXTENSION_VERSION_FILES = Object.freeze([
 
 /**
  * Put `version` into the first `fields` `"version"` fields of a JSON file, editing the text in place so that nothing else in the file
- * changes: a lock file's first two are its own (`version` and `packages[""].version`). Returns a problem text, or `undefined`.
+ * changes: a lock file's first two are its own (`version` and `packages[""].version`). Returns a problem text, or `undefined`. With
+ * `write: false` it only checks, and writes nothing.
  */
-function stampVersionFields(root, { file, fields }, version) {
+function stampVersionFields(root, { file, fields }, version, { write = true } = {}) {
   const full = path.join(root, file);
   if (!existsSync(full)) return `${file} is missing. Restore it from git.`;
   let seen = 0;
@@ -72,15 +73,15 @@ function stampVersionFields(root, { file, fields }, version) {
     return seen <= fields ? `${prefix}"${version}"` : match;
   });
   if (seen < fields) return `${file} has ${seen} "version" fields, not the ${fields} the stamp expects. Fix the file by hand.`;
-  writeFileSync(full, stamped, 'utf8');
+  if (write) writeFileSync(full, stamped, 'utf8');
   return undefined;
 }
 
 /**
  * Rename the extension changelog's `## [Unreleased]` heading to `## [<version>] <em dash> <date>`. It must be the first `## ` heading.
- * Returns a problem text, or `undefined`.
+ * Returns a problem text, or `undefined`. With `write: false` it only checks, and writes nothing.
  */
-function renameUnreleasedHeading(root, version, date) {
+function renameUnreleasedHeading(root, version, date, { write = true } = {}) {
   const full = path.join(root, EXTENSION_CHANGELOG_PATH);
   if (!existsSync(full)) return `${EXTENSION_CHANGELOG_PATH} is missing. Restore it from git.`;
   const lines = readFileSync(full, 'utf8').split('\n');
@@ -89,7 +90,7 @@ function renameUnreleasedHeading(root, version, date) {
     return `the first \`## \` heading of ${EXTENSION_CHANGELOG_PATH} is ${JSON.stringify(index < 0 ? undefined : lines[index])}, not \`## [Unreleased]\`. Put the release's entries under a \`## [Unreleased]\` heading at the top, then run it again.`;
   }
   lines[index] = `## [${version}] \u2014 ${date}${lines[index].endsWith('\r') ? '\r' : ''}`;
-  writeFileSync(full, lines.join('\n'), 'utf8');
+  if (write) writeFileSync(full, lines.join('\n'), 'utf8');
   return undefined;
 }
 
@@ -155,6 +156,16 @@ export async function main(argv = process.argv.slice(2), env = process.env, root
   if (bin === undefined) {
     say('node_modules/@changesets/cli is not installed. Run pnpm install, then run it again.');
     return 2;
+  }
+  // The extension's stamp and rename are checked before anything is written, so that a problem there leaves the tree as it was.
+  const unstampable = [
+    ...EXTENSION_VERSION_FILES.map((entry) => stampVersionFields(root, entry, before.facts.sharedVersion, { write: false })),
+    renameUnreleasedHeading(root, before.facts.sharedVersion, '', { write: false }),
+  ].filter((problem) => problem !== undefined);
+  if (unstampable.length > 0) {
+    for (const problem of unstampable) say(`problem: ${problem}`);
+    say('nothing was changed. Fix the extension file it names, commit it, then run pnpm run version again.');
+    return 1;
   }
   if (firstRelease) {
     copyFileSync(template, copy);

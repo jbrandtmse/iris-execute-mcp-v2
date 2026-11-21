@@ -3908,3 +3908,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-6-tarball-smoke-and-1-0-0-publish.md | severity: low | fix-risk: med | footprint: in-epic
 - evidence: scripts/release.mjs runVerify walks NPM_PUBLISH_ORDER only; RELEASE_CHANNELS gains marketplace channels in 42.7 and ipm in 42.8. v1.0.0 is npm-only (decision #77), so nothing is misreported today.
 - 2026-11-21T02:57:09Z status=wontfix-accepted owner=42-6-tarball-smoke-and-1-0-0-publish by=cr note=reopen_if=42.7 or 42.8 enables a non-npm channel and release.mjs verify still reads npm alone
+
+### DW-702: MCP Clients view with no folder open: Cursor's project scope (.cursor/mcp.json in cwd=home) is the same file as its user scope (~/.cursor/mcp.json), so a project-scope write lands in the user's global Cursor config
+- source: spec-42-7-vs-code-extension-publish.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: extension.ts clients cwd falls back to os.homedir() (DW-663, decision #98); client-config adapters.ts:124-135 Cursor user=~/.cursor/mcp.json, project=.cursor/mcp.json; clients.ts:165 has no project-dir==home guard
+- 2026-11-21T06:43:42Z status=decision-pending owner=burndown by=cr note=product call: refuse/flag project scope when the project dir is home, or document the alias
+
+### DW-703: The first Open VSX publish with OVSX_PAT unset falls back to --trusted-publishing, which cannot work for a not-yet-existing extension, and fails after npm and the Marketplace already published
+- source: spec-42-7-vs-code-extension-publish.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: runChannel (release.mjs) learns OVSX_PAT is empty only at the open-vsx channel; the rehearse job holds no secrets so it cannot pre-check; recovery is set OVSX_PAT then Re-run failed jobs (npm and Marketplace read already published)
+- 2026-11-21T06:43:42Z status=wontfix-accepted owner=42-7-vs-code-extension-publish by=cr note=reopen_if=the first store release's open-vsx row fails for a missing token, or O2 is skipped
+
+### DW-704: A store channel that is not ready in rehearse (Open VSX namespace missing before owner step O1, or a store outage) makes rehearse exit 1, so publish never runs and npm is blocked too
+- source: spec-42-7-vs-code-extension-publish.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: spec I/O row 'Open VSX namespace absent': rehearse not ready, dry run exit 1; release.yml publish needs [ci-gate, prepare, rehearse]; no per-run store opt-out
+- 2026-11-21T06:43:42Z status=by-design owner=42-7-vs-code-extension-publish by=cr note=spec-bound (matrix row); O1 must precede any post-merge tag incl. a 1.0.x fix; reopen via spec amendment

@@ -480,16 +480,32 @@ export function storeLookupHeaders(store) {
 }
 
 /**
- * What a store's answer to {@link storeLookupUrl} means: 200 (or 206, the one-byte read) is `published`, 404 is `absent`, and anything else
- * (another status, or no status because the request failed or stalled) is `unknown`, which stops the release.
+ * What a store's answer to {@link storeLookupUrl} means. `published` needs the store's own evidence: the Marketplace answers 200 (or 206,
+ * the one-byte read) with the vsix itself (content type `application/vsix`), and Open VSX answers 200 with JSON whose `namespace`, `name`
+ * and `version` are the ones asked for. A 404 is `absent` (the release then uploads, and the CLI asks the store again). Anything else is
+ * `unknown`, which stops the release: another status, no status (the request failed or stalled), or a 200 that is not the store's answer
+ * (a proxy or captive-portal page), because reading that as `published` would skip the upload and exit 0.
  *
- * @param {number | undefined} status
- * @returns {'published' | 'absent' | 'unknown'}
+ * @param {'vscode-marketplace' | 'open-vsx'} store
+ * @param {{ status?: number, contentType?: string | null, body?: unknown }} answer `body` is the parsed JSON of an Open VSX 200, if it parsed
+ * @param {{ publisher: string, name: string, version: string }} expected
+ * @returns {{ outcome: 'published' | 'absent' | 'unknown', why?: string }}
  */
-export function storeOutcome(status) {
-  if (status === 200 || status === 206) return 'published';
-  if (status === 404) return 'absent';
-  return 'unknown';
+export function storeOutcome(store, answer, expected) {
+  const { status } = answer;
+  if (status === 404) return { outcome: 'absent' };
+  // Only the Marketplace is asked for a range (one byte), so only its answer may be a 206.
+  const found = status === 200 || (status === 206 && store === 'vscode-marketplace');
+  if (!found) return { outcome: 'unknown', why: status === undefined ? 'no answer' : `HTTP ${status}` };
+  const type = String(answer.contentType ?? '').trim();
+  const notTheStore = (what) => ({ outcome: 'unknown', why: `HTTP ${status}, but ${what}, so it is not the store's answer` });
+  if (store === 'vscode-marketplace') {
+    return /^application\/vsix\s*(?:;|$)/i.test(type) ? { outcome: 'published' } : notTheStore(`the content type is ${type === '' ? 'missing' : type}, not application/vsix`);
+  }
+  if (!/^application\/json\s*(?:;|$)/i.test(type)) return notTheStore(`the answer is ${type === '' ? 'untyped' : type}, not JSON`);
+  const body = /** @type {Record<string, unknown> | null | undefined} */ (answer.body);
+  const named = body !== null && typeof body === 'object' && body.namespace === expected.publisher && body.name === expected.name && body.version === expected.version;
+  return named ? { outcome: 'published' } : notTheStore(`its JSON does not name ${expected.publisher}.${expected.name}@${expected.version}`);
 }
 
 /** Whether a store CLI's output has a line that says `--skip-duplicate` found the version already published (an exit 0 that uploaded nothing). */

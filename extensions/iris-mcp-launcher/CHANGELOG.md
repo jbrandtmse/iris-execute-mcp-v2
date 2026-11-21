@@ -140,4 +140,4 @@ All notable changes to the IRIS MCP Launcher VS Code extension are documented in
   cold start with no cached session can surface more than one credential prompt for that server.
 - AC 31.4.4's Copilot-chat smoke test (zero-manual-config tool listing, cancel-the-prompt path) requires a human
   in VS Code and has not yet been performed — see the story's Completion Notes for the exact remaining steps.
-- The first store release is the first release after `1.0.0`; until then the extension installs only from a `.vsix` built from the repository (see the README).
+- The first store release is the first release after `1.0.0`, the release this section becomes; before it, the extension installed only from a `.vsix` built from the repository (the README keeps that route for development).

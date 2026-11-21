@@ -390,7 +390,10 @@ describe("the extension follows the shared version (Story 42.7, the lockstep pol
     expectExtensionVersioned(root, "1.0.0");
   }, 180_000);
 
-  it("a changelog whose first `## ` heading is not `## [Unreleased]`: exit 1 naming the file and the heading, with the partial-version line and no next steps", () => {
+  /** What `git status --porcelain` says of the fixture: empty when the run changed nothing. */
+  const porcelain = (root: string): string => spawnSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).stdout.trim();
+
+  it("a changelog whose first `## ` heading is not `## [Unreleased]`: exit 1 naming the file and the heading, before anything is written (the changesets are not used up), and no next steps", () => {
     const root = makeVersionFixture();
     const file = join(root, "extensions/iris-mcp-launcher/CHANGELOG.md");
     writeFileSync(file, readFileSync(file, "utf8").replace("## [Unreleased]", "## [0.2.0] \u2014 2026-01-02"));
@@ -398,8 +401,10 @@ describe("the extension follows the shared version (Story 42.7, the lockstep pol
     const result = run(root, "release-version.mjs");
     expect(result.status, result.stderr).toBe(1);
     expect(result.stderr).toContain('problem: the first `## ` heading of extensions/iris-mcp-launcher/CHANGELOG.md is "## [0.2.0] \u2014 2026-01-02", not `## [Unreleased]`.');
-    expect(result.stderr).toContain("the tree now holds a partial version: discard it with git restore . && git clean -fd");
+    expect(result.stderr).toContain("nothing was changed. Fix the extension file it names, commit it, then run pnpm run version again.");
+    expect(result.stderr).not.toContain("partial version");
     expect(result.stderr).not.toContain("next steps");
+    expect(porcelain(root), "changeset version never ran: the tree is as it was").toBe("");
   }, 180_000);
 
   it("an `## [Unreleased]` heading that is not the first `## ` heading is refused too", () => {
@@ -410,6 +415,7 @@ describe("the extension follows the shared version (Story 42.7, the lockstep pol
     const result = run(root, "release-version.mjs");
     expect(result.status, result.stderr).toBe(1);
     expect(result.stderr).toContain("extensions/iris-mcp-launcher/CHANGELOG.md is \"## Notes\", not `## [Unreleased]`");
+    expect(porcelain(root)).toBe("");
   }, 180_000);
 
   it("a lock with fewer version fields than the stamp expects: exit 1 naming the file", () => {
@@ -419,6 +425,7 @@ describe("the extension follows the shared version (Story 42.7, the lockstep pol
     const result = run(root, "release-version.mjs");
     expect(result.status, result.stderr).toBe(1);
     expect(result.stderr).toContain('problem: extensions/iris-mcp-launcher/package-lock.json has 0 "version" fields, not the 2 the stamp expects.');
+    expect(porcelain(root), "nothing was stamped beside the lock it could not stamp").toBe("");
   }, 180_000);
 
   it("the lockstep check refuses a manifest or a lock that is off the shared version, naming the file and the fix", () => {

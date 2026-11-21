@@ -333,12 +333,12 @@ function buildDeclaredSteps() {
     { run: `${HARNESS} down --state ${STATE_FILE}`, if: '${{ always() }}' },
   ];
 
-  // Story 42.7 (DW-532): the launcher's whole suite on each runner of LAUNCHER_RUNNERS. It builds only the two dists its real-CLI
-  // tests read (the clients CLI of client-config, the governance CLI of shared), needs no other job and reaches no IRIS: its two
-  // live files stay unarmed and skip.
+  // Story 42.7 (DW-532): the launcher's whole suite on each runner of LAUNCHER_RUNNERS. It builds every package, because its real-CLI
+  // tests read the clients CLI of client-config, the governance CLI of shared and the five servers' tool lists (a missing dist skips
+  // a whole real-CLI file); it needs no other job and reaches no IRIS: its two live files stay unarmed and skip.
   const launcherJob = [
     { run: 'pnpm install --frozen-lockfile' },
-    { run: 'pnpm --filter @iris-mcp/client-config --filter @iris-mcp/shared build' },
+    { run: 'pnpm build' },
     { run: 'npm ci', ...launcher },
     { run: 'npm run build', ...launcher },
     { run: 'npx --no -- vitest run', ...launcher },
