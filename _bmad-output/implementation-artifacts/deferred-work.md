@@ -249,6 +249,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Deferred to the pre-publish session; routed to publishing checklist.
 - 2026-10-14T10:47:49Z status=decision-pending owner=burndown by=migration note=human=run the pre-publish smoke test (Story 9.3 rerun) in the pre-publish session
 - 2026-10-15T02:51:51Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=correct-course note=decided D2 (decision-record-2026-10-14): local tarball smoke required before 1.0.0
+- 2026-11-21T12:41:19Z status=resolved-by:42-6-tarball-smoke-and-1-0-0-publish by=adjudication note=A4_real_Claude_Code_client_smoke_on_a_throwaway_(Phase_A);published_1.0.0:npx_-y_@iris-mcp/dev@1_answers_initialize_1.0.0_(B7_verify_exit_0,2026-11-21)
 
 ### DW-48: [L11.retro-3-retrospective-skill-rules-enforcement] Epic 11 retro action #3: update /bmad-retrospective skill to enforce Rules codification
 - source: legacy:11.0 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -1551,6 +1552,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Nothing on npm; npx -y @iris-mcp/<pkg> fails for external users; published-mode paths remain dev-mode-only; Epic 33 docs must target the local-path reality.
 - 2026-10-14T10:47:54Z status=decision-pending owner=burndown by=migration note=human=Project Lead decision to npm-publish the @iris-mcp packages
 - 2026-10-15T02:51:51Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=correct-course note=decided D1/D2/D7 (decision-record-2026-10-14): publish 1.0.0 through the CI release workflow
+- 2026-11-21T12:41:19Z status=resolved-by:42-6-tarball-smoke-and-1-0-0-publish by=adjudication note=1.0.0_published_through_the_CI_release_workflow_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44902952309(approval_gated,auth_token);release.mjs_verify_exit_0_8_packages_with_SLSA_provenance
 
 ### DW-301: [32-4-R1] helpRequested valuedOptions set is a second hand-maintained mirror of parseArgs's per-command valued options
 - source: legacy:32.4 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -3383,6 +3385,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-41-1-pack-layout-licensing-and-provenance.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: 41.1 implement review 2026-10-19: packages/client-config/package.json scripts.prepublishOnly; Epic 42 owns the publish gates (AD-29)
 - 2026-10-19T06:17:55Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=harvest note=42.6's tarball smoke proves the pack and notice gate red on the real publish path (Rule 59)
+- 2026-11-21T12:41:19Z status=resolved-by:42-6-tarball-smoke-and-1-0-0-publish by=adjudication note=prepare_runs_every_check/validate_root_script(check:provenance,gen:pack:check);red_proof_on_the_publish_path_Phase_A;green_in_v1.0.0_prepare(https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44902952309)
 
 ### DW-613: No pack check requires a SKILL.md to start with frontmatter, so an adaptation header placed above the frontmatter passes provenance while the skill loses its name and description
 - source: spec-41-1-pack-layout-licensing-and-provenance.md | severity: med | fix-risk: low | footprint: in-epic
@@ -3537,6 +3540,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-20T07:58:39Z status=routed owner=43-3-human-confirmation-through-elicitation by=harvest note=43.3 enables elicitation, the only user of the bundled validator: check the published advisories against ajv 8.18.0 and fast-uri 3.1.0 and record the verdict (or supply a validator) before the dialog ships
 - 2026-10-21T01:44:35Z status=routed owner=42-1-pre-publish-package-fixes by=lead note=43.3 delivered the verdict (fast-uri 3.1.0 advisories unreachable: constant schema, bundled validator never invoked) and the story-43-3-validator-unreachable tripwire; residual: before 1.0, bump the exact SDK pin if a release pins fast-uri >=3.1.8 (typescript-sdk#2966/PR #2973); DW-637 bullet under 42.1
 - 2026-10-21T14:28:59Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=adjudication note=residual:@modelcontextprotocol/server_2.3.1_still_latest_on_2026-10-21_and_upstream_fast-uri_fix(PR_2973)_unmerged;re-check_right_before_the_1.0.0_publish;if_a_release_pins_fast-uri>=3.1.8_bump_the_exact_pin_and_re-run_the_epic-43_wire_goldens
+- 2026-11-21T12:41:19Z status=resolved-by:42-6-tarball-smoke-and-1-0-0-publish by=adjudication note=SDK_bumped_to_2.4.0(fast-uri_3.1.8);published_@iris-mcp/shared@1.0.0_depends_on_@modelcontextprotocol/server_2.4.0(npm_view,2026-11-21);frozen_goldens_byte-identical
 
 ### DW-638: The v2-client code in five iris-mcp-all local-copy gates and two launcher integration tests has never run against a server: each skips unless IRIS is reachable
 - source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: med | fix-risk: low | footprint: in-story
@@ -3699,6 +3703,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 42.1 implement: pnpm pack lists in 42-1-pack-file-lists.md show only LICENSE, README.md, package.json added
 - 2026-10-21T13:14:16Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=harvest note=decide add CHANGELOG.md to files before the 1.0.0 publish
+- 2026-11-21T12:41:19Z status=resolved-by:42-6-tarball-smoke-and-1-0-0-publish by=adjudication note=files_lists_CHANGELOG.md;published_@iris-mcp/dev@1.0.0_tarball_holds_CHANGELOG.md_and_LICENSE(npm_pack_--dry-run,2026-11-21)
 
 ### DW-666: pnpm --filter @iris-mcp/shared lint warns about an unused eslint-disable directive for @typescript-eslint/no-dynamic-delete
 - source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3886,6 +3891,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: ci.yml runs on every push, so ciGateDecision accepts a feature-branch run on the sha; the env tag rule binds the tag name, not the commit
 - 2026-11-20T21:58:32Z status=decision-pending owner=burndown by=cr note=product call: require the sha reachable from main (compare API) vs allow maintenance branches such as release/1.x
 - 2026-11-20T22:39:01Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=merge_gate note=OWNER_RULING_2026-11-20(via_Planner):'I_agree_we_should_require_tagged_commits_to_be_on_main';release_ci-gate_refuses_a_v*_tag_whose_commit_is_not_reachable_from_main(compare_main...sha_identical/behind_or_equivalent)_before_the_environment_approval_is_requested;no_maintenance-branch_allowance;pin+one_red_proof_on_the_real_path(Rule59:_a_v*_tag_on_an_unmerged_branch_commit_with_a_green_push_run_is_refused);land_before_the_v1.0.0_tag(decision_82)
+- 2026-11-21T12:41:19Z status=resolved-by:42-6-tarball-smoke-and-1-0-0-publish by=adjudication note=ci-gate_refuses_a_v*_tag_not_on_main(compare_main...sha);red_proof_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44858796584;v1.0.0_on_main_passed_ci-gate(https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44902952309)
 
 ### DW-697: an enabled store channel reports published when vsce/ovsx --skip-duplicate skipped an existing version (exit 0)
 - source: spec-42-5-release-workflow.md | severity: low | fix-risk: med | footprint: in-story

@@ -730,6 +730,21 @@ Every test added or changed passes on a fresh environment, in either order, and 
 8. **B8. The token, and trusted publishing.** The owner revokes the token and deletes the `NPM_TOKEN` secret. Record the action item: `npm trust github` for the eight packages within 48 h before 42.7's release, then "require 2FA and disallow tokens" (decision 5).
 9. **B9.** Record every URL and result above. Story 42.6 closes on B7.
 
+**Phase B record (lead, 2026-11-21).**
+- **B1:** M = `55ae0eb60de0c5c3c37ff3e000b3195d33d6e8e3` (the Planner's merge of `epic42` into wave-8 into `main`). The story sha is an ancestor; `.changeset/` holds only `README.md` and `config.json`; all eight packages read `1.0.0`; CI on M is green (push run https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44862653921).
+- **B2:** `@modelcontextprotocol/server` 2.4.0 is still the pin and the latest; no newer release, so no blocker (DW-637).
+- **B3:** `GET repos/jbrandtmse/iris-execute-mcp-v2/environments/release/secrets` lists `NPM_TOKEN`, created 2026-11-21T12:14:26Z (names only, read after the Planner's notice).
+- **B4:** `git tag -a v1.0.0 55ae0eb… -m "1.0.0"`, pushed 2026-11-21T12:15Z.
+- **B5:** release run https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44902952309. `ci-gate` 12:15:09–12:15:22Z, `prepare` 12:15:24–12:29:50Z, `rehearse` 12:29:54–12:30:17Z, all green; `publish` waited on the `release` environment, the Planner was told, and the owner approved.
+- **B6:** `publish` 12:32:49–12:33:31Z: `auth: token`; `@iris-mcp/client-config`, `shared`, `admin`, `data`, `dev`, `interop`, `ops` and `all` at `1.0.0` each `published`; `vscode-marketplace`, `open-vsx` and `ipm` `skipped: not enabled`.
+- **B7:** `node scripts/release.mjs verify --version 1.0.0`, run from a worktree of `v1.0.0`:
+  - At 12:34Z and 12:37Z it exited 1 on CDN propagation only (404, then `ETARGET`, for some packages). The Planner saw every package at `latest = 1.0.0` at 12:37Z.
+  - The third run exited **0**: eight lines `ok, published with a provenance attestation`; `npx -y @iris-mcp/dev@1: ok, initialize answered serverInfo.version 1.0.0`; summary `8 packages at 1.0.0 with provenance, and npx -y @iris-mcp/dev@1 starts`.
+  - Live checks: `npm view @iris-mcp/client-config@1.0.0 dist.attestations.provenance.predicateType` reads `https://slsa.dev/provenance/v1`; the `@iris-mcp/dev@1.0.0` tarball holds `CHANGELOG.md` and `LICENSE` (DW-665); `@iris-mcp/shared@1.0.0` depends on `@modelcontextprotocol/server` `2.4.0` (DW-637).
+  - Not the decision #75 fallback: every package was published by the workflow.
+- **B8:** owner action items, sent to the Planner 2026-11-21: revoke the granular token on npmjs.com and delete the `NPM_TOKEN` secret; set up npm trusted publishing for the eight packages (GitHub Actions, `release.yml`, environment `release`) before `v1.1.0` (decision #89), then "require 2FA and disallow tokens".
+- **Ledger:** DW-47, DW-300, DW-612, DW-637, DW-665 and DW-696 resolved by this story, with the evidence above.
+
 *If something fails (AD-29 bad-release policy; never `npm unpublish`):*
 - **Red before `publish`** (`ci-gate`, `prepare` or `rehearse`): nothing was published.
   - Delete the `v1.0.0` tag, fix forward on `epic42`, re-merge through the Planner, and re-tag the new `main` commit.
