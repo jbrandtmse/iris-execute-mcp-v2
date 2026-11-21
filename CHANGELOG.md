@@ -2,6 +2,27 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Unreleased] — Story 42.8 amendment (decision #122): IPM Publishes From the Main Repository
+
+IPM publishes from this repository's root, through the existing Open Exchange listing `IRIS-MCP-Server-Suite-2`, and the separate packaging repository is gone. This amends the IPM entries of the Story 42.8 section below, which describe the superseded design and stay as history. No ObjectScript class changes, so `BOOTSTRAP_VERSION` does not move (`1.0.0+2.244fe8623c76`), and the governance baseline, the goldens and the tools-list snapshot are untouched.
+
+### Added
+
+- **A committed, stamped IPM tree at the repository root.** The root `module.xml` (`SourcesRoot` `ipm/src`), the 35 stamped classes under `ipm/src/cls/ExecuteMCPv2/` and the stamped install guard under `preload/ipm/src/cls/ExecuteMCPv2/` are generated, output-only files. `pnpm gen:ipm` (`scripts/gen-bootstrap.mjs --ipm`) writes them, and only the version step (`pnpm run version`) runs it, so `main` always holds the content of the last release and the registry, which packages `main` when the owner presses Release, serves released content. Plain `pnpm gen:bootstrap` never writes the tree.
+- **`pnpm gen:ipm:check`.** It recomputes the tree's content hash and compares it with the marker the tree carries, holds the tree's version to the shared version, and refuses a hand edit, an extra class, any file under `preload/` but the guard, and a root `requirements.txt` (IPM runs `pip install -r` on it). It is a root gate in CI and in `prepare`.
+- **A served-archive gate (DW-694, redefined).** CI's `ipm` job fetches GitHub's archive of the commit under test, requires it equal to `git archive HEAD` and to hold the module's members, re-tars it the way the registry does, and `load`s it on both editions with no network. GitHub's archives stay the whole repository: there are no export rules.
+- **A manual step in the release.** The IPM channel reads the IPM registry, read-only. A version it lists is `already published`; any other answer, and a registry that cannot be read, is a `manual step` (`ready (manual step after the tag: ...)` in a rehearsal), reported in a "Manual steps" block at the end of the report and as a `::warning::` annotation. The channel can neither fail nor block a run.
+
+### Changed
+
+- **`pnpm run version` writes the tree.** It runs `gen-bootstrap.mjs --ipm`, and its final check requires the tree's marker to equal `BOOTSTRAP_VERSION`. A release's `prepare` refuses a tree that is older than the embed (`the IPM tree stamps <m1>, the embed <m2>`); a dry run notes it.
+- **`release verify` and IPM.** IPM is `pending` (and never fails verify) until the registry lists the version. Once it does, the module in the archive it serves (the root `module.xml`, `ipm/src` and `preload`) must equal `git archive v<version>` member for member and byte for byte, and its `module.xml` must be at that version; the rest of the archive is `main` at the Release press and is not compared. Fetch the tags first.
+- **`ipm/module.xml` is the root `module.xml`.** `ipm/preload/ExecuteMCPv2/InstallGuard.cls` stays the guard's source.
+
+### Removed
+
+- **The packaging repository, its deploy key and the pinned host keys.** The release no longer pushes anything for IPM, and `IPM_DIST_DEPLOY_KEY`, `known_hosts`, the SSH options and the README of the packaging repository are gone from the workflow, the declaration and the script. If the secret was added to the `release` environment, delete it. Owner step O-IPM1 is cancelled; the owner's step is to press Release on the Open Exchange listing after each tag (see the README's Releasing section). Never create a `master` branch in this repository: the registry reads `master/module.xml`, which GitHub redirects to `main`.
+
 ## [Unreleased] — Story 42.9: Install Docs and Client Re-Certification
 
 The install docs describe the published suite, the client adapter data is current as of 2026-11-21, and two silent problems of the installer now have a guard and a check. The first release with the plugin, the extension, the IPM channel and these changes is `1.1.0` (the changeset is `minor` for `@iris-mcp/client-config`, and the fixed group moves every package). No tool, prompt, governance or wire change is made: no tool or tool count changes, the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), the frozen goldens and the tools-list snapshot are byte-unchanged, and `BOOTSTRAP_VERSION` does not move.

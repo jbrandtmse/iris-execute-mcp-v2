@@ -3,7 +3,8 @@
 //
 // The proof builds the module archive from the generated embed (`BOOTSTRAP_CLASSES`, `IPM_INSTALL_GUARD` of
 // `@iris-mcp/shared`), never from `src/` (AD-14), and installs it on throwaway IRIS containers that have no network. The helpers
-// here stage the module, read the manifest a module declares, compare the archive with the embed, build the terminal-session
+// here stage the module (in the layout of the committed tree, `scripts/lib/ipm-tree.mjs`), read the manifest a module declares,
+// compare the archive with the embed, judge the archive the registry downloads from GitHub (DW-694), build the terminal-session
 // scripts the proof pipes into `iris session`, and read their markers back.
 //
 // SESSION SCRIPTS. `iris session` echoes its own input, so every marker literal is written split (`"IRISMCP-"_"X-START:"`) and
@@ -25,7 +26,22 @@ import { pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 
 import { CONTAINER_WEB_PORT, THROWAWAY_PASSWORD, THROWAWAY_USERNAME } from '../throwaway-iris.mjs';
-import { ipmReadme } from './release-core.mjs';
+import {
+  IPM_MANIFEST_FILE,
+  IPM_PRELOAD_PREFIX,
+  IPM_SOURCES_ROOT,
+  classPathSegments,
+  guardTreePath,
+  ipmTreeFiles,
+  ipmTreeMarker,
+  manifestDeclarations,
+  normalizeText,
+  renderModuleXml,
+  stampedMarker,
+} from './ipm-tree.mjs';
+
+// The helpers the tree module owns, re-exported so that the archive proof and its tests keep one import path.
+export { classPathSegments, manifestDeclarations, normalizeText };
 
 /** The IPM verbs the proof issues, in both directions of the comparison with the scripts. */
 export const IPM_VERBS = Object.freeze(['load', 'package', 'list']);
@@ -55,14 +71,14 @@ export const ABSENT_DOCUMENT = 'ExecuteMCPv2.NoSuchGuard.cls';
 /** The words the install guard's refusal carries (`ipm/preload/ExecuteMCPv2/InstallGuard.cls`). */
 export const GUARD_REFUSAL_TEXT = 'ExecuteMCPv2.InstallGuard refused the install';
 
-/** The line that holds the stamped marker in a class (`Parameter BOOTSTRAPVERSION = "...";`), and the placeholder on disk. */
-const MARKER_LINE_PATTERN = /^Parameter BOOTSTRAPVERSION = "([^"]*)";$/m;
+/** The placeholder on disk (`Parameter BOOTSTRAPVERSION = "dev";`); the stamped line is read by `stampedMarker` of the tree module. */
 const PLACEHOLDER_LINE = 'Parameter BOOTSTRAPVERSION = "dev";';
 
 // -- The embed ---------------------------------------------------------------------------
 
 /**
- * The embed of the BUILT shared dist plus the checked-in manifest: everything the proof stages and compares.
+ * The embed of the BUILT shared dist plus the module manifest rendered for it: everything the proof stages and compares. The manifest
+ * is {@link renderModuleXml} of the embed's own class list at the embed's semver, so the build leg stages the layout the tree has.
  *
  * @param {string} repoRoot
  * @returns {Promise<{ marker: string, classes: ReadonlyMap<string, string>, guard: { name: string, content: string }, moduleName: string, moduleXml: string, classify: (deployed: string, embedded: string) => string, parse: (marker: string) => unknown }>}
@@ -87,7 +103,12 @@ export async function loadEmbed(repoRoot) {
     classes: classes.BOOTSTRAP_CLASSES,
     guard: classes.IPM_INSTALL_GUARD,
     moduleName: classes.IPM_MODULE_NAME,
-    moduleXml: readFileSync(path.join(repoRoot, 'ipm', 'module.xml'), 'utf8'),
+    moduleXml: renderModuleXml({
+      moduleName: classes.IPM_MODULE_NAME,
+      version: markerSemver(classes.BOOTSTRAP_VERSION),
+      classNames: [...classes.BOOTSTRAP_CLASSES.keys()],
+      guardName: classes.IPM_INSTALL_GUARD.name,
+    }),
     classify: version.classifyDeployedMarker,
     parse: version.parseBootstrapMarker,
   };
@@ -98,26 +119,10 @@ export function markerSemver(marker) {
   return String(marker).split('+')[0];
 }
 
-/** `ExecuteMCPv2.REST.Base.cls` as the path segments `['ExecuteMCPv2', 'REST', 'Base.cls']`. */
-export function classPathSegments(documentName) {
-  const stem = String(documentName).replace(/\.cls$/, '');
-  return [...stem.split('.').slice(0, -1), `${stem.split('.').at(-1)}.cls`];
-}
-
-/** The line ends the embed and the archive are compared after: LF, with no trailing whitespace. */
-export function normalizeText(text) {
-  return String(text).replace(/\r\n/g, '\n').trimEnd();
-}
-
-/** The marker a class text stamps, or `undefined` when it has no `Parameter BOOTSTRAPVERSION` line. */
-function stampedMarker(content) {
-  return MARKER_LINE_PATTERN.exec(content)?.[1];
-}
-
 /**
  * What is wrong with an embed that is about to be staged: an empty list means every class and the guard carry the embed's
  * marker, no content still holds the `dev` placeholder, no test or fixture class is among the classes, and the manifest names
- * the embed's module at the embed's semver.
+ * the embed's module.
  */
 export function embedProblems(embed) {
   const problems = [];
@@ -141,17 +146,15 @@ export function embedProblems(embed) {
     }
   }
   const declared = manifestDeclarations(embed.moduleXml ?? '');
-  if (declared.name !== embed.moduleName) problems.push(`ipm/module.xml names the module ${JSON.stringify(declared.name)}, not ${JSON.stringify(embed.moduleName)}.`);
-  if (declared.version !== markerSemver(embed.marker)) {
-    problems.push(`ipm/module.xml is at version ${JSON.stringify(declared.version)}, not the embed's ${JSON.stringify(markerSemver(embed.marker))}: run pnpm gen:bootstrap.`);
-  }
+  if (declared.name !== embed.moduleName) problems.push(`module.xml names the module ${JSON.stringify(declared.name)}, not ${JSON.stringify(embed.moduleName)}.`);
   return problems;
 }
 
 /**
- * Stage the module under `dir`: `module.xml`, one `src/cls/<package path>.cls` per embedded class, and the preloaded guard at
- * `preload/src/cls/ExecuteMCPv2/InstallGuard.cls`. Every directory is 0755 and every file 0644 (`a+rX`), so the IRIS user inside a
- * container can read what a read-only mount shows it. It refuses, and writes nothing, when {@link embedProblems} finds anything.
+ * Stage the module under `dir` in the layout of the committed tree: `module.xml`, one `ipm/src/cls/<package path>.cls` per embedded
+ * class, and the preloaded guard at `preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls` ({@link ipmTreeFiles} maps the paths). Every
+ * directory is 0755 and every file 0644 (`a+rX`), so the IRIS user inside a container can read what a read-only mount shows it. It
+ * refuses, and writes nothing, when {@link embedProblems} finds anything.
  *
  * @param {string} dir - An existing, empty directory.
  * @param {Awaited<ReturnType<typeof loadEmbed>>} embed
@@ -162,41 +165,20 @@ export function stageModule(dir, embed) {
   if (problems.length > 0) throw new Error(`refusing to stage the module: ${problems.join(' ')}`);
   const files = [];
   const write = (relative, text) => {
-    const file = path.join(dir, relative);
+    const file = path.join(dir, ...relative.split('/'));
     mkdirSync(path.dirname(file), { recursive: true, mode: 0o755 });
     writeFileSync(file, text.endsWith('\n') ? text : `${text}\n`, 'utf8');
     chmodSync(file, 0o644);
     files.push(relative);
   };
-  write('module.xml', embed.moduleXml);
-  for (const [name, content] of embed.classes) write(path.join('src', 'cls', ...classPathSegments(name)), content);
-  write(path.join('preload', 'src', 'cls', ...classPathSegments(embed.guard.name)), embed.guard.content);
-  for (const directory of new Set(files.flatMap((file) => directoriesOf(file)))) chmodSync(path.join(dir, directory), 0o755);
+  write(IPM_MANIFEST_FILE, embed.moduleXml);
+  for (const [relative, text] of ipmTreeFiles(embed)) write(relative, text);
+  for (const directory of new Set(files.flatMap((file) => directoriesOf(file)))) chmodSync(path.join(dir, ...directory.split('/')), 0o755);
   chmodSync(dir, 0o755);
   return { files };
 }
 
-/**
- * Stage the packaging repository's root under `dir`: the module ({@link stageModule}) plus the generated `README.md` and the `LICENSE`.
- * This is the tree the release pushes to the packaging repository and the tree the proof tars the way the IPM registry serves it
- * (DW-694), so one function stages both and each gate proves the bytes the release would push. Every file is 0644 and every directory 0755.
- *
- * @param {string} dir - An existing, empty directory.
- * @param {Awaited<ReturnType<typeof loadEmbed>>} embed
- * @param {{ version: string, licenseText: string }} options - The release version (the README names it) and the text of `LICENSE`.
- * @returns {{ files: string[] }} The files written, relative to `dir`.
- */
-export function stagePackagingRoot(dir, embed, { version, licenseText }) {
-  const { files } = stageModule(dir, embed);
-  for (const [name, text] of [['README.md', ipmReadme(version)], ['LICENSE', licenseText]]) {
-    writeFileSync(path.join(dir, name), text, 'utf8');
-    chmodSync(path.join(dir, name), 0o644);
-    files.push(name);
-  }
-  return { files };
-}
-
-/** Where the registry-shaped leg mounts its directory, the staged root inside it, the cases file beside it, and the archive it tars. */
+/** Where the served-archive leg mounts its directory, the extracted repository inside it, the cases file beside it, and the archive it tars. */
 export const REGISTRY_MOUNT = '/opt/iris-mcp/registry';
 export const REGISTRY_ROOT_MOUNT = `${REGISTRY_MOUNT}/root`;
 export const REGISTRY_CASES_FILE = `${REGISTRY_MOUNT}/cases.json`;
@@ -204,9 +186,9 @@ export const REGISTRY_ARCHIVE_NAME = 'registry-root.tgz';
 export const REGISTRY_ARCHIVE = `${OUTPUT_DIRECTORY}/${REGISTRY_ARCHIVE_NAME}`;
 
 /**
- * The command the registry runs to make the archive it serves from the packaging repository root (zpm-registry `UpdatePackage`): GNU tar
- * with no `.git`, from inside the root, so every member is `./<path>`. The proof runs it inside the Linux container, where `tar` is GNU
- * tar and writes no pax headers (a macOS `bsdtar` does, and IPM before 0.10.11 rejects them).
+ * The command the registry runs to make the archive it serves (zpm-registry `LoadPackage`): GNU tar with no `.git`, from inside the
+ * extracted GitHub archive of the repository, so every member is `./<path>`. The proof runs it inside the Linux container, where `tar`
+ * is GNU tar and writes no pax headers (a macOS `bsdtar` does, and IPM before 0.10.11 rejects them).
  */
 export function registryTarCommand(root = REGISTRY_ROOT_MOUNT, archive = REGISTRY_ARCHIVE) {
   return `tar --exclude=.git -czf ${archive} -C ${root} .`;
@@ -229,78 +211,171 @@ export function registryArchiveScript() {
   ]);
 }
 
+/** A member name as the proof compares it: repeated slashes, a leading `./` and a trailing `/` collapsed. */
+function normalizeMember(name) {
+  return String(name).replace(/\/\/+/g, '/').replace(/^(?:\.\/)+/, '').replace(/\/$/, '');
+}
+
+/** The address of GitHub's archive of a commit: the one the registry's download of the repository resolves to for that commit. */
+export function servedArchiveUrl(repository, sha) {
+  return `https://codeload.github.com/${repository}/tar.gz/${sha}`;
+}
+
 /**
- * What is wrong with the archive the registry would serve, given its members (as {@link readTgz} returns them) and the files that were
- * staged: `module.xml` must be a member at the top (`./module.xml`), no member may be under `.git`, no member may be anything but a
- * file or a directory, and the file members must be exactly the staged files. Empty means the archive is the packaging root.
+ * The files an IPM install needs from the repository: the root `module.xml`, and every tracked file under `ipm/src` and `preload`,
+ * from the output of `git ls-files ipm/src preload` (one path per line).
+ *
+ * @param {string} lsFilesOutput
+ * @returns {string[]} Paths relative to the repository root, `module.xml` first, then the rest in the order given.
+ */
+export function moduleMemberSet(lsFilesOutput) {
+  const listed = String(lsFilesOutput)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith(`${IPM_SOURCES_ROOT}/`) || line.startsWith(`${IPM_PRELOAD_PREFIX}/`));
+  return [IPM_MANIFEST_FILE, ...new Set(listed)];
+}
+
+/**
+ * The members of an archive that make up the module: the root `module.xml` and everything under `ipm/src` and `preload`. The names
+ * are the archive's own, so `./<path>` members of the registry's re-tar and the plain paths of `git archive` both match.
+ *
+ * @template {{ name: string }} T
+ * @param {readonly T[]} entries
+ * @returns {T[]}
+ */
+export function moduleMemberEntries(entries) {
+  return entries.filter((entry) => {
+    const name = normalizeMember(entry.name);
+    return name === IPM_MANIFEST_FILE || name.startsWith(`${IPM_SOURCES_ROOT}/`) || name.startsWith(`${IPM_PRELOAD_PREFIX}/`);
+  });
+}
+
+/**
+ * What is wrong with the archive the registry serves, given its members (as {@link readTgz} returns them, the `<repo>-<ref>/` folder
+ * of GitHub's archive already removed by {@link stripArchivePrefix}, or the `./<path>` members of the registry's re-tar) and the
+ * module's members ({@link moduleMemberSet}): the archive must hold `module.xml` at its top, the stamped guard under `preload/` (whatever
+ * the members list) and every module member, no member may be
+ * under `.git`, there is no root `requirements.txt` (IPM runs `pip install -r` on it), and nothing but the stamped guard is under
+ * `preload/` (IPM imports everything there). The archive is the whole repository, so its other members are not judged.
  *
  * @param {ReadonlyArray<{ name: string, type: string }>} entries
- * @param {readonly string[]} stagedFiles - The files {@link stagePackagingRoot} wrote, relative to the root.
+ * @param {readonly string[]} moduleMembers
  * @returns {string[]}
  */
-export function registryArchiveProblems(entries, stagedFiles) {
+export function registryArchiveProblems(entries, moduleMembers) {
   const problems = [];
-  const normalize = (name) => String(name).replace(/\/\/+/g, '/').replace(/^(?:\.\/)+/, '').replace(/\/$/, '');
-  const files = entries.filter((entry) => entry.type === 'file').map((entry) => normalize(entry.name));
-  if (!files.includes('module.xml')) {
-    problems.push('the registry-shaped archive has no module.xml at its top, so IPM finds no module in it. Stage module.xml at the root of the packaging tree.');
+  const files = new Set(entries.filter((entry) => entry.type === 'file').map((entry) => normalizeMember(entry.name)));
+  if (!files.has(IPM_MANIFEST_FILE)) {
+    problems.push('the archive has no module.xml at its top, so IPM finds no module in it. Keep module.xml at the root of the repository.');
   }
   for (const entry of entries) {
-    const name = normalize(entry.name);
+    const name = normalizeMember(entry.name);
     if (name === '.git' || name.startsWith('.git/')) problems.push(`the archive holds ${entry.name}, which the registry's tar excludes. Exclude .git.`);
-    if (entry.type !== 'file' && entry.type !== 'directory') problems.push(`the archive holds ${entry.name}, which is neither a file nor a directory (${entry.type}).`);
   }
-  const archived = new Set(files);
-  const staged = new Set(stagedFiles.map(normalize));
-  for (const name of [...staged].sort()) if (!archived.has(name)) problems.push(`the archive is missing the staged file ${name}.`);
-  for (const name of [...archived].sort()) if (!staged.has(name)) problems.push(`the archive holds ${name}, which was not staged.`);
+  // The stamped guard is required whatever the repository lists: IPM preloads only what is under <module root>/preload.
+  const guard = guardTreePath(GUARD_DOCUMENT);
+  for (const member of [...new Set([IPM_MANIFEST_FILE, guard, ...moduleMembers.map(normalizeMember)])].sort()) {
+    if (!files.has(member)) problems.push(`the archive is missing the module member ${member}. Commit it, or restore it with pnpm gen:ipm.`);
+  }
+  if (files.has('requirements.txt')) {
+    problems.push('the archive holds requirements.txt at its top: IPM runs pip install -r on it when it installs the module. Remove it from the repository root.');
+  }
+  for (const name of [...files].sort()) {
+    if (name.startsWith(`${IPM_PRELOAD_PREFIX}/`) && name !== guard) {
+      problems.push(`the archive holds ${name}, where nothing but the stamped guard may live: IPM imports everything under <module root>/preload.`);
+    }
+  }
   return problems;
 }
 
-/** Every directory above `file` (relative), outermost first. */
-function directoriesOf(file) {
-  const parts = file.split(path.sep).slice(0, -1);
-  return parts.map((_, index) => parts.slice(0, index + 1).join(path.sep));
-}
-
-// -- The manifest -----------------------------------------------------------------------
-
-/** Every `name="value"` attribute of one element tag, by name. */
-function attributesOf(tag) {
-  return Object.fromEntries([...tag.matchAll(/([A-Za-z]+)="([^"]*)"/g)].map((match) => [match[1], match[2]]));
-}
-
-/** The text of the first `<Tag>text</Tag>` of an XML text, or `undefined`. */
-function elementText(xml, tag) {
-  return new RegExp(`<${tag}>([^<]*)</${tag}>`).exec(xml)?.[1]?.trim();
+/**
+ * Drop the `<repo>-<ref>/` folder GitHub's archive wraps the repository in: the first path component of every member. The archive's
+ * members must share exactly one top-level folder, or the call throws.
+ *
+ * @template {{ name: string, type: string }} T
+ * @param {readonly T[]} entries
+ * @returns {T[]}
+ */
+export function stripArchivePrefix(entries) {
+  const named = entries.map((entry) => ({ entry, name: normalizeMember(entry.name) })).filter(({ name }) => name !== '');
+  const tops = new Set(named.map(({ name }) => name.split('/')[0]));
+  if (tops.size !== 1) {
+    throw new Error(`the archive's members do not share one top-level folder (${[...tops].slice(0, 3).join(', ') || 'no members'}): GitHub's archive wraps the repository in <repo>-<ref>/.`);
+  }
+  const [prefix] = tops;
+  const wrapped = named.some(({ entry, name }) => name.startsWith(`${prefix}/`) || (name === prefix && entry.type === 'directory'));
+  if (!wrapped) throw new Error(`the archive's only top-level member ${JSON.stringify(prefix)} is not a folder, so there is no <repo>-<ref>/ to remove.`);
+  return named
+    .filter(({ name }) => name !== prefix)
+    .map(({ entry, name }) => ({ ...entry, name: `${name.slice(prefix.length + 1)}${entry.type === 'directory' ? '/' : ''}` }));
 }
 
 /**
- * What a module manifest declares, read as text: the module name, version and sources root, each `<Resource>`'s name and `Preload`
- * flag, and each `<Invoke>`'s class, method, phase, moment and `CheckStatus`. IPM re-serializes a manifest on export (attribute order,
- * defaults, the default `<Packaging>`), so the comparison is over declarations and never over bytes. An absent `Phase` is `Configure`,
- * an absent `When` is `After`, an absent `Preload` is `false`, and an absent `CheckStatus` is `undefined` (`true` or `1` is `true`).
+ * What differs between two archives' members: the file members' names and bytes, and the names of members that are neither a file
+ * nor a directory (links). Directory members are not compared. Empty means the two hold the same files byte for byte.
  *
- * @param {string} xml
- * @returns {{ name?: string, version?: string, sourcesRoot?: string, resources: Array<{ name: string, preload: boolean }>, invokes: Array<{ class: string, method: string, phase: string, when: string, checkStatus?: boolean }> }}
+ * @param {ReadonlyArray<{ name: string, type: string, data?: Uint8Array }>} actual
+ * @param {ReadonlyArray<{ name: string, type: string, data?: Uint8Array }>} expected
+ * @param {{ actual: string, expected: string }} labels - What each side is called in a message.
+ * @returns {string[]}
  */
-export function manifestDeclarations(xml) {
-  const text = String(xml).replace(/<!--[\s\S]*?-->/g, '');
-  const tags = (element) => [...text.matchAll(new RegExp(`<${element}(\\s[^>]*)?/?>`, 'g'))].map((match) => attributesOf(match[0]));
-  return {
-    name: elementText(text, 'Name'),
-    version: elementText(text, 'Version'),
-    sourcesRoot: elementText(text, 'SourcesRoot'),
-    resources: tags('Resource').map((attributes) => ({ name: attributes.Name, preload: attributes.Preload === 'true' })),
-    invokes: tags('Invoke').map((attributes) => ({
-      class: attributes.Class,
-      method: attributes.Method,
-      phase: attributes.Phase ?? 'Configure',
-      when: attributes.When ?? 'After',
-      checkStatus: attributes.CheckStatus === undefined ? undefined : /^(true|1)$/i.test(attributes.CheckStatus),
-    })),
+export function archiveEqualityProblems(actual, expected, labels) {
+  const members = (entries) => {
+    const files = new Map();
+    const others = new Set();
+    for (const entry of entries) {
+      const name = normalizeMember(entry.name);
+      if (name === '') continue;
+      if (entry.type === 'file') files.set(name, Buffer.from(entry.data ?? []));
+      else if (entry.type !== 'directory') others.add(name);
+    }
+    return { files, others };
   };
+  const have = members(actual);
+  const want = members(expected);
+  const problems = [];
+  for (const name of [...want.files.keys()].sort()) {
+    if (!have.files.has(name)) problems.push(`${labels.actual} is missing ${name}, which ${labels.expected} holds.`);
+    else if (!have.files.get(name).equals(want.files.get(name))) problems.push(`${name} differs between ${labels.actual} and ${labels.expected}.`);
+  }
+  for (const name of [...have.files.keys()].sort()) {
+    if (!want.files.has(name)) problems.push(`${labels.actual} holds ${name}, which ${labels.expected} does not.`);
+  }
+  for (const name of [...want.others].filter((candidate) => !have.others.has(candidate)).sort()) problems.push(`${labels.actual} is missing the link ${name}, which ${labels.expected} holds.`);
+  for (const name of [...have.others].filter((candidate) => !want.others.has(candidate)).sort()) problems.push(`${labels.actual} holds the link ${name}, which ${labels.expected} does not.`);
+  return problems;
 }
+
+/**
+ * What the served leg expects to install, read from the committed tree and never from the embed: the marker the tree stamps, the
+ * manifest's version and module name, and the number of resources (the classes and the guard) that must compile. Between releases the
+ * embed moves and the tree does not, so the two answers differ then.
+ *
+ * @param {string} repoRoot
+ * @returns {{ marker: string, semver: string, moduleName: string, classCount: number }}
+ */
+export function treeExpectations(repoRoot) {
+  const marker = ipmTreeMarker(repoRoot);
+  let manifest;
+  try {
+    manifest = readFileSync(path.join(repoRoot, IPM_MANIFEST_FILE), 'utf8');
+  } catch {
+    throw new Error(`${IPM_MANIFEST_FILE} is missing from the repository root: run pnpm gen:ipm.`);
+  }
+  const declared = manifestDeclarations(manifest);
+  if (marker === undefined) throw new Error(`the stamped install guard under ${IPM_PRELOAD_PREFIX}/ is missing or carries no marker: run pnpm gen:ipm.`);
+  if (declared.name === undefined || declared.version === undefined) throw new Error(`${IPM_MANIFEST_FILE} declares no <Name> or no <Version>.`);
+  return { marker, semver: declared.version, moduleName: declared.name, classCount: declared.resources.length };
+}
+
+/** Every directory above `file` (relative, `/`-separated), outermost first. */
+function directoriesOf(file) {
+  const parts = file.split('/').slice(0, -1);
+  return parts.map((_, index) => parts.slice(0, index + 1).join('/'));
+}
+
+// -- The manifest -----------------------------------------------------------------------
 
 /**
  * What differs between the manifest the repository declares and the one the archive carries. Resources compare as sets (IPM may
@@ -345,9 +420,10 @@ export function manifestProblems(declared, archived) {
 
 /**
  * What is wrong with an archive, given its member names (as {@link readTgz} returns them) and the directory it was extracted to: it must carry
- * `module.xml`, one `src/cls/<path>.cls` member per embedded class and no other under `src/cls/`, the preloaded guard, and no test
- * or fixture member; and every class member must equal the embed after LF and trailing-whitespace normalization. A repeated slash
- * in a member name is collapsed first.
+ * `module.xml`, one `ipm/src/cls/<path>.cls` member per embedded class and no other under `ipm/src/cls/`, the preloaded guard at
+ * `preload/ipm/src/cls/<path>.cls`, and no test or fixture member; and every class member must equal the embed after LF and
+ * trailing-whitespace normalization. A repeated slash in a member name is collapsed first. The layout is the committed tree's
+ * ({@link ipmTreeFiles}), which is what IPM's `package` writes for the sources root `ipm/src`.
  *
  * @param {readonly string[]} members
  * @param {string} extractedDir
@@ -362,13 +438,12 @@ export function archiveProblems(members, extractedDir, embed, options = {}) {
   const present = new Set(names);
 
   if (!present.has('module.xml')) problems.push('the archive carries no module.xml, so nothing can install it.');
-  const expected = new Map();
-  for (const [name, content] of embed.classes) expected.set(['src', 'cls', ...classPathSegments(name)].join('/'), content);
-  expected.set(['preload', 'src', 'cls', ...classPathSegments(embed.guard.name)].join('/'), embed.guard.content);
+  const expected = ipmTreeFiles(embed);
 
-  const classMembers = names.filter((member) => /^src\/cls\/.*\.cls$/.test(member));
+  const classPrefix = `${IPM_SOURCES_ROOT}/cls/`;
+  const classMembers = names.filter((member) => member.startsWith(classPrefix) && member.endsWith('.cls'));
   if (classMembers.length !== embed.classes.size) {
-    problems.push(`the archive carries ${classMembers.length} src/cls class member(s), the embed ${embed.classes.size}.`);
+    problems.push(`the archive carries ${classMembers.length} ${classPrefix} class member(s), the embed ${embed.classes.size}.`);
   }
   for (const [member, content] of expected) {
     if (!present.has(member)) {

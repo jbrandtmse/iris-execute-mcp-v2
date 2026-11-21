@@ -25,8 +25,11 @@
 #              network, and installs that one archive offline on iris-community 2026.2 (USER) and irishealth-community
 #              2026.2 (HSCUSTOM), each on a container of its own with no network. On the community container it proves
 #              the install guard refuses a newer, dev or marker-less Setup; on both, that the classes compile, that the REST
-#              application is configured, that nothing was fetched, and that InstallGuard.Classify equals the TypeScript comparator. It needs gates and
-#              throwaway, so no archive comes from a red commit, and it runs in parallel with package. It publishes nothing.
+#              application is configured, that nothing was fetched into a container, and that InstallGuard.Classify equals the
+#              TypeScript comparator. It then fetches GitHub's archive of the commit under test (the archive the IPM registry
+#              downloads), requires it to equal `git archive`, re-tars it the registry's way inside a container and installs
+#              that on both editions the same way. It needs gates and throwaway, so no archive comes from a red commit, and
+#              it runs in parallel with package. It publishes nothing and reads no secret.
 #
 # The steps are declared in scripts/lib/ci-checks.mjs, and packages/iris-mcp-all/src/__tests__/ci-workflow.test.ts holds this
 # file equal to that registry. Every action is pinned by commit, with its release tag in the trailing comment.
@@ -99,6 +102,8 @@ jobs:
         run: pnpm gen:pack:check
       - name: listings check
         run: pnpm gen:listings:check
+      - name: ipm tree check
+        run: pnpm gen:ipm:check
       - name: validate prompts
         run: pnpm validate:prompts
       - name: provenance check

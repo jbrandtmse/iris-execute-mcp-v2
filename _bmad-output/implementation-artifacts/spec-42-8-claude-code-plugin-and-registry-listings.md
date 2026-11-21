@@ -368,7 +368,7 @@ Code review 2026-11-21, rework re-review of commit `27e3be5` only (frozen diff `
 - [x] [Review][Patch] MED: the rehearsal leg of the shared skip row asserted "the registry still ran", "not not attempted" and "no ovsx call", none of which a rehearsal can falsify (the registry runs after any soft `not ready`; the dry step never calls ovsx) [release-not-set-up.test.ts] — those three now run in the release leg only, with the reason; the rehearsal claim rests on its exit code, block and annotation (a soft-stopped later channel is unobservable until #122 brings IPM in). fix-risk low. (verification-gap)
 - [x] [Review][Patch] LOW: the `::warning` title `Channel skipped, not set up` is a property, which the runner splits on `,` (actions/runner `ActionCommand.cs`), so the annotation title read "Channel skipped" [scripts/lib/release-core.mjs `notSetUpAnnotations`] — `%2C`; the unit row also asserts the properties split into exactly one; Change Log #121 text corrected. (edge+auditor+blind+verification-gap)
 - [x] [Review][Patch] LOW: eight #121 pins had no `mutation:` line, and one line named only half its red rows — applied, red, reverted, written (Rule 19). The row named "an npm-only outcome" (it publishes the Marketplace too) renamed "Open VSX alone does not block a release".
-- [x] [Review][Defer] LOW: README Releasing and the commit say an npm-only release can go out, but IPM (excluded, enabled without condition) still fails the rehearsal before O-IPM1 — deferred: DW-714 `wontfix-accepted` (README is 42.9's file now; #124(6) has the #122 pass edit Releasing, where IPM stops failing). (edge+blind)
+- [x] [Review][Defer] LOW: README Releasing and the commit say an npm-only release can go out, but IPM (excluded, enabled without condition) still fails the rehearsal before O-IPM1 — deferred: DW-714 `wontfix-accepted` (README is 42.9's file now; #124(6) has the #122 pass edit Releasing, where IPM stops failing). (edge+blind) **Closed by the #122 amendment:** IPM is a `manual step` that can neither fail nor block a run, and the README's Releasing section says so, so the "npm-only release can go out" claim is true.
 - [x] [Review][Defer] LOW: "run the release again for the same tag" does not say how (a green run offers only Re-run all jobs, which repeats `prepare` and rebuilds the vsix) — deferred: DW-715 `wontfix-accepted`. (blind)
 
 DW-704 carries a trailer recording the #121 revision.
@@ -415,6 +415,16 @@ DW-704 carries a trailer recording the #121 revision.
      | Set-up channel fails | a version lookup HTTP 500, a vsix hash mismatch, a missing CLI, an upload that exits non-zero | `not ready`/`failed` as before; exit 1 (rehearsal), 1 or 2 (release); what follows `not attempted` | a skipped channel is still listed |
      | npm failure | `npm publish` fails or `npm view` cannot be judged | exit 1; every other channel `not attempted` | npm is never skipped |
      | Rerun after the setup | namespace now 200; npm and the Marketplace already hold the version | npm and the Marketplace `already published`; Open VSX `published`; no block | — |
+
+**2026-11-21, amendment: decisions #122 and #124 (owner, 2026-11-21; spec `spec-42-8-amendment-122-ipm-from-main.md` is the binding text) — IPM publishes from the main repository's root. Binding where it differs from every IPM statement above, including the "IPM is EXCLUDED pending decision #122" paragraph of #121 and the IPM rows of the matrix; the frozen block is untouched.**
+
+4. **#122 (IPM from `main`).** There is no packaging repository `jbrandtmse/iris-execute-mcp-v2-ipm`, no deploy key (`IPM_DIST_DEPLOY_KEY`), no pinned GitHub host keys and no push. The existing Open Exchange listing `IRIS-MCP-Server-Suite-2` (Github = this repository) stays the one listing: the IPM registry reads the root `module.xml` of `main` and serves a re-tar of GitHub's archive of `main` when the owner presses Release on it.
+   - **The tree.** The root `module.xml`, the stamped classes under `ipm/src/cls/` and the stamped guard under `preload/ipm/src/cls/` are committed, output-only and written by `gen-bootstrap.mjs --ipm` only at the version step; `gen:ipm:check` holds them (self-hash, shared version, no extra file, nothing but the guard under `preload/`, no root `requirements.txt`). A release's `prepare` refuses a tree whose marker is not `BOOTSTRAP_VERSION`; a dry run notes it.
+   - **The channel is a `manual step`.** A registry that lists the version reads `already published`; anything else, and a registry that cannot be read, is `manual step` (`ready (manual step after the tag: ...)` in a rehearsal), shown in a "Manual steps" block and a `::warning::` annotation. IPM can neither fail nor block a run, so the README's "an npm-only release can go out" claim (DW-714) is now true: only a missing store setup is skipped.
+   - **`verify`.** IPM is `pending` (never failing) until the registry lists the version; once it does, the served archive must equal `git archive v<version>` member for member and byte for byte.
+   - **The DW-694 gate** fetches GitHub's real archive of the commit under test, requires it equal to `git archive`, asserts the module's members and `load`s the registry's re-tar on both editions (the registry-shaped leg above, redefined; the `stagePackagingRoot` function is gone).
+   - **#124: no export rules.** `.gitattributes` is untouched; GitHub's archives stay the whole repository.
+   - **Owner steps.** O-IPM1 (the repository, the key, the secret) is cancelled. The owner's step is O-IPM: after the `v1.1.0` release has published, tick "Publish in Package Manager" on the existing listing and press Release with the version of `main`'s `module.xml`. If an `IPM_DIST_DEPLOY_KEY` secret was already added, delete it. Never create a `master` branch in this repository.
 
 ## Review Triage Log
 
@@ -546,7 +556,7 @@ DW-704 carries a trailer recording the #121 revision.
 - #106 (the Lead's call for AC 42.8.3): the compile-on-save hook is not shipped and is filed as a candidate.
 - #107: plugin detection.
 - #108, **amended**:
-  - IPM is enabled without condition, so a missing packaging repository blocks the release until owner step O-IPM1. This is intended.
+  - IPM is enabled without condition, so a missing packaging repository blocks the release until owner step O-IPM1. This is intended. **SUPERSEDED by decision #122:** there is no packaging repository and no O-IPM1; IPM is a `manual step` that can neither fail nor block a release.
   - The `mcp-registry` channel runs LAST. In `rehearse` its readiness or lookup failure is REPORTED but does NOT make `rehearse` exit non-zero, because the registry is in preview and must not block npm, the stores or IPM.
   - In `publish`, a failed registry upload fails the run only after every other channel has finished, and a rerun recovers it.
   - Update the I/O matrix rows, the tasks and the tests to match. Every other channel stays fail-closed.
@@ -586,7 +596,7 @@ The implement stage never pushes, creates repositories, tags, publishes or logs 
    - the always-on rule already makes agents compile through `iris_doc_load`/`iris_doc_compile`.
 7. **Orchestrator decision needed: what "detects the plugin" reads (DW-625) — recommended: `enabledPlugins["iris-mcp@iris-mcp"]` in the user (`CLAUDE_CONFIG_DIR`-aware), project and local settings files, highest precedence wins, managed/`--settings`/`--add-dir` declared out of scope,** because it is the documented key Claude Code writes on install and enable. A miss only installs a duplicate, and the report names what decided (Rule #56).
 8. **Orchestrator decision needed: how the IPM and registry channels behave when owner prerequisites are missing (DW-704) — recommended:**
-   - **IPM:** enabled unconditionally. A missing packaging repository makes `rehearse` not ready, which blocks `v1.1.0`, npm included, until owner step O-IPM1. This is intended: O-IPM1 is cheap and precedes the tag, as O1 does for the stores, and a 1.1.0 without IPM would break "the module version equals the npm version".
+   - **IPM:** enabled unconditionally. A missing packaging repository makes `rehearse` not ready, which blocks `v1.1.0`, npm included, until owner step O-IPM1. This is intended: O-IPM1 is cheap and precedes the tag, as O1 does for the stores, and a 1.1.0 without IPM would break "the module version equals the npm version". **SUPERSEDED by decision #122:** IPM publishes from the main repository through the owner's Release press (a `manual step`); there is no packaging repository to be missing, and a rehearsal never reads `not ready` for IPM.
    - **MCP Registry:** it has no owner prerequisite (OIDC from `repository_owner`), and an unreadable registry fails closed like every store.
    - Alternative: ship IPM enabled only once O-IPM1 is done (a one-line flip in a later commit).
 9. **Orchestrator decision needed: a rerun of the IPM channel when the registry already lists the version — recommended: go on to the tag/tree check (identical → `already published`; otherwise `failed`), and the dry step reads `ready (would be already published)`,** because 42.5's row made any rerun after the Open Exchange press fail (42.5 review, deferred to this story).
@@ -596,7 +606,7 @@ The implement stage never pushes, creates repositories, tags, publishes or logs 
 11. **Orchestrator decision needed: the MCP Registry scope — recommended: the five server packages, not `@iris-mcp/all`,** because `all` has no bin and no `mcpName`, and the registry lists runnable servers.
 
 **What the owner must provide, and when (the lead tells the Planner; nothing blocks the implement or QA stages):**
-- **O-IPM1, before the `v1.1.0` tag (and before lead A2's "ready" line):**
+- **O-IPM1 (SUPERSEDED by decision #122: cancelled, nothing below is to be done; the owner step is O-IPM in the lead checklist), before the `v1.1.0` tag (and before lead A2's "ready" line):**
   1. Create a **public, empty** repository `jbrandtmse/iris-execute-mcp-v2-ipm`, with no README, licence or `.gitignore`, so the release's first push makes `master` the default branch (decision #76).
   2. Generate a key pair, for example `ssh-keygen -t ed25519 -N "" -C iris-execute-mcp-v2-release -f ipm_deploy`.
   3. Add `ipm_deploy.pub` as a **deploy key with "Allow write access"** on that repository.
@@ -730,16 +740,15 @@ Every test added or changed passes on a fresh environment, in either order, and 
   - on the real path, A1b.
 
 **Lead checklist (after code review; the lead records each result, in this order; nothing publishes before the `release` environment approval in C0):**
-- A1: CI on the story commit is green, including `ipm`'s registry-shaped leg on both editions.
-- A1b: a throwaway branch where `stagePackagingRoot` ALONE puts `module.xml` under a subdirectory (after `stageModule` returns; never mutate `stageModule`, which the `package` leg also uses) is red at the registry-shaped leg while the `package` leg stays green; the branch is deleted.
-- A2: the release dry run (`release-dry-run/**`) before O-IPM1: `ipm` reads `not ready (... absent or not readable ...)` and the rehearsal exits 1 for it (intended); `mcp-registry` reads `ready (would publish 5 servers)` (its `not ready` would be reported without failing the run, decision #108). Decision #121: while the Open VSX namespace is absent (before owner step O1) `open-vsx` reads `skipped (not set up: the Open VSX namespace iris-mcp does not exist ...)` and does not fail the rehearsal; the IPM wording above is unchanged until the decision #122 pass redesigns the channel.
-- **O-IPM1 (OWNER ONLY; blocks the `v1.1.0` tag):** the packaging repository, the deploy key and the `IPM_DIST_DEPLOY_KEY` secret (Design Notes, "What the owner must provide").
-- A2b: after O-IPM1, the dry run again: `ipm` reads `ready`.
+- A1: CI on the story commit is green, including `ipm`'s served-archive leg (GitHub's real archive of the commit, its re-tar installed) on both editions.
+- A1b: the red proof of the served leg is the amendment spec's A1b (decision #122): a red branch moves the stamped guard out of `preload/` with the unit pins neutralized, and `ipm` is red at the served member check and, independently, at the install legs on both editions; the branch is deleted.
+- A2: the release dry run (`release-dry-run/**`): `ipm` reads `ready (manual step after the tag: Release <v> on the Open Exchange listing IRIS-MCP-Server-Suite-2; ...)` and is never `not ready`, and the summary shows the "Manual steps" block; `mcp-registry` reads `ready (would publish 5 servers)` (its `not ready` would be reported without failing the run, decision #108). Decision #121: while the Open VSX namespace is absent (before owner step O1) `open-vsx` reads `skipped (not set up: the Open VSX namespace iris-mcp does not exist ...)` and does not fail the rehearsal.
+- **O-IPM (OWNER ONLY; after the `v1.1.0` release has published, and before a later version commit reaches `main`):** tick "Publish in Package Manager" on the Open Exchange listing `IRIS-MCP-Server-Suite-2` and press Release with `main`'s `module.xml` version (the amendment spec's Design Notes, "What the owner must do"). It blocks neither the tag nor any stage.
 - B1: after npm 1.0.0 is live (42.6 B7), the `--plugin-dir` session with five servers connected.
 - C0 (before the `v1.1.0` tag): re-check the `mcp-publisher` v1.8.8 pin (decision #110: not yanked, no security-fix release since); then `pnpm run version`, CI green on the version commit, the tag on `main`, and the `release` environment approval. Keep the window between the `epic42` merge to `main` and this version commit short: until then `main`'s marketplace pins `v1.0.0`, whose pack has no plugin manifest (DW-707).
 - C1–C2: after `v1.1.0`, per the ACs above.
-- **O-OEX (OWNER ONLY; after `v1.1.0` publishes):** the Open Exchange app and its "Publish in Package Manager" approval.
-- C3: after O-OEX, per the AC "Listings".
+- **O-OEX (OWNER ONLY; after `v1.1.0` publishes):** done by O-IPM above (the existing listing, not a new app); the approval of the edit is the owner's.
+- C3: after O-IPM and its approval, per the AC "Listings" (`verify` turns IPM from `pending` to `ok`).
 
 **Implement-stage evidence (2026-11-21).**
 

@@ -15,8 +15,10 @@
 //      installed; and on any other argument (a second `--` is one).
 //   2. RUNS, in this order: the `--first-release` copy (removed again when `changeset version` fails), the repository's own
 //      `changeset version` (the bin of node_modules/@changesets/cli, so it needs no PATH entry), the same checks the release's `prepare`
-//      makes (`versionProblems`: one shared version, no prerelease, no pending changeset), then `scripts/gen-bootstrap.mjs`, which
-//      stamps the new semver into the embed and into ipm/module.xml and keeps the sequence and the hash. Then `scripts/gen-pack.mjs` and
+//      makes (`versionProblems`: one shared version, no prerelease, no pending changeset), then `scripts/gen-bootstrap.mjs --ipm`, which
+//      stamps the new semver into the embed, and writes the IPM tree (the root module.xml, the stamped classes under ipm/src and the
+//      guard under preload/) at it: the only run that does, so `main` carries the last released content (decision #122). It keeps the
+//      sequence and the hash. The final check also requires the tree's marker to equal `BOOTSTRAP_VERSION`. Then `scripts/gen-pack.mjs` and
 //      `scripts/gen-listings.mjs` regenerate the plugin manifest, the marketplace `ref` (`v<version>`) and the five `server.json` files
 //      (Story 42.8, lockstep: `embeddedVersionProblems` refuses any of them off the shared version). Then the VS Code extension
 //      follows the shared version (lockstep, Story 42.7): its package.json and package-lock.json (both of the lock's version fields) are
@@ -192,9 +194,9 @@ export async function main(argv = process.argv.slice(2), env = process.env, root
     return 1;
   }
 
-  const generated = await spawnInherited([process.execPath, path.join(root, 'scripts', 'gen-bootstrap.mjs')], { label: 'version', env, cwd: root });
+  const generated = await spawnInherited([process.execPath, path.join(root, 'scripts', 'gen-bootstrap.mjs'), '--ipm'], { label: 'version', env, cwd: root });
   if (generated !== 0) {
-    say(`gen-bootstrap failed (exit ${generated}). Fix the generator error.`);
+    say(`gen-bootstrap --ipm failed (exit ${generated}). Fix the generator error.`);
     partial();
     return 1;
   }
@@ -219,7 +221,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, root
     return 1;
   }
   const after = stateOf(root);
-  const problems = [...after.facts.problems, ...versionProblems(after, 'dry-run'), ...embeddedVersionProblems(after.facts)];
+  const problems = [...after.facts.problems, ...versionProblems(after, 'dry-run'), ...embeddedVersionProblems(after.facts, { release: true })];
   if (problems.length > 0) {
     for (const problem of problems) say(`problem: ${problem}`);
     partial();
@@ -227,7 +229,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, root
   }
 
   const version = after.facts.sharedVersion;
-  say(`all ${after.versions.length} packages are at ${version}; ipm/module.xml and the embed carry it.`);
+  say(`all ${after.versions.length} packages are at ${version}; the root module.xml, the IPM tree and the embed carry it.`);
   say(
     before.facts.marker === after.facts.marker
       ? `\`BOOTSTRAP_VERSION\` does not move (${after.facts.marker}).`

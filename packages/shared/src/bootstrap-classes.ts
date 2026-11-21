@@ -21002,7 +21002,7 @@ export function getBootstrapClasses(): BootstrapClass[] {
 }
 
 /**
- * The IPM module name: the `<Name>` of ipm/module.xml, declared once in scripts/gen-bootstrap.mjs.
+ * The IPM module name: the `<Name>` of the root module.xml, declared once in scripts/gen-bootstrap.mjs.
  */
 export const IPM_MODULE_NAME = "iris-execute-mcp-v2";
 

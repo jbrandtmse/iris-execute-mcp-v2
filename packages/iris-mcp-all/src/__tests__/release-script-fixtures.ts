@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
-import { NPM_PUBLISH_ORDER, RELEASE_CHANNELS } from "../../../../scripts/lib/release-core.mjs";
+import { IPM_MODULE, IPM_TREE_GUARD_RELATIVE, NPM_PUBLISH_ORDER, OPEN_EXCHANGE_LISTING_URL, RELEASE_CHANNELS } from "../../../../scripts/lib/release-core.mjs";
 
 export const SHA = "c".repeat(40);
 
@@ -164,6 +164,8 @@ export interface FakeStores {
   namespace: FakeAnswer;
   /** The IPM registry's answer for the package (Story 42.8): 404 for a package it does not list. */
   ipmRegistry: FakeAnswer;
+  /** The IPM registry's answer for a download of an archive (`/download/...`): the served `.tgz`; `undefined` is the unrouted 599. */
+  ipmArchive?: FakeAnswer;
   /** The MCP Registry's answer for `name@version`: 404 (the real body) for a server it does not list. */
   mcpRegistry: (name: string, version: string) => FakeAnswer;
   /** npm's answer for `<package>@<version>`: 200 once npm serves it. */
@@ -200,11 +202,46 @@ export function newFakeStores(): FakeStores {
     marketplace: { status: 404, contentType: "application/json; charset=utf-8", body: { $id: "1", innerException: null, message: "Resource not found", typeKey: "ExtensionAssetNotFoundException" } },
     openVsx: { status: 404, body: { deprecated: false, downloadable: false, error: "Extension not found: iris-mcp.iris-mcp-launcher 1.0.0" } },
     namespace: { status: 200, body: { extensions: {} } },
-    ipmRegistry: { status: 404, body: { message: "package not found" } },
+    ipmRegistry: IPM_REGISTRY_MISS,
     mcpRegistry: () => MCP_REGISTRY_MISS,
     npmVersion: () => ({ status: 200, body: {} }),
     requests: [],
   };
+}
+
+/**
+ * The IPM registry's answer for a package it does not list: 404, `application/json; charset=utf-8`, an empty body (a read-only GET of
+ * `https://pm.community.intersystems.com/packages/iris-execute-mcp-v2` on 2026-11-21).
+ */
+export const IPM_REGISTRY_MISS: FakeAnswer = { status: 404, contentType: "application/json; charset=utf-8", raw: "" };
+
+/**
+ * The IPM registry's answer for a package it lists: 200 JSON with `name`, `version` (the newest), `description`, `repository`, `size`,
+ * `hash`, `url` (the newest version's download), `versions` (every version, sorted as text), `publishTS` and `deleted`. The shape is the
+ * one a read-only GET of `https://pm.community.intersystems.com/packages/ocupilot` returned on 2026-11-21, with this module's own name.
+ */
+export function ipmRegistryHit(newest: string, older: string[] = []): FakeAnswer {
+  return {
+    status: 200,
+    contentType: "application/json; charset=utf-8",
+    body: {
+      name: "iris-execute-mcp-v2",
+      version: newest,
+      description: "Server-side classes and REST service (/api/executemcp/v2) for the IRIS MCP server suite.",
+      repository: "https://github.com/jbrandtmse/iris-execute-mcp-v2/",
+      size: 13824770,
+      hash: "d01d328f1d6b2c8a7f2a5e1b0c9d3e4f5a6b7c8d",
+      url: `https://pm.community.intersystems.com/download/iris-execute-mcp-v2/-/iris-execute-mcp-v2-${newest}.tgz`,
+      versions: [...older, newest].sort(),
+      publishTS: 1795235429.719946,
+      deleted: false,
+    },
+  };
+}
+
+/** The IPM registry's answer for a download: 200, `application/tar+gzip; charset=RAW` (a read-only GET of `.../download/ocupilot/-/ocupilot-1.0.18.tgz` on 2026-11-21), the archive's bytes. */
+export function ipmArchiveAnswer(bytes: Uint8Array): FakeAnswer {
+  return { status: 200, contentType: "application/tar+gzip; charset=RAW", bytes };
 }
 
 /** The MCP Registry's answer for a server it does not list (read-only GETs on 2026-11-21): 404 `{"title":"Not Found","status":404,"detail":"Server not found"}`. */
@@ -229,7 +266,7 @@ export function storeAnswerFor(stores: FakeStores, url: string, init?: FakeInit)
   }
   if (parsed.host === "pm.community.intersystems.com") {
     record();
-    return stores.ipmRegistry;
+    return parsed.pathname.startsWith("/download/") ? stores.ipmArchive : stores.ipmRegistry;
   }
   if (parsed.host === "registry.modelcontextprotocol.io") {
     record();
@@ -284,8 +321,8 @@ export interface ArtifactManifest {
 }
 
 /**
- * Write synthetic artifacts into `dir` -- eight tarballs, a vsix and a small IPM tree -- and their `release-manifest.json` with the
- * real hashes. The tarballs are not archives; `publish` hands them to the stand-in `npm` and reads their bytes only for the hash.
+ * Write synthetic artifacts into `dir` -- eight tarballs, a vsix and the registry listings -- and their `release-manifest.json` with the
+ * real hashes. The IPM channel lists no file (decision #122): its entry is the one `prepare` writes. The tarballs are not archives; `publish` hands them to the stand-in `npm` and reads their bytes only for the hash.
  */
 export function makeArtifacts(dir: string, options: ArtifactOptions = {}): ArtifactManifest {
   const version = options.version ?? "1.0.0";
@@ -302,9 +339,6 @@ export function makeArtifacts(dir: string, options: ArtifactOptions = {}): Artif
   const vsixVersion = options.vsixVersion ?? version;
   const vsixFile = `vsix/iris-mcp-launcher-${vsixVersion}.vsix`;
   write(vsixFile, "synthetic vsix\n");
-  write("ipm/module.xml", "<Export/>\n");
-  write("ipm/README.md", "# iris-execute-mcp-v2\n");
-  write("ipm/src/cls/ExecuteMCPv2/Utils.cls", "Class ExecuteMCPv2.Utils {}\n");
   const registryServers = SERVER_DIRS.map((dir) => {
     const file = `mcp-registry/${dir}.json`;
     write(file, `${JSON.stringify({ name: registryNameOf(dir), version, packages: [{ identifier: `@iris-mcp/${dir.replace(/^iris-|-mcp$/g, "")}`, version }] })}\n`);
@@ -315,16 +349,13 @@ export function makeArtifacts(dir: string, options: ArtifactOptions = {}): Artif
     npm: { packages },
     "vscode-marketplace": vsix,
     "open-vsx": vsix,
-    ipm: { tree: "ipm", module: "iris-execute-mcp-v2", version, marker: `${version}+2.244fe8623c76`, repository: "jbrandtmse/iris-execute-mcp-v2-ipm", branch: "master" },
+    ipm: { module: IPM_MODULE, version, marker: `${version}+2.244fe8623c76`, listing: OPEN_EXCHANGE_LISTING_URL, manual: true },
     "mcp-registry": { servers: registryServers },
   };
   const files = [
     ...packages.map((entry) => entry.tarball),
     ...registryServers.map((server) => server.file),
     vsixFile,
-    "ipm/module.xml",
-    "ipm/README.md",
-    "ipm/src/cls/ExecuteMCPv2/Utils.cls",
   ].sort();
   const manifest: ArtifactManifest = {
     schema: 1,
@@ -368,9 +399,11 @@ export interface RepoOptions {
   /** The version of every package (default 1.0.0), and the exceptions by package name. */
   version?: string;
   versions?: Record<string, string>;
-  /** The semver of the bootstrap marker and of `ipm/module.xml` (default: the version of `@iris-mcp/shared`). */
+  /** The semver of the bootstrap marker and of the root `module.xml` (default: the version of `@iris-mcp/shared`). */
   markerSemver?: string;
   moduleVersion?: string;
+  /** The whole marker the committed IPM tree stamps (default: the embed's marker), or `null` for a repository whose tree has no stamped guard. */
+  ipmTreeMarker?: string | null;
   /** Pending changesets, by file name. */
   pending?: string[];
   /** The root scripts (default: the four `:check` scripts, `format:check`, hooks and the others of the real root). */
@@ -395,6 +428,8 @@ export const registryNameOf = (dir: string): string => `io.github.jbrandtmse/${d
 /** The root scripts of the real repository that matter to `prepare`. */
 export const ROOT_SCRIPTS: Record<string, string> = {
   "gen:bootstrap": "node scripts/gen-bootstrap.mjs",
+  "gen:ipm": "node scripts/gen-bootstrap.mjs --ipm",
+  "gen:ipm:check": "node scripts/gen-bootstrap.mjs --ipm-check",
   "pregen:governance-baseline:check": "turbo run build --filter @iris-mcp/shared",
   "gen:governance-baseline:check": "node scripts/gen-governance-baseline.mjs --check",
   "gen:skills:check": "node scripts/gen-skills.mjs --check",
@@ -411,7 +446,7 @@ export const ROOT_SCRIPTS: Record<string, string> = {
 /** The marker `prepare` reads from the embed. */
 export const MARKER_TAIL = "2.244fe8623c76";
 
-/** Write a synthetic repository under `root`: the eight packages, the changesets, the embed's marker line, `ipm/module.xml`, the extension and the LICENSE. */
+/** Write a synthetic repository under `root`: the eight packages, the changesets, the embed's marker line, the root `module.xml` and the tree's stamped guard, the extension and the LICENSE. */
 export function makeRepo(root: string, options: RepoOptions = {}): { versionOf: (name: string) => string } {
   const version = options.version ?? "1.0.0";
   const versionOf = (name: string): string => options.versions?.[name] ?? version;
@@ -440,8 +475,11 @@ export function makeRepo(root: string, options: RepoOptions = {}): { versionOf: 
   text(".changeset/README.md", "# Changesets\n");
   for (const name of options.pending ?? []) text(`.changeset/${name}`, '---\n"@iris-mcp/shared": patch\n---\n\nA change.\n');
   const sharedVersion = versionOf("@iris-mcp/shared");
-  text("packages/shared/src/bootstrap-classes.ts", `export const BOOTSTRAP_VERSION = "${options.markerSemver ?? sharedVersion}+${MARKER_TAIL}";\n`);
-  text("ipm/module.xml", `<Export><Module><Name>iris-execute-mcp-v2</Name><Version>${options.moduleVersion ?? sharedVersion}</Version></Module></Export>\n`);
+  const marker = `${options.markerSemver ?? sharedVersion}+${MARKER_TAIL}`;
+  text("packages/shared/src/bootstrap-classes.ts", `export const BOOTSTRAP_VERSION = "${marker}";\n`);
+  text("module.xml", `<Export><Module><Name>iris-execute-mcp-v2</Name><Version>${options.moduleVersion ?? sharedVersion}</Version></Module></Export>\n`);
+  // The tree's stamped guard carries the marker the registry serves for the module's version (the generator's `Parameter` line).
+  if (options.ipmTreeMarker !== null) text(IPM_TREE_GUARD_RELATIVE, `Class ExecuteMCPv2.InstallGuard {\nParameter BOOTSTRAPVERSION = "${options.ipmTreeMarker ?? marker}";\n}\n`);
   // The extension follows the shared version (lockstep): its manifest, both version fields of its lock, and its changelog heading.
   const extensionVersion = options.extensionVersion ?? sharedVersion;
   json("extensions/iris-mcp-launcher/package.json", { name: "iris-mcp-launcher", version: extensionVersion, private: true, publisher: "iris-mcp" });

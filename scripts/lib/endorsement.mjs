@@ -4,7 +4,7 @@
 // A text may carry the suite's own non-endorsement sentence ({@link NO_ENDORSEMENT_SENTENCE}); the deny-list reads the text without it, because
 // that sentence says "endorsed" and "by InterSystems" in order to deny them. Pure: no file system and no process access.
 
-/** The sentence a description may end with to deny endorsement (the wording of the IPM packaging repository's README). */
+/** The sentence a description may end with to deny endorsement. */
 export const NO_ENDORSEMENT_SENTENCE = 'This is an independent community project. It is not made, endorsed or supported by InterSystems.';
 
 /** The claims a name or a description may not make, each with the label a problem carries. */

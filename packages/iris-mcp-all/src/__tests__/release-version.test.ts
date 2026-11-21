@@ -4,7 +4,9 @@
  * tree is never versioned, and nothing is committed, tagged or published.
  *
  * The fixture (`release-fixture.ts`) owns its state: all eight manifests at one seeded version, one synthetic `patch` changeset, and the
- * embed and `ipm/module.xml` generated for that version, committed in a git repository of its own so that the script sees a clean tree.
+ * embed, the root `module.xml` and the IPM tree generated for that version (`gen-bootstrap.mjs --ipm`, which writes the tree because it is
+ * absent), committed in a git repository of its own so that the script sees a clean tree. The version step regenerates the tree with
+ * `--ipm` (decision #122), and a second `--ipm` at the same version then refuses.
  * What a test expects is fixed by that seed and by the template (a first release lands on 1.0.0; a patch on 0.0.2 gives 0.0.3 and on
  * 1.0.0 gives 1.0.1), never by the real packages. Expected marker values come from running the generator on the fixture (Rule #36): the
  * sequence and hash that the marker keeps are the ones the generator prints before and after, and the printed `BOOTSTRAP_VERSION` move is
@@ -14,13 +16,14 @@
 
 import { afterAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { REPO_ROOT, removeLink } from "./pack-fixture";
 import { FIXTURE_GIT_ENV, PACKAGE_DIRS, SYNTHETIC_CHANGESET, commitFixture, fixtureStatus, fixtureTreeHash, makeVersionFixture, manifestOf, pendingChangesets, removeFixtures } from "./release-fixture";
 import { embeddedVersionProblems, readReleaseFacts } from "../../../../scripts/release.mjs";
 import { main as versionMain } from "../../../../scripts/release-version.mjs";
 import { versionProblems } from "../../../../scripts/lib/release-core.mjs";
+import { ipmTreeMarker, ipmTreeProblems } from "../../../../scripts/lib/ipm-tree.mjs";
 
 afterAll(removeFixtures);
 
@@ -58,17 +61,23 @@ function generatorMarker(root: string): string {
 /** The stamped `Parameter BOOTSTRAPVERSION` lines of the embed. */
 const stamps = (root: string): string[] => [...readFileSync(join(root, "packages/shared/src/bootstrap-classes.ts"), "utf8").matchAll(/Parameter BOOTSTRAPVERSION = "([^"]+)";/g)].map((match) => match[1] as string);
 
-/** Every manifest of the fixture is at `version`, and the marker, the two stamps and `ipm/module.xml` carry it with the sequence and hash of `before`. */
+/**
+ * Every manifest of the fixture is at `version`, and the marker, the two stamps, the root `module.xml` and the IPM tree carry it with
+ * the sequence and hash of `before`: the tree stamps the embed's marker exactly, and `gen:ipm:check`'s own check finds nothing wrong.
+ */
 function expectVersioned(root: string, version: string, before: string): string {
   for (const dir of PACKAGE_DIRS) expect(manifestOf(root, dir).version, dir).toBe(version);
   const after = generatorMarker(root);
   expect(after.split("+")[0], "the marker carries the new semver").toBe(version);
   expect(after.split("+")[1], "the sequence and hash are the ones from before").toBe(before.split("+")[1]);
   expect(stamps(root), "the marker is stamped into the embedded Setup and the embedded install guard").toEqual([after, after]);
-  expect(readFileSync(join(root, "ipm/module.xml"), "utf8")).toContain(`<Version>${version}</Version>`);
+  expect(readFileSync(join(root, "module.xml"), "utf8")).toContain(`<Version>${version}</Version>`);
+  expect(ipmTreeMarker(root), "the tree's Setup and guard stamp BOOTSTRAP_VERSION exactly").toBe(after);
+  expect(ipmTreeProblems(root, { sharedVersion: version })).toEqual([]);
   const facts = readReleaseFacts(root);
+  expect(facts.ipmTreeMarker).toBe(after);
   expect(versionProblems({ versions: facts.packages.map((entry: { name: string; version: string }) => ({ name: entry.name, version: entry.version })), pending: facts.pending }, "dry-run")).toEqual([]);
-  expect(embeddedVersionProblems(facts)).toEqual([]);
+  expect(embeddedVersionProblems(facts, { release: true }), "release mode: the tree is fresh").toEqual([]);
   expectExtensionVersioned(root, version);
   return after;
 }
@@ -87,7 +96,7 @@ function expectExtensionVersioned(root: string, version: string, date: RegExp | 
 }
 
 describe("pnpm run version -- --first-release in a throwaway fixture (AD-14)", () => {
-  it("lands all eight packages on 1.0.0; the marker, the two stamped parameters and ipm/module.xml carry it; the sequence and hash are unchanged; the move literal is the generator's", () => {
+  it("lands all eight packages on 1.0.0; the marker, the two stamped parameters, the root module.xml and the IPM tree carry it; the sequence and hash are unchanged; the move literal is the generator's", () => {
     const root = makeVersionFixture();
     const before = generatorMarker(root);
     const sequenceState = readFileSync(join(root, "scripts/bootstrap-sequence.json"), "utf8");
@@ -100,7 +109,7 @@ describe("pnpm run version -- --first-release in a throwaway fixture (AD-14)", (
     const after = expectVersioned(root, "1.0.0", before);
     expect(readFileSync(join(root, "scripts/bootstrap-sequence.json"), "utf8"), "the state file is byte-identical: a semver-only change keeps the sequence").toBe(sequenceState);
     expect(result.stderr).toContain(`version: \`BOOTSTRAP_VERSION\` moves from \`${before}\` to \`${after}\``);
-    expect(result.stderr).toContain("all 8 packages are at 1.0.0; ipm/module.xml and the embed carry it.");
+    expect(result.stderr).toContain("all 8 packages are at 1.0.0; the root module.xml, the IPM tree and the embed carry it.");
     expect(result.stderr).toContain("next steps: write the root CHANGELOG section for this release, naming the BOOTSTRAP_VERSION move above;");
     expect(result.stderr).toContain("then tag it v1.0.0, push the tag, and approve the run in the release environment.");
 
@@ -142,7 +151,7 @@ describe("pnpm run version -- --first-release in a throwaway fixture (AD-14)", (
 });
 
 describe("pnpm run version without --first-release versions the pending changeset and regenerates the embed", () => {
-  it("every package moves from 0.0.2 to one shared version, 0.0.3 (never 1.0.0), and the marker, the stamps and ipm/module.xml carry it", () => {
+  it("every package moves from 0.0.2 to one shared version, 0.0.3 (never 1.0.0), and the marker, the stamps, the root module.xml and the IPM tree carry it", () => {
     const root = makeVersionFixture();
     const before = generatorMarker(root);
     const result = run(root, "release-version.mjs");
@@ -154,14 +163,18 @@ describe("pnpm run version without --first-release versions the pending changese
 });
 
 describe("pnpm run version after the first release (the packages are at 1.0.0)", () => {
-  it("a patch changeset moves every package to 1.0.1, and the marker, the stamps and ipm/module.xml carry it", () => {
+  it("a patch changeset moves every package to 1.0.1, and the marker, the stamps, the root module.xml and the IPM tree carry it; `gen-bootstrap --ipm` then refuses", () => {
     const root = makeVersionFixture({ version: "1.0.0" });
     const before = generatorMarker(root);
     expect(before).toMatch(/^1\.0\.0\+/);
+    expect(ipmTreeMarker(root), "the fixture's tree starts at the seeded content").toBe(before);
     const result = run(root, "release-version.mjs");
     expect(result.status, result.stderr).toBe(0);
     const after = expectVersioned(root, "1.0.1", before);
     expect(result.stderr).toContain(`\`BOOTSTRAP_VERSION\` moves from \`${before}\` to \`${after}\``);
+    const again = run(root, "gen-bootstrap.mjs", ["--ipm"]);
+    expect(again.status, "the version step is the only run that writes the tree").toBe(2);
+    expect(again.stderr).toContain("the IPM tree is already at 1.0.1; it is regenerated only by the version step");
   }, 180_000);
 
   it("--first-release is refused (exit 2) naming the packages already at 1.0.0, and nothing changes", () => {
@@ -201,11 +214,11 @@ describe("pnpm run version refuses, with the files unchanged", () => {
     const root = makeVersionFixture();
     const pending = pendingChangesets(join(root, ".changeset"));
     expect(pending, "the fixture has its synthetic changeset pending").toEqual([SYNTHETIC_CHANGESET]);
-    appendFileSync(join(root, "ipm", "module.xml"), "\n");
+    appendFileSync(join(root, "module.xml"), "\n");
     const manifests = PACKAGE_DIRS.map((dir) => readFileSync(join(root, "packages", dir, "package.json"), "utf8"));
     const result = run(root, "release-version.mjs");
     expect(result.status).toBe(2);
-    expect(result.stderr).toMatch(/the tree is not clean \(M ipm\/module\.xml\)\. Commit or stash the changes, then run it again\./);
+    expect(result.stderr).toMatch(/the tree is not clean \(M module\.xml\)\. Commit or stash the changes, then run it again\./);
     expect(PACKAGE_DIRS.map((dir) => readFileSync(join(root, "packages", dir, "package.json"), "utf8"))).toEqual(manifests);
     expect(pendingChangesets(join(root, ".changeset")), "the pending changesets are still there").toEqual(pending);
   });
@@ -328,12 +341,39 @@ describe("pnpm run version exits 1 naming what it finds wrong after a step (I/O 
     const result = run(root, "release-version.mjs");
     expect(result.status, result.stderr).toBe(1);
     expect(result.stderr).toContain("generator exploded");
-    expect(result.stderr).toContain("version: gen-bootstrap failed (exit 3). Fix the generator error.");
+    expect(result.stderr).toContain("version: gen-bootstrap --ipm failed (exit 3). Fix the generator error.");
     expect(result.stderr, "changeset version already moved the packages, so a second run would refuse the dirty tree").toContain("the tree now holds a partial version: discard it with git restore . && git clean -fd");
     expect(result.stderr).not.toContain("next steps");
   }, 180_000);
 
-  it("a generator that exits 0 but stamps nothing: exit 1 naming the marker and ipm/module.xml, with the partial-version line and no next steps", () => {
+  it("a generator that stamps the embed but never writes the IPM tree (the version step run without --ipm): exit 1 naming the tree's marker and the embed's, with the partial-version line and no next steps", () => {
+    const root = makeVersionFixture();
+    const before = generatorMarker(root);
+    // The real generator, called through a wrapper that drops `--ipm`: the embed moves to the new version and the committed tree does not.
+    copyFileSync(join(root, "scripts", "gen-bootstrap.mjs"), join(root, "scripts", "gen-bootstrap-real.mjs"));
+    writeFileSync(
+      join(root, "scripts", "gen-bootstrap.mjs"),
+      [
+        'import { spawnSync } from "node:child_process";',
+        'import { fileURLToPath } from "node:url";',
+        'const real = fileURLToPath(new URL("./gen-bootstrap-real.mjs", import.meta.url));',
+        'const args = process.argv.slice(2).filter((argument) => argument !== "--ipm");',
+        'process.exit(spawnSync(process.execPath, [real, ...args], { stdio: "inherit" }).status ?? 1);',
+        "",
+      ].join("\n"),
+    );
+    commitFixture(root, "a generator that never writes the tree");
+    const result = run(root, "release-version.mjs");
+    expect(result.status, result.stderr).toBe(1);
+    const embed = stamps(root)[0] as string;
+    expect(embed.split("+")[0], "the embed moved to the new version").toBe("0.0.3");
+    expect(result.stderr).toContain(`problem: the IPM tree stamps ${before}, the embed ${embed}: the version step did not run on the final content. Run pnpm run version.`);
+    expect(result.stderr).toContain('problem: module.xml is at "0.0.2", not the shared version 0.0.3.');
+    expect(result.stderr).toContain("the tree now holds a partial version: discard it with git restore . && git clean -fd");
+    expect(result.stderr).not.toContain("next steps");
+  }, 180_000);
+
+  it("a generator that exits 0 but stamps nothing: exit 1 naming the marker and module.xml, with the partial-version line and no next steps", () => {
     const root = makeVersionFixture();
     const before = generatorMarker(root);
     writeFileSync(join(root, "scripts", "gen-bootstrap.mjs"), "process.exit(0);\n");
@@ -342,7 +382,7 @@ describe("pnpm run version exits 1 naming what it finds wrong after a step (I/O 
     expect(result.status, result.stderr).toBe(1);
     for (const dir of PACKAGE_DIRS) expect(manifestOf(root, dir).version, dir).toBe("0.0.3");
     expect(result.stderr).toContain(`problem: BOOTSTRAP_VERSION is "${before}", whose semver is not the shared version 0.0.3.`);
-    expect(result.stderr).toContain('problem: ipm/module.xml is at "0.0.2", not the shared version 0.0.3.');
+    expect(result.stderr).toContain('problem: module.xml is at "0.0.2", not the shared version 0.0.3.');
     expect(result.stderr).toContain("the tree now holds a partial version: discard it with git restore . && git clean -fd");
     expect(result.stderr).not.toContain("next steps");
     expect(result.stderr).not.toContain("the embed carry it");

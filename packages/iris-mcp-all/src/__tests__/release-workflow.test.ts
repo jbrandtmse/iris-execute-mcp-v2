@@ -77,10 +77,9 @@ describe("AC 42.5.1: release.yml is the declaration", () => {
     expect(workflow.jobs["publish"]?.["environment"]).toBe("release");
     const publishSteps = workflow.jobs["publish"]?.["steps"] as Array<{ run?: string; env?: Record<string, string> }>;
     const publishEnv = publishSteps.find((step) => String(step.run ?? "").startsWith("node scripts/release.mjs publish"))?.env;
-    expect(publishEnv, "the publish step holds each secret a channel reads (the IPM deploy key included), and nothing else").toEqual({
+    expect(publishEnv, "the publish step holds each secret a channel reads, and nothing else (IPM has no upload, so no key)").toEqual({
       NPM_TOKEN: "${{ secrets.NPM_TOKEN }}",
       OVSX_PAT: "${{ secrets.OVSX_PAT }}",
-      IPM_DIST_DEPLOY_KEY: "${{ secrets.IPM_DIST_DEPLOY_KEY }}",
       GITHUB_TOKEN: "${{ github.token }}",
     });
     expect([...(workflow.jobs["publish"]?.["needs"] as string[])].sort()).toEqual(["ci-gate", "prepare", "rehearse"]);
@@ -88,6 +87,19 @@ describe("AC 42.5.1: release.yml is the declaration", () => {
     expect(workflow.jobs["publish"]?.["if"]).toBe("${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}");
     expect(workflow.jobs["publish"]?.["permissions"]).toEqual({ actions: "read", contents: "read", "id-token": "write" });
     expect(workflow.jobs["ci-gate"]?.["permissions"]).toEqual({ actions: "read", contents: "read" });
+  });
+
+  it("no IPM secret, deploy key, pinned host key or ssh option is in release.yml, its declaration or the release script (decision #122), and a reintroduced secret is a problem of the check", () => {
+    // Built from parts, so that this file holds none of the removed names (the removal is also checked by grep).
+    const names = ["IPM_" + "DIST_DEPLOY_KEY", "known" + "_hosts", "GIT_SSH" + "_COMMAND", "Strict" + "HostKeyChecking", "ssh" + "-ed25519", "deploy" + "-key"];
+    for (const file of [".github/workflows/release.yml", "scripts/lib/release-checks.mjs", "scripts/release.mjs", "scripts/lib/release-core.mjs"]) {
+      const source = readFileSync(path.join(REPO_ROOT, file), "utf8");
+      for (const name of names) expect(source, `${file}: ${name}`).not.toContain(name);
+    }
+    const reintroduced = mutate(text, "          OVSX_PAT: ${{ secrets.OVSX_PAT }}\n", `          OVSX_PAT: \${{ secrets.OVSX_PAT }}\n          ${names[0]}: \${{ secrets.${names[0]} }}\n`);
+    const problems = releaseWorkflowProblems(reintroduced);
+    expect(problems, "the declaration refuses a secret the publish step does not declare").not.toEqual([]);
+    expect(problems.join("\n"), "and the problem names the reintroduced secret").toContain(names[0]);
   });
 
   it("the setup-node step of publish takes no registry-url, so npm's own authentication decides (OIDC or the token userconfig)", () => {

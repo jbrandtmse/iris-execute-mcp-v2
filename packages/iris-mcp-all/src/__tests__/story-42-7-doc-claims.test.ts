@@ -46,7 +46,7 @@ describe("Story 42.7: the root README Releasing subsection", () => {
       "| npm (`@iris-mcp/*`) | enabled | |",
       "| VS Code Marketplace (the extension's vsix) | enabled | Story 42.7 |",
       "| Open VSX (the same vsix) | enabled | Story 42.7 |",
-      "| IPM (the packaging repository `jbrandtmse/iris-execute-mcp-v2-ipm`) | enabled | Story 42.8 |",
+      "| IPM (the root `module.xml`; the owner's Open Exchange Release) | manual step | Story 42.8 |",
       "| MCP Registry (the five `server.json` listings), last | enabled | Story 42.8 |",
     ]);
     expect(RELEASE_CHANNELS.map((channel: { id: string; enabled: boolean }) => [channel.id, channel.enabled])).toEqual([

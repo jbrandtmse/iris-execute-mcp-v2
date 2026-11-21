@@ -120,7 +120,6 @@ export const RELEASE_JOBS = Object.freeze({
         env: Object.freeze({
           NPM_TOKEN: '${{ secrets.NPM_TOKEN }}',
           OVSX_PAT: '${{ secrets.OVSX_PAT }}',
-          IPM_DIST_DEPLOY_KEY: '${{ secrets.IPM_DIST_DEPLOY_KEY }}',
           GITHUB_TOKEN: '${{ github.token }}',
         }),
       }),

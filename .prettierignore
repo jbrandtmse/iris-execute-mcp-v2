@@ -16,6 +16,11 @@ irislib/
 /skills/
 packages/client-config/skills-pack/
 
+# Generated output of `pnpm gen:ipm`: the committed IPM tree, stamped and byte-exact
+/module.xml
+/ipm/src/
+/preload/
+
 # Byte-exact source: the notice embeds the upstream license text and a table the provenance check parses
 skills-pack-src/IRIS-MCP-THIRD-PARTY-NOTICES.md
 

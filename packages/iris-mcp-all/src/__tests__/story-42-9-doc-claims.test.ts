@@ -309,7 +309,8 @@ describe("Story 42.9: the automatic install leads and IPM is the fallback (decis
   });
 
   it("does not describe how IPM reaches the registry (decision #122)", () => {
-    expect(ipm).not.toMatch(/packaging repository|iris-execute-mcp-v2-ipm|module\.xml|deploy key|publishes? the IPM/i);
+    // The removed repository name is built from parts, so that no file of the tree holds it (the removal is also checked by grep).
+    expect(ipm).not.toMatch(new RegExp(`packaging repository|iris-execute-mcp-v2${"-ipm"}|module\\.xml|deploy key|publishes? the IPM`, "i"));
   });
 });
 

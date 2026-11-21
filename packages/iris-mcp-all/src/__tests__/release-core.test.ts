@@ -11,9 +11,14 @@ import { describe, expect, it } from "vitest";
 import { REPO_ROOT } from "./pack-fixture";
 import {
   CI_WORKFLOW_PATH,
-  IPM_DIST_BRANCH,
-  IPM_DIST_REPOSITORY,
+  IPM_MANIFEST_RELATIVE,
+  IPM_MODULE,
+  IPM_REGISTRY_PACKAGE_URL,
+  IPM_SOURCE_REPOSITORY,
+  IPM_TREE_GUARD_RELATIVE,
   MIN_NPM_VERSION,
+  OPEN_EXCHANGE_LISTING_NAME,
+  OPEN_EXCHANGE_LISTING_URL,
   NPM_NOT_FOUND,
   NPM_PUBLISH_ORDER,
   RELEASE_BRANCH,
@@ -30,11 +35,16 @@ import {
   environmentProblems,
   environmentSummary,
   environmentWarnings,
-  ipmDefaultBranch,
-  ipmPushPlan,
-  ipmReadme,
+  ipmArchiveUrl,
+  ipmManualStepText,
+  ipmNotListedReason,
   ipmRegistryListsVersion,
+  ipmRehearsalDetail,
+  ipmUnreadableReason,
   mainReachability,
+  manualStepAnnotations,
+  manualStepChannels,
+  notSetUpAnnotations,
   npmPublishArgv,
   npmUserconfig,
   npmVersionProblems,
@@ -62,22 +72,24 @@ const SHA = "a".repeat(40);
 const OTHER = "b".repeat(40);
 
 describe("the constants", () => {
-  it("name the order, the channels, the environment and the packaging repository the story fixes", () => {
+  it("name the order, the channels (IPM a manual one), the environment and the Open Exchange listing the decisions fix", () => {
     expect([...NPM_PUBLISH_ORDER]).toEqual(["@iris-mcp/client-config", "@iris-mcp/shared", "@iris-mcp/admin", "@iris-mcp/data", "@iris-mcp/dev", "@iris-mcp/interop", "@iris-mcp/ops", "@iris-mcp/all"]);
     expect(RELEASE_CHANNELS).toEqual([
       { id: "npm", enabled: true },
       { id: "vscode-marketplace", enabled: true },
       { id: "open-vsx", enabled: true },
-      { id: "ipm", enabled: true },
+      { id: "ipm", enabled: true, manual: true },
       { id: "mcp-registry", enabled: true },
     ]);
-    expect([RELEASE_ENVIRONMENT, RELEASE_TAG_PATTERN, IPM_DIST_REPOSITORY, IPM_DIST_BRANCH, MIN_NPM_VERSION, CI_WORKFLOW_PATH]).toEqual([
-      "release",
-      "v*",
-      "jbrandtmse/iris-execute-mcp-v2-ipm",
-      "master",
-      "11.5.1",
-      ".github/workflows/ci.yml",
+    expect([RELEASE_ENVIRONMENT, RELEASE_TAG_PATTERN, MIN_NPM_VERSION, CI_WORKFLOW_PATH]).toEqual(["release", "v*", "11.5.1", ".github/workflows/ci.yml"]);
+    expect([IPM_MODULE, IPM_SOURCE_REPOSITORY, OPEN_EXCHANGE_LISTING_NAME, OPEN_EXCHANGE_LISTING_URL, IPM_REGISTRY_PACKAGE_URL, IPM_MANIFEST_RELATIVE, IPM_TREE_GUARD_RELATIVE]).toEqual([
+      "iris-execute-mcp-v2",
+      "jbrandtmse/iris-execute-mcp-v2",
+      "IRIS-MCP-Server-Suite-2",
+      "https://openexchange.intersystems.com/package/IRIS-MCP-Server-Suite-2",
+      "https://pm.community.intersystems.com/packages/iris-execute-mcp-v2",
+      "module.xml",
+      "preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls",
     ]);
     expect(Object.keys(RELEASE_CHECK_EXEMPTIONS)).toEqual(["format:check"]);
     expect(RELEASE_CHECK_EXEMPTIONS["format:check"]).toContain("not a CI gate");
@@ -401,49 +413,59 @@ describe("The argv builders", () => {
     expect(() => npmUserconfig("tok\u0000en")).toThrow(/control character/);
   });
 
-  it("ipmPushPlan clones, replaces the tree, commits as iris-execute-mcp-v2 <v> from <sha>, tags v<v>, and pushes master and the tag with no force", () => {
-    const plan = ipmPushPlan("/tree", "1.0.0", SHA, { url: "git@github.com:jbrandtmse/iris-execute-mcp-v2-ipm.git", clone: "/work/repository" });
-    expect(plan.message).toBe(`iris-execute-mcp-v2 1.0.0 from ${SHA}`);
-    expect(plan.tag).toBe("v1.0.0");
-    expect(plan.cloneArgv).toEqual(["clone", "--quiet", "git@github.com:jbrandtmse/iris-execute-mcp-v2-ipm.git", "/work/repository"]);
-    expect(plan.commitArgv.slice(-4)).toEqual(["commit", "--quiet", "-m", plan.message]);
-    expect(plan.tagArgv.slice(-5)).toEqual(["tag", "-a", "v1.0.0", "-m", plan.message]);
-    expect(plan.pushArgv).toEqual(["push", "--atomic", "origin", "HEAD:refs/heads/master", "refs/tags/v1.0.0"]);
-    expect(plan.tagTreeArgv).toEqual(["rev-parse", "--verify", "--quiet", "refs/tags/v1.0.0^{tree}"]);
-    const everything = JSON.stringify(plan);
-    expect(everything).not.toMatch(/--force|"-f"|--force-with-lease|"\+refs|:\+/);
-    expect(plan.lsRemoteArgv).toEqual(["ls-remote", "--symref", "git@github.com:jbrandtmse/iris-execute-mcp-v2-ipm.git", "HEAD"]);
+  it("no IPM upload remains: the push plan, its host keys, the packaging repository and the README of it are gone from release-core (decision #122)", async () => {
+    const core = (await import("../../../../scripts/lib/release-core.mjs")) as Record<string, unknown>;
+    // Built from parts, so that this file itself holds none of the removed names (the removal is also checked by grep).
+    const removed = ["ipm" + "PushPlan", "ipm" + "DefaultBranch", "ipm" + "Readme", "IPM_" + "DIST_REPOSITORY", "IPM_" + "DIST_BRANCH", "GITHUB_SSH_" + "KNOWN_HOSTS", "github" + "KnownHostsText"];
+    for (const name of removed) expect(Object.keys(core), name).not.toContain(name);
+    const source = readFileSync(path.join(REPO_ROOT, "scripts", "lib", "release-core.mjs"), "utf8");
+    for (const word of ["IPM_" + "DIST", "known" + "_hosts", "git" + "@github.com", "--atomic", "clone"]) expect(source, word).not.toContain(word);
   });
 
-  it("the push is atomic: the branch and the tag land together or not at all", () => {
-    const plan = ipmPushPlan("/tree", "1.0.0", SHA, { url: "u", clone: "/c" });
-    expect(plan.pushArgv.slice(0, 2)).toEqual(["push", "--atomic"]);
+  it("ipmManualStepText says what the owner does and why it is still to do; the reasons name an unlisted and an unreadable registry", () => {
+    expect(ipmManualStepText("1.1.0", ipmNotListedReason("1.1.0"))).toBe("Release 1.1.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry does not list 1.1.0");
+    expect(ipmManualStepText("1.1.0", ipmUnreadableReason("1.1.0", "HTTP 503"))).toBe(
+      "Release 1.1.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry could not be read (HTTP 503), so it is not known whether it lists 1.1.0",
+    );
+    expect(ipmRehearsalDetail(ipmManualStepText("1.1.0", ipmNotListedReason("1.1.0")))).toBe(
+      "manual step after the tag: Release 1.1.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry does not list 1.1.0",
+    );
   });
 
-  it("the ls-remote asks for HEAD with its symref, not for a branch that an empty repository lacks (--exit-code on it exits 2)", () => {
-    const plan = ipmPushPlan("/tree", "1.0.0", SHA, { url: "u", clone: "/c" });
-    expect(plan.lsRemoteArgv).toEqual(["ls-remote", "--symref", "u", "HEAD"]);
-    expect(plan.lsRemoteArgv).not.toContain("--exit-code");
-    expect(plan.lsRemoteArgv).not.toContain("refs/heads/master");
+  it("STATUS.manualStep is the words `manual step`, and no other status changed", () => {
+    expect(STATUS.manualStep).toBe("manual step");
+    expect(STATUS.ready).toBe("ready");
+    expect(STATUS.notReady).toBe("not ready");
   });
 
-  it("ipmDefaultBranch reads the default branch from the symref line of ls-remote, and nothing from an empty answer", () => {
-    const sha = "c9a020973ccc910f035ff6e2a9462eada67a870a";
-    expect(ipmDefaultBranch(`ref: refs/heads/master\tHEAD\n${sha}\tHEAD\n`)).toBe("master");
-    expect(ipmDefaultBranch(`ref: refs/heads/main\tHEAD\n${sha}\tHEAD\n`)).toBe("main");
-    expect(ipmDefaultBranch(`ref: refs/heads/release/v1\tHEAD\n${sha}\tHEAD\n`)).toBe("release/v1");
-    expect(ipmDefaultBranch("")).toBeUndefined();
-    expect(ipmDefaultBranch(`${sha}\tHEAD\n`)).toBeUndefined();
+  // The registry's answer for a listed package, verbatim: a read-only GET of https://pm.community.intersystems.com/packages/ocupilot on 2026-11-21
+  // (Rule #36). Its download of an older version, .../ocupilot-1.0.17.tgz, answered 200 (probed) with the same path pattern.
+  const REGISTRY_ANSWER = {
+    name: "ocupilot",
+    version: "1.0.18",
+    description: "An agent co-pilot for the InterSystems IRIS System Management Portal: an Angular shell over an ObjectScript REST API.",
+    repository: "https://github.com/jbrandtmse/OcuPilot/",
+    size: 39724066,
+    hash: "d01dd30d6e620b3b399e8413b479b1328cdabab5",
+    url: "https://pm.community.intersystems.com/download/ocupilot/-/ocupilot-1.0.18.tgz",
+    versions: ["1.0.0", "1.0.1", "1.0.10", "1.0.11", "1.0.12", "1.0.13", "1.0.14", "1.0.15", "1.0.16", "1.0.17", "1.0.18", "1.0.2", "1.0.3", "1.0.4", "1.0.5", "1.0.6", "1.0.7", "1.0.8", "1.0.9"],
+    publishTS: 1795235429.719946,
+    deleted: false,
+  };
+
+  it("ipmArchiveUrl is the answer's own url for the newest version, and that url with the version swapped for an older one", () => {
+    expect(ipmArchiveUrl(REGISTRY_ANSWER, "1.0.18")).toBe("https://pm.community.intersystems.com/download/ocupilot/-/ocupilot-1.0.18.tgz");
+    expect(ipmArchiveUrl(REGISTRY_ANSWER, "1.0.17")).toBe("https://pm.community.intersystems.com/download/ocupilot/-/ocupilot-1.0.17.tgz");
   });
 
-  it("ipmReadme names the version and the source, and implies no endorsement (AD-28)", () => {
-    const readme = ipmReadme("1.0.0");
-    expect(readme).toContain("Version 1.0.0");
-    expect(readme).toContain("https://github.com/jbrandtmse/iris-execute-mcp-v2");
-    expect(readme).toContain('zpm "install iris-execute-mcp-v2"');
-    expect(readme).toMatch(/independent community project/);
-    expect(readme).toMatch(/not made, endorsed or supported by InterSystems/);
-    expect(readme).not.toMatch(/official|certified/i);
+  it.each([
+    ["no url", { ...REGISTRY_ANSWER, url: undefined }],
+    ["a url that is not https", { ...REGISTRY_ANSWER, url: "http://pm.community.intersystems.com/download/ocupilot/-/ocupilot-1.0.18.tgz" }],
+    ["a url that does not end with the newest version's .tgz", { ...REGISTRY_ANSWER, url: "https://pm.community.intersystems.com/download/ocupilot/latest" }],
+    ["a body that is not an object", "text"],
+    ["null", null],
+  ])("ipmArchiveUrl for an older version gives nothing from %s", (_label, body) => {
+    expect(ipmArchiveUrl(body, "1.0.17")).toBeUndefined();
   });
 
   it("ipmRegistryListsVersion reads the registry's answer: the newest version or the versions list", () => {
@@ -663,6 +685,61 @@ describe("The report", () => {
     );
   });
 
+  describe("manual steps (decision #122): the IPM channel is the owner's, never a failure", () => {
+    const READY = { channel: "ipm", item: "iris-execute-mcp-v2@1.1.0", status: STATUS.ready, manual: true, detail: ipmRehearsalDetail(ipmManualStepText("1.1.0", ipmNotListedReason("1.1.0"))) };
+    const STEP = { channel: "ipm", item: "iris-execute-mcp-v2@1.1.0", status: STATUS.manualStep, manual: true, detail: ipmManualStepText("1.1.0", ipmNotListedReason("1.1.0")) };
+    const TEXT = "Release 1.1.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry does not list 1.1.0";
+
+    it("a release's manual step is a line of its channel and a `Manual steps` block that names the owner's step and the listing", () => {
+      expect(releaseReport([{ channel: "npm", item: "@iris-mcp/all@1.1.0", status: STATUS.published }, STEP])).toBe(
+        [
+          "Release report",
+          "npm",
+          "  @iris-mcp/all@1.1.0: published",
+          "ipm",
+          `  iris-execute-mcp-v2@1.1.0: manual step (${TEXT})`,
+          "",
+          "Manual steps (the run does not do these, and its result does not depend on them; the listing is https://openexchange.intersystems.com/package/IRIS-MCP-Server-Suite-2):",
+          `  ipm: ${TEXT}`,
+          "",
+        ].join("\n"),
+      );
+    });
+
+    it("a rehearsal's `ready` line carries the same block, with the rehearsal's lead removed from the step", () => {
+      const report = releaseReport([READY]);
+      expect(report).toContain(`  iris-execute-mcp-v2@1.1.0: ready (manual step after the tag: ${TEXT})`);
+      expect(report).toContain(`\nManual steps (`);
+      expect(report).toContain(`\n  ipm: ${TEXT}\n`);
+      expect(manualStepChannels([READY, STEP])).toEqual([
+        { channel: "ipm", text: TEXT },
+        { channel: "ipm", text: TEXT },
+      ]);
+    });
+
+    it("a channel the registry already lists has no manual step: no block, no annotation", () => {
+      const listed = { channel: "ipm", item: "iris-execute-mcp-v2@1.1.0", status: STATUS.alreadyPublished };
+      expect(releaseReport([listed])).toBe("Release report\nipm\n  iris-execute-mcp-v2@1.1.0: already published\n");
+      expect(manualStepChannels([listed])).toEqual([]);
+      expect(manualStepAnnotations([listed])).toEqual([]);
+    });
+
+    it("each manual step is one raw `::warning::` line, whose message escapes what the runner reads (one line, `%`, a newline)", () => {
+      expect(manualStepAnnotations([STEP])).toEqual([`::warning title=Manual step::ipm: ${TEXT}`]);
+      const odd = { ...STEP, detail: "Release 100% done\nthen more" };
+      expect(manualStepAnnotations([odd])).toEqual(["::warning title=Manual step::ipm: Release 100%25 done%0Athen more"]);
+    });
+
+    it("a manual step and a skipped channel are separate blocks and separate annotations", () => {
+      const skipped = { channel: "open-vsx", item: "iris-mcp-launcher@1.1.0", status: STATUS.skipped, detail: "not set up: namespace absent", notSetUp: true };
+      const report = releaseReport([skipped, STEP]);
+      expect(report.indexOf("Skipped channels")).toBeGreaterThan(-1);
+      expect(report.indexOf("Manual steps")).toBeGreaterThan(report.indexOf("Skipped channels"));
+      expect(notSetUpAnnotations([skipped, STEP])).toHaveLength(1);
+      expect(manualStepAnnotations([skipped, STEP])).toHaveLength(1);
+    });
+  });
+
   it("the statuses are the five of the acceptance criteria", () => {
     expect([STATUS.published, STATUS.alreadyPublished, STATUS.failed, STATUS.notAttempted, STATUS.skipped]).toEqual(["published", "already published", "failed", "not attempted", "skipped"]);
     expect(skippedText({ enabledBy: "Story 42.8" })).toBe("skipped: not enabled (Story 42.8)");
@@ -718,7 +795,7 @@ describe("Main reachability (DW-696, decision #82): identical and behind are on 
 });
 
 describe("ROOT_CHECK_SCRIPT: a check or validate word in a root script's name (DW-612)", () => {
-  it.each(["check:provenance", "validate:prompts", "gen:pack:check", "gen:skills:check", "gen:tools-list-snapshot:check", "gen:governance-baseline:check", "format:check", "check", "validate", "lint:check:strict"])("matches %s", (name) => {
+  it.each(["check:provenance", "validate:prompts", "gen:pack:check", "gen:skills:check", "gen:tools-list-snapshot:check", "gen:governance-baseline:check", "gen:ipm:check", "format:check", "check", "validate", "lint:check:strict"])("matches %s", (name) => {
     expect(ROOT_CHECK_SCRIPT.test(name)).toBe(true);
   });
 

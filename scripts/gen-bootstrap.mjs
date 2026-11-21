@@ -1,7 +1,37 @@
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+// Generates the bootstrap embed (`packages/shared/src/bootstrap-classes.ts`) from `classes[]` and the IPM install guard, and, in its
+// ipm mode, the committed IPM tree at the repository root (AD-14, Story 42.8, decision #122).
+//
+// USE
+//   node scripts/gen-bootstrap.mjs                writes the embed and `scripts/bootstrap-sequence.json`. It never writes the IPM tree.
+//   node scripts/gen-bootstrap.mjs --ipm          writes the embed, then the stamped IPM tree: the root `module.xml`, one file per class
+//                                                 under `ipm/src/cls/`, and the guard under `preload/ipm/src/cls/`.
+//   node scripts/gen-bootstrap.mjs --ipm --force  writes the tree even at the version it already carries (repair of a damaged tree).
+//   node scripts/gen-bootstrap.mjs --ipm-check    writes nothing; verifies the committed tree is unedited generator output
+//                                                 (`pnpm gen:ipm:check`), and exits 0 or 1.
+//
+// THE TREE IS FROZEN BETWEEN RELEASES. The IPM registry packages `main`'s HEAD at the moment the owner presses Release, not the
+// tag, so `main` must always carry the content of the last released version. `--ipm` therefore writes the tree only when the tree is
+// absent (the first generation, at the shared version), when its version differs from the shared version (the version step just
+// bumped it: `scripts/release-version.mjs` is the one caller), or with `--force`; otherwise it refuses with exit 2 after writing the
+// embed. A class edited between releases moves the embed and leaves the tree untouched.
+//
+// EXIT CODES  0 done (or the tree is clean); 1 the tree check found a problem; 2 a bad argument or the same-version refusal.
+
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmdirSync, unlinkSync, writeFileSync, writeSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { createHash } from 'crypto';
+import {
+  IPM_MANIFEST_FILE,
+  IPM_PRELOAD_PREFIX,
+  IPM_SOURCES_ROOT,
+  VERSION_PLACEHOLDER_LINE,
+  contentHash,
+  ipmTreeFiles,
+  ipmTreeProblems,
+  manifestDeclarations,
+  readIpmTree,
+  renderModuleXml,
+} from './lib/ipm-tree.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -58,6 +88,33 @@ const IPM_MODULE_NAME = 'iris-execute-mcp-v2';
 // src/** load never plants that signal. It is stamped like Setup, and its content joins the marker's hash.
 const ipmGuard = { name: 'ExecuteMCPv2.InstallGuard.cls', path: 'ipm/preload/ExecuteMCPv2/InstallGuard.cls' };
 
+// The command line. A literal `--` (what some package managers pass through) is ignored.
+const USAGE = 'usage: node scripts/gen-bootstrap.mjs [--ipm [--force] | --ipm-check]';
+const argv = process.argv.slice(2).filter((argument) => argument !== '--');
+const wantIpm = argv.includes('--ipm');
+const wantCheck = argv.includes('--ipm-check');
+const wantForce = argv.includes('--force');
+const knownArguments = ['--ipm', '--ipm-check', '--force'];
+if (
+  argv.some((argument) => !knownArguments.includes(argument)) ||
+  (wantCheck && (wantIpm || wantForce)) ||
+  (wantForce && !wantIpm)
+) {
+  writeSync(2, `gen-bootstrap: ${USAGE}\n`);
+  process.exit(2);
+}
+
+// --ipm-check branches here, before anything is computed or written.
+if (wantCheck) {
+  const problems = ipmTreeProblems(root, { moduleName: IPM_MODULE_NAME });
+  if (problems.length > 0) {
+    writeSync(2, `gen:ipm:check found ${problems.length} problem(s) in the committed IPM tree:\n${problems.map((problem) => `  - ${problem}`).join('\n')}\n`);
+    process.exit(1);
+  }
+  writeSync(1, 'gen:ipm:check: OK, the root module.xml and the tree under ipm/src and preload are unedited generator output at the shared version.\n');
+  process.exit(0);
+}
+
 function escapeForTemplateLiteral(content) {
   // Escape backslashes, backticks, and ${ sequences for JS template literals
   return content
@@ -66,13 +123,12 @@ function escapeForTemplateLiteral(content) {
     .replace(/\$\{/g, '\\${');
 }
 
-// Placeholder string that lives in src/ExecuteMCPv2/Setup.cls and in the IPM install guard on disk.
-// gen-bootstrap.mjs replaces it with the real marker in the in-memory copy
+// The placeholder line (VERSION_PLACEHOLDER_LINE, from lib/ipm-tree.mjs) lives in src/ExecuteMCPv2/Setup.cls and in the IPM install
+// guard on disk. gen-bootstrap.mjs replaces it with the real marker in the in-memory copy
 // before embedding the class into bootstrap-classes.ts. The disk version
 // keeps "dev" so that local iris_doc_load deployments of Setup.cls compile
 // without extra steps; the bootstrap treats a deployed "dev" as foreign and
 // never redeploys over it.
-const VERSION_PLACEHOLDER_LINE = 'Parameter BOOTSTRAPVERSION = "dev";';
 
 // Step 1: Read all class files into memory.
 // CRLF → LF normalization is CRITICAL here, for two reasons:
@@ -99,12 +155,7 @@ let guardContent = readNormalized(ipmGuard.path);
 // IPM install guard, taken over the on-disk content, so it does not depend on the semver
 // or the sequence the marker carries. Any change to any .cls file or to the guard, even a
 // single character, produces a new hash. Developers never set it by hand.
-const hasher = createHash('sha256');
-for (const content of [...rawContents, guardContent]) {
-  hasher.update(content);
-  hasher.update('\n--CLASS-SEPARATOR--\n');
-}
-const CONTENT_HASH = hasher.digest('hex').substring(0, 12);
+const CONTENT_HASH = contentHash([...rawContents, guardContent]);
 
 // Step 2b: Build the marker `<semver>+<sequence>.<hash>`.
 //   semver    the version of @iris-mcp/shared (packages/shared/package.json).
@@ -249,7 +300,7 @@ export function getBootstrapClasses(): BootstrapClass[] {
 }
 
 /**
- * The IPM module name: the \`<Name>\` of ipm/module.xml, declared once in scripts/gen-bootstrap.mjs.
+ * The IPM module name: the \`<Name>\` of the root module.xml, declared once in scripts/gen-bootstrap.mjs.
  */
 export const IPM_MODULE_NAME = "${IPM_MODULE_NAME}";
 
@@ -264,40 +315,9 @@ export const IPM_INSTALL_GUARD: BootstrapClass = {
 };
 `;
 
-// Step 4b: Emit ipm/module.xml from the same class list, plus the preloaded install guard.
-function escapeForXml(text) {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-const resourceCount = classes.length + 1;
-const manifestLines = [
-  '<?xml version="1.0" encoding="UTF-8"?>',
-  '<Export generator="IRIS" version="26">',
-  `  <Document name="${IPM_MODULE_NAME}.ZPM">`,
-  '    <Module>',
-  '      <!-- GENERATED by scripts/gen-bootstrap.mjs from classes[] and the IPM install guard. DO NOT EDIT: run pnpm gen:bootstrap.',
-  `           ${resourceCount} resources: the preloaded ${ipmGuard.name.replace(/\.cls$/, '')} and the ${classes.length} classes of classes[], in compile order. -->`,
-  `      <Name>${escapeForXml(IPM_MODULE_NAME)}</Name>`,
-  `      <Version>${SEMVER}</Version>`,
-  '      <Description>Server-side classes and REST service (/api/executemcp/v2) for the IRIS MCP server suite. An independent community project.</Description>',
-  '      <Keywords>mcp model-context-protocol rest ai developer-tools</Keywords>',
-  '      <Packaging>module</Packaging>',
-  '      <SourcesRoot>src</SourcesRoot>',
-  `      <Resource Name="${ipmGuard.name.replace(/\.cls$/, '.CLS')}" Preload="true"/>`,
-  ...classes.map((cls) => `      <Resource Name="${escapeForXml(cls.name.replace(/\.cls$/, '.CLS'))}"/>`),
-  // CheckStatus makes IPM 0.10.0 to 0.10.4 act on the %Status that Check returns; IPM 0.10.5 and later check a %Status by default
-  // and mark the property [Deprecated], but still read it. The ipm proof holds the built archive's manifest to carry it.
-  `      <Invoke Class="${ipmGuard.name.replace(/\.cls$/, '')}" Method="Check" Phase="Initialize" When="After" CheckStatus="true"/>`,
-  '      <Invoke Class="ExecuteMCPv2.Setup" Method="Configure"/>',
-  '      <Invoke Class="ExecuteMCPv2.Setup" Method="ConfigureMapping"/>',
-  '    </Module>',
-  '  </Document>',
-  '</Export>',
-];
-const manifest = `${manifestLines.join('\n')}\n`;
-
 // Step 5: Write only when the output differs from the file on disk. The shared
-// dist's freshness check is mtime-based, so rewriting an identical embed (or manifest)
-// would make a clean dist look stale.
+// dist's freshness check is mtime-based, so rewriting an identical embed would make a
+// clean dist look stale.
 // The sequence state is written first, so a failed embed write leaves a state that the
 // next run reuses unchanged instead of one that raises the sequence twice.
 if (sequenceChanged) {
@@ -315,11 +335,60 @@ if (unchanged) {
   console.log('Classes in order:', classes.map(c => c.name).join(', '));
 }
 
-const manifestPath = resolve(root, 'ipm/module.xml');
-const manifestUnchanged = existsSync(manifestPath) && readFileSync(manifestPath, 'utf-8') === manifest;
-if (manifestUnchanged) {
-  console.log(`Unchanged ${manifestPath} with ${resourceCount} resources (not rewritten)`);
-} else {
-  writeFileSync(manifestPath, manifest, 'utf-8');
-  console.log(`Generated ${manifestPath} with ${resourceCount} resources`);
+// Step 6 (--ipm only): the IPM tree. The embed above is already written, so a refusal leaves it as plain `pnpm gen:bootstrap`
+// would. The tree files are the stamped copies the embed holds (Setup and the guard carry the marker), each with a final newline.
+if (wantIpm) {
+  const manifestFile = resolve(root, IPM_MANIFEST_FILE);
+  const treeVersion = existsSync(manifestFile) ? manifestDeclarations(readFileSync(manifestFile, 'utf-8')).version : undefined;
+  if (treeVersion === SEMVER && !wantForce) {
+    writeSync(
+      2,
+      `gen-bootstrap: the IPM tree is already at ${treeVersion}; it is regenerated only by the version step (pnpm run version), ` +
+      `so main keeps the content the registry serves for ${treeVersion}. Pass --force only to repair a damaged tree.\n`,
+    );
+    process.exit(2);
+  }
+
+  const treeFiles = ipmTreeFiles({
+    classes: classes.map((cls, index) => [cls.name, rawContents[index]]),
+    guard: { name: ipmGuard.name, content: guardContent },
+  });
+  treeFiles.set(
+    IPM_MANIFEST_FILE,
+    renderModuleXml({
+      moduleName: IPM_MODULE_NAME,
+      version: SEMVER,
+      classNames: classes.map((cls) => cls.name),
+      guardName: ipmGuard.name,
+      sourcesRoot: IPM_SOURCES_ROOT,
+    }),
+  );
+
+  let written = 0;
+  let same = 0;
+  for (const [relative, text] of treeFiles) {
+    const file = resolve(root, relative);
+    if (existsSync(file) && readFileSync(file, 'utf-8') === text) {
+      same += 1;
+      continue;
+    }
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, text, 'utf-8');
+    written += 1;
+  }
+
+  // A file the new class list no longer names is removed, and so is a directory it leaves empty.
+  const existing = readIpmTree(root);
+  let removed = 0;
+  for (const relative of [...existing.sourceFiles.keys(), ...existing.preloadFiles.keys()]) {
+    if (treeFiles.has(relative)) continue;
+    unlinkSync(resolve(root, relative));
+    removed += 1;
+    for (let directory = dirname(resolve(root, relative)); [IPM_SOURCES_ROOT, IPM_PRELOAD_PREFIX].some((top) => directory.startsWith(resolve(root, top))); directory = dirname(directory)) {
+      if (readdirSync(directory).length > 0) break;
+      rmdirSync(directory);
+    }
+  }
+  console.log(`IPM tree at ${SEMVER} (${BOOTSTRAP_VERSION}): ${treeFiles.size} files (${written} written, ${same} unchanged, ${removed} removed): ${IPM_MANIFEST_FILE}, ${IPM_SOURCES_ROOT}/cls/, ${IPM_PRELOAD_PREFIX}/${IPM_SOURCES_ROOT}/cls/`);
 }
+

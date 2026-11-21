@@ -11,6 +11,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "gen:bootstrap": "node scripts/gen-bootstrap.mjs",
+    "gen:ipm": "node scripts/gen-bootstrap.mjs --ipm",
+    "gen:ipm:check": "node scripts/gen-bootstrap.mjs --ipm-check",
     "pregen:governance-baseline": "turbo run build --filter @iris-mcp/shared",
     "gen:governance-baseline": "node scripts/gen-governance-baseline.mjs",
     "pregen:governance-baseline:check": "turbo run build --filter @iris-mcp/shared",

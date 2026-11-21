@@ -1,7 +1,8 @@
 /**
  * Story 42.8 (AC 42.8.2, AC 42.8.5; Rules #30, #43, #51) - the documents say what the code does, each claim pinned to the code it describes:
  *  - the Releasing table of the root README lists every channel of `RELEASE_CHANNELS`, in order, with the default state the code has;
- *  - the README names the IPM deploy-key secret, the pinned `mcp-publisher` and the three host keys' pin, as the release script has them;
+ *  - the README names the pinned `mcp-publisher` as the release script has it, and the owner's IPM step as a manual one on the Open Exchange
+ *    listing (decision #122: no packaging repository, deploy key or host-key pin remains);
  *  - the plugin's install commands, options and defaults in the pack README, the root README and the changeset are the plugin's own;
  *  - the pinned installer command in the pack README names a real bin and only flags its usage line lists;
  *  - the CHANGELOG has this story's section above the previous one, and the changeset is a `minor` of `@iris-mcp/client-config`;
@@ -54,25 +55,53 @@ describe("the Releasing table (Rules #30, #51: the default state is derived from
     CHANNEL_ROWS.forEach((row, index) => expect(row.channel, `row ${index}`).toContain(expected[index] as string));
   });
 
-  it("each row's default state is the code's: enabled when the channel is, and none says `skipped`", () => {
-    RELEASE_CHANNELS.forEach((channel: { id: string; enabled: boolean }, index: number) => {
+  it("each row's default state is the code's: `manual step` for the channel that has `manual: true`, enabled when the channel is, and none says `skipped`", () => {
+    RELEASE_CHANNELS.forEach((channel: { id: string; enabled: boolean; manual?: boolean }, index: number) => {
       const state = CHANNEL_ROWS[index]?.state as string;
-      expect(state.startsWith(channel.enabled ? "enabled" : "disabled"), `${channel.id}: ${state}`).toBe(true);
+      if (channel.manual === true) expect(state, channel.id).toBe("manual step");
+      else expect(state.startsWith(channel.enabled ? "enabled" : "disabled"), `${channel.id}: ${state}`).toBe(true);
       expect(state).not.toContain("skipped");
     });
+    expect(RELEASE_CHANNELS.filter((channel: { manual?: boolean }) => channel.manual === true).map((channel: { id: string }) => channel.id)).toEqual(["ipm"]);
   });
 
-  it("names the owner prerequisite of IPM (the deploy-key secret and the packaging repository) and the registry's lack of one", () => {
-    expect(RELEASING).toContain("`IPM_DIST_DEPLOY_KEY` secret of the `release` environment");
-    expect(RELEASING).toContain("`jbrandtmse/iris-execute-mcp-v2-ipm`");
+  it("describes the owner's IPM step (decision #122): the Open Exchange listing, the Release press, the root module.xml, and the registry's lack of any other prerequisite", () => {
+    expect(RELEASING).toContain("**IPM is a manual step (owner step O-IPM, after the tag).**");
+    expect(RELEASING).toContain("`IRIS-MCP-Server-Suite-2`");
+    expect(RELEASING).toContain("https://openexchange.intersystems.com/package/IRIS-MCP-Server-Suite-2");
+    expect(RELEASING).toContain("the registry reads the root `module.xml` of `main`");
+    expect(RELEASING).toContain("tick **Publish in Package Manager**");
+    expect(RELEASING).toContain("press **Release**");
+    expect(RELEASING).toContain("The release uploads nothing and needs no repository, deploy key or secret.");
+    expect(RELEASING).toContain('a "Manual steps" block at the end of the report');
+    expect(RELEASING).toContain("it never changes the run's exit code");
+    expect(RELEASING).toContain("**Never create a `master` branch in this repository**");
     expect(RELEASING).toContain("It needs no owner step and no secret");
-    expect(RELEASING).toContain("owner step O-IPM1");
   });
 
-  it("names the pinned mcp-publisher version and the host-key pin, which are the code's", () => {
-    expect(RELEASING).toContain(`\`mcp-publisher\` (${MCP_PUBLISHER.version}`);
-    expect(RELEASING).toContain("`StrictHostKeyChecking=yes`");
+  it("says nothing of the superseded design: no packaging repository, deploy key, host-key pin or `O-IPM1`", () => {
+    // Built from parts, so that this file holds none of the removed names (the removal is also checked by grep).
+    for (const gone of ["iris-execute-mcp-v2" + "-ipm", "IPM_" + "DIST", "Strict" + "HostKeyChecking", "O-IPM" + "1", "packaging " + "repository", "deploy " + "key with write access"]) {
+      expect(RELEASING, gone).not.toContain(gone);
+    }
     expect(RELEASING).not.toContain("accept-new");
+  });
+
+  it("names the pinned mcp-publisher version, which is the code's", () => {
+    expect(RELEASING).toContain(`\`mcp-publisher\` (${MCP_PUBLISHER.version}`);
+  });
+
+  it("says the IPM step's verify check: `pending` until the registry lists the version, then the module in the served archive equals the tag's (decision #122)", () => {
+    expect(RELEASING).toContain("the IPM registry is `pending` (and verify does not fail for it)");
+    expect(RELEASING).toContain("the module in the archive it serves (the root `module.xml`, `ipm/src` and `preload`) must equal `git archive v<MAJOR.MINOR.PATCH>` member for member and byte for byte, the rest of that archive being `main` at the press and not compared");
+    expect(RELEASING).toContain("press Release before another version commit reaches `main`, or ask the registry to republish");
+    expect(RELEASING).toContain("`pnpm release verify --version <v>` turns IPM from `pending` to `ok`");
+  });
+
+  it("step 1 says the version step writes the root module.xml and the stamped IPM tree, and prepare says it refuses a stale tree (decision #122)", () => {
+    expect(RELEASING).toContain("`node scripts/gen-bootstrap.mjs --ipm`: the embed, its `BOOTSTRAP_VERSION` marker, the root `module.xml` and the stamped IPM tree under `ipm/src` and `preload/`, which this step alone writes");
+    expect(RELEASING).toContain("a release refuses a tree whose stamped marker is not `BOOTSTRAP_VERSION`");
+    expect(RELEASING).toContain("a dry run only notes the difference");
   });
 
   it("says the registry channel runs last and does not block the others, and what a rehearsal does with its `not ready` (decision #108)", () => {
@@ -88,7 +117,7 @@ describe("the Releasing table (Rules #30, #51: the default state is derived from
     expect(RELEASING).toContain("`::warning::` annotation");
     expect(RELEASING).toContain("run the release again for the same tag");
     expect(RELEASING).toContain("anything on npm still fail the run");
-    expect(RELEASING).toContain("the IPM channel below is unchanged for now");
+    expect(RELEASING).toContain("and the IPM channel is not one of them: it is a manual step that never fails or blocks a run (below), so only a missing store setup is skipped, and an npm-only release can go out.");
   });
 
   it("step 1 names the generators the version step runs after the bootstrap", () => {
@@ -148,11 +177,33 @@ describe("the plugin in the documents (AC 42.8.2)", () => {
 });
 
 describe("the CHANGELOG and the changeset (Rule #43)", () => {
-  it("the CHANGELOG has this story's section directly below Story 42.9's and above 42.7's", () => {
+  it("the CHANGELOG has this story's section directly below Story 42.9's and above 42.7's, and the amendment's (decision #122) above both", () => {
     const headings = CHANGELOG.split("\n").filter((line) => line.startsWith("## "));
-    expect(headings[0]).toBe("## [Unreleased] \u2014 Story 42.9: Install Docs and Client Re-Certification");
-    expect(headings[1]).toBe("## [Unreleased] \u2014 Story 42.8: Claude Code Plugin and Registry Listings");
-    expect(headings[2]).toBe("## [Unreleased] \u2014 Story 42.7: VS Code Extension Publish");
+    expect(headings[0]).toBe("## [Unreleased] \u2014 Story 42.8 amendment (decision #122): IPM Publishes From the Main Repository");
+    expect(headings[1]).toBe("## [Unreleased] \u2014 Story 42.9: Install Docs and Client Re-Certification");
+    expect(headings[2]).toBe("## [Unreleased] \u2014 Story 42.8: Claude Code Plugin and Registry Listings");
+    expect(headings[3]).toBe("## [Unreleased] \u2014 Story 42.7: VS Code Extension Publish");
+  });
+
+  it("the amendment's CHANGELOG section says what moved and what did not: the tree, the manual step, verify, the removals, and that BOOTSTRAP_VERSION stays (decision #122)", () => {
+    const section = CHANGELOG.slice(CHANGELOG.indexOf("## [Unreleased] \u2014 Story 42.8 amendment"), CHANGELOG.indexOf("## [Unreleased] \u2014 Story 42.9"));
+    for (const claim of [
+      "`BOOTSTRAP_VERSION` does not move (`1.0.0+2.244fe8623c76`)",
+      "`pnpm gen:ipm`",
+      "`pnpm gen:ipm:check`",
+      "only the version step (`pnpm run version`) runs it",
+      "`ready (manual step after the tag: ...)`",
+      '"Manual steps" block',
+      "can neither fail nor block a run",
+      "`pending`",
+      "the module in the archive it serves (the root `module.xml`, `ipm/src` and `preload`) must equal `git archive v<version>`",
+      "the rest of the archive is `main` at the Release press and is not compared",
+      "The packaging repository, its deploy key and the pinned host keys.",
+      "Never create a `master` branch in this repository",
+      "there are no export rules",
+    ]) {
+      expect(section, claim).toContain(claim);
+    }
   });
 
   it("the CHANGELOG section states that nothing moves: the frozen baseline hash and count, and BOOTSTRAP_VERSION", () => {

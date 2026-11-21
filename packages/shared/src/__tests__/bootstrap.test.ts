@@ -2072,10 +2072,10 @@ describe("bootstrap", () => {
       );
     });
 
-    // AC 42.4.3 (Story 42.4): item 3 names the IPM package as ipm/module.xml declares it.
+    // AC 42.4.3 (Story 42.4): item 3 names the IPM package as the root module.xml declares it.
     describe("item 3 names the package IPM installs (AC 42.4.3)", () => {
       const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
-      const manifest = readFileSync(resolve(repoRoot, "ipm/module.xml"), "utf-8");
+      const manifest = readFileSync(resolve(repoRoot, "module.xml"), "utf-8");
       const manifestName = /<Name>([^<]+)<\/Name>/.exec(manifest)?.[1];
       const manifestVersion = /<Version>([^<]+)<\/Version>/.exec(manifest)?.[1];
       const item3 = MANUAL_INSTRUCTIONS.slice(MANUAL_INSTRUCTIONS.indexOf("\n3. IPM"));
@@ -2086,9 +2086,9 @@ describe("bootstrap", () => {
         expect(item3).not.toContain("any namespace");
       });
 
-      it("takes the name and the version from ipm/module.xml: either changing in one place only fails here", () => {
-        expect(manifestName, "ipm/module.xml carries a <Name>").toBeDefined();
-        expect(manifestVersion, "ipm/module.xml carries a <Version>").toBeDefined();
+      it("takes the name and the version from the root module.xml: either changing in one place only fails here", () => {
+        expect(manifestName, "module.xml carries a <Name>").toBeDefined();
+        expect(manifestVersion, "module.xml carries a <Version>").toBeDefined();
         expect(item3).toContain(`zpm "install ${manifestName} ${manifestVersion}"`);
       });
 

@@ -1,20 +1,16 @@
 /**
- * Story 42.8 (AC 42.8.5; AD-29) - the pure additions of `scripts/lib/release-core.mjs`: the pinned GitHub host keys, the pinned `mcp-publisher`, its
+ * Story 42.8 (AC 42.8.5; AD-29) - the pure additions of `scripts/lib/release-core.mjs`: the pinned `mcp-publisher`, its
  * argv builder, the MCP Registry lookup and what its answers mean, and the files that embed the shared version.
  *
- * Oracles (Rule #36), all read-only on 2026-11-21: the three host keys and their SHA256 fingerprints are the `ssh_keys` of
- * `GET https://api.github.com/meta` and GitHub's published fingerprints; the registry statuses are `GET /v0.1/servers/<name>/versions/<v>` for
+ * Oracles (Rule #36), all read-only on 2026-11-21: the registry statuses are `GET /v0.1/servers/<name>/versions/<v>` for
  * `io.github.upstash/context7@4.7.3` (200 `{"server":{...},"_meta":{...}}`) and for `@0.0.0-nonexistent` and
  * `io.github.jbrandtmse/iris-dev-mcp@1.0.0` (404 `{"title":"Not Found","status":404,"detail":"Server not found"}`); the publisher digest is the
  * `digest` of the v1.8.8 release asset, re-verified by hashing the downloaded tarball.
  */
 
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { NO_ENDORSEMENT_SENTENCE } from "../../../../scripts/lib/endorsement.mjs";
 import { CONNECTION_VARIABLES, MARKETPLACE_PATH, SERVER_PACKAGES, serverJsonPath } from "../../../../scripts/lib/listings.mjs";
 import {
-  GITHUB_SSH_KNOWN_HOSTS,
   MARKETPLACE_RELATIVE,
   MCP_PUBLISHER,
   MCP_REGISTRY_BASE,
@@ -22,8 +18,6 @@ import {
   PLUGIN_ENTRY_NAME,
   PLUGIN_MANIFEST_RELATIVE,
   SERVER_JSON_DIRS,
-  githubKnownHostsText,
-  ipmReadme,
   mcpPublisherArgv,
   mcpPublisherUrl,
   notSetUpAnnotations,
@@ -36,42 +30,6 @@ import {
   skippedText,
 } from "../../../../scripts/lib/release-core.mjs";
 import { PACK_DIR, PLUGIN_MANIFEST_PATH, PLUGIN_NAME } from "../../../../scripts/lib/skills-pack.mjs";
-
-/** GitHub's published SHA256 fingerprints of its three host keys (https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints). */
-const PUBLISHED_FINGERPRINTS: Record<string, string> = {
-  "ssh-ed25519": "+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU",
-  "ecdsa-sha2-nistp256": "p2QAMXNIC1TJYWeIOttrVc98/R1BUFWu3/LiyKgUfQM",
-  "ssh-rsa": "uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s",
-};
-
-describe("the pinned GitHub host keys (the IPM push trusts only these)", () => {
-  const entries = (GITHUB_SSH_KNOWN_HOSTS as readonly string[]).map((line) => {
-    const [host, type, blob] = line.split(" ");
-    return { host, type: type as string, blob: blob as string };
-  });
-
-  it("are three github.com lines: ed25519, ecdsa-sha2-nistp256 and rsa", () => {
-    expect(entries.map((entry) => entry.host)).toEqual(["github.com", "github.com", "github.com"]);
-    expect(entries.map((entry) => entry.type)).toEqual(["ssh-ed25519", "ecdsa-sha2-nistp256", "ssh-rsa"]);
-  });
-
-  it.each(entries.map((entry) => [entry.type, entry] as const))("%s: the SHA256 of the key (base64-decoded, unpadded base64) is the fingerprint GitHub publishes", (type, entry) => {
-    const recomputed = createHash("sha256").update(Buffer.from(entry.blob, "base64")).digest("base64").replace(/=+$/, "");
-    expect(recomputed).toBe(PUBLISHED_FINGERPRINTS[type]);
-  });
-
-  it("each key's blob names its own type, so a line cannot pair one type with another's key", () => {
-    for (const entry of entries) {
-      const blob = Buffer.from(entry.blob, "base64");
-      const length = blob.readUInt32BE(0);
-      expect(blob.subarray(4, 4 + length).toString("ascii")).toBe(entry.type);
-    }
-  });
-
-  it("the known_hosts text is those three lines and a final newline", () => {
-    expect(githubKnownHostsText()).toBe(`${(GITHUB_SSH_KNOWN_HOSTS as readonly string[]).join("\n")}\n`);
-  });
-});
 
 describe("the pinned mcp-publisher (decision #110)", () => {
   it("is v1.8.8 of the linux_amd64 tarball, with the digest the release asset publishes", () => {
@@ -151,11 +109,7 @@ describe("the files that embed the shared version (lockstep, decision #103)", ()
   });
 });
 
-describe("the non-endorsement sentence and the disabled-channel text", () => {
-  it("the IPM README ends with the sentence that the deny-list strips (one wording, two places)", () => {
-    expect(ipmReadme("1.1.0")).toContain(NO_ENDORSEMENT_SENTENCE);
-  });
-
+describe("the disabled-channel text", () => {
   it("a channel that names no reason still prints a status", () => {
     expect(skippedText({})).toBe("skipped: not enabled (no reason given)");
     expect(skippedText({ enabledBy: "Story 99.9" })).toBe("skipped: not enabled (Story 99.9)");
@@ -168,14 +122,14 @@ describe("a channel that is not set up (decision #121)", () => {
       { channel: "npm", item: "@iris-mcp/all@1.0.0", status: "published" },
       { channel: "open-vsx", item: "iris-mcp-launcher@1.0.0", status: "skipped", detail: notSetUpDetail("the namespace is absent"), notSetUp: true },
       { channel: "vscode-marketplace", item: "iris-mcp-launcher@1.0.0", status: "skipped: not enabled (Story 99.9)" },
-      { channel: "other-channel", item: "iris-execute-mcp-v2@1.0.0", status: "skipped", detail: notSetUpDetail("no deploy key"), notSetUp: true },
+      { channel: "other-channel", item: "iris-execute-mcp-v2@1.0.0", status: "skipped", detail: notSetUpDetail("the owner step is not done"), notSetUp: true },
     ];
     const report = releaseReport(results);
     expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: skipped (not set up: the namespace is absent)");
-    expect(report.endsWith("\nSkipped channels (not set up; run the release again once the owner step is done):\n  open-vsx: the namespace is absent\n  other-channel: no deploy key\n")).toBe(true);
+    expect(report.endsWith("\nSkipped channels (not set up; run the release again once the owner step is done):\n  open-vsx: the namespace is absent\n  other-channel: the owner step is not done\n")).toBe(true);
     expect(notSetUpChannels(results)).toEqual([
       { channel: "open-vsx", reason: "the namespace is absent" },
-      { channel: "other-channel", reason: "no deploy key" },
+      { channel: "other-channel", reason: "the owner step is not done" },
     ]);
     expect(releaseReport(results.slice(0, 1)), "nothing skipped, no block").not.toContain("Skipped channels");
     expect(releaseReport([results[2] as (typeof results)[number]]), "a disabled channel is not a not-set-up channel").not.toContain("Skipped channels");

@@ -9,8 +9,8 @@
  *    shared builder `copyGeneratorInputs`), the embed, the release scripts, the template under `scripts/release/`, a `.gitignore` and the
  *    extension (a manifest and a lock at the seeded version, and a changelog headed `## [Unreleased]`, which the version step stamps).
  *    The fixture owns its state: all eight manifests are seeded at one version, the pending changesets are one synthetic `patch` of
- *    `@iris-mcp/shared`, and the generator runs in the fixture before the first commit, so the embed and `ipm/module.xml` start
- *    consistent with that version and the version script sees a clean tree. What a test expects never depends on the real manifests,
+ *    `@iris-mcp/shared`, and the generator runs in the fixture before the first commit (with `--ipm`: the tree is absent, so it writes
+ *    it), so the embed, the root `module.xml` and the IPM tree start consistent with that version and the version script sees a clean tree. What a test expects never depends on the real manifests,
  *    the real changesets or the real embed.
  * {@link removeFixtures} removes every directory these made.
  */
@@ -98,7 +98,7 @@ export const SYNTHETIC_CHANGESET = "synthetic-patch.md";
 export interface VersionFixtureOptions {
   /** Whether the 1.0.0 template is under `scripts/release/` (default true). */
   withTemplate?: boolean;
-  /** The version of all eight packages, the embed's marker and `ipm/module.xml` (default `0.0.2`). */
+  /** The version of all eight packages, the embed's marker, the root `module.xml` and the IPM tree (default `0.0.2`). */
   version?: string;
   /** Whether the synthetic `patch` changeset is pending (default true). */
   pending?: boolean;
@@ -143,8 +143,8 @@ export function makeVersionFixture(options: VersionFixtureOptions = {}): string 
   seedExtension(root, version);
   for (const name of pendingChangesets(join(root, ".changeset"))) rmSync(join(root, ".changeset", name));
   if (options.pending !== false) writeFileSync(join(root, ".changeset", SYNTHETIC_CHANGESET), '---\n"@iris-mcp/shared": patch\n---\n\nA synthetic change.\n');
-  const generated = spawnSync(process.execPath, [join(root, "scripts", "gen-bootstrap.mjs")], { cwd: root, encoding: "utf8" });
-  if (generated.status !== 0) throw new Error(`gen-bootstrap failed in ${root}: ${generated.stderr}`);
+  const generated = spawnSync(process.execPath, [join(root, "scripts", "gen-bootstrap.mjs"), "--ipm"], { cwd: root, encoding: "utf8" });
+  if (generated.status !== 0) throw new Error(`gen-bootstrap --ipm failed in ${root}: ${generated.stderr}`);
   for (const script of ["gen-pack.mjs", "gen-listings.mjs"]) {
     const ran = spawnSync(process.execPath, [join(root, "scripts", script)], { cwd: root, encoding: "utf8" });
     if (ran.status !== 0) throw new Error(`${script} failed in ${root}: ${ran.stderr}`);

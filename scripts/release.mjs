@@ -21,12 +21,14 @@
 //      `diverged`, any other status, a non-2xx answer, an error or a stall is a refusal. It runs after the environment guard and before the CI
 //      poll, so a refused tag asks for no approval; a dry run prints one line about it. There is no maintenance-branch allowance.
 //   3. PREPARE checks the version state (the extension's package.json and lock at the shared version in both modes; in release mode its CHANGELOG's
-//      first `## [` heading naming the version, which a dry run reports as `a tag run would refuse`) and the generated files, runs every root script that checks the tree (the set CI's gates run), runs every package's `prepublishOnly` ONCE through the throwaway harness
+//      first `## [` heading naming the version, which a dry run reports as `a tag run would refuse`) and the generated files, runs every root script that checks the tree (the set CI's gates run, `gen:ipm:check` among them), runs every package's `prepublishOnly` ONCE through the throwaway harness
 //      (`scripts/throwaway-iris.mjs exec ... node scripts/ci-live-suite.mjs prepublish-<short>`, which exports IRIS_REQUIRE_LIVE=1 and all
-//      five IRIS_* variables), and only then packs: eight tarballs with `pnpm pack` (no lifecycle script), the vsix, and the IPM tree,
+//      five IRIS_* variables), and only then packs: eight tarballs with `pnpm pack` (no lifecycle script) and the vsix,
 //      with `release-manifest.json` (version, sha, mode, channels, files, sha256). The container is removed on every exit path.
+//      The IPM tree is committed, not packed: a release refuses a tree whose marker is not `BOOTSTRAP_VERSION` (the version step did not run
+//      on the final content), and a dry run notes the difference (`ipm: main carries <m1> for the registry; the next version step stamps <m2>`).
 //   4. PUBLISH verifies the manifest's hashes and the version of npm, and that every path it would upload (each npm tarball, an enabled
-//      channel's vsix or IPM tree) is one of those hash-verified files inside the artifacts directory; then uploads the exact tarballs: `npm publish <tgz> --access public
+//      channel's vsix) is one of those hash-verified files inside the artifacts directory; then uploads the exact tarballs: `npm publish <tgz> --access public
 //      --provenance --ignore-scripts`, in NPM_PUBLISH_ORDER, then each enabled channel in order. A version already on the registry is
 //      skipped. The first failure stops everything after it (a channel that throws is a failed channel), and the report names every
 //      package and channel as published, already published, failed, not attempted or skipped. A real run refuses, with exit 2 and
@@ -42,17 +44,18 @@
 //      absent is `skipped (not set up: ...)` (see NOT SET UP below).
 //      The CLIs are the exact pins in the launcher's `node_modules/.bin`; `vsce publish --oidc` is trusted publishing, and `ovsx publish`
 //      uses trusted publishing too unless OVSX_PAT is set (the first publish). In release mode the vsix must be at the manifest's version.
-//      IPM (Story 42.8). The push to the packaging repository trusts only GitHub's three published host keys: a 0600 known_hosts file of
-//      the pinned keys, `StrictHostKeyChecking=yes`, never `accept-new`. A version the IPM registry already lists goes on to the tag and tree
-//      check: tag `v<version>` on the packaging repository with an identical tree is `already published`, and an absent tag or a different
-//      tree is `failed`, with nothing pushed. In a rehearsal a listed version reads `ready (would be already published)`.
+//      IPM (Story 42.8, decision #122). IPM has no upload, key or repository of its own: the registry reads the root `module.xml` of `main` and
+//      serves a re-tar of GitHub's archive of `main`, when the owner presses Release on the Open Exchange listing. The channel reads the
+//      registry (read-only): a version it lists is `already published` (`ready (would be already published)` in a rehearsal); any other
+//      answer, and a registry that cannot be read, is a `manual step` (`ready (manual step after the tag: ...)` in a rehearsal). The
+//      channel can neither fail nor block a run. Each manual step is a "Manual steps" block at the end of the report and a `::warning::`.
 //      NOT SET UP (decision #121). A channel whose OWNER SETUP is missing is `skipped (not set up: <reason>)` in a rehearsal and in a
 //      release, does not fail the run, and later channels still run, so that an npm-only release can go out. The only reason today is the
 //      one the real service gives: the Open VSX namespace's 404 (owner step O1). Nothing else is one: an unreadable lookup, a network
 //      failure, a hash mismatch, a missing CLI, the placeholder publisher, a failed upload, and anything on npm still fail the run, and
 //      so does a channel that has a real problem beside an unset one. The Marketplace has no such reason: no public read-only signal tells
-//      a missing publisher from a publisher that has published nothing yet (Story 42.8, DW-705). The IPM channel is excluded from this
-//      rule for now (decision #122 redesigns it): its readiness and failures are as they were. The end of the run lists every skipped
+//      a missing publisher from a publisher that has published nothing yet (Story 42.8, DW-705). The IPM channel is not one: its owner step is
+//      a `manual step`, never `skipped`, because every run needs it. The end of the run lists every skipped
 //      channel with its reason, in the report (and so in the step summary) and as a `::warning::` annotation; running the release again
 //      after the setup publishes them (npm and the other channels read `already published`).
 //      THE MCP REGISTRY (Story 42.8). The channel is last and the registry is in preview, so it never blocks the others: in a rehearsal its
@@ -63,16 +66,17 @@
 //      version, runs `login github-oidc` (no secret) and one `publish <server.json>` per listing, all with a temporary HOME that is removed on
 //      every exit path. A failed publish is judged by a fresh lookup. The OIDC request variables reach that login only.
 //   5. AUTH. NPM_TOKEN set: a 0600 temporary userconfig holds it and is passed as `--userconfig`; it is removed on every exit path and the
-//      token is never printed. NPM_TOKEN empty: no userconfig, npm uses OIDC (trusted publishing). The token, GITHUB_TOKEN, VSCE_PAT,
-//      OVSX_PAT and the IPM deploy key are removed from the environment of every child process, and the job's OIDC request variables
+//      token is never printed. NPM_TOKEN empty: no userconfig, npm uses OIDC (trusted publishing). The token, GITHUB_TOKEN, VSCE_PAT and
+//      OVSX_PAT are removed from the environment of every child process, and the job's OIDC request variables
 //      (ACTIONS_ID_TOKEN_REQUEST_TOKEN and _URL) reach only `npm publish`, `vsce publish`, `ovsx publish` and `mcp-publisher login`. OVSX_PAT reaches only
 //      `ovsx publish`, as an environment variable, never in argv. Every secret is redacted from every report line.
 //   6. Each phase prints a line, and the report is appended to $GITHUB_STEP_SUMMARY when it is set.
 //   7. SIGINT and SIGTERM kill the child processes that are running, run the cleanups and end the run with 130 or 143
 //      (`installSignalHandlers`); the gate set's own handlers, registered later, forward the signal to its command and remove the container.
 //   8. VERIFY is read-only: for every package of NPM_PUBLISH_ORDER, `npm view <name>@<v> version dist.attestations --json` must show the
-//      version with a provenance attestation, each of the five servers must be listed on the MCP Registry at <v>, the packaging repository
-//      must hold the tag `v<v>` (`git ls-remote`), and `npx -y @iris-mcp/dev@1` must answer `initialize` with `serverInfo.version` <v> in a
+//      version with a provenance attestation, each of the five servers must be listed on the MCP Registry at <v>, the IPM registry is
+//      `pending` (never a failure) until it lists <v> and, once it does, the module in the archive it serves (the root `module.xml`, `ipm/src`
+//      and `preload`) must equal `git archive v<v>` member for member and byte for byte (the local tag must exist), and `npx -y @iris-mcp/dev@1` must answer `initialize` with `serverInfo.version` <v> in a
 //      clean temporary home, npm cache and working directory, against a closed local port. It prints one line per check, never publishes,
 //      logs in or reaches IRIS, and removes its temporary directory on every exit path. It covers the `@1` major only.
 //
@@ -82,7 +86,7 @@
 // IMPORT
 //   Importing this module runs nothing. `ci-gate`, `rehearse` and `publish` run with no `node_modules`, so this file imports only `node:`
 //   builtins, `lib/release-core.mjs` and `lib/script-process.mjs`; every module that `prepare` alone needs (the harness, the packer, the
-//   smoke, the IPM staging) is loaded by `import()` inside `prepare` (`verify` loads the raw stdio driver the same way). `ciGate`, `prepare`, `publish` and `verify` take every side effect as `deps`.
+//   smoke) is loaded by `import()` inside `prepare` (`verify` loads the raw stdio driver and the archive reader the same way). `ciGate`, `prepare`, `publish` and `verify` take every side effect as `deps`.
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -90,7 +94,6 @@ import {
   appendFileSync,
   chmodSync,
   copyFileSync,
-  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -106,15 +109,18 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   CI_WORKFLOW_PATH,
-  IPM_DIST_BRANCH,
-  IPM_DIST_REPOSITORY,
+  IPM_MANIFEST_RELATIVE,
+  IPM_MODULE,
   IPM_REGISTRY_PACKAGE_URL,
+  IPM_SOURCE_REPOSITORY,
+  IPM_TREE_GUARD_RELATIVE,
   MARKETPLACE_RELATIVE,
   MCP_PUBLISHER,
   NPM_NOT_FOUND,
   NPM_PUBLISH_ORDER,
   NPM_VISIBLE_POLL_MS,
   NPM_VISIBLE_TIMEOUT_MS,
+  OPEN_EXCHANGE_LISTING_URL,
   PLACEHOLDER_PUBLISHER,
   PLUGIN_ENTRY_NAME,
   PLUGIN_MANIFEST_RELATIVE,
@@ -131,11 +137,14 @@ import {
   environmentSummary,
   environmentWarnings,
   extensionChangelogProblems,
-  githubKnownHostsText,
-  ipmDefaultBranch,
-  ipmPushPlan,
+  ipmArchiveUrl,
+  ipmManualStepText,
+  ipmNotListedReason,
   ipmRegistryListsVersion,
+  ipmRehearsalDetail,
+  ipmUnreadableReason,
   mainReachability,
+  manualStepAnnotations,
   mcpPublisherArgv,
   mcpPublisherUrl,
   notSetUpAnnotations,
@@ -178,7 +187,7 @@ const LAUNCHER_RELATIVE = path.join('extensions', 'iris-mcp-launcher');
 const OIDC_VARIABLES = Object.freeze(['ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'ACTIONS_ID_TOKEN_REQUEST_URL']);
 
 /** The variables that never reach a child process: each reaches only the code that needs it. */
-const SECRET_VARIABLES = Object.freeze(['NPM_TOKEN', 'GITHUB_TOKEN', 'IPM_DIST_DEPLOY_KEY', 'OVSX_PAT', 'VSCE_PAT', ...OIDC_VARIABLES]);
+const SECRET_VARIABLES = Object.freeze(['NPM_TOKEN', 'GITHUB_TOKEN', 'OVSX_PAT', 'VSCE_PAT', ...OIDC_VARIABLES]);
 
 /** A usage error or a refusal that ends the run with exit code 2. */
 export class Refusal extends Error {}
@@ -322,6 +331,7 @@ export function defaultDeps({ fetchTimeoutMs = 30_000 } = {}) {
     log: (line) => process.stderr.write(`${line}\n`),
     loadModules: loadPrepareModules,
     loadWire: loadVerifyWire,
+    loadArchive: loadVerifyArchive,
   };
 }
 
@@ -333,14 +343,18 @@ async function loadVerifyWire(repoRoot = REPO_ROOT) {
 /** The modules only `prepare` needs, loaded when it needs them (a runner without `node_modules` never loads them). */
 async function loadPrepareModules(repoRoot = REPO_ROOT) {
   const load = (relative) => import(pathToFileURL(path.join(repoRoot, relative)).href);
-  const [harness, checks, pack, smoke, ipm] = await Promise.all([
+  const [harness, checks, pack, smoke] = await Promise.all([
     load('scripts/throwaway-iris.mjs'),
     load('scripts/lib/ci-checks.mjs'),
     load('scripts/lib/pnpm-pack.mjs'),
     load('scripts/ci-package-smoke.mjs'),
-    load('scripts/lib/ipm-archive.mjs'),
   ]);
-  return { harness, checks, pack, smoke, ipm };
+  return { harness, checks, pack, smoke };
+}
+
+/** The archive reader only `verify` needs (the tgz parser and the archive comparison), loaded when it needs them. */
+async function loadVerifyArchive(repoRoot = REPO_ROOT) {
+  return import(pathToFileURL(path.join(repoRoot, 'scripts/lib/ipm-archive.mjs')).href);
 }
 
 // -- GitHub ----------------------------------------------------------------------------------------------------
@@ -511,7 +525,7 @@ const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 
 /**
  * The state of the repository that a release depends on: the packages in publish order with their manifests, the pending changesets,
- * the shared version, the bootstrap marker and the version of `ipm/module.xml`.
+ * the shared version, the bootstrap marker, the version of the root `module.xml` and the marker the committed IPM tree stamps.
  *
  * @param {string} [repoRoot]
  */
@@ -538,8 +552,11 @@ export function readReleaseFacts(repoRoot = REPO_ROOT) {
   const pending = existsSync(changesetDir) ? readdirSync(changesetDir).filter((name) => name.endsWith('.md') && name !== 'README.md').sort() : [];
   const embedFile = path.join(repoRoot, 'packages', 'shared', 'src', 'bootstrap-classes.ts');
   const marker = existsSync(embedFile) ? /export const BOOTSTRAP_VERSION = "([^"]+)"/.exec(readFileSync(embedFile, 'utf8'))?.[1] : undefined;
-  const moduleFile = path.join(repoRoot, 'ipm', 'module.xml');
+  const moduleFile = path.join(repoRoot, IPM_MANIFEST_RELATIVE);
   const moduleVersion = existsSync(moduleFile) ? /<Version>([^<]+)<\/Version>/.exec(readFileSync(moduleFile, 'utf8'))?.[1]?.trim() : undefined;
+  // The marker the committed IPM tree stamps (its install guard), which the registry serves for the module's version.
+  const guardFile = path.join(repoRoot, ...IPM_TREE_GUARD_RELATIVE.split('/'));
+  const ipmTreeMarker = existsSync(guardFile) ? /^Parameter BOOTSTRAPVERSION = "([^"]*)";$/m.exec(readFileSync(guardFile, 'utf8'))?.[1] : undefined;
   const shared = found.get('@iris-mcp/shared');
   const extensionDir = path.join(repoRoot, LAUNCHER_RELATIVE);
   const readIf = (file, parse) => (existsSync(file) ? parse(readFileSync(file, 'utf8')) : undefined);
@@ -561,21 +578,29 @@ export function readReleaseFacts(repoRoot = REPO_ROOT) {
       return { file, version: listing?.version, packageVersion: listing?.packages?.[0]?.version };
     }),
   };
-  return { packages, problems, pending, marker, moduleVersion, sharedVersion: shared?.manifest.version, extension, listings };
+  return { packages, problems, pending, marker, moduleVersion, ipmTreeMarker, sharedVersion: shared?.manifest.version, extension, listings };
 }
 
 /**
- * What is wrong with the files that embed the version: the bootstrap marker's semver, `ipm/module.xml`, and the extension's
- * `package.json` and `package-lock.json` (both of its version fields) must equal the shared version.
+ * What is wrong with the files that embed the version: the bootstrap marker's semver, the root `module.xml`, and the extension's
+ * `package.json` and `package-lock.json` (both of its version fields) must equal the shared version. With `release: true` the IPM tree
+ * must also stamp `BOOTSTRAP_VERSION` exactly: the registry serves `main`'s tree, so a release whose tree is older than the embed would
+ * publish content that is not the release's (the version step regenerates the tree and the embed together).
+ *
+ * @param {Record<string, any>} facts
+ * @param {{ release?: boolean }} [options]
  */
-export function embeddedVersionProblems(facts) {
+export function embeddedVersionProblems(facts, { release = false } = {}) {
   const problems = [];
   const markerSemver = facts.marker?.split('+')[0];
   if (markerSemver !== facts.sharedVersion) {
     problems.push(`BOOTSTRAP_VERSION is ${JSON.stringify(facts.marker)}, whose semver is not the shared version ${facts.sharedVersion}. Run pnpm run version, which regenerates it.`);
   }
   if (facts.moduleVersion !== facts.sharedVersion) {
-    problems.push(`ipm/module.xml is at ${JSON.stringify(facts.moduleVersion)}, not the shared version ${facts.sharedVersion}. Run pnpm run version, which regenerates it.`);
+    problems.push(`${IPM_MANIFEST_RELATIVE} is at ${JSON.stringify(facts.moduleVersion)}, not the shared version ${facts.sharedVersion}. Run pnpm run version, which regenerates it.`);
+  }
+  if (release && facts.ipmTreeMarker !== facts.marker) {
+    problems.push(`the IPM tree stamps ${facts.ipmTreeMarker ?? 'no marker'}, the embed ${facts.marker}: the version step did not run on the final content. Run pnpm run version.`);
   }
   const extensionDir = LAUNCHER_RELATIVE.split(path.sep).join('/');
   const extension = facts.extension ?? {};
@@ -698,16 +723,13 @@ async function packVsix({ repoRoot, out, env, deps, say }) {
   return { file: `vsix/${vsixes[0]}`, name: manifest.name, version: manifest.version, publisher: manifest.publisher, files };
 }
 
-/** The IPM tree: the packaging root staged from the built embed (never from `src/`), by the function the CI gate stages with too. */
-async function stageIpm({ repoRoot, out, version, modules, say }) {
-  const embed = await modules.ipm.loadEmbed(repoRoot);
-  const problems = modules.ipm.embedProblems(embed);
-  if (problems.length > 0) throw new Error(`the IPM embed is not releasable: ${problems.join(' ')}`);
-  const tree = path.join(out, 'ipm');
-  mkdirSync(tree, { recursive: true });
-  const staged = modules.ipm.stagePackagingRoot(tree, embed, { version, licenseText: readFileSync(path.join(repoRoot, 'LICENSE'), 'utf8') });
-  say(`the IPM tree: ${staged.files.length} files from the embed ${embed.marker}, including README.md and LICENSE`);
-  return { tree: 'ipm', module: embed.moduleName, version, marker: embed.marker, repository: IPM_DIST_REPOSITORY, branch: IPM_DIST_BRANCH };
+/**
+ * The IPM channel's entry in the manifest: no files, because the tree is committed and the registry serves `main`. It records what the
+ * owner's Release will publish: the module, the version and the marker the tree stamps.
+ */
+function ipmChannelDetail(facts, version, say) {
+  say(`the IPM tree on main stamps ${facts.ipmTreeMarker}: the owner's Release on the Open Exchange listing publishes it (a manual step)`);
+  return { module: IPM_MODULE, version, marker: facts.ipmTreeMarker, listing: OPEN_EXCHANGE_LISTING_URL, manual: true };
 }
 
 /**
@@ -778,9 +800,12 @@ async function runPrepare({ out, env, repoRoot = REPO_ROOT }, deps) {
     ...versionProblems({ versions: facts.packages.map((entry) => ({ name: entry.name, version: entry.version })), pending: facts.pending, tagVersion: info.version }, info.mode),
     ...extensionChangelogProblems(facts.extension.changelog ?? '', version),
   ];
-  const blocking = [...embeddedVersionProblems(facts)];
+  const blocking = [...embeddedVersionProblems(facts, { release: info.mode === 'release' })];
   if (info.mode === 'release') blocking.unshift(...versionIssues);
   else for (const issue of versionIssues) say(`a tag run would refuse: ${issue}`);
+  if (info.mode !== 'release' && facts.ipmTreeMarker !== facts.marker) {
+    say(`ipm: main carries ${facts.ipmTreeMarker ?? 'no marker'} for the registry; the next version step stamps ${facts.marker}`);
+  }
   if (blocking.length > 0) {
     for (const issue of blocking) say(`problem: ${issue}`);
     return 1;
@@ -869,7 +894,7 @@ async function runPrepare({ out, env, repoRoot = REPO_ROOT }, deps) {
       return 1;
     }
     const vsix = await packVsix({ repoRoot, out: outDir, env: cenv, deps, say });
-    const ipm = await stageIpm({ repoRoot, out: outDir, version, modules, say });
+    const ipm = ipmChannelDetail(facts, version, say);
     const registry = stageRegistryListings({ repoRoot, out: outDir, version, say });
 
     const channelDetails = {
@@ -945,8 +970,8 @@ export function artifactProblems(artifacts, manifest) {
 /**
  * What is wrong with the paths a run would upload: each is one of the manifest's hash-verified files, inside the artifacts directory.
  * An npm entry's tarball is the one `pnpm pack` names for its package and version (so no two entries share one), and in a release every
- * entry is at the manifest's version. An enabled store channel uploads a listed `.vsix` (at the manifest's version in a release); an enabled IPM channel pushes a listed directory that
- * holds `module.xml`. A channel that is not enabled uploads nothing, so its paths are not checked.
+ * entry is at the manifest's version. An enabled store channel uploads a listed `.vsix` (at the manifest's version in a release). The IPM
+ * channel uploads nothing, so it lists no file. A channel that is not enabled uploads nothing, so its paths are not checked.
  *
  * @param {Record<string, any>} manifest
  * @param {ReadonlyArray<{ id: string, enabled: boolean }>} channels
@@ -974,10 +999,8 @@ export function uploadPathProblems(manifest, channels) {
       continue;
     }
     if (channel.id === 'ipm') {
-      const tree = detail.tree ?? 'ipm';
-      if (!isContainedPath(tree) || !verified.has(`${tree}/module.xml`)) {
-        problems.push(`${channel.id}: its tree ${JSON.stringify(tree)} is not a directory of ${MANIFEST_NAME} that holds module.xml. Prepare the artifacts again.`);
-      }
+      // The manual IPM step uploads nothing, so it names no file to check.
+      continue;
     } else if (channel.id === 'mcp-registry') {
       const servers = Array.isArray(detail.servers) ? detail.servers : [];
       if (servers.length === 0) problems.push(`${channel.id}: the manifest lists no server.json. Prepare the artifacts again.`);
@@ -1176,8 +1199,7 @@ async function runPublish({ artifacts, dryRun = false, env, repoRoot = REPO_ROOT
     }
     const npmEnv = childEnv(env);
     const publishEnv = { ...npmEnv, ...oidcEnv(env) };
-    // The deploy key is redacted whole and line by line: a git error may echo one line of it.
-    secrets.push(env.ACTIONS_ID_TOKEN_REQUEST_TOKEN, env.OVSX_PAT, env.VSCE_PAT, env.IPM_DIST_DEPLOY_KEY, ...String(env.IPM_DIST_DEPLOY_KEY ?? '').split(/\r?\n/));
+    secrets.push(env.ACTIONS_ID_TOKEN_REQUEST_TOKEN, env.OVSX_PAT, env.VSCE_PAT);
     const quote = (text) => redact(text, secrets);
 
     // npm, in order; the first failure stops everything after it.
@@ -1249,7 +1271,14 @@ async function runPublish({ artifacts, dryRun = false, env, repoRoot = REPO_ROOT
           say(`${channel.id}: ${entry.item}: ${entry.status}${entry.detail === undefined ? '' : ` (${entry.detail})`}`);
         }
       } else {
-        results.push({ channel: channel.id, item, status: outcome.status, ...(outcome.detail === undefined ? {} : { detail: outcome.detail }), ...(outcome.notSetUp === true ? { notSetUp: true } : {}) });
+        results.push({
+          channel: channel.id,
+          item,
+          status: outcome.status,
+          ...(outcome.detail === undefined ? {} : { detail: outcome.detail }),
+          ...(outcome.notSetUp === true ? { notSetUp: true } : {}),
+          ...(outcome.manual === true ? { manual: true } : {}),
+        });
         say(`${channel.id}: ${outcome.status}${outcome.detail === undefined ? '' : ` (${outcome.detail})`}`);
       }
       if (outcome.status === STATUS.failed) {
@@ -1264,6 +1293,8 @@ async function runPublish({ artifacts, dryRun = false, env, repoRoot = REPO_ROOT
 
     // A channel skipped as not set up is not a failure, so each one is also an annotation (a raw `::warning::` line) beside the report's block.
     for (const annotation of notSetUpAnnotations(results)) deps.log(annotation);
+    // A manual step is the owner's to do after the run, so it is an annotation too; it never changes the exit code.
+    for (const annotation of manualStepAnnotations(results)) deps.log(annotation);
     const report = releaseReport(results);
     deps.log(report);
     appendSummary(env, `### ${dryRun ? 'Rehearsal' : 'Publish'} ${manifest.version}\n\n\`\`\`\n${report}\`\`\``);
@@ -1292,24 +1323,15 @@ function notReadyOutcome(reasons) {
 /**
  * Read-only checks of one channel. Returns `{ status: 'ready' }` or `{ status: 'not ready', detail, notSetUp }`. A reason is a missing
  * owner setup only where the real service says so: the Open VSX namespace's 404. Everything else (an unreadable lookup, a missing CLI,
- * the placeholder publisher, and every reason of the IPM channel, which decision #122 redesigns) is a plain reason.
+ * the placeholder publisher) is a plain reason. The IPM channel is never `not ready`: it is the owner's manual step, or already listed.
  */
 async function dryStep(channel, detail, { dir, env, deps, repoRoot, version, cleanups }) {
   if (channel.id === 'mcp-registry') return registryDryStep(detail, { dir, env, deps, version, cleanups });
   if (channel.id === 'ipm') {
-    const reasons = [];
-    const listing = await ipmRegistryState(deps, version);
-    if (listing.error !== undefined) reasons.push(`the registry could not be read (${listing.error})`);
-    const url = `https://github.com/${IPM_DIST_REPOSITORY}.git`;
-    const remote = await deps.run(['git', ...ipmPushPlan(path.join(dir, detail.tree ?? 'ipm'), version, '0'.repeat(40), { url, clone: dir }).lsRemoteArgv], { cwd: dir, env: childEnv(env, { GIT_TERMINAL_PROMPT: '0' }) });
-    if (remote.status !== 0) {
-      reasons.push(`the packaging repository ${IPM_DIST_REPOSITORY} is absent or not readable`);
-    } else {
-      const branch = ipmDefaultBranch(remote.stdout);
-      if (branch !== undefined && branch !== IPM_DIST_BRANCH) reasons.push(`its default branch is ${branch}, not ${IPM_DIST_BRANCH}, and the registry reads the default branch`);
-    }
-    if (reasons.length > 0) return { status: STATUS.notReady, detail: reasons.join('; ') };
-    return listing.listed ? { status: STATUS.ready, detail: STATUS.wouldBeAlreadyPublished } : { status: STATUS.ready };
+    const outcome = await ipmOutcome(deps, version);
+    return outcome.status === STATUS.alreadyPublished
+      ? { status: STATUS.ready, detail: STATUS.wouldBeAlreadyPublished }
+      : { status: STATUS.ready, detail: ipmRehearsalDetail(outcome.detail), manual: true };
   }
   const reasons = vsixReadiness(detail, repoRoot, channel.id === 'vscode-marketplace' ? 'vsce' : 'ovsx').reasons.map((text) => ({ text }));
   // The store reads need a real publisher: the placeholder names nothing a store could answer for.
@@ -1327,7 +1349,7 @@ async function dryStep(channel, detail, { dir, env, deps, repoRoot, version, cle
   return { status: STATUS.ready, detail: lookup?.outcome === 'published' ? STATUS.wouldBeAlreadyPublished : `${STATUS.wouldPublish} ${detail.name}@${detail.version}` };
 }
 
-/** Ask the IPM registry whether it lists the version: `{ listed }`, or `{ error }`. A 404 means the package is not registered yet. */
+/** Ask the IPM registry whether it lists the version: `{ listed, body }`, or `{ error }`. A 404 means the package is not registered yet. */
 async function ipmRegistryState(deps, version) {
   try {
     const response = await deps.fetch(IPM_REGISTRY_PACKAGE_URL, { headers: { Accept: 'application/json', 'User-Agent': 'iris-mcp-release' } });
@@ -1339,10 +1361,21 @@ async function ipmRegistryState(deps, version) {
     } catch {
       return { error: 'the answer is not JSON' };
     }
-    return { listed: ipmRegistryListsVersion(body, version) };
+    return { listed: ipmRegistryListsVersion(body, version), body };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/**
+ * What the IPM channel is for a run: `already published` when the registry lists the version, otherwise a `manual step` whose `detail`
+ * says what the owner does (a registry that cannot be read is the same step, with that said). The channel has no upload, so it never fails.
+ */
+async function ipmOutcome(deps, version) {
+  const registry = await ipmRegistryState(deps, version);
+  if (registry.error === undefined && registry.listed) return { status: STATUS.alreadyPublished };
+  const reason = registry.error === undefined ? ipmNotListedReason(version) : ipmUnreadableReason(version, registry.error);
+  return { status: STATUS.manualStep, detail: ipmManualStepText(version, reason), manual: true };
 }
 
 // -- the MCP Registry channel ----------------------------------------------------------------------------------
@@ -1508,15 +1541,15 @@ const notSetUp = (reason) => ({ status: STATUS.skipped, detail: notSetUpDetail(r
 
 /** Run one enabled channel: its dry step in a rehearsal, its upload otherwise. */
 async function runChannel(channel, detail, ctx) {
-  const { dir, env, deps, repoRoot, dryRun, cleanups, version, sha, quote } = ctx;
+  const { dir, env, deps, repoRoot, dryRun, cleanups, version, quote } = ctx;
   if (detail === undefined) return { status: STATUS.failed, detail: `the manifest has no ${channel.id} entry. Prepare the artifacts again.` };
   if (dryRun) {
     const dry = await dryStep(channel, detail, ctx);
-    if (dry.status === STATUS.ready) return { status: STATUS.ready, ...(dry.detail === undefined ? {} : { detail: dry.detail }) };
+    if (dry.status === STATUS.ready) return { status: STATUS.ready, ...(dry.detail === undefined ? {} : { detail: dry.detail }), ...(dry.manual === true ? { manual: true } : {}) };
     return dry.notSetUp === true ? notSetUp(dry.detail) : { status: STATUS.notReady, detail: dry.detail };
   }
   if (channel.id === 'mcp-registry') return publishMcpRegistry(detail, { dir, env, deps, cleanups, version, quote });
-  if (channel.id === 'ipm') return publishIpm(detail, { dir, env, deps, cleanups, version, sha, quote });
+  if (channel.id === 'ipm') return ipmOutcome(deps, version);
   const cliName = channel.id === 'vscode-marketplace' ? 'vsce' : 'ovsx';
   const { cli, reasons } = vsixReadiness(detail, repoRoot, cliName);
   if (reasons.length > 0) return { status: STATUS.failed, detail: reasons.join('; ') };
@@ -1542,69 +1575,6 @@ async function runChannel(channel, detail, ctx) {
   // `--skip-duplicate` exits 0 for an upload and for a skip alike: the CLI's own line tells them apart.
   if (skippedDuplicate(uploaded.stdout)) return { status: STATUS.alreadyPublished };
   return { status: STATUS.published, detail: channel.id === 'open-vsx' && useToken ? 'auth: token' : 'auth: oidc' };
-}
-
-/** The IPM channel: refuse a version the registry lists, push the staged tree to the packaging repository with the deploy key, and tag it. */
-async function publishIpm(detail, { dir, env, deps, cleanups, version, sha, quote }) {
-  const listing = await ipmRegistryState(deps, version);
-  if (listing.error !== undefined) return { status: STATUS.failed, detail: `the registry could not be read (${listing.error}). Nothing was pushed.` };
-  if (typeof env.IPM_DIST_DEPLOY_KEY !== 'string' || env.IPM_DIST_DEPLOY_KEY === '') {
-    return { status: STATUS.failed, detail: "IPM_DIST_DEPLOY_KEY is not set. Add the deploy key as a release-environment secret, and to the publish step's env in release.yml and scripts/lib/release-checks.mjs." };
-  }
-  const work = mkdtempSync(path.join(tmpdir(), 'release-ipm-'));
-  cleanups.add(() => rmSync(work, { recursive: true, force: true }));
-  // The key and the known_hosts file go as soon as the push ends, so no later channel's process can read them; the cleanup covers a signal.
-  try {
-    const keyFile = path.join(work, 'deploy-key');
-    writeFileSync(keyFile, env.IPM_DIST_DEPLOY_KEY.endsWith('\n') ? env.IPM_DIST_DEPLOY_KEY : `${env.IPM_DIST_DEPLOY_KEY}\n`, { encoding: 'utf8', mode: 0o600 });
-    chmodSync(keyFile, 0o600);
-    // The push trusts only GitHub's published host keys: a pinned known_hosts file, strict checking, and no other known_hosts file.
-    const knownHosts = path.join(work, 'known_hosts');
-    writeFileSync(knownHosts, githubKnownHostsText(), { encoding: 'utf8', mode: 0o600 });
-    chmodSync(knownHosts, 0o600);
-    const clone = path.join(work, 'repository');
-    const tree = path.join(dir, detail.tree ?? 'ipm');
-    const plan = ipmPushPlan(tree, version, sha, { url: `git@github.com:${IPM_DIST_REPOSITORY}.git`, clone });
-    const gitEnv = childEnv(env, {
-      GIT_SSH_COMMAND: `ssh -i ${keyFile} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${knownHosts} -o GlobalKnownHostsFile=/dev/null`,
-      GIT_TERMINAL_PROMPT: '0',
-    });
-    const git = (argv, cwd) => deps.run(['git', ...argv], { cwd, env: gitEnv });
-    const failedAt = (step, result) => ({
-      status: STATUS.failed,
-      detail: `git ${step} failed (exit ${result.status ?? 'none'}): ${quote(tail(result.stderr || result.error?.message || result.stdout, 3))}. Fix the packaging repository or its deploy key, then run the release again.`,
-    });
-
-    const cloned = await git(plan.cloneArgv, work);
-    if (cloned.status !== 0) return failedAt('clone', cloned);
-    const branch = await git(plan.checkoutArgv, clone);
-    if (branch.status !== 0) return failedAt('checkout', branch);
-    for (const entry of readdirSync(clone)) {
-      if (entry !== '.git') rmSync(path.join(clone, entry), { recursive: true, force: true });
-    }
-    cpSync(tree, clone, { recursive: true });
-    const added = await git(plan.addArgv, clone);
-    if (added.status !== 0) return failedAt('add', added);
-    const written = await git(plan.writeTreeArgv, clone);
-    if (written.status !== 0) return failedAt('write-tree', written);
-    const existing = await git(plan.tagTreeArgv, clone);
-    if (existing.status === 0) {
-      if (existing.stdout.trim() === written.stdout.trim()) return { status: STATUS.alreadyPublished, detail: `${plan.tag} exists with this tree` };
-      return { status: STATUS.failed, detail: `${plan.tag} exists on ${IPM_DIST_REPOSITORY} with a different tree. Release a new version.` };
-    }
-    if (listing.listed) {
-      return { status: STATUS.failed, detail: `the IPM registry lists ${version}, but ${IPM_DIST_REPOSITORY} has no tag ${plan.tag}. Nothing was pushed; release a new version.` };
-    }
-    const committed = await git(plan.commitArgv, clone);
-    if (committed.status !== 0) return failedAt('commit', committed);
-    const tagged = await git(plan.tagArgv, clone);
-    if (tagged.status !== 0) return failedAt('tag', tagged);
-    const pushed = await git(plan.pushArgv, clone);
-    if (pushed.status !== 0) return failedAt('push', pushed);
-    return { status: STATUS.published, detail: `${plan.tag} on ${IPM_DIST_REPOSITORY} ${plan.branch}` };
-  } finally {
-    rmSync(work, { recursive: true, force: true });
-  }
 }
 
 // -- verify ----------------------------------------------------------------------------------------------------
@@ -1646,7 +1616,64 @@ export async function verify(options, deps) {
   }
 }
 
-async function runVerify({ version, env }, deps) {
+/** The first `count` of a list of problems, with how many more there are. */
+const firstOf = (items, count) => (items.length > count ? `${items.slice(0, count).join(' ')} (and ${items.length - count} more)` : items.join(' '));
+
+/**
+ * The IPM check of `verify`: `{ line, problem?, settled }`. `line` always prints. The registry not listing `version`, or not being
+ * readable, is `pending` and no problem (the owner's Release may come days after the tag). Once it lists the version, the module in the
+ * archive it serves (the registry's re-tar of GitHub's archive of `main` at the Release press) must equal `git archive v<version>`:
+ * the root `module.xml` and every `ipm/src` and `preload` file, byte for byte, with a `module.xml` at `<Version>` `version`. The rest of
+ * the archive is `main` at the press and is not compared; it reads as the whole archive's equality only when it does match. A differing
+ * module, an unreadable download and a missing local tag are problems.
+ */
+async function verifyIpm(version, { deps, repoRoot, work, env }) {
+  const label = `${IPM_SOURCE_REPOSITORY} on IPM`;
+  const tag = `v${version}`;
+  const state = await ipmRegistryState(deps, version);
+  if (state.error !== undefined) return { line: `${label}: pending (could not read the registry: ${state.error}). Run verify again once the owner has pressed Release.`, settled: false };
+  if (!state.listed) return { line: `${label}: pending (the registry does not list ${version} yet: the owner presses Release on the Open Exchange listing)`, settled: false };
+  const failed = (problem) => ({ line: `${label}: ${version} is listed`, problem: `${label}: ${problem}`, settled: true });
+
+  const url = ipmArchiveUrl(state.body, version);
+  if (url === undefined) return failed(`the registry lists ${version} but its answer gives no archive address for it. Check ${IPM_REGISTRY_PACKAGE_URL}, then run verify again.`);
+  const exists = await deps.run(['git', 'rev-parse', '--verify', '--quiet', `refs/tags/${tag}`], { cwd: repoRoot, env, timeoutMs: 120_000 });
+  if (exists.status !== 0) return failed(`the local tag ${tag} is missing, so the served archive cannot be compared. Fetch the tags (git fetch --tags), then run verify again.`);
+  const tagArchive = path.join(work, 'tag.tgz');
+  const archived = await deps.run(['git', 'archive', '--format=tar.gz', `--output=${tagArchive}`, tag], { cwd: repoRoot, env, timeoutMs: 600_000 });
+  if (archived.status !== 0) return failed(`git archive ${tag} failed (${archived.error?.message ?? `exit ${archived.status}`}). Run it in a git checkout that holds the tag.`);
+
+  let served;
+  try {
+    const response = await deps.fetch(url, { headers: { 'User-Agent': 'iris-mcp-release' }, signal: AbortSignal.timeout(300_000) });
+    if (response.status !== 200) return failed(`the registry's archive ${url} answered HTTP ${response.status}. Run verify again.`);
+    served = Buffer.from(await response.arrayBuffer());
+  } catch (error) {
+    return failed(`the registry's archive ${url} could not be downloaded (${error instanceof Error ? error.message : String(error)}). Run verify again.`);
+  }
+  let differences;
+  let wholeEqual = false;
+  try {
+    const { readTgz, archiveEqualityProblems, moduleMemberEntries } = await deps.loadArchive();
+    const servedEntries = readTgz(served);
+    const tagEntries = readTgz(readFileSync(tagArchive));
+    const labels = { actual: "the registry's archive", expected: `git archive ${tag}` };
+    differences = archiveEqualityProblems(moduleMemberEntries(servedEntries), moduleMemberEntries(tagEntries), labels);
+    wholeEqual = archiveEqualityProblems(servedEntries, tagEntries, labels).length === 0;
+    const manifest = servedEntries.find((entry) => entry.type === 'file' && entry.name.replace(/^(?:\.\/)+/, '') === IPM_MANIFEST_RELATIVE);
+    const stamped = manifest === undefined ? undefined : /<Version>([^<]+)<\/Version>/.exec(Buffer.from(manifest.data).toString('utf8'))?.[1]?.trim();
+    if (stamped !== version) differences.push(`its ${IPM_MANIFEST_RELATIVE} is at ${JSON.stringify(stamped)}, not ${version}.`);
+  } catch (error) {
+    return failed(`the registry's archive could not be read (${error instanceof Error ? error.message : String(error)}). Run verify again.`);
+  }
+  if (differences.length > 0) {
+    return failed(`the module in the archive the registry serves for ${version} is not ${tag}'s: ${firstOf(differences, 3)} Press Release before another version commit reaches main, or ask the registry to republish.`);
+  }
+  if (!wholeEqual) return { line: `${label}: ok, the IPM registry serves ${version} and its module equals the tag's (the rest of the archive is main when the owner pressed Release)`, settled: true };
+  return { line: `${label}: ok, the IPM registry serves ${version} and its archive equals the tag's`, settled: true };
+}
+
+async function runVerify({ version, env, repoRoot = REPO_ROOT }, deps) {
   const say = (line) => deps.log(`verify: ${line}`);
   if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) {
     say(`--version must be MAJOR.MINOR.PATCH. ${USAGE}`);
@@ -1672,7 +1699,7 @@ async function runVerify({ version, env }, deps) {
       problems.push(...found);
     }
 
-    // The MCP Registry lists each server at the version, and the packaging repository holds the tag (read-only).
+    // The MCP Registry lists each server at the version (read-only).
     for (const dir of SERVER_JSON_DIRS) {
       const server = { name: `io.github.jbrandtmse/${dir}` };
       const lookup = await registryLookup(deps, server, version);
@@ -1688,18 +1715,12 @@ async function runVerify({ version, env }, deps) {
         problems.push(problem);
       }
     }
-    const tag = `v${version}`;
-    const tagged = await deps.run(['git', 'ls-remote', '--tags', `https://github.com/${IPM_DIST_REPOSITORY}.git`, `refs/tags/${tag}`], { cwd, env: { ...childEnvironment, GIT_TERMINAL_PROMPT: '0' }, timeoutMs: 120_000 });
-    const tagProblem =
-      tagged.status !== 0
-        ? `${IPM_DIST_REPOSITORY}: the tag ${tag} could not be read (${tagged.error?.message ?? `exit ${tagged.status}`}). Check the repository and the network, then run verify again.`
-        : tagged.stdout.includes(`refs/tags/${tag}`)
-          ? undefined
-          : `${IPM_DIST_REPOSITORY}: has no tag ${tag}. Publish the release, or run verify again once the push has landed.`;
-    if (tagProblem === undefined) say(`${IPM_DIST_REPOSITORY}: ok, holds the tag ${tag}`);
-    else {
-      say(tagProblem);
-      problems.push(tagProblem);
+    // The IPM registry lists the version only after the owner's Release: `pending` until then (never a failure), then the archive it serves must be the tag's.
+    const ipm = await verifyIpm(version, { deps, repoRoot, work, env: childEnvironment });
+    say(ipm.line);
+    if (ipm.problem !== undefined) {
+      say(ipm.problem);
+      problems.push(ipm.problem);
     }
 
     const spec = `npx ${VERIFY_NPX_ARGS.join(' ')}`;
@@ -1728,7 +1749,11 @@ async function runVerify({ version, env }, deps) {
       }
     }
 
-    say(problems.length === 0 ? `${NPM_PUBLISH_ORDER.length} packages at ${version} with provenance, ${SERVER_JSON_DIRS.length} servers on the MCP Registry, the packaging tag ${tag}, and ${spec} starts` : `${problems.length} check(s) failed`);
+    say(
+      problems.length === 0
+        ? `${NPM_PUBLISH_ORDER.length} packages at ${version} with provenance, ${SERVER_JSON_DIRS.length} servers on the MCP Registry, IPM ${ipm.settled ? 'serving the tag' : 'pending the owner'}, and ${spec} starts`
+        : `${problems.length} check(s) failed`,
+    );
     return problems.length === 0 ? 0 : 1;
   } finally {
     remove();
