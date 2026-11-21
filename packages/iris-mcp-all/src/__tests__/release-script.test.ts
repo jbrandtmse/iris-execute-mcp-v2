@@ -2601,8 +2601,11 @@ describe("The MCP Registry channel (Story 42.8; AD-29)", () => {
     const stage = path.join(world.root, "publisher-stage");
     mkdirSync(stage);
     world.standIns.installInto("mcp-publisher", stage);
+    // The real v1.8.8 asset holds LICENSE, README.md and mcp-publisher side by side at its root (listed with `tar -tzvf` on 2026-11-21, QA): the extraction must find the binary among them.
+    writeFileSync(path.join(stage, "LICENSE"), "MIT\n");
+    writeFileSync(path.join(stage, "README.md"), "# mcp-publisher\n");
     const archive = path.join(world.root, "mcp-publisher_linux_amd64.tar.gz");
-    const packed = spawnSync(hostTar(), ["-czf", archive, "-C", stage, "mcp-publisher"], { encoding: "utf8" });
+    const packed = spawnSync(hostTar(), ["-czf", archive, "-C", stage, "LICENSE", "README.md", "mcp-publisher"], { encoding: "utf8" });
     if (packed.status !== 0) throw new Error(`tar failed: ${packed.stderr}`);
     const bytes = readFileSync(archive);
     const pin = { version: "v9.9.9-test", asset: "mcp-publisher_linux_amd64.tar.gz", sha256: createHash("sha256").update(bytes).digest("hex") };
@@ -2974,6 +2977,111 @@ describe("The MCP Registry channel (Story 42.8; AD-29)", () => {
       expect(homes.length).toBeGreaterThan(0);
       for (const home of homes) expect(existsSync(home)).toBe(false);
       expect(readdirSync(privateTmp)).toEqual([]);
+    });
+  });
+
+  describe("QA (Story 42.8; Rules #54, #59): the pin that ships, the credential matrix over all five channels, and an IPM failure before the registry", () => {
+    const OVSX_PAT = "ovsx_SECRETOPENVSXPAT1234567890";
+    const VSCE_PAT = "vsce_SECRETMARKETPLACEPAT1234567890";
+    const REAL_PIN_URL = "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.8/mcp-publisher_linux_amd64.tar.gz";
+    const REAL_PIN_SHA256 = "09f1fa70ee146b640584274a1a6b2b8a0310b05d4321fa9224e6df6a016d67f4";
+    const ipmGit = (world: RegistryWorld): void =>
+      world.standIns.script("git", [
+        { match: ["clone"], effects: [{ mkdir: "$LAST" }, { mkdir: "$LAST/.git" }] },
+        { match: ["write-tree"], stdout: "tree-new\n" },
+        { match: ["rev-parse"], status: 1 },
+      ]);
+    /** Every child any stand-in recorded: npm, git, vsce, ovsx and mcp-publisher. */
+    const everyCall = (world: RegistryWorld): StandInCall[] => [...world.standIns.allCalls(), ...world.publisherCalls()].sort((a, b) => a.seq - b.seq);
+    const label = (call: StandInCall): string => `${call.tool} ${call.argv[0]}`;
+
+    it("the pin that ships is the one downloaded: with no pin injected, the request is the v1.8.8 asset, and bytes that are not its sha256 are never run (a real release and a rehearsal)", async () => {
+      for (const dryRun of [false, true]) {
+        const world = registryWorld();
+        // Deliberately no `mcpPublisher` in the deps: the script's own constant decides. The registry world's tarball (a stand-in) cannot match the real digest.
+        const code = await world.run({ dryRun, channels: NPM_AND_REGISTRY, env: OIDC, deps: { now: () => 0, sleep: async () => undefined } });
+        const downloads = world.stores.requests.filter((request) => request.url.includes("/releases/download/"));
+        expect(downloads.map((request) => request.url), `dryRun ${dryRun}`).toEqual([REAL_PIN_URL]);
+        expect(reportOf(world), `dryRun ${dryRun}`).toContain(`not the pinned ${REAL_PIN_SHA256}. It was not run`);
+        expect(world.publisherCalls(), `dryRun ${dryRun}: nothing ran`).toEqual([]);
+        // A real release fails on it; a rehearsal reports it `not ready` and (decision #108) does not fail.
+        expect(code, `dryRun ${dryRun}`).toBe(dryRun ? 0 : 1);
+        expect(reportOf(world)).toContain(dryRun ? "mcp-registry: not ready (the mcp-publisher download has the sha256" : "failed (the mcp-publisher download has the sha256");
+      }
+    });
+
+    it("every credential reaches only its own children across npm, both stores, IPM and the MCP Registry, and each site that may hold one does", async () => {
+      const world = registryWorld();
+      ipmGit(world);
+      const env = { NPM_TOKEN: TOKEN, OVSX_PAT, VSCE_PAT, IPM_DIST_DEPLOY_KEY: KEY };
+      expect(await world.runRegistry({ channels: SCRIPT_DEFAULT_CHANNELS, env })).toBe(0);
+      const calls = everyCall(world);
+      const isPublish = (call: StandInCall): boolean => call.argv[0] === "publish";
+      const oidcSite = (call: StandInCall): boolean => (["npm", "vsce", "ovsx"].includes(call.tool) && isPublish(call)) || (call.tool === "mcp-publisher" && call.argv[0] === "login");
+      const secrets: Array<[string, string, (call: StandInCall) => boolean]> = [
+        ["NPM_TOKEN", TOKEN, () => false],
+        ["GITHUB_TOKEN", GITHUB_TOKEN, () => false],
+        ["IPM_DIST_DEPLOY_KEY", "SECRETKEYBODY", () => false],
+        ["VSCE_PAT", VSCE_PAT, () => false],
+        ["OVSX_PAT", OVSX_PAT, (call) => call.tool === "ovsx" && isPublish(call)],
+        ["the OIDC request token", OIDC_TOKEN, oidcSite],
+        ["the OIDC request URL", OIDC.ACTIONS_ID_TOKEN_REQUEST_URL, oidcSite],
+      ];
+      for (const call of calls) {
+        for (const [name, value, allowed] of secrets) {
+          const holdsInEnvironment = Object.values(call.env).some((entry) => entry.includes(value));
+          expect(holdsInEnvironment, `${label(call)} holding ${name}`).toBe(allowed(call));
+          expect(JSON.stringify([call.argv, call.cwd, call.stdin]), `${label(call)}: ${name} in argv, cwd or stdin`).not.toContain(value);
+        }
+        expect("GIT_SSH_COMMAND" in call.env, `${label(call)} holding GIT_SSH_COMMAND`).toBe(call.tool === "git");
+      }
+      // The sweep is not vacuous: each site that is allowed to hold a credential ran, and held it.
+      const sites = {
+        npmPublish: calls.filter((call) => call.tool === "npm" && isPublish(call)),
+        vsce: calls.filter((call) => call.tool === "vsce" && isPublish(call)),
+        ovsx: calls.filter((call) => call.tool === "ovsx" && isPublish(call)),
+        login: calls.filter((call) => call.tool === "mcp-publisher" && call.argv[0] === "login"),
+        push: calls.filter((call) => call.tool === "git" && call.argv[0] === "push"),
+      };
+      expect(sites.npmPublish).toHaveLength(8);
+      for (const call of [...sites.npmPublish, ...sites.vsce, ...sites.ovsx, ...sites.login]) expect(call.env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"], label(call)).toBe(OIDC_TOKEN);
+      expect(sites.ovsx).toHaveLength(1);
+      expect(sites.ovsx[0]?.env["OVSX_PAT"]).toBe(OVSX_PAT);
+      expect(sites.vsce).toHaveLength(1);
+      expect(sites.login).toHaveLength(1);
+      expect(sites.push).toHaveLength(1);
+      expect(sites.push[0]?.sshKey?.text, "the key reaches the push as a 0600 file, never as an environment variable").toBe(`${KEY}\n`);
+      expect(sites.push[0]?.sshKey?.mode).toBe("600");
+      expect(sites.npmPublish.every((call) => call.userconfig?.mode === "600" && call.userconfig.text.includes(TOKEN)), "the npm token reaches npm only through the 0600 userconfig").toBe(true);
+    });
+
+    it("a rehearsal over all five channels hands no credential to any child but the OIDC variables of `npm publish --dry-run`", async () => {
+      const world = registryWorld();
+      ipmGit(world);
+      expect(await world.runRegistry({ dryRun: true, channels: SCRIPT_DEFAULT_CHANNELS, env: { NPM_TOKEN: TOKEN, OVSX_PAT, VSCE_PAT, IPM_DIST_DEPLOY_KEY: KEY } })).toBe(0);
+      const calls = everyCall(world);
+      expect(calls.some((call) => call.tool === "mcp-publisher" && call.argv[0] === "validate")).toBe(true);
+      for (const call of calls) {
+        const environment = Object.values(call.env).join("\n");
+        for (const secret of [TOKEN, GITHUB_TOKEN, "SECRETKEYBODY", VSCE_PAT, OVSX_PAT]) expect(environment, `${label(call)} holding ${secret}`).not.toContain(secret);
+        const oidcAllowed = call.tool === "npm" && call.argv[0] === "publish";
+        expect(environment.includes(OIDC_TOKEN), `${label(call)} holding the OIDC token`).toBe(oidcAllowed);
+        expect(call.argv[0] === "publish" && call.tool !== "npm", `${label(call)}: no store or registry publish in a rehearsal`).toBe(false);
+        expect(call.tool === "git" && !["ls-remote"].includes(call.argv[0] as string), `${label(call)}: git only reads in a rehearsal`).toBe(false);
+      }
+    });
+
+    it("an IPM channel that fails in a release leaves `mcp-registry` `not attempted`: no lookup, no download, no login", async () => {
+      const world = registryWorld();
+      ipmGit(world);
+      // No IPM_DIST_DEPLOY_KEY: the IPM channel fails before it pushes, and the registry channel, which is after it, does not start.
+      expect(await world.runRegistry({ channels: SCRIPT_DEFAULT_CHANNELS })).toBe(1);
+      const report = reportOf(world);
+      expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: failed (IPM_DIST_DEPLOY_KEY is not set");
+      expect(report).toContain("mcp-registry\n  5 servers@1.0.0: not attempted");
+      expect(lookupsOf(world)).toEqual([]);
+      expect(world.stores.requests.some((request) => request.url.includes("/releases/download/"))).toBe(false);
+      expect(world.publisherCalls()).toEqual([]);
     });
   });
 

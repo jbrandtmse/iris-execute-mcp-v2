@@ -1024,3 +1024,39 @@ describe("installSignalHandlers, which main() installs before any command runs (
     expect(proc.exits, "the exit handler ends nothing itself").toEqual([]);
   });
 });
+
+describe("Prepare: the listings' lockstep, one field of one file at a time (QA, Story 42.8, decision #103, Rule #59)", () => {
+  const PLUGIN = "packages/client-config/skills-pack/.claude-plugin/plugin.json";
+  const MARKETPLACE = ".claude-plugin/marketplace.json";
+  const FIELDS: Array<[string, string, (listing: any) => void, RegExp]> = [
+    ["plugin.json version", PLUGIN, (listing) => (listing.version = "0.9.0"), /plugin\.json is at "0\.9\.0", not the shared version 1\.0\.0\. Run pnpm run version/],
+    ["the marketplace ref", MARKETPLACE, (listing) => (listing.plugins[0].source.ref = "v0.9.0"), /marketplace\.json pins the ref "v0\.9\.0", not the release tag v1\.0\.0\. Run pnpm run version/],
+    ["the marketplace ref pinned to the branch", MARKETPLACE, (listing) => (listing.plugins[0].source.ref = "main"), /marketplace\.json pins the ref "main", not the release tag v1\.0\.0/],
+    ...SERVER_DIRS.flatMap((dir): Array<[string, string, (listing: any) => void, RegExp]> => [
+      [`${dir} server.json version`, `packages/${dir}/server.json`, (listing) => (listing.version = "0.9.0"), new RegExp(`packages/${dir}/server\\.json version is "0\\.9\\.0", not the shared version 1\\.0\\.0`)],
+      [`${dir} server.json packages[0].version`, `packages/${dir}/server.json`, (listing) => (listing.packages[0].version = "0.9.0"), new RegExp(`packages/${dir}/server\\.json packages\\[0\\]\\.version is "0\\.9\\.0", not the shared version 1\\.0\\.0`)],
+    ]),
+  ];
+
+  it("the control: a repository whose listings are all at the shared version prepares (exit 0, docker is used)", async () => {
+    const world = newWorld({ version: "1.0.0" });
+    expect(await world.run()).toBe(0);
+    expect(world.lines.join("\n")).not.toContain("not the shared version");
+    expect(world.docker.calls().length, "the gates went on to docker, so the refusals below are the listing rows' own").toBeGreaterThan(0);
+  });
+
+  it.each(FIELDS.map((field) => [field[0], field] as const))("%s: exit 1 in a tag run and in a dry run, naming the file and the field, before docker", async (_label, [, file, edit, expected]) => {
+    for (const ref of ["refs/tags/v1.0.0", "refs/heads/release-dry-run/x"]) {
+      const world = newWorld({ version: "1.0.0" });
+      const target = path.join(world.repo, ...file.split("/"));
+      const listing = JSON.parse(readFileSync(target, "utf8"));
+      edit(listing);
+      writeFileSync(target, `${JSON.stringify(listing, null, 2)}\n`);
+      expect(await world.run({ env: { GITHUB_REF: ref } }), ref).toBe(1);
+      const text = world.lines.join("\n");
+      expect(text, ref).toMatch(expected);
+      expect(text.match(/not the (shared version|release tag)/g) ?? [], `${ref}: the drifted field is the only problem`).toHaveLength(1);
+      expect(world.docker.calls(), ref).toEqual([]);
+    }
+  });
+});
