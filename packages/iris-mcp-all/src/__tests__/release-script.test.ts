@@ -198,12 +198,17 @@ function copyScriptInto(root: string): string {
   mkdirSync(path.join(root, "scripts", "lib"), { recursive: true });
   copyFileSync(RELEASE_SCRIPT, path.join(root, "scripts", "release.mjs"));
   copyFileSync(path.join(REPO_ROOT, "scripts", "lib", "script-process.mjs"), path.join(root, "scripts", "lib", "script-process.mjs"));
-  // The process-level rows are about npm and the two stores: the copy's IPM and MCP Registry channels are off (their rows run in process, with their own stand-ins).
+  // The process-level rows are about npm and the two stores: the copy's IPM and MCP Registry channels are off (their rows run in process, with their own stand-ins),
+  // and its Marketplace channel is on, though the shipped default is off until the owner's publisher exists (DW-719; pinned in process by "Publish channels").
   let core = readFileSync(path.join(REPO_ROOT, "scripts", "lib", "release-core.mjs"), "utf8");
-  for (const [id, declared] of [["ipm", "enabled: true, manual: true"], ["mcp-registry", "enabled: true"]]) {
-    const enabled = `Object.freeze({ id: '${id}', ${declared} })`;
-    if (!core.includes(enabled)) throw new Error(`release-core.mjs no longer declares the channel ${id} as ${enabled}`);
-    core = core.replace(enabled, `Object.freeze({ id: '${id}', enabled: false, enabledBy: 'the process-level rows' })`);
+  for (const [id, declared, replacement] of [
+    ["ipm", "enabled: true, manual: true", "enabled: false, enabledBy: 'the process-level rows'"],
+    ["mcp-registry", "enabled: true", "enabled: false, enabledBy: 'the process-level rows'"],
+    ["vscode-marketplace", "enabled: false, enabledBy: 'owner: publisher needs a verified domain (DW-719)'", "enabled: true"],
+  ]) {
+    const shipped = `Object.freeze({ id: '${id}', ${declared} })`;
+    if (!core.includes(shipped)) throw new Error(`release-core.mjs no longer declares the channel ${id} as ${shipped}`);
+    core = core.replace(shipped, `Object.freeze({ id: '${id}', ${replacement} })`);
   }
   writeFileSync(path.join(root, "scripts", "lib", "release-core.mjs"), core);
   return path.join(root, "scripts", "release.mjs");
@@ -1385,9 +1390,9 @@ describe("Publish channels (AC 42.5.3)", () => {
     expect(world.lines.join("\n")).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: not attempted");
   });
 
-  it("every channel is enabled by default (Story 42.8): npm, the two stores, IPM and the MCP Registry, and none names a story that enables it", () => {
-    expect(RELEASE_CHANNELS.filter((channel: { enabled: boolean }) => channel.enabled).map((channel: { id: string }) => channel.id)).toEqual(["npm", "vscode-marketplace", "open-vsx", "ipm", "mcp-registry"]);
-    expect(RELEASE_CHANNELS.filter((channel: { enabled: boolean }) => !channel.enabled)).toEqual([]);
+  it("every channel but the VS Code Marketplace is enabled by default (Story 42.8; DW-719): the Marketplace is off until the owner's publisher exists, and names why", () => {
+    expect(RELEASE_CHANNELS.filter((channel: { enabled: boolean }) => channel.enabled).map((channel: { id: string }) => channel.id)).toEqual(["npm", "open-vsx", "ipm", "mcp-registry"]);
+    expect(RELEASE_CHANNELS.filter((channel: { enabled: boolean }) => !channel.enabled)).toEqual([{ id: "vscode-marketplace", enabled: false, enabledBy: "owner: publisher needs a verified domain (DW-719)" }]);
   });
 });
 
@@ -3038,7 +3043,9 @@ describe("The MCP Registry channel (Story 42.8; AD-29)", () => {
     it("every credential reaches only its own children across npm, both stores, IPM (which runs no child) and the MCP Registry, and each site that may hold one does", async () => {
       const world = registryWorld();
       const env = { NPM_TOKEN: TOKEN, OVSX_PAT, VSCE_PAT };
-      expect(await world.runRegistry({ channels: SCRIPT_DEFAULT_CHANNELS, env })).toBe(0);
+      // All five channels on (the shipped Marketplace is off until DW-719), so that vsce's credential plumbing is still swept.
+      const everyChannel = RELEASE_CHANNELS.map(({ id, manual }: { id: string; manual?: boolean }) => ({ id, enabled: true, ...(manual === true ? { manual } : {}) }));
+      expect(await world.runRegistry({ channels: everyChannel, env })).toBe(0);
       const calls = everyCall(world);
       const isPublish = (call: StandInCall): boolean => call.argv[0] === "publish";
       const oidcSite = (call: StandInCall): boolean => (["npm", "vsce", "ovsx"].includes(call.tool) && isPublish(call)) || (call.tool === "mcp-publisher" && call.argv[0] === "login");
@@ -3087,6 +3094,26 @@ describe("The MCP Registry channel (Story 42.8; AD-29)", () => {
         expect(environment.includes(OIDC_TOKEN), `${label(call)} holding the OIDC token`).toBe(oidcAllowed);
         expect(call.argv[0] === "publish" && call.tool !== "npm", `${label(call)}: no store or registry publish in a rehearsal`).toBe(false);
         expect(call.tool, `${label(call)}: the IPM dry step runs no git`).not.toBe("git");
+      }
+    });
+
+    it("the shipped default (DW-719): the Marketplace is `skipped: not enabled (…)` with no vsce child, and Open VSX, IPM and the MCP Registry still run after it, in a release and a rehearsal", async () => {
+      for (const dryRun of [false, true]) {
+        const world = registryWorld();
+        expect(await world.runRegistry({ dryRun, channels: SCRIPT_DEFAULT_CHANNELS }), `dryRun ${dryRun}`).toBe(0);
+        const report = reportOf(world);
+        expect(report, `dryRun ${dryRun}`).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: skipped: not enabled (owner: publisher needs a verified domain (DW-719))");
+        expect(world.standIns.calls("vsce"), `dryRun ${dryRun}: no vsce child`).toEqual([]);
+        expect(report, `dryRun ${dryRun}`).not.toMatch(/vscode-marketplace\n {2}\S+: (published|failed|not attempted)/);
+        expect(report, `dryRun ${dryRun}`).toMatch(/open-vsx\n {2}iris-mcp-launcher@1\.0\.0: (published|ready)/);
+        expect(report, `dryRun ${dryRun}`).toMatch(/ipm\n {2}iris-execute-mcp-v2@1\.0\.0: (manual step|ready)/);
+        expect(report, `dryRun ${dryRun}`).not.toContain("not attempted");
+        if (dryRun) {
+          expect(report).toContain("mcp-registry: ready (would publish 5 servers)");
+        } else {
+          expect(world.standIns.calls("ovsx").filter((call) => call.argv[0] === "publish")).toHaveLength(1);
+          expect(world.publisherCalls().filter((call) => call.argv[0] === "publish")).toHaveLength(5);
+        }
       }
     });
 

@@ -638,7 +638,7 @@ describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
     expect(manifest["mode"]).toBe("dry-run");
     expect(manifest["channels"].map((channel: { id: string; enabled: boolean }) => [channel.id, channel.enabled])).toEqual([
       ["npm", true],
-      ["vscode-marketplace", true],
+      ["vscode-marketplace", false],
       ["open-vsx", true],
       ["ipm", true],
       ["mcp-registry", true],

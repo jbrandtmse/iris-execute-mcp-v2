@@ -34,7 +34,8 @@ export const NPM_PUBLISH_ORDER = Object.freeze([
  */
 export const RELEASE_CHANNELS = Object.freeze([
   Object.freeze({ id: 'npm', enabled: true }),
-  Object.freeze({ id: 'vscode-marketplace', enabled: true }),
+  // DW-719: off until the owner can register the publisher, which needs a verified domain (owner steps O1 and O2).
+  Object.freeze({ id: 'vscode-marketplace', enabled: false, enabledBy: 'owner: publisher needs a verified domain (DW-719)' }),
   Object.freeze({ id: 'open-vsx', enabled: true }),
   Object.freeze({ id: 'ipm', enabled: true, manual: true }),
   Object.freeze({ id: 'mcp-registry', enabled: true }),

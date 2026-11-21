@@ -15,7 +15,8 @@ How to point any MCP client at the IRIS MCP Server Suite, plus the two credentia
 > [VS Code extension](../../extensions/iris-mcp-launcher/README.md#mcp-clients-view) — client roster,
 > per-server toggles, diff preview, backup restore and doctor, all through the identical CLI code path.
 > It helps every client, not just Copilot: use it from VS Code to wire up Claude Code, Cursor, Cline, and
-> the rest. Install it from the Visual Studio Marketplace or Open VSX (from 1.1.0); see [the extension's README](../../extensions/iris-mcp-launcher/README.md).
+> the rest. Install it from the vsix on the repository's GitHub Releases (from 1.1.0; it is not on the Visual Studio Marketplace or
+> Open VSX yet); see [the extension's README](../../extensions/iris-mcp-launcher/README.md#installing).
 
 Detailed per-client guides: **[Claude Code](claude-code.md)** · **[Claude Desktop](claude-desktop.md)** · **[Cursor](cursor.md)**. Everything else is covered below.
 

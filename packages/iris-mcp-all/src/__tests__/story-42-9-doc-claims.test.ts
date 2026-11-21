@@ -169,7 +169,7 @@ describe("Story 42.9: the plugin and the extension are documented from 1.1.0 (DW
   it("the root README install table names the plugin and the extension from 1.1.0 and the clients CLI as the 1.0.x route", () => {
     const readme = squash(read("README.md"));
     expect(readme).toContain("| **Claude Code** | The plugin, from 1.1.0: `/plugin marketplace add jbrandtmse/iris-execute-mcp-v2`, then `/plugin install iris-mcp@iris-mcp`.");
-    expect(readme).toContain("| **VS Code** (GitHub Copilot) | The IRIS MCP Launcher extension, from 1.1.0: `iris-mcp.iris-mcp-launcher` on the Visual Studio Marketplace or Open VSX.");
+    expect(readme).toContain("| **VS Code** (GitHub Copilot) | The IRIS MCP Launcher extension, from 1.1.0: `iris-mcp-launcher-<version>.vsix` from the repository's [GitHub Releases](https://github.com/jbrandtmse/iris-execute-mcp-v2/releases); it is not on the Visual Studio Marketplace or Open VSX yet.");
     expect(readme).toContain("| **Every other client** | `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply --client <id> --servers iris-dev-mcp`.");
     expect(readme).toContain("On 1.0.x the `iris-mcp-clients` command is the route for every client, Claude Code and VS Code included.");
     expect(readme).toContain("#### Claude Code: the plugin (from 1.1.0)");
@@ -177,7 +177,7 @@ describe("Story 42.9: the plugin and the extension are documented from 1.1.0 (DW
   });
 
   it("the extension README and the IPM subsection say from 1.1.0", () => {
-    expect(squash(read("extensions/iris-mcp-launcher/README.md").replace(/^> ?/gm, ""))).toContain("**Install it from a store (from 1.1.0).** From 1.1.0 the extension is published on the");
+    expect(squash(read("extensions/iris-mcp-launcher/README.md").replace(/^> ?/gm, ""))).toContain("**Install it from a GitHub Release (from 1.1.0).** From 1.1.0 each release attaches the extension");
     expect(squash(read("README.md"))).toContain("The IPM package is published to the IPM registry from 1.1.0, the first release with the IPM channel");
   });
 });

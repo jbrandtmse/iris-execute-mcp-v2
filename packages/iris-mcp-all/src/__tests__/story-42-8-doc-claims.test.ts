@@ -56,12 +56,13 @@ describe("the Releasing table (Rules #30, #51: the default state is derived from
     CHANNEL_ROWS.forEach((row, index) => expect(row.channel, `row ${index}`).toContain(expected[index] as string));
   });
 
-  it("each row's default state is the code's: `manual step` for the channel that has `manual: true`, enabled when the channel is, and none says `skipped`", () => {
+  it("each row's default state is the code's: `manual step` for the channel that has `manual: true`, enabled when the channel is, and only a disabled row says `skipped` (its own skip text)", () => {
     RELEASE_CHANNELS.forEach((channel: { id: string; enabled: boolean; manual?: boolean }, index: number) => {
       const state = CHANNEL_ROWS[index]?.state as string;
       if (channel.manual === true) expect(state, channel.id).toBe("manual step");
       else expect(state.startsWith(channel.enabled ? "enabled" : "disabled"), `${channel.id}: ${state}`).toBe(true);
-      expect(state).not.toContain("skipped");
+      if (channel.enabled) expect(state).not.toContain("skipped");
+      else expect(state, channel.id).toBe(`disabled: \`skipped: not enabled (${(channel as { enabledBy?: string }).enabledBy})\``);
     });
     expect(RELEASE_CHANNELS.filter((channel: { manual?: boolean }) => channel.manual === true).map((channel: { id: string }) => channel.id)).toEqual(["ipm"]);
   });
@@ -203,6 +204,10 @@ describe("the CHANGELOG and the changeset (Rule #43)", () => {
     expect(section).toContain("`1e62c5ad5bf7` (141 keys)");
     expect(section).toContain('zpm "install iris-execute-mcp-v2"');
     expect(section).toContain("Use it only where the servers cannot install those classes themselves");
+    // DW-719: the extension ships as a vsix on the GitHub Release, and no line of the section says it is on a store.
+    expect(section).toContain("attached to the `v1.1.0` GitHub Release as `iris-mcp-launcher-1.1.0.vsix`");
+    expect(section).toContain("It is not on the Visual Studio Marketplace or Open VSX yet");
+    expect(section).not.toMatch(/on the stores|is published under the publisher `iris-mcp` to the VS Code Marketplace/);
   });
 
   it("the amendment's CHANGELOG section says what moved and what did not: the tree, the manual step, verify, the removals, and that BOOTSTRAP_VERSION stays (decision #122)", () => {

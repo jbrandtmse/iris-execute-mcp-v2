@@ -5,9 +5,9 @@ Model Context Protocol server registry, resolving IRIS connection credentials fr
 [InterSystems Server Manager](https://marketplace.visualstudio.com/items?itemName=intersystems-community.servermanager)
 extension at spawn time — **zero manual config, no password ever written to a file.**
 
-> **Install it from a store (from 1.1.0).** From 1.1.0 the extension is published on the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=iris-mcp.iris-mcp-launcher)
-> and on [Open VSX](https://open-vsx.org/extension/iris-mcp/iris-mcp-launcher) as `iris-mcp.iris-mcp-launcher` (see
-> [Installing](#installing)). This is an independent community project. It is not made, endorsed or supported by
+> **Install it from a GitHub Release (from 1.1.0).** From 1.1.0 each release attaches the extension, `iris-mcp.iris-mcp-launcher`,
+> as `iris-mcp-launcher-<version>.vsix` to its entry on the repository's [GitHub Releases](https://github.com/jbrandtmse/iris-execute-mcp-v2/releases) page (see
+> [Installing](#installing)). It is not on the Visual Studio Marketplace or Open VSX yet. This is an independent community project. It is not made, endorsed or supported by
 > InterSystems.
 >
 > This extension is an optional, standalone deliverable of the IRIS MCP Server Suite (Epic 31, Story 31.4). It lives at `extensions/iris-mcp-launcher/` in the suite's repository, deliberately
@@ -62,15 +62,18 @@ Code settings, `globalState`, `workspaceState`, or any log/output channel — se
 
 ## Installing
 
-From 1.1.0, install it from the store your editor uses, then reload the window:
+From 1.1.0, install it from the vsix that each release attaches, then reload the window. The extension is not on the
+Visual Studio Marketplace or Open VSX yet; both stores come later, once the publisher is set up.
 
-- **Visual Studio Marketplace** (VS Code): the Extensions view, search for `iris-mcp.iris-mcp-launcher` ("IRIS MCP
-  Launcher"), or `code --install-extension iris-mcp.iris-mcp-launcher`.
-- **Open VSX** (VSCodium, Cursor and other editors that use it): the same search in the Extensions view, or
-  `codium --install-extension iris-mcp.iris-mcp-launcher`.
+1. Download `iris-mcp-launcher-<version>.vsix` from the release's assets on the [GitHub Releases](https://github.com/jbrandtmse/iris-execute-mcp-v2/releases) page.
+2. In VS Code, run **Extensions: Install from VSIX…** from the command palette and pick the file, or run
+   `code --install-extension iris-mcp-launcher-<version>.vsix`. VSCodium and other VS Code-compatible editors install a
+   vsix the same way (`codium --install-extension iris-mcp-launcher-<version>.vsix`).
 
-Both stores carry the same version: the extension's version equals the version of the `@iris-mcp/*` packages it was
-released with. The InterSystems Server Manager extension is installed with it (`extensionDependencies`).
+Updates are manual until the stores are set up: install the next release's vsix the same way. The extension's version
+equals the version of the `@iris-mcp/*` packages it was released with. It declares the InterSystems Server Manager
+extension as a dependency (`extensionDependencies`); install that from your editor's extension store if the editor does
+not add it.
 
 ## Installing in development mode
 
@@ -400,8 +403,10 @@ injecting fakes shaped to the interfaces in `src/types.ts` — see `src/__tests_
 
 The extension is published only by the repository's release workflow, never by hand: see [Releasing](../../README.md#releasing)
 in the root README. In short: the extension's version equals the shared `@iris-mcp/*` version (`pnpm run version` stamps
-it and renames the `## [Unreleased]` heading of this CHANGELOG), and the release publishes the vsix built from the tagged
-commit to both stores under the publisher `iris-mcp`. Before each upload the script asks the store whether the version
+it and renames the `## [Unreleased]` heading of this CHANGELOG), and the release builds the vsix from the tagged commit.
+Until the stores are set up, the maintainer attaches that vsix to the tag's GitHub Release. The release can publish it to
+both stores under the publisher `iris-mcp`, but its Marketplace channel is off until the publisher is registered
+(DW-719), and Open VSX is skipped until its namespace exists. Before each upload the script asks the store whether the version
 is already there, so a rerun of the same tag changes nothing. The Marketplace uses trusted publishing (no secret), and
 Open VSX uses an access token for the first publish only. The package has `"private": true`, so `npm publish` can never
 send it to npm; `npm run package` only builds the vsix.
