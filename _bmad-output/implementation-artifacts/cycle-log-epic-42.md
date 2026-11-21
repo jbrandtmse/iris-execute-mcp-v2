@@ -197,3 +197,4 @@ TAB-separated: `<UTC>\t<Story|Epic>\t<stage>\t<metadata>`
 2026-11-21T04:04:18Z	Story 42.7	story_created	spawn_at=2026-11-21T03:45:22Z model=claude-opus-5-5 path=_bmad-output/implementation-artifacts/spec-42-7-vs-code-extension-publish.md build_status=ready-for-dev epic_context=reused
 2026-11-21T04:04:18Z	Story 42.7	spec_validated	owned_ledger=DW-389,DW-532,DW-663 addressed=3 declined=0 orchestrator_decisions=91-99 spine_updated=AD-29(pins,versions,channels),stack,deferred decision_dependency=store_accounts(owner;blocks_lead_phases_only) waits_on_npm_1.0.0=lead_B1+phase_C model=claude-opus-5-5
 2026-11-21T04:04:18Z	Epic 42	spine_updated	ad=AD-29,stack,deferred reason=spec_gate_decisions_91-99 by=lead story=42-7-vs-code-extension-publish lint=ok
+2026-11-21T04:04:20Z	Story 42.7	stage_spawned	stage=implement spawn_at=2026-11-21T04:04:20Z model=claude-sonnet-5-5 agent_name=42-7-vs-code-extension-publish-implement-1 cycle_iteration=1
