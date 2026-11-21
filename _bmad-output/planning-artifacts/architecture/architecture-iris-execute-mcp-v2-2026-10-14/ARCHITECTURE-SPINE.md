@@ -587,7 +587,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 - **Rule:**
   - **Versions.**
     - npm is the primary channel. Every `@iris-mcp/*` package shares one version through the Changesets `fixed` group, starting at `1.0.0`, with no prerelease tag.
-    - Until Story 42.6, changesets use `patch` or `minor`, and no story runs `changeset version` or publishes. Story 42.1 owns the mechanism that produces `1.0.0`.
+    - `1.0.0` was versioned in Story 42.6 (`pnpm run version -- --first-release`, the mechanism Story 42.1 built); later releases run `pnpm run version` on their changesets (decision #85).
   - **Pins and runtime.**
     - Every `npx` spec the suite writes, spawns or documents carries the pinned major (`@1`), taken from one exported constant, and a test finds any unpinned spec. This covers servers, the client-config CLI and the governance CLI. The constant lives in `@iris-mcp/client-config`. The VS Code extension, which has no runtime dependencies and no bundler, keeps one literal copy that a cross-package test pins equal to it (wave-8 decision #36).
     - Every published package declares `engines.node >=22.17.0` (decision #35), and `@types/node` is pinned to the floor major. The extension declares no `engines.node`; `engines.vscode` governs it.
@@ -608,6 +608,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - **The release workflow** *(Story 42.5, wave-8 decisions #75 to #81)*. `release.yml` runs `ci-gate`, `prepare`, `rehearse` and `publish`. Only `publish` holds the `release` environment, `id-token: write` and secrets, and only on a `v*` tag push; the dry run (a `release-dry-run/**` branch or a dispatch) cannot reach it. `prepare` runs every `prepublishOnly` once, armed on a seeded IRIS for Health throwaway, before anything is packed. Packing and uploading run no lifecycle script: pnpm packs and npm 11 uploads with provenance, in the order client-config, shared, admin, data, dev, interop, ops, all, stopping at the first failure.
     - **npm credentials.** The 1.0.0 publish uses a short-lived granular token, the `release` environment's `NPM_TOKEN` secret; then trusted publishing is bound to `release.yml` and `release` per package, and the token is deleted (decision #75, provisional until the Lead provisions it; the fallback is an interactive 2FA publish by the Lead, recorded as an exception).
     - **Channels.** npm, then the Marketplace, then Open VSX, then IPM, each enabled by its story (42.7, 42.8); `v1.0.0` is npm only (decision #77). IPM reaches the registry through the packaging repository `jbrandtmse/iris-execute-mcp-v2-ipm`, and the Open Exchange release press is a manual release step (decision #76).
+    - **Tags on `main` only** *(Story 42.6, the owner's ruling, decision #82)*. `ci-gate` refuses a tag run whose commit `main` does not contain (GitHub compare `main...<sha>` `identical` or `behind`; any other status or an unreadable answer refuses), before it waits for CI, so no approval is requested. There is no maintenance-branch allowance. `prepare` runs every root script whose name has a `check` or `validate` word, the same set as CI's root gates (DW-612). Every package ships its `CHANGELOG.md` (DW-665, decision #86). `release.mjs verify --version <v>` is the post-publish check.
     - **A bad release** is fixed forward; a harmful version is `npm deprecate`d, never unpublished. Vulnerabilities are reported through GitHub private vulnerability reporting (`SECURITY.md`, no email address published) (decisions #78 and #79).
 
 ### AD-30 — client-config writes only what it owns [ADOPTED] (FR141, AC 41.6.2, Rule #58)
@@ -648,7 +649,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
 - **Rule:**
   - **Where the SDK is used.** Only inside `@iris-mcp/shared` (AD-2, AD-3). Two source files import it: `server-base.ts` and its wire-compat helpers, `sdk-wire-compat.ts` (Story 43.1). A guard test pins that boundary.
   - **SDK v2.** From Epic 43, the framework runs on the TypeScript SDK v2 packages (`@modelcontextprotocol/server`, `client` and `core`), and `@modelcontextprotocol/sdk` v1 is removed. Epic 43 lands before Epic 42 publishes `1.0.0`.
-    - The v2 packages are pinned exactly, starting at 2.3.1 (published 2026-10-05, with SLSA provenance and no install scripts).
+    - The v2 packages are pinned exactly, starting at 2.3.1 (published 2026-10-05, with SLSA provenance and no install scripts); 2.4.0 since Story 42.6, which bundles fast-uri 3.1.8 (DW-637, decision #87).
     - The framework owns `tools/list`, `tools/call`, `prompts/get` and `resources/read`, installed through the public `setRequestHandler` from framework state, so the 2025-11-25 wire stays byte-identical. The SDK's own registration would change every tool's `$schema`, drop `execution` and reword the error texts (Story 43.1, wave-8 decision #1).
     - Tool-input validation runs inside the audited call path, so a schema-invalid call is audited (DW-579).
   - **Protocol revisions.**
@@ -749,7 +750,7 @@ Versions are the tested lockfile versions as of 2026-10-14. The code owns them a
 | IRIS CI images | `intersystems/iris-community:2026.2` and `:2026.1` (the bootstrap guard, `USER`; Community license keys expire, so the oldest leg uses the oldest tag whose key is still valid for months ahead: 2024.3 to 2025.2 had expired by 2026-10-22; 2025.3 passed the guard in CI run 39749804619 on 2026-10-22, but its key expires 2026-11-13, so Story 42.4 moved the leg to 2026.1, valid to 2027-03-27; every CI image is moved forward before its key expires, DW-686, wave-8 decisions #65 and #66), and `intersystems/irishealth-community:2026.2` (the armed rosters, integration suites, process gates and launcher live files, `HSCUSTOM`), each pinned by its manifest-list digest (Story 42.3, wave-8 decisions #56 and #60). The oldest green tag is the tested floor that Story 42.9 states |
 | TypeScript | 5.9.3 |
 | @modelcontextprotocol/sdk (v1) | Removed in Story 43.1; 1.29.0 is only the provenance of the frozen goldens |
-| @modelcontextprotocol/server (runtime, `@iris-mcp/shared` only) and client (tests: shared, dev, `iris-mcp-all`) | 2.3.1, pinned exactly (Story 43.1). `core` is not a direct dependency. The next bump waits for a release that pins fast-uri 3.1.8 or later (DW-637, Story 42.1) |
+| @modelcontextprotocol/server (runtime, `@iris-mcp/shared` only) and client (tests: shared, dev, `iris-mcp-all`) | 2.4.0, pinned exactly (Story 42.6: bundles fast-uri 3.1.8, closing DW-637; the wire is byte-identical to 2.3.1 on every frozen golden). 2.3.1 was pinned in Story 43.1. `core` is not a direct dependency |
 | MCP specification | 2025-11-25 and 2026-07-28, both served over stdio by one process (Story 43.2), with form elicitation for the confirmation gates on both (Story 43.3) |
 | zod | 4.3.6 |
 | pnpm | 9.15.0; the release packs with it and npm uploads, so no pnpm upgrade is needed (Story 42.5) |
@@ -837,6 +838,6 @@ ipm/                    # IPM module manifest (generated from Story 42.4)
 - **OAuth2 for the MCP servers themselves.** No hosted deployment needs it.
 - **Release operations.** These are decided in the stories named:
   - the version policies for the extension and the plugin (Stories 42.7 and 42.8); IPM's is settled, since the module version equals the npm version (AD-14);
-  - the bad-release policy, `SECURITY.md` and the first-publish route were decided in Story 42.5 (AD-29; the token route is provisional until the Lead provisions it).
+  - the bad-release policy, `SECURITY.md` and the first-publish route were decided in Story 42.5 (AD-29). The first publish (`1.0.0`, Story 42.6) uses the token route; trusted publishing is configured before the next release, and the token is revoked after the publish (decision #89).
 - **Development toolchain staleness** (Vitest 2, TypeScript 5.9, Turborepo, pnpm 9). Revisit at the Epic 42 gate. Story 42.5 recorded the release path's pins; no upgrade was needed.
 - **Declined on 2026-10-14:** G8, G17, G41, G45 and G47. The reasons are in the research gap register, and reopening one needs a Project Lead decision.
