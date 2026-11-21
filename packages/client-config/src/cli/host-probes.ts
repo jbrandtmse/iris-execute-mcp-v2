@@ -27,8 +27,12 @@
  * parses or edits a client MCP config — that is the engine's job alone.
  */
 
+import { realpathSync } from "node:fs";
+import path from "node:path";
+
 import { parse as parseJsonc, type ParseError } from "jsonc-parser";
 
+import { samePath } from "../home-guard.js";
 import type { AdapterPlatform } from "../types.js";
 import type { WriteFs } from "../write.js";
 
@@ -253,4 +257,23 @@ export function probeGovernanceFile(
     return { available: false, path: resolved, reason: `the governance file does not exist: ${resolved}` };
   }
   return { available: true, path: resolved, reason: `governance file found: ${resolved}` };
+}
+
+/** The real path of a directory, or its resolved form when it does not exist or cannot be resolved. */
+function realOrResolved(dir: string, platform: AdapterPlatform): string {
+  const p = platform === "win32" ? path.win32 : path.posix;
+  const resolved = p.resolve(dir);
+  try {
+    return realpathSync.native(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+/**
+ * Whether a project directory is the home directory (Story 42.9, DW-702): both go through the real path, so a symbolic link to the
+ * home directory counts, and the comparison is case-insensitive on darwin and win32.
+ */
+export function resolvesToHome(projectDir: string, homeDir: string, platform: AdapterPlatform): boolean {
+  return samePath(platform, realOrResolved(projectDir, platform), realOrResolved(homeDir, platform));
 }

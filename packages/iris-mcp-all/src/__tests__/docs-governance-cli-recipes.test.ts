@@ -41,7 +41,8 @@ const CLIENT_DOCS = [
 /** All five doc surfaces the story's docs task touched. */
 const ALL_SURFACES = [...CLIENT_DOCS, "README.md", "packages/shared/README.md"] as const;
 
-const CLI_BIN_PATH = "packages/shared/dist/cli/governance-cli.js";
+/** The command the docs give since Story 42.9: the published package through npx, the `-p` form naming the bin. */
+const CLI_COMMAND = "npx -y -p @iris-mcp/shared@1 iris-mcp-governance";
 
 function readDoc(rel: string): string {
   return readFileSync(resolve(root, rel), "utf-8");
@@ -81,20 +82,20 @@ describe("governance CLI recipes stay in sync across the client docs (Story 32.1
     expect([...seen]).toEqual(["C:\\governance\\iris-policy.json"]);
   });
 
-  it("each client recipe invokes the built CLI bin at its real dist path", () => {
+  it("each client recipe invokes the published CLI bin through npx, pinned to the major", () => {
     for (const rel of CLIENT_DOCS) {
-      expect(readDoc(rel), `${rel} references the built bin`).toContain(CLI_BIN_PATH);
+      expect(readDoc(rel), `${rel} references the published bin`).toContain(CLI_COMMAND);
     }
   });
 
-  it("the CLI bin path the docs advertise is the one package.json actually ships (doc-vs-manifest pin)", () => {
+  it("the package and bin the docs advertise are the ones package.json actually ships (doc-vs-manifest pin)", () => {
     const pkg = JSON.parse(readDoc("packages/shared/package.json")) as {
+      name?: string;
       bin?: Record<string, string>;
     };
     expect(pkg.bin?.["iris-mcp-governance"]).toBe(`./dist/cli/governance-cli.js`);
-    // The docs' path is packageRoot + the manifest's bin target — derived,
-    // not restated, so the two can never drift in opposite directions.
-    expect(CLI_BIN_PATH).toBe(`packages/shared/${pkg.bin!["iris-mcp-governance"]!.replace("./", "")}`);
+    // The docs' command is derived from the manifest's package name and bin key, so the two can never drift in opposite directions.
+    expect(CLI_COMMAND).toBe(`npx -y -p ${pkg.name}@1 ${Object.keys(pkg.bin ?? {}).find((key) => key === "iris-mcp-governance")}`);
   });
 
   it("the client docs' cross-link anchor resolves to a real heading in the root README", () => {

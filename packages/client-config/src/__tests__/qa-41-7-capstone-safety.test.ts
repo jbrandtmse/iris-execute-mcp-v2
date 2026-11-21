@@ -144,8 +144,8 @@ describe("Epic 41 capstone, blind spots closed: backups, the home directory and 
   });
 
   it("the rotation gives every one of the three plain shapes to at least one block route", () => {
-    expect(ROUTED).toHaveLength(16);
-    expect(BLOCK_LEGS).toHaveLength(14);
+    expect(ROUTED).toHaveLength(17);
+    expect(BLOCK_LEGS).toHaveLength(15);
     const used = new Set(BLOCK_LEGS.map((_, index) => PLAIN_SHAPES[index % PLAIN_SHAPES.length]));
     expect([...used].sort()).toEqual([...PLAIN_SHAPES].sort());
     for (const shape of PLAIN_SHAPES) {

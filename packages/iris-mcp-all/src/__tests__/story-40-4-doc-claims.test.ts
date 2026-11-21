@@ -213,11 +213,13 @@ describe("Story 40.4: the root README has the Test coverage section", () => {
     expect(section, "the section makes no claim about the size of a preset window").not.toMatch(/8- to 15-tool|8 to 15/);
   });
 
-  it("the prompts row names the coverage step, and the payload table is re-measured at this story", () => {
+  it("the prompts row names the coverage step, and the payload table was re-measured at this story or a later one (the dev row is pinned by story-42-9-doc-claims.test.ts)", () => {
     const row = lineStarting(rootReadme, "| `@iris-mcp/dev` | `deploy-and-test-class`");
     expect(row).toContain("and, only when the user asks, measures their line coverage (`iris_test_coverage`; see [Test coverage](#test-coverage-epic-40))");
-    expect(squash(rootReadme)).toContain("Last re-measured at Story 40.4 (`pnpm measure:tools-payload` on freshly built dists");
-    expect(lineStarting(rootReadme, "| @iris-mcp/dev | 33 /")).toBe("| @iris-mcp/dev | 33 / 94,932 / ~23,733 | 15 / 44,355 / ~11,089 | 33 / 94,932 / ~23,733 |");
+    const match = /Last re-measured at Story (\d+)\.(\d+) \(`pnpm measure:tools-payload` on freshly built dists/.exec(squash(rootReadme));
+    expect(match, "the re-measured sentence").not.toBeNull();
+    expect(Number(match?.[1]) > 40 || (Number(match?.[1]) === 40 && Number(match?.[2]) >= 4)).toBe(true);
+    expect(lineStarting(rootReadme, "| @iris-mcp/dev | 33 /")).toMatch(/^\| @iris-mcp\/dev \| 33 \/ [\d,]+ \/ ~[\d,]+ \| 15 \/ [\d,]+ \/ ~[\d,]+ \| 33 \/ [\d,]+ \/ ~[\d,]+ \|$/);
   });
 });
 

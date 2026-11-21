@@ -8,8 +8,9 @@
 //   - It never spawns a process, reads the environment of the process or touches the file system. Every decision takes its facts as
 //     arguments and returns data; every builder returns text or an argv array and never runs it.
 //   - Error text has the form `<what happened>. <what to do>.`
-//   - The only strings that form a publish verb are the argv builders `npmPublishArgv`, `vsceArgv`, `ovsxArgv` and `ipmPushPlan`
-//     (the release-workflow test finds a publish verb anywhere else in the repository's workflows and package scripts).
+//   - The only strings that form a publish verb are the argv builders `npmPublishArgv`, `vsceArgv`, `ovsxArgv` and `mcpPublisherArgv`
+//     (the release-workflow test finds a publish verb anywhere else in the repository's workflows and package scripts). The IPM
+//     channel has no upload: the owner presses Release on the Open Exchange listing, and the run reports it as a manual step.
 
 import { isDeepStrictEqual } from 'node:util';
 
@@ -27,23 +28,62 @@ export const NPM_PUBLISH_ORDER = Object.freeze([
   '@iris-mcp/all',
 ]);
 
-/** The channels a release publishes to, in order. A channel that is not enabled prints `skipped: not enabled (<enabledBy>)`. */
+/**
+ * The channels a release publishes to, in order. A channel that is not enabled prints `skipped: not enabled (<enabledBy>)`. A channel
+ * with `manual: true` has no automated upload: the run reports what the owner does by hand (decision #122).
+ */
 export const RELEASE_CHANNELS = Object.freeze([
   Object.freeze({ id: 'npm', enabled: true }),
-  Object.freeze({ id: 'vscode-marketplace', enabled: false, enabledBy: 'Story 42.7' }),
-  Object.freeze({ id: 'open-vsx', enabled: false, enabledBy: 'Story 42.7' }),
-  Object.freeze({ id: 'ipm', enabled: false, enabledBy: 'Story 42.8' }),
+  Object.freeze({ id: 'vscode-marketplace', enabled: true }),
+  Object.freeze({ id: 'open-vsx', enabled: true }),
+  Object.freeze({ id: 'ipm', enabled: true, manual: true }),
+  Object.freeze({ id: 'mcp-registry', enabled: true }),
 ]);
 
 /** The GitHub environment that holds the release's secrets, and the one tag rule that may deploy to it. */
 export const RELEASE_ENVIRONMENT = 'release';
 export const RELEASE_TAG_PATTERN = 'v*';
 
-/** The packaging repository the IPM registry reads (decision #76), its branch, and the registry's listing of the package. */
-export const IPM_DIST_REPOSITORY = 'jbrandtmse/iris-execute-mcp-v2-ipm';
-export const IPM_DIST_BRANCH = 'master';
+/**
+ * The IPM module, the registry's listing of it, and where it is published from (decision #122): the root `module.xml` of this
+ * repository, through the existing Open Exchange listing, whose Release the owner presses.
+ */
 export const IPM_MODULE = 'iris-execute-mcp-v2';
 export const IPM_REGISTRY_PACKAGE_URL = `https://pm.community.intersystems.com/packages/${IPM_MODULE}`;
+export const IPM_SOURCE_REPOSITORY = 'jbrandtmse/iris-execute-mcp-v2';
+export const OPEN_EXCHANGE_LISTING_NAME = 'IRIS-MCP-Server-Suite-2';
+export const OPEN_EXCHANGE_LISTING_URL = `https://openexchange.intersystems.com/package/${OPEN_EXCHANGE_LISTING_NAME}`;
+
+/** The root manifest and the stamped guard, relative to the repository root: the tree `gen:ipm` writes (`scripts/lib/ipm-tree.mjs`; a test holds them equal). */
+export const IPM_MANIFEST_RELATIVE = 'module.xml';
+export const IPM_TREE_GUARD_RELATIVE = 'preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls';
+
+/** The MCP Registry (in preview), and the pinned publisher CLI the release downloads, verifies by sha256 and runs (decision #110). */
+export const MCP_REGISTRY_BASE = 'https://registry.modelcontextprotocol.io';
+export const MCP_PUBLISHER = Object.freeze({
+  version: 'v1.8.8',
+  asset: 'mcp-publisher_linux_amd64.tar.gz',
+  sha256: '09f1fa70ee146b640584274a1a6b2b8a0310b05d4321fa9224e6df6a016d67f4',
+});
+
+/** The URL the pinned publisher is downloaded from. */
+export const mcpPublisherUrl = (publisher = MCP_PUBLISHER) => `https://github.com/modelcontextprotocol/registry/releases/download/${publisher.version}/${publisher.asset}`;
+
+/**
+ * The files that embed the shared version besides the packages (lockstep, decision #103), relative to the repository root: the plugin's
+ * manifest in the pack, the marketplace, and the `server.json` directory of each server package, in release order. A test holds them equal
+ * to the generator's (`scripts/lib/listings.mjs`, `scripts/lib/skills-pack.mjs`).
+ */
+export const PLUGIN_MANIFEST_RELATIVE = 'packages/client-config/skills-pack/.claude-plugin/plugin.json';
+export const MARKETPLACE_RELATIVE = '.claude-plugin/marketplace.json';
+export const SERVER_JSON_DIRS = Object.freeze(['iris-admin-mcp', 'iris-data-mcp', 'iris-dev-mcp', 'iris-interop-mcp', 'iris-ops-mcp']);
+
+/** The plugin's name in the marketplace, whose `ref` must be `v<version>`. */
+export const PLUGIN_ENTRY_NAME = 'iris-mcp';
+
+/** How long the registry channel waits for npm to serve a version the registry will check, and how often it asks. */
+export const NPM_VISIBLE_TIMEOUT_MS = 300_000;
+export const NPM_VISIBLE_POLL_MS = 10_000;
 
 /** The branch a release tag must be on (decision #82): there is no maintenance-branch allowance. */
 export const RELEASE_BRANCH = 'main';
@@ -68,6 +108,12 @@ export const CI_WORKFLOW_PATH = '.github/workflows/ci.yml';
 /** The extension's placeholder publisher: a channel that still carries it is not ready. */
 export const PLACEHOLDER_PUBLISHER = 'TBD-at-publish-time';
 
+/** The extension's changelog, whose first `## [` heading must name the release version. */
+export const EXTENSION_CHANGELOG_PATH = 'extensions/iris-mcp-launcher/CHANGELOG.md';
+
+/** What a CLI prints (after its own prefix) when `--skip-duplicate` found the version already on the store. */
+const SKIPPED_DUPLICATE_SUFFIX = 'is already published. Skipping publish.';
+
 /** The statuses a release report uses. */
 export const STATUS = Object.freeze({
   published: 'published',
@@ -79,7 +125,18 @@ export const STATUS = Object.freeze({
   wouldBeAlreadyPublished: 'would be already published',
   ready: 'ready',
   notReady: 'not ready',
+  manualStep: 'manual step',
 });
+
+/**
+ * What a Marketplace `ready` does NOT say (DW-705): the public Marketplace has no read that tells an absent publisher from one with no
+ * extensions yet (a new publisher answers 404 with 0 extensions too), and none that shows a trusted-publishing policy, so the rehearsal
+ * never checks either. Appended to the Marketplace's `would publish` detail so nobody reads `ready` as "the publisher exists".
+ *
+ * @param {string} publisher
+ */
+export const marketplaceUncheckedNote = (publisher) =>
+  `publisher not checked: the Marketplace has no public publisher lookup, so the owner confirms the publisher ${publisher} (step O1) and its trusted-publishing policy (step O2)`;
 
 const SEMVER = /^\d+\.\d+\.\d+$/;
 
@@ -429,58 +486,151 @@ export function npmUserconfig(token) {
   return `//registry.npmjs.org/:_authToken=${text}\n`;
 }
 
-/** The `vsce` arguments that publish a prebuilt vsix and tolerate a version that is already there. */
+/** The `vsce` arguments that publish a prebuilt vsix with trusted publishing (OIDC) and tolerate a version that is already there. */
 export function vsceArgv(vsix) {
-  return ['publish', '--packagePath', vsix, '--skip-duplicate'];
+  return ['publish', '--packagePath', vsix, '--skip-duplicate', '--oidc'];
 }
-
-/** The `ovsx` arguments that publish a prebuilt vsix and tolerate a version that is already there. */
-export function ovsxArgv(vsix) {
-  return ['publish', vsix, '--skip-duplicate'];
-}
-
-/** The git identity of the commit the IPM channel makes. */
-const GIT_IDENTITY = Object.freeze(['-c', 'user.name=github-actions[bot]', '-c', 'user.email=41898282+github-actions[bot]@users.noreply.github.com']);
 
 /**
- * The git steps that put the staged IPM tree on the packaging repository's `master` and tag it, with no force, in one atomic push.
- * `tree` is the staged directory; `clone` is the working copy the steps run in. An existing tag whose tree equals the staged one is
- * "already published". `lsRemoteArgv` reads the repository's `HEAD` and its symref, whose answer {@link ipmDefaultBranch} reads.
+ * The `ovsx` arguments that publish a prebuilt vsix and tolerate a version that is already there. With a token (`OVSX_PAT`, which `ovsx`
+ * reads from its environment, never from argv) the token authenticates; without one the publish asks for trusted publishing.
  *
- * @param {string} tree
+ * @param {string} vsix
+ * @param {{ token?: boolean }} [options]
+ */
+export function ovsxArgv(vsix, { token = false } = {}) {
+  return ['publish', vsix, '--skip-duplicate', ...(token ? [] : ['--trusted-publishing'])];
+}
+
+/**
+ * The `mcp-publisher` arguments of one verb: `login github-oidc` (no secret: the job's OIDC token), `validate <file>` and `publish <file>`.
+ *
+ * @param {'login' | 'validate' | 'publish'} verb
+ * @param {string} [file] - The `server.json`, for `validate` and `publish`.
+ * @returns {string[]}
+ */
+export function mcpPublisherArgv(verb, file) {
+  if (verb === 'login') return ['login', 'github-oidc'];
+  if (verb === 'validate' || verb === 'publish') {
+    if (typeof file !== 'string' || file === '') throw new Error(`mcp-publisher ${verb} needs the server.json to ${verb}. Pass its path.`);
+    return [verb, file];
+  }
+  throw new Error(`${JSON.stringify(verb)} is not an mcp-publisher verb the release runs. Use login, validate or publish.`);
+}
+
+/** The read-only URL that tells whether the MCP Registry holds `name@version`: 200 with the server, or 404. */
+export function registryLookupUrl(name, version) {
+  return `${MCP_REGISTRY_BASE}/v0.1/servers/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}`;
+}
+
+/**
+ * What the MCP Registry's answer to {@link registryLookupUrl} means (the sibling of {@link storeOutcome}). `published` needs the registry's own
+ * evidence: a 200 with a JSON body whose `server.name` and `server.version` are the ones asked for. A 404 is `absent` (the release then
+ * publishes, and a fresh lookup judges a failed publish). Anything else is `unknown`, which stops the registry channel: another status, no
+ * status (the request failed or stalled), or a 200 that is not the registry's answer, because reading that as `published` would skip a
+ * publish and exit 0. Captured 2026-11-21 (read-only GETs): `io.github.upstash/context7@4.7.3` answered 200 `{"server":{...},"_meta":{...}}`;
+ * an unknown version and `io.github.jbrandtmse/iris-dev-mcp@1.0.0` answered 404 `{"title":"Not Found","status":404,"detail":"Server not found"}`.
+ *
+ * @param {{ status?: number, contentType?: string | null, body?: unknown }} answer `body` is the parsed JSON of a 200
+ * @param {{ name: string, version: string }} expected
+ * @returns {{ outcome: 'published' | 'absent' | 'unknown', why?: string }}
+ */
+export function registryOutcome(answer, expected) {
+  const { status } = answer;
+  if (status === 404) return { outcome: 'absent' };
+  if (status !== 200) return { outcome: 'unknown', why: status === undefined ? 'no answer' : `HTTP ${status}` };
+  const type = String(answer.contentType ?? '').trim();
+  const notTheRegistry = (what) => ({ outcome: 'unknown', why: `HTTP 200, but ${what}, so it is not the registry's answer` });
+  if (!/^application\/json\s*(?:;|$)/i.test(type)) return notTheRegistry(`the answer is ${type === '' ? 'untyped' : type}, not JSON`);
+  const server = /** @type {Record<string, any> | null | undefined} */ (answer.body)?.server;
+  const named = server !== null && typeof server === 'object' && server.name === expected.name && server.version === expected.version;
+  return named ? { outcome: 'published' } : notTheRegistry(`its JSON does not name ${expected.name}@${expected.version}`);
+}
+
+/** The read-only URL that tells whether npm serves `name@version` (the MCP Registry refuses a version npm does not serve yet): 200 or 404. */
+export function npmVersionUrl(name, version) {
+  return `https://registry.npmjs.org/${name.replace('/', '%2F')}/${encodeURIComponent(version)}`;
+}
+
+/** The Open VSX URL of a namespace: 200 when it exists, 404 when it does not. */
+export function openVsxNamespaceUrl(publisher) {
+  return `https://open-vsx.org/api/${encodeURIComponent(publisher)}`;
+}
+
+/**
+ * The read-only URL that tells whether a store holds `publisher.name@version`. Open VSX answers its metadata (200, or 404). The Marketplace
+ * answers the vsix itself, so the request asks for one byte ({@link storeLookupHeaders}); its HEAD answers 405.
+ *
+ * @param {'vscode-marketplace' | 'open-vsx'} store
+ * @param {string} publisher
+ * @param {string} name
  * @param {string} version
- * @param {string} sha
- * @param {{ url: string, clone: string }} target
  */
-export function ipmPushPlan(tree, version, sha, { url, clone }) {
-  const tag = `v${version}`;
-  return {
-    tree,
-    clone,
-    tag,
-    branch: IPM_DIST_BRANCH,
-    message: `${IPM_MODULE} ${version} from ${sha}`,
-    cloneArgv: ['clone', '--quiet', url, clone],
-    checkoutArgv: ['checkout', '--quiet', '-B', IPM_DIST_BRANCH],
-    addArgv: ['add', '--all'],
-    writeTreeArgv: ['write-tree'],
-    tagTreeArgv: ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}^{tree}`],
-    commitArgv: [...GIT_IDENTITY, 'commit', '--quiet', '-m', `${IPM_MODULE} ${version} from ${sha}`],
-    tagArgv: [...GIT_IDENTITY, 'tag', '-a', tag, '-m', `${IPM_MODULE} ${version} from ${sha}`],
-    pushArgv: ['push', '--atomic', 'origin', `HEAD:refs/heads/${IPM_DIST_BRANCH}`, `refs/tags/${tag}`],
-    lsRemoteArgv: ['ls-remote', '--symref', url, 'HEAD'],
-  };
+export function storeLookupUrl(store, publisher, name, version) {
+  const part = (text) => encodeURIComponent(text);
+  if (store === 'open-vsx') return `https://open-vsx.org/api/${part(publisher)}/${part(name)}/${part(version)}`;
+  if (store === 'vscode-marketplace') {
+    return `https://marketplace.visualstudio.com/_apis/public/gallery/publishers/${part(publisher)}/vsextensions/${part(name)}/${part(version)}/vspackage`;
+  }
+  throw new Error(`${JSON.stringify(store)} is not an extension store. Use vscode-marketplace or open-vsx.`);
+}
+
+/** The request headers of a store lookup. */
+export function storeLookupHeaders(store) {
+  return store === 'vscode-marketplace' ? { Range: 'bytes=0-0', 'User-Agent': 'iris-mcp-release' } : { Accept: 'application/json', 'User-Agent': 'iris-mcp-release' };
 }
 
 /**
- * The default branch that the answer of `git ls-remote --symref <url> HEAD` names: the `<b>` of its `ref: refs/heads/<b>\tHEAD` line,
- * or `undefined` for an empty answer (an empty repository, which has no default branch yet).
+ * What a store's answer to {@link storeLookupUrl} means. `published` needs the store's own evidence: the Marketplace answers 200 (or 206,
+ * the one-byte read) with the vsix itself (content type `application/vsix`), and Open VSX answers 200 with JSON whose `namespace`, `name`
+ * and `version` are the ones asked for. A 404 is `absent` (the release then uploads, and the CLI asks the store again). Anything else is
+ * `unknown`, which stops the release: another status, no status (the request failed or stalled), or a 200 that is not the store's answer
+ * (a proxy or captive-portal page), because reading that as `published` would skip the upload and exit 0.
  *
- * @param {string} stdout
- * @returns {string | undefined}
+ * @param {'vscode-marketplace' | 'open-vsx'} store
+ * @param {{ status?: number, contentType?: string | null, body?: unknown }} answer `body` is the parsed JSON of an Open VSX 200, if it parsed
+ * @param {{ publisher: string, name: string, version: string }} expected
+ * @returns {{ outcome: 'published' | 'absent' | 'unknown', why?: string }}
  */
-export function ipmDefaultBranch(stdout) {
-  return /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(String(stdout))?.[1];
+export function storeOutcome(store, answer, expected) {
+  const { status } = answer;
+  if (status === 404) return { outcome: 'absent' };
+  // Only the Marketplace is asked for a range (one byte), so only its answer may be a 206.
+  const found = status === 200 || (status === 206 && store === 'vscode-marketplace');
+  if (!found) return { outcome: 'unknown', why: status === undefined ? 'no answer' : `HTTP ${status}` };
+  const type = String(answer.contentType ?? '').trim();
+  const notTheStore = (what) => ({ outcome: 'unknown', why: `HTTP ${status}, but ${what}, so it is not the store's answer` });
+  if (store === 'vscode-marketplace') {
+    return /^application\/vsix\s*(?:;|$)/i.test(type) ? { outcome: 'published' } : notTheStore(`the content type is ${type === '' ? 'missing' : type}, not application/vsix`);
+  }
+  if (!/^application\/json\s*(?:;|$)/i.test(type)) return notTheStore(`the answer is ${type === '' ? 'untyped' : type}, not JSON`);
+  const body = /** @type {Record<string, unknown> | null | undefined} */ (answer.body);
+  const named = body !== null && typeof body === 'object' && body.namespace === expected.publisher && body.name === expected.name && body.version === expected.version;
+  return named ? { outcome: 'published' } : notTheStore(`its JSON does not name ${expected.publisher}.${expected.name}@${expected.version}`);
+}
+
+/** Whether a store CLI's output has a line that says `--skip-duplicate` found the version already published (an exit 0 that uploaded nothing). */
+export function skippedDuplicate(stdout) {
+  return String(stdout)
+    .split('\n')
+    .some((line) => line.trimEnd().endsWith(SKIPPED_DUPLICATE_SUFFIX));
+}
+
+/**
+ * What is wrong with the extension's changelog for a release: its first `## [` heading must name `version`.
+ *
+ * @param {string} text
+ * @param {string} version
+ * @returns {string[]}
+ */
+export function extensionChangelogProblems(text, version) {
+  const heading = /^## \[[^\n]*$/m.exec(String(text))?.[0].trimEnd();
+  if (heading === undefined) {
+    return [`${EXTENSION_CHANGELOG_PATH} has no \`## [\` heading. Add a section headed \`## [${version}]\`, which pnpm run version writes.`];
+  }
+  const named = /^## \[([^\]]*)\]/.exec(heading)?.[1];
+  if (named === version) return [];
+  return [`the first heading of ${EXTENSION_CHANGELOG_PATH} is \`${heading}\`, not \`## [${version}]\`. Run pnpm run version, which renames the \`## [Unreleased]\` heading, and commit the result.`];
 }
 
 /** Whether the registry's answer for the package lists `version` (`versions` holds every published version, `version` the newest). */
@@ -489,24 +639,42 @@ export function ipmRegistryListsVersion(body, version) {
   return body.version === version || (Array.isArray(body.versions) && body.versions.includes(version));
 }
 
-/** The README of the packaging repository: what it is, where the source is, and how to install. It claims no endorsement (AD-28). */
-export function ipmReadme(version) {
-  return [
-    `# ${IPM_MODULE}`,
-    '',
-    `Version ${version}. This repository is generated by the release workflow of the IRIS MCP Server Suite and holds the IPM package of the`,
-    'server-side `ExecuteMCPv2` classes. Do not edit it by hand: the next release replaces its contents.',
-    '',
-    '- Source, issues and documentation: https://github.com/jbrandtmse/iris-execute-mcp-v2',
-    '- Install, in the namespace that should host the REST service, with IPM 0.10 or later:',
-    '',
-    '```',
-    `zpm "install ${IPM_MODULE}"`,
-    '```',
-    '',
-    'This is an independent community project. It is not made, endorsed or supported by InterSystems.',
-    '',
-  ].join('\n');
+/**
+ * What the owner does for the IPM channel, as one sentence: `reason` says why it is still to do (the registry does not list the
+ * version, or could not be read). The run performs none of it.
+ */
+export function ipmManualStepText(version, reason) {
+  return `Release ${version} on the Open Exchange listing ${OPEN_EXCHANGE_LISTING_NAME}; ${reason}`;
+}
+
+/** The reason of {@link ipmManualStepText} for a registry that answered and does not list `version`. */
+export const ipmNotListedReason = (version) => `the IPM registry does not list ${version}`;
+
+/** The reason of {@link ipmManualStepText} for a registry that could not be read. */
+export const ipmUnreadableReason = (version, why) => `the IPM registry could not be read (${why}), so it is not known whether it lists ${version}`;
+
+/** The words that open the rehearsal's detail of a manual step. */
+const MANUAL_STEP_REHEARSAL_LEAD = 'manual step after the tag: ';
+
+/** The detail of a rehearsal's `ready` IPM line: the manual step, said as one that follows the tag. */
+export const ipmRehearsalDetail = (text) => `${MANUAL_STEP_REHEARSAL_LEAD}${text}`;
+
+/**
+ * The address of the archive the IPM registry serves for `version`, from its answer for the package: the answer's own `url` when
+ * `version` is the newest, and that `url` with the version swapped when the registry lists it among older ones (its download paths end
+ * `-<version>.tgz`). `undefined` when the answer gives no address that can be read that way.
+ *
+ * @param {unknown} body
+ * @param {string} version
+ * @returns {string | undefined}
+ */
+export function ipmArchiveUrl(body, version) {
+  if (body === null || typeof body !== 'object') return undefined;
+  const { url, version: newest } = /** @type {{ url?: unknown, version?: unknown }} */ (body);
+  if (typeof url !== 'string' || !/^https:\/\//.test(url)) return undefined;
+  if (newest === version) return url;
+  if (typeof newest === 'string' && url.endsWith(`-${newest}.tgz`)) return `${url.slice(0, url.length - `${newest}.tgz`.length)}${version}.tgz`;
+  return undefined;
 }
 
 /**
@@ -524,10 +692,80 @@ export function releaseReport(results) {
       lines.push(`  ${result.item}: ${result.status}${result.detail === undefined || result.detail === '' ? '' : ` (${result.detail})`}`);
     }
   }
+  const skipped = notSetUpChannels(results);
+  if (skipped.length > 0) {
+    lines.push('', 'Skipped channels (not set up; run the release again once the owner step is done):');
+    for (const entry of skipped) lines.push(`  ${entry.channel}: ${entry.reason}`);
+  }
+  const manual = manualStepChannels(results);
+  if (manual.length > 0) {
+    lines.push('', `Manual steps (the run does not do these, and its result does not depend on them; the listing is ${OPEN_EXCHANGE_LISTING_URL}):`);
+    for (const entry of manual) lines.push(`  ${entry.channel}: ${entry.text}`);
+  }
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * The channels whose last step is the owner's, one entry per channel, with the step (the report's detail without the rehearsal's
+ * `manual step after the tag: ` lead). A result carries `manual: true` only for such a channel, whether its status is `ready` (a
+ * rehearsal) or `manual step` (a release); a channel the registry already lists carries none.
+ *
+ * @param {ReadonlyArray<{ channel: string, status: string, detail?: string, manual?: boolean }>} results
+ * @returns {Array<{ channel: string, text: string }>}
+ */
+export function manualStepChannels(results) {
+  return results
+    .filter((result) => result.manual === true)
+    .map((result) => ({ channel: result.channel, text: String(result.detail ?? '').startsWith(MANUAL_STEP_REHEARSAL_LEAD) ? String(result.detail).slice(MANUAL_STEP_REHEARSAL_LEAD.length) : String(result.detail ?? '') }));
+}
+
+/** The detail of a channel that the owner has not set up yet: `skipped (not set up: <reason>)` in the report. */
+export const notSetUpDetail = (reason) => `${NOT_SET_UP}: ${reason}`;
+
+/** The words that open the detail of a channel skipped for a missing owner setup. */
+const NOT_SET_UP = 'not set up';
+
+/**
+ * The channels a run skipped because the owner has not set them up: one entry per channel, with the reason (the report's detail without
+ * its `not set up: ` lead). A result carries `notSetUp: true` only when its channel was skipped for that reason, never for a failure.
+ *
+ * @param {ReadonlyArray<{ channel: string, status: string, detail?: string, notSetUp?: boolean }>} results
+ * @returns {Array<{ channel: string, reason: string }>}
+ */
+export function notSetUpChannels(results) {
+  const prefix = `${NOT_SET_UP}: `;
+  return results
+    .filter((result) => result.notSetUp === true)
+    .map((result) => ({ channel: result.channel, reason: String(result.detail ?? '').startsWith(prefix) ? String(result.detail).slice(prefix.length) : String(result.detail ?? '') }));
+}
+
+/** The text of a workflow command's message with its three reserved characters escaped, as the runner reads it (one line). */
+const escapeCommandData = (text) => String(text).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+
+/**
+ * One GitHub `::warning::` annotation line for each channel skipped as not set up (a raw line: the runner reads a workflow command only
+ * at the start of a line).
+ *
+ * @param {ReadonlyArray<{ channel: string, status: string, detail?: string, notSetUp?: boolean }>} results
+ * @returns {string[]}
+ */
+export function notSetUpAnnotations(results) {
+  // A property value escapes `,` and `:` too (the runner splits properties on `,`): the title's comma is `%2C`.
+  return notSetUpChannels(results).map((entry) => `::warning title=Channel skipped%2C not set up::${escapeCommandData(`${entry.channel}: ${entry.reason}`)}`);
+}
+
+/**
+ * One GitHub `::warning::` annotation line for each manual step (a raw line, like {@link notSetUpAnnotations}'s), so that an owner step
+ * the run cannot do stays visible on the run page.
+ *
+ * @param {ReadonlyArray<{ channel: string, status: string, detail?: string, manual?: boolean }>} results
+ * @returns {string[]}
+ */
+export function manualStepAnnotations(results) {
+  return manualStepChannels(results).map((entry) => `::warning title=Manual step::${escapeCommandData(`${entry.channel}: ${entry.text}`)}`);
 }
 
 /** The text a disabled channel prints. */
 export function skippedText(channel) {
-  return `${STATUS.skipped}: not enabled (${channel.enabledBy})`;
+  return `${STATUS.skipped}: not enabled (${channel.enabledBy ?? 'no reason given'})`;
 }

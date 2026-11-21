@@ -28,11 +28,11 @@ All servers use the same environment variables:
 |----------|---------|-------------|
 | `IRIS_HOST` | `localhost` | IRIS hostname or IP |
 | `IRIS_PORT` | `52773` | IRIS web server port |
-| `IRIS_USERNAME` | `_SYSTEM` | IRIS username |
+| `IRIS_USERNAME` | *(required)* | IRIS username. There is no default: a server that starts without it fails, naming the variable. |
 | `IRIS_PASSWORD` | *(required)* | IRIS password |
 | `IRIS_NAMESPACE` | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | `false` | Use HTTPS instead of HTTP |
-| `IRIS_ACCEPT_LANGUAGE` | `en-US,en;q=0.9` | **Optional.** `Accept-Language` header sent on every request, pinning `%Status` error text to a predictable language instead of whatever locale an unspecified header resolves to. IRIS also selects a message table per worker process independently of this header, so localized prefixes can still appear — existing prefix-stripping is unaffected. Details: [suite README](../../README.md#2-set-environment-variables). |
+| `IRIS_ACCEPT_LANGUAGE` | `en-US,en;q=0.9` | **Optional.** `Accept-Language` header sent on every request, pinning `%Status` error text to a predictable language instead of whatever locale an unspecified header resolves to. IRIS also chooses the message language per request, by matching this header against the languages the instance has, so a localized prefix can still appear when the header names one — existing prefix-stripping is unaffected. Details: [suite README](../../README.md#2-set-environment-variables). |
 
 ### Multiple servers & the `server` parameter
 

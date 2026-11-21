@@ -3,10 +3,11 @@
 > **Superseded by the manager (Epic 33):** the fastest, safest way to wire Claude Desktop is
 > `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply --client claude-desktop --servers iris-dev-mcp`
 > — it previews the exact diff, writes through the backup-on-write engine, and `iris-mcp-clients doctor`
-> verifies the result. *(Not yet published to npm — until then: `node packages/client-config/dist/cli/clients-cli.js apply …`.)*
-> This page remains as the **manual fallback**. Claude Desktop's adapter is
+> verifies the result. This page remains as the **manual fallback**. Claude Desktop's adapter is
 > **fixture-only-with-residual-risk** (no local install as of 2026-07-28) — see the
 > [certification table](../../packages/client-config/README.md#certification-dispositions-generated).
+>
+> **Skills pack:** Claude Desktop has no project folder for skills or rules, so `iris-mcp-clients skills install` refuses it; upload skills as a ZIP under Customize > Skills, or use `--client claude-code` for the Code tab (see [The skills pack](../../README.md#the-skills-pack)).
 
 Connect the IRIS MCP Server Suite to [Claude Desktop](https://claude.ai/download).
 
@@ -32,7 +33,7 @@ All five servers share the same environment variables:
 |----------|----------|---------|-------------|
 | `IRIS_HOST` | No | `localhost` | IRIS hostname or IP address |
 | `IRIS_PORT` | No | `52773` | IRIS web server port (not the SuperServer port 1972) |
-| `IRIS_USERNAME` | No | `_SYSTEM` | IRIS username |
+| `IRIS_USERNAME` | **Yes** | -- | IRIS username (there is no default) |
 | `IRIS_PASSWORD` | **Yes** | -- | IRIS password |
 | `IRIS_NAMESPACE` | No | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | No | `false` | Set to `true` to connect over HTTPS |
@@ -213,7 +214,7 @@ If you already curate IRIS connections in the [InterSystems Server Manager](http
    npx -y -p @iris-mcp/shared@1 iris-mcp-credentials set myserver
    ```
 
-   > **Pre-release:** the suite is not published to npm yet, so the `npx` form above will not resolve today. Until it is, run the built bin directly from a clone: `node /path/to/iris-execute-mcp-v2/packages/shared/dist/cli/credentials-cli.js set myserver`. (`-p` is required in the `npx` form because the bin name differs from the package name.)
+   > The `-p` is required in the `npx` form because the bin name differs from the package name.
 
 2. Set `IRIS_SERVER_MANAGER` to `auto` in the server's `env` block:
 
@@ -270,7 +271,7 @@ Point a server at production in **read-only mode** with one environment variable
 }
 ```
 
-All five are **optional** and apply to every server the same way (`IRIS_GOVERNANCE_PRESET` is framework configuration, not a tool; the four `IRIS_SQL_*` variables govern the SQL tools `iris_sql_execute` and `iris_sql_query`, which ship on `@iris-mcp/dev`). Under the read-only preset `iris_sql_execute` is blocked, so run queries through `iris_sql_query`: a read tool, enabled by default, that stays available. See the [suite README](../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable) for the full model.
+All five are **optional** and apply to every server the same way (`IRIS_GOVERNANCE_PRESET` is framework configuration, not a tool; the four `IRIS_SQL_*` variables govern the SQL tools `iris_sql_execute` and `iris_sql_query`, which ship on `@iris-mcp/dev`). Under the read-only preset `iris_sql_execute` is blocked, so run queries through `iris_sql_query`: a read tool, enabled by default, that stays available. See the [suite README](../../README.md#read-only-mode--point-it-at-production-with-one-environment-variable) for the full model.
 
 ---
 

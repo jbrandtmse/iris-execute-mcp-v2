@@ -128,7 +128,7 @@ function makeSandbox(): Sandbox {
         return path.join(home, ".codex", "config.toml");
       case "goose":
         return process.platform === "win32"
-          ? path.join(home, "AppData", "Roaming", "goose", "config.yaml")
+          ? path.join(home, "AppData", "Roaming", "Block", "goose", "config", "config.yaml")
           : path.join(home, ".config", "goose", "config.yaml");
       case "vscode":
         return path.join(vscodeUserRoot, "mcp.json");

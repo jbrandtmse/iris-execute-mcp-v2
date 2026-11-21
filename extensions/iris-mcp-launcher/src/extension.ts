@@ -47,6 +47,7 @@
 import * as vscode from "vscode";
 import { stat } from "node:fs/promises";
 import * as os from "node:os";
+import * as path from "node:path";
 
 import { SERVER_MANAGER_EXTENSION_ID } from "./constants.js";
 import {
@@ -378,7 +379,8 @@ export function activate(context: vscode.ExtensionContext): void {
         return { status: null, stdout: "", stderr: "", spawnError: resolution.error };
       }
       const env = buildGovernanceCliEnv(settings, resolution.target.extraEnv);
-      return runGovernanceCli(resolution.target, command, env);
+      // The directory the server definitions start in, so a relative governance file resolves the same way for both.
+      return runGovernanceCli(resolution.target, command, env, os.homedir());
     },
   };
 
@@ -393,8 +395,10 @@ export function activate(context: vscode.ExtensionContext): void {
     fileExists: async (candidatePath) => {
       // 32-2-R1: async stat (the 31-6-2 discipline) — a UNC governance-file
       // path must never stall the extension host on panel open/refresh.
+      // A relative path is the one the governance CLI reads: it runs in the
+      // user's home directory (DW-663), so the check resolves against it too.
       try {
-        return (await stat(candidatePath)).isFile();
+        return (await stat(path.resolve(os.homedir(), candidatePath))).isFile();
       } catch {
         return false;
       }
@@ -481,7 +485,9 @@ export function activate(context: vscode.ExtensionContext): void {
       return { status: null, stdout: "", stderr: "", spawnError: resolution.error };
     }
     const env = buildClientsCliEnv(settings, resolution.target.extraEnv);
-    return runClientsCli(resolution.target, command, env);
+    // Project scope means the first workspace folder; with no folder open, the user's home directory.
+    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+    return runClientsCli(resolution.target, command, env, cwd);
   };
 
   const clientsEngineHost: ClientsEngineHost = {

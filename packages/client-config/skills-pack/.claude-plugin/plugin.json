@@ -1,0 +1,59 @@
+{
+  "name": "iris-mcp",
+  "version": "1.1.0",
+  "displayName": "IRIS MCP Server Suite",
+  "description": "Five MCP servers for InterSystems IRIS (development, administration, data, interoperability and operations) and the IRIS MCP skills pack. This is an independent community project. It is not made, endorsed or supported by InterSystems.",
+  "author": {
+    "name": "jbrandtmse",
+    "url": "https://github.com/jbrandtmse"
+  },
+  "homepage": "https://github.com/jbrandtmse/iris-execute-mcp-v2#readme",
+  "repository": "https://github.com/jbrandtmse/iris-execute-mcp-v2",
+  "license": "MIT",
+  "keywords": [
+    "iris",
+    "mcp",
+    "model-context-protocol",
+    "objectscript",
+    "interoperability"
+  ],
+  "userConfig": {
+    "iris_host": {
+      "type": "string",
+      "title": "IRIS host",
+      "description": "Host name of the IRIS web server (a bare host name, not a URL).",
+      "default": "localhost"
+    },
+    "iris_port": {
+      "type": "number",
+      "title": "IRIS web port",
+      "description": "Port of the IRIS web server (the Management Portal port).",
+      "default": 52773
+    },
+    "iris_namespace": {
+      "type": "string",
+      "title": "IRIS namespace",
+      "description": "Namespace the servers work in by default.",
+      "default": "USER"
+    },
+    "iris_https": {
+      "type": "boolean",
+      "title": "Use HTTPS",
+      "description": "Connect to the IRIS web server over HTTPS.",
+      "default": false
+    },
+    "iris_username": {
+      "type": "string",
+      "title": "IRIS user name",
+      "description": "The IRIS user the servers connect as.",
+      "required": true
+    },
+    "iris_password": {
+      "type": "string",
+      "title": "IRIS password",
+      "description": "The password of that IRIS user. Claude Code keeps it in the system keychain.",
+      "required": true,
+      "sensitive": true
+    }
+  }
+}

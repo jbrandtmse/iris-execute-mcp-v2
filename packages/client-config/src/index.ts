@@ -192,9 +192,18 @@ export {
 } from "./pack-plan.js";
 
 export {
+  CLAUDE_CODE_PLUGIN_ID,
+  describePluginDetection,
+  detectClaudeCodePlugin,
+  type PluginDetection,
+  type PluginDetectionHost,
+} from "./claude-plugin-detect.js";
+
+export {
   executePackPlan,
   preparePackChange,
   projectKey,
+  readTextIfFile,
   REAL_BYTES_FS,
   type BytesFs,
   type ExecuteOptions,

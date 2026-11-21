@@ -3,7 +3,7 @@
 // directions, so a check cannot be added to one and not the other, and a step cannot be dropped silently.
 //
 // CONTRACT
-//   - PINS. The Node legs, the runner image, the three pinned actions and the host ports CI publishes are constants here.
+//   - PINS. The Node legs, the runner image (and the launcher job's three runners), the three pinned actions and the host ports CI publishes are constants here.
 //   - DECLARED_STEPS. For each job, the ordered `run` steps of the workflow, duplicates kept, each as
 //     `{ run, workingDirectory?, if?, id? }`. A step that has no `run:` (an action) is not listed.
 //   - LIVE_SUITES. Every armed suite CI runs, by id, as `node scripts/ci-live-suite.mjs <id>`. A suite is
@@ -30,8 +30,15 @@ import { LAUNCHER_DIR, PACKAGES_DIR, REPO_ROOT, readRoster, relativeToRepo, walk
 /** The Node legs of the `gates` job: the floor of each even major (the floor is `engines.node` of every package). */
 export const NODE_LEGS = Object.freeze(['22.17.0', '24.0.0', '26.0.0']);
 
-/** The runner every job uses. */
+/** The runner every job uses, except the `launcher` job's matrix (see {@link LAUNCHER_RUNNERS}). */
 export const RUNNER = 'ubuntu-24.04';
+
+/**
+ * The runners of the `launcher` job's matrix (Story 42.7, DW-532): the launcher's whole suite runs on each, because only CI can show Windows.
+ * The first is {@link RUNNER}. Each label is in the runner-images list of GitHub (https://github.com/actions/runner-images, read
+ * 2026-11-20): `ubuntu-24.04` (x64), `macos-15` (arm64) and `windows-2025` (x64).
+ */
+export const LAUNCHER_RUNNERS = Object.freeze(['ubuntu-24.04', 'macos-15', 'windows-2025']);
 
 /** The actions the workflow may use: `<owner>/<repo>`, the commit its release tag points at, and that tag. */
 export const PINNED_ACTIONS = Object.freeze([
@@ -51,7 +58,7 @@ export const CI_HOST_PORTS = Object.freeze({ guard: '52790', live: '52791' });
 export const LIVE_NAMESPACE = 'HSCUSTOM';
 
 /** The `timeout-minutes` of each job. */
-export const JOB_TIMEOUT_MINUTES = Object.freeze({ gates: 60, throwaway: 150, package: 30, ipm: 45 });
+export const JOB_TIMEOUT_MINUTES = Object.freeze({ gates: 60, launcher: 30, throwaway: 150, package: 30, ipm: 45 });
 
 /** The images the workflow and the suites may name: the harness's digest constants. */
 export const CI_IMAGES = Object.freeze([IRIS_COMMUNITY_IMAGE, OLDEST_IRIS_COMMUNITY_IMAGE, IRISHEALTH_COMMUNITY_IMAGE]);
@@ -286,6 +293,8 @@ export const ROOT_GATE_SCRIPTS = Object.freeze([
   'pnpm gen:governance-baseline:check',
   'pnpm gen:skills:check',
   'pnpm gen:pack:check',
+  'pnpm gen:listings:check',
+  'pnpm gen:ipm:check',
   'pnpm validate:prompts',
   'pnpm check:provenance',
   'pnpm gen:tools-list-snapshot:check',
@@ -326,13 +335,24 @@ function buildDeclaredSteps() {
     { run: `${HARNESS} down --state ${STATE_FILE}`, if: '${{ always() }}' },
   ];
 
+  // Story 42.7 (DW-532): the launcher's whole suite on each runner of LAUNCHER_RUNNERS. It builds every package, because its real-CLI
+  // tests read the clients CLI of client-config, the governance CLI of shared and the five servers' tool lists (a missing dist skips
+  // a whole real-CLI file); it needs no other job and reaches no IRIS: its two live files stay unarmed and skip.
+  const launcherJob = [
+    { run: 'pnpm install --frozen-lockfile' },
+    { run: 'pnpm build' },
+    { run: 'npm ci', ...launcher },
+    { run: 'npm run build', ...launcher },
+    { run: 'npx --no -- vitest run', ...launcher },
+  ];
+
   const packageJob = [{ run: 'pnpm install --frozen-lockfile' }, { run: 'pnpm build' }, { run: 'node scripts/ci-package-smoke.mjs' }];
 
   // Story 42.4: builds the IPM archive from the generated embed and installs it offline on both editions. It needs the built
   // shared dist, and no launcher, no reserved port (its containers have no network) and no suite.
   const ipm = [{ run: 'pnpm install --frozen-lockfile' }, { run: 'pnpm build' }, { run: 'node scripts/ci-ipm-archive.mjs' }];
 
-  return { gates, throwaway, package: packageJob, ipm };
+  return { gates, launcher: launcherJob, throwaway, package: packageJob, ipm };
 }
 
 /** Per job, the ordered `run` steps of the workflow (see the header). */

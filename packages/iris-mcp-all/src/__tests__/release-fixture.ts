@@ -6,10 +6,11 @@
  *    pending changeset, and each package's manifest and changelog, with a `node_modules` link to the repository's so that the real
  *    `@changesets/cli` resolves. With `withTemplate`, the 1.0.0 release changeset is added.
  *  - {@link makeVersionFixture} (Story 42.5, `release-version.test.ts`): the same, plus the inputs of the bootstrap generator (the
- *    shared builder `copyGeneratorInputs`), the embed, the release scripts, the template under `scripts/release/` and a `.gitignore`.
+ *    shared builder `copyGeneratorInputs`), the embed, the release scripts, the template under `scripts/release/`, a `.gitignore` and the
+ *    extension (a manifest and a lock at the seeded version, and a changelog headed `## [Unreleased]`, which the version step stamps).
  *    The fixture owns its state: all eight manifests are seeded at one version, the pending changesets are one synthetic `patch` of
- *    `@iris-mcp/shared`, and the generator runs in the fixture before the first commit, so the embed and `ipm/module.xml` start
- *    consistent with that version and the version script sees a clean tree. What a test expects never depends on the real manifests,
+ *    `@iris-mcp/shared`, and the generator runs in the fixture before the first commit (with `--ipm`: the tree is absent, so it writes
+ *    it), so the embed, the root `module.xml` and the IPM tree start consistent with that version and the version script sees a clean tree. What a test expects never depends on the real manifests,
  *    the real changesets or the real embed.
  * {@link removeFixtures} removes every directory these made.
  */
@@ -54,7 +55,7 @@ export function removeFixtures(): void {
 /** Copy `relative` from the repository into `root`. */
 function copyInto(root: string, relative: string): void {
   mkdirSync(dirname(join(root, relative)), { recursive: true });
-  cpSync(join(REPO_ROOT, relative), join(root, relative));
+  cpSync(join(REPO_ROOT, relative), join(root, relative), { recursive: true });
 }
 
 /**
@@ -97,7 +98,7 @@ export const SYNTHETIC_CHANGESET = "synthetic-patch.md";
 export interface VersionFixtureOptions {
   /** Whether the 1.0.0 template is under `scripts/release/` (default true). */
   withTemplate?: boolean;
-  /** The version of all eight packages, the embed's marker and `ipm/module.xml` (default `0.0.2`). */
+  /** The version of all eight packages, the embed's marker, the root `module.xml` and the IPM tree (default `0.0.2`). */
   version?: string;
   /** Whether the synthetic `patch` changeset is pending (default true). */
   pending?: boolean;
@@ -114,7 +115,23 @@ export function makeVersionFixture(options: VersionFixtureOptions = {}): string 
   copyGeneratorInputs(root, REPO_ROOT);
   copyInto(root, "packages/shared/src/bootstrap-classes.ts");
   copyInto(root, ".gitignore");
-  for (const relative of ["scripts/release-version.mjs", "scripts/release.mjs", "scripts/lib/release-core.mjs", "scripts/lib/script-process.mjs"]) copyInto(root, relative);
+  for (const relative of [
+    "scripts/release-version.mjs",
+    "scripts/release.mjs",
+    "scripts/lib/release-core.mjs",
+    "scripts/lib/script-process.mjs",
+    // The generators the version step runs after the bootstrap (Story 42.8): the pack (the plugin manifest) and the listings.
+    "scripts/gen-pack.mjs",
+    "scripts/gen-listings.mjs",
+    "scripts/lib/skills-pack.mjs",
+    "scripts/lib/generated-tree.mjs",
+    "scripts/lib/listings.mjs",
+    "scripts/lib/endorsement.mjs",
+    "skills-pack-src",
+    "skills",
+  ]) {
+    copyInto(root, relative);
+  }
   if (options.withTemplate !== false) copyInto(root, "scripts/release/changeset-1.0.0.md");
 
   for (const dir of PACKAGE_DIRS) {
@@ -123,14 +140,42 @@ export function makeVersionFixture(options: VersionFixtureOptions = {}): string 
     if (!seeded.includes(`"version": "${version}"`)) throw new Error(`could not seed the version of packages/${dir}/package.json`);
     writeFileSync(file, seeded);
   }
+  seedExtension(root, version);
   for (const name of pendingChangesets(join(root, ".changeset"))) rmSync(join(root, ".changeset", name));
   if (options.pending !== false) writeFileSync(join(root, ".changeset", SYNTHETIC_CHANGESET), '---\n"@iris-mcp/shared": patch\n---\n\nA synthetic change.\n');
-  const generated = spawnSync(process.execPath, [join(root, "scripts", "gen-bootstrap.mjs")], { cwd: root, encoding: "utf8" });
-  if (generated.status !== 0) throw new Error(`gen-bootstrap failed in ${root}: ${generated.stderr}`);
+  const generated = spawnSync(process.execPath, [join(root, "scripts", "gen-bootstrap.mjs"), "--ipm"], { cwd: root, encoding: "utf8" });
+  if (generated.status !== 0) throw new Error(`gen-bootstrap --ipm failed in ${root}: ${generated.stderr}`);
+  for (const script of ["gen-pack.mjs", "gen-listings.mjs"]) {
+    const ran = spawnSync(process.execPath, [join(root, "scripts", script)], { cwd: root, encoding: "utf8" });
+    if (ran.status !== 0) throw new Error(`${script} failed in ${root}: ${ran.stderr}`);
+  }
 
   git(root, ["init", "--quiet"]);
   commitFixture(root, "fixture");
   return root;
+}
+
+/**
+ * The extension of the version fixture, which the version step stamps with the shared version: a manifest and a lock at `version`, and a
+ * changelog whose first heading is `## [Unreleased]`. The lock holds one more package, whose version the stamp must leave alone.
+ */
+function seedExtension(root: string, version: string): void {
+  const directory = join(root, "extensions", "iris-mcp-launcher");
+  mkdirSync(directory, { recursive: true });
+  const write = (name: string, content: string): void => writeFileSync(join(directory, name), content);
+  write("package.json", `${JSON.stringify({ name: "iris-mcp-launcher", version, private: true, publisher: "iris-mcp", devDependencies: { typescript: "^5.7.0" } }, null, 2)}\n`);
+  const lock = {
+    name: "iris-mcp-launcher",
+    version,
+    lockfileVersion: 3,
+    requires: true,
+    packages: {
+      "": { name: "iris-mcp-launcher", version, license: "MIT", devDependencies: { typescript: "^5.7.0" } },
+      "node_modules/typescript": { version: "5.9.3", resolved: "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz", dev: true },
+    },
+  };
+  write("package-lock.json", `${JSON.stringify(lock, null, 2)}\n`);
+  write("CHANGELOG.md", ["# Changelog", "", "## [Unreleased]", "", "### Added", "", "- A synthetic entry.", "", "## [0.1.0] \u2014 2026-01-01", "", "- An older entry.", ""].join("\n"));
 }
 
 /** Commit every change of a fixture repository; the identity and the signing setting are the fixture's own. */

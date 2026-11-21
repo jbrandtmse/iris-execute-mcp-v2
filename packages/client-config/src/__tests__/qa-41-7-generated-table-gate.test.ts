@@ -12,7 +12,7 @@
  *  2. Table structure. `--check` compares the README with the renderer's own output, so a renderer that fails to escape a
  *     `|` would write a broken row and still pass its own check. The second row reads the committed table the way a
  *     GitHub Flavored Markdown renderer does (cells split on pipes that are not escaped) and asserts that the header, the
- *     delimiter row and each of the 17 body rows have the same number of cells, one row per `PACK_TARGETS` entry in order.
+ *     delimiter row and each of the 18 body rows have the same number of cells, one row per `PACK_TARGETS` entry in order.
  *
  * Writes nothing. Needs no IRIS.
  */
@@ -67,7 +67,7 @@ describe("the generated Skills pack targets table, on the paths its gates do not
     expect(result.stdout).toContain("render --check: README.md marker sections are in sync");
   });
 
-  it("the committed table has one header, one delimiter row and 17 body rows, all with the same cells, in PACK_TARGETS order", () => {
+  it("the committed table has one header, one delimiter row and 18 body rows, all with the same cells, in PACK_TARGETS order", () => {
     const text = readFileSync(README, "utf8");
     const begin = text.indexOf(BEGIN);
     const end = text.indexOf(END);

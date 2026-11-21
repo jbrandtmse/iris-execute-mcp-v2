@@ -40,6 +40,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { skipUnbuilt } from "./builtDist.js";
 import {
   buildGovernanceCliEnv,
   parseCliJson,
@@ -127,16 +128,12 @@ afterAll(() => {
 });
 
 function skipIf(ctx: { skip: () => void }, label: string): boolean {
-  if (!skipReason) return false;
-  // eslint-disable-next-line no-console
-  console.log(`[SKIP] governance engine real-CLI e2e (${label}): ${skipReason}`);
-  ctx.skip();
-  return true;
+  return skipUnbuilt(ctx, `governance engine real-CLI e2e (${label})`, skipReason);
 }
 
 /** Run one engine command against the real CLI and require exit 0 + parseable JSON. */
 async function runJson<T>(command: GovernanceCliCommand): Promise<T> {
-  const result = await runGovernanceCli(target, command, cliEnv);
+  const result = await runGovernanceCli(target, command, cliEnv, process.cwd());
   expect(result.spawnError, `spawn of the real CLI must not fail for ${command.kind}`).toBeUndefined();
   expect(
     result.status,
@@ -227,6 +224,7 @@ describe("Story 32.2 QA — engine subprocess e2e through the REAL built CLI", (
         target,
         { kind: "universe", profile: "default" },
         scrubbed,
+        process.cwd(),
       );
       expect(result.status).toBe(0);
       const parsed = parseCliJson(result.stdout, result.stderr);
@@ -257,6 +255,7 @@ describe("Story 32.2 QA — engine subprocess e2e through the REAL built CLI", (
         target,
         { kind: "set", file, profile: undefined, key: "iris_doc_put", value: false },
         cliEnv,
+        process.cwd(),
       );
       expect(setGlobal.status).toBe(0);
       expect(existsSync(file)).toBe(true);
@@ -273,6 +272,7 @@ describe("Story 32.2 QA — engine subprocess e2e through the REAL built CLI", (
         target,
         { kind: "set", file, profile: "qa32", key: "iris_sql_execute", value: true },
         cliEnv,
+        process.cwd(),
       );
       expect(setProfile.status).toBe(0);
 
@@ -310,12 +310,14 @@ describe("Story 32.2 QA — engine subprocess e2e through the REAL built CLI", (
         target,
         { kind: "unset", file, profile: undefined, key: "iris_doc_put" },
         cliEnv,
+        process.cwd(),
       );
       expect(unsetGlobal.status).toBe(0);
       const unsetProfile = await runGovernanceCli(
         target,
         { kind: "unset", file, profile: "qa32", key: "iris_sql_execute" },
         cliEnv,
+        process.cwd(),
       );
       expect(unsetProfile.status).toBe(0);
 
@@ -336,7 +338,7 @@ describe("Story 32.2 QA — engine subprocess e2e through the REAL built CLI", (
       const malformed = path.join(fixtureDir, "malformed.json");
       writeFileSync(malformed, "{ not json", "utf8");
 
-      const invalidResult = await runGovernanceCli(target, { kind: "validate", file: malformed }, cliEnv);
+      const invalidResult = await runGovernanceCli(target, { kind: "validate", file: malformed }, cliEnv, process.cwd());
       expect(invalidResult.status).toBe(1);
       const invalidParsed = parseCliJson(invalidResult.stdout, invalidResult.stderr);
       if (!invalidParsed.ok) throw new Error(`expected parseable JSON: ${invalidParsed.error}`);
@@ -348,7 +350,7 @@ describe("Story 32.2 QA — engine subprocess e2e through the REAL built CLI", (
       expect(invalidResult.stderr).toContain("could not parse JSON");
 
       const missing = path.join(fixtureDir, "does-not-exist.json");
-      const missingResult = await runGovernanceCli(target, { kind: "validate", file: missing }, cliEnv);
+      const missingResult = await runGovernanceCli(target, { kind: "validate", file: missing }, cliEnv, process.cwd());
       expect(missingResult.status).toBe(1);
       const missingParsed = parseCliJson(missingResult.stdout, missingResult.stderr);
       if (!missingParsed.ok) throw new Error(`expected parseable JSON: ${missingParsed.error}`);

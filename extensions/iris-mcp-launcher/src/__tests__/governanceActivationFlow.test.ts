@@ -34,6 +34,7 @@
  *      never "", never an ambient leak), so the pre-feature spawn contract is
  *      byte-stable for every value the feature does not set.
  */
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -45,6 +46,7 @@ import {
   resetMockState,
   ConfigurationTarget,
   McpStdioServerDefinition,
+  Uri,
 } from "./vscodeMock.js";
 
 const CONFIG = "irisMcpLauncher";
@@ -270,4 +272,103 @@ describe("Story 32.2 QA — governance editor activation flow (real extension.ts
       expect(value, `${name} must never be an empty string`).not.toBe("");
     }
   });
+});
+
+describe("DW-663: the working directory of the governance CLI spawn (real extension.ts, stub CLI in a temp repo)", () => {
+  /**
+   * Open the editor through the real command with a stub governance CLI that records its own working directory, with HOME sandboxed to
+   * a temp directory, and return the directories it ran in, the sandboxed home and the command of each run (its first argument).
+   * `folder` is what `workspace.workspaceFolders` holds; with `relativeFile` the governanceFile setting is `policy.json`, kept in home.
+   */
+  async function governanceCwds(folder?: string, { relativeFile = false }: { relativeFile?: boolean } = {}): Promise<{ cwds: string[]; home: string; commands: string[] }> {
+    const repo = mkdtempSync(path.join(tmpdir(), "governance-cwd-repo-"));
+    const home = mkdtempSync(path.join(tmpdir(), "governance-cwd-home-"));
+    const cliDir = path.join(repo, "packages", "shared", "dist", "cli");
+    mkdirSync(cliDir, { recursive: true });
+    writeFileSync(
+      path.join(cliDir, "governance-cli.js"),
+      [
+        'const fs = require("node:fs");',
+        'const path = require("node:path");',
+        // One start line per run (its command and working directory), and one end line when it exits.
+        'const log = path.join(__dirname, "runs.log");',
+        'fs.appendFileSync(log, JSON.stringify({ start: process.argv[2], cwd: process.cwd() }) + "\\n");',
+        'process.on("exit", () => fs.appendFileSync(log, JSON.stringify({ end: process.argv[2] }) + "\\n"));',
+        'process.stdout.write("{}\\n");',
+        "",
+      ].join("\n"),
+    );
+    const log = path.join(cliDir, "runs.log");
+    // A relative governanceFile lives in the home directory, the one the CLI runs in.
+    const policy = relativeFile ? path.join(home, "policy.json") : path.join(repo, "policy.json");
+    writeFileSync(policy, "{}\n");
+    const prior = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      mockState.configStore.set(`${CONFIG}.developmentRepoPath`, repo);
+      mockState.configStore.set(`${CONFIG}.governanceFile`, relativeFile ? "policy.json" : policy);
+      if (folder !== undefined) mockState.workspaceFolders = [{ uri: Uri.file(folder), name: "workspace", index: 0 }];
+      activate(fakeContext());
+      await flushEditor();
+      await theCommand()();
+      const started = Date.now();
+      while (!existsSync(log) && Date.now() - started < 60000) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(existsSync(log), "the stub governance CLI must record its working directory").toBe(true);
+      type Run = { start?: string; cwd?: string; end?: string };
+      const runs = (): Run[] => readFileSync(log, "utf8").split("\n").filter((line) => line !== "").map((line) => JSON.parse(line) as Run);
+      // The panel's refresh ends with `universe` (after `validate` when the file exists), and every spawn runs in these temp
+      // directories: wait until `universe` has started and every run that started has exited, so that none outlives the
+      // directories (EBUSY on Windows) and none is missed. A timing guess (a quiet period) is not a signal on a slow runner.
+      const done = (): boolean => {
+        const all = runs();
+        const starts = all.filter((run) => run.start !== undefined);
+        return starts.some((run) => run.start === "universe") && all.filter((run) => run.end !== undefined).length === starts.length;
+      };
+      const deadline = Date.now() + 30000;
+      while (!done() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(done(), `the panel's universe run must start and every run must exit within 30 s: ${readFileSync(log, "utf8")}`).toBe(true);
+      // An exited process releases its working directory as it ends; let the engine see each close before the directories go.
+      await flushEditor();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const startedRuns = runs().filter((run) => run.start !== undefined);
+      const cwds = startedRuns.map((run) => realpathSync.native(run.cwd as string));
+      const commands = startedRuns.map((run) => run.start as string);
+      return { cwds, home: realpathSync.native(home), commands };
+    } finally {
+      for (const key of ["HOME", "USERPROFILE"] as const) {
+        if (prior[key] === undefined) delete process.env[key];
+        else process.env[key] = prior[key];
+      }
+      for (const dir of [repo, home]) rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("the editor's CLI runs in the user's home directory, the directory the server definitions start in", async () => {
+    const { cwds, home } = await governanceCwds();
+    expect(cwds.length).toBeGreaterThan(0);
+    expect(cwds).toEqual(cwds.map(() => home));
+  }, 120000);
+
+  it("a workspace folder being open changes nothing: the governance CLI still runs in the home directory, never the folder (QA; the clients CLI is the one that follows the folder)", async () => {
+    const folder = mkdtempSync(path.join(tmpdir(), "governance-cwd-folder-"));
+    try {
+      const { cwds, home } = await governanceCwds(folder);
+      expect(cwds.length).toBeGreaterThan(0);
+      expect(cwds).toEqual(cwds.map(() => home));
+      expect(cwds).not.toContain(realpathSync.native(folder));
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  }, 120000);
+
+  it("a relative governanceFile is found where the CLI reads it, the home directory: the editor validates it", async () => {
+    const { cwds, home, commands } = await governanceCwds(undefined, { relativeFile: true });
+    expect(cwds).toEqual(cwds.map(() => home));
+    expect(commands, "the panel saw the file and ran validate on it").toContain("validate");
+  }, 120000);
 });

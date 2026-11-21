@@ -47,6 +47,8 @@ export const ADAPTER_FIXTURES: Readonly<Record<string, string>> = {
   goose: "goose/config.yaml",
   kimi: "kimi/mcp.json",
   "kimi-code": "kimi-code/mcp.json",
+  pi: "pi/mcp.json",
+  "jetbrains-junie": "jetbrains-junie/mcp.json",
 };
 
 /** Foreign third-party entry names planted across the fixtures. Tests
@@ -66,6 +68,8 @@ export const FOREIGN_ENTRY_NAMES = [
   "developer",
   "fetch",
   "playwright",
+  "pi-foreign-tool",
+  "Context7",
 ] as const;
 
 /** Secret-looking VALUES planted in foreign entries — must never leak onto

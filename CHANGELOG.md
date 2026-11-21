@@ -2,6 +2,116 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [1.1.0] — 2026-11-21
+
+The suite reaches more installers: a Claude Code plugin, the VS Code extension on the stores, the five servers on the MCP Registry, and the IRIS-side classes through IPM. All eight `@iris-mcp/*` packages are at `1.1.0`, one shared version, and `npx -y @iris-mcp/<server>@1` picks it up with no change. The "1.1.0 detail" sections below are the per-story record of everything in this release. No tool, prompt, governance or wire change is made: no tool or tool count changes, the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and the frozen goldens and the tools-list snapshot are byte-unchanged. `BOOTSTRAP_VERSION` moves from `1.0.0+2.244fe8623c76` to `1.1.0+2.244fe8623c76`: the marker follows the version, and the class content and the sequence are unchanged.
+
+### Added
+
+- **A Claude Code plugin.** `/plugin marketplace add jbrandtmse/iris-execute-mcp-v2`, then `/plugin install iris-mcp@iris-mcp`. It brings the five servers (each `npx -y @iris-mcp/<name>@1`) and the skills, and asks once for the IRIS host, web port, namespace, HTTPS, user name and password (the password goes to the system keychain). `iris-mcp-clients skills install --client claude-code` sees the plugin and installs only the always-on rule, and `iris-mcp-clients doctor` reports any `iris-*-mcp` entry that would make every tool appear twice beside it.
+- **The VS Code extension on the stores.** The IRIS MCP launcher is published under the publisher `iris-mcp` to the VS Code Marketplace, and to Open VSX once its namespace is set up (a store that is not set up is skipped by the release, never a failure).
+- **The MCP Registry.** The five servers are listed on the MCP Registry (in preview) at `1.1.0`.
+- **IPM.** `zpm "install iris-execute-mcp-v2"` installs the IRIS-side classes from the IPM registry, through the existing Open Exchange listing `IRIS-MCP-Server-Suite-2`. Use it only where the servers cannot install those classes themselves: the first server to connect deploys and upgrades them automatically, and once IPM owns them, upgrades go through `zpm` too.
+- **Two more clients.** Pi and JetBrains Junie are supported by `iris-mcp-clients apply`, `status`, `doctor` and the other commands, and the skills installer gains an `antigravity` target.
+
+### Changed
+
+- **A project-scope write from your home directory is refused.** `apply`, `diff`, `enable`, `disable`, `remove` and `restore` with `--scope project`, and `skills install` and `skills uninstall`, exit 1 and write nothing when the project directory is your home directory, where the project file would be the user file or would be read for every project.
+- **Current client data (`2026-11-21.1`).** With `CLAUDE_CONFIG_DIR` set, Claude Code's user file is `$CLAUDE_CONFIG_DIR/.claude.json`; Goose's Windows path is `%APPDATA%\Block\goose\config\config.yaml`; Windsurf is "Devin Desktop (formerly Windsurf)", Kimi CLI is archived and Roo Code is discontinued, each keeping its adapter so that existing entries can be removed.
+- **The install docs describe the published install.** One path per client, every `npx` command pinned to `@1`, and the clone-and-build steps in the README's Contributing section.
+- **The release.** npm is published with trusted publishing (OIDC, no token) and provenance. A store that is not set up is skipped and listed, never a failure; IPM is the owner's manual step after the tag and never fails or blocks a run; and the Marketplace's rehearsal `ready` says that the publisher is not checked.
+
+## [1.1.0 detail] — Story 42.8 amendment (decision #122): IPM Publishes From the Main Repository
+
+IPM publishes from this repository's root, through the existing Open Exchange listing `IRIS-MCP-Server-Suite-2`, and the separate packaging repository is gone. This amends the IPM entries of the Story 42.8 section below, which describe the superseded design and stay as history. No ObjectScript class changes, so `BOOTSTRAP_VERSION` does not move (`1.0.0+2.244fe8623c76`), and the governance baseline, the goldens and the tools-list snapshot are untouched.
+
+### Added
+
+- **A committed, stamped IPM tree at the repository root.** The root `module.xml` (`SourcesRoot` `ipm/src`), the 35 stamped classes under `ipm/src/cls/ExecuteMCPv2/` and the stamped install guard under `preload/ipm/src/cls/ExecuteMCPv2/` are generated, output-only files. `pnpm gen:ipm` (`scripts/gen-bootstrap.mjs --ipm`) writes them, and only the version step (`pnpm run version`) runs it, so `main` always holds the content of the last release and the registry, which packages `main` when the owner presses Release, serves released content. Plain `pnpm gen:bootstrap` never writes the tree.
+- **`pnpm gen:ipm:check`.** It recomputes the tree's content hash and compares it with the marker the tree carries, holds the tree's version to the shared version, and refuses a hand edit, an extra class, any file under `preload/` but the guard, and a root `requirements.txt` (IPM runs `pip install -r` on it). It is a root gate in CI and in `prepare`.
+- **A served-archive gate (DW-694, redefined).** CI's `ipm` job fetches GitHub's archive of the commit under test, requires it equal to `git archive HEAD` and to hold the module's members, re-tars it the way the registry does, and `load`s it on both editions with no network. GitHub's archives stay the whole repository: there are no export rules.
+- **A manual step in the release.** The IPM channel reads the IPM registry, read-only. A version it lists is `already published`; any other answer, and a registry that cannot be read, is a `manual step` (`ready (manual step after the tag: ...)` in a rehearsal), reported in a "Manual steps" block at the end of the report and as a `::warning::` annotation. The channel can neither fail nor block a run.
+
+### Changed
+
+- **`pnpm run version` writes the tree.** It runs `gen-bootstrap.mjs --ipm`, and its final check requires the tree's marker to equal `BOOTSTRAP_VERSION`. A release's `prepare` refuses a tree that is older than the embed (`the IPM tree stamps <m1>, the embed <m2>`); a dry run notes it.
+- **`release verify` and IPM.** IPM is `pending` (and never fails verify) until the registry lists the version. Once it does, the module in the archive it serves (the root `module.xml`, `ipm/src` and `preload`) must equal `git archive v<version>` member for member and byte for byte, and its `module.xml` must be at that version; the rest of the archive is `main` at the Release press and is not compared. Fetch the tags first.
+- **`ipm/module.xml` is the root `module.xml`.** `ipm/preload/ExecuteMCPv2/InstallGuard.cls` stays the guard's source.
+
+### Removed
+
+- **The packaging repository, its deploy key and the pinned host keys.** The release no longer pushes anything for IPM, and `IPM_DIST_DEPLOY_KEY`, `known_hosts`, the SSH options and the README of the packaging repository are gone from the workflow, the declaration and the script. If the secret was added to the `release` environment, delete it. Owner step O-IPM1 is cancelled; the owner's step is to press Release on the Open Exchange listing after each tag (see the README's Releasing section). Never create a `master` branch in this repository: the registry reads `master/module.xml`, which GitHub redirects to `main`.
+
+## [1.1.0 detail] — Story 42.9: Install Docs and Client Re-Certification
+
+The install docs describe the published suite, the client adapter data is current as of 2026-11-21, and two silent problems of the installer now have a guard and a check. The first release with the plugin, the extension, the IPM channel and these changes is `1.1.0` (the changeset is `minor` for `@iris-mcp/client-config`, and the fixed group moves every package). No tool, prompt, governance or wire change is made: no tool or tool count changes, the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), the frozen goldens and the tools-list snapshot are byte-unchanged, and `BOOTSTRAP_VERSION` does not move.
+
+### Added
+
+- **A project-scope write is refused from your home directory (DW-702).** `apply`, `diff`, `enable`, `disable`, `remove` and `restore` with `--scope project`, and `skills install` and `skills uninstall`, exit 1 and write nothing when the project directory is your home directory: for Cursor, Codex, Gemini CLI, Kimi Code and Junie the project file would be the user file, and for the others it would land in a folder the client reads for every project. Both paths go through the real path (a symbolic link to your home directory counts), and are compared case-insensitively on macOS and Windows. The reason names both paths and is in the `--json` envelope's `error`, so the VS Code extension's MCP Clients view shows it. `detect`, `status` and `doctor` are unchanged.
+- **`doctor` reports plugin duplicates (DW-706).** While the `iris-mcp@iris-mcp` Claude Code plugin is enabled, each `iris-*-mcp` entry in Claude Code's user scope (`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that variable is set) or project scope (`.mcp.json`) is a `claude-code-plugin-duplicates` finding (exit 1), with the `remove` command that clears it, because every tool would appear twice. The local scope is not read.
+- **Two clients are adapters.** Pi (`~/.pi/agent/mcp.json`, moved by `PI_CODING_AGENT_DIR`, and `.pi/mcp.json`) and JetBrains Junie (`~/.junie/mcp/mcp.json` and `.junie/mcp/mcp.json`) are supported by `apply`, `status`, `doctor` and the other commands, in the standard `mcpServers` JSON shape. Foreign content in their files is preserved byte for byte, in compact, 4-space, CRLF and byte-order-mark files too. The skills installer gains an `antigravity` target (the `gemini` route).
+- **Human-only certification rows.** A certification record can carry `humanOnly: {check, markedOn}`, rendered as `human-only (marked <date>): <check>`, for a client whose last step needs a person at the client. `certify.mjs` records `against`, the entry spec and the version `npm view` resolved it to (`@iris-mcp/dev@1 → 1.0.0`, or `unresolved`).
+
+### Changed
+
+- **The adapter data is `2026-11-21.1`.** With `CLAUDE_CONFIG_DIR` set, Claude Code's user file is `$CLAUDE_CONFIG_DIR/.claude.json`, where Claude Code keeps it then, and `apply`, `status`, `doctor` and the other commands use that file instead of `~/.claude.json`. Goose's Windows path is `%APPDATA%\Block\goose\config\config.yaml` (the adapter wrote a file Goose does not read). Windsurf is "Devin Desktop (formerly Windsurf)" and keeps its legacy file, Kimi CLI is "(archived)" and Roo Code is "(discontinued)", each keeping its adapter so that existing entries can be removed; the documentation links of Gemini CLI, Goose, Devin Desktop and Roo Code are current. Pi and Junie leave the dispositions, which now hold Kilo Code and Antigravity CLI (both roadmap, with the verified reasons). The skills pack targets state that Cursor and Copilot read `.agents/skills/` natively.
+- **The install docs describe the published install.** One path per client: the plugin for Claude Code and the extension for VS Code (both from 1.1.0), and `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply` for every other client, which is also the 1.0.x route. Every `npx` command carries `@1`. The docs lead with the automatic install of the IRIS-side classes (the first server to connect deploys and upgrades them) and present IPM only as the fallback where that cannot run, with its consequence: once IPM owns the classes, upgrades go through `zpm` too, and `zpm "uninstall iris-execute-mcp-v2"` returns to the automatic install. Clone-and-build instructions and the local `dist/index.js` entry points moved to the README's Contributing section. The docs say that IRIS 2023.1 or later is supported on a best-effort basis, and that CI tests 2026.1 to 2026.2.
+- **Documentation fixes.** `IRIS_USERNAME` is documented as required in every table (it has no default). The `IRIS_ACCEPT_LANGUAGE` text describes IRIS's per-request language choice. The README documents the manual cleanup after `zpm "uninstall iris-execute-mcp-v2"` (the web application and the `%ALL` mapping stay). The payload table is re-measured. Broken anchors and links in the docs are fixed, and a test now checks every relative link of every Markdown file.
+- **The README's skills-pack limit about the home directory is gone.** `--project ~` and a run from `~` are refused instead of being planned.
+
+## [1.1.0 detail] — Story 42.8: Claude Code Plugin and Registry Listings
+
+The suite gets a Claude Code plugin, an MCP Registry listing and a live IPM channel. The first release with them is `1.1.0` (the changeset is `minor` for `@iris-mcp/client-config`, and the fixed group moves every package). No tool, prompt, governance or wire change is made: the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), the frozen goldens and the tools-list snapshot are byte-unchanged, and `BOOTSTRAP_VERSION` does not move.
+
+### Added
+
+- **A Claude Code plugin (AC 42.8.1).** The skills pack directory is a plugin root: `.claude-plugin/plugin.json` (plugin `iris-mcp`, display name "IRIS MCP Server Suite", at the shared version) and `.mcp.json` (the five servers `dev`, `admin`, `data`, `interop` and `ops`, each `npx -y @iris-mcp/<name>@1`). Claude Code asks for six options (host, web port, namespace, HTTPS, user name, password: the password goes to the system keychain), and they set the `IRIS_*` variables of every server. The repository's `.claude-plugin/marketplace.json` lists the plugin pinned to the release tag with a `git-subdir` source. `gen:pack` writes the plugin files from `skills-pack-src/plugin/`, and `claude plugin validate` passes on the plugin and on the marketplace. The plugin carries no hook: the compile-on-save hook of AC 42.8.3 is evaluated and filed as a candidate.
+- **The installer knows the plugin (DW-625).** `skills install --client claude-code` reads `enabledPlugins["iris-mcp@iris-mcp"]` from the user, project and local settings, the highest file that has the key winning, and installs only the always-on rule when the plugin is enabled. It names the file that decided, warns about a settings file that is not valid JSON, and removes skill files it installed earlier under the existing manifest rules. Managed settings, `--settings`, `--add-dir` and synced plugins are not read.
+- **Generated listings.** `pnpm gen:listings` writes the five `packages/iris-*-mcp/server.json` files (the MCP Registry entries) and the marketplace from the package manifests; `gen:listings:check` is a root gate in CI and in the release's `prepare`. `check:provenance` has a `plugin` rule: the notice at the plugin root, the plugin and marketplace names, the five server keys, the marketplace pin and no endorsement wording in any listing (the deny-list is now shared in `scripts/lib/endorsement.mjs`).
+- **The MCP Registry channel.** The release has a fifth channel, last, that publishes the five listings with `mcp-publisher` v1.8.8 (downloaded and verified by its sha256), logged in with the job's GitHub OIDC token (no secret). It asks the registry first, waits until npm serves each package version and recovers a failed upload by a fresh lookup. The registry is in preview, so a `not ready` in a rehearsal is reported without failing the run, and a failed upload fails a release only after every other channel has run.
+- **A registry-shaped IPM gate (DW-694).** CI's `ipm` job also tars the staged packaging root the way the IPM registry serves it (GNU tar inside the Linux container, `./module.xml` at the top, no `.git`) and `load`s that archive on a fresh container per edition, besides the archive IPM builds. The release stages the same tree with the same function (`stagePackagingRoot`).
+
+### Changed
+
+- **The IPM channel is enabled.** The push trusts only GitHub's three published SSH host keys (`StrictHostKeyChecking=yes`, never `accept-new`), and `IPM_DIST_DEPLOY_KEY` is redacted from every report line. A rerun of a version the IPM registry already lists checks the tag `v<version>` on the packaging repository instead of failing: the identical tree is `already published`. Until the owner creates the packaging repository, a rehearsal is `not ready` for IPM and the release is blocked.
+- **`pnpm run version` stamps the listings.** After the bootstrap it runs `gen-pack` and `gen-listings`, so `plugin.json`, the marketplace `ref` and the five `server.json` files follow the shared version, and `prepare` refuses any of them off the release version.
+- **`release verify`** also checks that the five servers are listed on the MCP Registry at the version and that the packaging repository holds the tag.
+
+## [1.1.0 detail] — Story 42.7: VS Code Extension Publish
+
+The VS Code extension can be published. The release workflow now has a VS Code Marketplace channel and an Open VSX channel, both enabled, and
+the extension joins the shared version. No `@iris-mcp/*` package changes, so this story adds no changeset, and no tool, prompt, governance or
+wire change is made: the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), the frozen goldens and the tools-list snapshot are
+byte-unchanged, and `BOOTSTRAP_VERSION` does not move. `v1.0.0` publishes npm only; the first release with the extension on the stores is the one
+after it, once the owner has created the publisher and the namespace.
+
+### Added
+
+- **The Marketplace and Open VSX channels are enabled (AC 42.7.2).** After npm, the release uploads the extension's vsix with `vsce publish
+  --oidc` (trusted publishing, no Marketplace secret: Azure DevOps global personal access tokens stop working on 2026-12-01) and then with
+  `ovsx publish`, which uses trusted publishing too unless the `OVSX_PAT` secret is set (the first Open VSX publish). Both channels are enabled
+  by default; the IPM channel stays disabled until Story 42.8. The two store CLIs are exact `devDependencies` of the extension (`@vscode/vsce`
+  `4.1.1`, `ovsx` `1.4.0`), installed in `rehearse` and `publish` with `npm ci --ignore-scripts`.
+- **A read-only store lookup before each upload.** A version already on a store reads `already published` with no upload (a rerun of the same
+  tag), an exit 0 that printed `is already published. Skipping publish.` is also `already published`, and an answer that cannot be judged (an
+  unreadable store, or a 200 that is not the store's own answer) stops the release before that store's upload. The Open VSX namespace is read too: a missing one is `skipped (not set up: ...)` in a rehearsal and in a release (it does not fail the run, the channels after it still run, and the end of the report and a `::warning::` annotation list it; run the same tag again after `npx ovsx create-namespace` to publish it).
+  The OIDC variables reach only `npm publish`, `vsce publish` and `ovsx publish`, `OVSX_PAT` reaches only `ovsx publish`, and `VSCE_PAT` and
+  `OVSX_PAT` join the secrets that no other child process sees.
+- **The extension follows the shared version.** `pnpm run version` stamps the extension's `package.json` and `package-lock.json` and renames the
+  `## [Unreleased]` heading of its `CHANGELOG.md` to `## [<version>] — <date>`. `prepare` refuses a manifest, a lock or (in a release) a changelog
+  heading that is off the release version, and `publish` refuses a vsix that is not at the release version.
+- **A `launcher` CI job (DW-532).** The extension's whole test suite runs on `ubuntu-24.04`, `macos-15` and `windows-2025`.
+
+### Changed
+
+- **The extension has the publisher `iris-mcp` and is `"private": true` (DW-389).** `npm publish` can never send it to npm, and a test finds
+  any other tracked manifest that is not private and not one of the eight packages. The extension's README is the store listing.
+- **The extension's CLI spawns pass an explicit working directory (DW-663).** The clients CLI runs in the first workspace folder, or in the
+  user's home directory with no folder open; the governance CLI runs in the user's home directory.
+- **The launcher's test suite is green on macOS and Linux (DW-532).** Four tests no longer pin a `C:\` path, and one activation test no longer
+  waits on a render that was already on screen.
+
 ## [1.0.0] — 2026-11-20 — Story 42.6: Tarball Smoke and 1.0.0 Publish
 
 The first public release. All eight `@iris-mcp/*` packages are at `1.0.0`, one shared version. The release workflow publishes them to npm with

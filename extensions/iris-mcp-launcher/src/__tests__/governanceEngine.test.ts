@@ -9,6 +9,8 @@
  * (`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_PROFILES`) or an ambient governance
  * channel — ever reaches the spawned process's environment.
  */
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildGovernanceCliEnv,
@@ -24,6 +26,11 @@ import {
 } from "../governanceEngine.js";
 import { PACKAGE_NPM_NAME } from "../definitions.js";
 import type { LauncherSettings } from "../types.js";
+
+/** An absolute path on every OS (a `C:` drive-letter literal is not absolute on POSIX). */
+const ABSOLUTE_REPO = path.resolve(os.tmpdir(), "iris-execute-mcp-v2");
+/** The working directory the fake spawns are given. */
+const SPAWN_CWD = path.resolve(os.tmpdir(), "spawn-cwd");
 
 function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
   return {
@@ -82,14 +89,14 @@ describe("resolveGovernanceCli — resolution order mirrors 31.6", () => {
 
   it("local mode: developmentRepoPath → process.execPath + packages/shared/dist/cli/governance-cli.js + ELECTRON_RUN_AS_NODE=1", async () => {
     const resolution = await resolveGovernanceCli(
-      settings({ developmentRepoPath: "C:\\dev\\iris-execute-mcp-v2" }),
+      settings({ developmentRepoPath: ABSOLUTE_REPO }),
       false,
       async () => true,
     );
     if (!resolution.ok) throw new Error("expected ok resolution");
     expect(resolution.target.command).toBe(process.execPath);
     expect(resolution.target.baseArgs).toEqual([
-      "C:\\dev\\iris-execute-mcp-v2\\packages\\shared\\dist\\cli\\governance-cli.js",
+      path.join(ABSOLUTE_REPO, "packages", "shared", "dist", "cli", "governance-cli.js"),
     ]);
     expect(resolution.target.extraEnv).toEqual({ ELECTRON_RUN_AS_NODE: "1" });
     expect(resolution.target.mode).toBe("local");
@@ -111,7 +118,7 @@ describe("resolveGovernanceCli — resolution order mirrors 31.6", () => {
 
   it("fail-closed: an unbuilt CLI (no dist/cli/governance-cli.js) is an actionable error, never a silent npx fallback", async () => {
     const resolution = await resolveGovernanceCli(
-      settings({ developmentRepoPath: "C:\\dev\\repo" }),
+      settings({ developmentRepoPath: ABSOLUTE_REPO }),
       false,
       async () => false,
     );
@@ -266,6 +273,7 @@ describe("runGovernanceCli — captured output, never throws", () => {
       target,
       { kind: "set", file: "/p/g.json", profile: "prod", key: "iris_doc_put", value: false },
       { PATH: "/usr/bin" },
+      SPAWN_CWD,
       fakeSpawn({
         stdout: "Set ok\n",
         status: 0,
@@ -290,6 +298,7 @@ describe("runGovernanceCli — captured output, never throws", () => {
       target,
       { kind: "universe", profile: "default" },
       {},
+      SPAWN_CWD,
       fakeSpawn({
         stdout: "{}\n",
         onSpawn: (command, args) => {
@@ -320,6 +329,7 @@ describe("runGovernanceCli — captured output, never throws", () => {
       localTarget,
       { kind: "validate", file: "/p/g.json" },
       {},
+      SPAWN_CWD,
       fakeSpawn({
         stdout: "{}\n",
         onSpawn: (command, args) => {
@@ -347,6 +357,7 @@ describe("runGovernanceCli — captured output, never throws", () => {
       target,
       { kind: "universe", profile: "default" },
       {},
+      SPAWN_CWD,
       hungSpawn,
       10,
       "linux",
@@ -361,6 +372,7 @@ describe("runGovernanceCli — captured output, never throws", () => {
       target,
       { kind: "validate", file: "/p/g.json" },
       {},
+      SPAWN_CWD,
       fakeSpawn({ error: "spawn npx ENOENT" }),
     );
     expect(result.status).toBeNull();
@@ -368,11 +380,22 @@ describe("runGovernanceCli — captured output, never throws", () => {
   });
 
   it("a synchronous spawn throw comes back as spawnError", async () => {
-    const result = await runGovernanceCli(target, { kind: "diff", file: "/p/g.json" }, {}, () => {
+    const result = await runGovernanceCli(target, { kind: "diff", file: "/p/g.json" }, {}, SPAWN_CWD, () => {
       throw new Error("synchronous spawn failure");
     });
     expect(result.status).toBeNull();
     expect(result.spawnError).toBe("synchronous spawn failure");
+  });
+
+  it("DW-663: the spawn receives the caller's cwd and the scrubbed env, never an inherited directory", async () => {
+    let seen: { env: Record<string, string>; cwd: string } | undefined;
+    const recordingSpawn: SpawnImpl = (command, args, options) => {
+      seen = options;
+      return fakeSpawn({ stdout: "{}\n" })(command, args, options);
+    };
+    const home = path.resolve(os.tmpdir(), "home-directory");
+    await runGovernanceCli(target, { kind: "validate", file: "/p/g.json" }, { PATH: "/usr/bin" }, home, recordingSpawn);
+    expect(seen).toEqual({ env: { PATH: "/usr/bin" }, cwd: home });
   });
 
   it("a non-zero exit carries status + stderr through", async () => {
@@ -380,6 +403,7 @@ describe("runGovernanceCli — captured output, never throws", () => {
       target,
       { kind: "unset", file: "/p/g.json", profile: undefined, key: "k" },
       {},
+      SPAWN_CWD,
       fakeSpawn({ status: 1, stderr: '"k" is not set — nothing to unset.\n' }),
     );
     expect(result.status).toBe(1);

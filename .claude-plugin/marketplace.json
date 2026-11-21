@@ -1,0 +1,21 @@
+{
+  "name": "iris-mcp",
+  "owner": {
+    "name": "jbrandtmse"
+  },
+  "metadata": {
+    "description": "The Claude Code plugin of the IRIS MCP Server Suite. This is an independent community project. It is not made, endorsed or supported by InterSystems."
+  },
+  "plugins": [
+    {
+      "name": "iris-mcp",
+      "description": "Five MCP servers for InterSystems IRIS (development, administration, data, interoperability and operations) and the IRIS MCP skills pack. This is an independent community project. It is not made, endorsed or supported by InterSystems.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/jbrandtmse/iris-execute-mcp-v2.git",
+        "path": "packages/client-config/skills-pack",
+        "ref": "v1.1.0"
+      }
+    }
+  ]
+}

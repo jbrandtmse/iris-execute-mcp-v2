@@ -404,7 +404,7 @@ describe("gen:pack, the rule rows through the real CLI (scratch copy)", () => {
     expect(treeLines(scratch)).toEqual(before);
     const check = runScript(scratch, GEN_PACK, ["--check"]);
     expect(check.status, check.stderr).toBe(0);
-    expect(check.stdout).toContain("23 pack file(s) match their sources");
+    expect(check.stdout).toContain("25 pack file(s) match their sources");
   });
 
   it("writes all three forms of every byte variant, byte for byte, and a second run changes nothing", () => {

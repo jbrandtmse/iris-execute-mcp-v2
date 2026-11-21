@@ -4,15 +4,17 @@ import {
   appendFileSync,
   copyFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyGeneratorInputs } from "./gen-bootstrap-scratch.js";
 
@@ -40,7 +42,6 @@ const REPO_ROOT = resolve(__dirname, "../../../..");
 const EMBED_RELATIVE_PATH = join("packages", "shared", "src", "bootstrap-classes.ts");
 const MANIFEST_RELATIVE_PATH = join("packages", "shared", "package.json");
 const STATE_RELATIVE_PATH = join("scripts", "bootstrap-sequence.json");
-const IPM_MANIFEST_RELATIVE_PATH = join("ipm", "module.xml");
 const IPM_GUARD_RELATIVE_PATH = join("ipm", "preload", "ExecuteMCPv2", "InstallGuard.cls");
 const PAST_SECONDS = 1_000_000_000; // 2001-09-09, well before any real write
 
@@ -49,13 +50,21 @@ let script = "";
 let embedPath = "";
 let statePath = "";
 let manifestPath = "";
-let ipmManifestPath = "";
 let guardPath = "";
 
-function runGenerator(): { status: number | null; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, [script], { encoding: "utf8", cwd: scratch, timeout: 60000 });
+function runGenerator(args: string[] = []): { status: number | null; stdout: string; stderr: string } {
+  const result = spawnSync(process.execPath, [script, ...args], { encoding: "utf8", cwd: scratch, timeout: 60000 });
   expect(result.error, "the generator started").toBeUndefined();
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+
+/** The number of classes in the scratch generator's `classes[]` literal. */
+function rosterSize(): number {
+  const source = readFileSync(join(scratch, "scripts", "gen-bootstrap.mjs"), "utf8");
+  const literal = /const classes = \[([\s\S]*?)\n\];/.exec(source)?.[1] ?? "";
+  const size = [...literal.matchAll(/\{\s*name:\s*'([^']+)',\s*path:\s*'([^']+)'\s*\}/g)].length;
+  expect(size, "the roster literal was read").toBeGreaterThan(0);
+  return size;
 }
 
 function versionOf(content: string): string {
@@ -85,7 +94,6 @@ describe("gen-bootstrap writes the embed only when its content changes (DW-591)"
     manifestPath = join(scratch, MANIFEST_RELATIVE_PATH);
     statePath = join(scratch, STATE_RELATIVE_PATH);
     embedPath = join(scratch, EMBED_RELATIVE_PATH);
-    ipmManifestPath = join(scratch, IPM_MANIFEST_RELATIVE_PATH);
     guardPath = join(scratch, IPM_GUARD_RELATIVE_PATH);
   });
 
@@ -213,7 +221,6 @@ describe("gen-bootstrap stamps <semver>+<sequence>.<hash> (DW-508)", () => {
     manifestPath = join(scratch, MANIFEST_RELATIVE_PATH);
     statePath = join(scratch, STATE_RELATIVE_PATH);
     embedPath = join(scratch, EMBED_RELATIVE_PATH);
-    ipmManifestPath = join(scratch, IPM_MANIFEST_RELATIVE_PATH);
     guardPath = join(scratch, IPM_GUARD_RELATIVE_PATH);
   });
 
@@ -350,10 +357,9 @@ describe("gen-bootstrap stamps <semver>+<sequence>.<hash> (DW-508)", () => {
   });
 });
 
-// Story 42.4 (AD-14, DW-674): the generator also owns ipm/module.xml and the IPM install guard. The manifest is output-only,
-// written only when its content changes (the dist freshness check is mtime-based, DW-591); the guard is stamped like Setup and
-// its content joins the marker's hash.
-describe("gen-bootstrap writes ipm/module.xml and stamps the IPM install guard (Story 42.4)", () => {
+
+// Story 42.4 (AD-14, DW-674): the generator also stamps the IPM install guard, whose content joins the marker's hash.
+describe("gen-bootstrap stamps the IPM install guard (Story 42.4)", () => {
   beforeEach(() => {
     scratch = mkdtempSync(join(tmpdir(), "gen-bootstrap-ipm-"));
     copyGeneratorInputs(scratch, REPO_ROOT);
@@ -361,7 +367,6 @@ describe("gen-bootstrap writes ipm/module.xml and stamps the IPM install guard (
     manifestPath = join(scratch, MANIFEST_RELATIVE_PATH);
     statePath = join(scratch, STATE_RELATIVE_PATH);
     embedPath = join(scratch, EMBED_RELATIVE_PATH);
-    ipmManifestPath = join(scratch, IPM_MANIFEST_RELATIVE_PATH);
     guardPath = join(scratch, IPM_GUARD_RELATIVE_PATH);
   });
 
@@ -369,79 +374,9 @@ describe("gen-bootstrap writes ipm/module.xml and stamps the IPM install guard (
     if (scratch) rmSync(scratch, { recursive: true, force: true });
   });
 
-  it("the checked-in ipm/module.xml is exactly what the generator writes, so a run on a clean tree rewrites neither the embed nor the manifest", () => {
-    // The scratch tree holds copies of the real embed, manifest, guard, classes and state: the real files are only read.
-    copyFileSync(join(REPO_ROOT, EMBED_RELATIVE_PATH), embedPath);
-    const checkedIn = readFileSync(ipmManifestPath, "utf8");
-    expect(checkedIn, "the scratch copy is the checked-in manifest").toBe(readFileSync(join(REPO_ROOT, IPM_MANIFEST_RELATIVE_PATH), "utf8"));
-    utimesSync(ipmManifestPath, PAST_SECONDS, PAST_SECONDS);
-    utimesSync(embedPath, PAST_SECONDS, PAST_SECONDS);
-
-    const run = runGenerator();
-
-    expect(run.status, run.stderr).toBe(0);
-    expect(run.stdout, "the embed is out of date: run pnpm gen:bootstrap").toMatch(/Unchanged .*bootstrap-classes\.ts/);
-    expect(run.stdout, "ipm/module.xml differs from the generator's output: run pnpm gen:bootstrap").toMatch(/Unchanged .*module\.xml/);
-    expect(run.stdout, "the generator rewrote an output: run pnpm gen:bootstrap and commit the result").not.toContain("Generated");
-    expect(readFileSync(ipmManifestPath, "utf8"), "the manifest keeps its content").toBe(checkedIn);
-    expect(statSync(ipmManifestPath).mtimeMs, "and its mtime").toBe(PAST_SECONDS * 1000);
-    expect(statSync(embedPath).mtimeMs).toBe(PAST_SECONDS * 1000);
-  });
-
-  it("an unchanged run keeps the manifest's mtime and content, and a changed run rewrites it", () => {
-    rmSync(ipmManifestPath);
-    const first = runGenerator();
-    expect(first.status, first.stderr).toBe(0);
-    expect(first.stdout).toMatch(/Generated .*module\.xml/);
-    const written = readFileSync(ipmManifestPath, "utf8");
-    expect(written, "ipm/module.xml differs from the generator's output: run pnpm gen:bootstrap").toBe(readFileSync(join(REPO_ROOT, IPM_MANIFEST_RELATIVE_PATH), "utf8"));
-    utimesSync(ipmManifestPath, PAST_SECONDS, PAST_SECONDS);
-
-    const second = runGenerator();
-    expect(second.status, second.stderr).toBe(0);
-    expect(second.stdout).toMatch(/Unchanged .*module\.xml/);
-    expect(readFileSync(ipmManifestPath, "utf8")).toBe(written);
-    expect(statSync(ipmManifestPath).mtimeMs, "the unchanged manifest keeps its mtime").toBe(PAST_SECONDS * 1000);
-  });
-
-  it("a manifest edited by hand is written back to the generated content", () => {
-    const first = runGenerator();
-    expect(first.status, first.stderr).toBe(0);
-    const generated = readFileSync(ipmManifestPath, "utf8");
-    const edited = generated.replace('<Resource Name="ExecuteMCPv2.Utils.CLS"/>', '<Resource Name="ExecuteMCPv2.Utilz.CLS"/>');
-    expect(edited, "the edit changed the manifest").not.toBe(generated);
-    writeFileSync(ipmManifestPath, edited);
-    utimesSync(ipmManifestPath, PAST_SECONDS, PAST_SECONDS);
-
-    const run = runGenerator();
-
-    expect(run.status, run.stderr).toBe(0);
-    expect(run.stdout).toMatch(/Generated .*module\.xml/);
-    expect(readFileSync(ipmManifestPath, "utf8"), "the hand edit is gone").toBe(generated);
-    expect(statSync(ipmManifestPath).mtimeMs, "the rewrite has a new mtime").toBeGreaterThan(PAST_SECONDS * 1000);
-  });
-
-  it("a changed shared version moves <Version> and the marker's semver, and nothing else in the manifest", () => {
-    const first = runGenerator();
-    expect(first.status, first.stderr).toBe(0);
-    const before = readFileSync(ipmManifestPath, "utf8");
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { version: string };
-    expect(before).toContain(`<Version>${manifest.version}</Version>`);
-
-    writeFileSync(manifestPath, JSON.stringify({ ...manifest, version: "7.8.9" }));
-    const run = runGenerator();
-
-    expect(run.status, run.stderr).toBe(0);
-    const after = readFileSync(ipmManifestPath, "utf8");
-    expect(after).toContain("<Version>7.8.9</Version>");
-    expect(after.replace("<Version>7.8.9</Version>", `<Version>${manifest.version}</Version>`)).toBe(before);
-    expect(versionOf(readFileSync(embedPath, "utf8"))).toMatch(/^7\.8\.9\+/);
-  });
-
   it("an install guard without the placeholder line is an error that names the file and writes nothing", () => {
     const guard = readFileSync(guardPath, "utf8");
     writeFileSync(guardPath, guard.replace('Parameter BOOTSTRAPVERSION = "dev";', 'Parameter BOOTSTRAPVERSION = "stamped by hand";'));
-    const manifestBefore = readFileSync(ipmManifestPath, "utf8");
     const stateBefore = readFileSync(statePath, "utf8");
 
     const run = runGenerator();
@@ -451,7 +386,6 @@ describe("gen-bootstrap writes ipm/module.xml and stamps the IPM install guard (
     expect(run.stderr).toContain("ipm/preload/ExecuteMCPv2/InstallGuard.cls");
     expect(run.stderr).toContain('Parameter BOOTSTRAPVERSION = "dev";');
     expect(existsSync(embedPath), "no embed was written").toBe(false);
-    expect(readFileSync(ipmManifestPath, "utf8"), "the manifest is untouched").toBe(manifestBefore);
     expect(readFileSync(statePath, "utf8"), "and so is the sequence state").toBe(stateBefore);
   });
 
@@ -471,14 +405,12 @@ describe("gen-bootstrap writes ipm/module.xml and stamps the IPM install guard (
 
   it("a missing install guard is an error that names the file and writes nothing", () => {
     rmSync(guardPath);
-    const manifestBefore = readFileSync(ipmManifestPath, "utf8");
 
     const run = runGenerator();
 
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain("InstallGuard.cls");
     expect(existsSync(embedPath)).toBe(false);
-    expect(readFileSync(ipmManifestPath, "utf8")).toBe(manifestBefore);
   });
 
   it("the guard's content joins the marker: editing it raises the sequence by 1, moves the hash and reaches the embedded guard, not Setup", () => {
@@ -510,12 +442,231 @@ describe("gen-bootstrap writes ipm/module.xml and stamps the IPM install guard (
     expect(readFileSync(guardPath, "utf8"), "the disk copy keeps the placeholder").toContain('Parameter BOOTSTRAPVERSION = "dev";');
   });
 
-  it("the install guard stays out of classes[]: the embed holds the same 35 bootstrapped classes", () => {
+  it("the install guard stays out of classes[]: the embed holds the same bootstrapped classes as the roster", () => {
     const run = runGenerator();
     expect(run.status, run.stderr).toBe(0);
     const embed = readFileSync(embedPath, "utf8");
     const classBlock = embed.slice(embed.indexOf("export const BOOTSTRAP_CLASSES"), embed.indexOf("export function getBootstrapClasses"));
     expect(classBlock).not.toContain("ExecuteMCPv2.InstallGuard");
-    expect(embed).toContain("Contains all 35 production classes");
+    expect(embed).toContain(`Contains all ${rosterSize()} production classes`);
+  });
+});
+
+// Story 42.8 (decision #122; AD-14): the generator's ipm mode writes the committed IPM tree -- the root module.xml, one stamped file per
+// class under ipm/src/cls, and the stamped guard under preload/ -- and only at the version step. The scratch tree starts with none of
+// it. The oracle for a tree file is its SOURCE (Rule #36): the source with line ends normalized, the placeholder line replaced by the
+// marker for Setup and the guard, and a final newline.
+describe("gen-bootstrap --ipm writes the stamped IPM tree only at the version step (Story 42.8)", () => {
+  const TREE_MANIFEST = () => join(scratch, "module.xml");
+  const TREE_UTILS = () => join(scratch, "ipm", "src", "cls", "ExecuteMCPv2", "Utils.cls");
+  const TREE_SETUP = () => join(scratch, "ipm", "src", "cls", "ExecuteMCPv2", "Setup.cls");
+  const TREE_GUARD = () => join(scratch, "preload", "ipm", "src", "cls", "ExecuteMCPv2", "InstallGuard.cls");
+  /** The refusal text at the scratch world's shared version, read from its packages/shared/package.json. */
+  const refusal = (): RegExp => {
+    const { version } = JSON.parse(readFileSync(manifestPath, "utf8")) as { version: string };
+    const v = version.replace(/\./g, "\\.");
+    return new RegExp(`the IPM tree is already at ${v}; it is regenerated only by the version step \\(pnpm run version\\), so main keeps the content the registry serves for ${v}\\. Pass --force only to repair a damaged tree\\.`);
+  };
+  /** The files the tree holds for the scratch roster: one per class, the guard and module.xml. */
+  const treeFileCount = (): number => rosterSize() + 2;
+
+  /** Every file under `directory`, relative with forward slashes, sorted. */
+  function filesUnder(directory: string, base = directory): string[] {
+    if (!existsSync(directory)) return [];
+    return readdirSync(directory, { withFileTypes: true })
+      .flatMap((entry) => (entry.isDirectory() ? filesUnder(join(directory, entry.name), base) : [relative(base, join(directory, entry.name)).split(sep).join("/")]))
+      .sort();
+  }
+  /** The tree as the scratch repository holds it: the root manifest, the files under ipm/src and the files under preload, with their text. */
+  function treeSnapshot(): Record<string, string> {
+    const snapshot: Record<string, string> = {};
+    if (existsSync(TREE_MANIFEST())) snapshot["module.xml"] = readFileSync(TREE_MANIFEST(), "utf8");
+    for (const top of ["ipm/src", "preload"]) for (const file of filesUnder(join(scratch, top))) snapshot[`${top}/${file}`] = readFileSync(join(scratch, top, file), "utf8");
+    return snapshot;
+  }
+  /** The text a source file becomes in the tree, with `marker` for the one placeholder line it may carry. */
+  function expectedFrom(source: string, marker: string): string {
+    const text = readFileSync(source, "utf8").replace(/\r\n/g, "\n").trimEnd();
+    return `${text.replace('Parameter BOOTSTRAPVERSION = "dev";', `Parameter BOOTSTRAPVERSION = "${marker}";`)}\n`;
+  }
+
+  beforeEach(() => {
+    scratch = mkdtempSync(join(tmpdir(), "gen-bootstrap-tree-"));
+    copyGeneratorInputs(scratch, REPO_ROOT);
+    script = join(scratch, "scripts", "gen-bootstrap.mjs");
+    manifestPath = join(scratch, MANIFEST_RELATIVE_PATH);
+    statePath = join(scratch, STATE_RELATIVE_PATH);
+    embedPath = join(scratch, EMBED_RELATIVE_PATH);
+    guardPath = join(scratch, IPM_GUARD_RELATIVE_PATH);
+  });
+
+  afterEach(() => {
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it("a plain run writes no IPM file at all: the tree is not an output of pnpm gen:bootstrap", () => {
+    const run = runGenerator();
+
+    expect(run.status, run.stderr).toBe(0);
+    expect(existsSync(embedPath)).toBe(true);
+    expect(treeSnapshot(), "no module.xml, no file under ipm/src, no file under preload").toEqual({});
+    expect(existsSync(join(scratch, "module.xml"))).toBe(false);
+    expect(existsSync(join(scratch, "ipm", "src"))).toBe(false);
+    expect(existsSync(join(scratch, "preload"))).toBe(false);
+  });
+
+  it("--ipm on a repository with no tree (the first generation, at the shared version) writes module.xml, one file per class and the guard, each the stamped source", () => {
+    const run = runGenerator(["--ipm"]);
+
+    expect(run.status, run.stderr).toBe(0);
+    const marker = versionOf(readFileSync(embedPath, "utf8"));
+    const shared = JSON.parse(readFileSync(manifestPath, "utf8")) as { version: string };
+    const snapshot = treeSnapshot();
+    const classFiles = Object.keys(snapshot).filter((file) => file.startsWith("ipm/src/cls/ExecuteMCPv2/"));
+    expect(classFiles, "one file per class of classes[]").toHaveLength(rosterSize());
+    expect(Object.keys(snapshot).filter((file) => file.startsWith("preload/"))).toEqual(["preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls"]);
+    expect(Object.keys(snapshot)).toHaveLength(treeFileCount());
+    expect(snapshot["module.xml"]).toContain(`<Version>${shared.version}</Version>`);
+    expect(snapshot["module.xml"]).toContain("<SourcesRoot>ipm/src</SourcesRoot>");
+    for (const file of classFiles) {
+      const source = join(scratch, "src", file.slice("ipm/src/cls/".length));
+      expect(snapshot[file], file).toBe(expectedFrom(source, marker));
+    }
+    expect(snapshot["preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls"]).toBe(expectedFrom(guardPath, marker));
+    expect(snapshot["ipm/src/cls/ExecuteMCPv2/Setup.cls"]).toContain(`Parameter BOOTSTRAPVERSION = "${marker}";`);
+    expect(Object.values(snapshot).some((text) => text.includes('Parameter BOOTSTRAPVERSION = "dev";')), "no file holds the dev placeholder").toBe(false);
+    expect(run.stdout).toContain(`${treeFileCount()} files (${treeFileCount()} written, 0 unchanged, 0 removed)`);
+    expect(readFileSync(guardPath, "utf8"), "the dev source is untouched").toContain('Parameter BOOTSTRAPVERSION = "dev";');
+
+    const check = runGenerator(["--ipm-check"]);
+    expect(check.status, check.stderr).toBe(0);
+    expect(check.stdout).toContain("gen:ipm:check: OK");
+  });
+
+  it("--ipm again at the same version refuses with exit 2 and the text, and writes nothing: the files keep their content and mtime", () => {
+    expect(runGenerator(["--ipm"]).status).toBe(0);
+    const before = treeSnapshot();
+    for (const file of [TREE_MANIFEST(), TREE_SETUP(), TREE_GUARD()]) utimesSync(file, PAST_SECONDS, PAST_SECONDS);
+
+    const run = runGenerator(["--ipm"]);
+
+    expect(run.status, run.stderr).toBe(2);
+    expect(run.stderr).toMatch(refusal());
+    expect(treeSnapshot()).toEqual(before);
+    for (const file of [TREE_MANIFEST(), TREE_SETUP(), TREE_GUARD()]) expect(statSync(file).mtimeMs, file).toBe(PAST_SECONDS * 1000);
+  });
+
+  it("a class edited and --ipm at the same version: the embed moves by one in sequence, the refusal exits 2, and the tree is the released content untouched", () => {
+    expect(runGenerator(["--ipm"]).status).toBe(0);
+    const released = treeSnapshot();
+    const releasedMarker = versionOf(readFileSync(embedPath, "utf8"));
+    appendFileSync(join(scratch, "src", "ExecuteMCPv2", "Utils.cls"), "\n/// edited after the release\n");
+
+    const run = runGenerator(["--ipm"]);
+
+    expect(run.status, run.stderr).toBe(2);
+    expect(run.stderr).toMatch(refusal());
+    const embedded = versionOf(readFileSync(embedPath, "utf8"));
+    expect(sequenceOf(readFileSync(embedPath, "utf8")), "the embed was written as plain gen:bootstrap writes it").toBe(Number(/\+(\d+)\./.exec(releasedMarker)?.[1]) + 1);
+    expect(embedded).not.toBe(releasedMarker);
+    expect(treeSnapshot(), "the tree is the released content, byte for byte").toEqual(released);
+    expect(readFileSync(TREE_UTILS(), "utf8")).not.toContain("edited after the release");
+    const check = runGenerator(["--ipm-check"]);
+    expect(check.status, `the tree still hashes to its own marker: ${check.stderr}`).toBe(0);
+  });
+
+  it("--ipm --force repairs the tree: it rewrites a damaged file and stamps the embed's current marker everywhere", () => {
+    expect(runGenerator(["--ipm"]).status).toBe(0);
+    writeFileSync(TREE_UTILS(), "Class ExecuteMCPv2.Utils\n{\n}\n");
+    appendFileSync(join(scratch, "src", "ExecuteMCPv2", "Utils.cls"), "\n/// edited after the release\n");
+
+    const run = runGenerator(["--ipm", "--force"]);
+
+    expect(run.status, run.stderr).toBe(0);
+    const marker = versionOf(readFileSync(embedPath, "utf8"));
+    expect(readFileSync(TREE_UTILS(), "utf8")).toBe(expectedFrom(join(scratch, "src", "ExecuteMCPv2", "Utils.cls"), marker));
+    expect(readFileSync(TREE_SETUP(), "utf8")).toContain(`Parameter BOOTSTRAPVERSION = "${marker}";`);
+    expect(readFileSync(TREE_GUARD(), "utf8")).toContain(`Parameter BOOTSTRAPVERSION = "${marker}";`);
+    expect(runGenerator(["--ipm-check"]).status).toBe(0);
+  });
+
+  it("the version step: a raised shared version lets --ipm regenerate, moving <Version>, the marker's semver and the stamps, and nothing else in module.xml", () => {
+    expect(runGenerator(["--ipm"]).status).toBe(0);
+    const before = treeSnapshot();
+    const shared = JSON.parse(readFileSync(manifestPath, "utf8")) as { version: string };
+    writeFileSync(manifestPath, JSON.stringify({ ...shared, version: "7.8.9" }));
+
+    const run = runGenerator(["--ipm"]);
+
+    expect(run.status, run.stderr).toBe(0);
+    const marker = versionOf(readFileSync(embedPath, "utf8"));
+    expect(marker).toMatch(/^7\.8\.9\+/);
+    const after = treeSnapshot();
+    expect(after["module.xml"]).toContain("<Version>7.8.9</Version>");
+    expect((after["module.xml"] as string).replace("<Version>7.8.9</Version>", `<Version>${shared.version}</Version>`)).toBe(before["module.xml"]);
+    expect(readFileSync(TREE_SETUP(), "utf8")).toContain(`Parameter BOOTSTRAPVERSION = "${marker}";`);
+    expect(readFileSync(TREE_GUARD(), "utf8")).toContain(`Parameter BOOTSTRAPVERSION = "${marker}";`);
+    expect(Object.keys(after), "the same files").toEqual(Object.keys(before));
+    expect(runGenerator(["--ipm-check"]).status, "clean at the new version").toBe(0);
+    expect(runGenerator(["--ipm"]).status, "and frozen again until the next version").toBe(2);
+  });
+
+  it("removes the files the class list no longer names, and the directories they leave empty", () => {
+    expect(runGenerator(["--ipm"]).status).toBe(0);
+    writeFileSync(join(scratch, "ipm", "src", "cls", "ExecuteMCPv2", "Removed.cls"), "Class ExecuteMCPv2.Removed\n{\n}\n");
+    mkdirSync(join(scratch, "ipm", "src", "cls", "ExecuteMCPv2", "Gone"), { recursive: true });
+    writeFileSync(join(scratch, "ipm", "src", "cls", "ExecuteMCPv2", "Gone", "Old.cls"), "Class ExecuteMCPv2.Gone.Old\n{\n}\n");
+    writeFileSync(join(scratch, "preload", "stray.txt"), "x\n");
+
+    const run = runGenerator(["--ipm", "--force"]);
+
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toContain("3 removed");
+    expect(existsSync(join(scratch, "ipm", "src", "cls", "ExecuteMCPv2", "Removed.cls"))).toBe(false);
+    expect(existsSync(join(scratch, "ipm", "src", "cls", "ExecuteMCPv2", "Gone")), "the directory left empty is removed").toBe(false);
+    expect(existsSync(join(scratch, "preload", "stray.txt"))).toBe(false);
+    expect(runGenerator(["--ipm-check"]).status).toBe(0);
+  });
+
+  it("--ipm-check writes nothing and needs no embed: on an empty repository it fails naming the missing module.xml and the command", () => {
+    const run = runGenerator(["--ipm-check"]);
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("module.xml is missing from the repository root");
+    expect(run.stderr).toContain("pnpm gen:ipm");
+    expect(existsSync(embedPath), "no embed was written").toBe(false);
+    expect(readFileSync(statePath, "utf8")).toBe(readFileSync(join(REPO_ROOT, STATE_RELATIVE_PATH), "utf8"));
+  });
+
+  it("--ipm-check refuses a class edited by hand, naming the marker, and the repair command", () => {
+    expect(runGenerator(["--ipm"]).status).toBe(0);
+    appendFileSync(TREE_UTILS(), "// edited by hand\n");
+
+    const run = runGenerator(["--ipm-check"]);
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toMatch(/does not hash to the marker \d+\.\d+\.\d+\+\d+\.[0-9a-f]{12} it carries: the tree was edited by hand\. Run pnpm gen:ipm -- --force from a clean version commit, or restore it from git\./);
+  });
+
+  it.each([
+    [["--force"], "--force alone"],
+    [["--ipm", "--ipm-check"], "both modes"],
+    [["--ipm-check", "--force"], "--force with the check"],
+    [["--bogus"], "an unknown flag"],
+    [["--ipm", "extra"], "a stray word"],
+  ])("refuses %j (%s) with exit 2 and the usage line, and writes nothing", (args) => {
+    const run = runGenerator(args);
+
+    expect(run.status).toBe(2);
+    expect(run.stderr).toContain("usage: node scripts/gen-bootstrap.mjs [--ipm [--force] | --ipm-check]");
+    expect(existsSync(embedPath)).toBe(false);
+    expect(treeSnapshot()).toEqual({});
+  });
+
+  it("ignores a literal -- between the flags, as a package manager may pass it through", () => {
+    const run = runGenerator(["--ipm", "--", "--force"]);
+
+    expect(run.status, run.stderr).toBe(0);
+    expect(Object.keys(treeSnapshot())).toHaveLength(treeFileCount());
   });
 });

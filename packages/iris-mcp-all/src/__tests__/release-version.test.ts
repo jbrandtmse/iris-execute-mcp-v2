@@ -4,7 +4,9 @@
  * tree is never versioned, and nothing is committed, tagged or published.
  *
  * The fixture (`release-fixture.ts`) owns its state: all eight manifests at one seeded version, one synthetic `patch` changeset, and the
- * embed and `ipm/module.xml` generated for that version, committed in a git repository of its own so that the script sees a clean tree.
+ * embed, the root `module.xml` and the IPM tree generated for that version (`gen-bootstrap.mjs --ipm`, which writes the tree because it is
+ * absent), committed in a git repository of its own so that the script sees a clean tree. The version step regenerates the tree with
+ * `--ipm` (decision #122), and a second `--ipm` at the same version then refuses.
  * What a test expects is fixed by that seed and by the template (a first release lands on 1.0.0; a patch on 0.0.2 gives 0.0.3 and on
  * 1.0.0 gives 1.0.1), never by the real packages. Expected marker values come from running the generator on the fixture (Rule #36): the
  * sequence and hash that the marker keeps are the ones the generator prints before and after, and the printed `BOOTSTRAP_VERSION` move is
@@ -14,12 +16,14 @@
 
 import { afterAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { REPO_ROOT, removeLink } from "./pack-fixture";
 import { FIXTURE_GIT_ENV, PACKAGE_DIRS, SYNTHETIC_CHANGESET, commitFixture, fixtureStatus, fixtureTreeHash, makeVersionFixture, manifestOf, pendingChangesets, removeFixtures } from "./release-fixture";
 import { embeddedVersionProblems, readReleaseFacts } from "../../../../scripts/release.mjs";
+import { main as versionMain } from "../../../../scripts/release-version.mjs";
 import { versionProblems } from "../../../../scripts/lib/release-core.mjs";
+import { ipmTreeMarker, ipmTreeProblems } from "../../../../scripts/lib/ipm-tree.mjs";
 
 afterAll(removeFixtures);
 
@@ -57,22 +61,42 @@ function generatorMarker(root: string): string {
 /** The stamped `Parameter BOOTSTRAPVERSION` lines of the embed. */
 const stamps = (root: string): string[] => [...readFileSync(join(root, "packages/shared/src/bootstrap-classes.ts"), "utf8").matchAll(/Parameter BOOTSTRAPVERSION = "([^"]+)";/g)].map((match) => match[1] as string);
 
-/** Every manifest of the fixture is at `version`, and the marker, the two stamps and `ipm/module.xml` carry it with the sequence and hash of `before`. */
+/**
+ * Every manifest of the fixture is at `version`, and the marker, the two stamps, the root `module.xml` and the IPM tree carry it with
+ * the sequence and hash of `before`: the tree stamps the embed's marker exactly, and `gen:ipm:check`'s own check finds nothing wrong.
+ */
 function expectVersioned(root: string, version: string, before: string): string {
   for (const dir of PACKAGE_DIRS) expect(manifestOf(root, dir).version, dir).toBe(version);
   const after = generatorMarker(root);
   expect(after.split("+")[0], "the marker carries the new semver").toBe(version);
   expect(after.split("+")[1], "the sequence and hash are the ones from before").toBe(before.split("+")[1]);
   expect(stamps(root), "the marker is stamped into the embedded Setup and the embedded install guard").toEqual([after, after]);
-  expect(readFileSync(join(root, "ipm/module.xml"), "utf8")).toContain(`<Version>${version}</Version>`);
+  expect(readFileSync(join(root, "module.xml"), "utf8")).toContain(`<Version>${version}</Version>`);
+  expect(ipmTreeMarker(root), "the tree's Setup and guard stamp BOOTSTRAP_VERSION exactly").toBe(after);
+  expect(ipmTreeProblems(root, { sharedVersion: version })).toEqual([]);
   const facts = readReleaseFacts(root);
+  expect(facts.ipmTreeMarker).toBe(after);
   expect(versionProblems({ versions: facts.packages.map((entry: { name: string; version: string }) => ({ name: entry.name, version: entry.version })), pending: facts.pending }, "dry-run")).toEqual([]);
-  expect(embeddedVersionProblems(facts)).toEqual([]);
+  expect(embeddedVersionProblems(facts, { release: true }), "release mode: the tree is fresh").toEqual([]);
+  expectExtensionVersioned(root, version);
   return after;
 }
 
+/** The extension follows the shared version: its manifest, both version fields of its lock (and no other field of the lock), and its changelog heading. */
+function expectExtensionVersioned(root: string, version: string, date: RegExp | string = /\d{4}-\d{2}-\d{2}/): void {
+  const extension = join(root, "extensions", "iris-mcp-launcher");
+  expect((JSON.parse(readFileSync(join(extension, "package.json"), "utf8")) as { version: string }).version, "the extension manifest").toBe(version);
+  const lock = JSON.parse(readFileSync(join(extension, "package-lock.json"), "utf8")) as { version: string; packages: Record<string, { version: string }> };
+  expect(lock.version, "the lock's own version").toBe(version);
+  expect(lock.packages[""]?.version, "the lock's root package").toBe(version);
+  expect(lock.packages["node_modules/typescript"]?.version, "a dependency of the lock is left alone").toBe("5.9.3");
+  const headings = readFileSync(join(extension, "CHANGELOG.md"), "utf8").split("\n").filter((line) => line.startsWith("## "));
+  expect(headings[0], "the first heading is renamed").toMatch(new RegExp(`^## \\[${version.replaceAll(".", "\\.")}\\] \\u2014 ${typeof date === "string" ? date : date.source}$`));
+  expect(headings.slice(1), "the older heading is untouched").toEqual(["## [0.1.0] \u2014 2026-01-01"]);
+}
+
 describe("pnpm run version -- --first-release in a throwaway fixture (AD-14)", () => {
-  it("lands all eight packages on 1.0.0; the marker, the two stamped parameters and ipm/module.xml carry it; the sequence and hash are unchanged; the move literal is the generator's", () => {
+  it("lands all eight packages on 1.0.0; the marker, the two stamped parameters, the root module.xml and the IPM tree carry it; the sequence and hash are unchanged; the move literal is the generator's", () => {
     const root = makeVersionFixture();
     const before = generatorMarker(root);
     const sequenceState = readFileSync(join(root, "scripts/bootstrap-sequence.json"), "utf8");
@@ -85,7 +109,7 @@ describe("pnpm run version -- --first-release in a throwaway fixture (AD-14)", (
     const after = expectVersioned(root, "1.0.0", before);
     expect(readFileSync(join(root, "scripts/bootstrap-sequence.json"), "utf8"), "the state file is byte-identical: a semver-only change keeps the sequence").toBe(sequenceState);
     expect(result.stderr).toContain(`version: \`BOOTSTRAP_VERSION\` moves from \`${before}\` to \`${after}\``);
-    expect(result.stderr).toContain("all 8 packages are at 1.0.0; ipm/module.xml and the embed carry it.");
+    expect(result.stderr).toContain("all 8 packages are at 1.0.0; the root module.xml, the IPM tree and the embed carry it.");
     expect(result.stderr).toContain("next steps: write the root CHANGELOG section for this release, naming the BOOTSTRAP_VERSION move above;");
     expect(result.stderr).toContain("then tag it v1.0.0, push the tag, and approve the run in the release environment.");
 
@@ -127,7 +151,7 @@ describe("pnpm run version -- --first-release in a throwaway fixture (AD-14)", (
 });
 
 describe("pnpm run version without --first-release versions the pending changeset and regenerates the embed", () => {
-  it("every package moves from 0.0.2 to one shared version, 0.0.3 (never 1.0.0), and the marker, the stamps and ipm/module.xml carry it", () => {
+  it("every package moves from 0.0.2 to one shared version, 0.0.3 (never 1.0.0), and the marker, the stamps, the root module.xml and the IPM tree carry it", () => {
     const root = makeVersionFixture();
     const before = generatorMarker(root);
     const result = run(root, "release-version.mjs");
@@ -139,14 +163,18 @@ describe("pnpm run version without --first-release versions the pending changese
 });
 
 describe("pnpm run version after the first release (the packages are at 1.0.0)", () => {
-  it("a patch changeset moves every package to 1.0.1, and the marker, the stamps and ipm/module.xml carry it", () => {
+  it("a patch changeset moves every package to 1.0.1, and the marker, the stamps, the root module.xml and the IPM tree carry it; `gen-bootstrap --ipm` then refuses", () => {
     const root = makeVersionFixture({ version: "1.0.0" });
     const before = generatorMarker(root);
     expect(before).toMatch(/^1\.0\.0\+/);
+    expect(ipmTreeMarker(root), "the fixture's tree starts at the seeded content").toBe(before);
     const result = run(root, "release-version.mjs");
     expect(result.status, result.stderr).toBe(0);
     const after = expectVersioned(root, "1.0.1", before);
     expect(result.stderr).toContain(`\`BOOTSTRAP_VERSION\` moves from \`${before}\` to \`${after}\``);
+    const again = run(root, "gen-bootstrap.mjs", ["--ipm"]);
+    expect(again.status, "the version step is the only run that writes the tree").toBe(2);
+    expect(again.stderr).toContain("the IPM tree is already at 1.0.1; it is regenerated only by the version step");
   }, 180_000);
 
   it("--first-release is refused (exit 2) naming the packages already at 1.0.0, and nothing changes", () => {
@@ -186,11 +214,11 @@ describe("pnpm run version refuses, with the files unchanged", () => {
     const root = makeVersionFixture();
     const pending = pendingChangesets(join(root, ".changeset"));
     expect(pending, "the fixture has its synthetic changeset pending").toEqual([SYNTHETIC_CHANGESET]);
-    appendFileSync(join(root, "ipm", "module.xml"), "\n");
+    appendFileSync(join(root, "module.xml"), "\n");
     const manifests = PACKAGE_DIRS.map((dir) => readFileSync(join(root, "packages", dir, "package.json"), "utf8"));
     const result = run(root, "release-version.mjs");
     expect(result.status).toBe(2);
-    expect(result.stderr).toMatch(/the tree is not clean \(M ipm\/module\.xml\)\. Commit or stash the changes, then run it again\./);
+    expect(result.stderr).toMatch(/the tree is not clean \(M module\.xml\)\. Commit or stash the changes, then run it again\./);
     expect(PACKAGE_DIRS.map((dir) => readFileSync(join(root, "packages", dir, "package.json"), "utf8"))).toEqual(manifests);
     expect(pendingChangesets(join(root, ".changeset")), "the pending changesets are still there").toEqual(pending);
   });
@@ -313,12 +341,39 @@ describe("pnpm run version exits 1 naming what it finds wrong after a step (I/O 
     const result = run(root, "release-version.mjs");
     expect(result.status, result.stderr).toBe(1);
     expect(result.stderr).toContain("generator exploded");
-    expect(result.stderr).toContain("version: gen-bootstrap failed (exit 3). Fix the generator error.");
+    expect(result.stderr).toContain("version: gen-bootstrap --ipm failed (exit 3). Fix the generator error.");
     expect(result.stderr, "changeset version already moved the packages, so a second run would refuse the dirty tree").toContain("the tree now holds a partial version: discard it with git restore . && git clean -fd");
     expect(result.stderr).not.toContain("next steps");
   }, 180_000);
 
-  it("a generator that exits 0 but stamps nothing: exit 1 naming the marker and ipm/module.xml, with the partial-version line and no next steps", () => {
+  it("a generator that stamps the embed but never writes the IPM tree (the version step run without --ipm): exit 1 naming the tree's marker and the embed's, with the partial-version line and no next steps", () => {
+    const root = makeVersionFixture();
+    const before = generatorMarker(root);
+    // The real generator, called through a wrapper that drops `--ipm`: the embed moves to the new version and the committed tree does not.
+    copyFileSync(join(root, "scripts", "gen-bootstrap.mjs"), join(root, "scripts", "gen-bootstrap-real.mjs"));
+    writeFileSync(
+      join(root, "scripts", "gen-bootstrap.mjs"),
+      [
+        'import { spawnSync } from "node:child_process";',
+        'import { fileURLToPath } from "node:url";',
+        'const real = fileURLToPath(new URL("./gen-bootstrap-real.mjs", import.meta.url));',
+        'const args = process.argv.slice(2).filter((argument) => argument !== "--ipm");',
+        'process.exit(spawnSync(process.execPath, [real, ...args], { stdio: "inherit" }).status ?? 1);',
+        "",
+      ].join("\n"),
+    );
+    commitFixture(root, "a generator that never writes the tree");
+    const result = run(root, "release-version.mjs");
+    expect(result.status, result.stderr).toBe(1);
+    const embed = stamps(root)[0] as string;
+    expect(embed.split("+")[0], "the embed moved to the new version").toBe("0.0.3");
+    expect(result.stderr).toContain(`problem: the IPM tree stamps ${before}, the embed ${embed}: the version step did not run on the final content. Run pnpm run version.`);
+    expect(result.stderr).toContain('problem: module.xml is at "0.0.2", not the shared version 0.0.3.');
+    expect(result.stderr).toContain("the tree now holds a partial version: discard it with git restore . && git clean -fd");
+    expect(result.stderr).not.toContain("next steps");
+  }, 180_000);
+
+  it("a generator that exits 0 but stamps nothing: exit 1 naming the marker and module.xml, with the partial-version line and no next steps", () => {
     const root = makeVersionFixture();
     const before = generatorMarker(root);
     writeFileSync(join(root, "scripts", "gen-bootstrap.mjs"), "process.exit(0);\n");
@@ -327,10 +382,225 @@ describe("pnpm run version exits 1 naming what it finds wrong after a step (I/O 
     expect(result.status, result.stderr).toBe(1);
     for (const dir of PACKAGE_DIRS) expect(manifestOf(root, dir).version, dir).toBe("0.0.3");
     expect(result.stderr).toContain(`problem: BOOTSTRAP_VERSION is "${before}", whose semver is not the shared version 0.0.3.`);
-    expect(result.stderr).toContain('problem: ipm/module.xml is at "0.0.2", not the shared version 0.0.3.');
+    expect(result.stderr).toContain('problem: module.xml is at "0.0.2", not the shared version 0.0.3.');
     expect(result.stderr).toContain("the tree now holds a partial version: discard it with git restore . && git clean -fd");
     expect(result.stderr).not.toContain("next steps");
     expect(result.stderr).not.toContain("the embed carry it");
+  }, 180_000);
+});
+
+/** The plugin manifest, the marketplace ref and the five server.json files of a fixture, as the version step regenerates them. */
+function listingVersions(root: string): { plugin: string; ref: string; servers: Array<{ file: string; version: string; packageVersion: string }> } {
+  const json = (relative: string): any => JSON.parse(readFileSync(join(root, relative), "utf8"));
+  return {
+    plugin: json("packages/client-config/skills-pack/.claude-plugin/plugin.json").version,
+    ref: json(".claude-plugin/marketplace.json").plugins[0].source.ref,
+    servers: ["iris-admin-mcp", "iris-data-mcp", "iris-dev-mcp", "iris-interop-mcp", "iris-ops-mcp"].map((dir) => {
+      const listing = json(`packages/${dir}/server.json`);
+      return { file: `packages/${dir}/server.json`, version: listing.version, packageVersion: listing.packages[0].version };
+    }),
+  };
+}
+
+describe("the plugin and the registry listings follow the shared version (Story 42.8, lockstep: decision #103)", () => {
+  it("the fixture starts with every listing at its seeded version", () => {
+    const root = makeVersionFixture({ version: "1.0.0" });
+    const before = listingVersions(root);
+    expect(before.plugin).toBe("1.0.0");
+    expect(before.ref).toBe("v1.0.0");
+    for (const server of before.servers) expect([server.version, server.packageVersion], server.file).toEqual(["1.0.0", "1.0.0"]);
+  }, 180_000);
+
+  it("a patch changeset regenerates plugin.json's version, the marketplace ref (v<version>) and the five server.json files, and nothing is left for embeddedVersionProblems", async () => {
+    const root = makeVersionFixture({ version: "1.0.0" });
+    expect(await versionMain([], cleanEnv(), root, () => new Date("2026-11-20T23:59:59Z"))).toBe(0);
+    const after = listingVersions(root);
+    expect(after.plugin).toBe("1.0.1");
+    expect(after.ref).toBe("v1.0.1");
+    for (const server of after.servers) expect([server.version, server.packageVersion], server.file).toEqual(["1.0.1", "1.0.1"]);
+    expect(embeddedVersionProblems(readReleaseFacts(root))).toEqual([]);
+    expect(fixtureStatus(root)).toContain(".claude-plugin/marketplace.json");
+    expect(fixtureStatus(root)).toContain("packages/client-config/skills-pack/.claude-plugin/plugin.json");
+  }, 180_000);
+
+  it("the script run as a process names the listings in its next steps", () => {
+    const root = makeVersionFixture({ version: "1.0.0" });
+    const result = run(root, "release-version.mjs");
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain("the plugin manifest (packages/client-config/skills-pack/.claude-plugin/plugin.json), the marketplace ref (.claude-plugin/marketplace.json) and the five server.json files carry it too;");
+  }, 180_000);
+
+  it("a first release puts the listings at 1.0.0", () => {
+    const root = makeVersionFixture();
+    expect(run(root, "release-version.mjs", ["--first-release"]).status).toBe(0);
+    const after = listingVersions(root);
+    expect([after.plugin, after.ref]).toEqual(["1.0.0", "v1.0.0"]);
+    expect(after.servers.map((server) => server.version)).toEqual(["1.0.0", "1.0.0", "1.0.0", "1.0.0", "1.0.0"]);
+  }, 180_000);
+
+  it("a generator that fails stops the step: exit 1 naming the script, with the partial-version line", () => {
+    const root = makeVersionFixture({ version: "1.0.0" });
+    writeFileSync(join(root, "scripts", "gen-listings.mjs"), "process.exit(3);\n");
+    commitFixture(root, "a listings generator that fails");
+    const result = run(root, "release-version.mjs");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("gen-listings.mjs failed (exit 3). Fix the generator error.");
+    expect(result.stderr).toContain("the tree now holds a partial version");
+  }, 180_000);
+
+  describe("embeddedVersionProblems refuses any listing that is off the shared version, in both modes", () => {
+    const facts = (change: (listings: any) => void): any => {
+      const root = makeVersionFixture({ version: "1.0.0" });
+      const read = readReleaseFacts(root);
+      change(read.listings);
+      return read;
+    };
+
+    it("is empty for the fixture as seeded", () => {
+      expect(embeddedVersionProblems(facts(() => undefined))).toEqual([]);
+    });
+
+    it.each([
+      ["plugin.json off the version", (listings: any) => (listings.pluginVersion = "0.9.0"), /plugin\/?.*plugin\.json is at "0\.9\.0", not the shared version 1\.0\.0\. Run pnpm run version/],
+      ["the marketplace ref off the tag", (listings: any) => (listings.marketplaceRef = "v0.9.0"), /marketplace\.json pins the ref "v0\.9\.0", not the release tag v1\.0\.0\. Run pnpm run version/],
+      ["the marketplace ref pinned to a branch", (listings: any) => (listings.marketplaceRef = "main"), /pins the ref "main", not the release tag v1\.0\.0/],
+      ["a server.json version off", (listings: any) => (listings.servers[2].version = "0.9.0"), /packages\/iris-dev-mcp\/server\.json version is "0\.9\.0", not the shared version 1\.0\.0/],
+      ["a server.json package version off", (listings: any) => (listings.servers[4].packageVersion = "0.9.0"), /packages\/iris-ops-mcp\/server\.json packages\[0\]\.version is "0\.9\.0"/],
+      ["a server.json that was not read", (listings: any) => listings.servers.pop(), /the server\.json listings were not read \(4 of 5\)/],
+    ])("%s", (_name, change, expected) => {
+      const problems = embeddedVersionProblems(facts(change));
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toMatch(expected);
+    });
+
+    it("facts with no listings at all are refused, never read as consistent", () => {
+      const read = facts(() => undefined);
+      delete read.listings;
+      expect(embeddedVersionProblems(read).length).toBeGreaterThanOrEqual(3);
+    });
+  });
+});
+
+describe("the extension follows the shared version (Story 42.7, the lockstep policy)", () => {
+  it("stamps the manifest and both version fields of the lock, renames `## [Unreleased]` to `## [<version>] \u2014 <date>` with the injected date, and leaves everything else of those files alone", async () => {
+    const root = makeVersionFixture({ version: "1.0.0" });
+    const lockBefore = readFileSync(join(root, "extensions/iris-mcp-launcher/package-lock.json"), "utf8");
+    const status = await versionMain([], cleanEnv(), root, () => new Date("2026-11-20T23:59:59Z"));
+    expect(status).toBe(0);
+    expectExtensionVersioned(root, "1.0.1", "2026-11-20");
+    const lockAfter = readFileSync(join(root, "extensions/iris-mcp-launcher/package-lock.json"), "utf8");
+    expect(lockAfter, "only the two version fields changed").toBe(lockBefore.replaceAll('"version": "1.0.0"', '"version": "1.0.1"'));
+    const changelog = readFileSync(join(root, "extensions/iris-mcp-launcher/CHANGELOG.md"), "utf8");
+    expect(changelog).toContain("## [1.0.1] \u2014 2026-11-20\n\n### Added\n\n- A synthetic entry.\n");
+    expect(changelog).not.toContain("[Unreleased]");
+  }, 180_000);
+
+  it("a changelog with CRLF line endings keeps them: the renamed heading is a CRLF line like the rest", async () => {
+    const root = makeVersionFixture({ version: "1.0.0" });
+    const file = join(root, "extensions/iris-mcp-launcher/CHANGELOG.md");
+    writeFileSync(file, readFileSync(file, "utf8").replaceAll("\n", "\r\n"));
+    commitFixture(root, "a CRLF changelog");
+    const status = await versionMain([], cleanEnv(), root, () => new Date("2026-11-20T23:59:59Z"));
+    expect(status).toBe(0);
+    const changelog = readFileSync(file, "utf8");
+    expect(changelog).toContain("## [1.0.1] \u2014 2026-11-20\r\n\r\n### Added\r\n");
+    expect(changelog.replaceAll("\r\n", "")).not.toContain("\n");
+  }, 180_000);
+
+  it("the script run as a process stamps the extension too, and its next steps name the extension's files", () => {
+    const root = makeVersionFixture({ version: "1.0.0" });
+    const result = run(root, "release-version.mjs");
+    expect(result.status, result.stderr).toBe(0);
+    expectExtensionVersioned(root, "1.0.1");
+    expect(result.stderr).toContain("the package.json, package-lock.json and CHANGELOG.md heading of the extension now carry the version;");
+    expect(fixtureStatus(root)).toContain("extensions/iris-mcp-launcher/CHANGELOG.md");
+  }, 180_000);
+
+  it("a first release stamps the extension at 1.0.0 as well", () => {
+    const root = makeVersionFixture();
+    expect(run(root, "release-version.mjs", ["--first-release"]).status).toBe(0);
+    expectExtensionVersioned(root, "1.0.0");
+  }, 180_000);
+
+  /** What `git status --porcelain` says of the fixture: empty when the run changed nothing. */
+  const porcelain = (root: string): string => spawnSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).stdout.trim();
+
+  it("a changelog whose first `## ` heading is not `## [Unreleased]`: exit 1 naming the file and the heading, before anything is written (the changesets are not used up), and no next steps", () => {
+    const root = makeVersionFixture();
+    const file = join(root, "extensions/iris-mcp-launcher/CHANGELOG.md");
+    writeFileSync(file, readFileSync(file, "utf8").replace("## [Unreleased]", "## [0.2.0] \u2014 2026-01-02"));
+    commitFixture(root, "a changelog with no Unreleased heading");
+    const result = run(root, "release-version.mjs");
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('problem: the first `## ` heading of extensions/iris-mcp-launcher/CHANGELOG.md is "## [0.2.0] \u2014 2026-01-02", not `## [Unreleased]`.');
+    expect(result.stderr).toContain("nothing was changed. Fix the extension file it names, commit it, then run pnpm run version again.");
+    expect(result.stderr).not.toContain("partial version");
+    expect(result.stderr).not.toContain("next steps");
+    expect(porcelain(root), "changeset version never ran: the tree is as it was").toBe("");
+  }, 180_000);
+
+  it("an `## [Unreleased]` heading that is not the first `## ` heading is refused too", () => {
+    const root = makeVersionFixture();
+    const file = join(root, "extensions/iris-mcp-launcher/CHANGELOG.md");
+    writeFileSync(file, readFileSync(file, "utf8").replace("## [Unreleased]", "## Notes\n\n## [Unreleased]"));
+    commitFixture(root, "Unreleased is second");
+    const result = run(root, "release-version.mjs");
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain("extensions/iris-mcp-launcher/CHANGELOG.md is \"## Notes\", not `## [Unreleased]`");
+    expect(porcelain(root)).toBe("");
+  }, 180_000);
+
+  it("a lock with fewer version fields than the stamp expects: exit 1 naming the file", () => {
+    const root = makeVersionFixture();
+    writeFileSync(join(root, "extensions/iris-mcp-launcher/package-lock.json"), `${JSON.stringify({ name: "iris-mcp-launcher", lockfileVersion: 3 }, null, 2)}\n`);
+    commitFixture(root, "a lock with no version");
+    const result = run(root, "release-version.mjs");
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('problem: extensions/iris-mcp-launcher/package-lock.json has 0 "version" fields, not the 2 the stamp expects.');
+    expect(porcelain(root), "nothing was stamped beside the lock it could not stamp").toBe("");
+  }, 180_000);
+
+  it("the lockstep check refuses a manifest or a lock that is off the shared version, naming the file and the fix", () => {
+    const root = makeVersionFixture({ version: "1.0.0" });
+    expect(embeddedVersionProblems(readReleaseFacts(root))).toEqual([]);
+    const manifest = join(root, "extensions/iris-mcp-launcher/package.json");
+    writeFileSync(manifest, readFileSync(manifest, "utf8").replace('"version": "1.0.0"', '"version": "0.9.0"'));
+    expect(embeddedVersionProblems(readReleaseFacts(root))).toEqual([
+      'extensions/iris-mcp-launcher/package.json is at "0.9.0", not the shared version 1.0.0. Run pnpm run version, which stamps it.',
+    ]);
+    const lock = join(root, "extensions/iris-mcp-launcher/package-lock.json");
+    writeFileSync(manifest, readFileSync(manifest, "utf8").replace('"version": "0.9.0"', '"version": "1.0.0"'));
+    writeFileSync(lock, readFileSync(lock, "utf8").replace('"version": "1.0.0"', '"version": "0.9.0"'));
+    expect(embeddedVersionProblems(readReleaseFacts(root))).toEqual([
+      'extensions/iris-mcp-launcher/package-lock.json (version) is at "0.9.0", not the shared version 1.0.0. Run pnpm run version, which stamps it.',
+    ]);
+  });
+});
+
+describe("the extension follows the shared version: the REAL lock and manifest as the oracle (QA, Story 42.7, Rules #36, #54)", () => {
+  it("a copy of the extension's real package-lock.json and package.json is stamped in its two own version fields and nowhere else (the fixture lock is hand-written; npm decides the real order)", async () => {
+    const realLock = readFileSync(join(REPO_ROOT, "extensions/iris-mcp-launcher/package-lock.json"), "utf8");
+    const realManifest = readFileSync(join(REPO_ROOT, "extensions/iris-mcp-launcher/package.json"), "utf8");
+    const real = JSON.parse(realLock) as { version: string; packages: Record<string, { version?: string }> };
+    expect(Object.keys(real.packages).filter((key) => key !== "").length, "the real lock holds dependencies whose own `version` fields follow the root's").toBeGreaterThan(50);
+    const root = makeVersionFixture({ version: real.version });
+    writeFileSync(join(root, "extensions/iris-mcp-launcher/package-lock.json"), realLock);
+    writeFileSync(join(root, "extensions/iris-mcp-launcher/package.json"), realManifest);
+    commitFixture(root, "the real lock and manifest of the extension");
+    expect(await versionMain([], cleanEnv(), root, () => new Date("2026-11-20T12:00:00Z"))).toBe(0);
+    const shared = readReleaseFacts(root).sharedVersion as string;
+    expect(shared, "the version step moved the shared version").not.toBe(real.version);
+    const stamped = readFileSync(join(root, "extensions/iris-mcp-launcher/package-lock.json"), "utf8");
+    const parsed = JSON.parse(stamped) as { version: string; packages: Record<string, { version?: string }> };
+    expect(parsed.version).toBe(shared);
+    expect(parsed.packages[""]?.version).toBe(shared);
+    // Undo the two stamps and the lock is the real one again: no dependency's `version` field was touched.
+    parsed.version = real.version;
+    (parsed.packages[""] as { version?: string }).version = real.version;
+    expect(parsed).toEqual(real);
+    expect(stamped.split("\n").length, "no line was added or removed").toBe(realLock.split("\n").length);
+    expect((JSON.parse(readFileSync(join(root, "extensions/iris-mcp-launcher/package.json"), "utf8")) as { version: string }).version).toBe(shared);
+    expect(embeddedVersionProblems(readReleaseFacts(root))).toEqual([]);
   }, 180_000);
 });
 

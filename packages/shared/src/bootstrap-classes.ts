@@ -31,7 +31,7 @@
  * packages/shared/package.json. Compared against
  * `ExecuteMCPv2.Setup_GetBootstrapVersion()` at MCP server startup.
  */
-export const BOOTSTRAP_VERSION = "1.0.0+2.244fe8623c76";
+export const BOOTSTRAP_VERSION = "1.1.0+2.244fe8623c76";
 
 export interface BootstrapClass {
   name: string;
@@ -1267,7 +1267,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// deployment, an equal semver and sequence with a different hash, the
 /// <code>"dev"</code> placeholder and any unparseable value are left in place
 /// with a warning.</p>
-Parameter BOOTSTRAPVERSION = "1.0.0+2.244fe8623c76";
+Parameter BOOTSTRAPVERSION = "1.1.0+2.244fe8623c76";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -21002,7 +21002,7 @@ export function getBootstrapClasses(): BootstrapClass[] {
 }
 
 /**
- * The IPM module name: the `<Name>` of ipm/module.xml, declared once in scripts/gen-bootstrap.mjs.
+ * The IPM module name: the `<Name>` of the root module.xml, declared once in scripts/gen-bootstrap.mjs.
  */
 export const IPM_MODULE_NAME = "iris-execute-mcp-v2";
 
@@ -21033,7 +21033,7 @@ Class ExecuteMCPv2.InstallGuard Extends %RegisteredObject
 /// This package's bootstrap version marker, <code>&lt;semver&gt;+&lt;sequence&gt;.&lt;hash&gt;</code>.
 /// <p>The value on disk is <code>"dev"</code>, a placeholder. <code>scripts/gen-bootstrap.mjs</code>
 /// stamps the real marker into the copy it embeds and packages, and this file is not edited for it.</p>
-Parameter BOOTSTRAPVERSION = "1.0.0+2.244fe8623c76";
+Parameter BOOTSTRAPVERSION = "1.1.0+2.244fe8623c76";
 
 /// The class whose compiled BOOTSTRAPVERSION parameter is the deployed marker.
 Parameter SETUPCLASS = "ExecuteMCPv2.Setup";

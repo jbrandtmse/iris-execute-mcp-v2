@@ -263,13 +263,10 @@ export function loadConfig(
     testTimeoutMs = parsed * 1000;
   }
 
-  // IRIS_ACCEPT_LANGUAGE: pins the HTTP client's Accept-Language header so
-  // request-locale negotiation (independent of the per-worker-process
-  // message-table selection — Rule #13) is explicit and operator-overridable
-  // rather than left to whatever Node's fetch sends when the caller sets no
-  // header (undici injects `Accept-Language: *`, which IRIS resolves to the
-  // alphabetically-first locale — see the Story 35.3 record). Rule #10: send
-  // documented defaults explicitly on the wire.
+  // IRIS_ACCEPT_LANGUAGE pins the HTTP client's Accept-Language header, so the request locale IRIS matches on every request is
+  // explicit and operator-overridable, not whatever Node's fetch sends when the caller sets no header (it supplies
+  // `Accept-Language: *`, which IRIS resolves to the alphabetically-first locale). The documented default is sent explicitly on
+  // the wire.
   //
   // Story 35.3 code review: empty/whitespace-only is treated as UNSET, and an
   // invalid header value is rejected at load time — matching the convention

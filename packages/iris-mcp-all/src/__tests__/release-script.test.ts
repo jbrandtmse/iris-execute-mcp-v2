@@ -13,15 +13,17 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { findExecutable } from "../../../../scripts/throwaway-iris.mjs";
 import { REPO_ROOT } from "../../../../scripts/lib/live-gate-scan.mjs";
 import { stripComments } from "../../../../scripts/lib/script-ts-import-scan.mjs";
-import { NPM_PUBLISH_ORDER, RELEASE_CHANNELS } from "../../../../scripts/lib/release-core.mjs";
-import { ciGate, createCleanups, defaultDeps, isContainedPath, npmFailureDetail, packedTarballName, parseArgs, publish, redact, verify } from "../../../../scripts/release.mjs";
+import { NPM_PUBLISH_ORDER, OPEN_EXCHANGE_LISTING_URL, PLACEHOLDER_PUBLISHER, RELEASE_CHANNELS, SERVER_JSON_DIRS } from "../../../../scripts/lib/release-core.mjs";
+import { ciGate, createCleanups, defaultDeps, isContainedPath, npmFailureDetail, packedTarballName, parseArgs, publish, redact, uploadPathProblems, verify } from "../../../../scripts/release.mjs";
 import { installStandIns, type StandInCall, type StandInRule, type StandIns } from "./stand-in-clis";
 import {
   SHA,
@@ -33,10 +35,22 @@ import {
   startGithubServer,
   startHangingServer,
   fakeFetch,
+  HTML_PAGE,
+  IPM_REGISTRY_MISS,
+  MCP_REGISTRY_MISS,
+  fakeStoresFetch,
+  ipmArchiveAnswer,
+  ipmRegistryHit,
+  marketplaceHit,
+  mcpRegistryHit,
+  newFakeStores,
+  openVsxHit,
+  storeAnswerFor,
   writeManifest,
   type ArtifactManifest,
   type FakeAnswer,
   type FakeGithub,
+  type FakeStores,
 } from "./release-script-fixtures";
 
 const RELEASE_SCRIPT = path.join(REPO_ROOT, "scripts", "release.mjs");
@@ -106,15 +120,19 @@ describe("the script runs with no node_modules (Boundaries: ci-gate, rehearse an
   it("every module that only prepare or verify needs is loaded by a dynamic import() inside its own loader, and nowhere else", () => {
     const code = stripComments(readFileSync(RELEASE_SCRIPT, "utf8"));
     const dynamic = [...code.matchAll(/(?<![\w$.])import\(/g)];
-    expect(dynamic.length, "two import() calls: prepare's loader and verify's").toBe(2);
+    expect(dynamic.length, "three import() calls: prepare's loader and verify's two (the wire driver, the archive reader)").toBe(3);
     const loader = /async function loadPrepareModules[\s\S]*?\n\}\n/.exec(code)?.[0] ?? "";
     expect(loader).toContain("import(pathToFileURL");
-    for (const module of ["scripts/throwaway-iris.mjs", "scripts/lib/ci-checks.mjs", "scripts/lib/pnpm-pack.mjs", "scripts/ci-package-smoke.mjs", "scripts/lib/ipm-archive.mjs"]) {
+    for (const module of ["scripts/throwaway-iris.mjs", "scripts/lib/ci-checks.mjs", "scripts/lib/pnpm-pack.mjs", "scripts/ci-package-smoke.mjs"]) {
       expect(loader, module).toContain(`'${module}'`);
     }
+    expect(loader, "prepare no longer stages the IPM tree: it is committed").not.toContain("ipm-archive");
     const wireLoader = /async function loadVerifyWire[\s\S]*?\n\}\n/.exec(code)?.[0] ?? "";
     expect(wireLoader).toContain("import(pathToFileURL");
     expect(wireLoader).toContain("'scripts/lib/sdk-wire-golden-core.mjs'");
+    const archiveLoader = /async function loadVerifyArchive[\s\S]*?\n\}\n/.exec(code)?.[0] ?? "";
+    expect(archiveLoader, "verify reads the registry's archive with readTgz, loaded on demand").toContain("import(pathToFileURL");
+    expect(archiveLoader).toContain("'scripts/lib/ipm-archive.mjs'");
   });
 
   it("main() installs its signal handlers through installSignalHandlers and ends no run itself, so the gate set's handlers (registered later) still run", () => {
@@ -173,6 +191,22 @@ function runNode(args: string[], env: Record<string, string>, onStart?: (pid: nu
     child.stderr.on("data", (chunk) => (stderr += chunk));
     child.once("close", (status, signal) => resolve({ status, signal, stdout, stderr }));
   });
+}
+
+/** Copy `scripts/release.mjs` and the two modules it imports into `<root>/scripts`, and return the copy: a process run from it has `<root>` as its repository root. */
+function copyScriptInto(root: string): string {
+  mkdirSync(path.join(root, "scripts", "lib"), { recursive: true });
+  copyFileSync(RELEASE_SCRIPT, path.join(root, "scripts", "release.mjs"));
+  copyFileSync(path.join(REPO_ROOT, "scripts", "lib", "script-process.mjs"), path.join(root, "scripts", "lib", "script-process.mjs"));
+  // The process-level rows are about npm and the two stores: the copy's IPM and MCP Registry channels are off (their rows run in process, with their own stand-ins).
+  let core = readFileSync(path.join(REPO_ROOT, "scripts", "lib", "release-core.mjs"), "utf8");
+  for (const [id, declared] of [["ipm", "enabled: true, manual: true"], ["mcp-registry", "enabled: true"]]) {
+    const enabled = `Object.freeze({ id: '${id}', ${declared} })`;
+    if (!core.includes(enabled)) throw new Error(`release-core.mjs no longer declares the channel ${id} as ${enabled}`);
+    core = core.replace(enabled, `Object.freeze({ id: '${id}', enabled: false, enabledBy: 'the process-level rows' })`);
+  }
+  writeFileSync(path.join(root, "scripts", "lib", "release-core.mjs"), core);
+  return path.join(root, "scripts", "release.mjs");
 }
 
 // -- ci-gate ---------------------------------------------------------------------------------------------------------
@@ -600,9 +634,11 @@ const NPM_DEFAULT: StandInRule[] = [
   { match: ["publish"], stdout: "+ published\n" },
 ];
 
-/** The registry's answers for the IPM package; 404 means the package is not registered. */
+/** The IPM registry's answers: for the package (404 means it is not registered) and for the download of an archive; and every URL asked. */
 interface Registry {
   answer: FakeAnswer;
+  archive?: FakeAnswer;
+  requests: string[];
 }
 
 interface PublishWorld {
@@ -612,6 +648,8 @@ interface PublishWorld {
   standIns: StandIns;
   github: FakeGithub;
   registry: Registry;
+  /** The fake stores: what the Marketplace and Open VSX answer to the read-only lookups. */
+  stores: FakeStores;
   manifest: ArtifactManifest;
   lines: string[];
   env: (overrides?: Record<string, string | undefined>) => Record<string, string>;
@@ -620,19 +658,21 @@ interface PublishWorld {
 }
 
 /** A fixture world: artifacts, stand-ins on PATH, a fake GitHub API, a fixture repository root with the extension's stand-in CLIs. */
-function newWorld(options: { publisher?: string } = {}): PublishWorld {
+function newWorld(options: { publisher?: string; vsixVersion?: string } = {}): PublishWorld {
   const root = scratch();
   const artifacts = path.join(root, "artifacts");
   const repo = path.join(root, "repo");
   mkdirSync(artifacts, { recursive: true });
-  const manifest = makeArtifacts(artifacts, { ...(options.publisher === undefined ? {} : { publisher: options.publisher }) });
+  // The default publisher is a real one (the channels are enabled by default, and the placeholder is not ready); a test of the placeholder names it.
+  const manifest = makeArtifacts(artifacts, { publisher: options.publisher ?? "iris-mcp", ...(options.vsixVersion === undefined ? {} : { vsixVersion: options.vsixVersion }) });
   const standIns = installStandIns(path.join(root, "stand-ins"), ["npm", "git"]);
   const extensionBin = path.join(repo, "extensions", "iris-mcp-launcher", "node_modules", ".bin");
   standIns.installInto("vsce", extensionBin);
   standIns.installInto("ovsx", extensionBin);
   standIns.script("npm", NPM_DEFAULT);
   const github = newFakeGithub();
-  const registry: Registry = { answer: { status: 404, body: { error: "not found" } } };
+  const registry: Registry = { answer: IPM_REGISTRY_MISS, requests: [] };
+  const stores = newFakeStores();
   const lines: string[] = [];
   const baseEnv = (overrides: Record<string, string | undefined> = {}): Record<string, string> => {
     const env: Record<string, string | undefined> = {
@@ -648,7 +688,13 @@ function newWorld(options: { publisher?: string } = {}): PublishWorld {
     };
     return Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined));
   };
-  const fetchImpl = fakeFetch(github, (url) => (url.startsWith("https://pm.community.intersystems.com/") ? registry.answer : undefined));
+  const fetchImpl = fakeFetch(github, (url, init) => {
+    if (!url.startsWith("https://pm.community.intersystems.com/")) return storeAnswerFor(stores, url, init);
+    // A GET is recorded as its address alone; any other method carries its name, so a non-GET never equals a read.
+    const method = init?.method ?? "GET";
+    registry.requests.push(method === "GET" ? url : `${method} ${url}`);
+    return new URL(url).pathname.startsWith("/download/") ? (registry.archive ?? { status: 599, body: { message: `no route for ${url}` } }) : registry.answer;
+  });
   return {
     root,
     artifacts,
@@ -656,6 +702,7 @@ function newWorld(options: { publisher?: string } = {}): PublishWorld {
     standIns,
     github,
     registry,
+    stores,
     manifest,
     lines,
     env: baseEnv,
@@ -666,7 +713,7 @@ function newWorld(options: { publisher?: string } = {}): PublishWorld {
           dryRun: runOptions.dryRun ?? false,
           env: baseEnv(runOptions.env),
           repoRoot: repo,
-          ...(runOptions.channels === undefined ? {} : { channels: runOptions.channels as typeof RELEASE_CHANNELS }),
+          ...(runOptions.channels === SCRIPT_DEFAULT_CHANNELS ? {} : { channels: (runOptions.channels ?? STORES_DEFAULT) as typeof RELEASE_CHANNELS }),
         },
         { ...defaultDeps(), fetch: fetchImpl, log: (line: string) => lines.push(line), cleanups: createCleanups(), ...(runOptions.deps ?? {}) },
       ),
@@ -674,11 +721,25 @@ function newWorld(options: { publisher?: string } = {}): PublishWorld {
   };
 }
 
-/** The channels with every one of them enabled, for the stand-ins. */
-const ALL_ENABLED = RELEASE_CHANNELS.map((channel: { id: string }) => ({ id: channel.id, enabled: true }));
+/** Passed as `channels`, it leaves the option out of the call, so the script publishes its own default channels (all five of RELEASE_CHANNELS). */
+const SCRIPT_DEFAULT_CHANNELS = Symbol("the script's default channels");
+
+/** What a helper run with no `channels` option publishes: npm and the two stores, with IPM off and the MCP Registry not listed (the registry's own rows pass their own channels). */
+const STORES_DEFAULT = [
+  { id: "npm", enabled: true },
+  { id: "vscode-marketplace", enabled: true },
+  { id: "open-vsx", enabled: true },
+  { id: "ipm", enabled: false, enabledBy: "Story 42.8" },
+];
+
+/** npm, the two stores and IPM enabled, for the stand-ins; the MCP Registry is not listed. */
+const ALL_ENABLED = [...RELEASE_CHANNELS.filter((channel: { id: string }) => channel.id !== "mcp-registry").map((channel: { id: string }) => ({ id: channel.id, enabled: true }))];
 
 /** npm and IPM enabled, the stores disabled. */
 const IPM_ONLY = [{ id: "npm", enabled: true }, { id: "vscode-marketplace", enabled: false, enabledBy: "test" }, { id: "open-vsx", enabled: false, enabledBy: "test" }, { id: "ipm", enabled: true }];
+
+/** Only npm enabled: the two stores and IPM are not, each with the story that enables it. */
+const NPM_ONLY = [{ id: "npm", enabled: true }, { id: "vscode-marketplace", enabled: false, enabledBy: "Story 42.7" }, { id: "open-vsx", enabled: false, enabledBy: "Story 42.7" }, { id: "ipm", enabled: false, enabledBy: "Story 42.8" }];
 
 /** The tarball path argument of an npm publish call, relative to the artifacts. */
 const tarballOf = (call: StandInCall, artifacts: string): string => path.relative(artifacts, call.argv[1] as string);
@@ -736,9 +797,9 @@ describe("Publish refusals (exit 2 before any upload) (AC 42.5.2, AC 42.5.4)", (
 
   it("a missing file, and a file the manifest does not list, are refused", async () => {
     const missing = newWorld();
-    rmSync(path.join(missing.artifacts, "ipm", "README.md"));
+    rmSync(path.join(missing.artifacts, "mcp-registry", "iris-dev-mcp.json"));
     expect(await missing.run({ dryRun: true })).toBe(1);
-    expect(missing.lines.join("\n")).toContain("ipm/README.md is listed in release-manifest.json but missing");
+    expect(missing.lines.join("\n")).toContain("mcp-registry/iris-dev-mcp.json is listed in release-manifest.json but missing");
 
     const extra = newWorld();
     writeFileSync(path.join(extra.artifacts, "npm", "unlisted.tgz"), "x");
@@ -852,27 +913,21 @@ describe("Publish integrity: a manifest that verifies nothing, and a channel tha
 
   it("an enabled channel that the manifest does not describe is a failed channel in the report, after the eight packages and the channel before it, and it stops the channel after it (exit 1)", async () => {
     const world = newWorld({ publisher: "acme" });
-    world.standIns.script("git", [
-      { match: ["clone"], effects: [{ mkdir: "$LAST" }, { mkdir: "$LAST/.git" }] },
-      { match: ["write-tree"], stdout: "tree-new\n" },
-      { match: ["rev-parse"], status: 1 },
-    ]);
     world.manifest.channels = world.manifest.channels.filter((channel) => channel["id"] !== "open-vsx");
     writeManifest(world.artifacts, world.manifest);
-    expect(await world.run({ channels: ALL_ENABLED, env: { IPM_DIST_DEPLOY_KEY: "-----BEGIN KEY-----\nabc\n-----END KEY-----" } })).toBe(1);
+    expect(await world.run({ channels: ALL_ENABLED })).toBe(1);
     expect(world.published()).toHaveLength(8);
     expect(world.standIns.calls("vsce"), "the channel before it was published").toHaveLength(1);
     expect(world.standIns.calls("ovsx"), "nothing can be uploaded for a channel that has no entry").toEqual([]);
-    expect(world.standIns.calls("git"), "the IPM channel would have succeeded, and is not attempted").toEqual([]);
+    expect(world.registry.requests, "the IPM channel would have been a manual step, and is not attempted: the registry is not asked").toEqual([]);
     const report = world.lines.join("\n");
-    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@0.1.0: published");
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: published");
     expect(report).toContain("open-vsx\n  iris-mcp-launcher@?: failed (the manifest has no open-vsx entry. Prepare the artifacts again.)");
     expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: not attempted");
   });
 });
 
 describe("Publish uploads only the manifest's hash-verified files, inside the artifacts directory (DW-695; AC 42.5.2: the exact rehearsed bytes)", () => {
-  const KEY = "-----BEGIN OPENSSH PRIVATE KEY-----\nBINDKEYBODY\n-----END OPENSSH PRIVATE KEY-----";
   /** Bytes next to the artifacts directory that no manifest ever hashed. */
   const outside = (world: PublishWorld, name: string): string => {
     const file = path.join(world.root, name);
@@ -912,92 +967,81 @@ describe("Publish uploads only the manifest's hash-verified files, inside the ar
     ["a Marketplace entry that names a listed, hash-verified file that is not a vsix (an npm tarball)", (world: PublishWorld) => {
       channelOf(world, "vscode-marketplace")["file"] = npmEntry(world, "@iris-mcp/shared")["tarball"];
     }, /vscode-marketplace: its vsix "npm\/iris-mcp-shared-1\.0\.0\.tgz" is not a hash-verified \.vsix/],
-    ["an IPM tree outside the directory", (world: PublishWorld) => {
-      channelOf(world, "ipm")["tree"] = "..";
-    }, /ipm: its tree "\.\." is not a directory of release-manifest\.json that holds module\.xml/],
-    ["an IPM tree that is not the module (the npm tarballs)", (world: PublishWorld) => {
-      channelOf(world, "ipm")["tree"] = "npm";
-    }, /ipm: its tree "npm" is not a directory of release-manifest\.json that holds module\.xml/],
   ] as Array<[string, (world: PublishWorld) => void, RegExp]>)("%s is refused before any upload: exit 2 in a real run, exit 1 in a dry run, and no npm publish, store CLI or git call", async (_label, change, expected) => {
     for (const dryRun of [false, true]) {
       const world = newWorld({ publisher: "acme" });
       change(world);
       writeManifest(world.artifacts, world.manifest);
-      expect(await world.run({ dryRun, channels: ALL_ENABLED, env: { IPM_DIST_DEPLOY_KEY: KEY } }), `dryRun ${dryRun}`).toBe(dryRun ? 1 : 2);
+      expect(await world.run({ dryRun, channels: ALL_ENABLED }), `dryRun ${dryRun}`).toBe(dryRun ? 1 : 2);
       expect(world.lines.join("\n")).toMatch(expected);
       expect(world.standIns.allCalls().map((call) => `${call.tool} ${call.argv[0]}`), "only npm --version ran").toEqual(["npm --version"]);
       expect(world.github.requests, "the refusal comes before the environment is asked").toEqual([]);
     }
   });
 
+  it("the IPM entry of the manifest lists no file, and the manifest as prepare writes it passes: a channel entry with no tree, or with a stale one, is never an upload path (decision #122)", () => {
+    const world = newWorld({ publisher: "acme" });
+    expect(channelOf(world, "ipm")).toEqual({ id: "ipm", enabled: true, manual: true, module: "iris-execute-mcp-v2", version: "1.0.0", marker: "1.0.0+2.244fe8623c76", listing: OPEN_EXCHANGE_LISTING_URL });
+    expect(world.manifest.files.filter((file) => file.path.startsWith("ipm/") || file.path.includes("module.xml"))).toEqual([]);
+    expect(uploadPathProblems(world.manifest, ALL_ENABLED)).toEqual([]);
+    const stale = { ...world.manifest, channels: world.manifest.channels.map((channel) => (channel["id"] === "ipm" ? { ...channel, tree: "ipm" } : channel)) };
+    expect(uploadPathProblems(stale, ALL_ENABLED), "a leftover `tree` names nothing that would be uploaded").toEqual([]);
+  });
+
   it("the control: the manifest as prepare writes it, with every channel enabled, passes the check and uploads every artifact", async () => {
     const world = newWorld({ publisher: "acme" });
-    world.standIns.script("git", [
-      { match: ["clone"], effects: [{ mkdir: "$LAST" }, { mkdir: "$LAST/.git" }] },
-      { match: ["write-tree"], stdout: "tree-new\n" },
-      { match: ["rev-parse"], status: 1 },
-    ]);
-    expect(await world.run({ channels: ALL_ENABLED, env: { IPM_DIST_DEPLOY_KEY: KEY } })).toBe(0);
+    expect(await world.run({ channels: ALL_ENABLED })).toBe(0);
     expect(world.published().map((call) => tarballOf(call, world.artifacts))).toEqual(NPM_PUBLISH_ORDER.map((name: string) => `npm/${packedTarballName(name, "1.0.0")}`));
     expect(world.standIns.calls("vsce")).toHaveLength(1);
     expect(world.standIns.calls("ovsx")).toHaveLength(1);
-    expect(world.standIns.calls("git").some((call) => call.argv.includes("push"))).toBe(true);
+    expect(world.standIns.calls("git"), "IPM uploads nothing: no git call at all").toEqual([]);
   });
 
   it("isContainedPath accepts the paths prepare writes and nothing that leaves the directory", () => {
-    for (const ok of ["npm/iris-mcp-shared-1.0.0.tgz", "vsix/iris-mcp-launcher-0.1.0.vsix", "ipm", "ipm/src/cls/ExecuteMCPv2/Utils.cls"]) expect(isContainedPath(ok), ok).toBe(true);
+    for (const ok of ["npm/iris-mcp-shared-1.0.0.tgz", "vsix/iris-mcp-launcher-1.0.0.vsix", "mcp-registry/iris-dev-mcp.json"]) expect(isContainedPath(ok), ok).toBe(true);
     for (const bad of ["../outside.tgz", "npm/../../x", "/abs/x.tgz", "C:/x.tgz", "npm\\x.tgz", "./npm/x.tgz", "npm//x.tgz", "", ".", "..", "npm/", "a\0b", undefined, 7]) expect(isContainedPath(bad), String(bad)).toBe(false);
   });
 });
 
 describe("Publish stops at the first failure even when every later step would succeed (QA, AC 42.5.3)", () => {
-  const KEY = "-----BEGIN OPENSSH PRIVATE KEY-----\nSTOPKEYBODY\n-----END OPENSSH PRIVATE KEY-----";
-
-  /** A world in which each enabled channel succeeds if it is reached: a real publisher, both store CLIs, a deploy key's git steps. */
-  const workingWorld = (): PublishWorld => {
-    const world = newWorld({ publisher: "acme" });
-    world.standIns.script("git", [
-      { match: ["clone"], effects: [{ mkdir: "$LAST" }, { mkdir: "$LAST/.git" }] },
-      { match: ["write-tree"], stdout: "tree-new\n" },
-      { match: ["rev-parse"], status: 1 },
-    ]);
-    return world;
-  };
+  /** A world in which each enabled channel succeeds if it is reached: a real publisher and both store CLIs (IPM is a manual step). */
+  const workingWorld = (): PublishWorld => newWorld({ publisher: "acme" });
   const toolsRun = (world: PublishWorld): string[] => [...new Set(world.standIns.allCalls().filter((call) => call.tool !== "npm").map((call) => call.tool))];
 
   it("the control: with nothing failing every channel is reached, so the stops below are real", async () => {
     const world = workingWorld();
-    expect(await world.run({ channels: ALL_ENABLED, env: { IPM_DIST_DEPLOY_KEY: KEY } })).toBe(0);
+    expect(await world.run({ channels: ALL_ENABLED })).toBe(0);
     expect(world.published()).toHaveLength(8);
-    expect(toolsRun(world).sort()).toEqual(["git", "ovsx", "vsce"]);
-    expect(world.standIns.calls("git").some((call) => call.argv.includes("push"))).toBe(true);
+    expect(toolsRun(world).sort()).toEqual(["ovsx", "vsce"]);
+    expect(world.registry.requests, "the IPM channel was reached: it asked the registry").toHaveLength(1);
   });
 
-  it("a package that fails to upload stops every channel after npm: no store CLI and no git call runs, and each channel and package after it is `not attempted` exactly once", async () => {
+  it("a package that fails to upload stops every channel after npm: no store CLI runs and the registry is not asked, and each channel and package after it is `not attempted` exactly once", async () => {
     const world = workingWorld();
     world.standIns.script("npm", [{ match: ["publish", "~iris-mcp-ops"], status: 1, stderr: "npm error code E403\nnpm error 403 Forbidden\n" }, ...NPM_DEFAULT]);
-    expect(await world.run({ channels: ALL_ENABLED, env: { IPM_DIST_DEPLOY_KEY: KEY } })).toBe(1);
+    expect(await world.run({ channels: ALL_ENABLED })).toBe(1);
     expect(world.published()).toHaveLength(7);
-    expect(toolsRun(world), "no store CLI and no git").toEqual([]);
+    expect(toolsRun(world), "no store CLI").toEqual([]);
+    expect(world.registry.requests).toEqual([]);
     const report = world.lines.join("\n");
     for (const name of ["client-config", "shared", "admin", "data", "dev", "interop"]) expect(report, name).toContain(`@iris-mcp/${name}@1.0.0: published`);
     expect(report).toMatch(/@iris-mcp\/ops@1\.0\.0: failed \(npm error code E403/);
     expect(report).toContain("@iris-mcp/all@1.0.0: not attempted");
-    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@0.1.0: not attempted");
-    expect(report).toContain("open-vsx\n  iris-mcp-launcher@0.1.0: not attempted");
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: not attempted");
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
     expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: not attempted");
-    expect(report.match(/iris-mcp-launcher@0\.1\.0: /g), "one line per channel, never a second result for a channel that was skipped over").toHaveLength(2);
+    expect(report.match(/iris-mcp-launcher@1\.0\.0: /g), "one line per channel, never a second result for a channel that was skipped over").toHaveLength(2);
   });
 
-  it("an Open VSX upload that fails stops the IPM channel that would have succeeded: no git call, and the Marketplace stays published", async () => {
+  it("an Open VSX upload that fails stops the IPM channel that would have been a manual step: the registry is not asked, and the Marketplace stays published", async () => {
     const world = workingWorld();
     world.standIns.script("ovsx", [{ match: ["publish"], status: 1, stderr: "ovsx error 401\n" }]);
-    expect(await world.run({ channels: ALL_ENABLED, env: { IPM_DIST_DEPLOY_KEY: KEY } })).toBe(1);
+    expect(await world.run({ channels: ALL_ENABLED })).toBe(1);
     expect(toolsRun(world).sort()).toEqual(["ovsx", "vsce"]);
-    expect(world.standIns.calls("git")).toEqual([]);
+    expect(world.registry.requests).toEqual([]);
     const report = world.lines.join("\n");
-    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@0.1.0: published");
-    expect(report).toMatch(/open-vsx\n {2}iris-mcp-launcher@0\.1\.0: failed \(ovsx error 401/);
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: published");
+    expect(report).toMatch(/open-vsx\n {2}iris-mcp-launcher@1\.0\.0: failed \(ovsx error 401/);
     expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: not attempted");
   });
 });
@@ -1157,22 +1201,22 @@ describe("Publish auth (AC 42.5.2; Decision #75)", () => {
     }
   });
 
-  it("the job's OIDC request variables reach npm publish and no other child: not npm --version, npm view, a store CLI or git", async () => {
+  it("the job's OIDC request variables reach the three publish CLIs, `npm publish`, `vsce publish` and `ovsx publish`, and no other child: not npm --version or npm view (and the IPM channel runs no child at all)", async () => {
     const OIDC = { ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-request-SECRET-0123456789", ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.actions.example.invalid/x" };
     const world = newWorld({ publisher: "acme" });
-    world.standIns.script("git", [
-      { match: ["clone"], effects: [{ mkdir: "$LAST" }, { mkdir: "$LAST/.git" }] },
-      { match: ["write-tree"], stdout: "tree-new\n" },
-      { match: ["rev-parse"], status: 1 },
-    ]);
-    expect(await world.run({ channels: ALL_ENABLED, env: { ...OIDC, IPM_DIST_DEPLOY_KEY: "-----BEGIN KEY-----\nabc\n-----END KEY-----" } })).toBe(0);
+    expect(await world.run({ channels: ALL_ENABLED, env: { ...OIDC } })).toBe(0);
     const holds = (call: StandInCall): boolean => call.env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"] !== undefined || call.env["ACTIONS_ID_TOKEN_REQUEST_URL"] !== undefined;
     const uploads = world.published();
     expect(uploads).toHaveLength(8);
     expect(uploads.every((call) => call.env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"] === OIDC.ACTIONS_ID_TOKEN_REQUEST_TOKEN && call.env["ACTIONS_ID_TOKEN_REQUEST_URL"] === OIDC.ACTIONS_ID_TOKEN_REQUEST_URL), "npm publish asks GitHub for its OIDC token with them").toBe(true);
     const others = world.standIns.allCalls().filter((call) => !(call.tool === "npm" && call.argv[0] === "publish"));
-    expect(others.map((call) => `${call.tool} ${call.argv[0]}`)).toEqual(expect.arrayContaining(["npm --version", "npm view", "vsce publish", "ovsx publish", "git clone", "git push"]));
-    expect(others.filter(holds).map((call) => `${call.tool} ${call.argv[0]}`), "no other child holds them").toEqual([]);
+    expect(others.map((call) => `${call.tool} ${call.argv[0]}`)).toEqual(expect.arrayContaining(["npm --version", "npm view", "vsce publish", "ovsx publish"]));
+    expect(others.filter((call) => call.tool === "git"), "no git call: the IPM channel has no upload").toEqual([]);
+    expect(others.filter(holds).map((call) => `${call.tool} ${call.argv[0]}`), "only the two store publish CLIs hold them besides npm publish").toEqual(["vsce publish", "ovsx publish"]);
+    for (const call of others.filter(holds)) {
+      expect(call.env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"], call.tool).toBe(OIDC.ACTIONS_ID_TOKEN_REQUEST_TOKEN);
+      expect(call.env["ACTIONS_ID_TOKEN_REQUEST_URL"], call.tool).toBe(OIDC.ACTIONS_ID_TOKEN_REQUEST_URL);
+    }
   });
 
   it("an upload whose output echoes the OIDC request token is reported with the token replaced by ***", async () => {
@@ -1250,7 +1294,7 @@ describe("Publish npm: in order, idempotent, stops at the first failure (AC 42.5
     expect(report).toContain("@iris-mcp/data@1.0.0: published");
     expect(report).toMatch(/@iris-mcp\/dev@1\.0\.0: failed \(npm error code E403/);
     for (const name of ["interop", "ops", "all"]) expect(report).toContain(`@iris-mcp/${name}@1.0.0: not attempted`);
-    expect(report).toContain("iris-mcp-launcher@0.1.0: not attempted");
+    expect(report).toContain("iris-mcp-launcher@1.0.0: not attempted");
     expect(world.standIns.calls("git"), "no channel after the failure ran").toEqual([]);
     expect(world.standIns.calls("vsce")).toEqual([]);
   });
@@ -1275,45 +1319,55 @@ describe("Publish npm: in order, idempotent, stops at the first failure (AC 42.5
 });
 
 describe("Publish channels (AC 42.5.3)", () => {
-  it("the extension and IPM channels are disabled: each prints `skipped: not enabled (<story>)`, and no store CLI and no git runs", async () => {
+  it("by default both stores run and IPM does not: IPM prints `skipped: not enabled (Story 42.8)`, no git runs, and each store CLI runs once", async () => {
     const world = newWorld();
     expect(await world.run()).toBe(0);
     const report = world.lines.join("\n");
-    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@0.1.0: skipped: not enabled (Story 42.7)");
-    expect(report).toContain("open-vsx\n  iris-mcp-launcher@0.1.0: skipped: not enabled (Story 42.7)");
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: published (auth: oidc)");
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: published (auth: oidc)");
+    expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: skipped: not enabled (Story 42.8)");
+    expect(world.standIns.calls("git")).toEqual([]);
+    expect(world.standIns.calls("vsce")).toHaveLength(1);
+    expect(world.standIns.calls("ovsx")).toHaveLength(1);
+  });
+
+  it("a channel that is not enabled prints `skipped: not enabled (<story>)`, and no store CLI, no store lookup and no git runs, for a store as for IPM", async () => {
+    const world = newWorld();
+    expect(await world.run({ channels: NPM_ONLY })).toBe(0);
+    const report = world.lines.join("\n");
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: skipped: not enabled (Story 42.7)");
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: skipped: not enabled (Story 42.7)");
     expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: skipped: not enabled (Story 42.8)");
     expect(world.standIns.calls("git")).toEqual([]);
     expect(world.standIns.calls("vsce")).toEqual([]);
     expect(world.standIns.calls("ovsx")).toEqual([]);
+    expect(world.stores.requests, "a real run of a disabled channel reads no store").toEqual([]);
   });
 
-  it("all four enabled: the order is npm, the Marketplace, Open VSX, IPM; vsce and ovsx run from the extension's node_modules/.bin on the vsix", async () => {
+  it("all four enabled: the order is npm, the Marketplace, Open VSX, IPM; vsce and ovsx run from the extension's node_modules/.bin on the vsix, and IPM runs no child (a manual step)", async () => {
     const world = newWorld({ publisher: "acme" });
-    world.standIns.script("git", [
-      { match: ["clone"], effects: [{ mkdir: "$LAST" }, { mkdir: "$LAST/.git" }] },
-      { match: ["write-tree"], stdout: "tree-new\n" },
-      { match: ["rev-parse"], status: 1 },
-    ]);
-    expect(await world.run({ channels: ALL_ENABLED, env: { IPM_DIST_DEPLOY_KEY: "-----BEGIN KEY-----\nabc\n-----END KEY-----" } })).toBe(0);
-    const order = world.standIns.allCalls().filter((call) => (call.tool === "npm" && call.argv[0] === "publish") || (call.tool !== "npm" && call.tool !== "git") || (call.tool === "git" && call.argv[0] === "push"));
-    expect(order.map((call) => call.tool)).toEqual([...NPM_PUBLISH_ORDER.map(() => "npm"), "vsce", "ovsx", "git"]);
+    expect(await world.run({ channels: ALL_ENABLED })).toBe(0);
+    const order = world.standIns.allCalls().filter((call) => (call.tool === "npm" && call.argv[0] === "publish") || (call.tool !== "npm" && call.tool !== "git"));
+    expect(order.map((call) => call.tool)).toEqual([...NPM_PUBLISH_ORDER.map(() => "npm"), "vsce", "ovsx"]);
+    expect(world.standIns.calls("git")).toEqual([]);
     const vsce = world.standIns.calls("vsce")[0] as StandInCall;
-    expect(vsce.argv).toEqual(["publish", "--packagePath", path.join(world.artifacts, "vsix", "iris-mcp-launcher-0.1.0.vsix"), "--skip-duplicate"]);
+    expect(vsce.argv).toEqual(["publish", "--packagePath", path.join(world.artifacts, "vsix", "iris-mcp-launcher-1.0.0.vsix"), "--skip-duplicate", "--oidc"]);
     const ovsx = world.standIns.calls("ovsx")[0] as StandInCall;
-    expect(ovsx.argv).toEqual(["publish", path.join(world.artifacts, "vsix", "iris-mcp-launcher-0.1.0.vsix"), "--skip-duplicate"]);
+    expect(ovsx.argv).toEqual(["publish", path.join(world.artifacts, "vsix", "iris-mcp-launcher-1.0.0.vsix"), "--skip-duplicate", "--trusted-publishing"]);
     expect(realpathSync(vsce.cwd)).toBe(realpathSync(path.join(world.repo, "extensions", "iris-mcp-launcher")));
     const report = world.lines.join("\n");
-    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@0.1.0: published");
-    expect(report).toContain("open-vsx\n  iris-mcp-launcher@0.1.0: published");
-    expect(report).toMatch(/ipm\n {2}iris-execute-mcp-v2@1\.0\.0: published/);
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: published (auth: oidc)");
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: published (auth: oidc)");
+    expect(report).toMatch(/ipm\n {2}iris-execute-mcp-v2@1\.0\.0: manual step \(Release 1\.0\.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry does not list 1\.0\.0\)/);
   });
 
   it("a store CLI that is not installed, or a publisher that is still the placeholder, fails an enabled channel and stops what follows", async () => {
-    const placeholder = newWorld();
+    const placeholder = newWorld({ publisher: PLACEHOLDER_PUBLISHER });
     expect(await placeholder.run({ channels: ALL_ENABLED })).toBe(1);
-    expect(placeholder.lines.join("\n")).toMatch(/vscode-marketplace: failed|iris-mcp-launcher@0\.1\.0: failed \(the publisher is TBD-at-publish-time/);
+    expect(placeholder.lines.join("\n")).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: failed (the publisher is TBD-at-publish-time");
+    expect(placeholder.stores.requests, "a placeholder names nothing a store could answer for, so no store is asked").toEqual([]);
     expect(placeholder.standIns.calls("vsce")).toEqual([]);
-    expect(placeholder.lines.join("\n")).toContain("open-vsx\n  iris-mcp-launcher@0.1.0: not attempted");
+    expect(placeholder.lines.join("\n")).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
 
     const absent = newWorld({ publisher: "acme" });
     rmSync(path.join(absent.repo, "extensions", "iris-mcp-launcher", "node_modules", ".bin", "vsce"));
@@ -1327,155 +1381,518 @@ describe("Publish channels (AC 42.5.3)", () => {
     expect(await world.run({ channels: ALL_ENABLED })).toBe(1);
     expect(world.standIns.calls("ovsx"), "Open VSX is not attempted").toEqual([]);
     expect(world.standIns.calls("git")).toEqual([]);
-    expect(world.lines.join("\n")).toMatch(/vscode-marketplace\n {2}iris-mcp-launcher@0\.1\.0: failed \(vsce error 401/);
+    expect(world.lines.join("\n")).toMatch(/vscode-marketplace\n {2}iris-mcp-launcher@1\.0\.0: failed \(vsce error 401/);
     expect(world.lines.join("\n")).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: not attempted");
   });
 
-  it("the channels are enabled by default only for npm: the real RELEASE_CHANNELS", () => {
-    expect(RELEASE_CHANNELS.filter((channel: { enabled: boolean }) => channel.enabled).map((channel: { id: string }) => channel.id)).toEqual(["npm"]);
+  it("every channel is enabled by default (Story 42.8): npm, the two stores, IPM and the MCP Registry, and none names a story that enables it", () => {
+    expect(RELEASE_CHANNELS.filter((channel: { enabled: boolean }) => channel.enabled).map((channel: { id: string }) => channel.id)).toEqual(["npm", "vscode-marketplace", "open-vsx", "ipm", "mcp-registry"]);
+    expect(RELEASE_CHANNELS.filter((channel: { enabled: boolean }) => !channel.enabled)).toEqual([]);
   });
 });
 
-describe("The IPM channel (DW-689; Decision #76)", () => {
-  const ipmWorld = (): PublishWorld => {
-    const world = newWorld({ publisher: "acme" });
-    world.standIns.script("git", [
-      { match: ["clone"], effects: [{ mkdir: "$LAST" }, { mkdir: "$LAST/.git" }] },
-      { match: ["write-tree"], stdout: "tree-new\n" },
-      { match: ["rev-parse"], status: 1 },
-    ]);
-    return world;
-  };
-  const KEY ="-----BEGIN OPENSSH PRIVATE KEY-----\nSECRETKEYBODY\n-----END OPENSSH PRIVATE KEY-----";
+/**
+ * Story 42.7 (AC 42.7.2; AD-29; I/O matrix rows: Store upload, Already on a store, Skip-duplicate race, Lookup unreadable, Upload fails,
+ * Open VSX namespace absent, Dry step ready, Secret containment, Version lockstep). The stores' statuses in the fake are the real ones
+ * of 2026-11-20 (`release-core.test.ts`, Rule #36): 200 for a version that is there, 404 for one that is not, 404 for an unknown
+ * namespace; the skip line is the one vsce 4.1.1 and ovsx 1.4.0 print after `--skip-duplicate` found the version.
+ */
+describe("Publish: the extension stores (Story 42.7)", () => {
+  const SKIP_LINE = "Version 1.0.0 is already published. Skipping publish.\n";
+  const OVSX_PAT = "ovsx-PAT-SECRET-0123456789";
+  const VSCE_PAT = "vsce-PAT-SECRET-0123456789";
+  const OIDC = { ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-request-SECRET-0123456789", ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.actions.example.invalid/x" };
+  const SECRETS = [TOKEN, OVSX_PAT, VSCE_PAT, OIDC.ACTIONS_ID_TOKEN_REQUEST_TOKEN, GITHUB_TOKEN];
+  const MARKETPLACE_LOOKUP = "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/iris-mcp/vsextensions/iris-mcp-launcher/1.0.0/vspackage";
+  const OPEN_VSX_LOOKUP = "https://open-vsx.org/api/iris-mcp/iris-mcp-launcher/1.0.0";
+  const OPEN_VSX_NAMESPACE = "https://open-vsx.org/api/iris-mcp";
 
-  it("a version the registry already lists is refused (exit 1) with no git call at all", async () => {
-    const world = ipmWorld();
-    world.registry.answer = { status: 200, body: { name: "iris-execute-mcp-v2", version: "1.0.0", versions: ["0.9.0", "1.0.0"] } };
-    expect(await world.run({ channels: ALL_ENABLED.map((channel: { id: string }) => ({ ...channel, enabled: channel.id === "ipm" })), env: { IPM_DIST_DEPLOY_KEY: KEY } })).toBe(1);
-    expect(world.standIns.calls("git")).toEqual([]);
-    expect(world.lines.join("\n")).toContain("the IPM registry already lists 1.0.0");
+  const reportOf = (world: PublishWorld): string => world.lines.join("\n");
+  const storeRows = (world: PublishWorld): string[] => reportOf(world).split("\n").filter((line) => /^publish(?: \(dry run\))?: (?:vscode-marketplace|open-vsx): /.test(line));
+
+  it("Store upload: both lookups say absent, so vsce then ovsx upload, after npm, and each row says `published (auth: oidc)`", async () => {
+    const world = newWorld();
+    expect(await world.run({ env: OIDC })).toBe(0);
+    const order = world.standIns.allCalls().filter((call) => (call.tool === "npm" && call.argv[0] === "publish") || call.tool === "vsce" || call.tool === "ovsx");
+    expect(order.map((call) => call.tool)).toEqual([...NPM_PUBLISH_ORDER.map(() => "npm"), "vsce", "ovsx"]);
+    const report = reportOf(world);
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: published (auth: oidc)");
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: published (auth: oidc)");
+    expect(storeRows(world)).toEqual(["publish: vscode-marketplace: published (auth: oidc)", "publish: open-vsx: published (auth: oidc)"]);
   });
 
-  it("otherwise it clones with the deploy key, replaces the tree, commits `iris-execute-mcp-v2 <v> from <sha>`, tags v<v> and pushes master and the tag, never with force", async () => {
-    const world = ipmWorld();
-    world.registry.answer = { status: 200, body: { name: "iris-execute-mcp-v2", version: "0.9.0", versions: ["0.9.0"] } };
-    expect(await world.run({ channels: IPM_ONLY, env: { IPM_DIST_DEPLOY_KEY: KEY } })).toBe(0);
-    const git = world.standIns.calls("git");
-    expect(git.map((call) => call.argv.filter((argument) => argument !== "-c" && !argument.startsWith("user.")).slice(0, 3))).toEqual([
-      ["clone", "--quiet", "git@github.com:jbrandtmse/iris-execute-mcp-v2-ipm.git"],
-      ["checkout", "--quiet", "-B"],
-      ["add", "--all"],
-      ["write-tree"],
-      ["rev-parse", "--verify", "--quiet"],
-      ["commit", "--quiet", "-m"],
-      ["tag", "-a", "v1.0.0"],
-      ["push", "--atomic", "origin"],
-    ]);
-    const commit = git.find((call) => call.argv.includes("commit")) as StandInCall;
-    expect(commit.argv.at(-1)).toBe(`iris-execute-mcp-v2 1.0.0 from ${SHA}`);
-    const push = git.at(-1) as StandInCall;
-    expect(push.argv, "the branch and the tag land together or not at all").toEqual(["push", "--atomic", "origin", "HEAD:refs/heads/master", "refs/tags/v1.0.0"]);
-    for (const call of git) {
-      expect(call.argv.some((argument) => /^--force|^-f$|^\+/.test(argument)), `git ${call.argv[0]}: no force`).toBe(false);
-      expect(call.env["GIT_SSH_COMMAND"]).toMatch(/^ssh -i \S+ -o IdentitiesOnly=yes/);
-      expect(call.env["IPM_DIST_DEPLOY_KEY"], "the key text is not in the environment").toBeUndefined();
+  it("the lookups are read-only GETs, in order: the Marketplace's (one byte asked for), then Open VSX's namespace, then Open VSX's version, each with no signal of its own so that the 30 s guard of the deps applies", async () => {
+    const world = newWorld();
+    expect(await world.run()).toBe(0);
+    expect(world.stores.requests.map((request) => request.url)).toEqual([MARKETPLACE_LOOKUP, OPEN_VSX_NAMESPACE, OPEN_VSX_LOOKUP]);
+    expect(world.stores.requests[0]?.headers).toEqual({ Range: "bytes=0-0", "User-Agent": "iris-mcp-release" });
+    expect(world.stores.requests[2]?.headers).toEqual({ Accept: "application/json", "User-Agent": "iris-mcp-release" });
+    expect(world.stores.requests.every((request) => !request.signal)).toBe(true);
+    const sequence = world.standIns.allCalls();
+    expect(sequence.filter((call) => call.tool === "vsce"), "one vsce publish").toHaveLength(1);
+  });
+
+  it("Already on a store: a lookup that finds the version (200, or 206 for the one byte) is `already published` with no CLI publish call, and the other store goes on", async () => {
+    for (const found of [200, 206]) {
+      const world = newWorld();
+      world.stores.marketplace = marketplaceHit(found);
+      expect(await world.run()).toBe(0);
+      expect(world.standIns.calls("vsce"), `status ${found}: no upload`).toEqual([]);
+      expect(world.standIns.calls("ovsx"), "Open VSX still uploads").toHaveLength(1);
+      expect(reportOf(world)).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: already published\n");
+      expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: published (auth: oidc)");
     }
-    const key = git.find((call) => call.sshKey !== undefined)?.sshKey;
-    expect(key?.mode).toBe("600");
-    expect(key?.text).toBe(`${KEY}\n`);
-    expect(existsSync(key?.path as string), "the key file is removed on exit").toBe(false);
-    expect(world.lines.join("\n")).not.toContain("SECRETKEYBODY");
-    expect(world.lines.join("\n")).toMatch(/ipm\n {2}iris-execute-mcp-v2@1\.0\.0: published \(v1\.0\.0 on jbrandtmse\/iris-execute-mcp-v2-ipm master\)/);
+    const both = newWorld();
+    both.stores.marketplace = marketplaceHit();
+    both.stores.openVsx = openVsxHit();
+    expect(await both.run()).toBe(0);
+    expect(both.standIns.calls("vsce")).toEqual([]);
+    expect(both.standIns.calls("ovsx")).toEqual([]);
+    expect(reportOf(both)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: already published");
   });
 
-  it("an existing tag with an identical tree is already published: no commit and no push", async () => {
-    const world = ipmWorld();
-    world.standIns.script("git", [
-      { match: ["clone"], effects: [{ mkdir: "$LAST" }, { mkdir: "$LAST/.git" }] },
-      { match: ["write-tree"], stdout: "tree-same\n" },
-      { match: ["rev-parse"], stdout: "tree-same\n" },
-    ]);
-    expect(await world.run({ channels: IPM_ONLY, env: { IPM_DIST_DEPLOY_KEY: KEY } })).toBe(0);
-    expect(world.standIns.calls("git").some((call) => call.argv.includes("push") || call.argv.includes("commit"))).toBe(false);
-    expect(world.lines.join("\n")).toContain("iris-execute-mcp-v2@1.0.0: already published (v1.0.0 exists with this tree)");
+  it("Skip-duplicate race: a lookup that says absent and a CLI that exits 0 with the skip line is `already published`, for each store", async () => {
+    const world = newWorld();
+    world.standIns.script("vsce", [{ match: ["publish"], stdout: ` DONE  ${SKIP_LINE}` }]);
+    world.standIns.script("ovsx", [{ match: ["publish"], stdout: "iris-mcp.iris-mcp-launcher v1.0.0 is already published. Skipping publish.\n" }]);
+    expect(await world.run()).toBe(0);
+    const report = reportOf(world);
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: already published\n");
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: already published\n");
+    expect(report).not.toMatch(/iris-mcp-launcher@1\.0\.0: published/);
   });
 
-  it("an existing tag with a different tree fails, with no commit and no push", async () => {
-    const world = ipmWorld();
-    world.standIns.script("git", [
-      { match: ["clone"], effects: [{ mkdir: "$LAST" }, { mkdir: "$LAST/.git" }] },
-      { match: ["write-tree"], stdout: "tree-new\n" },
-      { match: ["rev-parse"], stdout: "tree-old\n" },
-    ]);
-    expect(await world.run({ channels: IPM_ONLY, env: { IPM_DIST_DEPLOY_KEY: KEY } })).toBe(1);
-    expect(world.standIns.calls("git").some((call) => call.argv.includes("push") || call.argv.includes("commit"))).toBe(false);
-    expect(world.lines.join("\n")).toContain("v1.0.0 exists on jbrandtmse/iris-execute-mcp-v2-ipm with a different tree");
+  it("an exit 0 that prints something else is a real upload, however close the words are", async () => {
+    const world = newWorld();
+    world.standIns.script("vsce", [{ match: ["publish"], stdout: "Version 1.0.0 is already published. Skipping publish. (and then uploaded)\n" }]);
+    expect(await world.run()).toBe(0);
+    expect(reportOf(world)).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: published (auth: oidc)");
   });
 
-  it("a missing deploy key, a failing clone and a failing push are failures that name the step", async () => {
-    const noKey = ipmWorld();
-    expect(await noKey.run({ channels: IPM_ONLY })).toBe(1);
-    expect(noKey.lines.join("\n")).toContain(
-      "IPM_DIST_DEPLOY_KEY is not set. Add the deploy key as a release-environment secret, and to the publish step's env in release.yml and scripts/lib/release-checks.mjs.",
-    );
-    expect(noKey.standIns.calls("git")).toEqual([]);
-
-    const clone = ipmWorld();
-    clone.standIns.script("git", [{ match: ["clone"], status: 128, stderr: "fatal: repository not found\n" }]);
-    expect(await clone.run({ channels: IPM_ONLY, env: { IPM_DIST_DEPLOY_KEY: KEY } })).toBe(1);
-    expect(clone.lines.join("\n")).toContain("git clone failed (exit 128): fatal: repository not found");
-    expect(clone.lines.join("\n"), "the failure says what to do").toContain("Fix the packaging repository or its deploy key, then run the release again.");
-
-    const push = ipmWorld();
-    push.standIns.script("git", [
-      { match: ["clone"], effects: [{ mkdir: "$LAST" }, { mkdir: "$LAST/.git" }] },
-      { match: ["write-tree"], stdout: "t\n" },
-      { match: ["rev-parse"], status: 1 },
-      { match: ["push"], status: 1, stderr: "remote rejected\n" },
-    ]);
-    expect(await push.run({ channels: IPM_ONLY, env: { IPM_DIST_DEPLOY_KEY: KEY } })).toBe(1);
-    expect(push.lines.join("\n")).toContain("git push failed (exit 1): remote rejected");
-    const rejected = push.standIns.calls("git").find((call) => call.sshKey !== undefined)?.sshKey;
-    expect(existsSync(rejected?.path as string), "the key file is removed after a failure, too").toBe(false);
+  it.each([
+    ["403", { status: 403, body: { message: "forbidden" } }, /\(HTTP 403\)/],
+    ["500", { status: 500, body: {} }, /\(HTTP 500\)/],
+    ["a redirect", { status: 301 }, /\(HTTP 301\)/],
+    ["a network error", { status: 0, fail: "fetch failed" }, /\(fetch failed\)/],
+  ] as Array<[string, FakeAnswer, RegExp]>)("Lookup unreadable (%s) on the Marketplace: `failed`, nothing uploaded, nothing after it attempted (fail closed), exit 1", async (_label, answer, cause) => {
+    const world = newWorld();
+    world.stores.marketplace = answer;
+    expect(await world.run()).toBe(1);
+    expect(world.standIns.calls("vsce"), "nothing uploaded").toEqual([]);
+    expect(world.standIns.calls("ovsx"), "nothing after it attempted").toEqual([]);
+    expect(world.stores.requests.map((request) => request.url), "Open VSX was not even asked").toEqual([MARKETPLACE_LOOKUP]);
+    const report = reportOf(world);
+    expect(report).toMatch(/vscode-marketplace\n {2}iris-mcp-launcher@1\.0\.0: failed \(could not ask vscode-marketplace whether iris-mcp-launcher@1\.0\.0 is published/);
+    expect(report).toMatch(cause);
+    expect(report).toContain("Nothing was uploaded to vscode-marketplace; check the network and the store, then run the release again.");
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
+    expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: skipped: not enabled (Story 42.8)");
   });
 
-  it("an unreadable registry stops the channel before it pushes", async () => {
-    const world = ipmWorld();
-    world.registry.answer = { status: 503 };
-    expect(await world.run({ channels: IPM_ONLY, env: { IPM_DIST_DEPLOY_KEY: KEY } })).toBe(1);
+  it("Lookup unreadable on Open VSX: the Marketplace stays published, Open VSX is `failed` with nothing uploaded, and what follows is `not attempted`", async () => {
+    const world = newWorld();
+    world.stores.openVsx = { status: 503 };
+    expect(await world.run({ channels: ALL_ENABLED })).toBe(1);
+    expect(world.standIns.calls("vsce")).toHaveLength(1);
+    expect(world.standIns.calls("ovsx")).toEqual([]);
     expect(world.standIns.calls("git")).toEqual([]);
-    expect(world.lines.join("\n")).toContain("the registry could not be read (HTTP 503). Nothing was pushed.");
+    const report = reportOf(world);
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: published (auth: oidc)");
+    expect(report).toMatch(/open-vsx\n {2}iris-mcp-launcher@1\.0\.0: failed \(could not ask open-vsx whether iris-mcp-launcher@1\.0\.0 is published \(HTTP 503\)/);
+    expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: not attempted");
   });
 
-  it("a throw inside the channel (a file-system error) after eight uploads is a failed channel: the report still names the eight packages as published, exit 1, the message redacted", async () => {
-    const world = ipmWorld();
-    const run = defaultDeps().run;
-    const attempts: string[][] = [];
-    const during: string[] = [];
-    const privateTmp = scratch("release-private-tmp-");
-    const code = await withTmpdir(privateTmp, () =>
-      world.run({
-        channels: IPM_ONLY,
-        env: { IPM_DIST_DEPLOY_KEY: KEY, NPM_TOKEN: TOKEN },
-        deps: {
-          run: (argv: string[], options: Parameters<typeof run>[1]) => {
-            if (argv[0] !== "git") return run(argv, options);
-            attempts.push(argv);
-            during.push(...readdirSync(privateTmp));
-            throw new Error(`ENOSPC: no space left on device, write ${TOKEN}`);
-          },
-        },
-      }),
+  it("a Marketplace 200 that is not the store's answer (a captive-portal or proxy HTML page) is `failed`, never `already published`: nothing uploaded, nothing after it attempted, exit 1", async () => {
+    const world = newWorld();
+    world.stores.marketplace = HTML_PAGE;
+    expect(await world.run()).toBe(1);
+    expect(world.standIns.calls("vsce"), "nothing uploaded").toEqual([]);
+    expect(world.standIns.calls("ovsx"), "nothing after it attempted").toEqual([]);
+    const report = reportOf(world);
+    expect(report).not.toContain("already published");
+    expect(report).toContain(
+      "vscode-marketplace\n  iris-mcp-launcher@1.0.0: failed (could not ask vscode-marketplace whether iris-mcp-launcher@1.0.0 is published (HTTP 200, but the content type is text/html; charset=utf-8, not application/vsix, so it is not the store's answer).",
     );
-    expect(code).toBe(1);
-    expect(during.some((name) => name.startsWith("release-ipm-")), "the channel had made its working directory when it threw").toBe(true);
-    expect(attempts, "the first git call of the channel threw").toHaveLength(1);
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
+  });
+
+  it.each([
+    ["an HTML page", HTML_PAGE],
+    ["JSON for another version", openVsxHit("0.9.0")],
+    ["JSON with no version (a proxy's own JSON)", { status: 200, body: { ok: true } }],
+  ] as Array<[string, FakeAnswer]>)("an Open VSX 200 that is %s is `failed`, never `already published`, and ovsx does not run", async (_label, answer) => {
+    const world = newWorld();
+    world.stores.openVsx = answer;
+    expect(await world.run()).toBe(1);
+    expect(world.standIns.calls("vsce"), "the Marketplace still uploads").toHaveLength(1);
+    expect(world.standIns.calls("ovsx"), "nothing uploaded").toEqual([]);
+    const report = reportOf(world);
+    expect(report).not.toContain("already published");
+    expect(report).toMatch(/open-vsx\n {2}iris-mcp-launcher@1\.0\.0: failed \(could not ask open-vsx whether iris-mcp-launcher@1\.0\.0 is published \(HTTP 200, but .*so it is not the store's answer\)/);
+  });
+
+  it("in a rehearsal, a store 200 that is not the store's answer is `not ready`, never `ready (would be already published)`", async () => {
+    const world = newWorld();
+    world.stores.marketplace = HTML_PAGE;
+    expect(await world.run({ dryRun: true })).toBe(1);
+    const report = reportOf(world);
+    expect(report).not.toContain("would be already published");
+    expect(report).toMatch(/vscode-marketplace\n {2}iris-mcp-launcher@1\.0\.0: not ready \(could not ask vscode-marketplace whether iris-mcp-launcher@1\.0\.0 is published \(HTTP 200, but the content type is text\/html/);
+  });
+
+  it("Lookup unreadable by a stall: a store that never answers is cut off by the 30 s guard of the deps, and the release fails closed", async () => {
+    const world = newWorld();
+    const github = fakeFetch(world.github);
+    const original = globalThis.fetch;
+    globalThis.fetch = ((url: unknown, init?: { signal?: AbortSignal }) =>
+      String(url).startsWith("https://marketplace.visualstudio.com/")
+        ? new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason)))
+        : github(url as string, init as never)) as typeof fetch;
+    try {
+      const guarded = defaultDeps({ fetchTimeoutMs: 50 }).fetch;
+      expect(await world.run({ deps: { fetch: guarded } })).toBe(1);
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(world.standIns.calls("vsce")).toEqual([]);
+    expect(world.standIns.calls("ovsx")).toEqual([]);
+    expect(reportOf(world)).toMatch(/vscode-marketplace\n {2}iris-mcp-launcher@1\.0\.0: failed \(could not ask vscode-marketplace whether iris-mcp-launcher@1\.0\.0 is published \(.*timeout/);
+  });
+
+  it("Upload fails: a CLI that exits non-zero is `failed` with the last four lines of its output, and what follows is `not attempted`", async () => {
+    const world = newWorld();
+    world.standIns.script("vsce", [{ match: ["publish"], status: 1, stderr: "line 1\nline 2\nline 3\nline 4\nERROR  The Personal Access Token verification has failed\nERROR  last line\n" }]);
+    expect(await world.run()).toBe(1);
+    expect(world.standIns.calls("ovsx")).toEqual([]);
+    const report = reportOf(world);
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: failed (line 3\nline 4\nERROR  The Personal Access Token verification has failed\nERROR  last line)");
+    expect(report).not.toContain("line 2");
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
+  });
+
+  it("Open VSX namespace absent (decision #121): a release skips Open VSX as not set up, naming the namespace and the owner's step, before any lookup or upload of it; the Marketplace is not affected and the run exits 0", async () => {
+    const world = newWorld();
+    world.stores.namespace = { status: 404, body: { error: "Namespace not found: iris-mcp" } };
+    expect(await world.run()).toBe(0);
+    expect(world.standIns.calls("vsce")).toHaveLength(1);
+    expect(world.standIns.calls("ovsx"), "nothing uploaded to a namespace that does not exist").toEqual([]);
+    expect(world.stores.requests.map((request) => request.url)).toEqual([MARKETPLACE_LOOKUP, OPEN_VSX_NAMESPACE]);
+    expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: skipped (not set up: the Open VSX namespace iris-mcp does not exist. Create it once with npx ovsx create-namespace iris-mcp (owner step O1).)");
+  });
+
+  it("an Open VSX namespace that cannot be read is `failed` too, with the status", async () => {
+    const world = newWorld();
+    world.stores.namespace = { status: 502 };
+    expect(await world.run()).toBe(1);
+    expect(world.standIns.calls("ovsx")).toEqual([]);
+    expect(reportOf(world)).toMatch(/open-vsx\n {2}iris-mcp-launcher@1\.0\.0: failed \(the Open VSX namespace iris-mcp could not be read \(HTTP 502\)\. Check the network and open-vsx\.org, then run the release again\. Nothing was uploaded to open-vsx\./);
+  });
+
+  it("an Open VSX namespace 200 that is not JSON (a captive-portal or proxy page) is not the namespace: `failed`, ovsx does not run", async () => {
+    const world = newWorld();
+    world.stores.namespace = HTML_PAGE;
+    expect(await world.run()).toBe(1);
+    expect(world.standIns.calls("vsce"), "the Marketplace still uploads").toHaveLength(1);
+    expect(world.standIns.calls("ovsx")).toEqual([]);
+    expect(world.stores.requests.map((request) => request.url), "the version is not asked after a namespace that cannot be judged").toEqual([MARKETPLACE_LOOKUP, OPEN_VSX_NAMESPACE]);
+    expect(reportOf(world)).toContain(
+      "open-vsx\n  iris-mcp-launcher@1.0.0: failed (the Open VSX namespace iris-mcp could not be read (HTTP 200, but the answer is text/html; charset=utf-8, not JSON, so it is not the store's answer). Check the network and open-vsx.org, then run the release again. Nothing was uploaded to open-vsx.)",
+    );
+  });
+
+  describe("the rehearsal", () => {
+    it("Dry step ready: publisher set, both CLIs installed, namespace present, versions absent: `ready (would publish ...)` for both, exit 0, and no CLI publish runs", async () => {
+      const world = newWorld();
+      expect(await world.run({ dryRun: true })).toBe(0);
+      const report = reportOf(world);
+      expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0; publisher not checked: the Marketplace has no public publisher lookup, so the owner confirms the publisher iris-mcp (step O1) and its trusted-publishing policy (step O2))");
+      expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0)");
+      expect(world.standIns.calls("vsce")).toEqual([]);
+      expect(world.standIns.calls("ovsx")).toEqual([]);
+      expect(world.stores.requests.map((request) => request.url)).toEqual([MARKETPLACE_LOOKUP, OPEN_VSX_NAMESPACE, OPEN_VSX_LOOKUP]);
+    });
+
+    it("a version that a store already holds reads `ready (would be already published)`", async () => {
+      const world = newWorld();
+      world.stores.marketplace = marketplaceHit(206);
+      expect(await world.run({ dryRun: true })).toBe(0);
+      expect(reportOf(world)).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: ready (would be already published)");
+      expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0)");
+    });
+
+    it("Open VSX namespace absent (decision #121): `skipped (not set up: the Open VSX namespace iris-mcp does not exist ...)`, exit 0", async () => {
+      const world = newWorld();
+      world.stores.namespace = { status: 404, body: { error: "Namespace not found: iris-mcp" } };
+      expect(await world.run({ dryRun: true })).toBe(0);
+      expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: skipped (not set up: the Open VSX namespace iris-mcp does not exist. Create it once with npx ovsx create-namespace iris-mcp (owner step O1).)");
+      expect(reportOf(world)).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0; publisher not checked: the Marketplace has no public publisher lookup, so the owner confirms the publisher iris-mcp (step O1) and its trusted-publishing policy (step O2))");
+    });
+
+    it("an unreadable lookup is `not ready`, not `ready`: the rehearsal cannot tell an upload from a duplicate", async () => {
+      const world = newWorld();
+      world.stores.openVsx = { status: 500 };
+      expect(await world.run({ dryRun: true })).toBe(1);
+      expect(reportOf(world)).toMatch(/open-vsx\n {2}iris-mcp-launcher@1\.0\.0: not ready \(could not ask open-vsx whether iris-mcp-launcher@1\.0\.0 is published \(HTTP 500\)/);
+    });
+
+    it("a placeholder publisher is `not ready`, and the stores are not asked about a name nobody owns", async () => {
+      const world = newWorld({ publisher: PLACEHOLDER_PUBLISHER });
+      expect(await world.run({ dryRun: true })).toBe(1);
+      expect(reportOf(world)).toMatch(/vscode-marketplace\n {2}iris-mcp-launcher@1\.0\.0: not ready \(the publisher is TBD-at-publish-time\)/);
+      expect(world.stores.requests).toEqual([]);
+    });
+
+    it("a store CLI that is not installed is `not ready` naming the directory, beside a ready lookup", async () => {
+      const world = newWorld();
+      rmSync(path.join(world.repo, "extensions", "iris-mcp-launcher", "node_modules", ".bin", "ovsx"));
+      expect(await world.run({ dryRun: true })).toBe(1);
+      expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not ready (ovsx is not installed in extensions/iris-mcp-launcher/node_modules)");
+    });
+  });
+
+  describe("Secret containment: each credential reaches only the CLI that needs it, and no report line holds one", () => {
+    const env = { NPM_TOKEN: TOKEN, OVSX_PAT, VSCE_PAT, ...OIDC };
+    const holdsAny = (call: StandInCall, names: string[]): string[] => names.filter((name) => call.env[name] !== undefined);
+
+    it("with OVSX_PAT: ovsx gets it in its environment (never in argv) and no `--trusted-publishing`, with `auth: token`; vsce gets the OIDC variables only", async () => {
+      const world = newWorld();
+      expect(await world.run({ env })).toBe(0);
+      const vsce = world.standIns.calls("vsce")[0] as StandInCall;
+      const ovsx = world.standIns.calls("ovsx")[0] as StandInCall;
+      expect(vsce.argv.slice(-2)).toEqual(["--skip-duplicate", "--oidc"]);
+      expect(vsce.env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]).toBe(OIDC.ACTIONS_ID_TOKEN_REQUEST_TOKEN);
+      expect(vsce.env["ACTIONS_ID_TOKEN_REQUEST_URL"]).toBe(OIDC.ACTIONS_ID_TOKEN_REQUEST_URL);
+      expect(holdsAny(vsce, ["OVSX_PAT", "VSCE_PAT", "NPM_TOKEN", "GITHUB_TOKEN"]), "vsce holds no secret but the OIDC variables, and not VSCE_PAT: the Marketplace always uses OIDC").toEqual([]);
+      expect(ovsx.argv).toEqual(["publish", path.join(world.artifacts, "vsix", "iris-mcp-launcher-1.0.0.vsix"), "--skip-duplicate"]);
+      expect(ovsx.env["OVSX_PAT"]).toBe(OVSX_PAT);
+      expect(ovsx.env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]).toBe(OIDC.ACTIONS_ID_TOKEN_REQUEST_TOKEN);
+      expect(holdsAny(ovsx, ["VSCE_PAT", "NPM_TOKEN", "GITHUB_TOKEN"])).toEqual([]);
+      expect(JSON.stringify([vsce.argv, ovsx.argv]), "no secret in any argv").not.toMatch(/SECRET/);
+      expect(reportOf(world)).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: published (auth: oidc)");
+      expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: published (auth: token)");
+    });
+
+    it("without OVSX_PAT (or with it empty): ovsx asks for trusted publishing, holds no OVSX_PAT, and the row says `auth: oidc`", async () => {
+      for (const value of [undefined, ""]) {
+        const world = newWorld();
+        expect(await world.run({ env: { ...env, OVSX_PAT: value } })).toBe(0);
+        const ovsx = world.standIns.calls("ovsx")[0] as StandInCall;
+        expect(ovsx.argv.slice(-2)).toEqual(["--skip-duplicate", "--trusted-publishing"]);
+        expect(ovsx.env["OVSX_PAT"]).toBeUndefined();
+        expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: published (auth: oidc)");
+      }
+    });
+
+    it("no other child holds OVSX_PAT or VSCE_PAT: not npm (--version, view, publish), not vsce (and no git runs at all)", async () => {
+      const world = newWorld();
+      expect(await world.run({ channels: ALL_ENABLED, env })).toBe(0);
+      const calls = world.standIns.allCalls();
+      expect(calls.length).toBeGreaterThan(15);
+      expect(calls.filter((call) => call.tool === "git")).toEqual([]);
+      for (const call of calls) {
+        const label = `${call.tool} ${call.argv[0]}`;
+        if (call.tool !== "ovsx") expect(call.env["OVSX_PAT"], label).toBeUndefined();
+        expect(call.env["VSCE_PAT"], label).toBeUndefined();
+        expect(call.env["GITHUB_TOKEN"], label).toBeUndefined();
+        expect(call.env["NPM_TOKEN"], label).toBeUndefined();
+        const publishCli = (call.tool === "npm" && call.argv[0] === "publish") || (call.tool === "vsce" && call.argv[0] === "publish") || (call.tool === "ovsx" && call.argv[0] === "publish");
+        if (!publishCli) expect(holdsAny(call, ["ACTIONS_ID_TOKEN_REQUEST_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_URL"]), label).toEqual([]);
+      }
+    });
+
+    it("a failing store CLI that echoes a secret is reported with it replaced by ***, and no line of the run holds any secret", async () => {
+      const world = newWorld();
+      world.standIns.script("ovsx", [{ match: ["publish"], status: 1, stderr: `ovsx error 401: token ${OVSX_PAT} rejected, ambient ${VSCE_PAT}, oidc ${OIDC.ACTIONS_ID_TOKEN_REQUEST_TOKEN}\n` }]);
+      expect(await world.run({ env })).toBe(1);
+      expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: failed (ovsx error 401: token *** rejected, ambient ***, oidc ***)");
+      for (const secret of SECRETS) expect(reportOf(world), secret).not.toContain(secret);
+    });
+  });
+
+  it("Version lockstep at the upload: a release whose vsix is not at the release version is refused (exit 2) before any upload, naming the channel", async () => {
+    const world = newWorld({ vsixVersion: "0.9.0" });
+    expect(await world.run()).toBe(2);
+    expect(world.standIns.allCalls().filter((call) => call.argv[0] === "publish")).toEqual([]);
+    expect(reportOf(world)).toContain('refusing: vscode-marketplace: its vsix is at "0.9.0", not the release version 1.0.0. Run pnpm run version, then prepare the artifacts again.');
+    expect(reportOf(world)).toContain('refusing: open-vsx: its vsix is at "0.9.0", not the release version 1.0.0.');
+  });
+
+  it("the version check is a release's: a dry-run manifest carries the extension's own version, and a disabled channel's vsix is not checked", async () => {
+    const dry = newWorld({ vsixVersion: "0.9.0" });
+    dry.manifest.mode = "dry-run";
+    writeManifest(dry.artifacts, dry.manifest);
+    expect(await dry.run({ dryRun: true })).toBe(0);
+    const disabled = newWorld({ vsixVersion: "0.9.0" });
+    expect(await disabled.run({ channels: NPM_ONLY })).toBe(0);
+  });
+});
+
+describe("Publish: the extension stores, QA gaps (Story 42.7, Rules #54, #59)", () => {
+  const OVSX_PAT = "ovsx-PAT-SECRET-0123456789";
+  const VSCE_PAT = "vsce-PAT-SECRET-0123456789";
+  const OIDC = { ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-request-SECRET-0123456789", ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.actions.example.invalid/x" };
+  const SECRET_ENV = { NPM_TOKEN: TOKEN, OVSX_PAT, VSCE_PAT, ...OIDC };
+  const reportOf = (world: PublishWorld): string => world.lines.join("\n");
+
+  /** Take the publisher out of both store entries of the manifest, as a manifest of an extension without one would read. */
+  function withoutPublisher(world: PublishWorld): void {
+    for (const channel of world.manifest.channels) if (channel["id"] === "vscode-marketplace" || channel["id"] === "open-vsx") delete channel["publisher"];
+    writeManifest(world.artifacts, world.manifest);
+  }
+
+  it("a store request is a plain GET with no body, the same few headers in a release and a rehearsal, and no secret anywhere in a URL or a header, though every secret is in the job's environment", async () => {
+    for (const dryRun of [false, true]) {
+      const world = newWorld();
+      expect(await world.run({ dryRun, env: SECRET_ENV }), `dryRun ${String(dryRun)}`).toBe(0);
+      expect(world.stores.requests, "the Marketplace, the Open VSX namespace and the Open VSX version").toHaveLength(3);
+      for (const request of world.stores.requests) {
+        expect(request.method, request.url).toBe("GET");
+        expect(request.hasBody, request.url).toBe(false);
+        expect(Object.keys(request.headers).sort(), request.url).toEqual(request.url.includes("marketplace") ? ["Range", "User-Agent"] : ["Accept", "User-Agent"]);
+      }
+      const wire = JSON.stringify(world.stores.requests);
+      for (const secret of [TOKEN, OVSX_PAT, VSCE_PAT, OIDC.ACTIONS_ID_TOKEN_REQUEST_TOKEN, GITHUB_TOKEN]) expect(wire, secret).not.toContain(secret);
+    }
+  });
+
+  it("a manifest that names no publisher fails an enabled store channel with `the publisher is missing`, and the stores are not asked about a name nobody owns", async () => {
+    const world = newWorld();
+    withoutPublisher(world);
+    expect(await world.run()).toBe(1);
+    expect(world.standIns.calls("vsce")).toEqual([]);
+    expect(world.standIns.calls("ovsx")).toEqual([]);
+    expect(world.stores.requests).toEqual([]);
+    expect(reportOf(world)).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: failed (the publisher is missing)");
+    expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
+  });
+
+  it("the same manifest in a rehearsal is `not ready (the publisher is missing)` at the Marketplace (Open VSX is not attempted), with no store read", async () => {
+    const world = newWorld();
+    withoutPublisher(world);
+    expect(await world.run({ dryRun: true })).toBe(1);
+    expect(world.stores.requests).toEqual([]);
+    expect(reportOf(world)).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: not ready (the publisher is missing)");
+    expect(reportOf(world), "the rehearsal stops at the first store that is not ready").toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
+  });
+
+  it("a store CLI that cannot start (the shape `runCaptured` returns: status null, the error, no output) is `failed` with the error's own words, and what follows is `not attempted`", async () => {
+    const world = newWorld();
+    const real = defaultDeps().run;
+    const run = ((argv: string[], options: unknown) =>
+      path.basename(argv[0] as string).startsWith("vsce") ? Promise.resolve({ status: null, stdout: "", stderr: "", error: new Error(`spawn ${argv[0]} ENOEXEC (token ${OVSX_PAT})`) }) : real(argv as never, options as never)) as typeof real;
+    expect(await world.run({ env: SECRET_ENV, deps: { run } })).toBe(1);
+    expect(world.standIns.calls("ovsx"), "nothing after the failure runs").toEqual([]);
+    const report = reportOf(world);
+    expect(report).toMatch(/vscode-marketplace\n {2}iris-mcp-launcher@1\.0\.0: failed \(spawn .*vsce ENOEXEC \(token \*\*\*\)\)/);
+    expect(report).not.toContain(OVSX_PAT);
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
+  });
+
+  it("a store CLI that exits non-zero with no output is `failed` with how it ended, never an empty `failed ()`", async () => {
+    const world = newWorld();
+    world.standIns.script("vsce", [{ match: ["publish"], status: 3 }]);
+    expect(await world.run()).toBe(1);
+    const report = reportOf(world);
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: failed (vsce ended with no output (exit 3))");
+    expect(report).not.toContain("failed ()");
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
+  });
+
+  it("a rehearsal stops at the first enabled store that is not ready: Open VSX is `not attempted`, and neither its namespace nor its version is read", async () => {
+    const world = newWorld();
+    world.stores.marketplace = { status: 500 };
+    expect(await world.run({ dryRun: true })).toBe(1);
+    const report = reportOf(world);
+    expect(report).toMatch(/vscode-marketplace\n {2}iris-mcp-launcher@1\.0\.0: not ready \(could not ask vscode-marketplace .*HTTP 500/);
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
+    expect(world.stores.requests.map((request) => request.url)).toEqual([`https://marketplace.visualstudio.com/_apis/public/gallery/publishers/iris-mcp/vsextensions/iris-mcp-launcher/1.0.0/vspackage`]);
+    expect(world.standIns.calls("vsce")).toEqual([]);
+    expect(world.standIns.calls("ovsx")).toEqual([]);
+  });
+});
+
+describe("The IPM channel (decision #122, superseding #76 and #109): a manual step, never a failure", () => {
+  const ipmWorld = (): PublishWorld => newWorld({ publisher: "acme" });
+  const REGISTRY_URL = "https://pm.community.intersystems.com/packages/iris-execute-mcp-v2";
+  const NOT_LISTED = "Release 1.0.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry does not list 1.0.0";
+  /** The `::warning::` lines of a run: raw lines at the start of a log line. */
+  const warnings = (world: PublishWorld): string[] => world.lines.filter((line) => line.startsWith("::warning"));
+
+  it("a registry that does not list the version (the 404 it really answers for an unregistered package) is a `manual step`: exit 0, the report line, the `Manual steps` block and one `::warning::`, and no process runs", async () => {
+    const world = ipmWorld();
+    expect(await world.run({ channels: IPM_ONLY })).toBe(0);
+    const text = world.lines.join("\n");
+    expect(text).toContain(`ipm: manual step (${NOT_LISTED})`);
+    expect(text).toContain(`ipm\n  iris-execute-mcp-v2@1.0.0: manual step (${NOT_LISTED})`);
+    expect(text).toContain(`Manual steps (the run does not do these, and its result does not depend on them; the listing is ${OPEN_EXCHANGE_LISTING_URL}):\n  ipm: ${NOT_LISTED}\n`);
+    expect(warnings(world)).toEqual([`::warning title=Manual step::ipm: ${NOT_LISTED}`]);
+    expect(world.registry.requests, "the registry is read once, read-only").toEqual([REGISTRY_URL]);
+    expect(world.standIns.calls("git"), "no git call: nothing is pushed, cloned or tagged").toEqual([]);
+    expect(world.standIns.allCalls().filter((call) => call.tool !== "npm")).toEqual([]);
+  });
+
+  it("a registry that lists the version (the newest or an older one) is `already published`: exit 0, no `Manual steps` block and no manual-step annotation", async () => {
+    for (const answer of [ipmRegistryHit("1.0.0", ["0.9.0"]), ipmRegistryHit("1.1.0", ["1.0.0", "0.9.0"])]) {
+      const world = ipmWorld();
+      world.registry.answer = answer;
+      expect(await world.run({ channels: IPM_ONLY })).toBe(0);
+      const text = world.lines.join("\n");
+      expect(text).toContain("ipm: already published");
+      expect(text).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: already published\n");
+      expect(text).not.toContain("Manual steps");
+      expect(warnings(world)).toEqual([]);
+    }
+  });
+
+  it("a registry that lists other versions only is a manual step, as one that does not know the package", async () => {
+    const world = ipmWorld();
+    world.registry.answer = ipmRegistryHit("0.9.0", ["0.8.0"]);
+    expect(await world.run({ channels: IPM_ONLY })).toBe(0);
+    expect(world.lines.join("\n")).toContain(`ipm: manual step (${NOT_LISTED})`);
+  });
+
+  it.each([
+    ["a 503", { status: 503 }, "HTTP 503"],
+    ["a 500 with a body", { status: 500, body: { message: "boom" } }, "HTTP 500"],
+    ["a network error", { status: 0, fail: "fetch failed" }, "fetch failed"],
+    ["a 200 that is not JSON (a captive portal)", { status: 200, contentType: "text/html; charset=utf-8", raw: "<!doctype html><title>Sign in</title>" }, "the answer is not JSON"],
+  ] as Array<[string, FakeAnswer, string]>)("a registry that cannot be read (%s) is still a manual step, never a failure: exit 0, and the detail says it could not be read", async (_label, answer, why) => {
+    const world = ipmWorld();
+    world.registry.answer = answer;
+    expect(await world.run({ channels: IPM_ONLY })).toBe(0);
+    const text = world.lines.join("\n");
+    expect(text).toContain(`ipm: manual step (Release 1.0.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry could not be read (${why}), so it is not known whether it lists 1.0.0)`);
+    expect(text).not.toMatch(/ipm[^\n]*: failed/);
+    expect(text).not.toContain("not ready");
+    expect(warnings(world)).toHaveLength(1);
+  });
+
+  it("the IPM channel does not block the channels after it, and a run whose only gap is the manual step exits 0 with every package published", async () => {
+    const world = ipmWorld();
+    expect(await world.run({ channels: ALL_ENABLED })).toBe(0);
     expect(world.published()).toHaveLength(8);
-    const report = world.lines.join("\n");
-    for (const name of NPM_PUBLISH_ORDER) expect(report, name).toContain(`${name}@1.0.0: published`);
-    expect(report).toMatch(/ipm\n {2}iris-execute-mcp-v2@1\.0\.0: failed \(ENOSPC: no space left on device, write \*\*\*\)/);
-    expect(report, "the redaction of the report").not.toContain(TOKEN);
-    expect(readdirSync(privateTmp), "the channel's working directory and the token's userconfig are removed").toEqual([]);
+    expect(world.standIns.calls("vsce")).toHaveLength(1);
+    expect(world.standIns.calls("ovsx")).toHaveLength(1);
+    expect(world.lines.join("\n")).toContain("ipm: manual step (");
+  });
+
+  it("the report with the block is appended to the step summary, and the warning is a log line of its own, before the report", async () => {
+    const world = ipmWorld();
+    const summary = path.join(world.root, "publish-summary.md");
+    expect(await world.run({ channels: IPM_ONLY, env: { GITHUB_STEP_SUMMARY: summary } })).toBe(0);
+    expect(readFileSync(summary, "utf8")).toContain(`Manual steps (`);
+    expect(readFileSync(summary, "utf8")).toContain(`  ipm: ${NOT_LISTED}`);
+    const annotation = world.lines.findIndex((line) => line.startsWith("::warning title=Manual step::"));
+    const report = world.lines.findIndex((line) => line.startsWith("Release report"));
+    expect(annotation).toBeGreaterThanOrEqual(0);
+    expect(annotation).toBeLessThan(report);
+  });
+
+  it("the IPM channel reads no secret: the run's lines never name a deploy key, and the only requests it makes are GETs of the registry", async () => {
+    const world = ipmWorld();
+    expect(await world.run({ channels: IPM_ONLY })).toBe(0);
+    expect(world.lines.join("\n")).not.toContain("deploy key");
+    expect(world.registry.requests).toEqual([REGISTRY_URL]);
   });
 });
 
@@ -1495,17 +1912,17 @@ describe("Rehearse: publish --dry-run (AC 42.5.4)", () => {
     expect(world.github.requests, "a dry run asks GitHub nothing").toEqual([]);
   });
 
-  it("every npm publish call carries --dry-run, and a dry run with every channel enabled runs no vsce or ovsx publish, no git push and no commit", async () => {
+  it("every npm publish call carries --dry-run, and a dry run with every channel enabled runs no vsce or ovsx publish and no git call at all", async () => {
     const world = newWorld({ publisher: "acme" });
     expect(await world.run({ dryRun: true, channels: ALL_ENABLED })).toBe(0);
     expect(world.published().every((call) => call.argv.includes("--dry-run"))).toBe(true);
     expect(world.standIns.calls("vsce")).toEqual([]);
     expect(world.standIns.calls("ovsx")).toEqual([]);
-    const gitCalls = world.standIns.calls("git");
-    expect(gitCalls.length, "the IPM dry step did ask the packaging repository").toBeGreaterThan(0);
-    expect(gitCalls.every((call) => call.argv[0] === "ls-remote")).toBe(true);
+    expect(world.standIns.calls("git"), "the IPM dry step reads the registry, not a repository").toEqual([]);
+    expect(world.registry.requests, "the IPM dry step asked the registry once").toEqual(["https://pm.community.intersystems.com/packages/iris-execute-mcp-v2"]);
     expect(world.standIns.allCalls().some((call) => call.argv.includes("push") || call.argv.includes("commit") || call.argv.includes("tag"))).toBe(false);
-    expect(world.lines.join("\n")).toContain("vscode-marketplace\n  iris-mcp-launcher@0.1.0: ready");
+    expect(world.lines.join("\n")).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0; publisher not checked: the Marketplace has no public publisher lookup, so the owner confirms the publisher acme (step O1) and its trusted-publishing policy (step O2))");
+    expect(world.lines.join("\n")).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0)");
   });
 
   it("a version that is on the registry is `would be already published`, and its dry-run publish is not made", async () => {
@@ -1516,96 +1933,79 @@ describe("Rehearse: publish --dry-run (AC 42.5.4)", () => {
     expect(world.lines.join("\n")).toContain("@iris-mcp/data@1.0.0: would be already published");
   });
 
-  it("every disabled channel runs its dry step and reports its readiness: the placeholder publisher, a missing CLI, the packaging repository", async () => {
-    const world = newWorld();
-    world.standIns.script("git", [{ match: ["ls-remote"], status: 128, stderr: "fatal: repository not found\n" }]);
-    expect(await world.run({ dryRun: true })).toBe(0);
+  it("every disabled channel runs its dry step and reports its readiness: the placeholder publisher and a missing CLI (IPM's is always a manual step)", async () => {
+    const world = newWorld({ publisher: PLACEHOLDER_PUBLISHER });
+    expect(await world.run({ dryRun: true, channels: NPM_ONLY })).toBe(0);
     const report = world.lines.join("\n");
     expect(report).toContain("vscode-marketplace: skipped: not enabled (Story 42.7); dry step: not ready: the publisher is TBD-at-publish-time");
     expect(report).toContain("open-vsx: skipped: not enabled (Story 42.7); dry step: not ready: the publisher is TBD-at-publish-time");
-    expect(report).toContain("ipm: skipped: not enabled (Story 42.8); dry step: not ready: the packaging repository jbrandtmse/iris-execute-mcp-v2-ipm is absent or not readable");
-    expect(world.standIns.calls("git").map((call) => call.argv)).toEqual([["ls-remote", "--symref", "https://github.com/jbrandtmse/iris-execute-mcp-v2-ipm.git", "HEAD"]]);
+    expect(report).toContain("ipm: skipped: not enabled (Story 42.8); dry step: ready (manual step after the tag: Release 1.0.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry does not list 1.0.0)");
+    expect(world.standIns.calls("git")).toEqual([]);
     rmSync(path.join(world.repo, "extensions", "iris-mcp-launcher", "node_modules", ".bin", "ovsx"));
     world.lines.length = 0;
-    expect(await world.run({ dryRun: true })).toBe(0);
+    expect(await world.run({ dryRun: true, channels: NPM_ONLY })).toBe(0);
     expect(world.lines.join("\n")).toContain("open-vsx: skipped: not enabled (Story 42.7); dry step: not ready: the publisher is TBD-at-publish-time; ovsx is not installed in extensions/iris-mcp-launcher/node_modules");
     world.registry.answer = { status: 503 };
     world.lines.length = 0;
-    expect(await world.run({ dryRun: true })).toBe(0);
-    expect(world.lines.join("\n")).toContain("dry step: not ready: the registry could not be read (HTTP 503)");
+    expect(await world.run({ dryRun: true, channels: NPM_ONLY })).toBe(0);
+    expect(world.lines.join("\n")).toContain("ipm: skipped: not enabled (Story 42.8); dry step: ready (manual step after the tag: Release 1.0.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry could not be read (HTTP 503)");
+    expect(world.stores.requests, "a placeholder publisher names nothing a store could answer for, so no store is asked").toEqual([]);
   });
 
   it("a disabled channel's readiness is `ready` when its prerequisites are there", async () => {
     const world = newWorld({ publisher: "acme" });
-    world.registry.answer = { status: 404 };
-    expect(await world.run({ dryRun: true })).toBe(0);
+    expect(await world.run({ dryRun: true, channels: NPM_ONLY })).toBe(0);
     const report = world.lines.join("\n");
-    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@0.1.0: skipped: not enabled (Story 42.7) (ready)");
-    expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: skipped: not enabled (Story 42.8) (ready)");
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: skipped: not enabled (Story 42.7) (ready (would publish iris-mcp-launcher@1.0.0; publisher not checked: the Marketplace has no public publisher lookup, so the owner confirms the publisher acme (step O1) and its trusted-publishing policy (step O2)))");
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: skipped: not enabled (Story 42.7) (ready (would publish iris-mcp-launcher@1.0.0))");
+    expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: skipped: not enabled (Story 42.8) (ready (manual step after the tag: Release 1.0.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry does not list 1.0.0))");
   });
 
-  describe("the IPM dry step reads the packaging repository's HEAD with its symref", () => {
-    const SYMREF = (branch: string): string => `ref: refs/heads/${branch}\tHEAD\nc9a020973ccc910f035ff6e2a9462eada67a870a\tHEAD\n`;
-    const LS_REMOTE = ["ls-remote", "--symref", "https://github.com/jbrandtmse/iris-execute-mcp-v2-ipm.git", "HEAD"];
-    const READY = "ipm\n  iris-execute-mcp-v2@1.0.0: ready";
-    const NOT_MAIN = "its default branch is main, not master, and the registry reads the default branch";
+  describe("the IPM dry step reads the registry and is never `not ready` (decision #122)", () => {
+    const LEAD = "manual step after the tag: ";
+    const NOT_LISTED = "Release 1.0.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry does not list 1.0.0";
+    const warnings = (world: PublishWorld): string[] => world.lines.filter((line) => line.startsWith("::warning"));
 
-    it("an empty repository is ready: the answer is empty and the exit is 0", async () => {
+    it("a registry that does not list the version reads `ready (manual step after the tag: ...)`, with the `Manual steps` block and one warning; the rehearsal exits 0", async () => {
       const world = newWorld({ publisher: "acme" });
-      world.standIns.script("git", [{ match: ["ls-remote"], stdout: "" }]);
       expect(await world.run({ dryRun: true, channels: IPM_ONLY })).toBe(0);
-      expect(world.lines.join("\n")).toContain(READY);
-      expect(world.standIns.calls("git").map((call) => call.argv)).toEqual([LS_REMOTE]);
+      const text = world.lines.join("\n");
+      expect(text).toContain(`ipm: ready (${LEAD}${NOT_LISTED})`);
+      expect(text).toContain(`ipm\n  iris-execute-mcp-v2@1.0.0: ready (${LEAD}${NOT_LISTED})`);
+      expect(text).toContain(`Manual steps (the run does not do these, and its result does not depend on them; the listing is ${OPEN_EXCHANGE_LISTING_URL}):\n  ipm: ${NOT_LISTED}\n`);
+      expect(warnings(world)).toEqual([`::warning title=Manual step::ipm: ${NOT_LISTED}`]);
+      expect(text).not.toContain("not ready");
+      expect(world.standIns.calls("git")).toEqual([]);
     });
 
-    it("a repository whose default branch is master is ready", async () => {
+    it("a registry that lists the version reads `ready (would be already published)` with no block and no warning", async () => {
       const world = newWorld({ publisher: "acme" });
-      world.standIns.script("git", [{ match: ["ls-remote"], stdout: SYMREF("master") }]);
+      world.registry.answer = ipmRegistryHit("1.0.0", ["0.9.0"]);
       expect(await world.run({ dryRun: true, channels: IPM_ONLY })).toBe(0);
-      expect(world.lines.join("\n")).toContain(READY);
+      expect(world.lines.join("\n")).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: ready (would be already published)");
+      expect(world.lines.join("\n")).not.toContain("Manual steps");
+      expect(warnings(world)).toEqual([]);
     });
 
-    it("a default branch other than master is not ready, and an enabled IPM channel fails the rehearsal on it (exit 1)", async () => {
-      const enabled = newWorld({ publisher: "acme" });
-      enabled.standIns.script("git", [{ match: ["ls-remote"], stdout: SYMREF("main") }]);
-      expect(await enabled.run({ dryRun: true, channels: IPM_ONLY })).toBe(1);
-      expect(enabled.lines.join("\n")).toContain(`ipm\n  iris-execute-mcp-v2@1.0.0: not ready (${NOT_MAIN})`);
-
-      const disabled = newWorld({ publisher: "acme" });
-      disabled.standIns.script("git", [{ match: ["ls-remote"], stdout: SYMREF("main") }]);
-      expect(await disabled.run({ dryRun: true })).toBe(0);
-      expect(disabled.lines.join("\n")).toContain(`ipm: skipped: not enabled (Story 42.8); dry step: not ready: ${NOT_MAIN}`);
-    });
-
-    it("a failing ls-remote is `absent or not readable`, in both a disabled and an enabled channel", async () => {
-      const absent = "the packaging repository jbrandtmse/iris-execute-mcp-v2-ipm is absent or not readable";
-      const disabled = newWorld({ publisher: "acme" });
-      disabled.standIns.script("git", [{ match: ["ls-remote"], status: 128, stderr: "fatal: repository not found\n" }]);
-      expect(await disabled.run({ dryRun: true })).toBe(0);
-      expect(disabled.lines.join("\n")).toContain(`ipm: skipped: not enabled (Story 42.8); dry step: not ready: ${absent}`);
-
-      const enabled = newWorld({ publisher: "acme" });
-      enabled.standIns.script("git", [{ match: ["ls-remote"], status: 128, stderr: "fatal: repository not found\n" }]);
-      expect(await enabled.run({ dryRun: true, channels: IPM_ONLY })).toBe(1);
-      expect(enabled.lines.join("\n")).toContain(`ipm\n  iris-execute-mcp-v2@1.0.0: not ready (${absent})`);
-    });
-
-    it("an unreadable registry and a wrong default branch are both reported", async () => {
+    it.each([
+      ["a 503", { status: 503 }, "HTTP 503"],
+      ["a network error", { status: 0, fail: "fetch failed" }, "fetch failed"],
+    ] as Array<[string, FakeAnswer, string]>)("a registry that cannot be read (%s) is the same `ready (manual step ...)`, never `not ready`, and the rehearsal exits 0", async (_label, answer, why) => {
       const world = newWorld({ publisher: "acme" });
-      world.registry.answer = { status: 503 };
-      world.standIns.script("git", [{ match: ["ls-remote"], stdout: SYMREF("main") }]);
-      expect(await world.run({ dryRun: true })).toBe(0);
-      expect(world.lines.join("\n")).toContain(`dry step: not ready: the registry could not be read (HTTP 503); ${NOT_MAIN}`);
+      world.registry.answer = answer;
+      expect(await world.run({ dryRun: true, channels: IPM_ONLY })).toBe(0);
+      expect(world.lines.join("\n")).toContain(`ipm: ready (${LEAD}Release 1.0.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry could not be read (${why}), so it is not known whether it lists 1.0.0)`);
+      expect(world.lines.join("\n")).not.toContain("not ready");
     });
   });
 
   it("an enabled channel whose dry step fails fails the rehearsal (exit 1); a disabled channel's problems are `not ready` only", async () => {
-    const enabled = newWorld();
+    const enabled = newWorld({ publisher: PLACEHOLDER_PUBLISHER });
     expect(await enabled.run({ dryRun: true, channels: ALL_ENABLED })).toBe(1);
-    expect(enabled.lines.join("\n")).toMatch(/vscode-marketplace\n {2}iris-mcp-launcher@0\.1\.0: not ready \(the publisher is TBD-at-publish-time/);
-    expect(enabled.lines.join("\n")).toContain("open-vsx\n  iris-mcp-launcher@0.1.0: not attempted");
-    const disabled = newWorld();
-    expect(await disabled.run({ dryRun: true })).toBe(0);
+    expect(enabled.lines.join("\n")).toMatch(/vscode-marketplace\n {2}iris-mcp-launcher@1\.0\.0: not ready \(the publisher is TBD-at-publish-time/);
+    expect(enabled.lines.join("\n")).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
+    const disabled = newWorld({ publisher: PLACEHOLDER_PUBLISHER });
+    expect(await disabled.run({ dryRun: true, channels: NPM_ONLY })).toBe(0);
   });
 
   it("a failing dry-run publish fails the rehearsal and stops after it", async () => {
@@ -1620,11 +2020,33 @@ describe("Rehearse: publish --dry-run (AC 42.5.4)", () => {
 // -- scripted real processes -----------------------------------------------------------------------------------------
 
 describe("scripted runs of `node scripts/release.mjs` with the stand-ins as the only PATH entries", () => {
+  /** A preload for the real process: the two stores answer from here, and no request leaves the machine. */
+  const STORE_STUB = [
+    'import { appendFileSync } from "node:fs";',
+    "const real = globalThis.fetch;",
+    "globalThis.fetch = (input, init) => {",
+    "  const url = new URL(String(input));",
+    '  if (url.host === "marketplace.visualstudio.com" || url.host === "open-vsx.org") {',
+    "    appendFileSync(process.env.STORE_STUB_LOG, JSON.stringify({ url: url.href, headers: init?.headers ?? {} }) + String.fromCharCode(10));",
+    '    const namespace = url.host === "open-vsx.org" && url.pathname.split("/").filter(Boolean).length === 2;',
+    // Typed as the real stores type these answers (JSON for the namespace and for both 404s, 2026-11-21).
+    '    return Promise.resolve(new Response(namespace ? JSON.stringify({ extensions: {} }) : JSON.stringify({ error: "not found" }), { status: namespace ? 200 : 404, headers: { "Content-Type": "application/json" } }));',
+    "  }",
+    "  return real(input, init);",
+    "};",
+    "",
+  ].join(String.fromCharCode(10));
+
   /** A real process run of the script against the fake GitHub API on a loopback port. */
   async function scripted(world: PublishWorld, args: string[], env: Record<string, string>, onStart?: (pid: number) => void) {
     const server = await startGithubServer(world.github);
     servers.push(server.close);
-    return runNode([RELEASE_SCRIPT, ...args], { ...world.env({ GITHUB_API_URL: server.url, ...env }) }, onStart);
+    // The stores are the real hosts of a real process: a preload answers them (an unpublished version, an existing namespace) and logs each request.
+    const stub = path.join(world.root, "store-stub.mjs");
+    writeFileSync(stub, STORE_STUB);
+    // The script runs from a copy inside the world's repository, so that its repository root is the fixture and the CLIs it runs are the fixture's stand-ins, never the real extension's vsce and ovsx.
+    const script = copyScriptInto(world.repo);
+    return runNode(["--import", pathToFileURL(stub).href, script, ...args], { ...world.env({ GITHUB_API_URL: server.url, STORE_STUB_LOG: path.join(world.root, "store-requests.log"), ...env }) }, onStart);
   }
 
   it("publish --dry-run: exit 0, eight dry-run uploads in order, nothing else that publishes, and the report appended to GITHUB_STEP_SUMMARY", async () => {
@@ -1650,6 +2072,13 @@ describe("scripted runs of `node scripts/release.mjs` with the stand-ins as the 
     expect(existsSync(config)).toBe(false);
     expect(result.stderr).toContain("publish: auth: token");
     expect(result.stderr).not.toContain(TOKEN);
+    expect(result.stderr).toContain("publish: vscode-marketplace: published (auth: oidc)");
+    expect(result.stderr).toContain("publish: open-vsx: published (auth: oidc)");
+    const requests = readFileSync(path.join(world.root, "store-requests.log"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as { url: string });
+    expect(requests.map((request) => new URL(request.url).host + new URL(request.url).pathname.replace(/\/iris-mcp-launcher\/1\.0\.0.*/, "/..."))).toEqual(["marketplace.visualstudio.com/_apis/public/gallery/publishers/iris-mcp/vsextensions/...", "open-vsx.org/api/iris-mcp", "open-vsx.org/api/iris-mcp/..."]);
+    expect(world.standIns.calls("vsce")).toHaveLength(1);
+    expect(world.standIns.calls("ovsx")).toHaveLength(1);
+    expect(JSON.stringify(world.standIns.allCalls().filter((call) => call.tool !== "npm")), "the npm token reaches no store CLI").not.toContain(TOKEN);
   });
 
   it("publish (real mode) outside a tag push is refused with exit 2 and no npm call", async () => {
@@ -1738,8 +2167,11 @@ describe("verify: the registry after a publish, read-only (AC 42.6.3)", () => {
     const root = scratch("release-verify-");
     const observed = path.join(root, "tmp");
     mkdirSync(observed);
-    const standIns = installStandIns(path.join(root, "stand-ins"), ["npm"]);
+    const standIns = installStandIns(path.join(root, "stand-ins"), ["npm", "git"]);
     standIns.script("npm", [{ match: ["view"], stdout: `${PUBLISHED_VIEW}\n` }]);
+    // The MCP Registry lists every server at the version, and the IPM registry lists nothing yet (its 404), unless a test says otherwise.
+    const stores = newFakeStores();
+    stores.mcpRegistry = (name, version) => mcpRegistryHit(name, version);
     const lines: string[] = [];
     const seen: WireSeen = { opened: [], handshakes: [], closed: 0 };
     const wireModule = {
@@ -1761,12 +2193,16 @@ describe("verify: the registry after a publish, read-only (AC 42.6.3)", () => {
       root,
       observed,
       standIns,
+      stores,
       lines,
       seen,
       env,
-      run: (version: string | undefined, overrides: Record<string, string | undefined> = {}, deps: Record<string, unknown> = {}) =>
+      run: (version: string | undefined, overrides: Record<string, string | undefined> = {}, deps: Record<string, unknown> = {}, repoRoot?: string) =>
         withTmpdir(observed, () =>
-          verify({ version: version as string, env: env(overrides) }, { ...defaultDeps(), log: (line: string) => lines.push(line), loadWire: async () => wireModule, cleanups: createCleanups(), ...deps }),
+          verify(
+            { version: version as string, env: env(overrides), ...(repoRoot === undefined ? {} : { repoRoot }) },
+            { ...defaultDeps(), fetch: fakeStoresFetch(stores), log: (line: string) => lines.push(line), loadWire: async () => wireModule, cleanups: createCleanups(), ...deps },
+          ),
         ),
     };
   }
@@ -1777,16 +2213,254 @@ describe("verify: the registry after a publish, read-only (AC 42.6.3)", () => {
     const text = world.lines.join("\n");
     for (const name of NPM_PUBLISH_ORDER) expect(text, name).toContain(`verify: ${name}@1.0.0: ok, published with a provenance attestation`);
     expect(text).toContain("verify: npx -y @iris-mcp/dev@1: ok, initialize answered serverInfo.version 1.0.0");
-    expect(text).toContain("8 packages at 1.0.0 with provenance, and npx -y @iris-mcp/dev@1 starts");
+    expect(text).toContain("verify: jbrandtmse/iris-execute-mcp-v2 on IPM: pending (the registry does not list 1.0.0 yet: the owner presses Release on the Open Exchange listing)");
+    expect(text).toContain("8 packages at 1.0.0 with provenance, 5 servers on the MCP Registry, IPM pending the owner, and npx -y @iris-mcp/dev@1 starts");
     expect(readdirSync(world.observed), "the temporary directory is removed").toEqual([]);
   });
 
-  it("asks the registry about each package in publish order with npm view ... --json, and calls nothing else", async () => {
+  it("asks the registry about each package in publish order with npm view ... --json, and calls nothing else of npm", async () => {
     const world = newVerifyWorld();
     await world.run("1.0.0");
-    const calls = world.standIns.allCalls();
+    const calls = world.standIns.calls("npm");
     expect(calls.map((call) => call.argv)).toEqual(NPM_PUBLISH_ORDER.map((name: string) => ["view", `${name}@1.0.0`, "version", "dist.attestations", "--json"]));
     expect(calls.every((call) => call.argv[0] === "view"), "no publish, deprecate, login or token call").toBe(true);
+  });
+
+  it("also asks the MCP Registry for each of the five servers at the version, and the IPM registry for the package, read-only (Story 42.8)", async () => {
+    const world = newVerifyWorld();
+    expect(await world.run("1.0.0")).toBe(0);
+    const text = world.lines.join("\n");
+    for (const dir of ["iris-admin-mcp", "iris-data-mcp", "iris-dev-mcp", "iris-interop-mcp", "iris-ops-mcp"]) {
+      expect(text, dir).toContain(`verify: io.github.jbrandtmse/${dir}@1.0.0: ok, listed on the MCP Registry`);
+    }
+    expect(world.stores.requests.map((request) => request.url).filter((url) => url.startsWith("https://registry.modelcontextprotocol.io/"))).toEqual(
+      ["iris-admin-mcp", "iris-data-mcp", "iris-dev-mcp", "iris-interop-mcp", "iris-ops-mcp"].map((dir) => `https://registry.modelcontextprotocol.io/v0.1/servers/io.github.jbrandtmse%2F${dir}/versions/1.0.0`),
+    );
+    expect(world.stores.requests.every((request) => request.method === "GET" && !request.hasBody)).toBe(true);
+    expect(world.stores.requests.map((request) => request.url).filter((url) => url.startsWith("https://pm.community.intersystems.com/"))).toEqual(["https://pm.community.intersystems.com/packages/iris-execute-mcp-v2"]);
+    expect(world.standIns.calls("git"), "an unlisted IPM version is pending: no git call").toEqual([]);
+  });
+
+  it("the name it asks the registry for, per server directory, is the package's mcpName and the generated server.json's name", async () => {
+    const world = newVerifyWorld();
+    expect(await world.run("1.0.0")).toBe(0);
+    const asked = world.stores.requests
+      .map((request) => /^https:\/\/registry\.modelcontextprotocol\.io\/v0\.1\/servers\/([^/]+)\/versions\//.exec(request.url)?.[1])
+      .filter((name): name is string => name !== undefined)
+      .map((name) => decodeURIComponent(name));
+    const read = (dir: string, file: string): { name?: string; mcpName?: string } => JSON.parse(readFileSync(path.join(REPO_ROOT, "packages", dir, file), "utf8")) as { name?: string; mcpName?: string };
+    expect(asked).toHaveLength(SERVER_JSON_DIRS.length);
+    expect(asked).toEqual(SERVER_JSON_DIRS.map((dir: string) => read(dir, "package.json").mcpName));
+    expect(asked).toEqual(SERVER_JSON_DIRS.map((dir: string) => read(dir, "server.json").name));
+  });
+
+  it("a server the MCP Registry does not list (404) and one it cannot read (500) are each one failed check, and the pending IPM line is none", async () => {
+    const world = newVerifyWorld();
+    world.stores.mcpRegistry = (name, version) => (name.endsWith("iris-dev-mcp") ? MCP_REGISTRY_MISS : name.endsWith("iris-ops-mcp") ? { status: 500 } : mcpRegistryHit(name, version));
+    expect(await world.run("1.0.0")).toBe(1);
+    const text = world.lines.join("\n");
+    expect(text).toContain("verify: io.github.jbrandtmse/iris-dev-mcp@1.0.0: not listed on the MCP Registry.");
+    expect(text).toContain("verify: io.github.jbrandtmse/iris-ops-mcp@1.0.0: the MCP Registry could not be read (HTTP 500).");
+    expect(text).toContain("on IPM: pending");
+    expect(text).toContain("2 check(s) failed");
+  });
+
+  describe("the IPM registry (decision #122): pending until it lists the version, then the archive it serves must be the tag's", () => {
+    const PENDING = "verify: jbrandtmse/iris-execute-mcp-v2 on IPM: pending (the registry does not list 1.0.0 yet: the owner presses Release on the Open Exchange listing)";
+    const OK = "verify: jbrandtmse/iris-execute-mcp-v2 on IPM: ok, the IPM registry serves 1.0.0 and its archive equals the tag's";
+    const MODULE_OK = "verify: jbrandtmse/iris-execute-mcp-v2 on IPM: ok, the IPM registry serves 1.0.0 and its module equals the tag's";
+    const ARCHIVE_URL = "https://pm.community.intersystems.com/download/iris-execute-mcp-v2/-/iris-execute-mcp-v2-1.0.0.tgz";
+    const tool = (command: string): string => {
+      const found = findExecutable(command, process.env["PATH"] ?? "");
+      if (found === undefined) throw new Error(`no ${command} on this host's PATH`);
+      return found;
+    };
+    // COPYFILE_DISABLE keeps the host tar from adding macOS AppleDouble (`._name`) members, which the registry's GNU tar never writes.
+    const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", COPYFILE_DISABLE: "1" } as Record<string, string>;
+    const sh = (file: string, args: string[], cwd: string): string => {
+      const result = spawnSync(file, args, { cwd, env: GIT_ENV, encoding: "utf8" });
+      if (result.status !== 0) throw new Error(`${file} ${args.join(" ")} failed: ${result.stderr}`);
+      return result.stdout;
+    };
+
+    /** The files of the module tree that the tag holds: the root manifest, a stamped class, the stamped guard, and a file outside the module. */
+    const treeFiles = (moduleVersion: string): Record<string, string> => ({
+      "module.xml": `<Export><Document name="iris-execute-mcp-v2.ZPM"><Module><Name>iris-execute-mcp-v2</Name><Version>${moduleVersion}</Version></Module></Document></Export>\n`,
+      "ipm/src/cls/ExecuteMCPv2/Utils.cls": "Class ExecuteMCPv2.Utils {}\n",
+      "preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls": "Class ExecuteMCPv2.InstallGuard {}\n",
+      "README.md": "# the repository\n",
+    });
+
+    /** A real git repository whose tag `v1.0.0` (when `tagged`) holds {@link treeFiles}. */
+    function tagRepo(options: { moduleVersion?: string; tagged?: boolean } = {}): string {
+      const repo = scratch("release-verify-repo-");
+      sh(tool("git"), ["init", "--quiet"], repo);
+      for (const [file, text] of Object.entries(treeFiles(options.moduleVersion ?? "1.0.0"))) {
+        mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+        writeFileSync(path.join(repo, file), text);
+      }
+      sh(tool("git"), ["add", "--all"], repo);
+      sh(tool("git"), ["-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "release"], repo);
+      if (options.tagged !== false) sh(tool("git"), ["tag", "v1.0.0"], repo);
+      return repo;
+    }
+
+    /**
+     * What the registry serves: GitHub's archive of the commit, extracted and re-tarred the way `LoadPackage` does it
+     * (`tar --exclude=.git -zcvf <out> -C <folder> .`), after `change` has altered the extracted tree.
+     */
+    function servedArchive(repo: string, change: (directory: string) => void = () => undefined): Buffer {
+      const stage = scratch("release-verify-served-");
+      sh(tool("git"), ["archive", "--format=tar", "--output", path.join(stage, "commit.tar"), "HEAD"], repo);
+      const tree = path.join(stage, "tree");
+      mkdirSync(tree);
+      sh(tool("tar"), ["-xf", path.join(stage, "commit.tar"), "-C", tree], stage);
+      change(tree);
+      const out = path.join(stage, "served.tgz");
+      sh(tool("tar"), ["--exclude=.git", "-czf", out, "-C", tree, "."], stage);
+      return readFileSync(out);
+    }
+
+    /** A verify world whose git calls run the REAL git (with the host's PATH, which `git archive --format=tar.gz` needs for gzip), recorded. */
+    function listedWorld(listed: FakeAnswer, archive: FakeAnswer | undefined, repo: string) {
+      const world = newVerifyWorld();
+      world.stores.ipmRegistry = listed;
+      if (archive !== undefined) world.stores.ipmArchive = archive;
+      const gitCalls: string[][] = [];
+      const run = defaultDeps().run;
+      const deps = {
+        run: (argv: string[], options: { env?: Record<string, string> }) => {
+          if (argv[0] !== "git") return run(argv, options as never);
+          gitCalls.push(argv);
+          return run(argv, { ...options, env: { ...(options.env ?? {}), PATH: process.env["PATH"] ?? "" } } as never);
+        },
+      };
+      return { world, gitCalls, run: () => world.run("1.0.0", {}, deps, repo), downloads: () => world.stores.requests.map((request) => request.url).filter((url) => url.includes("/download/")) };
+    }
+
+    it("a registry that does not list the version (its real 404) is `pending`: no failure, no download, no git call, and the summary line says IPM is pending the owner", async () => {
+      const world = newVerifyWorld();
+      expect(await world.run("1.0.0")).toBe(0);
+      const text = world.lines.join("\n");
+      expect(text).toContain(PENDING);
+      expect(text).not.toContain("check(s) failed");
+      expect(world.stores.requests.filter((request) => request.url.includes("/download/"))).toEqual([]);
+      expect(world.standIns.calls("git")).toEqual([]);
+    });
+
+    it("a registry that lists other versions only is `pending` too", async () => {
+      const world = newVerifyWorld();
+      world.stores.ipmRegistry = ipmRegistryHit("0.9.0");
+      expect(await world.run("1.0.0")).toBe(0);
+      expect(world.lines.join("\n")).toContain(PENDING);
+    });
+
+    it.each([
+      ["a 503", { status: 503 }, "HTTP 503"],
+      ["a network error", { status: 0, fail: "fetch failed" }, "fetch failed"],
+      ["an answer that is not JSON", { status: 200, contentType: "text/html", raw: "<html></html>" }, "the answer is not JSON"],
+    ] as Array<[string, FakeAnswer, string]>)("a registry that cannot be read (%s) is `pending (could not read the registry ...)`, never a failure", async (_label, answer, why) => {
+      const world = newVerifyWorld();
+      world.stores.ipmRegistry = answer;
+      expect(await world.run("1.0.0")).toBe(0);
+      expect(world.lines.join("\n")).toContain(`verify: jbrandtmse/iris-execute-mcp-v2 on IPM: pending (could not read the registry: ${why}).`);
+    });
+
+    it("listed, and the served archive (GitHub's archive of the commit, re-tarred as the registry does) holds the tag's files byte for byte: `ok`, exit 0, one GET of the archive, and git only reads", async () => {
+      const repo = tagRepo();
+      const { world, gitCalls, run, downloads } = listedWorld(ipmRegistryHit("1.0.0"), ipmArchiveAnswer(servedArchive(repo)), repo);
+      expect(await run(), world.lines.join("\n")).toBe(0);
+      const text = world.lines.join("\n");
+      expect(text).toContain(OK);
+      expect(text).toContain("IPM serving the tag");
+      expect(downloads()).toEqual([ARCHIVE_URL]);
+      expect(gitCalls.map((argv) => argv[1]), "git only resolves the tag and archives it: no fetch, tag or push").toEqual(["rev-parse", "archive"]);
+      expect(gitCalls[1]).toEqual(["git", "archive", "--format=tar.gz", expect.stringMatching(/^--output=.*tag\.tgz$/), "v1.0.0"]);
+      expect(readdirSync(world.observed), "the tag's archive is removed with the temporary directory").toEqual([]);
+    });
+
+    it("listed among older versions (the newest is 1.1.0): the archive asked for is the registry's download path for 1.0.0", async () => {
+      const repo = tagRepo();
+      const { run, downloads, world } = listedWorld(ipmRegistryHit("1.1.0", ["1.0.0"]), ipmArchiveAnswer(servedArchive(repo)), repo);
+      expect(await run(), world.lines.join("\n")).toBe(0);
+      expect(downloads()).toEqual([ARCHIVE_URL]);
+      expect(world.lines.join("\n")).toContain(OK);
+    });
+
+    it.each([
+      ["a class that differs by one byte", (directory: string) => appendFileSync(path.join(directory, "ipm/src/cls/ExecuteMCPv2/Utils.cls"), "x"), "ipm/src/cls/ExecuteMCPv2/Utils.cls differs between the registry's archive and git archive v1.0.0."],
+      ["the guard missing from the served archive", (directory: string) => rmSync(path.join(directory, "preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls")), "the registry's archive is missing preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls, which git archive v1.0.0 holds."],
+      ["a file the tag does not hold (a later commit's class, pressed after the version commit)", (directory: string) => writeFileSync(path.join(directory, "ipm/src/cls/ExecuteMCPv2/Later.cls"), "Class ExecuteMCPv2.Later {}\n"), "the registry's archive holds ipm/src/cls/ExecuteMCPv2/Later.cls, which git archive v1.0.0 does not."],
+      ["a module.xml that differs by one byte at the same <Version>", (directory: string) => appendFileSync(path.join(directory, "module.xml"), "x"), "module.xml differs between the registry's archive and git archive v1.0.0."],
+      ["no module.xml at all", (directory: string) => rmSync(path.join(directory, "module.xml")), "the registry's archive is missing module.xml, which git archive v1.0.0 holds."],
+      ["a stamped guard that differs by one byte", (directory: string) => appendFileSync(path.join(directory, "preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls"), "x"), "preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls differs between the registry's archive and git archive v1.0.0."],
+      ["a stray file under preload/ that the tag does not hold", (directory: string) => writeFileSync(path.join(directory, "preload/Stray.cls"), "Class Stray {}\n"), "the registry's archive holds preload/Stray.cls, which git archive v1.0.0 does not."],
+    ] as Array<[string, (directory: string) => void, string]>)("listed, but the served archive has %s: exit 1, a failing problem naming the member, and never `pending`", async (_label, change, expected) => {
+      const repo = tagRepo();
+      const { world, run } = listedWorld(ipmRegistryHit("1.0.0"), ipmArchiveAnswer(servedArchive(repo, change)), repo);
+      expect(await run()).toBe(1);
+      const text = world.lines.join("\n");
+      expect(text, "a listed version is settled: a differing module fails, it never reads as pending").not.toContain("on IPM: pending");
+      expect(text).toContain(`verify: jbrandtmse/iris-execute-mcp-v2 on IPM: the module in the archive the registry serves for 1.0.0 is not v1.0.0's: ${expected}`);
+      expect(text).toContain("Press Release before another version commit reaches main, or ask the registry to republish.");
+      expect(text).not.toContain("from the v1.0.0 commit");
+      expect(text).toContain("1 check(s) failed");
+      expect(text).not.toContain(OK);
+      expect(text).not.toContain(MODULE_OK);
+    });
+
+    it("listed, and the module equals the tag's while the rest of the archive is main at the press (a README edit and a later file): `ok, ... its module equals the tag's`, exit 0", async () => {
+      const repo = tagRepo();
+      const change = (directory: string) => {
+        appendFileSync(path.join(directory, "README.md"), "edited after the version commit\n");
+        writeFileSync(path.join(directory, "NOTES.md"), "added after the version commit\n");
+      };
+      const { world, run } = listedWorld(ipmRegistryHit("1.0.0"), ipmArchiveAnswer(servedArchive(repo, change)), repo);
+      expect(await run(), world.lines.join("\n")).toBe(0);
+      const text = world.lines.join("\n");
+      expect(text).toContain(MODULE_OK);
+      expect(text).not.toContain(OK);
+      expect(text).not.toContain("check(s) failed");
+    });
+
+    it("listed, and the served module.xml is at another version than the release: exit 1 naming both", async () => {
+      const repo = tagRepo({ moduleVersion: "0.9.9" });
+      const { world, run } = listedWorld(ipmRegistryHit("1.0.0"), ipmArchiveAnswer(servedArchive(repo)), repo);
+      expect(await run()).toBe(1);
+      expect(world.lines.join("\n")).toContain('its module.xml is at "0.9.9", not 1.0.0.');
+    });
+
+    it("listed, but the local tag is missing: exit 1 saying to fetch the tags, and nothing is downloaded", async () => {
+      const repo = tagRepo({ tagged: false });
+      const { world, run, downloads } = listedWorld(ipmRegistryHit("1.0.0"), ipmArchiveAnswer(servedArchive(repo)), repo);
+      expect(await run()).toBe(1);
+      expect(world.lines.join("\n")).toContain("on IPM: the local tag v1.0.0 is missing, so the served archive cannot be compared. Fetch the tags (git fetch --tags), then run verify again.");
+      expect(world.lines.join("\n")).not.toContain("on IPM: pending");
+      expect(downloads()).toEqual([]);
+    });
+
+    it.each([
+      ["a 404 for the archive", { status: 404 }, /the registry's archive https:\/\/pm\.community\.intersystems\.com\/download\/iris-execute-mcp-v2\/-\/iris-execute-mcp-v2-1\.0\.0\.tgz answered HTTP 404\. Run verify again\./],
+      ["a network error for the archive", { status: 0, fail: "socket hang up" }, /could not be downloaded \(socket hang up\)\. Run verify again\./],
+      ["an archive that is not a gzip file", { status: 200, contentType: "text/html", raw: "<html>not an archive</html>" }, /the registry's archive could not be read \(the archive is not a gzip file/],
+    ] as Array<[string, FakeAnswer, RegExp]>)("listed, with %s: exit 1 with a problem that says what to do, never `ok` and never `pending`", async (_label, archive, expected) => {
+      const repo = tagRepo();
+      const { world, run } = listedWorld(ipmRegistryHit("1.0.0"), archive, repo);
+      expect(await run()).toBe(1);
+      expect(world.lines.join("\n")).toMatch(expected);
+      expect(world.lines.join("\n")).not.toContain(OK);
+      expect(world.lines.join("\n")).not.toContain("on IPM: pending");
+    });
+
+    it("listed, but the answer gives no archive address: exit 1 naming the registry's page", async () => {
+      const repo = tagRepo();
+      const answer = ipmRegistryHit("1.0.0");
+      delete (answer.body as Record<string, unknown>)["url"];
+      const { world, run, gitCalls } = listedWorld(answer, undefined, repo);
+      expect(await run()).toBe(1);
+      expect(world.lines.join("\n")).toContain("the registry lists 1.0.0 but its answer gives no archive address for it. Check https://pm.community.intersystems.com/packages/iris-execute-mcp-v2, then run verify again.");
+      expect(gitCalls).toEqual([]);
+    });
   });
 
   it("starts npx -y @iris-mcp/dev@1 in a temporary HOME, npm cache and working directory that exist at the call, against the closed port, and closes the wire", async () => {
@@ -1908,7 +2582,8 @@ describe("verify: the registry after a publish, read-only (AC 42.6.3)", () => {
     writeFileSync(npxFile, `#!${process.execPath}\nrequire("node:fs").appendFileSync(${JSON.stringify(npxCalls)}, JSON.stringify(process.argv.slice(2)) + "\\n");\nprocess.stderr.write("npm error code E404\\n");\nprocess.exit(1);\n`);
     chmodSync(npxFile, 0o755);
     world.standIns.script("npm", [{ match: ["view"], status: 1, stderr: E404 }]);
-    const env = { ...world.env(), TMPDIR: world.observed };
+    // Every fetch of the process answers 404 (the preload), so that it reaches no network: the MCP Registry reads are part of verify now.
+    const env = { ...world.env(), TMPDIR: world.observed, NODE_OPTIONS: `--import=${pathToFileURL(path.join(REPO_ROOT, "packages/iris-mcp-all/src/__tests__/fetch-offline-preload.mjs")).href}` };
     const noVersion = await runNode([RELEASE_SCRIPT, "verify"], env);
     expect(noVersion.status).toBe(2);
     expect(noVersion.stderr).toMatch(/usage: node scripts\/release\.mjs[\s\S]*verify --version/);
@@ -1925,4 +2600,526 @@ describe("verify: the registry after a publish, read-only (AC 42.6.3)", () => {
     expect(world.standIns.calls("npm").every((call) => call.argv[0] === "view")).toBe(true);
     expect(readdirSync(world.observed), "the temporary directory is removed on the failing path").toEqual([]);
   }, 60_000);
+});
+
+// -- the MCP Registry channel (Story 42.8, decisions #108 and #110) --------------------------------------------------
+
+describe("The MCP Registry channel (Story 42.8; AD-29)", () => {
+  const OIDC_TOKEN = "oidc_SECRETREQUESTTOKEN1234567890";
+  const OIDC = { ACTIONS_ID_TOKEN_REQUEST_TOKEN: OIDC_TOKEN, ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.actions.example/request" };
+  const SERVERS =["iris-admin-mcp", "iris-data-mcp", "iris-dev-mcp", "iris-interop-mcp", "iris-ops-mcp"].map((dir) => `io.github.jbrandtmse/${dir}`);
+  const NPM_AND_REGISTRY = [{ id: "npm", enabled: true }, { id: "mcp-registry", enabled: true }];
+
+  /** The real `tar` of the host, linked next to the stand-ins: the channel extracts the publisher with it, and the stand-ins' directory is the script's whole PATH. */
+  const hostTar = (): string => {
+    const found = findExecutable("tar", process.env["PATH"] ?? "");
+    if (found === undefined) throw new Error("no tar on this host's PATH");
+    return found;
+  };
+
+  interface RegistryWorld extends PublishWorld {
+    /** The sleeps the npm poll made and the clock they moved. */
+    sleeps: number[];
+    pin: { version: string; asset: string; sha256: string };
+    publisherCalls: () => StandInCall[];
+    /** Run with the registry channel (and npm) enabled, the pinned publisher replaced by this world's, and a clock that only `sleep` moves. */
+    runRegistry: (options?: { dryRun?: boolean; env?: Record<string, string | undefined>; channels?: unknown }) => Promise<number>;
+  }
+
+  function registryWorld(): RegistryWorld {
+    const world = newWorld({ publisher: "acme" });
+    // The publisher this world "downloads": a tarball that holds the stand-in `mcp-publisher`, with the sha256 of its own bytes as the pin.
+    const stage = path.join(world.root, "publisher-stage");
+    mkdirSync(stage);
+    world.standIns.installInto("mcp-publisher", stage);
+    // The real v1.8.8 asset holds LICENSE, README.md and mcp-publisher side by side at its root (listed with `tar -tzvf` on 2026-11-21, QA): the extraction must find the binary among them.
+    writeFileSync(path.join(stage, "LICENSE"), "MIT\n");
+    writeFileSync(path.join(stage, "README.md"), "# mcp-publisher\n");
+    const archive = path.join(world.root, "mcp-publisher_linux_amd64.tar.gz");
+    const packed = spawnSync(hostTar(), ["-czf", archive, "-C", stage, "LICENSE", "README.md", "mcp-publisher"], { encoding: "utf8" });
+    if (packed.status !== 0) throw new Error(`tar failed: ${packed.stderr}`);
+    const bytes = readFileSync(archive);
+    const pin = { version: "v9.9.9-test", asset: "mcp-publisher_linux_amd64.tar.gz", sha256: createHash("sha256").update(bytes).digest("hex") };
+    world.stores.publisher = { status: 200, bytes, contentType: "application/octet-stream" };
+    symlinkSync(hostTar(), path.join(world.standIns.binDir, "tar"));
+    // GNU tar (the release runner's, and CI's) runs `gzip` from PATH for `-z`; macOS bsdtar decompresses in-process. The stand-ins'
+    // directory is the script's whole PATH, so the host's gzip is linked beside tar, as the runner's PATH holds both.
+    const hostGzip = findExecutable("gzip", process.env["PATH"] ?? "");
+    if (hostGzip !== undefined) symlinkSync(hostGzip, path.join(world.standIns.binDir, "gzip"));
+    world.standIns.script("mcp-publisher", [{ match: ["login"], stdout: "Successfully logged in\n" }, { match: ["validate"], stdout: "Validation passed\n" }, { match: ["publish"], stdout: "Successfully published\n" }]);
+    const sleeps: number[] = [];
+    let now = 0;
+    const runRegistry: RegistryWorld["runRegistry"] = (options = {}) =>
+      world.run({
+        dryRun: options.dryRun ?? false,
+        channels: options.channels ?? NPM_AND_REGISTRY,
+        env: { ...OIDC, ...(options.env ?? {}) },
+        deps: { mcpPublisher: pin, now: () => now, sleep: async (ms: number) => void (sleeps.push(ms), (now += ms)) },
+      });
+    return { ...world, sleeps, pin, publisherCalls: () => world.standIns.calls("mcp-publisher"), runRegistry };
+  }
+
+  const reportOf = (world: PublishWorld): string => world.lines.join("\n");
+  const lookupsOf = (world: PublishWorld): string[] => world.stores.requests.map((request) => request.url).filter((url) => url.startsWith("https://registry.modelcontextprotocol.io/"));
+
+  it("every server absent: lookups first, the publisher downloaded and verified, then one login github-oidc and one publish per listing, in order, each `published (auth: oidc)`, exit 0", async () => {
+    const world = registryWorld();
+    expect(await world.runRegistry()).toBe(0);
+    expect(lookupsOf(world)).toEqual(SERVERS.map((name) => `https://registry.modelcontextprotocol.io/v0.1/servers/${encodeURIComponent(name)}/versions/1.0.0`));
+    const calls = world.publisherCalls();
+    expect(calls.map((call) => (call.argv[0] === "login" ? call.argv : [call.argv[0], path.relative(world.artifacts, call.argv[1] as string)]))).toEqual([
+      ["login", "github-oidc"],
+      ...["iris-admin-mcp", "iris-data-mcp", "iris-dev-mcp", "iris-interop-mcp", "iris-ops-mcp"].map((dir) => ["publish", `mcp-registry/${dir}.json`]),
+    ]);
+    for (const name of SERVERS) expect(reportOf(world), name).toContain(`${name}@1.0.0: published (auth: oidc)`);
+    expect(reportOf(world)).toContain("mcp-registry\n  io.github.jbrandtmse/iris-admin-mcp@1.0.0: published (auth: oidc)");
+    expect(world.standIns.calls("npm").filter((call) => call.argv[0] === "publish")).toHaveLength(8);
+  });
+
+  it("each lookup is a plain read-only GET, and npm is asked for each package version it will publish before the login", async () => {
+    const world = registryWorld();
+    expect(await world.runRegistry()).toBe(0);
+    const urls = world.stores.requests.map((request) => request.url);
+    const npmAsked = urls.filter((url) => url.startsWith("https://registry.npmjs.org/"));
+    expect(npmAsked).toEqual(["admin", "data", "dev", "interop", "ops"].map((short) => `https://registry.npmjs.org/@iris-mcp%2F${short}/1.0.0`));
+    expect(world.stores.requests.every((request) => request.method === "GET" && !request.hasBody)).toBe(true);
+    const publisherDownload = urls.findIndex((url) => url.startsWith("https://github.com/modelcontextprotocol/registry/releases/download/"));
+    expect(publisherDownload, "the publisher is downloaded after the lookups").toBeGreaterThan(urls.findIndex((url) => url.startsWith("https://registry.modelcontextprotocol.io/")));
+  });
+
+  it("every server already listed (a lookup 200 that names it): `already published`, no download and no mcp-publisher call", async () => {
+    const world = registryWorld();
+    world.stores.mcpRegistry = (name, version) => mcpRegistryHit(name, version);
+    expect(await world.runRegistry()).toBe(0);
+    expect(world.publisherCalls()).toEqual([]);
+    expect(world.stores.requests.some((request) => request.url.includes("/releases/download/"))).toBe(false);
+    for (const name of SERVERS) expect(reportOf(world), name).toContain(`${name}@1.0.0: already published`);
+  });
+
+  it("one server listed and four absent: the listed one gets no publish call, and the order of the rest holds", async () => {
+    const world = registryWorld();
+    world.stores.mcpRegistry = (name, version) => (name.endsWith("iris-dev-mcp") ? mcpRegistryHit(name, version) : MCP_REGISTRY_MISS);
+    expect(await world.runRegistry()).toBe(0);
+    const published = world.publisherCalls().filter((call) => call.argv[0] === "publish").map((call) => path.basename(call.argv[1] as string));
+    expect(published).toEqual(["iris-admin-mcp.json", "iris-data-mcp.json", "iris-interop-mcp.json", "iris-ops-mcp.json"]);
+    expect(reportOf(world)).toContain("io.github.jbrandtmse/iris-dev-mcp@1.0.0: already published");
+  });
+
+  it.each([
+    ["a 500", { status: 500 }, /HTTP 500/],
+    ["a 403", { status: 403 }, /HTTP 403/],
+    ["a network error", { status: 0, fail: "socket hang up" }, /socket hang up/],
+    ["a 200 that is not the registry's answer (a captive portal)", HTML_PAGE, /not JSON/],
+    ["a 200 that names another version", { status: 200, body: { server: { name: SERVERS[0], version: "9.9.9" } } }, /does not name/],
+  ])("a lookup that cannot be judged (%s) is `failed (could not ask the MCP Registry ...)`, with nothing downloaded, nothing posted and exit 1", async (_label, answer, why) => {
+    const world = registryWorld();
+    world.stores.mcpRegistry = (name, version) => (name === SERVERS[0] ? (answer as FakeAnswer) : mcpRegistryHit(name, version));
+    expect(await world.runRegistry()).toBe(1);
+    expect(reportOf(world)).toMatch(/mcp-registry\n {2}\d+ servers@1\.0\.0: failed \(could not ask the MCP Registry whether io\.github\.jbrandtmse\/iris-admin-mcp@1\.0\.0 is published \(/);
+    expect(reportOf(world)).toMatch(why);
+    expect(world.publisherCalls()).toEqual([]);
+    expect(world.stores.requests.some((request) => request.url.includes("/releases/download/"))).toBe(false);
+  });
+
+  it("a publisher whose sha256 is not the pin is never run: `failed`, nothing posted, exit 1", async () => {
+    const world = registryWorld();
+    world.stores.publisher = { status: 200, bytes: Buffer.from("not the pinned bytes"), contentType: "application/octet-stream" };
+    expect(await world.runRegistry()).toBe(1);
+    expect(reportOf(world)).toMatch(/mcp-registry\n {2}5 servers@1\.0\.0: failed \(the mcp-publisher download has the sha256 [0-9a-f]{64}, not the pinned /);
+    expect(world.publisherCalls()).toEqual([]);
+  });
+
+  it("a download that answers 404 is `failed` and nothing is run", async () => {
+    const world = registryWorld();
+    world.stores.publisher = { status: 404, body: {} };
+    expect(await world.runRegistry()).toBe(1);
+    expect(reportOf(world)).toContain("the download of mcp-publisher v9.9.9-test answered HTTP 404");
+    expect(world.publisherCalls()).toEqual([]);
+  });
+
+  it("npm that never serves a version is `failed` after 5 minutes of polling, with no login and nothing posted", async () => {
+    const world = registryWorld();
+    world.stores.npmVersion = (name) => (name === "@iris-mcp/dev" ? { status: 404, body: {} } : { status: 200, body: {} });
+    expect(await world.runRegistry()).toBe(1);
+    expect(reportOf(world)).toContain("npm does not serve @iris-mcp/dev@1.0.0 after 5 minutes");
+    expect(world.sleeps.reduce((sum, ms) => sum + ms, 0)).toBeGreaterThanOrEqual(300_000);
+    expect(new Set(world.sleeps)).toEqual(new Set([10_000]));
+    expect(world.publisherCalls(), "no login and no publish").toEqual([]);
+  });
+
+  it("npm that serves a version after a few polls lets the publish go on", async () => {
+    const world = registryWorld();
+    let asked = 0;
+    world.stores.npmVersion = () => (++asked <= 3 ? { status: 404, body: {} } : { status: 200, body: {} });
+    expect(await world.runRegistry()).toBe(0);
+    expect(world.sleeps).toEqual([10_000, 10_000, 10_000]);
+    expect(world.publisherCalls().filter((call) => call.argv[0] === "publish")).toHaveLength(5);
+  });
+
+  it("a login that fails posts nothing: `failed` with the redacted output, exit 1", async () => {
+    const world = registryWorld();
+    world.standIns.script("mcp-publisher", [{ match: ["login"], status: 1, stderr: `invalid audience ${OIDC_TOKEN}\n` }]);
+    expect(await world.runRegistry()).toBe(1);
+    expect(reportOf(world)).toContain("mcp-publisher login github-oidc failed (exit 1): invalid audience ***");
+    expect(reportOf(world)).not.toContain(OIDC_TOKEN);
+    expect(world.publisherCalls().map((call) => call.argv[0])).toEqual(["login"]);
+  });
+
+  it("a publish that fails with a fresh lookup still 404 is `failed (<last lines, redacted>)`, the servers after it are `not attempted`, and the run exits 1", async () => {
+    const world = registryWorld();
+    world.standIns.script("mcp-publisher", [
+      { match: ["login"], stdout: "ok\n" },
+      { match: ["publish", "~iris-data-mcp"], status: 1, stderr: `line 1\nline 2\nline 3\nline 4\nline 5 ${OIDC_TOKEN}\n` },
+      { match: ["publish"], stdout: "ok\n" },
+    ]);
+    expect(await world.runRegistry()).toBe(1);
+    const report = reportOf(world);
+    expect(report).toContain("io.github.jbrandtmse/iris-admin-mcp@1.0.0: published (auth: oidc)");
+    expect(report).toContain("io.github.jbrandtmse/iris-data-mcp@1.0.0: failed (line 2\nline 3\nline 4\nline 5 ***)");
+    for (const dir of ["iris-dev-mcp", "iris-interop-mcp", "iris-ops-mcp"]) expect(report, dir).toContain(`io.github.jbrandtmse/${dir}@1.0.0: not attempted`);
+    expect(report).not.toContain(OIDC_TOKEN);
+    expect(world.publisherCalls().filter((call) => call.argv[0] === "publish")).toHaveLength(2);
+  });
+
+  it("a publish that fails but whose fresh lookup says it is there (a race) is `already published`, and the run goes on and exits 0", async () => {
+    const world = registryWorld();
+    let afterPublish = false;
+    world.standIns.script("mcp-publisher", [
+      { match: ["login"], stdout: "ok\n" },
+      { match: ["publish", "~iris-data-mcp"], status: 1, stderr: "400 version already exists\n" },
+      { match: ["publish"], stdout: "ok\n" },
+    ]);
+    world.stores.mcpRegistry = (name, version) => {
+      if (name.endsWith("iris-data-mcp")) {
+        if (afterPublish) return mcpRegistryHit(name, version);
+        afterPublish = true;
+      }
+      return MCP_REGISTRY_MISS;
+    };
+    expect(await world.runRegistry()).toBe(0);
+    expect(reportOf(world)).toContain("io.github.jbrandtmse/iris-data-mcp@1.0.0: already published");
+    expect(world.publisherCalls().filter((call) => call.argv[0] === "publish")).toHaveLength(5);
+  });
+
+  it("the OIDC request variables reach mcp-publisher login only; no validate, no publish, no git and no npm call holds them, and no secret reaches any call", async () => {
+    const world = registryWorld();
+    expect(await world.runRegistry({ env: { NPM_TOKEN: TOKEN } })).toBe(0);
+    const holding = (call: StandInCall): boolean => "ACTIONS_ID_TOKEN_REQUEST_TOKEN" in call.env || "ACTIONS_ID_TOKEN_REQUEST_URL" in call.env;
+    const login = world.publisherCalls().find((call) => call.argv[0] === "login") as StandInCall;
+    expect(holding(login)).toBe(true);
+    expect(login.env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]).toBe(OIDC_TOKEN);
+    for (const call of world.publisherCalls().filter((candidate) => candidate.argv[0] !== "login")) expect(holding(call), `mcp-publisher ${call.argv[0]}`).toBe(false);
+    for (const call of world.standIns.calls("npm").filter((candidate) => candidate.argv[0] !== "publish")) expect(holding(call), `npm ${call.argv[0]}`).toBe(false);
+    const everything = JSON.stringify(world.publisherCalls());
+    expect(everything, "the npm token").not.toContain(TOKEN);
+    expect(reportOf(world)).not.toContain(OIDC_TOKEN);
+  });
+
+  it("the publisher runs with a temporary HOME that is gone afterwards, on a success and on a failure, and the work directory with it", async () => {
+    for (const fail of [false, true]) {
+      const world = registryWorld();
+      if (fail) world.standIns.script("mcp-publisher", [{ match: ["login"], stdout: "ok\n" }, { match: ["publish"], status: 1, stderr: "boom\n" }]);
+      const privateTmp = scratch("release-private-tmp-");
+      const code = await withTmpdir(privateTmp, () => world.runRegistry());
+      expect(code, `fail ${fail}`).toBe(fail ? 1 : 0);
+      const homes = world.publisherCalls().map((call) => call.env["HOME"] as string);
+      expect(homes.length).toBeGreaterThan(0);
+      for (const home of homes) {
+        expect(home.startsWith(privateTmp), "HOME is under the temporary directory").toBe(true);
+        expect(home, "a HOME of its own, not the runner's").not.toBe(process.env["HOME"]);
+        expect(existsSync(home), `fail ${fail}: the HOME is removed`).toBe(false);
+      }
+      expect(new Set(homes).size, "one HOME for the login and the publishes").toBe(1);
+      expect(readdirSync(privateTmp), `fail ${fail}: nothing is left in the temporary directory`).toEqual([]);
+    }
+  });
+
+  it("an earlier failed channel stops the registry: `not attempted`, with no lookup and no download", async () => {
+    const world = registryWorld();
+    world.standIns.script("npm", [{ match: ["publish", "~iris-mcp-client-config"], status: 1, stderr: "boom\n" }, ...NPM_DEFAULT]);
+    expect(await world.runRegistry()).toBe(1);
+    expect(reportOf(world)).toContain("mcp-registry\n  5 servers@1.0.0: not attempted");
+    expect(lookupsOf(world)).toEqual([]);
+  });
+
+  it("a registry failure is the last thing the run does: npm and the stores before it have published, and the run exits 1 (a rerun recovers it)", async () => {
+    const world = registryWorld();
+    world.standIns.script("mcp-publisher", [{ match: ["login"], status: 1, stderr: "boom\n" }]);
+    expect(await world.runRegistry({ channels: [{ id: "npm", enabled: true }, { id: "vscode-marketplace", enabled: true }, { id: "open-vsx", enabled: true }, { id: "mcp-registry", enabled: true }] })).toBe(1);
+    const report = reportOf(world);
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: published");
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: published");
+    expect(report).toContain("mcp-registry\n  5 servers@1.0.0: failed");
+    expect(report.indexOf("open-vsx\n")).toBeLessThan(report.indexOf("mcp-registry\n"));
+  });
+
+  describe("a run with no `channels` option publishes the script's own five channels", () => {
+    const channelOrder = (report: string): number[] => ["@iris-mcp/dev@1.0.0", "vscode-marketplace", "open-vsx", "ipm", "mcp-registry"].map((id) => report.indexOf(id));
+
+    it("publish: npm, both stores, `ipm` and then `mcp-registry` last, and the registry stand-in was called", async () => {
+      const world = registryWorld();
+      expect(await world.runRegistry({ channels: SCRIPT_DEFAULT_CHANNELS })).toBe(0);
+      const report = reportOf(world);
+      const positions = channelOrder(report);
+      expect(positions.every((position) => position >= 0), `every channel is in the report: ${positions}`).toBe(true);
+      expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+      expect(report).toContain("mcp-registry\n  io.github.jbrandtmse/iris-admin-mcp@1.0.0: published (auth: oidc)");
+      expect(world.publisherCalls().filter((call) => call.argv[0] === "publish")).toHaveLength(5);
+    });
+
+    it("rehearsal: the same five channels in the same order, `mcp-registry` last and asked, with every channel ready", async () => {
+      const world = registryWorld();
+      expect(await world.runRegistry({ dryRun: true, channels: SCRIPT_DEFAULT_CHANNELS })).toBe(0);
+      const report = reportOf(world);
+      const positions = channelOrder(report);
+      expect(positions.every((position) => position >= 0), `every channel is in the report: ${positions}`).toBe(true);
+      expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+      expect(report).toContain("mcp-registry: ready (would publish 5 servers)");
+      expect(world.publisherCalls().map((call) => call.argv[0])).toEqual(["validate", "validate", "validate", "validate", "validate"]);
+    });
+  });
+
+  describe("a rehearsal's reads of the other channels leave the registry's own rows alone", () => {
+    it("the IPM registry lists the version: the dry step reads `ready (would be already published)` from the registry alone, and the rehearsal exits 0", async () => {
+      const world = registryWorld();
+      world.registry.answer = ipmRegistryHit("1.0.0", ["0.9.0"]);
+      expect(await world.runRegistry({ dryRun: true, channels: [{ id: "npm", enabled: true }, { id: "ipm", enabled: true }, { id: "mcp-registry", enabled: true }] })).toBe(0);
+      expect(reportOf(world)).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: ready (would be already published)");
+      expect(world.standIns.calls("git"), "no git call: the registry is the only thing asked").toEqual([]);
+    });
+
+    it("an npm dry-run publish that fails leaves `mcp-registry` `not attempted`, with no registry lookup and no publisher download", async () => {
+      const world = registryWorld();
+      world.standIns.script("npm", [{ match: ["publish", "~iris-mcp-admin"], status: 1, stderr: "E403\n" }, ...NPM_DEFAULT]);
+      expect(await world.runRegistry({ dryRun: true })).toBe(1);
+      expect(reportOf(world)).toContain("mcp-registry\n  5 servers@1.0.0: not attempted");
+      expect(lookupsOf(world)).toEqual([]);
+      expect(world.stores.requests.some((request) => request.url.includes("/releases/download/"))).toBe(false);
+      expect(world.publisherCalls()).toEqual([]);
+    });
+  });
+
+  describe("the publish loop and the manifest's listing (review patches)", () => {
+    it("a server the registry already lists reads `already published` even after an earlier server failed; only servers still absent read `not attempted`", async () => {
+      const world = registryWorld();
+      world.stores.mcpRegistry = (name, version) => (name.endsWith("iris-interop-mcp") ? mcpRegistryHit(name, version) : MCP_REGISTRY_MISS);
+      world.standIns.script("mcp-publisher", [
+        { match: ["login"], stdout: "ok\n" },
+        { match: ["publish", "~iris-data-mcp"], status: 1, stderr: "boom\n" },
+        { match: ["publish"], stdout: "ok\n" },
+      ]);
+      expect(await world.runRegistry()).toBe(1);
+      const report = reportOf(world);
+      expect(report).toContain("io.github.jbrandtmse/iris-data-mcp@1.0.0: failed");
+      expect(report).toContain("io.github.jbrandtmse/iris-dev-mcp@1.0.0: not attempted");
+      expect(report).toContain("io.github.jbrandtmse/iris-interop-mcp@1.0.0: already published");
+      expect(report).toContain("io.github.jbrandtmse/iris-ops-mcp@1.0.0: not attempted");
+      expect(world.publisherCalls().filter((call) => call.argv[0] === "publish")).toHaveLength(2);
+    });
+
+    it("a manifest whose registry entry lists no server.json is refused before any upload (exit 2)", async () => {
+      const world = registryWorld();
+      const entry = world.manifest.channels.find((channel: { id: string }) => channel.id === "mcp-registry") as { servers: unknown[] };
+      entry.servers = [];
+      writeManifest(world.artifacts, world.manifest);
+      expect(await world.runRegistry()).toBe(2);
+      expect(reportOf(world)).toContain("refusing: mcp-registry: the manifest lists no server.json. Prepare the artifacts again.");
+      expect(world.publisherCalls()).toEqual([]);
+      expect(world.standIns.calls("npm").every((call) => call.argv[0] === "--version"), "no upload").toBe(true);
+    });
+
+    it("uploadPathProblems names an enabled registry channel with no server.json, and one with no entry at all; a disabled channel and a listed one are clean", () => {
+      const server = { name: "io.github.jbrandtmse/iris-dev-mcp", version: "1.0.0", package: "@iris-mcp/dev", file: "mcp-registry/iris-dev-mcp.json" };
+      const manifest = (entry: unknown) => ({ mode: "release", version: "1.0.0", files: [{ path: "mcp-registry/iris-dev-mcp.json" }], channels: entry === undefined ? [] : [{ id: "mcp-registry", ...(entry as object) }] });
+      const on = [{ id: "mcp-registry", enabled: true }];
+      expect(uploadPathProblems(manifest({ servers: [] }), on)).toEqual(["mcp-registry: the manifest lists no server.json. Prepare the artifacts again."]);
+      expect(uploadPathProblems(manifest(undefined), on)).toEqual(["mcp-registry: the manifest has no mcp-registry entry, so no server.json would be posted. Prepare the artifacts again."]);
+      expect(uploadPathProblems(manifest(undefined), [{ id: "mcp-registry", enabled: false }])).toEqual([]);
+      expect(uploadPathProblems(manifest({ servers: [server] }), on)).toEqual([]);
+    });
+
+    it("an enabled registry channel whose manifest entry is absent is refused before any upload (exit 2); a disabled one is not", async () => {
+      const world = registryWorld();
+      world.manifest.channels = world.manifest.channels.filter((channel: { id: string }) => channel.id !== "mcp-registry");
+      writeManifest(world.artifacts, world.manifest);
+      expect(await world.runRegistry()).toBe(2);
+      expect(reportOf(world)).toContain("refusing: mcp-registry: the manifest has no mcp-registry entry, so no server.json would be posted. Prepare the artifacts again.");
+      expect(world.standIns.calls("npm").every((call) => call.argv[0] === "--version"), "no upload").toBe(true);
+
+      const disabled = registryWorld();
+      disabled.manifest.channels = disabled.manifest.channels.filter((channel: { id: string }) => channel.id !== "mcp-registry");
+      writeManifest(disabled.artifacts, disabled.manifest);
+      expect(await disabled.runRegistry({ channels: [{ id: "npm", enabled: true }, { id: "mcp-registry", enabled: false, enabledBy: "test" }] })).toBe(0);
+    });
+  });
+
+  describe("the rehearsal", () => {
+    it("every lookup 404, the publisher verified and every listing validated: `ready (would publish 5 servers)`, exit 0, and no login, no publish", async () => {
+      const world = registryWorld();
+      expect(await world.runRegistry({ dryRun: true })).toBe(0);
+      expect(reportOf(world)).toContain("mcp-registry: ready (would publish 5 servers)");
+      const calls = world.publisherCalls();
+      expect(calls.map((call) => call.argv[0])).toEqual(["validate", "validate", "validate", "validate", "validate"]);
+      expect(calls.map((call) => path.relative(world.artifacts, call.argv[1] as string))).toEqual(["iris-admin-mcp", "iris-data-mcp", "iris-dev-mcp", "iris-interop-mcp", "iris-ops-mcp"].map((dir) => `mcp-registry/${dir}.json`));
+      for (const call of calls) expect("ACTIONS_ID_TOKEN_REQUEST_TOKEN" in call.env, "a rehearsal holds no OIDC variable").toBe(false);
+      expect(world.standIns.calls("npm").every((call) => call.argv[0] !== "publish" || call.argv.includes("--dry-run"))).toBe(true);
+    });
+
+    it("every lookup 200: `ready (would be already published)`", async () => {
+      const world = registryWorld();
+      world.stores.mcpRegistry = (name, version) => mcpRegistryHit(name, version);
+      expect(await world.runRegistry({ dryRun: true })).toBe(0);
+      expect(reportOf(world)).toContain("mcp-registry: ready (would be already published)");
+    });
+
+    it("a hash mismatch, a validate failure and an unreadable lookup are each `not ready (...)`, reported but never failing the rehearsal (decision #108)", async () => {
+      const mismatch = registryWorld();
+      mismatch.stores.publisher = { status: 200, bytes: Buffer.from("other bytes"), contentType: "application/octet-stream" };
+      expect(await mismatch.runRegistry({ dryRun: true })).toBe(0);
+      expect(reportOf(mismatch)).toMatch(/mcp-registry: not ready \(the mcp-publisher download has the sha256 /);
+      expect(mismatch.publisherCalls()).toEqual([]);
+
+      const invalid = registryWorld();
+      invalid.standIns.script("mcp-publisher", [{ match: ["validate", "~iris-dev-mcp"], status: 1, stdout: "Validation failed with 1 issue\n" }, { match: ["validate"], stdout: "ok\n" }]);
+      expect(await invalid.runRegistry({ dryRun: true })).toBe(0);
+      expect(reportOf(invalid)).toMatch(/mcp-registry: not ready \(mcp-publisher validate rejected mcp-registry\/iris-dev-mcp\.json: Validation failed with 1 issue/);
+
+      const unreadable = registryWorld();
+      unreadable.stores.mcpRegistry = () => ({ status: 503 });
+      expect(await unreadable.runRegistry({ dryRun: true })).toBe(0);
+      expect(reportOf(unreadable)).toMatch(/mcp-registry: not ready \(could not ask the MCP Registry whether io\.github\.jbrandtmse\/iris-admin-mcp@1\.0\.0 is published \(HTTP 503\)/);
+      expect(reportOf(unreadable)).toContain("mcp-registry is not ready, which does not stop the rehearsal");
+    });
+
+    it("an IPM registry that cannot be read is a manual step, never `not ready`: the rehearsal exits 0 and the MCP Registry is asked and reads `ready (would publish 5 servers)`", async () => {
+      const world = registryWorld();
+      world.registry.answer = { status: 503 };
+      expect(await world.runRegistry({ dryRun: true, channels: [{ id: "npm", enabled: true }, { id: "ipm", enabled: true }, { id: "mcp-registry", enabled: true }] })).toBe(0);
+      expect(reportOf(world)).toContain("ipm: ready (manual step after the tag: Release 1.0.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry could not be read (HTTP 503)");
+      expect(reportOf(world)).not.toContain("ipm: not ready");
+      expect(reportOf(world)).toContain("mcp-registry: ready (would publish 5 servers)");
+    });
+
+    it("the temporary HOME and work directory of the dry step are removed", async () => {
+      const world = registryWorld();
+      const privateTmp = scratch("release-private-tmp-");
+      expect(await withTmpdir(privateTmp, () => world.runRegistry({ dryRun: true }))).toBe(0);
+      const homes = world.publisherCalls().map((call) => call.env["HOME"] as string);
+      expect(homes.length).toBeGreaterThan(0);
+      for (const home of homes) expect(existsSync(home)).toBe(false);
+      expect(readdirSync(privateTmp)).toEqual([]);
+    });
+  });
+
+  describe("QA (Story 42.8; Rules #54, #59): the pin that ships, the credential matrix over all five channels, and an IPM manual step before the registry", () => {
+    const OVSX_PAT = "ovsx_SECRETOPENVSXPAT1234567890";
+    const VSCE_PAT = "vsce_SECRETMARKETPLACEPAT1234567890";
+    const REAL_PIN_URL = "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.8/mcp-publisher_linux_amd64.tar.gz";
+    const REAL_PIN_SHA256 = "09f1fa70ee146b640584274a1a6b2b8a0310b05d4321fa9224e6df6a016d67f4";
+    /** Every child any stand-in recorded: npm, git, vsce, ovsx and mcp-publisher. */
+    const everyCall = (world: RegistryWorld): StandInCall[] => [...world.standIns.allCalls(), ...world.publisherCalls()].sort((a, b) => a.seq - b.seq);
+    const label = (call: StandInCall): string => `${call.tool} ${call.argv[0]}`;
+
+    it("the pin that ships is the one downloaded: with no pin injected, the request is the v1.8.8 asset, and bytes that are not its sha256 are never run (a real release and a rehearsal)", async () => {
+      for (const dryRun of [false, true]) {
+        const world = registryWorld();
+        // Deliberately no `mcpPublisher` in the deps: the script's own constant decides. The registry world's tarball (a stand-in) cannot match the real digest.
+        const code = await world.run({ dryRun, channels: NPM_AND_REGISTRY, env: OIDC, deps: { now: () => 0, sleep: async () => undefined } });
+        const downloads = world.stores.requests.filter((request) => request.url.includes("/releases/download/"));
+        expect(downloads.map((request) => request.url), `dryRun ${dryRun}`).toEqual([REAL_PIN_URL]);
+        expect(reportOf(world), `dryRun ${dryRun}`).toContain(`not the pinned ${REAL_PIN_SHA256}. It was not run`);
+        expect(world.publisherCalls(), `dryRun ${dryRun}: nothing ran`).toEqual([]);
+        // A real release fails on it; a rehearsal reports it `not ready` and (decision #108) does not fail.
+        expect(code, `dryRun ${dryRun}`).toBe(dryRun ? 0 : 1);
+        expect(reportOf(world)).toContain(dryRun ? "mcp-registry: not ready (the mcp-publisher download has the sha256" : "failed (the mcp-publisher download has the sha256");
+      }
+    });
+
+    it("every credential reaches only its own children across npm, both stores, IPM (which runs no child) and the MCP Registry, and each site that may hold one does", async () => {
+      const world = registryWorld();
+      const env = { NPM_TOKEN: TOKEN, OVSX_PAT, VSCE_PAT };
+      expect(await world.runRegistry({ channels: SCRIPT_DEFAULT_CHANNELS, env })).toBe(0);
+      const calls = everyCall(world);
+      const isPublish = (call: StandInCall): boolean => call.argv[0] === "publish";
+      const oidcSite = (call: StandInCall): boolean => (["npm", "vsce", "ovsx"].includes(call.tool) && isPublish(call)) || (call.tool === "mcp-publisher" && call.argv[0] === "login");
+      const secrets: Array<[string, string, (call: StandInCall) => boolean]> = [
+        ["NPM_TOKEN", TOKEN, () => false],
+        ["GITHUB_TOKEN", GITHUB_TOKEN, () => false],
+        ["VSCE_PAT", VSCE_PAT, () => false],
+        ["OVSX_PAT", OVSX_PAT, (call) => call.tool === "ovsx" && isPublish(call)],
+        ["the OIDC request token", OIDC_TOKEN, oidcSite],
+        ["the OIDC request URL", OIDC.ACTIONS_ID_TOKEN_REQUEST_URL, oidcSite],
+      ];
+      for (const call of calls) {
+        for (const [name, value, allowed] of secrets) {
+          const holdsInEnvironment = Object.values(call.env).some((entry) => entry.includes(value));
+          expect(holdsInEnvironment, `${label(call)} holding ${name}`).toBe(allowed(call));
+          expect(JSON.stringify([call.argv, call.cwd, call.stdin]), `${label(call)}: ${name} in argv, cwd or stdin`).not.toContain(value);
+        }
+        expect(Object.keys(call.env).filter((key) => /^GIT_SSH/.test(key)), `${label(call)} holding a GIT_SSH variable`).toEqual([]);
+      }
+      expect(calls.filter((call) => call.tool === "git"), "the IPM channel runs no git child").toEqual([]);
+      // The sweep is not vacuous: each site that is allowed to hold a credential ran, and held it.
+      const sites = {
+        npmPublish: calls.filter((call) => call.tool === "npm" && isPublish(call)),
+        vsce: calls.filter((call) => call.tool === "vsce" && isPublish(call)),
+        ovsx: calls.filter((call) => call.tool === "ovsx" && isPublish(call)),
+        login: calls.filter((call) => call.tool === "mcp-publisher" && call.argv[0] === "login"),
+      };
+      expect(sites.npmPublish).toHaveLength(8);
+      for (const call of [...sites.npmPublish, ...sites.vsce, ...sites.ovsx, ...sites.login]) expect(call.env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"], label(call)).toBe(OIDC_TOKEN);
+      expect(sites.ovsx).toHaveLength(1);
+      expect(sites.ovsx[0]?.env["OVSX_PAT"]).toBe(OVSX_PAT);
+      expect(sites.vsce).toHaveLength(1);
+      expect(sites.login).toHaveLength(1);
+      expect(sites.npmPublish.every((call) => call.userconfig?.mode === "600" && call.userconfig.text.includes(TOKEN)), "the npm token reaches npm only through the 0600 userconfig").toBe(true);
+    });
+
+    it("a rehearsal over all five channels hands no credential to any child but the OIDC variables of `npm publish --dry-run`", async () => {
+      const world = registryWorld();
+      expect(await world.runRegistry({ dryRun: true, channels: SCRIPT_DEFAULT_CHANNELS, env: { NPM_TOKEN: TOKEN, OVSX_PAT, VSCE_PAT } })).toBe(0);
+      const calls = everyCall(world);
+      expect(calls.some((call) => call.tool === "mcp-publisher" && call.argv[0] === "validate")).toBe(true);
+      for (const call of calls) {
+        const environment = Object.values(call.env).join("\n");
+        for (const secret of [TOKEN, GITHUB_TOKEN, VSCE_PAT, OVSX_PAT]) expect(environment, `${label(call)} holding ${secret}`).not.toContain(secret);
+        const oidcAllowed = call.tool === "npm" && call.argv[0] === "publish";
+        expect(environment.includes(OIDC_TOKEN), `${label(call)} holding the OIDC token`).toBe(oidcAllowed);
+        expect(call.argv[0] === "publish" && call.tool !== "npm", `${label(call)}: no store or registry publish in a rehearsal`).toBe(false);
+        expect(call.tool, `${label(call)}: the IPM dry step runs no git`).not.toBe("git");
+      }
+    });
+
+    it("an IPM registry that cannot be read does not stop the release: `ipm` is a manual step, the run's other channels and `mcp-registry` still publish, exit 0", async () => {
+      const world = registryWorld();
+      world.registry.answer = { status: 503 };
+      expect(await world.runRegistry({ channels: SCRIPT_DEFAULT_CHANNELS })).toBe(0);
+      const report = reportOf(world);
+      expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: manual step (Release 1.0.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry could not be read (HTTP 503)");
+      expect(report).toContain("mcp-registry\n  io.github.jbrandtmse/iris-admin-mcp@1.0.0: published (auth: oidc)");
+      expect(world.publisherCalls().filter((call) => call.argv[0] === "publish")).toHaveLength(5);
+    });
+  });
+
+  it("the report's item names and the version come from the manifest, and a listing that is not at the release version is refused before any upload", async () => {
+    const world = registryWorld();
+    const entry = (world.manifest.channels.find((channel: { id: string }) => channel.id === "mcp-registry") as { servers: Array<{ version: string }> }).servers[0] as { version: string };
+    entry.version = "0.9.0";
+    writeManifest(world.artifacts, world.manifest);
+    expect(await world.runRegistry()).toBe(2);
+    expect(reportOf(world)).toMatch(/refusing: mcp-registry: io\.github\.jbrandtmse\/iris-admin-mcp@0\.9\.0 is not at the release version 1\.0\.0/);
+    expect(world.publisherCalls()).toEqual([]);
+    expect(world.standIns.calls("npm").every((call) => call.argv[0] === "--version"), "no upload").toBe(true);
+  });
+
+  it("a listing that is not a hash-verified .json of the manifest is refused before any upload", async () => {
+    const world = registryWorld();
+    const entry = (world.manifest.channels.find((channel: { id: string }) => channel.id === "mcp-registry") as { servers: Array<{ file: string }> }).servers[0] as { file: string };
+    entry.file = "../outside.json";
+    writeManifest(world.artifacts, world.manifest);
+    expect(await world.runRegistry()).toBe(2);
+    expect(reportOf(world)).toMatch(/refusing: mcp-registry: .*its listing "\.\.\/outside\.json" is not a hash-verified \.json/);
+    expect(world.publisherCalls()).toEqual([]);
+    expect(world.standIns.calls("npm").every((call) => call.argv[0] === "--version"), "no upload").toBe(true);
+  });
 });

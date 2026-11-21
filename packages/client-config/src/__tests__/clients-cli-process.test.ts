@@ -137,12 +137,12 @@ function makeSandbox(): Sandbox {
       case "codex":
         return path.join(home, ".codex", "config.toml");
       case "goose":
-        // The adapter's win32 template is %APPDATA%/goose/config.yaml; the
-        // sandbox's APPDATA is <home>/AppData/Roaming (darwin/linux use
+        // The adapter's win32 template is %APPDATA%/Block/goose/config/config.yaml;
+        // the sandbox's APPDATA is <home>/AppData/Roaming (darwin/linux use
         // ~/.config/goose). Mirrors the REAL per-platform paths, so the child
         // detects the client exactly as a real install would.
         return process.platform === "win32"
-          ? path.join(home, "AppData", "Roaming", "goose", "config.yaml")
+          ? path.join(home, "AppData", "Roaming", "Block", "goose", "config", "config.yaml")
           : path.join(home, ".config", "goose", "config.yaml");
       case "vscode":
         // The adapter's per-OS user-scope mcp.json paths (win32
@@ -894,5 +894,45 @@ describe("E2E restore", () => {
     const unknown = sandbox.run(["restore", "--client", "claude-code", "--backup", "nope.bak"]);
     expect(unknown.status).toBe(1);
     expect(unknown.stderr).toContain('no backup named "nope.bak"');
+  }, T);
+});
+
+// --------------------------------------------------------------------
+// Story 42.9, DW-706: doctor and the enabled Claude Code plugin, on the built bin with a sandbox HOME and CLAUDE_CONFIG_DIR.
+// --------------------------------------------------------------------
+
+describe("doctor: claude-code-plugin-duplicates on the built bin (DW-706)", () => {
+  function seed(sandbox: Sandbox, enabledPlugins: Record<string, boolean>): { configDir: string } {
+    const configDir = path.join(sandbox.home, "claude-config");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(path.join(configDir, "settings.json"), JSON.stringify({ enabledPlugins }, null, 2));
+    writeFileSync(
+      path.join(configDir, ".claude.json"),
+      JSON.stringify({ mcpServers: { "iris-dev-mcp": { command: "npx", args: ["-y", "@iris-mcp/dev@1"] } } }, null, 2),
+    );
+    return { configDir };
+  }
+
+  it("the plugin is enabled and the installer's entry is present: the finding, with the remove command, and exit 1", () => {
+    const sandbox = makeSandbox();
+    const { configDir } = seed(sandbox, { "iris-mcp@iris-mcp": true });
+    const result = sandbox.run(["doctor", "--json"], { env: { CLAUDE_CONFIG_DIR: configDir, ...IRIS_ENV } });
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(1);
+    const data = parseEnvelope(result).data as { findings: Array<{ check: string; scope: string; detail: string }> };
+    const found = data.findings.filter((finding) => finding.check === "claude-code-plugin-duplicates");
+    expect(found).toHaveLength(1);
+    expect(found[0]?.scope).toBe("user");
+    expect(found[0]?.detail).toBe(
+      `iris-dev-mcp is also served by the Claude Code plugin iris-mcp (enabled in ${path.join(configDir, "settings.json")}): every tool appears twice. ` +
+        "Remove it: npx -y -p @iris-mcp/client-config@1 iris-mcp-clients remove --client claude-code --server iris-dev-mcp --scope user",
+    );
+  }, T);
+
+  it("the plugin is off: no such finding", () => {
+    const sandbox = makeSandbox();
+    const { configDir } = seed(sandbox, { "iris-mcp@iris-mcp": false });
+    const result = sandbox.run(["doctor", "--json"], { env: { CLAUDE_CONFIG_DIR: configDir, ...IRIS_ENV } });
+    const data = parseEnvelope(result).data as { findings: Array<{ check: string }> };
+    expect(data.findings.some((finding) => finding.check === "claude-code-plugin-duplicates")).toBe(false);
   }, T);
 });

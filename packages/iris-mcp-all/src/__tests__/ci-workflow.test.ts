@@ -15,6 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import vitestConfig from "../../vitest.config";
@@ -25,6 +26,7 @@ import {
   HARNESS_SUITE_IDS,
   JOB_TIMEOUT_MINUTES,
   LAUNCHER_LIVE_FILES,
+  LAUNCHER_RUNNERS,
   LIVE_SUITES,
   NODE_LEGS,
   PACKAGE_DIRS,
@@ -107,8 +109,8 @@ describe("AC 42.3.1: the workflow is the registry's workflow", () => {
     expect(workflowProblems(text, context)).toEqual([]);
   });
 
-  it("runs the four jobs, the gates job on exactly the three Node legs, and the package and ipm jobs after the other two", () => {
-    expect(Object.keys(DECLARED_STEPS)).toEqual(["gates", "throwaway", "package", "ipm"]);
+  it("runs the five jobs, the gates job on exactly the three Node legs, and the package and ipm jobs after the gates and throwaway jobs", () => {
+    expect(Object.keys(DECLARED_STEPS)).toEqual(["gates", "launcher", "throwaway", "package", "ipm"]);
     expect([...NODE_LEGS]).toEqual(["22.17.0", "24.0.0", "26.0.0"]);
     expect(workflowProblems(text, context).filter((problem) => /matrix|does not need/.test(problem))).toEqual([]);
     expect(workflowProblems(mutate(text, PACKAGE_NEEDS, PACKAGE_NEEDS.replace("[gates, throwaway]", "[gates]")), context).filter((problem) => /matrix|does not need/.test(problem))).toEqual(["the package job does not need throwaway"]);
@@ -138,7 +140,7 @@ describe("AC 42.3.1: the workflow is the registry's workflow", () => {
       /package does not run on Node 22\.17\.0/,
     ],
     ["a run-name without the head sha", () => mutate(text, "run-name: ci ${{ github.ref_name }} ${{ github.event.pull_request.head.sha || github.sha }}", "run-name: ci ${{ github.ref_name }}"), /run-name does not carry the head sha/],
-    ["a job the registry does not declare", () => mutate(text, "  package:\n    name: package\n", "  extra:\n    name: extra\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo extra\n  package:\n    name: package\n"), /the jobs are gates, throwaway, extra, package, ipm/],
+    ["a job the registry does not declare", () => mutate(text, "  package:\n    name: package\n", "  extra:\n    name: extra\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo extra\n  package:\n    name: package\n"), /the jobs are gates, launcher, throwaway, extra, package, ipm/],
     ["a uses: line hidden in a run block", () => mutate(text, "        run: node scripts/ci-package-smoke.mjs\n", "        run: |\n          node scripts/ci-package-smoke.mjs\n          uses: evil/action@v1\n"), /uses: lines but the jobs have/],
   ] as Array<[string, () => string, RegExp]>)("fails on %s, naming the difference", (_label, apply, expected) => {
     expect(workflowProblems(apply(), context).join("\n")).toMatch(expected);
@@ -199,7 +201,7 @@ describe("AC 42.3.4: the pins and the hygiene of the workflow", () => {
     ["a step shell", () => mutate(text, "        run: pnpm lint\n", '        run: pnpm lint\n        shell: "true {0}"\n'), /the step "pnpm lint" sets shell/],
     ["a matrix exclude that drops a leg", () => mutate(text, '        node: ["22.17.0", "24.0.0", "26.0.0"]\n', '        node: ["22.17.0", "24.0.0", "26.0.0"]\n        exclude:\n          - node: "26.0.0"\n'), /the gates matrix sets exclude/],
     ["another strategy setting", () => mutate(text, "      fail-fast: false\n", "      fail-fast: false\n      max-parallel: 1\n"), /the gates strategy sets max-parallel/],
-    ["a strategy on another job", () => mutate(text, "    timeout-minutes: 30\n", '    timeout-minutes: 30\n    strategy:\n      matrix:\n        node: ["22.17.0"]\n'), /job package has a strategy/],
+    ["a strategy on another job", () => mutate(text, "    runs-on: ubuntu-24.04\n    timeout-minutes: 30\n", '    runs-on: ubuntu-24.04\n    timeout-minutes: 30\n    strategy:\n      matrix:\n        node: ["22.17.0"]\n'), /job package has a strategy/],
     ["a checkout of another ref", () => mutate(text, `${CHECKOUT}\n        with:\n          persist-credentials: false\n`, `${CHECKOUT}\n        with:\n          persist-credentials: false\n          ref: main\n`), /the inputs of actions\/checkout sets ref/],
   ] as Array<[string, () => string, RegExp]>)("fails on %s", (_label, apply, expected) => {
     expect(workflowProblems(apply(), context).join("\n")).toMatch(expected);
@@ -280,7 +282,7 @@ describe("Story 42.4 (AC 42.4.2, AC 42.4.4): the ipm job builds and installs the
   });
 
   it.each([
-    ["the ipm job removed", () => text.slice(0, text.indexOf("\n  ipm:")) + "\n", /the jobs are gates, throwaway, package, the registry declares gates, throwaway, package, ipm/],
+    ["the ipm job removed", () => text.slice(0, text.indexOf("\n  ipm:")) + "\n", /the jobs are gates, launcher, throwaway, package, the registry declares gates, launcher, throwaway, package, ipm/],
     ["the archive step removed", () => mutate(text, IPM_STEP, ""), /declared step is not in the workflow.*ci-ipm-archive/],
     ["the archive step run for one edition only", () => mutate(text, "run: node scripts/ci-ipm-archive.mjs\n", "run: node scripts/ci-ipm-archive.mjs --edition health\n"), /declared step is not in the workflow.*ci-ipm-archive/],
     ["the build step removed", () => mutate(text, `      - name: build\n        run: pnpm build\n${IPM_STEP}`, IPM_STEP), /declared step is not in the workflow.*pnpm build/],
@@ -298,6 +300,59 @@ describe("Story 42.4 (AC 42.4.2, AC 42.4.4): the ipm job builds and installs the
     ["an ipm step that publishes the archive", () => mutate(text, IPM_STEP, `${IPM_STEP}      - name: publish\n        run: zpm "publish iris-execute-mcp-v2"\n`), /IPM verb other than load, package and list/],
     ["an ipm step that installs from the registry", () => mutate(text, IPM_STEP, `${IPM_STEP}      - name: install\n        run: zpm "install iris-execute-mcp-v2"\n`), /IPM verb other than load, package and list/],
     ["an ipm step that pushes", () => mutate(text, "run: node scripts/ci-ipm-archive.mjs\n", "run: node scripts/ci-ipm-archive.mjs && git push origin HEAD\n"), /publish, tag or push command/],
+  ] as Array<[string, () => string, RegExp]>)("fails on %s", (_label, apply, expected) => {
+    expect(workflowProblems(apply(), context).join("\n")).toMatch(expected);
+  });
+});
+
+describe("Story 42.7 (DW-532): the launcher job runs the extension's whole suite on three operating systems", () => {
+  const LAUNCHER_HEAD = "  launcher:\n    name: launcher (${{ matrix.os }})\n    runs-on: ${{ matrix.os }}\n    timeout-minutes: 30\n";
+  const OS_MATRIX = '        os: ["ubuntu-24.04", "macos-15", "windows-2025"]\n';
+  const DISTS_STEP = "      - name: build the dists the tests read\n        run: pnpm build\n";
+  const TEST_STEP = "      - name: launcher tests\n        run: npx --no -- vitest run\n        working-directory: extensions/iris-mcp-launcher\n";
+  const LAUNCHER_NODE =
+    'node-version: "22.17.0"\n          cache: pnpm\n      - name: install\n        run: pnpm install --frozen-lockfile\n      - name: build the dists the tests read';
+
+  it("the registry declares the job: the three runners in order, 30 minutes, and the five steps that run the whole suite", () => {
+    expect([...LAUNCHER_RUNNERS]).toEqual(["ubuntu-24.04", "macos-15", "windows-2025"]);
+    expect(JOB_TIMEOUT_MINUTES.launcher).toBe(30);
+    expect(DECLARED_STEPS.launcher).toEqual([
+      { run: "pnpm install --frozen-lockfile" },
+      { run: "pnpm build" },
+      { run: "npm ci", workingDirectory: "extensions/iris-mcp-launcher" },
+      { run: "npm run build", workingDirectory: "extensions/iris-mcp-launcher" },
+      { run: "npx --no -- vitest run", workingDirectory: "extensions/iris-mcp-launcher" },
+    ]);
+  });
+
+  it("the real job reports every leg (no fail-fast), needs no other job, and runs on the matrix's operating system", () => {
+    const job = (parse(text) as { jobs: Record<string, any> }).jobs["launcher"];
+    expect(job["strategy"]).toEqual({ "fail-fast": false, matrix: { os: [...LAUNCHER_RUNNERS] } });
+    expect(job["runs-on"]).toBe("${{ matrix.os }}");
+    expect(job["needs"]).toBeUndefined();
+  });
+
+  it("the two jobs that gate a release still need only gates and throwaway, so the launcher job adds no wait to them", () => {
+    const jobs = (parse(text) as { jobs: Record<string, any> }).jobs;
+    expect(jobs["package"]["needs"]).toEqual(["gates", "throwaway"]);
+    expect(jobs["ipm"]["needs"]).toEqual(["gates", "throwaway"]);
+  });
+
+  it.each([
+    ["the launcher job removed from ci.yml", () => text.slice(0, text.indexOf("\n  launcher:")) + text.slice(text.indexOf("\n  throwaway:")), /the jobs are gates, throwaway, package, ipm, the registry declares gates, launcher, throwaway, package, ipm/],
+    ["the windows leg dropped", () => mutate(text, OS_MATRIX, '        os: ["ubuntu-24.04", "macos-15"]\n'), /the launcher matrix is \["ubuntu-24\.04","macos-15"\]/],
+    ["a leg on a floating runner label", () => mutate(text, OS_MATRIX, '        os: ["ubuntu-24.04", "macos-latest", "windows-2025"]\n'), /the launcher matrix is/],
+    ["a launcher job pinned to one runner", () => mutate(text, "    runs-on: ${{ matrix.os }}\n", "    runs-on: ubuntu-24.04\n"), /launcher does not run on \$\{\{ matrix\.os \}\}/],
+    ["a matrix exclude that drops a leg", () => mutate(text, OS_MATRIX, `${OS_MATRIX}        exclude:\n          - os: windows-2025\n`), /the launcher matrix sets exclude/],
+    ["another matrix dimension", () => mutate(text, OS_MATRIX, `${OS_MATRIX}        node: ["22.17.0"]\n`), /the launcher matrix sets node/],
+    ["a launcher job that waits for gates", () => mutate(text, LAUNCHER_HEAD, `${LAUNCHER_HEAD}    needs: [gates]\n`), /the launcher job has needs/],
+    ["the launcher job on another Node", () => mutate(text, LAUNCHER_NODE, LAUNCHER_NODE.replace('"22.17.0"', '"24.0.0"')), /launcher does not run on Node 22\.17\.0/],
+    ["a longer launcher budget", () => mutate(text, "timeout-minutes: 30\n    strategy:", "timeout-minutes: 60\n    strategy:"), /launcher has timeout-minutes 60, not 30/],
+    ["the whole suite narrowed to one file", () => mutate(text, "run: npx --no -- vitest run\n", "run: npx --no -- vitest run src/__tests__/live-arming-guard.test.ts\n"), /launcher: the declared step is not in the workflow.*vitest run/],
+    ["the test step removed", () => mutate(text, TEST_STEP, ""), /launcher: the declared step is not in the workflow.*vitest run/],
+    ["the dist build step removed", () => mutate(text, DISTS_STEP, ""), /launcher: the declared step is not in the workflow.*pnpm build/],
+    ["the build narrowed to two of the packages (the governance real-CLI file would skip)", () => mutate(text, DISTS_STEP, DISTS_STEP.replace("run: pnpm build", "run: pnpm --filter @iris-mcp/client-config --filter @iris-mcp/shared build")), /launcher: the declared step is not in the workflow.*pnpm build/],
+    ["a launcher test step that may fail", () => mutate(text, "run: npx --no -- vitest run\n", "run: npx --no -- vitest run || true\n"), /\|\| true/],
   ] as Array<[string, () => string, RegExp]>)("fails on %s", (_label, apply, expected) => {
     expect(workflowProblems(apply(), context).join("\n")).toMatch(expected);
   });

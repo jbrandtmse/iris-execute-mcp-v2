@@ -5,12 +5,20 @@
  * through stand-ins is also pinned here at its source.
  */
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { REPO_ROOT } from "./pack-fixture";
 import {
   CI_WORKFLOW_PATH,
-  IPM_DIST_BRANCH,
-  IPM_DIST_REPOSITORY,
+  IPM_MANIFEST_RELATIVE,
+  IPM_MODULE,
+  IPM_REGISTRY_PACKAGE_URL,
+  IPM_SOURCE_REPOSITORY,
+  IPM_TREE_GUARD_RELATIVE,
   MIN_NPM_VERSION,
+  OPEN_EXCHANGE_LISTING_NAME,
+  OPEN_EXCHANGE_LISTING_URL,
   NPM_NOT_FOUND,
   NPM_PUBLISH_ORDER,
   RELEASE_BRANCH,
@@ -27,11 +35,16 @@ import {
   environmentProblems,
   environmentSummary,
   environmentWarnings,
-  ipmDefaultBranch,
-  ipmPushPlan,
-  ipmReadme,
+  ipmArchiveUrl,
+  ipmManualStepText,
+  ipmNotListedReason,
   ipmRegistryListsVersion,
+  ipmRehearsalDetail,
+  ipmUnreadableReason,
   mainReachability,
+  manualStepAnnotations,
+  manualStepChannels,
+  notSetUpAnnotations,
   npmPublishArgv,
   npmUserconfig,
   npmVersionProblems,
@@ -46,27 +59,37 @@ import {
   tarballProblems,
   versionProblems,
   vsceArgv,
+  EXTENSION_CHANGELOG_PATH,
+  extensionChangelogProblems,
+  openVsxNamespaceUrl,
+  skippedDuplicate,
+  storeLookupHeaders,
+  storeLookupUrl,
+  storeOutcome,
 } from "../../../../scripts/lib/release-core.mjs";
 
 const SHA = "a".repeat(40);
 const OTHER = "b".repeat(40);
 
 describe("the constants", () => {
-  it("name the order, the channels, the environment and the packaging repository the story fixes", () => {
+  it("name the order, the channels (IPM a manual one), the environment and the Open Exchange listing the decisions fix", () => {
     expect([...NPM_PUBLISH_ORDER]).toEqual(["@iris-mcp/client-config", "@iris-mcp/shared", "@iris-mcp/admin", "@iris-mcp/data", "@iris-mcp/dev", "@iris-mcp/interop", "@iris-mcp/ops", "@iris-mcp/all"]);
     expect(RELEASE_CHANNELS).toEqual([
       { id: "npm", enabled: true },
-      { id: "vscode-marketplace", enabled: false, enabledBy: "Story 42.7" },
-      { id: "open-vsx", enabled: false, enabledBy: "Story 42.7" },
-      { id: "ipm", enabled: false, enabledBy: "Story 42.8" },
+      { id: "vscode-marketplace", enabled: true },
+      { id: "open-vsx", enabled: true },
+      { id: "ipm", enabled: true, manual: true },
+      { id: "mcp-registry", enabled: true },
     ]);
-    expect([RELEASE_ENVIRONMENT, RELEASE_TAG_PATTERN, IPM_DIST_REPOSITORY, IPM_DIST_BRANCH, MIN_NPM_VERSION, CI_WORKFLOW_PATH]).toEqual([
-      "release",
-      "v*",
-      "jbrandtmse/iris-execute-mcp-v2-ipm",
-      "master",
-      "11.5.1",
-      ".github/workflows/ci.yml",
+    expect([RELEASE_ENVIRONMENT, RELEASE_TAG_PATTERN, MIN_NPM_VERSION, CI_WORKFLOW_PATH]).toEqual(["release", "v*", "11.5.1", ".github/workflows/ci.yml"]);
+    expect([IPM_MODULE, IPM_SOURCE_REPOSITORY, OPEN_EXCHANGE_LISTING_NAME, OPEN_EXCHANGE_LISTING_URL, IPM_REGISTRY_PACKAGE_URL, IPM_MANIFEST_RELATIVE, IPM_TREE_GUARD_RELATIVE]).toEqual([
+      "iris-execute-mcp-v2",
+      "jbrandtmse/iris-execute-mcp-v2",
+      "IRIS-MCP-Server-Suite-2",
+      "https://openexchange.intersystems.com/package/IRIS-MCP-Server-Suite-2",
+      "https://pm.community.intersystems.com/packages/iris-execute-mcp-v2",
+      "module.xml",
+      "preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls",
     ]);
     expect(Object.keys(RELEASE_CHECK_EXEMPTIONS)).toEqual(["format:check"]);
     expect(RELEASE_CHECK_EXEMPTIONS["format:check"]).toContain("not a CI gate");
@@ -375,9 +398,11 @@ describe("The argv builders", () => {
     expect(npmViewArgv("@iris-mcp/shared", "1.0.0")).toEqual(["view", "@iris-mcp/shared@1.0.0", "version"]);
   });
 
-  it("the extension stores take a prebuilt vsix and tolerate a duplicate version", () => {
-    expect(vsceArgv("/x/a.vsix")).toEqual(["publish", "--packagePath", "/x/a.vsix", "--skip-duplicate"]);
-    expect(ovsxArgv("/x/a.vsix")).toEqual(["publish", "/x/a.vsix", "--skip-duplicate"]);
+  it("the extension stores take a prebuilt vsix and tolerate a duplicate version: vsce with trusted publishing, ovsx with trusted publishing unless a token is set", () => {
+    expect(vsceArgv("/x/a.vsix")).toEqual(["publish", "--packagePath", "/x/a.vsix", "--skip-duplicate", "--oidc"]);
+    expect(ovsxArgv("/x/a.vsix")).toEqual(["publish", "/x/a.vsix", "--skip-duplicate", "--trusted-publishing"]);
+    expect(ovsxArgv("/x/a.vsix", { token: false })).toEqual(["publish", "/x/a.vsix", "--skip-duplicate", "--trusted-publishing"]);
+    expect(ovsxArgv("/x/a.vsix", { token: true }), "a token is read from OVSX_PAT, never from argv").toEqual(["publish", "/x/a.vsix", "--skip-duplicate"]);
   });
 
   it("the userconfig holds the token on one auth line, and refuses a token that could add a line", () => {
@@ -388,49 +413,59 @@ describe("The argv builders", () => {
     expect(() => npmUserconfig("tok\u0000en")).toThrow(/control character/);
   });
 
-  it("ipmPushPlan clones, replaces the tree, commits as iris-execute-mcp-v2 <v> from <sha>, tags v<v>, and pushes master and the tag with no force", () => {
-    const plan = ipmPushPlan("/tree", "1.0.0", SHA, { url: "git@github.com:jbrandtmse/iris-execute-mcp-v2-ipm.git", clone: "/work/repository" });
-    expect(plan.message).toBe(`iris-execute-mcp-v2 1.0.0 from ${SHA}`);
-    expect(plan.tag).toBe("v1.0.0");
-    expect(plan.cloneArgv).toEqual(["clone", "--quiet", "git@github.com:jbrandtmse/iris-execute-mcp-v2-ipm.git", "/work/repository"]);
-    expect(plan.commitArgv.slice(-4)).toEqual(["commit", "--quiet", "-m", plan.message]);
-    expect(plan.tagArgv.slice(-5)).toEqual(["tag", "-a", "v1.0.0", "-m", plan.message]);
-    expect(plan.pushArgv).toEqual(["push", "--atomic", "origin", "HEAD:refs/heads/master", "refs/tags/v1.0.0"]);
-    expect(plan.tagTreeArgv).toEqual(["rev-parse", "--verify", "--quiet", "refs/tags/v1.0.0^{tree}"]);
-    const everything = JSON.stringify(plan);
-    expect(everything).not.toMatch(/--force|"-f"|--force-with-lease|"\+refs|:\+/);
-    expect(plan.lsRemoteArgv).toEqual(["ls-remote", "--symref", "git@github.com:jbrandtmse/iris-execute-mcp-v2-ipm.git", "HEAD"]);
+  it("no IPM upload remains: the push plan, its host keys, the packaging repository and the README of it are gone from release-core (decision #122)", async () => {
+    const core = (await import("../../../../scripts/lib/release-core.mjs")) as Record<string, unknown>;
+    // Built from parts, so that this file itself holds none of the removed names (the removal is also checked by grep).
+    const removed = ["ipm" + "PushPlan", "ipm" + "DefaultBranch", "ipm" + "Readme", "IPM_" + "DIST_REPOSITORY", "IPM_" + "DIST_BRANCH", "GITHUB_SSH_" + "KNOWN_HOSTS", "github" + "KnownHostsText"];
+    for (const name of removed) expect(Object.keys(core), name).not.toContain(name);
+    const source = readFileSync(path.join(REPO_ROOT, "scripts", "lib", "release-core.mjs"), "utf8");
+    for (const word of ["IPM_" + "DIST", "known" + "_hosts", "git" + "@github.com", "--atomic", "clone"]) expect(source, word).not.toContain(word);
   });
 
-  it("the push is atomic: the branch and the tag land together or not at all", () => {
-    const plan = ipmPushPlan("/tree", "1.0.0", SHA, { url: "u", clone: "/c" });
-    expect(plan.pushArgv.slice(0, 2)).toEqual(["push", "--atomic"]);
+  it("ipmManualStepText says what the owner does and why it is still to do; the reasons name an unlisted and an unreadable registry", () => {
+    expect(ipmManualStepText("1.1.0", ipmNotListedReason("1.1.0"))).toBe("Release 1.1.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry does not list 1.1.0");
+    expect(ipmManualStepText("1.1.0", ipmUnreadableReason("1.1.0", "HTTP 503"))).toBe(
+      "Release 1.1.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry could not be read (HTTP 503), so it is not known whether it lists 1.1.0",
+    );
+    expect(ipmRehearsalDetail(ipmManualStepText("1.1.0", ipmNotListedReason("1.1.0")))).toBe(
+      "manual step after the tag: Release 1.1.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry does not list 1.1.0",
+    );
   });
 
-  it("the ls-remote asks for HEAD with its symref, not for a branch that an empty repository lacks (--exit-code on it exits 2)", () => {
-    const plan = ipmPushPlan("/tree", "1.0.0", SHA, { url: "u", clone: "/c" });
-    expect(plan.lsRemoteArgv).toEqual(["ls-remote", "--symref", "u", "HEAD"]);
-    expect(plan.lsRemoteArgv).not.toContain("--exit-code");
-    expect(plan.lsRemoteArgv).not.toContain("refs/heads/master");
+  it("STATUS.manualStep is the words `manual step`, and no other status changed", () => {
+    expect(STATUS.manualStep).toBe("manual step");
+    expect(STATUS.ready).toBe("ready");
+    expect(STATUS.notReady).toBe("not ready");
   });
 
-  it("ipmDefaultBranch reads the default branch from the symref line of ls-remote, and nothing from an empty answer", () => {
-    const sha = "c9a020973ccc910f035ff6e2a9462eada67a870a";
-    expect(ipmDefaultBranch(`ref: refs/heads/master\tHEAD\n${sha}\tHEAD\n`)).toBe("master");
-    expect(ipmDefaultBranch(`ref: refs/heads/main\tHEAD\n${sha}\tHEAD\n`)).toBe("main");
-    expect(ipmDefaultBranch(`ref: refs/heads/release/v1\tHEAD\n${sha}\tHEAD\n`)).toBe("release/v1");
-    expect(ipmDefaultBranch("")).toBeUndefined();
-    expect(ipmDefaultBranch(`${sha}\tHEAD\n`)).toBeUndefined();
+  // The registry's answer for a listed package, verbatim: a read-only GET of https://pm.community.intersystems.com/packages/ocupilot on 2026-11-21
+  // (Rule #36). Its download of an older version, .../ocupilot-1.0.17.tgz, answered 200 (probed) with the same path pattern.
+  const REGISTRY_ANSWER = {
+    name: "ocupilot",
+    version: "1.0.18",
+    description: "An agent co-pilot for the InterSystems IRIS System Management Portal: an Angular shell over an ObjectScript REST API.",
+    repository: "https://github.com/jbrandtmse/OcuPilot/",
+    size: 39724066,
+    hash: "d01dd30d6e620b3b399e8413b479b1328cdabab5",
+    url: "https://pm.community.intersystems.com/download/ocupilot/-/ocupilot-1.0.18.tgz",
+    versions: ["1.0.0", "1.0.1", "1.0.10", "1.0.11", "1.0.12", "1.0.13", "1.0.14", "1.0.15", "1.0.16", "1.0.17", "1.0.18", "1.0.2", "1.0.3", "1.0.4", "1.0.5", "1.0.6", "1.0.7", "1.0.8", "1.0.9"],
+    publishTS: 1795235429.719946,
+    deleted: false,
+  };
+
+  it("ipmArchiveUrl is the answer's own url for the newest version, and that url with the version swapped for an older one", () => {
+    expect(ipmArchiveUrl(REGISTRY_ANSWER, "1.0.18")).toBe("https://pm.community.intersystems.com/download/ocupilot/-/ocupilot-1.0.18.tgz");
+    expect(ipmArchiveUrl(REGISTRY_ANSWER, "1.0.17")).toBe("https://pm.community.intersystems.com/download/ocupilot/-/ocupilot-1.0.17.tgz");
   });
 
-  it("ipmReadme names the version and the source, and implies no endorsement (AD-28)", () => {
-    const readme = ipmReadme("1.0.0");
-    expect(readme).toContain("Version 1.0.0");
-    expect(readme).toContain("https://github.com/jbrandtmse/iris-execute-mcp-v2");
-    expect(readme).toContain('zpm "install iris-execute-mcp-v2"');
-    expect(readme).toMatch(/independent community project/);
-    expect(readme).toMatch(/not made, endorsed or supported by InterSystems/);
-    expect(readme).not.toMatch(/official|certified/i);
+  it.each([
+    ["no url", { ...REGISTRY_ANSWER, url: undefined }],
+    ["a url that is not https", { ...REGISTRY_ANSWER, url: "http://pm.community.intersystems.com/download/ocupilot/-/ocupilot-1.0.18.tgz" }],
+    ["a url that does not end with the newest version's .tgz", { ...REGISTRY_ANSWER, url: "https://pm.community.intersystems.com/download/ocupilot/latest" }],
+    ["a body that is not an object", "text"],
+    ["null", null],
+  ])("ipmArchiveUrl for an older version gives nothing from %s", (_label, body) => {
+    expect(ipmArchiveUrl(body, "1.0.17")).toBeUndefined();
   });
 
   it("ipmRegistryListsVersion reads the registry's answer: the newest version or the versions list", () => {
@@ -472,6 +507,151 @@ describe("Publish refusals: a real run only for a push of the tag, on the prepar
   });
 });
 
+/**
+ * Story 42.7, the extension stores. The statuses are the ones the real stores answered to a read-only GET on 2026-11-20, captured with
+ * `storeLookupUrl` and `storeLookupHeaders` and `fetch` from a `node --input-type=module -e` one-liner, for
+ * `intersystems-community.servermanager` (Rule #36; the suite itself never reaches a network):
+ *   Marketplace  3.10.2 -> 200 (application/vsix; the Range header was ignored)   0.0.1 -> 404 (application/json)
+ *   Open VSX     3.10.2 -> 200 (application/json)                                 0.0.1 -> 404 (application/json)
+ *   Open VSX namespace intersystems-community -> 200, iris-mcp -> 404 (the owner has not created it yet)
+ * Re-read on 2026-11-21 for the evidence `storeOutcome` requires: every Marketplace hit (servermanager 3.10.2, ms-python.python 2024.0.0,
+ * esbenp.prettier-vscode 10.1.0, vscode-objectscript 2.12.0, redhat.vscode-yaml 1.14.0) is 200 `application/vsix; api-version=7.2-preview.1`
+ * with no redirect; its 404 is `application/json; charset=utf-8` (`ExtensionAssetNotFoundException`). Open VSX's 3.10.2 hit is
+ * `application/json` with `namespace` "intersystems-community", `name` "servermanager", `version` "3.10.2"; its 404 is JSON with `error`.
+ */
+describe("The store lookups (Story 42.7)", () => {
+  it("the Open VSX URL is the metadata of the version, and the Marketplace URL is the vspackage of the version", () => {
+    expect(storeLookupUrl("open-vsx", "iris-mcp", "iris-mcp-launcher", "1.0.0")).toBe("https://open-vsx.org/api/iris-mcp/iris-mcp-launcher/1.0.0");
+    expect(storeLookupUrl("vscode-marketplace", "iris-mcp", "iris-mcp-launcher", "1.0.0")).toBe(
+      "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/iris-mcp/vsextensions/iris-mcp-launcher/1.0.0/vspackage",
+    );
+    expect(openVsxNamespaceUrl("iris-mcp")).toBe("https://open-vsx.org/api/iris-mcp");
+  });
+
+  it("a part of the URL that holds a reserved character is encoded, so that it cannot add a path segment", () => {
+    expect(storeLookupUrl("open-vsx", "a/b", "c?d", "1.0.0")).toBe("https://open-vsx.org/api/a%2Fb/c%3Fd/1.0.0");
+    expect(openVsxNamespaceUrl("a/b")).toBe("https://open-vsx.org/api/a%2Fb");
+  });
+
+  it("a store that is not one is refused, with the fix", () => {
+    expect(() => storeLookupUrl("npm", "p", "n", "1.0.0")).toThrow(/"npm" is not an extension store\. Use vscode-marketplace or open-vsx\./);
+  });
+
+  it("the Marketplace lookup asks for one byte (its HEAD answers 405); the Open VSX lookup asks for JSON", () => {
+    expect(storeLookupHeaders("vscode-marketplace")).toEqual({ Range: "bytes=0-0", "User-Agent": "iris-mcp-release" });
+    expect(storeLookupHeaders("open-vsx")).toEqual({ Accept: "application/json", "User-Agent": "iris-mcp-release" });
+  });
+
+  const EXPECTED = { publisher: "iris-mcp", name: "iris-mcp-launcher", version: "1.0.0" };
+  const VSIX = "application/vsix; api-version=7.2-preview.1";
+  const OPEN_VSX_BODY = { namespace: "iris-mcp", name: "iris-mcp-launcher", version: "1.0.0", downloadable: true };
+
+  it.each([
+    [404, "absent"],
+    [403, "unknown"],
+    [401, "unknown"],
+    [405, "unknown"],
+    [429, "unknown"],
+    [500, "unknown"],
+    [503, "unknown"],
+    [301, "unknown"],
+    [undefined, "unknown"],
+  ])("the status %s is %s on both stores, whatever the body", (status, expected) => {
+    for (const store of ["vscode-marketplace", "open-vsx"] as const) {
+      expect(storeOutcome(store, { status: status as number | undefined, contentType: "application/json" }, EXPECTED).outcome).toBe(expected);
+    }
+  });
+
+  it("the Marketplace's 200 or 206 is `published` only when it carries the vsix (application/vsix, the real store's type)", () => {
+    expect(storeOutcome("vscode-marketplace", { status: 200, contentType: VSIX }, EXPECTED)).toEqual({ outcome: "published" });
+    expect(storeOutcome("vscode-marketplace", { status: 206, contentType: "application/vsix" }, EXPECTED)).toEqual({ outcome: "published" });
+  });
+
+  it.each([
+    ["an HTML page (a captive portal or a proxy)", "text/html; charset=utf-8", /the content type is text\/html; charset=utf-8, not application\/vsix/],
+    ["JSON", "application/json; charset=utf-8", /not application\/vsix/],
+    ["a look-alike type", "application/vsixfoo", /not application\/vsix/],
+    ["no content type", null, /the content type is missing/],
+  ])("a Marketplace 200 that is %s is `unknown`, so the release does not skip the upload", (_label, contentType, why) => {
+    const judged = storeOutcome("vscode-marketplace", { status: 200, contentType }, EXPECTED);
+    expect(judged.outcome).toBe("unknown");
+    expect(judged.why).toMatch(/^HTTP 200, but /);
+    expect(judged.why).toMatch(why);
+  });
+
+  it("Open VSX's 200 is `published` only when it is JSON that names the namespace, the name and the version asked for", () => {
+    expect(storeOutcome("open-vsx", { status: 200, contentType: "application/json", body: OPEN_VSX_BODY }, EXPECTED)).toEqual({ outcome: "published" });
+  });
+
+  it.each([
+    ["an HTML page", { status: 200, contentType: "text/html", body: undefined }, /the answer is text\/html, not JSON/],
+    ["JSON that did not parse", { status: 200, contentType: "application/json", body: undefined }, /does not name iris-mcp\.iris-mcp-launcher@1\.0\.0/],
+    ["another version", { status: 200, contentType: "application/json", body: { ...OPEN_VSX_BODY, version: "0.9.0" } }, /does not name/],
+    ["another namespace (Open VSX matches it case-sensitively)", { status: 200, contentType: "application/json", body: { ...OPEN_VSX_BODY, namespace: "IRIS-MCP" } }, /does not name/],
+    ["another name", { status: 200, contentType: "application/json", body: { ...OPEN_VSX_BODY, name: "other" } }, /does not name/],
+    ["a JSON array", { status: 200, contentType: "application/json", body: [OPEN_VSX_BODY] }, /does not name/],
+    ["a 206 (Open VSX is not asked for a range)", { status: 206, contentType: "application/json", body: OPEN_VSX_BODY }, /^HTTP 206$/],
+  ])("an Open VSX answer that is %s is `unknown`", (_label, answer, why) => {
+    const judged = storeOutcome("open-vsx", answer, EXPECTED);
+    expect(judged.outcome).toBe("unknown");
+    expect(judged.why).toMatch(why);
+  });
+});
+
+describe("skippedDuplicate (Story 42.7): the CLI's own line tells a skip from an upload", () => {
+  // vsce 4.1.1 `out/publish.js` and ovsx 1.4.0 `lib/publish.js` print these after `--skip-duplicate` found the version (exit 0).
+  it.each([
+    ["vsce", "Executing prepublish script 'npm run vscode:prepublish'...\n DONE  Version 1.0.0 is already published. Skipping publish.\n"],
+    ["vsce in a GitHub Actions log", "Version 1.0.0 is already published. Skipping publish.\r\n"],
+    ["ovsx", "iris-mcp.iris-mcp-launcher v1.0.0 is already published. Skipping publish.\n"],
+  ])("%s: a line that ends with `is already published. Skipping publish.` is a skip", (_name, stdout) => {
+    expect(skippedDuplicate(stdout)).toBe(true);
+  });
+
+  it.each([
+    ["an upload", "Publishing 'iris-mcp.iris-mcp-launcher v1.0.0'...\n DONE  Published iris-mcp.iris-mcp-launcher v1.0.0.\n"],
+    ["nothing", ""],
+    ["the phrase inside a longer line", "Version 1.0.0 is already published. Skipping publish. Then it uploaded anyway.\n"],
+    ["a failure to find the version", "ERROR  iris-mcp.iris-mcp-launcher v1.0.0 already exists.\n"],
+  ])("%s is not a skip", (_name, stdout) => {
+    expect(skippedDuplicate(stdout)).toBe(false);
+  });
+});
+
+describe("extensionChangelogProblems (Story 42.7): the first `## [` heading names the release version", () => {
+  it("passes when the first heading is the version, with or without a date", () => {
+    expect(extensionChangelogProblems("# Changelog\n\n## [1.0.0] \u2014 2026-11-21\n\n- x\n\n## [0.1.0]\n", "1.0.0")).toEqual([]);
+    expect(extensionChangelogProblems("## [1.0.0]\n", "1.0.0")).toEqual([]);
+  });
+
+  it("refuses [Unreleased] as the first heading, naming the heading and the fix", () => {
+    expect(extensionChangelogProblems("# Changelog\n\n## [Unreleased]\n\n## [0.1.0]\n", "1.0.0")).toEqual([
+      `the first heading of ${EXTENSION_CHANGELOG_PATH} is \`## [Unreleased]\`, not \`## [1.0.0]\`. Run pnpm run version, which renames the \`## [Unreleased]\` heading, and commit the result.`,
+    ]);
+  });
+
+  it("refuses another version, a version that only starts like the release, and an older heading above the release's", () => {
+    expect(extensionChangelogProblems("## [0.1.0]\n", "1.0.0")).toHaveLength(1);
+    expect(extensionChangelogProblems("## [1.0.01]\n", "1.0.0")).toHaveLength(1);
+    expect(extensionChangelogProblems("## [0.9.0]\n\n## [1.0.0]\n", "1.0.0")).toHaveLength(1);
+  });
+
+  it("refuses a changelog with no `## [` heading, and an empty one", () => {
+    expect(extensionChangelogProblems("# Changelog\n\nNothing yet.\n", "1.0.0")[0]).toMatch(/has no `## \[` heading\. Add a section headed `## \[1\.0\.0\]`/);
+    expect(extensionChangelogProblems("", "1.0.0")).toHaveLength(1);
+  });
+
+  it("the real changelog of the extension is not at a release heading while it is Unreleased, and is once it is versioned", () => {
+    const text = readFileSync(path.join(REPO_ROOT, EXTENSION_CHANGELOG_PATH), "utf8");
+    const first = /^## \[([^\]]*)\]/m.exec(text)?.[1];
+    const manifest = JSON.parse(readFileSync(path.join(REPO_ROOT, "extensions", "iris-mcp-launcher", "package.json"), "utf8")) as { version: string };
+    // Between releases the first heading is [Unreleased]; on a version commit it is the extension's own version. Nothing else.
+    expect(first === "Unreleased" || first === manifest.version, `the first heading is [${first}]`).toBe(true);
+    expect(extensionChangelogProblems(text, manifest.version)).toHaveLength(first === "Unreleased" ? 1 : 0);
+    expect(extensionChangelogProblems(text, "99.0.0")).toHaveLength(1);
+  });
+});
+
 describe("The report", () => {
   it("names every package and channel with its status, grouped by channel, in the order given", () => {
     const report = releaseReport([
@@ -492,6 +672,72 @@ describe("The report", () => {
         "",
       ].join("\n"),
     );
+  });
+
+  it("a store channel row carries its authentication in the detail, and a skipped duplicate has none (Story 42.7)", () => {
+    const report = releaseReport([
+      { channel: "vscode-marketplace", item: "iris-mcp-launcher@1.0.0", status: STATUS.published, detail: "auth: oidc" },
+      { channel: "open-vsx", item: "iris-mcp-launcher@1.0.0", status: STATUS.published, detail: "auth: token" },
+      { channel: "open-vsx", item: "iris-mcp-launcher@1.0.1", status: STATUS.alreadyPublished },
+    ]);
+    expect(report).toBe(
+      ["Release report", "vscode-marketplace", "  iris-mcp-launcher@1.0.0: published (auth: oidc)", "open-vsx", "  iris-mcp-launcher@1.0.0: published (auth: token)", "  iris-mcp-launcher@1.0.1: already published", ""].join("\n"),
+    );
+  });
+
+  describe("manual steps (decision #122): the IPM channel is the owner's, never a failure", () => {
+    const READY = { channel: "ipm", item: "iris-execute-mcp-v2@1.1.0", status: STATUS.ready, manual: true, detail: ipmRehearsalDetail(ipmManualStepText("1.1.0", ipmNotListedReason("1.1.0"))) };
+    const STEP = { channel: "ipm", item: "iris-execute-mcp-v2@1.1.0", status: STATUS.manualStep, manual: true, detail: ipmManualStepText("1.1.0", ipmNotListedReason("1.1.0")) };
+    const TEXT = "Release 1.1.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry does not list 1.1.0";
+
+    it("a release's manual step is a line of its channel and a `Manual steps` block that names the owner's step and the listing", () => {
+      expect(releaseReport([{ channel: "npm", item: "@iris-mcp/all@1.1.0", status: STATUS.published }, STEP])).toBe(
+        [
+          "Release report",
+          "npm",
+          "  @iris-mcp/all@1.1.0: published",
+          "ipm",
+          `  iris-execute-mcp-v2@1.1.0: manual step (${TEXT})`,
+          "",
+          "Manual steps (the run does not do these, and its result does not depend on them; the listing is https://openexchange.intersystems.com/package/IRIS-MCP-Server-Suite-2):",
+          `  ipm: ${TEXT}`,
+          "",
+        ].join("\n"),
+      );
+    });
+
+    it("a rehearsal's `ready` line carries the same block, with the rehearsal's lead removed from the step", () => {
+      const report = releaseReport([READY]);
+      expect(report).toContain(`  iris-execute-mcp-v2@1.1.0: ready (manual step after the tag: ${TEXT})`);
+      expect(report).toContain(`\nManual steps (`);
+      expect(report).toContain(`\n  ipm: ${TEXT}\n`);
+      expect(manualStepChannels([READY, STEP])).toEqual([
+        { channel: "ipm", text: TEXT },
+        { channel: "ipm", text: TEXT },
+      ]);
+    });
+
+    it("a channel the registry already lists has no manual step: no block, no annotation", () => {
+      const listed = { channel: "ipm", item: "iris-execute-mcp-v2@1.1.0", status: STATUS.alreadyPublished };
+      expect(releaseReport([listed])).toBe("Release report\nipm\n  iris-execute-mcp-v2@1.1.0: already published\n");
+      expect(manualStepChannels([listed])).toEqual([]);
+      expect(manualStepAnnotations([listed])).toEqual([]);
+    });
+
+    it("each manual step is one raw `::warning::` line, whose message escapes what the runner reads (one line, `%`, a newline)", () => {
+      expect(manualStepAnnotations([STEP])).toEqual([`::warning title=Manual step::ipm: ${TEXT}`]);
+      const odd = { ...STEP, detail: "Release 100% done\nthen more" };
+      expect(manualStepAnnotations([odd])).toEqual(["::warning title=Manual step::ipm: Release 100%25 done%0Athen more"]);
+    });
+
+    it("a manual step and a skipped channel are separate blocks and separate annotations", () => {
+      const skipped = { channel: "open-vsx", item: "iris-mcp-launcher@1.1.0", status: STATUS.skipped, detail: "not set up: namespace absent", notSetUp: true };
+      const report = releaseReport([skipped, STEP]);
+      expect(report.indexOf("Skipped channels")).toBeGreaterThan(-1);
+      expect(report.indexOf("Manual steps")).toBeGreaterThan(report.indexOf("Skipped channels"));
+      expect(notSetUpAnnotations([skipped, STEP])).toHaveLength(1);
+      expect(manualStepAnnotations([skipped, STEP])).toHaveLength(1);
+    });
   });
 
   it("the statuses are the five of the acceptance criteria", () => {
@@ -549,7 +795,7 @@ describe("Main reachability (DW-696, decision #82): identical and behind are on 
 });
 
 describe("ROOT_CHECK_SCRIPT: a check or validate word in a root script's name (DW-612)", () => {
-  it.each(["check:provenance", "validate:prompts", "gen:pack:check", "gen:skills:check", "gen:tools-list-snapshot:check", "gen:governance-baseline:check", "format:check", "check", "validate", "lint:check:strict"])("matches %s", (name) => {
+  it.each(["check:provenance", "validate:prompts", "gen:pack:check", "gen:skills:check", "gen:tools-list-snapshot:check", "gen:governance-baseline:check", "gen:ipm:check", "format:check", "check", "validate", "lint:check:strict"])("matches %s", (name) => {
     expect(ROOT_CHECK_SCRIPT.test(name)).toBe(true);
   });
 

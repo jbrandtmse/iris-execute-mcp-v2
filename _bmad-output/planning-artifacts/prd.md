@@ -41,7 +41,7 @@ workflowType: 'prd'
 
 ## Executive Summary
 
-IRIS MCP v2 is an open-source suite of five Model Context Protocol (MCP) servers that deliver full AI controllability of InterSystems IRIS. It replaces the existing `iris-execute-mcp` (8 tools) and `mcp-server-iris` (10 tools) with 86 consolidated tools spanning development, administration, interoperability, operations, and data management — all communicating exclusively through the IRIS web port via HTTP/REST.
+IRIS MCP v2 is an open-source suite of five Model Context Protocol (MCP) servers that deliver full AI controllability of InterSystems IRIS. It replaces the existing `iris-execute-mcp` (8 tools) and `mcp-server-iris` (10 tools) with 110 consolidated tools (plus one framework tool, `iris_server_profiles`, on each server) spanning development, administration, interoperability, operations, and data management — all communicating exclusively through the IRIS web port via HTTP/REST.
 
 The v1 servers proved that AI agents want to work with IRIS. What held them back was coverage (only 18 tools covering basic development) and friction (SuperServer native driver dependency that blocks containerized and remote environments). v2 removes both barriers: comprehensive coverage across every major IRIS management surface, and zero-friction connectivity using the Atelier REST API and a self-bootstrapping custom REST service that requires only `npm install` and web port access.
 
@@ -55,7 +55,7 @@ Target users are IRIS developers using AI coding assistants (primary), system ad
 - **Atelier API first** — 70% of the development server's tools use the battle-tested REST API that powers the VS Code ObjectScript extension. Custom ObjectScript REST services only where Atelier doesn't reach.
 - **Self-bootstrapping installation** — servers detect missing IRIS-side components and auto-deploy via the Atelier API. If privileges are insufficient, explicit manual instructions are provided. IPM (`zpm "install iris-execute-mcp-v2"`) serves as a single-command fallback.
 - **Suite architecture** keeps each server in the 9-22 tool sweet spot, avoiding the LLM performance cliff that occurs past ~20 tools. GitHub's evidence: reducing from 40 to 13 tools improved benchmarks 2-5% with 400ms latency reduction.
-- **Full management surface coverage** — 86 tools across 5 servers covering everything from ObjectScript compilation to OAuth2 client registration, production lifecycle management, and Prometheus metrics export.
+- **Full management surface coverage** — 110 tools across 5 servers (115 advertised entries: each server also advertises `iris_server_profiles`) covering everything from ObjectScript compilation to OAuth2 client registration, production lifecycle management, and Prometheus metrics export.
 
 ## Project Classification
 
@@ -83,7 +83,7 @@ Target users are IRIS developers using AI coding assistants (primary), system ad
 
 ### Technical Success
 
-- All 86 consolidated tools implemented and functional across all 5 servers
+- All 110 consolidated tools implemented and functional across all 5 servers
 - Zero SuperServer/native driver dependencies — web port HTTP only
 - MCP specification compliance: revisions 2025-11-25 (pagination, tool annotations, listChanged, structured output) and 2026-07-28, both served over stdio by one process on the MCP TypeScript SDK v2 (FR161), with form elicitation for the confirmation gates on clients that declare it (FR162; Epic 43)
 - Self-bootstrap succeeds fully with %Admin_Manage privileges; degrades gracefully with %Development only
@@ -92,7 +92,7 @@ Target users are IRIS developers using AI coding assistants (primary), system ad
 
 ### Measurable Outcomes
 
-- **Completeness:** 86/86 tools passing integration tests against IRIS Community Edition
+- **Completeness:** 110/110 tools passing integration tests against IRIS Community Edition
 - **Reliability:** All Atelier API-based tools match VS Code extension behavior (same endpoints, same error handling)
 - **Documentation:** Every tool has a description sufficient for LLM tool selection (tested by having Claude correctly choose the right tool for 20 natural-language prompts)
 
@@ -199,24 +199,23 @@ Mei is a data analyst who uses IRIS as the backend for a document management sys
 
 ### Installation & Distribution
 
-- **Primary distribution:** npm registry
-  - `@iris-mcp/dev` — Development tools (21 tools)
-  - `@iris-mcp/admin` — Administration tools (22 tools)
-  - `@iris-mcp/interop` — Interoperability tools (19 tools)
-  - `@iris-mcp/ops` — Operations tools (16 tools)
-  - `@iris-mcp/data` — Data & analytics tools (9 tools)
-  - `@iris-mcp/all` — Meta-package installing all five
-  - `@iris-mcp/shared` — Shared HTTP client, auth, config, types (internal dependency)
-- **Secondary distribution:** IPM registry for IRIS-side ObjectScript component
-- **Installation:** `npm install -g @iris-mcp/dev` (or any individual package)
+- **Primary distribution:** npm registry. Every `@iris-mcp/*` package shares one version (`1.0.0` was published 2026-11-21 with provenance, with no beta tag), and every package requires Node.js `>=22.17.0`. Tool counts are the package tools; each server also advertises the framework tool `iris_server_profiles`, so a server lists one more (`fixtures/tools-list-snapshot.json`: 115 entries, 110 package tools plus 5):
+  - `@iris-mcp/dev` — Development tools (32 tools, 33 advertised)
+  - `@iris-mcp/admin` — Administration tools (26 tools, 27 advertised)
+  - `@iris-mcp/interop` — Interoperability tools (24 tools, 25 advertised)
+  - `@iris-mcp/ops` — Operations tools (21 tools, 22 advertised)
+  - `@iris-mcp/data` — Data & analytics tools (7 tools, 8 advertised)
+  - `@iris-mcp/all` — Meta-package that depends on the five servers (it has no `bin`, so it launches nothing)
+  - `@iris-mcp/shared` — Shared HTTP client, auth, config, governance and types, with the `iris-mcp-credentials` and `iris-mcp-governance` CLIs
+  - `@iris-mcp/client-config` — the `iris-mcp-clients` configuration manager CLI and the skills pack
+- **Installation:** Node.js 22.17 or later and one command, with one documented path per client. Clients launch `npx -y @iris-mcp/<pkg>@1` (major pin). There is no global `npm install -g` route.
+  - **Claude Code:** the plugin (from 1.1.0), which brings all five servers and the skills pack.
+  - **VS Code:** the IRIS MCP Launcher extension (from 1.1.0), on the Visual Studio Marketplace and Open VSX.
+  - **Every other client:** `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply --client <id> --servers <list>`, which is also the 1.0.x route for every client.
+- **Secondary distribution:** IPM registry for the IRIS-side ObjectScript component (from 1.1.0, the first release with the IPM channel). Without it, the first server to connect deploys the classes itself.
+- **Release channels (five):** npm, the Visual Studio Marketplace, Open VSX, the IPM registry (with Open Exchange) and the MCP Registry, each published only from a tagged, CI-green commit on `main` through the approved `release` environment. The Claude Code plugin is served from the repository's marketplace file, pinned to the release tag. `v1.0.0` published npm only; the other channels are first used by 1.1.0.
+- **IRIS support:** 2023.1 or later, best effort below the oldest CI-tested image; the tested range is 2026.1 to 2026.2.
 - **No native dependencies** — pure Node.js, no compiled modules, no Python runtime
-- **Status 2026-10-14** (decision record D1–D7, [decision-record-2026-10-14-distribution-and-skills.md](./decision-record-2026-10-14-distribution-and-skills.md); Epic 42):
-  - npm `1.0.0` of every `@iris-mcp/*` package, published with provenance by a gated GitHub Actions release workflow, with no beta tag;
-  - clients launch `npx -y @iris-mcp/<pkg>@1` (major pin);
-  - IPM is revived with a manifest generated from the bootstrap class list and an offline install proof, and listed on Open Exchange;
-  - the VS Code extension is published on the Marketplace and Open VSX;
-  - a Claude Code plugin brings all five servers plus the skills pack;
-  - the suite is listed on the MCP Registry.
 
 ### API Surface
 

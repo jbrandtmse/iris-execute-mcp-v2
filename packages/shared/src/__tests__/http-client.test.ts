@@ -131,9 +131,8 @@ describe("IrisHttpClient", () => {
   //
   // Pins the request locale explicitly so `%Status` error text renders
   // predictably instead of whatever locale an unspecified `Accept-Language`
-  // resolves to. This is ONE of TWO independent mechanisms — the other
-  // (per-worker-process message-table selection, Rule #13) is untouched and
-  // still handled by the existing ERROR#/خطأ# strippers. Rule #59: prove the
+  // resolves to. IRIS matches the header per request, and the existing English
+  // and localized prefix strippers still apply. Rule #59: prove the
   // knob is not inert — an explicit override must be observably different
   // from the default.
 

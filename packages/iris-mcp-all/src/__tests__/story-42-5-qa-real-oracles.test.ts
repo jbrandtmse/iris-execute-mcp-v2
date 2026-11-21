@@ -8,19 +8,12 @@
  *    by a neutral one; no key and no value that decides a verdict is edited. They carry what the hand-written fixtures of
  *    `release-script-fixtures.ts` do not: the `branch_policy` protection rule with `reviewers: null`, a Team reviewer whose `login` is
  *    `null` (not absent), `prevent_self_review: null`, and `deployment_branch_policy: null` for an environment with no restriction.
- *  - The IPM channel's git steps run against a REAL empty bare repository (the state of the packaging repository before its first
- *    release): the read-only and local steps only -- `ls-remote --symref`, `clone`, `checkout -B`, `add --all`, `write-tree` and the
- *    `rev-parse` that finds no tag. Nothing here commits, tags or pushes; the steps that do are covered by the scripted `git`.
  *
- * No network, no GitHub, no IRIS, no docker. Every directory is made under `os.tmpdir()` by the test that needs it and removed after it.
+ * No network, no GitHub, no IRIS, no docker.
  */
 
-import { afterEach, describe, expect, it } from "vitest";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { environmentProblems, environmentSummary, environmentWarnings, ipmDefaultBranch, ipmPushPlan } from "../../../../scripts/lib/release-core.mjs";
+import { describe, expect, it } from "vitest";
+import { environmentProblems, environmentSummary, environmentWarnings } from "../../../../scripts/lib/release-core.mjs";
 import { readEnvironmentGuard } from "../../../../scripts/release.mjs";
 
 // -- the environment guard against captured GitHub bodies ---------------------------------------------------------------
@@ -157,73 +150,5 @@ describe("The environment guard reads the bodies GitHub really returns (captured
 
     const wrongRule = serve(PIP_PYPI, PIP_PYPI_POLICIES);
     expect((await readEnvironmentGuard(wrongRule.deps as never, ENV)).state).toBe("unprotected");
-  });
-});
-
-// -- the IPM channel's git steps against a real empty repository ---------------------------------------------------------
-
-const roots: string[] = [];
-afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
-/** The environment of every git call here: no user or system configuration, and no prompt. */
-const GIT_ENV: Record<string, string> = { ...(process.env as Record<string, string>), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", GIT_TERMINAL_PROMPT: "0" };
-
-function git(args: readonly string[], cwd: string): { status: number | null; stdout: string; stderr: string } {
-  const result = spawnSync("git", [...args], { cwd, env: GIT_ENV, encoding: "utf8" });
-  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
-}
-
-describe("The IPM channel's git steps against a real empty bare repository (DW-689; project rule #54; no commit, no tag, no push)", () => {
-  /** A bare repository whose HEAD names `branch`, empty like the packaging repository before its first release; and the plan aimed at it. */
-  function emptyRemote(branch = "master") {
-    const root = mkdtempSync(path.join(tmpdir(), "release-real-git-"));
-    roots.push(root);
-    const bare = path.join(root, "remote.git");
-    expect(git(["init", "--bare", "--quiet", `--initial-branch=${branch}`, bare], root).status, "git init --bare").toBe(0);
-    const clone = path.join(root, "clone");
-    return { root, bare, clone, plan: ipmPushPlan(path.join(root, "tree"), "1.0.0", "c".repeat(40), { url: bare, clone }) };
-  }
-
-  it("git is there (a missing git must fail here, not skip)", () => {
-    expect(git(["--version"], tmpdir()).stdout).toMatch(/^git version \d+\.\d+/);
-  });
-
-  it("the dry step's `ls-remote --symref <url> HEAD` exits 0 with no output on an empty repository, whichever branch its HEAD names, which is `ready`", () => {
-    for (const branch of ["master", "main"]) {
-      const { root, plan } = emptyRemote(branch);
-      const listed = git(plan.lsRemoteArgv, root);
-      expect({ status: listed.status, stdout: listed.stdout }, `HEAD names ${branch}`).toEqual({ status: 0, stdout: "" });
-      expect(ipmDefaultBranch(listed.stdout)).toBeUndefined();
-    }
-  });
-
-  it("the same step on a path that is not a repository exits non-zero, which is `absent or not readable`", () => {
-    const { root, plan } = emptyRemote();
-    const missing = ipmPushPlan(plan.tree, "1.0.0", "c".repeat(40), { url: path.join(root, "no-such-repository.git"), clone: plan.clone });
-    const listed = git(missing.lsRemoteArgv, root);
-    expect(listed.status).not.toBe(0);
-    expect(listed.status).not.toBeNull();
-    expect(listed.stdout).toBe("");
-  });
-
-  it("clone, `checkout --quiet -B master` on the unborn branch, `add --all` and `write-tree` all succeed, and the tag's tree is absent: `rev-parse --verify --quiet` exits 1 with no output", () => {
-    for (const branch of ["master", "main"]) {
-      const { root, bare, clone, plan } = emptyRemote(branch);
-      expect(git(plan.cloneArgv, root).status, `clone of an empty repository whose HEAD names ${branch}`).toBe(0);
-      expect(git(plan.checkoutArgv, clone).status, "checkout -B master").toBe(0);
-      expect(git(["symbolic-ref", "HEAD"], clone).stdout.trim(), "the working copy is on master whatever the remote's HEAD names").toBe("refs/heads/master");
-      mkdirSync(path.join(clone, "src"), { recursive: true });
-      writeFileSync(path.join(clone, "module.xml"), "<Export/>\n");
-      writeFileSync(path.join(clone, "src", "a.cls"), "Class A {}\n");
-      expect(git(plan.addArgv, clone).status, "add --all").toBe(0);
-      const tree = git(plan.writeTreeArgv, clone);
-      expect(tree.status, "write-tree").toBe(0);
-      expect(tree.stdout.trim()).toMatch(/^[0-9a-f]{40}$/);
-      const tag = git(plan.tagTreeArgv, clone);
-      expect({ status: tag.status, stdout: tag.stdout }, "no tag yet").toEqual({ status: 1, stdout: "" });
-      expect(git(["for-each-ref", "refs/"], bare).stdout, "nothing reached the remote").toBe("");
-    }
   });
 });

@@ -34,7 +34,7 @@ import {
   UPSTREAM_COMMIT,
 } from "../../../../scripts/lib/provenance-core.mjs";
 import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
-import { gatherProvenanceInputs, NPM_PACK_ARGS } from "../../../../scripts/lib/provenance-inputs.mjs";
+import { gatherPluginInputs, gatherProvenanceInputs, NPM_PACK_ARGS } from "../../../../scripts/lib/provenance-inputs.mjs";
 import { NOTICE_FILENAME, PACK_DIR, PACK_SOURCE_DIR, WORKFLOW_SKILLS_DIR } from "../../../../scripts/lib/skills-pack.mjs";
 import { committedRowFiles, makeTempRoot, put, removeTempRoot, REPO_ROOT, runNode } from "./pack-fixture";
 
@@ -44,11 +44,24 @@ interface Distribution {
   files: Array<{ path: string; bytes: Buffer }>;
   problem?: string;
 }
+interface JsonInput {
+  path: string;
+  value: any;
+  problem?: string;
+}
+interface PluginInputs {
+  version: string | null;
+  manifest: JsonInput;
+  servers: JsonInput;
+  marketplace: JsonInput;
+  serverJsons: JsonInput[];
+}
 interface Inputs {
   sourceNotice: Buffer | null;
   packNotice: Buffer | null;
   agentFiles: Array<{ label: string; packRel: string; text: string }>;
   packFiles: Array<{ rel: string; bytes: Buffer }>;
+  plugin?: PluginInputs;
   distributions: Distribution[];
 }
 interface Problem {
@@ -90,6 +103,11 @@ function tarballOf(packFiles: Array<{ rel: string; bytes: Buffer }>): Array<{ pa
   return packFiles.map((file) => ({ path: `skills-pack/${file.rel}`, bytes: file.bytes }));
 }
 
+/** The committed plugin manifest, servers, marketplace and `server.json` files, as a fresh copy each call (a test mutates its own). */
+function realPlugin(): PluginInputs {
+  return structuredClone(gatherPluginInputs(REPO_ROOT)) as PluginInputs;
+}
+
 /** A consistent input set, with each part replaceable. */
 function inputsFor(
   options: {
@@ -99,6 +117,7 @@ function inputsFor(
     agentFiles?: Inputs["agentFiles"];
     extraPackFiles?: Inputs["packFiles"];
     distributions?: Distribution[];
+    plugin?: PluginInputs;
   } = {},
 ): Inputs {
   const notice = options.notice ?? noticeWithRows(options.rows);
@@ -113,6 +132,7 @@ function inputsFor(
     packNotice,
     agentFiles: options.agentFiles ?? [],
     packFiles,
+    plugin: options.plugin ?? realPlugin(),
     distributions: options.distributions ?? [
       { name: "@iris-mcp/client-config", mustShipPack: true, files: tarballOf(packFiles) },
     ],
@@ -561,6 +581,130 @@ describe("gathering distributions fails closed (fixture workspace, injected pack
   });
 });
 
+describe("the plugin rule (Story 42.8, AC 42.8.1; AD-28)", () => {
+  const pluginProblems = (inputs: Inputs): Problem[] => byRule(check(inputs), "plugin");
+  const messages = (problems: Problem[]): string[] => problems.map((problem) => `${problem.label}: ${problem.message}`);
+
+  it("holds for the committed plugin manifest, servers, marketplace and server.json files", () => {
+    expect(pluginProblems(inputsFor())).toEqual([]);
+  });
+
+  it("the gatherer reads the pack's manifest and servers, the marketplace and the five server.json files, at the shared version", () => {
+    const plugin = gatherPluginInputs(REPO_ROOT) as PluginInputs;
+    const shared = JSON.parse(readFileSync(join(REPO_ROOT, "packages/client-config/package.json"), "utf8")).version as string;
+    expect(plugin.version).toBe(shared);
+    expect(plugin.manifest.path).toBe(`${PACK_DIR}/.claude-plugin/plugin.json`);
+    expect(plugin.servers.path).toBe(`${PACK_DIR}/.mcp.json`);
+    expect(plugin.marketplace.path).toBe(".claude-plugin/marketplace.json");
+    expect(plugin.serverJsons.map((file) => file.path)).toEqual(
+      ["admin", "data", "dev", "interop", "ops"].map((name) => `packages/iris-${name}-mcp/server.json`),
+    );
+    for (const file of [plugin.manifest, plugin.servers, plugin.marketplace, ...plugin.serverJsons]) expect(file.value, file.path).not.toBeNull();
+  });
+
+  it("an input set with no plugin inputs is refused, never skipped", () => {
+    const inputs = inputsFor();
+    delete inputs.plugin;
+    expect(messages(pluginProblems(inputs))).toEqual(["plugin: the plugin inputs were not gathered"]);
+  });
+
+  it("the notice deleted from the pack is refused as plugin/notice (the plugin root must carry it)", () => {
+    const problems = pluginProblems(inputsFor({ packNotice: null }));
+    expect(problems.map((problem) => problem.label)).toEqual(["notice"]);
+    expect(problems[0]?.message).toContain("has no IRIS-MCP-THIRD-PARTY-NOTICES.md");
+  });
+
+  it('"official" in the plugin description is refused', () => {
+    const plugin = realPlugin();
+    plugin.manifest.value.description = `The official IRIS server. ${plugin.manifest.value.description}`;
+    expect(messages(pluginProblems(inputsFor({ plugin })))).toEqual([`${plugin.manifest.path}: description says "official"`]);
+  });
+
+  it("a plugin display name or marketplace entry description that claims endorsement is refused, and the suite's own denial is not", () => {
+    const plugin = realPlugin();
+    plugin.manifest.value.displayName = "IRIS MCP, endorsed";
+    plugin.marketplace.value.plugins[0].description = "Made by InterSystems";
+    expect(messages(pluginProblems(inputsFor({ plugin }))).sort()).toEqual(
+      [`${plugin.manifest.path}: displayName says "endorsed"`, `${plugin.marketplace.path}: description says "by InterSystems"`].sort(),
+    );
+  });
+
+  it("a plugin or marketplace name with claude, anthropic or intersystems in it is refused", () => {
+    const plugin = realPlugin();
+    plugin.manifest.value.name = "claude-iris";
+    plugin.marketplace.value.name = "anthropic-market";
+    const found = messages(pluginProblems(inputsFor({ plugin })));
+    expect(found).toContain(`${plugin.manifest.path}: name contains "claude"`);
+    expect(found).toContain(`${plugin.marketplace.path}: name contains "anthropic"`);
+    expect(found.some((line) => line.includes('the plugin name is "claude-iris", not "iris-mcp"'))).toBe(true);
+    expect(found.some((line) => line.includes('the marketplace name is "anthropic-market", not "iris-mcp"'))).toBe(true);
+  });
+
+  it("a title or description that claims endorsement in a server.json is refused", () => {
+    const plugin = realPlugin();
+    plugin.serverJsons[2]!.value.title = "The official dev server";
+    expect(messages(pluginProblems(inputsFor({ plugin })))).toEqual([`${plugin.serverJsons[2]!.path}: title says "official"`]);
+  });
+
+  it("a name or a plugin keyword that claims endorsement is refused: a server.json name, a marketplace entry name, a keyword", () => {
+    const plugin = realPlugin();
+    plugin.serverJsons[1]!.value.name = "io.github.jbrandtmse/iris-official-mcp";
+    plugin.marketplace.value.plugins.push({ name: "endorsed-extras", source: "./x" });
+    plugin.manifest.value.keywords = [...plugin.manifest.value.keywords, "official", "intersystems"];
+    expect(messages(pluginProblems(inputsFor({ plugin }))).sort()).toEqual(
+      [
+        `${plugin.serverJsons[1]!.path}: name says "official"`,
+        `${plugin.marketplace.path}: name says "endorsed"`,
+        `${plugin.manifest.path}: keyword says "official"`,
+        `${plugin.manifest.path}: keyword contains "intersystems"`,
+      ].sort(),
+    );
+  });
+
+  it.each([
+    ["a missing server", (servers: any) => delete servers.mcpServers.ops],
+    ["an extra server", (servers: any) => (servers.mcpServers.other = { command: "npx" })],
+    ["a full bin name as a key", (servers: any) => ((servers.mcpServers["iris-interop-mcp"] = servers.mcpServers.interop), delete servers.mcpServers.interop)],
+  ])(".mcp.json with %s is refused", (_name, mutate) => {
+    const plugin = realPlugin();
+    mutate(plugin.servers.value);
+    const found = messages(pluginProblems(inputsFor({ plugin })));
+    expect(found).toHaveLength(1);
+    expect(found[0]).toContain("the servers are");
+    expect(found[0]).toContain("not dev, admin, data, interop, ops");
+  });
+
+  it("a marketplace entry whose ref is not v<version>, whose path is not the pack directory, or whose source is not git-subdir is refused", () => {
+    const wrongRef = realPlugin();
+    wrongRef.marketplace.value.plugins[0].source.ref = "main";
+    expect(messages(pluginProblems(inputsFor({ plugin: wrongRef })))).toEqual([`${wrongRef.marketplace.path}: the entry's ref is "main", not the release tag v${wrongRef.version}`]);
+
+    const wrongPath = realPlugin();
+    wrongPath.marketplace.value.plugins[0].source.path = "skills-pack";
+    expect(messages(pluginProblems(inputsFor({ plugin: wrongPath })))[0]).toContain(`not the plugin root ${PACK_DIR}`);
+
+    const relative = realPlugin();
+    relative.marketplace.value.plugins[0].source = "./packages/client-config/skills-pack";
+    const found = messages(pluginProblems(inputsFor({ plugin: relative })));
+    expect(found.some((line) => line.includes("not \"git-subdir\""))).toBe(true);
+  });
+
+  it("a marketplace with no entry for the plugin is refused", () => {
+    const plugin = realPlugin();
+    plugin.marketplace.value.plugins = [];
+    expect(messages(pluginProblems(inputsFor({ plugin })))).toEqual([`${plugin.marketplace.path}: no plugin entry is named "iris-mcp"`]);
+  });
+
+  it("a file that is missing or not valid JSON is refused with its own path and reason", () => {
+    const plugin = realPlugin();
+    plugin.manifest = { path: plugin.manifest.path, value: null, problem: "the file is missing" };
+    plugin.serverJsons[0] = { path: plugin.serverJsons[0]!.path, value: null, problem: "the file is not valid JSON (Unexpected token)" };
+    expect(messages(pluginProblems(inputsFor({ plugin }))).sort()).toEqual(
+      [`${plugin.manifest.path}: the file is missing`, `${plugin.serverJsons[0]!.path}: the file is not valid JSON (Unexpected token)`].sort(),
+    );
+  });
+});
+
 describe("the real tree", () => {
   let inputs: Inputs;
   beforeAll(() => {
@@ -655,6 +799,8 @@ describe("the check-provenance CLI", () => {
     "scripts/lib/dist-freshness.mjs",
     "scripts/lib/generated-tree.mjs",
     "scripts/lib/skills-pack.mjs",
+    "scripts/lib/endorsement.mjs",
+    "scripts/lib/listings.mjs",
   ];
 
   it("exits 0 on the real tree and prints the pinned MIT block hash", () => {
@@ -662,6 +808,26 @@ describe("the check-provenance CLI", () => {
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
     expect(run.stdout).toContain(`MIT block sha256 ${PINNED_LICENSE_SHA256} (${PINNED_LICENSE_BYTES} bytes)`);
   }, 60_000);
+
+  it("exits 1 and names the plugin rule for a root whose plugin description claims to be official (the CLI path of the rule)", () => {
+    const root = makeTempRoot("check-provenance-cli-plugin");
+    roots.push(root);
+    for (const rel of SCRIPT_FILES) put(root, rel, readFileSync(join(REPO_ROOT, rel)));
+    put(root, `${PACK_SOURCE_DIR}/${NOTICE_FILENAME}`, realNotice);
+    put(root, `${PACK_DIR}/${NOTICE_FILENAME}`, realNotice);
+    for (const row of REAL_ROW_FILES) put(root, `${PACK_DIR}/${row.rel}`, row.bytes);
+    const real = gatherPluginInputs(REPO_ROOT) as PluginInputs;
+    const manifest = { ...real.manifest.value, description: `The official server. ${real.manifest.value.description}` };
+    put(root, real.manifest.path, JSON.stringify(manifest));
+    put(root, real.servers.path, JSON.stringify(real.servers.value));
+    put(root, real.marketplace.path, JSON.stringify(real.marketplace.value));
+    for (const file of real.serverJsons) put(root, file.path, JSON.stringify(file.value));
+    put(root, "packages/client-config/package.json", JSON.stringify({ name: "@iris-mcp/client-config", version: real.version }));
+
+    const run = runNode(root, "scripts/check-provenance.mjs");
+    expect(run.status, `${run.stdout}${run.stderr}`).toBe(1);
+    expect(run.stderr).toContain(`[plugin] ${real.manifest.path}: description says "official"`);
+  });
 
   it("exits 1 and names the failing rule for a fixture root whose notice was altered", () => {
     const root = makeTempRoot("check-provenance-cli");

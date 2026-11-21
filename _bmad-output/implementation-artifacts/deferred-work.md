@@ -249,6 +249,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Deferred to the pre-publish session; routed to publishing checklist.
 - 2026-10-14T10:47:49Z status=decision-pending owner=burndown by=migration note=human=run the pre-publish smoke test (Story 9.3 rerun) in the pre-publish session
 - 2026-10-15T02:51:51Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=correct-course note=decided D2 (decision-record-2026-10-14): local tarball smoke required before 1.0.0
+- 2026-11-21T12:41:19Z status=resolved-by:42-6-tarball-smoke-and-1-0-0-publish by=adjudication note=A4_real_Claude_Code_client_smoke_on_a_throwaway_(Phase_A);published_1.0.0:npx_-y_@iris-mcp/dev@1_answers_initialize_1.0.0_(B7_verify_exit_0,2026-11-21)
 
 ### DW-48: [L11.retro-3-retrospective-skill-rules-enforcement] Epic 11 retro action #3: update /bmad-retrospective skill to enforce Rules codification
 - source: legacy:11.0 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -1551,6 +1552,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Nothing on npm; npx -y @iris-mcp/<pkg> fails for external users; published-mode paths remain dev-mode-only; Epic 33 docs must target the local-path reality.
 - 2026-10-14T10:47:54Z status=decision-pending owner=burndown by=migration note=human=Project Lead decision to npm-publish the @iris-mcp packages
 - 2026-10-15T02:51:51Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=correct-course note=decided D1/D2/D7 (decision-record-2026-10-14): publish 1.0.0 through the CI release workflow
+- 2026-11-21T12:41:19Z status=resolved-by:42-6-tarball-smoke-and-1-0-0-publish by=adjudication note=1.0.0_published_through_the_CI_release_workflow_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44902952309(approval_gated,auth_token);release.mjs_verify_exit_0_8_packages_with_SLSA_provenance
 
 ### DW-301: [32-4-R1] helpRequested valuedOptions set is a second hand-maintained mirror of parseArgs's per-command valued options
 - source: legacy:32.4 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -2004,6 +2006,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 9 non-private publishable manifests not 8; add private:true after confirming vsce package/publish still work; replace the publisher placeholder before any marketplace release.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=9 non-private publishable manifests not 8; add private:true after confirming vsce package/publish still work
 - 2026-10-15T02:51:51Z status=routed owner=42-7-vs-code-extension-publish by=correct-course note=decided D5 (decision-record-2026-10-14): project-name publisher on Marketplace + Open VSX; private:true for npm
+- 2026-11-21T07:54:04Z status=resolved-by:42-7-vs-code-extension-publish by=adjudication note=publisher_iris-mcp+private:true;non-private-packages_test(red_on_drop_of_private_and_on_a_new_tracked_package.json,QA);dry_run_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44878912402_vsix_publisher_iris-mcp
 
 ### DW-390: [34-6-CR-15] The TS tool layer discards byRefTruncated on the error path (execute.ts extracts only truncated)
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -2862,6 +2865,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-21T13:14:16Z occurrence=42-1-pre-publish-package-fixes note=same_5_macOS_failures_seen_at_42.1_implement_on_pristine_baseline(4_C:_path_pins_not_absolute_on_POSIX;_33-3-3_clientsActivationFlow_timeout)
 - 2026-10-21T14:27:37Z occurrence=42-1-pre-publish-package-fixes
 - 2026-10-22T04:35:01Z occurrence=42-3-ci-workflow note=CI_runs_only_the_launcher_arming_guard,liveArming.test.ts,type-check,build_and_its_two_live_files;the_full_suite_stays_out_of_CI_until_42.7_(4_baseline_failures_pin_C:_paths_and_fail_on_Linux_too)
+- 2026-11-21T07:54:04Z status=resolved-by:42-7-vs-code-extension-publish by=adjudication note=4_C:_path_pins_rebuilt_with_path,33-3-3_stale_wait_fixed;launcher_suite_mac_5fail->0fail;CI_launcher_job_3_OS_457_passed_3_skipped_each(https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44878867919);red_proof_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44878910834_red_on_all_3
 
 ### DW-533: iris_production_manage delete removes ANY class given as name: the class-delete path never checks that the class extends Ens.Production
 - source: spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: high | footprint: in-story
@@ -3381,6 +3385,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-41-1-pack-layout-licensing-and-provenance.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: 41.1 implement review 2026-10-19: packages/client-config/package.json scripts.prepublishOnly; Epic 42 owns the publish gates (AD-29)
 - 2026-10-19T06:17:55Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=harvest note=42.6's tarball smoke proves the pack and notice gate red on the real publish path (Rule 59)
+- 2026-11-21T12:41:19Z status=resolved-by:42-6-tarball-smoke-and-1-0-0-publish by=adjudication note=prepare_runs_every_check/validate_root_script(check:provenance,gen:pack:check);red_proof_on_the_publish_path_Phase_A;green_in_v1.0.0_prepare(https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44902952309)
 
 ### DW-613: No pack check requires a SKILL.md to start with frontmatter, so an adaptation header placed above the frontmatter passes provenance while the skill loses its name and description
 - source: spec-41-1-pack-layout-licensing-and-provenance.md | severity: med | fix-risk: low | footprint: in-epic
@@ -3459,6 +3464,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: 41.6 plan 2026-10-19: no .claude-plugin/plugin.json in the repo or pack; a detection branch now is unreachable (rule #54); packages/client-config/src/pack-plan.ts claude-code route
 - 2026-10-19T22:31:15Z status=routed owner=42-8-claude-code-plugin-and-registry-listings by=harvest note=42.8 creates the plugin and makes the claude-code route of iris-mcp-clients skills install install only the rule when it detects the plugin
+- 2026-11-21T17:38:52Z status=resolved-by:42-8-claude-code-plugin-and-registry-listings by=adjudication note=claude-plugin-detect.ts detects iris-mcp@iris-mcp enabled; skills install --client claude-code installs only the rule then (clients.ts:1923); unit+built-bin child-process tests (claude-plugin-detect, skills-cli-plugin, qa-42-8-plugin-process); CI 44926140484 green on 9d795c2
 
 ### DW-626: The MCP adapter data in adapters.ts is stale against the clients' docs read on 2026-10-19 (Pi, Kilo Code, Junie now document MCP; Kimi CLI archived; Roo Code shut down; Windsurf renamed Devin Desktop; the Goose docsUrl 404s)
 - source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: low | footprint: out-of-footprint
@@ -3466,6 +3472,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-19T22:31:15Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=re-disposition the three MCP-capable clients, rename or retire the stale rows, fix docsUrl, bump ADAPTER_DATA_VERSION with the certification table, before 1.0
 - 2026-10-20T02:12:59Z occurrence=41-7-skills-pack-docs-and-capstone by=cr note=PACK_TARGETS too: the gemini row's own note says Antigravity CLI replaced Gemini CLI for unpaid users; no row or id names it
 - 2026-10-20T12:12:41Z occurrence=43-2-serve-mcp-revision-2026-07-28 note=43.2 plan research 2026-10-20: pi MCP since 0.99.0 (stdio+streamable HTTP, ~/.pi/agent/mcp.json, .pi/mcp.json; npm now @earendil-works/pi-coding-agent); windsurf adapter may write a config Devin Desktop ignores (Cascade removed v3.9.19 2026-09-08; mcp_config.json legacy-Cascade-only); goose repo now aaif-goose/goose, docs goose-docs.ai
+- 2026-11-21T14:26:13Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=adapters.ts_re-dispositioned(decision_112:Pi,Junie_promoted;Kilo,Antigravity_roadmap;Devin_Desktop_rename_keeping_windsurf_path;Goose_win32_path_fixed;Kimi_CLI_archived,Roo_discontinued);ADAPTER_DATA_VERSION_bumped;Goose_mutation_red;15_docsUrl_200(QA,2026-11-21);CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-627: The default iris-mcp-all test sweep reaches a local IRIS: the live gates default to localhost:52773 / HSCUSTOM and run their legs whenever that instance answers, with no opt-in
 - source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3487,6 +3494,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 41.7 review 2026-10-20: the generated Skills pack targets table in packages/client-config/README.md; Cursor names .cursor/.claude/.codex skills, VS Code names .github/.claude skills; every other agents-route row states .agents/skills/
 - 2026-10-20T01:15:16Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=re-read both clients' skills docs with DW-626's re-dispositions, fix the two why texts in pack-targets.ts, re-render the table
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=PACK_TARGETS_cursor/vscode_why_text_names_.agents/skills;client-config_README_table_re-rendered;pack-targets.test.ts;CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-630: packages/client-config/package.json description still reads 'read-only foundation; writes arrive in Epic 33 Story 33.1' though the package writes client configs and installs the skills pack
 - source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3500,17 +3508,20 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 41.7 review 2026-10-20: the spec's Never list excludes docs/client-config/*; the em-dash heading's anchor is #read-only-mode--point-...; grep -c 'skills install' docs/client-config/*.md is 0
 - 2026-10-20T02:12:59Z status=wontfix-accepted owner=41-7-skills-pack-docs-and-capstone by=cr note=reopen_if=a story edits docs/client-config/*.md (42.9 install docs) and the three anchors or the missing installer pointer are still there
 - 2026-10-20T02:20:25Z status=routed owner=42-9-install-docs-and-client-re-certification by=lead note=reopened before 1.0: 42.9 rewrites the install docs (AC 42.9.1); fix the three docs/client-config anchors (#read-only-mode--point-...) and add the skills install pointer to docs/client-config pages
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=docs/client-config_anchors_fixed_and_skills_install_page_linked;widened_link_checker_red_on_broken_anchor(mutation);CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-632: qa-41-7-doc-links checks only the 9 documents Story 41.7 changed; a repo-wide run of its checker finds broken relative links elsewhere (packages/shared/README.md:108 #server-manager-connections-iris_server_manager, three docs/known-bugs-* links, and the docs/client-config anchors of DW-631)
 - source: spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: 41.7 review 2026-10-20: the same checker over git ls-files '*.md' (130 files, _bmad and .claude excluded) reported 13 broken links before the review's 4 fixes
 - 2026-10-20T02:13:05Z status=wontfix-accepted owner=41-7-skills-pack-docs-and-capstone by=cr note=reopen_if=a user-facing README or docs/ page outside CHANGED_DOCS ships a broken relative link or anchor that a user reports or a doc story finds
 - 2026-10-20T02:20:25Z status=routed owner=42-9-install-docs-and-client-re-certification by=lead note=reopened before 1.0: run the qa-41-7-doc-links checker repo-wide (git ls-files *.md minus _bmad/.claude), fix the broken links it reports (packages/shared/README.md:108, the docs/known-bugs-* links), and widen the test's document set so it pins them
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=qa-41-7-doc-links_widened_to_every_reader_*.md;untracked/gitignored_targets_count_as_broken(review_M8);mutations_red;CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-633: The IRIS_ACCEPT_LANGUAGE docs (README.md:77, http-client.ts:183-193) describe a per-worker message-table mechanism the header does not affect, but %CSP.REST re-matches the message language from the header on every request; tool_support.md:21 also calls the Utils prefix-stripping English/Arabic-only and unmodified
 - source: _bmad-output/implementation-artifacts/spec-41-8-epic-41-burn-down.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 41.8 plan + implement 2026-10-20: irislib/%CSP/REST.cls:149-151 MatchLanguage per request (UseSession=0); live MatchLanguage(fr)=fr; tool_support.md:21 stale after StripErrorPrefix
 - 2026-10-20T03:43:34Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=rewrite the IRIS_ACCEPT_LANGUAGE paragraph and tool_support.md:21 against the per-request model and the 15-language StripErrorPrefix
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=IRIS_ACCEPT_LANGUAGE_docs_rewritten_to_per-request_model_and_15-language_StripErrorPrefix;CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-634: BaseTest:TestAllSixteenHandlersExtendBase pins 16 ExecuteMCPv2.REST handlers but 19 exist (MessageSearch, MessageBody, Coverage added later), so the OS test is red at HEAD
 - source: _bmad-output/implementation-artifacts/spec-41-8-epic-41-burn-down.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3535,6 +3546,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-20T07:58:39Z status=routed owner=43-3-human-confirmation-through-elicitation by=harvest note=43.3 enables elicitation, the only user of the bundled validator: check the published advisories against ajv 8.18.0 and fast-uri 3.1.0 and record the verdict (or supply a validator) before the dialog ships
 - 2026-10-21T01:44:35Z status=routed owner=42-1-pre-publish-package-fixes by=lead note=43.3 delivered the verdict (fast-uri 3.1.0 advisories unreachable: constant schema, bundled validator never invoked) and the story-43-3-validator-unreachable tripwire; residual: before 1.0, bump the exact SDK pin if a release pins fast-uri >=3.1.8 (typescript-sdk#2966/PR #2973); DW-637 bullet under 42.1
 - 2026-10-21T14:28:59Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=adjudication note=residual:@modelcontextprotocol/server_2.3.1_still_latest_on_2026-10-21_and_upstream_fast-uri_fix(PR_2973)_unmerged;re-check_right_before_the_1.0.0_publish;if_a_release_pins_fast-uri>=3.1.8_bump_the_exact_pin_and_re-run_the_epic-43_wire_goldens
+- 2026-11-21T12:41:19Z status=resolved-by:42-6-tarball-smoke-and-1-0-0-publish by=adjudication note=SDK_bumped_to_2.4.0(fast-uri_3.1.8);published_@iris-mcp/shared@1.0.0_depends_on_@modelcontextprotocol/server_2.4.0(npm_view,2026-11-21);frozen_goldens_byte-identical
 
 ### DW-638: The v2-client code in five iris-mcp-all local-copy gates and two launcher integration tests has never run against a server: each skips unless IRIS is reachable
 - source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: med | fix-risk: low | footprint: in-story
@@ -3642,6 +3654,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 43.3 plan
 - 2026-10-20T23:38:03Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=AC 42.9.3 aligns the PRD with what shipped
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=prd.md_tool_counts_corrected(110_tools+iris_server_profiles)_and_distribution_section_rewritten;counts_pinned_to_tools-list_snapshot(review_M5);CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-656: The HTTP client clears its timeout once response headers arrive, so a stalled body read is unbounded, and an abort by destroy() is reported as TIMEOUT
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3673,6 +3686,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-43-4-sdk-v2-docs-smokes-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 43.4 plan inventory 2026-10-20: story-40-4-doc-claims.test.ts:216-217, story-39-4/39-1/39-5 doc-claims
 - 2026-10-21T03:57:59Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=re-measure the payload table in the 42.9 README rewrite and move its doc-claims pins with it
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=README_payload_table_re-measured_2026-11-21;doc-claims_pins_moved(mutation_98907->98908_red);CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-662: The iris_message_resend description, its maxMessages schema text and the interop README still say executing needs both dryRun false and confirm true or the call is refused, and that an over-cap count is refused, though MessageResend.cls refuses only when dryRun is false and previews when dryRun is omitted
 - source: _bmad-output/implementation-artifacts/spec-43-4-sdk-v2-docs-smokes-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3686,16 +3700,19 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 42.1 plan probe 2026-10-20: npm exec resolves a local copy from the nearest ancestor (libnpmexec index.js:41-69); clients.ts:165 uses process.cwd()
 - 2026-10-21T13:14:16Z status=routed owner=42-7-vs-code-extension-publish by=harvest note=the extension publish story touches both engines; pass an explicit project dir or neutral cwd
+- 2026-11-21T07:54:04Z status=resolved-by:42-7-vs-code-extension-publish by=adjudication note=decision_98:clients_cwd=first_workspace_folder_else_home,governance_cwd=home;real_activate()_tests+mutations(QA);relative_governanceFile_resolved_against_home(review_M2);DW-702_alias_follow-up_routed_42-9(decision_100)
 
 ### DW-664: Seven READMEs say IRIS_USERNAME defaults to _SYSTEM, but config.ts treats it as required and the server exits with 'IRIS_USERNAME environment variable is required'
 - source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 42.1 plan probe: local install of the packed meta-package; README.md:73, packages/iris-*-mcp/README.md:31, packages/iris-mcp-all/README.md:69 vs packages/shared/src/config.ts:162-169
 - 2026-10-21T13:14:16Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=fix with the AC 42.9.1 README rewrite
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=IRIS_USERNAME_documented_as_required_in_every_README;doc-claims_mutation_red;CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-665: Each package keeps a tracked CHANGELOG.md that changeset version fills, but pnpm pack does not ship it (files lists only dist, plus skills-pack for client-config); published 1.0.0 tarballs would carry no changelog
 - source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 42.1 implement: pnpm pack lists in 42-1-pack-file-lists.md show only LICENSE, README.md, package.json added
 - 2026-10-21T13:14:16Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=harvest note=decide add CHANGELOG.md to files before the 1.0.0 publish
+- 2026-11-21T12:41:19Z status=resolved-by:42-6-tarball-smoke-and-1-0-0-publish by=adjudication note=files_lists_CHANGELOG.md;published_@iris-mcp/dev@1.0.0_tarball_holds_CHANGELOG.md_and_LICENSE(npm_pack_--dry-run,2026-11-21)
 
 ### DW-666: pnpm --filter @iris-mcp/shared lint warns about an unused eslint-disable directive for @typescript-eslint/no-dynamic-delete
 - source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3841,11 +3858,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 42.4 plan probe; ipm/module.xml is generated and stamped, the archive is CI-built
 - 2026-10-22T13:06:14Z status=routed owner=42-5-release-workflow by=harvest note=decision 72: 42.5's plan picks the registry route (a published-artifact repo or branch, a stamped root manifest, or another channel) and probes the current Open Exchange rules; 42.8 lists it
 - 2026-11-21T00:07:58Z status=resolved-by:42-5-release-workflow by=adjudication note=route_decided(decision_76):packaging_repository_jbrandtmse/iris-execute-mcp-v2-ipm_pushed_by_the_release(IPM_channel_implemented,disabled_until_42.8;rehearse_reports_its_readiness);the_listing+served-artifact_gate_are_42.8(DW-694)
+- 2026-11-21T17:38:52Z status=resolved-by:42-8-claude-code-plugin-and-registry-listings by=adjudication note=route superseded by decision #122 (supersedes #76): root module.xml of the main repository + stamped ipm/src tree + preload guard written by the version step (b8eaebf,20dcc72); CI ipm 44926140484 installs GitHub's served archive re-tarred the registry's way on both editions; dry run 44929493723 ipm=ready (manual step)
 
 ### DW-690: zpm uninstall iris-execute-mcp-v2 removes the classes but leaves the /api/executemcp/v2 web application and the %ALL package mapping, because the manifest configures them through Invoke methods with no Unconfigure counterpart
 - source: spec-42-4-ipm-package-revival.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 42.4 plan probe; nothing calls Setup.Uninstall() on the IPM path
 - 2026-10-22T13:06:14Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=two-way door for the docs story: state the manual cleanup in the IPM uninstall docs (or wire an Unconfigure Invoke to Setup.Uninstall if cheap)
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=IPM_uninstall_docs_state_the_manual_cleanup(web_app_and_%ALL_mapping);Unconfigure_invoke_declined(decision_119);CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-691: A failed IPM-ownership read (guard document 5xx or timeout) logs the unreadable-marker warning: it says the deployed marker could not be read, names SQL as the privilege to check, suggests deleting Setup, and drops the deployedVersion it had read
 - source: spec-42-4-ipm-package-revival.md | severity: low | fix-risk: low | footprint: in-story
@@ -3871,6 +3890,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-5-release-workflow.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 42.5 plan: the release pushes the stamped module to jbrandtmse/iris-execute-mcp-v2-ipm (decision 76); the registry serves a tar of that repository root
 - 2026-10-22T23:44:29Z status=routed owner=42-8-claude-code-plugin-and-registry-listings by=harvest note=42.8 adds a gate that tars the packaging repository root the way Open Exchange does and installs it offline, before the listing goes live
+- 2026-11-21T17:38:52Z status=resolved-by:42-8-claude-code-plugin-and-registry-listings by=adjudication note=gate redefined: CI ipm fetches GitHub's archive of the commit, requires it to equal git archive HEAD, asserts module members, re-tars it the registry's way and installs it on community+health (44926140484 green); red proof on that path: 44926263060 red at served (stray preload/ file in GitHub's archive), 44926275290 red at registry-community install (class missing, ERROR #5001); branches deleted
 
 ### DW-695: publish uploads whatever path the manifest names (channels[].packages[].tarball, vsix.file, ipm.tree) without checking it is one of the hash-verified files, so the AC 'uploads the exact rehearsed bytes' is not enforced
 - source: spec-42-5-release-workflow.md | severity: med | fix-risk: low | footprint: in-story
@@ -3883,6 +3903,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: ci.yml runs on every push, so ciGateDecision accepts a feature-branch run on the sha; the env tag rule binds the tag name, not the commit
 - 2026-11-20T21:58:32Z status=decision-pending owner=burndown by=cr note=product call: require the sha reachable from main (compare API) vs allow maintenance branches such as release/1.x
 - 2026-11-20T22:39:01Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=merge_gate note=OWNER_RULING_2026-11-20(via_Planner):'I_agree_we_should_require_tagged_commits_to_be_on_main';release_ci-gate_refuses_a_v*_tag_whose_commit_is_not_reachable_from_main(compare_main...sha_identical/behind_or_equivalent)_before_the_environment_approval_is_requested;no_maintenance-branch_allowance;pin+one_red_proof_on_the_real_path(Rule59:_a_v*_tag_on_an_unmerged_branch_commit_with_a_green_push_run_is_refused);land_before_the_v1.0.0_tag(decision_82)
+- 2026-11-21T12:41:19Z status=resolved-by:42-6-tarball-smoke-and-1-0-0-publish by=adjudication note=ci-gate_refuses_a_v*_tag_not_on_main(compare_main...sha);red_proof_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44858796584;v1.0.0_on_main_passed_ci-gate(https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44902952309)
 
 ### DW-697: an enabled store channel reports published when vsce/ovsx --skip-duplicate skipped an existing version (exit 0)
 - source: spec-42-5-release-workflow.md | severity: low | fix-risk: med | footprint: in-story
@@ -3908,3 +3929,93 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-6-tarball-smoke-and-1-0-0-publish.md | severity: low | fix-risk: med | footprint: in-epic
 - evidence: scripts/release.mjs runVerify walks NPM_PUBLISH_ORDER only; RELEASE_CHANNELS gains marketplace channels in 42.7 and ipm in 42.8. v1.0.0 is npm-only (decision #77), so nothing is misreported today.
 - 2026-11-21T02:57:09Z status=wontfix-accepted owner=42-6-tarball-smoke-and-1-0-0-publish by=cr note=reopen_if=42.7 or 42.8 enables a non-npm channel and release.mjs verify still reads npm alone
+
+### DW-702: MCP Clients view with no folder open: Cursor's project scope (.cursor/mcp.json in cwd=home) is the same file as its user scope (~/.cursor/mcp.json), so a project-scope write lands in the user's global Cursor config
+- source: spec-42-7-vs-code-extension-publish.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: extension.ts clients cwd falls back to os.homedir() (DW-663, decision #98); client-config adapters.ts:124-135 Cursor user=~/.cursor/mcp.json, project=.cursor/mcp.json; clients.ts:165 has no project-dir==home guard
+- 2026-11-21T06:43:42Z status=decision-pending owner=burndown by=cr note=product call: refuse/flag project scope when the project dir is home, or document the alias
+- 2026-11-21T06:50:16Z status=routed owner=42-9-install-docs-and-client-re-certification by=lead note=decision_100:refuse_project-scope_write_when_project_dir_resolves_to_home(clear_message:open_a_folder_or_use_user_scope);regression_test_on_Cursor_and_every_adapter_whose_project_and_user_paths_can_alias
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=home_guard_refuses_every_project-scope_write,diff,skills_install|uninstall_when_project_dir_resolves_to_home(realpath,case-fold);QA_50_process_rows_on_real_files;mutations_red;CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
+
+### DW-703: The first Open VSX publish with OVSX_PAT unset falls back to --trusted-publishing, which cannot work for a not-yet-existing extension, and fails after npm and the Marketplace already published
+- source: spec-42-7-vs-code-extension-publish.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: runChannel (release.mjs) learns OVSX_PAT is empty only at the open-vsx channel; the rehearse job holds no secrets so it cannot pre-check; recovery is set OVSX_PAT then Re-run failed jobs (npm and Marketplace read already published)
+- 2026-11-21T06:43:42Z status=wontfix-accepted owner=42-7-vs-code-extension-publish by=cr note=reopen_if=the first store release's open-vsx row fails for a missing token, or O2 is skipped
+
+### DW-704: A store channel that is not ready in rehearse (Open VSX namespace missing before owner step O1, or a store outage) makes rehearse exit 1, so publish never runs and npm is blocked too
+- source: spec-42-7-vs-code-extension-publish.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: spec I/O row 'Open VSX namespace absent': rehearse not ready, dry run exit 1; release.yml publish needs [ci-gate, prepare, rehearse]; no per-run store opt-out
+- 2026-11-21T06:43:42Z status=by-design owner=42-7-vs-code-extension-publish by=cr note=spec-bound (matrix row); O1 must precede any post-merge tag incl. a 1.0.x fix; reopen via spec amendment
+- 2026-11-21T13:37:01Z by=cr note=revised by decision #121 (commit 27e3be5, re-review patch): an absent Open VSX namespace (its real 404 JSON answer only) is now skipped, not a rehearsal failure; IPM not ready still blocks rehearse until the #122 amendment
+
+### DW-705: The Marketplace channel reads ready before the publisher exists: the rehearse check only asks whether the version is already published, so a missing publisher (owner step O1 skipped) fails only at upload, after npm has published
+- source: spec-42-7-vs-code-extension-publish.md (lead Phase A, dry run https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44878912402) | severity: low | fix-risk: med | footprint: in-story
+- evidence: rehearse: vscode-marketplace: ready (would publish iris-mcp-launcher@1.0.0) while open-vsx reads not ready (namespace absent); the public Marketplace has no unauthenticated publisher lookup; recovery: create the publisher, then Re-run failed jobs (npm reads already published)
+- 2026-11-21T07:54:04Z status=wontfix-accepted owner=42-7-vs-code-extension-publish by=lead note=reopen_if=the_first_store_release's_vscode-marketplace_row_fails_for_a_missing_publisher;O1_precedes_any_post-merge_tag(DW-704)
+
+### DW-706: Claude Code plugin plus the installer's server route configures the five servers twice; no doc or check tells the user to remove the old entries
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: cmdSkills is the only caller of detectClaudeCodePlugin; install --client claude-code and doctor never consult it, and README:225 says only 'instead', so a user with existing iris-*-mcp entries who adds the plugin gets every tool twice with two credential sets
+- 2026-11-21T11:24:10Z status=routed owner=42-9-install-docs-and-client-re-certification by=cr note=42.9 install docs: tell users to remove installer or hand-written entries when switching to the plugin; doctor may warn
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=doctor_claude-code-plugin-duplicates(exit_1);CLAUDE_CONFIG_DIR-aware_user_scope(review_M1,live_cc_2.1.330);install_docs_remove-old-entries_lead;mutations_red;CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
+
+### DW-707: Marketplace on main pins ref v1.0.0, whose pack has no plugin.json: an install before v1.1.0 fails (no tag) or silently yields a skills-only plugin
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: Probe 2026-11-21, Claude Code 2.1.330, scratch CLAUDE_CONFIG_DIR: the 55ae0eb pack via a directory marketplace installs OK, Version unknown, no servers, no userConfig prompt; enabledPlugins written
+- 2026-11-21T11:24:24Z status=by-design owner=42-8-claude-code-plugin-and-registry-listings by=cr note=decision #102 consequence; README says from 1.1.0; lead keeps the merge-to-version-commit window short
+
+### DW-708: Release-core copies listing constants (SERVER_JSON_DIRS, MARKETPLACE_RELATIVE, PLUGIN_ENTRY_NAME, PLUGIN_MANIFEST_RELATIVE) from listings.mjs and skills-pack.mjs
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: release-core stays pure and release.mjs imports only it (42.5 constraint); story-42-8 tests pin each pair equal, so no silent drift
+- 2026-11-21T11:24:24Z status=wontfix-accepted owner=42-8-claude-code-plugin-and-registry-listings by=cr note=reopen_if=an equality pin between release-core and listings/skills-pack constants is removed or goes red
+
+### DW-709: Plugin sources restate the six connection variables by hand (.mcp.json env x5, plugin.json userConfig) beside CONNECTION_VARIABLES
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: Spec copies .mcp.json byte for byte from skills-pack-src; story-42-8-plugin.test.ts pins names and defaults of all three equal; only descriptions differ (cosmetic)
+- 2026-11-21T11:24:24Z status=wontfix-accepted owner=42-8-claude-code-plugin-and-registry-listings by=cr note=reopen_if=a connection variable is added, renamed or its default changes
+
+### DW-710: DW-694 offline scripted run does not exercise the in-container tar, the registry mount or the -C path; only CI ipm job does
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: Fake docker cp serves a host-built archive; mount name and REGISTRY_ROOT_MOUNT are tied only by convention (same shape as the stage/install legs); a mismatch fails loudly in CI
+- 2026-11-21T11:24:24Z status=wontfix-accepted owner=42-8-claude-code-plugin-and-registry-listings by=cr note=reopen_if=lead A1 is not recorded green with the registry-shaped leg, or A1b is not red at that leg
+
+### DW-711: The registry-shaped archive check does not observe pax headers, the stated reason the tar runs in the container
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: readTgz folds x/g headers silently; but the served artifact is tarred by zpm-registry, not by us, and load of the archive on both editions is the behavioral oracle
+- 2026-11-21T11:24:24Z status=wontfix-theoretical owner=42-8-claude-code-plugin-and-registry-listings by=cr note=real if the CI image's IPM predates 0.10.11 and load stops being the oracle
+
+### DW-712: A thrown error in the registry dry step would fail a rehearsal, contrary to decision #108's never-blocks
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: runChannel catch maps any throw to failed; but runCaptured never rejects and lookup/fetch paths catch, so only mkdtemp/write failures (disk) reach it
+- 2026-11-21T11:24:24Z status=wontfix-theoretical owner=42-8-claude-code-plugin-and-registry-listings by=cr note=real if a registry dry-step dependency can reject or throw on a normal path
+
+### DW-713: npm visibility poll has a 5-minute deadline per pending server, so the total wait could reach 25 minutes
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: The first package that times out returns failed at once; the five packages were published together earlier in the same run, so sequential near-deadline visibility is not a realistic path
+- 2026-11-21T11:24:24Z status=wontfix-theoretical owner=42-8-claude-code-plugin-and-registry-listings by=cr note=real if a registry run is seen polling npm for more than 5 minutes in total
+
+### DW-714: README Releasing and the #121 commit say a missing Open VSX namespace lets an npm-only release go out, but IPM (excluded from #121, enabled without condition) still fails the rehearsal before O-IPM1, so the release is still blocked until IPM is set up or #122 lands
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: README.md Releasing #121 paragraph ('an npm-only release can go out'); scripts/release.mjs IPM dry step unchanged; release.yml publish needs rehearse
+- 2026-11-21T13:37:01Z status=wontfix-accepted owner=42-8-claude-code-plugin-and-registry-listings by=cr note=reopen_if=after the #122 amendment lands, IPM can still fail a rehearsal for a missing owner setup while README still says an npm-only release can go out; README is 42.9's file now and #124(6) has the #122 pass edit Releasing
+- 2026-11-21T17:38:52Z status=resolved-by:42-8-claude-code-plugin-and-registry-listings by=adjudication note=#122 makes IPM a manual step that never fails a release; dry run 44929493723 rehearse exit 0 with open-vsx skipped (not set up) and ipm ready (manual step), so the README npm-only claim is now true
+
+### DW-715: README says to run the release again for the same tag after an owner step, but not how: a green run that skipped a channel offers only GitHub's Re-run all jobs, which repeats ci-gate, prepare (a fresh vsix build) and the release approval
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: README.md Releasing #121 paragraph; release.yml jobs ci-gate/prepare/rehearse/publish; release-not-set-up.test.ts rerun row reuses one artifacts directory
+- 2026-11-21T13:37:01Z status=wontfix-accepted owner=42-8-claude-code-plugin-and-registry-listings by=cr note=reopen_if=the owner's rerun after O1 cannot be found or started, or Open VSX then serves a vsix whose contents differ from the Marketplace's at the same version; the #122 README pass may add the Re-run all jobs wording
+
+### DW-716: Every @iris-mcp/* package carries a public, non-deprecated 0.0.0-stage version (npm staged-publishing placeholder, 2026-11-21T12:33Z) that the 42.6 spec says must not exist
+- source: spec-42-9-install-docs-and-client-re-certification.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: npm view @iris-mcp/dev time: 0.0.0-stage 2026-11-21T12:33:19Z, description 'Temporary package placeholder for staged publishing', not deprecated; dist-tag latest is 1.0.0; spec-42-6:70 says no 0.0.0-stage placeholder
+- 2026-11-21T13:55:48Z status=decision-pending owner=burndown by=cr note=human=owner decides npm deprecate of 0.0.0-stage (registry write) or a CHANGELOG note
+
+### DW-717: CLAUDE.md and project rule #18 do not name the root module.xml, ipm/src/** and preload/** as generated do-not-edit output written by the release version step
+- source: spec-42-8-amendment-122-ipm-from-main.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: rule #18 lists bootstrap-classes.ts and *.generated.* only; gen-bootstrap.mjs --ipm writes module.xml, ipm/src/cls/**, preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls at the version step (b8eaebf)
+- 2026-11-21T16:43:12Z status=decision-pending owner=burndown by=cr note=retro: add the stamped IPM tree to rule #18 and CLAUDE.md (lead may not edit rules mid-epic)
+
+### DW-718: ci-ipm-archive.test.ts pins class counts derived from the generated embed as literals, which move whenever a bootstrapped class is added
+- source: spec-42-8-amendment-122-ipm-from-main.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: packages/iris-mcp-all/src/__tests__/ci-ipm-archive.test.ts lines 181,244,306,898,1090,1133,1186,1199,1359-1361 (20dcc72)
+- 2026-11-21T16:43:12Z status=wontfix-accepted owner=42-8-claude-code-plugin-and-registry-listings by=cr note=reopen_if=a version-step commit goes red on a class-count literal
