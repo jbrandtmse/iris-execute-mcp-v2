@@ -140,7 +140,7 @@ describe("every reader document: every relative link and anchor resolves", () =>
   const docs = readerDocs();
 
   it("the doc set holds the documents this story widened to", () => {
-    expect(docs.length).toBeGreaterThanOrEqual(83);
+    expect(docs.length, "82 after the 1.1.0 version step consumed the two story changesets").toBeGreaterThanOrEqual(82);
     for (const rel of ["README.md", "tool_support.md", "docs/client-config/claude-code.md", "packages/shared/README.md", "docs/known-bugs-2026-04-20.md"]) {
       expect(docs, rel).toContain(rel);
     }

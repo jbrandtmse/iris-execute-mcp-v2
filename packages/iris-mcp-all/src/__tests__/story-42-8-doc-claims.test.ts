@@ -188,16 +188,25 @@ describe("the plugin in the documents (AC 42.8.2)", () => {
 });
 
 describe("the CHANGELOG and the changeset (Rule #43)", () => {
-  it("the CHANGELOG has this story's section directly below Story 42.9's and above 42.7's, and the amendment's (decision #122) above both", () => {
+  it("the CHANGELOG has this story's section directly below Story 42.9's and above 42.7's, and the amendment's (decision #122) above both, under the release's [1.1.0] section", () => {
     const headings = CHANGELOG.split("\n").filter((line) => line.startsWith("## "));
-    expect(headings[0]).toBe("## [Unreleased] \u2014 Story 42.8 amendment (decision #122): IPM Publishes From the Main Repository");
-    expect(headings[1]).toBe("## [Unreleased] \u2014 Story 42.9: Install Docs and Client Re-Certification");
-    expect(headings[2]).toBe("## [Unreleased] \u2014 Story 42.8: Claude Code Plugin and Registry Listings");
-    expect(headings[3]).toBe("## [Unreleased] \u2014 Story 42.7: VS Code Extension Publish");
+    expect(headings[0]).toMatch(/^## \[1\.1\.0\] \u2014 \d{4}-\d{2}-\d{2}$/);
+    expect(headings[1]).toBe("## [1.1.0 detail] \u2014 Story 42.8 amendment (decision #122): IPM Publishes From the Main Repository");
+    expect(headings[2]).toBe("## [1.1.0 detail] \u2014 Story 42.9: Install Docs and Client Re-Certification");
+    expect(headings[3]).toBe("## [1.1.0 detail] \u2014 Story 42.8: Claude Code Plugin and Registry Listings");
+    expect(headings[4]).toBe("## [1.1.0 detail] \u2014 Story 42.7: VS Code Extension Publish");
+  });
+
+  it("the release's [1.1.0] section (the version step, decision #117) names the BOOTSTRAP_VERSION move and the unchanged baseline", () => {
+    const section = CHANGELOG.slice(CHANGELOG.indexOf("## [1.1.0] \u2014"), CHANGELOG.indexOf("## [1.1.0 detail]"));
+    expect(section).toContain("`BOOTSTRAP_VERSION` moves from `1.0.0+2.244fe8623c76` to `1.1.0+2.244fe8623c76`");
+    expect(section).toContain("`1e62c5ad5bf7` (141 keys)");
+    expect(section).toContain('zpm "install iris-execute-mcp-v2"');
+    expect(section).toContain("Use it only where the servers cannot install those classes themselves");
   });
 
   it("the amendment's CHANGELOG section says what moved and what did not: the tree, the manual step, verify, the removals, and that BOOTSTRAP_VERSION stays (decision #122)", () => {
-    const section = CHANGELOG.slice(CHANGELOG.indexOf("## [Unreleased] \u2014 Story 42.8 amendment"), CHANGELOG.indexOf("## [Unreleased] \u2014 Story 42.9"));
+    const section = CHANGELOG.slice(CHANGELOG.indexOf("## [1.1.0 detail] \u2014 Story 42.8 amendment"), CHANGELOG.indexOf("## [1.1.0 detail] \u2014 Story 42.9"));
     for (const claim of [
       "`BOOTSTRAP_VERSION` does not move (`1.0.0+2.244fe8623c76`)",
       "`pnpm gen:ipm`",
@@ -218,7 +227,7 @@ describe("the CHANGELOG and the changeset (Rule #43)", () => {
   });
 
   it("the CHANGELOG section states that nothing moves: the frozen baseline hash and count, and BOOTSTRAP_VERSION", () => {
-    const section = CHANGELOG.slice(CHANGELOG.indexOf("## [Unreleased] \u2014 Story 42.8"), CHANGELOG.indexOf("## [Unreleased] \u2014 Story 42.7"));
+    const section = CHANGELOG.slice(CHANGELOG.indexOf("## [1.1.0 detail] \u2014 Story 42.8"), CHANGELOG.indexOf("## [1.1.0 detail] \u2014 Story 42.7"));
     expect(section).toContain("`1e62c5ad5bf7` (141 keys)");
     expect(section).toContain("`BOOTSTRAP_VERSION` does not move");
     expect(section).toContain("`1.1.0`");

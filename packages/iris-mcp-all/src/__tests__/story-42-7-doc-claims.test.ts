@@ -103,12 +103,12 @@ describe("Story 42.7: the root README Releasing subsection", () => {
 });
 
 describe("Story 42.7: the root CHANGELOG section", () => {
-  const TITLE = /^## \[Unreleased\] \u2014 Story 42\.7: VS Code Extension Publish$/;
+  const TITLE = /^## \[1\.1\.0 detail\] \u2014 Story 42\.7: VS Code Extension Publish$/;
   const index = titles.findIndex((title) => TITLE.test(title));
   const section = squash(sections[index] ?? "");
 
   it("is found by its title, and is above Story 42.6's section", () => {
-    expect(index, "a section titled `## [Unreleased] \u2014 Story 42.7: VS Code Extension Publish`").toBeGreaterThanOrEqual(0);
+    expect(index, "a section titled `## [1.1.0 detail] \u2014 Story 42.7: VS Code Extension Publish`").toBeGreaterThanOrEqual(0);
     expect(titles.filter((title) => TITLE.test(title))).toHaveLength(1);
     const previous = titles.findIndex((title) => /Story 42\.6: Tarball Smoke and 1\.0\.0 Publish/.test(title));
     expect(previous).toBeGreaterThan(index);

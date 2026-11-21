@@ -1,5 +1,24 @@
 # @iris-mcp/client-config
 
+## 1.1.0
+
+### Minor Changes
+
+- 83c3f4a: feat: a Claude Code plugin, an installer that knows it, and the MCP Registry and IPM listings (Story 42.8)
+  - The skills pack directory is now a Claude Code plugin root. `pnpm gen:pack` writes `.claude-plugin/plugin.json` (plugin `iris-mcp`, at the shared version, with six connection options: host, port, namespace, HTTPS, user name and password) and `.mcp.json` (the five servers as `dev`, `admin`, `data`, `interop` and `ops`, each `npx -y @iris-mcp/<name>@1`) into `skills-pack/`, from `skills-pack-src/plugin/`. The repository's `.claude-plugin/marketplace.json` lists the plugin, pinned to the release tag. Install with `/plugin marketplace add jbrandtmse/iris-execute-mcp-v2` and `/plugin install iris-mcp@iris-mcp` (from release 1.1.0).
+  - `iris-mcp-clients skills install --client claude-code` reads `enabledPlugins["iris-mcp@iris-mcp"]` from the user (`CLAUDE_CONFIG_DIR` aware), project and local Claude Code settings, the highest file that has the key deciding. With the plugin enabled it installs only the always-on rule, because the plugin brings the skills, and it removes skill files it installed earlier under the usual manifest rules. The run prints the file that decided, or the three it checked, and a `[WARN]` line for a settings file that is not valid JSON. New exports: `CLAUDE_CODE_PLUGIN_ID`, `detectClaudeCodePlugin`, `describePluginDetection`.
+
+  No tool, action, governance key, annotation, description, REST route or environment variable is added or changed, and `BOOTSTRAP_VERSION` does not move.
+
+- 1aa8b1f: feat: a home-directory guard, a plugin-duplicates check and current client data (Story 42.9)
+  - A project-scope write (`apply`, `diff`, `enable`, `disable`, `remove` and `restore` with `--scope project`, and `skills install` and `skills uninstall`) is refused when the project directory is your home directory. It exits 1, writes nothing and puts the reason, which names the project and user paths, in the `--json` envelope's `error`. Both paths go through the real path, and are compared case-insensitively on macOS and Windows. Reads are unchanged.
+  - `iris-mcp-clients doctor` reports each `iris-*-mcp` entry in Claude Code's user or project scope while the `iris-mcp@iris-mcp` plugin is enabled (`claude-code-plugin-duplicates`), with the `remove` command that clears it.
+  - With `CLAUDE_CONFIG_DIR` set, the Claude Code user file is `$CLAUDE_CONFIG_DIR/.claude.json`, the file Claude Code then reads.
+  - Pi and JetBrains Junie are supported clients. Goose's Windows path is `%APPDATA%\Block\goose\config\config.yaml`. Windsurf is Devin Desktop (formerly Windsurf), Kimi CLI is archived and Roo Code is discontinued; their adapters stay. The skills installer gains an `antigravity` target on the `gemini` route. The adapter data is `2026-11-21.1`.
+  - The install docs describe the published install: one path per client, every `npx` command pinned to `@1`, and the clone-and-build steps in Contributing.
+
+  No tool, action, governance key, annotation, description, REST route or environment variable is added or changed, and `BOOTSTRAP_VERSION` does not move.
+
 ## 1.0.0
 
 ### Major Changes

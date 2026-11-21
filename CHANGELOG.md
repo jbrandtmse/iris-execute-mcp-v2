@@ -2,7 +2,26 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
-## [Unreleased] — Story 42.8 amendment (decision #122): IPM Publishes From the Main Repository
+## [1.1.0] — 2026-11-21
+
+The suite reaches more installers: a Claude Code plugin, the VS Code extension on the stores, the five servers on the MCP Registry, and the IRIS-side classes through IPM. All eight `@iris-mcp/*` packages are at `1.1.0`, one shared version, and `npx -y @iris-mcp/<server>@1` picks it up with no change. The "1.1.0 detail" sections below are the per-story record of everything in this release. No tool, prompt, governance or wire change is made: no tool or tool count changes, the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and the frozen goldens and the tools-list snapshot are byte-unchanged. `BOOTSTRAP_VERSION` moves from `1.0.0+2.244fe8623c76` to `1.1.0+2.244fe8623c76`: the marker follows the version, and the class content and the sequence are unchanged.
+
+### Added
+
+- **A Claude Code plugin.** `/plugin marketplace add jbrandtmse/iris-execute-mcp-v2`, then `/plugin install iris-mcp@iris-mcp`. It brings the five servers (each `npx -y @iris-mcp/<name>@1`) and the skills, and asks once for the IRIS host, web port, namespace, HTTPS, user name and password (the password goes to the system keychain). `iris-mcp-clients skills install --client claude-code` sees the plugin and installs only the always-on rule, and `iris-mcp-clients doctor` reports any `iris-*-mcp` entry that would make every tool appear twice beside it.
+- **The VS Code extension on the stores.** The IRIS MCP launcher is published under the publisher `iris-mcp` to the VS Code Marketplace, and to Open VSX once its namespace is set up (a store that is not set up is skipped by the release, never a failure).
+- **The MCP Registry.** The five servers are listed on the MCP Registry (in preview) at `1.1.0`.
+- **IPM.** `zpm "install iris-execute-mcp-v2"` installs the IRIS-side classes from the IPM registry, through the existing Open Exchange listing `IRIS-MCP-Server-Suite-2`. Use it only where the servers cannot install those classes themselves: the first server to connect deploys and upgrades them automatically, and once IPM owns them, upgrades go through `zpm` too.
+- **Two more clients.** Pi and JetBrains Junie are supported by `iris-mcp-clients apply`, `status`, `doctor` and the other commands, and the skills installer gains an `antigravity` target.
+
+### Changed
+
+- **A project-scope write from your home directory is refused.** `apply`, `diff`, `enable`, `disable`, `remove` and `restore` with `--scope project`, and `skills install` and `skills uninstall`, exit 1 and write nothing when the project directory is your home directory, where the project file would be the user file or would be read for every project.
+- **Current client data (`2026-11-21.1`).** With `CLAUDE_CONFIG_DIR` set, Claude Code's user file is `$CLAUDE_CONFIG_DIR/.claude.json`; Goose's Windows path is `%APPDATA%\Block\goose\config\config.yaml`; Windsurf is "Devin Desktop (formerly Windsurf)", Kimi CLI is archived and Roo Code is discontinued, each keeping its adapter so that existing entries can be removed.
+- **The install docs describe the published install.** One path per client, every `npx` command pinned to `@1`, and the clone-and-build steps in the README's Contributing section.
+- **The release.** npm is published with trusted publishing (OIDC, no token) and provenance. A store that is not set up is skipped and listed, never a failure; IPM is the owner's manual step after the tag and never fails or blocks a run; and the Marketplace's rehearsal `ready` says that the publisher is not checked.
+
+## [1.1.0 detail] — Story 42.8 amendment (decision #122): IPM Publishes From the Main Repository
 
 IPM publishes from this repository's root, through the existing Open Exchange listing `IRIS-MCP-Server-Suite-2`, and the separate packaging repository is gone. This amends the IPM entries of the Story 42.8 section below, which describe the superseded design and stay as history. No ObjectScript class changes, so `BOOTSTRAP_VERSION` does not move (`1.0.0+2.244fe8623c76`), and the governance baseline, the goldens and the tools-list snapshot are untouched.
 
@@ -23,7 +42,7 @@ IPM publishes from this repository's root, through the existing Open Exchange li
 
 - **The packaging repository, its deploy key and the pinned host keys.** The release no longer pushes anything for IPM, and `IPM_DIST_DEPLOY_KEY`, `known_hosts`, the SSH options and the README of the packaging repository are gone from the workflow, the declaration and the script. If the secret was added to the `release` environment, delete it. Owner step O-IPM1 is cancelled; the owner's step is to press Release on the Open Exchange listing after each tag (see the README's Releasing section). Never create a `master` branch in this repository: the registry reads `master/module.xml`, which GitHub redirects to `main`.
 
-## [Unreleased] — Story 42.9: Install Docs and Client Re-Certification
+## [1.1.0 detail] — Story 42.9: Install Docs and Client Re-Certification
 
 The install docs describe the published suite, the client adapter data is current as of 2026-11-21, and two silent problems of the installer now have a guard and a check. The first release with the plugin, the extension, the IPM channel and these changes is `1.1.0` (the changeset is `minor` for `@iris-mcp/client-config`, and the fixed group moves every package). No tool, prompt, governance or wire change is made: no tool or tool count changes, the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), the frozen goldens and the tools-list snapshot are byte-unchanged, and `BOOTSTRAP_VERSION` does not move.
 
@@ -41,7 +60,7 @@ The install docs describe the published suite, the client adapter data is curren
 - **Documentation fixes.** `IRIS_USERNAME` is documented as required in every table (it has no default). The `IRIS_ACCEPT_LANGUAGE` text describes IRIS's per-request language choice. The README documents the manual cleanup after `zpm "uninstall iris-execute-mcp-v2"` (the web application and the `%ALL` mapping stay). The payload table is re-measured. Broken anchors and links in the docs are fixed, and a test now checks every relative link of every Markdown file.
 - **The README's skills-pack limit about the home directory is gone.** `--project ~` and a run from `~` are refused instead of being planned.
 
-## [Unreleased] — Story 42.8: Claude Code Plugin and Registry Listings
+## [1.1.0 detail] — Story 42.8: Claude Code Plugin and Registry Listings
 
 The suite gets a Claude Code plugin, an MCP Registry listing and a live IPM channel. The first release with them is `1.1.0` (the changeset is `minor` for `@iris-mcp/client-config`, and the fixed group moves every package). No tool, prompt, governance or wire change is made: the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), the frozen goldens and the tools-list snapshot are byte-unchanged, and `BOOTSTRAP_VERSION` does not move.
 
@@ -59,7 +78,7 @@ The suite gets a Claude Code plugin, an MCP Registry listing and a live IPM chan
 - **`pnpm run version` stamps the listings.** After the bootstrap it runs `gen-pack` and `gen-listings`, so `plugin.json`, the marketplace `ref` and the five `server.json` files follow the shared version, and `prepare` refuses any of them off the release version.
 - **`release verify`** also checks that the five servers are listed on the MCP Registry at the version and that the packaging repository holds the tag.
 
-## [Unreleased] — Story 42.7: VS Code Extension Publish
+## [1.1.0 detail] — Story 42.7: VS Code Extension Publish
 
 The VS Code extension can be published. The release workflow now has a VS Code Marketplace channel and an Open VSX channel, both enabled, and
 the extension joins the shared version. No `@iris-mcp/*` package changes, so this story adds no changeset, and no tool, prompt, governance or

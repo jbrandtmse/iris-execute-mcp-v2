@@ -14,7 +14,7 @@
         "source": "git-subdir",
         "url": "https://github.com/jbrandtmse/iris-execute-mcp-v2.git",
         "path": "packages/client-config/skills-pack",
-        "ref": "v1.0.0"
+        "ref": "v1.1.0"
       }
     }
   ]

@@ -233,7 +233,7 @@ describe("QA 42.9 (Rule #59): what the link checker cannot see, no reader docume
   });
 
   it("every reader document that the checker reads is in the doc set the claims test reads (one source: doc-set.ts)", () => {
-    expect(docs.length).toBeGreaterThanOrEqual(83);
+    expect(docs.length, "82 after the 1.1.0 version step consumed the two story changesets").toBeGreaterThanOrEqual(82);
     expect(new Set(docs).size).toBe(docs.length);
     expect(docs.every((rel) => rel.endsWith(".md"))).toBe(true);
   });

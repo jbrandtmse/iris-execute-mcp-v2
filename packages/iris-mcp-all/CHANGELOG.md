@@ -1,5 +1,15 @@
 # @iris-mcp/all
 
+## 1.1.0
+
+### Patch Changes
+
+- @iris-mcp/admin@1.1.0
+- @iris-mcp/data@1.1.0
+- @iris-mcp/dev@1.1.0
+- @iris-mcp/interop@1.1.0
+- @iris-mcp/ops@1.1.0
+
 ## 1.0.0
 
 ### Major Changes

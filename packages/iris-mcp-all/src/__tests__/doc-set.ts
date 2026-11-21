@@ -3,7 +3,7 @@
  * the planning, agent and IRIS-source folders. Shared by `story-42-9-doc-claims.test.ts` and `qa-41-7-doc-links.test.ts`, so the
  * two scans read the same set.
  *
- * Exhaustive as of 2026-11-21: `git ls-files '*.md'` held 83 files outside the excluded roots.
+ * Exhaustive as of 2026-11-21: `git ls-files '*.md'` held 83 files outside the excluded roots (82 after the 1.1.0 version step consumed the story changesets, which are transient).
  */
 
 import { spawnSync } from "node:child_process";

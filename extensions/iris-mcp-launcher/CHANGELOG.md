@@ -2,7 +2,7 @@
 
 All notable changes to the IRIS MCP Launcher VS Code extension are documented in this file.
 
-## [Unreleased]
+## [1.1.0] — 2026-11-21
 
 ### Changed
 

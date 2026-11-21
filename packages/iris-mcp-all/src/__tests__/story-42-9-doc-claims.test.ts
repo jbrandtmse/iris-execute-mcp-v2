@@ -101,7 +101,7 @@ const docs = readerDocs();
 
 describe("Story 42.9: the doc set and the caveat guard", () => {
   it("the doc set is the Markdown files a reader can open, and holds the documents this story changed", () => {
-    expect(docs.length, "the inventory of 2026-11-21 held 83 files").toBeGreaterThanOrEqual(83);
+    expect(docs.length, "the inventory of 2026-11-21 held 83 files, 82 once the 1.1.0 version step consumed the two story changesets").toBeGreaterThanOrEqual(82);
     for (const rel of ["README.md", "docs/client-config/README.md", "packages/client-config/README.md", "extensions/iris-mcp-launcher/README.md", "CHANGELOG.md"]) {
       expect(docs, rel).toContain(rel);
     }

@@ -31,7 +31,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// deployment, an equal semver and sequence with a different hash, the
 /// <code>"dev"</code> placeholder and any unparseable value are left in place
 /// with a warning.</p>
-Parameter BOOTSTRAPVERSION = "1.0.0+2.244fe8623c76";
+Parameter BOOTSTRAPVERSION = "1.1.0+2.244fe8623c76";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
