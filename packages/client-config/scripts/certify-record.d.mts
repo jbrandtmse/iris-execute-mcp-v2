@@ -4,6 +4,10 @@ export declare function mergeCertificationRecord(
   passOk: boolean,
 ): { action: "keep" } | { action: "write"; merged: Record<string, unknown> };
 
+export declare function humanOnlyProblem(record: Record<string, unknown> | undefined): string | null;
+
+export declare function formatAgainst(spec: string, lookup: { status: number | null; stdout: string }): string;
+
 export declare function passCreatedPaths(pre: string[], post: string[]): string[];
 
 export declare function decideRestoreRung(args: {

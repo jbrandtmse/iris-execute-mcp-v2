@@ -26,7 +26,7 @@ import { REPO_ROOT } from "../../../../scripts/lib/live-gate-scan.mjs";
 import { NPM_PUBLISH_ORDER, ROOT_CHECK_SCRIPT, compareVersions, mainReachability, versionProblems } from "../../../../scripts/lib/release-core.mjs";
 import { ciGate, createCleanups, defaultDeps, embeddedVersionProblems, readReleaseFacts, releaseCheckScripts, verify } from "../../../../scripts/release.mjs";
 import { installStandIns } from "./stand-in-clis";
-import { SHA, ciRun, compareAnswer, fakeFetch, makeRepo, newFakeGithub, startGithubServer, type FakeAnswer, type FakeGithub } from "./release-script-fixtures";
+import { SHA, ciRun, compareAnswer, fakeFetch, fakeStoresFetch, makeRepo, mcpRegistryHit, newFakeGithub, newFakeStores, startGithubServer, type FakeAnswer, type FakeGithub } from "./release-script-fixtures";
 
 const GITHUB_TOKEN = "ghs_SECRETGITHUBTOKEN0987654321";
 const TAG_ENV = { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/tags/v1.0.0", GITHUB_SHA: SHA, GITHUB_TOKEN, GITHUB_REPOSITORY: "o/r" };
@@ -291,8 +291,11 @@ describe("verify (AC 42.6.3): the shapes the registry and the machine can answer
     const root = scratch("qa-42-6-verify-");
     const observed = path.join(root, "tmp");
     mkdirSync(observed);
-    const standIns = installStandIns(path.join(root, "stand-ins"), ["npm"]);
+    const standIns = installStandIns(path.join(root, "stand-ins"), ["npm", "git"]);
     standIns.script("npm", [{ match: ["view"], stdout: `${PUBLISHED}\n` }]);
+    // The MCP Registry lists every server at the version (Story 42.8), with no network; the IPM registry (its default answer is a 404) lists nothing yet, so IPM is pending and git is never asked.
+    const stores = newFakeStores();
+    stores.mcpRegistry = (name, version) => mcpRegistryHit(name, version);
     const lines: string[] = [];
     const opened: Opened[] = [];
     const wireModule = {
@@ -316,7 +319,7 @@ describe("verify (AC 42.6.3): the shapes the registry and the machine can answer
       opened,
       text: () => lines.join("\n"),
       run: (overrides: Record<string, string> = {}, deps: Record<string, unknown> = {}) =>
-        withTmpdir(observed, () => verify({ version: "1.0.0", env: env(overrides) }, { ...defaultDeps(), log: (line: string) => lines.push(line), loadWire: async () => wireModule, cleanups: createCleanups(), ...deps })),
+        withTmpdir(observed, () => verify({ version: "1.0.0", env: env(overrides) }, { ...defaultDeps(), fetch: fakeStoresFetch(stores), log: (line: string) => lines.push(line), loadWire: async () => wireModule, cleanups: createCleanups(), ...deps })),
     };
   }
 
@@ -332,7 +335,8 @@ describe("verify (AC 42.6.3): the shapes the registry and the machine can answer
     expect(world.text().match(/@iris-mcp\/interop@1\.0\.0: (?!ok)/g)).toHaveLength(1);
     expect(world.text().match(/: ok, published with a provenance attestation/g)).toHaveLength(7);
     expect(world.text()).toContain("npx -y @iris-mcp/dev@1: ok");
-    expect(world.standIns.allCalls().every((call) => call.argv[0] === "view"), "a failing check still publishes, deprecates and logs in nothing").toBe(true);
+    expect(world.standIns.calls("npm").every((call) => call.argv[0] === "view"), "a failing check still publishes, deprecates and logs in nothing").toBe(true);
+    expect(world.standIns.calls("git"), "an unlisted IPM version is pending: git is never asked, so nothing is pushed, tagged or committed").toEqual([]);
     expect(readdirSync(world.observed)).toEqual([]);
   });
 
@@ -377,7 +381,6 @@ describe("verify (AC 42.6.3): the shapes the registry and the machine can answer
     const secrets: Record<string, string> = {
       NPM_TOKEN: "SECRET-npm-token",
       GITHUB_TOKEN: "SECRET-github-token",
-      IPM_DIST_DEPLOY_KEY: "SECRET-deploy-key",
       ACTIONS_ID_TOKEN_REQUEST_TOKEN: "SECRET-oidc-token",
       ACTIONS_ID_TOKEN_REQUEST_URL: "SECRET-oidc-url",
       NODE_AUTH_TOKEN: "SECRET-node-auth",
@@ -397,7 +400,7 @@ describe("verify (AC 42.6.3): the shapes the registry and the machine can answer
     for (const [label, env] of [["npm view", viewEnvs[0] as Record<string, string>], ["npx", npxEnv]] as Array<[string, Record<string, string>]>) {
       expect(JSON.stringify(env), `${label}: no secret value`).not.toContain("SECRET-");
       for (const key of Object.keys(env)) {
-        expect(key, `${label}: ${key}`).not.toMatch(/^(npm_config_(?!cache$|update_notifier$)|NODE_AUTH_TOKEN$|NPM_TOKEN$|GITHUB_TOKEN$|IPM_DIST_DEPLOY_KEY$|ACTIONS_ID_TOKEN_REQUEST_)/i);
+        expect(key, `${label}: ${key}`).not.toMatch(/^(npm_config_(?!cache$|update_notifier$)|NODE_AUTH_TOKEN$|NPM_TOKEN$|GITHUB_TOKEN$|ACTIONS_ID_TOKEN_REQUEST_)/i);
       }
       expect(env["HOME"], `${label}: a clean home`).toMatch(/release-verify-.*\/home$/);
       expect(env["npm_config_cache"], `${label}: a clean cache`).toMatch(/release-verify-.*\/cache$/);
@@ -418,7 +421,7 @@ describe("the tag consistency check at the committed tree (AC 42.6.2: all packag
     tagVersion,
   });
 
-  it("reads all eight packages at one plain version of 1.0.0 or later, and the marker and ipm/module.xml carry it", () => {
+  it("reads all eight packages at one plain version of 1.0.0 or later, and the marker and the root module.xml carry it", () => {
     expect(facts.problems).toEqual([]);
     expect(new Set(facts.packages.map((entry: { version: string }) => entry.version)).size).toBe(1);
     expect(facts.packages).toHaveLength(8);
@@ -458,7 +461,7 @@ describe("the tag consistency check at the committed tree (AC 42.6.2: all packag
     const embedded = embeddedVersionProblems(drifted);
     expect(embedded).toHaveLength(2);
     expect(embedded[0]).toContain("BOOTSTRAP_VERSION");
-    expect(embedded[1]).toContain("ipm/module.xml");
+    expect(embedded[1]).toMatch(/^module\.xml is at "0\.9\.0"/);
     expect(existsSync(path.join(root, ".changeset", "late.md"))).toBe(true);
   });
 });

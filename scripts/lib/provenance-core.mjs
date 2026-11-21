@@ -10,7 +10,8 @@
 // https://github.com/intersystems-community/iris-agentic-dev (never in this repository).
 
 import { createHash } from 'node:crypto';
-import { NOTICE_FILENAME, skillFrontmatterProblems } from './skills-pack.mjs';
+import { descriptionStartProblems, endorsementProblems, nameProblems } from './endorsement.mjs';
+import { MARKETPLACE_NAME, NOTICE_FILENAME, PACK_DIR, PLUGIN_NAME, PLUGIN_SERVER_KEYS, skillFrontmatterProblems } from './skills-pack.mjs';
 
 /**
  * The upstream commit adapted content is pinned to.
@@ -231,6 +232,7 @@ export function isExcludedSource(path) {
  * @property {Buffer | null} packNotice - The notice inside the pack.
  * @property {Array<{ label: string, packRel: string, text: string }>} agentFiles - Every agent content file.
  * @property {Array<{ rel: string, bytes: Buffer }>} packFiles - Every file of the pack, pack-relative.
+ * @property {PluginInputs} plugin - The plugin manifest, its servers, the marketplace and the five `server.json` files (rule `plugin`).
  * @property {Array<{ name: string, mustShipPack: boolean, noticeBeside?: boolean, files: Array<{ path: string, bytes: Buffer }>, problem?: string }>} distributions
  *   One per npm tarball, and one per installer route. `problem` is set when the file list could not be gathered.
  *   `noticeBeside` marks an installer payload: each of its files that carries adapted content needs the notice
@@ -371,6 +373,108 @@ export function checkProvenance(inputs) {
     }
   }
 
+  problems.push(...pluginProblems(inputs));
+  return problems;
+}
+
+/**
+ * One gathered JSON file of the plugin inputs: `value` is the parsed document, or `null` with the `problem` that kept it from being read.
+ *
+ * @typedef {{ path: string, value: any, problem?: string }} JsonInput
+ */
+
+/**
+ * The inputs of the `plugin` rule.
+ *
+ * @typedef {object} PluginInputs
+ * @property {string | null} version - The shared version (the version of `@iris-mcp/client-config`).
+ * @property {JsonInput} manifest - The pack's `.claude-plugin/plugin.json`.
+ * @property {JsonInput} servers - The pack's `.mcp.json`.
+ * @property {JsonInput} marketplace - The repository's `.claude-plugin/marketplace.json`.
+ * @property {JsonInput[]} serverJsons - The five `server.json` files.
+ */
+
+/**
+ * The `plugin` rule: the pack directory is a Claude Code plugin root (AD-28). It needs the manifest named `iris-mcp`, the five servers
+ * under their short keys, the notice at the plugin root, a marketplace entry that pins the pack directory at the release tag, and no
+ * endorsement wording in any name, display name, description or title of the manifest, the marketplace and the five `server.json`.
+ *
+ * @param {{ packNotice: Buffer | null, plugin?: PluginInputs }} inputs
+ * @returns {Array<{ rule: string, label: string, message: string }>}
+ */
+function pluginProblems(inputs) {
+  const problems = [];
+  const add = (label, message) => problems.push({ rule: 'plugin', label, message });
+  const plugin = inputs.plugin;
+  if (plugin === undefined) {
+    add('plugin', 'the plugin inputs were not gathered');
+    return problems;
+  }
+  const unreadable = (file) => {
+    if (file.value === null || typeof file.value !== 'object' || Array.isArray(file.value)) {
+      add(file.path, file.problem ?? 'the file is not a JSON object');
+      return true;
+    }
+    return false;
+  };
+
+  if (inputs.packNotice === null) add('notice', `the plugin root ${PACK_DIR} has no ${NOTICE_FILENAME}`);
+
+  if (!unreadable(plugin.manifest)) {
+    const manifest = plugin.manifest.value;
+    const label = plugin.manifest.path;
+    if (manifest.name !== PLUGIN_NAME) add(label, `the plugin name is ${JSON.stringify(manifest.name)}, not ${JSON.stringify(PLUGIN_NAME)}`);
+    for (const problem of nameProblems(manifest.name)) add(label, problem);
+    for (const field of ['name', 'displayName', 'description']) {
+      for (const problem of endorsementProblems(field, manifest[field])) add(label, problem);
+    }
+    for (const keyword of Array.isArray(manifest.keywords) ? manifest.keywords : []) {
+      for (const problem of [...endorsementProblems('keyword', keyword), ...nameProblems(keyword).map((found) => found.replace(/^name /, 'keyword '))]) add(label, problem);
+    }
+    for (const problem of descriptionStartProblems(manifest.description)) add(label, problem);
+  }
+
+  if (!unreadable(plugin.servers)) {
+    const keys = Object.keys(plugin.servers.value.mcpServers ?? {}).sort();
+    const expected = [...PLUGIN_SERVER_KEYS].sort();
+    if (JSON.stringify(keys) !== JSON.stringify(expected)) {
+      add(plugin.servers.path, `the servers are ${keys.join(', ') || 'none'}, not ${PLUGIN_SERVER_KEYS.join(', ')}`);
+    }
+  }
+
+  if (!unreadable(plugin.marketplace)) {
+    const marketplace = plugin.marketplace.value;
+    const label = plugin.marketplace.path;
+    if (marketplace.name !== MARKETPLACE_NAME) add(label, `the marketplace name is ${JSON.stringify(marketplace.name)}, not ${JSON.stringify(MARKETPLACE_NAME)}`);
+    for (const problem of nameProblems(marketplace.name)) add(label, problem);
+    for (const problem of endorsementProblems('description', marketplace.metadata?.description)) add(label, problem);
+    const entries = Array.isArray(marketplace.plugins) ? marketplace.plugins : [];
+    const entry = entries.find((candidate) => candidate?.name === PLUGIN_NAME);
+    if (entry === undefined) {
+      add(label, `no plugin entry is named ${JSON.stringify(PLUGIN_NAME)}`);
+    } else {
+      const source = entry.source ?? {};
+      if (source.path !== PACK_DIR) add(label, `the entry's source path is ${JSON.stringify(source.path)}, not the plugin root ${PACK_DIR}`);
+      if (source.source !== 'git-subdir') add(label, `the entry's source type is ${JSON.stringify(source.source)}, not "git-subdir", the one source that pins a subdirectory to a tag`);
+      if (plugin.version === null) {
+        add(label, 'the shared version could not be read from packages/client-config/package.json, so the entry\'s ref cannot be checked against the release tag');
+      } else if (source.ref !== `v${plugin.version}`) {
+        add(label, `the entry's ref is ${JSON.stringify(source.ref)}, not the release tag v${plugin.version}`);
+      }
+      for (const problem of endorsementProblems('description', entry.description)) add(label, problem);
+    }
+    for (const listed of entries) {
+      for (const problem of [...nameProblems(listed?.name), ...endorsementProblems('name', listed?.name)]) add(label, problem);
+    }
+  }
+
+  for (const file of plugin.serverJsons) {
+    if (unreadable(file)) continue;
+    for (const field of ['name', 'title', 'description']) {
+      for (const problem of endorsementProblems(field, file.value[field])) add(file.path, problem);
+    }
+    for (const problem of nameProblems(file.value.name)) add(file.path, problem);
+  }
   return problems;
 }
 

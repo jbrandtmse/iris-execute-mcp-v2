@@ -145,10 +145,10 @@ describe("Story 39.4: the root README names the searchTable action, its default 
     expect(paragraph).toContain("a read, enabled by default");
   });
 
-  it("the payload table says it was last re-measured at a Story 39.x or 40.x, no earlier than the story that moved its bytes", () => {
-    const match = /Last re-measured at Story (39|40)\.(\d+) \(`pnpm measure:tools-payload`/.exec(squash(readme));
+  it("the payload table says it was last re-measured at a Story 39.4 or later, no earlier than the story that moved its bytes", () => {
+    const match = /Last re-measured at Story (\d+)\.(\d+) \(`pnpm measure:tools-payload`/.exec(squash(readme));
     expect(match, "the re-measured sentence").not.toBeNull();
-    expect(match?.[1] === "40" || Number(match?.[2]) >= 4).toBe(true);
+    expect(Number(match?.[1]) > 39 || (Number(match?.[1]) === 39 && Number(match?.[2]) >= 4)).toBe(true);
   });
 });
 

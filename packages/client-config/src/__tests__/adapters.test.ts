@@ -1,7 +1,7 @@
 /**
  * Story 33.0 Task 2 / AC 33.0.1 — the ClientAdapter registry data.
  *
- * Counts are mechanical (Rule #51): the 13-client total is asserted ONCE as
+ * Counts are mechanical (Rule #51): the 15-client total is asserted ONCE as
  * a literal, everything else iterates the registry so new adapters cannot
  * drift past the suite.
  */
@@ -18,9 +18,9 @@ import type { ClientAdapter } from "../index.js";
 const adapters = Object.values(CLIENT_ADAPTERS);
 
 describe("CLIENT_ADAPTERS registry", () => {
-  it("contains exactly 13 v1 adapters (the spec §3.2 roster)", () => {
-    // The ONLY hand-authored count in the package — the spec's v1 roster size.
-    expect(Object.keys(CLIENT_ADAPTERS)).toHaveLength(13);
+  it("contains exactly 15 adapters (the spec roster plus Pi and Junie)", () => {
+    // The only hand-authored count in the package: the roster size.
+    expect(Object.keys(CLIENT_ADAPTERS)).toHaveLength(15);
   });
 
   it("keys every record by its own id", () => {
@@ -137,20 +137,78 @@ describe("CLIENT_ADAPTERS registry", () => {
 });
 
 describe("CLIENT_DISPOSITIONS (spec §3.1)", () => {
-  it("documents Pi as excluded-not-MCP-capable", () => {
-    const pi = CLIENT_DISPOSITIONS.find((d) => d.id === "pi");
-    expect(pi?.disposition).toBe("excluded-not-mcp-capable");
-    expect(pi?.reason).toContain("MCP");
+  it("keeps no client excluded as not MCP-capable: Pi and Junie are adapters now", () => {
+    expect(CLIENT_DISPOSITIONS.filter((d) => d.disposition === "excluded-not-mcp-capable")).toEqual([]);
+    expect(CLIENT_ADAPTERS.pi?.id).toBe("pi");
+    expect(CLIENT_ADAPTERS["jetbrains-junie"]?.id).toBe("jetbrains-junie");
   });
 
-  it("notes JetBrains and Kilo Code as roadmap adapters", () => {
+  it("notes Kilo Code and Antigravity CLI as roadmap rows, with the verified facts", () => {
     const roadmap = CLIENT_DISPOSITIONS.filter((d) => d.disposition === "roadmap").map((d) => d.id);
-    expect(roadmap.sort()).toEqual(["jetbrains-junie", "kilo-code"]);
+    expect(roadmap.sort()).toEqual(["antigravity", "kilo-code"]);
+    const reasons = Object.fromEntries(CLIENT_DISPOSITIONS.map((d) => [d.id, d.reason]));
+    expect(reasons["kilo-code"]).toContain("kilo.json");
+    expect(reasons["kilo-code"]).toContain("new entry shape");
+    expect(reasons.antigravity).toContain("~/.gemini/config/mcp_config.json");
+    expect(reasons.antigravity).toContain("collide with Gemini CLI");
   });
 
   it("dispositions never collide with the adapter roster", () => {
     for (const disposition of CLIENT_DISPOSITIONS) {
       expect(CLIENT_ADAPTERS[disposition.id], disposition.id).toBeUndefined();
     }
+  });
+});
+
+describe("the 2026-11-21 re-disposition (Story 42.9, DW-626)", () => {
+  const scopeOf = (id: string, scope: "user" | "project") => CLIENT_ADAPTERS[id]?.scopes.find((s) => s.scope === scope);
+
+  it("Goose reads %APPDATA%/Block/goose/config/config.yaml on Windows, and the config folder is its detection root", () => {
+    const user = scopeOf("goose", "user");
+    expect(user?.paths.win32).toBe("%APPDATA%/Block/goose/config/config.yaml");
+    expect(user?.paths.darwin).toBe("~/.config/goose/config.yaml");
+    expect(user?.paths.linux).toBe("~/.config/goose/config.yaml");
+    const appDir = CLIENT_ADAPTERS.goose?.detection.find((rule) => rule.kind === "appDir");
+    expect(appDir?.kind === "appDir" ? appDir.paths.win32 : "").toBe("%APPDATA%/Block/goose/config");
+  });
+
+  it("Pi: ~/.pi/agent/mcp.json moved by PI_CODING_AGENT_DIR, .pi/mcp.json in a project, mcpServers JSON", () => {
+    const pi = CLIENT_ADAPTERS.pi;
+    expect(pi?.format).toBe("json");
+    expect(pi?.rootKey).toBe("mcpServers");
+    expect(scopeOf("pi", "user")?.paths.linux).toBe("~/.pi/agent/mcp.json");
+    expect(scopeOf("pi", "user")?.envOverride).toEqual({ var: "PI_CODING_AGENT_DIR", pathSuffix: "mcp.json" });
+    expect(scopeOf("pi", "project")?.paths.linux).toBe(".pi/mcp.json");
+    expect(pi?.docsUrl).toBe("https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/docs/mcp.md");
+  });
+
+  it("Junie: ~/.junie/mcp/mcp.json and .junie/mcp/mcp.json on every platform, mcpServers JSON", () => {
+    const junie = CLIENT_ADAPTERS["jetbrains-junie"];
+    expect(junie?.displayName).toBe("JetBrains Junie");
+    expect(junie?.format).toBe("json");
+    expect(junie?.rootKey).toBe("mcpServers");
+    for (const platform of ["win32", "darwin", "linux"] as const) {
+      expect(scopeOf("jetbrains-junie", "user")?.paths[platform]).toBe("~/.junie/mcp/mcp.json");
+      expect(scopeOf("jetbrains-junie", "project")?.paths[platform]).toBe(".junie/mcp/mcp.json");
+    }
+    expect(junie?.docsUrl).toBe("https://junie.jetbrains.com/docs/junie-cli-mcp-configuration.html");
+  });
+
+  it("renames Windsurf, archives Kimi CLI and discontinues Roo Code, each keeping its adapter and its path", () => {
+    expect(CLIENT_ADAPTERS.windsurf?.displayName).toBe("Devin Desktop (formerly Windsurf)");
+    expect(scopeOf("windsurf", "user")?.paths.linux).toBe("~/.codeium/windsurf/mcp_config.json");
+    expect(CLIENT_ADAPTERS.kimi?.displayName).toBe("Kimi CLI (archived)");
+    expect(CLIENT_ADAPTERS["roo-code"]?.displayName).toBe("Roo Code (discontinued)");
+  });
+
+  it("every documentation link is the one read on 2026-11-21", () => {
+    expect(CLIENT_ADAPTERS.windsurf?.docsUrl).toBe("https://docs.devin.ai/desktop/devin-local/customizations");
+    expect(CLIENT_ADAPTERS.gemini?.docsUrl).toBe("https://geminicli.com/docs/tools/mcp-server/");
+    expect(CLIENT_ADAPTERS.goose?.docsUrl).toBe("https://goose-docs.ai/docs/getting-started/using-extensions/");
+    expect(CLIENT_ADAPTERS["roo-code"]?.docsUrl).toBe("https://roocodeinc.github.io/Roo-Code/features/mcp/overview/");
+  });
+
+  it("stamps the adapter data with the implementation date", () => {
+    expect(ADAPTER_DATA_VERSION).toBe("2026-11-21.1");
   });
 });

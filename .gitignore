@@ -33,6 +33,8 @@ coverage/
 # ...but not the IRIS class package ExecuteMCPv2.Coverage (Story 40.1): `coverage/` also matches `Coverage/` where
 # the file system ignores case, and these classes are source.
 !src/ExecuteMCPv2/Coverage/
+# The stamped IPM tree carries the same package under ipm/src/cls (Story 42.8); it is committed output.
+!ipm/src/cls/ExecuteMCPv2/Coverage/
 
 # Existing exclusions
 sources/

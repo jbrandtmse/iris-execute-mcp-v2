@@ -24,6 +24,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { hasValidAdaptationHeader, checkProvenance } from "../../../../scripts/lib/provenance-core.mjs";
+import { gatherPluginInputs } from "../../../../scripts/lib/provenance-inputs.mjs";
 import {
   KNOWLEDGE_SOURCE_DIR,
   NOTICE_FILENAME,
@@ -387,6 +388,7 @@ function inputsWith(agentFiles: AgentFile[]) {
     packNotice: realNotice,
     agentFiles,
     packFiles,
+    plugin: gatherPluginInputs(REPO_ROOT),
     distributions: [
       { name: "@x/client-config", mustShipPack: true, files: packFiles.map((file) => ({ path: `skills-pack/${file.rel}`, bytes: file.bytes })) },
     ],

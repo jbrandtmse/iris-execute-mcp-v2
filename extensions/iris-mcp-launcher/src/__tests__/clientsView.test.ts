@@ -84,31 +84,24 @@ const DETECT: DetectData = {
       probes: [{ kind: "config", scope: "user", path: "C:\\home\\AppData\\Roaming\\Code\\User\\mcp.json", exists: false }],
     },
   ],
-  // The REAL CLIENT_DISPOSITIONS rows (verbatim, incl. the Pi rationale the
-  // AC 33.3.1 info row renders).
+  // The REAL CLIENT_DISPOSITIONS rows (verbatim, as of adapter data 2026-11-21.1).
   dispositions: [
-    {
-      id: "pi",
-      displayName: "Pi (pi CLI / pi-coding-agent)",
-      disposition: "excluded-not-mcp-capable",
-      reason:
-        "Verified to have no built-in MCP support by design (minimal four-tool core; external tools via bash or TypeScript extensions). Revisit if Pi ships MCP support.",
-    },
-    {
-      id: "jetbrains-junie",
-      displayName: "JetBrains AI Assistant / Junie",
-      disposition: "roadmap",
-      reason:
-        "High adoption but config surface not yet verified against official docs; the registry is data-driven, so this is an adapter-data addition + fixture test once verified.",
-    },
     {
       id: "kilo-code",
       displayName: "Kilo Code",
       disposition: "roadmap",
-      reason: "Roo/Cline-lineage fork; likely follows the mcp_settings.json pattern — verify against official docs before adding (never assume).",
+      reason:
+        "Documents MCP (~/.config/kilo/kilo.json[c] or ./kilo.json[c] or ./.kilo/kilo.jsonc, top-level `mcp` key), but its entries use an OpenCode-style shape (type \"local\", `command` as an array, `environment`, `enabled`) that the engine does not model yet; supporting it needs a new entry shape, not an adapter-data patch.",
+    },
+    {
+      id: "antigravity",
+      displayName: "Antigravity CLI",
+      disposition: "roadmap",
+      reason:
+        "Documents MCP at ~/.gemini/config/mcp_config.json and .agents/mcp_config.json, but detection would collide with Gemini CLI's ~/.gemini, and no Windows path is documented; verify both before adding an adapter.",
     },
   ],
-  counts: { probed: 13, detected: 2, notDetected: 11, dispositioned: 3 },
+  counts: { probed: 13, detected: 2, notDetected: 11, dispositioned: 2 },
 };
 
 const STATUS: StatusData = {
@@ -391,7 +384,7 @@ describe("renderClientsHtml", () => {
     // even though the envelope carries dispositions (AC 33.3.1 as amended).
     expect(html).not.toContain("Other clients considered");
     expect(html).not.toContain("not MCP-capable");
-    expect(html).not.toContain("Pi (pi CLI / pi-coding-agent)");
+    expect(html).not.toContain("Antigravity CLI");
     // CSP nonce.
     expect(html).toContain(`script-src 'nonce-${NONCE}'`);
   });

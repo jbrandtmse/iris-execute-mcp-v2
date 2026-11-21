@@ -1,6 +1,6 @@
 # IRIS MCP Server Suite
 
-> **Pre-Release** — This project is under active development and has not yet been published to npm or IPM. Install by cloning the repository (see [Quick Start](#quick-start) below). Package registry publishing is planned for a future release. See [CHANGELOG.md](CHANGELOG.md) for the full pre-release history — most recently the governance policy file (`IRIS_GOVERNANCE_FILE`), the multi-client configuration manager (`iris-mcp-clients`), and the `iris_execute_classmethod` fidelity work (output capture, `ByRef`/`Output` args, response-payload budget, request-body UTF-8 decoding) — and [`docs/epic-summary.md`](docs/epic-summary.md) for what each epic built.
+> **Install Node.js 22.17 or later and run one command.** The five servers and the `iris-mcp-clients` configuration CLI are published on npm as `@iris-mcp/*` (version 1.x, with provenance). Claude Code has a plugin and VS Code has an extension, both from 1.1.0; every other client is configured by one `npx` command. See [Quick Start](#quick-start), [CHANGELOG.md](CHANGELOG.md) for what each release changed, and [`docs/epic-summary.md`](docs/epic-summary.md) for what each epic built.
 
 **Give AI assistants structured, safe access to InterSystems IRIS.**
 
@@ -22,7 +22,7 @@ The IRIS MCP Server Suite is a collection of five specialized [Model Context Pro
 
 ### Meta-package
 
-Once published, `@iris-mcp/all` installs the five servers as dependencies of one package, but it launches nothing: a global install (`npm install -g @iris-mcp/all`) links no command, and an npm project install puts the seven commands of its dependencies in `node_modules/.bin`. MCP clients start servers with `npx -y @iris-mcp/<server>@1`, one entry per server. See the [meta-package README](packages/iris-mcp-all/README.md) for details.
+`@iris-mcp/all` installs the five servers as dependencies of one package, but it launches nothing: a global install (`npm install -g @iris-mcp/all`) links no command, and an npm project install puts the seven commands of its dependencies in `node_modules/.bin`. MCP clients start servers with `npx -y @iris-mcp/<server>@1`, one entry per server. See the [meta-package README](packages/iris-mcp-all/README.md) for details.
 
 ---
 
@@ -42,25 +42,77 @@ Once published, `@iris-mcp/all` installs the five servers as dependencies of one
 ## Prerequisites
 
 - **Node.js** 22.17 or later
-- **InterSystems IRIS** 2023.1 or later (including IRIS for Health, HealthShare)
+- **InterSystems IRIS** 2023.1 or later (including IRIS for Health, HealthShare), best effort below the oldest CI-tested image. CI tests IRIS Community 2026.1 to 2026.2 and IRIS for Health 2026.2.
 - **IRIS web port** accessible (default `52773`)
 
 ---
 
 ## Quick Start
 
-Until packages are published to npm, install by cloning the repository and building from source.
+Install [Node.js](https://nodejs.org/) 22.17 or later, then follow the one path for your client. Every path starts the same five servers (`@iris-mcp/dev`, `admin`, `data`, `interop` and `ops`) through `npx -y @iris-mcp/<name>@1`, pinned to major version 1.
 
-### 1. Clone and Build
+**The IRIS side installs itself.** The first time a server connects to a namespace, it deploys and compiles the `ExecuteMCPv2` classes there and registers the `/api/executemcp/v2` web application and the `%ALL` package mapping, and it upgrades an older deployment the same way when you move to a newer release. Most users need nothing beyond the steps below. IPM is only the fallback for an instance where that automatic install cannot run (see [Optional: Install the IRIS-Side Classes with IPM](#optional-install-the-iris-side-classes-with-ipm)).
 
-```bash
-git clone https://github.com/jbrandtmse/iris-execute-mcp-v2.git
-cd iris-execute-mcp-v2
-pnpm install
-pnpm turbo run build
+### 1. Install
+
+| Your client | The one install path |
+|-------------|----------------------|
+| **Claude Code** | The plugin, from 1.1.0: `/plugin marketplace add jbrandtmse/iris-execute-mcp-v2`, then `/plugin install iris-mcp@iris-mcp`. See [Claude Code: the plugin](#claude-code-the-plugin-from-110). |
+| **VS Code** (GitHub Copilot) | The IRIS MCP Launcher extension, from 1.1.0: `iris-mcp.iris-mcp-launcher` on the Visual Studio Marketplace or Open VSX. See [VS Code: the extension](#vs-code-extension-iris-mcp-launcher-from-110). |
+| **Every other client** | `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply --client <id> --servers iris-dev-mcp`. See [Every other client](#every-other-client-the-iris-mcp-clients-cli). |
+
+On 1.0.x the `iris-mcp-clients` command is the route for every client, Claude Code and VS Code included.
+
+#### Claude Code: the plugin (from 1.1.0)
+
+```
+/plugin marketplace add jbrandtmse/iris-execute-mcp-v2
+/plugin install iris-mcp@iris-mcp
 ```
 
-> **Requires:** [Node.js](https://nodejs.org/) 22.17+ and [pnpm](https://pnpm.io/) 9+. Install pnpm with `npm install -g pnpm` if needed.
+Claude Code asks for the IRIS host, web port, namespace and HTTPS flag (defaults `localhost`, `52773`, `USER`, off), the user name and the password (kept in the system keychain), and starts the five servers (`dev`, `admin`, `data`, `interop`, `ops`) through `npx -y @iris-mcp/<name>@1`, with the 18 skills. A plugin cannot carry the always-on rule: run `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients skills install --client claude-code` in your project for it (see [The skills pack](#the-skills-pack)).
+
+**Switching from the installer or `claude mcp add`: remove the old entries first.** If Claude Code already has `iris-dev-mcp`, `iris-admin-mcp`, `iris-data-mcp`, `iris-interop-mcp` or `iris-ops-mcp` entries, the plugin serves the same tools again and every tool appears twice. `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients doctor` lists each such entry as a `claude-code-plugin-duplicates` finding, with the command that removes it:
+
+```bash
+npx -y -p @iris-mcp/client-config@1 iris-mcp-clients remove --client claude-code --server iris-dev-mcp --scope user
+```
+
+Use `--scope project` for an entry in the project's `.mcp.json`. `doctor` reads Claude Code's user and project scopes only; an entry in the local scope (the `projects` map of `~/.claude.json`) is removed with `claude mcp remove iris-dev-mcp --scope local`.
+
+#### VS Code extension: IRIS MCP Launcher (from 1.1.0)
+
+If you're inside VS Code with GitHub Copilot (or another client that consumes VS Code's built-in MCP server
+registry), the extension is the install path, and it sidesteps the Server Manager credential chain described in [step 2](#2-set-environment-variables) entirely:
+[`extensions/iris-mcp-launcher/`](extensions/iris-mcp-launcher/README.md), a standalone VS Code
+extension (outside this repo's npm workspace) that registers the `@iris-mcp/*` servers directly with VS Code and
+resolves credentials from Server Manager's `vscode.authentication` session **inside the extension host** — the
+one place a Server-Manager-saved SecretStorage password actually is reachable. No OS keychain setup, no
+`IRIS_CREDENTIAL_HELPER`, no `IRIS_PROFILES` password entry required.
+
+**This only helps Copilot-family agents** *for launching servers*. Claude Code manages its own MCP configuration
+(`claude mcp add` / `.mcp.json`) and does not consume VS Code's MCP registry — Claude Code users should use the
+plugin or the `iris-mcp-clients` command (see [1. Install](#1-install)) and the credential options in step 2 instead. See the extension's own README for the
+verified client-coverage boundary and citations.
+
+**The extension carries three surfaces**, and two of them help *every* client, not just Copilot:
+
+| Command (category "IRIS MCP Launcher") | What it does |
+| --- | --- |
+| **Select Servers…** | Choose which Server Manager servers become MCP servers; a status bar item shows how many are registered |
+| **Manage MCP Clients…** | Wire the suite into any of the 15 supported MCP clients — detect, per-server enable/disable, diff preview, backup/restore, doctor. The GUI front-end for [`iris-mcp-clients`](#the-manager-iris-mcp-clients); **useful to Claude Code / Cursor / Cline users too** |
+| **Open Governance Editor** | Visually edit the shared [governance policy file](#governance-file-iris_governance_file) that every client's servers read |
+
+**Installing it (from 1.1.0).** Install `iris-mcp.iris-mcp-launcher` from the Visual Studio Marketplace (the Extensions view, or `code --install-extension iris-mcp.iris-mcp-launcher`) or from Open VSX (VSCodium and other VS Code-compatible editors). The extension starts the servers through `npx -y @iris-mcp/<name>@1`, so it needs Node.js 22.17 or later on the machine. To build the extension from a checkout instead, see [Contributing](#contributing).
+
+#### Every other client: the `iris-mcp-clients` CLI
+
+```bash
+npx -y -p @iris-mcp/client-config@1 iris-mcp-clients detect                                        # which clients are installed
+npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply --client cursor --servers iris-dev-mcp  # preview, confirm, write
+```
+
+`--client` takes one of `claude-desktop`, `cursor`, `cline`, `windsurf` (Devin Desktop), `codex`, `gemini`, `zed`, `goose`, `kimi-code`, from 1.1.0 `pi` and `jetbrains-junie`, or, for older installs, `roo-code` (discontinued) and `kimi` (archived); `--servers all` writes all five. `apply` prints the exact edit first and writes only after you confirm. The per-client guides and copy-pasteable snippets are in the [MCP client configuration index](docs/client-config/README.md), and the full command reference is in [`@iris-mcp/client-config`](packages/client-config/README.md).
 
 ### 2. Set Environment Variables
 
@@ -70,11 +122,11 @@ All servers use the same environment variables:
 |----------|---------|-------------|
 | `IRIS_HOST` | `localhost` | IRIS hostname or IP |
 | `IRIS_PORT` | `52773` | IRIS web server port |
-| `IRIS_USERNAME` | `_SYSTEM` | IRIS username |
+| `IRIS_USERNAME` | *(required)* | IRIS username. There is no default: a server that starts without it fails, naming the variable. |
 | `IRIS_PASSWORD` | *(required)* | IRIS password |
 | `IRIS_NAMESPACE` | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | `false` | Use HTTPS instead of HTTP |
-| `IRIS_ACCEPT_LANGUAGE` | `en-US,en;q=0.9` | **Optional.** `Accept-Language` header value sent on every HTTP request, pinning IRIS's request-locale negotiation so `%Status` error text renders in a predictable language instead of whatever locale an unspecified header resolves to. This addresses ONE of two independent localization mechanisms — IRIS also selects a message table per worker process (unaffected by this header), so both English (`ERROR #`) and localized (e.g. `خطأ #`) prefixes can still appear; existing prefix-stripping is unaffected. |
+| `IRIS_ACCEPT_LANGUAGE` | `en-US,en;q=0.9` | **Optional.** `Accept-Language` header value sent on every HTTP request, pinning IRIS's request-locale negotiation so `%Status` error text renders in a predictable language instead of whatever locale an unspecified header resolves to. IRIS chooses the message language per request: its REST dispatcher matches this header against the languages the instance has on every request, so both English (`ERROR #`) and localized prefixes can appear when the header names a non-English language; existing prefix-stripping is unaffected. |
 | `MCP_TRANSPORT` | `stdio` | **Optional.** Only `stdio` is supported (`--transport` is equivalent); any other value fails startup naming it. |
 | `IRIS_PROFILES` | *(unset)* | **Optional.** JSON map of named IRIS instances for multi-server use. Omit for single-server — the `IRIS_*` vars above define the reserved `default` profile. See [Multiple Servers & Governance](#multiple-servers--governance). |
 | `IRIS_GOVERNANCE` | *(unset)* | **Optional.** JSON policy that enables/disables individual tool actions per profile. Omit to leave every tool enabled (today's behavior). See [Multiple Servers & Governance](#multiple-servers--governance). |
@@ -125,40 +177,6 @@ If you already curate IRIS connections in the [InterSystems Server Manager](http
 - **See where every profile came from.** `iris_server_profiles` (the [discovery tool](#discovering-profiles-and-policy-call-this-first)) reports a `source` field on every roster entry — `"env"` (from `IRIS_*`/`IRIS_PROFILES`) or `"server-manager"` (imported from a settings file) — plus `sourceFile`, the exact settings file a Server-Manager-sourced profile came from. Both are attribution only: they never affect which actions governance allows, only where you look to change a connection's host/port/username. The optional `IRIS_AUDIT_LOG` audit trail (see [Compliance & Auditability](#compliance--auditability)) likewise records `profileSource` per call, for the same reason.
 - **`sourceFile` is a local path, and your AI client sees it.** It never contains a password — but it *is* a real filesystem path, so when a profile comes from a **user-scope** settings file it includes your OS account name (e.g. `C:\Users\jsmith\AppData\Roaming\Code\User\settings.json`), and when it comes from a workspace it includes that directory. Because the roster is returned to the connected MCP client, that path is visible to the model. This is deliberate: a bare filename would be useless — every candidate file is called `settings.json`, so the folder is the whole point. If you would rather not disclose local paths, define the connections you expose at workspace scope (`IRIS_SM_WORKSPACE`), or leave `IRIS_SERVER_MANAGER` off and use `IRIS_PROFILES`.
 
-#### VS Code extension: IRIS MCP Launcher (optional, Copilot-family only)
-
-If you're inside VS Code with GitHub Copilot (or another client that consumes VS Code's built-in MCP server
-registry), there's a **fourth** way to connect that sidesteps the credential chain above entirely:
-[`extensions/iris-mcp-launcher/`](extensions/iris-mcp-launcher/README.md), a standalone, optional VS Code
-extension (outside this repo's npm workspace) that registers the `@iris-mcp/*` servers directly with VS Code and
-resolves credentials from Server Manager's `vscode.authentication` session **inside the extension host** — the
-one place a Server-Manager-saved SecretStorage password actually is reachable. No OS keychain setup, no
-`IRIS_CREDENTIAL_HELPER`, no `IRIS_PROFILES` password entry required.
-
-**This only helps Copilot-family agents** *for launching servers*. Claude Code manages its own MCP configuration
-(`claude mcp add` / `.mcp.json`) and does not consume VS Code's MCP registry — Claude Code users should use the
-`IRIS_SERVER_MANAGER`/credential-chain path documented above instead. See the extension's own README for the
-verified client-coverage boundary and citations.
-
-**The extension carries three surfaces**, and two of them help *every* client, not just Copilot:
-
-| Command (category "IRIS MCP Launcher") | What it does |
-| --- | --- |
-| **Select Servers…** | Choose which Server Manager servers become MCP servers; a status bar item shows how many are registered |
-| **Manage MCP Clients…** | Wire the suite into any of the 13 supported MCP clients — detect, per-server enable/disable, diff preview, backup/restore, doctor. The GUI front-end for [`iris-mcp-clients`](#the-manager-iris-mcp-clients-recommended); **useful to Claude Code / Cursor / Cline users too** |
-| **Open Governance Editor** | Visually edit the shared [governance policy file](#governance-file-iris_governance_file) that every client's servers read |
-
-**Installing it (not yet on any Marketplace).** Build a VSIX from this checkout and install it, then point it at
-your checkout — full steps, including the reload/reinstall gotchas, are in
-[the extension's install section](extensions/iris-mcp-launcher/README.md#installing-in-development-mode):
-
-```bash
-cd extensions/iris-mcp-launcher && npm install && npm run build
-npx vsce package --allow-missing-repository        # -> iris-mcp-launcher-0.1.0.vsix
-code --install-extension "$PWD/iris-mcp-launcher-0.1.0.vsix"
-# then: Developer: Reload Window, and set irisMcpLauncher.developmentRepoPath to this repo's absolute path
-```
-
 #### Where do Server Manager passwords come from? (the canonical answer)
 
 **Short version: a Server Manager password is never readable outside VS Code, by design — but the suite can still get one from you through three other doors.**
@@ -173,10 +191,10 @@ If none of the three is set up, the profile is excluded at startup (a log line n
 
 #### `iris-mcp-credentials` CLI
 
-A small command-line tool — ships as a `bin` in `@iris-mcp/shared`, built to `packages/shared/dist/cli/credentials-cli.js` — for the one-time per-machine setup referenced above: storing, listing, testing, and removing IRIS passwords in the OS keychain, so the OS-keychain link of the credential chain never needs a hand-edited config file containing a password. Not yet published to npm (see [Quick Start](#quick-start)), so invoke it directly with `node`:
+A small command-line tool — ships as a `bin` in `@iris-mcp/shared`, built to `packages/shared/dist/cli/credentials-cli.js` — for the one-time per-machine setup referenced above: storing, listing, testing, and removing IRIS passwords in the OS keychain, so the OS-keychain link of the credential chain never needs a hand-edited config file containing a password. Run it through `npx`; the `-p` form names the bin:
 
 ```bash
-node packages/shared/dist/cli/credentials-cli.js set myserver
+npx -y -p @iris-mcp/shared@1 iris-mcp-credentials set myserver
 ```
 
 | Command | Effect |
@@ -194,14 +212,14 @@ Exit codes are consistent across all four commands: `0` success · `1` not found
 
 `--json` output is available on `list` and `test`. Its contract: an **operational** outcome (exit 0 or 1) always writes exactly one JSON object to stdout — on failure that is `{"error": "..."}` for `list`, and an `error` field alongside the usual fields for `test`. **Usage errors (exit 2) are always plain text on stderr**, because the flags themselves were not understood. Human-readable failures always go to stderr, so `... --json 2>/dev/null | jq` works while a human still sees the error.
 
-Every output path — human text, `--json`, `--help`, and error/failure messages, including a failed `--connect` — is secret-free: known secrets are substring-redacted, and a secret too short to redact safely causes the whole message body to be withheld. Unlike the credential chain's own OS-keychain link (which silently skips to the next link when the native keychain module is unavailable), this CLI's `set`/`delete`/`list` fail loudly with a non-zero exit and an actionable message, since operating on the OS keychain is the whole point of the command. Run `node packages/shared/dist/cli/credentials-cli.js --help` for full usage.
+Every output path — human text, `--json`, `--help`, and error/failure messages, including a failed `--connect` — is secret-free: known secrets are substring-redacted, and a secret too short to redact safely causes the whole message body to be withheld. Unlike the credential chain's own OS-keychain link (which silently skips to the next link when the native keychain module is unavailable), this CLI's `set`/`delete`/`list` fail loudly with a non-zero exit and an actionable message, since operating on the OS keychain is the whole point of the command. Run `npx -y -p @iris-mcp/shared@1 iris-mcp-credentials --help` for full usage.
 
 #### `iris-mcp-governance` CLI
 
-A small command-line tool — ships as a second `bin` in `@iris-mcp/shared`, built to `packages/shared/dist/cli/governance-cli.js` — for validating, inspecting, and editing a [governance file](#governance-file-iris_governance_file) with the SAME engine the servers enforce with: every parse goes through the server's own loader (so `validate` prints the exact error text a server would fail startup with), and `effective`/`diff` compose the shared cascade functions directly rather than reimplementing them. Opt-in and agent-agnostic — with no file configured, the servers are unaffected. Not yet published to npm (see [Quick Start](#quick-start)), so invoke it directly with `node`:
+A small command-line tool — ships as a second `bin` in `@iris-mcp/shared`, built to `packages/shared/dist/cli/governance-cli.js` — for validating, inspecting, and editing a [governance file](#governance-file-iris_governance_file) with the SAME engine the servers enforce with: every parse goes through the server's own loader (so `validate` prints the exact error text a server would fail startup with), and `effective`/`diff` compose the shared cascade functions directly rather than reimplementing them. Opt-in and agent-agnostic — with no file configured, the servers are unaffected. Run it through `npx`; the `-p` form names the bin:
 
 ```bash
-node packages/shared/dist/cli/governance-cli.js validate --file C:\governance\iris-policy.json
+npx -y -p @iris-mcp/shared@1 iris-mcp-governance validate --file C:\governance\iris-policy.json
 ```
 
 | Command | Effect |
@@ -218,26 +236,26 @@ node packages/shared/dist/cli/governance-cli.js validate --file C:\governance\ir
 
 **Default file resolution** — `--file <path>` wins; otherwise `IRIS_GOVERNANCE_FILE` from the environment. Explicit path only: the CLI never discovers or searches for a file (architecture decision J1). Exit codes: `0` success · `1` operational failure (file unreadable/invalid per the server loader, a key not set for `unset`, a key that matches nothing for `check`) · `2` usage error. `--json` on the read commands (`validate`, `get`, `effective`, `diff`, `universe`, `check`) always emits exactly one parseable JSON object to stdout on an operational outcome — including failures; usage errors (exit 2) are always plain text on stderr.
 
-One caveat: the full governance-key universe is the frozen baseline plus each server's registered tool keys, which `validate`/`get`/`set`/`unset`/`effective`/`diff` cannot enumerate (importing a server package would be a circular dependency). `effective`/`diff` therefore render over the baseline plus keys mentioned in any config layer — a post-foundation key mentioned nowhere renders with the read-default seed (enabled) even when a real server would seed it disabled. The `universe` command closes that gap by deriving the registered half from built dist, and `iris_server_profiles` on a running server remains the authoritative render. Run `node packages/shared/dist/cli/governance-cli.js --help` for full usage.
+One caveat: the full governance-key universe is the frozen baseline plus each server's registered tool keys, which `validate`/`get`/`set`/`unset`/`effective`/`diff` cannot enumerate (importing a server package would be a circular dependency). `effective`/`diff` therefore render over the baseline plus keys mentioned in any config layer — a post-foundation key mentioned nowhere renders with the read-default seed (enabled) even when a real server would seed it disabled. The `universe` command closes that gap by deriving the registered half from built dist, and `iris_server_profiles` on a running server remains the authoritative render. Run `npx -y -p @iris-mcp/shared@1 iris-mcp-governance --help` for full usage.
 
 ### 3. Configure Your MCP Client
 
-Point your MCP client at the built server using `node` and the local `dist/index.js` path. Replace `/path/to/iris-execute-mcp-v2` with the actual path where you cloned the repo.
+The Claude Code plugin and the VS Code extension configure themselves (step 1). For every other client the `iris-mcp-clients` CLI writes the entry for you, and the manual snippets below show what it writes.
 
-> **📖 [MCP client configuration index](docs/client-config/README.md)** — copy-pasteable config for **13 clients** (Claude Code, VS Code/Copilot, Cline, Kimi Code, Kimi CLI, Codex CLI, Cursor, Claude Desktop, Windsurf, Roo Code, Gemini CLI, Zed, Goose), a format/root-key matrix (three formats and four different root keys between them), and the two credential caveats above restated where you need them.
+> **📖 [MCP client configuration index](docs/client-config/README.md)** — copy-pasteable config for **15 clients** (Claude Code, VS Code/Copilot, Cline, Kimi Code, Kimi CLI, Codex CLI, Cursor, Claude Desktop, Devin Desktop (formerly Windsurf), Roo Code, Gemini CLI, Zed, Goose, Pi, JetBrains Junie), a format/root-key matrix (three formats and four different root keys between them), and the two credential caveats above restated where you need them.
 
-#### The manager: `iris-mcp-clients` (recommended)
+#### The manager: `iris-mcp-clients`
 
-The [`@iris-mcp/client-config`](packages/client-config/README.md) package ships the **`iris-mcp-clients`** CLI — one tool that wires any of the 13 supported clients for you instead of hand-editing config files: it detects which clients are installed, previews the exact edit, writes through a backup-on-write engine, toggles entries, rolls back, and diagnoses the result. Not yet published to npm (see [Quick Start](#quick-start)), so invoke the built bin directly with `node`:
+The [`@iris-mcp/client-config`](packages/client-config/README.md) package ships the **`iris-mcp-clients`** CLI — one tool that wires any of the 15 supported clients for you instead of hand-editing config files: it detects which clients are installed, previews the exact edit, writes through a backup-on-write engine, toggles entries, rolls back, and diagnoses the result. Run it through `npx`; the `-p` form names the bin:
 
 ```bash
-node packages/client-config/dist/cli/clients-cli.js detect                    # which clients are installed
-node packages/client-config/dist/cli/clients-cli.js diff --client claude-code --servers iris-dev-mcp
-node packages/client-config/dist/cli/clients-cli.js apply --client claude-code --servers iris-dev-mcp
-node packages/client-config/dist/cli/clients-cli.js doctor                    # env refs, parseability, drift, backups, stashes
+npx -y -p @iris-mcp/client-config@1 iris-mcp-clients detect                    # which clients are installed
+npx -y -p @iris-mcp/client-config@1 iris-mcp-clients diff --client cursor --servers iris-dev-mcp
+npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply --client cursor --servers iris-dev-mcp
+npx -y -p @iris-mcp/client-config@1 iris-mcp-clients doctor                    # env refs, parseability, drift, backups, stashes, plugin duplicates
 ```
 
-`apply` prints the pending diff first and requires confirmation (`--yes` to skip); every successful write takes a timestamped backup and prints the client's restart hint. `iris-mcp-clients skills install` also installs the skills pack into a project: see [The skills pack](#the-skills-pack).
+`apply` prints the pending diff first and requires confirmation (`--yes` to skip); every successful write takes a timestamped backup and prints the client's restart hint. From 1.1.0, a project-scope write (`--scope project`) is refused when the project directory is your home directory, because the project file would then be a user-level file; open a project folder, or use `--scope user`. `iris-mcp-clients skills install` also installs the skills pack into a project: see [The skills pack](#the-skills-pack).
 
 **The zero-secrets end state** — three composable pieces, each covering a different secret class:
 
@@ -245,7 +263,7 @@ node packages/client-config/dist/cli/clients-cli.js doctor                    # 
 2. **Governance file** (Epic 32): `--mode governance-file` writes entries carrying `IRIS_GOVERNANCE_FILE=<path>` — one shared policy file governs every server's tool surface; the file holds no credentials.
 3. **VS Code native inputs** (default `env-reference` mode on VS Code): the password is never stored — the manager merges a native `inputs` prompt (`${input:iris-password}`) so VS Code asks once and keeps it out of the file.
 
-Which clients/config surfaces are proven: the [adapter certification table](packages/client-config/README.md#certification-dispositions-generated) (Claude Code, VS Code, Cline and Kimi Code are certified-live as of 2026-07-28; the rest carry explicit fixture-only-with-residual-risk dispositions — re-provable anywhere with `node packages/client-config/scripts/certify.mjs run <client> --real-config`).
+Which clients/config surfaces are proven: the [adapter certification table](packages/client-config/README.md#certification-dispositions-generated) (Claude Code, VS Code, Cline and Kimi Code are certified-live as of 2026-07-28; the rest carry explicit fixture-only-with-residual-risk dispositions, and the clients that need a person at the GUI carry a human-only marker — re-provable anywhere with `node packages/client-config/scripts/certify.mjs run <client> --real-config` from a checkout).
 
 The manual per-client snippets below remain as the fallback (and as the reference for what the manager writes).
 
@@ -257,8 +275,8 @@ Create a `.mcp.json` file in your project root:
 {
   "mcpServers": {
     "iris-dev-mcp": {
-      "command": "node",
-      "args": ["/path/to/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -281,8 +299,8 @@ Add to your Claude Desktop configuration:
 {
   "mcpServers": {
     "iris-dev-mcp": {
-      "command": "node",
-      "args": ["/path/to/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -301,28 +319,20 @@ To add more servers, include additional entries under `mcpServers` using the sam
 {
   "mcpServers": {
     "iris-dev-mcp": {
-      "command": "node",
-      "args": ["/path/to/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js"],
-      "env": { "IRIS_PASSWORD": "SYS" }
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev@1"],
+      "env": { "IRIS_USERNAME": "_SYSTEM", "IRIS_PASSWORD": "SYS" }
     },
     "iris-admin-mcp": {
-      "command": "node",
-      "args": ["/path/to/iris-execute-mcp-v2/packages/iris-admin-mcp/dist/index.js"],
-      "env": { "IRIS_PASSWORD": "SYS" }
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/admin@1"],
+      "env": { "IRIS_USERNAME": "_SYSTEM", "IRIS_PASSWORD": "SYS" }
     }
   }
 }
 ```
 
-**All server entry points:**
-
-| Server | Path (relative to repo root) |
-|--------|------------------------------|
-| dev | `packages/iris-dev-mcp/dist/index.js` |
-| admin | `packages/iris-admin-mcp/dist/index.js` |
-| interop | `packages/iris-interop-mcp/dist/index.js` |
-| ops | `packages/iris-ops-mcp/dist/index.js` |
-| data | `packages/iris-data-mcp/dist/index.js` |
+The five servers are `@iris-mcp/dev`, `@iris-mcp/admin`, `@iris-mcp/interop`, `@iris-mcp/ops` and `@iris-mcp/data`; each is launched as `npx -y @iris-mcp/<name>@1`.
 
 ### 4. Verify
 
@@ -338,18 +348,32 @@ If the assistant returns results from your IRIS instance, you are connected.
 
 ### Optional: Install the IRIS-Side Classes with IPM
 
-Most installs need nothing here: the first server to connect deploys the `ExecuteMCPv2` classes itself (see [Shared Instances](#shared-instances-upgrade-every-client-together)). An administrator who wants them installed through [IPM](https://github.com/intersystems/ipm) instead (for example on an instance where the servers' user may not deploy classes) runs, in the target namespace, as a user with `%Admin_Manage`, with IPM 0.10 or later installed in that namespace:
+**Skip this section unless the automatic install cannot run.** By default the first server to connect deploys the `ExecuteMCPv2` classes itself and upgrades them when a newer release connects (see [Shared Instances](#shared-instances-upgrade-every-client-together)), and most users need nothing else. Use [IPM](https://github.com/intersystems/ipm) only where that cannot happen:
+
+- **The connecting user cannot upload or compile classes in the namespace.** The server records `Deploy failed` or `Compile failed` in its startup report, and the REST service does not come up.
+- **The connecting user lacks `%Admin_Manage`.** The classes deploy, but the web application cannot be created, so the server logs a warning that web application registration requires `%Admin_Manage` privileges, with manual instructions (a later start by a user who has `%Admin_Manage` repairs it, and so does running `Do ##class(ExecuteMCPv2.Setup).Configure("<namespace>")` in `%SYS`). An administrator who prefers one step runs the IPM install instead.
+- **Your change control does not allow a client to deploy code to the instance.** An administrator installs the package once.
+
+An administrator then runs, in the target namespace, as a user with `%Admin_Manage`, with IPM 0.10 or later installed in that namespace:
 
 ```
 zpm "install iris-execute-mcp-v2 <version>"
 ```
 
-`<version>` is the version of the suite you run: the `@iris-mcp/shared` semver, which is the part of the version marker before the `+`. When `zpm "repo -list"` shows no registry, add the community registry to that namespace first with `zpm "repo -r -n registry -reset-defaults"`. A package is published to the IPM registry from the first release (`1.0.0`); until then the command finds nothing, and the server's own bootstrap installs the classes.
+`<version>` is the version of the suite you run: the `@iris-mcp/shared` semver, which is the part of the version marker before the `+`. When `zpm "repo -list"` shows no registry, add the community registry to that namespace first with `zpm "repo -r -n registry -reset-defaults"`. The IPM package is published to the IPM registry from 1.1.0, the first release with the IPM channel; before that the command finds nothing, and the server's own bootstrap installs the classes.
 
-- **IPM then owns the classes in that namespace, and the server never redeploys them.** The package carries a class, `ExecuteMCPv2.InstallGuard`, that only IPM installs. A server that finds it writes nothing there (no upload, no compile, no web application or mapping change) and logs one `[WARN]` line that names the `zpm` command. A server that was already deploying when IPM installed the classes finds the guard just before compiling: it compiles and configures nothing, and the documents it had uploaded stay until the package is reinstalled. `zpm "uninstall iris-execute-mcp-v2"` in that namespace hands it back to the server, which installs its own classes the next time it connects.
+- **IPM then owns the classes in that namespace, and the server never redeploys them.** The package carries a class, `ExecuteMCPv2.InstallGuard`, that only IPM installs. A server that finds it writes nothing there (no upload, no compile, no web application or mapping change) and logs one `[WARN]` line that names the `zpm` command. So every upgrade of the classes must go through `zpm "install iris-execute-mcp-v2 <version>"` too: a newer server release does not update them on its own. A server that was already deploying when IPM installed the classes finds the guard just before compiling: it compiles and configures nothing, and the documents it had uploaded stay until the package is reinstalled. `zpm "uninstall iris-execute-mcp-v2"` in that namespace hands it back to the server (restart a running server): it installs its own classes again the next time it connects, which is how you return to the automatic install.
 - **The install cannot downgrade a newer deployment.** At the start of every install the guard orders the marker of the `ExecuteMCPv2.Setup` already in the namespace against the package's own marker, with the same ordering as the server (semver first, then sequence). It refuses to install over a newer one, over `dev` or another foreign marker, or over a `Setup` whose marker cannot be read, and nothing is installed. To install the package deliberately over such a deployment, delete the class `ExecuteMCPv2.Setup` in the namespace and run the install again. An older deployment, or none, installs. The manifest sets `CheckStatus` on the guard's invoke, because IPM 0.10.0 to 0.10.4 ignore a returned error status without it; the CI proof runs on the IPM 0.10.5 that ships with the IRIS images it uses, and the earlier versions are not tested. IPM 0.10.5 marks `CheckStatus` deprecated, because it checks a returned `%Status` by default, but still reads it, and the CI proof checks that the manifest inside the built archive still carries it.
 - **Install with `zpm "install ..."` only, never with `-dev`.** A developer-mode load of a refused version keeps IPM's record at the version it refused.
 - The package configures the `/api/executemcp/v2` web application and the `%ALL` package mapping through `ExecuteMCPv2.Setup.Configure`, with no application roles: handlers run with the connecting user's own privileges.
+- **`zpm "uninstall iris-execute-mcp-v2"` leaves two things behind, and removes neither.** It removes the classes, but not the web application or the `%ALL` mapping that `Configure` created. To remove them by hand, in the `%SYS` namespace as an administrator:
+
+  ```
+  Do ##class(Security.Applications).Delete("/api/executemcp/v2")
+  Do ##class(Config.MapPackages).Delete("%ALL","ExecuteMCPv2")
+  ```
+
+  Run them only when no other namespace still uses the suite: the instance has one such web application and one such mapping, shared by every namespace that uses the suite. Each call returns a `%Status`.
 
 This adds no tool and no governed action. CI builds the package archive and installs it, with no network, on `iris-community` and `irishealth-community` (the `ipm` job below).
 
@@ -481,7 +505,7 @@ Pair it with the **SQL resource caps** for an extra safety margin on `iris_sql_e
 
 An INSERT, UPDATE or DELETE result carries `rowsAffected`. The read-only mode is **statement-level read-only, not side-effect-free**: a rollback does not undo `$INCREMENT`/`$SEQUENCE` counters (row ID counters included), process-private or IRISTEMP globals, changes made with `%NOJOURN` by a function, procedure or trigger the statement runs, work that parallel query worker processes do (`%PARALLEL`), `JOB` or device output, other external effects, or a function, procedure or trigger that starts, commits or rolls back a transaction (reported as an error when the transaction level the tool opened has changed, which a commit followed by a new `TSTART` does not show; some changes may be saved). A capped statement that is rolled back leaves the same effects. A capped INSERT, UPDATE or DELETE on a table stored in IRISTEMP (not journaled) keeps its row changes even when the cap rolls it back. Both variables are global operator variables: every profile inherits them, and no per-profile key can loosen them.
 
-See the [client configuration index](docs/client-config/README.md) — covering 13 clients — or the detailed guides for [Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md) and [Cursor](docs/client-config/cursor.md), for copy-pasteable `env` blocks.
+See the [client configuration index](docs/client-config/README.md) — covering 15 clients — or the detailed guides for [Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md) and [Cursor](docs/client-config/cursor.md), for copy-pasteable `env` blocks.
 
 ### Agent code editing (Epic 38)
 
@@ -799,13 +823,13 @@ Produced by `pnpm measure:tools-payload` ([`scripts/measure-tools-payload.mjs`](
 
 | Server | full (count / bytes / ~tokens) | core (count / bytes / ~tokens) | developer (count / bytes / ~tokens) |
 | --- | --- | --- | --- |
-| @iris-mcp/dev | 33 / 94,932 / ~23,733 | 15 / 44,355 / ~11,089 | 33 / 94,932 / ~23,733 |
-| @iris-mcp/admin | 27 / 48,369 / ~12,092 | 13 / 16,862 / ~4,216 | 11 / 16,222 / ~4,056 |
-| @iris-mcp/interop | 25 / 57,046 / ~14,262 | 12 / 38,104 / ~9,526 | 25 / 57,046 / ~14,262 |
-| @iris-mcp/ops | 22 / 30,812 / ~7,703 | 10 / 13,814 / ~3,454 | 10 / 14,265 / ~3,566 |
+| @iris-mcp/dev | 33 / 98,907 / ~24,727 | 15 / 45,835 / ~11,459 | 33 / 98,907 / ~24,727 |
+| @iris-mcp/admin | 27 / 48,808 / ~12,202 | 13 / 16,862 / ~4,216 | 11 / 16,222 / ~4,056 |
+| @iris-mcp/interop | 25 / 58,297 / ~14,574 | 12 / 39,355 / ~9,839 | 25 / 58,297 / ~14,574 |
+| @iris-mcp/ops | 22 / 30,811 / ~7,703 | 10 / 13,813 / ~3,453 | 10 / 14,264 / ~3,566 |
 | @iris-mcp/data | 8 / 12,643 / ~3,161 | 8 / 12,643 / ~3,161 | 8 / 12,643 / ~3,161 |
 
-`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~65% fewer bytes (`@iris-mcp/admin`: 48,369 → 16,862; `@iris-mcp/dev`: 94,932 → 44,355, ~53%). Last re-measured at Story 40.4 (`pnpm measure:tools-payload` on freshly built dists — mechanical, Rule #51). Byte counts are not test-pinned (only the tool counts are), so they drift whenever a tool description or schema changes, until the next re-measure. `@iris-mcp/dev`'s `full`/`developer` rows include `iris_test_status` and `iris_test_coverage`, which `core` excludes.
+`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~65% fewer bytes (`@iris-mcp/admin`: 48,808 → 16,862; `@iris-mcp/dev`: 98,907 → 45,835, ~54%). Last re-measured at Story 42.9 (`pnpm measure:tools-payload` on freshly built dists — mechanical, Rule #51). The `@iris-mcp/dev` row is test-pinned (`story-42-9-doc-claims.test.ts`): the test holds the row's text, so the row changes only together with the test, and nothing re-measures it on its own. Every row, that one included, drifts whenever a tool description or schema changes, until the next re-measure; for the other rows only the tool counts are test-pinned. `@iris-mcp/dev`'s `full`/`developer` rows include `iris_test_status` and `iris_test_coverage`, which `core` excludes.
 
 ---
 
@@ -865,7 +889,7 @@ For regulated environments — healthcare, finance, or any shop that has to answ
 
 **Disambiguation — this is not `iris_audit_manage` / `iris_audit_events`.** The suite already ships two *IRIS server-side* security-audit tools: `iris_audit_manage` (`@iris-mcp/admin`) manages IRIS's own `%SYS.Audit*` security-audit subsystem (login events, privilege changes, and similar — a feature of the IRIS instance itself), and `iris_audit_events` (`@iris-mcp/ops`) reads events from that same IRIS-native audit database. `IRIS_AUDIT_LOG` is a completely different thing: it is the **MCP server process's own record of the tool calls an AI client made through it**. It has nothing to do with IRIS's built-in auditing feature, doesn't read from or write to `%SYS.Audit*`, and works whether or not IRIS-native auditing is enabled at all. Don't conflate the two when scoping a compliance review — they answer different questions ("what did IRIS's security subsystem observe" vs. "what did the AI, through this MCP server, actually do").
 
-See the [client configuration index](docs/client-config/README.md) — covering 13 clients — or the detailed guides for [Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md) and [Cursor](docs/client-config/cursor.md), for copy-pasteable `env` blocks.
+See the [client configuration index](docs/client-config/README.md) — covering 15 clients — or the detailed guides for [Claude Code](docs/client-config/claude-code.md), [Claude Desktop](docs/client-config/claude-desktop.md) and [Cursor](docs/client-config/cursor.md), for copy-pasteable `env` blocks.
 
 ---
 
@@ -909,20 +933,24 @@ The skills pack gives an agent the suite's ObjectScript know-how where the agent
 |---|---|---|---|
 | Claude Code | `claude-code` | `.claude/skills/` | `.claude/rules/iris-mcp-objectscript-pre-write.md` |
 | Cursor | `cursor` | `.agents/skills/` | `.cursor/rules/iris-mcp-objectscript-pre-write.mdc` |
-| Gemini CLI | `gemini` | `.agents/skills/` | a marked block in `GEMINI.md` |
+| Gemini CLI and Antigravity CLI | `gemini`, `antigravity` | `.agents/skills/` | a marked block in `GEMINI.md` |
 | Every other client | `vscode`, `cline`, `roo-code`, `windsurf`, `codex`, `zed`, `goose`, `kimi`, `kimi-code`, `pi`, `jetbrains-junie`, `kilo-code`, `agents` | `.agents/skills/` | a marked block in `AGENTS.md` |
+
+The `antigravity` id is accepted from 1.1.0; on 1.0.x, use `gemini` for Antigravity CLI (the same route).
+
+**The Claude Code plugin.** The pack directory is also a Claude Code plugin root (plugin `iris-mcp`, marketplace `iris-mcp`): it brings the five servers and the 18 skills, but a plugin cannot carry a rule, so the always-on rule still needs the installer. With the plugin enabled, `skills install --client claude-code` installs only the rule (the next paragraph and the [client-config README](packages/client-config/README.md#installing-the-skills-pack) say how it detects the plugin).
 
 Claude Desktop (`claude-desktop`) has no route: it takes skills only as an uploaded ZIP, so the installer refuses it. The per-client table, with each client's reason and documentation sources, is generated from the installer's own data in the [client-config README](packages/client-config/README.md#skills-pack-targets-generated).
 
-From the repository root (the package is not yet published to npm), preview the plan first, then install:
+Preview the plan first, then install (run these from your project, or pass `--project`):
 
 ```bash
-node packages/client-config/dist/cli/clients-cli.js skills install --client claude-code --project /path/to/your/project --dry-run
-node packages/client-config/dist/cli/clients-cli.js skills install --client claude-code --project /path/to/your/project
-node packages/client-config/dist/cli/clients-cli.js skills install --client cursor --project /path/to/your/project
-node packages/client-config/dist/cli/clients-cli.js skills install --client gemini --project /path/to/your/project
-node packages/client-config/dist/cli/clients-cli.js skills install --client codex --project /path/to/your/project
-node packages/client-config/dist/cli/clients-cli.js skills uninstall --client claude-code --project /path/to/your/project
+npx -y -p @iris-mcp/client-config@1 iris-mcp-clients skills install --client claude-code --project /path/to/your/project --dry-run
+npx -y -p @iris-mcp/client-config@1 iris-mcp-clients skills install --client claude-code --project /path/to/your/project
+npx -y -p @iris-mcp/client-config@1 iris-mcp-clients skills install --client cursor --project /path/to/your/project
+npx -y -p @iris-mcp/client-config@1 iris-mcp-clients skills install --client gemini --project /path/to/your/project
+npx -y -p @iris-mcp/client-config@1 iris-mcp-clients skills install --client codex --project /path/to/your/project
+npx -y -p @iris-mcp/client-config@1 iris-mcp-clients skills uninstall --client claude-code --project /path/to/your/project
 ```
 
 The installer prints its plan and asks before it writes (`--yes` skips the question). It writes only the files it installs and its own marked block, records them in `.iris-mcp/skills-pack.json` in the project, and leaves every other byte, `CLAUDE.md` included, as it was. Running the same install again changes nothing, and `uninstall` removes only what the installer put there.
@@ -931,9 +959,9 @@ The installer prints its plan and asks before it writes (`--yes` skips the quest
 
 **Known limits:**
 
-- Project scope only: `--scope user` is refused.
+- Project scope only: `--scope user` is refused, and from 1.1.0 so is a project directory that is your home directory (`--project ~`, or a run from `~`). A pack that 1.0.x installed in your home directory is therefore not removed by `skills uninstall` there: delete the files and the marked blocks that `~/.iris-mcp/skills-pack.json` lists, then that file.
 - Claude Desktop has no route, as above.
-- The Claude Code route always installs both the skills and the rule; it does not detect a Claude Code plugin.
+- The Claude Code route installs only the rule when it finds the `iris-mcp@iris-mcp` plugin enabled in the user, project or local Claude Code settings, and both the skills and the rule otherwise. Managed settings, `--settings`, `--add-dir` and synced plugins are not read, so a plugin it does not see means the skills install twice.
 - A symbolic link at or above a path the installer would write, or a second hard link to such a file, refuses the run.
 - A file you edit after installing is kept; `--include-modified` replaces or removes it after a backup under `~/.iris-mcp/client-manager/backups/skills-pack/`.
 
@@ -993,7 +1021,7 @@ Each server has its own README with a complete tool reference:
 Two supporting packages ship no MCP tools of their own but carry user-facing surfaces:
 
 - [`@iris-mcp/shared`](packages/shared/README.md) — the connection/governance/audit engine every server sits on, plus the `iris-mcp-credentials` and `iris-mcp-governance` CLIs.
-- [`@iris-mcp/client-config`](packages/client-config/README.md) — the 13-client adapter registry, the `iris-mcp-clients` manager CLI, the per-adapter certification dispositions, and the [skills pack](#the-skills-pack) with its installer.
+- [`@iris-mcp/client-config`](packages/client-config/README.md) — the 15-client adapter registry, the `iris-mcp-clients` manager CLI, the per-adapter certification dispositions, and the [skills pack](#the-skills-pack) with its installer.
 
 And two documentation sets sit alongside them:
 
@@ -1032,7 +1060,7 @@ On the next server start, the bootstrap recognizes this `unconfigured` state and
 
 The self-heal runs only in a server whose own marker equals the deployed one (or is newer, which upgrades the classes). A server that finds a newer, foreign or unreadable deployment changes nothing, the web application included (see the next subsection): start a build that matches the deployed marker, or, for a `dev` or foreign deployment, delete the class `ExecuteMCPv2.Setup` and restart, which installs the classes and registers the web application.
 
-If the connecting user lacks `%Admin_Manage`, the web application cannot be created; the bootstrap reports `configured: false` with manual instructions, and a later launch by a privileged user self-heals automatically.
+If the connecting user lacks `%Admin_Manage`, the web application cannot be created; the bootstrap logs a warning that web application registration requires `%Admin_Manage` privileges, with manual instructions, and a later launch by a privileged user self-heals automatically.
 
 ### Shared Instances: Upgrade Every Client Together
 
@@ -1083,16 +1111,52 @@ This affected any tool whose input is written back to IRIS or otherwise round-tr
 
 Contributions are welcome. Please open an issue to discuss proposed changes before submitting a pull request.
 
+### Building from source
+
+Working on the suite itself needs [Node.js](https://nodejs.org/) 22.17+ and [pnpm](https://pnpm.io/) 9+ (`npm install -g pnpm`):
+
+```bash
+git clone https://github.com/jbrandtmse/iris-execute-mcp-v2.git
+cd iris-execute-mcp-v2
+pnpm install
+pnpm turbo run build
+```
+
+An MCP client can launch a built server straight from the checkout with `node` and the local entry point instead of `npx`; replace `/path/to/iris-execute-mcp-v2` with the path of your clone:
+
+```json
+{
+  "mcpServers": {
+    "iris-dev-mcp": {
+      "command": "node",
+      "args": ["/path/to/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js"],
+      "env": { "IRIS_USERNAME": "_SYSTEM", "IRIS_PASSWORD": "SYS" }
+    }
+  }
+}
+```
+
+| Server | Entry point (relative to the repo root) |
+|--------|------------------------------|
+| dev | `packages/iris-dev-mcp/dist/index.js` |
+| admin | `packages/iris-admin-mcp/dist/index.js` |
+| interop | `packages/iris-interop-mcp/dist/index.js` |
+| ops | `packages/iris-ops-mcp/dist/index.js` |
+| data | `packages/iris-data-mcp/dist/index.js` |
+
+The CLIs run from the checkout the same way: `node packages/client-config/dist/cli/clients-cli.js <command>`, `node packages/shared/dist/cli/credentials-cli.js <command>` and `node packages/shared/dist/cli/governance-cli.js <command>`. To build and install the VS Code extension from a checkout, see [its development-mode install](extensions/iris-mcp-launcher/README.md#installing-in-development-mode).
+
 A plain `pnpm test` touches no IRIS instance. The test legs that need one are opt-in: they run only when `IRIS_REQUIRE_LIVE=1` (or `true`) is set, and then all five of `IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD` and `IRIS_NAMESPACE` are required. There are no defaults, a set `IRIS_HOST` alone arms nothing, and the `IRIS_TEST_HOST`, `IRIS_TEST_PORT`, `IRIS_TEST_USERNAME`, `IRIS_TEST_PASSWORD` and `IRIS_TEST_NAMESPACE` target variables are retired (`IRIS_TEST_TIMEOUT`, the wait budget of `iris_execute_tests`, is a different setting and is unchanged). Armed legs deploy the `ExecuteMCPv2` classes and create temporary fixtures, so point them at an instance you can afford to change.
 
 ### Continuous Integration
 
-`.github/workflows/ci.yml` runs on every push to any branch or tag, on pull requests and on manual dispatch. It is secret-free (a read-only token and no `secrets.` reference) and publishes, tags and releases nothing. Every action is pinned by commit and every tool by an exact version. It has four jobs:
+`.github/workflows/ci.yml` runs on every push to any branch or tag, on pull requests and on manual dispatch. It is secret-free (a read-only token and no `secrets.` reference) and publishes, tags and releases nothing. Every action is pinned by commit and every tool by an exact version. It has five jobs:
 
 - `gates` runs on Node 22.17.0, 24.0.0 and 26.0.0 (the floor of each even major; 22.17.0 is the `engines.node` floor of every package). It installs, builds, lints with no warning allowed, type-checks, runs the tests of the eight packages, and runs the governance baseline, skills, pack, prompt, provenance and tools-list checks and the epics-sync check. It also installs, type-checks and builds the launcher extension and runs its arming guard.
+- `launcher` runs the launcher extension's whole test suite (the real-CLI tests included) on `ubuntu-24.04`, `macos-15` and `windows-2025`, each on Node 22.17.0, because only CI shows a platform difference. It builds every package (the real-CLI tests read the client-config and shared CLIs and the five servers' tool lists), needs no other job and reaches no IRIS (its two live files stay unarmed and skip). A red leg fails the run, and a release waits for a green run.
 - `throwaway` runs everything that needs a live IRIS against throwaway containers that `scripts/throwaway-iris.mjs` starts, labels and removes. It refuses ports 52773 and 1972, the shared instance's container name and any image that is not pinned by digest. The bootstrap-guard gate runs on `iris-community` 2026.2 and on 2026.1 (the oldest tag that is tested: a Community image carries a time-limited license key and refuses to start once it expires, so the oldest tag moves forward before its key expires; the 2026.1 key is valid to 2027-03-27, and 2025.3 passed every guard leg in CI run 39749804619 on 2026-10-22 before its key expires on 2026-11-13), in `USER`, each in a container of its own, and the guard gate includes the leg that leaves an IPM installation alone. An `irishealth-community` 2026.2 container is then started in `HSCUSTOM` and seeded (the real bootstrap, then the test and fixture classes under `src/ExecuteMCPv2/Tests` and `src/ExecuteMCPv2/QAFixtures`). Every package's `prepublishOnly`, every integration suite, the five process gates and the launcher's live files run against it.
 - `package` packs the eight packages, installs the tarballs together into a clean directory, and starts every server bin (an `initialize` and a `tools/list`) and every CLI bin. It runs only after `gates` and `throwaway` are green, so no tarball is built from a red commit.
-- `ipm` builds the IPM archive of the `ExecuteMCPv2` package from the generated embed (never from `src/`) on a throwaway `iris-community` 2026.2 container with no network, and installs that one archive on a fresh `iris-community` 2026.2 container (`USER`) and a fresh `irishealth-community` 2026.2 container (`HSCUSTOM`), each with no network (`node scripts/ci-ipm-archive.mjs`). On the community edition it shows that the install guard refuses a newer, `dev` or marker-less `Setup` and leaves it untouched and that an older `Setup` is upgraded; on both editions it shows that 36 classes compile, that the REST application is configured with no roles and answers, that `%IPM_Repo.Definition` holds 0 rows at every read, and that the guard's `Classify` equals the TypeScript comparator on a shared table of cases. It issues only the IPM verbs `load`, `package` and `list`, publishes nothing and reads no secret. It runs after `gates` and `throwaway`, in parallel with `package`.
+- `ipm` builds the IPM archive of the `ExecuteMCPv2` package from the generated embed (never from `src/`) on a throwaway `iris-community` 2026.2 container with no network, and installs that one archive on a fresh `iris-community` 2026.2 container (`USER`) and a fresh `irishealth-community` 2026.2 container (`HSCUSTOM`), each with no network (`node scripts/ci-ipm-archive.mjs`). On the community edition it shows that the install guard refuses a newer, `dev` or marker-less `Setup` and leaves it untouched and that an older `Setup` is upgraded; on both editions it shows that 36 classes compile, that the REST application is configured with no roles and answers, that `%IPM_Repo.Definition` holds 0 rows at every read, and that the guard's `Classify` equals the TypeScript comparator on a shared table of cases. It then proves what the IPM registry would serve: it fetches GitHub's archive of the commit under test (three attempts, never a local stand-in in CI), requires it to equal `git archive` of that commit and to hold the module's members (the root `module.xml`, `ipm/src` and the guard under `preload/`), re-tars it as the registry does and installs it the same way on both editions, at the committed tree's marker. It issues only the IPM verbs `load`, `package` and `list`, publishes nothing and reads no secret. It runs after `gates` and `throwaway`, in parallel with `package`.
 
 An armed suite fails if any test in it was skipped (skipped, pending, todo or disabled), unless an `allowedSkips` entry in `scripts/lib/ci-checks.mjs` names the test and gives the reason. The allowlist holds the four golden-capture legs, which run only under the capture CLI, and the nine DocDB lifecycle tests of the data integration suite, so CI never runs that lifecycle: on a fresh instance `%Service_DocDB` is disabled, and a database the REST API creates has no `Security.DocDBs` record. An entry that no longer matches a skipped test fails too. An armed run therefore cannot go green on a test that vitest reports as skipped; a test that returns early without asserting is reported as passed, which the wrapper cannot see. A new check is registered in `scripts/lib/ci-checks.mjs` and in `ci.yml`, and `ci-workflow.test.ts` fails when the two differ.
 
@@ -1102,14 +1166,14 @@ An armed suite fails if any test in it was skipped (skipped, pending, todo or di
 
 A release is published only by `.github/workflows/release.yml`, which runs `node scripts/release.mjs` (alias `pnpm release`). Nothing else publishes: no workflow step and no `package.json` script holds a publish command, and `release-workflow.test.ts` fails on one. The steps of a release:
 
-1. Run `pnpm run version`. It runs `changeset version`, then regenerates every artifact that embeds the version (`pnpm gen:bootstrap`: the embed, its `BOOTSTRAP_VERSION` marker and `ipm/module.xml`), and prints the `BOOTSTRAP_VERSION` move. Run it as `pnpm run version`, because `pnpm version` hands over to `npm version`, and the script refuses to run as that hook. For the first release only, run `pnpm run version -- --first-release`, which first copies the 1.0.0 template (`scripts/release/changeset-1.0.0.md`) into `.changeset/` so that all eight packages land on 1.0.0.
+1. Run `pnpm run version`. It runs `changeset version`, then regenerates every artifact that embeds the version (`node scripts/gen-bootstrap.mjs --ipm`: the embed, its `BOOTSTRAP_VERSION` marker, the root `module.xml` and the stamped IPM tree under `ipm/src` and `preload/`, which this step alone writes, so that `main` always holds the content of the last release; then `pnpm gen:pack` and `pnpm gen:listings`: the Claude Code plugin's `plugin.json` version, the marketplace entry's `ref` (`v<version>`) and the five `server.json` files of the MCP Registry), and prints the `BOOTSTRAP_VERSION` move. Run it as `pnpm run version`, because `pnpm version` hands over to `npm version`, and the script refuses to run as that hook. For the first release only, run `pnpm run version -- --first-release`, which first copies the 1.0.0 template (`scripts/release/changeset-1.0.0.md`) into `.changeset/` so that all eight packages land on 1.0.0. It also stamps the VS Code extension, which follows the shared version: its `package.json` and `package-lock.json` are set to the new version, and the `## [Unreleased]` heading of its `CHANGELOG.md` (which must be that file's first `##` heading, so put the release's entries under it first) becomes `## [<version>] — <date>`. `prepare` refuses a release whose extension manifest, lock or changelog heading is not at the release version.
 2. Write the root `CHANGELOG.md` section of the release, naming the `BOOTSTRAP_VERSION` move that step 1 printed.
 3. Commit the result, merge it to `main`, and wait for CI to be green on the merged commit.
 4. Tag the commit `v<MAJOR.MINOR.PATCH>` (for example `v1.0.0`) on `main` and push the tag. `ci-gate` refuses a tag whose commit `main` does not contain, so tag the merged commit and never a branch commit.
-5. Approve the run in the `release` environment: the **Review deployments** button on the run page approves it. The environment itself (Settings, Environments) holds the required reviewer and the secrets.
-6. When the run has published, run `pnpm release verify --version <MAJOR.MINOR.PATCH>` (for example `pnpm release verify --version 1.0.0`). It reads the registry and changes nothing: every package must be there at that version with a provenance attestation, and `npx -y @iris-mcp/dev@1` must start in a clean temporary home, npm cache and working directory and answer `initialize` with that version. It exits 0 when all of it holds, 1 when a check fails, and 2 for a usage error, and it covers the `@1` major only (`@1` serves the newest `1.x`, so verify a release before a later `1.x` is published). Registry propagation can lag right after an upload, so a first red run is worth repeating once.
+5. Approve the run in the `release` environment: the **Review deployments** button on the run page approves it. The environment itself (Settings, Environments) holds the required reviewer and the secrets. Once the run has published, the owner presses Release on the Open Exchange listing for IPM (owner step O-IPM, below), before another version commit reaches `main`.
+6. When the run has published, run `pnpm release verify --version <MAJOR.MINOR.PATCH>` (for example `pnpm release verify --version 1.0.0`). It reads the registries and changes nothing: every package must be there at that version with a provenance attestation, the five servers must be listed on the MCP Registry at that version, the IPM registry is `pending` (and verify does not fail for it) until the owner has pressed Release on the Open Exchange listing and, once it lists the version, the module in the archive it serves (the root `module.xml`, `ipm/src` and `preload`) must equal `git archive v<MAJOR.MINOR.PATCH>` member for member and byte for byte, the rest of that archive being `main` at the press and not compared (fetch the tags first: `git fetch --tags`), and `npx -y @iris-mcp/dev@1` must start in a clean temporary home, npm cache and working directory and answer `initialize` with that version. It exits 0 when all of it holds, 1 when a check fails, and 2 for a usage error, and it covers the `@1` major only (`@1` serves the newest `1.x`, so verify a release before a later `1.x` is published). Registry propagation can lag right after an upload, so a first red run is worth repeating once.
 
-The workflow has four jobs. `ci-gate` waits for a green `ci.yml` run on the tagged commit and refuses a tag run unless the `release` environment is protected (a required reviewer, no administrator bypass, and exactly one tag rule, `v*`) and the tagged commit is on `main` (GitHub's compare of `main...<sha>` answers `identical` or `behind`; any other answer, or none, refuses). The main check comes before the wait, so a refused tag asks for no approval, and there is no maintenance-branch allowance. `prepare` runs every root check script that CI's `gates` job runs (each script whose name has a `check` or `validate` word, such as `check:provenance`, `validate:prompts` and the `gen:*:check` scripts; `format:check` is the one exemption), then every package's `prepublishOnly` once, armed on a seeded IRIS for Health throwaway, and only then packs the eight tarballs with `pnpm pack` (no lifecycle script), the extension's vsix and the IPM tree, with a manifest of their hashes. `rehearse` verifies the hashes and runs `npm publish --dry-run` on each tarball; it has no environment, no OIDC permission and no secret. `publish` runs only on a tag push and only after the other three, behind the `release` environment: it uploads the exact bytes that `rehearse` exercised, in the order `client-config`, `shared`, `admin`, `data`, `dev`, `interop`, `ops`, `all`, with npm provenance. A version that is already on the registry is skipped, and the first failure stops everything after it; the report names every package and channel as published, already published, failed, not attempted or skipped.
+The workflow has four jobs. `ci-gate` waits for a green `ci.yml` run on the tagged commit and refuses a tag run unless the `release` environment is protected (a required reviewer, no administrator bypass, and exactly one tag rule, `v*`) and the tagged commit is on `main` (GitHub's compare of `main...<sha>` answers `identical` or `behind`; any other answer, or none, refuses). The main check comes before the wait, so a refused tag asks for no approval, and there is no maintenance-branch allowance. `prepare` runs every root check script that CI's `gates` job runs (each script whose name has a `check` or `validate` word, such as `check:provenance`, `validate:prompts` and the `gen:*:check` scripts; `format:check` is the one exemption), then every package's `prepublishOnly` once, armed on a seeded IRIS for Health throwaway, and only then packs the eight tarballs with `pnpm pack` (no lifecycle script), the extension's vsix and the five registry listings, with a manifest of their hashes. The IPM tree is committed, so it packs none: a release refuses a tree whose stamped marker is not `BOOTSTRAP_VERSION` (the version step did not run on the final content), and a dry run only notes the difference. `rehearse` installs the store CLIs (`@vscode/vsce` and `ovsx`, exact pins of the extension, with `npm ci --ignore-scripts`), verifies the hashes, runs `npm publish --dry-run` on each tarball and reads each store, read-only, to say whether the vsix is ready; it has no environment, no OIDC permission and no secret. `publish` runs only on a tag push and only after the other three, behind the `release` environment: it uploads the exact bytes that `rehearse` exercised, in the order `client-config`, `shared`, `admin`, `data`, `dev`, `interop`, `ops`, `all`, with npm provenance, then the extension to the VS Code Marketplace and to Open VSX (it installs the same two CLIs first, with no install script), the IPM channel (no upload: a manual step, below), and the five listings to the MCP Registry. A version that is already on the registry or on a store is skipped, and the first failure stops every channel after it (the one exception is the MCP Registry in a rehearsal, below); the report names every package and channel as published, already published, failed, not attempted, skipped or a manual step.
 
 **A publish that stops part-way.** If a publish stops part-way, fix the cause and run the release again: versions already on the registry are skipped. If the cause was outside the repository (a token, a registry outage), use **Re-run failed jobs** on the same run, which reuses its rehearsed artifacts. A re-run runs the release script and workflow of the tagged commit, so a fix to either of them, like a fix that changes a package, needs a new patch version: release that version instead.
 
@@ -1118,14 +1182,25 @@ The channels, in publish order, and their default state:
 | Channel | Default state | Enabled by |
 | --- | --- | --- |
 | npm (`@iris-mcp/*`) | enabled | |
-| VS Code Marketplace (the extension's vsix) | disabled: `skipped: not enabled (Story 42.7)` | Story 42.7 |
-| Open VSX (the same vsix) | disabled: `skipped: not enabled (Story 42.7)` | Story 42.7 |
-| IPM (the packaging repository `jbrandtmse/iris-execute-mcp-v2-ipm`) | disabled: `skipped: not enabled (Story 42.8)` | Story 42.8 |
+| VS Code Marketplace (the extension's vsix) | enabled | Story 42.7 |
+| Open VSX (the same vsix) | enabled | Story 42.7 |
+| IPM (the root `module.xml`; the owner's Open Exchange Release) | manual step | Story 42.8 |
+| MCP Registry (the five `server.json` listings), last | enabled | Story 42.8 |
 
-A disabled channel still runs its read-only dry step in a rehearsal and reports whether it is ready (for example, the extension's publisher is still `TBD-at-publish-time`). The IPM registry reads the default branch of the packaging repository, so the IPM channel pushes the staged tree there and tags it; listing the new version on Open Exchange is a manual release step (its "Release app" press has no API), done after the push.
+Every channel is enabled by default; a channel that `RELEASE_CHANNELS` switches off still runs its read-only dry step in a rehearsal and reports whether it is ready. The IPM channel has no upload: listing the new version on Open Exchange is a manual release step (its "Release app" press has no API), and the run reports it as a `manual step`.
+
+**A channel that is not set up is skipped, not a failure.** In a rehearsal and in a release, an Open VSX namespace that does not exist (owner step O1: `npx ovsx create-namespace iris-mcp`) makes that channel `skipped (not set up: <reason>)`: the run does not fail for it, the channels after it still run, and an npm-only release can go out. Every skipped channel is listed in a "Skipped channels" block at the end of the report (which is also the step summary) and as a `::warning::` annotation, so a skip is never silent. After the owner step, run the release again for the same tag: npm and the channels that already published read `already published`, and the skipped channel publishes. Only a missing owner setup that the store itself reports is a skip; an unreadable store, a hash mismatch, a missing CLI, a failed upload and anything on npm still fail the run and stop the channels after them. The VS Code Marketplace has no such skip, because no public read-only answer tells a publisher that does not exist from one that has published nothing yet; for the same reason its rehearsal `ready` checks only that the version is not already there, and says so (`ready (would publish …; publisher not checked: … the owner confirms the publisher iris-mcp (step O1) and its trusted-publishing policy (step O2))`), so a missing publisher fails only at upload, and the IPM channel is not one of them: it is a manual step that never fails or blocks a run (below), so only a missing store setup is skipped, and an npm-only release can go out.
+
+**IPM is a manual step (owner step O-IPM, after the tag).** IPM publishes from this repository: the existing Open Exchange listing `IRIS-MCP-Server-Suite-2` points at it, and the registry reads the root `module.xml` of `main` and serves a re-tar of GitHub's archive of `main` when the owner presses Release on the listing. The release uploads nothing and needs no repository, deploy key or secret. It reads the IPM registry, read-only: a version the registry lists is `already published`; any other answer, and a registry it cannot read, is a `manual step` (`ready (manual step after the tag: ...)` in a rehearsal), shown as a "Manual steps" block at the end of the report and as a `::warning::` annotation, and it never changes the run's exit code. The owner does it once the release has published and `main` holds its version commit, and before a later version commit reaches `main` (the registry packages `main` at the moment of the press, not the tag; the committed IPM tree changes only in the version step, so it always holds the last released content): open https://openexchange.intersystems.com/package/IRIS-MCP-Server-Suite-2, choose Edit, confirm the GitHub URL is exactly `https://github.com/jbrandtmse/iris-execute-mcp-v2` (the registry binds the module name to it on the first publish), tick **Publish in Package Manager**, save (and send for approval if asked), then press **Release** with the version of the root `module.xml` of `main` and the version's section of `CHANGELOG.md` as the notes. After every later release press Release on the same listing with the new version. Then `pnpm release verify --version <v>` turns IPM from `pending` to `ok`; if it reports that the module differs from the tag, press Release before another version commit reaches `main`, or ask the registry to republish. **Never create a `master` branch in this repository**: the registry reads `.../master/module.xml`, which GitHub redirects to `main` only while no `master` branch exists.
+
+**What `verify` checks for IPM, and why only the module.** Once the registry lists the version, `verify` compares the module's own files in the archive the registry serves with `git archive v<version>`: the root `module.xml` and every file under `ipm/src` and `preload/`, byte for byte, with no file missing and none extra, and the served `module.xml` must carry the release's version. Those are every file an IPM install reads, so a served module that differs from the tag in any byte fails `verify`. The rest of the served archive is not compared, because the registry packages `main` at the moment the owner presses Release, not the tag: commits that reach `main` after the version commit (documentation, tests, TypeScript) are in that archive, and they must not fail `verify` when they leave the module alone.
+
+**MCP Registry.** The MCP Registry is in preview, so its channel runs last and never blocks the others: in a rehearsal its `not ready` is reported without failing the run, and the rehearsal still reads it when an earlier channel is `not ready` (the read changes nothing). In a release a failed upload fails the run only after every other channel has finished (rerun it to recover), and after an earlier channel's failure it is `not attempted`. It needs no owner step and no secret: `mcp-publisher` (v1.8.8, downloaded and verified by its sha256 pin) logs in with the job's GitHub OIDC token, and the registry grants `io.github.jbrandtmse/*` from it. For each of the five servers the channel asks the registry first (a listed version is `already published`), waits until npm serves the package version, then publishes its `server.json`. `pnpm release verify --version <v>` also checks that the five servers are listed at `<v>`.
 
 **The dry run.** A push to a `release-dry-run/**` branch, or a manual dispatch of the workflow (once the file is on the default branch), runs every job except `publish`, so the whole path is proven before a tag exists: `git push origin <sha>:refs/heads/release-dry-run/<name>`. A tag push is never a dry run: it is the release itself, so a dry-run trigger is never a tag. A manual dispatch on a tag ref is a dry run, because `publish` runs only for a push. A dry run publishes nothing: before the first release, `npm view @iris-mcp/shared` still answers E404 afterwards.
 
 **npm authentication.** The `publish` job uses npm trusted publishing (OIDC) whenever no token is set. Until each package has a trusted publisher (npm cannot configure one for a package that does not exist yet), the first release uses a short-lived granular token, scoped to `@iris-mcp`, stored as the `NPM_TOKEN` secret of the `release` environment. Create it with read and write access to the `@iris-mcp` scope, with "Bypass two-factor authentication" turned on (otherwise a write token asks for a one-time password, which a workflow cannot give), and with an expiry of 7 days or less; npm ends direct publishing with such a token in January 2027. The script writes it to a 0600 temporary userconfig that it deletes on every exit path, and never prints it. After the first publish, configure trusted publishing for each package (npm 11.15 or later, with two-factor authentication: `npm trust github @iris-mcp/<package> --file release.yml --repo jbrandtmse/iris-execute-mcp-v2 --env release --allow-publish`), delete the `NPM_TOKEN` secret, and no workflow change is needed.
+
+**Store authentication.** The extension is published under the publisher `iris-mcp` on both stores (the Marketplace publisher id, and the Open VSX namespace, which Open VSX matches case-sensitively). Before each upload the script asks the store, read-only, whether it already holds the version: a version that is there is `already published` and nothing is uploaded, an absent one is uploaded with `--skip-duplicate` (an exit 0 that prints `is already published. Skipping publish.` is also `already published`), and an answer that cannot be judged (an unreadable store, or a 200 that is not the store's own answer) stops the release before that store's upload: npm, and the Marketplace when Open VSX is the one that stopped, are already published, and the job is re-run once the store answers. The Marketplace uses trusted publishing (`vsce publish --oidc`, with the job's `id-token: write`), because Azure DevOps global personal access tokens stop working on 2026-12-01. Set it up once under the publisher's Trusted Publishing page with the owner `jbrandtmse`, the repository `iris-execute-mcp-v2`, the workflow `release.yml` and the environment `release`; there is no Marketplace secret. If the Marketplace refuses the OIDC publish of a brand-new extension, the owner uploads the exact vsix of the release run's `release-artifacts` on the publisher page instead, and records the exception. Open VSX needs an access token for the first publish of an extension (a trusted publisher can be registered only for an extension that exists): store it as the `OVSX_PAT` secret of the `release` environment, create the namespace once with `OVSX_PAT=<token> npx ovsx create-namespace iris-mcp` (the token in the environment, so that it is not in the command's arguments or the process list; the shell still records the line as typed, so start it with a space where the shell skips such lines, or delete it from the history afterwards), and after that publish register a trusted publisher for the namespace (GitHub Actions, `jbrandtmse`, `iris-execute-mcp-v2`, `release.yml`, `release`) and delete the secret. With no `OVSX_PAT` the script asks `ovsx` for trusted publishing. The OIDC variables of the job reach only the three publish commands (`npm publish`, `vsce publish`, `ovsx publish`), `OVSX_PAT` reaches only `ovsx publish` (as an environment variable, never in its arguments), and `VSCE_PAT` is never passed on. The extension's version equals the shared version, so a store reads `already published` only when the same tag is released again; its first store release is the next release after `1.0.0`, which is npm only.
 
 **A bad release** is fixed forward: the fix is a new patch release through the same workflow, so `@1` clients receive it. A version with a security, data-loss or broken-install defect is also marked with `npm deprecate @iris-mcp/<package>@<version> "<reason>; use >=<fixed version>"`. A release is never removed with `npm unpublish`, which breaks installs. For the extension and the IPM package there is no rollback: the fix is published as the next version. The security reporting route is in [SECURITY.md](SECURITY.md).

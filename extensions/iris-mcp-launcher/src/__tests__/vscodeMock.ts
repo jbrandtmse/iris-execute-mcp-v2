@@ -43,6 +43,9 @@
  *   shape mirrors the declared class
  * - `ConfigurationTarget`/`StatusBarAlignment` enum values mirror the
  *   declared members
+ * - `workspace.workspaceFolders` is `readonly WorkspaceFolder[] | undefined`
+ *   (`undefined` when no folder is open), each `{ uri, name, index }`
+ *   (scripted via `mockState.workspaceFolders`)
  *
  * Tests manipulate {@link mockState} (reset via {@link resetMockState}) to
  * script the editor's side of every interaction; nothing here fakes a shape
@@ -148,6 +151,15 @@ export interface MockState {
   inputBoxCalls: { prompt?: string; password?: boolean; placeHolder?: string }[];
   /** `workspace.onDidChangeConfiguration` listeners. */
   configChangeListeners: ((event: { affectsConfiguration(section: string): boolean }) => void)[];
+  /** What `workspace.workspaceFolders` returns: `undefined` when no folder is open (the declared shape), else the folders. */
+  workspaceFolders: readonly MockWorkspaceFolder[] | undefined;
+}
+
+/** Mirrors the declared `vscode.WorkspaceFolder` (`@types/vscode` 1.125.0): `uri`, `name` and `index`, all readonly. */
+export interface MockWorkspaceFolder {
+  readonly uri: Uri;
+  readonly name: string;
+  readonly index: number;
 }
 
 export const mockState: MockState = {
@@ -170,6 +182,7 @@ export const mockState: MockState = {
   inputBoxResponder: () => undefined,
   inputBoxCalls: [],
   configChangeListeners: [],
+  workspaceFolders: undefined,
 };
 
 /** Restore every piece of scripted editor state between tests. */
@@ -193,6 +206,7 @@ export function resetMockState(): void {
   mockState.inputBoxResponder = () => undefined;
   mockState.inputBoxCalls = [];
   mockState.configChangeListeners = [];
+  mockState.workspaceFolders = undefined;
 }
 
 function disposable(): MockDisposable {
@@ -327,6 +341,11 @@ export const window = {
 };
 
 export const workspace = {
+  /** Mirrors the declared `readonly workspaceFolders: readonly WorkspaceFolder[] | undefined`. */
+  get workspaceFolders(): readonly MockWorkspaceFolder[] | undefined {
+    return mockState.workspaceFolders;
+  },
+
   getConfiguration: (section: string) => ({
     get: <T>(key: string, defaultValue: T): T => {
       const fullKey = `${section}.${key}`;

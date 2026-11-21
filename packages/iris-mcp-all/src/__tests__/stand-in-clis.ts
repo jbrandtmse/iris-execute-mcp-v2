@@ -152,3 +152,14 @@ export function installStandIns(root: string, names: readonly string[]): StandIn
     script: (name, rules) => writeFileSync(path.join(dir, `${name}.script.json`), JSON.stringify(rules), "utf8"),
   };
 }
+
+/**
+ * Install the `vsce` and `ovsx` stand-ins where the release script looks for them: the extension's `node_modules/.bin` under
+ * `repoRoot`. A rule's `stdout` may be the skip line a store CLI prints after `--skip-duplicate` found the version
+ * (`Version <v> is already published. Skipping publish.`), and every call records the environment the CLI was started with.
+ */
+export function installStoreClis(standIns: StandIns, repoRoot: string): void {
+  const bin = path.join(repoRoot, "extensions", "iris-mcp-launcher", "node_modules", ".bin");
+  standIns.installInto("vsce", bin);
+  standIns.installInto("ovsx", bin);
+}

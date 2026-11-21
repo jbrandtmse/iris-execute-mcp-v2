@@ -201,8 +201,8 @@ describe("Story 38.7: the launcher documents that it clears MCP_TRANSPORT", () =
 
   it("the launcher CHANGELOG records the change under Changed", () => {
     const unreleased =
-      sectionsOf(read("extensions/iris-mcp-launcher/CHANGELOG.md")).find((candidate) => candidate.startsWith("## [0.1.0]")) ?? "";
-    expect(unreleased, "the launcher CHANGELOG has a 0.1.0 section").not.toBe("");
+      sectionsOf(read("extensions/iris-mcp-launcher/CHANGELOG.md")).find((candidate) => candidate.includes("(Story 38.7, DW-539)")) ?? "";
+    expect(unreleased, "a section of the launcher CHANGELOG records Story 38.7 (its heading is [Unreleased] until the version step renames it)").not.toBe("");
     const changed = squash(/### Changed[\s\S]*?(?=\n### )/.exec(unreleased)?.[0] ?? "");
     expect(changed).toContain("**The launcher clears `MCP_TRANSPORT` in every server it starts** (Story 38.7, DW-539)");
     expect(changed).toContain("`MCP_TRANSPORT: null`");

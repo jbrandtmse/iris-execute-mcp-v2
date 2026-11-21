@@ -29,6 +29,7 @@ import { applyEdits, parse as parseJsonc, type ParseError } from "jsonc-parser";
 
 import { CLIENT_ADAPTERS } from "./adapters.js";
 import { diff, insertionEdits, type DiffMechanism, type DiffOptions } from "./diff.js";
+import { homeGuardReason } from "./home-guard.js";
 import { resolveScopePath } from "./paths.js";
 import { ownEntry, readConfigEntries, type RawEntry } from "./readers.js";
 import type { VscodeInput } from "./synthesize.js";
@@ -130,6 +131,10 @@ function resolveTarget(
   const path = resolveScopePath(adapter, scope, ctx, (p) => fs.exists(p));
   if (path === null) {
     return fail(client, scope, action, null, `cannot resolve a ${scope}-scope config path for ${client} (project scope requires a projectDir)`);
+  }
+  if (scope === "project") {
+    const refusal = homeGuardReason(adapter, ctx, (p) => fs.exists(p));
+    if (refusal !== null) return fail(client, scope, action, path, refusal);
   }
   const stateDir = resolveStateDir(ctx);
   const state = readState(fs, stateDir, ctx.platform);
@@ -681,6 +686,10 @@ export function ensureInputs(
   const path = resolveScopePath(adapter, scope, ctx, (p) => fs.exists(p));
   if (path === null) {
     return failInputs(null, `cannot resolve a ${scope}-scope config path for ${client} (project scope requires a projectDir)`);
+  }
+  if (scope === "project") {
+    const refusal = homeGuardReason(adapter, ctx, (p) => fs.exists(p));
+    if (refusal !== null) return failInputs(path, refusal);
   }
   const current = readCurrent(fs, path);
   if (!current.ok) return failInputs(path, current.reason);

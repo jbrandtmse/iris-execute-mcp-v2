@@ -1,0 +1,59 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.jbrandtmse/iris-interop-mcp",
+  "title": "IRIS Interoperability Management MCP Server",
+  "description": "IRIS Interoperability Management MCP Server",
+  "repository": {
+    "url": "https://github.com/jbrandtmse/iris-execute-mcp-v2",
+    "source": "github",
+    "subfolder": "packages/iris-interop-mcp"
+  },
+  "version": "1.1.0",
+  "websiteUrl": "https://github.com/jbrandtmse/iris-execute-mcp-v2/tree/main/packages/iris-interop-mcp#readme",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@iris-mcp/interop",
+      "version": "1.1.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "IRIS_HOST",
+          "description": "Host name of the IRIS web server (a bare host name, not a URL).",
+          "default": "localhost"
+        },
+        {
+          "name": "IRIS_PORT",
+          "description": "Port of the IRIS web server (the Management Portal port).",
+          "format": "number",
+          "default": "52773"
+        },
+        {
+          "name": "IRIS_USERNAME",
+          "description": "The IRIS user the server connects as.",
+          "isRequired": true
+        },
+        {
+          "name": "IRIS_PASSWORD",
+          "description": "The password of that IRIS user.",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "IRIS_NAMESPACE",
+          "description": "The namespace the server works in by default.",
+          "default": "USER"
+        },
+        {
+          "name": "IRIS_HTTPS",
+          "description": "Connect to the IRIS web server over HTTPS.",
+          "format": "boolean",
+          "default": "false"
+        }
+      ]
+    }
+  ]
+}

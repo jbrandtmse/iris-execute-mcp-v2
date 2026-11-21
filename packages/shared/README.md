@@ -109,7 +109,7 @@ Part of the [IRIS MCP Server Suite](../../README.md).
 
 ## Server Manager Connections & the `iris-mcp-credentials` CLI
 
-`server-manager-source.ts`, `credential-chain.ts`, and `cli/credentials.ts` implement the suite's [Server Manager connections](../../README.md#server-manager-connections-iris_server_manager) feature (Epic 31): importing `intersystems.servers` definitions from VS Code Server Manager settings files instead of duplicating host/port/username into every MCP client's config. All four env vars are **optional and default off/unset** (unset `IRIS_SERVER_MANAGER` ⇒ the module is never invoked and the filesystem is never touched — the Rule #19 back-compat gate):
+`server-manager-source.ts`, `credential-chain.ts`, and `cli/credentials.ts` implement the suite's [Server Manager connections](../../README.md#server-manager-connections-optional) feature (Epic 31): importing `intersystems.servers` definitions from VS Code Server Manager settings files instead of duplicating host/port/username into every MCP client's config. All four env vars are **optional and default off/unset** (unset `IRIS_SERVER_MANAGER` ⇒ the module is never invoked and the filesystem is never touched — the Rule #19 back-compat gate):
 
 | Variable | Default | Purpose |
 |---|---|---|

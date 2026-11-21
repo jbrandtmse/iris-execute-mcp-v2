@@ -37,16 +37,28 @@
     "claude-desktop": {
       "disposition": "fixture-only-with-residual-risk",
       "date": "2026-07-28",
+      "humanOnly": {
+        "check": "after apply --client claude-desktop and a restart, the tools menu lists the server and one read call succeeds",
+        "markedOn": "2026-11-21"
+      },
       "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, per-OS claude_desktop_config.json paths) parses and round-trips add/disable/enable/remove byte-equal in the golden suite, and the entry shape matches the spec capability table. Unproven: the real Claude Desktop config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run claude-desktop --real-config on a machine with Claude Desktop installed."
     },
     "cursor": {
       "disposition": "fixture-only-with-residual-risk",
       "date": "2026-07-28",
+      "humanOnly": {
+        "check": "Settings > MCP shows the server green with its tools",
+        "markedOn": "2026-11-21"
+      },
       "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, ~/.cursor/mcp.json + .cursor/mcp.json paths, stash disable) parses and round-trips byte-equal in the golden suite. Unproven: the real Cursor config surface (no local install as of 2026-07-28; installing clients is a Project Lead choice) — certify with: node packages/client-config/scripts/certify.mjs run cursor --real-config."
     },
     "vscode": {
       "disposition": "certified-live",
       "date": "2026-07-28",
+      "humanOnly": {
+        "check": "in Copilot agent mode the iris_* tools are listed and one read call (for example iris_server_info) succeeds",
+        "markedOn": "2026-11-21"
+      },
       "host": "win32/x64",
       "server": "iris-mcp-all",
       "steps": [
@@ -73,6 +85,10 @@
     "cline": {
       "disposition": "certified-live",
       "date": "2026-07-28",
+      "humanOnly": {
+        "check": "the Cline panel shows iris-dev-mcp with its tools",
+        "markedOn": "2026-11-21"
+      },
       "host": "win32/x64",
       "server": "iris-mcp-all",
       "steps": [
@@ -99,41 +115,65 @@
     "roo-code": {
       "disposition": "fixture-only-with-residual-risk",
       "date": "2026-07-28",
-      "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, globalStorage mcp_settings.json + .roo/mcp.json paths, native disabled flag) parses and round-trips byte-equal in the golden suite. Unproven: the real Roo Code config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run roo-code --real-config."
+      "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, globalStorage mcp_settings.json + .roo/mcp.json paths, native disabled flag) parses and round-trips byte-equal in the golden suite. Unproven: the real Roo Code config surface (no local install as of 2026-07-28) — not re-certified: Roo Code was discontinued on 2026-05-15, and its adapter is kept so existing entries can be found and removed."
     },
     "windsurf": {
       "disposition": "fixture-only-with-residual-risk",
       "date": "2026-07-28",
-      "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, ~/.codeium/windsurf/mcp_config.json path, stash disable) parses and round-trips byte-equal in the golden suite. Unproven: the real Windsurf config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run windsurf --real-config."
+      "humanOnly": {
+        "check": "Devin Local shows the server from the legacy ~/.codeium/windsurf/mcp_config.json, which also confirms the import",
+        "markedOn": "2026-11-21"
+      },
+      "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, ~/.codeium/windsurf/mcp_config.json path, stash disable) parses and round-trips byte-equal in the golden suite. Unproven: the real Windsurf config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run windsurf --real-config. The client is now Devin Desktop; the adapter keeps the legacy file. Devin CLI documents an import of it that is on by default; that Devin Desktop reads it is not documented and not yet verified (docs.devin.ai, 2026-11-21)."
     },
     "codex": {
       "disposition": "fixture-only-with-residual-risk",
       "date": "2026-07-28",
+      "humanOnly": {
+        "check": "codex mcp list (or the client's equivalent) shows iris-dev-mcp",
+        "markedOn": "2026-11-21"
+      },
       "note": "Fixtures prove: the adapter data (TOML format, mcp_servers rootKey, ~/.codex/config.toml + .codex/config.toml paths) parses and round-trips add/disable/enable/remove byte-equal in the golden suite; the native `enabled` flag is docs-verified (Story 33.1 probe: learn.chatgpt.com config reference documents mcp_servers.<id>.enabled). Unproven: the real Codex CLI config surface (no local install as of 2026-07-28; installing clients is a Project Lead choice) — certify with: node packages/client-config/scripts/certify.mjs run codex --real-config."
     },
     "gemini": {
       "disposition": "fixture-only-with-residual-risk",
       "date": "2026-07-28",
+      "humanOnly": {
+        "check": "gemini mcp list (or the client's equivalent) shows iris-dev-mcp",
+        "markedOn": "2026-11-21"
+      },
       "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, ~/.gemini/settings.json paths, shell $VAR/${VAR} env expansion, stash disable) parses and round-trips byte-equal in the golden suite. Unproven: the real Gemini CLI config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run gemini --real-config."
     },
     "zed": {
       "disposition": "fixture-only-with-residual-risk",
       "date": "2026-07-28",
+      "humanOnly": {
+        "check": "the agent panel shows the context server as active",
+        "markedOn": "2026-11-21"
+      },
       "note": "Fixtures prove: the adapter data (JSON format, context_servers rootKey, per-OS settings.json paths, zed command-object entry shape, stash disable) parses and round-trips byte-equal in the golden suite. Unproven: the real Zed config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run zed --real-config."
     },
     "goose": {
       "disposition": "fixture-only-with-residual-risk",
       "date": "2026-07-28",
-      "note": "Fixtures prove: the adapter data (YAML format, extensions rootKey, per-OS config.yaml paths, goose stdio extension shape, native enabled flag) parses and round-trips byte-equal in the golden suite. Unproven: the real Goose config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run goose --real-config."
+      "humanOnly": {
+        "check": "goose mcp list (or the client's equivalent) shows iris-dev-mcp",
+        "markedOn": "2026-11-21"
+      },
+      "note": "Fixtures prove: the adapter data (YAML format, extensions rootKey, per-OS config.yaml paths, goose stdio extension shape, native enabled flag) parses and round-trips byte-equal in the golden suite. Unproven: the real Goose config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run goose --real-config. The Windows path was corrected on 2026-11-21 to %APPDATA%/Block/goose/config/config.yaml (goose-docs.ai config-files guide)."
     },
     "kimi": {
       "disposition": "fixture-only-with-residual-risk",
       "date": "2026-07-28",
-      "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, ~/.kimi/mcp.json path, stash disable, --mcp-config-file per-invocation override documented not modeled) parses and round-trips byte-equal in the golden suite. Unproven: the real Kimi CLI config surface (no local install as of 2026-07-28 — the installed Kimi CODE is a different product with its own adapter) — certify with: node packages/client-config/scripts/certify.mjs run kimi --real-config."
+      "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, ~/.kimi/mcp.json path, stash disable, --mcp-config-file per-invocation override documented not modeled) parses and round-trips byte-equal in the golden suite. Unproven: the real Kimi CLI config surface (no local install as of 2026-07-28 — the installed Kimi CODE is a different product with its own adapter) — not re-certified: Kimi CLI is archived and Kimi Code (the kimi-code adapter) replaces it; this adapter is kept so existing entries can be found and removed."
     },
     "kimi-code": {
       "disposition": "certified-live",
       "date": "2026-07-28",
+      "humanOnly": {
+        "check": "the Kimi Code VS Code extension (moonshot-ai.kimi-code) lists the server from ~/.kimi-code/mcp.json with IRIS_PASSWORD exported, and the Kimi Code CLI half runs ~/.kimi-code/bin/kimi, which the scratch-HOME harness cannot reach",
+        "markedOn": "2026-11-21"
+      },
       "host": "win32/x64",
       "server": "iris-mcp-all",
       "steps": [
@@ -172,10 +212,28 @@
           "claim": "repo-root .mcp.json sharing between Claude Code and Kimi Code (binding-spec claim, AC 33.4.4)",
           "claudeSide": "verified-live (see claude-code record)",
           "kimiSide": "FALSIFIED for kimi-code 0.29.0 as probed — official docs (moonshotai.github.io/kimi-code MCP customization) document ONLY .kimi-code/mcp.json as the project path (no .mcp.json fallback anywhere); live print-mode probes loaded NO project-scope server: a distinctive WORKING probe server (iris-sharing-probe, node dist entry) placed first in .mcp.json then in .kimi-code/mcp.json answered TOOL-NOT-LOADED to mcp__iris-sharing-probe__iris_server_info, even in a TUI-registered workspace",
-          "consequence": "the adapter data fallback was REMOVED (ADAPTER_DATA_VERSION 2026-07-25.2 → 2026-07-28.1, drift-fix data patch); project-scope loading itself may be TUI-only (print mode loads user scope only) — residual risk recorded",
+          "consequence": "the adapter data fallback was REMOVED (ADAPTER_DATA_VERSION 2026-07-25.2 → 2026-07-28.1, drift-fix data patch; adapter data is 2026-11-21.1 since Story 42.9); project-scope loading itself may be TUI-only (print mode loads user scope only) — residual risk recorded",
           "date": "2026-07-28"
         }
       }
+    },
+    "pi": {
+      "disposition": "fixture-only-with-residual-risk",
+      "date": "2026-11-21",
+      "humanOnly": {
+        "check": "pi mcp list (or the client's equivalent) shows iris-dev-mcp",
+        "markedOn": "2026-11-21"
+      },
+      "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, ~/.pi/agent/mcp.json with the PI_CODING_AGENT_DIR override, and .pi/mcp.json paths, stash disable) parses and round-trips byte-equal in the golden suite, including compact, CRLF, BOM and 4-space-indented files. Unproven: the real Pi config surface (no local install as of 2026-11-21; installing clients is a Project Lead choice) - the paths and the override variable are docs-verified (docs.pi.dev, 2026-11-21)."
+    },
+    "jetbrains-junie": {
+      "disposition": "fixture-only-with-residual-risk",
+      "date": "2026-11-21",
+      "humanOnly": {
+        "check": "junie mcp list (or the client's equivalent) shows iris-dev-mcp",
+        "markedOn": "2026-11-21"
+      },
+      "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, ~/.junie/mcp/mcp.json and .junie/mcp/mcp.json paths, stash disable) parses and round-trips byte-equal in the golden suite, including compact, CRLF, BOM and 4-space-indented files. Unproven: the real Junie config surface (no local install as of 2026-11-21) - the paths are docs-verified (junie.jetbrains.com, 2026-11-21); no Windows-specific path is documented, so the home-relative form is used on every platform."
     }
   }
 }

@@ -104,16 +104,18 @@ describe("Story 42.5: the README Releasing subsection", () => {
     expect(section).toContain("with npm provenance");
     expect(section).toContain("it has no environment, no OIDC permission and no secret");
     expect(section).toContain("runs only on a tag push and only after the other three, behind the `release` environment");
-    expect(section).toContain("published, already published, failed, not attempted or skipped");
+    expect(section).toContain("published, already published, failed, not attempted, skipped or a manual step");
   });
 
   it("states each channel's default state and the story that enables it, matching the code", () => {
     const rows = sectionUnder(readme, RELEASING).split("\n").filter((line) => line.startsWith("| "));
     expect(rows.length).toBe(RELEASE_CHANNELS.length + 2);
     const bodies = rows.slice(2);
-    RELEASE_CHANNELS.forEach((channel: { id: string; enabled: boolean; enabledBy?: string }, index: number) => {
+    RELEASE_CHANNELS.forEach((channel: { id: string; enabled: boolean; manual?: boolean; enabledBy?: string }, index: number) => {
       const row = squash(bodies[index] ?? "");
-      if (channel.enabled) {
+      if (channel.manual === true) {
+        expect(row, channel.id).toContain("| manual step |");
+      } else if (channel.enabled) {
         expect(row, channel.id).toContain("| enabled |");
       } else {
         expect(row, channel.id).toContain(`disabled: \`skipped: not enabled (${channel.enabledBy})\``);
@@ -123,7 +125,7 @@ describe("Story 42.5: the README Releasing subsection", () => {
     expect(bodies[0]).toContain("npm (`@iris-mcp/*`)");
     expect(bodies[1]).toContain("VS Code Marketplace");
     expect(bodies[2]).toContain("Open VSX");
-    expect(bodies[3]).toContain("`jbrandtmse/iris-execute-mcp-v2-ipm`");
+    expect(bodies[3]).toContain("the root `module.xml`; the owner's Open Exchange Release");
     expect(section).toContain("runs its read-only dry step in a rehearsal and reports whether it is ready");
     expect(section).toContain("listing the new version on Open Exchange is a manual release step");
   });

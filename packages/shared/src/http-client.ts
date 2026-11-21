@@ -200,17 +200,12 @@ export class IrisHttpClient {
       this.activeControllers.delete(controller);
     };
 
-    // Story 35.3: pin the request locale explicitly (`IRIS_ACCEPT_LANGUAGE`,
-    // default English) so `%Status` error text renders predictably. Setting
-    // NO header is not a neutral act here: Node's `fetch`/undici injects
-    // `Accept-Language: *` on the caller's behalf, and IRIS resolves `*` to
-    // the alphabetically-first locale — which is how this client came to
-    // render Arabic `%Status` prefixes on an `enuw` instance (probe in the
-    // Story 35.3 record; `curl`, which genuinely omits the header, renders
-    // English, which is why the two disagreed). This addresses ONE of TWO
-    // independent mechanisms — the per-worker-process message-table selection
-    // (Rule #13) is untouched and still requires the existing ERROR#/خطأ#
-    // strippers (Utils.cls, Diagram/Loader.cls).
+    // The request locale is pinned (`IRIS_ACCEPT_LANGUAGE`, default English) so `%Status` error text renders predictably. Sending
+    // no header is not neutral: Node's `fetch` supplies `Accept-Language: *` itself, and IRIS resolves `*` to the
+    // alphabetically-first message language of the instance. IRIS chooses the message language per request: the `%CSP.REST`
+    // dispatcher sets `%response.Domain` and calls `%response.MatchLanguage()` on every request, which matches this header
+    // against the languages the instance has. The error-prefix strippers (`ExecuteMCPv2.Utils.StripErrorPrefix`,
+    // `Diagram/Loader.cls`) still remove one English or localized prefix.
     //
     // Override precedence: `init.extraHeaders` then a per-call
     // `options.headers` are spread after, so either wins — but ONLY under the

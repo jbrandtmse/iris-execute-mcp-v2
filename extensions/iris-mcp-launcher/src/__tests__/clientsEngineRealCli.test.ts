@@ -24,15 +24,20 @@
  *      owned re-add (`IRIS_GOVERNANCE_FILE` from
  *      `irisMcpLauncher.governanceFile`) does.
  *   5. **The Story-33.3 sanctioned additive**: `detect --json` carries the
- *      `dispositions` array (Pi `excluded-not-mcp-capable` + roadmap rows).
+ *      `dispositions` array (the roadmap rows: Kilo Code and Antigravity CLI).
+ *   6. **The home-directory refusal (Story 42.9, DW-702)**: a project-scope
+ *      apply with the working directory equal to HOME reaches the typed
+ *      wrapper's error string with the CLI's reason, and writes nothing.
  *
  * **Never fails on a pristine checkout**: an unbuilt client-config dist SKIPS
  * with a logged reason (mirrors the iris-mcp-all process gates).
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { skipUnbuilt } from "./builtDist.js";
 import {
   applyJson,
   availableModes,
@@ -92,7 +97,7 @@ function runInSandbox(
 ): (command: ClientsCliCommand) => Promise<ClientsCliResult> {
   const effectiveSettings = settings(settingsOverrides);
   const env = buildClientsCliEnv(effectiveSettings, target.extraEnv, { ...sandboxAmbient, ...ambientOverrides });
-  return (command) => runClientsCli(target, command, env);
+  return (command) => runClientsCli(target, command, env, process.cwd());
 }
 
 beforeAll(async () => {
@@ -133,11 +138,7 @@ afterAll(() => {
 });
 
 function skipIf(ctx: { skip: () => void }, label: string): boolean {
-  if (!skipReason) return false;
-  // eslint-disable-next-line no-console
-  console.log(`[SKIP] clients engine real-CLI e2e (${label}): ${skipReason}`);
-  ctx.skip();
-  return true;
+  return skipUnbuilt(ctx, `clients engine real-CLI e2e (${label})`, skipReason);
 }
 
 /** Plant the claude-code fixture at its real user-scope path inside the sandbox. */
@@ -157,7 +158,7 @@ function resetHome(): void {
 
 describe("Story 33.3 — clients engine subprocess e2e through the REAL built bin (AC 33.3-I1)", () => {
   it(
-    "detect --json carries the roster AND the sanctioned dispositions array (Pi not-MCP-capable + roadmap rows)",
+    "detect --json carries the roster AND the sanctioned dispositions array (the roadmap rows; Pi is an adapter now)",
     async (ctx) => {
       if (skipIf(ctx, "detect")) return;
       resetHome();
@@ -172,10 +173,11 @@ describe("Story 33.3 — clients engine subprocess e2e through the REAL built bi
       expect(data.clients.find((row) => row.client === "claude-code")?.detected).toBe(true);
       expect(data.counts.probed).toBe(data.clients.length);
       expect(data.counts.dispositioned).toBe(data.dispositions?.length);
-      const pi = data.dispositions?.find((row) => row.id === "pi");
-      expect(pi?.disposition).toBe("excluded-not-mcp-capable");
-      expect(pi?.reason).toContain("no built-in MCP support");
-      expect(data.dispositions?.some((row) => row.disposition === "roadmap")).toBe(true);
+      expect(data.clients.some((row) => row.client === "pi")).toBe(true);
+      expect(data.clients.some((row) => row.client === "jetbrains-junie")).toBe(true);
+      expect(data.dispositions?.map((row) => row.id)).toEqual(["kilo-code", "antigravity"]);
+      expect(data.dispositions?.every((row) => row.disposition === "roadmap")).toBe(true);
+      expect(data.dispositions?.some((row) => row.disposition === ("excluded-not-mcp-capable" as string))).toBe(false);
     },
     120000,
   );
@@ -347,4 +349,53 @@ describe("Story 33.3 — clients engine subprocess e2e through the REAL built bi
     },
     120000,
   );
+
+  it(
+    "DW-702: a project-scope apply run from the HOME directory surfaces the CLI's refusal reason in the typed wrapper's error, not \"see stderr\", and the sandbox is byte-unchanged",
+    async (ctx) => {
+      if (skipIf(ctx, "home-directory refusal")) return;
+      resetHome();
+      const before = snapshotTree(home);
+      const env = buildClientsCliEnv(settings(), target.extraEnv, sandboxAmbient);
+      const runFromHome = (command: ClientsCliCommand): Promise<ClientsCliResult> => runClientsCli(target, command, env, home);
+
+      const applied = await applyJson(runFromHome, {
+        client: "cursor", scope: "project", servers: ["iris-dev-mcp"], mode: "env-reference",
+      });
+      expect(applied.ok).toBe(false);
+      if (applied.ok) return;
+      const file = path.join(home, ".cursor", "mcp.json");
+      expect(applied.error).toBe(
+        `iris-mcp-clients apply failed: refusing to write the project scope of cursor: the project directory ${home} is your home directory, ` +
+          `so the project file ${file} is the user file ${file}. Open a project folder (or cd into one), or use --scope user.`,
+      );
+      expect(applied.error).not.toContain("see stderr");
+      expect(snapshotTree(home)).toEqual(before);
+
+      const toggled = await toggleJson(runFromHome, "remove", { client: "cursor", scope: "project", server: "iris-dev-mcp" });
+      expect(toggled.ok).toBe(false);
+      if (toggled.ok) return;
+      expect(toggled.error).toContain("is your home directory");
+    },
+    120000,
+  );
 });
+
+/** Every path under `dir` with a content hash: the byte-level snapshot a refusal must leave unchanged. */
+function snapshotTree(dir: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const walk = (current: string): void => {
+    for (const name of readdirSync(current).sort()) {
+      const full = path.join(current, name);
+      const rel = path.relative(dir, full);
+      if (lstatSync(full).isDirectory()) {
+        out[rel] = "dir";
+        walk(full);
+      } else {
+        out[rel] = createHash("sha256").update(readFileSync(full)).digest("hex");
+      }
+    }
+  };
+  walk(dir);
+  return out;
+}

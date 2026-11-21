@@ -150,8 +150,10 @@ describe("Story 39.1: the READMEs state the tool, its default state and the refu
     expect(row).toContain("`availableActions`");
   });
 
-  it("the root README says the payload table was last re-measured at a Story 39.x or 40.x (Story 39.2 re-measured it after this story, and Story 40.1 after that)", () => {
-    expect(squash(rootReadme)).toMatch(/Last re-measured at Story (?:39|40)\.\d+ \(`pnpm measure:tools-payload`/);
+  it("the root README says the payload table was last re-measured at this story or a later one (Story 39.2 re-measured it after this story, Story 40.1 after that, and Story 42.9 after that)", () => {
+    const match = /Last re-measured at Story (\d+)\.(\d+) \(`pnpm measure:tools-payload`/.exec(squash(rootReadme));
+    expect(match, "the re-measured sentence").not.toBeNull();
+    expect(Number(match?.[1]) > 39 || (Number(match?.[1]) === 39 && Number(match?.[2]) >= 1)).toBe(true);
   });
 
   it("the interop README has a subsection for the tool with the governance default and the 7-day window", () => {

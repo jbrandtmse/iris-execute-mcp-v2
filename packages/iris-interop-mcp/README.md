@@ -28,11 +28,11 @@ All servers use the same environment variables:
 |----------|---------|-------------|
 | `IRIS_HOST` | `localhost` | IRIS hostname or IP |
 | `IRIS_PORT` | `52773` | IRIS web server port |
-| `IRIS_USERNAME` | `_SYSTEM` | IRIS username |
+| `IRIS_USERNAME` | *(required)* | IRIS username. There is no default: a server that starts without it fails, naming the variable. |
 | `IRIS_PASSWORD` | *(required)* | IRIS password |
 | `IRIS_NAMESPACE` | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | `false` | Use HTTPS instead of HTTP |
-| `IRIS_ACCEPT_LANGUAGE` | `en-US,en;q=0.9` | **Optional.** `Accept-Language` header sent on every request, pinning `%Status` error text to a predictable language instead of whatever locale an unspecified header resolves to. IRIS also selects a message table per worker process independently of this header, so localized prefixes can still appear — existing prefix-stripping is unaffected. Details: [suite README](../../README.md#2-set-environment-variables). |
+| `IRIS_ACCEPT_LANGUAGE` | `en-US,en;q=0.9` | **Optional.** `Accept-Language` header sent on every request, pinning `%Status` error text to a predictable language instead of whatever locale an unspecified header resolves to. IRIS also chooses the message language per request, by matching this header against the languages the instance has, so a localized prefix can still appear when the header names one — existing prefix-stripping is unaffected. Details: [suite README](../../README.md#2-set-environment-variables). |
 | `IRIS_DATA_POLICY` | *(unset — `redact`)* | **Optional.** `block`, `redact` or `allow` (case-insensitive): the PHI data policy for every profile that no `IRIS_PROFILES` entry sets. Default **`redact`**: `iris_message_body` shows an HL7 v2 body redacted by a reviewed keep-list and withholds every other body, the `preview` action of `iris_message_resend` shows an HL7 v2 body only as its class name and withholds every other body with a reason, and the `body` and `searchTable` actions of `iris_message_search` run and return header rows only. `allow` shows bodies as stored; `block` withholds every body and refuses the `body` and `searchTable` actions, and withholds the Event Log text of `iris_production_logs` and the error text of `iris_message_diagram`. Every one of these is a read, enabled by default. Per profile and in the governance file: see [PHI data policy](#phi-data-policy-iris_data_policy). A malformed value fails startup naming the channel. |
 
 ### Multiple servers & the `server` parameter

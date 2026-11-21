@@ -248,6 +248,7 @@ describe("Story 32.2 QA — UI→file→server→gate round-trip at the wire (en
         engineTarget,
         { kind: "set", file: policyPath, profile: undefined, key: "iris_doc_put", value: false },
         engineEnv,
+        process.cwd(),
       );
       expect(setResult.spawnError).toBeUndefined();
       expect(setResult.status, `set must exit 0 (stderr: ${setResult.stderr.trim()})`).toBe(0);
@@ -294,12 +295,14 @@ describe("Story 32.2 QA — UI→file→server→gate round-trip at the wire (en
         engineTarget,
         { kind: "unset", file: policyPath, profile: undefined, key: "iris_doc_put" },
         engineEnv,
+        process.cwd(),
       );
       expect(unsetResult.status).toBe(0);
       const diffResult = await runGovernanceCli(
         engineTarget,
         { kind: "diff", file: policyPath },
         engineEnv,
+        process.cwd(),
       );
       expect(diffResult.status).toBe(0);
       const diff = JSON.parse(diffResult.stdout) as DiffJson;

@@ -46,6 +46,8 @@ function mutate(source: string, from: string, to: string): string {
 
 const CHECKOUT = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0";
 const DRY_RUN = "        run: node scripts/release.mjs publish --dry-run --artifacts ${{ runner.temp }}/release-artifacts\n";
+/** The step that installs the store CLIs, which rehearse and publish both have. */
+const INSTALL_STORE_CLIS = "      - name: install the store CLIs\n        run: npm ci --ignore-scripts\n        working-directory: extensions/iris-mcp-launcher\n";
 const BARE_PUBLISH = "        run: node scripts/release.mjs publish --artifacts ${{ runner.temp }}/release-artifacts\n        env:\n";
 const PUBLISH_IF = "    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}\n";
 const REHEARSE_HEAD = "    needs: [prepare]\n    runs-on: ubuntu-24.04\n    timeout-minutes: 20\n    permissions:\n      contents: read\n";
@@ -73,11 +75,31 @@ describe("AC 42.5.1: release.yml is the declaration", () => {
     expect(owners((job) => JSON.stringify(job).includes("secrets."))).toEqual(["publish"]);
     expect(owners((job) => JSON.stringify(job).includes("github.token"))).toEqual(["ci-gate", "publish"]);
     expect(workflow.jobs["publish"]?.["environment"]).toBe("release");
+    const publishSteps = workflow.jobs["publish"]?.["steps"] as Array<{ run?: string; env?: Record<string, string> }>;
+    const publishEnv = publishSteps.find((step) => String(step.run ?? "").startsWith("node scripts/release.mjs publish"))?.env;
+    expect(publishEnv, "the publish step holds each secret a channel reads, and nothing else (IPM has no upload, so no key)").toEqual({
+      NPM_TOKEN: "${{ secrets.NPM_TOKEN }}",
+      OVSX_PAT: "${{ secrets.OVSX_PAT }}",
+      GITHUB_TOKEN: "${{ github.token }}",
+    });
     expect([...(workflow.jobs["publish"]?.["needs"] as string[])].sort()).toEqual(["ci-gate", "prepare", "rehearse"]);
     expect(workflow.jobs["publish"]?.["if"]).toBe(PUBLISH_CONDITION);
     expect(workflow.jobs["publish"]?.["if"]).toBe("${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}");
     expect(workflow.jobs["publish"]?.["permissions"]).toEqual({ actions: "read", contents: "read", "id-token": "write" });
     expect(workflow.jobs["ci-gate"]?.["permissions"]).toEqual({ actions: "read", contents: "read" });
+  });
+
+  it("no IPM secret, deploy key, pinned host key or ssh option is in release.yml, its declaration or the release script (decision #122), and a reintroduced secret is a problem of the check", () => {
+    // Built from parts, so that this file holds none of the removed names (the removal is also checked by grep).
+    const names = ["IPM_" + "DIST_DEPLOY_KEY", "known" + "_hosts", "GIT_SSH" + "_COMMAND", "Strict" + "HostKeyChecking", "ssh" + "-ed25519", "deploy" + "-key"];
+    for (const file of [".github/workflows/release.yml", "scripts/lib/release-checks.mjs", "scripts/release.mjs", "scripts/lib/release-core.mjs"]) {
+      const source = readFileSync(path.join(REPO_ROOT, file), "utf8");
+      for (const name of names) expect(source, `${file}: ${name}`).not.toContain(name);
+    }
+    const reintroduced = mutate(text, "          OVSX_PAT: ${{ secrets.OVSX_PAT }}\n", `          OVSX_PAT: \${{ secrets.OVSX_PAT }}\n          ${names[0]}: \${{ secrets.${names[0]} }}\n`);
+    const problems = releaseWorkflowProblems(reintroduced);
+    expect(problems, "the declaration refuses a secret the publish step does not declare").not.toEqual([]);
+    expect(problems.join("\n"), "and the problem names the reintroduced secret").toContain(names[0]);
   });
 
   it("the setup-node step of publish takes no registry-url, so npm's own authentication decides (OIDC or the token userconfig)", () => {
@@ -197,6 +219,13 @@ describe("AC 42.5.1: release.yml is the declaration", () => {
     ["a job with a strategy", () => mutate(text, "    timeout-minutes: 20\n", '    timeout-minutes: 20\n    strategy:\n      matrix:\n        node: ["22"]\n'), /sets a strategy, defaults or env|job rehearse sets strategy/],
     ["a job env", () => mutate(text, "    timeout-minutes: 20\n", "    timeout-minutes: 20\n    env:\n      A: b\n"), /sets a strategy, defaults or env|job rehearse sets env/],
     ["a step shell", () => mutate(text, "        run: pnpm build\n", '        run: pnpm build\n        shell: "true {0}"\n'), /sets shell/],
+    // Story 42.7: the store CLIs are installed with no install script in the two jobs that run them, and `OVSX_PAT` is a secret of `publish` alone.
+    ["the store CLI install dropped from rehearse and publish", () => mutate(text, INSTALL_STORE_CLIS, ""), /job rehearse has 4 steps, the declaration has 5[\s\S]*job publish has 4 steps, the declaration has 5/],
+    ["the store CLI install run with its install scripts", () => mutate(text, "run: npm ci --ignore-scripts", "run: npm ci"), /job rehearse: step 4 is[\s\S]*job publish: step 4 is/],
+    ["the store CLI install in another directory", () => mutate(text, "        working-directory: extensions/iris-mcp-launcher\n      - name: rehearse the upload", "      - name: rehearse the upload"), /job rehearse: step 4 is/],
+    ["OVSX_PAT dropped from the publish step", () => mutate(text, "          OVSX_PAT: ${{ secrets.OVSX_PAT }}\n", ""), /job publish: step 5 is/],
+    ["a VSCE_PAT secret passed to the publish step", () => mutate(text, "          OVSX_PAT: ${{ secrets.OVSX_PAT }}\n", "          OVSX_PAT: ${{ secrets.OVSX_PAT }}\n          VSCE_PAT: ${{ secrets.VSCE_PAT }}\n"), /job publish: step 5 is/],
+    ["OVSX_PAT read in rehearse", () => mutate(text, DRY_RUN, `${DRY_RUN}        env:\n          OVSX_PAT: \${{ secrets.OVSX_PAT }}\n`), /job rehearse reads a secret: only publish may/],
     ["the prepare job without the artifact upload", () => mutate(text, "      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2\n        with:\n          name: release-artifacts\n          path: ${{ runner.temp }}/release-artifacts\n          if-no-files-found: error\n", ""), /job prepare has 8 steps/],
   ] as Array<[string, () => string, RegExp]>)("fails on %s", (_label, apply, expected) => {
     expect(releaseWorkflowProblems(apply()).join("\n")).toMatch(expected);
@@ -212,7 +241,7 @@ describe("AC 42.5.1: release.yml is the declaration", () => {
     expect(rehearse["permissions"]).toEqual({ contents: "read" });
     expect(JSON.stringify(rehearse)).not.toMatch(/secrets\.|github\.token|id-token/);
     const runs = (rehearse["steps"] as Array<Record<string, any>>).map((step) => step["run"]).filter((run) => typeof run === "string");
-    expect(runs).toEqual(["node scripts/release.mjs publish --dry-run --artifacts ${{ runner.temp }}/release-artifacts"]);
+    expect(runs).toEqual(["npm ci --ignore-scripts", "node scripts/release.mjs publish --dry-run --artifacts ${{ runner.temp }}/release-artifacts"]);
   });
 });
 
@@ -383,10 +412,10 @@ describe("the npm publish order and the channels", () => {
     expect(violations(allFirst).sort()).toEqual(["admin", "data", "dev", "interop", "ops"].map((short) => `@iris-mcp/all before @iris-mcp/${short}`));
   });
 
-  it("the channels are npm, then the Marketplace, Open VSX and IPM; only npm is enabled, and each other names the story that enables it", () => {
-    expect(RELEASE_CHANNELS.map((channel: { id: string }) => channel.id)).toEqual(["npm", "vscode-marketplace", "open-vsx", "ipm"]);
-    expect(RELEASE_CHANNELS.map((channel: { enabled: boolean }) => channel.enabled)).toEqual([true, false, false, false]);
-    expect(RELEASE_CHANNELS.map((channel: { enabledBy?: string }) => channel.enabledBy)).toEqual([undefined, "Story 42.7", "Story 42.7", "Story 42.8"]);
+  it("the channels are npm, the Marketplace, Open VSX, IPM and the MCP Registry last, and all five are enabled (Story 42.8)", () => {
+    expect(RELEASE_CHANNELS.map((channel: { id: string }) => channel.id)).toEqual(["npm", "vscode-marketplace", "open-vsx", "ipm", "mcp-registry"]);
+    expect(RELEASE_CHANNELS.map((channel: { enabled: boolean }) => channel.enabled)).toEqual([true, true, true, true, true]);
+    expect(RELEASE_CHANNELS.map((channel: { enabledBy?: string }) => channel.enabledBy)).toEqual([undefined, undefined, undefined, undefined, undefined]);
   });
 
   it("the pins of the release workflow are the CI pins plus the two artifact actions, each a 40-hex commit", () => {

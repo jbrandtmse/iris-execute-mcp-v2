@@ -4,22 +4,25 @@
 //
 // USE
 //   node scripts/ci-ipm-archive.mjs [--edition community|health]     (default: both editions)
-//   CI runs it as the last step of the `ipm` job. It needs docker, the built `@iris-mcp/shared` (`pnpm build`) and a checked-in
-//   `ipm/module.xml` that `pnpm gen:bootstrap` wrote from the same embed.
+//   CI runs it as the last step of the `ipm` job. It needs docker, the built `@iris-mcp/shared` (`pnpm build`), a git checkout, and the
+//   committed IPM tree (the root `module.xml`, `ipm/src`, `preload`) that `pnpm gen:ipm` wrote at the last version step. In CI it also
+//   needs `GITHUB_ACTIONS`, `GITHUB_REPOSITORY` and `GITHUB_SHA`, which every workflow run sets.
 //
 // CONTRACT
 //   1. PREFLIGHT, before any container: the shared dist exports the embed, no embedded class still holds the `dev` placeholder, the
-//      stamped markers are the embed's, and `ipm/module.xml` names the embed's module at the embed's semver (exit 2).
-//   2. NOTHING IS FETCHED. All three containers run `--network none` (the harness starts them with it and re-inspects
+//      stamped markers are the embed's, and the committed tree has a root `module.xml` and a stamped guard to read the served leg's
+//      expectations from (exit 2).
+//   2. NOTHING IS FETCHED INTO A CONTAINER. Every container runs `--network none` (the harness starts them with it and re-inspects
 //      `HostConfig.NetworkMode === "none"` and no published port before every session), IPM is imported from the copy every image
 //      carries (`/usr/irissys/dist/install/misc/zpm.xml`), and `%IPM_Repo.Definition` is read after the import and after every
-//      verb: it must hold 0 rows each time.
-//   3. BUILD. The embed is staged (`stageModule`: `module.xml`, `src/cls/**`, `preload/src/cls/ExecuteMCPv2/InstallGuard.cls`) and
-//      mounted read-only into a fresh `iris-community:2026.2` container (`USER`). There IPM runs `load -dev` and then `package`;
-//      exactly one `.tgz` must appear in the emptied output directory, and it is copied out. The archive is read on the host, in-process
-//      (`readTgz` and `extractEntries` of `scripts/lib/ipm-archive.mjs`: `node:zlib` and a tar reader, so no `tar` or `gzip` binary is
-//      spawned): the member set must equal the embed (35 classes, the guard, no test or fixture member), each member must equal the
-//      embed after LF and trailing-whitespace normalization, and the manifest it carries must declare what `ipm/module.xml` declares.
+//      verb: it must hold 0 rows each time. The one fetch of the run, GitHub's archive of the commit (7a), is made on the host.
+//   3. BUILD. The embed is staged (`stageModule`, in the layout of the committed tree: `module.xml`, `ipm/src/cls/**`,
+//      `preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls`) and mounted read-only into a fresh `iris-community:2026.2` container
+//      (`USER`). There IPM runs `load -dev` and then `package`; exactly one `.tgz` must appear in the emptied output directory, and it
+//      is copied out. The archive is read on the host, in-process (`readTgz` and `extractEntries` of `scripts/lib/ipm-archive.mjs`:
+//      `node:zlib` and a tar reader, so no `tar` or `gzip` binary is spawned): the member set must equal the embed (35 classes, the
+//      guard, no test or fixture member), each member must equal the embed after LF and trailing-whitespace normalization, and the
+//      manifest it carries must declare what the manifest rendered for the embed declares.
 //   4. INSTALL, community (`USER`): on a fresh container, three synthetic `ExecuteMCPv2.Setup` classes (marker newer, `dev`,
 //      no `BOOTSTRAPVERSION`) are each loaded and the archive's `load` must FAIL with the install guard's text, leaving Setup's
 //      marker as it was, no module in `list`, and no repository row; a synthetic older Setup then installs. The checks of the I/O
@@ -35,19 +38,35 @@
 //      answer must equal `classifyDeployedMarker` of the shared dist.
 //   7. The only IPM verbs any session issues are `load`, `package` and `list` (`scripts/lib/ipm-archive.mjs`, `IPM_VERBS`). The script
 //      has no `install`, `publish`, `repo`, `enable` or `update` anywhere, publishes nothing and reads no secret.
+//   7a. SERVED LEG (Story 42.8, DW-694; decision #122). The IPM registry downloads GitHub's archive of the repository's default branch,
+//      extracts it and re-tars it; it serves that tar, not what `package` builds. This leg proves that path on the commit under test:
+//        - IN CI (`GITHUB_ACTIONS` set) it fetches `https://codeload.github.com/<GITHUB_REPOSITORY>/tar.gz/<GITHUB_SHA>` from the runner
+//          host (an unauthenticated public GET, never from a container) and requires its members (the `<repo>-<sha>/` folder removed)
+//          and every file's bytes to equal `git archive --format=tar.gz HEAD`. A fetch that fails, or answers anything but 200, is
+//          tried up to three times in all (waits of 2 s and 5 s) and then fails the leg: there is no fallback to a local emulation in CI.
+//        - LOCALLY it uses `git archive --format=tar.gz HEAD` and prints that it is a local emulation of GitHub's archive.
+//      The archive must hold the module's members (the root `module.xml` and every tracked file under `ipm/src` and `preload`), no
+//      root `requirements.txt`, and nothing under `preload/` but the guard. It is the whole repository, so its other members are not
+//      judged. It is extracted under the registry directory and, on a fresh `--network none` container per edition, GNU tar re-tars it
+//      the registry's way inside the container (`tar --exclude=.git -czf ... -C <root> .`, so no pax headers); the community re-tar is
+//      copied out and its members are checked again (`./module.xml` at the top, no `.git`, the module's members); then `load <that
+//      archive>` (not a dev directory) must succeed and the install checks of step 4 and the parity of step 6 hold for it on both
+//      editions. What it expects to install (marker, version, class count) is read from the committed tree, not from the embed: between
+//      releases the embed moves and the tree stays at the last released content.
 //   8. Every container is started and removed only through `scripts/throwaway-iris.mjs`; this script builds no docker argument. A
 //      container is removed on every exit path, SIGINT and SIGTERM included, and so is the temporary directory. A failing
 //      phase prints the container's log before the container is removed.
 //
 // EXIT CODES
 //   0 passed; 1 a check failed (the message names the phase and the edition); 2 usage or a refusal (a bad option, a missing dist,
-//   an embed that is not stamped); 3 docker is not on PATH; 4 a container did not start or become ready.
+//   an embed that is not stamped, no committed tree, a CI run without GITHUB_REPOSITORY or GITHUB_SHA); 3 docker is not on PATH;
+//   4 a container did not start or become ready.
 //
 // IMPORT
 //   Importing this module runs nothing. `runIpmArchive(options)` takes the environment, the repository root and the harness
 //   dependencies as options.
 
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, copyFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -69,8 +88,12 @@ import {
   GUARD_REFUSAL_TEXT,
   INSTALL_MOUNT,
   OUTPUT_DIRECTORY,
+  REGISTRY_ARCHIVE,
+  REGISTRY_ARCHIVE_NAME,
+  REGISTRY_CASES_FILE,
   STAGE_MOUNT,
   REST_APP,
+  archiveEqualityProblems,
   archiveNames,
   archiveProblems,
   deleteSetupScript,
@@ -87,17 +110,24 @@ import {
   manifestProblems,
   markerSemver,
   markerValue,
+  moduleMemberSet,
   outputDirectoryScript,
   parityProblems,
   parityScript,
   readTgz,
+  registryArchiveProblems,
+  registryArchiveScript,
   seedMarkers,
+  servedArchiveUrl,
   setupStateScript,
   stageModule,
+  stripArchivePrefix,
   synthesizedSetup,
+  treeExpectations,
 } from './lib/ipm-archive.mjs';
 import { REPO_ROOT } from './lib/live-gate-scan.mjs';
 import { isEntryPoint } from './lib/script-process.mjs';
+import { defaultServedDeps, fetchWithRetry } from './lib/served-archive.mjs';
 
 /** The editions the proof installs on: the image, the namespace the archive is installed into, and the label of the container. */
 export const EDITIONS = Object.freeze({
@@ -148,6 +178,7 @@ const tail = (text, count) => String(text).trimEnd().split('\n').slice(-count).j
  *   repoRoot?: string,
  *   log?: (line: string) => void,
  *   harnessDeps?: ReturnType<typeof defaultDeps>,
+ *   served?: ReturnType<typeof defaultServedDeps>,
  *   tmpRoot?: string,
  *   onContainer?: (container: { label: string, id: string, teardown: ReturnType<typeof createTeardown> }) => void,
  * }} [options]
@@ -160,6 +191,9 @@ export function startRun(options = {}) {
   const log = options.log ?? ((line) => process.stderr.write(`${line}\n`));
   const say = (line) => log(`ci-ipm-archive: ${line}`);
   const harnessDeps = options.harnessDeps ?? defaultDeps(env);
+  // The two outside calls of the served leg: a read-only git, and the public GET of GitHub's archive (CI only).
+  const served = options.served ?? defaultServedDeps({ env, cwd: repoRoot });
+  const inCi = env.GITHUB_ACTIONS === 'true';
 
   /** Every container this run started and has not removed yet. */
   const containers = [];
@@ -296,7 +330,7 @@ export function startRun(options = {}) {
     }
     need(problems.length === 0, phase, undefined, `the archive differs from the embed:\n  - ${problems.slice(0, 20).join('\n  - ')}`);
     const declared = manifestDeclarations(embed.moduleXml);
-    say(`[${phase}] ${members.length} members: module.xml, ${embed.classes.size} classes equal to the embed, the preloaded guard, no test or fixture member; the manifest declares the same ${declared.resources.length} resources and ${declared.invokes.length} invokes as ipm/module.xml`);
+    say(`[${phase}] ${members.length} members: module.xml, ${embed.classes.size} classes equal to the embed, the preloaded guard, no test or fixture member; the manifest declares the same ${declared.resources.length} resources and ${declared.invokes.length} invokes as the manifest rendered for the embed`);
   }
 
   /** Write the install directory: the archive, the synthetic Setup classes and the parity cases. */
@@ -320,6 +354,83 @@ export function startRun(options = {}) {
     writeFileSync(path.join(directories.install, 'cases.json'), `${text}\n`, 'utf8');
     for (const entry of ['cases.json', ...Object.keys(seeds).map((leg) => `setup-${leg}.cls`), archiveName(embed)]) chmodSync(path.join(directories.install, entry), 0o644);
     return { cases, seeds };
+  }
+
+  /** Every directory under `directory` (and it) 0755 and every file 0644, so the IRIS user in a container can read what a read-only mount shows it. */
+  function makeReadable(directory) {
+    chmodSync(directory, 0o755);
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) makeReadable(target);
+      else if (entry.isFile()) chmodSync(target, 0o644);
+    }
+  }
+
+  /** The output of a git call that must succeed, as a Buffer; a failure is a refusal (exit 2), because the leg cannot read the commit under test. */
+  function git(args) {
+    const result = served.git(args);
+    if (result.error !== undefined || result.status !== 0) {
+      const reason = result.error?.message ?? (String(result.stderr).trim() || `exit ${result.status}`);
+      throw new PhaseFailure('served', `git ${args[0]} failed (${reason}). The leg reads the commit under test, so run it from a git checkout of the repository.`, { code: 2 });
+    }
+    return result.stdout;
+  }
+
+  /**
+   * The served-archive leg's preparation (DW-694): obtain the archive the IPM registry downloads for the commit under test, judge it,
+   * and write the registry directory the leg mounts: the archive extracted under `root/` and the parity cases beside it. In CI the
+   * archive is GitHub's own, fetched from the host and required to equal `git archive`; locally `git archive` stands in.
+   */
+  async function prepareServedDirectory(directories) {
+    const phase = 'served';
+    const members = moduleMemberSet(git(['ls-files', 'ipm/src', 'preload']).toString('utf8'));
+    let local;
+    try {
+      local = readTgz(git(['archive', '--format=tar.gz', 'HEAD']));
+    } catch (error) {
+      if (error instanceof PhaseFailure) throw error;
+      throw new PhaseFailure(phase, `the output of git archive could not be read: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    let entries = local;
+    let source;
+    if (inCi) {
+      const sha = env.GITHUB_SHA;
+      const repository = env.GITHUB_REPOSITORY;
+      if (!sha || !repository) {
+        throw new PhaseFailure(phase, 'GITHUB_ACTIONS is set but GITHUB_SHA or GITHUB_REPOSITORY is not, so the commit under test cannot be named. Run the leg from a GitHub Actions job.', { code: 2 });
+      }
+      const url = servedArchiveUrl(repository, sha);
+      const notServed = (what) => new PhaseFailure(phase, `GitHub did not serve the archive of ${sha} (${what}). The gate proves the archive the registry downloads; it never falls back to a local emulation in CI. Fetched ${url}.`);
+      const answer = await fetchWithRetry(url, served);
+      if (answer.failure !== undefined) throw notServed(answer.failure);
+      const { bytes } = answer;
+      let fetched;
+      try {
+        fetched = stripArchivePrefix(readTgz(bytes));
+      } catch (error) {
+        throw new PhaseFailure(phase, `GitHub's archive of ${sha} could not be read: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const differences = archiveEqualityProblems(fetched, local, { actual: `GitHub's archive of ${sha}`, expected: 'git archive HEAD' });
+      need(differences.length === 0, phase, undefined, `GitHub's archive of ${sha} is not git archive HEAD (is HEAD the commit under test?):\n  - ${differences.slice(0, 20).join('\n  - ')}`);
+      entries = fetched;
+      source = `GitHub's archive of ${sha}`;
+    } else {
+      say("[served] local emulation of GitHub's archive (CI fetches the real one)");
+      source = 'git archive HEAD (local emulation)';
+    }
+
+    const problems = registryArchiveProblems(entries, members);
+    need(problems.length === 0, phase, undefined, `the archive the registry would download is not an installable module:\n  - ${problems.slice(0, 20).join('\n  - ')}`);
+    const root = path.join(directories.registry, 'root');
+    mkdirSync(root, { recursive: true, mode: 0o755 });
+    extractEntries(entries, root);
+    makeReadable(directories.registry);
+    directories.moduleMembers = members;
+    copyFileSync(path.join(directories.install, 'cases.json'), path.join(directories.registry, 'cases.json'));
+    chmodSync(path.join(directories.registry, 'cases.json'), 0o644);
+    const fileCount = entries.filter((entry) => entry.type === 'file').length;
+    say(`[${phase}] ${source}: ${fileCount} files${inCi ? ', equal to git archive HEAD' : ''}, module members present (${members.length}: module.xml, ipm/src, preload; no requirements.txt, only the guard under preload/)`);
   }
 
   const archiveInContainer = (embed) => `${INSTALL_MOUNT}/${archiveName(embed)}`;
@@ -351,33 +462,73 @@ export function startRun(options = {}) {
     say(`[${phase}] the guard refused the load over ${seedMarker === null ? 'a Setup with no BOOTSTRAPVERSION' : JSON.stringify(seedMarker)}; Setup unchanged, no module listed, 0 repository rows`);
   }
 
-  /** The install checks of the I/O matrix, after the archive was loaded. */
-  async function installChecks(container, embed, edition, cases) {
-    const phase = `install-${edition}`;
-    const semver = markerSemver(embed.marker);
+  /**
+   * The install checks of the I/O matrix, after the archive was loaded. `expected` is what the archive under test must install: the
+   * embed's marker, version and class count for the archives built from the embed (the default), the committed tree's for the served leg.
+   */
+  async function installChecks(container, embed, edition, cases, { phase = `install-${edition}`, casesFile = `${INSTALL_MOUNT}/cases.json`, expected = undefined } = {}) {
+    // The classes of classes[] plus the preloaded guard.
+    const want = expected ?? { marker: embed.marker, semver: markerSemver(embed.marker), classCount: embed.classes.size + 1 };
+    const { semver } = want;
     const listed = await ipm(container, 'list', phase, edition);
     need(listedVersion(listed.output, embed.moduleName) === semver, phase, edition, `list names ${embed.moduleName} at ${JSON.stringify(listedVersion(listed.output, embed.moduleName))}, not ${semver}.`);
     const output = await session(container, installChecksScript(), phase, edition);
-    // The classes of classes[] plus the preloaded guard.
-    const expectedClasses = embed.classes.size + 1;
-    need(value(output, 'COMPILED') === String(expectedClasses), phase, edition, `${value(output, 'COMPILED')} ExecuteMCPv2 classes are compiled and up to date, not ${expectedClasses} (the ${embed.classes.size} of classes[] and the guard).`);
+    const expectedClasses = want.classCount;
+    need(value(output, 'COMPILED') === String(expectedClasses), phase, edition, `${value(output, 'COMPILED')} ExecuteMCPv2 classes are compiled and up to date, not ${expectedClasses} (the classes of classes[] and the guard).`);
     need(value(output, 'TESTCLASSES') === '0', phase, edition, `${value(output, 'TESTCLASSES')} compiled class(es) are test or fixture classes; the archive carries none.`);
-    need(value(output, 'VERSION') === embed.marker, phase, edition, `GetBootstrapVersion() answers ${JSON.stringify(value(output, 'VERSION'))}, not ${embed.marker}.`);
+    need(value(output, 'VERSION') === want.marker, phase, edition, `GetBootstrapVersion() answers ${JSON.stringify(value(output, 'VERSION'))}, not ${want.marker}.`);
     const expectedApp = `${container.namespace}|ExecuteMCPv2.REST.Dispatch|1|`;
     need(value(output, 'APP') === expectedApp, phase, edition, `the web application ${REST_APP} reads ${JSON.stringify(value(output, 'APP'))}, not ${JSON.stringify(expectedApp)} (namespace, dispatch class, enabled, no MatchRoles).`);
     need(value(output, 'MAPPED') === '1', phase, edition, 'the %ALL namespace does not map the ExecuteMCPv2 package.');
     need(value(output, 'HTTP') === '200', phase, edition, `a GET of ${REST_APP}/config/namespace from inside the container answered ${JSON.stringify(value(output, 'HTTP'))}, not 200.`);
     need(value(output, 'GUARDDOC') === '200', phase, edition, `an Atelier GET of ${GUARD_DOCUMENT} in ${container.namespace} from inside the container answered ${JSON.stringify(value(output, 'GUARDDOC'))}, not 200: the server's bootstrap would not see that IPM installed the classes.`);
     need(value(output, 'ABSENTDOC') === '404', phase, edition, `an Atelier GET of ${ABSENT_DOCUMENT} answered ${JSON.stringify(value(output, 'ABSENTDOC'))}, not 404: a 200 for the guard document would then show nothing about the guard.`);
-    say(`[${phase}] list: ${embed.moduleName} ${semver}; ${expectedClasses} classes compiled (none a test or fixture); marker ${embed.marker}; ${REST_APP} in ${container.namespace} with no MatchRoles, %ALL mapped, GET answers 200; the guard document answers 200 through Atelier (the bootstrap's ownership signal) and a missing one 404`);
+    say(`[${phase}] list: ${embed.moduleName} ${semver}; ${expectedClasses} classes compiled (none a test or fixture); marker ${want.marker}; ${REST_APP} in ${container.namespace} with no MatchRoles, %ALL mapped, GET answers 200; the guard document answers 200 through Atelier (the bootstrap's ownership signal) and a missing one 404`);
 
-    const parity = await session(container, parityScript(`${INSTALL_MOUNT}/cases.json`), `parity-${edition}`, edition);
+    const parityPhase = phase.startsWith('registry-') ? `parity-${phase}` : `parity-${edition}`;
+    const parity = await session(container, parityScript(casesFile), parityPhase, edition);
     const raw = value(parity, 'PARITY');
-    need(raw !== undefined, `parity-${edition}`, edition, `the parity run printed no result: ${tail(parity, 10)}`);
+    need(raw !== undefined, parityPhase, edition, `the parity run printed no result: ${tail(parity, 10)}`);
     const results = raw.split(',').slice(0, -1);
     const problems = parityProblems(cases, results, embed.classify);
-    need(problems.length === 0, `parity-${edition}`, edition, `InstallGuard.Classify and classifyDeployedMarker disagree on ${problems.length} case(s):\n  - ${problems.join('\n  - ')}`);
-    say(`[parity-${edition}] ${cases.length}/${cases.length} cases agree between InstallGuard.Classify and classifyDeployedMarker`);
+    need(problems.length === 0, parityPhase, edition, `InstallGuard.Classify and classifyDeployedMarker disagree on ${problems.length} case(s):\n  - ${problems.join('\n  - ')}`);
+    say(`[${parityPhase}] ${cases.length}/${cases.length} cases agree between InstallGuard.Classify and classifyDeployedMarker`);
+  }
+
+  /**
+   * The served leg (DW-694): in a fresh container, re-tar the extracted archive of the repository the way the IPM registry does, check the
+   * members, and `load` that archive (not a dev directory); the install checks of the edition then hold for it too, against what the
+   * committed tree stamps (`expected`).
+   */
+  async function registryLeg(embed, directories, install, edition, expected) {
+    const phase = `registry-${edition}`;
+    const spec = EDITIONS[edition];
+    const container = await startContainer({ label: `registry-${edition}`, image: spec.image, namespace: spec.namespace, mountDirectory: directories.registry, mountName: 'registry', phase, edition });
+    await importIpm(container, phase, edition);
+    const before = await session(container, setupStateScript(), phase, edition);
+    need(value(before, 'SETUP') === 'absent', phase, edition, `the fresh container already has a Setup class (${JSON.stringify(value(before, 'SETUP'))}).`);
+    const made = await session(container, registryArchiveScript(), phase, edition);
+    need(value(made, 'OUTDIR') === '1', phase, edition, `the output directory ${OUTPUT_DIRECTORY} could not be emptied and created.`);
+    need(value(made, 'TAR') === '0', phase, edition, `tar exited ${JSON.stringify(value(made, 'TAR'))} making the registry-shaped archive from the served archive.`);
+    need(archiveNames(value(made, 'FILES')).join('|') === 'registry-root.tgz', phase, edition, `${OUTPUT_DIRECTORY} holds ${JSON.stringify(value(made, 'FILES'))}, not the one registry-root.tgz.`);
+    if (edition === 'community') {
+      const copied = await copyHarness({ state: container.stateFile, from: REGISTRY_ARCHIVE, to: directories.registryArchive, env }, harnessDeps);
+      need(copied === 0, phase, edition, `the registry-shaped archive could not be copied out of ${container.label} (exit ${copied}).`);
+      let entries;
+      try {
+        entries = readTgz(readFileSync(directories.registryArchive));
+      } catch (error) {
+        throw new PhaseFailure(phase, `the registry-shaped archive could not be read: ${error instanceof Error ? error.message : String(error)}`, { edition });
+      }
+      const problems = registryArchiveProblems(entries, directories.moduleMembers);
+      need(problems.length === 0, phase, edition, `the registry-shaped archive does not hold the module:\n  - ${problems.slice(0, 20).join('\n  - ')}`);
+      say(`[${phase}] the archive re-tarred as the registry serves it holds ./module.xml at its top, no .git and the ${directories.moduleMembers.length} module members`);
+    }
+    const loaded = await ipm(container, `load ${REGISTRY_ARCHIVE}`, phase, edition);
+    need(loaded.outcome === 'OK', phase, edition, `load of the registry-shaped archive did not succeed: ${loaded.outcome ?? tail(loaded.output, 20)}`);
+    say(`[${phase}] the registry-shaped archive installed on a fresh ${spec.image.split('@')[0]} in ${container.namespace}`);
+    await installChecks(container, embed, edition, install.cases, { phase, casesFile: REGISTRY_CASES_FILE, expected });
+    await removeContainer(container);
   }
 
   async function installCommunity(embed, directories, install) {
@@ -414,15 +565,18 @@ export function startRun(options = {}) {
 
   async function run() {
     let embed;
+    let treeWants;
     try {
       embed = await loadEmbed(repoRoot);
       const problems = embedProblems(embed);
       if (problems.length > 0) throw new Error(problems.join(' '));
+      treeWants = treeExpectations(repoRoot);
+      if (treeWants.moduleName !== embed.moduleName) throw new Error(`the committed module.xml names the module ${JSON.stringify(treeWants.moduleName)}, not the embed's ${JSON.stringify(embed.moduleName)}: restore the tree from git, or run pnpm gen:ipm -- --force from a clean version commit.`);
     } catch (error) {
       say(`refusing to run: ${error instanceof Error ? error.message : String(error)}`);
       return 2;
     }
-    say(`[preflight] the embed ${embed.marker} is stamped, ipm/module.xml names ${embed.moduleName} ${markerSemver(embed.marker)}, and the editions to install are ${editions.join(' and ')}`);
+    say(`[preflight] the embed ${embed.marker} is stamped; the committed tree stamps ${treeWants.marker} (module.xml ${treeWants.moduleName} ${treeWants.semver}, ${treeWants.classCount} classes); the editions to install are ${editions.join(' and ')}`);
 
     root = mkdtempSync(path.join(realpathSync(options.tmpRoot ?? tmpdir()), 'iris-mcp-ipm-'));
     const directories = {
@@ -431,6 +585,9 @@ export function startRun(options = {}) {
       install: path.join(root, 'install'),
       extract: path.join(root, 'extract'),
       archive: path.join(root, 'built', archiveName(embed)),
+      registry: path.join(root, 'registry'),
+      registryArchive: path.join(root, 'built', REGISTRY_ARCHIVE_NAME),
+      moduleMembers: [],
     };
     for (const directory of [directories.stage, directories.extract, path.dirname(directories.archive)]) mkdirSync(directory, { recursive: true, mode: 0o755 });
     chmodSync(directories.stage, 0o755);
@@ -441,7 +598,9 @@ export function startRun(options = {}) {
       const install = prepareInstallDirectory(embed, directories);
       if (editions.includes('community')) await installCommunity(embed, directories, install);
       if (editions.includes('health')) await installHealth(embed, directories, install);
-      say(`PASS: one archive of ${embed.moduleName} ${markerSemver(embed.marker)} was built on a no-network ${EDITIONS.community.image.split('@')[0]} and installed on ${editions.join(' and ')} with no network and 0 package-registry rows`);
+      await prepareServedDirectory(directories);
+      for (const edition of editions) await registryLeg(embed, directories, install, edition, treeWants);
+      say(`PASS: one archive of ${embed.moduleName} ${markerSemver(embed.marker)} was built from the embed on a no-network ${EDITIONS.community.image.split('@')[0]} and installed on ${editions.join(' and ')} with no network and 0 package-registry rows; ${inCi ? "GitHub's archive of the commit" : 'the local git archive of HEAD'}, re-tarred as the registry serves it, installed ${treeWants.moduleName} ${treeWants.semver} (${treeWants.marker}) on ${editions.join(' and ')} too`);
       return 0;
     } catch (error) {
       if (!(error instanceof PhaseFailure)) throw error;

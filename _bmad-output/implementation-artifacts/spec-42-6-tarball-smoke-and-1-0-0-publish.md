@@ -670,6 +670,39 @@ Every test added or changed passes on a fresh environment, in either order, and 
 5. **A5.** Run `node scripts/release.mjs verify --version 1.0.0`. Exit 1, every package E404: the red leg before the publish.
 6. **A6.** Send the Planner the `epic42` story sha and A1's green run id. **STOP.** The Planner merges `epic42` → wave-8 → `main`, pushes, and returns the `main` sha M.
 
+*Phase A record (lead, 2026-11-21, story sha `caf3722326d5a8ffd9b9a850e896aece3bc811d7`):*
+- **A1:** CI green, https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44858763040. The jobs gates 22.17.0/24.0.0/26.0.0, throwaway, package and ipm all passed.
+- **A2:** the dry run is green, https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44858794844.
+  - `ci-gate`:
+    - The guard reported `environment release: protected (required reviewers: jbrandtmse; admin bypass off; tags v*)`.
+    - It printed `commit caf3722… is not on main (compare: ahead); a tag run stops here`, and the dry run carried on.
+    - It saw CI green on the dry-run push run 44858794833.
+  - `prepare`:
+    - `version state: 8 packages at 1.0.0, no pending changeset`.
+    - `check:provenance: ok` and `validate:prompts: ok`.
+    - `seed and 8 prepublish suites passed, and the container is removed`.
+  - `rehearse`: 8 `@iris-mcp/*@1.0.0: dry run ok` lines in order.
+  - `publish`: skipped.
+  - The branch was deleted afterwards, and `npm view @iris-mcp/shared` still answers E404.
+- **A3:** red on the real path, https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44858796584.
+  - `ci-gate` failed about 1.5 s after it started, with `refusing the tag run: caf3722… is not on main (compare main...caf3722…: ahead). Merge it to main, then tag the merged commit. No later job runs.`
+  - It did not wait for CI. `prepare`, `rehearse` and `publish` were skipped, and the repository still has 0 deployments.
+  - `v0.0.3` was deleted locally and on origin, and its tag-push CI run 44858796830 was cancelled.
+- **A4:** the real-client tarball smoke passed.
+  - **Install:** `ci-package-smoke.mjs --keep` exited 0 (8 packages installed from tarballs, 5 servers and their CLIs answered).
+  - **Throwaway:** `iris-mcp-throwaway-64bdddaf739d`, image `intersystems/irishealth-community:2026.2@sha256:462de1fb…` (already local, nothing pulled), HSCUSTOM, 127.0.0.1:52792, no seed.
+  - **Client:** Claude Code (`claude -p`, `--mcp-config .mcp.json --strict-mcp-config`, only the five read tools allowed) launched the five tarball servers through `npx --no`. Every call answered:
+    - dev `iris_server_info`: IRIS for UNIX 2026.2 (Build 221U);
+    - admin `iris_namespace_list`: 7 namespaces;
+    - interop `iris_production_status`: Stopped;
+    - ops `iris_metrics_system`: `iris_process_count` = 43, uptime 57 s, which confirms the throwaway and not the shared instance;
+    - data `iris_analytics_cubes`: 0 cubes.
+  - **Era and version:** the 2025-era handshake (`Serving the 2025-era MCP handshake (initialize)`), and `serverInfo` `@iris-mcp/dev` `1.0.0`.
+  - **Deployed marker:** `ExecuteMCPv2.Setup_GetBootstrapVersion()` = `1.0.0+2.244fe8623c76`.
+  - **Teardown:** `down` removed the container and the kept directory was removed. No throwaway container remains, and the local image list is unchanged.
+- **A5:** `release.mjs verify --version 1.0.0` exited 1 with 9 failed checks: 8 `not on the registry` lines and `npx -y @iris-mcp/dev@1 … E404`.
+- **A6:** the `epic42` sha `caf3722` and run 44858763040 were sent to the Planner. The lead stopped for the merge.
+
 *Phase B, after the Planner returns M:*
 1. **B1. Check M** (read-only):
    - `git fetch origin`; then `git merge-base --is-ancestor <story sha> M`;
@@ -696,6 +729,21 @@ Every test added or changed passes on a fresh environment, in either order, and 
    - On the decision #75 fallback path (some packages published interactively), `verify` exits 1 by design, naming exactly the packages without provenance. Record that output as the AD-29 exception; do not expect exit 0.
 8. **B8. The token, and trusted publishing.** The owner revokes the token and deletes the `NPM_TOKEN` secret. Record the action item: `npm trust github` for the eight packages within 48 h before 42.7's release, then "require 2FA and disallow tokens" (decision 5).
 9. **B9.** Record every URL and result above. Story 42.6 closes on B7.
+
+**Phase B record (lead, 2026-11-21).**
+- **B1:** M = `55ae0eb60de0c5c3c37ff3e000b3195d33d6e8e3` (the Planner's merge of `epic42` into wave-8 into `main`). The story sha is an ancestor; `.changeset/` holds only `README.md` and `config.json`; all eight packages read `1.0.0`; CI on M is green (push run https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44862653921).
+- **B2:** `@modelcontextprotocol/server` 2.4.0 is still the pin and the latest; no newer release, so no blocker (DW-637).
+- **B3:** `GET repos/jbrandtmse/iris-execute-mcp-v2/environments/release/secrets` lists `NPM_TOKEN`, created 2026-11-21T12:14:26Z (names only, read after the Planner's notice).
+- **B4:** `git tag -a v1.0.0 55ae0eb… -m "1.0.0"`, pushed 2026-11-21T12:15Z.
+- **B5:** release run https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44902952309. `ci-gate` 12:15:09–12:15:22Z, `prepare` 12:15:24–12:29:50Z, `rehearse` 12:29:54–12:30:17Z, all green; `publish` waited on the `release` environment, the Planner was told, and the owner approved.
+- **B6:** `publish` 12:32:49–12:33:31Z: `auth: token`; `@iris-mcp/client-config`, `shared`, `admin`, `data`, `dev`, `interop`, `ops` and `all` at `1.0.0` each `published`; `vscode-marketplace`, `open-vsx` and `ipm` `skipped: not enabled`.
+- **B7:** `node scripts/release.mjs verify --version 1.0.0`, run from a worktree of `v1.0.0`:
+  - At 12:34Z and 12:37Z it exited 1 on CDN propagation only (404, then `ETARGET`, for some packages). The Planner saw every package at `latest = 1.0.0` at 12:37Z.
+  - The third run exited **0**: eight lines `ok, published with a provenance attestation`; `npx -y @iris-mcp/dev@1: ok, initialize answered serverInfo.version 1.0.0`; summary `8 packages at 1.0.0 with provenance, and npx -y @iris-mcp/dev@1 starts`.
+  - Live checks: `npm view @iris-mcp/client-config@1.0.0 dist.attestations.provenance.predicateType` reads `https://slsa.dev/provenance/v1`; the `@iris-mcp/dev@1.0.0` tarball holds `CHANGELOG.md` and `LICENSE` (DW-665); `@iris-mcp/shared@1.0.0` depends on `@modelcontextprotocol/server` `2.4.0` (DW-637).
+  - Not the decision #75 fallback: every package was published by the workflow.
+- **B8:** owner action items, sent to the Planner 2026-11-21: revoke the granular token on npmjs.com and delete the `NPM_TOKEN` secret; set up npm trusted publishing for the eight packages (GitHub Actions, `release.yml`, environment `release`) before `v1.1.0` (decision #89), then "require 2FA and disallow tokens".
+- **Ledger:** DW-47, DW-300, DW-612, DW-637, DW-665 and DW-696 resolved by this story, with the evidence above.
 
 *If something fails (AD-29 bad-release policy; never `npm unpublish`):*
 - **Red before `publish`** (`ci-gate`, `prepare` or `rehearse`): nothing was published.

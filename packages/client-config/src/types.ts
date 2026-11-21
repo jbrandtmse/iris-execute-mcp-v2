@@ -156,4 +156,6 @@ export interface HostContext {
   homeDir: string;
   /** Required to resolve/probe project-scope paths; omit to skip project scopes. */
   projectDir?: string;
+  /** True when `projectDir` resolves (real path; case-insensitive on darwin and win32) to `homeDir`. Decided at the package boundary; a project-scope write refuses when it is true (Story 42.9, DW-702). */
+  projectIsHome?: boolean;
 }

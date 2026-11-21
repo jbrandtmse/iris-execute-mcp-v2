@@ -28,6 +28,61 @@ export function mergeCertificationRecord(existing, record, passOk) {
 }
 
 /**
+ * Story 42.9 - validate a record's optional `humanOnly` marker: the part of a client's certification that only a person can do
+ * (`{ check, markedOn }`: what the person checks, and the ISO date the marker was written). The merge above never touches it: the
+ * harness record does not carry it, so a re-run keeps it.
+ *
+ * @param {object | undefined} record - one certification record
+ * @returns {string | null} what is malformed, or `null` when the marker is absent or well formed
+ */
+export function humanOnlyProblem(record) {
+  const marker = record?.humanOnly;
+  if (marker === undefined) return null;
+  if (marker === null || typeof marker !== "object" || Array.isArray(marker)) {
+    return "humanOnly must be an object with a check and a markedOn date";
+  }
+  if (typeof marker.check !== "string" || marker.check.trim() === "" || marker.check.includes("|")) {
+    return "humanOnly.check must be a non-empty string without a pipe character";
+  }
+  const date = marker.markedOn;
+  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) {
+    return "humanOnly.markedOn must be an ISO date (YYYY-MM-DD)";
+  }
+  if (new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) {
+    return "humanOnly.markedOn must be a real calendar date";
+  }
+  return null;
+}
+
+/**
+ * Story 42.9 - the `against` text of a record: the npm spec the run launched and the version the registry resolved it to, from the
+ * result of `npm view <spec> version --json` (a read). A failed or unreadable lookup records `unresolved`.
+ *
+ * @param {string} spec - the pinned entry spec, e.g. `@iris-mcp/dev@1`
+ * @param {{ status: number | null, stdout: string }} lookup - the finished `npm view` process
+ * @returns {string} `<spec> -> <version>`, or `<spec> -> unresolved`
+ */
+export function formatAgainst(spec, lookup) {
+  const unresolved = `${spec} \u2192 unresolved`;
+  if (lookup.status !== 0) return unresolved;
+  let parsed;
+  try {
+    parsed = JSON.parse(lookup.stdout);
+  } catch {
+    return unresolved;
+  }
+  const versions = (Array.isArray(parsed) ? parsed : [parsed]).filter(
+    (value) => typeof value === "string" && /^\d+\.\d+\.\d+$/.test(value),
+  );
+  const newest = [...versions].sort((a, b) => {
+    const left = a.split(".").map(Number);
+    const right = b.split(".").map(Number);
+    return (left[0] - right[0]) || (left[1] - right[1]) || (left[2] - right[2]);
+  })[versions.length - 1];
+  return newest === undefined ? unresolved : `${spec} \u2192 ${newest}`;
+}
+
+/**
  * 33-5-18 — the paths a pass CREATED: post-pass entries not present
  * pre-pass. Used for both backup FILES and backup DIRECTORIES; callers
  * delete files first, then the pass-created directories deepest-first

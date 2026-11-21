@@ -9,21 +9,28 @@
  *  - the MCP Registry name `io.github.jbrandtmse/<bin>` on the five servers (and on nothing else);
  *  - the AD-28 deny-list: nothing in a name, description or keyword presents the suite as InterSystems' or endorsed;
  *  - the license text each package ships is a byte copy of the root `LICENSE`;
- *  - the documented Node floor: the root README states the manifest floor, and no document names Node 18 or 20.
+ *  - the documented Node floor: the root README states the manifest floor, and no document names Node 18 or 20;
+ *  - the npm-publishable set: every tracked `package.json` that is not private is one of the eight packages (DW-389), and the
+ *    extension is private, published only to the stores under the publisher `iris-mcp` (Story 42.7).
  *
  * The package list is enumerated from the directory, never hand-typed, so a package added later is covered at once;
  * the expected roster is pinned separately so a package that appears or vanishes is a visible change (Rule #56).
  * This is a default-suite test (no IRIS, no build); Story 42.3 promotes it to a CI gate.
  */
 
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { listScanSurface } from "../../../../scripts/lib/npx-pin-scan.mjs";
+import { descriptionStartProblems, endorsementProblems, NO_ENDORSEMENT_SENTENCE, nameProblems } from "../../../../scripts/lib/endorsement.mjs";
+import { NPM_PUBLISH_ORDER } from "../../../../scripts/lib/release-core.mjs";
 import { REPO_ROOT } from "./pack-fixture";
 
 interface Manifest {
   name: string;
+  private?: boolean;
+  publisher?: string;
   version?: string;
   displayName?: string;
   description?: string;
@@ -96,6 +103,43 @@ describe("the roster (Rule #56)", () => {
   it("has seven TypeScript packages (a tsconfig.json), the meta-package being the only one without", () => {
     expect(PACKAGES.filter((entry) => entry.hasTsconfig)).toHaveLength(7);
     expect(PACKAGES.filter((entry) => !entry.hasTsconfig).map((entry) => entry.manifest.name)).toEqual(["@iris-mcp/all"]);
+  });
+});
+
+describe("the npm-publishable set (DW-389, Story 42.7, Rule #56)", () => {
+  /** Every tracked `package.json`, outside `node_modules` and fixtures: the files a stray `npm publish` could be run from. */
+  const trackedManifests = execFileSync("git", ["ls-files", "*package.json"], { cwd: REPO_ROOT, encoding: "utf8" })
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !/(^|\/)(node_modules|fixtures)\//.test(line))
+    .sort();
+
+  it("enumerates the root, the eight packages and the extension, so that a manifest added anywhere is seen", () => {
+    expect(trackedManifests).toEqual(
+      ["package.json", `${EXTENSION_DIRECTORY}/package.json`, ...PACKAGE_DIRECTORIES.map((directory) => `${directory}/package.json`)].sort(),
+    );
+  });
+
+  it("the manifests that are not private are exactly the eight packages of NPM_PUBLISH_ORDER", () => {
+    const publishable = trackedManifests
+      .map((file) => JSON.parse(readFileSync(join(REPO_ROOT, file), "utf8")) as Manifest)
+      .filter((manifest) => manifest.private !== true)
+      .map((manifest) => manifest.name)
+      .sort();
+    expect(publishable).toEqual([...NPM_PUBLISH_ORDER].sort());
+  });
+
+  it("the extension is private, is published under the publisher iris-mcp, and no published name contains intersystems (AD-28)", () => {
+    const { manifest } = EXTENSION;
+    expect(manifest.private).toBe(true);
+    expect(manifest.publisher).toBe("iris-mcp");
+    const storeId = `${String(manifest.publisher)}.${manifest.name}`;
+    expect(storeId).toBe("iris-mcp.iris-mcp-launcher");
+    for (const published of [...NPM_PUBLISH_ORDER, storeId, manifest.displayName ?? ""]) {
+      expect(published, "a published name contains intersystems").not.toMatch(/intersystems/i);
+    }
+    // A dependency is not our name: the extension still needs the Server Manager from the community publisher.
+    expect((manifest as { extensionDependencies?: string[] }).extensionDependencies).toEqual(["intersystems-community.servermanager"]);
   });
 });
 
@@ -219,14 +263,68 @@ describe("AD-28 deny-list: nothing presents the suite as InterSystems' or endors
     "%s",
     (_name, entry) => {
       for (const [field, text] of surfaces(entry)) {
-        expect(text, `${field} says "official"`).not.toMatch(/\bofficial\b/i);
-        expect(text, `${field} says "endorsed"`).not.toMatch(/\bendorsed\b/i);
-        expect(text, `${field} says "by InterSystems"`).not.toMatch(/\bby\s+InterSystems\b/i);
+        expect(endorsementProblems(field, text)).toEqual([]);
       }
-      expect(entry.manifest.description ?? "", "description starts with InterSystems").not.toMatch(/^\s*InterSystems/i);
-      expect(entry.manifest.name, "name contains intersystems").not.toMatch(/intersystems/i);
+      expect(descriptionStartProblems(entry.manifest.description ?? "")).toEqual([]);
+      expect(nameProblems(entry.manifest.name)).toEqual([]);
     },
   );
+
+  it("the shared deny-list flags each claim and reads a text without the suite's own non-endorsement sentence", () => {
+    expect(endorsementProblems("description", "The official server")).toEqual(['description says "official"']);
+    expect(endorsementProblems("description", "An endorsed server")).toEqual(['description says "endorsed"']);
+    expect(endorsementProblems("description", "Made by InterSystems")).toEqual(['description says "by InterSystems"']);
+    expect(endorsementProblems("description", `A server. ${NO_ENDORSEMENT_SENTENCE}`)).toEqual([]);
+    expect(endorsementProblems("description", `An official server. ${NO_ENDORSEMENT_SENTENCE}`)).toEqual(['description says "official"']);
+    expect(descriptionStartProblems("InterSystems tools")).toEqual(["description starts with InterSystems"]);
+    expect(nameProblems("my-claude-plugin")).toEqual(['name contains "claude"']);
+    expect(nameProblems("intersystems-anthropic")).toEqual(['name contains "intersystems"', 'name contains "anthropic"']);
+  });
+});
+
+describe("server.json (Story 42.8, AD-29: mcpName and the listing agree)", () => {
+  const servers = PACKAGES.filter((entry) => Object.keys(entry.manifest.bin ?? {}).some((bin) => SERVER_BINS.includes(bin)));
+
+  it.each(servers.map((entry) => [label(entry), entry] as const))("%s has a generated server.json that names its mcpName, package and version", (_name, entry) => {
+    const listing = JSON.parse(readFileSync(join(REPO_ROOT, entry.directory, "server.json"), "utf8")) as {
+      name: string;
+      version: string;
+      description: string;
+      packages: Array<{ identifier: string; version: string; registryType: string }>;
+    };
+    expect(listing.name).toBe(entry.manifest.mcpName);
+    expect(listing.version).toBe(entry.manifest.version);
+    expect(listing.packages).toHaveLength(1);
+    expect(listing.packages[0]?.identifier).toBe(entry.manifest.name);
+    expect(listing.packages[0]?.version).toBe(entry.manifest.version);
+    expect(listing.packages[0]?.registryType).toBe("npm");
+    expect(listing.description).toBe(entry.manifest.description);
+    expect(listing.description.length).toBeLessThanOrEqual(100);
+  });
+
+  it.each(servers.map((entry) => [label(entry), entry] as const))("%s: its server.json lists the six connection variables with the schema's keys (the password required and secret)", (_name, entry) => {
+    const listing = JSON.parse(readFileSync(join(REPO_ROOT, entry.directory, "server.json"), "utf8")) as { packages: Array<{ environmentVariables: Array<Record<string, unknown>> }> };
+    const shape = (listing.packages[0]?.environmentVariables ?? []).map(({ description: _description, ...rest }) => rest);
+    expect(shape).toEqual([
+      { name: "IRIS_HOST", default: "localhost" },
+      { name: "IRIS_PORT", format: "number", default: "52773" },
+      { name: "IRIS_USERNAME", isRequired: true },
+      { name: "IRIS_PASSWORD", isRequired: true, isSecret: true },
+      { name: "IRIS_NAMESPACE", default: "USER" },
+      { name: "IRIS_HTTPS", format: "boolean", default: "false" },
+    ]);
+  });
+
+  it.each(servers.map((entry) => [label(entry), entry] as const))("%s: its server.json passes the deny-list", (_name, entry) => {
+    const listing = JSON.parse(readFileSync(join(REPO_ROOT, entry.directory, "server.json"), "utf8")) as { name: string; title: string; description: string };
+    expect(endorsementProblems("title", listing.title)).toEqual([]);
+    expect(endorsementProblems("description", listing.description)).toEqual([]);
+  });
+
+  it("no package outside the five servers has a server.json", () => {
+    const withListing = PACKAGES.filter((entry) => existsSync(join(REPO_ROOT, entry.directory, "server.json"))).map((entry) => entry.manifest.name);
+    expect(withListing.sort()).toEqual(servers.map((entry) => entry.manifest.name).sort());
+  });
 });
 
 describe("what a tarball may carry (the manifests behind AC 42.1.3)", () => {

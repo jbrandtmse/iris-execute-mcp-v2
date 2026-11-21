@@ -255,7 +255,7 @@ export interface GovernanceCliResult {
 export type SpawnImpl = (
   command: string,
   args: string[],
-  options: { env: Record<string, string> },
+  options: { env: Record<string, string>; cwd: string },
 ) => {
   stdout: { on: (event: "data", listener: (chunk: Buffer | string) => void) => void };
   stderr: { on: (event: "data", listener: (chunk: Buffer | string) => void) => void };
@@ -307,11 +307,17 @@ export function resolveSpawnCommand(
  * realistic case) is killed after `timeoutMs` and resolved as a `spawnError`
  * — otherwise the panel's busy guard would wedge for the whole session
  * (32.2 review: hung child + no timeout + busy surviving panel dispose).
+ *
+ * `cwd` is the working directory of the spawned process. It is always passed
+ * explicitly, so the CLI never inherits the extension host's own directory
+ * (which depends on how the editor was launched). A relative governance file
+ * resolves against it, so it must be the directory the servers start in.
  */
 export function runGovernanceCli(
   target: GovernanceCliTarget,
   command: GovernanceCliCommand,
   env: Record<string, string>,
+  cwd: string,
   spawnImpl: SpawnImpl = realSpawn,
   timeoutMs: number = DEFAULT_CLI_TIMEOUT_MS,
   platform: NodeJS.Platform = process.platform,
@@ -321,7 +327,7 @@ export function runGovernanceCli(
   return new Promise((resolvePromise) => {
     let child: ReturnType<SpawnImpl>;
     try {
-      child = spawnImpl(resolved.command, resolved.args, { env });
+      child = spawnImpl(resolved.command, resolved.args, { env, cwd });
     } catch (error: unknown) {
       resolvePromise({
         status: null,

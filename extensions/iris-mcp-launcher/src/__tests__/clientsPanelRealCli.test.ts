@@ -36,6 +36,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { skipUnbuilt } from "./builtDist.js";
 import {
   applyJson,
   availableModes,
@@ -146,7 +147,7 @@ function makeRealEngineHost(
       return { status: null, stdout: "", stderr: "", spawnError: resolution.error };
     }
     const env = buildClientsCliEnv(effectiveSettings, resolution.target.extraEnv, effectiveAmbient);
-    return runClientsCli(resolution.target, command, env);
+    return runClientsCli(resolution.target, command, env, process.cwd());
   };
   return {
     describe: async () => {
@@ -277,11 +278,7 @@ async function openPanel(harness: PanelHarness): Promise<string> {
 }
 
 function skipAll(ctx: { skip: () => void }, label: string): boolean {
-  if (!skipReason) return false;
-  // eslint-disable-next-line no-console
-  console.log(`[SKIP] clients panel real-CLI journeys (${label}): ${skipReason}`);
-  ctx.skip();
-  return true;
+  return skipUnbuilt(ctx, `clients panel real-CLI journeys (${label})`, skipReason);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -299,7 +296,7 @@ describe("Story 33.3 QA — panel journeys through the REAL built CLI (E2E layer
       // Open: the REAL detection render — roster default-selected, Pi info
       // row, undetected collapsed in <details>, engine transparency line.
       let html = await openPanel(harness);
-      expect(html).toContain("Detected clients (1 of 13)");
+      expect(html).toContain("Detected clients (1 of 15)");
       expect(html).toContain("Claude Code");
       expect(html).not.toContain("not MCP-capable"); // dispositions section removed (2026-07-28 lead decision)
       expect(html).toContain("local build");
@@ -374,7 +371,7 @@ describe("Story 33.3 QA — panel journeys through the REAL built CLI (E2E layer
       // back to the all-detected default, no crash.
       const nonArray = makePanelHarness(makeRealEngineHost(), { roster: "claude-code" });
       let html = await openPanel(nonArray);
-      expect(html).toContain("Detected clients (1 of 13)");
+      expect(html).toContain("Detected clients (1 of 15)");
       expect(html).toContain(`&quot;toggleClient&quot;,&quot;client&quot;:&quot;claude-code&quot;}' checked`);
 
       // (b) A mixed array (numbers, null, empty strings, unknown ids — every

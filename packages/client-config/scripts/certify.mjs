@@ -44,7 +44,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { decideRestoreRung, excerpt, mergeCertificationRecord, parseCertifyArgs, passCreatedPaths, timeoutSuffix } from "./certify-record.mjs";
+import { decideRestoreRung, excerpt, formatAgainst, mergeCertificationRecord, parseCertifyArgs, passCreatedPaths, timeoutSuffix } from "./certify-record.mjs";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const BIN = path.join(PACKAGE_ROOT, "dist", "cli", "clients-cli.js");
@@ -54,6 +54,7 @@ const RESULTS_PATH = path.join(PACKAGE_ROOT, "scripts", "certification-results.j
 // never a hand-mirrored literal (a 14th adapter would have been invisible
 // here). Requires a built dist, same as render-certification-table.mjs.
 const { CLIENT_ADAPTERS } = await import("../dist/adapters.js");
+const { PKG_BY_SERVER, pinnedSpec } = await import("../dist/synthesize.js");
 const CLIENT_IDS = Object.keys(CLIENT_ADAPTERS);
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -100,6 +101,13 @@ function runMaybeShim(cmd, args, opts = {}) {
     return run("cmd.exe", ["/d", "/s", "/c", quoted], opts);
   }
   return run(cmd, args, opts);
+}
+
+/** The npm spec the run launches and the version the registry resolves it to (`npm view`, a read). */
+function resolveAgainst() {
+  const spec = pinnedSpec(PKG_BY_SERVER[server] ?? "@iris-mcp/dev");
+  const lookup = runMaybeShim("npm", ["view", spec, "version", "--json"], { timeout: 60_000 });
+  return formatAgainst(spec, lookup);
 }
 
 function cli(args, opts = {}) {
@@ -519,6 +527,7 @@ const record = {
   date: TODAY,
   host: `${process.platform}/${process.arch}`,
   server,
+  against: resolveAgainst(),
   steps: steps.map((s) => `${s.ok ? "PASS" : "FAIL"} ${s.name}`),
   evidence,
 };

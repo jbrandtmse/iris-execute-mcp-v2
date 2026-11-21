@@ -201,9 +201,9 @@ describe("readTgz and extractEntries against the host tar (Rule #36)", () => {
       stageModule(stage, realEmbed());
       const everyByte = Buffer.alloc(1024);
       for (let index = 0; index < everyByte.length; index += 1) everyByte[index] = index % 256;
-      writeFileSync(path.join(stage, "src/cls/ExecuteMCPv2/every-byte.bin"), everyByte);
-      writeFileSync(path.join(stage, "src/cls/ExecuteMCPv2/empty.bin"), "");
-      writeFileSync(path.join(stage, "src/cls/ExecuteMCPv2/over-a-block.bin"), Buffer.alloc(513, 0x7a));
+      writeFileSync(path.join(stage, "ipm/src/cls/ExecuteMCPv2/every-byte.bin"), everyByte);
+      writeFileSync(path.join(stage, "ipm/src/cls/ExecuteMCPv2/empty.bin"), "");
+      writeFileSync(path.join(stage, "ipm/src/cls/ExecuteMCPv2/over-a-block.bin"), Buffer.alloc(513, 0x7a));
       if (format.longPaths) {
         for (const long of LONG_PATHS) {
           mkdirSync(path.dirname(path.join(stage, long)), { recursive: true });
@@ -391,8 +391,8 @@ describe("an archive built the way IPM's writer builds one", () => {
     stageModule(stage, embed);
     const entries = readTgz(ipmArchive(stage));
 
-    expect(entries.map((entry) => entry.name)).toContain("src/cls/ExecuteMCPv2/Utils.cls");
-    expect(entries.map((entry) => entry.name)).toContain("preload/src/cls/ExecuteMCPv2/InstallGuard.cls");
+    expect(entries.map((entry) => entry.name)).toContain("ipm/src/cls/ExecuteMCPv2/Utils.cls");
+    expect(entries.map((entry) => entry.name)).toContain("preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls");
     expect(entries.filter((entry) => entry.type === "file")).toHaveLength(embed.classes.size + 2);
     const extracted = scratchDir();
     extractEntries(entries, extracted);

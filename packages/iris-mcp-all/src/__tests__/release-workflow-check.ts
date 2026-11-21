@@ -96,6 +96,7 @@ export const RAW_VERB = new RegExp(
   String.raw`\b(?:npm|pnpm|yarn)\b${ARGS}\s+(?:publish|stage|login|adduser|deprecate|unpublish|access|token|dist-tag|owner|trust)\b` +
     String.raw`|\bchangeset\b${ARGS}\s+(?:publish|version)\b` +
     String.raw`|\b(?:vsce|ovsx)\b${ARGS}\s+publish\b` +
+    String.raw`|\bmcp-publisher\b${ARGS}\s+(?:login|publish)\b` +
     String.raw`|\bgit\b${ARGS}\s+(?:push|tag)\b` +
     String.raw`|\bgh\b${ARGS}\s+(?:release|secret|workflow)\b` +
     String.raw`|\bdocker\b${ARGS}\s+push\b` +

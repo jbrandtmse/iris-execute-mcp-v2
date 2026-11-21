@@ -4,31 +4,40 @@
  *
  *  - THE HELPERS. Staging from an embed (and its refusals), the declarations a manifest makes, the comparison of an archive with the embed
  *    over a real `tar czf` fixture, the split session markers and how they are read back, the parity comparison.
+ *  - THE SERVED ARCHIVE (Story 42.8, DW-694; decision #122). What the IPM registry downloads is GitHub's archive of the repository: the
+ *    member judgement (`registryArchiveProblems`), the removal of GitHub's wrapping folder, the byte-for-byte comparison with
+ *    `git archive`, and what the leg expects to install (read from the committed tree), each over real `tar czf` archives of the real tree.
  *  - THE VERB SET (AC 42.4.4). The IPM verbs the session scripts issue equal `IPM_VERBS` in both directions, and none is `publish`,
  *    `install`, `repo`, `enable` or `update`: held over every script builder, over the source text of both files, and over the scripts a
  *    full scripted run feeds to its sessions.
  *  - THE SCRIPTED RUN. The script runs as a REAL process against the scripted docker of `fake-docker.ts`, whose session handler plays the
  *    IPM and IRIS side of every phase (`SESSION_HANDLER` below). A full run passes on both editions; each phase's fault ends the run with exit
  *    1 naming the phase and the edition, every container removed (the log of the failing one printed first) and the temporary directory
- *    gone; every container is started `--network none` with no `-p`; a signal during a session removes everything.
+ *    gone; every container is started `--network none` with no `-p`; a signal during a session removes everything. The served leg runs
+ *    against a stand-in `git` and, in the CI rows, a stand-in `fetch` (an `--import` preload) that answer from real tar archives of the
+ *    real tree; the URL the script builds from `GITHUB_REPOSITORY` and `GITHUB_SHA` is what the stand-in records.
  *
  * Nothing here reaches a network or runs docker. The real IPM and IRIS behavior (what `load`, `package` and the install guard actually
  * do) is shown by running `node scripts/ci-ipm-archive.mjs` on throwaway containers, in CI's `ipm` job.
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { EDITIONS, PhaseFailure, parseArgs, runIpmArchive } from "../../../../scripts/ci-ipm-archive.mjs";
 import { findExecutable } from "../../../../scripts/throwaway-iris.mjs";
+import { GIT_VERBS, defaultServedDeps } from "../../../../scripts/lib/served-archive.mjs";
+import { ipmTreeMarker, renderModuleXml } from "../../../../scripts/lib/ipm-tree.mjs";
+import { copyGeneratorInputs } from "../../../shared/src/__tests__/gen-bootstrap-scratch";
 import {
   ABSENT_DOCUMENT,
   FORBIDDEN_IPM_VERBS,
   GUARD_DOCUMENT,
   GUARD_REFUSAL_TEXT,
   IPM_VERBS,
+  archiveEqualityProblems,
   archiveNames,
   archiveProblems,
   classPathSegments,
@@ -47,24 +56,47 @@ import {
   markerSemver,
   markerStatement,
   markerValue,
+  moduleMemberSet,
   normalizeText,
   outputDirectoryScript,
   parityProblems,
   parityScript,
   readTgz,
+  registryArchiveProblems,
+  registryArchiveScript,
+  registryTarCommand,
   repositoriesScript,
   seedMarkers,
+  servedArchiveUrl,
   sessionScript,
   setupStateScript,
   stageModule,
+  stripArchivePrefix,
   stripTerminal,
   synthesizedSetup,
+  treeExpectations,
 } from "../../../../scripts/lib/ipm-archive.mjs";
 import { REPO_ROOT } from "../../../../scripts/lib/live-gate-scan.mjs";
 import { BOOTSTRAP_CLASSES, BOOTSTRAP_VERSION, IPM_INSTALL_GUARD } from "../../../shared/src/bootstrap-classes.js";
 import { classifyDeployedMarker, parseBootstrapMarker } from "../../../shared/src/bootstrap-version.js";
 import { installFakeDocker, type FakeDocker } from "./fake-docker";
-import { filesUnder, realEmbed, tarGz, type Embed } from "./ipm-archive-fixture";
+import {
+  SERVED_PREFIX,
+  SERVED_REPOSITORY,
+  SERVED_SHA,
+  fakeFetchCalls,
+  fakeGitCalls,
+  filesUnder,
+  gitArchiveOf,
+  githubArchiveOf,
+  installFakeGit,
+  realEmbed,
+  realTreeMembers,
+  tarGz,
+  writeFetchPreload,
+  writeServedRepository,
+  type Embed,
+} from "./ipm-archive-fixture";
 import { staleDistReason } from "./process-gate-helpers.js";
 
 const SCRIPT = path.join(REPO_ROOT, "scripts", "ci-ipm-archive.mjs");
@@ -96,17 +128,12 @@ function syntheticEmbed(overrides: Partial<Embed> = {}): Embed {
     ["ExecuteMCPv2.Setup.cls", stamped("ExecuteMCPv2.Setup")],
     ["ExecuteMCPv2.REST.Dispatch.cls", "Class ExecuteMCPv2.REST.Dispatch\n{\n}\n"],
   ]);
-  const moduleXml = [
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    '<Export generator="IRIS" version="26"><Document name="iris-execute-mcp-v2.ZPM"><Module>',
-    "<Name>iris-execute-mcp-v2</Name><Version>1.2.3</Version><SourcesRoot>src</SourcesRoot>",
-    '<Resource Name="ExecuteMCPv2.InstallGuard.CLS" Preload="true"/>',
-    ...[...classes.keys()].map((name) => `<Resource Name="${name.replace(/\.cls$/, ".CLS")}"/>`),
-    '<Invoke Class="ExecuteMCPv2.InstallGuard" Method="Check" Phase="Initialize" When="After"/>',
-    '<Invoke Class="ExecuteMCPv2.Setup" Method="Configure"/>',
-    "</Module></Document></Export>",
-    "",
-  ].join("\n");
+  const moduleXml = renderModuleXml({
+    moduleName: "iris-execute-mcp-v2",
+    version: "1.2.3",
+    classNames: [...classes.keys()],
+    guardName: "ExecuteMCPv2.InstallGuard.cls",
+  });
   return {
     marker,
     classes,
@@ -122,7 +149,7 @@ function syntheticEmbed(overrides: Partial<Embed> = {}): Embed {
 // -- the helpers ---------------------------------------------------------------------------
 
 describe("stageModule (AD-14: the archive is built from the embed, never from src/)", () => {
-  it("writes module.xml, one src/cls/<package path>.cls per embedded class and the preloaded guard, readable by everyone", () => {
+  it("writes module.xml, one ipm/src/cls/<package path>.cls per embedded class and the preloaded guard under preload/, readable by everyone", () => {
     const directory = scratchDir();
     const embed = syntheticEmbed();
 
@@ -131,17 +158,17 @@ describe("stageModule (AD-14: the archive is built from the embed, never from sr
     expect(filesUnder(directory).sort()).toEqual(
       [
         "module.xml",
-        "preload/src/cls/ExecuteMCPv2/InstallGuard.cls",
-        "src/cls/ExecuteMCPv2/REST/Dispatch.cls",
-        "src/cls/ExecuteMCPv2/Setup.cls",
-        "src/cls/ExecuteMCPv2/Utils.cls",
+        "preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls",
+        "ipm/src/cls/ExecuteMCPv2/REST/Dispatch.cls",
+        "ipm/src/cls/ExecuteMCPv2/Setup.cls",
+        "ipm/src/cls/ExecuteMCPv2/Utils.cls",
       ].sort(),
     );
     expect(files.sort()).toEqual(filesUnder(directory).sort());
-    expect(readFileSync(path.join(directory, "src/cls/ExecuteMCPv2/Setup.cls"), "utf8")).toBe(embed.classes.get("ExecuteMCPv2.Setup.cls"));
+    expect(readFileSync(path.join(directory, "ipm/src/cls/ExecuteMCPv2/Setup.cls"), "utf8")).toBe(embed.classes.get("ExecuteMCPv2.Setup.cls"));
     expect(readFileSync(path.join(directory, "module.xml"), "utf8")).toBe(embed.moduleXml);
     for (const file of files) expect(statSync(path.join(directory, file)).mode & 0o777, file).toBe(0o644);
-    for (const sub of ["", "src", "src/cls", "src/cls/ExecuteMCPv2", "src/cls/ExecuteMCPv2/REST", "preload", "preload/src/cls"]) {
+    for (const sub of ["", "ipm", "ipm/src", "ipm/src/cls", "ipm/src/cls/ExecuteMCPv2", "ipm/src/cls/ExecuteMCPv2/REST", "preload", "preload/ipm/src/cls"]) {
       expect(statSync(path.join(directory, sub)).mode & 0o755, sub || "the stage").toBe(0o755);
     }
   });
@@ -151,12 +178,24 @@ describe("stageModule (AD-14: the archive is built from the embed, never from sr
 
     const { files } = stageModule(directory, realEmbed());
 
-    expect(files.filter((file) => file.startsWith("src/cls/") && file.endsWith(".cls"))).toHaveLength(35);
-    expect(files).toContain("preload/src/cls/ExecuteMCPv2/InstallGuard.cls");
+    expect(files.filter((file) => file.startsWith("ipm/src/cls/") && file.endsWith(".cls"))).toHaveLength(35);
+    expect(files).toContain("preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls");
     expect(files.some((file) => /Tests|QAFixtures/.test(file))).toBe(false);
     for (const [name, content] of BOOTSTRAP_CLASSES) {
-      expect(readFileSync(path.join(directory, "src", "cls", ...classPathSegments(name)), "utf8").trimEnd()).toBe(content.trimEnd());
+      expect(readFileSync(path.join(directory, "ipm", "src", "cls", ...classPathSegments(name)), "utf8").trimEnd()).toBe(content.trimEnd());
     }
+  });
+
+  it("stages the layout the committed tree has: the same manifest path, the guard under preload/, every class under ipm/src/cls (the build leg and the tree share one path map)", () => {
+    const directory = scratchDir();
+    const { files } = stageModule(directory, realEmbed());
+    const tree = realTreeMembers();
+
+    expect(files).toContain("module.xml");
+    expect(tree).toContain("module.xml");
+    expect(files.filter((file) => file.startsWith("preload/"))).toEqual(tree.filter((file) => file.startsWith("preload/")));
+    expect(files.filter((file) => file !== "module.xml" && !file.startsWith("preload/")).every((file) => file.startsWith("ipm/src/cls/ExecuteMCPv2/"))).toBe(true);
+    expect(tree.filter((file) => file !== "module.xml" && !file.startsWith("preload/")).every((file) => file.startsWith("ipm/src/cls/ExecuteMCPv2/"))).toBe(true);
   });
 
   it.each([
@@ -167,7 +206,6 @@ describe("stageModule (AD-14: the archive is built from the embed, never from sr
     ["a Setup with no marker line", (embed: Embed) => embed.classes.set("ExecuteMCPv2.Setup.cls", "Class ExecuteMCPv2.Setup\n{\n}\n"), /stamps the marker undefined/],
     ["a test class among the classes", (embed: Embed) => embed.classes.set("ExecuteMCPv2.Tests.UtilsTest.cls", "Class ExecuteMCPv2.Tests.UtilsTest\n{\n}\n"), /test or fixture class/],
     ["a fixture class among the classes", (embed: Embed) => embed.classes.set("ExecuteMCPv2.QAFixtures.Thing.cls", "Class ExecuteMCPv2.QAFixtures.Thing\n{\n}\n"), /test or fixture class/],
-    ["a manifest at another version", (embed: Embed) => (embed.moduleXml = embed.moduleXml.replace("<Version>1.2.3</Version>", "<Version>1.2.4</Version>")), /is at version "1\.2\.4"/],
     ["a manifest for another module", (embed: Embed) => (embed.moduleXml = embed.moduleXml.replace("<Name>iris-execute-mcp-v2</Name>", "<Name>other</Name>")), /names the module "other"/],
   ])("refuses %s, and writes nothing", (_label, change, problem) => {
     const directory = scratchDir();
@@ -202,7 +240,7 @@ describe("manifestDeclarations and manifestProblems (IPM re-serializes a manifes
   it("reads the name, version, sources root, every resource with its preload flag and every invoke with its defaults", () => {
     expect(declared.name).toBe("iris-execute-mcp-v2");
     expect(declared.version).toBe(markerSemver(BOOTSTRAP_VERSION));
-    expect(declared.sourcesRoot).toBe("src");
+    expect(declared.sourcesRoot).toBe("ipm/src");
     expect(declared.resources).toHaveLength(36);
     expect(declared.resources[0]).toEqual({ name: "ExecuteMCPv2.InstallGuard.CLS", preload: true });
     expect(declared.invokes[0], "the guard's Check carries CheckStatus").toStrictEqual({ class: "ExecuteMCPv2.InstallGuard", method: "Check", phase: "Initialize", when: "After", checkStatus: true });
@@ -212,7 +250,7 @@ describe("manifestDeclarations and manifestProblems (IPM re-serializes a manifes
 
   it("ignores comments, attribute order, the default packaging and explicit defaults: the same declarations", () => {
     const reserialized = `<?xml version="1.0"?><Export><Document name="x"><Module>
-      <Name>iris-execute-mcp-v2</Name><Version>${markerSemver(BOOTSTRAP_VERSION)}</Version><SourcesRoot>src</SourcesRoot>
+      <Name>iris-execute-mcp-v2</Name><Version>${markerSemver(BOOTSTRAP_VERSION)}</Version><SourcesRoot>ipm/src</SourcesRoot>
       ${declared.resources.map((resource) => `<Resource ${resource.preload ? 'Preload="true" ' : 'Preload="false" '}Name="${resource.name}"></Resource>`).join("\n")}
       ${declared.invokes.map((entry) => `<Invoke ${entry.checkStatus === undefined ? "" : `CheckStatus="${entry.checkStatus ? 1 : 0}" `}When="${entry.when}" Phase="${entry.phase}" Method="${entry.method}" Class="${entry.class}"/>`).join("\n")}
     </Module></Document></Export>`;
@@ -276,14 +314,14 @@ describe("archiveProblems over a real tar czf of a staged module", () => {
     const embed = syntheticEmbed();
     const { members, extracted } = archiveOf(embed);
 
-    const doubled = members.map((member) => member.replace("src/cls/", "src//cls/"));
+    const doubled = members.map((member) => member.replace("ipm/src/cls/", "ipm/src//cls/"));
     expect(archiveProblems(doubled, extracted, embed)).toEqual([]);
   });
 
   it("tolerates line-end and trailing-whitespace differences, which an export may introduce", () => {
     const embed = syntheticEmbed();
     const { members, extracted } = archiveOf(embed, (stage) => {
-      const file = path.join(stage, "src/cls/ExecuteMCPv2/Utils.cls");
+      const file = path.join(stage, "ipm/src/cls/ExecuteMCPv2/Utils.cls");
       writeFileSync(file, `${readFileSync(file, "utf8").replace(/\n/g, "\r\n")}\r\n\r\n`);
     });
 
@@ -292,17 +330,18 @@ describe("archiveProblems over a real tar czf of a staged module", () => {
   });
 
   it.each([
-    ["a changed class", (stage: string) => writeFileSync(path.join(stage, "src/cls/ExecuteMCPv2/Utils.cls"), "Class ExecuteMCPv2.Utils\n{\n// edited\n}\n"), /src\/cls\/ExecuteMCPv2\/Utils\.cls differs from the embed/],
-    ["a changed guard", (stage: string) => writeFileSync(path.join(stage, "preload/src/cls/ExecuteMCPv2/InstallGuard.cls"), "Class ExecuteMCPv2.InstallGuard\n{\n}\n"), /InstallGuard\.cls differs from the embed/],
-    ["a missing class", (stage: string) => rmSync(path.join(stage, "src/cls/ExecuteMCPv2/REST/Dispatch.cls")), /carries 2 src\/cls class member\(s\), the embed 3|missing src\/cls\/ExecuteMCPv2\/REST\/Dispatch\.cls/],
-    ["a missing guard", (stage: string) => rmSync(path.join(stage, "preload"), { recursive: true }), /missing preload\/src\/cls\/ExecuteMCPv2\/InstallGuard\.cls/],
+    ["a changed class", (stage: string) => writeFileSync(path.join(stage, "ipm/src/cls/ExecuteMCPv2/Utils.cls"), "Class ExecuteMCPv2.Utils\n{\n// edited\n}\n"), /ipm\/src\/cls\/ExecuteMCPv2\/Utils\.cls differs from the embed/],
+    ["a changed guard", (stage: string) => writeFileSync(path.join(stage, "preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls"), "Class ExecuteMCPv2.InstallGuard\n{\n}\n"), /InstallGuard\.cls differs from the embed/],
+    ["a missing class", (stage: string) => rmSync(path.join(stage, "ipm/src/cls/ExecuteMCPv2/REST/Dispatch.cls")), /carries 2 ipm\/src\/cls\/ class member\(s\), the embed 3|missing ipm\/src\/cls\/ExecuteMCPv2\/REST\/Dispatch\.cls/],
+    ["a missing guard", (stage: string) => rmSync(path.join(stage, "preload"), { recursive: true }), /missing preload\/ipm\/src\/cls\/ExecuteMCPv2\/InstallGuard\.cls/],
     ["a missing manifest", (stage: string) => rmSync(path.join(stage, "module.xml")), /no module\.xml/],
-    ["an extra class", (stage: string) => writeFileSync(path.join(stage, "src/cls/ExecuteMCPv2/Extra.cls"), "Class ExecuteMCPv2.Extra\n{\n}\n"), /not an embedded class/],
+    ["an extra class", (stage: string) => writeFileSync(path.join(stage, "ipm/src/cls/ExecuteMCPv2/Extra.cls"), "Class ExecuteMCPv2.Extra\n{\n}\n"), /not an embedded class/],
+    ["the classes under the old sources root, src/cls", (stage: string) => renameSync(path.join(stage, "ipm/src"), path.join(stage, "src")), /the archive is missing ipm\/src\/cls\/ExecuteMCPv2\/Utils\.cls/],
     ["a test class", (stage: string) => {
-      mkdirSync(path.join(stage, "src/cls/ExecuteMCPv2/Tests"), { recursive: true });
-      writeFileSync(path.join(stage, "src/cls/ExecuteMCPv2/Tests/UtilsTest.cls"), "Class ExecuteMCPv2.Tests.UtilsTest\n{\n}\n");
-    }, /test or fixture member src\/cls\/ExecuteMCPv2\/Tests\/UtilsTest\.cls/],
-    ["a fixture class", (stage: string) => writeFileSync(path.join(stage, "src/cls/ExecuteMCPv2/QAFixtures.cls"), "Class ExecuteMCPv2.QAFixtures\n{\n}\n"), /test or fixture member/],
+      mkdirSync(path.join(stage, "ipm/src/cls/ExecuteMCPv2/Tests"), { recursive: true });
+      writeFileSync(path.join(stage, "ipm/src/cls/ExecuteMCPv2/Tests/UtilsTest.cls"), "Class ExecuteMCPv2.Tests.UtilsTest\n{\n}\n");
+    }, /test or fixture member ipm\/src\/cls\/ExecuteMCPv2\/Tests\/UtilsTest\.cls/],
+    ["a fixture class", (stage: string) => writeFileSync(path.join(stage, "ipm/src/cls/ExecuteMCPv2/QAFixtures.cls"), "Class ExecuteMCPv2.QAFixtures\n{\n}\n"), /test or fixture member/],
   ])("reports %s", (_label, mutate, problem) => {
     const embed = syntheticEmbed();
     const { members, extracted } = archiveOf(embed, mutate);
@@ -313,7 +352,7 @@ describe("archiveProblems over a real tar czf of a staged module", () => {
   it("reports a member that cannot be read from the extracted tree instead of passing it", () => {
     const embed = syntheticEmbed();
     const { members, extracted } = archiveOf(embed);
-    rmSync(path.join(extracted, "src/cls/ExecuteMCPv2/Setup.cls"));
+    rmSync(path.join(extracted, "ipm/src/cls/ExecuteMCPv2/Setup.cls"));
 
     expect(archiveProblems(members, extracted, embed).join(" ")).toMatch(/Setup\.cls could not be read/);
   });
@@ -453,6 +492,223 @@ describe("parityProblems", () => {
   });
 });
 
+// -- the served archive (Story 42.8, DW-694; decision #122) -----------------------------------
+
+describe("moduleMemberSet and servedArchiveUrl", () => {
+  it("lists module.xml first, then the tracked files under ipm/src and preload, once each, and nothing else a whole repository holds", () => {
+    const listing = ["ipm/src/cls/ExecuteMCPv2/Utils.cls", "preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls", "ipm/src/cls/ExecuteMCPv2/Utils.cls", "", "ipm/preload/ExecuteMCPv2/InstallGuard.cls", "README.md", "preloaded.txt"].join("\n");
+
+    expect(moduleMemberSet(listing)).toEqual(["module.xml", "ipm/src/cls/ExecuteMCPv2/Utils.cls", "preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls"]);
+    expect(moduleMemberSet("")).toEqual(["module.xml"]);
+  });
+
+  it("builds the address codeload.github.com serves a commit at: owner/repo and the full sha", () => {
+    expect(servedArchiveUrl(SERVED_REPOSITORY, SERVED_SHA)).toBe(`https://codeload.github.com/jbrandtmse/iris-execute-mcp-v2/tar.gz/${SERVED_SHA}`);
+  });
+});
+
+describe("registryArchiveProblems over a real `tar czf` of a whole repository that holds the real IPM tree (DW-694)", () => {
+  /**
+   * Write the repository, apply `mutate`, tar it the way the registry does and judge its members against the module's members, which
+   * are listed before the mutation (what `git ls-files` says of the commit) or after it (`listAfter`).
+   */
+  function judged(mutate: (repo: string) => void = () => undefined, extraTarArguments: string[] = ["--exclude=.git"], listAfter = false): string[] {
+    const repo = scratchDir();
+    const listed = writeServedRepository(repo);
+    mutate(repo);
+    const members = moduleMemberSet((listAfter ? filesUnder(repo).filter((file) => file.startsWith("ipm/src/") || file.startsWith("preload/")) : listed).join("\n"));
+    const archive = path.join(scratchDir(), "registry-root.tgz");
+    const made = tarGz(archive, repo, extraTarArguments);
+    expect(made.status, made.stderr).toBe(0);
+    return registryArchiveProblems(readTgz(readFileSync(archive)), members);
+  }
+
+  it("finds nothing wrong with the real tree inside a whole repository: ./module.xml at the top, every module member, the guard under preload/", () => {
+    expect(judged()).toEqual([]);
+    const repo = scratchDir();
+    writeServedRepository(repo);
+    const archive = path.join(scratchDir(), "registry-root.tgz");
+    expect(tarGz(archive, repo, ["--exclude=.git"]).status).toBe(0);
+    expect(readTgz(readFileSync(archive)).some((entry) => entry.name === "./module.xml"), "the members are ./<path>, as the registry's tar writes them").toBe(true);
+  });
+
+  it("does not judge the rest of the repository: other files, a docs folder and a symbolic link are not problems", () => {
+    expect(
+      judged((repo) => {
+        writeFileSync(path.join(repo, "docs", "more.md"), "more\n");
+        symlinkSync("README.md", path.join(repo, "link.md"));
+      }),
+    ).toEqual([]);
+  });
+
+  it("module.xml under a subdirectory is refused: there is no module.xml at the top", () => {
+    const problems = judged((repo) => {
+      mkdirSync(path.join(repo, "sub"));
+      renameSync(path.join(repo, "module.xml"), path.join(repo, "sub", "module.xml"));
+    });
+    expect(problems.join("\n")).toMatch(/no module\.xml at its top/);
+    expect(problems.join("\n")).toMatch(/missing the module member module\.xml/);
+  });
+
+  it.each([false, true])("the stamped guard moved out of preload/ is refused, whether the listing was taken before or after the move (listAfter %s)", (listAfter) => {
+    const problems = judged((repo) => {
+      renameSync(path.join(repo, "preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls"), path.join(repo, "ipm/src/cls/ExecuteMCPv2/InstallGuard.cls"));
+      rmSync(path.join(repo, "preload"), { recursive: true });
+    }, ["--exclude=.git"], listAfter);
+    expect(problems.join("\n")).toMatch(/missing the module member preload\/ipm\/src\/cls\/ExecuteMCPv2\/InstallGuard\.cls/);
+  });
+
+  it("a class the module lists but the archive lacks is refused, naming it", () => {
+    const problems = judged((repo) => rmSync(path.join(repo, "ipm/src/cls/ExecuteMCPv2/Utils.cls")));
+    expect(problems).toEqual(["the archive is missing the module member ipm/src/cls/ExecuteMCPv2/Utils.cls. Commit it, or restore it from git (pnpm gen:ipm -- --force only from a clean version commit)."]);
+  });
+
+  it("a preload/ file other than the guard is refused, naming it, even when the repository's listing does not list it", () => {
+    const problems = judged((repo) => writeFileSync(path.join(repo, "preload", "other.txt"), "x\n"));
+    expect(problems.join("\n")).toMatch(/holds preload\/other\.txt, where nothing but the stamped guard may live/);
+  });
+
+  it("a requirements.txt at the top is refused: IPM would run pip install -r on it", () => {
+    const problems = judged((repo) => writeFileSync(path.join(repo, "requirements.txt"), "left-pad\n"));
+    expect(problems.join("\n")).toMatch(/holds requirements\.txt at its top: IPM runs pip install -r/);
+  });
+
+  it("a requirements.txt below the top is not a problem: only the root one is read", () => {
+    expect(judged((repo) => writeFileSync(path.join(repo, "docs", "requirements.txt"), "x\n"))).toEqual([]);
+  });
+
+  it("a .git directory that tar did not exclude is refused, and with --exclude=.git it never reaches the archive", () => {
+    const addGit = (repo: string) => {
+      mkdirSync(path.join(repo, ".git"));
+      writeFileSync(path.join(repo, ".git", "HEAD"), "ref: refs/heads/main\n");
+    };
+    expect(judged(addGit, []).join("\n")).toMatch(/holds \.\/\.git\/HEAD, which the registry's tar excludes/);
+    expect(judged(addGit)).toEqual([]);
+  });
+
+  it("the member names are compared without the leading ./ and doubled slashes, and an empty archive is refused rather than passed", () => {
+    const guard = "./preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls";
+    expect(registryArchiveProblems([{ name: ".//module.xml", type: "file" }, { name: guard, type: "file" }, { name: "./", type: "directory" }], ["module.xml"])).toEqual([]);
+    expect(registryArchiveProblems([], ["module.xml"]).join("\n")).toMatch(/no module\.xml at its top/);
+  });
+});
+
+describe("stripArchivePrefix and archiveEqualityProblems over a real GitHub-shaped archive and a real git-shaped archive (DW-694)", () => {
+  /** The repository's members as `git archive` writes them, and as GitHub's archive of the same commit wraps them. */
+  function bothArchives(mutateGithub: (repo: string) => void = () => undefined) {
+    const repo = scratchDir();
+    writeServedRepository(repo);
+    const local = path.join(scratchDir(), "local.tgz");
+    gitArchiveOf(repo, local);
+    mutateGithub(repo);
+    const github = path.join(scratchDir(), "github.tgz");
+    githubArchiveOf(repo, github, scratchDir());
+    return { local: readTgz(readFileSync(local)), github: readTgz(readFileSync(github)) };
+  }
+  const LABELS = { actual: "GitHub's archive", expected: "git archive HEAD" };
+
+  it("removes the <repo>-<sha>/ folder and the folder member itself, leaving the repository's own members", () => {
+    const { github } = bothArchives();
+    expect(github.some((entry) => entry.name.replace(/^\.\//, "").startsWith(`${SERVED_PREFIX}/`))).toBe(true);
+
+    const stripped = stripArchivePrefix(github);
+
+    expect(stripped.map((entry) => entry.name.replace(/^\.\//, "")).some((name) => name.startsWith(SERVED_PREFIX))).toBe(false);
+    expect(stripped.map((entry) => entry.name)).toContain("module.xml");
+    expect(stripped.filter((entry) => entry.type === "file").map((entry) => entry.name)).toContain("preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls");
+    expect(stripped.map((entry) => entry.name)).not.toContain("");
+  });
+
+  it("finds GitHub's archive equal to git archive when the files are the same, whatever directory members either side holds", () => {
+    const { local, github } = bothArchives();
+    expect(local.some((entry) => entry.type === "directory"), "git's archive here holds file members only, GitHub's holds folders too").toBe(false);
+    expect(github.some((entry) => entry.type === "directory")).toBe(true);
+
+    expect(archiveEqualityProblems(stripArchivePrefix(github), local, LABELS)).toEqual([]);
+  });
+
+  it("reports a file that differs by one byte, a file GitHub's archive lacks and a file it holds that git archive does not, each naming the file", () => {
+    const { local, github } = bothArchives((repo) => {
+      writeFileSync(path.join(repo, "README.md"), "# A stand-in repository README!\n");
+      rmSync(path.join(repo, "docs", "notes.md"));
+      writeFileSync(path.join(repo, "docs", "extra.md"), "extra\n");
+    });
+
+    expect(archiveEqualityProblems(stripArchivePrefix(github), local, LABELS)).toEqual([
+      "README.md differs between GitHub's archive and git archive HEAD.",
+      "GitHub's archive is missing docs/notes.md, which git archive HEAD holds.",
+      "GitHub's archive holds docs/extra.md, which git archive HEAD does not.",
+    ]);
+  });
+
+  it("compares a link member by name: a link on one side only is reported", () => {
+    const link = (name: string) => ({ name, type: "other", data: Buffer.alloc(0) });
+    const file = { name: "a.txt", type: "file", data: Buffer.from("a") };
+
+    expect(archiveEqualityProblems([file, link("l")], [file, link("l")], LABELS)).toEqual([]);
+    expect(archiveEqualityProblems([file], [file, link("l")], LABELS)).toEqual(["GitHub's archive is missing the link l, which git archive HEAD holds."]);
+    expect(archiveEqualityProblems([file, link("l")], [file], LABELS)).toEqual(["GitHub's archive holds the link l, which git archive HEAD does not."]);
+  });
+
+  it("refuses an archive whose members do not share one folder, a lone top-level file and an empty archive", () => {
+    const file = (name: string) => ({ name, type: "file", data: Buffer.from("x") });
+    expect(() => stripArchivePrefix([file("one/a.txt"), file("two/b.txt")])).toThrow(/do not share one top-level folder \(one, two\)/);
+    expect(() => stripArchivePrefix([file("a.txt")])).toThrow(/is not a folder/);
+    expect(() => stripArchivePrefix([])).toThrow(/no members/);
+  });
+});
+
+describe("treeExpectations reads what the served leg installs from the committed tree, never from the embed (DW-694)", () => {
+  /** A scratch repository holding the real tree, restamped as another version: marker 9.9.9+7.aaaaaaaaaaaa, one resource fewer. */
+  function otherTree(): string {
+    const repo = scratchDir();
+    writeServedRepository(repo);
+    const guardFile = path.join(repo, "preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls");
+    writeFileSync(guardFile, readFileSync(guardFile, "utf8").replace(/Parameter BOOTSTRAPVERSION = "[^"]*";/, 'Parameter BOOTSTRAPVERSION = "9.9.9+7.aaaaaaaaaaaa";'));
+    const manifest = readFileSync(path.join(repo, "module.xml"), "utf8");
+    writeFileSync(path.join(repo, "module.xml"), manifest.replace(/<Version>[^<]*<\/Version>/, "<Version>9.9.9</Version>").replace(/ *<Resource Name="ExecuteMCPv2\.REST\.Coverage\.CLS"\/>\n/, ""));
+    return repo;
+  }
+
+  it("answers the tree's marker, version, module name and resource count: a tree that moved apart from the embed gives its own values", () => {
+    const wants = treeExpectations(otherTree());
+    // The committed tree is frozen between releases and moves at the version step, so its resource count is read, never written down.
+    const committedResources = manifestDeclarations(readFileSync(path.join(REPO_ROOT, "module.xml"), "utf8")).resources.length;
+
+    expect(committedResources, "the committed module.xml's resources were read").toBeGreaterThan(1);
+    expect(wants).toEqual({ marker: "9.9.9+7.aaaaaaaaaaaa", semver: "9.9.9", moduleName: "iris-execute-mcp-v2", classCount: committedResources - 1 });
+    expect(wants.marker, "not the embed's").not.toBe(BOOTSTRAP_VERSION);
+  });
+
+  it("answers the real tree's own values at the checked-in tree", () => {
+    const wants = treeExpectations(REPO_ROOT);
+
+    expect(wants.marker).toMatch(/^\d+\.\d+\.\d+\+\d+\.[0-9a-f]{12}$/);
+    expect(wants.moduleName).toBe("iris-execute-mcp-v2");
+    expect(wants.marker.split("+")[0]).toBe(wants.semver);
+  });
+
+  it("refuses a repository with no module.xml and one with no stamped guard, naming the command", () => {
+    const empty = scratchDir();
+    expect(() => treeExpectations(empty)).toThrow(/module\.xml is missing from the repository root: run pnpm gen:ipm/);
+    const noGuard = otherTree();
+    rmSync(path.join(noGuard, "preload"), { recursive: true });
+    expect(() => treeExpectations(noGuard)).toThrow(/stamped install guard under preload\/ is missing/);
+  });
+});
+
+describe("the session script of the registry-shaped leg", () => {
+  it("runs GNU tar from inside the mounted root into the output directory, excluding .git, and reads back OUTDIR, TAR and FILES", () => {
+    expect(registryTarCommand()).toBe("tar --exclude=.git -czf /tmp/iris-mcp-ipm-out/registry-root.tgz -C /opt/iris-mcp/registry/root .");
+    const script = registryArchiveScript();
+    expect(script).toContain(`$ZF(-1,"${registryTarCommand()}")`);
+    for (const name of ["OUTDIR", "TAR", "FILES"]) expect(markerValue(`IRISMCP-${name}-START:x:IRISMCP-${name}-END`, name), name).toBe("x");
+    expect(script).toContain('IRISMCP-"_"TAR-START:');
+    expect(script.endsWith("Halt\n")).toBe(true);
+    expect(ipmVerbsOf(script), "it issues no IPM verb").toEqual([]);
+  });
+});
+
 // -- the verb set (AC 42.4.4) ----------------------------------------------------------------
 
 describe("the IPM verbs the proof issues (AC 42.4.4)", () => {
@@ -502,8 +758,25 @@ describe("the IPM verbs the proof issues (AC 42.4.4)", () => {
     }
   });
 
+  it("the served-archive leg spawns one thing, a read-only git, and refuses every other git verb", async () => {
+    const { defaultServedDeps } = await import("../../../../scripts/lib/served-archive.mjs");
+    const source = readFileSync(path.join(REPO_ROOT, "scripts/lib/served-archive.mjs"), "utf8");
+
+    expect([...GIT_VERBS].sort()).toEqual(["archive", "ls-files"]);
+    expect(source.match(/spawnSync\(/g), "one spawn in the module").toHaveLength(1);
+    expect(source).toContain("spawnSync('git', args");
+    const deps = defaultServedDeps({ env: { PATH: process.env.PATH }, cwd: REPO_ROOT });
+    for (const verb of ["push", "commit", "tag", "fetch", "pull", "checkout", "reset", "clean", "config"]) {
+      expect(() => deps.git([verb]), verb).toThrow(/refusing the git verb/);
+    }
+    // The real shape of the answer (Rule #54): a spawnSync result with a Buffer on stdout.
+    const listed = deps.git(["ls-files", "ipm/src", "preload"]);
+    expect(listed.status, listed.stderr).toBe(0);
+    expect(Buffer.isBuffer(listed.stdout)).toBe(true);
+  });
+
   it("publishes, uploads and reads no secret: the script and its helpers hold none of those words as a statement", () => {
-    for (const file of ["scripts/ci-ipm-archive.mjs", "scripts/lib/ipm-archive.mjs"]) {
+    for (const file of ["scripts/ci-ipm-archive.mjs", "scripts/lib/ipm-archive.mjs", "scripts/lib/served-archive.mjs", "scripts/lib/ipm-tree.mjs"]) {
       const source = readFileSync(path.join(REPO_ROOT, file), "utf8");
       expect(source, file).not.toMatch(/npm publish|pnpm publish|changeset (version|publish)|git tag|secrets\.|upload-artifact|vsce publish|ovsx publish|npm login/);
       // No docker argument is built here: the containers belong to the harness.
@@ -551,6 +824,10 @@ module.exports = function handler(namespace, stdin, { dir, container }) {
   const save = () => fs.writeFileSync(statePath, JSON.stringify(state));
   const fail = config.fail;
   const mountHost = (container.mount || "").split(":")[0];
+  // The served leg installs what the committed tree stamps, which config may set apart from the embed's marker and version.
+  const served = path.basename(mountHost) === "registry";
+  const wantMarker = served && config.registryMarker ? config.registryMarker : config.marker;
+  const wantSemver = served && config.registrySemver ? config.registrySemver : config.semver;
   const marker = (name, value) => "IRISMCP-" + name + "-START:" + value + ":IRISMCP-" + name + "-END\n";
   const repositories = (after) => marker("REPOSITORIES", fail === "repositories-after-" + after ? "1" : "0");
   const log = (line) => fs.appendFileSync(path.join(dir, "handler.log"), line + "\n");
@@ -561,6 +838,9 @@ module.exports = function handler(namespace, stdin, { dir, container }) {
     out += marker("IPM", fail === "import" ? "FAILED:ERROR #5001: scripted" : "OK") + repositories("import");
   } else if (stdin.includes("Shell(\"load -dev ")) {
     out += (fail === "load-dev" ? "" : "") + marker("COMMAND", fail === "load-dev" ? "FAILED:ERROR #5001: scripted load -dev failure" : "OK") + repositories("load-dev");
+  } else if (stdin.includes("$ZF(-1,")) {
+    // The registry-shaped leg: GNU tar of the extracted served archive, made inside the container (the command text is what the test pins).
+    out += marker("OUTDIR", fail === "registry-outdir-fails" ? "0" : "1") + marker("TAR", fail === "registry-tar-fails" ? "2" : "0") + marker("FILES", fail === "registry-no-archive" ? "" : "registry-root.tgz|");
   } else if (stdin.includes("RemoveDirectoryTree")) {
     out += marker("OUTDIR", fail === "outdir-fails" ? "0" : "1");
   } else if (stdin.includes("Shell(\"package ")) {
@@ -576,7 +856,7 @@ module.exports = function handler(namespace, stdin, { dir, container }) {
     save();
     const synthFails = fail === "synth-fails" || (fail === "older-synth-fails" && leg === "older");
     out += marker("SYNTH", synthFails ? "FAILED:ERROR #5001: scripted synthetic load failure" : "OK");
-  } else if (stdin.includes("Shell(\"load /opt/iris-mcp/install/")) {
+  } else if (stdin.includes("Shell(\"load /opt/iris-mcp/install/") || stdin.includes("Shell(\"load /tmp/iris-mcp-ipm-out/registry-root.tgz")) {
     let outcome = "OK";
     if (state.setup !== null) {
       const relation = state.setup === "" ? "unknown" : config.relations[state.setup];
@@ -595,9 +875,9 @@ module.exports = function handler(namespace, stdin, { dir, container }) {
     if (outcome === "OK") {
       state.installed = true;
       state.guardDefined = true;
-      state.setup = fail === "version-wrong" ? config.marker + "x" : config.marker;
+      state.setup = fail === "version-wrong" ? wantMarker + "x" : wantMarker;
     } else if (fail === "guard-setup-changed") {
-      state.setup = config.marker;
+      state.setup = wantMarker;
     } else if (fail === "guard-leaves-guard") {
       state.guardDefined = true;
     } else if (fail === "guard-leaves-module") {
@@ -605,9 +885,9 @@ module.exports = function handler(namespace, stdin, { dir, container }) {
     }
     save();
     out += marker("COMMAND", outcome) + repositories("load");
-    if (state.installed) out += "iris-execute-mcp-v2 " + config.semver + "\n";
+    if (state.installed) out += "iris-execute-mcp-v2 " + wantSemver + "\n";
   } else if (stdin.includes("Shell(\"list\"")) {
-    const listed = fail === "list-version-wrong" ? "0.0.0" : config.semver;
+    const listed = fail === "list-version-wrong" ? "0.0.0" : wantSemver;
     out += (state.installed ? "\u001b[32miris-execute-mcp-v2\u001b[0m " + listed + "\r\n" : "zpm 0.10.5\r\n") + marker("COMMAND", "OK") + repositories("list");
   } else if (stdin.includes("OBJ.Delete(\"ExecuteMCPv2.Setup\"")) {
     state.setup = fail === "setup-not-deleted" || fail === "delete-fails" ? state.setup : null;
@@ -618,7 +898,7 @@ module.exports = function handler(namespace, stdin, { dir, container }) {
     out += marker("SETUP", fail === "health-not-fresh" && namespace === "HSCUSTOM" && !state.installed ? "compiled:1.0.0+1.cccccccccccc" : setup) + marker("GUARD", state.guardDefined ? "1" : "0");
   } else if (stdin.includes("%Dictionary.CompiledClass WHERE Name %STARTSWITH")) {
     const app = fail === "app-matchroles" ? namespace + "|ExecuteMCPv2.REST.Dispatch|1|%All" : namespace + "|ExecuteMCPv2.REST.Dispatch|1|";
-    out += marker("COMPILED", fail === "compiled-count" ? "35" : "36") + marker("TESTCLASSES", fail === "test-classes" ? "2" : "0");
+    out += marker("COMPILED", fail === "compiled-count" || (fail === "registry-compiled-count" && path.basename(mountHost) === "registry") ? "35" : "36") + marker("TESTCLASSES", fail === "test-classes" ? "2" : "0");
     const version = fail === "version-call-wrong" ? "not-the-marker" : state.setup === null ? "" : state.setup;
     out += marker("VERSION", version) + marker("APP", app) + marker("MAPPED", fail === "not-mapped" ? "0" : "1") + marker("HTTP", fail === "http-500" ? "500" : "200");
     out += marker("GUARDDOC", fail === "guard-document-missing" ? "404" : fail === "guard-document-unauthorized" ? "401" : "200") + marker("ABSENTDOC", fail === "absent-document-found" ? "200" : "404");
@@ -651,8 +931,48 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
   let fake: FakeDocker;
   let tmp = "";
   let archiveSource = "";
+  let registryArchiveSource = "";
+  let fetchPreload = "";
+  let servedCount = 0;
+  const LS_FILES = () => path.join(root, "ls-files.txt");
+  const LOCAL_ARCHIVE = () => path.join(root, "git-archive.tgz");
+  const GITHUB_ARCHIVE = () => path.join(root, "github-archive.tgz");
   let embed: Embed;
   let cases: ParityCase[];
+
+  /**
+   * Write the served leg's inputs: a repository holding the real IPM tree and files the module does not need, then the three archives
+   * made from copies of it, each of which `variant` may change on its own: what `git archive HEAD` writes (`local`), what GitHub's
+   * archive of the commit holds (`github`) and what the container's GNU re-tar writes (`registry`). `listing` changes what
+   * `git ls-files ipm/src preload` prints.
+   */
+  function buildServed(variant: { local?: (repo: string) => void; github?: (repo: string) => void; registry?: (repo: string) => void; listing?: (members: string[]) => string[] } = {}): void {
+    servedCount += 1;
+    const base = path.join(root, `served-${servedCount}`);
+    const repo = path.join(base, "repo");
+    mkdirSync(repo, { recursive: true });
+    const members = writeServedRepository(repo);
+    const copy = (name: string, mutate: ((repo: string) => void) | undefined): string => {
+      const directory = path.join(base, name);
+      cpSync(repo, directory, { recursive: true });
+      mutate?.(directory);
+      return directory;
+    };
+    gitArchiveOf(copy("local", variant.local), LOCAL_ARCHIVE());
+    githubArchiveOf(copy("github", variant.github), GITHUB_ARCHIVE(), path.join(base, "wrapper"));
+    const reTarred = tarGz(registryArchiveSource, copy("registry", variant.registry), ["--exclude=.git"]);
+    expect(reTarred.status, reTarred.stderr).toBe(0);
+    writeFileSync(LS_FILES(), `${(variant.listing?.(members) ?? members).join("\n")}\n`);
+  }
+
+  /** The environment of a GitHub Actions run of the commit, with the fetch stand-in loaded. */
+  const ciEnv = (extra: Record<string, string> = {}): Record<string, string> => ({
+    GITHUB_ACTIONS: "true",
+    GITHUB_REPOSITORY: SERVED_REPOSITORY,
+    GITHUB_SHA: SERVED_SHA,
+    NODE_OPTIONS: fetchPreload,
+    ...extra,
+  });
 
   beforeEach(() => {
     root = mkdtempSync(path.join(tmpdir(), "ci-ipm-archive-run-"));
@@ -669,6 +989,14 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     archiveSource = path.join(root, "good.tgz");
     const made = tarGz(archiveSource, stage);
     expect(made.status, made.stderr).toBe(0);
+
+    // The served leg's world: a whole repository holding the real tree, the stand-in `git` that lists and archives it, GitHub's archive of
+    // the same commit for the fetch stand-in, and the archive the scripted `cp` copies out of the container after its GNU re-tar.
+    installFakeGit(fake.binDir);
+    fetchPreload = writeFetchPreload(root);
+    registryArchiveSource = path.join(root, "registry-good.tgz");
+    servedCount = 0;
+    buildServed();
 
     // What the comparator answers for every case the run will send: the fixture's and the three built from the embedded marker.
     const fixture = JSON.parse(readFileSync(PARITY_FIXTURE, "utf8")) as ParityCase[];
@@ -717,6 +1045,11 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
       FAKE_DOCKER_DIR: fake.dir,
       FAKE_DOCKER_SESSION_HANDLER: path.join(root, "handler.cjs"),
       FAKE_DOCKER_CP_SOURCE: archiveSource,
+      FAKE_DOCKER_CP_REGISTRY_SOURCE: registryArchiveSource,
+      FAKE_GIT_DIR: fake.dir,
+      FAKE_GIT_LS_FILES: LS_FILES(),
+      FAKE_GIT_ARCHIVE: LOCAL_ARCHIVE(),
+      FAKE_FETCH_FILE: GITHUB_ARCHIVE(),
       ...env,
     };
     return new Promise((resolve, reject) => {
@@ -763,18 +1096,33 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     expect(run.stderr).toContain("[install-health] the archive installed on a fresh");
     expect(run.stderr).toMatch(/\[parity-community\] \d+\/\d+ cases agree/);
     expect(run.stderr).toMatch(/\[parity-health\] \d+\/\d+ cases agree/);
+    // The served leg (DW-694): the archive of the repository, extracted, re-tarred in a fresh container per edition, copied out once and
+    // checked, then loaded as an archive. A local run has no GITHUB_ACTIONS, so `git archive HEAD` stands in and says so.
+    expect(run.stderr).toContain("[served] local emulation of GitHub's archive (CI fetches the real one)");
+    const memberCount = realTreeMembers().length;
+    expect(run.stderr).toContain(`[served] git archive HEAD (local emulation): ${filesUnder(path.join(root, "served-1", "local")).length} files, module members present (${memberCount}: module.xml, ipm/src, preload;`);
+    expect(run.stderr).toContain(`[registry-community] the archive re-tarred as the registry serves it holds ./module.xml at its top, no .git and the ${memberCount} module members`);
+    expect(run.stderr).toContain("[registry-community] the registry-shaped archive installed on a fresh");
+    expect(run.stderr).toContain("[registry-health] the registry-shaped archive installed on a fresh");
+    expect(run.stderr).toMatch(/\[parity-registry-community\] \d+\/\d+ cases agree/);
+    expect(run.stderr).toMatch(/\[parity-registry-health\] \d+\/\d+ cases agree/);
     expect(run.stderr).toContain("PASS: one archive of iris-execute-mcp-v2");
     expect(run.stderr).toContain("0 package-registry rows");
+    expect(run.stderr).toContain("the local git archive of HEAD, re-tarred as the registry serves it, installed iris-execute-mcp-v2");
+    expect(fakeFetchCalls(fake.dir), "a local run fetches nothing").toEqual([]);
+    expect(fakeGitCalls(fake.dir)).toEqual([["ls-files", "ipm/src", "preload"], ["archive", "--format=tar.gz", "HEAD"]]);
 
     const runs = fake.calls().filter((call) => call.argv[0] === "run");
-    expect(runs, "a build container and one install container per edition").toHaveLength(3);
+    expect(runs, "a build container, one install container and one registry-shaped container per edition").toHaveLength(5);
     expect(runs.map((call) => call.argv[call.argv.length - 1])).toEqual([
       EDITIONS.community.image,
       EDITIONS.community.image,
       EDITIONS.health.image,
+      EDITIONS.community.image,
+      EDITIONS.health.image,
     ]);
-    expect(dockerVerbs().filter((verb) => verb === "rm")).toHaveLength(3);
-    expect(dockerVerbs().filter((verb) => verb === "cp")).toHaveLength(1);
+    expect(dockerVerbs().filter((verb) => verb === "rm")).toHaveLength(5);
+    expect(dockerVerbs().filter((verb) => verb === "cp"), "the built archive, and the registry-shaped one (community only)").toHaveLength(2);
     expect(dockerVerbs().filter((verb) => verb === "logs"), "no log is read when everything passes").toHaveLength(0);
     expectCleanEnd();
   }, 120_000);
@@ -803,15 +1151,16 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
   }, 120_000);
 
   it.each([
-    ["community", ["build", "install-community"], 2],
-    ["health", ["build", "install-health"], 2],
-  ])("--edition %s starts the build container and that edition's install container only", async (edition, phases, containers) => {
+    ["community", ["build", "install-community", "registry-community"], 3],
+    ["health", ["build", "install-health", "registry-health"], 3],
+  ])("--edition %s starts the build container, that edition's install container and its registry-shaped container only", async (edition, phases, containers) => {
     const run = await runScript(["--edition", edition]);
 
     expect(run.status, run.stderr).toBe(0);
     expect(fake.calls().filter((call) => call.argv[0] === "run")).toHaveLength(containers);
     for (const phase of phases) expect(run.stderr).toContain(`[${phase}]`);
     expect(run.stderr).not.toContain(edition === "community" ? "[install-health]" : "[install-community]");
+    expect(run.stderr).not.toContain(edition === "community" ? "[registry-health]" : "[registry-community]");
     expectCleanEnd();
   }, 120_000);
 
@@ -845,6 +1194,14 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     ["parity-mismatch", "community", "parity-community", "community", "InstallGuard.Classify says"],
     ["parity-short", "community", "parity-community", "community", "answered"],
     ["health-not-fresh", "health", "install-health", "health", "already has a Setup class"],
+    // The registry-shaped leg (DW-694): each clause of its checks can fail on its own.
+    ["registry-outdir-fails", "community", "registry-community", "community", "could not be emptied and created"],
+    ["registry-tar-fails", "community", "registry-community", "community", "tar exited \"2\" making the registry-shaped archive"],
+    ["registry-no-archive", "community", "registry-community", "community", "not the one registry-root.tgz"],
+    ["fresh-load-fails", "community", "registry-community", "community", "load of the registry-shaped archive did not succeed"],
+    ["registry-compiled-count", "community", "registry-community", "community", "35 ExecuteMCPv2 classes are compiled and up to date, not 36"],
+    ["registry-tar-fails", "health", "registry-health", "health", "tar exited"],
+    ["fresh-load-fails", "health", "install-health", "health", "load of the archive on a fresh container did not succeed"],
     ["parity-mismatch", "health", "parity-health", "health", "InstallGuard.Classify says"],
     ["http-500", "health", "install-health", "health", 'answered "500", not 200'],
     // The ownership signal the server's bootstrap reads: the install guard's document answers 200 through Atelier, a missing one 404.
@@ -862,7 +1219,6 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     ["older-load-fails", "community", "install-community", "community", "over an older Setup"],
     ["list-version-wrong", "community", "install-community", "community", "list names iris-execute-mcp-v2 at"],
     ["version-call-wrong", "community", "install-community", "community", "GetBootstrapVersion() answers"],
-    ["fresh-load-fails", "health", "install-health", "health", "load of the archive on a fresh container did not succeed"],
     ["list-version-wrong", "health", "install-health", "health", "list names iris-execute-mcp-v2 at"],
     ["version-wrong", "health", "install-health", "health", "GetBootstrapVersion() answers"],
   ];
@@ -898,11 +1254,11 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     }
 
     it.each([
-      ["a class that differs from the embed", (stage: string) => writeFileSync(path.join(stage, "src/cls/ExecuteMCPv2/Utils.cls"), "Class ExecuteMCPv2.Utils\n{\n// edited after the embed\n}\n"), "differs from the embed"],
-      ["a missing class", (stage: string) => rmSync(path.join(stage, "src/cls/ExecuteMCPv2/REST/Dispatch.cls")), "the archive is missing src/cls/ExecuteMCPv2/REST/Dispatch.cls"],
+      ["a class that differs from the embed", (stage: string) => writeFileSync(path.join(stage, "ipm/src/cls/ExecuteMCPv2/Utils.cls"), "Class ExecuteMCPv2.Utils\n{\n// edited after the embed\n}\n"), "differs from the embed"],
+      ["a missing class", (stage: string) => rmSync(path.join(stage, "ipm/src/cls/ExecuteMCPv2/REST/Dispatch.cls")), "the archive is missing ipm/src/cls/ExecuteMCPv2/REST/Dispatch.cls"],
       ["a test class", (stage: string) => {
-        mkdirSync(path.join(stage, "src/cls/ExecuteMCPv2/Tests"), { recursive: true });
-        writeFileSync(path.join(stage, "src/cls/ExecuteMCPv2/Tests/UtilsTest.cls"), "Class ExecuteMCPv2.Tests.UtilsTest\n{\n}\n");
+        mkdirSync(path.join(stage, "ipm/src/cls/ExecuteMCPv2/Tests"), { recursive: true });
+        writeFileSync(path.join(stage, "ipm/src/cls/ExecuteMCPv2/Tests/UtilsTest.cls"), "Class ExecuteMCPv2.Tests.UtilsTest\n{\n}\n");
       }, "test or fixture member"],
       ["a manifest at another version", (stage: string) => writeFileSync(path.join(stage, "module.xml"), readFileSync(path.join(stage, "module.xml"), "utf8").replace(/<Version>[^<]*<\/Version>/, "<Version>9.9.9</Version>")), "version:"],
       ["a manifest that lost its invokes", (stage: string) => writeFileSync(path.join(stage, "module.xml"), readFileSync(path.join(stage, "module.xml"), "utf8").replace(/<Invoke [^>]*>/g, "")), "invokes:"],
@@ -919,6 +1275,338 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
       expect(fake.calls().filter((call) => call.argv[0] === "run")).toHaveLength(1);
       expectCleanEnd();
     }, 120_000);
+  });
+
+  describe("the served leg: the archive the registry downloads for the commit under test (DW-694; decision #122)", () => {
+    const GUARD_MEMBER = "preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls";
+    const notServed = (what: string) => `GitHub did not serve the archive of ${SERVED_SHA} (${what}). The gate proves the archive the registry downloads; it never falls back to a local emulation in CI.`;
+
+    it("in CI it fetches GitHub's archive of GITHUB_SHA from the codeload address, requires it equal to git archive, and installs it re-tarred on both editions", async () => {
+      const run = await runScript([], ciEnv());
+
+      expect(run.status, run.stderr).toBe(0);
+      expect(fakeFetchCalls(fake.dir), "one fetch, of the address built from GITHUB_REPOSITORY and GITHUB_SHA").toEqual([`https://codeload.github.com/${SERVED_REPOSITORY}/tar.gz/${SERVED_SHA}`]);
+      expect(run.stderr).toContain(`[served] GitHub's archive of ${SERVED_SHA}: ${filesUnder(path.join(root, "served-1", "local")).length} files, equal to git archive HEAD, module members present (${realTreeMembers().length}: module.xml, ipm/src, preload;`);
+      expect(run.stderr).not.toContain("[served] local emulation");
+      expect(run.stderr).toContain("[registry-community] the registry-shaped archive installed on a fresh");
+      expect(run.stderr).toContain("[registry-health] the registry-shaped archive installed on a fresh");
+      expect(run.stderr).toContain(`GitHub's archive of the commit, re-tarred as the registry serves it, installed iris-execute-mcp-v2 ${treeExpectations(REPO_ROOT).semver} (${treeExpectations(REPO_ROOT).marker}) on community and health too`);
+      expect(fakeGitCalls(fake.dir), "git only lists the module's files and archives HEAD").toEqual([["ls-files", "ipm/src", "preload"], ["archive", "--format=tar.gz", "HEAD"]]);
+      expectCleanEnd();
+    }, 120_000);
+
+    it("expects the install to carry what the committed tree stamps: the preflight names the tree's marker, and the leg's checks read it", async () => {
+      const run = await runScript(["--edition", "community"]);
+      const wants = treeExpectations(REPO_ROOT);
+
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stderr).toContain(`the committed tree stamps ${wants.marker} (module.xml ${wants.moduleName} ${wants.semver}, ${wants.classCount} classes)`);
+      expect(run.stderr).toContain(`[registry-community] list: ${wants.moduleName} ${wants.semver}; ${wants.classCount} classes compiled (none a test or fixture); marker ${wants.marker};`);
+    }, 120_000);
+
+    describe("a tree that stands apart from the embed (between releases the embed moves and the tree stays at the last released content)", () => {
+      /**
+       * A scratch repository whose committed tree was generated at shared version 9.9.9, so it stamps 9.9.9+<n>.<hash> while the built dist
+       * still holds the embed's marker; the stand-in git lists and archives that tree. Returns the repository root and the tree's marker.
+       */
+      function divergedRepository(): { repoRoot: string; treeMarker: string } {
+        const repoRoot = path.join(root, "diverged-repo");
+        mkdirSync(repoRoot, { recursive: true });
+        copyGeneratorInputs(repoRoot, REPO_ROOT);
+        const sharedManifest = path.join(repoRoot, "packages", "shared", "package.json");
+        writeFileSync(sharedManifest, JSON.stringify({ ...(JSON.parse(readFileSync(sharedManifest, "utf8")) as object), version: "9.9.9" }));
+        const generated = spawnSync(process.execPath, [path.join(repoRoot, "scripts", "gen-bootstrap.mjs"), "--ipm"], { cwd: repoRoot, encoding: "utf8" });
+        expect(generated.status, generated.stderr).toBe(0);
+        mkdirSync(path.join(repoRoot, "packages", "shared", "src", "__tests__", "fixtures"), { recursive: true });
+        cpSync(PARITY_FIXTURE, path.join(repoRoot, "packages", "shared", "src", "__tests__", "fixtures", "bootstrap-marker-parity-cases.json"));
+        symlinkSync(path.join(REPO_ROOT, "packages", "shared", "dist"), path.join(repoRoot, "packages", "shared", "dist"));
+
+        // What the stand-in git lists and archives, and what the container's re-tar writes: the scratch tree plus a README.
+        const served = path.join(root, "diverged-served");
+        mkdirSync(served, { recursive: true });
+        for (const entry of ["module.xml", "ipm/src", "preload"]) {
+          mkdirSync(path.dirname(path.join(served, entry)), { recursive: true });
+          cpSync(path.join(repoRoot, entry), path.join(served, entry), { recursive: true });
+        }
+        writeFileSync(path.join(served, "README.md"), "# stand-in\n");
+        writeFileSync(LS_FILES(), `${filesUnder(served).filter((file) => file.startsWith("ipm/src/") || file.startsWith("preload/")).join("\n")}\n`);
+        gitArchiveOf(served, LOCAL_ARCHIVE());
+        expect(tarGz(registryArchiveSource, served, ["--exclude=.git"]).status).toBe(0);
+        const treeMarker = ipmTreeMarker(repoRoot) as string;
+        expect(treeMarker.startsWith("9.9.9+")).toBe(true);
+        expect(treeMarker, "the tree and the embed disagree").not.toBe(embed.marker);
+        return { repoRoot, treeMarker };
+      }
+
+      const inProcessEnv = (): Record<string, string> => ({
+        PATH: fake.binDir,
+        TMPDIR: tmp,
+        FAKE_DOCKER_DIR: fake.dir,
+        FAKE_DOCKER_SESSION_HANDLER: path.join(root, "handler.cjs"),
+        FAKE_DOCKER_CP_SOURCE: archiveSource,
+        FAKE_DOCKER_CP_REGISTRY_SOURCE: registryArchiveSource,
+        FAKE_GIT_DIR: fake.dir,
+        FAKE_GIT_LS_FILES: LS_FILES(),
+        FAKE_GIT_ARCHIVE: LOCAL_ARCHIVE(),
+      });
+
+      it("installs it and judges the install as the tree: the version, the class count and the marker it stamps, which the embed does not", async () => {
+        const { repoRoot, treeMarker } = divergedRepository();
+        writeConfig({ registryMarker: treeMarker, registrySemver: "9.9.9" });
+        const lines: string[] = [];
+
+        const code = await runIpmArchive({ repoRoot, editions: ["community"], env: inProcessEnv(), log: (line: string) => lines.push(line), tmpRoot: tmp });
+
+        const log = lines.join("\n");
+        expect(code, log).toBe(0);
+        expect(log).toContain(`[preflight] the embed ${embed.marker} is stamped; the committed tree stamps ${treeMarker} (module.xml iris-execute-mcp-v2 9.9.9, 36 classes)`);
+        expect(log).toContain(`[registry-community] list: iris-execute-mcp-v2 9.9.9; 36 classes compiled (none a test or fixture); marker ${treeMarker};`);
+        expect(log, "the build and install legs still prove the embed").toContain(`[install-community] list: iris-execute-mcp-v2 ${markerSemver(embed.marker)}; 36 classes compiled (none a test or fixture); marker ${embed.marker};`);
+        expect(log).toContain(`installed iris-execute-mcp-v2 9.9.9 (${treeMarker}) on community too`);
+      }, 120_000);
+
+      it("fails when the served install carries the embed's version instead of the tree's, naming both", async () => {
+        const { repoRoot } = divergedRepository();
+        const lines: string[] = [];
+
+        const code = await runIpmArchive({ repoRoot, editions: ["community"], env: inProcessEnv(), log: (line: string) => lines.push(line), tmpRoot: tmp });
+
+        expect(code, lines.join("\n")).toBe(1);
+        expect(lines.join("\n")).toContain(`FAILED in the registry-community phase (community): list names iris-execute-mcp-v2 at "${markerSemver(embed.marker)}", not 9.9.9.`);
+      }, 120_000);
+    });
+
+    /** The environment of an in-process CI run: the scripted docker and git, and the variables that name the commit. */
+    const inProcessCiEnv = (): Record<string, string> => ({
+      PATH: fake.binDir,
+      TMPDIR: tmp,
+      FAKE_DOCKER_DIR: fake.dir,
+      FAKE_DOCKER_SESSION_HANDLER: path.join(root, "handler.cjs"),
+      FAKE_DOCKER_CP_SOURCE: archiveSource,
+      FAKE_DOCKER_CP_REGISTRY_SOURCE: registryArchiveSource,
+      FAKE_GIT_DIR: fake.dir,
+      FAKE_GIT_LS_FILES: LS_FILES(),
+      FAKE_GIT_ARCHIVE: LOCAL_ARCHIVE(),
+      GITHUB_ACTIONS: "true",
+      GITHUB_REPOSITORY: SERVED_REPOSITORY,
+      GITHUB_SHA: SERVED_SHA,
+    });
+
+    /**
+     * An in-process CI run whose GET answers from `answers` (a status, or "network" for a rejected fetch; the last answer repeats) and
+     * whose waits are zero and recorded. The git is the scripted one the PATH holds.
+     */
+    async function ciRunWithAnswers(answers: Array<number | "network">): Promise<{ code: number; log: string; urls: string[]; waits: number[] }> {
+      const env = inProcessCiEnv();
+      const urls: string[] = [];
+      const waits: number[] = [];
+      const served = {
+        ...defaultServedDeps({ env, cwd: REPO_ROOT }),
+        fetch: async (url: string): Promise<Response> => {
+          urls.push(url);
+          const answer = answers[Math.min(urls.length - 1, answers.length - 1)];
+          if (answer === "network") throw new TypeError("fetch failed");
+          if (answer !== 200) return new Response("not served", { status: answer });
+          return new Response(readFileSync(GITHUB_ARCHIVE()), { status: 200 });
+        },
+        sleep: async (ms: number): Promise<void> => {
+          waits.push(ms);
+        },
+        retryDelaysMs: [0, 0],
+      };
+      const lines: string[] = [];
+      const code = await runIpmArchive({ editions: ["community"], env, served, log: (line: string) => lines.push(line), tmpRoot: tmp });
+      return { code, log: lines.join("\n"), urls, waits };
+    }
+
+    it("the real fetch waits 2 s, then 5 s, between its three attempts", async () => {
+      const { FETCH_RETRY_DELAYS_MS } = await import("../../../../scripts/lib/served-archive.mjs");
+      expect([...FETCH_RETRY_DELAYS_MS]).toEqual([2000, 5000]);
+      expect([...defaultServedDeps({ env: { PATH: process.env.PATH }, cwd: REPO_ROOT }).retryDelaysMs]).toEqual([2000, 5000]);
+    });
+
+    it("a 503 and then a 200 from GitHub passes the leg: the GET is made twice, with one wait between", async () => {
+      const run = await ciRunWithAnswers([503, 200]);
+
+      expect(run.code, run.log).toBe(0);
+      expect(run.urls, "two attempts, both at the codeload address").toEqual(Array(2).fill(`https://codeload.github.com/${SERVED_REPOSITORY}/tar.gz/${SERVED_SHA}`));
+      expect(run.waits).toEqual([0]);
+      expect(run.log).toContain(`[served] GitHub's archive of ${SERVED_SHA}:`);
+      expect(run.log).toContain("[registry-community] the registry-shaped archive installed on a fresh");
+    }, 120_000);
+
+    it.each([
+      ["a 404", [404], "404"],
+      ["a 503", [503], "503"],
+      ["a fetch that cannot connect", ["network"], "fetch failed"],
+      ["a 503, a 404 and then a 502", [503, 404, 502], "502"],
+    ] as Array<[string, Array<number | "network">, string]>)("%s from GitHub on all three attempts fails the leg with exit 1, naming the sha and the last status, and never falls back to git archive", async (_label, answers, shown) => {
+      const run = await ciRunWithAnswers(answers);
+
+      expect(run.code, run.log).toBe(1);
+      expect(run.urls, "three attempts in all").toHaveLength(3);
+      expect(run.waits, "two waits, between the attempts").toEqual([0, 0]);
+      expect(run.log).toContain("FAILED in the served phase");
+      expect(run.log).toContain(notServed(shown));
+      expect(run.log).toContain(`Fetched https://codeload.github.com/${SERVED_REPOSITORY}/tar.gz/${SERVED_SHA}`);
+      expect(run.log, "no local emulation stands in for the real archive").not.toContain("[served] local emulation");
+      expect(run.log).not.toContain("git archive HEAD (local emulation)");
+      expect(run.log).not.toContain("PASS:");
+      expect(run.log, "no served container ran").not.toContain("[registry-community]");
+      expect(fake.calls().filter((call) => call.argv[0] === "run"), "the build and the one install container only").toHaveLength(2);
+      expectCleanEnd();
+    }, 120_000);
+
+    it("a GitHub archive that is not an archive, or has no wrapping folder, fails the leg naming what is wrong", async () => {
+      writeFileSync(GITHUB_ARCHIVE(), "this is not an archive");
+      const unreadable = await runScript(["--edition", "community"], ciEnv());
+      expect(unreadable.status, unreadable.stderr).toBe(1);
+      expect(unreadable.stderr).toContain(`GitHub's archive of ${SERVED_SHA} could not be read: the archive is not a gzip file`);
+
+      buildServed();
+      cpSync(LOCAL_ARCHIVE(), GITHUB_ARCHIVE());
+      const unwrapped = await runScript(["--edition", "community"], ciEnv());
+      expect(unwrapped.status, unwrapped.stderr).toBe(1);
+      expect(unwrapped.stderr).toMatch(/could not be read: the archive's members do not share one top-level folder/);
+    }, 120_000);
+
+    it.each([
+      ["a file that differs by one byte", { github: (repo: string) => writeFileSync(path.join(repo, "README.md"), "# A stand-in repository README!\n") }, "README.md differs between GitHub's archive of"],
+      ["a file GitHub's archive lacks", { github: (repo: string) => rmSync(path.join(repo, "docs", "notes.md")) }, "is missing docs/notes.md, which git archive HEAD holds"],
+      ["a file GitHub's archive holds that git archive does not", { github: (repo: string) => writeFileSync(path.join(repo, "docs", "extra.md"), "extra\n") }, "holds docs/extra.md, which git archive HEAD does not"],
+      ["a module file that differs", { github: (repo: string) => writeFileSync(path.join(repo, "ipm/src/cls/ExecuteMCPv2/Utils.cls"), "Class ExecuteMCPv2.Utils\n{\n}\n") }, "ipm/src/cls/ExecuteMCPv2/Utils.cls differs between GitHub's archive of"],
+    ])("%s between GitHub's archive and git archive ends the leg with exit 1, naming the member (is HEAD the commit under test?)", async (_label, variant, reason) => {
+      buildServed(variant);
+
+      const run = await runScript(["--edition", "community"], ciEnv());
+
+      expect(run.status, run.stderr).toBe(1);
+      expect(run.stderr).toContain("FAILED in the served phase");
+      expect(run.stderr).toContain(reason);
+      expect(run.stderr).toContain("is not git archive HEAD (is HEAD the commit under test?)");
+      expect(run.stderr).not.toContain("[registry-community]");
+      expectCleanEnd();
+    }, 120_000);
+
+    const BOTH = (mutate: (repo: string) => void) => ({ local: mutate, github: mutate });
+    it.each([
+      ["a module member the archive lacks (export-ignored, or never committed)", BOTH((repo) => rmSync(path.join(repo, "ipm/src/cls/ExecuteMCPv2/Utils.cls"))), undefined, "missing the module member ipm/src/cls/ExecuteMCPv2/Utils.cls"],
+      ["the stamped guard missing from preload/", BOTH((repo) => rmSync(path.join(repo, "preload"), { recursive: true })), undefined, `missing the module member ${GUARD_MEMBER}`],
+      [
+        "the stamped guard moved out of preload/, with a listing that follows it (the mutation the install legs must also catch)",
+        BOTH((repo) => {
+          renameSync(path.join(repo, GUARD_MEMBER), path.join(repo, "ipm/src/cls/ExecuteMCPv2/InstallGuard.cls"));
+          rmSync(path.join(repo, "preload"), { recursive: true });
+        }),
+        (members: string[]) => [...members.filter((member) => !member.startsWith("preload/")), "ipm/src/cls/ExecuteMCPv2/InstallGuard.cls"],
+        `missing the module member ${GUARD_MEMBER}`,
+      ],
+      ["module.xml at another path than the top", BOTH((repo) => renameSync(path.join(repo, "module.xml"), path.join(repo, "docs", "module.xml"))), undefined, "no module.xml at its top"],
+      ["a file other than the guard under preload/", BOTH((repo) => writeFileSync(path.join(repo, "preload", "other.txt"), "x\n")), undefined, "holds preload/other.txt, where nothing but the stamped guard may live"],
+      ["a requirements.txt at the root", BOTH((repo) => writeFileSync(path.join(repo, "requirements.txt"), "left-pad\n")), undefined, "holds requirements.txt at its top"],
+    ])("%s ends the leg with exit 1 in the served phase, naming the member", async (_label, variant, listing, reason) => {
+      buildServed({ ...variant, ...(listing === undefined ? {} : { listing }) });
+
+      const run = await runScript(["--edition", "community"], ciEnv());
+
+      expect(run.status, run.stderr).toBe(1);
+      expect(run.stderr).toContain("FAILED in the served phase");
+      expect(run.stderr).toContain("the archive the registry would download is not an installable module");
+      expect(run.stderr).toContain(reason);
+      expect(run.stderr, "the install legs of the served archive never ran").not.toContain("[registry-community]");
+      expectCleanEnd();
+    }, 120_000);
+
+    it("a git that cannot list or archive the commit is a refusal with exit 2, naming the verb", async () => {
+      const run = await runScript(["--edition", "community"], { FAKE_GIT_FAIL: "128" });
+
+      expect(run.status, run.stderr).toBe(2);
+      expect(run.stderr).toContain("FAILED in the served phase");
+      expect(run.stderr).toContain("git ls-files failed (fatal: scripted failure)");
+      expect(fakeGitCalls(fake.dir)).toEqual([["ls-files", "ipm/src", "preload"]]);
+      expectCleanEnd();
+    }, 120_000);
+
+    it.each([
+      ["GITHUB_SHA", { GITHUB_SHA: "" }],
+      ["GITHUB_REPOSITORY", { GITHUB_REPOSITORY: "" }],
+    ])("a CI run with no %s cannot name the commit: exit 2, and nothing is fetched", async (_name, missing) => {
+      const run = await runScript(["--edition", "community"], ciEnv(missing));
+
+      expect(run.status, run.stderr).toBe(2);
+      expect(run.stderr).toContain("GITHUB_ACTIONS is set but GITHUB_SHA or GITHUB_REPOSITORY is not");
+      expect(fakeFetchCalls(fake.dir)).toEqual([]);
+      expectCleanEnd();
+    }, 120_000);
+
+    it("a local run, with no GITHUB_ACTIONS, fetches nothing even when a fetch stand-in is loaded, and says it is a local emulation", async () => {
+      const run = await runScript(["--edition", "health"], { NODE_OPTIONS: fetchPreload, FAKE_FETCH_STATUS: "404" });
+
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stderr).toContain("[served] local emulation of GitHub's archive (CI fetches the real one)");
+      expect(fakeFetchCalls(fake.dir)).toEqual([]);
+    }, 120_000);
+
+    describe("what the container's GNU re-tar wrote", () => {
+      /** The re-tar the scripted `cp` copies out is judged against the module's members before the archive is loaded. */
+      it.each([
+        ["module.xml under a subdirectory", { registry: (repo: string) => renameSync(path.join(repo, "module.xml"), path.join(repo, "docs", "module.xml")) }, "no module.xml at its top"],
+        ["the guard missing", { registry: (repo: string) => rmSync(path.join(repo, "preload"), { recursive: true }) }, `missing the module member ${GUARD_MEMBER}`],
+        ["a requirements.txt at the top", { registry: (repo: string) => writeFileSync(path.join(repo, "requirements.txt"), "x\n") }, "holds requirements.txt at its top"],
+      ])("%s ends the run in the registry phase", async (_label, variant, reason) => {
+        buildServed(variant);
+
+        const run = await runScript(["--edition", "community"]);
+
+        expect(run.status, run.stderr).toBe(1);
+        expect(run.stderr).toContain("FAILED in the registry-community phase (community)");
+        expect(run.stderr).toContain("the registry-shaped archive does not hold the module");
+        expect(run.stderr).toContain(reason);
+        expect(run.stderr, "the install of the built archive passed before it").toContain("[install-community] the archive installed over an older Setup");
+        expect(run.stderr, "nothing was loaded from the bad archive").not.toContain("[registry-community] the registry-shaped archive installed");
+        expectCleanEnd();
+      }, 120_000);
+
+      it("a .git directory that the re-tar did not exclude is refused", async () => {
+        const base = path.join(root, "git-not-excluded");
+        mkdirSync(path.join(base, ".git"), { recursive: true });
+        writeFileSync(path.join(base, ".git", "HEAD"), "x\n");
+        const repo = path.join(base, "repo");
+        mkdirSync(repo);
+        writeServedRepository(repo);
+        cpSync(path.join(base, ".git"), path.join(repo, ".git"), { recursive: true });
+        expect(tarGz(registryArchiveSource, repo, ["--exclude=nothing"]).status).toBe(0);
+
+        const run = await runScript(["--edition", "community"]);
+
+        expect(run.status, run.stderr).toBe(1);
+        expect(run.stderr).toContain("FAILED in the registry-community phase (community)");
+        expect(run.stderr).toContain("which the registry's tar excludes");
+        expectCleanEnd();
+      }, 120_000);
+
+      it("an archive that cannot be read is a failure of the registry phase", async () => {
+        writeFileSync(registryArchiveSource, "this is not an archive");
+
+        const run = await runScript(["--edition", "community"]);
+
+        expect(run.status, run.stderr).toBe(1);
+        expect(run.stderr).toContain("FAILED in the registry-community phase (community)");
+        expect(run.stderr).toContain("the registry-shaped archive could not be read");
+        expectCleanEnd();
+      }, 120_000);
+
+      it("the leg loads the archive from the container's own output directory with a plain `load`, never `load -dev`, and tars with the registry's command", async () => {
+        const run = await runScript(["--edition", "health"]);
+        expect(run.status, run.stderr).toBe(0);
+
+        const scripts = sessionScripts();
+        expect(scripts.some((script) => script.includes(`Shell("load /tmp/iris-mcp-ipm-out/registry-root.tgz"`))).toBe(true);
+        expect(scripts.filter((script) => script.includes("registry-root.tgz")).every((script) => !script.includes("load -dev"))).toBe(true);
+        expect(scripts.some((script) => script.includes(`$ZF(-1,"${registryTarCommand()}")`))).toBe(true);
+        expect(run.stderr).toMatch(/\[registry-health\] the registry-shaped archive installed on a fresh/);
+      }, 120_000);
+    });
   });
 
   describe("an archive that cannot be read ends the run in the archive phase", () => {
@@ -1005,12 +1693,25 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     expect(usage.stderr).toMatch(/usage: node scripts\/ci-ipm-archive\.mjs/);
 
     const unbuilt = path.join(root, "unbuilt");
-    mkdirSync(path.join(unbuilt, "ipm"), { recursive: true });
-    writeFileSync(path.join(unbuilt, "ipm", "module.xml"), embed.moduleXml);
+    writeServedRepository(unbuilt);
     const lines: string[] = [];
     const code = await runIpmArchive({ repoRoot: unbuilt, env: { PATH: fake.binDir }, log: (line: string) => lines.push(line), tmpRoot: tmp });
     expect(code).toBe(2);
     expect(lines.join("\n")).toMatch(/shared dist is not built/);
+    expect(fake.calls(), "no docker call").toEqual([]);
+    expect(leftoverTempDirectories()).toEqual([]);
+  }, 60_000);
+
+  it("refuses a repository with no committed IPM tree with exit 2 before any container, naming the command that writes it", async () => {
+    const bare = path.join(root, "no-tree");
+    mkdirSync(path.join(bare, "packages", "shared"), { recursive: true });
+    symlinkSync(path.join(REPO_ROOT, "packages", "shared", "dist"), path.join(bare, "packages", "shared", "dist"));
+    const lines: string[] = [];
+
+    const code = await runIpmArchive({ repoRoot: bare, env: { PATH: fake.binDir }, log: (line: string) => lines.push(line), tmpRoot: tmp });
+
+    expect(code).toBe(2);
+    expect(lines.join("\n")).toContain("refusing to run: module.xml is missing from the repository root: run pnpm gen:ipm.");
     expect(fake.calls(), "no docker call").toEqual([]);
     expect(leftoverTempDirectories()).toEqual([]);
   }, 60_000);

@@ -5,9 +5,20 @@
  * extracted lib makes the behavior genuinely testable).
  */
 
+import { readFileSync } from "node:fs";
+
 import { describe, it, expect } from "vitest";
 
-import { decideRestoreRung, excerpt, mergeCertificationRecord, parseCertifyArgs, passCreatedPaths, timeoutSuffix } from "../../scripts/certify-record.mjs";
+import {
+  decideRestoreRung,
+  excerpt,
+  formatAgainst,
+  humanOnlyProblem,
+  mergeCertificationRecord,
+  parseCertifyArgs,
+  passCreatedPaths,
+  timeoutSuffix,
+} from "../../scripts/certify-record.mjs";
 
 describe("mergeCertificationRecord (AC 33.5.6a/b)", () => {
   const passingRecord = { disposition: "certified-live", date: "2026-07-28", evidence: ["PASS add"] };
@@ -166,5 +177,67 @@ describe("parseCertifyArgs (33-5-L9 Set-vs-Map leg, extracted + pinned at the St
     expect(parsed.positional).toEqual([]);
     expect(parsed.flags.size).toBe(0);
     expect(parsed.options.size).toBe(0);
+  });
+});
+
+describe("humanOnly (Story 42.9)", () => {
+  const marker = { check: "the Cline panel shows iris-dev-mcp with its tools", markedOn: "2026-11-21" };
+
+  it("a re-run merges over a record without losing its humanOnly marker, passing or not", () => {
+    const existing = { disposition: "certified-live", date: "2026-07-28", evidence: ["PASS add"], humanOnly: marker };
+    const passing = { disposition: "certified-live", date: "2026-11-22", evidence: ["PASS add"] };
+    const decision = mergeCertificationRecord(existing, passing, true);
+    expect(decision.action).toBe("write");
+    expect(decision.action === "write" ? decision.merged.humanOnly : undefined).toEqual(marker);
+    expect(mergeCertificationRecord(existing, { disposition: "certification-failed-see-story" }, false).action).toBe("keep");
+  });
+
+  it("accepts an absent marker and a well-formed one", () => {
+    expect(humanOnlyProblem({ disposition: "certified-live" })).toBeNull();
+    expect(humanOnlyProblem(undefined)).toBeNull();
+    expect(humanOnlyProblem({ humanOnly: marker })).toBeNull();
+  });
+
+  it("rejects a missing field, a bad date, an impossible date, a pipe and a non-object", () => {
+    expect(humanOnlyProblem({ humanOnly: { check: "x" } })).toMatch(/markedOn/);
+    expect(humanOnlyProblem({ humanOnly: { markedOn: "2026-11-21" } })).toMatch(/check/);
+    expect(humanOnlyProblem({ humanOnly: { check: "x", markedOn: "21/11/2026" } })).toMatch(/ISO date/);
+    expect(humanOnlyProblem({ humanOnly: { check: "x", markedOn: "2026-02-30" } })).toMatch(/calendar/);
+    expect(humanOnlyProblem({ humanOnly: { check: "a | b", markedOn: "2026-11-21" } })).toMatch(/pipe/);
+    expect(humanOnlyProblem({ humanOnly: "yes" })).toMatch(/object/);
+    expect(humanOnlyProblem({ humanOnly: null })).toMatch(/object/);
+    expect(humanOnlyProblem({ humanOnly: [] })).toMatch(/object/);
+  });
+});
+
+describe("formatAgainst (Story 42.9)", () => {
+  const spec = "@iris-mcp/dev@1";
+
+  it("records the spec and the version npm view resolved it to", () => {
+    expect(formatAgainst(spec, { status: 0, stdout: '"1.0.0"\n' })).toBe("@iris-mcp/dev@1 \u2192 1.0.0");
+  });
+
+  it("takes the highest semver of several matching versions, whatever order npm lists them in", () => {
+    expect(formatAgainst(spec, { status: 0, stdout: '["1.0.0","1.0.1","1.1.0"]' })).toBe("@iris-mcp/dev@1 \u2192 1.1.0");
+    expect(formatAgainst(spec, { status: 0, stdout: '["1.0.0","1.1.0","1.0.9","1.0.10"]' })).toBe("@iris-mcp/dev@1 \u2192 1.1.0");
+  });
+
+  it("records unresolved for a failed lookup, unreadable output and an empty or non-version answer", () => {
+    expect(formatAgainst(spec, { status: 1, stdout: "" })).toBe("@iris-mcp/dev@1 \u2192 unresolved");
+    expect(formatAgainst(spec, { status: null, stdout: "" })).toBe("@iris-mcp/dev@1 \u2192 unresolved");
+    expect(formatAgainst(spec, { status: 0, stdout: "not json" })).toBe("@iris-mcp/dev@1 \u2192 unresolved");
+    expect(formatAgainst(spec, { status: 0, stdout: "[]" })).toBe("@iris-mcp/dev@1 \u2192 unresolved");
+    expect(formatAgainst(spec, { status: 0, stdout: '"next"' })).toBe("@iris-mcp/dev@1 \u2192 unresolved");
+  });
+});
+
+describe("certify.mjs records `against` (Story 42.9; the harness runs on import, so the wiring is pinned by a source scan)", () => {
+  const source = readFileSync(new URL("../../scripts/certify.mjs", import.meta.url), "utf8");
+
+  it("resolves the pinned entry spec with a read-only `npm view` and puts the answer in the record", () => {
+    expect(source).toContain('runMaybeShim("npm", ["view", spec, "version", "--json"]');
+    expect(source).toContain("pinnedSpec(PKG_BY_SERVER[server]");
+    expect(source).toMatch(/const record = \{[\s\S]*?against: resolveAgainst\(\),[\s\S]*?\};/);
+    expect(source).not.toMatch(/npm["'], \[["'](publish|login|trust)/);
   });
 });

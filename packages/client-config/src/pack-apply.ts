@@ -135,6 +135,14 @@ export function projectKey(ctx: PackContext, projectDir: string): string {
   return `${name}-${sha256Hex(Buffer.from(projectDir, "utf8")).slice(0, 12)}`;
 }
 
+/**
+ * The UTF-8 text of a file through the injected `BytesFs`, or `null` when the path does not exist or is a directory. A read that fails
+ * throws (the caller decides what an unreadable file means).
+ */
+export function readTextIfFile(fs: BytesFs, file: string): string | null {
+  return fs.exists(file) && !fs.isDirectory(file) ? fs.readBytes(file).toString("utf8") : null;
+}
+
 export interface PrepareOptions {
   action: PackAction;
   client: string;
@@ -142,6 +150,8 @@ export interface PrepareOptions {
   fs?: BytesFs;
   /** The pack to install from (default: the one shipped in this package). */
   packDir?: string;
+  /** An install of the rules only (the Claude Code plugin is enabled and brings the skills); see `PlanInput.skipSkills`. */
+  skipSkills?: boolean;
 }
 
 export type PrepareResult =
@@ -199,6 +209,7 @@ export function preparePackChange(ctx: PackContext, options: PrepareOptions): Pr
       includeModified: options.includeModified,
       ...(pack !== undefined ? { pack } : {}),
       project: view,
+      ...(options.skipSkills === true ? { skipSkills: true } : {}),
     });
   } catch (error) {
     return { ok: false, kind: "failure", message: `could not read the project: ${describeError(error)}` };

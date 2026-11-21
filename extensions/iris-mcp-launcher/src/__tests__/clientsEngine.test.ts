@@ -9,6 +9,8 @@
  * header; the SPAWN-level proofs against the real bin live in
  * clientsEngineRealCli.test.ts).
  */
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   availableModes,
@@ -35,6 +37,11 @@ import {
   type ClientsSpawnImpl,
 } from "../clientsEngine.js";
 import type { LauncherSettings } from "../types.js";
+
+/** An absolute path on every OS (a `C:` drive-letter literal is not absolute on POSIX). */
+const ABSOLUTE_REPO = path.resolve(os.tmpdir(), "iris-execute-mcp-v2");
+/** The working directory the fake spawns are given. */
+const SPAWN_CWD = path.resolve(os.tmpdir(), "spawn-cwd");
 
 function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
   return {
@@ -73,7 +80,7 @@ describe("resolveClientsCli", () => {
 
   it("dev-repo mode: the extension host interpreter + the repo's built CLI, ELECTRON_RUN_AS_NODE=1", async () => {
     const resolution = await resolveClientsCli(
-      settings({ developmentRepoPath: "C:\\git\\iris-execute-mcp-v2" }),
+      settings({ developmentRepoPath: ABSOLUTE_REPO }),
       async () => true,
     );
     expect(resolution.ok).toBe(true);
@@ -81,7 +88,7 @@ describe("resolveClientsCli", () => {
     expect(resolution.target.mode).toBe("local");
     expect(resolution.target.command).toBe(process.execPath);
     expect(resolution.target.baseArgs).toEqual([
-      "C:\\git\\iris-execute-mcp-v2\\packages\\client-config\\dist\\cli\\clients-cli.js",
+      path.join(ABSOLUTE_REPO, "packages", "client-config", "dist", "cli", "clients-cli.js"),
     ]);
     expect(resolution.target.extraEnv).toEqual({ ELECTRON_RUN_AS_NODE: "1" });
     expect(CLIENTS_CLI_REPO_PATH.replace(/\\/g, "/")).toBe("packages/client-config/dist/cli/clients-cli.js");
@@ -97,7 +104,7 @@ describe("resolveClientsCli", () => {
 
   it("an unbuilt CLI fails closed with the build command (never falls back to npx)", async () => {
     const resolution = await resolveClientsCli(
-      settings({ developmentRepoPath: "C:\\git\\iris-execute-mcp-v2" }),
+      settings({ developmentRepoPath: ABSOLUTE_REPO }),
       async () => false,
     );
     expect(resolution.ok).toBe(false);
@@ -264,7 +271,7 @@ describe("runClientsCli", () => {
   it("captures status/stdout/stderr from a settling child", async () => {
     const child = fakeChild({ status: 0, stdout: "{\"ok\":true}\n", stderr: "" });
     const spawnImpl: ClientsSpawnImpl = () => child;
-    const result = await runClientsCli(LOCAL_TARGET, { kind: "detect" }, {}, spawnImpl);
+    const result = await runClientsCli(LOCAL_TARGET, { kind: "detect" }, {}, SPAWN_CWD, spawnImpl);
     expect(result).toEqual({ status: 0, stdout: "{\"ok\":true}\n", stderr: "" });
   });
 
@@ -272,21 +279,21 @@ describe("runClientsCli", () => {
     const spawnImpl: ClientsSpawnImpl = () => {
       throw new Error("ENOENT npx");
     };
-    const result = await runClientsCli(LOCAL_TARGET, { kind: "detect" }, {}, spawnImpl);
+    const result = await runClientsCli(LOCAL_TARGET, { kind: "detect" }, {}, SPAWN_CWD, spawnImpl);
     expect(result.status).toBeNull();
     expect(result.spawnError).toBe("ENOENT npx");
   });
 
   it("a child error event comes back as spawnError", async () => {
     const child = fakeChild({ error: "spawn npx ENOENT" });
-    const result = await runClientsCli(LOCAL_TARGET, { kind: "detect" }, {}, () => child);
+    const result = await runClientsCli(LOCAL_TARGET, { kind: "detect" }, {}, SPAWN_CWD, () => child);
     expect(result.status).toBeNull();
     expect(result.spawnError).toBe("spawn npx ENOENT");
   });
 
   it("a hung child is killed at the timeout and resolved as spawnError (the 32.2 hung-CLI lesson)", async () => {
     const child = fakeChild({ hang: true });
-    const result = await runClientsCli(LOCAL_TARGET, { kind: "status" }, {}, () => child, 25);
+    const result = await runClientsCli(LOCAL_TARGET, { kind: "status" }, {}, SPAWN_CWD, () => child, 25);
     expect(child.killed).toBe(true);
     expect(result.spawnError).toContain("iris-mcp-clients status timed out");
   });
@@ -297,13 +304,14 @@ describe("runClientsCli", () => {
       LOCAL_TARGET,
       { kind: "apply", client: "zed", scope: "user", servers: ["iris-dev-mcp"], mode: "explicit", confirmSecret: "iris-dev-mcp", passwordStdin: "s3cr3t" },
       {},
+      SPAWN_CWD,
       () => withPw,
     );
     expect(withPw.stdinWritten).toBe("s3cr3t\n");
     expect(withPw.stdinEnded).toBe(true);
 
     const withoutPw = fakeChild({ status: 0, stdout: "x", stderr: "" });
-    await runClientsCli(LOCAL_TARGET, { kind: "detect" }, {}, () => withoutPw);
+    await runClientsCli(LOCAL_TARGET, { kind: "detect" }, {}, SPAWN_CWD, () => withoutPw);
     expect(withoutPw.stdinWritten).toBe("");
     expect(withoutPw.stdinEnded).toBe(false);
   });
@@ -316,9 +324,20 @@ describe("runClientsCli", () => {
       return child;
     };
     const npxTarget: ClientsCliTarget = { command: "npx", baseArgs: ["-y", "-p", "@iris-mcp/client-config@1", "iris-mcp-clients"], extraEnv: {}, mode: "npx" };
-    await runClientsCli(npxTarget, { kind: "detect" }, {}, spawnImpl, 1000, "win32");
+    await runClientsCli(npxTarget, { kind: "detect" }, {}, SPAWN_CWD, spawnImpl, 1000, "win32");
     expect(spawned?.command.toLowerCase()).toContain("cmd.exe");
     expect(spawned?.args).toEqual(["/d", "/s", "/c", "npx", "-y", "-p", "@iris-mcp/client-config@1", "iris-mcp-clients", "detect", "--json"]);
+  });
+
+  it("DW-663: the spawn receives the caller's cwd and the scrubbed env, never an inherited directory", async () => {
+    let seen: { env: Record<string, string>; cwd: string } | undefined;
+    const spawnImpl: ClientsSpawnImpl = (_command, _args, options) => {
+      seen = options;
+      return fakeChild({ status: 0, stdout: "{}\n", stderr: "" });
+    };
+    const folder = path.resolve(os.tmpdir(), "workspace-folder");
+    await runClientsCli(LOCAL_TARGET, { kind: "detect" }, { PATH: "/usr/bin" }, folder, spawnImpl);
+    expect(seen).toEqual({ env: { PATH: "/usr/bin" }, cwd: folder });
   });
 });
 

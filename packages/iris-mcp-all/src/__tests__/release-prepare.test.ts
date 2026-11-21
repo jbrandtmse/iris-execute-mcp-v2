@@ -6,10 +6,13 @@
  *
  * `prepare` runs against a synthetic repository (`makeRepo`) with its commands scripted, and with the REAL throwaway harness driving
  * `fake-docker.ts` (a docker script that is the only PATH entry), so the container lifecycle, the state file and the child environment
- * are the harness's own. No docker, no IRIS, no network, no `pnpm`: the packer, the smoke, the IPM embed and the commands are fakes
- * whose answers a test sets. The manifest that `prepare` writes is then fed to `publish --dry-run` with the stand-in `npm`.
+ * are the harness's own. No docker, no IRIS, no network, no `pnpm`: the packer, the smoke and the commands are fakes whose answers a
+ * test sets. The manifest that `prepare` writes is then fed to `publish --dry-run` with the stand-in `npm`.
  *
- * Rows of the I/O matrix covered here: Prepare (version state, tree integrity, gate set, artifacts).
+ * The IPM channel packs nothing (decision #122): the tree is committed. What `prepare` holds of it is its FRESHNESS (a release refuses
+ * a tree whose stamped marker is not `BOOTSTRAP_VERSION`; a dry run only notes it) and the root scripts, `gen:ipm:check` among them.
+ *
+ * Rows of the I/O matrix covered here: Prepare (version state, tree integrity, IPM freshness, gate set, artifacts).
  */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -20,9 +23,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import * as checks from "../../../../scripts/lib/ci-checks.mjs";
-import * as ipm from "../../../../scripts/lib/ipm-archive.mjs";
 import { ROOT_GATE_SCRIPTS } from "../../../../scripts/lib/ci-checks.mjs";
-import { NPM_PUBLISH_ORDER, ROOT_CHECK_SCRIPT } from "../../../../scripts/lib/release-core.mjs";
+import { guardTreePath, ipmTreeMarker } from "../../../../scripts/lib/ipm-tree.mjs";
+import { IPM_MANIFEST_RELATIVE, IPM_TREE_GUARD_RELATIVE, NPM_PUBLISH_ORDER, OPEN_EXCHANGE_LISTING_URL, ROOT_CHECK_SCRIPT } from "../../../../scripts/lib/release-core.mjs";
 import * as harness from "../../../../scripts/throwaway-iris.mjs";
 import { REPO_ROOT } from "../../../../scripts/lib/live-gate-scan.mjs";
 import {
@@ -39,13 +42,13 @@ import {
   runGateSet,
 } from "../../../../scripts/release.mjs";
 import { installFakeDocker, type FakeDocker } from "./fake-docker";
-import { installStandIns } from "./stand-in-clis";
-import { MARKER_TAIL, PACKAGE_DIRS, ROOT_SCRIPTS, SHA, makeRepo, type RepoOptions } from "./release-script-fixtures";
+import { installStandIns, installStoreClis } from "./stand-in-clis";
+import { MARKER_TAIL, PACKAGE_DIRS, ROOT_SCRIPTS, SERVER_DIRS, SHA, fakeStoresFetch, makeRepo, registryNameOf, type RepoOptions } from "./release-script-fixtures";
 
 const SECRET_NPM = "npm_PREPARESECRET1234567890";
 const SECRET_GITHUB = "ghs_PREPARESECRET0987654321";
 /** The root scripts prepare runs on the real root manifest (DW-612): CI's root gates, sorted. */
-const REAL_CHECKS = ["check:provenance", "gen:governance-baseline:check", "gen:pack:check", "gen:skills:check", "gen:tools-list-snapshot:check", "validate:prompts"];
+const REAL_CHECKS = ["check:provenance", "gen:governance-baseline:check", "gen:ipm:check", "gen:listings:check", "gen:pack:check", "gen:skills:check", "gen:tools-list-snapshot:check", "validate:prompts"];
 
 /** The `scripts` of the real root `package.json`. */
 const realRootScripts = (): Record<string, string> => (JSON.parse(readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")) as { scripts: Record<string, string> }).scripts;
@@ -84,8 +87,6 @@ interface Behaviors {
   smokeStatus: number;
   /** The suites the CI registry knows (default: the real registry's). */
   suites: Record<string, unknown>;
-  /** Changes the embed before it is checked. */
-  embed: (embed: Record<string, any>) => Record<string, any>;
   /** The extension's three commands: the exit code of its build, of `npm run package` and of `vsce ls`, and the vsix files that packaging leaves. */
   vsix: { build: number; package: number; ls: number; files: string[] };
 }
@@ -130,8 +131,7 @@ function newWorld(repoOptions: RepoOptions = {}): PrepareWorld {
     packed: {},
     smokeStatus: 0,
     suites: checks.LIVE_SUITES as Record<string, unknown>,
-    embed: (embed) => embed,
-    vsix: { build: 0, package: 0, ls: 0, files: ["iris-mcp-launcher-0.1.0.vsix"] },
+    vsix: { build: 0, package: 0, ls: 0, files: ["iris-mcp-launcher-1.0.0.vsix"] },
   };
   const baseEnv = (overrides: Record<string, string | undefined> = {}): Record<string, string> => {
     const env: Record<string, string | undefined> = {
@@ -190,25 +190,6 @@ function newWorld(repoOptions: RepoOptions = {}): PrepareWorld {
         return behaviors.smokeStatus;
       },
     },
-    ipm: {
-      embedProblems: ipm.embedProblems,
-      stageModule: ipm.stageModule,
-      loadEmbed: async (repoRoot: string) => {
-        events.push("embed");
-        const marker = /BOOTSTRAP_VERSION = "([^"]+)"/.exec(readFileSync(path.join(repoRoot, "packages", "shared", "src", "bootstrap-classes.ts"), "utf8"))?.[1] as string;
-        const stamped = (name: string): string => `Class ${name} {\nParameter BOOTSTRAPVERSION = "${marker}";\n}\n`;
-        return behaviors.embed({
-          marker,
-          classes: new Map([
-            ["ExecuteMCPv2.Setup.cls", stamped("ExecuteMCPv2.Setup")],
-            ["ExecuteMCPv2.Utils.cls", "Class ExecuteMCPv2.Utils {}\n"],
-          ]),
-          guard: { name: "ExecuteMCPv2.InstallGuard.cls", content: stamped("ExecuteMCPv2.InstallGuard") },
-          moduleName: "iris-execute-mcp-v2",
-          moduleXml: readFileSync(path.join(repoRoot, "ipm", "module.xml"), "utf8"),
-        });
-      },
-    },
   });
 
   return {
@@ -250,16 +231,15 @@ function newWorld(repoOptions: RepoOptions = {}): PrepareWorld {
 const dockerVerbs = (docker: FakeDocker): string[] => docker.calls().map((call) => call.argv[0] as string);
 
 describe("Prepare: the gate set runs every prepublishOnly once, through the harness's exec, before anything is packed (AC 42.5.2; DW-387, DW-675)", () => {
-  it("a healthy dry run: up, the seed, the eight prepublish suites in publish order, down; then eight tarballs, the smoke, the vsix and the IPM tree; exit 0", async () => {
+  it("a healthy dry run: up, the seed, the eight prepublish suites in publish order, down; then eight tarballs, the smoke and the vsix; exit 0", async () => {
     const world = newWorld({ version: "1.0.0" });
     expect(await world.run()).toBe(0);
-    const order = world.events.filter((event) => event.startsWith("exec ") || event.startsWith("pack ") || event === "smoke" || event === "embed");
+    const order = world.events.filter((event) => event.startsWith("exec ") || event.startsWith("pack ") || event === "smoke");
     expect(order).toEqual([
       "exec node scripts/ci-seed-throwaway.mjs",
       ...SUITE_IDS.map((id: string) => `exec node scripts/ci-live-suite.mjs ${id}`),
       ...NPM_PUBLISH_ORDER.map((name: string) => `pack ${name}`),
       "smoke",
-      "embed",
     ]);
     const run = world.docker.calls().find((call) => call.argv[0] === "run")?.argv as string[];
     expect(run).toEqual([
@@ -434,10 +414,57 @@ describe("Prepare: the version state (AC 42.5.2)", () => {
   });
 });
 
+describe("Prepare: the extension's changelog heading names the release (Story 42.7, I/O matrix: CHANGELOG heading)", () => {
+  const UNRELEASED = "# Changelog\n\n## [Unreleased]\n\n- A change.\n\n## [0.1.0]\n";
+  const REFUSAL = /the first heading of extensions\/iris-mcp-launcher\/CHANGELOG\.md is `## \[Unreleased\]`, not `## \[1\.0\.0\]`\. Run pnpm run version, which renames the `## \[Unreleased\]` heading, and commit the result\./;
+
+  it("a tag run whose first `## [` heading is [Unreleased] is refused (exit 1) naming the heading, before docker and before any command", async () => {
+    const world = newWorld({ version: "1.0.0", extensionChangelog: UNRELEASED });
+    expect(await world.run({ env: { GITHUB_REF: "refs/tags/v1.0.0" } })).toBe(1);
+    expect(world.lines.join("\n")).toMatch(new RegExp(`problem: ${REFUSAL.source}`));
+    expect(world.docker.calls()).toEqual([]);
+    expect(world.runs, "no command ran").toEqual([]);
+    expect(existsSync(path.join(world.out, "release-manifest.json"))).toBe(false);
+  });
+
+  it("a tag run whose heading names the release version passes (exit 0), with or without a date", async () => {
+    for (const heading of ["## [1.0.0] \u2014 2026-11-21", "## [1.0.0]"]) {
+      const world = newWorld({ version: "1.0.0", extensionChangelog: `# Changelog\n\n${heading}\n\n- x\n\n## [0.1.0]\n` });
+      expect(await world.run({ env: { GITHUB_REF: "refs/tags/v1.0.0" } }), heading).toBe(0);
+    }
+  });
+
+  it("a tag run whose heading names another version is refused too", async () => {
+    const world = newWorld({ version: "1.0.0", extensionChangelog: "## [0.1.0]\n" });
+    expect(await world.run({ env: { GITHUB_REF: "refs/tags/v1.0.0" } })).toBe(1);
+    expect(world.lines.join("\n")).toContain("the first heading of extensions/iris-mcp-launcher/CHANGELOG.md is `## [0.1.0]`, not `## [1.0.0]`.");
+  });
+
+  it("a dry run reports `a tag run would refuse: ...` with the heading and goes on (exit 0), and a dry run whose heading is right says nothing", async () => {
+    const world = newWorld({ version: "1.0.0", extensionChangelog: UNRELEASED });
+    expect(await world.run()).toBe(0);
+    expect(world.lines.join("\n")).toMatch(new RegExp(`a tag run would refuse: ${REFUSAL.source}`));
+    expect(world.lines.join("\n")).toContain("version state: a dry run goes on with the problems above; a tag run would stop here");
+    expect(world.lines.join("\n")).not.toContain("problem: the first heading");
+    const right = newWorld({ version: "1.0.0" });
+    expect(await right.run()).toBe(0);
+    expect(right.lines.join("\n")).not.toContain("the first heading");
+  });
+
+  it("a dry run measures the heading against the shared version, not a tag", async () => {
+    const world = newWorld({ version: "0.0.2", extensionChangelog: "## [0.0.2] \u2014 2026-01-01\n" });
+    expect(await world.run()).toBe(0);
+    expect(world.lines.join("\n")).not.toContain("the first heading");
+  });
+});
+
 describe("Prepare: tree integrity, in both modes (AC 42.5.2; AD-14)", () => {
   it.each([
     ["the bootstrap marker's semver is not the shared version", { markerSemver: "0.9.0" }, /BOOTSTRAP_VERSION is "0\.9\.0\+2\.244fe8623c76", whose semver is not the shared version 1\.0\.0/],
-    ["ipm/module.xml is at another version", { moduleVersion: "0.9.0" }, /ipm\/module\.xml is at "0\.9\.0", not the shared version 1\.0\.0/],
+    ["the root module.xml is at another version", { moduleVersion: "0.9.0" }, /module\.xml is at "0\.9\.0", not the shared version 1\.0\.0/],
+    ["the extension's package.json is at another version (the lockstep)", { extensionVersion: "0.9.0" }, /extensions\/iris-mcp-launcher\/package\.json is at "0\.9\.0", not the shared version 1\.0\.0\. Run pnpm run version, which stamps it\./],
+    ["the extension's lock is at another version", { extensionLockVersion: "0.9.0" }, /extensions\/iris-mcp-launcher\/package-lock\.json \(version\) is at "0\.9\.0", not the shared version 1\.0\.0/],
+    ["the extension's lock holds another version for its own package", { extensionLockRootVersion: "0.9.0" }, /extensions\/iris-mcp-launcher\/package-lock\.json \(packages\[""\]\.version\) is at "0\.9\.0", not the shared version 1\.0\.0/],
   ])("%s: exit 1 in a tag run and in a dry run, before docker", async (_label, repoOptions, expected) => {
     for (const ref of ["refs/tags/v1.0.0", "refs/heads/release-dry-run/x"]) {
       const world = newWorld(repoOptions as RepoOptions);
@@ -450,7 +477,7 @@ describe("Prepare: tree integrity, in both modes (AC 42.5.2; AD-14)", () => {
   it("pnpm run gen:bootstrap must leave `git status --porcelain` empty: a dirty tree is exit 1 in both modes and names the files", async () => {
     for (const ref of ["refs/tags/v1.0.0", "refs/heads/release-dry-run/x"]) {
       const world = newWorld();
-      world.behaviors.dirty = " M packages/shared/src/bootstrap-classes.ts\n M ipm/module.xml\n";
+      world.behaviors.dirty = " M packages/shared/src/bootstrap-classes.ts\n M module.xml\n";
       expect(await world.run({ env: { GITHUB_REF: ref } }), ref).toBe(1);
       expect(world.lines.join("\n")).toMatch(/pnpm run gen:bootstrap changed the tree \(.*bootstrap-classes\.ts; .*module\.xml\)\. Run it, review the result and commit it/);
       expect(world.docker.calls()).toEqual([]);
@@ -535,18 +562,74 @@ describe("Prepare: tree integrity, in both modes (AC 42.5.2; AD-14)", () => {
   });
 });
 
+describe("Prepare: the committed IPM tree is fresh in a release and noted in a dry run (decision #122; AD-14)", () => {
+  const STALE = "1.0.0+1.aaaaaaaaaaaa";
+  const EMBED = `1.0.0+${MARKER_TAIL}`;
+  const TAG = { GITHUB_REF: "refs/tags/v1.0.0" };
+
+  it("a tag run whose tree stamps another marker than BOOTSTRAP_VERSION is refused (exit 1) naming both, before docker, and nothing is packed", async () => {
+    const world = newWorld({ version: "1.0.0", ipmTreeMarker: STALE });
+    expect(await world.run({ env: TAG })).toBe(1);
+    expect(world.lines.join("\n")).toContain(`problem: the IPM tree stamps ${STALE}, the embed ${EMBED}: the version step did not run on the final content. Run pnpm run version.`);
+    expect(world.docker.calls()).toEqual([]);
+    expect(existsSync(path.join(world.out, "release-manifest.json"))).toBe(false);
+  });
+
+  it("a tag run whose tree has no stamped guard is refused the same way, saying it stamps no marker", async () => {
+    const world = newWorld({ version: "1.0.0", ipmTreeMarker: null });
+    expect(await world.run({ env: TAG })).toBe(1);
+    expect(world.lines.join("\n")).toContain(`problem: the IPM tree stamps no marker, the embed ${EMBED}: the version step did not run on the final content.`);
+    expect(world.docker.calls()).toEqual([]);
+  });
+
+  it("a tag run whose tree stamps BOOTSTRAP_VERSION passes, says nothing of the tree's staleness, and records the tree's marker in the IPM channel entry", async () => {
+    const world = newWorld({ version: "1.0.0" });
+    expect(await world.run({ env: TAG })).toBe(0);
+    expect(world.lines.join("\n")).not.toContain("the IPM tree stamps");
+    expect(world.lines.join("\n")).not.toContain("main carries");
+    const manifest = JSON.parse(readFileSync(path.join(world.out, "release-manifest.json"), "utf8")) as Record<string, any>;
+    expect(manifest["mode"]).toBe("release");
+    expect(manifest["channels"][3]).toEqual({ id: "ipm", enabled: true, manual: true, module: "iris-execute-mcp-v2", version: "1.0.0", marker: EMBED, listing: OPEN_EXCHANGE_LISTING_URL });
+  });
+
+  it("a dry run with a stale tree only notes it (exit 0, the gate set still runs): main carries the old marker for the registry until the next version step", async () => {
+    const world = newWorld({ version: "1.0.0", ipmTreeMarker: STALE });
+    expect(await world.run()).toBe(0);
+    expect(world.lines).toContain(`prepare: ipm: main carries ${STALE} for the registry; the next version step stamps ${EMBED}`);
+    expect(world.lines.join("\n")).not.toContain("problem:");
+    expect(world.docker.calls().length, "the dry run went on to the gate set").toBeGreaterThan(0);
+    const manifest = JSON.parse(readFileSync(path.join(world.out, "release-manifest.json"), "utf8")) as Record<string, any>;
+    expect(manifest["channels"][3].marker, "the entry records what the registry would serve").toBe(STALE);
+  });
+
+  it("a dry run whose tree is fresh prints no staleness note, and a dry run with no stamped guard names that", async () => {
+    const fresh = newWorld({ version: "1.0.0" });
+    expect(await fresh.run()).toBe(0);
+    expect(fresh.lines.join("\n")).not.toContain("main carries");
+    const bare = newWorld({ version: "1.0.0", ipmTreeMarker: null });
+    expect(await bare.run()).toBe(0);
+    expect(bare.lines).toContain(`prepare: ipm: main carries no marker for the registry; the next version step stamps ${EMBED}`);
+  });
+
+  it("readReleaseFacts reads the tree's marker from the stamped guard at the path the generator writes, equal to ipm-tree.mjs's own reading of the real repository", () => {
+    expect(IPM_TREE_GUARD_RELATIVE).toBe(guardTreePath("ExecuteMCPv2.InstallGuard.cls"));
+    expect(IPM_MANIFEST_RELATIVE).toBe("module.xml");
+    const facts = readReleaseFacts(REPO_ROOT);
+    expect(facts.ipmTreeMarker).toMatch(/^\d+\.\d+\.\d+\+\d+\.[0-9a-f]{12}$/);
+    expect(facts.ipmTreeMarker).toBe(ipmTreeMarker(REPO_ROOT));
+    const world = newWorld({ ipmTreeMarker: STALE });
+    expect(readReleaseFacts(world.repo).ipmTreeMarker).toBe(STALE);
+  });
+});
+
 describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
-  it("eight tarballs in publish order, the vsix with its file list, the IPM tree with README.md and LICENSE, and a manifest whose files carry the real sha256", async () => {
+  it("eight tarballs in publish order, the vsix with its file list, no IPM file at all, and a manifest whose files carry the real sha256", async () => {
     const world = newWorld();
     expect(await world.run()).toBe(0);
     const files = listFiles(world.out);
     expect(files.filter((file) => file.startsWith("npm/"))).toEqual(NPM_PUBLISH_ORDER.map((name: string) => `npm/${name.replace("@", "").replace("/", "-")}-1.0.0.tgz`).sort());
-    expect(files).toContain("vsix/iris-mcp-launcher-0.1.0.vsix");
-    for (const file of ["ipm/module.xml", "ipm/src/cls/ExecuteMCPv2/Setup.cls", "ipm/src/cls/ExecuteMCPv2/Utils.cls", "ipm/preload/src/cls/ExecuteMCPv2/InstallGuard.cls", "ipm/README.md", "ipm/LICENSE"]) {
-      expect(files, file).toContain(file);
-    }
-    expect(readFileSync(path.join(world.out, "ipm", "LICENSE"), "utf8")).toBe("MIT License\n");
-    expect(readFileSync(path.join(world.out, "ipm", "README.md"), "utf8")).toMatch(/not made, endorsed or supported by InterSystems/);
+    expect(files).toContain("vsix/iris-mcp-launcher-1.0.0.vsix");
+    expect(files.filter((file) => file.startsWith("ipm/") || file.includes("module.xml")), "the IPM channel packs no file: the tree is committed").toEqual([]);
 
     const manifest = JSON.parse(readFileSync(path.join(world.out, "release-manifest.json"), "utf8")) as Record<string, any>;
     expect(manifest["schema"]).toBe(1);
@@ -555,13 +638,22 @@ describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
     expect(manifest["mode"]).toBe("dry-run");
     expect(manifest["channels"].map((channel: { id: string; enabled: boolean }) => [channel.id, channel.enabled])).toEqual([
       ["npm", true],
-      ["vscode-marketplace", false],
-      ["open-vsx", false],
-      ["ipm", false],
+      ["vscode-marketplace", true],
+      ["open-vsx", true],
+      ["ipm", true],
+      ["mcp-registry", true],
     ]);
+    // The five server.json listings are copied byte for byte to mcp-registry/<bin>.json, and the channel lists each (Story 42.8).
+    expect(files.filter((file) => file.startsWith("mcp-registry/"))).toEqual(SERVER_DIRS.map((dir) => `mcp-registry/${dir}.json`).sort());
+    expect(manifest["channels"][4].servers).toEqual(
+      SERVER_DIRS.map((dir) => ({ name: registryNameOf(dir), version: "1.0.0", package: `@iris-mcp/${dir.replace(/^iris-|-mcp$/g, "")}`, file: `mcp-registry/${dir}.json` })),
+    );
+    for (const dir of SERVER_DIRS) {
+      expect(readFileSync(path.join(world.out, "mcp-registry", `${dir}.json`)), dir).toEqual(readFileSync(path.join(world.repo, "packages", dir, "server.json")));
+    }
     expect(manifest["channels"][0].packages.map((entry: { name: string }) => entry.name)).toEqual([...NPM_PUBLISH_ORDER]);
-    expect(manifest["channels"][1]).toMatchObject({ file: "vsix/iris-mcp-launcher-0.1.0.vsix", name: "iris-mcp-launcher", version: "0.1.0", publisher: "TBD-at-publish-time", files: ["package.json", "dist/extension.js", "LICENSE"] });
-    expect(manifest["channels"][3]).toMatchObject({ tree: "ipm", module: "iris-execute-mcp-v2", version: "1.0.0", repository: "jbrandtmse/iris-execute-mcp-v2-ipm", branch: "master" });
+    expect(manifest["channels"][1]).toMatchObject({ file: "vsix/iris-mcp-launcher-1.0.0.vsix", name: "iris-mcp-launcher", version: "1.0.0", publisher: "iris-mcp", files: ["package.json", "dist/extension.js", "LICENSE"] });
+    expect(manifest["channels"][3]).toEqual({ id: "ipm", enabled: true, manual: true, module: "iris-execute-mcp-v2", version: "1.0.0", marker: `1.0.0+${MARKER_TAIL}`, listing: OPEN_EXCHANGE_LISTING_URL });
     expect(manifest["files"].map((entry: { path: string }) => entry.path)).toEqual(files.filter((file) => file !== "release-manifest.json"));
     for (const entry of manifest["files"] as Array<{ path: string; bytes: number; sha256: string }>) {
       const bytes = readFileSync(path.join(world.out, entry.path));
@@ -616,13 +708,6 @@ describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
     expect(existsSync(path.join(world.out, "release-manifest.json"))).toBe(false);
   });
 
-  it("an embed that is not releasable (a class still holding the dev placeholder) is exit 1 naming the class", async () => {
-    const world = newWorld();
-    world.behaviors.embed = (embed) => ({ ...embed, classes: new Map([...(embed["classes"] as Map<string, string>), ["ExecuteMCPv2.Utils.cls", 'Class X {\nParameter BOOTSTRAPVERSION = "dev";\n}\n']]) });
-    expect(await world.run()).toBe(1);
-    expect(world.lines.join("\n")).toMatch(/the IPM embed is not releasable: ExecuteMCPv2\.Utils\.cls still holds the dev placeholder/);
-  });
-
   it("an output directory that is not empty, a missing sha and a missing --out are refusals (exit 2)", async () => {
     const full = newWorld();
     mkdirSync(full.out, { recursive: true });
@@ -643,6 +728,7 @@ describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
     const world = newWorld();
     expect(await world.run()).toBe(0);
     const standIns = installStandIns(path.join(world.root, "stand-ins"), ["npm", "git"]);
+    installStoreClis(standIns, world.repo);
     standIns.script("npm", [
       { match: ["--version"], stdout: "11.12.1\n" },
       { match: ["view"], status: 1, stderr: "npm error code E404\n" },
@@ -650,7 +736,7 @@ describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
     const lines: string[] = [];
     const code = await publish(
       { artifacts: world.out, dryRun: true, env: { PATH: standIns.binDir, STAND_IN_DIR: standIns.dir }, repoRoot: world.repo },
-      { ...defaultDeps(), log: (line: string) => lines.push(line), fetch: (async () => new Response(null, { status: 404 })) as unknown as typeof fetch },
+      { ...defaultDeps(), log: (line: string) => lines.push(line), fetch: fakeStoresFetch() },
     );
     expect(code, lines.join("\n")).toBe(0);
     expect(standIns.calls("npm").filter((call) => call.argv[0] === "publish")).toHaveLength(8);
@@ -661,6 +747,7 @@ describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
     const world = newWorld({ version: "0.0.2", versions: { "@iris-mcp/client-config": "0.0.1" }, pending: ["one.md"] });
     expect(await world.run()).toBe(0);
     const standIns = installStandIns(path.join(world.root, "stand-ins"), ["npm", "git"]);
+    installStoreClis(standIns, world.repo);
     standIns.script("npm", [
       { match: ["--version"], stdout: "11.12.1\n" },
       { match: ["view"], status: 1, stderr: "npm error code E404\n" },
@@ -668,7 +755,7 @@ describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
     const lines: string[] = [];
     const code = await publish(
       { artifacts: world.out, dryRun: true, env: { PATH: standIns.binDir, STAND_IN_DIR: standIns.dir }, repoRoot: world.repo },
-      { ...defaultDeps(), log: (line: string) => lines.push(line), fetch: (async () => new Response(null, { status: 404 })) as unknown as typeof fetch },
+      { ...defaultDeps(), log: (line: string) => lines.push(line), fetch: fakeStoresFetch() },
     );
     expect(code, lines.join("\n")).toBe(0);
     expect(lines.join("\n")).not.toContain("is not at the release version");
@@ -683,12 +770,11 @@ describe("Prepare: the extension's vsix is an artifact that fails by name (I/O m
   const ranPackage = (world: PrepareWorld): boolean => world.runs.some((run) => run.argv.join(" ").startsWith("npm run package"));
   const ranList = (world: PrepareWorld): boolean => world.runs.some((run) => run.argv.join(" ") === "npm exec -- vsce ls");
 
-  /** What every failed vsix step leaves behind: the gate set ran and its container is gone, but there is no manifest and no IPM tree. */
+  /** What every failed vsix step leaves behind: the gate set ran and its container is gone, but there is no manifest. */
   const expectNoManifest = (world: PrepareWorld): void => {
     expect(world.events.filter((event) => event.startsWith("exec ")), "the gate set ran first").toHaveLength(9);
     expect(world.docker.containers(), "the container is removed").toEqual({});
     expect(existsSync(path.join(world.out, "release-manifest.json")), "no manifest is written").toBe(false);
-    expect(world.events, "the IPM tree is not staged after a failed vsix").not.toContain("embed");
   };
 
   it("an extension that does not build is exit 1 naming the build and the directory, and packaging never starts", async () => {
@@ -741,9 +827,9 @@ describe("Prepare: the extension's vsix is an artifact that fails by name (I/O m
 });
 
 describe("the real loadModules, which only prepare runs (a runner without node_modules never does)", () => {
-  it("loads the five modules from the repository root, with every member that prepare and runGateSet call", async () => {
+  it("loads the four modules from the repository root, with every member that prepare and runGateSet call", async () => {
     const modules = await defaultDeps().loadModules(REPO_ROOT);
-    expect(Object.keys(modules).sort()).toEqual(["checks", "harness", "ipm", "pack", "smoke"]);
+    expect(Object.keys(modules).sort()).toEqual(["checks", "harness", "pack", "smoke"]);
     for (const member of ["upHarness", "execHarness", "downHarness", "createTeardown", "defaultDeps"]) expect(typeof modules.harness[member], `harness.${member}`).toBe("function");
     expect(typeof modules.harness.IRISHEALTH_COMMUNITY_IMAGE).toBe("string");
     expect(typeof modules.checks.LIVE_NAMESPACE).toBe("string");
@@ -751,7 +837,6 @@ describe("the real loadModules, which only prepare runs (a runner without node_m
     for (const id of SUITE_IDS) expect(Object.hasOwn(modules.checks.LIVE_SUITES, id), `checks.LIVE_SUITES.${id}`).toBe(true);
     expect(typeof modules.pack.pnpmPack).toBe("function");
     expect(typeof modules.smoke.smokePackages).toBe("function");
-    for (const member of ["loadEmbed", "embedProblems", "stageModule"]) expect(typeof modules.ipm[member], `ipm.${member}`).toBe("function");
   });
 });
 
@@ -963,5 +1048,41 @@ describe("installSignalHandlers, which main() installs before any command runs (
     proc.emit("exit");
     expect(cleaned, "the exit handler ran the cleanups").toBe(1);
     expect(proc.exits, "the exit handler ends nothing itself").toEqual([]);
+  });
+});
+
+describe("Prepare: the listings' lockstep, one field of one file at a time (QA, Story 42.8, decision #103, Rule #59)", () => {
+  const PLUGIN = "packages/client-config/skills-pack/.claude-plugin/plugin.json";
+  const MARKETPLACE = ".claude-plugin/marketplace.json";
+  const FIELDS: Array<[string, string, (listing: any) => void, RegExp]> = [
+    ["plugin.json version", PLUGIN, (listing) => (listing.version = "0.9.0"), /plugin\.json is at "0\.9\.0", not the shared version 1\.0\.0\. Run pnpm run version/],
+    ["the marketplace ref", MARKETPLACE, (listing) => (listing.plugins[0].source.ref = "v0.9.0"), /marketplace\.json pins the ref "v0\.9\.0", not the release tag v1\.0\.0\. Run pnpm run version/],
+    ["the marketplace ref pinned to the branch", MARKETPLACE, (listing) => (listing.plugins[0].source.ref = "main"), /marketplace\.json pins the ref "main", not the release tag v1\.0\.0/],
+    ...SERVER_DIRS.flatMap((dir): Array<[string, string, (listing: any) => void, RegExp]> => [
+      [`${dir} server.json version`, `packages/${dir}/server.json`, (listing) => (listing.version = "0.9.0"), new RegExp(`packages/${dir}/server\\.json version is "0\\.9\\.0", not the shared version 1\\.0\\.0`)],
+      [`${dir} server.json packages[0].version`, `packages/${dir}/server.json`, (listing) => (listing.packages[0].version = "0.9.0"), new RegExp(`packages/${dir}/server\\.json packages\\[0\\]\\.version is "0\\.9\\.0", not the shared version 1\\.0\\.0`)],
+    ]),
+  ];
+
+  it("the control: a repository whose listings are all at the shared version prepares (exit 0, docker is used)", async () => {
+    const world = newWorld({ version: "1.0.0" });
+    expect(await world.run()).toBe(0);
+    expect(world.lines.join("\n")).not.toContain("not the shared version");
+    expect(world.docker.calls().length, "the gates went on to docker, so the refusals below are the listing rows' own").toBeGreaterThan(0);
+  });
+
+  it.each(FIELDS.map((field) => [field[0], field] as const))("%s: exit 1 in a tag run and in a dry run, naming the file and the field, before docker", async (_label, [, file, edit, expected]) => {
+    for (const ref of ["refs/tags/v1.0.0", "refs/heads/release-dry-run/x"]) {
+      const world = newWorld({ version: "1.0.0" });
+      const target = path.join(world.repo, ...file.split("/"));
+      const listing = JSON.parse(readFileSync(target, "utf8"));
+      edit(listing);
+      writeFileSync(target, `${JSON.stringify(listing, null, 2)}\n`);
+      expect(await world.run({ env: { GITHUB_REF: ref } }), ref).toBe(1);
+      const text = world.lines.join("\n");
+      expect(text, ref).toMatch(expected);
+      expect(text.match(/not the (shared version|release tag)/g) ?? [], `${ref}: the drifted field is the only problem`).toHaveLength(1);
+      expect(world.docker.calls(), ref).toEqual([]);
+    }
   });
 });

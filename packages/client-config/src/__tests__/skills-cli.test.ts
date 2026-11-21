@@ -32,7 +32,8 @@ afterEach(removeSandboxes);
 
 const RULE = "iris-mcp-objectscript-pre-write";
 const SKILLS_USAGE =
-  "iris-mcp-clients skills install|uninstall --client <id> [--project <dir>] [--scope project] [--dry-run] [--yes] [--include-modified] [--json]";
+  "iris-mcp-clients skills install|uninstall --client <id> [--project <dir>] [--scope project] [--dry-run] [--yes] [--include-modified] [--json]\n" +
+  "  With --client claude-code, an enabled iris-mcp@iris-mcp Claude Code plugin (it brings the skills) makes install write only the rule.";
 const NON_TTY_REFUSAL = (action: string): string =>
   `skills ${action} needs confirmation before writing and this is not an interactive terminal; re-run with --yes to accept the previewed changes, or --dry-run to preview only`;
 

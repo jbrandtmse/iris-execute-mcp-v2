@@ -1,0 +1,146 @@
+/**
+ * Story 42.8 (AC 42.8.5; AD-29) - the pure additions of `scripts/lib/release-core.mjs`: the pinned `mcp-publisher`, its
+ * argv builder, the MCP Registry lookup and what its answers mean, and the files that embed the shared version.
+ *
+ * Oracles (Rule #36), all read-only on 2026-11-21: the registry statuses are `GET /v0.1/servers/<name>/versions/<v>` for
+ * `io.github.upstash/context7@4.7.3` (200 `{"server":{...},"_meta":{...}}`) and for `@0.0.0-nonexistent` and
+ * `io.github.jbrandtmse/iris-dev-mcp@1.0.0` (404 `{"title":"Not Found","status":404,"detail":"Server not found"}`); the publisher digest is the
+ * `digest` of the v1.8.8 release asset, re-verified by hashing the downloaded tarball.
+ */
+
+import { describe, expect, it } from "vitest";
+import { CONNECTION_VARIABLES, MARKETPLACE_PATH, SERVER_PACKAGES, serverJsonPath } from "../../../../scripts/lib/listings.mjs";
+import {
+  MARKETPLACE_RELATIVE,
+  MCP_PUBLISHER,
+  MCP_REGISTRY_BASE,
+  NPM_PUBLISH_ORDER,
+  PLUGIN_ENTRY_NAME,
+  PLUGIN_MANIFEST_RELATIVE,
+  SERVER_JSON_DIRS,
+  mcpPublisherArgv,
+  mcpPublisherUrl,
+  notSetUpAnnotations,
+  notSetUpChannels,
+  notSetUpDetail,
+  npmVersionUrl,
+  registryLookupUrl,
+  registryOutcome,
+  releaseReport,
+  skippedText,
+} from "../../../../scripts/lib/release-core.mjs";
+import { PACK_DIR, PLUGIN_MANIFEST_PATH, PLUGIN_NAME } from "../../../../scripts/lib/skills-pack.mjs";
+
+describe("the pinned mcp-publisher (decision #110)", () => {
+  it("is v1.8.8 of the linux_amd64 tarball, with the digest the release asset publishes", () => {
+    expect(MCP_PUBLISHER).toEqual({
+      version: "v1.8.8",
+      asset: "mcp-publisher_linux_amd64.tar.gz",
+      sha256: "09f1fa70ee146b640584274a1a6b2b8a0310b05d4321fa9224e6df6a016d67f4",
+    });
+    expect(mcpPublisherUrl()).toBe("https://github.com/modelcontextprotocol/registry/releases/download/v1.8.8/mcp-publisher_linux_amd64.tar.gz");
+  });
+
+  it("builds only the verbs the release runs: login github-oidc, validate <file> and publish <file>", () => {
+    expect(mcpPublisherArgv("login")).toEqual(["login", "github-oidc"]);
+    expect(mcpPublisherArgv("validate", "/a/server.json")).toEqual(["validate", "/a/server.json"]);
+    expect(mcpPublisherArgv("publish", "/a/server.json")).toEqual(["publish", "/a/server.json"]);
+    expect(() => mcpPublisherArgv("publish")).toThrow(/needs the server\.json/);
+    expect(() => mcpPublisherArgv("validate", "")).toThrow(/needs the server\.json/);
+    expect(() => mcpPublisherArgv("logout" as never)).toThrow(/not an mcp-publisher verb/);
+  });
+});
+
+describe("the MCP Registry lookup (Story 42.8, I/O matrix)", () => {
+  const expected = { name: "io.github.jbrandtmse/iris-dev-mcp", version: "1.1.0" };
+  const json = "application/json; charset=utf-8";
+
+  it("asks GET /v0.1/servers/<name>/versions/<version> with each part URL-encoded", () => {
+    expect(registryLookupUrl("io.github.jbrandtmse/iris-dev-mcp", "1.1.0")).toBe(`${MCP_REGISTRY_BASE}/v0.1/servers/io.github.jbrandtmse%2Firis-dev-mcp/versions/1.1.0`);
+    expect(MCP_REGISTRY_BASE).toBe("https://registry.modelcontextprotocol.io");
+  });
+
+  it("a 200 JSON answer whose server names the name and the version is published (the shape the registry answered for context7@4.7.3)", () => {
+    const body = { server: { name: expected.name, version: expected.version, description: "x" }, _meta: {} };
+    expect(registryOutcome({ status: 200, contentType: json, body }, expected)).toEqual({ outcome: "published" });
+  });
+
+  it("a 404 is absent (the shape the registry answered for an unknown version and for iris-dev-mcp@1.0.0)", () => {
+    expect(registryOutcome({ status: 404, contentType: "application/problem+json", body: { title: "Not Found", status: 404, detail: "Server not found" } }, expected)).toEqual({ outcome: "absent" });
+  });
+
+  it.each([
+    ["a 200 that names another version", { status: 200, contentType: json, body: { server: { name: expected.name, version: "1.0.9" } } }, /does not name/],
+    ["a 200 that names another server", { status: 200, contentType: json, body: { server: { name: "io.github.other/x", version: expected.version } } }, /does not name/],
+    ["a 200 whose body has no server", { status: 200, contentType: json, body: { detail: "ok" } }, /does not name/],
+    ["a 200 with no body", { status: 200, contentType: json }, /does not name/],
+    ["a 200 that is not JSON (a proxy or captive portal)", { status: 200, contentType: "text/html" }, /not JSON/],
+    ["a 200 that is untyped", { status: 200 }, /untyped/],
+    ["a 500", { status: 500 }, /HTTP 500/],
+    ["a 403", { status: 403 }, /HTTP 403/],
+    ["a 429", { status: 429 }, /HTTP 429/],
+    ["no answer", {}, /no answer/],
+  ])("%s is unknown, which stops the channel before anything is posted", (_name, answer, why) => {
+    const outcome = registryOutcome(answer as never, expected);
+    expect(outcome.outcome).toBe("unknown");
+    expect(outcome.why).toMatch(why);
+  });
+
+  it("asks npm for the version of a scoped package at /<scope>%2F<name>/<version>", () => {
+    expect(npmVersionUrl("@iris-mcp/dev", "1.1.0")).toBe("https://registry.npmjs.org/@iris-mcp%2Fdev/1.1.0");
+  });
+});
+
+describe("the files that embed the shared version (lockstep, decision #103)", () => {
+  it("the release's constants equal the generators' (a second copy pinned to the first)", () => {
+    expect(PLUGIN_MANIFEST_RELATIVE).toBe(`${PACK_DIR}/${PLUGIN_MANIFEST_PATH}`);
+    expect(MARKETPLACE_RELATIVE).toBe(MARKETPLACE_PATH);
+    expect(PLUGIN_ENTRY_NAME).toBe(PLUGIN_NAME);
+    expect([...SERVER_JSON_DIRS]).toEqual(SERVER_PACKAGES.map((entry: { dir: string }) => entry.dir));
+    expect(SERVER_JSON_DIRS.map((dir: string) => `packages/${dir}/server.json`)).toEqual(SERVER_PACKAGES.map((entry: { dir: string }) => serverJsonPath(entry.dir)));
+  });
+
+  it("every listed server is an npm package of the publish order", () => {
+    expect(SERVER_PACKAGES.map((entry: { npm: string }) => entry.npm).every((name: string) => (NPM_PUBLISH_ORDER as readonly string[]).includes(name))).toBe(true);
+  });
+
+  it("the connection variables are the six the plugin and the servers read, in the registry's order", () => {
+    expect(CONNECTION_VARIABLES.map((entry: { name: string }) => entry.name)).toEqual(["IRIS_HOST", "IRIS_PORT", "IRIS_USERNAME", "IRIS_PASSWORD", "IRIS_NAMESPACE", "IRIS_HTTPS"]);
+  });
+});
+
+describe("the disabled-channel text", () => {
+  it("a channel that names no reason still prints a status", () => {
+    expect(skippedText({})).toBe("skipped: not enabled (no reason given)");
+    expect(skippedText({ enabledBy: "Story 99.9" })).toBe("skipped: not enabled (Story 99.9)");
+  });
+});
+
+describe("a channel that is not set up (decision #121)", () => {
+  it("the report lists every channel skipped as not set up in one block after the channels, with its reason, and has no block otherwise", () => {
+    const results = [
+      { channel: "npm", item: "@iris-mcp/all@1.0.0", status: "published" },
+      { channel: "open-vsx", item: "iris-mcp-launcher@1.0.0", status: "skipped", detail: notSetUpDetail("the namespace is absent"), notSetUp: true },
+      { channel: "vscode-marketplace", item: "iris-mcp-launcher@1.0.0", status: "skipped: not enabled (Story 99.9)" },
+      { channel: "other-channel", item: "iris-execute-mcp-v2@1.0.0", status: "skipped", detail: notSetUpDetail("the owner step is not done"), notSetUp: true },
+    ];
+    const report = releaseReport(results);
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: skipped (not set up: the namespace is absent)");
+    expect(report.endsWith("\nSkipped channels (not set up; run the release again once the owner step is done):\n  open-vsx: the namespace is absent\n  other-channel: the owner step is not done\n")).toBe(true);
+    expect(notSetUpChannels(results)).toEqual([
+      { channel: "open-vsx", reason: "the namespace is absent" },
+      { channel: "other-channel", reason: "the owner step is not done" },
+    ]);
+    expect(releaseReport(results.slice(0, 1)), "nothing skipped, no block").not.toContain("Skipped channels");
+    expect(releaseReport([results[2] as (typeof results)[number]]), "a disabled channel is not a not-set-up channel").not.toContain("Skipped channels");
+  });
+
+  it("each skipped channel is one raw `::warning::` line, with the three reserved characters of a workflow command escaped", () => {
+    const lines = notSetUpAnnotations([{ channel: "other-channel", item: "x", status: "skipped", detail: notSetUpDetail("100% sure\nsecond line\rthird"), notSetUp: true }]);
+    // The title is a property: the runner (actions/runner ActionCommand.cs) splits properties on `,`, so its comma is `%2C`.
+    expect(lines).toEqual(["::warning title=Channel skipped%2C not set up::other-channel: 100%25 sure%0Asecond line%0Dthird"]);
+    const properties = (lines[0] as string).slice("::warning ".length, (lines[0] as string).indexOf("::", 2)).split(",");
+    expect(properties, "one property, unsplit by the runner").toEqual(["title=Channel skipped%2C not set up"]);
+    expect(notSetUpAnnotations([{ channel: "npm", item: "x", status: "published" }])).toEqual([]);
+  });
+});
