@@ -853,10 +853,10 @@ describe("SQL write safety (Story 38.5)", () => {
       expect(shape.countOnly?.description).toContain("default: false");
     });
 
-    it("iris_sql_execute keeps its frozen annotations and has no parent", () => {
+    it("iris_sql_execute declares destructiveHint true (Story 42.10, DW-560), keeps its other hints and has no parent", () => {
       expect(sqlExecuteTool.annotations).toEqual({
         readOnlyHint: false,
-        destructiveHint: false,
+        destructiveHint: true,
         idempotentHint: false,
         openWorldHint: false,
       });

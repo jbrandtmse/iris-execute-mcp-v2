@@ -652,10 +652,9 @@ export const testStatusTool: ToolDefinition = {
   annotations: {
     // Mixed action (poll: read, cancel: write) — mirrors iris_env_promote's
     // precedent of one tool-level annotation set covering both actions.
-    // Unlike iris_env_promote (whose 'execute' never deletes anything and so
-    // stays destructiveHint:false), 'cancel' genuinely stops a running job and
-    // permanently prevents its result from ever finalizing -- irreversible,
-    // so destructiveHint is truthfully true at the tool level.
+    // 'cancel' genuinely stops a running job and permanently prevents its
+    // result from ever finalizing -- irreversible, so destructiveHint is
+    // truthfully true at the tool level.
     readOnlyHint: false,
     destructiveHint: true,
     // Calling 'cancel' twice on the same jobId does not repeat the same

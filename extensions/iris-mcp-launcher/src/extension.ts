@@ -46,6 +46,7 @@
  */
 import * as vscode from "vscode";
 import { stat } from "node:fs/promises";
+import * as os from "node:os";
 
 import { SERVER_MANAGER_EXTENSION_ID } from "./constants.js";
 import {
@@ -656,15 +657,20 @@ export function activate(context: vscode.ExtensionContext): void {
         // path (the multi-server credential loop); the provide path resolves
         // no credentials, so the token is not needed here.
         const planned = await provider.providePlannedDefinitions();
-        return planned.map(
-          (definition) =>
-            new vscode.McpStdioServerDefinition(
-              definition.label,
-              definition.command,
-              definition.args,
-              {},
-            ),
-        );
+        // VS Code starts a definition without a `cwd` in the user's home
+        // directory today. Setting it explicitly keeps `npx` from resolving a
+        // project-local copy of an `@iris-mcp/*` package should that default change.
+        const cwd = vscode.Uri.file(os.homedir());
+        return planned.map((definition) => {
+          const def = new vscode.McpStdioServerDefinition(
+            definition.label,
+            definition.command,
+            definition.args,
+            {},
+          );
+          def.cwd = cwd;
+          return def;
+        });
       },
       resolveMcpServerDefinition: async (server, token) => {
         const env = await provider.resolveEnvForLabel(server.label, token);

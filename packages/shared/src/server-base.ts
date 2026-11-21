@@ -2286,13 +2286,15 @@ export class McpServerBase {
       tool: tool.name,
       action: this.deriveAuditAction(tool, argsRecord),
       profile: profileName,
-      namespace: this.deriveAuditNamespace(argsRecord, profileName),
+      namespace: this.deriveAuditNamespace(tool, argsRecord, profileName),
       outcome,
       durationMs,
       paramKeys: argsRecord
         ? Object.keys(argsRecord).filter((key) => key !== "server")
         : [],
     };
+    const targetNamespace = this.deriveAuditTargetNamespace(tool, argsRecord);
+    if (targetNamespace !== undefined) entryInput.targetNamespace = targetNamespace;
     if (!schemaInvalid) {
       entryInput.params = this.redactPhiInputs(tool, argsRecord, resolvedProfile);
       // Story 39.2 (AD-19): what the PHI data policy did over a governed call. Counts only; the
@@ -2386,18 +2388,43 @@ export class McpServerBase {
   }
 
   /**
-   * `rawArgs.namespace` when present (per-call override), else the resolved
-   * profile's default namespace read from the already-built, in-memory
-   * profile registry. Basic derivation only (Dev Notes): never establishes a
-   * connection just to learn a namespace — a denied call must not connect.
+   * The audit `namespace` (AD-19): `"%SYS"` for a `SYS`-scoped tool, which
+   * always executes there whatever its `namespace` argument says (that
+   * argument goes to {@link deriveAuditTargetNamespace}). Every other scope
+   * records the call's `namespace` argument (per-call override), else the
+   * resolved profile's default namespace read from the already-built,
+   * in-memory profile registry: the call's target, which for a `NONE`-scoped
+   * tool is not necessarily where it runs. Never establishes a connection
+   * just to learn a namespace, because a denied call must not connect.
    */
   private deriveAuditNamespace(
+    tool: ToolDefinition,
     argsRecord: Record<string, unknown> | undefined,
     profileName: string,
   ): string {
-    const override = argsRecord?.namespace;
-    if (typeof override === "string" && override.length > 0) return override;
-    return this.profiles?.get(profileName)?.namespace ?? "";
+    if (tool.scope === "SYS") return "%SYS";
+    return this.auditNamespaceArgument(argsRecord) ?? this.profiles?.get(profileName)?.namespace ?? "";
+  }
+
+  /**
+   * The audit `targetNamespace` (AD-19): the `namespace` argument of a call to
+   * a `SYS`-scoped tool, the namespace the call acts on while `namespace`
+   * records `"%SYS"`. Recorded on every outcome, a schema-invalid call
+   * included, whatever `IRIS_AUDIT_LOG_PARAMS` says. `undefined` (no field)
+   * for every other scope, whose `namespace` already records the argument,
+   * and for a call with no non-empty string `namespace`.
+   */
+  private deriveAuditTargetNamespace(
+    tool: ToolDefinition,
+    argsRecord: Record<string, unknown> | undefined,
+  ): string | undefined {
+    return tool.scope === "SYS" ? this.auditNamespaceArgument(argsRecord) : undefined;
+  }
+
+  /** The call's `namespace` argument when it is a non-empty string, else `undefined`. */
+  private auditNamespaceArgument(argsRecord: Record<string, unknown> | undefined): string | undefined {
+    const value = argsRecord?.namespace;
+    return typeof value === "string" && value.length > 0 ? value : undefined;
   }
 
   /**

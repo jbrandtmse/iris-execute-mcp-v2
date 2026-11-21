@@ -1,9 +1,9 @@
 /**
  * Story 43.4 QA (DW-639, AC 43.4.2; Rules #21, #59) - the two gates of Story 43.4 are proven to guard the path they claim to guard.
  *
- * 1. The five golden tests read THROUGH the ledger. A test that pointed at the raw golden would go red on the sanctioned rows of the wire
- *    golden, but the handler golden holds no sanctioned entry yet, so `story-43-1-qa-handler-golden.test.ts` would stay green on a raw
- *    read and the ledger would be bypassed unseen. This file therefore checks the routing itself: every test that loads a frozen golden
+ * 1. The golden tests read THROUGH the ledger. A consumer that read a raw golden would compare against the frozen bytes and bypass the
+ *    ledger: the wire golden's sanctioned rows and the handler golden's one sanctioned audit member (Story 42.10) exist only there. This
+ *    file therefore checks the routing itself: every test that loads a frozen golden
  *    does so with `readSanctionedGolden(REPO_ROOT, "<kind>")` for the kinds it needs, a new consumer must be named here, and no test but
  *    the three that pin the frozen bytes (the ledger test, the independent wire test and this file) reads the frozen files or their path
  *    constants.
@@ -34,6 +34,7 @@ const CONSUMERS: Record<string, Array<"wire" | "handler">> = {
   [`${TESTS}/story-43-2-chokepoint-both-eras.test.ts`]: ["wire"],
   [`${TESTS}/story-43-1-qa-handler-golden.test.ts`]: ["handler"],
   [`${TESTS}/epic43-capstone-gate.test.ts`]: ["wire", "handler"],
+  [`${TESTS}/story-42-10-snapshot-ledger-parity.test.ts`]: ["wire"],
 };
 
 /** The test files that pin or read the frozen bytes on purpose (and so may also name the frozen files). */
@@ -180,9 +181,27 @@ describe("the epic capstone and the Story 43.4 tests are in the default suite an
   });
 
   it("the capstone and the Story 43.4 tests contain no skip construct and never read IRIS_REQUIRE_LIVE", () => {
+    // The one sanctioned construct (Story 42.1): `changeset version` consumes the story's changeset, so the doc test that reads its bump map
+    // runs only while the file exists. It depends on the presence of a repository file, never on IRIS or the environment.
+    const SANCTIONED = { file: `${TESTS}/story-43-4-doc-claims.test.ts`, construct: "it.skipIf", count: 1 };
     for (const file of NEW_FILES) {
       if (file.endsWith("story-43-4-qa-gate-guards.test.ts")) continue;
-      expect(skipConstructs(readFileSync(path.join(REPO_ROOT, file), "utf8")), `${file} has no skip construct`).toEqual([]);
+      const source = readFileSync(path.join(REPO_ROOT, file), "utf8");
+      const found = skipConstructs(source);
+      const allowed = file === SANCTIONED.file ? found.filter((construct) => construct === SANCTIONED.construct) : [];
+      if (file === SANCTIONED.file) {
+        expect(allowed, `${file} holds exactly the sanctioned changeset-presence guard`).toHaveLength(SANCTIONED.count);
+        expect(source, "the sanctioned guard skips only when the changeset file is absent").toContain(
+          'it.skipIf(!changesetPresent)("the changeset is a patch for @iris-mcp/shared, client-config and the five servers, and nothing else"',
+        );
+        expect(source, "changesetPresent is the existence of the story's own changeset file").toContain(
+          'const changesetPresent = existsSync(path.join(REPO_ROOT, ".changeset/story-43-4-sdk-v2-close.md"));',
+        );
+      }
+      expect(
+        found.filter((construct) => !allowed.includes(construct)),
+        `${file} has no skip construct`,
+      ).toEqual([]);
     }
   });
 });

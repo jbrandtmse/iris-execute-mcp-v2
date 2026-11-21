@@ -177,6 +177,8 @@ describe("Story 40.1: the root README and the class comment", () => {
 });
 
 describe("Story 40.1: the CHANGELOG section and the changeset", () => {
+  // `changeset version` consumes (deletes) the file, so its checks run only while it exists.
+  const changesetPresent = existsSync(path.join(REPO_ROOT, ".changeset/test-coverage-tool.md"));
   const sections = sectionsOf(read("CHANGELOG.md"));
   const section = sections.find((candidate) => CHANGELOG_TITLE.test(candidate.split("\n")[0] ?? "")) ?? "";
 
@@ -212,7 +214,7 @@ describe("Story 40.1: the CHANGELOG section and the changeset", () => {
     expect(changelog).toContain("as of Story 40.1 `iris_test_coverage` / `iris_test_status` are a fourth");
   });
 
-  it("the changeset bumps @iris-mcp/dev by a minor and @iris-mcp/shared by a patch, and records the default state", () => {
+  it.skipIf(!changesetPresent)("the changeset bumps @iris-mcp/dev by a minor and @iris-mcp/shared by a patch, and records the default state", () => {
     const dir = path.join(REPO_ROOT, ".changeset");
     expect(existsSync(dir)).toBe(true);
     const file = readdirSync(dir).find((name) => name === "test-coverage-tool.md");
@@ -229,7 +231,7 @@ describe("Story 40.1: the CHANGELOG section and the changeset", () => {
       section,
       lineStarting(toolSupport, "> **Story 40.1"),
       lineStarting(toolSupport, "| 32 | `iris_test_coverage`"),
-      read(".changeset/test-coverage-tool.md"),
+      ...(changesetPresent ? [read(".changeset/test-coverage-tool.md")] : []),
     ];
     for (const text of texts) {
       for (const claim of CLAIMS) expect(text, String(claim)).not.toMatch(claim);

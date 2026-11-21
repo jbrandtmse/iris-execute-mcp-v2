@@ -7,7 +7,7 @@
  *  - no packed file names `@modelcontextprotocol/sdk` (the v1 package), in code, type declarations, source maps or the manifest;
  *  - the module specifiers that the packed JavaScript and declarations import: only `@iris-mcp/shared` imports an
  *    `@modelcontextprotocol/*` module, and only `@modelcontextprotocol/server` and its `/stdio` entry;
- *  - the packed `package.json`: the one runtime dependency on the MCP SDK is shared's `@modelcontextprotocol/server`, at exactly 2.3.1;
+ *  - the packed `package.json`: the one runtime dependency on the MCP SDK is shared's `@modelcontextprotocol/server`, at exactly 2.4.0;
  *    the client package is a test-only devDependency, also exact, and no package lists it (or any SDK package) as a runtime,
  *    peer or optional dependency.
  *
@@ -106,16 +106,16 @@ describe.each([...PUBLISHED, "iris-mcp-all"])("what npm would publish of %s", (p
     );
   });
 
-  it("lists an MCP SDK package only as shared's exact 2.3.1 runtime dependency and the test-only exact 2.3.1 client", () => {
+  it("lists an MCP SDK package only as shared's exact 2.4.0 runtime dependency and the test-only exact 2.4.0 client", () => {
     const { manifest } = get();
     const sdkEntries = (section: Record<string, string> | undefined): Array<[string, string]> =>
       Object.entries(section ?? {}).filter(([name]) => name.startsWith("@modelcontextprotocol/"));
 
     expect(sdkEntries(manifest.peerDependencies), "peerDependencies").toEqual([]);
     expect(sdkEntries(manifest.optionalDependencies), "optionalDependencies").toEqual([]);
-    expect(sdkEntries(manifest.dependencies), "dependencies").toEqual(pkg === "shared" ? [["@modelcontextprotocol/server", "2.3.1"]] : []);
+    expect(sdkEntries(manifest.dependencies), "dependencies").toEqual(pkg === "shared" ? [["@modelcontextprotocol/server", "2.4.0"]] : []);
     for (const [name, version] of sdkEntries(manifest.devDependencies)) {
-      expect([name, version], "devDependencies").toEqual(["@modelcontextprotocol/client", "2.3.1"]);
+      expect([name, version], "devDependencies").toEqual(["@modelcontextprotocol/client", "2.4.0"]);
     }
   });
 });

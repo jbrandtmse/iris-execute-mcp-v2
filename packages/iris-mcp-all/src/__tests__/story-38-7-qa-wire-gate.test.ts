@@ -25,8 +25,8 @@
  * route, never from the implementation (Rule #36). Before any test it asserts that the deployed `ExecuteMCPv2`
  * classes carry the `BOOTSTRAP_VERSION` of the built shared dist.
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, defaulting to the dev
- * instance at localhost:52773 / HSCUSTOM; every call names `server: "default"` and the namespace. Writes only
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none
+ * defaulted, and only when `IRIS_REQUIRE_LIVE` arms the run (without it every test skips before any request); every call names `server: "default"` and the namespace. Writes only
  * the disposable `ExecuteMCPv2.Temp.QaStory387Wire*` documents (one compiled, one never compiled) and a scratch
  * directory under the OS temp directory; it removes them before and after the run and asserts that nothing
  * named `QaStory387Wire` is left.
@@ -47,6 +47,7 @@ import {
   docFixtures,
   irisTargetFromEnv,
   isIrisReachable,
+  liveArmingSkipReason,
   openWireSession,
   resolveSdkEsmDir,
   staleDistReason,
@@ -116,7 +117,7 @@ async function stored(docName: string): Promise<boolean> {
 
 beforeAll(async () => {
   const sharedStale = staleDistReason(REPO_ROOT, "shared");
-  skipReason = sharedStale ?? staleDistReason(REPO_ROOT, "iris-dev-mcp");
+  skipReason = liveArmingSkipReason() ?? sharedStale ?? staleDistReason(REPO_ROOT, "iris-dev-mcp");
   skipReason = skipReason ?? staleDistReason(REPO_ROOT, "iris-interop-mcp");
   if (!skipReason) {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);

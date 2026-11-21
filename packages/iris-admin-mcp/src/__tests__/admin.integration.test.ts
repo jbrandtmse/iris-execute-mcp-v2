@@ -2,8 +2,9 @@
  * Integration tests for iris-admin-mcp tools against a real IRIS instance.
  *
  * These tests exercise every administration tool end-to-end via the custom
- * ExecuteMCPv2 REST service. They are skipped automatically when IRIS is
- * not reachable (see integration-setup.ts).
+ * ExecuteMCPv2 REST service. They run only when armed (`IRIS_REQUIRE_LIVE`
+ * plus the five `IRIS_*` target variables) and IRIS is reachable, and skip
+ * otherwise (see integration-setup.ts).
  *
  * Resources are created in dependency order and cleaned up in reverse
  * dependency order to avoid conflicts. All test resources use the
@@ -21,12 +22,13 @@ import { describe, it, expect, afterAll, beforeAll } from "vitest";
 import {
   IrisHttpClient,
   IrisApiError,
-  loadConfig,
   negotiateVersion,
   buildToolContext,
   type ToolContext,
+  type ToolResult,
   type IrisConnectionConfig,
 } from "@iris-mcp/shared";
+import { getIntegrationConfig } from "@iris-mcp/shared/test-helpers/integration-config";
 
 import { databaseManageTool, databaseListTool } from "../tools/database.js";
 import { namespaceManageTool, namespaceListTool } from "../tools/namespace.js";
@@ -113,17 +115,6 @@ const attempted = {
 
 // ── Setup / Teardown ─────────────────────────────────────────────────
 
-function getConfig(): IrisConnectionConfig {
-  return loadConfig({
-    IRIS_HOST: process.env.IRIS_HOST ?? "localhost",
-    IRIS_PORT: process.env.IRIS_PORT ?? "52773",
-    IRIS_USERNAME: process.env.IRIS_USERNAME ?? "_SYSTEM",
-    IRIS_PASSWORD: process.env.IRIS_PASSWORD ?? "SYS",
-    IRIS_NAMESPACE: process.env.IRIS_NAMESPACE ?? "HSCUSTOM",
-    IRIS_HTTPS: process.env.IRIS_HTTPS ?? "false",
-  });
-}
-
 /** Safely attempt a delete, ignoring errors. */
 async function safeDelete(
   tool: { handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown> },
@@ -137,9 +128,36 @@ async function safeDelete(
   }
 }
 
+/** The most pages {@link listAllNames} follows: a list that never ends fails the test instead of looping. */
+const MAX_LIST_PAGES = 200;
+
+/**
+ * The first page's result and the `name` of every row on every page of a paginated list tool. The list tools return one
+ * page of 50 rows plus a `nextCursor`, and a fresh IRIS for Health holds more resources and roles than fit on one page,
+ * so a row that was just created is on the first page only by chance.
+ */
+async function listAllNames(
+  tool: { handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<ToolResult> },
+  rowsKey: "resources" | "roles",
+  toolCtx: ToolContext,
+): Promise<{ first: ToolResult; names: string[] }> {
+  const first = await tool.handler({}, toolCtx);
+  const names: string[] = [];
+  let page = first;
+  for (let pages = 1; !page.isError; pages++) {
+    const structured = page.structuredContent as Record<string, unknown> & { nextCursor?: string };
+    names.push(...(structured[rowsKey] as Array<{ name: string }>).map((row) => row.name));
+    if (structured.nextCursor === undefined) break;
+    if (pages >= MAX_LIST_PAGES) throw new Error(`${rowsKey}: still a nextCursor after ${MAX_LIST_PAGES} pages`);
+    page = await tool.handler({ cursor: structured.nextCursor }, toolCtx);
+    if (page.isError) throw new Error(`${rowsKey}: page ${pages + 1} failed: ${page.content[0]?.text}`);
+  }
+  return { first, names };
+}
+
 describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
   beforeAll(async () => {
-    config = getConfig();
+    config = getIntegrationConfig();
     client = new IrisHttpClient(config);
     const version = await negotiateVersion(client);
     ctx = buildToolContext("SYS", config, client, version);
@@ -337,18 +355,11 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
     });
 
     it("verifies resource in resource.list", async () => {
-      const result = await resourceListTool.handler({}, ctx);
+      const { first: result, names } = await listAllNames(resourceListTool, "resources", ctx);
 
       expect(result.content[0]?.text).toBeDefined();
       if (!result.isError && created.resource) {
-        const structured = result.structuredContent as {
-          resources: Array<{ name: string }>;
-          count: number;
-        };
-        const found = structured.resources.some(
-          (r) => r.name === TEST_RESOURCE_NAME,
-        );
-        expect(found).toBe(true);
+        expect(names).toContain(TEST_RESOURCE_NAME);
       }
     });
   });
@@ -375,18 +386,11 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
     });
 
     it("verifies role in role.list", async () => {
-      const result = await roleListTool.handler({}, ctx);
+      const { first: result, names } = await listAllNames(roleListTool, "roles", ctx);
 
       expect(result.content[0]?.text).toBeDefined();
       if (!result.isError && created.role) {
-        const structured = result.structuredContent as {
-          roles: Array<{ name: string }>;
-          count: number;
-        };
-        const found = structured.roles.some(
-          (r) => r.name === TEST_ROLE_NAME,
-        );
-        expect(found).toBe(true);
+        expect(names).toContain(TEST_ROLE_NAME);
       }
     });
   });
@@ -638,11 +642,15 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
   });
 
   // ── 12. OAuth2 config create & verify (conditional) ──────────────
+  //
+  // oauthAvailable is set by beforeAll, after the file is collected, so each
+  // test reads it when it runs (testContext.skip), never through skipIf.
 
   describe("oauth management", () => {
-    it.skipIf(!oauthAvailable)(
+    it(
       "creates a test OAuth2 server configuration",
-      async () => {
+      async (testContext) => {
+        if (!oauthAvailable) testContext.skip();
         attempted.oauth = true;
         try {
           const result = await oauthManageTool.handler(
@@ -672,9 +680,10 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
       },
     );
 
-    it.skipIf(!oauthAvailable)(
+    it(
       "verifies OAuth2 config in oauth.list",
-      async () => {
+      async (testContext) => {
+        if (!oauthAvailable) testContext.skip();
         const result = await oauthListTool.handler({}, ctx);
 
         expect(result.content[0]?.text).toBeDefined();

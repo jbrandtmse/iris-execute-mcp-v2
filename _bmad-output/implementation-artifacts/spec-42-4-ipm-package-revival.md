@@ -1,0 +1,958 @@
+---
+title: 'Story 42.4: IPM Package Revival'
+type: 'feature'
+created: '2026-10-22'
+status: 'done'
+baseline_revision: '2ba29b0fb665610dc73352c4acfa4c3d438036ef'
+baseline_commit: '2ba29b0fb665610dc73352c4acfa4c3d438036ef'
+review_loop_iteration: 0
+followup_review_recommended: false
+context:
+  - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
+  - '{project-root}/_bmad-output/implementation-artifacts/epic-42-context.md'
+warnings:
+  - multiple-goals
+  - oversized
+deferred:
+  - summary: >-
+      The public IPM registry is fed only through Open Exchange, which reads `module.xml` from the ROOT of a GitHub repository.
+      That collides with AD-14 ("IPM archives are built from the generator's stamped output, never from `src/`") and with the
+      manifest living at `ipm/module.xml`: an Open Exchange build of this repository would package `src/` (Setup's `dev`
+      placeholder) or find no manifest. Story 42.5 (registry publish) and 42.8 (Open Exchange listing) must choose the route.
+    evidence: >-
+      Plan 2026-10-22 research: docs.openexchange.intersystems.com/apps/ipm/ ("Open exchange is the only place to publish
+      applications to the public IPM registry"; tick "Publish in Package manager"; keep module.xml "in the root of your project
+      in GitHub"). Options for 42.5/42.8: a committed stamped module tree at the root of a release branch or a dedicated repository,
+      or a direct registry publish if one exists for this registry. The CI archive of this story is the artifact either route can reuse.
+    location: 'Story 42.5 (release workflow, AC 42.5.3); Story 42.8 (Open Exchange); AD-14 IPM manifest bullet'
+    severity: medium
+  - summary: >-
+      `zpm "uninstall iris-execute-mcp-v2"` removes the classes but leaves the `/api/executemcp/v2` web application and the `%ALL`
+      package mapping, because the manifest configures them through `<Invoke>` methods that have no Unconfigure counterpart
+      (`ExecuteMCPv2.Setup.Uninstall()` exists but nothing calls it). Not an AC of this story.
+    evidence: >-
+      Plan 2026-10-22: IPM 0.10.5 removes a `<WebApplication>` element's app on Unconfigure, but nothing a Configure-phase Invoke
+      created (research of `%IPM.Lifecycle.*`, IPM v0.10.10 source). The manifest keeps the Invoke because AD-31 binds IPM Configure
+      to `Setup.Configure` (no application roles, no MatchRoles).
+    location: 'scripts/gen-bootstrap.mjs (module.xml Invokes); src/ExecuteMCPv2/Setup.cls Uninstall'
+    severity: low
+  - summary: >-
+      Several readers of an audit JSON-lines file still split the raw text and `JSON.parse` every non-blank line, so a read that lands
+      while the server is writing its last entry throws the `SyntaxError: Unterminated string in JSON` that `pollAuditEntries` no
+      longer can. `settledAuditEntries` has four default-suite consumers; the other two sites are one test's reader and one armed-only
+      `afterAll`.
+    evidence: >-
+      The audit writer appends each entry as `${line}\n` in one `appendFile` call (`packages/shared/src/audit.ts`), so a line without its
+      newline is an entry still being written. `settledAuditEntries` polls every 50 ms and parses each line it sees (verification-gap
+      layer, Story 42.4 rework 1); the fix is one shared reader that takes only newline-terminated lines. `completeAuditLines` of
+      `process-gate-helpers.ts` is that reader for TypeScript; an `.mjs` script cannot import it, so it has to move to `scripts/lib`.
+    location: 'scripts/lib/sdk-handler-golden-core.mjs:120-137 (settledAuditEntries; consumers story-43-2-chokepoint-both-eras.test.ts, story-43-2-qa-hand-wire.ts, story-43-3-qa-wire.ts, runHandlerSession); packages/iris-mcp-all/src/__tests__/story-43-4-qa-probe-copy.test.ts (audit reader); packages/iris-mcp-all/src/__tests__/story-39-5-qa-live-gate.test.ts (afterAll)'
+    severity: medium
+---
+
+<intent-contract>
+
+## Intent
+
+**Problem:** IRIS administrators have no working IPM route, and nothing proves one would work:
+- `ipm/module.xml` is a stale hand-written `0.1.0` manifest. It lists 13 of today's 35 classes plus test classes. It is not generated and has never been installed or tested.
+- The bootstrap's `zpm "install iris-execute-mcp-v2"` fallback is inaccurate.
+- AD-14's Ownership and IPM-upgrade bullets are unbuilt (DW-674):
+  - bootstrap would redeploy over classes that IPM installed;
+  - an IPM install can downgrade a newer deployment. IPM's own version check ignores the marker's `+<sequence>.<hash>` part and never sees a bootstrap deployment.
+- CI's oldest-image leg goes red on 2026-11-13, when the `2025.3` Community license key expires (DW-686).
+
+**Approach:**
+- **Manifest.** Generate `ipm/module.xml` from `gen-bootstrap.mjs` `classes[]`, plus one IPM-only, preloaded `ExecuteMCPv2.InstallGuard`. The guard runs Story 42.2's marker ordering inside IRIS before IPM reloads anything.
+- **Offline proof.** A new `ipm` CI job builds the archive from the stamped embed on a `--network none` throwaway, then installs it on fresh `--network none` throwaways of both editions.
+- **Ownership.** Bootstrap treats the guard's presence as IPM ownership: it writes nothing and warns once, naming the `zpm` command.
+- **Fallback text.** Correct the `zpm` fallback message.
+- **CI image.** Move the oldest CI leg to `2026.1`.
+
+## Boundaries & Constraints
+
+**Always:**
+- **The shared IRIS.** The shared IRIS (localhost:52773, HSCUSTOM, marker `0.0.2+1.995fbbb1055d`) gets one read-only marker probe and nothing else. No stage runs a 42.4-built server, an armed suite or an IPM verb against it; the lead's smoke does the normal per-story upgrade.
+- **Throwaways.**
+  - Every container is started, inspected, entered and removed only through `scripts/throwaway-iris.mjs`. No new script builds a docker argv of its own.
+  - Every container a script starts is removed on every exit path, signals included.
+  - Throwaways run `--network none` wherever the AC says so.
+- **Generated outputs.** They change only through `pnpm gen:bootstrap` (Rules #18 and #24): `packages/shared/src/bootstrap-classes.ts`, `scripts/bootstrap-sequence.json` and `ipm/module.xml`. `BOOTSTRAP_VERSION` moves from `0.0.2+1.995fbbb1055d` to `0.0.2+2.<hash>`, and the implement stage records the hash.
+- **The archive** is staged from the generated embed (`BOOTSTRAP_CLASSES`, `IPM_INSTALL_GUARD`), never from `src/` (AD-14).
+- **Name and version.** The module name `iris-execute-mcp-v2` is declared once, in the generator. The module `<Version>` equals the `packages/shared/package.json` version, which equals the marker's semver.
+- **Byte-identical behavior.**
+  - `parseCli(["run", …])`, the root `live:bootstrap-guard` script and every `prepublishOnly` stay byte-identical.
+  - With no `ExecuteMCPv2.InstallGuard` on the instance, every `BootstrapResult` is deep-equal to today's: no new key. The only difference is the ownership request on a write path.
+- **Repo conventions.**
+  - Rule 14: non-ASCII in code and JSON is written as escapes.
+  - Rule #55: no heredoc writes.
+  - Changesets are `patch`.
+  - ObjectScript rules: `$$$` macros, no argumented `Quit` inside Try/Catch, no `$Get()` around a method call, error text in the form `<what happened>. <what to do>.`
+
+**Never:**
+- **No publishing or registry verb.** The only IPM verbs any script issues are `load`, `package` and `list`, never `publish`, `install`, `repo`, `enable` or `update` (AC 42.4.4). No `npm publish`, `pnpm publish`, `changeset version`/`publish`, `git tag`, `secrets.` or upload-artifact step.
+- **No change to `classes[]`.** No new bootstrapped class: the guard is IPM-only, is not in `BOOTSTRAP_CLASSES`, and bootstrap never deploys it.
+- **No `-dev` install on an install container.** A refused developer-mode load keeps IPM's record at the refused version (probe Q3c).
+- **No `<WebApplication>` element, application roles or `MatchRoles`** (AD-31). Configure stays `ExecuteMCPv2.Setup.Configure`.
+- **No change to protected surfaces:** the tool surface, REST routes, governance baseline `1e62c5ad5bf7`/141, frozen goldens, `tools-list-snapshot.json`, the warning text of the newer, foreign and unknown cases, or `irislib/`/`irissys/`.
+
+## I/O & Edge-Case Matrix
+
+| Scenario | Input / State | Expected Output / Behavior | Error Handling |
+|----------|--------------|---------------------------|----------------|
+| Generate | `pnpm gen:bootstrap` on a clean tree | `ipm/module.xml`, the embed and the sequence state are unchanged (not rewritten). The second run prints "Unchanged" for both outputs | — |
+| Drift (AC 42.4.1) | `ipm/module.xml` hand-edited; or `classes[]`, the shared version or the guard changed without a regeneration | The default suite goes red, naming the file and `pnpm gen:bootstrap` | red |
+| Build (AC 42.4.2) | Embed staged on a fresh `iris-community:2026.2` `--network none` container in `USER` (IPM imported from `/usr/irissys/dist/install/misc/zpm.xml`) | `load -dev` then `package` leave exactly one `.tgz` holding `module.xml`, 35 `src/cls/ExecuteMCPv2/**.cls` members equal to the embed, `preload/src/cls/ExecuteMCPv2/InstallGuard.cls`, and no `Tests`/`QAFixtures` member. The archive's manifest declares what `ipm/module.xml` declares | exit 1 naming the phase |
+| Offline install (AC 42.4.2) | The archive on a fresh `--network none` `iris-community:2026.2` (`USER`) and a fresh `irishealth-community:2026.2` (`HSCUSTOM`) | Every check below holds | exit 1 naming the edition and the check |
+| ↳ nothing fetched | | Both containers inspect as `NetworkMode: none`. `%IPM_Repo.Definition` holds 0 rows after the IPM import and after every installing verb | |
+| ↳ compiled | | `load <archive>` succeeds and `list` names `iris-execute-mcp-v2 <version>`. Exactly 36 `ExecuteMCPv2.*` classes are compiled and up-to-date (the 35 of `classes[]` plus the guard; counted from `%Dictionary.CompiledClass` with `GeneratedBy` empty and `$System.OBJ.IsUpToDate`), none of them `Tests`/`QAFixtures`. `GetBootstrapVersion()` equals `BOOTSTRAP_VERSION` | |
+| ↳ REST app | | `/api/executemcp/v2` has the install namespace, `ExecuteMCPv2.REST.Dispatch`, `Enabled=1` and empty `MatchRoles`. `%ALL` maps `ExecuteMCPv2`. An in-container GET of `/api/executemcp/v2/config/namespace` answers 200 | |
+| Guard: newer (DW-674) | Community install container; a synthetic compiled `ExecuteMCPv2.Setup` with marker `<semver>+<seq+1>.<hash>` | `load <archive>` fails with the guard's text naming both markers. Setup's marker is unchanged, `list` has no module, and the repository count is 0 | expected refusal |
+| Guard: foreign / unknown | Synthetic Setup with `dev`; Setup defined with no `BOOTSTRAPVERSION` | Refused the same way | expected refusal |
+| Guard: older | Synthetic Setup with `<semver>+<seq-1>.<hash>` | The install succeeds and the marker becomes `BOOTSTRAP_VERSION` | — |
+| Guard: absent | Fresh health container (no Setup) | The install succeeds | — |
+| Parity (DW-674) | Every case of the shared case table, run through `##class(ExecuteMCPv2.InstallGuard).Classify(d, e)` in each install container | Each result equals `classifyDeployedMarker(d, e)` from the shared dist | exit 1 listing every mismatch |
+| Bootstrap, IPM-owned (DW-674) | The guard document answers 200 and the probe is `stale`, `unconfigured` or `missing`, at startup or on the re-check before compile | At startup: no PUT, compile, Configure, mapping or `^UnitTestRoot`. On the re-check before compile *(amended by the lead after implement, 2026-10-22: the PUTs of `stale` and `missing` precede the re-check, so "no PUT" cannot hold there)*: nothing further is written (no compile, Configure, mapping or `^UnitTestRoot`); documents already uploaded stay. One `[WARN]` "Bootstrap: leaving the ExecuteMCPv2 classes in '<ns>' on <host>:<port> alone: …" naming "installed by IPM", the deployed marker (or absent), this build's marker, `zpm "install iris-execute-mcp-v2 <semver>"` and the `zpm "uninstall …"` hand-back. Result: `ipmOwned: true`, `probeFound: true`; every step flag false at startup, and at the re-check `deployed` stays true for the documents already uploaded | — |
+| Bootstrap, not IPM-owned | The guard document answers 404 | The result is deep-equal to today's (no `ipmOwned` key) | — |
+| Bootstrap, ownership unread | The guard GET fails another way (5xx, timeout) | No write. `probeStatus: "unknown"` with `readFailure` naming it, and one warning (decision #54) | — |
+| Bootstrap, current / newer / foreign / unknown | As today | Unchanged; no ownership request | — |
+| Harness `up --network none` | `--image`, `--namespace`, `--network none`, optional `--mount <hostDir>:/opt/iris-mcp/<name>`, `--state` | `docker run -d --network none` (read-only `-v` when mounted), no `-p`. Readiness is the session loop plus the unexpire step, with no web poll. State is `{name, id, image, namespace, network: "none", mount?}` with mode 0600 | `--host-port` with `--network none`, a bad mount or a symlinked host directory → exit 2 |
+| Harness `session` / `cp` | `session --state --namespace --script <file>`; `cp --state --from /tmp/iris-mcp-<…> --to <hostPath>` | Each re-inspects first (name, label, running, NetworkMode or port). `session` pipes the script into `iris session iris -U <NS>` and prints its output; `cp` copies out | an unlabelled or wrong container → exit 2. `exec` on a `--network none` state → exit 2 (no port) |
+| Fallback text (AC 42.4.3) | Configure fails during bootstrap | `manualInstructions` item 3 names `zpm "install iris-execute-mcp-v2 <semver of BOOTSTRAP_VERSION>"` in the target namespace, as a `%Admin_Manage` user with IPM 0.10+ there, and `zpm "repo -r -n registry -reset-defaults"` when no registry is configured. The name and version equal `ipm/module.xml`'s | — |
+| Oldest leg (DW-686) | `bootstrap-guard-oldest` | Runs on `iris-community:2026.1@sha256:c57b65b2…7c2` and passes every leg (the IPM-owned leg included) | red |
+
+</intent-contract>
+
+## Code Map
+
+**The generator and its outputs**
+- `scripts/gen-bootstrap.mjs` -- the one generator.
+  - `classes[]` `:14-50` (35 entries; `bootstrapRoster()` regex-parses this literal, so it stays a literal and the guard is declared OUTSIDE it).
+  - LF + `trimEnd` read `:82-85`; hash `:92-97`; marker `:108-146`.
+  - The placeholder stamp is Setup-only today (`:151-165`), and `bootstrap-classes.ts` is emitted at `:169-234`.
+  - Write-if-changed at `:236-254`. `ipm/module.xml` must follow the same rule: the dist freshness check is mtime-based (DW-591).
+- `packages/shared/src/bootstrap-classes.ts` -- generated, with `BOOTSTRAP_VERSION` at `:29`; never hand-edited. `scripts/bootstrap-sequence.json` is `{"sequence": 1, "hash": "995fbbb1055d"}`.
+- `ipm/module.xml` -- today a hand-written `0.1.0` manifest (13 classes plus Tests). It becomes output-only.
+- `src/ExecuteMCPv2/Setup.cls` -- unchanged. These are the members the guard and the proof read:
+  - `BOOTSTRAPVERSION` `:34` (`"dev"` on disk);
+  - `Configure(pNamespace="")` `:44` (defaults to `$NAMESPACE`; no MatchRoles);
+  - `ConfigureMapping` `:130`;
+  - `GetBootstrapVersion()` `:226`.
+
+**Bootstrap (TypeScript)**
+- `packages/shared/src/bootstrap.ts`:
+  - `MANUAL_INSTRUCTIONS` `:114-131`, with item 3 at `:130-131` (AC 42.4.3; the epic's `:95-96` is stale). It is used at `:484` via `.replace("NAMESPACE", ns)`, first occurrence only.
+  - `setupClassAbsence` `:190-205` (404 = positive absence; Rule 2: generalize it to any document).
+  - `probeCustomRest` `:257`.
+  - `warnDeploymentLeftAlone` `:553-589`: the `LeftAlone` union gains an `ipm` variant.
+  - `markerAllowsCompile` `:607-632`: the re-check before compile also re-checks ownership.
+  - `bootstrap()` `:669-838`: the write paths are the unconfigured branch `:730`, the stale/missing branch `:756`, and the privileged steps.
+- `packages/shared/src/bootstrap-version.ts` -- `parseBootstrapMarker`/`classifyDeployedMarker`, the oracle of the parity check. Unchanged. It uses ASCII `\d` (JS), BigInt ordering, and treats leading zeros as meaningless.
+- `packages/shared/src/server-base.ts:2905,3161` -- `manualInstructions` is logged only; `BootstrapResult` is on no tool wire (exported type, `index.ts:129`).
+
+**Tests that pin these**
+- `packages/shared/src/__tests__/bootstrap.test.ts`:
+  - `MANUAL_INSTRUCTIONS` `:1664-1673`; Configure-fails cases `:815-863` and `:1084-1163`;
+  - the 35-class roster `:1677+`;
+  - drift check `:1915-2050` (`classPaths` and the hash formula: the guard joins both);
+  - the fetch-sequence cases of every write path, which change with the ownership GET.
+- `packages/shared/src/__tests__/gen-bootstrap-write.test.ts` -- scratch-copy runs of the generator. The copy must now include `ipm/`. `:190` is the "checked-in embed equals generator output" drift case; the manifest joins it.
+- `packages/shared/src/__tests__/bootstrap-version.test.ts` -- it pins literal markers (`EMBEDDED` `:9`), so it is unaffected by the move.
+- `packages/iris-mcp-all/src/__tests__/changelog-bootstrap-move.test.ts` -- the newest CHANGELOG section that names a move must end at the embed's marker. `story-42-2-doc-claims.test.ts:79-80` holds history literals and stays true.
+- `packages/iris-mcp-all/src/__tests__/bootstrap-guard-legs.ts` -- `LEGS` `:357-367`, `REMEDY` `:300-304`, `leavingLines` `:295`. It is shared by the hermetic `story-42-2-bootstrap-guard-orchestration.test.ts` (fake Atelier, `stateful-fake-atelier.ts:320-323`: GET doc → 404 when missing) and by the live `story-42-2-bootstrap-guard-live-gate.test.ts`, which the CI `bootstrap-guard`/`bootstrap-guard-oldest` suites run.
+
+**Harness and CI**
+- `scripts/throwaway-iris.mjs`:
+  - Images `:69-88`, with `OLDEST_IRIS_COMMUNITY_IMAGE` `:80-81` (DW-686).
+  - Builders and parsers: `buildRunArgv` `:222` (always `-p` today); `buildSessionArgv` `:253` (`-U %SYS` only); `parseCli` `:400`.
+  - Inspection and state: `inspectProblems` `:496` (always checks a port); `parseState` `:554` (port required).
+  - Lifecycle: `startContainer` `:635` (session loop, unexpire, then web poll); `upHarness` `:762`; `loadThrowaway` `:806`; `execHarness` `:847`; `downHarness` `:890`; `defaultDeps` `:913`; `main` `:988`.
+- Pins on the harness:
+  - `packages/iris-mcp-all/src/__tests__/throwaway-iris.test.ts` (the oldest pin `:99-103`, `parseCli` `:338`);
+  - `story-42-3-qa-harness-lifecycle.test.ts` with `fake-docker.ts` (a scripted docker as the only PATH entry);
+  - `story-42-2-qa-throwaway-wiring.test.ts`.
+- `scripts/lib/ci-checks.mjs`:
+  - pins `JOB_TIMEOUT_MINUTES` `:54` and `CI_IMAGES` `:57`;
+  - `buildDeclaredSteps` `:295-332` returns `{gates, throwaway, package}`.
+- `.github/workflows/ci.yml` -- the three jobs, and the header comment `:1-21` (which names 2025.3).
+- `packages/iris-mcp-all/src/__tests__/ci-workflow-check.ts` -- `JOB_KEYS` `:74`; the "only gates runs a matrix" check `:161`; the floor-node loop over `["throwaway","package"]` `:232`; package needs `:293-296`. `ci-workflow.test.ts` holds the README CI section naming each job.
+- `scripts/ci-seed-throwaway.mjs:54` `bootstrapRoster()` -- reuse it to read `classes[]`.
+- `scripts/lib/script-process.mjs` (`isEntryPoint`, `spawnInherited`) -- reuse it.
+
+**Docs**
+- `README.md`:
+  - `### 4. Verify` `:327` (the new IPM subsection goes after it);
+  - `### Shared Instances: Upgrade Every Client Together` `:1020-1040` (the table gains an IPM row and the remedies gain a bullet; `story-42-2-doc-claims.test.ts` pins the Newer and Foreign rows and the remedy sentences, so keep them);
+  - `### Continuous Integration` `:1069-1079` ("three jobs"; 2025.3).
+- `CHANGELOG.md` -- the newest section is Story 42.3 at `:5`.
+
+**IPM facts, live probes 2026-10-22.** IPM is 0.10.5 on `iris-community:2026.2` (Build 221U), `irishealth-community:2026.2` and `iris-community:2026.1` (Build 234U). The exported source is at `/private/tmp/claude-501/-Users-jbrandt-git-iris-execute-mcp-v2/03eb9a39-2d9e-4087-85ac-363a9bb86d2a/scratchpad/ipm-probe/ipm-src/`, and the probe logs and modules are in `…/scratchpad/ipm-probe/`.
+- **Offline copy and import.**
+  - Every image carries `/usr/irissys/dist/install/misc/zpm.xml`. No `%IPM` is present in USER, %SYS or HSCUSTOM; the Health image's HSLIB has a `0.10.5-SNAPSHOT`.
+  - `$System.OBJ.Load(<zpm.xml>,"ck")` imports IPM into the current namespace only. Its Python wheels come from inside the kit, and `%IPM_Repo.Definition` stays at 0 rows.
+- **Phases.**
+  - The new `module.xml` is stored before any phase runs (`%IPM.Utils.Module:LoadNewModule:1054`).
+  - The phases are Initialize, Reload, `*`, Validate, Compile and Activate (the last also runs Configure) (`%IPM.Lifecycle.Base:GetCompletePhasesForOne:159`).
+- **`<Invoke>`.** `Phase` defaults to Configure and `When` to After. A `%Status` error aborts the phase and the install (`%IPM.Storage.InvokeReference:12,17,24,79`; `%IPM.Storage.Module:ExecutePhases:573-611`).
+- **Preload.** A `Preload="true"` file lives under `<root>/preload/<SourcesRoot>/cls/…` and is compiled in Initialize (`%IPM.Lifecycle.Base:%Initialize:560-566`).
+  - The working guard is `<Invoke … Phase="Initialize" When="After"/>`. It reads the previously compiled class's parameter; `Initialize/Before` runs the OLD guard, and on a fresh install fails with `<CLASS DOES NOT EXIST>`.
+  - Research found that a failed preload compile is swallowed. The Invoke then fails closed on a fresh install.
+- **IPM's own downgrade check** refuses a lower module version when an IPM record exists ("Cannot downgrade …", `LoadNewModule:1043-1046`). No flag bypasses it, it ignores build metadata, and it is skipped when no record exists.
+- **Rollback.** A non-dev load rolls back on refusal (`:1156-1159`). A plain load over a `-dev` install inherits dev mode and keeps the refused version in the record (`:1104-1115`).
+- **`package <m> -path <p>`** writes `<p>.tgz` and re-runs Initialize through Activate. It exports the classes from the namespace; the probe found the members byte-identical to the source.
+- **`load <abs>.tgz`** runs the same phases. The probe's 35-class module compiled, configured the web app and the `%ALL` mapping, and answered GET 200 on all three images.
+- **Registry and commands.**
+  - The registry answers 404 for `iris-execute-mcp-v2`, `iris-mcp` and `iris-execute-mcp` (`pm.community.intersystems.com/packages/<name>`, 2026-10-22).
+  - `zpm "repo -r -n registry -reset-defaults"` adds the community registry to the current namespace. `enable -community` also maps IPM to every namespace, so it is not used here.
+
+**Reference:** `../OcuPilot/scripts/ci-ipm-archive.sh`, the Lead's own code: adapt, don't copy. It is the precedent for:
+- `--network none` on both containers;
+- import from `zpm.xml`;
+- the repository-count measurement after every verb;
+- reading back exactly one `.tgz`;
+- the structural manifest comparison;
+- split session markers;
+- removing both containers on every exit.
+
+## Tasks & Acceptance
+
+**Execution** (dependency order):
+- `ipm/preload/ExecuteMCPv2/InstallGuard.cls` (new, hand-written source) -- class `ExecuteMCPv2.InstallGuard Extends %RegisteredObject`, self-contained (it references no other `ExecuteMCPv2` class and compiles alone in IPM's preload). Its source sits outside `src/`, so a `src/**` load never deploys it (Design Notes).
+  - `Parameter BOOTSTRAPVERSION = "dev";` -- the placeholder line, stamped by the generator.
+  - `ClassMethod Classify(pDeployed As %String, pEmbedded As %String) As %String` -- an exact port of `classifyDeployedMarker`/`parseBootstrapMarker`. It returns `current|older|newer|foreign`.
+    - Use `[0-9]`, never `\d` (ICU `\d` matches non-ASCII digits).
+    - Compare numbers as digit strings: strip leading zeros, then compare length, then the string.
+    - `deployed = embedded` (string equality) is `current` first.
+  - `ClassMethod DeployedState(Output pMarker As %String) As %String` -- returns one of:
+    - `absent`: no `%Dictionary.ClassDefinition` row for `ExecuteMCPv2.Setup`;
+    - `marker`: compiled, with a non-empty `BOOTSTRAPVERSION`;
+    - `unknown`: anything else (defined but not compiled, or no or empty parameter).
+  - `ClassMethod Check() As %Status` -- the IPM Invoke target. `absent`, `older` and `current` return `$$$OK`. `newer`, `foreign` and `unknown` return `$$$ERROR($$$GeneralError, <text>)`.
+    - The text names the namespace, the deployed marker (or why none was read) and this package's marker, and says nothing was installed.
+    - The remedy: for `newer`, install a package at least as new; for `foreign`/`unknown`, delete class `ExecuteMCPv2.Setup` in this namespace to install deliberately.
+  - Rationale: DW-674, IPM-upgrade half.
+- `scripts/gen-bootstrap.mjs` -- extend it (Rule 2):
+  - **(a) The guard input.** Declare `ipmGuard = { name: 'ExecuteMCPv2.InstallGuard.cls', path: 'ipm/preload/ExecuteMCPv2/InstallGuard.cls' }` and `IPM_MODULE_NAME = 'iris-execute-mcp-v2'` outside `classes[]`. Read the guard with the same normalization and hash it after the 35 classes, with the same separator.
+  - **(b) Stamping.** Stamp the placeholder into both Setup and the guard, and error naming the file when either lacks it.
+  - **(c) The embed.** Emit `export const IPM_MODULE_NAME` and `export const IPM_INSTALL_GUARD: BootstrapClass` (stamped) into `bootstrap-classes.ts`, outside `BOOTSTRAP_CLASSES`.
+  - **(d) The manifest.** Emit `ipm/module.xml`, write-if-changed:
+    - an XML comment `GENERATED by scripts/gen-bootstrap.mjs … DO NOT EDIT … pnpm gen:bootstrap` that states the counts, computed from `classes.length`;
+    - `<Name>`, `<Version>` (the shared semver), a `<Description>` that does not imply InterSystems endorsement (AD-28), `<Keywords>`, `<Packaging>module</Packaging>` and `<SourcesRoot>src</SourcesRoot>`;
+    - `<Resource Name="ExecuteMCPv2.InstallGuard.CLS" Preload="true"/>`, then one `<Resource Name="<class>.CLS"/>` per `classes[]` entry in order;
+    - `<Invoke Class="ExecuteMCPv2.InstallGuard" Method="Check" Phase="Initialize" When="After"/>`, then `<Invoke Class="ExecuteMCPv2.Setup" Method="Configure"/>` and `<Invoke Class="ExecuteMCPv2.Setup" Method="ConfigureMapping"/>`.
+  - Rationale: AC 42.4.1 and DW-674.
+- `pnpm gen:bootstrap` -- run it twice. The first run regenerates `bootstrap-classes.ts`, `scripts/bootstrap-sequence.json` (sequence 2) and `ipm/module.xml`; the second must print "Unchanged". Record `BOOTSTRAP_VERSION` from `0.0.2+1.995fbbb1055d` to the new value (Rule #24).
+- `packages/shared/src/bootstrap.ts`:
+  - **(a) Ownership read.** Generalize `setupClassAbsence` into `documentAbsence(http, config, version, document)` (Rule 2), and add `ipmOwnership(…)`, which reads the guard document `IPM_INSTALL_GUARD.name`: 200 → `ipm`, 404 → `none`, anything else → `unknown` with a reason. It never throws.
+  - **(b) Startup check.** In `bootstrap()`, after the `newer`, `foreign`, `unknown` and `current` returns and before any write on the `unconfigured`, `stale` and `missing` paths:
+    - `ipm` → set `ipmOwned: true` and `probeFound: true`, log the warning, return;
+    - `unknown` → set `probeStatus: "unknown"`, `probeFound: true` and `readFailure`, log the existing unknown warning with that reason, return.
+  - **(c) Re-check before compile.** `markerAllowsCompile` re-checks ownership the same way.
+  - **(d) The warning.** Add the `ipm` variant of `warnDeploymentLeftAlone`. Its text and remedies are listed in Design Notes.
+  - **(e) The fallback text.** Rewrite `MANUAL_INSTRUCTIONS` item 3 (AC 42.4.3). Its text is listed in Design Notes.
+  - **(f) The result type.** `BootstrapResult` gains optional `ipmOwned?: boolean`, present only when true.
+  - Rationale: DW-674 ownership half, and AC 42.4.3.
+- `packages/shared/src/__tests__/fixtures/bootstrap-marker-parity-cases.json` (new) -- `[{deployed, embedded, expected}]`, with at least 40 cases. They cover:
+  - each classification in each grammar kind (stamped, legacy, unparseable);
+  - every semver part and the sequence, both directions;
+  - leading zeros; integers past 2^53 and past 19 digits;
+  - `dev`, `""`, surrounding whitespace, a trailing `\n`, uppercase hex, 11/13-hex legacy, a prerelease semver, and Arabic-Indic digits (U+0661 and its neighbours, written in the JSON as backslash-u escapes, never as literal characters; Rule 14);
+  - an unparseable or legacy embedded marker.
+
+  Take `expected` from a run of the TS reference (Rule #36), and cite the command in the consuming test's header.
+- `packages/shared/src/__tests__/bootstrap-version.test.ts` -- add a table-driven describe over the fixture: the TS output equals `expected` for every case. Add a completeness case: every classification and every parse kind occurs, and so do a >2^53 case and a non-ASCII-digit case.
+- `packages/shared/src/__tests__/bootstrap.test.ts`:
+  - ownership cases, one per matrix row: IPM-owned at startup for `stale`, `unconfigured` and `missing`; IPM-owned found on the re-check; not owned (deep-equal to today's result, no `ipmOwned` key); ownership unread; and current/newer/foreign/unknown making no ownership request;
+  - the AC 42.4.3 text pins, including name and version equal to `ipm/module.xml`'s `<Name>`/`<Version>`;
+  - the drift check extended to `IPM_INSTALL_GUARD` (stamped content equals disk) and to the new hash formula;
+  - the existing fetch-sequence expectations updated for the ownership GET.
+- `packages/shared/src/__tests__/gen-bootstrap-write.test.ts` -- the scratch copy includes `ipm/`. Add these cases:
+  - the checked-in `ipm/module.xml` is exactly the generator's output;
+  - an unchanged run keeps the manifest's mtime;
+  - a missing guard placeholder is an error that writes nothing;
+  - a changed shared version moves `<Version>`.
+- `packages/iris-mcp-all/src/__tests__/ipm-manifest.test.ts` (new, default suite; AC 42.4.1) -- parse `ipm/module.xml` and assert:
+  - the non-preload resources equal `bootstrapRoster().names`, as `.CLS`, in order;
+  - exactly one Preload resource, the guard;
+  - the three Invokes in order with their attributes;
+  - `<Version>` equals the shared version, which equals the embed marker's semver;
+  - `<Name>` equals the embed's `IPM_MODULE_NAME`;
+  - no `ExecuteMCPv2.Tests.`/`QAFixtures` resource, and no `<WebApplication>`, `MatchRoles` or role attribute;
+  - the DO-NOT-EDIT header;
+  - the header's stated counts equal the counted `<Resource` lines, which equal the roster length plus 1 (Rule #51).
+- `scripts/throwaway-iris.mjs` -- extend it (Rule 2), keeping `run`'s argv and result byte-identical:
+  - **`up`:**
+    - `--network none` (mutually exclusive with `--host-port`): no `-p`, readiness without the web poll, and state `network: "none"`;
+    - `--mount <absolute real directory>:/opt/iris-mcp/<[a-z0-9-]+>` → `-v …:ro`, refusing `..`, `:`, a symlink or a missing directory.
+  - **`session --state <f> --namespace <NS> --script <file>`** → `docker exec -i <id> iris session iris -U <NS>`, printing its output and exiting with docker's status.
+  - **`cp --state <f> --from <container path under /tmp/iris-mcp-…> --to <host path>`**: copy out.
+  - **Inspection and state:**
+    - `inspectProblems` takes `{port}` or `{network: "none"}`. `none` requires `HostConfig.NetworkMode === "none"` and no port binding.
+    - `parseState` accepts exactly one of `port` or `network`.
+    - `exec` refuses a `--network none` state (exit 2).
+    - `session` and `cp` run `loadThrowaway` first.
+  - **DW-686:** `OLDEST_IRIS_COMMUNITY_IMAGE` becomes `intersystems/iris-community:2026.1@sha256:c57b65b2b454494091e7b3e49f6a53b3335f40adf475bcfcee0866083f35a7c2`. Its comment carries the dated floor: 2025.3 passed every guard leg in CI run 39749804619 (sha `6a8574f`, 2026-10-22) and its key expires 2026-11-13; the 2026.1 key is valid to 2027-03-27.
+  - Update the header contract and usage.
+- `scripts/lib/ipm-archive.mjs` (new; pure helpers, importable without side effects):
+  - `stageModule(dir, embed)` -- writes `module.xml`, `src/cls/<path>.cls` per `BOOTSTRAP_CLASSES` entry and `preload/src/cls/ExecuteMCPv2/InstallGuard.cls`, with mode `a+rX`. It refuses content that still holds the `"dev"` placeholder, or a marker other than `BOOTSTRAP_VERSION`.
+  - `manifestDeclarations(xml)` -- Name, Version, SourcesRoot, each Resource's Name/Preload, each Invoke's Class/Method/Phase/When. IPM re-serializes on export, so comparisons are structural.
+  - `archiveProblems(members, extractedDir, embed)` -- the member set, and content equal after LF/trimEnd.
+  - Session-script builders that use split markers (`"IRISMCP-"_"X-START:"`), and `markerValue(output, name)`.
+  - `synthesizedSetup(marker | null)` -- a one-class fixture source.
+  - `parityProblems(cases, irisResults, classify)`.
+  - `IPM_VERBS` = `['load','package','list']`.
+- `scripts/ci-ipm-archive.mjs` (new; AC 42.4.2):
+  - **Usage.** `node scripts/ci-ipm-archive.mjs [--edition community|health]` (default both).
+  - **Preflight.** It requires the built shared dist (`packages/shared/dist/bootstrap-classes.js`, `bootstrap-version.js`) and a manifest whose Name and Version match the embed.
+  - **Driver.** It drives `throwaway-iris.mjs` (its exported subcommand functions with `defaultDeps`, or its CLI) through the flow in Design Notes. It prints a phase line and, on failure, the container log. It removes every container in `finally` and on SIGINT/SIGTERM, and removes its temp directories.
+  - **Exits.** 0 pass; 1 a check failed (naming the phase and edition); 2 usage or refusal; 3 no docker; 4 a container did not start.
+- `packages/iris-mcp-all/src/__tests__/bootstrap-guard-legs.ts` -- add the leg `ipm-owned-older`: seed an older marker plus a stub `ExecuteMCPv2.InstallGuard` document; it expects `ipm` (byte-identical, one warning with the `REMEDY.ipm` strings).
+  - Every other leg's seed removes a guard document left from an earlier leg, so the legs stay independent.
+  - The hermetic orchestration test and the CI `bootstrap-guard*` suites pick the leg up unchanged (Rule #48: the live proof of the ownership half).
+- `scripts/lib/ci-checks.mjs` and `.github/workflows/ci.yml`:
+  - **Registry.** `JOB_TIMEOUT_MINUTES.ipm = 45`, and the `ipm` job's `DECLARED_STEPS` are install, build and `node scripts/ci-ipm-archive.mjs`.
+  - **Workflow.** The `ipm` job has `needs: [gates, throwaway]`, Node at the floor, the same three pinned actions and no strategy.
+  - **Header comment.** It describes four jobs and names the oldest image as 2026.1.
+- `packages/iris-mcp-all/src/__tests__/ci-workflow-check.ts` and `ci-workflow.test.ts`:
+  - the job set includes `ipm`;
+  - the floor-node check covers `ipm`;
+  - `ipm.needs` includes gates and throwaway;
+  - the README names the `ipm` job.
+
+  Each new check gets a case that goes red.
+- `packages/iris-mcp-all/src/__tests__/throwaway-iris.test.ts`, `fake-docker.ts` and `story-42-3-qa-harness-lifecycle.test.ts` -- cover every new flag, subcommand and refusal with injected deps and the scripted docker:
+  - the `--network none` argv and state;
+  - the mount argv and its refusals;
+  - `session`'s stdin and namespace;
+  - `cp`;
+  - `exec` refusing a network-none state;
+  - inspection of an unlabelled container, a container with a port, and a container with another network.
+
+  The DW-686 pin moves to 2026.1.
+- `packages/iris-mcp-all/src/__tests__/ci-ipm-archive.test.ts` (new):
+  - **Helpers.** Staging from a synthetic embed, including its refusals; declaration comparison; archive problems over a real `tar czf` fixture; marker parsing; parity problems.
+  - **Verb set.** The IPM verbs the script's session scripts issue equal `IPM_VERBS` in both directions, and contain no `publish`, `install`, `repo`, `enable` or `update` (AC 42.4.4).
+  - **Scripted run.** A full run against the scripted docker passes. Each phase's failure exits 1 naming it, with every container removed on every path. A missing `--network none` is refused.
+- `README.md`:
+  - **New subsection.** A `### Optional: Install the IRIS-Side Classes with IPM` subsection after `### 4. Verify`. It covers:
+    - the command, the namespace, `%Admin_Manage`, IPM 0.10+ in that namespace, and the registry command;
+    - that a package is published from the first release;
+    - the ownership rule (the server never redeploys an IPM installation, and `zpm "uninstall"` hands the namespace back);
+    - the IRIS-side no-downgrade guard;
+    - never `-dev`.
+  - **Shared Instances.** A table row for IPM-owned deployments, and a remedy bullet.
+  - **CI section.** Four jobs, the `ipm` job, and the oldest leg 2026.1 with the dated floor.
+  - Default states: no new governed action.
+- `CHANGELOG.md` -- a new top section, "Story 42.4: IPM Package Revival", covering:
+  - the generated manifest, the guard, ownership, the fallback text, the `ipm` job and DW-686 (the dated tested floor);
+  - "`BOOTSTRAP_VERSION` moves from `0.0.2+1.995fbbb1055d` to `<the marker pnpm gen:bootstrap prints>`", written with the literal value (`changelog-bootstrap-move.test.ts` reads it);
+  - no tool, wire or governance change.
+- `.changeset/story-42-4-ipm-package-revival.md` (new) -- `"@iris-mcp/shared": patch`.
+- `packages/iris-mcp-all/src/__tests__/story-42-4-doc-claims.test.ts` (new) -- it pins the README IPM subsection's commands, the IPM row and bullet of Shared Instances, the CI section's `ipm` job and 2026.1, and the CHANGELOG move literals (on the pattern of `story-42-2-doc-claims.test.ts`).
+
+**Acceptance Criteria:**
+- **AC 42.4.1:**
+  - Given the regenerated tree, when the default suite runs, then `ipm-manifest.test.ts` and the generator drift case are green. The manifest lists the guard as the only Preload resource, followed by exactly `classes[]` in order. Its `<Version>` is the shared version, and its counts are mechanically equal to the roster plus 1.
+  - Given `ipm/module.xml` edited by hand, or a `classes[]`, shared-version or guard change without `pnpm gen:bootstrap`, then the default suite fails, naming the file and the command (mutation recorded).
+- **AC 42.4.2:** Given the story commit pushed, when its CI run completes (lead checklist 1), then the `ipm` job log shows:
+  - one archive built on a `--network none` `iris-community:2026.2`;
+  - its installs on fresh `--network none` `iris-community:2026.2` (`USER`) and `irishealth-community:2026.2` (`HSCUSTOM`);
+  - `%IPM_Repo.Definition` = 0 at every read, NetworkMode `none` on all three containers, 36 compiled classes with the embed's marker, and the REST application configured and answering 200.
+
+  Locally, `ci-ipm-archive.test.ts` proves the same flow against the scripted docker.
+- **AC 42.4.3:** Given a bootstrap whose Configure fails, when `manualInstructions` is read, then item 3 names `zpm "install iris-execute-mcp-v2 <semver>"` in the target namespace with its prerequisites. The name and version are those of `ipm/module.xml`. Given the version or name changed in one place only, then `bootstrap.test.ts` fails.
+- **AC 42.4.4 / DW-34:**
+  - Given this story's diff, when `ci-ipm-archive.test.ts` and `ci-workflow.test.ts` run, then no script issues an IPM verb outside `load`/`package`/`list`, and the workflow holds no publish, upload or secret.
+  - The DW-34 revival (generated manifest and offline proof) lands here. Publishing is 42.5 (the registry) and 42.8 (Open Exchange).
+- **DW-674 (ownership):**
+  - Given a deployment whose `ExecuteMCPv2.InstallGuard` document exists, when a 42.4 server starts on `stale`, `unconfigured` or `missing` (or finds the guard on the re-check before compile), then it writes nothing and logs one warning naming the `zpm` command. Bootstrap unit tests prove this.
+  - Live, the `ipm-owned-older` leg leaves every class byte-identical in CI's `bootstrap-guard` and `bootstrap-guard-oldest` suites.
+- **DW-674 (IRIS-side guard and parity):**
+  - Given the archive, when it is loaded over a newer, `dev` or marker-less `Setup`, then the load is refused before any class is replaced, and nothing remains installed.
+  - Given an older `Setup`, then it installs.
+  - Given every case of the shared table, then `InstallGuard.Classify` equals `classifyDeployedMarker` on both editions.
+- **DW-686:** Given the story commit's CI run, when `bootstrap-guard-oldest` runs, then it runs on `iris-community:2026.1@sha256:c57b65b2…7c2` and passes every leg. The CHANGELOG, the README CI section and the harness comment record 2025.3's green run 39749804619 of 2026-10-22.
+- **Shared instance:** Given each stage's end, when `SELECT ExecuteMCPv2.Setup_GetBootstrapVersion()` runs read-only (`server:"default"`, `namespace:"HSCUSTOM"`), then it returns `0.0.2+1.995fbbb1055d`.
+
+- [x] [CI] gates (node 24.0.0 and 26.0.0) / test @iris-mcp/all: 48 tests of `ci-ipm-archive.test.ts` ("as a process against a scripted docker") fail at the archive phase with `tar (child): gzip: Cannot exec: No such file or directory` — on Linux, GNU tar execs an external `gzip`, and the tests give the script a PATH that holds only the stand-in `docker` directory (macOS bsdtar has gzip built in, so it passed locally) — https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39798458188 — make the scripted runs pass on Linux and macOS alike (for example: list and read the archive with Node's `zlib`/tar parsing instead of the `tar` binary, or put the real `tar` and `gzip` directories on the child PATH next to the stand-in, keeping a real `docker` unreachable), and pin it so a gzip-less PATH cannot hide the archive phase again.
+  - Rework 1 scope: work ONLY these two [CI] items and the tests they name. Everything else in this spec is implemented, committed and reviewed; do not re-derive, widen or re-verify it.
+  - Approach, chosen over putting `tar` and `gzip` on the child PATH (that keeps the proof dependent on the host's `tar` flavour and on a `gzip` binary): the archive phase stops spawning `tar`.
+    - `scripts/lib/ipm-archive.mjs` gains `readTgz(buffer)` and `extractEntries(entries, directory)`. `checkArchive` in `scripts/ci-ipm-archive.mjs` calls them in place of `tar tzf` and `tar xzf`, and drops the `node:child_process` import. `archiveProblems` and its signature are unchanged.
+    - `readTgz` gunzips with `node:zlib` and reads the tar in-process, returning `{ name, type, data }` per member in archive order, where `type` is `file`, `directory` or `other`:
+      - a POSIX `ustar\0` header's name is `prefix` + `/` + `name`, with no second slash when the prefix already ends in one (a GNU header's prefix bytes are not a prefix);
+      - a pax `x` header's `path` and `size` records and a GNU `L` long name override it, and pax `g` and GNU `K` headers are consumed and ignored;
+      - numeric fields are octal (leading blanks and NULs skipped, reading stops at the first non-octal byte) or GNU base-256;
+      - typeflag `5`, or a regular file whose name ends in `/`, is a `directory` and its name ends in `/`; hard and symbolic links and other types carry no data;
+      - the header checksum is verified (unsigned or signed sum, the checksum field read as blanks);
+      - reading ends at the first all-zero block or at the end of the data: IPM's `%IPM.Utils.FileBinaryTar` (github.com/intersystems/ipm, `src/cls/IPM/Utils/FileBinaryTar.cls`) writes no end marker, writes each numeric field as octal followed by a blank, and splits a path into a `prefix` and a name of at most 99 characters;
+      - a file that is not gzip, a bad checksum and a member cut short each throw an `Error` that names the problem.
+    - `extractEntries` writes the `file` members and creates the `directory` members under the directory it is given, after collapsing repeated slashes and a leading `./`; a name that is absolute or has a `..` segment throws.
+    - The scripted-run harness's child PATH is the scripted docker's directory ALONE: the `toolsDir` and its `tar` symlink in `ci-ipm-archive.test.ts` go, so a `tar` or `gzip` spawn anywhere in the script fails on every host, not only on Linux.
+  - Tests:
+    - the scripted full run (existing) passes on that PATH on this host and in CI;
+    - a new `packages/iris-mcp-all/src/__tests__/ci-ipm-archive-tgz.test.ts` (default suite) holds `readTgz` and `extractEntries` against the host `tar` as the oracle (Rule #36): for each of the default, `ustar`, `pax`, `gnu` and `v7` formats the host can write, the members equal `tar tzf` and every file's bytes equal what `tar xzf` extracts, over the staged real embed plus, except for `v7`, a path over 100 characters;
+    - the same file holds hand-built edge archives (a pax `path` override, a GNU `L` name, a base-256 size, a pax `g` header, an archive with no end marker, a typeflag-5 name without a slash) and an archive built the way IPM's writer builds one (prefix with a trailing slash, octal fields ending in a blank, no end marker), which `archiveProblems` accepts over the real embed with no host `tar`;
+    - the refusals: not gzip, a bad checksum, a member cut short, a `..` name, an absolute name;
+    - a real IPM archive, `fixtures/ipm-real-package.tgz` (the output of IPM's `package` for a two-class module, captured byte for byte in the plan probes): `readTgz` returns its ten members with the sizes `tar tzvf` printed, agrees with the host `tar` on names and bytes, and its manifest reads through `manifestDeclarations`.
+  - Reproduction (this host's bsdtar has gzip built in, so the failure hides here): `/private/tmp/claude-501/-Users-jbrandt-git-iris-execute-mcp-v2/03eb9a39-2d9e-4087-85ac-363a9bb86d2a/scratchpad/gnu-tar-shim/tar` acts like GNU tar (`-z` needs a `gzip` on PATH, else `tar (child): gzip: Cannot exec`). Before the fix, `PATH="<that directory>:$PATH" UNARMED CI=true pnpm --filter @iris-mcp/all exec vitest run src/__tests__/ci-ipm-archive.test.ts` fails 48 tests, as CI did; after the fix it is green with and without the shim.
+  - Rule 19: write a `mutation:` line for each pinning test you add, in this spec's `## Verification` under a `Rework 1 (CI)` heading (apply the mutation, observe red, revert, tree byte-identical). Candidate mutations: re-adding a `tar` spawn to `checkArchive` (the scripted runs go red on every host, since the child PATH holds no `tar`); `readTgz` ignoring a pax `path` record or a GNU `L` name; skipping the checksum check; `completeAuditLines` returning the partial last line.
+- [x] [CI] flake, gates (node 24.0.0) / test @iris-mcp/all: `story-43-1-qa-dw579-process.test.ts` ("DW-579 on the real process: iris-admin-mcp") fails with `SyntaxError: Unterminated string in JSON` at `process-gate-helpers.ts:950`: `pollAuditEntries` parses the audit file while the server is still writing its last line — same run — parse only newline-terminated lines (leave a trailing partial line for the next poll), with a test that feeds a partial last line.
+  - Approach: `process-gate-helpers.ts` exports `completeAuditLines(text)`, the non-blank lines of `text` that end in a newline, in order; `pollAuditEntries`, `settledAuditCount` and the `readEntries` of `story-43-1-qa-dw579-process.test.ts` read through it. The audit writer appends each entry as `${line}\n` in one `appendFile` call (`packages/shared/src/audit.ts`), so a line without its newline is an entry still being written, and the next poll sees it whole. A newline-terminated line that does not parse still throws (a corrupt line is not skipped). The timeout excerpt is unchanged.
+  - Tests (`process-gate-helpers.test.ts`, the DW-561 `pollAuditEntries` block): a file ending in a partial line resolves with the complete entries and no `SyntaxError`; a poll that waits for 2 entries picks up the one whose last bytes arrive later; a terminated corrupt line still rejects; `completeAuditLines` over an empty text, a text with no newline, blank lines and a trailing partial line.
+
+### Review Findings
+
+_Code review 2026-10-22 (bmad-code-review, review tier full-opus; layers blind-hunter, edge-case-hunter, verification-gap and acceptance-auditor, all four delivered). 32 raw rows; after grouping, 13 entries (high 0, medium 1, low 12) and 9 rejected._ **Review Outcome:** CLEAN. The story status is `done`: all 11 patches are applied, and the 2 deferred findings are closed terminal (DW-691, DW-692).
+
+- [x] [Review][Patch] (med) The archive check ignores `CheckStatus`. `manifestDeclarations` and `manifestProblems` compare only Class, Method, Phase and When, so an archive whose IPM-re-serialized `module.xml` lost `CheckStatus="true"` passes every check. Yet the README and CHANGELOG say this attribute is what makes IPM 0.10.0 to 0.10.4 act on a refusal. IPM 0.10.5 marks the property `[Deprecated]` (rule #4), and nothing recorded that [scripts/lib/ipm-archive.mjs:201-247] (blind+edge+vg+auditor; fix-risk low: one field and one comparison, with tests in the same file)
+- [x] [Review][Patch] (low) In a namespace that reaches the classes through the `%ALL` mapping, the IPM warning's `zpm` commands ("there") belong in the namespace IPM installed into. The README said so only for `Configure` [README.md, Shared Instances IPM bullet] (blind; fix-risk low: a doc clause; the warning text itself is bound by the Design Notes)
+- [x] [Review][Patch] (low) The QA parity test holds the Story 42.4 CHANGELOG count equal to the live fixture length, so any later story that adds a case goes red on history [packages/iris-mcp-all/src/__tests__/story-42-4-qa-parity-table.test.ts:79-88] (blind; fix-risk low)
+- [x] [Review][Patch] (low) A literal U+00E9 in test code (Rule 14) [packages/iris-mcp-all/src/__tests__/story-42-4-qa-parity-table.test.ts:69] (blind+vg+auditor; fix-risk low)
+- [x] [Review][Patch] (low) The npm README of the bumped package doesn't describe the IPM-ownership rule or `ipmOwned` (Rule #43) [packages/shared/README.md:62] (blind; fix-risk low)
+- [x] [Review][Patch] (low) The install directory's mode depends on the umask. `mkdirSync`'s mode is masked and only the stage directory is chmodded, so under umask 077 IRIS cannot read the read-only mount [scripts/ci-ipm-archive.mjs:299] (blind+edge; fix-risk low: one chmod, as for the stage)
+- [x] [Review][Patch] (low) The parity fixture's provenance comment cites no capture command (the Task requires one, Rule #36) and narrates the stage [packages/shared/src/__tests__/bootstrap-version.test.ts:160-165] (blind; fix-risk low)
+- [x] [Review][Patch] (low) The CHANGELOG, the changeset and the README say "nothing is written" or "no upload" for an IPM finding or an unreadable ownership. At the re-check before compile (`stale`, `missing`), the documents were already uploaded [CHANGELOG.md, .changeset/story-42-4-ipm-package-revival.md, README.md] (edge; fix-risk low)
+- [x] [Review][Patch] (low) The module name is a literal outside the generator (`ARCHIVE_NAME`), and `ARCHIVE_PATH_STEM` is a dead export [scripts/ci-ipm-archive.mjs:110, scripts/lib/ipm-archive.mjs:35] (auditor; fix-risk low)
+- [x] [Review][Patch] (low) The `missing` IPM warning names no versioned install command, though the matrix row expects one and the README says "the warning gives the version" [packages/shared/src/bootstrap.ts:636] (auditor; fix-risk low)
+- [x] [Review][Patch] (low) Some pinning tests have no `mutation:` line: AC 42.4.1 (a guard change without regeneration); AC 42.4.2 (`%IPM_Repo.Definition` = 0 and the install-check `need()`s); AC 42.4.4 (the workflow's upload pattern) [spec ## Verification] (vg; closed in this pass per Rule 19)
+- [x] [Review][Defer] (low) A failed ownership read logs the unreadable-marker warning ("the deployed marker could not be read (whether the ExecuteMCPv2.InstallGuard class exists could not be checked…)", "this user can run SQL", "delete class ExecuteMCPv2.Setup") and drops `deployedVersion` [packages/shared/src/bootstrap.ts leftToIpm] — deferred: by-design (DW-691). Task (b) binds "log the existing unknown warning with that reason" (blind+vg+auditor)
+- [x] [Review][Defer] (low) The scripted-run block fails in `beforeAll` after an mtime-only touch of shared `src/`, which `pnpm build` cannot clear (composite `tsc` re-emits nothing), and its message names only the rebuild [packages/iris-mcp-all/src/__tests__/ci-ipm-archive.test.ts:657-660] — deferred: wontfix-accepted (DW-692). The root cause is the repository-wide mtime check `checkDistFresh`, shared with every process gate (vg)
+
+**Rejected:**
+- BH4 (low): the refusal legs don't count the ExecuteMCPv2 classes after a refusal. IPM loads no package class before `Initialize/After`, and a failed rollback would leave the preloaded guard defined, which `GUARD=0` already catches. The fix adds a check and scripted-docker support.
+- BH9/EH5 (low): a non-`PhaseFailure` throw ends `main()` as an unhandled rejection. Node then exits 1 with the stack, and the `finally` and the exit handler still remove every container. It is rare, and wrapping it adds branches.
+- BH11 (low): the Auto Run Result's "parity 94 of 94 (73 at implement; QA grew the table to 91 cases plus 3 runtime cases)" predates QA's 94/94. Fixing it would edit the spec under review, and the QA section already records 94/94.
+- EH1 (low): a guard that appears at the re-check after a `missing` probe makes the warning name the marker it just read alongside "holds no Setup class". That happens only in a concurrent IPM-install race, and the fix adds a state branch.
+- EH2 (low): an IPM `stale` deployment with the same semver and a lower sequence gets a remedy that reinstalls the same package. Only unreleased builds share a semver with a published package, and the fix adds a branch.
+- EH6 (low): `--mount` refuses a symbolic link only at the last path component. The mount is read-only and the path is the caller's, and a whole-path check would refuse every macOS temp path (`/var` → `/private/var`).
+- AA4: the amended matrix row's "every step flag false" contradicts `deployed: true` at the re-check. That is a spec edit for the lead; the `bootstrap()` JSDoc already states it correctly.
+- AA6 (low): the "running with no network" log line comes from the state file. Every `session` and `cp` re-inspects `HostConfig.NetworkMode === "none"` and fails closed (recorded mutation: 41 tests red), and logging an inspect would add a docker call.
+- AA8 (low): an IPM-installed guard of the same semver and a higher sequence is replaced by the preload before `Check` runs. Releases have distinct semvers, IPM's own check stops a lower one, and a refusal rolls back; it becomes real only if same-semver archives were ever distributed. Recording `CheckStatus` in the Spec Change Log (AA5's second half) is the lead's spec edit.
+
+_Code review 2026-10-22, rework re-review iteration 1 of 3 (bmad-code-review, review tier full-opus; diff `2ba29b0..HEAD`; layers blind-hunter, edge-case-hunter, verification-gap and acceptance-auditor, all four delivered). 21 raw rows; after grouping, 11 entries (high 0, medium 2, low 9) and 3 rejected._ **Review Outcome:** CLEAN. The story status is `done`: 9 entries are patched or closed in this pass, and the 2 deferred ones are on DW-693 (`routed owner=burndown`).
+
+Checklist (the previous round's open items):
+- [CI] 1, the archive phase needs no host `tar` or `gzip`: **fixed.** `checkArchive` reads the `.tgz` through `readTgz` and `extractEntries` (`node:zlib` and an in-process tar reader), neither `ci-ipm-archive.mjs` nor `lib/ipm-archive.mjs` imports `child_process`, and the scripted run's child PATH is the scripted docker's directory alone. Locally `ci-ipm-archive.test.ts` is 130/130 and `ci-ipm-archive-tgz.test.ts` 35/35. The reader was checked by hand against the pax `x`/`g`, GNU `L`/`K`, base-256, checksum, truncated-header and truncated-data paths, and `extractEntries` against `..`, absolute, drive-letter, backslash and link names. It refuses each before writing anything, and it skips links, so no symlink can be planted. No defect was found. The headers of the real IPM archives (the fixture and the full-module probe archive) agree with what the reader expects. The remaining proof is the lead's next Linux CI run (GNU tar's `L` and `PaxHeaders` members in the oracle cases).
+- [CI] 2, the audit-poll partial-line flake: **fixed.** `completeAuditLines` keeps only newline-terminated lines, and `pollAuditEntries`, `settledAuditCount` and the DW-579 test's `readEntries` read through it. `process-gate-helpers.test.ts` is 36/36.
+- Rule 3: exempt. The rework changes only CI tooling and test helpers, with no user-facing surface. Rule 6: AD-14 still holds (the archive is built from the embed, never from `src/`), and so does AD-29 (no workflow change, nothing is published or uploaded). Rule 2: no sibling tar reader exists in the repository.
+
+- [x] [Review][Patch] (med) The "no tar or gzip on the script's PATH" pin checked the contents of the scripted docker's directory, not the PATH `runScript` gives the child, so widening the child PATH again (the pre-fix state) left it green. The [CI] item asks to "pin it so a gzip-less PATH cannot hide the archive phase again" [packages/iris-mcp-all/src/__tests__/ci-ipm-archive.test.ts:777] (blind; fix-risk low: `Run` now carries the PATH it ran with and the test asserts on it; mutation recorded, 1 of 130 red)
+- [x] [Review][Patch] (low) The hand-built "IPM writer" archive wrote prefixes that real IPM never writes (`src//`, pinned by `toContain("src//cls/…")`), and wrote uid and gid as octal where IPM leaves NULs. The `archiveProblems` JSDoc also claimed "IPM joins `src/` and `cls` with a doubled one". Both real IPM archives store single-slash prefixes that end in `/` (`src/`, `src/cls/`), so the fake broke rule #54 [packages/iris-mcp-all/src/__tests__/ci-ipm-archive-tgz.test.ts:353-377, scripts/lib/ipm-archive.mjs:268] (blind+edge+vg+auditor; fix-risk low: the fake now mirrors the fixture's bytes, so it pins the no-second-slash branch; mutation recorded)
+- [x] [Review][Patch] (low) `extractEntries` documents its directory as "created when missing", but created it only as a side effect of the first member, so an archive with nothing to write left it absent [scripts/lib/ipm-archive.mjs:540] (edge; fix-risk low: one `mkdirSync` after validation, so a refusal still writes nothing; new test, mutation recorded)
+- [x] [Review][Patch] (low) The source pin's title said "spawns no process of its own", but the script spawns `docker` through the harness. It now says what it checks [packages/iris-mcp-all/src/__tests__/ci-ipm-archive.test.ts:497] (blind+edge; fix-risk low: a retitle; the Verification line that names it was updated)
+- [x] [Review][Patch] (low) The real fixture's comment said the expected members were "what `tar tzvf` printed", but bsdtar prints directories with no trailing slash, which `REAL_MEMBERS` carries [packages/iris-mcp-all/src/__tests__/ci-ipm-archive-tgz.test.ts:390-395] (blind; fix-risk low: a comment)
+- [x] [Review][Patch] (low) `tarGz` threw away tar's stderr, and `hostFormats` dropped a format without saying why. So the first GNU-tar run, the residual risk this rework names, would fail as "expected 2 to be 0" [packages/iris-mcp-all/src/__tests__/ipm-archive-fixture.ts:47, ci-ipm-archive-tgz.test.ts:144-180] (blind; fix-risk low: `tarGz` returns `{status, stderr}`, every call site passes stderr as the assertion message, and the format guard's message lists each dropped spelling and why)
+- [x] [Review][Patch] (low) The implement stage's mutation line "the POSIX prefix not joined … red (5)" was stale after the real-archive cases were added [spec ## Verification] (blind; re-run on the final tree, 7 red, corrected in place)
+- [x] [Review][Patch] (low) Several pinning tests had no `mutation:` line: `extractEntries`' `./` strip, slash collapse and skipping of `other` members; the 6-byte ustar magic (a GNU header's prefix bytes are no prefix); the cut-short header check; a regular file named with a trailing `/` read as a directory [spec ## Verification] (vg+auditor; each applied, observed red and reverted byte-identical; lines written under "mutations closed in code review")
+- [x] [Review][Patch] (low) DW-693's body says `footprint: in-epic`, but its sites are Epic 39 and 43 files, a done 42.10 test and a shared helper, all owned by `burndown` [deferred-work.md DW-693] (blind+auditor; corrected by a `by=cr` trailer, since the body is write-once)
+- [x] [Review][Defer] (med) DW-693's site list leaves out two raw audit readers of the same flake class: a fifth `settledAuditEntries` consumer (`story-42-10-qa-audit-namespace-built.test.ts:66`) and the shared `auditLines` of `packages/shared/src/__tests__/test-helpers.ts:59-66` (11 call sites in `sdk-wire-compat.test.ts` and `data-policy-server.test.ts`) — deferred: routed owner=burndown, appended to DW-693 (occurrence and site note). Out-of-footprint; fix-risk low (blind+edge)
+- [x] [Review][Defer] (low) The DW-579 test's `readEntries` reads through `completeAuditLines`, but no test fails if it goes back to a raw split [packages/iris-mcp-all/src/__tests__/story-43-1-qa-dw579-process.test.ts:88] — deferred: occurrence on DW-693. The copy guard can refuse a local reader only by the name of an exported helper, which is DW-693's shared reader; until then the helper's own tests pin the rule (vg+auditor)
+
+**Rejected (re-review):**
+- BH5 (low): put `completeAuditLines` in `scripts/lib` now, so an `.mjs` reader can import it. The fix is a move and a re-export, not a direct correction, and DW-693's first note already plans exactly that move.
+- EH1 (low): a pax record with an empty `path=` or `size=` value. No writer the proof reads emits one (IPM writes no pax, and GNU tar and bsdtar never write an empty value). `size=` then throws a named error, and `path=` yields an empty name, which `archiveProblems` reports as a missing member.
+- VG other (false): the second half of the `settledAuditCount` partial-line test gives the same count under the old code. Its first half tells old from new, and the recorded mutation turns that half red. That is not a defect.
+- Also not acted on: BH7's tally ("13 by the implement stage" counts bullets) would mean editing `## Auto Run Result`, which is outside the sanctioned Verification edit. BH1's member-order remark changes nothing: no assertion and no reader depends on the emulation's order.
+
+## Spec Change Log
+
+- 2026-10-22, lead, at the smoke: CI run https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39798458188 (sha 08d343d) was red; two [CI] items added for rework iteration 1 (wave-8 decision #73).
+- 2026-10-22, implement (rework 1): the first [CI] item takes its first option (an in-process `zlib` and tar reader) rather than putting `tar` and `gzip` on the child PATH, so the proof depends on no host binary; Design Notes step 3 of the `ipm` CI flow is amended to say so, and the approach is written under both [CI] items.
+
+## Review Triage Log
+
+### 2026-10-22 - Review pass
+- verdicts: 35 findings - high 0, medium 14, low 15, false 6, maybe-false 0
+- findings (layer order: Blind Hunter BH1-9, Edge Case Hunter EH1-9, Verification Gap VG1-4 and VGo1-3, Intent Alignment IA1-10):
+  - BH1 `[medium]` `[patch]` The `zpm uninstall` hand-back and the "IPM 0.10 or later" floor are asserted, not shown. The hand-back half is disproved: a throwaway probe (`load -dev` then `uninstall` of the staged module on `iris-community:2026.2`, IPM 0.10.5) showed `InstallGuard`, `Setup` and `Utils` defined after the load and none defined after the uninstall. The floor half is real (see EH1): the Check invoke now carries `CheckStatus="true"`, and the README says the proof ran on IPM 0.10.5 and the earlier versions are untested.
+  - BH2 `[medium]` `[patch]` "Uploads nothing" is false on the re-check path (the class documents are uploaded before the re-check). CHANGELOG, changeset and the `bootstrap()` JSDoc now say that a guard found only at the re-check leaves the uploaded documents in place and skips the compile and everything after; the README remedy bullet says the same.
+  - BH3 `[medium]` `[patch]` The AD-24 forbidden-construct exemption covered a whole file. `FORBIDDEN_EXEMPTIONS` now lists the exact constructs and counts (`OBJ.Load* / OBJ.Import* x2`), and the test holds the found set equal to the listed set.
+  - BH4 `[low]` `[patch]` `installChecksScript` hard-coded the harness account, password and port. It imports `THROWAWAY_USERNAME`, `THROWAWAY_PASSWORD` and `CONTAINER_WEB_PORT` from `scripts/throwaway-iris.mjs`.
+  - BH5 `[low]` `[reject]` Nothing mechanical warns before the next license-key expiry (2027-03-27). A calendar-dependent check in the default suite goes red on a date with no code change, and DW-686 is the dated record; not worth a guard now.
+  - BH6 `[low]` `[patch]` The README lacked two consequences of IPM ownership (a namespace reached by the `%ALL` mapping is not self-configured; deleting `Setup` does not reinstall into an IPM namespace). Added to the remedy bullet and pinned in `story-42-4-doc-claims.test.ts`.
+  - BH7 `[low]` `[reject]` `MANUAL_INSTRUCTIONS` item 3 names a package that is not published before 1.0.0. The spec's Design Notes state that this is expected for a pre-1.0 build (42.5 publishes from 1.0.0), and the text is pinned by AC 42.4.3.
+  - BH8 `[low]` `[reject]` Literal non-ASCII characters (an arrow, box-drawing dashes) in comments. Rule 14 exempts comments where the project convention allows them, and the `bootstrap.ts` JSDoc already uses the arrow on 15 lines. The literal non-ASCII bytes found in code (three `￿` regex bounds and one Arabic-Indic digit) were replaced by escapes during verification.
+  - BH9 `[low]` `[patch]` The docs read as if the guard refusals were proven on both editions; only the community run does them. README, CHANGELOG and the `ci.yml` header now say so, and `story-42-4-doc-claims.test.ts` pins it.
+  - EH1 `[medium]` `[patch]` IPM 0.10.0 to 0.10.4 ignore a returned error `%Status` unless the invoke has `CheckStatus` (`%IPM.Storage.InvokeReference` at v0.10.0, v0.10.4 and v0.10.5, read through the GitHub API). Without it the guard is a silent no-op there. `scripts/gen-bootstrap.mjs` now emits `CheckStatus="true"` on the Check invoke only; the attribute is outside the Task text of this spec (a one-attribute extension, source-verified for 0.10.0 to 0.10.11, run only on 0.10.5, where the real proofs passed with it). Pinned by `ipm-manifest.test.ts`; `BOOTSTRAP_VERSION` did not move.
+  - EH2 `[low]` `[reject]` The guard class present with no IPM module installed (aborted install, manual copy). A refused or failed non-dev load rolls back (the proofs showed no guard class left after a refusal), and copying a file out of `ipm/` by hand is contrived; the remedy is to delete the class.
+  - EH3 `[low]` `[patch]` The AD-24 scan did not read `ipm/preload`. It now walks `ipm/preload/**/*.cls` as ObjectScript.
+  - EH4 `[medium]` `[patch]` Same root cause as BH3 (exemption keyed by file).
+  - EH5 `[low]` `[patch]` `upHarness` skipped the mount-directory check when `deps.checkMountDirectory` was missing. It now refuses (exit 2, no docker call); tested.
+  - EH6 `[low]` `[reject]` The state file unreadable right after `upHarness` wrote it and disarmed the teardown. No real path reaches it (the harness wrote the file a moment earlier, and a failed write is handled inside `upHarness`).
+  - EH7 `[medium]` `[patch]` Same root cause as BH2 (claim of "uploads nothing" on every write path).
+  - EH8 `[medium]` `[patch]` Same root cause as EH1 (claim about IPM 0.10 and later).
+  - EH9 `[false]` `[reject]` The `uninstall` hand-back is unproven: disproved by the probe in BH1 (the guard class is removed by `uninstall`).
+  - VG1 `[medium]` `[patch]` Install-phase checks of the scripted run that no fault exercised (list version, `GetBootstrapVersion()`, the older-leg load, the fresh-health load, the refusal naming the deployed marker, `cp`, the synthetic Setup load and delete, the output directory). Eleven fault rows, a `cp` failure case and a parity-listing case were added; each clause is shown to fail by a mutation.
+  - VG2 `[low]` `[patch]` `GUARD_REFUSAL_TEXT` was an untied copy of the guard's wording. A test now holds the embedded guard source to the constant.
+  - VG3 `[low]` `[patch]` The IRIS-side `InstallGuard` has no default-suite host (by design: the red-proofs are lead branches `guard` and `parity`), and several pinning tests lacked `mutation:` lines. The lines were written after demonstrating each mutation (see Verification).
+  - VG4 `[medium]` `[patch]` The scripted-run block depends on the built shared dist and ran on Windows. It now fails clearly in `beforeAll` when the dist is missing or stale, and is skipped on `win32`.
+  - VGo1 `[low]` `[patch]` Two unused symbols (`GUARD_REFUSAL_TEXT` import, `_network`); both are used or removed. `@iris-mcp/all` has no `lint` script (pre-existing), so the changed test files were linted ad hoc: clean.
+  - VGo2 `[medium]` `[patch]` AC 42.4.1 wants a manifest drift failure to name the file and the command. `ipm-manifest.test.ts` and the generator tests now carry that message.
+  - VGo3 `[medium]` `[patch]` Same root cause as BH3.
+  - IA1 `[false]` `[reject]` The default suite cannot run real IPM or IRIS. AC 42.4.2 says so ("Locally, `ci-ipm-archive.test.ts` proves the same flow against the scripted docker"); the real behavior is shown by the `ipm` job and by this pass's throwaway runs of `ci-ipm-archive.mjs` on both editions.
+  - IA2 `[low]` `[reject]` The seam (a guard produced by a real IPM install read by the bootstrap) is covered by neither side alone. The ownership signal is the Atelier document `ExecuteMCPv2.InstallGuard.cls` answering 200, and the live `ipm-owned-older` leg exercises that read against a real IRIS; the real install was shown to define the class.
+  - IA3 `[false]` `[reject]` The proof issues `load`, not `install`. AC 42.4.4 forbids `install`; the uninstall hand-back was probed once through the harness.
+  - IA4 `[false]` `[reject]` The guard legs run over a one-class synthetic Setup. That is the spec's own matrix ("a synthetic compiled `ExecuteMCPv2.Setup`").
+  - IA5 `[medium]` `[patch]` The matrix row says "no PUT" for a guard found "on the re-check before compile". That cannot hold for `stale` and `missing`: the PUTs precede the re-check. The only coherent reading is "nothing further is written" (no compile, Configure, mapping or `^UnitTestRoot`; documents already uploaded stay), which the code, the warning text and the tests implement; only one reading is possible, so this is not an `intent_gap`. The docs were corrected (BH2). The lead should amend the matrix row when it next touches the spec.
+  - IA6 `[medium]` `[patch]` Same root cause as VGo2.
+  - IA7 `[medium]` `[patch]` A signal arriving while `upHarness` waited for the container's session found the container neither registered nor armed in the script, so it was not removed. The container is now registered before `upHarness` starts it; tested with a scripted-docker signal on the first readiness session.
+  - IA8 `[low]` `[patch]` The parity failure listed the first 20 mismatches; the matrix says every mismatch. It now lists all; tested with 68 mismatches.
+  - IA9 `[false]` `[reject]` Whether `bootstrap-guard-oldest` passes on 2026.1 is a CI fact. It was also run through the harness on the 2026.1 image in this pass: 10 of 10 legs, `ipm-owned-older` included.
+  - IA10 `[false]` `[reject]` The `FORBIDDEN_EXEMPTIONS` entry is outside the intent's text: forced by the existing AD-24 scan, which flags `$System.OBJ.Load` in the proof's session scripts; it is now exact (BH3).
+
+### 2026-10-22 — Review pass
+Rework iteration 1 (follow-up pass; the diff since `2ba29b0`: the two [CI] items). Layers: blind-hunter (BH), edge-case-hunter (EH), verification-gap (VG), intent-alignment (IA); all four delivered.
+- verdicts: 20 findings — high 0, medium 5, low 15, false 0, maybe-false 0
+- findings:
+  - BH1 `[medium]` `[patch]` No real IPM archive was an oracle for `readTgz`: the tests' IPM-writer archive came from the implementer's reading of `FileBinaryTar.cls`, so the first run on a real IPM archive would have been CI. True of the diff. Patched: `fixtures/ipm-real-package.tgz`, a genuine `package` output captured in the plan probes, is pinned by three tests (the ten members and sizes `tar tzvf` printed, agreement with the host `tar`, the manifest read through `manifestDeclarations`); the mutations show it ends with no marker and uses the ustar prefix; and `ci-ipm-archive.mjs --edition community` passed on a fresh real archive (48 members).
+  - BH2 `[low]` `[patch]` `hostFormats()` could silently shrink to the default and ustar formats on a host that does write the others. The guard test now expects all five formats when `tar --version` reports GNU tar or bsdtar (mutation recorded).
+  - BH3 `[medium]` `[patch]` `settledAuditCount` and the `readEntries` of the DW-579 test still counted or parsed a partial last line. The sites in this story's footprint (the helper file and the test the [CI] item names) now read through `completeAuditLines`, with a new `settledAuditCount` test and a mutation. The sites in other stories' files are VG1.
+  - BH4 `[low]` `[patch]` `archiveOf` built its archive with raw host-`tar` spawns and fed `archiveProblems` the `tar tzf` list, not what the script passes. It now uses `tarGz`, `readTgz` and `extractEntries`.
+  - BH5 `[low]` `[reject]` A pax `x`, GNU `L` or `K` header followed by no member is dropped, and a second `x` header replaces the first: no writer the proof meets makes either (IPM writes neither; GNU tar and bsdtar write a meta header only with its member), and a guard adds a branch.
+  - BH6 `[low]` `[patch]` The `extractEntries` JSDoc said the directory "must exist", but the code creates it: corrected. The rest (every extraction failure reads "could not be read") is rejected: the system error (`EEXIST`, `ENOTDIR`, `EACCES`) follows in the message, and an IPM archive holds no file and directory of one name.
+  - BH7 `[low]` `[reject]` The spec's Reproduction line cites a scratchpad shim. The fix edits this build's spec; the red-proof that needs no shim is the recorded `tar`-spawn mutation (52 red on this host).
+  - BH8 `[low]` `[reject]` The replaced `## Auto Run Result` drops the story-level content, and the flags disagree with the prose. The fix edits this build's spec; the dispatch requires a this-pass-only result (Rule 14); the flag follows the follow-up-pass rule.
+  - EH1 `[low]` `[reject]` A typeflag-5 header with a non-zero size would swallow the next members. No tar the proof meets writes one (IPM sets `size = 0` for a directory, GNU tar and bsdtar write 0; rule #54).
+  - EH2 `[low]` `[reject]` `module.xml` as a link member is listed but not extracted, so the manifest comparison is skipped. IPM writes it as a regular file (the real archive shows it), and the skip is unchanged from the `tar xzf` flow.
+  - EH3 `[medium]` `[patch]` Same root cause as BH1 (a real IPM archive is not shown to read): see BH1.
+  - VG1 `[medium]` `[defer]` Other readers of an audit file still parse raw lines: `settledAuditEntries` of `scripts/lib/sdk-handler-golden-core.mjs` (four consumers), the audit reader of `story-43-4-qa-probe-copy.test.ts` and the armed-only `afterAll` of `story-39-5-qa-live-gate.test.ts`. They belong to Epic 39 and 43 files, not to this story, and one shared helper has to live where an `.mjs` script and the TypeScript tests can both import it. Deferred (frontmatter `deferred:`, severity medium); the sites in this story's footprint are BH3's patch.
+  - VG2 `[low]` `[patch]` Pinning tests with no `mutation:` line (the reader's no-end-marker, zero-block, directory, link, signed-checksum, gzip, cut-short, malformed-pax and `K` cases; the extraction order and the `..` names; the unreadable-archive runs; the blank-line case; the format guard). Each mutation was applied, observed red and reverted; the lines are in `## Verification`.
+  - VG3 `[low]` `[reject]` The `pax` and default oracle cases on bsdtar carry only time and attribute records, so the pax `path` and `size` handling rests on the hand-built cases on this host. A true observation, not a defect: the hand-built cases pin both, and the Linux run adds GNU tar's own `L` and `PaxHeaders` members (residual risk).
+  - VG4 `[low]` `[patch]` Other finding: `archiveOf` still spawns host `tar` next to the new `tarGz`. Same root cause as BH4, patched there.
+  - VG5 `[low]` `[patch]` Other finding: the spec's "160 tests with the tgz file" disagrees with a count. Recounted: 164 (130 and 34, with the shim and without), corrected in `## Verification` (rule #51).
+  - IA1 `[medium]` `[patch]` The tar item's expectations live on a real IPM archive through a real `docker cp`, and the diff's tests used host-`tar` and hand-built archives only. Same root cause as BH1: the real fixture and the real-path run. The auditor's own read-only parse of two earlier real archives (43 members, every checksum valid) agrees.
+  - IA2 `[low]` `[reject]` The flake item's tests write the partial last line from the same process and do not reproduce the cross-process race. A partial last line is the only state that race can produce (`audit.ts` appends `${line}\n` in one `appendFile` call), and the same-process write sets that state deterministically.
+  - IA3 `[low]` `[patch]` The test fixture's IPM mode wrote the checksum field as digits and two blanks, where the real archive has digits, a blank and a NUL. It now writes `NNNNNN` and a blank and a NUL.
+  - IA4 `[low]` `[reject]` The earlier `## Auto Run Result` was replaced by this pass's, as the rework dispatch requires (Rule 14); the earlier tally stays in git history.
+
+## Design Notes
+
+**Governing ADs and conventions (Rule 6):**
+- **AD-14:**
+  - the generated manifest from the same class list;
+  - archives built from the stamped embed, never from `src/`;
+  - the module version equals the npm version;
+  - Ownership and IPM upgrades, which this story confirms (amendment drafts below).
+- **AD-29:**
+  - CI stays secret-free and publishes nothing;
+  - throwaways refuse the live ports;
+  - the new `ipm` job is registered in `ci-checks.mjs` and `ci.yml`, with the self-test;
+  - it runs after `gates` and `throwaway`, so no artifact comes from a red commit.
+- **AD-15:** with no guard present, every `BootstrapResult` is deep-equal to today's. The fallback-text change is log-only and named in the CHANGELOG.
+- **AD-31:** Configure through `Setup.Configure`, with no application roles and no MatchRoles; the proof asserts this.
+- **AD-12:** the guard's comparison is an IRIS-side check that must run before commit, inside IPM's install transaction. That is a recorded exception; the draft below names it.
+- **AD-28:** the module name and description do not imply InterSystems endorsement.
+- **AD-1:** the servers still reach IRIS only over the web port. The in-container `iris session` is container setup inside the harness, the one docker caller.
+- **AD-33:** no route is changed.
+- **Conventions:**
+  - Live testing on a shared instance;
+  - Probes and references (verified-on versions: IPM 0.10.5 on IRIS 2026.1 Build 234U and 2026.2 Build 221U);
+  - Error text;
+  - ObjectScript naming and pitfalls;
+  - the Stack row "IRIS CI images".
+
+**Why the guard is a separate, IPM-only class whose presence marks ownership:**
+- **Why not Setup itself.**
+  - The guard must run before IPM reloads the package, and must read the OLD deployed marker. Preloading `Setup` itself would overwrite that marker first.
+  - `Initialize/Before` runs the previously installed class, and on a fresh install fails with `<CLASS DOES NOT EXIST>`. So the guard is a self-contained class: preloaded, run at `Initialize/After`, and carrying its own stamped marker.
+- **Why presence is the ownership signal.**
+  - Its presence follows the `ExecuteMCPv2` package mapping exactly. A namespace that sees the classes through `%ALL` also sees the guard.
+  - That makes presence a better signal than IPM's own module table, which lives only in the namespace where IPM was imported.
+  - Bootstrap reads it with the existing positive-absence rule (404 = not IPM).
+- **Why its source is outside `src/`.** A developer `iris_doc_load` of `src/**/*.cls` would otherwise plant a false ownership signal. The path `ipm/preload/…` also fails a hand `zpm "load ipm/"`, because the layout is not IPM's, so nobody installs from the repository by accident.
+- **Why its content joins the marker's hash.** An archive with a different guard must not share a marker with this one.
+
+**The IRIS-side check, in detail.**
+- **Where it runs.** `Check()` runs inside IPM's lifecycle (`Initialize/After`), after IPM stores the new record and before Reload. It runs on `load`, `install` and `update` alike.
+- **Refusal.** A refusal rolls everything back on a non-dev install.
+- **Why it is needed.** IPM's own check:
+  - compares module versions without our `+<sequence>.<hash>`;
+  - never sees a bootstrap deployment;
+  - is skipped with no IPM record.
+
+  The guard covers all three.
+- **The ordering.** It is 42.2's, in both directions (`Classify` is a port, and the parity check holds it equal on the real instances). The policy mirrors `probeCustomRest`:
+  - only a provable absence (no class definition) or an older or equal marker installs;
+  - an existing `Setup` whose marker cannot be read is `unknown` and is refused.
+- **Copy, not shared code (Rule 2).** The ObjectScript `Classify` is a deliberate port of the TS comparator: the IPM install path has no TypeScript. The parity check is what keeps the two unified.
+
+**Bootstrap warning (`ipm` variant).** It is one line, starting `Bootstrap: leaving the ExecuteMCPv2 classes in '<ns>' on <host>:<port> alone`, so `leavingLines` matches it.
+- **It names:**
+  - "installed by IPM (class ExecuteMCPv2.InstallGuard is present)";
+  - that this server never redeploys an IPM installation;
+  - the deployed marker (or "absent") and `BOOTSTRAP_VERSION`.
+- **Remedies, which the `REMEDY.ipm` strings pin:**
+  - stale: `run zpm "install iris-execute-mcp-v2 <semver of BOOTSTRAP_VERSION>" in '<ns>' as a user with %Admin_Manage`;
+  - unconfigured: `Do ##class(ExecuteMCPv2.Setup).Configure("<ns>")` as a user with `%Admin_Manage`;
+  - missing: uninstall and reinstall with zpm;
+  - always: `to hand '<ns>' back to this server, run zpm "uninstall iris-execute-mcp-v2" there and restart this server`.
+
+**MANUAL_INSTRUCTIONS item 3 (AC 42.4.3).** It replaces `zpm "install iris-execute-mcp-v2"` "in any namespace". The item:
+- is headed "IPM (InterSystems Package Manager 0.10 or later, installed in the target namespace)";
+- says to run in the target namespace, as a user with `%Admin_Manage`, `zpm "install iris-execute-mcp-v2 <semver>"`, where `<semver>` is the semver of `BOOTSTRAP_VERSION` (this server's version);
+- says to run `zpm "repo -r -n registry -reset-defaults"` first when `zpm "repo -list"` shows no registry;
+- says that IPM then owns the classes there, and this server never redeploys them.
+
+Items 1 and 2 and the first-occurrence `NAMESPACE` replacement are unchanged. For a pre-1.0 build the version names a package that is not yet published, which is expected (42.5 publishes from `1.0.0`).
+
+**The `ipm` CI flow (`scripts/ci-ipm-archive.mjs`).**
+1. **Stage.** Stage the embed into a temp directory, along with a fixtures directory holding `cases.json` and the synthetic Setup files.
+2. **Build.**
+   1. `up` the community 2026.2 image (`--network none`, stage mounted).
+   2. In a session: import IPM, read the repository count (0), `load -dev /opt/iris-mcp/stage`, empty `/tmp/iris-mcp-ipm-out`, then `package iris-execute-mcp-v2 -path /tmp/iris-mcp-ipm-out/iris-execute-mcp-v2`.
+   3. Read the repository count (0), list the output directory (exactly one `.tgz`), `cp` it out, and `down` the container.
+3. **Check the archive on the host.** Read the `.tgz` in-process (`readTgz`: `node:zlib` and a tar reader, no `tar` or `gzip` binary) and extract it (`extractEntries`). Compare the declarations and the members against the embed.
+4. **Install on community** (`USER`, archive and fixtures mounted).
+   1. Import IPM and read the repository count (0).
+   2. Run the guard legs: newer, `dev`, unknown. Each one loads a synthetic Setup with `$System.OBJ.Load(…,"ck")`, then requires `load /opt/iris-mcp/install/<tgz>` to fail with the guard text. It then reads Setup's marker (unchanged), `list` (no module) and the repository count (0), and deletes the synthetic Setup.
+   3. Run the older leg, which installs.
+   4. Run the install checks of the matrix, then parity over `cases.json`, then `down`.
+5. **Install on health** (`HSCUSTOM`). Do the same, with a fresh install instead of the guard legs, and `down`.
+
+The IPM verbs are exactly `load`, `package` and `list`. The CI script's `InstallGuard.Classify` results are compared with `classifyDeployedMarker` from `packages/shared/dist/bootstrap-version.js`, over the fixture cases plus three runtime cases built from `BOOTSTRAP_VERSION`.
+
+**Rule 2 (extend, don't copy):**
+- `throwaway-iris.mjs` gains `--network none`, `--mount`, `session` and `cp` rather than a second harness or a `.sh` script.
+- `setupClassAbsence` becomes `documentAbsence`.
+- `warnDeploymentLeftAlone` gains a variant.
+- `bootstrap-guard-legs.ts` gains a leg.
+- `gen-bootstrap.mjs` emits the manifest; there is no second generator.
+- `bootstrapRoster()` is reused by the manifest test.
+- `fake-docker.ts` is extended.
+
+The OcuPilot script is a functional reference only (AD-12 reference-code rule).
+
+**Integration ACs:**
+- Consumer `ci-ipm-archive.mjs` reads the generator's embed and `ipm/module.xml`, and produces an installed, configured service on two editions (AC 42.4.2).
+- Consumer `bootstrap()` reads the guard's presence and produces no write plus one warning (the `ipm-owned-older` leg, live).
+
+- **Consumed-by:**
+  - **42.5:** the release workflow builds and publishes the IPM archive with `lib/ipm-archive.mjs` staging, and its root `version` script regenerates `ipm/module.xml` through `gen:bootstrap`. Deferred item 1 is the registry route.
+  - **42.8:** the Open Exchange listing reuses the manifest metadata.
+  - **42.9:** the README states the tested floor, 2026.1, and the IPM install route.
+- **Consumes:** 42.2 (the marker grammar, `classifyDeployedMarker`, the guard legs) and 42.3 (the harness, the CI registry, the self-test, the scripted docker).
+
+**Ledger inbox:**
+- **DW-34:** addressed by AC 42.4.1, AC 42.4.2 and AC 42.4.4 (the revival and the offline proof). Its publishing half is 42.5's and 42.8's; the lead re-owns the residual at adjudication.
+- **DW-674:** addressed by the two DW-674 ACs and the `ipm-owned-older` leg.
+- **DW-686:** addressed by the DW-686 AC.
+
+**AC reinterpretations:**
+1. **One archive, three containers.** "Build on one throwaway, install on a second … on both editions" means one archive built on `iris-community:2026.2` and installed on fresh containers of both editions. The release ships one archive, so this proves that the same artifact installs on both. All three containers run `--network none`.
+2. **A Node script and its own job.** "Adapted from `ci-ipm-archive.sh`" becomes a Node script over the extended harness (Rule 2) in its own `ipm` job, not in `package`. The job has the same `needs` and runs in parallel with `package`, within its own 45-minute budget.
+3. **"Nothing was fetched" is measured** by NetworkMode `none` on every container, plus 0 `%IPM_Repo.Definition` rows after every installing verb.
+4. **"REST application configured" is measured** by the web application's properties, the `%ALL` mapping and an in-container HTTP 200.
+5. **AC 42.4.3's line numbers.** `bootstrap.ts:95-96` is now `:130-131`.
+6. **The manifest adds one resource.** It is generated from `classes[]` plus one IPM-only preloaded guard (DW-674).
+
+**Decided at the spec gate (2026-10-22):** all six recommendations were accepted as written. They are wave-8 orchestrator decisions #67 (the ownership signal is the presence of `ExecuteMCPv2.InstallGuard`), #68 (one archive installed on both editions, three containers), #69 (its own `ipm` CI job), #70 (the module name stays `iris-execute-mcp-v2`), #71 (the implement and QA stages may run throwaways on the terms of #55 and #64: harness only, own containers only, removed before return, pulls reported) and #72 (the registry route goes to 42.5's plan). The lead wrote the spine drafts below: AD-14 (manifest, Ownership, IPM upgrades, no longer [ASSUMPTION]), AD-12's exception list, AD-29's CI bullet, the "IRIS CI images" Stack row and the Deferred release-operations entry. `lint_spine.py` is clean. The implement stage does not edit the spine, never pushes, never triggers CI and never writes to the shared IRIS. The first CI run of this story's commit is the lead's checklist at its smoke. The lead upgrades HSCUSTOM to the new `BOOTSTRAP_VERSION` there.
+
+**Orchestrator decisions needed (as planned):**
+1. **The IPM ownership signal.** Recommended: (A) the presence of the IPM-only `ExecuteMCPv2.InstallGuard` class.
+   - (A) follows the `%ALL` package mapping, needs no IPM-schema query, and was proven by probe Q3.
+   - (B) is an owner parameter stamped per channel. It needs two variants of the stamped Setup, and a dictionary read whose failure modes are harder.
+   - (C) queries `%IPM_Storage.Module`. That only works in the namespace IPM was imported into, so it is wrong under `%ALL`.
+2. **The proof topology.** Recommended: one archive, installed on both editions (three containers), rather than a build and an install per edition (four containers). This is reinterpretation 1.
+3. **Where the proof runs.** Recommended: its own `ipm` job with `needs: [gates, throwaway]`, rather than steps inside `package`. It keeps the 30-minute package budget, runs in parallel, and needs no matrix, so the self-test's "only gates has a strategy" rule stands.
+4. **The module name.** Recommended: keep `iris-execute-mcp-v2`. It is the existing name, the registry answers 404 for it, it is lowercase, and it does not imply endorsement.
+5. **Throwaways for the implement and QA stages.** Recommended: authorize them on the terms of decisions #55 and #64 (harness only, own containers only, removed before return, pulls reported). Then `node scripts/ci-ipm-archive.mjs` and `pnpm live:bootstrap-guard` run once on the real path before review. IPM's behavior cannot be shown by a scripted docker, and without this the first live run is the lead's CI run.
+6. **The registry route (deferred item 1).** Recommended: route it to 42.5's plan, and keep `ipm/module.xml` plus the CI-built archive here.
+
+**Spine amendment drafts for the lead (Rule 20):**
+- **AD-14, IPM manifest:** "`ipm/module.xml` is generated by `scripts/gen-bootstrap.mjs` from `classes[]`, plus one IPM-only preloaded class, `ExecuteMCPv2.InstallGuard`, whose source is `ipm/preload/ExecuteMCPv2/InstallGuard.cls` and whose content joins the marker's hash. The module is `iris-execute-mcp-v2` at the npm version. Archives are built from the generated embed, never from `src/`, and CI's `ipm` job proves one installs offline on both editions (Story 42.4)."
+- **AD-14, Ownership** (drop [ASSUMPTION]): "When `ExecuteMCPv2.InstallGuard` is present, IPM installed the classes: bootstrap writes nothing on any path that would write, and logs one warning naming the `zpm` command. A 404 for it is the positive absence; any other failure is unknown, and nothing is written."
+- **AD-14, IPM upgrades** (drop [ASSUMPTION]): "The preloaded guard runs at IPM's `Initialize/After`, before Reload. It orders the deployed `ExecuteMCPv2.Setup` marker against its own stamped one with the 42.2 table, and refuses newer, foreign and unknown inside IPM's transaction. IPM's own check ignores build metadata and never sees a bootstrap deployment. Installs never use `-dev`."
+- **AD-12, recorded exceptions:** add "the IPM install guard's marker comparison (AD-14)".
+- **Stack row "IRIS CI images":** replace `:2025.3` with `:2026.1` (key valid to 2027-03-27), and add "2025.3 passed the guard in CI run 39749804619 on 2026-10-22 before its key expired 2026-11-13".
+- **AD-29, CI:** append "The `ipm` job builds the IPM archive and installs it offline on both editions, after `gates` and `throwaway` (Story 42.4)."
+- **Deferred, Release operations:** IPM's version policy is settled, since the module version equals the npm version (AD-14). Remove "and IPM (… 42.4)".
+
+## Verification
+
+Run from `/Users/jbrandt/git/iris-execute-mcp-v2`, one command per foreground call, with `timeout: 600000`. After editing a package's `src/`, rebuild it (`pnpm --filter <pkg> build`).
+
+`UNARMED` is `env -u IRIS_HOST -u IRIS_PORT -u IRIS_USERNAME -u IRIS_PASSWORD -u IRIS_NAMESPACE -u IRIS_HTTPS -u IRIS_REQUIRE_LIVE -u IRIS_TEST_HOST -u IRIS_TEST_PORT -u IRIS_THROWAWAY`.
+
+No stage pushes, triggers CI, or writes to the shared IRIS. Docker runs only under Orchestrator decision 5, and only through the harness.
+
+**Commands:**
+- `(loop)` Syntax-check the scripts -- expected: exit 0.
+  ```sh
+  for f in scripts/gen-bootstrap.mjs scripts/throwaway-iris.mjs scripts/ci-ipm-archive.mjs scripts/lib/ipm-archive.mjs scripts/lib/ci-checks.mjs; do
+    node --check "$f" || exit 1
+  done
+  ```
+- `(loop)` `pnpm gen:bootstrap` twice -- expected: the second run prints "Unchanged" for the embed and the manifest, and `git diff --stat` names only this story's files.
+- `(loop)` `UNARMED CI=true pnpm --filter @iris-mcp/shared exec vitest run src/__tests__/bootstrap.test.ts src/__tests__/bootstrap-version.test.ts src/__tests__/gen-bootstrap-write.test.ts` -- expected: green.
+- `(loop)` Run the `@iris-mcp/all` story files (`UNARMED CI=true`) -- expected: green.
+  ```sh
+  UNARMED CI=true pnpm --filter @iris-mcp/all exec vitest run \
+    src/__tests__/ipm-manifest.test.ts src/__tests__/ci-ipm-archive.test.ts \
+    src/__tests__/throwaway-iris.test.ts src/__tests__/story-42-3-qa-harness-lifecycle.test.ts \
+    src/__tests__/story-42-2-qa-throwaway-wiring.test.ts src/__tests__/ci-workflow.test.ts \
+    src/__tests__/ci-seed-throwaway.test.ts src/__tests__/story-42-2-bootstrap-guard-orchestration.test.ts \
+    src/__tests__/changelog-bootstrap-move.test.ts src/__tests__/story-42-2-doc-claims.test.ts \
+    src/__tests__/story-42-4-doc-claims.test.ts
+  ```
+- `(loop)` `pnpm --filter @iris-mcp/shared lint` and `pnpm --filter @iris-mcp/all lint` -- expected: 0 warnings.
+- `(once)` `UNARMED CI=true pnpm --filter <pkg> test`, one call per package -- expected: green. The packages are shared, client-config, admin, data, dev, interop and ops; run `@iris-mcp/all` as `-- --shard=1/2` and `-- --shard=2/2`.
+- `(once)` `pnpm lint` and `pnpm type-check` (per package if turbo flakes), plus `npm --prefix extensions/iris-mcp-launcher run type-check` -- expected: green.
+- `(once)` The root checks -- expected: all OK, with the baseline at `1e62c5ad5bf7`/141.
+  ```sh
+  pnpm gen:governance-baseline:check
+  pnpm gen:skills:check
+  pnpm gen:pack:check
+  pnpm validate:prompts
+  pnpm check:provenance
+  pnpm gen:tools-list-snapshot:check
+  node scripts/check-epics-sync.mjs
+  ```
+- `(once)` `UNARMED node scripts/ci-package-smoke.mjs` -- expected: exit 0 (the shared dist changed).
+- `(once)`, only under decision 5. Each item is its own foreground call, so each fits the 10-minute cap:
+  - `node scripts/ci-ipm-archive.mjs --edition community` -- expected: exit 0;
+  - `node scripts/ci-ipm-archive.mjs --edition health` -- expected: exit 0;
+  - `pnpm live:bootstrap-guard` -- expected: every leg passes, `ipm-owned-older` included. If one call cannot hold every leg, run the gate through `node scripts/throwaway-iris.mjs run -- pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-42-2-bootstrap-guard-live-gate.test.ts -t <leg title>`, one call per group of legs.
+
+  Report each container's name and that it was removed, and every image pulled.
+- `(once)` A read-only HSCUSTOM `SELECT ExecuteMCPv2.Setup_GetBootstrapVersion()`, before and after -- expected: `0.0.2+1.995fbbb1055d` both times.
+
+**Mutations (Rule 19).** Apply each, observe red, revert, confirm `git status --short` and `git diff --stat` are unchanged, and record `mutation: … → …`.
+- AC 42.4.1: hand-edit one `<Resource>` in `ipm/module.xml` → `gen-bootstrap-write.test.ts` and `ipm-manifest.test.ts` go red.
+  - mutation: hand-edited one `<Resource>` of `ipm/module.xml` (`ExecuteMCPv2.Utils.CLS` to `ExecuteMCPv2.Utilz.CLS`) -> `gen-bootstrap-write.test.ts` "the checked-in ipm/module.xml is exactly what the generator writes, so a run on a clean tree rewrites neither the embed nor the manifest" and "an unchanged run keeps the manifest's mtime and content, and a changed run rewrites it" went red; `ipm-manifest.test.ts` "lists the guard as the only preloaded resource, first, followed by exactly classes[] in order as .CLS" went red. Reverted; tree fingerprint byte-identical.
+- AC 42.4.1: drop the guard from the hash formula in the generator → the `bootstrap.test.ts` drift check goes red.
+  - mutation: `scripts/gen-bootstrap.mjs` hashed `rawContents` without `guardContent`, then `node scripts/gen-bootstrap.mjs` regenerated (marker `0.0.2+3.995fbbb1055d`) -> `bootstrap.test.ts` "the marker's hash is the SHA-256 hash of concatenated disk contents, the IPM install guard last" went red, and so did `gen-bootstrap-write.test.ts` "the guard's content joins the marker: editing it raises the sequence by 1, moves the hash and reaches the embedded guard, not Setup". Reverted the generator and restored the embed, the sequence state and the manifest from backups; tree fingerprint byte-identical.
+- AC 42.4.2: remove `--network none` from the build `up` in the script → `ci-ipm-archive.test.ts` goes red on the scripted run.
+  - mutation: removed `network: NETWORK_NONE` from the `upHarness` options of `startContainer` in `scripts/ci-ipm-archive.mjs` (the harness then asks for a published port and refuses, exit 2) -> 41 tests of `ci-ipm-archive.test.ts` went red, among them "passes a full run: one archive built on a no-network community container, installed on community and health, every container removed", "--edition community starts the build container and that edition's install container only" and every fault case of the scripted run. Reverted; tree fingerprint byte-identical.
+- AC 42.4.2: make the archive check skip the content comparison → `ci-ipm-archive.test.ts` goes red.
+  - mutation: `archiveProblems` of `scripts/lib/ipm-archive.mjs` with the content comparison disabled (`if (false && …)`) -> `ci-ipm-archive.test.ts` "archiveProblems over a real tar czf of a staged module > reports a changed class", "> reports a changed guard" and "an archive that differs from the embed ends the run in the archive phase > a class that differs from the embed" went red. Reverted; tree fingerprint byte-identical.
+- AC 42.4.3: change the version in item 3 to a literal → `bootstrap.test.ts` goes red.
+  - mutation: item 3 of `MANUAL_INSTRUCTIONS` in `packages/shared/src/bootstrap.ts` with `${PACKAGE_SEMVER}` replaced by the literal `9.9.9` -> `bootstrap.test.ts` "item 3 names the package IPM installs (AC 42.4.3) > names the install command with the module name and the semver of BOOTSTRAP_VERSION" and "> takes the name and the version from ipm/module.xml: either changing in one place only fails here" went red, as did the two Configure-fails cases ("should report configured=false + manualInstructions when unconfigured and Configure fails", "should populate manualInstructions when configure fails"). Reverted; tree fingerprint byte-identical.
+- AC 42.4.4: add a `repo` verb to a session script → `ci-ipm-archive.test.ts` goes red on the verb-set case.
+  - mutation: `importIpmScript` of `scripts/lib/ipm-archive.mjs` with a `##class(%IPM.Main).Shell("repo -list",0,0)` statement added -> `ci-ipm-archive.test.ts` "the IPM verbs the proof issues (AC 42.4.4) > are the only verbs in the source text of the script and of its helpers: every Shell call names one of IPM_VERBS", "> reads the verb of every Shell call of a script, and an unreadable one as the empty verb" and "scripts/ci-ipm-archive.mjs as a process against a scripted docker > issues exactly the verbs load, package and list in the sessions of a full run, and no other" went red. Reverted; tree fingerprint byte-identical.
+- DW-674 ownership: remove the ownership check from `bootstrap()` → `bootstrap.test.ts` and the orchestration test (`ipm-owned-older`) go red. Remove it from `markerAllowsCompile` → the re-check case goes red.
+  - mutation: the `leftToIpm` call removed from `bootstrap()` in `packages/shared/src/bootstrap.ts`, shared dist rebuilt -> `bootstrap.test.ts` "bootstrap never writes over an IPM installation (DW-674) > an IPM installation found at startup on the 'stale' path: nothing is written, ipmOwned is true, and one warning names the zpm command" (and the fetch-sequence cases of every write path) went red; `story-42-2-bootstrap-guard-orchestration.test.ts` "ipm-owned-older: IPM-owned at startup: an older marker and the InstallGuard document (DW-674)" went red. Reverted, shared dist rebuilt; tree fingerprint byte-identical.
+  - mutation: `markerAllowsCompile` made to `return true;` after the marker checks (no ownership re-check) -> `bootstrap.test.ts` "an IPM installation found at the re-check before compile (stale)", "(unconfigured)", "(missing)" and "the ownership read fails at the re-check before compile: unknown, no compile and nothing later; one warning" went red. Reverted; tree fingerprint byte-identical.
+- DW-674 parity: change one fixture `expected` → `bootstrap-version.test.ts` goes red. The IRIS side's red is lead branch `parity`.
+  - mutation: `expected` of the "stamped: a lower major" case of `bootstrap-marker-parity-cases.json` changed from `older` to `newer` -> `bootstrap-version.test.ts` "the shared parity case table (DW-674) > case 1 ('stamped: a lower major'): the comparator says 'newer'" went red. Reverted; tree fingerprint byte-identical.
+- DW-686: revert the constant to the 2025.3 digest → the `throwaway-iris.test.ts` oldest pin goes red.
+  - mutation: `OLDEST_IRIS_COMMUNITY_IMAGE` in `scripts/throwaway-iris.mjs` set back to the `2025.3` digest -> `throwaway-iris.test.ts` "throwaway-iris: the images > pins the oldest IRIS Community tag whose key is valid for months ahead (2026.1) by its manifest-list digest" went red. Reverted; tree fingerprint byte-identical.
+- Harness: drop the NetworkMode check from `inspectProblems` → `throwaway-iris.test.ts` goes red on the network-none inspection cases.
+  - mutation: the `mode !== NETWORK_NONE` problem removed from `inspectProblems` in `scripts/throwaway-iris.mjs` -> `throwaway-iris.test.ts` "the inspection of a --network none container > refuses the default bridge network", "> refuses the host network", "> refuses no host config at all", "> checks the network mode of a stopped container too, when a stopped one is allowed", "> refuses a container that publishes a port when the state says --network none, and the reverse" and "exec, logs and down on a --network none state > down refuses a container on another network with exit 2…" went red; `story-42-3-qa-harness-lifecycle.test.ts` "session and cp re-inspect first: an unlabelled container, a container that has gained a port and a missing container are refused…" went red. Reverted; tree fingerprint byte-identical.
+
+Added in the review pass (each applied, observed red, reverted; `git status --short` and the diff hash were identical to before):
+- AC 42.4.1 (the Check invoke carries `CheckStatus`, and every manifest drift failure names the file and the command):
+  - mutation: removed ` CheckStatus="true"` from the checked-in `ipm/module.xml` -> `ipm-manifest.test.ts` "has the three invokes, in order, with their attributes" went red with the message "ipm/module.xml is generated and must not be edited by hand: run pnpm gen:bootstrap"; `gen-bootstrap-write.test.ts` "the checked-in ipm/module.xml is exactly what the generator writes…" and "an unchanged run keeps the manifest's mtime and content…" went red with "ipm/module.xml differs from the generator's output: run pnpm gen:bootstrap".
+- AC 42.4.1 (a shared-version change without a regeneration):
+  - mutation: `packages/shared/package.json` version `0.0.2` -> `0.0.3`, no `pnpm gen:bootstrap` -> `ipm-manifest.test.ts` "is the shared package's version, which is the semver of the embedded marker, under the embed's module name" went red (message names the file and the command).
+- AC 42.4.1 (Rule #51, the header's counts are the counted lines):
+  - mutation: the header of `ipm/module.xml` stating `35 resources` instead of `36` -> `ipm-manifest.test.ts` "states counts that equal the counted <Resource lines, which equal the roster length plus one (Rule #51)" went red.
+- AC 42.4.2 (every container is removed on every exit path, signals included):
+  - mutation: `startContainer` in `scripts/ci-ipm-archive.mjs` registering the container only after `upHarness` returned -> `ci-ipm-archive.test.ts` "removes the container it is still waiting for, and exits 143, when SIGTERM arrives while the harness starts it" went red (the container was left).
+- AC 42.4.2 (each install-phase check of the script can be the one that fails):
+  - mutation: the `GetBootstrapVersion()` `need(...)` deleted -> "the version-call-wrong fault in a community run…" and "the version-wrong fault in a health run…" went red.
+  - mutation: the `list` version `need(...)` deleted -> "the list-version-wrong fault in a community run…" and "…in a health run…" went red.
+  - mutation: the `cp` exit status ignored (`need(true, …)`) -> "ends the build phase with exit 1, naming it, when the archive cannot be copied out of the build container, and removes it" went red.
+  - mutation: the parity listing capped at 20 again (`problems.slice(0, 20)`) -> "lists every parity mismatch, not the first few, when the two comparators disagree on many cases" went red.
+  - mutation: `GUARD_REFUSAL_TEXT` in `scripts/lib/ipm-archive.mjs` reworded ("declined the install") -> `ci-ipm-archive.test.ts` "expects the guard refusal text that the embedded install guard builds…" went red.
+  - the stale-dist gate: after an edit of `packages/shared/src/bootstrap.ts` made `src/` newer than `dist/`, the scripted-run suite failed in `beforeAll` with "The scripted run loads the built shared dist (pnpm --filter @iris-mcp/shared build)…" instead of failing every case on a marker mismatch; the rebuild turned it green.
+- AC 42.4.2 and AC 42.4.4 (the `ipm` job in the workflow):
+  - mutation: `needs: [gates, throwaway]` of the `ipm` job in `.github/workflows/ci.yml` -> `needs: [gates]` -> `ci-workflow.test.ts` "runs the four jobs, the gates job on exactly the three Node legs, and the package and ipm jobs after the other two", "the real ci.yml has no problem" and the ipm-job cases went red.
+  - mutation: a `secrets.NPM_TOKEN` env entry added to the `ipm archive` step -> `ci-workflow.test.ts` "the real ci.yml has no problem" and "is registered with install, build and the archive proof, a 45-minute budget, and no strategy, condition or launcher step" went red.
+- DW-674 (ownership that cannot be read is never a licence to write):
+  - mutation: `leftToIpm` in `packages/shared/src/bootstrap.ts` returning `false` for an `unknown` ownership -> `bootstrap.test.ts` "the ownership read fails at startup ('an HTTP 500'): unknown, nothing is written, one warning naming the failure", "…('a timeout')…" and "the ownership read fails at the re-check before compile: unknown, no compile and nothing later; one warning" went red.
+- Harness (the mount check and the `exec` refusal never silently skip):
+  - mutation: `upHarness` calling `deps.checkMountDirectory?.(…)` (no check when none is supplied) -> `throwaway-iris.test.ts` "never skips the host-directory check: a mount with no checker in the dependencies is refused with exit 2 and no docker call, and a start with no mount needs none" went red.
+  - mutation: `execHarness` calling `loadThrowaway(…, { needsPort: false })` -> `throwaway-iris.test.ts` "exec refuses a state with no port with exit 2, before docker is called, and runs nothing" and `story-42-3-qa-harness-lifecycle.test.ts` "exec refuses it; session pipes the script in and returns docker's status; cp copies a file out; logs and down work" went red.
+- AD-24 scan (the exemption is exact):
+  - mutation: a second forbidden token (`ImportDir`) added to a comment of `scripts/lib/ipm-archive.mjs` -> `document-write-paths.test.ts` "no construct the roster does not model (OBJ.Load*, OBJ.Import*, ImportDir, SetTextFrom*, %Routine %New) exists in the scanned sources" went red.
+- The IRIS-side `InstallGuard` (`Classify`, `Check`) has no default-suite host by design: its red-proofs are the lead's CI branches `guard` and `parity` (lead checklist 2.2 and 2.3).
+
+**QA additions (QA).** Files:
+- `packages/iris-mcp-all/src/__tests__/story-42-4-qa-parity-table.test.ts` (new, default suite): the parity table keeps 21 boundary cases (the ASCII neighbours of 0-9 and a-f, a bad character after a good digit and a bad first character, a hash of f, a third part after the hash, an embedded marker with a neighbour character, NUL, a Latin-1 letter), and the CHANGELOG's case count equals the fixture's length (Rule #51).
+- `packages/shared/src/__tests__/fixtures/bootstrap-marker-parity-cases.json`: 70 to 91 cases; `expected` from a run of `classifyDeployedMarker` in `packages/shared/dist/bootstrap-version.js` over each pair (Rule #36).
+- `scripts/lib/ipm-archive.mjs`, `scripts/ci-ipm-archive.mjs`, `packages/iris-mcp-all/src/__tests__/ci-ipm-archive.test.ts`: the install checks also read the install guard's document through Atelier from inside the container (200) and a document that does not exist (404), so the real IPM-installed guard is shown to be what the bootstrap's ownership read sees; 5 fault rows and 1 name case added.
+- `CHANGELOG.md`: the case count and the new check.
+
+Real-path runs (QA; throwaways through the harness only): `ci-ipm-archive.mjs` on both editions, 94/94 parity cases on each; `pnpm live:bootstrap-guard` 10/10; the guard gate on the `iris-community:2026.1` digest 10/10 (`ipm-owned-older` included).
+
+Mutations of the IRIS-side `InstallGuard` (the dist copy of the embedded guard was patched, `ci-ipm-archive.mjs --edition community` run on real IRIS and IPM, and the dist restored by checksum; none leaked):
+- mutation: `IsDigits` accepting ":" (`> 57` to `> 58`), "/" (`< 48` to `< 47`), and `IsHash` accepting "/" (`>= 48` to `>= 47`), ":" (`<= 57` to `<= 58`) or a backtick (`>= 97` to `>= 96`) -> all five PASSED against the 70-case table (the gap) and each went red at `parity-community` against the 91-case table, naming cases 70 to 83.
+- mutation: `IsHash` rejecting "f" (`<= 102` to `<= 101`) -> red at `install-community`: the guard refused the older leg, whose hash holds an f (the table's f cases hold the gap open for a marker whose hash has none).
+- mutation: `Check` accepting a newer / `dev` / marker-less `Setup` -> red at `guard-newer` / `guard-dev` / `guard-unknown`.
+- mutation: `Check` also refusing a current deployment -> red at `build` (`package` re-runs Initialize over the dev-loaded classes); also refusing an absent one -> red at `build` (`load -dev` on a fresh namespace).
+- mutation: `Classify` comparing the sequence before the semver -> red at `parity-community` (8 cases); the length comparison of `CompareDigits` removed -> cases 22 and 23; the leading-zero strip removed -> 4 cases.
+- mutation: the `Configure` invoke removed from `ipm/module.xml` -> red at `install-community` (the web application reads `|||`); the `ConfigureMapping` invoke removed -> red at `install-community` (`%ALL` does not map the package).
+- mutation (live, DW-674 ownership): the startup `leftToIpm` check disabled in `packages/shared/dist/bootstrap.js` -> `pnpm live:bootstrap-guard` red on exactly the `ipm-owned-older` leg; restored by checksum.
+
+Mutations of the default suite (each applied, observed red, reverted; the tree fingerprint of `git status --short` plus `git diff` was identical afterwards):
+- mutation: `ExecuteMCPv2.Utils.CLS` hand-edited to `Utilz.CLS` in `ipm/module.xml` -> `ipm-manifest.test.ts` "lists the guard as the only preloaded resource, first, followed by exactly classes[] in order as .CLS".
+- mutation: `${PACKAGE_SEMVER}` of `MANUAL_INSTRUCTIONS` item 3 replaced by `9.9.9` -> 4 cases of `bootstrap.test.ts`; `<Version>` of the manifest alone changed to 0.0.3 -> "takes the name and the version from ipm/module.xml: either changing in one place only fails here".
+- mutation: an ownership request made on every probe outcome in `bootstrap()` -> 44 cases of `bootstrap.test.ts`, among them "a 'current' / 'newer' / 'foreign' / 'unknown' probe makes no ownership request".
+- mutation: a `repo -list` Shell statement in `importIpmScript` -> `ci-ipm-archive.test.ts` verb-set cases (3), the scripted run's verb case included.
+- mutation: the dev-placeholder refusal of `embedProblems` disabled -> "refuses a class that still holds the dev placeholder" and "refuses a guard that still holds the dev placeholder".
+- mutation: `OLDEST_IRIS_COMMUNITY_IMAGE` back to the 2025.3 digest -> `throwaway-iris.test.ts` "pins the oldest IRIS Community tag ... (2026.1) by its manifest-list digest" (and no other case: the pin is the only guard).
+- mutation: `JOB_TIMEOUT_MINUTES.ipm` 45 to 60 in `scripts/lib/ci-checks.mjs` -> 4 cases of `ci-workflow.test.ts`.
+- mutation: the README heading of the IPM subsection renamed -> 7 cases of `story-42-4-doc-claims.test.ts`.
+- mutation (QA): the "/"-as-major case of the parity table changed -> `story-42-4-qa-parity-table.test.ts` "holds a case for the character before 0 ("/") as the major"; the CHANGELOG count 91 changed to 90 -> "states in the CHANGELOG the number of cases the fixture holds (Rule #51)".
+- mutation (QA, seam): the `GUARDDOC` check removed from `scripts/ci-ipm-archive.mjs` -> the 3 `guard-document-*` fault cases of `ci-ipm-archive.test.ts`; `GUARD_DOCUMENT` renamed in `scripts/lib/ipm-archive.mjs` -> "reads the ownership signal under the name the bootstrap reads" and, on the real path, red at `install-community` (the Atelier GET answers 404).
+
+Mutations added in the code review. Each was applied, observed red and reverted, and the fingerprint of `git status --short` plus the `git diff` hash was identical afterwards:
+- AC 42.4.1 (a guard change without `pnpm gen:bootstrap`):
+  - mutation: `Parameter MAXECHO = 80;` changed to `81` in `ipm/preload/ExecuteMCPv2/InstallGuard.cls`, with no regeneration -> red:
+    - `bootstrap.test.ts` "the embedded IPM install guard is the disk source with the marker stamped in (AD-14)";
+    - `bootstrap.test.ts` "the marker's hash is the SHA-256 hash of concatenated disk contents, the IPM install guard last";
+    - `gen-bootstrap-write.test.ts` "the checked-in embed is exactly what the generator writes…";
+    - `gen-bootstrap-write.test.ts` "the checked-in ipm/module.xml is exactly what the generator writes…".
+- AC 42.4.2 and DW-674 (the built archive keeps the guard invoke's `CheckStatus`, which IPM 0.10.0 to 0.10.4 need; IPM source at v0.10.0 and v0.10.4 reads the returned status only when `CheckStatus` is set):
+  - mutation: the `CheckStatus` comparison of `manifestProblems` in `scripts/lib/ipm-archive.mjs` disabled (`if (false && …)`) -> red:
+    - `ci-ipm-archive.test.ts` "reports a guard invoke that lost CheckStatus";
+    - `ci-ipm-archive.test.ts` "reports a guard invoke with CheckStatus off";
+    - the scripted-run case "an archive that differs from the embed ends the run in the archive phase > a manifest whose guard invoke lost CheckStatus".
+- AC 42.4.2 ("nothing fetched", and the install checks of the matrix):
+  - mutation: the `need()` of `noRepositories` and the `COMPILED`, `TESTCLASSES`, `APP`, `MAPPED`, `HTTP` and `ABSENTDOC` `need()`s of `installChecks` in `scripts/ci-ipm-archive.mjs` made `need(true, …)` / `need(true || …)` -> all 12 matching fault rows of `ci-ipm-archive.test.ts` went red:
+    - `repositories-after-import`, `-load-dev`, `-package` and `-load`;
+    - `compiled-count`, `test-classes`, `app-matchroles` and `not-mapped`;
+    - `http-500` and `absent-document-found`, on both editions.
+  - The same filter on the reverted tree: 12 passed (control).
+- AC 42.4.4 (the workflow holds no upload):
+  - mutation: the `upload-(artifact|release-asset)|actions/cache` pattern removed from `workflowProblems` in `ci-workflow-check.ts` -> red: `ci-workflow.test.ts` "fails on an ipm step that uploads the archive".
+- DW-674 ownership (the `missing` IPM warning names the versioned command):
+  - mutation: the remedy restored to "uninstall and reinstall the package with zpm." in `packages/shared/src/bootstrap.ts` -> red: `bootstrap.test.ts` "an IPM installation found at startup on the 'missing' path…".
+- Rule #51 (the parity table's CHANGELOG count, held as Story 42.4 history):
+  - mutation: the CHANGELOG's "parity table of 91 cases" changed to 92 -> red: `story-42-4-qa-parity-table.test.ts` "states in the Story 42.4 CHANGELOG section the 91 cases the table held…".
+  - mutation: the first case removed from the fixture -> the same test red ("the fixture holds 90").
+
+Rework 1 (CI). Reproduction first: with the committed (HEAD) `scripts/ci-ipm-archive.mjs` and `ci-ipm-archive.test.ts` and the GNU-tar shim on PATH, `ci-ipm-archive.test.ts` failed 48 of 126 tests at the archive phase with `tar (child): gzip: Cannot exec: No such file or directory`, as CI did. After the fix the same file is green with the shim and without it (130 tests; 164 together with `ci-ipm-archive-tgz.test.ts`, 34 tests, recounted in the review pass). Each mutation below was applied, observed red and reverted from a backup, and the fingerprint of `git status --short`, the diff and every untracked file's hash was identical afterwards:
+- AC 42.4.2 (the archive phase needs no `tar` or `gzip` on any host):
+  - mutation: `checkArchive` of `scripts/ci-ipm-archive.mjs` with a `spawnSync('tar', ['tzf', ...])` call and the `node:child_process` import added back -> `ci-ipm-archive.test.ts` 52 of 130 red on this host (the child PATH holds only the scripted docker): "passes a full run: one archive built on a no-network community container, installed on community and health, every container removed", "reads the archive in-process: the run passes on a PATH that holds the scripted docker alone, where neither tar nor gzip resolves", "issues exactly the verbs load, package and list in the sessions of a full run, and no other", every scripted fault case that reaches the archive phase ("tar could not list the archive: spawnSync tar ENOENT") and the source pin "imports no child_process in the script or its archive helpers: the archive is read in-process, so no tar or gzip binary is needed on any host (docker is spawned by the harness alone)" (retitled in code review; it was "spawns no process of its own…").
+- `readTgz` and `extractEntries` (`ci-ipm-archive-tgz.test.ts`, 34 tests; the oracle is the host `tar`, which is bsdtar here):
+  - mutation: the pax `path` record ignored (`name = longName ?? name`) -> "reads the path of a pax x header in bytes, not characters, over the short name of the member" red (1).
+  - mutation: the pax `size` record ignored -> "reads the size of a pax x header over a header size of 0, and applies a pax record to the next member only" red (1).
+  - mutation: the GNU `L` long name not stored -> "reads a GNU L long name over the truncated name of the member that follows" and the oracle case "the gnu format" red (2).
+  - mutation: pax `g` headers not consumed -> "consumes pax g and GNU K headers and ignores them: a global path or size record changes no member" red (1).
+  - mutation: GNU base-256 numbers not read -> "reads a GNU base-256 size, and octal sizes with leading blanks, a trailing blank or NULs, or a stop at the first non-octal byte" red (1).
+  - mutation: the POSIX prefix not joined to the name (`if (false && prefix !== '')`) -> re-run in code review on the final tree: the oracle cases of the default, ustar and pax formats, "joins a POSIX prefix and a name with one slash, and reads the prefix bytes of a GNU or v7 header as no prefix", "an archive built the way IPM's writer builds one: is read, extracted and accepted by archiveProblems over the real embed, with no host tar" and the two real-archive cases "reads the ten members IPM wrote…" and "agrees with the host tar…" red (7; it was 5 before the real-archive cases were added).
+  - mutation: the header checksum not verified -> "refuses a header whose checksum is wrong, naming the member and both sums" red (1).
+  - mutation: the gzip magic check removed -> "refuses a file that is not gzip, an uncompressed tar included, naming it" red (1).
+  - mutation: the `..` segment check of `memberPath` removed -> the three ".. segment" cases of "extractEntries" red; the absolute-path check removed -> the three absolute-path and drive-letter cases red.
+- `completeAuditLines` and `pollAuditEntries` (`process-gate-helpers.test.ts`, 36 tests):
+  - mutation: `completeAuditLines` returning the text split on every newline (the partial last line included) -> 5 red: "reads only newline-terminated lines: a file that ends in a partial line resolves with the complete entries and no SyntaxError", "picks up an entry whose last bytes arrive later: a poll for 2 entries waits for the newline of the second", "quotes the raw start of the file, a partial last line included, when the entries never appear" and the two `completeAuditLines` cases.
+  - mutation: `pollAuditEntries` reading the raw text instead of `completeAuditLines` -> the first three of those red (3).
+  - mutation: `pollAuditEntries` skipping a newline-terminated line that does not parse -> "still throws on a newline-terminated line that does not parse: a corrupt line is never skipped" red (1).
+
+Rework 1 (CI), mutations closed in the review pass (Rule 19). Each was applied by a scratch harness outside the repository, which restored every touched file and compared its sha-256 with the one before; each run ended byte-identical, with `git status --short` unchanged:
+- A real IPM archive (`fixtures/ipm-real-package.tgz`, 1085 bytes, sha-256 `354ed5c0...f152dd8`, `package` of a probe module on `iris-community:2026.2`, captured byte for byte in the plan probes): `readTgz` agrees with `tar tzvf` on its ten members and sizes. It ends with no end marker, directories are typeflag 5 with no trailing slash, and nested names use the ustar prefix, as the mutations below show.
+  - mutation: `readTgz` requiring an end marker -> "reads an archive that has no end marker as it reads one that has", "an archive built the way IPM's writer builds one: is read, extracted and accepted by archiveProblems…" and all three "readTgz over a real IPM package archive" cases red (5).
+  - mutation: the ustar prefix never joined (`if (false && block.subarray(257, 263)…`) -> the oracle cases of the default, ustar and pax formats, "joins a POSIX prefix and a name with one slash…", the IPM-writer case and two of the real-archive cases red (7).
+  - mutation: a typeflag-5 name left without its trailing slash -> "names a typeflag-5 member with no slash as a directory…" and the real archive's "reads the ten members IPM wrote…" red (2).
+- Reader rules:
+  - mutation: reading continues past the first all-zero block -> "stops at the first all-zero block: nothing after it is a member" red (1).
+  - mutation: a link's size field read as data (`isLink = false`) -> "reports links and other types as `other` with no data…" red (1).
+  - mutation: only the unsigned checksum accepted -> "accepts a checksum stored as the sum of signed bytes…" red (1).
+  - mutation: a GNU `K` header not consumed -> "consumes pax g and GNU K headers and ignores them…" red (1).
+  - mutation: an octal field read past its first non-octal digit -> "reads a GNU base-256 size, and octal sizes with leading blanks, a trailing blank or NULs, or a stop at the first non-octal byte" red (1).
+- Refusals:
+  - mutation: a truncated gzip stream flushed instead of refused (`finishFlush: Z_SYNC_FLUSH`) -> "refuses a gzip stream that is cut short or damaged" red (1) and, in `ci-ipm-archive.test.ts`, "an archive that cannot be read ends the run in the archive phase > a gzip stream cut in the middle" red (1).
+  - mutation: the member data bounds check removed -> "refuses a member whose data is cut short, and a header that is cut short" red (1).
+  - mutation: the pax record length check removed -> "refuses a pax header with a malformed record" red (1).
+  - mutation: `checkArchive` rethrowing the reader's `Error` (no `PhaseFailure`) -> both cases of "an archive that cannot be read ends the run in the archive phase" red (2).
+- `extractEntries`:
+  - mutation: each file written while its name is validated -> the six refusal cases "refuses %s, and writes nothing, not even the members before it" red (6).
+  - mutation: any name containing two dots refused -> "extracts a member whose name merely starts with two dots" red (1).
+- The audit readers:
+  - mutation: `completeAuditLines` keeping blank lines -> "skips blank lines, whitespace-only ones included" red (1).
+  - mutation: `settledAuditCount` counting every non-blank line again -> "settledAuditCount counts only newline-terminated lines: a partial last line is no entry until its newline lands" red (1).
+  - Not pinned by a deterministic test: `readEntries` of `story-43-1-qa-dw579-process.test.ts` reading through `completeAuditLines`. The helper's own tests pin the rule, and the reader's race window (after the poll and the settled count) is narrower than the poll's. The pin belongs to DW-693's shared reader (a copy-guard name needs an exported helper to point at).
+- The host formats:
+  - mutation: the `pax` format made unwritable on the host (`--format=nosuch`) -> "the host tar can write at least the default and the ustar formats… and every format when it is GNU tar or bsdtar" red (1).
+
+Rework 1 (CI), mutations closed in code review (re-review; Rule 19). Each was applied by a scratch harness outside the repository (`scratchpad/cr-42-4-r2/probe-lead/mutate.mjs`), which ran one suite unarmed, restored the file and compared its sha-256 and `git status --short` with the ones before; every run ended byte-identical. `ci-ipm-archive-tgz.test.ts` now holds 35 tests and `ci-ipm-archive.test.ts` 130.
+- The scripted run's PATH (AC 42.4.2, "pin it so a gzip-less PATH cannot hide the archive phase again"): the test now checks the PATH `runScript` gave the child (`Run.path`), not the scripted docker's directory.
+  - mutation: `runScript`'s `PATH` widened to `${fake.binDir}${path.delimiter}/usr/bin` -> "reads the archive in-process: the run passes on a PATH that holds the scripted docker alone, where neither tar nor gzip resolves" red (1 of 130).
+- The ustar prefix (`readTgz`):
+  - mutation: a slash always put after the prefix (`${prefix}/${name}`, no trailing-slash case) -> "joins a POSIX prefix and a name with one slash…", "an archive built the way IPM's writer builds one…" (its prefixes now end in one slash, as the real archive's do) and "reads the ten members IPM wrote…" red (3).
+  - mutation: the magic compared on 5 bytes (`ustar`, so a GNU `ustar  ` header's prefix bytes read as a prefix) -> "joins a POSIX prefix and a name with one slash, and reads the prefix bytes of a GNU or v7 header as no prefix" red (1).
+- Reader rules:
+  - mutation: a regular file whose name ends in `/` not read as a directory (`if (typeflag === '5')`) -> "names a typeflag-5 member with no slash as a directory ending in a slash, and a regular file that ends in one as well" and the oracle case "the v7 format" red (2).
+  - mutation: the cut-short header check removed (`if (false) throw`) -> "refuses a member whose data is cut short, and a header that is cut short" red (1; the header then reads as a bad checksum).
+- `extractEntries`:
+  - mutation: the leading `./` not stripped -> "writes files and directories under the directory, collapsing repeated slashes and a leading ./, and skips `other` members" red (1).
+  - mutation: repeated slashes not collapsed -> the same test red (1).
+  - mutation: `other` members not skipped -> that test and "creates the directory when it is missing, even for an archive with nothing to write" red (2).
+  - mutation: the directory not created up front (`mkdirSync(root, …)` removed) -> "creates the directory when it is missing, even for an archive with nothing to write" red (1).
+
+Real-path runs (code review, throwaways through the harness only, no image pulled):
+- `ci-ipm-archive.mjs --edition community` exited 0, with the archive phase holding `CheckStatus` in IPM 0.10.5's re-serialized manifest and parity 94/94. Containers: `iris-mcp-throwaway-aa249d8aa8a6` (build) and `-f21fcfaf7d26` (install), both removed.
+- `ci-ipm-archive.mjs --edition health` exited 0. Containers: `-2408bdf2d4af` and `-0622bef00cdd`, both removed.
+- An uninstall probe of the README hand-back on `iris-community:2026.2` (`-113b7732f594`, removed): a non-dev `load` of the packaged `.tgz` left 36 `ExecuteMCPv2.*` class definitions, the guard included; `zpm "uninstall iris-execute-mcp-v2"` then left 0, with no guard and no `Setup`.
+- Shared HSCUSTOM: `SELECT ExecuteMCPv2.Setup_GetBootstrapVersion()` read `0.0.2+1.995fbbb1055d`.
+
+Real-path run (rework 1, review pass; a throwaway through the harness only, no image pulled): `node scripts/ci-ipm-archive.mjs --edition community` exited 0 with the in-process reader on the archive IPM's `package` wrote: 48 members, the 35 classes and the guard equal to the embed, the manifest equal to `ipm/module.xml`, parity 94/94. Containers `iris-mcp-throwaway-4e93ae203ab9` (build) and `-f0d27fec44d5` (install), both removed. `--edition health` was not re-run: the archive phase runs once per run, on the community build, and the health install does not read the archive on the host.
+
+Shared surfaces (QA): the parity table now holds 91 cases (`bootstrap-version.test.ts`, `ci-ipm-archive.test.ts`'s scripted table, `ci-ipm-archive.mjs`'s parity run); the shared `src/` mtime moved, so a local run of the scripted-run block or the live gates needs the shared dist at least as new (`touch packages/shared/dist/bootstrap.js` after a checkout, since `tsc` does not re-emit an unchanged file).
+
+**Lead checklist (after the story commit is pushed to `epic42`; lead only):**
+1. **First run.** Record the run URL and per-job durations. Check that:
+   - the `ipm` job shows the build, both installs, the three guard refusals, the older upgrade, parity N/N and repository count 0 at every read;
+   - `bootstrap-guard` and `bootstrap-guard-oldest` (on 2026.1) pass every leg, `ipm-owned-older` included.
+
+   When it is green, rerun it once.
+2. **Red branches.** Branch each of these from the story commit as `ci-red-42-4-<slug>`, push them together, and record each run's URL and red step:
+   1. `configure`: drop the Configure `<Invoke>` in the generator and regenerate → `ipm` red at the REST-application check.
+   2. `guard`: make `InstallGuard.Check` accept `newer` and regenerate → `ipm` red at the newer-refusal leg.
+   3. `parity`: make `InstallGuard.Classify` compare the sequence before the semver and regenerate → `ipm` red at parity.
+   4. `src-stage`: stage `Setup.cls` from `src/`, with the stage refusal removed → `ipm` red at the in-container marker check.
+   5. `ipm-owned`: remove the ownership check from `bootstrap()` → `throwaway` red at `bootstrap-guard`. `gates` red is expected too.
+   6. `network`: start the build container without `--network none` → `ipm` red at the network check.
+3. **Clean up.** Delete every `ci-red-42-4-*` branch locally and on origin, and confirm `git ls-remote --heads origin 'ci-red-42-4-*'` prints nothing.
+4. **Smoke.** At the smoke, a 42.4-built server upgrades the shared HSCUSTOM from `0.0.2+1.995fbbb1055d` to the new marker. The guard document answers 404 there, so the path is the normal one. Remove the probe image `iris-community:2026.1` if this session pulled it (the plan probe inferred a pull).
+
+**Shared surfaces:**
+- `BOOTSTRAP_VERSION` and `scripts/bootstrap-sequence.json`; the embed's exports (`IPM_MODULE_NAME`, `IPM_INSTALL_GUARD`); `ipm/module.xml`.
+- The bootstrap fetch sequences (the `bootstrap.test.ts` cases); `MANUAL_INSTRUCTIONS`; the `BootstrapResult` shape.
+- `LEGS`/`REMEDY` in `bootstrap-guard-legs.ts`, and the leg count of the orchestration and live gates.
+- `throwaway-iris.mjs` exports, CLI, usage, state and inspection; `OLDEST_IRIS_COMMUNITY_IMAGE`; `fake-docker.ts`.
+- `DECLARED_STEPS`, `JOB_TIMEOUT_MINUTES`, the job set and the README CI section (the `ci-workflow` self-test). `CI_LIVE_EXEMPTIONS` gains an entry, with its reason, for any new test file the live-capable scan (`scripts/lib/live-gate-scan.mjs`) flags.
+- The README Quick Start and Shared Instances sections (the doc-claims tests); the CHANGELOG's newest move (`changelog-bootstrap-move.test.ts`); `.changeset/`.
+
+**Must stay unchanged:** the tool surface, `tools-list-snapshot.json`, the goldens, governance baseline `1e62c5ad5bf7`/141, `classes[]` (35), every `prepublishOnly`, and `parseCli(["run", …])`.
+
+**Standing criterion:** every test added or changed passes on a fresh environment, in either order. Each creates and removes its own temp directories, listeners and containers.
+
+**IRIS:** nothing writes to the shared instance. No `ExecuteMCPv2.Temp.*` fixture and no OS `%UnitTest` class runs. Every IRIS-side check runs in a throwaway.
+
+## Auto Run Result
+
+Status: done
+Blocking condition: none
+
+**Rework 1 (CI), this pass only.** Both [CI] items of CI run 39798458188 (sha 08d343d) are closed. `BOOTSTRAP_VERSION` did not move (`0.0.2+2.244fe8623c76`); `pnpm gen:bootstrap` printed "Unchanged" for the embed and the manifest. Nothing else in the story was touched.
+
+**Summary.**
+- **Root cause, [CI] 1 (48 scripted-run tests red).** `scripts/ci-ipm-archive.mjs` listed and extracted the archive by spawning `tar tzf` and `tar xzf`. GNU tar execs an external `gzip` for `-z`; the scripted-run harness gave the script a PATH of the scripted docker's directory plus a directory holding only `tar`, so on a Linux runner `gzip` was not found. This host's bsdtar has gzip built in, so the failure was invisible here.
+- **Fix, [CI] 1.** The archive phase spawns nothing: `scripts/lib/ipm-archive.mjs` gains `readTgz` (`node:zlib` gunzip and an in-process tar reader: ustar prefix, pax `x`/`g`, GNU `L`/`K`, octal and base-256 numbers, checksum, no end marker) and `extractEntries` (a name that is absolute or has a `..` segment throws before anything is written). `checkArchive` calls them, and the `node:child_process` import is gone. The scripted-run harness's child PATH is now the scripted docker's directory alone, so a `tar` or `gzip` spawn anywhere in the script fails on every host.
+- **Independent of the host's tar flavour.** The reader uses no `tar` binary at all, and the scripted runs now pass with neither `tar` nor `gzip` on the PATH. `readTgz` is checked against the host `tar` (default, ustar, pax, gnu and v7 formats, paths over 100 characters), against hand-built pax, GNU and base-256 archives, and against a real IPM `package` archive captured in the plan probes (`fixtures/ipm-real-package.tgz`). It also read a fresh real archive in `ci-ipm-archive.mjs --edition community` (48 members, exit 0).
+- **Root cause, [CI] 2 (flake).** `pollAuditEntries` parsed every non-blank line of the audit file, including a last line the server was still writing (each entry is one `appendFile` of `${line}\n`). `process-gate-helpers.ts` exports `completeAuditLines`, which keeps only newline-terminated lines; `pollAuditEntries`, `settledAuditCount` and the `readEntries` of `story-43-1-qa-dw579-process.test.ts` read through it, and a terminated line that does not parse still throws.
+
+**Files changed.**
+- `scripts/lib/ipm-archive.mjs`: `readTgz`, `extractEntries`.
+- `scripts/ci-ipm-archive.mjs`: `checkArchive` reads in-process; no `child_process`.
+- `packages/iris-mcp-all/src/__tests__/ci-ipm-archive.test.ts`: the child PATH, 4 new cases (130 tests), `archiveOf` on `tarGz` and `readTgz`.
+- `packages/iris-mcp-all/src/__tests__/ci-ipm-archive-tgz.test.ts` (new, 34 tests) and `ipm-archive-fixture.ts` (new: `realEmbed`, `filesUnder`, `tarGz`).
+- `packages/iris-mcp-all/src/__tests__/fixtures/ipm-real-package.tgz` (new, 1085 bytes, a real IPM `package` output).
+- `packages/iris-mcp-all/src/__tests__/process-gate-helpers.ts`, `process-gate-helpers.test.ts` (36 tests) and `story-43-1-qa-dw579-process.test.ts`: `completeAuditLines` and its readers.
+- This spec.
+
+**Review.** Four layers, all delivered: 20 findings — high 0, medium 5, low 15, false 0, maybe-false 0 (mechanically recounted from the triage log). Patched, grouped by root cause: 11 findings (medium 4, low 7): the real IPM archive fixture and run (BH1, EH3, IA1), the audit readers in this story's footprint (BH3), the format guard (BH2), `archiveOf` (BH4, VG4), the `extractEntries` JSDoc (BH6), the missing mutation lines (VG2), the test count (VG5) and the fixture's checksum bytes (IA3). Deferred: 1 (medium, VG1: the audit readers of Epic 39 and 43 files). Rejected with a recorded reason: BH5, BH7, BH8, EH1, EH2, VG3, IA2, IA4 (all low).
+
+**Follow-up review recommendation: false.** A follow-up pass; none of the patched entries was `high` (patched by verdict: high 0, medium 4, low 7), so the work has converged.
+
+**Verification.**
+- Reproduction: the committed (HEAD) script and test with a GNU-tar-like shim first on PATH failed 48 of 126 tests with `tar (child): gzip: Cannot exec: No such file or directory`, as CI did. After the fix `ci-ipm-archive.test.ts` and `ci-ipm-archive-tgz.test.ts` are green with the shim and without it (164 tests).
+- `(loop)`, on the final tree: syntax checks; `pnpm gen:bootstrap` ("Unchanged" for the embed and the manifest); the three shared suites (290 tests); the 15 `@iris-mcp/all` story, helper and flake files (770 tests). The changed TypeScript files lint clean apart from pre-existing warnings in the DW-579 test, which this pass did not touch (`@iris-mcp/all` has no `lint` or `type-check` script).
+- `(once)`, after the last patch: `@iris-mcp/all` shard 1 of 2 (100 files, 2803 passed, 359 skipped) and shard 2 of 2 (100 files, 2076 passed, 330 skipped), all unarmed, 0 failed; the root checks (`gen:governance-baseline:check`, `gen:skills:check`, `gen:pack:check`, `validate:prompts`, `check:provenance`, `gen:tools-list-snapshot:check`, `check-epics-sync`) all OK. The other packages and the shared `src/` are unchanged and were not re-run.
+- Mutations: 30 recorded under "Rework 1 (CI)" in `## Verification` (13 by the implement stage, 17 closed in the review pass), each applied, observed red and reverted with the touched files compared by sha-256.
+- Real path: `node scripts/ci-ipm-archive.mjs --edition community` exited 0 (build, archive, guard refusals, older upgrade, 36 classes, REST app, parity 94/94). Containers `iris-mcp-throwaway-4e93ae203ab9` (build) and `-f0d27fec44d5` (install), both removed through the harness; no image pulled.
+- The shared HSCUSTOM IRIS was not touched by this pass; no push was made.
+
+**Residual risk.** The Linux CI `gates` run is the first run of `ci-ipm-archive-tgz.test.ts` against GNU tar's own output (`L` long names, `PaxHeaders` members, the five `--format` spellings); the hand-built archives and the format guard are what hold until then. The live `ipm` job has not run on a Linux runner; its archive phase no longer needs `tar` or `gzip`.

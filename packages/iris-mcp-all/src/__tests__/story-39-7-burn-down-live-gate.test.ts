@@ -26,8 +26,8 @@
  * asserts there are none; `afterAll` removes the namespace, its database files, the fixture class and the temp
  * files, and asserts nothing is left.
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (defaults: localhost:52773,
- * `_SYSTEM`, HSCUSTOM). Writes only the namespace and database `EXECMCPTMP397A` and the HSCUSTOM class
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none defaulted, and
+ * only when `IRIS_REQUIRE_LIVE` arms the run (without it every row skips before any request). Writes only the namespace and database `EXECMCPTMP397A` and the HSCUSTOM class
  * `ExecuteMCPv2.Temp.Story391Fixture`; the dev rows read document names, search and macro metadata in HSCUSTOM, and
  * send one put of a document name with no type, which IRIS refuses and stores nothing. The fixture needs a
  * HealthShare or IRIS for Health instance: `HS.Message.XMLMessage` lives in the HSLIB database. A missing or stale dist, an unresolvable SDK or an unreachable IRIS skips each row with the reason, or fails with
@@ -48,6 +48,7 @@ import {
   headerIds,
   irisTargetFromEnv,
   isIrisReachable,
+  liveArmingSkipReason,
   openAuditedSession,
   openWireSession,
   pollAuditEntries,
@@ -165,7 +166,7 @@ async function docnames(category: string, type: string, filter: string): Promise
 // -- Setup and teardown ------------------------------------------------
 
 beforeAll(async () => {
-  skipReason = staleDistReason(REPO_ROOT, "shared");
+  skipReason = liveArmingSkipReason() ?? staleDistReason(REPO_ROOT, "shared");
   for (const pkg of ["iris-dev-mcp", "iris-admin-mcp", "iris-interop-mcp"]) skipReason ??= staleDistReason(REPO_ROOT, pkg);
   if (!skipReason) {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);

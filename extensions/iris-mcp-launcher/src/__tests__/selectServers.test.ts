@@ -850,7 +850,7 @@ describe("Rule #19 back-compat — selectServers.ts has zero effect on the 31.4 
 
     const planned = await provider.providePlannedDefinitions();
     expect(planned).toEqual([
-      { label: "IRIS Dev Tools — prod", command: "npx", args: ["-y", "@iris-mcp/dev"] },
+      { label: "IRIS Dev Tools — prod", command: "npx", args: ["-y", "@iris-mcp/dev@1"] },
     ]);
 
     // Code review (Story 31.5): this was five spot-checks

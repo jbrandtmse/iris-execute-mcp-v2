@@ -2,8 +2,9 @@
  * Integration tests for iris-ops-mcp tools against a real IRIS instance.
  *
  * These tests exercise every operations and monitoring tool end-to-end via
- * the custom ExecuteMCPv2 REST service. They are skipped automatically when
- * IRIS is not reachable (see integration-setup.ts).
+ * the custom ExecuteMCPv2 REST service. They run only when armed
+ * (`IRIS_REQUIRE_LIVE` plus the five `IRIS_*` target variables) and IRIS is
+ * reachable, and skip otherwise (see integration-setup.ts).
  *
  * Read-only tools verify response structure and key fields.
  * The task lifecycle test creates a test task, verifies it, runs it,

@@ -234,9 +234,12 @@ export function goldenLabels(pkg) {
  * rejects the pending request.
  *
  * @param {object} options
- * @param {string} options.entry - Absolute path of the built server's `index.js`.
+ * @param {string} options.entry - Absolute path of the built server's `index.js`, run with the current Node. Ignored when `command` is given.
  * @param {Record<string, string>} options.env - The complete child environment.
  * @param {number} [options.timeoutMs] - Milliseconds one request may take.
+ * @param {string} [options.command] - A program to start instead of Node on `entry` (an installed bin through `npx`, for instance).
+ * @param {string[]} [options.args] - The arguments of `command`.
+ * @param {string} [options.cwd] - The working directory of `command`; the current one when omitted.
  * @returns {{ request: (method: string, params?: object) => Promise<{ line: string, message: any }>,
  *   requestFrame: (fields: { method: string, params?: unknown }) => Promise<{ line: string, message: any }>,
  *   notify: (method: string, params?: object) => void,
@@ -252,8 +255,11 @@ export function goldenLabels(pkg) {
  *   `close`, or once `exit` resolves). `endInput` closes the server's stdin, as a client does when it is done; `exit`
  *   resolves with how the process ended, whenever it does.
  */
-export function openRawWire({ entry, env, timeoutMs = REQUEST_TIMEOUT_MS }) {
-  const child = spawn(process.execPath, [entry], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+export function openRawWire({ entry, env, timeoutMs = REQUEST_TIMEOUT_MS, command, args = [], cwd }) {
+  const child =
+    command === undefined
+      ? spawn(process.execPath, [entry], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+      : spawn(command, args, { env, cwd, stdio: ['pipe', 'pipe', 'pipe'] });
   const waiting = new Map();
   let buffer = '';
   let stderr = '';

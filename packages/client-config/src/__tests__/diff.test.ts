@@ -45,15 +45,24 @@ import {
 } from "./helpers.js";
 
 const PKG_BY_SERVER: Record<CanonicalServerName, string> = {
-  "iris-dev-mcp": "@iris-mcp/dev",
-  "iris-admin-mcp": "@iris-mcp/admin",
-  "iris-ops-mcp": "@iris-mcp/ops",
-  "iris-interop-mcp": "@iris-mcp/interop",
-  "iris-data-mcp": "@iris-mcp/data",
+  "iris-dev-mcp": "@iris-mcp/dev@1",
+  "iris-admin-mcp": "@iris-mcp/admin@1",
+  "iris-ops-mcp": "@iris-mcp/ops@1",
+  "iris-interop-mcp": "@iris-mcp/interop@1",
+  "iris-data-mcp": "@iris-mcp/data@1",
 };
 
 function canonicalEntry(name: CanonicalServerName): CanonicalEntry {
   return { name, command: "npx", args: ["-y", PKG_BY_SERVER[name]], env: { IRIS_NAMESPACE: "HSCUSTOM" } };
+}
+
+/**
+ * The entry as every manager before the `@1` pin wrote it. The legacy-input
+ * fixtures (`codex/config.toml` and its siblings) model a user config that
+ * still holds this form.
+ */
+function legacyUnpinnedEntry(name: CanonicalServerName): CanonicalEntry {
+  return { ...canonicalEntry(name), args: ["-y", PKG_BY_SERVER[name].replace(/@1$/, "")] };
 }
 
 function adapterOf(id: string): ClientAdapter {
@@ -314,7 +323,7 @@ describe("JSON/JSONC edits (jsonc-parser modify — the 33.1 apply set)", () => 
     const adapter = adapterOf("zed");
     const shaped = renderNativeEntry(adapter, canonicalEntry("iris-admin-mcp"));
     expect(shaped).toEqual({
-      command: { path: "npx", args: ["-y", "@iris-mcp/admin"], env: { IRIS_NAMESPACE: "HSCUSTOM" } },
+      command: { path: "npx", args: ["-y", "@iris-mcp/admin@1"], env: { IRIS_NAMESPACE: "HSCUSTOM" } },
     });
     const result = expectOk(
       diff(readFixture("zed/settings.json"), canonicalEntry("iris-admin-mcp"), adapter, "user", "apply"),
@@ -322,6 +331,27 @@ describe("JSON/JSONC edits (jsonc-parser modify — the 33.1 apply set)", () => 
     const after = applyEdits(readFixture("zed/settings.json"), (result.native as JsoncNativeEdit).edits);
     const parsed = readConfigEntries(adapter, after);
     if (parsed.ok) expect(parsed.entries["iris-admin-mcp"]).toEqual(shaped);
+  });
+
+  it("Zed re-apply over the legacy fixture's unpinned entry pins the owned command.args; every byte before and after the entry is identical (AD-30, Story 42.1)", () => {
+    const adapter = adapterOf("zed");
+    const content = readFixture("zed/settings.json");
+    expect(content).toContain('"args": ["-y", "@iris-mcp/dev"]'); // npx-pin-exempt: the unpinned entry this test upgrades
+    const ownedStart = '    "iris-dev-mcp": {';
+    const foreignStart = '    "linear": {';
+    expect(content.indexOf(ownedStart)).toBeGreaterThan(-1);
+    expect(content.indexOf(foreignStart)).toBeGreaterThan(-1);
+    const result = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "apply"));
+    expect(result.mechanism).toBe("update");
+    const after = applyEdits(content, (result.native as JsoncNativeEdit).edits);
+    const parsed = readConfigEntries(adapter, after);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const command = (parsed.entries["iris-dev-mcp"] as { command: { path: string; args: string[] } }).command;
+    expect(command.path).toBe("npx");
+    expect(command.args).toEqual(["-y", "@iris-mcp/dev@1"]);
+    expect(after.slice(0, after.indexOf(ownedStart))).toBe(content.slice(0, content.indexOf(ownedStart)));
+    expect(after.slice(after.indexOf(foreignStart))).toBe(content.slice(content.indexOf(foreignStart)));
   });
 });
 
@@ -348,7 +378,7 @@ describe("TOML section splices (Codex — owned tables only)", () => {
   it("apply on an existing entry renders merge-update span surgery (33.5.2), executable and valid", () => {
     const adapter = adapterOf("codex");
     const content = readFixture("codex/config.toml");
-    const result = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "apply"));
+    const result = expectOk(diff(content, legacyUnpinnedEntry("iris-dev-mcp"), adapter, "user", "apply"));
     expect(result.mechanism).toBe("update");
     const native = result.native as TomlNativeEdit;
     expect(native.op).toBe("merge-update");
@@ -361,8 +391,23 @@ describe("TOML section splices (Codex — owned tables only)", () => {
     const parsed = parseToml(after) as Record<string, Record<string, Record<string, unknown>>>;
     expect(parsed["mcp_servers"]?.["iris-dev-mcp"]).toBeDefined();
     expect(parsed["mcp_servers"]?.["context7"]).toBeDefined();
-    // The fixture's canonical entry matches the file: a byte-preserving no-op.
+    // The fixture holds the entry as the unpinned managers wrote it: re-applying that form is a byte-preserving no-op.
     expect(after).toBe(content);
+  });
+
+  it("re-apply of the pinned entry over a previously applied unpinned entry rewrites only the owned args line (AD-30, Story 42.1)", () => {
+    const adapter = adapterOf("codex");
+    const content = readFixture("codex/config.toml");
+    const result = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "apply"));
+    expect(result.mechanism).toBe("update");
+    const native = result.native as TomlNativeEdit;
+    expect(native.op).toBe("merge-update");
+    expect(native.spans ?? []).toHaveLength(1);
+    const legacyArgsLine = 'args = ["-y", "@iris-mcp/dev"]'; // npx-pin-exempt: the unpinned line this test upgrades
+    expect(content).toContain(legacyArgsLine);
+    // Every other byte, the foreign context7 entry and the trusted-project table included, is untouched, by the
+    // production executor itself.
+    expect(executeNativeEdit(content, native)).toBe(content.replace(legacyArgsLine, 'args = ["-y", "@iris-mcp/dev@1"]'));
   });
 
   it("remove renders a remove-region covering ONLY the owned tables (env sub-table included)", () => {
@@ -411,7 +456,7 @@ describe("TOML section splices (Codex — owned tables only)", () => {
     const content = [
       "[mcp_servers.iris-dev-mcp]",
       'command = "npx"',
-      'args = ["-y", "@iris-mcp/dev"]',
+      'args = ["-y", "@iris-mcp/dev@1"]',
       "enabled = true",
       "",
       "[mcp_servers.context7]",
@@ -440,7 +485,7 @@ describe("TOML section splices (Codex — owned tables only)", () => {
     const content = [
       "[mcp_servers.iris-dev-mcp]",
       'command = "npx"',
-      'args = ["-y", "@iris-mcp/dev"]',
+      'args = ["-y", "@iris-mcp/dev@1"]',
       "",
       "[mcp_servers.iris-dev-mcp.env]",
       'enabled = "true"',
@@ -482,7 +527,7 @@ describe("TOML section splices (Codex — owned tables only)", () => {
     const block = serializeTomlEntry(adapterOf("codex"), canonicalEntry("iris-data-mcp"));
     expect(block).toContain("[mcp_servers.iris-data-mcp]");
     expect(block).toContain('command = "npx"');
-    expect(block).toContain('args = ["-y", "@iris-mcp/data"]');
+    expect(block).toContain('args = ["-y", "@iris-mcp/data@1"]');
     expect(block).toContain("[mcp_servers.iris-data-mcp.env]");
     expect(block).toContain('IRIS_NAMESPACE = "HSCUSTOM"');
     // The block itself is valid TOML.
@@ -500,7 +545,7 @@ describe("TOML trailing-comment headers + header-less forms (33.0 review finding
   const commented = [
     "[mcp_servers.iris-dev-mcp] # managed by iris-mcp",
     'command = "npx"',
-    'args = ["-y", "@iris-mcp/dev"]',
+    'args = ["-y", "@iris-mcp/dev@1"]',
     "",
     "# context7 keeps its own comment.",
     "[mcp_servers.context7] # foreign, never touched",
@@ -556,7 +601,7 @@ describe("TOML trailing-comment headers + header-less forms (33.0 review finding
     // Legal TOML: defines mcp_servers.iris-dev-mcp WITHOUT a table header.
     const dotted = [
       'mcp_servers.iris-dev-mcp.command = "npx"',
-      'mcp_servers.iris-dev-mcp.args = ["-y", "@iris-mcp/dev"]',
+      'mcp_servers.iris-dev-mcp.args = ["-y", "@iris-mcp/dev@1"]',
       "",
       "[mcp_servers.context7]",
       'command = "npx"',
@@ -616,6 +661,24 @@ describe("YAML CST ops (Goose)", () => {
     if (parsed.ok) {
       expect(parsed.entries["iris-data-mcp"]?.["enabled"]).toBe(false);
     }
+  });
+
+  it("re-apply over the legacy fixture's unpinned entry pins the owned args; the bytes before and after the entry are identical (AD-30, Story 42.1)", () => {
+    const adapter = adapterOf("goose");
+    const content = readFixture("goose/config.yaml");
+    const legacy = (parseDocument(content).toJS() as { extensions: Record<string, Record<string, unknown>> }).extensions["iris-data-mcp"] as Record<string, unknown>;
+    expect(legacy.args).toEqual(["-y", "@iris-mcp/data"]); // npx-pin-exempt: the unpinned entry this test upgrades
+    const ownedStart = "  # The iris-mcp data server, managed by iris-mcp.";
+    const foreignStart = "  # Present but disabled via the native flag.";
+    expect(content.indexOf(ownedStart)).toBeGreaterThan(-1);
+    expect(content.indexOf(foreignStart)).toBeGreaterThan(-1);
+    const result = expectOk(diff(content, canonicalEntry("iris-data-mcp"), adapter, "user", "apply"));
+    expect(result.mechanism).toBe("update");
+    const after = executeNativeEdit(content, result.native);
+    const entry = (parseDocument(after).toJS() as { extensions: Record<string, Record<string, unknown>> }).extensions["iris-data-mcp"] as Record<string, unknown>;
+    expect(entry.args).toEqual(["-y", "@iris-mcp/data@1"]);
+    expect(after.slice(0, after.indexOf(ownedStart))).toBe(content.slice(0, content.indexOf(ownedStart)));
+    expect(after.slice(after.indexOf(foreignStart))).toBe(content.slice(content.indexOf(foreignStart)));
   });
 
   it("enable on an already-enabled entry is already-in-state", () => {
@@ -754,7 +817,7 @@ describe("apply-update preservation (AC 33.5.2, lead probe P2)", () => {
       2,
     );
     const result = expectOk(
-      diff(content, { name: "iris-dev-mcp", command: "npx", args: ["-y", "@iris-mcp/dev"], env: { IRIS_PASSWORD: "new" } }, adapter, "user", "apply"),
+      diff(content, { name: "iris-dev-mcp", command: "npx", args: ["-y", "@iris-mcp/dev@1"], env: { IRIS_PASSWORD: "new" } }, adapter, "user", "apply"),
     );
     expect(result.mechanism).toBe("update");
     // The confirm text surfaces the preservation contract.
@@ -763,7 +826,7 @@ describe("apply-update preservation (AC 33.5.2, lead probe P2)", () => {
     const parsed = JSON.parse(after) as { mcpServers: Record<string, Record<string, unknown>> };
     const entry = parsed.mcpServers["iris-dev-mcp"] as Record<string, unknown>;
     expect(entry.command).toBe("npx"); // manager-owned overwritten
-    expect(entry.args).toEqual(["-y", "@iris-mcp/dev"]);
+    expect(entry.args).toEqual(["-y", "@iris-mcp/dev@1"]);
     expect(entry.disabled).toBe(true); // enablement NEVER changes on apply
     expect(entry.autoApprove).toEqual(["iris_server_info"]); // unmanaged preserved
     expect(entry.timeout).toBe(45);
@@ -800,7 +863,7 @@ describe("apply-update preservation (AC 33.5.2, lead probe P2)", () => {
       "",
     ].join("\n");
     const result = expectOk(
-      diff(content, { name: "iris-dev-mcp", command: "npx", args: ["-y", "@iris-mcp/dev"], env: { IRIS_NAMESPACE: "HSCUSTOM" } }, adapter, "user", "apply"),
+      diff(content, { name: "iris-dev-mcp", command: "npx", args: ["-y", "@iris-mcp/dev@1"], env: { IRIS_NAMESPACE: "HSCUSTOM" } }, adapter, "user", "apply"),
     );
     expect(result.mechanism).toBe("update");
     const native = result.native as TomlNativeEdit;
@@ -812,7 +875,7 @@ describe("apply-update preservation (AC 33.5.2, lead probe P2)", () => {
     expect(lines).toContain("# tuned for the slow VPN"); // interior comment preserved
     expect(lines).toContain("[mcp_servers.iris-dev-mcp] # managed"); // header comment preserved
     expect(lines).toContain('command = "npx"'); // manager-owned overwritten
-    expect(lines).toContain('args = ["-y", "@iris-mcp/dev"]'); // multiline args collapsed to the fresh render
+    expect(lines).toContain('args = ["-y", "@iris-mcp/dev@1"]'); // multiline args collapsed to the fresh render
     const envStart = lines.indexOf("[mcp_servers.iris-dev-mcp.env]");
     expect(envStart).toBeGreaterThan(-1);
     expect(lines[envStart + 1]).toBe('EXTRA_KEY = "keep-me"'); // existing env extras first
@@ -862,12 +925,12 @@ describe("apply-update preservation (AC 33.5.2, lead probe P2)", () => {
       "",
     ].join("\n");
     const result = expectOk(
-      diff(content, { name: "iris-dev-mcp", command: "npx", args: ["-y", "@iris-mcp/dev"] }, adapter, "user", "apply"),
+      diff(content, { name: "iris-dev-mcp", command: "npx", args: ["-y", "@iris-mcp/dev@1"] }, adapter, "user", "apply"),
     );
     const after = executeNativeEdit(content, result.native);
     const lines = after.split("\n");
     expect(lines).toContain('command = "npx" # pinned by ops');
-    expect(lines).toContain('args = ["-y", "@iris-mcp/dev"] # do not touch the flags');
+    expect(lines).toContain('args = ["-y", "@iris-mcp/dev@1"] # do not touch the flags');
   });
 
   it("33-5-R2 leg (b): per-key env spans — a SIBLING key's line, its OWN quoting style, and its trailing/interior comments survive byte-exact even though another key in the SAME table changes", () => {
@@ -915,7 +978,7 @@ describe("apply-update preservation (AC 33.5.2, lead probe P2)", () => {
       "    timeout: 90",
       "",
     ].join("\n");
-    const result = expectOk(diff(content, { name: "iris-data-mcp", command: "npx", args: ["-y", "@iris-mcp/data"] }, adapter, "user", "apply"));
+    const result = expectOk(diff(content, { name: "iris-data-mcp", command: "npx", args: ["-y", "@iris-mcp/data@1"] }, adapter, "user", "apply"));
     expect(result.mechanism).toBe("update");
     const after = executeNativeEdit(content, result.native);
     const doc = parseDocument(after);
@@ -933,7 +996,7 @@ describe("apply-update preservation (AC 33.5.2, lead probe P2)", () => {
     const content = [
       "[mcp_servers.iris-dev-mcp]",
       'command = "npx" # pinned to the corporate registry mirror',
-      'args = ["-y", "@iris-mcp/dev"] # do not reorder',
+      'args = ["-y", "@iris-mcp/dev@1"] # do not reorder',
       "enabled = false",
       "",
       "[mcp_servers.iris-dev-mcp.env]",
@@ -942,7 +1005,7 @@ describe("apply-update preservation (AC 33.5.2, lead probe P2)", () => {
       "",
     ].join("\n");
     const result = expectOk(
-      diff(content, { name: "iris-dev-mcp", command: "npx", args: ["-y", "@iris-mcp/dev"], env: { IRIS_NAMESPACE: "HSCUSTOM" } }, adapter, "user", "apply"),
+      diff(content, { name: "iris-dev-mcp", command: "npx", args: ["-y", "@iris-mcp/dev@1"], env: { IRIS_NAMESPACE: "HSCUSTOM" } }, adapter, "user", "apply"),
     );
     expect(result.mechanism).toBe("update");
     const native = result.native as TomlNativeEdit;

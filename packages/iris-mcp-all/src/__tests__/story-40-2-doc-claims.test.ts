@@ -187,6 +187,8 @@ describe("Story 40.2: tool_support.md", () => {
 });
 
 describe("Story 40.2: the CHANGELOG section and the changeset", () => {
+  // `changeset version` consumes (deletes) the file, so its checks run only while it exists.
+  const changesetPresent = existsSync(path.join(REPO_ROOT, ".changeset/story-40-2-coverage-reports-and-targets.md"));
   const sections = sectionsOf(read("CHANGELOG.md"));
   const section = sections.find((candidate) => CHANGELOG_TITLE.test(candidate.split("\n")[0] ?? "")) ?? "";
 
@@ -230,7 +232,7 @@ describe("Story 40.2: the CHANGELOG section and the changeset", () => {
     expect(text).toContain("DW-596 is closed with evidence");
   });
 
-  it("the changeset bumps @iris-mcp/dev by a minor and @iris-mcp/shared by a patch, and records the default state and the bootstrap move", () => {
+  it.skipIf(!changesetPresent)("the changeset bumps @iris-mcp/dev by a minor and @iris-mcp/shared by a patch, and records the default state and the bootstrap move", () => {
     const dir = path.join(REPO_ROOT, ".changeset");
     expect(existsSync(dir)).toBe(true);
     const file = readdirSync(dir).find((name) => name === "story-40-2-coverage-reports-and-targets.md");
@@ -247,7 +249,7 @@ describe("Story 40.2: the CHANGELOG section and the changeset", () => {
     const texts = [
       section,
       lineStarting(toolSupport, "> **Story 40.2"),
-      read(".changeset/story-40-2-coverage-reports-and-targets.md"),
+      ...(changesetPresent ? [read(".changeset/story-40-2-coverage-reports-and-targets.md")] : []),
       read("scripts/lib/cobertura-dtd.mjs"),
     ];
     for (const text of texts) {

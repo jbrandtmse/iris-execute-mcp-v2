@@ -5683,7 +5683,7 @@ This is the `/epic-cycle` burn-down story, chartered on 2026-10-20 at Epic 41's 
 
 | Account | Needed by |
 |---|---|
-| npm account with 2FA and the `iris-mcp` organization (D1) | 42.5. Confirm or create it before 42.1, because the scope is baked into every pin |
+| npm account with 2FA and the `iris-mcp` organization (D1) | 42.5. Confirm or create it before 42.1, because the scope is baked into every pin. **Done:** the Lead reserved the `iris-mcp` organization on 2026-10-15; the `@iris-mcp` scope stays |
 | VS Code Marketplace publisher | 42.7 |
 | Open VSX namespace | 42.7 |
 | InterSystems Developer Community account | 42.8 |
@@ -5696,7 +5696,7 @@ This is the `/epic-cycle` burn-down story, chartered on 2026-10-20 at Epic 41's 
 - There is no beta tag (D2).
 - The pin is major-only: `@1` (D3).
 - The floor is Node 22+ (D4).
-- **The IRIS support claim stays 2023.1+, labelled best effort** below the oldest image CI can test (Project Lead decision, 2026-10-15). InterSystems' own minimum supported version is 2024.1 (since 2026-07-01), and the oldest Docker Hub community image is 2024.3. Story 42.3 tests the oldest image it can pull, and Story 42.9's README states the claim and the tested range.
+- **The IRIS support claim stays 2023.1+, labelled best effort** below the oldest image CI can test (Project Lead decision, 2026-10-15). InterSystems' own minimum supported version is 2024.1 (since 2026-07-01), and the oldest Docker Hub community image is 2024.3 *(2026-10-22, decision #65: Community license keys expire, so the oldest tag that still starts is 2025.3, whose key expires 2026-11-13)*. Story 42.3 tests the oldest image it can pull, and Story 42.9's README states the claim and the tested range.
 
 **Out of scope:**
 
@@ -5709,7 +5709,7 @@ This is the `/epic-cycle` burn-down story, chartered on 2026-10-20 at Epic 41's 
 The decision record's fix table, except DW-508 (42.2) and IPM (42.4). Ledger: DW-394, DW-31, DW-506, DW-260.
 
 - **AC 42.1.1** — Node floor:
-  - `engines.node` is `>=22` in the root and in every publishable `package.json`;
+  - `engines.node` is `>=22.17.0` in the root and in every publishable `package.json` *(amended 2026-10-21, wave-8 decision #35: `fs.globSync` is stable from 22.17.0; the VS Code extension declares no `engines.node`)*;
   - every mention of Node 18 or 20 in docs is listed with a verdict and fixed (Rule #56);
   - a test asserts that every manifest declares the floor.
 - **AC 42.1.2** — `@iris-mcp/all` (`"files": []`, no `bin`): probe what a global install of its tarball actually links. Then either add a real launcher or correct the README's `npm i -g @iris-mcp/all` claim. The choice and the evidence are recorded.
@@ -5728,16 +5728,13 @@ The decision record's fix table, except DW-508 (42.2) and IPM (42.4). Ledger: DW
   - the plugin's server entries (42.8).
 
   A test searches the extension, `client-config` and the docs for an unpinned `@iris-mcp/` spec. The other half of DW-260, the launcher's missing neutral `cwd` (a local `node_modules` can shadow the package), is probed with a recorded verdict and fixed if it is real. Certification fixtures and docs are updated.
-  - Before `1.0.0`, also raise the SDK floor out of the high advisory range (`>=1.31.0` on the v1 line until Epic 43 replaces it) and refresh the lockfile. `@types/node` is pinned to the floor major, so code cannot type-check against APIs that don't exist on Node 22.
+  - ~~Before `1.0.0`, also raise the SDK floor out of the high advisory range (`>=1.31.0` on the v1 line until Epic 43 replaces it) and refresh the lockfile.~~ **Not applicable** (wave-8 decision #33, 2026-10-21): Epic 43 removed SDK v1, and `@modelcontextprotocol/server` / `client` are pinned exactly at `2.3.1` (spine AD-32); the remaining SDK advisory follow-up is DW-637. Still in scope: `@types/node` is pinned to the floor major, so code cannot type-check against APIs that don't exist on Node 22.
 - **AC 42.1.7** — The documented `npx … @iris-mcp/client-config iris-mcp-clients` command (`packages/client-config/README.md:17`) is corrected. The correct invocation of a scoped package with a differently named `bin` is probed, and every documented instance is fixed (Rule #56).
 - **AC 42.1.8** — The `npm pack --dry-run` file list for each package is recorded in the story record.
-- DW-560: correct the existing-tool annotation divergences before 1.0. `iris_sql_execute`, `iris_execute_command` and `iris_doc_put` get `destructiveHint: true`, because each can delete or overwrite state. This is a sanctioned AD-15 hint correction (orchestrator decision #18, Epic 38 decision sheet, 2026-10-16). Rule #44's cross-check and the annotation sweeps move with it, and the CHANGELOG records it. (ledger; routed by merge_gate 2026-10-16)
+- **Moved to Story 42.10** (wave-8 decision #34, 42.1 spec gate 2026-10-21): DW-560, DW-662, DW-652 and DW-654. All four change wire or audit bytes through the frozen-goldens machinery, and DW-652 alone is feature-sized.
 - DW-628 (evidence for AC 42.1.7): `clients-cli.ts:14` passes `process.argv.slice(2)` to `runCli`, which takes the first argument as the command. So `npx -y @iris-mcp/client-config iris-mcp-clients <command>` fails as an unknown command once the package is published, and it has no `@1` pin. The form appears at `packages/client-config/README.md:17`, `docs/client-config/README.md:5` and `docs/client-config/{claude-code,claude-desktop,cursor}.md:4`, and `certification-docs.test.ts:88` pins it. (ledger; routed by harvest 2026-10-20)
 - DW-630: `packages/client-config/package.json`'s `description` still reads "read-only foundation; writes arrive in Epic 33 Story 33.1". Rewrite it with the other `package.json` metadata fixes (DW-31). (ledger; routed by harvest 2026-10-20)
 - DW-637: `@modelcontextprotocol/server` 2.3.1 bundles fast-uri 3.1.0, which has 9 published advisories (8 high), all fixed in 3.1.8. Story 43.3 recorded them as unreachable (our schema is a constant, and the bundled validator never runs) and added a tripwire. Before 1.0 publishes, check whether an SDK release pins fast-uri ≥ 3.1.8 (upstream typescript-sdk#2966 / PR #2973). If one does, bump the exact pin and re-run the epic-43 wire goldens. (ledger; routed at the Story 43.3 spec gate 2026-10-20, wave-8 decision #19)
-- DW-662: the `iris_message_resend` description, its `maxMessages` schema text and `packages/iris-interop-mcp/README.md:302` say that executing needs both `dryRun: false` and `confirm: true` or the call is refused, and that an over-cap count is refused. In fact `MessageResend.cls` refuses only when `dryRun` is false, and previews when `dryRun` is omitted. Correct it as a sanctioned AD-15 tool-text fix together with DW-560. It needs one Frozen-goldens ledger entry per changed byte; that is a replace, so its sanction names the correction. Regenerate the tools-list snapshot. (ledger; routed by harvest 2026-10-21)
-- DW-652 (wave-8 decision #30): the Storage guard of Story 38.4 covers only `iris_doc_put` and `iris_doc_edit`. Extend it to `iris_doc_load`, the `iris_doc_xml_export` import, and `iris_env_promote`'s document writes (`env-promote.ts:869`, `?ignoreConflict=1`), which today can drop a Storage definition with no flag. Pin a refusal per path, and keep it a sanctioned AD-15 change named in the CHANGELOG. (ledger; routed by merge_gate 2026-10-21)
-- DW-654 (wave-8 decision #31): audit entries for `%SYS`-scoped tools record the profile's default namespace (for example `HSCUSTOM`), not `%SYS`. Record the effective namespace for those handlers (AD-19), and pin it. (ledger; routed by merge_gate 2026-10-21)
 
 ### Story 42.2: Bootstrap Downgrade Guard
 
@@ -5752,6 +5749,8 @@ DW-508, HIGH. A dedicated story; it must land before 42.6 publishes.
   - an older deployment is upgraded.
 
   Proven red by reverting to equality comparison.
+
+  *(Amended 2026-10-21 at the 42.2 spec gate, wave-8 decision #49.)* No namespace of the shared instance can isolate this: the `%ALL` mapping sends the `ExecuteMCPv2` package to HSCUSTOM. The check runs in a throwaway container instead. Story 42.2 writes the gate and `scripts/throwaway-iris.mjs` and proves the guard hermetically against a fake Atelier, without running docker on the development machine (its agent rules forbid docker commands). Story 42.3's CI runs the gate live (DW-672).
 - DW-518: the default-suite live gate `epic37-default-outage-gate` deploys the bootstrap to its target on first touch. Under this story's version-ordered guard, an older-sequenced branch must not redeploy over a newer deployment. Verify it, and record the gate's write footprint. (ledger; routed by x0 2026-10-15)
 - DW-627: the default `@iris-mcp/all` sweep reaches a local IRIS. The live gates default to `localhost:52773` and `HSCUSTOM`, and run their legs whenever that instance answers, so a contributor's plain `pnpm test` touches their instance. This is the same class as DW-518. Gate every live leg on an explicit opt-in (`IRIS_REQUIRE_LIVE`, or an `IRIS_HOST` the caller set), keeping the armed lead and CI runs, and pin that an unset environment runs no leg. (ledger; routed by harvest 2026-10-19)
 
@@ -5784,6 +5783,11 @@ DW-443. A secret-free `.github/workflows/ci.yml`.
 - **AC 42.3.5** — DW-443: the publish-time gates also run at a point the tarball path actually reaches (`prepack` and/or CI as the gate), and they are proven red on the tarball path specifically (Rule #59).
 - **AC 42.3.6** — Each self-test and gate is broken once in a throwaway branch and the run goes red. The run URLs are recorded.
 
+  *(Amended 2026-10-22 at the 42.3 spec gate, wave-8 decisions #56 and #59.)* The armed live suites run on a seeded `irishealth-community:2026.2` throwaway in `HSCUSTOM`, because the gates were written against IRIS for Health and need `HSCUSTOM` and `HSLIB`; plain `iris-community` runs the bootstrap guard on 2026.2 and on the oldest pullable tag. AC 42.3.6 breaks each self-test and each check this story adds or first wires, on 7 throwaway branches; checks that already existed keep their owning stories' mutation evidence, and the step-equality self-test proves none of them can be dropped silently.
+- DW-672 (from the 42.2 spec gate, wave-8 decision #49): run Story 42.2's throwaway bootstrap-guard live check in CI. The throwaway job extends `scripts/throwaway-iris.mjs` (Rule 2) and runs `pnpm live:bootstrap-guard` armed with `IRIS_THROWAWAY`; the newer, foreign and DW-518 legs leave every class byte-identical and the older and legacy legs upgrade. Prove it red once by reverting the probe to equality (AC 42.3.6) and record the run URL. This is the live proof of DW-508 (Rule #48). (ledger; routed by spec_gate 2026-10-21)
+- DW-676: an armed CI run must not go green by skipping. Today armed integration-setup files and the launcher's two live files skip when IRIS does not answer, the armed side of the migrated family C/D/E files has no default-suite test, and the launcher's arming guard runs only under `npm --prefix`. Make CI fail an armed run that skipped a leg, run the launcher guard, and prove it red once (Rule #59). Also decide whether CI runs the five process gates that arm on `IRIS_REQUIRE_LIVE` but sit on no roster (credentials-cli, governance-file, host-guard, server-manager-precedence, server-manager-process). (ledger; routed by harvest 2026-10-21)
+- DW-666: `pnpm --filter @iris-mcp/shared lint` warns about an unused `eslint-disable` directive for `@typescript-eslint/no-dynamic-delete` (`packages/shared/src/cli/governance.ts:935`). Remove it when lint becomes a CI gate, so the gate carries no standing warning. (ledger; routed by harvest 2026-10-21)
+
 ### Story 42.4: IPM Package Revival
 
 DW-34, D6.
@@ -5797,6 +5801,8 @@ DW-34, D6.
   It runs on both `iris-community` and `irishealth-community` (edition matrix).
 - **AC 42.4.3** — The bootstrap's `zpm "install iris-execute-mcp-v2"` fallback message (`bootstrap.ts:95-96`) is made accurate for the published package.
 - **AC 42.4.4** — Publishing to the IPM registry happens in 42.5's release workflow; the Open Exchange listing is in 42.8.
+- DW-674 (wave-8 decision #53): implement AD-14's Ownership and IPM-upgrade bullets. Bootstrap detects IPM-installed classes and never redeploys them (it reports the mismatch and the `zpm` command), and the IPM install/upgrade path runs the same no-downgrade check IRIS-side, reusing Story 42.2's marker grammar and ordering table, with a parity test between the TypeScript comparator and the IRIS-side one. (ledger; routed by harvest 2026-10-21)
+- DW-686 (wave-8 decisions #65 and #66): Community license keys expire. The CI oldest-image leg uses `iris-community:2025.3`, whose key expires on 2026-11-13; from then every CI run on every branch would go red. Move `OLDEST_IRIS_COMMUNITY_IMAGE` to `2026.1` (`sha256:c57b65b2b454494091e7b3e49f6a53b3335f40adf475bcfcee0866083f35a7c2`, key valid to 2027-03-27) in this story, which edits CI anyway, and keep 2025.3's green guard run of 2026-10-22 on record as support-claim evidence. (ledger; routed by harvest 2026-10-22, re-owned from 42.6 by decision #66)
 
 ### Story 42.5: Release Workflow
 
@@ -5806,6 +5812,10 @@ DW-387, D7. New, with no OcuPilot precedent.
 - **AC 42.5.2** — A root pre-flight release script runs the full gate set once, then publishes in dependency order (client-config, shared, admin, data, dev, interop, ops, all) with npm provenance. It is the only supported publish command (DW-387).
 - **AC 42.5.3** — After npm: the extension to both stores (42.7), then the IPM package (42.4). A failed step stops the rest and reports which channels were published.
 - **AC 42.5.4** — A dry-run mode exercises every step without publishing, and is proven before the first real run.
+- DW-387 (occurrence from 42.1, 2026-10-21): publishing has to go through pnpm. `pnpm publish` runs each package's `prepublishOnly` (`verify-iris-reachable.mjs`, `prepublish-gate.mjs`), which fails in a release environment with no IRIS, and only pnpm applies `publishConfig.exports` and rewrites `workspace:*`; a direct `npm publish` would ship the dev-only exports and unresolvable `workspace:*` dependencies. The release script owns both. (ledger; occurrence added by harvest 2026-10-21)
+- DW-675: armed live gates fail closed unless all five `IRIS_HOST`/`PORT`/`USERNAME`/`PASSWORD`/`NAMESPACE` are set (Story 42.2, decision #51). The release script exports all five for its gate run, and 42.6 publishes through it. (ledger; routed by harvest 2026-10-21)
+- DW-689 (wave-8 decision #72): pick the IPM registry route. The public IPM registry is fed through Open Exchange, which reads `module.xml` from a GitHub repository root; that collides with AD-14 (archives from the generator's stamped output, never from `src/`) and the manifest's `ipm/` location. Probe the current Open Exchange rules and choose (a published-artifact repository or branch, a stamped root manifest, or another channel); 42.8 lists it. (ledger; routed by harvest 2026-10-22)
+- DW-693 (wave-8 decision #74): a recurring CI flake. Raw audit readers can parse a half-written last line (`settledAuditEntries` in `scripts/lib/sdk-handler-golden-core.mjs` and its five consumers, `auditLines` in the shared test helpers, the readers in `story-43-4-qa-probe-copy.test.ts` and `story-39-5-qa-live-gate.test.ts`). And `story-43-4-qa-probe-copy.test.ts` failed three times on 2026-10-22 ("the first process, the probe, got SIGTERM: expected [] to include <pid>"), each time passing on rerun. Move the newline-terminated reader to `scripts/lib`, route every audit reader through it, fix the probe-copy test's process bookkeeping, and prove each fix red once. The release workflow consumes a green CI, so this lands here. (ledger; re-owned from burndown by the lead 2026-10-22)
 
 ### Story 42.6: Tarball Smoke and 1.0.0 Publish
 
@@ -5824,6 +5834,9 @@ DW-47, DW-300, D2.
   - `npx -y @iris-mcp/dev@1` starts in a clean environment;
   - the registry 404s are gone.
 - DW-612: nothing on the publish path runs `gen:pack --check` or `check:provenance`. client-config's `prepublishOnly` runs only `verify-iris-reachable`, so a publish made without the default suite could ship a drifted skills pack or a tarball without `IRIS-MCP-THIRD-PARTY-NOTICES.md`. Add both checks to the publish path and prove them red on that path (Rule #59). (ledger; routed by harvest 2026-10-19 from Story 41.1)
+- DW-665: each package keeps a tracked `CHANGELOG.md` that `changeset version` fills, but `pnpm pack` does not ship it (`files` names only `dist`, plus `skills-pack` for client-config). Decide whether the `1.0.0` tarballs carry their changelog, before publishing. (ledger; routed by harvest 2026-10-21)
+- DW-696 (owner ruling 2026-11-20, wave-8 decision #82: "I agree we should require tagged commits to be on main."): the release's `ci-gate` refuses a `v*` tag whose commit is not reachable from `main` (for example the compare API `main...<sha>` reports `identical` or `behind`), before the environment approval is requested. No maintenance-branch allowance. Pin it, and prove it red once on the real path (Rule #59): a `v*` tag on an unmerged branch commit with a green push run is refused. Lands before the `v1.0.0` tag. (ledger; routed by merge_gate 2026-11-20)
+- DW-637 (residual from 42.1, re-owned at adjudication 2026-10-21): `@modelcontextprotocol/server` 2.3.1 is still the newest release and the upstream fast-uri fix (typescript-sdk PR #2973) is unmerged. Re-check right before the `1.0.0` tag: if a release pins fast-uri 3.1.8 or later, bump the exact pin and re-run the epic-43 wire goldens; otherwise record the check and its date. (ledger; routed by adjudication 2026-10-21)
 
 ### Story 42.7: VS Code Extension Publish
 
@@ -5833,6 +5846,7 @@ DW-389, D5.
 - **AC 42.7.2** — The extension launches `npx -y @iris-mcp/<pkg>@1` (from 42.1). It is published to the VS Code Marketplace and to Open VSX through the release workflow, after npm `1.0.0`.
 - **AC 42.7.3** — Install from each store into a clean VS Code and into an Open VSX client (VSCodium or Cursor). The extension starts the servers, and the result is recorded.
 - DW-532: the launcher's full test suite is red on macOS at its baseline: Windows-only path assertions, an `@intersystems-community/intersystems-servermanager` import the extension's `node_modules` lack, and a 60 s timeout in `clientsActivationFlow`. Make it green on every platform before publishing the extension. (ledger; routed by merge_gate 2026-10-16)
+- DW-663: the extension's two CLI spawns (`clientsEngine.ts:341`, `governanceEngine.ts:324`) pass no `cwd`, so the clients CLI treats the extension host's cwd as the project (`clients.ts:165`): the MCP Clients view's project scope depends on how VS Code was launched, and a project-local 1.x client-config copy can shadow the pinned spec. Pass the workspace folder explicitly or a neutral `cwd`, with a test. (ledger; routed by harvest 2026-10-21)
 
 ### Story 42.8: Claude Code Plugin and Registry Listings
 
@@ -5847,6 +5861,7 @@ DW-389, D5.
 - **AC 42.8.4** — Live check: in a clean Claude Code, add the marketplace, install the plugin, and confirm the five servers connect and the skills list. The result is recorded.
 - **AC 42.8.5** — An MCP Registry listing (the current registry requirements are probed; namespace verification as required), and an Open Exchange listing for the IPM package. Listing needs the Lead's InterSystems Developer Community account.
 - DW-625: the 41.6 installer's `claude-code` route installs the skills even when the plugin is present (AD-28 Duplicates), because no plugin existed to detect. Once the plugin exists, make that route of `iris-mcp-clients skills install` install only the rule when it detects the plugin, with a test for each case. (ledger; routed by harvest 2026-10-19)
+- DW-694: no gate installs the IPM artifact the registry actually serves. Open Exchange tars the packaging repository root as-is (decision #76), while CI's `ipm` job proves IPM's own `package` output. Add a gate that tars the packaging repository root the same way and installs it offline, before the listing goes live. (ledger; routed by harvest 2026-10-22)
 
 ### Story 42.9: Install Docs and Client Re-Certification
 
@@ -5875,6 +5890,33 @@ DW-441.
 - DW-631: `docs/client-config/claude-code.md:306`, `claude-desktop.md:273` and `cursor.md:304` link the broken anchor `#read-only-mode-point-it-at-production-with-one-environment-variable`; the heading's real slug is `#read-only-mode--point-…`. No `docs/client-config/` page points at `iris-mcp-clients skills install` either. Fix both with the AC 42.9.1 rewrite. (ledger; routed by the lead 2026-10-20)
 - DW-632: `qa-41-7-doc-links.test.ts` checks only the 9 documents Story 41.7 changed, and a repo-wide run of its checker finds more broken relative links: `packages/shared/README.md:108`, three `docs/known-bugs-*` links, and the DW-631 anchors. Fix them, and widen the test's document set to every user-facing `*.md`, so it pins them before 1.0. (ledger; routed by the lead 2026-10-20)
 - DW-633: the `IRIS_ACCEPT_LANGUAGE` docs (`README.md:77`, `packages/shared/src/http-client.ts:183-193`) describe a per-worker message-table mechanism the header does not affect, but `%CSP.REST` matches the message language from the header on every request. `tool_support.md:21` also says the `Utils` prefix-stripping handles only English and Arabic and is unmodified. Rewrite both against the per-request model and Story 41.8's 15-language `StripErrorPrefix`. (ledger; routed by harvest 2026-10-20)
+- DW-664: seven READMEs say `IRIS_USERNAME` defaults to `_SYSTEM` (`README.md:73`, `packages/iris-*-mcp/README.md:31`, `packages/iris-mcp-all/README.md:69`), but `config.ts:162-169` treats it as required and the server exits without it. Fix with the AC 42.9.1 README rewrite. (ledger; routed by harvest 2026-10-21)
+- DW-690: `zpm uninstall iris-execute-mcp-v2` leaves the `/api/executemcp/v2` web application and the `%ALL` mapping in place (no Unconfigure counterpart). State the manual cleanup in the IPM uninstall docs, or wire an Unconfigure invoke to `Setup.Uninstall` if it is cheap. (ledger; routed by harvest 2026-10-22)
+
+### Story 42.10: Pre-1.0 Tool-Surface Corrections
+
+Split from Story 42.1 at its spec gate (wave-8 decision #34, 2026-10-21). It runs right after 42.1 and must be done before 42.6 publishes `1.0.0`. Every item changes wire or audit bytes. Each is a sanctioned AD-15 change recorded through the Frozen goldens convention and named in the CHANGELOG.
+
+- **AC 42.10.1** — The Frozen goldens machinery accepts this story's sanctioned changes:
+  - the sanctioned-change ledger and its tests accept entries from stories after 43.4. Today `story-43-4-sanctioned-golden-changes.test.ts` and `story-43-4-qa-sanctioned-wire.test.ts` reject any entry not from 43.4;
+  - a sanctioned entry can *correct* text it replaces, not only append;
+  - the loader reaches the handler golden's `audit` array (DW-654).
+
+  The spine's Frozen goldens convention and AD-4's Known divergences are amended to match (the lead wrote them at the spec gate, decision #40; AD-24 moved to Story 42.11 with DW-652). Every widened check is proven red once.
+- **AC 42.10.2** — The tools-list snapshot is regenerated through its generator, and each byte that moved has exactly one sanctioned entry.
+- DW-560: correct the existing-tool annotation divergences before 1.0. `iris_sql_execute`, `iris_execute_command` and `iris_doc_put` get `destructiveHint: true`, because each can delete or overwrite state. This is a sanctioned AD-15 hint correction (orchestrator decision #18, Epic 38 decision sheet, 2026-10-16). Rule #44's cross-check and the annotation sweeps move with it, and the CHANGELOG records it. Re-check the occurrence's extra candidates with the same test: `iris_ldap_manage`, `iris_x509_manage`, `iris_service_manage`, `iris_doc_load`, `iris_execute_classmethod`, `iris_global_set`, `iris_production_item` and `iris_env_promote`. (ledger; routed by merge_gate 2026-10-16; moved from 42.1 by decision #34)
+- DW-662: the `iris_message_resend` description, its `maxMessages` schema text and `packages/iris-interop-mcp/README.md:302` say that executing needs both `dryRun: false` and `confirm: true` or the call is refused, and that an over-cap count is refused. In fact `MessageResend.cls` refuses only when `dryRun` is false, and previews when `dryRun` is omitted. Correct it as a sanctioned AD-15 tool-text fix together with DW-560, including the `confirm` schema text (`message-resend.ts:447-448`). It needs one Frozen-goldens ledger entry per changed byte; that is a replace, so its sanction names the correction. Regenerate the tools-list snapshot. (ledger; routed by harvest 2026-10-21; moved from 42.1 by decision #34)
+- **Moved to Story 42.11** (wave-8 decision #38, 42.10 spec gate 2026-10-21): DW-652, a feature-sized guard extension on three tools.
+- DW-654 (wave-8 decision #31): audit entries for `%SYS`-scoped tools record the profile's default namespace (for example `HSCUSTOM`), not `%SYS`. Record the effective namespace for those handlers (AD-19), and pin it. `deriveAuditNamespace` (`server-base.ts:2394-2401`) ignores `tool.scope`; there are 25 SYS-scoped tools, all on admin. (ledger; routed by merge_gate 2026-10-21; moved from 42.1 by decision #34)
+
+### Story 42.11: Storage Guard on Every Document Write
+
+Split from Story 42.10 at its spec gate (wave-8 decision #38, 2026-10-21). It runs right after 42.10, consumes 42.10's frozen-goldens machinery, and must be done before 42.6 publishes `1.0.0`. Each path's refusal is a sanctioned AD-15 change named in the CHANGELOG, and spine AD-24 is amended to cover every document-write path.
+
+- **AC 42.11.1** — Every document-write path that can replace an existing class refuses, by default, a write that would drop a Storage definition the deployed class has, and says which definitions and how to override (the Story 38.4 refusal, `storage-guard.ts`): `iris_doc_put` and `iris_doc_edit` (today), plus `iris_doc_load`, the `iris_doc_xml_export` import and `iris_env_promote`'s execute.
+- **AC 42.11.2** — Each new path takes an explicit override (`allowStorageRegeneration`, as on `iris_doc_put`); with it, the write proceeds and the result names the dropped definitions. The governance classification of each tool is unchanged.
+- **AC 42.11.3** — The document-write roster tests list every path as guarded, and a live refusal pin per path runs in a disposable `ExecuteMCPv2.Temp.*` class on the shared instance, removed afterwards. Each pin is proven red by removing that path's guard (Rule #59).
+- DW-652 (wave-8 decision #30): the Storage guard of Story 38.4 covers only `iris_doc_put` and `iris_doc_edit`. Extend it to `iris_doc_load`, the `iris_doc_xml_export` import, and `iris_env_promote`'s document writes, which today can drop a Storage definition with no flag. Pin a refusal per path, and keep it a sanctioned AD-15 change named in the CHANGELOG. The 42.10 plan's handoff (corrects the 42.1 notes): the shared guard is `packages/shared/src/storage-guard.ts` (`storageDefinitionNames` :38, `droppedStorageDefinitions` :50-60, `storageDroppedRefusal` :76-95) with `iris_doc_put`'s 409 flow at `doc.ts:433-474`; `iris_doc_load` needs a per-file guard between the identity check (`load.ts:463`) and the PUT (`:477`), a drop being a `failures[]` entry with `code: STORAGE_DROPPED`; the import (`format.ts:197-271`, one POST for all classes) needs a per-class XML Storage map extending `xmlStorageNames` (`storage-guard.ts:130-158`) and a whole-import refusal before the POST; `iris_env_promote` needs a GET-only preflight before the dialog (the PUT is `env-promote.ts:853-854`, the dialog `:1187-1193`), reusing the checked source text with no TOCTOU, and with the override the dialog's scope names the drops. `iris_env_promote` is post-foundation, not frozen-baseline. Rosters: `document-write-paths.test.ts:72-160`, `story-38-3-qa-doc-claims.test.ts:303-336`, `packages/iris-dev-mcp/README.md:380`, the live gate roster in `packages/iris-dev-mcp/scripts/prepublish-gate.mjs:73-102`. Existing fakes that break: `env-promote-execute.test.ts:919-922`, `load.test.ts:448-456`, `story-38-7-qa-live-gate.test.ts:338-355`. Adjudicate DW-544, DW-545 and DW-546 with it. (ledger; routed by merge_gate 2026-10-21; moved from 42.1 by decision #34 and from 42.10 by decision #38)
 
 ## Epic 43: MCP SDK v2 Migration (added 2026-10-15)
 

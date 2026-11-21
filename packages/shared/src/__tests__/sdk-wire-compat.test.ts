@@ -13,7 +13,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -41,6 +41,7 @@ import type { IrisConnectionConfig } from "../config.js";
 import { logger } from "../logger.js";
 import type { PromptDefinition, ToolDefinition } from "../tool-types.js";
 import { AuditLogger } from "../audit.js";
+import { readAuditEntries } from "../../../../scripts/lib/audit-lines.mjs";
 import { auditLines, callTool, stageDefaultStartup } from "./test-helpers.js";
 import { makeEnvHarness } from "./env-harness.js";
 
@@ -100,6 +101,18 @@ const refinedTool: ToolDefinition = {
   scope: "NS",
   mutates: { start: "read", stop: "read" },
   handler: async () => ({ content: [{ type: "text" as const, text: "refined ok" }] }),
+};
+
+/** A SYS-scoped tool: it always runs in %SYS, whatever its `namespace` argument says (Story 42.10, DW-654). */
+const sysTool: ToolDefinition = {
+  name: "iris_wire_sys",
+  title: "Wire sys",
+  description: "Always runs in %SYS.",
+  inputSchema: z.object({ name: z.string(), namespace: z.string().optional() }),
+  annotations: READ_ANNOTATIONS,
+  scope: "SYS",
+  mutates: "read",
+  handler: async () => ({ content: [{ type: "text" as const, text: "sys ok" }] }),
 };
 
 const writeTool: ToolDefinition = {
@@ -662,6 +675,27 @@ describe("the audit trail (DW-579, AD-19)", () => {
     expect(valid).toMatchObject({ tool: "iris_wire_echo", outcome: "ok", profile: "default", namespace: "HSCUSTOM", paramKeys: ["name"], params: { name: "doc" } });
   });
 
+  it("a SYS-scoped call records %SYS and its namespace argument as targetNamespace whether it ends ok or fails its schema on the wire; an NS call keeps its namespace argument (Story 42.10, DW-654, DW-667)", async () => {
+    const file = join(workDir, "audit.jsonl");
+    process.env.IRIS_AUDIT_LOG = file;
+    process.env.IRIS_AUDIT_LOG_PARAMS = "true";
+    const { client } = await boot({ tools: [echoTool, sysTool] });
+    const invalid = await client.callTool({ name: "iris_wire_sys", arguments: { namespace: "USER", name: 777 } });
+    expect(invalid.isError).toBe(true);
+    await client.callTool({ name: "iris_wire_sys", arguments: { namespace: "USER", name: "doc" } });
+    await client.callTool({ name: "iris_wire_echo", arguments: { namespace: "USER", name: "doc" } });
+
+    const lines = await toolEntries(file, 3);
+    expect(lines.map((entry) => [entry.tool, entry.outcome, entry.namespace, entry.targetNamespace])).toEqual([
+      ["iris_wire_sys", "error", "%SYS", "USER"],
+      ["iris_wire_sys", "ok", "%SYS", "USER"],
+      ["iris_wire_echo", "ok", "USER", undefined],
+    ]);
+    expect(Object.prototype.hasOwnProperty.call(lines[2], "targetNamespace"), "an NS entry has no targetNamespace").toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(lines[0], "params"), "a schema-invalid entry carries no params").toBe(false);
+    expect(lines[1]).toMatchObject({ paramKeys: ["name", "namespace"], params: { name: "doc", namespace: "USER" } });
+  });
+
   it("a call with arguments omitted entirely writes the same single entry, with no key names", async () => {
     const { booted, file } = await bootAudited();
     const result = await booted.client.callTool({ name: "iris_wire_echo" });
@@ -1084,13 +1118,7 @@ describe("Story 43.2: both eras over serveStdio", () => {
       await call("iris_wire_echo", { name: "marker" });
       const deadline = Date.now() + 3000;
       for (;;) {
-        const entries = existsSync(file)
-          ? readFileSync(file, "utf-8")
-              .split("\n")
-              .filter((line) => line.trim().length > 0)
-              .map((line) => JSON.parse(line) as Record<string, unknown>)
-              .filter((entry) => typeof entry.tool === "string")
-          : [];
+        const entries = readAuditEntries(file).filter((entry) => typeof entry.tool === "string");
         const marker = entries.findIndex((entry) => entry.tool === "iris_wire_echo");
         if (marker >= 0) return entries.slice(0, marker);
         if (Date.now() > deadline) throw new Error("the marker entry never reached the audit file");

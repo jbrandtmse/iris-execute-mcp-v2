@@ -27,8 +27,8 @@
  * `ExecuteMCPv2.Temp.Story391Fixture`, the gate's own temporary directory and one synthetic run record, all removed in `afterAll`,
  * which also asserts nothing is left and the monitor is idle.
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (defaults: localhost:52773, `_SYSTEM`, HSCUSTOM). A
- * missing or stale dist, an unresolvable SDK or an unreachable IRIS skips each row with the reason, or fails with "may not be
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none defaulted, and only when
+ * `IRIS_REQUIRE_LIVE` arms the run (without it every row skips before any request). A missing or stale dist, an unresolvable SDK or an unreachable IRIS skips each row with the reason, or fails with "may not be
  * skipped" when `IRIS_REQUIRE_LIVE` is armed (listed in `scripts/prepublish-gate.mjs` `gateTestFiles`).
  */
 
@@ -46,6 +46,7 @@ import {
   fixtureDocumentNames,
   irisTargetFromEnv,
   isIrisReachable,
+  liveArmingSkipReason,
   openWireSession,
   rawIrisRequest,
   resolveSdkEsmDir,
@@ -274,7 +275,7 @@ function withoutGeneratedCovered(source: ClassSourceContent): Omit<ClassSourceCo
 // -- Setup and teardown ------------------------------------------------
 
 beforeAll(async () => {
-  skipReason = staleDistReason(REPO_ROOT, "shared");
+  skipReason = liveArmingSkipReason() ?? staleDistReason(REPO_ROOT, "shared");
   for (const pkg of ["iris-dev-mcp", "iris-admin-mcp", "iris-interop-mcp"]) skipReason ??= staleDistReason(REPO_ROOT, pkg);
   if (!skipReason) {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);

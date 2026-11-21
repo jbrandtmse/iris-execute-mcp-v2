@@ -230,7 +230,7 @@ export const taskRunTool: ToolDefinition = {
       .describe("Task ID to run immediately"),
   }),
   annotations: {
-    destructiveHint: false,
+    destructiveHint: true,
     readOnlyHint: false,
     idempotentHint: false,
     openWorldHint: false,

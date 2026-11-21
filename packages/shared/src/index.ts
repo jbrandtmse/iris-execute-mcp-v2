@@ -47,7 +47,7 @@ export {
 } from "./lines.js";
 export { REFUSAL_CODES, refusalResult } from "./refusals.js";
 export type { RefusalCode, RefusalResult } from "./refusals.js";
-export { contentHash } from "./confirmation.js";
+export { CONFIRMATION_TEXT_LIMIT, contentHash } from "./confirmation.js";
 export {
   DATA_POLICIES,
   DEFAULT_DATA_POLICY,
@@ -85,9 +85,17 @@ export type { Hl7RedactionResult, Hl7SafeHarborField } from "./hl7-redaction.js"
 export {
   isClassDocument,
   storageDefinitionNames,
+  droppedStorageNames,
   droppedStorageDefinitions,
+  xmlClassStorageNames,
+  storageDroppedText,
   storageDroppedRefusal,
+  storageDroppedDetail,
+  storageDrop,
+  describeStorageDrops,
+  storageDropsRefusal,
 } from "./storage-guard.js";
+export type { StorageDroppedDetail, StorageDrop } from "./storage-guard.js";
 export type {
   ConfirmationOutcome,
   ConfirmationRequest,
@@ -119,6 +127,8 @@ export {
   MANUAL_INSTRUCTIONS,
 } from "./bootstrap.js";
 export type { BootstrapResult } from "./bootstrap.js";
+export { classifyDeployedMarker, parseBootstrapMarker } from "./bootstrap-version.js";
+export type { DeployedMarkerClassification, ParsedBootstrapMarker } from "./bootstrap-version.js";
 export { BOOTSTRAP_CLASSES, getBootstrapClasses } from "./bootstrap-classes.js";
 export type { BootstrapClass } from "./bootstrap-classes.js";
 export { resolveTransport } from "./transport.js";

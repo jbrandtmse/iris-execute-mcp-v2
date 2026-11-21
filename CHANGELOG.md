@@ -2,6 +2,484 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [1.0.0] — 2026-11-20 — Story 42.6: Tarball Smoke and 1.0.0 Publish
+
+The first public release. All eight `@iris-mcp/*` packages are at `1.0.0`, one shared version. The release workflow publishes them to npm with
+provenance, and the five servers launch as `npx -y @iris-mcp/<server>@1` on Node `>=22.17.0`. The per-story "Pre-release" sections below are the history up to
+`1.0.0`. This story adds no changeset: the version step consumed all of them, and its own changes are the ones named here. No tool, prompt,
+governance or wire change is made: no tool, action, preset row, annotation, refusal code, product environment variable, REST route or REST
+response is added, removed or changed, the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and the frozen SDK goldens and
+the tools-list snapshot are byte-unchanged.
+
+### Added
+
+- **The version.** `pnpm run version -- --first-release` put all eight packages at `1.0.0` and consumed the pending changesets. `BOOTSTRAP_VERSION`
+  moves from `0.0.2+2.244fe8623c76` to `1.0.0+2.244fe8623c76`; the class content and the sequence are unchanged, and `ipm/module.xml` carries
+  `1.0.0`. Each package's own `CHANGELOG.md` has its `## 1.0.0` section (the generated detail of every change in it).
+- **`CHANGELOG.md` ships in every tarball (DW-665).** Each package lists it in `files`, so the history travels with the exact bytes a user
+  installed, offline.
+- **`node scripts/release.mjs verify --version <x.y.z>` (AC 42.6.3; alias `pnpm release verify`).** A read-only check of the registry after a
+  publish: every package is there at that version with a provenance attestation, and `npx -y @iris-mcp/dev@1` starts in a clean temporary home,
+  npm cache and working directory, against a closed local port, and answers `initialize` with that version. It covers the `@1` major, prints
+  one line per check, and exits 0, 1 or 2. It publishes, deprecates and logs in to nothing.
+- **`node scripts/ci-package-smoke.mjs --keep <dir>` (AC 42.6.1, DW-47).** The package smoke, which keeps the installed project: the eight
+  tarballs are installed into `<dir>` (absent or empty, outside the repository) from `file:` tarballs only, the five servers answer
+  `initialize` and `tools/list` through `npx --no`, and `<dir>/.mcp.json` launches each of them through `npx`, taking the IRIS connection from
+  `IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD` and `IRIS_NAMESPACE`. With no argument the smoke and its output are unchanged.
+
+### Changed
+
+- **The release refuses a tag that is not on `main` (DW-696, decision #82).** `ci-gate` compares `main` with the tagged commit, and a tag run
+  whose commit `main` does not contain (a status other than `identical` or `behind`, or an answer it cannot read) stops before it waits for CI,
+  so no approval is requested. A dry run reports the answer on one line and goes on. There is no maintenance-branch allowance.
+- **`prepare` runs every root check script that CI runs (DW-612).** It now selects each root script whose name has a `check` or `validate` word,
+  so `check:provenance` and `validate:prompts` run on the publish path with the `gen:*:check` scripts; `format:check` stays the one exemption. A
+  test holds that set equal to the `pnpm` entries of CI's root gates.
+- **The MCP SDK is pinned at `2.4.0` (DW-637).** `@modelcontextprotocol/server` and `client` move from `2.3.1`, and the lockfile resolves
+  `server`, `client` and `core` at `2.4.0` alone. `2.4.0` bundles fast-uri `3.1.8`, which fixes the advisories that `2.3.1`'s `3.1.0` carried.
+  The wire is unchanged: every frozen golden is byte-identical. `packages/iris-mcp-all/src/__tests__/fixtures/tools-list-snapshot.json` keeps `2.3.1` in its `sdkVersion` metadata,
+  which its check does not compare.
+- **The README `### Releasing` section** gains the main rule, the merge before the tag, and the `verify` step.
+
+## [Pre-release — 2026-10-22] — Story 42.5: Release Workflow
+
+Story 42.5 adds the release machinery: a workflow that publishes only from a tagged, CI-green commit through an approved protected
+environment, the script that is the only way to publish, the version step, and the security policy. Nothing is published, versioned,
+tagged or released by this story, and it adds no changeset: no package content changes. No tool, action, governance key, preset row,
+annotation, refusal code, product environment variable, REST route or REST response is added, removed or changed, no tool count moves
+(110 package tools, 115 advertised), the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and the frozen SDK goldens
+and the tools-list snapshot are byte-unchanged. `BOOTSTRAP_VERSION` does not move (it stays `0.0.2+2.244fe8623c76`); `classes[]` is
+unchanged (35 classes).
+
+### Added
+
+- **`.github/workflows/release.yml` (AC 42.5.1 to 42.5.4; DW-387, DW-675).** It runs on a `v*` tag and has four jobs. `ci-gate` waits for a green
+  `ci.yml` run on the tagged commit and refuses a tag run unless the `release` environment is protected. `prepare` runs the root checks and then
+  every package's `prepublishOnly` once, armed on a seeded IRIS for Health throwaway, before it packs the eight tarballs (with `pnpm pack`, no
+  lifecycle script), the vsix and the IPM tree. `rehearse` is the dry run: it has no environment, no OIDC permission and no secret. `publish` is
+  behind the approved `release` environment, runs only on a tag push, and uploads the exact rehearsed bytes with npm provenance, in the order
+  client-config, shared, admin, data, dev, interop, ops, all. A push to a `release-dry-run/**` branch, or a manual dispatch, runs every job
+  except `publish`. Only `publish` holds the environment, `id-token: write` and a secret; every action is pinned by commit.
+- **`scripts/release.mjs` (alias `pnpm release`) and `scripts/lib/release-core.mjs`.** `ci-gate`, `prepare` and `publish [--dry-run]`. The
+  publish skips a version that is already on the registry, stops at the first failure, and reports every package and channel as published,
+  already published, failed, not attempted or skipped. The extension and IPM channels are implemented and dry-run, and ship disabled: they are
+  enabled by Stories 42.7 and 42.8. The IPM channel pushes the staged tree to the packaging repository `jbrandtmse/iris-execute-mcp-v2-ipm`
+  (DW-689) and refuses a version the IPM registry already lists. The script's modules that `ci-gate`, `rehearse` and `publish` use import only
+  Node builtins, so those jobs run without `pnpm install`.
+- **`pnpm run version [-- --first-release]` (AD-14).** `scripts/release-version.mjs` runs `changeset version` and then `pnpm gen:bootstrap`,
+  so the embed, its marker and `ipm/module.xml` carry the new version with the sequence and hash unchanged, and prints the `BOOTSTRAP_VERSION`
+  move. `--first-release` copies the 1.0.0 template into `.changeset/` first. It refuses to run as the `npm version` hook.
+- **`SECURITY.md`.** Supported versions (the latest `1.x`), reporting through GitHub private vulnerability reporting (no email address), the
+  scope, and the handling: fix forward, then an advisory, then `npm deprecate`. The README has a `### Releasing` section with the steps, the
+  channels and their default states, the dry run, the npm authentication route, and the bad-release policy (never `npm unpublish`).
+- **`smokePackages` accepts prebuilt tarballs.** `scripts/ci-package-smoke.mjs` installs exactly the tarballs it is given, so `prepare` smokes the
+  files that would be published. With no options its behavior, and the command line, are unchanged.
+
+### Changed
+
+- **The audit reader is one function (DW-693).** CI runs 39819176668 and 39838191935 showed a flake: a test read an audit file while the server
+  was writing it and parsed a half-written last line. `scripts/lib/audit-lines.mjs` holds the newline-terminated reader (`completeAuditLines`,
+  `readAuditEntries`), and every test and script that reads `IRIS_AUDIT_LOG` goes through it. The six private `waitForLineCount` copies became
+  one `waitForAuditLines`. `audit-reader-guard.test.ts` fails on a raw split-and-parse reader in any test or script that mentions audit.
+- **`story-43-4-qa-probe-copy` observes the SIGTERM the client sends (DW-693).** The SDK ends a probe copy's stdin and then sends SIGTERM, and a
+  loaded probe that sees the end of input first exits before its own SIGTERM listener runs, so the test recorded no SIGTERM. A
+  `ChildProcess.prototype.kill` spy now records what the client sent.
+
+### Tests
+
+- `release-workflow.test.ts` holds `release.yml` equal to `scripts/lib/release-checks.mjs` and goes red for each defect the acceptance criteria
+  name; `release-core.test.ts`, `release-script.test.ts` (stand-in `npm`, `git`, `vsce` and `ovsx` on `PATH`, and a fake GitHub API),
+  `release-prepare.test.ts` (the real throwaway harness over a scripted docker) and `release-version.test.ts` (the real `changeset version`
+  and generator in a git fixture) cover every row of the story's matrix. `audit-lines.test.ts` and `audit-reader-guard.test.ts` pin DW-693.
+
+## [Pre-release — 2026-10-22] — Story 42.4: IPM Package Revival
+
+Story 42.4 makes the IPM package real: its manifest is generated, an install guard keeps an IPM install from downgrading a newer
+deployment, the bootstrap leaves an IPM installation alone, and a new CI job proves that one archive installs offline on both IRIS
+editions. Nothing is published, versioned or tagged by this story. No tool, action, governance key, preset row, annotation, refusal
+code, product environment variable, REST route or REST response is added, removed or changed, no tool count moves (110 package tools,
+115 advertised), the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and the frozen SDK goldens and the tools-list
+snapshot are byte-unchanged. `BOOTSTRAP_VERSION` moves from `0.0.2+1.995fbbb1055d` to `0.0.2+2.244fe8623c76`: the marker's hash now covers
+the install guard as well as the 35 classes, so the sequence rises by one. `classes[]` is unchanged (35 classes).
+
+### Added
+
+- **A generated IPM manifest (AC 42.4.1, DW-34).** `ipm/module.xml` was a hand-written `0.1.0` manifest of 13 classes and some test classes
+  that had never been installed. It is now written by `scripts/gen-bootstrap.mjs` (`pnpm gen:bootstrap`) from `classes[]`, plus one IPM-only
+  preloaded class, and carries a DO-NOT-EDIT header. It declares 36 resources (the guard, then the 35 classes in compile order), the
+  module `iris-execute-mcp-v2` at the version of `@iris-mcp/shared`, and three invokes: the guard's `Check` at `Initialize`/`After` (with `CheckStatus`, which IPM 0.10.0 to 0.10.4 need to act on the error a refusal returns; IPM 0.10.5 and later check it by default and mark the attribute deprecated; the `ipm` job checks that the built archive's manifest keeps it), then
+  `ExecuteMCPv2.Setup.Configure` and `ConfigureMapping`. It has no `<WebApplication>`, no application role and no `MatchRoles`. It is
+  rewritten only when its content changes, like the embed. `ipm-manifest.test.ts` and the generator drift test in the default suite fail on a
+  hand edit, or on a `classes[]`, shared-version or guard change that skipped the regeneration. The embed gains `IPM_MODULE_NAME` and
+  `IPM_INSTALL_GUARD`, outside `BOOTSTRAP_CLASSES`.
+- **`ExecuteMCPv2.InstallGuard` (DW-674, the IPM-upgrade half).** Its source is `ipm/preload/ExecuteMCPv2/InstallGuard.cls`, outside `src/`,
+  so a `src/**` load can never plant it. IPM preloads it and runs `Check` at the end of `Initialize`, before it reloads any class. `Check`
+  orders the marker of the `ExecuteMCPv2.Setup` already in the namespace against its own stamped marker with the Story 42.2 table, and refuses the
+  install, inside IPM's transaction and with nothing installed, over a newer, `dev` or unreadable one; an absent, older or equal one installs.
+  IPM's own downgrade check ignores the `+<sequence>.<hash>` part of a version and never sees a deployment made by the bootstrap. `Classify` is a
+  port of `classifyDeployedMarker`, held equal to it by a parity table of 91 cases (leading zeros, numbers past 2^53 and past 19 digits,
+  non-ASCII digits, trailing line breaks, uppercase hex, legacy markers, the characters either side of the digit and hex ranges) that `bootstrap-version.test.ts` pins on the TypeScript side and that CI
+  runs on both editions.
+- **The bootstrap leaves an IPM installation alone (DW-674, the ownership half).** When the document `ExecuteMCPv2.InstallGuard.cls` answers
+  200, IPM installed the classes there: at startup, on every path that would write (`stale`, `unconfigured`, `missing`) the server uploads,
+  compiles and configures nothing and logs one `[WARN]` line that says so, names the deployed marker and this server's, and gives
+  `zpm "install iris-execute-mcp-v2 <version>"` and `zpm "uninstall iris-execute-mcp-v2"`. The marker is read again before each compile, and the
+  document is asked for again there: a guard that appears only then (another client installing at the same moment) comes after this server's
+  class documents were uploaded, so those stay, and the compile and every later step are skipped. `BootstrapResult` gains `ipmOwned`, present only
+  when `true`. A 404 for the document is the positive absence and the result is deep-equal to before, with no new key. Any other failure of the read
+  is unknown: nothing more is written (at the re-check, the documents already uploaded stay), and the existing unreadable-marker warning names it. A current, newer, foreign or unreadable deployment makes no ownership
+  request. The `ipm-owned-older` leg of the bootstrap-guard gate runs this against a real IRIS in CI.
+- **The `ipm` CI job and `scripts/ci-ipm-archive.mjs` (AC 42.4.2).** It builds the archive with IPM's `load -dev` and `package` on a throwaway
+  `iris-community` 2026.2 container with no network, from the stamped embed and never from `src/`, and installs that one archive on fresh
+  no-network containers of `iris-community` 2026.2 (`USER`) and `irishealth-community` 2026.2 (`HSCUSTOM`). On the community edition it shows that the three guard refusals
+  (a newer, `dev` and marker-less `Setup`) leave the deployment as it was, with no module listed, and that an older `Setup` is upgraded; on both editions it shows that 36 classes compile,
+  that the web application has the install namespace, `ExecuteMCPv2.REST.Dispatch`, `Enabled=1` and no `MatchRoles`, that `%ALL` maps the package, that a
+  GET of the application from inside the container answers 200, that an Atelier GET of the guard's document `ExecuteMCPv2.InstallGuard.cls` (the ownership signal the bootstrap reads) answers 200 while a document that does not exist answers 404, that `%IPM_Repo.Definition` holds 0 rows at every read, and that the parity table agrees. The only IPM verbs it issues are `load`, `package` and `list` (AC 42.4.4); it publishes nothing, uploads nothing and reads no secret. The job needs
+  `gates` and `throwaway` and has a 45-minute budget. `scripts/lib/ipm-archive.mjs` holds the pure helpers.
+- **The throwaway harness learns to run without a network.** `up --network none` starts a container with no `-p`, ready when its session answers (there is
+  no web port to poll); `--mount <dir>:/opt/iris-mcp/<name>` adds a read-only bind mount whose host directory must be absolute, plain and a real directory, not a link; `session`
+  pipes a script into `iris session` of the recorded container; `cp` copies a file out of it. Each re-inspects the container first, a `--network none` state is checked
+  for the network mode and for no published port, and `exec` refuses such a state. `run`'s argv and `pnpm live:bootstrap-guard` are unchanged.
+
+### Changed
+
+- **The oldest CI image moves to `iris-community:2026.1` (DW-686).** A Community image's license key expires: 2025.3 passed every bootstrap-guard leg in CI
+  run 39749804619 (commit `6a8574f`, 2026-10-22) and its key expires on 2026-11-13, so `bootstrap-guard-oldest` runs on 2026.1 (key valid to 2027-03-27), pinned by
+  digest `sha256:c57b65b2b454494091e7b3e49f6a53b3335f40adf475bcfcee0866083f35a7c2`. The oldest green tag remains the tested floor that Story 42.9 states.
+- **The `zpm` fallback text is accurate (AC 42.4.3).** When the bootstrap's Configure step fails, `manualInstructions` item 3 now says to run, in the target
+  namespace, as a user with `%Admin_Manage` and IPM 0.10 or later, `zpm "install iris-execute-mcp-v2 <version>"` (the version of this build), to add the community
+  registry first with `zpm "repo -r -n registry -reset-defaults"` when `zpm "repo -list"` shows none, and that IPM then owns the classes and the server never redeploys them. The text
+  is logged, never sent on a tool wire. Until the first release publishes the package the install finds nothing, which is expected.
+- **Documentation.** The root README has an "Optional: Install the IRIS-Side Classes with IPM" subsection after "Verify", an IPM-owned row and remedy in "Shared Instances", and a
+  Continuous Integration section of four jobs with the 2026.1 floor.
+
+## [Pre-release — 2026-10-22] — Story 42.3: CI Workflow
+
+Story 42.3 adds the first CI of the repository, `.github/workflows/ci.yml`, and the checks that hold it honest. It is secret-free and
+publishes nothing, and nothing is published, versioned or tagged by this story. No tool, action, governance key, preset row,
+annotation, refusal code, product environment variable, REST route or REST response is added, removed or changed, no tool count moves
+(110 package tools, 115 advertised), the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), the frozen SDK goldens and
+the tools-list snapshot are byte-unchanged, and `BOOTSTRAP_VERSION` stays `0.0.2+1.995fbbb1055d` (no bootstrapped class changed).
+
+### Added
+
+- **The CI workflow.** Three jobs run on every push to any branch or tag, on pull requests and on manual dispatch, and every action is
+  pinned by commit.
+  - `gates` runs on Node 22.17.0, 24.0.0 and 26.0.0: install, build, lint, type-check, the tests of the 8 packages (the Story 42.1 package
+    checks among them), the governance-baseline, skills, pack, prompts, provenance, tools-list and epics-sync checks, and the launcher
+    extension's install, type-check, build and arming guard.
+  - `throwaway` runs the armed suites against throwaway containers: the bootstrap-guard gate on `iris-community` 2026.2 and 2025.3 in
+    `USER` (DW-672, the live proof of DW-508), and then, against a seeded `irishealth-community` 2026.2 in `HSCUSTOM`, every package's
+    `prepublishOnly`, every integration suite, the five process gates and the launcher's live files. A run on `main` is never cancelled:
+    each has a concurrency group of its own (its commit). A superseded run elsewhere is, and `gh run list --workflow ci.yml --commit <sha>`
+    still finds it.
+  - `package` runs only after both are green (DW-443): it packs the 8 packages, installs the tarballs together with every `@iris-mcp/*`
+    dependency resolved to a local tarball, starts each server bin through `npx --no` (`initialize` and a `tools/list` with the snapshot's
+    tool count) and runs each CLI bin.
+- **A registry and a self-test.** `scripts/lib/ci-checks.mjs` declares the pins, the steps and the armed suites; `ci-workflow.test.ts`
+  holds `ci.yml` equal to it in both directions and fails on an unpinned action, `continue-on-error`, `|| true`, a `secrets.` reference,
+  wider permissions, a removed concurrency block or a concurrency group that runs on `main` share, a missing or wrong `sysctl` reservation,
+  a key the registry's workflow does not use (an `env`, a `defaults`, a step `shell`, a matrix `exclude`, an action input), a dropped or undeclared step, a moved Node
+  floor, a `package` job that does not need `throwaway`, a `prepublishOnly` with no suite, and a live-capable test file that no suite runs.
+- **`scripts/ci-live-suite.mjs` (DW-676).** An armed suite fails when any test in it was skipped, pending, todo or disabled, unless an
+  allowlist entry names the test and gives a reason; an entry that matches no skipped test fails as stale, and a report that is missing,
+  holds 0 tests or lacks an expected file fails too. The allowlist holds the 4 golden-capture legs and the 9 DocDB lifecycle tests (see Fixed). A test that returns early without
+  asserting is reported as passed, which the wrapper cannot see.
+- **`scripts/ci-seed-throwaway.mjs`.** It runs the real `bootstrap()`, fails closed unless `Ens.Director` is visible in the namespace, and
+  deploys and compiles the 62 classes of `src/ExecuteMCPv2/Tests` and `QAFixtures`, never a bootstrapped class from `src/` (AD-14).
+- **`scripts/ci-package-smoke.mjs` (DW-443).** The tarball path that `prepublishOnly` does not guard, run locally with
+  `node scripts/ci-package-smoke.mjs` after `pnpm build`.
+
+### Changed
+
+- **`scripts/throwaway-iris.mjs`** gains `up`, `exec`, `logs` and `down` (each re-inspects the container and refuses one that is not a
+  throwaway it started), `run --host-port`, the oldest image `OLDEST_IRIS_COMMUNITY_IMAGE` (`2025.3`, see Fixed), `validateNamespace`,
+  `assertThrowawayEnv`, and a namespace in the command's environment. The environment it hands a command now includes
+  `IRIS_HTTPS=false`, which `scripts/verify-iris-reachable.mjs` requires under `CI`. `run` prints the container log before removing the
+  container when its command fails, and `run` and `up` print it when the container does not become ready. `parseCli(["run", ...])` and `pnpm live:bootstrap-guard` are unchanged. The image comments now say
+  what they are: multi-arch manifest lists, so one digest serves an arm64 development machine and an amd64 runner (Story 42.2 recorded the
+  default as arm64 only).
+- **The four `prepublish-gate.mjs` scripts** forward their command-line arguments to `vitest run`, so the CI wrapper can ask for the JSON
+  reporter; with no argument they behave as before, and no `prepublishOnly` changed. Their headers no longer say the repository has no CI.
+- **Lint.** The `lint` script of the 7 packages that have one is `eslint src/ --max-warnings 0`, and the unused `eslint-disable`
+  directive at `packages/shared/src/cli/governance.ts` is removed (DW-666), so the gate carries no standing warning.
+- **Tooling that is not shipped.** The roster and live-capable scans moved to `scripts/lib/live-gate-scan.mjs`, `pnpmPack` to
+  `scripts/lib/pnpm-pack.mjs` (with an option to run the package's lifecycle scripts), and `openRawWire` can start an installed bin. The
+  `@iris-mcp/all` tests gain the `yaml` 2.9.0 development dependency, already in the lockfile. `deployClasses` and `compileClasses` of
+  `@iris-mcp/shared` take an optional class list, and `compileClasses` returns the Atelier response (changeset, patch).
+- **Tests under `CI=true`.** Running the suites with `CI=true`, as GitHub Actions does, showed that vitest then colors the output of a child
+  `vitest run`, which broke every guard test that reads that output as text (22 cases of the Story 39.1 gate guards, and the same pattern in
+  the Story 41.8 and launcher guards). The `vitest.config.ts` of `@iris-mcp/all` and of the launcher extension now set `NO_COLOR=1` for the
+  tests, which the children they start inherit. The Story 38.6 text pin of the `@iris-mcp/all` gate's `vitestArgs` line follows the
+  forwarded arguments.
+- **Documentation.** The root README has a "Continuous Integration" subsection under Contributing.
+
+### Fixed (rework after the first CI run)
+
+The first CI run (sha `221181a`) was red in six places. None of them touches a product behavior, a tool, a route or a bootstrapped class.
+
+- **The governance baseline check runs on Node 22.17.0.** `scripts/gen-governance-baseline.mjs --check` imported
+  `packages/shared/src/governance-baseline.ts`, and Node strips types from a `.ts` import only from 22.18, so the floor leg failed
+  with `ERR_UNKNOWN_FILE_EXTENSION` while 24 and 26 passed. It now reads the built `packages/shared/dist/governance-baseline.js`. A new scan,
+  `scripts/lib/script-ts-import-scan.mjs`, finds a `.ts` import in any repository script (a literal specifier, or a path variable that
+  reaches `import()` or `require()`), and `script-ts-imports.test.ts` runs it; the two shared tests that run the generator now start
+  it with `--no-experimental-strip-types`, so on any Node they fail the way the floor does.
+- **The tests remove a link to a directory with `unlink`.** `rmSync(link, { force: true })` is refused by Node 24.0.0 ("Path is a
+  directory"), which failed 22 cases of the Story 41.5 scratch-copy tests on that leg. `removeLink` in the test fixtures does the unlink,
+  and `symlink-removal.test.ts` fails on any test file that makes links and calls `rmSync` with `force` alone.
+- **The oldest image is `iris-community:2025.3`, not `2024.3`.** A Community image carries a time-limited license key and refuses to
+  start once it has expired ("Invalid Community Edition license, may have exceeded core limit"), so the oldest testable tag moves
+  forward over time. On 2026-10-22 the keys of 2024.3, 2025.1 and 2025.2 had expired. 2025.3 starts and passes the nine bootstrap-guard
+  legs, and its key expires on 2026-11-13, so the leg turns red again that day; 2026.1 passes too (its key expires on 2027-03-27) and is the
+  next move. The oldest tag that passes is the tested floor that Story 42.9 states.
+- **Three integration tests that only a fresh instance exposed.** `admin.integration.test.ts` looked for the resource and the role it had
+  created on the first page of a 50-row list, and a fresh IRIS for Health holds more of both; it follows `nextCursor` now. The `iris_sql_execute`
+  case in `tools.integration.test.ts` named a table `NonExistent.Table.…`, and `TABLE` is a reserved word, so IRIS answered a syntax error
+  (SQLCODE -1) instead of -30; the names are not reserved now. `data.integration.test.ts` named its DocDB database `MCPDataTest_DocDB`, and IRIS
+  refuses an underscore in a DocDB name ("it must be a valid Class Name").
+- **The DocDB lifecycle skips on a fresh instance, by name.** The DocDB REST routes answer `ERROR #822: Access Denied` until an operator enables
+  `%Service_DocDB`, and then for every database that has no `Security.DocDBs` record, which creating a database through the REST route does
+  not make. A fresh instance has neither, and the Epic 35 F5 gate needs the service disabled, so the seed leaves it so. The data setup file's
+  probe now reads the `#822` answer (IRIS 2026.2 sends it with HTTP 200, not 403) as "not available", the nine lifecycle tests skip, and
+  `scripts/lib/ci-checks.mjs` allowlists them by name with that reason.
+
+## [Pre-release — 2026-10-21] — Story 42.2: Bootstrap Downgrade Guard
+
+Story 42.2 stops the bootstrap from redeploying the `ExecuteMCPv2` classes over a newer deployment (DW-508: an older server on a shared
+instance could reinstall classes that a later build had replaced) and makes every live test leg opt-in (DW-627, DW-518). Nothing is
+published, versioned or tagged. No tool, action, governance key, preset row, annotation, refusal code, product environment variable, REST
+route or REST response is added, removed or changed, no tool count moves (110 package tools, 115 advertised), the frozen governance
+baseline stays at hash `1e62c5ad5bf7` (141 keys), and the frozen SDK goldens and the tools-list snapshot are
+byte-unchanged. `BOOTSTRAP_VERSION` moves from `d51856f74d6a` to `0.0.2+1.995fbbb1055d`: the doc comments of `ExecuteMCPv2.Setup` changed
+(no behavior of any class did) and the marker gained its semver and sequence.
+
+### Changed (AD-14)
+
+- **The bootstrap never downgrades.** It reads the marker stamped into the deployed `ExecuteMCPv2.Setup` and orders it against its own, by
+  semver and then by sequence. An absent deployment gets the full install, and an older one (a lower semver; the same semver and a lower
+  sequence; or a bare 12-character hash from a build before this release) takes today's `stale` upgrade flow. A newer deployment, and a
+  foreign one (the same semver and sequence with a different hash, `dev`, or any value that is not a marker), is left alone: no upload, no
+  compile, no web-application or mapping change, and one `[WARN]` on stderr names both markers and the remedy. For a newer deployment the
+  remedy is to upgrade this server to a build at least as new as the deployed one and to run the same or a newer build on every client that
+  shares the instance; for a foreign one it is to run one build per instance, or to delete class `ExecuteMCPv2.Setup` in the namespace and
+  restart the server to install this server's classes deliberately. The marker is read again immediately before each compile, so a newer or
+  foreign deployment that appears in the meantime is not compiled over.
+- **A marker that cannot be read is `unknown`, not absent (wave-8 decision #54, DW-673).** Only a provably absent `ExecuteMCPv2.Setup`
+  class (its Atelier document route answers HTTP 404) gets the full install. A version query that fails or returns no marker (an HTTP
+  error, a timeout, a privilege error, an empty value) while the class exists, or while its existence cannot be checked, uploads and
+  compiles nothing and logs one `[WARN]` naming the failure and the remedy; the server goes on with what is deployed. The same holds for the
+  read before each compile after an older or unconfigured probe. `BootstrapResult.probeStatus` gains `unknown`, and the optional
+  `readFailure` field carries the reason.
+- **The marker format and `scripts/bootstrap-sequence.json`.** `BOOTSTRAP_VERSION` is `<semver>+<sequence>.<hash>`: the version of
+  `@iris-mcp/shared`, a sequence number and the 12-character content hash. The sequence lives in the new `scripts/bootstrap-sequence.json`;
+  `pnpm gen:bootstrap` raises it by exactly 1 when the hash changes and leaves it alone otherwise (an unchanged rerun is byte-identical, and a
+  missing file is an error). The drift test also asserts that the semver equals the `packages/shared/package.json` version and that the
+  sequence and hash equal the state file's. `@iris-mcp/shared` exports `classifyDeployedMarker` and `parseBootstrapMarker`.
+- **Sanctioned change to an existing behavior (AD-15).** An instance whose deployed marker is `dev` (a hand-loaded deployment from `src/`) or
+  otherwise foreign is no longer overwritten at the next start; it was before. Nor is a deployment whose version query fails while its
+  `Setup` class exists, which used to get the full install; a deployment from before the version stamp (a `Setup` class with no
+  `GetBootstrapVersion` method) is one of these, and deleting the class `ExecuteMCPv2.Setup` makes it installable again. Every other probe
+  path is as it was: an absent deployment installs, an equal marker is `current` or `unconfigured`, and an older deployment upgrades, apart
+  from the one marker read before each compile.
+- **Builds from before this release still downgrade.** The guard runs in the server that is about to deploy, so an earlier server compares
+  for equality only and redeploys over a newer deployment. Upgrade every client that shares an instance together (README, Known
+  Limitations, "Shared Instances: Upgrade Every Client Together").
+
+### Changed
+
+- **Live test legs are opt-in (DW-627, DW-518).** A leg that can reach IRIS runs only when `IRIS_REQUIRE_LIVE` is `1` or `true`. Armed, it
+  needs all five of `IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD` and `IRIS_NAMESPACE`, with no default target, and a set
+  `IRIS_HOST` alone arms nothing. The `IRIS_TEST_HOST`, `IRIS_TEST_PORT`, `IRIS_TEST_USERNAME`, `IRIS_TEST_PASSWORD` and
+  `IRIS_TEST_NAMESPACE` target variables are retired (`IRIS_TEST_TIMEOUT` is a different setting and is unchanged). A plain `pnpm test`
+  therefore touches no IRIS instance, and `scripts/lib/no-live-iris-preload.mjs` lets a run prove that it connected to none. The prepublish
+  gates arm with `IRIS_REQUIRE_LIVE=1`, so a release run exports the five variables too.
+- **Documentation.** The root README has the "Shared Instances: Upgrade Every Client Together" subsection under Known Limitations and a
+  short note on running the tests; the `@iris-mcp/shared` README and `tool_support.md` describe the ordered marker where they said that every
+  restart reconciles the handlers with the embedded classes.
+
+### Added
+
+- **Test and release tooling, none of it shipped.** `scripts/throwaway-iris.mjs` runs one command against a disposable, digest-pinned IRIS
+  container that it starts on a dynamic loopback port and always removes, and refuses port 52773 or 1972, the shared instance's name and any
+  floating image tag; `pnpm live:bootstrap-guard` runs the throwaway bootstrap-guard gate through it (Story 42.3's CI runs it; on a
+  development machine it runs only as the Lead authorizes, wave-8 decisions #49 and #55). A hermetic orchestration test drives the built `iris-dev-mcp` against a stateful fake Atelier for the same legs
+  (newer, foreign, older, legacy, current, and the lazy `other` profile of DW-518). `@iris-mcp/shared/test-helpers/live-target` is the one
+  place a test leg resolves its arming and target (in-repo only: it is not in `publishConfig.exports`), and `live-arming-guard.test.ts`
+  pins that no test source defaults a target and that every live-capable test file connects to nothing when unarmed.
+
+## [Pre-release — 2026-10-21] — Story 42.11: Storage Guard on Every Document Write
+
+Story 42.11 extends the Storage-drop guard that Stories 38.3 and 38.4 gave `iris_doc_put` and `iris_doc_edit` to the three other paths that
+can replace an existing class: `iris_doc_load`, the `iris_doc_xml_export` import and the `iris_env_promote` `execute` sync (DW-652). Before
+this, each of them could store text that lacks one of a class's Storage definitions with no flag, and IRIS then generated new storage at the
+next compile, which can change how existing rows are read; a probe on 2026-10-21 confirmed it for the XML import. Nothing is published,
+versioned or tagged. No tool, action, governance key, preset row, annotation, refusal code or ObjectScript class is added, removed or
+changed, no tool count moves (110 package tools, 115 advertised), the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys),
+and `BOOTSTRAP_VERSION` is unchanged. `sdk-wire-golden.json` and `sdk-handler-golden.json` are byte-unchanged (their SHA-256 pins stay); the
+changes to bytes they hold are 8 new entries of `fixtures/sdk-golden-sanctioned-changes.json`, one per moved golden value, and the
+tools-list snapshot was regenerated through its generator (`pnpm gen:tools-list-snapshot --force` after a rebuild of every package): apart
+from the header's `capturedAt`, only the values named below moved.
+
+### Changed (AD-15 sanctioned)
+
+- **The default refusal on three more paths (DW-652; wave-8 decisions #30 and #38).** Each path now refuses by default a write that would
+  drop one of the Storage definitions the existing class has, naming the definitions and the override, with `STORAGE_DROPPED` and nothing
+  changed. Names are compared exactly (a rename is a drop; changing a definition's content is allowed), only `.cls` documents are guarded,
+  and a new class is never refused. A write that drops nothing sends the requests it sent before, apart from the GETs that read the class,
+  and returns the fields it returned before.
+  - `iris_doc_load` reads each class file's class before its `?ignoreConflict=1` PUT (one GET; with `ignoreConflict: false` the 409 of the
+    first PUT is the read) and refuses per file, as a `failures` entry with `code: "STORAGE_DROPPED"` and `droppedStorage`; the other files
+    continue and a refused file is not compiled.
+  - The `iris_doc_xml_export` import reads each `<Class>` of the XML before its one POST and refuses the whole import, with
+    `structuredContent` `{code, namespace, storageDrops}`.
+  - `iris_env_promote` `execute` runs a GET-only preflight after its gates and the blank-namespace check and before the confirmation dialog,
+    and refuses the whole execute, with `structuredContent` `{code, source, target, storageDrops}`, before any write in any domain. Each class
+    is written with the source text the preflight read. A preflight read that fails fails its step when its turn comes.
+- **`allowStorageRegeneration` on the three tools (default `false`).** With `true` the write goes ahead, IRIS generates new storage at the
+  next compile, and the result gains `storageDrops` (`[{name, droppedStorage}]`) and a text line naming what was dropped. The dialog of
+  `iris_env_promote` names the drops too. The parameter has no default in the schema, so the arguments of a call, and the hash of them that
+  binds a confirmation, are what they were when it is left out.
+- **`S-42.11-storage-guard-schema`.** The three `inputSchema`s gain the optional `allowStorageRegeneration` boolean, just before the
+  framework's `server` member, and the `iris_doc_load` `ignoreConflict` text says each file overwrites its server copy "without a version
+  check", where it said "unconditionally". The `iris_doc_load` text was true only until this story.
+- **`S-42.11-storage-guard-text`.** One sentence is appended to the description of each of the three tools (after the Story 43.4 dialog
+  passage, for `iris_env_promote`), saying that the write is refused when it drops a Storage definition and that `allowStorageRegeneration`
+  lets it through.
+- **DW-544, DW-545 and DW-546 are superseded.** The three exclusions that Story 38.3 recorded are guarded now, and the write-path roster has
+  no `excluded` entry.
+
+### Added
+
+- `@iris-mcp/shared` exports `droppedStorageNames`, `xmlClassStorageNames`, `storageDroppedText`, `storageDroppedDetail`, `storageDrop`,
+  `describeStorageDrops` and `storageDropsRefusal`, with the types `StorageDroppedDetail` and `StorageDrop`; the one guard owns every name
+  comparison and every refusal and drop field.
+
+### Changed
+
+- **Documentation.** The dev README rows and Storage-guard bullets, the root README bullet and its `STORAGE_DROPPED` row, and
+  `tool_support.md` (rows 7, 12 and 28, and a Story 42.11 note) describe the guard on every path.
+
+## [Pre-release — 2026-10-21] — Story 42.10: Pre-1.0 Tool-Surface Corrections
+
+Story 42.10 corrects three wire and audit truths before 1.0 publishes, and widens the sanctioned-change ledger so that the frozen SDK
+goldens can record the corrections. Nothing is published, versioned or tagged. No tool, action, governance key, preset row, input-schema
+key, refusal code, environment variable or ObjectScript class is added, removed or changed, the frozen governance baseline stays at hash
+`1e62c5ad5bf7` (141 keys), and `BOOTSTRAP_VERSION` is unchanged. The tools-list snapshot was regenerated through its generator
+(`pnpm gen:tools-list-snapshot --force` after a rebuild of every package): apart from the header's `capturedAt`, only the values named
+below moved. `sdk-wire-golden.json` and `sdk-handler-golden.json` are byte-unchanged (their SHA-256 pins stay); the corrections are 23 new
+entries of `fixtures/sdk-golden-sanctioned-changes.json`, one per moved golden value (19 annotations, 3 resend texts, 1 audit
+`namespace`). DW-652 (the Storage guard on three more document-write paths) is not in this story: it moved to Story 42.11.
+
+### Changed (AD-15 sanctioned)
+
+- **`S-42.10-annotations` (DW-560).** 13 existing tools change `destructiveHint` from `false` to `true`, because each can delete, or
+  irreversibly overwrite, existing state (AD-4): `iris_doc_put`, `iris_sql_execute`, `iris_global_set`, `iris_execute_command`,
+  `iris_execute_classmethod`, `iris_doc_load`, `iris_doc_export`, `iris_env_promote`, `iris_service_manage`, `iris_ldap_manage`,
+  `iris_x509_manage`, `iris_production_item` and `iris_task_run`. The other three hints of each tool, every tool name, title, input-schema
+  key, governance key and `mutates` classification stay as they were, and `iris_execute_tests` keeps `destructiveHint: false` (Story 40.4).
+  49 of the 110 package tools are now destructive (36 before). Nothing in this suite reads the hints, but a client that does may now ask
+  for approval before these calls. A cross-check in `@iris-mcp/all` keeps the set honest: a tool that is not read-only and declares
+  `destructiveHint: false` must be on a justified list (five tools today), and no tool with a `delete`, `remove`, `purge`, `kill` or
+  `clean` action may declare it.
+- **`S-42.10-resend-text` (DW-662).** The `iris_message_resend` description and its `maxMessages` and `confirm` texts are corrected, not
+  appended. They now say that executing needs `dryRun: false` and `confirm: true`, that `dryRun: false` without `confirm: true` is refused
+  with no changes made, that a call that leaves out `dryRun` previews, and that only an executing call whose match count is over the cap
+  is refused, while a preview reports the full count. They said that a preview without `confirm` was refused and that an over-cap preview
+  was refused, which the tool never did. The tool's behavior, `dryRun`'s text and the Story 43.4 dialog passage are unchanged.
+- **`S-42.10-audit-namespace` (DW-654, AD-19).** The audit entry of a `SYS`-scoped tool (the 25 SYS-scoped tools of `@iris-mcp/admin`)
+  records `"namespace":"%SYS"`, where it recorded the call's `namespace` argument or the profile's default namespace, which is not where
+  the call ran. When the call has a non-empty `namespace` argument, the new additive field `targetNamespace` records it, on every outcome
+  and whatever `IRIS_AUDIT_LOG_PARAMS` says, so the entry still names the namespace that `iris_mapping_manage`, `iris_mapping_list`,
+  `iris_webapp_manage`, `iris_resource_manage` or `iris_user_manage` acts on (decision #41, DW-667); a call without one has no
+  `targetNamespace`. The entries of `NS`, `BOTH` and `NONE` tools are byte-identical to before and never carry `targetNamespace`.
+
+### Changed
+
+- **The sanctioned-change ledger accepts later stories, corrections and the handler golden's `audit` array.** An entry may come from any
+  story after the capture; a description entry appends unless its sanction is a recorded correction (`S-42.10-resend-text` is the first);
+  and a handler entry with `section: "audit"` changes one member of one audit call entry. The ledger test names a shape for each of the
+  five sanctions, and a new test in `@iris-mcp/all` checks the tools-list snapshot against the sanctioned golden without a build.
+- **Documentation.** The README Annotations cells of the 13 tools say `destructive`; the interop README carries the corrected resend
+  wording; the root README carries one paragraph on the audit `namespace` and its Story 43.4 sentence no longer says that no other
+  description byte changed; `docs/tool-annotation-audit.md` is marked historical; `tool_support.md` has a Story 42.10 note.
+
+## [Pre-release — 2026-10-21] — Story 42.1: Pre-Publish Package Fixes
+
+Story 42.1 makes the eight `@iris-mcp/*` packages publishable and pins every `npx` spec the suite writes, spawns or documents to the
+major. Nothing is published, versioned or tagged: no `1.0.0` section is written here (Story 42.6 writes it), and no pending changeset
+declares a major. No tool, action, governance key, preset row, annotation, description, schema, refusal code or environment variable is
+added or changed, the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), the tools-list snapshot and the SDK goldens are
+byte-unchanged, and no ObjectScript class is touched.
+
+### Changed (AD-15 sanctioned)
+
+- **The `@1` pin (D3, DW-260).** Every `npx` spec the suite writes, spawns or documents now ends in `@1`, taken from one constant:
+  `@iris-mcp/client-config` exports `IRIS_MCP_MAJOR` (`"1"`) and `pinnedSpec()`. The entries `iris-mcp-clients apply` writes are
+  `{"command": "npx", "args": ["-y", "@iris-mcp/<pkg>@1"]}` (the byte goldens of the four adapter families are re-captured from the built
+  engine). **Re-apply pins existing managed entries:** applying an entry that an earlier version wrote unpinned rewrites only its owned
+  `args` (and `command` and `env`, as before); foreign entries and every byte outside the owned entry keep their exact bytes (AD-30). The
+  VS Code extension keeps a literal mirror of the major (it has no runtime dependencies and no bundler), pinned equal to the constant by a
+  test in `@iris-mcp/all`. It spawns `npx -y @iris-mcp/<pkg>@1`, reaches the clients CLI as
+  `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients` and the governance CLI as `npx -y -p @iris-mcp/shared@1 iris-mcp-governance`
+  (`universe` also installs each server as `-p @iris-mcp/<pkg>@1`). Every server definition it provides starts in the user's home
+  directory, which is VS Code's own default made explicit. Specs use `@1`, never `^1`, because `^` is cmd.exe's escape character on win32.
+  Clients on `@1` receive every 1.x release automatically.
+- **The Node floor (D4).** The root manifest and all eight packages declare `engines.node >=22.17.0`: the packages had no `engines`, and
+  the root said `>=18.0.0`. 22.17.0 is where `fs.globSync`, which `iris_doc_load` uses, is stable. `@types/node` is major 22 in the seven
+  TypeScript packages (it was 25 in `@iris-mcp/shared` and `@iris-mcp/client-config` and undeclared in the five servers) and in the
+  extension (`^22.15.0`, the Node of VS Code 1.101's Electron; it was `^20`). The extension declares no `engines.node`; `engines.vscode`
+  governs it. The README prerequisites say Node.js 22.17 or later.
+
+### Fixed
+
+- **The documented clients CLI form (DW-628).** `npx -y @iris-mcp/client-config iris-mcp-clients <command>` hands `iris-mcp-clients` to the
+  CLI as its command, which it refuses as unknown. The documented form is `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients <command>`,
+  in `packages/client-config/README.md`, `docs/client-config/README.md` and the three per-client guides. The credentials and governance
+  recipes use `-p @iris-mcp/shared@1`.
+- **`@iris-mcp/shared` no longer advertises unshipped exports (DW-506).** Its published `exports` holds only `"."` (through
+  `publishConfig.exports`, which pnpm applies when it packs); the three `./test-helpers` subpaths stay in the source manifest for the
+  in-repo test imports. The tarball no longer ships `dist/test-helpers`, any source map or any vitest peer declaration; `@iris-mcp/shared`
+  and `@iris-mcp/client-config` no longer declare vitest as an optional peer.
+- **`@iris-mcp/all` is documented as what it is.** It is a meta-package with no `bin`: a global install links no command, and an npm project
+  install puts the seven commands of its dependencies in `node_modules/.bin`. MCP clients start servers with
+  `npx -y @iris-mcp/<server>@1`. The root README, the meta-package README, the extension README, the `iris-mcp-clients` documentation and
+  the certification records no longer say that `@iris-mcp/all` links commands, can be launched, or is an aggregate server.
+- **Package descriptions (DW-630).** `@iris-mcp/client-config` no longer describes itself as a read-only foundation, and its README and the
+  root README name the skills pack. The root description no longer reads as a product title.
+
+### Added
+
+- **Registry metadata (DW-31).** All eight packages declare `license` (MIT, with a `LICENSE` file in each tarball), `repository` (with the
+  package's directory), `author`, `homepage`, `bugs` and `keywords`; the five servers declare `mcpName`
+  (`io.github.jbrandtmse/<bin>`), the name the MCP Registry checks against the published version. No name, description or keyword presents
+  the suite as InterSystems' or implies endorsement (AD-28). The extension gains `author`.
+- **Publish-path tests in `@iris-mcp/all`.** `package-manifests.test.ts` (the floor, `@types/node`, the metadata, `mcpName` and the AD-28
+  deny-list), `published-tarballs.test.ts` (`pnpm pack` of all eight packages: every `exports`, `main`, `types` and `bin` target is in the
+  tarball, `LICENSE` and `README.md` are present, no test helper, test, source map or source file ships), `npx-pin.test.ts` (the
+  unpinned-spec scan, `scripts/lib/npx-pin-scan.mjs`, and the extension mirror), `release-1-0-0-mechanism.test.ts` and
+  `meta-package-docs.test.ts` (no document claims that `@iris-mcp/all` links or launches a command); the extension suite gains
+  `pinnedDefinitionsActivationFlow.test.ts` (every provided definition carries the `@1` pin and the home-directory `cwd`).
+- **The release changeset template (DW-394).** `scripts/release/changeset-1.0.0.md` names all eight packages as `major`. It lives outside
+  `.changeset/`, which Changesets would consume, and Story 42.6 applies it once. A test runs the repository's real `changeset version` in a
+  throwaway fixture and asserts that all eight packages land on exactly `1.0.0` (and on `0.1.0` without the template).
+- **The changeset-reading doc tests skip once their changeset is consumed** instead of failing with `ENOENT`.
+
+### Unchanged
+
+- No tool, action, governance key, preset row, annotation, description, schema, refusal code or environment variable changes, and the
+  2025-11-25 and 2026-07-28 wire is byte-identical. The frozen SDK goldens, `sdk-golden-sanctioned-changes.json` and
+  `tools-list-snapshot.json` are untouched.
+- The SDK pins stay exact at `2.3.1`. The newest release is still 2.3.1, which bundles fast-uri 3.1.0 (the fix, upstream PR #2973, is not
+  released), so there is no bump to make (DW-637).
+
+### Known limits
+
+- The extension's two CLI spawns (clients and governance) pass no `cwd`, so they inherit the extension host's working directory. A
+  project-local copy of `@iris-mcp/client-config` or `@iris-mcp/shared` at major 1 can shadow the pinned spec there (deferred, severity low).
+- Publishing must go through pnpm: `pnpm publish` applies `publishConfig.exports` and rewrites `workspace:*`, and a direct `npm publish`
+  would ship the source exports and unresolvable `workspace:*` dependencies. Story 42.5's release script owns this.
+- Seven READMEs still say that `IRIS_USERNAME` defaults to `_SYSTEM`; the server treats it as required (deferred, severity low).
+
 ## [Pre-release — 2026-10-20] — Story 43.4: SDK v2 docs, smokes and capstone
 
 Story 43.4 closes Epic 43, the move to the MCP TypeScript SDK v2. It appends one passage about the confirmation dialog to the description of

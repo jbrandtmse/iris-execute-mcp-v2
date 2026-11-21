@@ -13,7 +13,7 @@ extension at spawn time — **zero manual config, no password ever written to a 
 > oracle, so the extension folder is not testable in isolation from a sparse checkout — see
 > `src/__tests__/definitions.test.ts` and `src/__tests__/localSpawnIntegration.test.ts`.) It talks to the
 > published `@iris-mcp/*` npm
-> packages only at _runtime_, via `npx`. **Because no `@iris-mcp/*` package is published yet, `npx -y @iris-mcp/<pkg>`
+> packages only at _runtime_, via `npx`. **Because no `@iris-mcp/*` package is published yet, `npx -y @iris-mcp/<pkg>@1`
 > currently fails to start on every machine** — see [Development mode](#development-mode) below for the only way
 > to run this extension against a real server before publication.
 
@@ -35,8 +35,9 @@ extension at spawn time — **zero manual config, no password ever written to a 
      `username`, then `session.scopes[1]`, then `session.account.id`.
    - If the user declines the credential prompt, the server is reported as **not started**, with one clear
      message — never a repeated prompt, never an error toast storm.
-4. It spawns `npx -y @iris-mcp/<pkg>` (or, in [Development mode](#development-mode),
-   `<developmentRepoPath>/packages/<dir>/dist/index.js` with the editor's own interpreter) with the resolved connection synthesized into the suite's
+4. It spawns `npx -y @iris-mcp/<pkg>@1` (or, in [Development mode](#development-mode),
+   `<developmentRepoPath>/packages/<dir>/dist/index.js` with the editor's own interpreter), always starting in your
+   home directory rather than in a project folder, so a project-local copy of an `@iris-mcp/*` package is not picked up, with the resolved connection synthesized into the suite's
    own documented env contract (`IRIS_HOST`/`IRIS_PORT`/`IRIS_HTTPS`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`
    for a single server, or `IRIS_PROFILES` JSON for several — see [`irisMcpLauncher.combineProfiles`](#settings)
    below), plus whatever governance/audit/visibility variables you've set in this extension's own settings,
@@ -87,7 +88,7 @@ Then **two required follow-ups**:
    "irisMcpLauncher.developmentRepoPath": "C:\\git\\iris-execute-mcp-v2"
    ```
 
-   Without it, every spawn path resolves to `npx -y @iris-mcp/<pkg>`, which cannot work until the packages are
+   Without it, every spawn path resolves to `npx -y @iris-mcp/<pkg>@1`, which cannot work until the packages are
    published — see [Development mode](#development-mode) for the full rationale and the fail-closed behavior.
    Prefer setting it through the Settings UI (search "development repo path"); an editor writing the file
    externally can be overwritten by the running instance's cached copy.
@@ -135,10 +136,10 @@ CLI, all documented in the suite's root README.
 
 `irisMcpLauncher.developmentRepoPath` (Story 31.6) makes this extension usable **before** any `@iris-mcp/*`
 package is published: set it to the absolute path of a local monorepo checkout, and every registered definition
-spawns `<developmentRepoPath>/packages/<dir>/dist/index.js` instead of `npx -y @iris-mcp/<pkg>`, using the
+spawns `<developmentRepoPath>/packages/<dir>/dist/index.js` instead of `npx -y @iris-mcp/<pkg>@1`, using the
 editor's own interpreter (`process.execPath` with `ELECTRON_RUN_AS_NODE=1` — the standard extension-host
 pattern, so no dependence on a `node` being on the host's PATH). Empty
-(the default) leaves spawning untouched — byte-identical `npx` behavior.
+(the default) leaves spawning untouched: the pinned `npx` form.
 
 - **Development only, opt-in, and security-relevant.** This setting makes the extension execute an **arbitrary
   local file path** you configure — effectively arbitrary code execution scoped to whatever `dist/index.js` your
@@ -156,7 +157,7 @@ pattern, so no dependence on a `node` being on the host's PATH). Empty
   MCP spawner working directory — so a relative path can validate against one file and then start a different one
   (or none). Absolute paths have no such ambiguity.
 - **Until `@iris-mcp/*` is published to npm** (see the [status note](#iris-mcp-launcher) at the top of this file),
-  this is the **only** way to start an IRIS MCP server through this extension — the default `npx -y @iris-mcp/<pkg>`
+  this is the **only** way to start an IRIS MCP server through this extension — the default `npx -y @iris-mcp/<pkg>@1`
   path has no published package to resolve and fails to start on every machine.
 - **Package-key -> directory mapping is explicit, not derived.** All five suite packages happen to follow the
   `iris-<key>-mcp` directory-naming pattern today — which is exactly what makes a derivation rule tempting. The
@@ -175,7 +176,7 @@ pattern, so no dependence on a `node` being on the host's PATH). Empty
 ### Removed: the `all` package key
 
 `@iris-mcp/all` declared no `main`, `bin`, or `files` and shipped no `dist` — its own README states it "contains
-no source code of its own". `npx` needs a `bin` to execute, so `npx -y @iris-mcp/all` could never start a server,
+no source code of its own". `npx` needs a `bin` to execute, so `npx -y @iris-mcp/all@1` could never start a server,
 published or not, and local mode has no `dist/index.js` to target for it either. The `"all"` key has been removed
 from `irisMcpLauncher.packages`'s allowed values (Story 31.6). If your settings still list it, you'll see one
 warning naming the removal; select the five individual packages instead (`admin`, `data`, `dev`, `interop`,
@@ -207,7 +208,7 @@ one edits *wiring*.
 `iris-mcp-clients` bin of [`@iris-mcp/client-config`](../../packages/client-config/README.md) with `--json` —
 the same single code path as the terminal CLI, so the UI and the CLI cannot diverge. With
 `irisMcpLauncher.developmentRepoPath` set it runs the checkout's built CLI
-(`packages/client-config/dist/cli/clients-cli.js`); otherwise `npx -y -p @iris-mcp/client-config iris-mcp-clients`,
+(`packages/client-config/dist/cli/clients-cli.js`); otherwise `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients`,
 which cannot resolve until the packages are published. **Build it first:**
 `pnpm --filter @iris-mcp/client-config build`.
 
@@ -248,8 +249,8 @@ rendered HTML ever carries the value. As with the governance editor, the spawned
 
 **Managed scope:** the manager only ever modifies entries it owns — the 5 canonical servers
 (`iris-dev-mcp`, `iris-admin-mcp`, `iris-ops-mcp`, `iris-interop-mcp`, `iris-data-mcp`) or entries recorded as
-manager-created. `iris-mcp-all` is deliberately **unmanaged** (it would double-register every tool alongside the
-five); hand-write it if you want the aggregate. Which clients are proven live vs fixture-only is in the
+manager-created. `iris-mcp-all` is deliberately **unmanaged**: `@iris-mcp/all` is a meta-package with no `bin`, so no
+server by that name can start. Which clients are proven live vs fixture-only is in the
 package's [certification table](../../packages/client-config/README.md#certification-dispositions-generated).
 
 ## Governance editor
@@ -262,7 +263,7 @@ the policy visually and every MCP client picks it up on next server start.
   `iris-mcp-governance` CLI (the second `bin` of `@iris-mcp/shared`) for everything: validation, the
   governed-key universe, the effective-policy cascade, and every write (`set`/`unset` — never hand-serialized
   JSON). With `irisMcpLauncher.developmentRepoPath` set it runs the checkout's built CLI
-  (`packages/shared/dist/cli/governance-cli.js`); otherwise `npx -y -p @iris-mcp/shared iris-mcp-governance`.
+  (`packages/shared/dist/cli/governance-cli.js`); otherwise `npx -y -p @iris-mcp/shared@1 iris-mcp-governance`.
   **Until `@iris-mcp/*` is published** (see the status note at the top of this file), the published-mode npx
   invocation cannot resolve — set `developmentRepoPath` to use the editor before publication.
 - **The governed-key universe is derived, never hand-maintained**: the CLI's `universe` command derives it from
@@ -300,7 +301,7 @@ All settings live under `irisMcpLauncher.*` (Settings UI: search "IRIS MCP Launc
 | `irisMcpLauncher.packages`         | `["admin","data","dev","interop","ops"]` | Which `@iris-mcp` suite packages to register. (The `"all"` meta-package key was removed in Story 31.6 — `@iris-mcp/all` ships no `dist`/`bin` and could never be started; select the individual packages you need.)                                                              |
 | `irisMcpLauncher.namespace`        | `"USER"`                                 | Default `IRIS_NAMESPACE` for every spawned server (matches the suite's own `loadConfig()` default). Server Manager has no per-server namespace concept, so this is the one connection field this extension cannot read from Server Manager.                                       |
 | `irisMcpLauncher.combineProfiles`  | `false`                                  | `false` (default): one definition per (package, server) pair, each single-profile. `true`: one definition **per package**, covering **every selected server** via the suite's multi-profile `IRIS_PROFILES` env var — address a specific server with the `server` tool parameter. |
-| `irisMcpLauncher.developmentRepoPath` | `""` (unset)                          | **Development only, machine-scoped** (User/Machine settings only — a workspace cannot set it) — see [Development mode](#development-mode) above. **Absolute** path to a local monorepo checkout; spawns `<path>/packages/<dir>/dist/index.js` with the editor's own interpreter (`process.execPath` + `ELECTRON_RUN_AS_NODE=1`) instead of `npx -y @iris-mcp/<pkg>`.                                    |
+| `irisMcpLauncher.developmentRepoPath` | `""` (unset)                          | **Development only, machine-scoped** (User/Machine settings only — a workspace cannot set it) — see [Development mode](#development-mode) above. **Absolute** path to a local monorepo checkout; spawns `<path>/packages/<dir>/dist/index.js` with the editor's own interpreter (`process.execPath` + `ELECTRON_RUN_AS_NODE=1`) instead of `npx -y @iris-mcp/<pkg>@1`.                                    |
 | `irisMcpLauncher.governance`       | `""` (unset)                             | Passed through unchanged as `IRIS_GOVERNANCE`.                                                                                                                                                                                                                                    |
 | `irisMcpLauncher.governancePreset` | `""` (unset)                             | Passed through unchanged as `IRIS_GOVERNANCE_PRESET`.                                                                                                                                                                                                                             |
 | `irisMcpLauncher.governanceFile`   | `""` (unset)                             | Passed through unchanged as `IRIS_GOVERNANCE_FILE` — the shared governance policy file, **also edited by the [Governance editor](#governance-editor)**. Empty = unset (no file; the editor shows an empty state). Explicit path only, never discovered; servers read the file once at startup — restart to apply edits. |
@@ -399,8 +400,8 @@ that decision is made:
       the VSIX manually via the [Marketplace publisher management page](https://marketplace.visualstudio.com/manage).
 - [ ] For Open VSX: `npx ovsx publish <file>.vsix -p <token>` (needs a separate Open VSX access token/namespace).
 - [ ] Decide a release cadence relative to the `@iris-mcp/*` npm packages this extension spawns via `npx` — a
-      version bump here is independent of theirs (this extension pins no version of the spawned packages; `npx -y`
-      always resolves the latest published `@iris-mcp/<pkg>`).
+      version bump here is independent of theirs (this extension pins the major only: `npx -y @iris-mcp/<pkg>@1`
+      resolves the latest published 1.x).
 
 ## License
 

@@ -13,6 +13,13 @@
  * keeps that script's checks (the target resolution and its CI refusal, `checkDistFresh`, the
  * reachability ping); this script adds only the armed gate run.
  *
+ * ARGUMENTS AND CI. Every command-line argument after the script name is forwarded to `vitest run`,
+ * after the gate files, so a caller can ask for a reporter (`--reporter=json --outputFile.json=<file>`);
+ * with no extra argument the run is what it always was. CI (`.github/workflows/ci.yml`) runs this
+ * script through `pnpm run prepublishOnly` and `scripts/ci-live-suite.mjs prepublish-admin`, armed, against a
+ * seeded throwaway IRIS (`scripts/throwaway-iris.mjs`), and fails the suite when a test of the roster
+ * skipped without an allowlist entry.
+ *
  * Spawned through `cmd.exe /d /s /c` on Windows for the reason documented in
  * `packages/iris-dev-mcp/scripts/prepublish-gate.mjs`: an env-var prefix on the script line
  * does not work under the bare `cmd.exe` npm/pnpm use there, so the variable is passed
@@ -31,7 +38,7 @@ const gateTestFiles = [
   "src/__tests__/resource-listprivileges-live-gate.test.ts",
 ];
 
-const vitestArgs = ["exec", "vitest", "run", ...gateTestFiles];
+const vitestArgs = ["exec", "vitest", "run", ...gateTestFiles, ...process.argv.slice(2)];
 
 const env = { ...process.env, IRIS_REQUIRE_LIVE: "1" };
 
@@ -62,8 +69,9 @@ if (result.error) {
 if (result.status !== 0) {
   console.error(
     "[prepublish-gate] FAILED CLOSED: a live-IRIS gate did not pass with IRIS_REQUIRE_LIVE=1. " +
-      "Publishing must not proceed. Point IRIS_HOST/IRIS_PORT/IRIS_USERNAME/IRIS_PASSWORD at a " +
-      "reachable IRIS instance with src/ExecuteMCPv2/ deployed, then retry.",
+      "Publishing must not proceed. Point IRIS_HOST/IRIS_PORT/IRIS_USERNAME/IRIS_PASSWORD/IRIS_NAMESPACE at a " +
+      "reachable IRIS instance whose ExecuteMCPv2 classes a built server's bootstrap deployed (a Setup.cls loaded by hand " +
+      "from src/ carries the dev marker, which the bootstrap then leaves alone), then retry.",
   );
 }
 

@@ -1,12 +1,13 @@
 /**
  * Shared fixtures for the skills-pack tests (`skills-pack.test.ts`, `pack-provenance.test.ts`,
  * `validate-prompts.test.ts`) and the skills-pack documentation tests: disposable temp roots, file placement, a real
- * `node` child process, and the anchors of a Markdown file's headings.
+ * `node` child process, the anchors of a Markdown file's headings, and a real `pnpm pack` (the packer that
+ * publishing uses) with its tarball extracted.
  *
  * Every temp root is created under `os.tmpdir()` and removed by the test that made it.
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -34,6 +35,15 @@ export function makeTempRoot(prefix: string): string {
 
 export function removeTempRoot(root: string): void {
   rmSync(root, { recursive: true, force: true });
+}
+
+/**
+ * Remove a symbolic link or junction itself, never what it points at; a path that is not a link is left alone and a missing path is
+ * a no-op. `rmSync` without `recursive` is not a way to do this: Node 24.0.0 refuses a link to a directory ("Path is a directory"),
+ * where Node 22 and 26 remove it.
+ */
+export function removeLink(linkPath: string): void {
+  if (lstatSync(linkPath, { throwIfNoEntry: false })?.isSymbolicLink()) unlinkSync(linkPath);
 }
 
 /** Write `content` at `rel` under `root`, creating the directories. Strings are written as UTF-8. */
@@ -99,4 +109,57 @@ export function runNode(cwd: string, script: string, args: string[] = [], option
     timeout: options.timeout,
   });
   return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+}
+
+/** One package packed by `pnpm pack` and extracted: the tarball, its files and its packed manifest. */
+export interface PnpmPack {
+  /** Absolute path of the tarball. */
+  tarball: string;
+  /** Size of the tarball in bytes. */
+  bytes: number;
+  /** Absolute path of the extracted `package/` directory. */
+  root: string;
+  /** Forward-slash paths, relative to the package root, of every file in the tarball, sorted. */
+  files: string[];
+  /** The `package.json` that was packed (after `publishConfig` overrides). */
+  manifest: Record<string, unknown>;
+}
+
+/**
+ * Pack `packageDir` with `pnpm pack` (the packer that publishing goes through: only pnpm applies `publishConfig` overrides such as
+ * `exports`) into `destination`, and extract the tarball next to it. The implementation is `scripts/lib/pnpm-pack.mjs`, shared with
+ * `scripts/ci-package-smoke.mjs`; lifecycle scripts are not run here, as with the `npm pack --ignore-scripts` siblings.
+ */
+export { pnpmPack } from "../../../../scripts/lib/pnpm-pack.mjs";
+
+/**
+ * Give the extracted `pack` a `node_modules` that holds exactly what a registry install of it would: each declared
+ * `dependencies` entry (taken from the repository's install of `packages/<dir>`), each installed optional dependency, and
+ * `workspaceLinks` in place of the `@iris-mcp/*` packages. A dependency the repository has not installed is an error naming it.
+ *
+ * @param pack - A package packed and extracted by {@link pnpmPack}.
+ * @param dir - The package's directory name under `packages/`.
+ * @param workspaceLinks - Absolute directories to link in for `@iris-mcp/*` dependencies, keyed by package name.
+ */
+export function installDeclaredDependencies(pack: PnpmPack, dir: string, workspaceLinks: Record<string, string>): void {
+  const manifest = pack.manifest as { dependencies?: Record<string, string>; optionalDependencies?: Record<string, string> };
+  const link = (name: string, to: string): void => {
+    const destination = join(pack.root, "node_modules", name);
+    mkdirSync(dirname(destination), { recursive: true });
+    symlinkSync(to, destination, "junction");
+  };
+  for (const name of Object.keys(manifest.dependencies ?? {})) {
+    const workspace = workspaceLinks[name];
+    if (workspace !== undefined) {
+      link(name, workspace);
+      continue;
+    }
+    const installed = join(REPO_ROOT, "packages", dir, "node_modules", name);
+    if (!existsSync(installed)) throw new Error(`${String(pack.manifest["name"])} declares ${name}, which packages/${dir}/node_modules does not hold`);
+    link(name, realpathSync(installed));
+  }
+  for (const name of Object.keys(manifest.optionalDependencies ?? {})) {
+    const installed = join(REPO_ROOT, "packages", dir, "node_modules", name);
+    if (existsSync(installed)) link(name, realpathSync(installed));
+  }
 }

@@ -112,11 +112,11 @@ function steppingClock(): () => Date {
 }
 
 const PKG: Record<CanonicalServerName, string> = {
-  "iris-dev-mcp": "@iris-mcp/dev",
-  "iris-admin-mcp": "@iris-mcp/admin",
-  "iris-ops-mcp": "@iris-mcp/ops",
-  "iris-interop-mcp": "@iris-mcp/interop",
-  "iris-data-mcp": "@iris-mcp/data",
+  "iris-dev-mcp": "@iris-mcp/dev@1",
+  "iris-admin-mcp": "@iris-mcp/admin@1",
+  "iris-ops-mcp": "@iris-mcp/ops@1",
+  "iris-interop-mcp": "@iris-mcp/interop@1",
+  "iris-data-mcp": "@iris-mcp/data@1",
 };
 
 function canonicalEntry(name: CanonicalServerName): CanonicalEntry {
@@ -682,7 +682,7 @@ describe("adversarial encodings and values through the engine (real fs)", () => 
     const entry: CanonicalEntry = {
       name: "iris-ops-mcp",
       command: "npx",
-      args: ["-y", "@iris-mcp/ops"],
+      args: ["-y", "@iris-mcp/ops@1"],
       env: { IRIS_NOTE: "設定-名前-🔧" },
     };
     expect(api.apply(ctx, "claude-code", "user", entry).ok).toBe(true);

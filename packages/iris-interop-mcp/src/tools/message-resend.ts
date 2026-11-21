@@ -363,9 +363,11 @@ export const messageResendTool: ToolDefinition = {
     "item + status (default 'Errored') + a from/to time window (max 7 days). " +
     "DRY-RUN-FIRST WORKFLOW: dryRun defaults to true and returns only the " +
     "match count + first-20 sample, resending NOTHING; executing requires " +
-    "BOTH dryRun:false AND confirm:true, otherwise the call is refused with " +
-    "no changes made. maxMessages caps the batch (default 100, HARD CAP 500) " +
-    "— a match count over the cap is refused (not truncated-and-executed); " +
+    "BOTH dryRun:false AND confirm:true: dryRun:false without confirm:true is " +
+    "refused with no changes made, and leaving dryRun out previews again. " +
+    "maxMessages caps the batch (default 100, HARD CAP 500) " +
+    "\u2014 an executing call whose match count is over the cap is refused " +
+    "(not truncated-and-executed), while a preview reports the full count; " +
     "narrow the window or item filter and retry.\n\n" +
     "GOVERNANCE — resend/resendFiltered are default-disabled writes (resend " +
     "duplicates data flow downstream; it is not a last-resort recovery action " +
@@ -431,7 +433,8 @@ export const messageResendTool: ToolDefinition = {
       .optional()
       .describe(
         "(resendFiltered) Cap on matched/resent messages (default: 100, HARD CAP: 500). " +
-          "A match count over this cap is refused, not truncated-and-executed.",
+          "An executing call whose match count is over this cap is refused, not truncated-and-executed; " +
+          "a preview reports the full count.",
       ),
     dryRun: z
       .boolean()
@@ -445,7 +448,8 @@ export const messageResendTool: ToolDefinition = {
       .optional()
       .describe(
         "(resendFiltered) Must be true together with dryRun:false to execute " +
-          "the resend; otherwise the call is refused with no changes made.",
+          "the resend; dryRun:false without confirm:true is refused with no changes made. " +
+          "Ignored while dryRun is true or omitted (the call previews).",
       ),
     namespace: z
       .string()

@@ -7,7 +7,7 @@
  *     normalization stopped recognising the spelling the workspace actually uses
  *     (`["dist", "!dist/**\/__tests__"]`), every gate would report a skipped (passing) result for the
  *     package and verify nothing. So: each publishable workspace package is dist-shipping (never
- *     skipped), and the dependencies-only meta-package `@iris-mcp/all` (`files: []`) is the one
+ *     skipped), and the dependencies-only meta-package `@iris-mcp/all` (`files: ["CHANGELOG.md"]`) is the one
  *     package that is skipped. Freshness itself is not asserted here (it depends on the host's
  *     build state); only that the package is checked.
  *  2. An `exports` subpath pattern (`./features/*`) names no single file, so it is not looked up on
@@ -53,12 +53,12 @@ describe("checkDistFresh against the real workspace manifests (Story 38.0, DW-41
     });
   }
 
-  it("iris-mcp-all (files: []) is the dependencies-only meta-package and is skipped", () => {
+  it("iris-mcp-all (no dist in files) is the dependencies-only meta-package and is skipped", () => {
     const pkgDir = path.join(PACKAGES_DIR, "iris-mcp-all");
     const manifest = JSON.parse(readFileSync(path.join(pkgDir, "package.json"), "utf8")) as {
       files?: unknown[];
     };
-    expect(manifest.files).toEqual([]);
+    expect(manifest.files).toEqual(["CHANGELOG.md"]);
 
     expect(checkDistFresh(pkgDir, "iris-mcp-all")).toEqual({ ok: true, skipped: true });
   });

@@ -713,11 +713,11 @@ describe("iris_doc_put: the schema and the description (Story 38.3, AC-3, AC-7)"
     expect(description).toContain("A leading byte-order mark is stripped from the content before it is sent");
   });
 
-  it("the tool key, its annotations and its scope are unchanged", () => {
+  it("the tool key and its scope are unchanged, and its annotations declare destructiveHint true (Story 42.10, DW-560)", () => {
     expect(docPutTool.name).toBe("iris_doc_put");
     expect(docPutTool.annotations).toEqual({
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       idempotentHint: true,
       openWorldHint: false,
     });

@@ -40,8 +40,8 @@
  * Budgets: the first built-server start (which includes the bootstrap deployment) stays under 60 s; each
  * search and each body read stays under 2 s (`[PERF]` log lines).
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (defaults: localhost:52773,
- * `_SYSTEM`, HSCUSTOM). Writes only the namespace and database `EXECMCPTMP396A` (with `Story396.Seed` and
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none defaulted, and
+ * only when `IRIS_REQUIRE_LIVE` arms the run (without it every row skips before any request). Writes only the namespace and database `EXECMCPTMP396A` (with `Story396.Seed` and
  * `Story394.SearchTable` inside it) and the HSCUSTOM class `ExecuteMCPv2.Temp.Story391Fixture`. No message of
  * HSCUSTOM is read.
  *
@@ -68,6 +68,7 @@ import {
   irisClassMethod,
   irisTargetFromEnv,
   isIrisReachable,
+  liveArmingSkipReason,
   openAuditedSession,
   openWireSession,
   pollAuditEntries,
@@ -311,7 +312,7 @@ async function lookupThenRead(
 // -- Setup and teardown --------------------------------------------------
 
 beforeAll(async () => {
-  skipReason = staleDistReason(REPO_ROOT, "shared");
+  skipReason = liveArmingSkipReason() ?? staleDistReason(REPO_ROOT, "shared");
   for (const pkg of ["iris-dev-mcp", "iris-admin-mcp", "iris-interop-mcp"]) skipReason ??= staleDistReason(REPO_ROOT, pkg);
   if (!skipReason) {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);

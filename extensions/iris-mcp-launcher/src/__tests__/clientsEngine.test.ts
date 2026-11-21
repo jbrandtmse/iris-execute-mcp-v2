@@ -60,13 +60,13 @@ function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
 // ── Resolution ─────────────────────────────────────────────────────────
 
 describe("resolveClientsCli", () => {
-  it("published mode: npx -y -p @iris-mcp/client-config iris-mcp-clients", async () => {
+  it("published mode: npx -y -p @iris-mcp/client-config@1 iris-mcp-clients", async () => {
     const resolution = await resolveClientsCli(settings());
     expect(resolution.ok).toBe(true);
     if (!resolution.ok) return;
     expect(resolution.target.mode).toBe("npx");
     expect(resolution.target.command).toBe("npx");
-    expect(resolution.target.baseArgs).toEqual(["-y", "-p", CLIENTS_CLI_NPM_PACKAGE, CLIENTS_CLI_BIN_NAME]);
+    expect(resolution.target.baseArgs).toEqual(["-y", "-p", "@iris-mcp/client-config@1", CLIENTS_CLI_BIN_NAME]);
     expect(CLIENTS_CLI_NPM_PACKAGE).toBe("@iris-mcp/client-config");
     expect(CLIENTS_CLI_BIN_NAME).toBe("iris-mcp-clients");
   });
@@ -315,10 +315,10 @@ describe("runClientsCli", () => {
       spawned = { command, args };
       return child;
     };
-    const npxTarget: ClientsCliTarget = { command: "npx", baseArgs: ["-y", "-p", "@iris-mcp/client-config", "iris-mcp-clients"], extraEnv: {}, mode: "npx" };
+    const npxTarget: ClientsCliTarget = { command: "npx", baseArgs: ["-y", "-p", "@iris-mcp/client-config@1", "iris-mcp-clients"], extraEnv: {}, mode: "npx" };
     await runClientsCli(npxTarget, { kind: "detect" }, {}, spawnImpl, 1000, "win32");
     expect(spawned?.command.toLowerCase()).toContain("cmd.exe");
-    expect(spawned?.args).toEqual(["/d", "/s", "/c", "npx", "-y", "-p", "@iris-mcp/client-config", "iris-mcp-clients", "detect", "--json"]);
+    expect(spawned?.args).toEqual(["/d", "/s", "/c", "npx", "-y", "-p", "@iris-mcp/client-config@1", "iris-mcp-clients", "detect", "--json"]);
   });
 });
 

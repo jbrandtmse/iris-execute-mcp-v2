@@ -142,7 +142,7 @@ export type ServerManagerApiFailureReason = "not-available" | "shape-mismatch";
  *
  * Deliberately excludes `"all"` (AC 31.6.5): `@iris-mcp/all` declares no
  * `main`/`bin`/`files` and ships no `dist` — it "contains no source code of
- * its own" (its own README) — so `npx -y @iris-mcp/all` has no executable to
+ * its own" (its own README) — so `npx -y @iris-mcp/all@1` has no executable to
  * run and local mode has no `dist/index.js` to target. It is unspawnable by
  * construction, not by a bug fixable in this extension. See `settings.ts`'s
  * `hadStaleAllPackage` for how a settings.json that still lists `"all"` is
@@ -174,8 +174,8 @@ export interface LauncherSettings {
   combineProfiles: boolean;
   /**
    * Absolute path to a local monorepo checkout of the IRIS MCP suite (AC
-   * 31.6.1). `""` (default) ⇒ spawn stays `npx -y @iris-mcp/<pkg>`, byte-
-   * identical to Story 31.5. Non-empty ⇒ each definition spawns
+   * 31.6.1). `""` (default) ⇒ spawn stays `npx -y @iris-mcp/<pkg>@1`, the shape
+   * of Story 31.5 plus the major pin. Non-empty ⇒ each definition spawns
    * `node <developmentRepoPath>/packages/<dir>/dist/index.js` instead — see
    * `definitions.ts`'s `PACKAGE_DIR_NAME` for the explicit key->directory map.
    * Development-only: this makes the extension execute an arbitrary local

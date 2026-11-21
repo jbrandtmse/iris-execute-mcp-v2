@@ -1,0 +1,273 @@
+/**
+ * Story 42.3 (AC 42.3.3; DW-443) -- the pure helpers of `scripts/ci-package-smoke.mjs`, the check that the packages install and
+ * start from their tarballs (the `package` job). The script itself packs 8 packages, runs `npm install` against the registry for
+ * the third-party dependencies and starts 8 bins, so it is not part of the default suite: it is run once by hand (`## Verification`)
+ * and by the `package` job. Here: which packages and bins it covers, the install manifest that keeps every `@iris-mcp/*` package
+ * off the registry, the tool counts it expects (the committed snapshot's), and the lockfile check that proves the install used
+ * the tarballs.
+ *
+ * Reads files and calls pure functions: nothing is packed, installed or started.
+ */
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import {
+  KEEP_IRIS_VARIABLES,
+  binsOf,
+  expectedToolCount,
+  installManifest,
+  keepDirProblems,
+  keepMcpConfig,
+  lockfileProblems,
+  main,
+  publishablePackages,
+  snapshotServers,
+} from "../../../../scripts/ci-package-smoke.mjs";
+import { PACKAGE_DIRS } from "../../../../scripts/lib/ci-checks.mjs";
+import { REPO_ROOT } from "../../../../scripts/lib/live-gate-scan.mjs";
+
+const snapshot = JSON.parse(readFileSync(path.join(REPO_ROOT, "packages", "iris-mcp-all", "src", "__tests__", "fixtures", "tools-list-snapshot.json"), "utf8")) as {
+  servers: Record<string, Record<string, unknown>>;
+};
+
+const SERVERS = ["iris-admin-mcp", "iris-data-mcp", "iris-dev-mcp", "iris-interop-mcp", "iris-ops-mcp"];
+
+describe("the packages and bins the smoke covers", () => {
+  const packages = publishablePackages() as Array<{ dir: string; name: string; manifest: Record<string, unknown> }>;
+
+  it("is every non-private package under packages/, the 8 that CI registers", () => {
+    expect(packages.map((pkg) => pkg.dir).sort()).toEqual([...PACKAGE_DIRS].sort());
+    expect(packages.map((pkg) => pkg.name).sort()).toEqual([
+      "@iris-mcp/admin",
+      "@iris-mcp/all",
+      "@iris-mcp/client-config",
+      "@iris-mcp/data",
+      "@iris-mcp/dev",
+      "@iris-mcp/interop",
+      "@iris-mcp/ops",
+      "@iris-mcp/shared",
+    ]);
+    expect(packages.every((pkg) => pkg.manifest["private"] !== true)).toBe(true);
+  });
+
+  it("finds the 5 server bins and the 3 CLI bins, and no bin on the meta-package", () => {
+    const bins = Object.fromEntries(packages.map((pkg) => [pkg.name, binsOf(pkg.manifest)]));
+
+    expect(bins["@iris-mcp/dev"]).toEqual(["iris-dev-mcp"]);
+    expect(bins["@iris-mcp/client-config"]).toEqual(["iris-mcp-clients"]);
+    expect(bins["@iris-mcp/shared"]).toEqual(["iris-mcp-credentials", "iris-mcp-governance"]);
+    expect(bins["@iris-mcp/all"]).toEqual([]);
+    expect(Object.values(bins).flat().sort()).toEqual([...SERVERS, "iris-mcp-clients", "iris-mcp-credentials", "iris-mcp-governance"].sort());
+  });
+
+  it("reads a bin written as a string and a manifest with none", () => {
+    expect(binsOf({ name: "@scope/tool", bin: "./dist/cli.js" })).toEqual(["tool"]);
+    expect(binsOf({ name: "@scope/tool" })).toEqual([]);
+    expect(binsOf({ name: "x", bin: { b: "./b.js", a: "./a.js" } })).toEqual(["a", "b"]);
+  });
+});
+
+describe("the install manifest keeps every @iris-mcp package off the registry", () => {
+  const tarballs = (publishablePackages() as Array<{ name: string }>).map((pkg) => ({ name: pkg.name, tarball: `/work/packs/${pkg.name.replace("@iris-mcp/", "iris-mcp-")}-1.0.0.tgz` }));
+
+  it("resolves each package as a file: dependency and as an override, to the same tarball", () => {
+    const manifest = installManifest(tarballs) as { private: boolean; dependencies: Record<string, string>; overrides: Record<string, string> };
+
+    expect(manifest.private).toBe(true);
+    expect(Object.keys(manifest.dependencies)).toHaveLength(8);
+    expect(manifest.overrides).toEqual(manifest.dependencies);
+    for (const { name, tarball } of tarballs) expect(manifest.dependencies[name]).toBe(`file:${tarball}`);
+    expect(Object.values(manifest.dependencies).every((spec) => spec.startsWith("file:/"))).toBe(true);
+    expect(Object.keys(manifest.dependencies)).toEqual([...Object.keys(manifest.dependencies)].sort());
+  });
+
+  it("is the same whatever order the tarballs come in", () => {
+    expect(installManifest([...tarballs].reverse())).toEqual(installManifest(tarballs));
+  });
+});
+
+describe("the tool counts the smoke expects", () => {
+  it("are the committed tools-list snapshot's, 27, 8, 33, 25 and 22", () => {
+    expect(snapshotServers()).toEqual(SERVERS);
+    expect(Object.fromEntries(SERVERS.map((server) => [server, expectedToolCount(server)]))).toEqual({
+      "iris-admin-mcp": 27,
+      "iris-data-mcp": 8,
+      "iris-dev-mcp": 33,
+      "iris-interop-mcp": 25,
+      "iris-ops-mcp": 22,
+    });
+    for (const server of SERVERS) expect(expectedToolCount(server), server).toBe(Object.keys(snapshot.servers[server] as object).length);
+  });
+
+  it("refuses a server the snapshot does not list", () => {
+    expect(() => expectedToolCount("iris-new-mcp")).toThrow(/no server "iris-new-mcp"/);
+  });
+});
+
+describe("the lockfile check that proves the install used the tarballs", () => {
+  const names = ["@iris-mcp/shared", "@iris-mcp/dev"];
+  const lock = (packages: Record<string, { resolved?: string }>) => ({ packages });
+
+  it("passes when every @iris-mcp package is resolved from a local tarball", () => {
+    expect(
+      lockfileProblems(
+        lock({
+          "": {},
+          "node_modules/@iris-mcp/shared": { resolved: "file:../packs/shared.tgz" },
+          "node_modules/@iris-mcp/dev": { resolved: "file:../packs/dev.tgz" },
+          "node_modules/zod": { resolved: "https://registry.npmjs.org/zod/-/zod-4.3.6.tgz" },
+        }),
+        names,
+      ),
+    ).toEqual([]);
+  });
+
+  it("names a package resolved from the registry, a package missing, and a package that is no package of this repository", () => {
+    const problems = lockfileProblems(
+      lock({
+        "node_modules/@iris-mcp/shared": { resolved: "https://registry.npmjs.org/@iris-mcp/shared/-/shared-1.0.0.tgz" },
+        "node_modules/@iris-mcp/stranger": { resolved: "file:../x.tgz" },
+        "node_modules/@iris-mcp/dev/node_modules/@iris-mcp/other": { resolved: "file:../y.tgz" },
+      }),
+      names,
+    );
+
+    expect(problems).toEqual([
+      '@iris-mcp/shared was resolved from "https://registry.npmjs.org/@iris-mcp/shared/-/shared-1.0.0.tgz", not from a local tarball.',
+      "@iris-mcp/dev is not in the lockfile.",
+      "@iris-mcp/stranger is in the lockfile but is no package of this repository.",
+      "@iris-mcp/other is in the lockfile but is no package of this repository.",
+    ]);
+  });
+
+  it("names a nested copy of a repository package that was resolved from the registry", () => {
+    const problems = lockfileProblems(
+      lock({
+        "node_modules/@iris-mcp/shared": { resolved: "file:../packs/shared.tgz" },
+        "node_modules/@iris-mcp/dev": { resolved: "file:../packs/dev.tgz" },
+        "node_modules/@iris-mcp/dev/node_modules/@iris-mcp/shared": { resolved: "https://registry.npmjs.org/@iris-mcp/shared/-/shared-1.0.0.tgz" },
+      }),
+      names,
+    );
+
+    expect(problems).toEqual([
+      '@iris-mcp/shared at node_modules/@iris-mcp/dev/node_modules/@iris-mcp/shared was resolved from "https://registry.npmjs.org/@iris-mcp/shared/-/shared-1.0.0.tgz", not from a local tarball.',
+    ]);
+  });
+
+  it("treats a lockfile with no packages as missing every package", () => {
+    expect(lockfileProblems({}, names)).toHaveLength(2);
+  });
+});
+
+// -- Story 42.6: --keep -------------------------------------------------------------------------------------------
+
+describe("--keep <dir>: which directories the smoke accepts (AC 42.6.1)", () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+  const scratch = (): string => {
+    const root = mkdtempSync(path.join(tmpdir(), "smoke-keep-"));
+    roots.push(root);
+    return root;
+  };
+
+  it("accepts an absent directory and an empty one, both outside the repository", () => {
+    const root = scratch();
+    expect(keepDirProblems(path.join(root, "project"), REPO_ROOT)).toEqual([]);
+    expect(keepDirProblems(path.join(root, "deeper", "still", "project"), REPO_ROOT)).toEqual([]);
+    expect(keepDirProblems(root, REPO_ROOT)).toEqual([]);
+  });
+
+  it("refuses a directory that holds anything, and a path that is a file", () => {
+    const root = scratch();
+    writeFileSync(path.join(root, "a.txt"), "x");
+    expect(keepDirProblems(root, REPO_ROOT)).toEqual([expect.stringMatching(/is not an empty directory\. Pass an absent or empty directory\.$/)]);
+    expect(keepDirProblems(path.join(root, "a.txt"), REPO_ROOT)).toEqual([expect.stringContaining("is not an empty directory")]);
+  });
+
+  it("refuses the repository, a directory inside it (absent or not), and a link that leads into it", () => {
+    const root = scratch();
+    const repo = path.join(root, "repo");
+    mkdirSync(path.join(repo, "sub"), { recursive: true });
+    for (const target of [repo, path.join(repo, "sub"), path.join(repo, "new", "project")]) {
+      expect(keepDirProblems(target, repo), target).toEqual(expect.arrayContaining([expect.stringContaining("is inside the repository. Pass a directory outside it")]));
+    }
+    const link = path.join(root, "link");
+    symlinkSync(repo, link, "junction");
+    expect(keepDirProblems(path.join(link, "project"), repo), "through a link").toEqual([expect.stringContaining("is inside the repository")]);
+  });
+
+  it("a directory inside the repository whose name starts with two dots is inside it, and a dangling link is not an absent directory", () => {
+    const root = scratch();
+    const repo = path.join(root, "repo");
+    mkdirSync(repo);
+    expect(keepDirProblems(path.join(repo, "..cache"), repo)).toEqual([expect.stringContaining("is inside the repository")]);
+    const dangling = path.join(root, "dangling");
+    symlinkSync(path.join(root, "nowhere"), dangling);
+    expect(keepDirProblems(dangling, repo)).toEqual([expect.stringContaining("is not an empty directory")]);
+  });
+
+  it("on a case-insensitive volume, the repository spelled in other letter case is still the repository", (context) => {
+    const root = scratch();
+    const repo = path.join(root, "repo");
+    mkdirSync(repo);
+    const respelled = path.join(root, "REPO");
+    if (!existsSync(respelled)) context.skip();
+    expect(keepDirProblems(path.join(respelled, "project"), repo)).toEqual([expect.stringContaining("is inside the repository")]);
+    expect(keepDirProblems(respelled, repo)).toEqual([expect.stringContaining("is inside the repository")]);
+  });
+
+  it("a sibling whose name merely starts with the repository's is outside it", () => {
+    const root = scratch();
+    mkdirSync(path.join(root, "repo"));
+    expect(keepDirProblems(path.join(root, "repo-other", "project"), path.join(root, "repo"))).toEqual([]);
+  });
+
+  it("main refuses a non-empty directory, a directory inside the repository, and any other arguments with exit 2, before it packs anything", async () => {
+    const root = scratch();
+    writeFileSync(path.join(root, "a.txt"), "x");
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: string | Uint8Array) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      expect(await main(["--keep", root])).toBe(2);
+      expect(await main(["--keep", path.join(REPO_ROOT, "keep-test-project")])).toBe(2);
+      expect(existsSync(path.join(REPO_ROOT, "keep-test-project")), "nothing was created inside the repository").toBe(false);
+      for (const bad of [["--keep"], ["--keep", path.join(root, "p"), "extra"], ["--kept", path.join(root, "p")], ["unexpected-argument"], [path.join(root, "p"), "--keep"], ["--keep", "--keep"], ["--keep", ""]]) {
+        expect(await main(bad), JSON.stringify(bad)).toBe(2);
+      }
+    } finally {
+      spy.mockRestore();
+      rmSync(path.join(REPO_ROOT, "keep-test-project"), { recursive: true, force: true });
+    }
+    const text = written.join("");
+    expect(text).toContain("is not an empty directory");
+    expect(text).toContain("is inside the repository");
+    expect(text.match(/usage: node scripts\/ci-package-smoke\.mjs \[--keep <dir>\]/g)).toHaveLength(7);
+    expect(existsSync(path.join(root, "p")), "an accepted-looking directory is not made by a refused call").toBe(false);
+  });
+});
+
+describe("the .mcp.json of a kept project (AC 42.6.1)", () => {
+  it("names each server once, through npx --no, with the five IRIS variables as references", () => {
+    expect([...KEEP_IRIS_VARIABLES]).toEqual(["IRIS_HOST", "IRIS_PORT", "IRIS_USERNAME", "IRIS_PASSWORD", "IRIS_NAMESPACE"]);
+    const env = { IRIS_HOST: "${IRIS_HOST}", IRIS_PORT: "${IRIS_PORT}", IRIS_USERNAME: "${IRIS_USERNAME}", IRIS_PASSWORD: "${IRIS_PASSWORD}", IRIS_NAMESPACE: "${IRIS_NAMESPACE}" };
+    expect(keepMcpConfig(SERVERS)).toEqual({ mcpServers: Object.fromEntries(SERVERS.map((bin) => [bin, { command: "npx", args: ["--no", "--", bin], env }])) });
+  });
+
+  it("is the same whatever order the servers come in, and writes no password or other literal", () => {
+    expect(JSON.stringify(keepMcpConfig([...SERVERS].reverse()))).toBe(JSON.stringify(keepMcpConfig(SERVERS)));
+    expect(Object.keys(keepMcpConfig([...SERVERS].reverse()).mcpServers)).toEqual([...SERVERS].sort());
+    expect(JSON.stringify(keepMcpConfig(SERVERS))).not.toMatch(/SYS|_SYSTEM|127\.0\.0\.1/);
+  });
+
+  it("covers the five servers of the committed snapshot", () => {
+    expect(Object.keys(keepMcpConfig(snapshotServers()).mcpServers)).toEqual(SERVERS);
+  });
+});

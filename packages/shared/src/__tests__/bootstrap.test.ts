@@ -18,10 +18,121 @@ import {
 import {
   BOOTSTRAP_CLASSES,
   BOOTSTRAP_VERSION,
+  IPM_INSTALL_GUARD,
+  IPM_MODULE_NAME,
   getBootstrapClasses,
 } from "../bootstrap-classes.js";
+import { parseBootstrapMarker } from "../bootstrap-version.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * The embedded marker moved by `change`: each number is added to the matching
+ * part of `BOOTSTRAP_VERSION`, and `hash` replaces its hash.
+ */
+function embeddedMarkerMoved(change: {
+  major?: number;
+  minor?: number;
+  patch?: number;
+  sequence?: number;
+  hash?: string;
+}): string {
+  const parsed = parseBootstrapMarker(BOOTSTRAP_VERSION);
+  if (parsed.kind !== "stamped") throw new Error(`the embedded marker ${BOOTSTRAP_VERSION} is not stamped`);
+  const [major, minor, patch] = parsed.semver;
+  return (
+    `${Number(major) + (change.major ?? 0)}.${Number(minor) + (change.minor ?? 0)}.${Number(patch) + (change.patch ?? 0)}` +
+    `+${Number(parsed.sequence) + (change.sequence ?? 0)}.${change.hash ?? parsed.hash}`
+  );
+}
+
+/** An Atelier reply to the `Setup_GetBootstrapVersion()` query. */
+function versionReply(version: string): Response {
+  return mockResponse(envelope({ content: [{ Version: version }] }));
+}
+
+/** An Atelier reply to a query whose method does not exist, as a missing deployment answers it. */
+function missingMethodReply(): Response {
+  return mockResponse(
+    {
+      status: { errors: [{ error: "Method not found" }], summary: "Error" },
+      console: [],
+      result: null,
+    },
+    { status: 400 },
+  );
+}
+
+/**
+ * The Atelier reply to `GET doc/ExecuteMCPv2.Setup.cls` when the class does not exist: HTTP 404, as Atelier's GetDoc
+ * answers a missing document (live check 2026-10-22: `iris_doc_get` of a missing document in HSCUSTOM took its
+ * `statusCode === 404` branch). Only the status decides; the envelope carries no error.
+ */
+function setupAbsentReply(): Response {
+  return mockResponse({ status: { errors: [], summary: "" }, console: [], result: {} }, { status: 404 });
+}
+
+/** The Atelier reply to `GET doc/ExecuteMCPv2.Setup.cls` when the class exists. */
+function setupFoundReply(): Response {
+  return mockResponse(
+    envelope({ name: "ExecuteMCPv2.Setup.cls", cat: "CLS", ts: "2026-10-21 12:00:00.000", status: "", enc: false, content: ["Class ExecuteMCPv2.Setup", "{", "}"] }),
+  );
+}
+
+/** The number of recorded fetch calls that GET the `ExecuteMCPv2.Setup.cls` document. */
+function setupDocGetCount(fetchMock: ReturnType<typeof vi.fn>): number {
+  return fetchMock.mock.calls.filter(
+    (call: unknown[]) => (call[1] as { method?: string }).method === "GET" && String(call[0]).endsWith("/doc/ExecuteMCPv2.Setup.cls"),
+  ).length;
+}
+
+/**
+ * The Atelier reply to `GET doc/ExecuteMCPv2.InstallGuard.cls` when the IPM-only guard class does not exist (HTTP 404, as
+ * for the Setup document): nothing installed the classes through IPM, and the bootstrap may write.
+ */
+function guardAbsentReply(): Response {
+  return setupAbsentReply();
+}
+
+/** The Atelier reply to `GET doc/ExecuteMCPv2.InstallGuard.cls` when the guard class exists: IPM installed the classes. */
+function guardFoundReply(): Response {
+  return mockResponse(
+    envelope({ name: "ExecuteMCPv2.InstallGuard.cls", cat: "CLS", ts: "2026-10-21 12:00:00.000", status: "", enc: false, content: ["Class ExecuteMCPv2.InstallGuard", "{", "}"] }),
+  );
+}
+
+/** The number of recorded fetch calls that GET the `ExecuteMCPv2.InstallGuard.cls` document. */
+function guardDocGetCount(fetchMock: ReturnType<typeof vi.fn>): number {
+  return fetchMock.mock.calls.filter(
+    (call: unknown[]) => (call[1] as { method?: string }).method === "GET" && String(call[0]).endsWith("/doc/ExecuteMCPv2.InstallGuard.cls"),
+  ).length;
+}
+
+/** Every `[WARN]` line written to the (mocked) console.error since the test began. */
+function warnLines(): string[] {
+  return vi
+    .mocked(console.error)
+    .mock.calls.map((call) => String(call[0]))
+    .filter((line) => line.startsWith("[WARN]"));
+}
+
+/** The number of recorded fetch calls that are PUTs. */
+function putCount(fetchMock: ReturnType<typeof vi.fn>): number {
+  return fetchMock.mock.calls.filter((call: unknown[]) => (call[1] as { method?: string }).method === "PUT").length;
+}
+
+/** The number of recorded fetch calls that compile. */
+function compileCount(fetchMock: ReturnType<typeof vi.fn>): number {
+  return fetchMock.mock.calls.filter((call: unknown[]) => String(call[0]).includes("action/compile")).length;
+}
+
+/** The number of recorded fetch calls whose body names `Setup_<name>(` or `Setup_<name>()`. */
+function setupCallCount(fetchMock: ReturnType<typeof vi.fn>, name: string): number {
+  return fetchMock.mock.calls.filter((call: unknown[]) => {
+    const body = (call[1] as { body?: unknown }).body;
+    return typeof body === "string" && body.includes(`Setup_${name}(`);
+  }).length;
+}
 
 function makeConfig(): IrisConnectionConfig {
   return {
@@ -190,7 +301,47 @@ describe("bootstrap", () => {
       http.destroy();
     });
 
-    it("should return {status: 'missing'} when SQL fails (class/method not found)", async () => {
+    // The deployed marker is ORDERED against the embedded one: only an older
+    // deployment is stale (redeployable); a newer or foreign one is left alone,
+    // and neither makes an IsConfigured() call (CSRF preflight + one version query).
+    it.each([
+      { label: "a higher major", deployed: embeddedMarkerMoved({ major: 1 }), expected: "newer" },
+      { label: "a higher minor", deployed: embeddedMarkerMoved({ minor: 1 }), expected: "newer" },
+      { label: "a higher patch", deployed: embeddedMarkerMoved({ patch: 1 }), expected: "newer" },
+      { label: "the same semver and a higher sequence", deployed: embeddedMarkerMoved({ sequence: 1 }), expected: "newer" },
+      { label: "a higher semver with a lower sequence", deployed: embeddedMarkerMoved({ major: 1, sequence: -1 }), expected: "newer" },
+      { label: "the same semver and sequence with a different hash", deployed: embeddedMarkerMoved({ hash: "ffffffffffff" }), expected: "foreign" },
+      { label: "the dev placeholder", deployed: "dev", expected: "foreign" },
+      { label: "an unparseable value", deployed: "not a marker", expected: "foreign" },
+    ])("should return {status: '$expected'} without an IsConfigured call for $label", async ({ deployed, expected }) => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      setupCsrfThenRequest(envelope({ content: [{ Version: deployed }] }));
+
+      const result = await probeCustomRest(http, config, 7);
+      expect(result).toEqual({ status: expected, deployedVersion: deployed });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      http.destroy();
+    });
+
+    it.each([
+      { label: "a legacy bare hash", deployed: "abcdef123456" },
+      { label: "a lower semver with a higher sequence", deployed: "0.0.0+999999.aaaaaaaaaaaa" },
+      { label: "the same semver and a lower sequence", deployed: embeddedMarkerMoved({ sequence: -1 }) },
+    ])("should return {status: 'stale'} for an older deployment: $label", async ({ deployed }) => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      setupCsrfThenRequest(envelope({ content: [{ Version: deployed }] }));
+
+      expect(await probeCustomRest(http, config, 7)).toEqual({ status: "stale", deployedVersion: deployed });
+
+      http.destroy();
+    });
+
+    it("should return {status: 'missing'} when SQL fails AND the Setup document route answers 404 (a positive absence)", async () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
@@ -202,21 +353,27 @@ describe("bootstrap", () => {
           setCookie: ["CSPSESSIONID=s1; path=/"],
         }),
       );
-      // SQL call fails with 400 — this is the pre-version-stamp upgrade
-      // path, where old Setup.cls lacks GetBootstrapVersion()
-      fetchMock.mockResolvedValueOnce(
-        mockResponse(
-          {
-            status: {
-              errors: [{ error: "Method not found" }],
-              summary: "Error",
-            },
-            console: [],
-            result: null,
-          },
-          { status: 400 },
-        ),
+      // SQL call fails: the GetBootstrapVersion function does not exist
+      fetchMock.mockResolvedValueOnce(missingMethodReply());
+      // GET doc/ExecuteMCPv2.Setup.cls: 404, the class does not exist
+      fetchMock.mockResolvedValueOnce(setupAbsentReply());
+
+      const result = await probeCustomRest(http, config, 7);
+      expect(result).toEqual({ status: "missing" });
+      expect(setupDocGetCount(fetchMock)).toBe(1);
+      expect(String(fetchMock.mock.calls[2]?.[0])).toBe("http://localhost:52773/api/atelier/v7/USER/doc/ExecuteMCPv2.Setup.cls");
+
+      http.destroy();
+    });
+
+    it("should return {status: 'missing'} when SQL returns an empty version string AND the Setup document route answers 404", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+
+      setupCsrfThenRequest(
+        envelope({ content: [{ Version: "" }] }),
       );
+      fetchMock.mockResolvedValueOnce(setupAbsentReply());
 
       const result = await probeCustomRest(http, config, 7);
       expect(result).toEqual({ status: "missing" });
@@ -224,16 +381,20 @@ describe("bootstrap", () => {
       http.destroy();
     });
 
-    it("should return {status: 'missing'} when SQL returns empty version string", async () => {
+    it("should return {status: 'unknown'} when SQL fails while the Setup class exists, naming both findings (DW-673)", async () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
-      setupCsrfThenRequest(
-        envelope({ content: [{ Version: "" }] }),
-      );
+      setupCsrfThenRequest({ status: { errors: [{ error: "Internal error" }], summary: "Error" }, console: [], result: null }, 500);
+      fetchMock.mockResolvedValueOnce(setupFoundReply());
 
       const result = await probeCustomRest(http, config, 7);
-      expect(result).toEqual({ status: "missing" });
+      expect(result.status).toBe("unknown");
+      const reason = (result as { reason: string }).reason;
+      expect(reason).toContain("the version query failed: IRIS returned HTTP 500");
+      expect(reason).toContain("and the ExecuteMCPv2.Setup class exists");
+      // No IsConfigured call: CSRF, the version query and the document GET only.
+      expect(fetchMock).toHaveBeenCalledTimes(3);
 
       http.destroy();
     });
@@ -420,11 +581,62 @@ describe("bootstrap", () => {
 
       http.destroy();
     });
+
+    // A caller that deploys documents of its own (the CI seed's test fixtures) passes its own map; the bootstrap
+    // flow passes none and keeps today's requests.
+    it("deploys exactly the documents of the map it is given, with the same URL shape", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      fetchMock.mockResolvedValueOnce(
+        mockResponse("", {
+          status: 200,
+          headers: { "X-CSRF-Token": "test-csrf-token" },
+          setCookie: ["CSPSESSIONID=s1; path=/"],
+        }),
+      );
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+
+      await deployClasses(
+        http,
+        config,
+        7,
+        new Map([
+          ["ExecuteMCPv2.Tests.First.cls", "Class ExecuteMCPv2.Tests.First {\n}"],
+          ["ExecuteMCPv2.QAFixtures.Second.cls", "Class ExecuteMCPv2.QAFixtures.Second {\n}"],
+        ]),
+      );
+
+      const putCalls = fetchMock.mock.calls.filter((call: unknown[]) => (call[1] as { method: string }).method === "PUT");
+      expect(putCalls.map((call: unknown[]) => call[0] as string)).toEqual([
+        expect.stringMatching(/\/api\/atelier\/v7\/USER\/doc\/ExecuteMCPv2\.Tests\.First\.cls\?ignoreConflict=1$/),
+        expect.stringMatching(/\/api\/atelier\/v7\/USER\/doc\/ExecuteMCPv2\.QAFixtures\.Second\.cls\?ignoreConflict=1$/),
+      ]);
+      expect(JSON.parse(putCalls[0]![1].body as string)).toEqual({ enc: false, content: ["Class ExecuteMCPv2.Tests.First {", "}"] });
+
+      http.destroy();
+    });
   });
 
   // ── compileClasses ──────────────────────────────────────────────
 
   describe("compileClasses", () => {
+    it("compiles the names it is given and returns the Atelier response", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      const reply = envelope({ content: [{ name: "ExecuteMCPv2.Tests.First.cls", status: "" }] });
+      setupCsrfThenRequest(reply);
+
+      const response = await compileClasses(http, config, 7, ["ExecuteMCPv2.Tests.First.cls"]);
+
+      const postCalls = fetchMock.mock.calls.filter((call: unknown[]) => (call[1] as { method: string }).method === "POST");
+      expect(postCalls.length).toBe(1);
+      expect(JSON.parse(postCalls[0]![1].body as string)).toEqual(["ExecuteMCPv2.Tests.First.cls"]);
+      expect(response.result).toEqual({ content: [{ name: "ExecuteMCPv2.Tests.First.cls", status: "" }] });
+
+      http.destroy();
+    });
+
     it("should POST with all class names", async () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
@@ -575,7 +787,13 @@ describe("bootstrap", () => {
       fetchMock.mockResolvedValueOnce(
         mockResponse(envelope({ content: [{ Configured: 0 }] })),
       );
+      // Ownership before the first write: the IPM-only guard class does not exist (404)
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
+      // Re-probe immediately before the compile: the marker is still the embedded one
+      fetchMock.mockResolvedValueOnce(versionReply(BOOTSTRAP_VERSION));
+      // Ownership again at the re-check: still not IPM's
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
       // Recompile: POST action/compile response (NO deploy PUTs — source is current)
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
       // Configure: POST response
@@ -612,8 +830,11 @@ describe("bootstrap", () => {
       });
       expect(compileCalls.length).toBe(1);
 
-      // 1 CSRF + 1 version SQL + 1 IsConfigured SQL + compile + configure + mapping + ensureRoot = 7
-      expect(fetchMock).toHaveBeenCalledTimes(7);
+      // 1 CSRF + 1 version SQL + 1 IsConfigured SQL + 1 ownership + 1 re-probe + 1 ownership + compile + configure + mapping + ensureRoot = 10
+      expect(fetchMock).toHaveBeenCalledTimes(10);
+      expect(guardDocGetCount(fetchMock), "ownership is asked at startup and again at the re-check").toBe(2);
+      expect(result.ipmOwned, "an unowned deployment carries no ipmOwned key").toBeUndefined();
+      expect("ipmOwned" in result).toBe(false);
 
       http.destroy();
     });
@@ -634,7 +855,13 @@ describe("bootstrap", () => {
       fetchMock.mockResolvedValueOnce(
         mockResponse(envelope({ content: [{ Configured: 0 }] })),
       );
+      // Ownership before the first write: not IPM's (404)
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
+      // Re-probe immediately before the compile: the marker is still the embedded one
+      fetchMock.mockResolvedValueOnce(versionReply(BOOTSTRAP_VERSION));
+      // Ownership at the re-check: still not IPM's
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
       // Recompile: POST action/compile response (runs before Configure on unconfigured)
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
       // Configure: fails with 403 (no %Admin_Manage)
@@ -669,6 +896,9 @@ describe("bootstrap", () => {
       expect(result.manualInstructions).toBeDefined();
       expect(result.manualInstructions).toContain("Terminal");
       expect(result.manualInstructions).toContain("USER");
+      expect(result.manualInstructions, "AC 42.4.3: the IPM fallback names this build's package version").toContain(
+        `zpm "install ${IPM_MODULE_NAME} ${BOOTSTRAP_VERSION.split("+")[0]}"`,
+      );
 
       http.destroy();
     });
@@ -696,6 +926,10 @@ describe("bootstrap", () => {
           { status: 400 },
         ),
       );
+      // Probe: GET doc/ExecuteMCPv2.Setup.cls answers 404 — the class is provably absent
+      fetchMock.mockResolvedValueOnce(setupAbsentReply());
+      // Ownership before the first write: not IPM's (404)
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Deploy: PUT responses for each class (CSRF already established)
       for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
@@ -703,6 +937,12 @@ describe("bootstrap", () => {
           mockResponse(envelope({ result: [] })),
         );
       }
+
+      // Re-probe immediately before the compile: the uploaded classes are not
+      // compiled yet, so no marker exists — the expected state after a positive absence
+      fetchMock.mockResolvedValueOnce(missingMethodReply());
+      // Ownership at the re-check: still not IPM's
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Compile: POST response
       fetchMock.mockResolvedValueOnce(
@@ -738,6 +978,10 @@ describe("bootstrap", () => {
       expect(result.unitTestRoot).toBe("/iris/mgr/");
       expect(result.errors).toHaveLength(0);
       expect(result.manualInstructions).toBeUndefined();
+      expect(setupDocGetCount(fetchMock), "the probe proved the Setup class absent").toBe(1);
+      expect(guardDocGetCount(fetchMock), "ownership is asked at startup and again at the re-check").toBe(2);
+      expect("ipmOwned" in result, "an unowned deployment carries no ipmOwned key").toBe(false);
+      expect(warnLines()).toEqual([]);
 
       http.destroy();
     });
@@ -751,10 +995,12 @@ describe("bootstrap", () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
-      // Probe: CSRF + SQL returning an OLD version hash
+      // Probe: CSRF + SQL returning an OLD (legacy bare hash) version
       setupCsrfThenRequest(
-        envelope({ content: [{ Version: "oldhash12345" }] }),
+        envelope({ content: [{ Version: "abcdef123456" }] }),
       );
+      // Ownership before the first write: not IPM's (404)
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Deploy: PUT responses for each class (CSRF already established)
       for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
@@ -762,6 +1008,11 @@ describe("bootstrap", () => {
           mockResponse(envelope({ result: [] })),
         );
       }
+
+      // Re-probe immediately before the compile: the compiled marker is still the old one
+      fetchMock.mockResolvedValueOnce(versionReply("abcdef123456"));
+      // Ownership at the re-check: still not IPM's
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Compile: POST response
       fetchMock.mockResolvedValueOnce(
@@ -801,9 +1052,9 @@ describe("bootstrap", () => {
       expect(result.errors).toHaveLength(0);
       expect(result.manualInstructions).toBeUndefined();
 
-      // 1 CSRF + 1 probe SQL + 20 PUTs + 1 compile + 1 IsConfigured + 1 EnsureUnitTestRoot = 25
+      // 1 CSRF + 1 probe SQL + 1 ownership + one PUT per class + 1 re-probe + 1 ownership + 1 compile + 1 IsConfigured + 1 EnsureUnitTestRoot
       // (no configure, no mapping)
-      const expectedCallCount = 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1;
+      const expectedCallCount = 1 + 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 1 + 1;
       expect(fetchMock).toHaveBeenCalledTimes(expectedCallCount);
 
       http.destroy();
@@ -818,10 +1069,12 @@ describe("bootstrap", () => {
       const config = makeConfig();
       const http = new IrisHttpClient(config);
 
-      // Probe: CSRF + SQL returning an OLD version hash
+      // Probe: CSRF + SQL returning an OLD (legacy bare hash) version
       setupCsrfThenRequest(
-        envelope({ content: [{ Version: "oldhash12345" }] }),
+        envelope({ content: [{ Version: "abcdef123456" }] }),
       );
+      // Ownership before the first write: not IPM's (404)
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Deploy: PUT responses for each class
       for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
@@ -829,6 +1082,10 @@ describe("bootstrap", () => {
           mockResponse(envelope({ result: [] })),
         );
       }
+      // Re-probe immediately before the compile: the compiled marker is still the old one
+      fetchMock.mockResolvedValueOnce(versionReply("abcdef123456"));
+      // Ownership at the re-check: still not IPM's
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
       // Compile: POST response
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
       // IsConfigured check on the stale path — web app ABSENT (0) → self-heal
@@ -869,8 +1126,8 @@ describe("bootstrap", () => {
       });
       expect(configureCalls.length).toBe(1);
 
-      // 1 CSRF + 1 probe SQL + 20 PUTs + 1 compile + 1 IsConfigured + configure + mapping + ensureRoot = 27
-      const expectedCallCount = 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 1 + 1;
+      // 1 CSRF + 1 probe SQL + 1 ownership + one PUT per class + 1 re-probe + 1 ownership + 1 compile + 1 IsConfigured + configure + mapping + ensureRoot
+      const expectedCallCount = 1 + 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 1 + 1 + 1 + 1;
       expect(fetchMock).toHaveBeenCalledTimes(expectedCallCount);
 
       http.destroy();
@@ -899,6 +1156,10 @@ describe("bootstrap", () => {
           { status: 400 },
         ),
       );
+      // Probe: GET doc/ExecuteMCPv2.Setup.cls answers 404 — the class is provably absent
+      fetchMock.mockResolvedValueOnce(setupAbsentReply());
+      // Ownership before the first write: not IPM's (404)
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Deploy: PUT responses for each class
       for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
@@ -906,6 +1167,11 @@ describe("bootstrap", () => {
           mockResponse(envelope({ result: [] })),
         );
       }
+
+      // Re-probe immediately before the compile: still no deployment
+      fetchMock.mockResolvedValueOnce(missingMethodReply());
+      // Ownership at the re-check: still not IPM's
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Compile: POST response
       fetchMock.mockResolvedValueOnce(
@@ -951,6 +1217,9 @@ describe("bootstrap", () => {
       expect(result.manualInstructions).toContain("Terminal");
       expect(result.manualInstructions).toContain("Management Portal");
       expect(result.manualInstructions).toContain("IPM");
+      expect(result.manualInstructions, "AC 42.4.3: the IPM fallback names this build's package version").toContain(
+        `zpm "install ${IPM_MODULE_NAME} ${BOOTSTRAP_VERSION.split("+")[0]}"`,
+      );
 
       http.destroy();
     });
@@ -978,6 +1247,10 @@ describe("bootstrap", () => {
           { status: 400 },
         ),
       );
+      // Probe: GET doc/ExecuteMCPv2.Setup.cls answers 404 — the class is provably absent
+      fetchMock.mockResolvedValueOnce(setupAbsentReply());
+      // Ownership before the first write: not IPM's (404)
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
 
       // Deploy: first PUT fails with 500
       fetchMock.mockResolvedValueOnce(
@@ -1007,6 +1280,786 @@ describe("bootstrap", () => {
     });
   });
 
+  // ── The downgrade guard (DW-508) ─────────────────────────────────
+
+  describe("bootstrap never replaces a newer or foreign deployment", () => {
+    function queuePutReplies(): void {
+      for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
+        fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      }
+    }
+
+    const NEWER_SEQUENCE = embeddedMarkerMoved({ sequence: 1 });
+    const NEWER_MAJOR = embeddedMarkerMoved({ major: 1 });
+    const FOREIGN_HASH = embeddedMarkerMoved({ hash: "ffffffffffff" });
+
+    it.each([
+      { label: "the same semver and a higher sequence", deployed: NEWER_SEQUENCE, status: "newer" },
+      { label: "a higher semver", deployed: NEWER_MAJOR, status: "newer" },
+      { label: "the same semver and sequence with a different hash", deployed: FOREIGN_HASH, status: "foreign" },
+      { label: "the dev placeholder", deployed: "dev", status: "foreign" },
+      { label: "an unparseable value", deployed: "garbage", status: "foreign" },
+    ])("a $status deployment ($label): no PUT, no compile, no Configure, no mapping, no ^UnitTestRoot, one warning naming both markers", async ({ deployed, status }) => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: deployed }] }));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe(status);
+      expect(result.probeFound).toBe(true);
+      expect(result.deployedVersion).toBe(deployed);
+      expect(result.deployed).toBe(false);
+      expect(result.compiled).toBe(false);
+      expect(result.configured).toBe(false);
+      expect(result.mapped).toBe(false);
+      expect(result.unitTestRootEnsured).toBe(false);
+      expect(result.errors).toEqual([]);
+      expect(result.manualInstructions).toBeUndefined();
+
+      // Only the CSRF preflight and the version query: nothing was written or asked.
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(putCount(fetchMock)).toBe(0);
+      expect(compileCount(fetchMock)).toBe(0);
+      for (const name of ["IsConfigured", "Configure", "ConfigureMapping", "EnsureUnitTestRoot"]) {
+        expect(setupCallCount(fetchMock, name), `Setup_${name}`).toBe(0);
+      }
+
+      const warnings = warnLines();
+      expect(warnings, "exactly one warning").toHaveLength(1);
+      expect(warnings[0]).toContain(deployed);
+      expect(warnings[0]).toContain(BOOTSTRAP_VERSION);
+      expect(warnings[0], "the namespace and the instance").toContain("in 'USER' on localhost:52773 alone");
+      expect(warnings[0], "nothing was uploaded").not.toContain("had already uploaded");
+
+      http.destroy();
+    });
+
+    it("the warning for a newer deployment names the remedy: upgrade to the deployed semver and sequence, on every client", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: NEWER_SEQUENCE }] }));
+
+      await bootstrap(http, config, 7);
+
+      const parsed = parseBootstrapMarker(NEWER_SEQUENCE);
+      if (parsed.kind !== "stamped") throw new Error("the fixture marker must be stamped");
+      const [warning] = warnLines();
+      expect(warning).toContain("is newer than this server's");
+      expect(warning).toContain("Upgrade this server to a build at least as new as the deployed one");
+      expect(warning).toContain(`(semver ${parsed.semver.join(".")}, sequence ${parsed.sequence})`);
+      expect(warning).toContain("run the same or a newer build on every client that shares the instance");
+
+      http.destroy();
+    });
+
+    it("the warning for a foreign deployment names the remedy: one build per instance, or delete ExecuteMCPv2.Setup and restart", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: FOREIGN_HASH }] }));
+
+      await bootstrap(http, config, 7);
+
+      const [warning] = warnLines();
+      expect(warning).toContain("cannot be ordered against this server's");
+      expect(warning).toContain("Run one build per instance");
+      expect(warning).toContain("delete class ExecuteMCPv2.Setup in 'USER' and restart this server");
+
+      http.destroy();
+    });
+
+    it("a deployed marker is quoted and cut at 80 characters, and a line break inside it stays inside the one warning line", async () => {
+      const longMarker = "x".repeat(300);
+      const multiLineMarker = "x\n[ERROR] injected line";
+      for (const deployed of [longMarker, multiLineMarker]) {
+        vi.mocked(console.error).mockClear();
+        const config = makeConfig();
+        const http = new IrisHttpClient(config);
+        setupCsrfThenRequest(envelope({ content: [{ Version: deployed }] }));
+
+        await bootstrap(http, config, 7);
+
+        const warnings = warnLines();
+        expect(warnings, "exactly one warning").toHaveLength(1);
+        expect(warnings[0]).not.toContain("\n");
+        const written = vi.mocked(console.error).mock.calls.map((call) => String(call[0]));
+        expect(written.filter((line) => line.startsWith("[ERROR]") || line.includes("\n"))).toEqual([]);
+        if (deployed === longMarker) {
+          expect(warnings[0]).toContain(JSON.stringify(`${"x".repeat(80)}...`));
+          expect(warnings[0]).not.toContain("x".repeat(81));
+        } else {
+          expect(warnings[0]).toContain(JSON.stringify(multiLineMarker));
+        }
+
+        http.destroy();
+      }
+    });
+
+    it("an older deployment logs no warning and is upgraded as before", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: "abcdef123456" }] }));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      queuePutReplies();
+      fetchMock.mockResolvedValueOnce(versionReply("abcdef123456"));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 1 }] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("stale");
+      expect(result.deployedVersion).toBe("abcdef123456");
+      expect(putCount(fetchMock)).toBe(BOOTSTRAP_CLASSES.size);
+      expect(compileCount(fetchMock)).toBe(1);
+      expect(warnLines()).toEqual([]);
+
+      http.destroy();
+    });
+
+    // Race: a newer build compiled between this server's probe and its compile.
+    it("an older probe followed by a newer re-read: the classes were uploaded, but no compile and nothing later runs; one warning", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: "abcdef123456" }] }));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      queuePutReplies();
+      fetchMock.mockResolvedValueOnce(versionReply(NEWER_SEQUENCE));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("newer");
+      expect(result.deployedVersion).toBe(NEWER_SEQUENCE);
+      expect(result.deployed).toBe(true);
+      expect(result.compiled).toBe(false);
+      expect(result.configured).toBe(false);
+      expect(result.mapped).toBe(false);
+      expect(result.unitTestRootEnsured).toBe(false);
+      expect(result.errors).toEqual([]);
+      expect(compileCount(fetchMock)).toBe(0);
+      for (const name of ["IsConfigured", "Configure", "ConfigureMapping", "EnsureUnitTestRoot"]) {
+        expect(setupCallCount(fetchMock, name), `Setup_${name}`).toBe(0);
+      }
+      // CSRF + probe + the startup ownership read + one PUT per class + the re-read, and nothing after it
+      // (a newer reading ends the re-check before the ownership read).
+      expect(fetchMock).toHaveBeenCalledTimes(1 + 1 + 1 + BOOTSTRAP_CLASSES.size + 1);
+      expect(guardDocGetCount(fetchMock)).toBe(1);
+
+      const warnings = warnLines();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("found just before compiling");
+      expect(warnings[0]).toContain(NEWER_SEQUENCE);
+      expect(warnings[0]).toContain(BOOTSTRAP_VERSION);
+      expect(warnings[0], "the uploads that already landed, and how to reinstall cleanly").toContain(
+        "This server had already uploaded its class documents, so the namespace can hold its source under the deployed compiled classes; " +
+          "to reinstall cleanly, delete class ExecuteMCPv2.Setup in 'USER' and restart the build that should own this instance.",
+      );
+
+      http.destroy();
+    });
+
+    it("a missing probe followed by a foreign re-read (dev): no compile, no Configure; one warning", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      fetchMock.mockResolvedValueOnce(
+        mockResponse("", { status: 200, headers: { "X-CSRF-Token": "t" }, setCookie: ["CSPSESSIONID=s1; path=/"] }),
+      );
+      fetchMock.mockResolvedValueOnce(missingMethodReply());
+      fetchMock.mockResolvedValueOnce(setupAbsentReply());
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      queuePutReplies();
+      fetchMock.mockResolvedValueOnce(versionReply("dev"));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("foreign");
+      expect(result.deployedVersion).toBe("dev");
+      expect(result.deployed).toBe(true);
+      expect(result.compiled).toBe(false);
+      expect(compileCount(fetchMock)).toBe(0);
+      expect(setupCallCount(fetchMock, "Configure")).toBe(0);
+      const warnings = warnLines();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('"dev"');
+      expect(warnings[0]).toContain(BOOTSTRAP_VERSION);
+      expect(warnings[0], "the uploads that already landed, and how to reinstall cleanly").toContain(
+        "This server had already uploaded its class documents",
+      );
+
+      http.destroy();
+    });
+
+    it("an unconfigured probe followed by a newer re-read: no compile and nothing later; one warning", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 0 }] })));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      fetchMock.mockResolvedValueOnce(versionReply(NEWER_SEQUENCE));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("newer");
+      expect(result.deployed).toBe(false);
+      expect(result.compiled).toBe(false);
+      expect(putCount(fetchMock)).toBe(0);
+      expect(compileCount(fetchMock)).toBe(0);
+      expect(setupCallCount(fetchMock, "Configure")).toBe(0);
+      expect(fetchMock).toHaveBeenCalledTimes(5);
+      expect(warnLines()).toHaveLength(1);
+      expect(warnLines()[0], "nothing was uploaded on the unconfigured path").not.toContain("had already uploaded");
+
+      http.destroy();
+    });
+  });
+
+  // ── A marker that cannot be read (DW-673, decision #54) ──────────
+
+  describe("a marker that cannot be read is unknown: nothing is deployed or compiled over it (DW-673)", () => {
+    function queuePutReplies(): void {
+      for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
+        fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      }
+    }
+
+    function queueCsrf(): void {
+      fetchMock.mockResolvedValueOnce(
+        mockResponse("", { status: 200, headers: { "X-CSRF-Token": "t" }, setCookie: ["CSPSESSIONID=s1; path=/"] }),
+      );
+    }
+
+    /** One way the version query can fail to yield a marker, and the text that names it in the reason. */
+    const READ_FAILURES: Array<{ label: string; queue: () => void; named: string }> = [
+      {
+        label: "an HTTP 500 error envelope",
+        queue: () => fetchMock.mockResolvedValueOnce(mockResponse({ status: { errors: [{ error: "ERROR #5002: ObjectScript error: <STORE>" }], summary: "Error" }, console: [], result: null }, { status: 500 })),
+        named: "IRIS returned HTTP 500",
+      },
+      {
+        label: "an HTTP 200 envelope reporting a privilege error",
+        queue: () => fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] }, [{ error: "ERROR #5540: SQLCODE: -99 Message: User testuser is not privileged for the operation" }]))),
+        named: "SQLCODE: -99",
+      },
+      {
+        label: "an HTTP 403",
+        queue: () => fetchMock.mockResolvedValueOnce(mockResponse({ status: { errors: [], summary: "" }, console: [], result: null }, { status: 403 })),
+        named: "IRIS returned HTTP 403",
+      },
+      {
+        label: "a timeout",
+        queue: () => fetchMock.mockRejectedValueOnce(new DOMException("The operation was aborted.", "AbortError")),
+        named: "Connection to IRIS timed out",
+      },
+      {
+        label: "a connection failure",
+        queue: () => fetchMock.mockRejectedValueOnce(new TypeError("fetch failed")),
+        named: "Failed to connect to IRIS at localhost:52773",
+      },
+      {
+        label: "an empty value",
+        queue: () => fetchMock.mockResolvedValueOnce(versionReply("")),
+        named: "the version query returned no marker",
+      },
+      {
+        label: "no row",
+        queue: () => fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] }))),
+        named: "the version query returned no marker",
+      },
+      {
+        label: "a Setup class from before the version stamp (no GetBootstrapVersion method)",
+        queue: () => fetchMock.mockResolvedValueOnce(missingMethodReply()),
+        named: "IRIS returned HTTP 400",
+      },
+    ];
+
+    it.each(READ_FAILURES)(
+      "the probe's read fails ($label) while the Setup class exists: unknown, no PUT, no compile, no Setup_ call, one warning naming the failure and the remedy",
+      async ({ queue, named }) => {
+        const config = makeConfig();
+        const http = new IrisHttpClient(config);
+        queueCsrf();
+        queue();
+        fetchMock.mockResolvedValueOnce(setupFoundReply());
+
+        const result = await bootstrap(http, config, 7);
+
+        expect(result.probeStatus).toBe("unknown");
+        expect(result.probeFound).toBe(true);
+        expect(result.readFailure).toContain(named);
+        expect(result.readFailure).toContain("and the ExecuteMCPv2.Setup class exists");
+        expect(result.deployedVersion).toBeUndefined();
+        expect(result.deployed).toBe(false);
+        expect(result.compiled).toBe(false);
+        expect(result.configured).toBe(false);
+        expect(result.mapped).toBe(false);
+        expect(result.unitTestRootEnsured).toBe(false);
+        expect(result.errors).toEqual([]);
+        expect(result.manualInstructions).toBeUndefined();
+
+        // The CSRF preflight, the version query and the Setup document GET: nothing written, nothing else asked.
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(setupDocGetCount(fetchMock)).toBe(1);
+        expect(putCount(fetchMock)).toBe(0);
+        expect(compileCount(fetchMock)).toBe(0);
+        for (const name of ["IsConfigured", "Configure", "ConfigureMapping", "EnsureUnitTestRoot"]) {
+          expect(setupCallCount(fetchMock, name), `Setup_${name}`).toBe(0);
+        }
+
+        const warnings = warnLines();
+        expect(warnings, "exactly one warning").toHaveLength(1);
+        const [warning] = warnings as [string];
+        expect(warning).not.toContain("\n");
+        expect(warning).toContain("Bootstrap: leaving the ExecuteMCPv2 classes in 'USER' on localhost:52773 alone: the deployed marker could not be read (");
+        expect(warning).toContain(named);
+        expect(warning).toContain(`so it cannot be ordered against this server's ${BOOTSTRAP_VERSION}`);
+        expect(warning).toContain("Check that the instance answers and that this user can run SQL in 'USER', then restart this server.");
+        expect(warning).toContain("delete class ExecuteMCPv2.Setup in 'USER' and restart this server");
+
+        http.destroy();
+      },
+    );
+
+    it("the read fails and the Setup class check fails too (HTTP 500): unknown, not a positive absence; nothing is deployed", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      queueCsrf();
+      fetchMock.mockResolvedValueOnce(missingMethodReply());
+      fetchMock.mockResolvedValueOnce(mockResponse({ status: { errors: [{ error: "Internal error" }], summary: "Error" }, console: [], result: null }, { status: 500 }));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("unknown");
+      expect(result.readFailure).toContain("whether the ExecuteMCPv2.Setup class exists could not be checked: IRIS returned HTTP 500");
+      expect(putCount(fetchMock)).toBe(0);
+      expect(compileCount(fetchMock)).toBe(0);
+      expect(warnLines()).toHaveLength(1);
+
+      http.destroy();
+    });
+
+    it("the read fails and the Setup document route answers 404 (a positive absence): the full install runs, with no warning", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      queueCsrf();
+      fetchMock.mockResolvedValueOnce(mockResponse({ status: { errors: [{ error: "Internal error" }], summary: "Error" }, console: [], result: null }, { status: 500 }));
+      fetchMock.mockResolvedValueOnce(setupAbsentReply());
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      queuePutReplies();
+      fetchMock.mockResolvedValueOnce(missingMethodReply());
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("missing");
+      expect(result.probeFound).toBe(false);
+      expect(putCount(fetchMock)).toBe(BOOTSTRAP_CLASSES.size);
+      expect(compileCount(fetchMock), "the failed re-read after a positive absence is the not-yet-compiled state").toBe(1);
+      expect(result.configured).toBe(true);
+      expect(result.mapped).toBe(true);
+      expect(warnLines()).toEqual([]);
+
+      http.destroy();
+    });
+
+    it.each(READ_FAILURES.filter((failure) => ["an HTTP 500 error envelope", "a timeout", "an empty value"].includes(failure.label)))(
+      "an older probe followed by a re-read that fails ($label): the uploads landed, but no compile and nothing later; one warning",
+      async ({ queue, named }) => {
+        const config = makeConfig();
+        const http = new IrisHttpClient(config);
+        setupCsrfThenRequest(envelope({ content: [{ Version: "abcdef123456" }] }));
+        fetchMock.mockResolvedValueOnce(guardAbsentReply());
+        queuePutReplies();
+        queue();
+
+        const result = await bootstrap(http, config, 7);
+
+        expect(result.probeStatus).toBe("unknown");
+        expect(result.probeFound).toBe(true);
+        expect(result.readFailure).toContain(named);
+        expect(result.deployedVersion).toBeUndefined();
+        expect(result.deployed).toBe(true);
+        expect(result.compiled).toBe(false);
+        expect(result.configured).toBe(false);
+        expect(result.unitTestRootEnsured).toBe(false);
+        expect(compileCount(fetchMock)).toBe(0);
+        for (const name of ["IsConfigured", "Configure", "ConfigureMapping", "EnsureUnitTestRoot"]) {
+          expect(setupCallCount(fetchMock, name), `Setup_${name}`).toBe(0);
+        }
+        // CSRF + probe + the startup ownership read + one PUT per class + the re-read, and nothing after it.
+        expect(fetchMock).toHaveBeenCalledTimes(1 + 1 + 1 + BOOTSTRAP_CLASSES.size + 1);
+
+        const warnings = warnLines();
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain("alone (found just before compiling, so nothing was compiled): the deployed marker could not be read (");
+        expect(warnings[0]).toContain(named);
+        expect(warnings[0]).toContain("This server had already uploaded its class documents");
+
+        http.destroy();
+      },
+    );
+
+    it("an unconfigured probe followed by a re-read that fails: no compile, no Configure, nothing later; one warning", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 0 }] })));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      fetchMock.mockResolvedValueOnce(mockResponse({ status: { errors: [{ error: "Internal error" }], summary: "Error" }, console: [], result: null }, { status: 500 }));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("unknown");
+      expect(result.readFailure).toContain("IRIS returned HTTP 500");
+      expect(result.deployed).toBe(false);
+      expect(result.compiled).toBe(false);
+      expect(result.configured).toBe(false);
+      expect(putCount(fetchMock)).toBe(0);
+      expect(compileCount(fetchMock)).toBe(0);
+      expect(setupCallCount(fetchMock, "Configure")).toBe(0);
+      expect(fetchMock).toHaveBeenCalledTimes(5);
+      const warnings = warnLines();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("found just before compiling, so nothing was compiled");
+      expect(warnings[0]).not.toContain("had already uploaded");
+
+      http.destroy();
+    });
+  });
+
+  // ── IPM ownership (DW-674, Story 42.4) ───────────────────────────
+
+  describe("bootstrap never writes over an IPM installation (DW-674)", () => {
+    function queuePutReplies(): void {
+      for (let i = 0; i < BOOTSTRAP_CLASSES.size; i++) {
+        fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      }
+    }
+
+    function queueCsrf(): void {
+      fetchMock.mockResolvedValueOnce(
+        mockResponse("", { status: 200, headers: { "X-CSRF-Token": "t" }, setCookie: ["CSPSESSIONID=s1; path=/"] }),
+      );
+    }
+
+    const SEMVER = BOOTSTRAP_VERSION.split("+")[0] as string;
+    const OLD_MARKER = "abcdef123456";
+
+    /** How each write path reaches its ownership read at startup, and what the warning must name. */
+    const STARTUP_PATHS = [
+      {
+        probe: "stale" as const,
+        queue: () => {
+          setupCsrfThenRequest(envelope({ content: [{ Version: OLD_MARKER }] }));
+        },
+        requests: 3,
+        deployed: JSON.stringify(OLD_MARKER),
+        remedy: `run zpm "install ${IPM_MODULE_NAME} ${SEMVER}" there as a user with %Admin_Manage`,
+      },
+      {
+        probe: "unconfigured" as const,
+        queue: () => {
+          setupCsrfThenRequest(envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }));
+          fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 0 }] })));
+        },
+        requests: 4,
+        deployed: JSON.stringify(BOOTSTRAP_VERSION),
+        remedy: 'run Do ##class(ExecuteMCPv2.Setup).Configure("USER") as a user with %Admin_Manage',
+      },
+      {
+        probe: "missing" as const,
+        queue: () => {
+          queueCsrf();
+          fetchMock.mockResolvedValueOnce(missingMethodReply());
+          fetchMock.mockResolvedValueOnce(setupAbsentReply());
+        },
+        requests: 4,
+        deployed: "absent",
+        remedy: `uninstall and reinstall the package with zpm: run zpm "uninstall ${IPM_MODULE_NAME}" and then zpm "install ${IPM_MODULE_NAME} ${SEMVER}" there as a user with %Admin_Manage`,
+      },
+    ];
+
+    function assertNothingWritten(): void {
+      expect(putCount(fetchMock)).toBe(0);
+      expect(compileCount(fetchMock)).toBe(0);
+      for (const name of ["Configure", "ConfigureMapping", "EnsureUnitTestRoot"]) {
+        expect(setupCallCount(fetchMock, name), `Setup_${name}`).toBe(0);
+      }
+    }
+
+    it.each(STARTUP_PATHS)(
+      "an IPM installation found at startup on the $probe path: nothing is written, ipmOwned is true, and one warning names the zpm command",
+      async ({ probe, queue, requests, deployed, remedy }) => {
+        const config = makeConfig();
+        const http = new IrisHttpClient(config);
+        queue();
+        fetchMock.mockResolvedValueOnce(guardFoundReply());
+
+        const result = await bootstrap(http, config, 7);
+
+        expect(result).toStrictEqual({
+          probeFound: true,
+          probeStatus: probe,
+          ...(probe === "stale" ? { deployedVersion: OLD_MARKER } : {}),
+          ipmOwned: true,
+          deployed: false,
+          compiled: false,
+          configured: false,
+          mapped: false,
+          unitTestRootEnsured: false,
+          errors: [],
+        });
+        assertNothingWritten();
+        expect(fetchMock, "the probe's requests and the one ownership read, then nothing").toHaveBeenCalledTimes(requests);
+        expect(guardDocGetCount(fetchMock)).toBe(1);
+
+        const warnings = warnLines();
+        expect(warnings, "exactly one warning").toHaveLength(1);
+        const [warning] = warnings as [string];
+        expect(warning).not.toContain("\n");
+        expect(warning).toContain("Bootstrap: leaving the ExecuteMCPv2 classes in 'USER' on localhost:52773 alone: the classes were installed by IPM");
+        expect(warning).toContain("(class ExecuteMCPv2.InstallGuard is present)");
+        expect(warning).toContain("this server never redeploys an IPM installation");
+        expect(warning).toContain(`The deployed marker is ${deployed}; this server's is ${BOOTSTRAP_VERSION}.`);
+        expect(warning).toContain(remedy);
+        expect(warning).toContain(`To hand 'USER' back to this server, run zpm "uninstall ${IPM_MODULE_NAME}" there and restart this server.`);
+        expect(warning, "nothing was uploaded, and it was not found at a re-check").not.toContain("had already uploaded");
+        expect(warning).not.toContain("found just before compiling");
+
+        http.destroy();
+      },
+    );
+
+    it("an IPM installation found at the re-check before compile (stale): the classes were uploaded, but no compile and nothing later; one warning", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: OLD_MARKER }] }));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      queuePutReplies();
+      fetchMock.mockResolvedValueOnce(versionReply(OLD_MARKER));
+      fetchMock.mockResolvedValueOnce(guardFoundReply());
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("stale");
+      expect(result.probeFound).toBe(true);
+      expect(result.ipmOwned).toBe(true);
+      expect(result.deployedVersion).toBe(OLD_MARKER);
+      expect(result.deployed).toBe(true);
+      expect(result.compiled).toBe(false);
+      expect(result.configured).toBe(false);
+      expect(result.mapped).toBe(false);
+      expect(result.unitTestRootEnsured).toBe(false);
+      expect(result.errors).toEqual([]);
+      expect(compileCount(fetchMock)).toBe(0);
+      for (const name of ["Configure", "ConfigureMapping", "EnsureUnitTestRoot"]) {
+        expect(setupCallCount(fetchMock, name), `Setup_${name}`).toBe(0);
+      }
+      // CSRF + probe + ownership + one PUT per class + the re-read + the second ownership read, and nothing after it.
+      expect(fetchMock).toHaveBeenCalledTimes(1 + 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1);
+      expect(guardDocGetCount(fetchMock)).toBe(2);
+
+      const warnings = warnLines();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("alone (found just before compiling, so nothing was compiled): the classes were installed by IPM");
+      expect(warnings[0]).toContain(`The deployed marker is ${JSON.stringify(OLD_MARKER)}; this server's is ${BOOTSTRAP_VERSION}.`);
+      expect(warnings[0]).toContain("This server had already uploaded its class documents, which stay in place until the package is reinstalled with zpm.");
+
+      http.destroy();
+    });
+
+    it("an IPM installation found at the re-check before compile (unconfigured): no compile and nothing later; one warning", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 0 }] })));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      fetchMock.mockResolvedValueOnce(versionReply(BOOTSTRAP_VERSION));
+      fetchMock.mockResolvedValueOnce(guardFoundReply());
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("unconfigured");
+      expect(result.ipmOwned).toBe(true);
+      expect(result.probeFound).toBe(true);
+      expect(result.deployed).toBe(false);
+      expect(result.compiled).toBe(false);
+      expect(putCount(fetchMock)).toBe(0);
+      expect(compileCount(fetchMock)).toBe(0);
+      expect(setupCallCount(fetchMock, "Configure")).toBe(0);
+      expect(fetchMock).toHaveBeenCalledTimes(6);
+      const warnings = warnLines();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("found just before compiling, so nothing was compiled");
+      expect(warnings[0]).not.toContain("had already uploaded");
+
+      http.destroy();
+    });
+
+    it("an IPM installation found at the re-check before compile (missing): the failed marker read is the expected state, and the guard still stops the compile", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      queueCsrf();
+      fetchMock.mockResolvedValueOnce(missingMethodReply());
+      fetchMock.mockResolvedValueOnce(setupAbsentReply());
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      queuePutReplies();
+      fetchMock.mockResolvedValueOnce(missingMethodReply());
+      fetchMock.mockResolvedValueOnce(guardFoundReply());
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("missing");
+      expect(result.probeFound).toBe(true);
+      expect(result.ipmOwned).toBe(true);
+      expect(result.deployed).toBe(true);
+      expect(result.compiled).toBe(false);
+      expect(compileCount(fetchMock)).toBe(0);
+      expect(setupCallCount(fetchMock, "Configure")).toBe(0);
+      const warnings = warnLines();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("The deployed marker is absent;");
+      expect(warnings[0]).toContain("uninstall and reinstall the package with zpm");
+
+      http.destroy();
+    });
+
+    it("no guard document (404): the result is deep-equal to today's, with no ipmOwned key", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: OLD_MARKER }] }));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      queuePutReplies();
+      fetchMock.mockResolvedValueOnce(versionReply(OLD_MARKER));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 1 }] })));
+      fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })));
+
+      const result = await bootstrap(http, config, 7);
+
+      // The pre-42.4 shape of an upgrade: every field, and no new key.
+      expect(result).toStrictEqual({
+        probeFound: true,
+        probeStatus: "stale",
+        deployedVersion: OLD_MARKER,
+        deployed: true,
+        compiled: true,
+        configured: true,
+        mapped: true,
+        unitTestRootEnsured: true,
+        unitTestRoot: "/iris/mgr/",
+        errors: [],
+      });
+      expect(warnLines()).toEqual([]);
+
+      http.destroy();
+    });
+
+    const OWNERSHIP_FAILURES: Array<{ label: string; queue: () => void; named: string }> = [
+      {
+        label: "an HTTP 500",
+        queue: () => fetchMock.mockResolvedValueOnce(mockResponse({ status: { errors: [{ error: "Internal error" }], summary: "Error" }, console: [], result: null }, { status: 500 })),
+        named: "IRIS returned HTTP 500",
+      },
+      {
+        label: "a timeout",
+        queue: () => fetchMock.mockRejectedValueOnce(new DOMException("The operation was aborted.", "AbortError")),
+        named: "Connection to IRIS timed out",
+      },
+    ];
+
+    it.each(OWNERSHIP_FAILURES)(
+      "the ownership read fails at startup ($label): unknown, nothing is written, one warning naming the failure",
+      async ({ queue, named }) => {
+        const config = makeConfig();
+        const http = new IrisHttpClient(config);
+        setupCsrfThenRequest(envelope({ content: [{ Version: OLD_MARKER }] }));
+        queue();
+
+        const result = await bootstrap(http, config, 7);
+
+        expect(result.probeStatus).toBe("unknown");
+        expect(result.probeFound).toBe(true);
+        expect(result.readFailure).toContain("whether the ExecuteMCPv2.InstallGuard class exists could not be checked");
+        expect(result.readFailure).toContain(named);
+        expect(result.deployedVersion).toBeUndefined();
+        expect("ipmOwned" in result).toBe(false);
+        expect(result.deployed).toBe(false);
+        expect(result.compiled).toBe(false);
+        expect(result.configured).toBe(false);
+        expect(result.mapped).toBe(false);
+        expect(result.unitTestRootEnsured).toBe(false);
+        assertNothingWritten();
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+
+        const warnings = warnLines();
+        expect(warnings, "exactly one warning").toHaveLength(1);
+        expect(warnings[0]).toContain("the deployed marker could not be read (whether the ExecuteMCPv2.InstallGuard class exists could not be checked");
+        expect(warnings[0]).toContain(named);
+
+        http.destroy();
+      },
+    );
+
+    it("the ownership read fails at the re-check before compile: unknown, no compile and nothing later; one warning", async () => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      setupCsrfThenRequest(envelope({ content: [{ Version: OLD_MARKER }] }));
+      fetchMock.mockResolvedValueOnce(guardAbsentReply());
+      queuePutReplies();
+      fetchMock.mockResolvedValueOnce(versionReply(OLD_MARKER));
+      fetchMock.mockResolvedValueOnce(mockResponse({ status: { errors: [{ error: "Internal error" }], summary: "Error" }, console: [], result: null }, { status: 500 }));
+
+      const result = await bootstrap(http, config, 7);
+
+      expect(result.probeStatus).toBe("unknown");
+      expect(result.probeFound).toBe(true);
+      expect(result.readFailure).toContain("whether the ExecuteMCPv2.InstallGuard class exists could not be checked");
+      expect(result.deployedVersion).toBeUndefined();
+      expect(result.deployed).toBe(true);
+      expect(result.compiled).toBe(false);
+      expect(compileCount(fetchMock)).toBe(0);
+      expect(setupCallCount(fetchMock, "Configure")).toBe(0);
+      const warnings = warnLines();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("alone (found just before compiling, so nothing was compiled)");
+      expect(warnings[0]).toContain("This server had already uploaded its class documents");
+
+      http.destroy();
+    });
+
+    it.each([
+      { label: "current", queue: () => {
+          setupCsrfThenRequest(envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }));
+          fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 1 }] })));
+        }, requests: 3 },
+      { label: "newer", queue: () => setupCsrfThenRequest(envelope({ content: [{ Version: embeddedMarkerMoved({ sequence: 1 }) }] })), requests: 2 },
+      { label: "foreign", queue: () => setupCsrfThenRequest(envelope({ content: [{ Version: "dev" }] })), requests: 2 },
+      { label: "unknown", queue: () => {
+          queueCsrf();
+          fetchMock.mockResolvedValueOnce(missingMethodReply());
+          fetchMock.mockResolvedValueOnce(setupFoundReply());
+        }, requests: 3 },
+    ])("a $label probe makes no ownership request", async ({ queue, requests }) => {
+      const config = makeConfig();
+      const http = new IrisHttpClient(config);
+      queue();
+
+      const result = await bootstrap(http, config, 7);
+
+      expect("ipmOwned" in result).toBe(false);
+      expect(guardDocGetCount(fetchMock)).toBe(0);
+      expect(fetchMock).toHaveBeenCalledTimes(requests);
+
+      http.destroy();
+    });
+  });
+
   // ── MANUAL_INSTRUCTIONS ─────────────────────────────────────────
 
   describe("MANUAL_INSTRUCTIONS", () => {
@@ -1017,6 +2070,41 @@ describe("bootstrap", () => {
       expect(MANUAL_INSTRUCTIONS).toContain(
         "ExecuteMCPv2.Setup",
       );
+    });
+
+    // AC 42.4.3 (Story 42.4): item 3 names the IPM package as ipm/module.xml declares it.
+    describe("item 3 names the package IPM installs (AC 42.4.3)", () => {
+      const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+      const manifest = readFileSync(resolve(repoRoot, "ipm/module.xml"), "utf-8");
+      const manifestName = /<Name>([^<]+)<\/Name>/.exec(manifest)?.[1];
+      const manifestVersion = /<Version>([^<]+)<\/Version>/.exec(manifest)?.[1];
+      const item3 = MANUAL_INSTRUCTIONS.slice(MANUAL_INSTRUCTIONS.indexOf("\n3. IPM"));
+
+      it("names the install command with the module name and the semver of BOOTSTRAP_VERSION", () => {
+        const semver = BOOTSTRAP_VERSION.split("+")[0];
+        expect(item3).toContain(`zpm "install ${IPM_MODULE_NAME} ${semver}"`);
+        expect(item3).not.toContain("any namespace");
+      });
+
+      it("takes the name and the version from ipm/module.xml: either changing in one place only fails here", () => {
+        expect(manifestName, "ipm/module.xml carries a <Name>").toBeDefined();
+        expect(manifestVersion, "ipm/module.xml carries a <Version>").toBeDefined();
+        expect(item3).toContain(`zpm "install ${manifestName} ${manifestVersion}"`);
+      });
+
+      it("states the prerequisites: the target namespace, %Admin_Manage, IPM 0.10 or later there, and the registry command", () => {
+        expect(item3).toContain("IPM (InterSystems Package Manager 0.10 or later, installed in the target namespace)");
+        expect(item3).toContain("in the target\n   namespace, as a user with %Admin_Manage, run:");
+        expect(item3).toContain('If zpm "repo -list" shows no registry, run this first:');
+        expect(item3).toContain('zpm "repo -r -n registry -reset-defaults"');
+        expect(item3).toContain("IPM then owns the classes there, and this server never redeploys them.");
+      });
+
+      it("leaves items 1 and 2 as they were, so the first NAMESPACE is still item 1's", () => {
+        const item1 = MANUAL_INSTRUCTIONS.slice(MANUAL_INSTRUCTIONS.indexOf("1. Terminal"), MANUAL_INSTRUCTIONS.indexOf("2. Management Portal"));
+        expect(item1).toContain('Do ##class(ExecuteMCPv2.Setup).Configure("NAMESPACE")');
+        expect(item3, "item 3 holds no NAMESPACE token that a replacement could hit").not.toContain("NAMESPACE");
+      });
     });
   });
 
@@ -1226,11 +2314,13 @@ describe("bootstrap", () => {
   // ── BOOTSTRAP_VERSION ───────────────────────────────────────────
 
   describe("BOOTSTRAP_VERSION", () => {
-    it("should be a non-empty hex string", () => {
+    it("should be a marker <semver>+<sequence>.<hash>", () => {
       expect(typeof BOOTSTRAP_VERSION).toBe("string");
       expect(BOOTSTRAP_VERSION.length).toBeGreaterThan(0);
-      // 12-char short SHA-256 is the current format (gen-bootstrap.mjs)
-      expect(BOOTSTRAP_VERSION).toMatch(/^[0-9a-f]{12}$/);
+      // The semver of @iris-mcp/shared, the generator's sequence and the
+      // 12-char short SHA-256 (gen-bootstrap.mjs)
+      expect(BOOTSTRAP_VERSION).toMatch(/^\d+\.\d+\.\d+\+\d+\.[0-9a-f]{12}$/);
+      expect(parseBootstrapMarker(BOOTSTRAP_VERSION).kind).toBe("stamped");
     });
 
     it("should be injected into the embedded Setup.cls BOOTSTRAPVERSION parameter", () => {
@@ -1303,10 +2393,14 @@ describe("bootstrap", () => {
       ["ExecuteMCPv2.REST.Dispatch.cls", "src/ExecuteMCPv2/REST/Dispatch.cls"],
     ];
 
+    // The IPM-only install guard: hashed after the classes, stamped like Setup, outside classes[] (Story 42.4).
+    const GUARD_PATH = "ipm/preload/ExecuteMCPv2/InstallGuard.cls";
+
     const VERSION_PLACEHOLDER_LINE = 'Parameter BOOTSTRAPVERSION = "dev";';
     const DRIFT_HINT =
       "bootstrap-classes.ts is out of sync with disk. " +
-      "Run `npm run gen:bootstrap` and commit the regenerated file.";
+      "Run `pnpm gen:bootstrap` and commit the regenerated files " +
+      "(the embed and scripts/bootstrap-sequence.json).";
 
     /**
      * Read a .cls file and normalize line endings to LF, mirroring the
@@ -1345,21 +2439,69 @@ describe("bootstrap", () => {
       }
     });
 
-    it("BOOTSTRAP_VERSION matches SHA-256 hash of concatenated disk contents", () => {
+    it("the embedded IPM install guard is the disk source with the marker stamped in (AD-14)", () => {
+      const diskContent = readClsNormalized(GUARD_PATH);
+      expect(diskContent, "the disk source keeps the dev placeholder").toContain(VERSION_PLACEHOLDER_LINE);
+
+      expect(IPM_INSTALL_GUARD.name).toBe("ExecuteMCPv2.InstallGuard.cls");
+      expect(IPM_INSTALL_GUARD.content, `${DRIFT_HINT} (the IPM install guard)`).toBe(
+        diskContent.replace(VERSION_PLACEHOLDER_LINE, `Parameter BOOTSTRAPVERSION = "${BOOTSTRAP_VERSION}";`),
+      );
+      expect(IPM_INSTALL_GUARD.content).not.toContain(VERSION_PLACEHOLDER_LINE);
+    });
+
+    it("the install guard is not a bootstrapped class: it is never deployed, and its presence marks an IPM installation", () => {
+      expect(BOOTSTRAP_CLASSES.has(IPM_INSTALL_GUARD.name)).toBe(false);
+      expect(getBootstrapClasses().map((entry) => entry.name)).not.toContain(IPM_INSTALL_GUARD.name);
+      expect(IPM_MODULE_NAME).toBe("iris-execute-mcp-v2");
+    });
+
+    /** The embedded marker's parts; fails the test when the marker is not in the current grammar. */
+    const markerParts = (): { semver: string; sequence: number; hash: string } => {
+      const parsed = parseBootstrapMarker(BOOTSTRAP_VERSION);
+      if (parsed.kind !== "stamped") {
+        throw new Error(`BOOTSTRAP_VERSION ${BOOTSTRAP_VERSION} is not <semver>+<sequence>.<hash>. ${DRIFT_HINT}`);
+      }
+      return { semver: parsed.semver.join("."), sequence: Number(parsed.sequence), hash: parsed.hash };
+    };
+
+    it("the marker's hash is the SHA-256 hash of concatenated disk contents, the IPM install guard last", () => {
       // Re-compute the hash with the same formula as gen-bootstrap.mjs.
-      // If a dev edits any .cls file without running gen:bootstrap, this
-      // test fails with a clear instruction.
+      // If a dev edits any .cls file (or the IPM install guard) without
+      // running gen:bootstrap, this test fails with a clear instruction.
       const hasher = createHash("sha256");
-      for (const [, relPath] of classPaths) {
+      for (const relPath of [...classPaths.map(([, path]) => path), GUARD_PATH]) {
         hasher.update(readClsNormalized(relPath));
         hasher.update("\n--CLASS-SEPARATOR--\n");
       }
-      const expectedVersion = hasher.digest("hex").substring(0, 12);
+      const expectedHash = hasher.digest("hex").substring(0, 12);
 
       expect(
-        BOOTSTRAP_VERSION,
+        markerParts().hash,
         `BOOTSTRAP_VERSION drift: ${DRIFT_HINT}`,
-      ).toBe(expectedVersion);
+      ).toBe(expectedHash);
+    });
+
+    it("the marker's semver is the version of packages/shared/package.json", () => {
+      const manifest = JSON.parse(readFileSync(resolve(repoRoot, "packages/shared/package.json"), "utf-8")) as {
+        version: string;
+      };
+
+      expect(
+        markerParts().semver,
+        `BOOTSTRAP_VERSION semver drift (a packages/shared/package.json version change needs a regeneration): ${DRIFT_HINT}`,
+      ).toBe(manifest.version);
+    });
+
+    it("the marker's sequence and hash are the ones recorded in scripts/bootstrap-sequence.json", () => {
+      const state = JSON.parse(readFileSync(resolve(repoRoot, "scripts/bootstrap-sequence.json"), "utf-8")) as {
+        sequence: number;
+        hash: string;
+      };
+      const { sequence, hash } = markerParts();
+
+      expect(sequence, `BOOTSTRAP_VERSION sequence drift: ${DRIFT_HINT}`).toBe(state.sequence);
+      expect(hash, `BOOTSTRAP_VERSION hash drift: ${DRIFT_HINT}`).toBe(state.hash);
     });
   });
 });

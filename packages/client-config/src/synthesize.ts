@@ -31,8 +31,20 @@
 
 import type { CanonicalEntry, CanonicalServerName, ClientAdapter } from "./types.js";
 
-/** Canonical server → npm package (the `npx -y <pkg>` launch target).
- * No `iris-mcp-all` row — the aggregate is unmanaged (see CANONICAL_SERVERS). */
+/** The npm major every `npx` spec the suite writes, spawns or documents is
+ * pinned to. The VS Code extension keeps a literal mirror, pinned equal by a
+ * cross-package test in `@iris-mcp/all`. */
+export const IRIS_MCP_MAJOR = "1";
+
+/** `<pkg>@<major>`: the pinned form of an npm package name. Specs use `@1`,
+ * never `^1`, because `^` is cmd.exe's escape character on win32. */
+export function pinnedSpec(pkg: string): string {
+  return `${pkg}@${IRIS_MCP_MAJOR}`;
+}
+
+/** Canonical server → npm package (the bare package name; the `npx -y` launch
+ * target is `pinnedSpec(<pkg>)`). No `iris-mcp-all` row — the aggregate is
+ * unmanaged (see CANONICAL_SERVERS). */
 export const PKG_BY_SERVER: Record<CanonicalServerName, string> = {
   "iris-dev-mcp": "@iris-mcp/dev",
   "iris-admin-mcp": "@iris-mcp/admin",
@@ -123,7 +135,7 @@ function referenceForm(adapter: ClientAdapter, variable: string): string {
 }
 
 function baseEntry(server: CanonicalServerName): CanonicalEntry {
-  return { name: server, command: "npx", args: ["-y", PKG_BY_SERVER[server]] };
+  return { name: server, command: "npx", args: ["-y", pinnedSpec(PKG_BY_SERVER[server])] };
 }
 
 /**

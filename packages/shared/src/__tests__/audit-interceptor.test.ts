@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -21,6 +21,8 @@ import { McpServerBase } from "../server-base.js";
 import type { McpServerBaseOptions } from "../server-base.js";
 import type { ToolDefinition } from "../tool-types.js";
 import type { IrisConnectionConfig } from "../config.js";
+import { waitForAuditLines } from "./test-helpers.js";
+import type { AuditRecord } from "./test-helpers.js";
 
 const appendFileMock = appendFile as unknown as ReturnType<typeof vi.fn>;
 
@@ -92,26 +94,8 @@ async function invokeTool(
   return callback(args);
 }
 
-/** Poll (bounded) until the file has at least `minLines` non-empty lines. */
-async function waitForLineCount(
-  filePath: string,
-  minLines: number,
-  timeoutMs = 2000,
-): Promise<string[]> {
-  const start = Date.now();
-  for (;;) {
-    if (existsSync(filePath)) {
-      const lines = readFileSync(filePath, "utf-8")
-        .split("\n")
-        .filter((line) => line.trim().length > 0);
-      if (lines.length >= minLines) return lines;
-    }
-    if (Date.now() - start > timeoutMs) {
-      throw new Error(`Timed out waiting for ${minLines} line(s) in ${filePath}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
+/** The wait for the audit file, in milliseconds. */
+const AUDIT_WAIT_MS = 2000;
 
 // ── Tests ───────────────────────────────────────────────────────────
 
@@ -187,15 +171,15 @@ describe("audit interceptor (Epic 29, Story 29.0)", () => {
     const result = await invokeTool(server, "iris_doc_get", { name: "Foo.cls" });
     expect(result.isError).toBeFalsy();
 
-    const lines = await waitForLineCount(auditPath, 2);
+    const lines = await waitForAuditLines(auditPath, 2, AUDIT_WAIT_MS);
     expect(lines).toHaveLength(2);
 
-    const header = JSON.parse(lines[0] as string);
+    const header = lines[0] as AuditRecord;
     expect(header.type).toBe("sessionStart");
     expect(header.serverPkg).toBe("test-server");
     expect(header.version).toBe("1.0.0");
 
-    const entry = JSON.parse(lines[1] as string);
+    const entry = lines[1] as AuditRecord;
     expect(entry.tool).toBe("iris_doc_get");
     expect(entry.action).toBeNull();
     expect(entry.profile).toBe("default");
@@ -240,8 +224,8 @@ describe("audit interceptor (Epic 29, Story 29.0)", () => {
     });
     expect(result.isError).toBe(true);
 
-    const lines = await waitForLineCount(auditPath, 2);
-    const entry = JSON.parse(lines[1] as string);
+    const lines = await waitForAuditLines(auditPath, 2, AUDIT_WAIT_MS);
+    const entry = lines[1] as AuditRecord;
     expect(entry.profile).toBe("no-such-profile");
     // The distinguishing assertion: absent, NOT "env".
     expect(Object.prototype.hasOwnProperty.call(entry, "profileSource")).toBe(false);
@@ -280,5 +264,89 @@ describe("audit interceptor (Epic 29, Story 29.0)", () => {
 
     expect(exitMock).toHaveBeenCalledWith(1);
     expect(appendFileMock).not.toHaveBeenCalled();
+  });
+
+  // Story 42.10 (DW-654, DW-667, AD-19), with IRIS_AUDIT_LOG_PARAMS unset: a SYS-scoped tool always runs in %SYS, so its
+  // entry's `namespace` says so whatever its `namespace` argument holds, and `targetNamespace` carries that argument when it
+  // is a non-empty string. Every other scope keeps the argument-or-profile derivation and never has `targetNamespace`.
+  describe("the audit namespace follows the tool's scope (Story 42.10, DW-654)", () => {
+    /** A tool of `scope` that takes an optional `namespace`; `mutates: "write"` makes it default-disabled (a denial). */
+    function makeScopedTool(scope: ToolDefinition["scope"], mutates: "read" | "write" = "read"): ToolDefinition {
+      return {
+        name: `iris_scope_${scope.toLowerCase()}_${mutates}`,
+        title: `${scope} ${mutates}`,
+        description: `A ${scope}-scoped ${mutates} tool.`,
+        inputSchema: z.object({ namespace: z.string().optional().describe("Target namespace") }),
+        annotations: { readOnlyHint: mutates === "read", destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        scope,
+        mutates,
+        handler: async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+      };
+    }
+
+    /** Run the `calls` against a started server with auditing on, and return the tool-call entries in call order. */
+    async function auditedEntries(tool: ToolDefinition, calls: Array<Record<string, unknown>>): Promise<Array<Record<string, unknown>>> {
+      const dir = mkdtempSync(join(tmpdir(), "iris-audit-scope-test-"));
+      const auditPath = join(dir, "audit.log");
+      process.env.IRIS_AUDIT_LOG = auditPath;
+      try {
+        fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+        fetchMock.mockResolvedValueOnce(versionResponse());
+        const server = new McpServerBase(makeServerOpts([tool], makeConfig()));
+        await server.start("stdio");
+        for (const args of calls) await invokeTool(server, tool.name, args);
+        const lines = await waitForAuditLines(auditPath, calls.length + 1, AUDIT_WAIT_MS);
+        return lines.filter((entry) => entry.tool === tool.name);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+
+    it("a SYS-scoped call records %SYS, with and without a namespace argument, and the argument as targetNamespace", async () => {
+      const entries = await auditedEntries(makeScopedTool("SYS"), [{}, { namespace: "USER" }, { namespace: "" }]);
+      expect(entries.map((entry) => [entry.outcome, entry.namespace, entry.targetNamespace])).toEqual([
+        ["ok", "%SYS", undefined],
+        ["ok", "%SYS", "USER"],
+        ["ok", "%SYS", undefined],
+      ]);
+      expect(entries.map((entry) => "targetNamespace" in entry), "no key without a non-empty argument").toEqual([false, true, false]);
+      // The argument is still named in `paramKeys`; its value is in `targetNamespace`, not in `params`.
+      expect(entries.map((entry) => entry.paramKeys)).toEqual([[], ["namespace"], ["namespace"]]);
+      expect(entries.map((entry) => "params" in entry)).toEqual([false, false, false]);
+      // `targetNamespace` follows `namespace` in the entry.
+      const keys = Object.keys(entries[1]!);
+      expect(keys.indexOf("targetNamespace")).toBe(keys.indexOf("namespace") + 1);
+    });
+
+    it("a denied SYS-scoped call records %SYS and its namespace argument as targetNamespace", async () => {
+      const entries = await auditedEntries(makeScopedTool("SYS", "write"), [{ namespace: "USER" }, {}]);
+      expect(entries).toHaveLength(2);
+      expect(entries[0]).toMatchObject({ outcome: "denied", denyReason: "GOVERNANCE_DISABLED", namespace: "%SYS", targetNamespace: "USER" });
+      expect(entries[1]).toMatchObject({ outcome: "denied", namespace: "%SYS" });
+      expect(entries[1]).not.toHaveProperty("targetNamespace");
+    });
+
+    it("a SYS-scoped call that fails its schema records %SYS, and no targetNamespace for a namespace that is not a string", async () => {
+      const entries = await auditedEntries(makeScopedTool("SYS"), [{ namespace: 5 }]);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({ outcome: "error", namespace: "%SYS" });
+      expect(entries[0]).not.toHaveProperty("targetNamespace");
+    });
+
+    it.each(["NS", "BOTH", "NONE"] as const)("a %s-scoped call records its namespace argument, else the profile's default (as before), and never targetNamespace", async (scope) => {
+      const entries = await auditedEntries(makeScopedTool(scope), [{}, { namespace: "USER" }]);
+      expect(entries.map((entry) => [entry.outcome, entry.namespace])).toEqual([
+        ["ok", "HSCUSTOM"],
+        ["ok", "USER"],
+      ]);
+      for (const entry of entries) expect(entry).not.toHaveProperty("targetNamespace");
+    });
+
+    it.each(["NS", "BOTH", "NONE"] as const)("a denied %s-scoped call records its namespace argument (as before), and never targetNamespace", async (scope) => {
+      const entries = await auditedEntries(makeScopedTool(scope, "write"), [{ namespace: "USER" }]);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({ outcome: "denied", namespace: "USER" });
+      expect(entries[0]).not.toHaveProperty("targetNamespace");
+    });
   });
 });

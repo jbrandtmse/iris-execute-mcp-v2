@@ -19,7 +19,9 @@
 //
 //   node scripts/gen-governance-baseline.mjs --check
 //       SAFE. Re-derives the LIVE governance keys from the built server dists
-//       and verifies the FROZEN committed baseline ONE-DIRECTIONALLY (mirrors
+//       and verifies the FROZEN committed baseline, read from the built shared
+//       dist (build @iris-mcp/shared first; the pnpm script's pre-hook does),
+//       ONE-DIRECTIONALLY (mirrors
 //       the governance.test.ts drift guard): every frozen foundation key must
 //       still exist in the live surface (a vanished key is a real back-compat
 //       regression → exit 1). New post-foundation keys are EXPECTED and allowed
@@ -172,6 +174,10 @@ function computeHash(sortedKeys) {
 }
 
 const outPath = resolve(root, 'packages/shared/src/governance-baseline.ts');
+// --check reads the BUILT module, never `outPath`: Node strips types from a `.ts` import only from 22.18, and the floor is
+// 22.17.0. The shared dist is built from `outPath` by the `pnpm gen:governance-baseline:check` pre-hook and by `pnpm build`, so
+// after a build it holds the same frozen set; a direct `node` run reads whatever dist was built last.
+const builtBaselinePath = resolve(root, 'packages/shared/dist/governance-baseline.js');
 
 // VANISHED_HINT is imported from the shared derivation module (single source of truth,
 // shared with the governance.test.ts drift guard).
@@ -182,16 +188,16 @@ const outPath = resolve(root, 'packages/shared/src/governance-baseline.ts');
 if (CHECK_MODE) {
   const { keys: liveKeys } = await deriveLiveKeys();
 
-  // Import the FROZEN committed baseline (source of truth for the foundation).
-  // `outPath` is the single shared path constant — --check verifies exactly the
-  // file --force would write, so they can never diverge.
+  // Import the FROZEN baseline (source of truth for the foundation) from the built shared
+  // dist, which `pnpm build` compiles from the file --force would write (`outPath`).
   let committedModule;
   try {
-    committedModule = await import(pathToFileURL(outPath).href);
+    committedModule = await import(pathToFileURL(builtBaselinePath).href);
   } catch (e) {
     console.error(
-      `gen-governance-baseline --check: could not import the committed baseline at\n` +
-        `${outPath}.\nUnderlying error: ${e?.message ?? e}`,
+      `gen-governance-baseline --check: could not import the built baseline at\n` +
+        `${builtBaselinePath}.\nDid you run "pnpm turbo run build --filter @iris-mcp/shared" first?\n` +
+        `Underlying error: ${e?.message ?? e}`,
     );
     process.exit(1);
   }
@@ -205,7 +211,7 @@ if (CHECK_MODE) {
     committedExport != null && typeof committedExport[Symbol.iterator] === 'function';
   if (!committedIsIterable) {
     console.error(
-      `gen-governance-baseline --check: the committed baseline at\n${outPath}\n` +
+      `gen-governance-baseline --check: the built baseline at\n${builtBaselinePath}\n` +
         `does not export an iterable GOVERNANCE_BASELINE (got ` +
         `${Object.prototype.toString.call(committedExport)}). The frozen ` +
         `foundation appears destroyed or the export was renamed — refusing to ` +
@@ -216,7 +222,7 @@ if (CHECK_MODE) {
   const committed = new Set(committedExport);
   if (committed.size === 0) {
     console.error(
-      `gen-governance-baseline --check: the committed baseline at\n${outPath}\n` +
+      `gen-governance-baseline --check: the built baseline at\n${builtBaselinePath}\n` +
         `exports an EMPTY GOVERNANCE_BASELINE. The frozen foundation appears ` +
         `destroyed — refusing to report a false "OK". Restore the frozen ` +
         `baseline; do NOT regenerate it.`,

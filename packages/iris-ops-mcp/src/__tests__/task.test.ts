@@ -372,8 +372,8 @@ describe("iris_task_run", () => {
     expect(taskRunTool.scope).toBe("NONE");
   });
 
-  it("should have destructiveHint false annotation", () => {
-    expect(taskRunTool.annotations.destructiveHint).toBe(false);
+  it("should have destructiveHint true annotation (Story 42.10, DW-560)", () => {
+    expect(taskRunTool.annotations.destructiveHint).toBe(true);
     expect(taskRunTool.annotations.readOnlyHint).toBe(false);
   });
 

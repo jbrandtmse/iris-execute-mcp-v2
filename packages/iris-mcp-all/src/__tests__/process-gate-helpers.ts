@@ -9,11 +9,15 @@
 import { spawn } from "node:child_process";
 import http from "node:http";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import type { AddressInfo } from "node:net";
+import { createServer, type AddressInfo } from "node:net";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Readable } from "node:stream";
+import { completeAuditLines, readAuditEntries } from "../../../../scripts/lib/audit-lines.mjs";
 import { checkDistFresh } from "../../../../scripts/lib/dist-freshness.mjs";
+import { liveGateTarget } from "../../../shared/src/test-helpers/live-target.js";
+
+export { completeAuditLines };
 
 /**
  * The ESM build of `@modelcontextprotocol/client` (its `dist/` directory, holding `index.mjs` and
@@ -70,23 +74,45 @@ export async function isIrisReachable(host: string, port: string): Promise<boole
   }
 }
 
+/** A local port nothing listens on: bind an ephemeral port on 127.0.0.1, then release it. */
+export async function reserveClosedPort(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address !== null ? address.port : 0;
+      server.close(() => resolve(String(port)));
+    });
+  });
+}
+
+/**
+ * The settings of the connection-refusing preload (`scripts/lib/no-live-iris-preload.mjs`). They configure the test
+ * oracle, never a server, so {@link inheritedEnv} hands them to a spawned child: a child that inherits the preload
+ * through `NODE_OPTIONS` then also logs its refused connects to the same file.
+ */
+export const PRELOAD_SETTINGS: readonly string[] = ["IRIS_MCP_CONNECT_LOG", "IRIS_MCP_WATCH_PORTS", "IRIS_MCP_WATCH_HOSTS"];
+
 /**
  * The test runner's environment for a spawned server: everything it inherits
  * (PATH, and SystemRoot on Windows), minus every variable that configures the
  * suite -- each `IRIS_*` key and `MCP_TRANSPORT` -- and minus each name in
  * `alsoDrop`. Names match case-insensitively, as Windows treats them, so an
- * ambient lowercase `iris_host` is dropped too. A gate layers its own explicit
+ * ambient lowercase `iris_host` is dropped too. The {@link PRELOAD_SETTINGS}
+ * are kept unless `alsoDrop` names them. A gate layers its own explicit
  * values on top of the result.
  *
  * @param alsoDrop - Further variable names to drop (case-insensitive).
  */
 export function inheritedEnv(alsoDrop: readonly string[] = []): Record<string, string> {
   const dropped = new Set(["MCP_TRANSPORT", ...alsoDrop.map((name) => name.toUpperCase())]);
+  const kept = new Set(PRELOAD_SETTINGS);
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value !== "string") continue;
     const upper = key.toUpperCase();
-    if (upper.startsWith("IRIS_") || dropped.has(upper)) continue;
+    if (dropped.has(upper) || (upper.startsWith("IRIS_") && !kept.has(upper))) continue;
     env[key] = value;
   }
   return env;
@@ -162,17 +188,31 @@ export interface IrisTarget {
 }
 
 /**
- * The target named by `IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD` and
- * `IRIS_NAMESPACE`, each defaulting to the dev instance at localhost:52773 as `_SYSTEM` in HSCUSTOM.
+ * The target of an armed run: `IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD` and
+ * `IRIS_NAMESPACE`, all required, none defaulted (`resolveLiveTarget`). A run that `IRIS_REQUIRE_LIVE`
+ * does not arm gets an inert target under the reserved `.invalid` TLD that is never contacted: every
+ * gate checks {@link liveArmingSkipReason} before its first probe, spawn or request.
+ *
+ * @throws When `IRIS_REQUIRE_LIVE` arms the run and any of the five variables is missing.
  */
 export function irisTargetFromEnv(): IrisTarget {
+  const { target } = liveGateTarget();
   return {
-    host: process.env.IRIS_HOST ?? "localhost",
-    port: process.env.IRIS_PORT ?? "52773",
-    username: process.env.IRIS_USERNAME ?? "_SYSTEM",
-    password: process.env.IRIS_PASSWORD ?? "SYS",
-    namespace: process.env.IRIS_NAMESPACE ?? "HSCUSTOM",
+    host: target.host,
+    port: target.port,
+    username: target.username,
+    password: target.password,
+    namespace: target.namespace,
   };
+}
+
+/**
+ * Why a live gate must not run: `IRIS_REQUIRE_LIVE` (`1` or `true`) is not set, so the gate reaches
+ * no IRIS. `undefined` when armed. A set `IRIS_HOST` does not arm a gate. A gate skips with this
+ * reason before any probe, spawn or request.
+ */
+export function liveArmingSkipReason(): string | undefined {
+  return liveGateTarget().skipReason;
 }
 
 /** The connection settings of a spawned server's `default` profile. */
@@ -604,9 +644,9 @@ export async function shippedBootstrapVersion(repoRoot: string): Promise<string>
  * ships, so a gate that drives a built server is not testing some other build.
  *
  * Call it once the gate's first built-server session has connected: that server's startup
- * bootstrap redeploys any deployment whose version differs, so a mismatch after the connection means
- * the deployment is not the shipped embed. The deployed value is read over the raw Atelier route,
- * independently of the bootstrap code that decides the redeploy.
+ * bootstrap redeploys an older deployment and leaves a newer or foreign one alone, so a mismatch
+ * after the connection means the deployment is not the shipped embed. The deployed value is read
+ * over the raw Atelier route, independently of the bootstrap code that decides the redeploy.
  *
  * @returns The version, once it matches.
  * @throws When the deployed version differs from the shipped one, naming both.
@@ -620,7 +660,8 @@ export async function assertDeployedBootstrapVersion(repoRoot: string, target: I
       `The deployed ExecuteMCPv2 classes report BOOTSTRAP_VERSION "${deployed}" but the shipped embed ` +
         `(packages/shared/dist/bootstrap-classes.js) is "${shipped}", so this gate would test classes ` +
         "other than the shipped ones. The gate's own built server has connected, and its startup bootstrap " +
-        "redeploys a deployment whose version differs, so that bootstrap failed or did not run. Its report " +
+        "redeploys an older deployment, so that bootstrap failed or did not run, or refused to replace a " +
+        "newer or foreign deployment. Its report " +
         "goes to the server's stderr, which the gate does not show: start the built server by hand against " +
         "this instance to read it, fix the cause, then rerun the gate.",
     );
@@ -900,16 +941,13 @@ export interface AuditPollOptions {
 
 /**
  * Read the JSON-lines audit file `file` until it holds the entries `options` asks for, and return them.
- * Throws, quoting the start of the file, when they have not appeared within `timeoutMs`.
+ * Only newline-terminated lines are read (see `completeAuditLines` in `scripts/lib/audit-lines.mjs`); a terminated line that does
+ * not parse still throws. Throws, quoting the start of the file, when the entries have not appeared within `timeoutMs`.
  */
 export async function pollAuditEntries(file: string, options: AuditPollOptions): Promise<AuditEntry[]> {
   const wanted = options.count ?? 1;
   const deadline = Date.now() + options.timeoutMs;
-  const read = (): AuditEntry[] =>
-    (existsSync(file) ? readFileSync(file, "utf8") : "")
-      .split("\n")
-      .filter((line) => line.trim() !== "")
-      .map((line) => JSON.parse(line) as AuditEntry);
+  const read = (): AuditEntry[] => readAuditEntries(file) as AuditEntry[];
   const ofTool = (entry: AuditEntry): boolean => options.tool === undefined || entry["tool"] === options.tool;
   for (;;) {
     const entries = read();
@@ -929,11 +967,11 @@ export async function pollAuditEntries(file: string, options: AuditPollOptions):
 /**
  * The number of entries the JSON-lines audit file `file` holds once no entry has landed for `stableReads` reads
  * `intervalMs` apart (0 when there is no file). The server writes an entry after it has sent the reply, so a test
- * that asserts on the entries its own calls add takes this count first and then reads only what follows it.
+ * that asserts on the entries its own calls add takes this count first and then reads only what follows it. An entry
+ * counts once its newline has landed (see {@link completeAuditLines}), as it does for {@link pollAuditEntries}.
  */
 export async function settledAuditCount(file: string, intervalMs = 50, stableReads = 3): Promise<number> {
-  const count = (): number =>
-    (existsSync(file) ? readFileSync(file, "utf8") : "").split("\n").filter((line) => line.trim() !== "").length;
+  const count = (): number => completeAuditLines(existsSync(file) ? readFileSync(file, "utf8") : "").length;
   let last = count();
   for (let stable = 0; stable < stableReads; ) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));

@@ -121,11 +121,10 @@ export interface ClientDisposition {
 
 /** The canonical iris-mcp server set (spec §3.3) — the rows of the status matrix.
  * `iris-mcp-all` is deliberately EXCLUDED (Project Lead decision 2026-07-28,
- * epics.md AC 33.3.2 amendment): it is a real aggregate stdio server, but as a
- * peer row it invites applying all 5 servers AND the aggregate, double-
- * registering every tool in the client. An `iris-mcp-all` entry in a client
- * config is therefore FOREIGN to the manager (surfaced read-only, never
- * modified) — users who want the aggregate hand-write it. */
+ * epics.md AC 33.3.2 amendment): `@iris-mcp/all` is a meta-package with no
+ * `bin`, so no server by that name can start. An `iris-mcp-all` entry in a
+ * client config is therefore FOREIGN to the manager (surfaced read-only, never
+ * modified); the five per-server entries are the way to register the suite. */
 export const CANONICAL_SERVERS = [
   "iris-dev-mcp",
   "iris-admin-mcp",

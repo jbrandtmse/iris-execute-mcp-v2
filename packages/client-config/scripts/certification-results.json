@@ -26,7 +26,7 @@
         "PASS remove (engine)",
         "PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass"
       ],
-      "residualRisk": "The npx launch target (@iris-mcp/all) is unpublished as of 2026-07-28, so the client health check reports 'Failed to connect' for the manager-written entry; sibling node-dist entries at the same path/rootKey show '√ Connected' in the same 'claude mcp list' run. Re-run scripts/certify.mjs after the first npm publish for the full tool-listing leg.",
+      "residualRisk": "The npx launch target of the certified entry (@iris-mcp/dev) was unpublished as of 2026-07-28, so the client health check reported 'Failed to connect' for the manager-written entry; sibling node-dist entries at the same path/rootKey showed '√ Connected' in the same 'claude mcp list' run. Re-run scripts/certify.mjs after the first npm publish for the full tool-listing leg. The sharing probe below wrote an iris-mcp-all entry; @iris-mcp/all is a meta-package with no bin, so that entry never starts, published or not.",
       "sharing": {
         "claim": "repo-root .mcp.json is read by Claude Code (AC 33.4.4, Claude half)",
         "verdict": "verified-live",
@@ -68,7 +68,7 @@
         "PASS remove (engine)",
         "PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass"
       ],
-      "residualRisk": "File-level lifecycle certified live; the agent-side tool listing (Copilot MCP view) is a manual GUI step that stays OPEN as AC 33.3.4 for the Project Lead — never claimed here. The npx launch target (@iris-mcp/all) is unpublished as of 2026-07-28 — re-run scripts/certify.mjs after the first npm publish."
+      "residualRisk": "File-level lifecycle certified live; the agent-side tool listing (Copilot MCP view) is a manual GUI step that stays OPEN as AC 33.3.4 for the Project Lead — never claimed here. The certified entry was iris-mcp-all, whose npx launch target (@iris-mcp/all) is a meta-package with no bin: it never starts, published or not, and is no longer a managed server — re-run scripts/certify.mjs against a leaf server (iris-dev-mcp) after the first npm publish."
     },
     "cline": {
       "disposition": "certified-live",
@@ -94,7 +94,7 @@
         "PASS remove (engine)",
         "PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass"
       ],
-      "residualRisk": "File-level lifecycle certified live incl. the native 'disabled' flag round-trip; the agent-side tool listing (Cline MCP UI) is a manual GUI step — never claimed here. The npx launch target (@iris-mcp/all) is unpublished as of 2026-07-28 — re-run scripts/certify.mjs after the first npm publish."
+      "residualRisk": "File-level lifecycle certified live incl. the native 'disabled' flag round-trip; the agent-side tool listing (Cline MCP UI) is a manual GUI step — never claimed here. The certified entry was iris-mcp-all, whose npx launch target (@iris-mcp/all) is a meta-package with no bin: it never starts, published or not, and is no longer a managed server — re-run scripts/certify.mjs against a leaf server (iris-dev-mcp) after the first npm publish."
     },
     "roo-code": {
       "disposition": "fixture-only-with-residual-risk",
@@ -156,7 +156,7 @@
         "PASS remove (engine)",
         "PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass"
       ],
-      "residualRisk": "CLI/TUI half: certified live (file-level lifecycle + agent surface probe; the added entry's npx target @iris-mcp/all is unpublished as of 2026-07-28, so its in-session launch fails — sibling node-dist entries in the same file ARE callable live, verified 2026-07-28). VS Code extension half: fixture-only-with-residual-risk — the Kimi Code VS Code extension is NOT installed locally (code --list-extensions, 2026-07-28); per the extension's marketplace docs it reads the same ~/.kimi-code/mcp.json, unproven live. Re-run both legs after publish/extension install — and note kimi-code does NO env expansion (envExpansion: none): the harness applies env-reference, so the entry only authenticates in-session when the OS environment provides IRIS_PASSWORD — export it before the agent leg (or hand-apply in explicit mode with --confirm-secret), otherwise the post-publish launch fails on auth, not on the npx target.",
+      "residualRisk": "CLI/TUI half: certified live (file-level lifecycle + agent surface probe; the added entry's npx target @iris-mcp/all is a meta-package with no bin, so its in-session launch fails and always will, published or not — sibling node-dist entries in the same file ARE callable live, verified 2026-07-28). VS Code extension half: fixture-only-with-residual-risk — the Kimi Code VS Code extension is NOT installed locally (code --list-extensions, 2026-07-28); per the extension's marketplace docs it reads the same ~/.kimi-code/mcp.json, unproven live. Re-run both legs against a leaf server after publish/extension install — and note kimi-code does NO env expansion (envExpansion: none): the harness applies env-reference, so the entry only authenticates in-session when the OS environment provides IRIS_PASSWORD — export it before the agent leg (or hand-apply in explicit mode with --confirm-secret), otherwise the post-publish launch fails on auth, not on the npx target.",
       "ac3344": {
         "cliTuiHalf": {
           "verdict": "verified-live",

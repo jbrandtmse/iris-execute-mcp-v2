@@ -12,7 +12,7 @@
  * carry the `BOOTSTRAP_VERSION` of the built shared dist (the version check of `process-gate-helpers.ts`):
  *
  *  - `tools/list` shows both tools' schemas and annotations (no `readOnly`/`maxRowsAffected` on
- *    `iris_sql_query`, the frozen annotations on `iris_sql_execute`), and `iris_server_profiles`
+ *    `iris_sql_query`, the annotations of `iris_sql_execute` with `destructiveHint` true since Story 42.10), and `iris_server_profiles`
  *    reports the default verdicts;
  *  - with no SQL variable set, a query and a DML statement answer as the Atelier `action/query` route
  *    does (the oracle), `rowsAffected` is the change IRIS made, and `countOnly` equals a `COUNT(*)`;
@@ -39,8 +39,8 @@
  * Expected values come from the live Atelier route and from the Story 38.5 intent contract (the
  * texts and shapes), never from the implementation (Rule #36).
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, defaulting to the
- * dev instance at localhost:52773 / HSCUSTOM; every call names `server: "default"` (or the profile it
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none
+ * defaulted, and only when `IRIS_REQUIRE_LIVE` arms the run (without it every test skips before any request); every call names `server: "default"` (or the profile it
  * tests) and the namespace. Writes only the disposable `ExecuteMCPv2.Temp.QaStory385Wire.cls`
  * (persistent, compiled, six rows) document, its data globals and the marker global
  * `^ExecuteMCPv2.QaStory385WireM`, plus `ExecuteMCPv2.Temp.QaStory385WireDdl` if a DDL refusal were to
@@ -69,6 +69,7 @@ import {
   inheritedEnv,
   irisTargetFromEnv,
   isIrisReachable,
+  liveArmingSkipReason,
   openWireSession,
   resolveSdkEsmDir,
   spawnAndWaitForExit,
@@ -216,7 +217,7 @@ async function seed(): Promise<void> {
 
 beforeAll(async () => {
   const sharedStale = staleDistReason(REPO_ROOT, "shared");
-  distSkipReason = sharedStale ?? staleDistReason(REPO_ROOT, "iris-dev-mcp");
+  distSkipReason = liveArmingSkipReason() ?? sharedStale ?? staleDistReason(REPO_ROOT, "iris-dev-mcp");
   if (!distSkipReason) {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);
     if (!sdkEsmDir) {
@@ -311,10 +312,10 @@ describe("the SQL tools on the wire, no SQL variable set (Story 38.5, AC-4, AC-5
       ["countOnly", "maxRows", "maxRowsAffected", "namespace", "parameters", "query", "readOnly", "server"],
     );
     expect(execute?.inputSchema.required).toEqual(["query"]);
-    // The frozen tool keeps its annotations and gains no `action` enum.
+    // The frozen tool declares destructiveHint true since Story 42.10 (DW-560), keeps its other hints and gains no `action` enum.
     expect(execute?.annotations).toMatchObject({
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       idempotentHint: false,
       openWorldHint: false,
     });

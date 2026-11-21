@@ -100,8 +100,9 @@ describe("IRIS_NAMESPACE default (Story 38.0, DW-469, AC-3)", () => {
       }
     }
 
-    // The scan found the fallbacks at all (an empty scan would pass the next assertion vacuously).
-    expect(fallbacks.length).toBeGreaterThan(5);
+    // The scan found the fallbacks at all (an empty scan would pass the next assertion vacuously): the suite default in
+    // `loadConfig` is the one inline fallback that remains, because every test target is explicit (Story 42.2).
+    expect(fallbacks).toContainEqual({ file: "packages/shared/src/config.ts", fallback: '"USER"' });
     const unexpected = fallbacks.filter(
       ({ file, fallback }) =>
         !(file === "packages/shared/src/config.ts" && fallback === '"USER"') && fallback !== '"HSCUSTOM"',

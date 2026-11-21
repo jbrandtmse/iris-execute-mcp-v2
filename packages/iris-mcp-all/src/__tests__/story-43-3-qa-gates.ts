@@ -37,6 +37,12 @@ export function manyDocumentsDiff(count: number): Json {
 
 export const post = (url: string, body: unknown): string => `POST ${url} ${JSON.stringify(body)}`;
 
+/** The gated tools that declare `scope: "SYS"`: they always run in %SYS (AD-3), so their audit entry records `%SYS` (Story 42.10, DW-654). */
+export const SYS_SCOPED_GATE_TOOLS = ["iris_audit_manage"];
+
+/** The `namespace` that the audit entry of a call to `tool` records when the call names none: `%SYS` for a SYS-scoped tool, else the profile's namespace. */
+export const auditNamespace = (tool: string): string => (SYS_SCOPED_GATE_TOOLS.includes(tool) ? "%SYS" : "HSCUSTOM");
+
 /** The audit entry (without `seq`) that a call must leave when auditing logs no argument values: derived from what was sent and what came back. */
 export function expectedEntry(pkg: string, tool: string, args: Json, result: Json): Json {
   const base = {
@@ -44,7 +50,7 @@ export function expectedEntry(pkg: string, tool: string, args: Json, result: Jso
     tool,
     action: args.action,
     profile: "default",
-    namespace: "HSCUSTOM",
+    namespace: auditNamespace(tool),
     paramKeys: Object.keys(JSON.parse(JSON.stringify(args))).sort(),
     profileSource: "env",
   };

@@ -2,7 +2,7 @@
   "name": "iris-mcp-suite",
   "private": true,
   "version": "0.0.0",
-  "description": "InterSystems IRIS MCP Server Suite — a monorepo of specialized MCP servers for IRIS",
+  "description": "Monorepo of Model Context Protocol servers for IRIS: five stdio servers, their shared framework, a client configuration manager and a skills pack",
   "scripts": {
     "build": "turbo run build",
     "test": "turbo run test",
@@ -21,10 +21,13 @@
     "gen:pack:check": "node scripts/gen-pack.mjs --check",
     "check:provenance": "node scripts/check-provenance.mjs",
     "validate:prompts": "node scripts/validate-prompts.mjs",
+    "live:bootstrap-guard": "node scripts/throwaway-iris.mjs run -- pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-42-2-bootstrap-guard-live-gate.test.ts",
     "measure:tools-payload": "node scripts/measure-tools-payload.mjs",
     "gen:tools-list-snapshot": "node scripts/gen-tools-list-snapshot.mjs",
     "gen:tools-list-snapshot:check": "node scripts/gen-tools-list-snapshot.mjs --check",
-    "changeset": "changeset"
+    "changeset": "changeset",
+    "version": "node scripts/release-version.mjs",
+    "release": "node scripts/release.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",
@@ -40,6 +43,6 @@
   },
   "packageManager": "pnpm@9.15.0",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.17.0"
   }
 }

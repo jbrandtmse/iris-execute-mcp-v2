@@ -22,8 +22,8 @@
  *  2. Byte identity: replay every captured request against the current classes; each raw response text
  *     equals its capture, and the capture predates the `BOOTSTRAP_VERSION` the gate runs on.
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (defaults: localhost:52773,
- * `_SYSTEM`, HSCUSTOM). Writes only the three `EXECMCPTMP393*` namespaces and databases, and the HSCUSTOM
+ * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, all required and none defaulted, and
+ * only when `IRIS_REQUIRE_LIVE` arms the run (without it every row skips before any request). Writes only the three `EXECMCPTMP393*` namespaces and databases, and the HSCUSTOM
  * class `ExecuteMCPv2.Temp.Story391Fixture`. A missing or stale dist, an unresolvable SDK or an
  * unreachable IRIS skips each row with the reason, or fails with "may not be skipped" when
  * `IRIS_REQUIRE_LIVE` is armed (listed in `scripts/prepublish-gate.mjs` `gateTestFiles`).
@@ -44,6 +44,7 @@ import {
   headerIds,
   irisTargetFromEnv,
   isIrisReachable,
+  liveArmingSkipReason,
   openWireSession,
   pollAuditEntries,
   postEnvelope,
@@ -184,7 +185,7 @@ const sendSearch = (body: Record<string, unknown>): Promise<{ status: number; te
 // -- Setup and teardown ------------------------------------------------
 
 beforeAll(async () => {
-  skipReason = staleDistReason(REPO_ROOT, "shared");
+  skipReason = liveArmingSkipReason() ?? staleDistReason(REPO_ROOT, "shared");
   for (const pkg of ["iris-dev-mcp", "iris-admin-mcp", "iris-interop-mcp"]) skipReason ??= staleDistReason(REPO_ROOT, pkg);
   if (!skipReason) {
     sdkEsmDir = resolveSdkEsmDir(REPO_ROOT);

@@ -13,15 +13,24 @@
 //   entry `id`, an entry whose row or pointer does not exist, whose `old` is not the frozen value, or whose frozen
 //   line is not canonical JSON (re-serializing it would change bytes no entry names). It never skips an entry.
 //
-//   An entry that replaces a description only appends (`appendOnly`): `new` starts with `old` and is longer.
+//   An entry that replaces a description only appends (`appendOnly`) when it says so: `new` starts with `old` and is
+//   longer. An entry without `appendOnly` may replace the text (a correction); which sanction may do so is the
+//   ledger test's decision, not the loader's.
+//
+//   A "handler" entry with `section: "audit"` addresses the server's `audit` array instead of a row: its pointer
+//   starts with the index of an audit element and then names a member of it. Only a call entry (an element that has
+//   `seq`) can change; the `sessionStart` element and every row `line` stay frozen. It is checked like any other entry:
+//   the pointer must resolve, and `old` must be the frozen value.
 //
 // LEDGER SCHEMA (`validateSanctionedChanges` enforces it; unknown keys are refused)
 //   { "description": string, "changes": [ change ... ] }
 //   change: id (unique, non-empty), sanction (^S-\d+\.\d+-[a-z-]+$), story (^\d+\.\d+$), golden ("wire" | "handler"),
 //           server (one of the golden's servers), session (required for "wire", absent for "handler"), label (the
-//           row), pointer (RFC 6901, starting with "/", inside the parsed line), op ("replace" | "remove"),
-//           old (required), new (required for "replace", absent for "remove"), appendOnly (optional boolean).
-//   Changes to one row apply in file order.
+//           row; absent when `section` is "audit"), section (optional, "audit", "handler" only), pointer (RFC 6901,
+//           starting with "/", inside the parsed line, or `/<audit index>/<member>...` for the audit section),
+//           op ("replace" | "remove"), old (required), new (required for "replace", absent for "remove"),
+//           appendOnly (optional boolean).
+//   Changes to one row, or to one audit element, apply in file order.
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -35,7 +44,7 @@ export const SANCTIONED_CHANGES_RELATIVE_PATH = 'packages/iris-mcp-all/src/__tes
 /** The repository-relative path of each golden kind. */
 const GOLDEN_PATHS = Object.freeze({ wire: GOLDEN_RELATIVE_PATH, handler: HANDLER_GOLDEN_RELATIVE_PATH });
 
-const CHANGE_KEYS = ['id', 'sanction', 'story', 'golden', 'server', 'session', 'label', 'pointer', 'op', 'old', 'new', 'appendOnly'];
+const CHANGE_KEYS = ['id', 'sanction', 'story', 'golden', 'server', 'session', 'label', 'section', 'pointer', 'op', 'old', 'new', 'appendOnly'];
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
@@ -115,9 +124,20 @@ function validateChange(change, index) {
   if (!GOLDEN_PACKAGES.includes(change.server)) refuse(`server must be one of ${GOLDEN_PACKAGES.join(', ')}.`);
   if (change.golden === 'wire' && !isText(change.session)) refuse("a 'wire' change needs a non-empty session.");
   if (change.golden === 'handler' && hasOwn(change, 'session')) refuse("a 'handler' change has no session.");
-  if (!isText(change.label)) refuse('label must be a non-empty string.');
+  const audit = hasOwn(change, 'section');
+  if (audit) {
+    if (change.section !== 'audit') refuse("section must be 'audit' when present.");
+    if (change.golden !== 'handler') refuse("an 'audit' change must be a 'handler' change.");
+    if (hasOwn(change, 'label')) refuse("an 'audit' change addresses an element of the audit array and has no label.");
+  } else if (!isText(change.label)) {
+    refuse('label must be a non-empty string.');
+  }
   if (typeof change.pointer !== 'string' || !change.pointer.startsWith('/') || pointerTokens(change.pointer) === undefined) {
     refuse('pointer must be an RFC 6901 pointer starting with "/".');
+  }
+  if (audit) {
+    const tokens = pointerTokens(change.pointer);
+    if (tokens.length < 2 || indexOf(tokens[0]) === undefined) refuse("an 'audit' pointer must be /<audit index>/<member>.");
   }
   if (change.op !== 'replace' && change.op !== 'remove') refuse("op must be 'replace' or 'remove'.");
   if (!hasOwn(change, 'old')) refuse('old is required.');
@@ -201,8 +221,29 @@ function edit(message, change) {
 }
 
 /**
+ * Apply one `section: "audit"` change to `clone`: the audit element that the pointer's first token names must exist and
+ * be a call entry (it has `seq`), the pointer must resolve inside it, and `old` must be its value. Throws, naming the
+ * change, otherwise.
+ */
+function applyAuditChange(clone, change) {
+  const audit = clone.servers?.[change.server]?.audit;
+  if (!Array.isArray(audit)) throw new Error(`${named(change.id)}: the golden has no audit array for ${change.server}.`);
+  const tokens = pointerTokens(change.pointer);
+  const element = walk(audit, tokens.slice(0, 1));
+  if (element === undefined) throw new Error(`${named(change.id)}: the audit array of ${change.server} has no element ${tokens[0]}.`);
+  if (!isObject(element) || !hasOwn(element, 'seq')) {
+    throw new Error(`${named(change.id)}: audit element ${tokens[0]} of ${change.server} is not a call entry (it has no seq), so it stays frozen.`);
+  }
+  const current = walk(audit, tokens);
+  if (current === undefined) throw new Error(`${named(change.id)}: pointer ${change.pointer} resolves to nothing in the audit array of ${change.server}.`);
+  if (!sameJson(current, change.old)) throw new Error(`${named(change.id)}: old is not the value at ${change.pointer} in the audit array of ${change.server}.`);
+  edit(audit, change);
+}
+
+/**
  * A deep clone of `golden` with the ledger applied: each row that a `kind` change names carries its frozen line with
- * the changes of that row applied in file order and re-serialized with `JSON.stringify`. No other field changes.
+ * the changes of that row applied in file order and re-serialized with `JSON.stringify`, and each audit element that
+ * a handler change names carries the changed member. No other field changes.
  *
  * @param {Record<string, any>} golden - The frozen golden, parsed.
  * @param {'wire' | 'handler'} kind - Which golden `golden` is; only the changes of that kind apply.
@@ -214,6 +255,10 @@ export function applySanctionedChanges(golden, kind, changes) {
   const clone = structuredClone(golden);
   const parsed = new Map();
   for (const change of changes.filter((candidate) => candidate.golden === kind)) {
+    if (change.section === 'audit') {
+      applyAuditChange(clone, change);
+      continue;
+    }
     const row = rowOf(clone, change);
     if (!parsed.has(row)) {
       const message = JSON.parse(row.line);

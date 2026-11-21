@@ -7,7 +7,7 @@
  * requires the found set to equal `DOCUMENT_WRITE_PATHS` exactly: a new write path turns it red, and so
  * does a roster entry whose path is gone.
  *
- * The roster is exhaustive as of 2026-10-15 (Story 38.3). To add a path, add a roster entry with one of
+ * The roster is exhaustive as of 2026-10-21 (Story 42.11). To add a path, add a roster entry with one of
  * the four verdicts:
  *  - `guarded`: the Storage-drop guard covers it;
  *  - `excluded`: no guard, by decision, with a ledger id whose `reopen_if` says when to reopen it;
@@ -36,6 +36,8 @@ interface WritePath {
   reason: string;
   /** The deferred-work ledger id of an `excluded` path. */
   ledger?: string;
+  /** The shared-guard calls a `guarded` path's source must contain. */
+  guard?: readonly string[];
 }
 
 type Language = "typescript" | "objectscript";
@@ -66,9 +68,24 @@ const FORBIDDEN: Array<{ label: string; expression: RegExp }> = [
   { label: "%Routine / %RoutineMgr %New", expression: /##class\(%(?:Library\.)?(?:Routine|RoutineMgr)\)\.%New\(/g },
 ];
 
+/**
+ * Files that hold a forbidden construct on purpose, each with the exact constructs (label and count, as the scan reports them) and
+ * its reason. A construct is exempt only in a file that no agent tool and no user instance can reach, and only as often as listed:
+ * a further construct, or one more of a listed kind, in that file is forbidden again, and an entry the file no longer matches fails
+ * as stale.
+ */
+const FORBIDDEN_EXEMPTIONS: Readonly<Record<string, { constructs: readonly string[]; reason: string }>> = {
+  "scripts/lib/ipm-archive.mjs": {
+    constructs: ["OBJ.Load* / OBJ.Import* x2"],
+    reason:
+      "builds the terminal sessions of the IPM archive proof (scripts/ci-ipm-archive.mjs, Story 42.4): `$System.OBJ.Load` imports IPM from the image's own " +
+      "copy and loads a synthetic Setup class, both inside a throwaway container that scripts/throwaway-iris.mjs started with no network; no agent tool and no user instance ever runs them",
+  },
+};
+
 const INTEROP = "src/ExecuteMCPv2/REST/Interop.cls";
 
-/** Every document-writing path as of 2026-10-15, in the order the verdicts are recorded. */
+/** Every document-writing path as of 2026-10-21 (Story 42.11), in the order the verdicts are recorded. */
 export const DOCUMENT_WRITE_PATHS: readonly WritePath[] = [
   {
     file: "packages/iris-dev-mcp/src/tools/doc.ts",
@@ -76,6 +93,7 @@ export const DOCUMENT_WRITE_PATHS: readonly WritePath[] = [
     count: 4,
     verdict: "guarded",
     reason: "iris_doc_put: for a class without allowStorageRegeneration, the 409 that the unversioned PUT draws feeds the Storage-drop guard before any write (a refused drop sends no write); a non-class document, and a class with allowStorageRegeneration, are not guarded",
+    guard: ["droppedStorageDefinitions(", "storageDroppedRefusal("],
   },
   {
     file: "packages/iris-dev-mcp/src/tools/doc-edit.ts",
@@ -83,30 +101,31 @@ export const DOCUMENT_WRITE_PATHS: readonly WritePath[] = [
     count: 1,
     verdict: "guarded",
     reason: "iris_doc_edit: the edits are applied to the one read of the class, and for action apply the Storage-drop guard compares that read with the edited lines before the one version-checked PUT (a refused drop sends no write); action regenerateStorage is the default-disabled override, and a non-class document is not guarded",
+    guard: ["droppedStorageDefinitions(", "storageDroppedRefusal("],
   },
   {
     file: "packages/iris-dev-mcp/src/tools/load.ts",
     pattern: "put",
     count: 2,
-    verdict: "excluded",
-    reason: "iris_doc_load uploads files with ignoreConflict on by default and the file is the source of truth for the class text; with ignoreConflict false the second PUT is the version-checked repeat of the first (Story 38.7, DW-549), which changes the version handling and not the Storage handling",
-    ledger: "DW-544",
+    verdict: "guarded",
+    reason: "iris_doc_load: for a class file without allowStorageRegeneration, a GET of the class (ignoreConflict true) or the 409 of the unversioned PUT (ignoreConflict false) feeds the Storage-drop guard before any write; a refused file is a failures entry with code STORAGE_DROPPED, the other files continue, and the PUT sequence of a file that drops nothing is unchanged (the second PUT is the version-checked repeat of the first, Story 38.7, DW-549); a new class, a non-class document and a class with allowStorageRegeneration are not refused",
+    guard: ["droppedStorageDefinitions(", "storageDroppedDetail("],
   },
   {
     file: "packages/iris-dev-mcp/src/tools/env-promote.ts",
     pattern: "put",
     count: 1,
-    verdict: "excluded",
-    reason: "iris_env_promote execute: a sync replaces the target's class, Storage included, by design; plan-gated and default-disabled",
-    ledger: "DW-545",
+    verdict: "guarded",
+    reason: "iris_env_promote execute: before the confirmation dialog and before any write, a GET-only preflight reads the source and target copy of each class step; a source copy that drops a Storage definition the target class has refuses the whole execute unless allowStorageRegeneration is set, and the batch PUTs the source text the preflight checked; a non-class document is not guarded",
+    guard: ["droppedStorageDefinitions(", "storageDropsRefusal("],
   },
   {
     file: "packages/iris-dev-mcp/src/tools/format.ts",
     pattern: "xmlLoad",
     count: 1,
-    verdict: "excluded",
-    reason: "iris_doc_xml_export import: an XML export carries its own Storage elements and is the source of truth for the class it describes",
-    ledger: "DW-546",
+    verdict: "guarded",
+    reason: "iris_doc_xml_export import: before the one POST, a GET of each <Class> of the XML is compared with the Storage elements the XML holds for it; a class that drops a definition refuses the whole import unless allowStorageRegeneration is set; a new class and an XML with no class are not refused, and export and list write nothing",
+    guard: ["xmlClassStorageNames(", "storageDropsRefusal("],
   },
   {
     file: "packages/shared/src/bootstrap.ts",
@@ -208,6 +227,8 @@ function scannedFiles(): Array<{ file: string; language: Language }> {
     walk("src/ExecuteMCPv2", (f) => f.endsWith(".cls") && !f.startsWith("src/ExecuteMCPv2/Tests/")),
     "objectscript",
   );
+  // The IPM-only install guard (Story 42.4) is IRIS-side source that sits outside src/.
+  add(walk("ipm/preload", (f) => f.endsWith(".cls")), "objectscript");
   return files;
 }
 
@@ -219,9 +240,10 @@ interface Found {
   count: number;
 }
 
-function scan(): { found: Found[]; scanned: number; forbidden: string[] } {
+function scan(): { found: Found[]; scanned: number; forbidden: string[]; exempted: string[] } {
   const found: Found[] = [];
   const forbidden: string[] = [];
+  const exempted: string[] = [];
   const files = scannedFiles();
   for (const { file, language } of files) {
     const text = readFileSync(path.join(REPO_ROOT, file), "utf8");
@@ -232,16 +254,19 @@ function scan(): { found: Found[]; scanned: number; forbidden: string[] } {
     }
     for (const { label, expression } of FORBIDDEN) {
       const count = countOf(text, expression);
-      if (count > 0) forbidden.push(`${file}: ${label} x${count}`);
+      if (count === 0) continue;
+      const construct = `${label} x${count}`;
+      const exempt = Object.hasOwn(FORBIDDEN_EXEMPTIONS, file) && FORBIDDEN_EXEMPTIONS[file]?.constructs.includes(construct) === true;
+      (exempt ? exempted : forbidden).push(`${file}: ${construct}`);
     }
   }
-  return { found, scanned: files.length, forbidden };
+  return { found, scanned: files.length, forbidden, exempted };
 }
 
 const key = (entry: Found): string => `${entry.file} :: ${entry.pattern} x${entry.count}`;
 
 describe("every document-writing path has a recorded verdict (Story 38.3, AC-6, AD-24)", () => {
-  const { found, scanned, forbidden } = scan();
+  const { found, scanned, forbidden, exempted } = scan();
 
   it("the scan reads the packages' sources, the scripts, the extension and the IRIS-side classes (an empty scan would pass everything below)", () => {
     expect(scanned).toBeGreaterThan(100);
@@ -285,6 +310,20 @@ describe("every document-writing path has a recorded verdict (Story 38.3, AC-6, 
     expect(forbidden).toEqual([]);
   });
 
+  it("every exemption from that rule names a scanned file, the exact constructs it still holds, and a reason (a stale or widened one fails)", () => {
+    const scannedPaths = scannedFiles().map(({ file }) => file);
+    const listed: string[] = [];
+    for (const [file, { constructs, reason }] of Object.entries(FORBIDDEN_EXEMPTIONS)) {
+      expect(scannedPaths, `${file} is scanned`).toContain(file);
+      expect(constructs.length, `${file} lists its constructs`).toBeGreaterThan(0);
+      expect(reason.length, `${file} has a reason`).toBeGreaterThan(60);
+      listed.push(...constructs.map((construct) => `${file}: ${construct}`));
+    }
+    // Equal both ways: a listed construct the file no longer holds is stale, and the file holding more (or other) constructs than listed
+    // puts them in `forbidden` above, so the exemption never covers a construct nobody reviewed.
+    expect([...exempted].sort()).toEqual([...listed].sort());
+  });
+
   it("every entry has a reason, and each exclusion names its own ledger id", () => {
     for (const entry of DOCUMENT_WRITE_PATHS) {
       expect(entry.reason.length, `${key(entry)} has a reason`).toBeGreaterThan(20);
@@ -295,23 +334,32 @@ describe("every document-writing path has a recorded verdict (Story 38.3, AC-6, 
     expect(new Set(ledgerIds).size, "each exclusion has its own ledger row").toBe(ledgerIds.length);
   });
 
-  it("the guarded path is found, and its source runs the shared guard (a non-empty guarded set needs a real put)", () => {
+  it("every guarded path is found, and its source runs the shared guard calls that its entry names (a non-empty guarded set needs a real put)", () => {
     const guarded = DOCUMENT_WRITE_PATHS.filter((entry) => entry.verdict === "guarded");
     expect(guarded.length).toBeGreaterThan(0);
     for (const entry of guarded) {
+      expect(entry.guard?.length ?? 0, `${key(entry)} names the shared guard calls its source must contain`).toBeGreaterThan(0);
       expect(found.map(key), `${key(entry)} is found on disk`).toContain(key(entry));
       const source = readFileSync(path.join(REPO_ROOT, entry.file), "utf8");
-      expect(source).toContain("droppedStorageDefinitions(");
-      expect(source).toContain("storageDroppedRefusal(");
+      for (const call of entry.guard ?? []) expect(source, `${entry.file} calls ${call}`).toContain(call);
     }
   });
 
-  it("the three recorded exclusions are the Story 38.3 set: iris_doc_load, the iris_env_promote execute sync and the XML import", () => {
-    const excluded = DOCUMENT_WRITE_PATHS.filter((entry) => entry.verdict === "excluded").map((entry) => entry.file);
-    expect(excluded).toEqual([
+  it("all five agent class-write paths are guarded, and no path is excluded (Story 42.11: the Story 38.3 exclusions are gone)", () => {
+    const guarded = DOCUMENT_WRITE_PATHS.filter((entry) => entry.verdict === "guarded").map((entry) => entry.file);
+    expect(guarded).toEqual([
+      "packages/iris-dev-mcp/src/tools/doc.ts",
+      "packages/iris-dev-mcp/src/tools/doc-edit.ts",
       "packages/iris-dev-mcp/src/tools/load.ts",
       "packages/iris-dev-mcp/src/tools/env-promote.ts",
       "packages/iris-dev-mcp/src/tools/format.ts",
     ]);
+    expect(DOCUMENT_WRITE_PATHS.filter((entry) => entry.verdict === "excluded")).toEqual([]);
+  });
+
+  it("only a guarded path names guard calls", () => {
+    for (const entry of DOCUMENT_WRITE_PATHS) {
+      if (entry.verdict !== "guarded") expect(entry.guard, `${key(entry)} is not guarded`).toBeUndefined();
+    }
   });
 });

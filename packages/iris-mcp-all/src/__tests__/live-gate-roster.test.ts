@@ -11,31 +11,19 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  ARMED_GATE,
+  NAMED_EXEMPTIONS,
+  PACKAGES_DIR,
+  armedTestFiles,
+  isNamedExemption as isExempt,
+  listedGateFiles,
+  workspacePackageDirs,
+} from "../../../../scripts/lib/live-gate-scan.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PACKAGES_DIR = path.resolve(__dirname, "..", "..", "..");
-
-/** The quoted entries of a gate script's `const gateTestFiles = [ ... ];` literal, comments removed. */
-function listedGateFiles(scriptSource: string): string[] {
-  const literal = /const gateTestFiles = \[([\s\S]*?)\];/.exec(scriptSource)?.[1] ?? "";
-  const withoutComments = literal.replace(/\/\/[^\n]*/g, "");
-  return [...withoutComments.matchAll(/"([^"]+)"/g)].map((match) => match[1] ?? "");
-}
-
-/** The package's test files that compare the arming variable (`... IRIS_REQUIRE_LIVE === ...`), as `src/__tests__/<name>`. */
-function armedTestFiles(pkgDir: string): string[] {
-  const testsDir = path.join(pkgDir, "src", "__tests__");
-  if (!existsSync(testsDir)) return [];
-  return readdirSync(testsDir)
-    .filter((name) => name.endsWith(".test.ts"))
-    .filter((name) => /process\.env\.IRIS_REQUIRE_LIVE\s*===/.test(readFileSync(path.join(testsDir, name), "utf8")))
-    .map((name) => `src/__tests__/${name}`);
-}
-
-const packages = readdirSync(PACKAGES_DIR).filter((name) => existsSync(path.join(PACKAGES_DIR, name, "package.json")));
+const packages: string[] = workspacePackageDirs();
 const armed = packages
   .map((pkg) => ({ pkg, files: armedTestFiles(path.join(PACKAGES_DIR, pkg)) }))
   .filter(({ files }) => files.length > 0);
@@ -45,21 +33,52 @@ describe("armed live gates are run by their package's prepublish gate", () => {
     expect(armed.map(({ pkg }) => pkg)).toEqual(
       expect.arrayContaining(["iris-admin-mcp", "iris-data-mcp", "iris-dev-mcp", "iris-mcp-all"]),
     );
+    expect(armed.flatMap(({ files }) => files).length, "the armed gates of the workspace").toBeGreaterThan(40);
   });
 
   for (const { pkg, files } of armed) {
     it(`${pkg}: every armed test file is in scripts/prepublish-gate.mjs gateTestFiles, and prepublishOnly runs that script`, () => {
       const pkgDir = path.join(PACKAGES_DIR, pkg);
       const script = path.join(pkgDir, "scripts", "prepublish-gate.mjs");
-      expect(existsSync(script), `${pkg} has armed live gates but no scripts/prepublish-gate.mjs`).toBe(true);
+      const rostered = files.filter((file) => !isExempt(pkg, file));
+      expect(existsSync(script) || rostered.length === 0, `${pkg} has armed live gates but no scripts/prepublish-gate.mjs`).toBe(true);
+      if (rostered.length === 0) return;
 
       const listed = listedGateFiles(readFileSync(script, "utf8"));
-      expect(files.filter((file) => !listed.includes(file)), `${pkg} armed files missing from gateTestFiles`).toEqual([]);
+      expect(rostered.filter((file) => !listed.includes(file)), `${pkg} armed files missing from gateTestFiles`).toEqual([]);
 
       const manifest = JSON.parse(readFileSync(path.join(pkgDir, "package.json"), "utf8")) as {
         scripts?: Record<string, string>;
       };
       expect(manifest.scripts?.prepublishOnly ?? "").toContain("scripts/prepublish-gate.mjs");
+    });
+  }
+
+  it("the detector finds a gate that compares the arming variable or arms through IRIS_THROWAWAY, and nothing else", () => {
+    // The samples are assembled, so that this file does not itself contain what the detector looks for.
+    const comparison = ["const REQUIRE_LIVE = process.env.IRIS_REQUIRE_", 'LIVE === "1";'].join("");
+    const plan = ["const PLAN = throwaway", "GatePlan(process.env);"].join("");
+    expect(ARMED_GATE.test(comparison)).toBe(true);
+    expect(ARMED_GATE.test(`import x;\n${plan}\n`)).toBe(true);
+    expect(ARMED_GATE.test(`  ${plan}`), "an indented call is a test of the plan, not a gate").toBe(false);
+    expect(ARMED_GATE.test("const reason = liveArmingSkipReason();")).toBe(false);
+    expect(ARMED_GATE.test("process.env.IRIS_REQUIRE_LIVE = '1'")).toBe(false);
+  });
+});
+
+describe("the named exemptions: armed live gates that are off every roster", () => {
+  for (const { pkg, file, reason } of NAMED_EXEMPTIONS) {
+    it(`${pkg}/${file}: exists, is detected as an armed gate (so the exemption is needed), is listed in no gateTestFiles, and says why`, () => {
+      const source = path.join(PACKAGES_DIR, pkg, file);
+      expect(existsSync(source), `${source} no longer exists: remove the exemption`).toBe(true);
+      expect(ARMED_GATE.test(readFileSync(source, "utf8")), `${file} is no longer detected as an armed gate: remove the exemption`).toBe(true);
+      expect(reason.length).toBeGreaterThan(40);
+
+      for (const other of packages) {
+        const script = path.join(PACKAGES_DIR, other, "scripts", "prepublish-gate.mjs");
+        if (!existsSync(script)) continue;
+        expect(listedGateFiles(readFileSync(script, "utf8")), `${other}'s gateTestFiles must not list ${file}`).not.toContain(file);
+      }
     });
   }
 });

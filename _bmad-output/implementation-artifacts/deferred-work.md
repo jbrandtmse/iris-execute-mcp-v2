@@ -159,6 +159,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Pre-existing publish-readiness concern across all packages; later routed to the publishing checklist item A2.
 - 2026-10-14T10:47:49Z status=wontfix-accepted owner=8-6-meta-package-iris-mcp-all by=migration note=reopen_if=the npm publish decision is taken and a package.json still lacks license/repository/author
 - 2026-10-15T02:51:51Z status=routed owner=42-1-pre-publish-package-fixes by=correct-course note=reopened - reopen_if fired: npm publish decided (decision-record-2026-10-14)
+- 2026-10-21T14:28:59Z status=resolved-by:42-1-pre-publish-package-fixes by=adjudication note=all_8_packages_carry_license_MIT+repository.directory+author+keywords+homepage+bugs(+LICENSE_copy);package-manifests.test.ts_pins_them_with_AD-28_deny-list
 
 ### DW-32: [L8.retro-post-project-1-npm-publishing-session] Retro Post-Project Action #1: npm publishing session
 - source: legacy:8.0 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -175,6 +176,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Publishing activity; belongs to the publishing checklist and post-project planning.
 - 2026-10-14T10:47:49Z status=dropped owner=8-0-epic-7-deferred-cleanup by=migration note=not pipeline work: IPM publishing
 - 2026-10-15T02:51:51Z status=routed owner=42-4-ipm-package-revival by=correct-course note=reopened by D6 (decision-record-2026-10-14): revive IPM, generated manifest, offline install proof, publish
+- 2026-10-22T20:03:33Z status=resolved-by:42-4-ipm-package-revival by=adjudication note=IPM_package_revived:ipm/module.xml_generated_from_classes[]+InstallGuard;offline_install_proof_on_both_editions_in_CI_ipm_job(https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39819176668);publishing_half=42.5_release(DW-689_route)+42.8_Open_Exchange_listing
 
 ### DW-35: [L8.retro-followthrough-mcp-test-harness] Retro Follow-Through: MCP test harness
 - source: legacy:8.0 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -1347,6 +1349,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Both halves are publish-coupled product decisions assigned to the end-of-Epic-32 merge gate with the @iris-mcp/* publish decision; minimum remediation named (neutral cwd + packageVersion setting).
 - 2026-10-14T10:47:53Z status=wontfix-accepted owner=31-4-broker-extension by=migration note=reopen_if=the @iris-mcp/* publish decision is taken and the launcher spawns published packages
 - 2026-10-15T02:51:51Z status=routed owner=42-1-pre-publish-package-fixes by=correct-course note=reopened - reopen_if fired: publish decided; D3 (decision-record-2026-10-14) major pin @1; neutral-cwd half probed in 42.1
+- 2026-10-21T14:28:59Z status=resolved-by:42-1-pre-publish-package-fixes by=adjudication note=every_npx_spec_pinned_@1_from_IRIS_MCP_MAJOR(synthesize.ts:37;extension_mirror_definitions.ts:15_pinned_equal);npx-pin.test.ts_scans_tracked_text;cwd_verdict:extension_definitions_home_cwd,synthesized_entries_mitigated_by_@1(spec_Design_Notes)
 
 ### DW-261: [31-4-8] extension.exports cached without shape validation: a truthy-but-wrong Server Manager API is cached permanently
 - source: legacy:31.4 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -1986,6 +1989,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Publish order client-config, shared, admin, data, dev, interop, ops, all; add a root-level pre-flight release script that runs the full gate set once before pnpm -r publish.
 - 2026-10-14T10:47:57Z status=decision-pending owner=burndown by=migration note=call: add a root-level pre-flight release script as the sole supported publish command
 - 2026-10-15T02:51:51Z status=routed owner=42-5-release-workflow by=correct-course note=decided D7 (decision-record-2026-10-14): release workflow with root pre-flight script as sole publish command
+- 2026-10-21T13:14:16Z occurrence=42-1-pre-publish-package-fixes note=publishing_must_go_through_pnpm:_pnpm_publish_runs_each_prepublishOnly(verify-iris-reachable,prepublish-gate)_which_fails_with_no_IRIS;_only_pnpm_applies_publishConfig.exports_and_rewrites_workspace:*;_direct_npm_publish_ships_dev_exports+workspace:*_deps(42.1_plan_probe;_release_script_owns_both)
+- 2026-11-21T00:07:58Z status=resolved-by:42-5-release-workflow by=adjudication note=release.mjs_prepare_runs_every_prepublishOnly_once_armed_before_anything_is_packed;pnpm_packs,npm_uploads_with_provenance_in_dependency_order,stop_at_first_failure;dry_run_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44836664255_prepare_green+rehearse_8_npm_dry-run_publishes_in_order
 
 ### DW-388: [34-6-CR-13] verify-iris-reachable.mjs silently falls back to hard-coded local dev credentials when env vars are unset
 - source: legacy:34.6 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2030,6 +2035,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-14T10:47:57Z status=decision-pending owner=burndown by=migration note=human=Project Lead decides the initial minor/patch version boundary before the first npm publish
 - 2026-10-15T02:51:51Z status=routed owner=42-1-pre-publish-package-fixes by=correct-course note=decided D2 (decision-record-2026-10-14): align every @iris-mcp/* package at 1.0.0
 - 2026-10-18T17:35:49Z occurrence=40-3-testproduction-runs
+- 2026-10-21T14:28:59Z status=resolved-by:42-1-pre-publish-package-fixes by=adjudication note=1.0.0_mechanism:major_changeset_template_scripts/release/changeset-1.0.0.md_makes_the_fixed_group_land_on_1.0.0_whatever_the_patch/minor_labels(release-1-0-0-mechanism.test.ts_runs_real_changeset_version_in_a_throwaway);42.6_applies_it
 
 ### DW-395: [34-6-CR-20] Documentation and bookkeeping accuracy cluster: (a) error envelope can carry truncated:true for an absent output
 - source: legacy:34.6 | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -2310,6 +2316,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Correctly inert for a git clone + build beta hand-off; add the gates to prepack/prepare and prove the gate RED on the tarball path specifically (Rule #59).
 - 2026-10-14T10:47:58Z status=routed owner=burndown by=migration note=Correctly inert for a git clone + build beta hand-off; add the gates to prepack/prepare and prove the gate RED
 - 2026-10-15T02:51:51Z status=routed owner=42-3-ci-workflow by=correct-course note=D7 (decision-record-2026-10-14): CI gates; prove RED on the tarball path (Rule #59)
+- 2026-10-22T10:02:10Z status=resolved-by:42-3-ci-workflow by=adjudication note=CI_is_the_publish-time_gate(decision_57):package_job_needs_gates+throwaway;CI_runs_every_prepublishOnly_armed;red_on_the_tarball_path:roster_branch_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39753197961_prepublish-admin_red,package_skipped;package_branch_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39753202734_only_package_red_at_smoke
 
 ### DW-444: [35-1-DEV-1] The full parallel turbo run build test lint is not reliably green in this dev environment
 - source: legacy:35.1 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2684,6 +2691,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-16T23:53:09Z occurrence=39-0-epic-38-deferred-cleanup
 - 2026-10-16T23:53:09Z note=39.0 implement: AC-7 pack-content gate deferred here; npm pack must list no __tests__/env-harness/startup-env path and no dist/test-helpers (Story 42.1 AC 42.1.3)
 - 2026-10-17T00:45:43Z occurrence=39-0-epic-38-deferred-cleanup
+- 2026-10-21T14:28:59Z status=resolved-by:42-1-pre-publish-package-fixes by=adjudication note=shared_publishConfig.exports_keeps_only_root_export;published-tarballs.test.ts_compares_pnpm_pack_list_vs_exports+story-42-1-qa-packed-servers_starts_5_packed_servers_on_packed_shared
 
 ### DW-507: [36-4-QA-1] BuildGlobalRef strips leading/trailing whitespace (incl. TAB) BEFORE the new control-character rejection runs
 - source: legacy:36.4 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2695,6 +2703,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: probeCustomRest compares deployed hash vs embedded BOOTSTRAP_VERSION for equality only; fix: embed a monotonic seq:hash, add a newer status so bootstrap() does not redeploy; servers already built without it will always downgrade.
 - 2026-10-14T10:47:59Z status=routed owner=burndown by=migration note=probeCustomRest compares deployed hash vs embedded BOOTSTRAP_VERSION for equality
 - 2026-10-15T02:51:51Z status=routed owner=42-2-bootstrap-downgrade-guard by=correct-course note=pre-publish fix table (decision-record-2026-10-14); must land before 42.6 publishes
+- 2026-10-22T01:54:30Z status=resolved-by:42-2-bootstrap-downgrade-guard by=adjudication note=marker_<semver>+<sequence>.<hash>+ordering(newer/foreign/unknown=no_redeploy+one_warning);lead_smoke_2026-10-22:throwaway_iris-community:2026.2_container_9/9_legs_green(newer,foreign-hash,foreign-dev,older,legacy,current,current-after-upgrade,DW-518_lazy_other);equality-revert_mutation_turned_the_4_newer/foreign_legs_red_on_the_live_container;HSCUSTOM_current_case_observed_live(no_redeploy,Setup_etag_unchanged)
 
 ### DW-509: [36-4-CR-2] BuildGlobalRef's numeric test tSub = (+tSub) throws <MAXNUMBER> for a string key whose numeric prefix overflows (e.g. 1E999)
 - source: legacy:36.4 | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -2757,6 +2766,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Unavoidable inside AC 37.1.8; harmless at the embedded BOOTSTRAP_VERSION; interacts with open HIGH 36-4-CR-1 (running from an older branch could reinstall a pre-36.4 Global.cls)
 - 2026-10-14T10:47:59Z status=decision-pending owner=burndown by=migration note=call: may a default-suite test deploy? else gate the 'other' leg on IRIS_REQUIRE_LIVE
 - 2026-10-15T11:47:35Z status=routed owner=42-2-bootstrap-downgrade-guard by=x0 note=decided=orchestrator(Lead-away) owned by named story (orchestrator decision 2): first-touch deploy = every server's normal bootstrap, idempotent at equal version; the harmful half (older branch reinstalling pre-36.4 Global.cls) is DW-508, closed by AC 42.2.2
+- 2026-10-22T01:54:30Z status=resolved-by:42-2-bootstrap-downgrade-guard by=adjudication note=epic37_gate_header_records_its_write_footprint;the_lazy_other-profile_bootstrap_against_a_newer_deployment_redeploys_nothing(throwaway_live_leg_newer-lazy-other_green;red_under_the_equality_revert)
 
 ### DW-519: [37-1-CR-5] The headline 'recovers automatically, no restart' promise has no LIVE proof
 - source: legacy:37.1 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -2849,6 +2859,9 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-16T15:58:09Z status=routed owner=42-7-vs-code-extension-publish by=burndown note=overflow: the extension-publish story needs a green launcher suite on every platform; DW bullet in 42.7
 - 2026-10-19T22:31:15Z status=routed owner=42-7-vs-code-extension-publish by=harvest note=occurrence: 41.6 implement 2026-10-19 reproduced clientsActivationFlow 33-3-3 timing out at 60s on the working tree and on a baseline 3890fec copy (re-toggled roster never persists)
 - 2026-10-20T09:40:41Z occurrence=43-1-framework-migration-to-sdk-v2 by=cr note=43.1 cr: launcher tsc --noEmit red on this host, 11 errors, all missing vscode/servermanager modules; none in a 43.1 file
+- 2026-10-21T13:14:16Z occurrence=42-1-pre-publish-package-fixes note=same_5_macOS_failures_seen_at_42.1_implement_on_pristine_baseline(4_C:_path_pins_not_absolute_on_POSIX;_33-3-3_clientsActivationFlow_timeout)
+- 2026-10-21T14:27:37Z occurrence=42-1-pre-publish-package-fixes
+- 2026-10-22T04:35:01Z occurrence=42-3-ci-workflow note=CI_runs_only_the_launcher_arming_guard,liveArming.test.ts,type-check,build_and_its_two_live_files;the_full_suite_stays_out_of_CI_until_42.7_(4_baseline_failures_pin_C:_paths_and_fail_on_Linux_too)
 
 ### DW-533: iris_production_manage delete removes ANY class given as name: the class-delete path never checks that the class extends Ens.Production
 - source: spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: high | footprint: in-story
@@ -2923,16 +2936,19 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: load.ts:447-456 sends PUT ?ignoreConflict=1 per file (the default) with no Storage guard; Story 38.3 AD-24 write-path verdict: excluded, because loading files from source control is the sanctioned flow and the file is the source of truth for the class text
 - 2026-10-15T18:19:47Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=implement note=reopen_if=a class loses its Storage after iris_doc_load uploads a file without it (user report or ledger occurrence)
+- 2026-10-21T20:02:57Z status=resolved-by:42-11-storage-guard-on-every-document-write by=adjudication note=wave-8_decision_46:the_excluded_path_is_now_guarded_by_default;reopen_if_trigger_prevented_by_the_live-pinned_refusal(storage-guard-write-paths-live-gate)
 
 ### DW-545: iris_env_promote execute copies each source document to the target with ignoreConflict=1 and has no Storage check, so a sync replaces the target class's Storage definitions with the source copy's
 - source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: env-promote.ts:868-869 PUTs the source content to ...?ignoreConflict=1; a sync replaces the target's whole class, Storage included, by design. Story 38.3 AD-24 write-path verdict: excluded, because execute is plan-gated (the plan embeds the content hash of its source diff, AD-17) and default-disabled
 - 2026-10-15T18:19:52Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=implement note=reopen_if=promote execute replaces a target class that has Storage with a source copy that has none (report)
+- 2026-10-21T20:02:57Z status=resolved-by:42-11-storage-guard-on-every-document-write by=adjudication note=wave-8_decision_46:the_excluded_path_is_now_guarded_by_default;reopen_if_trigger_prevented_by_the_live-pinned_refusal(storage-guard-write-paths-live-gate)
 
 ### DW-546: iris_doc_xml_export import loads an XML export through action/xml/load with no Storage check, so an import replaces the stored class, including its Storage definitions, with the export's
 - source: spec-38-3-storage-block-drop-guard.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: format.ts:218 POSTs the XML to action/xml/load; an XML export carries its own <Storage> elements, so an import replaces the stored definitions with the exported ones. Story 38.3 AD-24 write-path verdict: excluded (orchestrator decision 8 at the spec gate, 2026-10-15), because the export is the source of truth for the class it describes
 - 2026-10-15T18:19:52Z status=wontfix-accepted owner=38-3-storage-block-drop-guard by=implement note=reopen_if=an XML import replaces a class that has Storage with a definition that has none (report)
+- 2026-10-21T20:02:57Z status=resolved-by:42-11-storage-guard-on-every-document-write by=adjudication note=wave-8_decision_46:the_excluded_path_is_now_guarded_by_default;reopen_if_trigger_prevented_by_the_live-pinned_refusal(storage-guard-write-paths-live-gate)
 
 ### DW-547: Storage-drop scanner loses brace sync without reporting it in embedded &html</&js< blocks, string-bearing [ ] keyword values and ( ) defaults, XData bodies, and some contrived headers, so a drop after such a member is not refused (fails open = pre-38.3 behavior)
 - source: _bmad-output/implementation-artifacts/spec-38-3-storage-block-drop-guard.md | severity: low | fix-risk: med | footprint: in-epic
@@ -3023,6 +3039,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-16T15:13:57Z status=decision-pending owner=burndown by=harvest note=product call for the decision sheet: sanction the hint correction (and in which story) or keep the grandfathered hints
 - 2026-10-16T15:58:09Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=decided=orchestrator(Lead-away) decision 18: sanction the destructiveHint correction before 1.0; DW bullet in 42.1
 - 2026-10-20T23:38:03Z occurrence=43-3-human-confirmation-through-elicitation note=43.3 plan inventory: iris_ldap_manage delete, iris_x509_manage delete and iris_service_manage enable/disable/set are annotated destructiveHint false although they delete or disable; fix with the same AD-15 annotation correction
+- 2026-10-21T06:26:44Z owner=42-10-pre-1-0-tool-surface-corrections by=spec_gate note=moved_from_42-1_by_wave8_decision_34_split(frozen-goldens_machinery+feature-sized_DW-652)
+- 2026-10-21T16:59:07Z status=resolved-by:42-10-pre-1-0-tool-surface-corrections by=adjudication note=13_tools_now_destructiveHint_true(verdict_table,decision_39);19_S-42.10-annotations_ledger_entries;destructiveHint_cross-check_in_readonly-hint-crosscheck.test.ts;lead_smoke_built_servers_49/115_destructive_all_13_flipped
 
 ### DW-561: Epic 38 capstone, the 38.4 and the 38.5 wire gates each carry their own fixture helpers (putDoc, compileDoc, lineNumber, fixtureDocuments, fixtureGlobals, removeFixtures) instead of one promoted set in process-gate-helpers.ts
 - source: _bmad-output/implementation-artifacts/spec-38-6-editing-and-sql-safety-docs-prompt-and-capstone.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3456,11 +3474,14 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-20T04:42:43Z status=routed owner=42-2-bootstrap-downgrade-guard by=lead note=reference: Story 41.8's story-41-8-qa-accept-language-live-gate.test.ts is the opt-in shape (legs run only with IRIS_REQUIRE_LIVE=1 and all five IRIS_*; a guard test proves zero requests unarmed); the prepublish gate must then export all five IRIS_* (42.6)
 - 2026-10-20T07:58:39Z occurrence=43-1-framework-migration-to-sdk-v2 note=the two launcher SDK-client tests (governanceUiRoundTrip, localSpawnIntegration) read IRIS_TEST_HOST/IRIS_TEST_PORT defaulting to localhost:52773 HSCUSTOM and ignore IRIS_HOST/IRIS_PORT; a 43.1 plan probe reached the shared instance through them (read-only)
 - 2026-10-20T12:12:41Z occurrence=43-2-serve-mcp-revision-2026-07-28 note=43.2 implement handoff ran pnpm --filter @iris-mcp/dev test with no IRIS_* set; dev's live gates wrote and removed their disposable ExecuteMCPv2.Temp.QaStory* fixtures on the shared instance (lead verified no leftovers)
+- 2026-10-21T19:52:21Z occurrence=42-11-storage-guard-on-every-document-write by=cr note=both new dev gates (storage-guard-write-paths-live-gate, story-42-11-qa-live-gate) run their legs unarmed whenever localhost:52773 answers
+- 2026-10-22T01:54:30Z status=resolved-by:42-2-bootstrap-downgrade-guard by=adjudication note=only_IRIS_REQUIRE_LIVE_arms(decision_51);armed_needs_all_five_IRIS_*;63_live_files_resolve_through_resolveLiveTarget;live-arming-guard+no-live-iris-preload_pin_that_an_unarmed_run_connects_to_nothing(child-process_preload);42.11_and_43.1_occurrences_included
 
 ### DW-628: The documented npx form npx -y @iris-mcp/client-config iris-mcp-clients <command> passes iris-mcp-clients to the CLI as its command (unknown-command once published) and carries no @1 pin
 - source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: 41.7 plan 2026-10-20: clients-cli.ts:14 runCli(process.argv.slice(2)), clients.ts:1966 takes argv[0] as the command; the form is at packages/client-config/README.md:17, docs/client-config/README.md:5, docs/client-config/{claude-code,claude-desktop,cursor}.md:4; certification-docs.test.ts:88 pins it
 - 2026-10-20T01:15:16Z status=routed owner=42-1-pre-publish-package-fixes by=harvest note=42.1 (AC 42.1.6 owns the npx pin): likely npx -y -p @iris-mcp/client-config@1 iris-mcp-clients <command>, verified against the published package; move the certification-docs pin
+- 2026-10-21T14:28:59Z status=resolved-by:42-1-pre-publish-package-fixes by=adjudication note=documented_form_now_npx_-y_-p_@iris-mcp/client-config@1_iris-mcp-clients;story-42-1-qa-packed-clis.test.ts_runs_bins_from_packed_tarballs(new_form_exit0,old_exit2)
 
 ### DW-629: The why text of the cursor and vscode PACK_TARGETS rows never says the client reads .agents/skills/, the claim that justifies their route
 - source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3472,6 +3493,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 41.7 review 2026-10-20: packages/client-config/package.json:4; npm-facing summary before the first publish
 - 2026-10-20T01:15:16Z status=routed owner=42-1-pre-publish-package-fixes by=harvest note=rewrite the npm description with the other package.json metadata fixes (DW-31)
 - 2026-10-20T02:12:59Z occurrence=41-7-skills-pack-docs-and-capstone by=cr note=also packages/client-config/README.md:5 status line (Stories 33.0-33.4 only) and README.md:924 package summary omit the skills pack
+- 2026-10-21T14:28:59Z status=resolved-by:42-1-pre-publish-package-fixes by=adjudication note=client-config_description_rewritten(config_manager+skills-pack_installer)
 
 ### DW-631: docs/client-config/* was left out of Story 41.7: no page points at iris-mcp-clients skills install, and claude-code.md:306, claude-desktop.md:273, cursor.md:304 link the broken anchor #read-only-mode-point-it-at-production-with-one-environment-variable
 - source: spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3512,6 +3534,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 43.1 plan probe 2026-10-20: @modelcontextprotocol/server@2.3.1 dist ajvProvider-*.mjs bundles them; pnpm audit --prod reads only the lockfile
 - 2026-10-20T07:58:39Z status=routed owner=43-3-human-confirmation-through-elicitation by=harvest note=43.3 enables elicitation, the only user of the bundled validator: check the published advisories against ajv 8.18.0 and fast-uri 3.1.0 and record the verdict (or supply a validator) before the dialog ships
 - 2026-10-21T01:44:35Z status=routed owner=42-1-pre-publish-package-fixes by=lead note=43.3 delivered the verdict (fast-uri 3.1.0 advisories unreachable: constant schema, bundled validator never invoked) and the story-43-3-validator-unreachable tripwire; residual: before 1.0, bump the exact SDK pin if a release pins fast-uri >=3.1.8 (typescript-sdk#2966/PR #2973); DW-637 bullet under 42.1
+- 2026-10-21T14:28:59Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=adjudication note=residual:@modelcontextprotocol/server_2.3.1_still_latest_on_2026-10-21_and_upstream_fast-uri_fix(PR_2973)_unmerged;re-check_right_before_the_1.0.0_publish;if_a_release_pins_fast-uri>=3.1.8_bump_the_exact_pin_and_re-run_the_epic-43_wire_goldens
 
 ### DW-638: The v2-client code in five iris-mcp-all local-copy gates and two launcher integration tests has never run against a server: each skips unless IRIS is reachable
 - source: _bmad-output/implementation-artifacts/spec-43-1-framework-migration-to-sdk-v2.md | severity: med | fix-risk: low | footprint: in-story
@@ -3597,6 +3620,9 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 43.3 plan inventory 2026-10-20
 - 2026-10-20T23:38:03Z status=escalated owner=burndown by=harvest note=for the decision sheet: extend the Story 38.4 Storage guard to every document-write path, or accept
 - 2026-10-21T05:27:11Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=wave-8 decision 30: fix before 1.0, extend the Story 38.4 Storage guard to doc_load, XML import and env_promote document writes; DW-652 bullet under 42.1
+- 2026-10-21T06:26:44Z owner=42-10-pre-1-0-tool-surface-corrections by=spec_gate note=moved_from_42-1_by_wave8_decision_34_split(frozen-goldens_machinery+feature-sized_DW-652)
+- 2026-10-21T14:59:04Z owner=42-11-storage-guard-on-every-document-write by=spec_gate note=moved_from_42-10_by_wave8_decision_38(feature-sized:three_guard_designs,new_override_param_on_three_tools,new_live_gate)
+- 2026-10-21T20:02:57Z status=resolved-by:42-11-storage-guard-on-every-document-write by=adjudication note=Storage_guard_on_iris_doc_load(GET_before_PUT+409_read),iris_doc_xml_export_import(whole-import_refusal),iris_env_promote_execute(GET-only_preflight_before_dialog);allowStorageRegeneration+storageDrops;8_sanctioned_entries;lead_smoke_live_gates_7/7+5/5_real_Atelier_HSCUSTOM_no_leftovers
 
 ### DW-653: The resend-failed-messages prompt says an over-cap match is refused and omitting dryRun or confirm is refused; a dry run returns the full matchCount and omitting dryRun previews; the prompt text is pinned by the frozen 43.1 golden
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3609,6 +3635,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 43.3 plan probe 2026-10-20
 - 2026-10-20T23:38:03Z status=escalated owner=burndown by=harvest note=for the decision sheet: AD-19 accuracy; record the effective namespace for %SYS-scoped handlers, or accept
 - 2026-10-21T05:27:11Z status=routed owner=42-1-pre-publish-package-fixes by=merge_gate note=wave-8 decision 31: record the effective namespace for %SYS-scoped handlers in audit entries; DW-654 bullet under 42.1
+- 2026-10-21T06:26:44Z owner=42-10-pre-1-0-tool-surface-corrections by=spec_gate note=moved_from_42-1_by_wave8_decision_34_split(frozen-goldens_machinery+feature-sized_DW-652)
+- 2026-10-21T16:59:07Z status=resolved-by:42-10-pre-1-0-tool-surface-corrections by=adjudication note=SYS-scoped_audit_namespace=%SYS_plus_additive_targetNamespace(decision_41,DW-667);pinned_shared_unit+wire+story-42-10-qa-audit-namespace-built;lead_smoke_iris_mapping_list_namespace=USER_audited_%SYS+targetNamespace=USER
 
 ### DW-655: prd.md:86 says All 86 consolidated tools; the suite has 115
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3651,3 +3679,232 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 43.4 review 2026-10-20 (blind hunter): message-resend.ts:364-369, :434; packages/iris-interop-mcp/README.md:302; Story 43.4 fixed only the resend-failed-messages prompt (DW-653)
 - 2026-10-21T03:57:59Z status=routed owner=42-1-pre-publish-package-fixes by=harvest note=a sanctioned AD-15 tool-text correction before 1.0, with DW-560's annotation corrections: one sanctioned-change ledger entry per changed byte (a replace, so the Frozen goldens convention needs its sanction to name a correction), the tools-list snapshot regenerated
 - 2026-10-21T05:15:12Z occurrence=43-4-sdk-v2-docs-smokes-and-capstone by=cr note=appendOnly is optional, so a description replace under a later sanction passes the loader and the S-43.4-only append row; 42.1 decides
+- 2026-10-21T06:26:44Z owner=42-10-pre-1-0-tool-surface-corrections by=spec_gate note=moved_from_42-1_by_wave8_decision_34_split(frozen-goldens_machinery+feature-sized_DW-652)
+- 2026-10-21T16:59:07Z status=resolved-by:42-10-pre-1-0-tool-surface-corrections by=adjudication note=resend_description+maxMessages+confirm_corrected_as_S-42.10-resend-text(3_correction_entries)+interop_README:302;lead_smoke_reads_corrected_texts_from_built_interop
+
+### DW-663: Extension CLI spawns (clientsEngine.ts:341, governanceEngine.ts:324) pass no cwd, so the clients CLI treats the extension host's cwd as the project and the MCP Clients view's project scope depends on how VS Code was launched; a project-local 1.x client-config copy can shadow the pinned spec
+- source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 42.1 plan probe 2026-10-20: npm exec resolves a local copy from the nearest ancestor (libnpmexec index.js:41-69); clients.ts:165 uses process.cwd()
+- 2026-10-21T13:14:16Z status=routed owner=42-7-vs-code-extension-publish by=harvest note=the extension publish story touches both engines; pass an explicit project dir or neutral cwd
+
+### DW-664: Seven READMEs say IRIS_USERNAME defaults to _SYSTEM, but config.ts treats it as required and the server exits with 'IRIS_USERNAME environment variable is required'
+- source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 42.1 plan probe: local install of the packed meta-package; README.md:73, packages/iris-*-mcp/README.md:31, packages/iris-mcp-all/README.md:69 vs packages/shared/src/config.ts:162-169
+- 2026-10-21T13:14:16Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=fix with the AC 42.9.1 README rewrite
+
+### DW-665: Each package keeps a tracked CHANGELOG.md that changeset version fills, but pnpm pack does not ship it (files lists only dist, plus skills-pack for client-config); published 1.0.0 tarballs would carry no changelog
+- source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 42.1 implement: pnpm pack lists in 42-1-pack-file-lists.md show only LICENSE, README.md, package.json added
+- 2026-10-21T13:14:16Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=harvest note=decide add CHANGELOG.md to files before the 1.0.0 publish
+
+### DW-666: pnpm --filter @iris-mcp/shared lint warns about an unused eslint-disable directive for @typescript-eslint/no-dynamic-delete
+- source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: packages/shared/src/cli/governance.ts:935; seen at the 42.1 full lint run
+- 2026-10-21T13:14:16Z status=routed owner=42-3-ci-workflow by=harvest note=the CI lint gate must not carry a standing warning; remove the directive when wiring lint into CI
+- 2026-10-22T10:02:10Z status=resolved-by:42-3-ci-workflow by=adjudication note=directive_removed;all_7_lint_scripts_--max-warnings_0;lint_branch_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39753177232_red_at_lint_on_all_3_Node_legs
+
+### DW-667: SYS-scoped tools whose namespace argument is the call's subject (iris_mapping_manage, iris_mapping_list, iris_webapp_manage, iris_resource_manage, iris_user_manage) now audit namespace %SYS, so with the default IRIS_AUDIT_LOG_PARAMS=false the namespace they act on no longer appears in the entry
+- source: spec-42-10-pre-1-0-tool-surface-corrections.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: 42.10 implement review (3 of 4 layers): deriveAuditNamespace server-base.ts:2402 returns %SYS for SYS scope; paramKeys holds names only; before 42.10 the entry carried the argument
+- 2026-10-21T16:12:40Z status=open owner=42-10-pre-1-0-tool-surface-corrections by=harvest note=wave-8 decision 41: add the additive targetNamespace field (the call's namespace argument, when set) for SYS-scoped tools; spine AD-19 amended; code review patches it in-story with a pin, or it takes the story's one rework iteration
+- 2026-10-21T16:56:09Z status=resolved-by:42-10-pre-1-0-tool-surface-corrections by=cr note=targetNamespace added (audit.ts, server-base.ts); pinned in shared + built QA tests; 2 mutations red; golden unmoved
+
+### DW-668: Audit namespace for NONE- and BOTH-scoped tools still records the call's namespace argument or the profile default: the 21 ops tools run in %SYS server-side but record the profile namespace, and iris_backup_manage, iris_database_action and iris_process_manage record a namespace argument documented as having no effect
+- source: spec-42-10-pre-1-0-tool-surface-corrections.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: 42.10 plan probe: deriveAuditNamespace server-base.ts:2394-2401; ToolScope NONE means no namespace concept (tool-types.ts:38-46); handler golden records HSCUSTOM for ops iris_metrics_system
+- 2026-10-21T16:12:40Z status=wontfix-accepted owner=42-10-pre-1-0-tool-surface-corrections by=harvest note=reopen_if=an operator reports a misleading namespace in an ops or webapp_list audit entry, or AD-19 adopts per-scope recording; spine AD-19 now states the non-SYS rule exactly (decision 41)
+
+### DW-669: The agent prompts and skills deploy-and-test-class and promote-environment-change (and their skills-pack copies) do not mention the STORAGE_DROPPED refusal or the allowStorageRegeneration override, so the deploy loop may test against the stale server copy of a refused file
+- source: spec-42-11-storage-guard-on-every-document-write.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: 42.11 implement: the deploy-and-test-class loop handles compile errors only; a refusal is a failures entry; prompt text is a frozen prompts/get golden (sanctioned entry needed)
+- 2026-10-21T19:00:28Z status=wontfix-accepted owner=42-11-storage-guard-on-every-document-write by=harvest note=reopen_if=an agent following deploy-and-test-class or promote-environment-change misses a STORAGE_DROPPED refusal (report or ledger occurrence); the refusal text itself names the override and the result counts the failure
+- 2026-10-21T19:52:21Z occurrence=42-11-storage-guard-on-every-document-write by=cr note=cr blind layer: deploy-and-test-class step 2 exits on zero compile errors, which a STORAGE_DROPPED file meets (not compiled), so step 3 tests the stale copy
+
+### DW-670: On a client that answers the confirmation dialog in a second request, iris_env_promote execute re-runs its Storage preflight in the accepting round and writes the drops that round finds, while the confirmation binds only the tool and the argument hash (AD-34), so drops that appeared during the dialog are written unseen
+- source: spec-42-11-storage-guard-on-every-document-write.md | severity: med | fix-risk: high | footprint: out-of-footprint
+- evidence: 42.11 cr: server-base.ts confirmOnWire (2133-2143) proceeds on an echoed state matching tool+args hash without recomputing the scope; env-promote.ts executeAction re-runs preflightClassSteps every round, so round two's planned drops are never compared with round one's dialog
+- 2026-10-21T19:52:11Z status=escalated owner=burndown by=cr note=decision sheet: bind a scope digest into the confirmation state (shared helper, all six gates; an AD-34 amendment) or accept the dialog-window race
+
+### DW-671: The QA live gate story-42-11-qa-live-gate.test.ts copies the write-paths gate's ~90-line cleanup and fixture skeleton verbatim (listFixtureGlobals, killFixtureGlobals, listFixtureDocuments, removeFixtures, createFixture, beforeAll/afterAll), a pattern now repeated across six dev live gates
+- source: spec-42-11-storage-guard-on-every-document-write.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: 42.11 cr: Rule 2 weak reason - per-gate fixture ownership needs only a per-gate class list, not copied code; a prefix-parameterised helper in live-doc-helpers.ts would serve every gate
+- 2026-10-21T19:52:21Z status=wontfix-accepted owner=42-11-storage-guard-on-every-document-write by=cr note=reopen_if=a fix to one gate's cleanup or leftover check is missed in a sibling gate (red run or review finding naming the drift)
+
+### DW-672: AC 42.2.5's live legs (newer, foreign, DW-518, older, legacy) against a throwaway iris-community container run nowhere yet: Story 42.2 writes the gate and scripts/throwaway-iris.mjs but runs no docker locally (agent rules forbid docker commands); CI must run pnpm live:bootstrap-guard
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 42.2 spec gate (wave-8 decision 49): %ALL maps the ExecuteMCPv2 package to HSCUSTOM, so no namespace of the shared instance isolates a deploy; .claude/rules/iris-objectscript-basics.md:167 forbids docker
+- 2026-10-21T20:47:03Z status=routed owner=42-3-ci-workflow by=spec_gate note=42.3's throwaway job extends scripts/throwaway-iris.mjs (Rule 2), runs pnpm live:bootstrap-guard armed with IRIS_THROWAWAY, proves it red once by reverting the probe to equality (AC 42.3.6), and records the run URL; the live proof of DW-508 (Rule 48)
+- 2026-10-21T22:44:16Z occurrence=42-2-bootstrap-downgrade-guard note=42.2_implement:extend_scripts/throwaway-iris.mjs(Rule2);first_real_docker_run_is_CI:verify_the_35_classes_compile_in_plain-IRIS_USER(else_--image_irishealth),readiness_loop,docker_port_read-back,teardown_on_INT/TERM;pinned_digest_is_arm64:x86_runners_need_a_multi-arch_or_amd64_digest_via_--image
+- 2026-10-22T01:01:05Z note=wave-8_decision_55:the_Lead_authorized_a_local_throwaway_container_2026-10-22;the_lead_runs_pnpm_live:bootstrap-guard_at_the_42.2_smoke;CI_must_still_run_it_in_42.3(the_platform_the_project_ships_from)
+- 2026-10-22T01:54:30Z note=partial:the_lead_ran_pnpm_live:bootstrap-guard_locally_2026-10-22(9/9;equality-revert_4_red;container_removed);42.3_still_runs_it_in_CI_on_the_platform_the_project_ships_from(amd64_digest;fail-on-skip_DW-676)
+- 2026-10-22T10:02:10Z status=resolved-by:42-3-ci-workflow by=adjudication note=CI_runs_pnpm_live:bootstrap-guard_on_iris-community_2026.2_and_the_oldest_leg(2025.3),9/9_each_in_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39749804619;guard_branch(equality_revert)_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39753259452_red_at_bootstrap-guard_and_bootstrap-guard-oldest;amd64_on_hosted_runners
+
+### DW-673: A failed version read is treated as an absent deployment, so the full install runs and the pre-compile re-read lets the compile proceed on an empty value: a transient 5xx, timeout or privilege error on the version query while a newer build is deployed lets an older server upload its classes over it (the downgrade DW-508 prevents)
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: 42.2 implement review: packages/shared/src/bootstrap.ts readDeployedVersion, probeCustomRest, markerAllowsCompile; the matrix specified failed-or-empty = absent; unverified against a real instance
+- 2026-10-21T22:44:16Z status=open owner=42-2-bootstrap-downgrade-guard by=harvest note=wave-8 decision 54: only a positive absence (the REST route or the Setup class provably missing) counts as absent; any other failed or empty read is unknown: no PUT, no compile, one warning naming the failure and the remedy; spec matrix amended; code review patches it in-story with a hermetic pin or it takes the story's one rework iteration
+- 2026-10-22T01:48:21Z status=resolved-by:42-2-bootstrap-downgrade-guard by=cr note=unknown status; only GET doc/Setup 404 installs; 14 unit+9 hermetic cases; failed=absent mutation red 19 unit, 8 dist
+
+### DW-674: AD-14 Ownership and IPM-upgrade bullets are not implemented: bootstrap does not detect IPM-installed classes, and the IPM install/upgrade path has no IRIS-side no-downgrade check
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: 42.2 implement: decision 53 routes them to 42.4; reuse 42.2's marker grammar and ordering table, with a parity test between the TS comparator and the IRIS-side one
+- 2026-10-21T22:44:16Z status=routed owner=42-4-ipm-package-revival by=harvest note=IPM packaging lands in 42.4 (decision 53)
+- 2026-10-22T01:48:21Z occurrence=42-2-bootstrap-downgrade-guard
+- 2026-10-22T20:03:33Z status=resolved-by:42-4-ipm-package-revival by=adjudication note=ownership=InstallGuard_present(bootstrap_writes_nothing+zpm_warning);IRIS-side_guard_at_Initialize/After_refuses_newer/foreign/unknown;parity_94/94_both_editions;red_branches:guard=https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39838191935(ipm@guard-newer),parity=https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39838197468(ipm@parity),ipm-owned=https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39838209264(throwaway@ipm-owned-older)
+
+### DW-675: Armed live gates now fail closed unless all five IRIS_HOST/PORT/USERNAME/PASSWORD/NAMESPACE are set; the release path (prepublishOnly -> prepublish-gate.mjs, the 42.5 release script, the 42.6 publish) must export all five or the gates go red
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 42.2 implement: resolveLiveTarget throws naming the missing variables when IRIS_REQUIRE_LIVE is set (decision 51)
+- 2026-10-21T22:44:16Z status=routed owner=42-5-release-workflow by=harvest note=the release script exports all five IRIS_* for its gate run, and 42.6 publishes through it
+- 2026-11-21T00:07:58Z status=resolved-by:42-5-release-workflow by=adjudication note=prepare_exports_all_five_IRIS_*+IRIS_REQUIRE_LIVE_via_the_throwaway_harness;dry_run_prepare_green_with_8_prepublish_suites_armed(https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44836664255)
+
+### DW-676: Story 42.3's armed CI run could go green by skipping: armed integration-setup files and the launcher's two live files skip when IRIS does not answer, the armed side of the migrated family C/D/E files has no default-suite test, and the launcher's arming guard runs only under npm --prefix
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 42.2 implement review; packages/*/src/__tests__/integration-setup.ts; extensions/iris-mcp-launcher/src/__tests__
+- 2026-10-21T22:44:16Z status=routed owner=42-3-ci-workflow by=harvest note=CI fails an armed run that skipped a leg (a skip counter or a fail-on-skip flag), and runs the launcher guard; proven red once (Rule 59)
+- 2026-10-21T22:44:16Z occurrence=42-2-bootstrap-downgrade-guard note=also:5_process_gates(credentials-cli,governance-file,host-guard,server-manager-precedence,server-manager-process)_arm_on_IRIS_REQUIRE_LIVE_but_are_off_every_prepublish_roster;42.3_decides_whether_CI_runs_them
+- 2026-10-22T01:48:21Z occurrence=42-2-bootstrap-downgrade-guard
+- 2026-10-22T10:02:10Z status=resolved-by:42-3-ci-workflow by=adjudication note=ci-live-suite_fails_any_armed_suite_with_an_unlisted_skip;14_live_suites_0_unlisted_skips_in_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39749804619;skip_branch_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39753187494_red_at_integration-admin(vitest_exit_0,skips_listed);process_gates_run_as_a_CI-only_armed_suite(25_passed);launcher_guard_in_gates
+
+### DW-677: Concurrency residual: the re-probe before compile stops this server compiling over a newer build that compiled first, but cannot undo source PUTs two builds interleaved, so the namespace can hold mixed source under a newer compiled marker
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: low | fix-risk: high | footprint: in-story
+- evidence: 42.2 implement: packages/shared/src/bootstrap.ts; the next unconfigured self-heal recompile would compile that source
+- 2026-10-21T22:44:16Z status=wontfix-accepted owner=42-2-bootstrap-downgrade-guard by=harvest note=reopen_if=a deployment is observed with mixed-build source under one marker (report, or a source-vs-embed drift check failing on a live instance)
+- 2026-10-22T01:48:21Z occurrence=42-2-bootstrap-downgrade-guard
+
+### DW-678: A Setup.cls hand-loaded from src/ (an iris_doc_load of src/**/*.cls, Rule #17) stamps the dev marker, which Story 42.2 classifies foreign, so the bootstrap leaves the namespace (the shared HSCUSTOM included) at dev until ExecuteMCPv2.Setup is deleted
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: 42.2 cr: AD-14 dev=foreign; .claude/rules project-rules #17 loads src/**/*.cls; the in-story hints (2 prepublish-gate.mjs, 3 gate skip texts) were reworded by cr; the rule files are the Lead's
+- 2026-10-22T01:48:34Z status=decision-pending owner=burndown by=cr note=human=Lead: add to Rule #17 that a hand-loaded Setup.cls pins dev; delete ExecuteMCPv2.Setup and restart after
+
+### DW-679: The family-C live gates each carry the same ~20-line probe block (loadConfig, ping, negotiateVersion, buildToolContext, catch) instead of one shared helper
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: 42.2 cr: pre-existing per-gate copies, each re-touched by the arming migration (doc-edit-live-gate, doc-get-range-live-gate, resource-listprivileges-live-gate, analytics-cubes-wire-gate, others)
+- 2026-10-22T01:48:34Z status=wontfix-accepted owner=42-2-bootstrap-downgrade-guard by=cr note=reopen_if=a story (e.g. 42.3's DW-676 fail-on-skip) must edit that probe block in more than 3 gate files
+
+### DW-680: The launcher guard's runUnarmed is a near-copy of runVitestUnderPreload (env scrub, the preload NODE_OPTIONS, the connect-log parse); the spec's AD-2 reason covers only liveArming.ts
+- source: spec-42-2-bootstrap-downgrade-guard.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: 42.2 cr: extensions/iris-mcp-launcher/src/__tests__/live-arming-guard.test.ts vs packages/iris-mcp-all/src/__tests__/live-gate-child-run.ts; a runner in scripts/lib/ could serve both
+- 2026-10-22T01:48:34Z status=wontfix-accepted owner=42-2-bootstrap-downgrade-guard by=cr note=reopen_if=the two env-scrub lists diverge, or a third copy of the preload child runner appears
+- 2026-10-22T05:51:03Z occurrence=42-3-ci-workflow
+- 2026-10-22T05:51:03Z status=wontfix-accepted owner=42-2-bootstrap-downgrade-guard by=cr note=42.3 copies folded into live-gate-child-run.ts; reopen_if=a preload runner copy appears outside the launcher
+
+### DW-681: The two OAuth tests in admin.integration.test.ts never run anywhere: it.skipIf(!oauthAvailable) is evaluated at collection, before beforeAll sets the flag, so CI allowlists both skips
+- source: spec-42-3-ci-workflow.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: 42.3 implement review: packages/iris-admin-mcp/src/__tests__/admin.integration.test.ts; the ci-live-suite allowlist names both skips with this reason
+- 2026-10-22T04:35:01Z status=open owner=42-3-ci-workflow by=harvest note=code review patches it in-story: evaluate the condition at run time (ctx.skip inside the test, or a describe gated after setup) and drop the two allowlist entries, or it takes the story's one rework iteration
+- 2026-10-22T05:51:03Z status=resolved-by:42-3-ci-workflow by=cr note=OAuth tests read oauthAvailable at run time (ctx.skip); allowlist entries dropped; scan pin red on revert
+
+### DW-682: A burst of pushes to main can lose CI runs of the middle commits: with cancel-in-progress false, GitHub still cancels an earlier PENDING run of the same concurrency group when a newer run queues, so a tag target on main could have no completed run
+- source: spec-42-3-ci-workflow.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: 42.3 implement review, against the GitHub concurrency docs; .github/workflows/ci.yml concurrency block
+- 2026-10-22T04:35:01Z status=open owner=42-3-ci-workflow by=harvest note=two-way door: give main a per-sha concurrency group so no main run is ever superseded, and pin it in the workflow self-test; code review patches it
+- 2026-10-22T05:51:03Z status=resolved-by:42-3-ci-workflow by=cr note=main runs get group ci-<sha>; self-test pins the exact group; reverting ci.yml turns the real-file case red
+
+### DW-683: Locally, pnpm live:bootstrap-guard publishes a dynamic host port chosen by Docker's own allocator, which ignores net.ipv4.ip_local_reserved_ports, so about 1 run in 28,000 lands on a refused port and fails closed (exit 4)
+- source: spec-42-3-ci-workflow.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: 42.3 implement: scripts/throwaway-iris.mjs run mode; CI uses fixed reserved ports instead
+- 2026-10-22T04:35:01Z status=wontfix-accepted owner=42-3-ci-workflow by=harvest note=reopen_if=a local live:bootstrap-guard run exits 4 on a refused port (the failure is closed and the rerun succeeds)
+
+### DW-684: Armed integration suites can go green without testing: guard returns (interop.integration.test.ts:204,219,239 if (!created.production) return;) report passed after a create test that tolerates isError, and ci-live-suite sees only skip statuses
+- source: spec-42-3-ci-workflow.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: 42.3 cr (blind layer): vitest reports an early return as passed (spec Code Map); admin.integration create/verify tests use the same tolerate-then-return pattern
+- 2026-10-22T05:51:10Z status=escalated owner=burndown by=cr note=decide per suite: ctx.skip() with an allowlist reason, or a hard assertion; README and CHANGELOG claims narrowed in 42.3
+- 2026-10-22T08:17:18Z occurrence=42-3-ci-workflow note=admin.integration_resource_and_role_list_tests_assert_nothing_when_the_create_did_not_succeed(expect_inside_if(!result.isError&&created.resource))
+
+### DW-685: bootstrap() reports compiled=true whatever the compile console says: bootstrap.ts:746,788 ignore the Atelier envelope, and General.Compile answers HTTP 200 when only some classes failed
+- source: spec-42-3-ci-workflow.md | severity: med | fix-risk: high | footprint: out-of-footprint
+- evidence: 42.3 cr (edge layer): compileClasses now returns the envelope but bootstrap drops it; the CI seed checks the console of its fixture compile only, so a broken bootstrapped class surfaces later as 404/500 from the suites
+- 2026-10-22T05:51:10Z status=escalated owner=burndown by=cr note=fix-risk high: the success and ERROR lines are localized (Rule #13), so a console check must hold on every NLS locale of the 2023.1+ range
+
+### DW-686: The CI oldest-image leg goes red again on 2026-11-13: iris-community:2025.3, the oldest tag that still starts, carries a Community license key that expires that day, and an expired Community image refuses to start
+- source: spec-42-3-ci-workflow.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 42.3 rework: 2024.3, 2025.1 and 2025.2 keys already expired (harness probes 2026-10-22); 2026.1 (sha256:c57b65b2b454494091e7b3e49f6a53b3335f40adf475bcfcee0866083f35a7c2) passes the guard, key to 2027-03-27
+- 2026-10-22T08:17:18Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=harvest note=before tagging v1.0.0 (CI must be green on that commit): if the date is on or after 2026-11-13, move OLDEST_IRIS_COMMUNITY_IMAGE to 2026.1 and update the Stack row and 42.9's tested floor
+- 2026-10-22T08:37:52Z occurrence=42-3-ci-workflow note=cr: red on every CI run from 2026-11-13, not just at the v1.0.0 tag; 2026.2 keys expire ~2027-06-26; 42.9 dates its floor
+- 2026-10-22T08:42:32Z owner=42-4-ipm-package-revival by=cr_followup note=decision_66:the_expiry_turns_every_CI_run_red_from_2026-11-13,not_only_the_tag;42.4_(next_story,edits_CI)_moves_the_oldest_leg_to_2026.1_now;all_CI_image_keys_expire(2026.2_~2027-06-26)_so_moving_images_forward_is_a_standing_maintenance_step(decision_sheet_action_item)
+- 2026-10-22T20:03:33Z status=resolved-by:42-4-ipm-package-revival by=adjudication note=oldest_leg_moved_to_iris-community:2026.1(key_to_2027-03-27);bootstrap-guard-oldest_10/10_in_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/39819176668;2025.3_green_run_39749804619_kept_as_evidence
+
+### DW-687: The nine DocDB lifecycle tests of data.integration.test.ts never run in CI: a fresh instance has no enabled %Service_DocDB and no Security.DocDBs record for the test database, and enabling the service in the seed would make the Epic 35 F5 gate skip
+- source: spec-42-3-ci-workflow.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: 42.3 rework: the setup probe reads ERROR #822 as unavailable; ci-checks.mjs allowlists the 9 by name
+- 2026-10-22T08:17:18Z status=wontfix-accepted owner=42-3-ci-workflow by=harvest note=reopen_if=a DocDB regression ships that the shared-instance runs missed, or a story adds a seeded DocDB fixture that keeps the F5 gate armed
+- 2026-10-22T08:37:52Z occurrence=42-3-ci-workflow note=cr: reopen_if clause 1 cannot fire (the shared IRIS skips the lifecycle too); DW-688 is the DocDB defect no run caught
+
+### DW-688: A DocDB database created through iris_docdb_manage create is unusable on IRIS 2026.2: the REST create registers no Security.DocDBs record, so every property, document, find and drop call then answers a raw ERROR #822 even with %Service_DocDB enabled
+- source: spec-42-3-ci-workflow.md | severity: med | fix-risk: high | footprint: out-of-footprint
+- evidence: irislib/%Api/DocDB/v1.cls:299-313 (httpPostDatabase) only calls CreateDatabase, while every other route runs CheckAccess^%SYS.DOCDB, which fails with no SECURITY(DocDBsD,name,ns) (irislib/%SYS/DOCDB.int:15). Ens.Setting.Report.base:629 calls $$Create^%SYS.DOCDB itself. The 42.3 rework reproduced it on a 2026.2 throwaway (spec deferred item 6). translateDocDbAccessDenied passes #822 through when the service is enabled, and the data README names only the service
+- 2026-10-22T08:37:47Z status=escalated owner=burndown by=cr note=decide before the 1.0.0 publish (42.6): register the record on create (a %SYS write, bootstrap) or document it (42.9)
+
+### DW-689: The public IPM registry is fed only through Open Exchange, which reads module.xml from the ROOT of a GitHub repository; that collides with AD-14 (archives built from the generator's stamped output, never from src/) and with the manifest's ipm/ location
+- source: spec-42-4-ipm-package-revival.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: 42.4 plan probe; ipm/module.xml is generated and stamped, the archive is CI-built
+- 2026-10-22T13:06:14Z status=routed owner=42-5-release-workflow by=harvest note=decision 72: 42.5's plan picks the registry route (a published-artifact repo or branch, a stamped root manifest, or another channel) and probes the current Open Exchange rules; 42.8 lists it
+- 2026-11-21T00:07:58Z status=resolved-by:42-5-release-workflow by=adjudication note=route_decided(decision_76):packaging_repository_jbrandtmse/iris-execute-mcp-v2-ipm_pushed_by_the_release(IPM_channel_implemented,disabled_until_42.8;rehearse_reports_its_readiness);the_listing+served-artifact_gate_are_42.8(DW-694)
+
+### DW-690: zpm uninstall iris-execute-mcp-v2 removes the classes but leaves the /api/executemcp/v2 web application and the %ALL package mapping, because the manifest configures them through Invoke methods with no Unconfigure counterpart
+- source: spec-42-4-ipm-package-revival.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: 42.4 plan probe; nothing calls Setup.Uninstall() on the IPM path
+- 2026-10-22T13:06:14Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=two-way door for the docs story: state the manual cleanup in the IPM uninstall docs (or wire an Unconfigure Invoke to Setup.Uninstall if cheap)
+
+### DW-691: A failed IPM-ownership read (guard document 5xx or timeout) logs the unreadable-marker warning: it says the deployed marker could not be read, names SQL as the privilege to check, suggests deleting Setup, and drops the deployedVersion it had read
+- source: spec-42-4-ipm-package-revival.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: 42.4 cr (blind+vg+auditor): bootstrap.ts leftToIpm unknown branch reuses warnDeploymentLeftAlone kind unknown; pinned at bootstrap.test.ts ownership-read-fails cases
+- 2026-10-22T14:43:11Z status=by-design owner=42-4-ipm-package-revival by=cr note=spec Task (b) binds: log the existing unknown warning with that reason; reopen via a spec amendment only
+
+### DW-692: The ci-ipm-archive scripted-run block (and every process gate on checkDistFresh) fails in beforeAll after an mtime-only touch of a shared src file, which pnpm build cannot clear because composite tsc re-emits nothing unchanged
+- source: spec-42-4-ipm-package-revival.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: 42.4 cr (vg): ci-ipm-archive.test.ts:657-660 staleDistReason throws; reproduced in this review after a mutation revert; touching packages/shared/dist cleared it
+- 2026-10-22T14:43:11Z status=wontfix-accepted owner=42-4-ipm-package-revival by=cr note=reopen_if=a fresh CI checkout+build reports a stale shared dist, or a red with no source change is seen twice in one epic
+
+### DW-693: flake: other audit readers still parse raw audit lines and can hit a half-written last line: settledAuditEntries in scripts/lib/sdk-handler-golden-core.mjs (four consumers), and the readers in story-43-4-qa-probe-copy.test.ts and story-39-5-qa-live-gate.test.ts
+- source: spec-42-4-ipm-package-revival.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 42.4 rework 1: completeAuditLines now guards pollAuditEntries/settledAuditCount; the .mjs script cannot import the TS helper, so the reader must move to scripts/lib
+- 2026-10-22T16:31:24Z status=routed owner=burndown by=harvest note=flake class (CI run 39798458188 hit it once in story-43-1-qa-dw579-process); move the newline-terminated reader to scripts/lib and route every audit reader through it
+- 2026-10-22T16:59:16Z occurrence=42-4-ipm-package-revival
+- 2026-10-22T16:59:16Z status=routed owner=burndown by=cr note=also 42-10 audit-namespace test:66, shared test-helpers auditLines (11 calls); pin dw579 readEntries; out-of-footprint
+- 2026-10-22T19:13:03Z occurrence=42-4-ipm-package-revival note=flake_hit_again:run_39819176668_attempt2(unchanged_green_head_ff56c62)_gates_node22.17.0:story-43-4-qa-probe-copy.test.ts_'the_first_process,the_probe,got_SIGTERM:expected_[]_to_include_<pid>';attempt1_green;priority_for_the_burn-down
+- 2026-10-22T19:43:58Z owner=42-5-release-workflow by=lead note=decision_74:third_hit_today(run_39838191935_gates_node26:story-43-4-qa-probe-copy_'the_probe_got_SIGTERM:expected_[]_to_include_<pid>');recurring_CI_flake_blocks_dependent_jobs;fix_before_the_release_workflow_relies_on_green_CI(also_check_the_probe-copy_test's_signal/exit_bookkeeping,not_only_partial_lines)
+- 2026-11-21T00:07:58Z status=resolved-by:42-5-release-workflow by=adjudication note=shared_newline-terminated_reader_scripts/lib/audit-lines.mjs_routed_through_all_audit_readers;audit-reader-guard_red_branch_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44826591904;probe-copy_test_records_the_SIGTERM_the_client_sends;CI_green_on_da3bca7_and_62fbceb_(no_flake)
+
+### DW-694: No gate installs the IPM artifact the registry actually serves: Open Exchange tars the packaging repository's root as-is, while CI's ipm job proves IPM's own package output
+- source: spec-42-5-release-workflow.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: 42.5 plan: the release pushes the stamped module to jbrandtmse/iris-execute-mcp-v2-ipm (decision 76); the registry serves a tar of that repository root
+- 2026-10-22T23:44:29Z status=routed owner=42-8-claude-code-plugin-and-registry-listings by=harvest note=42.8 adds a gate that tars the packaging repository root the way Open Exchange does and installs it offline, before the listing goes live
+
+### DW-695: publish uploads whatever path the manifest names (channels[].packages[].tarball, vsix.file, ipm.tree) without checking it is one of the hash-verified files, so the AC 'uploads the exact rehearsed bytes' is not enforced
+- source: spec-42-5-release-workflow.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: 42.5 QA probe: a manifest whose npm entry is ../outside.tgz published that unhashed file (exit 0); today the manifest comes from prepare in the same run
+- 2026-10-23T00:43:09Z status=open owner=42-5-release-workflow by=harvest note=code review patches it in-story: artifactProblems requires every uploaded path to be one of the manifest's hash-verified files, resolved inside the artifact directory; pin it with the ../outside.tgz case
+- 2026-11-20T21:58:23Z status=resolved-by:42-5-release-workflow by=cr note=uploadPathProblems binds npm/vsix/ipm paths to hash-verified files inside the dir; ../outside.tgz+per-channel rows; mutations M1-M6,M19 red
+
+### DW-696: ci-gate does not check that the tagged commit is on main: a v* tag on an unmerged branch commit with a green push run reaches approval, the reviewer the only guard
+- source: spec-42-5-release-workflow.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: ci.yml runs on every push, so ciGateDecision accepts a feature-branch run on the sha; the env tag rule binds the tag name, not the commit
+- 2026-11-20T21:58:32Z status=decision-pending owner=burndown by=cr note=product call: require the sha reachable from main (compare API) vs allow maintenance branches such as release/1.x
+- 2026-11-20T22:39:01Z status=routed owner=42-6-tarball-smoke-and-1-0-0-publish by=merge_gate note=OWNER_RULING_2026-11-20(via_Planner):'I_agree_we_should_require_tagged_commits_to_be_on_main';release_ci-gate_refuses_a_v*_tag_whose_commit_is_not_reachable_from_main(compare_main...sha_identical/behind_or_equivalent)_before_the_environment_approval_is_requested;no_maintenance-branch_allowance;pin+one_red_proof_on_the_real_path(Rule59:_a_v*_tag_on_an_unmerged_branch_commit_with_a_green_push_run_is_refused);land_before_the_v1.0.0_tag(decision_82)
+
+### DW-697: an enabled store channel reports published when vsce/ovsx --skip-duplicate skipped an existing version (exit 0)
+- source: spec-42-5-release-workflow.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: runChannel maps exit 0 to published; --skip-duplicate exits 0 for a version already on the store; the skip text is unverified
+- 2026-11-20T21:58:32Z status=wontfix-accepted owner=42-5-release-workflow by=cr note=reopen_if=Story 42.7 enables a store channel without telling a skipped duplicate from an upload
+
+### DW-698: the IPM channel refuses a version the registry lists before its tag-tree check, so a re-run after a landed push exits 1 instead of already published
+- source: spec-42-5-release-workflow.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: publishIpm returns failed on listing.listed before the tagTreeArgv comparison; the matrix row says refuse when the registry lists the version
+- 2026-11-20T21:58:32Z status=by-design owner=42-5-release-workflow by=cr note=spec-bound (I/O matrix Publish channels, IPM); Story 42.8 enables the channel and may amend the row
+
+### DW-699: RAW_VERB in release-workflow-check.ts repeats and widens the verb pattern of ci-workflow-check.ts:261 (Rule 2 copy)
+- source: spec-42-5-release-workflow.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: the spec freezes every ci.yml assertion, so the release check carries its own wider copy (flags between tool and verb)
+- 2026-11-20T21:58:32Z status=wontfix-accepted owner=42-5-release-workflow by=cr note=reopen_if=a verb with flags before it (pnpm -r publish) lands in ci.yml and ci-workflow.test.ts stays green
+
+### DW-700: compareUrl puts GITHUB_SHA into the compare path without percent-encoding, unlike the runs URL beside it (encodeURIComponent)
+- source: spec-42-6-tarball-smoke-and-1-0-0-publish.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: scripts/lib/release-core.mjs compareUrl; QA 42.6 listed it as deferred. GITHUB_SHA is set by the runner (40 hex) and cannot be set by a step or a tag push; an odd value would still fail at the head_sha runs read.
+- 2026-11-21T02:57:09Z status=wontfix-theoretical owner=42-6-tarball-smoke-and-1-0-0-publish by=cr note=real if the sha ever comes from a workflow_dispatch input or another caller-supplied value
+
+### DW-701: release.mjs verify checks the npm channel only; once 42.7/42.8 enable vsix, Open VSX or IPM, its all-pass summary says nothing about them
+- source: spec-42-6-tarball-smoke-and-1-0-0-publish.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: scripts/release.mjs runVerify walks NPM_PUBLISH_ORDER only; RELEASE_CHANNELS gains marketplace channels in 42.7 and ipm in 42.8. v1.0.0 is npm-only (decision #77), so nothing is misreported today.
+- 2026-11-21T02:57:09Z status=wontfix-accepted owner=42-6-tarball-smoke-and-1-0-0-publish by=cr note=reopen_if=42.7 or 42.8 enables a non-npm channel and release.mjs verify still reads npm alone

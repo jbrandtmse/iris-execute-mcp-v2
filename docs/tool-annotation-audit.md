@@ -1,5 +1,7 @@
 # Tool Annotation Audit Report
 
+> **Historical document.** This is the audit of 2026-04-07. The current hints live in each tool's source and in the committed `tools/list` snapshot (`packages/iris-mcp-all/src/__tests__/fixtures/tools-list-snapshot.json`); Story 42.10 later corrected `destructiveHint` on 13 tools (see the CHANGELOG).
+
 **Date:** 2026-04-07
 **Auditor:** Claude Opus 4.6 (automated)
 **Scope:** All 85 tools across 5 MCP server packages

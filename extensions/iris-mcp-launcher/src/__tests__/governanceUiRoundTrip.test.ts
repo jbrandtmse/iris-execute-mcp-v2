@@ -30,10 +30,13 @@
  * the OS keychain — the default profile is configured entirely from `IRIS_*`
  * env vars and the denied call is refused BEFORE any IRIS connection.
  *
- * **Never fails on a pristine/offline checkout**: unbuilt dist, an
- * unresolvable SDK, or an unreachable IRIS SKIPS with a logged reason.
- * Credentials come from `IRIS_TEST_*` env vars with the documented local dev
- * defaults (the 31-6-5 convention).
+ * **Opt-in, and never fails on a pristine/offline checkout**: the round-trip
+ * runs only with `IRIS_REQUIRE_LIVE=1` (or `true`) and the five `IRIS_HOST`/
+ * `IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` target
+ * variables (all required, none defaulted; `liveArming.ts`); unarmed it SKIPS
+ * before any probe or spawn, and a set `IRIS_HOST` alone does not arm it.
+ * Armed, an unbuilt dist, an unresolvable SDK, or an unreachable IRIS SKIPS
+ * with a logged reason.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { existsSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
@@ -48,6 +51,7 @@ import {
 } from "../governanceEngine.js";
 import type { DiffJson } from "../governanceView.js";
 import type { LauncherSettings } from "../types.js";
+import { liveGateTarget } from "./liveArming.js";
 import { resolveSdkEsmDir } from "./sdkClientStore.js";
 
 // src/__tests__ → repo root is four levels up.
@@ -62,11 +66,12 @@ const GOVERNANCE_CLI_BIN = path.join(
   "governance-cli.js",
 );
 
-const IRIS_HOST = process.env.IRIS_TEST_HOST ?? "localhost";
-const IRIS_PORT = Number(process.env.IRIS_TEST_PORT ?? 52773);
-const IRIS_USERNAME = process.env.IRIS_TEST_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_TEST_PASSWORD ?? "SYS";
-const IRIS_NAMESPACE = process.env.IRIS_TEST_NAMESPACE ?? "HSCUSTOM";
+const LIVE = liveGateTarget();
+const IRIS_HOST = LIVE.target.host;
+const IRIS_PORT = LIVE.target.port;
+const IRIS_USERNAME = LIVE.target.username;
+const IRIS_PASSWORD = LIVE.target.password;
+const IRIS_NAMESPACE = LIVE.target.namespace;
 
 /** Any HTTP response — even a 401 — proves the IRIS Web Gateway is reachable. */
 async function isIrisReachable(): Promise<boolean> {
@@ -146,6 +151,10 @@ let engineTarget: GovernanceCliTarget;
 let engineEnv: Record<string, string>;
 
 beforeAll(async () => {
+  if (LIVE.skipReason !== undefined) {
+    skipReason = LIVE.skipReason;
+    return;
+  }
   if (!existsSync(DEV_MCP_ENTRY_POINT)) {
     skipReason = `packages/iris-dev-mcp/dist/index.js is not built (run "pnpm turbo run build" first). Looked at: ${DEV_MCP_ENTRY_POINT}`;
     return;
@@ -161,7 +170,7 @@ beforeAll(async () => {
     return;
   }
   if (!(await isIrisReachable())) {
-    skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/ (set IRIS_TEST_* to point at a live instance).`;
+    skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT}/api/atelier/ (check IRIS_HOST/IRIS_PORT).`;
     return;
   }
 

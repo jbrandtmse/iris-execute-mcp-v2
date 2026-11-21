@@ -14,8 +14,8 @@
  *    new `@iris-mcp/shared` exports, and each runtime export exists in the built shared dist.
  *  - The README tool-table row lists exactly the tool's schema parameters, with `?` on the optional ones, and
  *    states the default of both flags.
- *  - The README names the unguarded paths, and each named tool is still a real tool in the source file the
- *    write-path roster records for it.
+ *  - The README names the guarded paths and the tools that write no Atelier document, and each named tool is still
+ *    a real tool in the source file the write-path roster records for it.
  *  - The catalog contract (the code strings live in `refusals.ts` only) and `droppedStorage` (built in
  *    `storage-guard.ts` only, so no other tool's output carries it).
  *  - The changeset carries the sanctioned bumps (AD-29: `@iris-mcp/shared` and `@iris-mcp/dev` minor).
@@ -300,39 +300,48 @@ describe("Story 38.3 CHANGELOG entry", () => {
     }
   });
 
-  it("names the three recorded exclusions, and the write-path roster records each of their ids", () => {
+  it("names the three Story 38.3 exclusions as recorded history, and the write-path roster has no excluded entry any more (Story 42.11)", () => {
     const roster = read("packages/iris-mcp-all/src/__tests__/document-write-paths.test.ts");
     for (const id of ["DW-544", "DW-545", "DW-546"]) {
       expect(changelogSection, `the CHANGELOG names ${id}`).toContain(id);
-      expect(roster, `the roster records ${id}`).toContain(`"${id}"`);
     }
+    expect(roster, "the roster has no excluded entry").not.toMatch(/verdict: "excluded"/);
   });
 });
 
-describe("Story 38.3 README unguarded paths (AC-6)", () => {
-  // The tools the README names as unguarded or as not writing documents, with the roster's source file for each.
-  const NAMED: Array<[string, string]> = [
+describe("Story 38.3 README document-write paths (AC-6; Story 42.11)", () => {
+  // The tools the README names as guarded, with the roster's source file for each.
+  const GUARDED: Array<[string, string]> = [
+    ["iris_doc_put", "packages/iris-dev-mcp/src/tools/doc.ts"],
+    ["iris_doc_edit", "packages/iris-dev-mcp/src/tools/doc-edit.ts"],
     ["iris_doc_load", "packages/iris-dev-mcp/src/tools/load.ts"],
-    ["iris_env_promote", "packages/iris-dev-mcp/src/tools/env-promote.ts"],
     ["iris_doc_xml_export", "packages/iris-dev-mcp/src/tools/format.ts"],
+    ["iris_env_promote", "packages/iris-dev-mcp/src/tools/env-promote.ts"],
+  ];
+  // The tools the README names as not writing an Atelier document, with the roster's source file for each.
+  const NAMED: Array<[string, string]> = [
     ["iris_docdb_document", "packages/iris-data-mcp/src/tools/docdb.ts"],
     ["iris_global_set", "packages/iris-dev-mcp/src/tools/global.ts"],
   ];
 
-  it("names each path the write-path roster records, and each named tool is still defined in that source file", () => {
-    const unguarded = /- \*\*Unguarded paths\.\*\*[\s\S]*?(?=\n\n)/.exec(putDetails)?.[0] ?? "";
-    expect(unguarded, "README has the unguarded-paths item").not.toBe("");
-    for (const [tool, file] of NAMED) {
-      expect(unguarded, `the README names ${tool}`).toContain(tool);
+  it("names each guarded tool and each tool the roster records as not a document write, and each named tool is still defined in its source file", () => {
+    const paths = /- \*\*Document-write paths\.\*\*[\s\S]*?(?=\n\n)/.exec(putDetails)?.[0] ?? "";
+    expect(paths, "README has the document-write-paths item").not.toBe("");
+    for (const [tool, file] of [...GUARDED, ...NAMED]) {
+      expect(paths, `the README names ${tool}`).toContain(tool);
       expect(read(file), `${file} defines ${tool}`).toContain(`"${tool}"`);
     }
-    // The roster's excluded and not-a-document-write entries are exactly the files above: a new one needs a README line.
+    // The roster's guarded and not-a-document-write entries in tool files are exactly the files above: a new one needs a README line.
     const roster = read("packages/iris-mcp-all/src/__tests__/document-write-paths.test.ts");
-    const rosterFiles = [
-      ...roster.matchAll(/file: "([^"]+)",\s*pattern: "\w+",\s*count: \d+,\s*verdict: "(?:excluded|not-a-document-write)"/g),
-    ].map((match) => match[1]);
-    expect(rosterFiles.length, "the roster's unguarded entries are found").toBeGreaterThan(0);
-    expect([...rosterFiles].sort(), "the README covers every unguarded roster entry").toEqual(NAMED.map(([, file]) => file).sort());
+    const rosterFiles = (verdict: string): string[] =>
+      [...roster.matchAll(new RegExp(`file: "([^"]+)",\\s*pattern: "\\w+",\\s*count: \\d+,\\s*verdict: "${verdict}"`, "g"))].map(
+        (match) => match[1] ?? "",
+      );
+    expect(rosterFiles("guarded").sort(), "the README names every guarded roster entry").toEqual(GUARDED.map(([, file]) => file).sort());
+    expect(rosterFiles("not-a-document-write").sort(), "the README covers every not-a-document-write roster entry").toEqual(
+      NAMED.map(([, file]) => file).sort(),
+    );
+    expect(rosterFiles("excluded"), "no roster entry is excluded").toEqual([]);
   });
 });
 

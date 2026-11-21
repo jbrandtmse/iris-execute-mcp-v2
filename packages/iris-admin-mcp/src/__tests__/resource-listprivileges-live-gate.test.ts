@@ -13,10 +13,11 @@
  *    validation message and never as a raw `<SUBSCRIPT>` error, while `A.B.C` keeps its graceful
  *    empty result (captured live 2026-10-15, IRIS 2026.2, grantee `%Developer`, HSCUSTOM).
  *
- * Read-only: the tool only lists privileges; nothing is created or changed. Target:
- * `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, defaulting to the dev
- * instance at localhost:52773 / HSCUSTOM. Skips when IRIS or the deployed route is unavailable; fails
- * instead when `IRIS_REQUIRE_LIVE` is armed (the arming convention of the other live gates).
+ * Read-only: the tool only lists privileges; nothing is created or changed. Arming: runs only with
+ * `IRIS_REQUIRE_LIVE=1` (or `true`), against the target named by
+ * `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (all required, none defaulted;
+ * `@iris-mcp/shared/test-helpers/live-target`). Unarmed, every test skips before any request; armed, an
+ * unreachable IRIS or an undeployed route fails the gate instead of skipping it.
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
@@ -29,13 +30,13 @@ import {
   ping,
   type ToolContext,
 } from "@iris-mcp/shared";
+import { liveConnectionEnv, liveGateTarget } from "@iris-mcp/shared/test-helpers/live-target";
 import { resourceManageTool } from "../tools/resource.js";
 
-const IRIS_HOST = process.env.IRIS_HOST ?? "localhost";
-const IRIS_PORT = process.env.IRIS_PORT ?? "52773";
-const IRIS_USERNAME = process.env.IRIS_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_PASSWORD ?? "SYS";
-const IRIS_NAMESPACE = process.env.IRIS_NAMESPACE ?? "HSCUSTOM";
+const LIVE = liveGateTarget();
+const IRIS_HOST = LIVE.target.host;
+const IRIS_PORT = LIVE.target.port;
+const IRIS_NAMESPACE = LIVE.target.namespace;
 
 const REQUIRE_LIVE =
   process.env.IRIS_REQUIRE_LIVE === "1" || process.env.IRIS_REQUIRE_LIVE === "true";
@@ -74,33 +75,29 @@ async function list(args: Record<string, unknown>): Promise<Listing> {
 }
 
 beforeAll(async () => {
-  try {
-    const config = loadConfig({
-      IRIS_HOST,
-      IRIS_PORT,
-      IRIS_USERNAME,
-      IRIS_PASSWORD,
-      IRIS_NAMESPACE,
-      IRIS_HTTPS: "false",
-    });
-    const client = new IrisHttpClient(config);
-    if (!(await ping(client, 3000))) {
-      skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
-    } else {
-      const version = await negotiateVersion(client);
-      ctx = buildToolContext("NS", config, client, version);
-      try {
-        await client.get(`${ROUTE}?grantee=${encodeURIComponent(GRANTEE)}&system=0`);
-      } catch (error) {
-        if (error instanceof IrisApiError && error.statusCode === 404) {
-          skipReason = `The ExecuteMCPv2 REST handlers are not deployed in ${IRIS_NAMESPACE} (${ROUTE} answered 404).`;
-        } else {
-          throw error;
+  skipReason = LIVE.skipReason;
+  if (skipReason === undefined) {
+    try {
+      const config = loadConfig(liveConnectionEnv(LIVE.target));
+      const client = new IrisHttpClient(config);
+      if (!(await ping(client, 3000))) {
+        skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (check IRIS_HOST/IRIS_PORT).`;
+      } else {
+        const version = await negotiateVersion(client);
+        ctx = buildToolContext("NS", config, client, version);
+        try {
+          await client.get(`${ROUTE}?grantee=${encodeURIComponent(GRANTEE)}&system=0`);
+        } catch (error) {
+          if (error instanceof IrisApiError && error.statusCode === 404) {
+            skipReason = `The ExecuteMCPv2 REST handlers are not deployed in ${IRIS_NAMESPACE} (${ROUTE} answered 404).`;
+          } else {
+            throw error;
+          }
         }
       }
+    } catch (error) {
+      skipReason = `IRIS availability probe failed: ${error instanceof Error ? error.message : String(error)}`;
     }
-  } catch (error) {
-    skipReason = `IRIS availability probe failed: ${error instanceof Error ? error.message : String(error)}`;
   }
   if (skipReason && REQUIRE_LIVE) {
     throw new Error(`IRIS_REQUIRE_LIVE is set, so this gate may not be skipped: ${skipReason}`);

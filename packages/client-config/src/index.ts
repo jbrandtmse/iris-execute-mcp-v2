@@ -206,6 +206,8 @@ export {
 
 export {
   synthesizeEntry,
+  IRIS_MCP_MAJOR,
+  pinnedSpec,
   PKG_BY_SERVER,
   VSCODE_PASSWORD_INPUT_ID,
   type EnvMode,

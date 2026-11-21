@@ -1,8 +1,9 @@
 /**
  * Story 43.3 (DW-637, AD-34, AD-32; Rules #54, #59) - the tripwire behind the verdict on the SDK's bundled JSON-schema validator.
  *
- * `@modelcontextprotocol/server` 2.3.1 bundles ajv 8.18.0, ajv-formats 3.0.1 and fast-uri 3.1.0 (`ajvProvider-*.mjs`), which `pnpm audit`
- * cannot see; fast-uri 3.1.0 is affected by nine advisories fixed in 3.1.8. They are unreachable from this suite only while the server never
+ * `@modelcontextprotocol/server` bundles ajv, ajv-formats and fast-uri (`ajvProvider-*.mjs`), which `pnpm audit` cannot see. Version 2.3.1
+ * bundled fast-uri 3.1.0, which nine advisories affect; the pinned 2.4.0 bundles fast-uri 3.1.8, the release that fixes them (Story 42.6,
+ * DW-637). The tripwire stays: the validator is unreachable from this suite only while the server never
  * invokes that validator: the legacy shim of the SDK is configured with `validateAcceptedContent: false`, the 2026-07-28 path does not
  * validate, and the confirmation helper reads the answer itself. The validator would be reached through a call of `elicitInput`
  * (`ctx.mcpReq.elicitInput` or the server's), through `fromJsonSchema`, through a `jsonSchemaValidator` option, or through the

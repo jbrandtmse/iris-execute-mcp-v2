@@ -2,7 +2,7 @@
 
 Multi-client MCP configuration manager for the iris-mcp suite (Epic 33 / FR141).
 
-**Status: engine + CLI + certification (Stories 33.0–33.4).** The package
+**Status: engine + CLI + certification (Stories 33.0–33.4) and the skills pack (Epic 41).** The package
 ships the declarative `ClientAdapter` registry for the 13 v1 clients, the
 detect/status/diff read engine, the write engine (apply/enable/disable/
 remove/restore with timestamped backups and a state.json ownership/stash
@@ -10,11 +10,15 @@ ledger), the **`iris-mcp-clients` CLI** (below), the doctor config-drift
 guard, and the **adapter certification record** (dispositions below — live
 passes where the client is locally available, honest fixture-only
 dispositions otherwise). The VS Code extension "MCP Clients" view shipped
-in Story 33.3.
+in Story 33.3. The package also ships the **skills pack** (`skills-pack/`: the
+knowledge skills, the workflow skills and the always-on rule) and the
+`iris-mcp-clients skills install` installer that copies it into a project
+(Epic 41).
 
 ## `iris-mcp-clients` CLI
 
-Ships as a `bin` of this package: `npx -y @iris-mcp/client-config iris-mcp-clients <command>`.
+Ships as a `bin` of this package: `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients <command>`.
+The `-p` form names the bin; otherwise `iris-mcp-clients` reaches the CLI as an unknown command.
 *(Not yet published to npm — until then run the built bin directly:
 `node packages/client-config/dist/cli/clients-cli.js <command>`.)*
 The CLI is a thin consumer of the engine — no configuration format logic of
@@ -214,11 +218,9 @@ formats, data handles clients. Adding a client never touches engine code.
 
 **Managed servers:** the 5 leaf servers (`iris-dev-mcp`, `iris-admin-mcp`,
 `iris-ops-mcp`, `iris-interop-mcp`, `iris-data-mcp`). `iris-mcp-all` is
-deliberately **unmanaged** (Project Lead decision 2026-07-28): it is a real
-aggregate stdio server, but as a peer row it invites applying all 5 servers
-AND the aggregate, double-registering every tool. Entries named
-`iris-mcp-all` are surfaced read-only (foreign), never modified — hand-write
-the aggregate if you want it.
+deliberately **unmanaged** (Project Lead decision 2026-07-28): `@iris-mcp/all`
+is a meta-package with no `bin`, so no server by that name can start. Entries
+named `iris-mcp-all` are surfaced read-only (foreign), never modified.
 
 - `CLIENT_ADAPTERS` — the 13-adapter registry (id, format, rootKey, per-OS
   scope path templates, entryShape, envExpansion, disableSupport, restartHint,
@@ -298,11 +300,11 @@ does nothing; a real pass needs both `run` and `--real-config`:
 ```text
 node scripts/certify.mjs run <clientId> --real-config [--server iris-dev-mcp] [--skip-agent]
 
-_Note (2026-07-28): certification probes now default to `iris-dev-mcp`. The 2026-07-28 evidence blocks below used `iris-mcp-all` as the probe entry (a valid managed server at the time); the aggregate is now unmanaged by design (see "Managed servers" above) — re-runs use a real server._
+_Note (2026-07-28): certification probes now default to `iris-dev-mcp`. The 2026-07-28 evidence blocks below used `iris-mcp-all` as the probe entry (then a managed row); `@iris-mcp/all` has no `bin` and can never start a server, and the aggregate is now unmanaged by design (see "Managed servers" above) — re-runs use a real server._
 ```
 
 Re-run it after the first npm publish (the pre-publish residual risk named
-in several dispositions: the manager's `npx -y @iris-mcp/*` launch targets
+in several dispositions: the manager's `npx -y @iris-mcp/<server>@1` launch targets
 are not on the registry yet) and on any machine with a fixture-only client
 installed. Two mode notes for re-runs: the VS Code pass applies in
 **explicit mode with a dummy placeholder password** (a single write —
@@ -335,7 +337,7 @@ Recorded evidence:
 - PASS remove (engine)
 - PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass
 
-Residual risk: The npx launch target (@iris-mcp/all) is unpublished as of 2026-07-28, so the client health check reports 'Failed to connect' for the manager-written entry; sibling node-dist entries at the same path/rootKey show '√ Connected' in the same 'claude mcp list' run. Re-run scripts/certify.mjs after the first npm publish for the full tool-listing leg.
+Residual risk: The npx launch target of the certified entry (@iris-mcp/dev) was unpublished as of 2026-07-28, so the client health check reported 'Failed to connect' for the manager-written entry; sibling node-dist entries at the same path/rootKey showed '√ Connected' in the same 'claude mcp list' run. Re-run scripts/certify.mjs after the first npm publish for the full tool-listing leg. The sharing probe below wrote an iris-mcp-all entry; @iris-mcp/all is a meta-package with no bin, so that entry never starts, published or not.
 
 Repo `.mcp.json` sharing (Claude half, AC 33.4.4): **verified-live** (2026-07-28) — manager wrote iris-mcp-all at project scope into a scratch dir .mcp.json; claude mcp list (2.1.220) in that dir showed: iris-mcp-all: npx -y @iris-mcp/all - Pending approval, with the MCP config diagnostics naming the exact scratch .mcp.json path.
 
@@ -361,7 +363,7 @@ Recorded evidence:
 - PASS remove (engine)
 - PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass
 
-Residual risk: File-level lifecycle certified live; the agent-side tool listing (Copilot MCP view) is a manual GUI step that stays OPEN as AC 33.3.4 for the Project Lead — never claimed here. The npx launch target (@iris-mcp/all) is unpublished as of 2026-07-28 — re-run scripts/certify.mjs after the first npm publish.
+Residual risk: File-level lifecycle certified live; the agent-side tool listing (Copilot MCP view) is a manual GUI step that stays OPEN as AC 33.3.4 for the Project Lead — never claimed here. The certified entry was iris-mcp-all, whose npx launch target (@iris-mcp/all) is a meta-package with no bin: it never starts, published or not, and is no longer a managed server — re-run scripts/certify.mjs against a leaf server (iris-dev-mcp) after the first npm publish.
 
 #### Cline (`cline`)
 
@@ -377,7 +379,7 @@ Recorded evidence:
 - PASS remove (engine)
 - PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass
 
-Residual risk: File-level lifecycle certified live incl. the native 'disabled' flag round-trip; the agent-side tool listing (Cline MCP UI) is a manual GUI step — never claimed here. The npx launch target (@iris-mcp/all) is unpublished as of 2026-07-28 — re-run scripts/certify.mjs after the first npm publish.
+Residual risk: File-level lifecycle certified live incl. the native 'disabled' flag round-trip; the agent-side tool listing (Cline MCP UI) is a manual GUI step — never claimed here. The certified entry was iris-mcp-all, whose npx launch target (@iris-mcp/all) is a meta-package with no bin: it never starts, published or not, and is no longer a managed server — re-run scripts/certify.mjs against a leaf server (iris-dev-mcp) after the first npm publish.
 
 #### Roo Code (`roo-code`)
 
@@ -422,7 +424,7 @@ Recorded evidence:
 - PASS remove (engine)
 - PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass
 
-Residual risk: CLI/TUI half: certified live (file-level lifecycle + agent surface probe; the added entry's npx target @iris-mcp/all is unpublished as of 2026-07-28, so its in-session launch fails — sibling node-dist entries in the same file ARE callable live, verified 2026-07-28). VS Code extension half: fixture-only-with-residual-risk — the Kimi Code VS Code extension is NOT installed locally (code --list-extensions, 2026-07-28); per the extension's marketplace docs it reads the same ~/.kimi-code/mcp.json, unproven live. Re-run both legs after publish/extension install — and note kimi-code does NO env expansion (envExpansion: none): the harness applies env-reference, so the entry only authenticates in-session when the OS environment provides IRIS_PASSWORD — export it before the agent leg (or hand-apply in explicit mode with --confirm-secret), otherwise the post-publish launch fails on auth, not on the npx target.
+Residual risk: CLI/TUI half: certified live (file-level lifecycle + agent surface probe; the added entry's npx target @iris-mcp/all is a meta-package with no bin, so its in-session launch fails and always will, published or not — sibling node-dist entries in the same file ARE callable live, verified 2026-07-28). VS Code extension half: fixture-only-with-residual-risk — the Kimi Code VS Code extension is NOT installed locally (code --list-extensions, 2026-07-28); per the extension's marketplace docs it reads the same ~/.kimi-code/mcp.json, unproven live. Re-run both legs against a leaf server after publish/extension install — and note kimi-code does NO env expansion (envExpansion: none): the harness applies env-reference, so the entry only authenticates in-session when the OS environment provides IRIS_PASSWORD — export it before the agent leg (or hand-apply in explicit mode with --confirm-secret), otherwise the post-publish launch fails on auth, not on the npx target.
 
 AC 33.4.4 dual-surface:
 - CLI/TUI half: **verified-live** (2026-07-28) — user-scope pass certified live (see steps/evidence above); the agent surface (kimi -p, 0.29.0) called iris_server_info LIVE through the existing entries of the same ~/.kimi-code/mcp.json the manager writes (returned IRIS for Windows (x86-64) 2026.1 (Build 235U)); kimi -p listing answered exactly the user-scope servers (chrome-devtools, iris-admin-mcp, iris-data-mcp, iris-dev-mcp, iris-interop-mcp, iris-ops-mcp, perplexity).

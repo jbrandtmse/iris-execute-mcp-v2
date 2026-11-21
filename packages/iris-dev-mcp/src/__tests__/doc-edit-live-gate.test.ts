@@ -21,14 +21,14 @@
  *
  * Every test first PUTs its fixture's starting text. The tool sends no compile request (AC-8).
  *
- * Target: `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE`, defaulting to the dev
- * instance at localhost:52773 / HSCUSTOM. Writes only the disposable `ExecuteMCPv2.Temp.QaStory384Edit.cls`
- * (compiled by the test), `...Store.cls` (persistent, compiled, no rows) and `...Rtn.mac` documents. Before
+ * Arming: runs only with `IRIS_REQUIRE_LIVE=1` (or `true`), against the target named by
+ * `IRIS_HOST`/`IRIS_PORT`/`IRIS_USERNAME`/`IRIS_PASSWORD`/`IRIS_NAMESPACE` (all required, none defaulted;
+ * `@iris-mcp/shared/test-helpers/live-target`). Unarmed, every test skips before any request. Writes only the
+ * disposable `ExecuteMCPv2.Temp.QaStory384Edit.cls` (compiled by the test), `...Store.cls` (persistent, compiled, no rows) and `...Rtn.mac` documents. Before
  * and after the run the gate removes the documents and every data global whose name starts `ExecuteMCPv` and
  * carries one of its fixture stems (`QaStory384Edit`, `QaStory384Store`, `QaStory384Rtn`), then asserts that no
  * such document (generated ones included) or global is left; another gate's `QaStory384Wire*` fixtures are
- * not this gate's. Skips when IRIS is unreachable; fails instead when `IRIS_REQUIRE_LIVE` is armed
- * (same arming convention as the other live gates in this directory).
+ * not this gate's. Armed, an unreachable IRIS fails the gate instead of skipping it.
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
@@ -41,6 +41,7 @@ import {
   storageDefinitionNames,
   type ToolContext,
 } from "@iris-mcp/shared";
+import { liveConnectionEnv, liveGateTarget } from "@iris-mcp/shared/test-helpers/live-target";
 import { docGetTool, docListTool } from "../tools/doc.js";
 import { docEditTool } from "../tools/doc-edit.js";
 import { globalKillTool, globalListTool } from "../tools/global.js";
@@ -52,11 +53,10 @@ import {
   type AtelierDocResult,
 } from "./live-doc-helpers.js";
 
-const IRIS_HOST = process.env.IRIS_HOST ?? "localhost";
-const IRIS_PORT = process.env.IRIS_PORT ?? "52773";
-const IRIS_USERNAME = process.env.IRIS_USERNAME ?? "_SYSTEM";
-const IRIS_PASSWORD = process.env.IRIS_PASSWORD ?? "SYS";
-const IRIS_NAMESPACE = process.env.IRIS_NAMESPACE ?? "HSCUSTOM";
+const LIVE = liveGateTarget();
+const IRIS_HOST = LIVE.target.host;
+const IRIS_PORT = LIVE.target.port;
+const IRIS_NAMESPACE = LIVE.target.namespace;
 
 const REQUIRE_LIVE =
   process.env.IRIS_REQUIRE_LIVE === "1" || process.env.IRIS_REQUIRE_LIVE === "true";
@@ -217,24 +217,20 @@ function storageRange(content: string[]): { first: number; last: number } {
 }
 
 beforeAll(async () => {
-  try {
-    const config = loadConfig({
-      IRIS_HOST,
-      IRIS_PORT,
-      IRIS_USERNAME,
-      IRIS_PASSWORD,
-      IRIS_NAMESPACE,
-      IRIS_HTTPS: "false",
-    });
-    client = new IrisHttpClient(config);
-    if (!(await ping(client, 3000))) {
-      skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (set IRIS_HOST/IRIS_PORT to point at a live instance).`;
-    } else {
-      version = await negotiateVersion(client);
-      ctx = buildToolContext("NS", config, client, version);
+  skipReason = LIVE.skipReason;
+  if (skipReason === undefined) {
+    try {
+      const config = loadConfig(liveConnectionEnv(LIVE.target));
+      client = new IrisHttpClient(config);
+      if (!(await ping(client, 3000))) {
+        skipReason = `IRIS is not reachable at http://${IRIS_HOST}:${IRIS_PORT} (check IRIS_HOST/IRIS_PORT).`;
+      } else {
+        version = await negotiateVersion(client);
+        ctx = buildToolContext("NS", config, client, version);
+      }
+    } catch (error) {
+      skipReason = `IRIS availability probe failed: ${error instanceof Error ? error.message : String(error)}`;
     }
-  } catch (error) {
-    skipReason = `IRIS availability probe failed: ${error instanceof Error ? error.message : String(error)}`;
   }
   if (skipReason && REQUIRE_LIVE) {
     throw new Error(`IRIS_REQUIRE_LIVE is set, so this gate may not be skipped: ${skipReason}`);
