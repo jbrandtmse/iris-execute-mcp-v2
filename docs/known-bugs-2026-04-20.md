@@ -249,8 +249,8 @@ Estimated effort: comparable to Story 10.4 (which was a similar scope). The repr
 
 - [src/ExecuteMCPv2/REST/Task.cls](../src/ExecuteMCPv2/REST/Task.cls) — `TaskHistory()` classmethod
 - [src/ExecuteMCPv2/REST/Security.cls](../src/ExecuteMCPv2/REST/Security.cls) — `ResourceManage()` and `RoleManage()` classmethods
-- `%SYS:Security.Resources.cls` — IRIS `Create` / `Modify` / `Get` API signatures (currently exported in this repo at [irissys/%SYS/Security/Resources.cls](../irissys/%SYS/Security/Resources.cls) thanks to the Story 10.2 stress-test export)
+- `%SYS:Security.Resources.cls` — IRIS `Create` / `Modify` / `Get` API signatures (currently exported in this repo at `irissys/%SYS/Security/Resources.cls` thanks to the Story 10.2 stress-test export)
 - `%SYS:Security.Roles.cls` — same, for the role variant
 - `%SYS:Security.Roles.cls`, `%SYS:Security.Resources.cls` — verify `Create` argument order and types before fixing
-- [irissys/%SYS/Task/History.cls](../irissys/%SYS/Task/History.cls) — `TaskHistoryDetail` (line 170) vs `TaskHistoryForTask(Task)` (line 148) named queries
+- `irissys/%SYS/Task/History.cls` — `TaskHistoryDetail` (line 170) vs `TaskHistoryForTask(Task)` (line 148) named queries
 - [_bmad-output/implementation-artifacts/epic-10-retro-2026-04-20.md](../_bmad-output/implementation-artifacts/epic-10-retro-2026-04-20.md) — Epic 10 retrospective, Action Items #1 and #2

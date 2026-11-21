@@ -2,8 +2,8 @@
 title: 'Story 42.9: Install Docs and Client Re-Certification'
 type: 'feature'
 created: '2026-11-21'
-status: 'ready-for-dev'
-baseline_revision: 'dc1d437f46b32c706a844b69176ae310a0f7059b'
+status: 'done'
+baseline_revision: '915703e5b98ab7f80c71aa11c62467a2b558314e'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -346,7 +346,58 @@ That gives 83 files. They were grepped with `-nEi 'not yet published|not publish
 
 ## Spec Change Log
 
+- **2026-11-21, decision #123 (owner ruling relayed by the Planner), added during implement; binding.** The install docs lead with the automatic install of the server-side classes (bootstrap deploys and upgrades them on first connect) and present IPM only as the fallback where that cannot run. The cases are those the code shows (`packages/shared/src/bootstrap.ts`: `Deploy failed` / `Compile failed` errors; the web application needs `%Admin_Manage`, reported as `configured: false` with manual instructions), plus a change-control policy that forbids client deployment. The consequence is stated (decision #67, AD-14 Ownership): with `ExecuteMCPv2.InstallGuard` present bootstrap writes nothing, so upgrades also go through `zpm`; `zpm "uninstall iris-execute-mcp-v2"` plus a server restart hands the namespace back (the bootstrap warning says the same). The docs do not describe how IPM reaches the registry (decision #122). Pinned by `story-42-9-doc-claims.test.ts` ("the automatic install leads and IPM is the fallback"); `mutation: the "Skip this section unless the automatic install cannot run." sentence replaced by "Optional." in README.md -> the "IPM section is the fallback" test red, README restored byte-identically`. Not changed: `ipmReadme()` in `scripts/lib/release-core.mjs` (42.8 code; decision #122 redesigns that route).
+
 ## Review Triage Log
+
+### 2026-11-21 — Review pass
+- verdicts: 41 findings — high 0, medium 2, low 35, false 4, maybe-false 0 (18 patched: 2 medium, 16 low; 23 rejected: 4 false, 19 low; none deferred)
+- findings:
+  - Blind Hunter
+    - `[low]` `patch` IRIS for Health range overstated (CI tests Health on 2026.2 only) — README now reads "IRIS Community 2026.1 to 2026.2 and IRIS for Health 2026.2", and the doc-claims row derives each product's tag from `scripts/throwaway-iris.mjs`.
+    - `[low]` `patch` Payload prose says only the dev row is test-pinned, the test pinned all five — the test now pins the dev row only (the spec's pin), so another server's description change cannot break it.
+    - `[low]` `patch` Caveat guard header claims "after publish" wording that the regex does not match — the header is corrected; the stale "after the first npm publish" text lives in dated certification records that the lead's re-run replaces (reject for that part: generated from `certification-results.json`, not worth a hand edit).
+    - `[false]` `reject` "Client re-certification produced no new live evidence" — the live re-run is the lead's step after npm 1.0.0 (spec AC 42.9.2 lead scope); implement scope forbids fabricating `certified-live` rows.
+    - `[low]` `reject` `goose|pi|junie mcp list` check commands may not exist — the spec's Design Notes give them as "`<cli> mcp list` (or the client's equivalent)"; they are check prompts for a person, and Pi's reversal is sourced in the spec (decision #112). reopen_if: a person finds the subcommand absent.
+    - `[low]` `reject` Pi evidence inconsistent between docs.pi.dev and the GitHub docs URL — both are cited by the spec; implement re-read them on 2026-11-21 and found no difference (Verification, adapter paths).
+    - `[low]` `reject` Windsurf `restartHint` still says "Restart Windsurf" — the spec changes display name and docs URL only; a hint change moves goldens for no behavioral effect.
+    - `[low]` `reject` The home guard blocks `remove`/`restore`/`diff` from the home directory — spec-bound: decision #115 refuses every project-scope write and `diff`; user scope remains available. by-design.
+    - `[low]` `reject` The guard is opt-in for library callers (`projectIsHome` set at the CLI boundary) — spec-bound (core never reads `os.homedir()`, `HostContext`); every shipped surface goes through the CLI. by-design.
+    - `[low]` `reject` Governance-CLI doc pin echoes a literal — a test-hardening wish with no user-reachable failure; not worth the fix.
+    - `[low]` `patch` `doc-set.ts` depends on untracked files and the working tree — it now lists tracked files only (the spec's `git ls-files '*.md'`) and drops entries that no longer exist.
+    - `[low]` `patch` `formatAgainst` takes the last array element, not the highest semver — now sorted by semver; a row with 1.1.0 listed before 1.0.9 and 1.0.10 pins it.
+    - `[false]` `reject` PRD "half updated": the 86-tool lines :194 and the scope table :884 are planning-time history the spec tells us to keep (:46/:188/:224/:679 and the epic headings); the four listed lines are updated.
+    - `[low]` `reject` Windows `npx` needs `cmd /c` — unverified for the clients named, and the installer's own entry shape is unchanged by this story; reopen_if: a Windows client fails to launch a documented `npx` entry.
+    - `[low]` `patch` The VS Code extension paragraph still sends Claude Code users to the Server Manager credential path — now points to the plugin or `iris-mcp-clients` and the step 2 options.
+    - `[low]` `patch` Pack-target and renderer row-count comments double-count — both now read 15 adapters, 2 dispositions (`kilo-code`, `antigravity`) and `agents`.
+  - Edge Case Hunter
+    - `[medium]` `patch` Doctor prints a `remove --scope project` command the home guard refuses when run from the home directory — the finding now says to delete the entry from the file by hand in that case, with a row.
+    - `[low]` `patch` `cmdSkills` carries a stale `projectIsHome` in the context for a `--project` elsewhere — it is set to false there (the home case returned earlier).
+    - `[false]` `reject` Doctor falls back to the home directory when `deps.projectDir` is undefined — the CLI always sets `projectDir` from cwd (`clients.ts` deps resolution); no real input reaches it.
+    - `[low]` `reject` `humanOnly.check` with a newline or `**` breaks the table — the data is the project's own JSON, and a guard adds a branch for an input nobody writes. reopen_if: a record is authored by a tool.
+    - `[low]` `reject` Case fold wrong on a case-sensitive APFS volume — spec-bound (decision #100 compares case-insensitively on darwin and win32); `realpath` already normalizes real directories. by-design.
+    - `[low]` `patch` A tracked file deleted in the tree breaks the doc scan — closed by the `doc-set.ts` change above.
+    - `[low]` `patch` The spec says certified-live records are byte-identical, the diff adds `humanOnly` to three and rewrites the kimi-code `ac3344` — the AC is read as "evidence untouched", pinned by a baseline digest test (records that gain `against` leave it) and the comparison is recorded under Verification.
+    - `[low]` `reject` Goose's old Windows path is no longer detected — that path is the defect (Goose does not read it), so entries there were never live. by-design.
+  - Verification Gap
+    - `[low]` `patch` The cwd-symlink and case rows cannot fail on the property they name — the titles now say what each proves; the HOME-symlink row pins realpath and the pure rows pin the case fold.
+    - `[low]` `patch` Missing `mutation:` lines for the skills guard, the launcher row, the doctor negative rows, malformed `humanOnly`, the Pi and antigravity data, `samePath`, the doc pins — each mutation was applied, observed red and reverted; the lines are under Verification.
+    - `[low]` `reject` `certify.mjs` `against` wiring is pinned by a source scan only — the harness acts on import; extracting it is more than a 15-line fix. reopen_if: the lead's post-publish run records a wrong or `unresolved` `against`.
+    - `[medium]` `patch` No test pins "certified-live records unchanged" — added `BASELINE_CERTIFIED_LIVE_DIGESTS` in `certification-docs.test.ts`, with a mutation line.
+    - `[low]` `patch` Doc-set tests depend on state they did not create — closed by the `doc-set.ts` change above.
+    - `[low]` `patch` The "compact" fixture is not minified — a fully minified document and an empty object were added for both adapters (the engine preserved both).
+    - `[low]` `patch` Doctor's local-scope limit has no test — a row with the entry in the `projects` map asserts no finding.
+    - `[low]` `reject` The caveat regex misses "(pre-release)" notes and a caveat wrapped over two lines — the "(pre-release)" notes are dated schema history the inventory keeps; a squashed scan found no wrapped caveat. reopen_if: a wrapped caveat appears.
+    - `[low]` `reject` `samePath` case fold is unreachable for existing directories — spec-bound (decision #100); harmless there and the pure row pins it. by-design.
+    - `[low]` `reject` Process tests spawn the dist with no freshness check — the spec's loop rebuilds first (`checkDistFresh` is the project's gate for live suites).
+  - Intent Alignment
+    - `[low]` `reject` Tests exercise the workspace build, not the published `@1` artifact — the published run is the lead's step after the release; by design of the story split.
+    - `[low]` `reject` The guard sits at the CLI boundary — same row as the library-caller finding above. by-design.
+    - `[low]` `reject` The doctor check is reactive (a user must run `doctor`) — the spec's decision #114 is exactly that check plus the docs step.
+    - `[false]` `reject` README keeps the `zpm "repo -r -n registry -reset-defaults"` sentence against decision #123(4) — that is the user's registry setup, not how the package reaches the registry; the story-42-4 pin requires it.
+    - `[low]` `patch` The VS Code paragraph and the Claude Code route disagree — same patch as the Blind Hunter row.
+    - `[low]` `reject` `humanOnly` markers read like verified — the rendered text is "human-only (marked <date>): <check>", and the row's disposition stays `fixture-only-with-residual-risk`.
+    - `[low]` `reject` The node-launch exemption and the exact-string PRD assertions — spec-listed sections; the `>= 83` floor is the spec's inventory.
 
 ## Design Notes
 
@@ -539,7 +590,46 @@ Search the test trees of client-config, iris-mcp-all and the launcher for each o
 - `realpathSync.native` probe result (task 1).
 - The new adapters' paths re-read against the cited docs on the implementation date. A difference stops the stage and is reported.
 
+**Implement results (2026-11-21, macOS, Node 26.8.1):**
+- `realpathSync.native` probe (Rule #14, task 1), on a temp directory `<tmp>/Home` that holds the real on-disk case: `native("<tmp>/Home")`, `native("<tmp>/home")` and `native("<tmp>/HOME")` all return `<tmp>/Home` (the on-disk case, on case-insensitive APFS); a symbolic link to `Home` returns `<tmp>/Home`; `native("/tmp/")` returns `/private/tmp`; a missing path throws `ENOENT` (so the guard falls back to `path.resolve` and the case-insensitive comparison). A second finding from the real-CLI integration row: on macOS a child process's `process.cwd()` is the physical path (`/private/var/...`) while `HOME` may carry the symlinked form (`/var/...`), so the refusal text names the project directory and the project file the way the user's own `HOME` writes them.
+- Adapter paths re-read on 2026-11-21: Pi (`raw.githubusercontent.com/earendil-works/pi/.../docs/mcp.md`: `~/.pi/agent/mcp.json`, `.pi/mcp.json`, `mcpServers`; `PI_CODING_AGENT_DIR` is on `docs.pi.dev/latest/environment-variables`, not on the mcp page), Junie (`junie.jetbrains.com/docs/junie-cli-mcp-configuration.html`: `~/.junie/mcp/mcp.json`, `.junie/mcp/mcp.json`, no Windows path), Goose (`goose-docs.ai/docs/guides/config-files`: `%APPDATA%\Block\goose\config\config.yaml`) and the Antigravity row (`antigravity.google/docs/customization-discovery/`: `.agents/`, `AGENTS.md`, `GEMINI.md`). No difference from the spec. The Windsurf, Gemini, Roo Code and Kilo Code facts are the spec's own 2026-11-21 reads, not re-fetched.
+- Measured payload (`node scripts/measure-tools-payload.mjs` on freshly built shared and five server dists; full / core / developer, count / bytes / ~tokens): dev `33 / 98,907 / ~24,727`, `15 / 45,835 / ~11,459`, `33 / 98,907 / ~24,727`; admin `27 / 48,808 / ~12,202`, `13 / 16,862 / ~4,216`, `11 / 16,222 / ~4,056`; interop `25 / 58,297 / ~14,574`, `12 / 39,355 / ~9,839`, `25 / 58,297 / ~14,574`; ops `22 / 30,811 / ~7,703`, `10 / 13,813 / ~3,453`, `10 / 14,264 / ~3,566`; data `8 / 12,643 / ~3,161` in all three.
+- Commands: client-config build and `render-certification-table.mjs --check` OK; `UNARMED pnpm --filter @iris-mcp/client-config test` 42 files, 1,177 tests green; `UNARMED pnpm --filter @iris-mcp/all test` 220 files, 5,891 passed, 727 skipped (the unarmed live legs; the count equals the baseline run), 0 failed; `UNARMED pnpm --filter @iris-mcp/shared test` 86 files, 2,575 green; launcher `UNARMED npx --no -- vitest run` 32 files, 458 passed, 3 skipped (the existing unarmed live files); `clientsEngineRealCli.test.ts` 6 passed, none skipped; `pnpm gen:pack:check`, `check:provenance`, `gen:listings:check`, `gen:governance-baseline:check` (141 frozen keys all present) and `validate:prompts` exit 0; client-config `lint` and `type-check`, and the launcher `npm run type-check`, clean. No IRIS call, no docker, no real client config was touched; every process test ran with a temporary `HOME`, `USERPROFILE` and `CLAUDE_CONFIG_DIR`.
+- `mutation: removed the body of homeGuardReason (it returns null) → 11 home-guard.test.ts rows red (all five alias rows, vscode, the HOME symlink row, the case row, the diff/enable/disable/remove/restore row, the pure-piece row)`
+- `mutation: dropped realpathSync.native from realOrResolved in cli/host-probes.ts → home-guard.test.ts "HOME is a symbolic link to the directory the process runs in" red (the row where the process runs in a link to HOME stays green: a child's cwd is already the physical path)`
+- `mutation: forced the claude-code-plugin-duplicates branch off in cmdDoctor (if (false && plugin.enabled)) → 5 clients-cli.test.ts doctor rows red`
+- `mutation: reverted Goose's win32 path to %APPDATA%/goose/config.yaml in adapters.ts → adapters.test.ts "Goose reads %APPDATA%/Block/goose/config/config.yaml on Windows" red`
+- `mutation: render-certification-table.mjs returns the cell without the humanOnly text → certification-docs.test.ts "README marker sections are in sync with a fresh render from the built dist" red`
+- `mutation: put "not yet published to npm" back into docs/client-config/README.md → story-42-9-doc-claims.test.ts "no reader document outside the history files has a publication caveat or a development-only node launch" red`
+- `mutation: pointed the anchor in packages/shared/README.md back at #server-manager-connections-iris_server_manager → qa-41-7-doc-links.test.ts "packages/shared/README.md: no relative link is broken" red`
+- `mutation: changed one byte of the dev row of the README payload table (98,907 → 98,908) → story-42-9-doc-claims.test.ts "has the measured dev row of 2026-11-21" red`
+- `mutation (review pass): the skills guard in cmdSkills disabled (if (false)) → home-guard.test.ts "skills install", "skills uninstall" and "skills install --project naming the home directory" rows red`
+- `mutation (review pass): cmdApply's JSON error replaced by "see stderr (exit N)" → clientsEngineRealCli.test.ts "DW-702: a project-scope apply run from the HOME directory surfaces the CLI's refusal reason" red (and the apply alias rows of home-guard.test.ts)`
+- `mutation (review pass): doctor's plugin branch made unconditional (if (true)) → the doctor rows "plugin set to false, or its key absent", "no settings file at all", "the highest settings file wins" and "not valid JSON" red`
+- `mutation (review pass): the project-scope home hint disabled in cmdDoctor → "run from the home directory, the project-scope finding does not offer a remove command the home guard refuses" red`
+- `mutation (review pass): humanOnlyProblem returns null for every record → certify-record.test.ts "rejects a missing field, a bad date, an impossible date, a pipe and a non-object" and certification-docs.test.ts "render refuses a malformed humanOnly marker (exit 2, naming the client)" red`
+- `mutation (review pass): Pi's path in adapters.ts changed to ~/.pi/mcp.json → new-adapters-42-9.test.ts "pi: user ... project ...", "PI_CODING_AGENT_DIR moves the user file", the status row and every pi apply/remove row red`
+- `mutation (review pass): the antigravity row of PACK_TARGETS renamed → pack-targets.test.ts "puts Antigravity CLI on the gemini route, with the sources read on 2026-11-21" and four more rows red`
+- `mutation (review pass): the case fold removed from samePath (left === right) → home-guard.test.ts "resolvesToHome folds case on darwin and win32 and not on linux" and "samePath normalizes before comparing" red`
+- `mutation (review pass): formatAgainst's semver comparator returns 0 → certify-record.test.ts "takes the highest semver of several matching versions, whatever order npm lists them in" red`
+- `mutation (review pass): README.md edited in six places (the install table's "from 1.1.0", "2023.1" in the IRIS claim, the IRIS_USERNAME row given a _SYSTEM default, the DW-706 "remove the old entries first" lead, the DW-690 Security.Applications.Delete line, the per-request language sentence) → story-42-9-doc-claims.test.ts: the install table row, the IRIS claim row, "IRIS_USERNAME is required", the DW-706 removal step, the DW-690 cleanup and the DW-633 per-request rows red, one each`
+- `mutation (review pass): the cline record's date changed to 2026-11-21 in certification-results.json → certification-docs.test.ts "every certified-live record that has not been re-certified equals its baseline digest" red (and the render --check row)`
+- The baseline digests of the four certified-live records were captured from `git show 915703e5:packages/client-config/scripts/certification-results.json` and equal the current file's digests, so `vscode`, `cline`, `claude-code` and `kimi-code` differ from the baseline only by `humanOnly` and the kimi-code `ac3344` text. The spec's "byte-identical" is read as "evidence untouched" for that reason.
+- Every mutation was reverted byte-identically (checked with `diff` against a copy) and the client-config dist rebuilt from the original source.
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** The install docs describe the published install (one path per client, Node 22.17, IRIS 2023.1 best effort with the tested range, clone-and-build moved to Contributing), led by the automatic install of the server-side classes with IPM as the fallback (decision #123). `@iris-mcp/client-config` gains the home-directory guard (DW-702) and the `claude-code-plugin-duplicates` doctor check (DW-706); Pi and Junie are adapters, Goose's Windows path and the other DW-626 rows are corrected, `ADAPTER_DATA_VERSION` is `2026-11-21.1`; certification records carry optional `humanOnly` and `certify.mjs` records `against`; the CHANGELOG, PRD (110 tools plus `iris_server_profiles` on each server) and the widened doc-link and doc-claims tests agree. No version, tool, golden, governance baseline or `BOOTSTRAP_VERSION` change; no `certified-live` record was written (the lead's re-certification after npm 1.0.0 is the remaining AC 42.9.2 scope).
+
+**Files changed.** `packages/client-config/` (`src/home-guard.ts`, `src/cli/clients.ts`, `src/cli/host-probes.ts`, `src/engine.ts`, `src/types.ts`, `src/adapters.ts`, `src/pack-targets.ts`, `scripts/certify*.mjs`, `scripts/render-certification-table.mjs`, `scripts/certification-results.json`, README and tests); `packages/iris-mcp-all/src/__tests__/` (`story-42-9-doc-claims.test.ts`, `doc-set.ts`, the widened `qa-41-7-doc-links.test.ts` and relaxed 39/40/41/42 pins); `extensions/iris-mcp-launcher/src/__tests__/` (real-CLI row, disposition pins); root `README.md`, `CHANGELOG.md`, `.changeset/story-42-9-install-docs-and-client-re-certification.md`, `docs/client-config/`, package READMEs, `tool_support.md`, two `docs/known-bugs-*` files, `_bmad-output/planning-artifacts/prd.md`; a comment in `packages/shared/src/http-client.ts`.
+
+**Review.** 41 findings from four layers: 18 patched (2 medium, 16 low), 23 rejected with reasons (4 false, 19 low), 0 deferred; see the Review Triage Log. The patches: the doctor project-scope hint under the home guard, a certified-live baseline digest test, the IRIS for Health range, the dev-row-only payload pin, tracked-files-only doc set, semver ordering in `formatAgainst`, the VS Code paragraph, comment counts, the case and symlink row titles, minified and empty-object fixtures, a local-scope doctor row, and the mutation lines under Verification.
+
+**Follow-up review recommendation.** `false`: the two medium patches (the doctor hint and the digest pin) were each proven red by a recorded mutation and the affected suites ran green afterwards.
+
+**Verification.** client-config build, `render-certification-table.mjs --check` and `UNARMED pnpm --filter @iris-mcp/client-config test` (42 files, 1,188 tests), lint and type-check clean; `UNARMED pnpm --filter @iris-mcp/all test` 220 files, 5,894 passed, 727 skipped (unarmed live legs); shared 86 files, 2,575 (run before the review patches, which did not touch shared); launcher 32 files, 458 passed, 3 skipped, type-check clean; `gen:pack:check`, `check:provenance`, `gen:listings:check`, `gen:governance-baseline:check` and `validate:prompts` exit 0; `lint_spine.py` 0 findings. No IRIS call, no docker container, no image pulled.
+
+**Residual risks.** The `ipmReadme()` text of the packaging repository (`scripts/lib/release-core.mjs`, Story 42.8 code, redesigned under decision #122) does not yet carry the "fallback only" framing of decision #123. The stale "after the first npm publish" residual-risk sentences live in the generated certification records until the lead's re-run replaces them. The `kilo-code` and `antigravity` roadmap rows, the human-only rows and the four `deferred:` items wait for the burn-down and the lead's post-publish phase.

@@ -34,6 +34,8 @@ const EXPECTED_OWNED: Readonly<Record<string, string[]>> = {
   goose: ["iris-data-mcp", "iris-ops-mcp"],
   kimi: ["iris-ops-mcp"],
   "kimi-code": ["iris-dev-mcp"],
+  pi: ["iris-dev-mcp"],
+  "jetbrains-junie": ["iris-ops-mcp"],
 };
 
 const EXPECTED_FOREIGN: Readonly<Record<string, string[]>> = {
@@ -50,6 +52,8 @@ const EXPECTED_FOREIGN: Readonly<Record<string, string[]>> = {
   goose: ["developer"],
   kimi: ["fetch"],
   "kimi-code": ["playwright"],
+  pi: ["pi-foreign-tool"],
+  "jetbrains-junie": ["Context7"],
 };
 
 function adapterOf(id: string): ClientAdapter {

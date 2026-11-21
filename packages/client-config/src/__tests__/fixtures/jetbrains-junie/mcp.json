@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "iris-ops-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/ops@1"]
+    },
+    "Context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp"],
+      "env": { "ENV_VAR": "value" }
+    }
+  }
+}

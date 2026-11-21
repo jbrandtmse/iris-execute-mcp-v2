@@ -41,6 +41,8 @@ const ADMIN = path.join(REPO_ROOT, "packages", "iris-admin-mcp");
 const PACK = path.join(CLIENT_CONFIG, "skills-pack");
 const DOC_BIN = "packages/client-config/dist/cli/clients-cli.js";
 const BIN = path.join(REPO_ROOT, ...DOC_BIN.split("/"));
+/** The command prefix the README gives since Story 42.9: the published package through npx, the `-p` form naming the bin. */
+const DOC_COMMAND = "npx -y -p @iris-mcp/client-config@1 iris-mcp-clients";
 
 interface PackTarget {
   id: string;
@@ -175,7 +177,12 @@ describe("the root README's `### The skills pack` section: what the pack holds",
     const expected = targets.PACK_ROUTE_IDS.map((routeId) => {
       const route = targets.PACK_ROUTES[routeId] as PackRoute;
       const clients = targets.PACK_TARGETS.filter((target) => target.route === routeId);
-      const label = clients.length === 1 ? (clients[0] as PackTarget).displayName : "Every other client";
+      const label =
+        clients.length === 1
+          ? (clients[0] as PackTarget).displayName
+          : routeId === "agents"
+            ? "Every other client"
+            : clients.map((target) => target.displayName).join(" and ");
       const ids = clients.map((target) => `\`${target.id}\``).join(", ");
       const rule =
         route.rule.kind === "block"
@@ -214,11 +221,11 @@ describe("the root README's `### The skills pack` section: what the pack holds",
 describe("the root README's documented commands run", () => {
   const section = (): string => skillsPackSection(read("README.md"));
 
-  it("lists the six commands, each a built-bin invocation of `skills`", () => {
+  it("lists the six commands, each an npx invocation of the published bin's `skills` command", () => {
     const block = /```bash\n([\s\S]*?)```/.exec(section())?.[1] ?? "";
     const lines = block.split("\n").filter((line) => line.trim() !== "");
     expect(lines).toHaveLength(6);
-    for (const line of lines) expect(line.startsWith(`node ${DOC_BIN} skills `), line).toBe(true);
+    for (const line of lines) expect(line.startsWith(`${DOC_COMMAND} skills `), line).toBe(true);
   });
 
   it("each command uses only flags of the bin's usage line and a routed client, and runs as a dry run that writes nothing", () => {
@@ -233,11 +240,11 @@ describe("the root README's documented commands run", () => {
     for (const line of block.split("\n").filter((entry) => entry.trim() !== "")) {
       for (const flag of flagsIn(line)) expect(allowed.has(flag), `${flag} in "${line}" is not a flag of the bin`).toBe(true);
       const words = line.trim().split(/\s+/);
-      expect(words[1]).toBe(DOC_BIN);
-      expect(["install", "uninstall"], line).toContain(words[3]);
+      expect(words.slice(0, 5).join(" ")).toBe(DOC_COMMAND);
+      expect(["install", "uninstall"], line).toContain(words[6]);
       expect(routed, `--client in "${line}"`).toContain(words[words.indexOf("--client") + 1]);
 
-      const args = words.slice(2);
+      const args = words.slice(5);
       const at = args.indexOf("--project");
       expect(at, `--project in "${line}"`).toBeGreaterThan(-1);
       args[at + 1] = project;
@@ -269,7 +276,7 @@ describe("the root README's known limits", () => {
   const section = (): string => skillsPackSection(read("README.md"));
 
   it("`--scope user` is refused by the bin", () => {
-    expect(section()).toContain("- Project scope only: `--scope user` is refused.");
+    expect(section()).toContain("- Project scope only: `--scope user` is refused, and so is a project directory that is your home directory (`--project ~`, or a run from `~`).");
     const own = ownProject("scope-user-refused");
     const run = runBin(["skills", "install", "--client", "codex", "--scope", "user", "--yes"], own);
     expect(run.status).toBe(2);

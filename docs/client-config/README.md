@@ -5,9 +5,9 @@ How to point any MCP client at the IRIS MCP Server Suite, plus the two credentia
 > **The fast path is the manager (Epic 33):** `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients`
 > detects your installed clients (`detect`), previews the exact edit (`diff`), writes it through the
 > backup-on-write engine (`apply`), toggles entries (`enable`/`disable`/`remove`), rolls back
-> (`restore`), and diagnoses the result (`doctor`). *(Not yet published to npm — until then run the
-> built bin directly: `node packages/client-config/dist/cli/clients-cli.js …` from a repo checkout.)*
-> The per-client snippets below are the **manual
+> (`restore`), and diagnoses the result (`doctor`). The same command is the 1.0.x route for every
+> client; from 1.1.0, Claude Code has a plugin and VS Code has an extension (see the
+> [suite README](../../README.md#quick-start)). The per-client snippets below are the **manual
 > fallback** — and the reference for what the manager writes. Per-client adapter details and
 > certification dispositions: [packages/client-config README](../../packages/client-config/README.md).
 >
@@ -15,9 +15,11 @@ How to point any MCP client at the IRIS MCP Server Suite, plus the two credentia
 > [VS Code extension](../../extensions/iris-mcp-launcher/README.md#mcp-clients-view) — client roster,
 > per-server toggles, diff preview, backup restore and doctor, all through the identical CLI code path.
 > It helps every client, not just Copilot: use it from VS Code to wire up Claude Code, Cursor, Cline, and
-> the rest. Install it [in development mode](../../extensions/iris-mcp-launcher/README.md#installing-in-development-mode).
+> the rest. Install it from the Visual Studio Marketplace or Open VSX (from 1.1.0); see [the extension's README](../../extensions/iris-mcp-launcher/README.md).
 
 Detailed per-client guides: **[Claude Code](claude-code.md)** · **[Claude Desktop](claude-desktop.md)** · **[Cursor](cursor.md)**. Everything else is covered below.
+
+Every guide has one install path: `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply --client <id> --servers iris-dev-mcp`, then `skills install --client <id>` for the [skills pack](../../README.md#the-skills-pack).
 
 ---
 
@@ -78,14 +80,18 @@ golden round-trips proven; the real client's config surface not yet hands-verifi
 | ⚠️ Claude Desktop | JSON | `mcpServers` | Win `%APPDATA%\Claude\claude_desktop_config.json`; mac `~/Library/Application Support/Claude/…` | — | stash |
 | ⚠️ Cursor | JSON | `mcpServers` | `~/.cursor/mcp.json` | `.cursor/mcp.json` | stash |
 | ⚠️ Codex CLI | **TOML** | `[mcp_servers.<name>]` | `~/.codex/config.toml` | `.codex/config.toml` | native `enabled` flag (docs-verified) |
-| ⚠️ Kimi CLI | JSON | `mcpServers` | `~/.kimi/mcp.json` (`--mcp-config-file` override) | — | stash |
-| ⚠️ Roo Code | JSON | `mcpServers` | ext-storage `mcp_settings.json` | `.roo/mcp.json` | native `disabled` |
-| ⚠️ Windsurf | JSON | `mcpServers` | `~/.codeium/windsurf/mcp_config.json` | — | stash |
+| ⚠️ Kimi CLI (archived) | JSON | `mcpServers` | `~/.kimi/mcp.json` (`--mcp-config-file` override) | — | stash |
+| ⚠️ Roo Code (discontinued) | JSON | `mcpServers` | ext-storage `mcp_settings.json` | `.roo/mcp.json` | native `disabled` |
+| ⚠️ Devin Desktop (formerly Windsurf) | JSON | `mcpServers` | `~/.codeium/windsurf/mcp_config.json` | — | stash |
 | ⚠️ Gemini CLI | JSON | `mcpServers` | `~/.gemini/settings.json` | `.gemini/settings.json` | stash |
 | ⚠️ Zed | JSON | `context_servers` | `~/.config/zed/settings.json` / `%APPDATA%\zed\settings.json` | `.zed/settings.json` | stash |
-| ⚠️ Goose | **YAML** | `extensions` | `~/.config/goose/config.yaml` / `%APPDATA%\goose\config.yaml` | — | native `enabled` |
+| ⚠️ Goose | **YAML** | `extensions` | `~/.config/goose/config.yaml` / `%APPDATA%\Block\goose\config\config.yaml` | — | native `enabled` |
+| ⚠️ Pi | JSON | `mcpServers` | `~/.pi/agent/mcp.json` (or `$PI_CODING_AGENT_DIR`) | `.pi/mcp.json` | stash |
+| ⚠️ JetBrains Junie | JSON | `mcpServers` | `~/.junie/mcp/mcp.json` | `.junie/mcp/mcp.json` | stash |
 
-Three formats and three root keys — `mcpServers`, `servers`, `context_servers`, `extensions` — is exactly why Epic 33 builds a config manager instead of documenting copy-paste forever.
+Clients on the roadmap, not yet supported by the manager: Kilo Code (its entries need an OpenCode-style shape the engine does not model) and Antigravity CLI (its `~/.gemini` folder is also Gemini CLI's). The `human-only` rows of the [certification table](../../packages/client-config/README.md#certification-dispositions-generated) name the checks that only a person at the client can make.
+
+Three formats and four root keys — `mcpServers`, `servers`, `context_servers`, `extensions` — is exactly why Epic 33 builds a config manager instead of documenting copy-paste forever.
 
 ---
 
@@ -118,7 +124,7 @@ IRIS_SERVER_MANAGER=auto
 IRIS_SM_WORKSPACE=/path/to/your/workspace
 ```
 
-> **`@iris-mcp/*` is not yet published to npm.** `npx -y @iris-mcp/dev@1` will fail. Until publication, point clients at a local build: `node /path/to/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js`. Every snippet below uses the local form; swap in `npx -y @iris-mcp/dev@1` once published.
+> **Entry form.** Every snippet below launches a server with `npx -y @iris-mcp/dev@1` (Node.js 22.17 or later). The five servers are `@iris-mcp/dev`, `admin`, `data`, `interop` and `ops`, each pinned to major version 1; add one entry per server.
 
 ---
 
@@ -129,7 +135,7 @@ Preferred — the CLI writes the config for you:
 ```bash
 claude mcp add iris-dev -e IRIS_HOST=localhost -e IRIS_PORT=52773 \
   -e IRIS_USERNAME=_SYSTEM -e IRIS_PASSWORD=secret -e IRIS_NAMESPACE=USER \
-  -- node /path/to/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js
+  -- npx -y @iris-mcp/dev@1
 ```
 
 Or edit `~/.claude.json` (root-level `mcpServers` = user scope; see [claude-code.md](claude-code.md)):
@@ -137,13 +143,13 @@ Or edit `~/.claude.json` (root-level `mcpServers` = user scope; see [claude-code
 ```jsonc
 "mcpServers": {
   "iris-dev-mcp": {
-    "command": "node",
-    "args": ["c:/git/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js"],
+    "command": "npx",
+    "args": ["-y", "@iris-mcp/dev@1"],
     "env": {
       "IRIS_HOST": "localhost", "IRIS_PORT": "52773", "IRIS_HTTPS": "false",
       "IRIS_USERNAME": "_SYSTEM", "IRIS_PASSWORD": "secret", "IRIS_NAMESPACE": "USER",
       "IRIS_SERVER_MANAGER": "auto",
-      "IRIS_SM_WORKSPACE": "c:/git/iris-execute-mcp-v2"
+      "IRIS_SM_WORKSPACE": "c:/git/my-project"
     }
   }
 }
@@ -163,8 +169,8 @@ Restart Claude Code to pick up changes. Verify with `claude mcp list`.
   "servers": {
     "iris-dev": {
       "type": "stdio",
-      "command": "node",
-      "args": ["c:/git/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost", "IRIS_PORT": "52773", "IRIS_HTTPS": "false",
         "IRIS_USERNAME": "_SYSTEM", "IRIS_PASSWORD": "${input:iris-password}",
@@ -186,8 +192,8 @@ Edit via Cline's MCP Servers pane, or the file directly. Root key `mcpServers`; 
   "mcpServers": {
     "iris-dev-mcp": {
       "type": "stdio",
-      "command": "node",
-      "args": ["c:/git/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost", "IRIS_PORT": "52773", "IRIS_HTTPS": "false",
         "IRIS_USERNAME": "_SYSTEM", "IRIS_PASSWORD": "secret", "IRIS_NAMESPACE": "USER"
@@ -214,8 +220,8 @@ values or OS-environment injection.
 {
   "mcpServers": {
     "iris-dev-mcp": {
-      "command": "node",
-      "args": ["c:/git/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost", "IRIS_PORT": "52773", "IRIS_HTTPS": "false",
         "IRIS_USERNAME": "_SYSTEM", "IRIS_PASSWORD": "secret", "IRIS_NAMESPACE": "USER"
@@ -231,8 +237,8 @@ values or OS-environment injection.
 
 ```toml
 [mcp_servers.iris-dev]
-command = "node"
-args = ["/path/to/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js"]
+command = "npx"
+args = ["-y", "@iris-mcp/dev@1"]
 
 [mcp_servers.iris-dev.env]
 IRIS_HOST = "localhost"
@@ -252,7 +258,7 @@ To share ONE governance policy file across clients, add it to the same env table
 IRIS_GOVERNANCE_FILE = "C:\\governance\\iris-policy.json"
 ```
 
-Create/maintain the file with `node /path/to/iris-execute-mcp-v2/packages/shared/dist/cli/governance-cli.js` (the `iris-mcp-governance` CLI — see the [suite README](../../README.md#iris-mcp-governance-cli)).
+Create/maintain the file with `npx -y -p @iris-mcp/shared@1 iris-mcp-governance` (the `iris-mcp-governance` CLI — see the [suite README](../../README.md#iris-mcp-governance-cli)).
 
 ## Kimi CLI ⚠️
 
@@ -266,7 +272,7 @@ Root key is **`context_servers`**, inside Zed's main settings file:
 {
   "context_servers": {
     "iris-dev": {
-      "command": { "path": "node", "args": ["/path/to/packages/iris-dev-mcp/dist/index.js"], "env": { "IRIS_HOST": "localhost" } }
+      "command": { "path": "npx", "args": ["-y", "@iris-mcp/dev@1"], "env": { "IRIS_HOST": "localhost" } }
     }
   }
 }
@@ -280,8 +286,8 @@ Root key is **`context_servers`**, inside Zed's main settings file:
 extensions:
   iris-dev:
     type: stdio
-    cmd: node
-    args: ["/path/to/packages/iris-dev-mcp/dist/index.js"]
+    cmd: npx
+    args: ["-y", "@iris-mcp/dev@1"]
     envs:
       IRIS_HOST: localhost
       IRIS_PORT: "52773"
@@ -291,9 +297,14 @@ extensions:
     enabled: true
 ```
 
-## Cursor · Claude Desktop · Windsurf · Gemini CLI · Roo Code ⚠️
+## Cursor · Claude Desktop · Devin Desktop (formerly Windsurf) · Gemini CLI · Roo Code · Pi · JetBrains Junie ⚠️
 
 All use the standard `mcpServers` JSON shape shown in the Claude Code snippet — only the file path differs (see the matrix). Cursor and Claude Desktop have dedicated guides: **[cursor.md](cursor.md)**, **[claude-desktop.md](claude-desktop.md)**.
+
+- **Devin Desktop (formerly Windsurf).** The adapter keeps writing the legacy `~/.codeium/windsurf/mcp_config.json`, which Devin reads through an import that is on by default and that you can switch off; Devin's own files are `~/.config/devin/mcp_config.json` (`%APPDATA%/devin` on Windows) and `.devin/mcp_config.json`.
+- **Pi** reads `~/.pi/agent/mcp.json` (moved by `PI_CODING_AGENT_DIR`) and, once you trust the project, `.pi/mcp.json`.
+- **JetBrains Junie** reads `~/.junie/mcp/mcp.json` and `.junie/mcp/mcp.json`; its documentation names no Windows-specific path.
+- **Roo Code** was discontinued and **Kimi CLI** is archived (Kimi Code replaces it); their adapters stay so existing entries can be found and removed.
 
 ---
 

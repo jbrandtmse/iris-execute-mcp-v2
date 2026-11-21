@@ -87,8 +87,8 @@ describe("Story 42.4: the README IPM subsection", () => {
     expect(section, "the version is the shared semver").toContain("the `@iris-mcp/shared` semver, which is the part of the version marker before the `+`");
   });
 
-  it("says that a package is published from the first release, and that until then the server's bootstrap installs the classes", () => {
-    expect(section).toContain("A package is published to the IPM registry from the first release (`1.0.0`)");
+  it("says that the package is published from 1.1.0, the first release with the IPM channel, and that before then the server's bootstrap installs the classes", () => {
+    expect(section).toContain("The IPM package is published to the IPM registry from 1.1.0, the first release with the IPM channel");
     expect(section).toContain("the server's own bootstrap installs the classes");
   });
 

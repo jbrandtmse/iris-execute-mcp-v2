@@ -57,10 +57,10 @@ const DETECT: DetectData = {
   ],
   dispositions: [
     {
-      id: "pi",
-      displayName: "Pi (pi CLI / pi-coding-agent)",
-      disposition: "excluded-not-mcp-capable",
-      reason: "Verified to have no built-in MCP support by design (minimal four-tool core; external tools via bash or TypeScript extensions). Revisit if Pi ships MCP support.",
+      id: "antigravity",
+      displayName: "Antigravity CLI",
+      disposition: "roadmap",
+      reason: "Documents MCP at ~/.gemini/config/mcp_config.json and .agents/mcp_config.json, but detection would collide with Gemini CLI's ~/.gemini, and no Windows path is documented; verify both before adding an adapter.",
     },
   ],
   counts: { probed: 13, detected: 2, notDetected: 11, dispositioned: 1 },

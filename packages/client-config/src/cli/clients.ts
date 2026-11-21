@@ -58,6 +58,7 @@ import { ADAPTER_DATA_VERSION, CLIENT_ADAPTERS, CLIENT_DISPOSITIONS } from "../a
 import { detectClients } from "../detect.js";
 import { CLAUDE_CODE_PLUGIN_ID, describePluginDetection, detectClaudeCodePlugin } from "../claude-plugin-detect.js";
 import { diff } from "../diff.js";
+import { homeGuardReason, skillsHomeGuardReason } from "../home-guard.js";
 import {
   apply,
   disable,
@@ -90,6 +91,7 @@ import {
 } from "../state.js";
 import { buildStatusMatrix } from "../status.js";
 import {
+  pinnedSpec,
   synthesizeEntry,
   type EnvMode,
   type SynthesisProfile,
@@ -103,7 +105,7 @@ import {
   type ClientScope,
 } from "../types.js";
 import { listBackups, REAL_WRITE_FS, type WriteFs } from "../write.js";
-import { probeGovernanceFile, probeServerManager } from "./host-probes.js";
+import { probeGovernanceFile, probeServerManager, resolvesToHome } from "./host-probes.js";
 
 // ════════════════════════════════════════════════════════════════════
 // CLI dependency injection — production defaults + test seams.
@@ -182,7 +184,9 @@ function hostContext(deps: ResolvedDeps) {
     platform: deps.platform,
     env: deps.env,
     homeDir: deps.homeDir,
-    ...(deps.projectDir !== undefined ? { projectDir: deps.projectDir } : {}),
+    ...(deps.projectDir !== undefined
+      ? { projectDir: deps.projectDir, projectIsHome: resolvesToHome(deps.projectDir, deps.homeDir, deps.platform) }
+      : {}),
     ...(deps.stateDir !== undefined ? { stateDir: deps.stateDir } : {}),
   };
 }
@@ -496,9 +500,11 @@ Commands:
   doctor [--json] [--repair --yes-i-mean-it]
       Diagnose: env-reference resolvability, file parseability, config-surface
       drift (a parseable file whose root key fails the adapter's shape
-      expectations), stale backups, orphaned stashes, and present
+      expectations), stale backups, orphaned stashes, present
       non-canonical entries that fail ownership (re-recorded manager-created
-      by --repair --yes-i-mean-it).
+      by --repair --yes-i-mean-it), and iris-*-mcp entries in Claude Code's
+      user or project scope while the iris-mcp@iris-mcp plugin is enabled
+      (claude-code-plugin-duplicates; the local scope is not read).
   skills install|uninstall --client <id> [--project <dir>] [--dry-run] [--yes] [--include-modified] [--json]
       Install, update or remove the IRIS MCP skills pack and its always-on
       rule in a project, in the client's native locations (--client agents
@@ -863,11 +869,19 @@ async function planApply(
   servers: CanonicalServerName[],
   mode: EnvMode,
   profile: SynthesisProfile,
-): Promise<{ plans: SynthPlan[] } | { exit: number }> {
+): Promise<{ plans: SynthPlan[] } | { exit: number; reason?: string }> {
   const plans: SynthPlan[] = [];
-  const path = resolveScopePath(adapter, scope, hostContext(deps), (p) => deps.fs.exists(p));
+  const ctx = hostContext(deps);
+  const path = resolveScopePath(adapter, scope, ctx, (p) => deps.fs.exists(p));
   if (path === null) {
     return { exit: usageError(deps, `cannot resolve a ${scope}-scope config path for ${adapter.id} (project scope needs to run from a project directory)`, usage) };
+  }
+  if (scope === "project") {
+    const refusal = homeGuardReason(adapter, ctx, (p) => deps.fs.exists(p));
+    if (refusal !== null) {
+      deps.stderr.write(`Error: ${refusal}\n`);
+      return { exit: 1, reason: refusal };
+    }
   }
   let content: string | null = null;
   try {
@@ -1028,7 +1042,7 @@ async function cmdDiff(args: string[], deps: ResolvedDeps): Promise<number> {
 
   const planned = await planApply(parsed, deps, DIFF_USAGE, adapter, scope, servers, mode, profile);
   if ("exit" in planned) {
-    if (wantJson) emitJson(deps, "diff", false, null, `see stderr (exit ${planned.exit})`);
+    if (wantJson) emitJson(deps, "diff", false, null, planned.reason ?? `see stderr (exit ${planned.exit})`);
     return planned.exit;
   }
   const { plans } = planned;
@@ -1106,7 +1120,7 @@ async function cmdApply(args: string[], deps: ResolvedDeps): Promise<number> {
 
   const planned = await planApply(parsed, deps, APPLY_USAGE, adapter, scope, servers, mode, profile);
   if ("exit" in planned) {
-    if (wantJson) emitJson(deps, "apply", false, null, `see stderr (exit ${planned.exit})`);
+    if (wantJson) emitJson(deps, "apply", false, null, planned.reason ?? `see stderr (exit ${planned.exit})`);
     return planned.exit;
   }
   const { plans } = planned;
@@ -1703,6 +1717,42 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
     }
   }
 
+  // Check 6 (Story 42.9, DW-706): an owned iris-*-mcp entry in Claude Code's
+  // user or project scope while the plugin is enabled serves every tool twice.
+  // The local scope (the `projects` map of ~/.claude.json) is not read.
+  const pluginHost = {
+    homeDir: deps.homeDir,
+    projectDir: deps.projectDir ?? deps.homeDir,
+    env: deps.env,
+    platform: deps.platform,
+    readFile: (file: string): string | null => (deps.fs.exists(file) ? deps.fs.readFile(file) : null),
+  };
+  const plugin = detectClaudeCodePlugin(pluginHost);
+  const projectIsHome = deps.projectDir !== undefined && resolvesToHome(deps.projectDir, deps.homeDir, deps.platform);
+  if (plugin.enabled) {
+    const claude = report.clients.find((client) => client.client === "claude-code");
+    for (const scope of claude?.scopes ?? []) {
+      if (scope.file !== "ok" || scope.path === null) continue;
+      for (const server of scope.servers) {
+        if (server.state !== "present-enabled") continue;
+        findings.push({
+          check: "claude-code-plugin-duplicates",
+          client: "claude-code",
+          scope: scope.scope,
+          path: scope.path,
+          entry: server.server,
+          detail:
+            `${server.server} is also served by the Claude Code plugin ${CLAUDE_CODE_PLUGIN_ID.split("@")[0]} ` +
+            `(enabled in ${plugin.decidedBy ?? "a settings file"}): every tool appears twice. ` +
+            (scope.scope === "project" && projectIsHome
+              ? `Remove it: delete the "${server.server}" entry from ${scope.path} by hand, because the CLI refuses a project-scope write from your home directory.`
+              : `Remove it: npx -y -p ${pinnedSpec("@iris-mcp/client-config")} iris-mcp-clients remove ` +
+                `--client claude-code --server ${server.server} --scope ${scope.scope}`),
+        });
+      }
+    }
+  }
+
   // Restart hints: every client with a finding, plus clients with a
   // present-disabled owned entry (a state change pending activation).
   for (const client of report.clients) {
@@ -1862,7 +1912,14 @@ async function cmdSkills(args: string[], deps: ResolvedDeps): Promise<number> {
   const projectOption = parsed.options.get("--project");
   const project = projectOption === undefined ? base : pathApi.resolve(base, projectOption);
 
-  const ctx = { ...hostContext(deps), projectDir: project };
+  if (resolvesToHome(project, deps.homeDir, deps.platform)) {
+    const refusal = skillsHomeGuardReason(target.id, action, project);
+    deps.stderr.write(`Error: ${refusal}\n`);
+    if (wantJson) emitJson(deps, "skills", false, null, refusal);
+    return 1;
+  }
+
+  const ctx = { ...hostContext(deps), projectDir: project, projectIsHome: false };
   // The Claude Code route asks whether the plugin (which brings the skills) is enabled, so that only the rule is installed (DW-625).
   const detection =
     action === "install" && target.id === "claude-code"

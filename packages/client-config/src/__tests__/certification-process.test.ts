@@ -281,6 +281,7 @@ function makePkgSandbox(): { pkg: string; run: (args: string[]) => RunResult; re
   mkdirSync(path.join(pkg, "dist"), { recursive: true });
   cpSync(RENDERER, path.join(pkg, "scripts", "render-certification-table.mjs"));
   cpSync(RESULTS_PATH, path.join(pkg, "scripts", "certification-results.json"));
+  cpSync(path.join(PACKAGE_ROOT, "scripts", "certify-record.mjs"), path.join(pkg, "scripts", "certify-record.mjs"));
   cpSync(path.join(PACKAGE_ROOT, "dist", "adapters.js"), path.join(pkg, "dist", "adapters.js"));
   cpSync(path.join(PACKAGE_ROOT, "dist", "pack-targets.js"), path.join(pkg, "dist", "pack-targets.js"));
   cpSync(path.join(PACKAGE_ROOT, "skills-pack", "rules"), path.join(pkg, "skills-pack", "rules"), { recursive: true });
@@ -475,7 +476,7 @@ describe("Story 41.7: the PACK-TARGETS-TABLE section of the README is generated 
     expect(twice.stderr).toContain('duplicate id "pi"');
   }, T);
 
-  it("the roster guard refuses a roster of 16 rows, and a routed row whose route has no entry (exit 2)", () => {
+  it("the roster guard refuses a roster of 17 rows, and a routed row whose route has no entry (exit 2)", () => {
     const short = makePkgSandbox();
     const shortDist = path.join(short.pkg, "dist", "pack-targets.js");
     const shortSource = readFileSync(shortDist, "utf8");
@@ -487,7 +488,7 @@ describe("Story 41.7: the PACK-TARGETS-TABLE section of the README is generated 
     );
     const missing = short.run(["--check"]);
     expect(missing.status).toBe(2);
-    expect(missing.stderr).toContain("PACK_TARGETS has 16 rows, expected 17");
+    expect(missing.stderr).toContain("PACK_TARGETS has 17 rows, expected 18");
 
     const unrouted = makePkgSandbox();
     const unroutedDist = path.join(unrouted.pkg, "dist", "pack-targets.js");
@@ -670,7 +671,7 @@ describe("QA 33.4: certify.mjs writes nothing without the full explicit pass", (
     expect(treeEntries(home)).toEqual([]);
   }, T);
 
-  it("33-5-17: the usage roster is derived from CLIENT_ADAPTERS (the full 13, never a hand-mirrored subset)", async () => {
+  it("33-5-17: the usage roster is derived from CLIENT_ADAPTERS (every adapter, never a hand-mirrored subset)", async () => {
     const { CLIENT_ADAPTERS } = await import("../adapters.js");
     const result = runCertify([]);
     expect(result.status).toBe(0);

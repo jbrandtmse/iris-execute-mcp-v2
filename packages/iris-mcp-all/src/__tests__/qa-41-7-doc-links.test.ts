@@ -1,50 +1,22 @@
 /**
- * Story 41.7 QA - every relative link and anchor in the documents this story changed resolves (project rules #56 and #59).
+ * Every relative link and anchor in every reader document resolves (project rules #56 and #59; Story 41.7 QA, widened by Story 42.9, DW-632).
  *
- * `story-41-7-doc-claims.test.ts` pins the links the story ADDED (the `#the-skills-pack` links, the client-config
- * anchors, the catalog and the pointer). It does not pin the links the story relies on that already existed: the root
- * README's four links to `#workflow-prompts--agent-skills` (the spec says "keep that heading") are checked by no other
- * test, so renaming that heading breaks four links and every suite stays green. This file closes that class: for each
- * document in the list below, every `[text](target)` with a relative target must name an existing file or directory, and
- * a `#anchor` into a Markdown file must equal the GitHub-style slug of one of that file's headings.
+ * `story-41-7-doc-claims.test.ts` pins the links that story ADDED. It does not pin the links the documents rely on that already
+ * existed, so renaming a heading breaks every link to it and every suite stays green. This file closes that class: for each reader
+ * document (`doc-set.ts`: every tracked or untracked-but-not-ignored `*.md` file outside the planning, agent and IRIS-source
+ * folders, 83 files as of 2026-11-21), every `[text](target)` with a relative target must name an existing file or directory, and a
+ * `#anchor` into a Markdown file must equal the GitHub-style slug of one of that file's headings. There are no known-broken entries.
  *
- * The list is exhaustive as of 2026-10-19: the documents in `git diff --name-only 49244c3..4046924` (Story 41.7's
- * baseline to its build commit) that are Markdown and carry a relative link. The other changed Markdown files carry none
- * (the generated catalog `packages/client-config/skills-pack/README.md` and the changeset). A document that a later story
- * changes, and that carries relative links, is added here by that story.
- *
- * The checker is pure (text in, problems out) and has its own rows below that make it fail on a broken file link and on a
- * broken anchor, so a green run means the checker could see a problem and found none. Reads files only; needs no IRIS.
+ * The checker is pure (text in, problems out) and has its own rows below that make it fail on a broken file link, on a broken
+ * anchor and on a percent sign that is not an escape, so a green run means the checker could see a problem and found none. Reads
+ * files only; needs no IRIS.
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readerDocs } from "./doc-set";
 import { markdownHeadingSlugs, REPO_ROOT } from "./pack-fixture";
-
-/** The documents Story 41.7 changed, relative to the repository root. */
-const CHANGED_DOCS = [
-  "README.md",
-  "tool_support.md",
-  "CHANGELOG.md",
-  "skills/README.md",
-  "packages/client-config/README.md",
-  "packages/iris-admin-mcp/README.md",
-  "packages/iris-dev-mcp/README.md",
-  "packages/iris-interop-mcp/README.md",
-  "packages/iris-ops-mcp/README.md",
-  // Story 43.4 added the protocol-revision sections, which link to each other and to the root README.
-  "docs/client-config/README.md",
-  "docs/client-config/claude-code.md",
-] as const;
-
-/**
- * Broken links that a deferred-work entry owns, by document. The row of a document fails when one of these is fixed, so an entry cannot
- * outlive its defect. DW-631 (routed to Story 42.9): the anchor of the em-dash heading is `#read-only-mode--point-...`, with two hyphens.
- */
-const KNOWN_BROKEN: Record<string, string[]> = {
-  "docs/client-config/claude-code.md": ["../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable"],
-};
 
 interface LinkProblem {
   line: number;
@@ -60,6 +32,15 @@ function slugsOfFile(file: string): Set<string> {
     slugCache.set(file, slugs);
   }
   return slugs;
+}
+
+/** A link's path with its percent escapes decoded; a percent sign that is not an escape (`%SYS`) stays as written. */
+function decodedPath(filePart: string): string {
+  try {
+    return decodeURIComponent(filePart);
+  } catch {
+    return filePart;
+  }
 }
 
 /** Every relative `[text](target)` of `text` (a document at `file`) that names nothing real. */
@@ -78,7 +59,7 @@ function brokenLinks(text: string, file: string, slugsFor: (target: string) => S
       const hash = target.indexOf("#");
       const filePart = hash < 0 ? target : target.slice(0, hash);
       const anchor = hash < 0 ? "" : target.slice(hash + 1);
-      const resolved = filePart === "" ? file : path.resolve(path.dirname(file), decodeURIComponent(filePart));
+      const resolved = filePart === "" ? file : path.resolve(path.dirname(file), decodedPath(filePart));
       let problem: string | null = null;
       if (!existsSync(resolved)) problem = "no such file or directory";
       else if (anchor !== "") {
@@ -96,7 +77,7 @@ function checkDoc(rel: string): { problems: LinkProblem[]; checked: number } {
   return brokenLinks(readFileSync(file, "utf8"), file, slugsOfFile);
 }
 
-describe("the documents Story 41.7 changed: every relative link and anchor resolves", () => {
+describe("every reader document: every relative link and anchor resolves", () => {
   it("the checker sees a missing file and a missing anchor (it can fail)", () => {
     const here = path.join(REPO_ROOT, "README.md");
     const text = [
@@ -116,19 +97,34 @@ describe("the documents Story 41.7 changed: every relative link and anchor resol
     ).toBe(true);
   });
 
-  for (const rel of CHANGED_DOCS) {
+  it("the checker keeps a percent sign that is not an escape, and finds the file it names", () => {
+    const here = path.join(REPO_ROOT, "README.md");
+    const { problems, checked } = brokenLinks("[a](irissys/%SYS/no-such.cls) [b](docs/client-config/README.md)", here, slugsOfFile);
+    expect(checked).toBe(2);
+    expect(problems.map((problem) => problem.target)).toEqual(["irissys/%SYS/no-such.cls"]);
+  });
+
+  const docs = readerDocs();
+
+  it("the doc set holds the documents this story widened to", () => {
+    expect(docs.length).toBeGreaterThanOrEqual(83);
+    for (const rel of ["README.md", "tool_support.md", "docs/client-config/claude-code.md", "packages/shared/README.md", "docs/known-bugs-2026-04-20.md"]) {
+      expect(docs, rel).toContain(rel);
+    }
+  });
+
+  it("the doc set has relative links to check", () => {
+    const total = docs.reduce((sum, rel) => sum + checkDoc(rel).checked, 0);
+    expect(total).toBeGreaterThan(100);
+  });
+
+  for (const rel of docs) {
     it(`${rel}: no relative link is broken`, () => {
-      const { problems, checked } = checkDoc(rel);
-      const known = KNOWN_BROKEN[rel] ?? [];
-      expect(checked, `${rel} has relative links to check`).toBeGreaterThan(0);
+      const { problems } = checkDoc(rel);
       expect(
-        problems.filter((problem) => !known.includes(problem.target)).map((problem) => `${rel}:${problem.line} (${problem.target}) ${problem.problem}`),
+        problems.map((problem) => `${rel}:${problem.line} (${problem.target}) ${problem.problem}`),
         "broken links",
       ).toEqual([]);
-      expect(
-        problems.filter((problem) => known.includes(problem.target)).map((problem) => problem.target).sort(),
-        "the known broken links are still broken; remove an entry of KNOWN_BROKEN once its link is fixed",
-      ).toEqual([...known].sort());
     });
   }
 });

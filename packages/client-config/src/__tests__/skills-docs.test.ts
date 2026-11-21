@@ -206,19 +206,18 @@ describe("the README's Known limits hold on the built bin", () => {
     expect(run.stdout).toMatch(ruleLine);
   }, T);
 
-  it("`--project` is not compared with the home directory: the home, named or as cwd, is planned like a project", () => {
-    expect(knownLimits()).toContain(
-      "`--project` is not compared with your home directory: `--project ~`, or a run from `~`, installs the rule where every project's session loads it.",
-    );
+  it("`--project` is compared with the home directory: the home, named or as cwd, is refused and nothing is written", () => {
+    expect(README).toContain("- **Never the home directory.**");
+    expect(knownLimits()).not.toContain("is not compared with your home directory");
     const sandbox = makeSandbox();
     const before = lstatTree(sandbox.root);
     const named = runBin(sandbox, ["skills", "install", "--client", "claude-code", "--project", sandbox.home, "--dry-run"]);
-    expect(named.status, `${named.stdout}${named.stderr}`).toBe(0);
-    expect(named.stdout).toMatch(ruleLine);
+    expect(named.status, `${named.stdout}${named.stderr}`).toBe(1);
+    expect(named.stderr).toContain("is your home directory");
     const fromHome = runBin(sandbox, ["skills", "install", "--client", "claude-code", "--dry-run"], { cwd: sandbox.home });
-    expect(fromHome.status, `${fromHome.stdout}${fromHome.stderr}`).toBe(0);
-    expect(fromHome.stdout).toMatch(ruleLine);
-    expect(treeDiff(before, lstatTree(sandbox.root)), "the dry runs wrote nothing").toEqual([]);
+    expect(fromHome.status, `${fromHome.stdout}${fromHome.stderr}`).toBe(1);
+    expect(fromHome.stderr).toContain("is your home directory");
+    expect(treeDiff(before, lstatTree(sandbox.root)), "the refusals wrote nothing").toEqual([]);
   }, T);
 
   it("only the project directory is checked for a CLAUDE.md", () => {

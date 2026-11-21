@@ -43,9 +43,9 @@ The subscript is part of **`Name`**, not a property. `Config.MapGlobals` persist
 
 ### Defective lines — [`src/ExecuteMCPv2/REST/Config.cls`](../src/ExecuteMCPv2/REST/Config.cls)
 
-- **Create**, [Config.cls:581](../src/ExecuteMCPv2/REST/Config.cls#L581): `If tBody.%Get("subscript") '= "" Set tProps("Subscript") = tBody.%Get("subscript")` — sets a non-existent property.
-- **Create**, [Config.cls:584](../src/ExecuteMCPv2/REST/Config.cls#L584): `$ClassMethod(tClassName, "Create", tNamespace, tName, .tProps)` — passes the **base** `tName`, not `tName_subscript`.
-- **Delete**, [Config.cls:592](../src/ExecuteMCPv2/REST/Config.cls#L592): `$ClassMethod(tClassName, "Delete", tNamespace, tName)` — passes the **base** `tName`, ignoring `subscript` entirely.
+- **Create**, `Config.cls:581`: `If tBody.%Get("subscript") '= "" Set tProps("Subscript") = tBody.%Get("subscript")` — sets a non-existent property.
+- **Create**, `Config.cls:584`: `$ClassMethod(tClassName, "Create", tNamespace, tName, .tProps)` — passes the **base** `tName`, not `tName_subscript`.
+- **Delete**, `Config.cls:592`: `$ClassMethod(tClassName, "Delete", tNamespace, tName)` — passes the **base** `tName`, ignoring `subscript` entirely.
 
 Why `iris_mapping_list` still renders subscripts correctly (and the manage path doesn't): the `Config.MapGlobals:List` query returns each subscript mapping as its own row whose `Name` column already contains the full `%SYS("HealthShare")`. The list handler reads `tRS.Get("Name")`, so the subscript rides along in the name. The manage path never builds that full name. This is consistent with the reporter's observation that read works but create/delete don't.
 

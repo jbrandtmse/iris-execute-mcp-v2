@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "iris-dev-mcp": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev@1"]
+    },
+    "pi-foreign-tool": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "cwd": "."
+    }
+  }
+}

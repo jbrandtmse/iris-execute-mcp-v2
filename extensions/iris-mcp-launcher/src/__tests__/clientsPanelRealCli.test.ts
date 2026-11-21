@@ -296,7 +296,7 @@ describe("Story 33.3 QA — panel journeys through the REAL built CLI (E2E layer
       // Open: the REAL detection render — roster default-selected, Pi info
       // row, undetected collapsed in <details>, engine transparency line.
       let html = await openPanel(harness);
-      expect(html).toContain("Detected clients (1 of 13)");
+      expect(html).toContain("Detected clients (1 of 15)");
       expect(html).toContain("Claude Code");
       expect(html).not.toContain("not MCP-capable"); // dispositions section removed (2026-07-28 lead decision)
       expect(html).toContain("local build");
@@ -371,7 +371,7 @@ describe("Story 33.3 QA — panel journeys through the REAL built CLI (E2E layer
       // back to the all-detected default, no crash.
       const nonArray = makePanelHarness(makeRealEngineHost(), { roster: "claude-code" });
       let html = await openPanel(nonArray);
-      expect(html).toContain("Detected clients (1 of 13)");
+      expect(html).toContain("Detected clients (1 of 15)");
       expect(html).toContain(`&quot;toggleClient&quot;,&quot;client&quot;:&quot;claude-code&quot;}' checked`);
 
       // (b) A mixed array (numbers, null, empty strings, unknown ids — every

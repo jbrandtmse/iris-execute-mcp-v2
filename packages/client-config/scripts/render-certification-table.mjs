@@ -25,6 +25,8 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { humanOnlyProblem } from "./certify-record.mjs";
+
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const README_PATH = path.join(PACKAGE_ROOT, "README.md");
 const RESULTS_PATH = path.join(PACKAGE_ROOT, "scripts", "certification-results.json");
@@ -43,8 +45,8 @@ const CERT_END = "<!-- CERTIFICATION-TABLE:END -->";
 const PACK_BEGIN = "<!-- PACK-TARGETS-TABLE:BEGIN -->";
 const PACK_END = "<!-- PACK-TARGETS-TABLE:END -->";
 
-/** The number of rows `PACK_TARGETS` holds: the 13 adapters, the 3 dispositions and the generic `agents` row. */
-const EXPECTED_PACK_TARGET_COUNT = 17;
+/** The number of rows `PACK_TARGETS` holds: the 15 adapters, the 2 dispositions (`kilo-code` and `antigravity`) and the generic `agents` row. */
+const EXPECTED_PACK_TARGET_COUNT = 18;
 
 // ────────────────────────────────────────────────────────────────────
 // Roster validation (Rule #56): one record per adapter, no extras.
@@ -70,6 +72,12 @@ for (const id of adapterIds) {
   // a literal "undefined" note (Rule #34 honesty).
   if (!KNOWN_DISPOSITIONS.has(record.disposition)) {
     console.error(`render: ${id} has unknown disposition "${record.disposition}" — refusing to render (a failed certification is resolved by re-running certify.mjs, never by relabeling)`);
+    process.exit(2);
+  }
+  // Story 42.9: the optional human-only marker is validated before anything is rendered from it.
+  const humanOnlyIssue = humanOnlyProblem(record);
+  if (humanOnlyIssue !== null) {
+    console.error(`render: ${id} has a malformed humanOnly marker: ${humanOnlyIssue}`);
     process.exit(2);
   }
   if (record.disposition === "certified-live" && (!record.date || !Array.isArray(record.evidence))) {
@@ -153,8 +161,20 @@ function disableCell(adapter) {
   return "manager stash";
 }
 
+/** The one line a record's `humanOnly` marker renders as, or `null` without a marker. */
+function humanOnlyText(record) {
+  if (record.humanOnly === undefined) return null;
+  return `human-only (marked ${record.humanOnly.markedOn}): ${record.humanOnly.check}`;
+}
+
 function certCell(id) {
   const record = results.clients[id];
+  const base = certBase(record);
+  const human = humanOnlyText(record);
+  return human === null ? base : `${base}<br>${human}`;
+}
+
+function certBase(record) {
   switch (record.disposition) {
     case "certified-live": {
       // 33-5-15 (aa-33-4 #1): the cell carries the file-level-vs-agent-side
@@ -165,9 +185,10 @@ function certCell(id) {
       const agentProbe = (record.evidence ?? []).some(
         (line) => line.startsWith("$ claude mcp list") || line.startsWith("$ kimi -p"),
       );
+      const against = typeof record.against === "string" ? ` against ${record.against}` : "";
       return agentProbe
-        ? `**certified-live** ${record.date} (incl. agent CLI probe)`
-        : `**certified-live** ${record.date} (file-level; agent-side GUI stays manual)`;
+        ? `**certified-live** ${record.date} (incl. agent CLI probe)${against}`
+        : `**certified-live** ${record.date} (file-level; agent-side GUI stays manual)${against}`;
     }
     case "fixture-only-with-residual-risk":
       return "fixture-only (residual risk)";
@@ -225,7 +246,7 @@ function renderCertificationDetails() {
     if (record.disposition === "certified-live") {
       lines.push(
         `**certified-live** (${record.date}, ${record.host}) — scripted pass via \`scripts/certify.mjs\` ` +
-          `(server used: \`${record.server}\`): add (engine apply) → client surfaces the entry → disable → ` +
+          `(server used: \`${record.server}\`${typeof record.against === "string" ? `, against \`${record.against}\`` : ""}): add (engine apply) → client surfaces the entry → disable → ` +
           `entry inactive → remove → byte-exact restore + side-effect cleanup.`,
       );
       lines.push(``);
@@ -250,6 +271,11 @@ function renderCertificationDetails() {
       }
     } else {
       lines.push(`**fixture-only-with-residual-risk** (${record.date}) — ${record.note}`);
+      lines.push(``);
+    }
+    const human = humanOnlyText(record);
+    if (human !== null) {
+      lines.push(`**${human}**`);
       lines.push(``);
     }
   }

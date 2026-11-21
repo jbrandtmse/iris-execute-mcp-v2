@@ -17,9 +17,9 @@
  *     stdout, an unchanged tree, no manifest and no backup.
  *
  * Rows (one per `PACK_TARGETS` row, in that order, plus the completeness row):
- *  - 16 routed legs. Path: the built bin -> `cmdSkills` -> `pack-plan` / `pack-apply` / `rule-block` -> the project tree.
+ *  - 17 routed legs. Path: the built bin -> `cmdSkills` -> `pack-plan` / `pack-apply` / `rule-block` -> the project tree.
  *  - 1 claude-desktop leg. Path: the built bin -> `cmdSkills` -> `usageError` (a null route), before any plan is made.
- *  - the completeness row: 17 unique ids, every route in `PACK_ROUTE_IDS` used, exactly one id with no route.
+ *  - the completeness row: 18 unique ids, every route in `PACK_ROUTE_IDS` used, exactly one id with no route.
  *
  * The oracles do not come from the bin: the route table, constants and refusal text are imported from the package's
  * `src/` modules, the pack bytes are read from disk, and frontmatter is read through the pack generator's own reader. A
@@ -292,12 +292,12 @@ describe("Epic 41 capstone: the skills pack for every client id on the built bin
     SPAWN_TEST_TIMEOUT,
   );
 
-  it("completeness: 17 unique ids, every route used, exactly one id without a route", () => {
+  it("completeness: 18 unique ids, every route used, exactly one id without a route", () => {
     const ids = PACK_TARGETS.map((target) => target.id);
-    expect(ids).toHaveLength(17);
-    expect(new Set(ids).size).toBe(17);
-    expect(FIXTURES, "the 16 host byte shapes, one per routed leg").toHaveLength(16);
-    expect(ROUTED).toHaveLength(16);
+    expect(ids).toHaveLength(18);
+    expect(new Set(ids).size).toBe(18);
+    expect(FIXTURES, "the 16 host byte shapes, which the 17 routed legs rotate through").toHaveLength(16);
+    expect(ROUTED).toHaveLength(17);
     const used = new Set(PACK_TARGETS.map((target) => target.route).filter((route) => route !== null));
     expect([...used].sort()).toEqual([...PACK_ROUTE_IDS].sort());
     expect(PACK_TARGETS.filter((target) => target.route === null).map((target) => target.id)).toEqual(["claude-desktop"]);

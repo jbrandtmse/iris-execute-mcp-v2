@@ -106,13 +106,24 @@ describe("the AC minimum, asserted literally (AC 41.6.1)", () => {
       expect(route.skillsDir, target.id).toBe(".agents/skills");
       expect(route.rule.kind, target.id).toBe("block");
       const host = route.rule.kind === "block" ? route.rule.host : "";
-      expect(host, target.id).toBe(target.id === "gemini" ? "GEMINI.md" : "AGENTS.md");
+      expect(host, target.id).toBe(target.id === "gemini" || target.id === "antigravity" ? "GEMINI.md" : "AGENTS.md");
     }
   });
 
   it("has exactly the four routes", () => {
     expect([...PACK_ROUTE_IDS]).toEqual(["claude-code", "cursor", "gemini", "agents"]);
     expect(Object.keys(PACK_ROUTES).sort()).toEqual([...PACK_ROUTE_IDS].sort());
+  });
+
+  it("puts Antigravity CLI on the gemini route, with the sources read on 2026-11-21", () => {
+    const target = packTargetFor("antigravity");
+    expect(target?.route).toBe("gemini");
+    expect(target?.sources).toContain("https://antigravity.google/docs/customization-discovery/");
+  });
+
+  it("states what Cursor and Copilot read natively (DW-629)", () => {
+    expect(packTargetFor("cursor")?.why).toContain("Cursor reads .agents/skills/ natively");
+    expect(packTargetFor("vscode")?.why).toContain("Copilot's local sessions also read .agents/skills/");
   });
 
   it("sends VS Code / Copilot to the AGENTS.md block, not an applyTo instructions file", () => {
@@ -135,8 +146,9 @@ describe("table data", () => {
   });
 
   it("pins the golden notes", () => {
-    expect(packTargetFor("pi")?.notes).toEqual([
-      "Pi loads project skills only in a trusted project. iris-mcp-clients does not configure MCP for Pi, so add the IRIS MCP servers to Pi yourself before using the workflow skills.",
+    expect(packTargetFor("pi")?.notes).toEqual(["Pi loads project skills only in a trusted project."]);
+    expect(packTargetFor("antigravity")?.notes).toEqual([
+      "iris-mcp-clients does not configure MCP for Antigravity CLI, so add the IRIS MCP servers to Antigravity CLI yourself before using the workflow skills.",
     ]);
     expect(packTargetFor("gemini")?.notes).toEqual([
       "For unpaid-tier and Google One users, Gemini CLI was replaced by Antigravity CLI on 2026-06-18.",

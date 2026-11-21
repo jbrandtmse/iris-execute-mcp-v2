@@ -184,10 +184,10 @@ describe("Story 39.5: the root README names the tool, its default state and the 
     expect(text).toContain("| `allow` | Today's output, unchanged; `iris_message_body` shows each body as stored. |");
   });
 
-  it("the payload table was re-measured at this story or a later one (Story 40.1 re-measured it again)", () => {
-    const match = /Last re-measured at Story (39|40)\.(\d+) \(`pnpm measure:tools-payload`/.exec(squash(readme));
+  it("the payload table was re-measured at this story or a later one (Story 40.1 re-measured it again, and Story 42.9 after that)", () => {
+    const match = /Last re-measured at Story (\d+)\.(\d+) \(`pnpm measure:tools-payload`/.exec(squash(readme));
     expect(match, "the re-measured sentence").not.toBeNull();
-    expect(match?.[1] === "40" || Number(match?.[2]) >= 5).toBe(true);
+    expect(Number(match?.[1]) > 39 || (Number(match?.[1]) === 39 && Number(match?.[2]) >= 5)).toBe(true);
   });
 });
 

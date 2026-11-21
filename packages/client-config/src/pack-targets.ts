@@ -122,7 +122,7 @@ const NO_MCP_FOR = (name: string): string =>
   `iris-mcp-clients does not configure MCP for ${name}, so add the IRIS MCP servers to ${name} yourself before using the workflow skills.`;
 
 /**
- * The 17 rows: the 13 adapters, the 3 dispositions, and `agents`, in that order. Rows are data; the route
+ * The 18 rows: the 15 adapters, the 2 dispositions (`kilo-code` and `antigravity`) and `agents`, in that order. Rows are data; the route
  * table above decides where each one installs.
  */
 export const PACK_TARGETS: readonly PackTarget[] = Object.freeze([
@@ -157,7 +157,7 @@ export const PACK_TARGETS: readonly PackTarget[] = Object.freeze([
     route: "cursor",
     why:
       "Project rules in .cursor/rules/ must be .mdc files with alwaysApply: true to be always included. " +
-      "Cursor also reads .cursor/skills/, .claude/skills/, .codex/skills/, AGENTS.md and CLAUDE.md.",
+      "Cursor reads .agents/skills/ natively. It also reads .cursor/skills/, .claude/skills/, .codex/skills/, AGENTS.md and CLAUDE.md.",
     notes: [
       "Cursor also reads .claude/skills/ and AGENTS.md, so a project that also installs for Claude Code or for an AGENTS.md client shows Cursor each skill, or the rule, twice.",
     ],
@@ -169,8 +169,8 @@ export const PACK_TARGETS: readonly PackTarget[] = Object.freeze([
     route: "agents",
     why:
       "An .instructions.md file with applyTo: attaches only to files the agent creates or modifies, so the rule " +
-      "goes in AGENTS.md at the repository root, which is always applied. VS Code also reads .github/skills/, " +
-      ".claude/skills/, .github/copilot-instructions.md and CLAUDE.md.",
+      "goes in AGENTS.md at the repository root, which is always applied. Copilot's local sessions also read " +
+      ".agents/skills/. VS Code also reads .github/skills/, .claude/skills/, .github/copilot-instructions.md and CLAUDE.md.",
     notes: [
       "VS Code reads the rule from AGENTS.md at the repository root while its chat.useAgentsMdFile setting is on, the default. " +
         ALSO_READS_CLAUDE_SKILLS_TWICE,
@@ -300,10 +300,8 @@ export const PACK_TARGETS: readonly PackTarget[] = Object.freeze([
     route: "agents",
     why:
       "Pi reads .agents/skills/ (trusted project only) and AGENTS.md natively, per folder with AGENTS.md before " +
-      "CLAUDE.md. It also reads .pi/skills/. iris-mcp-clients configures no MCP for it.",
-    notes: [
-      "Pi loads project skills only in a trusted project. " + NO_MCP_FOR("Pi"),
-    ],
+      "CLAUDE.md. It also reads .pi/skills/.",
+    notes: ["Pi loads project skills only in a trusted project."],
     sources: [
       "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/skills.md",
       "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/configuration.md",
@@ -316,11 +314,9 @@ export const PACK_TARGETS: readonly PackTarget[] = Object.freeze([
     route: "agents",
     why:
       "Junie reads .agents/skills/ (trusted project only) and AGENTS.md natively; it ignores AGENTS.md when " +
-      ".junie/AGENTS.md exists or a custom guidelines file is set. It also reads .junie/skills/ and .junie/rules/. " +
-      "iris-mcp-clients configures no MCP for it.",
+      ".junie/AGENTS.md exists or a custom guidelines file is set. It also reads .junie/skills/ and .junie/rules/.",
     notes: [
-      "Junie loads project skills only in a trusted project, and ignores AGENTS.md when .junie/AGENTS.md exists or a custom guidelines file is set. " +
-        NO_MCP_FOR("Junie"),
+      "Junie loads project skills only in a trusted project, and ignores AGENTS.md when .junie/AGENTS.md exists or a custom guidelines file is set.",
     ],
     sources: [
       "https://junie.jetbrains.com/docs/agent-skills.html",
@@ -337,6 +333,16 @@ export const PACK_TARGETS: readonly PackTarget[] = Object.freeze([
     notes: [NO_MCP_FOR("Kilo Code")],
     sources: ["https://kilo.ai/docs/customize/skills", "https://kilo.ai/docs/customize/agents-md"],
     readsAgentsMdBeforeClaudeMd: true,
+  },
+  {
+    id: "antigravity",
+    displayName: displayNameOf("antigravity"),
+    route: "gemini",
+    why:
+      "Antigravity reads .agents/skills/ and, at the repository root, GEMINI.md and AGENTS.md. The gemini route writes " +
+      "the skills to .agents/skills/ and the rule to the marked block in GEMINI.md.",
+    notes: [NO_MCP_FOR("Antigravity CLI")],
+    sources: ["https://antigravity.google/docs/customization-discovery/", "https://antigravity.google/docs/skills"],
   },
   {
     id: GENERIC_AGENTS_TARGET_ID,

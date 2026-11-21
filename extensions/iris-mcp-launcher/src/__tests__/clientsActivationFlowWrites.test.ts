@@ -141,7 +141,7 @@ describe("Story 33.3 QA — MCP Clients write journeys through the REAL extensio
 
     activate(fakeContext(fakeMemento()));
     await theCommand()();
-    let html = await waitForPanel((h) => h.includes("Detected clients (1 of 13)"));
+    let html = await waitForPanel((h) => h.includes("Detected clients (1 of 15)"));
     expect(html).toContain("Claude Code");
 
     // Expand, stage, preview — the real diff render appears; nothing written.
@@ -182,7 +182,7 @@ describe("Story 33.3 QA — MCP Clients write journeys through the REAL extensio
 
     activate(fakeContext(fakeMemento()));
     await theCommand()();
-    await waitForPanel((h) => h.includes("Detected clients (1 of 13)"));
+    await waitForPanel((h) => h.includes("Detected clients (1 of 15)"));
 
     await fireAndWait({ type: "activateClient", client: "claude-code" }, (h) => h.includes("iris-dev-mcp"));
     await fireAndWait({ type: "setMode", client: "claude-code", mode: "explicit" }, (h) =>

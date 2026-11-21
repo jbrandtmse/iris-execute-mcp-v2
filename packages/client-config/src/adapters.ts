@@ -16,7 +16,7 @@ import type { ClientAdapter, ClientDisposition } from "./types.js";
  * adapter record changes; surfaced in `status` output so a drift report
  * always names the data vintage it was computed from (spec §3.7).
  */
-export const ADAPTER_DATA_VERSION = "2026-07-28.1";
+export const ADAPTER_DATA_VERSION = "2026-11-21.1";
 
 /** Shared VS Code user-profile roots (per-OS), under which several
  * VS Code-extension clients (Cline, Roo Code) keep their globalStorage. */
@@ -27,7 +27,7 @@ const VSCODE_USER_ROOT = {
 } as const;
 
 /**
- * The 13 v1 adapters, keyed by id. Order is the spec table's order; every
+ * The adapters, keyed by id: the spec table's 13, then later additions. Every
  * consumer (status matrix, docs, tests) iterates THIS object so counts are
  * mechanical (Rule #51).
  */
@@ -238,7 +238,7 @@ export const CLIENT_ADAPTERS: Readonly<Record<string, ClientAdapter>> = {
 
   "roo-code": {
     id: "roo-code",
-    displayName: "Roo Code",
+    displayName: "Roo Code (discontinued)",
     format: "json",
     rootKey: "mcpServers",
     scopes: [
@@ -279,12 +279,12 @@ export const CLIENT_ADAPTERS: Readonly<Record<string, ClientAdapter>> = {
         },
       },
     ],
-    docsUrl: "https://docs.roocode.com/features/mcp/overview",
+    docsUrl: "https://roocodeinc.github.io/Roo-Code/features/mcp/overview/",
   },
 
   windsurf: {
     id: "windsurf",
-    displayName: "Windsurf",
+    displayName: "Devin Desktop (formerly Windsurf)",
     format: "json",
     rootKey: "mcpServers",
     scopes: [
@@ -309,7 +309,7 @@ export const CLIENT_ADAPTERS: Readonly<Record<string, ClientAdapter>> = {
         paths: { win32: "~/.codeium", darwin: "~/.codeium", linux: "~/.codeium" },
       },
     ],
-    docsUrl: "https://docs.windsurf.com/windsurf/cascade/mcp",
+    docsUrl: "https://docs.devin.ai/desktop/devin-local/customizations",
   },
 
   codex: {
@@ -398,7 +398,7 @@ export const CLIENT_ADAPTERS: Readonly<Record<string, ClientAdapter>> = {
         paths: { win32: "~/.gemini", darwin: "~/.gemini", linux: "~/.gemini" },
       },
     ],
-    docsUrl: "https://google-gemini.github.io/gemini-cli/docs/tools/mcp-server.html",
+    docsUrl: "https://geminicli.com/docs/tools/mcp-server/",
   },
 
   zed: {
@@ -454,7 +454,7 @@ export const CLIENT_ADAPTERS: Readonly<Record<string, ClientAdapter>> = {
       {
         scope: "user",
         paths: {
-          win32: "%APPDATA%/goose/config.yaml",
+          win32: "%APPDATA%/Block/goose/config/config.yaml",
           darwin: "~/.config/goose/config.yaml",
           linux: "~/.config/goose/config.yaml",
         },
@@ -471,18 +471,18 @@ export const CLIENT_ADAPTERS: Readonly<Record<string, ClientAdapter>> = {
       {
         kind: "appDir",
         paths: {
-          win32: "%APPDATA%/goose",
+          win32: "%APPDATA%/Block/goose/config",
           darwin: "~/.config/goose",
           linux: "~/.config/goose",
         },
       },
     ],
-    docsUrl: "https://block.github.io/goose/docs/getting-started/using-extensions",
+    docsUrl: "https://goose-docs.ai/docs/getting-started/using-extensions/",
   },
 
   kimi: {
     id: "kimi",
-    displayName: "Kimi CLI",
+    displayName: "Kimi CLI (archived)",
     format: "json",
     rootKey: "mcpServers",
     scopes: [
@@ -570,6 +570,87 @@ export const CLIENT_ADAPTERS: Readonly<Record<string, ClientAdapter>> = {
     ],
     docsUrl: "https://moonshotai.github.io/kimi-code/",
   },
+
+  pi: {
+    id: "pi",
+    displayName: "Pi (pi CLI / pi-coding-agent)",
+    format: "json",
+    rootKey: "mcpServers",
+    scopes: [
+      {
+        scope: "user",
+        paths: {
+          win32: "~/.pi/agent/mcp.json",
+          darwin: "~/.pi/agent/mcp.json",
+          linux: "~/.pi/agent/mcp.json",
+        },
+        shareable: false,
+        envOverride: { var: "PI_CODING_AGENT_DIR", pathSuffix: "mcp.json" },
+      },
+      {
+        scope: "project",
+        paths: {
+          win32: ".pi/mcp.json",
+          darwin: ".pi/mcp.json",
+          linux: ".pi/mcp.json",
+        },
+        shareable: true,
+      },
+    ],
+    entryShape: "standard",
+    envExpansion: "none",
+    disableSupport: "stash",
+    restartHint: "Run /reload in Pi (or start a new Pi session) for MCP changes to take effect.",
+    detection: [
+      { kind: "config", scope: "user" },
+      { kind: "config", scope: "project" },
+      {
+        kind: "appDir",
+        paths: { win32: "~/.pi", darwin: "~/.pi", linux: "~/.pi" },
+      },
+    ],
+    docsUrl: "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/docs/mcp.md",
+  },
+
+  "jetbrains-junie": {
+    id: "jetbrains-junie",
+    displayName: "JetBrains Junie",
+    format: "json",
+    rootKey: "mcpServers",
+    scopes: [
+      {
+        scope: "user",
+        paths: {
+          win32: "~/.junie/mcp/mcp.json",
+          darwin: "~/.junie/mcp/mcp.json",
+          linux: "~/.junie/mcp/mcp.json",
+        },
+        shareable: false,
+      },
+      {
+        scope: "project",
+        paths: {
+          win32: ".junie/mcp/mcp.json",
+          darwin: ".junie/mcp/mcp.json",
+          linux: ".junie/mcp/mcp.json",
+        },
+        shareable: true,
+      },
+    ],
+    entryShape: "standard",
+    envExpansion: "none",
+    disableSupport: "stash",
+    restartHint: "Restart Junie (or start a new Junie CLI session) for MCP changes to take effect.",
+    detection: [
+      { kind: "config", scope: "user" },
+      { kind: "config", scope: "project" },
+      {
+        kind: "appDir",
+        paths: { win32: "~/.junie", darwin: "~/.junie", linux: "~/.junie" },
+      },
+    ],
+    docsUrl: "https://junie.jetbrains.com/docs/junie-cli-mcp-configuration.html",
+  },
 };
 
 /**
@@ -578,24 +659,17 @@ export const CLIENT_ADAPTERS: Readonly<Record<string, ClientAdapter>> = {
  */
 export const CLIENT_DISPOSITIONS: readonly ClientDisposition[] = [
   {
-    id: "pi",
-    displayName: "Pi (pi CLI / pi-coding-agent)",
-    disposition: "excluded-not-mcp-capable",
-    reason:
-      "Verified to have no built-in MCP support by design (minimal four-tool core; external tools via bash or TypeScript extensions). Revisit if Pi ships MCP support.",
-  },
-  {
-    id: "jetbrains-junie",
-    displayName: "JetBrains AI Assistant / Junie",
-    disposition: "roadmap",
-    reason:
-      "High adoption but config surface not yet verified against official docs; the registry is data-driven, so this is an adapter-data addition + fixture test once verified.",
-  },
-  {
     id: "kilo-code",
     displayName: "Kilo Code",
     disposition: "roadmap",
     reason:
-      "Roo/Cline-lineage fork; likely follows the mcp_settings.json pattern — verify against official docs before adding (never assume).",
+      "Documents MCP (~/.config/kilo/kilo.json[c] or ./kilo.json[c] or ./.kilo/kilo.jsonc, top-level `mcp` key), but its entries use an OpenCode-style shape (type \"local\", `command` as an array, `environment`, `enabled`) that the engine does not model yet; supporting it needs a new entry shape, not an adapter-data patch.",
+  },
+  {
+    id: "antigravity",
+    displayName: "Antigravity CLI",
+    disposition: "roadmap",
+    reason:
+      "Documents MCP at ~/.gemini/config/mcp_config.json and .agents/mcp_config.json, but detection would collide with Gemini CLI's ~/.gemini, and no Windows path is documented; verify both before adding an adapter.",
   },
 ];

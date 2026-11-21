@@ -3,10 +3,13 @@
 > **Superseded by the manager (Epic 33):** the fastest, safest way to wire Claude Code is
 > `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply --client claude-code --servers iris-dev-mcp`
 > — it previews the exact diff, writes through the backup-on-write engine, and `iris-mcp-clients doctor`
-> verifies the result. *(Not yet published to npm — until then: `node packages/client-config/dist/cli/clients-cli.js apply …`.)*
-> This page remains as the **manual fallback** (and as the reference for what the
+> verifies the result. This page remains as the **manual fallback** (and as the reference for what the
 > manager writes). Claude Code's adapter is **certified-live** (2026-07-28) — see the
 > [certification table](../../packages/client-config/README.md#certification-dispositions-generated).
+>
+> **Skills pack:** `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients skills install --client claude-code` installs the IRIS MCP skills and the always-on ObjectScript rule into a project (see [The skills pack](../../README.md#the-skills-pack)).
+>
+> **Plugin (from 1.1.0):** Claude Code can also install the suite as a plugin (`/plugin marketplace add jbrandtmse/iris-execute-mcp-v2`, then `/plugin install iris-mcp@iris-mcp`); remove any `iris-*-mcp` entries first, or every tool appears twice (see the [suite README](../../README.md#claude-code-the-plugin-from-110)).
 
 Connect the IRIS MCP Server Suite to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) -- both the CLI and the VS Code extension.
 
@@ -33,7 +36,7 @@ All five servers share the same environment variables:
 |----------|----------|---------|-------------|
 | `IRIS_HOST` | No | `localhost` | IRIS hostname or IP address |
 | `IRIS_PORT` | No | `52773` | IRIS web server port (not the SuperServer port 1972) |
-| `IRIS_USERNAME` | No | `_SYSTEM` | IRIS username |
+| `IRIS_USERNAME` | **Yes** | -- | IRIS username (there is no default) |
 | `IRIS_PASSWORD` | **Yes** | -- | IRIS password |
 | `IRIS_NAMESPACE` | No | `USER` | Default IRIS namespace |
 | `IRIS_HTTPS` | No | `false` | Set to `true` to connect over HTTPS |
@@ -210,8 +213,8 @@ Instead of inlining `IRIS_GOVERNANCE` JSON per client, point every client at ONE
 {
   "mcpServers": {
     "iris-dev-mcp": {
-      "command": "node",
-      "args": ["/path/to/iris-execute-mcp-v2/packages/iris-dev-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
         "IRIS_HOST": "localhost",
         "IRIS_PORT": "52773",
@@ -228,8 +231,8 @@ Instead of inlining `IRIS_GOVERNANCE` JSON per client, point every client at ONE
 Create and maintain the file with the `iris-mcp-governance` CLI (same engine the servers enforce with — what you write is what they compute):
 
 ```bash
-node /path/to/iris-execute-mcp-v2/packages/shared/dist/cli/governance-cli.js set iris_doc_put false --file C:\governance\iris-policy.json
-node /path/to/iris-execute-mcp-v2/packages/shared/dist/cli/governance-cli.js effective --file C:\governance\iris-policy.json
+npx -y -p @iris-mcp/shared@1 iris-mcp-governance set iris_doc_put false --file C:\governance\iris-policy.json
+npx -y -p @iris-mcp/shared@1 iris-mcp-governance effective --file C:\governance\iris-policy.json
 ```
 
 The file's layers sit strictly BELOW any `IRIS_GOVERNANCE` env value in the cascade, and the file is read once at server startup — restart the client/server after editing. See [Governance file](../../README.md#governance-file-iris_governance_file) in the suite README for the full model.
@@ -246,7 +249,7 @@ If you already curate IRIS connections in the [InterSystems Server Manager](http
    npx -y -p @iris-mcp/shared@1 iris-mcp-credentials set myserver
    ```
 
-   > **Pre-release:** the suite is not published to npm yet, so the `npx` form above will not resolve today. Until it is, run the built bin directly from a clone: `node /path/to/iris-execute-mcp-v2/packages/shared/dist/cli/credentials-cli.js set myserver`. (`-p` is required in the `npx` form because the bin name differs from the package name.)
+   > The `-p` is required in the `npx` form because the bin name differs from the package name.
 
 2. Set `IRIS_SERVER_MANAGER` to `auto` in the server's `env` block:
 
@@ -303,7 +306,7 @@ Point a server at production in **read-only mode** with one environment variable
 }
 ```
 
-All five are **optional** and apply to every server the same way (`IRIS_GOVERNANCE_PRESET` is framework configuration, not a tool; the four `IRIS_SQL_*` variables govern the SQL tools `iris_sql_execute` and `iris_sql_query`, which ship on `@iris-mcp/dev`). Under the read-only preset `iris_sql_execute` is blocked, so run queries through `iris_sql_query`: a read tool, enabled by default, that stays available. See the [suite README](../../README.md#read-only-mode-point-it-at-production-with-one-environment-variable) for the full model.
+All five are **optional** and apply to every server the same way (`IRIS_GOVERNANCE_PRESET` is framework configuration, not a tool; the four `IRIS_SQL_*` variables govern the SQL tools `iris_sql_execute` and `iris_sql_query`, which ship on `@iris-mcp/dev`). Under the read-only preset `iris_sql_execute` is blocked, so run queries through `iris_sql_query`: a read tool, enabled by default, that stays available. See the [suite README](../../README.md#read-only-mode--point-it-at-production-with-one-environment-variable) for the full model.
 
 ---
 

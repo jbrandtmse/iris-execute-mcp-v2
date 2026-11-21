@@ -138,10 +138,11 @@ describe("the plugin in the documents (AC 42.8.2)", () => {
 });
 
 describe("the CHANGELOG and the changeset (Rule #43)", () => {
-  it("the CHANGELOG has this story's section first, above 42.7's", () => {
+  it("the CHANGELOG has this story's section directly below Story 42.9's and above 42.7's", () => {
     const headings = CHANGELOG.split("\n").filter((line) => line.startsWith("## "));
-    expect(headings[0]).toBe("## [Unreleased] \u2014 Story 42.8: Claude Code Plugin and Registry Listings");
-    expect(headings[1]).toBe("## [Unreleased] \u2014 Story 42.7: VS Code Extension Publish");
+    expect(headings[0]).toBe("## [Unreleased] \u2014 Story 42.9: Install Docs and Client Re-Certification");
+    expect(headings[1]).toBe("## [Unreleased] \u2014 Story 42.8: Claude Code Plugin and Registry Listings");
+    expect(headings[2]).toBe("## [Unreleased] \u2014 Story 42.7: VS Code Extension Publish");
   });
 
   it("the CHANGELOG section states that nothing moves: the frozen baseline hash and count, and BOOTSTRAP_VERSION", () => {

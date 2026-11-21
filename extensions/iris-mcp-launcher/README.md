@@ -5,7 +5,7 @@ Model Context Protocol server registry, resolving IRIS connection credentials fr
 [InterSystems Server Manager](https://marketplace.visualstudio.com/items?itemName=intersystems-community.servermanager)
 extension at spawn time — **zero manual config, no password ever written to a file.**
 
-> **Install it from a store.** The extension is published on the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=iris-mcp.iris-mcp-launcher)
+> **Install it from a store (from 1.1.0).** From 1.1.0 the extension is published on the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=iris-mcp.iris-mcp-launcher)
 > and on [Open VSX](https://open-vsx.org/extension/iris-mcp/iris-mcp-launcher) as `iris-mcp.iris-mcp-launcher` (see
 > [Installing](#installing)). This is an independent community project. It is not made, endorsed or supported by
 > InterSystems.
@@ -62,7 +62,7 @@ Code settings, `globalState`, `workspaceState`, or any log/output channel — se
 
 ## Installing
 
-Install it from the store your editor uses, then reload the window:
+From 1.1.0, install it from the store your editor uses, then reload the window:
 
 - **Visual Studio Marketplace** (VS Code): the Extensions view, search for `iris-mcp.iris-mcp-launcher` ("IRIS MCP
   Launcher"), or `code --install-extension iris-mcp.iris-mcp-launcher`.
@@ -213,7 +213,7 @@ is selected or registration produced zero). Click the item to open the picker.
 
 **Command: "IRIS MCP Launcher: Manage MCP Clients…"** (Story 33.3). A webview for wiring the suite into the
 **other** MCP clients on your machine — Claude Code, Cursor, Cline, Codex, Kimi Code and the rest of the
-[13-client roster](../../packages/client-config/README.md#v1-client-roster) — so you never hand-edit their MCP
+[15-client roster](../../packages/client-config/README.md#v1-client-roster) — so you never hand-edit their MCP
 config JSON. This is the sibling of the [Governance editor](#governance-editor): that one edits *policy*, this
 one edits *wiring*.
 
@@ -232,7 +232,7 @@ config is the one under that directory.
 ### Using it
 
 1. **Open the view.** The header shows the adapter-data version, which engine resolved (local build vs npx), and
-   how many of the 13 clients were detected.
+   how many of the 15 clients were detected.
 2. **Pick your roster.** Detected clients render with checkboxes, all selected by default; unchecking one hides
    its section. The selection persists across sessions (extension `globalState`, not settings). Undetected
    clients are listed collapsed under "Not detected (N)".
