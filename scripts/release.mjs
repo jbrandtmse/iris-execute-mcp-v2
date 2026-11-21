@@ -116,6 +116,7 @@ import {
   IPM_TREE_GUARD_RELATIVE,
   MARKETPLACE_RELATIVE,
   MCP_PUBLISHER,
+  marketplaceUncheckedNote,
   NPM_NOT_FOUND,
   NPM_PUBLISH_ORDER,
   NPM_VISIBLE_POLL_MS,
@@ -1346,7 +1347,10 @@ async function dryStep(channel, detail, { dir, env, deps, repoRoot, version, cle
     if (lookup.outcome === 'unknown') reasons.push({ text: lookupProblem(channel.id, item, lookup.why) });
   }
   if (reasons.length > 0) return notReadyOutcome(reasons);
-  return { status: STATUS.ready, detail: lookup?.outcome === 'published' ? STATUS.wouldBeAlreadyPublished : `${STATUS.wouldPublish} ${detail.name}@${detail.version}` };
+  if (lookup?.outcome === 'published') return { status: STATUS.ready, detail: STATUS.wouldBeAlreadyPublished };
+  const wouldPublish = `${STATUS.wouldPublish} ${detail.name}@${detail.version}`;
+  // DW-705: the Marketplace's `ready` checks the version only; say so, so it is never read as "the publisher exists".
+  return { status: STATUS.ready, detail: channel.id === 'vscode-marketplace' ? `${wouldPublish}; ${marketplaceUncheckedNote(detail.publisher)}` : wouldPublish };
 }
 
 /** Ask the IPM registry whether it lists the version: `{ listed, body }`, or `{ error }`. A 404 means the package is not registered yet. */

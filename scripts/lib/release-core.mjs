@@ -128,6 +128,16 @@ export const STATUS = Object.freeze({
   manualStep: 'manual step',
 });
 
+/**
+ * What a Marketplace `ready` does NOT say (DW-705): the public Marketplace has no read that tells an absent publisher from one with no
+ * extensions yet (a new publisher answers 404 with 0 extensions too), and none that shows a trusted-publishing policy, so the rehearsal
+ * never checks either. Appended to the Marketplace's `would publish` detail so nobody reads `ready` as "the publisher exists".
+ *
+ * @param {string} publisher
+ */
+export const marketplaceUncheckedNote = (publisher) =>
+  `publisher not checked: the Marketplace has no public publisher lookup, so the owner confirms the publisher ${publisher} (step O1) and its trusted-publishing policy (step O2)`;
+
 const SEMVER = /^\d+\.\d+\.\d+$/;
 
 // -- versions -------------------------------------------------------------------------------------------------

@@ -1605,7 +1605,7 @@ describe("Publish: the extension stores (Story 42.7)", () => {
       const world = newWorld();
       expect(await world.run({ dryRun: true })).toBe(0);
       const report = reportOf(world);
-      expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0)");
+      expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0; publisher not checked: the Marketplace has no public publisher lookup, so the owner confirms the publisher iris-mcp (step O1) and its trusted-publishing policy (step O2))");
       expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0)");
       expect(world.standIns.calls("vsce")).toEqual([]);
       expect(world.standIns.calls("ovsx")).toEqual([]);
@@ -1625,7 +1625,7 @@ describe("Publish: the extension stores (Story 42.7)", () => {
       world.stores.namespace = { status: 404, body: { error: "Namespace not found: iris-mcp" } };
       expect(await world.run({ dryRun: true })).toBe(0);
       expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: skipped (not set up: the Open VSX namespace iris-mcp does not exist. Create it once with npx ovsx create-namespace iris-mcp (owner step O1).)");
-      expect(reportOf(world)).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0)");
+      expect(reportOf(world)).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0; publisher not checked: the Marketplace has no public publisher lookup, so the owner confirms the publisher iris-mcp (step O1) and its trusted-publishing policy (step O2))");
     });
 
     it("an unreadable lookup is `not ready`, not `ready`: the rehearsal cannot tell an upload from a duplicate", async () => {
@@ -1921,7 +1921,7 @@ describe("Rehearse: publish --dry-run (AC 42.5.4)", () => {
     expect(world.standIns.calls("git"), "the IPM dry step reads the registry, not a repository").toEqual([]);
     expect(world.registry.requests, "the IPM dry step asked the registry once").toEqual(["https://pm.community.intersystems.com/packages/iris-execute-mcp-v2"]);
     expect(world.standIns.allCalls().some((call) => call.argv.includes("push") || call.argv.includes("commit") || call.argv.includes("tag"))).toBe(false);
-    expect(world.lines.join("\n")).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0)");
+    expect(world.lines.join("\n")).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0; publisher not checked: the Marketplace has no public publisher lookup, so the owner confirms the publisher acme (step O1) and its trusted-publishing policy (step O2))");
     expect(world.lines.join("\n")).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0)");
   });
 
@@ -1956,7 +1956,7 @@ describe("Rehearse: publish --dry-run (AC 42.5.4)", () => {
     const world = newWorld({ publisher: "acme" });
     expect(await world.run({ dryRun: true, channels: NPM_ONLY })).toBe(0);
     const report = world.lines.join("\n");
-    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: skipped: not enabled (Story 42.7) (ready (would publish iris-mcp-launcher@1.0.0))");
+    expect(report).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: skipped: not enabled (Story 42.7) (ready (would publish iris-mcp-launcher@1.0.0; publisher not checked: the Marketplace has no public publisher lookup, so the owner confirms the publisher acme (step O1) and its trusted-publishing policy (step O2)))");
     expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: skipped: not enabled (Story 42.7) (ready (would publish iris-mcp-launcher@1.0.0))");
     expect(report).toContain("ipm\n  iris-execute-mcp-v2@1.0.0: skipped: not enabled (Story 42.8) (ready (manual step after the tag: Release 1.0.0 on the Open Exchange listing IRIS-MCP-Server-Suite-2; the IPM registry does not list 1.0.0))");
   });
