@@ -3464,6 +3464,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: 41.6 plan 2026-10-19: no .claude-plugin/plugin.json in the repo or pack; a detection branch now is unreachable (rule #54); packages/client-config/src/pack-plan.ts claude-code route
 - 2026-10-19T22:31:15Z status=routed owner=42-8-claude-code-plugin-and-registry-listings by=harvest note=42.8 creates the plugin and makes the claude-code route of iris-mcp-clients skills install install only the rule when it detects the plugin
+- 2026-11-21T17:38:52Z status=resolved-by:42-8-claude-code-plugin-and-registry-listings by=adjudication note=claude-plugin-detect.ts detects iris-mcp@iris-mcp enabled; skills install --client claude-code installs only the rule then (clients.ts:1923); unit+built-bin child-process tests (claude-plugin-detect, skills-cli-plugin, qa-42-8-plugin-process); CI 44926140484 green on 9d795c2
 
 ### DW-626: The MCP adapter data in adapters.ts is stale against the clients' docs read on 2026-10-19 (Pi, Kilo Code, Junie now document MCP; Kimi CLI archived; Roo Code shut down; Windsurf renamed Devin Desktop; the Goose docsUrl 404s)
 - source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: low | footprint: out-of-footprint
@@ -3857,6 +3858,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 42.4 plan probe; ipm/module.xml is generated and stamped, the archive is CI-built
 - 2026-10-22T13:06:14Z status=routed owner=42-5-release-workflow by=harvest note=decision 72: 42.5's plan picks the registry route (a published-artifact repo or branch, a stamped root manifest, or another channel) and probes the current Open Exchange rules; 42.8 lists it
 - 2026-11-21T00:07:58Z status=resolved-by:42-5-release-workflow by=adjudication note=route_decided(decision_76):packaging_repository_jbrandtmse/iris-execute-mcp-v2-ipm_pushed_by_the_release(IPM_channel_implemented,disabled_until_42.8;rehearse_reports_its_readiness);the_listing+served-artifact_gate_are_42.8(DW-694)
+- 2026-11-21T17:38:52Z status=resolved-by:42-8-claude-code-plugin-and-registry-listings by=adjudication note=route superseded by decision #122 (supersedes #76): root module.xml of the main repository + stamped ipm/src tree + preload guard written by the version step (b8eaebf,20dcc72); CI ipm 44926140484 installs GitHub's served archive re-tarred the registry's way on both editions; dry run 44929493723 ipm=ready (manual step)
 
 ### DW-690: zpm uninstall iris-execute-mcp-v2 removes the classes but leaves the /api/executemcp/v2 web application and the %ALL package mapping, because the manifest configures them through Invoke methods with no Unconfigure counterpart
 - source: spec-42-4-ipm-package-revival.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3888,6 +3890,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-5-release-workflow.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 42.5 plan: the release pushes the stamped module to jbrandtmse/iris-execute-mcp-v2-ipm (decision 76); the registry serves a tar of that repository root
 - 2026-10-22T23:44:29Z status=routed owner=42-8-claude-code-plugin-and-registry-listings by=harvest note=42.8 adds a gate that tars the packaging repository root the way Open Exchange does and installs it offline, before the listing goes live
+- 2026-11-21T17:38:52Z status=resolved-by:42-8-claude-code-plugin-and-registry-listings by=adjudication note=gate redefined: CI ipm fetches GitHub's archive of the commit, requires it to equal git archive HEAD, asserts module members, re-tars it the registry's way and installs it on community+health (44926140484 green); red proof on that path: 44926263060 red at served (stray preload/ file in GitHub's archive), 44926275290 red at registry-community install (class missing, ERROR #5001); branches deleted
 
 ### DW-695: publish uploads whatever path the manifest names (channels[].packages[].tarball, vsix.file, ipm.tree) without checking it is one of the hash-verified files, so the AC 'uploads the exact rehearsed bytes' is not enforced
 - source: spec-42-5-release-workflow.md | severity: med | fix-risk: low | footprint: in-story
@@ -3995,6 +3998,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
 - evidence: README.md Releasing #121 paragraph ('an npm-only release can go out'); scripts/release.mjs IPM dry step unchanged; release.yml publish needs rehearse
 - 2026-11-21T13:37:01Z status=wontfix-accepted owner=42-8-claude-code-plugin-and-registry-listings by=cr note=reopen_if=after the #122 amendment lands, IPM can still fail a rehearsal for a missing owner setup while README still says an npm-only release can go out; README is 42.9's file now and #124(6) has the #122 pass edit Releasing
+- 2026-11-21T17:38:52Z status=resolved-by:42-8-claude-code-plugin-and-registry-listings by=adjudication note=#122 makes IPM a manual step that never fails a release; dry run 44929493723 rehearse exit 0 with open-vsx skipped (not set up) and ipm ready (manual step), so the README npm-only claim is now true
 
 ### DW-715: README says to run the release again for the same tag after an owner step, but not how: a green run that skipped a channel offers only GitHub's Re-run all jobs, which repeats ci-gate, prepare (a fresh vsix build) and the release approval
 - source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
