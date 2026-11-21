@@ -588,11 +588,12 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **Versions.**
     - npm is the primary channel. Every `@iris-mcp/*` package shares one version through the Changesets `fixed` group, starting at `1.0.0`, with no prerelease tag.
     - `1.0.0` was versioned in Story 42.6 (`pnpm run version -- --first-release`, the mechanism Story 42.1 built); later releases run `pnpm run version` on their changesets (decision #85).
+    - The VS Code extension's version equals the shared version (lockstep, Story 42.7, decision #94): `pnpm run version` stamps it and renames its CHANGELOG's `[Unreleased]` heading; `prepare` refuses a mismatch. Its first store release is `v1.1.0` (decision #95).
   - **Pins and runtime.**
     - Every `npx` spec the suite writes, spawns or documents carries the pinned major (`@1`), taken from one exported constant, and a test finds any unpinned spec. This covers servers, the client-config CLI and the governance CLI. The constant lives in `@iris-mcp/client-config`. The VS Code extension, which has no runtime dependencies and no bundler, keeps one literal copy that a cross-package test pins equal to it (wave-8 decision #36).
     - Every published package declares `engines.node >=22.17.0` (decision #35), and `@types/node` is pinned to the floor major. The extension declares no `engines.node`; `engines.vscode` governs it.
     - Each server package's `mcpName` is `io.github.jbrandtmse/<bin>`, the name its MCP Registry `server.json` must carry. It is set before `1.0.0`, because the registry checks it against the published version (decision #37).
-    - The extension persists the server major at first activation, and never moves it without the user's confirmation [ASSUMPTION; Story 42.7 confirms].
+    - The extension's major is the literal `@1`. A story that moves it to a new major asks the user before the move, and treats a user with no recorded major as on `1` (Story 42.7, decision #97, correcting the earlier assumption that the extension persists the major at first activation).
     - The plugin marketplace entry pins the release tag of the same version as npm.
   - **Native code.** No published package has a required native or compiled dependency. A native module is allowed only as an `optionalDependency` with a graceful skip.
   - **CI.**
@@ -608,6 +609,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - **The release workflow** *(Story 42.5, wave-8 decisions #75 to #81)*. `release.yml` runs `ci-gate`, `prepare`, `rehearse` and `publish`. Only `publish` holds the `release` environment, `id-token: write` and secrets, and only on a `v*` tag push; the dry run (a `release-dry-run/**` branch or a dispatch) cannot reach it. `prepare` runs every `prepublishOnly` once, armed on a seeded IRIS for Health throwaway, before anything is packed. Packing and uploading run no lifecycle script: pnpm packs and npm 11 uploads with provenance, in the order client-config, shared, admin, data, dev, interop, ops, all, stopping at the first failure.
     - **npm credentials.** The 1.0.0 publish uses a short-lived granular token, the `release` environment's `NPM_TOKEN` secret; then trusted publishing is bound to `release.yml` and `release` per package, and the token is deleted (decision #75, provisional until the Lead provisions it; the fallback is an interactive 2FA publish by the Lead, recorded as an exception).
     - **Channels.** npm, then the Marketplace, then Open VSX, then IPM, each enabled by its story (42.7, 42.8); `v1.0.0` is npm only (decision #77). IPM reaches the registry through the packaging repository `jbrandtmse/iris-execute-mcp-v2-ipm`, and the Open Exchange release press is a manual release step (decision #76).
+    - **Marketplace and Open VSX** *(Story 42.7, decisions #91 to #93 and #99)*. Publisher and namespace `iris-mcp` on both stores. `vsce publish --oidc` (trusted publishing; Azure DevOps global PATs are retired on 2026-12-01; the fallback is the owner uploading the release run's exact vsix) and `ovsx publish`, with `OVSX_PAT` for the first publish only, then trusted publishing. A read-only store lookup before each upload makes a version already there `already published`, and an unreadable store fails closed. The CLIs are installed in `rehearse` and `publish` with `npm ci --ignore-scripts`. The OIDC variables reach only the three publish CLIs, and `OVSX_PAT` only `ovsx`.
     - **Tags on `main` only** *(Story 42.6, the owner's ruling, decision #82)*. `ci-gate` refuses a tag run whose commit `main` does not contain (GitHub compare `main...<sha>` `identical` or `behind`; any other status or an unreadable answer refuses), before it waits for CI, so no approval is requested. There is no maintenance-branch allowance. `prepare` runs every root script whose name has a `check` or `validate` word, the same set as CI's root gates (DW-612). Every package ships its `CHANGELOG.md` (DW-665, decision #86). `release.mjs verify --version <v>` is the post-publish check.
     - **A bad release** is fixed forward; a harmful version is `npm deprecate`d, never unpublished. Vulnerabilities are reported through GitHub private vulnerability reporting (`SECURITY.md`, no email address published) (decisions #78 and #79).
 
@@ -756,6 +758,7 @@ Versions are the tested lockfile versions as of 2026-10-14. The code owns them a
 | pnpm | 9.15.0; the release packs with it and npm uploads, so no pnpm upgrade is needed (Story 42.5) |
 | Turborepo | 2.9.4 |
 | Vitest | 2.1.9 (an end-of-life major, used in dev only) |
+| @vscode/vsce / ovsx (launcher dev, release only) | 4.1.1 / 1.4.0, pinned exactly (Story 42.7, decision #99) |
 | @changesets/cli | 2.30.0, versioning only: `changeset publish` is not used, so its OIDC fix does not apply (Story 42.5) |
 | jsonc-parser | 3.3.1 |
 | yaml | 2.9.0 |
@@ -837,7 +840,7 @@ ipm/                    # IPM module manifest (generated from Story 42.4)
 - **Server-side source-control integration** (G4). It waits for an Atelier PUT hook probe.
 - **OAuth2 for the MCP servers themselves.** No hosted deployment needs it.
 - **Release operations.** These are decided in the stories named:
-  - the version policies for the extension and the plugin (Stories 42.7 and 42.8); IPM's is settled, since the module version equals the npm version (AD-14);
+  - the version policy for the plugin (Story 42.8); the extension's is lockstep (Story 42.7, decision #94), and IPM's is settled, since the module version equals the npm version (AD-14);
   - the bad-release policy, `SECURITY.md` and the first-publish route were decided in Story 42.5 (AD-29). The first publish (`1.0.0`, Story 42.6) uses the token route; trusted publishing is configured before the next release, and the token is revoked after the publish (decision #89).
 - **Development toolchain staleness** (Vitest 2, TypeScript 5.9, Turborepo, pnpm 9). Revisit at the Epic 42 gate. Story 42.5 recorded the release path's pins; no upgrade was needed.
 - **Declined on 2026-10-14:** G8, G17, G41, G45 and G47. The reasons are in the research gap register, and reopening one needs a Project Lead decision.
