@@ -97,6 +97,8 @@ jobs:
         run: pnpm gen:skills:check
       - name: pack check
         run: pnpm gen:pack:check
+      - name: listings check
+        run: pnpm gen:listings:check
       - name: validate prompts
         run: pnpm validate:prompts
       - name: provenance check

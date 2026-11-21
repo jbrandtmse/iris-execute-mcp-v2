@@ -68,7 +68,8 @@ describe("the constants", () => {
       { id: "npm", enabled: true },
       { id: "vscode-marketplace", enabled: true },
       { id: "open-vsx", enabled: true },
-      { id: "ipm", enabled: false, enabledBy: "Story 42.8" },
+      { id: "ipm", enabled: true },
+      { id: "mcp-registry", enabled: true },
     ]);
     expect([RELEASE_ENVIRONMENT, RELEASE_TAG_PATTERN, IPM_DIST_REPOSITORY, IPM_DIST_BRANCH, MIN_NPM_VERSION, CI_WORKFLOW_PATH]).toEqual([
       "release",

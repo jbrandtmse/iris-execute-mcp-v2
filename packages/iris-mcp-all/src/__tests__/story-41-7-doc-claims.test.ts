@@ -277,8 +277,10 @@ describe("the root README's known limits", () => {
     expect(readdirSync(own), "the refused install wrote nothing").toEqual([]);
   });
 
-  it("the Claude Code route installs both the skills and the rule, as its route row says", () => {
-    expect(section()).toContain("- The Claude Code route always installs both the skills and the rule; it does not detect a Claude Code plugin.");
+  it("the Claude Code route installs both the skills and the rule, or only the rule with the plugin enabled, as its route row says", () => {
+    expect(section()).toContain(
+      "- The Claude Code route installs only the rule when it finds the `iris-mcp@iris-mcp` plugin enabled in the user, project or local Claude Code settings, and both the skills and the rule otherwise. Managed settings, `--settings`, `--add-dir` and synced plugins are not read, so a plugin it does not see means the skills install twice.",
+    );
     const route = targets.PACK_ROUTES["claude-code"] as PackRoute;
     expect(route.skillsDir).toBe(".claude/skills");
     expect(route.rule).toMatchObject({ kind: "file", dir: ".claude/rules" });

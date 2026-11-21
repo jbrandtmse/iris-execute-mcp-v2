@@ -349,6 +349,98 @@ describe("pnpm run version exits 1 naming what it finds wrong after a step (I/O 
   }, 180_000);
 });
 
+/** The plugin manifest, the marketplace ref and the five server.json files of a fixture, as the version step regenerates them. */
+function listingVersions(root: string): { plugin: string; ref: string; servers: Array<{ file: string; version: string; packageVersion: string }> } {
+  const json = (relative: string): any => JSON.parse(readFileSync(join(root, relative), "utf8"));
+  return {
+    plugin: json("packages/client-config/skills-pack/.claude-plugin/plugin.json").version,
+    ref: json(".claude-plugin/marketplace.json").plugins[0].source.ref,
+    servers: ["iris-admin-mcp", "iris-data-mcp", "iris-dev-mcp", "iris-interop-mcp", "iris-ops-mcp"].map((dir) => {
+      const listing = json(`packages/${dir}/server.json`);
+      return { file: `packages/${dir}/server.json`, version: listing.version, packageVersion: listing.packages[0].version };
+    }),
+  };
+}
+
+describe("the plugin and the registry listings follow the shared version (Story 42.8, lockstep: decision #103)", () => {
+  it("the fixture starts with every listing at its seeded version", () => {
+    const root = makeVersionFixture({ version: "1.0.0" });
+    const before = listingVersions(root);
+    expect(before.plugin).toBe("1.0.0");
+    expect(before.ref).toBe("v1.0.0");
+    for (const server of before.servers) expect([server.version, server.packageVersion], server.file).toEqual(["1.0.0", "1.0.0"]);
+  }, 180_000);
+
+  it("a patch changeset regenerates plugin.json's version, the marketplace ref (v<version>) and the five server.json files, and nothing is left for embeddedVersionProblems", async () => {
+    const root = makeVersionFixture({ version: "1.0.0" });
+    expect(await versionMain([], cleanEnv(), root, () => new Date("2026-11-20T23:59:59Z"))).toBe(0);
+    const after = listingVersions(root);
+    expect(after.plugin).toBe("1.0.1");
+    expect(after.ref).toBe("v1.0.1");
+    for (const server of after.servers) expect([server.version, server.packageVersion], server.file).toEqual(["1.0.1", "1.0.1"]);
+    expect(embeddedVersionProblems(readReleaseFacts(root))).toEqual([]);
+    expect(fixtureStatus(root)).toContain(".claude-plugin/marketplace.json");
+    expect(fixtureStatus(root)).toContain("packages/client-config/skills-pack/.claude-plugin/plugin.json");
+  }, 180_000);
+
+  it("the script run as a process names the listings in its next steps", () => {
+    const root = makeVersionFixture({ version: "1.0.0" });
+    const result = run(root, "release-version.mjs");
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain("the plugin manifest (packages/client-config/skills-pack/.claude-plugin/plugin.json), the marketplace ref (.claude-plugin/marketplace.json) and the five server.json files carry it too;");
+  }, 180_000);
+
+  it("a first release puts the listings at 1.0.0", () => {
+    const root = makeVersionFixture();
+    expect(run(root, "release-version.mjs", ["--first-release"]).status).toBe(0);
+    const after = listingVersions(root);
+    expect([after.plugin, after.ref]).toEqual(["1.0.0", "v1.0.0"]);
+    expect(after.servers.map((server) => server.version)).toEqual(["1.0.0", "1.0.0", "1.0.0", "1.0.0", "1.0.0"]);
+  }, 180_000);
+
+  it("a generator that fails stops the step: exit 1 naming the script, with the partial-version line", () => {
+    const root = makeVersionFixture({ version: "1.0.0" });
+    writeFileSync(join(root, "scripts", "gen-listings.mjs"), "process.exit(3);\n");
+    commitFixture(root, "a listings generator that fails");
+    const result = run(root, "release-version.mjs");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("gen-listings.mjs failed (exit 3). Fix the generator error.");
+    expect(result.stderr).toContain("the tree now holds a partial version");
+  }, 180_000);
+
+  describe("embeddedVersionProblems refuses any listing that is off the shared version, in both modes", () => {
+    const facts = (change: (listings: any) => void): any => {
+      const root = makeVersionFixture({ version: "1.0.0" });
+      const read = readReleaseFacts(root);
+      change(read.listings);
+      return read;
+    };
+
+    it("is empty for the fixture as seeded", () => {
+      expect(embeddedVersionProblems(facts(() => undefined))).toEqual([]);
+    });
+
+    it.each([
+      ["plugin.json off the version", (listings: any) => (listings.pluginVersion = "0.9.0"), /plugin\/?.*plugin\.json is at "0\.9\.0", not the shared version 1\.0\.0\. Run pnpm run version/],
+      ["the marketplace ref off the tag", (listings: any) => (listings.marketplaceRef = "v0.9.0"), /marketplace\.json pins the ref "v0\.9\.0", not the release tag v1\.0\.0\. Run pnpm run version/],
+      ["the marketplace ref pinned to a branch", (listings: any) => (listings.marketplaceRef = "main"), /pins the ref "main", not the release tag v1\.0\.0/],
+      ["a server.json version off", (listings: any) => (listings.servers[2].version = "0.9.0"), /packages\/iris-dev-mcp\/server\.json version is "0\.9\.0", not the shared version 1\.0\.0/],
+      ["a server.json package version off", (listings: any) => (listings.servers[4].packageVersion = "0.9.0"), /packages\/iris-ops-mcp\/server\.json packages\[0\]\.version is "0\.9\.0"/],
+      ["a server.json that was not read", (listings: any) => listings.servers.pop(), /the server\.json listings were not read \(4 of 5\)/],
+    ])("%s", (_name, change, expected) => {
+      const problems = embeddedVersionProblems(facts(change));
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toMatch(expected);
+    });
+
+    it("facts with no listings at all are refused, never read as consistent", () => {
+      const read = facts(() => undefined);
+      delete read.listings;
+      expect(embeddedVersionProblems(read).length).toBeGreaterThanOrEqual(3);
+    });
+  });
+});
+
 describe("the extension follows the shared version (Story 42.7, the lockstep policy)", () => {
   it("stamps the manifest and both version fields of the lock, renames `## [Unreleased]` to `## [<version>] \u2014 <date>` with the injected date, and leaves everything else of those files alone", async () => {
     const root = makeVersionFixture({ version: "1.0.0" });

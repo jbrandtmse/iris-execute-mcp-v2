@@ -40,12 +40,12 @@ import {
 } from "../../../../scripts/release.mjs";
 import { installFakeDocker, type FakeDocker } from "./fake-docker";
 import { installStandIns, installStoreClis } from "./stand-in-clis";
-import { MARKER_TAIL, PACKAGE_DIRS, ROOT_SCRIPTS, SHA, fakeStoresFetch, makeRepo, type RepoOptions } from "./release-script-fixtures";
+import { MARKER_TAIL, PACKAGE_DIRS, ROOT_SCRIPTS, SERVER_DIRS, SHA, fakeStoresFetch, makeRepo, registryNameOf, type RepoOptions } from "./release-script-fixtures";
 
 const SECRET_NPM = "npm_PREPARESECRET1234567890";
 const SECRET_GITHUB = "ghs_PREPARESECRET0987654321";
 /** The root scripts prepare runs on the real root manifest (DW-612): CI's root gates, sorted. */
-const REAL_CHECKS = ["check:provenance", "gen:governance-baseline:check", "gen:pack:check", "gen:skills:check", "gen:tools-list-snapshot:check", "validate:prompts"];
+const REAL_CHECKS = ["check:provenance", "gen:governance-baseline:check", "gen:listings:check", "gen:pack:check", "gen:skills:check", "gen:tools-list-snapshot:check", "validate:prompts"];
 
 /** The `scripts` of the real root `package.json`. */
 const realRootScripts = (): Record<string, string> => (JSON.parse(readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")) as { scripts: Record<string, string> }).scripts;
@@ -193,6 +193,7 @@ function newWorld(repoOptions: RepoOptions = {}): PrepareWorld {
     ipm: {
       embedProblems: ipm.embedProblems,
       stageModule: ipm.stageModule,
+      stagePackagingRoot: ipm.stagePackagingRoot,
       loadEmbed: async (repoRoot: string) => {
         events.push("embed");
         const marker = /BOOTSTRAP_VERSION = "([^"]+)"/.exec(readFileSync(path.join(repoRoot, "packages", "shared", "src", "bootstrap-classes.ts"), "utf8"))?.[1] as string;
@@ -604,8 +605,17 @@ describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
       ["npm", true],
       ["vscode-marketplace", true],
       ["open-vsx", true],
-      ["ipm", false],
+      ["ipm", true],
+      ["mcp-registry", true],
     ]);
+    // The five server.json listings are copied byte for byte to mcp-registry/<bin>.json, and the channel lists each (Story 42.8).
+    expect(files.filter((file) => file.startsWith("mcp-registry/"))).toEqual(SERVER_DIRS.map((dir) => `mcp-registry/${dir}.json`).sort());
+    expect(manifest["channels"][4].servers).toEqual(
+      SERVER_DIRS.map((dir) => ({ name: registryNameOf(dir), version: "1.0.0", package: `@iris-mcp/${dir.replace(/^iris-|-mcp$/g, "")}`, file: `mcp-registry/${dir}.json` })),
+    );
+    for (const dir of SERVER_DIRS) {
+      expect(readFileSync(path.join(world.out, "mcp-registry", `${dir}.json`)), dir).toEqual(readFileSync(path.join(world.repo, "packages", dir, "server.json")));
+    }
     expect(manifest["channels"][0].packages.map((entry: { name: string }) => entry.name)).toEqual([...NPM_PUBLISH_ORDER]);
     expect(manifest["channels"][1]).toMatchObject({ file: "vsix/iris-mcp-launcher-1.0.0.vsix", name: "iris-mcp-launcher", version: "1.0.0", publisher: "iris-mcp", files: ["package.json", "dist/extension.js", "LICENSE"] });
     expect(manifest["channels"][3]).toMatchObject({ tree: "ipm", module: "iris-execute-mcp-v2", version: "1.0.0", repository: "jbrandtmse/iris-execute-mcp-v2-ipm", branch: "master" });
@@ -800,7 +810,7 @@ describe("the real loadModules, which only prepare runs (a runner without node_m
     for (const id of SUITE_IDS) expect(Object.hasOwn(modules.checks.LIVE_SUITES, id), `checks.LIVE_SUITES.${id}`).toBe(true);
     expect(typeof modules.pack.pnpmPack).toBe("function");
     expect(typeof modules.smoke.smokePackages).toBe("function");
-    for (const member of ["loadEmbed", "embedProblems", "stageModule"]) expect(typeof modules.ipm[member], `ipm.${member}`).toBe("function");
+    for (const member of ["loadEmbed", "embedProblems", "stageModule", "stagePackagingRoot"]) expect(typeof modules.ipm[member], `ipm.${member}`).toBe("function");
   });
 });
 

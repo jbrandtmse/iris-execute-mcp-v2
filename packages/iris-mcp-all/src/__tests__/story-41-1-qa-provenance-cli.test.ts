@@ -252,8 +252,10 @@ describe("check:provenance CLI, scratch copy: the notice and its MIT block (AC 4
   it("a deleted pack notice is refused for the sync and for the tarball", () => {
     const root = scratch();
     rmSync(join(root, PACK_DIR, NOTICE_FILENAME));
-    const stderr = expectRed(root, ["distribution", "notice-sync"]);
+    // The plugin root is the pack directory, so the plugin rule asks for the notice there too (Story 42.8).
+    const stderr = expectRed(root, ["distribution", "notice-sync", "plugin"]);
     expect(stderr).toContain("the pack does not contain the notice");
+    expect(stderr).toContain("[plugin] notice: the plugin root packages/client-config/skills-pack has no IRIS-MCP-THIRD-PARTY-NOTICES.md");
   });
 
   it("a deleted source notice is refused", () => {
@@ -364,8 +366,10 @@ describe("check:provenance CLI, scratch copy: distributions through the real npm
   it("a package.json that is not valid JSON is refused, naming it", () => {
     const root = scratch();
     writeFileSync(join(root, "packages/client-config/package.json"), "{ not json");
-    const stderr = expectRed(root, ["distribution"]);
+    // The same file holds the shared version, which the plugin rule reads for the marketplace ref (Story 42.8).
+    const stderr = expectRed(root, ["distribution", "plugin"]);
     expect(stderr).toContain("is not valid JSON");
+    expect(stderr).toContain("the shared version could not be read from packages/client-config/package.json");
   });
 
   it("with npm missing from PATH the check is refused, never skipped", () => {

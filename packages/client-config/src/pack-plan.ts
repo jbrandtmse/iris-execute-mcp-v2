@@ -435,8 +435,11 @@ interface DesiredState {
   blocks: DesiredBlock[];
 }
 
-/** The files and blocks a route installs from `pack`, or why the pack cannot be installed. */
-function desiredState(pack: LoadedPack, route: PackRoute): DesiredState | { error: string } {
+/**
+ * The files and blocks a route installs from `pack`, or why the pack cannot be installed. With `skipSkills` the route installs the rules
+ * only: the skills, and the notice that sits beside them, are not wanted (the Claude Code plugin brings them).
+ */
+function desiredState(pack: LoadedPack, route: PackRoute, skipSkills = false): DesiredState | { error: string } {
   const files = new Map<string, Buffer>();
   const put = (rel: string, bytes: Buffer): string | null => {
     const earlier = files.get(rel);
@@ -457,7 +460,7 @@ function desiredState(pack: LoadedPack, route: PackRoute): DesiredState | { erro
     }
   }
 
-  for (const [rel, bytes] of pack.skills) {
+  for (const [rel, bytes] of skipSkills ? [] : pack.skills) {
     const path = `${route.skillsDir}/${rel}`;
     if (!isManagedFilePath(path)) return { error: `the skills pack names a path the installer cannot manage: ${rel}` };
     const clash = put(path, bytes);
@@ -572,6 +575,12 @@ export interface PlanInput {
   /** Required for `install`; an `uninstall` needs no pack. */
   pack?: LoadedPack;
   project: ProjectView;
+  /**
+   * An `install` that wants the rules only (the Claude Code plugin is enabled and brings the skills). Skill files this installer put
+   * there earlier are then removed under the usual manifest rules: a file you changed is kept unless `includeModified`. Ignored by
+   * an `uninstall`.
+   */
+  skipSkills?: boolean;
 }
 
 const KEPT_DETAIL_INSTALL = "changed since it was installed; --include-modified replaces it";
@@ -675,7 +684,7 @@ export function planPackChange(input: PlanInput): PackPlan | PackRefusal {
     if (clientRoute === undefined || input.pack === undefined) return undefined;
     let cached = desiredCache.get(clientId);
     if (cached === undefined) {
-      cached = desiredState(input.pack, clientRoute);
+      cached = desiredState(input.pack, clientRoute, clientId === client && action === "install" && input.skipSkills === true);
       desiredCache.set(clientId, cached);
     }
     return cached;

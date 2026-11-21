@@ -392,10 +392,10 @@ describe("the npm publish order and the channels", () => {
     expect(violations(allFirst).sort()).toEqual(["admin", "data", "dev", "interop", "ops"].map((short) => `@iris-mcp/all before @iris-mcp/${short}`));
   });
 
-  it("the channels are npm, then the Marketplace, Open VSX and IPM; npm and the two stores are enabled (Story 42.7), and IPM names the story that enables it", () => {
-    expect(RELEASE_CHANNELS.map((channel: { id: string }) => channel.id)).toEqual(["npm", "vscode-marketplace", "open-vsx", "ipm"]);
-    expect(RELEASE_CHANNELS.map((channel: { enabled: boolean }) => channel.enabled)).toEqual([true, true, true, false]);
-    expect(RELEASE_CHANNELS.map((channel: { enabledBy?: string }) => channel.enabledBy)).toEqual([undefined, undefined, undefined, "Story 42.8"]);
+  it("the channels are npm, the Marketplace, Open VSX, IPM and the MCP Registry last, and all five are enabled (Story 42.8)", () => {
+    expect(RELEASE_CHANNELS.map((channel: { id: string }) => channel.id)).toEqual(["npm", "vscode-marketplace", "open-vsx", "ipm", "mcp-registry"]);
+    expect(RELEASE_CHANNELS.map((channel: { enabled: boolean }) => channel.enabled)).toEqual([true, true, true, true, true]);
+    expect(RELEASE_CHANNELS.map((channel: { enabledBy?: string }) => channel.enabledBy)).toEqual([undefined, undefined, undefined, undefined, undefined]);
   });
 
   it("the pins of the release workflow are the CI pins plus the two artifact actions, each a 40-hex commit", () => {

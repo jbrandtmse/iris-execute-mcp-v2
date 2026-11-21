@@ -15,8 +15,9 @@
  *    `scripted session in NS` and the script it was given) and exits with `FAKE_DOCKER_SESSION_STATUS` (default 0). When
  *    `FAKE_DOCKER_SESSION_HANDLER` names a CommonJS module, its export `(namespace, stdin, { dir, container })` answers instead,
  *    returning `{ stdout, status? }` (it keeps its own state in files under `dir`, because every call is a new process).
- *  - `cp ID:PATH DEST`: copies the file `FAKE_DOCKER_CP_SOURCE` to DEST, or else writes `FAKE_DOCKER_CP_CONTENT` (default
- *    `scripted archive`) to it, or exits 1 when `FAKE_DOCKER_CP_FAIL=1`.
+ *  - `cp ID:PATH DEST`: copies the file `FAKE_DOCKER_CP_SOURCE` to DEST (for a PATH that ends in `registry-root.tgz`, the file
+ *    `FAKE_DOCKER_CP_REGISTRY_SOURCE` when it is set), or else writes `FAKE_DOCKER_CP_CONTENT` (default `scripted archive`) to it, or
+ *    exits 1 when `FAKE_DOCKER_CP_FAIL=1`.
  *  - `inspect REF`: a one-element JSON array shaped like `docker inspect` (name, labels, running, network mode, published port);
  *    `[]` and exit 1 for a container that does not exist.
  *  - `logs --tail N REF`: two fixed log lines.
@@ -145,7 +146,8 @@ if (command === "run") {
   const [source, destination] = [argv[1], argv[2]];
   if (!find(load(), source.split(":")[0])) fail(1, "Error: No such container:path: " + source);
   if (process.env.FAKE_DOCKER_CP_FAIL) fail(1, "Error: Could not find the file " + source.split(":").slice(1).join(":"));
-  if (process.env.FAKE_DOCKER_CP_SOURCE) fs.copyFileSync(process.env.FAKE_DOCKER_CP_SOURCE, destination);
+  if (process.env.FAKE_DOCKER_CP_REGISTRY_SOURCE && source.endsWith("registry-root.tgz")) fs.copyFileSync(process.env.FAKE_DOCKER_CP_REGISTRY_SOURCE, destination);
+  else if (process.env.FAKE_DOCKER_CP_SOURCE) fs.copyFileSync(process.env.FAKE_DOCKER_CP_SOURCE, destination);
   else fs.writeFileSync(destination, process.env.FAKE_DOCKER_CP_CONTENT !== undefined ? process.env.FAKE_DOCKER_CP_CONTENT : "scripted archive");
 } else if (command === "inspect") {
   const container = find(load(), argv[1]);

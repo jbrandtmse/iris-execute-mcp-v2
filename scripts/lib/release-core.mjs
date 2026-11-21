@@ -8,8 +8,8 @@
 //   - It never spawns a process, reads the environment of the process or touches the file system. Every decision takes its facts as
 //     arguments and returns data; every builder returns text or an argv array and never runs it.
 //   - Error text has the form `<what happened>. <what to do>.`
-//   - The only strings that form a publish verb are the argv builders `npmPublishArgv`, `vsceArgv`, `ovsxArgv` and `ipmPushPlan`
-//     (the release-workflow test finds a publish verb anywhere else in the repository's workflows and package scripts).
+//   - The only strings that form a publish verb are the argv builders `npmPublishArgv`, `vsceArgv`, `ovsxArgv`, `mcpPublisherArgv` and
+//     `ipmPushPlan` (the release-workflow test finds a publish verb anywhere else in the repository's workflows and package scripts).
 
 import { isDeepStrictEqual } from 'node:util';
 
@@ -32,7 +32,8 @@ export const RELEASE_CHANNELS = Object.freeze([
   Object.freeze({ id: 'npm', enabled: true }),
   Object.freeze({ id: 'vscode-marketplace', enabled: true }),
   Object.freeze({ id: 'open-vsx', enabled: true }),
-  Object.freeze({ id: 'ipm', enabled: false, enabledBy: 'Story 42.8' }),
+  Object.freeze({ id: 'ipm', enabled: true }),
+  Object.freeze({ id: 'mcp-registry', enabled: true }),
 ]);
 
 /** The GitHub environment that holds the release's secrets, and the one tag rule that may deploy to it. */
@@ -44,6 +45,48 @@ export const IPM_DIST_REPOSITORY = 'jbrandtmse/iris-execute-mcp-v2-ipm';
 export const IPM_DIST_BRANCH = 'master';
 export const IPM_MODULE = 'iris-execute-mcp-v2';
 export const IPM_REGISTRY_PACKAGE_URL = `https://pm.community.intersystems.com/packages/${IPM_MODULE}`;
+
+/**
+ * The three host keys GitHub publishes for `github.com` (`GET https://api.github.com/meta`, `ssh_keys`, read on 2026-11-21), as a
+ * `known_hosts` file. The IPM push trusts only these (`StrictHostKeyChecking=yes`), so a first connection is never "accepted new". The
+ * published SHA256 fingerprints are ED25519 `+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU`, ECDSA `p2QAMXNIC1TJYWeIOttrVc98/R1BUFWu3/LiyKgUfQM`
+ * and RSA `uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s`; a test recomputes each from the key.
+ */
+export const GITHUB_SSH_KNOWN_HOSTS = Object.freeze([
+  'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl',
+  'github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=',
+  'github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=',
+]);
+
+/** The text of the `known_hosts` file the IPM push writes (0600, removed on every exit path). */
+export const githubKnownHostsText = () => `${GITHUB_SSH_KNOWN_HOSTS.join('\n')}\n`;
+
+/** The MCP Registry (in preview), and the pinned publisher CLI the release downloads, verifies by sha256 and runs (decision #110). */
+export const MCP_REGISTRY_BASE = 'https://registry.modelcontextprotocol.io';
+export const MCP_PUBLISHER = Object.freeze({
+  version: 'v1.8.8',
+  asset: 'mcp-publisher_linux_amd64.tar.gz',
+  sha256: '09f1fa70ee146b640584274a1a6b2b8a0310b05d4321fa9224e6df6a016d67f4',
+});
+
+/** The URL the pinned publisher is downloaded from. */
+export const mcpPublisherUrl = (publisher = MCP_PUBLISHER) => `https://github.com/modelcontextprotocol/registry/releases/download/${publisher.version}/${publisher.asset}`;
+
+/**
+ * The files that embed the shared version besides the packages (lockstep, decision #103), relative to the repository root: the plugin's
+ * manifest in the pack, the marketplace, and the `server.json` directory of each server package, in release order. A test holds them equal
+ * to the generator's (`scripts/lib/listings.mjs`, `scripts/lib/skills-pack.mjs`).
+ */
+export const PLUGIN_MANIFEST_RELATIVE = 'packages/client-config/skills-pack/.claude-plugin/plugin.json';
+export const MARKETPLACE_RELATIVE = '.claude-plugin/marketplace.json';
+export const SERVER_JSON_DIRS = Object.freeze(['iris-admin-mcp', 'iris-data-mcp', 'iris-dev-mcp', 'iris-interop-mcp', 'iris-ops-mcp']);
+
+/** The plugin's name in the marketplace, whose `ref` must be `v<version>`. */
+export const PLUGIN_ENTRY_NAME = 'iris-mcp';
+
+/** How long the registry channel waits for npm to serve a version the registry will check, and how often it asks. */
+export const NPM_VISIBLE_TIMEOUT_MS = 300_000;
+export const NPM_VISIBLE_POLL_MS = 10_000;
 
 /** The branch a release tag must be on (decision #82): there is no maintenance-branch allowance. */
 export const RELEASE_BRANCH = 'main';
@@ -451,6 +494,56 @@ export function ovsxArgv(vsix, { token = false } = {}) {
   return ['publish', vsix, '--skip-duplicate', ...(token ? [] : ['--trusted-publishing'])];
 }
 
+/**
+ * The `mcp-publisher` arguments of one verb: `login github-oidc` (no secret: the job's OIDC token), `validate <file>` and `publish <file>`.
+ *
+ * @param {'login' | 'validate' | 'publish'} verb
+ * @param {string} [file] - The `server.json`, for `validate` and `publish`.
+ * @returns {string[]}
+ */
+export function mcpPublisherArgv(verb, file) {
+  if (verb === 'login') return ['login', 'github-oidc'];
+  if (verb === 'validate' || verb === 'publish') {
+    if (typeof file !== 'string' || file === '') throw new Error(`mcp-publisher ${verb} needs the server.json to ${verb}. Pass its path.`);
+    return [verb, file];
+  }
+  throw new Error(`${JSON.stringify(verb)} is not an mcp-publisher verb the release runs. Use login, validate or publish.`);
+}
+
+/** The read-only URL that tells whether the MCP Registry holds `name@version`: 200 with the server, or 404. */
+export function registryLookupUrl(name, version) {
+  return `${MCP_REGISTRY_BASE}/v0.1/servers/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}`;
+}
+
+/**
+ * What the MCP Registry's answer to {@link registryLookupUrl} means (the sibling of {@link storeOutcome}). `published` needs the registry's own
+ * evidence: a 200 with a JSON body whose `server.name` and `server.version` are the ones asked for. A 404 is `absent` (the release then
+ * publishes, and a fresh lookup judges a failed publish). Anything else is `unknown`, which stops the registry channel: another status, no
+ * status (the request failed or stalled), or a 200 that is not the registry's answer, because reading that as `published` would skip a
+ * publish and exit 0. Captured 2026-11-21 (read-only GETs): `io.github.upstash/context7@4.7.3` answered 200 `{"server":{...},"_meta":{...}}`;
+ * an unknown version and `io.github.jbrandtmse/iris-dev-mcp@1.0.0` answered 404 `{"title":"Not Found","status":404,"detail":"Server not found"}`.
+ *
+ * @param {{ status?: number, contentType?: string | null, body?: unknown }} answer `body` is the parsed JSON of a 200
+ * @param {{ name: string, version: string }} expected
+ * @returns {{ outcome: 'published' | 'absent' | 'unknown', why?: string }}
+ */
+export function registryOutcome(answer, expected) {
+  const { status } = answer;
+  if (status === 404) return { outcome: 'absent' };
+  if (status !== 200) return { outcome: 'unknown', why: status === undefined ? 'no answer' : `HTTP ${status}` };
+  const type = String(answer.contentType ?? '').trim();
+  const notTheRegistry = (what) => ({ outcome: 'unknown', why: `HTTP 200, but ${what}, so it is not the registry's answer` });
+  if (!/^application\/json\s*(?:;|$)/i.test(type)) return notTheRegistry(`the answer is ${type === '' ? 'untyped' : type}, not JSON`);
+  const server = /** @type {Record<string, any> | null | undefined} */ (answer.body)?.server;
+  const named = server !== null && typeof server === 'object' && server.name === expected.name && server.version === expected.version;
+  return named ? { outcome: 'published' } : notTheRegistry(`its JSON does not name ${expected.name}@${expected.version}`);
+}
+
+/** The read-only URL that tells whether npm serves `name@version` (the MCP Registry refuses a version npm does not serve yet): 200 or 404. */
+export function npmVersionUrl(name, version) {
+  return `https://registry.npmjs.org/${name.replace('/', '%2F')}/${encodeURIComponent(version)}`;
+}
+
 /** The Open VSX URL of a namespace: 200 when it exists, 404 when it does not. */
 export function openVsxNamespaceUrl(publisher) {
   return `https://open-vsx.org/api/${encodeURIComponent(publisher)}`;
@@ -622,5 +715,5 @@ export function releaseReport(results) {
 
 /** The text a disabled channel prints. */
 export function skippedText(channel) {
-  return `${STATUS.skipped}: not enabled (${channel.enabledBy})`;
+  return `${STATUS.skipped}: not enabled (${channel.enabledBy ?? 'no reason given'})`;
 }

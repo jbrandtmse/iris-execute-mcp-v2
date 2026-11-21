@@ -9,12 +9,16 @@
 //   rules/cursor/<name>.mdc                 each always-on rule, as a Cursor project rule
 //   rules/agents-md/<name>.md               each always-on rule, as an AGENTS.md section
 //   IRIS-MCP-THIRD-PARTY-NOTICES.md         the third-party notice
+//   .claude-plugin/plugin.json              the Claude Code plugin manifest (the pack directory is the plugin root)
+//   .mcp.json                               the plugin's five servers
 //   README.md                               generated (carries the DO-NOT-EDIT banner)
 //
 // SOURCES. Workflow skills are `gen:skills` output in `skills/`. Hand-authored content lives in
 // `skills-pack-src/`: knowledge skills under `knowledge/<name>/`, the rules under `rules/`, and the notice
-// at the root of that directory. Assembly copies bytes and renders only the pack README (a catalog of the
-// knowledge skills, the workflow skills and the rules) and each rule's three forms.
+// at the root of that directory. `plugin/` holds the plugin's `plugin.json` (rendered with the version of
+// `@iris-mcp/client-config`) and `mcp.json` (copied as bytes to `.mcp.json`). Assembly copies bytes and renders only the
+// pack README (a catalog of the knowledge skills, the workflow skills and the rules), each rule's three forms and
+// the plugin manifest.
 //
 // RULES. A rule source is one flat `rules/<name>.md` with no frontmatter (an always-on rule is unscoped,
 // so it takes no `paths:`). Its `claude-code` form is the source bytes. Its `cursor` form is the source bytes
@@ -42,9 +46,24 @@ import { listFilesRecursive } from './generated-tree.mjs';
 export const PACK_SOURCE_DIR = 'skills-pack-src';
 export const KNOWLEDGE_SOURCE_DIR = 'skills-pack-src/knowledge';
 export const RULES_SOURCE_DIR = 'skills-pack-src/rules';
+export const PLUGIN_SOURCE_DIR = 'skills-pack-src/plugin';
 export const PACK_DIR = 'packages/client-config/skills-pack';
 export const WORKFLOW_SKILLS_DIR = 'skills';
 export const NOTICE_FILENAME = 'IRIS-MCP-THIRD-PARTY-NOTICES.md';
+
+/** The Claude Code plugin files of the pack, relative to the pack root, and the two sources they come from. */
+export const PLUGIN_MANIFEST_PATH = '.claude-plugin/plugin.json';
+export const PLUGIN_SERVERS_PATH = '.mcp.json';
+export const PLUGIN_SOURCE_MANIFEST = 'plugin.json';
+export const PLUGIN_SOURCE_SERVERS = 'mcp.json';
+
+/** The plugin's and the marketplace's names (the install key is `iris-mcp@iris-mcp`) and the keys of the five servers in `.mcp.json`. */
+export const PLUGIN_NAME = 'iris-mcp';
+export const MARKETPLACE_NAME = 'iris-mcp';
+export const PLUGIN_SERVER_KEYS = Object.freeze(['dev', 'admin', 'data', 'interop', 'ops']);
+
+/** The package whose version the plugin manifest carries (lockstep with the shared version), relative to the repository root. */
+export const PLUGIN_VERSION_PACKAGE = 'packages/client-config/package.json';
 
 /** The pack's top-level index file. Generated; the source tree's own README is never copied. */
 export const PACK_README_FILENAME = 'README.md';
@@ -236,6 +255,21 @@ function catalogRuleLine({ stem, title }) {
   );
 }
 
+/** The pack README's "Claude Code plugin" section: the install, the six options, what a plugin cannot carry, and the installer command for the rule. */
+export const PLUGIN_README_SECTION =
+  `## Claude Code plugin\n\n` +
+  `This directory is also a Claude Code plugin root: the plugin \`iris-mcp\` of the marketplace \`iris-mcp\`, which brings the five ` +
+  `servers and the skills above.\n\n` +
+  `- Install it with \`/plugin marketplace add jbrandtmse/iris-execute-mcp-v2\`, then \`/plugin install iris-mcp@iris-mcp\`.\n` +
+  `- Claude Code asks for six options: \`iris_host\` (default \`localhost\`), \`iris_port\` (\`52773\`), \`iris_namespace\` (\`USER\`), ` +
+  `\`iris_https\` (\`false\`), \`iris_username\` and \`iris_password\`. The last two are required, and Claude Code keeps the password ` +
+  `in the system keychain. They set \`IRIS_HOST\`, \`IRIS_PORT\`, \`IRIS_NAMESPACE\`, \`IRIS_HTTPS\`, \`IRIS_USERNAME\` and ` +
+  `\`IRIS_PASSWORD\` for every server, and they win over the same variables exported in your shell. Every other \`IRIS_*\` variable ` +
+  `is inherited from the environment that starts Claude Code.\n` +
+  '- The servers are `dev`, `admin`, `data`, `interop` and `ops`; each runs `npx -y @iris-mcp/<name>@1`.\n' +
+  '- A plugin cannot carry rules. The always-on rule needs the installer; with the plugin enabled it installs only the rule:\n\n' +
+  '  `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients skills install --client claude-code`';
+
 /**
  * The generated pack README: a DO-NOT-EDIT banner naming the generator, a catalog of what the pack holds
  * (the knowledge skills, the workflow skills and the always-on rules, in that order, each sorted by name,
@@ -269,8 +303,10 @@ export function renderPackReadme(contents = {}) {
     `${catalogList(workflow)}\n\n` +
     `## Always-on rules\n\n` +
     `${catalogList(rules)}\n\n` +
+    `${PLUGIN_README_SECTION}\n\n` +
     `## Layout\n\n` +
     `- \`skills/<name>/SKILL.md\`: one directory per skill, in the standard plugin layout.\n` +
+    `- \`${PLUGIN_MANIFEST_PATH}\` and \`${PLUGIN_SERVERS_PATH}\`: the Claude Code plugin manifest and its five servers; this directory is the plugin root.\n` +
     `- \`rules/claude-code/<name>.md\`: the always-on rule as a Claude Code rule file.\n` +
     `- \`rules/cursor/<name>.mdc\`: the same rule as a Cursor project rule, with \`alwaysApply: true\` frontmatter.\n` +
     `- \`rules/agents-md/<name>.md\`: the same rule as an \`AGENTS.md\` section, between the lines ` +
@@ -552,6 +588,54 @@ function ruleTitle(stem, bytes) {
 }
 
 /**
+ * The plugin files of the pack, from `skills-pack-src/plugin/`: `.claude-plugin/plugin.json` (the source manifest with the version of
+ * `@iris-mcp/client-config` added after `name`, as 2-space JSON with a trailing newline) and `.mcp.json` (the source bytes). A root
+ * with no `plugin/` directory has no plugin files.
+ *
+ * @param {string} root - Repository root (absolute path).
+ * @returns {Array<[string, Buffer]>}
+ * @throws {Error} If `plugin/` holds anything but `plugin.json` and `mcp.json`, either is missing or not a JSON object, the manifest
+ *   already has a `version`, or the version package cannot be read.
+ */
+function pluginFiles(root) {
+  const dir = join(root, PLUGIN_SOURCE_DIR);
+  if (!existsSync(dir)) return [];
+  const names = readdirSync(dir, { withFileTypes: true });
+  const unknown = names.filter((entry) => !(entry.isFile() && [PLUGIN_SOURCE_MANIFEST, PLUGIN_SOURCE_SERVERS].includes(entry.name))).map((entry) => entry.name);
+  if (unknown.length > 0) {
+    throw new Error(`unknown entry in ${PLUGIN_SOURCE_DIR}/: ${unknown.sort().join(', ')}. Allowed: ${PLUGIN_SOURCE_MANIFEST}, ${PLUGIN_SOURCE_SERVERS}.`);
+  }
+  const readObject = (name) => {
+    const file = join(dir, name);
+    if (!existsSync(file)) throw new Error(`missing ${PLUGIN_SOURCE_DIR}/${name}.`);
+    const bytes = readFileSync(file);
+    let parsed;
+    try {
+      parsed = JSON.parse(bytes.toString('utf8'));
+    } catch (error) {
+      throw new Error(`${PLUGIN_SOURCE_DIR}/${name} is not valid JSON (${error instanceof Error ? error.message : String(error)}).`);
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${PLUGIN_SOURCE_DIR}/${name} is not a JSON object.`);
+    return { bytes, parsed };
+  };
+  const manifest = readObject(PLUGIN_SOURCE_MANIFEST).parsed;
+  const servers = readObject(PLUGIN_SOURCE_SERVERS);
+  if (Object.hasOwn(manifest, 'version')) {
+    throw new Error(`${PLUGIN_SOURCE_DIR}/${PLUGIN_SOURCE_MANIFEST} has a "version". Remove it: gen-pack adds the version of ${PLUGIN_VERSION_PACKAGE}.`);
+  }
+  const versionFile = join(root, PLUGIN_VERSION_PACKAGE);
+  if (!existsSync(versionFile)) throw new Error(`missing ${PLUGIN_VERSION_PACKAGE}, which holds the plugin's version.`);
+  const version = JSON.parse(readFileSync(versionFile, 'utf8')).version;
+  if (typeof version !== 'string' || version === '') throw new Error(`${PLUGIN_VERSION_PACKAGE} has no "version".`);
+  const { name, ...rest } = manifest;
+  const rendered = `${JSON.stringify({ name, version, ...rest }, null, 2)}\n`;
+  return [
+    [PLUGIN_MANIFEST_PATH, Buffer.from(rendered, 'utf8')],
+    [PLUGIN_SERVERS_PATH, servers.bytes],
+  ];
+}
+
+/**
  * Build the pack: pack-relative POSIX path -> file bytes.
  *
  * - every file of each `skills/<n>/` (not `skills/README.md`) goes to `skills/<n>/...`;
@@ -560,9 +644,10 @@ function ruleTitle(stem, bytes) {
  *   `rules/cursor/<n>.mdc` (the source bytes after the always-apply frontmatter) and to
  *   `rules/agents-md/<n>.md` (the source bytes between the two marker lines);
  * - the notice goes to the pack root, beside a generated `README.md` that catalogs the skills (each with
- *   the description and the tool preset its frontmatter declares) and the rules.
+ *   the description and the tool preset its frontmatter declares) and the rules;
+ * - `skills-pack-src/plugin/` goes to `.claude-plugin/plugin.json` and `.mcp.json` (see `pluginFiles`).
  *
- * A missing `knowledge/` or `rules/` directory counts as empty.
+ * A missing `knowledge/`, `rules/` or `plugin/` directory counts as empty.
  *
  * @param {string} root - Repository root (absolute path).
  * @returns {Map<string, Buffer>}
@@ -581,7 +666,8 @@ export function assemblePack(root) {
 
   // Every top-level entry of the source directory is known, or the build fails and names it.
   const allowedFiles = new Set([SOURCE_README_FILENAME, NOTICE_FILENAME]);
-  const allowedDirs = new Set([knowledgeEntry, rulesEntry]);
+  const pluginEntry = posix.relative(PACK_SOURCE_DIR, PLUGIN_SOURCE_DIR);
+  const allowedDirs = new Set([knowledgeEntry, rulesEntry, pluginEntry]);
   const unknown = [];
   if (existsSync(sourceDir)) {
     for (const entry of readdirSync(sourceDir, { withFileTypes: true })) {
@@ -592,7 +678,7 @@ export function assemblePack(root) {
   if (unknown.length > 0) {
     throw new Error(
       `unknown entry in ${PACK_SOURCE_DIR}/: ${unknown.sort().join(', ')}. ` +
-        `Allowed: ${[...allowedFiles].join(', ')}, ${knowledgeEntry}/, ${rulesEntry}/.`,
+        `Allowed: ${[...allowedFiles].join(', ')}, ${knowledgeEntry}/, ${rulesEntry}/, ${pluginEntry}/.`,
     );
   }
 
@@ -684,6 +770,7 @@ export function assemblePack(root) {
     throw new Error(`missing ${PACK_SOURCE_DIR}/${NOTICE_FILENAME}.`);
   }
   add(NOTICE_FILENAME, readFileSync(noticePath), `${PACK_SOURCE_DIR}/${NOTICE_FILENAME}`);
+  for (const [packRel, bytes] of pluginFiles(root)) add(packRel, bytes, PLUGIN_SOURCE_DIR);
   add(PACK_README_FILENAME, Buffer.from(renderPackReadme(catalog), 'utf8'), 'the generated pack README');
 
   return pack;

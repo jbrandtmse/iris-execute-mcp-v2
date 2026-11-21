@@ -25,11 +25,13 @@ export interface FakeAnswer {
   contentType?: string;
   /** A body that is not JSON, sent as is in place of `body` (a vsix, an HTML page). */
   raw?: string;
+  /** Binary bytes, sent as is in place of `raw` and `body` (a tarball). */
+  bytes?: Uint8Array;
 }
 
-/** The `Response` of a fake answer: `raw` as is, else `body` as JSON, typed `contentType` or `application/json`. */
+/** The `Response` of a fake answer: `bytes` or `raw` as is, else `body` as JSON, typed `contentType` or `application/json`. */
 function responseOf(answer: FakeAnswer): Response {
-  const body = answer.raw ?? (answer.body === undefined ? null : JSON.stringify(answer.body));
+  const body = answer.bytes ?? answer.raw ?? (answer.body === undefined ? null : JSON.stringify(answer.body));
   return new Response(body, { status: answer.status, headers: { "Content-Type": answer.contentType ?? "application/json" } });
 }
 
@@ -160,6 +162,14 @@ export interface FakeStores {
   marketplace: FakeAnswer;
   openVsx: FakeAnswer;
   namespace: FakeAnswer;
+  /** The IPM registry's answer for the package (Story 42.8): 404 for a package it does not list. */
+  ipmRegistry: FakeAnswer;
+  /** The MCP Registry's answer for `name@version`: 404 (the real body) for a server it does not list. */
+  mcpRegistry: (name: string, version: string) => FakeAnswer;
+  /** npm's answer for `<package>@<version>`: 200 once npm serves it. */
+  npmVersion: (name: string, version: string) => FakeAnswer;
+  /** The answer for the `mcp-publisher` download; `undefined` is the unrouted 599. */
+  publisher?: FakeAnswer;
   /** Every request the stores were asked: its URL, its headers, whether the caller gave it a signal of its own, its method (`GET` when none was given) and whether it carried a body. */
   requests: Array<{ url: string; headers: Record<string, string>; signal: boolean; method: string; hasBody: boolean }>;
 }
@@ -190,8 +200,19 @@ export function newFakeStores(): FakeStores {
     marketplace: { status: 404, contentType: "application/json; charset=utf-8", body: { $id: "1", innerException: null, message: "Resource not found", typeKey: "ExtensionAssetNotFoundException" } },
     openVsx: { status: 404, body: { deprecated: false, downloadable: false, error: "Extension not found: iris-mcp.iris-mcp-launcher 1.0.0" } },
     namespace: { status: 200, body: { extensions: {} } },
+    ipmRegistry: { status: 404, body: { message: "package not found" } },
+    mcpRegistry: () => MCP_REGISTRY_MISS,
+    npmVersion: () => ({ status: 200, body: {} }),
     requests: [],
   };
+}
+
+/** The MCP Registry's answer for a server it does not list (read-only GETs on 2026-11-21): 404 `{"title":"Not Found","status":404,"detail":"Server not found"}`. */
+export const MCP_REGISTRY_MISS: FakeAnswer = { status: 404, body: { title: "Not Found", status: 404, detail: "Server not found" } };
+
+/** The MCP Registry's answer for a server it lists: 200 `{"server":{...},"_meta":{...}}`, as for `io.github.upstash/context7@4.7.3`. */
+export function mcpRegistryHit(name: string, version: string): FakeAnswer {
+  return { status: 200, body: { server: { name, version, description: "x" }, _meta: {} } };
 }
 
 /** The answer of the fake stores for a URL, recorded in `requests`; `undefined` for a URL that is not a store's. */
@@ -205,6 +226,24 @@ export function storeAnswerFor(stores: FakeStores, url: string, init?: FakeInit)
   if (parsed.host === "open-vsx.org") {
     record();
     return parsed.pathname.split("/").filter((part) => part !== "").length === 2 ? stores.namespace : stores.openVsx;
+  }
+  if (parsed.host === "pm.community.intersystems.com") {
+    record();
+    return stores.ipmRegistry;
+  }
+  if (parsed.host === "registry.modelcontextprotocol.io") {
+    record();
+    const match = /^\/v0\.1\/servers\/([^/]+)\/versions\/([^/]+)$/.exec(parsed.pathname);
+    return match === null ? undefined : stores.mcpRegistry(decodeURIComponent(match[1] as string), decodeURIComponent(match[2] as string));
+  }
+  if (parsed.host === "registry.npmjs.org") {
+    record();
+    const match = /^\/(@[^/]+(?:%2F|\/)[^/]+)\/([^/]+)$/i.exec(parsed.pathname);
+    return match === null ? undefined : stores.npmVersion(decodeURIComponent(match[1] as string), decodeURIComponent(match[2] as string));
+  }
+  if (parsed.host === "github.com" && parsed.pathname.startsWith("/modelcontextprotocol/registry/releases/download/")) {
+    record();
+    return stores.publisher;
   }
   return undefined;
 }
@@ -266,15 +305,22 @@ export function makeArtifacts(dir: string, options: ArtifactOptions = {}): Artif
   write("ipm/module.xml", "<Export/>\n");
   write("ipm/README.md", "# iris-execute-mcp-v2\n");
   write("ipm/src/cls/ExecuteMCPv2/Utils.cls", "Class ExecuteMCPv2.Utils {}\n");
+  const registryServers = SERVER_DIRS.map((dir) => {
+    const file = `mcp-registry/${dir}.json`;
+    write(file, `${JSON.stringify({ name: registryNameOf(dir), version, packages: [{ identifier: `@iris-mcp/${dir.replace(/^iris-|-mcp$/g, "")}`, version }] })}\n`);
+    return { name: registryNameOf(dir), version, package: `@iris-mcp/${dir.replace(/^iris-|-mcp$/g, "")}`, file };
+  });
   const vsix = { file: vsixFile, name: "iris-mcp-launcher", version: vsixVersion, publisher: options.publisher ?? "TBD-at-publish-time", files: ["package.json", "dist/extension.js"] };
   const details: Record<string, Record<string, unknown>> = {
     npm: { packages },
     "vscode-marketplace": vsix,
     "open-vsx": vsix,
     ipm: { tree: "ipm", module: "iris-execute-mcp-v2", version, marker: `${version}+2.244fe8623c76`, repository: "jbrandtmse/iris-execute-mcp-v2-ipm", branch: "master" },
+    "mcp-registry": { servers: registryServers },
   };
   const files = [
     ...packages.map((entry) => entry.tarball),
+    ...registryServers.map((server) => server.file),
     vsixFile,
     "ipm/module.xml",
     "ipm/README.md",
@@ -335,7 +381,16 @@ export interface RepoOptions {
   extensionLockRootVersion?: string;
   /** The extension's changelog text (default: a first heading `## [<the shared version>]`). */
   extensionChangelog?: string;
+  /** The listings' versions (default: the shared version, the lockstep): the plugin manifest, the marketplace entry's ref (`v<version>`), and the `version` and `packages[0].version` of each server.json. */
+  pluginVersion?: string;
+  marketplaceRef?: string;
+  serverVersion?: string;
+  serverPackageVersion?: string;
 }
+
+/** The five server directories of the real repository, and the registry name of each. */
+export const SERVER_DIRS = ["iris-admin-mcp", "iris-data-mcp", "iris-dev-mcp", "iris-interop-mcp", "iris-ops-mcp"] as const;
+export const registryNameOf = (dir: string): string => `io.github.jbrandtmse/${dir}`;
 
 /** The root scripts of the real repository that matter to `prepare`. */
 export const ROOT_SCRIPTS: Record<string, string> = {
@@ -344,6 +399,7 @@ export const ROOT_SCRIPTS: Record<string, string> = {
   "gen:governance-baseline:check": "node scripts/gen-governance-baseline.mjs --check",
   "gen:skills:check": "node scripts/gen-skills.mjs --check",
   "gen:pack:check": "node scripts/gen-pack.mjs --check",
+  "gen:listings:check": "node scripts/gen-listings.mjs --check",
   "gen:tools-list-snapshot:check": "node scripts/gen-tools-list-snapshot.mjs --check",
   "format:check": "prettier --check .",
   "check:provenance": "node scripts/check-provenance.mjs",
@@ -398,5 +454,19 @@ export function makeRepo(root: string, options: RepoOptions = {}): { versionOf: 
   });
   text("extensions/iris-mcp-launcher/CHANGELOG.md", options.extensionChangelog ?? `# Changelog\n\n## [${sharedVersion}] \u2014 2026-01-01\n\n- A synthetic entry.\n`);
   text("LICENSE", "MIT License\n");
+  // The listings follow the shared version (lockstep, Story 42.8): the plugin manifest, the marketplace ref and the five server.json files.
+  json("packages/client-config/skills-pack/.claude-plugin/plugin.json", { name: "iris-mcp", version: options.pluginVersion ?? sharedVersion });
+  json(".claude-plugin/marketplace.json", {
+    name: "iris-mcp",
+    owner: { name: "jbrandtmse" },
+    plugins: [{ name: "iris-mcp", source: { source: "git-subdir", url: "https://github.com/jbrandtmse/iris-execute-mcp-v2.git", path: "packages/client-config/skills-pack", ref: options.marketplaceRef ?? `v${sharedVersion}` } }],
+  });
+  for (const dir of SERVER_DIRS) {
+    json(`packages/${dir}/server.json`, {
+      name: registryNameOf(dir),
+      version: options.serverVersion ?? sharedVersion,
+      packages: [{ registryType: "npm", identifier: `@iris-mcp/${dir.replace(/^iris-|-mcp$/g, "")}`, version: options.serverPackageVersion ?? options.serverVersion ?? sharedVersion }],
+    });
+  }
   return { versionOf };
 }

@@ -3,7 +3,8 @@
 // DISTRIBUTIONS. One per non-private `packages/*/package.json`, enumerated mechanically. A distribution's
 // file list is what npm's own packer would put in the tarball (`npm pack --dry-run --json
 // --ignore-scripts --offline`); the bytes of those files come from disk. Stories that add a distribution
-// (the plugin) append it to `gatherProvenanceInputs`.
+// append it to `gatherProvenanceInputs`. The plugin is not a distribution: its root is the pack directory, whose files `plugin` (the
+// rule over `gatherPluginInputs`) and `notice-sync` cover.
 //
 // INSTALLER PAYLOADS. When `packages/client-config/package.json` exists, one more distribution per installer
 // route (`installer:claude-code`, `installer:cursor`, `installer:gemini`, `installer:agents`) holds the files an
@@ -23,7 +24,16 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDistShipping } from './dist-freshness.mjs';
 import { listFilesRecursive } from './generated-tree.mjs';
-import { listAgentContentFiles, NOTICE_FILENAME, PACK_DIR, PACK_SOURCE_DIR } from './skills-pack.mjs';
+import { MARKETPLACE_PATH, SERVER_PACKAGES, serverJsonPath } from './listings.mjs';
+import {
+  listAgentContentFiles,
+  NOTICE_FILENAME,
+  PACK_DIR,
+  PACK_SOURCE_DIR,
+  PLUGIN_MANIFEST_PATH,
+  PLUGIN_SERVERS_PATH,
+  PLUGIN_VERSION_PACKAGE,
+} from './skills-pack.mjs';
 
 /** The packages whose tarball must carry the whole pack. */
 export const PACK_SHIPPING_PACKAGES = ['@iris-mcp/client-config'];
@@ -217,6 +227,41 @@ function gatherInstallerDistributions(root, probe) {
 }
 
 /**
+ * One JSON file for the `plugin` rule: its parsed value, or `null` with the problem that kept it from being read.
+ *
+ * @param {string} root - Repository root (absolute path).
+ * @param {string} rel - Repository-relative path.
+ * @returns {import('./provenance-core.mjs').JsonInput}
+ */
+function readJsonInput(root, rel) {
+  const file = join(root, rel);
+  if (!existsSync(file)) return { path: rel, value: null, problem: 'the file is missing' };
+  try {
+    return { path: rel, value: JSON.parse(readFileSync(file, 'utf8')) };
+  } catch (error) {
+    return { path: rel, value: null, problem: `the file is not valid JSON (${error instanceof Error ? error.message : String(error)})` };
+  }
+}
+
+/**
+ * The inputs of the `plugin` rule: the pack's plugin manifest and servers, the marketplace and the five `server.json` files, with the
+ * shared version (the version of `@iris-mcp/client-config`).
+ *
+ * @param {string} root - Repository root (absolute path).
+ * @returns {import('./provenance-core.mjs').PluginInputs}
+ */
+export function gatherPluginInputs(root) {
+  const version = readJsonInput(root, PLUGIN_VERSION_PACKAGE).value?.version;
+  return {
+    version: typeof version === 'string' ? version : null,
+    manifest: readJsonInput(root, `${PACK_DIR}/${PLUGIN_MANIFEST_PATH}`),
+    servers: readJsonInput(root, `${PACK_DIR}/${PLUGIN_SERVERS_PATH}`),
+    marketplace: readJsonInput(root, MARKETPLACE_PATH),
+    serverJsons: SERVER_PACKAGES.map(({ dir }) => readJsonInput(root, serverJsonPath(dir))),
+  };
+}
+
+/**
  * Everything `checkProvenance` reads.
  *
  * @param {string} root - Repository root (absolute path).
@@ -237,6 +282,7 @@ export function gatherProvenanceInputs(root, options = {}) {
       text: readFileSync(absPath, 'utf8'),
     })),
     packFiles: listFilesRecursive(packDir).map((rel) => ({ rel, bytes: readFileSync(join(packDir, rel)) })),
+    plugin: gatherPluginInputs(root),
     distributions: [...gatherDistributions(root, runner), ...gatherInstallerDistributions(root, probe)],
   };
 }

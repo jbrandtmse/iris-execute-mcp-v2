@@ -293,6 +293,7 @@ export const ROOT_GATE_SCRIPTS = Object.freeze([
   'pnpm gen:governance-baseline:check',
   'pnpm gen:skills:check',
   'pnpm gen:pack:check',
+  'pnpm gen:listings:check',
   'pnpm validate:prompts',
   'pnpm check:provenance',
   'pnpm gen:tools-list-snapshot:check',

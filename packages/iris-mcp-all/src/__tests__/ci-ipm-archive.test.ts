@@ -18,11 +18,12 @@
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { EDITIONS, PhaseFailure, parseArgs, runIpmArchive } from "../../../../scripts/ci-ipm-archive.mjs";
 import { findExecutable } from "../../../../scripts/throwaway-iris.mjs";
+import { ipmReadme } from "../../../../scripts/lib/release-core.mjs";
 import {
   ABSENT_DOCUMENT,
   FORBIDDEN_IPM_VERBS,
@@ -52,11 +53,15 @@ import {
   parityProblems,
   parityScript,
   readTgz,
+  registryArchiveProblems,
+  registryArchiveScript,
+  registryTarCommand,
   repositoriesScript,
   seedMarkers,
   sessionScript,
   setupStateScript,
   stageModule,
+  stagePackagingRoot,
   stripTerminal,
   synthesizedSetup,
 } from "../../../../scripts/lib/ipm-archive.mjs";
@@ -453,6 +458,123 @@ describe("parityProblems", () => {
   });
 });
 
+// -- the registry-shaped archive (Story 42.8, DW-694) -----------------------------------------
+
+describe("stagePackagingRoot: the one function that stages what the release pushes and what the proof tars (DW-694)", () => {
+  const LICENSE_TEXT = "MIT License\n\nCopyright (c) test\n";
+
+  it("stages the module plus README.md and LICENSE, every file 0644 and every directory 0755", () => {
+    const directory = scratchDir();
+    const embed = syntheticEmbed();
+    const { files } = stagePackagingRoot(directory, embed, { version: "1.2.3", licenseText: LICENSE_TEXT });
+
+    expect(files.sort()).toEqual([...stageModule(scratchDir(), embed).files, "README.md", "LICENSE"].sort());
+    expect(filesUnder(directory).sort()).toEqual(files.sort());
+    expect(readFileSync(path.join(directory, "LICENSE"), "utf8")).toBe(LICENSE_TEXT);
+    expect(readFileSync(path.join(directory, "README.md"), "utf8")).toBe(ipmReadme("1.2.3"));
+    for (const file of files) expect(statSync(path.join(directory, file)).mode & 0o777, file).toBe(0o644);
+    for (const folder of ["src", "src/cls", "src/cls/ExecuteMCPv2", "preload"]) expect(statSync(path.join(directory, folder)).mode & 0o777, folder).toBe(0o755);
+    expect(statSync(directory).mode & 0o777).toBe(0o755);
+  });
+
+  it("module.xml is at the root of the staged tree, never in a subdirectory", () => {
+    const directory = scratchDir();
+    const { files } = stagePackagingRoot(directory, syntheticEmbed(), { version: "1.2.3", licenseText: LICENSE_TEXT });
+    expect(files).toContain("module.xml");
+    expect(files.filter((file) => file.endsWith("module.xml"))).toEqual(["module.xml"]);
+  });
+
+  it("refuses an embed that is not releasable, and writes nothing, as stageModule does", () => {
+    const directory = scratchDir();
+    const embed = syntheticEmbed({ classes: new Map([["ExecuteMCPv2.Setup.cls", 'Class ExecuteMCPv2.Setup\n{\nParameter BOOTSTRAPVERSION = "dev";\n}\n']]) });
+    expect(() => stagePackagingRoot(directory, embed, { version: "1.2.3", licenseText: LICENSE_TEXT })).toThrow(/refusing to stage the module/);
+    expect(readdirSync(directory)).toEqual([]);
+  });
+});
+
+describe("registryArchiveProblems over a real GNU-style `tar --exclude=.git -czf ... -C <root> .` of the staged packaging root (DW-694)", () => {
+  /** Stage the packaging root, apply `mutate` to the staged tree, tar it the way the registry does, and judge its members against the files that were staged. */
+  function judged(mutate: (stage: string) => void = () => undefined, extraTarArguments: string[] = ["--exclude=.git"]): string[] {
+    const stage = scratchDir();
+    const { files } = stagePackagingRoot(stage, syntheticEmbed(), { version: "1.2.3", licenseText: "MIT License\n" });
+    mutate(stage);
+    const archive = path.join(scratchDir(), "registry-root.tgz");
+    const made = tarGz(archive, stage, extraTarArguments);
+    expect(made.status, made.stderr).toBe(0);
+    return registryArchiveProblems(readTgz(readFileSync(archive)), files);
+  }
+
+  it("finds nothing wrong with the archive of the staged packaging root: ./module.xml at its top, exactly the staged files", () => {
+    expect(judged()).toEqual([]);
+  });
+
+  it("finds nothing wrong with the real embed's packaging root either", () => {
+    const stage = scratchDir();
+    const { files } = stagePackagingRoot(stage, realEmbed(), { version: "1.0.0", licenseText: readFileSync(path.join(REPO_ROOT, "LICENSE"), "utf8") });
+    const archive = path.join(scratchDir(), "registry-root.tgz");
+    expect(tarGz(archive, stage, ["--exclude=.git"]).status).toBe(0);
+    const entries = readTgz(readFileSync(archive));
+    expect(entries.some((entry) => entry.name === "./module.xml"), "the members are ./<path>, as the registry's tar writes them").toBe(true);
+    expect(registryArchiveProblems(entries, files)).toEqual([]);
+  });
+
+  it("module.xml under a subdirectory is refused: there is no module.xml at the top (the mutation of the served-artifact gate)", () => {
+    const problems = judged((stage) => {
+      mkdirSync(path.join(stage, "ipm"));
+      renameSync(path.join(stage, "module.xml"), path.join(stage, "ipm", "module.xml"));
+    });
+    expect(problems.join("\n")).toMatch(/no module\.xml at its top/);
+    expect(problems.join("\n")).toMatch(/is missing the staged file module\.xml/);
+    expect(problems.join("\n")).toMatch(/holds ipm\/module\.xml, which was not staged/);
+  });
+
+  it("a .git directory that tar did not exclude is refused", () => {
+    const problems = judged((stage) => {
+      mkdirSync(path.join(stage, ".git"));
+      writeFileSync(path.join(stage, ".git", "HEAD"), "ref: refs/heads/master\n");
+    }, []);
+    expect(problems.join("\n")).toMatch(/holds \.\/\.git\/HEAD, which the registry's tar excludes/);
+  });
+
+  it("with --exclude=.git a .git directory in the staged tree never reaches the archive", () => {
+    const problems = judged((stage) => {
+      mkdirSync(path.join(stage, ".git"));
+      writeFileSync(path.join(stage, ".git", "HEAD"), "ref: refs/heads/master\n");
+    });
+    expect(problems).toEqual([]);
+  });
+
+  it("an extra file and a missing file are each refused, naming the file", () => {
+    expect(judged((stage) => writeFileSync(path.join(stage, "EXTRA.txt"), "x\n")).join("\n")).toMatch(/holds EXTRA\.txt, which was not staged/);
+    expect(judged((stage) => rmSync(path.join(stage, "LICENSE"))).join("\n")).toMatch(/is missing the staged file LICENSE/);
+  });
+
+  it("a symbolic link member is refused (it is neither a file nor a directory)", () => {
+    const problems = judged((stage) => symlinkSync("module.xml", path.join(stage, "link.xml")));
+    expect(problems.join("\n")).toMatch(/link\.xml, which is neither a file nor a directory/);
+  });
+
+  it("the member names are compared without the leading ./ and doubled slashes", () => {
+    expect(registryArchiveProblems([{ name: ".//module.xml", type: "file" }, { name: "./", type: "directory" }], ["module.xml"])).toEqual([]);
+  });
+
+  it("an empty archive is refused, not passed for having nothing wrong", () => {
+    expect(registryArchiveProblems([], ["module.xml"]).join("\n")).toMatch(/no module\.xml at its top/);
+  });
+});
+
+describe("the session script of the registry-shaped leg", () => {
+  it("runs GNU tar from inside the mounted root into the output directory, excluding .git, and reads back OUTDIR, TAR and FILES", () => {
+    expect(registryTarCommand()).toBe("tar --exclude=.git -czf /tmp/iris-mcp-ipm-out/registry-root.tgz -C /opt/iris-mcp/registry/root .");
+    const script = registryArchiveScript();
+    expect(script).toContain(`$ZF(-1,"${registryTarCommand()}")`);
+    for (const name of ["OUTDIR", "TAR", "FILES"]) expect(markerValue(`IRISMCP-${name}-START:x:IRISMCP-${name}-END`, name), name).toBe("x");
+    expect(script).toContain('IRISMCP-"_"TAR-START:');
+    expect(script.endsWith("Halt\n")).toBe(true);
+    expect(ipmVerbsOf(script), "it issues no IPM verb").toEqual([]);
+  });
+});
+
 // -- the verb set (AC 42.4.4) ----------------------------------------------------------------
 
 describe("the IPM verbs the proof issues (AC 42.4.4)", () => {
@@ -561,6 +683,9 @@ module.exports = function handler(namespace, stdin, { dir, container }) {
     out += marker("IPM", fail === "import" ? "FAILED:ERROR #5001: scripted" : "OK") + repositories("import");
   } else if (stdin.includes("Shell(\"load -dev ")) {
     out += (fail === "load-dev" ? "" : "") + marker("COMMAND", fail === "load-dev" ? "FAILED:ERROR #5001: scripted load -dev failure" : "OK") + repositories("load-dev");
+  } else if (stdin.includes("$ZF(-1,")) {
+    // The registry-shaped leg: GNU tar of the packaging root, made inside the container (the command text is what the test pins).
+    out += marker("OUTDIR", fail === "registry-outdir-fails" ? "0" : "1") + marker("TAR", fail === "registry-tar-fails" ? "2" : "0") + marker("FILES", fail === "registry-no-archive" ? "" : "registry-root.tgz|");
   } else if (stdin.includes("RemoveDirectoryTree")) {
     out += marker("OUTDIR", fail === "outdir-fails" ? "0" : "1");
   } else if (stdin.includes("Shell(\"package ")) {
@@ -576,7 +701,7 @@ module.exports = function handler(namespace, stdin, { dir, container }) {
     save();
     const synthFails = fail === "synth-fails" || (fail === "older-synth-fails" && leg === "older");
     out += marker("SYNTH", synthFails ? "FAILED:ERROR #5001: scripted synthetic load failure" : "OK");
-  } else if (stdin.includes("Shell(\"load /opt/iris-mcp/install/")) {
+  } else if (stdin.includes("Shell(\"load /opt/iris-mcp/install/") || stdin.includes("Shell(\"load /tmp/iris-mcp-ipm-out/registry-root.tgz")) {
     let outcome = "OK";
     if (state.setup !== null) {
       const relation = state.setup === "" ? "unknown" : config.relations[state.setup];
@@ -618,7 +743,7 @@ module.exports = function handler(namespace, stdin, { dir, container }) {
     out += marker("SETUP", fail === "health-not-fresh" && namespace === "HSCUSTOM" && !state.installed ? "compiled:1.0.0+1.cccccccccccc" : setup) + marker("GUARD", state.guardDefined ? "1" : "0");
   } else if (stdin.includes("%Dictionary.CompiledClass WHERE Name %STARTSWITH")) {
     const app = fail === "app-matchroles" ? namespace + "|ExecuteMCPv2.REST.Dispatch|1|%All" : namespace + "|ExecuteMCPv2.REST.Dispatch|1|";
-    out += marker("COMPILED", fail === "compiled-count" ? "35" : "36") + marker("TESTCLASSES", fail === "test-classes" ? "2" : "0");
+    out += marker("COMPILED", fail === "compiled-count" || (fail === "registry-compiled-count" && path.basename(mountHost) === "registry") ? "35" : "36") + marker("TESTCLASSES", fail === "test-classes" ? "2" : "0");
     const version = fail === "version-call-wrong" ? "not-the-marker" : state.setup === null ? "" : state.setup;
     out += marker("VERSION", version) + marker("APP", app) + marker("MAPPED", fail === "not-mapped" ? "0" : "1") + marker("HTTP", fail === "http-500" ? "500" : "200");
     out += marker("GUARDDOC", fail === "guard-document-missing" ? "404" : fail === "guard-document-unauthorized" ? "401" : "200") + marker("ABSENTDOC", fail === "absent-document-found" ? "200" : "404");
@@ -651,6 +776,8 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
   let fake: FakeDocker;
   let tmp = "";
   let archiveSource = "";
+  let registryArchiveSource = "";
+  let registryFiles: string[] = [];
   let embed: Embed;
   let cases: ParityCase[];
 
@@ -669,6 +796,14 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     archiveSource = path.join(root, "good.tgz");
     const made = tarGz(archiveSource, stage);
     expect(made.status, made.stderr).toBe(0);
+
+    // The archive the registry-shaped leg copies out: GNU-style tar of the packaging root the release stages (./module.xml at its top, no .git).
+    const registryStage = path.join(root, "registry-stage");
+    mkdirSync(registryStage);
+    registryFiles = stagePackagingRoot(registryStage, embed, { version: markerSemver(embed.marker), licenseText: readFileSync(path.join(REPO_ROOT, "LICENSE"), "utf8") }).files;
+    registryArchiveSource = path.join(root, "registry-good.tgz");
+    const registryMade = tarGz(registryArchiveSource, registryStage, ["--exclude=.git"]);
+    expect(registryMade.status, registryMade.stderr).toBe(0);
 
     // What the comparator answers for every case the run will send: the fixture's and the three built from the embedded marker.
     const fixture = JSON.parse(readFileSync(PARITY_FIXTURE, "utf8")) as ParityCase[];
@@ -717,6 +852,7 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
       FAKE_DOCKER_DIR: fake.dir,
       FAKE_DOCKER_SESSION_HANDLER: path.join(root, "handler.cjs"),
       FAKE_DOCKER_CP_SOURCE: archiveSource,
+      FAKE_DOCKER_CP_REGISTRY_SOURCE: registryArchiveSource,
       ...env,
     };
     return new Promise((resolve, reject) => {
@@ -763,18 +899,27 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     expect(run.stderr).toContain("[install-health] the archive installed on a fresh");
     expect(run.stderr).toMatch(/\[parity-community\] \d+\/\d+ cases agree/);
     expect(run.stderr).toMatch(/\[parity-health\] \d+\/\d+ cases agree/);
+    // The registry-shaped leg (DW-694): the staged packaging root, tarred in a fresh container per edition, copied out once and checked, then loaded as an archive.
+    expect(run.stderr).toMatch(/\[registry\] staged the packaging root: \d+ files \(the module, README\.md and LICENSE\)/);
+    expect(run.stderr).toMatch(/\[registry-community\] the archive tarred as the registry serves it holds \.\/module\.xml at its top, no \.git and exactly the \d+ staged files/);
+    expect(run.stderr).toContain("[registry-community] the registry-shaped archive installed on a fresh");
+    expect(run.stderr).toContain("[registry-health] the registry-shaped archive installed on a fresh");
+    expect(run.stderr).toMatch(/\[parity-registry-community\] \d+\/\d+ cases agree/);
+    expect(run.stderr).toMatch(/\[parity-registry-health\] \d+\/\d+ cases agree/);
     expect(run.stderr).toContain("PASS: one archive of iris-execute-mcp-v2");
     expect(run.stderr).toContain("0 package-registry rows");
 
     const runs = fake.calls().filter((call) => call.argv[0] === "run");
-    expect(runs, "a build container and one install container per edition").toHaveLength(3);
+    expect(runs, "a build container, one install container and one registry-shaped container per edition").toHaveLength(5);
     expect(runs.map((call) => call.argv[call.argv.length - 1])).toEqual([
       EDITIONS.community.image,
       EDITIONS.community.image,
       EDITIONS.health.image,
+      EDITIONS.community.image,
+      EDITIONS.health.image,
     ]);
-    expect(dockerVerbs().filter((verb) => verb === "rm")).toHaveLength(3);
-    expect(dockerVerbs().filter((verb) => verb === "cp")).toHaveLength(1);
+    expect(dockerVerbs().filter((verb) => verb === "rm")).toHaveLength(5);
+    expect(dockerVerbs().filter((verb) => verb === "cp"), "the built archive, and the registry-shaped one (community only)").toHaveLength(2);
     expect(dockerVerbs().filter((verb) => verb === "logs"), "no log is read when everything passes").toHaveLength(0);
     expectCleanEnd();
   }, 120_000);
@@ -803,15 +948,16 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
   }, 120_000);
 
   it.each([
-    ["community", ["build", "install-community"], 2],
-    ["health", ["build", "install-health"], 2],
-  ])("--edition %s starts the build container and that edition's install container only", async (edition, phases, containers) => {
+    ["community", ["build", "install-community", "registry-community"], 3],
+    ["health", ["build", "install-health", "registry-health"], 3],
+  ])("--edition %s starts the build container, that edition's install container and its registry-shaped container only", async (edition, phases, containers) => {
     const run = await runScript(["--edition", edition]);
 
     expect(run.status, run.stderr).toBe(0);
     expect(fake.calls().filter((call) => call.argv[0] === "run")).toHaveLength(containers);
     for (const phase of phases) expect(run.stderr).toContain(`[${phase}]`);
     expect(run.stderr).not.toContain(edition === "community" ? "[install-health]" : "[install-community]");
+    expect(run.stderr).not.toContain(edition === "community" ? "[registry-health]" : "[registry-community]");
     expectCleanEnd();
   }, 120_000);
 
@@ -845,6 +991,14 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     ["parity-mismatch", "community", "parity-community", "community", "InstallGuard.Classify says"],
     ["parity-short", "community", "parity-community", "community", "answered"],
     ["health-not-fresh", "health", "install-health", "health", "already has a Setup class"],
+    // The registry-shaped leg (DW-694): each clause of its checks can fail on its own.
+    ["registry-outdir-fails", "community", "registry-community", "community", "could not be emptied and created"],
+    ["registry-tar-fails", "community", "registry-community", "community", "tar exited \"2\" making the registry-shaped archive"],
+    ["registry-no-archive", "community", "registry-community", "community", "not the one registry-root.tgz"],
+    ["fresh-load-fails", "community", "registry-community", "community", "load of the registry-shaped archive did not succeed"],
+    ["registry-compiled-count", "community", "registry-community", "community", "35 ExecuteMCPv2 classes are compiled and up to date, not 36"],
+    ["registry-tar-fails", "health", "registry-health", "health", "tar exited"],
+    ["fresh-load-fails", "health", "install-health", "health", "load of the archive on a fresh container did not succeed"],
     ["parity-mismatch", "health", "parity-health", "health", "InstallGuard.Classify says"],
     ["http-500", "health", "install-health", "health", 'answered "500", not 200'],
     // The ownership signal the server's bootstrap reads: the install guard's document answers 200 through Atelier, a missing one 404.
@@ -862,7 +1016,6 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     ["older-load-fails", "community", "install-community", "community", "over an older Setup"],
     ["list-version-wrong", "community", "install-community", "community", "list names iris-execute-mcp-v2 at"],
     ["version-call-wrong", "community", "install-community", "community", "GetBootstrapVersion() answers"],
-    ["fresh-load-fails", "health", "install-health", "health", "load of the archive on a fresh container did not succeed"],
     ["list-version-wrong", "health", "install-health", "health", "list names iris-execute-mcp-v2 at"],
     ["version-wrong", "health", "install-health", "health", "GetBootstrapVersion() answers"],
   ];
@@ -918,6 +1071,78 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
       expect(run.stderr, "no install container was started").not.toContain("[install-community]");
       expect(fake.calls().filter((call) => call.argv[0] === "run")).toHaveLength(1);
       expectCleanEnd();
+    }, 120_000);
+  });
+
+  describe("a registry-shaped archive that is not the packaging root ends the run in the registry phase (DW-694)", () => {
+    /** Stage the packaging root, apply `mutate`, and make the archive the scripted `cp` hands out for `registry-root.tgz`. */
+    function registryArchiveWith(mutate: (stage: string) => void, extra: string[] = ["--exclude=.git"]): void {
+      const stage = path.join(root, "bad-registry-stage");
+      mkdirSync(stage);
+      stagePackagingRoot(stage, embed, { version: markerSemver(embed.marker), licenseText: readFileSync(path.join(REPO_ROOT, "LICENSE"), "utf8") });
+      mutate(stage);
+      const bad = path.join(root, "bad-registry.tgz");
+      const made = tarGz(bad, stage, extra);
+      expect(made.status, made.stderr).toBe(0);
+      registryArchiveSource = bad;
+    }
+
+    it.each([
+      [
+        "module.xml under a subdirectory (the mutation the served-artifact gate must catch)",
+        (stage: string) => {
+          mkdirSync(path.join(stage, "ipm"));
+          renameSync(path.join(stage, "module.xml"), path.join(stage, "ipm", "module.xml"));
+        },
+        [] as string[],
+        "no module.xml at its top",
+      ],
+      ["a missing LICENSE", (stage: string) => rmSync(path.join(stage, "LICENSE")), [] as string[], "is missing the staged file LICENSE"],
+      [
+        "a .git directory that tar did not exclude",
+        (stage: string) => {
+          mkdirSync(path.join(stage, ".git"));
+          writeFileSync(path.join(stage, ".git", "HEAD"), "x\n");
+        },
+        ["--exclude=nothing"],
+        "which the registry's tar excludes",
+      ],
+    ])("%s", async (_label, mutate, extra, reason) => {
+      registryArchiveWith(mutate, extra);
+
+      const run = await runScript(["--edition", "community"]);
+
+      expect(run.status, run.stderr).toBe(1);
+      expect(run.stderr).toContain("FAILED in the registry-community phase (community)");
+      expect(run.stderr).toContain("the registry-shaped archive is not the packaging root");
+      expect(run.stderr).toContain(reason);
+      expect(run.stderr, "the install of the built archive passed before it").toContain("[install-community] the archive installed over an older Setup");
+      expect(run.stderr, "nothing was loaded from the bad archive").not.toContain("[registry-community] the registry-shaped archive installed");
+      expectCleanEnd();
+    }, 120_000);
+
+    it("a registry-shaped archive that cannot be read is a failure of the registry phase", async () => {
+      writeFileSync(path.join(root, "bad-registry.tgz"), "this is not an archive");
+      registryArchiveSource = path.join(root, "bad-registry.tgz");
+
+      const run = await runScript(["--edition", "community"]);
+
+      expect(run.status, run.stderr).toBe(1);
+      expect(run.stderr).toContain("FAILED in the registry-community phase (community)");
+      expect(run.stderr).toContain("the registry-shaped archive could not be read");
+      expectCleanEnd();
+    }, 120_000);
+
+    it("the leg loads the archive from the container's own output directory with a plain `load`, never `load -dev`, and tars with the registry's command", async () => {
+      const run = await runScript(["--edition", "health"]);
+      expect(run.status, run.stderr).toBe(0);
+
+      const scripts = sessionScripts();
+      expect(scripts.some((script) => script.includes(`Shell("load /tmp/iris-mcp-ipm-out/registry-root.tgz"`))).toBe(true);
+      expect(scripts.filter((script) => script.includes("registry-root.tgz")).every((script) => !script.includes("load -dev"))).toBe(true);
+      expect(scripts.some((script) => script.includes(`$ZF(-1,"${registryTarCommand()}")`))).toBe(true);
+      expect(run.stderr).toMatch(/\[registry-health\] the registry-shaped archive installed on a fresh/);
+      expect(registryArchiveProblems(readTgz(readFileSync(registryArchiveSource)), registryFiles), "the archive the run copied out is the staged packaging root").toEqual([]);
     }, 120_000);
   });
 

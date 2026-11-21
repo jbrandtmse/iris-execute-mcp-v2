@@ -114,8 +114,17 @@ Each `--client` id, with the folders it installs into and why, is listed in [Ski
   `2` for a usage error.
 - The notice for adapted content (`IRIS-MCP-THIRD-PARTY-NOTICES.md`) is installed beside every skill that carries it, and
   stays while a file you changed remains in that skill's directory.
+- **The Claude Code plugin (`--client claude-code`).** The `iris-mcp@iris-mcp` plugin brings the skills but cannot carry a rule,
+  so before an install the route looks for `enabledPlugins["iris-mcp@iris-mcp"]` in three settings files, lowest precedence
+  first, and the highest file that holds the key decides: the user file (`$CLAUDE_CONFIG_DIR/settings.json`, else
+  `~/.claude/settings.json`), the project's `.claude/settings.json` and the project's `.claude/settings.local.json`. With the
+  plugin enabled it installs only `.claude/rules/iris-mcp-objectscript-pre-write.md`, and it removes skill files it installed
+  earlier under the usual manifest rules (a file you changed is kept unless `--include-modified`). Without it, it installs
+  the skills and the rule. It prints one line that names the file that decided, or the three files it checked, and a
+  `[WARN]` line for a settings file that is not valid JSON or JSONC (that file counts as having no entry).
 - **Known limits.** Besides the refusals above (`--scope user`, `claude-desktop`, links):
-  - The `claude-code` route always installs both the skills and the rule; it does not detect a Claude Code plugin.
+  - The plugin is detected only in the three settings files above; managed settings, `--settings`, `--add-dir` and synced
+    plugins are not read, and a plugin the route does not see only means the skills are installed twice.
   - `--project` is not compared with your home directory: `--project ~`, or a run from `~`, installs the rule where every
     project's session loads it.
   - Only the project directory is checked for a `CLAUDE.md`; a `CLAUDE.md` in a parent directory is not seen.
@@ -134,7 +143,7 @@ Generated from `PACK_TARGETS` (client documentation checked 2026-10-19) by `scri
 
 | Client | `--client` | Skills go to | The always-on rule goes to | Why | Sources |
 | --- | --- | --- | --- | --- | --- |
-| Claude Code | `claude-code` | `.claude/skills/` | `.claude/rules/iris-mcp-objectscript-pre-write.md` | Claude Code never reads .agents/. A rule in .claude/rules/ without a paths: scope is loaded at launch. AGENTS.md is read only when there is no CLAUDE.md, so .claude/rules/ is the route that always works. | [1](https://code.claude.com/docs/en/skills), [2](https://code.claude.com/docs/en/memory) |
+| Claude Code | `claude-code` | `.claude/skills/` | `.claude/rules/iris-mcp-objectscript-pre-write.md` | Claude Code never reads .agents/. A rule in .claude/rules/ without a paths: scope is loaded at launch. AGENTS.md is read only when there is no CLAUDE.md, so .claude/rules/ is the route that always works. The iris-mcp@iris-mcp plugin brings the skills but cannot carry a rule, so with the plugin enabled the installer writes only the rule. | [1](https://code.claude.com/docs/en/skills), [2](https://code.claude.com/docs/en/memory) |
 | Claude Desktop | `claude-desktop` | none | none | Skills are only uploaded as a ZIP (Customize > Skills) and instructions are only settings fields; the Code tab is Claude Code. Refused: Claude Desktop has no project folder for skills or rules: upload skills as a ZIP under Customize > Skills. Its Code tab runs Claude Code, so use --client claude-code for that. | [1](https://support.claude.com/en/articles/12512180-use-skills-in-claude), [2](https://code.claude.com/docs/en/desktop) |
 | Cursor | `cursor` | `.agents/skills/` | `.cursor/rules/iris-mcp-objectscript-pre-write.mdc` | Project rules in .cursor/rules/ must be .mdc files with alwaysApply: true to be always included. Cursor also reads .cursor/skills/, .claude/skills/, .codex/skills/, AGENTS.md and CLAUDE.md. Installer note: Cursor also reads .claude/skills/ and AGENTS.md, so a project that also installs for Claude Code or for an AGENTS.md client shows Cursor each skill, or the rule, twice. | [1](https://cursor.com/docs/skills), [2](https://cursor.com/docs/rules) |
 | VS Code (Copilot) | `vscode` | `.agents/skills/` | a marked block in `AGENTS.md` | An .instructions.md file with applyTo: attaches only to files the agent creates or modifies, so the rule goes in AGENTS.md at the repository root, which is always applied. VS Code also reads .github/skills/, .claude/skills/, .github/copilot-instructions.md and CLAUDE.md. Installer note: VS Code reads the rule from AGENTS.md at the repository root while its chat.useAgentsMdFile setting is on, the default. It also reads .claude/skills/, so a project that also installs for Claude Code shows each skill twice. | [1](https://code.visualstudio.com/docs/agent-customization/agent-skills), [2](https://code.visualstudio.com/docs/agent-customization/custom-instructions) |

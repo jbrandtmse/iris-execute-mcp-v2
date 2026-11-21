@@ -47,15 +47,17 @@ export function makeScratchRepo(options: ScratchOptions = {}): string {
   };
   copy("scripts", true);
   for (const rel of [WORKFLOW_SKILLS_DIR, PACK_SOURCE_DIR, PACK_DIR]) copy(rel, true);
-  if (options.clientConfigManifest) {
-    copy("packages/client-config/package.json", false);
-    copy("packages/client-config/dist", true);
-  }
+  // The plugin rule of check:provenance reads the marketplace, the five server.json files and the version of client-config (Story 42.8).
+  copy(".claude-plugin", true);
+  copy("packages/client-config/package.json", false);
+  if (options.clientConfigManifest) copy("packages/client-config/dist", true);
   if (options.serverPackages) {
     mkdirSync(join(root, "packages"), { recursive: true });
     for (const dir of SERVER_PACKAGE_DIRS) {
       symlinkSync(join(REPO_ROOT, "packages", dir), join(root, "packages", dir), "junction");
     }
+  } else {
+    for (const dir of SERVER_PACKAGE_DIRS) copy(`packages/${dir}/server.json`, false);
   }
   return root;
 }

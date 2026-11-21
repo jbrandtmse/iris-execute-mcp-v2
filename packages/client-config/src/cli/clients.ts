@@ -56,6 +56,7 @@ import type { Readable } from "node:stream";
 
 import { ADAPTER_DATA_VERSION, CLIENT_ADAPTERS, CLIENT_DISPOSITIONS } from "../adapters.js";
 import { detectClients } from "../detect.js";
+import { CLAUDE_CODE_PLUGIN_ID, describePluginDetection, detectClaudeCodePlugin } from "../claude-plugin-detect.js";
 import { diff } from "../diff.js";
 import {
   apply,
@@ -67,7 +68,7 @@ import {
   restore,
   type EngineResult,
 } from "../engine.js";
-import { executePackPlan, preparePackChange, REAL_BYTES_FS, type BytesFs } from "../pack-apply.js";
+import { executePackPlan, preparePackChange, readTextIfFile, REAL_BYTES_FS, type BytesFs } from "../pack-apply.js";
 import { renderPlanPreview } from "../pack-plan.js";
 import { PACK_TARGETS, packTargetFor } from "../pack-targets.js";
 import { resolveScopePath } from "../paths.js";
@@ -1813,7 +1814,8 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
 // ------------------------------------------------------------------
 
 const SKILLS_USAGE =
-  "iris-mcp-clients skills install|uninstall --client <id> [--project <dir>] [--scope project] [--dry-run] [--yes] [--include-modified] [--json]";
+  "iris-mcp-clients skills install|uninstall --client <id> [--project <dir>] [--scope project] [--dry-run] [--yes] [--include-modified] [--json]\n" +
+  "  With --client claude-code, an enabled iris-mcp@iris-mcp Claude Code plugin (it brings the skills) makes install write only the rule.";
 
 const SKILLS_USER_SCOPE_REFUSAL =
   "skills supports only --scope project: at user scope the always-on rule would load in every session of every project, and a personal skill shadows a project skill of the same name in Claude Code";
@@ -1861,11 +1863,23 @@ async function cmdSkills(args: string[], deps: ResolvedDeps): Promise<number> {
   const project = projectOption === undefined ? base : pathApi.resolve(base, projectOption);
 
   const ctx = { ...hostContext(deps), projectDir: project };
+  // The Claude Code route asks whether the plugin (which brings the skills) is enabled, so that only the rule is installed (DW-625).
+  const detection =
+    action === "install" && target.id === "claude-code"
+      ? detectClaudeCodePlugin({
+          homeDir: deps.homeDir,
+          projectDir: project,
+          env: deps.env,
+          platform: deps.platform,
+          readFile: (file) => readTextIfFile(deps.bytesFs, file),
+        })
+      : undefined;
   const prepared = preparePackChange(ctx, {
     action,
     client: target.id,
     includeModified: parsed.flags.has("--include-modified"),
     fs: deps.bytesFs,
+    ...(detection?.enabled === true ? { skipSkills: true } : {}),
   });
   if (!prepared.ok) {
     if (prepared.kind === "usage") return usageError(deps, prepared.message, SKILLS_USAGE);
@@ -1886,7 +1900,22 @@ async function cmdSkills(args: string[], deps: ResolvedDeps): Promise<number> {
     changed,
     items: plan.items,
     notes: plan.notes,
+    ...(detection === undefined
+      ? {}
+      : {
+          plugin: {
+            id: CLAUDE_CODE_PLUGIN_ID,
+            enabled: detection.enabled,
+            decidedBy: detection.decidedBy,
+            checked: detection.checked,
+            warnings: detection.warnings,
+          },
+        }),
   });
+  if (detection !== undefined) {
+    for (const warning of detection.warnings) say(`[WARN] ${warning}\n`);
+    say(`${describePluginDetection(detection)}\n`);
+  }
   say(renderPlanPreview(plan, project));
 
   if (plan.conflicts.length > 0) {
@@ -1906,7 +1935,11 @@ async function cmdSkills(args: string[], deps: ResolvedDeps): Promise<number> {
         `Nothing to change for ${plan.displayName}: ${plan.counts.keep} installed file(s) you changed were kept; re-run with --include-modified to replace them.\n`,
       );
     } else if (action === "install") {
-      say(`Nothing to change for ${plan.displayName}: the skills pack is already installed.\n`);
+      say(
+        detection?.enabled === true
+          ? `Nothing to change for ${plan.displayName}: the rule is already installed, and the plugin brings the skills.\n`
+          : `Nothing to change for ${plan.displayName}: the skills pack is already installed.\n`,
+      );
     } else if (!plan.installed) {
       say(`Nothing to remove for ${plan.displayName}: the skills pack is not installed.\n`);
     } else {

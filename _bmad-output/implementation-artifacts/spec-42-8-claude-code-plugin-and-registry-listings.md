@@ -2,9 +2,10 @@
 title: 'Story 42.8: Claude Code Plugin and Registry Listings'
 type: 'feature'
 created: '2026-11-21'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'fc113e7b8737427ac846d069cbe4931b08e6de23'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
   - '{project-root}/_bmad-output/implementation-artifacts/epic-42-context.md'
@@ -22,6 +23,23 @@ deferred:
       compile needs an IRIS client outside MCP plus a target choice. Agents already compile through iris_doc_load/iris_doc_compile,
       which the always-on rule requires.
     location: 'packages/client-config/skills-pack (plugin root); no hooks/ directory'
+    severity: low
+  - summary: >-
+      Nothing in the default suite pins Claude Code's acceptance of plugin.json, .mcp.json and marketplace.json: a later gen:pack that
+      emits a field the validator rejects stays green.
+    evidence: >-
+      The only evidence is the recorded manual `claude plugin validate` and `plugin details` runs (Claude Code 2.1.330). The CLI is not
+      guaranteed on CI runners. An added unsupported key in skills-pack-src/plugin/plugin.json leaves gen:pack:check, check:provenance
+      and the unit tests green.
+    location: 'skills-pack-src/plugin/plugin.json; .claude-plugin/marketplace.json'
+    severity: low
+  - summary: >-
+      JOB_TIMEOUT_MINUTES.ipm (45) is unchanged although the registry-shaped leg adds two containers per run; the spec says to raise it
+      only by the measured need.
+    evidence: >-
+      No measurement exists: the harness run was not part of this stage (lead A1 is the binding run). Read the A1 duration and raise
+      the budget in scripts/lib/ci-checks.mjs if the job approaches 45 minutes.
+    location: 'scripts/lib/ci-checks.mjs JOB_TIMEOUT_MINUTES.ipm'
     severity: low
 ---
 
@@ -199,7 +217,7 @@ deferred:
   - `ipmPushPlan` :548-566 is unchanged in shape.
   - New pure functions:
     - `MCP_REGISTRY_BASE` `https://registry.modelcontextprotocol.io`;
-    - `MCP_PUBLISHER` `{version:'v1.8.10', asset:'mcp-publisher_linux_amd64.tar.gz', sha256:'32d287ed6fb7dc04eddd2621097784c06a355b2348b35ccc630a1643aa75ff4a'}`, with the URL `https://github.com/modelcontextprotocol/registry/releases/download/v1.8.10/<asset>`;
+    - `MCP_PUBLISHER` `{version:'v1.8.8', asset:'mcp-publisher_linux_amd64.tar.gz', sha256:'09f1fa70ee146b640584274a1a6b2b8a0310b05d4321fa9224e6df6a016d67f4'}` (decision #110, see the Spec Change Log), with the URL `https://github.com/modelcontextprotocol/registry/releases/download/v1.8.8/<asset>`;
     - `mcpPublisherArgv(verb, file?)` → `['login','github-oidc']` | `['validate', f]` | `['publish', f]`;
     - `registryLookupUrl(name, version)` → `/v0.1/servers/<encodeURIComponent(name)>/versions/<encodeURIComponent(version)>`;
     - `registryOutcome(response)` → published (200 JSON whose `server.name` and `server.version` match) / absent (404) / unknown. This is the `storeOutcome` :494-509 sibling. Oracle (Rule #36, read-only GETs on 2026-11-21): `io.github.upstash/context7@4.7.3` → 200 `{"server":{…},"_meta":{…}}`; `@0.0.0-nonexistent` and `io.github.jbrandtmse/iris-dev-mcp@1.0.0` → 404 `{"title":"Not Found","status":404,"detail":"Server not found"}`.
@@ -283,6 +301,15 @@ deferred:
    -- AC 42.8.1, AC 42.8.3.
 10. `README.md`, `packages/client-config/README.md`, `CHANGELOG.md`, `.changeset/*.md`, new `packages/iris-mcp-all/src/__tests__/story-42-8-doc-claims.test.ts`, plus the moved pins in `story-41-7-doc-claims.test.ts` and `skills-docs.test.ts` -- docs with each channel's default state and owner prerequisites (Rule #30/#43) -- AC 42.8.2, AC 42.8.5.
 
+**Review patches (first review pass; every item is small and in-story; apply each with its test and, where a test pins an AC, its `mutation:` line in `## Verification`):**
+- [x] [Review] `scripts/release.mjs` `publishMcpRegistry`: in the per-server publish loop test `lookups.get(server.name) === 'published'` BEFORE the `stopped` check, so a server the registry already lists reads `already published` after an earlier server failed. Also return `{ status: STATUS.failed, detail: 'the manifest lists no server.json. Prepare the artifacts again.' }` when `servers.length === 0`, and make `uploadPathProblems` report an enabled `mcp-registry` channel whose manifest detail is absent. Tests for the three behaviors.
+- [x] [Review] Tests in `release-script.test.ts` (or a sibling file if it nears 500 lines of additions): (a) one in-process `publish` and one `--dry-run` with NO `channels` option against the five-channel stand-ins, asserting the report lists npm, both stores, `ipm`, then `mcp-registry` last and that the registry stand-in was called; delete the unused `REGISTRY_ON` constant (or use it) and fix its comment. (b) A rehearsal where the IPM registry lists the version and the packaging tag/tree is not consulted by the dry step: `ipm` reads `ready (would be already published)`, exit 0. (c) A rehearsal where an npm dry-run publish fails: `mcp-registry` is `not attempted` and no registry lookup or publisher download happened.
+- [x] [Review] `packages/client-config/src/claude-plugin-detect.ts`: strip a leading U+FEFF (author it as an escape) before parsing, and treat an empty or whitespace-only settings file as absent with no warning. Tests with a BOM file holding the key (decides) and an empty file (no warning).
+- [x] [Review] Assertions that cannot fail: in `claude-plugin-detect.test.ts` replace the `expect(moved).toBe(path.join(configDir, "settings.json"))` tautology with an assertion on what the detector reports; in `pack-plan.test.ts` make "skipSkills is ignored by an uninstall" meaningful (an uninstall that is handed a pack and `skipSkills`) or delete it; in `story-42-8-release-core.test.ts` drop `expect(SERVER_JSON_DIRS).toHaveLength(5)` if it adds nothing; in `ci-ipm-archive.test.ts` replace `expect(registryFiles).toContain("module.xml")` (it re-checks the fixture it built) with an assertion on `registryArchiveProblems`.
+- [x] [Review] `runVerify` builds `io.github.jbrandtmse/<dir>`: add a test pinning that name for every `SERVER_JSON_DIRS` entry to the package's `mcpName` and to the generated `server.json` `name`.
+- [x] [Review] Root `README.md` `### Releasing`: reconcile "A channel that is not enabled still runs its read-only dry step ..." and "the first failure stops everything after it" with the all-enabled five-channel state and the MCP Registry's own last-and-non-blocking behavior, stating each rule once; keep `story-42-8-doc-claims.test.ts` and `story-42-7-doc-claims.test.ts` green.
+- [x] [Review] Rule 19: for each group below that lacks a `mutation:` line in `## Verification`, apply the named mutation, observe red, revert (tree byte-identical), and write the line: the README pointer text and its `@1` pin; the no-hook test; the IPM tag-and-tree rows (#109); the `verify` registry and packaging-tag checks; the host-key fingerprint recomputation; the `uploadPathProblems` registry refusals; the #108 rehearsal-exit rows and the failed-after-everything ordering row; the `registryArchiveProblems` `.git`, extra-file and missing-file branches; the `server.json` field mapping and `CONNECTION_VARIABLES` pin. Use `vitest -t` filters so no call outlasts about 170 seconds.
+
 **Acceptance Criteria:**
 - **Plugin format (AC 42.8.1).** Given the story tree, when `claude plugin validate packages/client-config/skills-pack` and `claude plugin validate .` run (Claude Code ≥ 2.1.330), then both print `Validation passed`. And `claude --plugin-dir packages/client-config/skills-pack plugin details iris-mcp` lists 5 MCP servers and 18 skills, and no hook.
 - **Provenance (AC 42.8.1).** Given the story tree, when `pnpm check:provenance` and `pnpm gen:pack:check` and `pnpm gen:listings:check` run, then all pass. Deleting the notice from the pack, or putting "official" into `plugin.json` `description`, turns `check:provenance` red.
@@ -297,7 +324,66 @@ deferred:
 
 ## Spec Change Log
 
+**2026-11-21, implement stage: decisions #108 and #110 override the intent-contract text below. The frozen block is left untouched; these entries are binding and take precedence wherever they differ.**
+
+1. **#110 (publisher pin).** The intent-contract Boundaries line "`mcp-registry`: `mcp-publisher` v1.8.10 (... sha256 `32d287ed...75ff4a`)" is replaced by `mcp-publisher` **v1.8.8**, `mcp-publisher_linux_amd64.tar.gz`, sha256 `09f1fa70ee146b640584274a1a6b2b8a0310b05d4321fa9224e6df6a016d67f4`.
+   - Source: `gh api repos/modelcontextprotocol/registry/releases` (GET). Today is 2026-11-21, so the cutoff is 2026-11-07. v1.8.8 was published **2026-11-06T14:07:07Z** (15 days earlier); v1.8.9 (2026-11-10) and v1.8.10 (2026-11-20) are younger than 14 days.
+   - The digest came from the release asset's `digest` field and was re-verified by downloading the tarball (public GET) and hashing it: `09f1fa70ee146b640584274a1a6b2b8a0310b05d4321fa9224e6df6a016d67f4`.
+   - Code Map and Verification lines that named v1.8.10 are updated. The lead re-checks, before the `v1.1.0` tag, that the pin has not been yanked or superseded by a security fix.
+2. **#108 (channel behavior).** The `mcp-registry` channel runs LAST, and its failure is non-blocking in the order below. These replace the matching I/O-matrix text:
+   - **Registry dry step row:** a hash mismatch, a `validate` failure or an unreadable lookup is reported as `mcp-registry: not ready (...)`, but in `rehearse` that report does NOT make the process exit non-zero. The readiness lines and exit codes of the other four channels are unchanged and stay fail-closed (an IPM `not ready` still exits 1).
+   - **Registry lookup unknown row:** `failed (could not ask the MCP Registry ...)` is reported; in `publish` it fails the run only after every other channel has finished (the channel is last, so nothing follows it), and a rerun recovers.
+   - **Registry publish fails row and the npm-never-visible row:** the same rule. A failed registry upload is the last thing the run does, it makes the run exit non-zero at the end, and a rerun recovers it (lookup 200 → `already published`).
+   - The dry-run acceptance line "`mcp-registry` reads `ready (would publish 5 servers)`" is unchanged for the all-good case.
+   - If an earlier channel failed, `mcp-registry` is reported `not attempted`, as every later channel is today.
+   - Tests and the release header contract state this.
+
 ## Review Triage Log
+
+### 2026-11-21 — Review pass
+- layers: blind-hunter 11, edge-case-hunter 9, verification-gap 16, intent-alignment 0 findings (descriptive report; every divergence it lists is the documented #108/#110 override, or work owned by the lead's A1/A1b/A2/C checklist).
+- verdicts: 36 findings — high 0, medium 7, low 26, false 3, maybe-false 0
+- findings:
+  - Blind hunter:
+    - `[low]` `[reject]` Marketplace on `main` pins `v1.0.0`, which has no plugin — decision #102 and the spec's stated consequence; the version step moves the ref at the release commit.
+    - `[low]` `[reject]` Detector treats a committed project `enabledPlugins` key as proof of install, so skills it wrote earlier are removed — spec-bound (#107); the report names the deciding file and the rule is kept. Closed by-design.
+    - `[low]` `[reject]` Invalid higher-precedence settings file counts as no entry — spec matrix row: a `[WARN]` naming the file, no refusal. Closed by-design.
+    - `[low]` `[reject]` IPM deploy key unchecked before npm publishes — decision #108 enables IPM unconditionally and the rehearsal holds no secrets. Closed by-design.
+    - `[low]` `[patch]` `publishMcpRegistry` reports an already-listed server as `not attempted` after a failure — reordered; fix applied, tested.
+    - `[low]` `[patch]` `runVerify` rebuilds the registry names from directory names — a test now pins the name to `mcpName` and the generated listing for every directory.
+    - `[low]` `[reject]` README/CHANGELOG cite story and ledger ids — the repository's CHANGELOG convention (42.7's section does the same); closed `wontfix-accepted`, `reopen_if` the 1.1.0 release notes are written (Story 42.9).
+    - `[low]` `[reject]` Doc-claims tests pin the two newest CHANGELOG headings and skip when the changeset is consumed — the project-wide precedent (`it.skipIf(!present)` in stories 42.1 to 42.11); the version step retires them. `wontfix-accepted`.
+    - `[low]` `[patch]` README sentences about "a channel that is not enabled" and "the first failure stops everything" are stale with five enabled channels — reconciled, each rule stated once.
+    - `[low]` `[reject]` `server.json` `title` equals `description` — pinned deliberately by the listings tests; no user-visible harm. `wontfix-accepted`.
+    - `[false]` `[reject]` Spec completion contract not met — `status` and `## Auto Run Result` are written at finalize, after this triage.
+  - Edge-case hunter:
+    - `[low]` `[reject]` IPM dry step says `ready (would be already published)` when the registry lists the version but the packaging tag is absent — the spec row (#109) words the dry step exactly so; the real run reports `failed`. `wontfix-accepted`, `reopen_if` a rehearsal is trusted past O-IPM1 for a rerun.
+    - `[medium]` `[patch]` `publishMcpRegistry` with no manifest detail returns `already published` and exit 0 — returns `failed` now.
+    - `[medium]` `[patch]` `uploadPathProblems` skips an enabled `mcp-registry` channel with no manifest detail — refuses it now (grouped with the previous row).
+    - `[low]` `[patch]` Settings file with a BOM, or an empty file — the BOM is stripped (as an escape) and an empty file is absent with no warning.
+    - `[low]` `[patch]` Same root cause as the blind hunter's `publishMcpRegistry` ordering row; one fix.
+    - `[low]` `[reject]` Malformed `plugin.json`/`server.json` gives a raw `SyntaxError` in `readReleaseFacts` — the same pattern as every sibling reader there.
+    - `[low]` `[reject]` `ci-ipm-archive.mjs` with only the health edition skips the member check — the member check is edition-independent bytes; a single-edition run is a debugging mode.
+    - `[low]` `[reject]` Marketplace `ref` pins `v1.0.0` — duplicate of the blind hunter's first row.
+    - `[low]` `[reject]` A store `not ready` leaves IPM `not attempted` while the registry still runs in a rehearsal — fail-closed order is 42.5's; the registry's read-only report in a rehearsal is decision #108.
+  - Verification gap:
+    - `[medium]` `[patch]` No test runs `publish`/`--dry-run` with the script's own five-channel default — rows added; a mutation line recorded.
+    - `[medium]` `[patch]` IPM dry step for a registry-listed version untested — row added.
+    - `[medium]` `[patch]` Rehearsal rule "registry not attempted after a hard failure" untested — row added.
+    - `[low]` `[patch]` Pinning tests without a `mutation:` line — each group mutated, observed red, reverted; lines written in `## Verification`.
+    - `[low]` `[defer]` No automated pin of Claude Code's acceptance of the plugin files — deferred (the CLI is not guaranteed on CI).
+    - `[medium]` `[patch]` `moved` tautology in `claude-plugin-detect.test.ts` — replaced by an assertion on `decidedBy`.
+    - `[medium]` `[patch]` "skipSkills is ignored by an uninstall" could not fail — the uninstall is now handed a pack and `skipSkills`.
+    - `[low]` `[patch]` Redundant `toHaveLength(5)` and `toContain("module.xml")` — replaced by `registryArchiveProblems` assertions.
+    - `[low]` `[reject]` Conditional skip on the changeset test — duplicate of the precedent row above.
+    - `[low]` `[patch]` Unused `REGISTRY_ON` constant — removed.
+    - `[low]` `[reject]` Built dists of shared and servers are not freshness-checked in `story-42-8-plugin.test.ts` — the project's environment rule is to rebuild after editing `src/`; sibling cross-package tests do the same.
+    - `[false]` `[reject]` Host `tar` on `PATH` — the rows fail loudly when it is absent.
+    - `[low]` `[patch]` Registry publish loop ordering — duplicate of the edge-case and blind rows; one fix.
+    - `[low]` `[patch]` `verify` names from directories — duplicate; one test.
+    - `[low]` `[defer]` `JOB_TIMEOUT_MINUTES.ipm` unmeasured — deferred to the lead's A1 measurement.
+    - `[false]` `[reject]` Spec state `in-progress` with `Status: ready-for-dev` — finalize writes it.
+- patches applied by a fresh subagent after the first review (the inner `servers.length === 0` guard in `publishMcpRegistry` is unreachable through `publish()` because `uploadPathProblems` refuses first; only the `uploadPathProblems` side is pinned).
 
 ## Design Notes
 
@@ -511,7 +597,7 @@ The implement stage never pushes, creates repositories, tags, publishes or logs 
   ```
 - `(once)` The tag-consistency check (the 42.7 one-liner, `tagVersion:'1.0.0'`) -- expected: `[] []`.
 - `(once)` The real registry lookups (read-only GET, the task 8 oracle): `registryLookupUrl` plus `fetch` for `io.github.upstash/context7@4.7.3` (expected `published`) and `io.github.jbrandtmse/iris-dev-mcp@1.0.0` (expected `absent`). Record the statuses in the test header.
-- `(once)` The pinned publisher digest: `gh api repos/modelcontextprotocol/registry/releases/tags/v1.8.10 --jq '.assets[]|select(.name=="mcp-publisher_linux_amd64.tar.gz").digest'` (GET) -- expected: `sha256:32d287ed6fb7dc04eddd2621097784c06a355b2348b35ccc630a1643aa75ff4a`.
+- `(once)` The pinned publisher digest: `gh api repos/modelcontextprotocol/registry/releases/tags/v1.8.8 --jq '.assets[]|select(.name=="mcp-publisher_linux_amd64.tar.gz").digest'` (GET) -- expected: `sha256:09f1fa70ee146b640584274a1a6b2b8a0310b05d4321fa9224e6df6a016d67f4`.
 - `(once)` The version-step rehearsal, in a throwaway clone (the 42.6/42.7 recipe, `os.tmpdir()`, `git remote remove origin`, a throwaway patch changeset, `pnpm run version`) -- expected: exit 0, then:
   - `plugin.json`, the marketplace `ref` and the five `server.json` at `1.0.1`;
   - `embeddedVersionProblems` empty;
@@ -572,7 +658,86 @@ Every test added or changed passes on a fresh environment, in either order, and 
 - B1: after npm 1.0.0 is live, the `--plugin-dir` session with five servers connected.
 - C1–C3: after `v1.1.0` (C3 also after O-OEX), per the ACs above.
 
+**Implement-stage evidence (2026-11-21).**
+
+- **Task 0 probe (Claude Code 2.1.330).** A scratch `CLAUDE_CONFIG_DIR` and a non-repo cwd, a directory marketplace, a two-server stub plugin with string, number and boolean `userConfig` (no `sensitive`) and one optional option with no default, installed with `claude plugin install ... --config p_user=bob`. `claude mcp list` showed both same-command servers `Connected`. Each stub's environment dump: `IRIS_HOST="localhost"`, `IRIS_PORT="52773"`, `IRIS_HTTPS="false"` (the defaults), `IRIS_USERNAME="bob"` (the set value), `IRIS_UNSET=""` (no default, unset) and the parent's `IRIS_PROBE_PARENT` inherited. Identical to the plan probe. `settings.json` held `enabledPlugins["probe-plug@probe-mkt"]: true`. The scratch directory was removed.
+- **Plugin format (AC 42.8.1).** `claude plugin validate packages/client-config/skills-pack` and `claude plugin validate .` both print `Validation passed` (the pack prints one `ICON_MISSING` directory warning that does not change the result). `claude --plugin-dir packages/client-config/skills-pack plugin details iris-mcp`: 18 skills, 5 MCP servers (`dev`, `admin`, `data`, `interop`, `ops`), Hooks (0).
+- **Real registry lookups (read-only GET).** `io.github.upstash/context7@4.7.3` answered 200 `application/json`, `registryOutcome` `published`; `io.github.jbrandtmse/iris-dev-mcp@1.0.0` answered 404 `application/problem+json`, `absent`.
+- **Publisher digest (GET).** `gh api repos/modelcontextprotocol/registry/releases/tags/v1.8.8 --jq ...digest` printed `sha256:09f1fa70ee146b640584274a1a6b2b8a0310b05d4321fa9224e6df6a016d67f4`, the pin. The registry source at v1.8.8 confirms that `publish` and `validate` take the file as a positional argument and that `CurrentSchemaVersion` is `2025-12-11`, the `$schema` the listings declare; the five generated listings also validate against that schema (ajv 6, a one-off check).
+- **Tag consistency (`tagVersion:'1.0.0'`).** `[1 changeset still pending (story-42-8-...)] []`: the first array holds the story's own pending changeset, which is what the story adds; `embeddedVersionProblems` is `[]`.
+- **Version-step rehearsal.** A throwaway copy of the tree under `os.tmpdir()` (a new git repository, the story's changeset replaced by a throwaway patch, `node_modules` linked), `pnpm run version`: exit 0; `plugin.json`, the marketplace `ref` (`v1.0.1`) and the five `server.json` at `1.0.1`; `embeddedVersionProblems` `[]`; `gen:pack:check` and `gen:listings:check` clean. The copy was removed.
+- **Sweeps.** `@iris-mcp/all` in 8 shards (every file green after the fixes below), `@iris-mcp/client-config` (39 files, 1047 tests), `lint` and `type-check` of client-config, `gen:governance-baseline:check` (141 keys, unchanged), `gen:skills:check`, `validate:prompts`, `gen:tools-list-snapshot:check`, `check-epics-sync`, `gen:bootstrap` (changes nothing, `BOOTSTRAP_VERSION` stays `1.0.0+2.244fe8623c76`). No container was started and no image pulled.
+
+**Mutations (Rule 19).** Each was applied, observed red, reverted, and the file and `git diff` confirmed byte-identical.
+- mutation: the detector ignores `.claude/settings.local.json` (the file dropped from the checked list) → `claude-plugin-detect.test.ts` (the local file wins, both directions) and `skills-cli-plugin.test.ts` (local override).
+- mutation: `CLAUDE_CONFIG_DIR` ignored → `claude-plugin-detect.test.ts` (the config-dir rows) and `skills-cli-plugin.test.ts` (config dir moved).
+- mutation: `skipSkills` not passed by `cmdSkills` → `skills-cli-plugin.test.ts` (user settings, project scope, config dir, dry run, plugin added after skills).
+- mutation: `.mcp.json` dev arg `@iris-mcp/dev@1` → `@iris-mcp/dev` → `npx-pin.test.ts` and `story-42-8-plugin.test.ts` (each server runs `npx -y <pinnedSpec>`).
+- mutation: `iris_host`'s default removed from `plugin.json` → `story-42-8-plugin.test.ts` (required or default; the defaults are `loadConfig`'s; the six map onto the registry's six).
+- mutation: the key `interop` → `iris-interop-mcp` in `.mcp.json` → `story-42-8-plugin.test.ts` (the keys row, the launch row and the 64-character row, which computes each name from the key `.mcp.json` really has).
+- mutation: the notice deleted from the pack → `pnpm check:provenance` red with `[plugin] notice` (and `notice-sync`, `distribution`); the in-memory row is `pack-provenance.test.ts` "the notice deleted from the pack".
+- mutation: "official" put into `plugin.json` `description` → `pnpm check:provenance` red with `[plugin] ...plugin.json: description says "official"`; rows in `pack-provenance.test.ts` and `package-manifests.test.ts` (the shared deny-list).
+- mutation: the marketplace `ref` `v1.0.0` → `main` → `story-42-8-plugin.test.ts` ("the marketplace pins the release tag"); `embeddedVersionProblems` and `check:provenance` have their own rows (`release-version.test.ts` "marketplace ref off the tag", `pack-provenance.test.ts` "a marketplace entry whose ref is not v<version>").
+- mutation: `ipm` back to `enabled: false` → `release-core.test.ts` constants, `release-workflow.test.ts` channels and `story-42-8-doc-claims.test.ts` (each row's default state).
+- mutation: `StrictHostKeyChecking=yes` → `accept-new` → `release-script.test.ts` "the push trusts only GitHub's pinned host keys".
+- mutation: `IPM_DIST_DEPLOY_KEY` dropped from the redaction list → `release-script.test.ts` "the deploy key is redacted from every report line".
+- mutation: `registryOutcome` reads a non-200, non-404 answer as `absent` → `story-42-8-release-core.test.ts` (the unknown rows) and `release-script.test.ts` (a lookup that cannot be judged is `failed`, for a 500 and a 403).
+- mutation: the lookup's `published` outcome ignored (every server treated as absent) → `release-script.test.ts` "every server already listed" and "one server listed and four absent" (no publish call).
+- mutation: the sha256 check skipped (`if (false)`) → `release-script.test.ts` "a publisher whose sha256 is not the pin is never run" and the rehearsal's hash-mismatch row.
+- mutation: the npm visibility poll skipped (`npmServes` returns true) → `release-script.test.ts` (the polling row, the 5-minute timeout row and the read-before-login row).
+- mutation: the OIDC variables added to the environment of `git` → `release-script.test.ts` "the job's OIDC request variables reach the three publish CLIs ... and no other child: not npm --version, npm view or git".
+- mutation: the registry channel's work directory (the temporary HOME) not removed → `release-script.test.ts` "the publisher runs with a temporary HOME that is gone afterwards".
+- mutation: `gen-listings` dropped from the version step (`['gen-pack.mjs']`) → `release-version.test.ts` (the listings follow the shared version: four rows).
+- mutation: `stagePackagingRoot` writes `module.xml` under `ipm/` → `ci-ipm-archive.test.ts`: the staging rows, `registryArchiveProblems` over a real `tar` ("finds nothing wrong with the archive of the staged packaging root"), and the scripted full run (the offline member test of the DW-694 gate; the real-path proof is lead A1b).
+
+**Review-patch mutations (Rule 19, first review pass).** Each was applied, observed red, reverted, and `git status --short` and `git diff --stat` (and `git diff`) confirmed byte-identical.
+- mutation: the registry publish loop checks `stopped` before `lookups.get(...) === 'published'` → `release-script.test.ts` "a server the registry already lists reads `already published` even after an earlier server failed".
+- mutation: `uploadPathProblems` never reports an enabled `mcp-registry` channel whose manifest entry is absent, and its empty-`servers` refusal is disabled → "an enabled registry channel whose manifest entry is absent is refused ...", "a manifest whose registry entry lists no server.json is refused ..." and "uploadPathProblems names an enabled registry channel ...". The matching `servers.length === 0` return inside `publishMcpRegistry` is defense in depth behind `uploadPathProblems`: `publish` cannot reach it, so no test can turn it red (recorded, not pinned).
+- mutation: `runPublish`'s default `channels` drops `mcp-registry` → "a run with no `channels` option publishes the script's own five channels" (the publish row and the rehearsal row).
+- mutation: the IPM dry step ignores the registry's listing (always plain `ready`) → "the IPM registry lists the version: the dry step reads `ready (would be already published)` ...".
+- mutation: the `!hardFailed` guard dropped from the channel loop's skip test, so a rehearsal asks the registry even after a hard npm failure → "an npm dry-run publish that fails leaves `mcp-registry` `not attempted` ...".
+- mutation: `claude-plugin-detect.ts` does not strip the byte order mark and does not treat an empty or whitespace-only file as absent → `claude-plugin-detect.test.ts` "a file that starts with a byte order mark is read ..." and "an empty or whitespace-only file is absent ...".
+- mutation: the detector reports `decidedBy` as the file path plus a suffix → `claude-plugin-detect.test.ts` "reads <dir>/settings.json, and never ~/.claude, when the variable is set" (the replacement for the `expect(moved)` tautology).
+- mutation: the plan loop in `pack-plan.ts` honors `skipSkills` on an uninstall (`|| input.skipSkills === true` kept in the record loop's skip test) → `pack-plan.test.ts` "an uninstall that is handed a pack and skipSkills plans exactly what it plans without them". (Dropping the `action === "install"` guard in `desiredFor` alone is unobservable, because an uninstall never asks for its own client's desired state.)
+- mutation: `runVerify` builds `io.github.jbrandtmse/<dir minus "iris-">` → `release-script.test.ts` "the name it asks the registry for, per server directory, is the package's mcpName and the generated server.json's name".
+- mutation: `stagePackagingRoot`/`stageModule` writes `module.xml` under `ipm/` → `ci-ipm-archive.test.ts` "the leg loads the archive ... with a plain `load`" (the scripted run exits non-zero, so the run-status assertion fails before the `registryArchiveProblems` and registry-health assertions that replace the `registryFiles` re-check; the member-level rows of `registryArchiveProblems` itself are pinned by the `registryArchiveProblems` mutation below).
+- mutation: the README pointer's `@1` removed from the pack README's installer command, and "they win over" changed to "they lose to" in the same README → `story-42-8-doc-claims.test.ts` "the pack README gives the @1-pinned installer command ..." and "the pack README names the six options with the plugin's own defaults".
+- mutation: an empty `hooks/` directory created at the plugin root → `story-42-8-plugin.test.ts` "has no hooks directory, no hooks key in plugin.json and no CLAUDE.md at its root" and "the plugin root holds only what the pack holds ...".
+- mutation: `IPM` tag-and-tree rows: the identical-tree comparison replaced by `true`, and the "registry lists the version but no tag" refusal disabled → `release-script.test.ts` "a listed version whose tag is absent fails ...", "a listed version whose tag holds a different tree fails ..." and "an existing tag with a different tree fails ...".
+- mutation: the `verify` registry loop emptied, and the packaging-tag check always passing → `release-script.test.ts` "also asks the MCP Registry for each of the five servers ..." and "a server the MCP Registry does not list (404), one it cannot read (500) and a packaging repository without the tag are each one failed check".
+- mutation: one byte of the ed25519 host key changed → `story-42-8-release-core.test.ts` "ssh-ed25519: the SHA256 of the key ... is the fingerprint GitHub publishes".
+- mutation: `uploadPathProblems`'s registry listing check (`.json` and hash-verified) and its release-version check each disabled → `release-script.test.ts` "a listing that is not a hash-verified .json of the manifest is refused before any upload" and "the report's item names and the version come from the manifest, and a listing that is not at the release version is refused ...".
+- mutation: a rehearsal's registry `not ready` also fails the rehearsal (`failed = true` after the registry branch), and the loop runs the registry channel before the others → `release-script.test.ts` "a hash mismatch, a validate failure and an unreadable lookup are each `not ready (...)`, reported but never failing the rehearsal (decision #108)", "a registry failure is the last thing the run does ..." and the two "no `channels` option" rows.
+- mutation: `registryArchiveProblems`'s `.git` check, its missing-file check and its extra-file check each disabled → `ci-ipm-archive.test.ts` "a .git directory that tar did not exclude is refused" and "an extra file and a missing file are each refused, naming the file" (and the module.xml-under-a-subdirectory row, which uses the extra and missing branches).
+- mutation: one `server.json` `registryType` changed from `npm` to `pypi`, and `CONNECTION_VARIABLES`'s `IRIS_HOST` default changed to `localhost2` → `package-manifests.test.ts` "has a generated server.json that names its mcpName, package and version" and `story-42-8-plugin.test.ts` "the plugin's options, the registry listings' variables and client-config's CONNECTION_VARS are the same six variables, with the same defaults".
+
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** Story 42.8 is implemented on `epic42`; the repository is still at 1.0.0 and `BOOTSTRAP_VERSION` did not move (`1.0.0+2.244fe8623c76`).
+- **Plugin.** `skills-pack-src/plugin/` feeds `gen:pack`, which writes `.claude-plugin/plugin.json` (plugin `iris-mcp`, six `userConfig` options) and `.mcp.json` (five servers `dev`, `admin`, `data`, `interop`, `ops`, each `npx -y @iris-mcp/<pkg>@1`) into the skills pack. `.claude-plugin/marketplace.json` pins `git-subdir` at `v<version>`. The pack README gained a "Claude Code plugin" section.
+- **Listings.** `scripts/gen-listings.mjs` generates the marketplace file and the five `server.json` files; `gen:listings:check` is a CI root gate. `checkProvenance` has a `plugin` rule, and the endorsement deny-list is shared (`scripts/lib/endorsement.mjs`).
+- **Installer (DW-625).** `claude-plugin-detect.ts` reads `enabledPlugins["iris-mcp@iris-mcp"]` from the user (`CLAUDE_CONFIG_DIR` aware), project and local settings. With the plugin on, `skills install --client claude-code` installs only the rule.
+- **Release.** `ipm` is enabled with the pinned GitHub host keys and a redacted deploy key; a listed IPM version goes on to the tag and tree check (#109). `mcp-registry` is the last channel (decision #108: non-blocking in a rehearsal, fails the run only after every other channel in a release). `mcp-publisher` is pinned to **v1.8.8**, published 2026-11-06T14:07:07Z, sha256 `09f1fa70ee146b640584274a1a6b2b8a0310b05d4321fa9224e6df6a016d67f4` (decision #110; the digest matches the release asset's `digest` field and a downloaded copy). `verify` also reads the five registry listings and the packaging tag. `release-version.mjs` regenerates the pack and the listings.
+- **DW-694.** `stagePackagingRoot` moved to `scripts/lib/ipm-archive.mjs`; `scripts/ci-ipm-archive.mjs` has a registry-shaped leg (GNU tar inside the Linux container, `load <tgz>` on a fresh container per edition).
+
+**Files changed.** 69 paths: the plugin sources and generated pack files, the listings generator and its output, the provenance and endorsement libraries, the installer (`claude-plugin-detect.ts`, `pack-plan.ts`, `pack-apply.ts`, `cli/clients.ts`, `pack-targets.ts`, `index.ts`), the release code (`release.mjs`, `release-core.mjs`, `release-checks.mjs`, `release.yml`, `release-version.mjs`, `ipm-archive.mjs`, `ci-ipm-archive.mjs`), the docs (root and client-config README, CHANGELOG, a `minor` changeset for `@iris-mcp/client-config`) and about 30 test files.
+
+**Review.** Four layers reported 36 findings: high 0, medium 7, low 26, false 3. Patched (one fresh subagent): the registry publish loop ordering and the empty-manifest guard, the `uploadPathProblems` refusal, BOM and empty settings files, four unfalsifiable assertions, the `verify` name pin, the stale README sentences, three missing release-script rows (the script's own five channels, an IPM dry step for a listed version, a registry `not attempted` after a hard failure) and nine groups of missing `mutation:` lines. Deferred (frontmatter): the compile-on-save hook candidate, an automated pin of Claude Code's acceptance of the plugin files, and the unmeasured `ipm` job timeout. Rejected with reasons: see the triage log (spec-bound design points, project precedents, duplicates, three false).
+
+**Follow-up review recommendation: true.** Six medium entries were patched. The unverified risk is the new release-script rows and the `release.mjs` registry-loop edits made after the review: they were checked by their own mutation runs and by every suite below, but no layer re-read the patched tree.
+
+**Verification.**
+- Static: `node --check` on the ten scripts; `gen:pack:check`, `gen:listings:check`, `check:provenance`, `lint_spine.py` (0 findings) all clean.
+- Claude Code 2.1.330 (scratch `CLAUDE_CONFIG_DIR`, non-repo cwd): `claude plugin validate` passes on the pack and on `.`; `plugin details iris-mcp` lists 5 MCP servers, 18 skills, 0 hooks. The Task 0 probe matched the plan (see `## Verification`).
+- Tests: client-config 1050 passed; shared 2575; admin 506 (8 skipped); data 163 (2 skipped); dev 1490 (319 skipped); interop 751; ops 350; `@iris-mcp/all` in 8 shards, all green (no failures in any shard). Lint and type-check clean for every package that has them (`@iris-mcp/all` has neither script).
+- Root: baseline `1e62c5ad5bf7`/141 intact, `gen:skills:check`, `validate:prompts`, `gen:tools-list-snapshot:check`, `check-epics-sync`, `gen:bootstrap` (no change, tree unchanged).
+- Read-only GETs: registry lookups `io.github.upstash/context7@4.7.3` is `published`, `io.github.jbrandtmse/iris-dev-mcp@1.0.0` is `absent`; the publisher digest matches.
+- Version-step rehearsal in a throwaway copy (removed): exit 0; `plugin.json`, marketplace `ref` (`v1.0.1`) and the five `server.json` at 1.0.1; `embeddedVersionProblems` `[]`; both generator checks clean.
+- Tag-consistency one-liner prints `[1 pending changeset] []`: the only problem is this story's own pending changeset, which the spec requires; `embeddedVersionProblems` is `[]`. The lead's version step consumes it.
+
+**Residual risks.** The DW-694 harness leg (`node scripts/ci-ipm-archive.mjs`: GNU tar inside the container and `load <tgz>`) was not run against a real IRIS: no container was started. Its real-path proof is lead A1/A1b. `git-subdir` with `ref` was verified by the validator only; C1 is its first real install. The marketplace entry resolves a tag that has no plugin until `v1.1.0`. The lead re-checks the `mcp-publisher` v1.8.8 pin before the `v1.1.0` tag. The inner `servers.length === 0` guard in `publishMcpRegistry` is unreachable through `publish()` (an earlier refusal fires), so only the refusal is pinned.
+
+**Overrides recorded.** Decisions #108 and #110 in `## Spec Change Log`; the frozen intent block is untouched.

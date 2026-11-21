@@ -42,16 +42,28 @@
 //      absent is `not ready` in a rehearsal and `failed` before its upload in a release.
 //      The CLIs are the exact pins in the launcher's `node_modules/.bin`; `vsce publish --oidc` is trusted publishing, and `ovsx publish`
 //      uses trusted publishing too unless OVSX_PAT is set (the first publish). In release mode the vsix must be at the manifest's version.
+//      IPM (Story 42.8). The push to the packaging repository trusts only GitHub's three published host keys: a 0600 known_hosts file of
+//      the pinned keys, `StrictHostKeyChecking=yes`, never `accept-new`. A version the IPM registry already lists goes on to the tag and tree
+//      check: tag `v<version>` on the packaging repository with an identical tree is `already published`, and an absent tag or a different
+//      tree is `failed`, with nothing pushed. In a rehearsal a listed version reads `ready (would be already published)`.
+//      THE MCP REGISTRY (Story 42.8). The channel is last and the registry is in preview, so it never blocks the others: in a rehearsal its
+//      `not ready` is reported but the run does not exit non-zero for it (and the rehearsal reads it even when an earlier channel is not ready),
+//      and in a release its failure fails the run only after every channel before it has run, with a rerun recovering it. It asks the registry
+//      (read-only) about each of the five `server.json` listings first; an answer that cannot be judged posts nothing. For the absent ones it
+//      downloads the pinned `mcp-publisher` (a sha256 pin; a mismatch is never run), waits (up to 5 minutes) for npm to serve each package
+//      version, runs `login github-oidc` (no secret) and one `publish <server.json>` per listing, all with a temporary HOME that is removed on
+//      every exit path. A failed publish is judged by a fresh lookup. The OIDC request variables reach that login only.
 //   5. AUTH. NPM_TOKEN set: a 0600 temporary userconfig holds it and is passed as `--userconfig`; it is removed on every exit path and the
 //      token is never printed. NPM_TOKEN empty: no userconfig, npm uses OIDC (trusted publishing). The token, GITHUB_TOKEN, VSCE_PAT,
 //      OVSX_PAT and the IPM deploy key are removed from the environment of every child process, and the job's OIDC request variables
-//      (ACTIONS_ID_TOKEN_REQUEST_TOKEN and _URL) reach only `npm publish`, `vsce publish` and `ovsx publish`. OVSX_PAT reaches only
+//      (ACTIONS_ID_TOKEN_REQUEST_TOKEN and _URL) reach only `npm publish`, `vsce publish`, `ovsx publish` and `mcp-publisher login`. OVSX_PAT reaches only
 //      `ovsx publish`, as an environment variable, never in argv. Every secret is redacted from every report line.
 //   6. Each phase prints a line, and the report is appended to $GITHUB_STEP_SUMMARY when it is set.
 //   7. SIGINT and SIGTERM kill the child processes that are running, run the cleanups and end the run with 130 or 143
 //      (`installSignalHandlers`); the gate set's own handlers, registered later, forward the signal to its command and remove the container.
 //   8. VERIFY is read-only: for every package of NPM_PUBLISH_ORDER, `npm view <name>@<v> version dist.attestations --json` must show the
-//      version with a provenance attestation, and `npx -y @iris-mcp/dev@1` must answer `initialize` with `serverInfo.version` <v> in a
+//      version with a provenance attestation, each of the five servers must be listed on the MCP Registry at <v>, the packaging repository
+//      must hold the tag `v<v>` (`git ls-remote`), and `npx -y @iris-mcp/dev@1` must answer `initialize` with `serverInfo.version` <v> in a
 //      clean temporary home, npm cache and working directory, against a closed local port. It prints one line per check, never publishes,
 //      logs in or reaches IRIS, and removes its temporary directory on every exit path. It covers the `@1` major only.
 //
@@ -88,13 +100,20 @@ import {
   IPM_DIST_BRANCH,
   IPM_DIST_REPOSITORY,
   IPM_REGISTRY_PACKAGE_URL,
+  MARKETPLACE_RELATIVE,
+  MCP_PUBLISHER,
   NPM_NOT_FOUND,
   NPM_PUBLISH_ORDER,
+  NPM_VISIBLE_POLL_MS,
+  NPM_VISIBLE_TIMEOUT_MS,
   PLACEHOLDER_PUBLISHER,
+  PLUGIN_ENTRY_NAME,
+  PLUGIN_MANIFEST_RELATIVE,
   RELEASE_CHANNELS,
   RELEASE_CHECK_EXEMPTIONS,
   RELEASE_ENVIRONMENT,
   ROOT_CHECK_SCRIPT,
+  SERVER_JSON_DIRS,
   STATUS,
   ciGateDecision,
   compareUrl,
@@ -103,19 +122,24 @@ import {
   environmentSummary,
   environmentWarnings,
   extensionChangelogProblems,
+  githubKnownHostsText,
   ipmDefaultBranch,
   ipmPushPlan,
-  ipmReadme,
   ipmRegistryListsVersion,
   mainReachability,
+  mcpPublisherArgv,
+  mcpPublisherUrl,
   npmPublishArgv,
   npmUserconfig,
   npmVersionProblems,
+  npmVersionUrl,
   npmViewArgv,
   npmViewJsonArgv,
   openVsxNamespaceUrl,
   ovsxArgv,
   publishRefusals,
+  registryLookupUrl,
+  registryOutcome,
   registryProblems,
   releaseMode,
   releaseReport,
@@ -514,7 +538,19 @@ export function readReleaseFacts(repoRoot = REPO_ROOT) {
     lockRootVersion: readIf(path.join(extensionDir, 'package-lock.json'), (text) => JSON.parse(text).packages?.['']?.version),
     changelog: readIf(path.join(extensionDir, 'CHANGELOG.md'), (text) => text),
   };
-  return { packages, problems, pending, marker, moduleVersion, sharedVersion: shared?.manifest.version, extension };
+  // The listings embed the version too (lockstep): the plugin manifest, the marketplace entry's ref and each server.json.
+  const readJsonIf = (relative) => readIf(path.join(repoRoot, relative), (text) => JSON.parse(text));
+  const marketplace = readJsonIf(MARKETPLACE_RELATIVE);
+  const listings = {
+    pluginVersion: readJsonIf(PLUGIN_MANIFEST_RELATIVE)?.version,
+    marketplaceRef: marketplace?.plugins?.find?.((entry) => entry?.name === PLUGIN_ENTRY_NAME)?.source?.ref,
+    servers: SERVER_JSON_DIRS.map((dir) => {
+      const file = `packages/${dir}/server.json`;
+      const listing = readJsonIf(file);
+      return { file, version: listing?.version, packageVersion: listing?.packages?.[0]?.version };
+    }),
+  };
+  return { packages, problems, pending, marker, moduleVersion, sharedVersion: shared?.manifest.version, extension, listings };
 }
 
 /**
@@ -538,6 +574,21 @@ export function embeddedVersionProblems(facts) {
     [`${extensionDir}/package-lock.json (packages[""].version)`, extension.lockRootVersion],
   ]) {
     if (version !== facts.sharedVersion) problems.push(`${file} is at ${JSON.stringify(version)}, not the shared version ${facts.sharedVersion}. Run pnpm run version, which stamps it.`);
+  }
+  const listings = facts.listings ?? {};
+  if (listings.pluginVersion !== facts.sharedVersion) {
+    problems.push(`${PLUGIN_MANIFEST_RELATIVE} is at ${JSON.stringify(listings.pluginVersion)}, not the shared version ${facts.sharedVersion}. Run pnpm run version, which regenerates it.`);
+  }
+  if (listings.marketplaceRef !== `v${facts.sharedVersion}`) {
+    problems.push(`${MARKETPLACE_RELATIVE} pins the ref ${JSON.stringify(listings.marketplaceRef)}, not the release tag v${facts.sharedVersion}. Run pnpm run version, which regenerates it.`);
+  }
+  for (const server of listings.servers ?? []) {
+    for (const [field, version] of [['version', server.version], ['packages[0].version', server.packageVersion]]) {
+      if (version !== facts.sharedVersion) problems.push(`${server.file} ${field} is ${JSON.stringify(version)}, not the shared version ${facts.sharedVersion}. Run pnpm run version, which regenerates it.`);
+    }
+  }
+  if ((listings.servers ?? []).length !== SERVER_JSON_DIRS.length) {
+    problems.push(`the server.json listings were not read (${(listings.servers ?? []).length} of ${SERVER_JSON_DIRS.length}). Run pnpm gen:listings.`);
   }
   return problems;
 }
@@ -636,18 +687,39 @@ async function packVsix({ repoRoot, out, env, deps, say }) {
   return { file: `vsix/${vsixes[0]}`, name: manifest.name, version: manifest.version, publisher: manifest.publisher, files };
 }
 
-/** The IPM tree: the module staged from the built embed (never from `src/`), plus a generated README and the LICENSE. */
+/** The IPM tree: the packaging root staged from the built embed (never from `src/`), by the function the CI gate stages with too. */
 async function stageIpm({ repoRoot, out, version, modules, say }) {
   const embed = await modules.ipm.loadEmbed(repoRoot);
   const problems = modules.ipm.embedProblems(embed);
   if (problems.length > 0) throw new Error(`the IPM embed is not releasable: ${problems.join(' ')}`);
   const tree = path.join(out, 'ipm');
   mkdirSync(tree, { recursive: true });
-  const staged = modules.ipm.stageModule(tree, embed);
-  writeFileSync(path.join(tree, 'README.md'), ipmReadme(version), 'utf8');
-  copyFileSync(path.join(repoRoot, 'LICENSE'), path.join(tree, 'LICENSE'));
-  say(`the IPM tree: ${staged.files.length} files from the embed ${embed.marker}, plus README.md and LICENSE`);
+  const staged = modules.ipm.stagePackagingRoot(tree, embed, { version, licenseText: readFileSync(path.join(repoRoot, 'LICENSE'), 'utf8') });
+  say(`the IPM tree: ${staged.files.length} files from the embed ${embed.marker}, including README.md and LICENSE`);
   return { tree: 'ipm', module: embed.moduleName, version, marker: embed.marker, repository: IPM_DIST_REPOSITORY, branch: IPM_DIST_BRANCH };
+}
+
+/**
+ * The registry listings: the five `server.json` files copied, byte for byte, to `<out>/mcp-registry/<bin>.json` (the bin is the last
+ * segment of the listing's `name`). Each must be at `version` and name its npm package at that version, so that what `publish` sends is
+ * what the packages are.
+ */
+function stageRegistryListings({ repoRoot, out, version, say }) {
+  const directory = path.join(out, 'mcp-registry');
+  mkdirSync(directory, { recursive: true });
+  const servers = [];
+  for (const dir of SERVER_JSON_DIRS) {
+    const source = path.join(repoRoot, 'packages', dir, 'server.json');
+    const listing = readJson(source);
+    const file = `mcp-registry/${String(listing.name).split('/').pop()}.json`;
+    if (listing.version !== version || listing.packages?.[0]?.version !== version) {
+      throw new Error(`packages/${dir}/server.json is at ${JSON.stringify(listing.version)} (package ${JSON.stringify(listing.packages?.[0]?.version)}), not ${version}. Run pnpm run version, which regenerates it.`);
+    }
+    copyFileSync(source, path.join(out, file));
+    servers.push({ name: listing.name, version: listing.version, package: listing.packages[0].identifier, file });
+  }
+  say(`the MCP Registry listings: ${servers.length} server.json files at ${version}`);
+  return { servers };
 }
 
 /**
@@ -787,12 +859,14 @@ async function runPrepare({ out, env, repoRoot = REPO_ROOT }, deps) {
     }
     const vsix = await packVsix({ repoRoot, out: outDir, env: cenv, deps, say });
     const ipm = await stageIpm({ repoRoot, out: outDir, version, modules, say });
+    const registry = stageRegistryListings({ repoRoot, out: outDir, version, say });
 
     const channelDetails = {
       npm: { packages: packedPackages.map((entry) => ({ name: entry.name, version: entry.version, tarball: `npm/${path.basename(entry.tarball)}` })) },
       'vscode-marketplace': vsix,
       'open-vsx': vsix,
       ipm,
+      'mcp-registry': registry,
     };
     const manifest = {
       schema: 1,
@@ -884,11 +958,26 @@ export function uploadPathProblems(manifest, channels) {
   }
   for (const channel of channels) {
     const detail = channel.enabled && channel.id !== 'npm' ? detailOf(channel.id) : undefined;
-    if (detail === undefined) continue;
+    if (detail === undefined) {
+      if (channel.enabled && channel.id === 'mcp-registry') problems.push(`${channel.id}: the manifest has no ${channel.id} entry, so no server.json would be posted. Prepare the artifacts again.`);
+      continue;
+    }
     if (channel.id === 'ipm') {
       const tree = detail.tree ?? 'ipm';
       if (!isContainedPath(tree) || !verified.has(`${tree}/module.xml`)) {
         problems.push(`${channel.id}: its tree ${JSON.stringify(tree)} is not a directory of ${MANIFEST_NAME} that holds module.xml. Prepare the artifacts again.`);
+      }
+    } else if (channel.id === 'mcp-registry') {
+      const servers = Array.isArray(detail.servers) ? detail.servers : [];
+      if (servers.length === 0) problems.push(`${channel.id}: the manifest lists no server.json. Prepare the artifacts again.`);
+      for (const server of servers) {
+        const item = `${server?.name}@${server?.version}`;
+        if (!isContainedPath(server?.file) || !verified.has(server.file) || !server.file.endsWith('.json')) {
+          problems.push(`${channel.id}: ${item}: its listing ${JSON.stringify(server?.file)} is not a hash-verified .json of ${MANIFEST_NAME}. Prepare the artifacts again.`);
+        }
+        if (manifest?.mode === 'release' && server?.version !== manifest.version) {
+          problems.push(`${channel.id}: ${item} is not at the release version ${manifest.version}. Run pnpm run version, then prepare the artifacts again.`);
+        }
       }
     } else {
       if (!isContainedPath(detail.file) || !verified.has(detail.file) || !detail.file.endsWith('.vsix')) {
@@ -1065,11 +1154,13 @@ async function runPublish({ artifacts, dryRun = false, env, repoRoot = REPO_ROOT
     }
     const npmEnv = childEnv(env);
     const publishEnv = { ...npmEnv, ...oidcEnv(env) };
-    secrets.push(env.ACTIONS_ID_TOKEN_REQUEST_TOKEN, env.OVSX_PAT, env.VSCE_PAT);
+    // The deploy key is redacted whole and line by line: a git error may echo one line of it.
+    secrets.push(env.ACTIONS_ID_TOKEN_REQUEST_TOKEN, env.OVSX_PAT, env.VSCE_PAT, env.IPM_DIST_DEPLOY_KEY, ...String(env.IPM_DIST_DEPLOY_KEY ?? '').split(/\r?\n/));
     const quote = (text) => redact(text, secrets);
 
     // npm, in order; the first failure stops everything after it.
     let failed = false;
+    let hardFailed = false;
     for (const entry of npmPackages) {
       const item = `${entry.name}@${entry.version}`;
       if (failed) {
@@ -1085,6 +1176,7 @@ async function runPublish({ artifacts, dryRun = false, env, repoRoot = REPO_ROOT
       }
       if (outcome === 'unknown') {
         failed = true;
+        hardFailed = true;
         results.push({ channel: 'npm', item, status: STATUS.failed, detail: `could not ask the registry: ${quote(npmFailureDetail(viewed, 3))}` });
         say(`${item}: could not ask the registry whether it is published. Nothing after it is attempted.`);
         continue;
@@ -1095,35 +1187,58 @@ async function runPublish({ artifacts, dryRun = false, env, repoRoot = REPO_ROOT
         say(`${item}: ${dryRun ? 'dry run ok' : 'published'}`);
       } else {
         failed = true;
+        hardFailed = true;
         results.push({ channel: 'npm', item, status: STATUS.failed, detail: quote(npmFailureDetail(uploaded, 4)) });
         say(`${item}: npm publish failed (exit ${uploaded.status ?? 'none'}). Nothing after it is attempted. Fix the cause and run the release again: versions already on the registry are skipped.`);
       }
     }
 
-    // The other channels, in order.
+    // The other channels, in order. The MCP Registry (in preview) is last and never blocks the others: in a rehearsal its `not ready` is
+    // reported but does not fail the run, and a rehearsal still reads it when an earlier channel is `not ready` (read-only checks). In a
+    // release its failed upload fails the run only after everything before it has run, and a rerun recovers it.
+    let registryNotReady = false;
     for (const channel of channels.filter((entry) => entry.id !== 'npm')) {
       const detail = Array.isArray(manifest.channels) ? manifest.channels.find((entry) => entry.id === channel.id) : undefined;
-      const item = channel.id === 'ipm' ? `${detail?.module ?? 'iris-execute-mcp-v2'}@${manifest.version}` : `${detail?.name ?? 'iris-mcp-launcher'}@${detail?.version ?? '?'}`;
+      const item =
+        channel.id === 'ipm'
+          ? `${detail?.module ?? 'iris-execute-mcp-v2'}@${manifest.version}`
+          : channel.id === 'mcp-registry'
+            ? `${Array.isArray(detail?.servers) ? detail.servers.length : 0} servers@${manifest.version}`
+            : `${detail?.name ?? 'iris-mcp-launcher'}@${detail?.version ?? '?'}`;
       if (!channel.enabled) {
         const readiness = dryRun && detail !== undefined ? await channelReadiness(channel, detail, { dir, env, deps, repoRoot, version: manifest.version }) : undefined;
         results.push({ channel: channel.id, item, status: skippedText(channel), ...(readiness === undefined ? {} : { detail: readiness }) });
         say(`${channel.id}: ${skippedText(channel)}${readiness === undefined ? '' : `; dry step: ${readiness}`}`);
         continue;
       }
-      if (failed) {
+      if (failed && !(dryRun && channel.id === 'mcp-registry' && !hardFailed)) {
         results.push({ channel: channel.id, item, status: STATUS.notAttempted });
         continue;
       }
       let outcome;
       try {
-        outcome = await runChannel(channel, detail, { dir, env, deps, repoRoot, dryRun, cleanups, version: manifest.version, sha: manifest.sha, quote });
+        outcome = await runChannel(channel, detail, { dir, env, deps, repoRoot, dryRun, cleanups, version: manifest.version, sha: manifest.sha, quote, secrets });
       } catch (error) {
         outcome = { status: STATUS.failed, detail: quote(error instanceof Error ? error.message : String(error)) };
       }
-      results.push({ channel: channel.id, item, status: outcome.status, ...(outcome.detail === undefined ? {} : { detail: outcome.detail }) });
-      say(`${channel.id}: ${outcome.status}${outcome.detail === undefined ? '' : ` (${outcome.detail})`}`);
-      if (outcome.status === STATUS.failed || (dryRun && outcome.status === STATUS.notReady)) failed = true;
+      if (Array.isArray(outcome.items)) {
+        for (const entry of outcome.items) {
+          results.push({ channel: channel.id, item: entry.item, status: entry.status, ...(entry.detail === undefined ? {} : { detail: entry.detail }) });
+          say(`${channel.id}: ${entry.item}: ${entry.status}${entry.detail === undefined ? '' : ` (${entry.detail})`}`);
+        }
+      } else {
+        results.push({ channel: channel.id, item, status: outcome.status, ...(outcome.detail === undefined ? {} : { detail: outcome.detail }) });
+        say(`${channel.id}: ${outcome.status}${outcome.detail === undefined ? '' : ` (${outcome.detail})`}`);
+      }
+      if (outcome.status === STATUS.failed) {
+        failed = true;
+        hardFailed = true;
+      } else if (dryRun && outcome.status === STATUS.notReady) {
+        if (channel.id === 'mcp-registry') registryNotReady = true;
+        else failed = true;
+      }
     }
+    if (registryNotReady) say('mcp-registry is not ready, which does not stop the rehearsal: the registry is in preview and never blocks npm, the stores or IPM.');
 
     const report = releaseReport(results);
     deps.log(report);
@@ -1143,12 +1258,12 @@ async function channelReadiness(channel, detail, ctx) {
 }
 
 /** Read-only checks of one channel. Returns `{ status: 'ready' }` or `{ status: 'not ready', detail }`. */
-async function dryStep(channel, detail, { dir, env, deps, repoRoot, version }) {
+async function dryStep(channel, detail, { dir, env, deps, repoRoot, version, cleanups }) {
+  if (channel.id === 'mcp-registry') return registryDryStep(detail, { dir, env, deps, version, cleanups });
   if (channel.id === 'ipm') {
     const reasons = [];
     const listing = await ipmRegistryState(deps, version);
     if (listing.error !== undefined) reasons.push(`the registry could not be read (${listing.error})`);
-    else if (listing.listed) reasons.push(`the registry already lists ${version}`);
     const url = `https://github.com/${IPM_DIST_REPOSITORY}.git`;
     const remote = await deps.run(['git', ...ipmPushPlan(path.join(dir, detail.tree ?? 'ipm'), version, '0'.repeat(40), { url, clone: dir }).lsRemoteArgv], { cwd: dir, env: childEnv(env, { GIT_TERMINAL_PROMPT: '0' }) });
     if (remote.status !== 0) {
@@ -1157,7 +1272,8 @@ async function dryStep(channel, detail, { dir, env, deps, repoRoot, version }) {
       const branch = ipmDefaultBranch(remote.stdout);
       if (branch !== undefined && branch !== IPM_DIST_BRANCH) reasons.push(`its default branch is ${branch}, not ${IPM_DIST_BRANCH}, and the registry reads the default branch`);
     }
-    return reasons.length === 0 ? { status: STATUS.ready } : { status: STATUS.notReady, detail: reasons.join('; ') };
+    if (reasons.length > 0) return { status: STATUS.notReady, detail: reasons.join('; ') };
+    return listing.listed ? { status: STATUS.ready, detail: STATUS.wouldBeAlreadyPublished } : { status: STATUS.ready };
   }
   const { reasons } = vsixReadiness(detail, repoRoot, channel.id === 'vscode-marketplace' ? 'vsce' : 'ovsx');
   // The store reads need a real publisher: the placeholder names nothing a store could answer for.
@@ -1193,6 +1309,164 @@ async function ipmRegistryState(deps, version) {
   }
 }
 
+// -- the MCP Registry channel ----------------------------------------------------------------------------------
+
+/** The sentence for a registry lookup that could not be judged: nothing is posted, because a publish cannot be told from a duplicate. */
+const registryLookupProblem = (item, why) =>
+  `could not ask the MCP Registry whether ${item} is published (${why}). Nothing was posted to the MCP Registry; check the network and the registry, then run the release again.`;
+
+/** Ask the MCP Registry (read-only) about one server listing: `{ outcome: 'published' | 'absent' | 'unknown', why? }`. */
+async function registryLookup(deps, server, version) {
+  const answer = await readStatus(deps, registryLookupUrl(server.name, version), { Accept: 'application/json', 'User-Agent': 'iris-mcp-release' }, { json: true });
+  if (answer.error !== undefined) return { outcome: 'unknown', why: answer.error };
+  return registryOutcome(answer, { name: server.name, version });
+}
+
+/**
+ * Download the pinned `mcp-publisher` (a linux tarball), refuse it unless its sha256 is the pin, and extract it into `work`. Returns
+ * `{ bin }`, or `{ problem }` (never run an unverified binary).
+ */
+async function fetchPublisher(deps, work, env) {
+  const publisher = deps.mcpPublisher ?? MCP_PUBLISHER;
+  let bytes;
+  try {
+    const response = await deps.fetch(mcpPublisherUrl(publisher), { headers: { 'User-Agent': 'iris-mcp-release' }, signal: AbortSignal.timeout(120_000) });
+    if (response.status !== 200) return { problem: `the download of mcp-publisher ${publisher.version} answered HTTP ${response.status}. Check the network, then run the release again.` };
+    bytes = Buffer.from(await response.arrayBuffer());
+  } catch (error) {
+    return { problem: `the download of mcp-publisher ${publisher.version} failed (${error instanceof Error ? error.message : String(error)}). Check the network, then run the release again.` };
+  }
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  if (digest !== publisher.sha256) {
+    return { problem: `the mcp-publisher download has the sha256 ${digest}, not the pinned ${publisher.sha256}. It was not run; check the pin in scripts/lib/release-core.mjs against the release's asset digest.` };
+  }
+  const archive = path.join(work, publisher.asset);
+  writeFileSync(archive, bytes);
+  const binDir = path.join(work, 'bin');
+  mkdirSync(binDir, { recursive: true });
+  const extracted = await deps.run(['tar', '-xzf', archive, '-C', binDir], { cwd: work, env: childEnv(env) });
+  const bin = path.join(binDir, 'mcp-publisher');
+  if (extracted.status !== 0 || !existsSync(bin)) {
+    return { problem: `mcp-publisher could not be extracted (${extracted.error?.message ?? `exit ${extracted.status}`}${existsSync(bin) ? '' : ', and no mcp-publisher file resulted'}). Check that tar is installed, then run the release again.` };
+  }
+  return { bin };
+}
+
+/** The dry step of the registry channel: the pinned publisher verifies, every listing validates, and every lookup can be judged. */
+async function registryDryStep(detail, { dir, env, deps, version, cleanups }) {
+  const servers = Array.isArray(detail?.servers) ? detail.servers : [];
+  if (servers.length === 0) return { status: STATUS.notReady, detail: 'the manifest lists no server.json. Prepare the artifacts again.' };
+  const reasons = [];
+  const lookups = [];
+  for (const server of servers) {
+    const lookup = await registryLookup(deps, server, version);
+    lookups.push(lookup.outcome);
+    if (lookup.outcome === 'unknown') reasons.push(registryLookupProblem(`${server.name}@${version}`, lookup.why));
+  }
+  const work = mkdtempSync(path.join(tmpdir(), 'release-registry-dry-'));
+  cleanups?.add(() => rmSync(work, { recursive: true, force: true }));
+  try {
+    const fetched = await fetchPublisher(deps, work, env);
+    if (fetched.problem !== undefined) {
+      reasons.push(fetched.problem);
+    } else {
+      const home = path.join(work, 'home');
+      mkdirSync(home, { recursive: true });
+      for (const server of servers) {
+        const validated = await deps.run([fetched.bin, ...mcpPublisherArgv('validate', path.join(dir, server.file))], { cwd: work, env: childEnv(env, { HOME: home, USERPROFILE: home }) });
+        if (validated.status !== 0) reasons.push(`mcp-publisher validate rejected ${server.file}: ${tail(validated.stdout || validated.stderr || validated.error?.message, 4)} Fix the listing, run pnpm gen:listings, then prepare again.`);
+      }
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+  if (reasons.length > 0) return { status: STATUS.notReady, detail: reasons.join('; ') };
+  if (lookups.every((outcome) => outcome === 'published')) return { status: STATUS.ready, detail: STATUS.wouldBeAlreadyPublished };
+  const absent = lookups.filter((outcome) => outcome === 'absent').length;
+  return { status: STATUS.ready, detail: `${STATUS.wouldPublish} ${absent === servers.length ? '' : `${absent} of `}${servers.length} servers` };
+}
+
+/** Whether npm serves `name@version`, asked until it does or until `NPM_VISIBLE_TIMEOUT_MS` has passed (the MCP Registry refuses a version npm does not serve). */
+async function npmServes(deps, name, version) {
+  const deadline = deps.now() + NPM_VISIBLE_TIMEOUT_MS;
+  for (;;) {
+    const answer = await readStatus(deps, npmVersionUrl(name, version), { Accept: 'application/json', 'User-Agent': 'iris-mcp-release' });
+    if (answer.status === 200) return true;
+    if (deps.now() >= deadline) return false;
+    await deps.sleep(NPM_VISIBLE_POLL_MS);
+  }
+}
+
+/**
+ * The MCP Registry channel: ask the registry about every listing first (an answer that cannot be judged posts nothing), then, for each
+ * absent one, wait for npm to serve the version, log in with the job's OIDC token (no secret) and `publish` the listing. The publisher
+ * runs with a temporary HOME that is removed on every exit path, so its login token never outlives the step. A failed publish is judged
+ * by a fresh lookup: a listing that is there now is `already published` (a race), one that is not is `failed`.
+ */
+async function publishMcpRegistry(detail, { dir, env, deps, cleanups, version, quote }) {
+  const servers = Array.isArray(detail?.servers) ? detail.servers : [];
+  if (servers.length === 0) return { status: STATUS.failed, detail: 'the manifest lists no server.json. Prepare the artifacts again.' };
+  const itemOf = (server) => `${server.name}@${version}`;
+  const lookups = new Map();
+  for (const server of servers) {
+    const lookup = await registryLookup(deps, server, version);
+    if (lookup.outcome === 'unknown') return { status: STATUS.failed, detail: registryLookupProblem(itemOf(server), lookup.why) };
+    lookups.set(server.name, lookup.outcome);
+  }
+  const pending = servers.filter((server) => lookups.get(server.name) === 'absent');
+  if (pending.length === 0) {
+    return { status: STATUS.alreadyPublished, items: servers.map((server) => ({ item: itemOf(server), status: STATUS.alreadyPublished })) };
+  }
+  const work = mkdtempSync(path.join(tmpdir(), 'release-registry-'));
+  cleanups.add(() => rmSync(work, { recursive: true, force: true }));
+  try {
+    const fetched = await fetchPublisher(deps, work, env);
+    if (fetched.problem !== undefined) return { status: STATUS.failed, detail: `${fetched.problem} Nothing was posted to the MCP Registry.` };
+    for (const server of pending) {
+      if (!(await npmServes(deps, server.package, version))) {
+        return { status: STATUS.failed, detail: `npm does not serve ${server.package}@${version} after ${NPM_VISIBLE_TIMEOUT_MS / 60_000} minutes, and the MCP Registry refuses a version npm does not serve. Nothing was posted; run the release again once npm serves it.` };
+      }
+    }
+    const home = path.join(work, 'home');
+    mkdirSync(home, { recursive: true });
+    const withHome = { HOME: home, USERPROFILE: home };
+    const loggedIn = await deps.run([fetched.bin, ...mcpPublisherArgv('login')], { cwd: work, env: childEnv(env, { ...withHome, ...oidcEnv(env) }) });
+    if (loggedIn.status !== 0) {
+      return { status: STATUS.failed, detail: `mcp-publisher login github-oidc failed (exit ${loggedIn.status ?? 'none'}): ${quote(tail(loggedIn.stderr || loggedIn.error?.message || loggedIn.stdout, 4))}. Nothing was posted; check that the job has id-token: write, then run the release again.` };
+    }
+    const items = [];
+    let stopped = false;
+    for (const server of servers) {
+      const item = itemOf(server);
+      if (lookups.get(server.name) === 'published') {
+        items.push({ item, status: STATUS.alreadyPublished });
+        continue;
+      }
+      if (stopped) {
+        items.push({ item, status: STATUS.notAttempted });
+        continue;
+      }
+      const posted = await deps.run([fetched.bin, ...mcpPublisherArgv('publish', path.join(dir, server.file))], { cwd: work, env: childEnv(env, withHome) });
+      if (posted.status === 0) {
+        items.push({ item, status: STATUS.published, detail: 'auth: oidc' });
+        continue;
+      }
+      const again = await registryLookup(deps, server, version);
+      if (again.outcome === 'published') {
+        items.push({ item, status: STATUS.alreadyPublished });
+        continue;
+      }
+      stopped = true;
+      items.push({ item, status: STATUS.failed, detail: quote(tail(posted.stderr || posted.error?.message || posted.stdout, 4)) });
+    }
+    const failed = items.some((entry) => entry.status === STATUS.failed);
+    const published = items.some((entry) => entry.status === STATUS.published);
+    return { status: failed ? STATUS.failed : published ? STATUS.published : STATUS.alreadyPublished, items };
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
 /** Run one enabled channel: its dry step in a rehearsal, its upload otherwise. */
 async function runChannel(channel, detail, ctx) {
   const { dir, env, deps, repoRoot, dryRun, cleanups, version, sha, quote } = ctx;
@@ -1201,6 +1475,7 @@ async function runChannel(channel, detail, ctx) {
     const dry = await dryStep(channel, detail, ctx);
     return dry.status === STATUS.ready ? { status: STATUS.ready, ...(dry.detail === undefined ? {} : { detail: dry.detail }) } : { status: STATUS.notReady, detail: dry.detail };
   }
+  if (channel.id === 'mcp-registry') return publishMcpRegistry(detail, { dir, env, deps, cleanups, version, quote });
   if (channel.id === 'ipm') return publishIpm(detail, { dir, env, deps, cleanups, version, sha, quote });
   const cliName = channel.id === 'vscode-marketplace' ? 'vsce' : 'ovsx';
   const { cli, reasons } = vsixReadiness(detail, repoRoot, cliName);
@@ -1232,7 +1507,6 @@ async function runChannel(channel, detail, ctx) {
 async function publishIpm(detail, { dir, env, deps, cleanups, version, sha, quote }) {
   const listing = await ipmRegistryState(deps, version);
   if (listing.error !== undefined) return { status: STATUS.failed, detail: `the registry could not be read (${listing.error}). Nothing was pushed.` };
-  if (listing.listed) return { status: STATUS.failed, detail: `the IPM registry already lists ${version}. Release a new version; nothing was pushed.` };
   if (typeof env.IPM_DIST_DEPLOY_KEY !== 'string' || env.IPM_DIST_DEPLOY_KEY === '') {
     return { status: STATUS.failed, detail: "IPM_DIST_DEPLOY_KEY is not set. Add the deploy key as a release-environment secret, and to the publish step's env in release.yml and scripts/lib/release-checks.mjs." };
   }
@@ -1241,10 +1515,17 @@ async function publishIpm(detail, { dir, env, deps, cleanups, version, sha, quot
   const keyFile = path.join(work, 'deploy-key');
   writeFileSync(keyFile, env.IPM_DIST_DEPLOY_KEY.endsWith('\n') ? env.IPM_DIST_DEPLOY_KEY : `${env.IPM_DIST_DEPLOY_KEY}\n`, { encoding: 'utf8', mode: 0o600 });
   chmodSync(keyFile, 0o600);
+  // The push trusts only GitHub's published host keys: a pinned known_hosts file, strict checking, and no other known_hosts file.
+  const knownHosts = path.join(work, 'known_hosts');
+  writeFileSync(knownHosts, githubKnownHostsText(), { encoding: 'utf8', mode: 0o600 });
+  chmodSync(knownHosts, 0o600);
   const clone = path.join(work, 'repository');
   const tree = path.join(dir, detail.tree ?? 'ipm');
   const plan = ipmPushPlan(tree, version, sha, { url: `git@github.com:${IPM_DIST_REPOSITORY}.git`, clone });
-  const gitEnv = childEnv(env, { GIT_SSH_COMMAND: `ssh -i ${keyFile} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new`, GIT_TERMINAL_PROMPT: '0' });
+  const gitEnv = childEnv(env, {
+    GIT_SSH_COMMAND: `ssh -i ${keyFile} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${knownHosts} -o GlobalKnownHostsFile=/dev/null`,
+    GIT_TERMINAL_PROMPT: '0',
+  });
   const git = (argv, cwd) => deps.run(['git', ...argv], { cwd, env: gitEnv });
   const failedAt = (step, result) => ({
     status: STATUS.failed,
@@ -1267,6 +1548,9 @@ async function publishIpm(detail, { dir, env, deps, cleanups, version, sha, quot
   if (existing.status === 0) {
     if (existing.stdout.trim() === written.stdout.trim()) return { status: STATUS.alreadyPublished, detail: `${plan.tag} exists with this tree` };
     return { status: STATUS.failed, detail: `${plan.tag} exists on ${IPM_DIST_REPOSITORY} with a different tree. Release a new version.` };
+  }
+  if (listing.listed) {
+    return { status: STATUS.failed, detail: `the IPM registry lists ${version}, but ${IPM_DIST_REPOSITORY} has no tag ${plan.tag}. Nothing was pushed; release a new version.` };
   }
   const committed = await git(plan.commitArgv, clone);
   if (committed.status !== 0) return failedAt('commit', committed);
@@ -1342,6 +1626,36 @@ async function runVerify({ version, env }, deps) {
       problems.push(...found);
     }
 
+    // The MCP Registry lists each server at the version, and the packaging repository holds the tag (read-only).
+    for (const dir of SERVER_JSON_DIRS) {
+      const server = { name: `io.github.jbrandtmse/${dir}` };
+      const lookup = await registryLookup(deps, server, version);
+      const problem =
+        lookup.outcome === 'published'
+          ? undefined
+          : lookup.outcome === 'absent'
+            ? `${server.name}@${version}: not listed on the MCP Registry. Publish the release, or run verify again once the registry has it.`
+            : `${server.name}@${version}: the MCP Registry could not be read (${lookup.why}). Check the network, then run verify again.`;
+      if (problem === undefined) say(`${server.name}@${version}: ok, listed on the MCP Registry`);
+      else {
+        say(problem);
+        problems.push(problem);
+      }
+    }
+    const tag = `v${version}`;
+    const tagged = await deps.run(['git', 'ls-remote', '--tags', `https://github.com/${IPM_DIST_REPOSITORY}.git`, `refs/tags/${tag}`], { cwd, env: { ...childEnvironment, GIT_TERMINAL_PROMPT: '0' }, timeoutMs: 120_000 });
+    const tagProblem =
+      tagged.status !== 0
+        ? `${IPM_DIST_REPOSITORY}: the tag ${tag} could not be read (${tagged.error?.message ?? `exit ${tagged.status}`}). Check the repository and the network, then run verify again.`
+        : tagged.stdout.includes(`refs/tags/${tag}`)
+          ? undefined
+          : `${IPM_DIST_REPOSITORY}: has no tag ${tag}. Publish the release, or run verify again once the push has landed.`;
+    if (tagProblem === undefined) say(`${IPM_DIST_REPOSITORY}: ok, holds the tag ${tag}`);
+    else {
+      say(tagProblem);
+      problems.push(tagProblem);
+    }
+
     const spec = `npx ${VERIFY_NPX_ARGS.join(' ')}`;
     let wire;
     try {
@@ -1368,7 +1682,7 @@ async function runVerify({ version, env }, deps) {
       }
     }
 
-    say(problems.length === 0 ? `${NPM_PUBLISH_ORDER.length} packages at ${version} with provenance, and ${spec} starts` : `${problems.length} check(s) failed`);
+    say(problems.length === 0 ? `${NPM_PUBLISH_ORDER.length} packages at ${version} with provenance, ${SERVER_JSON_DIRS.length} servers on the MCP Registry, the packaging tag ${tag}, and ${spec} starts` : `${problems.length} check(s) failed`);
     return problems.length === 0 ? 0 : 1;
   } finally {
     remove();

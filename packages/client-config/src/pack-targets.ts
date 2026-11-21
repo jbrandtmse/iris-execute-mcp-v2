@@ -132,7 +132,8 @@ export const PACK_TARGETS: readonly PackTarget[] = Object.freeze([
     route: "claude-code",
     why:
       "Claude Code never reads .agents/. A rule in .claude/rules/ without a paths: scope is loaded at launch. " +
-      "AGENTS.md is read only when there is no CLAUDE.md, so .claude/rules/ is the route that always works.",
+      "AGENTS.md is read only when there is no CLAUDE.md, so .claude/rules/ is the route that always works. " +
+      "The iris-mcp@iris-mcp plugin brings the skills but cannot carry a rule, so with the plugin enabled the installer writes only the rule.",
     notes: [],
     sources: ["https://code.claude.com/docs/en/skills", "https://code.claude.com/docs/en/memory"],
   },

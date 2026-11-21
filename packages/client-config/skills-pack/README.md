@@ -36,9 +36,21 @@ Each is generated from the MCP prompt of the same name and walks an agent throug
 
 - `iris-mcp-objectscript-pre-write`: ObjectScript pre-write checklist. Its Claude Code form, `rules/claude-code/iris-mcp-objectscript-pre-write.md`, has no `paths:` scope, so it loads in every session of a project that installs it. `rules/cursor/iris-mcp-objectscript-pre-write.mdc` is the same text as a Cursor rule with `alwaysApply: true`, and `rules/agents-md/iris-mcp-objectscript-pre-write.md` holds it for `AGENTS.md`, between two marker lines.
 
+## Claude Code plugin
+
+This directory is also a Claude Code plugin root: the plugin `iris-mcp` of the marketplace `iris-mcp`, which brings the five servers and the skills above.
+
+- Install it with `/plugin marketplace add jbrandtmse/iris-execute-mcp-v2`, then `/plugin install iris-mcp@iris-mcp`.
+- Claude Code asks for six options: `iris_host` (default `localhost`), `iris_port` (`52773`), `iris_namespace` (`USER`), `iris_https` (`false`), `iris_username` and `iris_password`. The last two are required, and Claude Code keeps the password in the system keychain. They set `IRIS_HOST`, `IRIS_PORT`, `IRIS_NAMESPACE`, `IRIS_HTTPS`, `IRIS_USERNAME` and `IRIS_PASSWORD` for every server, and they win over the same variables exported in your shell. Every other `IRIS_*` variable is inherited from the environment that starts Claude Code.
+- The servers are `dev`, `admin`, `data`, `interop` and `ops`; each runs `npx -y @iris-mcp/<name>@1`.
+- A plugin cannot carry rules. The always-on rule needs the installer; with the plugin enabled it installs only the rule:
+
+  `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients skills install --client claude-code`
+
 ## Layout
 
 - `skills/<name>/SKILL.md`: one directory per skill, in the standard plugin layout.
+- `.claude-plugin/plugin.json` and `.mcp.json`: the Claude Code plugin manifest and its five servers; this directory is the plugin root.
 - `rules/claude-code/<name>.md`: the always-on rule as a Claude Code rule file.
 - `rules/cursor/<name>.mdc`: the same rule as a Cursor project rule, with `alwaysApply: true` frontmatter.
 - `rules/agents-md/<name>.md`: the same rule as an `AGENTS.md` section, between the lines `<!-- IRIS-MCP-RULE:<name>:BEGIN -->` and `<!-- IRIS-MCP-RULE:<name>:END -->`.

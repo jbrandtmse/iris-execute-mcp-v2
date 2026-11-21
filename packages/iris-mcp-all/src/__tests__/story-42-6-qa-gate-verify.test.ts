@@ -26,7 +26,7 @@ import { REPO_ROOT } from "../../../../scripts/lib/live-gate-scan.mjs";
 import { NPM_PUBLISH_ORDER, ROOT_CHECK_SCRIPT, compareVersions, mainReachability, versionProblems } from "../../../../scripts/lib/release-core.mjs";
 import { ciGate, createCleanups, defaultDeps, embeddedVersionProblems, readReleaseFacts, releaseCheckScripts, verify } from "../../../../scripts/release.mjs";
 import { installStandIns } from "./stand-in-clis";
-import { SHA, ciRun, compareAnswer, fakeFetch, makeRepo, newFakeGithub, startGithubServer, type FakeAnswer, type FakeGithub } from "./release-script-fixtures";
+import { SHA, ciRun, compareAnswer, fakeFetch, fakeStoresFetch, makeRepo, mcpRegistryHit, newFakeGithub, newFakeStores, startGithubServer, type FakeAnswer, type FakeGithub } from "./release-script-fixtures";
 
 const GITHUB_TOKEN = "ghs_SECRETGITHUBTOKEN0987654321";
 const TAG_ENV = { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/tags/v1.0.0", GITHUB_SHA: SHA, GITHUB_TOKEN, GITHUB_REPOSITORY: "o/r" };
@@ -291,8 +291,12 @@ describe("verify (AC 42.6.3): the shapes the registry and the machine can answer
     const root = scratch("qa-42-6-verify-");
     const observed = path.join(root, "tmp");
     mkdirSync(observed);
-    const standIns = installStandIns(path.join(root, "stand-ins"), ["npm"]);
+    const standIns = installStandIns(path.join(root, "stand-ins"), ["npm", "git"]);
     standIns.script("npm", [{ match: ["view"], stdout: `${PUBLISHED}\n` }]);
+    // The MCP Registry lists every server at the version and the packaging repository holds the tag (Story 42.8), with no network.
+    standIns.script("git", [{ match: ["ls-remote"], stdout: `${SHA}\trefs/tags/v1.0.0\n` }]);
+    const stores = newFakeStores();
+    stores.mcpRegistry = (name, version) => mcpRegistryHit(name, version);
     const lines: string[] = [];
     const opened: Opened[] = [];
     const wireModule = {
@@ -316,7 +320,7 @@ describe("verify (AC 42.6.3): the shapes the registry and the machine can answer
       opened,
       text: () => lines.join("\n"),
       run: (overrides: Record<string, string> = {}, deps: Record<string, unknown> = {}) =>
-        withTmpdir(observed, () => verify({ version: "1.0.0", env: env(overrides) }, { ...defaultDeps(), log: (line: string) => lines.push(line), loadWire: async () => wireModule, cleanups: createCleanups(), ...deps })),
+        withTmpdir(observed, () => verify({ version: "1.0.0", env: env(overrides) }, { ...defaultDeps(), fetch: fakeStoresFetch(stores), log: (line: string) => lines.push(line), loadWire: async () => wireModule, cleanups: createCleanups(), ...deps })),
     };
   }
 
@@ -332,7 +336,7 @@ describe("verify (AC 42.6.3): the shapes the registry and the machine can answer
     expect(world.text().match(/@iris-mcp\/interop@1\.0\.0: (?!ok)/g)).toHaveLength(1);
     expect(world.text().match(/: ok, published with a provenance attestation/g)).toHaveLength(7);
     expect(world.text()).toContain("npx -y @iris-mcp/dev@1: ok");
-    expect(world.standIns.allCalls().every((call) => call.argv[0] === "view"), "a failing check still publishes, deprecates and logs in nothing").toBe(true);
+    expect(world.standIns.calls("npm").every((call) => call.argv[0] === "view"), "a failing check still publishes, deprecates and logs in nothing").toBe(true);
     expect(readdirSync(world.observed)).toEqual([]);
   });
 

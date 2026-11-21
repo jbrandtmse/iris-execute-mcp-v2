@@ -104,6 +104,54 @@ export function writeTree(expected, dir) {
 }
 
 /**
+ * Compare a fixed set of files with the expected content, relative to `root`. Unlike {@link diffTree} it looks at no other file, so it
+ * suits generated files that sit among hand-written ones. Writes nothing.
+ *
+ * @param {Map<string, Buffer | string>} expected
+ * @param {string} root
+ * @returns {{ missing: string[], drift: string[] }}
+ */
+export function diffFiles(expected, root) {
+  const missing = [];
+  const drift = [];
+  for (const [rel, content] of expected) {
+    const abs = join(root, rel);
+    if (!existsSync(abs)) {
+      missing.push(rel);
+      continue;
+    }
+    let actual = null;
+    try {
+      actual = readFileSync(abs);
+    } catch {
+      // Not a readable regular file: reported as drift below.
+    }
+    if (actual === null || !actual.equals(toBuffer(content))) drift.push(rel);
+  }
+  return { missing, drift };
+}
+
+/**
+ * Write each expected file under `root` whose bytes differ (creating directories), and nothing else.
+ *
+ * @param {Map<string, Buffer | string>} expected
+ * @param {string} root
+ * @returns {string[]} The relative paths that were written.
+ */
+export function writeFiles(expected, root) {
+  const written = [];
+  for (const [rel, content] of expected) {
+    const abs = join(root, rel);
+    const bytes = toBuffer(content);
+    if (existsSync(abs) && statSync(abs).isFile() && readFileSync(abs).equals(bytes)) continue;
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, bytes);
+    written.push(rel);
+  }
+  return written;
+}
+
+/**
  * @param {string} dir
  * @param {string} top - The directory that is never removed.
  */

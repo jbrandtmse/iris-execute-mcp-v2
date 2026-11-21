@@ -117,7 +117,12 @@ export const RELEASE_JOBS = Object.freeze({
       installStoreClis,
       Object.freeze({
         run: `node scripts/release.mjs publish --artifacts ${ARTIFACT_DIRECTORY}`,
-        env: Object.freeze({ NPM_TOKEN: '${{ secrets.NPM_TOKEN }}', OVSX_PAT: '${{ secrets.OVSX_PAT }}', GITHUB_TOKEN: '${{ github.token }}' }),
+        env: Object.freeze({
+          NPM_TOKEN: '${{ secrets.NPM_TOKEN }}',
+          OVSX_PAT: '${{ secrets.OVSX_PAT }}',
+          IPM_DIST_DEPLOY_KEY: '${{ secrets.IPM_DIST_DEPLOY_KEY }}',
+          GITHUB_TOKEN: '${{ github.token }}',
+        }),
       }),
     ]),
   }),

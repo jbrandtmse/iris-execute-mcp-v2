@@ -2,6 +2,24 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Unreleased] — Story 42.8: Claude Code Plugin and Registry Listings
+
+The suite gets a Claude Code plugin, an MCP Registry listing and a live IPM channel. The first release with them is `1.1.0` (the changeset is `minor` for `@iris-mcp/client-config`, and the fixed group moves every package). No tool, prompt, governance or wire change is made: the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), the frozen goldens and the tools-list snapshot are byte-unchanged, and `BOOTSTRAP_VERSION` does not move.
+
+### Added
+
+- **A Claude Code plugin (AC 42.8.1).** The skills pack directory is a plugin root: `.claude-plugin/plugin.json` (plugin `iris-mcp`, display name "IRIS MCP Server Suite", at the shared version) and `.mcp.json` (the five servers `dev`, `admin`, `data`, `interop` and `ops`, each `npx -y @iris-mcp/<name>@1`). Claude Code asks for six options (host, web port, namespace, HTTPS, user name, password: the password goes to the system keychain), and they set the `IRIS_*` variables of every server. The repository's `.claude-plugin/marketplace.json` lists the plugin pinned to the release tag with a `git-subdir` source. `gen:pack` writes the plugin files from `skills-pack-src/plugin/`, and `claude plugin validate` passes on the plugin and on the marketplace. The plugin carries no hook: the compile-on-save hook of AC 42.8.3 is evaluated and filed as a candidate.
+- **The installer knows the plugin (DW-625).** `skills install --client claude-code` reads `enabledPlugins["iris-mcp@iris-mcp"]` from the user, project and local settings, the highest file that has the key winning, and installs only the always-on rule when the plugin is enabled. It names the file that decided, warns about a settings file that is not valid JSON, and removes skill files it installed earlier under the existing manifest rules. Managed settings, `--settings`, `--add-dir` and synced plugins are not read.
+- **Generated listings.** `pnpm gen:listings` writes the five `packages/iris-*-mcp/server.json` files (the MCP Registry entries) and the marketplace from the package manifests; `gen:listings:check` is a root gate in CI and in the release's `prepare`. `check:provenance` has a `plugin` rule: the notice at the plugin root, the plugin and marketplace names, the five server keys, the marketplace pin and no endorsement wording in any listing (the deny-list is now shared in `scripts/lib/endorsement.mjs`).
+- **The MCP Registry channel.** The release has a fifth channel, last, that publishes the five listings with `mcp-publisher` v1.8.8 (downloaded and verified by its sha256), logged in with the job's GitHub OIDC token (no secret). It asks the registry first, waits until npm serves each package version and recovers a failed upload by a fresh lookup. The registry is in preview, so a `not ready` in a rehearsal is reported without failing the run, and a failed upload fails a release only after every other channel has run.
+- **A registry-shaped IPM gate (DW-694).** CI's `ipm` job also tars the staged packaging root the way the IPM registry serves it (GNU tar inside the Linux container, `./module.xml` at the top, no `.git`) and `load`s that archive on a fresh container per edition, besides the archive IPM builds. The release stages the same tree with the same function (`stagePackagingRoot`).
+
+### Changed
+
+- **The IPM channel is enabled.** The push trusts only GitHub's three published SSH host keys (`StrictHostKeyChecking=yes`, never `accept-new`), and `IPM_DIST_DEPLOY_KEY` is redacted from every report line. A rerun of a version the IPM registry already lists checks the tag `v<version>` on the packaging repository instead of failing: the identical tree is `already published`. Until the owner creates the packaging repository, a rehearsal is `not ready` for IPM and the release is blocked.
+- **`pnpm run version` stamps the listings.** After the bootstrap it runs `gen-pack` and `gen-listings`, so `plugin.json`, the marketplace `ref` and the five `server.json` files follow the shared version, and `prepare` refuses any of them off the release version.
+- **`release verify`** also checks that the five servers are listed on the MCP Registry at the version and that the packaging repository holds the tag.
+
 ## [Unreleased] — Story 42.7: VS Code Extension Publish
 
 The VS Code extension can be published. The release workflow now has a VS Code Marketplace channel and an Open VSX channel, both enabled, and

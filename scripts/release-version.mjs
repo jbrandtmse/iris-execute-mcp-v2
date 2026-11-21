@@ -16,7 +16,9 @@
 //   2. RUNS, in this order: the `--first-release` copy (removed again when `changeset version` fails), the repository's own
 //      `changeset version` (the bin of node_modules/@changesets/cli, so it needs no PATH entry), the same checks the release's `prepare`
 //      makes (`versionProblems`: one shared version, no prerelease, no pending changeset), then `scripts/gen-bootstrap.mjs`, which
-//      stamps the new semver into the embed and into ipm/module.xml and keeps the sequence and the hash. Then the VS Code extension
+//      stamps the new semver into the embed and into ipm/module.xml and keeps the sequence and the hash. Then `scripts/gen-pack.mjs` and
+//      `scripts/gen-listings.mjs` regenerate the plugin manifest, the marketplace `ref` (`v<version>`) and the five `server.json` files
+//      (Story 42.8, lockstep: `embeddedVersionProblems` refuses any of them off the shared version). Then the VS Code extension
 //      follows the shared version (lockstep, Story 42.7): its package.json and package-lock.json (both of the lock's version fields) are
 //      stamped, and the `## [Unreleased]` heading of its CHANGELOG.md, which must be that file's first `## ` heading (else exit 1 naming
 //      the file), becomes `## [<version>] <em dash> <YYYY-MM-DD>`. Any problem found after a step exits 1 naming it. Nothing is committed,
@@ -196,6 +198,15 @@ export async function main(argv = process.argv.slice(2), env = process.env, root
     partial();
     return 1;
   }
+  // The plugin and the registry listings follow the shared version (lockstep): the generators read the versions changeset just wrote.
+  for (const script of ['gen-pack.mjs', 'gen-listings.mjs']) {
+    const regenerated = await spawnInherited([process.execPath, path.join(root, 'scripts', script)], { label: 'version', env, cwd: root });
+    if (regenerated !== 0) {
+      say(`${script} failed (exit ${regenerated}). Fix the generator error.`);
+      partial();
+      return 1;
+    }
+  }
   // The extension follows the shared version (lockstep): its manifest, its lock and its changelog heading.
   const sharedAfter = stateOf(root).facts.sharedVersion;
   const extensionProblems = [
@@ -224,6 +235,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, root
   );
   say('next steps: write the root CHANGELOG section for this release, naming the BOOTSTRAP_VERSION move above;');
   say('  the package.json, package-lock.json and CHANGELOG.md heading of the extension now carry the version;');
+  say('  the plugin manifest (packages/client-config/skills-pack/.claude-plugin/plugin.json), the marketplace ref (.claude-plugin/marketplace.json) and the five server.json files carry it too;');
   say(`  review git diff and commit; wait for CI to be green on the commit; then tag it v${version}, push the tag, and approve the run in the release environment.`);
   return 0;
 }

@@ -1,0 +1,64 @@
+{
+  "mcpServers": {
+    "dev": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev@1"],
+      "env": {
+        "IRIS_HOST": "${user_config.iris_host}",
+        "IRIS_PORT": "${user_config.iris_port}",
+        "IRIS_NAMESPACE": "${user_config.iris_namespace}",
+        "IRIS_HTTPS": "${user_config.iris_https}",
+        "IRIS_USERNAME": "${user_config.iris_username}",
+        "IRIS_PASSWORD": "${user_config.iris_password}"
+      }
+    },
+    "admin": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/admin@1"],
+      "env": {
+        "IRIS_HOST": "${user_config.iris_host}",
+        "IRIS_PORT": "${user_config.iris_port}",
+        "IRIS_NAMESPACE": "${user_config.iris_namespace}",
+        "IRIS_HTTPS": "${user_config.iris_https}",
+        "IRIS_USERNAME": "${user_config.iris_username}",
+        "IRIS_PASSWORD": "${user_config.iris_password}"
+      }
+    },
+    "data": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/data@1"],
+      "env": {
+        "IRIS_HOST": "${user_config.iris_host}",
+        "IRIS_PORT": "${user_config.iris_port}",
+        "IRIS_NAMESPACE": "${user_config.iris_namespace}",
+        "IRIS_HTTPS": "${user_config.iris_https}",
+        "IRIS_USERNAME": "${user_config.iris_username}",
+        "IRIS_PASSWORD": "${user_config.iris_password}"
+      }
+    },
+    "interop": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/interop@1"],
+      "env": {
+        "IRIS_HOST": "${user_config.iris_host}",
+        "IRIS_PORT": "${user_config.iris_port}",
+        "IRIS_NAMESPACE": "${user_config.iris_namespace}",
+        "IRIS_HTTPS": "${user_config.iris_https}",
+        "IRIS_USERNAME": "${user_config.iris_username}",
+        "IRIS_PASSWORD": "${user_config.iris_password}"
+      }
+    },
+    "ops": {
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/ops@1"],
+      "env": {
+        "IRIS_HOST": "${user_config.iris_host}",
+        "IRIS_PORT": "${user_config.iris_port}",
+        "IRIS_NAMESPACE": "${user_config.iris_namespace}",
+        "IRIS_HTTPS": "${user_config.iris_https}",
+        "IRIS_USERNAME": "${user_config.iris_username}",
+        "IRIS_PASSWORD": "${user_config.iris_password}"
+      }
+    }
+  }
+}

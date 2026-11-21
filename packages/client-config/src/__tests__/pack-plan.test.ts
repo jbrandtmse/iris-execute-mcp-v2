@@ -103,6 +103,32 @@ describe("the golden path list per route on an empty project", () => {
     expect(result.conflicts).toEqual([]);
   });
 
+  it("claude-code with skipSkills (the plugin brings the skills): the rule and the manifest only, no skill and no notice", () => {
+    const result = plan({ action: "install", client: "claude-code", pack: realPack(), project: empty(), skipSkills: true });
+    expect(paths(result)).toEqual([`.claude/rules/${RULE}.md`, MANIFEST_PATH].sort());
+    expect(result.conflicts).toEqual([]);
+  });
+
+  it("the skills installed earlier are removed by an install with skipSkills, and the rule stays", () => {
+    const installed = mapProject();
+    installed.apply(plan({ action: "install", client: "claude-code", pack: realPack(), project: installed }));
+    const rulesOnly = plan({ action: "install", client: "claude-code", pack: realPack(), project: installed, skipSkills: true });
+    expect(paths(rulesOnly, "remove")).toEqual(
+      [...PACK_SKILL_FILES.map((rel) => `.claude/skills/${rel}`), `.claude/skills/iris-mcp-objectscript-sql/${NOTICE_FILENAME}`].sort(),
+    );
+    expect(paths(rulesOnly, "unchanged")).toEqual([`.claude/rules/${RULE}.md`]);
+  });
+
+  it("an uninstall that is handed a pack and skipSkills plans exactly what it plans without them: every skill and the rule are removed", () => {
+    const installed = mapProject();
+    installed.apply(plan({ action: "install", client: "claude-code", pack: realPack(), project: installed }));
+    const plain = plan({ action: "uninstall", client: "claude-code", project: installed });
+    const handed = plan({ action: "uninstall", client: "claude-code", pack: realPack(), project: installed, skipSkills: true });
+    expect(handed.items).toEqual(plain.items);
+    expect(paths(handed, "remove")).toContain(`.claude/skills/${SQL_SKILL}`);
+    expect(paths(handed, "remove")).toContain(`.claude/rules/${RULE}.md`);
+  });
+
   it("cursor: .agents/skills plus the .mdc rule", () => {
     const result = plan({ action: "install", client: "cursor", pack: realPack(), project: empty() });
     const expected = [

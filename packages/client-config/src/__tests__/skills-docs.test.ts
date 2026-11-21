@@ -193,9 +193,9 @@ describe("the README's Known limits hold on the built bin", () => {
   const ruleLine = new RegExp(`^ {2}create +\\.claude/rules/${RULE_STEM}\\.md`, "m");
   const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-  it("the claude-code route plans both the skills and the rule", () => {
+  it("the claude-code route plans both the skills and the rule when no plugin is enabled, and says what it detects", () => {
     expect(knownLimits()).toContain(
-      "The `claude-code` route always installs both the skills and the rule; it does not detect a Claude Code plugin.",
+      "The plugin is detected only in the three settings files above; managed settings, `--settings`, `--add-dir` and synced plugins are not read, and a plugin the route does not see only means the skills are installed twice.",
     );
     expect(PACK_ROUTES["claude-code"].skillsDir).toBe(".claude/skills");
     expect(PACK_ROUTES["claude-code"].rule).toMatchObject({ kind: "file", dir: ".claude/rules" });

@@ -55,7 +55,7 @@ export function removeFixtures(): void {
 /** Copy `relative` from the repository into `root`. */
 function copyInto(root: string, relative: string): void {
   mkdirSync(dirname(join(root, relative)), { recursive: true });
-  cpSync(join(REPO_ROOT, relative), join(root, relative));
+  cpSync(join(REPO_ROOT, relative), join(root, relative), { recursive: true });
 }
 
 /**
@@ -115,7 +115,23 @@ export function makeVersionFixture(options: VersionFixtureOptions = {}): string 
   copyGeneratorInputs(root, REPO_ROOT);
   copyInto(root, "packages/shared/src/bootstrap-classes.ts");
   copyInto(root, ".gitignore");
-  for (const relative of ["scripts/release-version.mjs", "scripts/release.mjs", "scripts/lib/release-core.mjs", "scripts/lib/script-process.mjs"]) copyInto(root, relative);
+  for (const relative of [
+    "scripts/release-version.mjs",
+    "scripts/release.mjs",
+    "scripts/lib/release-core.mjs",
+    "scripts/lib/script-process.mjs",
+    // The generators the version step runs after the bootstrap (Story 42.8): the pack (the plugin manifest) and the listings.
+    "scripts/gen-pack.mjs",
+    "scripts/gen-listings.mjs",
+    "scripts/lib/skills-pack.mjs",
+    "scripts/lib/generated-tree.mjs",
+    "scripts/lib/listings.mjs",
+    "scripts/lib/endorsement.mjs",
+    "skills-pack-src",
+    "skills",
+  ]) {
+    copyInto(root, relative);
+  }
   if (options.withTemplate !== false) copyInto(root, "scripts/release/changeset-1.0.0.md");
 
   for (const dir of PACKAGE_DIRS) {
@@ -129,6 +145,10 @@ export function makeVersionFixture(options: VersionFixtureOptions = {}): string 
   if (options.pending !== false) writeFileSync(join(root, ".changeset", SYNTHETIC_CHANGESET), '---\n"@iris-mcp/shared": patch\n---\n\nA synthetic change.\n');
   const generated = spawnSync(process.execPath, [join(root, "scripts", "gen-bootstrap.mjs")], { cwd: root, encoding: "utf8" });
   if (generated.status !== 0) throw new Error(`gen-bootstrap failed in ${root}: ${generated.stderr}`);
+  for (const script of ["gen-pack.mjs", "gen-listings.mjs"]) {
+    const ran = spawnSync(process.execPath, [join(root, "scripts", script)], { cwd: root, encoding: "utf8" });
+    if (ran.status !== 0) throw new Error(`${script} failed in ${root}: ${ran.stderr}`);
+  }
 
   git(root, ["init", "--quiet"]);
   commitFixture(root, "fixture");

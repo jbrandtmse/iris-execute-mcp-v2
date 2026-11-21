@@ -23,6 +23,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { listScanSurface } from "../../../../scripts/lib/npx-pin-scan.mjs";
+import { descriptionStartProblems, endorsementProblems, NO_ENDORSEMENT_SENTENCE, nameProblems } from "../../../../scripts/lib/endorsement.mjs";
 import { NPM_PUBLISH_ORDER } from "../../../../scripts/lib/release-core.mjs";
 import { REPO_ROOT } from "./pack-fixture";
 
@@ -262,14 +263,55 @@ describe("AD-28 deny-list: nothing presents the suite as InterSystems' or endors
     "%s",
     (_name, entry) => {
       for (const [field, text] of surfaces(entry)) {
-        expect(text, `${field} says "official"`).not.toMatch(/\bofficial\b/i);
-        expect(text, `${field} says "endorsed"`).not.toMatch(/\bendorsed\b/i);
-        expect(text, `${field} says "by InterSystems"`).not.toMatch(/\bby\s+InterSystems\b/i);
+        expect(endorsementProblems(field, text)).toEqual([]);
       }
-      expect(entry.manifest.description ?? "", "description starts with InterSystems").not.toMatch(/^\s*InterSystems/i);
-      expect(entry.manifest.name, "name contains intersystems").not.toMatch(/intersystems/i);
+      expect(descriptionStartProblems(entry.manifest.description ?? "")).toEqual([]);
+      expect(nameProblems(entry.manifest.name)).toEqual([]);
     },
   );
+
+  it("the shared deny-list flags each claim and reads a text without the suite's own non-endorsement sentence", () => {
+    expect(endorsementProblems("description", "The official server")).toEqual(['description says "official"']);
+    expect(endorsementProblems("description", "An endorsed server")).toEqual(['description says "endorsed"']);
+    expect(endorsementProblems("description", "Made by InterSystems")).toEqual(['description says "by InterSystems"']);
+    expect(endorsementProblems("description", `A server. ${NO_ENDORSEMENT_SENTENCE}`)).toEqual([]);
+    expect(endorsementProblems("description", `An official server. ${NO_ENDORSEMENT_SENTENCE}`)).toEqual(['description says "official"']);
+    expect(descriptionStartProblems("InterSystems tools")).toEqual(["description starts with InterSystems"]);
+    expect(nameProblems("my-claude-plugin")).toEqual(['name contains "claude"']);
+    expect(nameProblems("intersystems-anthropic")).toEqual(['name contains "intersystems"', 'name contains "anthropic"']);
+  });
+});
+
+describe("server.json (Story 42.8, AD-29: mcpName and the listing agree)", () => {
+  const servers = PACKAGES.filter((entry) => Object.keys(entry.manifest.bin ?? {}).some((bin) => SERVER_BINS.includes(bin)));
+
+  it.each(servers.map((entry) => [label(entry), entry] as const))("%s has a generated server.json that names its mcpName, package and version", (_name, entry) => {
+    const listing = JSON.parse(readFileSync(join(REPO_ROOT, entry.directory, "server.json"), "utf8")) as {
+      name: string;
+      version: string;
+      description: string;
+      packages: Array<{ identifier: string; version: string; registryType: string }>;
+    };
+    expect(listing.name).toBe(entry.manifest.mcpName);
+    expect(listing.version).toBe(entry.manifest.version);
+    expect(listing.packages).toHaveLength(1);
+    expect(listing.packages[0]?.identifier).toBe(entry.manifest.name);
+    expect(listing.packages[0]?.version).toBe(entry.manifest.version);
+    expect(listing.packages[0]?.registryType).toBe("npm");
+    expect(listing.description).toBe(entry.manifest.description);
+    expect(listing.description.length).toBeLessThanOrEqual(100);
+  });
+
+  it.each(servers.map((entry) => [label(entry), entry] as const))("%s: its server.json passes the deny-list", (_name, entry) => {
+    const listing = JSON.parse(readFileSync(join(REPO_ROOT, entry.directory, "server.json"), "utf8")) as { name: string; title: string; description: string };
+    expect(endorsementProblems("title", listing.title)).toEqual([]);
+    expect(endorsementProblems("description", listing.description)).toEqual([]);
+  });
+
+  it("no package outside the five servers has a server.json", () => {
+    const withListing = PACKAGES.filter((entry) => existsSync(join(REPO_ROOT, entry.directory, "server.json"))).map((entry) => entry.manifest.name);
+    expect(withListing.sort()).toEqual(servers.map((entry) => entry.manifest.name).sort());
+  });
 });
 
 describe("what a tarball may carry (the manifests behind AC 42.1.3)", () => {

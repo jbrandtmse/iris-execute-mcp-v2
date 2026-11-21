@@ -25,6 +25,7 @@ import { pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 
 import { CONTAINER_WEB_PORT, THROWAWAY_PASSWORD, THROWAWAY_USERNAME } from '../throwaway-iris.mjs';
+import { ipmReadme } from './release-core.mjs';
 
 /** The IPM verbs the proof issues, in both directions of the comparison with the scripts. */
 export const IPM_VERBS = Object.freeze(['load', 'package', 'list']);
@@ -173,6 +174,87 @@ export function stageModule(dir, embed) {
   for (const directory of new Set(files.flatMap((file) => directoriesOf(file)))) chmodSync(path.join(dir, directory), 0o755);
   chmodSync(dir, 0o755);
   return { files };
+}
+
+/**
+ * Stage the packaging repository's root under `dir`: the module ({@link stageModule}) plus the generated `README.md` and the `LICENSE`.
+ * This is the tree the release pushes to the packaging repository and the tree the proof tars the way the IPM registry serves it
+ * (DW-694), so one function stages both and each gate proves the bytes the release would push. Every file is 0644 and every directory 0755.
+ *
+ * @param {string} dir - An existing, empty directory.
+ * @param {Awaited<ReturnType<typeof loadEmbed>>} embed
+ * @param {{ version: string, licenseText: string }} options - The release version (the README names it) and the text of `LICENSE`.
+ * @returns {{ files: string[] }} The files written, relative to `dir`.
+ */
+export function stagePackagingRoot(dir, embed, { version, licenseText }) {
+  const { files } = stageModule(dir, embed);
+  for (const [name, text] of [['README.md', ipmReadme(version)], ['LICENSE', licenseText]]) {
+    writeFileSync(path.join(dir, name), text, 'utf8');
+    chmodSync(path.join(dir, name), 0o644);
+    files.push(name);
+  }
+  return { files };
+}
+
+/** Where the registry-shaped leg mounts its directory, the staged root inside it, the cases file beside it, and the archive it tars. */
+export const REGISTRY_MOUNT = '/opt/iris-mcp/registry';
+export const REGISTRY_ROOT_MOUNT = `${REGISTRY_MOUNT}/root`;
+export const REGISTRY_CASES_FILE = `${REGISTRY_MOUNT}/cases.json`;
+export const REGISTRY_ARCHIVE_NAME = 'registry-root.tgz';
+export const REGISTRY_ARCHIVE = `${OUTPUT_DIRECTORY}/${REGISTRY_ARCHIVE_NAME}`;
+
+/**
+ * The command the registry runs to make the archive it serves from the packaging repository root (zpm-registry `UpdatePackage`): GNU tar
+ * with no `.git`, from inside the root, so every member is `./<path>`. The proof runs it inside the Linux container, where `tar` is GNU
+ * tar and writes no pax headers (a macOS `bsdtar` does, and IPM before 0.10.11 rejects them).
+ */
+export function registryTarCommand(root = REGISTRY_ROOT_MOUNT, archive = REGISTRY_ARCHIVE) {
+  return `tar --exclude=.git -czf ${archive} -C ${root} .`;
+}
+
+/**
+ * Empty and recreate the output directory, then run {@link registryTarCommand} through `$ZF(-1)`. Markers: `OUTDIR`, `TAR` (the exit
+ * status of tar, `0` when it succeeded) and `FILES` (the names in the output directory).
+ */
+export function registryArchiveScript() {
+  return sessionScript([
+    `Set tDir = "${OUTPUT_DIRECTORY}"`,
+    'Do ##class(%File).RemoveDirectoryTree(tDir)',
+    'Set tOK = ##class(%File).CreateDirectoryChain(tDir)',
+    markerStatement('OUTDIR', 'tOK'),
+    `Set tRC = $ZF(-1,"${registryTarCommand()}")`,
+    markerStatement('TAR', 'tRC'),
+    `Set tList = "" Set tRS = ##class(%ResultSet).%New("%File:FileSet") Do tRS.Execute(tDir,"*") For  Quit:'tRS.Next()  Set tList = tList_##class(%File).GetFilename(tRS.Get("Name"))_"|"`,
+    markerStatement('FILES', 'tList'),
+  ]);
+}
+
+/**
+ * What is wrong with the archive the registry would serve, given its members (as {@link readTgz} returns them) and the files that were
+ * staged: `module.xml` must be a member at the top (`./module.xml`), no member may be under `.git`, no member may be anything but a
+ * file or a directory, and the file members must be exactly the staged files. Empty means the archive is the packaging root.
+ *
+ * @param {ReadonlyArray<{ name: string, type: string }>} entries
+ * @param {readonly string[]} stagedFiles - The files {@link stagePackagingRoot} wrote, relative to the root.
+ * @returns {string[]}
+ */
+export function registryArchiveProblems(entries, stagedFiles) {
+  const problems = [];
+  const normalize = (name) => String(name).replace(/\/\/+/g, '/').replace(/^(?:\.\/)+/, '').replace(/\/$/, '');
+  const files = entries.filter((entry) => entry.type === 'file').map((entry) => normalize(entry.name));
+  if (!files.includes('module.xml')) {
+    problems.push('the registry-shaped archive has no module.xml at its top, so IPM finds no module in it. Stage module.xml at the root of the packaging tree.');
+  }
+  for (const entry of entries) {
+    const name = normalize(entry.name);
+    if (name === '.git' || name.startsWith('.git/')) problems.push(`the archive holds ${entry.name}, which the registry's tar excludes. Exclude .git.`);
+    if (entry.type !== 'file' && entry.type !== 'directory') problems.push(`the archive holds ${entry.name}, which is neither a file nor a directory (${entry.type}).`);
+  }
+  const archived = new Set(files);
+  const staged = new Set(stagedFiles.map(normalize));
+  for (const name of [...staged].sort()) if (!archived.has(name)) problems.push(`the archive is missing the staged file ${name}.`);
+  for (const name of [...archived].sort()) if (!staged.has(name)) problems.push(`the archive holds ${name}, which was not staged.`);
+  return problems;
 }
 
 /** Every directory above `file` (relative), outermost first. */

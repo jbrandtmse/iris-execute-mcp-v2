@@ -35,6 +35,12 @@
 //      answer must equal `classifyDeployedMarker` of the shared dist.
 //   7. The only IPM verbs any session issues are `load`, `package` and `list` (`scripts/lib/ipm-archive.mjs`, `IPM_VERBS`). The script
 //      has no `install`, `publish`, `repo`, `enable` or `update` anywhere, publishes nothing and reads no secret.
+//   7a. REGISTRY-SHAPED LEG (Story 42.8, DW-694). The IPM registry serves a tar of the packaging repository root, not what `package`
+//      builds. The root is staged by `stagePackagingRoot`, the function the release uses (the module, `README.md`, `LICENSE`), and on a
+//      fresh `--network none` container per edition GNU tar makes the archive inside the container (`tar --exclude=.git -czf ... -C
+//      <root> .`, so no pax headers); the community archive is copied out and its members are checked (`./module.xml` at the top, no
+//      `.git`, exactly the staged files); then `load <that archive>` (not a dev directory) must succeed and the install checks of step
+//      4 and the parity of step 6 hold for it on both editions.
 //   8. Every container is started and removed only through `scripts/throwaway-iris.mjs`; this script builds no docker argument. A
 //      container is removed on every exit path, SIGINT and SIGTERM included, and so is the temporary directory. A failing
 //      phase prints the container's log before the container is removed.
@@ -69,6 +75,9 @@ import {
   GUARD_REFUSAL_TEXT,
   INSTALL_MOUNT,
   OUTPUT_DIRECTORY,
+  REGISTRY_ARCHIVE,
+  REGISTRY_ARCHIVE_NAME,
+  REGISTRY_CASES_FILE,
   STAGE_MOUNT,
   REST_APP,
   archiveNames,
@@ -91,9 +100,12 @@ import {
   parityProblems,
   parityScript,
   readTgz,
+  registryArchiveProblems,
+  registryArchiveScript,
   seedMarkers,
   setupStateScript,
   stageModule,
+  stagePackagingRoot,
   synthesizedSetup,
 } from './lib/ipm-archive.mjs';
 import { REPO_ROOT } from './lib/live-gate-scan.mjs';
@@ -322,6 +334,23 @@ export function startRun(options = {}) {
     return { cases, seeds };
   }
 
+  /**
+   * Write the registry directory the registry-shaped leg mounts: the packaging root, staged by the function the release uses
+   * (`stagePackagingRoot`), under `root/`, and the parity cases beside it.
+   */
+  function prepareRegistryDirectory(embed, directories) {
+    mkdirSync(path.join(directories.registry, 'root'), { recursive: true, mode: 0o755 });
+    chmodSync(directories.registry, 0o755);
+    const { files } = stagePackagingRoot(path.join(directories.registry, 'root'), embed, {
+      version: markerSemver(embed.marker),
+      licenseText: readFileSync(path.join(directories.repoRoot, 'LICENSE'), 'utf8'),
+    });
+    directories.registryFiles = files;
+    copyFileSync(path.join(directories.install, 'cases.json'), path.join(directories.registry, 'cases.json'));
+    chmodSync(path.join(directories.registry, 'cases.json'), 0o644);
+    say(`[registry] staged the packaging root: ${files.length} files (the module, README.md and LICENSE), by the function the release uses`);
+  }
+
   const archiveInContainer = (embed) => `${INSTALL_MOUNT}/${archiveName(embed)}`;
 
   /** One guard leg: seed a synthetic Setup, and the archive's `load` must be refused with nothing changed. */
@@ -352,8 +381,7 @@ export function startRun(options = {}) {
   }
 
   /** The install checks of the I/O matrix, after the archive was loaded. */
-  async function installChecks(container, embed, edition, cases) {
-    const phase = `install-${edition}`;
+  async function installChecks(container, embed, edition, cases, { phase = `install-${edition}`, casesFile = `${INSTALL_MOUNT}/cases.json` } = {}) {
     const semver = markerSemver(embed.marker);
     const listed = await ipm(container, 'list', phase, edition);
     need(listedVersion(listed.output, embed.moduleName) === semver, phase, edition, `list names ${embed.moduleName} at ${JSON.stringify(listedVersion(listed.output, embed.moduleName))}, not ${semver}.`);
@@ -371,13 +399,49 @@ export function startRun(options = {}) {
     need(value(output, 'ABSENTDOC') === '404', phase, edition, `an Atelier GET of ${ABSENT_DOCUMENT} answered ${JSON.stringify(value(output, 'ABSENTDOC'))}, not 404: a 200 for the guard document would then show nothing about the guard.`);
     say(`[${phase}] list: ${embed.moduleName} ${semver}; ${expectedClasses} classes compiled (none a test or fixture); marker ${embed.marker}; ${REST_APP} in ${container.namespace} with no MatchRoles, %ALL mapped, GET answers 200; the guard document answers 200 through Atelier (the bootstrap's ownership signal) and a missing one 404`);
 
-    const parity = await session(container, parityScript(`${INSTALL_MOUNT}/cases.json`), `parity-${edition}`, edition);
+    const parityPhase = phase.startsWith('registry-') ? `parity-${phase}` : `parity-${edition}`;
+    const parity = await session(container, parityScript(casesFile), parityPhase, edition);
     const raw = value(parity, 'PARITY');
-    need(raw !== undefined, `parity-${edition}`, edition, `the parity run printed no result: ${tail(parity, 10)}`);
+    need(raw !== undefined, parityPhase, edition, `the parity run printed no result: ${tail(parity, 10)}`);
     const results = raw.split(',').slice(0, -1);
     const problems = parityProblems(cases, results, embed.classify);
-    need(problems.length === 0, `parity-${edition}`, edition, `InstallGuard.Classify and classifyDeployedMarker disagree on ${problems.length} case(s):\n  - ${problems.join('\n  - ')}`);
-    say(`[parity-${edition}] ${cases.length}/${cases.length} cases agree between InstallGuard.Classify and classifyDeployedMarker`);
+    need(problems.length === 0, parityPhase, edition, `InstallGuard.Classify and classifyDeployedMarker disagree on ${problems.length} case(s):\n  - ${problems.join('\n  - ')}`);
+    say(`[${parityPhase}] ${cases.length}/${cases.length} cases agree between InstallGuard.Classify and classifyDeployedMarker`);
+  }
+
+  /**
+   * The registry-shaped leg (DW-694): in a fresh container, tar the staged packaging root the way the IPM registry serves it, check the
+   * members, and `load` that archive (not a dev directory); the install checks of the edition then hold for it too.
+   */
+  async function registryLeg(embed, directories, install, edition) {
+    const phase = `registry-${edition}`;
+    const spec = EDITIONS[edition];
+    const container = await startContainer({ label: `registry-${edition}`, image: spec.image, namespace: spec.namespace, mountDirectory: directories.registry, mountName: 'registry', phase, edition });
+    await importIpm(container, phase, edition);
+    const before = await session(container, setupStateScript(), phase, edition);
+    need(value(before, 'SETUP') === 'absent', phase, edition, `the fresh container already has a Setup class (${JSON.stringify(value(before, 'SETUP'))}).`);
+    const made = await session(container, registryArchiveScript(), phase, edition);
+    need(value(made, 'OUTDIR') === '1', phase, edition, `the output directory ${OUTPUT_DIRECTORY} could not be emptied and created.`);
+    need(value(made, 'TAR') === '0', phase, edition, `tar exited ${JSON.stringify(value(made, 'TAR'))} making the registry-shaped archive from the packaging root.`);
+    need(archiveNames(value(made, 'FILES')).join('|') === 'registry-root.tgz', phase, edition, `${OUTPUT_DIRECTORY} holds ${JSON.stringify(value(made, 'FILES'))}, not the one registry-root.tgz.`);
+    if (edition === 'community') {
+      const copied = await copyHarness({ state: container.stateFile, from: REGISTRY_ARCHIVE, to: directories.registryArchive, env }, harnessDeps);
+      need(copied === 0, phase, edition, `the registry-shaped archive could not be copied out of ${container.label} (exit ${copied}).`);
+      let entries;
+      try {
+        entries = readTgz(readFileSync(directories.registryArchive));
+      } catch (error) {
+        throw new PhaseFailure(phase, `the registry-shaped archive could not be read: ${error instanceof Error ? error.message : String(error)}`, { edition });
+      }
+      const problems = registryArchiveProblems(entries, directories.registryFiles);
+      need(problems.length === 0, phase, edition, `the registry-shaped archive is not the packaging root:\n  - ${problems.slice(0, 20).join('\n  - ')}`);
+      say(`[${phase}] the archive tarred as the registry serves it holds ./module.xml at its top, no .git and exactly the ${directories.registryFiles.length} staged files`);
+    }
+    const loaded = await ipm(container, `load ${REGISTRY_ARCHIVE}`, phase, edition);
+    need(loaded.outcome === 'OK', phase, edition, `load of the registry-shaped archive did not succeed: ${loaded.outcome ?? tail(loaded.output, 20)}`);
+    say(`[${phase}] the registry-shaped archive installed on a fresh ${spec.image.split('@')[0]} in ${container.namespace}`);
+    await installChecks(container, embed, edition, install.cases, { phase, casesFile: REGISTRY_CASES_FILE });
+    await removeContainer(container);
   }
 
   async function installCommunity(embed, directories, install) {
@@ -431,6 +495,9 @@ export function startRun(options = {}) {
       install: path.join(root, 'install'),
       extract: path.join(root, 'extract'),
       archive: path.join(root, 'built', archiveName(embed)),
+      registry: path.join(root, 'registry'),
+      registryArchive: path.join(root, 'built', REGISTRY_ARCHIVE_NAME),
+      registryFiles: [],
     };
     for (const directory of [directories.stage, directories.extract, path.dirname(directories.archive)]) mkdirSync(directory, { recursive: true, mode: 0o755 });
     chmodSync(directories.stage, 0o755);
@@ -441,7 +508,9 @@ export function startRun(options = {}) {
       const install = prepareInstallDirectory(embed, directories);
       if (editions.includes('community')) await installCommunity(embed, directories, install);
       if (editions.includes('health')) await installHealth(embed, directories, install);
-      say(`PASS: one archive of ${embed.moduleName} ${markerSemver(embed.marker)} was built on a no-network ${EDITIONS.community.image.split('@')[0]} and installed on ${editions.join(' and ')} with no network and 0 package-registry rows`);
+      prepareRegistryDirectory(embed, directories);
+      for (const edition of editions) await registryLeg(embed, directories, install, edition);
+      say(`PASS: one archive of ${embed.moduleName} ${markerSemver(embed.marker)} was built on a no-network ${EDITIONS.community.image.split('@')[0]} and installed on ${editions.join(' and ')} with no network and 0 package-registry rows; the packaging root, tarred as the registry serves it, installed on ${editions.join(' and ')} too`);
       return 0;
     } catch (error) {
       if (!(error instanceof PhaseFailure)) throw error;
