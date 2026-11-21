@@ -378,7 +378,8 @@ export function activate(context: vscode.ExtensionContext): void {
         return { status: null, stdout: "", stderr: "", spawnError: resolution.error };
       }
       const env = buildGovernanceCliEnv(settings, resolution.target.extraEnv);
-      return runGovernanceCli(resolution.target, command, env);
+      // The directory the server definitions start in, so a relative governance file resolves the same way for both.
+      return runGovernanceCli(resolution.target, command, env, os.homedir());
     },
   };
 
@@ -481,7 +482,9 @@ export function activate(context: vscode.ExtensionContext): void {
       return { status: null, stdout: "", stderr: "", spawnError: resolution.error };
     }
     const env = buildClientsCliEnv(settings, resolution.target.extraEnv);
-    return runClientsCli(resolution.target, command, env);
+    // Project scope means the first workspace folder; with no folder open, the user's home directory.
+    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+    return runClientsCli(resolution.target, command, env, cwd);
   };
 
   const clientsEngineHost: ClientsEngineHost = {

@@ -5,7 +5,7 @@
  *    install command with its prerequisites and the registry command, that a package is published from the first release, the ownership rule
  *    and its way back, the IRIS-side no-downgrade guard, never `-dev`, and that no governed action is added;
  *  - "Shared Instances" has the IPM-owned row and the remedy bullet, and the rows and sentences that Story 42.2 pinned are still there;
- *  - the Continuous Integration section names four jobs, the `ipm` job and what it proves, the verbs it issues, and the 2026.1 floor with
+ *  - the Continuous Integration section names five jobs, the `ipm` job and what it proves, the verbs it issues, and the 2026.1 floor with
  *    the dated run of 2025.3;
  *  - the CHANGELOG section of Story 42.4 is the newest, holds the marker move as literals (history: a later move leaves this file true),
  *    the DW-686 floor, and says no tool, wire or governance change;
@@ -148,8 +148,8 @@ describe("Story 42.4: the Shared Instances table and remedies", () => {
 describe("Story 42.4: the Continuous Integration section", () => {
   const section = squash(sectionUnder(readme, CI_HEADING));
 
-  it("names four jobs and describes the ipm job: the archive, both editions, no network, the verbs, no publish", () => {
-    expect(section).toContain("It has four jobs:");
+  it("names five jobs and describes the ipm job: the archive, both editions, no network, the verbs, no publish", () => {
+    expect(section).toContain("It has five jobs:");
     expect(section).toContain("- `ipm` builds the IPM archive");
     expect(section).toContain("never from `src/`");
     expect(section).toContain("each with no network (`node scripts/ci-ipm-archive.mjs`)");

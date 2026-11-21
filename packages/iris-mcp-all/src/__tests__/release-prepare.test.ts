@@ -39,8 +39,8 @@ import {
   runGateSet,
 } from "../../../../scripts/release.mjs";
 import { installFakeDocker, type FakeDocker } from "./fake-docker";
-import { installStandIns } from "./stand-in-clis";
-import { MARKER_TAIL, PACKAGE_DIRS, ROOT_SCRIPTS, SHA, makeRepo, type RepoOptions } from "./release-script-fixtures";
+import { installStandIns, installStoreClis } from "./stand-in-clis";
+import { MARKER_TAIL, PACKAGE_DIRS, ROOT_SCRIPTS, SHA, fakeStoresFetch, makeRepo, type RepoOptions } from "./release-script-fixtures";
 
 const SECRET_NPM = "npm_PREPARESECRET1234567890";
 const SECRET_GITHUB = "ghs_PREPARESECRET0987654321";
@@ -131,7 +131,7 @@ function newWorld(repoOptions: RepoOptions = {}): PrepareWorld {
     smokeStatus: 0,
     suites: checks.LIVE_SUITES as Record<string, unknown>,
     embed: (embed) => embed,
-    vsix: { build: 0, package: 0, ls: 0, files: ["iris-mcp-launcher-0.1.0.vsix"] },
+    vsix: { build: 0, package: 0, ls: 0, files: ["iris-mcp-launcher-1.0.0.vsix"] },
   };
   const baseEnv = (overrides: Record<string, string | undefined> = {}): Record<string, string> => {
     const env: Record<string, string | undefined> = {
@@ -434,10 +434,57 @@ describe("Prepare: the version state (AC 42.5.2)", () => {
   });
 });
 
+describe("Prepare: the extension's changelog heading names the release (Story 42.7, I/O matrix: CHANGELOG heading)", () => {
+  const UNRELEASED = "# Changelog\n\n## [Unreleased]\n\n- A change.\n\n## [0.1.0]\n";
+  const REFUSAL = /the first heading of extensions\/iris-mcp-launcher\/CHANGELOG\.md is `## \[Unreleased\]`, not `## \[1\.0\.0\]`\. Run pnpm run version, which renames the `## \[Unreleased\]` heading, and commit the result\./;
+
+  it("a tag run whose first `## [` heading is [Unreleased] is refused (exit 1) naming the heading, before docker and before any command", async () => {
+    const world = newWorld({ version: "1.0.0", extensionChangelog: UNRELEASED });
+    expect(await world.run({ env: { GITHUB_REF: "refs/tags/v1.0.0" } })).toBe(1);
+    expect(world.lines.join("\n")).toMatch(new RegExp(`problem: ${REFUSAL.source}`));
+    expect(world.docker.calls()).toEqual([]);
+    expect(world.runs, "no command ran").toEqual([]);
+    expect(existsSync(path.join(world.out, "release-manifest.json"))).toBe(false);
+  });
+
+  it("a tag run whose heading names the release version passes (exit 0), with or without a date", async () => {
+    for (const heading of ["## [1.0.0] \u2014 2026-11-21", "## [1.0.0]"]) {
+      const world = newWorld({ version: "1.0.0", extensionChangelog: `# Changelog\n\n${heading}\n\n- x\n\n## [0.1.0]\n` });
+      expect(await world.run({ env: { GITHUB_REF: "refs/tags/v1.0.0" } }), heading).toBe(0);
+    }
+  });
+
+  it("a tag run whose heading names another version is refused too", async () => {
+    const world = newWorld({ version: "1.0.0", extensionChangelog: "## [0.1.0]\n" });
+    expect(await world.run({ env: { GITHUB_REF: "refs/tags/v1.0.0" } })).toBe(1);
+    expect(world.lines.join("\n")).toContain("the first heading of extensions/iris-mcp-launcher/CHANGELOG.md is `## [0.1.0]`, not `## [1.0.0]`.");
+  });
+
+  it("a dry run reports `a tag run would refuse: ...` with the heading and goes on (exit 0), and a dry run whose heading is right says nothing", async () => {
+    const world = newWorld({ version: "1.0.0", extensionChangelog: UNRELEASED });
+    expect(await world.run()).toBe(0);
+    expect(world.lines.join("\n")).toMatch(new RegExp(`a tag run would refuse: ${REFUSAL.source}`));
+    expect(world.lines.join("\n")).toContain("version state: a dry run goes on with the problems above; a tag run would stop here");
+    expect(world.lines.join("\n")).not.toContain("problem: the first heading");
+    const right = newWorld({ version: "1.0.0" });
+    expect(await right.run()).toBe(0);
+    expect(right.lines.join("\n")).not.toContain("the first heading");
+  });
+
+  it("a dry run measures the heading against the shared version, not a tag", async () => {
+    const world = newWorld({ version: "0.0.2", extensionChangelog: "## [0.0.2] \u2014 2026-01-01\n" });
+    expect(await world.run()).toBe(0);
+    expect(world.lines.join("\n")).not.toContain("the first heading");
+  });
+});
+
 describe("Prepare: tree integrity, in both modes (AC 42.5.2; AD-14)", () => {
   it.each([
     ["the bootstrap marker's semver is not the shared version", { markerSemver: "0.9.0" }, /BOOTSTRAP_VERSION is "0\.9\.0\+2\.244fe8623c76", whose semver is not the shared version 1\.0\.0/],
     ["ipm/module.xml is at another version", { moduleVersion: "0.9.0" }, /ipm\/module\.xml is at "0\.9\.0", not the shared version 1\.0\.0/],
+    ["the extension's package.json is at another version (the lockstep)", { extensionVersion: "0.9.0" }, /extensions\/iris-mcp-launcher\/package\.json is at "0\.9\.0", not the shared version 1\.0\.0\. Run pnpm run version, which stamps it\./],
+    ["the extension's lock is at another version", { extensionLockVersion: "0.9.0" }, /extensions\/iris-mcp-launcher\/package-lock\.json \(version\) is at "0\.9\.0", not the shared version 1\.0\.0/],
+    ["the extension's lock holds another version for its own package", { extensionLockRootVersion: "0.9.0" }, /extensions\/iris-mcp-launcher\/package-lock\.json \(packages\[""\]\.version\) is at "0\.9\.0", not the shared version 1\.0\.0/],
   ])("%s: exit 1 in a tag run and in a dry run, before docker", async (_label, repoOptions, expected) => {
     for (const ref of ["refs/tags/v1.0.0", "refs/heads/release-dry-run/x"]) {
       const world = newWorld(repoOptions as RepoOptions);
@@ -541,7 +588,7 @@ describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
     expect(await world.run()).toBe(0);
     const files = listFiles(world.out);
     expect(files.filter((file) => file.startsWith("npm/"))).toEqual(NPM_PUBLISH_ORDER.map((name: string) => `npm/${name.replace("@", "").replace("/", "-")}-1.0.0.tgz`).sort());
-    expect(files).toContain("vsix/iris-mcp-launcher-0.1.0.vsix");
+    expect(files).toContain("vsix/iris-mcp-launcher-1.0.0.vsix");
     for (const file of ["ipm/module.xml", "ipm/src/cls/ExecuteMCPv2/Setup.cls", "ipm/src/cls/ExecuteMCPv2/Utils.cls", "ipm/preload/src/cls/ExecuteMCPv2/InstallGuard.cls", "ipm/README.md", "ipm/LICENSE"]) {
       expect(files, file).toContain(file);
     }
@@ -555,12 +602,12 @@ describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
     expect(manifest["mode"]).toBe("dry-run");
     expect(manifest["channels"].map((channel: { id: string; enabled: boolean }) => [channel.id, channel.enabled])).toEqual([
       ["npm", true],
-      ["vscode-marketplace", false],
-      ["open-vsx", false],
+      ["vscode-marketplace", true],
+      ["open-vsx", true],
       ["ipm", false],
     ]);
     expect(manifest["channels"][0].packages.map((entry: { name: string }) => entry.name)).toEqual([...NPM_PUBLISH_ORDER]);
-    expect(manifest["channels"][1]).toMatchObject({ file: "vsix/iris-mcp-launcher-0.1.0.vsix", name: "iris-mcp-launcher", version: "0.1.0", publisher: "TBD-at-publish-time", files: ["package.json", "dist/extension.js", "LICENSE"] });
+    expect(manifest["channels"][1]).toMatchObject({ file: "vsix/iris-mcp-launcher-1.0.0.vsix", name: "iris-mcp-launcher", version: "1.0.0", publisher: "iris-mcp", files: ["package.json", "dist/extension.js", "LICENSE"] });
     expect(manifest["channels"][3]).toMatchObject({ tree: "ipm", module: "iris-execute-mcp-v2", version: "1.0.0", repository: "jbrandtmse/iris-execute-mcp-v2-ipm", branch: "master" });
     expect(manifest["files"].map((entry: { path: string }) => entry.path)).toEqual(files.filter((file) => file !== "release-manifest.json"));
     for (const entry of manifest["files"] as Array<{ path: string; bytes: number; sha256: string }>) {
@@ -643,6 +690,7 @@ describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
     const world = newWorld();
     expect(await world.run()).toBe(0);
     const standIns = installStandIns(path.join(world.root, "stand-ins"), ["npm", "git"]);
+    installStoreClis(standIns, world.repo);
     standIns.script("npm", [
       { match: ["--version"], stdout: "11.12.1\n" },
       { match: ["view"], status: 1, stderr: "npm error code E404\n" },
@@ -650,7 +698,7 @@ describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
     const lines: string[] = [];
     const code = await publish(
       { artifacts: world.out, dryRun: true, env: { PATH: standIns.binDir, STAND_IN_DIR: standIns.dir }, repoRoot: world.repo },
-      { ...defaultDeps(), log: (line: string) => lines.push(line), fetch: (async () => new Response(null, { status: 404 })) as unknown as typeof fetch },
+      { ...defaultDeps(), log: (line: string) => lines.push(line), fetch: fakeStoresFetch() },
     );
     expect(code, lines.join("\n")).toBe(0);
     expect(standIns.calls("npm").filter((call) => call.argv[0] === "publish")).toHaveLength(8);
@@ -661,6 +709,7 @@ describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
     const world = newWorld({ version: "0.0.2", versions: { "@iris-mcp/client-config": "0.0.1" }, pending: ["one.md"] });
     expect(await world.run()).toBe(0);
     const standIns = installStandIns(path.join(world.root, "stand-ins"), ["npm", "git"]);
+    installStoreClis(standIns, world.repo);
     standIns.script("npm", [
       { match: ["--version"], stdout: "11.12.1\n" },
       { match: ["view"], status: 1, stderr: "npm error code E404\n" },
@@ -668,7 +717,7 @@ describe("Prepare: the artifacts and the manifest (AC 42.5.2)", () => {
     const lines: string[] = [];
     const code = await publish(
       { artifacts: world.out, dryRun: true, env: { PATH: standIns.binDir, STAND_IN_DIR: standIns.dir }, repoRoot: world.repo },
-      { ...defaultDeps(), log: (line: string) => lines.push(line), fetch: (async () => new Response(null, { status: 404 })) as unknown as typeof fetch },
+      { ...defaultDeps(), log: (line: string) => lines.push(line), fetch: fakeStoresFetch() },
     );
     expect(code, lines.join("\n")).toBe(0);
     expect(lines.join("\n")).not.toContain("is not at the release version");

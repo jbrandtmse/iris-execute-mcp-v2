@@ -30,8 +30,8 @@ export const NPM_PUBLISH_ORDER = Object.freeze([
 /** The channels a release publishes to, in order. A channel that is not enabled prints `skipped: not enabled (<enabledBy>)`. */
 export const RELEASE_CHANNELS = Object.freeze([
   Object.freeze({ id: 'npm', enabled: true }),
-  Object.freeze({ id: 'vscode-marketplace', enabled: false, enabledBy: 'Story 42.7' }),
-  Object.freeze({ id: 'open-vsx', enabled: false, enabledBy: 'Story 42.7' }),
+  Object.freeze({ id: 'vscode-marketplace', enabled: true }),
+  Object.freeze({ id: 'open-vsx', enabled: true }),
   Object.freeze({ id: 'ipm', enabled: false, enabledBy: 'Story 42.8' }),
 ]);
 
@@ -67,6 +67,12 @@ export const CI_WORKFLOW_PATH = '.github/workflows/ci.yml';
 
 /** The extension's placeholder publisher: a channel that still carries it is not ready. */
 export const PLACEHOLDER_PUBLISHER = 'TBD-at-publish-time';
+
+/** The extension's changelog, whose first `## [` heading must name the release version. */
+export const EXTENSION_CHANGELOG_PATH = 'extensions/iris-mcp-launcher/CHANGELOG.md';
+
+/** What a CLI prints (after its own prefix) when `--skip-duplicate` found the version already on the store. */
+const SKIPPED_DUPLICATE_SUFFIX = 'is already published. Skipping publish.';
 
 /** The statuses a release report uses. */
 export const STATUS = Object.freeze({
@@ -429,14 +435,85 @@ export function npmUserconfig(token) {
   return `//registry.npmjs.org/:_authToken=${text}\n`;
 }
 
-/** The `vsce` arguments that publish a prebuilt vsix and tolerate a version that is already there. */
+/** The `vsce` arguments that publish a prebuilt vsix with trusted publishing (OIDC) and tolerate a version that is already there. */
 export function vsceArgv(vsix) {
-  return ['publish', '--packagePath', vsix, '--skip-duplicate'];
+  return ['publish', '--packagePath', vsix, '--skip-duplicate', '--oidc'];
 }
 
-/** The `ovsx` arguments that publish a prebuilt vsix and tolerate a version that is already there. */
-export function ovsxArgv(vsix) {
-  return ['publish', vsix, '--skip-duplicate'];
+/**
+ * The `ovsx` arguments that publish a prebuilt vsix and tolerate a version that is already there. With a token (`OVSX_PAT`, which `ovsx`
+ * reads from its environment, never from argv) the token authenticates; without one the publish asks for trusted publishing.
+ *
+ * @param {string} vsix
+ * @param {{ token?: boolean }} [options]
+ */
+export function ovsxArgv(vsix, { token = false } = {}) {
+  return ['publish', vsix, '--skip-duplicate', ...(token ? [] : ['--trusted-publishing'])];
+}
+
+/** The Open VSX URL of a namespace: 200 when it exists, 404 when it does not. */
+export function openVsxNamespaceUrl(publisher) {
+  return `https://open-vsx.org/api/${encodeURIComponent(publisher)}`;
+}
+
+/**
+ * The read-only URL that tells whether a store holds `publisher.name@version`. Open VSX answers its metadata (200, or 404). The Marketplace
+ * answers the vsix itself, so the request asks for one byte ({@link storeLookupHeaders}); its HEAD answers 405.
+ *
+ * @param {'vscode-marketplace' | 'open-vsx'} store
+ * @param {string} publisher
+ * @param {string} name
+ * @param {string} version
+ */
+export function storeLookupUrl(store, publisher, name, version) {
+  const part = (text) => encodeURIComponent(text);
+  if (store === 'open-vsx') return `https://open-vsx.org/api/${part(publisher)}/${part(name)}/${part(version)}`;
+  if (store === 'vscode-marketplace') {
+    return `https://marketplace.visualstudio.com/_apis/public/gallery/publishers/${part(publisher)}/vsextensions/${part(name)}/${part(version)}/vspackage`;
+  }
+  throw new Error(`${JSON.stringify(store)} is not an extension store. Use vscode-marketplace or open-vsx.`);
+}
+
+/** The request headers of a store lookup. */
+export function storeLookupHeaders(store) {
+  return store === 'vscode-marketplace' ? { Range: 'bytes=0-0', 'User-Agent': 'iris-mcp-release' } : { Accept: 'application/json', 'User-Agent': 'iris-mcp-release' };
+}
+
+/**
+ * What a store's answer to {@link storeLookupUrl} means: 200 (or 206, the one-byte read) is `published`, 404 is `absent`, and anything else
+ * (another status, or no status because the request failed or stalled) is `unknown`, which stops the release.
+ *
+ * @param {number | undefined} status
+ * @returns {'published' | 'absent' | 'unknown'}
+ */
+export function storeOutcome(status) {
+  if (status === 200 || status === 206) return 'published';
+  if (status === 404) return 'absent';
+  return 'unknown';
+}
+
+/** Whether a store CLI's output has a line that says `--skip-duplicate` found the version already published (an exit 0 that uploaded nothing). */
+export function skippedDuplicate(stdout) {
+  return String(stdout)
+    .split('\n')
+    .some((line) => line.trimEnd().endsWith(SKIPPED_DUPLICATE_SUFFIX));
+}
+
+/**
+ * What is wrong with the extension's changelog for a release: its first `## [` heading must name `version`.
+ *
+ * @param {string} text
+ * @param {string} version
+ * @returns {string[]}
+ */
+export function extensionChangelogProblems(text, version) {
+  const heading = /^## \[[^\n]*$/m.exec(String(text))?.[0].trimEnd();
+  if (heading === undefined) {
+    return [`${EXTENSION_CHANGELOG_PATH} has no \`## [\` heading. Add a section headed \`## [${version}]\`, which pnpm run version writes.`];
+  }
+  const named = /^## \[([^\]]*)\]/.exec(heading)?.[1];
+  if (named === version) return [];
+  return [`the first heading of ${EXTENSION_CHANGELOG_PATH} is \`${heading}\`, not \`## [${version}]\`. Run pnpm run version, which renames the \`## [Unreleased]\` heading, and commit the result.`];
 }
 
 /** The git identity of the commit the IPM channel makes. */

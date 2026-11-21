@@ -146,7 +146,7 @@ function makeRealEngineHost(
       return { status: null, stdout: "", stderr: "", spawnError: resolution.error };
     }
     const env = buildClientsCliEnv(effectiveSettings, resolution.target.extraEnv, effectiveAmbient);
-    return runClientsCli(resolution.target, command, env);
+    return runClientsCli(resolution.target, command, env, process.cwd());
   };
   return {
     describe: async () => {

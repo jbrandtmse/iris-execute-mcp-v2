@@ -57,6 +57,8 @@ const setupNode = (version, extra = {}) => Object.freeze({ uses: 'actions/setup-
  */
 export const NO_PACKAGE_MANAGER_CACHE = Object.freeze({ 'package-manager-cache': false });
 const download = Object.freeze({ uses: 'actions/download-artifact', with: Object.freeze({ name: ARTIFACT_NAME, path: ARTIFACT_DIRECTORY }) });
+/** The store CLIs (`@vscode/vsce`, `ovsx`): exact devDependencies of the launcher, installed with no install script, because `publish` holds `id-token: write`. */
+const installStoreClis = Object.freeze({ run: 'npm ci --ignore-scripts', workingDirectory: 'extensions/iris-mcp-launcher' });
 
 /** The jobs of the workflow, in order (see the header). */
 export const RELEASE_JOBS = Object.freeze({
@@ -97,6 +99,7 @@ export const RELEASE_JOBS = Object.freeze({
       checkout,
       setupNode(RELEASE_NODE.upload, NO_PACKAGE_MANAGER_CACHE),
       download,
+      installStoreClis,
       Object.freeze({ run: `node scripts/release.mjs publish --dry-run --artifacts ${ARTIFACT_DIRECTORY}` }),
     ]),
   }),
@@ -111,9 +114,10 @@ export const RELEASE_JOBS = Object.freeze({
       checkout,
       setupNode(RELEASE_NODE.upload, NO_PACKAGE_MANAGER_CACHE),
       download,
+      installStoreClis,
       Object.freeze({
         run: `node scripts/release.mjs publish --artifacts ${ARTIFACT_DIRECTORY}`,
-        env: Object.freeze({ NPM_TOKEN: '${{ secrets.NPM_TOKEN }}', GITHUB_TOKEN: '${{ github.token }}' }),
+        env: Object.freeze({ NPM_TOKEN: '${{ secrets.NPM_TOKEN }}', OVSX_PAT: '${{ secrets.OVSX_PAT }}', GITHUB_TOKEN: '${{ github.token }}' }),
       }),
     ]),
   }),

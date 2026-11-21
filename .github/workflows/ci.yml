@@ -5,7 +5,11 @@
 #   gates      The repository's gates, on a Node matrix: install, build, lint, type-check, the tests of the 8 packages
 #              (which include the Story 42.1 package checks), the governance, skills, pack, prompt, provenance and tools-list
 #              checks, the epics-sync check, and the launcher extension's install, type-check, build and arming guard. Not
-#              run: the launcher's full test suite (Story 42.7, DW-532) and prettier's format:check, which the tree does not pass.
+#              run: prettier's format:check, which the tree does not pass.
+#   launcher   The launcher extension's whole test suite (Story 42.7, DW-532) on ubuntu-24.04, macos-15 and windows-2025, each leg on
+#              Node 22.17.0: it spawns real CLIs (the Windows .cmd shims, ELECTRON_RUN_AS_NODE), so only CI shows a platform
+#              difference. It builds only the two dists those tests read (client-config and shared), needs no other job and
+#              reaches no IRIS: the two live files stay unarmed and skip.
 #   throwaway  Everything that needs a live IRIS, against throwaway containers that scripts/throwaway-iris.mjs starts, labels
 #              and removes (it refuses ports 52773 and 1972 and any image that is not pinned by digest). The bootstrap-guard
 #              gate runs on iris-community 2026.2 and on the oldest tag that is tested (2026.1, whose Community license key is
@@ -112,6 +116,37 @@ jobs:
         working-directory: extensions/iris-mcp-launcher
       - name: launcher arming guard
         run: npx --no -- vitest run src/__tests__/live-arming-guard.test.ts src/__tests__/liveArming.test.ts
+        working-directory: extensions/iris-mcp-launcher
+
+  launcher:
+    name: launcher (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-24.04", "macos-15", "windows-2025"]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22.17.0"
+          cache: pnpm
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: build the CLIs the tests run
+        run: pnpm --filter @iris-mcp/client-config --filter @iris-mcp/shared build
+      - name: launcher install
+        run: npm ci
+        working-directory: extensions/iris-mcp-launcher
+      - name: launcher build
+        run: npm run build
+        working-directory: extensions/iris-mcp-launcher
+      - name: launcher tests
+        run: npx --no -- vitest run
         working-directory: extensions/iris-mcp-launcher
 
   throwaway:

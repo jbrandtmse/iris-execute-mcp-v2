@@ -5,17 +5,19 @@ Model Context Protocol server registry, resolving IRIS connection credentials fr
 [InterSystems Server Manager](https://marketplace.visualstudio.com/items?itemName=intersystems-community.servermanager)
 extension at spawn time — **zero manual config, no password ever written to a file.**
 
-> **Status: not yet published.** This extension is an optional, standalone deliverable of the IRIS MCP Server
-> Suite (Epic 31, Story 31.4). It lives at `extensions/iris-mcp-launcher/` in the suite's repository, deliberately
+> **Install it from a store.** The extension is published on the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=iris-mcp.iris-mcp-launcher)
+> and on [Open VSX](https://open-vsx.org/extension/iris-mcp/iris-mcp-launcher) as `iris-mcp.iris-mcp-launcher` (see
+> [Installing](#installing)). This is an independent community project. It is not made, endorsed or supported by
+> InterSystems.
+>
+> This extension is an optional, standalone deliverable of the IRIS MCP Server Suite (Epic 31, Story 31.4). It lives at `extensions/iris-mcp-launcher/` in the suite's repository, deliberately
 > _outside_ the npm workspace (`pnpm-workspace.yaml` globs only `packages/*`) — nothing in `packages/**` depends on
 > it, and it depends on nothing in `packages/**` at build time or at runtime. (Its _test tier_ is the exception:
 > two unit/integration tests deliberately read the monorepo `packages/` tree and the pnpm store on disk as their
 > oracle, so the extension folder is not testable in isolation from a sparse checkout — see
 > `src/__tests__/definitions.test.ts` and `src/__tests__/localSpawnIntegration.test.ts`.) It talks to the
-> published `@iris-mcp/*` npm
-> packages only at _runtime_, via `npx`. **Because no `@iris-mcp/*` package is published yet, `npx -y @iris-mcp/<pkg>@1`
-> currently fails to start on every machine** — see [Development mode](#development-mode) below for the only way
-> to run this extension against a real server before publication.
+> published `@iris-mcp/*` npm packages only at _runtime_, via `npx -y @iris-mcp/<pkg>@1`; see
+> [Development mode](#development-mode) below to run it against a local checkout of the suite instead.
 
 ## What it does
 
@@ -58,28 +60,40 @@ Code settings, `globalState`, `workspaceState`, or any log/output channel — se
   Server Manager's own UI).
 - A Copilot-family agent that consumes VS Code's MCP registry — see the next section.
 
+## Installing
+
+Install it from the store your editor uses, then reload the window:
+
+- **Visual Studio Marketplace** (VS Code): the Extensions view, search for `iris-mcp.iris-mcp-launcher` ("IRIS MCP
+  Launcher"), or `code --install-extension iris-mcp.iris-mcp-launcher`.
+- **Open VSX** (VSCodium, Cursor and other editors that use it): the same search in the Extensions view, or
+  `codium --install-extension iris-mcp.iris-mcp-launcher`.
+
+Both stores carry the same version: the extension's version equals the version of the `@iris-mcp/*` packages it was
+released with. The InterSystems Server Manager extension is installed with it (`extensionDependencies`).
+
 ## Installing in development mode
 
-This extension is **not on the Marketplace or Open VSX yet**, so you install it from a `.vsix` you build from
-this checkout. Two commands, then a reload:
+To run a local build, install a `.vsix` you build from this checkout (the vsix route is for development; the stores
+carry the released versions). Two commands, then a reload:
 
 ```bash
 cd extensions/iris-mcp-launcher
 npm install                                       # first time only
 npm run build                                     # tsc -> dist/
-npx vsce package --allow-missing-repository       # -> iris-mcp-launcher-0.1.0.vsix
+npx vsce package --allow-missing-repository       # -> iris-mcp-launcher-<version>.vsix
 ```
 
 Install the resulting file either way:
 
 - **GUI:** Extensions view -> `···` (top-right) -> **Install from VSIX…** -> pick the file.
-- **CLI:** `code --install-extension "<absolute path>/iris-mcp-launcher-0.1.0.vsix"`
+- **CLI:** `code --install-extension "<absolute path>/iris-mcp-launcher-<version>.vsix"`
 
 Then **two required follow-ups**:
 
 1. **Reload the window** (Command Palette -> **Developer: Reload Window**). Extension code loads at activation;
    a running window keeps the old bundle in memory. When you reinstall the *same version* after a rebuild, VS
-   Code does not always replace the files — run `code --uninstall-extension tbd-at-publish-time.iris-mcp-launcher`
+   Code does not always replace the files — run `code --uninstall-extension iris-mcp.iris-mcp-launcher`
    first, then install and reload. (Both were observed on Windows during the Story 33.3 acceptance smoke.)
 2. **Point it at your checkout** — set `irisMcpLauncher.developmentRepoPath` to this repo's absolute path in your
    **User** settings (it is machine-scoped, so a workspace cannot set it):
@@ -88,8 +102,8 @@ Then **two required follow-ups**:
    "irisMcpLauncher.developmentRepoPath": "C:\\git\\iris-execute-mcp-v2"
    ```
 
-   Without it, every spawn path resolves to `npx -y @iris-mcp/<pkg>@1`, which cannot work until the packages are
-   published — see [Development mode](#development-mode) for the full rationale and the fail-closed behavior.
+   Without it, every spawn path resolves to `npx -y @iris-mcp/<pkg>@1` (the published packages) — see
+   [Development mode](#development-mode) for the full rationale and the fail-closed behavior.
    Prefer setting it through the Settings UI (search "development repo path"); an editor writing the file
    externally can be overwritten by the running instance's cached copy.
 
@@ -134,8 +148,8 @@ CLI, all documented in the suite's root README.
 
 ## Development mode
 
-`irisMcpLauncher.developmentRepoPath` (Story 31.6) makes this extension usable **before** any `@iris-mcp/*`
-package is published: set it to the absolute path of a local monorepo checkout, and every registered definition
+`irisMcpLauncher.developmentRepoPath` (Story 31.6) makes this extension run a **local build** of the suite instead of the
+published `@iris-mcp/*` packages: set it to the absolute path of a local monorepo checkout, and every registered definition
 spawns `<developmentRepoPath>/packages/<dir>/dist/index.js` instead of `npx -y @iris-mcp/<pkg>@1`, using the
 editor's own interpreter (`process.execPath` with `ELECTRON_RUN_AS_NODE=1` — the standard extension-host
 pattern, so no dependence on a `node` being on the host's PATH). Empty
@@ -156,9 +170,8 @@ pattern, so no dependence on a `node` being on the host's PATH). Empty
   resolve it against the extension host's working directory, but the spawned server resolves it against VS Code's
   MCP spawner working directory — so a relative path can validate against one file and then start a different one
   (or none). Absolute paths have no such ambiguity.
-- **Until `@iris-mcp/*` is published to npm** (see the [status note](#iris-mcp-launcher) at the top of this file),
-  this is the **only** way to start an IRIS MCP server through this extension — the default `npx -y @iris-mcp/<pkg>@1`
-  path has no published package to resolve and fails to start on every machine.
+- **With the setting empty, the extension starts the published packages** (`npx -y @iris-mcp/<pkg>@1`); set it only to
+  test a local build of the suite (see [Development mode](#development-mode)).
 - **Package-key -> directory mapping is explicit, not derived.** All five suite packages happen to follow the
   `iris-<key>-mcp` directory-naming pattern today — which is exactly what makes a derivation rule tempting. The
   counterexample is real and recent: the `all` meta-package's directory was `iris-mcp-all`, **not** the
@@ -212,6 +225,10 @@ the same single code path as the terminal CLI, so the UI and the CLI cannot dive
 which cannot resolve until the packages are published. **Build it first:**
 `pnpm --filter @iris-mcp/client-config build`.
 
+**Which project "project scope" means.** The CLI runs in the first workspace folder that is open (in a multi-root
+window, only the first folder), or in your home directory when no folder is open. A client's project-scope
+config is the one under that directory.
+
 ### Using it
 
 1. **Open the view.** The header shows the adapter-data version, which engine resolved (local build vs npx), and
@@ -264,8 +281,7 @@ the policy visually and every MCP client picks it up on next server start.
   governed-key universe, the effective-policy cascade, and every write (`set`/`unset` — never hand-serialized
   JSON). With `irisMcpLauncher.developmentRepoPath` set it runs the checkout's built CLI
   (`packages/shared/dist/cli/governance-cli.js`); otherwise `npx -y -p @iris-mcp/shared@1 iris-mcp-governance`.
-  **Until `@iris-mcp/*` is published** (see the status note at the top of this file), the published-mode npx
-  invocation cannot resolve — set `developmentRepoPath` to use the editor before publication.
+  Set `developmentRepoPath` to run the editor against a local checkout of the suite instead.
 - **The governed-key universe is derived, never hand-maintained**: the CLI's `universe` command derives it from
   the five server packages' built dist (the same derivation the suite's own cross-package tests use), grouped
   per package with read/write badges, baseline/post-foundation origin, and each key's effective value with its
@@ -380,28 +396,15 @@ Every module except `src/extension.ts` (the activation entry point) is written w
 on the `vscode` module**, so the pure planning/credential/env logic is unit-testable in a plain Node process by
 injecting fakes shaped to the interfaces in `src/types.ts` — see `src/__tests__/`.
 
-## Marketplace / Open VSX publish checklist (not yet actioned)
+## Publishing
 
-This extension has **not** been published anywhere. Publishing is a separate decision for the project lead. When
-that decision is made:
-
-- [ ] Choose and register a real `publisher` id (currently the placeholder `"TBD-at-publish-time"` in
-      `package.json`) — a [Marketplace publisher](https://marketplace.visualstudio.com/manage) is required for
-      both the VS Code Marketplace and (for parity) [Open VSX](https://open-vsx.org/).
-- [ ] Add an icon (`"icon"` field in `package.json`, e.g. a 128x128 PNG) — the Marketplace listing looks bare
-      without one.
-- [x] `"repository"`, `"bugs"`, and `"homepage"` fields are already set in `package.json`, pointing at the
-      suite's GitHub repo (`extensions/iris-mcp-launcher` subdirectory).
-- [ ] Review/expand `categories` and `keywords` in `package.json` for Marketplace discoverability.
-- [ ] Confirm `CHANGELOG.md` is current for the version being published.
-- [ ] Confirm `.vscodeignore` excludes source/test/config files and includes only `dist/**/*.js` + `package.json` + `README.md` + `CHANGELOG.md` + `LICENSE` in the packaged VSIX (`npm run package` and inspect the "Files
-      included in the VSIX" listing it prints).
-- [ ] `npm run package` to produce the VSIX, then either `vsce publish` (needs a Personal Access Token) or upload
-      the VSIX manually via the [Marketplace publisher management page](https://marketplace.visualstudio.com/manage).
-- [ ] For Open VSX: `npx ovsx publish <file>.vsix -p <token>` (needs a separate Open VSX access token/namespace).
-- [ ] Decide a release cadence relative to the `@iris-mcp/*` npm packages this extension spawns via `npx` — a
-      version bump here is independent of theirs (this extension pins the major only: `npx -y @iris-mcp/<pkg>@1`
-      resolves the latest published 1.x).
+The extension is published only by the repository's release workflow, never by hand: see [Releasing](../../README.md#releasing)
+in the root README. In short: the extension's version equals the shared `@iris-mcp/*` version (`pnpm run version` stamps
+it and renames the `## [Unreleased]` heading of this CHANGELOG), and the release publishes the vsix built from the tagged
+commit to both stores under the publisher `iris-mcp`. Before each upload the script asks the store whether the version
+is already there, so a rerun of the same tag changes nothing. The Marketplace uses trusted publishing (no secret), and
+Open VSX uses an access token for the first publish only. The package has `"private": true`, so `npm publish` can never
+send it to npm; `npm run package` only builds the vsix.
 
 ## License
 

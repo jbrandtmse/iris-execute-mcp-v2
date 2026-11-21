@@ -92,7 +92,7 @@ function runInSandbox(
 ): (command: ClientsCliCommand) => Promise<ClientsCliResult> {
   const effectiveSettings = settings(settingsOverrides);
   const env = buildClientsCliEnv(effectiveSettings, target.extraEnv, { ...sandboxAmbient, ...ambientOverrides });
-  return (command) => runClientsCli(target, command, env);
+  return (command) => runClientsCli(target, command, env, process.cwd());
 }
 
 beforeAll(async () => {

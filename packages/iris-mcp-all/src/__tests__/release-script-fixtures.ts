@@ -19,6 +19,8 @@ export const SHA = "c".repeat(40);
 export interface FakeAnswer {
   status: number;
   body?: unknown;
+  /** When set, the request fails with this message instead of answering (a network error, or the stall guard of 30 seconds). */
+  fail?: string;
 }
 
 /** The state of the fake GitHub API. */
@@ -89,12 +91,19 @@ export function answerFor(github: FakeGithub, url: string, authorization = ""): 
   return { status: 404, body: { message: "Not Found" } };
 }
 
+/** The part of a `fetch` init that the fakes read. */
+export interface FakeInit {
+  headers?: Record<string, string>;
+  signal?: unknown;
+}
+
 /** A `fetch` that answers from the fake API; any other host is refused, so no test reaches a network. */
-export function fakeFetch(github: FakeGithub, extra: (url: string) => FakeAnswer | undefined = () => undefined): typeof fetch {
-  return (async (input: unknown, init?: { headers?: Record<string, string> }) => {
+export function fakeFetch(github: FakeGithub, extra: (url: string, init?: FakeInit) => FakeAnswer | undefined = () => undefined): typeof fetch {
+  return (async (input: unknown, init?: FakeInit) => {
     const url = String(input);
-    const other = extra(url);
+    const other = extra(url, init);
     const answer = other ?? (url.startsWith("https://api.github.com") ? answerFor(github, url, init?.headers?.["Authorization"] ?? "") : { status: 599, body: { message: `no route for ${url}` } });
+    if (answer.fail !== undefined) throw new Error(answer.fail);
     return new Response(answer.body === undefined ? null : JSON.stringify(answer.body), { status: answer.status, headers: { "Content-Type": "application/json" } });
   }) as unknown as typeof fetch;
 }
@@ -127,6 +136,55 @@ export async function startHangingServer(): Promise<{ url: string; close: () => 
   };
 }
 
+// -- the fake extension stores -------------------------------------------------------------------------------------
+
+/**
+ * The state of the fake stores (Story 42.7): what the Marketplace and Open VSX answer to the read-only lookups of a version, and what
+ * Open VSX answers for a namespace. The statuses are the ones the real stores answered on 2026-11-20 (captured in the header of
+ * `release-core.test.ts`): 200 for a version that is there, 404 for one that is not, 404 for an unknown namespace.
+ */
+export interface FakeStores {
+  marketplace: FakeAnswer;
+  openVsx: FakeAnswer;
+  namespace: FakeAnswer;
+  /** Every request the stores were asked: its URL, its headers and whether the caller gave it a signal of its own. */
+  requests: Array<{ url: string; headers: Record<string, string>; signal: boolean }>;
+}
+
+/** Fake stores on which the extension is not published and the namespace exists. */
+export function newFakeStores(): FakeStores {
+  return {
+    marketplace: { status: 404, body: { message: "not found" } },
+    openVsx: { status: 404, body: { error: "Extension not found: iris-mcp.iris-mcp-launcher" } },
+    namespace: { status: 200, body: { name: "iris-mcp" } },
+    requests: [],
+  };
+}
+
+/** The answer of the fake stores for a URL, recorded in `requests`; `undefined` for a URL that is not a store's. */
+export function storeAnswerFor(stores: FakeStores, url: string, init?: FakeInit): FakeAnswer | undefined {
+  const parsed = new URL(url);
+  const record = (): void => void stores.requests.push({ url, headers: { ...(init?.headers ?? {}) }, signal: init?.signal !== undefined });
+  if (parsed.host === "marketplace.visualstudio.com") {
+    record();
+    return stores.marketplace;
+  }
+  if (parsed.host === "open-vsx.org") {
+    record();
+    return parsed.pathname.split("/").filter((part) => part !== "").length === 2 ? stores.namespace : stores.openVsx;
+  }
+  return undefined;
+}
+
+/** A `fetch` that answers the two stores from `stores` and refuses every other URL (status 599), for a run that reads no GitHub and no registry. */
+export function fakeStoresFetch(stores: FakeStores = newFakeStores()): typeof fetch {
+  return (async (input: unknown, init?: FakeInit) => {
+    const answer = storeAnswerFor(stores, String(input), init) ?? { status: 599, body: { message: `no route for ${String(input)}` } };
+    if (answer.fail !== undefined) throw new Error(answer.fail);
+    return new Response(answer.body === undefined ? null : JSON.stringify(answer.body), { status: answer.status });
+  }) as unknown as typeof fetch;
+}
+
 // -- synthetic artifacts -------------------------------------------------------------------------------------------
 
 /** What {@link makeArtifacts} writes. */
@@ -137,6 +195,8 @@ export interface ArtifactOptions {
   event?: string;
   ref?: string;
   publisher?: string;
+  /** The version the vsix is at (default: the release version, which a release requires). */
+  vsixVersion?: string;
 }
 
 /** The manifest of an artifacts directory, as `prepare` writes it. */
@@ -167,11 +227,13 @@ export function makeArtifacts(dir: string, options: ArtifactOptions = {}): Artif
     write(tarball, `synthetic tarball of ${name}@${version}\n`);
     return { name, version, tarball };
   });
-  write("vsix/iris-mcp-launcher-0.1.0.vsix", "synthetic vsix\n");
+  const vsixVersion = options.vsixVersion ?? version;
+  const vsixFile = `vsix/iris-mcp-launcher-${vsixVersion}.vsix`;
+  write(vsixFile, "synthetic vsix\n");
   write("ipm/module.xml", "<Export/>\n");
   write("ipm/README.md", "# iris-execute-mcp-v2\n");
   write("ipm/src/cls/ExecuteMCPv2/Utils.cls", "Class ExecuteMCPv2.Utils {}\n");
-  const vsix = { file: "vsix/iris-mcp-launcher-0.1.0.vsix", name: "iris-mcp-launcher", version: "0.1.0", publisher: options.publisher ?? "TBD-at-publish-time", files: ["package.json", "dist/extension.js"] };
+  const vsix = { file: vsixFile, name: "iris-mcp-launcher", version: vsixVersion, publisher: options.publisher ?? "TBD-at-publish-time", files: ["package.json", "dist/extension.js"] };
   const details: Record<string, Record<string, unknown>> = {
     npm: { packages },
     "vscode-marketplace": vsix,
@@ -180,7 +242,7 @@ export function makeArtifacts(dir: string, options: ArtifactOptions = {}): Artif
   };
   const files = [
     ...packages.map((entry) => entry.tarball),
-    "vsix/iris-mcp-launcher-0.1.0.vsix",
+    vsixFile,
     "ipm/module.xml",
     "ipm/README.md",
     "ipm/src/cls/ExecuteMCPv2/Utils.cls",
@@ -234,6 +296,12 @@ export interface RepoOptions {
   pending?: string[];
   /** The root scripts (default: the four `:check` scripts, `format:check`, hooks and the others of the real root). */
   scripts?: Record<string, string>;
+  /** The extension's versions (default: the version of `@iris-mcp/shared`, the lockstep): its manifest, and the two version fields of its lock. */
+  extensionVersion?: string;
+  extensionLockVersion?: string;
+  extensionLockRootVersion?: string;
+  /** The extension's changelog text (default: a first heading `## [<the shared version>]`). */
+  extensionChangelog?: string;
 }
 
 /** The root scripts of the real repository that matter to `prepare`. */
@@ -285,7 +353,17 @@ export function makeRepo(root: string, options: RepoOptions = {}): { versionOf: 
   const sharedVersion = versionOf("@iris-mcp/shared");
   text("packages/shared/src/bootstrap-classes.ts", `export const BOOTSTRAP_VERSION = "${options.markerSemver ?? sharedVersion}+${MARKER_TAIL}";\n`);
   text("ipm/module.xml", `<Export><Module><Name>iris-execute-mcp-v2</Name><Version>${options.moduleVersion ?? sharedVersion}</Version></Module></Export>\n`);
-  json("extensions/iris-mcp-launcher/package.json", { name: "iris-mcp-launcher", version: "0.1.0", publisher: "TBD-at-publish-time" });
+  // The extension follows the shared version (lockstep): its manifest, both version fields of its lock, and its changelog heading.
+  const extensionVersion = options.extensionVersion ?? sharedVersion;
+  json("extensions/iris-mcp-launcher/package.json", { name: "iris-mcp-launcher", version: extensionVersion, private: true, publisher: "iris-mcp" });
+  json("extensions/iris-mcp-launcher/package-lock.json", {
+    name: "iris-mcp-launcher",
+    version: options.extensionLockVersion ?? extensionVersion,
+    lockfileVersion: 3,
+    requires: true,
+    packages: { "": { name: "iris-mcp-launcher", version: options.extensionLockRootVersion ?? extensionVersion } },
+  });
+  text("extensions/iris-mcp-launcher/CHANGELOG.md", options.extensionChangelog ?? `# Changelog\n\n## [${sharedVersion}] \u2014 2026-01-01\n\n- A synthetic entry.\n`);
   text("LICENSE", "MIT License\n");
   return { versionOf };
 }

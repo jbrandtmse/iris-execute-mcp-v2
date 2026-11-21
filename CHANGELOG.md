@@ -2,6 +2,40 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Unreleased] — Story 42.7: VS Code Extension Publish
+
+The VS Code extension can be published. The release workflow now has a VS Code Marketplace channel and an Open VSX channel, both enabled, and
+the extension joins the shared version. No `@iris-mcp/*` package changes, so this story adds no changeset, and no tool, prompt, governance or
+wire change is made: the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), the frozen goldens and the tools-list snapshot are
+byte-unchanged, and `BOOTSTRAP_VERSION` does not move. `v1.0.0` publishes npm only; the first release with the extension on the stores is the one
+after it, once the owner has created the publisher and the namespace.
+
+### Added
+
+- **The Marketplace and Open VSX channels are enabled (AC 42.7.2).** After npm, the release uploads the extension's vsix with `vsce publish
+  --oidc` (trusted publishing, no Marketplace secret: Azure DevOps global personal access tokens stop working on 2026-12-01) and then with
+  `ovsx publish`, which uses trusted publishing too unless the `OVSX_PAT` secret is set (the first Open VSX publish). Both channels are enabled
+  by default; the IPM channel stays disabled until Story 42.8. The two store CLIs are exact `devDependencies` of the extension (`@vscode/vsce`
+  `4.1.1`, `ovsx` `1.4.0`), installed in `rehearse` and `publish` with `npm ci --ignore-scripts`.
+- **A read-only store lookup before each upload.** A version already on a store reads `already published` with no upload (a rerun of the same
+  tag), an exit 0 that printed `is already published. Skipping publish.` is also `already published`, and an answer that cannot be read stops
+  the release before any upload. The Open VSX namespace is read too: a missing one is `not ready` in a rehearsal and `failed` in a release.
+  The OIDC variables reach only `npm publish`, `vsce publish` and `ovsx publish`, `OVSX_PAT` reaches only `ovsx publish`, and `VSCE_PAT` and
+  `OVSX_PAT` join the secrets that no other child process sees.
+- **The extension follows the shared version.** `pnpm run version` stamps the extension's `package.json` and `package-lock.json` and renames the
+  `## [Unreleased]` heading of its `CHANGELOG.md` to `## [<version>] — <date>`. `prepare` refuses a manifest, a lock or (in a release) a changelog
+  heading that is off the release version, and `publish` refuses a vsix that is not at the release version.
+- **A `launcher` CI job (DW-532).** The extension's whole test suite runs on `ubuntu-24.04`, `macos-15` and `windows-2025`.
+
+### Changed
+
+- **The extension has the publisher `iris-mcp` and is `"private": true` (DW-389).** `npm publish` can never send it to npm, and a test finds
+  any other tracked manifest that is not private and not one of the eight packages. The extension's README is the store listing.
+- **The extension's CLI spawns pass an explicit working directory (DW-663).** The clients CLI runs in the first workspace folder, or in the
+  user's home directory with no folder open; the governance CLI runs in the user's home directory.
+- **The launcher's test suite is green on macOS and Linux (DW-532).** Four tests no longer pin a `C:\` path, and one activation test no longer
+  waits on a render that was already on screen.
+
 ## [1.0.0] — 2026-11-20 — Story 42.6: Tarball Smoke and 1.0.0 Publish
 
 The first public release. All eight `@iris-mcp/*` packages are at `1.0.0`, one shared version. The release workflow publishes them to npm with

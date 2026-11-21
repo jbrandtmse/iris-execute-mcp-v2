@@ -19,6 +19,8 @@
  *    on any other ref; the sysctl step reserves exactly the registry's host ports and none is refused; `logs` runs on
  *    `failure() || cancelled()` and `down` on `always()`; the jobs' timeouts are the registry's.
  *  - DW-443 (42.3.5): `package` needs `gates` and `throwaway`, and every package with a `prepublishOnly` has its suite step.
+ *  - LAUNCHER (42.7, DW-532): the `launcher` job is a job of the registry like the others, except that it runs the registry's three runners
+ *    as `${{ matrix.os }}` (and a matrix of nothing else), on the floor Node, and needs no other job.
  *  - IPM (42.4): the `ipm` job is a job of the registry like the others (steps, timeout, runner, floor Node, no strategy, no `if`), and it
  *    needs `gates` and `throwaway`, so no archive is built from a red commit.
  */
@@ -29,6 +31,7 @@ import {
   CI_IMAGES,
   DECLARED_STEPS,
   JOB_TIMEOUT_MINUTES,
+  LAUNCHER_RUNNERS,
   LIVE_SUITES,
   NODE_LEGS,
   PINNED_ACTIONS,
@@ -189,7 +192,7 @@ export function workflowProblems(text: string, context: WorkflowContext): string
   unknownKeys("the workflow", workflow, WORKFLOW_KEYS);
   for (const [name, job] of Object.entries(jobs)) {
     unknownKeys(`job ${name}`, job, JOB_KEYS);
-    if (name !== "gates" && job?.strategy !== undefined) problems.push(`job ${name} has a strategy: only gates runs a matrix`);
+    if (name !== "gates" && name !== "launcher" && job?.strategy !== undefined) problems.push(`job ${name} has a strategy: only gates and launcher run a matrix`);
     for (const step of (job?.steps ?? []) as Array<Record<string, any>>) {
       const action = typeof step?.["uses"] === "string" ? (step["uses"] as string).split("@")[0] : undefined;
       unknownKeys(`job ${name}: the step ${action ?? JSON.stringify(step?.["run"])}`, step, action === undefined ? RUN_STEP_KEYS : ACTION_STEP_KEYS);
@@ -198,6 +201,8 @@ export function workflowProblems(text: string, context: WorkflowContext): string
   }
   unknownKeys("the gates strategy", jobs["gates"]?.strategy, ["fail-fast", "matrix"]);
   unknownKeys("the gates matrix", jobs["gates"]?.strategy?.matrix, ["node"]);
+  unknownKeys("the launcher strategy", jobs["launcher"]?.strategy, ["fail-fast", "matrix"]);
+  unknownKeys("the launcher matrix", jobs["launcher"]?.strategy?.matrix, ["os"]);
 
   // STEPS
   const declaredJobs = Object.keys(DECLARED_STEPS);
@@ -220,8 +225,12 @@ export function workflowProblems(text: string, context: WorkflowContext): string
   if (usesLines.length !== usesInJobs.length) problems.push(`the text has ${usesLines.length} uses: lines but the jobs have ${usesInJobs.length} uses steps`);
   problems.push(...actionPinProblems(usesLines, PINNED_ACTIONS));
   for (const [name, job] of Object.entries(jobs)) {
-    if ((job as { "runs-on"?: unknown })["runs-on"] !== RUNNER) problems.push(`${name} does not run on ${RUNNER}`);
+    const expected = name === "launcher" ? "${{ matrix.os }}" : RUNNER;
+    if ((job as { "runs-on"?: unknown })["runs-on"] !== expected) problems.push(`${name} does not run on ${expected}`);
   }
+  const launcherOs = jobs["launcher"]?.strategy?.matrix?.os;
+  if (JSON.stringify(launcherOs) !== JSON.stringify(LAUNCHER_RUNNERS)) problems.push(`the launcher matrix is ${JSON.stringify(launcherOs)}, the registry's runners are ${JSON.stringify(LAUNCHER_RUNNERS)}`);
+  if (jobs["launcher"]?.needs !== undefined) problems.push("the launcher job has needs: it runs beside gates, so that no other job's result can skip a platform leg");
   const images = [...bare.matchAll(/intersystems\/[A-Za-z0-9._-]+(?::[A-Za-z0-9._-]+)?(?:@sha256:[0-9a-f]{64})?/g)].map((match) => match[0]);
   for (const image of images) {
     if (!CI_IMAGES.includes(image)) problems.push(`image reference ${image} is not one of the harness's digest-pinned images`);
@@ -248,7 +257,7 @@ export function workflowProblems(text: string, context: WorkflowContext): string
   if (String(setupNodeOf("gates")?.with?.["node-version"]) !== "${{ matrix.node }}") {
     problems.push("gates does not run on its matrix leg: the node-version of its setup-node step is not ${{ matrix.node }}");
   }
-  for (const name of ["throwaway", "package", "ipm"]) {
+  for (const name of ["launcher", "throwaway", "package", "ipm"]) {
     if (String(setupNodeOf(name)?.with?.["node-version"]) !== floor) problems.push(`${name} does not run on Node ${floor}`);
   }
 

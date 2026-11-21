@@ -34,6 +34,7 @@
  *      never "", never an ambient leak), so the pre-feature spawn contract is
  *      byte-stable for every value the feature does not set.
  */
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -270,4 +271,55 @@ describe("Story 32.2 QA — governance editor activation flow (real extension.ts
       expect(value, `${name} must never be an empty string`).not.toBe("");
     }
   });
+});
+
+describe("DW-663: the working directory of the governance CLI spawn (real extension.ts, stub CLI in a temp repo)", () => {
+  it("the editor's CLI runs in the user's home directory, the directory the server definitions start in", async () => {
+    const repo = mkdtempSync(path.join(tmpdir(), "governance-cwd-repo-"));
+    const home = mkdtempSync(path.join(tmpdir(), "governance-cwd-home-"));
+    const cliDir = path.join(repo, "packages", "shared", "dist", "cli");
+    mkdirSync(cliDir, { recursive: true });
+    writeFileSync(
+      path.join(cliDir, "governance-cli.js"),
+      [
+        'const fs = require("node:fs");',
+        'const path = require("node:path");',
+        'fs.appendFileSync(path.join(__dirname, "cwd.log"), process.cwd() + "\\n");',
+        'process.stdout.write("{}\\n");',
+        "",
+      ].join("\n"),
+    );
+    const log = path.join(cliDir, "cwd.log");
+    const policy = path.join(repo, "policy.json");
+    writeFileSync(policy, "{}\n");
+    const prior = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      mockState.configStore.set(`${CONFIG}.developmentRepoPath`, repo);
+      mockState.configStore.set(`${CONFIG}.governanceFile`, policy);
+      activate(fakeContext());
+      await flushEditor();
+      await theCommand()();
+      const started = Date.now();
+      while (!existsSync(log) && Date.now() - started < 60000) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(existsSync(log), "the stub governance CLI must record its working directory").toBe(true);
+      // Let the panel's remaining spawns finish before the directories go away.
+      await flushEditor();
+      const cwds = readFileSync(log, "utf8")
+        .split("\n")
+        .filter((line) => line !== "")
+        .map((line) => realpathSync.native(line));
+      expect(cwds.length).toBeGreaterThan(0);
+      expect(cwds).toEqual(cwds.map(() => realpathSync.native(home)));
+    } finally {
+      for (const key of ["HOME", "USERPROFILE"] as const) {
+        if (prior[key] === undefined) delete process.env[key];
+        else process.env[key] = prior[key];
+      }
+      for (const dir of [repo, home]) rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120000);
 });

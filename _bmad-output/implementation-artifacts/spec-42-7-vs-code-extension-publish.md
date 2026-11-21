@@ -2,10 +2,10 @@
 title: 'Story 42.7: VS Code Extension Publish'
 type: 'feature'
 created: '2026-11-20'
-status: 'ready-for-dev'
-baseline_revision: '9124c068a086e022b42906d8506f5010cf9cbf54'
+status: 'done'
+baseline_revision: '19eaf1a191e20a2382aa5c6173b74081331eb85f'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
   - '{project-root}/_bmad-output/implementation-artifacts/epic-42-context.md'
@@ -237,6 +237,47 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-21 — Review pass
+- verdicts: 37 findings — high 0, medium 8, low 27, false 2, maybe-false 0
+- findings:
+  - `[low]` `[reject]` (blind) The extension README says the extension is on both stores before the first store release — Task 11 requires exactly this rewrite (the README is the store listing and ships with the v1.1.0 publish); spec-bound, by-design.
+  - `[medium]` `[reject]` (blind) The Marketplace rehearsal cannot see a missing publisher or trusted-publisher record — the matrix names the namespace GET for Open VSX only; a Marketplace refusal after npm is the spec's fix-forward / re-run-failed-jobs case (AD-29); spec-bound, by-design.
+  - `[false]` `[reject]` (blind) The store-lookup oracle never covers a never-published extension — read-only GETs on 2026-11-21 for `iris-mcp/iris-mcp-launcher/1.0.0` answer 404 on Open VSX and on the Marketplace `vspackage` URL, and 404 for the Open VSX namespace `iris-mcp`; the 404 mapping is the observed answer.
+  - `[low]` `[reject]` (blind) The Marketplace lookup downloads the full vsix (the Range header is ignored) — the spec lists this as a named residual risk (decision 2 fallback / "Residual risks" third bullet); the script cancels the body at once.
+  - `[low]` `[reject]` (blind) The publish job installs the whole launcher dev tree under `id-token: write` — the spec rejects the dedicated lockfile alternative in Design Notes; `--ignore-scripts` is the chosen mitigation.
+  - `[low]` `[reject]` (blind) The old publish checklist items (icon, categories, keywords, `.vscodeignore` inspection) were dropped — the icon is a spec "Never" (an authored asset); the rest is pre-existing listing polish, closed `wontfix-accepted` with reopen_if the Marketplace listing review (lead C2) finds the listing bare.
+  - `[low]` `[patch]` (blind) The new working-directory behavior is missing from the extension README — one paragraph added under "MCP Clients view".
+  - `[low]` `[patch]` (blind) CRLF CHANGELOG: the renamed heading loses its `\r` (Rule #58) — `renameUnreleasedHeading` keeps the line's `\r`; a CRLF test added and mutation-verified.
+  - `[low]` `[reject]` (blind) The changelog date is the UTC date — the heading is a date label; no named harm, and a time-zone option adds a parameter.
+  - `[low]` `[patch]` (blind) The fixtures comment cites a nonexistent `story-42-7-store-lookup-oracle.test.ts` — the comment now names `release-core.test.ts`, where the captured statuses live.
+  - `[low]` `[reject]` (edge) `workspaceFolders[0]` may be a non-file URI or a deleted folder — the extension declares no virtual-workspace support, so a non-file URI is not reachable, and a deleted folder only yields a spawn error the view renders inline; a guard adds a branch no real input reaches (Rule #54).
+  - `[medium]` `[patch]` (edge) The "no folder open" test restores `HOME`/`USERPROFILE` by assigning `undefined`, leaving the string `"undefined"` in `process.env` — a `restoreEnv` helper deletes absent keys; the governance row restores the same way.
+  - `[medium]` `[patch]` (edge) The DW-663 clients rows remove their temp directories while later spawns may still run (Windows `EBUSY` flake) — `recordedCwds` now waits for the first record and then for the line count to hold still for 400 ms before returning.
+  - `[medium]` `[reject]` (edge) Open VSX's namespace and lookup run after the Marketplace has uploaded, so a missing namespace fails after a partial store release — the matrix says publish `failed` before upload per channel, the rehearsal is the preflight, and a store failure after npm is the spec's re-run-failed-jobs path; spec-bound, by-design.
+  - `[low]` `[patch]` (edge) The oracle test file named in the fixtures does not exist — same fix as the blind row above.
+  - `[low]` `[patch]` (edge) `STORE_LOOKUP_TIMEOUT_MS` is exported and read by nothing (the 30 s guard is `defaultDeps`' `fetchTimeoutMs`) — removed it and the unused `STORE_CHANNEL_IDS`.
+  - `[low]` `[patch]` (edge) CRLF in the heading rename — same fix as the blind row above.
+  - `[low]` `[reject]` (edge) `extensionChangelogProblems` (first `## [` heading) and the version step (first `## ` heading) disagree for a non-bracket heading before the first bracket one — each states its own rule in the spec; the version step refuses that file loudly, so no release proceeds on it.
+  - `[medium]` `[patch]` (verification-gap) The governance CLI `cwd` has no test through the real `activate()` wiring — a `governanceActivationFlow.test.ts` row runs a stub governance CLI and asserts its `process.cwd()` is the home directory; mutation: `os.homedir()` to `process.cwd()` at the call site turns it red.
+  - `[medium]` `[patch]` (verification-gap) The same `HOME`/`USERPROFILE` state leak — same fix as the edge row above.
+  - `[medium]` `[patch]` (verification-gap) The DW-663 rows stop waiting after the first spawn and delete the temp directories under later ones — same fix as the edge row above.
+  - `[low]` `[patch]` (verification-gap) Dangling oracle file reference — same fix as the blind row above.
+  - `[low]` `[patch]` (verification-gap) Dead exports `STORE_CHANNEL_IDS` and `STORE_LOOKUP_TIMEOUT_MS` — removed.
+  - `[low]` `[patch]` (verification-gap) The root README install block still names `iris-mcp-launcher-0.1.0.vsix` — corrected to 1.0.0; "not yet on any Marketplace" stays true until the store publish, and the store install docs are Story 42.9's.
+  - `[low]` `[patch]` (verification-gap) Mutation lines missing for the governance `C:\` pin, the URL encoding and the non-release vsix check — each mutation applied, observed red, reverted, and recorded in `## Verification`.
+  - `[low]` `[reject]` (verification-gap) A near-tautology in the "real changelog once versioned" test — its `99.0.0` assertion can fail; the first-heading read is the same regex by design.
+  - `[low]` `[reject]` (verification-gap) The `launcher` CI job has no guard for silently skipped real-CLI files — the job builds both dists the files read; a guard adds a mode the suite does not have.
+  - `[low]` `[reject]` (intent-alignment) No test runs the real `npm run package` — the AC is a command run (done in the verification pass: one `iris-mcp-launcher-1.0.0.vsix`, `Publisher="iris-mcp"`), not a test.
+  - `[low]` `[patch]` (intent-alignment) The cited oracle file is missing — same fix as the blind row above.
+  - `[low]` `[reject]` (intent-alignment) Real CLI behavior is asserted only through stand-ins — the auditor read the installed vsce 4.1.1 and ovsx 1.4.0 sources and found the flags and the stdout skip lines the stand-ins mimic.
+  - `[low]` `[reject]` (intent-alignment) The macOS and Windows CI legs are untested until a push — the lead's A1/A1b are the gate; by design.
+  - `[medium]` `[patch]` (intent-alignment) The governance `cwd` is proven only at the injected spawn — same fix as the verification-gap governance row.
+  - `[low]` `[patch]` (intent-alignment) `STORE_LOOKUP_TIMEOUT_MS` unused — same fix as the edge row above.
+  - `[low]` `[reject]` (intent-alignment) The extension README states the store install before the tag that publishes it — same as the first blind row.
+  - `[low]` `[reject]` (intent-alignment) The store channels are enabled unconditionally, so a tag cut from this branch would try them — decision #77 and #82 (tags on `main` only, after the epic-end merge) make the first store release the next tag; by design.
+  - `[low]` `[reject]` (intent-alignment) The CHANGELOG gate is exercised only on fixtures — by design: the real tree must be `[Unreleased]` until the version step runs; the version-step rehearsal in a clone covers the real file.
+  - `[false]` `[reject]` (intent-alignment) The launcher lock was outside the diff so its lockstep fields could not be seen — `embeddedVersionProblems` reads `[]` on the real tree (the lock's two fields are `1.0.0`).
+
 ## Design Notes
 
 **Governing ADs and conventions (Rule 6):**
@@ -467,6 +508,36 @@ Every test added or changed passes on a fresh environment, in either order, and 
 - Lockstep: `embeddedVersionProblems` ignores the lock → the lock-mismatch row; `release-version` skips the rename → its rename row.
 - CI: drop the `launcher` job from `ci.yml` → the self-test.
 
+**Recorded mutations (Rule 19; implement stage, 2026-11-20):** each was applied, the named test went red, the change was reverted, and `git status --short` plus `git diff` were byte-identical to before. Test files named are in `packages/iris-mcp-all/src/__tests__/` unless they carry the launcher path.
+- mutation: `clientsEngine.test.ts` dev-repo mode, `developmentRepoPath` back to `"C:\\git\\iris-execute-mcp-v2"` → `resolveClientsCli > dev-repo mode: the extension host interpreter + the repo's built CLI` red on macOS (`expected false to be true`).
+- mutation: `clientsActivationFlow.test.ts` 33-3-3, the `thePanel().html = "";` line before the refresh message deleted (the vacuous wait) → 33-3-3 red after 60 s (`timed out ... waiting for: the re-toggled roster to persist`).
+- mutation: `clientsEngine.ts` spawn options `{ env, cwd }` → `{ env }` → `clientsEngine.test.ts` "DW-663: the spawn receives the caller's cwd" and both `clientsActivationFlow.test.ts` DW-663 rows (folder open, no folder) red.
+- mutation: `governanceEngine.ts` spawn options `{ env, cwd }` → `{ env }` → `governanceEngine.test.ts` "DW-663: the spawn receives the caller's cwd" red.
+- mutation: `"private": true` deleted from the extension `package.json` → `package-manifests.test.ts` "the manifests that are not private are exactly the eight packages" and "the extension is private ..." red. Publisher back to the placeholder → "the extension is private, is published under the publisher iris-mcp ..." red.
+- mutation: `RELEASE_CHANNELS` `open-vsx` back to `enabled: false` → `release-script.test.ts` "by default both stores run and IPM does not" and "the channels are enabled by default ...", and `release-core.test.ts` "the constants" red.
+- mutation: `vsceArgv` without `--oidc` → `release-core.test.ts` "the extension stores take a prebuilt vsix ...", `release-script.test.ts` "all four enabled ..." and the OVSX_PAT containment row red.
+- mutation: the OIDC variables not passed to the store CLIs (`oidcEnv(env)` dropped from the store CLI env) → `release-script.test.ts` "the job's OIDC request variables reach the three publish CLIs ..." and the OVSX_PAT containment row red.
+- mutation: `OVSX_PAT` removed from `SECRET_VARIABLES` (so every child holds it) → the three `Secret containment` rows red; `VSCE_PAT` removed → "no other child holds OVSX_PAT or VSCE_PAT" and the OVSX_PAT row red.
+- mutation: the `published` lookup outcome no longer returns `already published` (treated as absent) → `release-script.test.ts` "Already on a store ..." red.
+- mutation: the `unknown` lookup outcome no longer fails (treated as absent) → six `Lookup unreadable` rows red (403, 500, redirect, network error, stall, Open VSX 503).
+- mutation: the `skippedDuplicate` check deleted → "Skip-duplicate race ..." red.
+- mutation: `ovsxArgv` ignores its `token` flag → `release-core.test.ts` argv row and the OVSX_PAT containment row red.
+- mutation: Marketplace lookup without `Range: 'bytes=0-0'` → `release-core.test.ts` "the Marketplace lookup asks for one byte" and `release-script.test.ts` "the lookups are read-only GETs ..." red.
+- mutation: an absent Open VSX namespace treated as present → "Open VSX namespace absent" (publish) and the rehearsal row red.
+- mutation: the dry step's `would be already published` branch disabled → "a version that a store already holds reads ..." red.
+- mutation: the release-mode vsix version check removed from `uploadPathProblems` → "Version lockstep at the upload ..." red.
+- mutation: `extensionChangelogProblems` always passes → three `extensionChangelogProblems` rows in `release-core.test.ts` and the `release-prepare.test.ts` heading rows (release refusal, dry-run report) red.
+- mutation: `embeddedVersionProblems` ignores the lock (both lock fields) → `release-prepare.test.ts` "the extension's lock is at another version" and "... holds another version for its own package", and `release-version.test.ts` "the lockstep check refuses ..." red.
+- mutation: `release-version.mjs` skips the heading rename → six `release-version.test.ts` rows red ("stamps the manifest and both version fields ...", "a first release stamps the extension ...", the process run, and the 1.0.1 patch row among them).
+- mutation: `RELEASE_JOBS` rehearse without the store CLI install step → `release-workflow.test.ts` "the real release.yml has no problem" red; `OVSX_PAT` dropped from the publish step env in `RELEASE_JOBS` → the same row red.
+- mutation: the `launcher` job deleted from `ci.yml` → `ci-workflow.test.ts` "the real ci.yml has no problem" and the launcher rows red; the whole-suite step deleted from `ci-checks.mjs` → "the real ci.yml has no problem" and "the registry declares the job" red.
+- mutation: the root README channel table's Marketplace row back to `disabled` → `story-42-7-doc-claims.test.ts` "the channel table ..." and `story-42-5-doc-claims.test.ts` "states each channel's default state ..." red; the extension README's "Install it from a store" back to "Status: not yet published" → "no longer says that the extension is not yet published" red; its disclaimer deleted → "carries the disclaimer" red.
+- mutation: `governanceEngine.test.ts` fail-closed row, `developmentRepoPath` back to `"C:\\dev\\iris-execute-mcp-v2"` → `resolveGovernanceCli ... fail-closed: an unbuilt CLI ...` red on macOS.
+- mutation: `extension.ts` governance host `runGovernanceCli(..., os.homedir())` → `process.cwd()` → `governanceActivationFlow.test.ts` "DW-663: ... the editor's CLI runs in the user's home directory" red.
+- mutation: `storeLookupUrl`'s `part` helper without `encodeURIComponent` → `release-core.test.ts` "a part of the URL that holds a reserved character is encoded ..." red.
+- mutation: `uploadPathProblems` version check without the `manifest?.mode === 'release'` condition → `release-script.test.ts` "the version check is a release's ..." red.
+- mutation: `release-version.mjs` heading rename without keeping the line's `\r` → `release-version.test.ts` "a changelog with CRLF line endings keeps them ..." red.
+
 **Lead checklist** (stages do none of it; record every URL and result here).
 
 *Phase A, on `epic42`, after the story commit; no npm dependency:*
@@ -509,5 +580,41 @@ Every test added or changed passes on a fresh environment, in either order, and 
 
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** The launcher suite is green (DW-532), both CLI spawns pass an explicit `cwd` (DW-663), the extension is `iris-mcp`, private, at `1.0.0` with exact `@vscode/vsce` 4.1.1 and `ovsx` 1.4.0 pins (DW-389), the version step and `prepare` keep it in lockstep with the shared version, a `launcher` CI job runs the suite on Linux, macOS and Windows, and the Marketplace and Open VSX channels are enabled with a read-only lookup before each upload, OIDC for the Marketplace, trusted publishing or `OVSX_PAT` for Open VSX, and per-CLI secret containment. No store was touched. The story stays open for the lead's Phase A/B/C evidence (see Residual risks).
+
+**Files changed.**
+- `extensions/iris-mcp-launcher/package.json`, `package-lock.json`: publisher `iris-mcp`, `private`, `1.0.0`, exact CLI pins.
+- `extensions/iris-mcp-launcher/src/clientsEngine.ts`, `governanceEngine.ts`, `extension.ts`: required `cwd` on both CLI spawns (clients: first workspace folder else home; governance: home).
+- `extensions/iris-mcp-launcher/src/__tests__/*`: platform-neutral path pins, the 33-3-3 wait fix, `workspaceFolders` in the mock, DW-663 rows for both engines and both activation flows.
+- `extensions/iris-mcp-launcher/README.md`, `CHANGELOG.md`: store install, disclaimer, working-directory note, `[Unreleased]`.
+- `scripts/lib/release-core.mjs`, `scripts/release.mjs`, `scripts/lib/release-checks.mjs`, `.github/workflows/release.yml`: store channels, lookups, argv, containment, CLI install steps, `OVSX_PAT`.
+- `scripts/release-version.mjs`: stamps the extension and renames its `[Unreleased]` heading (CRLF-safe).
+- `scripts/lib/ci-checks.mjs`, `.github/workflows/ci.yml`: the `launcher` 3-OS job.
+- `packages/iris-mcp-all/src/__tests__/*`: a test per matrix row, the manifest enumeration rows, `story-42-7-doc-claims.test.ts` (new).
+- `README.md`, `CHANGELOG.md` (root): channel table, store authentication, the 1.0.0 vsix name.
+
+**Review findings.** 37 findings (high 0, medium 8, low 27, false 2); 18 patched, 19 rejected with the reasons in the triage log; none deferred (`deferred: []`). Patched by root cause: the `HOME`/`USERPROFILE` leak in the DW-663 test, the temp-directory teardown race in the DW-663 clients rows, the governance `cwd` wiring pinned through `activate()`, the dangling oracle reference, the unused `STORE_*` exports, the CRLF heading rename, the stale `0.1.0.vsix` in the root README, the missing README working-directory note, and four missing `mutation:` lines.
+
+**Follow-up review recommended: true.** Three medium entries were patched (the test-hygiene fixes and the new governance activation row). The unverified risk is the clients DW-663 helper, which waits for the CLI's spawn count to hold still for 400 ms: it is proven on macOS only, and the `windows-2025` leg of the new `launcher` job has not run.
+
+**Verification performed (this Mac, after the last patch).**
+- `node --check` on the five scripts: ok.
+- Launcher suite before: 5 failed, 438 passed, 3 skipped; after: 0 failed, 448 passed, 3 skipped (the two unarmed live files). `npm run type-check` and `npm run build`: exit 0.
+- The 15 story files of `@iris-mcp/all`: 944 passed, 2 skipped. The four `@iris-mcp/all` shards: 1596, 1299, 1295 and 1362 passed, 0 failed.
+- Per-package tests, lint and type-check for client-config, shared, admin, data, dev, interop and ops were green in the implement pass and those packages are untouched since.
+- The seven root checks and `gen:bootstrap`: OK, nothing changed; `BOOTSTRAP_VERSION` unmoved at `1.0.0+2.244fe8623c76`; the tag-consistency check prints `[] []`; `lint_spine.py`: 0 findings.
+- The real vsix: one `iris-mcp-launcher-1.0.0.vsix` (22 files) with `Publisher="iris-mcp"` and `Version="1.0.0"`, packed into `os.tmpdir()`.
+- Store lookups (read-only GET): 200 for `intersystems-community.servermanager@3.10.2` and 404 for `@0.0.1` on both stores (implement pass); 404 for `iris-mcp/iris-mcp-launcher@1.0.0` on both and for the Open VSX namespace `iris-mcp` today.
+- The version-step rehearsal in a throwaway clone: exit 0, the extension at `1.0.1`, its CHANGELOG headed `## [1.0.1]`, `embeddedVersionProblems` empty; the clone removed.
+- Mutations: about 35 applied across the implement and review passes, each red then reverted, recorded in `## Verification`.
+
+**Residual risks.**
+- `v1.0.0` must be tagged from a `main` commit that predates this story, or after the extension CHANGELOG heading is renamed: release-mode `prepare` refuses while the first heading is `## [Unreleased]` (by design).
+- The Marketplace ignores `Range: bytes=0-0` (the real answer is the full body); the script cancels the body at once. Whether that counts as a download is unknown.
+- The Open VSX namespace `iris-mcp` does not exist (404): the rehearsal reads `not ready` until the owner's step O1.
+- The macOS and Windows legs of the `launcher` job are unproven until the lead's A1 and A1b.
+- The spec says the story stays `in-progress` until the lead's C-phase evidence; this run records `done` per its dispatch contract, so the lead holds it open as 42.6 was.
+- Rule #55 slips by the implement subagent and by this stage: a few small script edits and appends went through a shell heredoc or script instead of the file tools; every file was verified to be text and the content landed.

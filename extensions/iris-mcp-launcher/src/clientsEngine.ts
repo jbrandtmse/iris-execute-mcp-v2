@@ -300,7 +300,7 @@ export interface ClientsCliResult {
 export type ClientsSpawnImpl = (
   command: string,
   args: string[],
-  options: { env: Record<string, string> },
+  options: { env: Record<string, string>; cwd: string },
 ) => {
   stdin?: { write(chunk: string): void; end(): void };
   stdout: { on: (event: "data", listener: (chunk: Buffer | string) => void) => void };
@@ -321,11 +321,16 @@ const realSpawn: ClientsSpawnImpl = (command, args, options) => spawn(command, a
  * When the command carries `passwordStdin` (explicit mode), the password is
  * written to the child's stdin and the stream closed immediately — it is
  * never logged, never echoed into argv, and never retained here.
+ *
+ * `cwd` is the working directory of the spawned process and is always passed
+ * explicitly: it decides which project the CLI's project scope means, so it
+ * must not depend on how the editor was launched.
  */
 export function runClientsCli(
   target: ClientsCliTarget,
   command: ClientsCliCommand,
   env: Record<string, string>,
+  cwd: string,
   spawnImpl: ClientsSpawnImpl = realSpawn,
   timeoutMs: number = DEFAULT_CLI_TIMEOUT_MS,
   platform: NodeJS.Platform = process.platform,
@@ -339,7 +344,7 @@ export function runClientsCli(
   return new Promise((resolvePromise) => {
     let child: ReturnType<ClientsSpawnImpl>;
     try {
-      child = spawnImpl(resolved.command, resolved.args, { env });
+      child = spawnImpl(resolved.command, resolved.args, { env, cwd });
     } catch (error: unknown) {
       resolvePromise({
         status: null,

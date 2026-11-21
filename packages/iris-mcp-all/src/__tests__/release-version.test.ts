@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { REPO_ROOT, removeLink } from "./pack-fixture";
 import { FIXTURE_GIT_ENV, PACKAGE_DIRS, SYNTHETIC_CHANGESET, commitFixture, fixtureStatus, fixtureTreeHash, makeVersionFixture, manifestOf, pendingChangesets, removeFixtures } from "./release-fixture";
 import { embeddedVersionProblems, readReleaseFacts } from "../../../../scripts/release.mjs";
+import { main as versionMain } from "../../../../scripts/release-version.mjs";
 import { versionProblems } from "../../../../scripts/lib/release-core.mjs";
 
 afterAll(removeFixtures);
@@ -68,7 +69,21 @@ function expectVersioned(root: string, version: string, before: string): string 
   const facts = readReleaseFacts(root);
   expect(versionProblems({ versions: facts.packages.map((entry: { name: string; version: string }) => ({ name: entry.name, version: entry.version })), pending: facts.pending }, "dry-run")).toEqual([]);
   expect(embeddedVersionProblems(facts)).toEqual([]);
+  expectExtensionVersioned(root, version);
   return after;
+}
+
+/** The extension follows the shared version: its manifest, both version fields of its lock (and no other field of the lock), and its changelog heading. */
+function expectExtensionVersioned(root: string, version: string, date: RegExp | string = /\d{4}-\d{2}-\d{2}/): void {
+  const extension = join(root, "extensions", "iris-mcp-launcher");
+  expect((JSON.parse(readFileSync(join(extension, "package.json"), "utf8")) as { version: string }).version, "the extension manifest").toBe(version);
+  const lock = JSON.parse(readFileSync(join(extension, "package-lock.json"), "utf8")) as { version: string; packages: Record<string, { version: string }> };
+  expect(lock.version, "the lock's own version").toBe(version);
+  expect(lock.packages[""]?.version, "the lock's root package").toBe(version);
+  expect(lock.packages["node_modules/typescript"]?.version, "a dependency of the lock is left alone").toBe("5.9.3");
+  const headings = readFileSync(join(extension, "CHANGELOG.md"), "utf8").split("\n").filter((line) => line.startsWith("## "));
+  expect(headings[0], "the first heading is renamed").toMatch(new RegExp(`^## \\[${version.replaceAll(".", "\\.")}\\] \\u2014 ${typeof date === "string" ? date : date.source}$`));
+  expect(headings.slice(1), "the older heading is untouched").toEqual(["## [0.1.0] \u2014 2026-01-01"]);
 }
 
 describe("pnpm run version -- --first-release in a throwaway fixture (AD-14)", () => {
@@ -332,6 +347,95 @@ describe("pnpm run version exits 1 naming what it finds wrong after a step (I/O 
     expect(result.stderr).not.toContain("next steps");
     expect(result.stderr).not.toContain("the embed carry it");
   }, 180_000);
+});
+
+describe("the extension follows the shared version (Story 42.7, the lockstep policy)", () => {
+  it("stamps the manifest and both version fields of the lock, renames `## [Unreleased]` to `## [<version>] \u2014 <date>` with the injected date, and leaves everything else of those files alone", async () => {
+    const root = makeVersionFixture({ version: "1.0.0" });
+    const lockBefore = readFileSync(join(root, "extensions/iris-mcp-launcher/package-lock.json"), "utf8");
+    const status = await versionMain([], cleanEnv(), root, () => new Date("2026-11-20T23:59:59Z"));
+    expect(status).toBe(0);
+    expectExtensionVersioned(root, "1.0.1", "2026-11-20");
+    const lockAfter = readFileSync(join(root, "extensions/iris-mcp-launcher/package-lock.json"), "utf8");
+    expect(lockAfter, "only the two version fields changed").toBe(lockBefore.replaceAll('"version": "1.0.0"', '"version": "1.0.1"'));
+    const changelog = readFileSync(join(root, "extensions/iris-mcp-launcher/CHANGELOG.md"), "utf8");
+    expect(changelog).toContain("## [1.0.1] \u2014 2026-11-20\n\n### Added\n\n- A synthetic entry.\n");
+    expect(changelog).not.toContain("[Unreleased]");
+  }, 180_000);
+
+  it("a changelog with CRLF line endings keeps them: the renamed heading is a CRLF line like the rest", async () => {
+    const root = makeVersionFixture({ version: "1.0.0" });
+    const file = join(root, "extensions/iris-mcp-launcher/CHANGELOG.md");
+    writeFileSync(file, readFileSync(file, "utf8").replaceAll("\n", "\r\n"));
+    commitFixture(root, "a CRLF changelog");
+    const status = await versionMain([], cleanEnv(), root, () => new Date("2026-11-20T23:59:59Z"));
+    expect(status).toBe(0);
+    const changelog = readFileSync(file, "utf8");
+    expect(changelog).toContain("## [1.0.1] \u2014 2026-11-20\r\n\r\n### Added\r\n");
+    expect(changelog.replaceAll("\r\n", "")).not.toContain("\n");
+  }, 180_000);
+
+  it("the script run as a process stamps the extension too, and its next steps name the extension's files", () => {
+    const root = makeVersionFixture({ version: "1.0.0" });
+    const result = run(root, "release-version.mjs");
+    expect(result.status, result.stderr).toBe(0);
+    expectExtensionVersioned(root, "1.0.1");
+    expect(result.stderr).toContain("the package.json, package-lock.json and CHANGELOG.md heading of the extension now carry the version;");
+    expect(fixtureStatus(root)).toContain("extensions/iris-mcp-launcher/CHANGELOG.md");
+  }, 180_000);
+
+  it("a first release stamps the extension at 1.0.0 as well", () => {
+    const root = makeVersionFixture();
+    expect(run(root, "release-version.mjs", ["--first-release"]).status).toBe(0);
+    expectExtensionVersioned(root, "1.0.0");
+  }, 180_000);
+
+  it("a changelog whose first `## ` heading is not `## [Unreleased]`: exit 1 naming the file and the heading, with the partial-version line and no next steps", () => {
+    const root = makeVersionFixture();
+    const file = join(root, "extensions/iris-mcp-launcher/CHANGELOG.md");
+    writeFileSync(file, readFileSync(file, "utf8").replace("## [Unreleased]", "## [0.2.0] \u2014 2026-01-02"));
+    commitFixture(root, "a changelog with no Unreleased heading");
+    const result = run(root, "release-version.mjs");
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('problem: the first `## ` heading of extensions/iris-mcp-launcher/CHANGELOG.md is "## [0.2.0] \u2014 2026-01-02", not `## [Unreleased]`.');
+    expect(result.stderr).toContain("the tree now holds a partial version: discard it with git restore . && git clean -fd");
+    expect(result.stderr).not.toContain("next steps");
+  }, 180_000);
+
+  it("an `## [Unreleased]` heading that is not the first `## ` heading is refused too", () => {
+    const root = makeVersionFixture();
+    const file = join(root, "extensions/iris-mcp-launcher/CHANGELOG.md");
+    writeFileSync(file, readFileSync(file, "utf8").replace("## [Unreleased]", "## Notes\n\n## [Unreleased]"));
+    commitFixture(root, "Unreleased is second");
+    const result = run(root, "release-version.mjs");
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain("extensions/iris-mcp-launcher/CHANGELOG.md is \"## Notes\", not `## [Unreleased]`");
+  }, 180_000);
+
+  it("a lock with fewer version fields than the stamp expects: exit 1 naming the file", () => {
+    const root = makeVersionFixture();
+    writeFileSync(join(root, "extensions/iris-mcp-launcher/package-lock.json"), `${JSON.stringify({ name: "iris-mcp-launcher", lockfileVersion: 3 }, null, 2)}\n`);
+    commitFixture(root, "a lock with no version");
+    const result = run(root, "release-version.mjs");
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('problem: extensions/iris-mcp-launcher/package-lock.json has 0 "version" fields, not the 2 the stamp expects.');
+  }, 180_000);
+
+  it("the lockstep check refuses a manifest or a lock that is off the shared version, naming the file and the fix", () => {
+    const root = makeVersionFixture({ version: "1.0.0" });
+    expect(embeddedVersionProblems(readReleaseFacts(root))).toEqual([]);
+    const manifest = join(root, "extensions/iris-mcp-launcher/package.json");
+    writeFileSync(manifest, readFileSync(manifest, "utf8").replace('"version": "1.0.0"', '"version": "0.9.0"'));
+    expect(embeddedVersionProblems(readReleaseFacts(root))).toEqual([
+      'extensions/iris-mcp-launcher/package.json is at "0.9.0", not the shared version 1.0.0. Run pnpm run version, which stamps it.',
+    ]);
+    const lock = join(root, "extensions/iris-mcp-launcher/package-lock.json");
+    writeFileSync(manifest, readFileSync(manifest, "utf8").replace('"version": "0.9.0"', '"version": "1.0.0"'));
+    writeFileSync(lock, readFileSync(lock, "utf8").replace('"version": "1.0.0"', '"version": "0.9.0"'));
+    expect(embeddedVersionProblems(readReleaseFacts(root))).toEqual([
+      'extensions/iris-mcp-launcher/package-lock.json (version) is at "0.9.0", not the shared version 1.0.0. Run pnpm run version, which stamps it.',
+    ]);
+  });
 });
 
 describe("the root manifest wires the scripts", () => {

@@ -23,7 +23,7 @@
  *      memento adapter, and a refresh keeps the filtered selection (AC
  *      33.3.1's persisted-roster wiring). Read-only engine commands only.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -33,6 +33,7 @@ import { CLIENT_ROSTER_STATE_KEY } from "../clientsPanel.js";
 import {
   mockState,
   resetMockState,
+  Uri,
 } from "./vscodeMock.js";
 
 const CONFIG = "irisMcpLauncher";
@@ -204,6 +205,11 @@ describe("Story 33.3 — MCP Clients activation flow (real extension.ts, faked e
       expect(memento.store.get(CLIENT_ROSTER_STATE_KEY)).toEqual([]);
 
       // A refresh re-derives from the persisted roster: claude-code stays unchecked.
+      // Clear the recorded html first, so that what the wait below sees was rendered
+      // AFTER the refresh message: the previous render already shows claude-code
+      // unchecked, and would satisfy the wait while the refresh's three spawns
+      // (detect, modes, status) still run with the busy guard held.
+      thePanel().html = "";
       for (const listener of thePanel().messageListeners) {
         listener({ type: "refresh" });
       }
@@ -241,4 +247,86 @@ describe("Story 33.3 — MCP Clients activation flow (real extension.ts, faked e
       rmSync(home, { recursive: true, force: true });
     }
   }, 120000);
+});
+
+describe("DW-663: the working directory of the clients CLI spawn (real extension.ts, stub CLI in a temp repo)", () => {
+  /** A temp "repo" whose built clients CLI records its own working directory next to itself and answers `{}`. */
+  function stubRepo(): { repo: string; log: string } {
+    const repo = mkdtempSync(path.join(tmpdir(), "clients-cwd-repo-"));
+    const cliDir = path.join(repo, "packages", "client-config", "dist", "cli");
+    mkdirSync(cliDir, { recursive: true });
+    writeFileSync(
+      path.join(cliDir, "clients-cli.js"),
+      [
+        'const fs = require("node:fs");',
+        'const path = require("node:path");',
+        'fs.appendFileSync(path.join(__dirname, "cwd.log"), process.cwd() + "\\n");',
+        'process.stdout.write("{}\\n");',
+        "",
+      ].join("\n"),
+    );
+    return { repo, log: path.join(cliDir, "cwd.log") };
+  }
+
+  /** The working directories the stub CLI recorded while the real command opened the panel, normalized for comparison. */
+  async function recordedCwds(log: string): Promise<string[]> {
+    activate(fakeContext(memento.memento));
+    await flushEditor();
+    await theCommand()();
+    const lines = (): string[] => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter((line) => line !== "") : []);
+    await waitFor(() => lines().length >= 1, "the stub clients CLI to record its working directory");
+    // The panel's remaining spawns follow the first: wait until the count has held still, so none outlives the temp directories.
+    let last = -1;
+    for (let still = 0; still < 4; ) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const count = lines().length;
+      still = count === last ? still + 1 : 0;
+      last = count;
+    }
+    return lines().map((line) => realpathSync.native(line));
+  }
+
+  /** Put an environment variable back to what it was: an absent one is deleted, never set to the string "undefined". */
+  function restoreEnv(prior: Record<string, string | undefined>): void {
+    for (const [key, value] of Object.entries(prior)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+
+  it("with a workspace folder open the spawn runs in the FIRST folder", async () => {
+    const { repo, log } = stubRepo();
+    const first = mkdtempSync(path.join(tmpdir(), "clients-cwd-first-"));
+    const second = mkdtempSync(path.join(tmpdir(), "clients-cwd-second-"));
+    try {
+      mockState.configStore.set(`${CONFIG}.developmentRepoPath`, repo);
+      mockState.workspaceFolders = [
+        { uri: Uri.file(first), name: "first", index: 0 },
+        { uri: Uri.file(second), name: "second", index: 1 },
+      ];
+      const cwds = await recordedCwds(log);
+      expect(cwds.length).toBeGreaterThan(0);
+      expect(cwds).toEqual(cwds.map(() => realpathSync.native(first)));
+    } finally {
+      for (const dir of [repo, first, second]) rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
+
+  it("with no folder open the spawn runs in the user's home directory", async () => {
+    const { repo, log } = stubRepo();
+    const home = mkdtempSync(path.join(tmpdir(), "clients-cwd-home-"));
+    const prior = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      mockState.configStore.set(`${CONFIG}.developmentRepoPath`, repo);
+      expect(mockState.workspaceFolders).toBeUndefined();
+      const cwds = await recordedCwds(log);
+      expect(cwds.length).toBeGreaterThan(0);
+      expect(cwds).toEqual(cwds.map(() => realpathSync.native(home)));
+    } finally {
+      restoreEnv(prior);
+      for (const dir of [repo, home]) rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
 });

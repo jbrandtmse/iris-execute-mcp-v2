@@ -9,21 +9,27 @@
  *  - the MCP Registry name `io.github.jbrandtmse/<bin>` on the five servers (and on nothing else);
  *  - the AD-28 deny-list: nothing in a name, description or keyword presents the suite as InterSystems' or endorsed;
  *  - the license text each package ships is a byte copy of the root `LICENSE`;
- *  - the documented Node floor: the root README states the manifest floor, and no document names Node 18 or 20.
+ *  - the documented Node floor: the root README states the manifest floor, and no document names Node 18 or 20;
+ *  - the npm-publishable set: every tracked `package.json` that is not private is one of the eight packages (DW-389), and the
+ *    extension is private, published only to the stores under the publisher `iris-mcp` (Story 42.7).
  *
  * The package list is enumerated from the directory, never hand-typed, so a package added later is covered at once;
  * the expected roster is pinned separately so a package that appears or vanishes is a visible change (Rule #56).
  * This is a default-suite test (no IRIS, no build); Story 42.3 promotes it to a CI gate.
  */
 
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { listScanSurface } from "../../../../scripts/lib/npx-pin-scan.mjs";
+import { NPM_PUBLISH_ORDER } from "../../../../scripts/lib/release-core.mjs";
 import { REPO_ROOT } from "./pack-fixture";
 
 interface Manifest {
   name: string;
+  private?: boolean;
+  publisher?: string;
   version?: string;
   displayName?: string;
   description?: string;
@@ -96,6 +102,43 @@ describe("the roster (Rule #56)", () => {
   it("has seven TypeScript packages (a tsconfig.json), the meta-package being the only one without", () => {
     expect(PACKAGES.filter((entry) => entry.hasTsconfig)).toHaveLength(7);
     expect(PACKAGES.filter((entry) => !entry.hasTsconfig).map((entry) => entry.manifest.name)).toEqual(["@iris-mcp/all"]);
+  });
+});
+
+describe("the npm-publishable set (DW-389, Story 42.7, Rule #56)", () => {
+  /** Every tracked `package.json`, outside `node_modules` and fixtures: the files a stray `npm publish` could be run from. */
+  const trackedManifests = execFileSync("git", ["ls-files", "*package.json"], { cwd: REPO_ROOT, encoding: "utf8" })
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !/(^|\/)(node_modules|fixtures)\//.test(line))
+    .sort();
+
+  it("enumerates the root, the eight packages and the extension, so that a manifest added anywhere is seen", () => {
+    expect(trackedManifests).toEqual(
+      ["package.json", `${EXTENSION_DIRECTORY}/package.json`, ...PACKAGE_DIRECTORIES.map((directory) => `${directory}/package.json`)].sort(),
+    );
+  });
+
+  it("the manifests that are not private are exactly the eight packages of NPM_PUBLISH_ORDER", () => {
+    const publishable = trackedManifests
+      .map((file) => JSON.parse(readFileSync(join(REPO_ROOT, file), "utf8")) as Manifest)
+      .filter((manifest) => manifest.private !== true)
+      .map((manifest) => manifest.name)
+      .sort();
+    expect(publishable).toEqual([...NPM_PUBLISH_ORDER].sort());
+  });
+
+  it("the extension is private, is published under the publisher iris-mcp, and no published name contains intersystems (AD-28)", () => {
+    const { manifest } = EXTENSION;
+    expect(manifest.private).toBe(true);
+    expect(manifest.publisher).toBe("iris-mcp");
+    const storeId = `${String(manifest.publisher)}.${manifest.name}`;
+    expect(storeId).toBe("iris-mcp.iris-mcp-launcher");
+    for (const published of [...NPM_PUBLISH_ORDER, storeId, manifest.displayName ?? ""]) {
+      expect(published, "a published name contains intersystems").not.toMatch(/intersystems/i);
+    }
+    // A dependency is not our name: the extension still needs the Server Manager from the community publisher.
+    expect((manifest as { extensionDependencies?: string[] }).extensionDependencies).toEqual(["intersystems-community.servermanager"]);
   });
 });
 

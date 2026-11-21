@@ -5,7 +5,10 @@
  * through stand-ins is also pinned here at its source.
  */
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { REPO_ROOT } from "./pack-fixture";
 import {
   CI_WORKFLOW_PATH,
   IPM_DIST_BRANCH,
@@ -46,6 +49,13 @@ import {
   tarballProblems,
   versionProblems,
   vsceArgv,
+  EXTENSION_CHANGELOG_PATH,
+  extensionChangelogProblems,
+  openVsxNamespaceUrl,
+  skippedDuplicate,
+  storeLookupHeaders,
+  storeLookupUrl,
+  storeOutcome,
 } from "../../../../scripts/lib/release-core.mjs";
 
 const SHA = "a".repeat(40);
@@ -56,8 +66,8 @@ describe("the constants", () => {
     expect([...NPM_PUBLISH_ORDER]).toEqual(["@iris-mcp/client-config", "@iris-mcp/shared", "@iris-mcp/admin", "@iris-mcp/data", "@iris-mcp/dev", "@iris-mcp/interop", "@iris-mcp/ops", "@iris-mcp/all"]);
     expect(RELEASE_CHANNELS).toEqual([
       { id: "npm", enabled: true },
-      { id: "vscode-marketplace", enabled: false, enabledBy: "Story 42.7" },
-      { id: "open-vsx", enabled: false, enabledBy: "Story 42.7" },
+      { id: "vscode-marketplace", enabled: true },
+      { id: "open-vsx", enabled: true },
       { id: "ipm", enabled: false, enabledBy: "Story 42.8" },
     ]);
     expect([RELEASE_ENVIRONMENT, RELEASE_TAG_PATTERN, IPM_DIST_REPOSITORY, IPM_DIST_BRANCH, MIN_NPM_VERSION, CI_WORKFLOW_PATH]).toEqual([
@@ -375,9 +385,11 @@ describe("The argv builders", () => {
     expect(npmViewArgv("@iris-mcp/shared", "1.0.0")).toEqual(["view", "@iris-mcp/shared@1.0.0", "version"]);
   });
 
-  it("the extension stores take a prebuilt vsix and tolerate a duplicate version", () => {
-    expect(vsceArgv("/x/a.vsix")).toEqual(["publish", "--packagePath", "/x/a.vsix", "--skip-duplicate"]);
-    expect(ovsxArgv("/x/a.vsix")).toEqual(["publish", "/x/a.vsix", "--skip-duplicate"]);
+  it("the extension stores take a prebuilt vsix and tolerate a duplicate version: vsce with trusted publishing, ovsx with trusted publishing unless a token is set", () => {
+    expect(vsceArgv("/x/a.vsix")).toEqual(["publish", "--packagePath", "/x/a.vsix", "--skip-duplicate", "--oidc"]);
+    expect(ovsxArgv("/x/a.vsix")).toEqual(["publish", "/x/a.vsix", "--skip-duplicate", "--trusted-publishing"]);
+    expect(ovsxArgv("/x/a.vsix", { token: false })).toEqual(["publish", "/x/a.vsix", "--skip-duplicate", "--trusted-publishing"]);
+    expect(ovsxArgv("/x/a.vsix", { token: true }), "a token is read from OVSX_PAT, never from argv").toEqual(["publish", "/x/a.vsix", "--skip-duplicate"]);
   });
 
   it("the userconfig holds the token on one auth line, and refuses a token that could add a line", () => {
@@ -472,6 +484,106 @@ describe("Publish refusals: a real run only for a push of the tag, on the prepar
   });
 });
 
+/**
+ * Story 42.7, the extension stores. The statuses are the ones the real stores answered to a read-only GET on 2026-11-20, captured with
+ * `storeLookupUrl` and `storeLookupHeaders` and `fetch` from a `node --input-type=module -e` one-liner, for
+ * `intersystems-community.servermanager` (Rule #36; the suite itself never reaches a network):
+ *   Marketplace  3.10.2 -> 200 (application/vsix; the Range header was ignored)   0.0.1 -> 404 (application/json)
+ *   Open VSX     3.10.2 -> 200 (application/json)                                 0.0.1 -> 404 (application/json)
+ *   Open VSX namespace intersystems-community -> 200, iris-mcp -> 404 (the owner has not created it yet)
+ */
+describe("The store lookups (Story 42.7)", () => {
+  it("the Open VSX URL is the metadata of the version, and the Marketplace URL is the vspackage of the version", () => {
+    expect(storeLookupUrl("open-vsx", "iris-mcp", "iris-mcp-launcher", "1.0.0")).toBe("https://open-vsx.org/api/iris-mcp/iris-mcp-launcher/1.0.0");
+    expect(storeLookupUrl("vscode-marketplace", "iris-mcp", "iris-mcp-launcher", "1.0.0")).toBe(
+      "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/iris-mcp/vsextensions/iris-mcp-launcher/1.0.0/vspackage",
+    );
+    expect(openVsxNamespaceUrl("iris-mcp")).toBe("https://open-vsx.org/api/iris-mcp");
+  });
+
+  it("a part of the URL that holds a reserved character is encoded, so that it cannot add a path segment", () => {
+    expect(storeLookupUrl("open-vsx", "a/b", "c?d", "1.0.0")).toBe("https://open-vsx.org/api/a%2Fb/c%3Fd/1.0.0");
+    expect(openVsxNamespaceUrl("a/b")).toBe("https://open-vsx.org/api/a%2Fb");
+  });
+
+  it("a store that is not one is refused, with the fix", () => {
+    expect(() => storeLookupUrl("npm", "p", "n", "1.0.0")).toThrow(/"npm" is not an extension store\. Use vscode-marketplace or open-vsx\./);
+  });
+
+  it("the Marketplace lookup asks for one byte (its HEAD answers 405); the Open VSX lookup asks for JSON", () => {
+    expect(storeLookupHeaders("vscode-marketplace")).toEqual({ Range: "bytes=0-0", "User-Agent": "iris-mcp-release" });
+    expect(storeLookupHeaders("open-vsx")).toEqual({ Accept: "application/json", "User-Agent": "iris-mcp-release" });
+  });
+
+  it.each([
+    [200, "published"],
+    [206, "published"],
+    [404, "absent"],
+    [403, "unknown"],
+    [401, "unknown"],
+    [405, "unknown"],
+    [429, "unknown"],
+    [500, "unknown"],
+    [503, "unknown"],
+    [301, "unknown"],
+    [undefined, "unknown"],
+  ])("the status %s is %s", (status, expected) => {
+    expect(storeOutcome(status as number | undefined)).toBe(expected);
+  });
+});
+
+describe("skippedDuplicate (Story 42.7): the CLI's own line tells a skip from an upload", () => {
+  // vsce 4.1.1 `out/publish.js` and ovsx 1.4.0 `lib/publish.js` print these after `--skip-duplicate` found the version (exit 0).
+  it.each([
+    ["vsce", "Executing prepublish script 'npm run vscode:prepublish'...\n DONE  Version 1.0.0 is already published. Skipping publish.\n"],
+    ["vsce in a GitHub Actions log", "Version 1.0.0 is already published. Skipping publish.\r\n"],
+    ["ovsx", "iris-mcp.iris-mcp-launcher v1.0.0 is already published. Skipping publish.\n"],
+  ])("%s: a line that ends with `is already published. Skipping publish.` is a skip", (_name, stdout) => {
+    expect(skippedDuplicate(stdout)).toBe(true);
+  });
+
+  it.each([
+    ["an upload", "Publishing 'iris-mcp.iris-mcp-launcher v1.0.0'...\n DONE  Published iris-mcp.iris-mcp-launcher v1.0.0.\n"],
+    ["nothing", ""],
+    ["the phrase inside a longer line", "Version 1.0.0 is already published. Skipping publish. Then it uploaded anyway.\n"],
+    ["a failure to find the version", "ERROR  iris-mcp.iris-mcp-launcher v1.0.0 already exists.\n"],
+  ])("%s is not a skip", (_name, stdout) => {
+    expect(skippedDuplicate(stdout)).toBe(false);
+  });
+});
+
+describe("extensionChangelogProblems (Story 42.7): the first `## [` heading names the release version", () => {
+  it("passes when the first heading is the version, with or without a date", () => {
+    expect(extensionChangelogProblems("# Changelog\n\n## [1.0.0] \u2014 2026-11-21\n\n- x\n\n## [0.1.0]\n", "1.0.0")).toEqual([]);
+    expect(extensionChangelogProblems("## [1.0.0]\n", "1.0.0")).toEqual([]);
+  });
+
+  it("refuses [Unreleased] as the first heading, naming the heading and the fix", () => {
+    expect(extensionChangelogProblems("# Changelog\n\n## [Unreleased]\n\n## [0.1.0]\n", "1.0.0")).toEqual([
+      `the first heading of ${EXTENSION_CHANGELOG_PATH} is \`## [Unreleased]\`, not \`## [1.0.0]\`. Run pnpm run version, which renames the \`## [Unreleased]\` heading, and commit the result.`,
+    ]);
+  });
+
+  it("refuses another version, a version that only starts like the release, and an older heading above the release's", () => {
+    expect(extensionChangelogProblems("## [0.1.0]\n", "1.0.0")).toHaveLength(1);
+    expect(extensionChangelogProblems("## [1.0.01]\n", "1.0.0")).toHaveLength(1);
+    expect(extensionChangelogProblems("## [0.9.0]\n\n## [1.0.0]\n", "1.0.0")).toHaveLength(1);
+  });
+
+  it("refuses a changelog with no `## [` heading, and an empty one", () => {
+    expect(extensionChangelogProblems("# Changelog\n\nNothing yet.\n", "1.0.0")[0]).toMatch(/has no `## \[` heading\. Add a section headed `## \[1\.0\.0\]`/);
+    expect(extensionChangelogProblems("", "1.0.0")).toHaveLength(1);
+  });
+
+  it("the real changelog of the extension is not at a release heading while it is Unreleased, and is once it is versioned", () => {
+    const text = readFileSync(path.join(REPO_ROOT, EXTENSION_CHANGELOG_PATH), "utf8");
+    const first = /^## \[([^\]]*)\]/m.exec(text)?.[1];
+    expect(first).toBeDefined();
+    expect(extensionChangelogProblems(text, first as string)).toEqual([]);
+    expect(extensionChangelogProblems(text, "99.0.0")).toHaveLength(1);
+  });
+});
+
 describe("The report", () => {
   it("names every package and channel with its status, grouped by channel, in the order given", () => {
     const report = releaseReport([
@@ -491,6 +603,17 @@ describe("The report", () => {
         "  iris-mcp-launcher@0.1.0: skipped: not enabled (Story 42.7)",
         "",
       ].join("\n"),
+    );
+  });
+
+  it("a store channel row carries its authentication in the detail, and a skipped duplicate has none (Story 42.7)", () => {
+    const report = releaseReport([
+      { channel: "vscode-marketplace", item: "iris-mcp-launcher@1.0.0", status: STATUS.published, detail: "auth: oidc" },
+      { channel: "open-vsx", item: "iris-mcp-launcher@1.0.0", status: STATUS.published, detail: "auth: token" },
+      { channel: "open-vsx", item: "iris-mcp-launcher@1.0.1", status: STATUS.alreadyPublished },
+    ]);
+    expect(report).toBe(
+      ["Release report", "vscode-marketplace", "  iris-mcp-launcher@1.0.0: published (auth: oidc)", "open-vsx", "  iris-mcp-launcher@1.0.0: published (auth: token)", "  iris-mcp-launcher@1.0.1: already published", ""].join("\n"),
     );
   });
 

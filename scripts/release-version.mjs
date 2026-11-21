@@ -16,8 +16,11 @@
 //   2. RUNS, in this order: the `--first-release` copy (removed again when `changeset version` fails), the repository's own
 //      `changeset version` (the bin of node_modules/@changesets/cli, so it needs no PATH entry), the same checks the release's `prepare`
 //      makes (`versionProblems`: one shared version, no prerelease, no pending changeset), then `scripts/gen-bootstrap.mjs`, which
-//      stamps the new semver into the embed and into ipm/module.xml and keeps the sequence and the hash. Any problem found after a
-//      step exits 1 naming it. Nothing is committed, tagged or published.
+//      stamps the new semver into the embed and into ipm/module.xml and keeps the sequence and the hash. Then the VS Code extension
+//      follows the shared version (lockstep, Story 42.7): its package.json and package-lock.json (both of the lock's version fields) are
+//      stamped, and the `## [Unreleased]` heading of its CHANGELOG.md, which must be that file's first `## ` heading (else exit 1 naming
+//      the file), becomes `## [<version>] <em dash> <YYYY-MM-DD>`. Any problem found after a step exits 1 naming it. Nothing is committed,
+//      tagged or published.
 //   3. PRINTS the `BOOTSTRAP_VERSION` move as the generator left it, and the next steps. The root CHANGELOG section for the release names
 //      that move literal.
 //
@@ -29,12 +32,12 @@
 //   acts on the fixture. `main(argv, env, root)` takes the root for the tests.
 
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { embeddedVersionProblems, readReleaseFacts } from './release.mjs';
-import { compareVersions, versionProblems } from './lib/release-core.mjs';
+import { EXTENSION_CHANGELOG_PATH, compareVersions, versionProblems } from './lib/release-core.mjs';
 import { isEntryPoint, spawnInherited } from './lib/script-process.mjs';
 
 /** The template of the first release, and the name it takes in `.changeset/`. */
@@ -48,6 +51,46 @@ const say = (line) => process.stderr.write(`version: ${line}\n`);
 function stateOf(root) {
   const facts = readReleaseFacts(root);
   return { facts, versions: facts.packages.map((entry) => ({ name: entry.name, version: entry.version })), pending: facts.pending };
+}
+
+/** The extension's version files, relative to the repository root, and how many leading `"version"` fields of each carry the extension's own version. */
+const EXTENSION_VERSION_FILES = Object.freeze([
+  { file: 'extensions/iris-mcp-launcher/package.json', fields: 1 },
+  { file: 'extensions/iris-mcp-launcher/package-lock.json', fields: 2 },
+]);
+
+/**
+ * Put `version` into the first `fields` `"version"` fields of a JSON file, editing the text in place so that nothing else in the file
+ * changes: a lock file's first two are its own (`version` and `packages[""].version`). Returns a problem text, or `undefined`.
+ */
+function stampVersionFields(root, { file, fields }, version) {
+  const full = path.join(root, file);
+  if (!existsSync(full)) return `${file} is missing. Restore it from git.`;
+  let seen = 0;
+  const stamped = readFileSync(full, 'utf8').replace(/^(\s*"version":\s*)"[^"]*"/gm, (match, prefix) => {
+    seen += 1;
+    return seen <= fields ? `${prefix}"${version}"` : match;
+  });
+  if (seen < fields) return `${file} has ${seen} "version" fields, not the ${fields} the stamp expects. Fix the file by hand.`;
+  writeFileSync(full, stamped, 'utf8');
+  return undefined;
+}
+
+/**
+ * Rename the extension changelog's `## [Unreleased]` heading to `## [<version>] <em dash> <date>`. It must be the first `## ` heading.
+ * Returns a problem text, or `undefined`.
+ */
+function renameUnreleasedHeading(root, version, date) {
+  const full = path.join(root, EXTENSION_CHANGELOG_PATH);
+  if (!existsSync(full)) return `${EXTENSION_CHANGELOG_PATH} is missing. Restore it from git.`;
+  const lines = readFileSync(full, 'utf8').split('\n');
+  const index = lines.findIndex((line) => line.startsWith('## '));
+  if (index < 0 || lines[index].trimEnd() !== '## [Unreleased]') {
+    return `the first \`## \` heading of ${EXTENSION_CHANGELOG_PATH} is ${JSON.stringify(index < 0 ? undefined : lines[index])}, not \`## [Unreleased]\`. Put the release's entries under a \`## [Unreleased]\` heading at the top, then run it again.`;
+  }
+  lines[index] = `## [${version}] \u2014 ${date}${lines[index].endsWith('\r') ? '\r' : ''}`;
+  writeFileSync(full, lines.join('\n'), 'utf8');
+  return undefined;
 }
 
 /** The `bin` of the repository's own `@changesets/cli`, or `undefined` when it is not installed. */
@@ -65,9 +108,10 @@ function changesetBin(root) {
  * @param {readonly string[]} [argv]
  * @param {Record<string, string | undefined>} [env]
  * @param {string} [root]
+ * @param {() => Date} [now] - The clock that dates the extension changelog's release heading.
  * @returns {Promise<number>}
  */
-export async function main(argv = process.argv.slice(2), env = process.env, root = ROOT) {
+export async function main(argv = process.argv.slice(2), env = process.env, root = ROOT, now = () => new Date()) {
   const args = argv[0] === '--' ? argv.slice(1) : argv;
   const unknown = args.filter((argument) => argument !== '--first-release');
   if (unknown.length > 0 || args.length > 1) {
@@ -141,6 +185,17 @@ export async function main(argv = process.argv.slice(2), env = process.env, root
     partial();
     return 1;
   }
+  // The extension follows the shared version (lockstep): its manifest, its lock and its changelog heading.
+  const sharedAfter = stateOf(root).facts.sharedVersion;
+  const extensionProblems = [
+    ...EXTENSION_VERSION_FILES.map((entry) => stampVersionFields(root, entry, sharedAfter)),
+    renameUnreleasedHeading(root, sharedAfter, now().toISOString().slice(0, 10)),
+  ].filter((problem) => problem !== undefined);
+  if (extensionProblems.length > 0) {
+    for (const problem of extensionProblems) say(`problem: ${problem}`);
+    partial();
+    return 1;
+  }
   const after = stateOf(root);
   const problems = [...after.facts.problems, ...versionProblems(after, 'dry-run'), ...embeddedVersionProblems(after.facts)];
   if (problems.length > 0) {
@@ -157,6 +212,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, root
       : `\`BOOTSTRAP_VERSION\` moves from \`${before.facts.marker}\` to \`${after.facts.marker}\``,
   );
   say('next steps: write the root CHANGELOG section for this release, naming the BOOTSTRAP_VERSION move above;');
+  say('  the package.json, package-lock.json and CHANGELOG.md heading of the extension now carry the version;');
   say(`  review git diff and commit; wait for CI to be green on the commit; then tag it v${version}, push the tag, and approve the run in the release environment.`);
   return 0;
 }

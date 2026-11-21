@@ -20,7 +20,8 @@
 //      A tag run is also refused unless the commit is on `main`: GET compare `main...<sha>` must answer `identical` or `behind`, and `ahead`,
 //      `diverged`, any other status, a non-2xx answer, an error or a stall is a refusal. It runs after the environment guard and before the CI
 //      poll, so a refused tag asks for no approval; a dry run prints one line about it. There is no maintenance-branch allowance.
-//   3. PREPARE checks the version state and the generated files, runs every root script that checks the tree (the set CI's gates run), runs every package's `prepublishOnly` ONCE through the throwaway harness
+//   3. PREPARE checks the version state (the extension's package.json and lock at the shared version in both modes; in release mode its CHANGELOG's
+//      first `## [` heading naming the version, which a dry run reports as `a tag run would refuse`) and the generated files, runs every root script that checks the tree (the set CI's gates run), runs every package's `prepublishOnly` ONCE through the throwaway harness
 //      (`scripts/throwaway-iris.mjs exec ... node scripts/ci-live-suite.mjs prepublish-<short>`, which exports IRIS_REQUIRE_LIVE=1 and all
 //      five IRIS_* variables), and only then packs: eight tarballs with `pnpm pack` (no lifecycle script), the vsix, and the IPM tree,
 //      with `release-manifest.json` (version, sha, mode, channels, files, sha256). The container is removed on every exit path.
@@ -31,11 +32,19 @@
 //      package and channel as published, already published, failed, not attempted or skipped. A real run refuses, with exit 2 and
 //      before any upload, unless it is a `push` of `refs/tags/v<manifest.version>` on the manifest's sha with a manifest prepared in
 //      release mode, and unless the environment guard passes again. `--dry-run` runs `npm publish --dry-run`, never reads NPM_TOKEN, and runs no `vsce`/`ovsx` publish, no
-//      `git push` and no userconfig write.
+//      `git push` and no userconfig write; its store steps make read-only GETs only.
+//      THE STORES (Story 42.7). Each store channel (the Marketplace, then Open VSX) asks the store, read-only, whether it holds the version:
+//      published is `already published` with no upload, absent uploads with `--skip-duplicate` (a CLI line ending `is already published.
+//      Skipping publish.` after an exit 0 is still `already published`), and a lookup that cannot be read (another status, a network
+//      error, a 30 s stall) fails closed: nothing is uploaded and nothing after it is attempted. Open VSX also needs its namespace
+//      (`GET https://open-vsx.org/api/<publisher>`): absent is `not ready` in a rehearsal and `failed` before any upload in a release.
+//      The CLIs are the exact pins in the launcher's `node_modules/.bin`; `vsce publish --oidc` is trusted publishing, and `ovsx publish`
+//      uses trusted publishing too unless OVSX_PAT is set (the first publish). In release mode the vsix must be at the manifest's version.
 //   5. AUTH. NPM_TOKEN set: a 0600 temporary userconfig holds it and is passed as `--userconfig`; it is removed on every exit path and the
-//      token is never printed. NPM_TOKEN empty: no userconfig, npm uses OIDC (trusted publishing). The token, GITHUB_TOKEN and the IPM
-//      deploy key are removed from the environment of every child process, and the job's OIDC request variables
-//      (ACTIONS_ID_TOKEN_REQUEST_TOKEN and _URL) reach only `npm publish`.
+//      token is never printed. NPM_TOKEN empty: no userconfig, npm uses OIDC (trusted publishing). The token, GITHUB_TOKEN, VSCE_PAT,
+//      OVSX_PAT and the IPM deploy key are removed from the environment of every child process, and the job's OIDC request variables
+//      (ACTIONS_ID_TOKEN_REQUEST_TOKEN and _URL) reach only `npm publish`, `vsce publish` and `ovsx publish`. OVSX_PAT reaches only
+//      `ovsx publish`, as an environment variable, never in argv. Every secret is redacted from every report line.
 //   6. Each phase prints a line, and the report is appended to $GITHUB_STEP_SUMMARY when it is set.
 //   7. SIGINT and SIGTERM kill the child processes that are running, run the cleanups and end the run with 130 or 143
 //      (`installSignalHandlers`); the gate set's own handlers, registered later, forward the signal to its command and remove the container.
@@ -91,6 +100,7 @@ import {
   environmentProblems,
   environmentSummary,
   environmentWarnings,
+  extensionChangelogProblems,
   ipmDefaultBranch,
   ipmPushPlan,
   ipmReadme,
@@ -101,12 +111,17 @@ import {
   npmVersionProblems,
   npmViewArgv,
   npmViewJsonArgv,
+  openVsxNamespaceUrl,
   ovsxArgv,
   publishRefusals,
   registryProblems,
   releaseMode,
   releaseReport,
+  skippedDuplicate,
   skippedText,
+  storeLookupHeaders,
+  storeLookupUrl,
+  storeOutcome,
   tarballProblems,
   versionProblems,
   vsceArgv,
@@ -122,11 +137,11 @@ export const MANIFEST_NAME = 'release-manifest.json';
 /** The extension the vsix and the stores' CLIs live in. */
 const LAUNCHER_RELATIVE = path.join('extensions', 'iris-mcp-launcher');
 
-/** The variables with which npm asks GitHub for the job's OIDC token (trusted publishing and provenance): only `npm publish` gets them. */
+/** The variables with which a publish CLI asks GitHub for the job's OIDC token (trusted publishing and provenance): only `npm publish`, `vsce publish` and `ovsx publish` get them. */
 const OIDC_VARIABLES = Object.freeze(['ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'ACTIONS_ID_TOKEN_REQUEST_URL']);
 
 /** The variables that never reach a child process: each reaches only the code that needs it. */
-const SECRET_VARIABLES = Object.freeze(['NPM_TOKEN', 'GITHUB_TOKEN', 'IPM_DIST_DEPLOY_KEY', ...OIDC_VARIABLES]);
+const SECRET_VARIABLES = Object.freeze(['NPM_TOKEN', 'GITHUB_TOKEN', 'IPM_DIST_DEPLOY_KEY', 'OVSX_PAT', 'VSCE_PAT', ...OIDC_VARIABLES]);
 
 /** A usage error or a refusal that ends the run with exit code 2. */
 export class Refusal extends Error {}
@@ -489,10 +504,21 @@ export function readReleaseFacts(repoRoot = REPO_ROOT) {
   const moduleFile = path.join(repoRoot, 'ipm', 'module.xml');
   const moduleVersion = existsSync(moduleFile) ? /<Version>([^<]+)<\/Version>/.exec(readFileSync(moduleFile, 'utf8'))?.[1]?.trim() : undefined;
   const shared = found.get('@iris-mcp/shared');
-  return { packages, problems, pending, marker, moduleVersion, sharedVersion: shared?.manifest.version };
+  const extensionDir = path.join(repoRoot, LAUNCHER_RELATIVE);
+  const readIf = (file, parse) => (existsSync(file) ? parse(readFileSync(file, 'utf8')) : undefined);
+  const extension = {
+    version: readIf(path.join(extensionDir, 'package.json'), (text) => JSON.parse(text).version),
+    lockVersion: readIf(path.join(extensionDir, 'package-lock.json'), (text) => JSON.parse(text).version),
+    lockRootVersion: readIf(path.join(extensionDir, 'package-lock.json'), (text) => JSON.parse(text).packages?.['']?.version),
+    changelog: readIf(path.join(extensionDir, 'CHANGELOG.md'), (text) => text),
+  };
+  return { packages, problems, pending, marker, moduleVersion, sharedVersion: shared?.manifest.version, extension };
 }
 
-/** What is wrong with the files that embed the version: the bootstrap marker's semver and `ipm/module.xml` must equal the shared version. */
+/**
+ * What is wrong with the files that embed the version: the bootstrap marker's semver, `ipm/module.xml`, and the extension's
+ * `package.json` and `package-lock.json` (both of its version fields) must equal the shared version.
+ */
 export function embeddedVersionProblems(facts) {
   const problems = [];
   const markerSemver = facts.marker?.split('+')[0];
@@ -501,6 +527,15 @@ export function embeddedVersionProblems(facts) {
   }
   if (facts.moduleVersion !== facts.sharedVersion) {
     problems.push(`ipm/module.xml is at ${JSON.stringify(facts.moduleVersion)}, not the shared version ${facts.sharedVersion}. Run pnpm run version, which regenerates it.`);
+  }
+  const extensionDir = LAUNCHER_RELATIVE.split(path.sep).join('/');
+  const extension = facts.extension ?? {};
+  for (const [file, version] of [
+    [`${extensionDir}/package.json`, extension.version],
+    [`${extensionDir}/package-lock.json (version)`, extension.lockVersion],
+    [`${extensionDir}/package-lock.json (packages[""].version)`, extension.lockRootVersion],
+  ]) {
+    if (version !== facts.sharedVersion) problems.push(`${file} is at ${JSON.stringify(version)}, not the shared version ${facts.sharedVersion}. Run pnpm run version, which stamps it.`);
   }
   return problems;
 }
@@ -656,6 +691,7 @@ async function runPrepare({ out, env, repoRoot = REPO_ROOT }, deps) {
   const versionIssues = [
     ...facts.problems,
     ...versionProblems({ versions: facts.packages.map((entry) => ({ name: entry.name, version: entry.version })), pending: facts.pending, tagVersion: info.version }, info.mode),
+    ...extensionChangelogProblems(facts.extension.changelog ?? '', version),
   ];
   const blocking = [...embeddedVersionProblems(facts)];
   if (info.mode === 'release') blocking.unshift(...versionIssues);
@@ -822,7 +858,7 @@ export function artifactProblems(artifacts, manifest) {
 /**
  * What is wrong with the paths a run would upload: each is one of the manifest's hash-verified files, inside the artifacts directory.
  * An npm entry's tarball is the one `pnpm pack` names for its package and version (so no two entries share one), and in a release every
- * entry is at the manifest's version. An enabled store channel uploads a listed `.vsix`; an enabled IPM channel pushes a listed directory that
+ * entry is at the manifest's version. An enabled store channel uploads a listed `.vsix` (at the manifest's version in a release); an enabled IPM channel pushes a listed directory that
  * holds `module.xml`. A channel that is not enabled uploads nothing, so its paths are not checked.
  *
  * @param {Record<string, any>} manifest
@@ -852,8 +888,13 @@ export function uploadPathProblems(manifest, channels) {
       if (!isContainedPath(tree) || !verified.has(`${tree}/module.xml`)) {
         problems.push(`${channel.id}: its tree ${JSON.stringify(tree)} is not a directory of ${MANIFEST_NAME} that holds module.xml. Prepare the artifacts again.`);
       }
-    } else if (!isContainedPath(detail.file) || !verified.has(detail.file) || !detail.file.endsWith('.vsix')) {
-      problems.push(`${channel.id}: its vsix ${JSON.stringify(detail.file)} is not a hash-verified .vsix of ${MANIFEST_NAME}. Prepare the artifacts again.`);
+    } else {
+      if (!isContainedPath(detail.file) || !verified.has(detail.file) || !detail.file.endsWith('.vsix')) {
+        problems.push(`${channel.id}: its vsix ${JSON.stringify(detail.file)} is not a hash-verified .vsix of ${MANIFEST_NAME}. Prepare the artifacts again.`);
+      }
+      if (manifest?.mode === 'release' && detail.version !== manifest.version) {
+        problems.push(`${channel.id}: its vsix is at ${JSON.stringify(detail.version)}, not the release version ${manifest.version}. Run pnpm run version, then prepare the artifacts again.`);
+      }
     }
   }
   return problems;
@@ -874,6 +915,44 @@ function vsixReadiness(channel, repoRoot, cliName) {
   if (!existsSync(cli)) reasons.push(`${cliName} is not installed in ${LAUNCHER_RELATIVE}/node_modules`);
   return { cli, reasons };
 }
+
+/** The OIDC request variables of the job that are set: what a publish CLI needs to ask GitHub for its token. */
+const oidcEnv = (env) => Object.fromEntries(OIDC_VARIABLES.filter((name) => typeof env[name] === 'string').map((name) => [name, env[name]]));
+
+/** The HTTP status of a read-only GET (the body is not read), or `{ error }` when it failed or stalled. */
+async function readStatus(deps, url, headers) {
+  try {
+    const response = await deps.fetch(url, { headers });
+    try {
+      await response.body?.cancel();
+    } catch {
+      // only the status is read
+    }
+    return { status: response.status };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Ask a store (read-only) whether it holds `detail.name@version`: `{ outcome: 'published' | 'absent' | 'unknown', why? }`. */
+async function storeLookup(deps, store, detail, version) {
+  const answer = await readStatus(deps, storeLookupUrl(store, detail.publisher, detail.name, version), storeLookupHeaders(store));
+  const outcome = storeOutcome(answer.status);
+  return outcome === 'unknown' ? { outcome, why: answer.error ?? `HTTP ${answer.status}` } : { outcome };
+}
+
+/** Ask Open VSX (read-only) whether the namespace exists: `{ state: 'present' | 'absent' | 'unknown', problem? }`. */
+async function openVsxNamespaceState(deps, publisher) {
+  const answer = await readStatus(deps, openVsxNamespaceUrl(publisher), { Accept: 'application/json', 'User-Agent': 'iris-mcp-release' });
+  if (answer.status === 200) return { state: 'present' };
+  if (answer.status === 404) {
+    return { state: 'absent', problem: `the Open VSX namespace ${publisher} does not exist. Create it once with npx ovsx create-namespace ${publisher} (owner step O1).` };
+  }
+  return { state: 'unknown', problem: `the Open VSX namespace ${publisher} could not be read (${answer.error ?? `HTTP ${answer.status}`}). Check the network and open-vsx.org, then run the release again.` };
+}
+
+/** The sentence for a lookup that could not be judged: the release stops, because it cannot tell an upload from a duplicate. */
+const lookupProblem = (store, item, why) => `could not ask ${store} whether ${item} is published (${why}). Nothing was uploaded; check the network and the store, then run the release again.`;
 
 /**
  * Rehearse (`--dry-run`) or perform the upload of a prepared artifacts directory (see the header).
@@ -969,8 +1048,8 @@ async function runPublish({ artifacts, dryRun = false, env, repoRoot = REPO_ROOT
       say('auth: oidc');
     }
     const npmEnv = childEnv(env);
-    const publishEnv = { ...npmEnv, ...Object.fromEntries(OIDC_VARIABLES.filter((name) => typeof env[name] === 'string').map((name) => [name, env[name]])) };
-    secrets.push(env.ACTIONS_ID_TOKEN_REQUEST_TOKEN);
+    const publishEnv = { ...npmEnv, ...oidcEnv(env) };
+    secrets.push(env.ACTIONS_ID_TOKEN_REQUEST_TOKEN, env.OVSX_PAT, env.VSCE_PAT);
     const quote = (text) => redact(text, secrets);
 
     // npm, in order; the first failure stops everything after it.
@@ -1043,7 +1122,8 @@ async function runPublish({ artifacts, dryRun = false, env, repoRoot = REPO_ROOT
 /** The dry step of a channel that is not enabled: what would stop it if it were. */
 async function channelReadiness(channel, detail, ctx) {
   const outcome = await dryStep(channel, detail, ctx);
-  return outcome.status === STATUS.ready ? 'ready' : `${STATUS.notReady}: ${outcome.detail}`;
+  if (outcome.status === STATUS.ready) return outcome.detail === undefined ? 'ready' : `ready (${outcome.detail})`;
+  return `${STATUS.notReady}: ${outcome.detail}`;
 }
 
 /** Read-only checks of one channel. Returns `{ status: 'ready' }` or `{ status: 'not ready', detail }`. */
@@ -1064,7 +1144,19 @@ async function dryStep(channel, detail, { dir, env, deps, repoRoot, version }) {
     return reasons.length === 0 ? { status: STATUS.ready } : { status: STATUS.notReady, detail: reasons.join('; ') };
   }
   const { reasons } = vsixReadiness(detail, repoRoot, channel.id === 'vscode-marketplace' ? 'vsce' : 'ovsx');
-  return reasons.length === 0 ? { status: STATUS.ready } : { status: STATUS.notReady, detail: reasons.join('; ') };
+  // The store reads need a real publisher: the placeholder names nothing a store could answer for.
+  let lookup;
+  if (typeof detail.publisher === 'string' && detail.publisher !== PLACEHOLDER_PUBLISHER) {
+    const item = `${detail.name}@${detail.version}`;
+    if (channel.id === 'open-vsx') {
+      const namespace = await openVsxNamespaceState(deps, detail.publisher);
+      if (namespace.state !== 'present') reasons.push(namespace.problem);
+    }
+    lookup = await storeLookup(deps, channel.id, detail, detail.version);
+    if (lookup.outcome === 'unknown') reasons.push(lookupProblem(channel.id, item, lookup.why));
+  }
+  if (reasons.length > 0) return { status: STATUS.notReady, detail: reasons.join('; ') };
+  return { status: STATUS.ready, detail: lookup?.outcome === 'published' ? STATUS.wouldBeAlreadyPublished : `${STATUS.wouldPublish} ${detail.name}@${detail.version}` };
 }
 
 /** Ask the IPM registry whether it lists the version: `{ listed }`, or `{ error }`. A 404 means the package is not registered yet. */
@@ -1091,16 +1183,29 @@ async function runChannel(channel, detail, ctx) {
   if (detail === undefined) return { status: STATUS.failed, detail: `the manifest has no ${channel.id} entry. Prepare the artifacts again.` };
   if (dryRun) {
     const dry = await dryStep(channel, detail, ctx);
-    return dry.status === STATUS.ready ? { status: STATUS.ready } : { status: STATUS.notReady, detail: dry.detail };
+    return dry.status === STATUS.ready ? { status: STATUS.ready, ...(dry.detail === undefined ? {} : { detail: dry.detail }) } : { status: STATUS.notReady, detail: dry.detail };
   }
   if (channel.id === 'ipm') return publishIpm(detail, { dir, env, deps, cleanups, version, sha, quote });
   const cliName = channel.id === 'vscode-marketplace' ? 'vsce' : 'ovsx';
   const { cli, reasons } = vsixReadiness(detail, repoRoot, cliName);
   if (reasons.length > 0) return { status: STATUS.failed, detail: reasons.join('; ') };
   const vsix = path.join(dir, detail.file);
-  const argv = [cli, ...(channel.id === 'vscode-marketplace' ? vsceArgv(vsix) : ovsxArgv(vsix))];
-  const uploaded = await deps.run(argv, { cwd: path.join(repoRoot, LAUNCHER_RELATIVE), env: childEnv(env) });
-  return uploaded.status === 0 ? { status: STATUS.published } : { status: STATUS.failed, detail: quote(tail(uploaded.stderr || uploaded.error?.message || uploaded.stdout, 4)) };
+  const item = `${detail.name}@${detail.version}`;
+  if (channel.id === 'open-vsx') {
+    const namespace = await openVsxNamespaceState(deps, detail.publisher);
+    if (namespace.state !== 'present') return { status: STATUS.failed, detail: `${namespace.problem} Nothing was uploaded.` };
+  }
+  const lookup = await storeLookup(deps, channel.id, detail, detail.version);
+  if (lookup.outcome === 'published') return { status: STATUS.alreadyPublished };
+  if (lookup.outcome === 'unknown') return { status: STATUS.failed, detail: lookupProblem(channel.id, item, lookup.why) };
+  // Each CLI gets the job's OIDC variables; only ovsx gets the token, in its environment (never its argv).
+  const useToken = channel.id === 'open-vsx' && typeof env.OVSX_PAT === 'string' && env.OVSX_PAT !== '';
+  const argv = [cli, ...(channel.id === 'vscode-marketplace' ? vsceArgv(vsix) : ovsxArgv(vsix, { token: useToken }))];
+  const uploaded = await deps.run(argv, { cwd: path.join(repoRoot, LAUNCHER_RELATIVE), env: childEnv(env, { ...oidcEnv(env), ...(useToken ? { OVSX_PAT: env.OVSX_PAT } : {}) }) });
+  if (uploaded.status !== 0) return { status: STATUS.failed, detail: quote(tail(uploaded.stderr || uploaded.error?.message || uploaded.stdout, 4)) };
+  // `--skip-duplicate` exits 0 for an upload and for a skip alike: the CLI's own line tells them apart.
+  if (skippedDuplicate(uploaded.stdout)) return { status: STATUS.alreadyPublished };
+  return { status: STATUS.published, detail: channel.id === 'open-vsx' && useToken ? 'auth: token' : 'auth: oidc' };
 }
 
 /** The IPM channel: refuse a version the registry lists, push the staged tree to the packaging repository with the deploy key, and tag it. */
