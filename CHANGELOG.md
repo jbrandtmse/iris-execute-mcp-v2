@@ -37,7 +37,7 @@ the tools-list snapshot are byte-unchanged.
   test holds that set equal to the `pnpm` entries of CI's root gates.
 - **The MCP SDK is pinned at `2.4.0` (DW-637).** `@modelcontextprotocol/server` and `client` move from `2.3.1`, and the lockfile resolves
   `server`, `client` and `core` at `2.4.0` alone. `2.4.0` bundles fast-uri `3.1.8`, which fixes the advisories that `2.3.1`'s `3.1.0` carried.
-  The wire is unchanged: every frozen golden is byte-identical. `fixtures/tools-list-snapshot.json` keeps `2.3.1` in its `sdkVersion` metadata,
+  The wire is unchanged: every frozen golden is byte-identical. `packages/iris-mcp-all/src/__tests__/fixtures/tools-list-snapshot.json` keeps `2.3.1` in its `sdkVersion` metadata,
   which its check does not compare.
 - **The README `### Releasing` section** gains the main rule, the merge before the tag, and the `verify` step.
 

@@ -280,6 +280,41 @@ deferred: []
 - **DW-665:** Given the story commit, when each package is packed, then its tarball holds `CHANGELOG.md`, whose first `## ` is `## 1.0.0`.
 - **DW-637:** Given the bump, when the epic-43 wire suites run, then every frozen golden is byte-identical. The pins read 2.4.0, and the lockfile resolves `server`, `client` and `core` at 2.4.0 alone. The fallback rule applies otherwise.
 
+### Review Findings
+
+Code review 2026-11-20, frozen diff `fe7cae7..729746b` (generated version-step output excluded from line review, its results checked). Tier `full-opus`; four layers ran and all delivered (Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor). 23 layer rows, 10 entries after grouping: high 0, medium 1, low 9. Patched 8, ledgered terminal 2 (DW-700, DW-701), rejected 13.
+
+- [x] [Review][Patch] [med] A test row depends on the host's temp path: "no next steps after a failure" asserted `not.toContain("claude")` over a log that holds the kept directory's absolute path, so a TMPDIR containing `claude` (this harness's scratch area) turned it red with no defect (Rule 19 hermeticity). Shown red with `TMPDIR=<scratch>/claude-tmp/`, green after: the assertion now targets the next-steps lines themselves. fix-risk low (test only) [packages/iris-mcp-all/src/__tests__/release-smoke-prebuilt.test.ts:160] (verification-gap+edge-case-hunter)
+- [x] [Review][Patch] [low] The verify row "the cleanup registered for a signal removes the directory" only counted the registration and ran it after `finally` had already removed the directory; a no-op registration stayed green. The row now runs a real `createCleanups()` from inside the server start and asserts the directory is gone at that moment. fix-risk low [packages/iris-mcp-all/src/__tests__/release-script.test.ts:1877] (verification-gap)
+- [x] [Review][Patch] [low] `--keep` spelled in another letter case on a case-insensitive volume (macOS APFS) passed the inside-the-repository check: `keepDirProblems('/USERS/jbrandt/git/IRIS-execute-mcp-v2/kept', repo)` returned `[]`. `realPathOf` now uses `realpathSync.native`, which returns the volume's own spelling; new row, skipped on a case-sensitive volume. fix-risk low [scripts/ci-package-smoke.mjs:181] (edge-case-hunter)
+- [x] [Review][Patch] [low] The second half of the QA row "the comparison can fail" filtered `validate:prompts` out of a local array and asserted the result differed, which cannot fail; removed and the title narrowed to the half that can. fix-risk low [packages/iris-mcp-all/src/__tests__/story-42-6-qa-gate-verify.test.ts:269] (blind-hunter)
+- [x] [Review][Patch] [low] `VERIFY_PROTOCOL = '2025-11-25'` was a third copy of the wire driver's `WIRE_ERA` (Rule 2); `verify` already loads that module, so it now asks for `WIRE_ERA`, and the two wire fakes export it. fix-risk low [scripts/release.mjs:1161] (blind-hunter)
+- [x] [Review][Patch] [low] The root `1.0.0` section cited `fixtures/tools-list-snapshot.json`, a path that does not exist at the root; now `packages/iris-mcp-all/src/__tests__/fixtures/tools-list-snapshot.json`. The snapshot's own `sdkVersion: "2.3.1"` stays (protected file, a recorded residual risk). fix-risk low [CHANGELOG.md:39] (blind-hunter)
+- [x] [Review][Patch] [low] `--keep` was documented only in the root CHANGELOG; the script's own USE block and contract item 5 now name it (the point of use; the README was not touched). fix-risk low [scripts/ci-package-smoke.mjs:4] (blind-hunter)
+- [x] [Review][Patch] [low] The `main` refusal row passed `REPO_ROOT/keep-test-project` and only asserted it was not created, so a broken refusal would leave a full install inside the repository; the row's `finally` now removes that path. fix-risk low [packages/iris-mcp-all/src/__tests__/ci-package-smoke.test.ts:230] (blind-hunter)
+- [x] [Review][Defer] [low] `compareUrl` does not percent-encode the sha (QA's open item) — closed `wontfix-theoretical` as DW-700: GITHUB_SHA is set by the runner (40 hex) and no step or tag push can change it, and an odd value would still fail at the `head_sha` runs read. Confirmed unreachable. [scripts/lib/release-core.mjs compareUrl] (blind-hunter)
+- [x] [Review][Defer] [low] `verify` checks npm only; when 42.7/42.8 enable the vsix, Open VSX or IPM channels its summary will say nothing about them — closed `wontfix-accepted` as DW-701, `reopen_if` a non-npm channel is enabled while verify still reads npm alone. v1.0.0 is npm-only (decision #77). [scripts/release.mjs runVerify] (blind-hunter)
+
+**For the lead (checklist text, not code; not edited here):**
+- A2 and B5 quote report lines the code does not print. The real dry-run line is `ci-gate: commit <sha> is not on main (compare: ahead); a tag run stops here`, and the on-main line is `ci-gate: commit <sha> is on main (compare: identical)`. A3's refusal text matches the code. (acceptance-auditor)
+- "What the owner must provide, At A4" still asks for a container authorization that decision #88 says is already covered. (acceptance-auditor; pre-existing text)
+- On the decision #75 fallback path, B7's `verify` exits 1 for good, naming exactly the packages published without provenance; record that output as the AD-29 exception rather than expecting exit 0. (acceptance-auditor)
+
+**Rejected:**
+- `false` Blind: "parity is red when prepare would run a root check CI does not" cannot fail — it can: it goes red if `ROOT_CHECK_SCRIPT` or `releaseCheckScripts` stops selecting a new `check:` name, which is the half of the parity it states.
+- `false` Blind: `ROOT_CHECK_SCRIPT` shares only half the rule with `ci-workflow.test.ts` (hook filters differ) — any divergence between what `prepare` selects and CI's root gates turns the parity row red, so no caller can drift silently.
+- `low` Blind+Edge: `verify` cannot start `npx` on Windows — every child of `release.mjs` (`npm`, `docker`, `pnpm`) spawns without a shell: the release runs on the ubuntu runner and the lead's macOS; a fix adds platform branches.
+- `low` Blind: `verifyEnv` drops `npm_config_*proxy`/`cafile` and the temporary HOME hides `~/.npmrc` — fails closed (a red run with a network error, never a false pass), and the lead's network sets no npm proxy.
+- `by-design` Blind: `tools-list-snapshot.json` keeps `sdkVersion: "2.3.1"` — the spec forbids regenerating the protected file and records it as a residual risk.
+- `low` Blind: "before the wait, so a refused tag asks for no approval" is a loose causal — the wording mirrors AD-29 in the spine; the claim itself (no approval) is true.
+- `low` Edge: an absent `--keep` path under a regular file is not refused with exit 2 — it fails later with an error; unlikely, and the fix adds a branch.
+- `low` Edge: SIGTERM to `verify` alone can orphan the `npx` child — adjudicated in the implement review (Gap 6, reopen_if recorded); Ctrl-C reaches the whole process group.
+- `false` Edge: a server that ignores SIGTERM would hang `wire.close()` — `close` ends stdin and kills; the same close ends every golden and smoke run, and the servers exit on either.
+- `by-design` Edge: `main` force-pushed during the CI wait — Design Notes "No re-check in `publish`"; the spine rule is "a commit `main` contains" at the gate.
+- `low` Auditor: A2/B5 quote lines the code does not print — the fix is the lead checklist's text (listed above for the lead).
+- `low` Auditor: the A4 authorization contradiction — pre-existing spec text (listed above).
+- `low` Auditor: B7 has no expected result on the fallback path (listed above).
+
 ## Spec Change Log
 
 ## Review Triage Log
@@ -604,6 +639,9 @@ Every test added or changed passes on a fresh environment, in either order, and 
 - mutation: the move literal changed in the root section (`...c76` to `...c77`) -> `changelog-bootstrap-move.test.ts` and `story-42-6-doc-claims.test.ts` (2 red).
 - mutation (review pass): `deps.cleanups?.add(remove)` removed from `runVerify` -> the `release-script.test.ts` verify row "the lines are appended ... the cleanup registered for a signal" (1 red).
 - mutation (review pass): `verifyEnv` no longer drops `NPM_CONFIG_*` and `NODE_AUTH_TOKEN` -> the `release-script.test.ts` verify row "starts npx -y @iris-mcp/dev@1 in a temporary HOME ..." (1 red).
+- mutation (code review): `deps.cleanups?.add(remove)` changed to `deps.cleanups?.add(() => {})` -> the `release-script.test.ts` verify row "... the cleanup registered for a signal removes the directory" (1 red; before the review patch this mutation stayed green).
+- mutation (code review): `realpathSync.native(current)` back to `realpathSync(current)` in `realPathOf` -> `ci-package-smoke.test.ts` "on a case-insensitive volume, the repository spelled in other letter case is still the repository" (1 red).
+- red observed (code review, hermeticity): the unpatched "no next steps after a failure" row of `release-smoke-prebuilt.test.ts` under `TMPDIR=<scratch>/claude-tmp/` -> 1 red with no defect; green under the same TMPDIR after the patch.
 - Not mutated: the doc-claims rows for the README (their literals are the README's own text); the SDK-fallback path (not taken).
 - Test files added by the QA stage (QA): `packages/iris-mcp-all/src/__tests__/story-42-6-qa-gate-verify.test.ts` and `packages/iris-mcp-all/src/__tests__/story-42-6-qa-keep-process.test.ts`; their rows and mutations are in `## QA`.
 

@@ -1158,8 +1158,7 @@ async function publishIpm(detail, { dir, env, deps, cleanups, version, sha, quot
 const VERIFY_NPX_ARGS = Object.freeze(['-y', '@iris-mcp/dev@1']);
 const VERIFY_MAJOR = '1';
 
-/** The protocol revision `verify` asks the server for, and the name it reports. */
-const VERIFY_PROTOCOL = '2025-11-25';
+/** The client name `verify` reports; it asks for the wire driver's own protocol revision (`WIRE_ERA`). */
 const VERIFY_CLIENT = 'release-verify';
 
 /** The environment of `verify`'s children: the caller's, with no secret, IRIS_*, MCP_* or npm_config_* variable and no npm auth token, and with an empty home and cache. */
@@ -1221,9 +1220,9 @@ async function runVerify({ version, env }, deps) {
     const spec = `npx ${VERIFY_NPX_ARGS.join(' ')}`;
     let wire;
     try {
-      const { openRawWire, handshake, CLOSED_PORT_ENV } = await deps.loadWire();
+      const { openRawWire, handshake, CLOSED_PORT_ENV, WIRE_ERA } = await deps.loadWire();
       wire = openRawWire({ command: 'npx', args: [...VERIFY_NPX_ARGS], cwd, env: { ...childEnvironment, ...CLOSED_PORT_ENV }, timeoutMs: 240_000 });
-      const initialized = await handshake(wire, VERIFY_PROTOCOL, VERIFY_CLIENT);
+      const initialized = await handshake(wire, WIRE_ERA, VERIFY_CLIENT);
       const served = initialized.message?.result?.serverInfo?.version;
       if (served === version) {
         say(`${spec}: ok, initialize answered serverInfo.version ${served}`);

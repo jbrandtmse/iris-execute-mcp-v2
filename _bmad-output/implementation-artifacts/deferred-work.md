@@ -3898,3 +3898,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-5-release-workflow.md | severity: low | fix-risk: low | footprint: in-story
 - evidence: the spec freezes every ci.yml assertion, so the release check carries its own wider copy (flags between tool and verb)
 - 2026-11-20T21:58:32Z status=wontfix-accepted owner=42-5-release-workflow by=cr note=reopen_if=a verb with flags before it (pnpm -r publish) lands in ci.yml and ci-workflow.test.ts stays green
+
+### DW-700: compareUrl puts GITHUB_SHA into the compare path without percent-encoding, unlike the runs URL beside it (encodeURIComponent)
+- source: spec-42-6-tarball-smoke-and-1-0-0-publish.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: scripts/lib/release-core.mjs compareUrl; QA 42.6 listed it as deferred. GITHUB_SHA is set by the runner (40 hex) and cannot be set by a step or a tag push; an odd value would still fail at the head_sha runs read.
+- 2026-11-21T02:57:09Z status=wontfix-theoretical owner=42-6-tarball-smoke-and-1-0-0-publish by=cr note=real if the sha ever comes from a workflow_dispatch input or another caller-supplied value
+
+### DW-701: release.mjs verify checks the npm channel only; once 42.7/42.8 enable vsix, Open VSX or IPM, its all-pass summary says nothing about them
+- source: spec-42-6-tarball-smoke-and-1-0-0-publish.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: scripts/release.mjs runVerify walks NPM_PUBLISH_ORDER only; RELEASE_CHANNELS gains marketplace channels in 42.7 and ipm in 42.8. v1.0.0 is npm-only (decision #77), so nothing is misreported today.
+- 2026-11-21T02:57:09Z status=wontfix-accepted owner=42-6-tarball-smoke-and-1-0-0-publish by=cr note=reopen_if=42.7 or 42.8 enables a non-npm channel and release.mjs verify still reads npm alone

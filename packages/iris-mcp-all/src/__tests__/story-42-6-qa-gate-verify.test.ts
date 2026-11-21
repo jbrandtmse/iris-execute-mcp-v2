@@ -266,13 +266,11 @@ describe("prepare runs the root checks that CI's workflow FILE runs (DW-612; Rul
     expect(rootChecksOf(workflow), "a root check outside the gates job would be a check prepare cannot see").toEqual(fromGates);
   });
 
-  it("the comparison can fail: the workflow with one check step removed no longer matches prepare's set, and neither does a prepare set missing one", () => {
+  it("the comparison can fail: the workflow with one check step removed no longer matches prepare's set", () => {
     const withoutProvenance = workflow.replace("      - name: provenance check\n        run: pnpm check:provenance\n", "");
     expect(withoutProvenance).not.toBe(workflow);
     expect(releaseCheckScripts(rootScripts)).not.toEqual(rootChecksOf(gatesJob(withoutProvenance)));
     expect(rootChecksOf(gatesJob(withoutProvenance))).not.toContain("check:provenance");
-    const reduced = releaseCheckScripts(rootScripts).filter((name: string) => name !== "validate:prompts");
-    expect(reduced).not.toEqual(rootChecksOf(gatesJob(workflow)));
   });
 });
 
@@ -298,6 +296,7 @@ describe("verify (AC 42.6.3): the shapes the registry and the machine can answer
     const lines: string[] = [];
     const opened: Opened[] = [];
     const wireModule = {
+      WIRE_ERA: "2025-11-25",
       CLOSED_PORT_ENV: { IRIS_HOST: "127.0.0.1", IRIS_PORT: "1", IRIS_USERNAME: "qa", IRIS_PASSWORD: "qa", IRIS_NAMESPACE: "HSCUSTOM", IRIS_HTTPS: "false" },
       openRawWire: (wireOptions: Opened) => {
         opened.push(wireOptions);

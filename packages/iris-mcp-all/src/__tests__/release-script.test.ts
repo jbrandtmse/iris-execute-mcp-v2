@@ -1743,6 +1743,7 @@ describe("verify: the registry after a publish, read-only (AC 42.6.3)", () => {
     const lines: string[] = [];
     const seen: WireSeen = { opened: [], handshakes: [], closed: 0 };
     const wireModule = {
+      WIRE_ERA: "2025-11-25",
       CLOSED_PORT_ENV: { IRIS_HOST: "127.0.0.1", IRIS_PORT: "1", IRIS_USERNAME: "qa", IRIS_PASSWORD: "qa", IRIS_NAMESPACE: "HSCUSTOM", IRIS_HTTPS: "false" },
       openRawWire: (options: { command: string; args: string[]; cwd: string; env: Record<string, string> }) => {
         seen.opened.push({ ...options, existed: [options.cwd, options.env["HOME"], options.env["npm_config_cache"]].every((entry) => typeof entry === "string" && existsSync(entry)) });
@@ -1877,12 +1878,26 @@ describe("verify: the registry after a publish, read-only (AC 42.6.3)", () => {
   it("the lines are appended to GITHUB_STEP_SUMMARY with the exit code, and the cleanup registered for a signal removes the directory", async () => {
     const world = newVerifyWorld();
     const summary = path.join(world.root, "summary.md");
-    const registered: Array<() => void> = [];
-    const cleanups = { add: (cleanup: () => void) => { registered.push(cleanup); }, run: () => undefined };
-    expect(await world.run("1.0.0", { GITHUB_STEP_SUMMARY: summary }, { cleanups })).toBe(0);
+    expect(await world.run("1.0.0", { GITHUB_STEP_SUMMARY: summary })).toBe(0);
     expect(readFileSync(summary, "utf8")).toMatch(/^### verify \(exit 0\)\n[\s\S]*@iris-mcp\/all@1\.0\.0: ok/);
-    expect(registered, "the temporary directory's removal is registered for a signal").toHaveLength(1);
-    expect(() => registered[0](), "running the registered cleanup again after the directory is gone does not throw").not.toThrow();
+
+    // A signal while the server starts: the handlers run the cleanups, which must empty the temporary directory there and then.
+    const cleanups = createCleanups();
+    const atSignal: { before?: string[]; after?: string[] } = {};
+    const signalled = {
+      WIRE_ERA: "2025-11-25",
+      CLOSED_PORT_ENV: {},
+      openRawWire: () => {
+        atSignal.before = readdirSync(world.observed);
+        cleanups.run();
+        atSignal.after = readdirSync(world.observed);
+        return { close: async () => undefined };
+      },
+      handshake: async () => ({ line: "{}", message: { result: { serverInfo: { version: "1.0.0" } } } }),
+    };
+    await world.run("1.0.0", {}, { cleanups, loadWire: async () => signalled });
+    expect(atSignal.before, "verify's temporary directory exists while the server starts").toHaveLength(1);
+    expect(atSignal.after, "the cleanup registered for a signal removed it").toEqual([]);
   });
 
   it("as a real process: no --version and a major other than 1 exit 2; today's registry (stand-in npm E404, stand-in npx failing) exits 1 with no directory left", async () => {

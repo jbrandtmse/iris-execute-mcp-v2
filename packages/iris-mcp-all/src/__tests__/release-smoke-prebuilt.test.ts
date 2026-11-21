@@ -157,7 +157,8 @@ describe("smokePackages({ keep }) over a synthetic repository (Story 42.6, AC 42
     expect(log).toContain(`${keep} is kept for inspection.`);
     expect(existsSync(path.join(keep, "node_modules", "@iris-mcp"))).toBe(true);
     expect(existsSync(path.join(keep, ".mcp.json"))).toBe(true);
-    expect(log, "no next steps after a failure").not.toContain("claude");
+    expect(log, "no next steps after a failure").not.toMatch(/^ {2}claude$/m);
+    expect(log).not.toContain("Next, with an IRIS to call");
   }, 120_000);
 
   it("a refused directory is exit 2 before anything is packed, and is left as it was", async () => {

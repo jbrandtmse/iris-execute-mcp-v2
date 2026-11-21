@@ -211,6 +211,16 @@ describe("--keep <dir>: which directories the smoke accepts (AC 42.6.1)", () => 
     expect(keepDirProblems(dangling, repo)).toEqual([expect.stringContaining("is not an empty directory")]);
   });
 
+  it("on a case-insensitive volume, the repository spelled in other letter case is still the repository", (context) => {
+    const root = scratch();
+    const repo = path.join(root, "repo");
+    mkdirSync(repo);
+    const respelled = path.join(root, "REPO");
+    if (!existsSync(respelled)) context.skip();
+    expect(keepDirProblems(path.join(respelled, "project"), repo)).toEqual([expect.stringContaining("is inside the repository")]);
+    expect(keepDirProblems(respelled, repo)).toEqual([expect.stringContaining("is inside the repository")]);
+  });
+
   it("a sibling whose name merely starts with the repository's is outside it", () => {
     const root = scratch();
     mkdirSync(path.join(root, "repo"));
@@ -234,6 +244,7 @@ describe("--keep <dir>: which directories the smoke accepts (AC 42.6.1)", () => 
       }
     } finally {
       spy.mockRestore();
+      rmSync(path.join(REPO_ROOT, "keep-test-project"), { recursive: true, force: true });
     }
     const text = written.join("");
     expect(text).toContain("is not an empty directory");

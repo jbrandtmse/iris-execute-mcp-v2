@@ -4,6 +4,10 @@
 // USE
 //   pnpm build && node scripts/ci-package-smoke.mjs
 //   CI runs it as the `package` job, which starts only after the `gates` and `throwaway` jobs are green.
+//   pnpm build && node scripts/ci-package-smoke.mjs --keep <dir>
+//   The same smoke, which installs into <dir> (absent or empty, outside the repository), keeps it, and writes <dir>/.mcp.json
+//   for a real client: the five servers through `npx --no`, with IRIS_HOST, IRIS_PORT, IRIS_USERNAME, IRIS_PASSWORD and
+//   IRIS_NAMESPACE taken from the client's environment. A refused <dir> or any other argument is exit 2.
 //
 // CONTRACT
 //   1. `pnpm pack` packs every non-private `packages/*` package with its lifecycle scripts on, the real path. A package whose
@@ -17,7 +21,7 @@
 //      the committed tools-list snapshot's.
 //   4. Each CLI bin (`iris-mcp-clients`, `iris-mcp-credentials`, `iris-mcp-governance`) must print `Usage: <bin>` for `--help` and
 //      exit 0, and `iris-mcp-clients detect --json` must exit 0 with `HOME` set to an empty temporary directory.
-//   5. The temporary directories are removed. The exit code is 0 when every check passed and 1 otherwise, with each failing bin named.
+//   5. The temporary directories are removed (with `--keep`, <dir> is not). The exit code is 0 when every check passed and 1 otherwise, with each failing bin named.
 //
 // IMPORT
 //   Importing this module runs nothing. The pure helpers (`publishablePackages`, `binsOf`, `installManifest`, `expectedToolCount`,
@@ -177,7 +181,10 @@ function checkCli(bin, installDir, env) {
 /** The IRIS connection variables a kept project's `.mcp.json` hands to each server, as `${VAR}` references. */
 export const KEEP_IRIS_VARIABLES = Object.freeze(['IRIS_HOST', 'IRIS_PORT', 'IRIS_USERNAME', 'IRIS_PASSWORD', 'IRIS_NAMESPACE']);
 
-/** The nearest existing ancestor of `target`, resolved through symbolic links, with the rest of the path put back. */
+/**
+ * The nearest existing ancestor of `target`, resolved through symbolic links and to the file system's own letter case (a
+ * case-insensitive volume accepts any spelling), with the rest of the path put back.
+ */
 function realPathOf(target) {
   const missing = [];
   let current = path.resolve(target);
@@ -185,7 +192,7 @@ function realPathOf(target) {
     missing.unshift(path.basename(current));
     current = path.dirname(current);
   }
-  return path.join(realpathSync(current), ...missing);
+  return path.join(realpathSync.native(current), ...missing);
 }
 
 /**
