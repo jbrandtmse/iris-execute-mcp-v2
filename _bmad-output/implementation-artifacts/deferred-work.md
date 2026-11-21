@@ -3913,6 +3913,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-7-vs-code-extension-publish.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: extension.ts clients cwd falls back to os.homedir() (DW-663, decision #98); client-config adapters.ts:124-135 Cursor user=~/.cursor/mcp.json, project=.cursor/mcp.json; clients.ts:165 has no project-dir==home guard
 - 2026-11-21T06:43:42Z status=decision-pending owner=burndown by=cr note=product call: refuse/flag project scope when the project dir is home, or document the alias
+- 2026-11-21T06:50:16Z status=routed owner=42-9-install-docs-and-client-re-certification by=lead note=decision_100:refuse_project-scope_write_when_project_dir_resolves_to_home(clear_message:open_a_folder_or_use_user_scope);regression_test_on_Cursor_and_every_adapter_whose_project_and_user_paths_can_alias
 
 ### DW-703: The first Open VSX publish with OVSX_PAT unset falls back to --trusted-publishing, which cannot work for a not-yet-existing extension, and fails after npm and the Marketplace already published
 - source: spec-42-7-vs-code-extension-publish.md | severity: low | fix-risk: med | footprint: in-story
