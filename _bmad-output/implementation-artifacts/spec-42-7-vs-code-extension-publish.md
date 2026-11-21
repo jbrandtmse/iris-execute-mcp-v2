@@ -618,3 +618,54 @@ Blocking condition: none
 - The macOS and Windows legs of the `launcher` job are unproven until the lead's A1 and A1b.
 - The spec says the story stays `in-progress` until the lead's C-phase evidence; this run records `done` per its dispatch contract, so the lead holds it open as 42.6 was.
 - Rule #55 slips by the implement subagent and by this stage: a few small script edits and appends went through a shell heredoc or script instead of the file tools; every file was verified to be text and the content landed.
+
+## QA
+
+QA stage (2026-11-20), against build commit `62c34ec`. Method: a gap analysis of the matrix and the five priority areas, then a survivor hunt (about 22 mutations on the real tree, each restored with `git checkout --` and the tree compared byte-for-byte). Mutations that the existing suite already turned red were left as the implement stage recorded them; the ones below are the survivors found, the tests added for them, and the extra mutations QA demonstrated. No file was created: every test went into an existing file (the `release-script.test.ts` file already carries inline `(QA, ...)` describes). Oracles read read-only on 2026-11-20: Open VSX and Marketplace statuses for `intersystems-community.servermanager` 3.10.2 (200 both) and 0.0.1 (404 both), `iris-mcp` namespace 404, `iris-mcp.iris-mcp-launcher@1.0.0` 404 on both (all as the fixtures assume); the installed vsce 4.1.1 `log.done` was run under and outside `GITHUB_ACTIONS` and prints the skip line to stdout, ending the line, exactly as `skippedDuplicate` reads it; ovsx 1.4.0 `console.log`s its line to stdout (source).
+
+**Tests added (QA)**
+- `packages/iris-mcp-all/src/__tests__/release-script.test.ts`, new `describe("Publish: the extension stores, QA gaps ...")`, 5 tests:
+  - a store request is a plain GET with no body, with exactly the headers `Range`+`User-Agent` (Marketplace) or `Accept`+`User-Agent` (Open VSX), in a release and a rehearsal, and no secret in any URL or header though every secret is in the job's environment;
+  - a manifest with no `publisher` fails an enabled store channel (`failed (the publisher is missing)`) and is `not ready` in a rehearsal, and the stores are not asked;
+  - a store CLI that cannot start (the `runCaptured` shape: `status: null`, `error`, no output) is `failed` with the error's own words, redacted, and what follows is `not attempted`;
+  - a rehearsal stops at the first enabled store that is not ready: Open VSX is `not attempted` and its namespace and version are not read.
+- `packages/iris-mcp-all/src/__tests__/release-script-fixtures.ts` (supporting): `FakeInit` gains `method`/`body`, and `FakeStores.requests` records `method` and `hasBody`.
+- `packages/iris-mcp-all/src/__tests__/release-version.test.ts`, 1 test: a copy of the extension's REAL `package-lock.json` and `package.json` is stamped in the two version fields of its own and nowhere else (the fixture lock is hand-written, npm decides the real field order).
+- `extensions/iris-mcp-launcher/src/__tests__/clientsActivationFlow.test.ts`, 2 tests: an EMPTY `workspaceFolders` array is no folder (home), and the folder is read when a command runs, not at activation (`recordedCwds` gains an `afterActivation` hook).
+- `extensions/iris-mcp-launcher/src/__tests__/governanceActivationFlow.test.ts`, 1 test: with a workspace folder open the governance CLI still runs in home, never the folder (the existing DW-663 row was folded into a `governanceCwds(folder?)` helper, assertions unchanged).
+
+**Mutations demonstrated by QA (`mutation: <what> -> <red test>`; each restored, tree identical)**
+- mutation: `vsixReadiness` without the `typeof channel.publisher !== 'string'` check -> the two new missing-publisher rows red (this one SURVIVED the whole implement-stage suite before QA).
+- mutation: `uploaded.error?.message` dropped from the upload-failure detail -> the new `cannot start` row red (survived before).
+- mutation: an `Authorization` header added to the Open VSX namespace GET -> the new plain-GET row red (survived before: only the version GET's headers were pinned).
+- mutation: `readStatus` sends `method: "HEAD"` -> the new plain-GET row red (survived before: the fakes never recorded the method).
+- mutation: the store CLI `cwd` of `runChannel` set to the repo root -> `Publish channels ... all four enabled` red.
+- mutation: `OVSX_PAT` removed from the redaction list -> `a failing store CLI that echoes a secret` red.
+- mutation: `npmEnv = childEnv(env, oidcEnv(env))` (the OIDC variables leak into `npm view`/`--version`) -> `the job's OIDC request variables reach the three publish CLIs ... and no other child` and `no other child holds OVSX_PAT or VSCE_PAT` red.
+- mutation: `OVSX_PAT` passed to `vsce` as well as `ovsx` -> three `Secret containment` rows red.
+- mutation: the two store channels swapped in `RELEASE_CHANNELS` -> 14+ rows red (the order npm, Marketplace, Open VSX, IPM; the order test, the report rows and the OIDC row).
+- mutation: the extension lock's top-level `version` key moved after `packages` (a reordering npm could produce) in the REAL lock -> the new real-lock stamp row red, while all 30 other `release-version.test.ts` rows stayed green.
+- mutation: a new tracked non-private `package.json` (added to a temporary copy of the index through `GIT_INDEX_FILE`, so the real index never moved) -> `enumerates the root, the eight packages and the extension` and `the manifests that are not private are exactly the eight packages` red (DW-389: "a new non-private manifest appears").
+- mutation: `"private": true` removed from the extension `package.json` -> the same two package-manifests rows red (re-demonstrated by QA).
+- mutation: the governance spawn `cwd` follows `workspaceFolders[0]` -> the new governance folder row red (the older row, with no folder open, stayed green).
+- mutation: the clients `cwd` expression `workspaceFolders ? workspaceFolders[0]!.uri.fsPath : os.homedir()` (breaks on `[]`) -> the new empty-array row red alone.
+- mutation: the clients `cwd` cached at first use -> the new late-folder row red (plus the older DW-663 rows, polluted by the process-wide cache).
+- mutation: the Windows leg dropped from the `launcher` matrix of the REAL `ci.yml` -> nine `ci-workflow.test.ts` rows red; the whole-suite step narrowed to one file in the real `ci.yml` -> six rows red; a runner dropped from the code-declared `LAUNCHER_RUNNERS` in `ci-checks.mjs` -> seven rows red.
+- mutation: `OVSX_PAT` added to the rehearse job's store CLI install step env in the REAL `release.yml` -> five `release-workflow.test.ts` rows red.
+
+**First-run failures:** two of my own new tests were wrong about the design, not the code: a rehearsal STOPS at the first enabled store that is not ready (Open VSX reads `not attempted`, as in a release), so I had expected a second `not ready` line that the script, by design, never prints; both tests were rewritten to pin the stopping behavior.
+
+**Priorities, as found**
+1. Store channels: the implement stage's tests already pinned the lookup outcomes (200/206/404/403/500/301/network/stall), fail-closed, per-CLI containment, the order and the readiness line of a disabled channel; QA closed the four survivors above.
+2. Lockstep: the three lockstep fields, the heading refusal (release vs dry) and the rename were already red-on-mutation; QA added the real-lock oracle.
+3. DW-389: covered; QA added the new-manifest mutation.
+4. DW-663: the real `activate()` path was covered for one folder and none; QA added the empty array, the late folder and governance-with-folder.
+5. `launcher` CI job: covered for the code roster, `ci.yml` and every OS leg; QA re-demonstrated the mutations on the real files.
+
+**Verification (after the QA edits, unarmed):** `release-script`, `release-version`, `release-core` and `release-prepare` (418 passed); the launcher suite (31 files, 451 passed, 3 skipped, up from 448); launcher `type-check` clean. `package-manifests`, `ci-workflow` and `release-workflow` ran green under their baselines before each mutation.
+
+**Defects and findings (none blocking)**
+- deferred: the store lookup trusts any 200/206 without looking at what came back. The real Marketplace answer is `application/vsix` (a zip) and the real Open VSX answer is JSON that names the version; a CDN, proxy or captive-portal 200 with an HTML body would read as `published`, and a release would skip the upload with exit 0 and the row `already published`. Suggested fix, to be probe-first (#16): read the content type (Marketplace `application/vsix`, Open VSX JSON) and treat a 200 with another type as `unknown`. Not trivial (the fakes need real content types, and `fakeFetch` always answers `application/json`), so it is recorded, not fixed. reopen_if: the first store release reads `already published` for a version that is not on the store.
+- deferred (low): a store CLI killed by a signal or by the 30-minute `runCaptured` timeout returns `status: null` with no `error` and no output, so the row reads `failed ()` with an empty detail; the exit code is still 1 and the status is `failed`. A fallback such as `exited without a status` would read better.
+- note: the fake `fetch` answers a 301 as a final status; the real `fetch` follows redirects, so a `(HTTP 301)` cause can only come from a redirect with no usable `Location`. The branch is fail-closed either way and harmless.
+- containers used: none. Shared IRIS: not touched. No store, registry or GitHub call other than public read-only GETs (curl) to `open-vsx.org` and `marketplace.visualstudio.com`.

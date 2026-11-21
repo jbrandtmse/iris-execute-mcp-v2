@@ -269,9 +269,10 @@ describe("DW-663: the working directory of the clients CLI spawn (real extension
   }
 
   /** The working directories the stub CLI recorded while the real command opened the panel, normalized for comparison. */
-  async function recordedCwds(log: string): Promise<string[]> {
+  async function recordedCwds(log: string, afterActivation: () => void = () => undefined): Promise<string[]> {
     activate(fakeContext(memento.memento));
     await flushEditor();
+    afterActivation();
     await theCommand()();
     const lines = (): string[] => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter((line) => line !== "") : []);
     await waitFor(() => lines().length >= 1, "the stub clients CLI to record its working directory");
@@ -309,6 +310,45 @@ describe("DW-663: the working directory of the clients CLI spawn (real extension
       expect(cwds).toEqual(cwds.map(() => realpathSync.native(first)));
     } finally {
       for (const dir of [repo, first, second]) rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
+
+  it("an EMPTY folder list (the other shape the API may answer, not only undefined) is no folder: the spawn runs in the user's home directory (QA)", async () => {
+    const { repo, log } = stubRepo();
+    const home = mkdtempSync(path.join(tmpdir(), "clients-cwd-empty-home-"));
+    const prior = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      mockState.configStore.set(`${CONFIG}.developmentRepoPath`, repo);
+      mockState.workspaceFolders = [];
+      const cwds = await recordedCwds(log);
+      expect(cwds.length).toBeGreaterThan(0);
+      expect(cwds).toEqual(cwds.map(() => realpathSync.native(home)));
+    } finally {
+      restoreEnv(prior);
+      for (const dir of [repo, home]) rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
+
+  it("the folder is read when a command runs, not when the extension activates: a folder opened after activation is the cwd of the next spawn (QA)", async () => {
+    const { repo, log } = stubRepo();
+    const home = mkdtempSync(path.join(tmpdir(), "clients-cwd-late-home-"));
+    const folder = mkdtempSync(path.join(tmpdir(), "clients-cwd-late-folder-"));
+    const prior = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      mockState.configStore.set(`${CONFIG}.developmentRepoPath`, repo);
+      expect(mockState.workspaceFolders, "no folder at activation").toBeUndefined();
+      const cwds = await recordedCwds(log, () => {
+        mockState.workspaceFolders = [{ uri: Uri.file(folder), name: "late", index: 0 }];
+      });
+      expect(cwds.length).toBeGreaterThan(0);
+      expect(cwds).toEqual(cwds.map(() => realpathSync.native(folder)));
+    } finally {
+      restoreEnv(prior);
+      for (const dir of [repo, home, folder]) rmSync(dir, { recursive: true, force: true });
     }
   }, 60000);
 

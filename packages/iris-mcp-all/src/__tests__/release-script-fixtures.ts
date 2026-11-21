@@ -95,6 +95,9 @@ export function answerFor(github: FakeGithub, url: string, authorization = ""): 
 export interface FakeInit {
   headers?: Record<string, string>;
   signal?: unknown;
+  /** `fetch` sends a GET when it is not given. */
+  method?: string;
+  body?: unknown;
 }
 
 /** A `fetch` that answers from the fake API; any other host is refused, so no test reaches a network. */
@@ -147,8 +150,8 @@ export interface FakeStores {
   marketplace: FakeAnswer;
   openVsx: FakeAnswer;
   namespace: FakeAnswer;
-  /** Every request the stores were asked: its URL, its headers and whether the caller gave it a signal of its own. */
-  requests: Array<{ url: string; headers: Record<string, string>; signal: boolean }>;
+  /** Every request the stores were asked: its URL, its headers, whether the caller gave it a signal of its own, its method (`GET` when none was given) and whether it carried a body. */
+  requests: Array<{ url: string; headers: Record<string, string>; signal: boolean; method: string; hasBody: boolean }>;
 }
 
 /** Fake stores on which the extension is not published and the namespace exists. */
@@ -164,7 +167,7 @@ export function newFakeStores(): FakeStores {
 /** The answer of the fake stores for a URL, recorded in `requests`; `undefined` for a URL that is not a store's. */
 export function storeAnswerFor(stores: FakeStores, url: string, init?: FakeInit): FakeAnswer | undefined {
   const parsed = new URL(url);
-  const record = (): void => void stores.requests.push({ url, headers: { ...(init?.headers ?? {}) }, signal: init?.signal !== undefined });
+  const record = (): void => void stores.requests.push({ url, headers: { ...(init?.headers ?? {}) }, signal: init?.signal !== undefined, method: init?.method ?? "GET", hasBody: init?.body !== undefined });
   if (parsed.host === "marketplace.visualstudio.com") {
     record();
     return stores.marketplace;

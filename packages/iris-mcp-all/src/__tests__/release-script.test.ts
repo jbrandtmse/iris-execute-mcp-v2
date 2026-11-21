@@ -1665,6 +1665,80 @@ describe("Publish: the extension stores (Story 42.7)", () => {
   });
 });
 
+describe("Publish: the extension stores, QA gaps (Story 42.7, Rules #54, #59)", () => {
+  const OVSX_PAT = "ovsx-PAT-SECRET-0123456789";
+  const VSCE_PAT = "vsce-PAT-SECRET-0123456789";
+  const OIDC = { ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-request-SECRET-0123456789", ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.actions.example.invalid/x" };
+  const SECRET_ENV = { NPM_TOKEN: TOKEN, OVSX_PAT, VSCE_PAT, ...OIDC };
+  const reportOf = (world: PublishWorld): string => world.lines.join("\n");
+
+  /** Take the publisher out of both store entries of the manifest, as a manifest of an extension without one would read. */
+  function withoutPublisher(world: PublishWorld): void {
+    for (const channel of world.manifest.channels) if (channel["id"] === "vscode-marketplace" || channel["id"] === "open-vsx") delete channel["publisher"];
+    writeManifest(world.artifacts, world.manifest);
+  }
+
+  it("a store request is a plain GET with no body, the same few headers in a release and a rehearsal, and no secret anywhere in a URL or a header, though every secret is in the job's environment", async () => {
+    for (const dryRun of [false, true]) {
+      const world = newWorld();
+      expect(await world.run({ dryRun, env: SECRET_ENV }), `dryRun ${String(dryRun)}`).toBe(0);
+      expect(world.stores.requests, "the Marketplace, the Open VSX namespace and the Open VSX version").toHaveLength(3);
+      for (const request of world.stores.requests) {
+        expect(request.method, request.url).toBe("GET");
+        expect(request.hasBody, request.url).toBe(false);
+        expect(Object.keys(request.headers).sort(), request.url).toEqual(request.url.includes("marketplace") ? ["Range", "User-Agent"] : ["Accept", "User-Agent"]);
+      }
+      const wire = JSON.stringify(world.stores.requests);
+      for (const secret of [TOKEN, OVSX_PAT, VSCE_PAT, OIDC.ACTIONS_ID_TOKEN_REQUEST_TOKEN, GITHUB_TOKEN]) expect(wire, secret).not.toContain(secret);
+    }
+  });
+
+  it("a manifest that names no publisher fails an enabled store channel with `the publisher is missing`, and the stores are not asked about a name nobody owns", async () => {
+    const world = newWorld();
+    withoutPublisher(world);
+    expect(await world.run()).toBe(1);
+    expect(world.standIns.calls("vsce")).toEqual([]);
+    expect(world.standIns.calls("ovsx")).toEqual([]);
+    expect(world.stores.requests).toEqual([]);
+    expect(reportOf(world)).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: failed (the publisher is missing)");
+    expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
+  });
+
+  it("the same manifest in a rehearsal is `not ready (the publisher is missing)` at the Marketplace (Open VSX is not attempted), with no store read", async () => {
+    const world = newWorld();
+    withoutPublisher(world);
+    expect(await world.run({ dryRun: true })).toBe(1);
+    expect(world.stores.requests).toEqual([]);
+    expect(reportOf(world)).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: not ready (the publisher is missing)");
+    expect(reportOf(world), "the rehearsal stops at the first store that is not ready").toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
+  });
+
+  it("a store CLI that cannot start (the shape `runCaptured` returns: status null, the error, no output) is `failed` with the error's own words, and what follows is `not attempted`", async () => {
+    const world = newWorld();
+    const real = defaultDeps().run;
+    const run = ((argv: string[], options: unknown) =>
+      path.basename(argv[0] as string).startsWith("vsce") ? Promise.resolve({ status: null, stdout: "", stderr: "", error: new Error(`spawn ${argv[0]} ENOEXEC (token ${OVSX_PAT})`) }) : real(argv as never, options as never)) as typeof real;
+    expect(await world.run({ env: SECRET_ENV, deps: { run } })).toBe(1);
+    expect(world.standIns.calls("ovsx"), "nothing after the failure runs").toEqual([]);
+    const report = reportOf(world);
+    expect(report).toMatch(/vscode-marketplace\n {2}iris-mcp-launcher@1\.0\.0: failed \(spawn .*vsce ENOEXEC \(token \*\*\*\)\)/);
+    expect(report).not.toContain(OVSX_PAT);
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
+  });
+
+  it("a rehearsal stops at the first enabled store that is not ready: Open VSX is `not attempted`, and neither its namespace nor its version is read", async () => {
+    const world = newWorld();
+    world.stores.marketplace = { status: 500 };
+    expect(await world.run({ dryRun: true })).toBe(1);
+    const report = reportOf(world);
+    expect(report).toMatch(/vscode-marketplace\n {2}iris-mcp-launcher@1\.0\.0: not ready \(could not ask vscode-marketplace .*HTTP 500/);
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
+    expect(world.stores.requests.map((request) => request.url)).toEqual([`https://marketplace.visualstudio.com/_apis/public/gallery/publishers/iris-mcp/vsextensions/iris-mcp-launcher/1.0.0/vspackage`]);
+    expect(world.standIns.calls("vsce")).toEqual([]);
+    expect(world.standIns.calls("ovsx")).toEqual([]);
+  });
+});
+
 describe("The IPM channel (DW-689; Decision #76)", () => {
   const ipmWorld = (): PublishWorld => {
     const world = newWorld({ publisher: "acme" });

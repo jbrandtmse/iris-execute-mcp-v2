@@ -438,6 +438,33 @@ describe("the extension follows the shared version (Story 42.7, the lockstep pol
   });
 });
 
+describe("the extension follows the shared version: the REAL lock and manifest as the oracle (QA, Story 42.7, Rules #36, #54)", () => {
+  it("a copy of the extension's real package-lock.json and package.json is stamped in its two own version fields and nowhere else (the fixture lock is hand-written; npm decides the real order)", async () => {
+    const realLock = readFileSync(join(REPO_ROOT, "extensions/iris-mcp-launcher/package-lock.json"), "utf8");
+    const realManifest = readFileSync(join(REPO_ROOT, "extensions/iris-mcp-launcher/package.json"), "utf8");
+    const real = JSON.parse(realLock) as { version: string; packages: Record<string, { version?: string }> };
+    expect(Object.keys(real.packages).filter((key) => key !== "").length, "the real lock holds dependencies whose own `version` fields follow the root's").toBeGreaterThan(50);
+    const root = makeVersionFixture({ version: real.version });
+    writeFileSync(join(root, "extensions/iris-mcp-launcher/package-lock.json"), realLock);
+    writeFileSync(join(root, "extensions/iris-mcp-launcher/package.json"), realManifest);
+    commitFixture(root, "the real lock and manifest of the extension");
+    expect(await versionMain([], cleanEnv(), root, () => new Date("2026-11-20T12:00:00Z"))).toBe(0);
+    const shared = readReleaseFacts(root).sharedVersion as string;
+    expect(shared, "the version step moved the shared version").not.toBe(real.version);
+    const stamped = readFileSync(join(root, "extensions/iris-mcp-launcher/package-lock.json"), "utf8");
+    const parsed = JSON.parse(stamped) as { version: string; packages: Record<string, { version?: string }> };
+    expect(parsed.version).toBe(shared);
+    expect(parsed.packages[""]?.version).toBe(shared);
+    // Undo the two stamps and the lock is the real one again: no dependency's `version` field was touched.
+    parsed.version = real.version;
+    (parsed.packages[""] as { version?: string }).version = real.version;
+    expect(parsed).toEqual(real);
+    expect(stamped.split("\n").length, "no line was added or removed").toBe(realLock.split("\n").length);
+    expect((JSON.parse(readFileSync(join(root, "extensions/iris-mcp-launcher/package.json"), "utf8")) as { version: string }).version).toBe(shared);
+    expect(embeddedVersionProblems(readReleaseFacts(root))).toEqual([]);
+  }, 180_000);
+});
+
 describe("the root manifest wires the scripts", () => {
   it("`version` runs the version script and `release` the release script", () => {
     const scripts = (JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as { scripts: Record<string, string> }).scripts;

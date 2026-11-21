@@ -46,6 +46,7 @@ import {
   resetMockState,
   ConfigurationTarget,
   McpStdioServerDefinition,
+  Uri,
 } from "./vscodeMock.js";
 
 const CONFIG = "irisMcpLauncher";
@@ -274,7 +275,11 @@ describe("Story 32.2 QA — governance editor activation flow (real extension.ts
 });
 
 describe("DW-663: the working directory of the governance CLI spawn (real extension.ts, stub CLI in a temp repo)", () => {
-  it("the editor's CLI runs in the user's home directory, the directory the server definitions start in", async () => {
+  /**
+   * Open the editor through the real command with a stub governance CLI that records its own working directory, with HOME sandboxed to
+   * a temp directory, and return the directories it ran in and the sandboxed home. `folder` is what `workspace.workspaceFolders` holds.
+   */
+  async function governanceCwds(folder?: string): Promise<{ cwds: string[]; home: string }> {
     const repo = mkdtempSync(path.join(tmpdir(), "governance-cwd-repo-"));
     const home = mkdtempSync(path.join(tmpdir(), "governance-cwd-home-"));
     const cliDir = path.join(repo, "packages", "shared", "dist", "cli");
@@ -298,6 +303,7 @@ describe("DW-663: the working directory of the governance CLI spawn (real extens
     try {
       mockState.configStore.set(`${CONFIG}.developmentRepoPath`, repo);
       mockState.configStore.set(`${CONFIG}.governanceFile`, policy);
+      if (folder !== undefined) mockState.workspaceFolders = [{ uri: Uri.file(folder), name: "workspace", index: 0 }];
       activate(fakeContext());
       await flushEditor();
       await theCommand()();
@@ -312,14 +318,31 @@ describe("DW-663: the working directory of the governance CLI spawn (real extens
         .split("\n")
         .filter((line) => line !== "")
         .map((line) => realpathSync.native(line));
-      expect(cwds.length).toBeGreaterThan(0);
-      expect(cwds).toEqual(cwds.map(() => realpathSync.native(home)));
+      return { cwds, home: realpathSync.native(home) };
     } finally {
       for (const key of ["HOME", "USERPROFILE"] as const) {
         if (prior[key] === undefined) delete process.env[key];
         else process.env[key] = prior[key];
       }
       for (const dir of [repo, home]) rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("the editor's CLI runs in the user's home directory, the directory the server definitions start in", async () => {
+    const { cwds, home } = await governanceCwds();
+    expect(cwds.length).toBeGreaterThan(0);
+    expect(cwds).toEqual(cwds.map(() => home));
+  }, 120000);
+
+  it("a workspace folder being open changes nothing: the governance CLI still runs in the home directory, never the folder (QA; the clients CLI is the one that follows the folder)", async () => {
+    const folder = mkdtempSync(path.join(tmpdir(), "governance-cwd-folder-"));
+    try {
+      const { cwds, home } = await governanceCwds(folder);
+      expect(cwds.length).toBeGreaterThan(0);
+      expect(cwds).toEqual(cwds.map(() => home));
+      expect(cwds).not.toContain(realpathSync.native(folder));
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
     }
   }, 120000);
 });
