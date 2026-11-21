@@ -87,7 +87,7 @@ deferred: []
 | Store upload | release mode; lookup → absent; CLI exit 0 | `vscode-marketplace`: `iris-mcp-launcher@<v>: published (auth: oidc)`; then `open-vsx` the same (`auth: oidc`, or `auth: token` with `OVSX_PAT`) | — |
 | Already on a store | lookup → published (a rerun of the same tag) | `already published`; no CLI publish call | — |
 | Skip-duplicate race | lookup → absent; CLI exit 0, a stdout line ending `is already published. Skipping publish.` | `already published` | — |
-| Lookup unreadable | non-2xx other than 404, a network error, or a 30 s stall | `failed (could not ask <store> whether <name>@<v> is published …)`; no upload; what follows `not attempted` | fail closed, exit 1 |
+| Lookup unreadable | non-2xx other than 404, a network error, a 30 s stall, or a 200/206 that is not the store's own answer (wrong content type; Open VSX JSON whose namespace, name or version differ) — spec-gate amendment by the lead after review M1 | `failed (could not ask <store> whether <name>@<v> is published …)`; no upload; what follows `not attempted` | fail closed, exit 1 |
 | Upload fails | CLI exit non-zero | `failed (<last 4 lines, redacted>)`; what follows `not attempted` | exit 1 |
 | Open VSX namespace absent | GET `https://open-vsx.org/api/iris-mcp` → 404 | rehearse: `open-vsx: not ready: the Open VSX namespace iris-mcp does not exist …`; publish: `failed` before upload | dry run exit 1 |
 | Dry step ready | publisher not the placeholder, CLI installed, namespace present, lookup absent | rehearse `ready (would publish <name>@<v>)`; on lookup published, `ready (would be already published)` | — |
@@ -112,7 +112,7 @@ deferred: []
       - Open VSX: `https://open-vsx.org/api/<p>/<n>/<v>`;
       - Marketplace: `https://marketplace.visualstudio.com/_apis/public/gallery/publishers/<p>/vsextensions/<n>/<v>/vspackage`, read with `Range: bytes=0-0`; HEAD answers 405.
       - Probed read-only on 2026-11-20: `intersystems-community.servermanager` 3.10.2 → 200 on both, 0.0.1 → 404 on both.
-    - `storeOutcome(status)` → published / absent / unknown;
+    - `storeOutcome(response)` → published (only with the store's own evidence: Marketplace 200/206 `application/vsix`; Open VSX 200 `application/json` with matching namespace, name and version) / absent (404) / unknown (anything else) — amended after review M1;
     - `skippedDuplicate(stdout)`;
     - `extensionChangelogProblems(text, version)`.
   - The `releaseReport` and `skippedText` shapes are unchanged.
@@ -147,7 +147,7 @@ deferred: []
     2. pnpm setup;
     3. setup-node with the pnpm cache;
     4. `pnpm install --frozen-lockfile`;
-    5. `pnpm --filter @iris-mcp/client-config --filter @iris-mcp/shared build` (the real-CLI tests use both dists);
+    5. `pnpm build` (every package: the real-CLI tests need all five server dists; review H1 — a real-CLI test whose dist is missing fails under `CI=true`, re-review R1);
     6. in the launcher, `npm ci`;
     7. `npm run build`;
     8. `npx --no -- vitest run`.
@@ -223,7 +223,7 @@ deferred: []
 7. `scripts/release.mjs` -- secrets, lockstep facts and checks, the CHANGELOG-heading check, dry step, lookup, upload, auth detail, header -- AC 42.7.2; every matrix row.
 8. `scripts/lib/release-checks.mjs`, `.github/workflows/release.yml` -- the `npm ci --ignore-scripts` steps and `OVSX_PAT` -- AC 42.7.2.
 9. `scripts/release-version.mjs` -- stamp the extension, rename its heading, and update the next-steps text -- the lockstep policy (Orchestrator decision 4).
-10. `packages/iris-mcp-all/src/__tests__/release-*.test.ts`, `release-script-fixtures.ts`, `stand-in-clis.ts`, `story-38-7-doc-claims.test.ts` -- a test per matrix row (lookup outcomes from captured real statuses, Rule #36: 200/206 → published, 404 → absent, 403/500/stall → unknown); secret containment per child; a lockstep mismatch per file; heading release vs dry; the rename and stamp in `release-version`; the default-enabled channels -- AC 42.7.2.
+10. `packages/iris-mcp-all/src/__tests__/release-*.test.ts`, `release-script-fixtures.ts`, `stand-in-clis.ts`, `story-38-7-doc-claims.test.ts` -- a test per matrix row (lookup outcomes from captured real statuses, Rule #36: 200/206 with the store's own evidence (review M1) → published, 404 → absent, 403/500/stall → unknown); secret containment per child; a lockstep mismatch per file; heading release vs dry; the rename and stamp in `release-version`; the default-enabled channels -- AC 42.7.2.
 11. `extensions/iris-mcp-launcher/README.md`, `CHANGELOG.md`, root `README.md`, root `CHANGELOG.md` -- docs per the Code Map, with the default state of each channel (Rule #30/#43); new `packages/iris-mcp-all/src/__tests__/story-42-7-doc-claims.test.ts` pinning the channel table, the disclaimer, and the absence of "not yet published" in the extension README.
 
 **Acceptance Criteria:**
@@ -403,7 +403,7 @@ The lead wrote the spine drafts below: AD-29 (Pins, Versions, Channels), the Sta
     1. Create an Eclipse account with the GitHub Username field set to `jbrandtmse`.
     2. Sign in at open-vsx.org with GitHub, go to Settings, choose "Log in with Eclipse", and agree to the Publisher Agreement.
     3. Generate an access token under Settings → Access Tokens.
-    4. Run `npx ovsx create-namespace iris-mcp -p <token>`.
+    4. Run `OVSX_PAT=<token> npx ovsx create-namespace iris-mcp` (the token stays out of the command's arguments and the process list; review L3).
     5. Optional: claim namespace ownership for the verified badge.
 - **O2, before the next tag:**
   - The Marketplace trusted-publishing policy: publisher `iris-mcp` → Trusted Publishing → Create, with owner `jbrandtmse`, repository `iris-execute-mcp-v2`, workflow `release.yml`, environment `release`. The repository is public, so the 48-hour rule, which is stated for private repositories, does not apply.
