@@ -670,6 +670,39 @@ Every test added or changed passes on a fresh environment, in either order, and 
 5. **A5.** Run `node scripts/release.mjs verify --version 1.0.0`. Exit 1, every package E404: the red leg before the publish.
 6. **A6.** Send the Planner the `epic42` story sha and A1's green run id. **STOP.** The Planner merges `epic42` → wave-8 → `main`, pushes, and returns the `main` sha M.
 
+*Phase A record (lead, 2026-11-21, story sha `caf3722326d5a8ffd9b9a850e896aece3bc811d7`):*
+- **A1:** CI green, https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44858763040. The jobs gates 22.17.0/24.0.0/26.0.0, throwaway, package and ipm all passed.
+- **A2:** the dry run is green, https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44858794844.
+  - `ci-gate`:
+    - The guard reported `environment release: protected (required reviewers: jbrandtmse; admin bypass off; tags v*)`.
+    - It printed `commit caf3722… is not on main (compare: ahead); a tag run stops here`, and the dry run carried on.
+    - It saw CI green on the dry-run push run 44858794833.
+  - `prepare`:
+    - `version state: 8 packages at 1.0.0, no pending changeset`.
+    - `check:provenance: ok` and `validate:prompts: ok`.
+    - `seed and 8 prepublish suites passed, and the container is removed`.
+  - `rehearse`: 8 `@iris-mcp/*@1.0.0: dry run ok` lines in order.
+  - `publish`: skipped.
+  - The branch was deleted afterwards, and `npm view @iris-mcp/shared` still answers E404.
+- **A3:** red on the real path, https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44858796584.
+  - `ci-gate` failed about 1.5 s after it started, with `refusing the tag run: caf3722… is not on main (compare main...caf3722…: ahead). Merge it to main, then tag the merged commit. No later job runs.`
+  - It did not wait for CI. `prepare`, `rehearse` and `publish` were skipped, and the repository still has 0 deployments.
+  - `v0.0.3` was deleted locally and on origin, and its tag-push CI run 44858796830 was cancelled.
+- **A4:** the real-client tarball smoke passed.
+  - **Install:** `ci-package-smoke.mjs --keep` exited 0 (8 packages installed from tarballs, 5 servers and their CLIs answered).
+  - **Throwaway:** `iris-mcp-throwaway-64bdddaf739d`, image `intersystems/irishealth-community:2026.2@sha256:462de1fb…` (already local, nothing pulled), HSCUSTOM, 127.0.0.1:52792, no seed.
+  - **Client:** Claude Code (`claude -p`, `--mcp-config .mcp.json --strict-mcp-config`, only the five read tools allowed) launched the five tarball servers through `npx --no`. Every call answered:
+    - dev `iris_server_info`: IRIS for UNIX 2026.2 (Build 221U);
+    - admin `iris_namespace_list`: 7 namespaces;
+    - interop `iris_production_status`: Stopped;
+    - ops `iris_metrics_system`: `iris_process_count` = 43, uptime 57 s, which confirms the throwaway and not the shared instance;
+    - data `iris_analytics_cubes`: 0 cubes.
+  - **Era and version:** the 2025-era handshake (`Serving the 2025-era MCP handshake (initialize)`), and `serverInfo` `@iris-mcp/dev` `1.0.0`.
+  - **Deployed marker:** `ExecuteMCPv2.Setup_GetBootstrapVersion()` = `1.0.0+2.244fe8623c76`.
+  - **Teardown:** `down` removed the container and the kept directory was removed. No throwaway container remains, and the local image list is unchanged.
+- **A5:** `release.mjs verify --version 1.0.0` exited 1 with 9 failed checks: 8 `not on the registry` lines and `npx -y @iris-mcp/dev@1 … E404`.
+- **A6:** the `epic42` sha `caf3722` and run 44858763040 were sent to the Planner. The lead stopped for the merge.
+
 *Phase B, after the Planner returns M:*
 1. **B1. Check M** (read-only):
    - `git fetch origin`; then `git merge-base --is-ancestor <story sha> M`;
