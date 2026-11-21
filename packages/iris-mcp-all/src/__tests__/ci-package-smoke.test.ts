@@ -9,14 +9,19 @@
  * Reads files and calls pure functions: nothing is packed, installed or started.
  */
 
-import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  KEEP_IRIS_VARIABLES,
   binsOf,
   expectedToolCount,
   installManifest,
+  keepDirProblems,
+  keepMcpConfig,
   lockfileProblems,
+  main,
   publishablePackages,
   snapshotServers,
 } from "../../../../scripts/ci-package-smoke.mjs";
@@ -154,5 +159,104 @@ describe("the lockfile check that proves the install used the tarballs", () => {
 
   it("treats a lockfile with no packages as missing every package", () => {
     expect(lockfileProblems({}, names)).toHaveLength(2);
+  });
+});
+
+// -- Story 42.6: --keep -------------------------------------------------------------------------------------------
+
+describe("--keep <dir>: which directories the smoke accepts (AC 42.6.1)", () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+  const scratch = (): string => {
+    const root = mkdtempSync(path.join(tmpdir(), "smoke-keep-"));
+    roots.push(root);
+    return root;
+  };
+
+  it("accepts an absent directory and an empty one, both outside the repository", () => {
+    const root = scratch();
+    expect(keepDirProblems(path.join(root, "project"), REPO_ROOT)).toEqual([]);
+    expect(keepDirProblems(path.join(root, "deeper", "still", "project"), REPO_ROOT)).toEqual([]);
+    expect(keepDirProblems(root, REPO_ROOT)).toEqual([]);
+  });
+
+  it("refuses a directory that holds anything, and a path that is a file", () => {
+    const root = scratch();
+    writeFileSync(path.join(root, "a.txt"), "x");
+    expect(keepDirProblems(root, REPO_ROOT)).toEqual([expect.stringMatching(/is not an empty directory\. Pass an absent or empty directory\.$/)]);
+    expect(keepDirProblems(path.join(root, "a.txt"), REPO_ROOT)).toEqual([expect.stringContaining("is not an empty directory")]);
+  });
+
+  it("refuses the repository, a directory inside it (absent or not), and a link that leads into it", () => {
+    const root = scratch();
+    const repo = path.join(root, "repo");
+    mkdirSync(path.join(repo, "sub"), { recursive: true });
+    for (const target of [repo, path.join(repo, "sub"), path.join(repo, "new", "project")]) {
+      expect(keepDirProblems(target, repo), target).toEqual(expect.arrayContaining([expect.stringContaining("is inside the repository. Pass a directory outside it")]));
+    }
+    const link = path.join(root, "link");
+    symlinkSync(repo, link, "junction");
+    expect(keepDirProblems(path.join(link, "project"), repo), "through a link").toEqual([expect.stringContaining("is inside the repository")]);
+  });
+
+  it("a directory inside the repository whose name starts with two dots is inside it, and a dangling link is not an absent directory", () => {
+    const root = scratch();
+    const repo = path.join(root, "repo");
+    mkdirSync(repo);
+    expect(keepDirProblems(path.join(repo, "..cache"), repo)).toEqual([expect.stringContaining("is inside the repository")]);
+    const dangling = path.join(root, "dangling");
+    symlinkSync(path.join(root, "nowhere"), dangling);
+    expect(keepDirProblems(dangling, repo)).toEqual([expect.stringContaining("is not an empty directory")]);
+  });
+
+  it("a sibling whose name merely starts with the repository's is outside it", () => {
+    const root = scratch();
+    mkdirSync(path.join(root, "repo"));
+    expect(keepDirProblems(path.join(root, "repo-other", "project"), path.join(root, "repo"))).toEqual([]);
+  });
+
+  it("main refuses a non-empty directory, a directory inside the repository, and any other arguments with exit 2, before it packs anything", async () => {
+    const root = scratch();
+    writeFileSync(path.join(root, "a.txt"), "x");
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: string | Uint8Array) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      expect(await main(["--keep", root])).toBe(2);
+      expect(await main(["--keep", path.join(REPO_ROOT, "keep-test-project")])).toBe(2);
+      expect(existsSync(path.join(REPO_ROOT, "keep-test-project")), "nothing was created inside the repository").toBe(false);
+      for (const bad of [["--keep"], ["--keep", path.join(root, "p"), "extra"], ["--kept", path.join(root, "p")], ["unexpected-argument"], [path.join(root, "p"), "--keep"], ["--keep", "--keep"], ["--keep", ""]]) {
+        expect(await main(bad), JSON.stringify(bad)).toBe(2);
+      }
+    } finally {
+      spy.mockRestore();
+    }
+    const text = written.join("");
+    expect(text).toContain("is not an empty directory");
+    expect(text).toContain("is inside the repository");
+    expect(text.match(/usage: node scripts\/ci-package-smoke\.mjs \[--keep <dir>\]/g)).toHaveLength(7);
+    expect(existsSync(path.join(root, "p")), "an accepted-looking directory is not made by a refused call").toBe(false);
+  });
+});
+
+describe("the .mcp.json of a kept project (AC 42.6.1)", () => {
+  it("names each server once, through npx --no, with the five IRIS variables as references", () => {
+    expect([...KEEP_IRIS_VARIABLES]).toEqual(["IRIS_HOST", "IRIS_PORT", "IRIS_USERNAME", "IRIS_PASSWORD", "IRIS_NAMESPACE"]);
+    const env = { IRIS_HOST: "${IRIS_HOST}", IRIS_PORT: "${IRIS_PORT}", IRIS_USERNAME: "${IRIS_USERNAME}", IRIS_PASSWORD: "${IRIS_PASSWORD}", IRIS_NAMESPACE: "${IRIS_NAMESPACE}" };
+    expect(keepMcpConfig(SERVERS)).toEqual({ mcpServers: Object.fromEntries(SERVERS.map((bin) => [bin, { command: "npx", args: ["--no", "--", bin], env }])) });
+  });
+
+  it("is the same whatever order the servers come in, and writes no password or other literal", () => {
+    expect(JSON.stringify(keepMcpConfig([...SERVERS].reverse()))).toBe(JSON.stringify(keepMcpConfig(SERVERS)));
+    expect(Object.keys(keepMcpConfig([...SERVERS].reverse()).mcpServers)).toEqual([...SERVERS].sort());
+    expect(JSON.stringify(keepMcpConfig(SERVERS))).not.toMatch(/SYS|_SYSTEM|127\.0\.0\.1/);
+  });
+
+  it("covers the five servers of the committed snapshot", () => {
+    expect(Object.keys(keepMcpConfig(snapshotServers()).mcpServers)).toEqual(SERVERS);
   });
 });

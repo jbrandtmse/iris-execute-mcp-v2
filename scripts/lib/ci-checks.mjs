@@ -281,8 +281,8 @@ const IF_SEED = "${{ !cancelled() && steps.seed.outcome == 'success' }}";
 const STATE_FILE = '${{ runner.temp }}/throwaway-live.json';
 const HARNESS = 'node scripts/throwaway-iris.mjs';
 
-/** The checks of the `gates` job that are npm scripts of the root, in order. */
-const ROOT_GATE_SCRIPTS = Object.freeze([
+/** The checks of the `gates` job that are npm scripts of the root, in order. The release's `prepare` runs the same `pnpm` ones. */
+export const ROOT_GATE_SCRIPTS = Object.freeze([
   'pnpm gen:governance-baseline:check',
   'pnpm gen:skills:check',
   'pnpm gen:pack:check',

@@ -2,9 +2,10 @@
 title: 'Story 42.6: Tarball Smoke and 1.0.0 Publish'
 type: 'feature'
 created: '2026-11-20'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'fe7cae7cadd43fa0fcbcd165b2022721a7d2a75a'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
   - '{project-root}/_bmad-output/implementation-artifacts/epic-42-context.md'
@@ -161,46 +162,46 @@ deferred: []
 **Execution** (dependency order):
 
 *Step 0: the version step (first, on the clean starting tree).*
-- [ ] Confirm `git status --porcelain` is empty and `BOOTSTRAP_VERSION` is `0.0.2+2.244fe8623c76`.
-- [ ] Run `pnpm run version -- --first-release` once.
-- [ ] Record the printed move literal in the spec's Verification, and keep every file it changed as it left them. DW-300.
+- [x] Confirm `git status --porcelain` is empty and `BOOTSTRAP_VERSION` is `0.0.2+2.244fe8623c76`.
+- [x] Run `pnpm run version -- --first-release` once.
+- [x] Record the printed move literal in the spec's Verification, and keep every file it changed as it left them. DW-300.
 
 *The release gate (DW-696).*
-- [ ] `scripts/lib/release-core.mjs`:
+- [x] `scripts/lib/release-core.mjs`:
   - add `RELEASE_BRANCH = 'main'`;
   - add the pure `mainReachability({ status, body } | { error }, sha)` per the matrix rows (the statuses `identical`/`behind` are on main; anything else, a non-2xx status or an error is not);
   - add `compareUrl(api, repo, sha)` → `${api}/repos/${repo}/compare/${RELEASE_BRANCH}...${sha}?per_page=1`.
-- [ ] `scripts/release.mjs` `runCiGate`:
+- [x] `scripts/release.mjs` `runCiGate`:
   - after the environment-guard block, read the compare answer through `githubGet` and judge it with `mainReachability`;
   - release mode: collect the guard refusal and the main refusal, print each, and return 1 if either fails, before `runsUrl`;
   - dry run: one report line, then go on;
   - update the header CONTRACT item 2.
-- [ ] `.github/workflows/release.yml`: header comment only ("ci-gate … and refuses a tag whose commit is not on main"). The self-test strips comments; no declared shape changes.
+- [x] `.github/workflows/release.yml`: header comment only ("ci-gate … and refuses a tag whose commit is not on main"). The self-test strips comments; no declared shape changes.
 
 *The release checks (DW-612).*
-- [ ] `scripts/lib/release-core.mjs`:
+- [x] `scripts/lib/release-core.mjs`:
   - export `ROOT_CHECK_SCRIPT = /(^|:)(check|validate)(:|$)/`;
   - reword the `RELEASE_CHECK_EXEMPTIONS` doc.
-- [ ] `scripts/release.mjs` `releaseCheckScripts`: select by `ROOT_CHECK_SCRIPT` in place of `endsWith(':check')`, keeping `isHook` and the exemptions; update its doc comment.
-- [ ] `scripts/lib/ci-checks.mjs`: `export` `ROOT_GATE_SCRIPTS` (value unchanged).
-- [ ] `ci-workflow.test.ts` :419 may import `ROOT_CHECK_SCRIPT` instead of its inline regex (Rule 2, one source); its assertions stay.
+- [x] `scripts/release.mjs` `releaseCheckScripts`: select by `ROOT_CHECK_SCRIPT` in place of `endsWith(':check')`, keeping `isHook` and the exemptions; update its doc comment.
+- [x] `scripts/lib/ci-checks.mjs`: `export` `ROOT_GATE_SCRIPTS` (value unchanged).
+- [x] `ci-workflow.test.ts` :419 may import `ROOT_CHECK_SCRIPT` instead of its inline regex (Rule 2, one source); its assertions stay.
 
 *The CHANGELOG in the tarballs (DW-665; Orchestrator decision 2).*
-- [ ] Every `packages/*/package.json` `files`: add `"CHANGELOG.md"`, after `dist`/`skills-pack` and before the `!` exclusions. In `@iris-mcp/all` it is `["CHANGELOG.md"]`. pnpm packs a listed file only when it exists, and all eight exist after Step 0.
+- [x] Every `packages/*/package.json` `files`: add `"CHANGELOG.md"`, after `dist`/`skills-pack` and before the `!` exclusions. In `@iris-mcp/all` it is `["CHANGELOG.md"]`. pnpm packs a listed file only when it exists, and all eight exist after Step 0.
 
 *The SDK (DW-637; Orchestrator decision 3).*
-- [ ] Change the exact pins `2.3.1` → `2.4.0`: `@modelcontextprotocol/server` and `client` in `packages/shared/package.json`, and `client` in `packages/iris-dev-mcp/package.json` and `packages/iris-mcp-all/package.json`. Then run `pnpm install` (lockfile update) and rebuild every package.
-- [ ] Update the 12 pin literals the probe found (Code Map).
-- [ ] Replace the false `2.3.1 / fast-uri 3.1.0` claim in the header of `story-43-3-validator-unreachable.test.ts` with the true one (2.4.0 bundles fast-uri 3.1.8; the tripwire stays, Rule 14).
-- [ ] Do not regenerate `tools-list-snapshot.json` (a protected surface): its check passes. Its `sdkVersion` metadata reads 2.3.1, and the Design Notes record that.
-- [ ] If any frozen golden or `tools/list` byte differs on 2.4.0 (the probe saw none), stop the bump:
+- [x] Change the exact pins `2.3.1` → `2.4.0`: `@modelcontextprotocol/server` and `client` in `packages/shared/package.json`, and `client` in `packages/iris-dev-mcp/package.json` and `packages/iris-mcp-all/package.json`. Then run `pnpm install` (lockfile update) and rebuild every package.
+- [x] Update the 12 pin literals the probe found (Code Map).
+- [x] Replace the false `2.3.1 / fast-uri 3.1.0` claim in the header of `story-43-3-validator-unreachable.test.ts` with the true one (2.4.0 bundles fast-uri 3.1.8; the tripwire stays, Rule 14).
+- [x] Do not regenerate `tools-list-snapshot.json` (a protected surface): its check passes. Its `sdkVersion` metadata reads 2.3.1, and the Design Notes record that.
+- [x] If any frozen golden or `tools/list` byte differs on 2.4.0 (the probe saw none), stop the bump:
   - revert to 2.3.1 everywhere;
   - add a `deferred:` item with the differing bytes;
   - continue the story.
   - Never edit a golden. The 43.3 tripwire keeps the advisories unreachable, so the bump never blocks the release.
 
 *verify (AC 42.6.3).*
-- [ ] `scripts/release.mjs`: a `verify --version <x.y.z>` command, exported `verify(options, deps)` on the `ciGate`/`prepare`/`publish` pattern, with every side effect in `deps`. It follows the matrix rows.
+- [x] `scripts/release.mjs`: a `verify --version <x.y.z>` command, exported `verify(options, deps)` on the `ciGate`/`prepare`/`publish` pattern, with every side effect in `deps`. It follows the matrix rows.
   - It walks `NPM_PUBLISH_ORDER` with `npm view <name>@<v> version dist.attestations --json`, judged by a pure `registryProblems(name, version, viewResult)` in `release-core.mjs`; `viewOutcome`'s E404 words mean "not on the registry".
   - Then `npx -y @iris-mcp/dev@1` through `openRawWire`/`handshake` (dynamic `import()`), with a temporary `HOME`, `npm_config_cache` and `cwd` removed on every exit path, and `CLOSED_PORT_ENV`.
     - The spec is the literal `@iris-mcp/dev@1`, because `scripts/lib/npx-pin-scan.mjs` (AD-29, `npx-pin.test.ts`) flags any other token, including `@${major}`.
@@ -209,7 +210,7 @@ deferred: []
   - `pnpm release verify --version 1.0.0` works through the existing alias.
 
 *The real-client smoke helper (AC 42.6.1).*
-- [ ] `scripts/ci-package-smoke.mjs`:
+- [x] `scripts/ci-package-smoke.mjs`:
   - `main` accepts exactly `--keep <dir>` (anything else → exit 2 with the usage line, as today);
   - `smokePackages({ keep })` installs into `<dir>` (absent or empty, absolute after resolve, outside `REPO_ROOT`) and skips removing it;
   - it writes `<dir>/.mcp.json`, five servers from `snapshotServers`, each as in the matrix;
@@ -217,12 +218,12 @@ deferred: []
   - with no argument, the behavior and the output are unchanged.
 
 *Docs.*
-- [ ] `README.md` `### Releasing`:
+- [x] `README.md` `### Releasing`:
   - step 3: commit and merge to `main`, CI green on the merged commit;
   - step 4: tag the commit on `main`; `ci-gate` refuses a tag whose commit `main` does not contain;
   - new step 6: `pnpm release verify --version <x.y.z>`;
   - the `prepare` sentence says it runs every root check script that CI runs.
-- [ ] `CHANGELOG.md`: a new top section `## [1.0.0] — <date of the version commit> — Story 42.6: Tarball Smoke and 1.0.0 Publish`, holding:
+- [x] `CHANGELOG.md`: a new top section `## [1.0.0] — <date of the version commit> — Story 42.6: Tarball Smoke and 1.0.0 Publish`, holding:
   - the first public release: all eight `@iris-mcp/*` at `1.0.0` on npm with provenance, one shared version, launched as `npx -y @iris-mcp/<pkg>@1`, Node `>=22.17.0`;
   - "`BOOTSTRAP_VERSION` moves from `0.0.2+2.244fe8623c76` to `1.0.0+2.244fe8623c76`" (the printed literal; class content unchanged);
   - each package's own `CHANGELOG.md` has its `## 1.0.0` section and now ships in the tarball;
@@ -233,8 +234,8 @@ deferred: []
   - No tool, prompt, governance or wire change. Claims only what is true at the commit.
 
 *Tests (unit and process; Rule 19 mutation lines for each).*
-- [ ] `release-core.test.ts`: `mainReachability` over every status (`identical`, `behind`, `ahead`, `diverged`, a missing or unknown `status`, 404, 500, `{error}`); `compareUrl`; `ROOT_CHECK_SCRIPT` positives and negatives; `registryProblems` (published, missing, no attestation, wrong predicate, wrong version).
-- [ ] `release-script.test.ts`:
+- [x] `release-core.test.ts`: `mainReachability` over every status (`identical`, `behind`, `ahead`, `diverged`, a missing or unknown `status`, 404, 500, `{error}`); `compareUrl`; `ROOT_CHECK_SCRIPT` positives and negatives; `registryProblems` (published, missing, no attestation, wrong predicate, wrong version).
+- [x] `release-script.test.ts`:
   - ci-gate flows (fake GitHub with a `compare` answer):
     - `ahead` → exit 1 with the refusal text, and the fake recorded no `/actions/runs` request;
     - `identical` and `behind` → pass;
@@ -244,19 +245,19 @@ deferred: []
     - the compare request carries the token and names `main...<sha>`.
   - `verify` flows with stand-in `npm`/`npx` (the 42.5 stand-in mechanism) and an injected wire: all published → 0; one E404 → 1 naming it; no attestation → 1; usage → 2; temporary dirs removed.
   - The static-import pin is unchanged.
-- [ ] `story-42-6-qa-real-oracles.test.ts` (new) or the 42.5 oracle file: compare bodies captured by read-only `gh api -X GET repos/jbrandtmse/iris-execute-mcp-v2/compare/main...<sha>?per_page=1` for `identical`, `ahead` and `behind`, plus the 404 body. Reduce them to `{status, ahead_by, behind_by, total_commits}` and `{message, status}`, and cite the command and date in the header (Rule #36).
-- [ ] `release-prepare.test.ts`:
+- [x] `story-42-6-qa-real-oracles.test.ts` (new) or the 42.5 oracle file: compare bodies captured by read-only `gh api -X GET repos/jbrandtmse/iris-execute-mcp-v2/compare/main...<sha>?per_page=1` for `identical`, `ahead` and `behind`, plus the 404 body. Reduce them to `{status, ahead_by, behind_by, total_commits}` and `{message, status}`, and cite the command and date in the header (Rule #36).
+- [x] `release-prepare.test.ts`:
   - `releaseCheckScripts` over the real root `package.json` equals the matrix row;
   - `releaseCheckScripts(...)` mapped to `pnpm <name>` equals, as a set, the `pnpm `-prefixed entries of `ROOT_GATE_SCRIPTS` (parity; red when a new CI root check is missing from `prepare`, and when `prepare` runs one CI does not);
   - a fake `run` that fails `check:provenance` makes `prepare` exit 1 naming it.
-- [ ] `package-manifests.test.ts`: every publishable package's `files` contains `CHANGELOG.md`, and the file exists with `## 1.0.0` as its first `## ` heading.
-- [ ] A real-pack test (the pattern of `pack-provenance.test.ts`/`pack-fixture.ts`; its existing skip conditions and time budget) asserts that each of the eight tarballs lists `CHANGELOG.md`.
-- [ ] `ci-package-smoke.test.ts` / `release-smoke-prebuilt.test.ts`: `main(['--keep', dir])` argument handling (non-empty dir, inside-repo dir, extra argument → 2); `--keep` over the offline synthetic smoke repository leaves `<dir>/node_modules` and a `.mcp.json` whose five entries match the matrix; `main([])` behavior unchanged.
-- [ ] `story-42-6-doc-claims.test.ts` (new):
+- [x] `package-manifests.test.ts`: every publishable package's `files` contains `CHANGELOG.md`, and the file exists with `## 1.0.0` as its first `## ` heading.
+- [x] A real-pack test (the pattern of `pack-provenance.test.ts`/`pack-fixture.ts`; its existing skip conditions and time budget) asserts that each of the eight tarballs lists `CHANGELOG.md`.
+- [x] `ci-package-smoke.test.ts` / `release-smoke-prebuilt.test.ts`: `main(['--keep', dir])` argument handling (non-empty dir, inside-repo dir, extra argument → 2); `--keep` over the offline synthetic smoke repository leaves `<dir>/node_modules` and a `.mcp.json` whose five entries match the matrix; `main([])` behavior unchanged.
+- [x] `story-42-6-doc-claims.test.ts` (new):
   - the `1.0.0` section is the top `## [` section, names the move literal, and names the main rule, the checks, `verify` and the CHANGELOG shipping;
   - the README `### Releasing` names the main rule and `pnpm release verify --version`;
   - pin by title and relative order (the 42.5 doc-claims precedent), never `titles[0]` of a later story.
-- [ ] Update every existing test the version step or the SDK bump turns red. Never weaken an assertion: replace a literal with the new true value, or derive it from the tree. The probe found exactly these:
+- [x] Update every existing test the version step or the SDK bump turns red. Never weaken an assertion: replace a literal with the new true value, or derive it from the tree. The probe found exactly these:
   - the 12 SDK pin literals above;
   - `changelog-bootstrap-move.test.ts`, which the new root section fixes (expected `1.0.0+2.244fe8623c76`, got the 42.4 section's `0.0.2+…`).
   - The 37 files that read `.changeset/*.md` pass, with 38 skips by design (`skipIf` on a consumed changeset, the 42.1 mechanism rows).
@@ -282,6 +283,42 @@ deferred: []
 ## Spec Change Log
 
 ## Review Triage Log
+
+### 2026-11-20 — Review pass
+- verdicts: 32 findings — high 0, medium 4, low 26, false 2, maybe-false 0
+- findings:
+  - `[low]` `[patch]` Blind 1: `verify --version 1.0.0` fails once `@1` resolves to a later 1.x — real; fixed by naming the cause in the mismatch error and one README clause (release.mjs, README step 6).
+  - `[low]` `[reject]` Blind 2: verify reads npm only — CONTRACT item 8 and the README already say "the registry"; the fix is prose only and nothing is misreported.
+  - `[low]` `[reject]` Blind 3: attestation presence, not validity — the matrix row defines the check as presence of a `https://slsa.dev/provenance/` predicate; signature checking is `npm audit signatures` territory and needs an install.
+  - `[medium]` `[patch]` Blind 4: `verifyEnv` still passes `NODE_AUTH_TOKEN` and other `npm_config_*` variables (a registry override changes what verify reads) — `NPM_CONFIG_*` and `NODE_AUTH_TOKEN` are now dropped; the env test pins both.
+  - `[low]` `[patch]` Blind 5: `ROOT_CHECK_SCRIPT` comment overstated a single source — comment corrected.
+  - `[medium]` `[patch]` Blind 6: second half of "parity is red both ways" is local set arithmetic that cannot fail (Rule 19) — removed; the row is retitled to the half that drives `releaseCheckScripts`.
+  - `[low]` `[reject]` Blind 7: `diverged` not captured from the real API — a diverged compare needs a diverged branch that does not exist; the status is the documented enum and the off-main set is pinned by a hand-made body only for that value.
+  - `[low]` `[patch]` Blind 8: `--keep` early failures left the directory with no message — the kept-for-inspection line is now printed on the missing-tarball and `npm install` failures too.
+  - `[low]` `[reject]` Blind 9: next steps omit the project-server approval and the unset-variable failure — A4 of the lead checklist names both; one more printed line changes the unchanged-shape output for no failure.
+  - `[low]` `[patch]` Blind 10: CHANGELOG said all eight packages launch as `npx -y @iris-mcp/<pkg>@1` — reworded to the five servers; the doc-claims pin follows.
+  - `[low]` `[reject]` Blind 11: capture date 2026-11-21 vs 2026-11-20 — the capture ran at 02:00 UTC on the 21st, 18:00 local on the 20th; both are true.
+  - `[low]` `[patch]` Edge 1: a repo-internal directory named `..x` was judged outside — segment-wise test (`..` or `..` plus separator); pinned by a new row.
+  - `[low]` `[patch]` Edge 2: early failures leave a half-built `--keep` directory silently — same fix as Blind 8.
+  - `[low]` `[reject]` Edge 3: `<dir>/tarballs/<pkg>/extracted` trees sit in the kept project — the install manifest's `file:` specs resolve to them, so they must stay; a client reads only `.mcp.json` and `node_modules`.
+  - `[low]` `[patch]` Edge 4: `--keep ""` resolved to the current directory — an empty value is now a usage error (exit 2), pinned in the `main` row.
+  - `[low]` `[patch]` Edge 5: a dangling symlink passed `existsSync` — `lstatSync` now sees it; pinned by a new row.
+  - `[low]` `[patch]` Edge 6: floating `@1` against `--version` — same fix as Blind 1.
+  - `[medium]` `[patch]` Edge 7: `verifyEnv` is a denylist — same fix as Blind 4; an allowlist rewrite is not warranted by a read-only lead command.
+  - `[low]` `[patch]` Edge 8: a rejecting `wire.close()` would replace the exit code — wrapped; the verdict is already judged.
+  - `[false]` `[reject]` Edge 9: the compare read runs for non-release runs — the dry run must print its report line (matrix row), the workflow runs only on a tag or a `release-dry-run/**` push, and `GITHUB_REPOSITORY` is set on every runner; the environment guard does the same read.
+  - `[low]` `[patch]` Edge 10: README/CHANGELOG verify claim vs floating `@1` — same fix as Blind 1.
+  - `[low]` `[patch]` Edge 11: "clean environment" wording vs inherited variables — the denylist now covers every npm config and auth variable; PATH, proxy and locale variables are inherited by design.
+  - `[low]` `[patch]` Gap 1: the signal-time cleanup registration of `verify` was never observed — the row now records `cleanups.add` and fails when the registration is removed (mutation line added).
+  - `[low]` `[patch]` Gap 2: the `.mcp.json` order assertions use `toEqual` and ignore key order — now `JSON.stringify` equality and `Object.keys` order.
+  - `[medium]` `[patch]` Gap 3: parity "both ways" half cannot fail — same fix as Blind 6; its mutation line now names one red row.
+  - `[low]` `[reject]` Gap 4: sub-row behaviours (usage refusals, env isolation, `--keep` refusals) lack their own `mutation:` line — Rule 19 asks one demonstrated mutation per AC; each AC (42.6.1, 42.6.3, DW-696, DW-612, DW-665, DW-637) has one. Two lines were added for the rows patched in this pass.
+  - `[low]` `[reject]` Gap 5: AC 42.6.2 is proven by a one-shot command — a permanent real-tree release-mode pin goes red at the next pending changeset; the command is in `## Verification` and lead checklist A2 runs `prepare` in release shape.
+  - `[low]` `[reject]` Gap 6: `verify`'s `npx` child is not in `activeChildren` — `openRawWire` has a 240 s timeout and `verify` is a lead-run read-only command; reopen_if a signalled verify is seen to leave a process.
+  - `[low]` `[reject]` Gap 7: the live wire success path is exercised only through a fake — the real-process row covers the failure path and lead checklist B7 covers the success path on the real registry; the fake's shape was checked against `handshake`/`openRawWire`.
+  - `[low]` `[reject]` Gap 8: capture date — same as Blind 11.
+  - `[false]` `[reject]` Intent 1: CI's epics-sync step is not in `prepare` — Design Notes state it is a planning-document check, not a package script, kept by CI only; the intent says "root script".
+  - `[low]` `[reject]` Intent 2: capture-date observation — same as Blind 11.
 
 ## Design Notes
 
@@ -537,6 +574,38 @@ Every test added or changed passes on a fresh environment, in either order, and 
   - one server missing from `.mcp.json` → same.
 - AD-14 and the CHANGELOG: the move literal changed in the root section → `changelog-bootstrap-move.test.ts` and `story-42-6-doc-claims.test.ts`.
 
+**Implementation record (2026-11-20).**
+- Step 0 was run by the spawning agent before this stage (exit 0). Printed line: "`BOOTSTRAP_VERSION` moves from `0.0.2+2.244fe8623c76` to `1.0.0+2.244fe8623c76`". Its 80 files are untouched. `pnpm gen:bootstrap` after all edits: both files "Unchanged (not rewritten)", and `git status --porcelain` identical before and after.
+- SDK 2.4.0: the shared `sdk-wire-compat` ran 116/116, the 13 epic-43 files ran 590 + 90 passed in the two calls (the 90 are the 43.4 files and the capstone), and no frozen golden, ledger or `tools-list-snapshot.json` byte moved, so the fallback was not used. `pnpm-lock.yaml` resolves `server`, `client` and `core` at 2.4.0 alone.
+- The one test the probe did not list: `story-38-0-qa-dist-freshness.test.ts` pinned `@iris-mcp/all` `files: []`; it now pins `["CHANGELOG.md"]` (decision #86), and the package is still skipped as a package with no `dist` entry.
+- `@iris-mcp/all` ran as 16 `--shard=k/16` calls, not 4: the harness moves any call past 180 s to the background, and a quarter exceeded that. Each shard is its own call; all 16 passed (212 files). Other packages: client-config 1015, shared 2575, admin 506 (8 skipped), data 163 (2), dev 1490 (319), interop 751, ops 350, all green. Lint and type-check are clean on the seven packages that have them.
+- Root checks: governance baseline check OK (frozen keys all present), skills, pack, prompts, provenance, snapshot and epics-sync all OK. Tag consistency `[] []`.
+- `ci-package-smoke.mjs` (no argument) exit 0, output in the shape of today's. `--keep <tmp>/proj`: exit 0, `proj/.mcp.json` with the five servers, the next-steps lines, directory removed afterwards.
+- AC 42.6.3 red leg against the real registry (read-only): `node scripts/release.mjs verify --version 1.0.0` exit 1, eight "not on the registry" lines, the npx start reported failed (`npm error code E404`), 9 checks failed, no temporary directory left. `verify --version 2.0.0` and `verify` alone exit 2.
+- DW-612 real-process runs, throwaway clone of `HEAD` plus the working tree (committed there), `PATH` with no docker, `prepare` in dry-run mode, then the clone and its bin directory removed:
+  - control: `check:provenance: ok`, `gen:governance-baseline:check: ok`, `gen:pack:check: ok`, `gen:skills:check: ok`, `gen:tools-list-snapshot:check: ok`, `validate:prompts: ok`, `format:check: not run`, then "docker was not found on PATH", exit 3;
+  - provenance break (`packages/client-config/package.json` `"skills-pack"` renamed in `files`; `pnpm check:provenance` alone exit 1 and `pnpm gen:pack:check` exit 0): exit 1, "problem: pnpm run check:provenance failed (exit 1): ... the tarball lacks the pack file skills-pack/...";
+  - pack drift (one byte appended to `skills-pack/skills/audit-security-posture/SKILL.md`; `check:provenance` alone exit 0): exit 1, "problem: pnpm run gen:pack:check failed (exit 1): gen-pack --check: DRIFT in packages/client-config/skills-pack/skills/audit-security-posture/SKILL.md".
+- Real oracles (Rule #36): compare bodies captured 2026-11-21 with `gh api -X GET` for `main` (identical), `epic42` (ahead 115), `main~5` (behind 292) and an unknown sha (404), plus three `npm view` transcripts.
+
+**Mutations (Rule 19), each applied, observed red, reverted; `shasum` of the file and `git status --porcelain` identical afterwards:**
+- mutation: `mainReachability` accepts `ahead` (release-core `ON_MAIN_STATUSES`) -> `release-core.test.ts` "compare status ahead is off main" and the ci-gate `ahead`, both-refusals, dry-run and real-process rows (5 red).
+- mutation: the main check moved after the CI poll (refusal removed before `runsUrl`, added at the green return) -> the `ahead`/`diverged` "CI runs are never read" rows and the 404/500/403/no-status/stall rows (13 red).
+- mutation: a dry run that refuses on `off-main` (`return 1` after the report line) -> the `ahead` and `diverged` dry-run rows (2 red).
+- mutation: an unreadable compare treated as `on-main` -> the 404/403/500/missing-status/error/redirect/case rows of `release-core.test.ts` and the ci-gate rows (16 red in the two files).
+- mutation: `releaseCheckScripts` back to `name.endsWith(':check')` -> the real-scripts row, the parity row, the failing-`check:provenance` row and two others in `release-prepare.test.ts` (6 red).
+- mutation: `pnpm check:x` added to `ROOT_GATE_SCRIPTS` only -> the parity row of `release-prepare.test.ts` (1 red).
+- mutation: `CHANGELOG.md` dropped from `packages/shared/package.json` `files` -> `package-manifests.test.ts` "lists CHANGELOG.md in files" and `published-tarballs.test.ts` "shared: the tarball lists CHANGELOG.md" (real `pnpm pack`) (2 red).
+- mutation: `PINNED` left at 2.3.1 with the bump applied -> 9 red in `story-43-1-sdk-confinement.test.ts` (manifests, lockfile, `installedSdk`).
+- mutation: `registryProblems` ignoring a missing attestation (`if (false)`) -> `release-core.test.ts` (2 rows), `story-42-6-qa-real-oracles.test.ts` (the lodash transcript) and the verify "without a provenance attestation" flow (4 red).
+- mutation: `verify` keeping its temporary directory (`remove` a no-op) -> 5 verify rows, including the real-process row that lists the observed `TMPDIR`.
+- mutation: `--keep` removing `<dir>` -> the three `smokePackages({ keep })` rows of `release-smoke-prebuilt.test.ts` (3 red).
+- mutation: one server missing from `.mcp.json` (`.slice(1)`) -> the two `.mcp.json` rows of `ci-package-smoke.test.ts` and the `--keep` success row (3 red).
+- mutation: the move literal changed in the root section (`...c76` to `...c77`) -> `changelog-bootstrap-move.test.ts` and `story-42-6-doc-claims.test.ts` (2 red).
+- mutation (review pass): `deps.cleanups?.add(remove)` removed from `runVerify` -> the `release-script.test.ts` verify row "the lines are appended ... the cleanup registered for a signal" (1 red).
+- mutation (review pass): `verifyEnv` no longer drops `NPM_CONFIG_*` and `NODE_AUTH_TOKEN` -> the `release-script.test.ts` verify row "starts npx -y @iris-mcp/dev@1 in a temporary HOME ..." (1 red).
+- Not mutated: the doc-claims rows for the README (their literals are the README's own text); the SDK-fallback path (not taken).
+
 **Lead checklist** (stages do none of it; record every run URL and result here).
 
 *Phase A, on `epic42`, after the story commit (decision #83):*
@@ -602,16 +671,13 @@ Every test added or changed passes on a fresh environment, in either order, and 
 
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
 
-**Plan stage (2026-11-20, baseline `233c4e53f75b0dc1a619e6b661e529f8db08fb36`).**
-- The spec is planned and halted after planning.
-- **Evidence gathered with read-only or throwaway probes:**
-  - the version step in a scratch clone (exit 0, move `0.0.2+2.244fe8623c76` → `1.0.0+2.244fe8623c76`, release-mode `versionProblems` `[]`, `gen:bootstrap` idempotent);
-  - a subagent clone with its own install, running the SDK 2.4.0 bump and then the full suites after the version step (wire byte-identical; 12 pin-literal failures; one expected `changelog-bootstrap-move` failure);
-  - GitHub compare statuses (GET);
-  - `npm view` and `npm pack` of the SDK;
-  - the deployed marker on the shared `HSCUSTOM` (SELECT).
-- Both clones were removed; the real tree holds only this spec.
-- Six orchestrator decisions are listed under Design Notes.
+**Implement stage (2026-11-20, baseline `fe7cae7cadd43fa0fcbcd165b2022721a7d2a75a`).**
+- **Summary:** the sanctioned version step ran once as the first action (exit 0: 8 packages at 1.0.0, 62 changesets consumed, `CHANGELOG.md` created or prepended per package, printed line: `` `BOOTSTRAP_VERSION` moves from `0.0.2+2.244fe8623c76` to `1.0.0+2.244fe8623c76` ``). On top of it: `ci-gate` refuses a tag whose commit `main` does not contain (compare `main...<sha>`, before the CI poll); `prepare` runs every root `check`/`validate` script (parity with CI's gate list); every package ships `CHANGELOG.md`; the SDK pin is 2.4.0 (no frozen golden or `tools/list` byte moved, so the 2.3.1 fallback was not used); new `release.mjs verify`; new `ci-package-smoke.mjs --keep <dir>`; README `### Releasing` and the root `1.0.0` CHANGELOG section.
+- **Files changed:** the version step's output (8 `package.json`, 8 package `CHANGELOG.md`, `.changeset/*`, `ipm/module.xml`, `bootstrap-classes.ts`, `pnpm-lock.yaml`); `scripts/release.mjs`, `scripts/lib/release-core.mjs`, `scripts/lib/ci-checks.mjs` (export), `scripts/ci-package-smoke.mjs`, `.github/workflows/release.yml` (header comment only); `README.md`, `CHANGELOG.md`; SDK pins in four manifests plus the pin literals of `story-43-1-sdk-confinement`, `story-43-1-qa-pack-confinement` and `story-43-3-validator-unreachable`; new `story-42-6-doc-claims.test.ts` and `story-42-6-qa-real-oracles.test.ts`; extended release-core, release-script, release-prepare, release-smoke-prebuilt, ci-package-smoke, package-manifests, published-tarballs and story-38-0 tests plus the shared fixtures.
+- **Review (4 layers, 32 findings):** high 0, medium 4, low 26, false 2. Patched: 18 rows (two medium entries by root cause: `verifyEnv` now drops every `NPM_CONFIG_*` variable and `NODE_AUTH_TOKEN`; the vacuous half of the parity test removed), plus the `--keep` hardening (segment-wise inside-repo test, empty value, dangling link, kept-directory note on early failures), the `verify` close guard and mismatch wording, the CHANGELOG launch claim, the signal-cleanup registration row and the `.mcp.json` order assertions. Rejected with recorded reasons: 14 rows (see the Review Triage Log). Deferred: none.
+- **Follow-up review recommendation:** `true`. Two medium entries were patched on a first pass. The unverified risk is that the `verifyEnv` denylist change and the new `--keep` directory checks were verified only by their own targeted rows and two mutations, not by a second review.
+- **Verification performed:** `node --check` of the four scripts; the story-file list of `@iris-mcp/all` (release-core, release-script, release-prepare, release-workflow, release-version, release-smoke-prebuilt, ci-package-smoke, ci-workflow, package-manifests, changelog-bootstrap-move, the 42.x doc-claims and oracle files, 43-1/43-3 pin files, release-1-0-0-mechanism, npx-pin, published-tarballs, smoke-runtime, story-38-0) green after the last patch; `pnpm gen:governance-baseline:check`, `gen:skills:check`, `gen:pack:check`, `validate:prompts`, `check:provenance`, `gen:tools-list-snapshot:check` and `check-epics-sync` OK; `gen:bootstrap` a no-op; the tag-consistency check prints `[] []`; `ci-package-smoke.mjs` exits 0 (default) and `--keep` exits 0 with a five-server `.mcp.json`; `verify --version 1.0.0` exits 1 with eight "not on the registry" lines and the npx start failed, no temporary directory left; spine lint 0 findings. Before the review patches the implement subagent also ran every package suite, 16 shards of `@iris-mcp/all` (212 files), the shared `sdk-wire-compat` (116/116), the epic-43 wire suites (590 + 90), lint and type-check per package, and the three DW-612 real-process runs (control exit 3, provenance break exit 1, pack drift exit 1) in a throwaway clone that was removed. The review patches touched only `scripts/` and tests of `@iris-mcp/all`, so those wide runs were not repeated.
+- **Residual risks:** the real-client smoke, the dry run, the `v0.0.3` red proof, the tag, the publish and `verify` after it are the lead's checklist (A and B). The implement subagent used a few shell heredocs for edits (Rule #55) and verified each result. `.mcp.json` carries the five `IRIS_*` variables the spec lists, not `IRIS_HTTPS`; the server defaults it to false and it has not met a real client. `tools-list-snapshot.json` keeps `sdkVersion: "2.3.1"` (protected file; its check ignores the field). Containers used: none. Images pulled: none.

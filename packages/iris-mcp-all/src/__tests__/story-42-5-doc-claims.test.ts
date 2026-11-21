@@ -77,7 +77,7 @@ describe("Story 42.5: the README Releasing subsection", () => {
     expect(section).toContain("`scripts/release/changeset-1.0.0.md`");
     expect(section).toContain("root `CHANGELOG.md` section");
     expect(section).toContain("`BOOTSTRAP_VERSION` move");
-    expect(section).toContain("wait for CI to be green on the commit");
+    expect(section).toContain("wait for CI to be green on the merged commit");
     expect(section).toContain("Tag the commit `v<MAJOR.MINOR.PATCH>`");
     expect(section).toContain("Approve the run in the `release` environment");
   });

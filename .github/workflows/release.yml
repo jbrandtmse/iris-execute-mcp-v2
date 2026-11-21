@@ -5,8 +5,10 @@
 # What runs
 #   ci-gate   Waits for a green ci.yml run on the commit (up to 180 minutes) and reads the `release` environment: a tag run stops here unless
 #             the environment is protected (a required reviewer, no administrator bypass, exactly one tag rule `v*`); GitHub would
-#             otherwise create an unprotected environment when `publish` first named it. It holds `actions: read` and the read-only token.
-#   prepare   Checks the version state and the generated files, runs every package's prepublishOnly ONCE, armed on a seeded IRIS for Health
+#             otherwise create an unprotected environment when `publish` first named it. A tag run also stops here unless its commit is
+#             on `main`, and that check comes before the wait, so a refused tag asks for no approval. It holds `actions: read` and the
+#             read-only token.
+#   prepare   Checks the version state, the generated files and every root check script CI runs, runs every package's prepublishOnly ONCE, armed on a seeded IRIS for Health
 #             throwaway (scripts/throwaway-iris.mjs), and only then packs: eight tarballs with pnpm (no lifecycle script), the extension's
 #             vsix and the IPM tree, with a manifest of hashes. It uploads them as the one artifact the later jobs use.
 #   rehearse  The dry run of the upload: it verifies the hashes and runs `npm publish --dry-run` on each tarball, in order. It has no

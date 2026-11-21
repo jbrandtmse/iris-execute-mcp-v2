@@ -16,6 +16,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pnpmPack } from "../../../../scripts/lib/pnpm-pack.mjs";
 import { packedTarballName } from "../../../../scripts/release.mjs";
@@ -102,4 +103,79 @@ describe("smokePackages({ tarballs }) over a synthetic repository of eight packa
     expect(log).toContain("8 packages installed from tarballs, 5 servers and their CLIs answered");
     expect(leftovers, "the temporary directories are removed").toEqual([]);
   }, 240_000);
+});
+
+describe("smokePackages({ keep }) over a synthetic repository (Story 42.6, AC 42.6.1: the project a real client is pointed at)", () => {
+  /** A project directory that does not exist yet, inside a fresh scratch directory. */
+  const projectDir = (): string => path.join(scratch("release-smoke-keep"), "project");
+
+  it("installs the eight tarballs into the directory from file: tarballs only, keeps it, writes .mcp.json for the five servers, and prints the next steps (exit 0)", async () => {
+    const keepRepo = scratch("release-smoke-keep-repo");
+    writeRepo(keepRepo, PACKAGES, SNAPSHOT);
+    const keep = projectDir();
+    const observed = scratch("release-smoke-tmp");
+    const { code, log, leftovers } = await smokeOffline(keepRepo, observed, undefined, keep);
+    expect(code, log).toBe(0);
+    expect(existsSync(keep), "the directory is kept").toBe(true);
+    expect(readdirSync(path.join(keep, "node_modules", "@iris-mcp")).sort()).toEqual(PACKAGES.map((spec) => spec.name.replace("@iris-mcp/", "")).sort());
+
+    const manifest = JSON.parse(readFileSync(path.join(keep, "package.json"), "utf8")) as { dependencies: Record<string, string> };
+    expect(Object.values(manifest.dependencies)).toHaveLength(8);
+    expect(Object.values(manifest.dependencies).every((spec) => spec.startsWith("file:") && spec.endsWith(".tgz"))).toBe(true);
+    const lock = JSON.parse(readFileSync(path.join(keep, "package-lock.json"), "utf8")) as { packages: Record<string, { resolved?: string }> };
+    for (const spec of PACKAGES) expect(lock.packages[`node_modules/${spec.name}`]?.resolved, spec.name).toMatch(/^file:/);
+
+    const env = Object.fromEntries(["IRIS_HOST", "IRIS_PORT", "IRIS_USERNAME", "IRIS_PASSWORD", "IRIS_NAMESPACE"].map((name) => [name, `\${${name}}`]));
+    expect(JSON.parse(readFileSync(path.join(keep, ".mcp.json"), "utf8"))).toEqual({
+      mcpServers: Object.fromEntries(SERVERS.map((short) => [`iris-fake-${short}-mcp`, { command: "npx", args: ["--no", "--", `iris-fake-${short}-mcp`], env }])),
+    });
+    expect(Object.keys(JSON.parse(readFileSync(path.join(keep, ".mcp.json"), "utf8")).mcpServers)).toHaveLength(5);
+
+    expect(log).toContain(`cd ${keep}`);
+    expect(log).toMatch(/export IRIS_HOST=\.\.\. IRIS_PORT=\.\.\. IRIS_USERNAME=\.\.\. IRIS_PASSWORD=\.\.\. IRIS_NAMESPACE=\.\.\./);
+    expect(log).toMatch(/\n {2}claude$/);
+    for (const short of SERVERS) expect(log).toContain(`iris-fake-${short}-mcp: initialize and tools/list (2 tools) ok`);
+    expect(leftovers, "the smoke's own temporary directory is removed; only the kept directory stays").toEqual([]);
+  }, 240_000);
+
+  it("an empty existing directory is accepted", async () => {
+    const keepRepo = scratch("release-smoke-keep-repo");
+    writeRepo(keepRepo, PACKAGES.slice(0, 1), { "iris-fake-admin-mcp": 2 });
+    const keep = scratch("release-smoke-keep-empty");
+    const { code, log } = await smokeOffline(keepRepo, scratch("release-smoke-tmp"), undefined, keep);
+    expect(code, log).toBe(0);
+    expect(existsSync(path.join(keep, ".mcp.json"))).toBe(true);
+  }, 120_000);
+
+  it("a smoke failure is exit 1 and the directory is left for inspection, with its .mcp.json", async () => {
+    const keepRepo = scratch("release-smoke-keep-repo");
+    writeRepo(keepRepo, PACKAGES.slice(0, 1), { "iris-fake-admin-mcp": 3 });
+    const keep = projectDir();
+    const { code, log } = await smokeOffline(keepRepo, scratch("release-smoke-tmp"), undefined, keep);
+    expect(code, log).toBe(1);
+    expect(log).toContain("tools/list listed 2 tools, the snapshot lists 3.");
+    expect(log).toContain(`${keep} is kept for inspection.`);
+    expect(existsSync(path.join(keep, "node_modules", "@iris-mcp"))).toBe(true);
+    expect(existsSync(path.join(keep, ".mcp.json"))).toBe(true);
+    expect(log, "no next steps after a failure").not.toContain("claude");
+  }, 120_000);
+
+  it("a refused directory is exit 2 before anything is packed, and is left as it was", async () => {
+    const keepRepo = scratch("release-smoke-keep-repo");
+    writeRepo(keepRepo, PACKAGES.slice(0, 1), { "iris-fake-admin-mcp": 2 });
+    const occupied = scratch("release-smoke-keep-occupied");
+    writeFileSync(path.join(occupied, "keep.txt"), "mine\n");
+    const inside = path.join(keepRepo, "project");
+    for (const [label, target, expected] of [
+      ["a non-empty directory", occupied, /is not an empty directory/],
+      ["a directory inside the repository", inside, /is inside the repository/],
+    ] as Array<[string, string, RegExp]>) {
+      const { code, log } = await smokeOffline(keepRepo, scratch("release-smoke-tmp"), undefined, target);
+      expect(code, label).toBe(2);
+      expect(log, label).toMatch(expected);
+      expect(log, `${label}: nothing was packed`).not.toContain("packed");
+    }
+    expect(readFileSync(path.join(occupied, "keep.txt"), "utf8")).toBe("mine\n");
+    expect(existsSync(inside), "nothing was created inside the repository").toBe(false);
+  });
 });

@@ -45,7 +45,16 @@ export const IPM_DIST_BRANCH = 'master';
 export const IPM_MODULE = 'iris-execute-mcp-v2';
 export const IPM_REGISTRY_PACKAGE_URL = `https://pm.community.intersystems.com/packages/${IPM_MODULE}`;
 
-/** Root scripts whose name ends in `:check` and that the release does not run, each with its reason. */
+/** The branch a release tag must be on (decision #82): there is no maintenance-branch allowance. */
+export const RELEASE_BRANCH = 'main';
+
+/** The root scripts that check the tree: a `check` or `validate` word in the name. The release's `prepare` selects by it, and `ci-workflow.test.ts` scans the root scripts with it against CI's gate list. */
+export const ROOT_CHECK_SCRIPT = /(^|:)(check|validate)(:|$)/;
+
+/** What `npm view` prints when the registry does not hold the package or the version. */
+export const NPM_NOT_FOUND = /\bE404\b|404 Not Found|is not in this registry/i;
+
+/** Root check scripts (see {@link ROOT_CHECK_SCRIPT}) that the release does not run, each with its reason. */
 export const RELEASE_CHECK_EXEMPTIONS = Object.freeze({
   'format:check': 'not a CI gate (exempted by ROOT_SCRIPT_EXEMPTIONS in ci-workflow.test.ts)',
 });
@@ -220,6 +229,49 @@ export function describeRuns(runs) {
   return runs.map((run) => `${run.html_url ?? `run ${run.id}`}: ${run.status === 'completed' ? run.conclusion : run.status}`);
 }
 
+// -- main reachability ------------------------------------------------------------------------------------------
+
+/** The GitHub compare statuses of `main...<sha>` that mean the commit is main itself or one of its ancestors. */
+const ON_MAIN_STATUSES = Object.freeze(['identical', 'behind']);
+
+/** The compare statuses that mean the commit has something `main` does not contain. */
+const OFF_MAIN_STATUSES = Object.freeze(['ahead', 'diverged']);
+
+/** The GitHub API URL that compares `main` with a commit (one commit per page: only the status is read). */
+export function compareUrl(api, repo, sha) {
+  return `${api}/repos/${repo}/compare/${RELEASE_BRANCH}...${sha}?per_page=1`;
+}
+
+/**
+ * Whether a commit is on `main`, from the answer of {@link compareUrl}: `identical` and `behind` mean the commit is main or an ancestor
+ * of it, `ahead` and `diverged` mean it is not, and anything else (a non-2xx answer, an error, a body without a known status) is
+ * unreadable. Only `on-main` lets a tag run go on.
+ *
+ * @param {{ status: number, body?: any } | { error: string }} answer - What `githubGet` returned.
+ * @param {string} sha
+ * @returns {{ state: 'on-main' | 'off-main' | 'unreadable', status?: string, line: string, problem?: string }}
+ */
+export function mainReachability(answer, sha) {
+  const unreadable = (why) => ({
+    state: 'unreadable',
+    line: `commit ${sha}: unreadable (${why})`,
+    problem: `whether ${sha} is on ${RELEASE_BRANCH} could not be read (${why}). Check that the token may read the repository and that the commit was pushed, then run the release again.`,
+  });
+  if (typeof answer?.error === 'string') return unreadable(answer.error);
+  if (typeof answer?.status !== 'number' || answer.status < 200 || answer.status >= 300) return unreadable(`HTTP ${answer?.status}`);
+  const status = answer.body?.status;
+  if (ON_MAIN_STATUSES.includes(status)) return { state: 'on-main', status, line: `commit ${sha} is on ${RELEASE_BRANCH} (compare: ${status})` };
+  if (OFF_MAIN_STATUSES.includes(status)) {
+    return {
+      state: 'off-main',
+      status,
+      line: `commit ${sha} is not on ${RELEASE_BRANCH} (compare: ${status})`,
+      problem: `${sha} is not on ${RELEASE_BRANCH} (compare ${RELEASE_BRANCH}...${sha}: ${status}). Merge it to ${RELEASE_BRANCH}, then tag the merged commit.`,
+    };
+  }
+  return unreadable(`the answer holds no known status: ${JSON.stringify(status)}`);
+}
+
 // -- the environment guard --------------------------------------------------------------------------------------
 
 /** The names of the required reviewers of an environment (a user's login or a team's slug). */
@@ -328,6 +380,44 @@ export function npmPublishArgv(tarball, { dryRun = false, userconfig } = {}) {
 /** The `npm` arguments that ask the registry for the version of a package: it prints the version when it is published. */
 export function npmViewArgv(name, version) {
   return ['view', `${name}@${version}`, 'version'];
+}
+
+/** The `npm` arguments that read the version and the provenance attestation of one published package as JSON. */
+export function npmViewJsonArgv(name, version) {
+  return ['view', `${name}@${version}`, 'version', 'dist.attestations', '--json'];
+}
+
+/**
+ * What is wrong with the registry's answer for `name@version` (the result of `npm view ... --json`): the version must be there, at that
+ * version, with a provenance attestation. Empty means published with provenance.
+ *
+ * @param {string} name
+ * @param {string} version
+ * @param {{ status: number | null, stdout: string, stderr?: string, error?: Error }} viewed
+ * @returns {string[]}
+ */
+export function registryProblems(name, version, viewed) {
+  const item = `${name}@${version}`;
+  if (viewed.status !== 0) {
+    if (NPM_NOT_FOUND.test(`${viewed.stderr ?? ''}\n${viewed.stdout ?? ''}`)) {
+      return [`${item}: not on the registry. Publish the release, or run verify again once the registry has propagated it.`];
+    }
+    return [`${item}: npm view failed (${viewed.error?.message ?? `exit ${viewed.status}`}). Check the network and the registry, then run verify again.`];
+  }
+  let answer;
+  try {
+    answer = JSON.parse(viewed.stdout);
+  } catch {
+    return [`${item}: npm view answered text that is not JSON. Run verify again, and check npm's version.`];
+  }
+  // With no attestation npm prints the bare version string; with one it prints an object that holds both fields.
+  const found = typeof answer === 'string' ? answer : answer?.version;
+  if (found !== version) return [`${item}: the registry answered the version ${JSON.stringify(found)}, not ${version}. Run verify again.`];
+  const predicate = typeof answer === 'object' && answer !== null ? answer['dist.attestations']?.provenance?.predicateType : undefined;
+  if (typeof predicate !== 'string' || !predicate.startsWith('https://slsa.dev/provenance/')) {
+    return [`${item}: published without a provenance attestation. Publish through the release workflow, which signs with provenance.`];
+  }
+  return [];
 }
 
 /** The text of the 0600 userconfig that carries the npm token. A token with a control character could add a line, so it is refused. */

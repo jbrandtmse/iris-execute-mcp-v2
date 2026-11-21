@@ -4,12 +4,12 @@
  * What it pins, in the default suite:
  *  - no package manifest of the workspace lists the v1 SDK package;
  *  - `@iris-mcp/shared` depends on `@modelcontextprotocol/server`, and the client is a devDependency of each package that
- *    drives it, every one at the exact version 2.3.1 (no range);
+ *    drives it, every one at the exact version 2.4.0 (no range);
  *  - only `packages/shared/src` source (tests aside) imports an `@modelcontextprotocol/*` package;
- *  - the lockfile resolves `server`, `client` and `core` at 2.3.1 alone, names no v1 SDK, and marks none of the three as
+ *  - the lockfile resolves `server`, `client` and `core` at 2.4.0 alone, names no v1 SDK, and marks none of the three as
  *    running an install script;
  *  - the capture script's `installedSdk` finds the v1 SDK on an oracle tree and the v2 server package on a migrated one,
- *    and this repository resolves the v2 server package at 2.3.1.
+ *    and this repository resolves the v2 server package at 2.4.0.
  *
  * It reads manifests, source files and the lockfile only; it starts no server and touches no IRIS instance. The temporary
  * trees of the `installedSdk` rows are created and removed by the rows themselves.
@@ -23,7 +23,7 @@ import { REPO_ROOT } from "./pack-fixture";
 import { installedSdk } from "../../../../scripts/lib/sdk-wire-golden-core.mjs";
 
 const V1_SDK = "@modelcontextprotocol/sdk";
-const PINNED = "2.3.1";
+const PINNED = "2.4.0";
 const DEPENDENCY_FIELDS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"] as const;
 
 type Manifest = { name?: string } & Partial<Record<(typeof DEPENDENCY_FIELDS)[number], Record<string, string>>>;
@@ -138,7 +138,7 @@ describe("the lockfile (AC 43.1.1)", () => {
     expect(lock).not.toContain(V1_SDK);
   });
 
-  it("resolves server, client and core at exactly 2.3.1 and no other version", () => {
+  it("resolves server, client and core at exactly 2.4.0 and no other version", () => {
     const keys = lines.map((line) => /^ {2}'@modelcontextprotocol\/(server|client|core)@([^']+)':$/.exec(line)).filter((match): match is RegExpExecArray => match !== null);
     expect(new Set(keys.map((match) => match[1]))).toEqual(new Set(["server", "client", "core"]));
     expect(new Set(keys.map((match) => match[2]))).toEqual(new Set([PINNED]));
@@ -182,7 +182,7 @@ describe("installedSdk, the capture script's reading of the SDK package it ran a
     expect(() => installedSdk(treeWith())).toThrow(/is installed under packages\/shared\/node_modules/);
   });
 
-  it("resolves the v2 server package at 2.3.1 in this repository", () => {
+  it("resolves the v2 server package at 2.4.0 in this repository", () => {
     expect(installedSdk(REPO_ROOT)).toEqual({ sdkPackage: "@modelcontextprotocol/server", sdkVersion: PINNED });
   });
 });

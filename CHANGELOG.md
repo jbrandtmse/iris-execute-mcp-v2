@@ -2,6 +2,45 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [1.0.0] — 2026-11-20 — Story 42.6: Tarball Smoke and 1.0.0 Publish
+
+The first public release. All eight `@iris-mcp/*` packages are at `1.0.0`, one shared version. The release workflow publishes them to npm with
+provenance, and the five servers launch as `npx -y @iris-mcp/<server>@1` on Node `>=22.17.0`. The per-story "Pre-release" sections below are the history up to
+`1.0.0`. This story adds no changeset: the version step consumed all of them, and its own changes are the ones named here. No tool, prompt,
+governance or wire change is made: no tool, action, preset row, annotation, refusal code, product environment variable, REST route or REST
+response is added, removed or changed, the frozen governance baseline stays at hash `1e62c5ad5bf7` (141 keys), and the frozen SDK goldens and
+the tools-list snapshot are byte-unchanged.
+
+### Added
+
+- **The version.** `pnpm run version -- --first-release` put all eight packages at `1.0.0` and consumed the pending changesets. `BOOTSTRAP_VERSION`
+  moves from `0.0.2+2.244fe8623c76` to `1.0.0+2.244fe8623c76`; the class content and the sequence are unchanged, and `ipm/module.xml` carries
+  `1.0.0`. Each package's own `CHANGELOG.md` has its `## 1.0.0` section (the generated detail of every change in it).
+- **`CHANGELOG.md` ships in every tarball (DW-665).** Each package lists it in `files`, so the history travels with the exact bytes a user
+  installed, offline.
+- **`node scripts/release.mjs verify --version <x.y.z>` (AC 42.6.3; alias `pnpm release verify`).** A read-only check of the registry after a
+  publish: every package is there at that version with a provenance attestation, and `npx -y @iris-mcp/dev@1` starts in a clean temporary home,
+  npm cache and working directory, against a closed local port, and answers `initialize` with that version. It covers the `@1` major, prints
+  one line per check, and exits 0, 1 or 2. It publishes, deprecates and logs in to nothing.
+- **`node scripts/ci-package-smoke.mjs --keep <dir>` (AC 42.6.1, DW-47).** The package smoke, which keeps the installed project: the eight
+  tarballs are installed into `<dir>` (absent or empty, outside the repository) from `file:` tarballs only, the five servers answer
+  `initialize` and `tools/list` through `npx --no`, and `<dir>/.mcp.json` launches each of them through `npx`, taking the IRIS connection from
+  `IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD` and `IRIS_NAMESPACE`. With no argument the smoke and its output are unchanged.
+
+### Changed
+
+- **The release refuses a tag that is not on `main` (DW-696, decision #82).** `ci-gate` compares `main` with the tagged commit, and a tag run
+  whose commit `main` does not contain (a status other than `identical` or `behind`, or an answer it cannot read) stops before it waits for CI,
+  so no approval is requested. A dry run reports the answer on one line and goes on. There is no maintenance-branch allowance.
+- **`prepare` runs every root check script that CI runs (DW-612).** It now selects each root script whose name has a `check` or `validate` word,
+  so `check:provenance` and `validate:prompts` run on the publish path with the `gen:*:check` scripts; `format:check` stays the one exemption. A
+  test holds that set equal to the `pnpm` entries of CI's root gates.
+- **The MCP SDK is pinned at `2.4.0` (DW-637).** `@modelcontextprotocol/server` and `client` move from `2.3.1`, and the lockfile resolves
+  `server`, `client` and `core` at `2.4.0` alone. `2.4.0` bundles fast-uri `3.1.8`, which fixes the advisories that `2.3.1`'s `3.1.0` carried.
+  The wire is unchanged: every frozen golden is byte-identical. `fixtures/tools-list-snapshot.json` keeps `2.3.1` in its `sdkVersion` metadata,
+  which its check does not compare.
+- **The README `### Releasing` section** gains the main rule, the merge before the tag, and the `verify` step.
+
 ## [Pre-release — 2026-10-22] — Story 42.5: Release Workflow
 
 Story 42.5 adds the release machinery: a workflow that publishes only from a tagged, CI-green commit through an approved protected

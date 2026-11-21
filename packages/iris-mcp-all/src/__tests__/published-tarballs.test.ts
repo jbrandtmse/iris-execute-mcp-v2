@@ -138,6 +138,14 @@ describe("the eight packed tarballs", () => {
     expect((pack.manifest as PackedManifest).publishConfig).toBeUndefined();
   });
 
+  it.each(PACKAGE_DIRS)("%s: the tarball lists CHANGELOG.md, byte-equal to the source file, whose first `## ` heading is the package version (Story 42.6, DW-665)", (dir) => {
+    const pack = packs.get(dir) as PnpmPack;
+    expect(pack.files, "the tarball holds the CHANGELOG").toContain("CHANGELOG.md");
+    const packed = readFileSync(join(pack.root, "CHANGELOG.md"), "utf8");
+    expect(packed).toBe(readFileSync(join(REPO_ROOT, "packages", dir, "CHANGELOG.md"), "utf8"));
+    expect(packed.split("\n").find((line) => line.startsWith("## "))).toBe(`## ${String((pack.manifest as PackedManifest).version)}`);
+  });
+
   it("the five servers carry mcpName and the others do not", () => {
     const named = PACKAGE_DIRS.filter((dir) => (packs.get(dir)?.manifest as PackedManifest).mcpName !== undefined);
     expect(named).toEqual(["iris-admin-mcp", "iris-data-mcp", "iris-dev-mcp", "iris-interop-mcp", "iris-ops-mcp"]);

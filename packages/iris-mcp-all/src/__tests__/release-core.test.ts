@@ -11,13 +11,17 @@ import {
   IPM_DIST_BRANCH,
   IPM_DIST_REPOSITORY,
   MIN_NPM_VERSION,
+  NPM_NOT_FOUND,
   NPM_PUBLISH_ORDER,
+  RELEASE_BRANCH,
   RELEASE_CHANNELS,
   RELEASE_CHECK_EXEMPTIONS,
   RELEASE_ENVIRONMENT,
   RELEASE_TAG_PATTERN,
+  ROOT_CHECK_SCRIPT,
   STATUS,
   ciGateDecision,
+  compareUrl,
   compareVersions,
   describeRuns,
   environmentProblems,
@@ -27,12 +31,15 @@ import {
   ipmPushPlan,
   ipmReadme,
   ipmRegistryListsVersion,
+  mainReachability,
   npmPublishArgv,
   npmUserconfig,
   npmVersionProblems,
   npmViewArgv,
+  npmViewJsonArgv,
   ovsxArgv,
   publishRefusals,
+  registryProblems,
   releaseMode,
   releaseReport,
   skippedText,
@@ -490,5 +497,119 @@ describe("The report", () => {
   it("the statuses are the five of the acceptance criteria", () => {
     expect([STATUS.published, STATUS.alreadyPublished, STATUS.failed, STATUS.notAttempted, STATUS.skipped]).toEqual(["published", "already published", "failed", "not attempted", "skipped"]);
     expect(skippedText({ enabledBy: "Story 42.8" })).toBe("skipped: not enabled (Story 42.8)");
+  });
+});
+
+// -- Story 42.6 ---------------------------------------------------------------------------------------------------
+
+describe("Main reachability (DW-696, decision #82): identical and behind are on main, anything else is not", () => {
+  const ok = (status: string) => ({ status: 200, body: { status, ahead_by: 0, behind_by: 0, total_commits: 0 } });
+
+  it("RELEASE_BRANCH is main", () => {
+    expect(RELEASE_BRANCH).toBe("main");
+  });
+
+  it.each(["identical", "behind"])("compare status %s is on main", (status) => {
+    expect(mainReachability(ok(status), SHA)).toEqual({ state: "on-main", status, line: `commit ${SHA} is on main (compare: ${status})` });
+  });
+
+  it.each(["ahead", "diverged"])("compare status %s is off main, with the refusal text of the matrix", (status) => {
+    const answer = mainReachability(ok(status), SHA);
+    expect(answer.state).toBe("off-main");
+    expect(answer.status).toBe(status);
+    expect(answer.line).toBe(`commit ${SHA} is not on main (compare: ${status})`);
+    expect(answer.problem).toBe(`${SHA} is not on main (compare main...${SHA}: ${status}). Merge it to main, then tag the merged commit.`);
+  });
+
+  it.each([
+    ["a missing status", { status: 200, body: {} }, /holds no known status: undefined/],
+    ["an unknown status", { status: 200, body: { status: "sideways" } }, /holds no known status: "sideways"/],
+    ["no body", { status: 200 }, /holds no known status/],
+    ["a 404 (an unknown commit)", { status: 404, body: { message: "Not Found" } }, /\(HTTP 404\)/],
+    ["a 403", { status: 403, body: { message: "Forbidden" } }, /\(HTTP 403\)/],
+    ["a 500", { status: 500 }, /\(HTTP 500\)/],
+    ["a redirect", { status: 302 }, /\(HTTP 302\)/],
+    ["a network error", { error: "socket hang up" }, /\(socket hang up\)/],
+  ] as Array<[string, Record<string, unknown>, RegExp]>)("%s is unreadable, which refuses a tag run", (_label, input, expected) => {
+    const answer = mainReachability(input as never, SHA);
+    expect(answer.state).toBe("unreadable");
+    expect(answer.line).toMatch(expected);
+    expect(answer.problem).toMatch(expected);
+    expect(answer.problem, "the text has the form <what happened>. <what to do>.").toMatch(/^whether a+ is on main could not be read \(.+\)\. [A-Z]/);
+    expect(answer.status).toBeUndefined();
+  });
+
+  it("a status that only looks like a good one (a case change, a padded text) is not on main", () => {
+    for (const status of ["Identical", "BEHIND", "identical ", ""]) expect(mainReachability(ok(status), SHA).state, JSON.stringify(status)).toBe("unreadable");
+  });
+
+  it("compareUrl names main...<sha> with one commit per page", () => {
+    expect(compareUrl("https://api.github.com", "o/r", SHA)).toBe(`https://api.github.com/repos/o/r/compare/main...${SHA}?per_page=1`);
+  });
+});
+
+describe("ROOT_CHECK_SCRIPT: a check or validate word in a root script's name (DW-612)", () => {
+  it.each(["check:provenance", "validate:prompts", "gen:pack:check", "gen:skills:check", "gen:tools-list-snapshot:check", "gen:governance-baseline:check", "format:check", "check", "validate", "lint:check:strict"])("matches %s", (name) => {
+    expect(ROOT_CHECK_SCRIPT.test(name)).toBe(true);
+  });
+
+  it.each(["build", "test", "gen:pack", "release", "version", "checkout", "validated", "recheck", "live:bootstrap-guard", "measure:tools-payload", "prettier:checker"])("does not match %s", (name) => {
+    expect(ROOT_CHECK_SCRIPT.test(name)).toBe(false);
+  });
+});
+
+describe("The registry check of a published package (AC 42.6.3)", () => {
+  const NAME = "@iris-mcp/shared";
+  const published = (extra: Record<string, unknown> = {}) => ({
+    status: 0,
+    stdout: JSON.stringify({ version: "1.0.0", "dist.attestations": { url: "https://registry.npmjs.org/-/npm/v1/attestations/x", provenance: { predicateType: "https://slsa.dev/provenance/v1" } }, ...extra }),
+    stderr: "",
+  });
+
+  it("npmViewJsonArgv asks for the version and the attestations as JSON, and is no publish verb", () => {
+    expect(npmViewJsonArgv(NAME, "1.0.0")).toEqual(["view", "@iris-mcp/shared@1.0.0", "version", "dist.attestations", "--json"]);
+    expect(npmViewJsonArgv(NAME, "1.0.0")).not.toContain("publish");
+  });
+
+  it("a version with a SLSA provenance attestation is fine", () => {
+    expect(registryProblems(NAME, "1.0.0", published())).toEqual([]);
+  });
+
+  it("an E404 (stderr text or the JSON error body) means the package is not on the registry", () => {
+    const text = "npm error code E404\nnpm error 404 Not Found - GET https://registry.npmjs.org/@iris-mcp%2fshared - Not found\n";
+    expect(registryProblems(NAME, "1.0.0", { status: 1, stdout: "", stderr: text })).toEqual([expect.stringMatching(/^@iris-mcp\/shared@1\.0\.0: not on the registry\. /)]);
+    expect(registryProblems(NAME, "1.0.0", { status: 1, stdout: JSON.stringify({ error: { code: "E404", summary: "Not Found" } }), stderr: "" })).toEqual([expect.stringContaining("not on the registry")]);
+    for (const words of ["404 Not Found", "is not in this registry"]) {
+      expect(NPM_NOT_FOUND.test(words), words).toBe(true);
+      expect(registryProblems(NAME, "1.0.0", { status: 1, stdout: "", stderr: words })[0], words).toContain("not on the registry");
+    }
+  });
+
+  it("another failure (a network error, a 5xx) is a failed view, not an absence", () => {
+    const problems = registryProblems(NAME, "1.0.0", { status: 1, stdout: "", stderr: "npm error code ECONNREFUSED" });
+    expect(problems).toEqual([expect.stringMatching(/npm view failed \(exit 1\)\. Check the network/)]);
+    expect(problems[0]).not.toContain("not on the registry");
+    expect(registryProblems(NAME, "1.0.0", { status: null, stdout: "", error: new Error("spawn npm ENOENT") })[0]).toContain("spawn npm ENOENT");
+  });
+
+  it("a version without dist.attestations (npm then prints the bare version) is published without provenance", () => {
+    expect(registryProblems(NAME, "1.0.0", { status: 0, stdout: '"1.0.0"\n' })).toEqual([expect.stringMatching(/^@iris-mcp\/shared@1\.0\.0: published without a provenance attestation\. /)]);
+    expect(registryProblems(NAME, "1.0.0", { status: 0, stdout: JSON.stringify({ version: "1.0.0" }) })[0]).toContain("without a provenance attestation");
+  });
+
+  it("an attestation whose predicate is not SLSA provenance, or that has none, is not provenance", () => {
+    for (const attestations of [{ provenance: { predicateType: "https://example.test/other/v1" } }, { provenance: {} }, { url: "https://x" }, "text", null]) {
+      expect(registryProblems(NAME, "1.0.0", published({ "dist.attestations": attestations }))[0], JSON.stringify(attestations)).toContain("without a provenance attestation");
+    }
+  });
+
+  it("a registry that answers another version is a problem naming both", () => {
+    expect(registryProblems(NAME, "1.0.0", { ...published(), stdout: JSON.stringify({ version: "1.0.1", "dist.attestations": { provenance: { predicateType: "https://slsa.dev/provenance/v1" } } }) })).toEqual([
+      expect.stringContaining('the registry answered the version "1.0.1", not 1.0.0'),
+    ]);
+  });
+
+  it("text that is not JSON is a problem", () => {
+    expect(registryProblems(NAME, "1.0.0", { status: 0, stdout: "not json" })[0]).toContain("not JSON");
   });
 });

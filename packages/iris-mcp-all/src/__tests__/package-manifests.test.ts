@@ -24,6 +24,7 @@ import { REPO_ROOT } from "./pack-fixture";
 
 interface Manifest {
   name: string;
+  version?: string;
   displayName?: string;
   description?: string;
   keywords?: unknown;
@@ -239,6 +240,26 @@ describe("what a tarball may carry (the manifests behind AC 42.1.3)", () => {
   it("every built package keeps source maps out of its tarball", () => {
     for (const entry of PACKAGES.filter((candidate) => candidate.hasTsconfig)) {
       expect(entry.manifest.files, label(entry)).toContain("!dist/**/*.map");
+    }
+  });
+
+  it("every publishable package lists CHANGELOG.md in files, and the file exists with the package's own version as its first `## ` heading (DW-665)", () => {
+    expect(PACKAGES.length, "the eight publishable packages").toBe(8);
+    for (const entry of PACKAGES) {
+      expect(entry.manifest.files, label(entry)).toContain("CHANGELOG.md");
+      const file = join(REPO_ROOT, entry.directory, "CHANGELOG.md");
+      expect(existsSync(file), `${label(entry)} has a CHANGELOG.md for pnpm to pack`).toBe(true);
+      const headings = readFileSync(file, "utf8").split("\n").filter((line) => line.startsWith("## "));
+      expect(headings[0], label(entry)).toBe(`## ${String(entry.manifest.version)}`);
+      expect(headings, `${label(entry)} carries the 1.0.0 section`).toContain("## 1.0.0");
+    }
+  });
+
+  it("CHANGELOG.md is listed before every `!` exclusion, so no exclusion pattern can reach it", () => {
+    for (const entry of PACKAGES) {
+      const files = entry.manifest.files ?? [];
+      const firstExclusion = files.findIndex((pattern) => pattern.startsWith("!"));
+      if (firstExclusion >= 0) expect(files.indexOf("CHANGELOG.md"), label(entry)).toBeLessThan(firstExclusion);
     }
   });
 

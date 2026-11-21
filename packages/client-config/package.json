@@ -1,6 +1,6 @@
 {
   "name": "@iris-mcp/client-config",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "Client configuration manager and skills-pack installer for the IRIS MCP servers: detects MCP clients, writes and removes server entries with backups, and installs the skills pack into a project",
   "keywords": [
     "iris",
@@ -36,6 +36,7 @@
   },
   "files": [
     "dist",
+    "CHANGELOG.md",
     "!dist/**/__tests__",
     "!dist/**/*.map",
     "skills-pack"

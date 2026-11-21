@@ -1,6 +1,6 @@
 {
   "name": "@iris-mcp/ops",
-  "version": "0.0.2",
+  "version": "1.0.0",
   "description": "IRIS Operations & Monitoring MCP Server",
   "keywords": [
     "iris",
@@ -37,6 +37,7 @@
   },
   "files": [
     "dist",
+    "CHANGELOG.md",
     "!dist/**/__tests__",
     "!dist/**/*.map"
   ],

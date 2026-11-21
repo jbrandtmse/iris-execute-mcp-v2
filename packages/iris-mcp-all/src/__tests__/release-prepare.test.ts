@@ -21,7 +21,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import * as checks from "../../../../scripts/lib/ci-checks.mjs";
 import * as ipm from "../../../../scripts/lib/ipm-archive.mjs";
-import { NPM_PUBLISH_ORDER } from "../../../../scripts/lib/release-core.mjs";
+import { ROOT_GATE_SCRIPTS } from "../../../../scripts/lib/ci-checks.mjs";
+import { NPM_PUBLISH_ORDER, ROOT_CHECK_SCRIPT } from "../../../../scripts/lib/release-core.mjs";
 import * as harness from "../../../../scripts/throwaway-iris.mjs";
 import { REPO_ROOT } from "../../../../scripts/lib/live-gate-scan.mjs";
 import {
@@ -43,6 +44,12 @@ import { MARKER_TAIL, PACKAGE_DIRS, ROOT_SCRIPTS, SHA, makeRepo, type RepoOption
 
 const SECRET_NPM = "npm_PREPARESECRET1234567890";
 const SECRET_GITHUB = "ghs_PREPARESECRET0987654321";
+/** The root scripts prepare runs on the real root manifest (DW-612): CI's root gates, sorted. */
+const REAL_CHECKS = ["check:provenance", "gen:governance-baseline:check", "gen:pack:check", "gen:skills:check", "gen:tools-list-snapshot:check", "validate:prompts"];
+
+/** The `scripts` of the real root `package.json`. */
+const realRootScripts = (): Record<string, string> => (JSON.parse(readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")) as { scripts: Record<string, string> }).scripts;
+
 const SUITE_IDS = NPM_PUBLISH_ORDER.map((name: string) => `prepublish-${name.replace(/^@iris-mcp\//, "")}`);
 
 const roots: string[] = [];
@@ -460,12 +467,12 @@ describe("Prepare: tree integrity, in both modes (AC 42.5.2; AD-14)", () => {
     expect(world.lines.join("\n")).toContain("pnpm run gen:bootstrap failed (exit 1): generator exploded");
   });
 
-  it("every root script that ends in :check runs, except format:check (a named reason) and the lifecycle hooks; a failing one is named, and all problems are listed", async () => {
+  it("every root script that checks the tree runs, except format:check (a named reason) and the lifecycle hooks; a failing one is named, and all problems are listed", async () => {
     const world = newWorld();
     world.behaviors.failChecks = new Set(["gen:skills:check", "gen:pack:check"]);
     expect(await world.run()).toBe(1);
     const ran = world.runs.filter((entry) => entry.argv[0] === "pnpm" && entry.argv[1] === "run" && entry.argv[2] !== "gen:bootstrap").map((entry) => entry.argv[2]);
-    expect(ran).toEqual(["gen:governance-baseline:check", "gen:pack:check", "gen:skills:check", "gen:tools-list-snapshot:check"]);
+    expect(ran).toEqual(REAL_CHECKS);
     expect(ran).not.toContain("format:check");
     expect(ran).not.toContain("pregen:governance-baseline:check");
     const text = world.lines.join("\n");
@@ -475,10 +482,36 @@ describe("Prepare: tree integrity, in both modes (AC 42.5.2; AD-14)", () => {
     expect(world.docker.calls()).toEqual([]);
   });
 
-  it("releaseCheckScripts finds the :check scripts of the REAL root manifest and none of its hooks, and format:check is the one exemption", () => {
-    const scripts = (JSON.parse(readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")) as { scripts: Record<string, string> }).scripts;
-    expect(releaseCheckScripts(scripts)).toEqual(["gen:governance-baseline:check", "gen:pack:check", "gen:skills:check", "gen:tools-list-snapshot:check"]);
-    expect(Object.keys(scripts).filter((name) => name.endsWith(":check") && !releaseCheckScripts(scripts).includes(name)).sort()).toEqual(["format:check", "pregen:governance-baseline:check"]);
+  it("releaseCheckScripts finds the check and validate scripts of the REAL root manifest and none of its hooks, and format:check is the one exemption (DW-612)", () => {
+    const scripts = realRootScripts();
+    expect(releaseCheckScripts(scripts)).toEqual(REAL_CHECKS);
+    expect(Object.keys(scripts).filter((name) => ROOT_CHECK_SCRIPT.test(name) && !releaseCheckScripts(scripts).includes(name)).sort()).toEqual(["format:check", "pregen:governance-baseline:check"]);
+  });
+
+  it("parity: the root scripts prepare runs, as pnpm commands, are exactly the pnpm entries of CI's ROOT_GATE_SCRIPTS (DW-612, Rule #44)", () => {
+    const prepared = new Set(releaseCheckScripts(realRootScripts()).map((name: string) => `pnpm ${name}`));
+    const gated = new Set((ROOT_GATE_SCRIPTS as readonly string[]).filter((command) => command.startsWith("pnpm ")));
+    expect([...prepared].sort()).toEqual([...gated].sort());
+    expect(prepared.has("pnpm check:provenance") && prepared.has("pnpm validate:prompts")).toBe(true);
+  });
+
+  it("parity is red when prepare would run a root check that CI's gate list does not", () => {
+    const scripts = { ...realRootScripts(), "check:new-gate": "node scripts/check-new-gate.mjs" };
+    const prepared = new Set(releaseCheckScripts(scripts).map((name: string) => `pnpm ${name}`));
+    const gated = new Set((ROOT_GATE_SCRIPTS as readonly string[]).filter((command) => command.startsWith("pnpm ")));
+    expect([...prepared].filter((command) => !gated.has(command)), "prepare runs one CI does not").toEqual(["pnpm check:new-gate"]);
+  });
+
+  it("a failing check:provenance, or validate:prompts, is exit 1 naming it, and nothing is packed (DW-612)", async () => {
+    for (const failing of ["check:provenance", "validate:prompts"]) {
+      const world = newWorld();
+      world.behaviors.failChecks = new Set([failing]);
+      expect(await world.run(), failing).toBe(1);
+      expect(world.lines.join("\n"), failing).toContain(`problem: pnpm run ${failing} failed (exit 1)`);
+      expect(world.lines.join("\n")).toContain("gen:pack:check: ok");
+      expect(world.docker.calls(), "the gate set never started").toEqual([]);
+      expect(existsSync(path.join(world.out, "release-manifest.json"))).toBe(false);
+    }
   });
 
   it("releaseCheckScripts drops only a lifecycle hook: a pre/post name whose remainder is itself a script", () => {
@@ -498,7 +531,7 @@ describe("Prepare: tree integrity, in both modes (AC 42.5.2; AD-14)", () => {
     const world = newWorld({ scripts: { ...ROOT_SCRIPTS, "prettier:check": "prettier --check src", "postgen:skills:check": "echo done" } });
     expect(await world.run()).toBe(0);
     const ran = world.runs.filter((entry) => entry.argv[0] === "pnpm" && entry.argv[1] === "run" && entry.argv[2] !== "gen:bootstrap").map((entry) => entry.argv[2]);
-    expect(ran).toEqual(["gen:governance-baseline:check", "gen:pack:check", "gen:skills:check", "gen:tools-list-snapshot:check", "prettier:check"]);
+    expect(ran).toEqual([...REAL_CHECKS, "prettier:check"].sort());
   });
 });
 

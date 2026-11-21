@@ -27,6 +27,8 @@ export interface FakeGithub {
   environment: FakeAnswer;
   policies: FakeAnswer;
   runs: () => FakeAnswer;
+  /** The answer of the compare of `main...<sha>`: the commit is main itself unless a test says otherwise. */
+  compare: FakeAnswer;
   /** Every path (with its query) the API was asked for, in order. */
   requests: string[];
   /** The `Authorization` header of each request. */
@@ -55,12 +57,20 @@ export function ciRun(overrides: Record<string, unknown> = {}): Record<string, u
   return { id: 7, html_url: "https://github.com/o/r/actions/runs/7", head_sha: SHA, event: "push", path: ".github/workflows/ci.yml", status: "completed", conclusion: "success", ...overrides };
 }
 
-/** A fake GitHub API with a protected environment and one green CI run. */
+/** The reduced body of a GitHub compare answer (`status`, `ahead_by`, `behind_by`, `total_commits`), the shape `story-42-6-qa-real-oracles.test.ts` captured. */
+export function compareAnswer(status: string, counts: { ahead?: number; behind?: number } = {}): FakeAnswer {
+  const ahead = counts.ahead ?? (status === "ahead" || status === "diverged" ? 3 : 0);
+  const behind = counts.behind ?? (status === "behind" || status === "diverged" ? 2 : 0);
+  return { status: 200, body: { status, ahead_by: ahead, behind_by: behind, total_commits: ahead } };
+}
+
+/** A fake GitHub API with a protected environment, one green CI run, and a commit that is on `main`. */
 export function newFakeGithub(): FakeGithub {
   return {
     environment: protectedEnvironment(),
     policies: TAG_POLICIES,
     runs: () => ({ status: 200, body: { total_count: 1, workflow_runs: [ciRun()] } }),
+    compare: compareAnswer("identical"),
     requests: [],
     authorizations: [],
   };
@@ -75,6 +85,7 @@ export function answerFor(github: FakeGithub, url: string, authorization = ""): 
   if (parsed.pathname.endsWith("/deployment-branch-policies")) return github.policies;
   if (/\/environments\/release$/.test(parsed.pathname)) return github.environment;
   if (parsed.pathname.endsWith("/actions/runs")) return github.runs();
+  if (/\/compare\/main\.\.\.[0-9a-f]+$/.test(parsed.pathname)) return github.compare;
   return { status: 404, body: { message: "Not Found" } };
 }
 

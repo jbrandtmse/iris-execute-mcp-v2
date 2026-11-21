@@ -78,15 +78,16 @@ export interface PrebuiltTarball {
 
 /**
  * Smoke `repo` offline, with the temporary directory pointed at `observed` (an empty directory the caller removes) so that what the
- * smoke leaves behind can be listed afterwards. With `tarballs` the smoke installs exactly those files and packs nothing.
+ * smoke leaves behind can be listed afterwards. With `tarballs` the smoke installs exactly those files and packs nothing. With `keep` the
+ * smoke installs into that directory and leaves it (Story 42.6).
  */
-export async function smokeOffline(repo: string, observed: string, tarballs?: readonly PrebuiltTarball[]): Promise<{ code: number; log: string; leftovers: string[] }> {
+export async function smokeOffline(repo: string, observed: string, tarballs?: readonly PrebuiltTarball[], keep?: string): Promise<{ code: number; log: string; leftovers: string[] }> {
   const saved = { TMPDIR: process.env["TMPDIR"], offline: process.env["npm_config_offline"] };
   process.env["TMPDIR"] = observed;
   process.env["npm_config_offline"] = "true";
   try {
     const lines: string[] = [];
-    const code = await smokePackages({ repoRoot: repo, log: (line: string) => lines.push(line), ...(tarballs === undefined ? {} : { tarballs }) });
+    const code = await smokePackages({ repoRoot: repo, log: (line: string) => lines.push(line), ...(tarballs === undefined ? {} : { tarballs }), ...(keep === undefined ? {} : { keep }) });
     return { code, log: lines.join("\n"), leftovers: readdirSync(observed).filter((name) => name.startsWith("ci-package-smoke-")) };
   } finally {
     for (const [key, value] of [["TMPDIR", saved.TMPDIR], ["npm_config_offline", saved.offline]] as const) {

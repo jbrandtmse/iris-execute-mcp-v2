@@ -47,6 +47,7 @@ import {
   relativeToRepo,
   workspacePackageDirs,
 } from "../../../../scripts/lib/live-gate-scan.mjs";
+import { ROOT_CHECK_SCRIPT } from "../../../../scripts/lib/release-core.mjs";
 import { workflowProblems, type PackageFacts, type WorkflowContext } from "./ci-workflow-check";
 
 const WORKFLOW = path.join(REPO_ROOT, ".github", "workflows", "ci.yml");
@@ -416,7 +417,7 @@ describe("Rule #56: every root script that checks the tree is a gates step or a 
 
   /** The names of the root scripts that check the tree (a `check` or `validate` word in the name, lifecycle hooks left out). */
   const checkScripts = (scripts: Record<string, string>): string[] =>
-    Object.keys(scripts).filter((name) => /(^|:)(check|validate)(:|$)/.test(name) && !/^(pre|post)/.test(name));
+    Object.keys(scripts).filter((name) => ROOT_CHECK_SCRIPT.test(name) && !/^(pre|post)/.test(name));
 
   /** The check scripts that the gates job does not run and no exemption excuses. */
   const uncovered = (scripts: Record<string, string>): string[] => {

@@ -24,7 +24,7 @@
 //   `lockfileProblems`) are exported for the tests.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -174,15 +174,78 @@ function checkCli(bin, installDir, env) {
   return problems;
 }
 
+/** The IRIS connection variables a kept project's `.mcp.json` hands to each server, as `${VAR}` references. */
+export const KEEP_IRIS_VARIABLES = Object.freeze(['IRIS_HOST', 'IRIS_PORT', 'IRIS_USERNAME', 'IRIS_PASSWORD', 'IRIS_NAMESPACE']);
+
+/** The nearest existing ancestor of `target`, resolved through symbolic links, with the rest of the path put back. */
+function realPathOf(target) {
+  const missing = [];
+  let current = path.resolve(target);
+  while (!existsSync(current) && path.dirname(current) !== current) {
+    missing.unshift(path.basename(current));
+    current = path.dirname(current);
+  }
+  return path.join(realpathSync(current), ...missing);
+}
+
+/**
+ * What is wrong with a `--keep` directory: it must be absent or empty, and outside the repository (the project is installed there, and
+ * the repository must stay clean).
+ *
+ * @param {string} dir
+ * @param {string} [repoRoot]
+ * @returns {string[]}
+ */
+export function keepDirProblems(dir, repoRoot = REPO_ROOT) {
+  const problems = [];
+  const resolved = path.resolve(dir);
+  const relative = path.relative(realPathOf(repoRoot), realPathOf(resolved));
+  const outside = relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+  if (relative === '' || !outside) {
+    problems.push(`${resolved} is inside the repository. Pass a directory outside it, such as one made by mktemp -d.`);
+  }
+  let entry;
+  try {
+    entry = lstatSync(resolved);
+  } catch {
+    entry = undefined;
+  }
+  if (entry !== undefined && (!entry.isDirectory() || readdirSync(resolved).length > 0)) {
+    problems.push(`${resolved} exists and is not an empty directory. Pass an absent or empty directory.`);
+  }
+  return problems;
+}
+
+/**
+ * The `.mcp.json` of a kept project: one entry per server bin, launched through `npx --no` (the installed tarballs, never the
+ * registry), each with the IRIS connection taken from the environment of the client.
+ *
+ * @param {readonly string[]} servers - The server bins.
+ */
+export function keepMcpConfig(servers) {
+  const env = Object.fromEntries(KEEP_IRIS_VARIABLES.map((name) => [name, `\${${name}}`]));
+  return { mcpServers: Object.fromEntries([...servers].sort().map((bin) => [bin, { command: 'npx', args: ['--no', '--', bin], env }])) };
+}
+
 /**
  * Pack, install and start every package, and return the exit code. With `tarballs` (Story 42.5: the release's own, packed once with
  * `pnpm pack` and scripts ignored) it packs nothing and installs exactly those files; each entry is
- * `{ name, tarball, manifest, files? }` as `pnpmPack` returns it, and a package without an entry fails the smoke.
+ * `{ name, tarball, manifest, files? }` as `pnpmPack` returns it, and a package without an entry fails the smoke. With `keep` (Story
+ * 42.6) the project is installed into that directory (absent or empty, outside the repository), which is never removed, and gets a
+ * `.mcp.json` for a real client; a refused directory is exit 2 before anything is packed.
  *
- * @param {{ repoRoot?: string, log?: (line: string) => void, tarballs?: ReadonlyArray<{ name: string, tarball: string, manifest: Record<string, any>, files?: readonly string[] }> }} [options]
+ * @param {{ repoRoot?: string, keep?: string, log?: (line: string) => void, tarballs?: ReadonlyArray<{ name: string, tarball: string, manifest: Record<string, any>, files?: readonly string[] }> }} [options]
  * @returns {Promise<number>}
  */
-export async function smokePackages({ repoRoot = REPO_ROOT, log = (line) => process.stderr.write(`${line}\n`), tarballs: prebuilt } = {}) {
+export async function smokePackages({ repoRoot = REPO_ROOT, keep, log = (line) => process.stderr.write(`${line}\n`), tarballs: prebuilt } = {}) {
+  const keepDir = keep === undefined ? undefined : path.resolve(keep);
+  if (keepDir !== undefined) {
+    const refused = keepDirProblems(keepDir, repoRoot);
+    if (refused.length > 0) {
+      log(`ci-package-smoke: ${refused.join(' ')}`);
+      return 2;
+    }
+  }
   const packages = publishablePackages(repoRoot);
   const failures = [];
   const fail = (what, problems) => {
@@ -207,7 +270,7 @@ export async function smokePackages({ repoRoot = REPO_ROOT, log = (line) => proc
     for (const pkg of packages) {
       let packed;
       if (prebuilt === undefined) {
-        const destination = path.join(work, 'packs', pkg.dir);
+        const destination = path.join(keepDir ?? work, keepDir === undefined ? 'packs' : 'tarballs', pkg.dir);
         packed = pnpmPack(path.join(repoRoot, 'packages', pkg.dir), destination, { ignoreScripts: false });
         log(`ci-package-smoke: packed ${pkg.name} (${packed.bytes} bytes)`);
       } else {
@@ -226,15 +289,17 @@ export async function smokePackages({ repoRoot = REPO_ROOT, log = (line) => proc
     }
     if (tarballs.length < packages.length) {
       log(`ci-package-smoke: ${failures.length} problem(s):\n  - ${failures.join('\n  - ')}`);
+      if (keepDir !== undefined) log(`ci-package-smoke: ${keepDir} is kept for inspection.`);
       return 1;
     }
 
-    const installDir = path.join(work, 'install');
-    mkdirSync(installDir);
+    const installDir = keepDir ?? path.join(work, 'install');
+    mkdirSync(installDir, { recursive: true });
     writeFileSync(path.join(installDir, 'package.json'), `${JSON.stringify(installManifest(tarballs), null, 2)}\n`);
     const installed = run('npm', ['install', '--no-audit', '--no-fund'], { cwd: installDir, env });
     if (installed.status !== 0) {
       log(`ci-package-smoke: npm install failed (${installed.status ?? installed.error?.message}):\n${installed.stderr.trim().slice(-2000)}`);
+      if (keepDir !== undefined) log(`ci-package-smoke: ${keepDir} is kept for inspection.`);
       return 1;
     }
     const lockFile = path.join(installDir, 'package-lock.json');
@@ -242,6 +307,7 @@ export async function smokePackages({ repoRoot = REPO_ROOT, log = (line) => proc
     log(`ci-package-smoke: installed ${packages.length} tarballs`);
 
     const servers = snapshotServers(repoRoot);
+    if (keepDir !== undefined) writeFileSync(path.join(keepDir, '.mcp.json'), `${JSON.stringify(keepMcpConfig(servers), null, 2)}\n`);
     const bins = packages.flatMap((pkg) => binsOf(tarballs.find((entry) => entry.name === pkg.name).manifest));
     for (const server of servers) {
       if (!bins.includes(server)) fail(server, ['no packed package declares this server bin.']);
@@ -262,19 +328,25 @@ export async function smokePackages({ repoRoot = REPO_ROOT, log = (line) => proc
 
   if (failures.length > 0) {
     log(`ci-package-smoke: ${failures.length} problem(s):\n  - ${failures.join('\n  - ')}`);
+    if (keepDir !== undefined) log(`ci-package-smoke: ${keepDir} is kept for inspection.`);
     return 1;
   }
   log(`ci-package-smoke: ${packages.length} packages installed from tarballs, ${snapshotServers(repoRoot).length} servers and their CLIs answered`);
+  if (keepDir !== undefined) {
+    log(`ci-package-smoke: ${keepDir} holds the installed project and its .mcp.json. Next, with an IRIS to call:`);
+    log(`  cd ${keepDir}`);
+    log(`  export ${KEEP_IRIS_VARIABLES.map((name) => `${name}=...`).join(' ')}`);
+    log('  claude');
+  }
   return 0;
 }
 
-/** The entry point. */
+/** The entry point: no argument is the CI smoke; `--keep <dir>` is the same smoke that leaves the installed project in `<dir>`. */
 export async function main(argv = process.argv.slice(2)) {
-  if (argv.length > 0) {
-    process.stderr.write('usage: node scripts/ci-package-smoke.mjs\n');
-    return 2;
-  }
-  return smokePackages();
+  if (argv.length === 0) return smokePackages();
+  if (argv.length === 2 && argv[0] === '--keep' && argv[1] !== '' && !argv[1].startsWith('-')) return smokePackages({ keep: argv[1] });
+  process.stderr.write('usage: node scripts/ci-package-smoke.mjs [--keep <dir>]\n');
+  return 2;
 }
 
 if (isEntryPoint(import.meta.url)) {

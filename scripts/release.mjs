@@ -7,6 +7,7 @@
 //   node scripts/release.mjs prepare --out <dir>                   run the checks and the gate set, then pack every artifact into <dir>
 //   node scripts/release.mjs publish --artifacts <dir> --dry-run   rehearse the upload of <dir>
 //   node scripts/release.mjs publish --artifacts <dir>             upload <dir>, channel by channel, in order
+//   node scripts/release.mjs verify --version <x.y.z>              check the registry after a publish (read-only)
 //
 // CONTRACT
 //   1. MODE. A run is a release only for a `push` of the tag `refs/tags/v<MAJOR.MINOR.PATCH>`; any other event or ref (a push to a
@@ -16,7 +17,10 @@
 //      its merge ref and never counts), exits 1 when every such run completed and none succeeded, when the timeout passes or when the
 //      API fails or stalls for 30 s (it fails closed). It also reads the `release` environment: a tag run exits 1 unless the environment
 //      is protected (a required reviewer, no administrator bypass, exactly one tag rule `v*`); a dry run prints one line about it.
-//   3. PREPARE checks the version state and the generated files, runs every package's `prepublishOnly` ONCE through the throwaway harness
+//      A tag run is also refused unless the commit is on `main`: GET compare `main...<sha>` must answer `identical` or `behind`, and `ahead`,
+//      `diverged`, any other status, a non-2xx answer, an error or a stall is a refusal. It runs after the environment guard and before the CI
+//      poll, so a refused tag asks for no approval; a dry run prints one line about it. There is no maintenance-branch allowance.
+//   3. PREPARE checks the version state and the generated files, runs every root script that checks the tree (the set CI's gates run), runs every package's `prepublishOnly` ONCE through the throwaway harness
 //      (`scripts/throwaway-iris.mjs exec ... node scripts/ci-live-suite.mjs prepublish-<short>`, which exports IRIS_REQUIRE_LIVE=1 and all
 //      five IRIS_* variables), and only then packs: eight tarballs with `pnpm pack` (no lifecycle script), the vsix, and the IPM tree,
 //      with `release-manifest.json` (version, sha, mode, channels, files, sha256). The container is removed on every exit path.
@@ -35,6 +39,10 @@
 //   6. Each phase prints a line, and the report is appended to $GITHUB_STEP_SUMMARY when it is set.
 //   7. SIGINT and SIGTERM kill the child processes that are running, run the cleanups and end the run with 130 or 143
 //      (`installSignalHandlers`); the gate set's own handlers, registered later, forward the signal to its command and remove the container.
+//   8. VERIFY is read-only: for every package of NPM_PUBLISH_ORDER, `npm view <name>@<v> version dist.attestations --json` must show the
+//      version with a provenance attestation, and `npx -y @iris-mcp/dev@1` must answer `initialize` with `serverInfo.version` <v> in a
+//      clean temporary home, npm cache and working directory, against a closed local port. It prints one line per check, never publishes,
+//      logs in or reaches IRIS, and removes its temporary directory on every exit path. It covers the `@1` major only.
 //
 // EXIT CODES
 //   0 passed; 1 a check, a gate or an upload failed; 2 usage or a refusal; 3 docker is not on PATH; 4 the container did not start.
@@ -42,7 +50,7 @@
 // IMPORT
 //   Importing this module runs nothing. `ci-gate`, `rehearse` and `publish` run with no `node_modules`, so this file imports only `node:`
 //   builtins, `lib/release-core.mjs` and `lib/script-process.mjs`; every module that `prepare` alone needs (the harness, the packer, the
-//   smoke, the IPM staging) is loaded by `import()` inside `prepare`. `ciGate`, `prepare` and `publish` take every side effect as `deps`.
+//   smoke, the IPM staging) is loaded by `import()` inside `prepare` (`verify` loads the raw stdio driver the same way). `ciGate`, `prepare`, `publish` and `verify` take every side effect as `deps`.
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -69,13 +77,16 @@ import {
   IPM_DIST_BRANCH,
   IPM_DIST_REPOSITORY,
   IPM_REGISTRY_PACKAGE_URL,
+  NPM_NOT_FOUND,
   NPM_PUBLISH_ORDER,
   PLACEHOLDER_PUBLISHER,
   RELEASE_CHANNELS,
   RELEASE_CHECK_EXEMPTIONS,
   RELEASE_ENVIRONMENT,
+  ROOT_CHECK_SCRIPT,
   STATUS,
   ciGateDecision,
+  compareUrl,
   describeRuns,
   environmentProblems,
   environmentSummary,
@@ -84,12 +95,15 @@ import {
   ipmPushPlan,
   ipmReadme,
   ipmRegistryListsVersion,
+  mainReachability,
   npmPublishArgv,
   npmUserconfig,
   npmVersionProblems,
   npmViewArgv,
+  npmViewJsonArgv,
   ovsxArgv,
   publishRefusals,
+  registryProblems,
   releaseMode,
   releaseReport,
   skippedText,
@@ -255,7 +269,13 @@ export function defaultDeps({ fetchTimeoutMs = 30_000 } = {}) {
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     log: (line) => process.stderr.write(`${line}\n`),
     loadModules: loadPrepareModules,
+    loadWire: loadVerifyWire,
   };
+}
+
+/** The wire helpers only `verify` needs (the raw stdio driver and the closed-port settings), loaded when it needs them. */
+async function loadVerifyWire(repoRoot = REPO_ROOT) {
+  return import(pathToFileURL(path.join(repoRoot, 'scripts/lib/sdk-wire-golden-core.mjs')).href);
 }
 
 /** The modules only `prepare` needs, loaded when it needs them (a runner without `node_modules` never loads them). */
@@ -337,6 +357,15 @@ export async function readEnvironmentGuard(deps, env) {
   return { state: 'protected', line: `environment ${RELEASE_ENVIRONMENT}: ${environmentSummary(environment.body, policies)}`, problems, warnings };
 }
 
+/**
+ * Ask GitHub whether the commit is on `main` (the compare of `main...<sha>`) and judge the answer.
+ *
+ * @returns {Promise<ReturnType<typeof mainReachability>>}
+ */
+export async function readMainReachability(deps, env, sha) {
+  return mainReachability(await githubGet(deps, env, compareUrl(apiRoot(env), env.GITHUB_REPOSITORY, sha)), sha);
+}
+
 // -- ci-gate ---------------------------------------------------------------------------------------------------
 
 /** `deps` whose `log` also keeps every line, and a function that appends those lines to the step summary under `title`. */
@@ -381,14 +410,20 @@ async function runCiGate({ env, timeoutMinutes = 180, pollMs = 60_000 }, deps) {
 
   const guard = await readEnvironmentGuard(deps, env);
   for (const warning of guard.warnings) say(`warning: ${warning}`);
+  const onMain = await readMainReachability(deps, env, info.sha);
   if (info.mode === 'release') {
     say(guard.line);
-    if (guard.state !== 'protected') {
-      say(`refusing the tag run: ${guard.problems.join(' ')} No later job runs.`);
+    say(onMain.line);
+    const refusals = [];
+    if (guard.state !== 'protected') refusals.push(`refusing the tag run: ${guard.problems.join(' ')} No later job runs.`);
+    if (onMain.state !== 'on-main') refusals.push(`refusing the tag run: ${onMain.problem} No later job runs.`);
+    if (refusals.length > 0) {
+      for (const refusal of refusals) say(refusal);
       return 1;
     }
   } else {
     say(`${guard.line}${guard.state === 'protected' ? '' : '; a tag run stops here'}`);
+    say(`${onMain.line}${onMain.state === 'on-main' ? '' : '; a tag run stops here'}`);
   }
 
   const runsUrl = `${apiRoot(env)}/repos/${env.GITHUB_REPOSITORY}/actions/runs?head_sha=${encodeURIComponent(info.sha)}&per_page=100`;
@@ -471,9 +506,9 @@ export function embeddedVersionProblems(facts) {
 }
 
 /**
- * The names of the root scripts that `prepare` runs: those that end in `:check`, less the exemptions and the lifecycle hooks. A hook is
- * a name that starts with `pre` or `post` and whose remainder is itself a script (`pregen:x:check` of `gen:x:check`); `prettier:check`
- * is not one.
+ * The names of the root scripts that `prepare` runs: those with a `check` or `validate` word in the name (`ROOT_CHECK_SCRIPT`, the
+ * pattern CI's own scan uses), less the exemptions and the lifecycle hooks. A hook is a name that starts with `pre` or `post` and
+ * whose remainder is itself a script (`pregen:x:check` of `gen:x:check`); `prettier:check` is not one.
  */
 export function releaseCheckScripts(scripts) {
   const isHook = (name) => {
@@ -481,7 +516,7 @@ export function releaseCheckScripts(scripts) {
     return hooked !== undefined && Object.hasOwn(scripts, hooked);
   };
   return Object.keys(scripts)
-    .filter((name) => name.endsWith(':check') && !isHook(name) && !(name in RELEASE_CHECK_EXEMPTIONS))
+    .filter((name) => ROOT_CHECK_SCRIPT.test(name) && !isHook(name) && !(name in RELEASE_CHECK_EXEMPTIONS))
     .sort();
 }
 
@@ -827,7 +862,7 @@ export function uploadPathProblems(manifest, channels) {
 /** Whether `npm view` said that the version is on the registry (`published`), is not (`absent`), or could not be judged (`unknown`). */
 function viewOutcome(result, version) {
   if (result.status === 0 && result.stdout.trim() === version) return 'published';
-  if (result.status !== 0 && /\bE404\b|404 Not Found|is not in this registry/i.test(`${result.stderr}\n${result.stdout}`)) return 'absent';
+  if (result.status !== 0 && NPM_NOT_FOUND.test(`${result.stderr}\n${result.stdout}`)) return 'absent';
   return 'unknown';
 }
 
@@ -1117,12 +1152,112 @@ async function publishIpm(detail, { dir, env, deps, cleanups, version, sha, quot
   return { status: STATUS.published, detail: `${plan.tag} on ${IPM_DIST_REPOSITORY} ${plan.branch}` };
 }
 
+// -- verify ----------------------------------------------------------------------------------------------------
+
+/** The arguments of the `npx` start `verify` makes: the pinned major (`npx-pin.test.ts` finds any other spelling), and the one major it covers. */
+const VERIFY_NPX_ARGS = Object.freeze(['-y', '@iris-mcp/dev@1']);
+const VERIFY_MAJOR = '1';
+
+/** The protocol revision `verify` asks the server for, and the name it reports. */
+const VERIFY_PROTOCOL = '2025-11-25';
+const VERIFY_CLIENT = 'release-verify';
+
+/** The environment of `verify`'s children: the caller's, with no secret, IRIS_*, MCP_* or npm_config_* variable and no npm auth token, and with an empty home and cache. */
+function verifyEnv(env, home, cache) {
+  const copy = childEnv(env);
+  for (const key of Object.keys(copy)) {
+    const upper = key.toUpperCase();
+    if (upper.startsWith('IRIS_') || upper.startsWith('MCP_') || upper.startsWith('NPM_CONFIG_') || upper === 'NODE_AUTH_TOKEN') delete copy[key];
+  }
+  return { ...copy, npm_config_update_notifier: 'false', HOME: home, USERPROFILE: home, npm_config_cache: cache };
+}
+
+/**
+ * Check the registry after a publish (read-only): every package of `NPM_PUBLISH_ORDER` is on it at `version` with a provenance
+ * attestation, and `npx -y @iris-mcp/dev@1` starts in a clean temporary home, cache and working directory (against a closed local port)
+ * and answers `initialize` with that version. Prints one line per check; 0 when all pass, 1 when any fails, 2 for a usage error.
+ *
+ * @param {{ version: string, env: Record<string, string | undefined> }} options
+ * @param {ReturnType<typeof defaultDeps> & { cleanups?: ReturnType<typeof createCleanups> }} deps
+ * @returns {Promise<number>}
+ */
+export async function verify(options, deps) {
+  const summary = withSummary(deps, options.env, 'verify');
+  let code = 1;
+  try {
+    code = await runVerify(options, summary.deps);
+    return code;
+  } finally {
+    summary.finish(code);
+  }
+}
+
+async function runVerify({ version, env }, deps) {
+  const say = (line) => deps.log(`verify: ${line}`);
+  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) {
+    say(`--version must be MAJOR.MINOR.PATCH. ${USAGE}`);
+    return 2;
+  }
+  if (version.split('.')[0] !== VERIFY_MAJOR) {
+    say(`verify launches the @${VERIFY_MAJOR} major. Update its pinned spec with the next major.`);
+    return 2;
+  }
+  const work = mkdtempSync(path.join(tmpdir(), 'release-verify-'));
+  const remove = () => rmSync(work, { recursive: true, force: true });
+  deps.cleanups?.add(remove);
+  try {
+    const [home, cache, cwd] = ['home', 'cache', 'cwd'].map((name) => path.join(work, name));
+    for (const directory of [home, cache, cwd]) mkdirSync(directory);
+    const childEnvironment = verifyEnv(env, home, cache);
+    const problems = [];
+    for (const name of NPM_PUBLISH_ORDER) {
+      const viewed = await deps.run(['npm', ...npmViewJsonArgv(name, version)], { cwd, env: childEnvironment, timeoutMs: 120_000 });
+      const found = registryProblems(name, version, viewed);
+      for (const problem of found) say(problem);
+      if (found.length === 0) say(`${name}@${version}: ok, published with a provenance attestation`);
+      problems.push(...found);
+    }
+
+    const spec = `npx ${VERIFY_NPX_ARGS.join(' ')}`;
+    let wire;
+    try {
+      const { openRawWire, handshake, CLOSED_PORT_ENV } = await deps.loadWire();
+      wire = openRawWire({ command: 'npx', args: [...VERIFY_NPX_ARGS], cwd, env: { ...childEnvironment, ...CLOSED_PORT_ENV }, timeoutMs: 240_000 });
+      const initialized = await handshake(wire, VERIFY_PROTOCOL, VERIFY_CLIENT);
+      const served = initialized.message?.result?.serverInfo?.version;
+      if (served === version) {
+        say(`${spec}: ok, initialize answered serverInfo.version ${served}`);
+      } else {
+        const problem = `${spec}: initialize answered serverInfo.version ${JSON.stringify(served)}, not ${version}. Check that the published @${VERIFY_MAJOR} line is ${version}; once a later ${VERIFY_MAJOR}.x is published, @${VERIFY_MAJOR} serves that one.`;
+        say(problem);
+        problems.push(problem);
+      }
+    } catch (error) {
+      const problem = `${spec}: failed to start and answer initialize (${(error instanceof Error ? error.message : String(error)).split('\n')[0]}). Publish the release, then run verify again.`;
+      say(problem);
+      problems.push(problem);
+    } finally {
+      try {
+        await wire?.close();
+      } catch {
+        // the answer is already judged; a close that fails changes no verdict
+      }
+    }
+
+    say(problems.length === 0 ? `${NPM_PUBLISH_ORDER.length} packages at ${version} with provenance, and ${spec} starts` : `${problems.length} check(s) failed`);
+    return problems.length === 0 ? 0 : 1;
+  } finally {
+    remove();
+  }
+}
+
 // -- the command line ------------------------------------------------------------------------------------------
 
 const USAGE =
   'usage: node scripts/release.mjs ci-gate [--timeout-minutes <n>]\n' +
   '       node scripts/release.mjs prepare --out <dir>\n' +
-  '       node scripts/release.mjs publish --artifacts <dir> [--dry-run]';
+  '       node scripts/release.mjs publish --artifacts <dir> [--dry-run]\n' +
+  '       node scripts/release.mjs verify --version <MAJOR.MINOR.PATCH>';
 
 /**
  * Parse the command line into `{ command, options }`; a bad line throws a {@link Refusal} that holds the usage. One leading `--` is
@@ -1132,7 +1267,7 @@ const USAGE =
  */
 export function parseArgs(argv) {
   const [command, ...rest] = argv[0] === '--' ? argv.slice(1) : argv;
-  const allowed = { 'ci-gate': ['--timeout-minutes'], prepare: ['--out'], publish: ['--artifacts'] }[command];
+  const allowed = { 'ci-gate': ['--timeout-minutes'], prepare: ['--out'], publish: ['--artifacts'], verify: ['--version'] }[command];
   if (allowed === undefined) throw new Refusal(`unknown command ${JSON.stringify(command)}. ${USAGE}`);
   const values = {};
   let dryRun = false;
@@ -1149,6 +1284,8 @@ export function parseArgs(argv) {
   }
   if (command === 'prepare' && values['--out'] === undefined) throw new Refusal(`prepare needs --out. ${USAGE}`);
   if (command === 'publish' && values['--artifacts'] === undefined) throw new Refusal(`publish needs --artifacts. ${USAGE}`);
+  if (command === 'verify' && values['--version'] === undefined) throw new Refusal(`verify needs --version. ${USAGE}`);
+  if (command === 'verify' && !/^\d+\.\d+\.\d+$/.test(values['--version'])) throw new Refusal(`--version must be MAJOR.MINOR.PATCH. ${USAGE}`);
   const options = {};
   if (command === 'ci-gate' && values['--timeout-minutes'] !== undefined) {
     const minutes = Number(values['--timeout-minutes']);
@@ -1157,6 +1294,7 @@ export function parseArgs(argv) {
   }
   if (command === 'prepare') options.out = values['--out'];
   if (command === 'publish') Object.assign(options, { artifacts: values['--artifacts'], dryRun });
+  if (command === 'verify') options.version = values['--version'];
   return { command, options };
 }
 
@@ -1204,6 +1342,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     process.chdir(REPO_ROOT);
     return prepare({ env, ...options, out }, deps);
   }
+  if (command === 'verify') return verify({ env, ...options }, deps);
   return publish({ env, ...options }, deps);
 }
 
