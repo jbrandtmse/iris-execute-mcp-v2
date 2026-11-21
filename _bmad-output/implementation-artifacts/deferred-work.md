@@ -4005,3 +4005,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-9-install-docs-and-client-re-certification.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: npm view @iris-mcp/dev time: 0.0.0-stage 2026-11-21T12:33:19Z, description 'Temporary package placeholder for staged publishing', not deprecated; dist-tag latest is 1.0.0; spec-42-6:70 says no 0.0.0-stage placeholder
 - 2026-11-21T13:55:48Z status=decision-pending owner=burndown by=cr note=human=owner decides npm deprecate of 0.0.0-stage (registry write) or a CHANGELOG note
+
+### DW-717: CLAUDE.md and project rule #18 do not name the root module.xml, ipm/src/** and preload/** as generated do-not-edit output written by the release version step
+- source: spec-42-8-amendment-122-ipm-from-main.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: rule #18 lists bootstrap-classes.ts and *.generated.* only; gen-bootstrap.mjs --ipm writes module.xml, ipm/src/cls/**, preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls at the version step (b8eaebf)
+- 2026-11-21T16:43:12Z status=decision-pending owner=burndown by=cr note=retro: add the stamped IPM tree to rule #18 and CLAUDE.md (lead may not edit rules mid-epic)
+
+### DW-718: ci-ipm-archive.test.ts pins class counts derived from the generated embed as literals, which move whenever a bootstrapped class is added
+- source: spec-42-8-amendment-122-ipm-from-main.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: packages/iris-mcp-all/src/__tests__/ci-ipm-archive.test.ts lines 181,244,306,898,1090,1133,1186,1199,1359-1361 (20dcc72)
+- 2026-11-21T16:43:12Z status=wontfix-accepted owner=42-8-claude-code-plugin-and-registry-listings by=cr note=reopen_if=a version-step commit goes red on a class-count literal
