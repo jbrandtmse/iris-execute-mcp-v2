@@ -2004,6 +2004,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 9 non-private publishable manifests not 8; add private:true after confirming vsce package/publish still work; replace the publisher placeholder before any marketplace release.
 - 2026-10-14T10:47:57Z status=routed owner=burndown by=migration note=9 non-private publishable manifests not 8; add private:true after confirming vsce package/publish still work
 - 2026-10-15T02:51:51Z status=routed owner=42-7-vs-code-extension-publish by=correct-course note=decided D5 (decision-record-2026-10-14): project-name publisher on Marketplace + Open VSX; private:true for npm
+- 2026-11-21T07:54:04Z status=resolved-by:42-7-vs-code-extension-publish by=adjudication note=publisher_iris-mcp+private:true;non-private-packages_test(red_on_drop_of_private_and_on_a_new_tracked_package.json,QA);dry_run_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44878912402_vsix_publisher_iris-mcp
 
 ### DW-390: [34-6-CR-15] The TS tool layer discards byRefTruncated on the error path (execute.ts extracts only truncated)
 - source: legacy:34.6 | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -2862,6 +2863,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-21T13:14:16Z occurrence=42-1-pre-publish-package-fixes note=same_5_macOS_failures_seen_at_42.1_implement_on_pristine_baseline(4_C:_path_pins_not_absolute_on_POSIX;_33-3-3_clientsActivationFlow_timeout)
 - 2026-10-21T14:27:37Z occurrence=42-1-pre-publish-package-fixes
 - 2026-10-22T04:35:01Z occurrence=42-3-ci-workflow note=CI_runs_only_the_launcher_arming_guard,liveArming.test.ts,type-check,build_and_its_two_live_files;the_full_suite_stays_out_of_CI_until_42.7_(4_baseline_failures_pin_C:_paths_and_fail_on_Linux_too)
+- 2026-11-21T07:54:04Z status=resolved-by:42-7-vs-code-extension-publish by=adjudication note=4_C:_path_pins_rebuilt_with_path,33-3-3_stale_wait_fixed;launcher_suite_mac_5fail->0fail;CI_launcher_job_3_OS_457_passed_3_skipped_each(https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44878867919);red_proof_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44878910834_red_on_all_3
 
 ### DW-533: iris_production_manage delete removes ANY class given as name: the class-delete path never checks that the class extends Ens.Production
 - source: spec-38-0-epic-37-deferred-cleanup.md | severity: med | fix-risk: high | footprint: in-story
@@ -3686,6 +3688,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 42.1 plan probe 2026-10-20: npm exec resolves a local copy from the nearest ancestor (libnpmexec index.js:41-69); clients.ts:165 uses process.cwd()
 - 2026-10-21T13:14:16Z status=routed owner=42-7-vs-code-extension-publish by=harvest note=the extension publish story touches both engines; pass an explicit project dir or neutral cwd
+- 2026-11-21T07:54:04Z status=resolved-by:42-7-vs-code-extension-publish by=adjudication note=decision_98:clients_cwd=first_workspace_folder_else_home,governance_cwd=home;real_activate()_tests+mutations(QA);relative_governanceFile_resolved_against_home(review_M2);DW-702_alias_follow-up_routed_42-9(decision_100)
 
 ### DW-664: Seven READMEs say IRIS_USERNAME defaults to _SYSTEM, but config.ts treats it as required and the server exits with 'IRIS_USERNAME environment variable is required'
 - source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3924,3 +3927,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-7-vs-code-extension-publish.md | severity: med | fix-risk: med | footprint: in-story
 - evidence: spec I/O row 'Open VSX namespace absent': rehearse not ready, dry run exit 1; release.yml publish needs [ci-gate, prepare, rehearse]; no per-run store opt-out
 - 2026-11-21T06:43:42Z status=by-design owner=42-7-vs-code-extension-publish by=cr note=spec-bound (matrix row); O1 must precede any post-merge tag incl. a 1.0.x fix; reopen via spec amendment
+
+### DW-705: The Marketplace channel reads ready before the publisher exists: the rehearse check only asks whether the version is already published, so a missing publisher (owner step O1 skipped) fails only at upload, after npm has published
+- source: spec-42-7-vs-code-extension-publish.md (lead Phase A, dry run https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44878912402) | severity: low | fix-risk: med | footprint: in-story
+- evidence: rehearse: vscode-marketplace: ready (would publish iris-mcp-launcher@1.0.0) while open-vsx reads not ready (namespace absent); the public Marketplace has no unauthenticated publisher lookup; recovery: create the publisher, then Re-run failed jobs (npm reads already published)
+- 2026-11-21T07:54:04Z status=wontfix-accepted owner=42-7-vs-code-extension-publish by=lead note=reopen_if=the_first_store_release's_vscode-marketplace_row_fails_for_a_missing_publisher;O1_precedes_any_post-merge_tag(DW-704)

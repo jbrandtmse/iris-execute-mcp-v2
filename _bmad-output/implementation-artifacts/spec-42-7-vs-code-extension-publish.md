@@ -568,6 +568,23 @@ Every test added or changed passes on a fresh environment, in either order, and 
    - Delete the branch.
 4. **A3.** Hand the Planner the sha and the run ids (decision #83: the merge waits for the epic end).
 
+*Phase A record (lead, 2026-11-21, story sha `c874000`):*
+- **A1:** CI is green, https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44878867919.
+  - Every `launcher` leg (ubuntu-24.04, macos-15, windows-2025) shows 32 files passed and `457 passed | 3 skipped (460)`. The skips are exactly the two live files: `localSpawnIntegration` 2 and `governanceUiRoundTrip` 1.
+  - The gates (22.17.0, 24.0.0, 26.0.0), throwaway, package and ipm jobs are green.
+- **A1b:** red on the path the job guards, https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44878910834.
+  - The throwaway branch `red/42-7-launcher` (`4e33987`) inverts one assertion in `constants.test.ts`.
+  - Its `launcher` job failed on all three OS legs, each at `src/__tests__/constants.test.ts > hardcoded Server Manager constants`. The gates jobs stayed green, so the launcher job alone caught it.
+  - The branch was deleted afterwards. The temporary worktree was already removed.
+- **A2:** dry run, https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44878912402.
+  - `ci-gate` passed.
+  - `prepare` packaged `the extension iris-mcp-launcher@1.0.0 (publisher iris-mcp): iris-mcp-launcher-1.0.0.vsix, 20 files`, and printed `a tag run would refuse: the first heading of extensions/iris-mcp-launcher/CHANGELOG.md is ## [Unreleased]` (by design).
+  - `rehearse` gave 8 npm `dry run ok` lines. `vscode-marketplace` read `ready (would publish iris-mcp-launcher@1.0.0)`. `open-vsx` read `not ready (the Open VSX namespace iris-mcp does not exist … owner step O1)`, so `rehearse` exited 1 (DW-704, by design, before O1). `ipm` read `skipped: not enabled (Story 42.8)`.
+  - The branch was deleted afterwards.
+  - Observation, ledgered as DW-705 (wontfix-accepted): the Marketplace reads `ready` before the publisher exists. O1 must come before any tag after the merge.
+- **A3:** the sha and run ids were sent to the Planner. The merge waits for the end of the epic (decision #83).
+- **Status:** the story stays `in-progress`. Phase B waits for npm `1.0.0` (42.6 B7), and Phase C for the `v1.1.0` release (decision #95) and owner steps O1 to O3.
+
 *Phase B, after npm `1.0.0` is live (42.6 B7):*
 1. **B1. The local vsix launches the published servers.**
    - Start a throwaway IRIS for Health through `scripts/throwaway-iris.mjs up` (Lead authorization, decisions #55/#64/#71/#88; host port 52792; `HSCUSTOM`).
