@@ -2642,6 +2642,10 @@ describe("The MCP Registry channel (Story 42.8; AD-29)", () => {
     const pin = { version: "v9.9.9-test", asset: "mcp-publisher_linux_amd64.tar.gz", sha256: createHash("sha256").update(bytes).digest("hex") };
     world.stores.publisher = { status: 200, bytes, contentType: "application/octet-stream" };
     symlinkSync(hostTar(), path.join(world.standIns.binDir, "tar"));
+    // GNU tar (the release runner's, and CI's) runs `gzip` from PATH for `-z`; macOS bsdtar decompresses in-process. The stand-ins'
+    // directory is the script's whole PATH, so the host's gzip is linked beside tar, as the runner's PATH holds both.
+    const hostGzip = findExecutable("gzip", process.env["PATH"] ?? "");
+    if (hostGzip !== undefined) symlinkSync(hostGzip, path.join(world.standIns.binDir, "gzip"));
     world.standIns.script("mcp-publisher", [{ match: ["login"], stdout: "Successfully logged in\n" }, { match: ["validate"], stdout: "Validation passed\n" }, { match: ["publish"], stdout: "Successfully published\n" }]);
     const sleeps: number[] = [];
     let now = 0;
