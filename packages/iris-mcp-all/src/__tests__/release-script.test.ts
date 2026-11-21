@@ -1632,7 +1632,7 @@ describe("Publish: the extension stores (Story 42.7)", () => {
 
     it("Open VSX namespace absent (decision #121): `skipped (not set up: the Open VSX namespace iris-mcp does not exist ...)`, exit 0", async () => {
       const world = newWorld();
-      world.stores.namespace = { status: 404 };
+      world.stores.namespace = { status: 404, body: { error: "Namespace not found: iris-mcp" } };
       expect(await world.run({ dryRun: true })).toBe(0);
       expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: skipped (not set up: the Open VSX namespace iris-mcp does not exist. Create it once with npx ovsx create-namespace iris-mcp (owner step O1).)");
       expect(reportOf(world)).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0)");

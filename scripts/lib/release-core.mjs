@@ -749,7 +749,8 @@ const escapeCommandData = (text) => String(text).replace(/%/g, '%25').replace(/\
  * @returns {string[]}
  */
 export function notSetUpAnnotations(results) {
-  return notSetUpChannels(results).map((entry) => `::warning title=Channel skipped, not set up::${escapeCommandData(`${entry.channel}: ${entry.reason}`)}`);
+  // A property value escapes `,` and `:` too (the runner splits properties on `,`): the title's comma is `%2C`.
+  return notSetUpChannels(results).map((entry) => `::warning title=Channel skipped%2C not set up::${escapeCommandData(`${entry.channel}: ${entry.reason}`)}`);
 }
 
 /** The text a disabled channel prints. */

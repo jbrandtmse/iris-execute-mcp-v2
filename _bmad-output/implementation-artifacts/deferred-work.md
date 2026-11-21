@@ -3933,6 +3933,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-7-vs-code-extension-publish.md | severity: med | fix-risk: med | footprint: in-story
 - evidence: spec I/O row 'Open VSX namespace absent': rehearse not ready, dry run exit 1; release.yml publish needs [ci-gate, prepare, rehearse]; no per-run store opt-out
 - 2026-11-21T06:43:42Z status=by-design owner=42-7-vs-code-extension-publish by=cr note=spec-bound (matrix row); O1 must precede any post-merge tag incl. a 1.0.x fix; reopen via spec amendment
+- 2026-11-21T13:37:01Z by=cr note=revised by decision #121 (commit 27e3be5, re-review patch): an absent Open VSX namespace (its real 404 JSON answer only) is now skipped, not a rehearsal failure; IPM not ready still blocks rehearse until the #122 amendment
 
 ### DW-705: The Marketplace channel reads ready before the publisher exists: the rehearse check only asks whether the version is already published, so a missing publisher (owner step O1 skipped) fails only at upload, after npm has published
 - source: spec-42-7-vs-code-extension-publish.md (lead Phase A, dry run https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44878912402) | severity: low | fix-risk: med | footprint: in-story
@@ -3978,3 +3979,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
 - evidence: The first package that times out returns failed at once; the five packages were published together earlier in the same run, so sequential near-deadline visibility is not a realistic path
 - 2026-11-21T11:24:24Z status=wontfix-theoretical owner=42-8-claude-code-plugin-and-registry-listings by=cr note=real if a registry run is seen polling npm for more than 5 minutes in total
+
+### DW-714: README Releasing and the #121 commit say a missing Open VSX namespace lets an npm-only release go out, but IPM (excluded from #121, enabled without condition) still fails the rehearsal before O-IPM1, so the release is still blocked until IPM is set up or #122 lands
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: README.md Releasing #121 paragraph ('an npm-only release can go out'); scripts/release.mjs IPM dry step unchanged; release.yml publish needs rehearse
+- 2026-11-21T13:37:01Z status=wontfix-accepted owner=42-8-claude-code-plugin-and-registry-listings by=cr note=reopen_if=after the #122 amendment lands, IPM can still fail a rehearsal for a missing owner setup while README still says an npm-only release can go out; README is 42.9's file now and #124(6) has the #122 pass edit Releasing
+
+### DW-715: README says to run the release again for the same tag after an owner step, but not how: a green run that skipped a channel offers only GitHub's Re-run all jobs, which repeats ci-gate, prepare (a fresh vsix build) and the release approval
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: README.md Releasing #121 paragraph; release.yml jobs ci-gate/prepare/rehearse/publish; release-not-set-up.test.ts rerun row reuses one artifacts directory
+- 2026-11-21T13:37:01Z status=wontfix-accepted owner=42-8-claude-code-plugin-and-registry-listings by=cr note=reopen_if=the owner's rerun after O1 cannot be found or started, or Open VSX then serves a vsix whose contents differ from the Marketplace's at the same version; the #122 README pass may add the Re-run all jobs wording

@@ -1022,14 +1022,15 @@ function vsixReadiness(channel, repoRoot, cliName) {
 const oidcEnv = (env) => Object.fromEntries(OIDC_VARIABLES.filter((name) => typeof env[name] === 'string').map((name) => [name, env[name]]));
 
 /**
- * The HTTP status and content type of a read-only GET, or `{ error }` when it failed or stalled. With `json`, a 200 that says it is JSON
- * has its body parsed into `body` (left out when it does not parse); every other body is cancelled unread.
+ * The HTTP status and content type of a read-only GET, or `{ error }` when it failed or stalled. With `json`, an answer whose status is in
+ * `jsonStatuses` (a 200 unless the caller says otherwise) and that says it is JSON has its body parsed into `body` (left out when it does
+ * not parse); every other body is cancelled unread.
  */
-async function readStatus(deps, url, headers, { json = false } = {}) {
+async function readStatus(deps, url, headers, { json = false, jsonStatuses = [200] } = {}) {
   try {
     const response = await deps.fetch(url, { headers });
     const contentType = response.headers.get('content-type');
-    if (json && response.status === 200 && /^application\/json\s*(?:;|$)/i.test(String(contentType ?? '').trim())) {
+    if (json && jsonStatuses.includes(response.status) && /^application\/json\s*(?:;|$)/i.test(String(contentType ?? '').trim())) {
       try {
         return { status: response.status, contentType, body: await response.json() };
       } catch {
@@ -1056,14 +1057,24 @@ async function storeLookup(deps, store, detail, version) {
 
 /** Ask Open VSX (read-only) whether the namespace exists: `{ state: 'present' | 'absent' | 'unknown', problem? }`. */
 async function openVsxNamespaceState(deps, publisher) {
-  const answer = await readStatus(deps, openVsxNamespaceUrl(publisher), { Accept: 'application/json', 'User-Agent': 'iris-mcp-release' });
+  const answer = await readStatus(deps, openVsxNamespaceUrl(publisher), { Accept: 'application/json', 'User-Agent': 'iris-mcp-release' }, { json: true, jsonStatuses: [200, 404] });
   const type = String(answer.contentType ?? '').trim();
   // Like a version lookup, a 200 is the namespace only when it is Open VSX's JSON, not a proxy or captive-portal page.
   if (answer.status === 200 && /^application\/json\s*(?:;|$)/i.test(type)) return { state: 'present' };
-  if (answer.status === 404) {
+  // Absent (decision #121: a skip, not a failure) only on the store's own answer, read-only GET 2026-11-21: 404 `application/json`
+  // `{"error":"Namespace not found: <name>"}`. Any other 404 (an HTML proxy page, or the JSON `"error":"Not Found"` Open VSX gives a path it
+  // does not route) is not the namespace's answer, so it is unknown and fails the run.
+  const body = /** @type {{ error?: unknown } | undefined} */ (answer.body);
+  if (answer.status === 404 && body?.error === `Namespace not found: ${publisher}`) {
     return { state: 'absent', problem: `the Open VSX namespace ${publisher} does not exist. Create it once with npx ovsx create-namespace ${publisher} (owner step O1).` };
   }
-  const why = answer.error ?? (answer.status === 200 ? `HTTP 200, but the answer is ${type === '' ? 'untyped' : type}, not JSON, so it is not the store's answer` : `HTTP ${answer.status}`);
+  const why =
+    answer.error ??
+    (answer.status === 200
+      ? `HTTP 200, but the answer is ${type === '' ? 'untyped' : type}, not JSON, so it is not the store's answer`
+      : answer.status === 404
+        ? `HTTP 404, but not Open VSX's "Namespace not found" answer, so it does not say the namespace is absent`
+        : `HTTP ${answer.status}`);
   return { state: 'unknown', problem: `the Open VSX namespace ${publisher} could not be read (${why}). Check the network and open-vsx.org, then run the release again.` };
 }
 

@@ -183,7 +183,10 @@ describe("a channel that is not set up (decision #121)", () => {
 
   it("each skipped channel is one raw `::warning::` line, with the three reserved characters of a workflow command escaped", () => {
     const lines = notSetUpAnnotations([{ channel: "other-channel", item: "x", status: "skipped", detail: notSetUpDetail("100% sure\nsecond line\rthird"), notSetUp: true }]);
-    expect(lines).toEqual(["::warning title=Channel skipped, not set up::other-channel: 100%25 sure%0Asecond line%0Dthird"]);
+    // The title is a property: the runner (actions/runner ActionCommand.cs) splits properties on `,`, so its comma is `%2C`.
+    expect(lines).toEqual(["::warning title=Channel skipped%2C not set up::other-channel: 100%25 sure%0Asecond line%0Dthird"]);
+    const properties = (lines[0] as string).slice("::warning ".length, (lines[0] as string).indexOf("::", 2)).split(",");
+    expect(properties, "one property, unsplit by the runner").toEqual(["title=Channel skipped%2C not set up"]);
     expect(notSetUpAnnotations([{ channel: "npm", item: "x", status: "published" }])).toEqual([]);
   });
 });

@@ -26,7 +26,13 @@ const CHANNELS = RELEASE_CHANNELS.filter((channel: { id: string }) => channel.id
 /** The same without the registry, which a rehearsal can only read through a pinned download. */
 const STORES_ONLY = CHANNELS.filter((channel: { id: string }) => channel.id !== "mcp-registry");
 
-const OPEN_VSX_SKIP = "open-vsx\n  iris-mcp-launcher@1.0.0: skipped (not set up: the Open VSX namespace iris-mcp does not exist. Create it once with npx ovsx create-namespace iris-mcp (owner step O1).)";
+/**
+ * Open VSX's own answer for a namespace that does not exist (read-only GETs of `https://open-vsx.org/api/iris-mcp` and of an invented
+ * namespace, 2026-11-21): 404, `application/json`, `{"error":"Namespace not found: <name>"}`. Only this answer is "not set up".
+ */
+const NAMESPACE_ABSENT = { status: 404, body: { error: "Namespace not found: iris-mcp" } };
+
+const OPEN_VSX_SKIP ="open-vsx\n  iris-mcp-launcher@1.0.0: skipped (not set up: the Open VSX namespace iris-mcp does not exist. Create it once with npx ovsx create-namespace iris-mcp (owner step O1).)";
 
 const NPM_DEFAULT: StandInRule[] = [
   { match: ["--version"], stdout: "11.12.1\n" },
@@ -121,21 +127,24 @@ const MODES = [
 describe("an Open VSX namespace that does not exist is not set up (owner step O1)", () => {
   it.each(MODES)("%s: Open VSX is skipped (not set up), the run exits 0, the registry (after it) still runs, and the block, the annotation and the step summary name it", async (_label, dryRun) => {
     const world = newWorld();
-    world.stores.namespace = { status: 404, body: { error: "Namespace not found: iris-mcp" } };
+    world.stores.namespace = NAMESPACE_ABSENT;
     expect(await world.run({ dryRun })).toBe(0);
     expect(world.report()).toContain(OPEN_VSX_SKIP);
-    expect(registryAsked(world), "the channel after it ran").toBe(true);
-    expect(world.report()).not.toMatch(/mcp-registry\n.*: not attempted/);
-    expect(world.standIns.calls("ovsx"), "nothing is uploaded to a namespace that does not exist").toEqual([]);
+    // In a rehearsal the registry runs after any `not ready` and the dry step never calls ovsx, so these three only observe a release.
+    if (!dryRun) {
+      expect(registryAsked(world), "the channel after it ran").toBe(true);
+      expect(world.report()).not.toMatch(/mcp-registry\n.*: not attempted/);
+      expect(world.standIns.calls("ovsx"), "nothing is uploaded to a namespace that does not exist").toEqual([]);
+    }
     expect(world.report()).toContain("Skipped channels (not set up; run the release again once the owner step is done):\n  open-vsx: the Open VSX namespace iris-mcp does not exist.");
-    expect(warnings(world)).toEqual(["::warning title=Channel skipped, not set up::open-vsx: the Open VSX namespace iris-mcp does not exist. Create it once with npx ovsx create-namespace iris-mcp (owner step O1)."]);
+    expect(warnings(world)).toEqual(["::warning title=Channel skipped%2C not set up::open-vsx: the Open VSX namespace iris-mcp does not exist. Create it once with npx ovsx create-namespace iris-mcp (owner step O1)."]);
     expect(world.summaryText(), "the step summary carries the same block").toContain("Skipped channels (not set up");
     expect(world.summaryText()).toContain("  open-vsx: the Open VSX namespace iris-mcp does not exist.");
   });
 
-  it("an npm-only outcome: a release publishes the eight packages and the Marketplace, skips Open VSX, still runs the registry, and exits 0", async () => {
+  it("Open VSX alone does not block a release: it publishes the eight packages and the Marketplace, skips Open VSX, still runs the registry, and exits 0", async () => {
     const world = newWorld();
-    world.stores.namespace = { status: 404 };
+    world.stores.namespace = NAMESPACE_ABSENT;
     expect(await world.run()).toBe(0);
     expect(npmUploads(world)).toBe(NPM_PUBLISH_ORDER.length);
     expect(world.standIns.calls("vsce")).toHaveLength(1);
@@ -177,6 +186,35 @@ describe("a channel that is set up and then fails still fails the run, and stops
     expect(warnings(world)).toEqual([]);
   });
 
+  /** 404s that are not Open VSX's namespace answer: a proxy's HTML page, and the JSON Open VSX gives a path it does not route (GET 2026-11-21). */
+  const OTHER_404S = [
+    ["an HTML 404 page", { status: 404, contentType: "text/html; charset=utf-8", raw: "<!doctype html><title>404 Not Found</title>" }],
+    ["Open VSX's 404 for a path it does not route", { status: 404, body: { timestamp: "2026-11-21T13:25:45.102Z", status: 404, error: "Not Found", path: "/api/iris-mcp" } }],
+  ] as const;
+  for (const [what, answer] of OTHER_404S) {
+    it.each(MODES)(`%s: ${what} on the namespace URL is not "not set up": exit 1, nothing skipped`, async (_label, dryRun) => {
+      const world = newWorld();
+      world.stores.namespace = answer;
+      expect(await world.run({ dryRun })).toBe(1);
+      expect(world.report()).toContain("could not be read (HTTP 404, but not Open VSX's \"Namespace not found\" answer");
+      expect(world.report()).not.toContain("not set up");
+      expect(warnings(world)).toEqual([]);
+      expect(world.standIns.calls("ovsx")).toEqual([]);
+    });
+  }
+
+  it("a skip followed by a channel that fails: the release exits 1, and the skipped channel is still listed and annotated", async () => {
+    const world = newWorld();
+    world.stores.namespace = NAMESPACE_ABSENT;
+    world.stores.mcpRegistry = () => ({ status: 500 });
+    expect(await world.run()).toBe(1);
+    expect(world.report()).toContain(OPEN_VSX_SKIP);
+    expect(world.report()).toMatch(/mcp-registry\n {2}5 servers@1\.0\.0: failed \(/);
+    expect(world.report()).toContain("Skipped channels (not set up; run the release again once the owner step is done):\n  open-vsx: the Open VSX namespace iris-mcp does not exist.");
+    expect(warnings(world)).toHaveLength(1);
+    expect(world.summaryText()).toContain("  open-vsx: the Open VSX namespace iris-mcp does not exist.");
+  });
+
   it("an Open VSX namespace 200 that is not JSON (a captive-portal page) is not the namespace, nor an absent one: a release fails", async () => {
     const world = newWorld();
     world.stores.namespace = { status: 200, contentType: "text/html; charset=utf-8", raw: "<!doctype html><title>Sign in to the network</title>" };
@@ -187,7 +225,7 @@ describe("a channel that is set up and then fails still fails the run, and stops
 
   it("a Marketplace upload that fails (vsce exits 1) fails the release; Open VSX, whose namespace is also absent, is `not attempted`, not skipped, and the block is empty", async () => {
     const world = newWorld();
-    world.stores.namespace = { status: 404 };
+    world.stores.namespace = NAMESPACE_ABSENT;
     world.standIns.script("vsce", [{ match: ["publish"], status: 1, stderr: "ERROR  The Personal Access Token verification has failed\n" }]);
     expect(await world.run()).toBe(1);
     expect(world.report()).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: failed (ERROR  The Personal Access Token verification has failed)");
@@ -208,7 +246,7 @@ describe("a channel that is set up and then fails still fails the run, and stops
 
   it.each(MODES)("%s: an Open VSX namespace that is absent beside an `ovsx` that is not installed is not ready/failed (exit 1): a missing CLI is never owner setup", async (_label, dryRun) => {
     const world = newWorld();
-    world.stores.namespace = { status: 404 };
+    world.stores.namespace = NAMESPACE_ABSENT;
     rmSync(path.join(world.repo, "extensions", "iris-mcp-launcher", "node_modules", ".bin", "ovsx"));
     expect(await world.run({ dryRun })).toBe(1);
     expect(world.report()).toMatch(/open-vsx\n {2}iris-mcp-launcher@1\.0\.0: (?:not ready|failed) \(ovsx is not installed in extensions\/iris-mcp-launcher\/node_modules/);
@@ -218,7 +256,7 @@ describe("a channel that is set up and then fails still fails the run, and stops
   it("a vsix whose hash differs from the manifest fails before any channel runs, whatever is not set up: a rehearsal exits 1 and a release exits 2, with no skipped channel", async () => {
     for (const dryRun of [true, false]) {
       const world = newWorld();
-      world.stores.namespace = { status: 404 };
+      world.stores.namespace = NAMESPACE_ABSENT;
       writeFileSync(path.join(world.artifacts, "vsix", "iris-mcp-launcher-1.0.0.vsix"), "tampered\n");
       expect(await world.run({ dryRun }), dryRun ? "rehearsal" : "release").toBe(dryRun ? 1 : 2);
       expect(world.report()).toContain("does not match its sha256");
@@ -231,7 +269,7 @@ describe("a channel that is set up and then fails still fails the run, and stops
 describe("npm is never skippable", () => {
   it.each(MODES)("%s: an npm publish that fails exits 1 and every other channel is `not attempted`, not skipped, even one that is not set up", async (_label, dryRun) => {
     const world = newWorld();
-    world.stores.namespace = { status: 404 };
+    world.stores.namespace = NAMESPACE_ABSENT;
     world.standIns.script("npm", [{ match: ["publish", "~iris-mcp-admin"], status: 1, stderr: "npm error code E403\n" }, ...NPM_DEFAULT]);
     expect(await world.run({ dryRun, channels: STORES_ONLY })).toBe(1);
     expect(world.report()).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: not attempted");
@@ -242,7 +280,7 @@ describe("npm is never skippable", () => {
 
   it("an npm registry that cannot be asked (`npm view` fails with something other than E404) fails the run, whatever is not set up", async () => {
     const world = newWorld();
-    world.stores.namespace = { status: 404 };
+    world.stores.namespace = NAMESPACE_ABSENT;
     world.standIns.script("npm", [{ match: ["view"], status: 1, stderr: "npm error code ECONNRESET\nnpm error network aborted\n" }, ...NPM_DEFAULT]);
     expect(await world.run()).toBe(1);
     expect(world.report()).toContain("could not ask the registry whether it is published");
@@ -254,7 +292,7 @@ describe("npm is never skippable", () => {
 describe("a rerun of the same tag after the owner setup publishes the skipped channels", () => {
   it("run 1 publishes npm and the Marketplace and skips Open VSX; after the namespace exists, run 2 reads npm and the Marketplace `already published` and publishes Open VSX, with no skipped channel left", async () => {
     const world = newWorld();
-    world.stores.namespace = { status: 404 };
+    world.stores.namespace = NAMESPACE_ABSENT;
     expect(await world.run()).toBe(0);
     expect(npmUploads(world)).toBe(NPM_PUBLISH_ORDER.length);
     expect(world.report()).toContain("Skipped channels (not set up");
