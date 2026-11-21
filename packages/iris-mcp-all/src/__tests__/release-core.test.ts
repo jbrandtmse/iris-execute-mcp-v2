@@ -76,7 +76,7 @@ describe("the constants", () => {
     expect([...NPM_PUBLISH_ORDER]).toEqual(["@iris-mcp/client-config", "@iris-mcp/shared", "@iris-mcp/admin", "@iris-mcp/data", "@iris-mcp/dev", "@iris-mcp/interop", "@iris-mcp/ops", "@iris-mcp/all"]);
     expect(RELEASE_CHANNELS).toEqual([
       { id: "npm", enabled: true },
-      { id: "vscode-marketplace", enabled: true },
+      { id: "vscode-marketplace", enabled: false, enabledBy: "owner: publisher needs a verified domain (DW-719)" },
       { id: "open-vsx", enabled: true },
       { id: "ipm", enabled: true, manual: true },
       { id: "mcp-registry", enabled: true },

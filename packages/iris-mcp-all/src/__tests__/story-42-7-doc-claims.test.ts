@@ -44,14 +44,14 @@ describe("Story 42.7: the root README Releasing subsection", () => {
     expect(rows).toHaveLength(RELEASE_CHANNELS.length);
     expect(rows.map((row) => squash(row))).toEqual([
       "| npm (`@iris-mcp/*`) | enabled | |",
-      "| VS Code Marketplace (the extension's vsix) | enabled | Story 42.7 |",
+      "| VS Code Marketplace (the extension's vsix) | disabled: `skipped: not enabled (owner: publisher needs a verified domain (DW-719))` | owner: publisher needs a verified domain (DW-719) |",
       "| Open VSX (the same vsix) | enabled | Story 42.7 |",
       "| IPM (the root `module.xml`; the owner's Open Exchange Release) | manual step | Story 42.8 |",
       "| MCP Registry (the five `server.json` listings), last | enabled | Story 42.8 |",
     ]);
     expect(RELEASE_CHANNELS.map((channel: { id: string; enabled: boolean }) => [channel.id, channel.enabled])).toEqual([
       ["npm", true],
-      ["vscode-marketplace", true],
+      ["vscode-marketplace", false],
       ["open-vsx", true],
       ["ipm", true],
       ["mcp-registry", true],
@@ -142,18 +142,21 @@ describe("Story 42.7: the extension README is the store listing", () => {
   // The top of the file is a blockquote: its line prefixes are not part of the sentences.
   const flat = squash(readme.replace(/^> ?/gm, ""));
 
-  it("no longer says that the extension is not yet published, or that it is not on a store", () => {
+  it("no longer says that the extension is not yet published; it says it is not on the stores yet (DW-719)", () => {
     expect(flat).not.toMatch(/not yet published/i);
-    expect(flat).not.toMatch(/not on the Marketplace or Open VSX/i);
+    expect(flat).toContain("It is not on the Visual Studio Marketplace or Open VSX yet.");
     expect(flat).not.toContain("TBD-at-publish-time");
     expect(flat).not.toMatch(/publish checklist/i);
   });
 
-  it("names both stores and the extension id, and keeps the vsix route for development", () => {
-    expect(flat).toContain("[Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=iris-mcp.iris-mcp-launcher)");
-    expect(flat).toContain("[Open VSX](https://open-vsx.org/extension/iris-mcp/iris-mcp-launcher)");
+  it("names the extension id and the GitHub Releases vsix route, links no store page while the stores are not set up (DW-719), and keeps the vsix route for development", () => {
+    expect(flat).not.toContain("marketplace.visualstudio.com/items?itemName=iris-mcp.iris-mcp-launcher");
+    expect(flat).not.toContain("open-vsx.org/extension/iris-mcp/iris-mcp-launcher");
+    expect(flat).toContain("[GitHub Releases](https://github.com/jbrandtmse/iris-execute-mcp-v2/releases)");
     expect(flat).toContain("`iris-mcp.iris-mcp-launcher`");
-    expect(flat).toContain("code --install-extension iris-mcp.iris-mcp-launcher");
+    expect(flat).toContain("code --install-extension iris-mcp-launcher-<version>.vsix");
+    expect(flat).toContain("**Extensions: Install from VSIX…**");
+    expect(flat).toContain("Updates are manual until the stores are set up");
     expect(flat).toContain("## Installing in development mode");
     expect(flat).toContain("code --uninstall-extension iris-mcp.iris-mcp-launcher");
   });
@@ -181,7 +184,8 @@ describe("Story 42.7: the extension CHANGELOG", () => {
   });
 
   it("records the publisher and `private`, the lockstep, the working directory and the green suite", () => {
-    expect(current).toContain("The extension is published to the Visual Studio Marketplace and to Open VSX");
+    expect(current).toContain("The extension is ready for the Visual Studio Marketplace and Open VSX, but not on them yet");
+    expect(current).toContain("installs from the vsix attached to the `v1.1.0` GitHub Release");
     expect(current).toContain("the publisher is `iris-mcp`");
     expect(current).toContain('`package.json` carries `"private": true`');
     expect(current).toContain("The extension's version equals the shared `@iris-mcp/*` version");
