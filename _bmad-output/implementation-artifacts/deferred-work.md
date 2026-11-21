@@ -1990,6 +1990,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-14T10:47:57Z status=decision-pending owner=burndown by=migration note=call: add a root-level pre-flight release script as the sole supported publish command
 - 2026-10-15T02:51:51Z status=routed owner=42-5-release-workflow by=correct-course note=decided D7 (decision-record-2026-10-14): release workflow with root pre-flight script as sole publish command
 - 2026-10-21T13:14:16Z occurrence=42-1-pre-publish-package-fixes note=publishing_must_go_through_pnpm:_pnpm_publish_runs_each_prepublishOnly(verify-iris-reachable,prepublish-gate)_which_fails_with_no_IRIS;_only_pnpm_applies_publishConfig.exports_and_rewrites_workspace:*;_direct_npm_publish_ships_dev_exports+workspace:*_deps(42.1_plan_probe;_release_script_owns_both)
+- 2026-11-21T00:07:58Z status=resolved-by:42-5-release-workflow by=adjudication note=release.mjs_prepare_runs_every_prepublishOnly_once_armed_before_anything_is_packed;pnpm_packs,npm_uploads_with_provenance_in_dependency_order,stop_at_first_failure;dry_run_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44836664255_prepare_green+rehearse_8_npm_dry-run_publishes_in_order
 
 ### DW-388: [34-6-CR-13] verify-iris-reachable.mjs silently falls back to hard-coded local dev credentials when env vars are unset
 - source: legacy:34.6 | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3755,6 +3756,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: 42.2 implement: resolveLiveTarget throws naming the missing variables when IRIS_REQUIRE_LIVE is set (decision 51)
 - 2026-10-21T22:44:16Z status=routed owner=42-5-release-workflow by=harvest note=the release script exports all five IRIS_* for its gate run, and 42.6 publishes through it
+- 2026-11-21T00:07:58Z status=resolved-by:42-5-release-workflow by=adjudication note=prepare_exports_all_five_IRIS_*+IRIS_REQUIRE_LIVE_via_the_throwaway_harness;dry_run_prepare_green_with_8_prepublish_suites_armed(https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44836664255)
 
 ### DW-676: Story 42.3's armed CI run could go green by skipping: armed integration-setup files and the launcher's two live files skip when IRIS does not answer, the armed side of the migrated family C/D/E files has no default-suite test, and the launcher's arming guard runs only under npm --prefix
 - source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: low | footprint: in-epic
@@ -3838,6 +3840,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-4-ipm-package-revival.md | severity: med | fix-risk: med | footprint: in-epic
 - evidence: 42.4 plan probe; ipm/module.xml is generated and stamped, the archive is CI-built
 - 2026-10-22T13:06:14Z status=routed owner=42-5-release-workflow by=harvest note=decision 72: 42.5's plan picks the registry route (a published-artifact repo or branch, a stamped root manifest, or another channel) and probes the current Open Exchange rules; 42.8 lists it
+- 2026-11-21T00:07:58Z status=resolved-by:42-5-release-workflow by=adjudication note=route_decided(decision_76):packaging_repository_jbrandtmse/iris-execute-mcp-v2-ipm_pushed_by_the_release(IPM_channel_implemented,disabled_until_42.8;rehearse_reports_its_readiness);the_listing+served-artifact_gate_are_42.8(DW-694)
 
 ### DW-690: zpm uninstall iris-execute-mcp-v2 removes the classes but leaves the /api/executemcp/v2 web application and the %ALL package mapping, because the manifest configures them through Invoke methods with no Unconfigure counterpart
 - source: spec-42-4-ipm-package-revival.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3862,6 +3865,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-22T16:59:16Z status=routed owner=burndown by=cr note=also 42-10 audit-namespace test:66, shared test-helpers auditLines (11 calls); pin dw579 readEntries; out-of-footprint
 - 2026-10-22T19:13:03Z occurrence=42-4-ipm-package-revival note=flake_hit_again:run_39819176668_attempt2(unchanged_green_head_ff56c62)_gates_node22.17.0:story-43-4-qa-probe-copy.test.ts_'the_first_process,the_probe,got_SIGTERM:expected_[]_to_include_<pid>';attempt1_green;priority_for_the_burn-down
 - 2026-10-22T19:43:58Z owner=42-5-release-workflow by=lead note=decision_74:third_hit_today(run_39838191935_gates_node26:story-43-4-qa-probe-copy_'the_probe_got_SIGTERM:expected_[]_to_include_<pid>');recurring_CI_flake_blocks_dependent_jobs;fix_before_the_release_workflow_relies_on_green_CI(also_check_the_probe-copy_test's_signal/exit_bookkeeping,not_only_partial_lines)
+- 2026-11-21T00:07:58Z status=resolved-by:42-5-release-workflow by=adjudication note=shared_newline-terminated_reader_scripts/lib/audit-lines.mjs_routed_through_all_audit_readers;audit-reader-guard_red_branch_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44826591904;probe-copy_test_records_the_SIGTERM_the_client_sends;CI_green_on_da3bca7_and_62fbceb_(no_flake)
 
 ### DW-694: No gate installs the IPM artifact the registry actually serves: Open Exchange tars the packaging repository's root as-is, while CI's ipm job proves IPM's own package output
 - source: spec-42-5-release-workflow.md | severity: med | fix-risk: low | footprint: in-epic

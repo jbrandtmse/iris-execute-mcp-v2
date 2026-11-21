@@ -9,7 +9,9 @@
  *  - TRIGGERS (42.5.1): exactly a push of `v*` tags and of `release-dry-run/**` branches, and a manual dispatch; no `pull_request*`,
  *    `workflow_run` or `schedule`; `permissions: {}` at the top; a concurrency group per ref that never cancels a started release.
  *  - JOBS (42.5.1): the jobs, their runner, timeout, `needs`, permissions, environment, condition and ordered steps (an action with its
- *    inputs, or a command with its environment and directory) are the declaration's, in both directions.
+ *    inputs, or a command with its environment and directory) are the declaration's, in both directions. Read from the workflow alone, a
+ *    setup-node step with no `pnpm/action-setup` before it sets `package-manager-cache: false` and no `cache: pnpm` (setup-node v5
+ *    otherwise looks for pnpm and fails).
  *  - EXCLUSIVITY (42.5.1, 42.5.4): `environment`, `id-token: write` and any mention of `secrets` (`secrets.X`, `secrets['X']`,
  *    `toJSON(secrets)`) occur in the `publish` job only; `github.token` (or `github['token']`, or `toJSON(github)`) occurs in `ci-gate`
  *    and `publish` only. So `rehearse` has no environment, no OIDC permission
@@ -168,13 +170,18 @@ export function releaseWorkflowProblems(text: string): string[] {
     if (String(setupNode?.with?.["node-version"]) !== expected.node) problems.push(`job ${name} does not run on Node ${expected.node}`);
 
     // setup-node v5 caches the package manager named by `packageManager` in package.json (pnpm) unless told not to, and fails where no
-    // pnpm is installed ("Unable to locate executable file: pnpm"). A setup-node step with no pnpm/action-setup before it must switch it off.
+    // pnpm is installed ("Unable to locate executable file: pnpm"). A setup-node step with no pnpm/action-setup before it must switch it off,
+    // and must not ask for `cache: pnpm` either: setup-node restores an explicit `cache` before it looks at `package-manager-cache`.
     const pnpmAt = actual.findIndex((step) => step.uses === "pnpm/action-setup");
     actual.forEach((step, index) => {
       if (step.uses !== "actions/setup-node") return;
       const hasPnpm = pnpmAt !== -1 && pnpmAt < index;
-      if (!hasPnpm && step.with?.["package-manager-cache"] !== false) {
+      if (hasPnpm) return;
+      if (step.with?.["package-manager-cache"] !== false) {
         problems.push(`job ${name}: step ${index + 1} is a setup-node with no pnpm installed before it and without package-manager-cache: false, so it fails looking for pnpm`);
+      }
+      if (step.with?.["cache"] === "pnpm") {
+        problems.push(`job ${name}: step ${index + 1} is a setup-node with no pnpm installed before it and with cache: pnpm, so it fails looking for pnpm (install pnpm first)`);
       }
     });
   }
