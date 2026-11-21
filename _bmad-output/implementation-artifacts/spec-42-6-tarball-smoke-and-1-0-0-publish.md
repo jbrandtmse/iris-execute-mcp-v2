@@ -605,6 +605,7 @@ Every test added or changed passes on a fresh environment, in either order, and 
 - mutation (review pass): `deps.cleanups?.add(remove)` removed from `runVerify` -> the `release-script.test.ts` verify row "the lines are appended ... the cleanup registered for a signal" (1 red).
 - mutation (review pass): `verifyEnv` no longer drops `NPM_CONFIG_*` and `NODE_AUTH_TOKEN` -> the `release-script.test.ts` verify row "starts npx -y @iris-mcp/dev@1 in a temporary HOME ..." (1 red).
 - Not mutated: the doc-claims rows for the README (their literals are the README's own text); the SDK-fallback path (not taken).
+- Test files added by the QA stage (QA): `packages/iris-mcp-all/src/__tests__/story-42-6-qa-gate-verify.test.ts` and `packages/iris-mcp-all/src/__tests__/story-42-6-qa-keep-process.test.ts`; their rows and mutations are in `## QA`.
 
 **Lead checklist** (stages do none of it; record every run URL and result here).
 
@@ -681,3 +682,51 @@ Blocking condition: none
 - **Follow-up review recommendation:** `true`. Two medium entries were patched on a first pass. The unverified risk is that the `verifyEnv` denylist change and the new `--keep` directory checks were verified only by their own targeted rows and two mutations, not by a second review.
 - **Verification performed:** `node --check` of the four scripts; the story-file list of `@iris-mcp/all` (release-core, release-script, release-prepare, release-workflow, release-version, release-smoke-prebuilt, ci-package-smoke, ci-workflow, package-manifests, changelog-bootstrap-move, the 42.x doc-claims and oracle files, 43-1/43-3 pin files, release-1-0-0-mechanism, npx-pin, published-tarballs, smoke-runtime, story-38-0) green after the last patch; `pnpm gen:governance-baseline:check`, `gen:skills:check`, `gen:pack:check`, `validate:prompts`, `check:provenance`, `gen:tools-list-snapshot:check` and `check-epics-sync` OK; `gen:bootstrap` a no-op; the tag-consistency check prints `[] []`; `ci-package-smoke.mjs` exits 0 (default) and `--keep` exits 0 with a five-server `.mcp.json`; `verify --version 1.0.0` exits 1 with eight "not on the registry" lines and the npx start failed, no temporary directory left; spine lint 0 findings. Before the review patches the implement subagent also ran every package suite, 16 shards of `@iris-mcp/all` (212 files), the shared `sdk-wire-compat` (116/116), the epic-43 wire suites (590 + 90), lint and type-check per package, and the three DW-612 real-process runs (control exit 3, provenance break exit 1, pack drift exit 1) in a throwaway clone that was removed. The review patches touched only `scripts/` and tests of `@iris-mcp/all`, so those wide runs were not repeated.
 - **Residual risks:** the real-client smoke, the dry run, the `v0.0.3` red proof, the tag, the publish and `verify` after it are the lead's checklist (A and B). The implement subagent used a few shell heredocs for edits (Rule #55) and verified each result. `.mcp.json` carries the five `IRIS_*` variables the spec lists, not `IRIS_HTTPS`; the server defaults it to false and it has not met a real client. `tools-list-snapshot.json` keeps `sdkVersion: "2.3.1"` (protected file; its check ignores the field). Containers used: none. Images pulled: none.
+
+## QA
+
+Stage: QA (2026-11-20), build commit `6b5e514`, baseline `fe7cae7`. Gap analysis against the I/O matrix and the ACs: the implement stage's tests were already broad (every compare status, the verify flows, the `--keep` directory rules, the real-pack CHANGELOG rows), so the additions go at what could still pass while the thing it guards was broken. No product code changed.
+
+**Tests added (all in the default suite of `@iris-mcp/all`; none opts out of it, none needs `IRIS_REQUIRE_LIVE`):**
+- `packages/iris-mcp-all/src/__tests__/story-42-6-qa-gate-verify.test.ts` (58 rows):
+  - DW-696: the gate over bodies a real HTTP call can bring back (an HTML page on a 200, an empty body, `null`, an array, a bare string, a status that is an object or `null`, 502, 401, 403 secondary rate limit, 429), each in a tag run (exit 1, cause named, CI never read) and a dry run (report line, goes on); non-tag runs (dispatch on a branch, dispatch FROM a tag ref, release-dry-run push, a non-`v` tag, a pull request) on `ahead` and `diverged` are never refused; a malformed `v` tag is exit 2 before the compare is read; an off-main tag run ends at once against a CI that never turns green, with the same world on `main` as the waiting control; an off-main run with a red CI run prints the main refusal and never the CI verdict; the whole script as a real process on a dry run and on a tag run with a compare 500.
+  - More compare bodies from the real API (captured 2026-11-20 with read-only `gh api -X GET .../compare/main...<ref>?per_page=1`: wave-7 branch behind 1, wave-8 branch ahead 37, `main` identical, `not-a-sha` and `abc` HTTP 404 with the text status `"404"`, and the 13 top-level keys of a full body).
+  - DW-612: `prepare`'s check set against the CI workflow FILE (`.github/workflows/ci.yml`, the `gates` job), not the constant that builds the declared steps; the comparison is shown able to fail in both directions.
+  - AC 42.6.3: `verify` over a wrong version, a wrong predicate and a non-JSON answer (each one package, seven ok, the npx start still checked, no non-`view` npm call); a network fault of `npm view` is `npm view failed`, never `not on the registry`; an npm that cannot start; a runner that rejects (the directory is removed and the summary says exit 1); a `wire.close` that rejects changes no verdict; both children (`npm view` and the npx start) carry no variable of the secret classes in any case and no secret VALUE.
+  - AC 42.6.2: the committed tree read as a release (one shared version of 1.0.0 or later, the marker and `ipm/module.xml` in step, `[]` in release mode, durable across later releases because the tag version is the tree's own; the real-pending row is `skipIf` a changeset is pending), and each of the eight packages alone at another version, on disk, is exactly one problem naming it; a pending changeset, a marker at another semver and a module at another version are each a problem of their own.
+- `packages/iris-mcp-all/src/__tests__/story-42-6-qa-keep-process.test.ts` (12 rows):
+  - `ci-package-smoke.mjs` as a real process: eight refused argument shapes (including `--keep=dir`, which no in-process row covered) are exit 2 with the usage line and nothing made; a relative `--keep` from the repository root is refused as inside the repository with nothing created; the same relative name from outside resolves against the working directory and is refused only as non-empty.
+  - The kept project's `.mcp.json` EXECUTED as a client does (cwd = the project, `${VAR}` expanded from an environment that holds the five variables): each entry answers `initialize` and `tools/list`. Before this, the smoke started the servers with its own arguments, so a wrong `command` or `args` in `.mcp.json` passed every row that compares the file with the generator's output. A second row shows the entry fails from a directory that is not the project.
+
+**Mutations (Rule 19), each applied with a one-line substitution, run, then `git checkout --` of the file; `shasum` and `git status --short` identical afterwards (printed by the helper after every one):**
+- mutation: `ON_MAIN_STATUSES` gains `ahead` -> 10 red in `story-42-6-qa-gate-verify.test.ts` (the five non-tag rows, the pending-CI row, the red-CI row, the real-process row, two real-body rows).
+- mutation: an unreadable compare judged `on-main` -> 24 red (every tag-run and dry-run body row).
+- mutation: the main refusal moved after the CI poll (removed before `runsUrl`, added at the green return) -> 14 red, among them "a tag run off main ends at once even when CI would never turn green" (it waits instead) and the red-CI row.
+- mutation: a dry run that returns 1 on `off-main` -> 6 red (the non-tag rows and the real-process dry run).
+- mutation: `releaseMode` ignores the event (a dispatch from a tag ref becomes a release) -> 1 red, "a manual dispatch FROM a tag ref" (no existing row saw this).
+- mutation: `check:provenance` added to `RELEASE_CHECK_EXEMPTIONS` (prepare drops it) -> 2 red, the workflow-file parity rows.
+- mutation: the `check:provenance` step removed from `ci.yml` -> 2 red, the same rows.
+- mutation: `pnpm validate:prompts` removed from `ROOT_GATE_SCRIPTS` -> 2 red in `release-prepare.test.ts` (the constant side of the parity).
+- mutation: `...OIDC_VARIABLES` dropped from `SECRET_VARIABLES` -> 1 red, "neither child sees a secret".
+- mutation: `registryProblems` ignores a wrong version -> 1 red, the verify wrong-version row.
+- mutation: `NPM_NOT_FOUND` also matches `ENOTFOUND` -> 1 red, "a network failure of npm view is `npm view failed`".
+- mutation: a rejecting `wire.close()` rethrown instead of swallowed -> 1 red, "a wire whose close rejects changes no verdict".
+- mutation: `verify`'s `finally { remove(); }` emptied -> 6 red, including the runner-rejects row.
+- mutation: `versionProblems` skips the first package in a release check -> 1 red, `@iris-mcp/client-config alone at another version`.
+- mutation: `packages/iris-ops-mcp/package.json` at `1.0.1` -> 3 red, the committed-tree rows.
+- mutation: relative `--keep` resolved against `REPO_ROOT` instead of the working directory -> 1 red, the outside-the-repository relative row.
+- mutation: `.mcp.json` names `<bin>-x` -> 1 red, "every entry launches from the project directory" (the shape rows of `ci-package-smoke.test.ts` go red on it too).
+- mutation: `"CHANGELOG.md"` dropped from `packages/iris-mcp-all/package.json` `files` -> 2 red, `package-manifests.test.ts` and `published-tarballs.test.ts` ("iris-mcp-all: the tarball lists CHANGELOG.md", the real `pnpm pack`).
+- mutation: `packages/client-config/CHANGELOG.md` deleted while `files` lists it (pnpm omits a missing file silently) -> 2 red, the same two files (client-config row).
+mutations_demonstrated=19
+
+**Runs:** the new files plus `story-42-6-qa-real-oracles`, `story-42-6-doc-claims`, `release-core`, `release-prepare`, `release-smoke-prebuilt`, `ci-package-smoke`, `ci-workflow`, `package-manifests`, `published-tarballs` and `release-workflow`: 12 files, 604 passed, 0 failed; `release-script`, `release-core`, `story-42-6-qa-real-oracles` and `ci-package-smoke` (293) before the additions, also green. The read-only `node scripts/release.mjs verify --version 1.0.0` against the real registry ran again: eight "not on the registry" lines, the npx start failed (E404), 9 checks failed, no temporary directory left. Commands used `UNARMED`'s unset list; nothing was armed and no IRIS was called.
+
+**First-run failures:** none. Both new files passed on their first run; the mutations above are what show they can fail.
+
+**Defects found:** none that blocks the tag.
+- deferred: `compareUrl` puts `GITHUB_SHA` into the path without percent-encoding (the runs URL beside it uses `encodeURIComponent`). The runner always sets a 40-hex value, so no real input reaches it (Rule #54), but a value with `?`, `#` or `/` would change the request. Low; a one-line `encodeURIComponent(sha)` plus a row if the lead wants the two URLs consistent.
+- note: `@iris-mcp/all` has no `type-check` or `lint` script, so its tests are not type-checked; the new files use the same patterns as `release-script.test.ts`. An ad-hoc `tsc --strict` run shows the same class of notices on both (the injected-dependency shapes), none specific to the new files' logic.
+- note: the `qa-rules.md` stage rules say not to commit, and the lead's dispatch prompt asks for one local commit of the QA additions. The prompt was followed; nothing was pushed.
+
+**Containers used:** none. Images pulled: none.
