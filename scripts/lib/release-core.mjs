@@ -710,7 +710,46 @@ export function releaseReport(results) {
       lines.push(`  ${result.item}: ${result.status}${result.detail === undefined || result.detail === '' ? '' : ` (${result.detail})`}`);
     }
   }
+  const skipped = notSetUpChannels(results);
+  if (skipped.length > 0) {
+    lines.push('', 'Skipped channels (not set up; run the release again once the owner step is done):');
+    for (const entry of skipped) lines.push(`  ${entry.channel}: ${entry.reason}`);
+  }
   return `${lines.join('\n')}\n`;
+}
+
+/** The detail of a channel that the owner has not set up yet: `skipped (not set up: <reason>)` in the report. */
+export const notSetUpDetail = (reason) => `${NOT_SET_UP}: ${reason}`;
+
+/** The words that open the detail of a channel skipped for a missing owner setup. */
+const NOT_SET_UP = 'not set up';
+
+/**
+ * The channels a run skipped because the owner has not set them up: one entry per channel, with the reason (the report's detail without
+ * its `not set up: ` lead). A result carries `notSetUp: true` only when its channel was skipped for that reason, never for a failure.
+ *
+ * @param {ReadonlyArray<{ channel: string, status: string, detail?: string, notSetUp?: boolean }>} results
+ * @returns {Array<{ channel: string, reason: string }>}
+ */
+export function notSetUpChannels(results) {
+  const prefix = `${NOT_SET_UP}: `;
+  return results
+    .filter((result) => result.notSetUp === true)
+    .map((result) => ({ channel: result.channel, reason: String(result.detail ?? '').startsWith(prefix) ? String(result.detail).slice(prefix.length) : String(result.detail ?? '') }));
+}
+
+/** The text of a workflow command's message with its three reserved characters escaped, as the runner reads it (one line). */
+const escapeCommandData = (text) => String(text).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+
+/**
+ * One GitHub `::warning::` annotation line for each channel skipped as not set up (a raw line: the runner reads a workflow command only
+ * at the start of a line).
+ *
+ * @param {ReadonlyArray<{ channel: string, status: string, detail?: string, notSetUp?: boolean }>} results
+ * @returns {string[]}
+ */
+export function notSetUpAnnotations(results) {
+  return notSetUpChannels(results).map((entry) => `::warning title=Channel skipped, not set up::${escapeCommandData(`${entry.channel}: ${entry.reason}`)}`);
 }
 
 /** The text a disabled channel prints. */

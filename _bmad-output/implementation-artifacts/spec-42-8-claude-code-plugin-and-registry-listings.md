@@ -375,6 +375,26 @@ Code review 2026-11-21 (stage `code-review`, frozen diff `fc113e7..c741a7f` minu
    - If an earlier channel failed, `mcp-registry` is reported `not attempted`, as every later channel is today.
    - Tests and the release header contract state this.
 
+**2026-11-21, rework 2: decision #121 (owner ruling "b"; revises DW-704 and the "IPM enabled unconditionally" part of #108) — a channel whose owner setup is missing is skipped, not a release failure. Binding where it differs from the text above; the frozen block is untouched.**
+
+3. **#121 (not set up).** In `rehearse` and in `publish`, a channel whose OWNER SETUP is missing is reported `skipped (not set up: <reason>)`, does not make the run exit non-zero, and does not stop the channels after it, so an npm-only release proceeds. Everything else is unchanged and fail-closed: npm is never skippable; an unreadable store or registry lookup, a vsix whose hash differs from the manifest, a missing CLI, the placeholder publisher, a failed upload and a channel that is set up and then fails still fail the run (stop-on-failure as before). A channel with a real problem beside an unset one stays `not ready`/`failed` (the dry step skips only when EVERY reason is a missing setup). When in doubt, a reason is not "not set up" (Rule #54: each skip is reachable by a real input).
+   - **Reasons implemented (Open VSX only):** the Open VSX namespace API's real 404 (`GET https://open-vsx.org/api/iris-mcp`, owner step O1), in a rehearsal and in a release. Its 502, a 200 that is not JSON and a network error are not "absent" and still fail.
+   - **IPM is EXCLUDED pending decision #122** (the owner ruled that there is no separate `-ipm` packaging repository and IPM will publish from a root `module.xml`; the channel is redesigned in a separate pass). The IPM code, its tests and its matrix rows are exactly as before: a missing packaging repository is still `ipm: not ready (... absent or not readable ...)` and fails the rehearsal, and a missing `IPM_DIST_DEPLOY_KEY` is still `failed`. The lead checklist A2 and the IPM prerequisites paragraph are therefore unchanged for IPM until the #122 pass.
+   - **`mcp-registry` is unchanged** (decision #108: its not-ready never blocks, and it needs no owner setup); it is simply a "later channel" that still runs after a skipped one.
+   - **OVSX_PAT:** the code does not decide anything on it today. `ovsx publish` uses trusted publishing unless `OVSX_PAT` is set, and no read-only signal tells a namespace that has trusted publishing from one that does not, so an absent `OVSX_PAT` is NOT a "not set up" reason; an upload that fails for want of one is a failed upload.
+   - **Marketplace verdict (DW-705 unchanged):** probed read-only on 2026-11-21: `GET https://marketplace.visualstudio.com/publishers/iris-mcp` answers 404 (HTML) and `.../publishers/microsoft` 200, `.../publishers/zzz-nonexistent-pub-qq1` 404; the gallery REST path `/_apis/public/gallery/publishers/<id>` answers 404 for both an existing and an absent publisher, so it carries no signal. The publisher page is a real signal for "this publisher does not exist", but nothing establishes that a freshly created publisher with no extension yet reads 200, and that is exactly the state of the first release; a false "not set up" there would silently skip a channel that is set up. Trusted-publishing setup has no public read at all. So the Marketplace has no skip reason and stays as it was.
+   - **Visibility (v1.1.0 safety, lead's call in #121):** the end of the report, and so the GitHub step summary, carries a "Skipped channels (not set up; run the release again once the owner step is done)" block listing each skipped channel with its reason, and each also emits a raw `::warning title=Channel skipped, not set up::<channel>: <reason>` line (the three reserved characters escaped). There is no required-channels list. A rerun of the same tag after the setup publishes the skipped channel, and npm (and every channel that already published) reads `already published`: the existing idempotence covers it, pinned by one test.
+   - **I/O matrix (replaces or adds to the frozen rows; IPM rows untouched):**
+
+     | Scenario | Input / State | Expected Output / Behavior | Error Handling |
+     |----------|--------------|---------------------------|----------------|
+     | Open VSX namespace absent, rehearse | namespace GET 404 | `open-vsx: skipped (not set up: the Open VSX namespace iris-mcp does not exist. Create it once with npx ovsx create-namespace iris-mcp (owner step O1).)`; exit 0; later channels run; "Skipped channels" block and a `::warning::` line | — |
+     | Open VSX namespace absent, publish | namespace GET 404 | the same line; nothing is uploaded to Open VSX; exit 0 | — |
+     | Namespace unreadable | 502, a 200 that is not JSON, a network error | `not ready`/`failed (the Open VSX namespace iris-mcp could not be read ...)`; exit 1; what follows `not attempted` | never "not set up" |
+     | Set-up channel fails | a version lookup HTTP 500, a vsix hash mismatch, a missing CLI, an upload that exits non-zero | `not ready`/`failed` as before; exit 1 (rehearsal), 1 or 2 (release); what follows `not attempted` | a skipped channel is still listed |
+     | npm failure | `npm publish` fails or `npm view` cannot be judged | exit 1; every other channel `not attempted` | npm is never skipped |
+     | Rerun after the setup | namespace now 200; npm and the Marketplace already hold the version | npm and the Marketplace `already published`; Open VSX `published`; no block | — |
+
 ## Review Triage Log
 
 ### 2026-11-21 — Review pass
@@ -691,7 +711,7 @@ Every test added or changed passes on a fresh environment, in either order, and 
 **Lead checklist (after code review; the lead records each result, in this order; nothing publishes before the `release` environment approval in C0):**
 - A1: CI on the story commit is green, including `ipm`'s registry-shaped leg on both editions.
 - A1b: a throwaway branch where `stagePackagingRoot` ALONE puts `module.xml` under a subdirectory (after `stageModule` returns; never mutate `stageModule`, which the `package` leg also uses) is red at the registry-shaped leg while the `package` leg stays green; the branch is deleted.
-- A2: the release dry run (`release-dry-run/**`) before O-IPM1: `ipm` reads `not ready (... absent or not readable ...)` and the rehearsal exits 1 for it (intended); `mcp-registry` reads `ready (would publish 5 servers)` (its `not ready` would be reported without failing the run, decision #108).
+- A2: the release dry run (`release-dry-run/**`) before O-IPM1: `ipm` reads `not ready (... absent or not readable ...)` and the rehearsal exits 1 for it (intended); `mcp-registry` reads `ready (would publish 5 servers)` (its `not ready` would be reported without failing the run, decision #108). Decision #121: while the Open VSX namespace is absent (before owner step O1) `open-vsx` reads `skipped (not set up: the Open VSX namespace iris-mcp does not exist ...)` and does not fail the rehearsal; the IPM wording above is unchanged until the decision #122 pass redesigns the channel.
 - **O-IPM1 (OWNER ONLY; blocks the `v1.1.0` tag):** the packaging repository, the deploy key and the `IPM_DIST_DEPLOY_KEY` secret (Design Notes, "What the owner must provide").
 - A2b: after O-IPM1, the dry run again: `ipm` reads `ready`.
 - B1: after npm 1.0.0 is live (42.6 B7), the `--plugin-dir` session with five servers connected.
@@ -765,6 +785,19 @@ Every test added or changed passes on a fresh environment, in either order, and 
 - mutation: the `[WARN]` loop in `cmdSkills` removed → `skills-cli-plugin.test.ts` "an unreadable settings file prints a [WARN] line ...".
 - mutation: the no-plugin report line without its `(checked ...)` list → `skills-cli-plugin.test.ts` "no plugin ... reports that no plugin was found and which three files were checked".
 - mutation: `publishMcpRegistry`'s fresh lookup after a failed publish ignored (`if (false)`) → `release-script.test.ts` "a publish that fails but whose fresh lookup says it is there (a race) ...".
+
+**Rework 2, decision #121 (2026-11-21; tests: `release-not-set-up.test.ts` (new, 19 rows), `story-42-8-release-core.test.ts`, `story-42-8-doc-claims.test.ts`, and two rows of `release-script.test.ts` that pinned "namespace absent is not ready / failed, exit 1" and now pin the skip, exit 0). Each mutation was applied, observed red, and reverted; `shasum` of `scripts/release.mjs` and `scripts/lib/release-core.mjs` was identical before and after the whole set.**
+- mutation: the release path's `if (namespace.state === 'absent') return notSetUp(...)` removed → `release-not-set-up.test.ts` "a release: Open VSX is skipped ...", "an npm-only outcome ..." and "a rerun of the same tag ..." (3 red).
+- mutation: the dry step's `notSetUp: namespace.state === 'absent'` set to `false` → `release-not-set-up.test.ts` "a rehearsal: Open VSX is skipped ..." (1 red).
+- mutation: a skipped channel also fails the run (`outcome.status === STATUS.failed || outcome.notSetUp === true`) → the two skip rows, "an npm-only outcome ..." and "a rerun of the same tag ..." (4 red).
+- mutation: the release path skips on `namespace.state !== 'present'` (an unreadable namespace read as absent) → "a release: an Open VSX namespace that cannot be read (HTTP 502) ..." and "an Open VSX namespace 200 that is not JSON ..." (2 red).
+- mutation: `notReadyOutcome` uses `some` instead of `every` (a real problem beside an unset reason would skip) → "a rehearsal: an Open VSX namespace that is absent beside an `ovsx` that is not installed ..." (1 red).
+- mutation: the `::warning::` loop emptied → the two skip rows (2 red).
+- mutation: `releaseReport`'s "Skipped channels" block disabled → the two skip rows, "a rerun of the same tag ..." and `story-42-8-release-core.test.ts` "the report lists every channel skipped as not set up in one block ..." (4 red).
+- mutation: the npm failure ignored (`failed = false; hardFailed = false;` after the npm loop) → `release-not-set-up.test.ts` "npm is never skippable" (3 red: the two modes and the `npm view` that cannot be judged).
+- mutation: the npm loop's `already published` branch disabled (`&& false`) → "a rerun of the same tag after the owner setup publishes the skipped channels" (1 red).
+- mutation: the README's "`::warning::` annotation" reworded → `story-42-8-doc-claims.test.ts` "says a channel that is not set up is skipped and listed, not a failure ..." (1 red).
+- Probe evidence for the Marketplace verdict and the real shapes: see the Spec Change Log, #121. The IPM channel was not touched (excluded pending #122): `release-script.test.ts` is byte-identical to `869c522` except the two Open VSX rows.
 
 ## Auto Run Result
 

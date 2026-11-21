@@ -1580,14 +1580,14 @@ describe("Publish: the extension stores (Story 42.7)", () => {
     expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not attempted");
   });
 
-  it("Open VSX namespace absent: a release fails before any lookup or upload of Open VSX, naming the namespace and the owner's step; the Marketplace is not affected", async () => {
+  it("Open VSX namespace absent (decision #121): a release skips Open VSX as not set up, naming the namespace and the owner's step, before any lookup or upload of it; the Marketplace is not affected and the run exits 0", async () => {
     const world = newWorld();
     world.stores.namespace = { status: 404, body: { error: "Namespace not found: iris-mcp" } };
-    expect(await world.run()).toBe(1);
+    expect(await world.run()).toBe(0);
     expect(world.standIns.calls("vsce")).toHaveLength(1);
     expect(world.standIns.calls("ovsx"), "nothing uploaded to a namespace that does not exist").toEqual([]);
     expect(world.stores.requests.map((request) => request.url)).toEqual([MARKETPLACE_LOOKUP, OPEN_VSX_NAMESPACE]);
-    expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: failed (the Open VSX namespace iris-mcp does not exist. Create it once with npx ovsx create-namespace iris-mcp (owner step O1). Nothing was uploaded to open-vsx.)");
+    expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: skipped (not set up: the Open VSX namespace iris-mcp does not exist. Create it once with npx ovsx create-namespace iris-mcp (owner step O1).)");
   });
 
   it("an Open VSX namespace that cannot be read is `failed` too, with the status", async () => {
@@ -1630,11 +1630,11 @@ describe("Publish: the extension stores (Story 42.7)", () => {
       expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0)");
     });
 
-    it("Open VSX namespace absent: `not ready: the Open VSX namespace iris-mcp does not exist ...`, exit 1", async () => {
+    it("Open VSX namespace absent (decision #121): `skipped (not set up: the Open VSX namespace iris-mcp does not exist ...)`, exit 0", async () => {
       const world = newWorld();
       world.stores.namespace = { status: 404 };
-      expect(await world.run({ dryRun: true })).toBe(1);
-      expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: not ready (the Open VSX namespace iris-mcp does not exist. Create it once with npx ovsx create-namespace iris-mcp (owner step O1).)");
+      expect(await world.run({ dryRun: true })).toBe(0);
+      expect(reportOf(world)).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: skipped (not set up: the Open VSX namespace iris-mcp does not exist. Create it once with npx ovsx create-namespace iris-mcp (owner step O1).)");
       expect(reportOf(world)).toContain("vscode-marketplace\n  iris-mcp-launcher@1.0.0: ready (would publish iris-mcp-launcher@1.0.0)");
     });
 

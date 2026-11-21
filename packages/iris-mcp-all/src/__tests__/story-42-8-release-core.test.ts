@@ -26,9 +26,13 @@ import {
   ipmReadme,
   mcpPublisherArgv,
   mcpPublisherUrl,
+  notSetUpAnnotations,
+  notSetUpChannels,
+  notSetUpDetail,
   npmVersionUrl,
   registryLookupUrl,
   registryOutcome,
+  releaseReport,
   skippedText,
 } from "../../../../scripts/lib/release-core.mjs";
 import { PACK_DIR, PLUGIN_MANIFEST_PATH, PLUGIN_NAME } from "../../../../scripts/lib/skills-pack.mjs";
@@ -155,5 +159,31 @@ describe("the non-endorsement sentence and the disabled-channel text", () => {
   it("a channel that names no reason still prints a status", () => {
     expect(skippedText({})).toBe("skipped: not enabled (no reason given)");
     expect(skippedText({ enabledBy: "Story 99.9" })).toBe("skipped: not enabled (Story 99.9)");
+  });
+});
+
+describe("a channel that is not set up (decision #121)", () => {
+  it("the report lists every channel skipped as not set up in one block after the channels, with its reason, and has no block otherwise", () => {
+    const results = [
+      { channel: "npm", item: "@iris-mcp/all@1.0.0", status: "published" },
+      { channel: "open-vsx", item: "iris-mcp-launcher@1.0.0", status: "skipped", detail: notSetUpDetail("the namespace is absent"), notSetUp: true },
+      { channel: "vscode-marketplace", item: "iris-mcp-launcher@1.0.0", status: "skipped: not enabled (Story 99.9)" },
+      { channel: "other-channel", item: "iris-execute-mcp-v2@1.0.0", status: "skipped", detail: notSetUpDetail("no deploy key"), notSetUp: true },
+    ];
+    const report = releaseReport(results);
+    expect(report).toContain("open-vsx\n  iris-mcp-launcher@1.0.0: skipped (not set up: the namespace is absent)");
+    expect(report.endsWith("\nSkipped channels (not set up; run the release again once the owner step is done):\n  open-vsx: the namespace is absent\n  other-channel: no deploy key\n")).toBe(true);
+    expect(notSetUpChannels(results)).toEqual([
+      { channel: "open-vsx", reason: "the namespace is absent" },
+      { channel: "other-channel", reason: "no deploy key" },
+    ]);
+    expect(releaseReport(results.slice(0, 1)), "nothing skipped, no block").not.toContain("Skipped channels");
+    expect(releaseReport([results[2] as (typeof results)[number]]), "a disabled channel is not a not-set-up channel").not.toContain("Skipped channels");
+  });
+
+  it("each skipped channel is one raw `::warning::` line, with the three reserved characters of a workflow command escaped", () => {
+    const lines = notSetUpAnnotations([{ channel: "other-channel", item: "x", status: "skipped", detail: notSetUpDetail("100% sure\nsecond line\rthird"), notSetUp: true }]);
+    expect(lines).toEqual(["::warning title=Channel skipped, not set up::other-channel: 100%25 sure%0Asecond line%0Dthird"]);
+    expect(notSetUpAnnotations([{ channel: "npm", item: "x", status: "published" }])).toEqual([]);
   });
 });

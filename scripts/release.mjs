@@ -39,13 +39,22 @@
 //      publish.` after an exit 0 is still `already published`), and a lookup that cannot be judged (another status, a 200 that is not
 //      the store's answer, a network error, a 30 s stall) fails closed: nothing is uploaded to that store and nothing after it is attempted (the channels before it
 //      have already run). Open VSX also needs its namespace (`GET https://open-vsx.org/api/<publisher>`, a 200 only when it is JSON):
-//      absent is `not ready` in a rehearsal and `failed` before its upload in a release.
+//      absent is `skipped (not set up: ...)` (see NOT SET UP below).
 //      The CLIs are the exact pins in the launcher's `node_modules/.bin`; `vsce publish --oidc` is trusted publishing, and `ovsx publish`
 //      uses trusted publishing too unless OVSX_PAT is set (the first publish). In release mode the vsix must be at the manifest's version.
 //      IPM (Story 42.8). The push to the packaging repository trusts only GitHub's three published host keys: a 0600 known_hosts file of
 //      the pinned keys, `StrictHostKeyChecking=yes`, never `accept-new`. A version the IPM registry already lists goes on to the tag and tree
 //      check: tag `v<version>` on the packaging repository with an identical tree is `already published`, and an absent tag or a different
 //      tree is `failed`, with nothing pushed. In a rehearsal a listed version reads `ready (would be already published)`.
+//      NOT SET UP (decision #121). A channel whose OWNER SETUP is missing is `skipped (not set up: <reason>)` in a rehearsal and in a
+//      release, does not fail the run, and later channels still run, so that an npm-only release can go out. The only reason today is the
+//      one the real service gives: the Open VSX namespace's 404 (owner step O1). Nothing else is one: an unreadable lookup, a network
+//      failure, a hash mismatch, a missing CLI, the placeholder publisher, a failed upload, and anything on npm still fail the run, and
+//      so does a channel that has a real problem beside an unset one. The Marketplace has no such reason: no public read-only signal tells
+//      a missing publisher from a publisher that has published nothing yet (Story 42.8, DW-705). The IPM channel is excluded from this
+//      rule for now (decision #122 redesigns it): its readiness and failures are as they were. The end of the run lists every skipped
+//      channel with its reason, in the report (and so in the step summary) and as a `::warning::` annotation; running the release again
+//      after the setup publishes them (npm and the other channels read `already published`).
 //      THE MCP REGISTRY (Story 42.8). The channel is last and the registry is in preview, so it never blocks the others: in a rehearsal its
 //      `not ready` is reported but the run does not exit non-zero for it (and the rehearsal reads it even when an earlier channel is not ready),
 //      and in a release its failure fails the run only after every channel before it has run, with a rerun recovering it. It asks the registry
@@ -129,6 +138,8 @@ import {
   mainReachability,
   mcpPublisherArgv,
   mcpPublisherUrl,
+  notSetUpAnnotations,
+  notSetUpDetail,
   npmPublishArgv,
   npmUserconfig,
   npmVersionProblems,
@@ -1227,7 +1238,7 @@ async function runPublish({ artifacts, dryRun = false, env, repoRoot = REPO_ROOT
           say(`${channel.id}: ${entry.item}: ${entry.status}${entry.detail === undefined ? '' : ` (${entry.detail})`}`);
         }
       } else {
-        results.push({ channel: channel.id, item, status: outcome.status, ...(outcome.detail === undefined ? {} : { detail: outcome.detail }) });
+        results.push({ channel: channel.id, item, status: outcome.status, ...(outcome.detail === undefined ? {} : { detail: outcome.detail }), ...(outcome.notSetUp === true ? { notSetUp: true } : {}) });
         say(`${channel.id}: ${outcome.status}${outcome.detail === undefined ? '' : ` (${outcome.detail})`}`);
       }
       if (outcome.status === STATUS.failed) {
@@ -1240,6 +1251,8 @@ async function runPublish({ artifacts, dryRun = false, env, repoRoot = REPO_ROOT
     }
     if (registryNotReady) say('mcp-registry is not ready, which does not stop the rehearsal: the registry is in preview and never blocks npm, the stores or IPM.');
 
+    // A channel skipped as not set up is not a failure, so each one is also an annotation (a raw `::warning::` line) beside the report's block.
+    for (const annotation of notSetUpAnnotations(results)) deps.log(annotation);
     const report = releaseReport(results);
     deps.log(report);
     appendSummary(env, `### ${dryRun ? 'Rehearsal' : 'Publish'} ${manifest.version}\n\n\`\`\`\n${report}\`\`\``);
@@ -1257,7 +1270,19 @@ async function channelReadiness(channel, detail, ctx) {
   return `${STATUS.notReady}: ${outcome.detail}`;
 }
 
-/** Read-only checks of one channel. Returns `{ status: 'ready' }` or `{ status: 'not ready', detail }`. */
+/**
+ * What a dry step says when it is not ready: `detail` is every reason, joined; `notSetUp` is true only when EVERY reason is a missing
+ * owner setup (decision #121), so that a channel with a real problem beside an unset one stays `not ready` and fails the run.
+ */
+function notReadyOutcome(reasons) {
+  return { status: STATUS.notReady, detail: reasons.map((reason) => reason.text).join('; '), notSetUp: reasons.every((reason) => reason.notSetUp === true) };
+}
+
+/**
+ * Read-only checks of one channel. Returns `{ status: 'ready' }` or `{ status: 'not ready', detail, notSetUp }`. A reason is a missing
+ * owner setup only where the real service says so: the Open VSX namespace's 404. Everything else (an unreadable lookup, a missing CLI,
+ * the placeholder publisher, and every reason of the IPM channel, which decision #122 redesigns) is a plain reason.
+ */
 async function dryStep(channel, detail, { dir, env, deps, repoRoot, version, cleanups }) {
   if (channel.id === 'mcp-registry') return registryDryStep(detail, { dir, env, deps, version, cleanups });
   if (channel.id === 'ipm') {
@@ -1275,19 +1300,19 @@ async function dryStep(channel, detail, { dir, env, deps, repoRoot, version, cle
     if (reasons.length > 0) return { status: STATUS.notReady, detail: reasons.join('; ') };
     return listing.listed ? { status: STATUS.ready, detail: STATUS.wouldBeAlreadyPublished } : { status: STATUS.ready };
   }
-  const { reasons } = vsixReadiness(detail, repoRoot, channel.id === 'vscode-marketplace' ? 'vsce' : 'ovsx');
+  const reasons = vsixReadiness(detail, repoRoot, channel.id === 'vscode-marketplace' ? 'vsce' : 'ovsx').reasons.map((text) => ({ text }));
   // The store reads need a real publisher: the placeholder names nothing a store could answer for.
   let lookup;
   if (typeof detail.publisher === 'string' && detail.publisher !== PLACEHOLDER_PUBLISHER) {
     const item = `${detail.name}@${detail.version}`;
     if (channel.id === 'open-vsx') {
       const namespace = await openVsxNamespaceState(deps, detail.publisher);
-      if (namespace.state !== 'present') reasons.push(namespace.problem);
+      if (namespace.state !== 'present') reasons.push({ text: namespace.problem, notSetUp: namespace.state === 'absent' });
     }
     lookup = await storeLookup(deps, channel.id, detail, detail.version);
-    if (lookup.outcome === 'unknown') reasons.push(lookupProblem(channel.id, item, lookup.why));
+    if (lookup.outcome === 'unknown') reasons.push({ text: lookupProblem(channel.id, item, lookup.why) });
   }
-  if (reasons.length > 0) return { status: STATUS.notReady, detail: reasons.join('; ') };
+  if (reasons.length > 0) return notReadyOutcome(reasons);
   return { status: STATUS.ready, detail: lookup?.outcome === 'published' ? STATUS.wouldBeAlreadyPublished : `${STATUS.wouldPublish} ${detail.name}@${detail.version}` };
 }
 
@@ -1467,13 +1492,17 @@ async function publishMcpRegistry(detail, { dir, env, deps, cleanups, version, q
   }
 }
 
+/** The outcome of a channel whose owner setup is missing (decision #121): skipped, never a failure, and listed at the end of the run. */
+const notSetUp = (reason) => ({ status: STATUS.skipped, detail: notSetUpDetail(reason), notSetUp: true });
+
 /** Run one enabled channel: its dry step in a rehearsal, its upload otherwise. */
 async function runChannel(channel, detail, ctx) {
   const { dir, env, deps, repoRoot, dryRun, cleanups, version, sha, quote } = ctx;
   if (detail === undefined) return { status: STATUS.failed, detail: `the manifest has no ${channel.id} entry. Prepare the artifacts again.` };
   if (dryRun) {
     const dry = await dryStep(channel, detail, ctx);
-    return dry.status === STATUS.ready ? { status: STATUS.ready, ...(dry.detail === undefined ? {} : { detail: dry.detail }) } : { status: STATUS.notReady, detail: dry.detail };
+    if (dry.status === STATUS.ready) return { status: STATUS.ready, ...(dry.detail === undefined ? {} : { detail: dry.detail }) };
+    return dry.notSetUp === true ? notSetUp(dry.detail) : { status: STATUS.notReady, detail: dry.detail };
   }
   if (channel.id === 'mcp-registry') return publishMcpRegistry(detail, { dir, env, deps, cleanups, version, quote });
   if (channel.id === 'ipm') return publishIpm(detail, { dir, env, deps, cleanups, version, sha, quote });
@@ -1484,6 +1513,7 @@ async function runChannel(channel, detail, ctx) {
   const item = `${detail.name}@${detail.version}`;
   if (channel.id === 'open-vsx') {
     const namespace = await openVsxNamespaceState(deps, detail.publisher);
+    if (namespace.state === 'absent') return notSetUp(namespace.problem);
     if (namespace.state !== 'present') return { status: STATUS.failed, detail: `${namespace.problem} Nothing was uploaded to open-vsx.` };
   }
   const lookup = await storeLookup(deps, channel.id, detail, detail.version);

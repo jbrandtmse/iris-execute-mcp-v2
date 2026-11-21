@@ -81,6 +81,16 @@ describe("the Releasing table (Rules #30, #51: the default state is derived from
     expect(RELEASING).toContain("a failed upload fails the run only after every other channel has finished");
   });
 
+  it("says a channel that is not set up is skipped and listed, not a failure, and what still fails (decision #121)", () => {
+    expect(RELEASING).toContain("**A channel that is not set up is skipped, not a failure.**");
+    expect(RELEASING).toContain("`skipped (not set up: <reason>)`");
+    expect(RELEASING).toContain('a "Skipped channels" block at the end of the report');
+    expect(RELEASING).toContain("`::warning::` annotation");
+    expect(RELEASING).toContain("run the release again for the same tag");
+    expect(RELEASING).toContain("anything on npm still fail the run");
+    expect(RELEASING).toContain("the IPM channel below is unchanged for now");
+  });
+
   it("step 1 names the generators the version step runs after the bootstrap", () => {
     expect(RELEASING).toContain("`pnpm gen:pack` and `pnpm gen:listings`");
     expect(RELEASING).toContain("the five `server.json` files of the MCP Registry");
