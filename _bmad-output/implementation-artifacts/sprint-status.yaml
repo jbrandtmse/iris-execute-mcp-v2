@@ -545,7 +545,7 @@ development_status:
   42-3-ci-workflow: done
   42-4-ipm-package-revival: done
   42-5-release-workflow: done
-  42-6-tarball-smoke-and-1-0-0-publish: ready-for-dev
+  42-6-tarball-smoke-and-1-0-0-publish: in-progress
   42-7-vs-code-extension-publish: backlog
   42-8-claude-code-plugin-and-registry-listings: backlog
   42-9-install-docs-and-client-re-certification: backlog
