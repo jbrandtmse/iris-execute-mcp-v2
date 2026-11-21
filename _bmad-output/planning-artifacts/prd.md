@@ -199,7 +199,7 @@ Mei is a data analyst who uses IRIS as the backend for a document management sys
 
 ### Installation & Distribution
 
-- **Primary distribution:** npm registry. Every `@iris-mcp/*` package shares one version (`1.0.0` was published 2026-11-20 with provenance, with no beta tag), and every package requires Node.js `>=22.17.0`. Tool counts are the package tools; each server also advertises the framework tool `iris_server_profiles`, so a server lists one more (`fixtures/tools-list-snapshot.json`: 115 entries, 110 package tools plus 5):
+- **Primary distribution:** npm registry. Every `@iris-mcp/*` package shares one version (`1.0.0` was published 2026-11-21 with provenance, with no beta tag), and every package requires Node.js `>=22.17.0`. Tool counts are the package tools; each server also advertises the framework tool `iris_server_profiles`, so a server lists one more (`fixtures/tools-list-snapshot.json`: 115 entries, 110 package tools plus 5):
   - `@iris-mcp/dev` — Development tools (32 tools, 33 advertised)
   - `@iris-mcp/admin` — Administration tools (26 tools, 27 advertised)
   - `@iris-mcp/interop` — Interoperability tools (24 tools, 25 advertised)

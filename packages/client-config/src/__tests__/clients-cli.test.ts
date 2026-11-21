@@ -1330,39 +1330,60 @@ describe("doctor: claude-code-plugin-duplicates (DW-706)", () => {
     return { code, list: payload.data.findings.filter((finding) => finding.check === "claude-code-plugin-duplicates") };
   }
 
-  it("plugin enabled in the user settings file and iris-dev-mcp in ~/.claude.json: one finding with the remove command, exit 1", async () => {
+  it("plugin enabled in the user settings file and iris-dev-mcp in the user file ($CLAUDE_CONFIG_DIR/.claude.json): one finding with the remove command, exit 1", async () => {
     const h = harness({}, { CLAUDE_CONFIG_DIR: CONFIG_DIR });
-    h.fs.seed(`${HOME}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY }));
+    h.fs.seed(`${CONFIG_DIR}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY }));
     h.fs.seed(`${CONFIG_DIR}/settings.json`, enabled(true));
     const { code, list } = await findings(h);
     expect(code).toBe(1);
     expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({ client: "claude-code", scope: "user", path: `${HOME}/.claude.json`, entry: "iris-dev-mcp" });
+    expect(list[0]).toMatchObject({ client: "claude-code", scope: "user", path: `${CONFIG_DIR}/.claude.json`, entry: "iris-dev-mcp" });
     expect(list[0]?.detail).toBe(
       `iris-dev-mcp is also served by the Claude Code plugin iris-mcp (enabled in ${CONFIG_DIR}/settings.json): every tool appears twice. ` +
         `Remove it: npx -y -p @iris-mcp/client-config@1 iris-mcp-clients remove --client claude-code --server iris-dev-mcp --scope user`,
     );
 
     const text = harness({}, { CLAUDE_CONFIG_DIR: CONFIG_DIR });
-    text.fs.seed(`${HOME}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY }));
+    text.fs.seed(`${CONFIG_DIR}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY }));
     text.fs.seed(`${CONFIG_DIR}/settings.json`, enabled(true));
     expect(await text.run(["doctor"])).toBe(1);
     expect(text.stdout.text).toContain("claude-code-plugin-duplicates (1):");
     expect(text.stdout.text).toContain("[claude-code/user] iris-dev-mcp is also served by the Claude Code plugin iris-mcp (enabled in /cfg/settings.json)");
   });
 
-  it("without CLAUDE_CONFIG_DIR the user settings file is ~/.claude/settings.json", async () => {
+  it("without CLAUDE_CONFIG_DIR the user settings file is ~/.claude/settings.json and the user file is ~/.claude.json", async () => {
     const h = harness();
     h.fs.seed(`${HOME}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY }));
     h.fs.seed(`${HOME}/.claude/settings.json`, enabled(true));
     const { list } = await findings(h);
     expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ scope: "user", path: `${HOME}/.claude.json` });
     expect(list[0]?.detail).toContain(`(enabled in ${HOME}/.claude/settings.json)`);
+  });
+
+  it("with CLAUDE_CONFIG_DIR set, Claude Code reads $CLAUDE_CONFIG_DIR/.claude.json and ignores ~/.claude.json, and so does doctor", async () => {
+    const h = harness({}, { CLAUDE_CONFIG_DIR: CONFIG_DIR });
+    h.fs.seed(`${HOME}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY }));
+    h.fs.seed(`${CONFIG_DIR}/.claude.json`, userFile({ "iris-admin-mcp": ENTRY }));
+    h.fs.seed(`${CONFIG_DIR}/settings.json`, enabled(true));
+    const { list } = await findings(h);
+    expect(list.map((finding) => `${finding.path}:${finding.entry}`)).toEqual([`${CONFIG_DIR}/.claude.json:iris-admin-mcp`]);
+  });
+
+  it("with CLAUDE_CONFIG_DIR set, apply --scope user writes $CLAUDE_CONFIG_DIR/.claude.json, the file the remove command of the finding targets", async () => {
+    const h = harness({}, { CLAUDE_CONFIG_DIR: CONFIG_DIR });
+    h.fs.seed(`${HOME}/.claude.json`, userFile({}));
+    const before = h.fs.readFile(`${HOME}/.claude.json`);
+    expect(await h.run(["apply", "--client", "claude-code", "--servers", "iris-dev-mcp", "--scope", "user", "--yes"])).toBe(0);
+    expect(h.fs.readFile(`${CONFIG_DIR}/.claude.json`)).toContain('"iris-dev-mcp"');
+    expect(h.fs.readFile(`${HOME}/.claude.json`)).toBe(before);
+    expect(await h.run(["remove", "--client", "claude-code", "--server", "iris-dev-mcp", "--scope", "user"])).toBe(0);
+    expect(h.fs.readFile(`${CONFIG_DIR}/.claude.json`)).not.toContain('"iris-dev-mcp"');
   });
 
   it("plugin enabled and iris-ops-mcp in the project's .mcp.json: the finding names claude-code/project and --scope project", async () => {
     const h = harness({}, { CLAUDE_CONFIG_DIR: CONFIG_DIR });
-    h.fs.seed(`${HOME}/.claude.json`, userFile({}));
+    h.fs.seed(`${CONFIG_DIR}/.claude.json`, userFile({}));
     h.fs.seed(`${PROJECT}/.mcp.json`, JSON.stringify({ mcpServers: { "iris-ops-mcp": ENTRY } }, null, 2));
     h.fs.seed(`${CONFIG_DIR}/settings.json`, enabled(true));
     const { code, list } = await findings(h);
@@ -1374,7 +1395,7 @@ describe("doctor: claude-code-plugin-duplicates (DW-706)", () => {
 
   it("one finding per duplicated entry, across both scopes", async () => {
     const h = harness({}, { CLAUDE_CONFIG_DIR: CONFIG_DIR });
-    h.fs.seed(`${HOME}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY, "iris-data-mcp": ENTRY, other: { command: "x" } }));
+    h.fs.seed(`${CONFIG_DIR}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY, "iris-data-mcp": ENTRY, other: { command: "x" } }));
     h.fs.seed(`${PROJECT}/.mcp.json`, JSON.stringify({ mcpServers: { "iris-ops-mcp": ENTRY } }));
     h.fs.seed(`${CONFIG_DIR}/settings.json`, enabled(true));
     const { list } = await findings(h);
@@ -1388,7 +1409,7 @@ describe("doctor: claude-code-plugin-duplicates (DW-706)", () => {
   it("plugin set to false, or its key absent: no such finding, and a clean doctor exits as before", async () => {
     for (const value of [false, undefined]) {
       const h = harness({}, { CLAUDE_CONFIG_DIR: CONFIG_DIR, IRIS_HOST: "h", IRIS_PORT: "1", IRIS_USERNAME: "u", IRIS_NAMESPACE: "N", IRIS_HTTPS: "false", IRIS_PASSWORD: "p" });
-      h.fs.seed(`${HOME}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY }));
+      h.fs.seed(`${CONFIG_DIR}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY }));
       h.fs.seed(`${CONFIG_DIR}/settings.json`, enabled(value));
       const { code, list } = await findings(h);
       expect(list, `enabledPlugins value ${String(value)}`).toEqual([]);
@@ -1398,19 +1419,19 @@ describe("doctor: claude-code-plugin-duplicates (DW-706)", () => {
 
   it("no settings file at all: no finding", async () => {
     const h = harness({}, { CLAUDE_CONFIG_DIR: CONFIG_DIR });
-    h.fs.seed(`${HOME}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY }));
+    h.fs.seed(`${CONFIG_DIR}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY }));
     expect((await findings(h)).list).toEqual([]);
   });
 
   it("the highest settings file wins: a local file that sets the plugin to false overrides the user file's true", async () => {
     const h = harness({}, { CLAUDE_CONFIG_DIR: CONFIG_DIR });
-    h.fs.seed(`${HOME}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY }));
+    h.fs.seed(`${CONFIG_DIR}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY }));
     h.fs.seed(`${CONFIG_DIR}/settings.json`, enabled(true));
     h.fs.seed(`${PROJECT}/.claude/settings.local.json`, enabled(false));
     expect((await findings(h)).list).toEqual([]);
 
     const on = harness({}, { CLAUDE_CONFIG_DIR: CONFIG_DIR });
-    on.fs.seed(`${HOME}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY }));
+    on.fs.seed(`${CONFIG_DIR}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY }));
     on.fs.seed(`${CONFIG_DIR}/settings.json`, enabled(false));
     on.fs.seed(`${PROJECT}/.claude/settings.json`, enabled(true));
     const found = await findings(on);
@@ -1420,14 +1441,14 @@ describe("doctor: claude-code-plugin-duplicates (DW-706)", () => {
 
   it("a settings file that is not valid JSON counts as no entry: no finding and no crash", async () => {
     const h = harness({}, { CLAUDE_CONFIG_DIR: CONFIG_DIR });
-    h.fs.seed(`${HOME}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY }));
+    h.fs.seed(`${CONFIG_DIR}/.claude.json`, userFile({ "iris-dev-mcp": ENTRY }));
     h.fs.seed(`${CONFIG_DIR}/settings.json`, "{ not json");
     expect((await findings(h)).list).toEqual([]);
   });
 
   it("an entry owned by another client, or a foreign entry in Claude Code's config, is not a duplicate", async () => {
     const h = harness({}, { CLAUDE_CONFIG_DIR: CONFIG_DIR });
-    h.fs.seed(`${HOME}/.claude.json`, userFile({ github: { command: "gh" } }));
+    h.fs.seed(`${CONFIG_DIR}/.claude.json`, userFile({ github: { command: "gh" } }));
     h.fs.seed(`${HOME}/.cursor/mcp.json`, JSON.stringify({ mcpServers: { "iris-dev-mcp": ENTRY } }));
     h.fs.seed(`${CONFIG_DIR}/settings.json`, enabled(true));
     expect((await findings(h)).list).toEqual([]);
@@ -1435,7 +1456,7 @@ describe("doctor: claude-code-plugin-duplicates (DW-706)", () => {
 
   it("run from the home directory, the project-scope finding does not offer a remove command the home guard refuses", async () => {
     const h = harness({ projectDir: HOME }, { CLAUDE_CONFIG_DIR: CONFIG_DIR });
-    h.fs.seed(`${HOME}/.claude.json`, userFile({}));
+    h.fs.seed(`${CONFIG_DIR}/.claude.json`, userFile({}));
     h.fs.seed(`${HOME}/.mcp.json`, JSON.stringify({ mcpServers: { "iris-ops-mcp": ENTRY } }, null, 2));
     h.fs.seed(`${CONFIG_DIR}/settings.json`, enabled(true));
     const { code, list } = await findings(h);
@@ -1449,7 +1470,7 @@ describe("doctor: claude-code-plugin-duplicates (DW-706)", () => {
   it("an entry in the local scope (the projects map of ~/.claude.json) is not read: no finding", async () => {
     const h = harness({}, { CLAUDE_CONFIG_DIR: CONFIG_DIR });
     h.fs.seed(
-      `${HOME}/.claude.json`,
+      `${CONFIG_DIR}/.claude.json`,
       JSON.stringify({ mcpServers: {}, projects: { [PROJECT]: { mcpServers: { "iris-dev-mcp": ENTRY } } } }, null, 2),
     );
     h.fs.seed(`${CONFIG_DIR}/settings.json`, enabled(true));

@@ -146,13 +146,11 @@ describe("Story 42.9: the doc set and the caveat guard", () => {
 
 describe("Story 42.9: the plugin and the extension are documented from 1.1.0 (DW-707)", () => {
   const INSTALL = /\/plugin marketplace add jbrandtmse|\/plugin install iris-mcp@iris-mcp|code --install-extension iris-mcp\.iris-mcp-launcher/;
-  /** Documents that carry an install command for one of the two and are generated, so their wording is the generator's. */
-  const GENERATED = new Set(["packages/client-config/skills-pack/README.md"]);
 
   it("each install command sits in a paragraph, or under a heading within twelve lines, that says 1.1.0", () => {
     const loose: string[] = [];
     for (const rel of docs) {
-      if (historyReason(rel) !== undefined || GENERATED.has(rel)) continue;
+      if (historyReason(rel) !== undefined) continue;
       const lines = read(rel).split("\n");
       lines.forEach((line, index) => {
         if (!INSTALL.test(line)) return;
@@ -270,7 +268,7 @@ describe("Story 42.9: the corrected facts", () => {
     expect(squash(readme)).toContain('`zpm "uninstall iris-execute-mcp-v2"` leaves two things behind, and removes neither.');
     expect(readme).toContain('Do ##class(Security.Applications).Delete("/api/executemcp/v2")');
     expect(readme).toContain('Do ##class(Config.MapPackages).Delete("%ALL","ExecuteMCPv2")');
-    expect(squash(readme)).toContain("Delete the `%ALL` mapping only when no other namespace still uses the suite");
+    expect(squash(readme)).toContain("Run them only when no other namespace still uses the suite: the instance has one such web application and one such mapping");
   });
 
   it("no reader document describes a per-worker message table, and the documents say IRIS chooses the language per request (DW-633)", () => {
@@ -312,5 +310,50 @@ describe("Story 42.9: the automatic install leads and IPM is the fallback (decis
 
   it("does not describe how IPM reaches the registry (decision #122)", () => {
     expect(ipm).not.toMatch(/packaging repository|iris-execute-mcp-v2-ipm|module\.xml|deploy key|publishes? the IPM/i);
+  });
+});
+
+describe("Story 42.9: what the published 1.0.0 CLI does not have yet is documented from 1.1.0 (AC 42.9.1, decision #116)", () => {
+  // `npx -y -p @iris-mcp/client-config@1` resolves to 1.0.0 until 1.1.0 ships; 1.0.0 answers `unknown client "pi"` and has no home guard.
+  it("the root README and the client index give the 1.1.0 floor for pi, jetbrains-junie, antigravity and the home-directory refusal", () => {
+    const readme = squash(read("README.md"));
+    expect(readme).toContain("`kimi-code`, from 1.1.0 `pi` and `jetbrains-junie`, or, for older installs,");
+    expect(readme).toContain("From 1.1.0, a project-scope write (`--scope project`) is refused when the project directory is your home directory");
+    expect(readme).toContain("The `antigravity` id is accepted from 1.1.0; on 1.0.x, use `gemini` for Antigravity CLI");
+    expect(readme).toContain("- Project scope only: `--scope user` is refused, and from 1.1.0 so is a project directory that is your home directory");
+    const index = read("docs/client-config/README.md");
+    expect(index).toMatch(/^\| \S+ Pi \(from 1\.1\.0\) \|/m);
+    expect(index).toMatch(/^\| \S+ JetBrains Junie \(from 1\.1\.0\) \|/m);
+  });
+});
+
+describe("Story 42.9: the PRD's tool counts equal the tools/list snapshot (AC 42.9.3, DW-655)", () => {
+  const snapshot = JSON.parse(read("packages/iris-mcp-all/src/__tests__/fixtures/tools-list-snapshot.json")) as {
+    entryCount: number;
+    servers: Record<string, Record<string, unknown>>;
+  };
+  const prd = squash(read("_bmad-output/planning-artifacts/prd.md"));
+  const serverCount = Object.keys(snapshot.servers).length;
+  const packageTools = snapshot.entryCount - serverCount;
+
+  it("the suite totals: package tools, plus iris_server_profiles on each server, equal the snapshot's entryCount", () => {
+    for (const tools of Object.values(snapshot.servers)) expect(Object.keys(tools)).toContain("iris_server_profiles");
+    expect(Object.values(snapshot.servers).reduce((sum, tools) => sum + Object.keys(tools).length, 0)).toBe(snapshot.entryCount);
+    expect(prd).toContain(`with ${packageTools} consolidated tools`);
+    expect(prd).toContain(`${packageTools} tools across ${serverCount} servers (${snapshot.entryCount} advertised entries`);
+    expect(prd).toContain(`All ${packageTools} consolidated tools implemented`);
+    expect(prd).toContain(`${packageTools}/${packageTools} tools passing`);
+  });
+
+  it("each package line gives that server's package tools and advertised entries", () => {
+    const names: Record<string, string> = { "iris-dev-mcp": "dev", "iris-admin-mcp": "admin", "iris-interop-mcp": "interop", "iris-ops-mcp": "ops", "iris-data-mcp": "data" };
+    expect(Object.keys(snapshot.servers).sort()).toEqual(Object.keys(names).sort());
+    for (const [server, tools] of Object.entries(snapshot.servers)) {
+      const advertised = Object.keys(tools).length;
+      const line = `\`@iris-mcp/${names[server] as string}\` \u2014 `;
+      expect(prd, server).toContain(line);
+      const rest = prd.slice(prd.indexOf(line) + line.length);
+      expect(rest.slice(0, rest.indexOf(")") + 1), server).toMatch(new RegExp(`\\(${advertised - 1} tools, ${advertised} advertised\\)$`));
+    }
   });
 });

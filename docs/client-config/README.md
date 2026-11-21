@@ -19,7 +19,7 @@ How to point any MCP client at the IRIS MCP Server Suite, plus the two credentia
 
 Detailed per-client guides: **[Claude Code](claude-code.md)** · **[Claude Desktop](claude-desktop.md)** · **[Cursor](cursor.md)**. Everything else is covered below.
 
-Every guide has one install path: `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply --client <id> --servers iris-dev-mcp`, then `skills install --client <id>` for the [skills pack](../../README.md#the-skills-pack).
+Every guide has one install path: `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply --client <id> --servers iris-dev-mcp`. For a client that works in a project folder, `skills install --client <id>` then adds the [skills pack](../../README.md#the-skills-pack).
 
 ---
 
@@ -73,7 +73,7 @@ golden round-trips proven; the real client's config surface not yet hands-verifi
 
 | Client | Format | Root key | User-scope path | Project scope | Disable |
 |---|---|---|---|---|---|
-| ✅ Claude Code | JSON | `mcpServers` | `~/.claude.json` (prefer `claude mcp add`) | `.mcp.json` | stash |
+| ✅ Claude Code | JSON | `mcpServers` | `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that is set (prefer `claude mcp add`) | `.mcp.json` | stash |
 | ✅ Cline | JSON | `mcpServers` | `<VS Code globalStorage>/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | — | native `disabled` |
 | ✅ Kimi Code | JSON | `mcpServers` | `~/.kimi-code/mcp.json` (or `$KIMI_CODE_HOME`) | `.kimi-code/mcp.json` | stash |
 | ✅ VS Code (Copilot) | JSONC | `servers` (+`inputs`) | user `mcp.json` — *MCP: Open User Configuration* | `.vscode/mcp.json` | native UI |
@@ -86,8 +86,8 @@ golden round-trips proven; the real client's config surface not yet hands-verifi
 | ⚠️ Gemini CLI | JSON | `mcpServers` | `~/.gemini/settings.json` | `.gemini/settings.json` | stash |
 | ⚠️ Zed | JSON | `context_servers` | `~/.config/zed/settings.json` / `%APPDATA%\zed\settings.json` | `.zed/settings.json` | stash |
 | ⚠️ Goose | **YAML** | `extensions` | `~/.config/goose/config.yaml` / `%APPDATA%\Block\goose\config\config.yaml` | — | native `enabled` |
-| ⚠️ Pi | JSON | `mcpServers` | `~/.pi/agent/mcp.json` (or `$PI_CODING_AGENT_DIR`) | `.pi/mcp.json` | stash |
-| ⚠️ JetBrains Junie | JSON | `mcpServers` | `~/.junie/mcp/mcp.json` | `.junie/mcp/mcp.json` | stash |
+| ⚠️ Pi (from 1.1.0) | JSON | `mcpServers` | `~/.pi/agent/mcp.json` (or `$PI_CODING_AGENT_DIR`) | `.pi/mcp.json` | stash |
+| ⚠️ JetBrains Junie (from 1.1.0) | JSON | `mcpServers` | `~/.junie/mcp/mcp.json` | `.junie/mcp/mcp.json` | stash |
 
 Clients on the roadmap, not yet supported by the manager: Kilo Code (its entries need an OpenCode-style shape the engine does not model) and Antigravity CLI (its `~/.gemini` folder is also Gemini CLI's). The `human-only` rows of the [certification table](../../packages/client-config/README.md#certification-dispositions-generated) name the checks that only a person at the client can make.
 
@@ -133,12 +133,12 @@ IRIS_SM_WORKSPACE=/path/to/your/workspace
 Preferred — the CLI writes the config for you:
 
 ```bash
-claude mcp add iris-dev -e IRIS_HOST=localhost -e IRIS_PORT=52773 \
+claude mcp add --scope user iris-dev-mcp -e IRIS_HOST=localhost -e IRIS_PORT=52773 \
   -e IRIS_USERNAME=_SYSTEM -e IRIS_PASSWORD=secret -e IRIS_NAMESPACE=USER \
   -- npx -y @iris-mcp/dev@1
 ```
 
-Or edit `~/.claude.json` (root-level `mcpServers` = user scope; see [claude-code.md](claude-code.md)):
+Or edit `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that variable is set (root-level `mcpServers` = user scope; see [claude-code.md](claude-code.md)):
 
 ```jsonc
 "mcpServers": {
@@ -301,9 +301,9 @@ extensions:
 
 All use the standard `mcpServers` JSON shape shown in the Claude Code snippet — only the file path differs (see the matrix). Cursor and Claude Desktop have dedicated guides: **[cursor.md](cursor.md)**, **[claude-desktop.md](claude-desktop.md)**.
 
-- **Devin Desktop (formerly Windsurf).** The adapter keeps writing the legacy `~/.codeium/windsurf/mcp_config.json`, which Devin reads through an import that is on by default and that you can switch off; Devin's own files are `~/.config/devin/mcp_config.json` (`%APPDATA%/devin` on Windows) and `.devin/mcp_config.json`.
-- **Pi** reads `~/.pi/agent/mcp.json` (moved by `PI_CODING_AGENT_DIR`) and, once you trust the project, `.pi/mcp.json`.
-- **JetBrains Junie** reads `~/.junie/mcp/mcp.json` and `.junie/mcp/mcp.json`; its documentation names no Windows-specific path.
+- **Devin Desktop (formerly Windsurf).** The adapter keeps writing the legacy `~/.codeium/windsurf/mcp_config.json`. Devin CLI documents an import of that file that is on by default and that you can switch off; Devin Desktop's own documentation lists only `~/.config/devin/mcp_config.json` and `.devin/mcp_config.json`, so whether Devin Desktop reads the legacy file is not yet verified. If the servers do not appear in Devin Desktop, copy the entries into `~/.config/devin/mcp_config.json`.
+- **Pi** (`--client pi`, from 1.1.0) reads `~/.pi/agent/mcp.json` (moved by `PI_CODING_AGENT_DIR`) and, once you trust the project, `.pi/mcp.json`.
+- **JetBrains Junie** (`--client jetbrains-junie`, from 1.1.0) reads `~/.junie/mcp/mcp.json` and `.junie/mcp/mcp.json`; its documentation names no Windows-specific path.
 - **Roo Code** was discontinued and **Kimi CLI** is archived (Kimi Code replaces it); their adapters stay so existing entries can be found and removed.
 
 ---

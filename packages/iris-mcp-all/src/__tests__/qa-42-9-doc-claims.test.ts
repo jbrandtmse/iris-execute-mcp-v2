@@ -16,7 +16,7 @@
  * Reads documents and source text only; needs no IRIS and no built dist.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { readerDocs } from "./doc-set";
@@ -29,9 +29,10 @@ const docs = readerDocs();
 const isHistory = (rel: string): boolean =>
   rel === "CHANGELOG.md" || rel.endsWith("/CHANGELOG.md") || rel === "docs/epic-summary.md" || /^docs\/(?:bugs|known-bugs)-/.test(rel);
 
-/** The search the spec's Rule #56 inventory ran (Code Map, "Rule #56 caveat inventory"), verbatim. */
+/** The search the spec's Rule #56 inventory ran (Code Map, "Rule #56 caveat inventory"), with its "until ... published" alternative widened to
+ * up to three words between, so that it also matches the commonest wording, "Until packages are published". */
 const INVENTORY =
-  /not yet published|not published|until (it is |they are )?published|before (the )?publish|unpublished|git clone|clone the repo|build from source|pnpm install && pnpm build|pnpm (run )?build|local path|dist\/index\.js|\bbeta\b|coming soon|once published|after publish|not yet (on|available)|pre-release|prerelease/i;
+  /not yet published|not published|until (?:[a-z]+ ){0,3}published|before (the )?publish|unpublished|git clone|clone the repo|build from source|pnpm install && pnpm build|pnpm (run )?build|local path|dist\/index\.js|\bbeta\b|coming soon|once published|after publish|not yet (on|available)|pre-release|prerelease/i;
 
 /**
  * Every hit the inventory regex has in a non-history reader document, with its verdict (2026-11-21, reviewed against the inventory
@@ -48,11 +49,12 @@ const REVIEWED: Array<{ file: string; where: RegExp; reason: string; max: number
   { file: "packages/iris-dev-mcp/README.md", where: /ENAMETOOLONG: local path exceeds/, reason: "an example error string about a Windows path length", max: 3 },
   { file: "tool_support.md", where: /beta users without manual intervention/, reason: "the word beta in a past-tense design note about the version-stamped auto-upgrade; not a publication caveat", max: 1 },
   { file: "tool_support.md", where: /Pre-release breaking change|BREAKING pre-release/, reason: "dated schema-history note", max: 2 },
+  { file: "SECURITY.md", where: /until an advisory is published/, reason: "the disclosure process (a security advisory is published), not a package publication caveat", max: 1 },
 ];
 
 describe("QA 42.9 (Rule #56): the caveat inventory, re-run with its own regex, has only reviewed hits", () => {
   it("the inventory regex can fail: it matches each of the spec's caveat wordings", () => {
-    for (const sample of ["not yet published to npm", "Until they are published", "Once published", "git clone https://x", "pnpm build", "dist/index.js", "Pre-release:", "not yet available", "build from source"]) {
+    for (const sample of ["not yet published to npm", "Until they are published", "Until packages are published", "Once published", "git clone https://x", "pnpm build", "dist/index.js", "Pre-release:", "not yet available", "build from source"]) {
       expect(INVENTORY.test(sample), sample).toBe(true);
     }
   });
@@ -88,12 +90,9 @@ describe("QA 42.9 (DW-707, decision #116): every install instruction for a chann
 
   /**
    * Places that carry such an instruction without a 1.1.0 qualifier, each with its reason. Nothing else may.
-   * - the generated plugin README: the plugin's own README, which a reader reaches only inside a release that has the plugin;
-   *   its wording comes from `PLUGIN_README_SECTION` in `scripts/lib/skills-pack.mjs` (a finding for the lead, see the QA section).
    * - the IPM-owned troubleshooting bullets: they remedy a namespace that IPM already owns, which only a 1.1.0 install can create.
    */
   const KNOWN_UNQUALIFIED: Array<{ file: string; where: RegExp; reason: string }> = [
-    { file: "packages/client-config/skills-pack/README.md", where: /\/plugin (?:marketplace add|install)/, reason: "the plugin's own README (generated)" },
     { file: "README.md", where: /^README\.md:\d+ - \*\*The warning says the classes were installed by IPM/, reason: "remedy for a namespace IPM already owns, which only a 1.1.0 install can create" },
     { file: "README.md", where: /^README\.md:\d+ \*\*MCP Registry\.\*\*/, reason: "the Releasing section's description of the release workflow's registry channel (contributor docs), not an install instruction" },
   ];
@@ -193,8 +192,8 @@ describe("QA 42.9 (decision #123): IPM is only the fallback, and each case the s
     expect(readme).toContain("`Deploy failed` or `Compile failed`");
     expect(bootstrap).toMatch(/errors\.push\(`Deploy failed: /);
     expect(bootstrap).toMatch(/errors\.push\(`Compile failed: /);
-    // Case 2: lacks %Admin_Manage -> `configured: false` plus manual instructions, repaired by `Setup.Configure("<namespace>")` in %SYS.
-    expect(readme).toContain("`configured: false`");
+    // Case 2: lacks %Admin_Manage -> `configured: false` and a logged warning with the manual instructions, repaired by `Setup.Configure("<namespace>")` in %SYS.
+    expect(readme).toContain("registration requires `%Admin_Manage` privileges, with manual instructions");
     expect(bootstrap).toMatch(/configured: false/);
     expect(bootstrap).toContain("registration requires %Admin_Manage privileges");
     expect(readme).toContain('Do ##class(ExecuteMCPv2.Setup).Configure("<namespace>")');
@@ -204,22 +203,17 @@ describe("QA 42.9 (decision #123): IPM is only the fallback, and each case the s
     expect(bootstrap).toMatch(/run zpm "install \$\{IPM_MODULE_NAME\} \$\{PACKAGE_SEMVER\}"/);
   });
 
-  it("the two cleanup calls the README gives for an IPM uninstall are calls the IRIS system classes have", () => {
-    // Rule #16: the snapshot of the system source is read when it is present (it is gitignored, so a clean checkout skips this row).
-    const apps = path.join(REPO_ROOT, "irissys", "Security", "Applications.cls");
-    const maps = path.join(REPO_ROOT, "irissys", "Config", "CommonMapMethods.cls");
-    let haveSnapshot = true;
-    try {
-      readFileSync(apps, "utf8");
-      readFileSync(maps, "utf8");
-    } catch {
-      haveSnapshot = false;
-    }
-    if (!haveSnapshot) return;
-    expect(readFileSync(apps, "utf8")).toMatch(/ClassMethod Delete\(Name As %String/);
-    expect(readFileSync(maps, "utf8")).toMatch(/ClassMethod Delete\(/);
+  it("the README gives the two cleanup calls for an IPM uninstall", () => {
     expect(readme).toContain('Do ##class(Security.Applications).Delete("/api/executemcp/v2")');
     expect(readme).toContain('Do ##class(Config.MapPackages).Delete("%ALL","ExecuteMCPv2")');
+  });
+
+  // Rule #16: the snapshot of the system source is gitignored, so a clean checkout (CI) reports this row as skipped, not passed.
+  const apps = path.join(REPO_ROOT, "irissys", "Security", "Applications.cls");
+  const maps = path.join(REPO_ROOT, "irissys", "Config", "CommonMapMethods.cls");
+  it.skipIf(!existsSync(apps) || !existsSync(maps))("the two cleanup calls are calls the IRIS system classes have (local system-source snapshot)", () => {
+    expect(readFileSync(apps, "utf8")).toMatch(/ClassMethod Delete\(Name As %String/);
+    expect(readFileSync(maps, "utf8")).toMatch(/ClassMethod Delete\(/);
   });
 });
 

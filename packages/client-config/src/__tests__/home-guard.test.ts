@@ -28,6 +28,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { homeGuardReason, samePath } from "../home-guard.js";
 import { CLIENT_ADAPTERS } from "../adapters.js";
 import { resolvesToHome } from "../cli/host-probes.js";
+import { ensureInputs } from "../engine.js";
+import { MemFs } from "./helpers.js";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const BIN = path.join(PACKAGE_ROOT, "dist", "cli", "clients-cli.js");
@@ -290,5 +292,18 @@ describe("DW-702: the pure pieces", () => {
     expect(homeGuardReason(cursor, { ...ctx, projectIsHome: false })).toBeNull();
     expect(homeGuardReason(goose, { ...ctx, projectIsHome: true })).toBeNull();
     expect(homeGuardReason(cursor, { ...ctx, projectIsHome: true })).toContain("is the user file /h/.cursor/mcp.json");
+  });
+
+  it("ensureInputs, the engine's other project-scope write, refuses too and writes nothing", () => {
+    const fs = new MemFs();
+    const descriptor = { type: "promptString" as const, id: "iris-password", description: "IRIS password", password: true };
+    const ctx = { platform: "linux" as const, env: {}, homeDir: "/h", projectDir: "/h", stateDir: "/state" };
+    const refused = ensureInputs({ ...ctx, projectIsHome: true }, "vscode", "project", [descriptor], { fs });
+    expect(refused.ok).toBe(false);
+    expect(refused.reason).toContain("refusing to write the project scope of vscode");
+    expect(fs.exists("/h/.vscode/mcp.json")).toBe(false);
+    const allowed = ensureInputs({ ...ctx, projectIsHome: false }, "vscode", "project", [descriptor], { fs });
+    expect(allowed.ok, allowed.reason).toBe(true);
+    expect(fs.exists("/h/.vscode/mcp.json")).toBe(true);
   });
 });

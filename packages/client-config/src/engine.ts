@@ -687,6 +687,10 @@ export function ensureInputs(
   if (path === null) {
     return failInputs(null, `cannot resolve a ${scope}-scope config path for ${client} (project scope requires a projectDir)`);
   }
+  if (scope === "project") {
+    const refusal = homeGuardReason(adapter, ctx, (p) => fs.exists(p));
+    if (refusal !== null) return failInputs(path, refusal);
+  }
   const current = readCurrent(fs, path);
   if (!current.ok) return failInputs(path, current.reason);
   const content = current.content ?? "";

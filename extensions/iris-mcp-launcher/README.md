@@ -222,7 +222,7 @@ one edits *wiring*.
 the same single code path as the terminal CLI, so the UI and the CLI cannot diverge. With
 `irisMcpLauncher.developmentRepoPath` set it runs the checkout's built CLI
 (`packages/client-config/dist/cli/clients-cli.js`); otherwise `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients`,
-which cannot resolve until the packages are published. **Build it first:**
+the published package. With `irisMcpLauncher.developmentRepoPath` set, **build it first:**
 `pnpm --filter @iris-mcp/client-config build`.
 
 **Which project "project scope" means.** The CLI runs in the first workspace folder that is open (in a multi-root

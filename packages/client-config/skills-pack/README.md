@@ -40,7 +40,7 @@ Each is generated from the MCP prompt of the same name and walks an agent throug
 
 This directory is also a Claude Code plugin root: the plugin `iris-mcp` of the marketplace `iris-mcp`, which brings the five servers and the skills above.
 
-- Install it with `/plugin marketplace add jbrandtmse/iris-execute-mcp-v2`, then `/plugin install iris-mcp@iris-mcp`.
+- From 1.1.0, install it with `/plugin marketplace add jbrandtmse/iris-execute-mcp-v2`, then `/plugin install iris-mcp@iris-mcp`.
 - Claude Code asks for six options: `iris_host` (default `localhost`), `iris_port` (`52773`), `iris_namespace` (`USER`), `iris_https` (`false`), `iris_username` and `iris_password`. The last two are required, and Claude Code keeps the password in the system keychain. They set `IRIS_HOST`, `IRIS_PORT`, `IRIS_NAMESPACE`, `IRIS_HTTPS`, `IRIS_USERNAME` and `IRIS_PASSWORD` for every server, and they win over the same variables exported in your shell. Every other `IRIS_*` variable is inherited from the environment that starts Claude Code.
 - The servers are `dev`, `admin`, `data`, `interop` and `ops`; each runs `npx -y @iris-mcp/<name>@1`.
 - A plugin cannot carry rules. The always-on rule needs the installer; with the plugin enabled it installs only the rule:

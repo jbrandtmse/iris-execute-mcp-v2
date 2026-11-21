@@ -3,8 +3,8 @@
  *
  * `story-41-7-doc-claims.test.ts` pins the links that story ADDED. It does not pin the links the documents rely on that already
  * existed, so renaming a heading breaks every link to it and every suite stays green. This file closes that class: for each reader
- * document (`doc-set.ts`: every tracked or untracked-but-not-ignored `*.md` file outside the planning, agent and IRIS-source
- * folders, 83 files as of 2026-11-21), every `[text](target)` with a relative target must name an existing file or directory, and a
+ * document (`doc-set.ts`: every tracked `*.md` file outside the planning, agent and IRIS-source
+ * folders, at least 83 files as of 2026-11-21), every `[text](target)` with a relative target must name an existing file or directory, and a
  * `#anchor` into a Markdown file must equal the GitHub-style slug of one of that file's headings. There are no known-broken entries.
  *
  * The checker is pure (text in, problems out) and has its own rows below that make it fail on a broken file link, on a broken
@@ -12,6 +12,7 @@
  * files only; needs no IRIS.
  */
 
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -32,6 +33,30 @@ function slugsOfFile(file: string): Set<string> {
     slugCache.set(file, slugs);
   }
   return slugs;
+}
+
+/**
+ * The tracked files of the repository and every directory that holds one: what a clean checkout (CI) has. A target that exists here
+ * only because it is untracked or gitignored (the `irislib/` and `irissys/` snapshots) is broken on CI, so it is broken here too.
+ */
+const TRACKED = ((): { files: Set<string>; dirs: Set<string> } => {
+  const listed = spawnSync("git", ["ls-files", "-z"], { cwd: REPO_ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  if (listed.status !== 0) throw new Error(`git ls-files failed: ${listed.stderr}`);
+  const files = new Set<string>();
+  const dirs = new Set<string>([""]);
+  for (const rel of listed.stdout.split("\0")) {
+    if (rel === "") continue;
+    files.add(rel);
+    for (let dir = path.posix.dirname(rel); dir !== "." && !dirs.has(dir); dir = path.posix.dirname(dir)) dirs.add(dir);
+  }
+  return { files, dirs };
+})();
+
+/** Whether a clean checkout has this path: a tracked file, or a directory that holds one. Paths outside the repository are not judged. */
+function inCleanCheckout(resolved: string): boolean {
+  const rel = path.relative(REPO_ROOT, resolved).split(path.sep).join("/");
+  if (rel.startsWith("..") || path.isAbsolute(rel)) return true;
+  return TRACKED.files.has(rel) || TRACKED.dirs.has(rel.replace(/\/$/, ""));
 }
 
 /** A link's path with its percent escapes decoded; a percent sign that is not an escape (`%SYS`) stays as written. */
@@ -62,6 +87,7 @@ function brokenLinks(text: string, file: string, slugsFor: (target: string) => S
       const resolved = filePart === "" ? file : path.resolve(path.dirname(file), decodedPath(filePart));
       let problem: string | null = null;
       if (!existsSync(resolved)) problem = "no such file or directory";
+      else if (!inCleanCheckout(resolved)) problem = "not in a clean checkout (untracked or gitignored), so it is broken on CI";
       else if (anchor !== "") {
         if (statSync(resolved).isDirectory() || !/\.md$/i.test(resolved)) problem = "an anchor into something that is not a Markdown file";
         else if (!slugsFor(resolved).has(anchor)) problem = "no heading has this slug";
@@ -102,6 +128,13 @@ describe("every reader document: every relative link and anchor resolves", () =>
     const { problems, checked } = brokenLinks("[a](irissys/%SYS/no-such.cls) [b](docs/client-config/README.md)", here, slugsOfFile);
     expect(checked).toBe(2);
     expect(problems.map((problem) => problem.target)).toEqual(["irissys/%SYS/no-such.cls"]);
+  });
+
+  it("the checker reports a link into the gitignored system-source snapshots, which exist locally but not on CI", () => {
+    const here = path.join(REPO_ROOT, "docs", "known-bugs-2026-05-29-mapping-subscript.md");
+    const { problems, checked } = brokenLinks("[snapshot](../irislib/) [sys](../irissys/Config/MapGlobals.cls) [ok](../README.md)", here, slugsOfFile);
+    expect(checked).toBe(3);
+    expect(problems.map((problem) => problem.target)).toEqual(["../irislib/", "../irissys/Config/MapGlobals.cls"]);
   });
 
   const docs = readerDocs();

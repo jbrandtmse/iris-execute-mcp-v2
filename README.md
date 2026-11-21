@@ -112,7 +112,7 @@ npx -y -p @iris-mcp/client-config@1 iris-mcp-clients detect                     
 npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply --client cursor --servers iris-dev-mcp  # preview, confirm, write
 ```
 
-`--client` takes one of `claude-desktop`, `cursor`, `cline`, `windsurf` (Devin Desktop), `codex`, `gemini`, `zed`, `goose`, `kimi-code`, `pi`, `jetbrains-junie`, or, for older installs, `roo-code` (discontinued) and `kimi` (archived); `--servers all` writes all five. `apply` prints the exact edit first and writes only after you confirm. The per-client guides and copy-pasteable snippets are in the [MCP client configuration index](docs/client-config/README.md), and the full command reference is in [`@iris-mcp/client-config`](packages/client-config/README.md).
+`--client` takes one of `claude-desktop`, `cursor`, `cline`, `windsurf` (Devin Desktop), `codex`, `gemini`, `zed`, `goose`, `kimi-code`, from 1.1.0 `pi` and `jetbrains-junie`, or, for older installs, `roo-code` (discontinued) and `kimi` (archived); `--servers all` writes all five. `apply` prints the exact edit first and writes only after you confirm. The per-client guides and copy-pasteable snippets are in the [MCP client configuration index](docs/client-config/README.md), and the full command reference is in [`@iris-mcp/client-config`](packages/client-config/README.md).
 
 ### 2. Set Environment Variables
 
@@ -255,7 +255,7 @@ npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply --client cursor --ser
 npx -y -p @iris-mcp/client-config@1 iris-mcp-clients doctor                    # env refs, parseability, drift, backups, stashes, plugin duplicates
 ```
 
-`apply` prints the pending diff first and requires confirmation (`--yes` to skip); every successful write takes a timestamped backup and prints the client's restart hint. A project-scope write (`--scope project`) is refused when the project directory is your home directory, because the project file would then be a user-level file; open a project folder, or use `--scope user`. `iris-mcp-clients skills install` also installs the skills pack into a project: see [The skills pack](#the-skills-pack).
+`apply` prints the pending diff first and requires confirmation (`--yes` to skip); every successful write takes a timestamped backup and prints the client's restart hint. From 1.1.0, a project-scope write (`--scope project`) is refused when the project directory is your home directory, because the project file would then be a user-level file; open a project folder, or use `--scope user`. `iris-mcp-clients skills install` also installs the skills pack into a project: see [The skills pack](#the-skills-pack).
 
 **The zero-secrets end state** — three composable pieces, each covering a different secret class:
 
@@ -351,7 +351,7 @@ If the assistant returns results from your IRIS instance, you are connected.
 **Skip this section unless the automatic install cannot run.** By default the first server to connect deploys the `ExecuteMCPv2` classes itself and upgrades them when a newer release connects (see [Shared Instances](#shared-instances-upgrade-every-client-together)), and most users need nothing else. Use [IPM](https://github.com/intersystems/ipm) only where that cannot happen:
 
 - **The connecting user cannot upload or compile classes in the namespace.** The server records `Deploy failed` or `Compile failed` in its startup report, and the REST service does not come up.
-- **The connecting user lacks `%Admin_Manage`.** The classes deploy, but the web application cannot be created, so the server reports `configured: false` with manual instructions (a later start by a user who has `%Admin_Manage` repairs it, and so does running `Do ##class(ExecuteMCPv2.Setup).Configure("<namespace>")` in `%SYS`). An administrator who prefers one step runs the IPM install instead.
+- **The connecting user lacks `%Admin_Manage`.** The classes deploy, but the web application cannot be created, so the server logs a warning that web application registration requires `%Admin_Manage` privileges, with manual instructions (a later start by a user who has `%Admin_Manage` repairs it, and so does running `Do ##class(ExecuteMCPv2.Setup).Configure("<namespace>")` in `%SYS`). An administrator who prefers one step runs the IPM install instead.
 - **Your change control does not allow a client to deploy code to the instance.** An administrator installs the package once.
 
 An administrator then runs, in the target namespace, as a user with `%Admin_Manage`, with IPM 0.10 or later installed in that namespace:
@@ -373,7 +373,7 @@ zpm "install iris-execute-mcp-v2 <version>"
   Do ##class(Config.MapPackages).Delete("%ALL","ExecuteMCPv2")
   ```
 
-  Delete the `%ALL` mapping only when no other namespace still uses the suite, because it is shared by every namespace. Each call returns a `%Status`.
+  Run them only when no other namespace still uses the suite: the instance has one such web application and one such mapping, shared by every namespace that uses the suite. Each call returns a `%Status`.
 
 This adds no tool and no governed action. CI builds the package archive and installs it, with no network, on `iris-community` and `irishealth-community` (the `ipm` job below).
 
@@ -829,7 +829,7 @@ Produced by `pnpm measure:tools-payload` ([`scripts/measure-tools-payload.mjs`](
 | @iris-mcp/ops | 22 / 30,811 / ~7,703 | 10 / 13,813 / ~3,453 | 10 / 14,264 / ~3,566 |
 | @iris-mcp/data | 8 / 12,643 / ~3,161 | 8 / 12,643 / ~3,161 | 8 / 12,643 / ~3,161 |
 
-`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~65% fewer bytes (`@iris-mcp/admin`: 48,808 → 16,862; `@iris-mcp/dev`: 98,907 → 45,835, ~54%). Last re-measured at Story 42.9 (`pnpm measure:tools-payload` on freshly built dists — mechanical, Rule #51). The `@iris-mcp/dev` row is test-pinned (`story-42-9-doc-claims.test.ts`), so a change to a dev tool description or schema fails that test until the row is re-measured; the other rows are not test-pinned (only the tool counts are), so they drift whenever a tool description or schema changes, until the next re-measure. `@iris-mcp/dev`'s `full`/`developer` rows include `iris_test_status` and `iris_test_coverage`, which `core` excludes.
+`@iris-mcp/dev`/`interop` show no `full`→`developer` reduction (their `developer` roster includes every tool); `@iris-mcp/data` is unaffected by any preset (its 7 tools are all `core`+`developer`-visible). `core` is the biggest win across every server that defines one — up to ~65% fewer bytes (`@iris-mcp/admin`: 48,808 → 16,862; `@iris-mcp/dev`: 98,907 → 45,835, ~54%). Last re-measured at Story 42.9 (`pnpm measure:tools-payload` on freshly built dists — mechanical, Rule #51). The `@iris-mcp/dev` row is test-pinned (`story-42-9-doc-claims.test.ts`): the test holds the row's text, so the row changes only together with the test, and nothing re-measures it on its own. Every row, that one included, drifts whenever a tool description or schema changes, until the next re-measure; for the other rows only the tool counts are test-pinned. `@iris-mcp/dev`'s `full`/`developer` rows include `iris_test_status` and `iris_test_coverage`, which `core` excludes.
 
 ---
 
@@ -936,6 +936,8 @@ The skills pack gives an agent the suite's ObjectScript know-how where the agent
 | Gemini CLI and Antigravity CLI | `gemini`, `antigravity` | `.agents/skills/` | a marked block in `GEMINI.md` |
 | Every other client | `vscode`, `cline`, `roo-code`, `windsurf`, `codex`, `zed`, `goose`, `kimi`, `kimi-code`, `pi`, `jetbrains-junie`, `kilo-code`, `agents` | `.agents/skills/` | a marked block in `AGENTS.md` |
 
+The `antigravity` id is accepted from 1.1.0; on 1.0.x, use `gemini` for Antigravity CLI (the same route).
+
 **The Claude Code plugin.** The pack directory is also a Claude Code plugin root (plugin `iris-mcp`, marketplace `iris-mcp`): it brings the five servers and the 18 skills, but a plugin cannot carry a rule, so the always-on rule still needs the installer. With the plugin enabled, `skills install --client claude-code` installs only the rule (the next paragraph and the [client-config README](packages/client-config/README.md#installing-the-skills-pack) say how it detects the plugin).
 
 Claude Desktop (`claude-desktop`) has no route: it takes skills only as an uploaded ZIP, so the installer refuses it. The per-client table, with each client's reason and documentation sources, is generated from the installer's own data in the [client-config README](packages/client-config/README.md#skills-pack-targets-generated).
@@ -957,7 +959,7 @@ The installer prints its plan and asks before it writes (`--yes` skips the quest
 
 **Known limits:**
 
-- Project scope only: `--scope user` is refused, and so is a project directory that is your home directory (`--project ~`, or a run from `~`).
+- Project scope only: `--scope user` is refused, and from 1.1.0 so is a project directory that is your home directory (`--project ~`, or a run from `~`). A pack that 1.0.x installed in your home directory is therefore not removed by `skills uninstall` there: delete the files and the marked blocks that `~/.iris-mcp/skills-pack.json` lists, then that file.
 - Claude Desktop has no route, as above.
 - The Claude Code route installs only the rule when it finds the `iris-mcp@iris-mcp` plugin enabled in the user, project or local Claude Code settings, and both the skills and the rule otherwise. Managed settings, `--settings`, `--add-dir` and synced plugins are not read, so a plugin it does not see means the skills install twice.
 - A symbolic link at or above a path the installer would write, or a second hard link to such a file, refuses the run.
@@ -1058,7 +1060,7 @@ On the next server start, the bootstrap recognizes this `unconfigured` state and
 
 The self-heal runs only in a server whose own marker equals the deployed one (or is newer, which upgrades the classes). A server that finds a newer, foreign or unreadable deployment changes nothing, the web application included (see the next subsection): start a build that matches the deployed marker, or, for a `dev` or foreign deployment, delete the class `ExecuteMCPv2.Setup` and restart, which installs the classes and registers the web application.
 
-If the connecting user lacks `%Admin_Manage`, the web application cannot be created; the bootstrap reports `configured: false` with manual instructions, and a later launch by a privileged user self-heals automatically.
+If the connecting user lacks `%Admin_Manage`, the web application cannot be created; the bootstrap logs a warning that web application registration requires `%Admin_Manage` privileges, with manual instructions, and a later launch by a privileged user self-heals automatically.
 
 ### Shared Instances: Upgrade Every Client Together
 

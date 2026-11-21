@@ -1,7 +1,8 @@
 # Claude Code Configuration
 
-> **Superseded by the manager (Epic 33):** the fastest, safest way to wire Claude Code is
+> **Superseded by the manager (Epic 33):** on 1.0.x the way to wire Claude Code is
 > `npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply --client claude-code --servers iris-dev-mcp`
+> (from 1.1.0 the suite README's one path for Claude Code is the plugin, below)
 > — it previews the exact diff, writes through the backup-on-write engine, and `iris-mcp-clients doctor`
 > verifies the result. This page remains as the **manual fallback** (and as the reference for what the
 > manager writes). Claude Code's adapter is **certified-live** (2026-07-28) — see the
@@ -22,7 +23,7 @@ Claude Code supports two scopes for MCP server configuration:
 | Scope | File | When to Use |
 |-------|------|-------------|
 | **Project** | `.mcp.json` in the project root | Shared with teammates via version control |
-| **Global** | `~/.claude/settings.json` | Available in every project on your machine |
+| **User** | `~/.claude.json` (top-level `mcpServers`), or `$CLAUDE_CONFIG_DIR/.claude.json` when that variable is set | Available in every project on your machine |
 
 Both files use the same `mcpServers` format.
 
@@ -390,9 +391,9 @@ You can also manage MCP servers through the VS Code command palette:
 
 ### Global Configuration (VS Code)
 
-To make servers available across all projects in VS Code, add the `mcpServers` block to your global settings file:
+To make servers available across all projects in VS Code, add the `mcpServers` block at the top level of Claude Code's user file (`$CLAUDE_CONFIG_DIR/.claude.json` when that variable is set; `~/.claude/settings.json` is not read for MCP servers):
 
-**`~/.claude/settings.json`:**
+**`~/.claude.json`:**
 
 ```json
 {

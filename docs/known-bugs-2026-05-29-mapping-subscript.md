@@ -29,7 +29,7 @@ Silently mis-maps a **base** global instead of the intended subscript node. When
 
 ## Root cause (verified against IRIS source)
 
-`Config.MapGlobals` ([`Config.MapGlobals.cls`](../irislib/) — read live from `IRISSYS`) documents the correct API in its own class comment:
+`Config.MapGlobals` (`irissys/Config/MapGlobals.cls` in the local system-source snapshot, which is not committed; read live from `IRISSYS`) documents the correct API in its own class comment:
 
 ```
 ; Now add a SLM mapping for a global XYZ(100). Note that two mappings will actually

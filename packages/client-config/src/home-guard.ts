@@ -3,7 +3,8 @@
  *
  * A project-scope write made while the project directory is the user's home directory would land in a user-level location: the
  * project file of most clients IS their user file, and the rest sit in a folder the client reads for every project. Such a write is
- * refused before the write protocol starts, naming the project and user paths. Reads are never refused.
+ * refused before the write protocol starts, naming the project and user paths. `detect`, `status` and `doctor` are never refused; `diff`
+ * and a skills `--dry-run` are, because they plan a write.
  *
  * This module is pure. Whether the project directory resolves to the home directory is decided at the package boundary (the CLI, with
  * the real file system) and arrives as `HostContext.projectIsHome`.

@@ -63,6 +63,14 @@ describe("Pi and Junie: path resolution", () => {
     });
   }
 
+  it("Claude Code: CLAUDE_CONFIG_DIR moves the user file to <dir>/.claude.json, and an empty value does not; the project file stays", () => {
+    const claude = adapterOf("claude-code");
+    expect(resolveScopePath(claude, "user", ctx({ CLAUDE_CONFIG_DIR: "/cfg" }))).toBe("/cfg/.claude.json");
+    expect(resolveScopePath(claude, "user", ctx({ CLAUDE_CONFIG_DIR: "" }))).toBe("/h/.claude.json");
+    expect(resolveScopePath(claude, "user", ctx())).toBe("/h/.claude.json");
+    expect(resolveScopePath(claude, "project", ctx({ CLAUDE_CONFIG_DIR: "/cfg" }))).toBe("/p/.mcp.json");
+  });
+
   it("Pi: PI_CODING_AGENT_DIR moves the user file, and an empty value does not", () => {
     expect(resolveScopePath(adapterOf("pi"), "user", ctx({ PI_CODING_AGENT_DIR: "/agent" }))).toBe("/agent/mcp.json");
     expect(resolveScopePath(adapterOf("pi"), "user", ctx({ PI_CODING_AGENT_DIR: "" }))).toBe("/h/.pi/agent/mcp.json");

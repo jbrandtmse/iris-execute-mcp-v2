@@ -66,7 +66,7 @@ iris-mcp-clients skills install|uninstall --client <id> [--project <dir>] [--dry
   and **plugin duplicates**: while the `iris-mcp@iris-mcp` Claude Code plugin is
   enabled (`enabledPlugins` in the user, project or local settings file, the highest file
   that holds the key deciding), each `iris-*-mcp` entry in Claude Code's user scope
-  (`~/.claude.json`) or project scope (`.mcp.json`) is a `claude-code-plugin-duplicates`
+  (`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that variable is set) or project scope (`.mcp.json`) is a `claude-code-plugin-duplicates`
   finding, because every tool would then appear twice; the finding prints the `remove`
   command that clears it. `doctor` reads the user and project scopes only: Claude Code's
   local scope (the `projects` map inside `~/.claude.json`) is not read, so remove such an
@@ -80,7 +80,7 @@ iris-mcp-clients skills install|uninstall --client <id> [--project <dir>] [--dry
   resolves both paths through the real path, so a symbolic link to your home directory
   counts, and compares them case-insensitively on macOS and Windows. Open a project
   folder (or `cd` into one), or use `--scope user`. Reads (`detect`, `status`,
-  `doctor`) are unaffected.
+  `doctor`) are unaffected; `diff` and `skills install --dry-run` are refused too, because they plan a write.
 
 ## Installing the skills pack
 
@@ -107,7 +107,9 @@ Each `--client` id, with the folders it installs into and why, is listed in [Ski
   user-scope rule would load in every session of every project.
 - **Never the home directory.** An install or uninstall whose project directory is your home directory (`--project ~`, or a
   run from `~`; a symbolic link to it, or a different letter case on macOS and Windows, counts) is refused with exit 1 and
-  nothing written, because the pack's folders would then apply to every project of the client.
+  nothing written, because the pack's folders would then apply to every project of the client. A pack that 1.0.x
+  installed in your home directory is therefore not removed by `skills uninstall` there: delete the files and the marked
+  blocks that `~/.iris-mcp/skills-pack.json` lists, then that file.
 - **Preview, then confirm.** Like `apply`, it prints the plan first (one line per path: `create`, `update`, `remove`,
   `adopt`, `unchanged`, `keep` or `conflict`) and writes only after `--yes` or a TTY confirmation; a non-TTY run without
   `--yes` refuses (exit 2). `--dry-run` previews and writes nothing. Re-running an install that would change nothing writes
@@ -301,13 +303,13 @@ never hand-edit this section.
 
 | Client | Format | Root key | User config | Project config | Disable | Restart hint | Certification |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Claude Code (`claude-code`) | json | `mcpServers` | `~/.claude.json` | `.mcp.json` | manager stash | Restart Claude Code (or start a new session) for MCP changes to take effect. | **certified-live** 2026-07-28 (incl. agent CLI probe) |
+| Claude Code (`claude-code`) | json | `mcpServers` | `~/.claude.json` (or $CLAUDE_CONFIG_DIR/.claude.json) | `.mcp.json` | manager stash | Restart Claude Code (or start a new session) for MCP changes to take effect. | **certified-live** 2026-07-28 (incl. agent CLI probe) |
 | Claude Desktop (`claude-desktop`) | json | `mcpServers` | win `%APPDATA%/Claude/claude_desktop_config.json`<br>mac `~/Library/Application Support/Claude/claude_desktop_config.json`<br>linux `~/.config/Claude/claude_desktop_config.json` | — | manager stash | Quit and relaunch Claude Desktop for MCP changes to take effect. | fixture-only (residual risk)<br>human-only (marked 2026-11-21): after apply --client claude-desktop and a restart, the tools menu lists the server and one read call succeeds |
 | Cursor (`cursor`) | json | `mcpServers` | `~/.cursor/mcp.json` | `.cursor/mcp.json` | manager stash | Restart Cursor (or refresh the server from the MCP settings page) for changes to take effect. | fixture-only (residual risk)<br>human-only (marked 2026-11-21): Settings > MCP shows the server green with its tools |
 | VS Code (Copilot) (`vscode`) | jsonc | `servers` | win `%APPDATA%/Code/User/mcp.json`<br>mac `~/Library/Application Support/Code/User/mcp.json`<br>linux `~/.config/Code/User/mcp.json` | `.vscode/mcp.json` | manager stash | Reload the VS Code window (Developer: Reload Window) or restart the server from the MCP view for changes to take effect. | **certified-live** 2026-07-28 (file-level; agent-side GUI stays manual)<br>human-only (marked 2026-11-21): in Copilot agent mode the iris_* tools are listed and one read call (for example iris_server_info) succeeds |
 | Cline (`cline`) | json | `mcpServers` | win `%APPDATA%/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`<br>mac `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`<br>linux `~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | — | native `disabled` flag | Reload the VS Code window (Developer: Reload Window) for Cline to pick up MCP changes. | **certified-live** 2026-07-28 (file-level; agent-side GUI stays manual)<br>human-only (marked 2026-11-21): the Cline panel shows iris-dev-mcp with its tools |
 | Roo Code (discontinued) (`roo-code`) | json | `mcpServers` | win `%APPDATA%/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json`<br>mac `~/Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json`<br>linux `~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json` | `.roo/mcp.json` | native `disabled` flag | Reload the VS Code window (Developer: Reload Window) for Roo Code to pick up MCP changes. | fixture-only (residual risk) |
-| Devin Desktop (formerly Windsurf) (`windsurf`) | json | `mcpServers` | `~/.codeium/windsurf/mcp_config.json` | — | manager stash | Restart Windsurf for MCP changes to take effect. | fixture-only (residual risk)<br>human-only (marked 2026-11-21): Devin Local shows the server from the legacy ~/.codeium/windsurf/mcp_config.json, which also confirms the import |
+| Devin Desktop (formerly Windsurf) (`windsurf`) | json | `mcpServers` | `~/.codeium/windsurf/mcp_config.json` | — | manager stash | Restart Devin Desktop (formerly Windsurf) for MCP changes to take effect. | fixture-only (residual risk)<br>human-only (marked 2026-11-21): Devin Local shows the server from the legacy ~/.codeium/windsurf/mcp_config.json, which also confirms the import |
 | Codex CLI (`codex`) | toml | `mcp_servers` | `~/.codex/config.toml` | `.codex/config.toml` | native `enabled` flag | Start a new Codex CLI session for MCP changes to take effect. | fixture-only (residual risk)<br>human-only (marked 2026-11-21): codex mcp list (or the client's equivalent) shows iris-dev-mcp |
 | Gemini CLI (`gemini`) | json | `mcpServers` | `~/.gemini/settings.json` | `.gemini/settings.json` | manager stash | Start a new Gemini CLI session for MCP changes to take effect. | fixture-only (residual risk)<br>human-only (marked 2026-11-21): gemini mcp list (or the client's equivalent) shows iris-dev-mcp |
 | Zed (`zed`) | json | `context_servers` | win `%APPDATA%/zed/settings.json`<br>mac `~/.config/zed/settings.json`<br>linux `~/.config/zed/settings.json` | `.zed/settings.json` | manager stash | Restart Zed (or reopen the agent panel) for MCP changes to take effect. | fixture-only (residual risk)<br>human-only (marked 2026-11-21): the agent panel shows the context server as active |
@@ -431,7 +433,7 @@ Residual risk: File-level lifecycle certified live incl. the native 'disabled' f
 
 #### Devin Desktop (formerly Windsurf) (`windsurf`)
 
-**fixture-only-with-residual-risk** (2026-07-28) — Fixtures prove: the adapter data (JSON format, mcpServers rootKey, ~/.codeium/windsurf/mcp_config.json path, stash disable) parses and round-trips byte-equal in the golden suite. Unproven: the real Windsurf config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run windsurf --real-config. The client is now Devin Desktop; the adapter keeps the legacy file, which Devin reads through an import that is on by default (docs.devin.ai, 2026-11-21).
+**fixture-only-with-residual-risk** (2026-07-28) — Fixtures prove: the adapter data (JSON format, mcpServers rootKey, ~/.codeium/windsurf/mcp_config.json path, stash disable) parses and round-trips byte-equal in the golden suite. Unproven: the real Windsurf config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run windsurf --real-config. The client is now Devin Desktop; the adapter keeps the legacy file. Devin CLI documents an import of it that is on by default; that Devin Desktop reads it is not documented and not yet verified (docs.devin.ai, 2026-11-21).
 
 **human-only (marked 2026-11-21): Devin Local shows the server from the legacy ~/.codeium/windsurf/mcp_config.json, which also confirms the import**
 

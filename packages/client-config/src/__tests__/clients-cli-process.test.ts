@@ -907,7 +907,7 @@ describe("doctor: claude-code-plugin-duplicates on the built bin (DW-706)", () =
     mkdirSync(configDir, { recursive: true });
     writeFileSync(path.join(configDir, "settings.json"), JSON.stringify({ enabledPlugins }, null, 2));
     writeFileSync(
-      sandbox.configPath("claude-code"),
+      path.join(configDir, ".claude.json"),
       JSON.stringify({ mcpServers: { "iris-dev-mcp": { command: "npx", args: ["-y", "@iris-mcp/dev@1"] } } }, null, 2),
     );
     return { configDir };

@@ -45,6 +45,8 @@ export const CLIENT_ADAPTERS: Readonly<Record<string, ClientAdapter>> = {
           darwin: "~/.claude.json",
           linux: "~/.claude.json",
         },
+        // Claude Code keeps .claude.json inside CLAUDE_CONFIG_DIR when that variable is set, and then ignores ~/.claude.json.
+        envOverride: { var: "CLAUDE_CONFIG_DIR", pathSuffix: ".claude.json" },
         shareable: false,
       },
       {
@@ -301,7 +303,7 @@ export const CLIENT_ADAPTERS: Readonly<Record<string, ClientAdapter>> = {
     entryShape: "standard",
     envExpansion: "none",
     disableSupport: "stash",
-    restartHint: "Restart Windsurf for MCP changes to take effect.",
+    restartHint: "Restart Devin Desktop (formerly Windsurf) for MCP changes to take effect.",
     detection: [
       { kind: "config", scope: "user" },
       {

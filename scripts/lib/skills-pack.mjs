@@ -260,7 +260,7 @@ export const PLUGIN_README_SECTION =
   `## Claude Code plugin\n\n` +
   `This directory is also a Claude Code plugin root: the plugin \`iris-mcp\` of the marketplace \`iris-mcp\`, which brings the five ` +
   `servers and the skills above.\n\n` +
-  `- Install it with \`/plugin marketplace add jbrandtmse/iris-execute-mcp-v2\`, then \`/plugin install iris-mcp@iris-mcp\`.\n` +
+  `- From 1.1.0, install it with \`/plugin marketplace add jbrandtmse/iris-execute-mcp-v2\`, then \`/plugin install iris-mcp@iris-mcp\`.\n` +
   `- Claude Code asks for six options: \`iris_host\` (default \`localhost\`), \`iris_port\` (\`52773\`), \`iris_namespace\` (\`USER\`), ` +
   `\`iris_https\` (\`false\`), \`iris_username\` and \`iris_password\`. The last two are required, and Claude Code keeps the password ` +
   `in the system keychain. They set \`IRIS_HOST\`, \`IRIS_PORT\`, \`IRIS_NAMESPACE\`, \`IRIS_HTTPS\`, \`IRIS_USERNAME\` and ` +

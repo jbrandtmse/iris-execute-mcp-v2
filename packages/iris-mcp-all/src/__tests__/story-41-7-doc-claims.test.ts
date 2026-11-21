@@ -276,7 +276,7 @@ describe("the root README's known limits", () => {
   const section = (): string => skillsPackSection(read("README.md"));
 
   it("`--scope user` is refused by the bin", () => {
-    expect(section()).toContain("- Project scope only: `--scope user` is refused, and so is a project directory that is your home directory (`--project ~`, or a run from `~`).");
+    expect(section()).toContain("- Project scope only: `--scope user` is refused, and from 1.1.0 so is a project directory that is your home directory (`--project ~`, or a run from `~`).");
     const own = ownProject("scope-user-refused");
     const run = runBin(["skills", "install", "--client", "codex", "--scope", "user", "--yes"], own);
     expect(run.status).toBe(2);

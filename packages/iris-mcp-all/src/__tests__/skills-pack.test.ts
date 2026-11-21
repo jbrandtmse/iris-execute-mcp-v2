@@ -221,7 +221,7 @@ const README_PLUGIN = [
   "",
   "This directory is also a Claude Code plugin root: the plugin `iris-mcp` of the marketplace `iris-mcp`, which brings the five servers and the skills above.",
   "",
-  "- Install it with `/plugin marketplace add jbrandtmse/iris-execute-mcp-v2`, then `/plugin install iris-mcp@iris-mcp`.",
+  "- From 1.1.0, install it with `/plugin marketplace add jbrandtmse/iris-execute-mcp-v2`, then `/plugin install iris-mcp@iris-mcp`.",
   "- Claude Code asks for six options: `iris_host` (default `localhost`), `iris_port` (`52773`), `iris_namespace` (`USER`), `iris_https` (`false`), `iris_username` and `iris_password`. The last two are required, and Claude Code keeps the password in the system keychain. They set `IRIS_HOST`, `IRIS_PORT`, `IRIS_NAMESPACE`, `IRIS_HTTPS`, `IRIS_USERNAME` and `IRIS_PASSWORD` for every server, and they win over the same variables exported in your shell. Every other `IRIS_*` variable is inherited from the environment that starts Claude Code.",
   "- The servers are `dev`, `admin`, `data`, `interop` and `ops`; each runs `npx -y @iris-mcp/<name>@1`.",
   "- A plugin cannot carry rules. The always-on rule needs the installer; with the plugin enabled it installs only the rule:",
@@ -576,11 +576,11 @@ describe("the committed pack (real tree)", () => {
       return `- \`${name}\`${preset === null ? "" : ` (tool preset \`${preset}\`)`}: ${description}`;
     };
 
-    // Captured from the committed README after `pnpm gen:pack` (Story 42.8): `wc -c -l` and `shasum -a 256` of the file.
-    it("is the golden file: 13502 bytes, 61 lines, sha256 7be1988e...", () => {
-      expect(readme.length).toBe(13502);
+    // Captured from the committed README after `pnpm gen:pack` (Story 42.9 review, the plugin install line gained "From 1.1.0"): `wc -c -l` and `shasum -a 256` of the file.
+    it("is the golden file: 13514 bytes, 61 lines, sha256 6e25cfe5...", () => {
+      expect(readme.length).toBe(13514);
       expect(text.split("\n").length - 1, "61 lines").toBe(61);
-      expect(createHash("sha256").update(readme).digest("hex")).toBe("7be1988e95cd06344882bb80f6a21981f73e53c15f2009e891527d1a8af33fd6");
+      expect(createHash("sha256").update(readme).digest("hex")).toBe("6e25cfe501fe841c743c2b099fce5c589e1dbe0d895c5df58d73e71417739281");
       expect(/^[\x0a\x20-\x7e]+$/.test(text), "ASCII").toBe(true);
     });
 

@@ -124,7 +124,7 @@
         "check": "Devin Local shows the server from the legacy ~/.codeium/windsurf/mcp_config.json, which also confirms the import",
         "markedOn": "2026-11-21"
       },
-      "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, ~/.codeium/windsurf/mcp_config.json path, stash disable) parses and round-trips byte-equal in the golden suite. Unproven: the real Windsurf config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run windsurf --real-config. The client is now Devin Desktop; the adapter keeps the legacy file, which Devin reads through an import that is on by default (docs.devin.ai, 2026-11-21)."
+      "note": "Fixtures prove: the adapter data (JSON format, mcpServers rootKey, ~/.codeium/windsurf/mcp_config.json path, stash disable) parses and round-trips byte-equal in the golden suite. Unproven: the real Windsurf config surface (no local install as of 2026-07-28) — certify with: node packages/client-config/scripts/certify.mjs run windsurf --real-config. The client is now Devin Desktop; the adapter keeps the legacy file. Devin CLI documents an import of it that is on by default; that Devin Desktop reads it is not documented and not yet verified (docs.devin.ai, 2026-11-21)."
     },
     "codex": {
       "disposition": "fixture-only-with-residual-risk",

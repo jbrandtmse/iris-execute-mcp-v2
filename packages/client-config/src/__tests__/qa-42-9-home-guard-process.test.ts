@@ -113,6 +113,7 @@ interface Envelope {
   ok: boolean;
   command: string;
   error?: string;
+  data?: unknown;
 }
 
 function envelopeOf(result: Result): Envelope {
@@ -347,8 +348,12 @@ describe("DW-702 QA: reads from the home directory are unaffected, with real fil
     const before = snapshot(sandbox.root);
     const status = sandbox.run(["status", "--json"]);
     expect(status.status, `${status.stdout}${status.stderr}`).toBe(0);
-    expect(status.stdout).toContain(cursorFile(sandbox.home));
-    expect(status.stdout).toContain("iris-dev-mcp");
+    const clients = (envelopeOf(status).data as { clients: Array<{ client: string; scopes: Array<{ scope: string; path: string | null; file: string; servers: Array<{ server: string; state: string }> }> }> }).clients;
+    const projectScope = clients.find((client) => client.client === "cursor")?.scopes.find((scope) => scope.scope === "project");
+    expect(projectScope, "cursor's project scope is listed").toBeDefined();
+    expect(projectScope?.path).toBe(cursorFile(sandbox.home));
+    expect(projectScope?.file).toBe("ok");
+    expect(projectScope?.servers.find((server) => server.server === "iris-dev-mcp")?.state).toBe("present-enabled");
     for (const command of ["detect", "doctor"]) {
       const result = sandbox.run([command, "--json"], { env: IRIS_ENV });
       expect(result.status, `${command}: ${result.stdout}${result.stderr}`).toBe(0);

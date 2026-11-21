@@ -3989,3 +3989,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
 - evidence: README.md Releasing #121 paragraph; release.yml jobs ci-gate/prepare/rehearse/publish; release-not-set-up.test.ts rerun row reuses one artifacts directory
 - 2026-11-21T13:37:01Z status=wontfix-accepted owner=42-8-claude-code-plugin-and-registry-listings by=cr note=reopen_if=the owner's rerun after O1 cannot be found or started, or Open VSX then serves a vsix whose contents differ from the Marketplace's at the same version; the #122 README pass may add the Re-run all jobs wording
+
+### DW-716: Every @iris-mcp/* package carries a public, non-deprecated 0.0.0-stage version (npm staged-publishing placeholder, 2026-11-21T12:33Z) that the 42.6 spec says must not exist
+- source: spec-42-9-install-docs-and-client-re-certification.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: npm view @iris-mcp/dev time: 0.0.0-stage 2026-11-21T12:33:19Z, description 'Temporary package placeholder for staged publishing', not deprecated; dist-tag latest is 1.0.0; spec-42-6:70 says no 0.0.0-stage placeholder
+- 2026-11-21T13:55:48Z status=decision-pending owner=burndown by=cr note=human=owner decides npm deprecate of 0.0.0-stage (registry write) or a CHANGELOG note
