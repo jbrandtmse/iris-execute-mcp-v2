@@ -75,6 +75,14 @@ describe("AC 42.5.1: release.yml is the declaration", () => {
     expect(owners((job) => JSON.stringify(job).includes("secrets."))).toEqual(["publish"]);
     expect(owners((job) => JSON.stringify(job).includes("github.token"))).toEqual(["ci-gate", "publish"]);
     expect(workflow.jobs["publish"]?.["environment"]).toBe("release");
+    const publishSteps = workflow.jobs["publish"]?.["steps"] as Array<{ run?: string; env?: Record<string, string> }>;
+    const publishEnv = publishSteps.find((step) => String(step.run ?? "").startsWith("node scripts/release.mjs publish"))?.env;
+    expect(publishEnv, "the publish step holds each secret a channel reads (the IPM deploy key included), and nothing else").toEqual({
+      NPM_TOKEN: "${{ secrets.NPM_TOKEN }}",
+      OVSX_PAT: "${{ secrets.OVSX_PAT }}",
+      IPM_DIST_DEPLOY_KEY: "${{ secrets.IPM_DIST_DEPLOY_KEY }}",
+      GITHUB_TOKEN: "${{ github.token }}",
+    });
     expect([...(workflow.jobs["publish"]?.["needs"] as string[])].sort()).toEqual(["ci-gate", "prepare", "rehearse"]);
     expect(workflow.jobs["publish"]?.["if"]).toBe(PUBLISH_CONDITION);
     expect(workflow.jobs["publish"]?.["if"]).toBe("${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}");

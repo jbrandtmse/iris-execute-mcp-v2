@@ -337,6 +337,7 @@ describe("verify (AC 42.6.3): the shapes the registry and the machine can answer
     expect(world.text().match(/: ok, published with a provenance attestation/g)).toHaveLength(7);
     expect(world.text()).toContain("npx -y @iris-mcp/dev@1: ok");
     expect(world.standIns.calls("npm").every((call) => call.argv[0] === "view"), "a failing check still publishes, deprecates and logs in nothing").toBe(true);
+    expect(world.standIns.calls("git").map((call) => call.argv[0]), "git only reads the packaging tag: no push, tag or commit").toEqual(["ls-remote"]);
     expect(readdirSync(world.observed)).toEqual([]);
   });
 

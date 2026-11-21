@@ -3932,3 +3932,43 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-7-vs-code-extension-publish.md (lead Phase A, dry run https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44878912402) | severity: low | fix-risk: med | footprint: in-story
 - evidence: rehearse: vscode-marketplace: ready (would publish iris-mcp-launcher@1.0.0) while open-vsx reads not ready (namespace absent); the public Marketplace has no unauthenticated publisher lookup; recovery: create the publisher, then Re-run failed jobs (npm reads already published)
 - 2026-11-21T07:54:04Z status=wontfix-accepted owner=42-7-vs-code-extension-publish by=lead note=reopen_if=the_first_store_release's_vscode-marketplace_row_fails_for_a_missing_publisher;O1_precedes_any_post-merge_tag(DW-704)
+
+### DW-706: Claude Code plugin plus the installer's server route configures the five servers twice; no doc or check tells the user to remove the old entries
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: med | fix-risk: low | footprint: in-epic
+- evidence: cmdSkills is the only caller of detectClaudeCodePlugin; install --client claude-code and doctor never consult it, and README:225 says only 'instead', so a user with existing iris-*-mcp entries who adds the plugin gets every tool twice with two credential sets
+- 2026-11-21T11:24:10Z status=routed owner=42-9-install-docs-and-client-re-certification by=cr note=42.9 install docs: tell users to remove installer or hand-written entries when switching to the plugin; doctor may warn
+
+### DW-707: Marketplace on main pins ref v1.0.0, whose pack has no plugin.json: an install before v1.1.0 fails (no tag) or silently yields a skills-only plugin
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: Probe 2026-11-21, Claude Code 2.1.330, scratch CLAUDE_CONFIG_DIR: the 55ae0eb pack via a directory marketplace installs OK, Version unknown, no servers, no userConfig prompt; enabledPlugins written
+- 2026-11-21T11:24:24Z status=by-design owner=42-8-claude-code-plugin-and-registry-listings by=cr note=decision #102 consequence; README says from 1.1.0; lead keeps the merge-to-version-commit window short
+
+### DW-708: Release-core copies listing constants (SERVER_JSON_DIRS, MARKETPLACE_RELATIVE, PLUGIN_ENTRY_NAME, PLUGIN_MANIFEST_RELATIVE) from listings.mjs and skills-pack.mjs
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: release-core stays pure and release.mjs imports only it (42.5 constraint); story-42-8 tests pin each pair equal, so no silent drift
+- 2026-11-21T11:24:24Z status=wontfix-accepted owner=42-8-claude-code-plugin-and-registry-listings by=cr note=reopen_if=an equality pin between release-core and listings/skills-pack constants is removed or goes red
+
+### DW-709: Plugin sources restate the six connection variables by hand (.mcp.json env x5, plugin.json userConfig) beside CONNECTION_VARIABLES
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: Spec copies .mcp.json byte for byte from skills-pack-src; story-42-8-plugin.test.ts pins names and defaults of all three equal; only descriptions differ (cosmetic)
+- 2026-11-21T11:24:24Z status=wontfix-accepted owner=42-8-claude-code-plugin-and-registry-listings by=cr note=reopen_if=a connection variable is added, renamed or its default changes
+
+### DW-710: DW-694 offline scripted run does not exercise the in-container tar, the registry mount or the -C path; only CI ipm job does
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: Fake docker cp serves a host-built archive; mount name and REGISTRY_ROOT_MOUNT are tied only by convention (same shape as the stage/install legs); a mismatch fails loudly in CI
+- 2026-11-21T11:24:24Z status=wontfix-accepted owner=42-8-claude-code-plugin-and-registry-listings by=cr note=reopen_if=lead A1 is not recorded green with the registry-shaped leg, or A1b is not red at that leg
+
+### DW-711: The registry-shaped archive check does not observe pax headers, the stated reason the tar runs in the container
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: readTgz folds x/g headers silently; but the served artifact is tarred by zpm-registry, not by us, and load of the archive on both editions is the behavioral oracle
+- 2026-11-21T11:24:24Z status=wontfix-theoretical owner=42-8-claude-code-plugin-and-registry-listings by=cr note=real if the CI image's IPM predates 0.10.11 and load stops being the oracle
+
+### DW-712: A thrown error in the registry dry step would fail a rehearsal, contrary to decision #108's never-blocks
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: runChannel catch maps any throw to failed; but runCaptured never rejects and lookup/fetch paths catch, so only mkdtemp/write failures (disk) reach it
+- 2026-11-21T11:24:24Z status=wontfix-theoretical owner=42-8-claude-code-plugin-and-registry-listings by=cr note=real if a registry dry-step dependency can reject or throw on a normal path
+
+### DW-713: npm visibility poll has a 5-minute deadline per pending server, so the total wait could reach 25 minutes
+- source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: The first package that times out returns failed at once; the five packages were published together earlier in the same run, so sequential near-deadline visibility is not a realistic path
+- 2026-11-21T11:24:24Z status=wontfix-theoretical owner=42-8-claude-code-plugin-and-registry-listings by=cr note=real if a registry run is seen polling npm for more than 5 minutes in total

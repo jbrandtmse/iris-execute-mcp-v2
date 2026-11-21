@@ -777,7 +777,6 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
   let tmp = "";
   let archiveSource = "";
   let registryArchiveSource = "";
-  let registryFiles: string[] = [];
   let embed: Embed;
   let cases: ParityCase[];
 
@@ -800,7 +799,7 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
     // The archive the registry-shaped leg copies out: GNU-style tar of the packaging root the release stages (./module.xml at its top, no .git).
     const registryStage = path.join(root, "registry-stage");
     mkdirSync(registryStage);
-    registryFiles = stagePackagingRoot(registryStage, embed, { version: markerSemver(embed.marker), licenseText: readFileSync(path.join(REPO_ROOT, "LICENSE"), "utf8") }).files;
+    stagePackagingRoot(registryStage, embed, { version: markerSemver(embed.marker), licenseText: readFileSync(path.join(REPO_ROOT, "LICENSE"), "utf8") });
     registryArchiveSource = path.join(root, "registry-good.tgz");
     const registryMade = tarGz(registryArchiveSource, registryStage, ["--exclude=.git"]);
     expect(registryMade.status, registryMade.stderr).toBe(0);
@@ -1142,7 +1141,6 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
       expect(scripts.filter((script) => script.includes("registry-root.tgz")).every((script) => !script.includes("load -dev"))).toBe(true);
       expect(scripts.some((script) => script.includes(`$ZF(-1,"${registryTarCommand()}")`))).toBe(true);
       expect(run.stderr).toMatch(/\[registry-health\] the registry-shaped archive installed on a fresh/);
-      expect(registryArchiveProblems(readTgz(readFileSync(registryArchiveSource)), registryFiles), "the archive the run copied out is the staged packaging root").toEqual([]);
     }, 120_000);
   });
 

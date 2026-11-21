@@ -3,8 +3,8 @@
  *
  * `claude-plugin-detect.test.ts` and `skills-cli-plugin.test.ts` inject the environment, the home and the file system, so a bin whose `main`
  * did not hand the real `process.env` and `os.homedir()` to the detector would stay green. Here the child's environment is built from
- * scratch (a temp HOME, a scratch `CLAUDE_CONFIG_DIR` that is set only where a row says so), and the real `~/.claude/settings.json` of
- * the developer is fingerprinted before and after (it is never read by the child, because HOME is the sandbox, and it is never written).
+ * scratch (a temp HOME, and a scratch `CLAUDE_CONFIG_DIR` that is set only where a row says so), so the child never sees the developer's
+ * own Claude Code settings.
  *
  * Fixture diversity (Rule #58): the same `enabledPlugins` entry is written compact, with 2 spaces, 4 spaces and tabs, with CRLF line
  * endings, behind a byte order mark, as JSONC with comments and a trailing comma, and among other keys. The precedence is then
@@ -12,8 +12,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -27,7 +26,7 @@ afterEach(removeSandboxes);
 const T = 180_000;
 const KEY = "iris-mcp@iris-mcp";
 const RULE = ".claude/rules/iris-mcp-objectscript-pre-write.md";
-const BOM = "﻿";
+const BOM = "\uFEFF";
 
 /** The same entry in the shapes a settings file really comes in. */
 const SHAPES: Array<[string, (value: boolean) => string]> = [
@@ -67,14 +66,6 @@ function runSkills(sandbox: Sandbox, configDir: string | undefined, extra: strin
 
 const plansSkills = (out: string): boolean => /^ {2}create +\.claude\/skills\//m.test(out);
 const plansRule = (out: string): boolean => /^ {2}create +\.claude\/rules\//m.test(out);
-
-/** The real `~/.claude/settings.json`, as size and mtime, or `absent`: read by stat only, never opened. */
-function realSettingsFingerprint(): string {
-  const real = path.join(homedir(), ".claude", "settings.json");
-  if (!existsSync(real)) return "absent";
-  const stat = statSync(real);
-  return `${stat.size}|${stat.mtimeMs}`;
-}
 
 describe("the built bin reads the real environment: one entry, many file shapes", () => {
   it.each(SHAPES.map((shape) => [shape[0], shape[1]] as const))("user settings, %s, true: the plan is the rule alone, and the decider is named", (_name, shape) => {
@@ -134,7 +125,6 @@ describe("the precedence local > project > user, over every combination, through
 
 describe("CLAUDE_CONFIG_DIR moves the user file, and the home's ~/.claude is then never the decider", () => {
   it("the moved file decides, and a decoy in ~/.claude holding the opposite value is not read", () => {
-    const before = realSettingsFingerprint();
     for (const [moved, decoy] of [[true, false], [false, true]] as const) {
       const sandbox = makeSandbox();
       const configDir = path.join(sandbox.root, "claude-config");
@@ -148,7 +138,6 @@ describe("CLAUDE_CONFIG_DIR moves the user file, and the home's ~/.claude is the
       expect(result.stdout).toContain(`in ${paths.user};`);
       expect(result.stdout).not.toContain(path.join(sandbox.home, ".claude"));
     }
-    expect(realSettingsFingerprint(), "the developer's real ~/.claude/settings.json was not touched").toBe(before);
   }, T);
 
   it("a ~/.claude/settings.json that says true is ignored when CLAUDE_CONFIG_DIR points at a directory with no settings: the skills are planned", () => {

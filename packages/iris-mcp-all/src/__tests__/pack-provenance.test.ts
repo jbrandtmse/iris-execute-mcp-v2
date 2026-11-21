@@ -646,6 +646,21 @@ describe("the plugin rule (Story 42.8, AC 42.8.1; AD-28)", () => {
     expect(messages(pluginProblems(inputsFor({ plugin })))).toEqual([`${plugin.serverJsons[2]!.path}: title says "official"`]);
   });
 
+  it("a name or a plugin keyword that claims endorsement is refused: a server.json name, a marketplace entry name, a keyword", () => {
+    const plugin = realPlugin();
+    plugin.serverJsons[1]!.value.name = "io.github.jbrandtmse/iris-official-mcp";
+    plugin.marketplace.value.plugins.push({ name: "endorsed-extras", source: "./x" });
+    plugin.manifest.value.keywords = [...plugin.manifest.value.keywords, "official", "intersystems"];
+    expect(messages(pluginProblems(inputsFor({ plugin }))).sort()).toEqual(
+      [
+        `${plugin.serverJsons[1]!.path}: name says "official"`,
+        `${plugin.marketplace.path}: name says "endorsed"`,
+        `${plugin.manifest.path}: keyword says "official"`,
+        `${plugin.manifest.path}: keyword contains "intersystems"`,
+      ].sort(),
+    );
+  });
+
   it.each([
     ["a missing server", (servers: any) => delete servers.mcpServers.ops],
     ["an extra server", (servers: any) => (servers.mcpServers.other = { command: "npx" })],

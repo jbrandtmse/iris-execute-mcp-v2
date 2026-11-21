@@ -1512,53 +1512,58 @@ async function publishIpm(detail, { dir, env, deps, cleanups, version, sha, quot
   }
   const work = mkdtempSync(path.join(tmpdir(), 'release-ipm-'));
   cleanups.add(() => rmSync(work, { recursive: true, force: true }));
-  const keyFile = path.join(work, 'deploy-key');
-  writeFileSync(keyFile, env.IPM_DIST_DEPLOY_KEY.endsWith('\n') ? env.IPM_DIST_DEPLOY_KEY : `${env.IPM_DIST_DEPLOY_KEY}\n`, { encoding: 'utf8', mode: 0o600 });
-  chmodSync(keyFile, 0o600);
-  // The push trusts only GitHub's published host keys: a pinned known_hosts file, strict checking, and no other known_hosts file.
-  const knownHosts = path.join(work, 'known_hosts');
-  writeFileSync(knownHosts, githubKnownHostsText(), { encoding: 'utf8', mode: 0o600 });
-  chmodSync(knownHosts, 0o600);
-  const clone = path.join(work, 'repository');
-  const tree = path.join(dir, detail.tree ?? 'ipm');
-  const plan = ipmPushPlan(tree, version, sha, { url: `git@github.com:${IPM_DIST_REPOSITORY}.git`, clone });
-  const gitEnv = childEnv(env, {
-    GIT_SSH_COMMAND: `ssh -i ${keyFile} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${knownHosts} -o GlobalKnownHostsFile=/dev/null`,
-    GIT_TERMINAL_PROMPT: '0',
-  });
-  const git = (argv, cwd) => deps.run(['git', ...argv], { cwd, env: gitEnv });
-  const failedAt = (step, result) => ({
-    status: STATUS.failed,
-    detail: `git ${step} failed (exit ${result.status ?? 'none'}): ${quote(tail(result.stderr || result.error?.message || result.stdout, 3))}. Fix the packaging repository or its deploy key, then run the release again.`,
-  });
+  // The key and the known_hosts file go as soon as the push ends, so no later channel's process can read them; the cleanup covers a signal.
+  try {
+    const keyFile = path.join(work, 'deploy-key');
+    writeFileSync(keyFile, env.IPM_DIST_DEPLOY_KEY.endsWith('\n') ? env.IPM_DIST_DEPLOY_KEY : `${env.IPM_DIST_DEPLOY_KEY}\n`, { encoding: 'utf8', mode: 0o600 });
+    chmodSync(keyFile, 0o600);
+    // The push trusts only GitHub's published host keys: a pinned known_hosts file, strict checking, and no other known_hosts file.
+    const knownHosts = path.join(work, 'known_hosts');
+    writeFileSync(knownHosts, githubKnownHostsText(), { encoding: 'utf8', mode: 0o600 });
+    chmodSync(knownHosts, 0o600);
+    const clone = path.join(work, 'repository');
+    const tree = path.join(dir, detail.tree ?? 'ipm');
+    const plan = ipmPushPlan(tree, version, sha, { url: `git@github.com:${IPM_DIST_REPOSITORY}.git`, clone });
+    const gitEnv = childEnv(env, {
+      GIT_SSH_COMMAND: `ssh -i ${keyFile} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${knownHosts} -o GlobalKnownHostsFile=/dev/null`,
+      GIT_TERMINAL_PROMPT: '0',
+    });
+    const git = (argv, cwd) => deps.run(['git', ...argv], { cwd, env: gitEnv });
+    const failedAt = (step, result) => ({
+      status: STATUS.failed,
+      detail: `git ${step} failed (exit ${result.status ?? 'none'}): ${quote(tail(result.stderr || result.error?.message || result.stdout, 3))}. Fix the packaging repository or its deploy key, then run the release again.`,
+    });
 
-  const cloned = await git(plan.cloneArgv, work);
-  if (cloned.status !== 0) return failedAt('clone', cloned);
-  const branch = await git(plan.checkoutArgv, clone);
-  if (branch.status !== 0) return failedAt('checkout', branch);
-  for (const entry of readdirSync(clone)) {
-    if (entry !== '.git') rmSync(path.join(clone, entry), { recursive: true, force: true });
+    const cloned = await git(plan.cloneArgv, work);
+    if (cloned.status !== 0) return failedAt('clone', cloned);
+    const branch = await git(plan.checkoutArgv, clone);
+    if (branch.status !== 0) return failedAt('checkout', branch);
+    for (const entry of readdirSync(clone)) {
+      if (entry !== '.git') rmSync(path.join(clone, entry), { recursive: true, force: true });
+    }
+    cpSync(tree, clone, { recursive: true });
+    const added = await git(plan.addArgv, clone);
+    if (added.status !== 0) return failedAt('add', added);
+    const written = await git(plan.writeTreeArgv, clone);
+    if (written.status !== 0) return failedAt('write-tree', written);
+    const existing = await git(plan.tagTreeArgv, clone);
+    if (existing.status === 0) {
+      if (existing.stdout.trim() === written.stdout.trim()) return { status: STATUS.alreadyPublished, detail: `${plan.tag} exists with this tree` };
+      return { status: STATUS.failed, detail: `${plan.tag} exists on ${IPM_DIST_REPOSITORY} with a different tree. Release a new version.` };
+    }
+    if (listing.listed) {
+      return { status: STATUS.failed, detail: `the IPM registry lists ${version}, but ${IPM_DIST_REPOSITORY} has no tag ${plan.tag}. Nothing was pushed; release a new version.` };
+    }
+    const committed = await git(plan.commitArgv, clone);
+    if (committed.status !== 0) return failedAt('commit', committed);
+    const tagged = await git(plan.tagArgv, clone);
+    if (tagged.status !== 0) return failedAt('tag', tagged);
+    const pushed = await git(plan.pushArgv, clone);
+    if (pushed.status !== 0) return failedAt('push', pushed);
+    return { status: STATUS.published, detail: `${plan.tag} on ${IPM_DIST_REPOSITORY} ${plan.branch}` };
+  } finally {
+    rmSync(work, { recursive: true, force: true });
   }
-  cpSync(tree, clone, { recursive: true });
-  const added = await git(plan.addArgv, clone);
-  if (added.status !== 0) return failedAt('add', added);
-  const written = await git(plan.writeTreeArgv, clone);
-  if (written.status !== 0) return failedAt('write-tree', written);
-  const existing = await git(plan.tagTreeArgv, clone);
-  if (existing.status === 0) {
-    if (existing.stdout.trim() === written.stdout.trim()) return { status: STATUS.alreadyPublished, detail: `${plan.tag} exists with this tree` };
-    return { status: STATUS.failed, detail: `${plan.tag} exists on ${IPM_DIST_REPOSITORY} with a different tree. Release a new version.` };
-  }
-  if (listing.listed) {
-    return { status: STATUS.failed, detail: `the IPM registry lists ${version}, but ${IPM_DIST_REPOSITORY} has no tag ${plan.tag}. Nothing was pushed; release a new version.` };
-  }
-  const committed = await git(plan.commitArgv, clone);
-  if (committed.status !== 0) return failedAt('commit', committed);
-  const tagged = await git(plan.tagArgv, clone);
-  if (tagged.status !== 0) return failedAt('tag', tagged);
-  const pushed = await git(plan.pushArgv, clone);
-  if (pushed.status !== 0) return failedAt('push', pushed);
-  return { status: STATUS.published, detail: `${plan.tag} on ${IPM_DIST_REPOSITORY} ${plan.branch}` };
 }
 
 // -- verify ----------------------------------------------------------------------------------------------------

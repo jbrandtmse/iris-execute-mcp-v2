@@ -1945,6 +1945,37 @@ describe("The IPM channel (DW-689; Decision #76)", () => {
     expect(world.lines.join("\n")).toMatch(/ipm\n {2}iris-execute-mcp-v2@1\.0\.0: published \(v1\.0\.0 on jbrandtmse\/iris-execute-mcp-v2-ipm master\)/);
   });
 
+  it("the deploy key and the known_hosts file are gone as soon as the channel ends, before anything after it runs (the report, or a later channel's process)", async () => {
+    const world = ipmWorld();
+    world.registry.answer = { status: 200, body: { name: "iris-execute-mcp-v2", version: "0.9.0", versions: ["0.9.0"] } };
+    const files = new Set<string>();
+    const run = defaultDeps().run;
+    let atReport: boolean[] | undefined;
+    expect(
+      await world.run({
+        channels: IPM_ONLY,
+        env: { IPM_DIST_DEPLOY_KEY: KEY },
+        deps: {
+          run: (argv: string[], options: { env?: Record<string, string> }) => {
+            const command = options.env?.["GIT_SSH_COMMAND"] ?? "";
+            for (const pattern of [/-i (\S+)/, /UserKnownHostsFile=(\S+)/]) {
+              const file = pattern.exec(command)?.[1];
+              if (file !== undefined) files.add(file);
+            }
+            return run(argv as never, options as never);
+          },
+          // The channel's own result line is logged right after it ends, before the report and before any later channel.
+          log: (line: string) => {
+            world.lines.push(line);
+            if (line.includes("ipm: published")) atReport = [...files].map((file) => existsSync(file));
+          },
+        },
+      }),
+    ).toBe(0);
+    expect(files.size, "the key file and the known_hosts file were seen").toBe(2);
+    expect(atReport, "neither file exists once the channel has ended").toEqual([false, false]);
+  });
+
   it("an existing tag with an identical tree is already published: no commit and no push", async () => {
     const world = ipmWorld();
     world.standIns.script("git", [

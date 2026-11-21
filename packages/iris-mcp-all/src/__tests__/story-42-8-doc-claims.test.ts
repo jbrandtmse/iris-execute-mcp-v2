@@ -114,6 +114,13 @@ describe("the plugin in the documents (AC 42.8.2)", () => {
     for (const flag of command.match(/--[a-z-]+/g) ?? []) expect(read("packages/client-config/src/cli/clients.ts"), flag).toContain(`"${flag}"`);
   });
 
+  it("the root README's skill count for the plugin is the pack's, counted from its skills directory (Rule #51)", () => {
+    const count = readdirSync(join(REPO_ROOT, PACK_DIR, "skills"), { withFileTypes: true }).filter((entry) => entry.isDirectory()).length;
+    const claimed = [...ROOT_README.matchAll(/\b(\d+) skills\b/g)].map((match) => Number(match[1]));
+    expect(claimed.length, "the README states the plugin's skill count").toBeGreaterThanOrEqual(2);
+    expect(new Set(claimed)).toEqual(new Set([count]));
+  });
+
   it("the root README's skills section and Known limits say that the plugin makes the claude-code route install only the rule", () => {
     expect(ROOT_README).toContain("With the plugin enabled, `skills install --client claude-code` installs only the rule");
     expect(ROOT_README).toContain("The Claude Code route installs only the rule when it finds the `iris-mcp@iris-mcp` plugin enabled");

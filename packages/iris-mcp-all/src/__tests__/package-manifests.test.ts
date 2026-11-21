@@ -302,6 +302,19 @@ describe("server.json (Story 42.8, AD-29: mcpName and the listing agree)", () =>
     expect(listing.description.length).toBeLessThanOrEqual(100);
   });
 
+  it.each(servers.map((entry) => [label(entry), entry] as const))("%s: its server.json lists the six connection variables with the schema's keys (the password required and secret)", (_name, entry) => {
+    const listing = JSON.parse(readFileSync(join(REPO_ROOT, entry.directory, "server.json"), "utf8")) as { packages: Array<{ environmentVariables: Array<Record<string, unknown>> }> };
+    const shape = (listing.packages[0]?.environmentVariables ?? []).map(({ description: _description, ...rest }) => rest);
+    expect(shape).toEqual([
+      { name: "IRIS_HOST", default: "localhost" },
+      { name: "IRIS_PORT", format: "number", default: "52773" },
+      { name: "IRIS_USERNAME", isRequired: true },
+      { name: "IRIS_PASSWORD", isRequired: true, isSecret: true },
+      { name: "IRIS_NAMESPACE", default: "USER" },
+      { name: "IRIS_HTTPS", format: "boolean", default: "false" },
+    ]);
+  });
+
   it.each(servers.map((entry) => [label(entry), entry] as const))("%s: its server.json passes the deny-list", (_name, entry) => {
     const listing = JSON.parse(readFileSync(join(REPO_ROOT, entry.directory, "server.json"), "utf8")) as { name: string; title: string; description: string };
     expect(endorsementProblems("title", listing.title)).toEqual([]);

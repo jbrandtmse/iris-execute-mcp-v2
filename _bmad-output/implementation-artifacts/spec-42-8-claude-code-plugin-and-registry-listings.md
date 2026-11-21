@@ -322,6 +322,43 @@ deferred:
 - **Live check (AC 42.8.4; lead, after `v1.1.0`).** Given a scratch `CLAUDE_CONFIG_DIR`, when the lead runs `claude plugin marketplace add jbrandtmse/iris-execute-mcp-v2` and `claude plugin install iris-mcp@iris-mcp` with `--config` values for a harness throwaway IRIS for Health, then `claude mcp list` shows `plugin:iris-mcp:{dev,admin,data,interop,ops}` connected and the 18 skills list. The result is recorded.
 - **Listings (AC 42.8.5; lead, after `v1.1.0`).** Given the `v1.1.0` publish, when `release.mjs verify --version 1.1.0` runs, then the five registry names answer 200 at `1.1.0` and the packaging repository holds tag `v1.1.0`. After the owner's Open Exchange approval, `GET https://pm.community.intersystems.com/packages/iris-execute-mcp-v2` lists `1.1.0`, its tgz's members equal the pushed tree, and `zpm "install iris-execute-mcp-v2"` installs it on a networked harness throwaway (the DW-694 served-artifact check).
 
+### Review Findings
+
+Code review 2026-11-21 (stage `code-review`, frozen diff `fc113e7..c741a7f` minus the cycle log; review tier full-opus; layers blind-hunter, edge-case-hunter, verification-gap, acceptance-auditor all delivered; no layer changed the tree). 37 raw findings → 21 entries after grouping: high 0, med 7, low 14; plus 9 rejected. The patches are one local commit, named in this stage's report to the lead. Mutation lines for every patched pin are under `## Verification`, "Code-review evidence and mutations".
+
+- [x] [Review][Patch] MED: a test depended on the developer's real `~/.claude/settings.json` (size and mtime fingerprint; any concurrent Claude Code session writing it turned the row red, and it could not catch the regression it named) [packages/client-config/src/__tests__/qa-42-8-plugin-process.test.ts] — fingerprint removed; the sandbox decoy rows remain the guard. fix-risk low.
+- [x] [Review][Patch] MED: the rendered `server.json` `environmentVariables` (`isRequired`, `isSecret`, `format`, `default`) had no pin; dropping `isSecret` from the password stayed green [packages/iris-mcp-all/src/__tests__/package-manifests.test.ts] — a typed-out expected shape per listing. fix-risk low.
+- [x] [Review][Patch] MED: `IPM_DIST_DEPLOY_KEY` in the publish step was pinned only as "release.yml equals the declaration"; removing it from both stayed green and would fail IPM after npm and the stores published [packages/iris-mcp-all/src/__tests__/release-workflow.test.ts] — the publish env is pinned exactly. fix-risk low.
+- [x] [Review][Patch] MED: the implement-review replacement assertion in the DW-694 scripted row re-checked the test's own fixture (cannot fail; the health run copies nothing out) [packages/iris-mcp-all/src/__tests__/ci-ipm-archive.test.ts] — deleted with its unused variable; the run status, session-script and member-check rows remain. fix-risk low.
+- [x] [Review][Patch] MED: the 42.6 "verify publishes nothing" check was narrowed to npm calls when `verify` gained a `git` call, so a `git push` in `verify` stayed green [packages/iris-mcp-all/src/__tests__/story-42-6-qa-gate-verify.test.ts] — git calls must be exactly `ls-remote`. fix-risk low.
+- [x] [Review][Patch] MED: the lead checklist lacked the #110 pin re-check, O-IPM1 as an owner-only blocker, the A2 rerun after O-IPM1, and the A1b scope (mutating `stageModule` would also break the `package` leg) [spec `## Verification`] — checklist reordered and completed (A1, A1b, A2, O-IPM1, A2b, B1, C0, C1–C2, O-OEX, C3). fix-risk low.
+- [x] [Review][Defer] MED: with the plugin, the installer's server route (`install --client claude-code`) or hand-written entries give every tool twice; nothing detects or documents it [packages/client-config/src/cli/clients.ts; README.md:225] — deferred: DW-706 `routed owner=42-9-install-docs-and-client-re-certification` (the install-docs story). fix-risk low.
+- [x] [Review][Patch] LOW: the `plugin` provenance rule ran the endorsement deny-list on descriptions only, so `io.github.jbrandtmse/iris-official-mcp`, an "endorsed" marketplace entry or an "official"/"intersystems" keyword passed [scripts/lib/provenance-core.mjs] — names and keywords now checked; test in `pack-provenance.test.ts`.
+- [x] [Review][Patch] LOW: the deploy key and known_hosts files lived until the end of the run, so the later `mcp-publisher` child (same user) could read them [scripts/release.mjs publishIpm] — removed in a `finally` as the channel ends (the signal cleanup stays); test in `release-script.test.ts`.
+- [x] [Review][Patch] LOW: literal U+FEFF in test source (Rule 14) [qa-42-8-plugin-process.test.ts:29] — `"﻿"`.
+- [x] [Review][Patch] LOW: the README's "18 skills" (two places) was hand-written (Rule #51) [README.md:225,917] — counted from the pack in `story-42-8-doc-claims.test.ts`.
+- [x] [Review][Patch] LOW: README Releasing step 6 omitted that `verify` now fails on a missing MCP Registry listing or packaging tag [README.md:1115] — stated in the step.
+- [x] [Review][Patch] LOW: "the plugin's options win over exported shell variables" had no evidence — probed (Claude Code 2.1.330): the plugin value won, other variables inherited; recorded under `## Verification`.
+- [x] [Review][Patch] LOW: three pinning tests had no `mutation:` line (the `[WARN]` row, the no-plugin report line, the registry publish race) — applied, red, reverted, written.
+- [x] [Review][Defer] LOW: `main`'s marketplace pins `v1.0.0`, whose pack has no manifest; an install before `v1.1.0` fails (tag absent) or, once the tag exists, silently installs a skills-only plugin (probed) [.claude-plugin/marketplace.json] — deferred: DW-707 `by-design` (decision #102; README says "from 1.1.0"); lead keeps the merge-to-version-commit window short (C0).
+- [x] [Review][Defer] LOW: release-core copies listing constants from `listings.mjs`/`skills-pack.mjs` (Rule 2) — deferred: DW-708 `wontfix-accepted` (release-core purity, 42.5; equality pinned by tests).
+- [x] [Review][Defer] LOW: plugin sources restate the six connection variables by hand — deferred: DW-709 `wontfix-accepted` (spec byte-copy of `.mcp.json`; names and defaults pinned equal).
+- [x] [Review][Defer] LOW: the DW-694 offline run does not exercise the in-container tar, the mount or `-C` (Rule #59 path is lead A1/A1b) — deferred: DW-710 `wontfix-accepted`.
+- [x] [Review][Defer] LOW: pax headers are not observed by the registry-shaped member check — deferred: DW-711 `wontfix-theoretical`.
+- [x] [Review][Defer] LOW: a thrown registry dry-step error would fail a rehearsal despite #108 — deferred: DW-712 `wontfix-theoretical` (no normal path throws).
+- [x] [Review][Defer] LOW: the npm visibility poll's deadline is per server (25 minutes worst case) — deferred: DW-713 `wontfix-theoretical`.
+
+**Rejected:**
+- edge: IPM dry step `ready (would be already published)` when the registry lists the version but the tag is absent — already adjudicated `wontfix-accepted` in the implement triage (#109 row wording).
+- edge: a disabled `mcp-registry` channel's dry step gets no signal cleanup — the channel is enabled; the path needs a config that does not exist (and the step has its own `finally`).
+- edge: `readReleaseFacts` throws a raw `SyntaxError` on a malformed listing — already adjudicated (every sibling reader there does the same).
+- edge: the registry leg tars the staged directory, not a git checkout — the staged root has no `.gitignore`, `.gitattributes` or empty directory, so `git add` changes nothing; low and the fix adds a git step to the harness.
+- edge: a health-only `ci-ipm-archive` run skips the member check — already adjudicated (debugging mode; member check is edition-independent).
+- edge: `npmServes` accepts a 200 HTML answer from a proxy — GitHub-hosted runners have no captive portal; low, fix adds a guard.
+- auditor: the spec frontmatter says `done` while C1–C3 are pending — frontmatter is build-auto's state and not this stage's to change; the sprint tracker stays `in-progress` until the lead's Phase C.
+- verification-gap: `story-42-8-qa.test.ts` describes share one fixture across `it`s — every mutation restores in `finally`, so no row depends on another's leftovers; low, the fix is a full copy per test.
+- verification-gap: the local `claude plugin validate` "can fail" row checks only a non-zero exit — low; CI pinning of Claude Code's acceptance is already the frontmatter `deferred:` item.
+
 ## Spec Change Log
 
 **2026-11-21, implement stage: decisions #108 and #110 override the intent-contract text below. The frozen block is left untouched; these entries are binding and take precedence wherever they differ.**
@@ -651,12 +688,17 @@ Every test added or changed passes on a fresh environment, in either order, and 
   - `stagePackagingRoot` writes `module.xml` under `ipm/` → the offline member test in `ci-ipm-archive.test.ts`;
   - on the real path, A1b.
 
-**Lead checklist (after code review; the lead records each result):**
+**Lead checklist (after code review; the lead records each result, in this order; nothing publishes before the `release` environment approval in C0):**
 - A1: CI on the story commit is green, including `ipm`'s registry-shaped leg on both editions.
-- A1b: a throwaway branch with the module.xml-in-subdirectory mutation is red at that leg; the branch is deleted.
-- A2: the release dry run (`release-dry-run/**`) shows the matrix's IPM and registry readiness lines.
-- B1: after npm 1.0.0 is live, the `--plugin-dir` session with five servers connected.
-- C1–C3: after `v1.1.0` (C3 also after O-OEX), per the ACs above.
+- A1b: a throwaway branch where `stagePackagingRoot` ALONE puts `module.xml` under a subdirectory (after `stageModule` returns; never mutate `stageModule`, which the `package` leg also uses) is red at the registry-shaped leg while the `package` leg stays green; the branch is deleted.
+- A2: the release dry run (`release-dry-run/**`) before O-IPM1: `ipm` reads `not ready (... absent or not readable ...)` and the rehearsal exits 1 for it (intended); `mcp-registry` reads `ready (would publish 5 servers)` (its `not ready` would be reported without failing the run, decision #108).
+- **O-IPM1 (OWNER ONLY; blocks the `v1.1.0` tag):** the packaging repository, the deploy key and the `IPM_DIST_DEPLOY_KEY` secret (Design Notes, "What the owner must provide").
+- A2b: after O-IPM1, the dry run again: `ipm` reads `ready`.
+- B1: after npm 1.0.0 is live (42.6 B7), the `--plugin-dir` session with five servers connected.
+- C0 (before the `v1.1.0` tag): re-check the `mcp-publisher` v1.8.8 pin (decision #110: not yanked, no security-fix release since); then `pnpm run version`, CI green on the version commit, the tag on `main`, and the `release` environment approval. Keep the window between the `epic42` merge to `main` and this version commit short: until then `main`'s marketplace pins `v1.0.0`, whose pack has no plugin manifest (DW-707).
+- C1–C2: after `v1.1.0`, per the ACs above.
+- **O-OEX (OWNER ONLY; after `v1.1.0` publishes):** the Open Exchange app and its "Publish in Package Manager" approval.
+- C3: after O-OEX, per the AC "Listings".
 
 **Implement-stage evidence (2026-11-21).**
 
@@ -710,6 +752,19 @@ Every test added or changed passes on a fresh environment, in either order, and 
 - mutation: a rehearsal's registry `not ready` also fails the rehearsal (`failed = true` after the registry branch), and the loop runs the registry channel before the others → `release-script.test.ts` "a hash mismatch, a validate failure and an unreadable lookup are each `not ready (...)`, reported but never failing the rehearsal (decision #108)", "a registry failure is the last thing the run does ..." and the two "no `channels` option" rows.
 - mutation: `registryArchiveProblems`'s `.git` check, its missing-file check and its extra-file check each disabled → `ci-ipm-archive.test.ts` "a .git directory that tar did not exclude is refused" and "an extra file and a missing file are each refused, naming the file" (and the module.xml-under-a-subdirectory row, which uses the extra and missing branches).
 - mutation: one `server.json` `registryType` changed from `npm` to `pypi`, and `CONNECTION_VARIABLES`'s `IRIS_HOST` default changed to `localhost2` → `package-manifests.test.ts` "has a generated server.json that names its mcpName, package and version" and `story-42-8-plugin.test.ts` "the plugin's options, the registry listings' variables and client-config's CONNECTION_VARS are the same six variables, with the same defaults".
+
+**Code-review evidence and mutations (Rule 19, 2026-11-21).** Each mutation was applied, observed red, reverted; `git status --short` and `git diff` hashes were identical before and after the whole set.
+- Probe (Claude Code 2.1.330, scratch `CLAUDE_CONFIG_DIR`, non-repo cwd, no `sensitive` option): a stub plugin whose `.mcp.json` sets `IRIS_HOST` to `${user_config.p_host}` (default `fromplugin`), started by `claude mcp list` with `IRIS_HOST=fromshell IRIS_PORT=1234` exported, saw `IRIS_HOST=fromplugin` and `IRIS_PORT=1234`: the plugin's options win over exported variables and the rest are inherited, as the pack README says.
+- Probe (same setup): the `55ae0eb` pack (no `.claude-plugin/plugin.json`) installed from a directory marketplace succeeds as `Version: unknown` with no servers and no option prompt, and writes `enabledPlugins` (DW-707).
+- mutation: `publishIpm`'s `finally` no longer removes the work directory → `release-script.test.ts` "the deploy key and the known_hosts file are gone as soon as the channel ends ..." (`[true, true]`).
+- mutation: `name` dropped from the `server.json` endorsement fields, and separately the plugin keyword loop emptied → `pack-provenance.test.ts` "a name or a plugin keyword that claims endorsement is refused ...".
+- mutation: `runVerify` also runs `git push --dry-run` → `story-42-6-qa-gate-verify.test.ts` "... is reported for that package alone ..." (three rows: `['push', 'ls-remote']`).
+- mutation: `"isSecret": true` removed from `packages/iris-dev-mcp/server.json` → `package-manifests.test.ts` "... lists the six connection variables with the schema's keys ...".
+- mutation: `IPM_DIST_DEPLOY_KEY` removed from both `release-checks.mjs` and `release.yml` (the two still agree) → `release-workflow.test.ts` "publish alone holds the environment ..." (only that row red).
+- mutation: README "the 18 skills" → "the 17 skills" → `story-42-8-doc-claims.test.ts` "the root README's skill count for the plugin is the pack's ...".
+- mutation: the `[WARN]` loop in `cmdSkills` removed → `skills-cli-plugin.test.ts` "an unreadable settings file prints a [WARN] line ...".
+- mutation: the no-plugin report line without its `(checked ...)` list → `skills-cli-plugin.test.ts` "no plugin ... reports that no plugin was found and which three files were checked".
+- mutation: `publishMcpRegistry`'s fresh lookup after a failed publish ignored (`if (false)`) → `release-script.test.ts` "a publish that fails but whose fresh lookup says it is there (a race) ...".
 
 ## Auto Run Result
 

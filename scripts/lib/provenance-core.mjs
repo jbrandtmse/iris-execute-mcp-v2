@@ -425,8 +425,11 @@ function pluginProblems(inputs) {
     const label = plugin.manifest.path;
     if (manifest.name !== PLUGIN_NAME) add(label, `the plugin name is ${JSON.stringify(manifest.name)}, not ${JSON.stringify(PLUGIN_NAME)}`);
     for (const problem of nameProblems(manifest.name)) add(label, problem);
-    for (const field of ['displayName', 'description']) {
+    for (const field of ['name', 'displayName', 'description']) {
       for (const problem of endorsementProblems(field, manifest[field])) add(label, problem);
+    }
+    for (const keyword of Array.isArray(manifest.keywords) ? manifest.keywords : []) {
+      for (const problem of [...endorsementProblems('keyword', keyword), ...nameProblems(keyword).map((found) => found.replace(/^name /, 'keyword '))]) add(label, problem);
     }
     for (const problem of descriptionStartProblems(manifest.description)) add(label, problem);
   }
@@ -461,13 +464,13 @@ function pluginProblems(inputs) {
       for (const problem of endorsementProblems('description', entry.description)) add(label, problem);
     }
     for (const listed of entries) {
-      for (const problem of nameProblems(listed?.name)) add(label, problem);
+      for (const problem of [...nameProblems(listed?.name), ...endorsementProblems('name', listed?.name)]) add(label, problem);
     }
   }
 
   for (const file of plugin.serverJsons) {
     if (unreadable(file)) continue;
-    for (const field of ['title', 'description']) {
+    for (const field of ['name', 'title', 'description']) {
       for (const problem of endorsementProblems(field, file.value[field])) add(file.path, problem);
     }
     for (const problem of nameProblems(file.value.name)) add(file.path, problem);
