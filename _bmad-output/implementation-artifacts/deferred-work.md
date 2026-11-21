@@ -3471,6 +3471,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-10-19T22:31:15Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=re-disposition the three MCP-capable clients, rename or retire the stale rows, fix docsUrl, bump ADAPTER_DATA_VERSION with the certification table, before 1.0
 - 2026-10-20T02:12:59Z occurrence=41-7-skills-pack-docs-and-capstone by=cr note=PACK_TARGETS too: the gemini row's own note says Antigravity CLI replaced Gemini CLI for unpaid users; no row or id names it
 - 2026-10-20T12:12:41Z occurrence=43-2-serve-mcp-revision-2026-07-28 note=43.2 plan research 2026-10-20: pi MCP since 0.99.0 (stdio+streamable HTTP, ~/.pi/agent/mcp.json, .pi/mcp.json; npm now @earendil-works/pi-coding-agent); windsurf adapter may write a config Devin Desktop ignores (Cascade removed v3.9.19 2026-09-08; mcp_config.json legacy-Cascade-only); goose repo now aaif-goose/goose, docs goose-docs.ai
+- 2026-11-21T14:26:13Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=adapters.ts_re-dispositioned(decision_112:Pi,Junie_promoted;Kilo,Antigravity_roadmap;Devin_Desktop_rename_keeping_windsurf_path;Goose_win32_path_fixed;Kimi_CLI_archived,Roo_discontinued);ADAPTER_DATA_VERSION_bumped;Goose_mutation_red;15_docsUrl_200(QA,2026-11-21);CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-627: The default iris-mcp-all test sweep reaches a local IRIS: the live gates default to localhost:52773 / HSCUSTOM and run their legs whenever that instance answers, with no opt-in
 - source: _bmad-output/implementation-artifacts/spec-41-6-skills-and-rules-installer.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -3492,6 +3493,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 41.7 review 2026-10-20: the generated Skills pack targets table in packages/client-config/README.md; Cursor names .cursor/.claude/.codex skills, VS Code names .github/.claude skills; every other agents-route row states .agents/skills/
 - 2026-10-20T01:15:16Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=re-read both clients' skills docs with DW-626's re-dispositions, fix the two why texts in pack-targets.ts, re-render the table
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=PACK_TARGETS_cursor/vscode_why_text_names_.agents/skills;client-config_README_table_re-rendered;pack-targets.test.ts;CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-630: packages/client-config/package.json description still reads 'read-only foundation; writes arrive in Epic 33 Story 33.1' though the package writes client configs and installs the skills pack
 - source: _bmad-output/implementation-artifacts/spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3505,17 +3507,20 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 41.7 review 2026-10-20: the spec's Never list excludes docs/client-config/*; the em-dash heading's anchor is #read-only-mode--point-...; grep -c 'skills install' docs/client-config/*.md is 0
 - 2026-10-20T02:12:59Z status=wontfix-accepted owner=41-7-skills-pack-docs-and-capstone by=cr note=reopen_if=a story edits docs/client-config/*.md (42.9 install docs) and the three anchors or the missing installer pointer are still there
 - 2026-10-20T02:20:25Z status=routed owner=42-9-install-docs-and-client-re-certification by=lead note=reopened before 1.0: 42.9 rewrites the install docs (AC 42.9.1); fix the three docs/client-config anchors (#read-only-mode--point-...) and add the skills install pointer to docs/client-config pages
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=docs/client-config_anchors_fixed_and_skills_install_page_linked;widened_link_checker_red_on_broken_anchor(mutation);CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-632: qa-41-7-doc-links checks only the 9 documents Story 41.7 changed; a repo-wide run of its checker finds broken relative links elsewhere (packages/shared/README.md:108 #server-manager-connections-iris_server_manager, three docs/known-bugs-* links, and the docs/client-config anchors of DW-631)
 - source: spec-41-7-skills-pack-docs-and-capstone.md | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: 41.7 review 2026-10-20: the same checker over git ls-files '*.md' (130 files, _bmad and .claude excluded) reported 13 broken links before the review's 4 fixes
 - 2026-10-20T02:13:05Z status=wontfix-accepted owner=41-7-skills-pack-docs-and-capstone by=cr note=reopen_if=a user-facing README or docs/ page outside CHANGED_DOCS ships a broken relative link or anchor that a user reports or a doc story finds
 - 2026-10-20T02:20:25Z status=routed owner=42-9-install-docs-and-client-re-certification by=lead note=reopened before 1.0: run the qa-41-7-doc-links checker repo-wide (git ls-files *.md minus _bmad/.claude), fix the broken links it reports (packages/shared/README.md:108, the docs/known-bugs-* links), and widen the test's document set so it pins them
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=qa-41-7-doc-links_widened_to_every_reader_*.md;untracked/gitignored_targets_count_as_broken(review_M8);mutations_red;CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-633: The IRIS_ACCEPT_LANGUAGE docs (README.md:77, http-client.ts:183-193) describe a per-worker message-table mechanism the header does not affect, but %CSP.REST re-matches the message language from the header on every request; tool_support.md:21 also calls the Utils prefix-stripping English/Arabic-only and unmodified
 - source: _bmad-output/implementation-artifacts/spec-41-8-epic-41-burn-down.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 41.8 plan + implement 2026-10-20: irislib/%CSP/REST.cls:149-151 MatchLanguage per request (UseSession=0); live MatchLanguage(fr)=fr; tool_support.md:21 stale after StripErrorPrefix
 - 2026-10-20T03:43:34Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=rewrite the IRIS_ACCEPT_LANGUAGE paragraph and tool_support.md:21 against the per-request model and the 15-language StripErrorPrefix
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=IRIS_ACCEPT_LANGUAGE_docs_rewritten_to_per-request_model_and_15-language_StripErrorPrefix;CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-634: BaseTest:TestAllSixteenHandlersExtendBase pins 16 ExecuteMCPv2.REST handlers but 19 exist (MessageSearch, MessageBody, Coverage added later), so the OS test is red at HEAD
 - source: _bmad-output/implementation-artifacts/spec-41-8-epic-41-burn-down.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3648,6 +3653,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 43.3 plan
 - 2026-10-20T23:38:03Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=AC 42.9.3 aligns the PRD with what shipped
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=prd.md_tool_counts_corrected(110_tools+iris_server_profiles)_and_distribution_section_rewritten;counts_pinned_to_tools-list_snapshot(review_M5);CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-656: The HTTP client clears its timeout once response headers arrive, so a stalled body read is unbounded, and an abort by destroy() is reported as TIMEOUT
 - source: _bmad-output/implementation-artifacts/spec-43-3-human-confirmation-through-elicitation.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3679,6 +3685,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: _bmad-output/implementation-artifacts/spec-43-4-sdk-v2-docs-smokes-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: 43.4 plan inventory 2026-10-20: story-40-4-doc-claims.test.ts:216-217, story-39-4/39-1/39-5 doc-claims
 - 2026-10-21T03:57:59Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=re-measure the payload table in the 42.9 README rewrite and move its doc-claims pins with it
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=README_payload_table_re-measured_2026-11-21;doc-claims_pins_moved(mutation_98907->98908_red);CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-662: The iris_message_resend description, its maxMessages schema text and the interop README still say executing needs both dryRun false and confirm true or the call is refused, and that an over-cap count is refused, though MessageResend.cls refuses only when dryRun is false and previews when dryRun is omitted
 - source: _bmad-output/implementation-artifacts/spec-43-4-sdk-v2-docs-smokes-and-capstone.md | severity: low | fix-risk: low | footprint: out-of-footprint
@@ -3698,6 +3705,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 42.1 plan probe: local install of the packed meta-package; README.md:73, packages/iris-*-mcp/README.md:31, packages/iris-mcp-all/README.md:69 vs packages/shared/src/config.ts:162-169
 - 2026-10-21T13:14:16Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=fix with the AC 42.9.1 README rewrite
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=IRIS_USERNAME_documented_as_required_in_every_README;doc-claims_mutation_red;CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-665: Each package keeps a tracked CHANGELOG.md that changeset version fills, but pnpm pack does not ship it (files lists only dist, plus skills-pack for client-config); published 1.0.0 tarballs would carry no changelog
 - source: spec-42-1-pre-publish-package-fixes.md | severity: low | fix-risk: low | footprint: in-epic
@@ -3854,6 +3862,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-4-ipm-package-revival.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: 42.4 plan probe; nothing calls Setup.Uninstall() on the IPM path
 - 2026-10-22T13:06:14Z status=routed owner=42-9-install-docs-and-client-re-certification by=harvest note=two-way door for the docs story: state the manual cleanup in the IPM uninstall docs (or wire an Unconfigure Invoke to Setup.Uninstall if cheap)
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=IPM_uninstall_docs_state_the_manual_cleanup(web_app_and_%ALL_mapping);Unconfigure_invoke_declined(decision_119);CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-691: A failed IPM-ownership read (guard document 5xx or timeout) logs the unreadable-marker warning: it says the deployed marker could not be read, names SQL as the privilege to check, suggests deleting Setup, and drops the deployedVersion it had read
 - source: spec-42-4-ipm-package-revival.md | severity: low | fix-risk: low | footprint: in-story
@@ -3923,6 +3932,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: extension.ts clients cwd falls back to os.homedir() (DW-663, decision #98); client-config adapters.ts:124-135 Cursor user=~/.cursor/mcp.json, project=.cursor/mcp.json; clients.ts:165 has no project-dir==home guard
 - 2026-11-21T06:43:42Z status=decision-pending owner=burndown by=cr note=product call: refuse/flag project scope when the project dir is home, or document the alias
 - 2026-11-21T06:50:16Z status=routed owner=42-9-install-docs-and-client-re-certification by=lead note=decision_100:refuse_project-scope_write_when_project_dir_resolves_to_home(clear_message:open_a_folder_or_use_user_scope);regression_test_on_Cursor_and_every_adapter_whose_project_and_user_paths_can_alias
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=home_guard_refuses_every_project-scope_write,diff,skills_install|uninstall_when_project_dir_resolves_to_home(realpath,case-fold);QA_50_process_rows_on_real_files;mutations_red;CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-703: The first Open VSX publish with OVSX_PAT unset falls back to --trusted-publishing, which cannot work for a not-yet-existing extension, and fails after npm and the Marketplace already published
 - source: spec-42-7-vs-code-extension-publish.md | severity: low | fix-risk: med | footprint: in-story
@@ -3944,6 +3954,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: med | fix-risk: low | footprint: in-epic
 - evidence: cmdSkills is the only caller of detectClaudeCodePlugin; install --client claude-code and doctor never consult it, and README:225 says only 'instead', so a user with existing iris-*-mcp entries who adds the plugin gets every tool twice with two credential sets
 - 2026-11-21T11:24:10Z status=routed owner=42-9-install-docs-and-client-re-certification by=cr note=42.9 install docs: tell users to remove installer or hand-written entries when switching to the plugin; doctor may warn
+- 2026-11-21T14:26:14Z status=resolved-by:42-9-install-docs-and-client-re-certification by=adjudication note=doctor_claude-code-plugin-duplicates(exit_1);CLAUDE_CONFIG_DIR-aware_user_scope(review_M1,live_cc_2.1.330);install_docs_remove-old-entries_lead;mutations_red;CI_green_https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/44911467997
 
 ### DW-707: Marketplace on main pins ref v1.0.0, whose pack has no plugin.json: an install before v1.1.0 fails (no tag) or silently yields a skills-only plugin
 - source: spec-42-8-claude-code-plugin-and-registry-listings.md | severity: low | fix-risk: low | footprint: in-story
