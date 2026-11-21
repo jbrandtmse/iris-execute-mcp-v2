@@ -239,6 +239,8 @@ The code review of 2026-11-21 (frozen diff `19eaf1a..c87662a`) is recorded under
 
 ## Spec Change Log
 
+- **2026-11-21, decision #128 (owner via the Planner; DW-719, DW-720): the seam this story closes without.** The owner cannot register the Marketplace publisher `iris-mcp` until they have a verified domain, so O1 and O2 do not happen for v1.1.0, and Open VSX waits with the Marketplace. AC 42.7.2's "both channels enabled" is amended: `RELEASE_CHANNELS` ships `vscode-marketplace` with `enabled: false, enabledBy: 'owner: publisher needs a verified domain (DW-719)'`, so a release reports it `skipped: not enabled (…)` and Open VSX, IPM and the MCP Registry still run; Open VSX stays enabled and skips as not set up. The docs say the extension is not on either store yet and installs from `iris-mcp-launcher-<version>.vsix` on the tag's GitHub Release, which the maintainer attaches by hand for now (DW-720 automates it). **This story closes with the seam open:** DW-719 (decision-pending, owner-blocked) owns the verified domain, O1, O2 and O4 for both stores, the flip back to `enabled: true`, the store-install docs and the first store publish. The code paths for both stores stay built and tested (the credential matrix and the process-level rows run them with the channel on).
+
 ## Review Triage Log
 
 ### 2026-11-21 — Review pass

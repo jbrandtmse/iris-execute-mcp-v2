@@ -6,10 +6,11 @@ All notable changes to the IRIS MCP Launcher VS Code extension are documented in
 
 ### Changed
 
-- **The extension is published to the Visual Studio Marketplace and to Open VSX** (Story 42.7), as `iris-mcp.iris-mcp-launcher`: the
-  publisher is `iris-mcp` (the Marketplace publisher id and the Open VSX namespace), `package.json` carries `"private": true`
-  so that `npm publish` can never send it to npm, and the release workflow is the only way it is published. The first store
-  release is the first release after `1.0.0`, which publishes the npm packages only.
+- **The extension is ready for the Visual Studio Marketplace and Open VSX, but not on them yet** (Story 42.7), as
+  `iris-mcp.iris-mcp-launcher`: the publisher is `iris-mcp` (the Marketplace publisher id and the Open VSX namespace),
+  `package.json` carries `"private": true` so that `npm publish` can never send it to npm, and the release workflow is the
+  only way it is published. The release's Marketplace channel is off until the publisher is registered, and Open VSX is
+  skipped until its namespace exists (DW-719), so 1.1.0 installs from the vsix attached to the `v1.1.0` GitHub Release.
 - **The extension's version equals the shared `@iris-mcp/*` version** (Story 42.7, the lockstep policy): `pnpm run version` stamps the
   manifest and the lock and renames the `## [Unreleased]` heading of this file to `## [<version>] — <date>`, and the release
   refuses a manifest, a lock or a heading that is off the release version.

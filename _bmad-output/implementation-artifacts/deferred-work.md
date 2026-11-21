@@ -4019,3 +4019,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-8-amendment-122-ipm-from-main.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: packages/iris-mcp-all/src/__tests__/ci-ipm-archive.test.ts lines 181,244,306,898,1090,1133,1186,1199,1359-1361 (20dcc72)
 - 2026-11-21T16:43:12Z status=wontfix-accepted owner=42-8-claude-code-plugin-and-registry-listings by=cr note=reopen_if=a version-step commit goes red on a class-count literal
+
+### DW-719: The VS Code extension is on neither store: the Marketplace channel is off (enabledBy names DW-719) and Open VSX skips as not set up, until the owner registers the publisher iris-mcp, which needs a verified domain
+- source: spec-42-7-vs-code-extension-publish.md | severity: low | fix-risk: low | footprint: out-of-footprint
+- evidence: scripts/lib/release-core.mjs RELEASE_CHANNELS vscode-marketplace enabled:false enabledBy 'owner: publisher needs a verified domain (DW-719)'; owner steps O1 (Marketplace publisher iris-mcp, Open VSX namespace), O2 (Marketplace trusted-publishing policy, OVSX_PAT), O4 (Open VSX trusted publisher) not done; v1.1.0 ships the vsix on the GitHub Release by hand
+- 2026-11-21T20:50:02Z status=decision-pending owner=burndown by=planner note=human=owner: verified domain, then O1/O2 for both stores, then flip enabled:true, docs back to store install, the first store publish; seam documented in 42.7
+
+### DW-720: The release does not attach the vsix to the tag's GitHub Release: the maintainer does it by hand (gh release create, notes from the CHANGELOG section, sha256 checked against manifest.json)
+- source: spec-42-7-vs-code-extension-publish.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: release.yml has no github-release channel or job and no contents: write; Planner fallback for v1.1.0 (2026-11-21); sizing: new channel or job, workflow declaration, 5->6 channel pins, README table
+- 2026-11-21T20:50:02Z status=decision-pending owner=burndown by=planner note=build as its own story: a separate github-release job after publish with contents: write and no id-token; already-published = success on re-run; red proof and dry run
