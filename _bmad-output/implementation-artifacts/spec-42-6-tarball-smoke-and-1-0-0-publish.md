@@ -470,7 +470,7 @@ Also in force: decision #82 (tags on `main` only, the owner's ruling) and decisi
   - `@iris-mcp` read and write;
   - bypass 2FA;
   - at most 7 days, so create it within a day or two of the tag.
-- **At A4:** authorization for one throwaway container (decision 4).
+- **At A4:** nothing: the Lead's test-container authorization already covers the throwaway (decision #88).
 - **At B5:** the approval (Review deployments).
 - **After B7:** revoke and delete the token.
 - **Before the next release:** the trusted-publisher configuration (decision 5).
@@ -650,7 +650,7 @@ Every test added or changed passes on a fresh environment, in either order, and 
 *Phase A, on `epic42`, after the story commit (decision #83):*
 1. **A1.** Push the story commit to `origin/epic42`. CI is green; record the run id.
 2. **A2. Dry run.** Run `git push origin <sha>:refs/heads/release-dry-run/42-6`. Expected:
-   - `ci-gate`: the environment is protected, the line `not on main (ahead); a tag run stops here`, and CI green;
+   - `ci-gate`: the environment is protected, the line `ci-gate: commit <sha> is not on main (compare: ahead); a tag run stops here`, and CI green;
    - `prepare`: "8 packages at 1.0.0, no pending changeset"; every check `ok`, `check:provenance` and `validate:prompts` included; 8 prepublish suites; 8 tarballs at `1.0.0`; the smoke, the vsix and the IPM tree;
    - `rehearse`: 8 `npm publish --dry-run` lines;
    - `publish`: skipped.
@@ -683,7 +683,7 @@ Every test added or changed passes on a fresh environment, in either order, and 
 3. **B3. The token.** The owner confirms `NPM_TOKEN` exists on `release`. A GET of `repos/<owner>/<repo>/environments/release/secrets` lists names only.
 4. **B4. Tag.** `git tag -a v1.0.0 M -m "1.0.0"`, then `git push origin v1.0.0`.
 5. **B5. Watch the run.** Expected:
-   - `ci-gate`: on main (`identical`), the environment protected, CI green on M;
+   - `ci-gate`: the line `ci-gate: commit <sha> is on main (compare: identical)`, the environment protected, CI green on M;
    - `prepare`: release v1.0.0, 8 packages at 1.0.0;
    - `rehearse`: 8 dry-run lines.
    - Then the owner approves through **Review deployments**.
@@ -693,6 +693,7 @@ Every test added or changed passes on a fresh environment, in either order, and 
    - eight `1.0.0` lines with provenance;
    - `npx -y @iris-mcp/dev@1` answers `initialize` with `1.0.0`.
    - Also check each package page on npmjs.com for the provenance badge.
+   - On the decision #75 fallback path (some packages published interactively), `verify` exits 1 by design, naming exactly the packages without provenance. Record that output as the AD-29 exception; do not expect exit 0.
 8. **B8. The token, and trusted publishing.** The owner revokes the token and deletes the `NPM_TOKEN` secret. Record the action item: `npm trust github` for the eight packages within 48 h before 42.7's release, then "require 2FA and disallow tokens" (decision 5).
 9. **B9.** Record every URL and result above. Story 42.6 closes on B7.
 
