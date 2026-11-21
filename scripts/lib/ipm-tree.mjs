@@ -170,12 +170,16 @@ export function ipmTreeFiles(embed) {
   return files;
 }
 
-/** Every file under `directory` (which may not exist), relative to it, with forward slashes, in sorted order. */
+/**
+ * Every file under `directory` (which may not exist), relative to it, with forward slashes, in sorted order. A `.DS_Store` (macOS
+ * Finder's folder metadata, which `.gitignore` keeps out of every commit) is not a file of the tree.
+ */
 function filesUnder(directory) {
   if (!existsSync(directory)) return [];
   const found = [];
   const walk = (current, prefix) => {
     for (const entry of readdirSync(current, { withFileTypes: true })) {
+      if (entry.name === '.DS_Store') continue;
       const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
       if (entry.isDirectory()) walk(path.join(current, entry.name), relative);
       else found.push(relative);
@@ -243,6 +247,8 @@ export function ipmTreeProblems(root, options = {}) {
   }
   const preloaded = named.filter((resource) => resource.preload);
   const classResources = named.filter((resource) => !resource.preload);
+  const repeated = [...new Set(named.map((resource) => resource.name).filter((name, index, all) => all.indexOf(name) !== index))];
+  if (repeated.length > 0) problems.push(`${IPM_MANIFEST_FILE} declares the resource ${repeated.join(', ')} more than once, which the generator never writes. ${REPAIR}`);
   if (preloaded.length !== 1) problems.push(`${IPM_MANIFEST_FILE} declares ${preloaded.length} preloaded resources; the generator writes exactly one, the install guard.`);
   if (declared.name === undefined || declared.version === undefined) problems.push(`${IPM_MANIFEST_FILE} declares no <Name> or no <Version>.`);
   if (options.moduleName !== undefined && declared.name !== options.moduleName) {

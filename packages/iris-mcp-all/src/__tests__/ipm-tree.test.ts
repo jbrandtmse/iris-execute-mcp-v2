@@ -20,8 +20,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { bootstrapRoster } from "../../../../scripts/ci-seed-throwaway.mjs";
-import { ipmTreeMarker, ipmTreeProblems, readIpmTree } from "../../../../scripts/lib/ipm-tree.mjs";
+import { ipmTreeMarker, ipmTreeProblems, manifestDeclarations, readIpmTree } from "../../../../scripts/lib/ipm-tree.mjs";
 import { REPO_ROOT } from "../../../../scripts/lib/live-gate-scan.mjs";
 import { copyGeneratorInputs, copyIpmTree } from "../../../shared/src/__tests__/gen-bootstrap-scratch";
 
@@ -57,11 +56,12 @@ describe("the committed tree is unedited generator output (the real repository)"
     expect(ipmTreeProblems(REPO_ROOT), "and with the default shared version read from packages/shared/package.json").toEqual([]);
   });
 
-  it("holds one class file per class of classes[], the guard and nothing else under preload/, and no root requirements.txt", () => {
+  it("holds one class file per class resource of its own module.xml (never the moving classes[] roster), the guard and nothing else under preload/, and no root requirements.txt", () => {
     const tree = readIpmTree(REPO_ROOT);
+    const classResources = manifestDeclarations(tree.manifest ?? "").resources.filter((resource) => !resource.preload);
 
-    expect([...tree.sourceFiles.keys()].filter((file) => file.endsWith(".cls"))).toHaveLength(bootstrapRoster().names.length);
-    expect(bootstrapRoster().names.length, "the roster literal was read").toBeGreaterThan(0);
+    expect(classResources.length, "the manifest's resources were read").toBeGreaterThan(0);
+    expect([...tree.sourceFiles.keys()].filter((file) => file.endsWith(".cls")).sort()).toEqual(classResources.map((resource) => `ipm/src/cls/${resource.name.replace(/\.CLS$/, "").split(".").join("/")}.cls`).sort());
     expect([...tree.sourceFiles.keys()].every((file) => file.startsWith("ipm/src/cls/ExecuteMCPv2/") && file.endsWith(".cls"))).toBe(true);
     expect([...tree.preloadFiles.keys()]).toEqual([GUARD]);
     expect(tree.hasRequirements).toBe(false);
@@ -86,10 +86,17 @@ describe("the committed tree is unedited generator output (the real repository)"
   });
 
   it("loses no file to .gitignore: a clean checkout holds every file of the tree (the ExecuteMCPv2.Coverage package sits under a `Coverage/` path)", () => {
-    const run = spawnSync("git", ["ls-files", "--others", "--ignored", "--exclude-standard", "--", "module.xml", "ipm/src", "preload"], { encoding: "utf8", cwd: REPO_ROOT });
+    const run = spawnSync("git", ["-c", "core.ignorecase=true", "ls-files", "--others", "--ignored", "--exclude-standard", "--", "module.xml", "ipm/src", "preload"], { encoding: "utf8", cwd: REPO_ROOT });
 
     expect(run.status, run.stderr).toBe(0);
     expect(run.stdout.trim().split("\n").filter((line) => line !== ""), "tree files that git ignores").toEqual([]);
+    // Committed tree files that an ignore rule matches: the version step's `git add` of a regenerated tree would leave such a file
+    // out (and a new one would never be committed), so no tracked tree file may match one. Matched case-insensitively on every host,
+    // as on the macOS and Windows checkouts that run the version step (`coverage/` matches `Coverage/` there, not on Linux CI).
+    const tracked = spawnSync("git", ["-c", "core.ignorecase=true", "ls-files", "--cached", "--ignored", "--exclude-standard", "--", "module.xml", "ipm/src", "preload"], { encoding: "utf8", cwd: REPO_ROOT });
+
+    expect(tracked.status, tracked.stderr).toBe(0);
+    expect(tracked.stdout.trim().split("\n").filter((line) => line !== ""), "committed tree files that an ignore rule matches").toEqual([]);
   });
 
   it("is registered as the root script gen:ipm:check and written by gen:ipm, and prettier never reformats it", () => {
@@ -172,6 +179,21 @@ describe("each tamper row is refused, naming the path, the version or the marker
     expect(problems.join("\n")).toContain("module.xml declares 1 <Resource> with no Name, which the generator never writes.");
   });
 
+  it("a <Resource> line repeated by hand, with the header's counts edited to match, is refused: the re-rendering repeats it and the file map absorbs it", () => {
+    const root = scratchTree();
+    const line = '<Resource Name="ExecuteMCPv2.REST.Coverage.CLS"/>';
+    const manifest = read(root, "module.xml");
+    const indent = /\n([ \t]*)<Resource Name="ExecuteMCPv2\.REST\.Coverage\.CLS"\/>/.exec(manifest)?.[1] ?? "";
+    const counts = /(\d+) resources: the preloaded ExecuteMCPv2\.InstallGuard and the (\d+) classes/.exec(manifest);
+    expect(counts, "the header states the counts").not.toBeNull();
+    const recounted = manifest.replace(counts![0], `${Number(counts![1]) + 1} resources: the preloaded ExecuteMCPv2.InstallGuard and the ${Number(counts![2]) + 1} classes`);
+    write(root, "module.xml", recounted.replace(line, `${line}\n${indent}${line}`));
+
+    expect(ipmTreeProblems(root, { sharedVersion: SHARED_VERSION })).toEqual([
+      "module.xml declares the resource ExecuteMCPv2.REST.Coverage.CLS more than once, which the generator never writes. Run pnpm gen:ipm -- --force from a clean version commit, or restore it from git.",
+    ]);
+  });
+
   it("a module.xml that names another module is refused when the name is given", () => {
     const root = scratchTree();
     write(root, "module.xml", read(root, "module.xml").replace(/<Name>iris-execute-mcp-v2<\/Name>/, "<Name>other-module</Name>"));
@@ -193,6 +215,17 @@ describe("each tamper row is refused, naming the path, the version or the marker
     expect(ipmTreeProblems(root, { sharedVersion: SHARED_VERSION })).toEqual([
       "ipm/src/cls/ExecuteMCPv2/Extra.cls is not a resource of module.xml: the tree holds a file the generator did not write. Remove it, or restore the tree from git.",
     ]);
+  });
+
+  it("a macOS .DS_Store under ipm/src or preload/ (ignored by git, never committed) is not a file of the tree, while any other dotfile is", () => {
+    const root = scratchTree();
+    write(root, "ipm/src/cls/ExecuteMCPv2/.DS_Store", "\u0000\u0000\u0000\u0001Bud1");
+    write(root, "preload/.DS_Store", "\u0000\u0000\u0000\u0001Bud1");
+
+    expect(ipmTreeProblems(root, { sharedVersion: SHARED_VERSION })).toEqual([]);
+
+    write(root, "preload/.hidden", "x");
+    expect(ipmTreeProblems(root, { sharedVersion: SHARED_VERSION }).join("\n")).toContain("preload/.hidden is under preload/");
   });
 
   it("a test or fixture class in the tree is refused, naming the path", () => {

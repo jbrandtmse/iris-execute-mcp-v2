@@ -560,7 +560,7 @@ describe("registryArchiveProblems over a real `tar czf` of a whole repository th
 
   it("a class the module lists but the archive lacks is refused, naming it", () => {
     const problems = judged((repo) => rmSync(path.join(repo, "ipm/src/cls/ExecuteMCPv2/Utils.cls")));
-    expect(problems).toEqual(["the archive is missing the module member ipm/src/cls/ExecuteMCPv2/Utils.cls. Commit it, or restore it with pnpm gen:ipm."]);
+    expect(problems).toEqual(["the archive is missing the module member ipm/src/cls/ExecuteMCPv2/Utils.cls. Commit it, or restore it from git (pnpm gen:ipm -- --force only from a clean version commit)."]);
   });
 
   it("a preload/ file other than the guard is refused, naming it, even when the repository's listing does not list it", () => {
@@ -672,8 +672,11 @@ describe("treeExpectations reads what the served leg installs from the committed
 
   it("answers the tree's marker, version, module name and resource count: a tree that moved apart from the embed gives its own values", () => {
     const wants = treeExpectations(otherTree());
+    // The committed tree is frozen between releases and moves at the version step, so its resource count is read, never written down.
+    const committedResources = manifestDeclarations(readFileSync(path.join(REPO_ROOT, "module.xml"), "utf8")).resources.length;
 
-    expect(wants).toEqual({ marker: "9.9.9+7.aaaaaaaaaaaa", semver: "9.9.9", moduleName: "iris-execute-mcp-v2", classCount: 35 });
+    expect(committedResources, "the committed module.xml's resources were read").toBeGreaterThan(1);
+    expect(wants).toEqual({ marker: "9.9.9+7.aaaaaaaaaaaa", semver: "9.9.9", moduleName: "iris-execute-mcp-v2", classCount: committedResources - 1 });
     expect(wants.marker, "not the embed's").not.toBe(BOOTSTRAP_VERSION);
   });
 

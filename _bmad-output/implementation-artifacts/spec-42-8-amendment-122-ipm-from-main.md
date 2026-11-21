@@ -272,6 +272,20 @@ deferred:
 - Given a release rehearsal, then the IPM line reads `ready (manual step after the tag: …)`, the run's exit is not affected by IPM, and no IPM secret is referenced.
 - Given `release.mjs verify --version <v>` before the owner's Release, then IPM is `pending` and does not fail verify. After it, the served archive must equal `git archive v<v>`.
 
+### Review Findings
+
+Code review of b8eaebf (iteration 3, 2026-11-21; frozen diff `cr-42-8-r122-scoped.patch`; all four layers delivered). Patched: the entries below (one high, two medium, the rest low, by their first word); the rest rejected or closed (the last bullet). Mutation lines: Verification, part 4.
+- [x] [Review][Patch] HIGH (Rule 6): `verifyIpm` compares only the module's files while AD-29 said the whole served archive must equal the tag. Spine AD-29 now states the scoped rule and its reason (every file an install reads is compared; the rest is `main` at the press); the lead records the decision row. [ARCHITECTURE-SPINE.md AD-29]
+- [x] [Review][Patch] MED: `ipm-tree.test.ts` counted the frozen tree's classes against the moving `classes[]` roster, so a class added between releases turned the default suite red; it now reads the tree's own `module.xml`. [ipm-tree.test.ts]
+- [x] [Review][Patch] MED: the `.gitignore` pin could no longer fail (`--others` skips tracked files, and Linux CI matches `coverage/` case-sensitively); it also checks `--cached --ignored` with `core.ignorecase=true`. [ipm-tree.test.ts]
+- [x] [Review][Patch] LOW: verify rows for a `module.xml` byte change at the same `<Version>`, no `module.xml`, a guard byte change and a stray `preload/` file; every listed-version failure asserts it never reads `pending`. [release-script.test.ts]
+- [x] [Review][Patch] LOW: README states the scoped-verify rule plainly (Releasing), step 5 names the owner's IPM press, and the CI `ipm` line names the served leg; the parent spec's `verify` line and AD-29 Binds (root `module.xml`, `preload/`) follow. [README.md, parent spec, spine]
+- [x] [Review][Patch] LOW: three repair hints said `run pnpm gen:ipm`, which refuses at the shared version; they now say restore from git or `--force` from a clean version commit. [ipm-archive.mjs, ci-ipm-archive.mjs]
+- [x] [Review][Patch] LOW: a repeated `<Resource>` (header counts edited to match) passed `gen:ipm:check`; it is now refused. A macOS `.DS_Store` under the tree no longer fails the check. [ipm-tree.mjs]
+- [x] [Review][Patch] LOW: `treeExpectations`' expected count read from the committed `module.xml`, not a literal; the "only GETs" test records the method; Rule 19 lines for `already published` and verify's unreadable-registry `pending`. [ci-ipm-archive.test.ts, release-script.test.ts]
+- [x] [Review][Patch] LOW: the owner note "until then `main`'s root module carries 1.0.0 with post-1.0.0 classes" was false (the tree marker equals `v1.0.0`'s); the wait is restated as a release-order choice. [this spec, Design Notes]
+- Closed: the dry-run staleness note's marker wording (`by-design`, matrix row); a forgotten IPM press leaving `zpm "install … <v>"` empty until the press (`by-design`, #121/#125); served-leg parity between releases and the freshness hint naming `pnpm run version` (duplicates of pass-1 E3 and E2); IPM not shown as a manual step after an earlier channel fails (`by-design`: a failed release is not pressed); a link under `preload/` (duplicate of pass-1 B7, false); the embed-derived class-count literals in `ci-ipm-archive.test.ts` (`wontfix-accepted`, move with the embed at class-add time); the stale amendment Acceptance line and matrix wording (spec under review; the Spec Change Log governs); `CLAUDE.md` and rule #18 not naming the stamped tree as output (agent-context files, reported to the lead).
+
 ## Design Notes
 
 **Governing ADs (Rule 6):**
@@ -374,7 +388,7 @@ The lead amended the spine (AD-14, AD-29, the capability map) at this gate for #
   3. Tick **"Publish in Package Manager"**. Save, and send for approval if Open Exchange asks, because an edit to a published app is re-approved.
   4. Press **Release**. Enter version **`1.1.0`**, which must equal `<Version>` in the root `module.xml` of `main`, and paste the `[1.1.0]` section of `CHANGELOG.md` as the release notes.
   5. After the approval, tell the lead. The lead runs `pnpm release verify --version 1.1.0` (the IPM line turns `ok`) and the C3 install.
-- **Every later release:** after its tag, press Release on the same listing with the new version, before the next version commit reaches `main`. Do not tick "Publish in Package Manager" or press Release before `v1.1.0`: until then `main`'s root module carries 1.0.0 with post-1.0.0 classes.
+- **Every later release:** after its tag, press Release on the same listing with the new version, before the next version commit reaches `main`. Do not tick "Publish in Package Manager" or press Release before `v1.1.0`: the README names 1.1.0 as the first version on the IPM registry, the first release with the IPM channel. (The committed tree carries `1.0.0+2.244fe8623c76`, which equals `v1.0.0`'s `BOOTSTRAP_VERSION`, so an earlier press would publish 1.0.0's own content; the wait is a release-order choice, not a content defect.)
 - **Never create a `master` branch in `jbrandtmse/iris-execute-mcp-v2`:** the registry reads `…/master/module.xml`, which today redirects to `main`.
 - **No other owner setup.** There is no repository, deploy key or secret to create, and O-IPM1 is cancelled. If an `IPM_DIST_DEPLOY_KEY` secret was already added to the `release` environment, delete it.
 
@@ -528,6 +542,18 @@ The lead amended the spine (AD-14, AD-29, the capability map) at this gate for #
 - mutation: the step-shape problem in `release-workflow-check.ts` no longer prints what it found (`step N differs`) → K "no IPM secret, deploy key, pinned host key or ssh option is in release.yml ..." red, which the former `not.toEqual([])` alone left green (P6).
 - mutation: the tree writer skips the first class (`[...embed.classes].slice(1)`) → B "--ipm on a repository with no tree (the first generation ...)" red; a class dropped from the `classes[]` literal of `gen-bootstrap.mjs` → T "holds one class file per class of classes[] ..." red (P7).
 - mutation: the `.gitignore` negation `!ipm/src/cls/ExecuteMCPv2/Coverage/` removed (the `coverage/` pattern then ignores `ipm/src/cls/ExecuteMCPv2/Coverage/Job.cls` and `Runner.cls`, so a clean checkout would lack two tree files) → T "loses no file to .gitignore ..." red, naming both files; restored (finalizer, found at staging).
+
+**Mutation evidence, part 4 (code review, iteration 3).** Each line was applied as an exact, once-only text replacement, the named test file (or `-t` slice) was run in `@iris-mcp/all` with the `UNARMED` environment, and the file was restored and compared by sha-1 (byte-identical every time; `git status` and the working diff were unchanged around each batch). Test files: `release-script.test.ts` (R), `ipm-tree.test.ts` (T), `story-42-8-doc-claims.test.ts` (D), `ci-ipm-archive.test.ts` (A).
+- mutation: `moduleMemberEntries` drops the root `module.xml` → R "listed, but the served archive has a module.xml that differs by one byte at the same <Version>" and "... no module.xml at all" red. Drops `preload/` → R "... the guard missing", "... a stamped guard that differs by one byte", "... a stray file under preload/" red. Drops `ipm/src` → R "... a class that differs by one byte", "... a file the tag does not hold" red.
+- mutation: `archiveEqualityProblems` byte comparison removed (`else if (false)`) → R the class, `module.xml` and guard one-byte rows red.
+- mutation: `verifyIpm`'s `failed` returns a `pending` line with no problem → R 13 listed rows red (every differing-member row, the version row, the local-tag row, the three archive-download rows, the no-address row). `failed` keeps the problem but its line reads `pending` → R 11 rows red on "never `pending`".
+- mutation: the duplicate-resource check in `ipmTreeProblems` turned off → T "a <Resource> line repeated by hand, with the header's counts edited to match, is refused" red. The `.DS_Store` skip removed → T "a macOS .DS_Store under ipm/src or preload/ ... is not a file of the tree" red.
+- mutation: the `.gitignore` negation `!ipm/src/cls/ExecuteMCPv2/Coverage/` removed (the files tracked) → T "loses no file to .gitignore ..." red (the `--cached` assertion, case-insensitive on every host).
+- mutation: README's scoped-verify paragraph says `by name` instead of byte for byte → D "states the scoped-verify rule plainly ..." red. `moduleMemberEntries` also selects `README.md` → the same D row red (the documented member set is the code's).
+- mutation: `treeExpectations` counts one resource too many → A "answers the tree's marker, version, module name and resource count ..." red.
+- mutation: `ipmOutcome` ignores a listing (`if (false)`) → R "a registry that lists the version ... is `already published`", "... reads `ready (would be already published)`" and the MCP Registry rehearsal row red.
+- mutation: `verifyIpm` returns a problem for an unreadable registry → R the three "a registry that cannot be read (...) is `pending (could not read the registry ...)`" rows red.
+- mutation: the IPM registry read sent as a `POST` → R "the IPM channel reads no secret ... the only requests it makes are GETs of the registry" red.
 
 **Shared surfaces:**
 - The root `package.json` scripts: `prepare`'s check set, and the CI root-gate list in `ci-checks.mjs`.

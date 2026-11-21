@@ -276,7 +276,7 @@ export function registryArchiveProblems(entries, moduleMembers) {
   // The stamped guard is required whatever the repository lists: IPM preloads only what is under <module root>/preload.
   const guard = guardTreePath(GUARD_DOCUMENT);
   for (const member of [...new Set([IPM_MANIFEST_FILE, guard, ...moduleMembers.map(normalizeMember)])].sort()) {
-    if (!files.has(member)) problems.push(`the archive is missing the module member ${member}. Commit it, or restore it with pnpm gen:ipm.`);
+    if (!files.has(member)) problems.push(`the archive is missing the module member ${member}. Commit it, or restore it from git (pnpm gen:ipm -- --force only from a clean version commit).`);
   }
   if (files.has('requirements.txt')) {
     problems.push('the archive holds requirements.txt at its top: IPM runs pip install -r on it when it installs the module. Remove it from the repository root.');
@@ -364,7 +364,7 @@ export function treeExpectations(repoRoot) {
     throw new Error(`${IPM_MANIFEST_FILE} is missing from the repository root: run pnpm gen:ipm.`);
   }
   const declared = manifestDeclarations(manifest);
-  if (marker === undefined) throw new Error(`the stamped install guard under ${IPM_PRELOAD_PREFIX}/ is missing or carries no marker: run pnpm gen:ipm.`);
+  if (marker === undefined) throw new Error(`the stamped install guard under ${IPM_PRELOAD_PREFIX}/ is missing or carries no marker: restore the tree from git, or run pnpm gen:ipm -- --force from a clean version commit.`);
   if (declared.name === undefined || declared.version === undefined) throw new Error(`${IPM_MANIFEST_FILE} declares no <Name> or no <Version>.`);
   return { marker, semver: declared.version, moduleName: declared.name, classCount: declared.resources.length };
 }

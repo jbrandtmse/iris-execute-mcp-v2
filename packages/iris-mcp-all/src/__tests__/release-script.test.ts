@@ -690,7 +690,9 @@ function newWorld(options: { publisher?: string; vsixVersion?: string } = {}): P
   };
   const fetchImpl = fakeFetch(github, (url, init) => {
     if (!url.startsWith("https://pm.community.intersystems.com/")) return storeAnswerFor(stores, url, init);
-    registry.requests.push(url);
+    // A GET is recorded as its address alone; any other method carries its name, so a non-GET never equals a read.
+    const method = init?.method ?? "GET";
+    registry.requests.push(method === "GET" ? url : `${method} ${url}`);
     return new URL(url).pathname.startsWith("/download/") ? (registry.archive ?? { status: 599, body: { message: `no route for ${url}` } }) : registry.answer;
   });
   return {
@@ -2389,11 +2391,16 @@ describe("verify: the registry after a publish, read-only (AC 42.6.3)", () => {
       ["a class that differs by one byte", (directory: string) => appendFileSync(path.join(directory, "ipm/src/cls/ExecuteMCPv2/Utils.cls"), "x"), "ipm/src/cls/ExecuteMCPv2/Utils.cls differs between the registry's archive and git archive v1.0.0."],
       ["the guard missing from the served archive", (directory: string) => rmSync(path.join(directory, "preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls")), "the registry's archive is missing preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls, which git archive v1.0.0 holds."],
       ["a file the tag does not hold (a later commit's class, pressed after the version commit)", (directory: string) => writeFileSync(path.join(directory, "ipm/src/cls/ExecuteMCPv2/Later.cls"), "Class ExecuteMCPv2.Later {}\n"), "the registry's archive holds ipm/src/cls/ExecuteMCPv2/Later.cls, which git archive v1.0.0 does not."],
-    ] as Array<[string, (directory: string) => void, string]>)("listed, but the served archive has %s: exit 1, a failing problem naming the member", async (_label, change, expected) => {
+      ["a module.xml that differs by one byte at the same <Version>", (directory: string) => appendFileSync(path.join(directory, "module.xml"), "x"), "module.xml differs between the registry's archive and git archive v1.0.0."],
+      ["no module.xml at all", (directory: string) => rmSync(path.join(directory, "module.xml")), "the registry's archive is missing module.xml, which git archive v1.0.0 holds."],
+      ["a stamped guard that differs by one byte", (directory: string) => appendFileSync(path.join(directory, "preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls"), "x"), "preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls differs between the registry's archive and git archive v1.0.0."],
+      ["a stray file under preload/ that the tag does not hold", (directory: string) => writeFileSync(path.join(directory, "preload/Stray.cls"), "Class Stray {}\n"), "the registry's archive holds preload/Stray.cls, which git archive v1.0.0 does not."],
+    ] as Array<[string, (directory: string) => void, string]>)("listed, but the served archive has %s: exit 1, a failing problem naming the member, and never `pending`", async (_label, change, expected) => {
       const repo = tagRepo();
       const { world, run } = listedWorld(ipmRegistryHit("1.0.0"), ipmArchiveAnswer(servedArchive(repo, change)), repo);
       expect(await run()).toBe(1);
       const text = world.lines.join("\n");
+      expect(text, "a listed version is settled: a differing module fails, it never reads as pending").not.toContain("on IPM: pending");
       expect(text).toContain(`verify: jbrandtmse/iris-execute-mcp-v2 on IPM: the module in the archive the registry serves for 1.0.0 is not v1.0.0's: ${expected}`);
       expect(text).toContain("Press Release before another version commit reaches main, or ask the registry to republish.");
       expect(text).not.toContain("from the v1.0.0 commit");
@@ -2428,6 +2435,7 @@ describe("verify: the registry after a publish, read-only (AC 42.6.3)", () => {
       const { world, run, downloads } = listedWorld(ipmRegistryHit("1.0.0"), ipmArchiveAnswer(servedArchive(repo)), repo);
       expect(await run()).toBe(1);
       expect(world.lines.join("\n")).toContain("on IPM: the local tag v1.0.0 is missing, so the served archive cannot be compared. Fetch the tags (git fetch --tags), then run verify again.");
+      expect(world.lines.join("\n")).not.toContain("on IPM: pending");
       expect(downloads()).toEqual([]);
     });
 
@@ -2435,12 +2443,13 @@ describe("verify: the registry after a publish, read-only (AC 42.6.3)", () => {
       ["a 404 for the archive", { status: 404 }, /the registry's archive https:\/\/pm\.community\.intersystems\.com\/download\/iris-execute-mcp-v2\/-\/iris-execute-mcp-v2-1\.0\.0\.tgz answered HTTP 404\. Run verify again\./],
       ["a network error for the archive", { status: 0, fail: "socket hang up" }, /could not be downloaded \(socket hang up\)\. Run verify again\./],
       ["an archive that is not a gzip file", { status: 200, contentType: "text/html", raw: "<html>not an archive</html>" }, /the registry's archive could not be read \(the archive is not a gzip file/],
-    ] as Array<[string, FakeAnswer, RegExp]>)("listed, with %s: exit 1 with a problem that says what to do, never `ok`", async (_label, archive, expected) => {
+    ] as Array<[string, FakeAnswer, RegExp]>)("listed, with %s: exit 1 with a problem that says what to do, never `ok` and never `pending`", async (_label, archive, expected) => {
       const repo = tagRepo();
       const { world, run } = listedWorld(ipmRegistryHit("1.0.0"), archive, repo);
       expect(await run()).toBe(1);
       expect(world.lines.join("\n")).toMatch(expected);
       expect(world.lines.join("\n")).not.toContain(OK);
+      expect(world.lines.join("\n")).not.toContain("on IPM: pending");
     });
 
     it("listed, but the answer gives no archive address: exit 1 naming the registry's page", async () => {

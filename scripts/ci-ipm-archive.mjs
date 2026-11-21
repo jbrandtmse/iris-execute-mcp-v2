@@ -571,7 +571,7 @@ export function startRun(options = {}) {
       const problems = embedProblems(embed);
       if (problems.length > 0) throw new Error(problems.join(' '));
       treeWants = treeExpectations(repoRoot);
-      if (treeWants.moduleName !== embed.moduleName) throw new Error(`the committed module.xml names the module ${JSON.stringify(treeWants.moduleName)}, not the embed's ${JSON.stringify(embed.moduleName)}: run pnpm gen:ipm.`);
+      if (treeWants.moduleName !== embed.moduleName) throw new Error(`the committed module.xml names the module ${JSON.stringify(treeWants.moduleName)}, not the embed's ${JSON.stringify(embed.moduleName)}: restore the tree from git, or run pnpm gen:ipm -- --force from a clean version commit.`);
     } catch (error) {
       say(`refusing to run: ${error instanceof Error ? error.message : String(error)}`);
       return 2;

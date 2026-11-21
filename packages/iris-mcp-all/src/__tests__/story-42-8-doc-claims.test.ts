@@ -13,6 +13,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { moduleMemberEntries } from "../../../../scripts/lib/ipm-archive.mjs";
 import { MCP_PUBLISHER, RELEASE_CHANNELS } from "../../../../scripts/lib/release-core.mjs";
 import { MARKETPLACE_NAME, PACK_DIR, PLUGIN_NAME } from "../../../../scripts/lib/skills-pack.mjs";
 import { REPO_ROOT } from "./pack-fixture";
@@ -96,6 +97,16 @@ describe("the Releasing table (Rules #30, #51: the default state is derived from
     expect(RELEASING).toContain("the module in the archive it serves (the root `module.xml`, `ipm/src` and `preload`) must equal `git archive v<MAJOR.MINOR.PATCH>` member for member and byte for byte, the rest of that archive being `main` at the press and not compared");
     expect(RELEASING).toContain("press Release before another version commit reaches `main`, or ask the registry to republish");
     expect(RELEASING).toContain("`pnpm release verify --version <v>` turns IPM from `pending` to `ok`");
+  });
+
+  it("states the scoped-verify rule plainly: every file an install reads is compared, and why the rest of the served archive is not (decision #122)", () => {
+    expect(RELEASING).toContain("**What `verify` checks for IPM, and why only the module.**");
+    expect(RELEASING).toContain("the root `module.xml` and every file under `ipm/src` and `preload/`, byte for byte, with no file missing and none extra, and the served `module.xml` must carry the release's version");
+    expect(RELEASING).toContain("Those are every file an IPM install reads, so a served module that differs from the tag in any byte fails `verify`.");
+    expect(RELEASING).toContain("the registry packages `main` at the moment the owner presses Release, not the tag");
+    // The paragraph names the members the code compares: the root module.xml and everything under ipm/src and preload, nothing else.
+    const names = ["module.xml", "ipm/src/cls/A.cls", "ipm/src/other.txt", "preload/ipm/src/cls/G.cls", "README.md", "ipm/preload/G.cls", "src/A.cls", "packages/x.ts"];
+    expect(moduleMemberEntries(names.map((name) => ({ name, type: "file" }))).map((entry: { name: string }) => entry.name)).toEqual(["module.xml", "ipm/src/cls/A.cls", "ipm/src/other.txt", "preload/ipm/src/cls/G.cls"]);
   });
 
   it("step 1 says the version step writes the root module.xml and the stamped IPM tree, and prepare says it refuses a stale tree (decision #122)", () => {
