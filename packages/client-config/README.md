@@ -303,11 +303,11 @@ never hand-edit this section.
 
 | Client | Format | Root key | User config | Project config | Disable | Restart hint | Certification |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Claude Code (`claude-code`) | json | `mcpServers` | `~/.claude.json` (or $CLAUDE_CONFIG_DIR/.claude.json) | `.mcp.json` | manager stash | Restart Claude Code (or start a new session) for MCP changes to take effect. | **certified-live** 2026-07-28 (incl. agent CLI probe) |
+| Claude Code (`claude-code`) | json | `mcpServers` | `~/.claude.json` (or $CLAUDE_CONFIG_DIR/.claude.json) | `.mcp.json` | manager stash | Restart Claude Code (or start a new session) for MCP changes to take effect. | **certified-live** 2026-11-22 (incl. agent CLI probe) against @iris-mcp/dev@1 → 1.1.0 |
 | Claude Desktop (`claude-desktop`) | json | `mcpServers` | win `%APPDATA%/Claude/claude_desktop_config.json`<br>mac `~/Library/Application Support/Claude/claude_desktop_config.json`<br>linux `~/.config/Claude/claude_desktop_config.json` | — | manager stash | Quit and relaunch Claude Desktop for MCP changes to take effect. | fixture-only (residual risk)<br>human-only (marked 2026-11-21): after apply --client claude-desktop and a restart, the tools menu lists the server and one read call succeeds |
 | Cursor (`cursor`) | json | `mcpServers` | `~/.cursor/mcp.json` | `.cursor/mcp.json` | manager stash | Restart Cursor (or refresh the server from the MCP settings page) for changes to take effect. | fixture-only (residual risk)<br>human-only (marked 2026-11-21): Settings > MCP shows the server green with its tools |
-| VS Code (Copilot) (`vscode`) | jsonc | `servers` | win `%APPDATA%/Code/User/mcp.json`<br>mac `~/Library/Application Support/Code/User/mcp.json`<br>linux `~/.config/Code/User/mcp.json` | `.vscode/mcp.json` | manager stash | Reload the VS Code window (Developer: Reload Window) or restart the server from the MCP view for changes to take effect. | **certified-live** 2026-07-28 (file-level; agent-side GUI stays manual)<br>human-only (marked 2026-11-21): in Copilot agent mode the iris_* tools are listed and one read call (for example iris_server_info) succeeds |
-| Cline (`cline`) | json | `mcpServers` | win `%APPDATA%/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`<br>mac `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`<br>linux `~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | — | native `disabled` flag | Reload the VS Code window (Developer: Reload Window) for Cline to pick up MCP changes. | **certified-live** 2026-07-28 (file-level; agent-side GUI stays manual)<br>human-only (marked 2026-11-21): the Cline panel shows iris-dev-mcp with its tools |
+| VS Code (Copilot) (`vscode`) | jsonc | `servers` | win `%APPDATA%/Code/User/mcp.json`<br>mac `~/Library/Application Support/Code/User/mcp.json`<br>linux `~/.config/Code/User/mcp.json` | `.vscode/mcp.json` | manager stash | Reload the VS Code window (Developer: Reload Window) or restart the server from the MCP view for changes to take effect. | **certified-live** 2026-11-22 (file-level; agent-side GUI stays manual) against @iris-mcp/dev@1 → 1.1.0<br>human-only (marked 2026-11-21): in Copilot agent mode the iris_* tools are listed and one read call (for example iris_server_info) succeeds |
+| Cline (`cline`) | json | `mcpServers` | win `%APPDATA%/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`<br>mac `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`<br>linux `~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | — | native `disabled` flag | Reload the VS Code window (Developer: Reload Window) for Cline to pick up MCP changes. | **certified-live** 2026-11-22 (file-level; agent-side GUI stays manual) against @iris-mcp/dev@1 → 1.1.0<br>human-only (marked 2026-11-21): the Cline panel shows iris-dev-mcp with its tools |
 | Roo Code (discontinued) (`roo-code`) | json | `mcpServers` | win `%APPDATA%/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json`<br>mac `~/Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json`<br>linux `~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json` | `.roo/mcp.json` | native `disabled` flag | Reload the VS Code window (Developer: Reload Window) for Roo Code to pick up MCP changes. | fixture-only (residual risk) |
 | Devin Desktop (formerly Windsurf) (`windsurf`) | json | `mcpServers` | `~/.codeium/windsurf/mcp_config.json` | — | manager stash | Restart Devin Desktop (formerly Windsurf) for MCP changes to take effect. | fixture-only (residual risk)<br>human-only (marked 2026-11-21): Devin Local shows the server from the legacy ~/.codeium/windsurf/mcp_config.json, which also confirms the import |
 | Codex CLI (`codex`) | toml | `mcp_servers` | `~/.codex/config.toml` | `.codex/config.toml` | native `enabled` flag | Start a new Codex CLI session for MCP changes to take effect. | fixture-only (residual risk)<br>human-only (marked 2026-11-21): codex mcp list (or the client's equivalent) shows iris-dev-mcp |
@@ -363,19 +363,19 @@ GUI tool listing is never claimed by the harness (33-5-15).
 
 #### Claude Code (`claude-code`)
 
-**certified-live** (2026-07-28, win32/x64) — scripted pass via `scripts/certify.mjs` (server used: `iris-dev-mcp`): add (engine apply) → client surfaces the entry → disable → entry inactive → remove → byte-exact restore + side-effect cleanup.
+**certified-live** (2026-11-22, darwin/arm64) — scripted pass via `scripts/certify.mjs` (server used: `iris-dev-mcp`, against `@iris-mcp/dev@1 → 1.1.0`): add (engine apply) → client surfaces the entry → disable → entry inactive → remove → byte-exact restore + side-effect cleanup.
 
 Recorded evidence:
-- PASS snapshot — config 139 bytes; state.json absent; 0 pre-existing backup(s)
-- PASS add (engine apply) — iris-dev-mcp written to C:\Users\Josh\AppData\Local\Temp\qa334-cert-home-M2ea0w\.claude.json
+- PASS snapshot — config 37 bytes; state.json absent; 0 pre-existing backup(s)
+- PASS add (engine apply) — iris-dev-mcp written to /private/tmp/claude-501/-Users-jbrandt-git-iris-execute-mcp-v2/03eb9a39-2d9e-4087-85ac-363a9bb86d2a/scratchpad/cert-home/.claude/.claude.json
 - PASS client surfaces the entry — `claude mcp list` listed the manager-written entry "iris-dev-mcp"
-- $ claude mcp list → iris-dev-mcp: npx -y @iris-mcp/dev - × Failed to connect — -32000: MCP error -32000: Connection closed
+- $ claude mcp list → iris-dev-mcp: npx -y @iris-mcp/dev@1 - ✔ Connected
 - PASS disable (engine)
 - PASS entry inactive after disable — state = absent
 - PASS remove (engine)
 - PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass
 
-Residual risk: The npx launch target of the certified entry (@iris-mcp/dev) was unpublished as of 2026-07-28, so the client health check reported 'Failed to connect' for the manager-written entry; sibling node-dist entries at the same path/rootKey showed '√ Connected' in the same 'claude mcp list' run. Re-run scripts/certify.mjs after the first npm publish for the full tool-listing leg. The sharing probe below wrote an iris-mcp-all entry; @iris-mcp/all is a meta-package with no bin, so that entry never starts, published or not.
+Residual risk: Certified against the published @iris-mcp/dev@1 (1.1.0): claude mcp list (Claude Code 2.1.330) showed the manager-written iris-dev-mcp entry Connected to a harness throwaway IRIS for Health. The pass ran under a scratch HOME and CLAUDE_CONFIG_DIR, so the user-scope .claude.json was a seeded scratch file, not a person's real config. The sharing probe below is the 2026-07-28 one: it wrote an iris-mcp-all entry, and @iris-mcp/all is a meta-package with no bin, so that entry never starts.
 
 Repo `.mcp.json` sharing (Claude half, AC 33.4.4): **verified-live** (2026-07-28) — manager wrote iris-mcp-all at project scope into a scratch dir .mcp.json; claude mcp list (2.1.220) in that dir showed: iris-mcp-all: npx -y @iris-mcp/all - Pending approval, with the MCP config diagnostics naming the exact scratch .mcp.json path.
 
@@ -393,37 +393,37 @@ Repo `.mcp.json` sharing (Claude half, AC 33.4.4): **verified-live** (2026-07-28
 
 #### VS Code (Copilot) (`vscode`)
 
-**certified-live** (2026-07-28, win32/x64) — scripted pass via `scripts/certify.mjs` (server used: `iris-mcp-all`): add (engine apply) → client surfaces the entry → disable → entry inactive → remove → byte-exact restore + side-effect cleanup.
+**certified-live** (2026-11-22, darwin/arm64) — scripted pass via `scripts/certify.mjs` (server used: `iris-dev-mcp`, against `@iris-mcp/dev@1 → 1.1.0`): add (engine apply) → client surfaces the entry → disable → entry inactive → remove → byte-exact restore + side-effect cleanup.
 
 Recorded evidence:
-- PASS snapshot — config 0 bytes; state.json present; 2 pre-existing backup(s)
-- PASS add (engine apply) — iris-mcp-all written to C:\Users\Josh\AppData\Roaming\Code\User\mcp.json
-- PASS client surfaces the entry — file-level: "iris-mcp-all" present-enabled (agent-side tool listing stays a manual GUI step — not claimed)
-- $ iris-mcp-clients status --json → vscode iris-mcp-all = present-enabled
+- PASS snapshot — config 20 bytes; state.json absent; 0 pre-existing backup(s)
+- PASS add (engine apply) — iris-dev-mcp written to /private/tmp/claude-501/-Users-jbrandt-git-iris-execute-mcp-v2/03eb9a39-2d9e-4087-85ac-363a9bb86d2a/scratchpad/cert-home/Library/Application Support/Code/User/mcp.json
+- PASS client surfaces the entry — file-level: "iris-dev-mcp" present-enabled (agent-side tool listing stays a manual GUI step — not claimed)
+- $ iris-mcp-clients status --json → vscode iris-dev-mcp = present-enabled
 - PASS disable (engine)
 - PASS entry inactive after disable — state = absent
 - PASS remove (engine)
 - PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass
 
-Residual risk: File-level lifecycle certified live; the agent-side tool listing (Copilot MCP view) is a manual GUI step that stays OPEN as AC 33.3.4 for the Project Lead — never claimed here. The certified entry was iris-mcp-all, whose npx launch target (@iris-mcp/all) is a meta-package with no bin: it never starts, published or not, and is no longer a managed server — re-run scripts/certify.mjs against a leaf server (iris-dev-mcp) after the first npm publish.
+Residual risk: File-level lifecycle certified live with iris-dev-mcp against the published @iris-mcp/dev@1 (1.1.0), under a scratch HOME (a seeded scratch mcp.json, not a person's real config). The agent-side tool listing (the Copilot MCP view) is a manual GUI step, never claimed here: it is the human-only check below (DW-442).
 
 **human-only (marked 2026-11-21): in Copilot agent mode the iris_* tools are listed and one read call (for example iris_server_info) succeeds**
 
 #### Cline (`cline`)
 
-**certified-live** (2026-07-28, win32/x64) — scripted pass via `scripts/certify.mjs` (server used: `iris-mcp-all`): add (engine apply) → client surfaces the entry → disable → entry inactive → remove → byte-exact restore + side-effect cleanup.
+**certified-live** (2026-11-22, darwin/arm64) — scripted pass via `scripts/certify.mjs` (server used: `iris-dev-mcp`, against `@iris-mcp/dev@1 → 1.1.0`): add (engine apply) → client surfaces the entry → disable → entry inactive → remove → byte-exact restore + side-effect cleanup.
 
 Recorded evidence:
-- PASS snapshot — config 2683 bytes; state.json present; 2 pre-existing backup(s)
-- PASS add (engine apply) — iris-mcp-all written to C:\Users\Josh\AppData\Roaming\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json
-- PASS client surfaces the entry — file-level: "iris-mcp-all" present-enabled (agent-side tool listing stays a manual GUI step — not claimed)
-- $ iris-mcp-clients status --json → cline iris-mcp-all = present-enabled
+- PASS snapshot — config 23 bytes; state.json absent; 0 pre-existing backup(s)
+- PASS add (engine apply) — iris-dev-mcp written to /private/tmp/claude-501/-Users-jbrandt-git-iris-execute-mcp-v2/03eb9a39-2d9e-4087-85ac-363a9bb86d2a/scratchpad/cert-home/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
+- PASS client surfaces the entry — file-level: "iris-dev-mcp" present-enabled (agent-side tool listing stays a manual GUI step — not claimed)
+- $ iris-mcp-clients status --json → cline iris-dev-mcp = present-enabled
 - PASS disable (engine)
 - PASS entry inactive after disable — state = present-disabled
 - PASS remove (engine)
 - PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass
 
-Residual risk: File-level lifecycle certified live incl. the native 'disabled' flag round-trip; the agent-side tool listing (Cline MCP UI) is a manual GUI step — never claimed here. The certified entry was iris-mcp-all, whose npx launch target (@iris-mcp/all) is a meta-package with no bin: it never starts, published or not, and is no longer a managed server — re-run scripts/certify.mjs against a leaf server (iris-dev-mcp) after the first npm publish.
+Residual risk: File-level lifecycle certified live, including the native disabled-flag round-trip, with iris-dev-mcp against the published @iris-mcp/dev@1 (1.1.0), under a scratch HOME (a seeded scratch cline_mcp_settings.json, not a person's real config). The agent-side tool listing (the Cline MCP UI) is a manual GUI step, never claimed here: it is the human-only check below.
 
 **human-only (marked 2026-11-21): the Cline panel shows iris-dev-mcp with its tools**
 
