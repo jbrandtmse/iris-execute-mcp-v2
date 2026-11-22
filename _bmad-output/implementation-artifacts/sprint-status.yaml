@@ -560,8 +560,8 @@ development_status:
   43-4-sdk-v2-docs-smokes-and-capstone: done
   epic-43-retrospective: optional
 
-  epic-44: backlog
-  44-1-docdb-create-registers-the-database: ready-for-dev
+  epic-44: in-progress
+  44-1-docdb-create-registers-the-database: in-progress
   44-2-vs-code-copilot-mcp-configuration-targets: backlog
   44-3-confirmation-bound-to-the-scope-shown: backlog
   44-4-bootstrap-compile-result-accuracy: backlog
