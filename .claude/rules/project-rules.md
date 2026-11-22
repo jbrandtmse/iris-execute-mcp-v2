@@ -24,6 +24,7 @@ Specs, story files, and plans are fallible about what exists and how it behaves.
 - (#3) `Config.*` = persistent CPF config; `SYS.*` = live runtime state; `Security.*` = authz (always %SYS). Handlers often must JOIN them (database list = `Config.Databases` for config + `SYS.Database` for Size/Mounted).
 - (#4) Check `[Deprecated]` before reading/writing a property — deprecated ones can be SELECT-able but stale/disconnected from the live replacement (`Security.SSLConfigs.Protocols` → `TLSMinVersion`/`TLSMaxVersion`). Use and note the replacement.
 - (#5) `$ZU(...)` counters are per-PROCESS. Instance-wide: `SYS.Stats.Global.Sample()` (RefLocal+RefPrivate+RefRemote), `SYS.Stats.Routine.Sample().RtnCommands`; cross-check the Mgmt Portal dashboard; system totals must be monotonically increasing.
+- Embedded SQL (`&sql(...)`) is compiled when it first RUNS, not when the class compiles: a clean class compile proves nothing about it — execute the path once. A `%SQL.Statement` result from a `%SYS` class query must be closed before switching back to the original namespace (the legacy `%ResultSet` the REST handlers use is unaffected). (Story 41.4 live probes, DW-615.)
 
 ## #6 — `%All` super-role short-circuit
 
@@ -32,7 +33,7 @@ Specs, story files, and plans are fallible about what exists and how it behaves.
 ## #7 — I/O redirect + single-response dispatch (REST handlers)
 
 When capturing Write output via `ReDirectIO(1)`:
-- **Fully restore before rendering:** `Do ##class(%Library.Device).ReDirectIO(0)` then bare `Use tInitIO` — note `Use tInitIO::("")` is a NO-OP that does not clear the mnemonic. A still-active redirect sends the JSON envelope into the capture buffer ("non-JSON response").
+- **Fully restore before rendering:** `Do ##class(%Library.Device).ReDirectIO(0)` then bare `Use tInitIO` — note `Use tInitIO::("")` is NOT a substitute: it clears the mnemonic but leaves redirection ON, so the next `Write` raises `<COMMAND>` (IRIS 2026.2, Story 41.2 probe P11). A still-active redirect sends the JSON envelope into the capture buffer ("non-JSON response").
 - **Exactly ONE `RenderResponseBody` per request:** never render inside a Catch AND on the success path — argumentless `Quit` inside `Catch {}` exits only the catch body, falls through, and the success render clobbers the error envelope. Pattern: set an error flag in Catch (no render), restore I/O unconditionally after Try/Catch, then a single If/Else dispatch.
 
 ## #8 / #9 / #13 / #33 — Error-text / SanitizeError discipline
@@ -69,10 +70,11 @@ Review grep: `\$Get\([a-zA-Z_]+\.` — any hit is suspect.
 ## #17 — `iris_doc_load` requires a glob-prefixed path
 
 The class name is derived from the directory prefix BEFORE the first glob metacharacter. Always `c:/git/iris-execute-mcp-v2/src/**/Name.cls` (or `src/**/*.cls`); a bare file path collapses the class to `User.<stem>`.
+- A `Setup.cls` hand-loaded from `src/` stamps the `dev` marker (`BOOTSTRAPVERSION = "dev"`), which the bootstrap treats as FOREIGN (AD-14) and never upgrades: the namespace (the shared HSCUSTOM included) stays at `dev`. After a hand-load, delete the class `ExecuteMCPv2.Setup` in that namespace and restart the MCP server so the bootstrap redeploys the stamped release classes. (DW-678)
 
 ## #18 / #24 / #39 — Bootstrap & generated artifacts
 
-- (#18) Generated files are OUTPUT-ONLY (`bootstrap-classes.ts`, any `*.generated.*`): fix the SOURCE and re-run the generator; hand-edits die at the next regen. Checked-in ≠ editable — the DO-NOT-EDIT header is the signal.
+- (#18) Generated files are OUTPUT-ONLY (`bootstrap-classes.ts`, any `*.generated.*`, and the stamped IPM tree: the root `module.xml`, `ipm/src/**` and `preload/**`): fix the SOURCE and re-run the generator; hand-edits die at the next regen. Checked-in ≠ editable — the DO-NOT-EDIT header is the signal. The IPM tree is written ONLY by the release version step (`pnpm run version`, which runs `gen:ipm`), so `main` holds the last release's content; check it with `pnpm gen:ipm:check`, never regenerate it mid-story. (DW-717)
 - (#24) Editing a bootstrapped class regenerates the embed IN THE SAME STORY (`pnpm run gen:bootstrap`; record `BOOTSTRAP_VERSION` from→to — it is a content hash and moves per change). "Defer the bump to a closing story" is incompatible with the drift test; the closing story verifies IDEMPOTENCE (regen produces no diff), it never performs a deferred bump.
 - (#39) A NEW bootstrapped `.cls` goes into BOTH hand-maintained rosters: `scripts/gen-bootstrap.mjs` `classes[]` (ordered; `REST/Dispatch.cls` stays last) AND `packages/shared/src/__tests__/bootstrap.test.ts` (classPaths roster + expected-names + count). `gen:bootstrap` regenerates content only — it does NOT update rosters. `ExecuteMCPv2.Tests.*` test/fixture classes stay OUT of the manifest.
 

@@ -7,12 +7,17 @@ The %UnitTest.TestCase class provides these STANDARD macros (must use triple dol
 - `$$$AssertEquals(actual, expected, description)` - Assert two values are equal
 - `$$$AssertNotEquals(actual, expected, description)` - Assert two values are not equal  
 - `$$$AssertTrue(condition, description)` - Assert condition is true
+- `$$$AssertNotTrue(condition, description)` - Assert condition is false (the real negative assertion)
 - `$$$AssertStatusOK(status, description)` - Assert status is $$$OK
 - `$$$AssertStatusNotOK(status, description)` - Assert status is not $$$OK
+- `$$$AssertStatusEquals(status, expected, description)` - Assert a status equals an expected status
+- `$$$AssertSuccess(message)`, `$$$AssertFailure(message)`, `$$$AssertSkipped(message)` - Log an unconditional pass, fail or skip
+- `$$$AssertFilesSame(...)`, `$$$AssertFilesSQLUnorderedSame(...)` - Compare output files
+- Source of truth: `irislib/%outUnitTest.inc`
 
 ### IMPORTANT: Non-existent Macros
 These macros DO NOT exist in %UnitTest.TestCase:
-- ~~$$$AssertFalse~~ - Use `$$$AssertTrue('condition, description)` instead
+- ~~$$$AssertFalse~~ - Use `$$$AssertNotTrue(condition, description)` instead
 - ~~$$$AssertCondition~~ - Use `$$$AssertTrue(condition, description)` instead
 
 ### Macro vs Method Distinction
@@ -63,18 +68,15 @@ Method %OnNew(initvalue As %String = "") As %Status
 **Key %OnNew Requirements:**
 1. **MUST accept initvalue parameter**: The parent %UnitTest.TestCase requires this
 2. **MUST call ##super(initvalue)**: Pass initvalue to parent constructor
-3. **NO Private keyword**: ERROR #5477 - %OnNew cannot be Private
+3. **NO Private keyword**: ERROR #5477 - an override cannot be Private when the parent's %OnNew is public, as it is in %UnitTest.TestCase (verified by live probe, Story 41.2)
 4. **Check parent status**: Always check if ##super() succeeded
 
-### MultiDimensional Property Restrictions
-**CRITICAL**: MultiDimensional properties CANNOT have datatype specifications:
+### MultiDimensional Properties
+A MultiDimensional property MAY carry a datatype; both forms compile (system classes use the typed form, e.g. `irislib/%Library/AbstractResultSet.cls`: `Property Data As %String [ MultiDimensional ];`). (Verified by live probe, Story 41.2.)
 
 ```objectscript
-// INCORRECT - causes compilation error
-Property MyData As %String [ MultiDimensional ];
-
-// CORRECT - no datatype for MultiDimensional
 Property MyData [ MultiDimensional ];
+Property Data As %String [ MultiDimensional ];
 ```
 
 ### Common Compilation Issues
@@ -82,8 +84,7 @@ Property MyData [ MultiDimensional ];
 2. **Undefined macros**: Using non-existent macros like $$$AssertFalse or $$$AssertCondition
 3. **Method vs Macro confusion**: Using ..AssertX() instead of $$$AssertX()
 4. **Parameter underscores**: Class parameters cannot contain underscores
-5. **Private %OnNew**: ERROR #5477 - Constructor cannot have Private keyword
-6. **MultiDimensional datatypes**: Cannot specify datatype for MultiDimensional properties
+5. **Private %OnNew**: ERROR #5477 - an override cannot be Private when the parent's %OnNew is public (as in %UnitTest.TestCase)
 
 ### Runtime Issues
 1. **UNDEFINED errors in %OnNew**: Usually missing initvalue parameter handling
