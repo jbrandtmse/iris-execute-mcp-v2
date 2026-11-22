@@ -4096,3 +4096,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-1-docdb-create-registers-the-database.md | severity: low | fix-risk: low | footprint: in-story
 - evidence: docdb.ts create path: 25051 then a register 404 or network error returns registrationFailure(created:false); README/changeset say already-defined is unchanged when the record is present
 - 2026-11-22T19:38:23Z status=by-design owner=44-1-docdb-create-registers-the-database by=cr note=spec matrix row Repair fails: 25051 plus a failed register returns the failure text with created:false
+
+### DW-731: The launcher extension's mcpServerDefinitionProvider servers reach a Copilot-harness session without connection settings or credentials
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: extension.ts:660-700 provides McpStdioServerDefinition(label,command,args,{}) and adds IRIS_* only in resolveMcpServerDefinition; VS Code 1.147.0 forwards the provided launch as is (workbench qls/PVn), the resolver runs only on a Local start; docs: do not rely on an interactive resolver during background forwarding (fetched 2026-11-22)
+- 2026-11-22T21:49:01Z status=routed owner=44-6-launcher-provider-works-in-copilot-sessions by=harvest note=owner ruling, decision #134: Story 44.6 fixes it; its vsix ships with the end-of-epic release (manual attach)
+
+### DW-732: Story 44.2's patch changeset removes four public exports of @iris-mcp/client-config (ensureInputs, presentInputIds, VscodeInput, VSCODE_PASSWORD_INPUT_ID)
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: packages/client-config/src/index.ts no longer exports them (Spec Change Log 3); an external importer breaks on a patch upgrade
+- 2026-11-22T21:49:01Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=harvest note=lead: keep the patch bump (decision #133) and make it semver-true by keeping the four exports as @deprecated re-exports that still work; for the code review to patch
+
+### DW-733: The client-config ownership ledger is keyed (client, scope, name) with no file path, so a claude-code project record from one project counts as a sharing owner in another project's .mcp.json
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: state.ts:123-135 sameSlot/isManagerCreated ignore the path; shared-files.ts ownerClients reads them for the Story 44.2 shared-file rule; effect: vscode adopts-or-conflicts where a fresh write was right
+- 2026-11-22T21:49:01Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=harvest note=keying is pre-existing; the new shared-file rule is what reads it across projects; code review to patch within the state format if fix-risk allows, else re-own with the residual
