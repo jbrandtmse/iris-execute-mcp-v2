@@ -3744,6 +3744,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-11-storage-guard-on-every-document-write.md | severity: med | fix-risk: high | footprint: out-of-footprint
 - evidence: 42.11 cr: server-base.ts confirmOnWire (2133-2143) proceeds on an echoed state matching tool+args hash without recomputing the scope; env-promote.ts executeAction re-runs preflightClassSteps every round, so round two's planned drops are never compared with round one's dialog
 - 2026-10-21T19:52:11Z status=escalated owner=burndown by=cr note=decision sheet: bind a scope digest into the confirmation state (shared helper, all six gates; an AD-34 amendment) or accept the dialog-window race
+- 2026-11-22T07:02:04Z status=dropped by=merge_gate note=action_item:epic-42-retro-item-4-charter-a-story-in-the-next-planned-epic (epic-42 close, decision #130; no next epic is planned, so the item waits in sprint-status action_items)
 
 ### DW-671: The QA live gate story-42-11-qa-live-gate.test.ts copies the write-paths gate's ~90-line cleanup and fixture skeleton verbatim (listFixtureGlobals, killFixtureGlobals, listFixtureDocuments, removeFixtures, createFixture, beforeAll/afterAll), a pattern now repeated across six dev live gates
 - source: spec-42-11-storage-guard-on-every-document-write.md | severity: low | fix-risk: med | footprint: in-story
@@ -3796,6 +3797,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-2-bootstrap-downgrade-guard.md | severity: med | fix-risk: low | footprint: out-of-footprint
 - evidence: 42.2 cr: AD-14 dev=foreign; .claude/rules project-rules #17 loads src/**/*.cls; the in-story hints (2 prepublish-gate.mjs, 3 gate skip texts) were reworded by cr; the rule files are the Lead's
 - 2026-10-22T01:48:34Z status=decision-pending owner=burndown by=cr note=human=Lead: add to Rule #17 that a hand-loaded Setup.cls pins dev; delete ExecuteMCPv2.Setup and restart after
+- 2026-11-22T07:02:04Z status=dropped by=merge_gate note=action_item:epic-42-retro-item-5-lead-add-to-project-rule-17-that-a-setup (epic-42 close, decision #130; no next epic is planned, so the item waits in sprint-status action_items)
 
 ### DW-679: The family-C live gates each carry the same ~20-line probe block (loadConfig, ping, negotiateVersion, buildToolContext, catch) instead of one shared helper
 - source: spec-42-2-bootstrap-downgrade-guard.md | severity: low | fix-risk: med | footprint: in-epic
@@ -3831,11 +3833,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: 42.3 cr (blind layer): vitest reports an early return as passed (spec Code Map); admin.integration create/verify tests use the same tolerate-then-return pattern
 - 2026-10-22T05:51:10Z status=escalated owner=burndown by=cr note=decide per suite: ctx.skip() with an allowlist reason, or a hard assertion; README and CHANGELOG claims narrowed in 42.3
 - 2026-10-22T08:17:18Z occurrence=42-3-ci-workflow note=admin.integration_resource_and_role_list_tests_assert_nothing_when_the_create_did_not_succeed(expect_inside_if(!result.isError&&created.resource))
+- 2026-11-22T07:02:05Z status=dropped by=merge_gate note=action_item:epic-42-retro-item-6-charter-a-story-in-the-next-planned-epic (epic-42 close, decision #130; no next epic is planned, so the item waits in sprint-status action_items)
 
 ### DW-685: bootstrap() reports compiled=true whatever the compile console says: bootstrap.ts:746,788 ignore the Atelier envelope, and General.Compile answers HTTP 200 when only some classes failed
 - source: spec-42-3-ci-workflow.md | severity: med | fix-risk: high | footprint: out-of-footprint
 - evidence: 42.3 cr (edge layer): compileClasses now returns the envelope but bootstrap drops it; the CI seed checks the console of its fixture compile only, so a broken bootstrapped class surfaces later as 404/500 from the suites
 - 2026-10-22T05:51:10Z status=escalated owner=burndown by=cr note=fix-risk high: the success and ERROR lines are localized (Rule #13), so a console check must hold on every NLS locale of the 2023.1+ range
+- 2026-11-22T07:02:05Z status=dropped by=merge_gate note=action_item:epic-42-retro-item-7-charter-a-story-in-the-next-planned-epic (epic-42 close, decision #130; no next epic is planned, so the item waits in sprint-status action_items)
 
 ### DW-686: The CI oldest-image leg goes red again on 2026-11-13: iris-community:2025.3, the oldest tag that still starts, carries a Community license key that expires that day, and an expired Community image refuses to start
 - source: spec-42-3-ci-workflow.md | severity: med | fix-risk: low | footprint: in-epic
@@ -3855,6 +3859,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-3-ci-workflow.md | severity: med | fix-risk: high | footprint: out-of-footprint
 - evidence: irislib/%Api/DocDB/v1.cls:299-313 (httpPostDatabase) only calls CreateDatabase, while every other route runs CheckAccess^%SYS.DOCDB, which fails with no SECURITY(DocDBsD,name,ns) (irislib/%SYS/DOCDB.int:15). Ens.Setting.Report.base:629 calls $$Create^%SYS.DOCDB itself. The 42.3 rework reproduced it on a 2026.2 throwaway (spec deferred item 6). translateDocDbAccessDenied passes #822 through when the service is enabled, and the data README names only the service
 - 2026-10-22T08:37:47Z status=escalated owner=burndown by=cr note=decide before the 1.0.0 publish (42.6): register the record on create (a %SYS write, bootstrap) or document it (42.9)
+- 2026-11-22T07:02:05Z status=dropped by=merge_gate note=action_item:epic-42-retro-item-8-charter-a-story-in-the-next-planned-epic (epic-42 close, decision #130; no next epic is planned, so the item waits in sprint-status action_items)
 
 ### DW-689: The public IPM registry is fed only through Open Exchange, which reads module.xml from the ROOT of a GitHub repository; that collides with AD-14 (archives built from the generator's stamped output, never from src/) and with the manifest's ipm/ location
 - source: spec-42-4-ipm-package-revival.md | severity: med | fix-risk: med | footprint: in-epic
@@ -4012,11 +4017,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-9-install-docs-and-client-re-certification.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: npm view @iris-mcp/dev time: 0.0.0-stage 2026-11-21T12:33:19Z, description 'Temporary package placeholder for staged publishing', not deprecated; dist-tag latest is 1.0.0; spec-42-6:70 says no 0.0.0-stage placeholder
 - 2026-11-21T13:55:48Z status=decision-pending owner=burndown by=cr note=human=owner decides npm deprecate of 0.0.0-stage (registry write) or a CHANGELOG note
+- 2026-11-22T07:02:05Z status=dropped by=merge_gate note=action_item:epic-42-retro-item-9-owner-deprecate-the-public-0-0-0-stage-p (epic-42 close, decision #130; no next epic is planned, so the item waits in sprint-status action_items)
 
 ### DW-717: CLAUDE.md and project rule #18 do not name the root module.xml, ipm/src/** and preload/** as generated do-not-edit output written by the release version step
 - source: spec-42-8-amendment-122-ipm-from-main.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: rule #18 lists bootstrap-classes.ts and *.generated.* only; gen-bootstrap.mjs --ipm writes module.xml, ipm/src/cls/**, preload/ipm/src/cls/ExecuteMCPv2/InstallGuard.cls at the version step (b8eaebf)
 - 2026-11-21T16:43:12Z status=decision-pending owner=burndown by=cr note=retro: add the stamped IPM tree to rule #18 and CLAUDE.md (lead may not edit rules mid-epic)
+- 2026-11-22T07:02:05Z status=dropped by=merge_gate note=action_item:epic-42-retro-item-10-lead-name-the-stamped-ipm-tree-the-root (epic-42 close, decision #130; no next epic is planned, so the item waits in sprint-status action_items)
 
 ### DW-718: ci-ipm-archive.test.ts pins class counts derived from the generated embed as literals, which move whenever a bootstrapped class is added
 - source: spec-42-8-amendment-122-ipm-from-main.md | severity: low | fix-risk: low | footprint: in-epic
@@ -4027,18 +4034,22 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-7-vs-code-extension-publish.md | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: scripts/lib/release-core.mjs RELEASE_CHANNELS vscode-marketplace enabled:false enabledBy 'owner: publisher needs a verified domain (DW-719)'; owner steps O1 (Marketplace publisher iris-mcp, Open VSX namespace), O2 (Marketplace trusted-publishing policy, OVSX_PAT), O4 (Open VSX trusted publisher) not done; v1.1.0 ships the vsix on the GitHub Release by hand
 - 2026-11-21T20:50:02Z status=decision-pending owner=burndown by=planner note=human=owner: verified domain, then O1/O2 for both stores, then flip enabled:true, docs back to store install, the first store publish; seam documented in 42.7
+- 2026-11-22T07:02:05Z status=decision-pending owner=burndown by=merge_gate note=kept decision-pending at the epic-42 close on the Planner's instruction: an owner decision relayed by the Planner (decision #130)
 
 ### DW-720: The release does not attach the vsix to the tag's GitHub Release: the maintainer does it by hand (gh release create, notes from the CHANGELOG section, sha256 checked against manifest.json)
 - source: spec-42-7-vs-code-extension-publish.md | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: release.yml has no github-release channel or job and no contents: write; Planner fallback for v1.1.0 (2026-11-21); sizing: new channel or job, workflow declaration, 5->6 channel pins, README table
 - 2026-11-21T20:50:02Z status=decision-pending owner=burndown by=planner note=build as its own story: a separate github-release job after publish with contents: write and no id-token; already-published = success on re-run; red proof and dry run
+- 2026-11-22T07:02:05Z status=decision-pending owner=burndown by=merge_gate note=kept decision-pending at the epic-42 close on the Planner's instruction: an owner decision relayed by the Planner (decision #130)
 
 ### DW-721: VS Code calls the files the vscode adapter writes (.vscode/mcp.json and the profile mcp.json) deprecated Local-harness files, removed in February 2027; new Copilot configurations belong in ~/.copilot/mcp-config.json (or COPILOT_HOME) and a workspace-root .mcp.json, both keyed mcpServers
 - source: spec-42-9-install-docs-and-client-re-certification.md (deferred frontmatter; decision #118) | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: code.visualstudio.com/docs/agents/reference/mcp-configuration, fetched 2026-11-21: use the native destinations, not .vscode/mcp.json or profile mcp.json (deprecated Local harness); the old files are still forwarded today except configurations using input or command variables. Decision #118: no change in 1.1.0, schedule a story before February 2027; never filed in the ledger until now (found at epic-end prep)
 - 2026-11-22T03:04:46Z status=decision-pending owner=burndown by=lead note=decision sheet: charter a migration story (the vscode adapter, the extension's and the CLI's write targets, certification) due before February 2027
+- 2026-11-22T07:02:05Z status=dropped by=merge_gate note=action_item:epic-42-retro-item-11-charter-a-story-due-before-february-2027 (epic-42 close, decision #130; no next epic is planned, so the item waits in sprint-status action_items)
 
 ### DW-722: List the iris-mcp Claude Code plugin in Anthropic's Claude plugin directory: an owner submission at claude.ai/directory/manage (portal validation, then human review; needs a README and a license)
 - source: planner (owner item, 2026-11-22, after v1.1.0) | severity: low | fix-risk: low | footprint: out-of-footprint
 - evidence: claude plugin validate (Claude Code 2.1.330), 2026-11-22: packages/client-config/skills-pack and the marketplace root both pass. Plugin-directory findings: ICON_MISSING (the icon is fixed at the first portal save or submit, so it must exist before then; an authored asset, the owner's); network.hosts undeclared for the 5 MCP servers and 18 skills (advisory); no LICENSE file in the plugin root (plugin.json says MIT; the git-subdir install copies only skills-pack) and the README does not state the license. The marketplace pins ref v1.1.0, so pack changes reach the directory only with a new tag
 - 2026-11-22T06:41:00Z status=decision-pending owner=burndown by=planner note=human=owner submits at claude.ai/directory/manage; before that, a pack story adds the icon (owner-supplied square PNG, 512-2048 px), a LICENSE in skills-pack and its README, and network.hosts, released in a patch tag; nothing is submitted by an agent
+- 2026-11-22T07:02:05Z status=decision-pending owner=burndown by=merge_gate note=kept decision-pending at the epic-42 close on the Planner's instruction: an owner decision relayed by the Planner (decision #130)
