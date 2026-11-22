@@ -4032,3 +4032,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-42-7-vs-code-extension-publish.md | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: release.yml has no github-release channel or job and no contents: write; Planner fallback for v1.1.0 (2026-11-21); sizing: new channel or job, workflow declaration, 5->6 channel pins, README table
 - 2026-11-21T20:50:02Z status=decision-pending owner=burndown by=planner note=build as its own story: a separate github-release job after publish with contents: write and no id-token; already-published = success on re-run; red proof and dry run
+
+### DW-721: VS Code calls the files the vscode adapter writes (.vscode/mcp.json and the profile mcp.json) deprecated Local-harness files, removed in February 2027; new Copilot configurations belong in ~/.copilot/mcp-config.json (or COPILOT_HOME) and a workspace-root .mcp.json, both keyed mcpServers
+- source: spec-42-9-install-docs-and-client-re-certification.md (deferred frontmatter; decision #118) | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: code.visualstudio.com/docs/agents/reference/mcp-configuration, fetched 2026-11-21: use the native destinations, not .vscode/mcp.json or profile mcp.json (deprecated Local harness); the old files are still forwarded today except configurations using input or command variables. Decision #118: no change in 1.1.0, schedule a story before February 2027; never filed in the ledger until now (found at epic-end prep)
+- 2026-11-22T03:04:46Z status=decision-pending owner=burndown by=lead note=decision sheet: charter a migration story (the vscode adapter, the extension's and the CLI's write targets, certification) due before February 2027
