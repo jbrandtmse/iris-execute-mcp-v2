@@ -310,16 +310,21 @@ function mutateReadme(readmePath: string, anchor: string, replacement: string): 
   writeFileSync(readmePath, readme.replace(anchor, replacement), "utf8");
 }
 
+/** The Claude Code row's disposition cell as rendered (`| **certified-live** <date> … |`), read from the README rather
+ * than pinned to a date, so the lead's re-certification (Story 42.9, AC 42.9.2) does not move the mutation anchor. */
+function claudeCodeDispositionCell(readmePath: string): string {
+  const row = readFileSync(readmePath, "utf8").split("\n").find((line) => line.startsWith("| Claude Code (`claude-code`) |"));
+  const cell = row?.match(/\| \*\*certified-live\*\* [^|]+\|$/)?.[0];
+  expect(cell, "the Claude Code adapter row ends in a certified-live disposition cell").toBeDefined();
+  return cell as string;
+}
+
 describe("QA 33.4: render-certification-table --check guard (real script, sandbox package)", () => {
   it("a pristine copy passes --check; a hand-edited ADAPTER table row fails it (exit 1)", () => {
     const sandbox = makePkgSandbox();
     expect(sandbox.run(["--check"]).status).toBe(0);
 
-    mutateReadme(
-      sandbox.readmePath,
-      "| **certified-live** 2026-07-28 (incl. agent CLI probe) |",
-      "| fixture-only (residual risk) |",
-    );
+    mutateReadme(sandbox.readmePath, claudeCodeDispositionCell(sandbox.readmePath), "| fixture-only (residual risk) |");
     const result = sandbox.run(["--check"]);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("OUT OF SYNC");
@@ -339,11 +344,7 @@ describe("QA 33.4: render-certification-table --check guard (real script, sandbo
 
   it("a bare run REGENERATES the edited section (the mutation is overwritten; --check passes again)", () => {
     const sandbox = makePkgSandbox();
-    mutateReadme(
-      sandbox.readmePath,
-      "| **certified-live** 2026-07-28 (incl. agent CLI probe) |",
-      "| fixture-only (residual risk) EDITED |",
-    );
+    mutateReadme(sandbox.readmePath, claudeCodeDispositionCell(sandbox.readmePath), "| fixture-only (residual risk) EDITED |");
     expect(sandbox.run(["--check"]).status).toBe(1);
 
     const regen = sandbox.run([]);

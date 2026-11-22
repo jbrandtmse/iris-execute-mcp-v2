@@ -2301,18 +2301,21 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Requires the Kimi Code extension installed; unchanged since the Epic 33 retro.
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=human=verify the Kimi Code VS Code extension half with the extension installed
 - 2026-10-15T11:47:33Z status=routed owner=42-9-install-docs-and-client-re-certification by=x0 note=decided=orchestrator(Lead-away) owned by named story (orchestrator decision 2): AC 42.9.2 re-certifies every adapter on published 1.0.0 and marks human-only rows with the date - this row. Alt: wontfix-accepted until someone installs the extension
+- 2026-11-22T02:25:58Z status=resolved-by:42-9-install-docs-and-client-re-certification owner=42-9-install-docs-and-client-re-certification by=lead note=per the routing (orchestrator decision 2): AC 42.9.2 marks the Kimi Code VS Code extension half human-only with a date - recorded in certification-results.json (kimi-code humanOnly markedOn 2026-11-21) and rendered in the table; the person-run check stays a dated human-only row
 
 ### DW-441: [L33.retro4-4-post-publish-recertification] Epic 33 retro section 4 #4: post-publish re-certification
 - source: legacy:33.4 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Deliberately re-sequenced behind beta; blocked on the Epic 33 publish decision (section 4 #1).
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=human=re-run client certification after the npm publish happens
 - 2026-10-15T02:51:51Z status=routed owner=42-9-install-docs-and-client-re-certification by=correct-course note=decided (decision-record-2026-10-14 story 8); human-only client rows recorded as such
+- 2026-11-22T02:25:58Z status=resolved-by:42-9-install-docs-and-client-re-certification owner=42-9-install-docs-and-client-re-certification by=lead note=lead re-certification 2026-11-22 against published @iris-mcp/dev@1 -> 1.1.0 on a harness throwaway IRIS for Health under a scratch HOME: claude-code (claude mcp list Connected), vscode and cline (file-level) certified-live with against recorded; engine-path byte-exact restore; table regenerated; human-only rows recorded (2026-11-21)
 
 ### DW-442: [L33.retro4-6-find-a-copilot-user] Epic 33 retro section 4 #6: find a Copilot user
 - source: legacy:33.4 | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Needs a consenting GitHub Copilot user; same class of blocker as section 4 #3; recorded for Rule #56 enumeration completeness.
 - 2026-10-14T10:47:58Z status=decision-pending owner=burndown by=migration note=human=find a consenting GitHub Copilot user to verify the launcher in Copilot Chat
 - 2026-10-15T11:47:33Z status=routed owner=42-9-install-docs-and-client-re-certification by=x0 note=decided=orchestrator(Lead-away) owned by named story (orchestrator decision 2): AC 42.9.2 marks the Copilot Chat row human-only with a date during post-publish re-certification. Alt: wontfix-accepted until a consenting Copilot user exists
+- 2026-11-22T02:25:58Z status=resolved-by:42-9-install-docs-and-client-re-certification owner=42-9-install-docs-and-client-re-certification by=lead note=per the routing (orchestrator decision 2): the Copilot Chat row is marked human-only with a date (vscode humanOnly markedOn 2026-11-21) after the 2026-11-22 file-level re-certification on 1.1.0; the person-run check (install the v1.1.0 GitHub Release vsix, Copilot agent mode lists iris_* tools, one read call) is raised with the Planner for the owner
 
 ### DW-443: [35-0-CR-1] Publish-time gates are wired to prepublishOnly only - nothing on prepack/prepare
 - source: legacy:35.0 | severity: med | fix-risk: med | footprint: out-of-footprint
