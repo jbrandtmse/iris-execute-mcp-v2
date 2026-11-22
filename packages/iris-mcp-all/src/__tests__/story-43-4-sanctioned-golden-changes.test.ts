@@ -112,7 +112,7 @@ const STORY_44_1_IDS = ["44.1/docdb-manage-text/iris_docdb_manage@data-main"];
 
 /** The sentence Story 44.1 appends (after one space) to the `iris_docdb_manage` description, written from its spec. */
 const DOCDB_REGISTER_SENTENCE =
-  "'create' also registers the database's Security.DocDBs record, which every other DocDB call requires, and on a database that exists without one it registers the missing record.";
+  "'create' also registers the database's Security.DocDBs record, which every other DocDB call on that database requires, and on a database that exists without one it registers the missing record.";
 
 /** The entry ids of each story, in the order the ledger lists the stories (landing order). */
 const STORIES: Array<[string, string[]]> = [

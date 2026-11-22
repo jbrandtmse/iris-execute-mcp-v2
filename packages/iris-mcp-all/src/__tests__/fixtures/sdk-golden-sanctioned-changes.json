@@ -911,7 +911,7 @@
       "op": "replace",
       "appendOnly": true,
       "old": "Create, drop, or list IRIS document databases. 'list' returns all DocDB databases in the namespace. 'create' creates a new document database with optional property definitions. 'drop' permanently removes a document database and all its data. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied.",
-      "new": "Create, drop, or list IRIS document databases. 'list' returns all DocDB databases in the namespace. 'create' creates a new document database with optional property definitions. 'drop' permanently removes a document database and all its data. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied. 'create' also registers the database's Security.DocDBs record, which every other DocDB call requires, and on a database that exists without one it registers the missing record."
+      "new": "Create, drop, or list IRIS document databases. 'list' returns all DocDB databases in the namespace. 'create' creates a new document database with optional property definitions. 'drop' permanently removes a document database and all its data. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied. 'create' also registers the database's Security.DocDBs record, which every other DocDB call on that database requires, and on a database that exists without one it registers the missing record."
     }
   ]
 }

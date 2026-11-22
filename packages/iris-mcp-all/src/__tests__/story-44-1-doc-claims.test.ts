@@ -144,10 +144,12 @@ describe("Story 44.1: the built tool matches the documented 'no new action, no n
 });
 
 describe("Story 44.1: the CHANGELOG entry", () => {
-  const firstSection = /^## \[[^\n]*\n[\s\S]*?(?=\n## \[)/m.exec(changelog)?.[0] ?? "";
+  // Found by its title, not its position: a later story's [Unreleased] section may sit above it, and the release relabels it.
+  const firstSection = /^## \[[^\]\n]*\] — Story 44\.1: DocDB Create Registers the Database\n[\s\S]*?(?=\n## \[)/m.exec(changelog)?.[0] ?? "";
 
-  it("is the first section, headed [Unreleased], with a Fixed block", () => {
-    expect(firstSection.startsWith("## [Unreleased] - Story 44.1:"), "the top section").toBe(true);
+  it("is a section above the 1.1.0 release's, headed [Unreleased] until a release relabels it, with a Fixed block", () => {
+    expect(firstSection, "the Story 44.1 section").not.toBe("");
+    expect(changelog.indexOf(firstSection)).toBeLessThan(changelog.indexOf("\n## [1.1.0] — "));
     expect(firstSection).toContain("### Fixed");
   });
 

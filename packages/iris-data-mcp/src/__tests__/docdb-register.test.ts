@@ -127,7 +127,7 @@ describe("Story 44.1 AC 44.1.7 -- request lists captured before the story", () =
 describe("Story 44.1 AC 44.1.7 -- list and drop results are unchanged", () => {
   it("list returns the wrapped array exactly as before", async () => {
     const dbs = ["A", "B"];
-    const ctx = createMockCtx({ get: async () => ({ result: dbs }) } as never);
+    const ctx = createMockCtx({ get: async () => ({ result: [...dbs] }) } as never);
     const result = await docdbManageTool.handler({ action: "list" }, ctx);
     expect(result).toEqual({
       content: [{ type: "text", text: JSON.stringify(dbs, null, 2) }],
@@ -140,7 +140,8 @@ describe("Story 44.1 AC 44.1.7 -- list and drop results are unchanged", () => {
       { database: "MyDb", dropped: true },
       { database: "MyDb", dropped: false },
     ]) {
-      const ctx = createMockCtx({ delete: async () => ({ result: answer }) } as never);
+      // A copy, so a handler that edits the answer in place cannot edit the expected value too.
+      const ctx = createMockCtx({ delete: async () => ({ result: { ...answer } }) } as never);
       const result = await docdbManageTool.handler({ action: "drop", database: "MyDb" }, ctx);
       expect(result).toEqual({
         content: [{ type: "text", text: JSON.stringify(answer, null, 2) }],
@@ -281,9 +282,9 @@ describe("Story 44.1 -- iris_docdb_manage create registers the record", () => {
   });
 
   it.each([
-    ["an IrisApiError 404 from an older deployed service", new IrisApiError(404, [], REGISTER_URL, "Not found")],
-    ["a connection error", new Error("connect ECONNREFUSED 127.0.0.1:52773")],
-  ])("register fails after create (%s): an error naming what was created, the real text and both fixes", async (_label, failure) => {
+    ["an IrisApiError 404 from an older deployed service", new IrisApiError(404, [], REGISTER_URL, "Not found"), true],
+    ["a connection error", new Error("connect ECONNREFUSED 127.0.0.1:52773"), false],
+  ])("register fails after create (%s): an error naming what was created, the real text and both fixes", async (_label, failure, missingRoute) => {
     http.post.mockImplementation((url: string) =>
       url === REGISTER_URL ? Promise.reject(failure) : Promise.resolve(CREATED),
     );
@@ -297,6 +298,13 @@ describe("Story 44.1 -- iris_docdb_manage create registers the record", () => {
     expect(text).toContain(failure.message);
     expect(text).toContain('action="create"');
     expect(text).toContain("Management Portal > System Administration > Security > Applications > Doc DB Applications");
+    // Only a 404 names the missing route, and the advice covers the deployments bootstrap leaves alone.
+    if (missingRoute) {
+      expect(text).toContain("has no /security/docdb route");
+      expect(text).toContain("upgrade the iris-execute-mcp-v2 IPM module");
+    } else {
+      expect(text).not.toContain("/security/docdb route");
+    }
     expect(result.structuredContent).toEqual({
       database: "probeC",
       namespace: "USER",

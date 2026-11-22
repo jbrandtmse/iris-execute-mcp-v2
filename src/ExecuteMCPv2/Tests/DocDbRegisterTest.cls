@@ -18,6 +18,15 @@ Parameter FIXTUREDB = "MCPRegTestDb";
 /// A name no test ever creates.
 Parameter MISSINGDB = "MCPRegNoSuchDb";
 
+/// A disposable user that may call the routes but holds neither <code>%DocDB_Admin</code> nor <code>%Admin_Secure</code>.
+Parameter DENIEDUSER = "MCPRegDenied";
+
+/// The disposable role of <parameter>DENIEDUSER</parameter>.
+Parameter DENIEDROLE = "MCPRegDeniedRole";
+
+/// The password of <parameter>DENIEDUSER</parameter>.
+Parameter DENIEDPASSWORD = "MCPreg44Denied1";
+
 Method OnBeforeOneTest() As %Status
 {
     Do ..DropFixture()
@@ -42,6 +51,52 @@ Method DropFixture()
         Set tSC = $$Delete^%SYS.DOCDB(..#FIXTUREDB, $NAMESPACE)
     } Catch ex {
     }
+    Do ..DropDeniedUser()
+}
+
+/// Create <parameter>DENIEDUSER</parameter> with a role that may reach the routes (<code>%Development:U</code>,
+/// <code>%Service_DocDB:U</code>, and every database resource IRIS lets a role hold, except
+/// <code>%DB_IRISSECURITY</code>) and holds no DocDB admin resource, so IRIS itself denies it the record check.
+Method CreateDeniedUser() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set $NAMESPACE = "%SYS"
+        Set tResources = "%Development:U,%Service_DocDB:U"
+        Set tSC = ##class(Security.Roles).Create(..#DENIEDROLE, "Story 44.1 test: no DocDB admin", tResources)
+        If $$$ISERR(tSC) Quit
+        Set tRS = ##class(%ResultSet).%New("Security.Resources:List")
+        Set tSC = tRS.Execute("%DB_*")
+        If $$$ISERR(tSC) Quit
+        While tRS.Next() {
+            Set tName = tRS.Get("Name")
+            If tName = "%DB_IRISSECURITY" Continue
+            ; Some system database resources cannot be held by a role (#1499); those are skipped
+            Kill tProps
+            Set tProps("Resources") = tResources_","_tName_":RW"
+            If $$$ISOK(##class(Security.Roles).Modify(..#DENIEDROLE, .tProps)) Set tResources = tProps("Resources")
+        }
+        Do tRS.Close()
+        Set tSC = ##class(Security.Users).Create(..#DENIEDUSER, ..#DENIEDROLE, ..#DENIEDPASSWORD, "Story 44.1 test", , , , 0, 1, , , , , , 1, 1)
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Set $NAMESPACE = tOrigNS
+    Quit tSC
+}
+
+/// Delete <parameter>DENIEDUSER</parameter> and its role; a no-op when they are absent.
+Method DropDeniedUser()
+{
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set $NAMESPACE = "%SYS"
+        If ##class(Security.Users).Exists(..#DENIEDUSER) Do ##class(Security.Users).Delete(..#DENIEDUSER)
+        If ##class(Security.Roles).Exists(..#DENIEDROLE) Do ##class(Security.Roles).Delete(..#DENIEDROLE)
+    } Catch ex {
+    }
+    Set $NAMESPACE = tOrigNS
 }
 
 /// Does a <class>Security.DocDBs</class> record exist for <var>pName</var> in the current namespace?
@@ -182,6 +237,19 @@ Method TestRouteGetRoundTrip()
     Do $$$AssertEquals(tResult.%Get("exists"), 1, "the database exists over the wire")
     Do $$$AssertEquals(tResult.%Get("registered"), 0, "and has no record over the wire")
 
+    ; A caller IRIS denies the record check gets an error envelope, never registered:false
+    Set tSC = ..CreateDeniedUser()
+    Do $$$AssertStatusOK(tSC, "the disposable non-admin user is created (got: "_$System.Status.GetErrorText(tSC)_")")
+    If $$$ISOK(tSC) {
+        Set tSC = ..GetRecord(tDb, tNamespace, .tHttp, .tEnv, ..#DENIEDUSER, ..#DENIEDPASSWORD)
+        Do $$$AssertStatusOK(tSC, "the denied GET is a parseable envelope (got: "_$System.Status.GetErrorText(tSC)_")")
+        If $$$ISOK(tSC) {
+            Do $$$AssertTrue(tEnv.%Get("status").%Get("errors").%Size() >= 1, "a caller without DocDB admin rights gets an error envelope (got: "_tEnv.%ToJSON()_")")
+            Do $$$AssertNotTrue($IsObject(tEnv.%Get("result")) && (tEnv.%Get("result").%Get("registered") = 0), "and never a registered:false answer")
+        }
+    }
+    Do ..DropDeniedUser()
+
     ; A request without the required parameters is refused in the same envelope
     Set tSC = ..GetRecord("", tNamespace, .tHttp, .tEnv)
     Do $$$AssertStatusOK(tSC, "the refusal is a parseable envelope")
@@ -230,8 +298,9 @@ Method TestRouteGetRoundTrip()
 }
 
 /// GET <code>/security/docdb</code> for <var>pName</var> in <var>pNamespace</var> (mirrors
-/// <class>ExecuteMCPv2.Tests.AdvisorDataTest</class>'s <method>PostAdvise</method>).
-Method GetRecord(pName As %String, pNamespace As %String, Output pHttpStatus As %Integer, Output pEnvelope As %DynamicObject) As %Status
+/// <class>ExecuteMCPv2.Tests.AdvisorDataTest</class>'s <method>PostAdvise</method>), as <var>pUsername</var> when
+/// given, else as the configured test user.
+Method GetRecord(pName As %String, pNamespace As %String, Output pHttpStatus As %Integer, Output pEnvelope As %DynamicObject, pUsername As %String = "", pPassword As %String = "") As %Status
 {
     Set tSC = $$$OK
     Set pHttpStatus = 0
@@ -240,8 +309,8 @@ Method GetRecord(pName As %String, pNamespace As %String, Output pHttpStatus As 
         Set tRequest = ##class(%Net.HttpRequest).%New()
         Set tRequest.Server = "127.0.0.1"
         Set tRequest.Port = ..ResolvePort()
-        Set tRequest.Username = $Get(^UnitTestConfig("DocDb", "Username"), "_SYSTEM")
-        Set tRequest.Password = $Get(^UnitTestConfig("DocDb", "Password"), "SYS")
+        Set tRequest.Username = $Select(pUsername '= "": pUsername, 1: $Get(^UnitTestConfig("DocDb", "Username"), "_SYSTEM"))
+        Set tRequest.Password = $Select(pUsername '= "": pPassword, 1: $Get(^UnitTestConfig("DocDb", "Password"), "SYS"))
         Set tRequest.Timeout = 60
         Do tRequest.SetParam("name", pName)
         Do tRequest.SetParam("namespace", pNamespace)

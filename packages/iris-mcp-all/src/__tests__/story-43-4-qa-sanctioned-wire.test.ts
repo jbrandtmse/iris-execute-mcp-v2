@@ -146,7 +146,7 @@ const CONFIRM_AFTER =
 
 /** The sentence Story 44.1 appends to the `iris_docdb_manage` description (sanction `S-44.1-docdb-manage-text`). */
 const DOCDB_REGISTER_SENTENCE =
-  "'create' also registers the database's Security.DocDBs record, which every other DocDB call requires, and on a database that exists without one it registers the missing record.";
+  "'create' also registers the database's Security.DocDBs record, which every other DocDB call on that database requires, and on a database that exists without one it registers the missing record.";
 
 interface Schema extends Json {
   properties: Record<string, { description: string } & Json>;

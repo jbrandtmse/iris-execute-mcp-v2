@@ -779,6 +779,16 @@ const SERVICE_ENABLED_RESULT = { ...SERVICE_DISABLED_RESULT, enabled: true };
 const SERVICE_ROUTE_FRAGMENT = "/api/executemcp/v2/security/service";
 const SERVICE_STATE_URL = `${SERVICE_ROUTE_FRAGMENT}?name=%25Service_DocDB`;
 
+/** The record route (Story 44.1) answering that TestDB is registered: an 822 then is a genuine privilege failure. */
+const RECORD_ROUTE_FRAGMENT = "/api/executemcp/v2/security/docdb";
+const RECORD_PRESENT_RESULT = { name: "TestDB", namespace: "USER", exists: true, registered: true, alreadyRegistered: true };
+const enabledWithRecord = (err: Error) => (url: string) =>
+  url.includes(SERVICE_ROUTE_FRAGMENT)
+    ? Promise.resolve(envelope(SERVICE_ENABLED_RESULT))
+    : url.includes(RECORD_ROUTE_FRAGMENT)
+      ? Promise.resolve(envelope(RECORD_PRESENT_RESULT))
+      : Promise.reject(err);
+
 /** AC 35.7.3: every mandatory element of the actionable message. */
 function expectActionableGateMessage(
   text: string,
@@ -966,11 +976,7 @@ describe("Story 35.7 — iris_docdb_document service gate", () => {
 
   it("passes the original error through unchanged when the service is enabled", async () => {
     const err = makeLive822Error("/api/docdb/v1/USER/doc/TestDB/42", "GET");
-    mockHttp.get.mockImplementation((url: string) =>
-      url.includes(SERVICE_ROUTE_FRAGMENT)
-        ? Promise.resolve(envelope(SERVICE_ENABLED_RESULT))
-        : Promise.reject(err),
-    );
+    mockHttp.get.mockImplementation(enabledWithRecord(err));
 
     const result = await docdbDocumentTool.handler(
       { action: "get", database: "TestDB", id: "42" },
@@ -979,6 +985,7 @@ describe("Story 35.7 — iris_docdb_document service gate", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toBe(`Error managing document: ${err.message}`);
+    expect(mockHttp.get).toHaveBeenCalledWith(expect.stringContaining(RECORD_ROUTE_FRAGMENT));
   });
 
   it("passes the original error through when the service-state check itself fails", async () => {
@@ -1048,7 +1055,7 @@ describe("Story 35.7 — iris_docdb_find service gate", () => {
   it("passes the original error through unchanged when the service is enabled", async () => {
     const err = makeLive822Error("/api/docdb/v1/USER/find/TestDB", "POST");
     mockHttp.post.mockRejectedValue(err);
-    mockHttp.get.mockResolvedValue(envelope(SERVICE_ENABLED_RESULT));
+    mockHttp.get.mockImplementation(enabledWithRecord(err));
 
     const result = await docdbFindTool.handler(
       { database: "TestDB", filter: { status: "active" } },
@@ -1057,6 +1064,7 @@ describe("Story 35.7 — iris_docdb_find service gate", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toBe(`Error querying documents: ${err.message}`);
+    expect(mockHttp.get).toHaveBeenCalledWith(expect.stringContaining(RECORD_ROUTE_FRAGMENT));
   });
 
   it("passes the original error through when the service-state check itself fails", async () => {
@@ -1125,7 +1133,7 @@ describe("Story 35.7 — iris_docdb_property service gate", () => {
   it("passes the original error through unchanged when the service is enabled", async () => {
     const err = makeLive822Error("/api/docdb/v1/USER/prop/TestDB/name?type=%String", "POST");
     mockHttp.post.mockRejectedValue(err);
-    mockHttp.get.mockResolvedValue(envelope(SERVICE_ENABLED_RESULT));
+    mockHttp.get.mockImplementation(enabledWithRecord(err));
 
     const result = await docdbPropertyTool.handler(
       { action: "create", database: "TestDB", property: "name", type: "%String" },
@@ -1136,6 +1144,7 @@ describe("Story 35.7 — iris_docdb_property service gate", () => {
     expect(result.content[0]!.text).toBe(
       `Error managing property 'name': ${err.message}`,
     );
+    expect(mockHttp.get).toHaveBeenCalledWith(expect.stringContaining(RECORD_ROUTE_FRAGMENT));
   });
 
   it("passes the original error through when the service-state check itself fails", async () => {

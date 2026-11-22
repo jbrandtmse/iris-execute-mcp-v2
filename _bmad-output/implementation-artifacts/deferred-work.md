@@ -4071,3 +4071,28 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-1-docdb-create-registers-the-database.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: docdb.ts:266 vs inputSchema docdb.ts:271-284 (action, database, namespace only)
 - 2026-11-22T19:00:13Z status=routed owner=burndown by=harvest note=AC 44.1.5 appends text only (Frozen goldens), so the false clause needs a recorded AD-15 correction
+
+### DW-726: No CI run drives the IRIS-side DocDB record route or its %UnitTest classes, so a contract drift between docdb.ts and DocDbRecord ships green
+- source: spec-44-1-docdb-create-registers-the-database.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: DocDbRegisterTest/DocDbRegisterNamespaceTest are seeded but never executed by any buildLiveSuites suite, and the data lifecycle skips in CI (DOCDB_SKIPS); renaming 'registered' in DocDbRecord leaves the default suite and CI green
+- 2026-11-22T19:38:23Z status=routed owner=44-5-integration-suites-cannot-pass-without-testing by=cr note=44.5 owns the DocDB CI seam (AC 44.5.4); run the IRIS-side DocDB classes in the seeded throwaway leg
+
+### DW-727: DocDbRegisterNamespaceTest copies the ServiceEnabled and RecordExists helpers of DocDbRegisterTest
+- source: spec-44-1-docdb-create-registers-the-database.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: src/ExecuteMCPv2/Tests/DocDbRegisterNamespaceTest.cls ServiceEnabled/RecordExists vs DocDbRegisterTest.cls:48-78 (ServiceEnabled verbatim, RecordExists with a namespace argument); weak reason: self-contained test classes, as with ResolvePort
+- 2026-11-22T19:38:23Z status=wontfix-accepted owner=44-1-docdb-create-registers-the-database by=cr note=reopen_if=a third ExecuteMCPv2.Tests class copies ServiceEnabled or RecordExists
+
+### DW-728: An 822 caused by a disabled Security.DocDBs record or a record Resource passes through unexplained, and create over a stale disabled record reports registered:true
+- source: spec-44-1-docdb-create-registers-the-database.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: CheckAccess^%SYS.DOCDB answers 792 (disabled) or 791 (Resource) then 822; DocDbRecord reports registered:true, and the spec's matrix row Record present requires pass-through
+- 2026-11-22T19:38:23Z status=by-design owner=44-1-docdb-create-registers-the-database by=cr note=spec: Record present passes the error through; the Safety note leaves a disabled or Resource record untouched
+
+### DW-729: POST /security/docdb answers success (exists:false, registered:true) for an orphan record whose DocDB database does not exist
+- source: spec-44-1-docdb-create-registers-the-database.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: DocDbRecord checks tDbExists only when no record exists (Security.cls DocDbRecord); IRIS writes orphan records (probe P11); the tool only registers after a DocDB create or 25051, so the database always exists
+- 2026-11-22T19:38:23Z status=wontfix-theoretical owner=44-1-docdb-create-registers-the-database by=cr note=real if a consumer calls POST /security/docdb without a successful DocDB create first
+
+### DW-730: create on an existing registered database returns the registration-failure text, not the already-defined error, when the register call itself fails
+- source: spec-44-1-docdb-create-registers-the-database.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: docdb.ts create path: 25051 then a register 404 or network error returns registrationFailure(created:false); README/changeset say already-defined is unchanged when the record is present
+- 2026-11-22T19:38:23Z status=by-design owner=44-1-docdb-create-registers-the-database by=cr note=spec matrix row Repair fails: 25051 plus a failed register returns the failure text with created:false

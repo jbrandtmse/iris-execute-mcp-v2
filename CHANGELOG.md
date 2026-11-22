@@ -2,7 +2,7 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
-## [Unreleased] - Story 44.1: DocDB Create Registers the Database
+## [Unreleased] — Story 44.1: DocDB Create Registers the Database
 
 ### Fixed
 

@@ -359,7 +359,7 @@ function registrationFailure(
 ) {
   const missingRoute =
     cause instanceof IrisApiError && cause.statusCode === 404
-      ? " The ExecuteMCPv2 REST service deployed on this instance has no /security/docdb route; it is updated when the server next bootstraps."
+      ? " The ExecuteMCPv2 REST service deployed on this instance has no /security/docdb route: its IRIS-side classes are older than this server, or the /api/executemcp/v2 web application is missing. The server's bootstrap deploys the current classes when it connects with enough privilege, but it leaves an IPM installation (upgrade the iris-execute-mcp-v2 IPM module) and a hand-loaded or foreign copy alone; update those yourself."
       : "";
   const lead = created
     ? `DocDB database '${target.database}' WAS created in namespace ${target.namespace}, but its Security.DocDBs record was NOT registered, so IRIS denies every other DocDB call on it (ERROR #822: Access Denied)`
@@ -398,7 +398,7 @@ export const docdbManageTool: ToolDefinition = {
     "Prerequisite: the %Service_DocDB service must be enabled on the instance " +
     "(it is disabled by default on IRIS) — a disabled service fails these calls " +
     "with ERROR #822: Access Denied. " +
-    "'create' also registers the database's Security.DocDBs record, which every other DocDB call requires, " +
+    "'create' also registers the database's Security.DocDBs record, which every other DocDB call on that database requires, " +
     "and on a database that exists without one it registers the missing record.",
   inputSchema: z.object({
     action: z
