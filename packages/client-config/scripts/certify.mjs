@@ -187,6 +187,10 @@ if (!clientId || !CLIENT_IDS.includes(clientId)) {
 if (!existsSync(BIN)) {
   fail(`the built CLI is missing at ${BIN} — run "npm run build" in packages/client-config first`);
 }
+// The vscode user file follows COPILOT_HOME, not HOME: a scratch HOME alone would still point the pass at a real file.
+if (clientId === "vscode" && (process.env.COPILOT_HOME ?? "") !== "") {
+  fail(`COPILOT_HOME is set (${process.env.COPILOT_HOME}); unset it so the vscode pass writes under the HOME/USERPROFILE you chose`);
+}
 
 // ────────────────────────────────────────────────────────────────────
 // Client-specific verification surfaces.

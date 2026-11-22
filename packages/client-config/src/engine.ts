@@ -66,6 +66,7 @@ import {
   type EngineHostContext,
   type ManagerState,
 } from "./state.js";
+import { pinnedSpec } from "./synthesize.js";
 import { CANONICAL_SERVERS, type CanonicalEntry, type CanonicalServerName, type ClientAdapter, type ClientScope } from "./types.js";
 import {
   applyWrite,
@@ -288,6 +289,20 @@ export function holdsLegacyReferences(entry: unknown): boolean {
 /** Stashed or written references of the old VS Code harness, which the Copilot harness does not forward. */
 const LEGACY_REFERENCE = /\$\{(?:env|input|command):/;
 
+/**
+ * True when a stash of an adapter with legacy files was taken from an old file: it holds old-harness references,
+ * or the scope writes the `copilot` shape and the stash lacks its `type` and `tools` keys. Enabling such a stash
+ * would write an entry the Copilot harness does not read as written; a fresh `apply` replaces it.
+ */
+export function isPreMoveStash(adapter: ClientAdapter, scope: ClientScope, entry: unknown): boolean {
+  if (adapter.legacyScopes === undefined) return false;
+  if (holdsLegacyReferences(entry)) return true;
+  if (adapterForScope(adapter, scope).entryShape !== "copilot") return false;
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return true;
+  const record = entry as Record<string, unknown>;
+  return record.type === undefined || !Array.isArray(record.tools);
+}
+
 /** A successful disable or remove of an entry other clients also own says that they read the same file (AD-30, Story 44.2). */
 function withSharedNote(result: EngineResult, target: Target, name: string): EngineResult {
   if (!result.ok || target.peers.length === 0) return result;
@@ -480,11 +495,11 @@ export function apply(
 
   const now = options.now ?? (() => new Date());
   const containsSecret = options.containsSecret ?? false;
-  // A stash recorded before the Copilot move holds old-harness references; the fresh entry replaces it.
+  // A stash recorded before the Copilot move is not enabled; the fresh entry replaces it.
   const record = (state: ManagerState): ManagerState => {
     const recorded = recordManaged(state, { client, scope, name: entry.name, containsSecret }, now());
     const stash = findStash(recorded, client, scope, entry.name);
-    return stash !== undefined && target.adapter.legacyScopes !== undefined && holdsLegacyReferences(stash.entry)
+    return stash !== undefined && isPreMoveStash(target.adapter, scope, stash.entry)
       ? dropStash(recorded, client, scope, entry.name)
       : recorded;
   };
@@ -544,14 +559,14 @@ export function enable(
   const current = readCurrent(fs, target.path);
   if (!current.ok) return fail(client, scope, "enable", target.path, current.reason);
   const stash = findStash(target.state, client, scope, name);
-  if (stash !== undefined && target.adapter.legacyScopes !== undefined && holdsLegacyReferences(stash.entry)) {
+  if (stash !== undefined && isPreMoveStash(target.adapter, scope, stash.entry)) {
     return fail(
       client,
       scope,
       "enable",
       target.path,
-      `refusing to enable "${name}": the stashed entry was recorded before ${client} moved to its Copilot files and holds \${env:...} or \${input:...} references that the Copilot harness does not forward. ` +
-        `The stash is kept; write a fresh entry with: iris-mcp-clients apply --client ${client} --scope ${scope} --servers ${name}`,
+      `refusing to enable "${name}": the stashed entry was recorded before ${client} moved to its Copilot files, so it holds \${env:...}, \${input:...} or \${command:...} references the Copilot harness does not forward, or lacks the type and tools keys of a Copilot user entry. ` +
+        `The stash is kept; write a fresh entry with: npx -y -p ${pinnedSpec("@iris-mcp/client-config")} iris-mcp-clients apply --client ${client} --scope ${scope} --servers ${name}`,
     );
   }
   if (current.content === null) {
@@ -772,6 +787,12 @@ export function restore(
       ...(result.restored !== undefined ? { restored: result.restored } : {}),
     });
   }
+  // A restore rolls back the whole file, so in a shared file it names the other readers, as a disable or remove does:
+  // always for a client that never wrote the file before it was shared, and for a pre-sharing writer once a peer has records.
+  const recordingPeers = peerClients(
+    target.peers.filter((peer) => [...target.state.entries, ...target.state.stashes].some((r) => r.client === peer.client && r.scope === peer.scope)),
+  );
+  const others = PRE_SHARING_WRITERS.includes(target.adapter.id) ? recordingPeers : peerClients(target.peers);
   return {
     ok: true,
     client,
@@ -782,6 +803,7 @@ export function restore(
     ...(result.backupPath !== undefined ? { backupPath: result.backupPath } : {}),
     restartHint: target.adapter.restartHint,
     note: `restored from ${result.restoredFrom ?? "backup"}`,
+    ...(others.length > 0 ? { sharedWith: others, sharedNote: sharedFileNote(target.path, others) } : {}),
   };
 }
 
@@ -791,18 +813,20 @@ export function restore(
 // same protocol, after the new file's write has re-parsed clean.
 // ════════════════════════════════════════════════════════════════════
 
-interface LegacyFile {
-  path: string;
-  /** The adapter as the old file sees it (root key, format, expansion). */
-  view: ClientAdapter;
-  /** The file's text; null when it could not be read (`error` says why). */
-  content: string | null;
-  error?: string;
-}
+/**
+ * One existing legacy file of an adapter scope that an apply or remove of some names touches: either the owned
+ * entries among those names that it holds, or why it cannot be read or parsed.
+ */
+type LegacyTarget =
+  | { path: string; view: ClientAdapter; error: string; unparseable: boolean }
+  | { path: string; view: ClientAdapter; content: string; present: string[] };
 
-/** The existing legacy files of one adapter scope. */
-function legacyFiles(ctx: EngineHostContext, adapter: ClientAdapter, scope: ClientScope, fs: WriteFs): LegacyFile[] {
-  const out: LegacyFile[] = [];
+/**
+ * The legacy files of one adapter scope that hold an owned entry among `names`, plus every one that cannot be read
+ * or parsed. Owned in an old file means a canonical iris-mcp name: the only names the manager wrote there.
+ */
+function legacyTargets(ctx: EngineHostContext, adapter: ClientAdapter, scope: ClientScope, names: readonly string[], fs: WriteFs): LegacyTarget[] {
+  const out: LegacyTarget[] = [];
   for (const def of adapter.legacyScopes ?? []) {
     if (def.scope !== scope) continue;
     const path = resolveLegacyPath(adapter, def, ctx);
@@ -815,11 +839,20 @@ function legacyFiles(ctx: EngineHostContext, adapter: ClientAdapter, scope: Clie
     }
     if (!exists) continue;
     const view = legacyAdapterView(adapter, def);
+    let content: string;
     try {
-      out.push({ path, view, content: fs.readFile(path) });
+      content = fs.readFile(path);
     } catch (err) {
-      out.push({ path, view, content: null, error: `could not read ${path}: ${err instanceof Error ? err.message : String(err)}` });
+      out.push({ path, view, error: `could not read ${path}: ${err instanceof Error ? err.message : String(err)}`, unparseable: false });
+      continue;
     }
+    const parsed = readConfigEntries(view, content);
+    if (!parsed.ok) {
+      out.push({ path, view, error: `${path} is unparseable (${parsed.error})`, unparseable: true });
+      continue;
+    }
+    const present = names.filter((name) => isCanonicalName(name) && ownEntry(parsed.entries, name) !== undefined);
+    if (present.length > 0) out.push({ path, view, content, present });
   }
   return out;
 }
@@ -850,22 +883,15 @@ export function previewLegacyRemoval(
   if (adapter?.legacyScopes === undefined) return [];
   const fs = options.fs ?? REAL_WRITE_FS;
   const previews: LegacyPreview[] = [];
-  for (const file of legacyFiles(ctx, adapter, scope, fs)) {
-    if (file.content === null) {
-      previews.push({ path: file.path, names: [], text: "", ...(file.error !== undefined ? { error: file.error } : {}) });
+  for (const file of legacyTargets(ctx, adapter, scope, names, fs)) {
+    if ("error" in file) {
+      previews.push({ path: file.path, names: [], text: "", error: file.error });
       continue;
     }
-    const parsed = readConfigEntries(file.view, file.content);
-    if (!parsed.ok) {
-      previews.push({ path: file.path, names: [], text: "", error: `${file.path} is unparseable (${parsed.error})` });
-      continue;
-    }
-    const present = names.filter((name) => ownEntry(parsed.entries, name) !== undefined);
-    if (present.length === 0) continue;
     let current = file.content;
     const texts: string[] = [];
     let error: string | undefined;
-    for (const name of present) {
+    for (const name of file.present) {
       const rendered = diff(current, stubEntry(name), file.view, scope, "remove");
       if (!rendered.ok || rendered.native === null) {
         error = rendered.ok ? `could not render the removal of "${name}"` : rendered.reason;
@@ -879,7 +905,7 @@ export function previewLegacyRemoval(
         break;
       }
     }
-    previews.push({ path: file.path, names: present, text: texts.join("\n"), ...(error !== undefined ? { error } : {}) });
+    previews.push({ path: file.path, names: file.present, text: texts.join("\n"), ...(error !== undefined ? { error } : {}) });
   }
   return previews;
 }
@@ -903,27 +929,15 @@ function withLegacyRemoval(
   const now = options.now ?? (() => new Date());
   const executeFn = options.executeFn ?? executeNativeEdit;
   const legacy: LegacyRemoval[] = [];
-  for (const file of legacyFiles(ctx, adapter, result.scope, fs)) {
-    if (file.content === null) {
-      legacy.push({ path: file.path, ok: false, changed: false, removed: [], reason: file.error ?? `could not read ${file.path}` });
+  for (const file of legacyTargets(ctx, adapter, result.scope, names, fs)) {
+    if ("error" in file) {
+      const reason = file.unparseable ? `${file.error}; the entry is still in the old file` : file.error;
+      legacy.push({ path: file.path, ok: false, changed: false, removed: [], reason });
       continue;
     }
-    const parsed = readConfigEntries(file.view, file.content);
-    if (!parsed.ok) {
-      legacy.push({
-        path: file.path,
-        ok: false,
-        changed: false,
-        removed: [],
-        reason: `${file.path} is unparseable (${parsed.error}); the entry is still in the old file`,
-      });
-      continue;
-    }
-    const present = names.filter((name) => ownEntry(parsed.entries, name) !== undefined);
-    if (present.length === 0) continue;
     const record: LegacyRemoval = { path: file.path, ok: true, changed: false, removed: [] };
     let current = file.content;
-    for (const name of present) {
+    for (const name of file.present) {
       const rendered = diff(current, stubEntry(name), file.view, result.scope, "remove");
       if (!rendered.ok || rendered.native === null) {
         record.ok = false;

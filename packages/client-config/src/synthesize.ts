@@ -28,6 +28,7 @@
  * no `IRIS_PASSWORD` literal value in any non-explicit render).
  */
 
+import type { VscodeInput } from "./deprecated.js";
 import type { CanonicalEntry, CanonicalServerName, ClientAdapter } from "./types.js";
 
 /** The npm major every `npx` spec the suite writes, spawns or documents is
@@ -86,6 +87,9 @@ export type SynthesisResult =
       entry: CanonicalEntry;
       /** True only for `explicit` mode (a literal IRIS_PASSWORD is present). */
       containsSecret: boolean;
+      /** Never set: no adapter synthesizes VS Code native `inputs`.
+       * @deprecated Removed in the next major version. */
+      inputs?: VscodeInput[];
       /** env-reference on a no-expansion client: OS-env injection guidance
        * (the 33.2 `doctor` command verifies resolvability). */
       doctorNote?: string;

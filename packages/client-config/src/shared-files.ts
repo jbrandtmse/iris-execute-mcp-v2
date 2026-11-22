@@ -63,6 +63,23 @@ export function peerClients(peers: readonly SharedPeer[]): string[] {
 }
 
 /**
+ * The clients among X and its peers whose ledger records `name` as manager-created or holds a stash of it,
+ * without repeats.
+ */
+export function recordingClients(
+  state: ManagerState,
+  client: string,
+  scope: ClientScope,
+  name: string,
+  peers: readonly SharedPeer[],
+): string[] {
+  const recorded = [{ client, scope }, ...peers]
+    .filter((p) => isManagerCreated(state, p.client, p.scope, name) || findStash(state, p.client, p.scope, name) !== undefined)
+    .map((p) => p.client);
+  return [...new Set(recorded)];
+}
+
+/**
  * Who owns `name` in a shared file: every client (X and its peers) whose ledger records it or holds a stash of
  * it; when none does, the pre-sharing writers among them are the implied owners.
  */
@@ -73,13 +90,9 @@ export function ownerClients(
   name: string,
   peers: readonly SharedPeer[],
 ): string[] {
-  const all: SharedPeer[] = [{ client, scope }, ...peers];
-  const recorded = all
-    .filter((p) => isManagerCreated(state, p.client, p.scope, name) || findStash(state, p.client, p.scope, name) !== undefined)
-    .map((p) => p.client);
-  const owners = [...new Set(recorded)];
+  const owners = recordingClients(state, client, scope, name, peers);
   if (owners.length > 0) return owners;
-  return [...new Set(all.map((p) => p.client))].filter((id) => PRE_SHARING_WRITERS.includes(id));
+  return [...new Set([client, ...peers.map((p) => p.client)])].filter((id) => PRE_SHARING_WRITERS.includes(id));
 }
 
 /** True when `client` is the only owner of `name` in the shared file (see the module header). */

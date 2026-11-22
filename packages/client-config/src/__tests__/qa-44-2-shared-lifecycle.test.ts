@@ -160,12 +160,18 @@ describe("vscode lifecycle on the strict user mcp-config.json, further shapes (A
     const fs = new MemFs();
     const file = `${HOME}/.copilot/mcp-config.json`;
     fs.seed(file, '{\n  "mcpServers": {\n    "foo": { "command": "x" }\n  }\n}\n');
-    apply(ctx, "vscode", "user", entry(), { fs });
-    expect(() => JSON.parse(fs.readFile(file))).not.toThrow();
-    disable(ctx, "vscode", "user", "iris-dev-mcp", { fs });
-    expect(() => JSON.parse(fs.readFile(file))).not.toThrow();
-    enable(ctx, "vscode", "user", "iris-dev-mcp", { fs });
-    expect(() => JSON.parse(fs.readFile(file))).not.toThrow();
+    const present = (): string[] => Object.keys((JSON.parse(fs.readFile(file)) as { mcpServers: Record<string, unknown> }).mcpServers).sort();
+    for (const [stage, run, expected] of [
+      ["apply", () => apply(ctx, "vscode", "user", entry(), { fs }), ["foo", "iris-dev-mcp"]],
+      ["disable", () => disable(ctx, "vscode", "user", "iris-dev-mcp", { fs }), ["foo"]],
+      ["enable", () => enable(ctx, "vscode", "user", "iris-dev-mcp", { fs }), ["foo", "iris-dev-mcp"]],
+      ["remove", () => remove(ctx, "vscode", "user", "iris-dev-mcp", { fs }), ["foo"]],
+    ] as const) {
+      const result = run();
+      expect(result.ok, `${stage}: ${result.reason ?? ""}`).toBe(true);
+      expect(result.changed, stage).toBe(true);
+      expect(present(), `${stage} leaves strict JSON holding the expected entries`).toEqual(expected);
+    }
   });
 });
 

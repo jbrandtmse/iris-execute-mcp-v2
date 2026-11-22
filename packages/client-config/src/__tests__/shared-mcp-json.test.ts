@@ -348,6 +348,27 @@ describe("shared disable and remove say that the other client reads the same fil
     expect(ccOff.sharedNote).toBeUndefined();
     expect(ccOff.sharedWith).toBeUndefined();
   });
+
+  it("a restore of the shared file names the other reader; claude-code's restore stays silent until a peer has records", async () => {
+    const fs = await both();
+    // vscode adopted the entry (no write, so no backup yet); its disable is the write whose backup the restore rolls back to.
+    expect((await step(fs, ["disable", ...project("vscode"), "--server", "iris-dev-mcp"])).exit).toBe(0);
+    const restored = await step(fs, ["restore", ...project("vscode"), "--json"]);
+    expect(restored.exit, restored.stderr).toBe(0);
+    const data = (JSON.parse(restored.stdout) as { data: { sharedWith?: string[]; sharedNote?: string } }).data;
+    expect(data.sharedWith).toEqual(["claude-code"]);
+    expect(data.sharedNote).toContain("Claude Code (claude-code) reads the same file");
+    const ccRestore = await step(fs, ["restore", ...project("claude-code")]);
+    expect(ccRestore.exit, ccRestore.stderr).toBe(0);
+    expect(ccRestore.stdout).toContain("VS Code (Copilot) (vscode) reads the same file");
+
+    const solo = new MemFs();
+    solo.seed(FILE, ORACLE.fixtures.crlf ?? "");
+    expect((await step(solo, applyArgs("claude-code"))).exit).toBe(0);
+    const quiet = await step(solo, ["restore", ...project("claude-code"), "--json"]);
+    expect(quiet.exit, quiet.stderr).toBe(0);
+    expect((JSON.parse(quiet.stdout) as { data: Record<string, unknown> }).data).not.toHaveProperty("sharedNote");
+  });
 });
 
 describe("enable into a shared file (AC 44.2.3)", () => {

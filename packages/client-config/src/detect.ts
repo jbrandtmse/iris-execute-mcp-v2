@@ -10,7 +10,7 @@
 import { existsSync } from "node:fs";
 
 import { ADAPTER_DATA_VERSION, CLIENT_ADAPTERS } from "./adapters.js";
-import { resolvePathTemplate, resolveScopeCandidates } from "./paths.js";
+import { resolveLegacyPath, resolvePathTemplate, resolveScopeCandidates } from "./paths.js";
 import { peerClients, sharedPeers } from "./shared-files.js";
 import type { ClientAdapter, HostContext } from "./types.js";
 
@@ -29,6 +29,8 @@ export interface DetectionProbe {
   exists: boolean;
   /** Other clients whose config scope resolves to this same file (a shared `.mcp.json`); absent when nobody shares it. */
   sharedWith?: string[];
+  /** True for one of the adapter's old, read-only config files (`legacyScopes`): an install there still detects the client. */
+  legacy?: true;
 }
 
 export interface ClientDetection {
@@ -59,6 +61,10 @@ export function detectionProbes(
     } else {
       probes.push({ kind: "appDir", path: resolvePathTemplate(rule.paths[ctx.platform], ctx) });
     }
+  }
+  for (const legacy of adapter.legacyScopes ?? []) {
+    const path = resolveLegacyPath(adapter, legacy, ctx);
+    if (path !== null) probes.push({ kind: "config", scope: legacy.scope, path, legacy: true });
   }
   return probes;
 }

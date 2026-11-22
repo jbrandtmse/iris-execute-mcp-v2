@@ -128,6 +128,7 @@ export {
   disable,
   enable,
   holdsLegacyReferences,
+  isPreMoveStash,
   previewLegacyRemoval,
   remove,
   restore,
@@ -249,3 +250,11 @@ export {
   type SynthesisProfile,
   type SynthesisResult,
 } from "./synthesize.js";
+
+export {
+  ensureInputs,
+  presentInputIds,
+  VSCODE_PASSWORD_INPUT_ID,
+  type EnsureInputsResult,
+  type VscodeInput,
+} from "./deprecated.js";

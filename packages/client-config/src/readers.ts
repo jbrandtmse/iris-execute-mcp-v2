@@ -333,7 +333,8 @@ function parseJsonSurface(content: string, rootKey?: string, strict = false): Su
     if (!strict && parsed === undefined && !hasJsonTokens(content)) {
       return { kind: "empty" };
     }
-    return { kind: "syntax-error", error: formatJsoncErrors(errors, content) };
+    const why = strict ? "; this file is read with JSON.parse, so it must be strict JSON (no comments, no trailing commas)" : "";
+    return { kind: "syntax-error", error: `${formatJsoncErrors(errors, content)}${why}` };
   }
   rehabilitateProto(parsed);
   if (parsed === undefined || parsed === null) {

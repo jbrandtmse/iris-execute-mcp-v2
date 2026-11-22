@@ -58,12 +58,12 @@ import { ADAPTER_DATA_VERSION, CLIENT_ADAPTERS, CLIENT_DISPOSITIONS } from "../a
 import { detectClients } from "../detect.js";
 import { CLAUDE_CODE_PLUGIN_ID, describePluginDetection, detectClaudeCodePlugin } from "../claude-plugin-detect.js";
 import { diff } from "../diff.js";
-import { homeGuardReason, skillsHomeGuardReason } from "../home-guard.js";
+import { homeGuardReason, pathKey, skillsHomeGuardReason } from "../home-guard.js";
 import {
   apply,
   disable,
   enable,
-  holdsLegacyReferences,
+  isPreMoveStash,
   previewLegacyRemoval,
   remove,
   restore,
@@ -83,15 +83,13 @@ import {
   type ConfigSurfaceDiagnosis,
 } from "../readers.js";
 import {
-  findStash,
-  isManagerCreated,
   readState,
   recordManaged,
   resolveStateDir,
   writeState,
   type ManagerState,
 } from "../state.js";
-import { sharedPeers } from "../shared-files.js";
+import { recordingClients, sharedPeers } from "../shared-files.js";
 import { buildStatusMatrix, type LegacyFileStatus } from "../status.js";
 import {
   pinnedSpec,
@@ -682,9 +680,8 @@ async function cmdDetect(args: string[], deps: ResolvedDeps): Promise<number> {
     deps.stdout.write(`  ${client.displayName} (${client.client}) — ${client.detected ? "detected" : "not detected"}\n`);
     if (client.detected) {
       for (const probe of client.probes) {
-        const label = probe.kind === "config" ? `config ${probe.scope ?? ""}`.trim() : "appDir";
-        const shared = probe.sharedWith !== undefined && probe.sharedWith.length > 0 ? ` [shared with ${probe.sharedWith.join(", ")}]` : "";
-        deps.stdout.write(`      ${label}: ${probe.path} (${probe.exists ? "exists" : "missing"})${shared}\n`);
+        const label = probe.kind === "config" ? `${probe.legacy === true ? "old config" : "config"} ${probe.scope ?? ""}`.trim() : "appDir";
+        deps.stdout.write(`      ${label}: ${probe.path} (${probe.exists ? "exists" : "missing"})${sharedMarker(probe.sharedWith)}\n`);
       }
     }
   }
@@ -746,7 +743,7 @@ async function cmdStatus(args: string[], deps: ResolvedDeps): Promise<number> {
           managedPresent++;
           continue;
         }
-        const key = `${deps.platform === "linux" ? scope.path : scope.path.toLowerCase()}|${server.server}`;
+        const key = `${pathKey(deps.platform, scope.path)}|${server.server}`;
         if (!managedKeys.has(key)) {
           managedKeys.add(key);
           managedPresent++;
@@ -1129,6 +1126,16 @@ async function cmdDiff(args: string[], deps: ResolvedDeps): Promise<number> {
   const { plans, legacy } = planned;
 
   if (wantJson) {
+    // A consumer that renders only `servers[].text` (the MCP Clients view) must still preview every file the
+    // apply edits, so each old-location removal is also appended to the text of the first server it removes.
+    const legacyText = new Map<string, string>();
+    for (const file of legacy) {
+      if (file.error !== undefined) continue;
+      const first = plans.find((plan) => file.names.includes(plan.server));
+      if (first === undefined) continue;
+      const block = `--- old location ${file.path} (remove ${file.names.join(", ")}) ---\n${file.text}`;
+      legacyText.set(first.server, [legacyText.get(first.server), block].filter((part) => part !== undefined).join("\n\n"));
+    }
     emitJson(deps, "diff", true, {
       client: adapter.id,
       scope,
@@ -1139,7 +1146,7 @@ async function cmdDiff(args: string[], deps: ResolvedDeps): Promise<number> {
         // The envelope gets the SAME redaction as the text render — an
         // explicit-mode diffText carries the literal IRIS_PASSWORD (QA 33.3:
         // the JSON path previously emitted it raw).
-        text: redactPlanSecrets(plan),
+        text: [redactPlanSecrets(plan), legacyText.get(plan.server)].filter((part) => part !== undefined).join("\n\n"),
         // Kept for envelope compatibility: no client prompts for a native input since Story 44.2.
         missingInputIds: [] as string[],
       })),
@@ -1388,6 +1395,7 @@ async function cmdRestore(args: string[], deps: ResolvedDeps): Promise<number> {
     emitJson(deps, "restore", true, result);
   } else {
     deps.stdout.write(`${result.note ?? "restored"} -> ${result.path ?? "(unknown path)"}\n`);
+    if (result.sharedNote !== undefined) deps.stdout.write(`Note: ${result.sharedNote}\n`);
     deps.stdout.write(`Restart: ${adapter.restartHint}\n`);
   }
   return 0;
@@ -1468,9 +1476,7 @@ function recordedByAny(
   name: string,
   peers: readonly { client: string; scope: ClientScope }[],
 ): boolean {
-  return [{ client, scope }, ...peers].some(
-    (p) => isManagerCreated(state, p.client, p.scope, name) || findStash(state, p.client, p.scope, name) !== undefined,
-  );
+  return recordingClients(state, client, scope, name, peers).length > 0;
 }
 
 /** Parse a backup filename's flattened-ISO timestamp back into a Date; null when it does not match.
@@ -1532,7 +1538,7 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
   const visited = { parse: new Set<string>(), references: new Set<string>(), unrecorded: new Set<string>() };
   const firstVisit = (seen: Set<string>, scope: { path: string | null; sharedWith?: string[] }): boolean => {
     if (scope.sharedWith === undefined || scope.path === null) return true;
-    const key = deps.platform === "linux" ? scope.path : scope.path.toLowerCase();
+    const key = pathKey(deps.platform, scope.path);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -1856,7 +1862,7 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
     const adapter = CLIENT_ADAPTERS[client.client];
     for (const scope of client.scopes) {
       for (const file of scope.legacy ?? []) {
-        const fix = `npx -y -p ${pinnedSpec("@iris-mcp/client-config")} iris-mcp-clients apply --client ${client.client} --scope ${scope.scope} --servers <the server names>`;
+        const fix = `npx -y -p ${pinnedSpec("@iris-mcp/client-config")} iris-mcp-clients apply --client ${client.client} --scope ${scope.scope} --servers ${file.servers.join(",")}`;
         findings.push({
           check: "vscode-local-harness-entries",
           client: client.client,
@@ -1874,7 +1880,8 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
   }
   if (state !== null) {
     for (const stash of state.stashes) {
-      if (CLIENT_ADAPTERS[stash.client]?.legacyScopes === undefined || !holdsLegacyReferences(stash.entry)) continue;
+      const stashAdapter = CLIENT_ADAPTERS[stash.client];
+      if (stashAdapter === undefined || !isPreMoveStash(stashAdapter, stash.scope, stash.entry)) continue;
       findings.push({
         check: "vscode-local-harness-entries",
         client: stash.client,
@@ -1882,7 +1889,7 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
         path: null,
         entry: stash.name,
         detail:
-          `the stash of "${stash.name}" was recorded before ${stash.client} moved to its Copilot files and holds environment or input references the Copilot harness does not forward, so enable refuses it. ` +
+          `the stash of "${stash.name}" was recorded before ${stash.client} moved to its Copilot files (it holds environment or input references the Copilot harness does not forward, or lacks the type and tools keys of a Copilot user entry), so enable refuses it. ` +
           `Write a fresh entry with: npx -y -p ${pinnedSpec("@iris-mcp/client-config")} iris-mcp-clients apply --client ${stash.client} --scope ${stash.scope} --servers ${stash.name}`,
       });
     }

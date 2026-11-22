@@ -503,7 +503,7 @@ function backupsOf(box: Box, scope: string): string[] {
 
 describe("QA 44.2: the migration out of a non-canonical legacy .vscode/mcp.json (project scope, built bin)", () => {
   for (const fixture of LEGACY) {
-    it(`${fixture.label}: diff previews and writes nothing; apply moves only the owned entry; the old file is backed up; a second apply is a no-op`, () => {
+    it(`${fixture.label}: diff previews and writes nothing; apply moves only the owned entry; the old file is backed up; a second apply leaves both files byte-identical`, () => {
       const box = makeBox();
       const legacy = path.join(box.project, ".vscode", "mcp.json");
       seed(legacy, fixture.before);
@@ -525,9 +525,14 @@ describe("QA 44.2: the migration out of a non-canonical legacy .vscode/mcp.json 
       const ownBackups = path.join(box.stateDir, "backups", "vscode");
       expect(existsSync(ownBackups) ? allBytes(ownBackups).includes(fixture.before) : false).toBe(false);
 
+      // A re-apply is an in-place update (a backup is taken, as for claude-code): the contract is that no byte moves.
+      const mcpJson = path.join(box.project, ".mcp.json");
+      const before = readFileSync(mcpJson, "utf8");
       const again = box.run(APPLY("vscode", "project"));
       expect(again.status, again.stderr).toBe(0);
       expect(readFileSync(legacy, "utf8")).toBe(fixture.after);
+      expect(readFileSync(mcpJson, "utf8"), "the second apply leaves .mcp.json byte-identical").toBe(before);
+      expect(backupsOf(box, "project"), "the second apply takes no further old-file backup").toEqual([fixture.before]);
       const doctor = envelope(box.run(["doctor", "--json"], { env: IRIS_ENV }));
       expect((doctor.data.findings as { check: string }[]).filter((f) => f.check === "vscode-local-harness-entries")).toEqual([]);
     }, T);

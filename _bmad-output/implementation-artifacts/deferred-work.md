@@ -4106,8 +4106,32 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: low | footprint: in-story
 - evidence: packages/client-config/src/index.ts no longer exports them (Spec Change Log 3); an external importer breaks on a patch upgrade
 - 2026-11-22T21:49:01Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=harvest note=lead: keep the patch bump (decision #133) and make it semver-true by keeping the four exports as @deprecated re-exports that still work; for the code review to patch
+- 2026-11-22T22:21:18Z status=resolved-by:44-2-vs-code-copilot-mcp-configuration-targets by=cr note=src/deprecated.ts keeps the 4 names (+EnsureInputsResult) as working @deprecated exports; deprecated-exports.test.ts pins them (mutation M1 red)
 
 ### DW-733: The client-config ownership ledger is keyed (client, scope, name) with no file path, so a claude-code project record from one project counts as a sharing owner in another project's .mcp.json
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: med | footprint: in-story
 - evidence: state.ts:123-135 sameSlot/isManagerCreated ignore the path; shared-files.ts ownerClients reads them for the Story 44.2 shared-file rule; effect: vscode adopts-or-conflicts where a fresh write was right
 - 2026-11-22T21:49:01Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=harvest note=keying is pre-existing; the new shared-file rule is what reads it across projects; code review to patch within the state format if fix-risk allows, else re-own with the residual
+- 2026-11-22T22:21:18Z status=escalated owner=burndown by=cr note=fix-risk high: needs a file path on ledger records (spec 3.4 state shape) + per-file record/drop/stash; probe: claude-code mode change refused in a project VS Code never touched
+- 2026-11-22T22:21:18Z occurrence=44-2-vs-code-copilot-mcp-configuration-targets
+- 2026-11-22T22:25:45Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=lead note=decision_135:reproduced_on_built_CLI(claude-code_mode_change_in_project_B_refused_by_vscode_record_from_A);AD-15_regression=HIGH;rework_1_adds_optional_path_on_records
+
+### DW-734: The strict Copilot user file accepts a leading BOM (readers.ts strips U+FEFF before the strict parse)
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: QA probe: a BOM-prefixed ~/.copilot/mcp-config.json applies with exit 0 and keeps the BOM; whether the Agent Host's JSON.parse read strips a BOM is unverified
+- 2026-11-22T22:21:30Z status=wontfix-accepted owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=manager never adds a BOM; reopen_if=D-6 or a bundle check shows a BOM-prefixed mcp-config.json is not loaded
+
+### DW-735: A remove by one client of a shared .mcp.json entry leaves the other client's ledger record behind
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: high | footprint: in-story
+- evidence: QA probe: after claude-code remove, the vscode record stays; a later different claude-code entry makes a vscode re-apply conflict; dropping peer records is unsafe while records carry no path (DW-733)
+- 2026-11-22T22:21:30Z status=wontfix-accepted owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=reopen_if=DW-733 lands path-keyed records (then drop the peers' records for that file on remove)
+
+### DW-736: doctor labels a shared .mcp.json finding with the first client in registry order (claude-code) even for a VS Code-only user
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: QA probe: a vscode-only apply, then doctor lists [claude-code/project] reference findings; the spec requires the file checked once
+- 2026-11-22T22:21:30Z status=wontfix-accepted owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=reopen_if=a user reports a doctor finding labelled with a client they never configured
+
+### DW-737: The capture scripts the pre-44-2 oracle fixtures cite (capture-oracle.mjs, capture-oracle-unrecorded.mjs) are not in the repository
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: adapters-44-2-backcompat.test.ts and both oracle fixtures name node capture-oracle.mjs; git ls-files has no such script, so the oracle cannot be re-captured from 9f7797c5
+- 2026-11-22T22:21:30Z status=wontfix-accepted owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=reopen_if=the pre-44-2 oracle fixtures need refreshing or a review disputes a captured value

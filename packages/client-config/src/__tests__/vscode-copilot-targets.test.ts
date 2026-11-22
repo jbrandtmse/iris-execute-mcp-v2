@@ -166,6 +166,7 @@ describe("AC 44.2.2: the write targets", () => {
       const result = apply(ctx(), "vscode", "user", entryFor("iris-dev-mcp", "env-reference"), { fs });
       expect(result.ok, bad).toBe(false);
       expect(result.reason).toContain("unparseable");
+      expect(result.reason, "the refusal says why").toContain("must be strict JSON (no comments, no trailing commas)");
       expect(fs.readFile(USER_FILE)).toBe(bad);
       expect([...fs.files.keys()].filter((p) => p.includes("/backups/"))).toEqual([]);
     }
@@ -203,8 +204,32 @@ describe("AC 44.2.4: old installs are reported, then moved by apply through the 
       (f) => f.check === "vscode-local-harness-entries",
     );
     expect(findings.map((f) => f.path).sort()).toEqual([OLD_PROJECT, OLD_USER].sort());
-    for (const finding of findings) expect(finding.detail).toContain(`apply --client vscode --scope ${finding.scope}`);
+    for (const finding of findings) expect(finding.detail).toContain(`apply --client vscode --scope ${finding.scope} --servers iris-dev-mcp`);
     expect(fs.readFile(OLD_USER)).toBe(OLD_USER_TEXT);
+    expect(fs.readFile(OLD_PROJECT)).toBe(OLD_PROJECT_TEXT);
+  });
+
+  it("an old .vscode/mcp.json alone (no Code app folder, no new file) still detects vscode, and status and doctor report it", async () => {
+    const fs = new MemFs();
+    fs.seed(OLD_PROJECT, OLD_PROJECT_TEXT);
+    expect(fs.exists(`${HOME}/.config/Code`)).toBe(false);
+    const detect = JSON.parse((await cli(fs, ["detect", "--json"])).stdout) as {
+      data: { clients: Array<{ client: string; detected: boolean; probes: Array<{ path: string; exists: boolean; legacy?: boolean }> }> };
+    };
+    const row = detect.data.clients.find((c) => c.client === "vscode");
+    expect(row?.detected).toBe(true);
+    expect(row?.probes.filter((p) => p.exists)).toEqual([{ kind: "config", scope: "project", path: OLD_PROJECT, exists: true, legacy: true }]);
+
+    const status = JSON.parse((await cli(fs, ["status", "--json"])).stdout) as {
+      data: { clients: Array<{ client: string; scopes: Array<{ scope: string; legacy?: Array<{ path: string; servers: string[] }> }> }> };
+    };
+    const scopes = status.data.clients.find((c) => c.client === "vscode")?.scopes ?? [];
+    expect(scopes.find((s) => s.scope === "project")?.legacy).toEqual([{ path: OLD_PROJECT, file: "ok", servers: ["iris-dev-mcp"] }]);
+
+    const doctor = await cli(fs, ["doctor", "--json"]);
+    expect(doctor.exit).toBe(1);
+    const findings = (JSON.parse(doctor.stdout) as { data: { findings: Array<{ check: string; path: string | null }> } }).data.findings;
+    expect(findings.filter((f) => f.check === "vscode-local-harness-entries").map((f) => f.path)).toEqual([OLD_PROJECT]);
     expect(fs.readFile(OLD_PROJECT)).toBe(OLD_PROJECT_TEXT);
   });
 
@@ -228,11 +253,47 @@ describe("AC 44.2.4: old installs are reported, then moved by apply through the 
     fs.seed(OLD_PROJECT, OLD_PROJECT_TEXT);
     const run = await cli(fs, ["diff", "--client", "vscode", "--scope", "project", "--servers", "iris-dev-mcp", "--json"]);
     expect(run.exit).toBe(0);
-    const data = (JSON.parse(run.stdout) as { data: { legacy?: Array<{ path: string; names: string[]; text: string }> } }).data;
+    const data = (
+      JSON.parse(run.stdout) as {
+        data: { servers: Array<{ server: string; text: string }>; legacy?: Array<{ path: string; names: string[]; text: string }> };
+      }
+    ).data;
     expect(data.legacy?.[0]).toMatchObject({ path: OLD_PROJECT, names: ["iris-dev-mcp"] });
     expect(data.legacy?.[0]?.text).toContain("iris-dev-mcp");
+    // The MCP Clients view renders only servers[].text, so the old-file removal is there too.
+    expect(data.servers[0]?.text).toContain(`--- old location ${OLD_PROJECT} (remove iris-dev-mcp) ---\n${data.legacy?.[0]?.text ?? "<none>"}`);
+    const clean = await cli(new MemFs(), ["diff", "--client", "vscode", "--scope", "project", "--servers", "iris-dev-mcp", "--json"]);
+    expect((JSON.parse(clean.stdout) as { data: { servers: Array<{ text: string }> } }).data.servers[0]?.text).not.toContain("old location");
     expect(fs.readFile(OLD_PROJECT)).toBe(OLD_PROJECT_TEXT);
     expect(fs.exists(PROJECT_FILE)).toBe(false);
+  });
+
+  it("an apply whose only edit is the old-file removal still asks for confirmation: no --yes on a non-TTY exits 2 and edits nothing", async () => {
+    // Claude Code wrote the entry vscode would write, so the new file is an adoption (no write); only the old file changes.
+    const fs = new MemFs();
+    expect((await cli(fs, ["apply", "--client", "claude-code", "--scope", "project", "--servers", "iris-dev-mcp", "--yes"])).exit).toBe(0);
+    const applied = fs.readFile(PROJECT_FILE);
+    fs.seed(OLD_PROJECT, OLD_PROJECT_TEXT);
+    const run = await cli(fs, ["apply", "--client", "vscode", "--scope", "project", "--servers", "iris-dev-mcp"]);
+    expect(run.stdout).toContain("(adopt)");
+    expect(run.exit).toBe(2);
+    expect(run.stdout).toContain(`old location ${OLD_PROJECT}`);
+    expect(fs.readFile(OLD_PROJECT)).toBe(OLD_PROJECT_TEXT);
+    expect(fs.readFile(PROJECT_FILE)).toBe(applied);
+  });
+
+  it("an adopt-only apply writes no config file, so it needs no confirmation and records the ledger entry", async () => {
+    const fs = new MemFs();
+    expect((await cli(fs, ["apply", "--client", "claude-code", "--scope", "project", "--servers", "iris-dev-mcp", "--yes"])).exit).toBe(0);
+    const shared = fs.readFile(PROJECT_FILE);
+    const run = await cli(fs, ["apply", "--client", "vscode", "--scope", "project", "--servers", "iris-dev-mcp"]);
+    expect(run.exit, run.stderr).toBe(0);
+    expect(fs.readFile(PROJECT_FILE)).toBe(shared);
+    const ledger = readState(fs, STATE_DIR, "linux");
+    expect(ledger.ok && ledger.state.entries.map((e) => `${e.client}/${e.scope}/${e.name}`).sort()).toEqual([
+      "claude-code/project/iris-dev-mcp",
+      "vscode/project/iris-dev-mcp",
+    ]);
   });
 
   it("the new write fails: the old file is untouched and gets no backup (the old file is never edited before the new write re-parsed clean)", () => {
@@ -308,6 +369,35 @@ describe("AC 44.2.4: old installs are reported, then moved by apply through the 
     expect(fs.readFile(PROJECT_FILE)).not.toContain("iris-dev-mcp");
   });
 
+  it("remove --client vscode whose old-file sweep fails exits 1, names the old file and keeps its bytes", async () => {
+    const fs = new MemFs();
+    expect((await cli(fs, ["apply", "--client", "vscode", "--scope", "project", "--servers", "iris-dev-mcp", "--yes"])).exit).toBe(0);
+    const broken = '{ "servers": { "iris-dev-mcp": ';
+    fs.seed(OLD_PROJECT, broken);
+    const run = await cli(fs, ["remove", "--client", "vscode", "--scope", "project", "--server", "iris-dev-mcp", "--json"]);
+    expect(run.exit).toBe(1);
+    const envelope = JSON.parse(run.stdout) as { ok: boolean; error?: string };
+    expect(envelope.ok).toBe(false);
+    expect(envelope.error).toContain(OLD_PROJECT);
+    expect(fs.readFile(OLD_PROJECT)).toBe(broken);
+    expect(JSON.parse(fs.readFile(PROJECT_FILE))).toEqual({ mcpServers: {} });
+  });
+
+  it("only canonical names are swept from an old file: a foreign entry under a name the engine API applies stays byte for byte", () => {
+    const fs = new MemFs();
+    const oldText = `{\n  "servers": {\n    "my-tool": { "command": "mine" }\n  }\n}\n`;
+    fs.seed(OLD_PROJECT, oldText);
+    // The type admits only canonical names; the engine still guards other names at run time.
+    const custom = { ...entryFor("iris-dev-mcp", "env-reference"), name: "my-tool" } as unknown as CanonicalEntry;
+    const applied = apply(ctx(), "vscode", "project", custom, { fs });
+    expect(applied.ok, applied.reason ?? "").toBe(true);
+    expect(applied).not.toHaveProperty("legacy");
+    expect(fs.readFile(OLD_PROJECT)).toBe(oldText);
+    const removed = remove(ctx(), "vscode", "project", "my-tool", { fs });
+    expect(removed.ok, removed.reason ?? "").toBe(true);
+    expect(fs.readFile(OLD_PROJECT)).toBe(oldText);
+  });
+
   it("an adapter with no legacy files (claude-code) gets no `legacy` field on apply or remove", () => {
     const fs = new MemFs();
     const claude = CLIENT_ADAPTERS["claude-code"];
@@ -348,13 +438,50 @@ describe("AC 44.2.4: a stash recorded before the move", () => {
     }
   });
 
-  it("a stash without legacy references enables as before, and so does every other client's stash", () => {
+  it("a user stash in the old {command, args, env} shape is refused even with no references; the stash is kept; apply drops it", async () => {
     const fs = new MemFs();
-    fs.seed(`${STATE_DIR}/state.json`, stashState({ command: "npx", env: { IRIS_HOST: "literal.example.com" } }));
+    fs.seed(`${STATE_DIR}/state.json`, stashState({ command: "npx", args: ["-y", "@iris-mcp/dev@1"], env: { IRIS_HOST: "literal.example.com" } }));
+    fs.seed(USER_FILE, '{"mcpServers":{}}\n');
+    const result = enable(ctx(), "vscode", "user", "iris-dev-mcp", { fs });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("type and tools keys");
+    expect(result.reason).toContain("apply --client vscode --scope user --servers iris-dev-mcp");
+    expect(fs.readFile(USER_FILE)).toBe('{"mcpServers":{}}\n');
+    const kept = readState(fs, STATE_DIR, "linux");
+    expect(kept.ok && kept.state.stashes).toHaveLength(1);
+
+    const doctor = await cli(fs, ["doctor", "--json"]);
+    const findings = (JSON.parse(doctor.stdout) as { data: { findings: Array<{ check: string; entry?: string }> } }).data.findings;
+    expect(findings.filter((f) => f.check === "vscode-local-harness-entries" && f.entry === "iris-dev-mcp")).toHaveLength(1);
+
+    expect(apply(ctx(), "vscode", "user", entryFor("iris-dev-mcp", "env-reference"), { fs }).ok).toBe(true);
+    const after = readState(fs, STATE_DIR, "linux");
+    expect(after.ok && after.state.stashes).toHaveLength(0);
+  });
+
+  it("a user stash in the Copilot shape, and a project stash in the standard shape, enable as before", () => {
+    const copilotEntry = { type: "stdio", command: "npx", args: ["-y", "@iris-mcp/dev@1"], env: { IRIS_HOST: "literal.example.com" }, tools: ["*"] };
+    const fs = new MemFs();
+    fs.seed(`${STATE_DIR}/state.json`, stashState(copilotEntry));
     fs.seed(USER_FILE, '{"mcpServers":{}}\n');
     const result = enable(ctx(), "vscode", "user", "iris-dev-mcp", { fs });
     expect(result.ok, result.reason ?? "").toBe(true);
-    expect(fs.readFile(USER_FILE)).toContain("literal.example.com");
+    expect(JSON.parse(fs.readFile(USER_FILE))).toEqual({ mcpServers: { "iris-dev-mcp": copilotEntry } });
+
+    const projectFs = new MemFs();
+    const standardEntry = { command: "npx", args: ["-y", "@iris-mcp/dev@1"], env: { IRIS_HOST: "literal.example.com" } };
+    projectFs.seed(
+      `${STATE_DIR}/state.json`,
+      JSON.stringify({
+        version: 1,
+        entries: [],
+        stashes: [{ client: "vscode", scope: "project", name: "iris-dev-mcp", entry: standardEntry, disabledAt: "2026-11-01T00:00:00.000Z" }],
+      }),
+    );
+    projectFs.seed(PROJECT_FILE, '{"mcpServers":{}}\n');
+    const projectResult = enable(ctx(), "vscode", "project", "iris-dev-mcp", { fs: projectFs });
+    expect(projectResult.ok, projectResult.reason ?? "").toBe(true);
+    expect(JSON.parse(projectFs.readFile(PROJECT_FILE))).toEqual({ mcpServers: { "iris-dev-mcp": standardEntry } });
   });
 
   it("another client's stash that holds ${env:...} still enables: only the vscode adapter refuses legacy references", () => {

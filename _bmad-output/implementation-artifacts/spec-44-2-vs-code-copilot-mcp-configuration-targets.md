@@ -2,10 +2,10 @@
 title: 'Story 44.2: VS Code Copilot MCP Configuration Targets'
 type: 'bugfix'
 created: '2026-11-22'
-status: 'done'
+status: 'in-progress'
 baseline_revision: '9f7797c595c4a49840062a2bf517101b93476147'
 baseline_commit: '9f7797c595c4a49840062a2bf517101b93476147'
-review_loop_iteration: 0
+review_loop_iteration: 1
 followup_review_recommended: true
 context:
   - '{project-root}/.claude/rules/project-rules.md'
@@ -160,6 +160,54 @@ deferred:
 - AC 44.2.8: Given task 1's capture, when the back-compat pins run, then the 14 other adapters, `CLIENT_DISPOSITIONS`, exit codes and envelope are unchanged, and the old-format fixtures still parse.
 - AC 44.2.9: Given the CHANGELOG and changeset, when the release is planned, then they name `@iris-mcp/client-config` as the must-carry package and publish nothing.
 - DW-721 (action item `epic-42-retro-item-11-charter-a-story-due-before-february-2027`): closed in delivery by tasks 2-12. The item itself closes at the Epic 44 retrospective, with the owner's confirmation.
+
+### Review Findings
+
+Code review 2026-11-22 (full mode, layers Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor; all four delivered). 28 rows (counted from this list): high 1, medium 8, low 18, false 1; 17 patched, 5 deferred to the ledger (1 escalated, 4 `wontfix-accepted`), 6 rejected. Each row: severity, fix-risk, footprint, disposition.
+
+- [x] [Review][Patch] **HIGH** The MCP Clients view previews only `diff --json` `servers[].text`, so the old-file removal of a vscode apply was confirmed without its diff (AD-30 "diff preview before confirmation"; the AD binds the view) [packages/client-config/src/cli/clients.ts cmdDiff] — fix-risk low (CLI-only, additive text), in-story. Each old-location removal is now also appended to the text of the first server it removes, so the released vsix's view shows it through the npm `@1` CLI with no extension change; `legacy` stays in the envelope. (blind-hunter)
+- [x] [Review][Patch] MED DW-732: the `patch` changeset removed four public exports [packages/client-config/src/index.ts] — fix-risk low, in-story. New `src/deprecated.ts` keeps `ensureInputs`, `presentInputIds`, `VscodeInput`, `VSCODE_PASSWORD_INPUT_ID` (and `EnsureInputsResult`) as working `@deprecated` exports; `SynthesisResult.inputs?` is back as a deprecated never-set field; changeset and CHANGELOG say "deprecated". Pinned by `deprecated-exports.test.ts`. Ledger DW-732 resolved. (acceptance-auditor+blind-hunter)
+- [x] [Review][Patch] MED A pre-move vscode user stash with no `${env:`/`${input:` references (explicit or server-manager mode) was enabled into `~/.copilot/mcp-config.json` in the old `{command,args,env}` shape, with no `type` or `tools` [packages/client-config/src/engine.ts isPreMoveStash] — fix-risk low, in-story. `isPreMoveStash` also treats a user-scope stash without `type`/`tools` as pre-move: `enable` refuses it (stash kept), `apply` drops it, doctor reports it; the test that pinned the old behavior was replaced. (acceptance-auditor+blind-hunter+edge-case-hunter)
+- [x] [Review][Patch] MED vscode was not detected from an old `.vscode/mcp.json` alone (no Code app folder, e.g. a remote host), so status and doctor reported nothing (AC 44.2.4) [packages/client-config/src/detect.ts detectionProbes] — fix-risk low, in-story. The adapter's legacy files are now config probes with an additive `legacy: true`. (verification-gap)
+- [x] [Review][Patch] MED No test of a failed old-file sweep on `remove` (exit 1) [vscode-copilot-targets.test.ts] — fix-risk low, in-story. Test added. (verification-gap)
+- [x] [Review][Patch] MED The apply confirmation gate's new terms (legacy-only edit; adopt-only) were untested [vscode-copilot-targets.test.ts] — fix-risk low, in-story. Two tests added; the legacy-only one drives an adopt plus an old-file removal so the term is isolated. (verification-gap)
+- [x] [Review][Patch] MED "strict JSON at every stage" passed even if every operation refused [qa-44-2-shared-lifecycle.test.ts] — fix-risk low, in-story. Each stage now asserts `ok`, `changed` and the entry set, and `remove` runs too. (verification-gap)
+- [x] [Review][Patch] MED Rule 2 near-copies: `previewLegacyRemoval` and `withLegacyRemoval` repeated the file-selection and parse code; `cli/clients.ts` `recordedByAny` repeated `shared-files.ts` `ownerClients`' filter [packages/client-config/src/engine.ts, src/cli/clients.ts] — fix-risk low, in-story. One `legacyTargets` step and one exported `recordingClients` now serve both sides (messages unchanged). (review lead)
+- [x] [Review][Defer] MED DW-733 / path-less ownership ledger [packages/client-config/src/state.ts:123-135] — deferred: fix-risk high (a file path on records changes the spec §3.4 state shape pinned by `engine-e2e.test.ts`, plus per-file record/drop/stash semantics). Probed on the built CLI with a scratch HOME: a claude-code mode change in project B (VS Code never configured there) exits 1 "shared with vscode" because of a vscode record from project A; Edge Case Hunter adds pre-move vscode records from `.vscode/mcp.json` and a vscode sole-owner overwrite. The CHANGELOG claim is corrected with the limitation and the one-shot workaround (probed). Ledger DW-733 `escalated owner=burndown`, occurrence appended. (blind-hunter+edge-case-hunter)
+- [x] [Review][Patch] LOW Strict-file refusal did not say why (QA finding 2) [packages/client-config/src/readers.ts] — patched: the error adds "this file is read with JSON.parse, so it must be strict JSON (no comments, no trailing commas)".
+- [x] [Review][Patch] LOW Fix commands: doctor printed `--servers <the server names>`; the enable refusal printed a bare `iris-mcp-clients` and omitted `${command:` — patched (real names; the pinned `npx -y -p @iris-mcp/client-config@1` form; `${command:...}` named). (blind-hunter)
+- [x] [Review][Patch] LOW `restore` of a shared `.mcp.json` rolls back the whole file without naming the other reader [packages/client-config/src/engine.ts restore] — patched: `sharedWith`/`sharedNote` on the same rule as disable/remove (claude-code silent until a peer has records). (edge-case-hunter)
+- [x] [Review][Patch] LOW `~/.copilot/mcp-config.json` is also the GitHub Copilot CLI's config and the docs did not say so [docs/client-config/README.md] — patched (one sentence). (blind-hunter+edge-case-hunter)
+- [x] [Review][Patch] LOW Duplicated path key and shared marker in the CLI (status count, doctor `firstVisit`, `cmdDetect`) [src/cli/clients.ts] — patched: `home-guard.ts` `pathKey` (shared with `samePath`), and `sharedMarker` reused. (blind-hunter)
+- [x] [Review][Patch] LOW The old-file sweep removed any name in `names`, so a foreign non-canonical entry could go through the engine API (a cast past the `CanonicalEntry` type) [engine.ts legacyTargets] — patched: only canonical names are swept, matching what `status` reports. (edge-case-hunter)
+- [x] [Review][Patch] LOW The QA "a second apply is a no-op" label overclaimed: a re-apply is an in-place update with a backup, exactly as for claude-code (probed) [qa-44-2-vscode-process.test.ts] — patched: asserts `.mcp.json` byte-identical and no further old-file backup; title corrected. (verification-gap)
+- [x] [Review][Patch] LOW `certify.mjs run vscode` followed an exported `COPILOT_HOME` past the scratch HOME [packages/client-config/scripts/certify.mjs] — patched: the vscode pass refuses (exit 2) while `COPILOT_HOME` is set; probed with scratch dirs. (verification-gap)
+- [x] [Review][Patch] LOW Mutation lines missing for the review-pass pins and misplaced for QA's (Rule 19) — closed in this pass: see `## Verification`. AC 44.2.8 keeps its one mutation (Rule 19 is one per AC). (verification-gap)
+- [x] [Review][Defer] LOW BOM accepted in the strict user file (QA finding 1) — deferred: unverified whether the Agent Host strips a BOM; ledger DW-734 `wontfix-accepted`.
+- [x] [Review][Defer] LOW A peer's ledger record outlives a shared-file remove (QA finding 3) — deferred: dropping peer records is unsafe while records carry no path; ledger DW-735 `wontfix-accepted` (reopen with DW-733).
+- [x] [Review][Defer] LOW doctor labels a shared-file finding with the first client in registry order (QA finding 5) — deferred: ledger DW-736 `wontfix-accepted`.
+- [x] [Review][Defer] LOW The oracle capture scripts the pre-44-2 fixtures cite are not in the repository — deferred: ledger DW-737 `wontfix-accepted`. (acceptance-auditor)
+
+Rejected:
+- `false` Blind Hunter: spec frontmatter `status: done` vs sprint `review` — the frontmatter is build-auto's machine state; the sprint tracker is the review state.
+- `low` Edge Case Hunter: `COPILOT_HOME` with `~` or a relative path — VS Code does not expand it either (probe V1), the `CLAUDE_CONFIG_DIR` override behaves the same, and a guard adds a branch for an unusual setting.
+- `low` Edge Case Hunter: `status` reports only canonical names in old files — the CLI writes only canonical names; the sweep now matches it.
+- `low` Edge Case Hunter: a claude-code disable/remove with no peer record is silent — spec-bound (`by-design`): the AD-15 byte-identical bound in Boundaries and the earlier triage.
+- `low` QA finding 4: a whitespace-only line after removing the last legacy entry — parity with the pinned pre-story claude-code behavior.
+- `low` Blind Hunter: the view shows no `legacy`/`sharedWith` status rows — the view's doctor run lists the old-location finding; rendering more needs extension code.
+
+### Rework (iteration 1 of 3; lead re-open 2026-11-22, wave-9 decision #135)
+
+The review's DW-733 deferral is overruled: the lead reproduced it on the built CLI with a scratch HOME (vscode `apply --scope project` in project A, then a claude-code mode change in project B, where VS Code was never configured, exits 1 "the file is shared with vscode"). That breaks the Boundaries' back-compat bound ("`claude-code` behavior on a `.mcp.json` that no `vscode` record touches is byte-identical to before") and AD-15, so it is a HIGH that cannot ship. Work ONLY these items:
+
+- [ ] [Review][HIGH] DW-733: shared-file ownership must be per file, not per (client, scope, name) [packages/client-config/src/state.ts, src/shared-files.ts, src/engine.ts]. Record the resolved absolute config path on every ownership and stash record this story's code writes, as an ADDITIVE optional field (old state files still parse; AD-15 additive fields; update the documented state shape that `engine-e2e.test.ts` pins only by adding the optional field). For the shared-file rule, a peer client's record counts as a sharing owner only when its recorded path is the same file (`home-guard.ts` `samePath`/`pathKey`). A record without a path (written before this story, or by a pre-44.2 vscode `.vscode/mcp.json` write) never counts as a peer owner of a `.mcp.json`. claude-code's existing rule (an unrecorded canonical entry counts as its own, AD-15) stays. Pins, on the built CLI as a child process under a scratch HOME where stated:
+  - the lead's repro (vscode in project A, claude-code mode change in project B) exits 0 and writes exactly what pre-44.2 claude-code wrote (compare with the pre-story claude-code oracle), both directions (claude-code in A, vscode in B too);
+  - a pre-44.2-shaped vscode project record (no path) does not block claude-code in any project;
+  - a genuinely shared file (both clients, same project) still adopts an equal entry and refuses a differing one, both directions;
+  - an old state file without paths parses and behaves as before;
+  - a `mutation:` line for each pin (Rule 19).
+- [ ] [Review] DW-735 (peer record outlives a shared-file remove; `wontfix-accepted` "reopen with DW-733"): with per-file records, re-check it. Fix it in this pass only if it is now a two-way door (about 15 lines with its test); otherwise leave it as filed and say why in `## Auto Run Result`.
+- [ ] [Review] `CHANGELOG.md` and the docs: remove the DW-733 limitation and its workaround text once the fix lands.
 
 ## Spec Change Log
 
@@ -348,6 +396,22 @@ Mutation evidence (review pass, 2026-11-22; each applied to the source, the name
 - mutation: AC 44.2.5 (help text) -- the help line `${VAR} references` set to `${env:VAR} references` in `cli/clients.ts` -> `vscode-copilot-targets.test.ts` "the CLI help text names ${VAR} and never ${env:VAR}" red (1 test).
 - mutation: AC 44.2.7 (re-dated marker) -- the vscode `markedOn` in `certification-results.json` set back to `2026-11-21` -> `qa-42-9-certification-gate.test.ts` "every humanOnly marker is dated the implementation date" and the table-sync control red (2 tests).
 - AC 44.2.1, 44.2.6 and 44.2.9 have no executable pin by design: probe claims, a grep enumeration, and a changeset and CHANGELOG that the release step consumes (a test on a changeset file would fail after release).
+
+Mutation evidence (code review, 2026-11-22; each applied with `perl -0pi`, the named test run with `-t`, the file restored from a copy and `cmp`-checked byte-identical):
+- mutation: AC 44.2.9 / DW-732 -- the `./deprecated.js` re-export block removed from `index.ts` -> `deprecated-exports.test.ts` "the package entry point still exports the four names" red (1 test).
+- mutation: AC 44.2.2 (pre-move stash shape) -- `isPreMoveStash` returns false whenever no old-harness reference is present -> `vscode-copilot-targets.test.ts` "a user stash in the old {command, args, env} shape is refused ..." red (1 test).
+- mutation: AC 44.2.4 (reporting; detection) -- the `legacyScopes` probe loop in `detect.ts` iterates nothing -> "an old .vscode/mcp.json alone ... still detects vscode, and status and doctor report it" red (1 test).
+- mutation: AC 44.2.4 (reporting; old file named in a doctor fix) -- the doctor fix back to `--servers <the server names>` -> "status and doctor report the owned entries in both old files" red (1 test).
+- mutation: AC 44.2.4 (preview of the migration write in `diff --json` text) -- `servers[].text` without the old-location block -> "the preview shows the old-file removal, and a diff writes nothing" red (1 test).
+- mutation: AC 44.2.4 (the `remove` sweep) -- `remove` returns without `withLegacyRemoval` -> "remove --client vscode also removes the owned old-file entry" red (1 test).
+- mutation: AC 44.2.4 (a failed sweep on `remove`) -- `cmdToggle`'s `legacyFailures` filter made empty -> "remove --client vscode whose old-file sweep fails exits 1 ..." red (1 test).
+- mutation: AC 44.2.4 (confirmation of a legacy-only edit) -- the `legacy.some(...)` term dropped from `wantsWrite` -> "an apply whose only edit is the old-file removal still asks for confirmation" red (1 test; the first version of this test, built on a re-apply, stayed green because a re-apply plans `update`, and was rewritten on an adopt).
+- mutation: AC 44.2.3 (adopt needs no confirmation) -- `&& plan.mechanism !== "adopt"` dropped -> "an adopt-only apply writes no config file, so it needs no confirmation" red (1 test).
+- mutation: AC 44.2.3 (restore names the other reader) -- the `sharedWith`/`sharedNote` spread dropped from `restore` -> `shared-mcp-json.test.ts` "a restore of the shared file names the other reader ..." red (1 test).
+- mutation: AC 44.2.4 (only canonical names leave an old file) -- `isCanonicalName(name) &&` dropped from `legacyTargets` -> "only canonical names are swept from an old file" red (1 test).
+- mutation: matrix row "Strict JSON user file" (the refusal says why) -- the strict hint disabled in `readers.ts` -> "a user file with a comment or a trailing comma is refused at validate" red (1 test).
+- mutation: matrix row "Strict JSON user file" (every stage) -- the strict JSON reader refuses every file -> `qa-44-2-shared-lifecycle.test.ts` "the strict file written by the manager is itself strict JSON ... at every stage" red (1 test; green before this pass's patch, because the stages' results were never checked).
+- QA-stage mutation lines for AC 44.2.2 (`COPILOT_HOME` empty, no literal secret, strict refusal), AC 44.2.3 (shared rule, listing once, CRLF) and AC 44.2.4 (backup location, `removalEdits`, darwin legacy path) are recorded under `## Tests Added` (2026-11-22) and count here.
 
 **Shared surfaces:**
 - the `CLIENT_ADAPTERS` vscode record and `ADAPTER_DATA_VERSION`;
