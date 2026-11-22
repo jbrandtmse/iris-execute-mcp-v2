@@ -16,8 +16,8 @@ Fix five defects that shipped in `1.1.0` and were found by Epic 42's reviews. Ea
 
 ## Requirements & Constraints
 
-- **Probe before building.** Each story verifies its API and documentation claims first, and amends the epic text in place if a claim is wrong. Three claims are known to be unverified or contradicted:
-  - the DocDB registration API (`$$Create^%SYS.DOCDB`: signature, privilege, `%SYS` requirement, whether REST DELETE removes the record, the version range);
+- **Probe before building.** Each story verifies its API and documentation claims first, and amends the epic text in place if a claim is wrong. Open claims to settle:
+  - the DocDB registration API is already probed (see Technical Decisions, 44.1); what remains is the oldest IRIS version, inside the 2023.1+ claim, that requires the `Security.DocDBs` record, or a recorded residual risk;
   - VS Code's Copilot-harness file semantics (the Windows path, the workspace `.mcp.json` gate, which file wins on a name conflict, forwarding of extension-provided definitions);
   - the Atelier compile envelope. An earlier review found that a partly failing compile answers HTTP 200 with the failure only in the localized console.
 - **No new tool and no new governance key.** Tool counts stay unchanged. `GOVERNANCE_BASELINE` stays frozen at `1e62c5ad5bf7`/141, and is checked with `:check` only. A story that needs a new tool, action or key stops and amends the epic first.
@@ -31,7 +31,7 @@ Fix five defects that shipped in `1.1.0` and were found by Epic 42's reviews. Ea
 
 ## Technical Decisions
 
-- **The architecture spine binds every story.** Where a story and the spine disagree, the spine wins and the story is amended. The spine's AD-14, AD-30 and AD-34 already carry this epic's amendments.
+- **The architecture spine binds every story.** Where a story and the spine disagree, the spine wins and the story is amended. The spine's AD-14, AD-15, AD-30 and AD-34 already carry this epic's amendments.
 - **IRIS-side handlers (44.1).**
   - Handlers are thin: validate the input, switch namespace, delegate to system classes, and return raw data. Judgment lives in TypeScript.
   - New routes are additive-only within the major version, proven by a pin.
@@ -39,6 +39,14 @@ Fix five defects that shipped in `1.1.0` and were found by Epic 42's reviews. Ea
   - `Security.*` calls run in `%SYS`.
   - Real IRIS error text passes through `SanitizeError`, never a generic "Failed to X".
   - Authorization belongs to IRIS: no privilege pre-checks and no role escalation.
+- **DocDB registration (44.1), as probed.**
+  - `create` creates the database and registers its `Security.DocDBs` record in one tool call, and repairs a database that exists without a record. A failed registration reports the real IRIS text and says whether the database itself was created.
+  - The output gains the additive fields `registered` and `created`. The `iris_docdb_manage` description change is append-only, recorded as the sanctioned change `S-44.1-docdb-manage-text`.
+  - The registration handler joins the existing `ExecuteMCPv2.REST.Security` class. No class is added, so the bootstrap rosters do not change, but the embed is regenerated.
+  - `Ens.Setting.Report.base` passes a lowercase `resource` key that `Security.DocDBs` ignores. It is not a model to copy.
+  - `drop` needs no change: both the REST DELETE and `DropDatabase` already remove the record. A database created by `1.1.0` or earlier answers #822 even to `drop` until `create` repairs it.
+  - `translateDocDbAccessDenied` names the missing record when the service is enabled but the database has no record. Its disabled-service branch is unchanged.
+  - DocDB indexes every property it creates and has no separate index operation. Indexing a property just created answers #5805, so a lifecycle test's `index` step targets a property not created before.
 - **Bootstrap discipline.**
   - A change to a bootstrapped class regenerates the embed in the same story and records `BOOTSTRAP_VERSION` from → to. It is `1.1.0+2.244fe8623c76` at the wave start.
   - A new class joins both rosters: `gen-bootstrap.mjs` and `bootstrap.test.ts`.
@@ -65,7 +73,7 @@ Fix five defects that shipped in `1.1.0` and were found by Epic 42's reviews. Ea
 - **Shared IRIS instance.**
   - Never stop it, and never toggle a service on it.
   - Never break a bootstrapped class on it: the `%ALL` mapping sends `ExecuteMCPv2` to HSCUSTOM.
-  - DocDB lifecycle and broken-compile proofs run on a throwaway, started only through `scripts/throwaway-iris.mjs`.
+  - DocDB lifecycle and broken-compile proofs run on a throwaway, started only through `scripts/throwaway-iris.mjs`. The DocDB lifecycle runs on the shared instance only if `%Service_DocDB` is already enabled there.
   - Writes go only to disposable `ExecuteMCPv2.Temp.*` classes and disposable DocDB names, which the story removes afterwards. DocDB names have no underscore.
 - **IRIS-side unit tests.** Compare the reported `total` with the expected number of `Test*` methods.
 
