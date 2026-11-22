@@ -4056,3 +4056,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-22T06:41:00Z status=decision-pending owner=burndown by=planner note=human=owner submits at claude.ai/directory/manage; before that, a pack story adds the icon (owner-supplied square PNG, 512-2048 px), a LICENSE in skills-pack and its README, and network.hosts, released in a patch tag; nothing is submitted by an agent
 - 2026-11-22T07:02:05Z status=decision-pending owner=burndown by=merge_gate note=kept decision-pending at the epic-42 close on the Planner's instruction: an owner decision relayed by the Planner (decision #130)
 - 2026-11-22T16:58:29Z status=decision-pending owner=burndown by=x0 note=Epic 44 X.0 gate: an owner decision; epics.md Epic 44 lists it Out of scope and the Planner relays that it stays decision-pending (wave-8 decision #131); asked again at the next decision sheet
+
+### DW-723: iris_docdb_property action=index on a property that already exists always fails with ERROR #5805 (DocDB indexes every property it creates; the tool re-creates it)
+- source: spec-44-1-docdb-create-registers-the-database.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: irislib/%DocDB/Database.cls:384-388 and irislib/%Api/DocDB/v1.cls:355-374; live 2026.2 throwaway: create prop then index the same prop -> HTTP 400 #5805; docdb.ts:688-693
+- 2026-11-22T19:00:13Z status=routed owner=burndown by=harvest note=out of 44.1: the fix changes iris_docdb_property request bytes that AC 44.1.7 pins
+
+### DW-724: A property created by iris_docdb_property never matches an iris_docdb_find filter (the tool sends no path, so the property is never populated)
+- source: spec-44-1-docdb-create-registers-the-database.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: live 2026.2 throwaway: property category created without path, doc inserted, find [category,test,=] -> []; with ?path=category it matches; docs inserted before the property are not backfilled; docdb.ts:683-687
+- 2026-11-22T19:00:13Z status=routed owner=burndown by=harvest note=out of 44.1 (pinned request bytes); probe whether path should default to the property name
+
+### DW-725: The iris_docdb_manage description claims create takes optional property definitions; the input schema has no such field
+- source: spec-44-1-docdb-create-registers-the-database.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: docdb.ts:266 vs inputSchema docdb.ts:271-284 (action, database, namespace only)
+- 2026-11-22T19:00:13Z status=routed owner=burndown by=harvest note=AC 44.1.5 appends text only (Frozen goldens), so the false clause needs a recorded AD-15 correction
