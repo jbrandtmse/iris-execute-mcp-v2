@@ -2,6 +2,21 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Unreleased] — Story 44.2: VS Code Copilot MCP Configuration Targets
+
+### Fixed
+
+- **`iris-mcp-clients apply --client vscode` writes the files the Copilot harness reads (DW-721).** The adapter used to write VS Code's own `mcp.json` files (the profile `mcp.json` and `.vscode/mcp.json`, root key `servers`, `${env:VAR}` and an `inputs` password prompt), which belong to the Local harness that VS Code removes in February 2027. The Copilot harness, the default since VS Code 1.143, does not forward those entries today: a profile entry with any variable, and a `.vscode/mcp.json` entry with `${input:...}`, are skipped. The adapter now writes the user file `~/.copilot/mcp-config.json` (`$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set and non-empty; on Windows `%USERPROFILE%\.copilot\mcp-config.json`) and the workspace-root `.mcp.json`, both keyed `mcpServers` with `${VAR}` references and no `inputs`.
+
+### Changed
+
+- **VS Code user entries are shaped like VS Code's own.** A user entry is `{type: "stdio", command, args, env, tools: ["*"]}`; a project entry in `.mcp.json` is exactly what `claude-code` writes there. `env-reference` writes `"IRIS_PASSWORD": "${IRIS_PASSWORD}"`, resolved from the environment VS Code was launched with; `server-manager` writes no secret; only `explicit` (with its typed confirmation) writes a literal. The `inputs` password prompt is gone, so the `--json` envelope's `inputsMerged` is always `[]`. The user file is strict JSON: a file with a comment or a trailing comma is refused at validate.
+- **A `.mcp.json` shared by Claude Code and VS Code is owned per entry name.** An entry that the other client would write identically is adopted (nothing is written), a different one is a conflict (exit 1, nothing written), and `disable` and `remove` say that the other client reads the same file. `detect`, `status` and `doctor` list the file under both clients, with a `sharedWith` marker, and count and check it once. Claude Code's behavior on a `.mcp.json` that VS Code does not touch is unchanged.
+- **Old installs are reported and moved.** `status` lists, per scope, the owned entries still in the old files (`legacy`), and `doctor` reports them as `vscode-local-harness-entries` with the `apply` command that fixes it. `apply --client vscode --scope <user|project>` writes the new file first, then removes the owned entries from that scope's old file through the same write protocol (foreign entries, comments and `inputs` there stay byte-identical); `remove` sweeps them too. A stash recorded before the move that holds `${env:...}` or `${input:...}` is refused by `enable`, which names `apply` as the fix.
+- **Adapter data `2026-11-22.1`.** Only the `vscode` record changed; the other 14 adapters and the dispositions are pinned equal to their previous capture. The public `ensureInputs`, `presentInputIds`, `VscodeInput` and `VSCODE_PASSWORD_INPUT_ID` exports are removed: no adapter in the roster uses native inputs any more.
+- **Known limitation (deferred).** The servers the VS Code launcher extension registers do not receive their connection settings or credentials in a Copilot-harness session, because VS Code forwards the registered definitions without running the extension's resolve step. A fix needs a new extension build; the files written by `iris-mcp-clients` are read by the harness itself and are not affected.
+- **Release note.** The end-of-epic release must carry `@iris-mcp/client-config`, the CLI the MCP Clients view runs through `npx -y -p @iris-mcp/client-config@1`. No new vsix is needed for this fix; the changed extension README reaches the Marketplace with the next vsix.
+
 ## [Unreleased] — Story 44.1: DocDB Create Registers the Database
 
 ### Fixed

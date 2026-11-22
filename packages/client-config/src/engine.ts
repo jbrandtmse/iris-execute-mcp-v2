@@ -20,19 +20,39 @@
  * act that makes it manager-created (recorded on success); an apply UPDATING
  * a present non-canonical entry requires the record up front.
  *
+ * Shared files (AD-30): when two adapter scopes resolve to one file (a workspace
+ * `.mcp.json` is Claude Code's and VS Code Copilot's project file), `apply` writes an
+ * entry that another client owns only when it equals what this client would write
+ * (adopted: no file edit, a ledger record) and refuses any other (see
+ * `shared-files.ts`); `disable` and `remove` say that the other client reads the file.
+ *
+ * Legacy files: an adapter's `legacyScopes` (VS Code's old Local-harness `mcp.json`
+ * files) are read-only sources. After a successful `apply` or `remove` the owned
+ * entries leave them through the same write protocol, and never before the new
+ * file's write has re-parsed clean.
+ *
  * Results name paths and reasons only — never config content (spec §3.5.5).
  * Everything is injectable (fs, clock, stateDir, and — for the AC 33.1-I1
  * spy test — the diff/execute seams); no `process.*` reads.
  */
 
-import { applyEdits, parse as parseJsonc, type ParseError } from "jsonc-parser";
-
 import { CLIENT_ADAPTERS } from "./adapters.js";
-import { diff, insertionEdits, type DiffMechanism, type DiffOptions } from "./diff.js";
+import { diff, renderNativeEntry, type DiffMechanism, type DiffOptions } from "./diff.js";
 import { homeGuardReason } from "./home-guard.js";
-import { resolveScopePath } from "./paths.js";
+import { adapterForScope, legacyAdapterView, resolveLegacyPath, resolveScopePath } from "./paths.js";
 import { ownEntry, readConfigEntries, type RawEntry } from "./readers.js";
-import type { VscodeInput } from "./synthesize.js";
+import {
+  adoptOrConflict,
+  type AdoptOrConflict,
+  otherOwners,
+  ownerClients,
+  peerClients,
+  PRE_SHARING_WRITERS,
+  sharedFileNote,
+  sharedPeers,
+  soleOwner,
+  type SharedPeer,
+} from "./shared-files.js";
 import {
   addStash,
   dropManaged,
@@ -80,6 +100,30 @@ export interface EngineResult {
   /** Non-fatal problems (e.g. the config write succeeded but the state.json
    * update failed) — the operation still reports ok. */
   warnings?: string[];
+  /** True when the entry was already in the shared file exactly as this client would write it: nothing was written and this client's record was added (Story 44.2). */
+  adopted?: boolean;
+  /** The other clients that read the same file and own the entry; present only on an adoption, a shared-file conflict, and a disable or remove that affects them (Story 44.2). */
+  sharedWith?: string[];
+  /** Says that other clients read the same file (a disable or remove of a shared entry; Story 44.2). */
+  sharedNote?: string;
+  /** Owned entries taken out of a read-only legacy file (the old VS Code mcp.json files), one record per file; present only when a legacy file held an owned entry or could not be read (Story 44.2). */
+  legacy?: LegacyRemoval[];
+}
+
+/** The outcome of taking owned entries out of one legacy file. */
+export interface LegacyRemoval {
+  /** The legacy file. */
+  path: string;
+  /** False when the file could not be read, parsed or edited; the entries are then still in it. */
+  ok: boolean;
+  /** True when the file's bytes changed. */
+  changed: boolean;
+  /** The entry names taken out of the file. */
+  removed: string[];
+  backupPath?: string;
+  /** True when a failed edit was rolled back to the backup. */
+  restored?: boolean;
+  reason?: string;
 }
 
 /** Injectable seams — production defaults are the real implementations; the
@@ -98,9 +142,12 @@ export interface EngineOptions {
 
 interface Target {
   adapter: ClientAdapter;
+  scope: ClientScope;
   path: string;
   stateDir: string;
   state: ManagerState;
+  /** The other adapter scopes that resolve to the same file (empty for an unshared file). */
+  peers: SharedPeer[];
 }
 
 function fail(
@@ -141,7 +188,7 @@ function resolveTarget(
   if (!state.ok) {
     return fail(client, scope, action, path, state.error);
   }
-  return { adapter, path, stateDir, state: state.state };
+  return { adapter: adapterForScope(adapter, scope), scope, path, stateDir, state: state.state, peers: sharedPeers(adapter, scope, ctx) };
 }
 
 /** Exact-match namespace ownership (never prefix — `iris-dev-mcp2` is foreign). */
@@ -171,6 +218,85 @@ function ownershipRefusal(
     `refusing to modify "${name}": the name is outside the iris-mcp namespace ` +
     `(it is not one of ${CANONICAL_SERVERS.join(", ")}) and state.json does not record it as manager-created`
   );
+}
+
+/**
+ * The shared-file verdict for writing `entry`: `null` when nothing is shared or the entry is not in the file or
+ * this client owns it alone (a normal write), otherwise adopt-or-conflict (see shared-files.ts).
+ */
+function sharedVerdict(
+  target: Target,
+  existing: RawEntry | undefined,
+  entry: CanonicalEntry,
+): { verdict: AdoptOrConflict; sharedWith: string[] } | null {
+  const { scope } = target;
+  const client = target.adapter.id;
+  if (existing === undefined || target.peers.length === 0) return null;
+  if (soleOwner(target.state, client, scope, entry.name, target.peers)) return null;
+  return {
+    verdict: adoptOrConflict({
+      existing,
+      wouldWrite: renderNativeEntry(target.adapter, entry),
+      path: target.path,
+      name: entry.name,
+      client,
+      owners: ownerClients(target.state, client, scope, entry.name, target.peers),
+    }),
+    sharedWith: (() => {
+      const others = otherOwners(target.state, client, scope, entry.name, target.peers);
+      return others.length > 0 ? others : peerClients(target.peers);
+    })(),
+  };
+}
+
+/** What an apply of `entry` would do in a shared file, for the preview: the same verdict `apply` acts on. */
+export type SharedWriteVerdict =
+  | { kind: "none" }
+  | { kind: "adopt"; path: string; sharedWith: string[] }
+  | { kind: "conflict"; path: string; sharedWith: string[]; reason: string };
+
+/**
+ * Plan the shared-file side of an apply: `none` for an unshared file, an entry that is not in the file yet, or
+ * one this client owns alone; `adopt` or `conflict` otherwise. Reads the file and the ledger, writes nothing.
+ */
+export function sharedWriteVerdict(
+  ctx: EngineHostContext,
+  client: string,
+  scope: ClientScope,
+  entry: CanonicalEntry,
+  options: { fs?: WriteFs } = {},
+): SharedWriteVerdict {
+  const fs = options.fs ?? REAL_WRITE_FS;
+  const target = resolveTarget(ctx, client, scope, "apply", fs);
+  if ("action" in target) return { kind: "none" };
+  const current = readCurrent(fs, target.path);
+  if (!current.ok || current.content === null || current.content.trim() === "") return { kind: "none" };
+  const parsed = readConfigEntries(target.adapter, current.content);
+  const existing = parsed.ok ? ownEntry(parsed.entries, entry.name) : undefined;
+  const shared = sharedVerdict(target, existing, entry);
+  if (shared === null) return { kind: "none" };
+  return shared.verdict.kind === "conflict"
+    ? { kind: "conflict", path: target.path, sharedWith: shared.sharedWith, reason: shared.verdict.reason }
+    : { kind: "adopt", path: target.path, sharedWith: shared.sharedWith };
+}
+
+/** True when a stashed or written entry holds `${env:...}`, `${input:...}` or `${command:...}` references (the old VS Code harness's syntax). */
+export function holdsLegacyReferences(entry: unknown): boolean {
+  return LEGACY_REFERENCE.test(JSON.stringify(entry));
+}
+
+/** Stashed or written references of the old VS Code harness, which the Copilot harness does not forward. */
+const LEGACY_REFERENCE = /\$\{(?:env|input|command):/;
+
+/** A successful disable or remove of an entry other clients also own says that they read the same file (AD-30, Story 44.2). */
+function withSharedNote(result: EngineResult, target: Target, name: string): EngineResult {
+  if (!result.ok || target.peers.length === 0) return result;
+  const owners = otherOwners(target.state, target.adapter.id, result.scope, name, target.peers);
+  // A client that never wrote the file before it was shared always names the file's other readers; a
+  // pre-sharing writer stays byte-identical until another client records the entry.
+  const others = owners.length > 0 || PRE_SHARING_WRITERS.includes(target.adapter.id) ? owners : peerClients(target.peers);
+  if (others.length === 0) return result;
+  return { ...result, sharedWith: others, sharedNote: sharedFileNote(target.path, others) };
 }
 
 function readCurrent(fs: WriteFs, path: string): { ok: true; content: string | null } | { ok: false; reason: string } {
@@ -343,16 +469,51 @@ export function apply(
 
   // Ownership needs presence for non-canonical names (a present foreign
   // entry may never be clobbered; a new one becomes manager-created).
-  let present = false;
+  let existing: RawEntry | undefined;
   if (current.content !== null && current.content.trim() !== "") {
     const parsed = readConfigEntries(target.adapter, current.content);
-    if (parsed.ok) present = ownEntry(parsed.entries, entry.name) !== undefined;
+    if (parsed.ok) existing = ownEntry(parsed.entries, entry.name);
   }
+  const present = existing !== undefined;
   const refusal = ownershipRefusal(target.state, client, scope, entry.name, present);
   if (refusal) return fail(client, scope, "apply", target.path, refusal);
 
   const now = options.now ?? (() => new Date());
-  return runEdit({
+  const containsSecret = options.containsSecret ?? false;
+  // A stash recorded before the Copilot move holds old-harness references; the fresh entry replaces it.
+  const record = (state: ManagerState): ManagerState => {
+    const recorded = recordManaged(state, { client, scope, name: entry.name, containsSecret }, now());
+    const stash = findStash(recorded, client, scope, entry.name);
+    return stash !== undefined && target.adapter.legacyScopes !== undefined && holdsLegacyReferences(stash.entry)
+      ? dropStash(recorded, client, scope, entry.name)
+      : recorded;
+  };
+
+  // A shared file: an entry this client does not own alone is adopted when it is exactly what this client would
+  // write, and refused otherwise (AD-30). A name that is not in the file is created as ever.
+  const shared = sharedVerdict(target, existing, entry);
+  if (shared !== null) {
+    const { verdict, sharedWith } = shared;
+    if (verdict.kind === "conflict") return fail(client, scope, "apply", target.path, verdict.reason, { sharedWith });
+    const warnings: string[] = [];
+    persistState(ctx, fs, target.stateDir, record(target.state), warnings);
+    const adopted: EngineResult = {
+      ok: true,
+      client,
+      scope,
+      action: "apply",
+      path: target.path,
+      changed: false,
+      adopted: true,
+      sharedWith,
+      note: `adopted: ${target.path} already holds this entry exactly as ${client} would write it (shared with ${sharedWith.join(", ")}); nothing was written`,
+      restartHint: target.adapter.restartHint,
+      ...(warnings.length > 0 ? { warnings } : {}),
+    };
+    return withLegacyRemoval(ctx, adopted, [entry.name], options);
+  }
+
+  const result = runEdit({
     ctx,
     target,
     scope,
@@ -360,11 +521,11 @@ export function apply(
     diffAction: "apply",
     entry,
     content: current.content,
-    containsSecret: options.containsSecret ?? false,
-    updateState: (state) =>
-      recordManaged(state, { client, scope, name: entry.name, containsSecret: options.containsSecret ?? false }, now()),
+    containsSecret,
+    updateState: record,
     options,
   });
+  return result.ok ? withLegacyRemoval(ctx, result, [entry.name], options) : result;
 }
 
 /** enable: re-activate an owned entry — native flag in place for flag
@@ -382,13 +543,41 @@ export function enable(
   if ("action" in target) return target;
   const current = readCurrent(fs, target.path);
   if (!current.ok) return fail(client, scope, "enable", target.path, current.reason);
+  const stash = findStash(target.state, client, scope, name);
+  if (stash !== undefined && target.adapter.legacyScopes !== undefined && holdsLegacyReferences(stash.entry)) {
+    return fail(
+      client,
+      scope,
+      "enable",
+      target.path,
+      `refusing to enable "${name}": the stashed entry was recorded before ${client} moved to its Copilot files and holds \${env:...} or \${input:...} references that the Copilot harness does not forward. ` +
+        `The stash is kept; write a fresh entry with: iris-mcp-clients apply --client ${client} --scope ${scope} --servers ${name}`,
+    );
+  }
   if (current.content === null) {
     return noopMissingFile(client, scope, "enable", target.path, target.adapter);
   }
   const refusal = ownershipRefusal(target.state, client, scope, name, true);
   if (refusal) return fail(client, scope, "enable", target.path, refusal);
-
-  const stash = findStash(target.state, client, scope, name);
+  if (stash !== undefined && target.peers.length > 0) {
+    const parsed = readConfigEntries(target.adapter, current.content);
+    const existing = parsed.ok ? ownEntry(parsed.entries, name) : undefined;
+    if (existing !== undefined && !soleOwner(target.state, client, scope, name, target.peers)) {
+      const verdict = adoptOrConflict({
+        existing,
+        wouldWrite: stash.entry,
+        path: target.path,
+        name,
+        client,
+        owners: ownerClients(target.state, client, scope, name, target.peers),
+      });
+      if (verdict.kind === "conflict") {
+        return fail(client, scope, "enable", target.path, verdict.reason, {
+          sharedWith: otherOwners(target.state, client, scope, name, target.peers),
+        });
+      }
+    }
+  }
   const diffOptions: DiffOptions | undefined = stash ? { nativeEntry: stash.entry } : undefined;
   if (!target.adapter.nativeDisableFlag && !stash) {
     // Stash client, entry absent, nothing stashed: distinguish "already
@@ -448,7 +637,7 @@ export function disable(
     if (parsed.ok) stashEntry = ownEntry(parsed.entries, name);
   }
 
-  return runEdit({
+  const result = runEdit({
     ctx,
     target,
     scope,
@@ -460,6 +649,7 @@ export function disable(
       stashEntry ? addStash(state, { client, scope, name, entry: stashEntry }, now()) : state,
     options: { ...options, now },
   });
+  return withSharedNote(result, target, name);
 }
 
 /** remove: purge an owned entry from the file entirely (plus its stash and
@@ -470,6 +660,17 @@ export function remove(
   scope: ClientScope,
   name: string,
   options: EngineOptions = {},
+): EngineResult {
+  const result = removeFromTarget(ctx, client, scope, name, options);
+  return result.ok ? withLegacyRemoval(ctx, result, [name], options) : result;
+}
+
+function removeFromTarget(
+  ctx: EngineHostContext,
+  client: string,
+  scope: ClientScope,
+  name: string,
+  options: EngineOptions,
 ): EngineResult {
   const fs = options.fs ?? REAL_WRITE_FS;
   const target = resolveTarget(ctx, client, scope, "remove", fs);
@@ -483,16 +684,20 @@ export function remove(
     const next = dropStash(dropManaged(target.state, client, scope, name), client, scope, name);
     const warnings: string[] = [];
     persistState(ctx, fs, target.stateDir, next, warnings);
-    return {
-      ok: true,
-      client,
-      scope,
-      action: "remove",
-      path: target.path,
-      changed: false,
-      note: "config file does not exist; state records purged",
-      ...(warnings.length > 0 ? { warnings } : {}),
-    };
+    return withSharedNote(
+      {
+        ok: true,
+        client,
+        scope,
+        action: "remove",
+        path: target.path,
+        changed: false,
+        note: "config file does not exist; state records purged",
+        ...(warnings.length > 0 ? { warnings } : {}),
+      },
+      target,
+      name,
+    );
   }
 
   // Entry absent from a parseable file (e.g. currently stashed after a
@@ -506,30 +711,38 @@ export function remove(
       const next = dropStash(dropManaged(target.state, client, scope, name), client, scope, name);
       const warnings: string[] = [];
       persistState(ctx, fs, target.stateDir, next, warnings);
-      return {
-        ok: true,
-        client,
-        scope,
-        action: "remove",
-        path: target.path,
-        changed: false,
-        note: "entry not present in the file; state records purged",
-        ...(warnings.length > 0 ? { warnings } : {}),
-      };
+      return withSharedNote(
+        {
+          ok: true,
+          client,
+          scope,
+          action: "remove",
+          path: target.path,
+          changed: false,
+          note: "entry not present in the file; state records purged",
+          ...(warnings.length > 0 ? { warnings } : {}),
+        },
+        target,
+        name,
+      );
     }
   }
 
-  return runEdit({
-    ctx,
+  return withSharedNote(
+    runEdit({
+      ctx,
+      target,
+      scope,
+      action: "remove",
+      diffAction: "remove",
+      entry: stubEntry(name),
+      content: current.content,
+      updateState: (state) => dropStash(dropManaged(state, client, scope, name), client, scope, name),
+      options,
+    }),
     target,
-    scope,
-    action: "remove",
-    diffAction: "remove",
-    entry: stubEntry(name),
-    content: current.content,
-    updateState: (state) => dropStash(dropManaged(state, client, scope, name), client, scope, name),
-    options,
-  });
+    name,
+  );
 }
 
 /** restore: restore the latest (or a named) timestamped backup of one
@@ -572,6 +785,190 @@ export function restore(
   };
 }
 
+// ════════════════════════════════════════════════════════════════════
+// Legacy files (Story 44.2): the old VS Code Local-harness `mcp.json` files. They are read-only sources
+// for status and doctor; the only write ever made to one is the removal of an owned entry, through the
+// same protocol, after the new file's write has re-parsed clean.
+// ════════════════════════════════════════════════════════════════════
+
+interface LegacyFile {
+  path: string;
+  /** The adapter as the old file sees it (root key, format, expansion). */
+  view: ClientAdapter;
+  /** The file's text; null when it could not be read (`error` says why). */
+  content: string | null;
+  error?: string;
+}
+
+/** The existing legacy files of one adapter scope. */
+function legacyFiles(ctx: EngineHostContext, adapter: ClientAdapter, scope: ClientScope, fs: WriteFs): LegacyFile[] {
+  const out: LegacyFile[] = [];
+  for (const def of adapter.legacyScopes ?? []) {
+    if (def.scope !== scope) continue;
+    const path = resolveLegacyPath(adapter, def, ctx);
+    if (path === null) continue;
+    let exists = false;
+    try {
+      exists = fs.exists(path);
+    } catch {
+      exists = false;
+    }
+    if (!exists) continue;
+    const view = legacyAdapterView(adapter, def);
+    try {
+      out.push({ path, view, content: fs.readFile(path) });
+    } catch (err) {
+      out.push({ path, view, content: null, error: `could not read ${path}: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+  return out;
+}
+
+/** What `previewLegacyRemoval` says an apply or remove will take out of one legacy file. */
+export interface LegacyPreview {
+  path: string;
+  /** The owned entry names the run removes from the file. */
+  names: string[];
+  /** The rendered removal diff (the same renderer as every other preview). */
+  text: string;
+  /** Set when the file could not be read or parsed: nothing can be removed from it. */
+  error?: string;
+}
+
+/**
+ * The pending removal of owned entries from the adapter's legacy files for one scope: for the preview an
+ * `apply` prints. A file with no owned entry among `names` is not listed. Pure reads.
+ */
+export function previewLegacyRemoval(
+  ctx: EngineHostContext,
+  client: string,
+  scope: ClientScope,
+  names: readonly string[],
+  options: { fs?: WriteFs } = {},
+): LegacyPreview[] {
+  const adapter = CLIENT_ADAPTERS[client];
+  if (adapter?.legacyScopes === undefined) return [];
+  const fs = options.fs ?? REAL_WRITE_FS;
+  const previews: LegacyPreview[] = [];
+  for (const file of legacyFiles(ctx, adapter, scope, fs)) {
+    if (file.content === null) {
+      previews.push({ path: file.path, names: [], text: "", ...(file.error !== undefined ? { error: file.error } : {}) });
+      continue;
+    }
+    const parsed = readConfigEntries(file.view, file.content);
+    if (!parsed.ok) {
+      previews.push({ path: file.path, names: [], text: "", error: `${file.path} is unparseable (${parsed.error})` });
+      continue;
+    }
+    const present = names.filter((name) => ownEntry(parsed.entries, name) !== undefined);
+    if (present.length === 0) continue;
+    let current = file.content;
+    const texts: string[] = [];
+    let error: string | undefined;
+    for (const name of present) {
+      const rendered = diff(current, stubEntry(name), file.view, scope, "remove");
+      if (!rendered.ok || rendered.native === null) {
+        error = rendered.ok ? `could not render the removal of "${name}"` : rendered.reason;
+        break;
+      }
+      texts.push(rendered.text);
+      try {
+        current = executeNativeEdit(current, rendered.native);
+      } catch (err) {
+        error = `could not preview the removal of "${name}": ${err instanceof Error ? err.message : String(err)}`;
+        break;
+      }
+    }
+    previews.push({ path: file.path, names: present, text: texts.join("\n"), ...(error !== undefined ? { error } : {}) });
+  }
+  return previews;
+}
+
+/**
+ * After a successful apply or remove of `names`, take the owned entries out of the adapter's legacy files for
+ * that scope, each through the write protocol (validate, backup, edit, re-parse, restore on failure). The
+ * caller's own write has already re-parsed clean, so a failure here leaves the new entry in place and the old
+ * entry where it was; the record says which. The result is returned unchanged when no legacy file holds an
+ * owned entry, so an adapter without legacy files (every one but `vscode`) is untouched.
+ */
+function withLegacyRemoval(
+  ctx: EngineHostContext,
+  result: EngineResult,
+  names: readonly string[],
+  options: EngineOptions,
+): EngineResult {
+  const adapter = CLIENT_ADAPTERS[result.client];
+  if (adapter?.legacyScopes === undefined) return result;
+  const fs = options.fs ?? REAL_WRITE_FS;
+  const now = options.now ?? (() => new Date());
+  const executeFn = options.executeFn ?? executeNativeEdit;
+  const legacy: LegacyRemoval[] = [];
+  for (const file of legacyFiles(ctx, adapter, result.scope, fs)) {
+    if (file.content === null) {
+      legacy.push({ path: file.path, ok: false, changed: false, removed: [], reason: file.error ?? `could not read ${file.path}` });
+      continue;
+    }
+    const parsed = readConfigEntries(file.view, file.content);
+    if (!parsed.ok) {
+      legacy.push({
+        path: file.path,
+        ok: false,
+        changed: false,
+        removed: [],
+        reason: `${file.path} is unparseable (${parsed.error}); the entry is still in the old file`,
+      });
+      continue;
+    }
+    const present = names.filter((name) => ownEntry(parsed.entries, name) !== undefined);
+    if (present.length === 0) continue;
+    const record: LegacyRemoval = { path: file.path, ok: true, changed: false, removed: [] };
+    let current = file.content;
+    for (const name of present) {
+      const rendered = diff(current, stubEntry(name), file.view, result.scope, "remove");
+      if (!rendered.ok || rendered.native === null) {
+        record.ok = false;
+        record.reason = `could not render the removal of "${name}" from ${file.path}${rendered.ok ? "" : `: ${rendered.reason}`}; it is still in the old file`;
+        break;
+      }
+      let next: string;
+      try {
+        next = executeFn(current, rendered.native);
+      } catch (err) {
+        record.ok = false;
+        record.reason = `could not execute the removal of "${name}" from ${file.path}: ${err instanceof Error ? err.message : String(err)}; it is still in the old file`;
+        break;
+      }
+      const written = applyWrite(file.path, current, next, {
+        adapter: file.view,
+        client: `${adapter.id}-legacy`,
+        scope: result.scope,
+        stateDir: resolveStateDir(ctx),
+        platform: ctx.platform,
+        fs,
+        now,
+      });
+      if (written.backupPath !== undefined) record.backupPath = written.backupPath;
+      if (!written.ok) {
+        record.ok = false;
+        record.reason = `could not remove "${name}" from ${file.path}: ${written.reason ?? "write failed"}; it is still in the old file`;
+        if (written.restored !== undefined) record.restored = written.restored;
+        break;
+      }
+      current = next;
+      record.removed.push(name);
+      record.changed = true;
+    }
+    legacy.push(record);
+  }
+  if (legacy.length === 0) return result;
+  const failures = legacy.filter((record) => !record.ok).map((record) => record.reason ?? `could not update ${record.path}`);
+  return {
+    ...result,
+    legacy,
+    ...(failures.length > 0 ? { warnings: [...(result.warnings ?? []), ...failures] } : {}),
+  };
+}
+
 function noopMissingFile(
   client: string,
   scope: ClientScope,
@@ -587,167 +984,6 @@ function noopMissingFile(
     path,
     changed: false,
     note: `config file does not exist; nothing to ${action}`,
-    restartHint: adapter.restartHint,
-  };
-}
-
-// ════════════════════════════════════════════════════════════════════
-// VS Code native `inputs` merge (Story 33.2 — the seam 33.1's review
-// assigned here: synthesizeEntry RETURNS the descriptor; THIS engine op is
-// the only writer that merges it into the file's top-level `inputs` array).
-// It is engine-side (never CLI-side, AC 33.2-I1) because it is format-aware
-// edit logic, and it goes through the SAME applyWrite safety protocol as
-// every other write.
-// ════════════════════════════════════════════════════════════════════
-
-export interface EnsureInputsResult {
-  ok: boolean;
-  client: string;
-  scope: ClientScope;
-  path: string | null;
-  /** True when the config file's bytes changed. */
-  changed: boolean;
-  /** The input ids this call merged (empty when none were missing). */
-  added: string[];
-  backupPath?: string;
-  restartHint?: string;
-  reason?: string;
-}
-
-/**
- * The ids currently present in a JSON/JSONC document's top-level `inputs`
- * array. Typed boundary mirroring the readers' discipline: an unparseable
- * document (or a non-array `inputs` key) is `{ok:false}`, never a guess.
- */
-export function presentInputIds(content: string): { ok: true; ids: string[] } | { ok: false; error: string } {
-  if (content.trim() === "") return { ok: true, ids: [] };
-  const errors: ParseError[] = [];
-  let parsed: unknown;
-  try {
-    parsed = parseJsonc(content, errors, { allowTrailingComma: true, disallowComments: false });
-  } catch (err) {
-    return { ok: false, error: `JSON parser threw: ${err instanceof Error ? err.message : String(err)}` };
-  }
-  if (errors.length > 0) {
-    return { ok: false, error: `JSON parse error at offset ${errors[0]?.offset ?? 0}` };
-  }
-  if (parsed === undefined || parsed === null) return { ok: true, ids: [] };
-  if (typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { ok: false, error: "top-level JSON value is not an object" };
-  }
-  const inputs = (parsed as Record<string, unknown>).inputs;
-  if (inputs === undefined) return { ok: true, ids: [] };
-  if (!Array.isArray(inputs)) {
-    return { ok: false, error: `the top-level "inputs" key is not an array` };
-  }
-  const ids: string[] = [];
-  for (const item of inputs) {
-    if (typeof item === "object" && item !== null) {
-      const id = (item as { id?: unknown }).id;
-      if (typeof id === "string") ids.push(id);
-    }
-  }
-  return { ok: true, ids };
-}
-
-/**
- * Merge VS Code native `inputs` descriptors into one client's config file —
- * idempotently (a descriptor whose id is already present is left untouched,
- * so a user's customized prompt survives re-applies). Refuses for any
- * adapter whose env expansion is not `vscode` (native inputs are a VS Code
- * concept), and before touching an unparseable file. Every write is an
- * applyWrite safety-protocol write (backup + post-write re-parse).
- */
-export function ensureInputs(
-  ctx: EngineHostContext,
-  client: string,
-  scope: ClientScope,
-  inputs: VscodeInput[],
-  options: EngineOptions = {},
-): EnsureInputsResult {
-  const fs = options.fs ?? REAL_WRITE_FS;
-  const failInputs = (path: string | null, reason: string): EnsureInputsResult => ({
-    ok: false,
-    client,
-    scope,
-    path,
-    changed: false,
-    added: [],
-    reason,
-  });
-  const adapter = CLIENT_ADAPTERS[client];
-  if (!adapter) {
-    const known = Object.keys(CLIENT_ADAPTERS).join(", ");
-    return failInputs(null, `unknown client "${client}" (known clients: ${known})`);
-  }
-  if (adapter.envExpansion !== "vscode") {
-    return failInputs(null, `native inputs are a VS Code concept; ${client} (${adapter.envExpansion} expansion) does not use them`);
-  }
-  const path = resolveScopePath(adapter, scope, ctx, (p) => fs.exists(p));
-  if (path === null) {
-    return failInputs(null, `cannot resolve a ${scope}-scope config path for ${client} (project scope requires a projectDir)`);
-  }
-  if (scope === "project") {
-    const refusal = homeGuardReason(adapter, ctx, (p) => fs.exists(p));
-    if (refusal !== null) return failInputs(path, refusal);
-  }
-  const current = readCurrent(fs, path);
-  if (!current.ok) return failInputs(path, current.reason);
-  const content = current.content ?? "";
-  const present = presentInputIds(content);
-  if (!present.ok) {
-    return failInputs(path, `refusing to modify ${path}: the existing file is unparseable (${present.error})`);
-  }
-  const missing = inputs.filter((input) => !present.ids.includes(input.id));
-  if (missing.length === 0) {
-    return {
-      ok: true,
-      client,
-      scope,
-      path,
-      changed: false,
-      added: [],
-      restartHint: adapter.restartHint,
-    };
-  }
-
-  // Append each missing descriptor at the end of the existing array (or
-  // create the key) — sequential insert+applyEdits so every edit set is
-  // computed against the content it actually targets. The insert is the
-  // SURGICAL one (diff.ts): jsonc-parser's own modify() would re-render the
-  // user's existing (foreign) input descriptors with hardcoded formatting
-  // (the 33.2 lead-smoke byte-preservation defect).
-  let next = content;
-  for (const descriptor of missing) {
-    const soFar = presentInputIds(next);
-    const index = soFar.ok ? soFar.ids.length : 0;
-    next = applyEdits(next, insertionEdits(next, ["inputs", index], descriptor));
-  }
-
-  const now = options.now ?? (() => new Date());
-  const written = applyWrite(path, current.content, next, {
-    adapter,
-    client,
-    scope,
-    stateDir: resolveStateDir(ctx),
-    platform: ctx.platform,
-    fs,
-    now,
-  });
-  if (!written.ok) {
-    return {
-      ...failInputs(path, written.reason ?? "write failed"),
-      ...(written.backupPath !== undefined ? { backupPath: written.backupPath } : {}),
-    };
-  }
-  return {
-    ok: true,
-    client,
-    scope,
-    path,
-    changed: true,
-    added: missing.map((input) => input.id),
-    ...(written.backupPath !== undefined ? { backupPath: written.backupPath } : {}),
     restartHint: adapter.restartHint,
   };
 }

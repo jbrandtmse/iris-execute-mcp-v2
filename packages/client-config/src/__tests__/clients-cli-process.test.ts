@@ -145,18 +145,21 @@ function makeSandbox(): Sandbox {
           ? path.join(home, "AppData", "Roaming", "Block", "goose", "config", "config.yaml")
           : path.join(home, ".config", "goose", "config.yaml");
       case "vscode":
-        // The adapter's per-OS user-scope mcp.json paths (win32
-        // %APPDATA%/Code/User/mcp.json; darwin ~/Library/Application Support;
-        // linux ~/.config) — mirrored exactly, like the goose case.
-        return process.platform === "win32"
-          ? path.join(home, "AppData", "Roaming", "Code", "User", "mcp.json")
-          : process.platform === "darwin"
-            ? path.join(home, "Library", "Application Support", "Code", "User", "mcp.json")
-            : path.join(home, ".config", "Code", "User", "mcp.json");
+        // The Copilot harness's user file (Story 44.2): ~/.copilot/mcp-config.json on every OS, with COPILOT_HOME unset.
+        return path.join(home, ".copilot", "mcp-config.json");
     }
   };
 
   return { home, project, run, configPath, stateDir };
+}
+
+/** VS Code's old Local-harness user mcp.json (win32 %APPDATA%/Code/User; darwin ~/Library/Application Support; linux ~/.config). */
+function legacyVscodeUserPath(home: string): string {
+  return process.platform === "win32"
+    ? path.join(home, "AppData", "Roaming", "Code", "User", "mcp.json")
+    : process.platform === "darwin"
+      ? path.join(home, "Library", "Application Support", "Code", "User", "mcp.json")
+      : path.join(home, ".config", "Code", "User", "mcp.json");
 }
 
 /** Plant one format family's fixture into the sandbox at the client's real
@@ -661,7 +664,7 @@ describe("E2E doctor finding classes (AC 33.2.1)", () => {
 describe("E2E doctor config-drift (AC 33.4-I1, process level)", () => {
   it.each([
     ["claude-code", "drift/wrong-shape.json", 'root key "mcpServers" holding an object of server entries', "an array (3 item(s))"],
-    ["vscode", "drift/wrong-shape.jsonc", 'root key "servers" holding an object of server entries', "an array (3 item(s))"],
+    ["vscode", "drift/wrong-shape.json", 'root key "mcpServers" holding an object of server entries', "an array (3 item(s))"],
     ["codex", "drift/wrong-shape.toml", 'root key "mcp_servers" holding a table of server entries', "a string"],
     ["goose", "drift/wrong-shape.yaml", 'root key "extensions" holding a mapping of server entries', "an array (2 item(s))"],
   ] as const)(
@@ -934,5 +937,124 @@ describe("doctor: claude-code-plugin-duplicates on the built bin (DW-706)", () =
     const result = sandbox.run(["doctor", "--json"], { env: { CLAUDE_CONFIG_DIR: configDir, ...IRIS_ENV } });
     const data = parseEnvelope(result).data as { findings: Array<{ check: string }> };
     expect(data.findings.some((finding) => finding.check === "claude-code-plugin-duplicates")).toBe(false);
+  }, T);
+});
+
+// ====================================================================
+// Story 44.2 Integration AC: the vscode Copilot targets and the shared
+// project .mcp.json, through the BUILT bin against a scratch HOME.
+// ====================================================================
+
+describe("vscode Copilot targets and the shared .mcp.json (Story 44.2, process level)", () => {
+  const APPLY = (client: string, scope: string, extra: string[] = []): string[] => [
+    "apply",
+    "--client",
+    client,
+    "--scope",
+    scope,
+    "--servers",
+    "iris-dev-mcp",
+    "--yes",
+    ...extra,
+  ];
+
+  it("apply --client vscode writes the Copilot user file under HOME, and under COPILOT_HOME when it is set and non-empty", () => {
+    const sandbox = makeSandbox();
+    const result = sandbox.run(APPLY("vscode", "user", ["--json"]));
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+    const envelope = parseEnvelope(result);
+    expect(Object.keys(envelope).sort()).toEqual(["command", "data", "ok"]);
+    expect(envelope.ok).toBe(true);
+    const written = JSON.parse(readFileSync(path.join(sandbox.home, ".copilot", "mcp-config.json"), "utf8")) as {
+      mcpServers: Record<string, { type: string; env: Record<string, string>; tools: string[] }>;
+    };
+    expect(written.mcpServers["iris-dev-mcp"]?.type).toBe("stdio");
+    expect(written.mcpServers["iris-dev-mcp"]?.env["IRIS_PASSWORD"]).toBe("${IRIS_PASSWORD}");
+    expect((envelope.data as { inputsMerged: string[] }).inputsMerged).toEqual([]);
+
+    const elsewhere = path.join(sandbox.home, "elsewhere");
+    const viaHome = sandbox.run(APPLY("vscode", "user"), { env: { COPILOT_HOME: elsewhere } });
+    expect(viaHome.status, `${viaHome.stdout}${viaHome.stderr}`).toBe(0);
+    expect(existsSync(path.join(elsewhere, "mcp-config.json"))).toBe(true);
+
+    // An empty COPILOT_HOME falls back to ~/.copilot, as VS Code does.
+    const fresh = makeSandbox();
+    const viaEmpty = fresh.run(APPLY("vscode", "user"), { env: { COPILOT_HOME: "" } });
+    expect(viaEmpty.status, `${viaEmpty.stdout}${viaEmpty.stderr}`).toBe(0);
+    expect(existsSync(path.join(fresh.home, ".copilot", "mcp-config.json"))).toBe(true);
+  }, T);
+
+  it("status --json lists the shared project .mcp.json once per client with sharedWith, and counts the entry once", () => {
+    const sandbox = makeSandbox();
+    expect(sandbox.run(APPLY("claude-code", "project")).status).toBe(0);
+    const adopt = sandbox.run(APPLY("vscode", "project"));
+    expect(adopt.status, `${adopt.stdout}${adopt.stderr}`).toBe(0);
+    expect(adopt.stdout).toContain("adopted");
+
+    const status = sandbox.run(["status", "--json"]);
+    expect(status.status).toBe(0);
+    const data = parseEnvelope(status).data as {
+      clients: { client: string; scopes: { scope: string; path: string | null; sharedWith?: string[]; servers: { server: string; state: string }[] }[] }[];
+      counts: { managedEntries: number };
+    };
+    const rows = data.clients.flatMap((client) =>
+      client.scopes
+        .filter((scope) => scope.scope === "project" && scope.sharedWith !== undefined)
+        .map((scope) => ({ client: client.client, path: scope.path, sharedWith: scope.sharedWith })),
+    );
+    const shared = rows.filter((row) => row.client === "claude-code" || row.client === "vscode");
+    expect(shared).toHaveLength(2);
+    expect(shared.find((row) => row.client === "claude-code")?.sharedWith).toEqual(["vscode"]);
+    expect(shared.find((row) => row.client === "vscode")?.sharedWith).toEqual(["claude-code"]);
+    expect(new Set(shared.map((row) => row.path)).size).toBe(1);
+    // One entry in one file: counted once, not once per client.
+    expect(data.counts.managedEntries).toBe(1);
+  }, T);
+
+  it("a conflicting write exits 1 naming the file and the other client, and changes nothing; a usage error exits 2", () => {
+    const sandbox = makeSandbox();
+    expect(sandbox.run(APPLY("claude-code", "project", ["--mode", "explicit", "--confirm-secret", "iris-dev-mcp", "--password-stdin"]).filter(Boolean), { input: "a-long-password-1\n" }).status).toBe(0);
+    const file = path.join(sandbox.project, ".mcp.json");
+    const before = readFileSync(file, "utf8");
+    const refused = sandbox.run(APPLY("vscode", "project"));
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain(".mcp.json");
+    expect(refused.stderr).toContain("claude-code");
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(sandbox.run(["apply", "--client", "vscode", "--scope", "sideways", "--servers", "iris-dev-mcp"]).status).toBe(2);
+  }, T);
+
+  it("old-location entries are reported by status and doctor, and apply moves them out of the old file (foreign entries and inputs stay)", () => {
+    const sandbox = makeSandbox();
+    const legacy = legacyVscodeUserPath(sandbox.home);
+    mkdirSync(path.dirname(legacy), { recursive: true });
+    const old = `{\n  "inputs": [\n    { "id": "iris-password", "type": "promptString", "password": true }\n  ],\n  "servers": {\n    "keep-me": { "command": "x" },\n    "iris-dev-mcp": { "command": "npx", "env": { "IRIS_PASSWORD": "\${input:iris-password}" } }\n  }\n}\n`;
+    writeFileSync(legacy, old);
+
+    const status = parseEnvelope(sandbox.run(["status", "--json"])).data as {
+      clients: { client: string; scopes: { scope: string; legacy?: { path: string; servers: string[] }[] }[] }[];
+    };
+    const userScope = status.clients.find((client) => client.client === "vscode")?.scopes.find((scope) => scope.scope === "user");
+    expect(userScope?.legacy).toEqual([{ path: legacy, file: "ok", servers: ["iris-dev-mcp"] }]);
+
+    const doctor = sandbox.run(["doctor", "--json"], { env: IRIS_ENV });
+    expect(doctor.status).toBe(1);
+    const findings = (parseEnvelope(doctor).data as { findings: { check: string; path: string | null; detail: string }[] }).findings.filter(
+      (finding) => finding.check === "vscode-local-harness-entries",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.path).toBe(legacy);
+    expect(findings[0]?.detail).toContain("apply --client vscode --scope user");
+
+    expect(sandbox.run(APPLY("vscode", "user")).status).toBe(0);
+    const after = readFileSync(legacy, "utf8");
+    expect(after).not.toContain("iris-dev-mcp");
+    expect(after).toContain(`    "keep-me": { "command": "x" }`);
+    expect(after).toContain(`    { "id": "iris-password", "type": "promptString", "password": true }`);
+    expect(existsSync(path.join(sandbox.home, ".copilot", "mcp-config.json"))).toBe(true);
+    // The doctor finding is resolved.
+    const again = sandbox.run(["doctor", "--json"], { env: IRIS_ENV });
+    const left = (parseEnvelope(again).data as { findings: { check: string }[] }).findings.filter((f) => f.check === "vscode-local-harness-entries");
+    expect(left).toHaveLength(0);
   }, T);
 });

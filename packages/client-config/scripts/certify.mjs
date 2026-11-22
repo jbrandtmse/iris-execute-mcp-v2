@@ -58,7 +58,6 @@ const { PKG_BY_SERVER, pinnedSpec } = await import("../dist/synthesize.js");
 const CLIENT_IDS = Object.keys(CLIENT_ADAPTERS);
 
 const TODAY = new Date().toISOString().slice(0, 10);
-const DUMMY_PASSWORD = "cert-pass-not-a-real-credential"; // explicit mode (vscode): a placeholder, never a real secret
 
 // ────────────────────────────────────────────────────────────────────
 // Small utilities.
@@ -478,16 +477,10 @@ function restoreAndClean() {
 }
 
 try {
-  // 3. ADD through the engine. vscode uses explicit mode with a DUMMY
-  // password (single write — env-reference would also merge a top-level
-  // inputs[] descriptor that `remove` does not roll back).
+  // 3. ADD through the engine, in the default env-reference mode for every client: it writes no password literal and no
+  // top-level inputs[] descriptor, so a single write is all that `remove` has to roll back.
   const applyArgs = ["apply", "--client", clientId, "--servers", server, "--yes", "--json"];
-  let applyInput;
-  if (clientId === "vscode") {
-    applyArgs.push("--mode", "explicit", "--confirm-secret", server, "--password-stdin");
-    applyInput = `${DUMMY_PASSWORD}\n`;
-  }
-  const applied = cli(applyArgs, { input: applyInput });
+  const applied = cli(applyArgs);
   const applyOk = applied.status === 0;
   step("add (engine apply)", applyOk, applyOk ? `${server} written to ${configPath}` : excerpt(applied.stderr) + timeoutSuffix(applied));
   if (!applyOk) throw new Error("apply failed — aborting the pass (restore follows)");

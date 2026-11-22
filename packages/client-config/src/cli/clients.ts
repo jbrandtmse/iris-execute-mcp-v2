@@ -63,16 +63,18 @@ import {
   apply,
   disable,
   enable,
-  ensureInputs,
-  presentInputIds,
+  holdsLegacyReferences,
+  previewLegacyRemoval,
   remove,
   restore,
+  sharedWriteVerdict,
   type EngineResult,
+  type LegacyPreview,
 } from "../engine.js";
 import { executePackPlan, preparePackChange, readTextIfFile, REAL_BYTES_FS, type BytesFs } from "../pack-apply.js";
 import { renderPlanPreview } from "../pack-plan.js";
 import { PACK_TARGETS, packTargetFor } from "../pack-targets.js";
-import { resolveScopePath } from "../paths.js";
+import { adapterForScope, resolveScopePath } from "../paths.js";
 import {
   diagnoseConfigSurface,
   isFlagDisabled,
@@ -89,7 +91,8 @@ import {
   writeState,
   type ManagerState,
 } from "../state.js";
-import { buildStatusMatrix } from "../status.js";
+import { sharedPeers } from "../shared-files.js";
+import { buildStatusMatrix, type LegacyFileStatus } from "../status.js";
 import {
   pinnedSpec,
   synthesizeEntry,
@@ -457,7 +460,7 @@ function modeAvailability(
 function buildHelpText(modes: { available: EnvMode[]; reasons: Record<EnvMode, string> }): string {
   const modeLines: string[] = [];
   const describe: Record<EnvMode, string> = {
-    "env-reference": "${VAR} / ${env:VAR} references (VS Code: native inputs for the password)",
+    "env-reference": "${VAR} references resolved from the environment the client was launched with",
     explicit: "literal values; a literal IRIS_PASSWORD needs --confirm-secret <entry-name>",
     "server-manager": "IRIS_SERVER_MANAGER=auto — connections from Server Manager profiles",
     "governance-file": "IRIS_GOVERNANCE_FILE=<path> — governance from a shared file",
@@ -680,7 +683,8 @@ async function cmdDetect(args: string[], deps: ResolvedDeps): Promise<number> {
     if (client.detected) {
       for (const probe of client.probes) {
         const label = probe.kind === "config" ? `config ${probe.scope ?? ""}`.trim() : "appDir";
-        deps.stdout.write(`      ${label}: ${probe.path} (${probe.exists ? "exists" : "missing"})\n`);
+        const shared = probe.sharedWith !== undefined && probe.sharedWith.length > 0 ? ` [shared with ${probe.sharedWith.join(", ")}]` : "";
+        deps.stdout.write(`      ${label}: ${probe.path} (${probe.exists ? "exists" : "missing"})${shared}\n`);
       }
     }
   }
@@ -703,6 +707,24 @@ async function cmdDetect(args: string[], deps: ResolvedDeps): Promise<number> {
 // status (AC 33.2.1, counts per AC 33.2.4)
 // ════════════════════════════════════════════════════════════════════
 
+/** The " [shared with ...]" suffix of a status or detect line for a file other clients read too. */
+function sharedMarker(sharedWith: readonly string[] | undefined): string {
+  return sharedWith !== undefined && sharedWith.length > 0 ? ` [shared with ${sharedWith.join(", ")}]` : "";
+}
+
+/** The old-location files (VS Code Local-harness mcp.json) that still hold iris-mcp entries, as status lines. */
+function writeLegacyStatus(deps: ResolvedDeps, legacy: LegacyFileStatus[] | undefined): void {
+  for (const file of legacy ?? []) {
+    if (file.file === "unparseable") {
+      deps.stdout.write(`      old location ${file.path}: UNPARSEABLE - ${file.error ?? "unknown"}\n`);
+    } else {
+      deps.stdout.write(
+        `      old location ${file.path}: ${file.servers.join(", ")} (not forwarded to Copilot sessions; apply moves them)\n`,
+      );
+    }
+  }
+}
+
 const STATUS_USAGE = "iris-mcp-clients status [--json]";
 
 async function cmdStatus(args: string[], deps: ResolvedDeps): Promise<number> {
@@ -713,11 +735,22 @@ async function cmdStatus(args: string[], deps: ResolvedDeps): Promise<number> {
 
   const report = buildStatusMatrix(hostContext(deps), deps.fs);
   // AC 33.2.4: managed-server count derived by iterating the matrix.
+  // A file two clients share (a project `.mcp.json`) is counted once: an entry is one (file, server) pair.
+  const managedKeys = new Set<string>();
   let managedPresent = 0;
   for (const client of report.clients) {
     for (const scope of client.scopes) {
       for (const server of scope.servers) {
-        if (server.state !== "absent") managedPresent++;
+        if (server.state === "absent") continue;
+        if (scope.sharedWith === undefined || scope.path === null) {
+          managedPresent++;
+          continue;
+        }
+        const key = `${deps.platform === "linux" ? scope.path : scope.path.toLowerCase()}|${server.server}`;
+        if (!managedKeys.has(key)) {
+          managedKeys.add(key);
+          managedPresent++;
+        }
       }
     }
   }
@@ -741,20 +774,23 @@ async function cmdStatus(args: string[], deps: ResolvedDeps): Promise<number> {
         continue;
       }
       if (scope.file === "missing") {
-        deps.stdout.write(`    ${scope.scope}: ${scope.path ?? "(no path)"} (no config file)\n`);
+        deps.stdout.write(`    ${scope.scope}: ${scope.path ?? "(no path)"} (no config file)${sharedMarker(scope.sharedWith)}\n`);
+        writeLegacyStatus(deps, scope.legacy);
         continue;
       }
       if (scope.file === "unparseable") {
-        deps.stdout.write(`    ${scope.scope}: ${scope.path ?? "(no path)"} UNPARSEABLE — ${scope.error ?? "unknown"}\n`);
+        deps.stdout.write(`    ${scope.scope}: ${scope.path ?? "(no path)"} UNPARSEABLE \u2014 ${scope.error ?? "unknown"}${sharedMarker(scope.sharedWith)}\n`);
+        writeLegacyStatus(deps, scope.legacy);
         continue;
       }
-      deps.stdout.write(`    ${scope.scope}: ${scope.path ?? "(no path)"}\n`);
+      deps.stdout.write(`    ${scope.scope}: ${scope.path ?? "(no path)"}${sharedMarker(scope.sharedWith)}\n`);
       for (const server of scope.servers) {
         deps.stdout.write(`      ${server.server.padEnd(18)} ${server.state}\n`);
       }
       if (scope.foreign.length > 0) {
         deps.stdout.write(`      foreign (names only): ${scope.foreign.join(", ")}\n`);
       }
+      writeLegacyStatus(deps, scope.legacy);
     }
   }
   if (report.undetected.length > 0) {
@@ -853,9 +889,16 @@ interface SynthPlan {
   server: CanonicalServerName;
   synthesis: Extract<SynthesisResult, { ok: true }>;
   diffText: string;
+  /** The diff mechanism, or `adopt` when the shared file already holds exactly this entry (no file edit). */
   mechanism: string;
-  /** VS Code env-reference: input descriptors missing from the file. */
-  missingInputIds: string[];
+  /** Set when the shared file already holds this entry as the client would write it. */
+  adoptedFrom?: string[];
+}
+
+/** What a planned apply does besides the entry writes: the owned entries it takes out of old-location files. */
+interface PlannedApply {
+  plans: SynthPlan[];
+  legacy: LegacyPreview[];
 }
 
 /** Synthesize + render the pending edit per server (NO writes). Returns the
@@ -869,7 +912,7 @@ async function planApply(
   servers: CanonicalServerName[],
   mode: EnvMode,
   profile: SynthesisProfile,
-): Promise<{ plans: SynthPlan[] } | { exit: number; reason?: string }> {
+): Promise<PlannedApply | { exit: number; reason?: string }> {
   const plans: SynthPlan[] = [];
   const ctx = hostContext(deps);
   const path = resolveScopePath(adapter, scope, ctx, (p) => deps.fs.exists(p));
@@ -890,7 +933,6 @@ async function planApply(
     deps.stderr.write(`Error: could not read ${path}: ${err instanceof Error ? err.message : String(err)}\n`);
     return { exit: 1 };
   }
-  const inputIds = content === null ? { ok: true as const, ids: [] as string[] } : presentInputIds(content);
 
   for (const server of servers) {
     const synthesis = synthesizeEntry(server, mode, {
@@ -903,27 +945,54 @@ async function planApply(
     if (!synthesis.ok) {
       return { exit: usageError(deps, synthesis.reason, usage) };
     }
+    // A file two clients share: an entry the other client owns is adopted when equal and refused otherwise (AD-30).
+    const shared = sharedWriteVerdict(ctx, adapter.id, scope, synthesis.entry, { fs: deps.fs });
+    if (shared.kind === "conflict") {
+      deps.stderr.write(`Error: ${shared.reason}\n`);
+      return { exit: 1, reason: shared.reason };
+    }
+    if (shared.kind === "adopt") {
+      plans.push({
+        server,
+        synthesis,
+        diffText:
+          `(no change to ${shared.path}: it already holds this entry exactly as ${adapter.id} would write it; ` +
+          `it is shared with ${shared.sharedWith.join(", ")}, so ${adapter.id} adopts it)`,
+        mechanism: "adopt",
+        adoptedFrom: shared.sharedWith,
+      });
+      continue;
+    }
     const rendered = diff(content, synthesis.entry, adapter, scope, "apply");
     if (!rendered.ok) {
       deps.stderr.write(`Error: ${rendered.reason}\n`);
       return { exit: 1 };
     }
-    const missingInputIds =
-      synthesis.inputs !== undefined && inputIds.ok
-        ? synthesis.inputs.filter((input) => !inputIds.ids.includes(input.id)).map((input) => input.id)
-        : [];
     plans.push({
       server,
       synthesis,
       diffText: rendered.text,
       mechanism: rendered.mechanism,
-      missingInputIds,
     });
   }
-  return { plans };
+  const legacy = previewLegacyRemoval(
+    ctx,
+    adapter.id,
+    scope,
+    plans.map((plan) => plan.server),
+    { fs: deps.fs },
+  );
+  return { plans, legacy };
 }
 
-function printApplyPreview(deps: ResolvedDeps, adapter: ClientAdapter, scope: ClientScope, mode: EnvMode, plans: SynthPlan[]): void {
+function printApplyPreview(
+  deps: ResolvedDeps,
+  adapter: ClientAdapter,
+  scope: ClientScope,
+  mode: EnvMode,
+  plans: SynthPlan[],
+  legacy: LegacyPreview[],
+): void {
   deps.stdout.write(`Pending changes for ${adapter.displayName} (${adapter.id}), ${scope} scope, mode ${mode}:\n\n`);
   for (const plan of plans) {
     deps.stdout.write(`  --- ${plan.server} (${plan.mechanism}) ---\n`);
@@ -933,10 +1002,22 @@ function printApplyPreview(deps: ResolvedDeps, adapter: ClientAdapter, scope: Cl
         .map((line) => `  ${line}`)
         .join("\n") + "\n",
     );
-    for (const id of plan.missingInputIds) {
-      deps.stdout.write(`  + top-level inputs[] descriptor "${id}" (promptString, password) will be merged\n`);
-    }
     deps.stdout.write("\n");
+  }
+  for (const file of legacy) {
+    if (file.error !== undefined) {
+      deps.stdout.write(`  --- old location ${file.path}: cannot be edited (${file.error}) ---\n\n`);
+      continue;
+    }
+    deps.stdout.write(
+      `  --- old location ${file.path}: ${file.names.join(", ")} will be removed (the Copilot harness does not forward it) ---\n`,
+    );
+    deps.stdout.write(
+      file.text
+        .split("\n")
+        .map((line) => `  ${line}`)
+        .join("\n") + "\n\n",
+    );
   }
   if (plans.some((plan) => plan.synthesis.doctorNote !== undefined)) {
     for (const plan of plans) {
@@ -1045,7 +1126,7 @@ async function cmdDiff(args: string[], deps: ResolvedDeps): Promise<number> {
     if (wantJson) emitJson(deps, "diff", false, null, planned.reason ?? `see stderr (exit ${planned.exit})`);
     return planned.exit;
   }
-  const { plans } = planned;
+  const { plans, legacy } = planned;
 
   if (wantJson) {
     emitJson(deps, "diff", true, {
@@ -1059,12 +1140,14 @@ async function cmdDiff(args: string[], deps: ResolvedDeps): Promise<number> {
         // explicit-mode diffText carries the literal IRIS_PASSWORD (QA 33.3:
         // the JSON path previously emitted it raw).
         text: redactPlanSecrets(plan),
-        missingInputIds: plan.missingInputIds,
+        // Kept for envelope compatibility: no client prompts for a native input since Story 44.2.
+        missingInputIds: [] as string[],
       })),
+      ...(legacy.length > 0 ? { legacy } : {}),
     });
     return 0;
   }
-  printApplyPreview(deps, adapter, scope, mode, plans);
+  printApplyPreview(deps, adapter, scope, mode, plans, legacy);
   deps.stdout.write(`(diff only — nothing was written)\n`);
   return 0;
 }
@@ -1123,20 +1206,24 @@ async function cmdApply(args: string[], deps: ResolvedDeps): Promise<number> {
     if (wantJson) emitJson(deps, "apply", false, null, planned.reason ?? `see stderr (exit ${planned.exit})`);
     return planned.exit;
   }
-  const { plans } = planned;
+  const { plans, legacy } = planned;
 
   // Diff preview FIRST (stdout, or stderr under --json so stdout stays one
   // parseable envelope), then confirmation.
   if (wantJson) {
     const preview = plans
       .map((plan) => `--- ${plan.server} (${plan.mechanism}) ---\n${redactPlanSecrets(plan)}`)
+      .concat(legacy.filter((file) => file.error === undefined).map((file) => `--- old location ${file.path} (remove ${file.names.join(", ")}) ---\n${file.text}`))
       .join("\n\n");
     deps.stderr.write(`Pending changes for ${adapter.id} (${scope}, ${mode}):\n${preview}\n`);
   } else {
-    printApplyPreview(deps, adapter, scope, mode, plans);
+    printApplyPreview(deps, adapter, scope, mode, plans, legacy);
   }
 
-  const wantsWrite = plans.some((plan) => plan.mechanism !== "already-in-state" || plan.missingInputIds.length > 0);
+  // An adoption only records the entry in the ledger; a removal from an old-location file edits a config file.
+  const wantsWrite =
+    plans.some((plan) => plan.mechanism !== "already-in-state" && plan.mechanism !== "adopt") ||
+    legacy.some((file) => file.error === undefined && file.names.length > 0);
   const stopped = await confirmBeforeWrite(deps, {
     command: "apply",
     usage: APPLY_USAGE,
@@ -1150,7 +1237,6 @@ async function cmdApply(args: string[], deps: ResolvedDeps): Promise<number> {
 
   const ctx = hostContext(deps);
   const results: EngineResult[] = [];
-  const inputsMerged: string[] = [];
   for (const plan of plans) {
     const result = apply(ctx, adapter.id, scope, plan.synthesis.entry, {
       fs: deps.fs,
@@ -1167,18 +1253,19 @@ async function cmdApply(args: string[], deps: ResolvedDeps): Promise<number> {
       return 1;
     }
     results.push(result);
-    if (plan.synthesis.inputs !== undefined && plan.synthesis.inputs.length > 0) {
-      const merged = ensureInputs(ctx, adapter.id, scope, plan.synthesis.inputs, { fs: deps.fs, now: deps.now });
-      if (!merged.ok) {
-        deps.stderr.write(`Error: the entry was written but merging the native inputs failed: ${merged.reason ?? "unknown"}\n`);
-        if (wantJson) emitJson(deps, "apply", false, { results }, merged.reason ?? "inputs merge failed");
-        return 1;
-      }
-      inputsMerged.push(...merged.added);
-    }
+  }
+
+  // The new file is written and re-parsed; a failed removal from an old-location file leaves the entry there (and nothing lost).
+  const legacyFailures = results.flatMap((result) => (result.legacy ?? []).filter((file) => !file.ok));
+  if (legacyFailures.length > 0) {
+    const reasons = legacyFailures.map((file) => file.reason ?? `could not update ${file.path}`).join("; ");
+    deps.stderr.write(`Error: the new entry was written, but ${reasons}\n`);
+    if (wantJson) emitJson(deps, "apply", false, { results }, reasons);
+    return 1;
   }
 
   const changedCount = results.filter((result) => result.changed).length;
+  const inputsMerged: string[] = []; // kept for envelope compatibility: no native inputs are merged since Story 44.2
   if (wantJson) {
     emitJson(deps, "apply", true, {
       client: adapter.id,
@@ -1198,9 +1285,11 @@ async function cmdApply(args: string[], deps: ResolvedDeps): Promise<number> {
       } else {
         deps.stdout.write(`${server}: ${result.note ?? "already in the requested state"}\n`);
       }
-    }
-    if (inputsMerged.length > 0) {
-      deps.stdout.write(`merged native inputs descriptor(s): ${inputsMerged.join(", ")}\n`);
+      for (const file of result.legacy ?? []) {
+        if (file.removed.length > 0) {
+          deps.stdout.write(`  removed ${file.removed.join(", ")} from the old location ${file.path}\n`);
+        }
+      }
     }
     deps.stdout.write(`${changedCount} of ${results.length} entries changed.\n`);
     deps.stdout.write(`Restart: ${adapter.restartHint}\n`);
@@ -1247,6 +1336,14 @@ async function cmdToggle(
     if (wantJson) emitJson(deps, action, false, result, result.reason ?? `${action} failed`);
     return 1;
   }
+  const legacyFailures = (result.legacy ?? []).filter((file) => !file.ok);
+  if (legacyFailures.length > 0) {
+    // The entry is gone from the current file; the old-location file keeps it and says why.
+    const reasons = legacyFailures.map((file) => file.reason ?? `could not update ${file.path}`).join("; ");
+    deps.stderr.write(`Error: ${reasons}\n`);
+    if (wantJson) emitJson(deps, action, false, result, reasons);
+    return 1;
+  }
   if (wantJson) {
     emitJson(deps, action, true, result);
   } else {
@@ -1255,6 +1352,10 @@ async function cmdToggle(
         ? `${action}d "${name}" in ${result.path ?? "(unknown path)"}\n`
         : `${action} "${name}": ${result.note ?? "no change"}\n`,
     );
+    if (result.sharedNote !== undefined) deps.stdout.write(`Note: ${result.sharedNote}\n`);
+    for (const file of result.legacy ?? []) {
+      if (file.removed.length > 0) deps.stdout.write(`Removed ${file.removed.join(", ")} from the old location ${file.path}\n`);
+    }
     deps.stdout.write(`Restart: ${adapter.restartHint}\n`);
   }
   return 0;
@@ -1359,6 +1460,19 @@ function walkEntry(
   return false;
 }
 
+/** True when the client, or a client sharing its file, records the entry as manager-created or holds a stash of it. */
+function recordedByAny(
+  state: ManagerState,
+  client: string,
+  scope: ClientScope,
+  name: string,
+  peers: readonly { client: string; scope: ClientScope }[],
+): boolean {
+  return [{ client, scope }, ...peers].some(
+    (p) => isManagerCreated(state, p.client, p.scope, name) || findStash(state, p.client, p.scope, name) !== undefined,
+  );
+}
+
 /** Parse a backup filename's flattened-ISO timestamp back into a Date; null when it does not match.
  * Accepts the optional `-N` same-millisecond disambiguator (33-1-R4) that
  * `listBackups` accepts — Story 36.3 code review: without it a disambiguated
@@ -1414,15 +1528,25 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
   // other content is a normal no-MCP-section config — never drift; empty or
   // missing files produce no finding.
   let parsedFiles = 0;
+  // A file two clients share (a project `.mcp.json`) is parsed, checked and counted once, under the first client listing it.
+  const visited = { parse: new Set<string>(), references: new Set<string>(), unrecorded: new Set<string>() };
+  const firstVisit = (seen: Set<string>, scope: { path: string | null; sharedWith?: string[] }): boolean => {
+    if (scope.sharedWith === undefined || scope.path === null) return true;
+    const key = deps.platform === "linux" ? scope.path : scope.path.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  };
   for (const client of report.clients) {
     const adapter = CLIENT_ADAPTERS[client.client];
     for (const scope of client.scopes) {
+      if (!firstVisit(visited.parse, scope)) continue;
       if (scope.file === "ok") parsedFiles++;
       if (scope.file === "unparseable") {
         let diagnosis: ConfigSurfaceDiagnosis | null = null;
         if (adapter !== undefined && scope.path !== null) {
           try {
-            diagnosis = diagnoseConfigSurface(adapter, deps.fs.readFile(scope.path));
+            diagnosis = diagnoseConfigSurface(adapterForScope(adapter, scope.scope), deps.fs.readFile(scope.path));
           } catch {
             diagnosis = null; // an unreadable file stays a parseability finding
           }
@@ -1468,20 +1592,21 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
     if (!adapter) continue;
     for (const scope of client.scopes) {
       if (scope.file !== "ok" || scope.path === null) continue;
+      if (!firstVisit(visited.references, scope)) continue;
       let content: string;
       try {
         content = deps.fs.readFile(scope.path);
       } catch {
         continue;
       }
-      const entries = readConfigEntries(adapter, content);
+      const entries = readConfigEntries(adapterForScope(adapter, scope.scope), content);
       if (!entries.ok) continue;
+      const peers = scope.sharedWith !== undefined ? sharedPeers(adapter, scope.scope, ctx) : [];
       const ownedNames = Object.keys(entries.entries).filter(
         (name) =>
           (CANONICAL_SERVERS as readonly string[]).includes(name) ||
-          (state !== null && isManagerCreated(state, client.client, scope.scope, name)),
+          (state !== null && recordedByAny(state, client.client, scope.scope, name, peers)),
       );
-      const inputIds = presentInputIds(content);
       for (const name of ownedNames) {
         const entry = entries.entries[name];
         if (entry === undefined) continue;
@@ -1534,36 +1659,6 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
               scope: scope.scope,
               path: scope.path,
               detail: `entry "${name}" references $${variable} (or \${${variable}}), which is not set in the current environment`,
-            });
-          }
-        } else if (adapter.envExpansion === "vscode") {
-          const missingEnv = new Set<string>();
-          const missingInputs = new Set<string>();
-          for (const text of strings) {
-            for (const match of text.matchAll(/\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
-              if (unresolved(match[1] as string)) missingEnv.add(match[1] as string);
-            }
-            for (const match of text.matchAll(/\$\{input:([^}]+)\}/g)) {
-              const id = match[1] as string;
-              if (!inputIds.ok || !inputIds.ids.includes(id)) missingInputs.add(id);
-            }
-          }
-          for (const variable of [...missingEnv].sort()) {
-            findings.push({
-              check: "env-references",
-              client: client.client,
-              scope: scope.scope,
-              path: scope.path,
-              detail: `entry "${name}" references \${env:${variable}}, which is not set in the current environment`,
-            });
-          }
-          for (const id of [...missingInputs].sort()) {
-            findings.push({
-              check: "env-references",
-              client: client.client,
-              scope: scope.scope,
-              path: scope.path,
-              detail: `entry "${name}" references \${input:${id}}, but the file's top-level inputs[] has no "${id}" descriptor`,
             });
           }
         } else {
@@ -1659,7 +1754,7 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
       } catch {
         continue;
       }
-      const entries = readConfigEntries(adapter, content);
+      const entries = readConfigEntries(adapterForScope(adapter, stash.scope), content);
       if (!entries.ok) continue; // unparseable is check 1's finding
       const present = ownEntry(entries.entries, stash.name);
       if (present !== undefined) {
@@ -1689,19 +1784,21 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
       if (!adapter) continue;
       for (const scope of client.scopes) {
         if (scope.file !== "ok" || scope.path === null) continue;
+        if (!firstVisit(visited.unrecorded, scope)) continue;
         let content: string;
         try {
           content = deps.fs.readFile(scope.path);
         } catch {
           continue;
         }
-        const entries = readConfigEntries(adapter, content);
+        const entries = readConfigEntries(adapterForScope(adapter, scope.scope), content);
         if (!entries.ok) continue;
+        // An entry a client sharing the file records is that client's, never an orphan (AD-30).
+        const peers = scope.sharedWith !== undefined ? sharedPeers(adapter, scope.scope, ctx) : [];
         for (const name of Object.keys(entries.entries)) {
           if (!name.startsWith("iris-")) continue;
           if ((CANONICAL_SERVERS as readonly string[]).includes(name)) continue;
-          if (isManagerCreated(state, client.client, scope.scope, name)) continue;
-          if (findStash(state, client.client, scope.scope, name)) continue;
+          if (recordedByAny(state, client.client, scope.scope, name, peers)) continue;
           findings.push({
             check: "unrecorded-entries",
             client: client.client,
@@ -1750,6 +1847,44 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
                 `--client claude-code --server ${server.server} --scope ${scope.scope}`),
         });
       }
+    }
+  }
+
+  // Check 7 (Story 44.2, DW-721): iris-mcp entries still in a client's old-location files (VS Code's Local-harness
+  // mcp.json files), which the Copilot harness does not forward, and stashes recorded in that syntax.
+  for (const client of report.clients) {
+    const adapter = CLIENT_ADAPTERS[client.client];
+    for (const scope of client.scopes) {
+      for (const file of scope.legacy ?? []) {
+        const fix = `npx -y -p ${pinnedSpec("@iris-mcp/client-config")} iris-mcp-clients apply --client ${client.client} --scope ${scope.scope} --servers <the server names>`;
+        findings.push({
+          check: "vscode-local-harness-entries",
+          client: client.client,
+          scope: scope.scope,
+          path: file.path,
+          detail:
+            file.file === "unparseable"
+              ? `${file.path} (the old ${adapter?.displayName ?? client.client} location) is unreadable (${file.error ?? "unknown"}), so apply cannot move the entries out of it; repair or restore it first`
+              : `${file.servers.join(", ")} still in ${file.path}, a file of the deprecated Local harness (VS Code removes it in February 2027) that Copilot sessions do not read. ` +
+                `Move them: ${fix}`,
+        });
+        restartClients.add(client.client);
+      }
+    }
+  }
+  if (state !== null) {
+    for (const stash of state.stashes) {
+      if (CLIENT_ADAPTERS[stash.client]?.legacyScopes === undefined || !holdsLegacyReferences(stash.entry)) continue;
+      findings.push({
+        check: "vscode-local-harness-entries",
+        client: stash.client,
+        scope: stash.scope,
+        path: null,
+        entry: stash.name,
+        detail:
+          `the stash of "${stash.name}" was recorded before ${stash.client} moved to its Copilot files and holds environment or input references the Copilot harness does not forward, so enable refuses it. ` +
+          `Write a fresh entry with: npx -y -p ${pinnedSpec("@iris-mcp/client-config")} iris-mcp-clients apply --client ${stash.client} --scope ${stash.scope} --servers ${stash.name}`,
+      });
     }
   }
 

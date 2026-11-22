@@ -6,9 +6,9 @@
  *     against REAL filesystem sandbox HOMEs (mkdtemp — never the real HOME):
  *     apply → status row flips → disable → enable → remove → byte-equality
  *     per format family (JSON stash, JSON native-flag, TOML native-flag,
- *     YAML native-flag, JSONC stash with comments).
+ *     YAML native-flag).
  *  2. Synthesis × engine × status end-to-end: synthesizeEntry → apply → the
- *     status matrix row flips (server-manager / env-reference+inputs seam /
+ *     status matrix row flips (server-manager / env-reference /
  *     explicit with the typed confirmation and the contains-secret ledger).
  *  3. Restore chains: sabotage auto-restore on the real fs, restore over an
  *     EXTERNALLY-CORRUPTED config (the disaster case), and a backup dir
@@ -330,19 +330,14 @@ describe("lifecycle chains over the built dist (real fs sandbox HOMEs)", () => {
     expect(readFileSync(cfg, "utf8")).toBe(initial);
   });
 
-  it("vscode (JSONC stash): comments and trailing commas are byte-intact through the whole chain", () => {
+  it("vscode (strict-JSON stash, the Copilot user file): foreign entries are byte-intact through the whole chain", () => {
     const { ctx } = makeSandbox();
-    const cfg = seedConfig(ctx, "vscode", "user", readFixture("vscode/user.jsonc"));
+    const cfg = seedConfig(ctx, "vscode", "user", readFixture("vscode/user.json"));
     const initial = readFileSync(cfg, "utf8");
 
     expect(api.apply(ctx, "vscode", "user", canonicalEntry("iris-ops-mcp")).ok).toBe(true);
     const afterApply = readFileSync(cfg, "utf8");
-    for (const marker of [
-      "// VS Code user MCP configuration — comments and trailing commas are legal here.",
-      "// A foreign third-party server (must never be touched).",
-      '"microsoft-learn"',
-      "https://learn.microsoft.com/api/mcp",
-    ]) {
+    for (const marker of ['"microsoft-learn"', "https://learn.microsoft.com/api/mcp", "Bearer ghp_foreignSecretValue123"]) {
       expect(afterApply).toContain(marker);
     }
     expect(statusRow(ctx, "vscode", "user", "iris-ops-mcp")).toBe("present-enabled");
@@ -377,27 +372,22 @@ describe("synthesis × engine × status end-to-end", () => {
     expect(onDisk).not.toContain("IRIS_PASSWORD");
   });
 
-  it("vscode env-reference: the ${input:} password lands in the entry; the inputs descriptor is returned but NOT merged (the 33.2 seam)", () => {
+  it("vscode env-reference: ${IRIS_PASSWORD} lands in the Copilot-shaped entry; no inputs array, no ${input:} (Story 44.2)", () => {
     const { ctx } = makeSandbox();
-    const cfg = seedConfig(ctx, "vscode", "user", readFixture("vscode/user.jsonc"));
+    const cfg = seedConfig(ctx, "vscode", "user", readFixture("vscode/user.json"));
     const synth = api.synthesizeEntry("iris-ops-mcp", "env-reference", { adapter: adapterOf("vscode") });
     if (!synth.ok) throw new Error(`synthesis refused: ${synth.reason}`);
-    expect(synth.entry.env?.["IRIS_PASSWORD"]).toBe(`\${input:${api.VSCODE_PASSWORD_INPUT_ID}}`);
-    expect(synth.inputs).toEqual([
-      {
-        id: api.VSCODE_PASSWORD_INPUT_ID,
-        type: "promptString",
-        description: "IRIS password for iris-ops-mcp",
-        password: true,
-      },
-    ]);
+    expect(synth.entry.env?.["IRIS_PASSWORD"]).toBe("${IRIS_PASSWORD}");
+    expect(synth).not.toHaveProperty("inputs");
 
     expect(api.apply(ctx, "vscode", "user", synth.entry).ok).toBe(true);
     expect(statusRow(ctx, "vscode", "user", "iris-ops-mcp")).toBe("present-enabled");
     const onDisk = readFileSync(cfg, "utf8");
-    expect(onDisk).toContain('"IRIS_PASSWORD": "${input:iris-password}"');
-    // The fixture's single inputs entry is unchanged — merging is the CLI's seam.
-    expect(onDisk.match(/"promptString"/g)).toHaveLength(1);
+    expect(onDisk).toContain('"IRIS_PASSWORD": "${IRIS_PASSWORD}"');
+    expect(onDisk).not.toContain("input:");
+    expect(onDisk).not.toContain("env:");
+    expect(JSON.parse(onDisk)).not.toHaveProperty("inputs");
+    expect(JSON.parse(onDisk).mcpServers["iris-ops-mcp"]).toMatchObject({ type: "stdio", tools: ["*"] });
   });
 
   it("explicit mode: refusal without the typed confirmation writes NOTHING; with it, the ledger marks contains-secret", () => {

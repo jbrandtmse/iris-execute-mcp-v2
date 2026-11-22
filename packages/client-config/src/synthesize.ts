@@ -9,10 +9,9 @@
  *    no secrets (connections come from Server Manager profiles).
  * 2. `env-reference`   — `${VAR}` for Claude-convention clients (and for
  *    `shell`-convention clients like Gemini CLI, whose documented `$VAR`/
- *    `${VAR}` substitution accepts the braced form), `${env:VAR}` for VS Code
- *    with the password UPGRADED to native `inputs`
- *    (`${input:iris-password}` + a `promptString`/`password:true` descriptor
- *    the consumer merges into the file's top-level `inputs` array);
+ *    `${VAR}` substitution accepts the braced form); VS Code Copilot reads
+ *    `${VAR}` too (Story 44.2: no `${env:VAR}`, no `${input:...}` password prompt
+ *    and no `inputs` array, which its harness cannot forward);
  *    no-expansion clients (`none`) get literals for the non-secret
  *    fields and NO password — plus a doctor note instructing OS-env
  *    injection (the 33.2 `doctor` command verifies resolvability).
@@ -81,26 +80,12 @@ export interface SynthesisOptions {
   confirm?: string;
 }
 
-/** One VS Code native `inputs` descriptor (spec §3.3's env-reference upgrade). */
-export interface VscodeInput {
-  id: string;
-  type: "promptString";
-  description: string;
-  password: boolean;
-}
-
-/** The id of the VS Code promptString input carrying the IRIS password. */
-export const VSCODE_PASSWORD_INPUT_ID = "iris-password";
-
 export type SynthesisResult =
   | {
       ok: true;
       entry: CanonicalEntry;
       /** True only for `explicit` mode (a literal IRIS_PASSWORD is present). */
       containsSecret: boolean;
-      /** VS Code `env-reference`: the top-level `inputs` section addition the
-       * consumer merges into mcp.json alongside the entry. */
-      inputs?: VscodeInput[];
       /** env-reference on a no-expansion client: OS-env injection guidance
        * (the 33.2 `doctor` command verifies resolvability). */
       doctorNote?: string;
@@ -126,12 +111,12 @@ function profileLiteral(profile: SynthesisProfile, key: (typeof CONNECTION_VARS)
   }
 }
 
-/** The env-var reference form for one adapter's expansion convention. */
-function referenceForm(adapter: ClientAdapter, variable: string): string {
-  // "vscode" uses ${env:VAR}; "claude" and "shell" use ${VAR} (shell also
-  // accepts $VAR, but the braced form is valid for both claude and shell
-  // conventions and keeps one renderer).
-  return adapter.envExpansion === "vscode" ? `\${env:${variable}}` : `\${${variable}}`;
+/** The env-var reference form every expanding adapter reads. */
+function referenceForm(variable: string): string {
+  // "claude" and "shell" use ${VAR} (shell also accepts $VAR, but the braced
+  // form is valid for both conventions and keeps one renderer). VS Code
+  // Copilot reads ${VAR} too, so no adapter in the roster needs ${env:VAR}.
+  return `\${${variable}}`;
 }
 
 function baseEntry(server: CanonicalServerName): CanonicalEntry {
@@ -199,28 +184,9 @@ export function synthesizeEntry(
       }
       for (const key of CONNECTION_VARS) {
         const literal = profile ? profileLiteral(profile, key) : undefined;
-        env[key] = literal ?? referenceForm(adapter, key);
+        env[key] = literal ?? referenceForm(key);
       }
-      if (adapter.envExpansion === "vscode") {
-        // Native inputs upgrade (spec §3.3): the password is prompted, never stored.
-        env.IRIS_PASSWORD = `\${input:${VSCODE_PASSWORD_INPUT_ID}}`;
-        entry.env = env;
-        return {
-          ok: true,
-          entry,
-          containsSecret: false,
-          inputs: [
-            {
-              id: VSCODE_PASSWORD_INPUT_ID,
-              type: "promptString",
-              description: `IRIS password for ${server}`,
-              password: true,
-            },
-          ],
-          notes,
-        };
-      }
-      env.IRIS_PASSWORD = referenceForm(adapter, "IRIS_PASSWORD");
+      env.IRIS_PASSWORD = referenceForm("IRIS_PASSWORD");
       entry.env = env;
       return { ok: true, entry, containsSecret: false, notes };
     }

@@ -26,6 +26,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import path from "node:path";
 
 import { describe, it, expect } from "vitest";
 import { applyEdits } from "jsonc-parser";
@@ -52,7 +53,7 @@ import {
   type TomlNativeEdit,
   type YamlNativeEdit,
 } from "../index.js";
-import { fixturePath, readFixture } from "./helpers.js";
+import { VSCODE_LEGACY_FIXTURE, fixturePath, readFixture, vscodeLegacyAdapter } from "./helpers.js";
 
 const PKG_BY_SERVER: Record<CanonicalServerName, string> = {
   "iris-dev-mcp": "@iris-mcp/dev@1",
@@ -253,13 +254,17 @@ describe("E2E chain: detect → status → diff → execute → re-read (sandbox
     expect(parsedDisable.entries["context7"]).toBeDefined();
   });
 
-  it("vscode: status unparseable and diff refusal AGREE — a malformed file is never guessed at", () => {
-    const adapter = adapterOf("vscode");
+  it("vscode: the malformed OLD user mcp.json is reported as an unparseable legacy file, and the legacy view refuses it too: never guessed at (Story 44.2)", () => {
     const report = status(sandboxHomeCtx(), REAL_STATUS_FS);
     const userScope = scopeOf(report, "vscode", "user");
-    expect(userScope.file).toBe("unparseable");
-    const content = readReportedPath(userScope);
-    const result = diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "apply");
+    // The Copilot user file is not there; the old Local-harness file is, and it is malformed.
+    expect(userScope.file).toBe("missing");
+    expect(userScope.legacy).toHaveLength(1);
+    const legacy = userScope.legacy?.[0];
+    expect(legacy?.file).toBe("unparseable");
+    expect(legacy?.error?.length).toBeGreaterThan(0);
+    const content = readFileSync(legacy?.path ?? "", "utf8");
+    const result = diff(content, canonicalEntry("iris-dev-mcp"), vscodeLegacyAdapter(), "user", "apply");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toContain("unparseable");
   });
@@ -358,14 +363,22 @@ describe("E2E chain: project scopes (sandbox-project fixture tree)", () => {
     expect(parsed.entries["IRIS-DEV-MCP"]).toBeDefined();
   });
 
-  it("vscode: user scope unparseable (sandbox) + project scope ok — per-scope states are independent", () => {
+  it("vscode: the project scope reads the SHARED .mcp.json (the same file as claude-code, listed under both) and reports the old .vscode/mcp.json entries as legacy (Story 44.2)", () => {
     const report = status(projectCtx(), REAL_STATUS_FS);
     const userScope = scopeOf(report, "vscode", "user");
     const projectScope = scopeOf(report, "vscode", "project");
-    expect(userScope.file).toBe("unparseable");
+    const claudeProject = scopeOf(report, "claude-code", "project");
+    expect(userScope.file).toBe("missing");
     expect(projectScope.file).toBe("ok");
-    expect(projectScope.servers.find((s) => s.server === "iris-ops-mcp")?.state).toBe("present-enabled");
-    expect(projectScope.foreign).toEqual(["microsoft-learn"]);
+    expect(projectScope.path).toBe(claudeProject.path);
+    expect(projectScope.sharedWith).toEqual(["claude-code"]);
+    expect(claudeProject.sharedWith).toEqual(["vscode"]);
+    expect(projectScope.servers).toEqual(claudeProject.servers);
+    expect(projectScope.servers.find((s) => s.server === "iris-data-mcp")?.state).toBe("present-enabled");
+    // The old Local-harness project file still holds an owned entry: reported, never edited by a read.
+    expect(projectScope.legacy).toEqual([
+      { path: path.join(path.dirname(projectScope.path ?? ""), ".vscode", "mcp.json"), file: "ok", servers: ["iris-ops-mcp"] },
+    ]);
   });
 
   it("adding a projectDir never changes the USER-scope picture", () => {
@@ -464,9 +477,9 @@ describe("adversarial: iris-looking rootKey collisions that are NOT canonical", 
 });
 
 describe("adversarial: encoding variants (CRLF / BOM) through the full diff chain", () => {
-  it("CRLF JSONC: comment-laden vscode config round-trips a stash removal", () => {
-    const adapter = adapterOf("vscode");
-    const content = readFixture("vscode/user.jsonc").replaceAll("\n", "\r\n");
+  it("CRLF JSONC: a comment-laden old vscode mcp.json (the legacy view) round-trips an owned-entry removal", () => {
+    const adapter = vscodeLegacyAdapter();
+    const content = readFixture(VSCODE_LEGACY_FIXTURE).replaceAll("\n", "\r\n");
     const disable = expectOk(diff(content, canonicalEntry("iris-dev-mcp"), adapter, "user", "disable"));
     expect(disable.mechanism).toBe("stash-remove");
     const after = applyEdits(content, (disable.native as JsoncNativeEdit).edits);
@@ -545,8 +558,8 @@ describe("adversarial: surgical JSON removal when the owned entry is LAST", () =
     expect(parsed.entries["github-mcp"]).toBeDefined();
   });
 
-  it("owned last WITH a JSONC trailing comma: removal stays inside the owned span", () => {
-    const adapter = adapterOf("vscode");
+  it("owned last WITH a JSONC trailing comma: removal stays inside the owned span (the vscode legacy view)", () => {
+    const adapter = vscodeLegacyAdapter();
     const content = `{
   // comment
   "servers": {

@@ -318,11 +318,11 @@ function childObjectNode(top: JsoncNode | undefined, key: string): JsoncNode | u
   return undefined;
 }
 
-function parseJsonSurface(content: string, rootKey?: string): SurfaceParse {
+function parseJsonSurface(content: string, rootKey?: string, strict = false): SurfaceParse {
   const errors: ParseError[] = [];
   let parsed: unknown;
   try {
-    parsed = parseJsonc(content, errors, { allowTrailingComma: true, disallowComments: false });
+    parsed = parseJsonc(content, errors, { allowTrailingComma: !strict, disallowComments: strict });
   } catch (err) {
     return { kind: "syntax-error", error: `JSON parser threw: ${sanitizeThrownError(err)}` };
   }
@@ -330,7 +330,7 @@ function parseJsonSurface(content: string, rootKey?: string): SurfaceParse {
     // jsonc-parser reports a "value expected" error for a comment-only file
     // (parsed === undefined) — but with no real token the document is
     // legitimately EMPTY, not malformed (AC 33.5.4).
-    if (parsed === undefined && !hasJsonTokens(content)) {
+    if (!strict && parsed === undefined && !hasJsonTokens(content)) {
       return { kind: "empty" };
     }
     return { kind: "syntax-error", error: formatJsoncErrors(errors, content) };
@@ -442,7 +442,8 @@ function parseSurface(adapter: ClientAdapter, text: string): SurfaceParse {
   switch (adapter.format) {
     case "json":
     case "jsonc":
-      return parseJsonSurface(text, adapter.rootKey);
+      // A scope the client parses with JSON.parse (`strictJson`) refuses comments and trailing commas.
+      return parseJsonSurface(text, adapter.rootKey, adapter.strictJson === true);
     case "toml":
       return parseTomlSurface(text);
     case "yaml":

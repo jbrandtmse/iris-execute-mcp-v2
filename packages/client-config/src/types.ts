@@ -54,11 +54,37 @@ export interface ScopeDef {
    * for it — only re-add a fallback with certification evidence.
    */
   fallbacks?: PlatformPaths[];
+  /**
+   * Per-scope entry shape. When set it wins over the adapter's `entryShape` for this scope's file
+   * (VS Code Copilot's user file takes the Copilot-global shape while its project `.mcp.json` takes
+   * the shape Claude Code writes into the same file).
+   */
+  entryShape?: EntryShape;
+  /**
+   * True when the client parses this file with a strict `JSON.parse`: a comment or a trailing comma
+   * makes the whole file unreadable to it, so the manager refuses such a file at validate instead of
+   * writing into it.
+   */
+  strictJson?: boolean;
+}
+
+/**
+ * A config file a client used to read and no longer does (VS Code's Local-harness `mcp.json` files).
+ * It is a read-only source: `status` and `doctor` report owned entries still in it, and the next
+ * `apply` or `remove` takes them out through the write protocol. Nothing is ever written into it.
+ */
+export interface LegacyScopeDef {
+  scope: ClientScope;
+  paths: PlatformPaths;
+  format: ConfigFormat;
+  rootKey: string;
+  envExpansion: EnvExpansion;
 }
 
 /** Shape of one MCP server entry inside the client config (spec §3.2). */
 export type EntryShape =
   | "standard" // {command,args,env}
+  | "copilot" // {type:"stdio",command,args,env,tools:["*"]} (the shape VS Code writes into the Copilot-global file)
   | "zed" // context_servers command-object variant
   | "goose" // extensions {type:"stdio",cmd,args,envs,...}
   | "codex-toml"; // [mcp_servers.<name>] tables
@@ -66,7 +92,7 @@ export type EntryShape =
 /**
  * Client-side environment-variable expansion convention inside entry values.
  * Spec §3.2 defines "claude" (`${VAR}`, `${VAR:-def}`), "vscode"
- * (`${input:id}`, `${env:VAR}`) and "none" (literals only); "shell" extends
+ * (`${input:id}`, `${env:VAR}`; used only by the read-only legacy scopes since Story 44.2) and "none" (literals only); "shell" extends
  * the union for Gemini CLI's documented `$VAR`/`${VAR}` shell convention
  * (spec §3.2 table row "Gemini CLI") — recorded deviation, Story 33.0.
  */
@@ -100,7 +126,7 @@ export interface ClientAdapter {
   id: string; // "claude-code", "cursor", "kimi-code", ...
   displayName: string;
   format: ConfigFormat;
-  rootKey: string; // "mcpServers" | "servers" | "mcp_servers" | "context_servers" | "extensions"
+  rootKey: string; // "mcpServers" | "mcp_servers" | "context_servers" | "extensions" (a legacy scope may use "servers")
   scopes: ScopeDef[];
   entryShape: EntryShape;
   envExpansion: EnvExpansion;
@@ -109,6 +135,10 @@ export interface ClientAdapter {
   restartHint: string;
   detection: DetectionRule[];
   docsUrl: string;
+  /** Files the client used to read, kept as read-only sources (see `LegacyScopeDef`). */
+  legacyScopes?: LegacyScopeDef[];
+  /** Set only on the view `adapterForScope` returns: the scope's file is strict JSON. */
+  strictJson?: boolean;
 }
 
 /** A client that was considered and dispositioned out of the adapter roster. */

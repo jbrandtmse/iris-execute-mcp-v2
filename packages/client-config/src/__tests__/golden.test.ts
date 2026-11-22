@@ -1,8 +1,8 @@
 /**
  * Story 33.1 Task 7 / AC 33.1.1 + AC 33.1.3 — golden-file byte comparisons.
  *
- * For each of the four format/mechanism families (vscode = JSONC stash with
- * comments, cline = JSON native flag, codex = TOML native flag with comments,
+ * For each of the four format/mechanism families (vscode = strict-JSON stash
+ * in the Copilot user file, cline = JSON native flag, codex = TOML native flag with comments,
  * goose = YAML native flag with comments), the full manager sequence
  *   apply (env-reference synthesis) -> disable -> enable -> remove
  * is re-run against an in-memory fs and EVERY stage's bytes are compared
@@ -15,6 +15,10 @@
  * and stages 1-3 were re-captured the same way for the `@1` pin:
  *   node capture-golden-42-1.mjs <repo root>  (2026-10-20, against the built
  *   client-config dist; the script was deleted after capture)
+ * and the vscode stages 1-4 were re-captured for the Copilot user file (Story 44.2, 2026-11-22):
+ *   node capture-golden.mjs <repo root>  (against the built client-config dist,
+ *   stage 0 hand-written; the script was deleted after capture; the pre-story
+ *   JSONC goldens live on under golden/vscode-legacy/)
  * — and are NOT trusted on capture alone: this test also asserts the
  * AC 33.1.3 cross-stage byte oracles (stash: disable == initial; all:
  * enable == added, remove == initial), that every stage re-parses with the
@@ -27,17 +31,21 @@ import { describe, it, expect } from "vitest";
 import {
   apply,
   disable,
+  diff,
   enable,
+  executeNativeEdit,
   remove,
   synthesizeEntry,
   entryPresence,
   readConfigEntries,
   CLIENT_ADAPTERS,
+  type CanonicalEntry,
   type CanonicalServerName,
   type ClientAdapter,
   type EngineHostContext,
+  type RawEntry,
 } from "../index.js";
-import { MemFs, readFixture } from "./helpers.js";
+import { MemFs, readFixture, vscodeLegacyAdapter } from "./helpers.js";
 
 const PROFILE = { host: "iris.example.com", port: 52773, username: "svc", namespace: "PROD", https: true };
 const STATE_DIR = "/state";
@@ -59,14 +67,10 @@ const FAMILIES: Family[] = [
   {
     client: "vscode",
     server: "iris-ops-mcp",
-    ext: "jsonc",
+    ext: "json",
     foreign: "microsoft-learn",
     foreignMarker: "BSA_foreignKeyABC",
-    foreignLines: [
-      "    // A foreign third-party server (must never be touched).",
-      '    "microsoft-learn": {',
-      '        "API_KEY": "BSA_foreignKeyABC"',
-    ],
+    foreignLines: ['    "microsoft-learn": {', '        "API_KEY": "BSA_foreignKeyABC"'],
     mechanism: "stash",
   },
   {
@@ -103,7 +107,7 @@ const FAMILIES: Family[] = [
 ];
 
 const USER_PATHS: Record<string, string> = {
-  vscode: "/h/.config/Code/User/mcp.json",
+  vscode: "/h/.copilot/mcp-config.json",
   cline: "/h/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
   codex: "/h/.codex/config.toml",
   goose: "/h/.config/goose/config.yaml",
@@ -198,7 +202,63 @@ describe("golden round-trips (AC 33.1.1 + AC 33.1.3)", () => {
   it("golden fixture inventory covers all four families (mechanical, Rule #51)", () => {
     expect(FAMILIES).toHaveLength(4);
     expect(new Set(FAMILIES.map((f) => f.mechanism))).toEqual(new Set(["stash", "native"]));
-    expect(new Set(FAMILIES.map((f) => f.ext))).toEqual(new Set(["jsonc", "json", "toml", "yaml"]));
+    // The roster has no JSONC adapter since Story 44.2: the JSONC goldens belong to the vscode legacy view (below).
+    expect(new Set(FAMILIES.map((f) => f.ext))).toEqual(new Set(["json", "toml", "yaml"]));
+  });
+});
+
+/**
+ * Story 44.2: the old VS Code Local-harness files (JSONC, root key `servers`) are read through the vscode adapter's legacy view,
+ * and an owned entry is taken out of them by the same renderer. These are the pre-story vscode goldens, re-pointed at that view: the
+ * five JSONC stages (comments and trailing structure included) stay byte-exact through apply -> disable -> enable -> remove, driven
+ * at the diff/execute layer (the engine only ever REMOVES from a legacy file; the other steps pin the JSONC renderer the removal shares).
+ */
+describe("vscode legacy view goldens (the old JSONC mcp.json)", () => {
+  const view = vscodeLegacyAdapter();
+  const OLD_ENTRY: CanonicalEntry = {
+    name: "iris-ops-mcp",
+    command: "npx",
+    args: ["-y", "@iris-mcp/ops@1"],
+    env: {
+      IRIS_HOST: "iris.example.com",
+      IRIS_PORT: "52773",
+      IRIS_USERNAME: "svc",
+      IRIS_NAMESPACE: "PROD",
+      IRIS_HTTPS: "true",
+      IRIS_PASSWORD: "${input:iris-password}",
+    },
+  };
+
+  function step(content: string, action: "apply" | "disable" | "enable" | "remove", options?: { nativeEntry: RawEntry }): string {
+    const result = diff(content, action === "apply" ? OLD_ENTRY : { ...OLD_ENTRY, command: "", args: [], env: {} }, view, "user", action, options);
+    if (!result.ok) throw new Error(result.reason);
+    return executeNativeEdit(content, result.native);
+  }
+
+  it("apply -> disable -> enable -> remove byte-equals each legacy golden stage", () => {
+    const stages = [readFixture("golden/vscode-legacy/stage-0-initial.jsonc")];
+    stages.push(step(stages[0] ?? "", "apply"));
+    const applied = readConfigEntries(view, stages[1] ?? "");
+    if (!applied.ok) throw new Error("applied stage must parse");
+    const stashed = applied.entries["iris-ops-mcp"];
+    if (stashed === undefined) throw new Error("the applied entry is missing");
+    stages.push(step(stages[1] ?? "", "disable"));
+    stages.push(step(stages[2] ?? "", "enable", { nativeEntry: stashed }));
+    stages.push(step(stages[3] ?? "", "remove"));
+    const names = ["initial", "added", "disabled", "enabled", "removed"];
+    stages.forEach((bytes, i) => {
+      expect(bytes, `legacy stage ${i}-${names[i]} differs from the committed golden`).toBe(readFixture(`golden/vscode-legacy/stage-${i}-${names[i]}.jsonc`));
+    });
+    expect(stages[2]).toBe(stages[0]);
+    expect(stages[3]).toBe(stages[1]);
+    expect(stages[4]).toBe(stages[0]);
+  });
+
+  it("the compact-foreign legacy file survives the same lifecycle (stage 4 == stage 0)", () => {
+    const stage0 = readFixture("golden/vscode-legacy-compact/stage-0-initial.jsonc");
+    const applied = step(stage0, "apply");
+    expect(applied).toContain('    "microsoft-learn": { "command": "npx", "args": ["-y", "@microsoft/learn-mcp"], "env": { "API_KEY": "BSA_foreignKeyABC" } }');
+    expect(step(applied, "remove")).toBe(stage0);
   });
 });
 
@@ -218,12 +278,11 @@ describe("compact-foreign golden lifecycle (33.2 byte-preservation regression)",
       client: "vscode-compact",
       engineClient: "vscode",
       server: "iris-ops-mcp" as const,
-      ext: "jsonc",
+      ext: "json",
       path: USER_PATHS.vscode ?? "",
       mechanism: "stash" as const,
       foreignLines: [
-        "    // A foreign third-party server (must never be touched).",
-        '    "microsoft-learn": { "command": "npx", "args": ["-y", "@microsoft/learn-mcp"], "env": { "API_KEY": "BSA_foreignKeyABC" } }',
+        '    "microsoft-learn": { "command": "npx", "args": ["-y", "@microsoft/learn-mcp"], "env": { "API_KEY": "BSA_foreignKeyABC" }, "tools": ["*"] }',
       ],
       foreignMarker: "BSA_foreignKeyABC",
     },

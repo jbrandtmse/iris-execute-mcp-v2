@@ -144,6 +144,10 @@ Code documentation:
   2026-07-25 via `gh issue view 47344 --repo anthropics/claude-code`: `state: CLOSED`,
   `stateReason: NOT_PLANNED`.)
 
+**Where the MCP Clients view writes for VS Code (Copilot).** Since the Copilot harness became the default (VS Code 1.143), the **MCP Clients view** wires the suite into the files that harness reads itself, not into VS Code's own `mcp.json`: the user file `~/.copilot/mcp-config.json` (`$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set; on Windows `%USERPROFILE%\.copilot\mcp-config.json`) and the workspace-root `.mcp.json`, which Claude Code reads too (the manager adopts an entry both clients would write identically and refuses a conflicting one). Entries the manager wrote into the old `mcp.json` files (the Local harness, which VS Code removes in February 2027) are reported, and the next apply moves them. The Copilot harness has no password prompt, so use the `server-manager` mode (the OS keychain) or start VS Code from an environment that has the `IRIS_*` variables.
+
+**Known limitation: the servers this extension registers do not carry their connection settings into a Copilot-harness session.** Under the Copilot harness VS Code forwards the registered definitions as provided and never runs this extension's resolve step, which is where the connection settings and credentials are added, so those servers start without them (tracked as deferred work; a fix needs a new extension build). The wired files above are not affected: they are read by the harness itself.
+
 **If you use Claude Code**, this extension has nothing for you — use the suite's other Epic 31 path instead:
 [Server Manager connections](../../README.md#server-manager-connections-optional) (`IRIS_SERVER_MANAGER=auto`),
 the credential chain (OS keychain / `IRIS_CREDENTIAL_HELPER` / `IRIS_PROFILES`), and the `iris-mcp-credentials`
@@ -257,7 +261,7 @@ The mode picker offers only what the host can actually support (the CLI probes a
 
 | Mode | What it writes | Needs |
 | --- | --- | --- |
-| `env-reference` (default) | `${IRIS_PASSWORD}`-style references, or a native `${input:iris-password}` prompt on VS Code | The client must see real `IRIS_*` env vars at launch (VS Code prompts instead) |
+| `env-reference` (default) | `${IRIS_PASSWORD}`-style references. On VS Code (Copilot) too: there is no `${env:...}` form and no password prompt, because the Copilot harness forwards neither | The client must see real `IRIS_*` env vars at launch (for VS Code, the environment it was started from: restart VS Code from a shell that has them set, or use `server-manager`) |
 | `server-manager` | `IRIS_SERVER_MANAGER=auto` — connections from Server Manager, passwords from the OS keychain | Epic 31 path; nothing secret in the file |
 | `governance-file` | `IRIS_GOVERNANCE_FILE=<path>` | An existing governance file (see the [Governance editor](#governance-editor)) |
 | `explicit` | A literal password | A typed confirmation; the entry is marked `contains-secret` |

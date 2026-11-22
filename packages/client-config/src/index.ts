@@ -21,6 +21,7 @@ export {
   type EntryShape,
   type EnvExpansion,
   type HostContext,
+  type LegacyScopeDef,
   type NativeDisableFlag,
   type PlatformPaths,
   type ScopeDef,
@@ -28,7 +29,14 @@ export {
 
 export { ADAPTER_DATA_VERSION, CLIENT_ADAPTERS, CLIENT_DISPOSITIONS } from "./adapters.js";
 
-export { resolvePathTemplate, resolveScopePath, resolveScopeCandidates } from "./paths.js";
+export {
+  adapterForScope,
+  legacyAdapterView,
+  resolveLegacyPath,
+  resolvePathTemplate,
+  resolveScopePath,
+  resolveScopeCandidates,
+} from "./paths.js";
 
 export {
   detectClients,
@@ -55,6 +63,7 @@ export {
   entryPresence,
   REAL_STATUS_FS,
   type ClientStatus,
+  type LegacyFileStatus,
   type ScopeFileState,
   type ScopeStatus,
   type ServerPresence,
@@ -118,15 +127,32 @@ export {
   apply,
   disable,
   enable,
-  ensureInputs,
-  presentInputIds,
+  holdsLegacyReferences,
+  previewLegacyRemoval,
   remove,
   restore,
+  sharedWriteVerdict,
   type EngineAction,
   type EngineOptions,
   type EngineResult,
-  type EnsureInputsResult,
+  type LegacyPreview,
+  type LegacyRemoval,
+  type SharedWriteVerdict,
 } from "./engine.js";
+
+export {
+  PRE_SHARING_WRITERS,
+  adoptOrConflict,
+  jsonEqual,
+  otherOwners,
+  ownerClients,
+  peerClients,
+  sharedFileNote,
+  sharedPeers,
+  soleOwner,
+  type AdoptOrConflict,
+  type SharedPeer,
+} from "./shared-files.js";
 
 export {
   CLAUDE_DESKTOP_REFUSAL,
@@ -218,10 +244,8 @@ export {
   IRIS_MCP_MAJOR,
   pinnedSpec,
   PKG_BY_SERVER,
-  VSCODE_PASSWORD_INPUT_ID,
   type EnvMode,
   type SynthesisOptions,
   type SynthesisProfile,
   type SynthesisResult,
-  type VscodeInput,
 } from "./synthesize.js";

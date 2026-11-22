@@ -19,6 +19,7 @@
 import { parseTree, findNodeAtLocation, type Edit as JsoncEdit, type Node as JsoncNode } from "jsonc-parser";
 import { Document } from "yaml";
 
+import { adapterForScope } from "./paths.js";
 import { readConfigEntries, hasJsonTokens, isFlagDisabled, ownEntry, type RawEntry } from "./readers.js";
 import type { CanonicalEntry, ClientAdapter, ClientScope } from "./types.js";
 
@@ -140,6 +141,13 @@ function shapeEntry(adapter: ClientAdapter, entry: CanonicalEntry): RawEntry {
       if (env) shaped.env = { ...env };
       return shaped;
     }
+    case "copilot": {
+      // The standard render, extended with the keys VS Code's Copilot-global writer emits (key order: type, command, args, env, tools).
+      const shaped: RawEntry = { type: "stdio", command: entry.command, args: [...entry.args] };
+      if (env) shaped.env = { ...env };
+      shaped.tools = ["*"];
+      return shaped;
+    }
     case "zed": {
       const command: RawEntry = { path: entry.command, args: [...entry.args] };
       if (env) command.env = { ...env };
@@ -201,6 +209,14 @@ export function mergeUpdateEntry(adapter: ClientAdapter, existing: RawEntry, fre
       merged.command = fresh.command;
       merged.args = fresh.args;
       mergeEnvCarrier(merged, fresh, "env");
+      break;
+    case "copilot":
+      merged.type = fresh.type;
+      merged.command = fresh.command;
+      merged.args = fresh.args;
+      mergeEnvCarrier(merged, fresh, "env");
+      // A user-narrowed tool list survives; an entry without one gets the render's.
+      if (merged.tools === undefined) merged.tools = fresh.tools;
       break;
     case "zed": {
       const freshCommand = isRecord(fresh.command) ? (fresh.command as Record<string, unknown>) : {};
@@ -544,11 +560,13 @@ export interface DiffOptions {
 export function diff(
   currentContent: string | null,
   entry: CanonicalEntry,
-  adapter: ClientAdapter,
+  scopedAdapter: ClientAdapter,
   scope: ClientScope,
   action: DiffAction,
   options?: DiffOptions,
 ): DiffResult {
+  // The adapter as this scope sees it (per-scope entry shape, strict JSON). Identity for every adapter whose scopes set neither.
+  const adapter = adapterForScope(scopedAdapter, scope);
   const fail = (reason: string): DiffResult => ({ ok: false, client: adapter.id, scope, action, reason });
 
   // Parse in the adapter's native format to establish presence/state; a

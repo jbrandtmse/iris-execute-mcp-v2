@@ -81,7 +81,7 @@ const DETECT: DetectData = {
       client: "vscode",
       displayName: "VS Code (Copilot)",
       detected: false,
-      probes: [{ kind: "config", scope: "user", path: "C:\\home\\AppData\\Roaming\\Code\\User\\mcp.json", exists: false }],
+      probes: [{ kind: "config", scope: "user", path: "C:\\home\\.copilot\\mcp-config.json", exists: false }],
     },
   ],
   // The REAL CLIENT_DISPOSITIONS rows (verbatim, as of adapter data 2026-11-21.1).

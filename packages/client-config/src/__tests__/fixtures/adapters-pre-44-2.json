@@ -1,0 +1,672 @@
+{
+  "captureCommand": "node capture-oracle.mjs <repo-root> <out-dir> against the dist built from the pre-edit tree (baseline commit 9f7797c5)",
+  "adapters": {
+    "claude-code": {
+      "id": "claude-code",
+      "displayName": "Claude Code",
+      "format": "json",
+      "rootKey": "mcpServers",
+      "scopes": [
+        {
+          "scope": "user",
+          "paths": {
+            "win32": "~/.claude.json",
+            "darwin": "~/.claude.json",
+            "linux": "~/.claude.json"
+          },
+          "envOverride": {
+            "var": "CLAUDE_CONFIG_DIR",
+            "pathSuffix": ".claude.json"
+          },
+          "shareable": false
+        },
+        {
+          "scope": "project",
+          "paths": {
+            "win32": ".mcp.json",
+            "darwin": ".mcp.json",
+            "linux": ".mcp.json"
+          },
+          "shareable": true
+        }
+      ],
+      "entryShape": "standard",
+      "envExpansion": "claude",
+      "disableSupport": "stash",
+      "restartHint": "Restart Claude Code (or start a new session) for MCP changes to take effect.",
+      "detection": [
+        {
+          "kind": "config",
+          "scope": "user"
+        },
+        {
+          "kind": "config",
+          "scope": "project"
+        },
+        {
+          "kind": "appDir",
+          "paths": {
+            "win32": "~/.claude",
+            "darwin": "~/.claude",
+            "linux": "~/.claude"
+          }
+        }
+      ],
+      "docsUrl": "https://code.claude.com/docs/en/mcp"
+    },
+    "claude-desktop": {
+      "id": "claude-desktop",
+      "displayName": "Claude Desktop",
+      "format": "json",
+      "rootKey": "mcpServers",
+      "scopes": [
+        {
+          "scope": "user",
+          "paths": {
+            "win32": "%APPDATA%/Claude/claude_desktop_config.json",
+            "darwin": "~/Library/Application Support/Claude/claude_desktop_config.json",
+            "linux": "~/.config/Claude/claude_desktop_config.json"
+          },
+          "shareable": false
+        }
+      ],
+      "entryShape": "standard",
+      "envExpansion": "claude",
+      "disableSupport": "stash",
+      "restartHint": "Quit and relaunch Claude Desktop for MCP changes to take effect.",
+      "detection": [
+        {
+          "kind": "config",
+          "scope": "user"
+        },
+        {
+          "kind": "appDir",
+          "paths": {
+            "win32": "%APPDATA%/Claude",
+            "darwin": "~/Library/Application Support/Claude",
+            "linux": "~/.config/Claude"
+          }
+        }
+      ],
+      "docsUrl": "https://modelcontextprotocol.io/quickstart/user"
+    },
+    "cursor": {
+      "id": "cursor",
+      "displayName": "Cursor",
+      "format": "json",
+      "rootKey": "mcpServers",
+      "scopes": [
+        {
+          "scope": "user",
+          "paths": {
+            "win32": "~/.cursor/mcp.json",
+            "darwin": "~/.cursor/mcp.json",
+            "linux": "~/.cursor/mcp.json"
+          },
+          "shareable": false
+        },
+        {
+          "scope": "project",
+          "paths": {
+            "win32": ".cursor/mcp.json",
+            "darwin": ".cursor/mcp.json",
+            "linux": ".cursor/mcp.json"
+          },
+          "shareable": true
+        }
+      ],
+      "entryShape": "standard",
+      "envExpansion": "none",
+      "disableSupport": "stash",
+      "restartHint": "Restart Cursor (or refresh the server from the MCP settings page) for changes to take effect.",
+      "detection": [
+        {
+          "kind": "config",
+          "scope": "user"
+        },
+        {
+          "kind": "config",
+          "scope": "project"
+        },
+        {
+          "kind": "appDir",
+          "paths": {
+            "win32": "~/.cursor",
+            "darwin": "~/.cursor",
+            "linux": "~/.cursor"
+          }
+        }
+      ],
+      "docsUrl": "https://cursor.com/docs/mcp"
+    },
+    "cline": {
+      "id": "cline",
+      "displayName": "Cline",
+      "format": "json",
+      "rootKey": "mcpServers",
+      "scopes": [
+        {
+          "scope": "user",
+          "paths": {
+            "win32": "%APPDATA%/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
+            "darwin": "~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
+            "linux": "~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"
+          },
+          "shareable": false
+        }
+      ],
+      "entryShape": "standard",
+      "envExpansion": "none",
+      "disableSupport": "native",
+      "nativeDisableFlag": {
+        "key": "disabled",
+        "enabledValue": false,
+        "disabledValue": true
+      },
+      "restartHint": "Reload the VS Code window (Developer: Reload Window) for Cline to pick up MCP changes.",
+      "detection": [
+        {
+          "kind": "config",
+          "scope": "user"
+        },
+        {
+          "kind": "appDir",
+          "paths": {
+            "win32": "%APPDATA%/Code/User/globalStorage/saoudrizwan.claude-dev",
+            "darwin": "~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev",
+            "linux": "~/.config/Code/User/globalStorage/saoudrizwan.claude-dev"
+          }
+        }
+      ],
+      "docsUrl": "https://docs.cline.bot/mcp/configuring-mcp-servers"
+    },
+    "roo-code": {
+      "id": "roo-code",
+      "displayName": "Roo Code (discontinued)",
+      "format": "json",
+      "rootKey": "mcpServers",
+      "scopes": [
+        {
+          "scope": "user",
+          "paths": {
+            "win32": "%APPDATA%/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json",
+            "darwin": "~/Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json",
+            "linux": "~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json"
+          },
+          "shareable": false
+        },
+        {
+          "scope": "project",
+          "paths": {
+            "win32": ".roo/mcp.json",
+            "darwin": ".roo/mcp.json",
+            "linux": ".roo/mcp.json"
+          },
+          "shareable": true
+        }
+      ],
+      "entryShape": "standard",
+      "envExpansion": "claude",
+      "disableSupport": "native",
+      "nativeDisableFlag": {
+        "key": "disabled",
+        "enabledValue": false,
+        "disabledValue": true
+      },
+      "restartHint": "Reload the VS Code window (Developer: Reload Window) for Roo Code to pick up MCP changes.",
+      "detection": [
+        {
+          "kind": "config",
+          "scope": "user"
+        },
+        {
+          "kind": "config",
+          "scope": "project"
+        },
+        {
+          "kind": "appDir",
+          "paths": {
+            "win32": "%APPDATA%/Code/User/globalStorage/rooveterinaryinc.roo-cline",
+            "darwin": "~/Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline",
+            "linux": "~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline"
+          }
+        }
+      ],
+      "docsUrl": "https://roocodeinc.github.io/Roo-Code/features/mcp/overview/"
+    },
+    "windsurf": {
+      "id": "windsurf",
+      "displayName": "Devin Desktop (formerly Windsurf)",
+      "format": "json",
+      "rootKey": "mcpServers",
+      "scopes": [
+        {
+          "scope": "user",
+          "paths": {
+            "win32": "~/.codeium/windsurf/mcp_config.json",
+            "darwin": "~/.codeium/windsurf/mcp_config.json",
+            "linux": "~/.codeium/windsurf/mcp_config.json"
+          },
+          "shareable": false
+        }
+      ],
+      "entryShape": "standard",
+      "envExpansion": "none",
+      "disableSupport": "stash",
+      "restartHint": "Restart Devin Desktop (formerly Windsurf) for MCP changes to take effect.",
+      "detection": [
+        {
+          "kind": "config",
+          "scope": "user"
+        },
+        {
+          "kind": "appDir",
+          "paths": {
+            "win32": "~/.codeium",
+            "darwin": "~/.codeium",
+            "linux": "~/.codeium"
+          }
+        }
+      ],
+      "docsUrl": "https://docs.devin.ai/desktop/devin-local/customizations"
+    },
+    "codex": {
+      "id": "codex",
+      "displayName": "Codex CLI",
+      "format": "toml",
+      "rootKey": "mcp_servers",
+      "scopes": [
+        {
+          "scope": "user",
+          "paths": {
+            "win32": "~/.codex/config.toml",
+            "darwin": "~/.codex/config.toml",
+            "linux": "~/.codex/config.toml"
+          },
+          "shareable": false
+        },
+        {
+          "scope": "project",
+          "paths": {
+            "win32": ".codex/config.toml",
+            "darwin": ".codex/config.toml",
+            "linux": ".codex/config.toml"
+          },
+          "shareable": true
+        }
+      ],
+      "entryShape": "codex-toml",
+      "envExpansion": "claude",
+      "disableSupport": "native",
+      "nativeDisableFlag": {
+        "key": "enabled",
+        "enabledValue": true,
+        "disabledValue": false
+      },
+      "restartHint": "Start a new Codex CLI session for MCP changes to take effect.",
+      "detection": [
+        {
+          "kind": "config",
+          "scope": "user"
+        },
+        {
+          "kind": "config",
+          "scope": "project"
+        },
+        {
+          "kind": "appDir",
+          "paths": {
+            "win32": "~/.codex",
+            "darwin": "~/.codex",
+            "linux": "~/.codex"
+          }
+        }
+      ],
+      "docsUrl": "https://github.com/openai/codex/blob/main/docs/config.md"
+    },
+    "gemini": {
+      "id": "gemini",
+      "displayName": "Gemini CLI",
+      "format": "json",
+      "rootKey": "mcpServers",
+      "scopes": [
+        {
+          "scope": "user",
+          "paths": {
+            "win32": "~/.gemini/settings.json",
+            "darwin": "~/.gemini/settings.json",
+            "linux": "~/.gemini/settings.json"
+          },
+          "shareable": false
+        },
+        {
+          "scope": "project",
+          "paths": {
+            "win32": ".gemini/settings.json",
+            "darwin": ".gemini/settings.json",
+            "linux": ".gemini/settings.json"
+          },
+          "shareable": true
+        }
+      ],
+      "entryShape": "standard",
+      "envExpansion": "shell",
+      "disableSupport": "stash",
+      "restartHint": "Start a new Gemini CLI session for MCP changes to take effect.",
+      "detection": [
+        {
+          "kind": "config",
+          "scope": "user"
+        },
+        {
+          "kind": "config",
+          "scope": "project"
+        },
+        {
+          "kind": "appDir",
+          "paths": {
+            "win32": "~/.gemini",
+            "darwin": "~/.gemini",
+            "linux": "~/.gemini"
+          }
+        }
+      ],
+      "docsUrl": "https://geminicli.com/docs/tools/mcp-server/"
+    },
+    "zed": {
+      "id": "zed",
+      "displayName": "Zed",
+      "format": "json",
+      "rootKey": "context_servers",
+      "scopes": [
+        {
+          "scope": "user",
+          "paths": {
+            "win32": "%APPDATA%/zed/settings.json",
+            "darwin": "~/.config/zed/settings.json",
+            "linux": "~/.config/zed/settings.json"
+          },
+          "shareable": false
+        },
+        {
+          "scope": "project",
+          "paths": {
+            "win32": ".zed/settings.json",
+            "darwin": ".zed/settings.json",
+            "linux": ".zed/settings.json"
+          },
+          "shareable": true
+        }
+      ],
+      "entryShape": "zed",
+      "envExpansion": "claude",
+      "disableSupport": "stash",
+      "restartHint": "Restart Zed (or reopen the agent panel) for MCP changes to take effect.",
+      "detection": [
+        {
+          "kind": "config",
+          "scope": "user"
+        },
+        {
+          "kind": "config",
+          "scope": "project"
+        },
+        {
+          "kind": "appDir",
+          "paths": {
+            "win32": "%APPDATA%/zed",
+            "darwin": "~/.config/zed",
+            "linux": "~/.config/zed"
+          }
+        }
+      ],
+      "docsUrl": "https://zed.dev/docs/ai/mcp"
+    },
+    "goose": {
+      "id": "goose",
+      "displayName": "Goose",
+      "format": "yaml",
+      "rootKey": "extensions",
+      "scopes": [
+        {
+          "scope": "user",
+          "paths": {
+            "win32": "%APPDATA%/Block/goose/config/config.yaml",
+            "darwin": "~/.config/goose/config.yaml",
+            "linux": "~/.config/goose/config.yaml"
+          },
+          "shareable": false
+        }
+      ],
+      "entryShape": "goose",
+      "envExpansion": "claude",
+      "disableSupport": "native",
+      "nativeDisableFlag": {
+        "key": "enabled",
+        "enabledValue": true,
+        "disabledValue": false
+      },
+      "restartHint": "Start a new Goose session for MCP changes to take effect.",
+      "detection": [
+        {
+          "kind": "config",
+          "scope": "user"
+        },
+        {
+          "kind": "appDir",
+          "paths": {
+            "win32": "%APPDATA%/Block/goose/config",
+            "darwin": "~/.config/goose",
+            "linux": "~/.config/goose"
+          }
+        }
+      ],
+      "docsUrl": "https://goose-docs.ai/docs/getting-started/using-extensions/"
+    },
+    "kimi": {
+      "id": "kimi",
+      "displayName": "Kimi CLI (archived)",
+      "format": "json",
+      "rootKey": "mcpServers",
+      "scopes": [
+        {
+          "scope": "user",
+          "paths": {
+            "win32": "~/.kimi/mcp.json",
+            "darwin": "~/.kimi/mcp.json",
+            "linux": "~/.kimi/mcp.json"
+          },
+          "shareable": false
+        }
+      ],
+      "entryShape": "standard",
+      "envExpansion": "none",
+      "disableSupport": "stash",
+      "restartHint": "Start a new Kimi CLI session for MCP changes to take effect.",
+      "detection": [
+        {
+          "kind": "config",
+          "scope": "user"
+        },
+        {
+          "kind": "appDir",
+          "paths": {
+            "win32": "~/.kimi",
+            "darwin": "~/.kimi",
+            "linux": "~/.kimi"
+          }
+        }
+      ],
+      "docsUrl": "https://moonshotai.github.io/kimi-cli/"
+    },
+    "kimi-code": {
+      "id": "kimi-code",
+      "displayName": "Kimi Code",
+      "format": "json",
+      "rootKey": "mcpServers",
+      "scopes": [
+        {
+          "scope": "user",
+          "paths": {
+            "win32": "~/.kimi-code/mcp.json",
+            "darwin": "~/.kimi-code/mcp.json",
+            "linux": "~/.kimi-code/mcp.json"
+          },
+          "shareable": false,
+          "envOverride": {
+            "var": "KIMI_CODE_HOME",
+            "pathSuffix": "mcp.json"
+          }
+        },
+        {
+          "scope": "project",
+          "paths": {
+            "win32": ".kimi-code/mcp.json",
+            "darwin": ".kimi-code/mcp.json",
+            "linux": ".kimi-code/mcp.json"
+          },
+          "shareable": true
+        }
+      ],
+      "entryShape": "standard",
+      "envExpansion": "none",
+      "disableSupport": "stash",
+      "restartHint": "Restart Kimi Code (or start a new session) for MCP changes to take effect.",
+      "detection": [
+        {
+          "kind": "config",
+          "scope": "user"
+        },
+        {
+          "kind": "config",
+          "scope": "project"
+        },
+        {
+          "kind": "appDir",
+          "paths": {
+            "win32": "~/.kimi-code",
+            "darwin": "~/.kimi-code",
+            "linux": "~/.kimi-code"
+          }
+        }
+      ],
+      "docsUrl": "https://moonshotai.github.io/kimi-code/"
+    },
+    "pi": {
+      "id": "pi",
+      "displayName": "Pi (pi CLI / pi-coding-agent)",
+      "format": "json",
+      "rootKey": "mcpServers",
+      "scopes": [
+        {
+          "scope": "user",
+          "paths": {
+            "win32": "~/.pi/agent/mcp.json",
+            "darwin": "~/.pi/agent/mcp.json",
+            "linux": "~/.pi/agent/mcp.json"
+          },
+          "shareable": false,
+          "envOverride": {
+            "var": "PI_CODING_AGENT_DIR",
+            "pathSuffix": "mcp.json"
+          }
+        },
+        {
+          "scope": "project",
+          "paths": {
+            "win32": ".pi/mcp.json",
+            "darwin": ".pi/mcp.json",
+            "linux": ".pi/mcp.json"
+          },
+          "shareable": true
+        }
+      ],
+      "entryShape": "standard",
+      "envExpansion": "none",
+      "disableSupport": "stash",
+      "restartHint": "Run /reload in Pi (or start a new Pi session) for MCP changes to take effect.",
+      "detection": [
+        {
+          "kind": "config",
+          "scope": "user"
+        },
+        {
+          "kind": "config",
+          "scope": "project"
+        },
+        {
+          "kind": "appDir",
+          "paths": {
+            "win32": "~/.pi",
+            "darwin": "~/.pi",
+            "linux": "~/.pi"
+          }
+        }
+      ],
+      "docsUrl": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/docs/mcp.md"
+    },
+    "jetbrains-junie": {
+      "id": "jetbrains-junie",
+      "displayName": "JetBrains Junie",
+      "format": "json",
+      "rootKey": "mcpServers",
+      "scopes": [
+        {
+          "scope": "user",
+          "paths": {
+            "win32": "~/.junie/mcp/mcp.json",
+            "darwin": "~/.junie/mcp/mcp.json",
+            "linux": "~/.junie/mcp/mcp.json"
+          },
+          "shareable": false
+        },
+        {
+          "scope": "project",
+          "paths": {
+            "win32": ".junie/mcp/mcp.json",
+            "darwin": ".junie/mcp/mcp.json",
+            "linux": ".junie/mcp/mcp.json"
+          },
+          "shareable": true
+        }
+      ],
+      "entryShape": "standard",
+      "envExpansion": "none",
+      "disableSupport": "stash",
+      "restartHint": "Restart Junie (or start a new Junie CLI session) for MCP changes to take effect.",
+      "detection": [
+        {
+          "kind": "config",
+          "scope": "user"
+        },
+        {
+          "kind": "config",
+          "scope": "project"
+        },
+        {
+          "kind": "appDir",
+          "paths": {
+            "win32": "~/.junie",
+            "darwin": "~/.junie",
+            "linux": "~/.junie"
+          }
+        }
+      ],
+      "docsUrl": "https://junie.jetbrains.com/docs/junie-cli-mcp-configuration.html"
+    }
+  },
+  "dispositions": [
+    {
+      "id": "kilo-code",
+      "displayName": "Kilo Code",
+      "disposition": "roadmap",
+      "reason": "Documents MCP (~/.config/kilo/kilo.json[c] or ./kilo.json[c] or ./.kilo/kilo.jsonc, top-level `mcp` key), but its entries use an OpenCode-style shape (type \"local\", `command` as an array, `environment`, `enabled`) that the engine does not model yet; supporting it needs a new entry shape, not an adapter-data patch."
+    },
+    {
+      "id": "antigravity",
+      "displayName": "Antigravity CLI",
+      "disposition": "roadmap",
+      "reason": "Documents MCP at ~/.gemini/config/mcp_config.json and .agents/mcp_config.json, but detection would collide with Gemini CLI's ~/.gemini, and no Windows path is documented; verify both before adding an adapter."
+    }
+  ]
+}

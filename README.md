@@ -261,7 +261,7 @@ npx -y -p @iris-mcp/client-config@1 iris-mcp-clients doctor                    #
 
 1. **Server Manager + OS keychain** (Epic 31): `--mode server-manager` writes entries carrying `IRIS_SERVER_MANAGER=auto` — connections come from your InterSystems Server Manager profiles, passwords from the OS keychain via `iris-mcp-credentials set <name>`; nothing secret in the config file.
 2. **Governance file** (Epic 32): `--mode governance-file` writes entries carrying `IRIS_GOVERNANCE_FILE=<path>` — one shared policy file governs every server's tool surface; the file holds no credentials.
-3. **VS Code native inputs** (default `env-reference` mode on VS Code): the password is never stored — the manager merges a native `inputs` prompt (`${input:iris-password}`) so VS Code asks once and keeps it out of the file.
+3. **Environment references on VS Code (Copilot)** (default `env-reference` mode): the password is never stored — the manager writes `${IRIS_PASSWORD}` into `~/.copilot/mcp-config.json` (or the workspace `.mcp.json`), which VS Code resolves from the environment it was started with, so start VS Code from a shell that has `IRIS_PASSWORD` exported. The Copilot harness has no password prompt; use item 1 where you would rather keep the password in the OS keychain.
 
 Which clients/config surfaces are proven: the [adapter certification table](packages/client-config/README.md#certification-dispositions-generated) (Claude Code, VS Code, Cline and Kimi Code are certified-live as of 2026-07-28; the rest carry explicit fixture-only-with-residual-risk dispositions, and the clients that need a person at the GUI carry a human-only marker — re-provable anywhere with `node packages/client-config/scripts/certify.mjs run <client> --real-config` from a checkout).
 

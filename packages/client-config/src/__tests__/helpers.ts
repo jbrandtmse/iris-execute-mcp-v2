@@ -15,6 +15,8 @@ import { fileURLToPath } from "node:url";
 import { applyEdits as applyJsoncEdits, modify as modifyJsonc } from "jsonc-parser";
 import { parseDocument as parseYamlDocument } from "yaml";
 
+import { CLIENT_ADAPTERS } from "../adapters.js";
+import { legacyAdapterView } from "../paths.js";
 import type { ClientAdapter } from "../types.js";
 
 export const FIXTURES_DIR = path.join(fileURLToPath(new URL(".", import.meta.url)), "fixtures");
@@ -37,7 +39,7 @@ export const ADAPTER_FIXTURES: Readonly<Record<string, string>> = {
   "claude-code": "claude-code/user.json",
   "claude-desktop": "claude-desktop/claude_desktop_config.json",
   cursor: "cursor/mcp.json",
-  vscode: "vscode/user.jsonc",
+  vscode: "vscode/user.json",
   cline: "cline/cline_mcp_settings.json",
   "roo-code": "roo-code/mcp_settings.json",
   windsurf: "windsurf/mcp_config.json",
@@ -50,6 +52,21 @@ export const ADAPTER_FIXTURES: Readonly<Record<string, string>> = {
   pi: "pi/mcp.json",
   "jetbrains-junie": "jetbrains-junie/mcp.json",
 };
+
+/** The old Local-harness user fixture (JSONC, root key `servers`, `${env:}`/`${input:}`), read through the vscode adapter's legacy scope. */
+export const VSCODE_LEGACY_FIXTURE = "vscode/user.jsonc";
+
+/**
+ * The vscode adapter as its OLD files see it (JSONC, root key `servers`): since Story 44.2 the only JSONC reader in the roster, so the
+ * suites that exercise JSONC comment, trailing-comma and CRLF handling drive it. It is the same view the engine uses to take an
+ * owned entry out of an old file.
+ */
+export function vscodeLegacyAdapter(scope: "user" | "project" = "user"): ClientAdapter {
+  const vscode = CLIENT_ADAPTERS["vscode"];
+  const legacy = vscode?.legacyScopes?.find((l) => l.scope === scope);
+  if (vscode === undefined || legacy === undefined) throw new Error("the vscode adapter has no legacy scope " + scope);
+  return legacyAdapterView(vscode, legacy);
+}
 
 /** Foreign third-party entry names planted across the fixtures. Tests
  * assert these are surfaced as names only and NEVER appear in any

@@ -11,6 +11,7 @@ import { existsSync } from "node:fs";
 
 import { ADAPTER_DATA_VERSION, CLIENT_ADAPTERS } from "./adapters.js";
 import { resolvePathTemplate, resolveScopeCandidates } from "./paths.js";
+import { peerClients, sharedPeers } from "./shared-files.js";
 import type { ClientAdapter, HostContext } from "./types.js";
 
 /** Injectable filesystem surface — reads only, by construction. */
@@ -26,6 +27,8 @@ export interface DetectionProbe {
   scope?: "user" | "project";
   path: string;
   exists: boolean;
+  /** Other clients whose config scope resolves to this same file (a shared `.mcp.json`); absent when nobody shares it. */
+  sharedWith?: string[];
 }
 
 export interface ClientDetection {
@@ -44,12 +47,14 @@ export interface DetectionReport {
 export function detectionProbes(
   adapter: ClientAdapter,
   ctx: HostContext,
+  adapters: Readonly<Record<string, ClientAdapter>> = CLIENT_ADAPTERS,
 ): Omit<DetectionProbe, "exists">[] {
   const probes: Omit<DetectionProbe, "exists">[] = [];
   for (const rule of adapter.detection) {
     if (rule.kind === "config") {
+      const sharedWith = peerClients(sharedPeers(adapter, rule.scope, ctx, adapters));
       for (const candidate of resolveScopeCandidates(adapter, rule.scope, ctx)) {
-        probes.push({ kind: "config", scope: rule.scope, path: candidate });
+        probes.push({ kind: "config", scope: rule.scope, path: candidate, ...(sharedWith.length > 0 ? { sharedWith } : {}) });
       }
     } else {
       probes.push({ kind: "appDir", path: resolvePathTemplate(rule.paths[ctx.platform], ctx) });
@@ -72,7 +77,7 @@ export function detectClients(
 ): DetectionReport {
   const clients: ClientDetection[] = [];
   for (const adapter of Object.values(adapters)) {
-    const probes: DetectionProbe[] = detectionProbes(adapter, ctx).map((probe) => {
+    const probes: DetectionProbe[] = detectionProbes(adapter, ctx, adapters).map((probe) => {
       let exists = false;
       try {
         exists = fs.exists(probe.path);

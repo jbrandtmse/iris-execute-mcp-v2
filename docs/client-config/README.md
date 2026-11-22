@@ -77,7 +77,7 @@ golden round-trips proven; the real client's config surface not yet hands-verifi
 | ✅ Claude Code | JSON | `mcpServers` | `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that is set (prefer `claude mcp add`) | `.mcp.json` | stash |
 | ✅ Cline | JSON | `mcpServers` | `<VS Code globalStorage>/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | — | native `disabled` |
 | ✅ Kimi Code | JSON | `mcpServers` | `~/.kimi-code/mcp.json` (or `$KIMI_CODE_HOME`) | `.kimi-code/mcp.json` | stash |
-| ✅ VS Code (Copilot) | JSONC | `servers` (+`inputs`) | user `mcp.json` — *MCP: Open User Configuration* | `.vscode/mcp.json` | native UI |
+| ✅ VS Code (Copilot) | JSON | `mcpServers` | `~/.copilot/mcp-config.json` (Windows `%USERPROFILE%\.copilot\mcp-config.json`; `$COPILOT_HOME/mcp-config.json` when that is set) | `.mcp.json` (shared with Claude Code) | stash |
 | ⚠️ Claude Desktop | JSON | `mcpServers` | Win `%APPDATA%\Claude\claude_desktop_config.json`; mac `~/Library/Application Support/Claude/…` | — | stash |
 | ⚠️ Cursor | JSON | `mcpServers` | `~/.cursor/mcp.json` | `.cursor/mcp.json` | stash |
 | ⚠️ Codex CLI | **TOML** | `[mcp_servers.<name>]` | `~/.codex/config.toml` | `.codex/config.toml` | native `enabled` flag (docs-verified) |
@@ -158,31 +158,40 @@ Or edit `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that variabl
 
 Restart Claude Code to pick up changes. Verify with `claude mcp list`.
 
+The project `.mcp.json` is also the project file of VS Code (Copilot) in the MCP client manager. When VS Code (Copilot) already records an entry under the same server name, an `apply --client claude-code --scope project` with different settings is refused (exit 1, nothing written) instead of replacing it; an identical entry is adopted without a write. Make the two entries match, or remove the entry first.
+
 ## VS Code (Copilot) ✅
 
-*MCP: Open User Configuration*, or `.vscode/mcp.json` for one workspace. Note the root key is **`servers`**, not `mcpServers`, and `inputs` prompts for secrets instead of storing them:
+The Copilot harness (the default since VS Code 1.143) reads two files itself, and the manager writes exactly those:
+
+- the user file `~/.copilot/mcp-config.json` (on Windows `%USERPROFILE%\.copilot\mcp-config.json`; `$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set and non-empty). It is strict JSON, with no comments and no trailing commas;
+- the workspace-root `.mcp.json`, the same file Claude Code uses for a project. The manager adopts an entry that both clients would write identically and refuses a conflicting one, so applying VS Code after Claude Code with the same mode and connection settings changes nothing.
+
+Both use the root key **`mcpServers`**, expand `${VAR}` from the environment VS Code was launched with, and have **no `inputs` prompt**: the Copilot harness cannot forward a password prompt. A user entry is shaped like the one VS Code writes itself:
 
 ```jsonc
 {
-  "inputs": [
-    { "id": "iris-password", "type": "promptString", "description": "IRIS password", "password": true }
-  ],
-  "servers": {
-    "iris-dev": {
+  "mcpServers": {
+    "iris-dev-mcp": {
       "type": "stdio",
       "command": "npx",
       "args": ["-y", "@iris-mcp/dev@1"],
       "env": {
-        "IRIS_HOST": "localhost", "IRIS_PORT": "52773", "IRIS_HTTPS": "false",
-        "IRIS_USERNAME": "_SYSTEM", "IRIS_PASSWORD": "${input:iris-password}",
-        "IRIS_NAMESPACE": "USER"
-      }
+        "IRIS_HOST": "${IRIS_HOST}", "IRIS_PORT": "${IRIS_PORT}", "IRIS_HTTPS": "${IRIS_HTTPS}",
+        "IRIS_USERNAME": "${IRIS_USERNAME}", "IRIS_PASSWORD": "${IRIS_PASSWORD}",
+        "IRIS_NAMESPACE": "${IRIS_NAMESPACE}"
+      },
+      "tools": ["*"]
     }
   }
 }
 ```
 
-Copilot users can skip this file entirely and install the **[iris-mcp-launcher extension](../../extensions/iris-mcp-launcher/README.md)**, which registers these servers from your Server Manager connections with credentials from SecretStorage.
+**Credentials.** `${IRIS_*}` resolves from the environment VS Code was started with, so export the variables in a shell and start VS Code (`code .`) from it, and start it again after you change them. The `server-manager` mode replaces the password prompt: it writes no secret, and the server reads the password from your OS keychain.
+
+**Moving from the old files.** Earlier versions wrote VS Code's own `mcp.json` files (the profile `mcp.json` and `.vscode/mcp.json`, root key `servers`, with an `inputs` password prompt). Those belong to the Local harness, which VS Code removes in February 2027, and the Copilot harness does not forward their entries. `iris-mcp-clients status` and `doctor` report any iris-mcp entry still in them, and the next `apply --client vscode --scope <user|project>` writes the new file and then removes the entry from the old one, leaving everything else in that file as it was.
+
+Copilot users can also install the **[iris-mcp-launcher extension](../../extensions/iris-mcp-launcher/README.md)**, which registers these servers from your Server Manager connections with credentials from SecretStorage. Under the Copilot harness the servers it registers do not receive those connection settings yet (a known limitation, described in the extension README); the files above are not affected.
 
 ## Cline ✅
 

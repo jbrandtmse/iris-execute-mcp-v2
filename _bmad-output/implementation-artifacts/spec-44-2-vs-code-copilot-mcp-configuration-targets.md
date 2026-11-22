@@ -2,11 +2,11 @@
 title: 'Story 44.2: VS Code Copilot MCP Configuration Targets'
 type: 'bugfix'
 created: '2026-11-22'
-status: 'ready-for-dev'
-baseline_revision: '171f1535f71baba17e669195751edbd9fd2573cd'
+status: 'done'
+baseline_revision: '9f7797c595c4a49840062a2bf517101b93476147'
 baseline_commit: '171f1535f71baba17e669195751edbd9fd2573cd'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
@@ -16,6 +16,18 @@ deferred:
     evidence: 'The provider returns McpStdioServerDefinition(label, command, args, {}) and adds IRIS_* only in resolveMcpServerDefinition (extensions/iris-mcp-launcher/src/extension.ts:660-700). VS Code 1.147.0 forwards the provided launch as is: the forwarding classifier (workbench.desktop.main.js, function qls) projects r.launch (env copied verbatim, function PVn) and never calls the collection''s resolveServerLanch, which runs only on a Local start (registry start path). Docs: "Don''t rely on an interactive resolver running during background forwarding to Copilot" (code.visualstudio.com/api/extension-guides/ai/mcp, fetched 2026-11-22). A fix needs extension code (provide-time non-secret env plus IRIS_SERVER_MANAGER=auto) and so a new vsix, which ships only through DW-720''s manual step.'
     location: 'extensions/iris-mcp-launcher/src/extension.ts:660-700'
     severity: 'med'
+  - summary: >-
+      The changeset is `patch` but the change removes four public exports of `@iris-mcp/client-config` (`ensureInputs`, `presentInputIds`, `VscodeInput`, `VSCODE_PASSWORD_INPUT_ID`).
+    evidence: |-
+      `packages/client-config/src/index.ts` no longer exports them (Spec Change Log 3). No in-repo consumer remains, but an external importer breaks on a patch upgrade. Task 12 fixes `patch` and leaves a raise to `minor` to the lead; the package sits in a fixed version group, so a `minor` moves every server's version too.
+    location: '.changeset/story-44-2-vs-code-copilot-mcp-configuration-targets.md'
+    severity: medium
+  - summary: >-
+      The ownership ledger is keyed (client, scope, name) with no file path, so a claude-code project record from one project counts as a sharing owner in another project's `.mcp.json`.
+    evidence: |-
+      `state.ts` `sameSlot` and `isManagerCreated` ignore the path; `shared-files.ts` `ownerClients` reads them for the shared-file rule. Effect: vscode can adopt-or-conflict where a path-keyed ledger would write a fresh entry. The keying is pre-existing (Spec Change Log 6); fixing it changes the state file format.
+    location: 'packages/client-config/src/state.ts:123-135'
+    severity: medium
 ---
 
 <intent-contract>
@@ -151,7 +163,48 @@ deferred:
 
 ## Spec Change Log
 
+Implement stage, 2026-11-22 (no change to the `<intent-contract>`; every item below is a build decision or a claim the build found wrong):
+
+1. **Wrong claim (AC 44.2.1): `format: "json"` does not make a file strict.** The Boundaries and the matrix row "Strict JSON user file" assume that a `json` adapter refuses a comment or a trailing comma. It does not: `readers.ts` parses every `json` and `jsonc` file with `allowTrailingComma: true, disallowComments: false` (the pre-story claude-code oracle accepts the comment-bearing `.mcp.json` fixture). The refusal needed new data: optional `ScopeDef.strictJson` and a matching `ClientAdapter.strictJson` that `paths.ts` `adapterForScope` projects for one scope, set only on the vscode user scope, and honored by the JSON reader. The shared project `.mcp.json` stays as tolerant as claude-code's, as the matrix row requires. This widens task 2 by one optional type field; no other adapter's data moves (pinned by `adapters-44-2-backcompat.test.ts`).
+2. **Spec tension (AC 44.2.3): "claude-code's results are `toEqual` the pre-story oracle" cannot hold for `status` and `detect` rows.** The spec's own matrix puts the shared file under both clients with a `sharedWith` marker, and the vscode adapter's project probe is `.mcp.json`, so any project with a `.mcp.json` now lists vscode as detected. The oracle therefore pins `apply`, `disable`, `enable`, `remove` and the doctor findings of claude-code exactly, and the claude-code status row except the additive `sharedWith` field (`shared-mcp-json.test.ts` strips it and says so).
+3. **Dead code deleted instead of kept (task 4, D-5 `inputs`, Rule #54).** `synthesize.ts` lost the `${env:` branch of `referenceForm` and the inputs branch (no adapter has `envExpansion: "vscode"` outside the read-only legacy scopes, which are never synthesized). `engine.ts` lost `ensureInputs` and `presentInputIds`, whose body was unreachable once the gate (`envExpansion !== "vscode"`) refused every roster adapter, and `synthesize.ts` lost `VscodeInput`, `VSCODE_PASSWORD_INPUT_ID` and `SynthesisResult.inputs`. The package's public `index.ts` no longer exports those four names: a removal from a published API in a `patch` changeset, which the lead may raise to `minor` (AC 44.2.9 allows it). The CLI keeps `inputsMerged: []` and `missingInputIds: []` in its envelopes, because the extension's types require both. The doctor's old `vscode` expansion branch (`cli/clients.ts:1543,1557`, D-5 verdict L) was deleted for the same reason; the new `vscode-local-harness-entries` check reports owned entries in the old files without scanning their references.
+4. **Task 3 and 7 detail.** The new `legacyScopes` data is `{scope, paths, format, rootKey, envExpansion}`; `paths.ts` adds `adapterForScope`, `legacyAdapterView` and `resolveLegacyPath`, and the engine reads and edits an old file through that view (backups under `backups/vscode-legacy/<scope>/`, so `restore --client vscode` can never pick an old-file backup). New engine surface: `previewLegacyRemoval`, `sharedWriteVerdict`, `holdsLegacyReferences`, `EngineResult.adopted|sharedWith|sharedNote|legacy`. A failed old-file edit is exit 1 from the CLI (`the new entry was written, but ... still in the old file`), after the new entry was kept; a refused conflict is exit 1 before any write. The matrix's `--server iris-dev-mcp` is the CLI's `--servers` for apply and `--server` for the toggles.
+5. **Certify harness (task 10).** `certify.mjs` now applies the vscode entry in the default env-reference mode: the dummy-password explicit mode existed only because the old env-reference write also merged an `inputs[]` descriptor that `remove` does not roll back. The record was re-run with a scratch `HOME`/`USERPROFILE`, `COPILOT_HOME` unset and a scratch working directory (the pass's `status` reads the project `.mcp.json` of the directory it runs in, and this repository may hold one). The `humanOnly` marker is kept, re-dated 2026-11-22, and points at the D-6 runbook.
+6. **Ledger limit, not fixed.** The ownership ledger is keyed `(client, scope, name)` with no file path, so a claude-code project record made in one project also counts as an owner in another project's `.mcp.json`. The shared-file rule inherits this; it can only make vscode adopt-or-conflict where a stricter, path-keyed ledger would write. Pre-existing keying, out of scope here.
+
 ## Review Triage Log
+
+### 2026-11-22 — Review pass
+- verdicts: 35 findings — high 0, medium 11, low 22, false 2, maybe-false 0
+- findings:
+  - `[low]` `[reject]` Blind-3: after vscode adopts an unrecorded claude-code entry, vscode becomes sole owner and a later vscode apply rewrites it — the literal D-2 / Boundaries sole-owner rule (spec-bound; closing by-design); reopen_if a spec amendment adds a persistent implied owner.
+  - `[low]` `[reject]` Blind-4: disable and remove state the shared-file effect after the write, not before — the Boundaries say "proceeds and says"; spec-bound.
+  - `[low]` `[reject]` Blind-5 and Edge-8: every project with a `.mcp.json` now detects VS Code — task 3 prescribes the project config probe, and Spec Change Log 2 records it; spec-bound.
+  - `[low]` `[reject]` Blind-6 and Edge-9: `disable` leaves old-file entries and old-file backups are not selectable by `restore` — the spec scopes the old files to `apply`/`remove`; recovery is the timestamped backup; not worth more than a note.
+  - `[low]` `[reject]` Blind-7 and Intent-3: legacy removal matches by canonical name, not ledger — the same ownership model `apply` uses for the new file (`ownershipRefusal`); consistent with AD-30.
+  - `[medium]` `[defer]` Blind-1 and Edge-10: a `patch` changeset removes four public exports — the spec task 12 fixes `patch` and leaves a raise to `minor` to the lead; deferred to the lead (frontmatter).
+  - `[medium]` `[patch]` Blind-2 and Edge-1: the `apply` the refusal and doctor advise never dropped the pre-move stash — `record` in `engine.ts` `apply` now drops a legacy-reference stash; pinned by a new test.
+  - `[low]` `[patch]` Blind-8, Verification-gap-9: doctor read an unparseable strict file and the stash check through the unscoped adapter — both calls now use `adapterForScope` (`cli/clients.ts`).
+  - `[false]` `[reject]` Blind-9: scratch path in the certification record — the existing claude-code and cline records already carry the same scratch-home form.
+  - `[low]` `[patch]` Blind-10: Claude Code users are not told the project `.mcp.json` is shared — a paragraph added to the Claude Code section of `docs/client-config/README.md`.
+  - `[medium]` `[patch]` Edge-2: the legacy-stash refusal ran after the missing-file no-op — moved before it; pinned by a new test.
+  - `[low]` `[patch]` Edge-3: `previewLegacyRemoval` did not guard a null native edit or a throw — guarded like `withLegacyRemoval`.
+  - `[low]` `[reject]` Edge-4: an unparseable unrelated old file makes `apply` exit 1 — the manager cannot confirm that no owned entry remains in it, and the new write already succeeded; reopen_if a user reports a broken old file blocking apply.
+  - `[low]` `[reject]` Edge-5: the doctor fix command omits `--mode`/`--yes` — wording only; the command names the server and scope.
+  - `[low]` `[reject]` Edge-6: one pre-move stash can raise an orphaned-stash and a legacy-stash finding — cosmetic duplicate.
+  - `[medium]` `[patch]` Edge-7 and Edge-11: a vscode disable or remove of an entry only vscode records says nothing about Claude Code reading the file — `withSharedNote` now names the other readers for a client that never wrote the file before sharing; claude-code stays silent until another client records the entry (the byte-identical back-compat bound); the old vscode-silent test was replaced.
+  - `[medium]` `[patch]` Verification-gap-1: no test of `enable` into a shared file — conflict and equal-entry tests added.
+  - `[medium]` `[patch]` Verification-gap-2: claude-code as the refused party, and `adopted:true` for the reverse adoption, were unpinned — tests added.
+  - `[medium]` `[patch]` Verification-gap-3: the other-client stash back-compat test asserted nothing about another client — a claude-code `${env:` stash enable test added.
+  - `[low]` `[patch]` Verification-gap-4: the CRLF assertion was constant 0 for LF fixtures — it now asserts the line-ending style survives for every fixture.
+  - `[low]` `[patch]` Verification-gap-5: missing `mutation:` lines — written in `## Verification` for the new and changed pinning tests (AC 44.2.3, 44.2.4, 44.2.5, 44.2.7); AC 44.2.1/6/9 have no executable pin by design.
+  - `[medium]` `[defer]` Verification-gap-6: the ledger has no file path, so a claude-code record from one project counts as a sharing owner in another's `.mcp.json` — pre-existing keying (Spec Change Log 6); deferred.
+  - `[false]` `[reject]` Verification-gap-7: migration combined with the shared rule — with the entry absent from `.mcp.json` the write is a normal create, and with it present the shared rule is the intended behavior.
+  - `[low]` `[reject]` Verification-gap-8: goldens captured from the engine's own output — the shape is grounded in probe V8 and the byte layout in the claude-code oracle.
+  - `[low]` `[reject]` Verification-gap-10: no extension test for the new output fields — the fields are additive and the spec makes no extension change beyond the mirror test.
+  - `[low]` `[reject]` Intent-1: no real Copilot session was exercised — AC 44.2.7 is a human row by decision; the file-level certify ran.
+  - `[low]` `[reject]` Intent-2: doctor lists the shared file under the first client only — the spec requires it checked once; `status` and `detect` show it under both.
+  - `[low]` `[reject]` Intent-4: a migration failure returns `ok:true` with warnings at the engine and exit 1 at the CLI — the spec's migration row keeps the new entry and reports the old one.
 
 ## Design Notes
 
@@ -240,6 +293,13 @@ No AC contradicts an AD's Rule. D-2 refines AD-30's draft bullet, which the prop
 - `mcp-config.json` / `COPILOT_HOME` / `.copilot`: no hits before the story.
 - Certification rows: the vscode record is M (AC 44.2.7); the cline/roo-code records are U.
 
+**D-5 build-time re-run (AC 44.2.6, task 13; 2026-11-22, the seven patterns over `packages/client-config`, `extensions/iris-mcp-launcher`, `docs` and the root `*.md`, with the same exclusions plus `fixtures/` listed as files).** Every hit above took its recorded verdict, as built; the re-run found these hits that D-5 did not list:
+- Root `README.md:264` (`${input:`, `inputs`: the "zero-secrets end state" item 3, "VS Code native inputs"): D, edited to the environment-reference text.
+- `CHANGELOG.md:3262` (`inputs`, a 2026 entry describing the old env-reference upgrade) and `packages/client-config/CHANGELOG.md:44` (`inputs`, unrelated wording): H, history, left as is. `tool_support.md:192` (`inputs`, tool arguments): U.
+- `extensions/iris-mcp-launcher/src/clientsEngine.ts`, `clientsPanel*.ts` and the extension tests: `inputs` hits are the unrelated "inputs the extension owns" wording and `missingInputIds` in three test fixtures and one type (kept: the CLI still emits `missingInputIds: []`): U / kept.
+- Verdicts differing from D-5's as written: `clientsView.test.ts:84` (a detect fixture holding a profile `mcp.json` path) was M, not L: it now holds the new user-file path, because it mirrors what `detect` prints for vscode. `cli/clients.ts:1543,1557` (the doctor's old-file branch) was deleted, not kept (Spec Change Log 3). `certify.mjs:481-483` was M, not D (the comment went with the explicit-mode special case). The re-pointed tests: `readers.test.ts`, `diff.test.ts`, `e2e.test.ts`, `qa-33-5-unit.test.ts` read the old JSONC fixtures through `vscodeLegacyAdapter()` (L); `golden.test.ts` has new Copilot goldens (`golden/vscode`, `golden/vscode-compact`, captured from the engine) and the old ones under `golden/vscode-legacy*` driven through the legacy view (L); `byte-preservation.test.ts`, `engine-e2e.test.ts`, `clients-cli*.test.ts`, `qa-33-5-process.test.ts`, `status.test.ts`, `home-guard.test.ts`, `synthesize.test.ts`, `adapters.test.ts` moved to the new shape (M).
+- The new hits this story's own files add are the intended ones: `adapters.ts` `legacyScopes` (`servers`, `${env:`-era paths: L), `engine.ts` `LEGACY_REFERENCE` and the enable refusal text (L), the new tests and their old-format seeds (L), the READMEs, `docs/client-config/README.md` and the CHANGELOG entry (D).
+
 **D-6 Owner runbook (human-only, AC 44.2.7; pair it with `epic-43-decision-sheet-item-1-…`).**
 1. Setup:
    - VS Code ≥ 1.146, signed in to Copilot, the Copilot harness selected (the default);
@@ -273,6 +333,22 @@ No AC contradicts an AD's Rule. D-2 refines AD-30's draft bullet, which the prop
 - AC 44.2.8: edit one other adapter's `restartHint` -> `adapters-44-2-backcompat.test.ts` red.
 - Integration (task 9): skip the `sharedWith` dedup -> the process test red.
 
+Mutation evidence (implement stage, 2026-11-22; each mutation applied to the source, the named tests run, the file restored and `cmp`-checked byte-identical):
+- mutation: AC 44.2.2 -- the user scope's `entryShape: "copilot"` set to `"standard"` in `adapters.ts` -> `vscode-copilot-targets.test.ts` "user scope, default" and "user scope in every mode" red (2 tests). The spec's own mutation, `envExpansion` back to `"vscode"`, was green in that row at first, because synthesis no longer branches on the expansion (the `${env:` branch is deleted): it was red only in `adapters.test.ts`. The default-write row now also asserts `vscode.envExpansion` is `"claude"`, and the same mutation is red there (1 test).
+- mutation: AC 44.2.3 -- `soleOwner` skipped in `engine.ts` `sharedVerdict` (always a normal write) -> `shared-mcp-json.test.ts` red: adopt, conflict (CLI and engine), unrecorded-different and the equal-entry adoption (5 tests). `PRE_SHARING_WRITERS` emptied in `shared-files.ts` (claude-code conflicts on an unrecorded entry) -> red: the claude-only unrecorded-entry `toEqual`, the vscode-conflict/claude-replaces row and the ownership unit (3 tests). The unrecorded-entry oracle was added for this: captured from a dist built from `git archive 9f7797c5` (`capture-oracle-unrecorded.mjs`), because the five-fixture oracle never has an unrecorded canonical entry, so that mutation was first green there.
+- mutation: AC 44.2.4 -- `withLegacyRemoval` called before `runEdit` in `engine.ts` `apply` -> `vscode-copilot-targets.test.ts` "the new write fails: the old file is untouched and gets no backup", the migration row and the old-file-edit-fails row red (3 tests).
+- mutation: AC 44.2.8 -- the Cursor `restartHint` text edited in `adapters.ts` -> `adapters-44-2-backcompat.test.ts` "every other adapter record is toEqual its pre-story capture" red (1 test).
+- mutation: Integration (task 9) -- the shared-file dedup of the `status` managed-entry count (`cli/clients.ts`) skipped, then the package rebuilt -> `clients-cli-process.test.ts` "status --json lists the shared project .mcp.json once per client with sharedWith, and counts the entry once" red (1 test, on the built bin). The source was restored and the package rebuilt; the process suite is green again (36 tests).
+
+Mutation evidence (review pass, 2026-11-22; each applied to the source, the named tests run, the file restored and `cmp`-checked byte-identical):
+- mutation: AC 44.2.3 (enable into a shared file) -- the conflict return in `engine.ts` `enable` disabled -> `shared-mcp-json.test.ts` "enable into a shared file ... refuses when the other client has since written a different entry" red (1 test).
+- mutation: AC 44.2.3 (claude-code as the refused or adopting party) -- `sharedVerdict` returns `null` for `claude-code` -> "adopt in the other direction" and "conflict the other way: claude-code is refused" red (2 tests).
+- mutation: AC 44.2.3 (shared disable/remove note) -- `withSharedNote` names only ledger owners again (the vscode-only-owner fallback removed) -> "the engine names the other reader even when only vscode records the entry" red (1 test).
+- mutation: AC 44.2.4 (pre-move stash) -- the legacy-stash drop removed from `apply`'s `record` -> "the apply that the refusal advises drops the legacy stash" red (1 test); the `legacyScopes !== undefined` guard removed from the `enable` refusal -> "another client's stash that holds ${env:...} still enables" red (1 test); the refusal made to run only when the file exists -> "enable refuses the stash even when the new file does not exist yet" red (1 test).
+- mutation: AC 44.2.5 (help text) -- the help line `${VAR} references` set to `${env:VAR} references` in `cli/clients.ts` -> `vscode-copilot-targets.test.ts` "the CLI help text names ${VAR} and never ${env:VAR}" red (1 test).
+- mutation: AC 44.2.7 (re-dated marker) -- the vscode `markedOn` in `certification-results.json` set back to `2026-11-21` -> `qa-42-9-certification-gate.test.ts` "every humanOnly marker is dated the implementation date" and the table-sync control red (2 tests).
+- AC 44.2.1, 44.2.6 and 44.2.9 have no executable pin by design: probe claims, a grep enumeration, and a changeset and CHANGELOG that the release step consumes (a test on a changeset file would fail after release).
+
 **Shared surfaces:**
 - the `CLIENT_ADAPTERS` vscode record and `ADAPTER_DATA_VERSION`;
 - the generated README tables;
@@ -287,10 +363,22 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
 
+Build and review (2026-11-22): tasks 1-13 built, reviewed by four layers (Blind Hunter, Edge Case Hunter, Verification Gap, Intent Alignment: 35 findings, none high), patched and verified; one commit of the reviewed diff plus this spec on the epic branch, nothing pushed or published.
+- Review breakdown: 6 medium entries patched (stash left behind by the advised `apply`; the legacy-stash refusal ordered after the missing-file no-op; the shared-file note for a vscode-only owner; and three test gaps: `enable` into a shared file, claude-code refused or adopting, a non-vscode `${env:` stash), 6 low patches (doctor strict-file adapter, preview guard, a constant-zero assertion, mutation lines, a docs paragraph), 2 items deferred (the `patch` changeset that removes four public exports, and the path-less ownership ledger), 2 false, and the remaining lows rejected with their reasons in `## Review Triage Log`.
+- Follow-up review recommended: true. Two or more medium entries were patched, and the patches touch `engine.ts` `apply`/`enable`/`withSharedNote`, which only in-memory and process tests exercise; the unverified risk is a shared-file flow no scenario drives (for example an `enable` after a disable by both clients).
+- Verification (all in the foreground, scratch homes only): build; the six-file and three-file `(loop)` sets green; `render-certification-table.mjs --check` exit 0; `@iris-mcp/client-config` suite 48 files, 1343 tests green; launcher suite 458 passed, 3 skipped; `@iris-mcp/all` run in 8 vitest shards, all 8 green; `lint`, `type-check`, `gen:governance-baseline:check` (141 frozen keys unchanged) and `gen:ipm:check` pass. Mutation evidence for each pinning test is in `## Verification`.
+- Residual risks: the owner's Copilot-session certification (D-6) is still to run; the changeset stays `patch` for the lead to raise; the ledger has no file path (deferred); the launcher provider path is Story 44.6.
+
 Plan stage (2026-11-22): the spec meets the READY FOR DEVELOPMENT standard and the run halted after planning, as instructed. Nothing was implemented or committed.
+
+Implement stage (2026-11-22): tasks 1-13 are built and verified; nothing is committed, staged beyond the golden-fixture `git mv` renames, or published.
+- Changed: `packages/client-config` (`types`, `adapters`, `paths`, `readers`, `diff`, `synthesize`, `engine`, `status`, `detect`, `index`, `cli/clients`, new `shared-files.ts`; tests, goldens and the oracle fixtures; `certify.mjs`, `certification-results.json`, the README with its generated tables), the three docs, the extension README and its two mirror tests, `CHANGELOG.md` and `.changeset/story-44-2-vs-code-copilot-mcp-configuration-targets.md`.
+- Verified: the `(loop)` commands green (build; the six-file and three-file vitest sets; `render-certification-table.mjs --check`); the package suite (48 files, 1337 tests) and the launcher suite (32 files, 458 tests) green; `lint`, `type-check`, `gen:governance-baseline:check` (141 frozen keys, unchanged) and `gen:ipm:check` clean; the five mutations of `## Verification` each observed red and restored.
+- AC 44.2.1: no probe claim about VS Code could be re-checked without the app; the claims the build found wrong are in the Spec Change Log (items 1-2). AC 44.2.6: the re-run and its new verdicts are in D-5. AC 44.2.7: the certify run passed under a scratch `HOME` (paths printed and checked first, `COPILOT_HOME` unset); the vscode record is re-dated 2026-11-22 with `humanOnly` kept and the D-6 pointer; the owner still runs D-6. AC 44.2.9: the CHANGELOG and the changeset name `@iris-mcp/client-config` as the must-carry package; no vsix is needed for the fix, the CLI change reaches the MCP Clients view through the npm `@1` release, and the extension README change reaches the Marketplace with the next vsix (DW-720).
+- For the lead: the changeset is `patch` but removes four public exports (Spec Change Log 3); the AD-30 text of D-2 is unchanged and was implemented as written.
 
 For the lead:
 - the AD-30 "Shared files" replacement text (D-2, Rule 20);
