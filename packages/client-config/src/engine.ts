@@ -38,7 +38,7 @@
 
 import { CLIENT_ADAPTERS } from "./adapters.js";
 import { diff, renderNativeEntry, type DiffMechanism, type DiffOptions } from "./diff.js";
-import { homeGuardReason } from "./home-guard.js";
+import { homeGuardReason, samePath } from "./home-guard.js";
 import { adapterForScope, legacyAdapterView, resolveLegacyPath, resolveScopePath } from "./paths.js";
 import { ownEntry, readConfigEntries, type RawEntry } from "./readers.js";
 import {
@@ -633,7 +633,10 @@ export function enable(
     updateState: (state) => {
       const next = dropStash(state, client, scope, name, target.at);
       if (!adopting) return next;
-      const prior = next.entries.find((r) => r.client === client && r.scope === scope && r.name === name);
+      // The flag comes from this file's record (or one without a path), never from another project's.
+      const prior = next.entries.find(
+        (r) => r.client === client && r.scope === scope && r.name === name && (r.path === undefined || samePath(target.at.platform, r.path, target.at.path)),
+      );
       return recordManaged(next, { client, scope, name, containsSecret: prior?.containsSecret ?? true, at: target.at }, now());
     },
     // 33-1-R1: a no-op enable (entry already present in the file) still

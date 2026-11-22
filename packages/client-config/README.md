@@ -72,7 +72,9 @@ iris-mcp-clients skills install|uninstall --client <id> [--project <dir>] [--dry
     name, so an entry the other client would write identically is **adopted** (nothing is
     written), a different one is a **conflict** (exit 1, nothing written), and a `disable` or
     `remove` says that the other client reads the same file. `detect`, `status` and `doctor`
-    list the file under both clients and check it once.
+    list the file under both clients and check it once. Ownership is kept per project file: a
+    record or a disabled entry from another project never counts, and after a project folder is
+    moved or renamed, `enable` finds nothing to enable there and `apply` writes the entry again.
   - There is no password prompt and no `inputs` array: the Copilot harness cannot forward
     either. `env-reference` writes `"IRIS_PASSWORD": "${IRIS_PASSWORD}"`, which VS Code resolves
     from the environment it was launched with (restart VS Code from a shell that has the

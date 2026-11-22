@@ -410,7 +410,8 @@ describe("a genuinely shared file (both clients, one project) still adopts an eq
     // B first: a lookup that ignored the file would find B's server-manager stash before A's.
     expect(toggle("disable", world.b).status).toBe(0);
     expect(toggle("disable", world.a).status).toBe(0);
-    expect(ledger(world).stashes.map((stash) => stash.path).sort()).toEqual([mcpJson(world.a), mcpJson(world.b)].sort());
+    // Unsorted on purpose: the ledger lists B's stash first, so a lookup that ignored the file would find it.
+    expect(ledger(world).stashes.map((stash) => stash.path)).toEqual([mcpJson(world.b), mcpJson(world.a)]);
     const enabled = toggle("enable", world.a);
     expect(enabled.status, enabled.stdout + enabled.stderr).toBe(0);
     expect(readFileSync(mcpJson(world.a), "utf8")).toBe(beforeA);
@@ -575,7 +576,8 @@ describe("per-file ledger units (in memory)", () => {
     const onlyA: ManagerState = { ...empty, entries: [{ ...pathlessClaude, path: FILE_A }] };
     expect(adopt(onlyA).entries).toEqual([...onlyA.entries, claudeForB]);
     expect(adopt(empty).entries).toEqual([claudeForB]);
-    // Idempotent once the file has a record, and a no-op for a peer that is not a pre-sharing writer.
+    // Idempotent once the file has a record, and a peer that records this file itself (here vscode, for claude-code's
+    // adoption) is never given a second record.
     expect(adopt(next)).toBe(next);
     const vscodeB: ManagerState = { ...empty, entries: [{ ...pathlessClaude, client: "vscode", path: FILE_B }] };
     expect(recordAdoptedOwners(vscodeB, "claude-code", "project", "iris-dev-mcp", sharedPeers(claude, "project", ctxB), atB, NOW, false)).toBe(vscodeB);

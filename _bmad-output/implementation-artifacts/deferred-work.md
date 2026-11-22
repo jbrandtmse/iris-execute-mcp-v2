@@ -4159,3 +4159,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: re-review 2 HIGH patch: recordAdoptedOwners keys on recordingClients/ownerClients, not on a pathless record (a converted record, or none, also triggers); vscode-as-other-client pathless records describe the old .vscode/mcp.json and are never recorded; the spine sentence is both narrower and wider than the code
 - 2026-11-22T23:35:58Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=lead Rule 20 spine edit at the rework commit; proposed text in the spec's Review Findings (rework re-review 2)
 - 2026-11-22T23:38:22Z status=resolved-by:44-2-vs-code-copilot-mcp-configuration-targets by=lead note=decision_137:AD-30_adoption_sentence_rewritten_to_the_reviewer_text;lint_spine_0
+
+### DW-742: An enable in a shared .mcp.json establishes no per-file ownership: an adopting enable never records the implied owner (Claude Code), and a stash-add enable from a pathless stash records nobody, so the other client later overwrites the entry unrefused
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: high | fix-risk: low | footprint: in-story
+- evidence: built CLI: pre-44.2 pathless cc record + pathless vscode server-manager stash; vscode enable adopts (ledger: vscode:B only), vscode apply env-reference exits 0 changed:1 over cc's entry. Reverse: vscode stash-add enable from a pathless stash leaves no vscode record; cc apply rewrites it. Only apply's adopt calls recordAdoptedOwners
+- 2026-11-22T23:54:03Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=rework_cap_reached: re-review 3 HIGH, not patched; Planner decides; proposed fix in spec Review Findings (rework re-review 3)
+
+### DW-743: sharedPeers counts the same client's other scope as a sharing peer, so from the home directory a cursor, codex, gemini, kimi-code or jetbrains-junie user-scope re-apply with a pre-44.2 (pathless) or missing state record is refused as a shared-file conflict
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: high | fix-risk: low | footprint: in-story
+- evidence: built CLI, cwd=HOME: user path == the client's own project path (~/.cursor/mcp.json); pathless own record never counts once peers exist (recordingClients), no implied owner (not pre-sharing), so a mode change exits 1 'shared with another client'; same run from another dir exits 0; pre-story had no shared rule; status shows sharedWith:[cursor]
+- 2026-11-22T23:54:18Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=rework_cap_reached: re-review 3 HIGH, not patched; Planner decides; AC 44.2.8 back-compat, AD-15; fix: skip same-client peers in sharedPeers
+
+### DW-744: A VS Code-only user whose project folder moved (or whose state file was lost) is refused a mode change as 'shared with claude-code', and a same-mode re-apply records Claude Code as an owner of the file for good
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: built CLI: vscode apply in A, rename A; vscode mode change exits 1 naming claude-code; same-mode re-apply adopts and records claude-code:A-moved; later mode change still exits 1. An unrecorded entry cannot be told apart from a lost-state Claude Code entry
+- 2026-11-22T23:54:18Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=AD-30 decision #137 (an adoption records the implied owner, 'or none'); refusal, never an overwrite; remove then apply clears it

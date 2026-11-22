@@ -165,7 +165,7 @@ The project `.mcp.json` is also the project file of VS Code (Copilot) in the MCP
 The Copilot harness (the default since VS Code 1.143) reads two files itself, and the manager writes exactly those:
 
 - the user file `~/.copilot/mcp-config.json` (on Windows `%USERPROFILE%\.copilot\mcp-config.json`; `$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set and non-empty). It is strict JSON, with no comments and no trailing commas. The GitHub Copilot CLI (`copilot`) reads the same file, so an entry applied, disabled or removed here changes its servers too;
-- the workspace-root `.mcp.json`, the same file Claude Code uses for a project. The manager adopts an entry that both clients would write identically and refuses a conflicting one, so applying VS Code after Claude Code with the same mode and connection settings changes nothing.
+- the workspace-root `.mcp.json`, the same file Claude Code uses for a project. The manager adopts an entry that both clients would write identically and refuses a conflicting one, so applying VS Code after Claude Code with the same mode and connection settings changes nothing. Ownership is kept per project file: a record or a disabled entry from another project never counts here, and after a project folder is moved or renamed, `enable` finds nothing to enable there and `apply` writes the entry again.
 
 Both use the root key **`mcpServers`**, expand `${VAR}` from the environment VS Code was launched with, and have **no `inputs` prompt**: the Copilot harness cannot forward a password prompt. A user entry is shaped like the one VS Code writes itself:
 

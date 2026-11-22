@@ -172,11 +172,12 @@ export function dropRemovedShared(
 
 /**
  * The state after `client` adopts `name` in the shared file `at`, before `client`'s own record is added: an adoption
- * never takes ownership away. A pre-sharing writer among the peers that owns the entry here without a record of it for
- * this file (its only ownership is the implied one: its record of the name has no path, is for another file, or does
- * not exist) gets a manager record for this file. Without it, `client`'s new record would make `client` the sole owner,
- * and a later different write by `client` would overwrite the entry unrefused (AD-30). `containsSecret` is the adopted
- * entry's, which is exactly what `client` would write. The peer's other records stay as they are.
+ * never takes ownership away. Every owner that `ownerClients` names among the peers without a record of the name for
+ * this file gets a manager record for this file. That happens only when no client records the name for the file, so the
+ * owners are the implied ones, the pre-sharing writers (whatever their other records say: none, one without a path, or
+ * one of another file). Without it, `client`'s new record would make `client` the sole owner, and a later different
+ * write by `client` would overwrite the entry unrefused (AD-30). `containsSecret` is the adopted entry's, which is
+ * exactly what `client` would write. The peer's other records stay as they are.
  */
 export function recordAdoptedOwners(
   state: ManagerState,
@@ -192,7 +193,7 @@ export function recordAdoptedOwners(
   const owners = ownerClients(state, client, scope, name, peers, at);
   const iso = now.toISOString();
   const added: ManagerState["entries"] = peers
-    .filter((peer) => PRE_SHARING_WRITERS.includes(peer.client) && owners.includes(peer.client) && !recorded.includes(peer.client))
+    .filter((peer) => owners.includes(peer.client) && !recorded.includes(peer.client))
     .map((peer) => ({ client: peer.client, scope: peer.scope, name, containsSecret, createdAt: iso, updatedAt: iso, path: at.path }));
   return added.length > 0 ? { ...state, entries: [...state.entries, ...added] } : state;
 }
