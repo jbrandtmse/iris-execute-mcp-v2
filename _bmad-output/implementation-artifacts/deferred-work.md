@@ -4153,3 +4153,9 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: med | footprint: in-story
 - evidence: resolveTarget records target.path from process.cwd(); the home guard uses realOrResolved but the ledger compare uses pathKey; posix getcwd is physical, Windows cwd is not
 - 2026-11-22T23:20:45Z status=wontfix-accepted owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=reopen_if=a ledger shows two records of one client and name whose paths realpath to the same file (Windows junction/subst cwd)
+
+### DW-741: AD-30 spine per-file sentence states the adopt rule as 'the other client recorded without a path'; the patched rule records the pre-sharing writer (Claude Code) whenever it owns the adopted entry with no record for that file, and an enable-adopt records the enabler
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: re-review 2 HIGH patch: recordAdoptedOwners keys on recordingClients/ownerClients, not on a pathless record (a converted record, or none, also triggers); vscode-as-other-client pathless records describe the old .vscode/mcp.json and are never recorded; the spine sentence is both narrower and wider than the code
+- 2026-11-22T23:35:58Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=lead Rule 20 spine edit at the rework commit; proposed text in the spec's Review Findings (rework re-review 2)
+- 2026-11-22T23:38:22Z status=resolved-by:44-2-vs-code-copilot-mcp-configuration-targets by=lead note=decision_137:AD-30_adoption_sentence_rewritten_to_the_reviewer_text;lint_spine_0

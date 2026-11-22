@@ -158,7 +158,7 @@ Or edit `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that variabl
 
 Restart Claude Code to pick up changes. Verify with `claude mcp list`.
 
-The project `.mcp.json` is also the project file of VS Code (Copilot) in the MCP client manager. When VS Code (Copilot) already records an entry under the same server name, an `apply --client claude-code --scope project` with different settings is refused (exit 1, nothing written) instead of replacing it; an identical entry is adopted without a write. Make the two entries match, or remove the entry first.
+The project `.mcp.json` is also the project file of VS Code (Copilot) in the MCP client manager. When VS Code (Copilot) already records an entry under the same server name for this project's `.mcp.json` (a record from another project never counts), an `apply --client claude-code --scope project` with different settings is refused (exit 1, nothing written) instead of replacing it; an identical entry is adopted without a write. Make the two entries match, or remove the entry first.
 
 ## VS Code (Copilot) ✅
 

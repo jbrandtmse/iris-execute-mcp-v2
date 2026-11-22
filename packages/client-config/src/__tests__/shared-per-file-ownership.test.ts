@@ -251,6 +251,63 @@ describe("DW-733: a record of another project's .mcp.json is not a sharing owner
     expect(readFileSync(mcpJson(world.b), "utf8")).toBe(before);
   }, T);
 
+  it("a pre-44.2 claude-code record that a claude-code write in project B turned into B's: vscode adopts in A, and a later different vscode write in A is still refused", () => {
+    const world = makeWorld();
+    seedMcp(world.a, COMPACT);
+    seedMcp(world.b, COMPACT);
+    expect(world.run(world.a, APPLY("claude-code", "env-reference")).status).toBe(0);
+    expect(world.run(world.b, APPLY("claude-code", "env-reference")).status).toBe(0);
+    // The pre-44.2 shape: one record of the name, with no path, standing for both projects.
+    const state = ledger(world);
+    writeFileSync(world.stateFile, JSON.stringify({ version: 1, entries: state.entries.slice(0, 1).map(({ path: _dropped, ...rest }) => rest), stashes: [] }) + "\n");
+    expect(world.run(world.b, APPLY("claude-code", "env-reference")).status).toBe(0);
+    expect(ledger(world).entries.map((entry) => entry.path)).toEqual([mcpJson(world.b)]);
+    const before = readFileSync(mcpJson(world.a), "utf8");
+
+    const adopted = world.run(world.a, APPLY("vscode", "env-reference"));
+    expect(adopted.status, adopted.stdout + adopted.stderr).toBe(0);
+    expect(readFileSync(mcpJson(world.a), "utf8")).toBe(before);
+    const refused = world.run(world.a, APPLY("vscode", "server-manager"));
+    expect(refused.status, refused.stdout + refused.stderr).toBe(1);
+    expect(refused.stdout + refused.stderr).toContain("shared with claude-code");
+    expect(readFileSync(mcpJson(world.a), "utf8")).toBe(before);
+  }, T);
+
+  it("an entry claude-code owns with no record at all (a lost state file): vscode adopts it, and a later different vscode write is still refused", () => {
+    const world = makeWorld();
+    seedMcp(world.b, COMPACT);
+    expect(world.run(world.b, APPLY("claude-code", "env-reference")).status).toBe(0);
+    rmSync(world.stateFile);
+    const before = readFileSync(mcpJson(world.b), "utf8");
+
+    const adopted = world.run(world.b, APPLY("vscode", "env-reference"));
+    expect(adopted.status, adopted.stdout + adopted.stderr).toBe(0);
+    expect(ledger(world).entries.map((entry) => `${entry.client}:${entry.path}`).sort()).toEqual([`claude-code:${mcpJson(world.b)}`, `vscode:${mcpJson(world.b)}`]);
+    const refused = world.run(world.b, APPLY("vscode", "server-manager"));
+    expect(refused.status, refused.stdout + refused.stderr).toBe(1);
+    expect(readFileSync(mcpJson(world.b), "utf8")).toBe(before);
+  }, T);
+
+  it("a pre-44.2 claude-code stash enabled by adopting vscode's equal entry: claude-code records the file, and a later different vscode write is refused", () => {
+    const world = makeWorld();
+    seedMcp(world.b, COMPACT);
+    const toggle = (verb: string): Run => world.run(world.b, [verb, "--client", "claude-code", "--scope", "project", "--server", "iris-dev-mcp", "--json"]);
+    expect(world.run(world.b, APPLY("claude-code", "env-reference")).status).toBe(0);
+    expect(toggle("disable").status).toBe(0);
+    const state = ledger(world);
+    writeFileSync(world.stateFile, JSON.stringify({ version: 1, entries: state.entries.map(({ path: _dropped, ...rest }) => rest), stashes: state.stashes.map(({ path: _dropped, ...rest }) => rest) }) + "\n");
+    expect(world.run(world.b, APPLY("vscode", "env-reference")).status).toBe(0);
+    const before = readFileSync(mcpJson(world.b), "utf8");
+
+    const enabled = toggle("enable");
+    expect(enabled.status, enabled.stdout + enabled.stderr).toBe(0);
+    expect(readFileSync(mcpJson(world.b), "utf8")).toBe(before);
+    expect(ledger(world).entries.some((entry) => entry.client === "claude-code" && entry.path === mcpJson(world.b))).toBe(true);
+    const refused = world.run(world.b, APPLY("vscode", "server-manager"));
+    expect(refused.status, refused.stdout + refused.stderr).toBe(1);
+    expect(readFileSync(mcpJson(world.b), "utf8")).toBe(before);
+  }, T);
+
   it("an old state file without any path parses and behaves as before: claude-code applies, disables, enables and removes", () => {
     const world = makeWorld();
     seedMcp(world.b, COMPACT);
@@ -350,8 +407,9 @@ describe("a genuinely shared file (both clients, one project) still adopts an eq
     const beforeA = readFileSync(mcpJson(world.a), "utf8");
     const toggle = (verb: string, dir: string): Run => world.run(dir, [verb, "--client", "claude-code", "--scope", "project", "--server", "iris-dev-mcp", "--json"]);
 
-    expect(toggle("disable", world.a).status).toBe(0);
+    // B first: a lookup that ignored the file would find B's server-manager stash before A's.
     expect(toggle("disable", world.b).status).toBe(0);
+    expect(toggle("disable", world.a).status).toBe(0);
     expect(ledger(world).stashes.map((stash) => stash.path).sort()).toEqual([mcpJson(world.a), mcpJson(world.b)].sort());
     const enabled = toggle("enable", world.a);
     expect(enabled.status, enabled.stdout + enabled.stderr).toBe(0);
@@ -396,6 +454,23 @@ describe("the other per-file ledger consumers (built CLI, scratch HOME)", () => 
 
     const again = world.run(world.b, ["doctor", "--json"]);
     expect(again.stdout).not.toContain("unrecorded-entries");
+  }, T);
+
+  it("a name outside the iris-mcp namespace repaired in project A is not owned in project B: remove and disable there are refused, B is unchanged, and doctor in B reports it", () => {
+    const world = makeWorld();
+    seedMcp(world.a, JSON.stringify({ mcpServers: { "iris-dev-mcp2": { command: "npx", args: ["-y", "@iris-mcp/dev@1"] } } }, null, 2));
+    expect(world.run(world.a, ["doctor", "--repair", "--yes-i-mean-it", "--json"]).status).toBe(0);
+    seedMcp(world.b, JSON.stringify({ mcpServers: { "iris-dev-mcp2": { command: "node", args: ["my-own-server.js"] } } }, null, 2));
+    const before = readFileSync(mcpJson(world.b), "utf8");
+
+    for (const verb of ["remove", "disable"]) {
+      const refused = world.run(world.b, [verb, "--client", "claude-code", "--scope", "project", "--server", "iris-dev-mcp2", "--json"]);
+      expect(refused.status, `${verb}: ${refused.stdout}${refused.stderr}`).toBe(1);
+      expect(refused.stdout + refused.stderr).toContain("outside the iris-mcp namespace");
+      expect(readFileSync(mcpJson(world.b), "utf8")).toBe(before);
+    }
+    expect(world.run(world.b, ["doctor", "--json"]).stdout).toContain("unrecorded-entries");
+    expect(ledger(world).entries.filter((entry) => entry.name === "iris-dev-mcp2").map((entry) => entry.path)).toEqual([mcpJson(world.a)]);
   }, T);
 });
 
@@ -480,25 +555,30 @@ describe("per-file ledger units (in memory)", () => {
     expect(recordingClients(cursorPathless, "cursor", "user", "iris-dev-mcp2", [], { platform: "linux", path: "/home/u/.cursor/mcp.json" })).toEqual(["cursor"]);
   });
 
-  it("recordAdoptedOwners gives a pathless pre-sharing writer a record for the adopted file, once, and never a peer that is not one", () => {
+  it("recordAdoptedOwners records a pre-sharing writer that owns the adopted entry without a record for this file, once, and never a peer that is not one", () => {
     const peersOfVscode = sharedPeers(vscode, "project", ctxB);
+    const adopt = (state: ManagerState): ManagerState => recordAdoptedOwners(state, "vscode", "project", "iris-dev-mcp", peersOfVscode, atB, NOW, false);
     const pathlessClaude: ManagerState["entries"][number] = {
       client: "claude-code",
       scope: "project",
       name: "iris-dev-mcp",
-      containsSecret: false,
+      containsSecret: true,
       createdAt: "2026-08-01T00:00:00.000Z",
       updatedAt: "2026-08-01T00:00:00.000Z",
     };
-    const state: ManagerState = { ...empty, entries: [pathlessClaude] };
-    const next = recordAdoptedOwners(state, "iris-dev-mcp", peersOfVscode, atB, NOW);
-    expect(next.entries).toEqual([pathlessClaude, { ...pathlessClaude, updatedAt: NOW.toISOString(), path: FILE_B }]);
+    const claudeForB = { client: "claude-code", scope: "project", name: "iris-dev-mcp", containsSecret: false, createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(), path: FILE_B };
+    // A pathless record: the pathless record stays, and the file gets its own (with the adopted entry's secret flag).
+    const next = adopt({ ...empty, entries: [pathlessClaude] });
+    expect(next.entries).toEqual([pathlessClaude, claudeForB]);
     expect(soleOwner(recordManaged(next, { client: "vscode", scope: "project", name: "iris-dev-mcp", containsSecret: false, at: atB }, NOW), "vscode", "project", "iris-dev-mcp", peersOfVscode, atB)).toBe(false);
-    // Idempotent once the file has a record, and a no-op without a pathless record or for a peer that is not a pre-sharing writer.
-    expect(recordAdoptedOwners(next, "iris-dev-mcp", peersOfVscode, atB, NOW)).toBe(next);
-    expect(recordAdoptedOwners(empty, "iris-dev-mcp", peersOfVscode, atB, NOW)).toBe(empty);
-    const pathlessVscode: ManagerState = { ...empty, entries: [{ ...pathlessClaude, client: "vscode" }] };
-    expect(recordAdoptedOwners(pathlessVscode, "iris-dev-mcp", sharedPeers(claude, "project", ctxB), atB, NOW)).toBe(pathlessVscode);
+    // Only a record of another file (a pathless record a write elsewhere has converted), or no record at all: the implied owner is recorded too.
+    const onlyA: ManagerState = { ...empty, entries: [{ ...pathlessClaude, path: FILE_A }] };
+    expect(adopt(onlyA).entries).toEqual([...onlyA.entries, claudeForB]);
+    expect(adopt(empty).entries).toEqual([claudeForB]);
+    // Idempotent once the file has a record, and a no-op for a peer that is not a pre-sharing writer.
+    expect(adopt(next)).toBe(next);
+    const vscodeB: ManagerState = { ...empty, entries: [{ ...pathlessClaude, client: "vscode", path: FILE_B }] };
+    expect(recordAdoptedOwners(vscodeB, "claude-code", "project", "iris-dev-mcp", sharedPeers(claude, "project", ctxB), atB, NOW, false)).toBe(vscodeB);
   });
 
   it("dropRemovedShared drops the client's own records and the peers' manager records for the file, keeping stashes and other files", () => {

@@ -525,7 +525,7 @@ export function apply(
     const { verdict, sharedWith } = shared;
     if (verdict.kind === "conflict") return fail(client, scope, "apply", target.path, verdict.reason, { sharedWith });
     const warnings: string[] = [];
-    persistState(ctx, fs, target.stateDir, record(recordAdoptedOwners(target.state, entry.name, target.peers, target.at, now())), warnings);
+    persistState(ctx, fs, target.stateDir, record(recordAdoptedOwners(target.state, client, scope, entry.name, target.peers, target.at, now(), containsSecret)), warnings);
     const adopted: EngineResult = {
       ok: true,
       client,
@@ -588,6 +588,9 @@ export function enable(
   }
   const refusal = ownershipRefusal(target.state, client, scope, name, true, target.at);
   if (refusal) return fail(client, scope, "enable", target.path, refusal);
+  // An enable that adopts the other client's equal entry records this client for the file, so its ownership is visible
+  // to the other client even when its only record has no path (AD-30: an adoption never leaves the adopter unrecorded).
+  let adopting = false;
   if (stash !== undefined && target.peers.length > 0) {
     const parsed = readConfigEntries(target.adapter, current.content);
     const existing = parsed.ok ? ownEntry(parsed.entries, name) : undefined;
@@ -605,6 +608,7 @@ export function enable(
           sharedWith: otherOwners(target.state, client, scope, name, target.peers, target.at),
         });
       }
+      adopting = true;
     }
   }
   const diffOptions: DiffOptions | undefined = stash ? { nativeEntry: stash.entry } : undefined;
@@ -626,7 +630,12 @@ export function enable(
     entry: stubEntry(name),
     content: current.content,
     ...(diffOptions !== undefined ? { diffOptions } : {}),
-    updateState: (state) => dropStash(state, client, scope, name, target.at),
+    updateState: (state) => {
+      const next = dropStash(state, client, scope, name, target.at);
+      if (!adopting) return next;
+      const prior = next.entries.find((r) => r.client === client && r.scope === scope && r.name === name);
+      return recordManaged(next, { client, scope, name, containsSecret: prior?.containsSecret ?? true, at: target.at }, now());
+    },
     // 33-1-R1: a no-op enable (entry already present in the file) still
     // must drop a STALE stash record when one exists — only fires when
     // `stash` was actually found above, so the common no-op (nothing
