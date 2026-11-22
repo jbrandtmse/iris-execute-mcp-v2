@@ -598,7 +598,7 @@ Each server is configured independently in the client's MCP configuration with i
 
 ### Document Database (DocDB)
 
-- FR100: Data engineer can create or drop document databases
+- FR100: Data engineer can create or drop document databases; a created database is registered so every other DocDB operation can use it (Epic 44, Story 44.1)
 - FR101: Data engineer can insert, retrieve, update, or delete documents by ID
 - FR102: Data engineer can query documents with filter criteria
 - FR103: Data engineer can create or drop document properties and indexes
@@ -716,7 +716,7 @@ Sourced from the Project Lead decision record [decision-record-2026-10-14-distri
 - FR159: IRIS administrator can install the IRIS-side classes through IPM, with an offline install proof. (Epic 42, Story 42.4)
 - FR160: Claude Code users can install the whole suite plus skills as one plugin, and VS Code users can install the extension from the Marketplace or Open VSX. (Epic 42, Stories 42.7 and 42.8)
 - FR161: The servers run on the MCP TypeScript SDK v2 before `1.0.0` is published. They behave byte-identically for clients on the 2025-11-25 protocol revision, and also serve revision `2026-07-28` over stdio from the same process, with identical logical content on both. (Epic 43, added 2026-10-15 by Project Lead decision; stdio support verified by live probe on 2026-10-15)
-- FR162: On a client that supports MCP elicitation, every confirmation gate asks the human directly before executing; examples are audit purge, promote execute, `clean` with `killAppData`, resend execute and `regenerateStorage`. A decline refuses and changes nothing. The confirmation is bound to the exact arguments shown. On clients that cannot elicit, today's `confirm: true` contract applies unchanged. (Epic 43, Story 43.3, added 2026-10-15 by Project Lead decision)
+- FR162: On a client that supports MCP elicitation, every confirmation gate asks the human directly before executing; examples are audit purge, promote execute, `clean` with `killAppData`, resend execute and `regenerateStorage`. A decline refuses and changes nothing. The confirmation is bound to the exact arguments and scope shown: if the scope changes before the answer is honored, the human is asked again (Epic 44, Story 44.3). On clients that cannot elicit, today's `confirm: true` contract applies unchanged. (Epic 43, Story 43.3, added 2026-10-15 by Project Lead decision)
 
 Release requirement (non-functional): releases run only from a tagged commit with green CI, through an approved protected environment, with npm provenance. (Epic 42, Stories 42.3 and 42.5)
 

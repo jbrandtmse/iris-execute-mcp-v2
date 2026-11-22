@@ -7,8 +7,8 @@ paradigm: 'Layered ports-and-adapters with a single call-time interceptor chain'
 scope: 'The five MCP servers, the @iris-mcp/shared framework, the IRIS-side ExecuteMCPv2 REST service, and the distribution tooling (client-config, VS Code launcher, skills pack, CI and release)'
 status: final
 created: '2026-10-14'
-updated: '2026-10-21'
-binds: ['FR1-FR162', 'Epics 38-43']
+updated: '2026-11-22'
+binds: ['FR1-FR162', 'Epics 38-44']
 sources:
   - '../../architecture.md'
   - '../../prd.md'
@@ -274,7 +274,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **The embed.** The IRIS-side classes ship embedded in `@iris-mcp/shared` (`bootstrap-classes.ts`, generated and output-only). They are deployed by Atelier PUT plus compile:
     - **when.** On each profile's first establishment, the `default` warm-up included. All five servers declare that they need the custom REST service.
     - **how often.** At most once per profile.
-    - **on failure.** The per-step report is logged with manual remediation, never as a silent no-op.
+    - **on failure.** The per-step report is logged with manual remediation, never as a silent no-op. A compile counts as succeeded only when a check that reads no localized text confirms that every embedded class compiled (Story 44.4, DW-685; Rule #13). An HTTP 200 from `action/compile` is not success on its own, because `General.Compile` can answer 200 when only some classes failed.
     - **governance.** Bootstrap is part of establishing a connection and is never a governed action.
   - **Class order.** `classes[]` is in compile order: Utils, Setup, the libraries, `REST/Base`, the handlers, and `REST/Dispatch` last. `ExecuteMCPv2.Tests.*` and fixture classes are never in it.
   - **Changing a class.** A change to any bootstrapped class regenerates the embed in the same story, which moves `BOOTSTRAP_VERSION`. A new class joins both rosters: `gen-bootstrap.mjs` and `bootstrap.test.ts`.
@@ -630,6 +630,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     5. restore automatically on failure;
     6. show a diff preview before confirmation.
   - **Ownership.** Only entries and marked blocks that the tool owns are written, and foreign content is preserved byte for byte, proven on varied fixtures.
+  - **Shared files** *(Story 44.2)*. When two adapters target one file (a workspace-root `.mcp.json` is both Claude Code's and VS Code Copilot's project file), entries are owned per server name, not per client. A write that finds a byte-identical entry adopts it, and any other entry under that name is a conflict. A disable or remove for one client warns that the other client reads the same file. `detect`, `status` and `doctor` show the file under both clients without counting it twice.
   - **Project scope is never the home directory.** A project-scope write (MCP entries, `diff` included, and the skills installer) whose project directory resolves (realpath; case-insensitive on darwin and win32) to the home directory is refused before the write protocol starts, naming the client's project and user paths, with exit 1 and the reason in the JSON envelope; reads are unaffected (Story 42.9, decisions #100 and #115).
   - **The installer's manifest** *(Story 41.6, wave-7 decision #27)*. The installer writes a per-target manifest of the paths and content hashes it installed: `.iris-mcp/skills-pack.json` in the project, deterministic, with each path's hash and the clients that need it.
     - An update removes owned paths that are absent from the new pack. Uninstall deletes a shared path only when no client still needs it.
@@ -700,7 +701,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - any future gate.
 
   It also binds the shared confirmation helper in `@iris-mcp/shared`.
-- **Prevents:** a destructive write proceeding because the agent set `confirm: true` on its own, a decline that loops, and a confirmation that doesn't match the call it approved
+- **Prevents:** a destructive write proceeding because the agent set `confirm: true` on its own, a decline that loops, and a confirmation that doesn't match the call or the scope it approved
 - **Rule:**
   - **One helper.** Gates use one shared helper. Handlers never call the SDK's elicitation API (AD-2, AD-3).
   - **Order.** Every existing check (bounds, dry-run, governance, `confirm: true`) runs first. The human dialog is an additional gate, never a replacement.
@@ -708,12 +709,12 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - An accept proceeds.
     - A decline or cancel ends the call with `CONFIRMATION_DECLINED` and changes nothing. It never asks again.
   - **Other clients.** When the client does not declare elicitation, today's `confirm: true` contract applies unchanged.
-  - **Binding to the call.** A confirmation is bound to the exact arguments it showed: if they change between rounds, the helper asks again. Any `requestState` is integrity-protected and verified.
+  - **Binding to the call.** A confirmation is bound to the exact arguments **and the scope** it showed. If either changes between rounds, the helper asks again, showing the new scope, and never proceeds on the old answer. Re-asks are bounded, so a scope that changes on every round ends the call with a refusal instead of looping (Story 44.3). Any `requestState` is integrity-protected and verified.
   - **Hooks.** A client-side hook that auto-answers dialogs is the user's choice, and is documented.
   - **As built** *(Story 43.3, wave-8 decisions #12, #13, #15 and #16)*.
     - **The gated set.** Exactly six: `iris_audit_manage:purge`, `iris_env_promote:execute`, `iris_production_control:clean` with `killAppData: true`, `iris_message_resend:resendFiltered` execute, `iris_message_resend:resend`, and `iris_doc_edit:regenerateStorage`. The last two have no `confirm` parameter, and their fallback is governance only. AD-15's "existing confirmation gates" means this set.
     - **The helper.** It is `ToolContext.confirm` (`confirmation.ts`). It sends one required boolean `confirm` in the form, and only an accept with `confirm: true` proceeds. It reads the client's capabilities by era: the request envelope on the modern era, and the `initialize` declaration on the legacy era, never a request's `_meta`.
-    - **Binding.** Through signed, single-use `requestState`: an HMAC codec with a per-process key and a 600 s TTL. The state covers the tool, the resolved profile and a hash of the validated arguments, plus a nonce consumed on the deciding round. Forged, replayed, expired or changed-argument state asks again.
+    - **Binding.** Through signed, single-use `requestState`: an HMAC codec with a per-process key and a 600 s TTL. The state covers the tool, the resolved profile and a hash of the validated arguments, plus a nonce consumed on the deciding round. *(Story 44.3, DW-670.)* It also covers a digest of the scope binding the dialog showed (state `v: 2`). The deciding round resolves the scope again, and a different digest asks again. Each gate's binding value is recorded in Story 44.3's gate table: the promote's planned Storage drops are always inside it. Forged, replayed, expired, changed-argument or changed-scope state asks again.
     - **Order.** Each handler asks immediately before its first IRIS write, after all its own checks. `resendFiltered` asks only for 1 ≤ match count ≤ cap, from a read-only preflight. `clean` asks only under IRIS's own pass condition.
     - **Descriptions** *(Story 43.4, wave-8 decision #24)*. Each gated tool's description names the dialog in one appended passage.
     - **Hooks, as observed** (Claude Code 2.1.296, decision #20). The `Elicitation` hook fires on both eras. Headless `claude -p` with no hook, or with `--permission-prompts none`, cancels the dialog (`CONFIRMATION_DECLINED`, `response: "cancel"`).

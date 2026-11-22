@@ -6061,3 +6061,243 @@ Added on 2026-10-15 by Project Lead decision. Today's `confirm: true` gates are 
 - From Story 43.3 (wave-8 decision #17): the gated tools' descriptions (`iris_audit_manage`, `iris_env_promote`, `iris_production_control`, `iris_message_resend`, `iris_doc_edit`) name the elicitation dialog. This lands with DW-639's golden retirement, since the frozen 2025-era golden pins those bytes. Regenerate the tools-list snapshot in the same change.
 - DW-653: the `resend-failed-messages` prompt says an over-cap match is refused and that omitting `dryRun` or `confirm` is refused. In fact a dry run returns the full `matchCount`, and omitting `dryRun` previews. The frozen 43.1 golden pins the prompt text, so correct it with DW-639's golden retirement, as a sanctioned AD-15 prompt-text fix, and regenerate the skill. (ledger; routed by harvest 2026-10-20)
 - DW-646: `resources/list` lists `iris-governance://default` twice on both eras: `registerGovernanceResource` (`server-base.ts:1166-1215`) registers it statically, and the `{profile}` template's list callback lists `default` again. The frozen v1 golden carries it for all five servers. Decide it together with DW-639's golden retirement: a sanctioned dedupe, or keep it as is. (ledger; routed by the Story 43.2 code review 2026-10-20)
+
+## Epic 44: Correctness & Safety Fixes (added 2026-11-22)
+
+**Runs on** `feature/feature-wave-9-bug-fixes`, cut from `main` at `8b177e1` plus the owner's rule-corrections commit `0e7bff1a`. The epic branch is `epic44`, per `_bmad/custom/branch-naming.yaml`. Stories run in order **44.1 → 44.2 → 44.3 → 44.4 → 44.5**.
+
+**Goal:** five defects found by Epic 42's reviews are fixed, each proven on the path it guards (Rule #59):
+
+- a DocDB database created through the suite can be used by the other DocDB tools (DW-688, high priority);
+- VS Code users keep a working setup after VS Code removes the Local harness in February 2027 (DW-721);
+- a confirmation counts only for the scope its dialog showed, not just the arguments (DW-670);
+- bootstrap's `compiled` reports whether every class actually compiled (DW-685);
+- an armed integration run cannot report "passed" for a test that tested nothing (DW-684).
+
+**Context:** the owner approved this scope on 2026-11-22 ([sprint-change-proposal-2026-11-22.md](./sprint-change-proposal-2026-11-22.md)). Epic 42's decision sheet (wave-8 decision #130) closed the five ledger entries `dropped note=action_item`, so the work is tracked by `sprint-status.yaml` action items rather than by the ledger:
+
+| Story | Ledger entry | Action item |
+|---|---|---|
+| 44.1 | DW-688 | `epic-42-retro-item-8-charter-a-story-in-the-next-planned-epic` |
+| 44.2 | DW-721 | `epic-42-retro-item-11-charter-a-story-due-before-february-2027` |
+| 44.3 | DW-670 | `epic-42-retro-item-4-charter-a-story-in-the-next-planned-epic` |
+| 44.4 | DW-685 | `epic-42-retro-item-7-charter-a-story-in-the-next-planned-epic` |
+| 44.5 | DW-684 | `epic-42-retro-item-6-charter-a-story-in-the-next-planned-epic` |
+
+These five are set to `in-progress` when the proposal is applied, so the Story 44.0 gate does not pull them in a second time. The Epic 44 retrospective closes them, with the owner's confirmation.
+
+**Ordering:**
+
+- **44.1 first.** It is the one user-facing, high-priority defect. 44.5 also depends on it, because `DOCDB_SKIPS`' reason in `scripts/lib/ci-checks.mjs` names the missing record.
+- **44.2 second.** It has a deadline outside the project: VS Code removes the Local harness in February 2027. The owner chose **one release at the end of the epic**, with no early release after 44.2 (2026-11-22, Q-3). So the whole epic, not just 44.2, has to be done in time for that release to ship before 2027-02-01. Putting 44.2 early de-risks the story most likely to need rework.
+- **44.3 and 44.4** are independent of each other.
+- **44.5 last.** It hardens the armed suites that 44.1 and 44.4 touch, and its armed CI run is the epic-done evidence.
+
+**Shared by every story** (the wave rules carried forward from Epics 38–43):
+
+- **The architecture spine binds every story** (`architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md`). Where a story's text and the spine disagree, the spine wins and the story is amended in place. The amendments to AD-14, AD-30 and AD-34 in the sprint change proposal (§4.3) are applied on approval, before 44.1 starts.
+- Story numbers start at 44.1. 44.0 is left free for `/epic-cycle`'s retro-review gate.
+- **Probe before building** (Rules #14/#16/#47). Each story verifies its API and documentation claims first, and amends this text in place if a claim is wrong. The proposal flags three claims that are known to be unverified or contradicted: the DocDB API (44.1), the VS Code file semantics (44.2) and the compile envelope (44.4).
+- **No new tool and no new governance key.** Tool counts and `GOVERNANCE_BASELINE` (frozen at `1e62c5ad5bf7`/141, checked with `:check` only) stay unchanged. A story that finds it needs a new tool, action or key stops and amends this text first (Rules #28/#53).
+- **Bootstrap discipline.** A story that changes a bootstrapped class regenerates the embed in the same story and records `BOOTSTRAP_VERSION` from → to (Rule #24). It is `1.1.0+2.244fe8623c76` at the wave start. A new class joins both rosters (Rule #39). The IPM tree is regenerated only by the release version step (AD-14).
+- **Tool-text changes** (a description or schema text) are sanctioned AD-15 changes. They go through the Frozen goldens convention (Story 42.10's machinery), regenerate the tools-list snapshot, and are named in `CHANGELOG.md`.
+- **Back-compat (Rule #19).** Each story names the behavior that must not move and pins it with an assertion that fails on drift.
+- **Live proof.** Endpoint-backed stories drive the live route, including one destructive-path refusal (Rule #26). Burn-down fixes are proven live or mutation-verified (Rule #48).
+- **Shared IRIS instance.** Other projects use it, and it is never stopped. A story never toggles a shared-instance service or breaks a bootstrapped class there, because the `%ALL` mapping sends the `ExecuteMCPv2` package to HSCUSTOM (wave-8 decision #49). Such checks run on a throwaway (`scripts/throwaway-iris.mjs`). Writes go only to disposable `ExecuteMCPv2.Temp.*` classes and disposable DocDB names, which the story removes afterwards.
+
+**Epic-done gate (Rule #21).** The five fixes are independent: no property spans them, so no single cross-cutting capstone exists, and an artificial one would only re-run the per-story gates. Instead:
+
+- each story's pinning gate runs in the default suite and is proven red on the path it guards (Rule #59), with the path named;
+- the epic is done when the default suite is green and **one armed CI run of the wave-branch tip** is green, with 44.5's guard-return check in the gates job and no skip outside the allowlist. The run URL is recorded in 44.5.
+
+**Out of scope:**
+
+- DW-538, the remote/HTTP transport (the owner declined it);
+- DW-719, DW-720 and DW-722 (store publishing, the GitHub-release job, the plugin directory);
+- publishing a release inside any story. There is one release, at the end of the epic (owner, 2026-11-22, Q-3). The Lead approves it, and it must ship before 2027-02-01;
+- any other ledger item, except what the 44.0 gate brings in under its own rules.
+
+### Story 44.1: DocDB Create Registers the Database
+
+**As a** data engineer, **I want** `iris_docdb_manage create` to leave a database that the other DocDB tools can use, **so that** my first property, document or find call does not fail with a raw ERROR #822.
+
+- **AC 44.1.1** — Probe first (Rules #14/#16), recorded in the story. Use the local `irislib/`/`irissys/` snapshot, then a disposable `ExecuteMCPv2.Temp.*` probe.
+  - **The API.** Record the signature of `$$Create^%SYS.DOCDB`, its return value, the privilege it needs, and whether it must run in `%SYS`. Record what `Ens.Setting.Report.base` passes it; the ledger cites `:629`.
+  - **The other routes.** Record whether `%DocDB.Database.CreateDatabase`, or the `%Api.DocDB.v1` create route (`httpPostDatabase`, cited at `:299-313`), has a variant that registers the record. Record whether `DELETE /api/docdb/v1/{ns}/db/{name}` removes the record; Story 42.3's rework says it does.
+  - **Existing databases.** Record what a database created by 1.1.0 or earlier answers, and whether registering it afterwards makes it usable.
+  - **Version range.** Record the oldest IRIS version, inside the 2023.1+ claim, that has the `Security.DocDBs` requirement, on the oldest throwaway image that starts. Otherwise record a residual risk.
+
+  If registering is not feasible, the story takes the documentation fallback of AC 44.1.5 alone, and this text is amended in place. Examples: it needs a privilege the suite cannot rely on, or it can't be done without an IRIS-side write the spine forbids.
+- **AC 44.1.2** — `create` creates the database and registers its `Security.DocDBs` record in one tool call.
+  - The registration goes through a thin IRIS-side handler (AD-12) on an additive route (AD-33), using the namespace save/restore pattern (no `New $NAMESPACE`).
+  - A registration that fails is reported with the real IRIS text through `SanitizeError` (Rule #9). The report says whether the database itself was created. A failure is never silent and never a generic "Failed to create".
+  - **Repair.** `create` on a database that exists without a record registers it. If the probe shows that is unsafe, the documented manual step replaces it, with the reason recorded.
+- **AC 44.1.3** — `drop` leaves no orphan `Security.DocDBs` record, checked live. `translateDocDbAccessDenied` (`packages/iris-data-mcp/src/tools/docdb.ts`) names the missing record when the service is enabled but the database has no record, instead of passing a raw #822 through. Its disabled-service branch is unchanged.
+- **AC 44.1.4** — Bootstrap:
+  - the embed is regenerated, and `BOOTSTRAP_VERSION` from → to is recorded (Rule #24);
+  - a new class joins both rosters (Rule #39);
+  - the handler's ObjectScript unit tests pass, and the test count is checked against the expected `Test*` methods (Rule #35).
+- **AC 44.1.5** — Docs:
+  - the data README's DocDB prerequisites name the record as well as `%Service_DocDB`, and say what `create` now does;
+  - the `iris_docdb_manage` description is updated as a sanctioned AD-15 change (the Frozen goldens convention, with the snapshot regenerated);
+  - `CHANGELOG.md` and a changeset are updated.
+- **AC 44.1.6** — Live proof (Rules #26 and #48), on a throwaway with `%Service_DocDB` enabled. It runs on the shared instance only if the service is already enabled there; the story never toggles it.
+  - Through the tools, a disposable database with no underscore in its name (Story 42.3) runs the whole lifecycle: create, property, index, insert, get, update, find, delete and drop. After the drop, no record remains.
+  - **Proven red:** with the registration call removed, the property call answers #822 again.
+  - **Refusal:** one destructive-path refusal changes nothing. An example is `drop` of a name that does not exist.
+- **AC 44.1.7** — Back-compat (Rule #19): `list`, `drop`, and the request bytes of `iris_docdb_document`, `iris_docdb_find` and `iris_docdb_property` are unchanged. Each is pinned with `toEqual` against its pre-story capture.
+- **Seam with 44.5.** `DOCDB_REASON` in `scripts/lib/ci-checks.mjs` names the missing record. This story narrows the reason to what is still true. 44.5 decides whether CI runs the lifecycle, because the Epic 35 F5 gate needs the service disabled.
+- DW-688 (action item `epic-42-retro-item-8-charter-a-story-in-the-next-planned-epic`, high priority): `iris_docdb_manage create` leaves a database that every other DocDB call rejects with ERROR #822 on IRIS 2026.2, because no `Security.DocDBs` record exists. Register the record on create (`$$Create^%SYS.DOCDB`, as `Ens.Setting.Report.base` does), or document it if that is not feasible. (action item; chartered by correct-course 2026-11-22)
+
+### Story 44.2: VS Code Copilot MCP Configuration Targets
+
+**Due:** it reaches users through the epic's single end-of-epic release, which must ship before 2027-02-01. There is no separate release after this story (owner, 2026-11-22, Q-3).
+
+**As a** VS Code user, **I want** client-config, the CLI and the extension's MCP Clients view to write the MCP configuration that VS Code's Copilot harness reads, **so that** my IRIS servers keep working after the Local harness is removed in February 2027.
+
+- **AC 44.2.1** — Verify the documentation claims first (Rule #14). Record each source with its fetch date. As read on 2026-11-22 (sources in the proposal, §1):
+  - **What is removed.** The **Local harness** is deprecated in VS Code 1.146 and removed in February 2027.
+  - **What the Copilot harness reads.** `$COPILOT_HOME/mcp-config.json`, or `~/.copilot/mcp-config.json` when `COPILOT_HOME` is unset, and a workspace-root `.mcp.json`. Both use a top-level `mcpServers` key.
+  - **What it forwards.** It doesn't read `.vscode/mcp.json` or the profile `mcp.json` directly. It forwards eligible definitions from them, and eligible extension-provided definitions, except configurations that need `${input:…}` or `${command:…}`.
+  - **The portable entry schema.** `type`, `command`, `args`, `env` and `cwd`, with `${NAME}` and `${NAME:-default}` expansion. There is no `inputs`, no `envFile` and no `${env:NAME}`.
+
+  The ledger's wording ("the files are removed") is stronger than the docs. In a real VS Code 1.146 or later, verify what happens to each source today, and what is documented for after the removal. Also verify the points the docs leave open:
+  - the Windows path of the user file;
+  - whether a workspace `.mcp.json` is read with `chat.mcp.workspaceRootConfig.enabled` off (the docs gate only guided setup);
+  - which file wins on a name conflict;
+  - whether the extension's `mcpServerDefinitionProviders` definitions are forwarded to Copilot-harness sessions, credentials included.
+- **AC 44.2.2** — The `vscode` adapter (`packages/client-config/src/adapters.ts`):
+  - **Targets.** The user scope is `~/.copilot/mcp-config.json`, with `envOverride: { var: "COPILOT_HOME", pathSuffix: "mcp-config.json" }` (the `CLAUDE_CONFIG_DIR` pattern). The project scope is `.mcp.json`.
+  - **Format.** The format is JSON and the root key is `mcpServers`.
+  - **Env expansion.** Synthesized entries use `${VAR}`, not `${env:VAR}`, and carry no `inputs` block.
+  - **Credentials.** The `env-reference` mode loses VS Code's native `inputs` password prompt. Record what replaces it, and pin that no secret is written as a literal by default.
+  - **Data and docs.** `ADAPTER_DATA_VERSION` is bumped, and the README adapter tables are regenerated.
+- **AC 44.2.3** — **The shared workspace file.** A workspace `.mcp.json` is also Claude Code's project file (`claude-code` adapter, project scope). Decide the rule and pin it on non-canonical fixtures (Rule #58), as the AD-30 amendment in the proposal (§4.3) states it:
+  - entries are owned per server name, not per client;
+  - a write for one client that finds a byte-identical entry adopts it, and any other entry under that name is a conflict;
+  - a disable (stash) or remove for one client says that the other client reads the same file;
+  - `detect`, `status` and `doctor` show the one file under both clients without counting it twice.
+- **AC 44.2.4** — **Existing installs.**
+  - `status` and `doctor` report owned entries that are still in `.vscode/mcp.json` or the profile `mcp.json`.
+  - A migration path moves them to the new target through the FR141 write protocol (AD-30): validate, back up, edit, re-parse, restore on failure, and preview the diff. The story chooses its shape: a command, or part of the next write.
+  - Only owned entries leave the old file, and foreign content is preserved byte for byte.
+  - Reading the old files stays, so an old install is still visible.
+- **AC 44.2.5** — **The extension.**
+  - The MCP Clients view and every VS Code-specific text name the new targets.
+  - The extension's own `mcpServerDefinitionProviders` path is verified per AC 44.2.1, and documented.
+  - The extension runs the CLI as `npx -y -p @iris-mcp/client-config@1` (`extensions/iris-mcp-launcher/src/clientsEngine.ts:25`), so an npm release carries the adapter change to it. Record whether a new vsix is needed at all; if it is, it ships through DW-720's manual step, which is out of scope.
+- **AC 44.2.6** — **Enumeration** (Rule #56), exhaustive as of a named date. List every source file, doc, test, fixture and certification row that names, for VS Code:
+  - `.vscode/mcp.json`;
+  - the profile `mcp.json`;
+  - the `servers` root key;
+  - `${env:…}`;
+  - `inputs`.
+
+  Give each a verdict. The drafting pass found at least `adapters.ts`, `docs/client-config/README.md`, `packages/client-config/README.md` and `home-guard.test.ts`.
+- **AC 44.2.7** — Re-certification: the `vscode` certification row is re-certified with the existing certify scripts (`packages/client-config/scripts/certify.mjs`) in a VS Code 1.146 or later Copilot-harness session, and the table is regenerated. Without a consenting Copilot user, the row is marked human-only with the date, as DW-442 was.
+- **AC 44.2.8** — Back-compat (Rule #19):
+  - the other 15 adapters' data is byte-identical, pinned with `toEqual` against the pre-story registry minus `vscode`;
+  - the CLI's exit codes and JSON envelope are unchanged;
+  - a reader of an old file still parses it.
+- **AC 44.2.9** — Release handoff: `CHANGELOG.md` and a changeset are updated. The story record names the packages the epic's end-of-epic release must carry for this fix (at least `@iris-mcp/client-config`). The story publishes nothing itself.
+- DW-721 (action item `epic-42-retro-item-11-charter-a-story-due-before-february-2027`): VS Code calls the files the `vscode` adapter writes (`.vscode/mcp.json` and the profile `mcp.json`) deprecated Local-harness files, removed in February 2027. Move the adapter, the extension's and the CLI's write targets to `~/.copilot/mcp-config.json` (or `COPILOT_HOME`) and a workspace-root `.mcp.json` (`mcpServers`), then re-certify (decision #118). (action item; chartered by correct-course 2026-11-22)
+
+### Story 44.3: Confirmation Bound to the Scope Shown
+
+**As a** person approving a destructive call, **I want** my accept to count only for the scope the dialog showed me, **so that** a promote cannot write Storage drops that appeared after I looked.
+
+- **AC 44.3.1** — Root cause, confirmed with a failing test first.
+  - In `confirmOnWire` (`packages/shared/src/server-base.ts`, about `:2125-2170`; the ledger cites `:2133-2143`), a retry that echoes a valid, unused state decides the call before the scope is resolved again.
+  - `iris_env_promote`'s `executeAction` re-runs `preflightClassSteps` every round (`packages/iris-dev-mcp/src/tools/env-promote.ts:1319`), and the accepting round's `planned` drops reach `promotionScope` without being compared with what the dialog showed.
+  - The test drives two rounds whose planned drops differ, and shows that today's helper proceeds.
+- **AC 44.3.2** — The fix is in the one shared helper (AD-34). Handlers never compare state.
+  - The confirmation state carries a digest of the scope the dialog showed (`contentHash`), and the state version moves from `v: 1` to `v: 2`.
+  - On the deciding round, the helper resolves the scope again before it honors the answer.
+  - **A different digest does not proceed.** The helper asks again, showing the new scope, with a new state and nonce, and the old nonce is used up. The call stays one logical call, with one audit entry (AD-19).
+  - **A scope that now resolves to `undefined`** follows the no-dialog rule (the call proceeds, and IRIS's own guards decide), pinned and recorded.
+- **AC 44.3.3** — **The six gates.** List them with a verdict each (Rule #56). As of 2026-11-22:
+
+  | Tool | Call site |
+  |---|---|
+  | `iris_audit_manage:purge` | `audit.ts:387` |
+  | `iris_env_promote:execute` | `env-promote.ts:1343` |
+  | `iris_production_control:clean` with `killAppData` | `production.ts:223` |
+  | `iris_message_resend:resend` | `message-resend.ts:565` |
+  | `iris_message_resend:resendFiltered` | `message-resend.ts:644` |
+  | `iris_doc_edit:regenerateStorage` | `doc-edit.ts:582` |
+
+  - **What the digest covers.** For each gate, decide whether the digest covers the whole scope text or a value the gate supplies for binding. `resendFiltered`'s scope carries a live match count ("N message(s) match now"), which can change between rounds on a busy queue. The promote's planned drop set must be inside the digest.
+  - **Bound the re-asks.** A scope that changes on every round must not loop until the client's round limit; the probe showed a 10-round limit. Define the bound, for example one re-ask and then `CONFIRMATION_DECLINED`. A new refusal code is a sanctioned AD-15 change.
+- **AC 44.3.4** — Tests on both eras, through the real SDK client over stdio (`serveStdio`), as in AC 43.3.5:
+  - an unchanged scope accepts once and proceeds;
+  - a changed scope asks again and shows the new scope;
+  - a decline after the re-ask changes nothing;
+  - a scope that keeps changing hits the bound;
+  - a forged state, or a state with a different digest, asks again;
+  - a client without elicitation is unaffected.
+
+  **Pinning gate:** remove the digest comparison, and the changed-drops promote test goes red. The path is the wire retry round of a real elicitation exchange, not a direct `ToolContext` call (Rule #59).
+- **AC 44.3.5** — Back-compat (Rule #19):
+  - on a client that does not declare elicitation, every gate's result is byte-identical;
+  - on an unchanged scope, the dialog message, the result and the audit entry are byte-identical to today's (`toEqual` pins).
+
+  The extra scope resolution on the deciding round costs one read-only preview for `resendFiltered` only. Record it, and keep `resendFiltered`'s fail-closed preview (DW-657).
+- **AC 44.3.6** — Docs: the AD-34 amendment (proposal §4.3) and PRD FR162 (proposal §4.4) are applied, and `CHANGELOG.md` and a changeset are updated. The tool descriptions are unchanged unless a re-ask changes what they promise; any change goes through the Frozen goldens convention.
+- DW-670 (action item `epic-42-retro-item-4-charter-a-story-in-the-next-planned-epic`): on a client that answers the dialog in a second request, `iris_env_promote` execute re-runs its Storage preflight in the accepting round and writes the drops that round finds, while the confirmation binds only the tool and the argument hash. Bind a scope digest into the confirmation state (an AD-34 amendment, one shared helper over all six gates). (action item; chartered by correct-course 2026-11-22)
+
+### Story 44.4: Bootstrap Compile Result Accuracy
+
+**As an** operator, **I want** bootstrap to report `compiled: false` when any bootstrapped class fails to compile, **so that** a broken deployment shows at connect time, not later as a 404 or 500 from a tool.
+
+- **AC 44.4.1** — Probe first (Rules #14/#16, #13). On a throwaway, capture the `POST /api/atelier/v{n}/{ns}/action/compile` envelope in three cases, each on every Atelier version the throwaway images offer:
+  - (a) every class compiles;
+  - (b) one class of several fails;
+  - (c) every class fails.
+
+  Record which fields carry a partial failure: `status.errors`, `status.summary`, `result.content[].errors` and `console`.
+
+  **Contradicted claim, to settle first.** Story 42.3's review found that `General.Compile` replaces the compile status with the status of the documents it updated (`irislib/%Atelier/v1/Utils/General.cls`). A partly failing compile then answers HTTP 200 with the failure **only in the console**, and real documents carry no `errors` (`spec-42-3-ci-workflow.md:464,478`). If that holds, the action item's "read the envelope status and error fields" cannot detect the defect, and AC 44.4.2 picks another oracle that reads no localized text.
+- **AC 44.4.2** — **The oracle.** `compiled` is true only when a check that reads no localized message text confirms that every bootstrapped class compiled from the source just deployed (Rule #13). The probe picks one of these and records why:
+  - the envelope fields, if AC 44.4.1 shows they carry the failure;
+  - a post-compile query of the class dictionary through the existing `action/query` route. For example, check that each class has a `%Dictionary.CompiledClass` row whose timestamp or hash matches its `%Dictionary.ClassDefinition`;
+  - an up-to-date check through a `Setup` class method. This changes a bootstrapped class, so the Rule #24 bump applies.
+
+  The localized lines are never parsed, including `Compilation finished successfully` and `ERROR #n`.
+- **AC 44.4.3** — **The report.** A partial failure:
+  - sets `compiled: false`;
+  - names the classes that failed, with the sanitized IRIS text as context (Rule #9);
+  - stops the privileged steps, as a thrown compile does today.
+
+  The `unconfigured` branch configures even after a failed compile today. Keep or change that, and pin it. Both call sites are covered: today `packages/shared/src/bootstrap.ts:877-878` and `:919-920` (the ledger's `:746,788` predate Epic 42).
+- **AC 44.4.4** — **The other consumers.** `compileProblems` in `scripts/ci-seed-throwaway.mjs` and the check in `packages/iris-dev-mcp/src/__tests__/live-doc-helpers.ts` match English console lines. Each moves to the AC 44.4.2 oracle for bootstrapped classes, or the story records why it stays for fixture compiles, as a documented residual Rule #13 risk.
+- **AC 44.4.5** — **Proof.**
+  - **Fake Atelier.** A unit test against `packages/iris-mcp-all/src/__tests__/stateful-fake-atelier.ts` answers a partial failure with HTTP 200, and `compiled` is `false`. Mutation: ignore the oracle, and the test goes red.
+  - **Localized consoles.** Fixtures with console lines in two non-English locales show that the result does not depend on console text.
+  - **Live (Rule #48).** On a throwaway, never the shared instance, a deliberately broken disposable class in the compiled list is reported by name.
+- **AC 44.4.6** — Back-compat (Rule #19): on a clean compile, the `BootstrapResult` fields are byte-identical (`toEqual`). Record any extra round trip the oracle adds. `BOOTSTRAP_VERSION` moves only if an IRIS-side class changes.
+- DW-685 (action item `epic-42-retro-item-7-charter-a-story-in-the-next-planned-epic`): `bootstrap()` reports `compiled=true` whatever the compile says, because it ignores the Atelier envelope, and `General.Compile` answers HTTP 200 when only some classes fail. Read a signal that is not localized console text (Rule #13). (action item; chartered by correct-course 2026-11-22)
+
+### Story 44.5: Integration Suites Cannot Pass Without Testing
+
+**As a** maintainer reading a green armed CI run, **I want** every passed test to have exercised the live surface, **so that** green means the surface works.
+
+- **AC 44.5.1** — **Inventory** (Rule #56), mechanical and exhaustive as of a named date. It covers every file an armed CI suite runs: `buildLiveSuites()` in `scripts/lib/ci-checks.mjs` (the `integration-*`, `prepublish-*`, `process-gates`, `launcher-live` and `bootstrap-guard*` suites). It lists:
+  - each early-return guard;
+  - each assertion that sits only inside an `if (!result.isError …)` or `if (created.…)` branch.
+
+  The drafting pass on 2026-11-22 found, in the `*.integration.test.ts` files:
+  - 15 `if (…) return;` guards: data 3, interop 8 and ops 4. The ledger names only interop's `:204`, `:219` and `:239`;
+  - 33 `result.isError` conditionals: admin 22, interop 10 and ops 1.
+
+  The live-gate files under `packages/iris-mcp-all` hold more `if (…) return;` lines. Many are probably the unarmed opt-in guard (DW-627), which is correct. The inventory classifies each.
+- **AC 44.5.2** — **Each site** becomes one of two things:
+  - (a) a hard assertion: in an armed run, a missing precondition fails the test;
+  - (b) `ctx.skip()` with a reason the suite's `allowedSkips` in `ci-checks.mjs` names, so `ci-live-suite` counts it. An example is an environment that lacks the feature, as admin's `oauthAvailable` already does.
+
+  A silent return is not allowed. A create test that tolerates `isError` asserts success when armed.
+- **AC 44.5.3** — **A check against regression.** A check in the default suite, also wired as a step of the CI gates job, fails on a new guard return or a conditional-only assertion in an armed file. The unarmed opt-in pattern is on an allowlist. **Proven red** by re-adding `if (!created.production) return;` to `interop.integration.test.ts`, on the path the gates job runs (Rule #59). The step-equality self-test of Story 42.3 lists the new step.
+- **AC 44.5.4** — **The armed run.** One armed CI run of the wave-branch tip is green, and its URL is recorded. This is the epic-done evidence.
+  - A suite that newly fails because it now tests something is fixed in the story if the test is wrong. If the product is wrong, it is filed under the ledger rules, never hidden.
+  - **DocDB.** With 44.1 merged, decide whether the DocDB lifecycle runs in CI (it needs `%Service_DocDB` enabled, and the Epic 35 F5 gate needs it disabled) or stays on the allowlist with 44.1's narrowed reason.
+- **AC 44.5.5** — Back-compat (Rule #19): no product code changes. The default-suite test count moves only by the new check. The README and CHANGELOG claims about armed CI that Story 42.3 narrowed are made accurate.
+- DW-684 (action item `epic-42-retro-item-6-charter-a-story-in-the-next-planned-epic`): armed integration suites can go green without testing. Guard returns report "passed" after a create test that tolerates `isError` (for example `interop.integration.test.ts` `if (!created.production) return;`, and admin's tests that assert only inside `if (!result.isError && created.resource)`). Per suite, use `ctx.skip()` with an allowlisted reason, or a hard assertion. (action item; chartered by correct-course 2026-11-22)
