@@ -6158,7 +6158,7 @@ These five are set to `in-progress` when the proposal is applied, so the Story 4
 - **AC 44.2.1** — Verify the documentation claims first (Rule #14). Record each source with its fetch date. As read on 2026-11-22 (sources in the proposal, §1):
   - **What is removed.** The **Local harness** is deprecated in VS Code 1.146 and removed in February 2027.
   - **What the Copilot harness reads.** `$COPILOT_HOME/mcp-config.json`, or `~/.copilot/mcp-config.json` when `COPILOT_HOME` is unset, and a workspace-root `.mcp.json`. Both use a top-level `mcpServers` key.
-  - **What it forwards.** It doesn't read `.vscode/mcp.json` or the profile `mcp.json` directly. It forwards eligible definitions from them, and eligible extension-provided definitions, except configurations that need `${input:…}` or `${command:…}`.
+  - **What it forwards.** It doesn't read `.vscode/mcp.json` or the profile `mcp.json` directly. It forwards eligible definitions from them, and eligible extension-provided definitions, except configurations that need `${input:…}` or `${command:…}`. *(Amended 2026-11-22 from the Story 44.2 probe, wave-9 decision #133.)* VS Code 1.147.0's own source is stricter: a profile `mcp.json` entry with any unresolved variable, `${env:…}` included, is not forwarded; a `.vscode/mcp.json` entry is resolved first and forwarded unless it needs `${input:…}`/`${command:…}`; an extension definition is forwarded as provided, without what `resolveMcpServerDefinition` adds. So the adapter's current entries already miss Copilot-harness sessions.
   - **The portable entry schema.** `type`, `command`, `args`, `env` and `cwd`, with `${NAME}` and `${NAME:-default}` expansion. There is no `inputs`, no `envFile` and no `${env:NAME}`.
 
   The ledger's wording ("the files are removed") is stronger than the docs. In a real VS Code 1.146 or later, verify what happens to each source today, and what is documented for after the removal. Also verify the points the docs leave open:
@@ -6184,7 +6184,7 @@ These five are set to `in-progress` when the proposal is applied, so the Story 4
   - Reading the old files stays, so an old install is still visible.
 - **AC 44.2.5** — **The extension.**
   - The MCP Clients view and every VS Code-specific text name the new targets.
-  - The extension's own `mcpServerDefinitionProviders` path is verified per AC 44.2.1, and documented.
+  - The extension's own `mcpServerDefinitionProviders` path is verified per AC 44.2.1, and documented. *(Amended 2026-11-22 from the Story 44.2 probe, wave-9 decision #133.)* Verified from source: under the Copilot harness the provider's servers arrive without their connection settings or credentials (added only in `resolveMcpServerDefinition`). Fixing that needs extension code and a new vsix, so it is not in this story: it is a ledger entry for the owner's decision sheet, paired with DW-720.
   - The extension runs the CLI as `npx -y -p @iris-mcp/client-config@1` (`extensions/iris-mcp-launcher/src/clientsEngine.ts:25`), so an npm release carries the adapter change to it. Record whether a new vsix is needed at all; if it is, it ships through DW-720's manual step, which is out of scope.
 - **AC 44.2.6** — **Enumeration** (Rule #56), exhaustive as of a named date. List every source file, doc, test, fixture and certification row that names, for VS Code:
   - `.vscode/mcp.json`;
@@ -6196,7 +6196,7 @@ These five are set to `in-progress` when the proposal is applied, so the Story 4
   Give each a verdict. The drafting pass found at least `adapters.ts`, `docs/client-config/README.md`, `packages/client-config/README.md` and `home-guard.test.ts`.
 - **AC 44.2.7** — Re-certification: the `vscode` certification row is re-certified with the existing certify scripts (`packages/client-config/scripts/certify.mjs`) in a VS Code 1.146 or later Copilot-harness session, and the table is regenerated. Without a consenting Copilot user, the row is marked human-only with the date, as DW-442 was.
 - **AC 44.2.8** — Back-compat (Rule #19):
-  - the other 15 adapters' data is byte-identical, pinned with `toEqual` against the pre-story registry minus `vscode`;
+  - the other 14 adapters' data is byte-identical, pinned with `toEqual` against the pre-story registry minus `vscode` *(Amended 2026-11-22 from the Story 44.2 probe, wave-9 decision #133.)* (there are 15 adapters in all, `adapters.test.ts`);
   - the CLI's exit codes and JSON envelope are unchanged;
   - a reader of an old file still parses it.
 - **AC 44.2.9** — Release handoff: `CHANGELOG.md` and a changeset are updated. The story record names the packages the epic's end-of-epic release must carry for this fix (at least `@iris-mcp/client-config`). The story publishes nothing itself.
