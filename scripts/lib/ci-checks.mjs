@@ -149,8 +149,9 @@ const CAPTURE_SKIPS = [
 
 /** The `reason` of a DocDB lifecycle test: it needs an operator's setup that a fresh instance lacks, and one gate needs it absent. */
 const DOCDB_REASON =
-  'the DocDB REST routes answer ERROR #822 (Access Denied) until an operator enables %Service_DocDB and registers a Security.DocDBs record for the database, ' +
-  'and a fresh instance has neither; the Epic 35 F5 gate of the all roster needs the service disabled, so the seed leaves it so (probed on irishealth-community 2026.2)';
+  'the DocDB REST routes answer ERROR #822 (Access Denied) until an operator enables %Service_DocDB, which a fresh instance lacks; ' +
+  'iris_docdb_manage create registers the database\'s Security.DocDBs record since Story 44.1, so the service is the only setup left; ' +
+  'the Epic 35 F5 gate of the all roster needs the service disabled, so the seed leaves it so (probed on irishealth-community 2026.2)';
 
 /** The DocDB lifecycle of `data.integration.test.ts`: its probe finds the service disabled and skips the whole `describe`. */
 const DOCDB_SKIPS = [

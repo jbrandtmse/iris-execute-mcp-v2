@@ -144,6 +144,10 @@ const CONFIRM_BEFORE = "(resendFiltered) Must be true together with dryRun:false
 const CONFIRM_AFTER =
   "(resendFiltered) Must be true together with dryRun:false to execute the resend; dryRun:false without confirm:true is refused with no changes made. Ignored while dryRun is true or omitted (the call previews).";
 
+/** The sentence Story 44.1 appends to the `iris_docdb_manage` description (sanction `S-44.1-docdb-manage-text`). */
+const DOCDB_REGISTER_SENTENCE =
+  "'create' also registers the database's Security.DocDBs record, which every other DocDB call requires, and on a database that exists without one it registers the missing record.";
+
 interface Schema extends Json {
   properties: Record<string, { description: string } & Json>;
 }
@@ -181,6 +185,8 @@ function sanctionedTool(pkg: string, then: Tool): Tool {
       ignoreConflict.description = IGNORE_CONFLICT_AFTER;
     }
   }
+  // Story 44.1 (S-44.1-docdb-manage-text): one sentence appended to the iris_docdb_manage description, nothing else.
+  if (pkg === "iris-data-mcp" && then.name === "iris_docdb_manage") expected.description = `${expected.description} ${DOCDB_REGISTER_SENTENCE}`;
   if (FLIPPED[pkg]?.includes(then.name)) {
     expect(expected.annotations["destructiveHint"], `${then.name}: the frozen entry declares destructiveHint false`).toBe(false);
     expected.annotations["destructiveHint"] = true;

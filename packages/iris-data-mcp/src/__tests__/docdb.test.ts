@@ -65,7 +65,13 @@ describe("iris_docdb_manage", () => {
 
   it("should create a database via POST", async () => {
     const created = { database: "NewDB", status: "created" };
-    mockHttp.post.mockResolvedValue(envelope(created));
+    mockHttp.post.mockImplementation((url: string) =>
+      Promise.resolve(
+        url.includes("/security/docdb")
+          ? envelope({ registered: true, alreadyRegistered: false })
+          : envelope(created),
+      ),
+    );
 
     const result = await docdbManageTool.handler(
       { action: "create", database: "NewDB" },
@@ -76,8 +82,13 @@ describe("iris_docdb_manage", () => {
       expect.stringContaining("/api/docdb/v1/USER/db/NewDB"),
       {},
     );
+    // Story 44.1: create also registers the Security.DocDBs record.
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      "/api/executemcp/v2/security/docdb",
+      { action: "register", name: "NewDB", namespace: "USER" },
+    );
     expect(result.isError).toBeUndefined();
-    expect(result.structuredContent).toEqual(created);
+    expect(result.structuredContent).toEqual({ ...created, registered: true });
   });
 
   it("should return error when create is called without database", async () => {

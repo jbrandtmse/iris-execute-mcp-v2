@@ -67,6 +67,18 @@ async function safeCall(
   }
 }
 
+/**
+ * The live `GET /security/docdb` answer for `name` in the test namespace:
+ * `{exists, registered, ...}` (Story 44.1).
+ */
+async function recordState(name: string): Promise<Record<string, unknown>> {
+  const response = await client.get(
+    `/api/executemcp/v2/security/docdb?name=${encodeURIComponent(name)}` +
+      `&namespace=${encodeURIComponent(ctx.resolveNamespace(undefined))}`,
+  );
+  return (response as { result: Record<string, unknown> }).result;
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // DocDB Lifecycle Tests
 // ══════════════════════════════════════════════════════════════════════
@@ -105,6 +117,12 @@ describe.skipIf(!IRIS_OK || !DOCDB_OK)("DocDB lifecycle integration", () => {
 
     expect(result.content[0]?.text).toBeDefined();
     expect(result.isError).toBeFalsy();
+
+    // Story 44.1: create registers the Security.DocDBs record that IRIS
+    // requires for every other call on the database (live GET, not the
+    // tool's own claim).
+    expect((result.structuredContent as Record<string, unknown>).registered).toBe(true);
+    expect(await recordState(TEST_DB)).toMatchObject({ exists: true, registered: true });
   });
 
   // ── 2. Create a property ───────────────────────────────────────
@@ -122,8 +140,11 @@ describe.skipIf(!IRIS_OK || !DOCDB_OK)("DocDB lifecycle integration", () => {
   // ── 3. Create an index on the property ─────────────────────────
 
   it("creates an index on the property", async () => {
+    // DocDB indexes every property when it is created and has no separate
+    // index operation: 'index' re-creates the property, so it answers #5805
+    // on one that exists. Index a property that does not exist yet.
     const result = await docdbPropertyTool.handler(
-      { action: "index", database: TEST_DB, property: "category" },
+      { action: "index", database: TEST_DB, property: "label" },
       ctx,
     );
 
@@ -149,9 +170,11 @@ describe.skipIf(!IRIS_OK || !DOCDB_OK)("DocDB lifecycle integration", () => {
     // Extract document ID from response
     const structured = result.structuredContent as Record<string, unknown> | undefined;
     if (structured) {
-      // DocDB typically returns the ID in various fields
+      // The insert answer is {"content":{"_documentID":"1","content":{...}}}
+      // (captured live, IRIS 2026.2).
+      const inner = structured.content as Record<string, unknown> | undefined;
       insertedDocId = String(
-        structured._id ?? structured.id ?? structured.ID ?? "",
+        inner?._documentID ?? structured._documentID ?? structured._id ?? structured.id ?? structured.ID ?? "",
       );
     }
     // Fallback: try parsing from text
@@ -254,6 +277,9 @@ describe.skipIf(!IRIS_OK || !DOCDB_OK)("DocDB lifecycle integration", () => {
 
     expect(result.content[0]?.text).toBeDefined();
     expect(result.isError).toBeFalsy();
+
+    // Dropping the database removes its record too: none is left behind.
+    expect(await recordState(TEST_DB)).toMatchObject({ exists: false, registered: false });
   });
 });
 

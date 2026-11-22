@@ -8,8 +8,10 @@
  * - {@link docdbPropertyTool} — Create, drop, or index properties
  *
  * All tools call the IRIS built-in DocDB REST API at
- * `/api/docdb/v1/{namespace}/...`. No custom ObjectScript handler
- * is required.
+ * `/api/docdb/v1/{namespace}/...`. IRIS denies every call on a database that has
+ * no `Security.DocDBs` record (ERROR #822) and that API never writes one, so
+ * `iris_docdb_manage create` also registers the record through the ExecuteMCPv2
+ * route `/api/executemcp/v2/security/docdb` (Story 44.1).
  *
  * ## DocDB API contract notes (from reading %Api.DocDB.v1.cls and %DocDB.Database.cls)
  *
@@ -171,10 +173,44 @@ const IRIS_ERROR_CODE_ACCESS_DENIED = 822;
 /** The DocDB gateway service — disabled by default on IRIS. */
 const DOCDB_SERVICE_NAME = "%Service_DocDB";
 
+/** IRIS error code for "database already defined in this namespace" (the DocDB create of an existing name). */
+const IRIS_ERROR_CODE_DOCDB_ALREADY_EXISTS = 25051;
+
+/**
+ * True when the error carries an `errors[]` entry with the numeric `code`.
+ *
+ * The runtime cast in http-client.ts passes envelope.status.errors through
+ * whenever it has a length; a non-empty STRING satisfies that check, so
+ * `errors` can be a non-array here despite the unknown[] type (the shared
+ * formatIrisErrors guards the same shape). Guard before .some so a
+ * malformed error can never throw out of the caller's catch path. Never
+ * matches message text (Rules #8/#13: it is localized).
+ */
+function hasErrorCode(error: IrisApiError, code: number): boolean {
+  return (
+    Array.isArray(error.errors) &&
+    error.errors.some(
+      (entry) =>
+        entry !== null &&
+        typeof entry === "object" &&
+        (entry as Record<string, unknown>).code === code,
+    )
+  );
+}
+
+/** The database a DocDB call targeted; lets the 822 translation check its `Security.DocDBs` record. */
+export interface DocDbTarget {
+  database: string;
+  namespace: string;
+}
+
+/** Where to register a database that has no record, named in every message that says it is missing. */
+const DOCDB_PORTAL_ROUTE =
+  "Management Portal > System Administration > Security > Applications > Doc DB Applications";
+
 /**
  * Translate a DocDB access-denied failure into an actionable error message
- * when the root cause is a disabled `%Service_DocDB` (Story 35.7,
- * AC 35.7.1/35.7.3/35.7.4).
+ * (Story 35.7, AC 35.7.1/35.7.3/35.7.4; Story 44.1).
  *
  * Returns the enriched message when (and only when) ALL of the following
  * hold; returns `null` (caller passes the original error through unchanged)
@@ -185,39 +221,31 @@ const DOCDB_SERVICE_NAME = "%Service_DocDB";
  *   `status.errors[]` — never match message text, never branch on the HTTP
  *   status); AND
  * - a follow-up `GET /api/executemcp/v2/security/service?name=...` reports
- *   `%Service_DocDB` as `enabled: false`.
+ *   `%Service_DocDB` as `enabled: false` (the disabled-service message); OR
+ *   it reports `enabled: true`, `target` is given, and a follow-up
+ *   `GET /api/executemcp/v2/security/docdb?name=...&namespace=...` reports
+ *   that the database exists without a `Security.DocDBs` record, or that no
+ *   such database exists (the record messages).
  *
- * Pass-through is total: service enabled (genuine privilege failure),
- * service-state check itself failing, unexpected response shape, or a
- * non-822 error all return `null` — a secondary failure must never mask
- * the real error.
+ * Pass-through is total: a genuine privilege failure (service enabled and a
+ * record present), no `target` (a namespace-level `list`), a follow-up check
+ * that itself fails or answers an unexpected shape, or a non-822 error all
+ * return `null`: a secondary failure must never mask the real error.
  *
- * This is a catch-path translation, not a pre-check: the extra round-trip
- * happens only when a call has already failed with 822.
+ * This is a catch-path translation, not a pre-check: the extra round-trips
+ * happen only when a call has already failed with 822.
  *
- * @param ctx - Tool context (used for the single service-state follow-up).
+ * @param ctx - Tool context (used for the follow-up GETs).
  * @param error - The `IrisApiError` thrown by the DocDB call.
+ * @param target - The database the call targeted; omit for namespace-level calls.
  * @returns The actionable message, or `null` for pass-through.
  */
 export async function translateDocDbAccessDenied(
   ctx: ToolContext,
   error: IrisApiError,
+  target?: DocDbTarget,
 ): Promise<string | null> {
-  // The runtime cast in http-client.ts passes envelope.status.errors through
-  // whenever it has a length — a non-empty STRING satisfies that check, so
-  // `errors` can be a non-array here despite the unknown[] type (the shared
-  // formatIrisErrors guards the same shape). Guard before .some so a
-  // malformed error can never throw out of the caller's catch path.
-  const hasAccessDenied =
-    Array.isArray(error.errors) &&
-    error.errors.some(
-      (entry) =>
-        entry !== null &&
-        typeof entry === "object" &&
-        (entry as Record<string, unknown>).code ===
-          IRIS_ERROR_CODE_ACCESS_DENIED,
-    );
-  if (!hasAccessDenied) return null;
+  if (!hasErrorCode(error, IRIS_ERROR_CODE_ACCESS_DENIED)) return null;
 
   let enabled: unknown;
   try {
@@ -232,6 +260,10 @@ export async function translateDocDbAccessDenied(
   } catch {
     // The service-state check itself failed — never mask the original error.
     return null;
+  }
+
+  if (enabled === true && target !== undefined) {
+    return translateMissingDocDbRecord(ctx, error, target);
   }
 
   if (enabled !== false) {
@@ -255,6 +287,104 @@ export async function translateDocDbAccessDenied(
   );
 }
 
+/**
+ * With `%Service_DocDB` enabled, name the cause of an 822 when the database has
+ * no `Security.DocDBs` record, or does not exist (Story 44.1).
+ *
+ * Returns `null` (pass the original error through) when the record is there,
+ * when the check fails, or when its answer has an unexpected shape.
+ */
+async function translateMissingDocDbRecord(
+  ctx: ToolContext,
+  error: IrisApiError,
+  target: DocDbTarget,
+): Promise<string | null> {
+  let exists: unknown;
+  let registered: unknown;
+  try {
+    const response = await ctx.http.get(
+      `${BASE_EXECUTEMCP_URL}/security/docdb?name=${encodeURIComponent(target.database)}` +
+        `&namespace=${encodeURIComponent(target.namespace)}`,
+    );
+    const result = (response as { result?: unknown }).result;
+    if (result === null || typeof result !== "object") return null;
+    exists = (result as Record<string, unknown>).exists;
+    registered = (result as Record<string, unknown>).registered;
+  } catch {
+    // The record check itself failed; never mask the original error.
+    return null;
+  }
+
+  if (registered !== false) return null;
+
+  if (exists === true) {
+    return (
+      `ERROR #822: Access Denied \u2014 DocDB database '${target.database}' in namespace ` +
+      `${target.namespace} has no Security.DocDBs record. IRIS denies every DocDB call ` +
+      `on a database without one, and the DocDB REST API never writes it (a database ` +
+      `created before iris_docdb_manage 'create' registered it is in this state). ` +
+      `Checked live: ${DOCDB_SERVICE_NAME} is enabled and the record is missing. ` +
+      `To fix: run iris_docdb_manage with action="create" and database="${target.database}" ` +
+      `(the same name) \u2014 it registers the missing record \u2014 or add it in the ` +
+      `${DOCDB_PORTAL_ROUTE}. ` +
+      `Original error: ${error.message}`
+    );
+  }
+  if (exists === false) {
+    return (
+      `ERROR #822: Access Denied \u2014 no DocDB database '${target.database}' exists in ` +
+      `namespace ${target.namespace}, so IRIS has no record to authorize the call against. ` +
+      `Create it with iris_docdb_manage action="create" (that also registers its ` +
+      `Security.DocDBs record), or check the database and namespace names. ` +
+      `Original error: ${error.message}`
+    );
+  }
+  return null;
+}
+
+/** The text of an error thrown by a follow-up call, for a message that must carry the real reason. */
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The result of `iris_docdb_manage create` when the database's `Security.DocDBs`
+ * record could not be registered: an error that says what was created, what was
+ * not, why, and what to do (Story 44.1). Never silent, never thrown.
+ */
+function registrationFailure(
+  target: DocDbTarget,
+  created: boolean,
+  cause: unknown,
+) {
+  const missingRoute =
+    cause instanceof IrisApiError && cause.statusCode === 404
+      ? " The ExecuteMCPv2 REST service deployed on this instance has no /security/docdb route; it is updated when the server next bootstraps."
+      : "";
+  const lead = created
+    ? `DocDB database '${target.database}' WAS created in namespace ${target.namespace}, but its Security.DocDBs record was NOT registered, so IRIS denies every other DocDB call on it (ERROR #822: Access Denied)`
+    : `DocDB database '${target.database}' already exists in namespace ${target.namespace}, but registering its Security.DocDBs record failed; without that record IRIS denies every other DocDB call on it (ERROR #822: Access Denied)`;
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text:
+          `${lead}. ` +
+          `Registration error: ${errorText(cause)}${missingRoute} ` +
+          `To fix: run iris_docdb_manage with action="create" and database="${target.database}" ` +
+          `again (it registers the missing record), or add it in the ${DOCDB_PORTAL_ROUTE}.`,
+      },
+    ],
+    structuredContent: {
+      database: target.database,
+      namespace: target.namespace,
+      created,
+      registered: false,
+    },
+    isError: true,
+  };
+}
+
 // ── iris_docdb_manage ──────────────────────────────────────────
 
 export const docdbManageTool: ToolDefinition = {
@@ -267,7 +397,9 @@ export const docdbManageTool: ToolDefinition = {
     "'drop' permanently removes a document database and all its data. " +
     "Prerequisite: the %Service_DocDB service must be enabled on the instance " +
     "(it is disabled by default on IRIS) — a disabled service fails these calls " +
-    "with ERROR #822: Access Denied.",
+    "with ERROR #822: Access Denied. " +
+    "'create' also registers the database's Security.DocDBs record, which every other DocDB call requires, " +
+    "and on a database that exists without one it registers the missing record.",
   inputSchema: z.object({
     action: z
       .enum(["list", "create", "drop"])
@@ -317,10 +449,93 @@ export const docdbManageTool: ToolDefinition = {
             isError: true,
           };
         }
-        response = await ctx.http.post(
-          `${BASE_DOCDB_URL}/${encodeURIComponent(ns)}/db/${encodeURIComponent(database)}`,
-          {},
-        );
+        const target: DocDbTarget = { database, namespace: ns };
+        let existingError: IrisApiError | undefined;
+        try {
+          response = await ctx.http.post(
+            `${BASE_DOCDB_URL}/${encodeURIComponent(ns)}/db/${encodeURIComponent(database)}`,
+            {},
+          );
+        } catch (createError: unknown) {
+          // A database that already exists answers 25051 (matched on the
+          // numeric code, never the text). It may be one made before create
+          // registered the record, so try to register it (repair).
+          if (
+            !(createError instanceof IrisApiError) ||
+            !hasErrorCode(createError, IRIS_ERROR_CODE_DOCDB_ALREADY_EXISTS)
+          ) {
+            throw createError;
+          }
+          existingError = createError;
+        }
+
+        // The DocDB API never writes the Security.DocDBs record that IRIS
+        // requires for every other call on the database; register it.
+        let registration: unknown;
+        try {
+          const registerResponse = await ctx.http.post(
+            `${BASE_EXECUTEMCP_URL}/security/docdb`,
+            { action: "register", name: database, namespace: ns },
+          );
+          registration = (registerResponse as { result?: unknown }).result;
+        } catch (registerError: unknown) {
+          return registrationFailure(target, existingError === undefined, registerError);
+        }
+        const registrationFields =
+          registration !== null && typeof registration === "object"
+            ? (registration as Record<string, unknown>)
+            : {};
+        if (registrationFields.registered !== true) {
+          return registrationFailure(
+            target,
+            existingError === undefined,
+            new Error(
+              `the register call answered an unexpected result: ${JSON.stringify(registration)}`,
+            ),
+          );
+        }
+
+        if (existingError !== undefined) {
+          if (registrationFields.alreadyRegistered === true) {
+            // The database exists and has its record: this is the plain
+            // "already exists" error, exactly as before.
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: `Error managing DocDB database: ${existingError.message}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+          const repaired = {
+            database,
+            namespace: ns,
+            created: false,
+            registered: true,
+          };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text:
+                  `DocDB database '${database}' already exists in namespace ${ns}; its ` +
+                  `Security.DocDBs record was missing and has been registered.\n` +
+                  JSON.stringify(repaired, null, 2),
+              },
+            ],
+            structuredContent: repaired,
+          };
+        }
+
+        const created = { ...toStructured(extractResult(response)), registered: true };
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(created, null, 2) },
+          ],
+          structuredContent: created,
+        };
       } else {
         // drop
         if (!database) {
@@ -350,7 +565,11 @@ export const docdbManageTool: ToolDefinition = {
       if (error instanceof IrisApiError) {
         // Story 35.7: a disabled %Service_DocDB surfaces as ERROR #822 —
         // translate it into an actionable message (pass-through otherwise).
-        const gateMessage = await translateDocDbAccessDenied(ctx, error);
+        const gateMessage = await translateDocDbAccessDenied(
+          ctx,
+          error,
+          action === "drop" && database ? { database, namespace: ns } : undefined,
+        );
         return {
           content: [
             {
@@ -506,7 +725,10 @@ export const docdbDocumentTool: ToolDefinition = {
       if (error instanceof IrisApiError) {
         // Story 35.7: a disabled %Service_DocDB surfaces as ERROR #822 —
         // translate it into an actionable message (pass-through otherwise).
-        const gateMessage = await translateDocDbAccessDenied(ctx, error);
+        const gateMessage = await translateDocDbAccessDenied(ctx, error, {
+          database,
+          namespace: ns,
+        });
         return {
           content: [
             {
@@ -589,7 +811,10 @@ export const docdbFindTool: ToolDefinition = {
       if (error instanceof IrisApiError) {
         // Story 35.7: a disabled %Service_DocDB surfaces as ERROR #822 —
         // translate it into an actionable message (pass-through otherwise).
-        const gateMessage = await translateDocDbAccessDenied(ctx, error);
+        const gateMessage = await translateDocDbAccessDenied(ctx, error, {
+          database,
+          namespace: ns,
+        });
         return {
           content: [
             {
@@ -703,7 +928,10 @@ export const docdbPropertyTool: ToolDefinition = {
       if (error instanceof IrisApiError) {
         // Story 35.7: a disabled %Service_DocDB surfaces as ERROR #822 —
         // translate it into an actionable message (pass-through otherwise).
-        const gateMessage = await translateDocDbAccessDenied(ctx, error);
+        const gateMessage = await translateDocDbAccessDenied(ctx, error, {
+          database,
+          namespace: ns,
+        });
         return {
           content: [
             {

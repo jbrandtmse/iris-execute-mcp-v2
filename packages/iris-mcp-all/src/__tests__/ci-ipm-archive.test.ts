@@ -1019,9 +1019,12 @@ describe.skipIf(process.platform === "win32")("scripts/ci-ipm-archive.mjs as a p
   function writeConfig(extra: Record<string, unknown>): void {
     const file = path.join(fake.dir, "handler-config.json");
     const current = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>) : {};
+    // The served leg installs what the committed tree stamps; between releases the embed moves and the tree stays at the last released
+    // content, so the stand-in answers the tree's marker there unless a test sets another.
+    const tree = treeExpectations(REPO_ROOT);
     writeFileSync(
       file,
-      JSON.stringify({ marker: embed.marker, semver: markerSemver(embed.marker), ...current, ...extra }),
+      JSON.stringify({ marker: embed.marker, semver: markerSemver(embed.marker), registryMarker: tree.marker, registrySemver: tree.semver, ...current, ...extra }),
       "utf8",
     );
   }

@@ -107,11 +107,19 @@ const STORY_42_11_IDS = [
   "42.11/storage-guard-text/iris_env_promote@dev-main",
 ];
 
+/** The Story 44.1 entry (S-44.1-docdb-manage-text): the one sentence appended to the `iris_docdb_manage` description. */
+const STORY_44_1_IDS = ["44.1/docdb-manage-text/iris_docdb_manage@data-main"];
+
+/** The sentence Story 44.1 appends (after one space) to the `iris_docdb_manage` description, written from its spec. */
+const DOCDB_REGISTER_SENTENCE =
+  "'create' also registers the database's Security.DocDBs record, which every other DocDB call requires, and on a database that exists without one it registers the missing record.";
+
 /** The entry ids of each story, in the order the ledger lists the stories (landing order). */
 const STORIES: Array<[string, string[]]> = [
   ["43.4", STORY_43_4_IDS],
   ["42.10", STORY_42_10_IDS],
   ["42.11", STORY_42_11_IDS],
+  ["44.1", STORY_44_1_IDS],
 ];
 
 /** The 13 tools Story 42.10 flips to `destructiveHint: true` (decision #39), by server. Written from the spec, never read from the ledger. */
@@ -280,7 +288,7 @@ function storagePropertiesProblems(change: Change, toolName: string | undefined)
   return problems;
 }
 
-/** The seven sanctions the ledger registers, written from the specs of Stories 43.4, 42.10 and 42.11. */
+/** The eight sanctions the ledger registers, written from the specs of Stories 43.4, 42.10, 42.11 and 44.1. */
 const SANCTIONS: Record<string, Shape> = {
   "S-43.4-descriptions": {
     story: "43.4",
@@ -365,6 +373,19 @@ const SANCTIONS: Record<string, Shape> = {
       ];
     },
   },
+  "S-44.1-docdb-manage-text": {
+    story: "44.1",
+    count: 1,
+    golden: "wire",
+    op: "replace",
+    text: "append",
+    check: (change, toolName) => [
+      ...unmet(change.server !== "iris-data-mcp" || change.label !== "tools-list", `${change.id}: must append to a tools-list row of the data server`),
+      ...unmet(!/^\/result\/tools\/\d+\/description$/.test(change.pointer), `${change.id}: must point at a tool's description`),
+      ...unmet(toolName !== "iris_docdb_manage", `${change.id}: the tool at its pointer (${String(toolName)}) must be iris_docdb_manage`),
+      ...unmet(change.new !== `${String(change.old)} ${DOCDB_REGISTER_SENTENCE}`, `${change.id}: new must be old, one space and the spec's sentence`),
+    ],
+  },
 };
 
 /**
@@ -440,7 +461,7 @@ describe("the ledger", () => {
     expect(readSanctionedChanges(REPO_ROOT)).toHaveLength(changes.length);
   });
 
-  it("holds the entries of Story 43.4, then Story 42.10, then Story 42.11, each story's ids in order, and no other entry", () => {
+  it("holds the entries of Story 43.4, then Story 42.10, then Story 42.11, then Story 44.1, each story's ids in order, and no other entry", () => {
     expect(changes.map((change) => change.id)).toEqual(STORIES.flatMap(([, ids]) => ids));
     for (const [story, ids] of STORIES) {
       expect(changes.filter((change) => change.story === story).map((change) => change.id), `Story ${story}`).toEqual(ids);
@@ -448,6 +469,7 @@ describe("the ledger", () => {
     expect(STORY_43_4_IDS).toHaveLength(11);
     expect(STORY_42_10_IDS).toHaveLength(23);
     expect(STORY_42_11_IDS).toHaveLength(8);
+    expect(STORY_44_1_IDS).toHaveLength(1);
     expect(SANCTIONED_CHANGES_RELATIVE_PATH).toBe("packages/iris-mcp-all/src/__tests__/fixtures/sdk-golden-sanctioned-changes.json");
   });
 
@@ -689,6 +711,7 @@ describe("the CHANGELOG names every sanction", () => {
       "42.11 S-42.11-storage-guard-text",
       "43.4 S-43.4-descriptions",
       "43.4 S-43.4-governance-resource",
+      "44.1 S-44.1-docdb-manage-text",
     ]);
     expect(changelogProblems(changes, changelog)).toEqual([]);
   });

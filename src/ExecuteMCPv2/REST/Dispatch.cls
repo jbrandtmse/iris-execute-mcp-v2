@@ -84,6 +84,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/security/service" Method="GET" Call="ExecuteMCPv2.REST.Security:ServiceList" />
   <Route Url="/security/service" Method="POST" Call="ExecuteMCPv2.REST.Security:ServiceManage" />
 
+  <!-- Epic 44: Security / DocDB database record (Security.DocDBs) registration -->
+  <Route Url="/security/docdb" Method="GET" Call="ExecuteMCPv2.REST.Security:DocDbGet" />
+  <Route Url="/security/docdb" Method="POST" Call="ExecuteMCPv2.REST.Security:DocDbManage" />
+
   <!-- Epic 15: Security / LDAP Configuration Management -->
   <Route Url="/security/ldap" Method="GET" Call="ExecuteMCPv2.REST.Security:LdapList" />
   <Route Url="/security/ldap" Method="POST" Call="ExecuteMCPv2.REST.Security:LdapManage" />

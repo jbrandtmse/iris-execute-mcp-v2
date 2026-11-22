@@ -2,7 +2,8 @@
 title: 'Story 44.1: DocDB Create Registers the Database'
 type: 'bugfix'
 created: '2026-11-22'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '7767b9c6021bc3bc1ad0547ecd6a88f93f8e3e58'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -117,6 +118,7 @@ deferred:
   - the record has no Resource;
   - registration needs the ExecuteMCPv2 service;
   - a troubleshooting row for 822 with the service enabled.
+- Review patch (pass 1) -- `src/ExecuteMCPv2/Tests/DocDbRegisterTest.cls`: nothing drives `POST /security/docdb` (`DocDbManage`) over HTTP, so a break in its body parsing, action check or result shape passes every default-suite test. Extend `TestRouteGetRoundTrip` (keep 5 `Test*` methods, total 5) with a `%Net.HttpRequest` POST helper (same pattern as `GetRecord`) and assert: `{action:"bogus"}` is an error envelope; `register` for `MISSINGDB` is an error envelope and writes no record; with `%Service_DocDB` enabled, `register` for the fixture answers `result.registered` true and `alreadyRegistered` false, a second POST answers `alreadyRegistered` true, and the GET route then reports `registered` true; with it disabled, `register` is an error envelope (822) and no record exists. The fixture stays dropped in `OnBeforeOneTest`/`OnAfterOneTest`. Run `DocDbRegisterTest` on a throwaway with the service enabled and again disabled (total 5, failed 0 each), then record a `mutation:` line in `## Verification` for it (e.g. `DocDbManage` calls `DocDbRecord(..., 0, ...)` -> the enabled-branch POST assertion red; restore from `src/`, recompile).
 
 **Acceptance Criteria:**
 - AC 44.1.1: Given the probe results in Design Notes, when the implement stage builds, then it builds on them. Any claim it finds wrong is added to the Design Notes probe results with its evidence, and reported in `## Auto Run Result` for the lead.
@@ -129,7 +131,38 @@ deferred:
 
 ## Spec Change Log
 
+- Review pass 1 (patch, no intent change): the Code Map line "Pass `target` from ... manage create/drop" is narrowed to manage `drop` only. A `create` that answers 822 with the service enabled is a privilege failure (an existing database answers 25051 before any record check), so the record GET reported `exists:false` and the text told the caller to run the `create` that had just been denied. With no `target` for `create` the original 822 passes through. Known-bad state avoided: circular "no such database, create it" advice after a denied create. KEEP: the `drop`, document, find and property targets, and the matrix rows "Missing record" / "No such database".
+
 ## Review Triage Log
+
+### 2026-11-22 -- Review pass
+- verdicts: 25 findings -- high 0, medium 5, low 17, false 3, maybe-false 0
+- findings:
+  - `[medium]` `[patch]` Blind: a non-admin re-running `create` on a registered database got "its record is missing" (the message asserted a state it did not know) -- `registrationFailure(created:false)` reworded to "registering its Security.DocDBs record failed; without that record IRIS denies ..."; the test assertion follows the wording.
+  - `[false]` `[reject]` Blind: namespace spelling not normalised -- probe Q1 (Design Notes) shows IRIS stores the namespace uppercase, and `$NAMESPACE` switching is case-insensitive.
+  - `[medium]` `[patch]` Blind + Verification-gap + Intent: `POST /security/docdb` (`DocDbManage`) has no test that drives it -- `TestRouteGetRoundTrip` extended with an HTTP POST helper (bogus action, missing database, service enabled: register, second register, GET after; service disabled: refusal); total 5 enabled and disabled on a throwaway; mutation line written.
+  - `[low]` `[reject]` Blind: the `index` workaround and the unmatched-`find` property are not recorded -- `carried`: both are already the first two `deferred:` items of this spec; the CHANGELOG says "Not fixed here".
+  - `[low]` `[patch]` Blind + Verification-gap: the spec's trailing `Status: ready-for-dev` line contradicts the frontmatter -- `## Auto Run Result` rewritten at finalize.
+  - `[medium]` `[patch]` Blind: a denied `create` (service enabled) reached "no such database ... create it with action=create" -- `target` is passed for `drop` only; a new test pins the pass-through (see the Spec Change Log).
+  - `[low]` `[reject]` Blind: `tool_support.md` "Mix" tally not changed for `iris_docdb_manage` -- the tally counts each tool by its primary tier and the row names the extra route; changing it is a classification call, not a defect.
+  - `[low]` `[reject]` Blind: `DocDbRegisterTest` duplicates helpers, hard-codes `_SYSTEM`/`SYS`, swallows cleanup errors -- the copy is justified in Design Notes (Rule 2), the credentials default is the sibling classes' pattern with a `^UnitTestConfig` override, and a failed fixture drop surfaces in the next test's assertion.
+  - `[low]` `[reject]` Blind: hard-coded class and PUT counts in `ci-seed-throwaway.test.ts` -- an existing convention that fails loudly on drift; a counter refactor is more than a direct correction.
+  - `[low]` `[reject]` Blind: the `[Unreleased]` allowance in `story-42-8-doc-claims.test.ts` is unconditional -- the pin still checks heading order; a release workflow forbidding a leftover heading is release-gate scope and not caused by this diff.
+  - `[medium]` `[patch]` Edge: a denied `create` reaches the "no such database" text -- same root cause as the denied-`create` row above; patched once.
+  - `[low]` `[reject]` Edge: a register failure after a successful create is an error although the database exists -- by-design: the matrix row "Register fails after create" requires `isError:true` with `created:true, registered:false` and both fixes.
+  - `[low]` `[reject]` Edge: concurrent registers can fail the loser -- `$$Create` answers 794 for a duplicate and the error's retry advice recovers it; no realistic path beyond a retried call.
+  - `[low]` `[reject]` Edge: a drop between the existence check and `Create` leaves an orphan record -- a theoretical window; `drop` and `create`'s repair handle the orphan.
+  - `[false]` `[reject]` Edge: the namespace string is assigned straight to `$NAMESPACE` -- an invalid name raises inside the Try, the Catch restores the namespace first and `SanitizeError` renders one envelope; no raw switch error reaches the caller.
+  - `[low]` `[reject]` Edge: `registered:false` with a non-boolean `exists` passes the 822 through unexplained -- the real handler always answers booleans (`%Set(...,"boolean")`), so that shape is unreachable (Rule #54).
+  - `[medium]` `[patch]` Verification-gap: the `action !== "list"` guard on `target` is not pinned (a list with `database` was never tested) -- the list test now passes `database`; the guard is `action === "drop"` and a mutation line names it.
+  - `[low]` `[patch]` Verification-gap: no `mutation:` line for AC 44.1.5, the drop half of AC 44.1.3, or the "already registered" row -- three lines written after demonstrating each mutation (the first and last on the unit tier, the drop half live on a throwaway).
+  - `[low]` `[reject]` Verification-gap: AC 44.1.6's USER-versus-HSCUSTOM separation is a live check only -- recorded in the throwaway proof; the namespace pass-through itself is pinned by the 44.1.7 request lists.
+  - `[low]` `[reject]` Verification-gap: `TestRegisterFollowsServiceState` reads ambient service state and runs one branch per run -- by-design: AC 44.1.4 asks for both branches across an enabled and a disabled run.
+  - `[low]` `[reject]` Verification-gap: "the fixture is the 102 routes" counts a static file -- the next test is the real route guard; the count only guards the fixture.
+  - `[low]` `[reject]` Verification-gap: the AD-33 pin fails any later story that adds a route -- by-design: the pin freezes the pre-44.1 route list (AD-33), and a later story updates the fixture in its own diff.
+  - `[false]` `[reject]` Verification-gap: the Story 35.7 call counts "2 -> 3" were not needed -- a fact about the spec's expectation, not a defect: those tests assert no call count with the service enabled.
+  - `[low]` `[reject]` Intent: repair needs `create` before a 1.1.0 database can be dropped -- by-design: the intent says "`create` on a database made without a record registers it".
+  - `[low]` `[reject]` Intent: the 822 translation also covers `drop` -- by-design: the spec passes `target` from `drop`, and the repair story needs it.
 
 ## Design Notes
 
@@ -160,6 +193,13 @@ deferred:
 - *Existing (1.1.0) databases.* Property, get-database and drop each answer 822 (R2, R4, R7). Registering afterwards makes property and drop work (X6, Y1, Y2), so repair is safe. The `create` REST call on an existing database answers HTTP 409 with code 25051 (R3).
 - *Version range.* The same behavior (822 without a record, `$$Create` fixes it, drop removes it) is verified on 2026.1 Build 234U (O3-O6) and 2026.2 Build 221U. **Residual risk:** 2023.1-2025.x are unverified, because their Community licence keys have expired (DW-686; `OLDEST_IRIS_COMMUNITY_IMAGE` is 2026.1). The routine's own comment (`verified 7/31/17`) suggests the API is older than 2023.1.
 - *Golden.* One row holds the description (see the Code Map); `sdk-handler-golden.json` has none.
+- *Implement-stage findings (AC 44.1.1; 2026-11-22, irishealth-community 2026.2 throwaway).* Every claim above held. The claims that needed a correction or a qualification:
+  - A `property create` on a name with no DocDB database answers HTTP 404 `ERROR #25351: DocDB Database '<x>' does not exist`, not 822. The 822 for a nonexistent database comes from the document and find routes (`GET doc/<x>/1`, `POST find/<x>`, `POST doc/<x>/` all answer 822 with the service on). So the "no such database" text is reached for document and find calls (and for `drop`, which answers `{dropped:false}` instead), and never for a property call. Proven live; the unit tests drive it through `iris_docdb_document`.
+  - A `create` that itself answers 822 with the service enabled (a caller without `%DocDB_Admin`) reaches the "no such database" text, because the spec passes `target` from `create` and the record GET then reports `exists:false`. The text says "Create it with iris_docdb_manage action=create", which is odd advice after a denied create. Not changed (the spec fixes this); flagged for the lead.
+  - `$$$DocDBDoesNotExist` and `$$$AccessDenied` are not defined in a class compiled in HSCUSTOM (`MPP5610: Referenced macro not defined`), although `irislib/%occErrors.inc` defines them. `DocDbRecord` and `DocDbRegisterTest` use the literals 793 and 822.
+  - `scripts/gen-bootstrap.mjs` bumps the sequence on every content change, so two regenerations in one story reach sequence 4. The story restored `scripts/bootstrap-sequence.json` from `HEAD` and regenerated once, which gives sequence 3.
+  - `pnpm gen:tools-list-snapshot` refuses without `--force` (the snapshot is a pinned artifact); this story ran `pnpm gen:tools-list-snapshot --force` as the spec's Commands require. The regeneration also moved the snapshot's `capturedAt` and `sdkVersion` (`2.3.1` -> `2.4.0`, the installed SDK).
+  - Two existing tests pinned what this story deliberately changes and were updated: `story-43-4-qa-sanctioned-wire.test.ts` (the data server's expected `iris_docdb_manage` description gains the sanctioned sentence) and `story-42-8-doc-claims.test.ts` (the CHANGELOG heading list now allows a leading `## [Unreleased]`).
 
 **Live-captured fake shapes (Rule #54).**
 - 822, service on, no record: HTTP 500 `{"status":{"errors":[{"error":"ERROR #822: Access Denied","code":822,"domain":"%ObjectErrors","id":"AccessDenied"}],"summary":"ERROR #822: Access Denied"},"content":null}`.
@@ -212,11 +252,36 @@ property create p %Integer -> [["POST","/api/docdb/v1/USER/prop/MyDb/p?type=%Int
 
 **Mutations (Rule 19; the implement stage writes the `mutation:` lines):**
 - AC 44.1.2: drop the register call from the create path -> the docdb-register "fresh create" test, and live, the lifecycle property test (#822).
+  mutation: replaced the register POST in `docdb.ts` with `registration = { registered: true }` -> 6 docdb-register tests and the docdb.test.ts create test red (fresh create, already registered, both register-fails cases, unexpected answer, repair fails); live on the throwaway the lifecycle `creates a test database` test failed on the `registered` assertion and `iris_docdb_property create` then answered the translated #822 (missing record). Reverted: `docdb.ts` sha256 `210dcbe95a8a...` byte-identical to before, dist rebuilt.
 - AC 44.1.2 repair: key the repair on any error instead of 25051 -> the "already registered returns the original error" test.
+  mutation: the repair trigger became "any IrisApiError" instead of `code === 25051` -> red: "repair is keyed on the numeric code 25051, never on message text" and "service disabled: the unchanged Story 35.7 message and no register call" (the "already registered" test stays green: its fake register answer keeps the original error whatever the trigger, so the two code-keyed tests are the pins). Reverted byte-identical (sha256 checked).
 - AC 44.1.3: skip the record GET -> the "missing record" test.
+  mutation: the `enabled === true && target` branch replaced by `false` -> red: "missing record", "no such database", "find and drop reach the same record check". Reverted byte-identical.
 - AC 44.1.4: remove the 793 check in `DocDbRecord` -> `TestRegisterFollowsServiceState` or a denial unit, on the throwaway.
+  mutation: removed `&& '$System.Status.Equals(tExSC, 793)` from `ExecuteMCPv2.REST.Security:DocDbRecord`, compiled on the throwaway (HSCUSTOM, service enabled) -> `DocDbRegisterTest` total 5, failed 3 (`TestStatusOfUnknownNameIsUnregistered`, `TestRegisterFollowsServiceState` with "#793 ... does not exist", `TestRouteGetRoundTrip`). Restored from `src/` and recompiled: total 5, failed 0. The mutation never touched `src/`.
 - AC 44.1.7: change a docdb document URL -> the capture pin.
+  mutation: the document tool's `/doc/` path became `/docs/` -> red: "AC 44.1.7 -- request lists captured before the story > iris_docdb_document". Reverted byte-identical.
 - AD-33: delete an existing Dispatch route -> the route pin.
+  mutation: deleted the `/security/service` GET route line from `Dispatch.cls` -> red: "AD-33 ... the only added route lines are the two /security/docdb routes". Reverted byte-identical (sha256 checked).
+- AC 44.1.3 drop half (review pass 1):
+  mutation: in `data.integration.test.ts` the "drops the test database" test had its `docdbManageTool.handler({ action: "drop", ... })` call replaced by a stub success, then the armed lifecycle ran on the throwaway (service enabled) -> 11 passed, "drops the test database" failed on its final `recordState(...)` assertion (`exists: true, registered: true` received). Restored byte-identical (sha256 `cdf7a2d4...` before and after); re-run 12/12 green.
+- Review patch, POST route (review pass 1):
+  mutation: in `Security.cls` `DocDbManage`, `..DocDbRecord(tName, tNamespace, 1, .tResult)` became `..DocDbRecord(tName, tNamespace, 0, .tResult)`, compiled on the throwaway -> `DocDbRegisterTest` total 5, failed 1: `TestRouteGetRoundTrip` red on the missing-database, `registered`, record, second-register and GET-after-register assertions. Restored from `src/` (sha256 identical before and after) and recompiled: total 5, failed 0. The disabled-service POST answers `ERROR #5001: Access Denied` over the wire (`SanitizeError`), so that branch asserts the text, not 822.
+- AC 44.1.2 already-registered row (review pass 1):
+  mutation: the `registrationFields.alreadyRegistered === true` branch in the create path became `if (false as boolean)` -> red: "already registered: 25051 and a record already there return the original error, byte-identical" (the only test red). Reverted byte-identical (sha256 checked).
+- AC 44.1.3 translation targets (review pass 1):
+  mutation: the manage catch path's `action === "drop" && database ? ... : undefined` became `database ? ... : undefined` -> red: "a namespace-level list never checks a record" and "a create that is itself denied with the service enabled passes the 822 through and checks no record". Reverted byte-identical (sha256 checked).
+- AC 44.1.5 (review pass 1):
+  mutation: the appended description sentence in `docdb.ts` changed `requires` to `needs`, `@iris-mcp/data` rebuilt -> red: `story-43-4-qa-sanctioned-wire.test.ts` (2 tests: the legacy and modern `iris-data-mcp` tools/list rows) and `tools-list-snapshot.test.ts` (3 tests). Reverted, rebuilt: 115 tests green.
+
+**BOOTSTRAP_VERSION:** `1.1.0+2.244fe8623c76` -> `1.1.0+3.3e97060f5bc4` (`scripts/bootstrap-sequence.json` `{"sequence": 3, "hash": "3e97060f5bc4"}`); a second `pnpm run gen:bootstrap` reports "Unchanged".
+
+**Throwaway proof (2026-11-22; `irishealth-community:2026.2`, HSCUSTOM, 127.0.0.1:52792, removed afterwards):**
+- `%Service_DocDB` enabled; `ci-seed-throwaway.mjs` seeded; `data.integration.test.ts` armed: 12 passed (9 DocDB lifecycle, none skipped), the create test asserts `registered:true` and a live `GET /security/docdb`, the drop test asserts `exists:false, registered:false`.
+- `DocDbRegisterTest` through `POST /tests`: total 5, failed 0 with the service enabled, and total 5, failed 0 after disabling it.
+- USER: create + property + drop through the built tools passed; USER's record was registered while HSCUSTOM's `GET` reported `exists:false, registered:false`; the record was gone after the drop; `drop` of a missing name answered `{content:{database, dropped:false}}`; `list` answered `{content:[]}`.
+- Repair: a database made through the DocDB REST API only (the 1.1.0 way) answered the missing-record text on property create and on drop; `create` repaired it (`created:false, registered:true`); property create and drop then worked and no record was left; a second `create` returned the unchanged `#25051` error.
+- Not run live: `iris_docdb_manage create` with the service disabled through the tool (the probe script crashed on a bug of its own after the tool had returned an error). Covered by the unit test "service disabled: the unchanged Story 35.7 message and no register call" and the unchanged F5 gate.
 
 **Shared surfaces:**
 - `fixtures/tools-list-snapshot.json` (the `iris_docdb_manage` description);
@@ -231,5 +296,23 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** `iris_docdb_manage create` now registers the database's `Security.DocDBs` record through a new route (`POST /security/docdb`, IRIS's own `$$Create^%SYS.DOCDB`), repairs a database that exists without one (error code 25051), and the 822 translation names a missing record or database when the service is enabled (`GET /security/docdb`). `BOOTSTRAP_VERSION` `1.1.0+2.244fe8623c76` -> `1.1.0+3.3e97060f5bc4`.
+
+**Files changed.**
+- `src/ExecuteMCPv2/REST/Security.cls`, `src/ExecuteMCPv2/REST/Dispatch.cls`: `DocDbRecord`, `DocDbGet`, `DocDbManage` and the two routes.
+- `src/ExecuteMCPv2/Tests/DocDbRegisterTest.cls`: 5 tests, including the HTTP GET and POST route round trips.
+- `packages/iris-data-mcp/src/tools/docdb.ts`: create/repair flow, record-aware 822 translation, appended description sentence.
+- `packages/iris-data-mcp/src/__tests__/docdb-register.test.ts` (new), `docdb.test.ts`, `data.integration.test.ts`, `fixtures/dispatch-routes-pre-44-1.txt`: pins, I/O matrix, lifecycle.
+- `packages/shared/src/bootstrap-classes.ts`, `scripts/bootstrap-sequence.json`, `packages/iris-mcp-all/src/__tests__/fixtures/sdk-golden-sanctioned-changes.json`, `fixtures/tools-list-snapshot.json`, `scripts/lib/ci-checks.mjs`, and four `iris-mcp-all` tests that pin the changed shared surfaces: embed, sanction `S-44.1-docdb-manage-text`, snapshot, `DOCDB_REASON`.
+- `README.md`, `tool_support.md`, `CHANGELOG.md`, `.changeset/story-44-1-docdb-create-registers-the-database.md`: docs.
+
+**Review (25 findings: high 0, medium 5, low 17, false 3).** Patched: 4 medium root causes (a denied `create` got circular "create it" advice, so `target` is now passed for `drop` only; no test drove `POST /security/docdb`; the `list` guard on `target` was unpinned; the repair-failure message asserted an unknown record state) and 2 low rows (the stale spec status line; three missing `mutation:` lines). Deferred in this pass: none (the three planning-time `deferred:` items are kept). Rejected: 16 low and 3 false findings with the reasons in the Review Triage Log. Follow-up review recommended: false. Patched counts by verdict: medium 5 rows (4 root causes), low 2; no HIGH.
+
+**Verification.** Loop commands green: docdb unit tests 104, bootstrap test 109, tools-list snapshot check OK, `iris-mcp-all` wire/golden/gate tests 264, `gen:bootstrap` idempotent (`Unchanged`). Once commands green: `pnpm turbo run build`, shared 2586, data 192 (2 skipped), all 6045 (729 skipped), `gen:governance-baseline:check` OK (141 frozen keys), `gen:ipm:check` OK, lint, type-check. Throwaway proof (IRIS for Health 2026.2, HSCUSTOM, port 52792, removed afterwards): armed lifecycle 12/12; `DocDbRegisterTest` total 5, failed 0 with the service enabled and disabled, before and after the review patch; USER second-namespace pass; repair of a 1.1.0-style database; the register-removed red. Six mutations plus the five review-pass mutations are recorded in `## Verification`.
+
+**Residual risks.** `iris_docdb_manage create` with the service disabled was not driven live through the tool (a unit test and the F5 gate cover it). IRIS 2023.1-2025.x are unverified for `$$Create^%SYS.DOCDB` behavior (DW-686). The snapshot regeneration moved its `capturedAt` and `sdkVersion` (2.3.1 -> 2.4.0).
+
+**For the lead (Rule 20 and Rule #42).** Add `S-44.1-docdb-manage-text` to AD-15's sanctioned list. Probe corrections are under Design Notes "Implement-stage findings": `property create` on a missing database answers 404 #25351, not 822; the `$$$DocDBDoesNotExist` and `$$$AccessDenied` macros are not defined in HSCUSTOM classes (the literals 793 and 822 are used); the disabled-service POST over the wire reads `ERROR #5001: Access Denied`, not 822.

@@ -304,7 +304,7 @@ were silently returning stale or per-process data.
 
 | # | Tool | API | Endpoint |
 |---|---|:---:|---|
-| 1 | `iris_docdb_manage` | 🟩 **DocDB** | `/api/docdb/v1/{ns}` + `/db/{db}` |
+| 1 | `iris_docdb_manage` | 🟩 **DocDB** + 🟥 ExecuteMCPv2 | `/api/docdb/v1/{ns}` + `/db/{db}` · `/security/docdb` (`create` registers the database's `Security.DocDBs` record) |
 | 2 | `iris_docdb_document` | 🟩 **DocDB** | `/api/docdb/v1/{ns}/doc/{db}` |
 | 3 | `iris_docdb_find` | 🟩 **DocDB** | `/api/docdb/v1/{ns}/find/{db}` |
 | 4 | `iris_docdb_property` | 🟩 **DocDB** | `/api/docdb/v1/{ns}/prop/{db}/{prop}` |
@@ -312,7 +312,7 @@ were silently returning stale or per-process data.
 | 6 | `iris_analytics_cubes` | 🟥 ExecuteMCPv2 | `/analytics/cubes` |
 | 7 | `iris_rest_manage` | 🟩 **Management API** + 🟥 ExecuteMCPv2 | `/api/mgmnt/v2/{ns}` (spec-first) · `/security/webapp` (legacy/all) |
 
-> The four DocDB tools require the `%Service_DocDB` service, which is **disabled by default** on IRIS — see the multi-API note below.
+> The four DocDB tools require the `%Service_DocDB` service, which is **disabled by default** on IRIS — see the multi-API note below. Every DocDB database also needs a `Security.DocDBs` record, which the DocDB REST API never writes: `iris_docdb_manage` `create` registers it (no Resource) through the ExecuteMCPv2 service, and also repairs a database made by `1.1.0` or earlier, which has none and fails every call with `ERROR #822`. The registration runs inside `iris_docdb_manage:create`, a write in the frozen governance baseline, so it keeps that action's default state (**enabled by default**, as before) and is blocked when that key is disabled. No new tool or action key exists.
 
 **Mix:** 0 Atelier · 2 ExecuteMCPv2 · 5 other — **the only server that uses all three API tiers.** DocDB and the Management API are standard IRIS APIs (not Atelier, not custom), and analytics/DeepSee is custom because IRIS has no standard REST facade for MDX or cube operations.
 
@@ -488,7 +488,7 @@ It's the only server that integrates with pre-existing IRIS APIs other than Atel
 - **Management API** (`/api/mgmnt/v2`) — 1 tool for REST application management
 - **ExecuteMCPv2** — 2 tools for DeepSee analytics (MDX queries, cube operations)
 
-If DocDB or the Management API aren't enabled on the IRIS instance, 5 of the 7 data tools would error — **independently of your custom REST deployment**. Note the asymmetry: the Management API is typically enabled by default, but `%Service_DocDB` is **disabled by default on IRIS**. Until it is enabled (Management Portal > *System Administration > Security > Services > %Service_DocDB*, or `iris_service_manage` `action="enable"` — itself governance-default-disabled, needing an `IRIS_GOVERNANCE` override), the four DocDB tools fail with `ERROR #822: Access Denied`, which they translate into an actionable error naming both remedy routes.
+If DocDB or the Management API aren't enabled on the IRIS instance, 5 of the 7 data tools would error — **independently of your custom REST deployment**, except that `iris_docdb_manage` `create` also needs the ExecuteMCPv2 service, to register the database's `Security.DocDBs` record. Note the asymmetry: the Management API is typically enabled by default, but `%Service_DocDB` is **disabled by default on IRIS**. Until it is enabled (Management Portal > *System Administration > Security > Services > %Service_DocDB*, or `iris_service_manage` `action="enable"` — itself governance-default-disabled, needing an `IRIS_GOVERNANCE` override), the four DocDB tools fail with `ERROR #822: Access Denied`, which they translate into an actionable error naming both remedy routes.
 
 ### Pre-publish implication: bootstrap is critical infrastructure
 
