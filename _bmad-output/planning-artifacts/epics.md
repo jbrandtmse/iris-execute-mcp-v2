@@ -6064,12 +6064,13 @@ Added on 2026-10-15 by Project Lead decision. Today's `confirm: true` gates are 
 
 ## Epic 44: Correctness & Safety Fixes (added 2026-11-22)
 
-**Runs on** `feature/feature-wave-9-bug-fixes`, cut from `main` at `8b177e1` plus the owner's rule-corrections commit `0e7bff1a`. The epic branch is `epic44`, per `_bmad/custom/branch-naming.yaml`. Stories run in order **44.1 → 44.2 → 44.3 → 44.4 → 44.5**.
+**Runs on** `feature/feature-wave-9-bug-fixes`, cut from `main` at `8b177e1` plus the owner's rule-corrections commit `0e7bff1a`. The epic branch is `epic44`, per `_bmad/custom/branch-naming.yaml`. Stories run in order **44.1 → 44.2 → 44.6 → 44.3 → 44.4 → 44.5** *(Added 2026-11-22 by the owner's ruling relayed by the Planner, wave-9 decision #134.)* 44.6 runs right after 44.2 so the owner's single VS Code re-test sitting covers both.
 
 **Goal:** five defects found by Epic 42's reviews are fixed, each proven on the path it guards (Rule #59):
 
 - a DocDB database created through the suite can be used by the other DocDB tools (DW-688, high priority);
 - VS Code users keep a working setup after VS Code removes the Local harness in February 2027 (DW-721);
+- the launcher extension's own servers keep their connection settings and credentials in Copilot-harness sessions (Story 44.6, found by the Story 44.2 probe) *(Added 2026-11-22 by the owner's ruling relayed by the Planner, wave-9 decision #134.)*;
 - a confirmation counts only for the scope its dialog showed, not just the arguments (DW-670);
 - bootstrap's `compiled` reports whether every class actually compiled (DW-685);
 - an armed integration run cannot report "passed" for a test that tested nothing (DW-684).
@@ -6184,7 +6185,7 @@ These five are set to `in-progress` when the proposal is applied, so the Story 4
   - Reading the old files stays, so an old install is still visible.
 - **AC 44.2.5** — **The extension.**
   - The MCP Clients view and every VS Code-specific text name the new targets.
-  - The extension's own `mcpServerDefinitionProviders` path is verified per AC 44.2.1, and documented. *(Amended 2026-11-22 from the Story 44.2 probe, wave-9 decision #133.)* Verified from source: under the Copilot harness the provider's servers arrive without their connection settings or credentials (added only in `resolveMcpServerDefinition`). Fixing that needs extension code and a new vsix, so it is not in this story: it is a ledger entry for the owner's decision sheet, paired with DW-720.
+  - The extension's own `mcpServerDefinitionProviders` path is verified per AC 44.2.1, and documented. *(Amended 2026-11-22 from the Story 44.2 probe, wave-9 decision #133.)* Verified from source: under the Copilot harness the provider's servers arrive without their connection settings or credentials (added only in `resolveMcpServerDefinition`). Fixing that needs extension code and a new vsix, so it is not in this story: Story 44.6 fixes it, and its vsix ships with the end-of-epic release (owner ruling, wave-9 decision #134).
   - The extension runs the CLI as `npx -y -p @iris-mcp/client-config@1` (`extensions/iris-mcp-launcher/src/clientsEngine.ts:25`), so an npm release carries the adapter change to it. Record whether a new vsix is needed at all; if it is, it ships through DW-720's manual step, which is out of scope.
 - **AC 44.2.6** — **Enumeration** (Rule #56), exhaustive as of a named date. List every source file, doc, test, fixture and certification row that names, for VS Code:
   - `.vscode/mcp.json`;
@@ -6301,3 +6302,18 @@ These five are set to `in-progress` when the proposal is applied, so the Story 4
   - **DocDB.** With 44.1 merged, decide whether the DocDB lifecycle runs in CI (it needs `%Service_DocDB` enabled, and the Epic 35 F5 gate needs it disabled) or stays on the allowlist with 44.1's narrowed reason.
 - **AC 44.5.5** — Back-compat (Rule #19): no product code changes. The default-suite test count moves only by the new check. The README and CHANGELOG claims about armed CI that Story 42.3 narrowed are made accurate.
 - DW-684 (action item `epic-42-retro-item-6-charter-a-story-in-the-next-planned-epic`): armed integration suites can go green without testing. Guard returns report "passed" after a create test that tolerates `isError` (for example `interop.integration.test.ts` `if (!created.production) return;`, and admin's tests that assert only inside `if (!result.isError && created.resource)`). Per suite, use `ctx.skip()` with an allowlisted reason, or a hard assertion. (action item; chartered by correct-course 2026-11-22)
+
+### Story 44.6: Launcher Provider Works in Copilot Sessions
+
+*(Added 2026-11-22 by the owner's ruling relayed by the Planner, wave-9 decision #134.)* **Due:** with the epic's single end-of-epic release, before 2027-02-01. Its vsix is attached to that release's GitHub Release by hand, as for v1.1.0 (the Planner's step); it needs no new release path and does not depend on DW-720.
+
+**As a** VS Code user of the IRIS MCP Launcher extension, **I want** the servers the extension provides to connect in a Copilot-harness chat session, **so that** they keep working after VS Code removes the Local harness in February 2027.
+
+- **AC 44.6.1** — Probe first (Rules #14/#16). The Story 44.2 probe (VS Code 1.147.0 source) found that the extension's `provideMcpServerDefinitions` returns each server with an empty `env`, and that the connection settings and the password are added only in `resolveMcpServerDefinition`, which VS Code runs only when the Local harness starts a server; Copilot-harness forwarding sends the provided definition as is. From VS Code's shipped source and the official docs, record (with dates):
+  - where connection settings and credentials can be supplied outside `resolveMcpServerDefinition`, for example in the definition `provideMcpServerDefinitions` returns, and what forwarding copies from it (`env`, `cwd`, args);
+  - **the secret path**: how the server gets the password in a Copilot session without a literal in the definition. Name it (for example the server's own keychain read through `IRIS_SERVER_MANAGER`, or another channel the probe finds), and whether it works for each credential source the extension supports today;
+  - whether the provider is told which harness asked, and whether the Local harness still calls `resolveMcpServerDefinition` after the change.
+- **AC 44.6.2** — The provided definition carries the non-secret connection settings (host, port, namespace, username, scheme and the other non-secret `IRIS_*` the resolver sets today) and the secret path from AC 44.6.1. **No literal secret** is put into a provided definition unless the user takes the same explicit opt-in that Story 44.2's `explicit` mode uses (a typed confirmation). The env allowlist in `env.ts` (the variables the extension refuses to leak) still holds.
+- **AC 44.6.3** — Back-compat (Rule #19): under the Local harness the resolver still runs and the servers start exactly as today (same env, same prompts, same cancellation outcome), pinned with assertions that fail on drift. The settings, commands and status bar are unchanged. Every fake of a VS Code API returns a shape the real API can return (Rule #54).
+- **AC 44.6.4** — Docs: the extension README's Copilot-harness section, the credential-mode table and `CHANGELOG.md` say what a Copilot session gets and how the password reaches the server. A changeset bumps the extension package. The story names the vsix as a must-carry artifact of the end-of-epic release and publishes nothing.
+- **AC 44.6.5** — The owner's VS Code re-test sitting (Story 44.2 AC 44.2.7, its runbook D-6) gains a provider-check row run on the build that carries 44.6: enable the launcher's servers in a Copilot-harness session and record whether they connect and authenticate. The sitting waits for both 44.2 and 44.6. Without that sitting, the row is marked human-only with the date.

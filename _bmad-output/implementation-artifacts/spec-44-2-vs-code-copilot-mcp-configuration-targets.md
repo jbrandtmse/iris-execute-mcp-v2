@@ -249,7 +249,7 @@ No AC contradicts an AD's Rule. D-2 refines AD-30's draft bullet, which the prop
 3. Repeat with `--scope user` and `COPILOT_HOME` unset. Expect `~/.copilot/mcp-config.json` (Windows: `%USERPROFILE%\.copilot\mcp-config.json`). Expect the same result.
 4. Precedence (V7): put `iris-dev-mcp` in both files with different `IRIS_NAMESPACE`, call `iris_server_info`, and record which namespace answers.
 5. Forwarding (V3/V4): put an old `${input:}` entry in `.vscode/mcp.json` and an old `${env:}` entry in the profile `mcp.json`. Expect both absent from the Copilot session.
-6. Provider (deferred item): enable the launcher's servers. Record whether they connect.
+6. Provider (deferred item; fixed by Story 44.6, owner ruling, wave-9 decision #134): enable the launcher's servers in the Copilot session, on the build that carries both 44.2 and 44.6. Record whether they connect and authenticate. The sitting waits for both stories.
 7. Record the outcome, dated, in the vscode record of `packages/client-config/scripts/certification-results.json`: clear `humanOnly` on a pass, or keep it with the failure in `residualRisk`. Rebuild, then run `node packages/client-config/scripts/render-certification-table.mjs`. Expected per source: steps 2-3 pass, step 5 shows both absent, step 6 fails to connect.
 
 **Release handoff (AC 44.2.9).** The end-of-epic release must carry `@iris-mcp/client-config` (the CLI the MCP Clients view runs through `npx -y -p @iris-mcp/client-config@1`). The fixed version group carries the others. A new vsix is not needed for the fix. The changed extension README reaches the Marketplace only with the next vsix (DW-720, out of scope).
