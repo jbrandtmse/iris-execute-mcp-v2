@@ -614,6 +614,14 @@ Every test added or changed passes on a fresh environment, in either order, and 
   - The Marketplace refuses the OIDC first publish: the decision-2 fallback (the owner uploads the artifact's vsix), recorded as an exception.
   - A cause in the code: release the next patch version.
 
+**Phase B/C record (lead, 2026-11-22; decisions #128 and #129).** The stores are off for `v1.1.0` (#128, DW-719), so C2's store lines and C3's store installs do not apply; B1 and C3 run on the vsix of the GitHub Release instead.
+- **C1:** the version commit `ac32870` carries the extension at 1.1.0; `v1.1.0` (annotated, `ff83327`) is on the `main` merge commit `704b410` (ci.yml 44956020363 green, 9 jobs).
+- **C2:** release run 44959208670 (owner-approved): `rehearse` and `publish` read `vscode-marketplace: skipped: not enabled (owner: publisher needs a verified domain (DW-719))` and `open-vsx: skipped (not set up …)`; npm 8 `published` (`auth: oidc`), MCP Registry 5 `published (auth: oidc)`, IPM a manual step. The Planner attached `iris-mcp-launcher-1.1.0.vsix` (96,293 bytes, sha256 `d6f556d1…66d9` = `release-manifest.json`) to the `v1.1.0` GitHub Release, marked Latest.
+- **C3 (vsix path), lead leg:** the asset downloaded from the Release has that sha256; VS Code 1.147.0's own CLI with a clean `--user-data-dir`/`--extensions-dir` installed it and pulled its dependency from the Marketplace: `--list-extensions --show-versions` → `iris-mcp.iris-mcp-launcher@1.1.0`, `intersystems-community.servermanager@3.16.0`. Temp directories removed.
+- **C3, owner leg (raised with the Planner):** in VS Code, "Extensions: Install from VSIX…" with that file, a Server Manager entry for an IRIS, then "MCP: List Servers" lists the five definitions and each starts (`npx -y @iris-mcp/<pkg>@1`, reporting 1.1.0). The Open VSX/VSCodium leg waits on DW-719.
+- **C3, owner leg (2026-11-21 PST / 2026-11-22 UTC; relayed by the Planner): PASS, an owner attestation.** In the owner's words: "VSIX is confirmed." VS Code 1.147.0 (the Planner read the app bundle on the owner's Mac; the owner did not state it). No screenshot. The steps given: install from the `v1.1.0` Release vsix, add a Server Manager entry, "MCP: List Servers" with the five servers starting.
+- **C4 / status:** the story closes on C3 (vsix path) with the DW-719 seam open: both store listings (the Marketplace publisher and the Open VSX namespace) wait on the owner's verified domain; the channel code stays built and pinned (#128, Spec Change Log).
+
 ## Auto Run Result
 
 Status: done

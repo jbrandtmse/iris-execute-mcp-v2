@@ -635,6 +635,19 @@ Search the test trees of client-config, iris-mcp-all and the launcher for each o
 - `mutation (code review): the ../irislib/ link restored in docs/known-bugs-2026-05-29-mapping-subscript.md -> qa-41-7-doc-links.test.ts "docs/known-bugs-2026-05-29-mapping-subscript.md: no relative link is broken" red ("not in a clean checkout"); with the clean-checkout rule disabled the same document passes locally (the CI-only failure of run 44908546119) and the checker row "reports a link into the gitignored system-source snapshots" is red`
 - Every code-review mutation was reverted (`cmp` against a copy) and the client-config dist rebuilt from the restored source; the client-config suite (45 files, 1,264 tests), the 51 iris-mcp-all doc files (1,370 passed, 30 skipped) and the launcher suite (458 passed, 3 skipped) are green afterwards.
 
+**Lead re-certification record (AC 42.9.2, lead scope; 2026-11-22, after `v1.1.0`; decision #129).**
+
+- **Published:** `release verify --version 1.1.0` exit 0: 8 packages with provenance, 5 MCP Registry servers, IPM `pending` (O-IPM), `npx -y @iris-mcp/dev@1` answered `initialize` with 1.1.0. (Its first run read E404 on `npx`: the `@iris-mcp/shared` 1.1.0 tarball was not yet served one minute after its publish; all 8 tarballs answered 200 at 02:21:47Z.)
+- **Throwaway:** harness `up`, IRIS for Health 2026.2 (the pinned digest), `iris-mcp-throwaway-7a6c650b913e` on 127.0.0.1:52792, `HSCUSTOM`; `down` afterwards, no throwaway container left. The shared instance was not touched.
+- **Runs:** scratch `HOME` and `CLAUDE_CONFIG_DIR`, `IRIS_*` set to the throwaway, client-config rebuilt; `certify.mjs run <client> --server iris-dev-mcp --real-config --residual-risk <text>` for claude-code, vscode and cline. Each `certified-live`, dated 2026-11-22, `darwin/arm64`, `against: @iris-mcp/dev@1 → 1.1.0`; each restore converged on the engine path, byte-exact.
+  - claude-code (Claude Code 2.1.330): `claude mcp list → iris-dev-mcp: npx -y @iris-mcp/dev@1 - ✔ Connected`.
+  - vscode and cline: file-level (the agent-side tool listing stays their human-only rows); cline's native `disabled` flag round-tripped (`present-disabled`).
+  - Each run started from a seeded pre-existing config. A first claude-code pass from an absent config fell to the raw restore rung (byte-exact: the engine cannot restore "absent"); it was superseded by the seeded run.
+  - The July `residualRisk` texts (an unpublished package, the `iris-mcp-all` entry, "re-run after the first npm publish") were replaced through `--residual-risk`.
+- **Table:** `render-certification-table.mjs` regenerated the README; `--check` in sync. The QA 33.4 mutation rows anchored on the 2026-07-28 claude-code cell now read the rendered cell (`claudeCodeDispositionCell`), so a re-certification no longer moves them. client-config 45 files / 1,264 tests and the iris-mcp-all certification and doc files (172 tests, `npx-pin` 51) are green.
+- **Ledger:** DW-441 resolved-by this story (the lead rows); DW-440 and DW-442 resolved-by this story per their routing (dated human-only markers); the person-run checks are raised with the Planner.
+- **Status:** the lead rows and the human-only rows are recorded, so the story closes.
+
 ## Auto Run Result
 
 Status: done
