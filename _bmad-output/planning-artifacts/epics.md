@@ -6122,7 +6122,7 @@ These five are set to `in-progress` when the proposal is applied, so the Story 4
 **As a** data engineer, **I want** `iris_docdb_manage create` to leave a database that the other DocDB tools can use, **so that** my first property, document or find call does not fail with a raw ERROR #822.
 
 - **AC 44.1.1** — Probe first (Rules #14/#16), recorded in the story. Use the local `irislib/`/`irissys/` snapshot, then a disposable `ExecuteMCPv2.Temp.*` probe.
-  - **The API.** Record the signature of `$$Create^%SYS.DOCDB`, its return value, the privilege it needs, and whether it must run in `%SYS`. Record what `Ens.Setting.Report.base` passes it; the ledger cites `:629`.
+  - **The API.** Record the signature of `$$Create^%SYS.DOCDB`, its return value, the privilege it needs, and whether it must run in `%SYS`. Record what `Ens.Setting.Report.base` passes it; the ledger cites `:629`. *(Amended 2026-11-22 from the Story 44.1 probe, wave-9 decision #132.)* It passes a lowercase `resource` key, which `Security.DocDBs` ignores, so its record carries no Resource; it is not a model to copy.
   - **The other routes.** Record whether `%DocDB.Database.CreateDatabase`, or the `%Api.DocDB.v1` create route (`httpPostDatabase`, cited at `:299-313`), has a variant that registers the record. Record whether `DELETE /api/docdb/v1/{ns}/db/{name}` removes the record; Story 42.3's rework says it does.
   - **Existing databases.** Record what a database created by 1.1.0 or earlier answers, and whether registering it afterwards makes it usable.
   - **Version range.** Record the oldest IRIS version, inside the 2023.1+ claim, that has the `Security.DocDBs` requirement, on the oldest throwaway image that starts. Otherwise record a residual risk.
@@ -6132,17 +6132,17 @@ These five are set to `in-progress` when the proposal is applied, so the Story 4
   - The registration goes through a thin IRIS-side handler (AD-12) on an additive route (AD-33), using the namespace save/restore pattern (no `New $NAMESPACE`).
   - A registration that fails is reported with the real IRIS text through `SanitizeError` (Rule #9). The report says whether the database itself was created. A failure is never silent and never a generic "Failed to create".
   - **Repair.** `create` on a database that exists without a record registers it. If the probe shows that is unsafe, the documented manual step replaces it, with the reason recorded.
-- **AC 44.1.3** — `drop` leaves no orphan `Security.DocDBs` record, checked live. `translateDocDbAccessDenied` (`packages/iris-data-mcp/src/tools/docdb.ts`) names the missing record when the service is enabled but the database has no record, instead of passing a raw #822 through. Its disabled-service branch is unchanged.
+- **AC 44.1.3** — `drop` leaves no orphan `Security.DocDBs` record, checked live. *(Amended 2026-11-22 from the Story 44.1 probe, wave-9 decision #132.)* Both the REST DELETE and `DropDatabase` already remove the record, so `drop` needs no change. A database created by 1.1.0 or earlier answers #822 even to `drop` until `create` repairs it. `translateDocDbAccessDenied` (`packages/iris-data-mcp/src/tools/docdb.ts`) names the missing record when the service is enabled but the database has no record, instead of passing a raw #822 through. Its disabled-service branch is unchanged.
 - **AC 44.1.4** — Bootstrap:
   - the embed is regenerated, and `BOOTSTRAP_VERSION` from → to is recorded (Rule #24);
-  - a new class joins both rosters (Rule #39);
+  - no class is added: the handler joins the existing `ExecuteMCPv2.REST.Security`, so the rosters (Rule #39) are unchanged *(Amended 2026-11-22 from the Story 44.1 probe, wave-9 decision #132.)*;
   - the handler's ObjectScript unit tests pass, and the test count is checked against the expected `Test*` methods (Rule #35).
 - **AC 44.1.5** — Docs:
   - the data README's DocDB prerequisites name the record as well as `%Service_DocDB`, and say what `create` now does;
-  - the `iris_docdb_manage` description is updated as a sanctioned AD-15 change (the Frozen goldens convention, with the snapshot regenerated);
+  - the `iris_docdb_manage` description is updated as a sanctioned AD-15 change (the Frozen goldens convention, with the snapshot regenerated), as one sanctioned-changes entry, `S-44.1-docdb-manage-text` *(Amended 2026-11-22 from the Story 44.1 probe, wave-9 decision #132.)*;
   - `CHANGELOG.md` and a changeset are updated.
 - **AC 44.1.6** — Live proof (Rules #26 and #48), on a throwaway with `%Service_DocDB` enabled. It runs on the shared instance only if the service is already enabled there; the story never toggles it.
-  - Through the tools, a disposable database with no underscore in its name (Story 42.3) runs the whole lifecycle: create, property, index, insert, get, update, find, delete and drop. After the drop, no record remains.
+  - Through the tools, a disposable database with no underscore in its name (Story 42.3) runs the whole lifecycle: create, property, index, insert, get, update, find, delete and drop. After the drop, no record remains. *(Amended 2026-11-22 from the Story 44.1 probe, wave-9 decision #132.)* DocDB indexes every property it creates and has no separate index operation, so indexing a property just created answers #5805: the `index` step targets a property not created before.
   - **Proven red:** with the registration call removed, the property call answers #822 again.
   - **Refusal:** one destructive-path refusal changes nothing. An example is `drop` of a name that does not exist.
 - **AC 44.1.7** — Back-compat (Rule #19): `list`, `drop`, and the request bytes of `iris_docdb_document`, `iris_docdb_find` and `iris_docdb_property` are unchanged. Each is pinned with `toEqual` against its pre-story capture.
