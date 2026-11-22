@@ -4115,6 +4115,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-22T22:21:18Z status=escalated owner=burndown by=cr note=fix-risk high: needs a file path on ledger records (spec 3.4 state shape) + per-file record/drop/stash; probe: claude-code mode change refused in a project VS Code never touched
 - 2026-11-22T22:21:18Z occurrence=44-2-vs-code-copilot-mcp-configuration-targets
 - 2026-11-22T22:25:45Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=lead note=decision_135:reproduced_on_built_CLI(claude-code_mode_change_in_project_B_refused_by_vscode_record_from_A);AD-15_regression=HIGH;rework_1_adds_optional_path_on_records
+- 2026-11-22T23:20:45Z status=resolved-by:44-2-vs-code-copilot-mcp-configuration-targets by=cr note=built CLI env-i scratch HOME: vscode A then claude-code B apply+mode change exit 0, bytes == control; swapped; one-project adopt/refuse; pathless state ok
 
 ### DW-734: The strict Copilot user file accepts a leading BOM (readers.ts strips U+FEFF before the strict parse)
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: low | footprint: in-story
@@ -4125,6 +4126,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: high | footprint: in-story
 - evidence: QA probe: after claude-code remove, the vscode record stays; a later different claude-code entry makes a vscode re-apply conflict; dropping peer records is unsafe while records carry no path (DW-733)
 - 2026-11-22T22:21:30Z status=wontfix-accepted owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=reopen_if=DW-733 lands path-keyed records (then drop the peers' records for that file on remove)
+- 2026-11-22T23:20:45Z status=resolved-by:44-2-vs-code-copilot-mcp-configuration-targets by=cr note=dropRemovedShared: built-CLI remove dropped vscode A record, kept vscode B record and vscode stash; pinned + mutation-verified
 
 ### DW-736: doctor labels a shared .mcp.json finding with the first client in registry order (claude-code) even for a VS Code-only user
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: med | footprint: in-story
@@ -4140,3 +4142,14 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: low | footprint: in-story
 - evidence: cli/clients.ts:1731-1745 check 4 calls resolveScopePath(adapter, stash.scope, ctx) per stash; pre-existing cross-project reading, now fixable since records carry path
 - 2026-11-22T23:07:19Z status=wontfix-accepted owner=44-2-vs-code-copilot-mcp-configuration-targets by=harvest note=reopen_if=a doctor run reports a stash as orphaned (or healthy) for a file in a different project than the recorded path; needs a call on stashes of deleted files
+
+### DW-739: Per-file ledger matching changes each client's own cross-project behavior (stash enabled only where disabled; repaired non-canonical name not owned in another project) without a recorded Lead decision or AD-30 spine text
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: high | footprint: in-story
+- evidence: built CLI: claude-code disable in A, enable in A moved to A2 exits 1 'no disabled entry is stashed' (pre-story enabled); repair-recorded iris-dev-mcp2 in A, remove in B exits 1 (auditor probe). Slot-wide own matching would reopen DW-733 in reverse (claude-code remove in B drops its A record, vscode then overwrites A)
+- 2026-11-22T23:20:45Z status=decision-pending owner=burndown by=cr note=human=Lead: ratify per-file own-record semantics as AD-15 sanctioned change and write the AD-30 per-file refinement into the spine (Rule 20); CHANGELOG now states it
+- 2026-11-22T23:23:28Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=lead note=decision_136:ratified_as_sanctioned_AD-15_change;old_slot-wide_matching_leaked_across_projects;AD-30_spine_text_written;CHANGELOG_states_the_move_cost
+
+### DW-740: Ledger record paths are compared as resolved strings, not real paths, so one .mcp.json reached through a Windows junction or subst drive is two files and the shared-file conflict guard can fail open
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: resolveTarget records target.path from process.cwd(); the home guard uses realOrResolved but the ledger compare uses pathKey; posix getcwd is physical, Windows cwd is not
+- 2026-11-22T23:20:45Z status=wontfix-accepted owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=reopen_if=a ledger shows two records of one client and name whose paths realpath to the same file (Windows junction/subst cwd)

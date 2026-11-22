@@ -13,7 +13,8 @@
  *   also counts: such a file predates the ledger or the sharing, and AD-15 forbids turning a Claude-Code-only
  *   user's re-apply into a refusal.
  * - Otherwise an entry equal, as a JSON value, to the one X would write is ADOPTED: X's record is added and
- *   nothing is written.
+ *   nothing is written. A pre-sharing writer whose record of the name has no path keeps its ownership of this
+ *   file: the adoption gives it a record for the file (`recordAdoptedOwners`).
  * - Any other entry is a CONFLICT that refuses the write.
  *
  * A name that is not in the file is created as ever. This module is pure: it reads the ledger and the resolved
@@ -167,6 +168,30 @@ export function dropRemovedShared(
     }),
     own,
   );
+}
+
+/**
+ * The state after `client` adopts `name` in the shared file `at`: a pre-sharing writer among the peers that records the
+ * name without a path (a record written before records carried a path), and has no record for this file, gets one. The
+ * adopted entry is that writer's too, and the record keeps it an owner here, so a later different write by `client` is a
+ * conflict, as it was while records had no path (AD-30). The pathless record stays as it is.
+ */
+export function recordAdoptedOwners(
+  state: ManagerState,
+  name: string,
+  peers: readonly SharedPeer[],
+  at: RecordFile,
+  now: Date,
+): ManagerState {
+  const added: ManagerState["entries"] = [];
+  for (const peer of peers) {
+    if (!PRE_SHARING_WRITERS.includes(peer.client)) continue;
+    const slot = state.entries.filter((r) => r.client === peer.client && r.scope === peer.scope && r.name === name);
+    const pathless = slot.find((r) => r.path === undefined);
+    if (pathless === undefined || slot.some((r) => r.path !== undefined && samePath(at.platform, r.path, at.path))) continue;
+    added.push({ ...pathless, updatedAt: now.toISOString(), path: at.path });
+  }
+  return added.length > 0 ? { ...state, entries: [...state.entries, ...added] } : state;
 }
 
 /** Deep equality of two JSON values, independent of object key order. */

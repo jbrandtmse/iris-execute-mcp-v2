@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { dropRemovedShared, recordingClients, soleOwner, sharedPeers } from "../shared-files.js";
+import { dropRemovedShared, recordAdoptedOwners, recordingClients, soleOwner, sharedPeers } from "../shared-files.js";
 import { addStash, dropManaged, findStash, isManagerCreated, readState, recordManaged, type ManagerState } from "../state.js";
 import { CLIENT_ADAPTERS } from "../adapters.js";
 
@@ -35,7 +35,7 @@ const T = 120_000;
 
 interface Oracle {
   fixtures: Record<string, string>;
-  scenarios: Record<string, { apply: { exit: number; file: string | null } }>;
+  scenarios: Record<string, { apply: { exit: number; file: string | null }; applyAgain: { exit: number; file: string | null } }>;
 }
 const ORACLE = JSON.parse(readFixture("claude-code-shared-oracle-pre-44-2.json")) as Oracle;
 const COMPACT: string = ORACLE.fixtures.compact ?? failFixture("compact");
@@ -150,6 +150,17 @@ describe("DW-733: a record of another project's .mcp.json is not a sharing owner
     expect(readFileSync(mcpJson(world.b), "utf8")).toBe(ORACLE.scenarios.compact?.apply.file);
   }, T);
 
+  it("a claude-code re-apply over its own recorded entry in project B is the pre-story oracle's applyAgain bytes", () => {
+    const world = makeWorld();
+    expect(world.run(world.a, APPLY("vscode", "env-reference")).status).toBe(0);
+    seedMcp(world.b, COMPACT);
+    expect(world.run(world.b, APPLY("claude-code", "env-reference")).status).toBe(0);
+    // The second apply goes through the shared-file rule: a vscode record counted here would adopt and write nothing.
+    const again = world.run(world.b, APPLY("claude-code", "env-reference"));
+    expect(again.status).toBe(ORACLE.scenarios.compact?.applyAgain.exit);
+    expect(readFileSync(mcpJson(world.b), "utf8")).toBe(ORACLE.scenarios.compact?.applyAgain.file);
+  }, T);
+
   it("the other direction: claude-code in project A, then a vscode mode change in project B, exit 0 and what vscode writes alone", () => {
     const world = makeWorld();
     expect(world.run(world.a, APPLY("claude-code", "env-reference")).status).toBe(0);
@@ -217,6 +228,27 @@ describe("DW-733: a record of another project's .mcp.json is not a sharing owner
     const after = ledger(world);
     expect(after.entries.find((entry) => entry.client === "claude-code")?.path).toBe(mcpJson(world.b));
     expect(after.entries.find((entry) => entry.client === "vscode")?.path).toBeUndefined();
+  }, T);
+
+  it("a pre-44.2 claude-code record (no path): vscode adopts the entry, and a later different vscode write is still refused", () => {
+    const world = makeWorld();
+    seedMcp(world.b, COMPACT);
+    expect(world.run(world.b, APPLY("claude-code", "env-reference")).status).toBe(0);
+    const state = ledger(world);
+    writeFileSync(world.stateFile, JSON.stringify({ version: 1, entries: state.entries.map(({ path: _dropped, ...rest }) => rest), stashes: [] }) + "\n");
+    const before = readFileSync(mcpJson(world.b), "utf8");
+
+    const adopted = world.run(world.b, APPLY("vscode", "env-reference"));
+    expect(adopted.status, adopted.stdout + adopted.stderr).toBe(0);
+    expect(readFileSync(mcpJson(world.b), "utf8")).toBe(before);
+    // The adoption gives claude-code a record for this file; its pathless record stays.
+    const records = ledger(world).entries.map((entry) => `${entry.client}:${entry.path === undefined ? "-" : path.basename(path.dirname(entry.path))}`);
+    expect(records.sort()).toEqual(["claude-code:-", `claude-code:${path.basename(world.b)}`, `vscode:${path.basename(world.b)}`].sort());
+
+    const refused = world.run(world.b, APPLY("vscode", "server-manager"));
+    expect(refused.status, refused.stdout + refused.stderr).toBe(1);
+    expect(refused.stdout + refused.stderr).toContain("shared with claude-code");
+    expect(readFileSync(mcpJson(world.b), "utf8")).toBe(before);
   }, T);
 
   it("an old state file without any path parses and behaves as before: claude-code applies, disables, enables and removes", () => {
@@ -291,6 +323,40 @@ describe("a genuinely shared file (both clients, one project) still adopts an eq
     expect(world.run(world.a, APPLY("claude-code", "server-manager")).status).toBe(0);
     const refused = world.run(world.a, APPLY("vscode", "env-reference"));
     expect(refused.status).toBe(1);
+  }, T);
+
+  it("a claude-code remove in project B leaves its record for project A, so vscode in A is still refused a different entry", () => {
+    const world = makeWorld();
+    seedMcp(world.a, COMPACT);
+    expect(world.run(world.a, APPLY("claude-code", "env-reference")).status).toBe(0);
+    expect(world.run(world.b, APPLY("claude-code", "env-reference")).status).toBe(0);
+    expect(world.run(world.a, APPLY("vscode", "env-reference")).status).toBe(0);
+    const before = readFileSync(mcpJson(world.a), "utf8");
+
+    expect(world.run(world.b, REMOVE("claude-code")).status).toBe(0);
+    const records = ledger(world).entries.map((entry) => `${entry.client}:${entry.path}`).sort();
+    expect(records).toEqual([`claude-code:${mcpJson(world.a)}`, `vscode:${mcpJson(world.a)}`].sort());
+
+    const refused = world.run(world.a, APPLY("vscode", "server-manager"));
+    expect(refused.status, refused.stdout + refused.stderr).toBe(1);
+    expect(readFileSync(mcpJson(world.a), "utf8")).toBe(before);
+  }, T);
+
+  it("stashes are kept per file: a disable in project B does not replace project A's stash, and A's enable restores A", () => {
+    const world = makeWorld();
+    seedMcp(world.a, COMPACT);
+    expect(world.run(world.a, APPLY("claude-code", "env-reference")).status).toBe(0);
+    expect(world.run(world.b, APPLY("claude-code", "server-manager")).status).toBe(0);
+    const beforeA = readFileSync(mcpJson(world.a), "utf8");
+    const toggle = (verb: string, dir: string): Run => world.run(dir, [verb, "--client", "claude-code", "--scope", "project", "--server", "iris-dev-mcp", "--json"]);
+
+    expect(toggle("disable", world.a).status).toBe(0);
+    expect(toggle("disable", world.b).status).toBe(0);
+    expect(ledger(world).stashes.map((stash) => stash.path).sort()).toEqual([mcpJson(world.a), mcpJson(world.b)].sort());
+    const enabled = toggle("enable", world.a);
+    expect(enabled.status, enabled.stdout + enabled.stderr).toBe(0);
+    expect(readFileSync(mcpJson(world.a), "utf8")).toBe(beforeA);
+    expect(ledger(world).stashes.map((stash) => stash.path)).toEqual([mcpJson(world.b)]);
   }, T);
 });
 
@@ -405,6 +471,34 @@ describe("per-file ledger units (in memory)", () => {
     expect(recordingClients({ ...empty, entries: [rec("vscode")] }, "vscode", "project", "iris-dev-mcp", vscodePeers, atB)).toEqual([]);
     // The file's path compares as the platform does.
     expect(recordingClients(here, "claude-code", "project", "iris-dev-mcp", peers, { platform: "darwin", path: FILE_B.toUpperCase() })).toEqual(["vscode"]);
+    // A stash follows the same per-file rule as a manager record.
+    const stashedA: ManagerState = { ...empty, stashes: [{ client: "vscode", scope: "project", name: "iris-dev-mcp", entry: { v: 1 }, disabledAt: "2026-11-22T00:00:00.000Z", path: FILE_A }] };
+    expect(recordingClients(stashedA, "claude-code", "project", "iris-dev-mcp", peers, atB)).toEqual([]);
+    expect(recordingClients(stashedA, "claude-code", "project", "iris-dev-mcp", peers, atA)).toEqual(["vscode"]);
+    // In an unshared scope a client's own pathless record still counts, for every client (doctor's unrecorded-entries check).
+    const cursorPathless = { ...empty, entries: [{ ...rec("cursor"), scope: "user" as const, name: "iris-dev-mcp2" }] };
+    expect(recordingClients(cursorPathless, "cursor", "user", "iris-dev-mcp2", [], { platform: "linux", path: "/home/u/.cursor/mcp.json" })).toEqual(["cursor"]);
+  });
+
+  it("recordAdoptedOwners gives a pathless pre-sharing writer a record for the adopted file, once, and never a peer that is not one", () => {
+    const peersOfVscode = sharedPeers(vscode, "project", ctxB);
+    const pathlessClaude: ManagerState["entries"][number] = {
+      client: "claude-code",
+      scope: "project",
+      name: "iris-dev-mcp",
+      containsSecret: false,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    };
+    const state: ManagerState = { ...empty, entries: [pathlessClaude] };
+    const next = recordAdoptedOwners(state, "iris-dev-mcp", peersOfVscode, atB, NOW);
+    expect(next.entries).toEqual([pathlessClaude, { ...pathlessClaude, updatedAt: NOW.toISOString(), path: FILE_B }]);
+    expect(soleOwner(recordManaged(next, { client: "vscode", scope: "project", name: "iris-dev-mcp", containsSecret: false, at: atB }, NOW), "vscode", "project", "iris-dev-mcp", peersOfVscode, atB)).toBe(false);
+    // Idempotent once the file has a record, and a no-op without a pathless record or for a peer that is not a pre-sharing writer.
+    expect(recordAdoptedOwners(next, "iris-dev-mcp", peersOfVscode, atB, NOW)).toBe(next);
+    expect(recordAdoptedOwners(empty, "iris-dev-mcp", peersOfVscode, atB, NOW)).toBe(empty);
+    const pathlessVscode: ManagerState = { ...empty, entries: [{ ...pathlessClaude, client: "vscode" }] };
+    expect(recordAdoptedOwners(pathlessVscode, "iris-dev-mcp", sharedPeers(claude, "project", ctxB), atB, NOW)).toBe(pathlessVscode);
   });
 
   it("dropRemovedShared drops the client's own records and the peers' manager records for the file, keeping stashes and other files", () => {

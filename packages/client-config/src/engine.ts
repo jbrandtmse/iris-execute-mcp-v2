@@ -50,6 +50,7 @@ import {
   peerClients,
   peersRecordingFile,
   PRE_SHARING_WRITERS,
+  recordAdoptedOwners,
   sharedFileNote,
   sharedPeers,
   soleOwner,
@@ -524,7 +525,7 @@ export function apply(
     const { verdict, sharedWith } = shared;
     if (verdict.kind === "conflict") return fail(client, scope, "apply", target.path, verdict.reason, { sharedWith });
     const warnings: string[] = [];
-    persistState(ctx, fs, target.stateDir, record(target.state), warnings);
+    persistState(ctx, fs, target.stateDir, record(recordAdoptedOwners(target.state, entry.name, target.peers, target.at, now())), warnings);
     const adopted: EngineResult = {
       ok: true,
       client,

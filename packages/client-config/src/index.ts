@@ -149,6 +149,7 @@ export {
   jsonEqual,
   otherOwners,
   peersRecordingFile,
+  recordAdoptedOwners,
   ownerClients,
   peerClients,
   sharedFileNote,
