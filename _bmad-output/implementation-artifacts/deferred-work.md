@@ -4135,3 +4135,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: med | footprint: in-story
 - evidence: adapters-44-2-backcompat.test.ts and both oracle fixtures name node capture-oracle.mjs; git ls-files has no such script, so the oracle cannot be re-captured from 9f7797c5
 - 2026-11-22T22:21:30Z status=wontfix-accepted owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=reopen_if=the pre-44-2 oracle fixtures need refreshing or a review disputes a captured value
+
+### DW-738: doctor's orphaned-stashes check resolves each stash's file from the current directory, not from the stash's recorded path
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: cli/clients.ts:1731-1745 check 4 calls resolveScopePath(adapter, stash.scope, ctx) per stash; pre-existing cross-project reading, now fixable since records carry path
+- 2026-11-22T23:07:19Z status=wontfix-accepted owner=44-2-vs-code-copilot-mcp-configuration-targets by=harvest note=reopen_if=a doctor run reports a stash as orphaned (or healthy) for a file in a different project than the recorded path; needs a call on stashes of deleted files
