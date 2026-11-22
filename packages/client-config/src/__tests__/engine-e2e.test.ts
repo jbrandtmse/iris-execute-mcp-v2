@@ -762,15 +762,16 @@ describe("state.json round-trips (the on-disk ledger IS the next session's input
     expect(api.disable(ctx, "claude-code", "user", "iris-ops-mcp").ok).toBe(true);
 
     const raw = readStateJson(ctx);
-    // Managed-entry record: exact key set.
+    // Managed-entry record: exact key set (`path` is the additive per-file field, the resolved config file).
+    // A record written before the field existed has no `path` and still parses (state.test.ts).
     expect(raw.entries).toHaveLength(1);
     expect(Object.keys(raw.entries[0] ?? {}).sort()).toEqual(
-      ["client", "containsSecret", "createdAt", "name", "scope", "updatedAt"].sort(),
+      ["client", "containsSecret", "createdAt", "name", "path", "scope", "updatedAt"].sort(),
     );
     // Stash record: the spec §3.4 shape, exact key set.
     expect(raw.stashes).toHaveLength(1);
-    expect(Object.keys(raw.stashes[0] ?? {}).sort()).toEqual(["client", "disabledAt", "entry", "name", "scope"].sort());
-    expect(raw.stashes[0]).toMatchObject({ client: "claude-code", scope: "user", name: "iris-ops-mcp" });
+    expect(Object.keys(raw.stashes[0] ?? {}).sort()).toEqual(["client", "disabledAt", "entry", "name", "path", "scope"].sort());
+    expect(raw.stashes[0]).toMatchObject({ client: "claude-code", scope: "user", name: "iris-ops-mcp", path: cfg });
 
     // A "new session" (the engine is stateless; every call re-reads the disk)
     // enables purely from the persisted record — byte-exact.

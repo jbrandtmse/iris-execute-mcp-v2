@@ -3,7 +3,9 @@
  *
  * Two adapter scopes can resolve to one file: a workspace-root `.mcp.json` is both Claude Code's and VS Code
  * Copilot's project file. Entries in such a file are owned per server NAME, not per client, and the state
- * ledger (keyed `(client, scope, name)`) is what records who wrote an entry.
+ * ledger is what records who wrote an entry. Each ledger record carries the resolved config file it was written
+ * to, and only a record for THIS file counts: a client's record for another project's `.mcp.json` is not an owner
+ * here.
  *
  * The rule, as the engine applies it to a write for client X under a name that is already present in the file:
  * - X owns the entry ALONE when its ledger records it and no other sharing client's does. For an adapter that
@@ -22,7 +24,7 @@ import { CLIENT_ADAPTERS } from "./adapters.js";
 import { samePath } from "./home-guard.js";
 import { resolveScopePath } from "./paths.js";
 import type { RawEntry } from "./readers.js";
-import { isManagerCreated, findStash, type ManagerState } from "./state.js";
+import { dropManaged, dropStash, type ManagerState, type RecordFile } from "./state.js";
 import type { ClientAdapter, ClientScope, HostContext } from "./types.js";
 
 /** One other adapter scope that resolves to the same file. */
@@ -63,8 +65,25 @@ export function peerClients(peers: readonly SharedPeer[]): string[] {
 }
 
 /**
- * The clients among X and its peers whose ledger records `name` as manager-created or holds a stash of it,
- * without repeats.
+ * The peers that hold any ledger record (manager-created or stash, whatever the name) for the file `at`. A record
+ * without a path never counts, as in `recordingClients`.
+ */
+export function peersRecordingFile(state: ManagerState, peers: readonly SharedPeer[], at: RecordFile): SharedPeer[] {
+  return peers.filter((peer) =>
+    [...state.entries, ...state.stashes].some(
+      (r) => r.client === peer.client && r.scope === peer.scope && r.path !== undefined && samePath(at.platform, r.path, at.path),
+    ),
+  );
+}
+
+/**
+ * The clients among X and its peers whose ledger records `name` as manager-created or holds a stash of it for the
+ * file `at`, without repeats. Ownership is per file:
+ * - a record with a path counts only when that path is the file `at`, so a record of another project's `.mcp.json`
+ *   never makes a client an owner here;
+ * - a record without a path (written before paths were recorded) never counts for a peer, and counts for X itself
+ *   only when the scope is not shared or X is a pre-sharing writer: it cannot be told apart from a record of an
+ *   old, unshared file.
  */
 export function recordingClients(
   state: ManagerState,
@@ -72,16 +91,20 @@ export function recordingClients(
   scope: ClientScope,
   name: string,
   peers: readonly SharedPeer[],
+  at: RecordFile,
 ): string[] {
-  const recorded = [{ client, scope }, ...peers]
-    .filter((p) => isManagerCreated(state, p.client, p.scope, name) || findStash(state, p.client, p.scope, name) !== undefined)
-    .map((p) => p.client);
-  return [...new Set(recorded)];
+  const slots = [{ client, scope }, ...peers];
+  const counts = (record: { client: string; scope: ClientScope; name: string; path?: string }): boolean => {
+    if (record.name !== name || !slots.some((p) => p.client === record.client && p.scope === record.scope)) return false;
+    if (record.path !== undefined) return samePath(at.platform, record.path, at.path);
+    return record.client === client && (peers.length === 0 || PRE_SHARING_WRITERS.includes(client));
+  };
+  return [...new Set([...state.entries, ...state.stashes].filter(counts).map((record) => record.client))];
 }
 
 /**
- * Who owns `name` in a shared file: every client (X and its peers) whose ledger records it or holds a stash of
- * it; when none does, the pre-sharing writers among them are the implied owners.
+ * Who owns `name` in the shared file `at`: every client (X and its peers) whose ledger records it or holds a stash
+ * of it for that file; when none does, the pre-sharing writers among them are the implied owners.
  */
 export function ownerClients(
   state: ManagerState,
@@ -89,8 +112,9 @@ export function ownerClients(
   scope: ClientScope,
   name: string,
   peers: readonly SharedPeer[],
+  at: RecordFile,
 ): string[] {
-  const owners = recordingClients(state, client, scope, name, peers);
+  const owners = recordingClients(state, client, scope, name, peers, at);
   if (owners.length > 0) return owners;
   return [...new Set([client, ...peers.map((p) => p.client)])].filter((id) => PRE_SHARING_WRITERS.includes(id));
 }
@@ -102,8 +126,9 @@ export function soleOwner(
   scope: ClientScope,
   name: string,
   peers: readonly SharedPeer[],
+  at: RecordFile,
 ): boolean {
-  const owners = ownerClients(state, client, scope, name, peers);
+  const owners = ownerClients(state, client, scope, name, peers, at);
   return owners.length === 1 && owners[0] === client;
 }
 
@@ -114,8 +139,34 @@ export function otherOwners(
   scope: ClientScope,
   name: string,
   peers: readonly SharedPeer[],
+  at: RecordFile,
 ): string[] {
-  return ownerClients(state, client, scope, name, peers).filter((id) => id !== client);
+  return ownerClients(state, client, scope, name, peers, at).filter((id) => id !== client);
+}
+
+/**
+ * The state after a client removes `name` from the shared file `at`: its own records and stash for the file go, and so
+ * do the manager-created records of the other clients for the same file, which no longer describe an entry that is
+ * there. Their stashes stay: a stash is a disabled copy the other client can still enable.
+ */
+export function dropRemovedShared(
+  state: ManagerState,
+  client: string,
+  scope: ClientScope,
+  name: string,
+  peers: readonly SharedPeer[],
+  at: RecordFile,
+): ManagerState {
+  const own = dropStash(dropManaged(state, client, scope, name, at), client, scope, name, at);
+  return peers.reduce(
+    (next, peer) => ({
+      ...next,
+      entries: next.entries.filter(
+        (r) => !(r.client === peer.client && r.scope === peer.scope && r.name === name && r.path !== undefined && samePath(at.platform, r.path, at.path)),
+      ),
+    }),
+    own,
+  );
 }
 
 /** Deep equality of two JSON values, independent of object key order. */

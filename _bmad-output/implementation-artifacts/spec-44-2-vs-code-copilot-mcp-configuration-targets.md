@@ -2,11 +2,11 @@
 title: 'Story 44.2: VS Code Copilot MCP Configuration Targets'
 type: 'bugfix'
 created: '2026-11-22'
-status: 'in-progress'
-baseline_revision: '9f7797c595c4a49840062a2bf517101b93476147'
+status: 'done'
+baseline_revision: '05e37579f45f3dd0ba8d509b7dea04db95dffbe2'
 baseline_commit: '9f7797c595c4a49840062a2bf517101b93476147'
 review_loop_iteration: 1
-followup_review_recommended: true
+followup_review_recommended: false
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
@@ -23,11 +23,11 @@ deferred:
     location: '.changeset/story-44-2-vs-code-copilot-mcp-configuration-targets.md'
     severity: medium
   - summary: >-
-      The ownership ledger is keyed (client, scope, name) with no file path, so a claude-code project record from one project counts as a sharing owner in another project's `.mcp.json`.
+      `doctor`'s orphaned-stashes check resolves each stash's file from the current directory, not from the stash's recorded path, so a stash recorded for another project's `.mcp.json` is checked against this project's file.
     evidence: |-
-      `state.ts` `sameSlot` and `isManagerCreated` ignore the path; `shared-files.ts` `ownerClients` reads them for the shared-file rule. Effect: vscode can adopt-or-conflict where a path-keyed ledger would write a fresh entry. The keying is pre-existing (Spec Change Log 6); fixing it changes the state file format.
-    location: 'packages/client-config/src/state.ts:123-135'
-    severity: medium
+      `cli/clients.ts` (check 4) calls `resolveScopePath(adapter, stash.scope, ctx, ...)` for every stash. Before the per-file records a slot held one stash for the same cross-project reading, so the behavior is not new; now that records carry `path`, the check can use it. Needs a decision on what a stash of a file that no longer exists should report.
+    location: 'packages/client-config/src/cli/clients.ts:1731-1745'
+    severity: low
 ---
 
 <intent-contract>
@@ -200,14 +200,14 @@ Rejected:
 
 The review's DW-733 deferral is overruled: the lead reproduced it on the built CLI with a scratch HOME (vscode `apply --scope project` in project A, then a claude-code mode change in project B, where VS Code was never configured, exits 1 "the file is shared with vscode"). That breaks the Boundaries' back-compat bound ("`claude-code` behavior on a `.mcp.json` that no `vscode` record touches is byte-identical to before") and AD-15, so it is a HIGH that cannot ship. Work ONLY these items:
 
-- [ ] [Review][HIGH] DW-733: shared-file ownership must be per file, not per (client, scope, name) [packages/client-config/src/state.ts, src/shared-files.ts, src/engine.ts]. Record the resolved absolute config path on every ownership and stash record this story's code writes, as an ADDITIVE optional field (old state files still parse; AD-15 additive fields; update the documented state shape that `engine-e2e.test.ts` pins only by adding the optional field). For the shared-file rule, a peer client's record counts as a sharing owner only when its recorded path is the same file (`home-guard.ts` `samePath`/`pathKey`). A record without a path (written before this story, or by a pre-44.2 vscode `.vscode/mcp.json` write) never counts as a peer owner of a `.mcp.json`. claude-code's existing rule (an unrecorded canonical entry counts as its own, AD-15) stays. Pins, on the built CLI as a child process under a scratch HOME where stated:
+- [x] [Review][HIGH] DW-733: shared-file ownership must be per file, not per (client, scope, name) [packages/client-config/src/state.ts, src/shared-files.ts, src/engine.ts]. Record the resolved absolute config path on every ownership and stash record this story's code writes, as an ADDITIVE optional field (old state files still parse; AD-15 additive fields; update the documented state shape that `engine-e2e.test.ts` pins only by adding the optional field). For the shared-file rule, a peer client's record counts as a sharing owner only when its recorded path is the same file (`home-guard.ts` `samePath`/`pathKey`). A record without a path (written before this story, or by a pre-44.2 vscode `.vscode/mcp.json` write) never counts as a peer owner of a `.mcp.json`. claude-code's existing rule (an unrecorded canonical entry counts as its own, AD-15) stays. Pins, on the built CLI as a child process under a scratch HOME where stated:
   - the lead's repro (vscode in project A, claude-code mode change in project B) exits 0 and writes exactly what pre-44.2 claude-code wrote (compare with the pre-story claude-code oracle), both directions (claude-code in A, vscode in B too);
   - a pre-44.2-shaped vscode project record (no path) does not block claude-code in any project;
   - a genuinely shared file (both clients, same project) still adopts an equal entry and refuses a differing one, both directions;
   - an old state file without paths parses and behaves as before;
   - a `mutation:` line for each pin (Rule 19).
-- [ ] [Review] DW-735 (peer record outlives a shared-file remove; `wontfix-accepted` "reopen with DW-733"): with per-file records, re-check it. Fix it in this pass only if it is now a two-way door (about 15 lines with its test); otherwise leave it as filed and say why in `## Auto Run Result`.
-- [ ] [Review] `CHANGELOG.md` and the docs: remove the DW-733 limitation and its workaround text once the fix lands.
+- [x] [Review] DW-735 (peer record outlives a shared-file remove; `wontfix-accepted` "reopen with DW-733"): with per-file records, re-check it. Fix it in this pass only if it is now a two-way door (about 15 lines with its test); otherwise leave it as filed and say why in `## Auto Run Result`.
+- [x] [Review] `CHANGELOG.md` and the docs: remove the DW-733 limitation and its workaround text once the fix lands.
 
 ## Spec Change Log
 
@@ -219,6 +219,8 @@ Implement stage, 2026-11-22 (no change to the `<intent-contract>`; every item be
 4. **Task 3 and 7 detail.** The new `legacyScopes` data is `{scope, paths, format, rootKey, envExpansion}`; `paths.ts` adds `adapterForScope`, `legacyAdapterView` and `resolveLegacyPath`, and the engine reads and edits an old file through that view (backups under `backups/vscode-legacy/<scope>/`, so `restore --client vscode` can never pick an old-file backup). New engine surface: `previewLegacyRemoval`, `sharedWriteVerdict`, `holdsLegacyReferences`, `EngineResult.adopted|sharedWith|sharedNote|legacy`. A failed old-file edit is exit 1 from the CLI (`the new entry was written, but ... still in the old file`), after the new entry was kept; a refused conflict is exit 1 before any write. The matrix's `--server iris-dev-mcp` is the CLI's `--servers` for apply and `--server` for the toggles.
 5. **Certify harness (task 10).** `certify.mjs` now applies the vscode entry in the default env-reference mode: the dummy-password explicit mode existed only because the old env-reference write also merged an `inputs[]` descriptor that `remove` does not roll back. The record was re-run with a scratch `HOME`/`USERPROFILE`, `COPILOT_HOME` unset and a scratch working directory (the pass's `status` reads the project `.mcp.json` of the directory it runs in, and this repository may hold one). The `humanOnly` marker is kept, re-dated 2026-11-22, and points at the D-6 runbook.
 6. **Ledger limit, not fixed.** The ownership ledger is keyed `(client, scope, name)` with no file path, so a claude-code project record made in one project also counts as an owner in another project's `.mcp.json`. The shared-file rule inherits this; it can only make vscode adopt-or-conflict where a stricter, path-keyed ledger would write. Pre-existing keying, out of scope here.
+
+7. **Ledger limit fixed (rework 1, DW-733; supersedes item 6).** `ManagedEntryRecord` and `StashRecord` gain an additive optional `path` (the resolved config file). No state-file version change; an older file parses, and its pathless records are never read as a peer's owner record of a shared file. `state.ts` keys a slot by `(client, scope, name)` plus the file: records of one slot for two files coexist, a ledger call that names a file (`RecordFile`) matches the records for that file and the pathless ones, and a call without one matches all (the old behavior, for the pure state tests). `shared-files.ts` `recordingClients` takes the file: a record with a path counts only for the same file (`samePath`); a pathless record counts for X itself only when the scope is unshared or X is a pre-sharing writer (claude-code), and never for a peer; so a pre-44.2 vscode record never makes vscode a sole owner of a `.mcp.json` entry either. `ownerClients`, `soleOwner` and `otherOwners` take the file as a final argument (the module is new in this story, unreleased). `dropRemovedShared` is new: a remove also drops the peers' manager records for the same file (their stashes stay). Doctor's `unrecorded-entries` and `--repair` use the same file.
 
 ## Review Triage Log
 
@@ -253,6 +255,45 @@ Implement stage, 2026-11-22 (no change to the `<intent-contract>`; every item be
   - `[low]` `[reject]` Intent-1: no real Copilot session was exercised — AC 44.2.7 is a human row by decision; the file-level certify ran.
   - `[low]` `[reject]` Intent-2: doctor lists the shared file under the first client only — the spec requires it checked once; `status` and `detect` show it under both.
   - `[low]` `[reject]` Intent-4: a migration failure returns `ok:true` with warnings at the engine and exit 1 at the CLI — the spec's migration row keeps the new entry and reports the old one.
+
+### 2026-11-22 — Review pass (rework 1)
+- verdicts: 35 findings — high 0, medium 3, low 24, false 8, maybe-false 0
+- findings:
+  - `[low]` `[reject]` Blind-1: the first write in another project replaces a legacy pathless record, so a non-canonical manager-created name loses its ownership elsewhere — reachable only for non-canonical names through the engine API (the CLI writes canonical names, which skip the ownership check); the fix adds a branch.
+  - `[low]` `[reject]` Blind-2: `at` is optional on the `state.ts` ledger functions — every non-test caller passes it (grep of `src` outside `__tests__`); making it required rewrites the state unit tests for no reachable caller.
+  - `[false]` `[reject]` Blind-3: the CHANGELOG omits the new required argument of `soleOwner`/`ownerClients`/`otherOwners` — `shared-files.ts` is new in this unreleased story, so no released signature changed.
+  - `[medium]` `[patch]` Blind-4: `restore` repeats the per-file record filter inline instead of extending `shared-files.ts` (Rule 2) — patched: `peersRecordingFile` in `shared-files.ts`, used by `restore`.
+  - `[low]` `[patch]` Blind-5: the DW-735 test name claims a stash check it does not make — retitled to the manager record; the stash unit stays.
+  - `[low]` `[reject]` Blind-6: the process tests spawn `dist` with no freshness guard — the same convention as every process suite of the package; the loop commands build first.
+  - `[low]` `[patch]` Blind-7: `COMPACT = ... ?? ""` fails silently — now throws when the oracle lacks the fixture.
+  - `[low]` `[reject]` Blind-8: no win32 case for the path comparison — `pathKey` is the shared helper `home-guard.test.ts` already pins per platform.
+  - `[low]` `[reject]` Blind-9: the CHANGELOG does not explain pathless records — it says a record written before this change never affects a Claude Code write, which is the user-visible rule.
+  - `[low]` `[reject]` Edge-1: duplicate of Blind-2.
+  - `[false]` `[reject]` Edge-2: `doctor --repair` records without a path when `finding.path` is null — every `unrecorded-entries` finding carries `scope.path`, which is non-null for a file that was read; a test now pins the recorded path.
+  - `[low]` `[reject]` Edge-3: a corrupt `path` type in `state.json` throws — a hand-corrupted ledger; `wontfix-theoretical`, the ledger fields are unvalidated by design.
+  - `[low]` `[reject]` Edge-4: duplicate of Blind-1.
+  - `[low]` `[reject]` Edge-5: a moved `COPILOT_HOME` makes a record not match — only non-canonical names are affected; the duplicate of Blind-1's reasoning.
+  - `[low]` `[reject]` Edge-6: records for dead paths accumulate — one small record per moved project; harmless and listed under the residual risks.
+  - `[low]` `[defer]` Edge-7: `doctor`'s orphaned-stashes check ignores `stash.path` — not caused by this change (one stash per slot was read the same way); deferred, low.
+  - `[false]` `[reject]` Edge-8: `doctor` flags a claude-code entry under vscode when it is visited first — claude-code is the first adapter in the registry and a pre-sharing writer, so it counts its own pathless record; vscode is the second visit and the file is checked once.
+  - `[false]` `[reject]` Edge-9: a pathless peer record outlives the remove — it never counts for a peer, so it cannot cause the DW-735 symptom.
+  - `[medium]` `[patch]` Edge-10: the `restore` filter differs from `recordingClients` — same root cause as Blind-4.
+  - `[low]` `[reject]` Edge-11: the oracle-byte check covers one ledger state — the pathless state is pinned by the pre-44.2 test and each guard has a mutation line.
+  - `[low]` `[reject]` Edge-12: a pathless record still satisfies `isManagerCreated` for any file — duplicate of Blind-1; the shared-file rule the item names is enforced.
+  - `[false]` `[reject]` Edge-13: DW-735 is unclosed for pathless peer records — same refutation as Edge-9.
+  - `[low]` `[reject]` Edge-14: slot-only matching for unshared scopes was removed — duplicate of Edge-5.
+  - `[medium]` `[patch]` Verification-gap-1: no test of `restore`'s per-file filter — patched: a built-CLI test with a positive control (`peersRecordingFile` mutation below).
+  - `[low]` `[patch]` Verification-gap-2: the `doctor --repair` path is unpinned — patched: a built-CLI repair round-trip asserting the recorded path.
+  - `[low]` `[reject]` Verification-gap-3: no engine test for a non-canonical name recorded at another path — the unit pins `isManagerCreated` per file and the behavior is the design.
+  - `[low]` `[patch]` Verification-gap-4: DW-735 test title and comment overclaim — fixed (same as Blind-5).
+  - `[false]` `[reject]` Verification-gap-5: the mutation line for the pathless term may overclaim — re-run: dropping the term turned exactly the three named tests red.
+  - `[low]` `[patch]` Verification-gap-6: a comment overclaims "byte for byte" and one assertion checks its own fixture — the comment is corrected; the fixture precondition stays, it guards the setup.
+  - `[low]` `[reject]` Verification-gap-7: process pins need a fresh `dist` — duplicate of Blind-6.
+  - `[low]` `[reject]` Intent-1: the process tests run on `dist` with no rebuild step shown — duplicate of Blind-6.
+  - `[low]` `[reject]` Intent-2: no status/doctor assertion for another project's record — the doctor change is the `recordingClients` argument, pinned by its unit; the stash half is Edge-7.
+  - `[low]` `[reject]` Intent-3: pathless records mean two things in `sameSlot` and `recordingClients` — duplicate of Blind-1; the split is the design (a legacy record never counts for a peer).
+  - `[false]` `[reject]` Intent-4: `dropRemovedShared` leaves a pathless peer record — same refutation as Edge-9.
+  - `[false]` `[reject]` Intent-5: `path` on every adapter's record changes the state file — an additive optional field; old files parse and `engine-e2e.test.ts` pins the new key.
 
 ## Design Notes
 
@@ -413,6 +454,18 @@ Mutation evidence (code review, 2026-11-22; each applied with `perl -0pi`, the n
 - mutation: matrix row "Strict JSON user file" (every stage) -- the strict JSON reader refuses every file -> `qa-44-2-shared-lifecycle.test.ts` "the strict file written by the manager is itself strict JSON ... at every stage" red (1 test; green before this pass's patch, because the stages' results were never checked).
 - QA-stage mutation lines for AC 44.2.2 (`COPILOT_HOME` empty, no literal secret, strict refusal), AC 44.2.3 (shared rule, listing once, CRLF) and AC 44.2.4 (backup location, `removalEdits`, darwin legacy path) are recorded under `## Tests Added` (2026-11-22) and count here.
 
+Mutation evidence (rework 1, 2026-11-22, DW-733 and DW-735; each applied with `perl -0pi` to the source, the package rebuilt (the process pins run the built bin), the named tests run, the file restored from a copy, `cmp`-checked byte-identical, rebuilt):
+- mutation: DW-733 (a peer's record counts only for the same file) -- `recordingClients` returns true for any record with a path -> `shared-per-file-ownership.test.ts` "vscode in project A, then a claude-code mode change in project B", "the other direction" and the `recordingClients` unit red (3 tests).
+- mutation: DW-733 (a pathless record never counts for a peer) -- the pathless branch of `recordingClients` returns true -> "a pre-44.2 vscode project record (no path) does not block claude-code in any project" and the `recordingClients` unit red (2 tests).
+- mutation: DW-733 (records of two files coexist) -- `state.ts` `sameSlot` ignores the path -> "vscode's records for project A and project B both survive" and the units "records of one slot for two files coexist" red (2 tests).
+- mutation: DW-733 (an old state file without paths) -- the `record.path === undefined ||` term dropped from `sameSlot` -> "an old state file without any path parses and behaves as before", the pre-44.2 vscode record test and the unit "a record without a path is replaced by the first write" red (3 tests).
+- mutation: DW-733 (a genuinely shared file still adopts and refuses) -- `soleOwner` returns true -> "claude-code first", "vscode first", "a vscode record in project A does not make vscode the sole owner ...", "vscode's records ... both survive" and the DW-735 process test red (5 tests).
+- mutation: DW-733 (every record carries its path) -- `engine.ts` `apply` records without `at` -> both repro directions, "vscode's records ... both survive", the pre-44.2 test, "vscode first" and the DW-735 process test red (6 tests). The same mutation plus `disable` stashing without `at` turns the changed pins red: `engine-e2e.test.ts` "the spec §3.4 shapes land on disk exactly" (the `path` key on both records) and four `shared-mcp-json.test.ts` tests (adopt in the other direction, the refused claude-code, the disable note, the restore note), which now seed `path` on their ledger records (5 tests on top of the 6 above).
+- mutation: DW-735 (a peer's record does not outlive a shared-file remove) -- `dropRemovedShared` drops only the client's own records -> the process test "DW-735: the peer's record does not outlive a shared-file remove" and the `dropRemovedShared` unit red (2 tests).
+- mutation: DW-733 (restore names a reader only for this file; review patch) -- `peersRecordingFile` in `shared-files.ts` made to ignore the path (`true`), the package rebuilt -> `shared-per-file-ownership.test.ts` "a claude-code restore names vscode as a reader only when vscode records this project's file" red (1 test); restored from a copy, `cmp`-checked byte-identical, rebuilt.
+- mutation: DW-733 (a repaired record carries its file; review patch) -- the `at` spread removed from the `recordManaged` call of `doctor --repair` in `cli/clients.ts`, rebuilt -> "doctor --repair records the unrecorded entry of a shared .mcp.json with that file's path" red (1 test); restored, `cmp`-checked, rebuilt.
+- Path of each mutation: the process pins and the repro run on the BUILT bin as a child process with a scratch HOME; the units run in memory. `engine-e2e.test.ts` and `shared-mcp-json.test.ts` run the engine and `runCli` in process.
+
 **Shared surfaces:**
 - the `CLIENT_ADAPTERS` vscode record and `ADAPTER_DATA_VERSION`;
 - the generated README tables;
@@ -449,6 +502,16 @@ For the lead:
 - three epic-text corrections (D-1, "Corrections for the lead");
 - one `deferred:` item (the extension provider path) to harvest;
 - the owner runbook (D-6).
+
+Rework 1 (2026-11-22; DW-733, DW-735; the lead's re-open, wave-9 decision #135):
+- DW-733 fixed with an additive optional `path` on every ledger and stash record the code writes (Spec Change Log 7): no breaking state-file change was needed, so nothing was stopped. The lead's repro (vscode `apply --scope project` in project A, then a claude-code mode change in project B) now exits 0 on the built CLI and writes the bytes of a world where VS Code was never used; the first claude-code apply is the pre-story oracle's bytes. The other direction, a pre-44.2 (pathless) vscode record, an old state file without paths, and a genuinely shared file (adopt and refuse, both directions) are pinned in the new `shared-per-file-ownership.test.ts` (14 tests, built CLI plus units). Mutation lines are in `## Verification`.
+- DW-735 re-checked and FIXED (it was a two-way door: `dropRemovedShared`, about 20 lines with its tests): a `remove` of a shared entry drops the peers' manager records for the same file, so the stale record no longer makes a later write look like a conflict. Peers' stashes are kept (a disabled copy the peer can still enable). The ledger DW-735 can close as resolved.
+- The `deferred:` frontmatter item for the path-less ledger (DW-733) is removed: it is fixed.
+- CHANGELOG: the known-limitation sentence and its workaround are replaced by the per-file ownership statement. The docs (`docs/client-config/README.md`, the package and extension READMEs) held no DW-733 text.
+- Verification (foreground, scratch homes only): build; the six-file `(loop)` set plus the new file, `state` and `engine-e2e` green (182 tests); the three-file process set green (66 tests); `render-certification-table.mjs --check` exit 0; the whole `@iris-mcp/client-config` suite 52 files, 1407 tests green; `tsc --noEmit` clean. The `(once)` commands were not run.
+- Review of this pass (2026-11-22; four layers, all delivered; frozen diff `05e3757..` tree, spec excluded from the diff): 35 findings, high 0 / medium 3 / low 24 / false 8. Patched: 3 medium (one root cause, the `restore` filter extended into `shared-files.ts` `peersRecordingFile` and pinned) and 4 low (the `doctor --repair` path pin, test title/comment overclaims, the silent oracle-fixture fallback); deferred: 1 low (doctor's orphaned-stash check ignores the stash path, not caused by this change); 24 rejected with their reasons in `## Review Triage Log`. Follow-up review recommended: false (no `high` patched).
+- Verification of this pass (foreground, scratch homes only): build; the `(loop)` sets green (215 tests across ten files); `render-certification-table.mjs --check` exit 0; `@iris-mcp/client-config` 52 files, 1409 tests green; launcher 32 files, 458 passed / 3 skipped; `@iris-mcp/all` 8 shards green; `lint`, `type-check`, `gen:governance-baseline:check` (141 frozen keys) and `gen:ipm:check` clean. This replaces the earlier "(once) not run" note.
+- Residual risk: a record written by a client other than claude-code or vscode now carries a path too (every record), so a `state.json` shared across two different homes' paths keeps one record per file; a project directory that moves leaves its old record behind (harmless: it counts only for the old path).
 
 ## Tests Added
 

@@ -88,6 +88,7 @@ import {
   resolveStateDir,
   writeState,
   type ManagerState,
+  type RecordFile,
 } from "../state.js";
 import { recordingClients, sharedPeers } from "../shared-files.js";
 import { buildStatusMatrix, type LegacyFileStatus } from "../status.js";
@@ -1475,8 +1476,9 @@ function recordedByAny(
   scope: ClientScope,
   name: string,
   peers: readonly { client: string; scope: ClientScope }[],
+  at: RecordFile,
 ): boolean {
-  return recordingClients(state, client, scope, name, peers).length > 0;
+  return recordingClients(state, client, scope, name, peers, at).length > 0;
 }
 
 /** Parse a backup filename's flattened-ISO timestamp back into a Date; null when it does not match.
@@ -1608,10 +1610,11 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
       const entries = readConfigEntries(adapterForScope(adapter, scope.scope), content);
       if (!entries.ok) continue;
       const peers = scope.sharedWith !== undefined ? sharedPeers(adapter, scope.scope, ctx) : [];
+      const at = { platform: deps.platform, path: scope.path };
       const ownedNames = Object.keys(entries.entries).filter(
         (name) =>
           (CANONICAL_SERVERS as readonly string[]).includes(name) ||
-          (state !== null && recordedByAny(state, client.client, scope.scope, name, peers)),
+          (state !== null && recordedByAny(state, client.client, scope.scope, name, peers, at)),
       );
       for (const name of ownedNames) {
         const entry = entries.entries[name];
@@ -1801,10 +1804,11 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
         if (!entries.ok) continue;
         // An entry a client sharing the file records is that client's, never an orphan (AD-30).
         const peers = scope.sharedWith !== undefined ? sharedPeers(adapter, scope.scope, ctx) : [];
+        const at = { platform: deps.platform, path: scope.path };
         for (const name of Object.keys(entries.entries)) {
           if (!name.startsWith("iris-")) continue;
           if ((CANONICAL_SERVERS as readonly string[]).includes(name)) continue;
-          if (recordedByAny(state, client.client, scope.scope, name, peers)) continue;
+          if (recordedByAny(state, client.client, scope.scope, name, peers, at)) continue;
           findings.push({
             check: "unrecorded-entries",
             client: client.client,
@@ -1928,7 +1932,7 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
         next,
         // Unknown provenance ⇒ containsSecret true (assume the entry may
         // carry a literal secret; the conservative marker).
-        { client: finding.client, scope: finding.scope as ClientScope, name: finding.entry, containsSecret: true },
+        { client: finding.client, scope: finding.scope as ClientScope, name: finding.entry, containsSecret: true, ...(finding.path !== null ? { at: { platform: deps.platform, path: finding.path } } : {}) },
         deps.now(),
       );
       repaired.push(`${finding.client}/${finding.scope}/${finding.entry}`);

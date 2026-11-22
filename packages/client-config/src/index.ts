@@ -120,6 +120,7 @@ export {
   type ManagedEntryRecord,
   type ManagerState,
   type ReadStateResult,
+  type RecordFile,
   type StashRecord,
 } from "./state.js";
 
@@ -144,8 +145,10 @@ export {
 export {
   PRE_SHARING_WRITERS,
   adoptOrConflict,
+  dropRemovedShared,
   jsonEqual,
   otherOwners,
+  peersRecordingFile,
   ownerClients,
   peerClients,
   sharedFileNote,

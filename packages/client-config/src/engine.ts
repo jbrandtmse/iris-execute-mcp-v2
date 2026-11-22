@@ -44,9 +44,11 @@ import { ownEntry, readConfigEntries, type RawEntry } from "./readers.js";
 import {
   adoptOrConflict,
   type AdoptOrConflict,
+  dropRemovedShared,
   otherOwners,
   ownerClients,
   peerClients,
+  peersRecordingFile,
   PRE_SHARING_WRITERS,
   sharedFileNote,
   sharedPeers,
@@ -55,7 +57,6 @@ import {
 } from "./shared-files.js";
 import {
   addStash,
-  dropManaged,
   dropStash,
   findStash,
   isManagerCreated,
@@ -65,6 +66,7 @@ import {
   writeState,
   type EngineHostContext,
   type ManagerState,
+  type RecordFile,
 } from "./state.js";
 import { pinnedSpec } from "./synthesize.js";
 import { CANONICAL_SERVERS, type CanonicalEntry, type CanonicalServerName, type ClientAdapter, type ClientScope } from "./types.js";
@@ -149,6 +151,8 @@ interface Target {
   state: ManagerState;
   /** The other adapter scopes that resolve to the same file (empty for an unshared file). */
   peers: SharedPeer[];
+  /** The config file the ledger calls concern: ownership records are kept per file. */
+  at: RecordFile;
 }
 
 function fail(
@@ -189,7 +193,15 @@ function resolveTarget(
   if (!state.ok) {
     return fail(client, scope, action, path, state.error);
   }
-  return { adapter: adapterForScope(adapter, scope), scope, path, stateDir, state: state.state, peers: sharedPeers(adapter, scope, ctx) };
+  return {
+    adapter: adapterForScope(adapter, scope),
+    scope,
+    path,
+    stateDir,
+    state: state.state,
+    peers: sharedPeers(adapter, scope, ctx),
+    at: { platform: ctx.platform, path },
+  };
 }
 
 /** Exact-match namespace ownership (never prefix — `iris-dev-mcp2` is foreign). */
@@ -210,10 +222,11 @@ function ownershipRefusal(
   scope: ClientScope,
   name: string,
   present: boolean,
+  at: RecordFile,
 ): string | null {
   if (isCanonicalName(name)) return null;
-  if (isManagerCreated(state, client, scope, name)) return null;
-  if (findStash(state, client, scope, name)) return null;
+  if (isManagerCreated(state, client, scope, name, at)) return null;
+  if (findStash(state, client, scope, name, at)) return null;
   if (!present) return null; // creation is how an entry becomes manager-created
   return (
     `refusing to modify "${name}": the name is outside the iris-mcp namespace ` +
@@ -233,7 +246,7 @@ function sharedVerdict(
   const { scope } = target;
   const client = target.adapter.id;
   if (existing === undefined || target.peers.length === 0) return null;
-  if (soleOwner(target.state, client, scope, entry.name, target.peers)) return null;
+  if (soleOwner(target.state, client, scope, entry.name, target.peers, target.at)) return null;
   return {
     verdict: adoptOrConflict({
       existing,
@@ -241,10 +254,10 @@ function sharedVerdict(
       path: target.path,
       name: entry.name,
       client,
-      owners: ownerClients(target.state, client, scope, entry.name, target.peers),
+      owners: ownerClients(target.state, client, scope, entry.name, target.peers, target.at),
     }),
     sharedWith: (() => {
-      const others = otherOwners(target.state, client, scope, entry.name, target.peers);
+      const others = otherOwners(target.state, client, scope, entry.name, target.peers, target.at);
       return others.length > 0 ? others : peerClients(target.peers);
     })(),
   };
@@ -306,7 +319,7 @@ export function isPreMoveStash(adapter: ClientAdapter, scope: ClientScope, entry
 /** A successful disable or remove of an entry other clients also own says that they read the same file (AD-30, Story 44.2). */
 function withSharedNote(result: EngineResult, target: Target, name: string): EngineResult {
   if (!result.ok || target.peers.length === 0) return result;
-  const owners = otherOwners(target.state, target.adapter.id, result.scope, name, target.peers);
+  const owners = otherOwners(target.state, target.adapter.id, result.scope, name, target.peers, target.at);
   // A client that never wrote the file before it was shared always names the file's other readers; a
   // pre-sharing writer stays byte-identical until another client records the entry.
   const others = owners.length > 0 || PRE_SHARING_WRITERS.includes(target.adapter.id) ? owners : peerClients(target.peers);
@@ -490,17 +503,17 @@ export function apply(
     if (parsed.ok) existing = ownEntry(parsed.entries, entry.name);
   }
   const present = existing !== undefined;
-  const refusal = ownershipRefusal(target.state, client, scope, entry.name, present);
+  const refusal = ownershipRefusal(target.state, client, scope, entry.name, present, target.at);
   if (refusal) return fail(client, scope, "apply", target.path, refusal);
 
   const now = options.now ?? (() => new Date());
   const containsSecret = options.containsSecret ?? false;
   // A stash recorded before the Copilot move is not enabled; the fresh entry replaces it.
   const record = (state: ManagerState): ManagerState => {
-    const recorded = recordManaged(state, { client, scope, name: entry.name, containsSecret }, now());
-    const stash = findStash(recorded, client, scope, entry.name);
+    const recorded = recordManaged(state, { client, scope, name: entry.name, containsSecret, at: target.at }, now());
+    const stash = findStash(recorded, client, scope, entry.name, target.at);
     return stash !== undefined && isPreMoveStash(target.adapter, scope, stash.entry)
-      ? dropStash(recorded, client, scope, entry.name)
+      ? dropStash(recorded, client, scope, entry.name, target.at)
       : recorded;
   };
 
@@ -558,7 +571,7 @@ export function enable(
   if ("action" in target) return target;
   const current = readCurrent(fs, target.path);
   if (!current.ok) return fail(client, scope, "enable", target.path, current.reason);
-  const stash = findStash(target.state, client, scope, name);
+  const stash = findStash(target.state, client, scope, name, target.at);
   if (stash !== undefined && isPreMoveStash(target.adapter, scope, stash.entry)) {
     return fail(
       client,
@@ -572,23 +585,23 @@ export function enable(
   if (current.content === null) {
     return noopMissingFile(client, scope, "enable", target.path, target.adapter);
   }
-  const refusal = ownershipRefusal(target.state, client, scope, name, true);
+  const refusal = ownershipRefusal(target.state, client, scope, name, true, target.at);
   if (refusal) return fail(client, scope, "enable", target.path, refusal);
   if (stash !== undefined && target.peers.length > 0) {
     const parsed = readConfigEntries(target.adapter, current.content);
     const existing = parsed.ok ? ownEntry(parsed.entries, name) : undefined;
-    if (existing !== undefined && !soleOwner(target.state, client, scope, name, target.peers)) {
+    if (existing !== undefined && !soleOwner(target.state, client, scope, name, target.peers, target.at)) {
       const verdict = adoptOrConflict({
         existing,
         wouldWrite: stash.entry,
         path: target.path,
         name,
         client,
-        owners: ownerClients(target.state, client, scope, name, target.peers),
+        owners: ownerClients(target.state, client, scope, name, target.peers, target.at),
       });
       if (verdict.kind === "conflict") {
         return fail(client, scope, "enable", target.path, verdict.reason, {
-          sharedWith: otherOwners(target.state, client, scope, name, target.peers),
+          sharedWith: otherOwners(target.state, client, scope, name, target.peers, target.at),
         });
       }
     }
@@ -612,7 +625,7 @@ export function enable(
     entry: stubEntry(name),
     content: current.content,
     ...(diffOptions !== undefined ? { diffOptions } : {}),
-    updateState: (state) => dropStash(state, client, scope, name),
+    updateState: (state) => dropStash(state, client, scope, name, target.at),
     // 33-1-R1: a no-op enable (entry already present in the file) still
     // must drop a STALE stash record when one exists — only fires when
     // `stash` was actually found above, so the common no-op (nothing
@@ -641,7 +654,7 @@ export function disable(
   if (current.content === null) {
     return noopMissingFile(client, scope, "disable", target.path, target.adapter);
   }
-  const refusal = ownershipRefusal(target.state, client, scope, name, true);
+  const refusal = ownershipRefusal(target.state, client, scope, name, true, target.at);
   if (refusal) return fail(client, scope, "disable", target.path, refusal);
 
   // For a stash client the entry is captured BEFORE the write: the parsed
@@ -661,7 +674,7 @@ export function disable(
     entry: stubEntry(name),
     content: current.content,
     updateState: (state) =>
-      stashEntry ? addStash(state, { client, scope, name, entry: stashEntry }, now()) : state,
+      stashEntry ? addStash(state, { client, scope, name, entry: stashEntry, at: target.at }, now()) : state,
     options: { ...options, now },
   });
   return withSharedNote(result, target, name);
@@ -692,11 +705,11 @@ function removeFromTarget(
   if ("action" in target) return target;
   const current = readCurrent(fs, target.path);
   if (!current.ok) return fail(client, scope, "remove", target.path, current.reason);
-  const refusal = ownershipRefusal(target.state, client, scope, name, true);
+  const refusal = ownershipRefusal(target.state, client, scope, name, true, target.at);
   if (refusal) return fail(client, scope, "remove", target.path, refusal);
   if (current.content === null) {
     // No file: nothing to remove from disk, but purge state records.
-    const next = dropStash(dropManaged(target.state, client, scope, name), client, scope, name);
+    const next = dropRemovedShared(target.state, client, scope, name, target.peers, target.at);
     const warnings: string[] = [];
     persistState(ctx, fs, target.stateDir, next, warnings);
     return withSharedNote(
@@ -723,7 +736,7 @@ function removeFromTarget(
   {
     const parsed = readConfigEntries(target.adapter, current.content);
     if (parsed.ok && ownEntry(parsed.entries, name) === undefined) {
-      const next = dropStash(dropManaged(target.state, client, scope, name), client, scope, name);
+      const next = dropRemovedShared(target.state, client, scope, name, target.peers, target.at);
       const warnings: string[] = [];
       persistState(ctx, fs, target.stateDir, next, warnings);
       return withSharedNote(
@@ -752,7 +765,7 @@ function removeFromTarget(
       diffAction: "remove",
       entry: stubEntry(name),
       content: current.content,
-      updateState: (state) => dropStash(dropManaged(state, client, scope, name), client, scope, name),
+      updateState: (state) => dropRemovedShared(state, client, scope, name, target.peers, target.at),
       options,
     }),
     target,
@@ -789,9 +802,7 @@ export function restore(
   }
   // A restore rolls back the whole file, so in a shared file it names the other readers, as a disable or remove does:
   // always for a client that never wrote the file before it was shared, and for a pre-sharing writer once a peer has records.
-  const recordingPeers = peerClients(
-    target.peers.filter((peer) => [...target.state.entries, ...target.state.stashes].some((r) => r.client === peer.client && r.scope === peer.scope)),
-  );
+  const recordingPeers = peerClients(peersRecordingFile(target.state, target.peers, target.at));
   const others = PRE_SHARING_WRITERS.includes(target.adapter.id) ? recordingPeers : peerClients(target.peers);
   return {
     ok: true,

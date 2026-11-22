@@ -40,6 +40,7 @@ import { MemFs, fixedNow, readFixture } from "./helpers.js";
 const HOME = "/home/u";
 const PROJECT = "/proj";
 const FILE = `${PROJECT}/.mcp.json`;
+const AT = { platform: "linux" as const, path: FILE };
 const STATE_DIR = `${HOME}/.iris-mcp/client-manager`;
 
 interface Scenario {
@@ -460,7 +461,7 @@ describe("status, detect and doctor list the shared file under both clients and 
     fs.seed(FILE, `{"mcpServers":{"iris-extra":{"command":"x"},"iris-stray":{"command":"y"}}}\n`);
     const ledger: ManagerState = {
       version: 1,
-      entries: [{ client: "vscode", scope: "project", name: "iris-extra", containsSecret: false, createdAt: "2026-11-22T00:00:00.000Z", updatedAt: "2026-11-22T00:00:00.000Z" }],
+      entries: [{ client: "vscode", scope: "project", name: "iris-extra", containsSecret: false, createdAt: "2026-11-22T00:00:00.000Z", updatedAt: "2026-11-22T00:00:00.000Z", path: FILE }],
       stashes: [],
     };
     fs.seed(`${STATE_DIR}/state.json`, JSON.stringify(ledger));
@@ -483,6 +484,7 @@ describe("shared-files.ts units", () => {
     containsSecret: false,
     createdAt: "2026-11-22T00:00:00.000Z",
     updatedAt: "2026-11-22T00:00:00.000Z",
+    path: FILE,
   });
 
   it("sharedPeers finds the other adapter scope that resolves to the same path, and none for a user scope", () => {
@@ -498,25 +500,25 @@ describe("shared-files.ts units", () => {
     const peersOfVscode = sharedPeers(vscode, "project", ctx);
     const peersOfClaude = sharedPeers(claude, "project", ctx);
     expect(PRE_SHARING_WRITERS).toEqual(["claude-code"]);
-    expect(soleOwner(empty, "claude-code", "project", "iris-dev-mcp", peersOfClaude)).toBe(true);
-    expect(soleOwner(empty, "vscode", "project", "iris-dev-mcp", peersOfVscode)).toBe(false);
+    expect(soleOwner(empty, "claude-code", "project", "iris-dev-mcp", peersOfClaude, AT)).toBe(true);
+    expect(soleOwner(empty, "vscode", "project", "iris-dev-mcp", peersOfVscode, AT)).toBe(false);
     const vscodeOnly: ManagerState = { ...empty, entries: [record("vscode")] };
-    expect(soleOwner(vscodeOnly, "vscode", "project", "iris-dev-mcp", peersOfVscode)).toBe(true);
-    expect(soleOwner(vscodeOnly, "claude-code", "project", "iris-dev-mcp", peersOfClaude)).toBe(false);
+    expect(soleOwner(vscodeOnly, "vscode", "project", "iris-dev-mcp", peersOfVscode, AT)).toBe(true);
+    expect(soleOwner(vscodeOnly, "claude-code", "project", "iris-dev-mcp", peersOfClaude, AT)).toBe(false);
     const both: ManagerState = { ...empty, entries: [record("claude-code"), record("vscode")] };
-    expect(soleOwner(both, "claude-code", "project", "iris-dev-mcp", peersOfClaude)).toBe(false);
-    expect(soleOwner(both, "vscode", "project", "iris-dev-mcp", peersOfVscode)).toBe(false);
-    expect(ownerClients(both, "vscode", "project", "iris-dev-mcp", peersOfVscode).sort()).toEqual(["claude-code", "vscode"]);
-    expect(otherOwners(both, "vscode", "project", "iris-dev-mcp", peersOfVscode)).toEqual(["claude-code"]);
-    expect(otherOwners(empty, "claude-code", "project", "iris-dev-mcp", peersOfClaude)).toEqual([]);
+    expect(soleOwner(both, "claude-code", "project", "iris-dev-mcp", peersOfClaude, AT)).toBe(false);
+    expect(soleOwner(both, "vscode", "project", "iris-dev-mcp", peersOfVscode, AT)).toBe(false);
+    expect(ownerClients(both, "vscode", "project", "iris-dev-mcp", peersOfVscode, AT).sort()).toEqual(["claude-code", "vscode"]);
+    expect(otherOwners(both, "vscode", "project", "iris-dev-mcp", peersOfVscode, AT)).toEqual(["claude-code"]);
+    expect(otherOwners(empty, "claude-code", "project", "iris-dev-mcp", peersOfClaude, AT)).toEqual([]);
   });
 
   it("a stash counts as ownership too", () => {
     const stashed: ManagerState = {
       ...empty,
-      stashes: [{ client: "vscode", scope: "project", name: "iris-dev-mcp", entry: { command: "x" }, disabledAt: "2026-11-22T00:00:00.000Z" }],
+      stashes: [{ client: "vscode", scope: "project", name: "iris-dev-mcp", entry: { command: "x" }, disabledAt: "2026-11-22T00:00:00.000Z", path: FILE }],
     };
-    expect(ownerClients(stashed, "claude-code", "project", "iris-dev-mcp", sharedPeers(claude, "project", ctx))).toEqual(["vscode"]);
+    expect(ownerClients(stashed, "claude-code", "project", "iris-dev-mcp", sharedPeers(claude, "project", ctx), AT)).toEqual(["vscode"]);
   });
 
   it("adoptOrConflict adopts a JSON-equal entry whatever its key order, and refuses any other, naming the file and the other client", () => {
