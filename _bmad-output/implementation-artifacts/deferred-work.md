@@ -4230,3 +4230,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: cycle-log-epic-44.md (lead fresh check, Story 44.6) | severity: low | fix-risk: low | footprint: in-epic
 - evidence: pnpm vitest --sequence.shuffle --sequence.seed=44 on packages/shared: 1 failed (expected names [prod-wiring-server], got 2); in order 2/2 pass; file unchanged since Story 31.2 (c6d39e4e)
 - 2026-11-23T08:45:54Z status=open owner=44-5-integration-suites-cannot-pass-without-testing by=lead note=Rule 19 hermeticity; fix: fakeStore.clear() in a beforeEach; 44.5 hardens the suites
+
+### DW-754: iris_doc_compile reports success for a compile in which a class failed while another class had its Storage written
+- source: spec-44-4-bootstrap-compile-result-accuracy.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: compile.ts:135-170 reads result.content[].errors, which IRIS never sends (2026.1, 2026.2, IRIS for Health 2026.2, Atelier v1-v8); General.Compile replaces the status when it writes Storage (irislib/%Atelier/v1/Utils/General.cls:1318-1385), so HTTP 200 with no status error
+- 2026-11-23T10:38:57Z status=routed owner=burndown by=harvest note=fix by reusing Story 44.4's verifyCompiled check (two Atelier reads) in the tool; the epic burn-down story
