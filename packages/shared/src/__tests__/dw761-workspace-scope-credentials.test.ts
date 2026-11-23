@@ -21,14 +21,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 
 import { loadProfileRegistry } from "../profiles.js";
-import {
-  discoverScopedSettingsFiles,
-  discoverSettingsFiles,
-  resolveServerManagerProfiles,
-} from "../server-manager-source.js";
+import { discoverScopedSettingsFiles, resolveServerManagerProfiles } from "../server-manager-source.js";
 import { logger } from "../logger.js";
 
 const USER_KEYCHAIN_PASSWORD = "users-keychain-password-761";
@@ -242,18 +238,45 @@ describe("DW-761: a workspace-scope definition never gets a stored password", ()
 });
 
 describe("DW-761: discovery reports which candidates are workspace scope", () => {
-  it("files is exactly discoverSettingsFiles' list, and workspaceFiles is its leading workspace-scope subset", () => {
+  it("workspaceFiles is the leading workspace-scope subset of files, and the user settings file is in files but not in it", () => {
     const r = rig({ codeWorkspace: { dev1: workspaceDev1 } });
     const scoped = discoverScopedSettingsFiles(r.env, "darwin");
 
-    expect(scoped.files).toEqual(discoverSettingsFiles(r.env, "darwin"));
     expect(scoped.workspaceFiles).toEqual([join(r.repoDir, ".vscode", "settings.json"), join(r.repoDir, "team.code-workspace")]);
     expect(scoped.files.slice(0, scoped.workspaceFiles.length)).toEqual(scoped.workspaceFiles);
+    expect(scoped.files).toContain(r.userSettingsFile);
+    expect(scoped.workspaceFiles).not.toContain(r.userSettingsFile);
   });
 
-  it("an explicit IRIS_SM_SETTINGS_PATHS has no workspace-scope files", () => {
+  it("an explicit IRIS_SM_SETTINGS_PATHS of absolute paths has no workspace-scope files", () => {
     const scoped = discoverScopedSettingsFiles({ IRIS_SM_SETTINGS_PATHS: "/a/settings.json:/b/settings.json", IRIS_SM_WORKSPACE: "/repo" }, "linux");
     expect(scoped.files).toEqual(["/a/settings.json", "/b/settings.json"]);
     expect(scoped.workspaceFiles).toEqual([]);
+  });
+
+  it("a RELATIVE IRIS_SM_SETTINGS_PATHS entry resolves against the working directory, so it is workspace scope; an absolute one beside it is not", () => {
+    const scoped = discoverScopedSettingsFiles({ IRIS_SM_SETTINGS_PATHS: ".vscode/settings.json:/a/settings.json" }, "linux");
+    const resolvedRelative = resolve(".vscode/settings.json");
+    expect(scoped.files).toEqual([resolvedRelative, "/a/settings.json"]);
+    expect(scoped.workspaceFiles).toEqual([resolvedRelative]);
+  });
+
+  it("end to end: a relative IRIS_SM_SETTINGS_PATHS that reaches the repository's settings file gets no keychain or helper password", async () => {
+    const r = rig({ workspaceSettings: { dev1: workspaceDev1 } });
+    const relativeToRepoFile = relative(process.cwd(), join(r.repoDir, ".vscode", "settings.json"));
+    const registry = await loadProfileRegistry({ ...r.env, IRIS_SM_SETTINGS_PATHS: relativeToRepoFile }, "darwin", r.deps);
+
+    expect(registry.has("dev1")).toBe(false);
+    expect(r.keychainAsked).toEqual([]);
+    expect(r.helperAsked).toEqual([]);
+    expect(r.warnings.some((message) => message.includes(`server "dev1" is defined or overridden in a workspace settings file`))).toBe(true);
+  });
+
+  it("control: the same file named by its ABSOLUTE path is the operator's own and gets the keychain password", async () => {
+    const r = rig({ workspaceSettings: { dev1: workspaceDev1 } });
+    const registry = await loadProfileRegistry({ ...r.env, IRIS_SM_SETTINGS_PATHS: join(r.repoDir, ".vscode", "settings.json") }, "darwin", r.deps);
+
+    expect(registry.get("dev1")?.password).toBe(USER_KEYCHAIN_PASSWORD);
+    expect(r.keychainAsked).toEqual(["dev1"]);
   });
 });

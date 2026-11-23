@@ -37,17 +37,14 @@ export function userScopeServers(names: readonly string[]): ServerManagerServers
 
 type LayerName = keyof ServerManagerServersInspection;
 
-/** VS Code's precedence among the eight `inspect` layers, least to most specific. */
-const LAYER_ORDER: readonly LayerName[] = [
-  "defaultValue",
-  "globalValue",
-  "globalLanguageValue",
-  "workspaceValue",
-  "workspaceLanguageValue",
-  "workspaceFolderValue",
-  "workspaceFolderLanguageValue",
-  // `defaultLanguageValue` ranks between `defaultValue` and `globalValue` (applied in `mergedSpec`).
-];
+/**
+ * The layers a read WITHOUT a language identifier merges, least to most specific. Server Manager's
+ * `getConfiguration("intersystems.servers", scope).get(name)` and the launcher's `inspect` both pass a workspace-folder
+ * scope (or none) and never a `languageId`, so VS Code fills no `*LanguageValue` layer for them. A fixture that sets a
+ * language layer therefore pins only `isUserScopedServer`'s fail-safe rule for that layer, a shape the launcher's own
+ * call never receives.
+ */
+const LAYER_ORDER: readonly LayerName[] = ["defaultValue", "globalValue", "workspaceValue", "workspaceFolderValue"];
 
 /** A layered `inspect("servers")` result from any of the eight documented layers; `undefined` layers are left out. */
 export function layeredServers(layers: Partial<Record<LayerName, unknown>>): ServerManagerServersInspection {
@@ -75,16 +72,14 @@ function mergeContents(source: Record<string, unknown>, target: Record<string, u
 }
 
 /**
- * The spec Server Manager's `getServerSpec(name)` returns for `layers`: the merged entry (every layer that defines
- * `name`, in VS Code's precedence order), with the scheme defaulted to `http` and a `password` kept only with a
- * `username`. `undefined` when no layer defines the name.
+ * The spec Server Manager's `getServerSpec(name)` returns for `layers`: the merged entry (every non-language layer that
+ * defines `name`, in VS Code's precedence order; see {@link LAYER_ORDER}), with the scheme defaulted to `http` and a
+ * `password` kept only with a `username`. `undefined` when no such layer defines the name.
  */
 export function mergedSpec(layers: ServerManagerServersInspection, name: string): ServerSpec | undefined {
   const entry: Record<string, unknown> = {};
   let defined = false;
-  // VS Code ranks a language-specific default above the plain default and below the user layer.
-  const ordered: LayerName[] = [LAYER_ORDER[0]!, "defaultLanguageValue", ...LAYER_ORDER.slice(1)];
-  for (const layer of ordered) {
+  for (const layer of LAYER_ORDER) {
     const value = layers[layer];
     if (!isPlainObject(value) || !Object.hasOwn(value, name) || !isPlainObject(value[name])) continue;
     mergeContents(entry, value[name] as Record<string, unknown>);
@@ -142,7 +137,7 @@ export function sessionStoreAuthApi(
 }
 
 /**
- * A Server Manager API fake over `layers`: `getServerNames` lists every server any layer defines (each with the
+ * A Server Manager API fake over `layers`: `getServerNames` lists every server a non-language layer defines (each with the
  * optional `scope`), `getServerSpec` returns {@link mergedSpec}, and `getAccount` returns an account hint. Every call is
  * recorded in `calls`.
  */
@@ -152,7 +147,7 @@ export function serverManagerOverLayers(
   scope?: ConfigScope,
 ): ServerManagerApi {
   const names = new Set<string>();
-  for (const layer of [...LAYER_ORDER, "defaultLanguageValue" as const]) {
+  for (const layer of LAYER_ORDER) {
     const value = layers[layer];
     if (isPlainObject(value)) for (const name of Object.keys(value)) names.add(name);
   }

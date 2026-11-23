@@ -13,6 +13,8 @@
  *   override, and user-class language layers that must NOT refuse;
  * - no stale verdict: the guard re-reads settings on every call, and parallel resolves of one refused server each warn
  *   once and call nothing;
+ * - a server no settings layer defines any more gets the no-such-server warning, not the workspace one (a non-object
+ *   workspace layer still gets the workspace one), with nothing called;
  * - the clean-path back-compat pins (Rule #19) on BOTH paths, as full-object `toEqual`s whose literals were captured by
  *   running the PRE-CHANGE provider (`git show ebf1e703:.../serverDefinitionProvider.ts`) on the same fixture (Rule #36).
  */
@@ -503,6 +505,52 @@ describe("Story 44.8 QA / AC-5 (Rule #19): the clean path for a user-only server
     expect(planned[0]!.env).toEqual({});
     expect(world.warnings, "the provide path never warns (the warning is the Local resolve step's)").toEqual([]);
     expect(world.calls.getServerSpec).toEqual([]);
+    expectNothingCalled(world.calls);
+  });
+});
+
+describe("Story 44.8 code review / AC-2: a server no settings layer defines any more", () => {
+  const noSuchServerText = (label: string, server: string): string =>
+    `IRIS MCP Launcher: "${label}" was not started — Server Manager has no server named "${server}" (it may have ` +
+    `been renamed or removed; try reloading the window).`;
+
+  it("removed from user settings after the plan was made: the no-such-server warning (not the workspace one), nothing called", async () => {
+    let current = layeredServers({ globalValue: { dev1: userDev1 } });
+    const world = newWorld({ layersFor: () => current, stored: { [`dev1/${USERNAME}`]: STORED_PASSWORD } });
+    const [label] = await provideAndReset(world);
+    current = layeredServers({ globalValue: { other: userDev1 }, workspaceValue: {} });
+
+    expect(await world.provider.resolveEnvForLabel(label!)).toBeUndefined();
+
+    expect(world.warnings).toEqual([noSuchServerText(label!, "dev1")]);
+    expectNothingCalled(world.calls);
+  });
+
+  it("a workspace layer that is not an object still refuses with the workspace warning (fail safe), even though no layer names the server", async () => {
+    let current = layeredServers({ globalValue: { dev1: userDev1 } });
+    const world = newWorld({ layersFor: () => current, stored: { [`dev1/${USERNAME}`]: STORED_PASSWORD } });
+    const [label] = await provideAndReset(world);
+    current = layeredServers({ globalValue: { other: userDev1 }, workspaceValue: "not an object" });
+
+    expect(await world.provider.resolveEnvForLabel(label!)).toBeUndefined();
+
+    expect(world.warnings).toEqual([notUserText(label!, "dev1")]);
+    expectNothingCalled(world.calls);
+  });
+
+  it("in a combined plan the first refused server is named whatever the refusal: a removed first server beats a workspace-defined second", async () => {
+    let current = layeredServers({ globalValue: { a: userDev1, b: userDev1 } });
+    const world = newWorld({
+      layersFor: () => current,
+      settings: { servers: ["a", "b"], combineProfiles: true },
+      stored: { [`a/${USERNAME}`]: "pw-a", [`b/${USERNAME}`]: "pw-b" },
+    });
+    const [label] = await provideAndReset(world);
+    current = layeredServers({ globalValue: { b: userDev1 }, workspaceValue: { b: workspaceHostOverride } });
+
+    expect(await world.provider.resolveEnvForLabel(label!)).toBeUndefined();
+
+    expect(world.warnings).toEqual([noSuchServerText(label!, "a")]);
     expectNothingCalled(world.calls);
   });
 });

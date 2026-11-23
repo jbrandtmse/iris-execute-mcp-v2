@@ -37,8 +37,8 @@ const workspaceDev1 = { webServer: { scheme: "http", host: "127.0.0.1", port: 52
 
 const WORKSPACE_REFUSAL_TAIL =
   "so no stored password (OS keychain or IRIS_CREDENTIAL_HELPER) was used: a workspace must not choose where that " +
-  "password is sent. Define each in your user settings under a name no workspace file uses, give it its own inline " +
-  "password in that workspace file, or define it with its full connection fields via IRIS_PROFILES.";
+  "password is sent. Define each in your user settings under a name no workspace file uses, or define it with its " +
+  "full connection fields via IRIS_PROFILES.";
 
 const tmpDirs: string[] = [];
 afterEach(() => {

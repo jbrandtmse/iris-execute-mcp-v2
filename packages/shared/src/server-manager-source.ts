@@ -157,7 +157,7 @@ export interface ServerManagerProfileResult extends IrisProfile {
   credentialStatus: CredentialStatus;
   /**
    * `true` only when the definition came from a workspace-scope settings file (the folder's `.vscode/settings.json` or a
-   * `*.code-workspace` file; see {@link discoverWorkspaceScopeFiles}). Absent otherwise. DW-761: a repository chooses such
+   * `*.code-workspace` file, or a relative `IRIS_SM_SETTINGS_PATHS` entry; see {@link discoverScopedSettingsFiles}). Absent otherwise. DW-761: a repository chooses such
    * a file's host, so a keychain or helper password must never be paired with it; the credential chain refuses an
    * `"unresolved"` entry carrying this flag. An inline `password` in the same file (`"resolved"`) is its own definition's
    * secret and is unaffected.
@@ -344,8 +344,10 @@ export interface ScopedSettingsFiles {
   files: string[];
   /**
    * The workspace-scope subset of `files`: the folder's `.vscode/settings.json` and every `*.code-workspace` file beside
-   * it. Empty when `IRIS_SM_SETTINGS_PATHS` replaces discovery: a path the operator named is their own choice, not a file
-   * an opened repository chose. A file here is controlled by whoever wrote the repository, not by the user, so a keychain
+   * it. When `IRIS_SM_SETTINGS_PATHS` replaces discovery, an ABSOLUTE path the operator named is their own choice and is
+   * not listed here, but a RELATIVE one is: it resolves against the working directory, which the MCP client sets (usually
+   * to the opened repository), so the file it reaches is the repository's. A file here is controlled by whoever wrote the
+   * repository, not by the user, so a keychain
    * or helper password must never be paired with a connection defined in it ({@link resolveServerManagerProfiles} flags
    * such a profile with `workspaceScope`).
    */
@@ -363,13 +365,14 @@ export function discoverScopedSettingsFiles(
   const explicit = env.IRIS_SM_SETTINGS_PATHS;
   if (explicit !== undefined && explicit !== "") {
     const delimiter = platform === "win32" ? ";" : ":";
+    const entries = explicit
+      .split(delimiter)
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
     return {
-      files: explicit
-        .split(delimiter)
-        .map((entry) => entry.trim())
-        .filter((entry) => entry.length > 0)
-        .map(toAbsolute),
-      workspaceFiles: [],
+      files: entries.map(toAbsolute),
+      // DW-761: a relative entry reaches whatever file the working directory holds, so it is workspace scope.
+      workspaceFiles: entries.filter((entry) => !isAbsoluteInAnyConvention(p, entry)).map(toAbsolute),
     };
   }
 
@@ -401,10 +404,12 @@ export function discoverScopedSettingsFiles(
  * stated in the code, and a passthrough test pins it on every host OS.
  */
 function absolutePathResolver(p: typeof path.win32): (candidate: string) => string {
-  return (candidate) =>
-    p.isAbsolute(candidate) || path.win32.isAbsolute(candidate) || path.posix.isAbsolute(candidate)
-      ? candidate
-      : p.resolve(candidate);
+  return (candidate) => (isAbsoluteInAnyConvention(p, candidate) ? candidate : p.resolve(candidate));
+}
+
+/** Whether `candidate` is absolute under `p` or under either path convention (see {@link absolutePathResolver}). */
+function isAbsoluteInAnyConvention(p: typeof path.win32, candidate: string): boolean {
+  return p.isAbsolute(candidate) || path.win32.isAbsolute(candidate) || path.posix.isAbsolute(candidate);
 }
 
 /** The workspace-scope candidates (folder `.vscode/settings.json`, then each `*.code-workspace` file), highest precedence first. */

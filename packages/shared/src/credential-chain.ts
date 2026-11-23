@@ -643,8 +643,7 @@ export async function resolveServerManagerCredentials(
           `${workspaceRefusedNames.length === 1 ? "is" : "are"} defined or overridden in a workspace settings file, ` +
           `so no stored password (OS keychain or IRIS_CREDENTIAL_HELPER) was used: a workspace must not choose ` +
           `where that password is sent. Define each in your user settings under a name no workspace file uses, ` +
-          `give it its own inline password in that workspace file, or define it with its full connection fields ` +
-          `via IRIS_PROFILES.`,
+          `or define it with its full connection fields via IRIS_PROFILES.`,
       );
     }
     throw new Error(parts.join(" "));

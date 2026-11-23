@@ -134,10 +134,32 @@ export function isUserScopedServer(
 
 /**
  * Whether a server's definition is user-scoped: `user` (user or default settings alone), `not-user` (a workspace,
- * folder or language-specific layer defines or overrides it, or no user layer defines it) or `uninspectable` (the
- * inspection dependency is absent, threw, or returned a non-object).
+ * folder or language-specific layer defines, overrides or is not an object, or only a language-specific user layer
+ * defines it), `absent` (every layer is an object or unset and none defines the name: it was renamed or removed since
+ * the plan was made) or `uninspectable` (the inspection dependency is absent, threw, or returned a non-object). Only
+ * `user` may reach Server Manager's credential API.
  */
-type ServerScopeVerdict = "user" | "not-user" | "uninspectable";
+type ServerScopeVerdict = "user" | "not-user" | "absent" | "uninspectable";
+
+/** Every layer of `inspection`, as `WorkspaceConfiguration.inspect` names them. */
+const INSPECTION_LAYERS: readonly (keyof ServerManagerServersInspection)[] = [
+  "defaultValue",
+  "globalValue",
+  "workspaceValue",
+  "workspaceFolderValue",
+  "defaultLanguageValue",
+  "globalLanguageValue",
+  "workspaceLanguageValue",
+  "workspaceFolderLanguageValue",
+];
+
+/** The warning for a server Server Manager no longer defines (the resolve step's no-spec outcome and the `absent` verdict). */
+function noSuchServerWarning(label: string, serverName: string): string {
+  return (
+    `IRIS MCP Launcher: "${label}" was not started — Server Manager has no server named ` +
+    `"${serverName}" (it may have been renamed or removed; try reloading the window).`
+  );
+}
 
 const NPX_COMMAND = "npx";
 
@@ -474,7 +496,13 @@ export class LauncherProvider {
       return "uninspectable";
     }
     if (typeof inspection !== "object" || inspection === null) return "uninspectable";
-    return isUserScopedServer(inspection, serverName) ? "user" : "not-user";
+    if (isUserScopedServer(inspection, serverName)) return "user";
+    const definedNowhere = INSPECTION_LAYERS.every((name) => {
+      const layer: unknown = inspection[name];
+      if (layer === undefined) return true;
+      return typeof layer === "object" && layer !== null && !Object.prototype.hasOwnProperty.call(layer, serverName);
+    });
+    return definedNowhere ? "absent" : "not-user";
   }
 
   /**
@@ -649,13 +677,14 @@ export class LauncherProvider {
    * an unknown label, a Server Manager definition that no longer exists, a
    * server that is not defined in user settings alone (or whose settings could
    * not be inspected; Story 44.8, DW-752), or a user-cancelled credential
-   * prompt. Every `undefined` path surfaces exactly ONE `showWarning` call
-   * (a token already cancelled on entry is the one silent exit) — never a
-   * toast storm, never a retry loop.
+   * prompt. Every `undefined` path surfaces exactly ONE `showWarning` call,
+   * except a cancelled token (on entry, or between the servers of a plan),
+   * which returns silently — never a toast storm, never a retry loop.
    *
    * Story 44.8 (DW-752): before ANY credential step, every server of the plan
    * must be user-scoped ({@link isUserScopedServer}, inspected in the scope it
-   * was enumerated in). Otherwise nothing is started and Server Manager's
+   * was enumerated in; a server no layer defines gets the no-such-server
+   * warning). Otherwise nothing is started and Server Manager's
    * `getServerSpec`/`getAccount`/`getSession` are never called: its session
    * is keyed by server name and username only, and its own session check
    * sends the stored password to the MERGED host, which a workspace's
@@ -705,6 +734,10 @@ export class LauncherProvider {
     for (const serverName of plan.serverNames) {
       const verdict = this.inspectServerScope(serverName, this.scopesByServerName.get(serverName));
       if (verdict === "user") continue;
+      if (verdict === "absent") {
+        this.deps.showWarning(noSuchServerWarning(label, serverName));
+        return undefined;
+      }
       this.deps.showWarning(
         verdict === "not-user"
           ? `IRIS MCP Launcher: "${label}" was not started — IRIS server "${serverName}" is defined or overridden in ` +
@@ -748,10 +781,7 @@ export class LauncherProvider {
         return undefined;
       }
       if (result.status === "no-spec") {
-        this.deps.showWarning(
-          `IRIS MCP Launcher: "${label}" was not started — Server Manager has no server named ` +
-            `"${serverName}" (it may have been renamed or removed; try reloading the window).`,
-        );
+        this.deps.showWarning(noSuchServerWarning(label, serverName));
         return undefined;
       }
       if (result.status === "no-username") {

@@ -660,7 +660,8 @@ describe("credential containment — Story 44.8: a refused Local resolve carries
   });
 
   it.each([
-    ["not-user (a workspace layer overrides the host)", () => ({ globalValue: { dev1: user }, workspaceValue: { dev1: { webServer: { host: "127.0.0.1" } } } })],
+    // The secret is also in the layers the guard reads, so this row fails on its own if a warning ever echoes them.
+    ["not-user (a workspace layer overrides the host)", () => ({ globalValue: { dev1: { ...user, password: STORED_SECRET } }, workspaceValue: { dev1: { webServer: { host: "127.0.0.1" }, description: STORED_SECRET } } })],
     ["uninspectable (the inspection throws)", () => { throw new Error(`inspection failed near ${STORED_SECRET}`); }],
     ["uninspectable (the dependency is absent)", undefined],
   ] as const)("%s: undefined, one warning, no session or spec call, and the stored password appears in no warning and no diagnostic", async (_name, inspect) => {
