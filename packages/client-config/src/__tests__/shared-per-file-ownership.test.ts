@@ -512,6 +512,7 @@ describe("DW-742: an enable in the shared .mcp.json records the enabler for the 
 
     const refused = world.run(world.b, APPLY("vscode", "env-reference"));
     expect(refused.status, refused.stdout + refused.stderr).toBe(1);
+    expect(refused.stdout + refused.stderr).toContain("shared with claude-code");
     expect(readFileSync(mcpJson(world.b), "utf8")).toBe(before);
   }, T);
 
@@ -546,7 +547,29 @@ describe("DW-742: an enable in the shared .mcp.json records the enabler for the 
 
     const refused = world.run(world.b, APPLY("claude-code", "env-reference"));
     expect(refused.status, refused.stdout + refused.stderr).toBe(1);
+    expect(refused.stdout + refused.stderr).toContain("shared with vscode");
     expect(readFileSync(mcpJson(world.b), "utf8")).toBe(before);
+  }, T);
+
+  // Lead matrix E2: every record and stash written before 44.2 (no file named), claude-code's entry taken out by a vscode
+  // disable and put back by a vscode enable. The entry is claude-code's, so a different vscode write is refused naming it.
+  it("E2: pathless records, a vscode disable then enable of claude-code's entry; a different vscode write is refused naming claude-code", () => {
+    const world = makeWorld();
+    seedMcp(world.b, COMPACT);
+    expect(world.run(world.b, APPLY("claude-code", "env-reference")).status).toBe(0);
+    const original = readFileSync(mcpJson(world.b), "utf8");
+    expect(world.run(world.b, APPLY("vscode", "env-reference")).status).toBe(0);
+    expect(world.run(world.b, TOGGLE("disable", "vscode")).status).toBe(0);
+    writePathlessState(world);
+
+    const enabled = world.run(world.b, TOGGLE("enable", "vscode"));
+    expect(enabled.status, enabled.stdout + enabled.stderr).toBe(0);
+    expect(readFileSync(mcpJson(world.b), "utf8")).toBe(original);
+
+    const refused = world.run(world.b, APPLY("vscode", "server-manager"));
+    expect(refused.status, refused.stdout + refused.stderr).toBe(1);
+    expect(refused.stdout + refused.stderr).toContain("shared with claude-code");
+    expect(readFileSync(mcpJson(world.b), "utf8")).toBe(original);
   }, T);
 
   it("a client's ordinary disable then enable of its own entry (per-file records) adds no record for the other client", () => {
@@ -724,15 +747,21 @@ describe("per-file ledger units (in memory)", () => {
     expect(sharedPeers(cursor, "project", ctxHome)).toEqual([]);
   });
 
-  it("SHARED_PROJECT_CLIENTS lists every adapter whose project file is another adapter's project file (from a project directory, not HOME)", () => {
-    const ctx = { platform: "linux" as const, env: {}, homeDir: "/home/u", projectDir: "/work/p" };
-    const byPath = new Map<string, string[]>();
-    for (const adapter of Object.values(CLIENT_ADAPTERS)) {
-      const file = resolveScopePath(adapter, "project", ctx);
-      if (file !== null) byPath.set(file, [...(byPath.get(file) ?? []), adapter.id]);
+  it("SHARED_PROJECT_CLIENTS lists every adapter whose project file is another adapter's project file, on every platform (from a project directory, not HOME)", () => {
+    const contexts = [
+      { platform: "linux" as const, env: {}, homeDir: "/home/u", projectDir: "/work/p" },
+      { platform: "darwin" as const, env: {}, homeDir: "/Users/u", projectDir: "/work/p" },
+      { platform: "win32" as const, env: {}, homeDir: "C:\\Users\\u", projectDir: "C:\\work\\p" },
+    ];
+    for (const ctx of contexts) {
+      const byPath = new Map<string, string[]>();
+      for (const adapter of Object.values(CLIENT_ADAPTERS)) {
+        const file = resolveScopePath(adapter, "project", ctx);
+        if (file !== null) byPath.set(file, [...(byPath.get(file) ?? []), adapter.id]);
+      }
+      const sharing = [...byPath.values()].filter((ids) => ids.length > 1).flat().sort();
+      expect(sharing, ctx.platform).toEqual([...SHARED_PROJECT_CLIENTS].sort());
     }
-    const sharing = [...byPath.values()].filter((ids) => ids.length > 1).flat().sort();
-    expect(sharing).toEqual([...SHARED_PROJECT_CLIENTS].sort());
   });
 
   it("implied ownership is for the canonical iris-mcp names only: an unrecorded entry under any other name is nobody's", () => {

@@ -79,7 +79,9 @@ iris-mcp-clients skills install|uninstall --client <id> [--project <dir>] [--dry
     either. `env-reference` writes `"IRIS_PASSWORD": "${IRIS_PASSWORD}"`, which VS Code resolves
     from the environment it was launched with (restart VS Code from a shell that has the
     `IRIS_*` variables after changing them); `server-manager` writes no secret at all (the
-    server reads the OS keychain); only `explicit` writes a literal.
+    server reads the passwords of the Server Manager connections from the OS keychain, while its
+    `default` profile still needs the base `IRIS_*` variables, `IRIS_PASSWORD` included, in that
+    environment); only `explicit` writes a literal.
   - **Migration.** Entries the manager wrote into the old files (`.vscode/mcp.json` and the
     profile `mcp.json`) are reported by `status` and `doctor` (check
     `vscode-local-harness-entries`), and are not forwarded to Copilot sessions. The next

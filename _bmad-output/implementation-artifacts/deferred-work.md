@@ -4164,11 +4164,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: high | fix-risk: low | footprint: in-story
 - evidence: built CLI: pre-44.2 pathless cc record + pathless vscode server-manager stash; vscode enable adopts (ledger: vscode:B only), vscode apply env-reference exits 0 changed:1 over cc's entry. Reverse: vscode stash-add enable from a pathless stash leaves no vscode record; cc apply rewrites it. Only apply's adopt calls recordAdoptedOwners
 - 2026-11-22T23:54:03Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=rework_cap_reached: re-review 3 HIGH, not patched; Planner decides; proposed fix in spec Review Findings (rework re-review 3)
+- 2026-11-23T04:51:36Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=rr4 HIGH: vscode disable+enable of cc entry (pathless/no cc record) makes vscode sole owner; overwrite; option B
 
 ### DW-743: sharedPeers counts the same client's other scope as a sharing peer, so from the home directory a cursor, codex, gemini, kimi-code or jetbrains-junie user-scope re-apply with a pre-44.2 (pathless) or missing state record is refused as a shared-file conflict
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: high | fix-risk: low | footprint: in-story
 - evidence: built CLI, cwd=HOME: user path == the client's own project path (~/.cursor/mcp.json); pathless own record never counts once peers exist (recordingClients), no implied owner (not pre-sharing), so a mode change exits 1 'shared with another client'; same run from another dir exits 0; pre-story had no shared rule; status shows sharedWith:[cursor]
 - 2026-11-22T23:54:18Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=rework_cap_reached: re-review 3 HIGH, not patched; Planner decides; AC 44.2.8 back-compat, AD-15; fix: skip same-client peers in sharedPeers
+- 2026-11-23T04:51:36Z status=resolved-by:44-2-vs-code-copilot-mcp-configuration-targets by=cr note=rr4: sharedPeers project-pair-only by construction; matrix-ext E3 81/81; roster pin red on linux+darwin collision
 
 ### DW-744: A VS Code-only user whose project folder moved (or whose state file was lost) is refused a mode change as 'shared with claude-code', and a same-mode re-apply records Claude Code as an owner of the file for good
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: med | footprint: in-story
