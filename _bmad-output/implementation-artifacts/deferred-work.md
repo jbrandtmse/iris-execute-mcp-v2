@@ -4181,3 +4181,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: low | footprint: in-story
 - evidence: rework-4 review, Verification Gap repro on the built CLI (lead matrix E6 setup, then enable + apply --mode env-reference exits 1); gating the implied record on adopting-only turns lead matrix E2 red
 - 2026-11-23T04:39:01Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=lead note=decision_141: fails safe (refusal, never an overwrite); pre-44.2 path-less vscode stash only; workaround remove then apply; the implied-owner rule is what AD-30 #137 and matrix E2 require
+
+### DW-746: client-config restore rolls back the whole shared .mcp.json from the calling client's backups, so it can revert the other client's entry; restore is not subject to the option-B one-owner rule
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: engine.ts restore only names the other reader; a restore of a backup taken before Claude Code wrote an entry removes that entry and leaves its ledger record (rework-5 review)
+- 2026-11-23T05:40:42Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=harvest note=for the option-B re-review: patch (refuse a shared-file restore that would change the other client's owned entries, or restore owned entries only) if fix-risk allows, else route to burndown
