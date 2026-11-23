@@ -4267,3 +4267,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-23T16:28:21Z status=routed owner=burndown by=cr note=per test: assert isError falsy (or the documented error) and verify on a CI-image throwaway; weak-password may be an expected error
 - 2026-11-23T16:50:10Z status=routed owner=burndown by=lead note=count correction: 12 tests, not 13 (the CR patched the ops task run in-story; spec-44-5 records 12)
 - 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+
+### DW-759: A failed routine (.mac/.int/.inc) in a compile that also writes a class's Storage still reads as success in iris_doc_compile, iris_doc_load and iris_env_promote: the Story 44.4 check covers classes only
+- source: spec-44-7-epic-44-burn-down.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: General.Compile overwrites tSC in its tUpdated loop (irislib/%Atelier/v1/Utils/General.cls:1318-1385); verifyCompiled refuses non-.cls names; the 44.4 oracle table records Atelier upd stays true for a failed routine; not probed with a routine
+- 2026-11-23T17:13:26Z status=routed owner=44-7-epic-44-burn-down by=harvest note=taken into Story 44.7 at its spec gate (decision #151): probe for a routine oracle, resolve or close by decision with the limit documented
