@@ -84,3 +84,4 @@
 2026-11-23T06:06:25Z	Story 44.2	fresh_check	client-config=1455_fwd+1455_shuffled launcher=458+3skip_fwd+shuffled doc-claim_files=68_run_by_re-review_5
 2026-11-23T06:06:46Z	Story 44.2	committed	sha=4a8c570 branch=epic44 pushed=yes ci=pending run=45121927416 note=run_also_carries_44.3_build(5924aa2,QA/CR_pending)
 2026-11-23T06:06:46Z	Story 44.2	story_cycle	plan=1fe260b build=065f014 reviews=6(round1+5_re-reviews) reworks=5(DW-733,re-review_patches,override_A,option_B) final=refuse-only(option_B,#139/#142) status=done human_rows=AC_44.2.7_D-6+44.6_P-6+AC_44.6.5(one_owner_sitting)
+2026-11-23T06:07:00Z	Story 44.3	stage_spawned	stage=qa spawn_at=2026-11-23T06:07:00Z model=claude-sonnet-5-5 agent_name=44-3-confirmation-bound-to-the-scope-shown-qa-1 cycle_iteration=1
