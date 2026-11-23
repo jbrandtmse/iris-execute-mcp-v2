@@ -134,4 +134,18 @@ describe("credentials.ts default loadKeyring wiring (real @napi-rs/keyring impor
       expect(service).toBe(CREDENTIAL_CHAIN_KEYCHAIN_SERVICE);
     }
   });
+
+  // DW-753 in default order: the test above leaves `roundtrip-server` in the store, so without the `beforeEach` this one, which runs
+  // after it, lists a name. mutation: delete the `beforeEach` -> this goes red in default order.
+  it("every test starts from an empty store: `list --json` lists no name", async () => {
+    let listOut = "";
+    const listCode = await runCli(["list", "--json"], {
+      env: {},
+      stdout: { write: (c: string) => { listOut += c; } },
+      stderr: silentOutput,
+    });
+
+    expect(listCode).toBe(0);
+    expect(JSON.parse(listOut.trim())).toEqual({ names: [] });
+  });
 });

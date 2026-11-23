@@ -4250,3 +4250,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-5-integration-suites-cannot-pass-without-testing.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: seen while hardening admin.integration.test.ts database create (Story 44.5): a second run on the same instance fails at create with ERROR #60 the database must be dismounted; CI unaffected (fresh container per run)
 - 2026-11-23T15:37:44Z status=routed owner=burndown by=harvest note=probe first (Rule #16): decide whether delete should dismount (and whether removing IRIS.DAT is in scope or by-design), then fix or close-by-decision
+
+### DW-758: 13 pre-existing armed integration tests assert only content[0]?.text toBeDefined, so an isError result passes them (a shape check:live-guards cannot see: no if)
+- source: spec-44-5-integration-suites-cannot-pass-without-testing.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: Story 44.5 review (blind hunter AST walk): admin password-validate x2 and permission-check; interop production status, auto-start get/set, event logs x2, queue status, rules, transforms, trace. Untouched by 44.5 (outside its 48-site grammar); a tool reply always carries text, so toBeDefined cannot fail.
+- 2026-11-23T16:28:21Z status=routed owner=burndown by=cr note=per test: assert isError falsy (or the documented error) and verify on a CI-image throwaway; weak-password may be an expected error

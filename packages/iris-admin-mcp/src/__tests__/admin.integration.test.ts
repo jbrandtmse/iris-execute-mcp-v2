@@ -14,9 +14,11 @@
  * test asserts that its create succeeded before it reads the list. An armed CI
  * suite reports a test with no failing assertion as passed, so no test here
  * tolerates a failed create or asserts only when one succeeded
- * (`pnpm check:live-guards` refuses that shape). The two creates that used to
- * fail on the CI image were test defects: the database create needs a
- * `directory`, and the OAuth server create needs `customizationRoles`.
+ * (`pnpm check:live-guards` refuses that shape). The four creates that used to
+ * fail on the CI image (database, namespace, mapping, OAuth server) had two
+ * test defects as their causes: the database create needs a `directory` (the
+ * namespace and the mapping need the database), and the OAuth server create
+ * needs `customizationRoles`.
  */
 
 import { describe, it, expect, afterAll, beforeAll } from "vitest";

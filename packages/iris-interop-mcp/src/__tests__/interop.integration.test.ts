@@ -437,7 +437,10 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(importResult.content[0]?.text).toBeDefined();
+      expect(importResult.isError, importResult.content[0]?.text).toBeFalsy();
+      // An import of XML that holds no entry also succeeds (with 0), so the count is what shows the table's entry came back in.
+      const imported = importResult.structuredContent as { entryCount?: number };
+      expect(imported?.entryCount, importResult.content[0]?.text).toBeGreaterThanOrEqual(1);
     });
   });
 

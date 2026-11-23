@@ -5,9 +5,14 @@
 //
 // CONTRACT
 //   - SCOPE. Every file `coveredTestFiles()` returns (`ci-checks.mjs`): the test files of the armed suites. A file that is in no
-//     armed suite is out of scope. A TEST CALLBACK is the function argument of `it`/`test` and their `.each`, `.skipIf`,
-//     `.runIf`, `.concurrent`, `.only` and `.skip` forms. A `return` or an `if` is in scope when the nearest function around it
-//     is a test callback: a hook (`beforeAll`), a helper function and a callback nested in a test report no test outcome.
+//     armed suite is out of scope. A TEST CALLBACK is the function argument of `it`/`test` (or a name the file imports them
+//     under from `vitest`) and their `.each` (a tagged template included), `.skipIf`, `.runIf`, `.concurrent`, `.only` and
+//     `.skip` forms. A `return` is in rule G's scope when the nearest function around it is a test callback: a `return` in a
+//     callback nested in a test (`rows.map((r) => { return r; })`) ends that callback, not the test. An `if` is in rule C's
+//     scope when it is inside a test callback, directly or through inline callbacks only (a function or arrow passed as a call
+//     argument: `rows.forEach(...)`, `Promise.all(rows.map(...))`), since an assertion there still runs only when the branch
+//     does. A hook (`beforeAll`), a helper function declared or bound to a name, and a class method report no test outcome and
+//     are out of both scopes.
 //   - RULE G (guard return). A `return` in scope is a finding unless one of these holds (each entry of SKIP_CALLS and
 //     SKIP_HELPERS names its reason):
 //       (a) it returns a skip call (`<ctx>.skip()`, `skipTest(`, `skipLeg(`);
@@ -15,12 +20,16 @@
 //           `skipIf`, `coverageBlocked`), not negated and not combined with another term by `||` or `&&`;
 //       (c) the statement just before it in the same block is a skip call.
 //     A skip is loud in CI (`ci-live-suite.mjs` fails a skip that is not allowlisted); a data guard is silent.
-//   - RULE C (conditional outcome). An `if` in scope whose condition reads `.isError` or `created.` is a finding unless its
-//     then-branch ends with a `throw`, a skip return or a skip call. A create that is "tolerated" (`if (!result.isError) {
-//     created.x = true; }`) and an assertion that only runs when a call succeeded both have this shape.
+//   - RULE C (conditional outcome). An `if` in scope whose condition reads `isError` (`.isError`, `?.isError`, `["isError"]`
+//     or a bare `isError` binding) or `created` (`created.`, `created?.`, `created[`) is a finding unless its then-branch ends
+//     with a `throw`, a skip return or a skip call. A create that is "tolerated" (`if (!result.isError) { created.x = true; }`)
+//     and an assertion that only runs when a call succeeded both have this shape.
 //   - The scan is syntactic (the TypeScript parser, one file at a time). It does not follow a helper that returns early, and it
-//     does not see a conditional assertion whose condition reads neither `.isError` nor `created.`; the rules are the grammar of
-//     the defect class Epic 44 closed, not a proof that every test asserts.
+//     does not see a conditional assertion whose condition reads neither `isError` nor `created`. Known limits, each pinned as a
+//     blind spot by a test that also proves no armed file holds one: an assertion gated by `&&`, `||` or a ternary instead of an
+//     `if`; a `switch` on an outcome; a test callback passed by name instead of inline; `it`/`test` bound to another name by a
+//     variable (`const check = it`). The rules are the grammar of the defect class Epic 44 closed, not a proof that every test
+//     asserts.
 //   - `scanSource` reads nothing, `liveGuardFindings` reads each file through `read`. Nothing is written.
 
 import { readFileSync } from 'node:fs';
@@ -32,13 +41,19 @@ import { coveredTestFiles } from './ci-checks.mjs';
 import { REPO_ROOT } from './live-gate-scan.mjs';
 
 /**
- * The calls that mark a running test skipped. `method` matches `<anything>.<name>(`, `function` matches `<name>(`.
+ * The calls that mark a running test skipped. `method` matches `<ctx>.<name>()` with no argument, where `<ctx>` is a parameter
+ * of a function around the call (the test context a test callback, or a helper it calls, receives); `function` matches `<name>(`.
  *
  * @type {ReadonlyArray<{ name: string, kind: 'method' | 'function', reason: string }>}
  */
 export const SKIP_CALLS = Object.freeze(
   [
-    { name: 'skip', kind: 'method', reason: "vitest's test context `skip()`: the test is reported as skipped, which CI lists and fails when it is not allowlisted" },
+    {
+      name: 'skip',
+      kind: 'method',
+      reason:
+        "vitest's test context `skip()` (a parameter, called with no argument): it throws, so the test stops and is reported as skipped, which CI lists and fails when it is not allowlisted",
+    },
     { name: 'skipTest', kind: 'function', reason: "process-gate-helpers' skipTest logs the reason and calls the context's skip()" },
     { name: 'skipLeg', kind: 'function', reason: "the Epic 35 defect gate's per-leg skip: it calls skipTest under the gate's tag" },
   ].map((entry) => Object.freeze(entry)),
@@ -58,11 +73,25 @@ export const SKIP_HELPERS = Object.freeze(
   ].map((entry) => Object.freeze(entry)),
 );
 
-/** What a condition must read to be rule C's concern. */
-const OUTCOME_CONDITION = /\.isError\b|\bcreated\./;
+/** What a condition must read to be rule C's concern: `isError` in any form, or a member of `created`. */
+const OUTCOME_CONDITION = /\bisError\b|\bcreated\s*(?:\?\.|\.|\[)/;
 
 /** The roots of a test callback's callee: `it`, `test` and their modifier chains. */
 const TEST_ROOTS = new Set(['it', 'test']);
+
+/** TEST_ROOTS plus every local name the file imports `it` or `test` under from `vitest` (`import { it as check } from 'vitest'`). */
+function testRootsOf(source) {
+  const roots = new Set(TEST_ROOTS);
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || statement.moduleSpecifier.text !== 'vitest') continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    for (const element of bindings.elements) {
+      if (TEST_ROOTS.has((element.propertyName ?? element.name).text)) roots.add(element.name.text);
+    }
+  }
+  return roots;
+}
 
 const isFunctionNode = (node) =>
   ts.isArrowFunction(node) ||
@@ -80,18 +109,24 @@ function calleeRoot(expression) {
     if (ts.isCallExpression(node)) node = node.expression;
     else if (ts.isPropertyAccessExpression(node)) node = node.expression;
     else if (ts.isParenthesizedExpression(node)) node = node.expression;
+    else if (ts.isTaggedTemplateExpression(node)) node = node.tag;
     else break;
   }
   return ts.isIdentifier(node) ? node.text : undefined;
 }
 
-/** Whether `fn` is the callback of a test call (`it('x', async () => {...})`, `it.each(rows)('x', (row) => {...})`). */
-function isTestCallback(fn) {
+/** Whether `fn` is an inline callback: an arrow or function expression passed as an argument of a call. */
+function isInlineCallback(fn) {
   if (!ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn)) return false;
   const call = fn.parent;
-  if (!call || !ts.isCallExpression(call) || !call.arguments.includes(fn)) return false;
-  const root = calleeRoot(call.expression);
-  return root !== undefined && TEST_ROOTS.has(root);
+  return Boolean(call && ts.isCallExpression(call) && call.arguments.includes(fn));
+}
+
+/** Whether `fn` is the callback of a test call (`it('x', async () => {...})`, `it.each(rows)('x', (row) => {...})`). */
+function isTestCallback(fn, roots) {
+  if (!isInlineCallback(fn)) return false;
+  const root = calleeRoot(fn.parent.expression);
+  return root !== undefined && roots.has(root);
 }
 
 /** The nearest function around `node`, or undefined at the top level. */
@@ -102,12 +137,31 @@ function enclosingFunction(node) {
   return undefined;
 }
 
+/** Rule C's scope: `node` is inside a test callback, directly or through inline callbacks only. */
+function inTestBody(node, roots) {
+  for (let fn = enclosingFunction(node); fn; fn = enclosingFunction(fn)) {
+    if (isTestCallback(fn, roots)) return true;
+    if (!isInlineCallback(fn)) return false;
+  }
+  return false;
+}
+
 /** Whether `expression` is a call of one of SKIP_CALLS. */
 function isSkipCall(expression) {
   if (!expression || !ts.isCallExpression(expression)) return false;
   const callee = expression.expression;
   if (ts.isIdentifier(callee)) return SKIP_CALLS.some((entry) => entry.kind === 'function' && entry.name === callee.text);
-  if (ts.isPropertyAccessExpression(callee)) return SKIP_CALLS.some((entry) => entry.kind === 'method' && entry.name === callee.name.text);
+  if (ts.isPropertyAccessExpression(callee) && expression.arguments.length === 0 && ts.isIdentifier(callee.expression) && isParameterInScope(callee.expression)) {
+    return SKIP_CALLS.some((entry) => entry.kind === 'method' && entry.name === callee.name.text);
+  }
+  return false;
+}
+
+/** Whether `identifier` names a parameter of a function around it (`async (ctx) => { ... ctx.skip() ... }`). */
+function isParameterInScope(identifier) {
+  for (let fn = enclosingFunction(identifier); fn; fn = enclosingFunction(fn)) {
+    if (fn.parameters.some((parameter) => ts.isIdentifier(parameter.name) && parameter.name.text === identifier.text)) return true;
+  }
   return false;
 }
 
@@ -175,13 +229,14 @@ export function scanSource(file, text) {
     findings.push({ file, line, rule, text: (lines[line - 1] ?? '').trim() });
   };
 
+  const roots = testRootsOf(source);
+
   const visit = (node) => {
     if (ts.isReturnStatement(node)) {
       const fn = enclosingFunction(node);
-      if (fn && isTestCallback(fn) && !isAllowedReturn(node)) add(node, 'G');
+      if (fn && isTestCallback(fn, roots) && !isAllowedReturn(node)) add(node, 'G');
     } else if (ts.isIfStatement(node)) {
-      const fn = enclosingFunction(node);
-      if (fn && isTestCallback(fn) && OUTCOME_CONDITION.test(node.expression.getText(source)) && !endsLoudly(node)) add(node, 'C');
+      if (inTestBody(node, roots) && OUTCOME_CONDITION.test(node.expression.getText(source)) && !endsLoudly(node)) add(node, 'C');
     }
     ts.forEachChild(node, visit);
   };

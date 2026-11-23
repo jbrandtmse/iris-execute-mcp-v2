@@ -2,10 +2,11 @@
 //
 // CONTRACT
 //   - It scans every test file that `coveredTestFiles()` (`scripts/lib/ci-checks.mjs`) returns, with rules G and C of
-//     `scripts/lib/live-guard-scan.mjs`: a `return` that ends a test early without a skip, and an `if` on `.isError` or
-//     `created.` whose then-branch does not end loudly.
+//     `scripts/lib/live-guard-scan.mjs`: a `return` that ends a test early without a skip, and an `if` on `isError` or a
+//     member of `created` whose then-branch does not end loudly.
 //   - It prints each finding as `<file>:<line> <rule> <text>`, then one summary line, `<n> armed files, <k> findings`.
-//   - It exits 1 on any finding and 0 otherwise. It reads files and writes nothing.
+//   - It exits 1 on any finding, and on an empty file list (a gate that reads nothing passes nothing); 0 otherwise. It reads
+//     files and writes nothing.
 //   - `main(argv, deps)` is the whole program; it runs only when this file is the entry point, so importing it runs nothing.
 //
 // USAGE
@@ -26,10 +27,14 @@ export function main(argv = [], { files = coveredTestFiles(), read, out = (line)
   const findings = liveGuardFindings({ files, ...(read ? { read } : {}) });
   for (const finding of findings) out(`${finding.file}:${finding.line} ${finding.rule} ${finding.text}`);
   out(`${files.length} armed files, ${findings.length} findings`);
+  if (files.length === 0) {
+    out('check-live-guards: no armed test file to read. A gate that reads nothing proves nothing, so an empty `coveredTestFiles()` fails.');
+    return 1;
+  }
   if (findings.length > 0) {
     out(
-      'check-live-guards: an armed test must assert, or skip loudly. Rule G is a `return` that ends a test early; rule C is an `if` on `.isError` or `created.` ' +
-        'that does not throw. Assert the precondition with expect(...), or skip with the test context (ci-live-suite.mjs lists every skip).',
+      'check-live-guards: an armed test must assert, or skip loudly. Rule G is a `return` that ends a test early; rule C is an `if` on `isError` or `created` ' +
+        'that does not throw or skip. Assert the precondition with expect(...), or skip with the test context (ci-live-suite.mjs lists every skip).',
     );
     return 1;
   }

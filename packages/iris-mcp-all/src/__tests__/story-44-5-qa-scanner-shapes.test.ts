@@ -5,15 +5,18 @@
  * What is pinned here:
  *   - test-callback forms: every `it`/`test` modifier chain, `describe.each` nesting, an arrow and a function expression, an
  *     options object and a timeout argument, a generator;
- *   - the scope rule "the nearest function around the statement is a test callback": a `return` or an outcome `if` inside a
- *     callback nested in a test is out of scope, and one inside `try`/`finally`, a `switch` case or an `else` branch is in scope;
+ *   - the scope rules: a `return` is in rule G's scope when the nearest function around it is a test callback, so a `return` in a
+ *     callback nested in a test is out of scope; an outcome `if` is in rule C's scope inside a test callback, directly or through
+ *     inline callbacks (`forEach`, `Promise.all(rows.map(...))`), but not inside a hook or a helper bound to a name; a statement
+ *     inside `try`/`finally`, a `switch` case or an `else` branch is in scope;
  *   - rule C's exception: the then-branch must END with a throw, a skip return or a skip call, with or without braces, and the
  *     `else` branch never makes a non-loud then-branch loud;
- *   - the condition grammar of rule C (`.isError` and `created.` anywhere in the condition, compound or optional-chained);
+ *   - the condition grammar of rule C (`isError` and a member of `created` anywhere in the condition: compound, optional-chained,
+ *     element access or a destructured binding), a tagged-template `it.each` and an `it`/`test` imported from vitest under an alias;
  *   - robustness of the position report (CRLF, BOM, a leading comment, a multi-line condition) and of the parse (a syntax error);
  *   - the blind spots of the scan, pinned as they are today (BLIND_SPOTS) and proven latent: no armed file holds one of those
  *     shapes, found by a typed-AST walk of every armed file that is independent of the scan's own regex;
- *   - the CLI's edges: a file the reader cannot read never returns 0, the output order and the failure hint, an empty list.
+ *   - the CLI's edges: a file the reader cannot read never returns 0, the output order and the failure hint, an empty list fails.
  *
  * A row of BLIND_SPOTS is a scan limit, not a wish: when the scan learns to see one, move the row to a forbidden table.
  * Reads source text and calls pure functions: no docker, no IRIS.
@@ -60,7 +63,7 @@ describe("test-callback forms: a data guard is a finding in every form of a test
 
   // mutation: make `isAllowedReturn` return true when the callback is a function expression -> the function-expression row is silent here.
   it.each([
-    ["a function expression", 'it("x", async function () { if (reason) return ctx.skip(); expect(1).toBe(1); });'],
+    ["a function expression", 'it("x", async function (ctx) { if (reason) return ctx.skip(); expect(1).toBe(1); });'],
     ["it.concurrent.each(rows)", 'it.concurrent.each([1])("x", async (n, ctx) => { if (skipIfReason(r, ctx)) return; expect(n).toBe(1); });'],
     ["describe.each nesting", 'describe.each([1])("d", (n) => { it("x", async (ctx) => { ctx.skip(); return; }); });'],
     ["an options object as the second argument", 'it("x", { timeout: 5 }, async (ctx) => { if (reason) return ctx.skip(); });'],
@@ -69,14 +72,16 @@ describe("test-callback forms: a data guard is a finding in every form of a test
   });
 });
 
-describe("scope: the nearest function around a statement decides (spec rules G and C)", () => {
+describe("scope: rule G reads the nearest function, rule C reads the test body through inline callbacks", () => {
   const SILENT: Array<[string, string]> = [
     ["a bare return in a forEach callback nested in a test", 'it("x", () => { rows.forEach((r) => { return; }); expect(1).toBe(1); });'],
     ["a value return in a map callback nested in a test", 'it("x", () => { const a = rows.map((r) => { return r; }); expect(a).toBeDefined(); });'],
     ["a guard return in a function declaration nested in a test", 'it("x", () => { function pick(r) { if (!r) return; return r; } expect(pick(1)).toBe(1); });'],
     ["a return in a method of a class declared in a test", 'it("x", () => { class A { m() { return 1; } } expect(new A().m()).toBe(1); });'],
     ["a guard return at the top level of a describe", 'describe("d", () => { if (!x) return; it("y", () => { expect(1).toBe(1); }); });'],
-    ["an if on isError in a callback nested in a test", 'it("x", async () => { rows.forEach((r) => { if (r.isError) { log(r); } }); expect(1).toBe(1); });'],
+    ["an if on isError in a hook's nested callback", 'beforeAll(async () => { await Promise.all(rs.map(async (r) => { if (r.isError) { log(r); } })); });'],
+    ["an if on isError in a helper bound to a name inside a test", 'it("x", () => { const check = (r) => { if (r.isError) { log(r); } }; check(1); expect(1).toBe(1); });'],
+    ["an if on isError in a callback nested in a describe, outside any test", 'describe("d", () => { rows.forEach((r) => { if (r.isError) { log(r); } }); it("y", () => { expect(1).toBe(1); }); });'],
     ["a skip, then a bare return, in a switch case", 'it("x", async (ctx) => { switch (k) { case 1: ctx.skip(); return; default: break; } });'],
     ["a skip, then a bare return, inside try", 'it("x", async (ctx) => { try { ctx.skip(); return; } finally { cleanup(); } });'],
   ];
@@ -94,14 +99,20 @@ describe("scope: the nearest function around a statement decides (spec rules G a
     ["a skip helper called as a method", 'it("x", async (ctx) => { if (h.skipIfReason(r, ctx)) return; });', ["G"]],
     ["an awaited skip is not a skip call", 'it("x", async (ctx) => { if (r) { await ctx.skip(); return; } });', ["G"]],
     ["two guards on one line are two findings", 'it("x", () => { if (!a) return; if (!b) return; });', ["G", "G"]],
+    ["an if on isError in a forEach callback nested in a test", 'it("x", async () => { rows.forEach((r) => { if (r.isError) { log(r); } }); expect(1).toBe(1); });', ["C"]],
+    ["an if on isError in a Promise.all(map) callback nested in a test", 'it("x", async () => { await Promise.all(rs.map(async (r) => { if (!r.isError) { expect(1).toBe(1); } })); });', ["C"]],
+    ["an outcome if two inline callbacks deep", 'it("x", () => { a.forEach((x) => { x.rows.forEach(function (r) { if (!created.y) { expect(r).toBe(1); } }); }); });', ["C"]],
+    ["an outcome if in a nested callback that returns early (C only: the return ends the callback)", 'it("x", () => { rows.forEach((r) => { if (r.isError) return; expect(r).toBe(1); }); });', ["C"]],
   ];
 
-  // mutation: make `enclosingFunction` climb past a callback that is not a test callback (return the test callback around it) -> every SILENT nested row is a finding.
+  // mutation: make `enclosingFunction` climb past a callback that is not a test callback (return the test callback around it) -> the SILENT nested-return rows are findings.
+  // mutation: make `inTestBody` climb through a function that is not an inline callback -> the SILENT helper-bound-to-a-name row is a finding.
   it.each(SILENT)("is silent for %s", (_label, source) => {
     expect(scanSource("fixture.test.ts", source)).toEqual([]);
   });
 
   // mutation: make `isAllowedReturn` accept any return whose block holds a skip call anywhere -> the "skip that is not just before" row is silent.
+  // mutation: make `inTestBody` read only the nearest function (the pre-review scope) -> the four nested-callback rows are silent.
   it.each(FORBIDDEN)("refuses %s", (_label, source, rules) => {
     expect(rulesOf(source)).toEqual(rules);
   });
@@ -189,26 +200,51 @@ describe("the position report and the parse", () => {
   });
 });
 
+/** Shapes the QA pass found the scan blind to, which the review taught it: each is a finding now. */
+const LEARNED: Array<[string, string, string[]]> = [
+  ["created read through an optional chain", 'it("x", async () => { if (created?.x) { expect(1).toBe(1); } });', ["C"]],
+  ["created read through an element access", 'it("x", async () => { if (created["x"]) { expect(1).toBe(1); } });', ["C"]],
+  ["isError read through an element access", 'it("x", async () => { if (result["isError"]) { expect(1).toBe(1); } });', ["C"]],
+  ["isError read through a destructured binding", 'it("x", async () => { const { isError } = result; if (isError) { expect(1).toBe(1); } });', ["C"]],
+  ["it.each over a tagged template", 'it.each`\n a\n ${1}\n`("x", ({ a }) => { if (!a) return; });', ["G"]],
+  ["a test function imported from vitest under an alias", 'import { it as vit } from "vitest";\nvit("x", () => { if (!id) return; });', ["G"]],
+  ["test imported from vitest under an alias, with a modifier", 'import { test as check } from "vitest";\ncheck.each([1])("x", (n) => { if (!created.x) { expect(n).toBe(1); } });', ["C"]],
+];
+
+describe("shapes the scan learned in review: optional chains, element access, destructuring, tagged templates, vitest aliases", () => {
+  // mutation: restore OUTCOME_CONDITION to `/\.isError\b|\bcreated\./` -> the four condition rows are silent; drop the tagged-template step of
+  // `calleeRoot` -> the it.each row is silent; make `testRootsOf` return TEST_ROOTS only -> the two alias rows are silent.
+  it.each(LEARNED)("refuses %s", (_label, source, rules) => {
+    expect(rulesOf(source)).toEqual(rules);
+  });
+
+  // mutation: make `isSkipCall` accept `.skip(` on any receiver with any arguments (the pre-review rule) -> these rows are silent.
+  it.each([
+    ["a skip method on a receiver that is not a parameter", 'it("x", async () => { rows.skip(); return; });'],
+    ["a skip method with an argument", 'it("x", async (ctx) => { ctx.skip(1); return; });'],
+    ["a returned skip method on a local cursor", 'it("x", async () => { const cursor = open(); if (!id) return cursor.skip(); });'],
+  ])("refuses %s as a skip: only the test context's skip() is one", (_label, source) => {
+    expect(rulesOf(source)).toEqual(["G"]);
+  });
+
+  // mutation: make `testRootsOf` accept an import from any module -> the non-vitest alias row is a finding.
+  it("an `it` alias imported from a module that is not vitest is not a test root, and a name that only contains isError is not an outcome", () => {
+    expect(scanSource("fixture.test.ts", 'import { it as vit } from "./other";\nvit("x", () => { if (!id) return; });')).toEqual([]);
+    expect(scanSource("fixture.test.ts", 'it("x", () => { if (expectIsErrorShape(r)) { expect(1).toBe(1); } });')).toEqual([]);
+  });
+});
+
 /**
- * The blind spots of the scan, pinned as they are today. Each is a shape in which a test can still end without asserting, or a
- * test form the scan does not recognise. `live-guard-scan.mjs` documents the first group (conditions that are not an `if`,
- * non-inline callbacks); the second group is not in its header.
+ * The blind spots of the scan, pinned as they are today and documented in the module header of `live-guard-scan.mjs`. Each is a
+ * shape in which a test can still end without asserting, or a test form the scan does not recognise.
  */
 const BLIND_SPOTS: Array<[string, string]> = [
-  // documented in the module header
   ["a ternary statement that asserts only on success", 'it("x", async () => { result.isError ? undefined : expect(1).toBe(1); });'],
   ["an && statement that asserts only when created", 'it("x", async () => { created.x && expect(1).toBe(1); });'],
   ["an && statement that asserts only on success", 'it("x", async () => { !result.isError && expect(1).toBe(1); });'],
   ["a callback that is a named function, not inline", 'async function body() { if (!id) return; }\nit("x", body);'],
-  // not documented in the module header
-  ["created read through an optional chain", 'it("x", async () => { if (created?.x) { expect(1).toBe(1); } });'],
-  ["created read through an element access", 'it("x", async () => { if (created["x"]) { expect(1).toBe(1); } });'],
-  ["isError read through an element access", 'it("x", async () => { if (result["isError"]) { expect(1).toBe(1); } });'],
-  ["isError read through a destructured binding", 'it("x", async () => { const { isError } = result; if (isError) { expect(1).toBe(1); } });'],
   ["a switch on isError", 'it("x", async () => { switch (result.isError) { case false: expect(1).toBe(1); break; } });'],
-  ["an if on isError in a callback nested in the test", 'it("x", async () => { await Promise.all(rs.map(async (r) => { if (!r.isError) { expect(1).toBe(1); } })); });'],
-  ["it.each over a tagged template", 'it.each`\n a\n ${1}\n`("x", ({ a }) => { if (!a) return; });'],
-  ["a test function imported under an alias", 'import { it as vit } from "vitest";\nvit("x", () => { if (!id) return; });'],
+  ["a test function bound to a variable", 'const check = it;\ncheck("x", () => { if (!id) return; });'],
 ];
 
 describe("blind spots: pinned as they are, and proven latent in the armed files", () => {
@@ -377,13 +413,14 @@ describe("the CLI's edges: `main()` over an injected file list", () => {
     expect(run(["--bogus", "x"])).toEqual(run([]));
   });
 
-  // Not a wish: with no file the gate has nothing to read and passes. The real list is pinned by `live-guard-check.test.ts` (more than 60
-  // files, equal to `coveredTestFiles()`); this row records that `main()` itself has no zero-file guard.
-  it("an empty file list is a clean run: `0 armed files, 0 findings` and exit 0 (main() has no zero-file guard)", () => {
+  // mutation: drop the zero-file guard of main() -> an empty list exits 0 and this goes red (Rule #59: a gate that reads nothing passes nothing).
+  it("an empty file list fails: `0 armed files, 0 findings`, a hint, and exit 1", () => {
     const out: string[] = [];
 
-    expect(main([], { files: [], out: (line: string) => out.push(line) })).toBe(0);
-    expect(out).toEqual(["0 armed files, 0 findings"]);
+    expect(main([], { files: [], out: (line: string) => out.push(line) })).toBe(1);
+    expect(out[0]).toBe("0 armed files, 0 findings");
+    expect(out).toHaveLength(2);
+    expect(out[1]).toMatch(/^check-live-guards: no armed test file/);
     expect(liveGuardFindings({ files: [] })).toEqual([]);
   });
 

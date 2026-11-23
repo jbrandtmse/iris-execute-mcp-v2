@@ -120,6 +120,8 @@ describe("the registry: where the enable step sits, derived from the suites' own
   it("the DocDB allowlist is gone from the registry module, and no suite other than prepublish-all allows a skip", () => {
     expect("DOCDB_SKIPS" in ciChecks).toBe(false);
     expect("DOCDB_REASON" in ciChecks).toBe(false);
+    // The baseline constants were not exported, so the module's source is read as well.
+    expect(readFileSync(path.join(REPO_ROOT, "scripts", "lib", "ci-checks.mjs"), "utf8")).not.toMatch(/\bDOCDB_(?:SKIPS|REASON)\b/);
     expect(LIVE_SUITES["integration-data"]?.allowedSkips).toEqual([]);
     const withSkips = Object.keys(LIVE_SUITES).filter((id) => (LIVE_SUITES[id]?.allowedSkips.length ?? 0) > 0);
     expect(withSkips).toEqual(["prepublish-all"]);
@@ -255,6 +257,15 @@ describe("the session script, statically (AC 44.5.2, DW-726)", () => {
     expect(get, "Get is called after Modify").toBeGreaterThan(modify);
   });
 
+  // mutation: delete the `Set (tModify,tGet)=0` line -> this goes red (a Modify that raises an error would leave tModify undefined, the If
+  // line would raise <UNDEFINED> before its Terminate, and the Halt would end the session with exit 0).
+  it("starts the two results at 0 before the Modify, so an error raised by Modify or Get still reaches the Terminate", () => {
+    const init = at(/^Set \(tModify,tGet\)=0$/);
+
+    expect(init, "the results are initialised").toBeGreaterThan(-1);
+    expect(init).toBeLessThan(at(/\.Modify\("%Service_DocDB"/));
+  });
+
   // mutation: change one of the three service names to `%Service_DocDb` (or add a second service) -> this goes red.
   it("names exactly one service, spelled `%Service_DocDB`, and touches nothing else", () => {
     const services = scriptText.match(/%Service_\w+/g) ?? [];
@@ -311,7 +322,13 @@ describe("the session script, statically (AC 44.5.2, DW-726)", () => {
 describe("the step's argv, run for real: the declared command parses and the script is read before docker is needed (AC 44.5.2)", () => {
   const declared = (DECLARED_STEPS["throwaway"] as Array<{ run: string }>).map((step) => step.run).find((run) => run.includes(DOCDB_ENABLE_SCRIPT)) as string;
   const missingState = path.join(tmpdir(), "story-44-5-qa-no-such-dir", "throwaway-live.json");
-  const argvFor = (run: string): string[] => run.replace("${{ runner.temp }}/throwaway-live.json", missingState).split(/\s+/).slice(1);
+  // The state path is put in after the split, so a temporary directory with a space in it stays one argument.
+  const argvFor = (run: string): string[] =>
+    run
+      .replace("${{ runner.temp }}/throwaway-live.json", "STATE-FILE")
+      .split(/\s+/)
+      .slice(1)
+      .map((arg) => (arg === "STATE-FILE" ? missingState : arg));
   const runNode = (argv: string[]) => spawnSync(process.execPath, argv, { cwd: REPO_ROOT, encoding: "utf8", env: { ...process.env, IRIS_REQUIRE_LIVE: "" } });
 
   // mutation: point DOCDB_ENABLE_SCRIPT at a name that is not on disk, or drop `--namespace` from the declared command -> the stderr is not the missing-state message and this goes red.

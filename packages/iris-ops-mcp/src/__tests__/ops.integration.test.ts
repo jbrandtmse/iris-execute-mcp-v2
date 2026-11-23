@@ -300,9 +300,8 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      // RunNow is async; it may succeed or report the task is running
-      // Either way it should not be a hard error
+      // RunNow is async; it may succeed or report the task is running. Either way it is not an error result.
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
     });
 
     it("checks task history after execution", async () => {

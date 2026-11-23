@@ -3,6 +3,8 @@
 ; It runs after the prepublish-all suite (the Epic 35 F5 gate needs the service disabled) and before integration-data (the
 ; DocDB lifecycle needs it enabled: its routes answer ERROR #822 until an operator enables it). No test toggles the service.
 ; Each line is one terminal command. The session exits 1 (Terminate) unless Modify and Get both returned OK and the read-back is Enabled=1.
+; The results start at 0, so a Modify or Get that raises an error instead of returning a status still reaches the Terminate.
+Set (tModify,tGet)=0
 Set tProps("Enabled")=1
 Set tModify=##class(Security.Services).Modify("%Service_DocDB",.tProps)
 Set tGet=##class(Security.Services).Get("%Service_DocDB",.tRead)

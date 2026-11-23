@@ -162,12 +162,47 @@ deferred:
 - Given `ci.yml` without the `live-guard check` step, when `ci-workflow.test.ts` runs, then its new mutation row reports the dropped step (AC 44.5.3, the 42.3 step-equality self-test).
 - Given a seeded `irishealth-community` 2026.2 throwaway (port 52792, `HSCUSTOM`), when F5, the enable step and `integration-admin`, `-data`, `-dev`, `-interop` and `-ops` run through `ci-live-suite.mjs` in CI order, then each suite passes with 0 unlisted skips. `integration-data` runs 12 of 12 (none skipped), and the dev DocDB legs report totals 5 and 3 with 0 failed (AC 44.5.2, AC 44.5.4, DW-726).
 - Given `credentials-cli-real-keyring.test.ts`, when it runs with `--sequence.shuffle --sequence.seed=44` and in default order, then both runs pass (DW-753).
-- Given the baseline `vitest list --json` lengths (Design Notes), when they are re-taken after the story, then every package except `@iris-mcp/all` is unchanged, and `@iris-mcp/all` equals 6986 + 1 + the number of tests in `live-guard-check.test.ts` (AC 44.5.5, Rule #19).
+- Given the baseline `vitest list --json` lengths (Design Notes), when they are re-taken after the story, then every package except `@iris-mcp/all` and `@iris-mcp/shared` is unchanged, `@iris-mcp/shared` equals 2650 + 1 (the DW-753 default-order test), and `@iris-mcp/all` equals 6986 + 1 + the number of tests in `live-guard-check.test.ts` + the number of tests in the two `story-44-5-qa-*.test.ts` files (AC 44.5.5, Rule #19). [AMENDED 2026-11-23 — see the story change log]
 - Given the README CI section and the new CHANGELOG section, when they are read, then neither claims that an early return is invisible to CI or that CI skips the DocDB lifecycle (AC 44.5.5).
 - Given the story pushed by the lead, when CI runs on the `epic44` tip, then the run is green. The lead records its URL in this spec's Verification as the epic-done evidence (AC 44.5.4; lead-owned).
 
+### Review Findings
+
+Code review 2026-11-23 (`bmad-code-review`, full mode, frozen diff `9a5767a3..bd2e2e62` without the lead's commit `46491d25`). All four layers delivered (blind, edge-case, verification-gap, acceptance auditor); review outcome NORMAL. 18 entries after grouping: 0 high, 10 medium, 8 low. 16 patched, 2 deferred (1 new ledger entry, 1 already ledgered), 11 rejected.
+
+- [x] [Review][Patch] Rule C read only the nearest function, so an outcome `if` inside `rows.forEach(...)` or `Promise.all(rows.map(...))` in a test was silent, against the spec's "inside a test callback" (QA a; auditor; blind) [scripts/lib/live-guard-scan.mjs `inTestBody`]
+- [x] [Review][Patch] The scan missed `created?.x`, `created["x"]`, `result["isError"]`, a destructured `isError`, a tagged-template `it.each` and `it`/`test` imported from vitest under an alias, and the header did not list its remaining limits; README and CHANGELOG claimed more than the scan does (QA b; auditor; blind) [scripts/lib/live-guard-scan.mjs `OUTCOME_CONDITION`, `calleeRoot`, `testRootsOf`, header; README.md; CHANGELOG.md]
+- [x] [Review][Patch] Any `<anything>.skip(...)` counted as a skip, so `rows.skip(); return;` hid a guard; now only a no-argument `skip()` on a parameter of a function around it (the test context) [scripts/lib/live-guard-scan.mjs `isSkipCall`]
+- [x] [Review][Patch] `main()` passed with zero files (`0 armed files, 0 findings`, exit 0); it now exits 1 (QA c; auditor; Rule #59) [scripts/check-live-guards.mjs]
+- [x] [Review][Patch] The CLI's exit code was never shown non-zero as a real process; a spawn test with a preload that serves the guard to the real entry point now asserts exit 1 and the file:line [packages/iris-mcp-all/src/__tests__/live-guard-check.test.ts]
+- [x] [Review][Patch] The DocDB enable step failed open: a Modify that raises an error left `tModify` undefined, the If line raised `<UNDEFINED>` before its Terminate and the session exited 0 (proven live); the results now start at 0, and the failure path was proven end to end on a throwaway (exit 1) [scripts/ci-enable-docdb-service.script]
+- [x] [Review][Patch] DW-753's `beforeEach` was pinned only by a manual shuffled run; a third test asserts an empty store and goes red in default order without it [packages/shared/src/__tests__/credentials-cli-real-keyring.test.ts]
+- [x] [Review][Patch] Two converted tests asserted their precondition but not their own step: the ops task run now asserts `isError` falsy, the interop lookup re-import asserts `isError` falsy and `entryCount >= 1` (an import of XML with no entry also succeeds) [packages/iris-ops-mcp/src/__tests__/ops.integration.test.ts; packages/iris-interop-mcp/src/__tests__/interop.integration.test.ts]
+- [x] [Review][Patch] CHANGELOG said the four admin creates "create and delete cleanly", which DW-757 contradicts [CHANGELOG.md]
+- [x] [Review][Patch] AC 44.5.5's count pin did not account for the QA tests (amended; see the change log) [this spec]
+- [x] [Review][Patch] No `mutation:` line for the dropped-step row (AC 44.5.3), the README test (AC 44.5.5) or the count pin [this spec, Verification]
+- [x] [Review][Patch] The admin header said "two creates" failed; four did, from two causes [packages/iris-admin-mcp/src/__tests__/admin.integration.test.ts:17]
+- [x] [Review][Patch] "every skip helper ... is allowlisted" passed vacuously if its regex matched nothing [packages/iris-mcp-all/src/__tests__/live-guard-check.test.ts]
+- [x] [Review][Patch] The live-guard-check header claimed fixture text is joined at run time; it is not [packages/iris-mcp-all/src/__tests__/live-guard-check.test.ts:13]
+- [x] [Review][Patch] The DOCDB_SKIPS check tested module exports only, though the baseline constants were never exported [packages/iris-mcp-all/src/__tests__/story-44-5-qa-docdb-enable-step.test.ts]
+- [x] [Review][Patch] The argv builder split a temporary directory with a space into several arguments [packages/iris-mcp-all/src/__tests__/story-44-5-qa-docdb-enable-step.test.ts]
+- [x] [Review][Defer] 12 pre-existing armed integration tests assert only `content[0]?.text` `toBeDefined` (admin 3, interop 9; the blind hunter's 13th, the ops task run, is patched above; DW-758's summary says 13) — deferred: pre-existing, untouched by this story and outside its 48-site grammar; DW-758, routed burndown
+- [x] [Review][Defer] The database delete leaves the database mounted and `IRIS.DAT` on disk, so a rerun on one instance fails the create — deferred: product defect already ledgered as DW-757 (routed burndown); the CHANGELOG now says so
+
+Rejected:
+- `false` — a then-branch that ends in a bare skip call is not loud (auditor): vitest 2.1.9's `context.skip()` throws `PendingError` (`@vitest/runner` dist/index.js:57-59), so the test stops there.
+- `false` — "gets config item settings" asserts nothing about its result (verification-gap): by design, it queries `NonExistentItem` and its title says an error is a valid answer; its precondition is now asserted.
+- `low` — QA rows without their own `mutation:` line (auditor): Rule 19 asks for one observed mutation per AC's pinning test, and every AC has one.
+- `low` — the QA argv test depends on a fixed temporary path not existing (verification-gap): no realistic collision; the fix adds state handling.
+- `low` — CI runs the IRIS-side DocDB classes only with the service enabled (blind): the spec puts the legs in integration-dev after the enable step (decision #147); the implementation probe ran both classes in both states, and F5 covers the disabled refusal in prepublish-all.
+- `low` — `lastIndexOf` of -1 in the directory builder (edge): USER's directory is absolute on every supported host; rejected at the first review too.
+- `low` — the OAuth teardown deletes the singleton server configuration on an instance that already has one (edge): pre-existing teardown (baseline :182-183), unchanged here; integration suites run only on throwaways.
+- `low` — user and web-app list verifies read only the first page (edge, two findings): pre-existing assertions (the baseline asserted them whenever the call succeeded), green on the CI image.
+- `low` — the skip-helper definition oracle resolves imports and bodies by regex (edge, two findings): a test of a test; the real-tree scan catches a guard on an unlisted helper.
+
 ## Spec Change Log
 
+- 2026-11-23 (code review, Rule 5 apply-and-report): AC 44.5.5's count pin restated so it counts every test the story added. Original: "every package except `@iris-mcp/all` is unchanged, and `@iris-mcp/all` equals 6986 + 1 + the number of tests in `live-guard-check.test.ts`". Amended: shared 2650 + 1 (the review's DW-753 default-order test) and `@iris-mcp/all` 6986 + 1 + `live-guard-check.test.ts` + the two QA files. Intent unchanged (no test dropped, every added test accounted for); measured 7170 = 6986 + 1 + 53 + 29 + 101 and shared 2651.
 - 2026-11-23 (lead, spec gate, decision #147): DocDB-in-CI choice accepted (CI runs the lifecycle; enable step after `prepublish-all`, before `integration-data`). `epics.md` Story 44.5 gains the DW-726 and DW-753 bullets and the decision tag. Spine AD-29's CI rule names the live-guard check and the DocDB enable step. The admin create fixes (`directory`, `customizationRoles`) are test bugs fixed in-story (AC 44.5.4's own rule).
 
 ## Review Triage Log
@@ -310,6 +345,17 @@ deferred:
 - mutation (review pass, observed): make `isSkipHelperCall` accept any condition → the new FORBIDDEN row "a data guard OR-ed with a skip helper" goes red, with the other G rows; restored.
 - mutation (review pass, observed): give `integration-data` one `allowedSkips` entry in `ci-checks.mjs` → `ci-live-suite.test.ts` "holds the allowlisted skips of the registry: the four capture legs, and nothing else" and "every allowlisted skip names an existing file…" go red; restored.
 
+**Code review (2026-11-23), observed; each reverted, the file byte-identical afterwards:**
+- mutation (code review, observed): drop `'pnpm check:live-guards'` from `ROOT_GATE_SCRIPTS` → `ci-workflow.test.ts` "fails on a dropped step (the live-guard check), naming the difference" goes red (with six other rows), the AC 44.5.3 step-equality pin.
+- mutation (code review, observed): put the old README sentence ("…which the wrapper cannot see") back in the CI section → `ci-workflow.test.ts` "the README documents the CI (Story 42.3) > states the images…" goes red (AC 44.5.5 docs).
+- mutation (code review, observed): restore `OUTCOME_CONDITION` to `/\.isError\b|\bcreated\./` → 4 red; make `inTestBody` read only the nearest function → 4 red; let it climb through any function → 1 red; drop the tagged-template step of `calleeRoot` → 1 red; make `testRootsOf` return `TEST_ROOTS` only → 2 red; let `isSkipCall` accept `.skip(` on any receiver → 3 red; drop the zero-file guard of `main()` → 1 red (all `story-44-5-qa-scanner-shapes.test.ts`).
+- mutation (code review, observed): drop `process.exitCode =` from the entry-point branch of `check-live-guards.mjs` → `live-guard-check.test.ts` "the CLI as a real process exits 1…" goes red; the in-process rows stay green.
+- mutation (code review, observed, gates path): add `it("qa mutation", async () => { [r1].forEach((r) => { if (!r.isError) { expect(r).toBeDefined(); } }); });` to `ops.integration.test.ts` → `node scripts/check-live-guards.mjs` exits 1 naming `ops.integration.test.ts:106 C` (QA's false negative, now seen on the real tree).
+- mutation (code review, observed): delete the `beforeEach` of `credentials-cli-real-keyring.test.ts` → the new "every test starts from an empty store" goes red in DEFAULT order; with it, 3/3 in default order and shuffled (seed 44).
+- mutation (code review, observed): delete `Set (tModify,tGet)=0` from the enable script → `story-44-5-qa-docdb-enable-step.test.ts` "starts the two results at 0…" goes red. Live, on a throwaway (52792, `irishealth-community:2026.2@sha256:462de1fb…`, seeded): a copy whose Modify raises `<METHOD DOES NOT EXIST>` exits 0 without the line (the defect) and 1 with it; the real script exits 0 with `modify=1 get=1 Enabled=1`.
+- mutation (code review, observed, live): the interop re-import given `xml: "<not-a-lookup-table/>"` → integration-interop fails at "re-imports the lookup table" (the import succeeds with `entryCount` 0, so the count assertion is what catches it); the ops task run given id `999999` → integration-ops 17/18. Unmutated: integration-interop 21/21, integration-ops 18/18, 0 unlisted skips. The throwaway was removed (`docker ps -a --filter label=iris-mcp.owner=throwaway` empty).
+- count pin (AC 44.5.5, re-taken after the review): shared 2651, client-config 1455, iris-admin-mcp 514, iris-data-mcp 205, iris-dev-mcp 1824, iris-interop-mcp 754, iris-ops-mcp 350, iris-mcp-all 7170 = 6986 + 1 + 53 + 29 + 101.
+
 **Shared surfaces:** `LIVE_SUITES['integration-data'].allowedSkips`, `ROOT_GATE_SCRIPTS`, `DECLARED_STEPS.gates`/`.throwaway`, the root `package.json` scripts (`REAL_CHECKS`), and the README CI section. Every test added or changed passes on a fresh environment, in either order (lifecycle chains excepted, as in Boundaries).
 
 ### QA
@@ -335,7 +381,7 @@ Mutations (each applied to the production file, the new test observed red, then 
 - mutation (QA, observed): delete the final `Halt` -> 1 red.
 - mutation (QA, observed): add an `it` holding `forEach((r) => { if (!r.isError) {...} })` to `ops.integration.test.ts` -> the new "none of those shapes occurs in an armed file" test goes red naming `ops.integration.test.ts:297`, while `pnpm check:live-guards` still prints `73 armed files, 0 findings` (the scan false negative below, shown on the real tree).
 
-Findings (production, none fixed here; the scanner and CLI are unchanged):
+Findings (production, none fixed here; the scanner and CLI are unchanged). Code review resolved both, see `### Review Findings`: the nested-callback scope, the condition forms, the tagged template and the vitest alias are findings now; a `switch` on an outcome and a variable-bound `it` stay documented limits; an empty file list exits 1.
 - Scan false negatives, all latent (no armed file holds one; pinned by the new "latent" test, which walks a typed AST independent of the scan's regex). Not in the module header: `created?.x` and `created["x"]` (the pattern is `\bcreated\.`), `result["isError"]` and a destructured `isError`, a `switch` on an outcome, an outcome `if` inside a callback nested in a test (`forEach`, `Promise.all(rows.map(...))`; rule G scopes by the nearest function, and rule C does the same although the spec says "inside a test callback"), `it.each` over a tagged template, and `it`/`test` imported under an alias or bound to a variable. Documented in the header and pinned as such: `&&`/ternary-gated assertions and a non-inline callback.
 - `main()` has no zero-file guard: `main([], { files: [] })` returns 0 and prints `0 armed files, 0 findings`. The default list cannot be empty today (`live-guard-check.test.ts` pins more than 60 files), so it is a latent weakness of the gate, not a defect of the shipped tree.
 

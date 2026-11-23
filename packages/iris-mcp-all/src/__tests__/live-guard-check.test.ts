@@ -10,9 +10,9 @@
  *   - the grammar, by a table of synthetic tests: every allowed shape is silent, every forbidden shape is a finding;
  *   - the allowlists: every skip helper is defined (in an armed file or one it imports) to call a skip, and every entry has a reason.
  *
- * The scan and the CLI are `scripts/lib/live-guard-scan.mjs` and `scripts/check-live-guards.mjs`; this file calls them in process
- * and runs no docker and reaches no IRIS. Fixture text that names a live-gate call is joined at run time, so that this file is not
- * itself read as a live-capable test.
+ * The scan and the CLI are `scripts/lib/live-guard-scan.mjs` and `scripts/check-live-guards.mjs`; this file calls them in process,
+ * and runs the CLI as a real process twice (the clean tree exits 0; the guard served through a preload exits 1). It runs no docker
+ * and reaches no IRIS.
  */
 
 import { describe, expect, it } from "vitest";
@@ -122,6 +122,30 @@ describe("the gate is red on the path it guards: the guard put back in the real 
     expect(tolerated.some((line) => line.startsWith(`${INTEROP}:`) && line.includes(" C "))).toBe(true);
 
     expect(main([], { read: serve(interopText), out: () => {} })).toBe(0);
+  });
+
+  // mutation: drop `process.exitCode =` from the entry-point branch of check-live-guards.mjs -> the process exits 0 while it prints the
+  // finding, and this goes red (the in-process `main()` rows above stay green: they never run the entry point).
+  it("the CLI as a real process exits 1 and names the file and line when an armed file holds the guard", () => {
+    // A preload that serves the mutated interop text to the scan's `readFileSync`, so the real entry point reads it.
+    const preload = [
+      'import fs from "node:fs";',
+      'import path from "node:path";',
+      'import { syncBuiltinESMExports } from "node:module";',
+      "const original = fs.readFileSync;",
+      "const target = path.normalize(process.env.LIVE_GUARD_TARGET);",
+      "fs.readFileSync = function (file, ...rest) { return path.normalize(String(file)).endsWith(target) ? process.env.LIVE_GUARD_TEXT : original.call(this, file, ...rest); };",
+      "syncBuiltinESMExports();",
+    ].join("\n");
+    const run = spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(preload)}`, path.join(REPO_ROOT, "scripts", "check-live-guards.mjs")], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      env: { ...process.env, LIVE_GUARD_TARGET: INTEROP, LIVE_GUARD_TEXT: withGuard },
+    });
+
+    expect(run.status, run.stdout + run.stderr).toBe(1);
+    expect(run.stdout).toContain(`${INTEROP}:${guardLine} G if (!created.production) return;`);
+    expect(run.stdout).toContain(`${coveredTestFiles().length} armed files, 2 findings`);
   });
 });
 
@@ -244,6 +268,7 @@ describe("the allowlists: each helper is defined to skip, and each entry has a r
     }
     const allowed = new Set<string>(SKIP_HELPERS.map((entry: { name: string }) => entry.name));
 
+    expect(called.size, "the pattern finds the skip-helper guards the armed files use today").toBeGreaterThan(0);
     expect([...called].filter((name) => !allowed.has(name))).toEqual([]);
   });
 });
