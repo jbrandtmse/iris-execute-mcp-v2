@@ -124,7 +124,7 @@
 # put new epic notes in epics.md, not here.
 
 generated: '2026-04-05'
-last_updated: '11-23-2026 12:45'
+last_updated: '11-23-2026 21:23'
 previous_update: '2026-09-16 (Story 37.1 dev complete via bmad-dev-story - ready-for-dev
   -> review. Fixed McpServerBase.start(): a default-profile health-check rejection
   no longer calls process.exit(1) - it logs (health-check-failed line + a new continuation
@@ -560,7 +560,7 @@ development_status:
   43-4-sdk-v2-docs-smokes-and-capstone: done
   epic-43-retrospective: optional
 
-  epic-44: in-progress
+  epic-44: done
   44-1-docdb-create-registers-the-database: done
   44-2-vs-code-copilot-mcp-configuration-targets: done
   44-3-confirmation-bound-to-the-scope-shown: done
