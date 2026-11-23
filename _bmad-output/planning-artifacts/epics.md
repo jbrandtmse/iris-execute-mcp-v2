@@ -6208,7 +6208,7 @@ These five are set to `in-progress` when the proposal is applied, so the Story 4
 **As a** person approving a destructive call, **I want** my accept to count only for the scope the dialog showed me, **so that** a promote cannot write Storage drops that appeared after I looked.
 
 - **AC 44.3.1** — Root cause, confirmed with a failing test first.
-  - In `confirmOnWire` (`packages/shared/src/server-base.ts`, about `:2125-2170`; the ledger cites `:2133-2143`), a retry that echoes a valid, unused state decides the call before the scope is resolved again.
+  - In `confirmOnWire` (`packages/shared/src/server-base.ts`, about `:2125-2170`; the ledger cites `:2133-2143`), a retry that echoes a valid, unused state decides the call before the scope is resolved again. *(Amended 2026-11-22 from the Story 44.3 probe, wave-9 decision #138.)* As probed: `confirmOnWire` is `:2125-2173` and its deciding branch `:2134-2151`. The "10-round limit" is the SDK client's default on the 2026-07-28 era; on 2025-11-25 the server's shim caps handler re-entries at 8 (`server-base.ts:915`). A deciding round whose handler refuses before `confirm` leaves the round-1 pending ask behind, giving the call a second, `unanswered` audit entry; this story fixes that too.
   - `iris_env_promote`'s `executeAction` re-runs `preflightClassSteps` every round (`packages/iris-dev-mcp/src/tools/env-promote.ts:1319`), and the accepting round's `planned` drops reach `promotionScope` without being compared with what the dialog showed.
   - The test drives two rounds whose planned drops differ, and shows that today's helper proceeds.
 - **AC 44.3.2** — The fix is in the one shared helper (AD-34). Handlers never compare state.
@@ -6227,7 +6227,7 @@ These five are set to `in-progress` when the proposal is applied, so the Story 4
   | `iris_message_resend:resendFiltered` | `message-resend.ts:644` |
   | `iris_doc_edit:regenerateStorage` | `doc-edit.ts:582` |
 
-  - **What the digest covers.** For each gate, decide whether the digest covers the whole scope text or a value the gate supplies for binding. `resendFiltered`'s scope carries a live match count ("N message(s) match now"), which can change between rounds on a busy queue. The promote's planned drop set must be inside the digest.
+  - **What the digest covers.** For each gate, decide whether the digest covers the whole scope text or a value the gate supplies for binding. `resendFiltered`'s scope carries a live match count ("N message(s) match now"), which can change between rounds on a busy queue. *(Amended 2026-11-22 from the Story 44.3 probe, wave-9 decision #138.)* It changes on every round when `to` is omitted, because IRIS sets `to` to the current second (`MessageResend.cls:543`), so the gate binds its status, `from`, a caller-supplied `to` and the cap, not the count. The promote and `regenerateStorage` texts are truncated (10 items, 600 characters), so both bind their full drop lists. The bound is one re-ask, then the new refusal `CONFIRMATION_SCOPE_CHANGED` (sanctioned `S-44.3-scope-changed-refusal`). The promote's planned drop set must be inside the digest.
   - **Bound the re-asks.** A scope that changes on every round must not loop until the client's round limit; the probe showed a 10-round limit. Define the bound, for example one re-ask and then `CONFIRMATION_DECLINED`. A new refusal code is a sanctioned AD-15 change.
 - **AC 44.3.4** — Tests on both eras, through the real SDK client over stdio (`serveStdio`), as in AC 43.3.5:
   - an unchanged scope accepts once and proceeds;
