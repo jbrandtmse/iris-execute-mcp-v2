@@ -4272,3 +4272,9 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-7-epic-44-burn-down.md | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: General.Compile overwrites tSC in its tUpdated loop (irislib/%Atelier/v1/Utils/General.cls:1318-1385); verifyCompiled refuses non-.cls names; the 44.4 oracle table records Atelier upd stays true for a failed routine; not probed with a routine
 - 2026-11-23T17:13:26Z status=routed owner=44-7-epic-44-burn-down by=harvest note=taken into Story 44.7 at its spec gate (decision #151): probe for a routine oracle, resolve or close by decision with the limit documented
+
+### DW-760: A compile failure of an .inc or .int document alone, in a compile that also writes a persistent class's Storage, still reads as success in iris_doc_compile, iris_doc_load and iris_env_promote: IRIS's docnames upd flag carries no compile verdict for them
+- source: spec-44-7-epic-44-burn-down.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: Story 44.7 probe: docnames/RTN upd is true for an .inc whether or not anything compiled it; the .int case likewise has no non-console oracle; .mac is resolved via upd (DW-759)
+- 2026-11-23T19:03:36Z status=routed owner=44-7-epic-44-burn-down by=harvest note=remainder of DW-759
+- 2026-11-23T19:03:49Z status=wontfix-accepted owner=44-7-epic-44-burn-down by=lead note=closed by decision #152: no oracle that reads no console text exists for .inc/.int (Rule #13); the limit is documented in packages/iris-dev-mcp/README.md and the CHANGELOG; reopen if IRIS exposes one

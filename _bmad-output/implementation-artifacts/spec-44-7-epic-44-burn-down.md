@@ -4,6 +4,7 @@ type: 'bugfix'
 created: '2026-11-23'
 status: 'done'
 baseline_revision: 'ad2b17e7862fc44f368248f4f7adbc0f7f36b41b'
+baseline_commit: 'ad2b17e7862fc44f368248f4f7adbc0f7f36b41b'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -14,36 +15,7 @@ context:
 warnings:
   - multiple-goals
   - oversized
-deferred:
-  - 'A compile failure of an `.inc` or an `.int` document alone, in a compile that also writes a persistent class''s Storage, still reads as success in iris_doc_compile, iris_doc_load and iris_env_promote: IRIS''s up-to-date flag (`docnames/RTN` `upd`) is true for an `.inc` whether or not anything compiled it, and for an `.int` after a failed compile (probe 2026-11-23, `p759b.out`). DW-759 resolved `.mac`; a check for these two needs another oracle (a new route or bootstrapped method, outside this story). Stated as a limit in `packages/iris-dev-mcp/README.md` and the CHANGELOG.'
-  - summary: >-
-      The `provision-project-environment` skill and prompt list `iris_database_manage delete` as the rollback for a created database, but delete now keeps `IRIS.DAT`, so re-provisioning at the same directory fails with #78.
-    evidence: |-
-      Review pass 2026-11-23 (BH11). Probe 2026-11-23: a create at a directory holding `IRIS.DAT` fails #78. The skill is generated from `packages/iris-admin-mcp/src/prompts/provisionProjectEnvironment.ts` with parity tests in `iris-mcp-all`.
-    location: >-
-      skills/provision-project-environment/SKILL.md:15
-    severity: medium
-  - summary: >-
-      An `iris_doc_compile` wildcard with no literal prefix (`*.cls`) lists every class of the namespace and hands the whole list to one `action/query` check; a very large namespace may time out or exceed a request limit.
-    evidence: |-
-      Review pass (BH4, EC1, VG10). Not exercised on a large namespace. Settle by compiling `*.cls` against a throwaway with a few thousand classes.
-    location: >-
-      packages/iris-dev-mcp/src/tools/compile.ts:documentsCovered
-    severity: medium (unverified)
-  - summary: >-
-      `DeleteDatabaseEntry` does not look at the `Server` column of `Config.Databases`, so a remote (ECP) entry may dismount a same-named local path or count as a shared directory.
-    evidence: |-
-      Review pass (BH8, EC6). Not probed: needs an ECP database entry on a throwaway.
-    location: >-
-      src/ExecuteMCPv2/REST/Config.cls:DeleteDatabaseEntry
-    severity: medium (unverified)
-  - summary: >-
-      `iris_doc_compile` with `flags` that omit `c` (for example `k`) still runs the compile check and may report an uncompiled class as failed.
-    evidence: |-
-      Review pass (EC4). Not probed: compile a clean class with `flags: "k"` on a throwaway and read the result.
-    location: >-
-      packages/iris-dev-mcp/src/tools/compile.ts
-    severity: low (unverified)
+deferred: []
 ---
 
 <intent-contract>
@@ -191,6 +163,8 @@ deferred:
 - DW-759 *(lead, spec gate, decision #151; was this plan's `deferred:` item)*: a failed routine in a compile that also writes a class's Storage reads as success in `iris_doc_compile`, `iris_doc_load` and `iris_env_promote`. Probe on the throwaway (a broken `ExecuteMCPv2.Temp` routine compiled together with a Storage-writing class) for an oracle that reads no console text (Rule #13). Candidates: the routine's `.obj`/`.int` generation state through an existing Atelier read, or `%Library.RoutineMgr`. If one exists and needs no new route or bootstrapped method, resolve it through the same shared check path, pinned by a mutation. Otherwise close it by decision: state the limit in `packages/iris-dev-mcp/README.md` (the compile tools' section) and in the CHANGELOG, and record the probe capture. Either way the disposition is terminal and counts in the AC 44.7.1 tally (now 10 entries).
 
 ## Spec Change Log
+
+- 2026-11-23 (lead, dev_complete triage, decision #152): the build's five `deferred:` items. (1) The `.inc`/`.int` remainder of DW-759 (no oracle: `upd` says nothing about whether they compiled) is harvested as DW-760 and closed by decision at once. The limit is documented in the dev README and the CHANGELOG, and DW-759 counts as resolved for `.mac`, the only routine type IRIS gives an oracle for. (2)-(5) The other four are consequences of this story's own new code or behaviour, so they are in-story items for the code review, not ledger entries: the `provision-project-environment` rollback text (delete now keeps `IRIS.DAT`, so re-provisioning at the same directory fails #78; fix the prompt source and regenerate the skill with its parity tests); an unprefixed wildcard (`*.cls`) expanding the whole namespace into one check query (Rule #38: bound it, or batch it, or check only the explicitly named documents, and pin it); `DeleteDatabaseEntry` ignoring the `Config.Databases` `Server` column (a remote/ECP entry must never dismount a local path or count as sharing it: restrict both to local entries, and prove it by source read plus a unit or IRIS-side test, since a live ECP probe is out of reach); and compile `flags` without `c` still running the check (probe on a throwaway, then skip the check when nothing was compiled, or record that IRIS compiles anyway). Anything the review cannot close goes on the epic-close decision sheet.
 
 - 2026-11-23 (lead, spec gate, decision #151): the plan's `deferred:` routines item is harvested as DW-759 and taken into this story (cap 12; Rule 17: `burndown` ownership does not survive the gate), with a terminal disposition required. The spine was amended at the gate: AD-15 gets the three `S-44.7-*` sanctions, and AD-14 "on failure" gets the compile check in the three dev tools.
 
