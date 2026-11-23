@@ -116,3 +116,6 @@
 2026-11-23T08:46:06Z	Story 44.6	fresh_check	launcher_shuffled_531+3skip shared_shuffled_2649/2650(1_pre-existing_order-dependence_in_untouched_credentials-cli-real-keyring.test.ts->DW-753) in-order_all_green
 2026-11-23T08:46:26Z	Story 44.6	committed	sha=ecc82b0 branch=epic44 pushed=yes ci=pending run=45141297405
 2026-11-23T08:46:26Z	Story 44.6	story_cycle	plan=1b9703a(blocked)+re-plan_5bbdbd3 build=3d49a06 qa=eacee78 cr+smoke=ecc82b0 status=done reviews=1 owner_rulings=#134,#140 decisions=#143 human_rows=AC_44.6.5+P-6_x5(owner_sitting_with_44.2_D-6)
+2026-11-23T09:23:07Z	Story 44.6	ci_red_classified	run=45141297405 sha=ecc82b0 class=story(two_review-patch_test_gaps) jobs=gates_x3(story-44-6-doc-claims_unguarded_changeset_read;after-release_reader_check),throwaway(launcher-live_localSpawnIntegration_lacks_inspectServerManagerServers_after_DW-749_guard) infra=none
+2026-11-23T09:23:07Z	Story 44.6	rework_opened	trigger=ci items=[CI]_doc-claims_skipIf_changeset,[CI]_live_test_inspection_fixture iteration=1
+2026-11-23T09:23:07Z	Story 44.6	stage_spawned	stage=implement spawn_at=2026-11-23T09:23:07Z model=claude-sonnet-5-5 agent_name=44-6-launcher-provider-works-in-copilot-sessions-implement-2 cycle_iteration=2

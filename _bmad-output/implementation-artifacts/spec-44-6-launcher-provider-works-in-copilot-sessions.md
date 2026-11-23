@@ -2,10 +2,10 @@
 title: 'Story 44.6: Launcher Provider Works in Copilot Sessions'
 type: 'bugfix'
 created: '2026-11-22'
-status: 'done'
+status: 'in-progress'
 baseline_revision: '374477bd4631d574ed85b987a3828dfd3da1f751'
 baseline_commit: '374477bd4631d574ed85b987a3828dfd3da1f751'
-review_loop_iteration: 0
+review_loop_iteration: 1
 followup_review_recommended: false
 context:
   - '{project-root}/.claude/rules/project-rules.md'
@@ -167,6 +167,13 @@ Code review 2026-11-23 (full mode; layers blind-hunter, edge-case-hunter, verifi
 - (gap) Ambient `FAKE_KEYRING_FILE` / `FAKE_KEYRING_UNAVAILABLE` in a developer shell, and no stale-dist check in the QA launcher files -- both fail red or mislead only locally, never falsely green on CI; nobody sets the fake's variables in a shell (low, the fix adds guards).
 - (gap) The exhausted-chain half of the leak-sweep addition is near-vacuous -- it still fails if the error text echoes the raw env; weak, not unfalsifiable (low).
 - (gap) AC-14 and AC-15 have no `mutation:` line -- AC-14 is human-only; AC-15 is the lead's fresh check plus `gen:governance-baseline:check`, not a story-code pin.
+
+### Rework (iteration 1: CI red, run 45141297405; lead re-open 2026-11-23)
+
+CI on `ecc82b0` failed in two jobs, both caused by this story's review patches. Work ONLY these items:
+
+- [ ] [CI] `packages/iris-mcp-all/src/__tests__/story-44-6-doc-claims.test.ts` reads `.changeset/story-44-6-launcher-provider-works-in-copilot-sessions.md` unconditionally, so `story-42-1-qa-changeset-readers.test.ts` ("after the release: every test that mentions .changeset passes with the pending changesets consumed") fails in all three gates jobs (`expected [ 'story-44-6-doc-claims.test.ts: ' ] to deeply equal []`; reproduced locally). Guard the changeset assertion exactly as the sibling `story-44-3-doc-claims.test.ts` does (`existsSync` + `it.skipIf(!present)`), keeping the CHANGELOG assertions unconditional. Verify by re-running `story-42-1-qa-changeset-readers.test.ts` (it hides `.changeset` and re-runs every reader) green.
+- [ ] [CI] `extensions/iris-mcp-launcher/src/__tests__/localSpawnIntegration.test.ts` (the armed launcher-live suite, run only in CI's throwaway job) builds its `LauncherProvider` (`newProvider`, ~:154) without `inspectServerManagerServers`, so after the DW-749 guard the provided env is the fail-safe `{}` and the assertion `env: expect.objectContaining({ IRIS_CREDENTIAL_NAME: "local-iris" })` fails. Wire `inspectServerManagerServers` from the shared fixture `serverManagerInspection.ts` (`userScopeServers(["local-iris"])`), the real `inspect()` shape (Rule #54). Verify the armed leg on a throwaway exactly as CI runs it (`node scripts/throwaway-iris.mjs run --host-port 52792 -- <the launcher-live command from .github/workflows/ci.yml>`; the container is removed afterwards), and the unarmed run skips cleanly.
 
 ## Spec Change Log
 
