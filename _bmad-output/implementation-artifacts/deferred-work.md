@@ -4292,3 +4292,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: Story 44.7 probe: docnames/RTN upd is true for an .inc whether or not anything compiled it; the .int case likewise has no non-console oracle; .mac is resolved via upd (DW-759)
 - 2026-11-23T19:03:36Z status=routed owner=44-7-epic-44-burn-down by=harvest note=remainder of DW-759
 - 2026-11-23T19:03:49Z status=wontfix-accepted owner=44-7-epic-44-burn-down by=lead note=closed by decision #152: no oracle that reads no console text exists for .inc/.int (Rule #13); the limit is documented in packages/iris-dev-mcp/README.md and the CHANGELOG; reopen if IRIS exposes one
+
+### DW-761: The shared Server Manager import (IRIS_SERVER_MANAGER=auto) takes a server's definition from the first settings file that names it (workspace before user) and the password from the keychain by server name, so a workspace file may direct a stored password to its own host (the DW-752 class)
+- source: spec-44-8-local-resolver-hands-a-password-only-to-user-scoped-servers.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: packages/shared/src/server-manager-source.ts:288-310 (candidate files in precedence order, workspace first; first sighting decides); credential chain keyed by server name (credential-chain.ts); unprobed whether a host-only workspace entry claims the slot
+- 2026-11-23T21:35:53Z status=routed owner=44-8-local-resolver-hands-a-password-only-to-user-scoped-servers by=harvest note=taken into Story 44.8 at its spec gate (decision #154): probe, then fix with the user-scope rule or close with evidence
