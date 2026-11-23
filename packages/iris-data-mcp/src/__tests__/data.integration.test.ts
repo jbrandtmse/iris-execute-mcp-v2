@@ -9,6 +9,11 @@
  * DocDB lifecycle: create database -> create property -> create index ->
  *   insert document -> get document -> update document -> find with filter ->
  *   delete document -> drop database.
+ *   CI runs this lifecycle (Story 44.5, DW-726): the throwaway job enables
+ *   %Service_DocDB after the Epic 35 F5 gate and before this suite, and the
+ *   suite allowlists no skip, so a skipped lifecycle test fails it. A step
+ *   that fails leaves the next one asserting its precondition, so the chain
+ *   fails loudly instead of returning early.
  *
  * Analytics: list cubes (may be empty), MDX error handling.
  * REST management: list REST applications.
@@ -191,7 +196,7 @@ describe.skipIf(!IRIS_OK || !DOCDB_OK)("DocDB lifecycle integration", () => {
   // ── 5. Get document by ID ──────────────────────────────────────
 
   it("gets the document by ID and verifies content", async () => {
-    if (!insertedDocId) return;
+    expect(insertedDocId, "the insert test must have returned the document id").toBeTruthy();
 
     const result = await docdbDocumentTool.handler(
       { action: "get", database: TEST_DB, id: insertedDocId },
@@ -209,7 +214,7 @@ describe.skipIf(!IRIS_OK || !DOCDB_OK)("DocDB lifecycle integration", () => {
   // ── 6. Update document ─────────────────────────────────────────
 
   it("updates the document and verifies changes", async () => {
-    if (!insertedDocId) return;
+    expect(insertedDocId, "the insert test must have returned the document id").toBeTruthy();
 
     const result = await docdbDocumentTool.handler(
       {
@@ -253,7 +258,7 @@ describe.skipIf(!IRIS_OK || !DOCDB_OK)("DocDB lifecycle integration", () => {
   // ── 8. Delete document by ID ───────────────────────────────────
 
   it("deletes the document by ID", async () => {
-    if (!insertedDocId) return;
+    expect(insertedDocId, "the insert test must have returned the document id").toBeTruthy();
 
     const result = await docdbDocumentTool.handler(
       { action: "delete", database: TEST_DB, id: insertedDocId },

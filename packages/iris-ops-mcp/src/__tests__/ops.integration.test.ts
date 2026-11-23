@@ -265,25 +265,23 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
       );
 
       expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        // Extract task ID from response for cleanup
-        const structured = result.structuredContent as { id?: string | number; taskId?: string | number } | undefined;
-        createdTaskId = structured?.id ?? structured?.taskId;
-        // If structuredContent didn't have it, try parsing from text
-        if (createdTaskId === undefined) {
-          const text = result.content[0]?.text ?? "";
-          const idMatch = text.match(/(?:id|ID|Id)[:\s]*(\d+)/);
-          if (idMatch) {
-            createdTaskId = idMatch[1];
-          }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      // Extract task ID from response for cleanup
+      const structured = result.structuredContent as { id?: string | number; taskId?: string | number } | undefined;
+      createdTaskId = structured?.id ?? structured?.taskId;
+      // If structuredContent didn't have it, try parsing from text
+      if (createdTaskId === undefined) {
+        const text = result.content[0]?.text ?? "";
+        const idMatch = text.match(/(?:id|ID|Id)[:\s]*(\d+)/);
+        if (idMatch) {
+          createdTaskId = idMatch[1];
         }
       }
-      expect(result.isError).toBeFalsy();
       expect(createdTaskId).toBeDefined();
     });
 
     it("lists tasks and verifies test task exists", async () => {
-      if (createdTaskId === undefined) return;
+      expect(createdTaskId, "the create test must have created the task").toBeDefined();
 
       const result = await taskListTool.handler({}, ctx);
 
@@ -295,7 +293,7 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
     });
 
     it("runs the test task", async () => {
-      if (createdTaskId === undefined) return;
+      expect(createdTaskId, "the create test must have created the task").toBeDefined();
 
       const result = await taskRunTool.handler(
         { id: createdTaskId },
@@ -308,7 +306,7 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
     });
 
     it("checks task history after execution", async () => {
-      if (createdTaskId === undefined) return;
+      expect(createdTaskId, "the create test must have created the task").toBeDefined();
 
       // Brief wait for async task execution
       await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -325,7 +323,7 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-ops-mcp integration", () => {
     });
 
     it("deletes the test task", async () => {
-      if (createdTaskId === undefined) return;
+      expect(createdTaskId, "the create test must have created the task").toBeDefined();
 
       const result = await taskManageTool.handler(
         { action: "delete", id: createdTaskId },

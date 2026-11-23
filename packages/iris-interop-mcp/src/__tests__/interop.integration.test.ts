@@ -75,8 +75,8 @@ let config: IrisConnectionConfig;
 let ctx: ToolContext;
 
 /**
- * Track what was successfully created (isError was NOT set on the response)
- * for both cleanup and to gate verification tests.
+ * Track what was successfully created (isError was NOT set on the response).
+ * A later test asserts its flag (Story 44.5): it never returns early without it.
  */
 const created = {
   production: false,
@@ -169,10 +169,8 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        created.production = true;
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      created.production = true;
     });
 
     it("verifies production status after creation", async () => {
@@ -186,14 +184,12 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
     it("gets production summary across namespaces", async () => {
       const result = await productionSummaryTool.handler({}, ctx);
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        const structured = result.structuredContent as {
-          productions: unknown[];
-          count: number;
-        };
-        expect(structured.count).toBeGreaterThanOrEqual(0);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const structured = result.structuredContent as {
+        productions: unknown[];
+        count: number;
+      };
+      expect(structured.count).toBeGreaterThanOrEqual(0);
     });
   });
 
@@ -201,7 +197,7 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
 
   describe("production control", () => {
     it("starts the test production", async () => {
-      if (!created.production) return;
+      expect(created.production, "the create test must have created the production").toBe(true);
 
       attempted.productionStarted = true;
       const result = await productionControlTool.handler(
@@ -209,26 +205,22 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        created.productionStarted = true;
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      created.productionStarted = true;
     });
 
     it("verifies production is running via status", async () => {
-      if (!created.productionStarted) return;
+      expect(created.productionStarted, "the start test must have started the production").toBe(true);
 
       const result = await productionStatusTool.handler(
         { detail: true },
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        const text = result.content[0]?.text ?? "";
-        // Production should show a state
-        expect(text.length).toBeGreaterThan(0);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const text = result.content[0]?.text ?? "";
+      // Production should show a state
+      expect(text.length).toBeGreaterThan(0);
     });
   });
 
@@ -236,7 +228,7 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
 
   describe("production item management", () => {
     it("gets config item settings (may return error for empty production)", async () => {
-      if (!created.productionStarted) return;
+      expect(created.productionStarted, "the start test must have started the production").toBe(true);
 
       // An empty production has no items, so this may return an error
       // or an empty result — both are valid
@@ -320,12 +312,10 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
     it("lists available adapters", async () => {
       const result = await productionAdaptersTool.handler({}, ctx);
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        // Adapters should return some built-in adapters
-        const text = result.content[0]?.text ?? "";
-        expect(text.length).toBeGreaterThan(2); // at least "[]" or more
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      // Adapters should return some built-in adapters
+      const text = result.content[0]?.text ?? "";
+      expect(text.length).toBeGreaterThan(2); // at least "[]" or more
     });
   });
 
@@ -344,22 +334,19 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        created.credential = true;
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      created.credential = true;
     });
 
     it("verifies credential in credential list (no passwords)", async () => {
+      expect(created.credential, "the create test must have created the credential").toBe(true);
       const result = await credentialListTool.handler({}, ctx);
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError && created.credential) {
-        const text = result.content[0]?.text ?? "";
-        expect(text).toContain(TEST_CREDENTIAL);
-        // Passwords must never be exposed
-        expect(text).not.toContain("testpass123");
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const text = result.content[0]?.text ?? "";
+      expect(text).toContain(TEST_CREDENTIAL);
+      // Passwords must never be exposed
+      expect(text).not.toContain("testpass123");
     });
   });
 
@@ -378,14 +365,12 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        created.lookupEntry = true;
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      created.lookupEntry = true;
     });
 
     it("gets the lookup table entry to verify", async () => {
-      if (!created.lookupEntry) return;
+      expect(created.lookupEntry, "the set test must have created the lookup entry").toBe(true);
 
       const result = await lookupManageTool.handler(
         {
@@ -396,11 +381,9 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        const text = result.content[0]?.text ?? "";
-        expect(text).toContain(TEST_LOOKUP_VALUE);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const text = result.content[0]?.text ?? "";
+      expect(text).toContain(TEST_LOOKUP_VALUE);
     });
   });
 
@@ -408,7 +391,7 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
 
   describe("lookup table transfer", () => {
     it("exports a lookup table as XML", async () => {
-      if (!created.lookupEntry) return;
+      expect(created.lookupEntry, "the set test must have created the lookup entry").toBe(true);
 
       const result = await lookupTransferTool.handler(
         {
@@ -418,16 +401,14 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        // XML export should contain the table name
-        const text = result.content[0]?.text ?? "";
-        expect(text.length).toBeGreaterThan(0);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      // XML export should contain the table name
+      const text = result.content[0]?.text ?? "";
+      expect(text.length).toBeGreaterThan(0);
     });
 
     it("re-imports the lookup table", async () => {
-      if (!created.lookupEntry) return;
+      expect(created.lookupEntry, "the set test must have created the lookup entry").toBe(true);
 
       // Simple import test: re-import the same table
       // The import tool requires XML content; we export first then import
@@ -439,13 +420,13 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      if (exportResult.isError) return;
+      expect(exportResult.isError, exportResult.content[0]?.text).toBeFalsy();
 
       // Extract XML from export result
       const structured = exportResult.structuredContent as { xml?: string; content?: string };
       const xml = structured?.xml ?? structured?.content ?? exportResult.content[0]?.text ?? "";
 
-      if (!xml || xml.length === 0) return;
+      expect(xml, "the export must return the table's XML").toBeTruthy();
 
       const importResult = await lookupTransferTool.handler(
         {

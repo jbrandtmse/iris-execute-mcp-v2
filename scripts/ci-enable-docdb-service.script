@@ -1,0 +1,11 @@
+; Story 44.5 (DW-726): the CI throwaway step "enable %Service_DocDB". It is piped into an IRIS terminal session in %SYS by
+; `node scripts/throwaway-iris.mjs session --state <file> --namespace %SYS --script scripts/ci-enable-docdb-service.script`.
+; It runs after the prepublish-all suite (the Epic 35 F5 gate needs the service disabled) and before integration-data (the
+; DocDB lifecycle needs it enabled: its routes answer ERROR #822 until an operator enables it). No test toggles the service.
+; Each line is one terminal command. The session exits 1 (Terminate) unless Modify and Get both returned OK and the read-back is Enabled=1.
+Set tProps("Enabled")=1
+Set tModify=##class(Security.Services).Modify("%Service_DocDB",.tProps)
+Set tGet=##class(Security.Services).Get("%Service_DocDB",.tRead)
+Write "ci-enable-docdb-service: modify=",tModify," get=",tGet," Enabled=",$Get(tRead("Enabled")),!
+If (tModify'=1)||(tGet'=1)||($Get(tRead("Enabled"))'=1) Write "ci-enable-docdb-service: FAILED",! Do $SYSTEM.Process.Terminate(,1)
+Halt

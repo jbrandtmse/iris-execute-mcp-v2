@@ -2,15 +2,22 @@
 title: 'Story 44.5: Integration Suites Cannot Pass Without Testing'
 type: 'chore'
 created: '2026-11-23'
-status: 'ready-for-dev'
-baseline_revision: 'd634a597a4196521eacbc4437d413872e909b67e'
+status: 'done'
+baseline_revision: '9a5767a35a2b76a7faa54b60036f43ada08d977b'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      iris_database_manage delete removes only the CPF entry: the database stays mounted and its IRIS.DAT stays on disk, so a second run of the admin integration test on one instance fails at create.
+    evidence: |-
+      Seen while hardening the admin database create (Story 44.5): with the literal directory mcpadmintestdata, a second run on the same instance fails at the create with "ERROR #60: the database must be dismounted". CI is unaffected (a fresh container per run). The test keeps the literal directory so the defect is not hidden; a unique suffix per run would hide it.
+    location: >-
+      packages/iris-admin-mcp (iris_database_manage delete); packages/iris-admin-mcp/src/__tests__/admin.integration.test.ts
+    severity: medium
 ---
 
 <intent-contract>
@@ -164,6 +171,31 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-23 — Review pass
+- verdicts: 21 rows (findings of the four layers grouped by shared root cause; each row names its members) — high 0, medium 3, low 14, false 4, maybe-false 0
+- findings:
+  - `[medium]` `patch` (verification-gap) the entry point of `check-live-guards.mjs` and the root script are run by no test — patched: a spawn test in `live-guard-check.test.ts` asserts exit 0 and the summary line on stdout; mutation observed red.
+  - `[medium]` `patch` (verification-gap, edge-case E1) skip-helper exemption accepts `if (skipIfReason(...) || !id) return;` and a negated helper — patched: `isSkipHelperCall` requires the condition to be the helper call itself; two FORBIDDEN rows added; the real tree still has 0 findings.
+  - `[low]` `patch` (verification-gap) `findIndex` of prepublish-all can be -1 and pass vacuously — patched with `toBeGreaterThan(-1)`.
+  - `[low]` `patch` (verification-gap) missing `mutation:` lines for the allowlist pins — written (observed) in `## Verification`.
+  - `[medium]` `defer` (blind B5, edge E4) `iris_database_manage delete` removes only the CPF entry (database stays mounted, `IRIS.DAT` stays), so a second admin integration run on one instance fails at create with ERROR #60 — product defect, in `deferred:`; not hidden by a unique suffix (spec keeps the literal directory).
+  - `[low]` `reject` (blind B1, B2; edge E2, E3, E8; intent divergence 1) the scan has no rule for swallowed exceptions, `&&`/ternary-gated assertions or non-inline test callbacks — spec-bound: the spec classified the 8 catch clauses and 16 non-isError conditionals as out of the grammar, and the module header states the limits; no armed file uses those shapes for a create.
+  - `[low]` `reject` (blind B3) allowlist-helper oracle regexes are weak — the helper-definition test pins every helper in use today, and a new shape is also caught by rule G itself; a stronger oracle is more than a direct fix.
+  - `[false]` `reject` (blind B4) privileged roles in the OAuth fixture — the spec fixes `customizationRoles: "%DB_IRISSYS,%Manager"` and the throwaway is disposable.
+  - `[low]` `reject` (blind B5 part, edge E5) `lastIndexOf` of -1 in the directory builder — USER's directory always has a separator on every supported host; no reachable failure.
+  - `[low]` `reject` (blind B6, edge E7) DocDB counts 5 and 3 are literals — spec-mandated (AC 44.5.3 names the totals, Rule #35).
+  - `[low]` `reject` (blind B7, edge E6) the enable step stays in effect for later suites — by design (spec Design Notes item 3); no later suite relies on the service being off, as the edge hunter confirmed by grep.
+  - `[false]` `reject` (blind B8) pinning `integration-data` at 0 allowlisted skips weakens the check — the empty allowlist is what makes a skipped lifecycle test fail the suite; the throwaway run showed 12 of 12.
+  - `[low]` `reject` (blind B9) the OAuth verify is a weak existence check — it asserts count and issuer text as the spec states; the create is asserted before it.
+  - `[low]` `reject` (blind B10) redundant `toBeDefined` lines and `void argv` — cosmetic.
+  - `[low]` `reject` (verification-gap) the enable script has no default-suite test host — only a throwaway can run it; the lead's CI run and the observed mutation are the evidence, and a skipped lifecycle test fails integration-data.
+  - `[low]` `reject` (verification-gap) dev DocDB tests rely on classes the CI seed deploys — the seed is the documented precondition and a missing class fails loudly on the counts.
+  - `[low]` `reject` (verification-gap) a leftover MCPADMINTEST object fails a create on a non-fresh instance — intended: a create must not be tolerated.
+  - `[low]` `reject` (verification-gap) stale `Status:` line in `## Auto Run Result` — rewritten at finalize.
+  - `[false]` `reject` (intent-alignment 2, 3, 5) live outcomes are not evidenced inside the diff — the throwaway run (admin 28/28, data 12/12, dev 33/33, interop 21/21, ops 18/18, F5 not skipped, enable step exit 0) is recorded in the Auto Run Result, and the lead owns the armed CI run.
+  - `[low]` `reject` (intent-alignment 4) the test asserts more than 60 files read, not 73 — the test also pins that the scanned list equals `coveredTestFiles()`; the CLI prints the exact count.
+  - `[false]` `reject` (intent-alignment 6) no shuffle-run test for DW-753 — the shuffled seed-44 run is an observed mutation, which a unit test cannot embed.
+
 ## Design Notes
 
 **Governing ADs (Rule 6).** None is contradicted:
@@ -273,6 +305,9 @@ deferred: []
 - mutation: move the DocDB step before the `prepublish-all` step in `buildDeclaredSteps` → the ci-workflow throwaway-order test goes red.
 - mutation: flip one `$$$AssertTrue` in `DocDbRegisterTest.cls` (src; reseed the throwaway) → the dev DocDB leg reports failed > 0 and goes red.
 - mutation: delete the new `beforeEach` → the shuffled seed-44 run fails the list assertion.
+- mutation (review pass, observed): disable the `isEntryPoint` branch of `check-live-guards.mjs` → `live-guard-check.test.ts` "the root script `check:live-guards` runs the CLI as a real process" goes red (1 failed of 52); restored.
+- mutation (review pass, observed): make `isSkipHelperCall` accept any condition → the new FORBIDDEN row "a data guard OR-ed with a skip helper" goes red, with the other G rows; restored.
+- mutation (review pass, observed): give `integration-data` one `allowedSkips` entry in `ci-checks.mjs` → `ci-live-suite.test.ts` "holds the allowlisted skips of the registry: the four capture legs, and nothing else" and "every allowlisted skip names an existing file…" go red; restored.
 
 **Shared surfaces:** `LIVE_SUITES['integration-data'].allowedSkips`, `ROOT_GATE_SCRIPTS`, `DECLARED_STEPS.gates`/`.throwaway`, the root `package.json` scripts (`REAL_CHECKS`), and the README CI section. Every test added or changed passes on a fresh environment, in either order (lifecycle chains excepted, as in Boundaries).
 
@@ -280,5 +315,32 @@ deferred: []
 
 ## Auto Run Result
 
-Status: ready-for-dev
-Blocking condition: none. The run halted after planning, as the invocation directed.
+Status: done
+Blocking condition: none
+
+**Summary.** Every one of the 48 silent-pass sites in the armed integration files is now a hard assertion (admin 22, interop 8 guards and 10 branches, ops 4 and 1, data 3). `pnpm check:live-guards` (`scripts/lib/live-guard-scan.mjs`, `scripts/check-live-guards.mjs`) refuses a guard return (rule G) or an `isError`/`created.` conditional outcome (rule C) in the 73 armed files. It runs as a gates step, as a release `prepare` check and in the default suite through `live-guard-check.test.ts`. CI now runs the DocDB lifecycle: `scripts/ci-enable-docdb-service.script` enables `%Service_DocDB` after `prepublish-all` and immediately before `integration-data`, and the nine DocDB allowlist entries are gone. The admin create defects were test bugs and are fixed (database `directory`, OAuth `customizationRoles`, no swallowed `IrisApiError`, OAuth verify asserts the server is listed). The dev integration suite runs `DocDbRegisterTest` (5) and `DocDbRegisterNamespaceTest` (3). DW-753's shared fake store is cleared before each test.
+
+**Files changed.**
+- `scripts/lib/live-guard-scan.mjs`, `scripts/check-live-guards.mjs` (new): the scan and its CLI. `package.json` adds `check:live-guards`.
+- `scripts/ci-enable-docdb-service.script` (new), `scripts/lib/ci-checks.mjs`, `.github/workflows/ci.yml`: the enable step, the gates step, the empty `integration-data` allowlist.
+- `packages/iris-{admin,interop,ops,data}-mcp/src/__tests__/*.integration.test.ts`: the 48 conversions and the admin fixes.
+- `packages/iris-dev-mcp/src/__tests__/custom-rest.integration.test.ts`: the two DocDB IRIS-side legs.
+- `packages/shared/src/__tests__/credentials-cli-real-keyring.test.ts`: `beforeEach` clear (DW-753).
+- `packages/iris-mcp-all/src/__tests__/live-guard-check.test.ts` (new, 52 tests), `ci-workflow.test.ts`, `ci-live-suite.test.ts`, `release-prepare.test.ts`, `release-script-fixtures.ts` (adds the new root check to the fixture world; not in the spec's file list, required by `prepare`).
+- `README.md`, `CHANGELOG.md`: CI section and the Story 44.5 entry.
+
+**Review.** Four layers (blind, edge-case, verification-gap, intent-alignment); 21 triage rows: high 0, medium 3, low 14, false 4. Patched: a spawn test of the real CLI entry point and root script (medium); the skip-helper exemption now needs the condition to be the helper call itself, so `skipIfReason(...) || !id` is a finding (medium); the vacuous `findIndex` in the throwaway-order test; observed `mutation:` lines for the allowlist pins. Deferred: 1 (below). Rejected: the rest, each with its reason in the Review Triage Log.
+
+**Deferred for the lead (product defect).** `iris_database_manage delete` removes only the CPF entry; the database stays mounted and `IRIS.DAT` stays on disk, so a second admin integration run on one instance fails at create (ERROR #60). CI is unaffected (fresh container). The test keeps the literal directory so the defect is not hidden.
+
+**Follow-up review recommended: true.** Two medium findings were patched on this first pass (the scan's skip-helper rule and the new entry-point test); the unverified risk is that the tightened rule (b) reads a legitimate skip-helper shape as a finding that the 73 current files do not contain. The real tree scans at 0 findings after the change, so the risk is only for shapes added later.
+
+**Verification performed.**
+- `pnpm check:live-guards`: `73 armed files, 0 findings`.
+- Full `@iris-mcp/all` suite on a closed port (IRIS_PORT=1, `IRIS_REQUIRE_LIVE` unset), 4 shards, each exit 0 (1719, 1642, 1523 and 1467 tests passed; the rest skipped without a live IRIS). Full `@iris-mcp/shared` suite 2650/2650; the keyring test passes shuffled (seed 44) and in default order, 2/2.
+- `pnpm run lint`, `pnpm run type-check` green; `gen:governance-baseline:check`, `gen:ipm:check`, `node scripts/check-epics-sync.mjs` OK.
+- `vitest list --json` counts: `@iris-mcp/all` 7039 = 6986 + 1 + 52; admin 514 (unchanged); the implementer verified the other packages unchanged.
+- Throwaway (52792, `irishealth-community` 2026.2, seeded, CI order, run by the implementation pass): F5 passed (not skipped); enable step exit 0 with `Enabled=1`; integration-admin 28/28, -data 12/12 (0 skipped), -dev 33/33 (DocDB legs 5 and 3), -interop 21/21, -ops 18/18, 0 unlisted skips; torn down, `docker ps -a --filter label=iris-mcp.owner=throwaway` is empty.
+- Mutations (Rule 19): all in `## Verification`; the implementation pass ran seven (guard re-added, tolerated create, dropped `directory`, enable `Modify` removed, DocDB step moved earlier, flipped DocDB assertion, `beforeEach` removed), and the review pass observed three more. Each was reverted.
+
+**Residual risks.** The scan is syntactic: it does not follow helpers, `&&`/ternary-gated assertions or swallowed exceptions (documented in the module header). The armed CI run of the `epic44` tip is lead-owned. `_bmad-output/implementation-artifacts/cycle-log-epic-44.md` carries an uncommitted line written by the lead during this run; it is not part of this story's diff and was left untouched.

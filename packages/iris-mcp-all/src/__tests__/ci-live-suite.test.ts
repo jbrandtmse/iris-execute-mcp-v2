@@ -342,10 +342,10 @@ describe("runSuite with its spawn stood in for", () => {
     expect(clean.logs.join("\n")).toMatch(/0 unlisted skips \(0 allowlisted\)/);
   });
 
-  it("holds the allowlisted skips of the registry: the four capture legs and the nine DocDB lifecycle tests, and nothing else", () => {
+  it("holds the allowlisted skips of the registry: the four capture legs, and nothing else (a skipped DocDB lifecycle test fails integration-data)", () => {
     expect(LIVE_SUITES["prepublish-all"].allowedSkips.length).toBe(4);
-    expect(LIVE_SUITES["integration-data"].allowedSkips.length).toBe(9);
-    expect(Object.entries(LIVE_SUITES).filter(([, suite]) => suite.allowedSkips.length > 0).map(([id]) => id)).toEqual(["prepublish-all", "integration-data"]);
+    expect(LIVE_SUITES["integration-data"].allowedSkips.length).toBe(0);
+    expect(Object.entries(LIVE_SUITES).filter(([, suite]) => suite.allowedSkips.length > 0).map(([id]) => id)).toEqual(["prepublish-all"]);
   });
 });
 

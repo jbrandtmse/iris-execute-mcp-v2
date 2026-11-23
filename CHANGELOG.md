@@ -2,6 +2,21 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Unreleased] — Story 44.5: Integration Suites Cannot Pass Without Testing
+
+### Fixed
+
+- **The armed integration suites no longer pass tests that test nothing (DW-684).** 15 guard returns (`if (!created.production) return;`) ended a test early, and 33 `if (!result.isError)` branches held the only assertion or tolerated a failed create. Every one is now a hard assertion: a create asserts `isError` is falsy before it records `created.*`, and a test that needs an earlier step asserts that step's result (interop 8 guards and 10 branches, ops 4 guards and 1 branch, data 3 guards, admin 22 branches).
+- **Four admin creates failed on the CI image and their tests passed anyway.** The admin integration test never passed a `directory` to the database create (the action requires one), so the database failed, the namespace and the global mapping failed on `Database MCPADMINTEST-DATA does not exist`, and the OAuth server create failed on the missing `customizationRoles`. All four verify tests passed because they asserted nothing. The database create now passes a sibling of the `USER` database's directory, the OAuth create passes `customizationRoles`, the swallow of `IrisApiError` 400/404/500 is gone, and the OAuth verify asserts that the created server is listed. All four now create and delete cleanly.
+- **`credentials-cli-real-keyring.test.ts` no longer depends on test order (DW-753).** Its module-level fake store is cleared before each test, so a shuffled run (`--sequence.shuffle --sequence.seed=44`) passes.
+
+### Changed
+
+- **New gates step, `pnpm check:live-guards`.** It reads every test file of an armed CI suite (73 at this story) and fails on a `return` that ends a test without a skip (rule G) or an `if` on `.isError` or `created.` whose then-branch does not throw or skip (rule C). It runs in the `gates` job, in the release `prepare` checks and, through `live-guard-check.test.ts`, in the default suite.
+- **CI runs the DocDB lifecycle (DW-726).** The `throwaway` job enables `%Service_DocDB` (`scripts/ci-enable-docdb-service.script`, a session step that exits 1 unless the read-back is `Enabled=1`) after the prepublish suites, where the Epic 35 F5 gate needs it disabled, and immediately before the data integration suite. The nine DocDB allowlist entries are gone: the data integration suite runs 12 of 12 tests, and a skipped lifecycle test now fails it. The allowlist holds only the four golden-capture legs.
+- **The dev integration suite runs the IRIS-side DocDB tests**: `ExecuteMCPv2.Tests.DocDbRegisterTest` (5 tests) and `ExecuteMCPv2.Tests.DocDbRegisterNamespaceTest` (3 tests) through `iris_execute_tests`, asserting the counts.
+- No package, tool, action, governance key, visibility or description changes, no IRIS-side class change and no `BOOTSTRAP_VERSION` change: only test files, scripts, the workflow and documents changed.
+
 ## [Unreleased] — Story 44.4: Bootstrap Compile Result Accuracy
 
 ### Fixed

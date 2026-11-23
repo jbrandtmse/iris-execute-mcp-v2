@@ -4,7 +4,8 @@
 # What runs
 #   gates      The repository's gates, on a Node matrix: install, build, lint, type-check, the tests of the 8 packages
 #              (which include the Story 42.1 package checks), the governance, skills, pack, prompt, provenance and tools-list
-#              checks, the epics-sync check, and the launcher extension's install, type-check, build and arming guard. Not
+#              checks, the epics-sync check, the live-guard check (Story 44.5: no armed test may end early or assert only when a
+#              create succeeded), and the launcher extension's install, type-check, build and arming guard. Not
 #              run: prettier's format:check, which the tree does not pass.
 #   launcher   The launcher extension's whole test suite (Story 42.7, DW-532) on ubuntu-24.04, macos-15 and windows-2025, each leg on
 #              Node 22.17.0: it spawns real CLIs (the Windows .cmd shims, ELECTRON_RUN_AS_NODE), so only CI shows a platform
@@ -18,7 +19,10 @@
 #              irishealth-community 2026.2 container is then started in HSCUSTOM and seeded (the real bootstrap, then the
 #              test and fixture classes), and every package's prepublishOnly, every integration suite, the five process
 #              gates and the launcher's live files run against it through scripts/ci-live-suite.mjs, which fails a suite in
-#              which any test skipped without an allowlist entry.
+#              which any test skipped without an allowlist entry. The Epic 35 F5 gate (in prepublish-all) needs %Service_DocDB
+#              disabled and the DocDB lifecycle (integration-data) needs it enabled, so one session step enables it between
+#              the two (Story 44.5, scripts/ci-enable-docdb-service.script): it runs after prepublish-all and immediately
+#              before integration-data, and fails unless the read-back is Enabled=1.
 #   package    Packs the 8 packages, installs the tarballs together, and starts every bin. It needs gates and throwaway,
 #              so no tarball is built from a red commit; CI, not a prepack hook, is the publish-time gate (DW-443).
 #   ipm        Builds the IPM archive of the ExecuteMCPv2 package from the generated embed on a throwaway container with no
@@ -112,6 +116,8 @@ jobs:
         run: pnpm gen:tools-list-snapshot:check
       - name: epics sync check
         run: node scripts/check-epics-sync.mjs
+      - name: live-guard check
+        run: pnpm check:live-guards
       - name: launcher install
         run: npm ci
         working-directory: extensions/iris-mcp-launcher
@@ -225,6 +231,9 @@ jobs:
       - name: suite integration-admin
         if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
         run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs integration-admin
+      - name: enable %Service_DocDB
+        if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
+        run: node scripts/throwaway-iris.mjs session --state ${{ runner.temp }}/throwaway-live.json --namespace %SYS --script scripts/ci-enable-docdb-service.script
       - name: suite integration-data
         if: "${{ !cancelled() && steps.seed.outcome == 'success' }}"
         run: node scripts/throwaway-iris.mjs exec --state ${{ runner.temp }}/throwaway-live.json -- node scripts/ci-live-suite.mjs integration-data
