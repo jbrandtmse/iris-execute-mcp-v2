@@ -887,10 +887,8 @@ interface SynthPlan {
   server: CanonicalServerName;
   synthesis: Extract<SynthesisResult, { ok: true }>;
   diffText: string;
-  /** The diff mechanism, or `adopt` when the shared file already holds exactly this entry (no file edit). */
+  /** The diff mechanism. */
   mechanism: string;
-  /** Set when the shared file already holds this entry as the client would write it. */
-  adoptedFrom?: string[];
 }
 
 /** What a planned apply does besides the entry writes: the owned entries it takes out of old-location files. */
@@ -943,23 +941,11 @@ async function planApply(
     if (!synthesis.ok) {
       return { exit: usageError(deps, synthesis.reason, usage) };
     }
-    // A file two clients share: an entry the other client owns is adopted when equal and refused otherwise (AD-30).
+    // A file two clients share: an entry the other client owns is refused, equal or not (AD-30).
     const shared = sharedWriteVerdict(ctx, adapter.id, scope, synthesis.entry, { fs: deps.fs });
     if (shared.kind === "conflict") {
       deps.stderr.write(`Error: ${shared.reason}\n`);
       return { exit: 1, reason: shared.reason };
-    }
-    if (shared.kind === "adopt") {
-      plans.push({
-        server,
-        synthesis,
-        diffText:
-          `(no change to ${shared.path}: it already holds this entry exactly as ${adapter.id} would write it; ` +
-          `it is shared with ${shared.sharedWith.join(", ")}, so ${adapter.id} adopts it)`,
-        mechanism: "adopt",
-        adoptedFrom: shared.sharedWith,
-      });
-      continue;
     }
     const rendered = diff(content, synthesis.entry, adapter, scope, "apply");
     if (!rendered.ok) {
@@ -1228,10 +1214,7 @@ async function cmdApply(args: string[], deps: ResolvedDeps): Promise<number> {
     printApplyPreview(deps, adapter, scope, mode, plans, legacy);
   }
 
-  // An adoption only records the entry in the ledger; a removal from an old-location file edits a config file.
-  const wantsWrite =
-    plans.some((plan) => plan.mechanism !== "already-in-state" && plan.mechanism !== "adopt") ||
-    legacy.some((file) => file.error === undefined && file.names.length > 0);
+  const wantsWrite = plans.some((plan) => plan.mechanism !== "already-in-state");
   const stopped = await confirmBeforeWrite(deps, {
     command: "apply",
     usage: APPLY_USAGE,

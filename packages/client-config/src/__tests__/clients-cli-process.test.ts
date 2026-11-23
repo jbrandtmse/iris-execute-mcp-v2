@@ -984,12 +984,14 @@ describe("vscode Copilot targets and the shared .mcp.json (Story 44.2, process l
     expect(existsSync(path.join(fresh.home, ".copilot", "mcp-config.json"))).toBe(true);
   }, T);
 
-  it("status --json lists the shared project .mcp.json once per client with sharedWith, and counts the entry once", () => {
+  it("status --json lists the shared project .mcp.json once per client with sharedWith, and counts each entry once", () => {
     const sandbox = makeSandbox();
     expect(sandbox.run(APPLY("claude-code", "project")).status).toBe(0);
-    const adopt = sandbox.run(APPLY("vscode", "project"));
-    expect(adopt.status, `${adopt.stdout}${adopt.stderr}`).toBe(0);
-    expect(adopt.stdout).toContain("adopted");
+    // The two clients own different entries of the one file; the same entry is refused to the second client.
+    const refused = sandbox.run(APPLY("vscode", "project"));
+    expect(refused.status, `${refused.stdout}${refused.stderr}`).toBe(1);
+    const other = sandbox.run(["apply", "--client", "vscode", "--scope", "project", "--servers", "iris-interop-mcp", "--yes"]);
+    expect(other.status, `${other.stdout}${other.stderr}`).toBe(0);
 
     const status = sandbox.run(["status", "--json"]);
     expect(status.status).toBe(0);
@@ -1007,8 +1009,8 @@ describe("vscode Copilot targets and the shared .mcp.json (Story 44.2, process l
     expect(shared.find((row) => row.client === "claude-code")?.sharedWith).toEqual(["vscode"]);
     expect(shared.find((row) => row.client === "vscode")?.sharedWith).toEqual(["claude-code"]);
     expect(new Set(shared.map((row) => row.path)).size).toBe(1);
-    // One entry in one file: counted once, not once per client.
-    expect(data.counts.managedEntries).toBe(1);
+    // Two entries in one file: counted once each, not once per client (four).
+    expect(data.counts.managedEntries).toBe(2);
   }, T);
 
   it("a conflicting write exits 1 naming the file and the other client, and changes nothing; a usage error exits 2", () => {

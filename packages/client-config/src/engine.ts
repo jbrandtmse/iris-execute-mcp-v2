@@ -21,10 +21,10 @@
  * a present non-canonical entry requires the record up front.
  *
  * Shared files (AD-30): when two adapter scopes resolve to one file (a workspace
- * `.mcp.json` is Claude Code's and VS Code Copilot's project file), `apply` writes an
- * entry that another client owns only when it equals what this client would write
- * (adopted: no file edit, a ledger record) and refuses any other (see
- * `shared-files.ts`); `disable` and `remove` say that the other client reads the file.
+ * `.mcp.json` is Claude Code's and VS Code Copilot's project file), an entry in the
+ * file has one owner and `apply`, `disable`, `enable` and `remove` by the other client
+ * are refused, never adopted (see `shared-files.ts`); an owner's `disable` and `remove`
+ * say that the other client reads the file.
  *
  * Legacy files: an adapter's `legacyScopes` (VS Code's old Local-harness `mcp.json`
  * files) are read-only sources. After a successful `apply` or `remove` the owned
@@ -37,23 +37,20 @@
  */
 
 import { CLIENT_ADAPTERS } from "./adapters.js";
-import { diff, renderNativeEntry, type DiffMechanism, type DiffOptions } from "./diff.js";
+import { diff, type DiffMechanism, type DiffOptions } from "./diff.js";
 import { homeGuardReason, samePath } from "./home-guard.js";
 import { adapterForScope, legacyAdapterView, resolveLegacyPath, resolveScopePath } from "./paths.js";
 import { ownEntry, readConfigEntries, type RawEntry } from "./readers.js";
 import {
-  adoptOrConflict,
-  type AdoptOrConflict,
+  dropPeerRecords,
   dropRemovedShared,
-  otherOwners,
-  ownerClients,
+  fileOwner,
+  ownedByOtherReason,
   peerClients,
   peersRecordingFile,
   PRE_SHARING_WRITERS,
-  recordAdoptedOwners,
   sharedFileNote,
   sharedPeers,
-  soleOwner,
   type SharedPeer,
 } from "./shared-files.js";
 import {
@@ -104,9 +101,7 @@ export interface EngineResult {
   /** Non-fatal problems (e.g. the config write succeeded but the state.json
    * update failed) — the operation still reports ok. */
   warnings?: string[];
-  /** True when the entry was already in the shared file exactly as this client would write it: nothing was written and this client's record was added (Story 44.2). */
-  adopted?: boolean;
-  /** The other clients that read the same file and own the entry; present only on an adoption, a shared-file conflict, and a disable or remove that affects them (Story 44.2). */
+  /** The other clients that read the same file; present only on a refusal because another client owns the entry, and on a disable or remove that affects them (Story 44.2). */
   sharedWith?: string[];
   /** Says that other clients read the same file (a disable or remove of a shared entry; Story 44.2). */
   sharedNote?: string;
@@ -236,43 +231,38 @@ function ownershipRefusal(
 }
 
 /**
- * The shared-file verdict for writing `entry`: `null` when nothing is shared or the entry is not in the file or
- * this client owns it alone (a normal write), otherwise adopt-or-conflict (see shared-files.ts).
+ * The refusal for an operation by a client that does not own an entry that is in a shared file, or `null`: nothing is
+ * shared, the entry is not in the file, nobody owns it, or this client does (see shared-files.ts `fileOwner`).
+ * `present` is whether the entry is in the file.
  */
-function sharedVerdict(
+function notOwnerRefusal(
   target: Target,
-  existing: RawEntry | undefined,
-  entry: CanonicalEntry,
-): { verdict: AdoptOrConflict; sharedWith: string[] } | null {
-  const { scope } = target;
+  name: string,
+  verb: "write" | "disable" | "enable" | "remove",
+  present: boolean,
+): { reason: string; owner: string } | null {
+  if (!present || target.peers.length === 0) return null;
   const client = target.adapter.id;
-  if (existing === undefined || target.peers.length === 0) return null;
-  if (soleOwner(target.state, client, scope, entry.name, target.peers, target.at)) return null;
-  return {
-    verdict: adoptOrConflict({
-      existing,
-      wouldWrite: renderNativeEntry(target.adapter, entry),
-      path: target.path,
-      name: entry.name,
-      client,
-      owners: ownerClients(target.state, client, scope, entry.name, target.peers, target.at),
-    }),
-    sharedWith: (() => {
-      const others = otherOwners(target.state, client, scope, entry.name, target.peers, target.at);
-      return others.length > 0 ? others : peerClients(target.peers);
-    })(),
-  };
+  const owner = fileOwner(target.state, client, target.scope, name, target.peers, target.at);
+  if (owner === null || owner === client) return null;
+  return { reason: ownedByOtherReason({ verb, path: target.path, name, client, owner }), owner };
+}
+
+/** True when `name` is in the shared file `content`. False for an unshared file, an unparseable one and an empty one. */
+function sharedEntryPresent(target: Target, content: string | null, name: string): boolean {
+  if (target.peers.length === 0 || content === null || content.trim() === "") return false;
+  const parsed = readConfigEntries(target.adapter, content);
+  return parsed.ok && ownEntry(parsed.entries, name) !== undefined;
 }
 
 /** What an apply of `entry` would do in a shared file, for the preview: the same verdict `apply` acts on. */
 export type SharedWriteVerdict =
   | { kind: "none" }
-  | { kind: "adopt"; path: string; sharedWith: string[] }
   | { kind: "conflict"; path: string; sharedWith: string[]; reason: string };
 
 /**
- * Plan the shared-file side of an apply: `none` for an unshared file, an entry that is not in the file yet, or
- * one this client owns alone; `adopt` or `conflict` otherwise. Reads the file and the ledger, writes nothing.
+ * Plan the shared-file side of an apply: `none` for an unshared file, an entry that is not in the file yet, or one this
+ * client owns; `conflict` for an entry that belongs to the other client. Reads the file and the ledger, writes nothing.
  */
 export function sharedWriteVerdict(
   ctx: EngineHostContext,
@@ -285,14 +275,9 @@ export function sharedWriteVerdict(
   const target = resolveTarget(ctx, client, scope, "apply", fs);
   if ("action" in target) return { kind: "none" };
   const current = readCurrent(fs, target.path);
-  if (!current.ok || current.content === null || current.content.trim() === "") return { kind: "none" };
-  const parsed = readConfigEntries(target.adapter, current.content);
-  const existing = parsed.ok ? ownEntry(parsed.entries, entry.name) : undefined;
-  const shared = sharedVerdict(target, existing, entry);
-  if (shared === null) return { kind: "none" };
-  return shared.verdict.kind === "conflict"
-    ? { kind: "conflict", path: target.path, sharedWith: shared.sharedWith, reason: shared.verdict.reason }
-    : { kind: "adopt", path: target.path, sharedWith: shared.sharedWith };
+  if (!current.ok) return { kind: "none" };
+  const conflict = notOwnerRefusal(target, entry.name, "write", sharedEntryPresent(target, current.content, entry.name));
+  return conflict === null ? { kind: "none" } : { kind: "conflict", path: target.path, sharedWith: [conflict.owner], reason: conflict.reason };
 }
 
 /** True when a stashed or written entry holds `${env:...}`, `${input:...}` or `${command:...}` references (the old VS Code harness's syntax). */
@@ -317,15 +302,24 @@ export function isPreMoveStash(adapter: ClientAdapter, scope: ClientScope, entry
   return record.type === undefined || !Array.isArray(record.tools);
 }
 
-/** A successful disable or remove of an entry other clients also own says that they read the same file (AD-30, Story 44.2). */
-function withSharedNote(result: EngineResult, target: Target, name: string): EngineResult {
-  if (!result.ok || target.peers.length === 0) return result;
-  const owners = otherOwners(target.state, target.adapter.id, result.scope, name, target.peers, target.at);
-  // A client that never wrote the file before it was shared always names the file's other readers; a
-  // pre-sharing writer stays byte-identical until another client records the entry.
-  const others = owners.length > 0 || PRE_SHARING_WRITERS.includes(target.adapter.id) ? owners : peerClients(target.peers);
+/** A successful disable or remove in a shared file says that the other clients read the same file (AD-30, Story 44.2). */
+function withSharedNote(result: EngineResult, target: Target): EngineResult {
+  if (!result.ok) return result;
+  const others = otherReaders(target);
   if (others.length === 0) return result;
   return { ...result, sharedWith: others, sharedNote: sharedFileNote(target.path, others) };
+}
+
+/**
+ * The other clients to name when a change rolls back or removes something in a shared file they read: always for a
+ * client that never wrote the file before it was shared, and for a pre-sharing writer once a peer holds a record for
+ * this file (until then its results stay byte-identical to what they were before the file was shared).
+ */
+function otherReaders(target: Target): string[] {
+  if (target.peers.length === 0) return [];
+  return PRE_SHARING_WRITERS.includes(target.adapter.id)
+    ? peerClients(peersRecordingFile(target.state, target.peers, target.at))
+    : peerClients(target.peers);
 }
 
 function readCurrent(fs: WriteFs, path: string): { ok: true; content: string | null } | { ok: false; reason: string } {
@@ -511,36 +505,18 @@ export function apply(
   const containsSecret = options.containsSecret ?? false;
   // A stash recorded before the Copilot move is not enabled; the fresh entry replaces it.
   const record = (state: ManagerState): ManagerState => {
-    const recorded = recordManaged(state, { client, scope, name: entry.name, containsSecret, at: target.at }, now());
+    // In a shared file this client now owns the entry, and the other client's records of it leave.
+    const recorded = recordManaged(dropPeerRecords(state, target.peers, entry.name, target.at), { client, scope, name: entry.name, containsSecret, at: target.at }, now());
     const stash = findStash(recorded, client, scope, entry.name, target.at);
     return stash !== undefined && isPreMoveStash(target.adapter, scope, stash.entry)
       ? dropStash(recorded, client, scope, entry.name, target.at)
       : recorded;
   };
 
-  // A shared file: an entry this client does not own alone is adopted when it is exactly what this client would
-  // write, and refused otherwise (AD-30). A name that is not in the file is created as ever.
-  const shared = sharedVerdict(target, existing, entry);
-  if (shared !== null) {
-    const { verdict, sharedWith } = shared;
-    if (verdict.kind === "conflict") return fail(client, scope, "apply", target.path, verdict.reason, { sharedWith });
-    const warnings: string[] = [];
-    persistState(ctx, fs, target.stateDir, record(recordAdoptedOwners(target.state, client, scope, entry.name, target.peers, target.at, now(), containsSecret)), warnings);
-    const adopted: EngineResult = {
-      ok: true,
-      client,
-      scope,
-      action: "apply",
-      path: target.path,
-      changed: false,
-      adopted: true,
-      sharedWith,
-      note: `adopted: ${target.path} already holds this entry exactly as ${client} would write it (shared with ${sharedWith.join(", ")}); nothing was written`,
-      restartHint: target.adapter.restartHint,
-      ...(warnings.length > 0 ? { warnings } : {}),
-    };
-    return withLegacyRemoval(ctx, adopted, [entry.name], options);
-  }
+  // A shared file: an entry that is in the file and belongs to the other client is never written, equal or not (AD-30).
+  // A name that is not in the file is created as ever.
+  const conflict = notOwnerRefusal(target, entry.name, "write", existing !== undefined);
+  if (conflict !== null) return fail(client, scope, "apply", target.path, conflict.reason, { sharedWith: [conflict.owner] });
 
   const result = runEdit({
     ctx,
@@ -588,29 +564,11 @@ export function enable(
   }
   const refusal = ownershipRefusal(target.state, client, scope, name, true, target.at);
   if (refusal) return fail(client, scope, "enable", target.path, refusal);
-  // In a shared file an enable records this client for the file, and an enable that adopts the other client's equal
-  // entry also records that client's implied ownership, so neither client can later overwrite the entry unrefused.
-  let adopting = false;
-  if (stash !== undefined && target.peers.length > 0) {
-    const parsed = readConfigEntries(target.adapter, current.content);
-    const existing = parsed.ok ? ownEntry(parsed.entries, name) : undefined;
-    if (existing !== undefined && !soleOwner(target.state, client, scope, name, target.peers, target.at)) {
-      const verdict = adoptOrConflict({
-        existing,
-        wouldWrite: stash.entry,
-        path: target.path,
-        name,
-        client,
-        owners: ownerClients(target.state, client, scope, name, target.peers, target.at),
-      });
-      if (verdict.kind === "conflict") {
-        return fail(client, scope, "enable", target.path, verdict.reason, {
-          sharedWith: otherOwners(target.state, client, scope, name, target.peers, target.at),
-        });
-      }
-      adopting = true;
-    }
-  }
+  // In a shared file the owner of an entry that is in the file is the only client that may enable it; the other
+  // client's stash is kept. An entry that is not in the file is put back by whoever holds the stash.
+  const present = sharedEntryPresent(target, current.content, name);
+  const notOwner = notOwnerRefusal(target, name, "enable", present);
+  if (notOwner !== null) return fail(client, scope, "enable", target.path, notOwner.reason, { sharedWith: [notOwner.owner] });
   const diffOptions: DiffOptions | undefined = stash ? { nativeEntry: stash.entry } : undefined;
   if (!target.adapter.nativeDisableFlag && !stash) {
     // Stash client, entry absent, nothing stashed: distinguish "already
@@ -636,13 +594,11 @@ export function enable(
         (r) => r.client === client && r.scope === scope && r.name === name && (r.path === undefined || samePath(target.at.platform, r.path, target.at.path)),
       );
       const containsSecret = prior?.containsSecret ?? true;
-      // In a shared file an enable that adopts, or puts the stash back, makes this client an owner of the entry for this
-      // file, exactly as `apply` does. The other owners are worked out before this client's own record exists (see
-      // `recordAdoptedOwners`), so a later different write by either client is refused.
-      if (target.peers.length === 0 || (!adopting && stash === undefined)) return dropStash(state, client, scope, name, target.at);
-      const owned = recordAdoptedOwners(state, client, scope, name, target.peers, target.at, now(), containsSecret);
-      const next = dropStash(owned, client, scope, name, target.at);
-      // A record already naming this file is left as it is.
+      // An entry already in the file keeps its owner and its records. Putting the stash back into a shared file creates
+      // the entry there: this client owns it for this file from now on, and the other client's records of it go.
+      if (target.peers.length === 0 || present) return dropStash(state, client, scope, name, target.at);
+      const next = dropStash(dropPeerRecords(state, target.peers, name, target.at), client, scope, name, target.at);
+      // A record that already names this file is left as it is.
       const recordedHere = next.entries.some(
         (r) => r.client === client && r.scope === scope && r.name === name && r.path !== undefined && samePath(target.at.platform, r.path, target.at.path),
       );
@@ -678,6 +634,9 @@ export function disable(
   }
   const refusal = ownershipRefusal(target.state, client, scope, name, true, target.at);
   if (refusal) return fail(client, scope, "disable", target.path, refusal);
+  // In a shared file only the owner of an entry that is in the file may disable it, so only an owner ever takes a stash.
+  const notOwner = notOwnerRefusal(target, name, "disable", sharedEntryPresent(target, current.content, name));
+  if (notOwner !== null) return fail(client, scope, "disable", target.path, notOwner.reason, { sharedWith: [notOwner.owner] });
 
   // For a stash client the entry is captured BEFORE the write: the parsed
   // native entry, exactly as it sat in the file (spec §3.4 stash shape).
@@ -699,7 +658,7 @@ export function disable(
       stashEntry ? addStash(state, { client, scope, name, entry: stashEntry, at: target.at }, now()) : state,
     options: { ...options, now },
   });
-  return withSharedNote(result, target, name);
+  return withSharedNote(result, target);
 }
 
 /** remove: purge an owned entry from the file entirely (plus its stash and
@@ -746,7 +705,6 @@ function removeFromTarget(
         ...(warnings.length > 0 ? { warnings } : {}),
       },
       target,
-      name,
     );
   }
 
@@ -773,10 +731,12 @@ function removeFromTarget(
           ...(warnings.length > 0 ? { warnings } : {}),
         },
         target,
-        name,
       );
     }
   }
+  // In a shared file only the owner of an entry that is in the file may remove it.
+  const notOwner = notOwnerRefusal(target, name, "remove", sharedEntryPresent(target, current.content, name));
+  if (notOwner !== null) return fail(client, scope, "remove", target.path, notOwner.reason, { sharedWith: [notOwner.owner] });
 
   return withSharedNote(
     runEdit({
@@ -791,7 +751,6 @@ function removeFromTarget(
       options,
     }),
     target,
-    name,
   );
 }
 
@@ -824,8 +783,7 @@ export function restore(
   }
   // A restore rolls back the whole file, so in a shared file it names the other readers, as a disable or remove does:
   // always for a client that never wrote the file before it was shared, and for a pre-sharing writer once a peer has records.
-  const recordingPeers = peerClients(peersRecordingFile(target.state, target.peers, target.at));
-  const others = PRE_SHARING_WRITERS.includes(target.adapter.id) ? recordingPeers : peerClients(target.peers);
+  const others = otherReaders(target);
   return {
     ok: true,
     client,

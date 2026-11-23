@@ -2,30 +2,28 @@
  * `@iris-mcp/client-config` - shared config files (Story 44.2; AD-30 "Shared files").
  *
  * Two adapter scopes can resolve to one file: a workspace-root `.mcp.json` is both Claude Code's and VS Code
- * Copilot's project file. Entries in such a file are owned per server NAME, not per client, and the state
- * ledger is what records who wrote an entry. Each ledger record carries the resolved config file it was written
- * to, and only a record for THIS file counts: a client's record for another project's `.mcp.json` is not an owner
+ * Copilot's project file. An entry in such a file has AT MOST ONE owner, and nothing is ever adopted: the other
+ * client is refused. The ledger records who wrote an entry, and each record carries the resolved config file it was
+ * written to; only a record for THIS file counts, so a client's record for another project's `.mcp.json` owns nothing
  * here.
  *
- * The rule, as the engine applies it to a write for client X under a name that is already present in the file:
- * - X owns the entry ALONE when its ledger records it and no other sharing client's does. For an adapter that
- *   wrote the file before it was shared (`PRE_SHARING_WRITERS`, Claude Code), an entry that no client records
- *   also counts: such a file predates the ledger or the sharing, and AD-15 forbids turning a Claude-Code-only
- *   user's re-apply into a refusal.
- * - Otherwise an entry equal, as a JSON value, to the one X would write is ADOPTED: X's record is added and
- *   nothing is written. An adoption never takes ownership away: a pre-sharing writer that owns the entry here
- *   without a record of it for this file gets one (`recordAdoptedOwners`).
- * - Any other entry is a CONFLICT that refuses the write.
+ * The owner of a name in the file (`fileOwner`) is:
+ * 1. the client with a manager-created record for this file; failing that,
+ * 2. the client holding a stash of it for this file; failing that,
+ * 3. for a canonical (iris-mcp) name only, the pre-sharing writer (`PRE_SHARING_WRITERS`, Claude Code): the file
+ *    predates the ledger or the sharing, and AD-15 keeps a Claude-Code-only user's writes unrefused. A VS Code record
+ *    without a path never makes VS Code an owner: it describes the old `.vscode/mcp.json`.
  *
- * A name that is not in the file is created as ever. This module is pure: it reads the ledger and the resolved
- * paths it is given and never touches a file.
+ * `apply`, `disable`, `enable` and `remove` by a client that does not own an entry that is in the file are refused and
+ * write nothing; a name that is not in the file is created (or put back from a stash) by whoever asks, and that client
+ * then owns it. This module is pure: it reads the ledger and the resolved paths it is given and never touches a file.
  */
 
 import { CLIENT_ADAPTERS } from "./adapters.js";
 import { samePath } from "./home-guard.js";
 import { resolveScopePath } from "./paths.js";
-import type { RawEntry } from "./readers.js";
 import { dropManaged, dropStash, type ManagerState, type RecordFile } from "./state.js";
+import { pinnedSpec } from "./synthesize.js";
 import { CANONICAL_SERVERS, type ClientAdapter, type ClientScope, type HostContext } from "./types.js";
 
 /** One other adapter scope that resolves to the same file. */
@@ -111,46 +109,62 @@ export function recordingClients(
 }
 
 /**
- * Who owns `name` in the shared file `at`: every client (X and its peers) whose ledger records it or holds a stash
- * of it for that file; when none does, the pre-sharing writers among them are the implied owners, for a canonical
- * (iris-mcp) name only. An unrecorded entry under any other name is nobody's.
+ * Who owns `name` in the shared file `at` (see the module header), or `null` when nobody does: an unrecorded entry
+ * under a name outside the iris-mcp namespace. A manager record for the file decides first, then a stash of it, then
+ * the pre-sharing writer for an iris-mcp name. When several clients hold a record of the same kind, the pre-sharing
+ * writer is the owner, so the answer is always one client.
  */
-export function ownerClients(
+export function fileOwner(
   state: ManagerState,
   client: string,
   scope: ClientScope,
   name: string,
   peers: readonly SharedPeer[],
   at: RecordFile,
-): string[] {
-  const owners = recordingClients(state, client, scope, name, peers, at);
-  if (owners.length > 0 || !(CANONICAL_SERVERS as readonly string[]).includes(name)) return owners;
-  return [...new Set([client, ...peers.map((p) => p.client)])].filter((id) => PRE_SHARING_WRITERS.includes(id));
+): string | null {
+  const slots = [{ client, scope }, ...peers];
+  const here = (record: LedgerRecord): boolean =>
+    record.name === name &&
+    record.path !== undefined &&
+    samePath(at.platform, record.path, at.path) &&
+    slots.some((slot) => slot.client === record.client && slot.scope === record.scope);
+  const pools: ReadonlyArray<readonly LedgerRecord[]> = [state.entries, state.stashes];
+  for (const pool of pools) {
+    const holders = [...new Set(pool.filter(here).map((record) => record.client))];
+    if (holders.length > 0) return holders.find((id) => PRE_SHARING_WRITERS.includes(id)) ?? holders[0] ?? null;
+  }
+  if (!(CANONICAL_SERVERS as readonly string[]).includes(name)) return null;
+  return slots.map((slot) => slot.client).find((id) => PRE_SHARING_WRITERS.includes(id)) ?? null;
 }
 
-/** True when `client` is the only owner of `name` in the shared file (see the module header). */
-export function soleOwner(
-  state: ManagerState,
-  client: string,
-  scope: ClientScope,
-  name: string,
-  peers: readonly SharedPeer[],
-  at: RecordFile,
-): boolean {
-  const owners = ownerClients(state, client, scope, name, peers, at);
-  return owners.length === 1 && owners[0] === client;
+/** The fields of a ledger record (entry or stash) that ownership reads. */
+interface LedgerRecord {
+  client: string;
+  scope: ClientScope;
+  name: string;
+  path?: string;
 }
 
-/** The other clients that own `name` in the shared file: the ones a write, disable or remove by `client` affects. */
-export function otherOwners(
-  state: ManagerState,
-  client: string,
-  scope: ClientScope,
-  name: string,
-  peers: readonly SharedPeer[],
-  at: RecordFile,
-): string[] {
-  return ownerClients(state, client, scope, name, peers, at).filter((id) => id !== client);
+/**
+ * The refusal for a client that does not own an entry of the shared file: names the file and the owner, says nothing
+ * was written, and gives the way out (remove the entry with its owner, then write it with this client). It never
+ * echoes an entry's content.
+ */
+export function ownedByOtherReason(args: {
+  verb: "write" | "disable" | "enable" | "remove";
+  path: string;
+  name: string;
+  client: string;
+  owner: string;
+}): string {
+  const label = (id: string): string => (CLIENT_ADAPTERS[id] !== undefined ? `${CLIENT_ADAPTERS[id].displayName} (${id})` : id);
+  return (
+    `refusing to ${args.verb} "${args.name}" in ${args.path}: the entry belongs to ${label(args.owner)}. ` +
+    `Claude Code and VS Code both read this workspace file, and one client never changes an entry the other owns, so nothing was written. ` +
+    `To use ${args.client} for this server instead, remove the entry with its owner first: ` +
+    `npx -y -p ${pinnedSpec("@iris-mcp/client-config")} iris-mcp-clients remove --client ${args.owner} --scope project --server ${args.name}, ` +
+    `then apply it with ${args.client}.`
+  );
 }
 
 /**
@@ -167,83 +181,26 @@ export function dropRemovedShared(
   at: RecordFile,
 ): ManagerState {
   const own = dropStash(dropManaged(state, client, scope, name, at), client, scope, name, at);
-  return peers.reduce(
-    (next, peer) => ({
-      ...next,
-      entries: next.entries.filter(
-        (r) => !(r.client === peer.client && r.scope === peer.scope && r.name === name && r.path !== undefined && samePath(at.platform, r.path, at.path)),
-      ),
-    }),
-    own,
-  );
+  return dropPeerRecords(own, peers, name, at);
 }
 
 /**
- * The state after `client` adopts `name` in the shared file `at`, before `client`'s own record is added: an adoption
- * never takes ownership away. Every owner that `ownerClients` names among the peers without a record of the name for
- * this file gets a manager record for this file. That happens only when no client records the name for the file, so the
- * owners are the implied ones, the pre-sharing writers (whatever their other records say: none, one without a path, or
- * one of another file). Without it, `client`'s new record would make `client` the sole owner, and a later different
- * write by `client` would overwrite the entry unrefused (AD-30). `containsSecret` is the adopted entry's, which is
- * exactly what `client` would write. The peer's other records stay as they are.
+ * The state after `client` creates `name` in the shared file `at`: the other clients' manager records of `name` for this
+ * file describe an entry that is gone, so they leave. Their stashes stay: a stash is a disabled copy its owner can still
+ * put back once this client's entry is removed.
  */
-export function recordAdoptedOwners(
-  state: ManagerState,
-  client: string,
-  scope: ClientScope,
-  name: string,
-  peers: readonly SharedPeer[],
-  at: RecordFile,
-  now: Date,
-  containsSecret: boolean,
-): ManagerState {
-  const recorded = recordingClients(state, client, scope, name, peers, at);
-  const owners = ownerClients(state, client, scope, name, peers, at);
-  const iso = now.toISOString();
-  const added: ManagerState["entries"] = peers
-    .filter((peer) => owners.includes(peer.client) && !recorded.includes(peer.client))
-    .map((peer) => ({ client: peer.client, scope: peer.scope, name, containsSecret, createdAt: iso, updatedAt: iso, path: at.path }));
-  return added.length > 0 ? { ...state, entries: [...state.entries, ...added] } : state;
-}
-
-/** Deep equality of two JSON values, independent of object key order. */
-export function jsonEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-    return a.every((item, index) => jsonEqual(item, b[index]));
-  }
-  const left = a as Record<string, unknown>;
-  const right = b as Record<string, unknown>;
-  const keys = Object.keys(left);
-  if (keys.length !== Object.keys(right).length) return false;
-  return keys.every((key) => Object.prototype.hasOwnProperty.call(right, key) && jsonEqual(left[key], right[key]));
-}
-
-export type AdoptOrConflict = { kind: "adopt" } | { kind: "conflict"; reason: string };
-
-/**
- * A write by a client that does not own `name` alone: adopt the entry when it equals what the client would
- * write, otherwise refuse. The reason names the file and the other owning clients, never an entry's content.
- */
-export function adoptOrConflict(args: {
-  existing: RawEntry;
-  wouldWrite: RawEntry;
-  path: string;
-  name: string;
-  client: string;
-  owners: readonly string[];
-}): AdoptOrConflict {
-  if (jsonEqual(args.existing, args.wouldWrite)) return { kind: "adopt" };
-  const others = args.owners.filter((id) => id !== args.client);
-  const named = others.length > 0 ? others.join(", ") : "another client";
+export function dropPeerRecords(state: ManagerState, peers: readonly SharedPeer[], name: string, at: RecordFile): ManagerState {
   return {
-    kind: "conflict",
-    reason:
-      `refusing to write "${args.name}" to ${args.path}: the file is shared with ${named}, which owns an entry under that name ` +
-      `that differs from what ${args.client} would write, so nothing was written. ` +
-      `Both clients read the same file; make the entries match (same mode and connection settings) or remove the entry first.`,
+    ...state,
+    entries: state.entries.filter(
+      (r) =>
+        !(
+          r.name === name &&
+          r.path !== undefined &&
+          samePath(at.platform, r.path, at.path) &&
+          peers.some((peer) => peer.client === r.client && peer.scope === r.scope)
+        ),
+    ),
   };
 }
 

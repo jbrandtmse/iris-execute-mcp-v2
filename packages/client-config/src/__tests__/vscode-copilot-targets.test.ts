@@ -268,32 +268,40 @@ describe("AC 44.2.4: old installs are reported, then moved by apply through the 
     expect(fs.exists(PROJECT_FILE)).toBe(false);
   });
 
-  it("an apply whose only edit is the old-file removal still asks for confirmation: no --yes on a non-TTY exits 2 and edits nothing", async () => {
-    // Claude Code wrote the entry vscode would write, so the new file is an adoption (no write); only the old file changes.
+  it("an apply that would move an old-file entry still asks for confirmation: no --yes on a non-TTY exits 2 and edits nothing", async () => {
     const fs = new MemFs();
-    expect((await cli(fs, ["apply", "--client", "claude-code", "--scope", "project", "--servers", "iris-dev-mcp", "--yes"])).exit).toBe(0);
-    const applied = fs.readFile(PROJECT_FILE);
     fs.seed(OLD_PROJECT, OLD_PROJECT_TEXT);
     const run = await cli(fs, ["apply", "--client", "vscode", "--scope", "project", "--servers", "iris-dev-mcp"]);
-    expect(run.stdout).toContain("(adopt)");
     expect(run.exit).toBe(2);
     expect(run.stdout).toContain(`old location ${OLD_PROJECT}`);
     expect(fs.readFile(OLD_PROJECT)).toBe(OLD_PROJECT_TEXT);
-    expect(fs.readFile(PROJECT_FILE)).toBe(applied);
+    expect(fs.exists(PROJECT_FILE)).toBe(false);
   });
 
-  it("an adopt-only apply writes no config file, so it needs no confirmation and records the ledger entry", async () => {
+  it("a multi-server apply with one server owned by claude-code exits 1 before it writes any server", async () => {
     const fs = new MemFs();
     expect((await cli(fs, ["apply", "--client", "claude-code", "--scope", "project", "--servers", "iris-dev-mcp", "--yes"])).exit).toBe(0);
     const shared = fs.readFile(PROJECT_FILE);
-    const run = await cli(fs, ["apply", "--client", "vscode", "--scope", "project", "--servers", "iris-dev-mcp"]);
-    expect(run.exit, run.stderr).toBe(0);
+    const before = readState(fs, STATE_DIR, "linux");
+    const run = await cli(fs, ["apply", "--client", "vscode", "--scope", "project", "--servers", "iris-interop-mcp,iris-dev-mcp", "--yes"]);
+    expect(run.exit).toBe(1);
+    expect(run.stderr).toContain("claude-code");
     expect(fs.readFile(PROJECT_FILE)).toBe(shared);
+    expect(readState(fs, STATE_DIR, "linux")).toEqual(before);
+  });
+
+  it("an apply refused because claude-code owns the entry exits 1 before any write: the old file keeps its entry, and no vscode record is made", async () => {
+    const fs = new MemFs();
+    expect((await cli(fs, ["apply", "--client", "claude-code", "--scope", "project", "--servers", "iris-dev-mcp", "--yes"])).exit).toBe(0);
+    const shared = fs.readFile(PROJECT_FILE);
+    fs.seed(OLD_PROJECT, OLD_PROJECT_TEXT);
+    const run = await cli(fs, ["apply", "--client", "vscode", "--scope", "project", "--servers", "iris-dev-mcp", "--yes"]);
+    expect(run.exit).toBe(1);
+    expect(run.stderr).toContain("claude-code");
+    expect(fs.readFile(PROJECT_FILE)).toBe(shared);
+    expect(fs.readFile(OLD_PROJECT)).toBe(OLD_PROJECT_TEXT);
     const ledger = readState(fs, STATE_DIR, "linux");
-    expect(ledger.ok && ledger.state.entries.map((e) => `${e.client}/${e.scope}/${e.name}`).sort()).toEqual([
-      "claude-code/project/iris-dev-mcp",
-      "vscode/project/iris-dev-mcp",
-    ]);
+    expect(ledger.ok && ledger.state.entries.map((e) => `${e.client}/${e.scope}/${e.name}`)).toEqual(["claude-code/project/iris-dev-mcp"]);
   });
 
   it("the new write fails: the old file is untouched and gets no backup (the old file is never edited before the new write re-parsed clean)", () => {

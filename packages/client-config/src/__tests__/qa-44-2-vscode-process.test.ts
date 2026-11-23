@@ -10,7 +10,7 @@
  * - no literal secret by default on every mode and both scopes, with a hostile `IRIS_PASSWORD` in the child environment
  *   and the WHOLE scratch tree scanned for it (explicit needs its typed confirmation);
  * - the strict-JSON user file (a comment or trailing comma is a validation refusal) against the tolerant shared `.mcp.json`;
- * - the shared-file rows: byte-identical writes, adopt writes nothing, conflict in both directions, the unrecorded-entry
+ * - the shared-file rows: byte-identical writes, an equal entry is refused and never adopted, conflict in both directions, the unrecorded-entry
  *   asymmetry (AD-15), the disable/remove notes, and `doctor` reporting the shared file once;
  * - the migration out of non-canonical legacy `.vscode/mcp.json` / profile `mcp.json` files (CRLF, BOM, 4-space, trailing commas,
  *   fully compact, comments inside the owned span, `inputs`), byte for byte, plus its `diff` preview, `remove` sweep and backup;
@@ -340,23 +340,21 @@ describe("QA 44.2: the shared .mcp.json (process level)", () => {
     }
   }, T);
 
-  it("adopt writes nothing: the file is byte-identical, no backup is made, and both clients now hold a ledger record", () => {
+  it("an equal entry is refused, never adopted: the file, the backups and the ledger are byte-identical, and vscode holds no record", () => {
     const box = makeBox();
     const file = path.join(box.project, ".mcp.json");
     expect(box.run(APPLY("claude-code", "project")).status).toBe(0);
     const bytes = readFileSync(file, "utf8");
     const backupsBefore = existsSync(path.join(box.stateDir, "backups")) ? readdirSync(path.join(box.stateDir, "backups")) : [];
-    const adopt = box.run(APPLY("vscode", "project", ["--json"]));
-    expect(adopt.status, adopt.stderr).toBe(0);
-    const data = envelope(adopt).data as { results?: unknown; changed?: unknown };
-    expect(JSON.stringify(data)).toContain("adopted");
+    const ledgerBefore = readFileSync(path.join(box.stateDir, "state.json"), "utf8");
+    const refused = box.run(APPLY("vscode", "project", ["--json"]));
+    expect(refused.status, refused.stdout).toBe(1);
+    expect(envelope(refused).ok).toBe(false);
+    expect(refused.stderr).toContain("claude-code");
+    expect(refused.stdout + refused.stderr).not.toContain("adopted");
     expect(readFileSync(file, "utf8")).toBe(bytes);
     expect(existsSync(path.join(box.stateDir, "backups")) ? readdirSync(path.join(box.stateDir, "backups")) : []).toEqual(backupsBefore);
-    const ledger = JSON.parse(readFileSync(path.join(box.stateDir, "state.json"), "utf8")) as { entries: { client: string; scope: string; name: string }[] };
-    expect(ledger.entries.map((entry) => `${entry.client}/${entry.scope}/${entry.name}`).sort()).toEqual([
-      "claude-code/project/iris-dev-mcp",
-      "vscode/project/iris-dev-mcp",
-    ]);
+    expect(readFileSync(path.join(box.stateDir, "state.json"), "utf8")).toBe(ledgerBefore);
   }, T);
 
   it("conflict in BOTH directions exits 1, names .mcp.json and the other client, and leaves file and ledger byte-identical", () => {
@@ -375,7 +373,7 @@ describe("QA 44.2: the shared .mcp.json (process level)", () => {
     expect(allBytes(box.home) + allBytes(box.project)).not.toContain("a-long-password-1");
   }, T);
 
-  it("an UNRECORDED different canonical entry: vscode is refused (exit 1, nothing written), claude-code replaces it as before (AD-15), then vscode adopts", () => {
+  it("an UNRECORDED different canonical entry: vscode is refused (exit 1, nothing written), claude-code replaces it as before (AD-15), then vscode is refused its equal entry", () => {
     const box = makeBox();
     const file = path.join(box.project, ".mcp.json");
     const handWritten = '{\n  "mcpServers": {\n    "iris-dev-mcp": { "command": "node", "args": ["/my/own/build.js"] }\n  }\n}\n';
@@ -389,36 +387,40 @@ describe("QA 44.2: the shared .mcp.json (process level)", () => {
 
     expect(box.run(APPLY("claude-code", "project")).status).toBe(0);
     expect(readFileSync(file, "utf8")).toContain('"@iris-mcp/dev@1"');
-    const adopt = box.run(APPLY("vscode", "project"));
-    expect(adopt.status, adopt.stderr).toBe(0);
-    expect(adopt.stdout).toContain("adopted");
+    const refused2 = box.run(APPLY("vscode", "project"));
+    expect(refused2.status, refused2.stdout).toBe(1);
+    expect(refused2.stderr).toContain("claude-code");
   }, T);
 
-  it("disable and remove by either client proceed and name the other client that reads the file (text and --json)", () => {
+  it("the owner's disable and remove proceed and name the other client that reads the file (text and --json); the other client is refused both", () => {
     const box = makeBox();
-    expect(box.run(APPLY("claude-code", "project")).status).toBe(0);
     expect(box.run(APPLY("vscode", "project")).status).toBe(0);
     const disabled = box.run(TOGGLE("disable", "vscode", "project"));
     expect(disabled.status).toBe(0);
     expect(disabled.stdout).toContain("Claude Code (claude-code) reads the same file");
     expect(readFileSync(path.join(box.project, ".mcp.json"), "utf8")).not.toContain("iris-dev-mcp");
-    // The entry is gone from the one shared file, so claude-code's own enable has no stash of its own to restore; vscode's does.
+    // The stash is vscode's: it puts the entry back, and from then on claude-code is the one refused.
     const enabled = box.run(TOGGLE("enable", "vscode", "project"));
     expect(enabled.status, enabled.stderr).toBe(0);
     expect(readFileSync(path.join(box.project, ".mcp.json"), "utf8")).toContain("iris-dev-mcp");
-    const removed = box.run(TOGGLE("remove", "claude-code", "project", ["--json"]));
+    for (const verb of ["disable", "remove"]) {
+      const refused = box.run(TOGGLE(verb, "claude-code", "project"));
+      expect(refused.status, `${verb}: ${refused.stdout}${refused.stderr}`).toBe(1);
+      expect(refused.stderr).toContain("vscode");
+      expect(readFileSync(path.join(box.project, ".mcp.json"), "utf8")).toContain("iris-dev-mcp");
+    }
+    const removed = box.run(TOGGLE("remove", "vscode", "project", ["--json"]));
     expect(removed.status).toBe(0);
     const data = envelope(removed).data as { sharedWith?: string[]; sharedNote?: string; changed?: boolean };
     expect(data.changed).toBe(true);
-    expect(data.sharedWith).toEqual(["vscode"]);
-    expect(data.sharedNote).toContain("VS Code (Copilot) (vscode) reads the same file");
+    expect(data.sharedWith).toEqual(["claude-code"]);
+    expect(data.sharedNote).toContain("Claude Code (claude-code) reads the same file");
   }, T);
 
   it("status and detect list the file under both clients once each, doctor reports an unreadable shared file once, and an env-reference finding once per variable", () => {
     const box = makeBox();
     const file = path.join(box.project, ".mcp.json");
     expect(box.run(APPLY("claude-code", "project")).status).toBe(0);
-    expect(box.run(APPLY("vscode", "project")).status).toBe(0);
 
     const clean = envelope(box.run(["doctor", "--json"]));
     const env = (clean.data.findings as { check: string; path: string; detail: string }[]).filter((f) => f.check === "env-references" && f.path === file);
@@ -562,18 +564,19 @@ describe("QA 44.2: the migration out of a non-canonical legacy .vscode/mcp.json 
     expect(JSON.parse(readFileSync(path.join(box.project, ".mcp.json"), "utf8")).mcpServers?.["iris-dev-mcp"]).toBeUndefined();
   }, T);
 
-  it("a migration with the shared rule in play: the old entry leaves even when claude-code already wrote the new .mcp.json (adopt), foreign bytes intact", () => {
+  it("a migration with the shared rule in play: when claude-code already wrote the new .mcp.json the apply is refused before any write, and the old file keeps its entry", () => {
     const box = makeBox();
     const legacy = path.join(box.project, ".vscode", "mcp.json");
     const fixture = LEGACY[1] as Legacy;
     seed(legacy, fixture.before);
     expect(box.run(APPLY("claude-code", "project")).status).toBe(0);
     const shared = readFileSync(path.join(box.project, ".mcp.json"), "utf8");
-    const adopt = box.run(APPLY("vscode", "project"));
-    expect(adopt.status, `${adopt.stdout}${adopt.stderr}`).toBe(0);
-    expect(adopt.stdout).toContain("adopted");
+    const refused = box.run(APPLY("vscode", "project"));
+    expect(refused.status, `${refused.stdout}${refused.stderr}`).toBe(1);
+    expect(refused.stderr).toContain("claude-code");
     expect(readFileSync(path.join(box.project, ".mcp.json"), "utf8")).toBe(shared);
-    expect(readFileSync(legacy, "utf8")).toBe(fixture.after);
+    expect(readFileSync(legacy, "utf8")).toBe(fixture.before);
+    expect(backupsOf(box, "project")).toEqual([]);
   }, T);
 });
 

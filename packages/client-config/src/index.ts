@@ -144,18 +144,14 @@ export {
 
 export {
   PRE_SHARING_WRITERS,
-  adoptOrConflict,
+  dropPeerRecords,
   dropRemovedShared,
-  jsonEqual,
-  otherOwners,
-  peersRecordingFile,
-  recordAdoptedOwners,
-  ownerClients,
+  fileOwner,
+  ownedByOtherReason,
   peerClients,
+  peersRecordingFile,
   sharedFileNote,
   sharedPeers,
-  soleOwner,
-  type AdoptOrConflict,
   type SharedPeer,
 } from "./shared-files.js";
 

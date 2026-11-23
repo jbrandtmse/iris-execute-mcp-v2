@@ -68,13 +68,17 @@ iris-mcp-clients skills install|uninstall --client <id> [--project <dir>] [--dry
     `JSON.parse`), so a file with a comment or a trailing comma is refused, and a user entry is
     `{type: "stdio", command, args, env, tools: ["*"]}`;
   - project scope: the workspace-root `.mcp.json`, keyed `mcpServers`, with the same entry
-    `claude-code` writes there. Claude Code reads that file too: entries are owned per server
-    name, so an entry the other client would write identically is **adopted** (nothing is
-    written), a different one is a **conflict** (exit 1, nothing written), and a `disable` or
-    `remove` says that the other client reads the same file. `detect`, `status` and `doctor`
-    list the file under both clients and check it once. Ownership is kept per project file: a
-    record or a disabled entry from another project never counts, and after a project folder is
-    moved or renamed, `enable` finds nothing to enable there and `apply` writes the entry again.
+    `claude-code` writes there. Claude Code reads that file too, so each entry has one owner,
+    the client that wrote it, and the other client is **refused**: its `apply` (an identical
+    entry included), `disable`, `enable` and `remove` of that entry exit 1 and write nothing.
+    Nothing is ever adopted. Configuring both clients for one project means picking one client
+    per server; to switch, `remove` the entry with its owner, then `apply` it with the other
+    client. An iris-mcp entry that no record names for this file belongs to Claude Code. The owner's
+    `disable` or `remove` says that the other client reads the same file. `detect`, `status`
+    and `doctor` list the file under both clients and check it once. Ownership is kept per
+    project file: a record or a disabled entry from another project never counts, and after a
+    project folder is moved or renamed, `enable` finds nothing to enable there and `apply`
+    writes the entry again.
   - There is no password prompt and no `inputs` array: the Copilot harness cannot forward
     either. `env-reference` writes `"IRIS_PASSWORD": "${IRIS_PASSWORD}"`, which VS Code resolves
     from the environment it was launched with (restart VS Code from a shell that has the
@@ -317,8 +321,8 @@ named `iris-mcp-all` are surfaced read-only (foreign), never modified.
   `env-reference`, `governance-file`, `explicit`).
 - `previewLegacyRemoval` / `sharedWriteVerdict` — the two read-only planners the CLI
   preview uses: the owned entries an apply or remove takes out of a client's old files
-  (VS Code's Local-harness `mcp.json`), and the adopt-or-conflict verdict for a file two
-  clients share.
+  (VS Code's Local-harness `mcp.json`), and the refusal verdict for an entry of a file two
+  clients share that the other client owns.
 
 ## v1 client roster
 
