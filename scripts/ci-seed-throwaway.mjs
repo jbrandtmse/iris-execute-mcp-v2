@@ -16,8 +16,9 @@
 //      bootstrapped classes come from the embed, never from `src/`).
 //   3. `Ens.Director` must be visible in `%Dictionary.CompiledClass` of the target namespace. If it is not, the namespace is
 //      not interoperability-enabled and the seed fails, naming the namespace.
-//   4. Every document under `src/ExecuteMCPv2/Tests/` and `src/ExecuteMCPv2/QAFixtures/` is PUT and compiled through
-//      `deployClasses` and `compileClasses` of the shared dist. A compile error in the response fails the seed. The list
+//   4. Every document under `src/ExecuteMCPv2/Tests/` and `src/ExecuteMCPv2/QAFixtures/` is PUT through `deployClasses` and
+//      compiled through `compileAndVerify` of the shared dist. A class that the check (the class dictionary and IRIS's own
+//      up-to-date flag, never the console) does not confirm as compiled fails the seed and is named in the log. The list
 //      shares no document with the bootstrap roster of `scripts/gen-bootstrap.mjs` (`seedDocuments` refuses otherwise): a
 //      bootstrapped class loaded from `src/` would carry the `dev` marker and pin the deployment as foreign.
 //
@@ -113,24 +114,26 @@ export function bootstrapProblems(result) {
   return problems;
 }
 
+/** `text` on one line, cut at 300 characters, for a log line. */
+const oneLine = (text) => {
+  const flat = String(text).replace(/\s+/g, ' ').trim();
+  return flat.length > 300 ? `${flat.slice(0, 300)}...` : flat;
+};
+
 /**
- * What is wrong with the response of an Atelier compile that did not throw. IRIS compiles with `CompileList` and then reuses the
- * status for the documents it updated, so a compile in which some classes failed can answer HTTP 200 with no status error: the
- * failure is then only in the console. An empty list means the console printed no error line and reported that the compilation
- * finished successfully (the line `iris_doc_compile` and the live gates require). A compile that fails outright is thrown by
- * the HTTP client before this function sees it.
+ * What is wrong with a compile, from the report of `compileAndVerify` in the shared dist. IRIS compiles with `CompileList` and
+ * then reuses the status for the documents it updated, so a compile in which some classes failed can answer HTTP 200 with no
+ * status error and name the failure only in the localized console. The report is decided by reading the class dictionary and
+ * IRIS's own up-to-date flag, so this reads no console line: one `did not compile: <document>` per class the check does not
+ * confirm, and each text IRIS reported as context. An empty list means every class compiled.
  *
- * @param {unknown} response - The parsed envelope of `POST action/compile`.
+ * @param {{ notCompiled?: string[], irisErrors?: string[], envelope?: unknown } | undefined} report - What `compileAndVerify` returned.
  * @returns {string[]}
  */
-export function compileProblems(response) {
-  const envelope = response !== null && typeof response === 'object' ? response : {};
-  const lines = Array.isArray(envelope.console) ? envelope.console.map(String) : [];
-  const problems = lines.filter((line) => /ERROR\s*#\d+/.test(line)).map((line) => `console: ${line.trim()}`);
-  if (!lines.some((line) => /Compilation finished successfully/.test(line))) {
-    problems.push(`the compile did not report that it finished successfully (console: ${JSON.stringify(lines)}).`);
-  }
-  return problems;
+export function compileProblems(report) {
+  const notCompiled = Array.isArray(report?.notCompiled) ? report.notCompiled : [];
+  const irisErrors = Array.isArray(report?.irisErrors) ? report.irisErrors : [];
+  return [...notCompiled.map((name) => `did not compile: ${name}`), ...irisErrors.map((text) => `IRIS reported: ${oneLine(text)}`)];
 }
 
 /** Import the built `@iris-mcp/shared`. */
@@ -177,7 +180,7 @@ export async function seedThrowaway(options = {}) {
     log(`ci-seed-throwaway: could not load the built @iris-mcp/shared (run pnpm build first): ${describeFailure(error)}`);
     return 1;
   }
-  const { IrisHttpClient, atelierPath, bootstrap, compileClasses, deployClasses, loadConfig, negotiateVersion } = shared;
+  const { IrisHttpClient, atelierPath, bootstrap, compileAndVerify, deployClasses, loadConfig, negotiateVersion } = shared;
 
   let http;
   try {
@@ -206,7 +209,7 @@ export async function seedThrowaway(options = {}) {
     log(`ci-seed-throwaway: Ens.Director is visible in ${config.namespace}`);
 
     await deployClasses(http, config, version, new Map(documents.map((document) => [document.name, document.content])));
-    const compiled = await compileClasses(http, config, version, documents.map((document) => document.name));
+    const compiled = await compileAndVerify(http, config, version, documents.map((document) => document.name));
     const compileFailures = compileProblems(compiled);
     if (compileFailures.length > 0) {
       log(`ci-seed-throwaway: ${compileFailures.length} compile problem(s) in ${config.namespace}:\n  - ${compileFailures.join('\n  - ')}`);

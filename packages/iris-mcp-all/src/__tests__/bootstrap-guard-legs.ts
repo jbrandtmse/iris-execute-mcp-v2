@@ -33,6 +33,8 @@ import {
   type IrisTarget,
 } from "./process-gate-helpers.js";
 import { parseBootstrapMarker, type StampedBootstrapMarker } from "../../../shared/src/bootstrap-version.js";
+import { verifyCompiled } from "../../../shared/src/bootstrap.js";
+import { IrisHttpClient } from "../../../shared/src/http-client.js";
 import { isLiveArmed } from "../../../shared/src/test-helpers/live-target.js";
 
 /** The document that carries the version marker. */
@@ -49,6 +51,9 @@ export const GUARD_STUB_LINES: readonly string[] = ["/// A stub of the IPM insta
 
 /** The statement the bootstrap probe runs, and the legs use as the compiled-marker oracle. */
 export const VERSION_QUERY = "SELECT ExecuteMCPv2.Setup_GetBootstrapVersion() AS Version";
+
+/** The Atelier API version of the seed's raw requests (`atelierWrite`), and of its compile check. */
+const SEED_ATELIER_VERSION = 8;
 
 /** The text the seed adds as the first line of every document. */
 export const SEED_LINE = "/// seed";
@@ -127,7 +132,7 @@ interface AtelierAnswer {
 }
 
 async function atelierWrite(target: IrisTarget, method: "PUT" | "POST" | "DELETE", subpath: string, body?: unknown): Promise<AtelierAnswer> {
-  const response = await fetch(`http://${target.host}:${target.port}/api/atelier/v8/${target.namespace}/${subpath}`, {
+  const response = await fetch(`http://${target.host}:${target.port}/api/atelier/v${SEED_ATELIER_VERSION}/${target.namespace}/${subpath}`, {
     method,
     headers: {
       "Content-Type": "application/json",
@@ -147,16 +152,16 @@ async function atelierWrite(target: IrisTarget, method: "PUT" | "POST" | "DELETE
   return { status: response.status, json, text };
 }
 
-/** Why an Atelier answer is not a success: its HTTP status, its envelope errors, and console lines that report an error. */
+/**
+ * Why an Atelier answer is not a success: its HTTP status and its envelope errors. The console is localized text and is never
+ * read: whether a compile succeeded is decided by `verifyCompiled`, not by the answer to the compile request.
+ */
 function failureOf(answer: AtelierAnswer, okStatuses: readonly number[]): string | undefined {
   const errors = answer.json?.status?.errors ?? [];
-  const consoleErrors = (answer.json?.console ?? []).map(String).filter((line) => /ERROR #\d+/.test(line));
-  if (okStatuses.includes(answer.status) && answer.json !== undefined && errors.length === 0 && consoleErrors.length === 0) {
+  if (okStatuses.includes(answer.status) && answer.json !== undefined && errors.length === 0) {
     return undefined;
   }
-  return `HTTP ${answer.status}; errors ${JSON.stringify(errors)}; console ${JSON.stringify(consoleErrors)}${
-    answer.json === undefined ? `; body ${answer.text.slice(0, 300)}` : ""
-  }`;
+  return `HTTP ${answer.status}; errors ${JSON.stringify(errors)}${answer.json === undefined ? `; body ${answer.text.slice(0, 300)}` : ""}`;
 }
 
 /** The seed's compile reported errors. */
@@ -195,10 +200,38 @@ export async function seedInstance(
     const failure = failureOf(answer, [200, 201]);
     if (failure !== undefined) throw new Error(`seeding ${name}: ${failure}`);
   }
-  const compiled = await atelierWrite(target, "POST", "action/compile", [...embedded.classes.keys()]);
+  const seededNames = [...embedded.classes.keys()];
+  const compiled = await atelierWrite(target, "POST", "action/compile", seededNames);
   const compileFailure = failureOf(compiled, [200]);
-  if (compileFailure !== undefined) {
-    throw new SeedCompileError(`compiling the ${embedded.classes.size} seeded classes in ${target.namespace}: ${compileFailure}`);
+  // Whether every class compiled is the check's verdict (the class dictionary and IRIS's own up-to-date flag), never the answer's console.
+  const checkClient = new IrisHttpClient({
+    host: target.host,
+    port: Number(target.port),
+    username: target.username,
+    password: target.password,
+    namespace: target.namespace,
+    https: false,
+    baseUrl: `http://${target.host}:${target.port}`,
+    timeout: 300_000,
+  });
+  let notCompiled: string[];
+  try {
+    notCompiled = await verifyCompiled(checkClient, target.namespace, SEED_ATELIER_VERSION, seededNames);
+  } catch (error) {
+    throw new SeedCompileError(
+      `compiling the ${embedded.classes.size} seeded classes in ${target.namespace}: the check that every class compiled could not run: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  } finally {
+    checkClient.destroy();
+  }
+  if (compileFailure !== undefined || notCompiled.length > 0) {
+    throw new SeedCompileError(
+      `compiling the ${embedded.classes.size} seeded classes in ${target.namespace}: ${compileFailure ?? "the compile answered"}${
+        notCompiled.length > 0 ? `; did not compile: ${notCompiled.join(", ")}` : ""
+      }`,
+    );
   }
   for (const statement of [
     "SELECT ExecuteMCPv2.Setup_Configure(?) AS ConfigureResult",

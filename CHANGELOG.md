@@ -2,6 +2,19 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Unreleased] — Story 44.4: Bootstrap Compile Result Accuracy
+
+### Fixed
+
+- **The bootstrap names every class that did not compile, and no longer calls a failed compile "compiled" (DW-685).** `bootstrap()` used to decide "compiled" from whether `POST action/compile` threw. IRIS answers HTTP 200 with no status error when the compile also writes a class's Storage and only some classes failed, and when it does report a status error it names at most one class. The bootstrap now confirms each class after the compile, with two reads that depend on no localized text: the class dictionary (a compiled class exists and carries no `ClassCompileError`) and IRIS's own up-to-date flag (`upd`) from `docnames`. The failure is reported as `Compile failed: <k> of <n> classes did not compile: <classes>` (followed by `. IRIS reported: ...` when IRIS sent a status error), and `compiled` is `false`. The `unconfigured` self-heal used to register the web application even after a failed recompile, so the next start probed `current` and never mentioned the failure again; it now stops first and names the classes at every start until they compile.
+- **The same check judges the compile in the CI seed, the live dev gates and the bootstrap-guard gate**, which used to read English console lines. `@iris-mcp/shared` exports `compileAndVerify()`, `verifyCompiled()` and the type `CompileReport`.
+
+### Changed
+
+- **After a failed or unverifiable compile the `unconfigured` branch stops before the privileged steps (sanction `S-44.4-unconfigured-stop`, wave-9 decision #145).** `configured`, `mapped` and `unitTestRootEnsured` stay `false` and no Configure, mapping or `^UnitTestRoot` request is sent, as on the `missing` and `stale` branches. The custom REST service stays unregistered until the classes compile, instead of being registered over classes that did not.
+- **A `current` start runs the same check (AC 44.4.7)**, so a partial failure of an earlier start is reported on the next connect, with `compiled: false` and the privileged steps skipped, instead of `compiled: true`.
+- **Two more requests per bootstrap that compiles, and on a `current` start**: one `action/query` over `%Dictionary.ClassDefinition` and `%Dictionary.CompiledClass`, and one `docnames/CLS` read per package root (one for the roster). The check needs the same `%Developer` access as the rest of the bootstrap. A clean `BootstrapResult` is byte-identical to before (pinned); `newer`, `foreign`, `unknown` and IPM-owned runs send nothing new. No IRIS-side class changes (`BOOTSTRAP_VERSION` is unchanged), and no tool, action, governance key, visibility or description changes.
+
 ## [Unreleased] — Story 44.6: Launcher Provider Works in Copilot Sessions
 
 ### Fixed

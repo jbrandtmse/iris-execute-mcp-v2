@@ -126,6 +126,21 @@ function compileCount(fetchMock: ReturnType<typeof vi.fn>): number {
   return fetchMock.mock.calls.filter((call: unknown[]) => String(call[0]).includes("action/compile")).length;
 }
 
+/**
+ * Queue the two replies of the compile check (Story 44.4) for a compile that left every embedded class compiled: the dictionary
+ * query, then `docnames`. The row and entry shapes are the planning probe's captures (IRIS 2026.2 Build 221U, 2026-11-23):
+ * `{"ID":"X","Compiled":1,"CompileError":0}` and `{"name":"X.cls","cat":"CLS","ts":"2026-11-23 10:20:27.782","upd":true,"db":"USER","gen":false}`.
+ */
+function queueCompileCheck(fetchMock: ReturnType<typeof vi.fn>): void {
+  const names = [...BOOTSTRAP_CLASSES.keys()];
+  fetchMock.mockResolvedValueOnce(
+    mockResponse(envelope({ content: names.map((name) => ({ ID: name.slice(0, -".cls".length), Compiled: 1, CompileError: 0 })) })),
+  );
+  fetchMock.mockResolvedValueOnce(
+    mockResponse(envelope({ content: names.map((name) => ({ name, cat: "CLS", ts: "2026-11-23 10:20:27.782", upd: true, db: "USER", gen: false })) })),
+  );
+}
+
 /** The number of recorded fetch calls whose body names `Setup_<name>(` or `Setup_<name>()`. */
 function setupCallCount(fetchMock: ReturnType<typeof vi.fn>, name: string): number {
   return fetchMock.mock.calls.filter((call: unknown[]) => {
@@ -746,6 +761,7 @@ describe("bootstrap", () => {
       fetchMock.mockResolvedValueOnce(
         mockResponse(envelope({ content: [{ Configured: 1 }] })),
       );
+      queueCompileCheck(fetchMock);
 
       const result = await bootstrap(http, config, 7);
 
@@ -762,7 +778,7 @@ describe("bootstrap", () => {
       expect(result.manualInstructions).toBeUndefined();
 
       // No deploy / compile on the current path: only 1 CSRF + 2 probe SQLs.
-      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock).toHaveBeenCalledTimes(5);
 
       http.destroy();
     });
@@ -796,6 +812,7 @@ describe("bootstrap", () => {
       fetchMock.mockResolvedValueOnce(guardAbsentReply());
       // Recompile: POST action/compile response (NO deploy PUTs — source is current)
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      queueCompileCheck(fetchMock);
       // Configure: POST response
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
       // Package mapping: POST response
@@ -831,7 +848,7 @@ describe("bootstrap", () => {
       expect(compileCalls.length).toBe(1);
 
       // 1 CSRF + 1 version SQL + 1 IsConfigured SQL + 1 ownership + 1 re-probe + 1 ownership + compile + configure + mapping + ensureRoot = 10
-      expect(fetchMock).toHaveBeenCalledTimes(10);
+      expect(fetchMock).toHaveBeenCalledTimes(12);
       expect(guardDocGetCount(fetchMock), "ownership is asked at startup and again at the re-check").toBe(2);
       expect(result.ipmOwned, "an unowned deployment carries no ipmOwned key").toBeUndefined();
       expect("ipmOwned" in result).toBe(false);
@@ -864,6 +881,7 @@ describe("bootstrap", () => {
       fetchMock.mockResolvedValueOnce(guardAbsentReply());
       // Recompile: POST action/compile response (runs before Configure on unconfigured)
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      queueCompileCheck(fetchMock);
       // Configure: fails with 403 (no %Admin_Manage)
       fetchMock.mockResolvedValueOnce(
         mockResponse(
@@ -948,6 +966,7 @@ describe("bootstrap", () => {
       fetchMock.mockResolvedValueOnce(
         mockResponse(envelope({ result: [] })),
       );
+      queueCompileCheck(fetchMock);
 
       // Configure: POST response
       fetchMock.mockResolvedValueOnce(
@@ -1018,6 +1037,7 @@ describe("bootstrap", () => {
       fetchMock.mockResolvedValueOnce(
         mockResponse(envelope({ result: [] })),
       );
+      queueCompileCheck(fetchMock);
 
       // IsConfigured check on the stale path — web app IS present, so
       // Configure + Mapping are skipped.
@@ -1054,7 +1074,7 @@ describe("bootstrap", () => {
 
       // 1 CSRF + 1 probe SQL + 1 ownership + one PUT per class + 1 re-probe + 1 ownership + 1 compile + 1 IsConfigured + 1 EnsureUnitTestRoot
       // (no configure, no mapping)
-      const expectedCallCount = 1 + 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 1 + 1;
+      const expectedCallCount = 1 + 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 2 + 1 + 1;
       expect(fetchMock).toHaveBeenCalledTimes(expectedCallCount);
 
       http.destroy();
@@ -1088,6 +1108,7 @@ describe("bootstrap", () => {
       fetchMock.mockResolvedValueOnce(guardAbsentReply());
       // Compile: POST response
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      queueCompileCheck(fetchMock);
       // IsConfigured check on the stale path — web app ABSENT (0) → self-heal
       fetchMock.mockResolvedValueOnce(
         mockResponse(envelope({ content: [{ Configured: 0 }] })),
@@ -1126,8 +1147,8 @@ describe("bootstrap", () => {
       });
       expect(configureCalls.length).toBe(1);
 
-      // 1 CSRF + 1 probe SQL + 1 ownership + one PUT per class + 1 re-probe + 1 ownership + 1 compile + 1 IsConfigured + configure + mapping + ensureRoot
-      const expectedCallCount = 1 + 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+      // 1 CSRF + 1 probe SQL + 1 ownership + one PUT per class + 1 re-probe + 1 ownership + 1 compile + 2 check reads + 1 IsConfigured + configure + mapping + ensureRoot
+      const expectedCallCount = 1 + 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 2 + 1 + 1 + 1 + 1;
       expect(fetchMock).toHaveBeenCalledTimes(expectedCallCount);
 
       http.destroy();
@@ -1177,6 +1198,7 @@ describe("bootstrap", () => {
       fetchMock.mockResolvedValueOnce(
         mockResponse(envelope({ result: [] })),
       );
+      queueCompileCheck(fetchMock);
 
       // Configure: fails with 403
       fetchMock.mockResolvedValueOnce(
@@ -1404,6 +1426,7 @@ describe("bootstrap", () => {
       fetchMock.mockResolvedValueOnce(versionReply("abcdef123456"));
       fetchMock.mockResolvedValueOnce(guardAbsentReply());
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      queueCompileCheck(fetchMock);
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 1 }] })));
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })));
 
@@ -1649,6 +1672,7 @@ describe("bootstrap", () => {
       fetchMock.mockResolvedValueOnce(missingMethodReply());
       fetchMock.mockResolvedValueOnce(guardAbsentReply());
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      queueCompileCheck(fetchMock);
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [] })));
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })));
@@ -1937,6 +1961,7 @@ describe("bootstrap", () => {
       fetchMock.mockResolvedValueOnce(versionReply(OLD_MARKER));
       fetchMock.mockResolvedValueOnce(guardAbsentReply());
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ result: [] })));
+      queueCompileCheck(fetchMock);
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 1 }] })));
       fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ UnitTestRoot: "/iris/mgr/" }] })));
 
@@ -2037,7 +2062,8 @@ describe("bootstrap", () => {
       { label: "current", queue: () => {
           setupCsrfThenRequest(envelope({ content: [{ Version: BOOTSTRAP_VERSION }] }));
           fetchMock.mockResolvedValueOnce(mockResponse(envelope({ content: [{ Configured: 1 }] })));
-        }, requests: 3 },
+          queueCompileCheck(fetchMock);
+        }, requests: 5 },
       { label: "newer", queue: () => setupCsrfThenRequest(envelope({ content: [{ Version: embeddedMarkerMoved({ sequence: 1 }) }] })), requests: 2 },
       { label: "foreign", queue: () => setupCsrfThenRequest(envelope({ content: [{ Version: "dev" }] })), requests: 2 },
       { label: "unknown", queue: () => {

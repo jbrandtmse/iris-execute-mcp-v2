@@ -2,8 +2,8 @@
 title: 'Story 44.4: Bootstrap Compile Result Accuracy'
 type: 'bugfix'
 created: '2026-11-23'
-status: 'ready-for-dev'
-baseline_revision: 'b3706e8730ace4d73130ae8a2c533dd5e8933d90'
+status: 'in-progress'
+baseline_revision: 'b2184e1d6bc4e3a2f71908ae811ee6bbeb398cd8'
 baseline_commit: 'b3706e8730ace4d73130ae8a2c533dd5e8933d90'
 review_loop_iteration: 0
 followup_review_recommended: false
@@ -39,10 +39,10 @@ deferred: []
 
 **Never:**
 - No IRIS-side class change. `BOOTSTRAP_VERSION` stays `1.1.0+3.3e97060f5bc4`. No `gen:bootstrap`, no `gen:ipm` (`:check` only), no IPM tree change.
-- No new tool, action, governance key, refusal code, tool description or schema change. No Frozen goldens entry and no tools-list snapshot change.
+- No new tool, action, governance key, refusal code, tool description or schema change. No tools-list snapshot change. The only Frozen goldens change is the startup-section entries of AC 44.4.8 (decision #146).
 - No `POST action/index` (it returned 389 KB for the roster) and no `Setup` method.
-- No check on the `current` path. That is the lead's call, recorded in `deferred`.
-- No change to `iris_doc_compile` (recorded in `deferred`) or to `scripts/lib/fake-iris-listener.mjs`.
+- No check on the `current` path beyond AC 44.4.7's (the same two reads, no compile, no write). *(Corrected by the lead, decision #146: this line contradicted AC 44.4.7, which decision #145 added.)*
+- No change to `iris_doc_compile` (DW-754, burn-down). `scripts/lib/fake-iris-listener.mjs` changes only as AC 44.4.8 says.
 
 ## I/O & Edge-Case Matrix
 
@@ -132,7 +132,25 @@ Each row uses the compile list a branch sends: the 35-class roster for bootstrap
 
 - AC 44.4.7 *(lead amendment at the spec gate, wave-9 decision #145; was the first `deferred:` item)*: Given a `stale` (upgrade) bootstrap whose compile partly failed, when the NEXT start probes `current`, then that start also runs the same check (`verifyCompiled`, the two reads, no compile) over the roster and reports `compiled: false` with the failing classes named and the privileged steps skipped, instead of asserting `compiled: true` (`bootstrap.ts:829-845`). This is DW-685's own symptom on the next connect. The cost is recorded and pinned: exactly 2 extra requests on a clean `current` start (fake Atelier request count `toEqual` the baseline plus 2), and a clean `current` start's result `toEqual`s the pre-story capture. Mutation: skip the check on `current` -> the next-start row goes red. Live (Rule #48): on the throwaway, break a roster class, bootstrap (fails), bootstrap again -> the second start reports the class by name.
 
+- AC 44.4.8 *(lead, decision #146; answers the intent gap of the first build pass)*: the frozen handler golden sanctions the `current`-start check's startup requests, and the fake listener answers the check.
+  - **Ledger.** `scripts/lib/golden-sanctioned-changes.mjs` gains a `handler` entry kind with `section: "startup"`, which addresses the server's `startup` request array. Its only op is `"insert"`: `pointer` is `/<index>` (0 to the array's current length, counted after the earlier entries of the same server, in file order), `new` is the exact request object `{ method, url, body }` (all strings, no other keys), and there is no `old`. `replace`/`remove` on `startup`, and `insert` anywhere else, are refused. The loader refuses, naming the entry `id`, an out-of-range index, a `new` of another shape, or an `old` that is present. Every request it does not insert stays the frozen one. Update the CONTRACT and LEDGER SCHEMA header comment, and the Conventions row in the spine (the lead has done the spine).
+  - **Entries.** One entry per inserted request per server (5 servers), sanction `S-44.4-current-check`, story `44.4`, in `fixtures/sdk-golden-sanctioned-changes.json`. Their values come from RUNNING the built servers against the listener (Rule #36). They are never hand-written, and the golden JSON is never edited or recaptured. The story's CHANGELOG entry names `S-44.4-current-check`.
+  - **Listener.** `scripts/lib/fake-iris-listener.mjs` answers the check's `action/query` and its `docnames` GET with the shapes the planning probe captured (Design Notes), for every class the query names: a compiled row, no error flag, `upd` true. A fake `current` start is then a clean start (`compiled: true`, no WARN). The rest of the listener's behaviour is unchanged. Every other suite that uses the listener stays green.
+  - **Fallback test.** `story-43-3-qa-fallback.test.ts` goes back to byte-identical with the baseline (`git diff <baseline_revision> -- <file>` empty), with no allowance for a compile WARN.
+  - **Tests (Rule #19, #59).** In `story-43-4-sanctioned-golden-changes.test.ts` (or a new sibling): a valid startup insert applies; each refusal names its entry. The handler golden (`story-43-1-qa-handler-golden.test.ts`) is green with the entries applied. Mutation 1: drop one startup entry, and the handler golden goes red for that server. Mutation 2: have the loader ignore the `startup` section, and it goes red for all five. Mutation 3: have the listener answer with no rows, and the fallback test goes red. Revert each one byte-identically, and record them under Verification.
+
+### Rework (re-dispatch after `blocked`, decision #146)
+
+The first build pass implemented everything else and left it uncommitted; the lead committed it as a checkpoint. Work ONLY these items, then finish the run (self-review, Verification, finalize):
+
+- [ ] AC 44.4.8 ledger `startup` section + its tests.
+- [ ] AC 44.4.8 entries for the five servers (captured by running), CHANGELOG names `S-44.4-current-check`.
+- [ ] AC 44.4.8 listener answers the check; the fallback test is restored byte-identical to the baseline.
+- [ ] The full `@iris-mcp/all` suite (both shards), `@iris-mcp/shared`, `@iris-mcp/dev`, `pnpm gen:governance-baseline:check`, `pnpm gen:ipm:check`, lint and typecheck green; `BOOTSTRAP_VERSION` unchanged.
+
 ## Spec Change Log
+
+- 2026-11-23 (lead, decision #146): the first build pass halted `blocked` (AC 44.4.7 vs the frozen handler golden's startup requests). Answer: AC 44.4.8 (a `startup` section for the golden ledger, sanction `S-44.4-current-check`, and the listener answers the check). The Never lines on the `current` path, Frozen goldens and the listener were corrected. `deferred:` cleared (both items now in scope).
 
 - 2026-11-23 (lead, spec gate, decision #145): AC 44.4.7 added (the next-start `current` check, from the first `deferred:` item, now in scope); the `unconfigured` stop confirmed; the `iris_doc_compile` item harvested to the ledger as DW-754 (routed to the burn-down) and removed from `deferred:`.
 
@@ -253,7 +271,26 @@ A `%Developer`-only user can run both reads. The cost is about 55-75 ms (query) 
 
 Standing criterion: every test added or changed passes on a fresh environment, in either order.
 
+**Implementation record (implement stage, 2026-11-23).**
+
+- Red run (AC 44.4.5), before any source edit, on the baseline built shared dist (baseline revision `b2184e1d`; BOOTSTRAP_VERSION `1.1.0+3.3e97060f5bc4`): `pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-44-4-compile-oracle.test.ts` -> 37 failed | 1 passed. The Storage-written rows on `missing`, `stale` and `unconfigured` fail at `expect(result.compiled).toBe(false)` with `AssertionError: expected true to be false` (the baseline reports `compiled: true`). The clean-compile rows fail only on the request count (baseline plus 2). Log: scratchpad `red-baseline.log`.
+- Green after the change: the same file, 38 passed. The pre-story captures of a clean compile (missing 44, stale 42, unconfigured 9, current 2 non-HEAD requests) are literals in the test with the capture command in its header.
+- Mutations (applied, red, reverted byte-identical with `cmp` against a copy of the file; the shared dist rebuilt after each):
+  - mutation: `verifyCompiled` returns `[]` (oracle file) -> 20 failed (every Storage-written, status-error, all-fail and de-DE/ja-JP row, the next-start row and four direct rows); reverted byte-identical.
+  - mutation: drop the `upd` condition -> 1 failed (the skipped-dependant and rollback row); reverted byte-identical.
+  - mutation: drop the `CompileError` condition -> 15 failed (the routine-failure rows); reverted byte-identical.
+  - mutation: remove the early return on the `unconfigured` branch -> 6 failed (the unconfigured Storage-written, status-error, status-error-with-clean-check, both could-not-run rows and the compile-request-fails row); reverted byte-identical.
+  - mutation: take the names from `irisErrors` -> 29 failed (the status-error row with Y named among them); reverted byte-identical.
+  - mutation: add a field to the clean-path result -> 3 failed (the missing, stale and unconfigured captures); reverted byte-identical.
+  - mutation: drop the docnames read -> 10 failed (the +2 request pin on all four branches, the docnames could-not-run rows, the per-root pin and the upd row); reverted byte-identical.
+  - mutation: skip the check on `current` -> 3 failed (the current capture's +2 pin and both AC 44.4.7 rows); reverted byte-identical.
+  - mutation: `compileProblems` reads the console again (`scripts/ci-seed-throwaway.mjs`, file `ci-seed-throwaway.test.ts`) -> 4 failed (the localized de-DE and ja-JP seed rows, the Storage-written row, the clean-report row); reverted byte-identical.
+  - mutation: ignore the check, live (`verifyCompiled` returns `[]`, shared dist rebuilt, fresh throwaway, `-t "Story 44.4"`) -> L1, L2 and L3 all red; reverted byte-identical, dist rebuilt.
+- Live (throwaway only, port 52792, `scripts/throwaway-iris.mjs run`, each container removed; `docker ps -a --filter label=iris-mcp.owner=throwaway` empty afterwards): the whole `story-42-2-bootstrap-guard-live-gate.test.ts` (the 10 legs plus L1, L2 and L3) is 13/13 green on `intersystems/iris-community:2026.2@sha256:cd2ebcab...` (2026.2 Build 221U) and on `intersystems/iris-community:2026.1@sha256:c57b65b2...` (2026.1, the oldest). The 2026.1 image was pulled by this stage and removed afterwards. L3 is the live proof of AC 44.4.7 (a class left failed by an earlier compile is named by the next `current` start).
+- Other gates: `pnpm turbo run build`, `pnpm run lint`, `pnpm run type-check`, `pnpm gen:governance-baseline:check` (141 keys, `1e62c5ad5bf7`), `pnpm run gen:tools-list-snapshot:check`, `pnpm run gen:ipm:check` all pass. `pnpm --filter @iris-mcp/shared test` 2650/2650; `pnpm --filter @iris-mcp/dev test` 1492 passed, 319 skipped. `@iris-mcp/all` in four shards (`--shard=1/4` to `4/4`): 1711, 1589 (+4 failed, fixed afterwards in `story-43-3-qa-fallback.test.ts`, 34/34 on rerun), 1467 and 1433 passed (+10 failed) - the 10 are `story-43-1-qa-handler-golden.test.ts`, the intent gap in `deferred:`; every other file is green.
+- The dev live gates that call `compileDocs` (`doc-edit-`, `doc-put-storage-guard-`, `storage-guard-write-paths-`, `story-42-11-qa-`, `sql-safety-live-gate`) were not run armed here (they need a seeded IRIS for Health and its `HSCUSTOM`); their `compileDocs` change is covered by the shared check on the live throwaway (L1) and by the dev unit suite, and is a residual risk for the first armed CI run.
+
 ## Auto Run Result
 
-Status: ready-for-dev
-Blocking condition: none
+Status: blocked
+Blocking condition: intent gap: AC 44.4.7 (the `current`-start compile check) adds 3 startup requests per server against `scripts/lib/fake-iris-listener.mjs` (HEAD, the dictionary POST, the docnames GET), which turns `story-43-1-qa-handler-golden.test.ts` red (10 tests, five servers: "asks IRIS for the same things while it starts" and "differs from the golden in nothing else"). The contract forbids a Frozen goldens entry and any change to the listener; the sanctioned-change ledger (`scripts/lib/golden-sanctioned-changes.mjs`, `sdk-handler-golden-core.mjs` `diffHandlerSession`) can express wire rows and audit elements, not startup requests. Recommended amendment: extend the golden ledger with a `startup` sanction section (AD-15 already names `S-44.4-unconfigured-stop`, which covers the `current` check), and let `fake-iris-listener.mjs` answer the check query (rows from the query parameters) and the docnames GET, so the lazy "other" profile no longer logs the WARN that `story-43-3-qa-fallback.test.ts` `HTTP_LINE` now allows for. Alternative: drop the `current`-path check (AC 44.4.7) and keep it in `deferred`. Everything else is implemented and verified (oracle file 38/38, shared 2650, dev, `@iris-mcp/all` shards green except the handler golden, live gate 13/13 on 2026.2 and 2026.1, mutations recorded under Verification). The implementation is left UNCOMMITTED in the working tree for the lead's decision; nothing was pushed.

@@ -9,7 +9,7 @@
  * with its extension (`Pkg.Name.cls`, `Pkg.Name.mac`).
  */
 
-import { IrisApiError, atelierDocStatusError, atelierPath, type IrisHttpClient } from "@iris-mcp/shared";
+import { IrisApiError, atelierDocStatusError, atelierPath, compileAndVerify, type IrisHttpClient } from "@iris-mcp/shared";
 
 /** The nine keys of an Atelier `PUT /doc` result, and of the current document in its HTTP 409. */
 export interface AtelierDocResult {
@@ -104,8 +104,9 @@ export async function putStatus(
 }
 
 /**
- * Compile documents with the server's default qualifiers. A compile that does not finish
- * successfully is a gate failure.
+ * Compile class documents with the server's default qualifiers. A class that the compile check
+ * (`compileAndVerify`: the class dictionary and IRIS's own up-to-date flag, never the console) does
+ * not confirm as compiled is a gate failure that names it. `names` are `.cls` documents.
  *
  * @returns The compiler's console lines.
  */
@@ -115,12 +116,14 @@ export async function compileDocs(
   namespace: string,
   names: string[],
 ): Promise<string[]> {
-  const response = await client.post(atelierPath(version, namespace, "action/compile"), names);
-  const lines = response.console ?? [];
-  if (!lines.some((line) => /Compilation finished successfully/.test(line))) {
-    throw new Error(`compiling ${names.join(", ")} did not finish successfully: ${lines.join(" | ")}`);
+  const report = await compileAndVerify(client, { namespace }, version, names);
+  if (report.notCompiled.length > 0 || report.irisErrors.length > 0) {
+    const context = report.irisErrors.length > 0 ? ` (IRIS reported: ${report.irisErrors.join(" | ")})` : "";
+    throw new Error(
+      `compiling ${names.join(", ")} did not finish successfully: ${report.notCompiled.join(", ") || "no class named"}${context}`,
+    );
   }
-  return lines;
+  return report.envelope?.console ?? [];
 }
 
 /** Run one SQL statement (a query or DML) with the Atelier query action and return its rows. */

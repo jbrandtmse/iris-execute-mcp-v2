@@ -122,12 +122,14 @@ export {
   probeCustomRest,
   deployClasses,
   compileClasses,
+  compileAndVerify,
+  verifyCompiled,
   configureWebApp,
   configurePackageMapping,
   ensureUnitTestRoot,
   MANUAL_INSTRUCTIONS,
 } from "./bootstrap.js";
-export type { BootstrapResult } from "./bootstrap.js";
+export type { BootstrapResult, CompileReport } from "./bootstrap.js";
 export { classifyDeployedMarker, parseBootstrapMarker } from "./bootstrap-version.js";
 export type { DeployedMarkerClassification, ParsedBootstrapMarker } from "./bootstrap-version.js";
 export { BOOTSTRAP_CLASSES, getBootstrapClasses } from "./bootstrap-classes.js";
