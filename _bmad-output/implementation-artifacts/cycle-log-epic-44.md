@@ -93,3 +93,4 @@
 2026-11-23T06:47:55Z	Story 44.3	ledger_adjudicated	slice_44-3=empty(no_entries_owned;DW-670_via_action_item_closes_at_retro)
 2026-11-23T06:47:55Z	Story 44.3	smoke_complete	kind=built_servers_stdio_real_SDK_vs_fake_IRIS_listener(clean_rebuild) checks=302/302(44.3_x5+43.3_x2) red=AD-34_M1_digest_compare(adr_verifications)+QA_8_mutations+CR_5 live_IRIS=n/a(target_cannot_change_mid-dialog_deterministically;spec_Design_Notes)
 2026-11-23T06:47:55Z	Story 44.3	fresh_check	shuffled_seed44: all_44.3_files+epic43_capstone_89,shared_103,interop_99,dev_215
+2026-11-23T06:48:12Z	Story 44.3	committed	sha=5acae405 branch=epic44 pushed=yes ci=pending run=45126565033
