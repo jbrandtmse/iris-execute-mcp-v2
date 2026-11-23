@@ -234,6 +234,7 @@ describe("credential containment — behavioral (secret never reaches a log/warn
       authApi,
       getSettings: () => settings(),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["a"]),
     };
 
     const provider = new LauncherProvider(deps);
@@ -279,6 +280,7 @@ describe("credential containment — behavioral (secret never reaches a log/warn
       authApi,
       getSettings: () => settings(),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["a"]),
     };
 
     const provider = new LauncherProvider(deps);
@@ -392,6 +394,7 @@ describe("credential containment — a resolved secret must not leak across a LA
       authApi,
       getSettings: () => settings({ packages: ["dev"], servers: ["leaky", "cancelme"] }),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["leaky", "cancelme"]),
     };
 
     const provider = new LauncherProvider(deps);
@@ -445,6 +448,7 @@ describe("credential containment — a resolved secret must not leak across a LA
       authApi,
       getSettings: () => settings({ packages: ["dev"], servers: ["leaky", "removed"] }),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["leaky", "removed"]),
     };
 
     const provider = new LauncherProvider(deps);
@@ -489,6 +493,7 @@ describe("credential containment — a resolved secret must not leak across a LA
       authApi,
       getSettings: () => settings({ packages: ["dev"], servers: ["leaky"] }),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["leaky"]),
     };
 
     const provider = new LauncherProvider(deps);
@@ -549,6 +554,7 @@ describe("credential containment — a REJECTED credential prompt must not carry
       authApi,
       getSettings: () => settings({ packages: ["dev"], servers: ["leaky", "rejects"] }),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["leaky", "rejects"]),
     });
 
     const planned = await provider.providePlannedDefinitions();
@@ -594,6 +600,7 @@ describe("cancellation must not storm: repeated resolves of the same cancelled d
       authApi,
       getSettings: () => settings({ packages: ["dev"], servers: ["a"] }),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["a"]),
     };
 
     const provider = new LauncherProvider(deps);
@@ -605,6 +612,67 @@ describe("cancellation must not storm: repeated resolves of the same cancelled d
       expect(warnings).toHaveLength(call); // linear growth: one new warning per call, never a burst
       expect(sessionCallCount).toBe(call * 2); // silent + createIfNone, no extra retries
     }
+  });
+});
+
+describe("credential containment — Story 44.8: a refused Local resolve carries no stored password", () => {
+  const STORED_SECRET = "DO-NOT-LEAK-STORED-44-8-c3d1a9e5";
+  const user = { webServer: { scheme: "https", host: "user-iris.corp.example", port: 443 }, username: "svc44" };
+
+  /** The real provider over a store holding `STORED_SECRET` for `dev1/svc44`; `inspection` is what the dependency returns. */
+  async function run(inspect: ProviderDeps["inspectServerManagerServers"]) {
+    const warnings: string[] = [];
+    const diagnostics: string[] = [];
+    const sessionCalls: unknown[] = [];
+    const specCalls: string[] = [];
+    const api: ServerManagerApi = {
+      getServerNames: () => [{ name: "dev1", description: "", detail: "" }],
+      getServerSpec: async (name: string) => {
+        specCalls.push(name);
+        return { name, ...user };
+      },
+      getAccount: () => ({ id: "acct-1", label: "Account One" }),
+    };
+    const authApi: AuthApi = {
+      getSession: async (_providerId, scopes) => {
+        sessionCalls.push(scopes);
+        return { id: "s1", accessToken: STORED_SECRET, account: { id: "acct-1", label: "Account One" }, scopes: ["dev1", "svc44"] };
+      },
+    };
+    const provider = new LauncherProvider({
+      getServerManagerApi: async () => api,
+      authApi,
+      getSettings: () => settings({ servers: ["dev1"] }),
+      showWarning: (message: string) => warnings.push(message),
+      logDiagnostic: (message: string) => diagnostics.push(message),
+      ...(inspect === undefined ? {} : { inspectServerManagerServers: inspect }),
+    });
+    const [planned] = await provider.providePlannedDefinitions();
+    warnings.length = 0;
+    const env = await provider.resolveEnvForLabel(planned!.label);
+    return { env, warnings, diagnostics, sessionCalls, specCalls };
+  }
+
+  it("control (not vacuous): a user-only server resolves the stored password into the env, and no warning carries it", async () => {
+    const { env, warnings, diagnostics } = await run(() => ({ globalValue: { dev1: user } }));
+    expect(env?.IRIS_PASSWORD).toBe(STORED_SECRET);
+    expect(JSON.stringify([warnings, diagnostics])).not.toContain(STORED_SECRET);
+  });
+
+  it.each([
+    ["not-user (a workspace layer overrides the host)", () => ({ globalValue: { dev1: user }, workspaceValue: { dev1: { webServer: { host: "127.0.0.1" } } } })],
+    ["uninspectable (the inspection throws)", () => { throw new Error(`inspection failed near ${STORED_SECRET}`); }],
+    ["uninspectable (the dependency is absent)", undefined],
+  ] as const)("%s: undefined, one warning, no session or spec call, and the stored password appears in no warning and no diagnostic", async (_name, inspect) => {
+    const { env, warnings, diagnostics, sessionCalls, specCalls } = await run(inspect as ProviderDeps["inspectServerManagerServers"]);
+
+    expect(env).toBeUndefined();
+    expect(warnings).toHaveLength(1);
+    expect(sessionCalls).toEqual([]);
+    expect(specCalls).toEqual([]);
+    expect(JSON.stringify([warnings, diagnostics])).not.toContain(STORED_SECRET);
+    // Even a hostile error text from the inspection never reaches a user surface.
+    expect(warnings[0]).not.toContain("inspection failed");
   });
 });
 

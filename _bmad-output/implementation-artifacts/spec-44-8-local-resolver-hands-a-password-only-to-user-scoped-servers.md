@@ -2,14 +2,22 @@
 title: 'Story 44.8: Local Resolver Hands a Password Only to User-Scoped Servers'
 type: 'bugfix'
 created: '2026-11-23'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'ebf1e703b6a2f7cce5609a78ad53c6c58ff8dc47'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      A repository-controlled MCP server env that sets IRIS_SM_SETTINGS_PATHS to the repository's own settings file makes that file count as user scope, so DW-761's workspace-scope guard does not apply and a keychain password can be paired with the repository's host.
+    evidence: |-
+      DW-761's rule treats files named in IRIS_SM_SETTINGS_PATHS as the operator's own choice (the spec did not say; the build chose it, and the README and CHANGELOG name it). Whether a repository can set that variable depends on the MCP client config it ships (for example a committed .mcp.json env block) and on that client's approval of project servers; not probed.
+    location: >-
+      packages/shared/src/server-manager-source.ts discoverScopedSettingsFiles
+    severity: medium (unverified)
 ---
 
 <intent-contract>
@@ -103,6 +111,35 @@ Fixture: user layer `dev1 = {webServer:{scheme:"https",host:"user-iris.corp.exam
 
 ## Review Triage Log
 
+### 2026-11-23 — Review pass
+- verdicts: 25 findings — high 0, medium 3, low 19, false 2, maybe-false 1 (the intent-alignment layer is descriptive and filed none)
+- findings:
+  - Blind 1 `[low]` `[patch]` root CHANGELOG said `packages/shared` source is unchanged while DW-761 edits it — reworded to name the DW-761 import and credential chain as the one shared change.
+  - Blind 2 `[low]` `[reject]` a server defined in no layer gets the `not-user` warning instead of the old no-spec text — fail-safe, the remedy it names (define it in user settings) is the right one, and a fourth verdict adds a branch for an unlikely case; the contract defines the rule by `isUserScopedServer`, which this follows. Same root cause as Edge 2.
+  - Blind 3 `[medium]` `[patch]` wire-leg refusal assertions were true by construction — the leg now spawns whatever the resolver returned before asserting on the listener, and asserts `env` undefined last. Mutation: guard made a no-op -> the listener assertion goes red on the wire (see Verification). Same root cause as Edge 7 and Verification-gap 1.
+  - Blind 4 `[low]` `[patch]` doc-claims test pinned the root block at index 1 — now asserts it precedes the Story 44.6 block. Same root cause as Verification-gap 3. The extension-CHANGELOG first-section assertion stays (the spec's own task).
+  - Blind 5 `[low]` `[patch]` no test for a workspace entry shadowing a user entry that has an inline password — added to `dw761-workspace-scope-credentials.test.ts`; mutation `workspaceScope === undefined` in the chain -> red.
+  - Blind 6 `[low]` `[reject]` the DW-761 refusal removes the user's same-named server from the roster — by decision #154 (a workspace-defined or workspace-overridden server gets no stored password and a clear message); a warning names the file and the remedy. Same as Edge 5.
+  - Blind 7 `[low]` `[reject]` six `profiles.test.ts` fixtures moved to `IRIS_SM_SETTINGS_PATHS` — workspace discovery plus the chain is covered by the DW-761 file; literals unchanged.
+  - Blind 8 `[low]` `[patch]` the fake merged `defaultLanguageValue` below `defaultValue` — reordered to VS Code's precedence (default, default-language, user, ...); no test used that layer.
+  - Blind 9 `[low]` `[reject]` the refusal is stderr-only and absent from `iris_server_profiles` — the intent asks for a warning; a roster field is a new surface (no tool or output change allowed here).
+  - Blind 10 `[false]` `[reject]` the February 2027 Local-harness removal date is unsourced — it is the lead's stated rationale in P-4 and decisions #153/#154, not an external claim of this build.
+  - Edge 1 `[low]` `[reject]` workspace settings changing between the guard and a later server's credential step in a multi-server plan — needs a live edit during a modal prompt, and the same plan is re-resolved on the next start; fix is a per-server re-check the spec rules out (a per-server guard went red in the planned mutations).
+  - Edge 2 `[low]` `[reject]` duplicate of Blind 2.
+  - Edge 3 `[low]` `[reject]` no once-per-session dedupe of the warning — spec-bound: "exactly one `showWarning` per refused resolve call", pinned by tests.
+  - Edge 4 `[low]` `[reject]` the first-file-wins warning advises storing a password when the winner is a workspace entry — the chain's own refusal warning follows at once with the correct remedy; a conditional message needs its own test.
+  - Edge 5 `[low]` `[reject]` duplicate of Blind 6.
+  - Edge 6 `[maybe-false]` `[defer]` a repository-controlled env (a committed `.mcp.json` with `IRIS_SM_SETTINGS_PATHS`) makes the repository's file count as user scope — the implementation's reading, named in the changelog, is that a path the operator names is the operator's; whether a repository can set it depends on the MCP client's config trust. Recorded in `deferred:`.
+  - Edge 7 `[medium]` `[patch]` duplicate of Blind 3.
+  - Edge 8 `[low]` `[reject]` the pending-resolution debug count includes workspace-flagged entries — cosmetic debug text; a one-line change broke an existing `31-1-5` pin on that line, so it was reverted.
+  - Verification-gap 1 `[medium]` `[patch]` duplicate of Blind 3.
+  - Verification-gap 2 `[low]` `[patch]` no `mutation:` lines in `## Verification` — added below, one per AC or pin, closed in the review pass (Rule 19).
+  - Verification-gap 3 `[low]` `[patch]` duplicate of Blind 4.
+  - Verification-gap 4 `[low]` `[patch]` root README and `profiles.ts` advised defining connections at workspace scope — now say a workspace-scope definition gets no stored password. Other `IRIS_SM_WORKSPACE` mentions only describe the variable.
+  - Verification-gap 5 `[low]` `[reject]` up to one warning per package label for one refused server — same as Edge 3 (spec-bound).
+  - Verification-gap 6 `[low]` `[reject]` the refusal text names the keychain and helper while it skips the whole chain — link 1 (the env password) is unreachable through `loadProfileRegistry`; no behaviour gap.
+  - Verification-gap 7 `[false]` `[reject]` `freshProcessKit.spawn` deletes `null` entries where the old helper skipped them — the Copilot provided env carries `IRIS_AUDIT_LOG_MAX_MB: null` only, which both forms leave unset; `dw749Characterization` stays green.
+
 ## Design Notes
 
 **P-1 Sources (probe 2026-11-23; nothing read from any real VS Code profile, `~/.claude`, `~/.copilot` or keychain).** Server Manager v3.16.0 (latest release 2026-11-04; tag commit `7fb0df1a9e72013a7643ee002316cc02c6148d22`) fetched with `gh api` into `scratchpad/sm-src-44-8/`: `src/authenticationProvider.ts` (sha256 `dc8599e2…`), `src/authenticationSession.ts` (`1340c404…`), `src/api/getServerSpec.ts` (`73ccdd7d…`). VS Code 1.147.0 `src/vs/platform/configuration/common/configurationModels.ts` (`1c2e41bd…`, `mergeContents` `:218-228`) and `configuration.ts` (`merge` `:341-355`). Installed types: `@types/vscode` 1.125.0 (`AuthenticationSession` `index.d.ts:17823-17846`, `WorkspaceConfiguration.inspect` `:6867`), `@intersystems-community/intersystems-servermanager` 3.10.2.
@@ -128,6 +165,8 @@ Fixture: user layer `dev1 = {webServer:{scheme:"https",host:"user-iris.corp.exam
 
 **P-9 Ledger inbox (Rule 17).** DW-752 (`routed`, owner this story): addressed by ACs 1-6; resolvable by this story's delivered scope. New out-of-footprint observation in frontmatter `deferred:` (the shared Server Manager import), for the lead's harvest.
 
+**P-10 DW-761 disposition (implemented 2026-11-23; terminal: fixed, not closed with evidence).** Probe first (Rule #16): `scratchpad/probe-44-8/probe-dw761.mjs` drives the built `@iris-mcp/shared` dist (`loadProfileRegistry`) with a scratch HOME, a scratch repository directory as `IRIS_SM_WORKSPACE` and an INJECTED keychain (no real profile, no real keychain). Results on the unfixed code: user-only `dev1` pairs the keychain password with the user's host; a workspace `.vscode/settings.json` entry with a host and a `username` claims the slot over the user's entry and the keychain password is paired with the workspace's host (`127.0.0.1:52799`); the same for a `.code-workspace` entry and for a workspace-only entry; a host-only workspace entry (no `username` of its own) is skipped by the existing 31-0-2 rule so the user's entry wins safely; an inline `password` in the workspace entry is used and the keychain is not asked. So the leak is real. Fix (the same rule as the launcher, in `@iris-mcp/shared`): `discoverScopedSettingsFiles` reports which discovered candidates are workspace-scope (the folder's `.vscode/settings.json` and the `*.code-workspace` files; none when `IRIS_SM_SETTINGS_PATHS` replaces discovery, because a path the operator named is their own choice); `resolveServerManagerProfiles` marks an entry from such a file `workspaceScope: true` (key absent otherwise, so user-only results are byte-identical); `resolveServerManagerCredentials` never runs the chain for an `"unresolved"` entry carrying the marker, excludes it with one warning that names the file and the remedy, and under `required` throws one error naming the server. A `"resolved"` entry (its own inline password in the same file) passes unchanged. Design choice: first-file-wins is kept (the workspace entry still claims the slot and is then refused; the user's same-named entry is shadowed, as before), so the target never silently moves. Pins: `packages/shared/src/__tests__/dw761-workspace-scope-credentials.test.ts` (14 tests). Mutation evidence is under Verification. Residual: the proof is in-process through `loadProfileRegistry` with injected keychain and helper (the function server startup calls), not a spawned server; and a repository that sets `IRIS_SM_SETTINGS_PATHS` itself (through a committed `.mcp.json` env) is out of this rule's reach, as every other variable it could set is. Three existing `profiles.test.ts` fixtures used a discovered workspace file to prove keychain completion; they now name the same file through `IRIS_SM_SETTINGS_PATHS` (operator-chosen, user scope) with their expected literals unchanged.
+
 ## Verification
 
 `Shared surfaces:` every launcher test that constructs `LauncherProvider` and resolves (the inspection dep now gates resolve); `pinnedDefinitionsActivationFlow.test.ts`'s DW-749 test; the extension CHANGELOG's first section (read by `story-42-7-doc-claims.test.ts` and `story-44-6-doc-claims.test.ts`); the root CHANGELOG block order. Standing criterion: every test added or changed passes on a fresh environment, in either order.
@@ -149,12 +188,45 @@ Fixture: user layer `dev1 = {webServer:{scheme:"https",host:"user-iris.corp.exam
 - `lookUpProvidedConnection` switched to treat `not-user` as user -> the DW-749 provide rows red (the shared helper serves both paths).
 - The root CHANGELOG's Story 44.8 block deleted -> `story-44-8-doc-claims.test.ts` red.
 
+**Dev results (2026-11-23).** Launcher suite: 37 files, 566 passed, 3 skipped (the 3 skips pre-exist; the new wire leg ran, not skipped), also green under `--sequence.shuffle` (seeds 44 and 7 for the five named files); `npm run type-check` clean. `@iris-mcp/shared`: 90 files, 2675 passed; `tsc --noEmit` and eslint on the changed files clean; `pnpm --filter @iris-mcp/shared build` was re-run because the stale-dist guard otherwise fails 38.x doc-claims tests. `@iris-mcp/all`: `story-44-8-doc-claims`, `story-44-6-doc-claims`, `story-42-7-doc-claims`, `story-42-1-qa-changeset-readers` (37 tests) green. `gen:governance-baseline:check` (212 live, 71 new, OK), `gen:tools-list-snapshot:check` (115 entries, 0 new) and `gen:ipm:check` OK.
+
+**Observed red per planned mutation** (source copied aside, mutated, run, restored; `cmp` of the restored file against the copy printed identical each time):
+- Guard removed (loop made a no-op): 23 red = `dw752LocalResolve` override, name-level, inspection-failure, combined-plan rows and the AC-3 wire leg, plus AC-4 (`pinnedDefinitionsActivationFlow`) and the DW-749 Local test in `serverDefinitionProvider.test.ts`.
+- `uninspectable` treated as `user`: 5 red (the five inspection-failure rows).
+- Guard moved after `resolveCredentialsCoalesced`: 21 red (every "nothing called" row and the wire leg).
+- Guard applied per server inside the loop, before each server's credential step: 7 red (the combined-plan row naming `b`, the first-refused-in-plan-order row, the five inspection-failure rows).
+- Guard refuses every server: 28 red, including `LOCAL_ENV_CAPTURE`, the prompts/cancellation pin, `selectServers.test.ts`'s byte-identical pin and `governanceActivationFlow` 32-2-4/32-2-5.
+- `lookUpProvidedConnection` treating `not-user` as user: 13 red (the DW-749 provide rows, `dw749Characterization` wire leg and its folder-scope row, and the AC-4 provided-env assertion).
+- Root CHANGELOG Story 44.8 heading renamed: `story-44-8-doc-claims.test.ts` red.
+- DW-761: the chain's workspace branch disabled: 6 red; the `workspaceScope` marker never set: 7 red (path guarded: `loadProfileRegistry` with injected keychain and helper).
+
+**Mutation lines (Rule 19; one per pinning test).**
+- mutation: AC-2/AC-3, resolve guard made a no-op (`if (verdict !== undefined) continue;`) -> `dw752LocalResolve.test.ts` wire leg red on the LISTENER assertion ("the workspace author's host never saw the user's stored password"), reached by spawning the returned env; AC-2 override rows and AC-4 red as recorded above.
+- mutation: AC-5, guard refuses every server -> `LOCAL_ENV_CAPTURE`, the prompts/cancellation pin, `selectServers` byte-identical pin red (28, above).
+- mutation: DW-761 shadow-with-inline-password pin, chain's workspace branch inverted (`workspaceScope === undefined`) -> that test red (10 red in `dw761-workspace-scope-credentials.test.ts`), restored byte-identical (`cmp`).
+- mutation: DW-761 `required` throw and `workspaceFiles` reporting are pinned by the same file; the marker-never-set mutation turned 7 red, including both.
+- mutation: AC-7, root CHANGELOG Story 44.8 heading renamed -> `story-44-8-doc-claims.test.ts` red (the position check now only requires the block to precede the Story 44.6 block).
+
+**Review-pass patches, re-run:** launcher 566 passed + 3 skipped before the patch pass; shared `dw761`, `profiles` and doc-claims re-run after it (below, in `## Auto Run Result`).
+
+**Deviations and notes for the lead.** (1) The DW-749 test `the Local resolve path is unchanged for a workspace-overridden server` in `serverDefinitionProvider.test.ts` also pinned the defect; it is changed to assert the refusal (the spec named only the `pinnedDefinitionsActivationFlow` one). (2) `activationFlow.test.ts` and `governanceActivationFlow.test.ts` reach the resolver through the real `extension.ts`; their `serverManagerWith` helper now sets the user-scope `intersystems.servers` store (the inspection wiring); no expected literal changed. (3) The shared fresh-process plumbing is `src/__tests__/freshProcessKit.ts`, used by `dw749Characterization.test.ts` (refactored, same assertions) and `dw752LocalResolve.test.ts`. (4) `containment.test.ts` gained a Story 44.8 block (a distinctive stored password through the not-user and both uninspectable refusals, never in a warning or the diagnostic log, with a user-only control). (5) The spec said `packages/shared` source is untouched; that holds for DW-752 and was lifted for DW-761 by decision #154.
+
 **Manual checks:**
 - Lead smoke (no IRIS needed): run `scratchpad/probe-44-8/probe-local-resolve.cjs` against the rebuilt launcher dist (`cd extensions/iris-mcp-launcher && npm run build`, output is gitignored): user-only resolves as before; both override cases return `undefined` with the `not-user` warning and no `getSession` call.
 
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
 
-Planning only (the dispatch said "Halt after planning."). Probe done (AC 44.8.1): Server Manager 3.16.0 keys a session and its stored password by server name and username only; VS Code 1.147.0 deep-merges `intersystems.servers` across layers; a probe of the built launcher dist reproduced the leak on the Local path (stored and inline passwords sent to a workspace-chosen host). DW-752 is real, so it is not closed with evidence. Chosen behaviour: the fail-safe warning, because every route into Server Manager's prompt uses or validates the stored password first (P-3). Notes for the lead: P-6 (the changeset names `@iris-mcp/shared`, since the extension cannot be named and follows the fixed group), P-7 (the AD-15/AD-9 spine entries are the lead's, Rule 20), and one out-of-footprint `deferred:` item (the shared Server Manager import). The working tree at dispatch held one uncommitted lead file (`cycle-log-epic-44.md`, a `ci_superseded` line appended after the spawn). It is outside this story's footprint and was left untouched. This run wrote only this spec file and scratchpad probe files.
+**Implemented.** DW-752: `LauncherProvider.inspectServerScope` (tri-state `user` / `not-user` / `uninspectable`) serves both `lookUpProvidedConnection` and a new guard in `resolveEnvForLabel`, which refuses a plan before any credential step (no `getServerSpec`, `getAccount` or `getSession` call, one pinned warning, a pre-cancelled token still silent). DW-761 (taken in at the gate, decision #154): probed and real; `discoverScopedSettingsFiles` and a `workspaceScope` marker on `resolveServerManagerProfiles` entries, and `resolveServerManagerCredentials` never runs the keychain or helper chain for a marked unresolved entry (a warning naming the file under `auto`, an error naming the server under `required`; an inline password in the same file still works; files named in `IRIS_SM_SETTINGS_PATHS` count as the operator's own).
+
+**Files changed.** Launcher: `serverDefinitionProvider.ts` (guard, helper); tests `dw752LocalResolve.test.ts` (new, matrix rows plus the fresh-process wire leg), `freshProcessKit.ts` (new, shared with `dw749Characterization.test.ts`), `serverManagerInspection.ts` (Rule #54 fakes), `pinnedDefinitionsActivationFlow`, `containment`, `serverDefinitionProvider`, `activationFlow`, `governanceActivationFlow` (wiring, DW-749 pins). Shared: `server-manager-source.ts`, `credential-chain.ts`, `profiles.ts` (comment only); tests `dw761-workspace-scope-credentials.test.ts` (new), `profiles.test.ts` (six fixtures now name the file via `IRIS_SM_SETTINGS_PATHS`). `@iris-mcp/all`: `story-44-8-doc-claims.test.ts` (new). Docs: root and extension READMEs and CHANGELOGs, `.changeset/story-44-8-...md` (`@iris-mcp/shared` patch).
+
+**Review.** Four layers, 25 findings: high 0, medium 3 (one root cause), low 19, false 2, maybe-false 1. Patches applied: the wire-leg refusal oracle (medium; now spawns what the resolver returned and goes red on the listener when the guard is a no-op), root CHANGELOG sentence on `packages/shared`, the position-pinned CHANGELOG test, a shadow-with-inline-password DW-761 test, the fake's `defaultLanguageValue` order, stale README/`profiles.ts` workspace-scope advice, and the `mutation:` lines. Rejected with reasons in the Review Triage Log (spec-bound, by decision #154, cosmetic, theoretical or false). Deferred: 1 (below).
+
+**Follow-up review recommended: false** (one medium entry patched; no high).
+
+**Verification.** Launcher `vitest run` 566 passed, 3 skipped (pre-existing), `tsc --noEmit` clean; `@iris-mcp/shared` 90 files, 2676 passed; `@iris-mcp/all` on a closed port (`IRIS_PORT=1`, `IRIS_REQUIRE_LIVE` unset) in two runs: Story 43/44 files 49 passed (1585 passed, 2 skipped) and the rest 193 passed (4915 passed, 730 skipped), after `pnpm turbo run build`; `pnpm run lint`, `pnpm run type-check`, `pnpm check:live-guards` (74 files, 0 findings), `gen:governance-baseline:check`, `gen:ipm:check`, `gen:tools-list-snapshot:check` (115 entries, no change) and `scripts/check-epics-sync.mjs` all green. Mutations observed red and restored byte-identical (see `## Verification`).
+
+**Residual risks / for the lead.** (1) `deferred:` item: a repository-controlled `IRIS_SM_SETTINGS_PATHS` (for example from a committed MCP client config) makes the repository's file count as user scope; unverified. (2) The DW-761 proof is in-process through `loadProfileRegistry` with an injected keychain and helper, not a spawned server. (3) The planner's request (decision log line in `cycle-log-epic-44.md`) for one "Behavior changes" CHANGELOG section after the 44.8 build commits is not done here. (4) `cycle-log-epic-44.md` carries a lead-appended uncommitted line (a `planner_message`, added after this dispatch); it is outside this story's footprint and was left uncommitted, so the tree is clean except for that file.

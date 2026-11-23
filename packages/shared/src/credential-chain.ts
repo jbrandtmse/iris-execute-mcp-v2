@@ -587,12 +587,30 @@ export async function resolveServerManagerCredentials(
 ): Promise<IrisProfile[]> {
   const resolvedProfiles: IrisProfile[] = [];
   const exhaustedNames: string[] = [];
+  /** DW-761: names a workspace-scope settings file defines, which the chain is never run for. */
+  const workspaceRefusedNames: string[] = [];
 
   for (const entry of entries) {
-    const { credentialStatus, ...profile } = entry;
+    const { credentialStatus, workspaceScope, ...profile } = entry;
 
     if (credentialStatus === "resolved") {
       resolvedProfiles.push(profile);
+      continue;
+    }
+
+    // DW-761: the credential chain resolves by NAME, and a workspace-scope settings file (the folder's
+    // `.vscode/settings.json` or a `.code-workspace` file) is chosen by whoever wrote the repository. Pairing the user's
+    // keychain or helper password with the host such a file names would hand it to the repository's author, so the chain
+    // is not run for it. Only a password the same definition carries inline (status "resolved", above) is used.
+    if (workspaceScope === true) {
+      workspaceRefusedNames.push(entry.name);
+      logger.warn(
+        `IRIS_SERVER_MANAGER: server "${entry.name}" is defined or overridden in a workspace settings file ` +
+          `(${entry.sourceFile ?? "a workspace settings file"}), so no stored password (OS keychain or ` +
+          `IRIS_CREDENTIAL_HELPER) was used for it: a workspace must not choose where that password is sent. ` +
+          `Define "${entry.name}" in your user settings under a name no workspace file uses, or define it with its ` +
+          `full connection fields via IRIS_PROFILES.`,
+      );
       continue;
     }
 
@@ -609,13 +627,27 @@ export async function resolveServerManagerCredentials(
     }
   }
 
-  if (options.mode === "required" && exhaustedNames.length > 0) {
-    throw new Error(
-      `IRIS_SERVER_MANAGER=required but the credential chain could not resolve a password ` +
-        `for: ${exhaustedNames.join(", ")}. Remediation per profile: run ` +
-        `"iris-mcp-credentials set <name>" (OS keychain), set IRIS_CREDENTIAL_HELPER, or ` +
-        `define the profile with its full connection fields via IRIS_PROFILES.`,
-    );
+  if (options.mode === "required" && (exhaustedNames.length > 0 || workspaceRefusedNames.length > 0)) {
+    const parts: string[] = [];
+    if (exhaustedNames.length > 0) {
+      parts.push(
+        `IRIS_SERVER_MANAGER=required but the credential chain could not resolve a password ` +
+          `for: ${exhaustedNames.join(", ")}. Remediation per profile: run ` +
+          `"iris-mcp-credentials set <name>" (OS keychain), set IRIS_CREDENTIAL_HELPER, or ` +
+          `define the profile with its full connection fields via IRIS_PROFILES.`,
+      );
+    }
+    if (workspaceRefusedNames.length > 0) {
+      parts.push(
+        `IRIS_SERVER_MANAGER=required but ${workspaceRefusedNames.join(", ")} ` +
+          `${workspaceRefusedNames.length === 1 ? "is" : "are"} defined or overridden in a workspace settings file, ` +
+          `so no stored password (OS keychain or IRIS_CREDENTIAL_HELPER) was used: a workspace must not choose ` +
+          `where that password is sent. Define each in your user settings under a name no workspace file uses, ` +
+          `give it its own inline password in that workspace file, or define it with its full connection fields ` +
+          `via IRIS_PROFILES.`,
+      );
+    }
+    throw new Error(parts.join(" "));
   }
 
   return resolvedProfiles;

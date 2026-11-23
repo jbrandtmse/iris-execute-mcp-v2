@@ -155,6 +155,14 @@ export type CredentialStatus = "resolved" | "unresolved";
  */
 export interface ServerManagerProfileResult extends IrisProfile {
   credentialStatus: CredentialStatus;
+  /**
+   * `true` only when the definition came from a workspace-scope settings file (the folder's `.vscode/settings.json` or a
+   * `*.code-workspace` file; see {@link discoverWorkspaceScopeFiles}). Absent otherwise. DW-761: a repository chooses such
+   * a file's host, so a keychain or helper password must never be paired with it; the credential chain refuses an
+   * `"unresolved"` entry carrying this flag. An inline `password` in the same file (`"resolved"`) is its own definition's
+   * secret and is unaffected.
+   */
+  workspaceScope?: true;
 }
 
 /** Fail-fast helper: a clear error naming `IRIS_SERVER_MANAGER` (mirrors `parseGovernancePreset`/`parseToolVisibilityConfig`). */
@@ -327,46 +335,46 @@ export function discoverSettingsFiles(
   platform: NodeJS.Platform = process.platform,
   cwd: string = process.cwd(),
 ): string[] {
+  return discoverScopedSettingsFiles(env, platform, cwd).files;
+}
+
+/** {@link discoverSettingsFiles}'s candidates, plus which of them are workspace-scope files (DW-761). */
+export interface ScopedSettingsFiles {
+  /** Every candidate, highest precedence first: exactly what {@link discoverSettingsFiles} returns. */
+  files: string[];
+  /**
+   * The workspace-scope subset of `files`: the folder's `.vscode/settings.json` and every `*.code-workspace` file beside
+   * it. Empty when `IRIS_SM_SETTINGS_PATHS` replaces discovery: a path the operator named is their own choice, not a file
+   * an opened repository chose. A file here is controlled by whoever wrote the repository, not by the user, so a keychain
+   * or helper password must never be paired with a connection defined in it ({@link resolveServerManagerProfiles} flags
+   * such a profile with `workspaceScope`).
+   */
+  workspaceFiles: string[];
+}
+
+/** One discovery pass that reports both the ordered candidates and their workspace-scope subset (one directory listing). */
+export function discoverScopedSettingsFiles(
+  env: Record<string, string | undefined> = process.env,
+  platform: NodeJS.Platform = process.platform,
+  cwd: string = process.cwd(),
+): ScopedSettingsFiles {
   const p = platform === "win32" ? path.win32 : path.posix;
-  // 31-3-5: resolve candidates to ABSOLUTE so `sourceFile` is never a
-  // relative path meaningful only against the server process's CWD. A
-  // candidate already absolute under EITHER path convention (a win32 drive
-  // path or a posix root path) is kept verbatim — in production the platform
-  // and every path share one convention, and the other-convention-absolute
-  // case only arises when a test simulates a foreign platform against real
-  // host temp directories (which must stay openable). 32-3-R2 (Story 32.4):
-  // the posix disjunct is spelled out EXPLICITLY rather than relying on the
-  // subtlety that `path.win32.isAbsolute("/x")` is true (win32 treats a
-  // leading slash as rooted) — the either-convention guarantee is now stated
-  // in the code, and a passthrough test pins it on every host OS.
-  const toAbsolute = (candidate: string): string =>
-    p.isAbsolute(candidate) || path.win32.isAbsolute(candidate) || path.posix.isAbsolute(candidate)
-      ? candidate
-      : p.resolve(candidate);
+  const toAbsolute = absolutePathResolver(p);
   const explicit = env.IRIS_SM_SETTINGS_PATHS;
   if (explicit !== undefined && explicit !== "") {
     const delimiter = platform === "win32" ? ";" : ":";
-    return explicit
-      .split(delimiter)
-      .map((entry) => entry.trim())
-      .filter((entry) => entry.length > 0)
-      .map(toAbsolute);
+    return {
+      files: explicit
+        .split(delimiter)
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+        .map(toAbsolute),
+      workspaceFiles: [],
+    };
   }
 
-  const candidates: string[] = [];
-
-  const workspaceDir = toAbsolute(env.IRIS_SM_WORKSPACE ?? cwd);
-  candidates.push(p.join(workspaceDir, ".vscode", "settings.json"));
-
-  // A `.code-workspace` file is WORKSPACE scope, which VS Code ranks BELOW
-  // folder scope (`.vscode/settings.json`) and ABOVE user scope — so it slots
-  // exactly here, and the caller's first-file-wins rule then yields VS Code's
-  // own precedence for a name defined in more than one place. Multi-root users
-  // commonly keep `intersystems.servers` ONLY in this file; without it they
-  // silently import nothing, because `auto` does not fail on zero definitions.
-  for (const workspaceFile of workspaceFileCandidates(workspaceDir, p)) {
-    candidates.push(workspaceFile);
-  }
+  const workspaceFiles = workspaceScopeCandidates(env, platform, cwd);
+  const candidates: string[] = [...workspaceFiles];
 
   for (const product of SETTINGS_PRODUCTS) {
     for (const userSettingsPath of userSettingsPathsFor(product, env, platform)) {
@@ -380,6 +388,46 @@ export function discoverSettingsFiles(
     candidates.push(toAbsolute(flatpakPath));
   }
 
+  return { files: candidates, workspaceFiles };
+}
+
+/**
+ * 31-3-5: resolve candidates to ABSOLUTE so `sourceFile` is never a relative path meaningful only against the server
+ * process's CWD. A candidate already absolute under EITHER path convention (a win32 drive path or a posix root path) is
+ * kept verbatim — in production the platform and every path share one convention, and the other-convention-absolute case
+ * only arises when a test simulates a foreign platform against real host temp directories (which must stay openable).
+ * 32-3-R2 (Story 32.4): the posix disjunct is spelled out EXPLICITLY rather than relying on the subtlety that
+ * `path.win32.isAbsolute("/x")` is true (win32 treats a leading slash as rooted) — the either-convention guarantee is
+ * stated in the code, and a passthrough test pins it on every host OS.
+ */
+function absolutePathResolver(p: typeof path.win32): (candidate: string) => string {
+  return (candidate) =>
+    p.isAbsolute(candidate) || path.win32.isAbsolute(candidate) || path.posix.isAbsolute(candidate)
+      ? candidate
+      : p.resolve(candidate);
+}
+
+/** The workspace-scope candidates (folder `.vscode/settings.json`, then each `*.code-workspace` file), highest precedence first. */
+function workspaceScopeCandidates(
+  env: Record<string, string | undefined>,
+  platform: NodeJS.Platform,
+  cwd: string,
+): string[] {
+  const p = platform === "win32" ? path.win32 : path.posix;
+  const toAbsolute = absolutePathResolver(p);
+  const candidates: string[] = [];
+  const workspaceDir = toAbsolute(env.IRIS_SM_WORKSPACE ?? cwd);
+  candidates.push(p.join(workspaceDir, ".vscode", "settings.json"));
+
+  // A `.code-workspace` file is WORKSPACE scope, which VS Code ranks BELOW
+  // folder scope (`.vscode/settings.json`) and ABOVE user scope — so it slots
+  // exactly here, and the caller's first-file-wins rule then yields VS Code's
+  // own precedence for a name defined in more than one place. Multi-root users
+  // commonly keep `intersystems.servers` ONLY in this file; without it they
+  // silently import nothing, because `auto` does not fail on zero definitions.
+  for (const workspaceFile of workspaceFileCandidates(workspaceDir, p)) {
+    candidates.push(workspaceFile);
+  }
   return candidates;
 }
 
@@ -757,7 +805,8 @@ export function resolveServerManagerProfiles(
   const allowList = parseServerAllowList(env);
   const matchedAllowNames = new Set<string>();
 
-  const files = discoverSettingsFiles(env, platform, cwd);
+  const { files, workspaceFiles } = discoverScopedSettingsFiles(env, platform, cwd);
+  const workspaceFileSet = new Set(workspaceFiles);
   /** Names whose first sighting (any outcome) has already been counted (definitionsFound). */
   const seenNames = new Set<string>();
   /** Names whose first sighting has already been counted toward consideredCount. */
@@ -1001,7 +1050,13 @@ export function resolveServerManagerProfiles(
       }
 
       nameStates.set(name, credentialStatus);
-      resultByName.set(name, { ...profile, credentialStatus });
+      // DW-761: an entry a workspace-scope file defines carries the flag, so the credential chain never pairs a keychain
+      // or helper password with the host that file chose. The key is absent for every other entry (byte-identical).
+      resultByName.set(name, {
+        ...profile,
+        credentialStatus,
+        ...(workspaceFileSet.has(file) ? { workspaceScope: true as const } : {}),
+      });
     }
   }
 

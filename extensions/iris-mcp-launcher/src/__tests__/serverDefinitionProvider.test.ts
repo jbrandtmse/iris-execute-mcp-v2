@@ -388,6 +388,7 @@ describe("LauncherProvider.resolveEnvForLabel — real cancel semantics (getSess
         authApi,
         getSettings: () => settings({ packages: ["dev"], servers: ["a"] }),
         showWarning: (message: string) => warnings.push(message),
+        inspectServerManagerServers: () => userScopeServers(["a"]),
       },
       warnings,
       sessionCalls: () => sessionCalls,
@@ -432,6 +433,7 @@ describe("LauncherProvider.resolveEnvForLabel — real cancel semantics (getSess
       authApi: { getSession: async () => undefined },
       getSettings: () => settings({ packages: ["dev"], servers: ["a"] }),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["a"]),
     };
     const provider = new LauncherProvider(deps);
     const [planned] = await provider.providePlannedDefinitions();
@@ -1221,6 +1223,7 @@ describe("Rule #19 whole-object back-compat — developmentRepoPath unset matche
           // the settings() helper's own default ("") is what is under test.
         }),
       showWarning: () => {},
+      inspectServerManagerServers: () => userScopeServers(["prod", "staging"]),
     });
 
     const planned = await provider.providePlannedDefinitions();
@@ -1317,6 +1320,7 @@ describe("Rule #19 whole-object back-compat — developmentRepoPath unset matche
       authApi: { getSession: vi.fn() as never },
       getSettings: () => settings({ packages: ["dev"], servers: ["solo"] }),
       showWarning: () => {},
+      inspectServerManagerServers: () => userScopeServers(["solo"]),
     });
 
     const [planned] = await provider.providePlannedDefinitions();
@@ -1360,6 +1364,7 @@ describe("Story 32.3 — 31-4-1: concurrent credential resolutions of the SAME s
       getSettings: () =>
         settings({ packages: ["dev", "admin", "data", "interop", "ops"] }),
       showWarning: () => {},
+      inspectServerManagerServers: () => userScopeServers(serverNames),
     };
     const provider = new LauncherProvider(deps);
     const planned = await provider.providePlannedDefinitions();
@@ -1587,6 +1592,7 @@ describe("Story 32.4 — 32-3-R14: coalesced-credential containment + shared-res
       getSettings: () => settings({ servers: ["serverA"] }),
       showWarning: (m) => warnings.push(m),
       logDiagnostic: (m) => diagnostics.push(m),
+      inspectServerManagerServers: () => userScopeServers(["serverA"]),
     };
     const provider = new LauncherProvider(deps);
     const planned = await provider.providePlannedDefinitions();
@@ -1954,14 +1960,20 @@ describe("DW-749: only a server defined in user settings alone names a stored cr
     }
   });
 
-  it("the Local resolve path is unchanged for a workspace-overridden server (it still resolves through the session)", async () => {
-    const { provider, calls } = tracked({ dev1: { ...dev1, password: "SYS" } }, {}, { ...userOnly, workspaceValue: { dev1: {} } });
+  it("Story 44.8 (DW-752): the Local resolve path refuses a workspace-overridden server with one warning and no Server Manager call", async () => {
+    const { provider, calls, warnings } = tracked(
+      { dev1: { ...dev1, password: "SYS" } },
+      {},
+      { ...userOnly, workspaceValue: { dev1: {} } },
+    );
     const [planned] = await provider.providePlannedDefinitions();
     expect(planned!.env).toEqual({});
-    const env = await provider.resolveEnvForLabel(planned!.label);
-    expect(env?.IRIS_HOST).toBe("dev1.example.com");
-    expect(env?.IRIS_PASSWORD).toBe("SYS");
-    expect(calls.getServerSpec).toEqual(["dev1"]);
+    warnings.length = 0;
+    expect(await provider.resolveEnvForLabel(planned!.label)).toBeUndefined();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("is defined or overridden in this workspace's settings");
+    expect(calls.getServerSpec).toEqual([]);
+    expect(calls.getSession).toEqual([]);
   });
 });
 
@@ -2088,6 +2100,7 @@ describe("Story 44.6 AC-11: the Local resolve path is exactly today's", () => {
       },
       getSettings: () => settings({ servers: ["a"] }),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["a"]),
     });
     const [refusedPlan] = await refusing.providePlannedDefinitions();
     warnings.length = 0;

@@ -72,6 +72,9 @@ function serverManagerWith(
   roster?: string[],
 ): (typeof mockState)["serverManager"] {
   const names = roster ?? Object.keys(specs);
+  // The user-scope `intersystems.servers` setting Server Manager reads these servers from (Story 44.8: the Local
+  // resolve step starts only servers defined in user settings alone).
+  mockState.configStore.set("intersystems.servers", Object.fromEntries(names.map((name) => [name, {}])));
   const api: ServerManagerApi = {
     getServerNames: () => names.map((name) => ({ name, description: "", detail: "" })),
     getServerSpec: async (name: string) => specs[name],

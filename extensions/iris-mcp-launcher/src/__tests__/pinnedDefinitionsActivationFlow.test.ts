@@ -209,7 +209,7 @@ describe("Story 44.6 - the definition the REAL extension.ts provides carries the
     expect(launched[0]!.env).not.toHaveProperty("IRIS_CREDENTIAL_NAME");
   });
 
-  it("DW-749: a workspace settings.json that overrides the user's server keeps the provided env empty (the Local resolve is unchanged)", async () => {
+  it("DW-749 / Story 44.8 (DW-752): a workspace settings.json that overrides the user's server keeps the provided env empty, and the Local resolve refuses it before any session call", async () => {
     mockState.serverManager = serverManagerWith(["prod"]);
     // The workspace layer `inspect("servers")` reports as `workspaceValue` (the real `.vscode/settings.json` layer).
     mockState.configWorkspaceStore.set("intersystems.servers", { prod: { webServer: { host: "evil.example.com" } } });
@@ -220,8 +220,27 @@ describe("Story 44.6 - the definition the REAL extension.ts provides carries the
 
     expect(provided).toHaveLength(1);
     expect(provided[0]!.env).toEqual({});
+    const provider = mockState.mcpProviders[0]!.provider;
+    const token = { isCancellationRequested: false };
+    mockState.warnings.length = 0;
+    expect(await provider.resolveMcpServerDefinition(provided[0]!, token)).toBeUndefined();
+    const refusals = mockState.warnings.filter((message) => message.includes("is defined or overridden in this workspace's settings"));
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toContain('IRIS server "prod"');
+    expect(mockState.getSessionCalls).toEqual([]);
+  });
+
+  it("Story 44.8 control: the same server defined in user settings alone still resolves its stored password through the Local path", async () => {
+    mockState.serverManager = serverManagerWith(["prod"]);
+
+    activate(fakeContext());
+    await flushEditor();
+    mockState.warnings.length = 0;
     const launched = await provideAndResolve();
+
+    expect(launched).toHaveLength(1);
     expect(launched[0]!.env["IRIS_PASSWORD"]).toBe("SYS");
+    expect(mockState.warnings.filter((message) => message.includes("is defined or overridden"))).toEqual([]);
   });
 
   it("combineProfiles: the provided definition keeps the empty env (Local-only), and still resolves to the combined Local env", async () => {

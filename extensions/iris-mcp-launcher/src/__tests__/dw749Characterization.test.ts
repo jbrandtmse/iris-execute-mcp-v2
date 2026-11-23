@@ -15,73 +15,37 @@
  * listener stands for the workspace author's host. A control with the same fixture minus the workspace layer shows the
  * listener DOES receive the stored password when the user configured that host, so the guarded assertion can fail.
  *
- * Needs no IRIS; never the real keychain. Skips with a logged reason when unbuilt (fails on CI).
+ * Needs no IRIS; never the real keychain. Skips with a logged reason when unbuilt (fails on CI). The listener, the fake
+ * keyring and the spawn are the shared `freshProcessKit.ts` (Story 44.8 reuses them for the Local harness).
  */
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { skipUnbuilt } from "./builtDist.js";
 import { LauncherProvider, type PlannedDefinition } from "../serverDefinitionProvider.js";
 import type { LauncherSettings, ServerManagerApi, ServerManagerServersInspection, ServerSpec } from "../types.js";
-import { resolveSdkEsmDir, REPO_ROOT } from "./sdkClientStore.js";
-
-const SHARED_DIST = path.join(REPO_ROOT, "packages", "shared", "dist");
-const DEV_ENTRY = path.join(REPO_ROOT, "packages", "iris-dev-mcp", "dist", "index.js");
-const FAKE_LISTENER = path.join(REPO_ROOT, "scripts", "lib", "fake-iris-listener.mjs");
-const FAKE_KEYRING_PRELOAD = path.join(REPO_ROOT, "scripts", "lib", "fake-keyring-preload.mjs");
+import { basicAuthorization, createFreshProcessKit, REPO_ROOT, sentAuthorizations, type FreshProcessKit } from "./freshProcessKit.js";
 
 const USERNAME = "svc44";
 const STORED_PASSWORD = "users-corporate-dev1-password";
-const STORED_BASIC = `Basic ${Buffer.from(`${USERNAME}:${STORED_PASSWORD}`).toString("base64")}`;
+const STORED_BASIC = basicAuthorization(USERNAME, STORED_PASSWORD);
 
-interface FakeIris {
-  port: number;
-  requests: unknown[];
-  authorizations: Array<{ method: string; url: string; authorization: string | undefined }>;
-  close: () => Promise<void>;
-}
-
-interface SdkClient {
-  connect: (transport: unknown) => Promise<void>;
-  close: () => Promise<void>;
-  listTools: () => Promise<{ tools: Array<{ name: string }> }>;
-}
-
-let unbuiltReason: string | undefined;
-let sdkEsmDir = "";
-let startFakeIris: (options: { bootstrapVersion: string }) => Promise<FakeIris>;
-let bootstrapVersion = "";
-let scratch = "";
-const open: Array<() => Promise<void>> = [];
+let kit: FreshProcessKit;
 
 beforeAll(async () => {
-  const missing = [
-    [path.join(SHARED_DIST, "bootstrap-classes.js"), "packages/shared is not built"],
-    [DEV_ENTRY, "packages/iris-dev-mcp is not built"],
-    [FAKE_LISTENER, "scripts/lib/fake-iris-listener.mjs is missing"],
-    [FAKE_KEYRING_PRELOAD, "scripts/lib/fake-keyring-preload.mjs is missing"],
-  ].find(([file]) => !existsSync(file as string));
-  const sdk = resolveSdkEsmDir();
-  if (missing !== undefined) unbuiltReason = `${missing[1]} (${missing[0]}); run "pnpm turbo run build" from the repo root.`;
-  else if (sdk === undefined) unbuiltReason = "the @modelcontextprotocol/client ESM build is not under node_modules/.pnpm; run pnpm install.";
-  else if (typeof (await import("node:module")).registerHooks !== "function") unbuiltReason = "this Node has no module.registerHooks (>= 22.15), so the fake keyring cannot be preloaded.";
-  if (unbuiltReason !== undefined) return;
-  sdkEsmDir = sdk as string;
-  startFakeIris = ((await import(pathToFileURL(FAKE_LISTENER).href)) as { startFakeIris: typeof startFakeIris }).startFakeIris;
-  const embed = (await import(pathToFileURL(path.join(SHARED_DIST, "bootstrap-classes.js")).href)) as { BOOTSTRAP_VERSION: string };
-  bootstrapVersion = embed.BOOTSTRAP_VERSION;
-  scratch = mkdtempSync(path.join(tmpdir(), "iris-mcp-launcher-dw749-"));
+  kit = await createFreshProcessKit("iris-mcp-launcher-dw749");
 });
 
 afterEach(async () => {
-  for (const close of open.splice(0).reverse()) await close().catch(() => undefined);
+  await kit.closeOpen();
 });
 
-afterAll(() => {
-  if (scratch !== "") rmSync(scratch, { recursive: true, force: true });
+afterAll(async () => {
+  await kit.dispose();
 });
+
+/** Spawn `planned` as the Copilot harness does, with the user's stored `dev1` password in the fake keyring. A server that cannot start is expected. */
+async function spawnAsCopilot(planned: PlannedDefinition): Promise<void> {
+  await kit.spawn(planned, { keyring: { dev1: STORED_PASSWORD } });
+}
 
 function settings(): LauncherSettings {
   return {
@@ -139,47 +103,10 @@ async function provide(inspection: ServerManagerServersInspection): Promise<Plan
   return planned!;
 }
 
-/** Spawn `planned` as the Copilot harness does, with the user's stored `dev1` password in the fake keyring. A server that cannot start is expected. */
-async function spawnAsCopilot(planned: PlannedDefinition): Promise<void> {
-  const caseDir = mkdtempSync(path.join(scratch, "case-"));
-  const keyringFile = path.join(caseDir, "fake-keyring.json");
-  writeFileSync(keyringFile, JSON.stringify({ "iris-mcp": { dev1: STORED_PASSWORD } }), "utf8");
-  const existing = process.env.NODE_OPTIONS;
-  const preload = `--import=${pathToFileURL(FAKE_KEYRING_PRELOAD).href}`;
-  const env: Record<string, string> = {
-    HOME: caseDir,
-    USERPROFILE: caseDir,
-    FAKE_KEYRING_FILE: keyringFile,
-    NODE_OPTIONS: existing === undefined || existing.trim() === "" ? preload : `${existing} ${preload}`,
-  };
-  if (process.env.PATH !== undefined) env["PATH"] = process.env.PATH;
-  for (const [key, value] of Object.entries(planned.env)) if (value !== null) env[key] = value;
-
-  const { Client } = (await import(pathToFileURL(path.join(sdkEsmDir, "index.mjs")).href)) as {
-    Client: new (info: { name: string; version: string }) => SdkClient;
-  };
-  const { StdioClientTransport } = (await import(pathToFileURL(path.join(sdkEsmDir, "stdio.mjs")).href)) as {
-    StdioClientTransport: new (params: { command: string; args: string[]; env: Record<string, string>; stderr: string }) => unknown;
-  };
-  const client = new Client({ name: "iris-mcp-launcher-dw749", version: "0.0.0" });
-  open.push(() => client.close());
-  try {
-    await client.connect(new StdioClientTransport({ command: planned.command, args: planned.args, env, stderr: "ignore" }));
-    await client.listTools();
-  } catch {
-    // A definition without connection settings exits at startup; what matters is what reached the listener.
-  }
-}
-
-function sentAuthorizations(fake: FakeIris): string[] {
-  return fake.authorizations.flatMap((entry) => (entry.authorization === undefined ? [] : [entry.authorization]));
-}
-
 describe("DW-749: a workspace-scope server reusing a user-scope name never receives the user's stored password", () => {
   it("a workspace layer that overrides only the user's dev1 host: provided env {}, and the workspace host receives no request and no stored password", async (ctx) => {
-    if (skipUnbuilt(ctx, "DW-749 pin", unbuiltReason)) return;
-    const workspaceHost = await startFakeIris({ bootstrapVersion });
-    open.push(() => workspaceHost.close());
+    if (skipUnbuilt(ctx, "DW-749 pin", kit.unbuiltReason)) return;
+    const workspaceHost = await kit.startFakeIris();
 
     const userScope = { webServer: { host: "iris.corp.invalid", port: 52773, scheme: "http" }, username: USERNAME };
     const workspaceScope = { webServer: { host: "127.0.0.1", port: workspaceHost.port } };
@@ -193,9 +120,8 @@ describe("DW-749: a workspace-scope server reusing a user-scope name never recei
   }, 60_000);
 
   it("control: the same user-scope dev1 pointed at the listener with NO workspace layer authenticates there with the stored password", async (ctx) => {
-    if (skipUnbuilt(ctx, "DW-749 pin", unbuiltReason)) return;
-    const userHost = await startFakeIris({ bootstrapVersion });
-    open.push(() => userHost.close());
+    if (skipUnbuilt(ctx, "DW-749 pin", kit.unbuiltReason)) return;
+    const userHost = await kit.startFakeIris();
 
     const userScope = { webServer: { host: "127.0.0.1", port: userHost.port, scheme: "http" }, username: USERNAME };
     const planned = await provide({ globalValue: { dev1: userScope } });

@@ -97,8 +97,8 @@ export interface IrisProfile extends IrisConnectionConfig {
    * reviewed trade-off (code review 2026-07-25): a basename would be useless —
    * every candidate is literally named `settings.json`, so the directory IS
    * the information — and the disclosure is non-credential. Operators who do
-   * not want local paths disclosed should define connections at workspace
-   * scope (`IRIS_SM_WORKSPACE`) or leave `IRIS_SERVER_MANAGER` off. Documented
+   * not want local paths disclosed should leave `IRIS_SERVER_MANAGER` off
+   * (a workspace-scope definition gets no stored password, DW-761). Documented
    * for users in the README's Server Manager connections section.
    */
   sourceFile?: string;

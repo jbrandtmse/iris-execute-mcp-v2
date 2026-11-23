@@ -16,6 +16,10 @@
  * authentication." Credential resolution therefore happens ONLY in
  * {@link resolveEnvForLabel} (VS Code's `resolveMcpServerDefinition`), never in
  * {@link providePlannedDefinitions}.
+ *
+ * Story 44.8 (DW-752): {@link resolveEnvForLabel} starts a server only when every server of its plan is defined in
+ * user (or default) settings alone ({@link isUserScopedServer}); otherwise it returns `undefined` with one warning,
+ * before any call to Server Manager's `getServerSpec`/`getAccount`/`getSession`.
  */
 import { stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -92,9 +96,11 @@ export interface ProviderDeps {
    */
   logDiagnostic?: (message: string) => void;
   /**
-   * The per-scope layers of `intersystems.servers` for `scope` (see {@link ServerManagerServersInspection}). A provided
-   * definition names a stored credential only for a server that {@link isUserScopedServer} accepts. Absent, throwing or
-   * returning `undefined`: no server qualifies, and every provided env is `{}`.
+   * The per-scope layers of `intersystems.servers` for `scope` (see {@link ServerManagerServersInspection}). Both
+   * harnesses use it, through one verdict (`inspectServerScope`): a provided definition names a stored credential only
+   * for a server that {@link isUserScopedServer} accepts, and the Local resolve step (`resolveEnvForLabel`) starts only
+   * such servers, before it touches Server Manager's credential API. Absent, throwing or returning a non-object: the
+   * verdict is `uninspectable`, so every provided env is `{}` and the Local resolve step starts nothing.
    */
   inspectServerManagerServers?: (scope?: ConfigScope) => ServerManagerServersInspection | undefined;
 }
@@ -125,6 +131,13 @@ export function isUserScopedServer(
   }
   return defines(inspection.globalValue) || defines(inspection.defaultValue);
 }
+
+/**
+ * Whether a server's definition is user-scoped: `user` (user or default settings alone), `not-user` (a workspace,
+ * folder or language-specific layer defines or overrides it, or no user layer defines it) or `uninspectable` (the
+ * inspection dependency is absent, threw, or returned a non-object).
+ */
+type ServerScopeVerdict = "user" | "not-user" | "uninspectable";
 
 const NPX_COMMAND = "npx";
 
@@ -450,6 +463,21 @@ export class LauncherProvider {
   }
 
   /**
+   * The one scope verdict both harnesses use (Story 44.8): inspect `intersystems.servers` in `scope` (the scope
+   * `getServerSpec` would read) and apply {@link isUserScopedServer}. Never throws.
+   */
+  private inspectServerScope(serverName: string, scope: ConfigScope | undefined): ServerScopeVerdict {
+    let inspection: ServerManagerServersInspection | undefined;
+    try {
+      inspection = this.deps.inspectServerManagerServers?.(scope);
+    } catch {
+      return "uninspectable";
+    }
+    if (typeof inspection !== "object" || inspection === null) return "uninspectable";
+    return isUserScopedServer(inspection, serverName) ? "user" : "not-user";
+  }
+
+  /**
    * The non-secret connection of one Server Manager server, or `undefined` when it cannot be known without a session or
    * the server is not defined in user settings alone (inspected in the same scope `getServerSpec` reads).
    */
@@ -459,7 +487,7 @@ export class LauncherProvider {
     scope: ConfigScope | undefined,
   ): Promise<ProvidedConnection | undefined> {
     try {
-      if (!isUserScopedServer(this.deps.inspectServerManagerServers?.(scope), serverName)) return undefined;
+      if (this.inspectServerScope(serverName, scope) !== "user") return undefined;
       const spec = await api.getServerSpec(serverName, scope, undefined, { hideFromRecents: true });
       if (!spec || typeof spec.webServer !== "object" || spec.webServer === null) return undefined;
       const username = typeof spec.username === "string" ? spec.username : "";
@@ -618,9 +646,20 @@ export class LauncherProvider {
    * provide -> resolve hop and is unique by construction, see `definitions.ts`).
    *
    * Returns `undefined` (never throws) when the server should not be started:
-   * an unknown label, a Server Manager definition that no longer exists, or a
-   * user-cancelled credential prompt. Every `undefined` path surfaces exactly
-   * ONE `showWarning` call — never a toast storm, never a retry loop.
+   * an unknown label, a Server Manager definition that no longer exists, a
+   * server that is not defined in user settings alone (or whose settings could
+   * not be inspected; Story 44.8, DW-752), or a user-cancelled credential
+   * prompt. Every `undefined` path surfaces exactly ONE `showWarning` call
+   * (a token already cancelled on entry is the one silent exit) — never a
+   * toast storm, never a retry loop.
+   *
+   * Story 44.8 (DW-752): before ANY credential step, every server of the plan
+   * must be user-scoped ({@link isUserScopedServer}, inspected in the scope it
+   * was enumerated in). Otherwise nothing is started and Server Manager's
+   * `getServerSpec`/`getAccount`/`getSession` are never called: its session
+   * is keyed by server name and username only, and its own session check
+   * sends the stored password to the MERGED host, which a workspace's
+   * `settings.json` may have chosen.
    */
   async resolveEnvForLabel(
     label: string,
@@ -652,6 +691,30 @@ export class LauncherProvider {
         `IRIS MCP Launcher: "${label}" was not started — the IRIS MCP Launcher settings could ` +
           `not be read. Check that irisMcpLauncher.servers and irisMcpLauncher.packages are ` +
           `arrays of strings in your settings.`,
+      );
+      return undefined;
+    }
+
+    // A cancellation already pending on entry is silent, and precedes the guard.
+    if (token?.isCancellationRequested) {
+      return undefined;
+    }
+    // Story 44.8 (DW-752): the user-scope guard, for EVERY server of the plan before the first credential step, so a
+    // refused plan never prompts and never reaches Server Manager's credential API. The first refused server in plan
+    // order is named. The texts carry no secret.
+    for (const serverName of plan.serverNames) {
+      const verdict = this.inspectServerScope(serverName, this.scopesByServerName.get(serverName));
+      if (verdict === "user") continue;
+      this.deps.showWarning(
+        verdict === "not-user"
+          ? `IRIS MCP Launcher: "${label}" was not started — IRIS server "${serverName}" is defined or overridden in ` +
+              `this workspace's settings (an intersystems.servers entry in a workspace, folder or language-specific ` +
+              `settings layer), so its stored password was not used: a workspace must not choose where that ` +
+              `password is sent. Define the server in your user settings under a name no workspace settings use, ` +
+              `and select that name in irisMcpLauncher.servers.`
+          : `IRIS MCP Launcher: "${label}" was not started — the intersystems.servers settings that define IRIS ` +
+              `server "${serverName}" could not be inspected, so its stored password was not used. Try reloading ` +
+              `the window.`,
       );
       return undefined;
     }
