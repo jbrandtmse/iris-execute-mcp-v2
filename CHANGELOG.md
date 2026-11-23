@@ -23,7 +23,7 @@ This summarises the Epic 44 release for the release notes. The story sections be
 
 ### IRIS side
 
-- `BOOTSTRAP_VERSION` moves from `1.1.0+3.3e97060f5bc4` to `1.1.0+5.6cbac260e73f`, for the `ExecuteMCPv2.REST.Config` change in Story 44.7. The server redeploys its IRIS classes on the next connect.
+- `BOOTSTRAP_VERSION` moves from `1.1.0+2.244fe8623c76` (the v1.1.0 release) to `1.1.0+5.6cbac260e73f`. Two IRIS-side changes cause this: the `ExecuteMCPv2.REST.Security` DocDB record route in Story 44.1 (`+3`), and the `ExecuteMCPv2.REST.Config` delete-dismount in Story 44.7 (`+4`, then `+5` after its review). The server redeploys its IRIS classes on the next connect.
 
 ## [Unreleased] — Story 44.8: Local Resolver Hands a Password Only to User-Scoped Servers
 
