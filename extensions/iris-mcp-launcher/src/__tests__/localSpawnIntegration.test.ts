@@ -40,6 +40,7 @@ import { LauncherProvider } from "../serverDefinitionProvider.js";
 import type { AuthApi, LauncherSettings, ServerManagerApi } from "../types.js";
 import { liveGateTarget } from "./liveArming.js";
 import { resolveSdkEsmDir } from "./sdkClientStore.js";
+import { userScopeServers } from "./serverManagerInspection.js";
 
 // Repo root — 4 levels up from src/__tests__ (__tests__ -> src ->
 // iris-mcp-launcher -> extensions -> repo root), matching the pattern
@@ -161,6 +162,8 @@ function newProvider(providerWarnings: string[]): LauncherProvider {
         developmentRepoPath: REPO_ROOT,
       }),
     showWarning: (message) => providerWarnings.push(message),
+    // The provided env is built only for a server defined in user settings alone.
+    inspectServerManagerServers: () => userScopeServers(["local-iris"]),
   });
 }
 

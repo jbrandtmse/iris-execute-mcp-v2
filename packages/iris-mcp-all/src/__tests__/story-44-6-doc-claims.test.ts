@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { REPO_ROOT } from "./pack-fixture";
 
@@ -78,10 +78,14 @@ describe("Story 44.6: the IRIS_CREDENTIAL_NAME env rows", () => {
 });
 
 describe("Story 44.6: the changelogs and the changeset", () => {
-  it("the extension CHANGELOG opens with ## [Unreleased], which records the Copilot-harness fix", () => {
+  const changesetPath = ".changeset/story-44-6-launcher-provider-works-in-copilot-sessions.md";
+  const changesetPresent = existsSync(path.join(REPO_ROOT, changesetPath));
+
+  // The release step renames "## [Unreleased]" to "## [<version>] — <date>"; either heading form passes.
+  it("the extension CHANGELOG's first section records the Copilot-harness fix", () => {
     const changelog = read("extensions/iris-mcp-launcher/CHANGELOG.md");
     const first = changelog.split(/^(?=## \[)/m)[1] ?? "";
-    expect(first.split("\n")[0]).toBe("## [Unreleased]");
+    expect(first.split("\n")[0]).toMatch(/^## \[(Unreleased|\d+\.\d+\.\d+)\]/);
     expect(squash(first)).toContain("start in a Copilot-harness chat session");
   });
 
@@ -92,8 +96,9 @@ describe("Story 44.6: the changelogs and the changeset", () => {
     expect(flat).toContain("resolves the \"Known limitation (deferred)\" bullet of Story 44.2");
   });
 
-  it("one changeset carries the release as an @iris-mcp/shared patch", () => {
-    const changeset = read(".changeset/story-44-6-launcher-provider-works-in-copilot-sessions.md");
+  // The changeset is consumed by the release version step, so it is asserted only while it exists.
+  it.skipIf(!changesetPresent)("one changeset carries the release as an @iris-mcp/shared patch", () => {
+    const changeset = read(changesetPath);
     expect(changeset.split("---")[1]?.trim()).toBe('"@iris-mcp/shared": patch');
   });
 });
