@@ -123,3 +123,6 @@
 2026-11-23T09:35:44Z	Story 44.6	cr_complete	pass=CI_rework_re-review review_outcome=lead_diff_review(decision_144) entries: high=0 med=0 low=0 rows=0 unresolved_high_med=0 status=done
 2026-11-23T10:10:11Z	Story 44.6	ci_resolved	run=45148477468 sha=1e79b53 conclusion=success jobs=9/9
 2026-11-23T10:10:11Z	Story 44.6	committed	sha=0a45825(+1e79b53_bookkeeping) ci=green run=45148477468
+2026-11-23T10:11:53Z	Epic 44	epic_context_compiled	reason=spine_AD-9_newer;44.4/44.5_focus model=claude-opus-5-5 lines=52
+2026-11-23T10:11:53Z	Epic 44	planner_message	from=MCP_Server_Suite_Planner ack=44.2+44.6(1e79b53,CI_green) accepted=DW-749_fix DW-752=decision_sheet sitting=being_scheduled(Planner_drives_shell;owner_clicks) results_handoff=to_lead lead_fix=spec-44-2_D-6_steps_6-7
+2026-11-23T10:11:53Z	Story 44.4	stage_spawned	stage=plan spawn_at=2026-11-23T10:11:53Z model=claude-opus-5-5 agent_name=44-4-bootstrap-compile-result-accuracy-plan-1 cycle_iteration=1 ledger_inbox=none
