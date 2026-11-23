@@ -3,6 +3,8 @@ import { IrisApiError, type ToolContext } from "@iris-mcp/shared";
 import { docLoadTool, filePathToDocName, extractBaseDir, docNameToFilePath, extractDeclaredIdentity } from "../tools/load.js";
 import { conflict, currentClass, notFound, TS_CURRENT } from "./conflict-fakes.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
+import { cleanCompileAnswer, fakeCompileAndCheck } from "./compile-check-fakes.js";
+import { notConfirmedText } from "../tools/compile-check.js";
 
 // ── Mock node:fs ──────────────────────────────────────────────────────
 
@@ -253,24 +255,142 @@ describe("iris_doc_load", () => {
     mockGlobSync.mockReturnValue(["c:/src/MyClass.cls"]);
     mockReadFileSync.mockReturnValue("Class MyClass {}\n");
     mockHttp.put.mockResolvedValue(envelope({ name: "MyClass.cls" }));
-    mockHttp.post.mockResolvedValue(
-      envelope({ content: [{ name: "MyClass.cls", status: "OK", errors: [] }] }),
-    );
+    // Story 44.7: the clean path adds the compile check's two reads (the dictionary query, then docnames).
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer(["MyClass.cls"]),
+      otherGet: async (path) => {
+        throw notFound(path);
+      },
+    });
 
     const result = await docLoadTool.handler(
       { path: "c:/src/**/*.cls", compile: true },
       ctx,
     );
 
-    expect(mockHttp.post).toHaveBeenCalledTimes(1);
+    expect(calls.posts).toEqual(["/api/atelier/v7/USER/action/compile", "/api/atelier/v7/USER/action/query"]);
     const compilePath = mockHttp.post.mock.calls[0]?.[0] as string;
     expect(compilePath).toContain("action/compile");
 
     const compileBody = mockHttp.post.mock.calls[0]?.[1] as string[];
     expect(compileBody).toEqual(["MyClass.cls"]);
 
-    const structured = result.structuredContent as { compilationResult: { success: boolean } };
-    expect(structured.compilationResult.success).toBe(true);
+    const structured = result.structuredContent as { compilationResult: Record<string, unknown> };
+    // The clean compilationResult keeps its pre-story keys: no `errors`, no `console` when none was sent.
+    expect(structured.compilationResult).toEqual({ success: true, documents: ["MyClass.cls"] });
+  });
+
+  // ── Story 44.7: the compile check (DW-755). Probe F (2026-11-23): the load's compile answers HTTP 200 and
+  //    `compilationResult.success: true` while `verifyCompiled` names the failing class.
+
+  it("a compile that failed without an error listed is compilationResult.success:false and names the class", async () => {
+    mockGlobSync.mockReturnValue(["c:/src/Bad.cls", "c:/src/Persistent.cls"]);
+    mockReadFileSync.mockReturnValueOnce("Class Bad {}\n").mockReturnValueOnce("Class Persistent {}\n");
+    mockHttp.put.mockResolvedValue(envelope({ name: "ok" }));
+    fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer(["Bad.cls", "Persistent.cls"], ["Compiling 2 classes"]),
+      broken: ["Bad.cls"],
+      otherGet: async (path) => {
+        throw notFound(path);
+      },
+    });
+
+    const result = await docLoadTool.handler({ path: "c:/src/**/*.cls", compile: true }, ctx);
+
+    expect(result.isError).toBeFalsy();
+    const structured = result.structuredContent as {
+      uploaded: number;
+      compilationResult: { success: boolean; errors?: Array<{ document: string; error: string }> };
+    };
+    expect(structured.uploaded).toBe(2);
+    expect(structured.compilationResult.success).toBe(false);
+    expect(structured.compilationResult.errors).toEqual([
+      { document: "Bad.cls", error: notConfirmedText("Bad.cls") },
+    ]);
+  });
+
+  it("a check that cannot run is compilationResult.success:false, never a pass", async () => {
+    mockGlobSync.mockReturnValue(["c:/src/Test.cls"]);
+    mockReadFileSync.mockReturnValue("Class Test {}\n");
+    mockHttp.put.mockResolvedValue(envelope({ name: "ok" }));
+    fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer(["Test.cls"]),
+      queryFails: new Error("ECONNRESET"),
+      otherGet: async (path) => {
+        throw notFound(path);
+      },
+    });
+
+    const result = await docLoadTool.handler({ path: "c:/src/**/*.cls", compile: true }, ctx);
+
+    const structured = result.structuredContent as {
+      compilationResult: { success: boolean; errors: Array<{ document: string; error: string }> };
+    };
+    expect(structured.compilationResult.success).toBe(false);
+    expect(structured.compilationResult.errors).toEqual([
+      { document: "*", error: "the check that every class compiled could not run: ECONNRESET" },
+    ]);
+  });
+
+  it("errors the compile already listed are reported as before, with no check request", async () => {
+    mockGlobSync.mockReturnValue(["c:/src/Bad.cls"]);
+    mockReadFileSync.mockReturnValue("Class Bad {}\n");
+    mockHttp.put.mockResolvedValue(envelope({ name: "ok" }));
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: envelope({
+        content: [{ name: "Bad.cls", status: "ERROR", errors: [{ error: "ERROR #5540: Expected '}'", line: 3, char: 1 }] }],
+      }),
+      otherGet: async (path) => {
+        throw notFound(path);
+      },
+    });
+
+    const result = await docLoadTool.handler({ path: "c:/src/**/*.cls", compile: true }, ctx);
+
+    expect(calls.posts).toEqual(["/api/atelier/v7/USER/action/compile"]);
+    const structured = result.structuredContent as {
+      compilationResult: { success: boolean; errors: Array<Record<string, unknown>> };
+    };
+    expect(structured.compilationResult).toEqual({
+      success: false,
+      documents: ["Bad.cls"],
+      errors: [{ document: "Bad.cls", error: "ERROR #5540: Expected '}'", line: 3, char: 1 }],
+    });
+  });
+
+  it("an include file is uploaded and compiled but not checked (its up-to-date flag cannot tell)", async () => {
+    mockGlobSync.mockReturnValue(["c:/src/Utils/Helper.inc"]);
+    mockReadFileSync.mockReturnValue("#define Helper 1\n");
+    mockHttp.put.mockResolvedValue(envelope({ name: "ok" }));
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: envelope({ content: [{ name: "Utils.Helper.inc", status: "", errors: [] }] }),
+    });
+
+    const result = await docLoadTool.handler({ path: "c:/src/**/*", compile: true }, ctx);
+
+    expect(calls.posts).toEqual(["/api/atelier/v7/USER/action/compile"]);
+    expect(calls.gets).toEqual([]);
+    expect((result.structuredContent as { compilationResult: { success: boolean } }).compilationResult.success).toBe(true);
+  });
+
+  // DW-759: a failed .mac routine in a compile that wrote a class's Storage answers HTTP 200 with nothing listed.
+  it("a .mac routine the check does not confirm is compilationResult.success:false and names the routine", async () => {
+    mockGlobSync.mockReturnValue(["c:/src/Utils/Bad.mac", "c:/src/Utils/Ok.mac"]);
+    mockReadFileSync.mockReturnValue("Write 1\n");
+    mockHttp.put.mockResolvedValue(envelope({ name: "ok" }));
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer(["Utils.Bad.mac", "Utils.Ok.mac"]),
+      broken: ["Utils.Bad.mac"],
+      catalog: [{ name: "Utils.Bad.mac" }, { name: "Utils.Ok.mac" }],
+    });
+
+    const result = await docLoadTool.handler({ path: "c:/src/**/*", compile: true }, ctx);
+
+    expect(calls.posts).toEqual(["/api/atelier/v7/USER/action/compile"]);
+    expect(calls.gets).toEqual(["/api/atelier/v7/USER/docnames/RTN?filter=Utils."]);
+    const compilation = (result.structuredContent as { compilationResult: { success: boolean; errors?: Array<{ document: string; error: string }> } }).compilationResult;
+    expect(compilation.success).toBe(false);
+    expect(compilation.errors).toEqual([{ document: "Utils.Bad.mac", error: notConfirmedText("Utils.Bad.mac") }]);
   });
 
   it("should pass compilation flags when compile is true and flags are provided", async () => {

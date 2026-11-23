@@ -66,6 +66,11 @@ const REST_OK = globalThis.__CUSTOM_REST_AVAILABLE__;
 // ── Test constants ────────────────────────────────────────────────────
 
 const TEST_DB_NAME = "MCPADMINTEST-DATA";
+/**
+ * Story 44.7 (DW-757): `delete` keeps the database's `IRIS.DAT` and its directory on disk, so a fixed directory would make
+ * the second run on one instance fail its create (#78, file already exists). Each run takes its own leaf.
+ */
+const TEST_DB_RUN_ID = `${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
 const TEST_NS_NAME = "MCPADMINTEST";
 const TEST_RESOURCE_NAME = "MCPAdminTestResource";
 const TEST_ROLE_NAME = "MCPAdminTestRole";
@@ -169,8 +174,9 @@ async function listAllNames(
 
 /**
  * The directory for the test database: a sibling of the `USER` database's directory, with that directory's separator
- * (`<parent of USER's directory>/mcpadmintestdata/`). The create action requires a `directory`, and a sibling of a
- * directory IRIS already uses is a place the instance can create on any platform.
+ * (`<parent of USER's directory>/mcpadmintestdata<run id>/`). The create action requires a `directory`, and a sibling of a
+ * directory IRIS already uses is a place the instance can create on any platform. The leaf is unique per run
+ * ({@link TEST_DB_RUN_ID}), because `delete` leaves the directory and its `IRIS.DAT` behind.
  */
 async function testDatabaseDirectory(toolCtx: ToolContext): Promise<string> {
   const { rows } = await listAllRows<{ name: string; directory: string }>(databaseListTool, "databases", toolCtx);
@@ -180,7 +186,7 @@ async function testDatabaseDirectory(toolCtx: ToolContext): Promise<string> {
   const separator = userDirectory.includes("\\") ? "\\" : "/";
   const trimmed = userDirectory.replace(/[\\/]+$/, "");
   const parent = trimmed.slice(0, trimmed.lastIndexOf(separator));
-  return `${parent}${separator}mcpadmintestdata${separator}`;
+  return `${parent}${separator}mcpadmintestdata${TEST_DB_RUN_ID}${separator}`;
 }
 
 describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
@@ -491,7 +497,9 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
+      // Story 44.7 (DW-758): the probed reply is `{valid:true,policy:{…}}`.
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      expect(result.structuredContent, result.content[0]?.text).toMatchObject({ valid: true });
     });
 
     it("validates a weak password returns result", async () => {
@@ -500,7 +508,12 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
+      // The probed reply is `{valid:false,message:"ERROR #845: …"}`: a policy
+      // verdict, not a tool error.
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const verdict = result.structuredContent as { valid?: boolean; message?: string };
+      expect(verdict?.valid, result.content[0]?.text).toBe(false);
+      expect(verdict.message ?? "").toContain("845");
     });
   });
 
@@ -536,7 +549,10 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
+      // Story 44.7 (DW-758): the probed reply is
+      // `{granted:true,reason:"target holds %All super-role"}` (Rule #6).
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      expect(result.structuredContent, result.content[0]?.text).toMatchObject({ granted: true });
     });
   });
 
@@ -682,5 +698,44 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         expect(result.content[0]?.text ?? "").toContain("https://mcpadmintest.example.com");
       },
     );
+  });
+
+  // ── 13. Database delete: refused while in use, then dismounted (Story 44.7, DW-757) ──
+  //
+  // Last, because it takes the namespace and the database away. afterAll's deletes
+  // stay as the safety net for a run that failed before this point.
+
+  describe("database delete", () => {
+    it("refuses to delete a database a namespace uses, and changes nothing", async () => {
+      expect(created.database && created.namespace, "the database and namespace creates must have succeeded").toBe(true);
+      const refused = await databaseManageTool.handler({ action: "delete", name: TEST_DB_NAME }, ctx);
+
+      expect(refused.isError, refused.content[0]?.text).toBe(true);
+      expect(refused.content[0]?.text ?? "").toContain("in use");
+      const { rows } = await listAllRows<{ name: string }>(databaseListTool, "databases", ctx);
+      expect(rows.some((db) => db.name.toUpperCase() === TEST_DB_NAME.toUpperCase())).toBe(true);
+    });
+
+    it("dismounts the database it deletes", async () => {
+      expect(created.database && created.namespace && created.mapping, "the creates must have succeeded").toBe(true);
+      const mapping = await mappingManageTool.handler(
+        { action: "delete", type: "global", namespace: TEST_NS_NAME, name: TEST_MAPPING_NAME },
+        ctx,
+      );
+      expect(mapping.isError, mapping.content[0]?.text).toBeFalsy();
+      const namespace = await namespaceManageTool.handler({ action: "delete", name: TEST_NS_NAME }, ctx);
+      expect(namespace.isError, namespace.content[0]?.text).toBeFalsy();
+
+      const result = await databaseManageTool.handler({ action: "delete", name: TEST_DB_NAME }, ctx);
+
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      expect(result.structuredContent, result.content[0]?.text).toMatchObject({
+        action: "deleted",
+        name: TEST_DB_NAME,
+        dismounted: true,
+      });
+      const { rows } = await listAllRows<{ name: string }>(databaseListTool, "databases", ctx);
+      expect(rows.some((db) => db.name.toUpperCase() === TEST_DB_NAME.toUpperCase())).toBe(false);
+    });
   });
 });

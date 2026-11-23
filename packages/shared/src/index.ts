@@ -124,6 +124,7 @@ export {
   compileClasses,
   compileAndVerify,
   verifyCompiled,
+  verifyRoutinesCompiled,
   configureWebApp,
   configurePackageMapping,
   ensureUnitTestRoot,

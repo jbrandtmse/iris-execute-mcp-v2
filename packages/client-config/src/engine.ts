@@ -291,12 +291,27 @@ export function sharedWriteVerdict(
   entry: CanonicalEntry,
   options: { fs?: WriteFs } = {},
 ): SharedWriteVerdict {
+  return sharedWriteVerdictByName(ctx, client, scope, entry.name, options);
+}
+
+/**
+ * The verdict of {@link sharedWriteVerdict} for an entry known by its name only (Story 44.7, DW-747: `doctor` asks it of
+ * the servers a client's old-location file still holds, with no entry to synthesize). It is the one place that decides
+ * ownership of a shared file, so the doctor can never disagree with the `apply` it advises about.
+ */
+export function sharedWriteVerdictByName(
+  ctx: EngineHostContext,
+  client: string,
+  scope: ClientScope,
+  name: string,
+  options: { fs?: WriteFs } = {},
+): SharedWriteVerdict {
   const fs = options.fs ?? REAL_WRITE_FS;
   const target = resolveTarget(ctx, client, scope, "apply", fs);
   if ("action" in target) return { kind: "none" };
   const current = readCurrent(fs, target.path);
   if (!current.ok) return { kind: "none" };
-  const conflict = notOwnerRefusal(target, entry.name, "write", sharedEntryPresent(target, current.content, entry.name));
+  const conflict = notOwnerRefusal(target, name, "write", sharedEntryPresent(target, current.content, name));
   return conflict === null
     ? { kind: "none" }
     : { kind: "conflict", path: target.path, sharedWith: conflict.owner !== undefined ? [conflict.owner] : [], reason: conflict.reason };

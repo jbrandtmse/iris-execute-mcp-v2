@@ -20,6 +20,7 @@ import { ProfileResolutionError } from "@iris-mcp/shared";
 import { STORAGE_FIXTURES } from "@iris-mcp/shared/test-helpers/storage-guard-fixtures";
 import { envPromoteTool } from "../tools/env-promote.js";
 import { currentClass, notFound } from "./conflict-fakes.js";
+import { cleanCheckReads } from "./compile-check-fakes.js";
 import { createMockCtx, createMockHttp, envelope } from "./test-helpers.js";
 
 /** A scanner fixture's text for class `name`, found by the start of its id. */
@@ -68,8 +69,12 @@ describe("Story 42.11 (QA): iris_env_promote execute, the Storage guard's scope 
       }
       throw notFound(path);
     });
+    // Story 44.7: the clean path adds the compile check's two reads on the target (the dictionary query, then docnames).
+    const check = cleanCheckReads();
     targetHttp.get.mockImplementation(async (path: string) => {
       if (path === "/api/atelier/") return envelope({ content: { api: 8 } });
+      const checked = check.get(path);
+      if (checked !== undefined) return checked;
       for (const [name, lines] of Object.entries(targetDocs)) {
         if (path === docPath(targetNs, name)) return envelope(currentClass(lines));
       }
@@ -78,6 +83,8 @@ describe("Story 42.11 (QA): iris_env_promote execute, the Storage guard's scope 
     targetHttp.put.mockResolvedValue(envelope({ status: "" }));
     targetHttp.post.mockImplementation(async (path: string, body: unknown) => {
       if (path.includes("/action/compile")) return envelope({ content: (body as string[]).map((name) => ({ name, errors: [] })) });
+      const checked = check.post(path, body);
+      if (checked !== undefined) return checked;
       return envelope({ success: true });
     });
   }
@@ -134,10 +141,17 @@ describe("Story 42.11 (QA): iris_env_promote execute, the Storage guard's scope 
     it("a class that exists only in the profile's own namespace is new in the namespace the caller named: nothing is refused", async () => {
       // The target holds Alpha.cls with its Storage in SADEMO only; in ALTNS there is no such class.
       arrange("ALTNS", "ALTNS");
+      const check = cleanCheckReads();
       targetHttp.get.mockImplementation(async (path: string) => {
         if (path === "/api/atelier/") return envelope({ content: { api: 8 } });
+        const checked = check.get(path);
+        if (checked !== undefined) return checked;
         if (path === docPath(TARGET_NS, "Alpha.cls")) return envelope(currentClass(withStorage("Alpha")));
         throw notFound(path);
+      });
+      targetHttp.post.mockImplementation(async (path: string, body: unknown) => {
+        if (path.includes("/action/compile")) return envelope({ content: (body as string[]).map((name) => ({ name, errors: [] })) });
+        return check.post(path, body) ?? envelope({ success: true });
       });
 
       const result = await execute(documentsDiff("Alpha.cls"), [1], { namespace: "ALTNS" });
@@ -163,7 +177,11 @@ describe("Story 42.11 (QA): iris_env_promote execute, the Storage guard's scope 
         },
       });
       expect(targetHttp.put.mock.calls.map((call) => call[0])).toEqual([`${docPath("ALTNS", "Alpha.cls")}?ignoreConflict=1`]);
-      expect(targetHttp.post.mock.calls.map((call) => call[0])).toEqual(["/api/atelier/v8/ALTNS/action/compile?flags=cuk"]);
+      // The compile, then the check's dictionary query (Story 44.7), both in the namespace the caller named.
+      expect(targetHttp.post.mock.calls.map((call) => call[0])).toEqual([
+        "/api/atelier/v8/ALTNS/action/compile?flags=cuk",
+        "/api/atelier/v8/ALTNS/action/query",
+      ]);
       expect(result.structuredContent).toMatchObject({ storageDrops: [{ name: "Alpha.cls", droppedStorage: ["Default"] }] });
     });
   });

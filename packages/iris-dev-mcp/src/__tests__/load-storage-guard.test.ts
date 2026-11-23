@@ -13,6 +13,7 @@ import { IrisApiError, type ToolContext } from "@iris-mcp/shared";
 import { STORAGE_FIXTURES } from "@iris-mcp/shared/test-helpers/storage-guard-fixtures";
 import { docLoadTool } from "../tools/load.js";
 import { conflict, currentClass, notFound, TS_CURRENT } from "./conflict-fakes.js";
+import { cleanCheckReads } from "./compile-check-fakes.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
 vi.mock("node:fs", () => ({
@@ -139,12 +140,24 @@ describe("iris_doc_load: the Storage guard (Story 42.11)", () => {
       localFiles({ [FILE]: NO_STORAGE, [OTHER_FILE]: OTHER_LINES });
       serverHolds(DEFAULT_ONLY);
       mockHttp.put.mockResolvedValue(envelope({ name: "Test.Other.cls", status: "" }));
-      mockHttp.post.mockResolvedValue(envelope({ content: [{ name: "Test.Other.cls", status: "OK", errors: [] }] }));
+      // Story 44.7: the compile that listed no error is followed by the check's two reads (dictionary query, docnames).
+      const check = cleanCheckReads();
+      const documentReads = mockHttp.get.getMockImplementation() as (path: string) => Promise<unknown>;
+      mockHttp.get.mockImplementation(async (path: string) => check.get(path) ?? documentReads(path));
+      mockHttp.post.mockImplementation(async (path: string, body: unknown) =>
+        path.includes("/action/compile")
+          ? envelope({ content: [{ name: "Test.Other.cls", status: "OK", errors: [] }] })
+          : check.post(path, body),
+      );
 
       const result = await load({ compile: true });
 
       expect(mockHttp.put.mock.calls).toEqual([[`${OTHER_PUT_PATH}?ignoreConflict=1`, bodyOf(OTHER_LINES)]]);
-      expect(mockHttp.post.mock.calls.map((call) => call[1])).toEqual([["Test.Other.cls"]]);
+      // Only the uploaded class reaches the compile and the check.
+      expect(mockHttp.post.mock.calls.map((call) => call[1])).toEqual([
+        ["Test.Other.cls"],
+        { query: expect.any(String), parameters: ["Test.Other"] },
+      ]);
       expect(result.structuredContent).toMatchObject({ total: 2, uploaded: 1, failed: 1 });
       expect(result.isError).toBe(false);
     });

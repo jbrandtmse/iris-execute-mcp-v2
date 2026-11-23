@@ -516,19 +516,65 @@ export async function verifyCompiled(
     if (Number(row["Compiled"]) === 1 && Number(row["CompileError"]) === 0) clean.add(String(row["ID"]).toLowerCase());
   }
 
+  const updated = await upToDateDocuments(http, namespace, version, "CLS", ids);
+
+  return names.filter((name, index) => !(clean.has((ids[index] as string).toLowerCase()) && updated.has(name.toLowerCase())));
+}
+
+/**
+ * The lower-cased names of the documents of `category` that IRIS lists as up to date (`upd: true`): one
+ * `docnames/<category>?filter=` GET per distinct first name segment (the package root) of `stems` (document names without
+ * their extension). The filter is a "name contains" read, so the entries of other packages come back too; the callers match by name.
+ */
+async function upToDateDocuments(
+  http: IrisHttpClient,
+  namespace: string,
+  version: number,
+  category: "CLS" | "RTN",
+  stems: readonly string[],
+): Promise<Set<string>> {
   const updated = new Set<string>();
-  const roots = [...new Set(ids.map((id) => id.split(".")[0] as string))];
+  const roots = [...new Set(stems.map((stem) => stem.split(".")[0] as string))];
   for (const root of roots) {
     const listed = await http.get(
-      atelierPath(version, namespace, `docnames/CLS?filter=${encodeURIComponent(`${root}.`)}`),
+      atelierPath(version, namespace, `docnames/${category}?filter=${encodeURIComponent(`${root}.`)}`),
     );
     const entries = (listed.result as { content?: Array<Record<string, unknown>> } | undefined)?.content;
     for (const entry of Array.isArray(entries) ? entries : []) {
       if (entry["upd"] === true) updated.add(String(entry["name"]).toLowerCase());
     }
   }
+  return updated;
+}
 
-  return names.filter((name, index) => !(clean.has((ids[index] as string).toLowerCase()) && updated.has(name.toLowerCase())));
+/**
+ * Decide, for each routine document in `names` (`Pkg.Name.mac`), whether the compile that covered it confirmed it (Story 44.7,
+ * DW-759). IRIS answers a compile with HTTP 200, no status error and no per-document error when a routine fails in a compile
+ * that also writes a persistent class's Storage, so the answer proves nothing. Atelier's `docnames/RTN` lists each routine
+ * with IRIS's own up-to-date flag (`upd`), which is false for a routine that did not compile and true once it did (probe
+ * 2026-11-23, irishealth-community 2026.2: failing `.mac` false, clean `.mac` true, an uncompiled one false). The decision reads no
+ * localized text.
+ *
+ * Only `.mac` documents are judged. The flag of an include file (`.inc`) is true whether or not anything compiled it, and the
+ * flag of an `.int` is true after a failed compile too (same probe), so neither can be decided from it.
+ *
+ * One `docnames/RTN?filter=` GET per distinct first name segment. Returns the unconfirmed documents in the order of `names`.
+ *
+ * @throws {Error} When a name does not end in `.mac`, and whatever the requests throw: a check that cannot run is never a pass.
+ */
+export async function verifyRoutinesCompiled(
+  http: IrisHttpClient,
+  namespace: string,
+  version: number,
+  names: readonly string[],
+): Promise<string[]> {
+  const other = names.find((name) => !name.endsWith(".mac") || name.length <= ".mac".length);
+  if (other !== undefined) {
+    throw new Error(`the routine compile check reads the up-to-date flag of .mac routines, so it takes documents ending in .mac; ${JSON.stringify(other)} is not one.`);
+  }
+  if (names.length === 0) return [];
+  const updated = await upToDateDocuments(http, namespace, version, "RTN", names.map((name) => name.slice(0, -".mac".length)));
+  return names.filter((name) => !updated.has(name.toLowerCase()));
 }
 
 /** What one compile and its check came to: a report, or which of the two stages failed to answer. */

@@ -84,6 +84,27 @@ describe("iris_database_manage", () => {
     );
   });
 
+  // Story 44.7 (AC 44.7.2): create and modify are byte-for-byte what they were (request body and the whole result).
+  it("create and modify send exactly their fields and return exactly the IRIS reply", async () => {
+    mockHttp.post.mockResolvedValueOnce(envelope({ action: "created", name: "NEWDB" }));
+    const created = await databaseManageTool.handler({ action: "create", name: "NEWDB", directory: "/d/newdb/", size: 10 }, ctx);
+    mockHttp.post.mockResolvedValueOnce(envelope({ action: "modified", name: "NEWDB" }));
+    const modified = await databaseManageTool.handler({ action: "modify", name: "NEWDB", readOnly: true }, ctx);
+
+    expect(mockHttp.post.mock.calls).toEqual([
+      ["/api/executemcp/v2/config/database", { action: "create", name: "NEWDB", directory: "/d/newdb/", size: 10 }],
+      ["/api/executemcp/v2/config/database", { action: "modify", name: "NEWDB", readOnly: true }],
+    ]);
+    expect(created).toEqual({
+      content: [{ type: "text", text: JSON.stringify({ action: "created", name: "NEWDB" }, null, 2) }],
+      structuredContent: { action: "created", name: "NEWDB" },
+    });
+    expect(modified).toEqual({
+      content: [{ type: "text", text: JSON.stringify({ action: "modified", name: "NEWDB" }, null, 2) }],
+      structuredContent: { action: "modified", name: "NEWDB" },
+    });
+  });
+
   it("should send POST for modify with only provided fields", async () => {
     mockHttp.post.mockResolvedValue(
       envelope({ action: "modified", name: "USER" }),
@@ -124,6 +145,67 @@ describe("iris_database_manage", () => {
 
     const structured = result.structuredContent as { action: string; name: string };
     expect(structured.action).toBe("deleted");
+  });
+
+  // ── Story 44.7 (DW-757): delete also dismounts; the reply gains `dismounted` and `dismountNote` (S-44.7-database-delete)
+
+  it("delete sends exactly {action, name} and passes the additive dismounted field through", async () => {
+    mockHttp.post.mockResolvedValue(envelope({ action: "deleted", name: "OLDDB", dismounted: true }));
+
+    const result = await databaseManageTool.handler({ action: "delete", name: "OLDDB" }, ctx);
+
+    expect(mockHttp.post.mock.calls).toEqual([
+      ["/api/executemcp/v2/config/database", { action: "delete", name: "OLDDB" }],
+    ]);
+    expect(result).toEqual({
+      content: [{ type: "text", text: JSON.stringify({ action: "deleted", name: "OLDDB", dismounted: true }, null, 2) }],
+      structuredContent: { action: "deleted", name: "OLDDB", dismounted: true },
+    });
+  });
+
+  it("delete of a database whose directory another entry uses passes dismounted:false and the note through", async () => {
+    const reply = {
+      action: "deleted",
+      name: "OLDDB",
+      dismounted: false,
+      dismountNote: "Not dismounted: the configured database 'OTHER' uses the same directory.",
+    };
+    mockHttp.post.mockResolvedValue(envelope({ ...reply }));
+
+    const result = await databaseManageTool.handler({ action: "delete", name: "OLDDB" }, ctx);
+
+    expect(result.structuredContent).toEqual(reply);
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("every delete error keeps its text exactly (in use by a namespace, no such name)", async () => {
+    for (const detail of [
+      "Cannot delete database OLDDB, in use by the following namespaces: APP",
+      "Database 'OLDDB' does not exist",
+    ]) {
+      const error = new IrisApiError(
+        400,
+        [{ error: `ERROR #429: ${detail}` }],
+        "/api/executemcp/v2/config/database",
+        `IRIS reported errors. Details: ${detail}`,
+      );
+      mockHttp.post.mockRejectedValueOnce(error);
+
+      const result = await databaseManageTool.handler({ action: "delete", name: "OLDDB" }, ctx);
+
+      expect(result).toEqual({
+        content: [{ type: "text", text: `Error managing database 'OLDDB': ${error.message}` }],
+        isError: true,
+      });
+    }
+  });
+
+  it("the description says delete dismounts, keeps IRIS.DAT, and keeps the background-work note (S-44.7-database-delete)", () => {
+    const text = databaseManageTool.description;
+    expect(text).toContain("dismounts it");
+    expect(text).toContain("IRIS.DAT and directory stay on disk");
+    expect(text).toContain("'create' at the same directory fails until that file is removed");
+    expect(text).toContain("does NOT cancel pending background work");
   });
 
   it("should return isError on IrisApiError", async () => {

@@ -7,7 +7,7 @@
  * `fixtures/sdk-golden-sanctioned-changes.json`, and the golden tests compare the live bytes with the frozen capture plus those
  * entries (`scripts/lib/golden-sanctioned-changes.mjs`). This file keeps the ledger honest. It pins:
  *  - both frozen files byte for byte, by SHA-256;
- *  - the entries of every story by id and order (43.4 first, then 42.10, 42.11, 44.1 and 44.4), so adding or removing one is a visible change of this file;
+ *  - the entries of every story by id and order (43.4 first, then 42.10, 42.11, 44.1, 44.4 and 44.7), so adding or removing one is a visible change of this file;
  *  - a shape for each sanction: how many entries it holds, which golden and operation, what the pointer may name, and
  *    whether a description entry appends (S-43.4-descriptions) or corrects (S-42.10-resend-text). A sanction with no shape fails;
  *    S-44.4-current-check holds the 15 startup inserts (Story 44.4, AC 44.4.8), three per server, written from the spec;
@@ -128,6 +128,18 @@ const STORY_44_4_IDS = [
   "iris-data-mcp",
 ].flatMap((server) => [6, 7, 8].map((index) => `44.4/startup/${server}@${index}`));
 
+/**
+ * The Story 44.7 entries (wave-9 decision #151), in ledger order: the `iris_docdb_property` description correction and its `inputSchema.properties`
+ * replacement (S-44.7-docdb-property), the `iris_docdb_manage` description correction (S-44.7-docdb-manage-text) and the `iris_database_manage`
+ * description correction (S-44.7-database-delete). One row each: only the `main` session of the data and admin servers lists these tools.
+ */
+const STORY_44_7_IDS = [
+  "44.7/docdb-property-text/iris_docdb_property@data-main",
+  "44.7/docdb-property-schema/iris_docdb_property@data-main",
+  "44.7/docdb-manage-text/iris_docdb_manage@data-main",
+  "44.7/database-delete/iris_database_manage@admin-main",
+];
+
 /** The entry ids of each story, in the order the ledger lists the stories (landing order). */
 const STORIES: Array<[string, string[]]> = [
   ["43.4", STORY_43_4_IDS],
@@ -135,6 +147,7 @@ const STORIES: Array<[string, string[]]> = [
   ["42.11", STORY_42_11_IDS],
   ["44.1", STORY_44_1_IDS],
   ["44.4", STORY_44_4_IDS],
+  ["44.7", STORY_44_7_IDS],
 ];
 
 /** The 13 tools Story 42.10 flips to `destructiveHint: true` (decision #39), by server. Written from the spec, never read from the ledger. */
@@ -348,7 +361,7 @@ function currentCheckProblems(change: Change): string[] {
 
 const hasOwn = (object: object, key: string): boolean => Object.prototype.hasOwnProperty.call(object, key);
 
-/** The nine sanctions the ledger registers, written from the specs of Stories 43.4, 42.10, 42.11, 44.1 and 44.4. */
+/** The twelve sanctions the ledger registers, written from the specs of Stories 43.4, 42.10, 42.11, 44.1, 44.4 and 44.7. */
 const SANCTIONS: Record<string, Shape> = {
   "S-43.4-descriptions": {
     story: "43.4",
@@ -454,7 +467,84 @@ const SANCTIONS: Record<string, Shape> = {
     text: "none",
     check: (change) => currentCheckProblems(change),
   },
+  "S-44.7-docdb-property": {
+    story: "44.7",
+    count: 2,
+    golden: "wire",
+    op: "replace",
+    text: "correction",
+    check: (change, toolName) => [
+      ...unmet(change.server !== "iris-data-mcp" || change.label !== "tools-list", `${change.id}: must change a tools-list row of the data server`),
+      ...unmet(toolName !== "iris_docdb_property", `${change.id}: the tool at its pointer (${String(toolName)}) must be iris_docdb_property`),
+      ...docdbPropertyProblems(change),
+    ],
+  },
+  "S-44.7-docdb-manage-text": {
+    story: "44.7",
+    count: 1,
+    golden: "wire",
+    op: "replace",
+    text: "correction",
+    check: (change, toolName) => [
+      ...unmet(change.server !== "iris-data-mcp" || change.label !== "tools-list", `${change.id}: must change a tools-list row of the data server`),
+      ...unmet(!/^\/result\/tools\/\d+\/description$/.test(change.pointer), `${change.id}: must point at a tool's description`),
+      ...unmet(toolName !== "iris_docdb_manage", `${change.id}: the tool at its pointer (${String(toolName)}) must be iris_docdb_manage`),
+      ...unmet(!String(change.old).includes("with optional property definitions"), `${change.id}: the frozen text is the one that claims create takes property definitions`),
+      ...unmet(String(change.new).includes("property definitions") || !String(change.new).includes("'create' creates an empty document database; define its properties with iris_docdb_property."), `${change.id}: the corrected text says create makes an empty database whose properties iris_docdb_property defines`),
+      ...unmet(!String(change.new).includes(DOCDB_REGISTER_SENTENCE), `${change.id}: the Story 44.1 sentence stays`),
+    ],
+  },
+  "S-44.7-database-delete": {
+    story: "44.7",
+    count: 1,
+    golden: "wire",
+    op: "replace",
+    text: "correction",
+    check: (change, toolName) => [
+      ...unmet(change.server !== "iris-admin-mcp" || change.label !== "tools-list", `${change.id}: must change a tools-list row of the admin server`),
+      ...unmet(!/^\/result\/tools\/\d+\/description$/.test(change.pointer), `${change.id}: must point at a tool's description`),
+      ...unmet(toolName !== "iris_database_manage", `${change.id}: the tool at its pointer (${String(toolName)}) must be iris_database_manage`),
+      ...unmet(
+        !String(change.new).includes("dismounts it") ||
+          !String(change.new).includes("IRIS.DAT and directory stay on disk") ||
+          !String(change.new).includes("fails until that file is removed") ||
+          !String(change.new).includes("does NOT cancel pending background work"),
+        `${change.id}: the corrected text says delete dismounts, keeps IRIS.DAT and the directory, makes a create at that directory fail, and keeps the background-work note`,
+      ),
+    ],
+  },
 };
+
+/**
+ * What is wrong with one S-44.7-docdb-property entry, written from the spec of Story 44.7 (Design Notes, Decisions): the description
+ * entry says `create` fills the property from `path` (default `$.<property>`), that earlier documents are not filled in until saved
+ * again, and what `index` does; the schema entry is the frozen properties object plus exactly one new member, `path`, a string of at
+ * least one character, just before `namespace`, with every other member as frozen.
+ */
+function docdbPropertyProblems(change: Change): string[] {
+  if (/^\/result\/tools\/\d+\/description$/.test(change.pointer)) {
+    const text = String(change.new);
+    return [
+      ...unmet(!String(change.old).includes("'index' creates an index on a property for faster queries."), `${change.id}: the frozen text is the one that claims index creates an index`),
+      ...unmet(!text.includes("'path'") || !text.includes("'$.<property>'"), `${change.id}: create is filled from 'path', default '$.<property>'`),
+      ...unmet(!text.includes("saved again"), `${change.id}: documents saved before the property exists are not filled in until saved again`),
+      ...unmet(!text.includes("DocDB indexes every property it creates"), `${change.id}: DocDB indexes every property it creates`),
+      ...unmet(!text.includes("'index' reports an existing property as indexed without writing anything, and creates a property that does not exist yet"), `${change.id}: what index does`),
+      ...unmet(text.includes("creates an index on a property for faster queries"), `${change.id}: the false claim is gone`),
+    ];
+  }
+  if (!/^\/result\/tools\/\d+\/inputSchema\/properties$/.test(change.pointer)) return [`${change.id}: must point at the description or the inputSchema properties`];
+  const before = change.old;
+  const after = change.new;
+  if (!isPlainRecord(before) || !isPlainRecord(after)) return [`${change.id}: old and new must be properties objects`];
+  const keys = Object.keys(after);
+  const path = after["path"];
+  return [
+    ...unmet(keys.join(",") !== "action,database,property,type,path,namespace,server", `${change.id}: the members are the frozen ones plus path, just before namespace`),
+    ...unmet(!isPlainRecord(path) || path["type"] !== "string" || path["minLength"] !== 1 || typeof path["description"] !== "string", `${change.id}: path is a string of at least one character with a description`),
+    ...Object.keys(before).flatMap((key) => unmet(!isDeepStrictEqual(after[key], before[key]), `${change.id}: member ${key} must be as frozen`)),
+  ];
+}
 
 /**
  * What is wrong with how `entries` use `shapes`: a sanction with no shape, an entry that is not its sanction's story, golden or
@@ -542,7 +632,7 @@ describe("the ledger", () => {
     expect(readSanctionedChanges(REPO_ROOT)).toHaveLength(changes.length);
   });
 
-  it("holds the entries of Story 43.4, then Story 42.10, then Story 42.11, then Story 44.1, then Story 44.4, each story's ids in order, and no other entry", () => {
+  it("holds the entries of Story 43.4, then Story 42.10, then Story 42.11, then Story 44.1, then Story 44.4, then Story 44.7, each story's ids in order, and no other entry", () => {
     expect(changes.map((change) => change.id)).toEqual(STORIES.flatMap(([, ids]) => ids));
     for (const [story, ids] of STORIES) {
       expect(changes.filter((change) => change.story === story).map((change) => change.id), `Story ${story}`).toEqual(ids);
@@ -552,6 +642,7 @@ describe("the ledger", () => {
     expect(STORY_42_11_IDS).toHaveLength(8);
     expect(STORY_44_1_IDS).toHaveLength(1);
     expect(STORY_44_4_IDS).toHaveLength(15);
+    expect(STORY_44_7_IDS).toHaveLength(4);
     expect(SANCTIONED_CHANGES_RELATIVE_PATH).toBe("packages/iris-mcp-all/src/__tests__/fixtures/sdk-golden-sanctioned-changes.json");
   });
 
@@ -818,6 +909,9 @@ describe("the CHANGELOG names every sanction", () => {
       "43.4 S-43.4-governance-resource",
       "44.1 S-44.1-docdb-manage-text",
       "44.4 S-44.4-current-check",
+      "44.7 S-44.7-database-delete",
+      "44.7 S-44.7-docdb-manage-text",
+      "44.7 S-44.7-docdb-property",
     ]);
     expect(changelogProblems(changes, changelog)).toEqual([]);
   });

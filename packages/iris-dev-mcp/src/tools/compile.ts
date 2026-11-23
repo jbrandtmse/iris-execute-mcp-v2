@@ -11,8 +11,15 @@
  * transport/connection failures set `isError: true`.
  */
 
-import { atelierPath, type ToolDefinition } from "@iris-mcp/shared";
+import { atelierPath, type ToolContext, type ToolDefinition } from "@iris-mcp/shared";
 import { z } from "zod";
+import {
+  checkCouldNotRunText,
+  isCheckableClass,
+  isCheckableRoutine,
+  notConfirmedText,
+  unconfirmedDocuments,
+} from "./compile-check.js";
 import { booleanParam } from "./zod-helpers.js";
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -34,6 +41,67 @@ interface CompilationDocResult {
 /** Shape of the `result.content` array in the Atelier compile response. */
 interface CompileResultContent {
   content?: CompilationDocResult[];
+}
+
+// ── Compile check (Story 44.7, DW-754) ─────────────────────────────
+
+/** True when a document name carries a wildcard that IRIS expands (`*` any run, `?` one character). */
+function hasWildcard(name: string): boolean {
+  return /[*?]/.test(name);
+}
+
+/** An anchored, case-insensitive regex for a document name or wildcard pattern: `*` is any run, `?` one character. */
+function wildcardRegex(pattern: string): RegExp {
+  const source = [...pattern]
+    .map((ch) => (ch === "*" ? ".*" : ch === "?" ? "." : ch.replace(/[.+^${}()|[\]\\]/g, "\\$&")))
+    .join("");
+  return new RegExp(`^${source}$`, "i");
+}
+
+/**
+ * The documents the compile of `docs` covers, for the check: concrete `.cls` and `.mac` names as given, and each `.cls` or `.mac`
+ * wildcard pattern expanded through `docnames` (IRIS expands it for the compile itself, so the tool has to know what it matched).
+ * `GET docnames/CLS|RTN?filter=<literal prefix>` is a "name contains" read, so the entries are kept only when the whole name
+ * matches the pattern, and generated documents are skipped. A name with a leading `'` is an exclusion: what it matches is
+ * removed. Other documents (`.inc`, `.int`, ...) are not checked. A pattern that matches nothing adds nothing.
+ */
+async function documentsCovered(ctx: ToolContext, ns: string, docs: readonly string[]): Promise<string[]> {
+  const included: string[] = [];
+  const excluded: RegExp[] = [];
+  for (const raw of docs) {
+    const isExclusion = raw.startsWith("'");
+    const name = isExclusion ? raw.slice(1) : raw;
+    if (!isCheckableClass(name) && !isCheckableRoutine(name)) continue;
+    if (isExclusion) {
+      excluded.push(wildcardRegex(name));
+      continue;
+    }
+    if (!hasWildcard(name)) {
+      included.push(name);
+      continue;
+    }
+    const prefix = name.slice(0, name.search(/[*?]/));
+    const listed = await ctx.http.get<{ content?: Array<{ name?: unknown; gen?: unknown }> }>(
+      atelierPath(
+        ctx.atelierVersion,
+        ns,
+        `docnames/${isCheckableClass(name) ? "CLS" : "RTN"}${prefix === "" ? "" : `?filter=${encodeURIComponent(prefix)}`}`,
+      ),
+    );
+    const entries = listed.result?.content;
+    const pattern = wildcardRegex(name);
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (entry.gen === true || typeof entry.name !== "string") continue;
+      if (pattern.test(entry.name)) included.push(entry.name);
+    }
+  }
+  const seen = new Set<string>();
+  return included.filter((name) => {
+    const key = name.toLowerCase();
+    if (seen.has(key) || excluded.some((rx) => rx.test(name))) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // ── iris_doc_compile ───────────────────────────────────────────────
@@ -155,6 +223,22 @@ export const docCompileTool: ToolDefinition = {
           if (err.char !== undefined) entry.char = err.char;
           allErrors.push(entry);
         }
+      }
+    }
+
+    // Story 44.7 (DW-754 and DW-759, AD-14): an HTTP 200 with no error listed is not proof that every document compiled.
+    // IRIS answers so when one class or routine fails in a compile that also writes a persistent class's Storage, so the
+    // class dictionary and IRIS's up-to-date flag decide for a class (`verifyCompiled`) and the flag for a `.mac` routine
+    // (`verifyRoutinesCompiled`); neither reads localized text. Only a compile that listed no error is checked: one that
+    // listed errors already fails, and a check that cannot run fails it too, never passes it.
+    if (allErrors.length === 0) {
+      try {
+        const covered = await documentsCovered(ctx, ns, docs);
+        for (const document of await unconfirmedDocuments(ctx.http, ns, ctx.atelierVersion, covered)) {
+          allErrors.push({ document, error: notConfirmedText(document) });
+        }
+      } catch (error: unknown) {
+        allErrors.push({ document: "*", error: checkCouldNotRunText(error) });
       }
     }
 

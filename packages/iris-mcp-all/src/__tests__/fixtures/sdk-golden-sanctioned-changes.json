@@ -1137,6 +1137,127 @@
         "url": "/api/atelier/v8/HSCUSTOM/docnames/CLS?filter=ExecuteMCPv2.",
         "body": ""
       }
+    },
+    {
+      "id": "44.7/docdb-property-text/iris_docdb_property@data-main",
+      "sanction": "S-44.7-docdb-property",
+      "story": "44.7",
+      "golden": "wire",
+      "server": "iris-data-mcp",
+      "session": "main",
+      "label": "tools-list",
+      "pointer": "/result/tools/3/description",
+      "op": "replace",
+      "old": "Create, drop, or index a property on an IRIS document database. 'create' defines a new property with a specified type. 'drop' removes a property definition. 'index' creates an index on a property for faster queries. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied.",
+      "new": "Create, drop, or index a property on an IRIS document database. 'create' defines a new property with a specified type and fills it from the document field at 'path' (default '$.<property>', the top-level field of the same name). Documents saved before the property exists are not filled in until they are saved again. DocDB indexes every property it creates, so a created property is already indexed. 'drop' removes a property definition. 'index' reports an existing property as indexed without writing anything, and creates a property that does not exist yet (a %String read from 'path'). A system property (a name starting with '%') cannot be indexed. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied."
+    },
+    {
+      "id": "44.7/docdb-property-schema/iris_docdb_property@data-main",
+      "sanction": "S-44.7-docdb-property",
+      "story": "44.7",
+      "golden": "wire",
+      "server": "iris-data-mcp",
+      "session": "main",
+      "label": "tools-list",
+      "pointer": "/result/tools/3/inputSchema/properties",
+      "op": "replace",
+      "old": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "create",
+            "drop",
+            "index"
+          ],
+          "description": "Action to perform: 'create', 'drop', or 'index'"
+        },
+        "database": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Document database name"
+        },
+        "property": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Property name"
+        },
+        "type": {
+          "description": "Property type (required for 'create', e.g., '%String', '%Integer')",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Target namespace (default: configured namespace)",
+          "type": "string"
+        },
+        "server": {
+          "description": "Named server profile to target for this call (from `IRIS_PROFILES`). Omit to use the default server.",
+          "type": "string"
+        }
+      },
+      "new": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "create",
+            "drop",
+            "index"
+          ],
+          "description": "Action to perform: 'create', 'drop', or 'index'"
+        },
+        "database": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Document database name"
+        },
+        "property": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Property name"
+        },
+        "type": {
+          "description": "Property type (required for 'create', e.g., '%String', '%Integer')",
+          "type": "string"
+        },
+        "path": {
+          "description": "Document path the property is read from, for 'create' and for 'index' of a property that does not exist yet (default '$.<property>', e.g. '$.address.city'). Ignored by 'drop' and by 'index' of an existing property.",
+          "type": "string",
+          "minLength": 1
+        },
+        "namespace": {
+          "description": "Target namespace (default: configured namespace)",
+          "type": "string"
+        },
+        "server": {
+          "description": "Named server profile to target for this call (from `IRIS_PROFILES`). Omit to use the default server.",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "id": "44.7/docdb-manage-text/iris_docdb_manage@data-main",
+      "sanction": "S-44.7-docdb-manage-text",
+      "story": "44.7",
+      "golden": "wire",
+      "server": "iris-data-mcp",
+      "session": "main",
+      "label": "tools-list",
+      "pointer": "/result/tools/0/description",
+      "op": "replace",
+      "old": "Create, drop, or list IRIS document databases. 'list' returns all DocDB databases in the namespace. 'create' creates a new document database with optional property definitions. 'drop' permanently removes a document database and all its data. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied. 'create' also registers the database's Security.DocDBs record, which every other DocDB call on that database requires, and on a database that exists without one it registers the missing record.",
+      "new": "Create, drop, or list IRIS document databases. 'list' returns all DocDB databases in the namespace. 'create' creates an empty document database; define its properties with iris_docdb_property. 'drop' permanently removes a document database and all its data. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied. 'create' also registers the database's Security.DocDBs record, which every other DocDB call on that database requires, and on a database that exists without one it registers the missing record."
+    },
+    {
+      "id": "44.7/database-delete/iris_database_manage@admin-main",
+      "sanction": "S-44.7-database-delete",
+      "story": "44.7",
+      "golden": "wire",
+      "server": "iris-admin-mcp",
+      "session": "main",
+      "label": "tools-list",
+      "pointer": "/result/tools/2/description",
+      "op": "replace",
+      "old": "Create, modify, or delete an IRIS database. For 'create', directory is required. For 'modify', only provided fields are updated. For 'delete', only the name is needed. Note: Deletion removes the database from the IRIS configuration but does NOT cancel pending background work (e.g., extent-index rebuilds) that may have been scheduled against the deleted directory. The IRIS console may log alerts for such operations post-delete; these are informational and do not indicate tool failure.",
+      "new": "Create, modify, or delete an IRIS database. For 'create', directory is required. For 'modify', only provided fields are updated. For 'delete', only the name is needed. Deletion removes the database from the IRIS configuration and dismounts it (unless another configured database uses the same directory; the reply then has 'dismounted: false' and a 'dismountNote'). Its IRIS.DAT and directory stay on disk, so a 'create' at the same directory fails until that file is removed. Note: Deletion does NOT cancel pending background work (e.g., extent-index rebuilds) that may have been scheduled against the deleted directory. The IRIS console may log alerts for such operations post-delete; these are informational and do not indicate tool failure."
     }
   ]
 }

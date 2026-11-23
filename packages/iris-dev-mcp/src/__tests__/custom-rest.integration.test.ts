@@ -327,6 +327,8 @@ describe.skipIf(!IRIS_OK || !CUSTOM_REST_OK)(
       it.each([
         ["ExecuteMCPv2.Tests.DocDbRegisterTest", 5],
         ["ExecuteMCPv2.Tests.DocDbRegisterNamespaceTest", 3],
+        // Story 44.7 (DW-757): `iris_database_manage delete` dismounts the database it removes (6 Test methods).
+        ["ExecuteMCPv2.Tests.DatabaseDeleteTest", 6],
       ] as const)("iris_execute_tests runs %s: all %i tests pass", async (target, expectedTotal) => {
         const result = await executeTestsTool.handler({ target, level: "class" }, ctx);
         expect(result.isError, result.content[0]?.text).toBeUndefined();

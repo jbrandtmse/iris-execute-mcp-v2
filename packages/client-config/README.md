@@ -95,7 +95,11 @@ iris-mcp-clients skills install|uninstall --client <id> [--project <dir>] [--dry
     re-parsed clean, removes the owned entries from that scope's old file through the same
     protocol (foreign entries, comments and `inputs` there stay byte-identical); `remove`
     sweeps them too. A stash recorded before the move that holds `${env:...}` or `${input:...}`
-    is refused by `enable`, which names `apply` as the fix.
+    is refused by `enable`, which names `apply` as the fix. A server whose entry in the shared
+    workspace `.mcp.json` belongs to Claude Code cannot be moved by `apply` (a refused verb writes
+    nothing, the old file included), and Copilot sessions already read that entry, so the copy in
+    the old file is unused: for that server `doctor` names deleting the entry from the old file
+    by hand instead of `apply`. The other servers keep the `apply` advice.
 - `doctor` diagnoses env-reference resolvability, config parseability,
   **config-surface drift** (below), stale backups, orphaned stashes,
   present `iris-`-namespaced entries that fail ownership (a state.json loss;

@@ -13,6 +13,7 @@ import { CONFIRMATION_TEXT_LIMIT, IrisApiError, ProfileResolutionError } from "@
 import { STORAGE_FIXTURES } from "@iris-mcp/shared/test-helpers/storage-guard-fixtures";
 import { envPromoteTool } from "../tools/env-promote.js";
 import { currentClass, notFound } from "./conflict-fakes.js";
+import { cleanCheckReads } from "./compile-check-fakes.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
 /** A scanner fixture's text for class `name`, found by the start of its id. */
@@ -136,8 +137,12 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
       }
       throw notFound(path);
     });
+    // Story 44.7: the clean path adds the compile check's two reads on the target (the dictionary query, then docnames).
+    const check = cleanCheckReads({ routines: ["Rtn.mac"] });
     targetHttp.get.mockImplementation(async (path: string) => {
       if (path === "/api/atelier/") return envelope({ content: { api: 8 } });
+      const checked = check.get(path);
+      if (checked !== undefined) return checked;
       for (const [name, lines] of Object.entries(targetDocs)) {
         if (path === `${TGT}${name}`) return envelope(currentClass(lines));
       }
@@ -146,6 +151,8 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
     targetHttp.put.mockResolvedValue(envelope({ status: "" }));
     targetHttp.post.mockImplementation(async (path: string, body: unknown) => {
       if (path.includes("/action/compile")) return envelope({ content: (body as string[]).map((name) => ({ name, errors: [] })) });
+      const checked = check.post(path, body);
+      if (checked !== undefined) return checked;
       return envelope({ success: true });
     });
   }
@@ -502,10 +509,17 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
 
     it("reads and writes each side with the Atelier version that side negotiated: source v8, target v7", async () => {
       const TGT7 = "/api/atelier/v7/SADEMO/doc/";
+      const check = cleanCheckReads();
       targetHttp.get.mockImplementation(async (path: string) => {
         if (path === "/api/atelier/") return envelope({ content: { api: 7 } });
+        const checked = check.get(path);
+        if (checked !== undefined) return checked;
         if (path === `${TGT7}Changed.cls`) return envelope(currentClass(withStorage("Changed")));
         throw notFound(path);
+      });
+      targetHttp.post.mockImplementation(async (path: string, body: unknown) => {
+        if (path.includes("/action/compile")) return envelope({ content: (body as string[]).map((name) => ({ name, errors: [] })) });
+        return check.post(path, body) ?? envelope({ success: true });
       });
 
       const refused = await execute(mixedDiff(), [2]);

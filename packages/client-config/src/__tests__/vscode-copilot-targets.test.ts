@@ -567,6 +567,107 @@ describe("AC 44.2.4: a stash recorded before the move", () => {
   });
 });
 
+// ── Story 44.7 (DW-747): doctor check 7 names a path that works when Claude Code owns the shared entry ──
+
+/** An old `.vscode/mcp.json` that still holds two owned servers, one of which Claude Code owns in the shared `.mcp.json`. */
+const OLD_PROJECT_TWO = `{\n  "servers": {\n    "iris-dev-mcp": { "command": "npx" },\n    "iris-admin-mcp": { "command": "npx" }\n  }\n}\n`;
+
+/** The `.mcp.json` entry of `server` as claude-code writes it, applied through the engine so the ledger records its ownership. */
+function claudeOwns(fs: MemFs, server: (typeof CANONICAL_SERVERS)[number]): void {
+  const claude = CLIENT_ADAPTERS["claude-code"];
+  if (claude === undefined) throw new Error("registry");
+  const entry = synthesizeEntry(server, "env-reference", { adapter: claude, profile: { governanceFile: "/g.json", serverManagerNames: "prod" } });
+  if (!entry.ok) throw new Error(entry.reason);
+  expect(apply(ctx(), "claude-code", "project", entry.entry, { fs }).ok).toBe(true);
+}
+
+type Finding = { check: string; scope: string; path: string | null; entry?: string; detail: string };
+
+async function localHarnessFindings(fs: MemFs): Promise<Finding[]> {
+  const doctor = await cli(fs, ["doctor", "--json"]);
+  return (JSON.parse(doctor.stdout) as { data: { findings: Finding[] } }).data.findings.filter((f) => f.check === "vscode-local-harness-entries");
+}
+
+describe("DW-747: doctor check 7 when Claude Code owns the entry of the shared .mcp.json", () => {
+  const PRE_STORY_DETAIL = (servers: string[], fixServers: string): string =>
+    `${servers.join(", ")} still in ${OLD_PROJECT}, a file of the deprecated Local harness (VS Code removes it in February 2027) that Copilot sessions do not read. ` +
+    `Move them: npx -y -p @iris-mcp/client-config@1 iris-mcp-clients apply --client vscode --scope project --servers ${fixServers}`;
+
+  it("a server Claude Code owns gets the by-hand delete; the other keeps today's apply finding; no file is written", async () => {
+    const fs = new MemFs();
+    claudeOwns(fs, "iris-dev-mcp");
+    fs.seed(OLD_PROJECT, OLD_PROJECT_TWO);
+    const before = new Map([...fs.files]);
+
+    const findings = await localHarnessFindings(fs);
+
+    const owned = findings.find((f) => f.entry === "iris-dev-mcp");
+    expect(owned, "a finding for the owned server").toBeDefined();
+    expect(owned?.path).toBe(OLD_PROJECT);
+    expect(owned?.detail).toContain(`Delete the "iris-dev-mcp" entry from ${OLD_PROJECT} by hand`);
+    expect(owned?.detail).toContain("belongs to Claude Code (claude-code)");
+    expect(owned?.detail, "never advises the apply that is refused").not.toContain("apply --client vscode");
+    expect(owned?.detail).not.toContain("--servers iris-dev-mcp");
+    const movable = findings.find((f) => f.entry === undefined && f.path === OLD_PROJECT);
+    expect(movable?.detail).toBe(PRE_STORY_DETAIL(["iris-admin-mcp"], "iris-admin-mcp"));
+    expect(findings).toHaveLength(2);
+    expect(new Map([...fs.files]), "doctor writes nothing").toEqual(before);
+  });
+
+  it("every server owned by Claude Code: only by-hand findings, no apply advice at all", async () => {
+    const fs = new MemFs();
+    claudeOwns(fs, "iris-dev-mcp");
+    claudeOwns(fs, "iris-admin-mcp");
+    fs.seed(OLD_PROJECT, OLD_PROJECT_TWO);
+
+    const findings = await localHarnessFindings(fs);
+
+    expect(findings.map((f) => f.entry).sort()).toEqual(["iris-admin-mcp", "iris-dev-mcp"]);
+    for (const finding of findings) expect(finding.detail).not.toContain("apply --client vscode");
+  });
+
+  it("the advice is true: the apply it replaces is refused for that server and writes no file", async () => {
+    const fs = new MemFs();
+    claudeOwns(fs, "iris-dev-mcp");
+    fs.seed(OLD_PROJECT, OLD_PROJECT_TWO);
+    const before = new Map([...fs.files]);
+
+    const run = await cli(fs, ["apply", "--client", "vscode", "--scope", "project", "--servers", "iris-dev-mcp", "--yes"]);
+
+    expect(run.exit).toBe(1);
+    expect(run.stderr).toContain("claude-code");
+    expect(new Map([...fs.files]), "a refused verb writes nothing, the old file included").toEqual(before);
+  });
+
+  it("no server refused: the finding is byte-identical to the pre-story one", async () => {
+    const fs = new MemFs();
+    fs.seed(OLD_PROJECT, OLD_PROJECT_TWO);
+
+    const findings = await localHarnessFindings(fs);
+
+    expect(findings).toEqual([
+      {
+        check: "vscode-local-harness-entries",
+        client: "vscode",
+        scope: "project",
+        path: OLD_PROJECT,
+        detail: PRE_STORY_DETAIL(["iris-dev-mcp", "iris-admin-mcp"], "iris-dev-mcp,iris-admin-mcp"),
+      },
+    ]);
+  });
+
+  it("the shared entry is VS Code's own (it applied it): no refusal, the apply advice stays", async () => {
+    const fs = new MemFs();
+    expect((await cli(fs, ["apply", "--client", "vscode", "--scope", "project", "--servers", "iris-dev-mcp", "--yes"])).exit).toBe(0);
+    fs.seed(OLD_PROJECT, OLD_PROJECT_TWO);
+
+    const findings = await localHarnessFindings(fs);
+
+    expect(findings.every((f) => f.entry === undefined)).toBe(true);
+    expect(findings.map((f) => f.detail).join("\n")).toContain("apply --client vscode --scope project --servers");
+  });
+});
+
 describe("one consumer: the CLI help text names ${VAR} and never ${env:VAR}", () => {
   it("--help", async () => {
     const run = await cli(new MemFs(), ["--help"], { stdin: Object.assign(Readable.from([]), { isTTY: false }) });

@@ -147,7 +147,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 | `iris_doc_edit` | Surgical line edits of an existing class, routine or include file: `insert`, `delete` or `replace` lines addressed by the numbers of a ranged `iris_doc_get`, each guarded by its `expected` text; all edits apply or none, in one version-checked save, and the answer (a unified diff, an excerpt per edit, `totalLines`, `ts`) comes from a re-read. Does not compile. **`apply` is a write that is enabled by default** (Project Lead decision S-3: every edit is guarded by `expected`, the save is version-checked and never retried, and a class edit that would drop a Storage definition is refused); disable it with `{"global": {"iris_doc_edit:apply": false}}`, or by disabling `iris_doc_put`. `regenerateStorage` (the Storage-guard override) is **disabled by default** | `action` (`apply` \| `regenerateStorage`), `name`, `edits` (each: `op`, `afterLine?`, `startLine?`, `endLine?`, `text?`, `expected`), `namespace?` | destructive |
 | `iris_doc_delete` | Delete one or more documents | `name` (string or array), `namespace?` | destructive, idempotent |
 | `iris_doc_list` | List documents with optional filters | `category?`, `type?`, `filter?`, `generated?`, `namespace?`, `modifiedSince?` (**refused**: IRIS cannot filter documents by modification time, so a call with a non-empty value is refused and lists nothing; compare the `ts` of the listed documents instead), `cursor?` | readOnly, idempotent |
-| `iris_doc_load` | Bulk upload files from disk into IRIS | `path` (glob), `baseDir?`, `compile?`, `flags?`, `namespace?`, `ignoreConflict?` (default: **true**: each file overwrites its server copy without a version check; **false**: a file whose document already exists is saved under a version check, and fails with `DOCUMENT_CONFLICT` if the document changes on the server while it is being saved, while the other files continue), `allowStorageRegeneration?` (default: **false**: a class file whose content drops one of the Storage definitions the existing class has is refused as a `failures` entry with `STORAGE_DROPPED`, nothing is stored for that file and the other files continue; **true**: the file is uploaded, IRIS generates new storage at the next compile, and the result's `storageDrops` names the dropped definitions) | destructive, idempotent |
+| `iris_doc_load` | Bulk upload files from disk into IRIS; with `compile: true` the compile is checked as `iris_doc_compile`'s is | `path` (glob), `baseDir?`, `compile?`, `flags?`, `namespace?`, `ignoreConflict?` (default: **true**: each file overwrites its server copy without a version check; **false**: a file whose document already exists is saved under a version check, and fails with `DOCUMENT_CONFLICT` if the document changes on the server while it is being saved, while the other files continue), `allowStorageRegeneration?` (default: **false**: a class file whose content drops one of the Storage definitions the existing class has is refused as a `failures` entry with `STORAGE_DROPPED`, nothing is stored for that file and the other files continue; **true**: the file is uploaded, IRIS generates new storage at the next compile, and the result's `storageDrops` names the dropped definitions) | destructive, idempotent |
 | `iris_doc_export` | Bulk-download documents to a local directory (inverse of `iris_doc_load`) | `destinationDir`, `prefix?`, `category?`, `type?`, `generated?`, `system?`, `modifiedSince?` (**refused**, as for `iris_doc_list`), `namespace?`, `includeManifest?`, `ignoreErrors?`, `useShortPaths?`, `overwrite?`, `continueDownloadOnTimeout?` | destructive, idempotent |
 
 ### Package Browsing Tools
@@ -160,7 +160,7 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_doc_compile` | Compile one or more documents | `doc` (string or array), `flags?`, `async?`, `namespace?` | idempotent |
+| `iris_doc_compile` | Compile one or more documents; a synchronous compile that IRIS answered with no error listed is checked (classes and `.mac` routines) against IRIS's own compile state, so a document that did not compile is named (see "The compile check" under the `iris_doc_compile` example below) | `doc` (string or array), `flags?`, `async?`, `namespace?` | idempotent |
 
 ### Code Intelligence Tools
 
@@ -850,6 +850,20 @@ For a structural overview at package granularity, use `iris_package_list`. For i
   "compilationTime": "245ms"
 }
 ```
+
+**The compile check (Story 44.7).** IRIS answers a compile with HTTP 200 and no error listed when one class or routine fails in a
+compile that also writes the Storage of a persistent class, so the answer alone proves nothing. After a synchronous compile that
+listed no error, `iris_doc_compile`, `iris_doc_load` (`compile: true`) and `iris_env_promote` (`execute`) ask IRIS itself, without
+reading any console text: for a class, the class dictionary (a compiled class with no compile error) and IRIS's up-to-date flag
+(`docnames`); for a `.mac` routine, the up-to-date flag. A document that is not confirmed makes the result `success: false`
+(`iris_doc_compile`; `errors` has one entry with `document` set to its name), `compilationResult.success: false`
+(`iris_doc_load`), or a `failed` step with the later steps `skipped` (`iris_env_promote`). `iris_doc_compile` reads the same
+documents of a wildcard (`Pkg.*.cls`, `Pkg.R?.mac`; a leading `'` excludes) from `docnames` first. A compile that listed an
+error, an `async` compile and a compile IRIS answered with a status error are reported exactly as before and send no check
+request. A check that cannot run fails the result; it is never a pass. A clean compile makes one more Atelier query plus one `docnames` listing for each package root of the classes it names
+(and one more listing for `.mac` routines). A wildcard with no literal prefix (`*.cls`) lists every class of the namespace first. Limit: an include file (`.inc`) and an `.int` routine are not checked, because IRIS's up-to-date flag
+is true for an include file whether or not anything compiled it, and for an `.int` also after a failed compile (probe 2026-11-23,
+IRIS 2026.2): a failure of only those, in a compile that also writes a class's Storage, still reads as success.
 </details>
 
 <details>

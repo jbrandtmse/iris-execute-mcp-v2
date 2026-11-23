@@ -165,11 +165,12 @@ describe("the tools/list snapshot and the sanctioned golden", () => {
     expect(chainProblems(changes)).toEqual([]);
     const chains = [...chainsOf(changes).values()];
     expect(Math.max(...chains.map((chain) => chain.length)), "a corrected or extended pointer is a chain of two entries").toBe(2);
-    // The resend description (Story 43.4's sentence, then Story 42.10's correction) and the iris_env_promote description (Story 43.4's
-    // sentence, then Story 42.11's Storage-guard paragraph) are the two chains of two.
+    // The resend description (Story 43.4's sentence, then Story 42.10's correction), the iris_env_promote description (Story 43.4's
+    // sentence, then Story 42.11's Storage-guard paragraph) and the iris_docdb_manage description (Story 44.1's sentence, then Story 44.7's
+    // correction) are the three chains of two.
     const chained = chains.filter((chain) => chain.length === 2);
-    expect(chained.map((chain) => chain[1]?.sanction).sort()).toEqual(["S-42.10-resend-text", "S-42.11-storage-guard-text"]);
-    expect(chained.map((chain) => chain[0]?.sanction).sort()).toEqual(["S-43.4-descriptions", "S-43.4-descriptions"]);
+    expect(chained.map((chain) => chain[1]?.sanction).sort()).toEqual(["S-42.10-resend-text", "S-42.11-storage-guard-text", "S-44.7-docdb-manage-text"]);
+    expect(chained.map((chain) => chain[0]?.sanction).sort()).toEqual(["S-43.4-descriptions", "S-43.4-descriptions", "S-44.1-docdb-manage-text"]);
   });
 });
 

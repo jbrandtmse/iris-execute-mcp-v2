@@ -19,7 +19,7 @@
  * REST management: list REST applications.
  */
 
-import { describe, it, expect, afterAll, beforeAll } from "vitest";
+import { describe, it, expect, afterAll, beforeAll, vi } from "vitest";
 import {
   IrisHttpClient,
   negotiateVersion,
@@ -144,17 +144,40 @@ describe.skipIf(!IRIS_OK || !DOCDB_OK)("DocDB lifecycle integration", () => {
 
   // ── 3. Create an index on the property ─────────────────────────
 
-  it("creates an index on the property", async () => {
-    // DocDB indexes every property when it is created and has no separate
-    // index operation: 'index' re-creates the property, so it answers #5805
-    // on one that exists. Index a property that does not exist yet.
+  it("reports the created property as indexed and writes nothing", async () => {
+    // Story 44.7 (DW-723): DocDB indexes every property when it creates it and has no
+    // index-only route, so 'index' on an existing property reads it (it used to POST
+    // and answer #5805). The reply says so, and the tool sends no POST.
+    const posts = vi.spyOn(client, "post");
+    try {
+      const result = await docdbPropertyTool.handler(
+        { action: "index", database: TEST_DB, property: "category" },
+        ctx,
+      );
+
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      expect(result.structuredContent, result.content[0]?.text).toMatchObject({ indexed: true, created: false });
+      expect(posts).not.toHaveBeenCalled();
+    } finally {
+      posts.mockRestore();
+    }
+  });
+
+  it("creates a property that does not exist yet when it is indexed", async () => {
+    // Story 44.7 (DW-723): a missing property is created (and so indexed) at the default path.
     const result = await docdbPropertyTool.handler(
       { action: "index", database: TEST_DB, property: "label" },
       ctx,
     );
 
-    expect(result.content[0]?.text).toBeDefined();
-    expect(result.isError).toBeFalsy();
+    expect(result.isError, result.content[0]?.text).toBeFalsy();
+    expect(result.structuredContent, result.content[0]?.text).toMatchObject({ indexed: true, created: true });
+
+    // Read it back from DocDB itself, not from the tool's own claim.
+    const readBack = (await client.get(
+      `/api/docdb/v1/${encodeURIComponent(ctx.resolveNamespace(undefined))}/prop/${encodeURIComponent(TEST_DB)}/label`,
+    )) as { content?: { Name?: string } };
+    expect(readBack.content?.Name).toBe("label");
   });
 
   // ── 4. Insert a document ───────────────────────────────────────
@@ -243,6 +266,8 @@ describe.skipIf(!IRIS_OK || !DOCDB_OK)("DocDB lifecycle integration", () => {
   // ── 7. Find documents with filter ──────────────────────────────
 
   it("finds documents with filter", async () => {
+    expect(insertedDocId, "the insert test must have returned the document id").toBeTruthy();
+
     const result = await docdbFindTool.handler(
       {
         database: TEST_DB,
@@ -251,8 +276,17 @@ describe.skipIf(!IRIS_OK || !DOCDB_OK)("DocDB lifecycle integration", () => {
       ctx,
     );
 
-    expect(result.content[0]?.text).toBeDefined();
-    expect(result.isError).toBeFalsy();
+    expect(result.isError, result.content[0]?.text).toBeFalsy();
+    // Story 44.7 (DW-724): the property was created with no path, and a property with
+    // no path is never filled in, so this find matched nothing. The create now defaults
+    // to `$.category`, so the inserted document is returned. The answer is
+    // {"content":{"sqlcode":100,"content":[{"%Doc":...,"%DocumentId":"2"}]}} (captured live).
+    const answer = result.structuredContent as { content?: { content?: Array<Record<string, unknown>> } };
+    const rows = answer?.content?.content ?? [];
+    expect(
+      rows.map((row) => String(row["%DocumentId"])),
+      result.content[0]?.text,
+    ).toContain(String(insertedDocId));
   });
 
   // ── 8. Delete document by ID ───────────────────────────────────
@@ -324,13 +358,14 @@ describe.skipIf(!IRIS_OK || !REST_OK)("Analytics integration", () => {
       ctx,
     );
 
-    // Should return an error response (not throw) since the cube doesn't exist
-    expect(result.content[0]?.text).toBeDefined();
+    // Should return an error response (not throw) since the cube doesn't exist.
     // The response is expected to be an error (isError: true) or contain
-    // an error message in the text, since the cube doesn't exist
+    // an error message in the text, since the cube doesn't exist.
+    // (Story 44.7, DW-758: the bare `toBeDefined()` on the text was dropped; the
+    // outcome assertion below is the real one.)
     const text = result.content[0]?.text ?? "";
     const isErrorResponse = result.isError === true || text.toLowerCase().includes("error");
-    expect(isErrorResponse).toBe(true);
+    expect(isErrorResponse, text).toBe(true);
   });
 });
 

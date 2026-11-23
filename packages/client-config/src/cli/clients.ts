@@ -68,6 +68,7 @@ import {
   remove,
   restore,
   sharedWriteVerdict,
+  sharedWriteVerdictByName,
   type EngineResult,
   type LegacyPreview,
 } from "../engine.js";
@@ -1849,18 +1850,45 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
     const adapter = CLIENT_ADAPTERS[client.client];
     for (const scope of client.scopes) {
       for (const file of scope.legacy ?? []) {
-        const fix = `npx -y -p ${pinnedSpec("@iris-mcp/client-config")} iris-mcp-clients apply --client ${client.client} --scope ${scope.scope} --servers ${file.servers.join(",")}`;
-        findings.push({
-          check: "vscode-local-harness-entries",
-          client: client.client,
-          scope: scope.scope,
-          path: file.path,
-          detail:
-            file.file === "unparseable"
-              ? `${file.path} (the old ${adapter?.displayName ?? client.client} location) is unreadable (${file.error ?? "unknown"}), so apply cannot move the entries out of it; repair or restore it first`
-              : `${file.servers.join(", ")} still in ${file.path}, a file of the deprecated Local harness (VS Code removes it in February 2027) that Copilot sessions do not read. ` +
-                `Move them: ${fix}`,
-        });
+        // Story 44.7 (DW-747): a server whose entry the other client owns in the shared file cannot be moved by `apply`
+        // (AD-30: a refused verb writes nothing, legacy files included), so advising `apply` for it is a dead end. The
+        // engine's own verdict decides which servers those are, so the advice can never disagree with the refusal.
+        const refused =
+          file.file === "unparseable"
+            ? []
+            : file.servers.flatMap((name) => {
+                const verdict = sharedWriteVerdictByName(ctx, client.client, scope.scope, name, { fs: deps.fs });
+                return verdict.kind === "conflict" ? [{ name, owner: verdict.sharedWith[0], sharedPath: verdict.path }] : [];
+              });
+        const movable = file.servers.filter((name) => !refused.some((entry) => entry.name === name));
+        if (file.file === "unparseable" || movable.length > 0 || refused.length === 0) {
+          const fix = `npx -y -p ${pinnedSpec("@iris-mcp/client-config")} iris-mcp-clients apply --client ${client.client} --scope ${scope.scope} --servers ${movable.join(",")}`;
+          findings.push({
+            check: "vscode-local-harness-entries",
+            client: client.client,
+            scope: scope.scope,
+            path: file.path,
+            detail:
+              file.file === "unparseable"
+                ? `${file.path} (the old ${adapter?.displayName ?? client.client} location) is unreadable (${file.error ?? "unknown"}), so apply cannot move the entries out of it; repair or restore it first`
+                : `${movable.join(", ")} still in ${file.path}, a file of the deprecated Local harness (VS Code removes it in February 2027) that Copilot sessions do not read. ` +
+                  `Move them: ${fix}`,
+          });
+        }
+        for (const entry of refused) {
+          const ownerName = entry.owner !== undefined ? `${CLIENT_ADAPTERS[entry.owner]?.displayName ?? entry.owner} (${entry.owner})` : "another client";
+          findings.push({
+            check: "vscode-local-harness-entries",
+            client: client.client,
+            scope: scope.scope,
+            path: file.path,
+            entry: entry.name,
+            detail:
+              `${entry.name} is still in ${file.path}, a file of the deprecated Local harness (VS Code removes it in February 2027) that Copilot sessions do not read. ` +
+              `The ${entry.name} entry in the shared ${entry.sharedPath} belongs to ${ownerName}, which Copilot sessions also read, so the copy in ${file.path} is unused. ` +
+              `Delete the "${entry.name}" entry from ${file.path} by hand: the CLI never changes an entry another client owns in the shared file.`,
+          });
+        }
         restartClients.add(client.client);
       }
     }

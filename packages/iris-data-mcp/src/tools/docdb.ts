@@ -177,6 +177,12 @@ const DOCDB_SERVICE_NAME = "%Service_DocDB";
 const IRIS_ERROR_CODE_DOCDB_ALREADY_EXISTS = 25051;
 
 /**
+ * IRIS error code for "DocDB Property '<name>' does not exist" (HTTP 400, ERROR #25541), the answer of a GET on a property
+ * the database lacks. The numeric code is locale-stable; the text is not (Rules #8/#13). Story 44.7, DW-723.
+ */
+const IRIS_ERROR_CODE_DOCDB_PROPERTY_MISSING = 25541;
+
+/**
  * True when the error carries an `errors[]` entry with the numeric `code`.
  *
  * The runtime cast in http-client.ts passes envelope.status.errors through
@@ -393,7 +399,7 @@ export const docdbManageTool: ToolDefinition = {
   description:
     "Create, drop, or list IRIS document databases. " +
     "'list' returns all DocDB databases in the namespace. " +
-    "'create' creates a new document database with optional property definitions. " +
+    "'create' creates an empty document database; define its properties with iris_docdb_property. " +
     "'drop' permanently removes a document database and all its data. " +
     "Prerequisite: the %Service_DocDB service must be enabled on the instance " +
     "(it is disabled by default on IRIS) — a disabled service fails these calls " +
@@ -837,9 +843,13 @@ export const docdbPropertyTool: ToolDefinition = {
   title: "Manage Document Property",
   description:
     "Create, drop, or index a property on an IRIS document database. " +
-    "'create' defines a new property with a specified type. " +
+    "'create' defines a new property with a specified type and fills it from the document field at 'path' " +
+    "(default '$.<property>', the top-level field of the same name). Documents saved before the property exists " +
+    "are not filled in until they are saved again. DocDB indexes every property it creates, so a created " +
+    "property is already indexed. " +
     "'drop' removes a property definition. " +
-    "'index' creates an index on a property for faster queries. " +
+    "'index' reports an existing property as indexed without writing anything, and creates a property that " +
+    "does not exist yet (a %String read from 'path'). A system property (a name starting with '%') cannot be indexed. " +
     "Prerequisite: the %Service_DocDB service must be enabled on the instance " +
     "(it is disabled by default on IRIS) — a disabled service fails these calls " +
     "with ERROR #822: Access Denied.",
@@ -853,6 +863,14 @@ export const docdbPropertyTool: ToolDefinition = {
       .string()
       .optional()
       .describe("Property type (required for 'create', e.g., '%String', '%Integer')"),
+    path: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Document path the property is read from, for 'create' and for 'index' of a property that does not exist yet " +
+          "(default '$.<property>', e.g. '$.address.city'). Ignored by 'drop' and by 'index' of an existing property.",
+      ),
     namespace: z
       .string()
       .optional()
@@ -866,19 +884,24 @@ export const docdbPropertyTool: ToolDefinition = {
   },
   scope: "NS",
   handler: async (args, ctx) => {
-    const { action, database, property, type, namespace } = args as {
+    const { action, database, property, type, path, namespace } = args as {
       action: string;
       database: string;
       property: string;
       type?: string;
+      path?: string;
       namespace?: string;
     };
 
     const ns = ctx.resolveNamespace(namespace);
     const propPath = `${BASE_DOCDB_URL}/${encodeURIComponent(ns)}/prop/${encodeURIComponent(database)}/${encodeURIComponent(property)}`;
+    // Story 44.7 (DW-724): a property created with no path is never filled in, so a find on it matches nothing.
+    // Default to the top-level field of the same name. IRIS decodes the encoded value (probed 2026-11-23).
+    const encodedPath = encodeURIComponent(path ?? `$.${property}`);
 
     try {
       let response: unknown;
+      let indexOutcome: { indexed: true; created: boolean } | undefined;
 
       if (action === "create") {
         if (!type) {
@@ -909,15 +932,54 @@ export const docdbPropertyTool: ToolDefinition = {
           .split("%")
           .map((part) => encodeURIComponent(part))
           .join("%");
-        response = await ctx.http.post(`${propPath}?type=${encodedType}`, {});
+        response = await ctx.http.post(`${propPath}?type=${encodedType}&path=${encodedPath}`, {});
       } else if (action === "drop") {
         response = await ctx.http.delete(propPath);
       } else {
-        // index
-        response = await ctx.http.post(propPath, { index: true });
+        // index (Story 44.7, DW-723). DocDB indexes every property when it creates it and its REST API has no
+        // index-only route, so POSTing an existing property re-creates it and fails with #5805. Read first:
+        // an existing property is reported, never written; a missing one (GET answers #25541) is created,
+        // which also indexes it.
+        if (property.startsWith("%")) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text:
+                  `Error: DocDB REST cannot index a system property ('${property}'). ` +
+                  "Only a property you created can be indexed.",
+              },
+            ],
+            isError: true,
+          };
+        }
+        let existing: unknown;
+        let missing = false;
+        try {
+          existing = await ctx.http.get(propPath);
+        } catch (getError: unknown) {
+          if (
+            getError instanceof IrisApiError &&
+            hasErrorCode(getError, IRIS_ERROR_CODE_DOCDB_PROPERTY_MISSING)
+          ) {
+            missing = true;
+          } else {
+            throw getError;
+          }
+        }
+        if (missing) {
+          response = await ctx.http.post(`${propPath}?path=${encodedPath}`, { index: true });
+          indexOutcome = { indexed: true, created: true };
+        } else {
+          response = existing;
+          indexOutcome = { indexed: true, created: false };
+        }
       }
 
-      const result = extractResult(response);
+      let result = extractResult(response);
+      if (indexOutcome !== undefined) {
+        result = { ...toStructured(result), ...indexOutcome };
+      }
       return {
         content: [
           { type: "text" as const, text: JSON.stringify(result, null, 2) },

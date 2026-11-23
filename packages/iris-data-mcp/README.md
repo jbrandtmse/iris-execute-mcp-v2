@@ -142,10 +142,10 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_docdb_manage` | Create, drop, or list document databases; `create` also registers the database's `Security.DocDBs` record (and repairs a database that has none) | `action`, `database?`, `namespace?` | destructive |
+| `iris_docdb_manage` | Create, drop, or list document databases; `create` makes an empty database (define its properties with `iris_docdb_property`). `create` also registers the database's `Security.DocDBs` record (and repairs a database that has none) | `action`, `database?`, `namespace?` | destructive |
 | `iris_docdb_document` | Insert, get, update, or delete documents | `action`, `database`, `id?`, `document?`, `namespace?` | destructive |
 | `iris_docdb_find` | Query documents with filter criteria | `database`, `filter`, `namespace?` | readOnly, idempotent |
-| `iris_docdb_property` | Create, drop, or index properties | `action`, `database`, `property`, `type?`, `namespace?` | destructive |
+| `iris_docdb_property` | Create, drop, or index properties; `create` fills the property from `path` (default `$.<property>`), and `index` reports an existing property without writing | `action`, `database`, `property`, `type?`, `path?`, `namespace?` | destructive |
 
 > All four DocDB tools require `%Service_DocDB` to be enabled on the instance (disabled by default on IRIS) — see [Prerequisites](#prerequisites). With the service disabled they return an actionable `ERROR #822: Access Denied` error naming both remedy routes.
 
@@ -369,6 +369,8 @@ comparison operator for filtering to work correctly (e.g., use `%Integer` for nu
 }
 ```
 
+**Where the property is read from (`path`):** the tool sends `path` (default `$.<property>`, the top-level field of the same name; for example `"path": "$.address.city"`) so that DocDB fills the property from each document. A property created with no path is never filled in, and a `find` on it matches nothing. DocDB fills a property when a document is saved, so documents saved before the property exists are not found by it until they are saved again. DocDB also indexes every property it creates, so a created property is already indexed.
+
 **Type encoding note:** The IRIS DocDB API reads `type` from a URL query parameter, not the JSON body.
 IRIS type names begin with `%` (e.g. `%Integer`, `%String`). The tool encodes these correctly using
 split/join encoding that preserves the `%` prefix as a literal `%` in the URL — standard `encodeURIComponent`
@@ -387,13 +389,16 @@ would convert `%Integer` to `%25Integer`, causing IRIS to look for class `%Libra
 }
 ```
 
-**Output:**
+**Output** (the property `email` already exists, so nothing is written):
 ```json
 {
-  "property": "email",
-  "indexed": true
+  "content": { "Name": "email", "Type": "%Library.String" },
+  "indexed": true,
+  "created": false
 }
 ```
+
+DocDB has no operation that only adds an index: it indexes every property when it creates it. So `index` reads the property and reports it with `indexed: true, created: false` (it used to re-create the property and fail with `ERROR #5805`). For a property that does not exist yet it creates it (`%String`, read from `path`, default `$.<property>`) and answers `created: true`. A system property (a name starting with `%`) cannot be indexed and is refused without a request.
 </details>
 
 <details>

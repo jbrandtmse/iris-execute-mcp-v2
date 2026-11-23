@@ -30,6 +30,7 @@ import {
   type ToolDefinition,
 } from "@iris-mcp/shared";
 import { z } from "zod";
+import { checkCouldNotRunText, notConfirmedText, unconfirmedDocuments } from "./compile-check.js";
 import { currentClassLines, currentDocument, storageDropsNote } from "./doc.js";
 import { booleanParam } from "./zod-helpers.js";
 
@@ -623,6 +624,22 @@ export const docLoadTool: ToolDefinition = {
               if (err.char !== undefined) entry.char = err.char;
               allErrors.push(entry);
             }
+          }
+        }
+
+        // Story 44.7 (DW-755, AD-14): an HTTP 200 with no error listed is not proof that every class compiled (IRIS answers
+        // so when one class fails in a compile that also writes a persistent class's Storage). Only a compile that listed
+        // no error is checked, through the class dictionary and IRIS's up-to-date flag (`verifyCompiled`, no localized
+        // text). A check that cannot run fails the compile: the catch below reports it, never a pass.
+        if (allErrors.length === 0) {
+          let unconfirmed: string[];
+          try {
+            unconfirmed = await unconfirmedDocuments(ctx.http, ns, ctx.atelierVersion, uploaded);
+          } catch (checkError: unknown) {
+            throw new Error(checkCouldNotRunText(checkError));
+          }
+          for (const document of unconfirmed) {
+            allErrors.push({ document, error: notConfirmedText(document) });
           }
         }
 

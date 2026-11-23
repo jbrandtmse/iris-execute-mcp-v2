@@ -148,6 +148,28 @@ const CONFIRM_AFTER =
 const DOCDB_REGISTER_SENTENCE =
   "'create' also registers the database's Security.DocDBs record, which every other DocDB call on that database requires, and on a database that exists without one it registers the missing record.";
 
+/** Story 44.7 (wave-9 decision #151), written from its spec's Design Notes: the clause of `iris_docdb_manage` that claimed `create` takes properties, and its correction. */
+const DOCDB_CREATE_BEFORE = "'create' creates a new document database with optional property definitions.";
+const DOCDB_CREATE_AFTER = "'create' creates an empty document database; define its properties with iris_docdb_property.";
+
+/** The frozen `iris_docdb_property` text, and the text Story 44.7 corrects it to. */
+const DOCDB_PROPERTY_BEFORE =
+  "Create, drop, or index a property on an IRIS document database. 'create' defines a new property with a specified type. 'drop' removes a property definition. 'index' creates an index on a property for faster queries. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied.";
+const DOCDB_PROPERTY_AFTER =
+  "Create, drop, or index a property on an IRIS document database. 'create' defines a new property with a specified type and fills it from the document field at 'path' (default '$.<property>', the top-level field of the same name). Documents saved before the property exists are not filled in until they are saved again. DocDB indexes every property it creates, so a created property is already indexed. 'drop' removes a property definition. 'index' reports an existing property as indexed without writing anything, and creates a property that does not exist yet (a %String read from 'path'). A system property (a name starting with '%') cannot be indexed. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied.";
+/** The new optional `path` member, in the wire order of an optional `z.string().min(1)` (`description`, `type`, `minLength`). */
+const DOCDB_PROPERTY_PATH = {
+  description:
+    "Document path the property is read from, for 'create' and for 'index' of a property that does not exist yet (default '$.<property>', e.g. '$.address.city'). Ignored by 'drop' and by 'index' of an existing property.",
+  type: "string",
+  minLength: 1,
+};
+
+/** The `iris_database_manage` note before Story 44.7, and what replaces it. */
+const DATABASE_DELETE_BEFORE = "Note: Deletion removes the database from the IRIS configuration but does NOT cancel pending background work";
+const DATABASE_DELETE_AFTER =
+  "Deletion removes the database from the IRIS configuration and dismounts it (unless another configured database uses the same directory; the reply then has 'dismounted: false' and a 'dismountNote'). Its IRIS.DAT and directory stay on disk, so a 'create' at the same directory fails until that file is removed. Note: Deletion does NOT cancel pending background work";
+
 interface Schema extends Json {
   properties: Record<string, { description: string } & Json>;
 }
@@ -187,6 +209,30 @@ function sanctionedTool(pkg: string, then: Tool): Tool {
   }
   // Story 44.1 (S-44.1-docdb-manage-text): one sentence appended to the iris_docdb_manage description, nothing else.
   if (pkg === "iris-data-mcp" && then.name === "iris_docdb_manage") expected.description = `${expected.description} ${DOCDB_REGISTER_SENTENCE}`;
+  // Story 44.7 (S-44.7-docdb-manage-text): the false clause "with optional property definitions" is replaced, nothing else.
+  if (pkg === "iris-data-mcp" && then.name === "iris_docdb_manage") {
+    expect(countOf(expected.description, DOCDB_CREATE_BEFORE), "the sanctioned docdb_manage text holds the false clause once").toBe(1);
+    expected.description = expected.description.replace(DOCDB_CREATE_BEFORE, DOCDB_CREATE_AFTER);
+  }
+  // Story 44.7 (S-44.7-docdb-property): the iris_docdb_property description is corrected and `path` joins the schema just before `namespace`.
+  if (pkg === "iris-data-mcp" && then.name === "iris_docdb_property") {
+    expect(expected.description, "the frozen iris_docdb_property text").toBe(DOCDB_PROPERTY_BEFORE);
+    expected.description = DOCDB_PROPERTY_AFTER;
+    const members = Object.entries(expected.inputSchema.properties);
+    expect(members.map(([name]) => name), "the frozen properties have no path").not.toContain("path");
+    const at = members.findIndex(([name]) => name === "namespace");
+    expect(at, "the frozen properties have namespace").toBeGreaterThan(-1);
+    expected.inputSchema.properties = Object.fromEntries([
+      ...members.slice(0, at),
+      ["path", DOCDB_PROPERTY_PATH],
+      ...members.slice(at),
+    ]) as Schema["properties"];
+  }
+  // Story 44.7 (S-44.7-database-delete): the Deletion note says what delete does now, then keeps its background-work sentence.
+  if (pkg === "iris-admin-mcp" && then.name === "iris_database_manage") {
+    expect(countOf(then.description, DATABASE_DELETE_BEFORE), "the frozen iris_database_manage text holds the old note once").toBe(1);
+    expected.description = then.description.replace(DATABASE_DELETE_BEFORE, DATABASE_DELETE_AFTER);
+  }
   if (FLIPPED[pkg]?.includes(then.name)) {
     expect(expected.annotations["destructiveHint"], `${then.name}: the frozen entry declares destructiveHint false`).toBe(false);
     expected.annotations["destructiveHint"] = true;

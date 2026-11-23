@@ -112,14 +112,17 @@ describe("Story 44.1 AC 44.1.7 -- request lists captured before the story", () =
   });
 
   it("iris_docdb_property", async () => {
+    // Story 44.7 (sanction S-44.7-docdb-property): `create` and `index` are the two rows that moved. The pre-story
+    // values were `POST .../p?type=%Integer` with `{}` and `POST .../p` with `{ index: true }`. `drop` is unchanged.
     expect(
       await requestsOf(docdbPropertyTool, { action: "create", database: "MyDb", property: "p", type: "%Integer" }),
-    ).toEqual([["POST", `${USER}/prop/MyDb/p?type=%Integer`, {}]]);
+    ).toEqual([["POST", `${USER}/prop/MyDb/p?type=%Integer&path=%24.p`, {}]]);
     expect(await requestsOf(docdbPropertyTool, { action: "drop", database: "MyDb", property: "p" })).toEqual([
       ["DELETE", `${USER}/prop/MyDb/p`],
     ]);
+    // The recording fake answers every call, so the GET finds an existing property and nothing is written.
     expect(await requestsOf(docdbPropertyTool, { action: "index", database: "MyDb", property: "p" })).toEqual([
-      ["POST", `${USER}/prop/MyDb/p`, { index: true }],
+      ["GET", `${USER}/prop/MyDb/p`],
     ]);
   });
 });

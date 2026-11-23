@@ -31,7 +31,7 @@
  * packages/shared/package.json. Compared against
  * `ExecuteMCPv2.Setup_GetBootstrapVersion()` at MCP server startup.
  */
-export const BOOTSTRAP_VERSION = "1.1.0+3.3e97060f5bc4";
+export const BOOTSTRAP_VERSION = "1.1.0+4.08228306009d";
 
 export interface BootstrapClass {
   name: string;
@@ -1267,7 +1267,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// deployment, an equal semver and sequence with a different hash, the
 /// <code>"dev"</code> placeholder and any unparseable value are left in place
 /// with a warning.</p>
-Parameter BOOTSTRAPVERSION = "1.1.0+3.3e97060f5bc4";
+Parameter BOOTSTRAPVERSION = "1.1.0+4.08228306009d";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -7000,6 +7000,14 @@ ClassMethod DatabaseManage() As %Status
             Quit
         }
 
+        ; delete switches to %SYS and restores the namespace itself (Story 44.7, DW-757), so it runs before the switch below.
+        If tAction = "delete" {
+            Set tSC = ..DeleteDatabaseEntry(tName, .tResult)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
         ; Switch to %SYS for Config operations
         Set $NAMESPACE = "%SYS"
 
@@ -7109,14 +7117,6 @@ ClassMethod DatabaseManage() As %Status
             Set tResult = {"action": "modified", "name": (tName)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }
-        ElseIf tAction = "delete" {
-            Set tSC = ##class(Config.Databases).Delete(tName)
-            Set $NAMESPACE = tOrigNS
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
-
-            Set tResult = {"action": "deleted", "name": (tName)}
-            Do ..RenderResponseBody($$$OK, , tResult)
-        }
     }
     Catch ex {
         Set $NAMESPACE = tOrigNS
@@ -7125,6 +7125,107 @@ ClassMethod DatabaseManage() As %Status
         Set tSC = $$$OK
     }
     Quit $$$OK
+}
+
+/// Delete a database's configuration entry and dismount the database (Story 44.7, DW-757).
+/// <p><code>Config.Databases.Delete</code> only removes the configuration entry, so the database stayed mounted and a later
+/// create at the same directory failed (#60). This reads the directory, deletes the entry and, unless another configured
+/// database names the same directory, dismounts it with <code>SYS.Database.DismountDatabase</code>.
+/// <code>IRIS.DAT</code> and the directory stay on disk: removing them is irreversible data loss and this action has no
+/// confirmation gate.</p>
+/// <p>Delete's own error (in use by a namespace, no such name, ...) is returned unchanged and nothing changes. A dismount
+/// that cannot run is not an error, because the entry is already gone: the result says <code>dismounted: false</code> and
+/// carries a <code>dismountNote</code>.</p>
+/// <p>Switches to %SYS itself and restores <code>$NAMESPACE</code> on every path (AD-13), so it runs from any namespace.
+/// The text of a failed dismount is sanitized after the namespace is restored.</p>
+/// <ul>
+/// <li><var>pName</var> - the database's configuration name</li>
+/// <li><var>pResult</var> - (output) <code>{"action": "deleted", "name": ..., "dismounted": true|false}</code>, plus
+/// <code>dismountNote</code> when it was not dismounted</li>
+/// </ul>
+ClassMethod DeleteDatabaseEntry(pName As %String, Output pResult As %DynamicObject) As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Set pResult = ""
+    Set tDir = ""
+    Set tDeleted = 0
+    Set tSharedBy = ""
+    Set tShareUnknown = 0
+    Set tDismounted = 0
+    Set tDismountSC = $$$OK
+    Try {
+        Set $NAMESPACE = "%SYS"
+
+        ; The entry holds the directory and Delete removes it, so read the directory first. A name that does not
+        ; exist gets Delete's own error below.
+        Kill tProps
+        If $$$ISOK(##class(Config.Databases).Get(pName, .tProps)) Set tDir = $Get(tProps("Directory"))
+
+        Set tSC = ##class(Config.Databases).Delete(pName)
+        If $$$ISERR(tSC) Quit
+        Set tDeleted = 1
+
+        If tDir '= "" {
+            Set tKey = ..DirectoryKey(tDir)
+
+            ; Another configured database that names the same directory still needs it mounted.
+            Set tRS = ##class(%ResultSet).%New("Config.Databases:List")
+            Set tListSC = tRS.Execute("*")
+            If $$$ISERR(tListSC) {
+                Set tShareUnknown = 1
+            } Else {
+                While tRS.Next() {
+                    If ..DirectoryKey(tRS.Get("Directory")) = tKey {
+                        Set tSharedBy = tRS.Get("Name")
+                        Quit
+                    }
+                }
+            }
+            Do tRS.Close()
+
+            If (tSharedBy = "") && 'tShareUnknown {
+                Set tDismountSC = ##class(SYS.Database).DismountDatabase(##class(%Library.File).NormalizeDirectory(tDir))
+                If $$$ISOK(tDismountSC) Set tDismounted = 1
+            }
+        }
+    }
+    Catch ex {
+        If tDeleted {
+            ; The entry is gone: report what did not happen, never an error.
+            Set tSC = $$$OK
+            Set tDismountSC = ex.AsStatus()
+        } Else {
+            Set tSC = ex.AsStatus()
+        }
+    }
+    Set $NAMESPACE = tOrigNS
+    If $$$ISERR(tSC) Quit tSC
+
+    Set pResult = {"action": "deleted", "name": (pName)}
+    Do pResult.%Set("dismounted", tDismounted, "boolean")
+    If 'tDismounted {
+        If tSharedBy '= "" {
+            Set tNote = "Not dismounted: the configured database '"_tSharedBy_"' uses the same directory."
+        } ElseIf tShareUnknown {
+            Set tNote = "Not dismounted: the configured databases could not be listed to check whether the directory is shared."
+        } ElseIf tDir = "" {
+            Set tNote = "Not dismounted: the directory of the database could not be read."
+        } Else {
+            Set tNote = "The configuration entry was removed, but the database could not be dismounted: "_##class(ExecuteMCPv2.Utils).StripErrorPrefix($System.Status.GetErrorText(##class(ExecuteMCPv2.Utils).SanitizeError(tDismountSC)))
+        }
+        Do pResult.%Set("dismountNote", tNote)
+    }
+    Quit $$$OK
+}
+
+/// The key two database directories are compared by: the normalized absolute directory, upper-cased on Windows, where
+/// paths are not case-sensitive (Story 44.7, DW-757).
+ClassMethod DirectoryKey(pDirectory As %String) As %String
+{
+    Set tKey = ##class(%Library.File).NormalizeDirectory(pDirectory)
+    If $ZVersion(1) = 2 Set tKey = $ZConvert(tKey, "U")
+    Quit tKey
 }
 
 /// List all global, routine, or package mappings for a namespace.
@@ -21185,7 +21286,7 @@ Class ExecuteMCPv2.InstallGuard Extends %RegisteredObject
 /// This package's bootstrap version marker, <code>&lt;semver&gt;+&lt;sequence&gt;.&lt;hash&gt;</code>.
 /// <p>The value on disk is <code>"dev"</code>, a placeholder. <code>scripts/gen-bootstrap.mjs</code>
 /// stamps the real marker into the copy it embeds and packages, and this file is not edited for it.</p>
-Parameter BOOTSTRAPVERSION = "1.1.0+3.3e97060f5bc4";
+Parameter BOOTSTRAPVERSION = "1.1.0+4.08228306009d";
 
 /// The class whose compiled BOOTSTRAPVERSION parameter is the deployed marker.
 Parameter SETUPCLASS = "ExecuteMCPv2.Setup";
