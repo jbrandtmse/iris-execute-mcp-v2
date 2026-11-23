@@ -64,7 +64,7 @@ Each row uses the compile list a branch sends: the 35-class roster for bootstrap
 | Skipped dependant | D has an old row, no error flag, and `upd` false (its dependency failed) | D named | named |
 | Rollback to identical content | a row and no error; timestamps differ, but `upd` true (hash match) | counts as compiled, not named | none |
 | Unconfigured plus failure | probe `unconfigured`; the recompile fails | `compiled: false`; `configured`, `mapped` and `unitTestRootEnsured` false; no Configure, mapping or `^UnitTestRoot` request | stops |
-| Compile request fails | transport error or non-2xx from `action/compile` | today's text and flags; no check requests | as today |
+| Compile request fails | transport error or non-2xx from `action/compile` | today's text; no check requests; the privileged steps are skipped on every writing branch (`unconfigured` included, per Boundaries; lead correction after review) | as today, fail-closed |
 | Check cannot run | `action/query` or `docnames` fails | `compiled: false`; "could not run" text; privileged steps skipped | fail-closed |
 | IRIS errors, check clean | status error; every class confirmed (not observed live; kept so that no status error is ever read as success, as today) | `compiled: false`; `Compile failed: IRIS reported errors: …` | as today |
 | Localized console | the de-DE or ja-JP console captures, with or without a flagged class | the result depends only on the check (clean: true; flagged: false, named) | none |
