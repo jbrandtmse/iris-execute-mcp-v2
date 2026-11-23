@@ -4200,3 +4200,18 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: low | footprint: in-story
 - evidence: rr5 verification-gap trace: vscode apply, vscode disable (stash), cc apply (drops vscode record), cc remove (stash kept), outside write; fileOwner's stash tier returns vscode
 - 2026-11-23T06:01:37Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=AD-30 owner order is record, then stash, then claude-code; fails safe (refusal naming vscode); way out: remove with vscode
+
+### DW-749: The 44.6 keychain entry is chosen by Server Manager server name only, so a workspace-scope intersystems.servers entry reusing a user-scope server's name would send that stored password to the workspace entry's host
+- source: spec-44-6-launcher-provider-works-in-copilot-sessions.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: IRIS_CREDENTIAL_NAME carries the server name; the host comes from that server's spec; nothing ties the stored entry to a host (serverDefinitionProvider.ts providedEnvFor); the Server Manager import keys the keychain the same way; unverified
+- 2026-11-23T08:12:06Z status=open owner=44-6-launcher-provider-works-in-copilot-sessions by=harvest note=for the code review: verify, then patch (e.g. do not provide IRIS_CREDENTIAL_NAME for a name defined at more than one scope, or bind the entry to its host) or route with the residual
+
+### DW-750: The launcher fires no MCP definitions-changed event when intersystems.servers changes, so a Copilot-harness session keeps the old provided host/port/username until a window reload
+- source: spec-44-6-launcher-provider-works-in-copilot-sessions.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: extension.ts:652 refreshes only the status bar; no onDidChangeMcpServerDefinitions emitter; command/args already behave this way; README says reload the window
+- 2026-11-23T08:12:06Z status=wontfix-accepted owner=44-6-launcher-provider-works-in-copilot-sessions by=harvest note=reopen_if=a user report of a stale Copilot-session connection after editing intersystems.servers, or VS Code documents re-provide on change
+
+### DW-751: McpServerBase.start() copies the registry-completed default password back into this.config with no test; nothing reads this.config.password after start
+- source: spec-44-6-launcher-provider-works-in-copilot-sessions.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: server-base.ts:2793; deleting the block turns no test red
+- 2026-11-23T08:12:06Z status=open owner=44-6-launcher-provider-works-in-copilot-sessions by=harvest note=for the code review: two-way door - delete the block if truly unread, or pin it with a start harness
