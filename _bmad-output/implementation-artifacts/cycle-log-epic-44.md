@@ -114,3 +114,5 @@
 2026-11-23T08:46:06Z	Story 44.6	ledger_adjudicated	slice_44-6=empty resolved=DW-731,DW-749,DW-751 accepted=DW-750 out=DW-752(decision-pending,decision_sheet),DW-753(lead_found_pre-existing_flaky_test->44-5)
 2026-11-23T08:46:06Z	Story 44.6	smoke_complete	kind=fresh_server_processes+fake_keychain+fake_listener(clean_rebuild) checks=process_gates_28/28(opt-in_keychain+helper+miss,unset_path_a/b_with_populated_keychain,doc_claims,fake-keyring)+DW-749_pin+empty_overrides+secret_sweep_20/20 red=CR_M(guard_removed->15_red_incl_wire_Basic_auth_to_workspace_host)+lead_M1(per-member_gate) real_keychain=never_touched
 2026-11-23T08:46:06Z	Story 44.6	fresh_check	launcher_shuffled_531+3skip shared_shuffled_2649/2650(1_pre-existing_order-dependence_in_untouched_credentials-cli-real-keyring.test.ts->DW-753) in-order_all_green
+2026-11-23T08:46:26Z	Story 44.6	committed	sha=ecc82b0 branch=epic44 pushed=yes ci=pending run=45141297405
+2026-11-23T08:46:26Z	Story 44.6	story_cycle	plan=1b9703a(blocked)+re-plan_5bbdbd3 build=3d49a06 qa=eacee78 cr+smoke=ecc82b0 status=done reviews=1 owner_rulings=#134,#140 decisions=#143 human_rows=AC_44.6.5+P-6_x5(owner_sitting_with_44.2_D-6)
