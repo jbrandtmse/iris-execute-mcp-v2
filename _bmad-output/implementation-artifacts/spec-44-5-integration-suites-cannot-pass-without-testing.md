@@ -318,6 +318,8 @@ Rejected:
 
 ## Verification
 
+- AC 44.5.4 (lead, 2026-11-23): the armed CI run of the epic44 tip after this story is green on every job: https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/45221487665 (sha ea05c03). Throwaway job: integration-admin 28/28, integration-data 12/12 with 0 skipped after the enable step, and every armed suite with 0 unlisted skips. The epic-done run of the wave-branch tip is recorded again at epic close, after Story 44.7.
+
 **Commands:**
 - `pnpm check:live-guards` -- expected: exit 0, `73 armed files, 0 findings`.
 - `pnpm --filter @iris-mcp/all exec vitest run src/__tests__/live-guard-check.test.ts src/__tests__/ci-workflow.test.ts src/__tests__/ci-live-suite.test.ts src/__tests__/release-prepare.test.ts` (timeout 600000) -- expected: green.
