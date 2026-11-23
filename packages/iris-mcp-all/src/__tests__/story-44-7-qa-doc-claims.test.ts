@@ -44,7 +44,8 @@ describe("Story 44.7: the READMEs", () => {
       "Limit: an include file (`.inc`) and an `.int` routine are not checked",
       "A check that cannot run fails the result; it is never a pass.",
       "A compile that listed an error, an `async` compile and a compile IRIS answered with a status error are reported exactly as before and send no check request.",
-      "A wildcard with no literal prefix (`*.cls`) lists every class of the namespace first.",
+      "a wildcard with no literal prefix (`*.cls`), one with a wildcard in its extension (`Pkg.*`), or one that matches more than 1000 documents is not expanded",
+      "`flags` without `c` (e.g. `k`) are checked too: IRIS compiles whatever the flags say.",
     ]) {
       expect(devReadme, needle).toContain(needle);
     }

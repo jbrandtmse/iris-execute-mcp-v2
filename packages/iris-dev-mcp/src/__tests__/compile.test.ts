@@ -302,7 +302,7 @@ describe("iris_doc_compile: the compile check (Story 44.7, DW-754)", () => {
     expect(mockHttp.post).toHaveBeenCalledWith("/api/atelier/v7/USER/action/compile", ["Pkg.P*.cls"]);
   });
 
-  it("'?' matches one character, and a leading wildcard lists without a filter", async () => {
+  it("'?' matches one character", async () => {
     const calls = fakeCompileAndCheck(mockHttp, {
       compile: cleanCompileAnswer([]),
       catalog: [{ name: "Pkg.A1.cls" }, { name: "Pkg.A22.cls" }, { name: "Pkg.B1.cls" }],
@@ -310,10 +310,87 @@ describe("iris_doc_compile: the compile check (Story 44.7, DW-754)", () => {
 
     await docCompileTool.handler({ doc: "Pkg.A?.cls" }, ctx);
     expect(calls.queryParameters).toEqual([["Pkg.A1"]]);
+  });
 
-    calls.gets.length = 0;
-    await docCompileTool.handler({ doc: "*.A1.cls" }, ctx);
-    expect(calls.gets[0]).toBe("/api/atelier/v7/USER/docnames/CLS");
+  it("a wildcard with no literal prefix is never listed (Rule #38): the named documents are still checked, and the result says what was not", async () => {
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer([]),
+      catalog: [{ name: "Pkg.A1.cls" }, { name: "Other.A1.cls" }],
+    });
+
+    const result = await docCompileTool.handler({ doc: ["*.A1.cls", "Pkg.A1.cls"] }, ctx);
+
+    expect(calls.gets.filter((url) => !url.includes("?filter="))).toEqual([]);
+    expect(calls.queryParameters).toEqual([["Pkg.A1"]]);
+    const structured = result.structuredContent as Structured & { checkNote?: string };
+    expect(structured.success).toBe(true);
+    expect(structured.checkNote).toBe(
+      "the compile check did not judge the documents matched by *.A1.cls: a wildcard with no literal prefix, one in the extension, " +
+        "or one that matches more than 1000 documents, is not expanded, so IRIS's answer alone decided them. Name the documents, " +
+        "or use a pattern with a package prefix and a .cls or .mac extension, to have them checked.",
+    );
+  });
+
+  it("a wildcard in the extension (Pkg.*) is not expanded, and the result names it", async () => {
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer([]),
+      catalog: [{ name: "Pkg.A.cls" }, { name: "Pkg.R.mac" }],
+    });
+
+    const result = await docCompileTool.handler({ doc: ["Pkg.*", "Pkg.A.cls"] }, ctx);
+
+    expect(calls.queryParameters).toEqual([["Pkg.A"]]);
+    const structured = result.structuredContent as Structured & { checkNote?: string };
+    expect(structured.success).toBe(true);
+    expect(structured.checkNote).toContain("matched by Pkg.*:");
+  });
+
+  it("a pattern whose matches would pass 1000 expanded documents is not expanded; a smaller one in the same call is", async () => {
+    const big = Array.from({ length: 1000 }, (_, index) => ({ name: `Big.C${index}.cls` }));
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer([]),
+      catalog: [...big, { name: "Small.A.cls" }, { name: "Small.B.cls" }],
+    });
+
+    const result = await docCompileTool.handler({ doc: ["Small.*.cls", "Big.*.cls"] }, ctx);
+
+    expect(calls.queryParameters).toEqual([["Small.A", "Small.B"]]);
+    const structured = result.structuredContent as Structured & { checkNote?: string };
+    expect(structured.success).toBe(true);
+    expect(structured.checkNote).toContain("matched by Big.*.cls:");
+  });
+
+  it("exactly 1000 expanded documents are all checked, with no note", async () => {
+    const thousand = Array.from({ length: 1000 }, (_, index) => ({ name: `Big.C${index}.cls` }));
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer([]),
+      catalog: thousand,
+    });
+
+    const result = await docCompileTool.handler({ doc: "Big.*.cls" }, ctx);
+
+    expect(calls.queryParameters.flat()).toHaveLength(1000);
+    expect(calls.queryParameters.map((batch) => batch.length)).toEqual(Array(10).fill(100));
+    expect(Object.keys(result.structuredContent as object)).not.toContain("checkNote");
+  });
+
+  it("flags without 'c' still run the check: IRIS compiles anyway", async () => {
+    // Probe 2026-11-23 (irishealth-community 2026.2, HSCUSTOM): `action/compile?flags=k` and `?flags=-c` compiled a class that had
+    // never been compiled (console "Compiling class ...", `verifyCompiled` [] after, the class unconfirmed before), and a broken
+    // class still answered #5475. `$SYSTEM.OBJ.CompileList` (irislib/%SYSTEM/OBJ.cls) compiles whatever the qualifiers say.
+    for (const flags of ["k", "-c"]) {
+      mockHttp.post.mockReset();
+      mockHttp.get.mockReset();
+      const calls = fakeCompileAndCheck(mockHttp, {
+        compile: cleanCompileAnswer(["Pkg.X.cls"]),
+        broken: ["Pkg.X.cls"],
+      });
+
+      const result = await docCompileTool.handler({ doc: "Pkg.X.cls", flags }, ctx);
+
+      expect(calls.posts, flags).toEqual([`/api/atelier/v7/USER/action/compile?flags=${encodeURIComponent(flags)}`, "/api/atelier/v7/USER/action/query"]);
+      expect((result.structuredContent as Structured).success, flags).toBe(false);
+    }
   });
 
   it("a wildcard that matches nothing checks nothing and the result stays a success", async () => {

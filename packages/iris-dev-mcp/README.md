@@ -860,8 +860,12 @@ reading any console text: for a class, the class dictionary (a compiled class wi
 (`iris_doc_load`), or a `failed` step with the later steps `skipped` (`iris_env_promote`). `iris_doc_compile` reads the same
 documents of a wildcard (`Pkg.*.cls`, `Pkg.R?.mac`; a leading `'` excludes) from `docnames` first. A compile that listed an
 error, an `async` compile and a compile IRIS answered with a status error are reported exactly as before and send no check
-request. A check that cannot run fails the result; it is never a pass. A clean compile makes one more Atelier query plus one `docnames` listing for each package root of the classes it names
-(and one more listing for `.mac` routines). A wildcard with no literal prefix (`*.cls`) lists every class of the namespace first. Limit: an include file (`.inc`) and an `.int` routine are not checked, because IRIS's up-to-date flag
+request. A check that cannot run fails the result; it is never a pass. A clean compile makes one more Atelier query for each 100 classes it
+checks, plus one `docnames` listing for each package root of those classes and one for each package root of its `.mac` routines;
+a wildcard adds its own `docnames` listing. `flags` without `c` (e.g. `k`) are checked too: IRIS compiles whatever the flags say.
+The check is bounded: a wildcard with no literal prefix (`*.cls`), one with a wildcard in its extension (`Pkg.*`), or one that
+matches more than 1000 documents is not expanded, so the documents it matches are not checked; the result then carries a
+`checkNote` naming the pattern, and the documents named outright are checked either way. Limit: an include file (`.inc`) and an `.int` routine are not checked, because IRIS's up-to-date flag
 is true for an include file whether or not anything compiled it, and for an `.int` also after a failed compile (probe 2026-11-23,
 IRIS 2026.2): a failure of only those, in a compile that also writes a class's Storage, still reads as success.
 </details>

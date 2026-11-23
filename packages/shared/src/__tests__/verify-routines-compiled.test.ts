@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { verifyCompiled, verifyRoutinesCompiled } from "../bootstrap.js";
+import { COMPILE_CHECK_BATCH, verifyCompiled, verifyRoutinesCompiled } from "../bootstrap.js";
 import type { IrisHttpClient } from "../http-client.js";
 
 /** A fake client whose `get` answers `docnames` listings per category, and whose `post` answers the dictionary query. */
@@ -95,6 +95,42 @@ describe("verifyRoutinesCompiled (DW-759)", () => {
     });
 
     await expect(verifyRoutinesCompiled({ get } as unknown as IrisHttpClient, "USER", 7, ["Pkg.Ok.mac"])).rejects.toThrow("ECONNRESET");
+  });
+});
+
+describe("verifyCompiled batches its dictionary query (Story 44.7 review)", () => {
+  // Probe 2026-11-23 (irishealth-community 2026.2, HSCUSTOM): one check query of 375 class names answered, one of 400 failed with
+  // `ERROR #5002: ObjectScript error: <STACK>Query+40^%Api.Atelier.v6.1`, so a compile of that many classes read as a check that
+  // could not run. The query is sent per 100 names; the rows answer only the names a query asked for, as IRIS's do.
+  it("250 names: three queries of 100, 100 and 50 parameters, each with as many placeholders, and the verdicts of all three are kept", async () => {
+    const names = Array.from({ length: 250 }, (_, index) => `Big.C${index}.cls`);
+    const get = vi.fn(async () => ({
+      result: { content: names.map((name) => ({ name, cat: "CLS", ts: "2026-11-23 17:49:08.205", upd: true, gen: false })) },
+    }));
+    const post = vi.fn(async (_path: string, body?: unknown) => {
+      const { parameters } = body as { parameters: string[] };
+      return { result: { content: parameters.map((ID) => ({ ID, Compiled: ID === "Big.C240" ? 0 : 1, CompileError: 0 })) } };
+    });
+    const http = { get, post } as unknown as IrisHttpClient;
+
+    const named = await verifyCompiled(http, "HSCUSTOM", 8, names);
+
+    expect(named).toEqual(["Big.C240.cls"]);
+    const bodies = post.mock.calls.map((call) => call[1] as { query: string; parameters: string[] });
+    expect(bodies.map((body) => body.parameters.length)).toEqual([100, 100, 50]);
+    expect(bodies.flatMap((body) => body.parameters)).toEqual(names.map((name) => name.slice(0, -".cls".length)));
+    for (const body of bodies) expect(body.query.match(/\?/g)).toHaveLength(body.parameters.length);
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it("exactly 100 names is one query, and COMPILE_CHECK_BATCH is 100", async () => {
+    const names = Array.from({ length: 100 }, (_, index) => `Big.C${index}.cls`);
+    const { http, post } = fakeHttp({});
+
+    await verifyCompiled(http, "HSCUSTOM", 8, names);
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(COMPILE_CHECK_BATCH).toBe(100);
   });
 });
 

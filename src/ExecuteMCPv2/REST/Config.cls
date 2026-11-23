@@ -453,8 +453,9 @@ ClassMethod DatabaseManage() As %Status
 
 /// Delete a database's configuration entry and dismount the database (Story 44.7, DW-757).
 /// <p><code>Config.Databases.Delete</code> only removes the configuration entry, so the database stayed mounted and a later
-/// create at the same directory failed (#60). This reads the directory, deletes the entry and, unless another configured
-/// database names the same directory, dismounts it with <code>SYS.Database.DismountDatabase</code>.
+/// create at the same directory failed (#60). This reads the directory and server, deletes the entry and dismounts the
+/// directory with <code>SYS.Database.DismountDatabase</code> when <method>ShouldDismount</method> says so: a local entry whose
+/// directory no other local entry names. A remote (ECP) entry dismounts nothing on this instance.
 /// <code>IRIS.DAT</code> and the directory stay on disk: removing them is irreversible data loss and this action has no
 /// confirmation gate.</p>
 /// <p>Delete's own error (in use by a namespace, no such name, ...) is returned unchanged and nothing changes. A dismount
@@ -473,6 +474,7 @@ ClassMethod DeleteDatabaseEntry(pName As %String, Output pResult As %DynamicObje
     Set tOrigNS = $NAMESPACE
     Set pResult = ""
     Set tDir = ""
+    Set tServer = ""
     Set tDeleted = 0
     Set tSharedBy = ""
     Set tShareUnknown = 0
@@ -481,34 +483,36 @@ ClassMethod DeleteDatabaseEntry(pName As %String, Output pResult As %DynamicObje
     Try {
         Set $NAMESPACE = "%SYS"
 
-        ; The entry holds the directory and Delete removes it, so read the directory first. A name that does not
-        ; exist gets Delete's own error below.
+        ; The entry holds the directory and the server and Delete removes them, so read them first. A name that does
+        ; not exist gets Delete's own error below.
         Kill tProps
-        If $$$ISOK(##class(Config.Databases).Get(pName, .tProps)) Set tDir = $Get(tProps("Directory"))
+        If $$$ISOK(##class(Config.Databases).Get(pName, .tProps)) {
+            Set tDir = $Get(tProps("Directory"))
+            Set tServer = $Get(tProps("Server"))
+        }
 
         Set tSC = ##class(Config.Databases).Delete(pName)
         If $$$ISERR(tSC) Quit
         Set tDeleted = 1
 
-        If tDir '= "" {
-            Set tKey = ..DirectoryKey(tDir)
-
-            ; Another configured database that names the same directory still needs it mounted.
+        ; A remote (ECP) entry names a directory on its own server: nothing on this instance is dismounted for it.
+        If (tDir '= "") && (tServer = "") {
+            ; The other configured databases, for the shared-directory check.
+            Kill tOthers
             Set tRS = ##class(%ResultSet).%New("Config.Databases:List")
             Set tListSC = tRS.Execute("*")
             If $$$ISERR(tListSC) {
                 Set tShareUnknown = 1
             } Else {
+                Set tN = 0
                 While tRS.Next() {
-                    If ..DirectoryKey(tRS.Get("Directory")) = tKey {
-                        Set tSharedBy = tRS.Get("Name")
-                        Quit
-                    }
+                    Set tN = tN + 1
+                    Set tOthers(tN) = $ListBuild(tRS.Get("Name"), tRS.Get("Server"), tRS.Get("Directory"))
                 }
             }
             Do tRS.Close()
 
-            If (tSharedBy = "") && 'tShareUnknown {
+            If ('tShareUnknown) && (..ShouldDismount(tServer, tDir, .tOthers, .tSharedBy)) {
                 Set tDismountSC = ##class(SYS.Database).DismountDatabase(##class(%Library.File).NormalizeDirectory(tDir))
                 If $$$ISOK(tDismountSC) Set tDismounted = 1
             }
@@ -529,7 +533,9 @@ ClassMethod DeleteDatabaseEntry(pName As %String, Output pResult As %DynamicObje
     Set pResult = {"action": "deleted", "name": (pName)}
     Do pResult.%Set("dismounted", tDismounted, "boolean")
     If 'tDismounted {
-        If tSharedBy '= "" {
+        If tServer '= "" {
+            Set tNote = "Not dismounted: the database is on the remote server '"_tServer_"', so nothing on this instance was dismounted."
+        } ElseIf tSharedBy '= "" {
             Set tNote = "Not dismounted: the configured database '"_tSharedBy_"' uses the same directory."
         } ElseIf tShareUnknown {
             Set tNote = "Not dismounted: the configured databases could not be listed to check whether the directory is shared."
@@ -541,6 +547,36 @@ ClassMethod DeleteDatabaseEntry(pName As %String, Output pResult As %DynamicObje
         Do pResult.%Set("dismountNote", tNote)
     }
     Quit $$$OK
+}
+
+/// Whether deleting a database entry dismounts its directory, decided from the deleted entry and the configured databases
+/// that remain (Story 44.7, DW-757).
+/// <p>Only a local entry (an empty <code>Server</code>, see <code>Config.Databases</code>) is dismounted, and only when no other
+/// local entry names the same directory. A remote (ECP) entry names a directory on its own server, so it is never dismounted
+/// here and never counts as sharing a local directory.</p>
+/// <ul>
+/// <li><var>pServer</var> - the deleted entry's <code>Server</code> (empty for a local database)</li>
+/// <li><var>pDirectory</var> - the deleted entry's <code>Directory</code></li>
+/// <li><var>pOthers</var> - the remaining entries, <code>pOthers(n) = $ListBuild(name, server, directory)</code></li>
+/// <li><var>pSharedBy</var> - (output) the name of a local entry that names the same directory, else empty</li>
+/// </ul>
+ClassMethod ShouldDismount(pServer As %String, pDirectory As %String, ByRef pOthers, Output pSharedBy As %String) As %Boolean
+{
+    Set pSharedBy = ""
+    If (pServer '= "") || (pDirectory = "") Quit 0
+    Set tKey = ..DirectoryKey(pDirectory)
+    Set tI = ""
+    For {
+        Set tI = $Order(pOthers(tI))
+        Quit:tI=""
+        Set tRow = pOthers(tI)
+        If $ListGet(tRow, 2) '= "" Continue
+        If ..DirectoryKey($ListGet(tRow, 3)) = tKey {
+            Set pSharedBy = $ListGet(tRow, 1)
+            Quit
+        }
+    }
+    Quit (pSharedBy = "")
 }
 
 /// The key two database directories are compared by: the normalized absolute directory, upper-cased on Windows, where

@@ -630,16 +630,14 @@ export const docLoadTool: ToolDefinition = {
         // Story 44.7 (DW-755, AD-14): an HTTP 200 with no error listed is not proof that every class compiled (IRIS answers
         // so when one class fails in a compile that also writes a persistent class's Storage). Only a compile that listed
         // no error is checked, through the class dictionary and IRIS's up-to-date flag (`verifyCompiled`, no localized
-        // text). A check that cannot run fails the compile: the catch below reports it, never a pass.
+        // text). A check that cannot run fails the compile, never passes it, and the compile's console output is kept.
         if (allErrors.length === 0) {
-          let unconfirmed: string[];
           try {
-            unconfirmed = await unconfirmedDocuments(ctx.http, ns, ctx.atelierVersion, uploaded);
+            for (const document of await unconfirmedDocuments(ctx.http, ns, ctx.atelierVersion, uploaded)) {
+              allErrors.push({ document, error: notConfirmedText(document) });
+            }
           } catch (checkError: unknown) {
-            throw new Error(checkCouldNotRunText(checkError));
-          }
-          for (const document of unconfirmed) {
-            allErrors.push({ document, error: notConfirmedText(document) });
+            allErrors.push({ document: "*", error: checkCouldNotRunText(checkError) });
           }
         }
 

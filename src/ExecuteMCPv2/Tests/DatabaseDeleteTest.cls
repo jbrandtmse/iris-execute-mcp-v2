@@ -211,6 +211,30 @@ Method TestInUseDeleteIsRefusedAndChangesNothing() As %Status
     Quit $$$OK
 }
 
+/// The dismount decision ignores remote (ECP) entries: a remote deleted entry is never dismounted (its directory is a path on
+/// its own server), and a remote entry that names the same path never counts as sharing a local directory. A remote entry
+/// cannot be created without a configured ECP server, so the rows are built here; <code>Config.Databases</code> documents an
+/// empty <code>Server</code> as local, and the shared-directory test above proves the live rows carry it that way.
+Method TestRemoteEntriesNeverDismountOrShare() As %Status
+{
+    Set tDir = ..Dir()
+    Set tOthers(1) = $ListBuild("P747REMOTE", "ECPSERVER1", tDir)
+
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Config).ShouldDismount("ECPSERVER1", tDir, .tOthers, .tSharedBy), 0, "a remote deleted entry is not dismounted")
+    Do $$$AssertEquals(tSharedBy, "", "and no entry is named as sharing it")
+
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Config).ShouldDismount("", tDir, .tOthers, .tSharedBy), 1, "a remote entry with the same path does not keep a local database mounted")
+    Do $$$AssertEquals(tSharedBy, "", "the remote entry is not named as sharing the directory")
+
+    Set tOthers(2) = $ListBuild(..#DBNAME2, "", tDir)
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Config).ShouldDismount("", tDir, .tOthers, .tSharedBy), 0, "a local entry with the same directory keeps it mounted")
+    Do $$$AssertEquals(tSharedBy, ..#DBNAME2, "the local entry is named")
+
+    Kill tNone
+    Do $$$AssertEquals(##class(ExecuteMCPv2.REST.Config).ShouldDismount("", "", .tNone, .tSharedBy), 0, "no directory, no dismount")
+    Quit $$$OK
+}
+
 /// A name that no database has gets Configuration's own error, and the namespace is restored.
 Method TestMissingNameGetsTheConfigurationError() As %Status
 {

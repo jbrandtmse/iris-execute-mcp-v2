@@ -461,6 +461,13 @@ export interface CompileReport {
 }
 
 /** The SQL of the compile check: one row per class definition among the `count` names, with whether it compiled and whether it carries a compile error. */
+/**
+ * The most class names one compile-check query carries. Atelier's query handler fails with `<STACK>` (#5002) on an `IN` list of
+ * about 400 parameters (probe 2026-11-23, irishealth-community 2026.2: 375 names answered, 400 failed), so a larger check is
+ * sent in batches of this size.
+ */
+export const COMPILE_CHECK_BATCH = 100;
+
 function compileCheckQuery(count: number): string {
   return (
     "SELECT d.ID AS ID, CASE WHEN c.ID IS NULL THEN 0 ELSE 1 END AS Compiled, " +
@@ -487,8 +494,9 @@ function assertClassDocuments(names: readonly string[]): void {
  * - Atelier's `docnames` lists the class with `upd` true, which is IRIS's own up-to-date judgment (it also holds for a
  *   rollback to identical content, and is false for a class skipped because a dependency failed).
  *
- * Two reads: one `action/query` over the dictionary, and one `docnames/CLS?filter=` GET per distinct first name segment
- * (the package root) of `names`. Returns the documents that are not confirmed, in the order of `names`.
+ * The reads: one `action/query` over the dictionary per {@link COMPILE_CHECK_BATCH} names, and one `docnames/CLS?filter=` GET
+ * per distinct first name segment (the package root) of `names`. Returns the documents that are not confirmed, in the order of
+ * `names`.
  *
  * @throws {Error} When a name does not end in `.cls`, and whatever the two requests throw: a check that cannot run is never
  *   a pass.
@@ -503,17 +511,20 @@ export async function verifyCompiled(
   if (names.length === 0) return [];
   const ids = names.map((name) => name.slice(0, -".cls".length));
 
-  const rows = await http.post(atelierPath(version, namespace, "action/query"), {
-    query: compileCheckQuery(ids.length),
-    parameters: ids,
-  });
-  const content = (rows.result as { content?: Array<Record<string, unknown>> } | undefined)?.content;
   // The dictionary query matches IDs exactly, while the docnames filter ignores case, and IRIS refuses a class whose name
   // differs from an existing one only in case. So keying the verdicts by the lowercase name never merges two classes, and a
   // name asked in another case than the class's own gets no row and is named.
   const clean = new Set<string>();
-  for (const row of Array.isArray(content) ? content : []) {
-    if (Number(row["Compiled"]) === 1 && Number(row["CompileError"]) === 0) clean.add(String(row["ID"]).toLowerCase());
+  for (let start = 0; start < ids.length; start += COMPILE_CHECK_BATCH) {
+    const batch = ids.slice(start, start + COMPILE_CHECK_BATCH);
+    const rows = await http.post(atelierPath(version, namespace, "action/query"), {
+      query: compileCheckQuery(batch.length),
+      parameters: batch,
+    });
+    const content = (rows.result as { content?: Array<Record<string, unknown>> } | undefined)?.content;
+    for (const row of Array.isArray(content) ? content : []) {
+      if (Number(row["Compiled"]) === 1 && Number(row["CompileError"]) === 0) clean.add(String(row["ID"]).toLowerCase());
+    }
   }
 
   const updated = await upToDateDocuments(http, namespace, version, "CLS", ids);

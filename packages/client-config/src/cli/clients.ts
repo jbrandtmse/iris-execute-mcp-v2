@@ -1857,8 +1857,11 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
           file.file === "unparseable"
             ? []
             : file.servers.flatMap((name) => {
+                // An old file lists canonical names only, and for a canonical name in the shared file a refusal always names its
+                // owner (`fileOwner`: the recorded holder, else the pre-sharing writer Claude Code).
                 const verdict = sharedWriteVerdictByName(ctx, client.client, scope.scope, name, { fs: deps.fs });
-                return verdict.kind === "conflict" ? [{ name, owner: verdict.sharedWith[0], sharedPath: verdict.path }] : [];
+                const owner = verdict.kind === "conflict" ? verdict.sharedWith[0] : undefined;
+                return verdict.kind === "conflict" && owner !== undefined ? [{ name, owner, sharedPath: verdict.path }] : [];
               });
         const movable = file.servers.filter((name) => !refused.some((entry) => entry.name === name));
         if (file.file === "unparseable" || movable.length > 0 || refused.length === 0) {
@@ -1876,7 +1879,7 @@ async function cmdDoctor(args: string[], deps: ResolvedDeps): Promise<number> {
           });
         }
         for (const entry of refused) {
-          const ownerName = entry.owner !== undefined ? `${CLIENT_ADAPTERS[entry.owner]?.displayName ?? entry.owner} (${entry.owner})` : "another client";
+          const ownerName = `${CLIENT_ADAPTERS[entry.owner]?.displayName ?? entry.owner} (${entry.owner})`;
           findings.push({
             check: "vscode-local-harness-entries",
             client: client.client,

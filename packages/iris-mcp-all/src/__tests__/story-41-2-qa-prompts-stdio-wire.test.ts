@@ -281,7 +281,9 @@ const WIRE_GOLDEN: Record<string, { list: string; get: Record<string, string> }>
   "iris-admin-mcp": {
     list: "bd531fad56f723fc0bdb547d4a38bec717139f2724a3ddd3df1616488a3aa827",
     get: {
-      "provision-project-environment": "72cd7ebd5c7a5283183dbf40c3bf7bdaa02465cab38b81177cfc50e60d7ce215",
+      // Re-pinned by Story 44.7 (sanction S-44.7-database-delete): the rollback sentence after each database delete, the only change;
+      // the wire-golden ledger entry `44.7/database-delete-prompt/...` pins it byte for byte. Captured over stdio from the built dist.
+      "provision-project-environment": "885466bf965692cf8cad9c0bea3dbfb67a4499b84919dc062580ac75c2fc7679",
       "audit-security-posture": "fed7d6bdbbcc5520297910ca88502803ea08a246d92364abc9c8e86cbe3eb116",
     },
   },

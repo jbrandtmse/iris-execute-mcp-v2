@@ -131,13 +131,15 @@ const STORY_44_4_IDS = [
 /**
  * The Story 44.7 entries (wave-9 decision #151), in ledger order: the `iris_docdb_property` description correction and its `inputSchema.properties`
  * replacement (S-44.7-docdb-property), the `iris_docdb_manage` description correction (S-44.7-docdb-manage-text) and the `iris_database_manage`
- * description correction (S-44.7-database-delete). One row each: only the `main` session of the data and admin servers lists these tools.
+ * description correction plus the matching rollback note of the `provision-project-environment` prompt's rendered text (S-44.7-database-delete).
+ * One row each: only the `main` session of the data and admin servers lists these tools and renders that prompt.
  */
 const STORY_44_7_IDS = [
   "44.7/docdb-property-text/iris_docdb_property@data-main",
   "44.7/docdb-property-schema/iris_docdb_property@data-main",
   "44.7/docdb-manage-text/iris_docdb_manage@data-main",
   "44.7/database-delete/iris_database_manage@admin-main",
+  "44.7/database-delete-prompt/provision-project-environment@admin-main",
 ];
 
 /** The entry ids of each story, in the order the ledger lists the stories (landing order). */
@@ -496,11 +498,11 @@ const SANCTIONS: Record<string, Shape> = {
   },
   "S-44.7-database-delete": {
     story: "44.7",
-    count: 1,
+    count: 2,
     golden: "wire",
     op: "replace",
     text: "correction",
-    check: (change, toolName) => [
+    check: (change, toolName) => (change.label === "prompts-get:with-arguments" ? provisionRollbackProblems(change) : [
       ...unmet(change.server !== "iris-admin-mcp" || change.label !== "tools-list", `${change.id}: must change a tools-list row of the admin server`),
       ...unmet(!/^\/result\/tools\/\d+\/description$/.test(change.pointer), `${change.id}: must point at a tool's description`),
       ...unmet(toolName !== "iris_database_manage", `${change.id}: the tool at its pointer (${String(toolName)}) must be iris_database_manage`),
@@ -511,9 +513,33 @@ const SANCTIONS: Record<string, Shape> = {
           !String(change.new).includes("does NOT cancel pending background work"),
         `${change.id}: the corrected text says delete dismounts, keeps IRIS.DAT and the directory, makes a create at that directory fail, and keeps the background-work note`,
       ),
-    ],
+    ]),
   },
 };
+
+/** The rollback sentence the `provision-project-environment` prompt gains after each database delete (S-44.7-database-delete). */
+const PROVISION_ROLLBACK_SENTENCE =
+  "Delete keeps the database's IRIS.DAT in its directory, so a later create at the same directory fails until that file is removed by hand; retry with a new directory instead.";
+
+/**
+ * What is wrong with the S-44.7-database-delete entry on the `provision-project-environment` prompt: it rewrites the rendered text of
+ * the admin `main` session's `prompts-get:with-arguments` row, and the only change is the rollback sentence after each of the two
+ * database deletes (steps 1 and 2); every other byte of the text is as frozen.
+ */
+function provisionRollbackProblems(change: Change): string[] {
+  const before = String(change.old);
+  const after = String(change.new);
+  const expected = before.replace(
+    /(\*Rollback: `iris_database_manage` action 'delete' with `name: "demo(?:DATA|CODE)"`\.)\*/g,
+    `$1 ${PROVISION_ROLLBACK_SENTENCE}*`,
+  );
+  return [
+    ...unmet(change.server !== "iris-admin-mcp" || change.session !== "main", `${change.id}: must change the admin server's main session`),
+    ...unmet(change.pointer !== "/result/messages/0/content/text", `${change.id}: must point at the rendered prompt text`),
+    ...unmet(expected === before, `${change.id}: the frozen text has the two database rollback notes`),
+    ...unmet(after !== expected, `${change.id}: new must be the frozen text with the rollback sentence after each database delete, and nothing else changed`),
+  ];
+}
 
 /**
  * What is wrong with one S-44.7-docdb-property entry, written from the spec of Story 44.7 (Design Notes, Decisions): the description
@@ -642,7 +668,7 @@ describe("the ledger", () => {
     expect(STORY_42_11_IDS).toHaveLength(8);
     expect(STORY_44_1_IDS).toHaveLength(1);
     expect(STORY_44_4_IDS).toHaveLength(15);
-    expect(STORY_44_7_IDS).toHaveLength(4);
+    expect(STORY_44_7_IDS).toHaveLength(5);
     expect(SANCTIONED_CHANGES_RELATIVE_PATH).toBe("packages/iris-mcp-all/src/__tests__/fixtures/sdk-golden-sanctioned-changes.json");
   });
 

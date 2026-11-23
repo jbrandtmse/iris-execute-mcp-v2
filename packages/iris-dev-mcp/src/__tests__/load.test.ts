@@ -332,6 +332,29 @@ describe("iris_doc_load", () => {
     ]);
   });
 
+  it("a check that cannot run keeps the compile's console output, as iris_doc_compile does", async () => {
+    mockGlobSync.mockReturnValue(["c:/src/Test.cls"]);
+    mockReadFileSync.mockReturnValue("Class Test {}\n");
+    mockHttp.put.mockResolvedValue(envelope({ name: "ok" }));
+    const console = ["Compiling class Test", "Compilation finished successfully in 0.002s."];
+    fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer(["Test.cls"], console),
+      queryFails: new Error("ECONNRESET"),
+      otherGet: async (path) => {
+        throw notFound(path);
+      },
+    });
+
+    const result = await docLoadTool.handler({ path: "c:/src/**/*.cls", compile: true }, ctx);
+
+    expect((result.structuredContent as { compilationResult: unknown }).compilationResult).toEqual({
+      success: false,
+      documents: ["Test.cls"],
+      errors: [{ document: "*", error: "the check that every class compiled could not run: ECONNRESET" }],
+      console,
+    });
+  });
+
   it("errors the compile already listed are reported as before, with no check request", async () => {
     mockGlobSync.mockReturnValue(["c:/src/Bad.cls"]);
     mockReadFileSync.mockReturnValue("Class Bad {}\n");
