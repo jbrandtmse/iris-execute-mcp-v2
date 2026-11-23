@@ -182,3 +182,42 @@ describe("Story 42.1 QA - the RESOLVED definition keeps the @1 pin and the home-
     expect(launched[0]!.env["IRIS_HOST"]).toBe("prod.example.com");
   });
 });
+
+describe("Story 44.6 - the definition the REAL extension.ts provides carries the non-secret env; the resolved one is the Local env", () => {
+  it("provided: the editor's definition holds the connection and credential name and no secret; resolved: the password replaces the whole env", async () => {
+    mockState.serverManager = serverManagerWith(["prod"]);
+
+    activate(fakeContext());
+    await flushEditor();
+    const provided = await provideDefinitions();
+
+    expect(provided).toHaveLength(1);
+    const env = provided[0]!.env;
+    expect(env["IRIS_HOST"]).toBe("prod.example.com");
+    expect(env["IRIS_PORT"]).toBe("52773");
+    expect(env["IRIS_USERNAME"]).toBe("_SYSTEM");
+    expect(env["IRIS_CREDENTIAL_NAME"]).toBe("prod");
+    expect(env["IRIS_PASSWORD"]).toBe("");
+    expect(JSON.stringify(provided)).not.toContain("SYS\"");
+
+    const launched = await provideAndResolve();
+    expect(launched).toHaveLength(1);
+    expect(launched[0]!.env["IRIS_PASSWORD"]).toBe("SYS");
+    expect(launched[0]!.env["IRIS_PROFILES"]).toBeNull();
+    expect(launched[0]!.env).not.toHaveProperty("IRIS_CREDENTIAL_NAME");
+  });
+
+  it("combineProfiles: the provided definition keeps the empty env (Local-only), and still resolves to the combined Local env", async () => {
+    mockState.configStore.set(`${CONFIG}.combineProfiles`, true);
+    mockState.serverManager = serverManagerWith(["a", "b"]);
+
+    activate(fakeContext());
+    await flushEditor();
+    const provided = await provideDefinitions();
+
+    expect(provided).toHaveLength(1);
+    expect(provided[0]!.env).toEqual({});
+    const launched = await provideAndResolve();
+    expect(Object.keys(JSON.parse(launched[0]!.env["IRIS_PROFILES"] as string)).sort()).toEqual(["a", "b"]);
+  });
+});

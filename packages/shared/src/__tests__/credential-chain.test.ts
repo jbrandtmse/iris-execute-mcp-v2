@@ -21,6 +21,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   CREDENTIAL_HELPER_TIMEOUT_MS,
   resolveCredential,
+  resolveStoredCredential,
   resolveServerManagerCredentials,
 } from "../credential-chain.js";
 import type { ServerManagerProfileResult } from "../server-manager-source.js";
@@ -235,6 +236,45 @@ describe("resolveCredential", () => {
 // ════════════════════════════════════════════════════════════════════
 // resolveServerManagerCredentials — link 4 (exhaustion) + required escalation
 // ════════════════════════════════════════════════════════════════════
+
+describe("resolveStoredCredential (links 2-3 only; Story 44.6)", () => {
+  it("never consults link 1: IRIS_PASSWORD and an IRIS_PROFILES member password are ignored", async () => {
+    const getKeychainPassword = vi.fn(async () => "kcpw");
+    const result = await resolveStoredCredential("prod", {
+      env: {
+        IRIS_PASSWORD: "envpw",
+        IRIS_PROFILES: JSON.stringify({ prod: { password: "profilespw" } }),
+      },
+      getKeychainPassword,
+    });
+    expect(result).toEqual({ password: "kcpw", source: "keychain" });
+    expect(getKeychainPassword).toHaveBeenCalledWith("prod");
+  });
+
+  it("falls to the helper, passing the name, when the keychain has nothing", async () => {
+    const runCredentialHelper = vi.fn(async () => "helperpw");
+    const result = await resolveStoredCredential("prod", {
+      env: { IRIS_CREDENTIAL_HELPER: "my-helper" },
+      getKeychainPassword: async () => undefined,
+      runCredentialHelper,
+    });
+    expect(result).toEqual({ password: "helperpw", source: "helper" });
+    expect(runCredentialHelper).toHaveBeenCalledWith("my-helper", "prod");
+  });
+
+  it("returns undefined when both links are empty, and never throws on a throwing seam", async () => {
+    const result = await resolveStoredCredential("prod", {
+      env: { IRIS_CREDENTIAL_HELPER: "my-helper" },
+      getKeychainPassword: async () => {
+        throw new Error("keychain locked");
+      },
+      runCredentialHelper: async () => {
+        throw new Error("helper crashed");
+      },
+    });
+    expect(result).toBeUndefined();
+  });
+});
 
 describe("resolveServerManagerCredentials", () => {
   it("already-resolved entries pass through unchanged, WITHOUT invoking the chain", async () => {

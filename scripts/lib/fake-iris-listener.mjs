@@ -28,6 +28,9 @@
 //   `MessageResend.cls`); `failPreview: true` answers every preview of `item` with an HTTP 500 error envelope;
 //   `setResendPreview(item, undefined)` removes it. A request's own non-empty `to` is never replaced. Without an
 //   override, a preview answers an absent or empty `to` with the request's `from`.
+//
+//   `authorizations` (Story 44.6) lists the `Authorization` header of each request (`undefined` when it carried none),
+//   in the order of `requests`. It is a separate list so `requests` and every reply stay as they were.
 
 import http from 'node:http';
 
@@ -96,6 +99,7 @@ function matchCountOf(item) {
  * @returns {Promise<{
  *   port: number,
  *   requests: Array<{ method: string, url: string, body: string }>,
+ *   authorizations: Array<{ method: string, url: string, authorization: string | undefined }>,
  *   setDocumentContent: (name: string, lines: string[] | undefined) => void,
  *   setDocumentFailure: (name: string, failing: boolean) => void,
  *   setResendPreview: (item: string, override: { matchCount?: number, to?: string, failPreview?: boolean } | undefined) => void,
@@ -104,6 +108,9 @@ function matchCountOf(item) {
  */
 export async function startFakeIris({ bootstrapVersion }) {
   const requests = [];
+  // The Authorization header of each request, in the same order as `requests` and kept apart from it so the
+  // `requests` records (compared byte for byte by the handler goldens) stay as they were.
+  const authorizations = [];
   const documentOverrides = new Map();
   const failingDocuments = new Set();
   let overrideVersion = 0;
@@ -339,6 +346,7 @@ export async function startFakeIris({ bootstrapVersion }) {
     req.on('end', () => {
       const bodyText = Buffer.concat(chunks).toString('utf8');
       requests.push({ method: req.method ?? '', url: req.url ?? '', body: bodyText });
+      authorizations.push({ method: req.method ?? '', url: req.url ?? '', authorization: req.headers.authorization });
       route(req.method ?? '', req.url ?? '', bodyText, res);
     });
   });
@@ -349,6 +357,7 @@ export async function startFakeIris({ bootstrapVersion }) {
   return {
     port: server.address().port,
     requests,
+    authorizations,
     setDocumentContent: (name, lines) => {
       if (lines === undefined) documentOverrides.delete(name);
       else {

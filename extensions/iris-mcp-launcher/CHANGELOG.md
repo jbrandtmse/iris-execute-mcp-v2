@@ -2,6 +2,13 @@
 
 All notable changes to the IRIS MCP Launcher VS Code extension are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **The launcher's servers start in a Copilot-harness chat session** (Story 44.6, DW-731). The Copilot harness forwards a provided definition without running this extension's resolve step, and the provided definitions carried an empty `env`, so the servers started with no `IRIS_*` and failed. A provided definition for a single Server Manager server now carries `IRIS_HOST`, `IRIS_PORT`, `IRIS_HTTPS`, `IRIS_USERNAME`, `IRIS_NAMESPACE`, the governance and visibility settings that are set, and `IRIS_CREDENTIAL_NAME` (the server name), and never a password. Run `iris-mcp-credentials set <server name>` once; the server reads the password from that keychain entry (needs `@iris-mcp/shared` with `IRIS_CREDENTIAL_NAME`, the same release). The unset launcher-owned variables are overridden with `""` where the server reads `""` as unset, because the Copilot harness drops `null` entries. `combineProfiles` and a server without a username keep the empty `env` (Local harness only), and the provide path never prompts.
+- **Local harness unchanged.** `resolveMcpServerDefinition` still runs there and returns exactly the environment it returned before; its prompts and cancellation outcomes are unchanged.
+
 ## [1.1.0] — 2026-11-21
 
 ### Changed

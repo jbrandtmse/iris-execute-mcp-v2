@@ -461,6 +461,28 @@ export async function resolveCredential(
     return { password: envPassword, source: "env" };
   }
 
+  return resolveStoredCredential(serverName, options);
+}
+
+/**
+ * Links 2-3 of the chain only: the OS keychain (service `iris-mcp`, account
+ * `name`), then `IRIS_CREDENTIAL_HELPER` when configured (`name` as its final
+ * argv). Link 1 (`IRIS_PROFILES.<name>.password` / `IRIS_PASSWORD`) is never
+ * consulted, so a caller that already owns the explicit-password decision
+ * (the `IRIS_CREDENTIAL_NAME` path) cannot receive another profile's password
+ * by account-name collision. Same seams and never-throws contract as
+ * {@link resolveCredential}.
+ *
+ * @param name    - The keychain account and the helper's `argv[1]`.
+ * @param options - Injectable deps for tests; production callers omit
+ *   `getKeychainPassword`/`runCredentialHelper`.
+ */
+export async function resolveStoredCredential(
+  name: string,
+  options: CredentialChainOptions = {},
+): Promise<CredentialLinkResult | undefined> {
+  const env = options.env ?? process.env;
+
   // Link 2 — OS keychain.
   const getKeychainPassword = options.getKeychainPassword ?? getKeychainPasswordDefault;
   let keychainPassword: string | undefined;
@@ -473,13 +495,13 @@ export async function resolveCredential(
     // this function, `resolveServerManagerCredentials`, `loadProfileRegistry`
     // and `McpServerBase.start()` — breaking this module's "NEVER throws"
     // contract and failing server startup.
-    keychainPassword = usablePassword(await getKeychainPassword(serverName));
+    keychainPassword = usablePassword(await getKeychainPassword(name));
   } catch (e: unknown) {
     // Belt-and-braces: the default implementation above never throws, but an
     // injected test double (or a future native-module edge case) might. A
     // keychain failure must never abort the chain.
     logger.debug(
-      `IRIS credential chain: keychain link error for "${serverName}" — ` +
+      `IRIS credential chain: keychain link error for "${name}" — ` +
         `${e instanceof Error ? e.message : String(e)}. Skipping this link.`,
     );
     keychainPassword = undefined;
@@ -496,10 +518,10 @@ export async function resolveCredential(
     try {
       // `usablePassword` inside the try — same never-throws reasoning as the
       // keychain link above.
-      helperPassword = usablePassword(await runCredentialHelper(helperCommand, serverName));
+      helperPassword = usablePassword(await runCredentialHelper(helperCommand, name));
     } catch (e: unknown) {
       logger.debug(
-        `IRIS credential chain: credential-helper link error for "${serverName}" — ` +
+        `IRIS credential chain: credential-helper link error for "${name}" — ` +
           `${e instanceof Error ? e.message : String(e)}. Skipping this link.`,
       );
       helperPassword = undefined;

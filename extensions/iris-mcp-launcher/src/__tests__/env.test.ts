@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildGovernanceEnv, synthesizeIrisEnv } from "../env.js";
+import {
+  buildGovernanceEnv,
+  EMPTY_MEANS_UNSET_VARS,
+  synthesizeIrisEnv,
+  synthesizeProvidedEnv,
+  withOwnedVarsCleared,
+  withOwnedVarsEmptied,
+} from "../env.js";
 import type { LauncherSettings, ResolvedConnectionProfile } from "../types.js";
 
 function profile(overrides: Partial<ResolvedConnectionProfile> = {}): ResolvedConnectionProfile {
@@ -152,6 +159,71 @@ describe("synthesizeIrisEnv — required-vs-optional var contract (packages/shar
     expect(env.IRIS_HOST).toBeTruthy();
     expect(env.IRIS_PORT).toBeTruthy();
     expect(env.IRIS_NAMESPACE).toBeTruthy();
+  });
+});
+
+describe("synthesizeProvidedEnv (Story 44.6) — the non-secret env a provided definition carries", () => {
+  const connection = { host: "iris.example.com", port: 52773, https: false, username: "_SYSTEM", namespace: "USER" };
+
+  it("emits the five non-secret IRIS_* variables plus the credential name, and no password", () => {
+    expect(synthesizeProvidedEnv(connection, "HSCUSTOM", "myServer")).toEqual({
+      IRIS_HOST: "iris.example.com",
+      IRIS_PORT: "52773",
+      IRIS_HTTPS: "false",
+      IRIS_USERNAME: "_SYSTEM",
+      IRIS_NAMESPACE: "USER",
+      IRIS_CREDENTIAL_NAME: "myServer",
+    });
+  });
+
+  it("shares its five connection fields with synthesizeIrisEnv: the resolved env is the same fields plus the password", () => {
+    const { IRIS_CREDENTIAL_NAME: _name, ...provided } = synthesizeProvidedEnv(connection, "HSCUSTOM", "myServer");
+    const { IRIS_PASSWORD, ...resolved } = synthesizeIrisEnv([profile({ name: "myServer", namespace: "USER" })], "HSCUSTOM");
+    expect(IRIS_PASSWORD).toBe("SYS");
+    expect(resolved).toEqual(provided);
+  });
+
+  it("falls back to the default namespace when the connection names none, and stringifies https", () => {
+    const env = synthesizeProvidedEnv({ ...connection, namespace: "", https: true, port: 443 }, "HSCUSTOM", "s");
+    expect(env.IRIS_NAMESPACE).toBe("HSCUSTOM");
+    expect(env.IRIS_HTTPS).toBe("true");
+    expect(env.IRIS_PORT).toBe("443");
+  });
+});
+
+describe("withOwnedVarsEmptied (Story 44.6) — empty-string overrides where the server reads '' as unset", () => {
+  const owned = Object.keys(withOwnedVarsCleared({}));
+
+  it("EMPTY_MEANS_UNSET_VARS is every launcher-owned variable except IRIS_AUDIT_LOG_MAX_MB (where '' parses as 0)", () => {
+    expect([...EMPTY_MEANS_UNSET_VARS].sort()).toEqual(owned.filter((name) => name !== "IRIS_AUDIT_LOG_MAX_MB").sort());
+    expect(EMPTY_MEANS_UNSET_VARS).toContain("IRIS_PASSWORD");
+    expect(EMPTY_MEANS_UNSET_VARS).toContain("MCP_TRANSPORT");
+    expect(EMPTY_MEANS_UNSET_VARS).not.toContain("IRIS_CREDENTIAL_NAME");
+  });
+
+  it("an unset owned variable becomes '' when empty means unset, and null for IRIS_AUDIT_LOG_MAX_MB", () => {
+    const env = withOwnedVarsEmptied({ IRIS_HOST: "h" });
+    expect(env.IRIS_HOST).toBe("h");
+    expect(env.IRIS_AUDIT_LOG_MAX_MB).toBeNull();
+    for (const name of owned) {
+      if (name === "IRIS_HOST" || name === "IRIS_AUDIT_LOG_MAX_MB") continue;
+      expect(env[name], name).toBe("");
+    }
+  });
+
+  it("a variable the launcher sets is kept verbatim, and no variable outside the owned set is added", () => {
+    const env = withOwnedVarsEmptied({ IRIS_CREDENTIAL_NAME: "s", IRIS_AUDIT_LOG_MAX_MB: "5" });
+    expect(env.IRIS_CREDENTIAL_NAME).toBe("s");
+    expect(env.IRIS_AUDIT_LOG_MAX_MB).toBe("5");
+    expect(Object.keys(env).sort()).toEqual([...new Set([...owned, "IRIS_CREDENTIAL_NAME"])].sort());
+  });
+
+  it("the Local path is unchanged: withOwnedVarsCleared still nulls every unset owned variable", () => {
+    const env = withOwnedVarsCleared({ IRIS_HOST: "h" });
+    for (const name of owned) {
+      expect(env[name], name).toBe(name === "IRIS_HOST" ? "h" : null);
+    }
+    expect("IRIS_CREDENTIAL_NAME" in env).toBe(false);
   });
 });
 

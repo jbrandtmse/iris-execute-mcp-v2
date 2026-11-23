@@ -27,7 +27,14 @@ import {
   type DefinitionPlan,
 } from "./definitions.js";
 import { resolveServerCredentials, type CredentialResult } from "./credentials.js";
-import { synthesizeIrisEnv, buildGovernanceEnv, withOwnedVarsCleared } from "./env.js";
+import { deriveConnection } from "./connection.js";
+import {
+  synthesizeIrisEnv,
+  synthesizeProvidedEnv,
+  buildGovernanceEnv,
+  withOwnedVarsCleared,
+  withOwnedVarsEmptied,
+} from "./env.js";
 import type {
   AuthApi,
   CancellationTokenLike,
@@ -39,11 +46,24 @@ import type {
   SuitePackageKey,
 } from "./types.js";
 
-/** The skeletal shape `provideMcpServerDefinitions` returns — no credentials, no env yet. */
+/**
+ * The shape `provideMcpServerDefinitions` returns. `env` is what a Copilot-harness session spawns (its resolver never
+ * runs) and carries NO secret: the non-secret `IRIS_*` settings plus `IRIS_CREDENTIAL_NAME`, or `{}` when the
+ * connection cannot be known without a session. Under the Local harness `resolveEnvForLabel`'s env replaces it.
+ */
 export interface PlannedDefinition {
   label: string;
   command: string;
   args: string[];
+  env: Record<string, string | null>;
+}
+
+/** The non-secret connection of one Server Manager server, as a provided definition carries it. */
+interface ProvidedConnection {
+  host: string;
+  port: number;
+  https: boolean;
+  username: string;
 }
 
 /** Dependencies injected into {@link LauncherProvider} — real implementations come from `extension.ts`; fakes come from tests. */
@@ -340,7 +360,75 @@ export class LauncherProvider {
       acceptedPlans.map(({ plan, localSpawn }) => [plan.label, { plan, localSpawn }]),
     );
 
+    // `definitions[i]` is the definition of `acceptedPlans[i]` (resolveSpawnTargets pushes both together).
+    const specLookups = new Map<string, Promise<ProvidedConnection | undefined>>();
+    await Promise.all(
+      acceptedPlans.map(async ({ plan, localSpawn }, index) => {
+        const definition = definitions[index];
+        if (definition === undefined) return;
+        definition.env = await this.providedEnvFor(api, settings, plan, localSpawn, specLookups);
+      }),
+    );
+
     return definitions;
+  }
+
+  /**
+   * The env a provided definition carries (Copilot-harness sessions never run the resolver). Only the secret-free
+   * prefix of `resolveServerCredentials` runs: `getServerSpec` (settings only; it never prompts) and
+   * `deriveConnection`. `spec.password`, `getAccount` and `getSession` are never touched, so no secret and no
+   * session token can reach the result, and nothing prompts or warns.
+   *
+   * `{}` (today's provided env) when the connection cannot be known without a session: a `combineProfiles` plan
+   * (Local-only), a server whose spec is missing, malformed or has no `webServer`, or one without a username.
+   */
+  private async providedEnvFor(
+    api: ServerManagerApi,
+    settings: LauncherSettings,
+    plan: DefinitionPlan,
+    localSpawn: boolean,
+    specLookups: Map<string, Promise<ProvidedConnection | undefined>>,
+  ): Promise<Record<string, string | null>> {
+    const [serverName] = plan.serverNames;
+    if (settings.combineProfiles || plan.serverNames.length !== 1 || serverName === undefined) return {};
+    // eslint-disable-next-line no-control-regex
+    if (serverName.trim() === "" || /[\u0000-\u001f\u007f-\u009f]/.test(serverName)) return {};
+
+    let lookup = specLookups.get(serverName);
+    if (lookup === undefined) {
+      lookup = this.lookUpProvidedConnection(api, serverName, this.scopesByServerName.get(serverName));
+      specLookups.set(serverName, lookup);
+    }
+    const connection = await lookup;
+    if (connection === undefined) return {};
+
+    const env = withOwnedVarsEmptied({
+      ...synthesizeProvidedEnv({ ...connection, namespace: settings.namespace }, settings.namespace, serverName),
+      ...buildGovernanceEnv(settings),
+    });
+    // 31-6-3: a local-build plan spawns the extension host's own Electron binary as the interpreter.
+    if (localSpawn) {
+      env["ELECTRON_RUN_AS_NODE"] = "1";
+    }
+    return env;
+  }
+
+  /** The non-secret connection of one Server Manager server, or `undefined` when it cannot be known without a session. */
+  private async lookUpProvidedConnection(
+    api: ServerManagerApi,
+    serverName: string,
+    scope: ConfigScope | undefined,
+  ): Promise<ProvidedConnection | undefined> {
+    try {
+      const spec = await api.getServerSpec(serverName, scope, undefined, { hideFromRecents: true });
+      if (!spec || typeof spec.webServer !== "object" || spec.webServer === null) return undefined;
+      const username = typeof spec.username === "string" ? spec.username : "";
+      if (username.trim() === "") return undefined;
+      const { host, port, https } = deriveConnection(spec);
+      return { host, port, https, username };
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -366,6 +454,7 @@ export class LauncherProvider {
           label: plan.label,
           command: NPX_COMMAND,
           args: ["-y", pinnedSpec(PACKAGE_NPM_NAME[plan.packageKey])],
+          env: {},
         });
         acceptedPlans.push({ plan, localSpawn: false });
       }
@@ -467,7 +556,7 @@ export class LauncherProvider {
       // entire fail-closed, legible-failure design. The interpreter the
       // extension is running in always exists. `resolveEnvForLabel` adds the
       // ELECTRON_RUN_AS_NODE=1 variable for these plans.
-      definitions.push({ label: plan.label, command: process.execPath, args: [entryPoint] });
+      definitions.push({ label: plan.label, command: process.execPath, args: [entryPoint], env: {} });
       acceptedPlans.push({ plan, localSpawn: true });
     }
 

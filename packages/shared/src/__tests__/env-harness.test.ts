@@ -1,7 +1,7 @@
 /**
  * The shared env harness and its setup scrub (`env-harness.ts`, `startup-env.ts`).
  *
- * Every test here starts from a HOSTILE environment: all 30 startup and
+ * Every test here starts from a HOSTILE environment: all 32 startup and
  * connection variables set to a value no default suite should ever see, and
  * restores the ambient values exactly afterwards. The assertions are about the
  * harness contract, so they hold in any developer environment.
@@ -22,8 +22,8 @@ import {
 const STARTUP_NAMES = [
   "IRIS_PROFILES", "IRIS_TIMEOUT", "IRIS_ACCEPT_LANGUAGE", "IRIS_GOVERNANCE", "IRIS_GOVERNANCE_FILE",
   "IRIS_GOVERNANCE_PRESET", "IRIS_TOOLS_PRESET", "IRIS_TOOLS_DISABLE", "IRIS_TOOLS_ENABLE", "IRIS_SERVER_MANAGER",
-  "IRIS_SM_SERVERS", "IRIS_SM_SETTINGS_PATHS", "IRIS_SM_WORKSPACE", "IRIS_CREDENTIAL_HELPER", "IRIS_SQL_MAX_ROWS",
-  "IRIS_SQL_TIMEOUT", "IRIS_SQL_READ_ONLY", "IRIS_SQL_MAX_ROWS_AFFECTED", "IRIS_TEST_TIMEOUT", "IRIS_DATA_POLICY",
+  "IRIS_SM_SERVERS", "IRIS_SM_SETTINGS_PATHS", "IRIS_SM_WORKSPACE", "IRIS_CREDENTIAL_HELPER", "IRIS_CREDENTIAL_NAME",
+  "IRIS_SQL_MAX_ROWS", "IRIS_SQL_TIMEOUT", "IRIS_SQL_READ_ONLY", "IRIS_SQL_MAX_ROWS_AFFECTED", "IRIS_TEST_TIMEOUT", "IRIS_DATA_POLICY",
   "IRIS_AUDIT_LOG", "IRIS_AUDIT_LOG_MAX_MB", "IRIS_AUDIT_LOG_PARAMS", "LOG_LEVEL", "MCP_TRANSPORT",
 ];
 const CONNECTION_NAMES = ["IRIS_HOST", "IRIS_PORT", "IRIS_USERNAME", "IRIS_PASSWORD", "IRIS_NAMESPACE", "IRIS_HTTPS"];
@@ -69,11 +69,11 @@ function expectHostileRestored(): void {
 }
 
 describe("the variable rosters", () => {
-  it("name the 25 startup, 6 connection and 3 platform variables, with no name in two lists", () => {
+  it("name the 26 startup, 6 connection and 3 platform variables, with no name in two lists", () => {
     expect([...STARTUP_ENV_VARS].sort()).toEqual([...STARTUP_NAMES].sort());
     expect([...CONNECTION_ENV_VARS].sort()).toEqual([...CONNECTION_NAMES].sort());
     expect([...PLATFORM_ENV_VARS].sort()).toEqual([...PLATFORM_NAMES].sort());
-    expect(STARTUP_NAMES).toHaveLength(25);
+    expect(STARTUP_NAMES).toHaveLength(26);
     const all = [...STARTUP_NAMES, ...CONNECTION_NAMES, ...PLATFORM_NAMES];
     expect(new Set(all).size).toBe(all.length);
   });
@@ -96,7 +96,7 @@ describe("makeEnvHarness with the default options", () => {
     }
   });
 
-  it("teardown restores each of the 30 values exactly: hostile, empty string and absent alike", () => {
+  it("teardown restores each of the 32 values exactly: hostile, empty string and absent alike", () => {
     const harness = makeEnvHarness();
     harness.setup();
     harness.teardown();
@@ -123,7 +123,7 @@ describe("makeEnvHarness with the default options", () => {
 });
 
 describe('makeEnvHarness({ connection: "unset" })', () => {
-  it("setup clears all 30 variables", () => {
+  it("setup clears all 32 variables", () => {
     const harness = makeEnvHarness({ connection: "unset" });
     harness.setup();
     try {

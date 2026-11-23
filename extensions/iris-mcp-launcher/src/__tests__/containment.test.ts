@@ -291,6 +291,70 @@ describe("credential containment — behavioral (secret never reaches a log/warn
   });
 });
 
+describe("credential containment — Story 44.6: a PROVIDED definition never carries a secret (VS Code persists it)", () => {
+  const INLINE_SECRET = "DO-NOT-LEAK-PROVIDED-5c2a8e1f";
+  const SESSION_SECRET = "DO-NOT-LEAK-SESSION-7b3d9a04";
+
+  it("an inline password and a session token appear nowhere in the provided definitions or the warnings, while the resolve path still carries the password (not vacuous)", async () => {
+    const warnings: string[] = [];
+    const sessions: unknown[] = [];
+    const accounts: unknown[] = [];
+    const spec: ServerSpec = {
+      name: "a",
+      webServer: { host: "a.example.com", port: 52773, scheme: "http" },
+      username: "_SYSTEM",
+      password: INLINE_SECRET,
+    };
+    const api: ServerManagerApi = {
+      getServerNames: () => [{ name: "a", description: "", detail: "" }],
+      getServerSpec: async () => spec,
+      getAccount: () => {
+        accounts.push(true);
+        return { id: "acct-1", label: "Account One" };
+      },
+    };
+    const authApi: AuthApi = {
+      getSession: async (...args) => {
+        sessions.push(args);
+        return { id: "s1", accessToken: SESSION_SECRET, account: { id: "acct-1", label: "Account One" }, scopes: ["a", "_SYSTEM"] };
+      },
+    };
+    const provider = new LauncherProvider({
+      getServerManagerApi: async () => api,
+      authApi,
+      getSettings: () => settings({ servers: ["a"] }),
+      showWarning: (message: string) => warnings.push(message),
+    });
+
+    const planned = await provider.providePlannedDefinitions();
+
+    const persisted = JSON.stringify(planned);
+    expect(persisted).not.toContain(INLINE_SECRET);
+    expect(persisted).not.toContain(SESSION_SECRET);
+    expect(planned[0]!.env["IRIS_CREDENTIAL_NAME"]).toBe("a");
+    expect(sessions).toEqual([]);
+    expect(accounts).toEqual([]);
+    expect(warnings).toEqual([]);
+
+    // The secret DID flow through the resolve path, so the checks above are not vacuous.
+    const env = await provider.resolveEnvForLabel(planned[0]!.label);
+    expect(env?.IRIS_PASSWORD).toBe(INLINE_SECRET);
+  });
+
+  it("the provide path's source (providedEnvFor, lookUpProvidedConnection) never names a password, an account or a session", () => {
+    const code = stripComments(readFileSync(path.join(SRC_DIR, "serverDefinitionProvider.ts"), "utf8"));
+    const start = code.indexOf("private async providedEnvFor(");
+    const end = code.indexOf("private async resolveSpawnTargets(");
+    expect(start, "providedEnvFor exists").toBeGreaterThan(-1);
+    expect(end, "resolveSpawnTargets follows lookUpProvidedConnection").toBeGreaterThan(start);
+    const provideSection = code.slice(start, end);
+    expect(provideSection).toContain("lookUpProvidedConnection");
+    for (const forbidden of [/password/i, /getAccount/, /getSession/, /accessToken/, /createIfNone/, /showWarning/]) {
+      expect(provideSection, String(forbidden)).not.toMatch(forbidden);
+    }
+  });
+});
+
 describe("credential containment — a resolved secret must not leak across a LATER resolve for a DIFFERENT definition", () => {
   const LEAKY_SECRET = "DO-NOT-LEAK-CROSS-DEF-9f1e3c7a";
 

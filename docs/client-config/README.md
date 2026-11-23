@@ -40,13 +40,13 @@ Note the difference between a **missing** setting and an **unreachable** instanc
 
 Server Manager import is **additive** — it adds *extra* addressable profiles alongside `default`. It is not a replacement for your primary connection.
 
-### 2. The OS keychain covers Server-Manager profiles only — not `IRIS_PASSWORD`
+### 2. The OS keychain covers Server-Manager profiles, and the base credentials only with `IRIS_CREDENTIAL_NAME`
 
 `iris-mcp-credentials set <name>` stores a password the credential chain uses for an **imported** Server Manager definition that has none.
 
-It is **not** consulted for the base credentials. Storing an entry named `default` has no effect: `loadConfig` reads `IRIS_PASSWORD` from the environment and never calls the chain. Verified — a `default` keychain entry still fails with `IRIS_PASSWORD environment variable is required`.
+It is **not** consulted for the base credentials unless you opt in with `IRIS_CREDENTIAL_NAME=<name>` (Story 44.6) and leave `IRIS_PASSWORD` unset or empty: the `default` profile then takes its password from the entry stored under `<name>` (OS keychain, then `IRIS_CREDENTIAL_HELPER`), and a missing entry fails startup naming the variable. Without that variable, storing an entry named `default` has no effect: `loadConfig` reads `IRIS_PASSWORD` from the environment and a `default` keychain entry still fails with `IRIS_PASSWORD environment variable is required`.
 
-**So the keychain reduces plaintext for your additional servers; it cannot remove `IRIS_PASSWORD` from your client config.**
+**So the keychain reduces plaintext for your additional servers, and with `IRIS_CREDENTIAL_NAME` it can remove `IRIS_PASSWORD` from your client config too.** This page's `client-config` writer does not set `IRIS_CREDENTIAL_NAME` for you; add it to the environment your client passes to the server.
 
 Worked example, verified end to end — four profiles resolving at once:
 

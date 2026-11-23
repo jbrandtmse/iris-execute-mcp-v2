@@ -2,14 +2,36 @@
 title: 'Story 44.6: Launcher Provider Works in Copilot Sessions'
 type: 'bugfix'
 created: '2026-11-22'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '374477bd4631d574ed85b987a3828dfd3da1f751'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      The keychain entry is chosen by server name only, so a workspace-scope intersystems.servers entry that reuses a user-scope server's name would send that stored password to the workspace entry's host.
+    evidence: |-
+      IRIS_CREDENTIAL_NAME carries the Server Manager server name; the host comes from that server's spec; nothing ties the stored iris-mcp entry to a host. The existing Server Manager import keys the keychain the same way. No cross-scope collision test exists.
+    location: >-
+      extensions/iris-mcp-launcher/src/serverDefinitionProvider.ts (providedEnvFor)
+    severity: medium (unverified)
+  - summary: >-
+      The launcher never fires a definitions-changed event when intersystems.servers changes, so a Copilot-harness session keeps the old provided host, port and username until the window is reloaded.
+    evidence: |-
+      extension.ts refreshes only the status bar on irisMcpLauncher.* changes; no onDidChangeMcpServerDefinitions emitter exists. Command and args have the same property today. The README now says to reload the window.
+    location: >-
+      extensions/iris-mcp-launcher/src/extension.ts:652
+    severity: low
+  - summary: >-
+      The McpServerBase.start() block that copies the registry's completed default password back into this.config has no test.
+    evidence: |-
+      Nothing reads this.config.password after start today (the clients carry the password), so deleting the block turns no test red; a McpServerBase start harness would pin it.
+    location: >-
+      packages/shared/src/server-base.ts:2793
+    severity: low
 ---
 
 <intent-contract>
@@ -110,6 +132,39 @@ Extension (`extensions/iris-mcp-launcher`, outside the pnpm workspace, CommonJS 
 
 ## Review Triage Log
 
+### 2026-11-23 — Review pass
+- verdicts: 29 findings — high 0, medium 2, low 17, false 4, maybe-false 6
+- findings:
+  - `[medium]` `[patch]` (Blind 1, Edge 6, Edge 10, Gap "untested combination") member lookups run when a non-empty `IRIS_PASSWORD` is set, contradicting AC-4 "neither seam is called" and the docs' "IRIS_PASSWORD wins" — verified at `profiles.ts` (the member loop ran on `credentialName !== undefined`); patched: the loop and the default lookup share one `chainActive` gate (the `default` password was empty after `loadConfig`), a new AC-4 test with passwordless members pins it, mutation recorded.
+  - `[low]` `[patch]` (Blind 2) the one-time command `iris-mcp-credentials set` is not runnable for launcher users who have only `npx` — extension README now gives the `npx -y -p @iris-mcp/shared@1 ...` form; the server's exhausted-chain text stays AC-3's pinned literal.
+  - `[maybe-false]` `[reject]` (Blind 3) silent `{}` fallbacks with no log line — the spec's AC-9/AC-10 say no warning and no new surface; a missing username is documented in the README; would only matter if a rejected spec is common, which Server Manager 3.x `getServerSpec` (settings only) makes unlikely.
+  - `[medium]` `[defer]` (Blind 4) the keychain entry is chosen by server name only: a workspace-scope `intersystems.servers` entry that reuses a user-scope name would send that stored password to the other host — same name-only keying the existing Server Manager import uses (AC-13's decision #140 channel); a product/trust decision outside this diff, recorded unverified (no cross-scope collision test exists).
+  - `[low]` `[patch]` (Blind 5) the `fake-keyring-preload.mjs` header named a nonexistent `fakeKeyringNodeOptions` — sentence removed.
+  - `[low]` `[patch]` (Blind 6) the provide-path source-grep slice ran to `resolveEnvForLabel`, spanning `resolveSpawnTargets` — the slice now ends at `private async resolveSpawnTargets(`, which follows `lookUpProvidedConnection`.
+  - `[false]` `[reject]` (Blind 7) changeset should be `minor` — AC-13 names `"@iris-mcp/shared": patch` explicitly (spec-bound).
+  - `[low]` `[patch]` (Blind 8) the leftover `const serverName = name;` alias in `resolveStoredCredential` — the body now uses `name` directly (mechanical rename, same behaviour).
+  - `[low]` `[reject]` (Blind 9) no test combining `IRIS_CREDENTIAL_NAME` with `IRIS_SERVER_MANAGER` — the Server Manager source clears the `loadConfig` password already and the launcher blanks `IRIS_SERVER_MANAGER`; no failing input shown, and the fix would be a new test of unchanged code.
+  - `[maybe-false]` `[reject]` (Edge 1) `providedEnvFor` could throw outside `lookUpProvidedConnection` — `buildGovernanceEnv` and `withOwnedVarsEmptied` only read settings already validated by `readSettings` and cannot throw (checked `env.ts`); no input reaches a throw.
+  - `[maybe-false]` `[reject]` (Edge 2) a `getServerSpec` that never settles hangs provide — the resolve path awaits the same API with the same exposure and the spec names no timeout; theoretical (`getServerSpec` reads settings only).
+  - `[low]` `[patch]` (Edge 3) provided env goes stale after an `intersystems.servers` edit — the extension never fires a definitions-changed event for that setting today (command/args have the same property); README now says to reload the window; the event wiring itself is deferred below.
+  - `[low]` `[reject]` (Edge 4) `ignoredPathPrefix` is not surfaced under Copilot — AC-9 forbids a warning on provide; a gateway path prefix in a Copilot-only setup is an edge, `reopen_if` a user reports a prefix server failing under Copilot.
+  - `[low]` `[reject]` (Edge 5) `IRIS_PROFILES.default` with its own password plus an empty `IRIS_PASSWORD` and a chain miss throws — the combination needs the opt-in, an empty `IRIS_PASSWORD` and a `default` override at once; the error names the remedy; a fix adds a branch.
+  - `[low]` `[reject]` (Edge 7) up to 10 s per passwordless member with a hanging helper — the helper timeout is the existing chain's; the feature is opt-in; the cost is bounded and documented for the Server Manager path.
+  - `[low]` `[reject]` (Edge 8) `scripts/verify-iris-reachable.mjs` and `scripts/ci-seed-throwaway.mjs` call `loadConfig` and now get `""` when `IRIS_CREDENTIAL_NAME` is set — both are CI/release scripts that never set the variable; no reachable input.
+  - `[low]` `[patch]` (Edge 9) the README claim "the Local harness refuses such a server too" is wrong (Local falls back to the session account) — sentence removed.
+  - `[low]` `[patch]` (Gap 1) the control-character guard in `providedEnvFor` pinned with `"bad\nname"` only — `it.each` over a newline, carriage return, tab, NUL and DEL added; mutation recorded.
+  - `[low]` `[defer]` (Gap 2) the `McpServerBase.start()` reconcile block has no test — nothing reads `this.config.password` after start today (verified: the registry's clients carry the password); pinning needs a `McpServerBase` start harness.
+  - `[low]` `[reject]` (Gap, self-referential) the Agent Host emulation `applyAsAgentHost` cannot fail from a product change — acknowledged by the spec (P-2 sourced from the installed 1.147 bundle, human rows P-6 for the real harness); AC-14 is human-only.
+  - `[low]` `[reject]` (Gap, missing mutation lines) six AC-9 behaviours without their own mutation line — Rule 19 asks one demonstrated mutation per AC; AC-9 and AC-10 each have one.
+  - `[low]` `[patch]` (Gap, overclaiming title) the `envContract.test.ts` title claimed governance and Server Manager coverage it does not assert — renamed to what it pins.
+  - `[low]` `[reject]` (Gap, hermeticity) no dist-freshness skip in `copilotProvidedEnv.test.ts`, ambient `FAKE_KEYRING_UNAVAILABLE`, no `registerHooks` guard in `fake-keyring.test.ts` — local-dev stale dist only; no CI leg sets the variable; every CI Node leg is >= 22.17.
+  - `[false]` `[reject]` (Gap, AC-6 comparison) the unset-path test compares two post-change runs — its explicit password assert and the pre-story literal error texts in the neighbouring tests pin the baseline.
+  - `[false]` `[reject]` (Gap, untested combination) duplicate of the first row (same root cause).
+  - `[false]` `[reject]` (Intent) the audit is descriptive; its divergence (the harness is emulated, not run) is the spec's own AC-12/AC-14 split.
+  - `[maybe-false]` `[reject]` (Intent) the extension wiring is pinned through the fake `vscode` only — the same boundary as every extension test; the real wiring is the owner's P-6 sitting.
+  - `[maybe-false]` `[reject]` (Intent) Q-B leaves `IRIS_AUDIT_LOG_MAX_MB` and non-owned variables inheritable — the spec's documented residual risk.
+  - `[maybe-false]` `[reject]` (Intent) `combineProfiles`/multi-server/no-username keep `{}` — Q-C and AC-10 by design.
+
 ## Design Notes
 
 **P-1 Sources (AC 44.6.1; all read or fetched 2026-11-22).**
@@ -187,6 +242,27 @@ Extension (`extensions/iris-mcp-launcher`, outside the pnpm workspace, CommonJS 
 - AC-9/AC-12: provide omits the `""` override for `IRIS_PASSWORD` (null instead) -> `copilotProvidedEnv.test.ts` sees Basic auth with the ambient `wrong` password and goes red; provide copies `spec.password` -> `containment.test.ts` goes red.
 - AC-11: resolve uses `withOwnedVarsEmptied` instead of `withOwnedVarsCleared` -> the Local `toEqual` capture goes red.
 
+**Observed mutations (implementer, 2026-11-22; each applied, observed red, reverted byte-identical; the shared dist rebuilt after each reverted source change, since a stale dist skips the process gate locally):**
+- mutation: `loadProfileRegistry` never runs the default lookup (`if (false && credentialName !== undefined && ...)`) -> `credential-name.test.ts` red (7: AC-1 x2, AC-2 helper, AC-3, AC-4 collision, AC-5 x2) and, after a shared rebuild, the process gate red (3 of 4: keychain leg, helper leg, miss leg; path guarded: a fresh built `iris-dev-mcp` process).
+- mutation: `resolveStoredCredential` also consults link 1 (`resolveEnvPassword` before the keychain) -> red (3): `credential-chain.test.ts` "never consults link 1", `credential-name.test.ts` member-name collision and "resolveStoredCredential never consults link 1".
+- mutation: `loadConfig` drops the `IRIS_PASSWORD` throw unconditionally (`&& Date.now() < 0`) -> red (4): `config.test.ts` "should throw when IRIS_PASSWORD is missing", `credential-name.test.ts` AC-6 x3 (unset, empty, blank); after a rebuild the process gate's unset leg red (1 of 4).
+- mutation: the member loop of `loadProfileRegistry` iterates nothing -> red (3): `credential-name.test.ts` AC-5 x2 and the secret-leak sweep's member-miss warning test.
+- mutation: the control-character check narrowed to `[\u0000-\u0008]` -> red (4): `credential-name.test.ts` AC-7 for `"dev\n1"`, `"dev1\r"`, `"de\tv"` and `"dev1"` with the DEL character.
+- mutation: `withOwnedVarsEmptied` leaves `IRIS_PASSWORD` `null` -> red (15): `copilotProvidedEnv.test.ts` (Basic auth with the ambient `wrong` password path, via the Agent Host emulation), `env.test.ts`, `envContract.test.ts` x2, `pinnedDefinitionsActivationFlow.test.ts`, `selectServers.test.ts` back-compat, `serverDefinitionProvider.test.ts` AC-9 x3 and the five whole-object pins.
+- mutation: provide copies `spec.password` into `IRIS_PASSWORD` -> red (11): `containment.test.ts` x2 (behavioral and the source grep), `copilotProvidedEnv.test.ts`, `serverDefinitionProvider.test.ts` AC-9 x2 and the whole-object pins.
+- mutation: `resolveEnvForLabel` uses `withOwnedVarsEmptied` instead of `withOwnedVarsCleared` -> red (7): the AC-11 `toEqual` capture, `governanceActivationFlow.test.ts` 32-2-5, `selectServers.test.ts` back-compat, `pinnedDefinitionsActivationFlow.test.ts`, and three older `serverDefinitionProvider.test.ts` resolve pins.
+- mutation: `extension.ts` passes `{}` instead of `definition.env` to `McpStdioServerDefinition` -> red (1): `pinnedDefinitionsActivationFlow.test.ts` provided-env test.
+- mutation: the `combineProfiles` / multi-server guard of the provide env removed -> red (4): `serverDefinitionProvider.test.ts` AC-10 combine, the two combine whole-object pins, `pinnedDefinitionsActivationFlow.test.ts` combine.
+- mutation: `FAKE_KEYRING_API.entryMethods` renames `deletePassword` -> `fake-keyring.test.ts` d.ts pin red (1).
+- mutation: the preload resolves `@napi-rs/keyring` to a missing file (never to the real module, which would reach the OS keychain) -> `fake-keyring.test.ts` preload tests red (2), `copilotProvidedEnv.test.ts` red (1), and the process gate's keychain leg red (1 of 4).
+- mutation: the fake listener records `authorization: undefined` -> the process gate's keychain and helper legs red (2 of 4) and `copilotProvidedEnv.test.ts` red (1).
+- mutation (review pass): the member loop of `loadProfileRegistry` gated on `credentialName !== undefined` instead of `chainActive` -> red (1): `credential-name.test.ts` AC-4 "with IRIS_PROFILES members that carry no password, a non-empty IRIS_PASSWORD still calls neither seam"; restored.
+- mutation (review pass): the launcher's control-character guard in `providedEnvFor` narrowed to `/[\n]/` -> red (4 of 5 `it.each` rows: carriage return, tab, NUL, DEL; the newline row stays green); restored byte-identical.
+- mutation: a dated `## [9.9.9]` section inserted above `## [1.1.0]` in the extension `CHANGELOG.md` -> `story-42-7-doc-claims.test.ts` "its first released section records the story" red (1); that test was changed (the first section is now `## [Unreleased]`, so it asserts the first released one), and the mutant section was removed again.
+- AC-11 capture: the Local `toEqual` literal was run against the baseline source (`git archive 374477bd extensions/iris-mcp-launcher`, `node_modules` symlinked, in the scratchpad) and passed there.
+
+**Observed results (implementer, 2026-11-22/23):** `@iris-mcp/shared` full suite 87 files / 2628 tests green and `eslint --max-warnings 0` clean; `@iris-mcp/all` full suite 231 files, 6151 passed, 729 skipped (the pre-existing live and opt-in skips), after one test (`story-42-7-doc-claims.test.ts`) was changed for the new `## [Unreleased]` extension changelog section (the full run took 1297 s; the doc-claims file passes alone after the change); launcher suite 33 files, 491 passed, 3 skipped (the three live-armed ones; `copilotProvidedEnv.test.ts` and `envContract.test.ts` ran, not skipped), `npm run type-check` clean; `pnpm type-check` 13/13; `pnpm gen:governance-baseline:check` OK (141 frozen keys, hash unchanged); `pnpm gen:tools-list-snapshot:check` OK (115 entries, 0 new); `pnpm gen:ipm:check` OK. The added and changed test files also pass in two shuffled orders (seeds 1 and 2) in all three suites. `STARTUP_ENV_VARS` now lists 26 names and `STARTUP_NAMES` the same 26; `env-harness.test.ts` names 32 (26 + 6 connection) where its stale header and two test names said 30 (they had not been updated when `IRIS_DATA_POLICY` joined, Story 39.2).
+
 **Manual checks:**
 - Lead smoke (once, throwaway only): `node scripts/throwaway-iris.mjs run --host-port 52792 -- <a disposable scratchpad script>` that stores the throwaway's password in the fake keyring (scratch `HOME`, preload), takes the launcher provider's provided env for a plan pointed at `127.0.0.1:52792`, spawns the server from it and calls `iris_server_info` successfully; then one refusal: an empty fake keyring gives the AC-3 exit and no IRIS request. Never the shared `iris-community-edition`.
 - Human-only (AC-14, recorded 2026-11-23, no sitting yet): the owner's VS Code sitting (44.2 runbook D-6), on a build carrying 44.2 and 44.6, runs P-6 rows 1-5 and the provider-check row (P-6 row 6).
@@ -194,5 +270,21 @@ Extension (`extensions/iris-mcp-launcher`, outside the pnpm workspace, CommonJS 
 
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
+
+**Summary.** The launcher's provided definitions now carry the non-secret `IRIS_*` settings plus `IRIS_CREDENTIAL_NAME` (the Server Manager server name), `""` overrides for the launcher-owned variables the servers read as unset, and `null` only for `IRIS_AUDIT_LOG_MAX_MB`; a `combineProfiles` plan, an unreadable spec or a username-less server keeps `{}`. `@iris-mcp/shared` lets the `default` profile (and each passwordless `IRIS_PROFILES` member) take its password from the keychain / `IRIS_CREDENTIAL_HELPER` chain when that variable is set and `IRIS_PASSWORD` is empty; unset, behaviour and texts are byte-identical. The Local resolver is unchanged.
+
+**Files changed.**
+- `packages/shared/src/{config,credential-chain,profiles,server-base,index}.ts` -- `readCredentialName`, `resolveStoredCredential` (links 2-3), registry lookups, start() reconcile.
+- `extensions/iris-mcp-launcher/src/{env,serverDefinitionProvider,extension}.ts` -- provided env, `withOwnedVarsEmptied`, wiring.
+- `scripts/lib/{fake-keyring,fake-keyring-preload}.mjs`, `scripts/lib/fake-iris-listener.mjs` -- test-only fake keychain and Authorization capture.
+- New and extended tests in `packages/shared`, `packages/iris-mcp-all`, `extensions/iris-mcp-launcher`; docs (both READMEs, shared README, `docs/client-config/README.md`, both CHANGELOGs) and the changeset.
+
+**Review.** 29 findings (high 0, medium 2, low 17, false 4, maybe-false 6). Patched 9 (one medium: the member lookups now also yield to a non-empty `IRIS_PASSWORD`; eight low: alias rename, preload header, containment slice, test title, control-character `it.each`, README username claim, `npx` command form and reload note). Deferred 3 (workspace-scope name collision, no definitions-changed event, unpinned `server-base` block). Rejected 17 with reasons in the triage log.
+
+**Follow-up review recommended: false** (patched: 0 high, 1 medium).
+
+**Verification (after the review patches).** `@iris-mcp/shared` suite 2629 passed and eslint clean; `@iris-mcp/all` targeted files (process gate, roster, fake keyring, doc claims) 31 passed, the full `@iris-mcp/all` suite passed before the review (6151 passed, 729 skipped) and was not re-run in full after the patches, which touched no `@iris-mcp/all` file; launcher suite 495 passed, 3 skipped; extension and workspace type-check clean; governance baseline, tools-list snapshot and `gen:ipm:check` OK. Mutations recorded above, each red then restored.
+
+**Residual risks.** The real Copilot harness is emulated, not run (AC-14: the owner's VS Code rows P-6 1-6 remain human-only, no sitting yet); `IRIS_AUDIT_LOG_MAX_MB` and variables the extension does not own may still inherit; the lead's throwaway-IRIS smoke is not run.

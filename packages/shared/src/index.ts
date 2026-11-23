@@ -210,6 +210,7 @@ export {
   CREDENTIAL_CHAIN_KEYCHAIN_SERVICE,
   CREDENTIAL_HELPER_TIMEOUT_MS,
   resolveCredential,
+  resolveStoredCredential,
   resolveServerManagerCredentials,
 } from "./credential-chain.js";
 export type {
