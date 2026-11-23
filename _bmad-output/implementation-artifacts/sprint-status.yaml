@@ -563,7 +563,7 @@ development_status:
   epic-44: in-progress
   44-1-docdb-create-registers-the-database: done
   44-2-vs-code-copilot-mcp-configuration-targets: in-progress
-  44-3-confirmation-bound-to-the-scope-shown: ready-for-dev
+  44-3-confirmation-bound-to-the-scope-shown: in-progress
   44-4-bootstrap-compile-result-accuracy: backlog
   44-5-integration-suites-cannot-pass-without-testing: backlog
   44-6-launcher-provider-works-in-copilot-sessions: backlog
