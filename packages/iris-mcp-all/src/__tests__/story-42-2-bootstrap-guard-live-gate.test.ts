@@ -191,6 +191,15 @@ describe("Story 44.4: the compile check on a throwaway", () => {
   /** The embed, current and configured, as it was before the block's own changes. */
   const reseed = (): Promise<void> => seedInstance(target, embedded, { marker: embedded.marker, perturb: false });
 
+  /** Restore the seeded state from a `finally`; a failed restore is logged so that it never replaces the test's own failure. */
+  async function restoreSeed(): Promise<void> {
+    try {
+      await reseed();
+    } catch (error) {
+      console.error(`restoring the seeded instance failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   it(
     "L1: compileAndVerify names the class that does not compile when the same compile writes another class's Storage (HTTP 200, no status error)",
     async (testCtx) => {
@@ -245,7 +254,7 @@ describe("Story 44.4: the compile check on a throwaway", () => {
         expect(await isConfigured(), "a failed compile stops before the web application is registered").toBe(false);
       } finally {
         http.destroy();
-        await reseed();
+        await restoreSeed();
       }
     },
     LEG_TIMEOUT_MS,
@@ -262,7 +271,7 @@ describe("Story 44.4: the compile check on a throwaway", () => {
       try {
         await reseed();
         await putDocument(http, HEALTH_DOC, brokenHealth());
-        // The compile that fails: the earlier start's work. It answers with a status error (a thrown IrisApiError); what it leaves is the oracle.
+        // The compile that fails: the earlier start's work. IRIS answers it with a status error, which compileAndVerify returns in irisErrors without throwing; what the compile leaves in the class dictionary is the oracle.
         await compileAndVerify(http, { namespace: target.namespace }, ATELIER_VERSION, [HEALTH_DOC]);
 
         const stderr = await runServer("startup", { repoRoot: REPO_ROOT, sdkEsmDir, target });
@@ -272,7 +281,7 @@ describe("Story 44.4: the compile check on a throwaway", () => {
         expect(await isConfigured(), "the web application is still registered").toBe(true);
       } finally {
         http.destroy();
-        await reseed();
+        await restoreSeed();
       }
     },
     LEG_TIMEOUT_MS,

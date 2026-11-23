@@ -22,15 +22,24 @@
 //   `seq`) can change; the `sessionStart` element and every row `line` stay frozen. It is checked like any other entry:
 //   the pointer must resolve, and `old` must be the frozen value.
 //
+//   A "handler" entry with `section: "startup"` addresses the server's `startup` array, the requests the server makes
+//   to IRIS while it starts (Story 44.4, AC 44.4.8). Its only operation is `"insert"`: `pointer` is `/<index>`, an index
+//   from 0 to the array's length at that point (counted after the earlier entries of the same server, in file order),
+//   and `new` is the exact request object `{ method, url, body }` (three strings, no other key). It has no `old`, because
+//   it removes nothing. `replace` and `remove` on `startup`, and `insert` anywhere else, are refused. Every request that
+//   no entry inserts stays the frozen one. The loader refuses, naming the entry `id`, an index out of range, a `new` of
+//   another shape, and an `old` that is present.
+//
 // LEDGER SCHEMA (`validateSanctionedChanges` enforces it; unknown keys are refused)
 //   { "description": string, "changes": [ change ... ] }
 //   change: id (unique, non-empty), sanction (^S-\d+\.\d+-[a-z-]+$), story (^\d+\.\d+$), golden ("wire" | "handler"),
 //           server (one of the golden's servers), session (required for "wire", absent for "handler"), label (the
-//           row; absent when `section` is "audit"), section (optional, "audit", "handler" only), pointer (RFC 6901,
-//           starting with "/", inside the parsed line, or `/<audit index>/<member>...` for the audit section),
-//           op ("replace" | "remove"), old (required), new (required for "replace", absent for "remove"),
-//           appendOnly (optional boolean).
-//   Changes to one row, or to one audit element, apply in file order.
+//           row; absent when `section` is "audit" or "startup"), section (optional, "audit" or "startup", "handler"
+//           only), pointer (RFC 6901, starting with "/", inside the parsed line, or `/<audit index>/<member>...` for
+//           the audit section, or `/<index>` for the startup section), op ("replace" | "remove", or "insert" for the
+//           startup section only), old (required, absent for "insert"), new (required for "replace" and "insert",
+//           absent for "remove"), appendOnly (optional boolean).
+//   Changes to one row, to one audit element, or to the startup array of one server apply in file order.
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -104,6 +113,17 @@ export function valueAt(message, pointer) {
   return tokens === undefined ? undefined : walk(message, tokens);
 }
 
+/** Whether `value` is exactly one startup request: `{ method, url, body }`, each a string, and no other key. */
+function isStartupRequest(value) {
+  return (
+    isObject(value) &&
+    Object.keys(value).sort().join(',') === 'body,method,url' &&
+    typeof value.method === 'string' &&
+    typeof value.url === 'string' &&
+    typeof value.body === 'string'
+  );
+}
+
 /** What entry `id` is called in a refusal. */
 const named = (id) => `Sanctioned change '${id}'`;
 
@@ -124,11 +144,15 @@ function validateChange(change, index) {
   if (!GOLDEN_PACKAGES.includes(change.server)) refuse(`server must be one of ${GOLDEN_PACKAGES.join(', ')}.`);
   if (change.golden === 'wire' && !isText(change.session)) refuse("a 'wire' change needs a non-empty session.");
   if (change.golden === 'handler' && hasOwn(change, 'session')) refuse("a 'handler' change has no session.");
-  const audit = hasOwn(change, 'section');
-  if (audit) {
-    if (change.section !== 'audit') refuse("section must be 'audit' when present.");
-    if (change.golden !== 'handler') refuse("an 'audit' change must be a 'handler' change.");
-    if (hasOwn(change, 'label')) refuse("an 'audit' change addresses an element of the audit array and has no label.");
+  const sectioned = hasOwn(change, 'section');
+  const audit = sectioned && change.section === 'audit';
+  const startup = sectioned && change.section === 'startup';
+  if (sectioned) {
+    if (!audit && !startup) refuse("section must be 'audit' or 'startup' when present.");
+    if (change.golden !== 'handler') refuse(`${audit ? 'an' : 'a'} '${change.section}' change must be a 'handler' change.`);
+    if (hasOwn(change, 'label')) {
+      refuse(`${audit ? 'an' : 'a'} '${change.section}' change addresses an element of the ${audit ? 'audit' : 'startup'} array and has no label.`);
+    }
   } else if (!isText(change.label)) {
     refuse('label must be a non-empty string.');
   }
@@ -139,6 +163,17 @@ function validateChange(change, index) {
     const tokens = pointerTokens(change.pointer);
     if (tokens.length < 2 || indexOf(tokens[0]) === undefined) refuse("an 'audit' pointer must be /<audit index>/<member>.");
   }
+  if (startup) {
+    const tokens = pointerTokens(change.pointer);
+    if (tokens.length !== 1 || indexOf(tokens[0]) === undefined) refuse("a 'startup' pointer must be /<index>.");
+    if (change.op !== 'insert') refuse("a 'startup' change must be an 'insert': the startup requests are frozen, so none is replaced or removed.");
+    if (hasOwn(change, 'old')) refuse("an 'insert' change has no old: it removes nothing.");
+    if (!hasOwn(change, 'new')) refuse("an 'insert' change needs new.");
+    if (!isStartupRequest(change.new)) refuse("new must be exactly { method, url, body }: three strings and no other key.");
+    if (hasOwn(change, 'appendOnly')) refuse("an 'insert' change is never appendOnly.");
+    return id;
+  }
+  if (change.op === 'insert') refuse("an 'insert' change belongs to section 'startup'.");
   if (change.op !== 'replace' && change.op !== 'remove') refuse("op must be 'replace' or 'remove'.");
   if (!hasOwn(change, 'old')) refuse('old is required.');
   if (change.op === 'remove' && hasOwn(change, 'new')) refuse("a 'remove' change has no new.");
@@ -241,9 +276,25 @@ function applyAuditChange(clone, change) {
 }
 
 /**
+ * Apply one `section: "startup"` change to `clone`: the request `new` is inserted into the server's `startup` array at
+ * the index of the pointer, which must be from 0 to the array's current length (entries before it have already applied).
+ * Throws, naming the change, otherwise.
+ */
+function applyStartupChange(clone, change) {
+  const startup = clone.servers?.[change.server]?.startup;
+  if (!Array.isArray(startup)) throw new Error(`${named(change.id)}: the golden has no startup array for ${change.server}.`);
+  const index = indexOf(pointerTokens(change.pointer)[0]);
+  if (index > startup.length) {
+    throw new Error(`${named(change.id)}: index ${index} is out of range: the startup array of ${change.server} holds ${startup.length} requests at this point.`);
+  }
+  startup.splice(index, 0, structuredClone(change.new));
+}
+
+/**
  * A deep clone of `golden` with the ledger applied: each row that a `kind` change names carries its frozen line with
  * the changes of that row applied in file order and re-serialized with `JSON.stringify`, and each audit element that
- * a handler change names carries the changed member. No other field changes.
+ * a handler change names carries the changed member, and each startup insert puts its request into the server's `startup`
+ * array. No other field changes.
  *
  * @param {Record<string, any>} golden - The frozen golden, parsed.
  * @param {'wire' | 'handler'} kind - Which golden `golden` is; only the changes of that kind apply.
@@ -257,6 +308,10 @@ export function applySanctionedChanges(golden, kind, changes) {
   for (const change of changes.filter((candidate) => candidate.golden === kind)) {
     if (change.section === 'audit') {
       applyAuditChange(clone, change);
+      continue;
+    }
+    if (change.section === 'startup') {
+      applyStartupChange(clone, change);
       continue;
     }
     const row = rowOf(clone, change);

@@ -1,5 +1,5 @@
 {
-  "description": "Sanctioned changes (AD-15) to bytes held by the frozen SDK v1 goldens sdk-wire-golden.json and sdk-handler-golden.json, from Story 43.4 and every later story. Each entry names a golden, a row (or, for a handler entry with section \"audit\", an element of the server's audit array), an RFC 6901 pointer inside the row's parsed line (or inside that audit element), the exact value before the entry (old: the frozen value, or the new value of the entry before it for the same pointer) and the exact new value (new). The goldens themselves are never edited or recaptured; scripts/lib/golden-sanctioned-changes.mjs applies the entries and the golden tests compare every other byte unchanged.",
+  "description": "Sanctioned changes (AD-15) to bytes held by the frozen SDK v1 goldens sdk-wire-golden.json and sdk-handler-golden.json, from Story 43.4 and every later story. Each entry names a golden, a row (or, for a handler entry with section \"audit\", an element of the server's audit array; or, for a handler entry with section \"startup\" and op \"insert\", an index of the server's startup request array, with the inserted request as new and no old), an RFC 6901 pointer inside the row's parsed line (or inside that audit element), the exact value before the entry (old: the frozen value, or the new value of the entry before it for the same pointer) and the exact new value (new). The goldens themselves are never edited or recaptured; scripts/lib/golden-sanctioned-changes.mjs applies the entries and the golden tests compare every other byte unchanged.",
   "changes": [
     {
       "id": "43.4/description/iris_env_promote@dev-main",
@@ -912,6 +912,231 @@
       "appendOnly": true,
       "old": "Create, drop, or list IRIS document databases. 'list' returns all DocDB databases in the namespace. 'create' creates a new document database with optional property definitions. 'drop' permanently removes a document database and all its data. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied.",
       "new": "Create, drop, or list IRIS document databases. 'list' returns all DocDB databases in the namespace. 'create' creates a new document database with optional property definitions. 'drop' permanently removes a document database and all its data. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied. 'create' also registers the database's Security.DocDBs record, which every other DocDB call on that database requires, and on a database that exists without one it registers the missing record."
+    },
+    {
+      "id": "44.4/startup/iris-dev-mcp@6",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-dev-mcp",
+      "section": "startup",
+      "pointer": "/6",
+      "op": "insert",
+      "new": {
+        "method": "HEAD",
+        "url": "/api/atelier/",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-dev-mcp@7",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-dev-mcp",
+      "section": "startup",
+      "pointer": "/7",
+      "op": "insert",
+      "new": {
+        "method": "POST",
+        "url": "/api/atelier/v8/HSCUSTOM/action/query",
+        "body": "{\"query\":\"SELECT d.ID AS ID, CASE WHEN c.ID IS NULL THEN 0 ELSE 1 END AS Compiled, CASE WHEN c.ClassCompileError IS NULL OR c.ClassCompileError = '' THEN 0 ELSE 1 END AS CompileError FROM %Dictionary.ClassDefinition d LEFT JOIN %Dictionary.CompiledClass c ON c.ID = d.ID WHERE d.ID IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\",\"parameters\":[\"ExecuteMCPv2.Utils\",\"ExecuteMCPv2.Setup\",\"ExecuteMCPv2.Diagram.Event\",\"ExecuteMCPv2.Diagram.RenderEvent\",\"ExecuteMCPv2.Diagram.Loader\",\"ExecuteMCPv2.Diagram.Correlator\",\"ExecuteMCPv2.Diagram.Compressor\",\"ExecuteMCPv2.Diagram.Writer\",\"ExecuteMCPv2.Diagram.Generate\",\"ExecuteMCPv2.Loc.Classifier\",\"ExecuteMCPv2.Loc.Scanner\",\"ExecuteMCPv2.Loc.Generate\",\"ExecuteMCPv2.Coverage.Job\",\"ExecuteMCPv2.Coverage.Runner\",\"ExecuteMCPv2.REST.Base\",\"ExecuteMCPv2.REST.Global\",\"ExecuteMCPv2.REST.Command\",\"ExecuteMCPv2.REST.UnitTest\",\"ExecuteMCPv2.REST.Config\",\"ExecuteMCPv2.REST.Security\",\"ExecuteMCPv2.REST.Interop\",\"ExecuteMCPv2.REST.MessageResend\",\"ExecuteMCPv2.REST.MessageSearch\",\"ExecuteMCPv2.REST.MessageBody\",\"ExecuteMCPv2.REST.Loc\",\"ExecuteMCPv2.REST.Monitor\",\"ExecuteMCPv2.REST.Health\",\"ExecuteMCPv2.REST.EnvSync\",\"ExecuteMCPv2.REST.Task\",\"ExecuteMCPv2.REST.SystemConfig\",\"ExecuteMCPv2.REST.Analytics\",\"ExecuteMCPv2.REST.SqlAdvisor\",\"ExecuteMCPv2.REST.Sql\",\"ExecuteMCPv2.REST.Coverage\",\"ExecuteMCPv2.REST.Dispatch\"]}"
+      }
+    },
+    {
+      "id": "44.4/startup/iris-dev-mcp@8",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-dev-mcp",
+      "section": "startup",
+      "pointer": "/8",
+      "op": "insert",
+      "new": {
+        "method": "GET",
+        "url": "/api/atelier/v8/HSCUSTOM/docnames/CLS?filter=ExecuteMCPv2.",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-admin-mcp@6",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-admin-mcp",
+      "section": "startup",
+      "pointer": "/6",
+      "op": "insert",
+      "new": {
+        "method": "HEAD",
+        "url": "/api/atelier/",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-admin-mcp@7",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-admin-mcp",
+      "section": "startup",
+      "pointer": "/7",
+      "op": "insert",
+      "new": {
+        "method": "POST",
+        "url": "/api/atelier/v8/HSCUSTOM/action/query",
+        "body": "{\"query\":\"SELECT d.ID AS ID, CASE WHEN c.ID IS NULL THEN 0 ELSE 1 END AS Compiled, CASE WHEN c.ClassCompileError IS NULL OR c.ClassCompileError = '' THEN 0 ELSE 1 END AS CompileError FROM %Dictionary.ClassDefinition d LEFT JOIN %Dictionary.CompiledClass c ON c.ID = d.ID WHERE d.ID IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\",\"parameters\":[\"ExecuteMCPv2.Utils\",\"ExecuteMCPv2.Setup\",\"ExecuteMCPv2.Diagram.Event\",\"ExecuteMCPv2.Diagram.RenderEvent\",\"ExecuteMCPv2.Diagram.Loader\",\"ExecuteMCPv2.Diagram.Correlator\",\"ExecuteMCPv2.Diagram.Compressor\",\"ExecuteMCPv2.Diagram.Writer\",\"ExecuteMCPv2.Diagram.Generate\",\"ExecuteMCPv2.Loc.Classifier\",\"ExecuteMCPv2.Loc.Scanner\",\"ExecuteMCPv2.Loc.Generate\",\"ExecuteMCPv2.Coverage.Job\",\"ExecuteMCPv2.Coverage.Runner\",\"ExecuteMCPv2.REST.Base\",\"ExecuteMCPv2.REST.Global\",\"ExecuteMCPv2.REST.Command\",\"ExecuteMCPv2.REST.UnitTest\",\"ExecuteMCPv2.REST.Config\",\"ExecuteMCPv2.REST.Security\",\"ExecuteMCPv2.REST.Interop\",\"ExecuteMCPv2.REST.MessageResend\",\"ExecuteMCPv2.REST.MessageSearch\",\"ExecuteMCPv2.REST.MessageBody\",\"ExecuteMCPv2.REST.Loc\",\"ExecuteMCPv2.REST.Monitor\",\"ExecuteMCPv2.REST.Health\",\"ExecuteMCPv2.REST.EnvSync\",\"ExecuteMCPv2.REST.Task\",\"ExecuteMCPv2.REST.SystemConfig\",\"ExecuteMCPv2.REST.Analytics\",\"ExecuteMCPv2.REST.SqlAdvisor\",\"ExecuteMCPv2.REST.Sql\",\"ExecuteMCPv2.REST.Coverage\",\"ExecuteMCPv2.REST.Dispatch\"]}"
+      }
+    },
+    {
+      "id": "44.4/startup/iris-admin-mcp@8",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-admin-mcp",
+      "section": "startup",
+      "pointer": "/8",
+      "op": "insert",
+      "new": {
+        "method": "GET",
+        "url": "/api/atelier/v8/HSCUSTOM/docnames/CLS?filter=ExecuteMCPv2.",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-interop-mcp@6",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-interop-mcp",
+      "section": "startup",
+      "pointer": "/6",
+      "op": "insert",
+      "new": {
+        "method": "HEAD",
+        "url": "/api/atelier/",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-interop-mcp@7",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-interop-mcp",
+      "section": "startup",
+      "pointer": "/7",
+      "op": "insert",
+      "new": {
+        "method": "POST",
+        "url": "/api/atelier/v8/HSCUSTOM/action/query",
+        "body": "{\"query\":\"SELECT d.ID AS ID, CASE WHEN c.ID IS NULL THEN 0 ELSE 1 END AS Compiled, CASE WHEN c.ClassCompileError IS NULL OR c.ClassCompileError = '' THEN 0 ELSE 1 END AS CompileError FROM %Dictionary.ClassDefinition d LEFT JOIN %Dictionary.CompiledClass c ON c.ID = d.ID WHERE d.ID IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\",\"parameters\":[\"ExecuteMCPv2.Utils\",\"ExecuteMCPv2.Setup\",\"ExecuteMCPv2.Diagram.Event\",\"ExecuteMCPv2.Diagram.RenderEvent\",\"ExecuteMCPv2.Diagram.Loader\",\"ExecuteMCPv2.Diagram.Correlator\",\"ExecuteMCPv2.Diagram.Compressor\",\"ExecuteMCPv2.Diagram.Writer\",\"ExecuteMCPv2.Diagram.Generate\",\"ExecuteMCPv2.Loc.Classifier\",\"ExecuteMCPv2.Loc.Scanner\",\"ExecuteMCPv2.Loc.Generate\",\"ExecuteMCPv2.Coverage.Job\",\"ExecuteMCPv2.Coverage.Runner\",\"ExecuteMCPv2.REST.Base\",\"ExecuteMCPv2.REST.Global\",\"ExecuteMCPv2.REST.Command\",\"ExecuteMCPv2.REST.UnitTest\",\"ExecuteMCPv2.REST.Config\",\"ExecuteMCPv2.REST.Security\",\"ExecuteMCPv2.REST.Interop\",\"ExecuteMCPv2.REST.MessageResend\",\"ExecuteMCPv2.REST.MessageSearch\",\"ExecuteMCPv2.REST.MessageBody\",\"ExecuteMCPv2.REST.Loc\",\"ExecuteMCPv2.REST.Monitor\",\"ExecuteMCPv2.REST.Health\",\"ExecuteMCPv2.REST.EnvSync\",\"ExecuteMCPv2.REST.Task\",\"ExecuteMCPv2.REST.SystemConfig\",\"ExecuteMCPv2.REST.Analytics\",\"ExecuteMCPv2.REST.SqlAdvisor\",\"ExecuteMCPv2.REST.Sql\",\"ExecuteMCPv2.REST.Coverage\",\"ExecuteMCPv2.REST.Dispatch\"]}"
+      }
+    },
+    {
+      "id": "44.4/startup/iris-interop-mcp@8",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-interop-mcp",
+      "section": "startup",
+      "pointer": "/8",
+      "op": "insert",
+      "new": {
+        "method": "GET",
+        "url": "/api/atelier/v8/HSCUSTOM/docnames/CLS?filter=ExecuteMCPv2.",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-ops-mcp@6",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-ops-mcp",
+      "section": "startup",
+      "pointer": "/6",
+      "op": "insert",
+      "new": {
+        "method": "HEAD",
+        "url": "/api/atelier/",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-ops-mcp@7",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-ops-mcp",
+      "section": "startup",
+      "pointer": "/7",
+      "op": "insert",
+      "new": {
+        "method": "POST",
+        "url": "/api/atelier/v8/HSCUSTOM/action/query",
+        "body": "{\"query\":\"SELECT d.ID AS ID, CASE WHEN c.ID IS NULL THEN 0 ELSE 1 END AS Compiled, CASE WHEN c.ClassCompileError IS NULL OR c.ClassCompileError = '' THEN 0 ELSE 1 END AS CompileError FROM %Dictionary.ClassDefinition d LEFT JOIN %Dictionary.CompiledClass c ON c.ID = d.ID WHERE d.ID IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\",\"parameters\":[\"ExecuteMCPv2.Utils\",\"ExecuteMCPv2.Setup\",\"ExecuteMCPv2.Diagram.Event\",\"ExecuteMCPv2.Diagram.RenderEvent\",\"ExecuteMCPv2.Diagram.Loader\",\"ExecuteMCPv2.Diagram.Correlator\",\"ExecuteMCPv2.Diagram.Compressor\",\"ExecuteMCPv2.Diagram.Writer\",\"ExecuteMCPv2.Diagram.Generate\",\"ExecuteMCPv2.Loc.Classifier\",\"ExecuteMCPv2.Loc.Scanner\",\"ExecuteMCPv2.Loc.Generate\",\"ExecuteMCPv2.Coverage.Job\",\"ExecuteMCPv2.Coverage.Runner\",\"ExecuteMCPv2.REST.Base\",\"ExecuteMCPv2.REST.Global\",\"ExecuteMCPv2.REST.Command\",\"ExecuteMCPv2.REST.UnitTest\",\"ExecuteMCPv2.REST.Config\",\"ExecuteMCPv2.REST.Security\",\"ExecuteMCPv2.REST.Interop\",\"ExecuteMCPv2.REST.MessageResend\",\"ExecuteMCPv2.REST.MessageSearch\",\"ExecuteMCPv2.REST.MessageBody\",\"ExecuteMCPv2.REST.Loc\",\"ExecuteMCPv2.REST.Monitor\",\"ExecuteMCPv2.REST.Health\",\"ExecuteMCPv2.REST.EnvSync\",\"ExecuteMCPv2.REST.Task\",\"ExecuteMCPv2.REST.SystemConfig\",\"ExecuteMCPv2.REST.Analytics\",\"ExecuteMCPv2.REST.SqlAdvisor\",\"ExecuteMCPv2.REST.Sql\",\"ExecuteMCPv2.REST.Coverage\",\"ExecuteMCPv2.REST.Dispatch\"]}"
+      }
+    },
+    {
+      "id": "44.4/startup/iris-ops-mcp@8",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-ops-mcp",
+      "section": "startup",
+      "pointer": "/8",
+      "op": "insert",
+      "new": {
+        "method": "GET",
+        "url": "/api/atelier/v8/HSCUSTOM/docnames/CLS?filter=ExecuteMCPv2.",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-data-mcp@6",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-data-mcp",
+      "section": "startup",
+      "pointer": "/6",
+      "op": "insert",
+      "new": {
+        "method": "HEAD",
+        "url": "/api/atelier/",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-data-mcp@7",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-data-mcp",
+      "section": "startup",
+      "pointer": "/7",
+      "op": "insert",
+      "new": {
+        "method": "POST",
+        "url": "/api/atelier/v8/HSCUSTOM/action/query",
+        "body": "{\"query\":\"SELECT d.ID AS ID, CASE WHEN c.ID IS NULL THEN 0 ELSE 1 END AS Compiled, CASE WHEN c.ClassCompileError IS NULL OR c.ClassCompileError = '' THEN 0 ELSE 1 END AS CompileError FROM %Dictionary.ClassDefinition d LEFT JOIN %Dictionary.CompiledClass c ON c.ID = d.ID WHERE d.ID IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\",\"parameters\":[\"ExecuteMCPv2.Utils\",\"ExecuteMCPv2.Setup\",\"ExecuteMCPv2.Diagram.Event\",\"ExecuteMCPv2.Diagram.RenderEvent\",\"ExecuteMCPv2.Diagram.Loader\",\"ExecuteMCPv2.Diagram.Correlator\",\"ExecuteMCPv2.Diagram.Compressor\",\"ExecuteMCPv2.Diagram.Writer\",\"ExecuteMCPv2.Diagram.Generate\",\"ExecuteMCPv2.Loc.Classifier\",\"ExecuteMCPv2.Loc.Scanner\",\"ExecuteMCPv2.Loc.Generate\",\"ExecuteMCPv2.Coverage.Job\",\"ExecuteMCPv2.Coverage.Runner\",\"ExecuteMCPv2.REST.Base\",\"ExecuteMCPv2.REST.Global\",\"ExecuteMCPv2.REST.Command\",\"ExecuteMCPv2.REST.UnitTest\",\"ExecuteMCPv2.REST.Config\",\"ExecuteMCPv2.REST.Security\",\"ExecuteMCPv2.REST.Interop\",\"ExecuteMCPv2.REST.MessageResend\",\"ExecuteMCPv2.REST.MessageSearch\",\"ExecuteMCPv2.REST.MessageBody\",\"ExecuteMCPv2.REST.Loc\",\"ExecuteMCPv2.REST.Monitor\",\"ExecuteMCPv2.REST.Health\",\"ExecuteMCPv2.REST.EnvSync\",\"ExecuteMCPv2.REST.Task\",\"ExecuteMCPv2.REST.SystemConfig\",\"ExecuteMCPv2.REST.Analytics\",\"ExecuteMCPv2.REST.SqlAdvisor\",\"ExecuteMCPv2.REST.Sql\",\"ExecuteMCPv2.REST.Coverage\",\"ExecuteMCPv2.REST.Dispatch\"]}"
+      }
+    },
+    {
+      "id": "44.4/startup/iris-data-mcp@8",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-data-mcp",
+      "section": "startup",
+      "pointer": "/8",
+      "op": "insert",
+      "new": {
+        "method": "GET",
+        "url": "/api/atelier/v8/HSCUSTOM/docnames/CLS?filter=ExecuteMCPv2.",
+        "body": ""
+      }
     }
   ]
 }

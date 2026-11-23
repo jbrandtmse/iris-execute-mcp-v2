@@ -6,7 +6,7 @@
  * Not a test file: each gate keeps its own setup and its own `IRIS_REQUIRE_LIVE ===` arming
  * comparison, so `live-gate-roster.test.ts` still sees every armed gate. Every helper takes the
  * target explicitly (client, negotiated Atelier version, namespace) and the FULL document name
- * with its extension (`Pkg.Name.cls`, `Pkg.Name.mac`).
+ * with its extension (`Pkg.Name.cls`; `compileDocs` takes `.cls` documents only and throws for any other name).
  */
 
 import { IrisApiError, atelierDocStatusError, atelierPath, compileAndVerify, type IrisHttpClient } from "@iris-mcp/shared";

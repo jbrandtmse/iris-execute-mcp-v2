@@ -25,7 +25,7 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import type * as Shared from "../../../shared/src/index.js";
 import type { IrisConnectionConfig } from "../../../shared/src/config.js";
 import { staleDistReason } from "./process-gate-helpers.js";
-import { LEGS, loadEmbedded, seedInstance, stampedEmbedded, type EmbeddedBootstrap } from "./bootstrap-guard-legs.js";
+import { LEGS, SeedCompileError, loadEmbedded, seedInstance, stampedEmbedded, type EmbeddedBootstrap } from "./bootstrap-guard-legs.js";
 import {
   COMPILE_CONSOLE_DE,
   COMPILE_CONSOLE_JA,
@@ -175,13 +175,6 @@ describe("Story 44.4 AC 44.4.6: a clean compile is byte-identical to the pre-sto
       TEST_TIMEOUT_MS,
     );
   }
-
-  it("a result with one more field than the capture is not equal to it (the capture can fail)", async () => {
-    const { fake, http, config } = await arrive("missing");
-    const { result } = await runBootstrap(fake, http, config);
-
-    expect({ ...result, extra: true }).not.toEqual(BASELINE.missing.result);
-  });
 });
 
 describe("Story 44.4 AC 44.4.2 / 44.4.3 / 44.4.5: a failed class is named from the check, on every writing branch", () => {
@@ -370,6 +363,68 @@ describe("Story 44.4 AC 44.4.7: the next start reports what an earlier start lef
     expect(result.compiled).toBe(false);
     expect(result.errors[0]).toMatch(/^Compile failed: the check that every class compiled could not run: /);
   });
+});
+
+describe("Story 44.4 AC 44.4.3: the IRIS text in the failure line is one line and at most 300 characters", () => {
+  it("a status error whose IRIS text carries CR LF (the captured #5475) reaches the failure line with no line break", async () => {
+    const { fake, http, config } = await arrive("unconfigured");
+    fake.compileFailure = () => ({ failed: [{ name: HEALTH, kind: "routine" }], shape: "status-errors" });
+
+    const { result } = await runBootstrap(fake, http, config);
+
+    expect(result.compiled).toBe(false);
+    const text = result.errors[0] as string;
+    expect(text).toContain(`${classNameOf(HEALTH)}. IRIS reported: ERROR #5475: Error compiling routine: ${classNameOf(HEALTH)}.`);
+    expect(text).not.toMatch(/[\r\n]/);
+  }, TEST_TIMEOUT_MS);
+
+  it("an IRIS text longer than 300 characters is cut as oneLine cuts it: whitespace collapsed, 300 characters, then three dots", async () => {
+    const { fake, http, config } = await arrive("unconfigured");
+    // The captured #5475 text names the failed class three times, so a long class name makes it longer than 300 characters.
+    const longName = `Story444.${"VeryLongClassName".repeat(6)}.cls`;
+    fake.compileFailure = () => ({ failed: [{ name: longName, kind: "routine" }], shape: "status-errors" });
+
+    const { result } = await runBootstrap(fake, http, config);
+
+    expect(result.compiled).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    const prefix = "Compile failed: IRIS reported errors: ";
+    const text = result.errors[0] as string;
+    expect(text.startsWith(prefix)).toBe(true);
+    const reported = text.slice(prefix.length);
+    expect(reported).toHaveLength(303);
+    expect(reported.endsWith("...")).toBe(true);
+    expect(reported.startsWith("ERROR #5475: Error compiling routine: Story444.")).toBe(true);
+    expect(reported).not.toMatch(/[\r\n]|\s\s/);
+  }, TEST_TIMEOUT_MS);
+});
+
+describe("Story 44.4 AC 44.4.4: seedInstance judges its compile by the check", () => {
+  async function seeding(): Promise<{ fake: StatefulFakeAtelier; target: { host: string; port: string; username: string; password: string; namespace: string } }> {
+    const fake = await startStatefulFakeAtelier({ namespace: NAMESPACE });
+    openFakes.push(fake);
+    return { fake, target: { host: "127.0.0.1", port: String(fake.port), username: "fake", password: "fake", namespace: NAMESPACE } };
+  }
+
+  it("a Storage-written partial failure (HTTP 200, no status error) throws a SeedCompileError that names the class", async () => {
+    const { fake, target } = await seeding();
+    fake.compileFailure = () => ({ failed: [{ name: HEALTH, kind: "routine" }], shape: "storage-written", console: COMPILE_CONSOLE_DE });
+
+    const seeded = seedInstance(target, embedded, { marker: embedded.marker, perturb: false });
+
+    await expect(seeded).rejects.toBeInstanceOf(SeedCompileError);
+    await expect(seeded).rejects.toThrow(`did not compile: ${HEALTH}`);
+  }, TEST_TIMEOUT_MS);
+
+  it("a check that cannot run throws a SeedCompileError with the could-not-run text", async () => {
+    const { fake, target } = await seeding();
+    fake.failCompileCheck = "query";
+
+    const seeded = seedInstance(target, embedded, { marker: embedded.marker, perturb: false });
+
+    await expect(seeded).rejects.toBeInstanceOf(SeedCompileError);
+    await expect(seeded).rejects.toThrow("the check that every class compiled could not run");
+  }, TEST_TIMEOUT_MS);
 });
 
 describe("Story 44.4 AC 44.4.2: verifyCompiled and compileAndVerify decide per class from the row, the error flag and upd", () => {

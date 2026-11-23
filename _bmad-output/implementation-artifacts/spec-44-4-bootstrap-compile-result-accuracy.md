@@ -2,7 +2,7 @@
 title: 'Story 44.4: Bootstrap Compile Result Accuracy'
 type: 'bugfix'
 created: '2026-11-23'
-status: 'in-progress'
+status: 'done'
 baseline_revision: 'b2184e1d6bc4e3a2f71908ae811ee6bbeb398cd8'
 baseline_commit: 'b3706e8730ace4d73130ae8a2c533dd5e8933d90'
 review_loop_iteration: 0
@@ -11,7 +11,14 @@ context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      iris_doc_load and env-promote read a compile as successful from per-document errors only, so a Storage-written partial failure reads as success there (the same DW-754 root cause as iris_doc_compile).
+    evidence: |-
+      The planning probe shows real documents never carry `errors`. load.ts computes compilationResult.success from per-document errors; env-promote posts action/compile. Neither was read to the end of its result handling (unverified).
+    location: >-
+      packages/iris-dev-mcp/src/tools/load.ts:604-640, env-promote.ts:975
+    severity: medium (unverified)
 ---
 
 <intent-contract>
@@ -143,10 +150,10 @@ Each row uses the compile list a branch sends: the 35-class roster for bootstrap
 
 The first build pass implemented everything else and left it uncommitted; the lead committed it as a checkpoint. Work ONLY these items, then finish the run (self-review, Verification, finalize):
 
-- [ ] AC 44.4.8 ledger `startup` section + its tests.
-- [ ] AC 44.4.8 entries for the five servers (captured by running), CHANGELOG names `S-44.4-current-check`.
-- [ ] AC 44.4.8 listener answers the check; the fallback test is restored byte-identical to the baseline.
-- [ ] The full `@iris-mcp/all` suite (both shards), `@iris-mcp/shared`, `@iris-mcp/dev`, `pnpm gen:governance-baseline:check`, `pnpm gen:ipm:check`, lint and typecheck green; `BOOTSTRAP_VERSION` unchanged.
+- [x] AC 44.4.8 ledger `startup` section + its tests.
+- [x] AC 44.4.8 entries for the five servers (captured by running), CHANGELOG names `S-44.4-current-check`.
+- [x] AC 44.4.8 listener answers the check; the fallback test is restored byte-identical to the baseline.
+- [x] The full `@iris-mcp/all` suite (both shards), `@iris-mcp/shared`, `@iris-mcp/dev`, `pnpm gen:governance-baseline:check`, `pnpm gen:ipm:check`, lint and typecheck green; `BOOTSTRAP_VERSION` unchanged.
 
 ## Spec Change Log
 
@@ -155,6 +162,33 @@ The first build pass implemented everything else and left it uncommitted; the le
 - 2026-11-23 (lead, spec gate, decision #145): AC 44.4.7 added (the next-start `current` check, from the first `deferred:` item, now in scope); the `unconfigured` stop confirmed; the `iris_doc_compile` item harvested to the ledger as DW-754 (routed to the burn-down) and removed from `deferred:`.
 
 ## Review Triage Log
+
+### 2026-11-23 — Review pass
+- verdicts: 22 findings (grouped by root cause across the layers) — high 0, medium 5, low 16, false 0, maybe-false 1
+- findings:
+  - `[low]` `patch` bootstrap.test.ts: three stale call-count comments — comments corrected.
+  - `[low]` `reject` compileProblems(undefined/{}) returns [] (blind, edge, gap) — the seed's compileAndVerify returns a report or throws, so no caller reaches it; theoretical.
+  - `[low]` `reject` roster change turns the handler golden red because the startup entries embed the roster and the loader refuses replace/remove — spec-bound by AC 44.4.8 (insert only); by-design.
+  - `[low]` `reject` 2 vs 3 startup requests wording (HEAD counted in the ledger, not in the check's two reads) — both are accurate for what they count.
+  - `[low]` `reject` current-path failure forces configured/mapped/unitTestRootEnsured false while the web app is registered, and uses the "Compile failed:" prefix — AC 44.4.7 specifies reporting compiled:false and the privileged steps skipped; by-design.
+  - `[low]` `reject` concurrent-start race: a second server probes `current` mid-upgrade and logs a transient warning (blind, edge) — transient log only, a retry adds complexity; wontfix-accepted, reopen_if a spurious warning is seen on a parallel start.
+  - `[low]` `reject` current path never recompiles (edge) — AC 44.4.7 is a read-only check by design; docs now say so.
+  - `[low]` `reject` verifyCompiled and compileAndVerify have no shared-package unit tests (blind) — covered by the oracle file against the built dist and by the bootstrap.test.ts reply queues; location of the test is not a defect.
+  - `[low]` `reject` the storage-written fake falls back to a failed class when all classes fail (blind) — no matrix row uses that combination.
+  - `[low]` `reject` docnames read lists the whole package root with no cap (blind) — one root for the roster; the live helpers pass small lists in a Temp package.
+  - `[low]` `reject` duplicated check-query regex in two fakes and the validator, and a local oneLine copy in the seed script (blind) — the fakes cannot import from the shared dist at that layer; a drift turns the oracle rows red.
+  - `[low]` `reject` non-JSON HTTP 200 compile body is read as an answered compile (edge) — the check then decides, and it is the success test; classes confirmed compiled are compiled.
+  - `[low]` `reject` oversized IN list over hundreds of names (edge) — the roster is 35; theoretical.
+  - `[low]` `reject` seedInstance shows "check could not run" when the compile request itself 500s (edge) — the compile failure is thrown by failureOf first; no reachable path was shown.
+  - `[medium]` `patch` compileDocs has no default-suite test host (gap) — new live-doc-helpers.test.ts; mutation recorded.
+  - `[medium]` `patch` seedInstance's compile-failure branches unpinned (gap) — two fake-based rows added; mutation recorded.
+  - `[medium]` `patch` the oneLine(…, 300) contract unpinned (gap) — two oracle rows added; mutation recorded.
+  - `[medium]` `patch` a test that cannot fail (`{...result, extra: true}` not.toEqual) (gap) — deleted.
+  - `[medium]` `patch` missing mutation lines for the missing/stale arms and the loader refusals (gap) — recorded under Verification.
+  - `[low]` `patch` L3 comment says compileAndVerify throws; live-doc-helpers header names .mac; fake-listener header says replies depend on the request alone; docs say "the next start tries again" for a failed stale compile; CHANGELOG says IPM-owned runs send nothing new (blind, edge, gap) — comments and docs corrected.
+  - `[low]` `patch` L2/L3 reseed in finally can mask the assertion failure (blind) — restore wrapped in try/catch.
+  - `[maybe-false]` `defer` iris_doc_load and env-promote read a Storage-written partial failure as success (gap other finding) — pre-existing, same root cause as DW-754; recorded in `deferred:` as medium (unverified).
+  - Intent auditor: descriptive report only, no findings. It records that the contract line 36 (no new request on `current`) is superseded by corrected line 44 and that the tests drive fakes, with live evidence in L1 to L3 (recorded under Verification).
 
 ## Design Notes
 
@@ -289,8 +323,32 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 - Live (throwaway only, port 52792, `scripts/throwaway-iris.mjs run`, each container removed; `docker ps -a --filter label=iris-mcp.owner=throwaway` empty afterwards): the whole `story-42-2-bootstrap-guard-live-gate.test.ts` (the 10 legs plus L1, L2 and L3) is 13/13 green on `intersystems/iris-community:2026.2@sha256:cd2ebcab...` (2026.2 Build 221U) and on `intersystems/iris-community:2026.1@sha256:c57b65b2...` (2026.1, the oldest). The 2026.1 image was pulled by this stage and removed afterwards. L3 is the live proof of AC 44.4.7 (a class left failed by an earlier compile is named by the next `current` start).
 - Other gates: `pnpm turbo run build`, `pnpm run lint`, `pnpm run type-check`, `pnpm gen:governance-baseline:check` (141 keys, `1e62c5ad5bf7`), `pnpm run gen:tools-list-snapshot:check`, `pnpm run gen:ipm:check` all pass. `pnpm --filter @iris-mcp/shared test` 2650/2650; `pnpm --filter @iris-mcp/dev test` 1492 passed, 319 skipped. `@iris-mcp/all` in four shards (`--shard=1/4` to `4/4`): 1711, 1589 (+4 failed, fixed afterwards in `story-43-3-qa-fallback.test.ts`, 34/34 on rerun), 1467 and 1433 passed (+10 failed) - the 10 are `story-43-1-qa-handler-golden.test.ts`, the intent gap in `deferred:`; every other file is green.
 - The dev live gates that call `compileDocs` (`doc-edit-`, `doc-put-storage-guard-`, `storage-guard-write-paths-`, `story-42-11-qa-`, `sql-safety-live-gate`) were not run armed here (they need a seeded IRIS for Health and its `HSCUSTOM`); their `compileDocs` change is covered by the shared check on the live throwaway (L1) and by the dev unit suite, and is a residual risk for the first armed CI run.
+- Review patches (2026-11-23): the oracle file gained the oneLine rows (CR LF removed; a text over 300 characters cut as `oneLine` cuts it) and two `seedInstance` rows (a Storage-written failure names the class; a check that cannot run says so); the vacuous "one more field" row was removed; `packages/iris-dev-mcp/src/__tests__/live-doc-helpers.test.ts` covers `compileDocs` in the default suite. Mutations (applied, red, reverted byte-identical with `cmp` against a copy; the shared dist rebuilt after each `bootstrap.ts` change):
+  - mutation: remove the early `return result` after a failed compile on the `missing`/`stale` call site (`bootstrap.ts`, shared dist rebuilt) -> `story-44-4-compile-oracle.test.ts` 11 failed (on `missing`: Storage written, status error naming one class, every class fails, status error with a clean check, both could-not-run rows; on `stale`: the same rows except every-class-fails); reverted byte-identical, dist rebuilt.
+  - mutation: `compileDocs` drops the `notCompiled` clause of its throw -> `live-doc-helpers.test.ts` 1 failed ("throws a message naming the class that the check does not confirm", the promise resolved instead of rejecting); reverted byte-identical.
+  - mutation: `seedInstance` drops the `notCompiled.length > 0` clause -> `story-44-4-compile-oracle.test.ts` 1 failed ("a Storage-written partial failure ... throws a SeedCompileError that names the class"); reverted byte-identical.
+  - mutation: the `oneLine` call in `compileFailureText` replaced by the raw join (shared dist rebuilt) -> `story-44-4-compile-oracle.test.ts` 2 failed (the CR LF row and the over-300-characters row); reverted byte-identical, dist rebuilt.
+  - mutation: drop the startup index-range check (`applyStartupChange`, `scripts/lib/golden-sanctioned-changes.mjs`) -> `story-43-4-sanctioned-golden-changes.test.ts` 1 failed ("the loader refuses what it cannot apply, naming the entry > a malformed startup entry: an index out of range, ..."); reverted byte-identical.
+
+**Re-dispatch record (AC 44.4.8, decision #146; 2026-11-23).**
+
+- Ledger: `scripts/lib/golden-sanctioned-changes.mjs` gained the `startup` section (op `insert` only; pointer `/<index>` from 0 to the array's current length, counted after the earlier entries of the same server; `new` exactly `{method, url, body}`, three strings; no `old`; `replace`/`remove` on `startup` and `insert` elsewhere are refused; every refusal names the entry `id`). The CONTRACT and LEDGER SCHEMA header comment is updated. Tests are in `story-43-4-sanctioned-golden-changes.test.ts` (valid insert applies, each refusal names its entry, the shape of the 15 entries, the sanctioned handler golden's startup is the frozen array plus exactly the inserts).
+- Entries: 15 (`44.4/startup/<server>@6|7|8`, sanction `S-44.4-current-check`, story `44.4`), appended to `fixtures/sdk-golden-sanctioned-changes.json` by a scratch script that ran each of the five built servers against the listener and took the three requests the frozen six do not hold (`HEAD /api/atelier/`, the dictionary `action/query` with the 35 roster names, `GET docnames/CLS?filter=ExecuteMCPv2.`) from what the server sent; nothing was hand-written, the existing entries are byte-identical, and the two frozen golden files are untouched (their SHA-256 pins pass). The CHANGELOG entry names `S-44.4-current-check`.
+- Listener: `scripts/lib/fake-iris-listener.mjs` answers the compile check's dictionary query with `{ID, Compiled: 1, CompileError: 0}` for every name in `parameters` (remembering the names), and the next `docnames/CLS?filter=` read with one `{name, cat, ts, upd: true, db, gen}` entry per remembered name containing the filter. Every other reply is as before. `story-43-3-qa-fallback.test.ts` is byte-identical to the baseline (`git diff b2184e1d -- <file>` empty) and 34/34 green, so the lazy `other` profile's `current` start is clean again.
+- mutation: drop one startup entry (`44.4/startup/iris-ops-mcp@8`) -> `story-43-1-qa-handler-golden.test.ts` 2 failed, both for `iris-ops-mcp` ("asks IRIS for the same things while it starts" and "differs from the golden in nothing else"); reverted byte-identical (`cmp` against a copy).
+- mutation: the loader ignores the `startup` section (`applySanctionedChanges` skips it) -> `story-43-1-qa-handler-golden.test.ts` 10 failed, the same two tests for all five servers; reverted byte-identical.
+- mutation: the listener answers the dictionary query with no rows -> `story-43-3-qa-fallback.test.ts` 4 failed (the `dev` "a client with no capability" and "url elicitation alone" rows on both eras: the second profile's start reports the classes as not compiled); reverted byte-identical.
 
 ## Auto Run Result
 
-Status: blocked
-Blocking condition: intent gap: AC 44.4.7 (the `current`-start compile check) adds 3 startup requests per server against `scripts/lib/fake-iris-listener.mjs` (HEAD, the dictionary POST, the docnames GET), which turns `story-43-1-qa-handler-golden.test.ts` red (10 tests, five servers: "asks IRIS for the same things while it starts" and "differs from the golden in nothing else"). The contract forbids a Frozen goldens entry and any change to the listener; the sanctioned-change ledger (`scripts/lib/golden-sanctioned-changes.mjs`, `sdk-handler-golden-core.mjs` `diffHandlerSession`) can express wire rows and audit elements, not startup requests. Recommended amendment: extend the golden ledger with a `startup` sanction section (AD-15 already names `S-44.4-unconfigured-stop`, which covers the `current` check), and let `fake-iris-listener.mjs` answer the check query (rows from the query parameters) and the docnames GET, so the lazy "other" profile no longer logs the WARN that `story-43-3-qa-fallback.test.ts` `HTTP_LINE` now allows for. Alternative: drop the `current`-path check (AC 44.4.7) and keep it in `deferred`. Everything else is implemented and verified (oracle file 38/38, shared 2650, dev, `@iris-mcp/all` shards green except the handler golden, live gate 13/13 on 2026.2 and 2026.1, mutations recorded under Verification). The implementation is left UNCOMMITTED in the working tree for the lead's decision; nothing was pushed.
+Status: done (re-dispatch after `blocked`, decision #146; this pass only).
+
+Summary: AC 44.4.8 is built. The golden ledger has a `startup` section (insert only), `fixtures/sdk-golden-sanctioned-changes.json` carries 15 `S-44.4-current-check` entries (3 per server, captured by running the five built servers against the listener), and `scripts/lib/fake-iris-listener.mjs` answers the check, so `story-43-3-qa-fallback.test.ts` is byte-identical to baseline `b2184e1d`. The frozen golden JSON files are untouched.
+
+Files changed in this pass: `scripts/lib/golden-sanctioned-changes.mjs` (startup section), `scripts/lib/fake-iris-listener.mjs` (answers the check), `fixtures/sdk-golden-sanctioned-changes.json` (15 entries), `story-43-4-sanctioned-golden-changes.test.ts` and `story-43-1-qa-handler-golden.test.ts` (tests, header), `story-43-3-qa-fallback.test.ts` (restored), review patches in `story-44-4-compile-oracle.test.ts`, `bootstrap.test.ts`, `story-42-2-bootstrap-guard-live-gate.test.ts`, `live-doc-helpers.ts`, new `live-doc-helpers.test.ts`, `CHANGELOG.md`, `README.md`, `packages/shared/README.md`, and this spec.
+
+Review: 22 findings, high 0. Patches applied: 5 medium (compileDocs test, seedInstance rows, oneLine pin, a vacuous test deleted, mutation lines) and 3 low groups (stale comments, comment and doc corrections, restore wrapper). Deferred: 1 (doc_load and env-promote partial-failure read, same root as DW-754, medium unverified). Rejected: 13 low, each with its reason in the Review Triage Log. Follow-up review recommended: false (no high patched, 5 mediums were test and mutation-evidence patches whose red runs are recorded).
+
+Verification (final tree): `pnpm turbo run build`; `@iris-mcp/shared` 2650/2650; `@iris-mcp/dev` 1494 passed, 319 skipped; `@iris-mcp/all` six affected files 261/261 (oracle, ci-seed, bootstrap-guard orchestration, sanctioned golden changes, handler golden, fallback) plus the four-shard full run before the review patches (1711, 1594, 1471, 1443 passed, 0 failed); `pnpm gen:governance-baseline:check` (141 keys), `gen:tools-list-snapshot:check`, `gen:ipm:check`, lint and type-check pass; `BOOTSTRAP_VERSION` is `1.1.0+3.3e97060f5bc4`. No live run this pass.
+
+Residual risks: `@iris-mcp/all` has no lint or type-check script, so its tests are checked only by vitest; the five dev live gates that call `compileDocs` were not run armed here.

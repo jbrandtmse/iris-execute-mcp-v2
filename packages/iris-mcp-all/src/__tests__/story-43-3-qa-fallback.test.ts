@@ -163,17 +163,9 @@ function callPathStderr(rig: GateRig): string[] {
   return lines.slice(served + 1);
 }
 
-/**
- * An HTTP request line, or one of the lines that the first use of a second profile writes (also at the baseline, 0a5a3f8).
- *
- * The second profile's bootstrap finds the classes current on `scripts/lib/fake-iris-listener.mjs`, and since Story 44.4 a
- * current start also runs the compile check. That listener answers the check's dictionary query with no rows, which no
- * real instance does for the embedded classes, so the bootstrap reports them as not compiled in one `[WARN]` line. The
- * listener is not changed by this story (its replies are the handler golden's), so exactly that line is allowed here; it
- * says nothing about the calls under test.
- */
+/** An HTTP request line, or one of the lines that the first use of a second profile writes (also at the baseline, 0a5a3f8). */
 const HTTP_LINE =
-  /^(\[INFO\] ((HEAD|GET|POST|PUT|DELETE) \S+ completed in \d+ms|IRIS health check passed|Detected Atelier API v\d+|Bootstrap: REST service is current .*)|\[WARN\] Bootstrap for profile "other" completed with errors: Compile failed: \d+ of \d+ classes did not compile: [\w., ]+)$/;
+  /^\[INFO\] ((HEAD|GET|POST|PUT|DELETE) \S+ completed in \d+ms|IRIS health check passed|Detected Atelier API v\d+|Bootstrap: REST service is current .*)$/;
 
 async function planOf(conn: Conn): Promise<Json> {
   const planned = JSON.parse((await conn.call("iris_env_promote", { action: "plan", source: "default", target: "other", diff: PROMOTE_DIFF }).end()).raw).result;

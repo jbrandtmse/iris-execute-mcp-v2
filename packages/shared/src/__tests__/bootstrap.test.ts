@@ -777,7 +777,7 @@ describe("bootstrap", () => {
       expect(result.errors).toHaveLength(0);
       expect(result.manualInstructions).toBeUndefined();
 
-      // No deploy / compile on the current path: only 1 CSRF + 2 probe SQLs.
+      // No deploy / compile on the current path: 1 CSRF + 2 probe SQLs + the 2 check reads (dictionary query, docnames) = 5.
       expect(fetchMock).toHaveBeenCalledTimes(5);
 
       http.destroy();
@@ -847,7 +847,7 @@ describe("bootstrap", () => {
       });
       expect(compileCalls.length).toBe(1);
 
-      // 1 CSRF + 1 version SQL + 1 IsConfigured SQL + 1 ownership + 1 re-probe + 1 ownership + compile + configure + mapping + ensureRoot = 10
+      // 1 CSRF + 1 version SQL + 1 IsConfigured SQL + 1 ownership + 1 re-probe + 1 ownership + compile + 2 check reads (dictionary query, docnames) + configure + mapping + ensureRoot = 12
       expect(fetchMock).toHaveBeenCalledTimes(12);
       expect(guardDocGetCount(fetchMock), "ownership is asked at startup and again at the re-check").toBe(2);
       expect(result.ipmOwned, "an unowned deployment carries no ipmOwned key").toBeUndefined();
@@ -1072,7 +1072,7 @@ describe("bootstrap", () => {
       expect(result.errors).toHaveLength(0);
       expect(result.manualInstructions).toBeUndefined();
 
-      // 1 CSRF + 1 probe SQL + 1 ownership + one PUT per class + 1 re-probe + 1 ownership + 1 compile + 1 IsConfigured + 1 EnsureUnitTestRoot
+      // 1 CSRF + 1 probe SQL + 1 ownership + one PUT per class + 1 re-probe + 1 ownership + 1 compile + 2 check reads (dictionary query, docnames) + 1 IsConfigured + 1 EnsureUnitTestRoot
       // (no configure, no mapping)
       const expectedCallCount = 1 + 1 + 1 + BOOTSTRAP_CLASSES.size + 1 + 1 + 1 + 2 + 1 + 1;
       expect(fetchMock).toHaveBeenCalledTimes(expectedCallCount);

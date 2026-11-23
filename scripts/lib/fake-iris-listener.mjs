@@ -11,8 +11,16 @@
 //   run can be compared with another by what each server asked IRIS for. It is SDK-free and reaches nothing but its
 //   own socket.
 //
-//   Every reply is a function of the request alone: two runs against fresh listeners that make the same requests get
-//   the same bytes. The SQL endpoint and the product routes choose their reply from marker values in the request
+//   It also answers the compile check that a `current` start runs (Story 44.4, AC 44.4.8; `verifyCompiled` of the shared
+//   package): the dictionary join over the class names in the request's `parameters` answers one row per name, in the
+//   shape the planning probe captured (`{ID, Compiled: 1, CompileError: 0}`), and the next `GET docnames/CLS?filter=<text>`
+//   answers one entry per name that query named and that contains `<text>` (`{name, cat, ts, upd: true, db, gen}`). So a
+//   fake `current` start is a clean one. A docnames read with no earlier check query, and every other docnames route,
+//   answers as before.
+//
+//   Every reply is a function of the request and, for a `docnames/CLS?filter=` read, of the compile-check query that
+//   the listener answered before it (the one thing it remembers across requests): two runs against fresh listeners
+//   that make the same requests in the same order get the same bytes. The SQL endpoint and the product routes choose their reply from marker values in the request
 //   (`SELECT boom` answers an HTTP 500 error envelope, `filter=throw` answers a non-JSON page, namespace `ERRNS`
 //   answers an HTTP 500 error envelope; a `resendFiltered` of item `Demo.Refused` is refused as IRIS refuses, HTTP 200
 //   with the error in the envelope, and one of item `Demo.PreviewDown` answers its preview with an HTTP 500 error
@@ -46,6 +54,9 @@ export function envelope(result) {
 export function errorEnvelope(text, code) {
   return { status: { errors: [{ error: text, code, domain: '%ObjectErrors', id: 'GeneralError', params: [] }], summary: text }, console: [], result: {} };
 }
+
+/** The statement of the compile check (`verifyCompiled` of the shared package): the dictionary join over the class names. */
+const COMPILE_CHECK_STATEMENT = /FROM %Dictionary\.ClassDefinition d LEFT JOIN %Dictionary\.CompiledClass c ON c\.ID = d\.ID WHERE d\.ID IN \(/;
 
 /** The document `Demo.Sample.cls` as the Atelier document route returns it. */
 const SAMPLE_DOCUMENT = {
@@ -115,6 +126,8 @@ export async function startFakeIris({ bootstrapVersion }) {
   const failingDocuments = new Set();
   let overrideVersion = 0;
   const previewOverrides = new Map();
+  // The class names that the compile check's dictionary query has named (without `.cls`), for the docnames read after it.
+  const checkedClasses = new Set();
 
   const reply = (res, status, body, headers = {}) => {
     const text = typeof body === 'string' ? body : JSON.stringify(body);
@@ -151,7 +164,12 @@ export async function startFakeIris({ bootstrapVersion }) {
         const query = String(body?.query ?? '');
         if (query.includes('Setup_GetBootstrapVersion')) reply(res, 200, envelope({ content: [{ Version: bootstrapVersion }] }));
         else if (query.includes('Setup_IsConfigured')) reply(res, 200, envelope({ content: [{ Configured: 1 }] }));
-        else reply(res, 200, envelope({ content: [] }));
+        else if (COMPILE_CHECK_STATEMENT.test(query)) {
+          // The compile check: every class the request names has a compiled row, no compile error and an up-to-date `upd`.
+          const names = Array.isArray(body?.parameters) ? body.parameters.map(String) : [];
+          for (const name of names) checkedClasses.add(name);
+          reply(res, 200, envelope({ content: names.map((name) => ({ ID: name, Compiled: 1, CompileError: 0 })) }));
+        } else reply(res, 200, envelope({ content: [] }));
         return;
       }
       if (method === 'POST' && action === 'action/compile') {
@@ -162,6 +180,16 @@ export async function startFakeIris({ bootstrapVersion }) {
         if (url.searchParams.get('filter') === 'throw') {
           reply(res, 200, '<html><body>not an Atelier envelope</body></html>');
           return;
+        }
+        const filter = (url.searchParams.get('filter') ?? '').toLowerCase();
+        if (action === 'docnames/CLS' && filter !== '') {
+          const checked = [...checkedClasses].filter((name) => name.toLowerCase().includes(filter));
+          if (checked.length > 0) {
+            reply(res, 200, envelope({
+              content: checked.map((name) => ({ name: `${name}.cls`, cat: 'CLS', ts: '2026-01-01 00:00:00.000', upd: true, db: 'HSCUSTOM', gen: false })),
+            }));
+            return;
+          }
         }
         reply(res, 200, envelope({
           content: [
