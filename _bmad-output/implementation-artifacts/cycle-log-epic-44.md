@@ -119,3 +119,5 @@
 2026-11-23T09:23:07Z	Story 44.6	ci_red_classified	run=45141297405 sha=ecc82b0 class=story(two_review-patch_test_gaps) jobs=gates_x3(story-44-6-doc-claims_unguarded_changeset_read;after-release_reader_check),throwaway(launcher-live_localSpawnIntegration_lacks_inspectServerManagerServers_after_DW-749_guard) infra=none
 2026-11-23T09:23:07Z	Story 44.6	rework_opened	trigger=ci items=[CI]_doc-claims_skipIf_changeset,[CI]_live_test_inspection_fixture iteration=1
 2026-11-23T09:23:07Z	Story 44.6	stage_spawned	stage=implement spawn_at=2026-11-23T09:23:07Z model=claude-sonnet-5-5 agent_name=44-6-launcher-provider-works-in-copilot-sessions-implement-2 cycle_iteration=2
+2026-11-23T09:35:44Z	Story 44.6	dev_complete	build_sha=0a45825 pass=CI_rework_1 items=2_[CI]_test-only+release-heading_pin armed_launcher-live=red->green_on_throwaway(down) review_layers=4_findings(m1_patched) deferred=0
+2026-11-23T09:35:44Z	Story 44.6	cr_complete	pass=CI_rework_re-review review_outcome=lead_diff_review(decision_144) entries: high=0 med=0 low=0 rows=0 unresolved_high_med=0 status=done
