@@ -4205,6 +4205,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-6-launcher-provider-works-in-copilot-sessions.md | severity: med | fix-risk: med | footprint: in-story
 - evidence: IRIS_CREDENTIAL_NAME carries the server name; the host comes from that server's spec; nothing ties the stored entry to a host (serverDefinitionProvider.ts providedEnvFor); the Server Manager import keys the keychain the same way; unverified
 - 2026-11-23T08:12:06Z status=open owner=44-6-launcher-provider-works-in-copilot-sessions by=harvest note=for the code review: verify, then patch (e.g. do not provide IRIS_CREDENTIAL_NAME for a name defined at more than one scope, or bind the entry to its host) or route with the residual
+- 2026-11-23T08:27:23Z severity=high by=lead note=QA_confirmed(dw749Characterization.test.ts):workspace-scope_override_of_webServer.host_sends_the_user's_stored_password_to_the_workspace_host_on_the_Copilot_path_without_a_prompt;reachable_from_an_untrusted_repo's_.vscode/settings.json;must_fix_in_44.6_review
 
 ### DW-750: The launcher fires no MCP definitions-changed event when intersystems.servers changes, so a Copilot-harness session keeps the old provided host/port/username until a window reload
 - source: spec-44-6-launcher-provider-works-in-copilot-sessions.md | severity: low | fix-risk: med | footprint: in-story
