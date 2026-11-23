@@ -210,6 +210,35 @@ Fixture: user layer `dev1 = {webServer:{scheme:"https",host:"user-iris.corp.exam
 **Manual checks:**
 - Lead smoke (no IRIS needed): run `scratchpad/probe-44-8/probe-local-resolve.cjs` against the rebuilt launcher dist (`cd extensions/iris-mcp-launcher && npm run build`, output is gitignored): user-only resolves as before; both override cases return `undefined` with the `not-user` warning and no `getSession` call.
 
+### QA
+
+Two new files, 63 tests (2026-11-23); no production code changed.
+
+- `extensions/iris-mcp-launcher/src/__tests__/story-44-8-qa-resolve.test.ts` (41 tests, AC-2, AC-5). A multi-server plan whose later server is refused (nothing prompts although the first server has no stored password, so `createIfNone` would have fired; the first refused server in plan order is named whether it is `not-user` or `uninspectable`; each server is inspected in the scope it was enumerated in, multi-root, with a clean control). The layer table: the four workspace-class layers x five entry kinds (host override, empty object, `null`, username only with the attacker's username holding its own stored password, password only), a default-only server overridden by a workspace layer, default plus user layers, and `globalLanguageValue`/`defaultLanguageValue` overrides, which stay user. No stale verdict (override added then removed between calls; three packages resolving one refused server in parallel: three warnings, nothing called). Back-compat (Rule #19) on both paths as whole-object `toEqual`s plus the call sequence.
+- `packages/shared/src/__tests__/story-44-8-qa-dw761.test.ts` (22 tests, DW-761). `.code-workspace` vs `.vscode/settings.json` precedence and which file is named (first file wins, the shadowed entry adds no second refusal, two `.code-workspace` files resolve in filename order, an inline password in a LATER file is not imported). The exact `auto` warning and the exact `required` error (one name, several names with the plural verb, mixed with an exhausted user-only server, exhausted-only unchanged). The user-only roster pins (whole entry, whole profile, exhaustion warning, inline user password with only the existing deprecation warning). Operator-named `IRIS_SM_SETTINGS_PATHS` (a `.code-workspace` path included) is not workspace scope and replaces discovery; the cwd-derived workspace and Linux (`XDG_CONFIG_HOME`, `~/.config`) paths; the `IRIS_SM_SERVERS` allow-list; roster order and the marker never reaching a registered profile; the refusal never falls through to the helper.
+
+Oracle for the back-compat literals (Rule #36): the pre-change sources (`git show ebf1e703:...`: `serverDefinitionProvider.ts`, and `server-manager-source.ts`, `credential-chain.ts`, `profiles.ts`) were swapped in and the new files run. 28 launcher tests (every refusal row) and 13 shared tests (every refusal and workspace-flag row) went red, while every user-only pin, the provide-path pins, the operator-path pins and the exhausted-only `required` text stayed green, so those literals are the pre-change behaviour. Each source was restored with `git checkout --` and `git diff --quiet` printed clean.
+
+Mutations (Rule #19/#59; each run on the path it guards, then restored byte-identical, `git diff --quiet` clean):
+- Launcher `resolveEnvForLabel` guard inspects with `undefined` instead of `scopesByServerName.get(serverName)`: 3 red (the multi-root plan, the second-server-uninspectable plan, the plan-order plan).
+- Guard verdict memoised per server name: 2 red (override added after a clean resolve; override removed after a refusal).
+- Guard loops over `plan.serverNames.slice(0, 1)`: 3 red (the no-prompt plan, the uninspectable second server, the multi-root plan).
+- `isUserScopedServer` drops `workspaceFolderLanguageValue`: 5 red (that layer's rows in the table).
+- `isUserScopedServer`'s `defines` ignores a `null` entry: 4 red (the `null` row of each workspace layer).
+- Guard calls `api.getServerSpec` for a user-scoped server before the credential step: 5 red, including the Local back-compat pin (call sequence) and the multi-root control (spec scopes).
+- `lookUpProvidedConnection` shows a warning on a refused server: 1 red (the provide path stays silent and never reads the spec).
+- DW-761 `workspaceFileSet.has(file)` made `false` (marker never set): 13 red.
+- DW-761 only the first workspace candidate counted as workspace scope (`.code-workspace` files dropped): 3 red.
+- DW-761 `IRIS_SM_SETTINGS_PATHS` files reported as workspace files: 2 red.
+- DW-761 user-only entries gain `workspaceScope: false`: 5 red (whole-entry pin, the three discovery rows, the roster row).
+- DW-761 chain pushes the marker onto a resolved profile: 1 red (roster row).
+- DW-761 `required` verb `are` -> `is`: 1 red; `parts.reverse()`: 1 red.
+- DW-761 a refused entry also runs the credential helper: 3 red (the helper-fallthrough row, the roster row, the first-file-wins row).
+
+Runs: the two new files plus the story's changed test files, green and shuffled (`--sequence.shuffle --sequence.seed=44`): launcher 8 files, 218 tests; shared 3 files, 111 tests. Full launcher suite 38 files, 607 passed, 3 skipped (pre-existing); full `@iris-mcp/shared` suite 91 files, 2698 passed; `tsc --noEmit` clean in both; eslint clean on both new files; `pnpm check:live-guards` 74 armed files, 0 findings. Neither new file reads `.changeset`. The full `@iris-mcp/all` suite on a closed port (`IRIS_PORT=1`, `IRIS_REQUIRE_LIVE` unset): 242 files, 6500 passed, 732 skipped, after `pnpm --filter @iris-mcp/shared build` (the mutation runs had left the shared dist older than its source, which the stale-dist guard reports as 23 red in `story-43-3-confirmation-both-eras.test.ts` until rebuilt).
+
+Observations, not defects: (1) `isUserScopedServer` treats a server that ONLY `globalLanguageValue` or `defaultLanguageValue` defines as not user-scoped (no `globalValue`/`defaultValue` entry), so the warning says "defined or overridden in this workspace's settings" for what is a user language-specific entry; fail-safe and unreachable in practice (Server Manager reads without a language scope), left unpinned. (2) The warning is the same for a server defined in no layer at all (Blind 2 in the triage log).
+
 ## Auto Run Result
 
 Status: done

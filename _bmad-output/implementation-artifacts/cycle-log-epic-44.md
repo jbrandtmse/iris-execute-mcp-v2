@@ -207,3 +207,6 @@
 2026-11-23T22:33:59Z	Story 44.8	ad_verification	ad=AD-9/Rule_59 mutation=Local_guard_verdict_ignored(serverDefinitionProvider.ts:707)->launcher_8_red(containment+dw752LocalResolve) reverted=byte-identical
 2026-11-23T22:33:59Z	Epic 44	changelog_release_summary	section=Epic_44_release_summary(Behavior_changes_8,Known_limitation,IRIS_side) readers=all_CHANGELOG_tests_1360_green decision=155 planner_request=done
 2026-11-23T22:33:59Z	Story 44.8	stage_spawned	stage=qa spawn_at=2026-11-23T22:33:59Z model=claude-sonnet-5-5 agent_name=44-8-local-resolver-qa-1 cycle_iteration=1
+2026-11-23T22:34:33Z	Story 44.8	ci_early	note=build+bookkeeping_pushed_for_early_signal(prev_run_45269618829_green) run=see_next_entry
+2026-11-23T23:04:39Z	Story 44.8	qa_complete	files=2_new tests=63 mutations=16 oracle=pre-change_sources_swap(back-compat_pins_green,refusals_red) runs=launcher_607+3skip,shared_2698,all_6500+732skip(242),live-guards_74/0 production_defects=0 observations=language-only_user_entry_warning_wording;no-layer_server_warning
+2026-11-23T23:04:39Z	Story 44.8	stage_spawned	stage=code-review spawn_at=2026-11-23T23:04:39Z model=claude-opus-5-5 agent_name=44-8-local-resolver-cr-1 cycle_iteration=1
