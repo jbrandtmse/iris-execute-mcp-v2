@@ -2,7 +2,7 @@
 title: 'Story 44.6: Launcher Provider Works in Copilot Sessions'
 type: 'bugfix'
 created: '2026-11-22'
-status: 'blocked'
+status: 'draft'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -18,13 +18,17 @@ deferred: []
 
 **Problem:** The IRIS MCP Launcher's `provideMcpServerDefinitions` returns every server with an empty `env`; the connection settings and the password are added only in `resolveMcpServerDefinition`, which the Copilot harness never runs. So in a Copilot-harness chat session (the default since VS Code 1.143, the only harness after February 2027) the launcher's servers start with no `IRIS_*` and fail at startup (DW-731).
 
-**Approach (pending the owner's decision, see `## Auto Run Result`):** the provided definition carries the non-secret `IRIS_*` settings the resolver sets today plus a named, non-literal secret path; the resolver keeps running exactly as today under the Local harness. The probe found that no non-literal secret path for the server's `default` profile exists today, so the shape of the fix is an owner decision (Design Notes P-3).
+**Approach** *(Owner rulings applied 2026-11-23, wave-9 decision #140; the lead re-opened this spec to `draft`.)* the provided definition carries the non-secret `IRIS_*` settings the resolver sets today plus a new variable that names an iris-mcp keychain entry, and never a secret. `@iris-mcp/shared` lets the `default` profile and each `IRIS_PROFILES` entry take its password from the existing keychain / `IRIS_CREDENTIAL_HELPER` chain when that variable is set (Q-A option A); the user stores the password once with `iris-mcp-credentials set <name>`. The resolver keeps running exactly as today under the Local harness.
 
 ## Boundaries & Constraints
 
 **Always:**
 - The provided definition carries only non-secret values: `IRIS_HOST`, `IRIS_PORT`, `IRIS_HTTPS`, `IRIS_USERNAME`, `IRIS_NAMESPACE` (and `IRIS_PROFILES` without any `password` member under `combineProfiles`), the governance pass-through variables (`buildGovernanceEnv`), and the variables of the chosen secret path. Every other launcher-owned variable is `null` (`withOwnedVarsCleared`, the env.ts allowlist).
-- No literal secret in a provided definition unless the user takes the typed-confirmation opt-in of 44.2's `explicit` mode (AC 44.6.2).
+- **No secret ever** in a provided definition (Q-A option A; options B1/B2 dropped, so there is no literal opt-in and no new UI). The secret path is the keychain chain named above.
+- `@iris-mcp/shared`: the new opt-in variable is read only by `loadConfig` / `loadProfileRegistry` for `default` and `IRIS_PROFILES` members; with it unset, the configuration and every error text are byte-identical to before (AD-15, a Rule #19 mechanical proof). AD-9's channel list carries the rule (decision #140).
+- The new path is proven red by breaking it on the path it guards: a fresh server process reading the keychain entry, under a scratch HOME with a fake keychain (`IRIS_CREDENTIAL_HELPER` or the injectable keyring), never the real keychain (Rules #48/#59).
+- **Q-B:** VS Code drops `null` env values, so the `env.ts` allowlist is enforced under the Copilot harness by empty-string overrides wherever the server treats `""` as unset (verify each variable in `packages/shared`); the rest is a documented residual risk in the extension README.
+- **Q-C:** `combineProfiles` is Local-only in this story and documented that way.
 - Under the Local harness `resolveMcpServerDefinition` still runs and returns exactly today's env, prompts and cancellation outcomes (AC 44.6.3), pinned with `toEqual` against a pre-story capture.
 - `provideMcpServerDefinitions` never prompts and never calls `getSession({createIfNone:true})`: the `vscode.d.ts` contract says it is called eagerly and must not take actions that need user interaction.
 - Every fake of a VS Code or Server Manager API returns a shape the real API can return (Rule #54).
@@ -53,9 +57,11 @@ deferred: []
 
 ## Tasks & Acceptance
 
-Not planned: the story is blocked on the owner's decision (Design Notes P-3). After the decision the lead resets `status: draft` and re-dispatches; the re-plan builds on this Code Map and Design Notes.
+To be planned on re-dispatch, from the owner's rulings in the intent block (decision #140), this Code Map and the Design Notes P-1 to P-10.
 
 ## Spec Change Log
+
+- 2026-11-23 (lead): the owner's rulings on Q-A/Q-B/Q-C (wave-9 decision #140) applied to the intent block; AD-9 amended in the spine; status reset `blocked` -> `draft` for the re-plan.
 
 ## Review Triage Log
 

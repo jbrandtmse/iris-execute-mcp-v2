@@ -94,3 +94,5 @@
 2026-11-23T06:47:55Z	Story 44.3	smoke_complete	kind=built_servers_stdio_real_SDK_vs_fake_IRIS_listener(clean_rebuild) checks=302/302(44.3_x5+43.3_x2) red=AD-34_M1_digest_compare(adr_verifications)+QA_8_mutations+CR_5 live_IRIS=n/a(target_cannot_change_mid-dialog_deterministically;spec_Design_Notes)
 2026-11-23T06:47:55Z	Story 44.3	fresh_check	shuffled_seed44: all_44.3_files+epic43_capstone_89,shared_103,interop_99,dev_215
 2026-11-23T06:48:12Z	Story 44.3	committed	sha=5acae405 branch=epic44 pushed=yes ci=pending run=45126565033
+2026-11-23T06:49:05Z	Story 44.6	plan_clarification_requested	answered=owner_rulings_#140(Q-A_A,Q-B_empty-string_overrides,Q-C_Local-only) applied=intent-contract,AD-9,AD-15 status=blocked->draft
+2026-11-23T06:49:05Z	Epic 44	spine_updated	ad=AD-9,AD-15 reason=44.6_keychain_secret_path(owner_ruling) by=lead story=44-6-launcher-provider-works-in-copilot-sessions lint=ok decision=140

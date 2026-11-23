@@ -205,7 +205,8 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
   - **Channels.** Configuration comes from:
     - environment variables (`IRIS_*`, including the JSON values `IRIS_PROFILES` and `IRIS_GOVERNANCE`);
     - file paths the operator supplies explicitly;
-    - for Server Manager credentials, the OS keychain and `IRIS_CREDENTIAL_HELPER`.
+    - for Server Manager credentials, the OS keychain and `IRIS_CREDENTIAL_HELPER`;
+    - *(Story 44.6, wave-9 decision #140, owner ruling.)* for the `default` profile and each `IRIS_PROFILES` entry, the same keychain / `IRIS_CREDENTIAL_HELPER` chain, opted into by a new variable that names the keychain entry. With that variable unset, behaviour is unchanged (an AD-15 mechanical proof pins it). A password stored once with `iris-mcp-credentials set <name>` then reaches a server that a client starts with only non-secret `IRIS_*` settings plus that variable (the launcher extension's provided definitions in a Copilot-harness session).
 
     A new channel is never discovered from the working directory. CWD discovery is grandfathered only for `IRIS_SERVER_MANAGER`.
   - **Profile inheritance.** A profile inherits omitted *connection* fields from `default`. On a name collision, `IRIS_PROFILES` and env always win. Every roster entry carries `source` / `sourceFile`.
@@ -216,6 +217,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - Tool arguments carry profile names, never credentials.
     - Discovery output is built from an allow-list of non-secret fields.
     - No distribution surface (client-config, the extension, the plugin) writes a literal credential to a file without FR141's explicit confirmation.
+    - *(Story 44.6, decision #140.)* A definition the launcher extension provides to VS Code never carries a secret: VS Code persists provided definitions (workspace storage and up to 8 `agentPlugins` copies), so there is no literal-password opt-in there.
   - **Operator ceilings.** A caller parameter can tighten an operator control (read-only mode; row, time and size caps; `dataPolicy`) but never loosen it. A clamped value is noted in the response. This generalizes the H1 SQL clamps, which already report `rowsCapped`.
 
 ### AD-10 — Framework-provided surfaces are registered once [ADOPTED] (D6, E1, H2, Rule #31)
@@ -341,6 +343,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - **Story 42.2** (wave-8 decisions #49 to #53): the bootstrap no longer redeploys over a newer or foreign deployment, including `dev`, which it used to overwrite (AD-14 Downgrades, DW-508). A live test leg no longer runs because an instance happens to answer: only `IRIS_REQUIRE_LIVE` arms one, and `IRIS_TEST_*` is retired (DW-627).
     - **Story 44.1** (wave-9 decision #132; the owner approved the Epic 44 scope on 2026-11-22, which names tool-text changes as sanctioned AD-15 changes): `S-44.1-docdb-manage-text`, an append-only change to the `iris_docdb_manage` description through the Frozen goldens convention. `create` also registers the database's `Security.DocDBs` record, and repairs a database that exists without one. The output gains the additive fields `registered` and `created` (DW-688).
     - **Story 44.3** (wave-9 decision #138; DW-670): `S-44.3-scope-changed-refusal`, the new refusal code `CONFIRMATION_SCOPE_CHANGED` for a confirmation whose scope changed again after one re-ask. The confirmation state moves to `v: 2` (it adds the scope digest), and an accepted `resendFiltered` sends one more read-only preview (one per round). No tool description changes, so the Frozen goldens and the tools-list snapshot are untouched.
+    - **Story 44.6** (wave-9 decision #140, owner ruling; DW-731): `@iris-mcp/shared` gains an opt-in variable naming an iris-mcp keychain entry, through which the `default` profile and each `IRIS_PROFILES` entry take their password from the existing keychain / `IRIS_CREDENTIAL_HELPER` chain (AD-9). Unset, configuration and error texts are byte-identical (pinned mechanically). The launcher extension's provided MCP server definitions now carry the non-secret `IRIS_*` settings plus that variable, and never a secret, so its servers start in Copilot-harness sessions; Local-harness resolution is unchanged. `combineProfiles` stays Local-only in this story.
 
     Each change may land in the earliest story that needs it, and is named in `CHANGELOG.md` with that story. Prune this list into the CHANGELOG at the Epic 42 retro.
   - **After `1.0.0`.** A breaking change requires a new major version. Clients pinned to `@1` receive every 1.x release automatically.
