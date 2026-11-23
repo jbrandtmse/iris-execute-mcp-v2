@@ -99,6 +99,7 @@ export type { StorageDroppedDetail, StorageDrop } from "./storage-guard.js";
 export type {
   ConfirmationOutcome,
   ConfirmationRequest,
+  ConfirmationScope,
   ToolAnnotations,
   ToolDefinition,
   ToolContext,

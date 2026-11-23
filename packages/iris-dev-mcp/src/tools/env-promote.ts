@@ -1343,7 +1343,8 @@ async function executeAction(input: ExecuteInput, ctx: ToolContext): Promise<Too
   const outcome = await ctx.confirm?.({
     operation: "promote changes to another server",
     target: `server '${input.target}', namespace ${targetNs}`,
-    scope: promotionScope(input.source, orderedAllowed, planned),
+    // The dialog text cuts the drop list; the binding is every drop, so a drop the text hides still changes the answer.
+    scope: { text: promotionScope(input.source, orderedAllowed, planned), binding: planned },
   });
   if (outcome !== undefined && !outcome.proceed) return outcome.result;
 

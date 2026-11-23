@@ -54,6 +54,7 @@ import {
   CONFIRMATION_INPUT_KEY,
   CONFIRMATION_PENDING,
   CONFIRMATION_SCHEMA,
+  CONFIRMATION_SCOPE_REASKS,
   CONFIRMATION_STATE_TTL_SECONDS,
   ConfirmationNonces,
   UNANSWERED_CONFIRMATION_TEXT,
@@ -61,9 +62,12 @@ import {
   classifyConfirmationResponse,
   confirmationDeclinedResult,
   confirmationMessage,
+  confirmationScopeChangedResult,
   contentHash,
   declaresFormElicitation,
   isConfirmationState,
+  scopeDigest,
+  scopeText,
 } from "./confirmation.js";
 import type { ProfileRegistry, IrisProfile } from "./profiles.js";
 import {
@@ -77,6 +81,7 @@ import {
 import type {
   ConfirmationOutcome,
   ConfirmationRequest,
+  ConfirmationScope,
   ToolDefinition,
   ToolContext,
   ToolResult,
@@ -310,6 +315,8 @@ interface WireCall {
   pending?: InputRequiredResult;
   /** The nonce of {@link pending}'s state. */
   pendingNonce?: string;
+  /** Whether the handler reached `ctx.confirm`, which settles the state this round echoed (if any). */
+  confirmReached?: boolean;
 }
 
 /** The members of a request context that a wire call reads. Each may be absent on the stub context of a test. */
@@ -2045,6 +2052,9 @@ export class McpServerBase {
         content: [{ type: "text" as const, text: `Tool error: ${message}` }],
         isError: true,
       };
+    } finally {
+      // A handler that ended the call before `ctx.confirm` leaves no ask of the state this round echoed (AD-19).
+      if (wireCall !== undefined) await this.releaseEchoedAsk(tool, profile, parseResult.data, wireCall);
     }
   }
 
@@ -2067,7 +2077,7 @@ export class McpServerBase {
     const bind = (client: IrisHttpClient): IrisHttpClient =>
       signal === undefined ? client : bindSignal(client, signal);
     const actionKey = this.deriveAuditAction(tool, validatedArgs) ?? tool.name;
-    const argsHash = (): string => contentHash({ tool: tool.name, profile: profile.name, args: parsedArgs });
+    const argsHash = (): string => this.confirmationArgsHash(tool, profile, parsedArgs);
     return {
       ...base,
       http: bind(base.http),
@@ -2111,16 +2121,27 @@ export class McpServerBase {
     return isConfirmationState(state) && state.tool === tool.name && state.hash === hash ? state : undefined;
   }
 
+  /** The hash a confirmation state binds to: this tool, this profile and these parsed arguments. */
+  private confirmationArgsHash(tool: ToolDefinition, profile: IrisProfile, parsedArgs: unknown): string {
+    return contentHash({ tool: tool.name, profile: profile.name, args: parsedArgs });
+  }
+
   /**
    * The helper behind {@link ToolContext.confirm} on a wire call. In order:
    *
    * 1. A retry that echoes a valid state of this call, whose nonce is unused, and carries an answer decides the
-   *    call whatever its capabilities now say: the nonce is used, and an accept with `confirm: true` proceeds,
-   *    while a decline, a dismissal and an unticked accept end the call with `CONFIRMATION_DECLINED`.
+   *    call whatever its capabilities now say, and uses the nonce. A decline, a dismissal and an unticked accept end
+   *    the call with `CONFIRMATION_DECLINED`, without resolving the scope. An accept with `confirm: true` resolves
+   *    the scope again and compares its digest with the digest of the scope the dialog showed (the gate's binding
+   *    value, else its whole text): equal, or no scope left to confirm, proceeds; different asks again with the new
+   *    scope, once per call ({@link CONFIRMATION_SCOPE_REASKS}); a further change, or a client that can no longer be
+   *    asked, ends the call with `CONFIRMATION_SCOPE_CHANGED`. A retry that carries no answer is asked below, and
+   *    keeps the count of re-asks.
    * 2. A client that does not declare form elicitation is not asked: the call proceeds as it always did.
    * 3. A scope that resolves to `undefined` means there is nothing to ask: the call proceeds.
-   * 4. Otherwise the question is minted: a state for this tool and these arguments, and a form request. The
-   *    handler gets {@link CONFIRMATION_PENDING}, which {@link dispatchToolCall} swaps for the question.
+   * 4. Otherwise the question is minted: a state for this tool, these arguments and the digest of the scope shown,
+   *    and a form request. The handler gets {@link CONFIRMATION_PENDING}, which {@link dispatchToolCall} swaps for
+   *    the question.
    */
   private async confirmOnWire(
     tool: ToolDefinition,
@@ -2130,8 +2151,10 @@ export class McpServerBase {
     request: ConfirmationRequest,
     wireCall: WireCall,
   ): Promise<ConfirmationOutcome> {
+    wireCall.confirmReached = true;
     const hash = argsHash();
     const state = await this.echoedConfirmationState(tool, hash, wireCall);
+    let reasks = 0;
     if (state !== undefined && !this.confirmationNonces.isUsed(state.nonce)) {
       const response = classifyConfirmationResponse(
         inputResponse(requestView(wireCall)?.inputResponses, CONFIRMATION_INPUT_KEY),
@@ -2140,26 +2163,68 @@ export class McpServerBase {
         this.confirmationNonces.markUsed(state.nonce);
         this.pendingAsks.delete(state.nonce);
         wireCall.confirmation = auditConfirmationOf(response);
-        if (response === "accepted") return { proceed: true };
-        return {
-          proceed: false,
-          result: confirmationDeclinedResult(actionKey, request.operation, response),
-        };
+        if (response !== "accepted") {
+          return {
+            proceed: false,
+            result: confirmationDeclinedResult(actionKey, request.operation, response),
+          };
+        }
+        // The person accepted the scope the dialog showed. Resolving it again, a scope that throws ends the call with
+        // that error, as the round that asked would have.
+        const now = await this.resolveConfirmationScope(request);
+        if (now === undefined || scopeDigest(now) === state.digest) return { proceed: true };
+        if (state.reasks >= CONFIRMATION_SCOPE_REASKS || !declaresFormElicitation(this.clientCapabilitiesOf(wireCall))) {
+          return {
+            proceed: false,
+            result: confirmationScopeChangedResult(actionKey, request.operation),
+          };
+        }
+        // The question goes out again with the scope as it is now; this round ends no call, so it records no answer.
+        delete wireCall.confirmation;
+        return this.askPerson(tool, profile, request, now, hash, state.reasks + 1, wireCall);
       }
       // A retry of this call with no answer: the call goes on below, asked again or not at all, so the ask it
-      // echoes no longer ends as an entry of its own.
+      // echoes no longer ends as an entry of its own, and the count of re-asks stays with the call.
       this.pendingAsks.delete(state.nonce);
+      reasks = state.reasks;
     }
 
     if (!declaresFormElicitation(this.clientCapabilitiesOf(wireCall))) return { proceed: true };
 
-    const scope = typeof request.scope === "function" ? await request.scope() : request.scope;
+    const scope = await this.resolveConfirmationScope(request);
     if (scope === undefined) return { proceed: true };
+    return this.askPerson(tool, profile, request, scope, hash, reasks, wireCall);
+  }
 
+  /** The scope of a confirmation request as it is now. */
+  private async resolveConfirmationScope(request: ConfirmationRequest): Promise<string | ConfirmationScope | undefined> {
+    return typeof request.scope === "function" ? await request.scope() : request.scope;
+  }
+
+  /**
+   * Put the question to the client: a new state (a new nonce, the digest of `scope` and the count of re-asks) and a form
+   * request, recorded on `wireCall` for {@link dispatchToolCall}. The handler gets {@link CONFIRMATION_PENDING}.
+   */
+  private async askPerson(
+    tool: ToolDefinition,
+    profile: IrisProfile,
+    request: ConfirmationRequest,
+    scope: string | ConfirmationScope,
+    hash: string,
+    reasks: number,
+    wireCall: WireCall,
+  ): Promise<ConfirmationOutcome> {
     const nonce = randomUUID();
-    const requestState = await this.confirmationCodec.mint({ v: 1, tool: tool.name, hash, nonce });
+    const requestState = await this.confirmationCodec.mint({
+      v: 2,
+      tool: tool.name,
+      hash,
+      digest: scopeDigest(scope),
+      reasks,
+      nonce,
+    });
     const message = confirmationMessage(
-      { operation: request.operation, target: request.target, scope },
+      { operation: request.operation, target: request.target, scope: scopeText(scope) },
       { profile: profile.name, host: profile.host, port: profile.port },
     );
     wireCall.pending = inputRequired({
@@ -2170,6 +2235,25 @@ export class McpServerBase {
     });
     wireCall.pendingNonce = nonce;
     return { proceed: false, result: CONFIRMATION_PENDING };
+  }
+
+  /**
+   * End the ask that a retry echoed when the round ended the call without the handler reaching `ctx.confirm` (it refused
+   * first): the nonce is used and the pending ask is forgotten, so the call is one audit entry and no `unanswered` entry
+   * follows. A round with no echoed state, or whose handler reached `confirm`, is left as it is.
+   */
+  private async releaseEchoedAsk(
+    tool: ToolDefinition,
+    profile: IrisProfile,
+    parsedArgs: unknown,
+    wireCall: WireCall,
+  ): Promise<void> {
+    if (wireCall.confirmReached === true) return;
+    if (typeof requestView(wireCall)?.requestState?.() !== "string") return;
+    const state = await this.echoedConfirmationState(tool, this.confirmationArgsHash(tool, profile, parsedArgs), wireCall);
+    if (state === undefined || this.confirmationNonces.isUsed(state.nonce)) return;
+    this.confirmationNonces.markUsed(state.nonce);
+    this.pendingAsks.delete(state.nonce);
   }
 
   /** Remember a dialog put to the client, so it ends as one audit entry even when nobody answers. */
@@ -2468,6 +2552,8 @@ export class McpServerBase {
     if (structured?.code === REFUSAL_CODES.GOVERNANCE_DISABLED) return "denied";
     // A person refused before anything changed, which is what `denied` means for governance (AD-19).
     if (structured?.code === REFUSAL_CODES.CONFIRMATION_DECLINED) return "denied";
+    // A scope that changed again after the person was asked again: nothing was changed, and the person did not decline.
+    if (structured?.code === REFUSAL_CODES.CONFIRMATION_SCOPE_CHANGED) return "denied";
     if (result.isError) return "error";
     return "ok";
   }

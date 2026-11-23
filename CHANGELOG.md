@@ -2,6 +2,18 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Unreleased] — Story 44.3: Confirmation Bound to the Scope Shown
+
+### Fixed
+
+- **A confirmation is bound to the scope the dialog showed (DW-670), sanction `S-44.3-scope-changed-refusal`.** The confirmation state bound only the tool, the profile and the argument hash, so a retry that echoed a valid, unused state decided the call before the scope was worked out again. `iris_env_promote` `execute`, which runs its Storage preflight on every round, could therefore write Storage drops that the dialog never showed (or other ones). The state is now `v: 2` and carries a digest of the scope the dialog showed. On the round that carries the person's accept, the server works the scope out again: an equal digest runs the call; a different one asks the person again, once per call, with the new scope, a new state and a new nonce, and runs nothing; a second change ends the call with the new refusal `CONFIRMATION_SCOPE_CHANGED` (`{code, action}`, nothing changed, audited `denied` with `confirmation: "accepted"`). The comparison, the re-ask and the bound live only in `@iris-mcp/shared`; a gate supplies its scope text and, where the text hides part of the scope, a binding value: `execute` binds every Storage drop and `regenerateStorage` every dropped definition (the dialog text cuts both), `resendFiltered` binds the status, the window the call gave, a `to` only when the call gave one, and the cap (not the live match count or a `to` that IRIS filled in), and `purge`, `clean` and `resend` bind their whole text.
+- **A call ended before its dialog is asked no longer leaves an `unanswered` entry.** A deciding round whose tool refuses before it asks (a Storage drop that appeared while `allowStorageRegeneration` is off) now removes the pending dialog of the state it echoed, so the call is one audit entry.
+
+### Changed
+
+- **An accepted `resendFiltered` sends its read-only preview twice**, once on the round that asks and once on the round that carries the accept, to compare the filter and the cap with the ones shown. A decline sends it once. The fail-closed preview (DW-657) is unchanged.
+- **Unchanged behavior, pinned.** A client that does not declare form elicitation gets today's requests, result and audit entry. A call whose scope does not change has today's dialog text, result and audit entry. No tool, action, input field, governance key, visibility, tool description or schema changes; the frozen goldens and the tools-list snapshot are untouched. `REFUSAL_CODES` gains `CONFIRMATION_SCOPE_CHANGED`, and `@iris-mcp/shared` exports the `ConfirmationScope` type.
+
 ## [Unreleased] — Story 44.2: VS Code Copilot MCP Configuration Targets
 
 ### Fixed

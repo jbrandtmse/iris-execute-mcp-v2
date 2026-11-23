@@ -2,7 +2,8 @@
 title: 'Story 44.3: Confirmation Bound to the Scope Shown'
 type: 'bugfix'
 created: '2026-11-22'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '5717b9f2f68227734a1702a9a7cb35aa74fbf422'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -125,6 +126,47 @@ The deciding round is a retry that echoes a valid, unused `v: 2` state of this c
 
 ## Review Triage Log
 
+### 2026-11-22 — Review pass
+- verdicts: 37 findings — high 0, medium 2, low 19, false 16, maybe-false 0
+- findings:
+  - `[false]` `[reject]` intent-alignment 1: the change-while-open scenario is driven on the fake listener, not a live IRIS — by design: a live IRIS cannot change a target mid-dialog deterministically (Design Notes, Integration ACs; Rule #54).
+  - `[false]` `[reject]` intent-alignment 2: `purge`/`clean`/`resend` bind their whole text, so their comparison cannot fire — by design: the gate table says their scope is a pure function of the arguments; the unchanged-path rows pin it.
+  - `[false]` `[reject]` intent-alignment 3: promote drops past the tenth are bound but not shown — the decided binding (Design Notes, Correction 4); a later change to them re-asks.
+  - `[false]` `[reject]` intent-alignment 4: a window after the comparison and before the PUT — the write uses the same preflight pass that was compared (`runDocumentsBatch` writes the pass's own content and drop list), so no read sits between them.
+  - `[false]` `[reject]` intent-alignment 5: a change during the accepting round itself — the same pass is compared and written, so what is written is what was compared.
+  - `[false]` `[reject]` intent-alignment 6: the replay, forged and re-ask rows run only on 2026-07-28 — spec Correction 6: on 2025-11-25 the state never leaves the server.
+  - `[false]` `[reject]` intent-alignment 7: an accepted `resendFiltered` sends two previews — the spec records it as the one documented difference (README, CHANGELOG).
+  - `[low]` `[patch]` blind 1: the `firstCallOrder` doc comment sat above `scopeTextOf` in `env-promote-storage-guard.test.ts` — patched: moved onto `firstCallOrder`.
+  - `[low]` `[patch]` blind 2: the raw-wire "re-signed as v 1" row claims more than it proves (the MAC fails first) — patched: row title and file header now say a state signed with a guessed key is refused whatever its shape, and that the shape check is pinned by `confirmation.test.ts`.
+  - `[low]` `[reject]` blind 3: no wire row for a changed `regenerateStorage` scope — the spec's rows cover promote and `resendFiltered` through the shared helper; the doc-edit binding is pinned by its unit test, and a one-sided gate adds no new helper path.
+  - `[medium]` `[patch]` blind 4: the accept round's second preview failing is untested — the matrix row "Scope resolver throws" had no covering test. Patched: a `resendFiltered` row on both eras (first preview ok, second HTTP 500: one dialog, two previews, no execute, entry `error` with `confirmation: "accepted"`); the fake gained `failPreview`.
+  - `[low]` `[patch]` blind 5: a binding of `undefined` digested as the hash of null whatever the text says — patched: `scopeDigest` falls back to the whole text for `binding: undefined` (what its doc comment already promised); the unit test pins it.
+  - `[false]` `[reject]` blind 6: "once per call" does not hold for a replayed or dropped state — a replayed or invalid state is not an accept: the person is asked again and must answer, so nothing runs unseen; the matrix row "Forged / v1 / other-digest state" fixes re-asks 0.
+  - `[false]` `[reject]` blind 7: the changelog's "the window the call gave" — it means `from` and a caller-given `to`, which is what the binding holds.
+  - `[low]` `[reject]` blind 8: per-server READMEs not updated — the spec's docs list is the root and shared READMEs, CHANGELOG and changeset; the per-server READMEs link to the root section and carry no stale claim (grep).
+  - `[false]` `[reject]` blind 9: the changeset is `patch` — the spec names it so.
+  - `[low]` `[reject]` blind 10: no direct `server-base` unit test for the new branches — the built-dist suites on both eras and the raw-wire driver cover each branch and carry mutation lines; a duplicate fast test adds no new evidence.
+  - `[low]` `[reject]` verification-gap 1: `delete wireCall.confirmation` has no test that cancels a re-asked dialog — a cancel during a re-ask is unlikely, and the fix is a new test row, not a direct correction.
+  - `[medium]` `[patch]` verification-gap 2: same root as blind 4 (the matrix row "Scope resolver throws"); patched as above, with a mutation line.
+  - `[low]` `[patch]` verification-gap 3: same root as blind 2.
+  - `[low]` `[reject]` verification-gap 4: `expect(rig.writes()).toEqual([])` on the source listener is redundant — harmless; the paired `otherWrites()` assertion carries the weight.
+  - `[low]` `[reject]` verification-gap 5: the 400 ms wait before the no-`unanswered` check — the check has no end signal to wait on, and its mutation line records it red.
+  - `[low]` `[patch]` verification-gap 6: no mutation line for the capability-gone refusal — demonstrated and recorded.
+  - `[low]` `[patch]` verification-gap 7: no mutation line for the re-ask count carried by a no-answer retry — demonstrated and recorded.
+  - `[low]` `[patch]` verification-gap 8: no mutation line for the `denied` mapping of the new code — demonstrated and recorded.
+  - `[low]` `[patch]` verification-gap 9: no mutation line for the `to`-only-when-given clause — demonstrated and recorded.
+  - `[low]` `[reject]` verification-gap 10: AC 44.3.5 and 44.3.6 have no mutation lines — AC 44.3.5 is a diff-shape check on the 43.3 files (their doubled-preview lists are covered by the decline-path mutation); AC 44.3.6's doc-claims tests are the existing ones and run green.
+  - `[low]` `[reject]` verification-gap 11: one `resendFiltered` raw-wire row makes cumulative preview counts across a decline and a second call — each count is asserted relative to a fresh baseline in the same row; no order dependence across tests.
+  - `[false]` `[reject]` verification-gap 12: `status` and `from` echoed by IRIS may change per round — IRIS echoes the request's `from` and a constant default status; nothing varies per round.
+  - `[false]` `[reject]` verification-gap 13: a caller-given `to` normalised differently per round — the same input gives the same echo.
+  - `[low]` `[patch]` edge 1: same root as blind 5.
+  - `[low]` `[patch]` edge 2: `releaseEchoedAsk` hashed the arguments of every wire call before looking for an echoed state — patched: it returns first when the request carries no state.
+  - `[false]` `[reject]` edge 3: a throw in the `finally` replaces the result — the arguments are validated JSON, so the hash cannot throw, and a state that fails to verify returns `undefined`.
+  - `[false]` `[reject]` edge 4: a replayed used state resets the bound — same as blind 6: a fresh dialog the person must answer.
+  - `[false]` `[reject]` edge 5: `undefined` on the accept round proceeds — the matrix row "Scope now undefined" says exactly this; IRIS's own guards decide.
+  - `[low]` `[patch]` edge 6: the `scopeDigest` comment promised a whole-text fallback the code did not give — true after the blind 5 patch.
+  - `[false]` `[reject]` edge 7: same as blind 6.
+
 ## Design Notes
 
 **Governing ADs (Rule 6).**
@@ -194,15 +236,35 @@ No AC contradicts an AD.
 - (once) `pnpm --filter @iris-mcp/all test` -- expected: green. If it does not finish inside one call, split it by file into calls that each finish in about 8 minutes.
 - (once) `pnpm gen:governance-baseline:check`, `pnpm run gen:tools-list-snapshot:check`, `pnpm run gen:ipm:check`, `pnpm run lint`, `pnpm run type-check` (one call each) -- expected: pass; the baseline stays `1e62c5ad5bf7`/141, and the snapshot and the IPM tree are unchanged.
 
+**Red run (AC 44.3.1; recorded before any source edit; built dists of baseline `5717b9f2`; `pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-44-3-confirmation-scope.test.ts`):** 2 tests, 2 failed (legacy and modern era). On each era the person was shown ONE dialog (`Scope: 1 step(s) from server 'default': #1 documents putAndCompile Demo.Sample.cls`, no drops) although the target's `Demo.Sample.cls` had gained `Storage Default` while it was open: `expected [ Array(1) ] to deeply equal [ …(2) ]`, the second expected dialog (`...; drops Storage definitions: Demo.Sample.cls ('Default')`) never sent. With the ask assertion made soft, the remaining assertions passed, so the target `PUT` and the compile were sent after that one dialog: the save carried a drop the dialog never showed (DW-670).
+
 **Mutations (Rule 19; the implement stage writes each `mutation:` line after demonstrating it):**
 - AC 44.3.1/44.3.4 pinning gate: the digest comparison in `confirmOnWire` becomes "always equal" -> the changed-drops promote rows on both eras go red.
+  - mutation: `scopeDigest(now) === state.digest` became `... || Date.now() > 0` (always equal) in `confirmOnWire`, shared dist rebuilt; `story-44-3-confirmation-scope.test.ts` and the raw-wire file ran 16 red of 37, including the AC 44.3.1 row, the changed-scope accept, both decline-after-re-ask rows and the "changes on every dialog" row on legacy and modern, and the raw-wire re-ask, refusal, replay, capability-gone, no-answer and decline rows; reverted byte-identical (`cmp`), dist rebuilt, green. (A first attempt with a literal `|| true` did not compile, so no dist was built and it proved nothing; it is not counted.)
 - Bound: `CONFIRMATION_SCOPE_REASKS` becomes 5 -> the "changes on every dialog" row goes red (more than 2 asks, no `CONFIRMATION_SCOPE_CHANGED`).
+  - mutation: `CONFIRMATION_SCOPE_REASKS = 5`, shared dist rebuilt; 4 red: the "changes on every dialog" row on both eras (a third dialog instead of the refusal) and the raw-wire refusal row and no-answer row; reverted byte-identical, green.
 - resendFiltered binding: it binds the whole text instead -> the count/`to`-change row goes red (2 asks).
+  - mutation: `binding` of the `resendFiltered` scope became the whole dialog text, interop dist rebuilt; 3 red: the 3 -> 4 count and moving `to` row on both eras (a second dialog) and the raw-wire `resendFiltered` row; reverted byte-identical, green.
 - Promote binding: `binding: planned` becomes `binding: planned.slice(0, 10)` -> the 11-drop unit pin goes red.
+  - mutation: `binding: planned.slice(0, 10)`; `env-promote-storage-guard.test.ts` 1 red (the 11-drop binding pin: 10 entries instead of 11); reverted byte-identical, green. A second mutation, `binding: dropped.slice(0, 10)` in `doc-edit.ts`, made the doc-edit pin (11 definitions with names over 600 characters) the 1 red of `doc-edit.test.ts`; reverted byte-identical.
 - Decline path: the scope is resolved before a decline is honored -> the decline-after-ask `resendFiltered` request-list pin goes red (two previews).
+  - mutation: `await this.resolveConfirmationScope(request)` added to the decline branch, shared dist rebuilt; 3 red: "a decline sends one preview and no execute" on both eras (two previews) and the raw-wire decline row; reverted byte-identical, green.
 - Undefined rule: `undefined` on the deciding round is treated as changed -> the count-0/over-cap rows go red.
+  - mutation: a deciding-round scope of `undefined` ended the call with `CONFIRMATION_SCOPE_CHANGED`, shared dist rebuilt; 4 red: the count-0 and the 600-over-cap rows on both eras; reverted byte-identical, green.
 - Pending-ask cleanup removed -> the "Handler refuses first" row goes red (`unanswered` entry).
+  - mutation: `releaseEchoedAsk` made a no-op (`confirmReached === true || confirmReached !== true`; the build reported a TS2367 for the comparison but emitted the dist); 2 red: the "handler refuses first" row on both eras (`[undefined, undefined, 'unanswered']` instead of two entries without `confirmation`); reverted byte-identical, dist rebuilt, green.
 - `isConfirmationState` accepts `v: 1` -> the confirmation unit test goes red, and so does the raw-wire `v: 1` row.
+  - mutation: `isConfirmationState` accepted `v: 1` as well as `v: 2`; `confirmation.test.ts` 1 red ("rejects the version of the state before the scope digest"); reverted byte-identical, green. The raw-wire `v: 1` row (a payload re-signed as `v: 1` with a guessed key) stays green under this mutation by design: the HMAC key is random per process, so a re-signed state fails the MAC before `isConfirmationState` is reached, and a `v: 1` state with a valid MAC cannot be produced from outside (Rule #54); the row pins the MAC path, and the unit test pins the shape.
+- Unit pins added beyond the list: the `ConfirmationScope` binding tests of `message-resend.test.ts` (mutation: `matchCount` added to the `resendFiltered` binding; 2 red, then reverted byte-identical) and the `scopeDigest` tests of `confirmation.test.ts` (mutation: a scope object digested as its string form; 3 red, then reverted byte-identical).
+- Review-pass mutations (each applied, observed red, reverted byte-identical with `cmp`, dists rebuilt):
+  - mutation: the deciding round's `resolveConfirmationScope` swallowed its error (`.catch(() => undefined)`) -> the new "preview that fails on the round that carries the accept" row goes red on both eras (the call proceeds to the execute).
+  - mutation: the `|| !declaresFormElicitation(...)` clause removed from the refusal condition -> the raw-wire "no longer declares form elicitation is refused" row goes red (1 red).
+  - mutation: `reasks = state.reasks` removed from the no-answer retry -> the raw-wire "a retry with no answer carries the count of re-asks forward" row goes red (1 red).
+  - mutation: the `CONFIRMATION_SCOPE_CHANGED` line of `deriveAuditOutcome` removed -> the "changes on every dialog" row on both eras and the raw-wire refusal row go red (3 red).
+  - mutation: `to: input.to === undefined ? undefined : found.to` became `to: found.to` -> the 3 -> 4 count and moving `to` row on both eras and the 43.3 unit row "the scope binds no `to` when the caller gave none" go red (3 red).
+  - mutation: `scopeDigest` of `binding: undefined` hashes null instead of the text -> the `confirmation.test.ts` row "digests a binding of undefined as its whole text" goes red (1 red).
+
+**Final run (implement stage, built dists of the working tree):** `pnpm turbo run build` success; `pnpm run lint` and `pnpm run type-check` pass; `@iris-mcp/shared` 2601 passed; `@iris-mcp/dev` 1492 passed (319 skipped, live); `@iris-mcp/admin` 506 passed; `@iris-mcp/interop` 753 passed; `@iris-mcp/all` 6093 passed (729 skipped) in 1234 s, and the two failures of that run (the shared-README phrase pinned by `story-43-3-doc-claims.test.ts`, and the child run of `story-42-1-qa-changeset-readers.test.ts` that includes it) passed after the README sentence was reworded. `story-44-3-confirmation-scope.test.ts` 26 passed and `story-44-3-confirmation-scope-raw-wire.test.ts` 11 passed. `gen:governance-baseline:check`, `gen:tools-list-snapshot:check` (115 entries, 0 new tools) and `gen:ipm:check` pass.
 
 **Shared surfaces:**
 - `REFUSAL_CODES` (+1) and its sorted-key test;
@@ -217,7 +279,22 @@ Standing criterion: every test added or changed passes on a fresh environment, i
 
 ## Auto Run Result
 
-Status: ready-for-dev
+Status: done
 Blocking condition: none
 
-Planning pass (2026-11-22): spec planned and verified against the READY FOR DEVELOPMENT standard; halted after planning as directed. No source file changed. Corrections to the epic text and the decisions for the lead are under Design Notes ("Corrections for the lead", "Decisions", "For the lead").
+Summary: a confirmation is bound to the scope the dialog showed (DW-670, sanction `S-44.3-scope-changed-refusal`). The signed state is `v: 2` with the scope digest and the re-ask count. An accepting round resolves the scope again: an equal digest proceeds, a different one asks again once with the new scope, and a second change (or a client that can no longer be asked) ends the call with `CONFIRMATION_SCOPE_CHANGED`, audited `denied` with `confirmation: "accepted"`. A deciding round that ends before `ctx.confirm` removes the echoed state's pending ask. The comparison lives only in `@iris-mcp/shared`.
+
+Files changed:
+- `packages/shared/src/confirmation.ts`, `server-base.ts`, `tool-types.ts`, `refusals.ts`, `index.ts` -- the `v: 2` state, `scopeDigest`/`scopeText`, `confirmOnWire` re-resolution and re-ask, the pending-ask release, the new refusal and its `denied` mapping, the `ConfirmationScope` type.
+- `packages/iris-dev-mcp/src/tools/env-promote.ts`, `doc-edit.ts` and `packages/iris-interop-mcp/src/tools/message-resend.ts` -- the gates supply `{ text, binding }`: every Storage drop, every dropped definition, and the `resendFiltered` filter and cap.
+- `scripts/lib/fake-iris-listener.mjs`, `sdk-confirmation-rig.ts`, `story-43-3-qa-wire.ts` -- opt-in overrides (`setDocumentContent`, `setResendPreview` with `failPreview`) and an `answer` function.
+- New `story-44-3-confirmation-scope.test.ts` (28 tests, both eras) and `story-44-3-confirmation-scope-raw-wire.test.ts` (11 tests); the unit tests, 43.3 suites and refusal list updated for the shapes only.
+- `README.md`, `packages/shared/README.md`, `CHANGELOG.md`, `.changeset/story-44-3-confirmation-bound-to-the-scope-shown.md` -- the docs.
+
+Review: 37 findings from four layers (high 0, medium 2, low 19, false 16). Patches applied: 2 medium (the matrix row "Scope resolver throws" got a test and a `failPreview` fake option), 11 low (comment placement, the raw-wire `v: 1` row's name, the `binding: undefined` fallback, the hash-on-every-call early return, four missing mutation lines and their demonstrations). Deferred: none. Every rejected finding and its reason is in the Review Triage Log.
+
+Follow-up review recommended: false (no high patched; one medium patched on this first pass is below the two-medium bar).
+
+Verification: build, lint, type-check, `gen:governance-baseline:check` (141, `1e62c5ad5bf7`), `gen:tools-list-snapshot:check` (115, unchanged) and `gen:ipm:check` pass. After the patches: shared 2601, dev 1492, admin 506, interop 753 passed; the 44.3 suites 28 + 11 and all the 43.3 suites, the epic43 capstone, the handler golden and the doc-claims and changeset-reader suites passed. The full `@iris-mcp/all` run (226 files, 6096 passed) was made before the review patches, which changed only test files, the fake's new option, `scopeDigest`'s undefined case and `releaseEchoedAsk`'s early return; the suites that use those were re-run green.
+
+Residual risks: the scenario runs on the fake listener, not a live IRIS (by design). The raw-wire `v: 1` row pins the MAC path, and the `v: 1` shape check is pinned only by its unit test. `releaseEchoedAsk` runs only after the handler returns or throws, so a round that ends earlier (a governance denial, an unknown profile) leaves its pending ask to the TTL sweep. The spine bookkeeping under Design Notes ("For the lead") is still the lead's.

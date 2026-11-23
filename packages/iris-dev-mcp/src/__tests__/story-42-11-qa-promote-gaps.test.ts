@@ -157,7 +157,10 @@ describe("Story 42.11 (QA): iris_env_promote execute, the Storage guard's scope 
       expect(confirm.mock.calls[0]?.[0]).toEqual({
         operation: "promote changes to another server",
         target: "server 'target', namespace ALTNS",
-        scope: "1 step(s) from server 'source': #1 documents putAndCompile Alpha.cls; drops Storage definitions: Alpha.cls ('Default')",
+        scope: {
+          text: "1 step(s) from server 'source': #1 documents putAndCompile Alpha.cls; drops Storage definitions: Alpha.cls ('Default')",
+          binding: [{ name: "Alpha.cls", droppedStorage: ["Default"] }],
+        },
       });
       expect(targetHttp.put.mock.calls.map((call) => call[0])).toEqual([`${docPath("ALTNS", "Alpha.cls")}?ignoreConflict=1`]);
       expect(targetHttp.post.mock.calls.map((call) => call[0])).toEqual(["/api/atelier/v8/ALTNS/action/compile?flags=cuk"]);

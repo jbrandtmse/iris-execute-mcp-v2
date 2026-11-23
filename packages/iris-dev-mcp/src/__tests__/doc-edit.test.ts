@@ -1785,7 +1785,10 @@ describe("Story 43.3: confirmation (regenerateStorage)", () => {
     expect(confirm.mock.calls[0]?.[0]).toEqual({
       operation: OPERATION,
       target: "document Test.Store.cls, namespace USER",
-      scope: "1 edit(s); drops Storage definition(s): Default, Second",
+      scope: {
+        text: "1 edit(s); drops Storage definition(s): Default, Second",
+        binding: ["Default", "Second"],
+      },
     });
     expect(result.isError).toBeUndefined();
     expect(sc(result).changed).toBe(true);
@@ -1814,6 +1817,8 @@ describe("Story 43.3: confirmation (regenerateStorage)", () => {
     read: string[];
     edits: unknown[];
     scope: string;
+    /** Every Storage definition the edits drop: what the person's answer is bound to. */
+    binding: string[];
   }> = [
     {
       title: "a class whose edit drops one of two Storage definitions",
@@ -1822,6 +1827,7 @@ describe("Story 43.3: confirmation (regenerateStorage)", () => {
       read: TWO_STORAGE_LINES,
       edits: [DELETE_SECOND],
       scope: "1 edit(s); drops Storage definition(s): Second",
+      binding: ["Second"],
     },
     {
       title: "a class where two edits together drop one Storage definition",
@@ -1830,6 +1836,7 @@ describe("Story 43.3: confirmation (regenerateStorage)", () => {
       read: TWO_STORAGE_LINES,
       edits: [RETYPE_PROPERTY, DELETE_SECOND],
       scope: "2 edit(s); drops Storage definition(s): Second",
+      binding: ["Second"],
     },
     {
       title: "a class whose edit keeps every Storage definition",
@@ -1838,6 +1845,7 @@ describe("Story 43.3: confirmation (regenerateStorage)", () => {
       read: TWO_STORAGE_LINES,
       edits: [RETYPE_PROPERTY],
       scope: "1 edit(s); drops no Storage definition",
+      binding: [],
     },
     {
       title: "a class that has no Storage definition",
@@ -1846,6 +1854,7 @@ describe("Story 43.3: confirmation (regenerateStorage)", () => {
       read: CLASS_LINES,
       edits: S2_EDITS,
       scope: "3 edit(s); drops no Storage definition",
+      binding: [],
     },
     {
       title: "a routine whose deleted text looks like a Storage definition",
@@ -1854,6 +1863,7 @@ describe("Story 43.3: confirmation (regenerateStorage)", () => {
       read: ROUTINE_WITH_STORAGE_TEXT,
       edits: [DELETE_STORAGE_TEXT],
       scope: "1 edit(s); drops no Storage definition",
+      binding: [],
     },
     {
       title: "an include file whose deleted text looks like a Storage definition",
@@ -1862,6 +1872,7 @@ describe("Story 43.3: confirmation (regenerateStorage)", () => {
       read: ROUTINE_WITH_STORAGE_TEXT,
       edits: [DELETE_STORAGE_TEXT],
       scope: "1 edit(s); drops no Storage definition",
+      binding: [],
     },
   ];
   for (const scopeCase of scopeCases) {
@@ -1876,10 +1887,32 @@ describe("Story 43.3: confirmation (regenerateStorage)", () => {
       expect(confirm.mock.calls[0]?.[0]).toEqual({
         operation: OPERATION,
         target: `document ${scopeCase.name}, namespace USER`,
-        scope: scopeCase.scope,
+        scope: { text: scopeCase.scope, binding: scopeCase.binding },
       });
     });
   }
+
+  it("binds every dropped definition, including the ones past the 600 characters the dialog text shows", async () => {
+    const longName = (index: number): string => `${"Definition".repeat(70)}${String(index).padStart(2, "0")}`;
+    const names = Array.from({ length: 11 }, (_, index) => longName(index + 1));
+    const read = [
+      "Class Test.Store Extends %Persistent",
+      "{",
+      ...names.flatMap((name) => [`Storage ${name}`, "{", "<Type>%Storage.Persistent</Type>", "}"]),
+      "}",
+    ];
+    const deleteAll = { op: "delete", startLine: 3, endLine: read.length - 1, expected: read.slice(2, read.length - 1).join("\n") };
+    arrange({ read, name: STORE_NAME });
+    const confirm = decliningConfirm();
+    ctx.confirm = confirm;
+
+    await run([deleteAll], { name: STORE_NAME });
+
+    const scope = confirm.mock.calls[0]?.[0]?.scope as { text: string; binding: string[] };
+    expect(scope.text.length).toBeGreaterThan(600);
+    expect(scope.text).toContain(names[10] as string);
+    expect(scope.binding).toEqual(names);
+  });
 
   // -- never asked when a check of the tool refuses first, or for apply --
 

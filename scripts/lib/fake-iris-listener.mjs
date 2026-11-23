@@ -17,6 +17,14 @@
 //   answers an HTTP 500 error envelope; a `resendFiltered` of item `Demo.Refused` is refused as IRIS refuses, HTTP 200
 //   with the error in the envelope, and one of item `Demo.PreviewDown` answers its preview with an HTTP 500 error
 //   envelope); a document called `Demo.Missing.cls` is absent.
+//
+//   Two opt-in overrides let a test change what the fake answers while a call is in flight (Story 44.3). With none set,
+//   every reply is exactly as described above. `setDocumentContent(name, lines)` makes GET and HEAD of `doc/<name>`
+//   answer a document whose content is `lines` (`undefined` removes the override); `setResendPreview(item, { matchCount,
+//   to })` makes the `resendFiltered` route, preview and execute alike, count `matchCount` messages for `item` and
+//   answer `to` in a preview when the request has no `to` (IRIS fills an omitted `to` with the current second;
+//   `MessageResend.cls`); `failPreview: true` answers every preview of `item` with an HTTP 500 error envelope;
+//   `setResendPreview(item, undefined)` removes it. A request's own `to` is never replaced.
 
 import http from 'node:http';
 
@@ -82,10 +90,18 @@ function matchCountOf(item) {
  * @param {object} options
  * @param {string} options.bootstrapVersion - The value `ExecuteMCPv2.Setup_GetBootstrapVersion()` answers: the
  *   `BOOTSTRAP_VERSION` of the build under test, so the probe finds the classes current and deploys nothing.
- * @returns {Promise<{ port: number, requests: Array<{ method: string, url: string, body: string }>, close: () => Promise<void> }>}
+ * @returns {Promise<{
+ *   port: number,
+ *   requests: Array<{ method: string, url: string, body: string }>,
+ *   setDocumentContent: (name: string, lines: string[] | undefined) => void,
+ *   setResendPreview: (item: string, override: { matchCount?: number, to?: string, failPreview?: boolean } | undefined) => void,
+ *   close: () => Promise<void>,
+ * }>}
  */
 export async function startFakeIris({ bootstrapVersion }) {
   const requests = [];
+  const documentOverrides = new Map();
+  const previewOverrides = new Map();
 
   const reply = (res, status, body, headers = {}) => {
     const text = typeof body === 'string' ? body : JSON.stringify(body);
@@ -144,6 +160,17 @@ export async function startFakeIris({ bootstrapVersion }) {
       }
       if (action.startsWith('doc/')) {
         const name = decodeURIComponent(action.slice('doc/'.length));
+        const overridden = documentOverrides.get(name);
+        if (overridden !== undefined && (method === 'GET' || method === 'HEAD')) {
+          const known = name === 'Demo.Stored.cls' ? STORED_DOCUMENT : SAMPLE_DOCUMENT;
+          if (method === 'HEAD') {
+            res.writeHead(200, { ETag: `"${known.ts}"` });
+            res.end();
+          } else {
+            reply(res, 200, envelope({ ...known, name, content: overridden }));
+          }
+          return;
+        }
         if (name === 'Demo.Stored.cls') {
           if (method === 'HEAD') {
             res.writeHead(200, { ETag: `"${STORED_DOCUMENT.ts}"` });
@@ -236,7 +263,8 @@ export async function startFakeIris({ bootstrapVersion }) {
       return;
     }
     if (method === 'POST' && path === '/api/executemcp/v2/interop/message/resend' && body?.action === 'resendFiltered') {
-      const matchCount = matchCountOf(body.item);
+      const override = previewOverrides.get(body.item);
+      const matchCount = override?.matchCount ?? matchCountOf(body.item);
       const maxMessages = body.maxMessages ?? 100;
       const preview = body.dryRun === undefined || body.dryRun === true;
       // `Demo.Refused`: IRIS refuses the preview and the execute alike, the way the ExecuteMCPv2 handlers refuse
@@ -249,7 +277,7 @@ export async function startFakeIris({ bootstrapVersion }) {
         ));
         return;
       }
-      if (body.item === 'Demo.PreviewDown' && preview) {
+      if ((body.item === 'Demo.PreviewDown' || override?.failPreview === true) && preview) {
         reply(res, 500, errorEnvelope('ERROR #5002: the fake IRIS preview failed', 5002));
         return;
       }
@@ -262,7 +290,7 @@ export async function startFakeIris({ bootstrapVersion }) {
           item: body.item,
           status: body.status ?? 'Errored',
           from: body.from,
-          to: body.to ?? body.from,
+          to: body.to ?? override?.to ?? body.from,
           maxMessages,
         }));
       } else if (!body.confirm) {
@@ -306,6 +334,14 @@ export async function startFakeIris({ bootstrapVersion }) {
   return {
     port: server.address().port,
     requests,
+    setDocumentContent: (name, lines) => {
+      if (lines === undefined) documentOverrides.delete(name);
+      else documentOverrides.set(name, [...lines]);
+    },
+    setResendPreview: (item, override) => {
+      if (override === undefined) previewOverrides.delete(item);
+      else previewOverrides.set(item, { ...override });
+    },
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections();

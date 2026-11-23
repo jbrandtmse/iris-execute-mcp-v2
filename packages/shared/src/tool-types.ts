@@ -348,8 +348,10 @@ export interface ToolContext {
    * Present only on a call that came off the wire. It is `undefined` for a context built directly (a unit test,
    * an in-process callback), which a gate treats as today's contract: no question, the gate's own checks decide.
    * On the wire it resolves to `{ proceed: true }` for a client that does not declare form elicitation, and to
-   * `{ proceed: true }` after the person ticked Confirm and accepted. A decline, a dismissal and an accept without
-   * the tick resolve to a `CONFIRMATION_DECLINED` refusal that changes nothing and is never asked again.
+   * `{ proceed: true }` after the person ticked Confirm and accepted the scope as it still is. A decline, a dismissal
+   * and an accept without the tick resolve to a `CONFIRMATION_DECLINED` refusal that changes nothing and is never asked
+   * again. A scope that changed while the person was answering is asked again, once; a second change resolves to a
+   * `CONFIRMATION_SCOPE_CHANGED` refusal that changes nothing. A gate never compares a scope itself.
    */
   confirm?(request: ConfirmationRequest): Promise<ConfirmationOutcome>;
 }
@@ -364,11 +366,28 @@ export interface ConfirmationRequest {
   /** What the call acts on. */
   target: string;
   /**
-   * What the call covers. A function is resolved only when the client can be asked, and may return `undefined`
-   * to say there is nothing to ask (the call then proceeds as it would without a dialog). When it throws,
-   * `confirm` rejects with that error and nothing is asked, so the gate ends the call with it.
+   * What the call covers. A function is resolved only when the client can be asked, and again on the round that
+   * carries the person's accept (never on a decline), so the scope the person approved is compared with the scope the
+   * call has now. It may return `undefined` to say there is nothing to ask (the call then proceeds as it would without
+   * a dialog). When it throws, `confirm` rejects with that error and nothing is asked, so the gate ends the call with it.
+   *
+   * A scope is the dialog text, which the confirmation compares whole, or a {@link ConfirmationScope} whose `binding`
+   * is the value that it compares instead.
    */
-  scope: string | (() => Promise<string | undefined>);
+  scope: string | ConfirmationScope | (() => Promise<string | ConfirmationScope | undefined>);
+}
+
+/**
+ * A scope whose dialog text and binding value differ. `text` is what the dialog shows. `binding` is the value that the
+ * person's answer is bound to: an answer given for one binding is never used for another, so a gate puts there every
+ * part of the scope that decides what the call changes (a list the text cuts short, for example) and leaves out what
+ * only changes how the dialog reads. It is compared as JSON with its keys in a fixed order.
+ */
+export interface ConfirmationScope {
+  /** The dialog text. */
+  text: string;
+  /** The value the answer is bound to. */
+  binding: unknown;
 }
 
 /** The answer to a {@link ConfirmationRequest}: carry on, or end the call with `result`. */

@@ -1030,12 +1030,18 @@ describe("Story 43.3: confirmation (resend)", () => {
   };
   const decline = async (): Promise<ConfirmOutcome> => ({ proceed: false, result: declinedResult });
 
+  type ResolvedScope = Awaited<ReturnType<Extract<ConfirmRequest["scope"], () => unknown>>>;
+
   /** The scope function of the first request. */
-  function scopeOf(requests: ConfirmRequest[]): () => Promise<string | undefined> {
+  function scopeOf(requests: ConfirmRequest[]): () => Promise<ResolvedScope> {
     const scope = requests[0]?.scope;
     if (typeof scope !== "function") throw new Error("the confirm request carried no scope function");
     return scope;
   }
+
+  /** The dialog text of a resolved scope; `undefined` stays `undefined`. */
+  const textOfScope = (scope: ResolvedScope): string | undefined =>
+    scope === undefined || typeof scope === "string" ? scope : scope.text;
 
   /** The POSTs made so far whose body has `dryRun` set to `dryRun`. */
   function postsWithDryRun(dryRun: boolean) {
@@ -1250,7 +1256,7 @@ describe("Story 43.3: confirmation (resend)", () => {
       await messageResendTool.handler(FILTER_ARGS, { ...ctx, confirm });
       preflightAnswer = async () => envelope(dryRunReply({ matchCount: 7 }));
 
-      await expect(scopeOf(requests)()).resolves.toBe(
+      expect(textOfScope(await scopeOf(requests)())).toBe(
         "7 message(s) match now (status Errored, from 2026-07-01 00:00:00 to 2026-07-02 00:00:00); " +
           "IRIS counts again when it runs and resends at most 100",
       );
@@ -1262,7 +1268,7 @@ describe("Story 43.3: confirmation (resend)", () => {
       preflightAnswer = async () =>
         envelope(dryRunReply({ matchCount: 42, status: "Discarded", maxMessages: 250 }));
 
-      await expect(scopeOf(requests)()).resolves.toBe(
+      expect(textOfScope(await scopeOf(requests)())).toBe(
         "42 message(s) match now (status Discarded, from 2026-07-01 00:00:00 to 2026-07-02 00:00:00); " +
           "IRIS counts again when it runs and resends at most 250",
       );
@@ -1276,12 +1282,41 @@ describe("Story 43.3: confirmation (resend)", () => {
       await messageResendTool.handler(FILTER_ARGS, { ...ctx, confirm });
       preflightAnswer = async () => envelope(dryRunReply({ matchCount, maxMessages }));
 
-      const text = await scopeOf(requests)();
+      const text = textOfScope(await scopeOf(requests)());
 
       expect(text).toBe(
         `${start} (status Errored, from 2026-07-01 00:00:00 to 2026-07-02 00:00:00); ` +
           `IRIS counts again when it runs and resends at most ${maxMessages}`,
       );
+    });
+
+    it("the scope binds the status, the window the caller gave and the cap, and neither the count nor a `to` IRIS filled in", async () => {
+      const { confirm, requests } = recordingConfirm(proceed);
+      await messageResendTool.handler(FULL_ARGS, { ...ctx, confirm });
+      preflightAnswer = async () =>
+        envelope(dryRunReply({ matchCount: 42, status: "Discarded", maxMessages: 250 }));
+      const first = await scopeOf(requests)();
+      preflightAnswer = async () =>
+        envelope(dryRunReply({ matchCount: 43, status: "Discarded", maxMessages: 250 }));
+      const second = await scopeOf(requests)();
+
+      expect(first).toStrictEqual({
+        text: expect.stringContaining("42 message(s) match now"),
+        binding: { status: "Discarded", from: "2026-07-01 00:00:00", to: "2026-07-02 00:00:00", maxMessages: 250 },
+      });
+      expect(typeof second === "object" ? second?.binding : second).toStrictEqual(typeof first === "object" ? first?.binding : first);
+    });
+
+    it("the scope binds no `to` when the caller gave none, so the second IRIS fills in does not change it", async () => {
+      const { confirm, requests } = recordingConfirm(proceed);
+      await messageResendTool.handler(FILTER_ARGS, { ...ctx, confirm });
+      preflightAnswer = async () => envelope(dryRunReply({ matchCount: 7, to: "2026-07-02 00:00:05" }));
+      const scope = await scopeOf(requests)();
+
+      expect(scope).toStrictEqual({
+        text: expect.stringContaining("to 2026-07-02 00:00:05"),
+        binding: { status: "Errored", from: "2026-07-01 00:00:00", to: undefined, maxMessages: 100 },
+      });
     });
 
     it.each([
@@ -1466,7 +1501,7 @@ describe("Story 43.3: confirmation (resend)", () => {
       mockHttp.post.mockClear();
       let scopeText: string | undefined = "not run";
       const { confirm } = recordingConfirm(async (request) => {
-        if (typeof request.scope === "function") scopeText = await request.scope();
+        if (typeof request.scope === "function") scopeText = textOfScope(await request.scope());
         return { proceed: true };
       });
 
@@ -1489,7 +1524,7 @@ describe("Story 43.3: confirmation (resend)", () => {
       preflightAnswer = async () => envelope(dryRunReply({ matchCount: 101, maxMessages: 100 }));
       let scopeText: string | undefined = "not run";
       const { confirm } = recordingConfirm(async (request) => {
-        if (typeof request.scope === "function") scopeText = await request.scope();
+        if (typeof request.scope === "function") scopeText = textOfScope(await request.scope());
         return { proceed: true };
       });
 

@@ -1803,9 +1803,12 @@ describe("Story 43.3: confirmation (execute)", () => {
     expect(confirm.mock.calls[0]?.[0]).toEqual({
       operation: "promote changes to another server",
       target: "server 'target', namespace SADEMO",
-      scope:
-        "3 step(s) from server 'source': #1 mappings createMapping global::NewGlobal; " +
-        "#3 webapps modifyWebApp /api/new; #4 config setConfig Maxprocesses",
+      scope: {
+        text:
+          "3 step(s) from server 'source': #1 mappings createMapping global::NewGlobal; " +
+          "#3 webapps modifyWebApp /api/new; #4 config setConfig Maxprocesses",
+        binding: [],
+      },
     });
     expect(result.isError).toBeFalsy();
     expect(targetHttp.post).toHaveBeenCalledTimes(3);
@@ -1831,8 +1834,10 @@ describe("Story 43.3: confirmation (execute)", () => {
     expect(confirm.mock.calls[0]?.[0]).toEqual({
       operation: "promote changes to another server",
       target: "server 'target', namespace SADEMO",
-      scope:
-        "2 step(s) from server 'source': #1 documents putAndCompile Changed.cls; #2 documents putAndCompile New.cls",
+      scope: {
+        text: "2 step(s) from server 'source': #1 documents putAndCompile Changed.cls; #2 documents putAndCompile New.cls",
+        binding: [],
+      },
     });
     expect(result.isError).toBeFalsy();
     expect(targetHttp.put).toHaveBeenCalledTimes(2);
@@ -1905,7 +1910,7 @@ describe("Story 43.3: confirmation (execute)", () => {
       );
 
       expect(confirm).toHaveBeenCalledTimes(1);
-      expect(confirm.mock.calls[0]?.[0]?.scope).toBe(scopeCase.scope);
+      expect(confirm.mock.calls[0]?.[0]?.scope).toEqual({ text: scopeCase.scope, binding: [] });
     });
   }
 
