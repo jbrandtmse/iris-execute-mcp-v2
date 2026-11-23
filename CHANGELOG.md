@@ -2,6 +2,29 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
+## [Unreleased] — Epic 44 release summary
+
+This summarises the Epic 44 release for the release notes. The story sections below have the details. Every behaviour change here is a sanctioned AD-15 change, recorded with its wave-9 decision.
+
+### Behavior changes
+
+- **VS Code client targets (Story 44.2).** `iris-mcp-clients apply --client vscode` now writes the files the Copilot harness reads: `~/.copilot/mcp-config.json` (or `$COPILOT_HOME`) and the workspace `.mcp.json`, keyed `mcpServers` with `${VAR}` references. It no longer writes the old `mcp.json` files or an `inputs` password prompt. In a `.mcp.json` that Claude Code and VS Code share, each entry has one owner, and the other client's write to that entry is refused.
+- **Confirmations are bound to the scope shown (Story 44.3, `S-44.3-scope-changed-refusal`).** If a confirmed action's scope changes after the dialog, the tool asks once more, then refuses with the new code `CONFIRMATION_SCOPE_CHANGED`.
+- **Bootstrap reports a failed compile honestly (Story 44.4, `S-44.4-unconfigured-stop`, `S-44.4-current-check`).** After a failed compile the setup steps stop, so the web application is not registered over broken classes. Each later start re-checks the compile and names any class that is still failing.
+- **New variable `IRIS_CREDENTIAL_NAME` (Story 44.6).** It lets the default profile, and `IRIS_PROFILES` entries without a password, take their password from the keychain or helper chain. When it is unset, behaviour is unchanged. Definitions the VS Code launcher provides now carry the non-secret `IRIS_*` settings for servers defined in user settings, and never a password.
+- **DocDB (Stories 44.1 and 44.7, `S-44.1-docdb-manage-text`, `S-44.7-docdb-property`, `S-44.7-docdb-manage-text`).** `iris_docdb_manage create` registers the database's security record, so every other DocDB tool can use it. `iris_docdb_property` gains a `path` that defaults to `$.<property>`, so a new property is filled and `find` matches it. `index` no longer re-creates a property that already exists.
+- **Database delete also dismounts (Story 44.7, `S-44.7-database-delete`).** `iris_database_manage delete` now dismounts the database and reports `dismounted`. It still keeps `IRIS.DAT`, so re-creating a database in the same directory needs the file removed first. The `provision-project-environment` prompt says so.
+- **Compile results are checked (Story 44.7).** `iris_doc_compile`, `iris_doc_load` and `iris_env_promote` now report a class or `.mac` routine that IRIS left failed, which they used to report as success. A wildcard is expanded only when it has a literal prefix, up to 1000 documents, and anything left unchecked is named in `checkNote`. A failing `.inc` or `.int` cannot be detected.
+- **Workspace settings can no longer redirect a stored password (Story 44.8).** Under VS Code's Local harness, the launcher no longer starts a server that a workspace, folder or language-specific `settings.json` defines or overrides. A warning names the override. To restore it, define the server in your user settings. The shared Server Manager import (`IRIS_SERVER_MANAGER=auto|required`) likewise never pairs a keychain password with a server from a workspace settings file. That server is skipped with a warning (`auto`), or startup fails naming it (`required`).
+
+### Known limitation
+
+- **The VS Code Copilot changes have not yet been tried in a live Copilot session.** Stories 44.2 and 44.6 are checked against VS Code's source and an emulated Copilot harness. If something does not work there, please report it as a GitHub issue.
+
+### IRIS side
+
+- `BOOTSTRAP_VERSION` moves from `1.1.0+3.3e97060f5bc4` to `1.1.0+5.6cbac260e73f`, for the `ExecuteMCPv2.REST.Config` change in Story 44.7. The server redeploys its IRIS classes on the next connect.
+
 ## [Unreleased] — Story 44.8: Local Resolver Hands a Password Only to User-Scoped Servers
 
 ### Fixed

@@ -4,20 +4,14 @@ type: 'bugfix'
 created: '2026-11-23'
 status: 'done'
 baseline_revision: 'ebf1e703b6a2f7cce5609a78ad53c6c58ff8dc47'
+baseline_commit: 'ebf1e703b6a2f7cce5609a78ad53c6c58ff8dc47'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
   - '{project-root}/.claude/rules/project-rules.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-iris-execute-mcp-v2-2026-10-14/ARCHITECTURE-SPINE.md'
 warnings: ['oversized']
-deferred:
-  - summary: >-
-      A repository-controlled MCP server env that sets IRIS_SM_SETTINGS_PATHS to the repository's own settings file makes that file count as user scope, so DW-761's workspace-scope guard does not apply and a keychain password can be paired with the repository's host.
-    evidence: |-
-      DW-761's rule treats files named in IRIS_SM_SETTINGS_PATHS as the operator's own choice (the spec did not say; the build chose it, and the README and CHANGELOG name it). Whether a repository can set that variable depends on the MCP client config it ships (for example a committed .mcp.json env block) and on that client's approval of project servers; not probed.
-    location: >-
-      packages/shared/src/server-manager-source.ts discoverScopedSettingsFiles
-    severity: medium (unverified)
+deferred: []
 ---
 
 <intent-contract>
@@ -106,6 +100,8 @@ Fixture: user layer `dev1 = {webServer:{scheme:"https",host:"user-iris.corp.exam
 - DW-761 *(lead, spec gate, decision #154; was this plan's `deferred:` item; same class as DW-752)*: the shared Server Manager import (`IRIS_SERVER_MANAGER=auto`, `packages/shared/src/server-manager-source.ts:288-310`) takes a server's definition from the first settings file that names it, with workspace `.vscode/settings.json` and `*.code-workspace` before user settings. It then looks the password up in the keychain by server name, so a workspace file may direct a stored password to its own host. **Probe first** (Rule #16), with fixtures under a scratch HOME and the fake keyring preload, never the real profile or keychain: does a workspace entry (full, or host-only) claim the slot, and is the keychain password then sent to the workspace's host? **If yes**, apply the same rule as the launcher: a keychain or helper password goes only to a server whose connection fields come from user settings alone. A workspace-defined or workspace-overridden server gets no stored password and a clear error naming the override, unless its own definition carries the password inline in that same file. Pin user-only servers byte-identical (Rule #19), mutation-prove the guard on the path it guards (Rule #59), and record the change as a sanctioned AD-15 change in the CHANGELOG. **If no**, close it with the probe evidence. Either way the disposition is terminal.
 
 ## Spec Change Log
+
+- 2026-11-23 (lead, dev_complete, decision #155): the build's deferred item (IRIS_SM_SETTINGS_PATHS set from repository-controlled launch config) is harvested as DW-762 and closed by-design. Launch config already chooses the command, which is arbitrary code execution, and can set IRIS_HOST with IRIS_CREDENTIAL_NAME; it sits inside the trust boundary of the client's project-server approval. The DW-761 guard defends against settings files, which are data.
 
 - 2026-11-23 (lead, spec gate, decision #154): accepted P-3 (the fail-safe warning, with no Server Manager prompt) and P-4 (workspace-only servers get the warning under Local: the sanctioned AD-15 change, short-lived because the Local harness is removed in February 2027). The `deferred:` shared-import item is harvested as DW-761 and taken into this story: same class, before the release. The spine is amended at the gate: an AD-15 Story 44.8 entry, and AD-9 extended to the Local resolve step and the shared import. The changeset is `@iris-mcp/shared` patch, and the extension follows the fixed group (P-6).
 

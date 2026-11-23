@@ -4297,3 +4297,9 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-8-local-resolver-hands-a-password-only-to-user-scoped-servers.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: packages/shared/src/server-manager-source.ts:288-310 (candidate files in precedence order, workspace first; first sighting decides); credential chain keyed by server name (credential-chain.ts); unprobed whether a host-only workspace entry claims the slot
 - 2026-11-23T21:35:53Z status=routed owner=44-8-local-resolver-hands-a-password-only-to-user-scoped-servers by=harvest note=taken into Story 44.8 at its spec gate (decision #154): probe, then fix with the user-scope rule or close with evidence
+
+### DW-762: A repository-controlled MCP server env that sets IRIS_SM_SETTINGS_PATHS to the repository's own settings file makes that file count as user scope, bypassing DW-761's workspace-scope guard
+- source: spec-44-8-local-resolver-hands-a-password-only-to-user-scoped-servers.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: server-manager-source.ts discoverScopedSettingsFiles treats IRIS_SM_SETTINGS_PATHS files as the operator's own; unprobed whether a repo can set it
+- 2026-11-23T22:31:21Z status=routed owner=44-8-local-resolver-hands-a-password-only-to-user-scoped-servers by=harvest note=lead triage at dev_complete (decision #155)
+- 2026-11-23T22:31:21Z status=by-design owner=44-8-local-resolver-hands-a-password-only-to-user-scoped-servers by=lead note=decision #155: whoever sets a server's launch env (a committed .mcp.json env block, approved by the client) also chooses its command, which is arbitrary code execution, and can equally set IRIS_HOST with IRIS_CREDENTIAL_NAME; the launch config is inside the trust boundary the client's project-server approval guards, so this adds no new capability. The guard defends against settings files, which are data, not against launch config.
