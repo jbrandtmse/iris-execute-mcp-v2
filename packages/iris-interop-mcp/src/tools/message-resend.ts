@@ -633,8 +633,8 @@ export const messageResendTool: ToolDefinition = {
             const { matchCount, maxMessages } = found;
             if (typeof matchCount !== "number" || typeof maxMessages !== "number") return undefined;
             if (matchCount < 1 || matchCount > maxMessages) return undefined;
-            // The person approves the filter and the cap. The count, and a `to` that IRIS filled in (the current second),
-            // change from round to round, so the binding leaves them out; IRIS counts again when it runs.
+            // The person approves the filter and the cap. The count, and a `to` that IRIS filled in (the current second, for
+            // an omitted or empty `to`), change from round to round, so the binding leaves them out; IRIS counts again when it runs.
             return {
               text:
                 `${matchCount} message(s) match now (status ${found.status}, from ${found.from} to ${found.to}); ` +
@@ -642,7 +642,7 @@ export const messageResendTool: ToolDefinition = {
               binding: {
                 status: found.status,
                 from: found.from,
-                to: input.to === undefined ? undefined : found.to,
+                to: input.to === undefined || input.to === "" ? undefined : found.to,
                 maxMessages,
               },
             };

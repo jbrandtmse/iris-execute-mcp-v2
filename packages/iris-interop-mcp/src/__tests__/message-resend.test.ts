@@ -1319,6 +1319,18 @@ describe("Story 43.3: confirmation (resend)", () => {
       });
     });
 
+    it("the scope binds no `to` when the caller gave an empty one, which IRIS fills in like an omitted one", async () => {
+      const { confirm, requests } = recordingConfirm(proceed);
+      await messageResendTool.handler({ ...FILTER_ARGS, to: "" }, { ...ctx, confirm });
+      preflightAnswer = async () => envelope(dryRunReply({ matchCount: 7, to: "2026-07-02 00:00:05" }));
+      const scope = await scopeOf(requests)();
+
+      expect(scope).toStrictEqual({
+        text: expect.stringContaining("to 2026-07-02 00:00:05"),
+        binding: { status: "Errored", from: "2026-07-01 00:00:00", to: undefined, maxMessages: 100 },
+      });
+    });
+
     it.each([
       ["no message matches", async () => envelope(dryRunReply({ matchCount: 0 }))],
       ["more messages match than the cap allows", async () => envelope(dryRunReply({ matchCount: 101, maxMessages: 100 }))],

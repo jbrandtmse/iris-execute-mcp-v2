@@ -25,7 +25,20 @@ import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { resultOf, type Json } from "./story-43-2-qa-hand-wire";
 import { FROM, PROMOTE_DIFF, promoteArgs } from "./story-43-3-qa-gates";
-import { DECLINED, ELICITING, TICKED, connect, dialogMessage, openRig, plainResult, requireFreshDists, stopAllRigs, type Conn, type GateRig } from "./story-43-3-qa-wire";
+import {
+  DECLINED,
+  ELICITING,
+  TICKED,
+  connect,
+  dialogMessage,
+  openRig,
+  plainResult,
+  requireFreshDists,
+  sampleWithStorage,
+  stopAllRigs,
+  type Conn,
+  type GateRig,
+} from "./story-43-3-qa-wire";
 
 requireFreshDists("iris-dev-mcp", "iris-interop-mcp");
 
@@ -35,19 +48,7 @@ const TIMEOUT = 60_000;
 const TOOL = "iris_env_promote";
 const NAME = "Demo.Sample.cls";
 
-/** The promoted class with a Storage definition called `name`: the target copy once it has gained one. */
-const withStorage = (name: string): string[] => [
-  "Class Demo.Sample Extends %RegisteredObject",
-  "{",
-  "Method A()",
-  "{",
-  "}",
-  `Storage ${name}`,
-  "{",
-  "<Type>%Storage.Persistent</Type>",
-  "}",
-  "}",
-];
+const withStorage = sampleWithStorage;
 
 const ACCEPT = { confirm: TICKED };
 const kindOf = (line: { message: Json }): string => line.message?.result?.resultType ?? (line.message?.error ? "error" : "?");

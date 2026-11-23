@@ -18,13 +18,16 @@
 //   with the error in the envelope, and one of item `Demo.PreviewDown` answers its preview with an HTTP 500 error
 //   envelope); a document called `Demo.Missing.cls` is absent.
 //
-//   Two opt-in overrides let a test change what the fake answers while a call is in flight (Story 44.3). With none set,
+//   Opt-in overrides let a test change what the fake answers while a call is in flight (Story 44.3). With none set,
 //   every reply is exactly as described above. `setDocumentContent(name, lines)` makes GET and HEAD of `doc/<name>`
-//   answer a document whose content is `lines` (`undefined` removes the override); `setResendPreview(item, { matchCount,
-//   to })` makes the `resendFiltered` route, preview and execute alike, count `matchCount` messages for `item` and
-//   answer `to` in a preview when the request has no `to` (IRIS fills an omitted `to` with the current second;
+//   answer a document whose content is `lines`, under a timestamp of its own (a new one for every call, as IRIS gives a
+//   changed document a new `ts`); `undefined` removes the override. `setDocumentFailure(name, true)` makes GET and HEAD
+//   of `doc/<name>` answer an HTTP 500 error envelope (`false` removes it). `setResendPreview(item, { matchCount, to })`
+//   makes the `resendFiltered` route, preview and execute alike, count `matchCount` messages for `item` and answer `to`
+//   in a preview when the request's `to` is absent or empty (IRIS fills such a `to` with the current second;
 //   `MessageResend.cls`); `failPreview: true` answers every preview of `item` with an HTTP 500 error envelope;
-//   `setResendPreview(item, undefined)` removes it. A request's own `to` is never replaced.
+//   `setResendPreview(item, undefined)` removes it. A request's own non-empty `to` is never replaced. Without an
+//   override, a preview answers an absent or empty `to` with the request's `from`.
 
 import http from 'node:http';
 
@@ -94,6 +97,7 @@ function matchCountOf(item) {
  *   port: number,
  *   requests: Array<{ method: string, url: string, body: string }>,
  *   setDocumentContent: (name: string, lines: string[] | undefined) => void,
+ *   setDocumentFailure: (name: string, failing: boolean) => void,
  *   setResendPreview: (item: string, override: { matchCount?: number, to?: string, failPreview?: boolean } | undefined) => void,
  *   close: () => Promise<void>,
  * }>}
@@ -101,6 +105,8 @@ function matchCountOf(item) {
 export async function startFakeIris({ bootstrapVersion }) {
   const requests = [];
   const documentOverrides = new Map();
+  const failingDocuments = new Set();
+  let overrideVersion = 0;
   const previewOverrides = new Map();
 
   const reply = (res, status, body, headers = {}) => {
@@ -160,14 +166,23 @@ export async function startFakeIris({ bootstrapVersion }) {
       }
       if (action.startsWith('doc/')) {
         const name = decodeURIComponent(action.slice('doc/'.length));
+        if (failingDocuments.has(name) && (method === 'GET' || method === 'HEAD')) {
+          if (method === 'HEAD') {
+            res.writeHead(500);
+            res.end();
+          } else {
+            reply(res, 500, errorEnvelope(`ERROR #5002: the fake IRIS could not read ${name}`, 5002));
+          }
+          return;
+        }
         const overridden = documentOverrides.get(name);
         if (overridden !== undefined && (method === 'GET' || method === 'HEAD')) {
           const known = name === 'Demo.Stored.cls' ? STORED_DOCUMENT : SAMPLE_DOCUMENT;
           if (method === 'HEAD') {
-            res.writeHead(200, { ETag: `"${known.ts}"` });
+            res.writeHead(200, { ETag: `"${overridden.ts}"` });
             res.end();
           } else {
-            reply(res, 200, envelope({ ...known, name, content: overridden }));
+            reply(res, 200, envelope({ ...known, name, ts: overridden.ts, content: overridden.lines }));
           }
           return;
         }
@@ -290,7 +305,7 @@ export async function startFakeIris({ bootstrapVersion }) {
           item: body.item,
           status: body.status ?? 'Errored',
           from: body.from,
-          to: body.to ?? override?.to ?? body.from,
+          to: body.to === undefined || body.to === '' ? (override?.to ?? body.from) : body.to,
           maxMessages,
         }));
       } else if (!body.confirm) {
@@ -336,7 +351,14 @@ export async function startFakeIris({ bootstrapVersion }) {
     requests,
     setDocumentContent: (name, lines) => {
       if (lines === undefined) documentOverrides.delete(name);
-      else documentOverrides.set(name, [...lines]);
+      else {
+        overrideVersion += 1;
+        documentOverrides.set(name, { lines: [...lines], ts: `2026-01-03 00:00:00.${String(overrideVersion % 1000).padStart(3, '0')}` });
+      }
+    },
+    setDocumentFailure: (name, failing) => {
+      if (failing) failingDocuments.add(name);
+      else failingDocuments.delete(name);
     },
     setResendPreview: (item, override) => {
       if (override === undefined) previewOverrides.delete(item);

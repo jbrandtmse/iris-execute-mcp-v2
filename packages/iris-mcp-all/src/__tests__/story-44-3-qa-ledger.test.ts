@@ -12,13 +12,17 @@
  *    of its own (other arguments, other hash), so the two entries are two logical calls, not one call with two entries. This pins the
  *    residual that the build named ("a round that ends before the handler runs leaves its pending ask until the TTL sweep"): the only
  *    way a client can end a round before the handler runs while echoing a state is to change the arguments, and then the state is not
- *    that call's.
+ *    that call's;
+ *  - a deciding round whose tool throws before it reaches the dialog (`regenerateStorage`, the document read answers HTTP 500) is one
+ *    `error` entry, and the stop of the process adds no `unanswered` entry (the release of the echoed ask runs on the throw path too);
+ *  - a `resendFiltered` whose preview fails on the round that carries the accept is one `error` entry with `confirmation: "accepted"`,
+ *    and the stop of the process adds no `unanswered` entry (the accept used the nonce and removed its ask before the preview ran).
  * The file fails, never skips, on a stale dist.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
 import { resultOf, type Json } from "./story-43-2-qa-hand-wire";
-import { PROMOTE_DIFF, promoteArgs } from "./story-43-3-qa-gates";
+import { FROM, PROMOTE_DIFF, STORAGE_EDIT, promoteArgs } from "./story-43-3-qa-gates";
 import {
   DECLINED,
   ELICITING,
@@ -29,33 +33,20 @@ import {
   openRig,
   plainResult,
   requireFreshDists,
+  sampleWithStorage,
   stopAllRigs,
   type Conn,
   type Era,
   type GateRig,
 } from "./story-43-3-qa-wire";
 
-requireFreshDists("iris-dev-mcp");
+requireFreshDists("iris-dev-mcp", "iris-interop-mcp");
 
 afterEach(stopAllRigs);
 
 const TIMEOUT = 60_000;
 const TOOL = "iris_env_promote";
 const NAME = "Demo.Sample.cls";
-
-/** The target copy of the promoted class once it has gained a Storage definition called `name`. */
-const withStorage = (name: string): string[] => [
-  "Class Demo.Sample Extends %RegisteredObject",
-  "{",
-  "Method A()",
-  "{",
-  "}",
-  `Storage ${name}`,
-  "{",
-  "<Type>%Storage.Persistent</Type>",
-  "}",
-  "}",
-];
 
 /** A connection on `era` to a fresh dev server, and the arguments of a real plan's execute. */
 async function open(era: Era): Promise<{ rig: GateRig; conn: Conn; args: Json }> {
@@ -72,7 +63,7 @@ async function open(era: Era): Promise<{ rig: GateRig; conn: Conn; args: Json }>
 async function reAsked(era: Era, conn: Conn, rig: GateRig, args: Json): Promise<(answer: Json) => Promise<Json>> {
   const call = conn.call(TOOL, args);
   const first = await call.ask();
-  rig.setDocumentContent("b", NAME, withStorage("Default"));
+  rig.setDocumentContent("b", NAME, sampleWithStorage("Default"));
   if (era === "legacy") {
     // The call's own response is awaited by the answer of the second dialog; when nobody answers it the process stops first.
     first.send(TICKED).response.catch(() => undefined);
@@ -119,6 +110,49 @@ describe.each(ERAS.map((era) => [era] as const))("Story 44.3 QA on the %s era: o
       expect(rig.writes("b")).toEqual([]);
       const entries = await rig.entries(2);
       expect(entries.map((entry) => `${entry.action}:${entry.outcome}:${entry.confirmation ?? ""}`)).toEqual(["plan:ok:", "execute:denied:declined"]);
+    },
+    TIMEOUT,
+  );
+});
+
+/** The entries of the audit file as `action:outcome:confirmation`. */
+const shapes = (entries: Json[]): string[] => entries.map((entry) => `${entry.action}:${entry.outcome}:${entry.confirmation ?? ""}`);
+
+describe.each(ERAS.map((era) => [era] as const))("Story 44.3 review on the %s era: a deciding round that ends in an error is one entry", (era) => {
+  it(
+    "a deciding round whose tool throws before the dialog (the document read fails) is one error entry, and the stop adds none",
+    async () => {
+      const rig = await openRig({ pkg: "iris-dev-mcp" });
+      const conn = await connect(rig, era, ELICITING);
+      const first = await conn.call("iris_doc_edit", { action: "regenerateStorage", name: "Demo.Stored.cls", edits: [STORAGE_EDIT] }).ask();
+      rig.setDocumentFailure("a", "Demo.Stored.cls", true);
+
+      const end = await first.answer(TICKED);
+
+      expect(plainResult(resultOf(end)).isError).toBe(true);
+      expect(rig.writes("a")).toEqual([]);
+      rig.wire.endInput();
+      await rig.wire.exit();
+      expect(shapes(await rig.entries(1))).toEqual(["regenerateStorage:error:"]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "a resendFiltered whose preview fails on the round that carries the accept is one error entry, and the stop adds none",
+    async () => {
+      const rig = await openRig({ pkg: "iris-interop-mcp" });
+      const conn = await connect(rig, era, ELICITING);
+      const first = await conn.call("iris_message_resend", { action: "resendFiltered", item: "Demo.Item", from: FROM, dryRun: false, confirm: true }).ask();
+      rig.setResendPreview("a", "Demo.Item", { failPreview: true });
+
+      const end = await first.answer(TICKED);
+
+      expect(plainResult(resultOf(end)).isError).toBe(true);
+      expect(rig.writes("a").filter((line) => line.includes('"dryRun":false'))).toEqual([]);
+      rig.wire.endInput();
+      await rig.wire.exit();
+      expect(shapes(await rig.entries(1))).toEqual(["resendFiltered:error:accepted"]);
     },
     TIMEOUT,
   );

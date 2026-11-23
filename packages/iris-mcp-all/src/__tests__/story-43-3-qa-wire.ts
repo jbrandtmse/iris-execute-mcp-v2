@@ -45,6 +45,20 @@ export const UNTICKED: Json = { action: "accept", content: { confirm: false } };
 export const DECLINED: Json = { action: "decline" };
 export const DISMISSED: Json = { action: "cancel" };
 
+/** The fake's `Demo.Sample.cls` once it has gained a Storage definition called `name`: the target copy a promotion would drop it from. */
+export const sampleWithStorage = (name: string): string[] => [
+  "Class Demo.Sample Extends %RegisteredObject",
+  "{",
+  "Method A()",
+  "{",
+  "}",
+  `Storage ${name}`,
+  "{",
+  "<Type>%Storage.Persistent</Type>",
+  "}",
+  "}",
+];
+
 /** Throw, naming the packages, when a dist this file drives is missing or older than its source. */
 export function requireFreshDists(...packages: string[]): void {
   const stale = ["shared", ...packages].map((pkg) => [pkg, staleDistReason(REPO_ROOT, pkg)] as const).filter(([, reason]) => reason !== undefined);
@@ -90,6 +104,8 @@ export interface GateRig {
   writes: (which?: "a" | "b") => string[];
   /** Make listener A or B serve `lines` as the content of the document `name` (the fake's `setDocumentContent`); `undefined` removes it. */
   setDocumentContent: (which: "a" | "b", name: string, lines: string[] | undefined) => void;
+  /** Make listener A or B answer GET and HEAD of the document `name` with an HTTP 500 error envelope (the fake's `setDocumentFailure`). */
+  setDocumentFailure: (which: "a" | "b", name: string, failing: boolean) => void;
   /** Make listener A or B count and date the `resendFiltered` preview of `item` as `override` says (the fake's `setResendPreview`). */
   setResendPreview: (which: "a" | "b", item: string, override: { matchCount?: number; to?: string; failPreview?: boolean } | undefined) => void;
   auditFile: string;
@@ -142,6 +158,7 @@ export async function openRig(options: RigOptions): Promise<GateRig> {
     requests: (which = "a") => of(which).map(describeRequest),
     writes: (which = "a") => of(which).filter(isWrite).map(describeRequest),
     setDocumentContent: (which, name, lines) => (which === "a" ? a : b).setDocumentContent(name, lines),
+    setDocumentFailure: (which, name, failing) => (which === "a" ? a : b).setDocumentFailure(name, failing),
     setResendPreview: (which, item, override) => (which === "a" ? a : b).setResendPreview(item, override),
     auditFile,
     entries: async (minimum) => {

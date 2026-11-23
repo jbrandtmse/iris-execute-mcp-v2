@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { closeSdkRigs, openSdkRig } from "./sdk-confirmation-rig.js";
 import type { SdkRig } from "./sdk-confirmation-rig.js";
 import { FROM, PROMOTE_DIFF } from "./story-43-3-qa-gates";
+import { sampleWithStorage } from "./story-43-3-qa-wire";
 import type { ElicitationAnswer, SdkVersionNegotiation } from "./process-gate-helpers.js";
 
 type Era = "legacy" | "modern";
@@ -41,18 +42,7 @@ afterEach(closeSdkRigs);
 // -- the promotion rows ---------------------------------------------------------------------------------------------------------------
 
 /** The class the fake serves for `Demo.Sample.cls`, with a `Storage Default` definition: the target copy once it has gained one. */
-const WITH_STORAGE = [
-  "Class Demo.Sample Extends %RegisteredObject",
-  "{",
-  "Method A()",
-  "{",
-  "}",
-  "Storage Default",
-  "{",
-  "<Type>%Storage.Persistent</Type>",
-  "}",
-  "}",
-];
+const WITH_STORAGE = sampleWithStorage("Default");
 
 /** The two writes that the promotion makes to the target: the save of the document, then the compile. */
 const PROMOTE_PUT =
@@ -80,8 +70,7 @@ const promoteArgs = (plan: unknown, extra: Record<string, unknown> = {}): Record
   ...extra,
 });
 
-/** The promoted class with a Storage definition called `name`: the target copy once it has gained one. */
-const withStorage = (name: string): string[] => WITH_STORAGE.map((line) => (line === "Storage Default" ? `Storage ${name}` : line));
+const withStorage = sampleWithStorage;
 
 describe.each(ERAS)("Story 44.3 on the %s era: a promotion whose Storage drops change while the dialog is open", (_era, negotiation) => {
   /** A rig with a second server, and the plan that a real `plan` call returns for the diff. */
