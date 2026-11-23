@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { dropRemovedShared, recordAdoptedOwners, recordingClients, soleOwner, sharedPeers } from "../shared-files.js";
+import { dropRemovedShared, ownerClients, recordAdoptedOwners, recordingClients, soleOwner, sharedPeers } from "../shared-files.js";
 import { addStash, dropManaged, findStash, isManagerCreated, readState, recordManaged, type ManagerState } from "../state.js";
 import { CLIENT_ADAPTERS } from "../adapters.js";
 
@@ -54,7 +54,7 @@ interface World {
   a: string;
   b: string;
   stateFile: string;
-  run: (cwd: string, args: string[]) => Run;
+  run: (cwd: string, args: string[], extraEnv?: Record<string, string>) => Run;
 }
 
 const made: string[] = [];
@@ -68,7 +68,7 @@ function makeWorld(): World {
   const a = realpathSync(mkdtempSync(path.join(tmpdir(), "po442-a-")));
   const b = realpathSync(mkdtempSync(path.join(tmpdir(), "po442-b-")));
   made.push(home, a, b);
-  const run: World["run"] = (cwd, args) => {
+  const run: World["run"] = (cwd, args, extraEnv = {}) => {
     const result = spawnSync(process.execPath, [BIN, ...args], {
       cwd,
       env: {
@@ -83,6 +83,7 @@ function makeWorld(): World {
         USERPROFILE: home,
         APPDATA: path.join(home, "AppData", "Roaming"),
         IRIS_SERVER_MANAGER: "auto",
+        ...extraEnv,
       },
       encoding: "utf8",
       input: "",
@@ -475,6 +476,118 @@ describe("the other per-file ledger consumers (built CLI, scratch HOME)", () => 
   }, T);
 });
 
+/** An `enable` or `disable` of the one server for `client` in project scope. */
+const TOGGLE = (verb: string, client: string): string[] => [verb, "--client", client, "--scope", "project", "--server", "iris-dev-mcp", "--json"];
+
+/** The state file as a pre-44.2 install wrote it: no record or stash names its file. */
+function writePathlessState(world: World, extraStashes: unknown[] = []): void {
+  const state = ledger(world);
+  writeFileSync(
+    world.stateFile,
+    JSON.stringify({ version: 1, entries: state.entries.map(({ path: _dropped, ...rest }) => rest), stashes: [...state.stashes.map(({ path: _dropped, ...rest }) => rest), ...extraStashes] }) + "\n",
+  );
+}
+
+describe("DW-742: an enable in the shared .mcp.json records the enabler for the file (built CLI, scratch HOME)", () => {
+  const EMPTY = '{\n  "mcpServers": {}\n}\n';
+  const OLD = "2026-08-01T00:00:00.000Z";
+
+  // Lead matrix E5. Captured from the built CLI of the pre-fix tree: the enable exited 0 and recorded nobody, and the
+  // later vscode write exited 0 with changed:1 over claude-code's entry.
+  it("E5: a pre-44.2 claude-code record plus a pathless vscode stash of its entry; vscode enable, then a different vscode write is refused", () => {
+    const world = makeWorld();
+    seedMcp(world.b, EMPTY);
+    expect(world.run(world.b, APPLY("claude-code", "server-manager")).status).toBe(0);
+    const entry = (JSON.parse(readFileSync(mcpJson(world.b), "utf8")) as { mcpServers: Record<string, unknown> }).mcpServers["iris-dev-mcp"];
+    writePathlessState(world, [{ client: "vscode", scope: "project", name: "iris-dev-mcp", entry, disabledAt: OLD }]);
+    const before = readFileSync(mcpJson(world.b), "utf8");
+
+    const enabled = world.run(world.b, TOGGLE("enable", "vscode"));
+    expect(enabled.status, enabled.stdout + enabled.stderr).toBe(0);
+    expect(readFileSync(mcpJson(world.b), "utf8")).toBe(before);
+    // The adoption gives claude-code, the pre-sharing writer that owns the entry, a record of this file, and vscode one too.
+    const here = ledger(world).entries.filter((record) => record.path === mcpJson(world.b)).map((record) => record.client).sort();
+    expect(here).toEqual(["claude-code", "vscode"]);
+
+    const refused = world.run(world.b, APPLY("vscode", "env-reference"));
+    expect(refused.status, refused.stdout + refused.stderr).toBe(1);
+    expect(readFileSync(mcpJson(world.b), "utf8")).toBe(before);
+  }, T);
+
+  // Lead matrix E6. Captured from the pre-fix tree: the stash was put back with no record of the file, and a claude-code
+  // write of a different entry then exited 0 over vscode's entry.
+  it("E6: a pathless vscode record and stash put back into an empty .mcp.json; a different claude-code write is refused", () => {
+    const world = makeWorld();
+    seedMcp(world.b, EMPTY);
+    expect(world.run(world.b, APPLY("vscode", "server-manager")).status).toBe(0);
+    const entry = (JSON.parse(readFileSync(mcpJson(world.b), "utf8")) as { mcpServers: Record<string, unknown> }).mcpServers["iris-dev-mcp"];
+    seedMcp(world.b, EMPTY);
+    mkdirSync(path.dirname(world.stateFile), { recursive: true });
+    writeFileSync(
+      world.stateFile,
+      JSON.stringify({
+        version: 1,
+        entries: [{ client: "vscode", scope: "project", name: "iris-dev-mcp", containsSecret: false, createdAt: OLD, updatedAt: OLD }],
+        stashes: [{ client: "vscode", scope: "project", name: "iris-dev-mcp", entry, disabledAt: OLD }],
+      }) + "\n",
+    );
+
+    const enabled = world.run(world.b, TOGGLE("enable", "vscode"));
+    expect(enabled.status, enabled.stdout + enabled.stderr).toBe(0);
+    const before = readFileSync(mcpJson(world.b), "utf8");
+    expect(before).toContain("iris-dev-mcp");
+    expect(ledger(world).entries.some((record) => record.client === "vscode" && record.path === mcpJson(world.b))).toBe(true);
+
+    const refused = world.run(world.b, APPLY("claude-code", "env-reference"));
+    expect(refused.status, refused.stdout + refused.stderr).toBe(1);
+    expect(readFileSync(mcpJson(world.b), "utf8")).toBe(before);
+  }, T);
+
+  it("a client's ordinary disable then enable of its own entry (per-file records) adds no record for the other client", () => {
+    const world = makeWorld();
+    seedMcp(world.b, COMPACT);
+    expect(world.run(world.b, APPLY("claude-code", "env-reference")).status).toBe(0);
+    expect(world.run(world.b, TOGGLE("disable", "claude-code")).status).toBe(0);
+    expect(world.run(world.b, TOGGLE("enable", "claude-code")).status).toBe(0);
+    expect(ledger(world).entries.map((record) => `${record.client}:${record.path}`)).toEqual([`claude-code:${mcpJson(world.b)}`]);
+  }, T);
+});
+
+describe("DW-743: only the claude-code and vscode project scopes share a file, whatever the working directory (built CLI, scratch HOME)", () => {
+  const IRIS_ENV = { IRIS_HOST: "127.0.0.1", IRIS_PORT: "9", IRIS_USERNAME: "u", IRIS_NAMESPACE: "USER" };
+  const userClients = Object.values(CLIENT_ADAPTERS)
+    .filter((adapter) => adapter.scopes.some((scope) => scope.scope === "user"))
+    .map((adapter) => adapter.id);
+
+  /** A user-scope apply, then a mode change, from `cwdOf(world)`, with the ledger as `state` leaves it. */
+  function sequence(id: string, state: "per-file" | "pathless" | "none", cwdOf: (world: World) => string): { first: number | null; change: number | null; out: string } {
+    const world = makeWorld();
+    const gov = path.join(world.a, "governance.json");
+    writeFileSync(gov, "{}\n");
+    const cwd = cwdOf(world);
+    const user = (extra: string[]): string[] => ["apply", "--client", id, "--scope", "user", "--servers", "iris-dev-mcp", ...extra, "--yes", "--json"];
+    const first = world.run(cwd, user([]), IRIS_ENV);
+    if (state === "pathless") writePathlessState(world);
+    if (state === "none") rmSync(world.stateFile, { force: true });
+    const change = world.run(cwd, user(["--mode", "governance-file", "--governance-file", gov]), IRIS_ENV);
+    return { first: first.status, change: change.status, out: change.stdout + change.stderr };
+  }
+
+  // Lead matrix E3. The pre-fix tree exited 1 from HOME ("the file is shared with another client") for cursor, codex, gemini,
+  // kimi-code and jetbrains-junie with pathless or no state, and 0 from any other directory.
+  for (const id of userClients) {
+    it(`${id}: a user-scope apply and a mode change from HOME exit exactly as from another directory (per-file, pathless and no state)`, () => {
+      for (const state of ["per-file", "pathless", "none"] as const) {
+        const fromHome = sequence(id, state, (world) => world.home);
+        const elsewhere = sequence(id, state, (world) => world.b);
+        expect({ state, ...fromHome }).toEqual({ state, ...elsewhere, out: fromHome.out });
+        expect(fromHome.change, `${id} ${state}: ${fromHome.out}`).toBe(0);
+        expect(fromHome.out).not.toContain("shared with");
+      }
+    }, 240_000);
+  }
+});
+
 describe("per-file ledger units (in memory)", () => {
   const NOW = new Date("2026-11-22T00:00:00.000Z");
   const FILE_A = "/proj-a/.mcp.json";
@@ -581,6 +694,30 @@ describe("per-file ledger units (in memory)", () => {
     expect(adopt(next)).toBe(next);
     const vscodeB: ManagerState = { ...empty, entries: [{ ...pathlessClaude, client: "vscode", path: FILE_B }] };
     expect(recordAdoptedOwners(vscodeB, "claude-code", "project", "iris-dev-mcp", sharedPeers(claude, "project", ctxB), atB, NOW, false)).toBe(vscodeB);
+  });
+
+  it("sharedPeers is the claude-code and vscode project scopes only: a client's own scopes, and every other adapter, are never peers, from the home directory too", () => {
+    const ctxHome = { platform: "linux" as const, env: {}, homeDir: "/home/u", projectDir: "/home/u" };
+    for (const adapter of Object.values(CLIENT_ADAPTERS)) {
+      for (const scopeDef of adapter.scopes) {
+        const peers = sharedPeers(adapter, scopeDef.scope, ctxHome);
+        const sharing = (adapter.id === "claude-code" || adapter.id === "vscode") && scopeDef.scope === "project";
+        expect(peers.map((peer) => `${peer.client}:${peer.scope}`), `${adapter.id} ${scopeDef.scope}`).toEqual(
+          sharing ? [`${adapter.id === "vscode" ? "claude-code" : "vscode"}:project`] : [],
+        );
+      }
+    }
+    // Cursor's user file and its own project file are one file from HOME, and still not a share.
+    const cursor = CLIENT_ADAPTERS["cursor"];
+    if (cursor === undefined) throw new Error("registry");
+    expect(sharedPeers(cursor, "user", ctxHome)).toEqual([]);
+    expect(sharedPeers(cursor, "project", ctxHome)).toEqual([]);
+  });
+
+  it("implied ownership is for the canonical iris-mcp names only: an unrecorded entry under any other name is nobody's", () => {
+    expect(ownerClients(empty, "vscode", "project", "iris-dev-mcp", sharedPeers(vscode, "project", ctxB), atB)).toEqual(["claude-code"]);
+    expect(ownerClients(empty, "vscode", "project", "my-own-server", sharedPeers(vscode, "project", ctxB), atB)).toEqual([]);
+    expect(recordAdoptedOwners(empty, "vscode", "project", "my-own-server", sharedPeers(vscode, "project", ctxB), atB, NOW, false)).toBe(empty);
   });
 
   it("dropRemovedShared drops the client's own records and the peers' manager records for the file, keeping stashes and other files", () => {

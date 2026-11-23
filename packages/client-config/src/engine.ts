@@ -588,8 +588,8 @@ export function enable(
   }
   const refusal = ownershipRefusal(target.state, client, scope, name, true, target.at);
   if (refusal) return fail(client, scope, "enable", target.path, refusal);
-  // An enable that adopts the other client's equal entry records this client for the file, so its ownership is visible
-  // to the other client even when its only record has no path (AD-30: an adoption never leaves the adopter unrecorded).
+  // In a shared file an enable records this client for the file, and an enable that adopts the other client's equal
+  // entry also records that client's implied ownership, so neither client can later overwrite the entry unrefused.
   let adopting = false;
   if (stash !== undefined && target.peers.length > 0) {
     const parsed = readConfigEntries(target.adapter, current.content);
@@ -631,13 +631,22 @@ export function enable(
     content: current.content,
     ...(diffOptions !== undefined ? { diffOptions } : {}),
     updateState: (state) => {
-      const next = dropStash(state, client, scope, name, target.at);
-      if (!adopting) return next;
       // The flag comes from this file's record (or one without a path), never from another project's.
-      const prior = next.entries.find(
+      const prior = state.entries.find(
         (r) => r.client === client && r.scope === scope && r.name === name && (r.path === undefined || samePath(target.at.platform, r.path, target.at.path)),
       );
-      return recordManaged(next, { client, scope, name, containsSecret: prior?.containsSecret ?? true, at: target.at }, now());
+      const containsSecret = prior?.containsSecret ?? true;
+      // In a shared file an enable that adopts, or puts the stash back, makes this client an owner of the entry for this
+      // file, exactly as `apply` does. The other owners are worked out before this client's own record exists (see
+      // `recordAdoptedOwners`), so a later different write by either client is refused.
+      if (target.peers.length === 0 || (!adopting && stash === undefined)) return dropStash(state, client, scope, name, target.at);
+      const owned = recordAdoptedOwners(state, client, scope, name, target.peers, target.at, now(), containsSecret);
+      const next = dropStash(owned, client, scope, name, target.at);
+      // A record already naming this file is left as it is.
+      const recordedHere = next.entries.some(
+        (r) => r.client === client && r.scope === scope && r.name === name && r.path !== undefined && samePath(target.at.platform, r.path, target.at.path),
+      );
+      return recordedHere ? next : recordManaged(next, { client, scope, name, containsSecret, at: target.at }, now());
     },
     // 33-1-R1: a no-op enable (entry already present in the file) still
     // must drop a STALE stash record when one exists — only fires when

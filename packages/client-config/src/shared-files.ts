@@ -26,7 +26,7 @@ import { samePath } from "./home-guard.js";
 import { resolveScopePath } from "./paths.js";
 import type { RawEntry } from "./readers.js";
 import { dropManaged, dropStash, type ManagerState, type RecordFile } from "./state.js";
-import type { ClientAdapter, ClientScope, HostContext } from "./types.js";
+import { CANONICAL_SERVERS, type ClientAdapter, type ClientScope, type HostContext } from "./types.js";
 
 /** One other adapter scope that resolves to the same file. */
 export interface SharedPeer {
@@ -38,8 +38,16 @@ export interface SharedPeer {
 export const PRE_SHARING_WRITERS: readonly string[] = ["claude-code"];
 
 /**
- * The OTHER adapter scopes whose resolved path equals this scope's, in registry order. Empty for a scope
- * nobody shares, and for a scope the context cannot resolve (a project scope with no project directory).
+ * The adapters whose PROJECT scope is the shared workspace-root `.mcp.json`. The shared-file rule is defined for these
+ * and nothing else: no other adapter, and no user scope, ever enters it, whatever the working directory (from the home
+ * directory a client's user path and its own project path can resolve to one file, and that is not a share).
+ */
+export const SHARED_PROJECT_CLIENTS: readonly string[] = ["claude-code", "vscode"];
+
+/**
+ * The OTHER sharing clients' project scopes whose resolved path equals this one's, in registry order. Empty for any scope
+ * that is not the project scope of a `SHARED_PROJECT_CLIENTS` adapter, and for a scope the context cannot resolve (a
+ * project scope with no project directory). A client's own scopes are never its peers.
  */
 export function sharedPeers(
   adapter: ClientAdapter,
@@ -47,15 +55,14 @@ export function sharedPeers(
   ctx: HostContext,
   adapters: Readonly<Record<string, ClientAdapter>> = CLIENT_ADAPTERS,
 ): SharedPeer[] {
+  if (scope !== "project" || !SHARED_PROJECT_CLIENTS.includes(adapter.id)) return [];
   const own = resolveScopePath(adapter, scope, ctx);
   if (own === null) return [];
   const peers: SharedPeer[] = [];
   for (const other of Object.values(adapters)) {
-    for (const scopeDef of other.scopes) {
-      if (other.id === adapter.id && scopeDef.scope === scope) continue;
-      const path = resolveScopePath(other, scopeDef.scope, ctx);
-      if (path !== null && samePath(ctx.platform, own, path)) peers.push({ client: other.id, scope: scopeDef.scope });
-    }
+    if (other.id === adapter.id || !SHARED_PROJECT_CLIENTS.includes(other.id)) continue;
+    const path = resolveScopePath(other, "project", ctx);
+    if (path !== null && samePath(ctx.platform, own, path)) peers.push({ client: other.id, scope: "project" });
   }
   return peers;
 }
@@ -105,7 +112,8 @@ export function recordingClients(
 
 /**
  * Who owns `name` in the shared file `at`: every client (X and its peers) whose ledger records it or holds a stash
- * of it for that file; when none does, the pre-sharing writers among them are the implied owners.
+ * of it for that file; when none does, the pre-sharing writers among them are the implied owners, for a canonical
+ * (iris-mcp) name only. An unrecorded entry under any other name is nobody's.
  */
 export function ownerClients(
   state: ManagerState,
@@ -116,7 +124,7 @@ export function ownerClients(
   at: RecordFile,
 ): string[] {
   const owners = recordingClients(state, client, scope, name, peers, at);
-  if (owners.length > 0) return owners;
+  if (owners.length > 0 || !(CANONICAL_SERVERS as readonly string[]).includes(name)) return owners;
   return [...new Set([client, ...peers.map((p) => p.client)])].filter((id) => PRE_SHARING_WRITERS.includes(id));
 }
 
