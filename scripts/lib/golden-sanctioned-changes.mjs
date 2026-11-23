@@ -28,7 +28,9 @@
 //   and `new` is the exact request object `{ method, url, body }` (three strings, no other key). It has no `old`, because
 //   it removes nothing. `replace` and `remove` on `startup`, and `insert` anywhere else, are refused. Every request that
 //   no entry inserts stays the frozen one. The loader refuses, naming the entry `id`, an index out of range, a `new` of
-//   another shape, and an `old` that is present.
+//   another shape, and an `old` that is present. The `S-44.4-current-check` inserts carry the bootstrap roster (the
+//   compile check's query names every roster class), so a change to the roster changes what a `current` start sends:
+//   the handler golden then fails for every server until those inserts hold the requests the built servers send.
 //
 // LEDGER SCHEMA (`validateSanctionedChanges` enforces it; unknown keys are refused)
 //   { "description": string, "changes": [ change ... ] }

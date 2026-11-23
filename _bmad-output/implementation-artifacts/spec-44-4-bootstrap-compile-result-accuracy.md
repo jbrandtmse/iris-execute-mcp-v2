@@ -155,6 +155,41 @@ The first build pass implemented everything else and left it uncommitted; the le
 - [x] AC 44.4.8 listener answers the check; the fallback test is restored byte-identical to the baseline.
 - [x] The full `@iris-mcp/all` suite (both shards), `@iris-mcp/shared`, `@iris-mcp/dev`, `pnpm gen:governance-baseline:check`, `pnpm gen:ipm:check`, lint and typecheck green; `BOOTSTRAP_VERSION` unchanged.
 
+### Review Findings
+
+Code review (epic-cycle, 2026-11-23, full mode, frozen diff `b2184e1d..a951897`). Layers: Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor; all four delivered (review outcome NORMAL). 17 patch, 1 defer, 11 rejected; no high. Every patch is applied.
+
+- [x] [Review][Patch] (medium) `compileDocs` and `seedInstance` were never pinned on a clean compile whose console is localized: putting the English success-line check back stayed green (AC 44.4.4) [live-doc-helpers.test.ts, story-44-4-compile-oracle.test.ts] — two rows added, mutation lines under Verification.
+- [x] [Review][Patch] `seedInstance` ran the check after a compile that got no Atelier answer, and a failing check then hid the compile's own HTTP failure (the earlier triage's rejection reason did not match the code) [bootstrap-guard-legs.ts:203] — it now throws the compile failure first and sends no check request, as `compileAndVerify` does; row and mutation added.
+- [x] [Review][Patch] `compileProblems` returned `[]` for something that is not a report (fail-open, pinned by a test) [scripts/ci-seed-throwaway.mjs:131] — now one problem; the row now pins the fail-closed answer.
+- [x] [Review][Patch] The check's wire cost was described inconsistently: one CHANGELOG bullet said three requests, the next two, and the HEAD was called "the connection check"; it is the HTTP client's CSRF pre-flight before each POST [CHANGELOG.md, changeset, packages/shared/README.md, story-43-4-sanctioned-golden-changes.test.ts:310] — wording corrected (two Atelier reads, three requests on the wire).
+- [x] [Review][Patch] README gave no remedy for a reported failure, the "same marker" row of the Shared Instances table did not mention the check, and the `unconfigured` stop's cost (custom REST tools unavailable) was not stated [README.md:1061, :1075].
+- [x] [Review][Patch] The shared README said a failed `missing` compile makes the next start "try the full install again"; the next start probes `unconfigured` (or `unknown` when `Setup` itself did not compile) [packages/shared/README.md:62].
+- [x] [Review][Patch] `CompileReport.irisErrors` and the shared README called the texts "context only", though a non-empty list fails the compile [bootstrap.ts:452, packages/shared/README.md].
+- [x] [Review][Patch] Stale `probeCustomRest` doc comment: `current` → "(skip everything)" [bootstrap.ts:290].
+- [x] [Review][Patch] Case semantics were unverified (QA residual): live probe on a throwaway (2026.2 Build 221U, port 52792, removed) shows the dictionary query matches IDs exactly (a lower- or upper-case parameter returns no row), the `docnames` filter ignores case, and IRIS refuses a PUT of a class that differs from an existing one only in case (HTTP 400). The `verifyCompiled` comment claimed the dictionary is case-insensitive, and the stateful fake's filter was case-sensitive [bootstrap.ts:509, stateful-fake-atelier.ts:386] — comment corrected; the fake now ignores case. The lowercase keying is safe (it cannot merge two classes; another case gets no row and is named).
+- [x] [Review][Patch] `IrisHttpClient` ignores `config.timeout`; the seed's check client and the live block's client passed 300 s only there, so they ran on the 60 s default [bootstrap-guard-legs.ts:207, story-42-2-bootstrap-guard-live-gate.test.ts:152] — passed as the constructor argument.
+- [x] [Review][Patch] The listener header said "the next" `docnames` read answers from the check; the listener remembers every checked name for its lifetime (QA pinned that) [scripts/lib/fake-iris-listener.mjs:14].
+- [x] [Review][Patch] The `S-44.4-current-check` inserts embed the roster, and nothing said what a roster change does [scripts/lib/golden-sanctioned-changes.mjs:31] — the header now says the handler golden fails for every server until those inserts hold what the built servers send.
+- [x] [Review][Patch] The oracle row's "a rollback to identical content counts as compiled" could not fail: `compiledFrom` is never on the wire [story-44-4-compile-oracle.test.ts:477] — renamed to what it pins (a clean row with `upd` true).
+- [x] [Review][Patch] Second assertion of the QA "package whose name merely starts with another's" row could not fail on its property (deleting the row names the class whatever `docnames` says) [story-44-4-qa-compile-check.test.ts:467] — removed; the first assertion pins the own-root read.
+- [x] [Review][Patch] The dev stubs answered `docnames` with `{name, upd}` only and a Storage entry with no `ts`, not the captured shapes (Rule #54) [live-doc-helpers.test.ts, story-44-4-qa-compile-docs.test.ts] — captured shapes used.
+- [x] [Review][Patch] `compileDocs` passed IRIS's status text on multi-line (the #5475 capture holds CR LF) [live-doc-helpers.ts:121] — one line, cut at 300 as `oneLine` cuts; row and mutation added.
+- [x] [Review][Defer] `iris_doc_xml_export` import with `compile: true` judges the compile only by per-file status text [packages/iris-dev-mcp/src/tools/format.ts:262-310] — deferred: maybe-false, medium if real; settle with a live probe of `action/xml/load` on a Storage-written partial failure. Ledger DW-756 (routed burndown).
+
+Rejected:
+- `current` start never recompiles (edge): by-design, AC 44.4.7 makes it a read-only check.
+- Concurrent starts can log a transient failure (edge): low, a retry or delay adds complexity; the earlier `wontfix-accepted` stands (reopen_if a spurious warning is seen on a parallel start).
+- `configured`/`mapped` false and the "Compile failed:" prefix on a `current` failure (edge, blind): spec-bound by the Boundaries texts and AC 44.4.7.
+- The `docnames` read lists a whole package root (edge): low, today's consumers pass `ExecuteMCPv2` roots only; a consumer with names under a large root (DW-754's `iris_doc_compile`) must narrow the filter.
+- Generated classes are never listed with `upd` (edge): low, no consumer compiles a generated class.
+- The bootstrap call sites use `compileWithCheck`, not `compileAndVerify` (auditor): false; it is the shared core `compileAndVerify` wraps, and `compileAndVerify`'s throw mapping is pinned by its own rows.
+- `compileClasses` signature changed (auditor): false; the parameter type was widened to `Pick<…, "namespace">`, so every earlier call still compiles and behaves the same.
+- L3 sets up the failed earlier start with a direct compile, and the live runs predated the review patches (auditor): low, the state L3 builds is the one a failed upgrade leaves; the whole live gate was re-run after this review's patches (13/13, 2026.2).
+- The Matrix row "Compile request fails → today's flags" contradicts the `unconfigured` stop (auditor): the fix is a spec edit (the code follows the Boundaries); for the lead.
+- AC 44.4.1 has no mutation line (gap): it is a documentation AC with no executable behavior.
+- `failureOf` passes `status.errors` without making it one line (auditor): false; `JSON.stringify` escapes CR LF, so it is one line.
+
 ## Spec Change Log
 
 - 2026-11-23 (lead, decision #146): the first build pass halted `blocked` (AC 44.4.7 vs the frozen handler golden's startup requests). Answer: AC 44.4.8 (a `startup` section for the golden ledger, sanction `S-44.4-current-check`, and the listener answers the check). The Never lines on the `current` path, Frozen goldens and the listener were corrected. `deferred:` cleared (both items now in scope).
@@ -366,6 +401,16 @@ Mutations (each applied to production code, the new test red on the path it guar
 - mutation: the listener's docnames match is case-sensitive -> `qa-listener-check` 4 failed; reverted byte-identical.
 
 Residual (not tested, by Rule #54): `verifyCompiled` keys its verdicts by the lowercase class name, on the comment's claim that the dictionary is case-insensitive. Whether IRIS can return an `ID` or a docnames `name` in a case that differs from the name asked was not verified (no live IRIS in this stage), so no row pins the lowercase branch.
+
+### Code review (2026-11-23)
+
+- Settled live (throwaway, 2026.2 Build 221U, port 52792, removed): the dictionary query matches IDs exactly, the `docnames` filter ignores case, and IRIS refuses a class differing from an existing one only in case (PUT HTTP 400). The comment is corrected; the lowercase keying cannot merge two classes.
+- mutation: `compileDocs` requires the English `Compilation finished successfully` line again (`live-doc-helpers.ts`) -> `live-doc-helpers.test.ts` 1 failed (the localized clean row); reverted byte-identical (`cmp`).
+- mutation: `compileDocs` drops the one-line flatten of IRIS's text -> `live-doc-helpers.test.ts` 1 failed (the one-line row); reverted byte-identical.
+- mutation: `seedInstance` requires the English success line in the compile's console (`bootstrap-guard-legs.ts`) -> `story-44-4-compile-oracle.test.ts` 3 failed (the localized clean seed row among them); reverted byte-identical.
+- mutation: `seedInstance` drops the throw for a compile with no Atelier answer -> `story-44-4-compile-oracle.test.ts` 1 failed (the no-answer row: a check query was sent); reverted byte-identical.
+- mutation: `compileProblems` returns `[]` for something that is not a report (`scripts/ci-seed-throwaway.mjs`) -> `ci-seed-throwaway.test.ts` 1 failed; reverted byte-identical.
+- After the patches: shared and dev dists rebuilt; `@iris-mcp/shared` 2650/2650; `@iris-mcp/dev` 1505 passed, 319 skipped; `@iris-mcp/all` the 28 files that use the changed helpers green (1339 passed, 2 skipped); lint, type-check, `gen:governance-baseline:check`, `gen:tools-list-snapshot:check`, `gen:ipm:check` pass; `BOOTSTRAP_VERSION` `1.1.0+3.3e97060f5bc4`. Live: `story-42-2-bootstrap-guard-live-gate.test.ts` 13/13 on `intersystems/iris-community:2026.2@sha256:cd2ebcab...` (throwaway removed). The 2026.1 image is not on this machine and was not re-run.
 
 ## Auto Run Result
 

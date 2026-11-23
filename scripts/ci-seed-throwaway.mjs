@@ -125,15 +125,20 @@ const oneLine = (text) => {
  * then reuses the status for the documents it updated, so a compile in which some classes failed can answer HTTP 200 with no
  * status error and name the failure only in the localized console. The report is decided by reading the class dictionary and
  * IRIS's own up-to-date flag, so this reads no console line: one `did not compile: <document>` per class the check does not
- * confirm, and each text IRIS reported as context. An empty list means every class compiled.
+ * confirm, and each text IRIS reported as context. An empty list means every class compiled. Something that is not a report
+ * (no `notCompiled` or `irisErrors` array) is one problem: no evidence is never a clean compile.
  *
  * @param {{ notCompiled?: string[], irisErrors?: string[], envelope?: unknown } | undefined} report - What `compileAndVerify` returned.
  * @returns {string[]}
  */
 export function compileProblems(report) {
-  const notCompiled = Array.isArray(report?.notCompiled) ? report.notCompiled : [];
-  const irisErrors = Array.isArray(report?.irisErrors) ? report.irisErrors : [];
-  return [...notCompiled.map((name) => `did not compile: ${name}`), ...irisErrors.map((text) => `IRIS reported: ${oneLine(text)}`)];
+  if (!Array.isArray(report?.notCompiled) || !Array.isArray(report?.irisErrors)) {
+    return ['the compile check returned no report.'];
+  }
+  return [
+    ...report.notCompiled.map((name) => `did not compile: ${name}`),
+    ...report.irisErrors.map((text) => `IRIS reported: ${oneLine(text)}`),
+  ];
 }
 
 /** Import the built `@iris-mcp/shared`. */

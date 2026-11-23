@@ -13,8 +13,9 @@
 //
 //   It also answers the compile check that a `current` start runs (Story 44.4, AC 44.4.8; `verifyCompiled` of the shared
 //   package): the dictionary join over the class names in the request's `parameters` answers one row per name, in the
-//   shape the planning probe captured (`{ID, Compiled: 1, CompileError: 0}`), and the next `GET docnames/CLS?filter=<text>`
-//   answers one entry per name that query named and that contains `<text>` (`{name, cat, ts, upd: true, db, gen}`). So a
+//   shape the planning probe captured (`{ID, Compiled: 1, CompileError: 0}`), and every later `GET docnames/CLS?filter=<text>`
+//   answers one entry per name that such a query has named (the listener remembers every one, for its lifetime) and that
+//   contains `<text>`, ignoring case (`{name, cat, ts, upd: true, db, gen}`). So a
 //   fake `current` start is a clean one. A docnames read with no earlier check query, and every other docnames route,
 //   answers as before.
 //

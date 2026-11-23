@@ -4240,3 +4240,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-4-bootstrap-compile-result-accuracy.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: load.ts:604-640 computes compilationResult.success from per-document errors, env-promote.ts:975 posts action/compile; the planning probe shows real documents never carry errors; unverified to the end of result handling
 - 2026-11-23T12:18:39Z status=routed owner=burndown by=harvest note=fix with DW-754 by reusing verifyCompiled; probe first (Rule #16)
+
+### DW-756: iris_doc_xml_export import with compile:true judges the compile only by per-file status text, so a Storage-written partial failure may read as success (unverified; the DW-754 root cause)
+- source: spec-44-4-bootstrap-compile-result-accuracy.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: format.ts:262-310 posts action/xml/load?flags=..c and surfaces only result.content[].status; no class-level check. Whether IRIS leaves the failure out of that status when the load writes Storage is unprobed (Rule #16).
+- 2026-11-23T12:49:18Z status=routed owner=burndown by=cr note=probe xml/load with a Storage-written partial failure first; if real, reuse verifyCompiled as DW-754/755 do

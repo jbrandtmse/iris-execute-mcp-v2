@@ -308,7 +308,7 @@ const CURRENT_CHECK_CLASS_COUNT = 35;
 
 /**
  * What is wrong with a Story 44.4 startup entry, written from the spec (AC 44.4.7, AC 44.4.8): a `current` start sends, after its two
- * probe reads, a HEAD of the Atelier root (the connection check before each request), then the dictionary query of the compile check over
+ * probe reads, a HEAD of the Atelier root (the HTTP client's CSRF pre-flight, sent before each POST while no token is held), then the dictionary query of the compile check over
  * the roster's class names (one `?` and one `parameters` name each), then one `docnames/CLS?filter=ExecuteMCPv2.` GET. The three go in
  * as indexes 6, 7 and 8 of the server's six frozen startup requests, in that order, and nowhere else.
  */

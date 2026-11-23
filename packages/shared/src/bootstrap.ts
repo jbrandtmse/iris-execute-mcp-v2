@@ -287,7 +287,8 @@ async function ipmOwnership(
  *   the moment deploy+compile succeed, independent of the privileged
  *   `Configure` step). We therefore call `ExecuteMCPv2.Setup_IsConfigured()`
  *   to verify the actual `/api/executemcp/v2` registration:
- *   - registered → `{ status: "current" }` (skip everything).
+ *   - registered → `{ status: "current" }` (skip the deploy; `bootstrap()`
+ *     still runs the read-only compile check).
  *   - not registered → `{ status: "unconfigured" }` (re-run the privileged
  *     steps only — self-heal). This covers the %SYS-refreshed-but-code-DB-
  *     persisted case (container migration, %SYS restore) and a first install
@@ -450,8 +451,9 @@ export interface CompileReport {
    */
   notCompiled: string[];
   /**
-   * The `errors[].error` texts of a compile that IRIS answered with a status error, as context only; empty when IRIS
-   * answered without one. IRIS names at most one failed class there, so this never decides which classes failed.
+   * The `errors[].error` texts of a compile that IRIS answered with a status error; empty when IRIS answered without one.
+   * A non-empty list makes the compile a failure even when `notCompiled` is empty. The texts are context for a person:
+   * IRIS names at most one failed class there, so they never decide which classes failed.
    */
   irisErrors: string[];
   /** The compile's response envelope, when IRIS answered it without a status error; absent when it answered with one. */
@@ -506,7 +508,9 @@ export async function verifyCompiled(
     parameters: ids,
   });
   const content = (rows.result as { content?: Array<Record<string, unknown>> } | undefined)?.content;
-  // A class name is case-insensitive in the dictionary, so the verdicts are keyed by the lowercase name.
+  // The dictionary query matches IDs exactly, while the docnames filter ignores case, and IRIS refuses a class whose name
+  // differs from an existing one only in case. So keying the verdicts by the lowercase name never merges two classes, and a
+  // name asked in another case than the class's own gets no row and is named.
   const clean = new Set<string>();
   for (const row of Array.isArray(content) ? content : []) {
     if (Number(row["Compiled"]) === 1 && Number(row["CompileError"]) === 0) clean.add(String(row["ID"]).toLowerCase());

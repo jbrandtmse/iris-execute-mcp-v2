@@ -184,9 +184,10 @@ describe("what makes a bootstrap or a compile a problem", () => {
     expect((problems[0] as string).length).toBeLessThanOrEqual("IRIS reported: ".length + 300 + 3);
   });
 
-  it("finds nothing wrong in no report at all (the seed's own compile request throws before a report exists)", () => {
-    expect(compileProblems(undefined)).toEqual([]);
-    expect(compileProblems({})).toEqual([]);
+  it("counts something that is not a report as one problem: no evidence is never a clean compile", () => {
+    for (const notAReport of [undefined, {}, { notCompiled: [] }, { irisErrors: [] }, { notCompiled: "Pkg.A.cls", irisErrors: [] }]) {
+      expect(compileProblems(notAReport), JSON.stringify(notAReport)).toEqual(["the compile check returned no report."]);
+    }
   });
 });
 

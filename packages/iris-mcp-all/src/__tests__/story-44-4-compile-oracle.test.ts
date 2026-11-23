@@ -425,6 +425,36 @@ describe("Story 44.4 AC 44.4.4: seedInstance judges its compile by the check", (
     await expect(seeded).rejects.toBeInstanceOf(SeedCompileError);
     await expect(seeded).rejects.toThrow("the check that every class compiled could not run");
   }, TEST_TIMEOUT_MS);
+
+  it("a clean check completes the seed although the console is localized and has no English success line", async () => {
+    const { fake, target } = await seeding();
+    fake.compileFailure = () => ({ failed: [], shape: "storage-written", console: COMPILE_CONSOLE_DE });
+
+    await seedInstance(target, embedded, { marker: embedded.marker, perturb: false });
+
+    expect(fake.state.configured, "the seed went on to Configure").toBe(true);
+  }, TEST_TIMEOUT_MS);
+
+  it("a compile request that gets no Atelier answer throws its own HTTP failure, and no check request is sent", async () => {
+    // The fake answers a compile that names a document it does not hold with an HTTP 500 envelope: drop the last seeded document.
+    const lastName = [...embedded.classes.keys()].at(-1) as string;
+    const fake = await startStatefulFakeAtelier({
+      namespace: NAMESPACE,
+      onPut: (name, _count, state) => {
+        if (name === lastName) state.docs.delete(name);
+      },
+    });
+    openFakes.push(fake);
+    const target = { host: "127.0.0.1", port: String(fake.port), username: "fake", password: "fake", namespace: NAMESPACE };
+
+    const seeded = seedInstance(target, embedded, { marker: embedded.marker, perturb: false });
+
+    await expect(seeded).rejects.toBeInstanceOf(SeedCompileError);
+    await expect(seeded).rejects.toThrow(/seeded classes in USER: HTTP 500; errors /);
+    const summary = summarizeRequests(fake.requests);
+    expect(summary.queries.filter(isCompileCheckQuery), "no dictionary query").toEqual([]);
+    expect(summary.others.filter((other) => /\/docnames\/CLS$/.test(other)), "no docnames read").toEqual([]);
+  }, TEST_TIMEOUT_MS);
 });
 
 describe("Story 44.4 AC 44.4.2: verifyCompiled and compileAndVerify decide per class from the row, the error flag and upd", () => {
@@ -444,12 +474,13 @@ describe("Story 44.4 AC 44.4.2: verifyCompiled and compileAndVerify decide per c
 
   const NAMES = ["Story444.Good.cls", "Story444.Broken.cls", "Story444.Dependant.cls", "Story444.Rolled.cls"];
 
-  it("names exactly the classes without a row, with the error flag, or with upd false, in list order; a rollback to identical content counts as compiled", async () => {
+  it("names exactly the classes without a row, with the error flag, or with upd false, in list order; a clean row with upd true counts as compiled", async () => {
     const { fake, http } = await holding(NAMES);
     // Broken: a routine failure (a row, the error flag, upd true). Dependant: skipped (an old row, no flag, upd false).
     fake.state.classes.set("Story444.Broken.cls", { compiledFrom: "2026-11-23 10:00:00.000", error: true, upd: true });
     fake.state.classes.set("Story444.Dependant.cls", { compiledFrom: "2026-11-23 10:00:00.000", error: false, upd: false });
-    // Rolled: compiled from other text than the stored `ts` says (a rollback), but IRIS's own flag holds.
+    // Rolled: the Matrix's rollback to identical content as the check sees it, a clean row and upd true. The check reads no
+    // timestamp, so this row is that of a clean class; the fake's `compiledFrom` is never on the wire.
     fake.state.classes.set("Story444.Rolled.cls", { compiledFrom: "2000-01-01 00:00:00.000", error: false, upd: true });
 
     const notCompiled = await shared.verifyCompiled(http, NAMESPACE, ATELIER_VERSION, NAMES);

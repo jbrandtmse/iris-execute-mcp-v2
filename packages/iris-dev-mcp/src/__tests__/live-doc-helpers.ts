@@ -118,7 +118,9 @@ export async function compileDocs(
 ): Promise<string[]> {
   const report = await compileAndVerify(client, { namespace }, version, names);
   if (report.notCompiled.length > 0 || report.irisErrors.length > 0) {
-    const context = report.irisErrors.length > 0 ? ` (IRIS reported: ${report.irisErrors.join(" | ")})` : "";
+    // IRIS's texts are context on one line, cut at 300 characters as the bootstrap's own `Compile failed:` text cuts them.
+    const reported = report.irisErrors.join(" | ").replace(/\s+/g, " ").trim();
+    const context = report.irisErrors.length > 0 ? ` (IRIS reported: ${reported.length > 300 ? `${reported.slice(0, 300)}...` : reported})` : "";
     throw new Error(
       `compiling ${names.join(", ")} did not finish successfully: ${report.notCompiled.join(", ") || "no class named"}${context}`,
     );

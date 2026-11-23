@@ -15,7 +15,7 @@
  *   is an HTTP 500 error envelope and changes nothing. Every class listed and not failed by `compileFailure` is compiled:
  *   it gets a compiled row, remembers the `ts` of the document it was compiled from, and carries no compile error.
  * - `GET /api/atelier/v<N>/<ns>/docnames/CLS?filter=<text>`: one entry `{name, cat, ts, upd, db, gen}` per stored class
- *   document whose name contains `<text>`, with IRIS's `upd` flag: true only for a class with a compiled row that is not
+ *   document whose name contains `<text>`, ignoring case as IRIS's filter does, with IRIS's `upd` flag: true only for a class with a compiled row that is not
  *   stale (`upd` held at its compile, and the document not stored again since).
  * - `POST action/query` of the compile check (a `%Dictionary.ClassDefinition` LEFT JOIN `%Dictionary.CompiledClass` over the
  *   class names in `parameters`): one row `{ID, Compiled, CompileError}` per stored class document among them, as the
@@ -383,9 +383,9 @@ export async function startStatefulFakeAtelier(options: FakeAtelierOptions): Pro
         reply(res, 500, errorEnvelope("ERROR #5002: ObjectScript error: <STORE>", 5002));
         return;
       }
-      const filter = url.searchParams.get("filter") ?? "";
+      const filter = (url.searchParams.get("filter") ?? "").toLowerCase();
       const content = [...state.docs.entries()]
-        .filter(([name]) => name.endsWith(".cls") && name.includes(filter))
+        .filter(([name]) => name.endsWith(".cls") && name.toLowerCase().includes(filter))
         .map(([name, stored]) => ({ name, cat: "CLS", ts: stored.ts, upd: classUpdated(name), db: namespace, gen: false }));
       reply(res, 200, envelope({ content }));
       return;

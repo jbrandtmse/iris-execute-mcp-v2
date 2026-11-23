@@ -34,6 +34,8 @@ const statusError = (cls: string): { error: string; code: number; domain: string
 
 const envelope = (content: unknown[]) => ({ status: { errors: [], summary: "" }, console: [], result: { content } });
 const clean = (id: string) => ({ ID: id, Compiled: 1, CompileError: 0 });
+/** A `docnames` entry in the captured shape `{name, cat, ts, upd, db, gen}`. */
+const entry = (name: string, upd: boolean) => ({ name, cat: "CLS", ts: "2026-11-23 10:20:27.782", upd, db: "USER", gen: false });
 
 interface Stub {
   compile: () => Promise<unknown>;
@@ -49,7 +51,7 @@ function stubClient(stub: Stub) {
     return stub.query === undefined ? envelope([clean("Gate444.Good"), clean("Gate444.Bad")]) : stub.query();
   });
   http.get.mockImplementation(async () =>
-    stub.docnames === undefined ? envelope([{ name: GOOD, upd: true }, { name: BAD, upd: true }]) : stub.docnames(),
+    stub.docnames === undefined ? envelope([entry(GOOD, true), entry(BAD, true)]) : stub.docnames(),
   );
   return http;
 }
@@ -80,7 +82,7 @@ describe("compileDocs: a compile IRIS answered with a status error", () => {
       compile: throwsStatus("Gate444.Good"),
       // IRIS names Good; the check also finds Bad flagged, and Good without a compiled row (a first compile that failed).
       query: async () => envelope([{ ID: "Gate444.Bad", Compiled: 1, CompileError: 1 }, { ID: "Gate444.Good", Compiled: 0, CompileError: 0 }]),
-      docnames: async () => envelope([{ name: BAD, upd: true }]),
+      docnames: async () => envelope([entry(BAD, true)]),
     });
 
     const failure = await compileDocs(http, VERSION, NAMESPACE, [GOOD, BAD]).catch((error: unknown) => error);
@@ -129,7 +131,7 @@ describe("compileDocs: a compile request that gets no Atelier answer, and a chec
   });
 
   it("a class whose entry says upd false is named even with a clean row", async () => {
-    const http = stubClient({ compile: async () => envelope([]), docnames: async () => envelope([{ name: GOOD, upd: true }, { name: BAD, upd: false }]) });
+    const http = stubClient({ compile: async () => envelope([]), docnames: async () => envelope([entry(GOOD, true), entry(BAD, false)]) });
 
     await expect(compileDocs(http, VERSION, NAMESPACE, [GOOD, BAD])).rejects.toThrow(new RegExp(`did not finish successfully: ${BAD.replace(/\./g, "\\.")}$`));
   });

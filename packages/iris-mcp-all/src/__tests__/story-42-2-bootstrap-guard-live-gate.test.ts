@@ -149,16 +149,19 @@ const IS_CONFIGURED = "SELECT ExecuteMCPv2.Setup_IsConfigured() AS Configured";
 describe("Story 44.4: the compile check on a throwaway", () => {
   /** A client for the throwaway, which the block closes. */
   function liveClient(): IrisHttpClient {
-    return new IrisHttpClient({
-      host: target.host,
-      port: Number(target.port),
-      username: target.username,
-      password: target.password,
-      namespace: target.namespace,
-      https: false,
-      baseUrl: `http://${target.host}:${target.port}`,
-      timeout: 300_000,
-    });
+    return new IrisHttpClient(
+      {
+        host: target.host,
+        port: Number(target.port),
+        username: target.username,
+        password: target.password,
+        namespace: target.namespace,
+        https: false,
+        baseUrl: `http://${target.host}:${target.port}`,
+        timeout: 300_000,
+      },
+      300_000,
+    );
   }
 
   const docPath = (name: string): string => atelierPath(ATELIER_VERSION, target.namespace, `doc/${encodeURIComponent(name)}`);

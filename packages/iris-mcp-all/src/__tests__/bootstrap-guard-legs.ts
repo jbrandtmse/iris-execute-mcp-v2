@@ -203,17 +203,24 @@ export async function seedInstance(
   const seededNames = [...embedded.classes.keys()];
   const compiled = await atelierWrite(target, "POST", "action/compile", seededNames);
   const compileFailure = failureOf(compiled, [200]);
+  // A compile request that got no Atelier answer (another status, or no envelope) has nothing to check, as in compileAndVerify.
+  if (compiled.status !== 200 || compiled.json === undefined) {
+    throw new SeedCompileError(`compiling the ${embedded.classes.size} seeded classes in ${target.namespace}: ${compileFailure}`);
+  }
   // Whether every class compiled is the check's verdict (the class dictionary and IRIS's own up-to-date flag), never the answer's console.
-  const checkClient = new IrisHttpClient({
-    host: target.host,
-    port: Number(target.port),
-    username: target.username,
-    password: target.password,
-    namespace: target.namespace,
-    https: false,
-    baseUrl: `http://${target.host}:${target.port}`,
-    timeout: 300_000,
-  });
+  const checkClient = new IrisHttpClient(
+    {
+      host: target.host,
+      port: Number(target.port),
+      username: target.username,
+      password: target.password,
+      namespace: target.namespace,
+      https: false,
+      baseUrl: `http://${target.host}:${target.port}`,
+      timeout: 300_000,
+    },
+    300_000,
+  );
   let notCompiled: string[];
   try {
     notCompiled = await verifyCompiled(checkClient, target.namespace, SEED_ATELIER_VERSION, seededNames);

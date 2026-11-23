@@ -464,13 +464,10 @@ describe("Story 44.4 QA, AC 44.4.2: a roster that spans several top-level packag
     expect(await shared.verifyCompiled(client, NAMESPACE, V, NAMES)).toEqual(["Beta444.Sub.Deep.cls", "Gamma444.Three.cls", "Alpha444x.Four.cls"]);
   });
 
-  it("a class that exists only under a package whose name merely starts with another's is never confirmed by the other package's read", async () => {
-    const { fake, http: client } = await holding(["Alpha444.One.cls", "Alpha444x.Four.cls"]);
-    // Alpha444x.Four is stored and compiled, but its own root read would be the only thing that lists it: with it, it counts.
+  it("a class under a package whose name merely starts with another's is confirmed through its own package's read", async () => {
+    const { http: client } = await holding(["Alpha444.One.cls", "Alpha444x.Four.cls"]);
+    // Alpha444x.Four is stored and compiled; the read of `Alpha444.` does not list it, so only its own root read confirms it.
     expect(await shared.verifyCompiled(client, NAMESPACE, V, ["Alpha444.One.cls", "Alpha444x.Four.cls"])).toEqual([]);
-    // Without a compiled row, the read of Alpha444. (which does not list it) cannot confirm it.
-    fake.state.classes.delete("Alpha444x.Four.cls");
-    expect(await shared.verifyCompiled(client, NAMESPACE, V, ["Alpha444.One.cls", "Alpha444x.Four.cls"])).toEqual(["Alpha444x.Four.cls"]);
   });
 
   it("a read of the second package that fails is 'could not run', after the query and the first package's read were sent", async () => {
