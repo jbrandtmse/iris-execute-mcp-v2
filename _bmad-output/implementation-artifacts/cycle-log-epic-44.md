@@ -152,3 +152,6 @@
 2026-11-23T13:23:23Z	Story 44.4	ci_result	run=45178755450 result=red(story-caused) jobs=gates_x3_red(story-43-4-qa-gate-guards_routing:story-44-4-qa-startup-ledger_reads_frozen_golden;changeset-readers_child_rerun) throwaway=green(dev_compileDocs_live_gates_pass_armed) launcher=green package,ipm=skipped
 2026-11-23T13:23:23Z	Story 44.4	ci_rework	decision=148 mode=lead_applied_test_only fix=FROZEN_READERS+story-44-4-qa-startup-ledger local=full_all_suite_closed_port(pending) status=done(kept;test-only)
 2026-11-23T13:46:06Z	Story 44.4	ci_rework_verified	full_all_suite_closed_port=237_files,6298_passed,732_skipped,0_failed
+2026-11-23T13:46:30Z	Story 44.4	committed	sha=249d592 reason=ci_rework(decision_148) pushed=epic44 ci=pending run=45187200059 carries=44.5_spec_gate(8f2a886)
+2026-11-23T14:28:17Z	Story 44.4	ci_result	run=45187200059 result=green jobs=all(gates_x3,throwaway,launcher_x3,package,ipm)
+2026-11-23T14:28:17Z	Story 44.5	stage_spawned	stage=implement spawn_at=2026-11-23T14:28:17Z model=claude-sonnet-5-5 agent_name=44-5-integration-suites-cannot-pass-without-testing-implement-1 cycle_iteration=1 prev_ci=44.4_run_45187200059_green
