@@ -36,6 +36,7 @@ import { describe, expect, it } from "vitest";
 import { buildStatusBarState, selectServers, type SelectServersDeps } from "../selectServers.js";
 import { LauncherProvider, type ProviderDeps } from "../serverDefinitionProvider.js";
 import { stripComments } from "./sourceGrep.js";
+import { userScopeServers } from "./serverManagerInspection.js";
 import type { AuthApi, LauncherSettings, ServerManagerApi, ServerName, ServerSpec } from "../types.js";
 
 // __dirname (not import.meta.url) so this file type-checks cleanly under the
@@ -324,6 +325,7 @@ describe("credential containment — Story 44.6: a PROVIDED definition never car
       authApi,
       getSettings: () => settings({ servers: ["a"] }),
       showWarning: (message: string) => warnings.push(message),
+      inspectServerManagerServers: () => userScopeServers(["a"]),
     });
 
     const planned = await provider.providePlannedDefinitions();

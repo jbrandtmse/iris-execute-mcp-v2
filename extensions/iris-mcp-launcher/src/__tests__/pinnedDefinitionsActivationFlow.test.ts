@@ -34,6 +34,8 @@ function specFor(name: string): ServerSpec {
 }
 
 function serverManagerWith(names: string[]): (typeof mockState)["serverManager"] {
+  // The user-scope `intersystems.servers` setting Server Manager reads these servers from.
+  mockState.configStore.set("intersystems.servers", Object.fromEntries(names.map((name) => [name, specFor(name)])));
   const api: ServerManagerApi = {
     getServerNames: () => names.map((name) => ({ name, description: "", detail: "" })),
     getServerSpec: async (name: string) => specFor(name),
@@ -205,6 +207,21 @@ describe("Story 44.6 - the definition the REAL extension.ts provides carries the
     expect(launched[0]!.env["IRIS_PASSWORD"]).toBe("SYS");
     expect(launched[0]!.env["IRIS_PROFILES"]).toBeNull();
     expect(launched[0]!.env).not.toHaveProperty("IRIS_CREDENTIAL_NAME");
+  });
+
+  it("DW-749: a workspace settings.json that overrides the user's server keeps the provided env empty (the Local resolve is unchanged)", async () => {
+    mockState.serverManager = serverManagerWith(["prod"]);
+    // The workspace layer `inspect("servers")` reports as `workspaceValue` (the real `.vscode/settings.json` layer).
+    mockState.configWorkspaceStore.set("intersystems.servers", { prod: { webServer: { host: "evil.example.com" } } });
+
+    activate(fakeContext());
+    await flushEditor();
+    const provided = await provideDefinitions();
+
+    expect(provided).toHaveLength(1);
+    expect(provided[0]!.env).toEqual({});
+    const launched = await provideAndResolve();
+    expect(launched[0]!.env["IRIS_PASSWORD"]).toBe("SYS");
   });
 
   it("combineProfiles: the provided definition keeps the empty env (Local-only), and still resolves to the combined Local env", async () => {

@@ -43,6 +43,7 @@ import type {
   ResolvedConnectionProfile,
   ServerManagerApi,
   ServerManagerApiFailureReason,
+  ServerManagerServersInspection,
   SuitePackageKey,
 } from "./types.js";
 
@@ -90,6 +91,39 @@ export interface ProviderDeps {
    * lose only the crumb, not the containment.
    */
   logDiagnostic?: (message: string) => void;
+  /**
+   * The per-scope layers of `intersystems.servers` for `scope` (see {@link ServerManagerServersInspection}). A provided
+   * definition names a stored credential only for a server that {@link isUserScopedServer} accepts. Absent, throwing or
+   * returning `undefined`: no server qualifies, and every provided env is `{}`.
+   */
+  inspectServerManagerServers?: (scope?: ConfigScope) => ServerManagerServersInspection | undefined;
+}
+
+/**
+ * Whether `serverName`'s `intersystems.servers` entry comes from user (or default) settings alone. `false` when any
+ * workspace or workspace-folder layer (language-specific ones included) defines that name or is not an object, or when
+ * neither the user nor the default layer defines it. A provided definition sends the password stored under the server's
+ * name to the host of the merged entry, so a workspace's `settings.json` (an untrusted repository's included) must not be
+ * able to choose or alter that entry (AD-9).
+ */
+export function isUserScopedServer(
+  inspection: ServerManagerServersInspection | undefined,
+  serverName: string,
+): boolean {
+  if (typeof inspection !== "object" || inspection === null) return false;
+  const defines = (layer: unknown): boolean =>
+    typeof layer === "object" && layer !== null && Object.prototype.hasOwnProperty.call(layer, serverName);
+  const workspaceLayers = [
+    inspection.workspaceValue,
+    inspection.workspaceFolderValue,
+    inspection.workspaceLanguageValue,
+    inspection.workspaceFolderLanguageValue,
+  ];
+  for (const layer of workspaceLayers) {
+    if (layer === undefined) continue;
+    if (typeof layer !== "object" || layer === null || defines(layer)) return false;
+  }
+  return defines(inspection.globalValue) || defines(inspection.defaultValue);
 }
 
 const NPX_COMMAND = "npx";
@@ -380,7 +414,9 @@ export class LauncherProvider {
    * session token can reach the result, and nothing prompts or warns.
    *
    * `{}` (today's provided env) when the connection cannot be known without a session: a `combineProfiles` plan
-   * (Local-only), a server whose spec is missing, malformed or has no `webServer`, or one without a username.
+   * (Local-only), a server whose spec is missing, malformed or has no `webServer`, or one without a username. Also `{}`
+   * for a server a workspace or folder `settings.json` defines or overrides ({@link isUserScopedServer}): the stored
+   * password is chosen by name, so only a user-scope definition may say where it is sent.
    */
   private async providedEnvFor(
     api: ServerManagerApi,
@@ -413,13 +449,17 @@ export class LauncherProvider {
     return env;
   }
 
-  /** The non-secret connection of one Server Manager server, or `undefined` when it cannot be known without a session. */
+  /**
+   * The non-secret connection of one Server Manager server, or `undefined` when it cannot be known without a session or
+   * the server is not defined in user settings alone (inspected in the same scope `getServerSpec` reads).
+   */
   private async lookUpProvidedConnection(
     api: ServerManagerApi,
     serverName: string,
     scope: ConfigScope | undefined,
   ): Promise<ProvidedConnection | undefined> {
     try {
+      if (!isUserScopedServer(this.deps.inspectServerManagerServers?.(scope), serverName)) return undefined;
       const spec = await api.getServerSpec(serverName, scope, undefined, { hideFromRecents: true });
       if (!spec || typeof spec.webServer !== "object" || spec.webServer === null) return undefined;
       const username = typeof spec.username === "string" ? spec.username : "";

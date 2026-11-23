@@ -4101,6 +4101,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: med | footprint: in-epic
 - evidence: extension.ts:660-700 provides McpStdioServerDefinition(label,command,args,{}) and adds IRIS_* only in resolveMcpServerDefinition; VS Code 1.147.0 forwards the provided launch as is (workbench qls/PVn), the resolver runs only on a Local start; docs: do not rely on an interactive resolver during background forwarding (fetched 2026-11-22)
 - 2026-11-22T21:49:01Z status=routed owner=44-6-launcher-provider-works-in-copilot-sessions by=harvest note=owner ruling, decision #134: Story 44.6 fixes it; its vsix ships with the end-of-epic release (manual attach)
+- 2026-11-23T08:45:54Z status=resolved-by:44-6-launcher-provider-works-in-copilot-sessions by=adjudication note=provided_definition_carries_non-secret_IRIS_*+IRIS_CREDENTIAL_NAME_for_user-scope_servers;fresh-process_gate_authenticates_via_fake_keychain;owner_Copilot_sitting_AC_44.6.5_pending
 
 ### DW-732: Story 44.2's patch changeset removes four public exports of @iris-mcp/client-config (ensureInputs, presentInputIds, VscodeInput, VSCODE_PASSWORD_INPUT_ID)
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: low | footprint: in-story
@@ -4206,13 +4207,26 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: IRIS_CREDENTIAL_NAME carries the server name; the host comes from that server's spec; nothing ties the stored entry to a host (serverDefinitionProvider.ts providedEnvFor); the Server Manager import keys the keychain the same way; unverified
 - 2026-11-23T08:12:06Z status=open owner=44-6-launcher-provider-works-in-copilot-sessions by=harvest note=for the code review: verify, then patch (e.g. do not provide IRIS_CREDENTIAL_NAME for a name defined at more than one scope, or bind the entry to its host) or route with the residual
 - 2026-11-23T08:27:23Z severity=high by=lead note=QA_confirmed(dw749Characterization.test.ts):workspace-scope_override_of_webServer.host_sends_the_user's_stored_password_to_the_workspace_host_on_the_Copilot_path_without_a_prompt;reachable_from_an_untrusted_repo's_.vscode/settings.json;must_fix_in_44.6_review
+- 2026-11-23T08:43:48Z status=resolved-by:44-6-launcher-provider-works-in-copilot-sessions by=cr note=provide names IRIS_CREDENTIAL_NAME only for a user-scope-only server (inspect, same scope); else env {}; pinned fresh-process+control, mutation red
 
 ### DW-750: The launcher fires no MCP definitions-changed event when intersystems.servers changes, so a Copilot-harness session keeps the old provided host/port/username until a window reload
 - source: spec-44-6-launcher-provider-works-in-copilot-sessions.md | severity: low | fix-risk: med | footprint: in-story
 - evidence: extension.ts:652 refreshes only the status bar; no onDidChangeMcpServerDefinitions emitter; command/args already behave this way; README says reload the window
 - 2026-11-23T08:12:06Z status=wontfix-accepted owner=44-6-launcher-provider-works-in-copilot-sessions by=harvest note=reopen_if=a user report of a stale Copilot-session connection after editing intersystems.servers, or VS Code documents re-provide on change
+- 2026-11-23T08:43:48Z occurrence=44-6-launcher-provider-works-in-copilot-sessions
 
 ### DW-751: McpServerBase.start() copies the registry-completed default password back into this.config with no test; nothing reads this.config.password after start
 - source: spec-44-6-launcher-provider-works-in-copilot-sessions.md | severity: low | fix-risk: low | footprint: in-story
 - evidence: server-base.ts:2793; deleting the block turns no test red
 - 2026-11-23T08:12:06Z status=open owner=44-6-launcher-provider-works-in-copilot-sessions by=harvest note=for the code review: two-way door - delete the block if truly unread, or pin it with a start harness
+- 2026-11-23T08:43:48Z status=resolved-by:44-6-launcher-provider-works-in-copilot-sessions by=cr note=block deleted (server-base.ts byte-identical to baseline); private config.password unread: bootstrap reads host/port/namespace
+
+### DW-752: Under the Local harness the launcher resolver takes the host from the merged intersystems.servers view and the password from Server Manager's session for that name, so a workspace override of a user server's host may receive that password
+- source: spec-44-6-launcher-provider-works-in-copilot-sessions.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: resolveEnvForLabel uses getServerSpec (merged user+workspace layers) then getSession for the server name; pre-existing since Story 31.x and shared by every Server Manager consumer; AC-11 pins the Local env unchanged; unverified: Server Manager 3.x auth provider keying not checked
+- 2026-11-23T08:43:48Z status=decision-pending owner=burndown by=cr note=product call: extend the 44.6 user-scope guard (isUserScopedServer) to Local resolve? diverges from Server Manager/ObjectScript norms
+
+### DW-753: credentials-cli-real-keyring.test.ts is order-dependent: its two tests share a module-level fakeStore Map that no hook clears, so a shuffled run fails the list assertion
+- source: cycle-log-epic-44.md (lead fresh check, Story 44.6) | severity: low | fix-risk: low | footprint: in-epic
+- evidence: pnpm vitest --sequence.shuffle --sequence.seed=44 on packages/shared: 1 failed (expected names [prod-wiring-server], got 2); in order 2/2 pass; file unchanged since Story 31.2 (c6d39e4e)
+- 2026-11-23T08:45:54Z status=open owner=44-5-integration-suites-cannot-pass-without-testing by=lead note=Rule 19 hermeticity; fix: fakeStore.clear() in a beforeEach; 44.5 hardens the suites

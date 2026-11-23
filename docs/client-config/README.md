@@ -28,7 +28,7 @@ Every guide has one install path: `npx -y -p @iris-mcp/client-config@1 iris-mcp-
 
 ### 1. The six base variables are always required
 
-`IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD`, `IRIS_NAMESPACE`, `IRIS_HTTPS` configure the reserved `default` profile, which is built **before** any Server Manager import or profile merge.
+`IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD`, `IRIS_NAMESPACE`, `IRIS_HTTPS` configure the reserved `default` profile, which is built **before** any Server Manager import or profile merge. (`IRIS_PASSWORD` may be left unset or empty when `IRIS_CREDENTIAL_NAME` is set; see caveat 2.)
 
 Setting `IRIS_SERVER_MANAGER=auto` **does not let you omit them.** Omitting `IRIS_USERNAME` fails at startup with:
 
@@ -52,7 +52,7 @@ Worked example, verified end to end — four profiles resolving at once:
 
 | Profile | Source | Credential from |
 |---|---|---|
-| `default` | env | `IRIS_PASSWORD` (required, plaintext) |
+| `default` | env | `IRIS_PASSWORD` (plaintext; or the keychain entry `IRIS_CREDENTIAL_NAME` names) |
 | `sademo` | `IRIS_PROFILES` | inherits base credentials |
 | `local` | Server Manager | inline `password` in `intersystems.servers` (deprecated) |
 | `localhost2` | Server Manager | **OS keychain** via `iris-mcp-credentials set localhost2` |
@@ -187,7 +187,7 @@ Both use the root key **`mcpServers`**, expand `${VAR}` from the environment VS 
 }
 ```
 
-**Credentials.** `${IRIS_*}` resolves from the environment VS Code was started with, so export the variables in a shell and start VS Code (`code .`) from it, and start it again after you change them. The `server-manager` mode writes no secret, only `IRIS_SERVER_MANAGER` and `IRIS_SM_SERVERS`: the server reads the passwords of the Server Manager connections it adds from your OS keychain. It does not replace the base connection: the server's `default` profile still reads the base `IRIS_*` variables, `IRIS_PASSWORD` included, from the same environment (see "The OS keychain covers Server-Manager profiles only" above).
+**Credentials.** `${IRIS_*}` resolves from the environment VS Code was started with, so export the variables in a shell and start VS Code (`code .`) from it, and start it again after you change them. The `server-manager` mode writes no secret, only `IRIS_SERVER_MANAGER` and `IRIS_SM_SERVERS`: the server reads the passwords of the Server Manager connections it adds from your OS keychain. It does not replace the base connection: the server's `default` profile still reads the base `IRIS_*` variables, `IRIS_PASSWORD` included, from the same environment (see "The OS keychain covers Server-Manager profiles, and the base credentials only with `IRIS_CREDENTIAL_NAME`" above).
 
 **Moving from the old files.** Earlier versions wrote VS Code's own `mcp.json` files (the profile `mcp.json` and `.vscode/mcp.json`, root key `servers`, with an `inputs` password prompt). Those belong to the Local harness, which VS Code removes in February 2027, and the Copilot harness does not forward their entries. `iris-mcp-clients status` and `doctor` report any iris-mcp entry still in them, and the next `apply --client vscode --scope <user|project>` writes the new file and then removes the entry from the old one, leaving everything else in that file as it was.
 

@@ -266,7 +266,7 @@ describe("AC-6: with IRIS_CREDENTIAL_NAME unset, empty or blank everything is as
 });
 
 describe("AC-7: a control character in IRIS_CREDENTIAL_NAME fails fast", () => {
-  it.each(["dev\n1", "dev1\r", "de\tv", "dev\u00001", "dev\u007f1"])("rejects %j naming the variable", async (name) => {
+  it.each(["dev\n1", "dev1\r", "de\tv", "dev\u00001", "dev\u007f1", "dev\u00851"])("rejects %j naming the variable", async (name) => {
     const env = { ...BASE_ENV, IRIS_PASSWORD: "pw", IRIS_CREDENTIAL_NAME: name };
     expect(() => loadConfig(env)).toThrow(/IRIS_CREDENTIAL_NAME/);
     await expect(loadProfileRegistry(env)).rejects.toThrow(/IRIS_CREDENTIAL_NAME/);

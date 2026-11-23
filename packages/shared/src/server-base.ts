@@ -2790,7 +2790,6 @@ export class McpServerBase {
     // 1. Load config + build the profile registry.
     //    loadConfig is preserved for the default profile's config so existing
     //    single-server behavior is byte-for-byte unchanged.
-    const configFromEnv = !this.config;
     if (!this.config) {
       this.config = loadConfig();
     }
@@ -2801,15 +2800,6 @@ export class McpServerBase {
       this.profiles = this.options.config
         ? buildProfileRegistry(this.config)
         : await loadProfileRegistry();
-    }
-    // IRIS_CREDENTIAL_NAME: `loadConfig` leaves the password "" until the
-    // registry has completed it; take the completed value so no config object
-    // keeps the placeholder.
-    if (configFromEnv && this.config.password === "") {
-      const completed = this.profiles.get(DEFAULT_PROFILE_NAME);
-      if (completed !== undefined) {
-        this.config = { ...this.config, password: completed.password };
-      }
     }
     this.clients = new ProfileClientRegistry(this.profiles);
 

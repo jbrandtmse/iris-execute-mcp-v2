@@ -12,6 +12,7 @@ import {
   type SelectServersQuickPickItem,
 } from "../selectServers.js";
 import { readSettings, type ConfigReader } from "../settings.js";
+import { userScopeServers } from "./serverManagerInspection.js";
 import type { LauncherSettings, ServerManagerApi, ServerName } from "../types.js";
 
 function settings(overrides: Partial<LauncherSettings> = {}): LauncherSettings {
@@ -846,6 +847,7 @@ describe("Rule #19 back-compat — selectServers.ts has zero effect on the 31.4 
       authApi: { getSession: vi.fn() as never },
       getSettings: () => settings({ packages: ["dev"], servers: ["prod"] }),
       showWarning: () => {},
+      inspectServerManagerServers: () => userScopeServers(["prod"]),
     });
 
     const planned = await provider.providePlannedDefinitions();

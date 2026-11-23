@@ -114,17 +114,29 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** Server Manager API calls made by the extension under test (reset with the mock state). */
+let apiCalls = { getServerSpec: 0, getAccount: 0 };
+
 function serverManager(mode: Mode): (typeof mockState)["serverManager"] {
   const api: ServerManagerApi = {
     getServerNames: () => mode.names.map((name) => ({ name, description: "", detail: "" })),
-    getServerSpec: (name: string) => mode.spec(name),
-    getAccount: () => ({ id: "acct-1", label: SECRETS.account }),
+    getServerSpec: (name: string) => {
+      apiCalls.getServerSpec += 1;
+      return mode.spec(name);
+    },
+    getAccount: () => {
+      apiCalls.getAccount += 1;
+      return { id: "acct-1", label: SECRETS.account };
+    },
   };
   return { isActive: true, activate: async () => undefined, exports: api };
 }
 
 async function provide(mode: Mode): Promise<McpStdioServerDefinition[]> {
   for (const [key, value] of Object.entries(mode.settings)) mockState.configStore.set(`${CONFIG}.${key}`, value);
+  // Every mode's servers are user-scope `intersystems.servers` entries, so each fallback is reached by its own branch.
+  mockState.configStore.set("intersystems.servers", Object.fromEntries(mode.names.map((name) => [name, {}])));
+  apiCalls = { getServerSpec: 0, getAccount: 0 };
   mockState.serverManager = serverManager(mode);
   activate(fakeContext());
   await flushEditor();
@@ -148,6 +160,10 @@ describe("Story 44.6 QA: no secret reaches a provided definition, a warning or a
           expect(env, `${mode.label}: fallback env`).toEqual({});
         }
       }
+      // A `combineProfiles` plan never looks a spec up; every other mode reaches its outcome through `getServerSpec`.
+      if (mode.settings["combineProfiles"] === true) expect(apiCalls.getServerSpec).toBe(0);
+      else expect(apiCalls.getServerSpec, `${mode.label}: the spec was looked up`).toBeGreaterThan(0);
+      expect(apiCalls.getAccount, "providing never asks for an account").toBe(0);
 
       const everything = JSON.stringify({ defs, warnings: mockState.warnings, stray });
       for (const [kind, secret] of Object.entries(SECRETS)) {

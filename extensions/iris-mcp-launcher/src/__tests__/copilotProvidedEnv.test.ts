@@ -28,6 +28,7 @@ import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { skipUnbuilt } from "./builtDist.js";
 import { LauncherProvider } from "../serverDefinitionProvider.js";
+import { userScopeServers } from "./serverManagerInspection.js";
 import type { LauncherSettings, ServerManagerApi, ServerSpec } from "../types.js";
 import { resolveSdkEsmDir, REPO_ROOT } from "./sdkClientStore.js";
 
@@ -132,6 +133,7 @@ function providerFor(port: number, overrides: Partial<LauncherSettings> = {}): L
     authApi: { getSession: async () => { throw new Error("a provided definition never prompts"); } },
     getSettings: () => settings(overrides),
     showWarning: () => undefined,
+    inspectServerManagerServers: () => userScopeServers(["dev1"]),
   });
 }
 
@@ -204,9 +206,9 @@ describe("Story 44.6 AC-12: a provided definition starts a working server under 
 
     const profiles = await client.callTool({ name: "iris_server_profiles", arguments: {} });
     expect(profiles.isError).not.toBe(true);
-    const roster = JSON.stringify(profiles.structuredContent ?? profiles.content);
-    expect(roster).toContain('"default"');
-    expect(roster).not.toContain("evil");
+    const roster = profiles.structuredContent as { profiles?: Array<{ name: string }> } | undefined;
+    expect(roster?.profiles?.map((profile) => profile.name), "the roster holds only default").toEqual(["default"]);
+    expect(JSON.stringify(profiles.structuredContent ?? profiles.content)).not.toContain("evil");
 
     const expected = `Basic ${Buffer.from(`${USERNAME}:${STORED_PASSWORD}`).toString("base64")}`;
     const sent = fake.authorizations.flatMap((entry) => (entry.authorization === undefined ? [] : [entry.authorization]));
@@ -215,7 +217,9 @@ describe("Story 44.6 AC-12: a provided definition starts a working server under 
     expect(fake.authorizations[0]).toMatchObject({ method: "HEAD", url: "/api/atelier/" });
   }, 60_000);
 
-  it("the ambient values WOULD win if the provided env used null: dropping a null entry leaves the hostile value in place (the premise of the empty-string overrides)", () => {
+  // A self-check of this file's Agent Host emulation (P-2), not product evidence: the product-side proof that a dropped
+  // null lets an ambient value through is the "control" test in copilotEmptyOverrides.test.ts, which spawns the server.
+  it("emulation self-check: applyAsAgentHost drops a null entry, so the ambient value it would have cleared stays in place", () => {
     const merged = applyAsAgentHost({ IRIS_PASSWORD: "wrong" }, { IRIS_PASSWORD: null, IRIS_PORT: 52773 });
     expect(merged).toEqual({ IRIS_PASSWORD: "wrong", IRIS_PORT: "52773" });
   });

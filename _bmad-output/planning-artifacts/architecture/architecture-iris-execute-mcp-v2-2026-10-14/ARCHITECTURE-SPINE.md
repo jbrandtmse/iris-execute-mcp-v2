@@ -217,7 +217,7 @@ Solid arrows are the only permitted runtime dependencies. Dotted arrows start pr
     - Tool arguments carry profile names, never credentials.
     - Discovery output is built from an allow-list of non-secret fields.
     - No distribution surface (client-config, the extension, the plugin) writes a literal credential to a file without FR141's explicit confirmation.
-    - *(Story 44.6, decision #140.)* A definition the launcher extension provides to VS Code never carries a secret: VS Code persists provided definitions (workspace storage and up to 8 `agentPlugins` copies), so there is no literal-password opt-in there.
+    - *(Story 44.6, decision #140.)* A definition the launcher extension provides to VS Code never carries a secret: VS Code persists provided definitions (workspace storage and up to 8 `agentPlugins` copies), so there is no literal-password opt-in there. It names a stored credential (`IRIS_CREDENTIAL_NAME`) only for a Server Manager server defined in user (or default) settings alone: if any workspace, folder or language-specific workspace layer defines that name, or the inspection fails, the provided env is empty, so an untrusted repository cannot redirect a stored password to its own host (DW-749, Story 44.6 code review).
   - **Operator ceilings.** A caller parameter can tighten an operator control (read-only mode; row, time and size caps; `dataPolicy`) but never loosen it. A clamped value is noted in the response. This generalizes the H1 SQL clamps, which already report `rowsCapped`.
 
 ### AD-10 — Framework-provided surfaces are registered once [ADOPTED] (D6, E1, H2, Rule #31)

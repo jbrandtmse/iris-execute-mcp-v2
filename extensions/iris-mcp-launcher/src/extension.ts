@@ -589,6 +589,11 @@ export function activate(context: vscode.ExtensionContext): void {
     // output channel only, never a toast; the provider bounds the content to
     // the error name + a truncated message (no profile/env/session data).
     logDiagnostic: (message) => outputChannel.appendLine(message),
+    // The layers Server Manager's `getServerSpec` merges, read in the scope it reads them in.
+    inspectServerManagerServers: (scope) =>
+      vscode.workspace
+        .getConfiguration("intersystems", scope as vscode.ConfigurationScope | undefined)
+        .inspect<unknown>("servers"),
   });
 
   // 32-3-R8 (Story 32.4): monotonic refresh guard. Two overlapping async

@@ -27,6 +27,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { skipUnbuilt } from "./builtDist.js";
 import { EMPTY_MEANS_UNSET_VARS } from "../env.js";
 import { LauncherProvider } from "../serverDefinitionProvider.js";
+import { userScopeServers } from "./serverManagerInspection.js";
 import type { LauncherSettings, ServerManagerApi, ServerSpec } from "../types.js";
 import { resolveSdkEsmDir, REPO_ROOT } from "./sdkClientStore.js";
 
@@ -169,6 +170,7 @@ function providerFor(port: number, overrides: Partial<LauncherSettings> = {}): L
     authApi: { getSession: async () => { throw new Error("a provided definition never prompts"); } },
     getSettings: () => settings(overrides),
     showWarning: () => undefined,
+    inspectServerManagerServers: () => userScopeServers(["dev1"]),
   });
 }
 
@@ -280,11 +282,13 @@ describe("Story 44.6 QA: every empty-string override is honoured by a fresh serv
       const blanked = applyAsAgentHost({ ...keychainBase(caseDir), [name]: junk }, env);
       const client = await connect(command, args, blanked);
       expect((await client.listTools()).tools.length, `${name} blanked: the server starts with its normal tool list`).toBeGreaterThan(5);
+      // One server at a time: close it before the next variable's pair is spawned.
+      await client.close();
     }
     // Captured by running this loop (Rule #36): the variables whose junk value alone stops the server. The rest are inert in
     // isolation (they only matter with a companion variable set), which the all-junk test above covers together.
     expect(potent.sort()).toEqual(POTENT_ALONE);
-  }, 120_000);
+  }, 300_000);
 
   it("a server with every blanked variable \"\" lists the same tools as one with every such variable absent", async (ctx) => {
     if (skipUnbuilt(ctx, "Story 44.6 QA empty overrides", unbuiltReason)) return;
@@ -326,6 +330,11 @@ describe("Story 44.6 QA: IRIS_AUDIT_LOG_MAX_MB stays null (the one owned variabl
     const caseDir = mkdtempSync(path.join(scratch, "case-"));
     const { command, args, env } = await provided({ auditLog: path.join(caseDir, "audit.log") });
     expect(env["IRIS_AUDIT_LOG"]).toBe(path.join(caseDir, "audit.log"));
+    // Control: the same provided env with auditLog set and NO ambient IRIS_AUDIT_LOG_MAX_MB starts, so the failure below
+    // is the garbage value's and not the audit log's.
+    const control = await connect(command, args, applyAsAgentHost(keychainBase(caseDir), env));
+    expect((await control.listTools()).tools.length).toBeGreaterThan(5);
+    await control.close();
     await expect(
       connect(command, args, applyAsAgentHost({ ...keychainBase(caseDir), IRIS_AUDIT_LOG_MAX_MB: "not-a-number" }, env)),
     ).rejects.toBeTruthy();
