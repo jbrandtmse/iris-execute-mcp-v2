@@ -2,10 +2,10 @@
 title: 'Story 44.2: VS Code Copilot MCP Configuration Targets'
 type: 'bugfix'
 created: '2026-11-22'
-status: 'done'
+status: 'in-progress'
 baseline_revision: '05e37579f45f3dd0ba8d509b7dea04db95dffbe2'
 baseline_commit: '65ad54a404df4f0d407dbd729ba9ca6b4bc625d9'
-review_loop_iteration: 3
+review_loop_iteration: 4
 followup_review_recommended: false
 context:
   - '{project-root}/.claude/rules/project-rules.md'
@@ -320,6 +320,18 @@ Rejected:
 - blind-hunter (low): decision #137 is stamped `23:40Z`, but its cycle-log line and its commit are at `23:38:22Z`. This is the lead's bookkeeping, and the gap is two minutes. Flagged to the lead.
 - blind-hunter (low): the "full ownership matrix" that decision #137 promised is not recorded in the spec, and it has fewer cells than promised. This is the lead's smoke record, not this diff. Flagged to the lead, together with the three cases it missed (checklist 4).
 
+### Rework (iteration 4: owner override; wave-9 decision #139)
+
+The rework cap was reached with two unpatched HIGHs. The owner chose a bounded override (option A) with an automatic fallback (option B). Work ONLY these items:
+
+- [ ] [Review][HIGH] DW-742: an adopting `enable` records only the enabler, and an `enable` of a path-less stash into `.mcp.json` records nobody, so a later differing write by one client overwrites the other's entry (repros: re-review 3 above; lead matrix E5, E6). Fix as proposed in re-review 3: on a shared file, `enable` records the enabling client for that file, and calls `recordAdoptedOwners` when it adopts the other client's equal entry.
+- [ ] [Review][HIGH] DW-743, **by construction**: the shared-file rule applies ONLY to the claude-code `project` scope and the vscode `project` scope (the workspace `.mcp.json`), never to generic path equality across adapters or scopes. A client's own scopes are never peers; no other adapter (cursor, codex, gemini, kimi-code, jetbrains-junie, …) ever enters the shared-file rule, whatever the cwd. Pin: every adapter's user-scope apply and mode change run from HOME exits exactly as from another directory, with per-file, path-less and no state (lead matrix E3).
+- [ ] [Review] Implied ownership is for canonical (iris-mcp) names only (re-review 3's low finding on `recordAdoptedOwners` and non-canonical names), if it falls out of the two fixes above.
+- [ ] [Review] Docs: the launcher README (`extensions/iris-mcp-launcher/README.md` :147 and the mode table :264) overstates `server-manager` mode; a `server-manager` entry writes only `IRIS_SERVER_MANAGER`/`IRIS_SM_SERVERS`, and the server's `default` profile still needs the base `IRIS_*` variables at startup. Correct both. (D-6 step 2 was corrected by the lead.)
+- [ ] [Review] Gate: before finalize, BOTH lead matrices are green on the rebuilt CLI: `env -i PATH=$PATH HOME=<scratch> node /private/tmp/claude-501/-Users-jbrandt-git-iris-execute-mcp-v2/03eb9a39-2d9e-4087-85ac-363a9bb86d2a/scratchpad/matrix-44-2.mjs <repo>/packages/client-config/dist/cli/clients-cli.js <scratch dir>` (37 checks) and `… matrix-44-2-ext.mjs <cli> <scratch dir> claude-code,claude-desktop,cursor,vscode,cline,roo-code,windsurf,codex,gemini,zed,goose,kimi,kimi-code,pi,jetbrains-junie,kilo-code,antigravity` (81 checks; on 4bf6989 it is red on exactly E3 for the five adapters and E5/E6). Port E3, E5 and E6 into `shared-per-file-ownership.test.ts` as built-CLI pins with `mutation:` lines.
+
+**Fallback (option B, owner-accepted):** if the re-review of this iteration finds another HIGH in the shared-file logic, the story switches to refuse-only: any entry under a canonical name that the OTHER client wrote (or that is unrecorded, for vscode) is a conflict; nothing is ever adopted; a person configuring both clients for one project picks one. That is documented in the CHANGELOG, the READMEs and AD-30, and re-reviewed.
+
 ## Spec Change Log
 
 Implement stage, 2026-11-22 (no change to the `<intent-contract>`; every item below is a build decision or a claim the build found wrong):
@@ -505,7 +517,7 @@ No AC contradicts an AD's Rule. D-2 refines AD-30's draft bullet, which the prop
    - VS Code ≥ 1.146, signed in to Copilot, the Copilot harness selected (the default);
    - a throwaway IRIS (`node scripts/throwaway-iris.mjs up …`), never shared data;
    - a throwaway project folder, trusted.
-2. From the built repo, run `node packages/client-config/dist/cli/clients-cli.js apply --client vscode --scope project --server iris-dev-mcp --mode server-manager`, or `--mode env-reference` with `IRIS_*` exported in the shell that then runs `code .`. Open a new Copilot chat. Expect `iris_*` tools listed and one `iris_server_info` call to succeed.
+2. From the built repo, run `node packages/client-config/dist/cli/clients-cli.js apply --client vscode --scope project --server iris-dev-mcp --mode server-manager`, or `--mode env-reference`. **In either mode, export the six `IRIS_*` connection variables (`IRIS_HOST`, `IRIS_PORT`, `IRIS_USERNAME`, `IRIS_PASSWORD`, `IRIS_NAMESPACE`, `IRIS_HTTPS`) in the shell that then runs `code .`**: a `server-manager` entry writes only `IRIS_SERVER_MANAGER` and `IRIS_SM_SERVERS`, and the server's `default` profile still needs the base `IRIS_*` variables at startup (Story 44.6 probe; lead correction, wave-9 decision #139). Open a new Copilot chat. Expect `iris_*` tools listed and one `iris_server_info` call to succeed.
 3. Repeat with `--scope user` and `COPILOT_HOME` unset. Expect `~/.copilot/mcp-config.json` (Windows: `%USERPROFILE%\.copilot\mcp-config.json`). Expect the same result.
 4. Precedence (V7): put `iris-dev-mcp` in both files with different `IRIS_NAMESPACE`, call `iris_server_info`, and record which namespace answers.
 5. Forwarding (V3/V4): put an old `${input:}` entry in `.vscode/mcp.json` and an old `${env:}` entry in the profile `mcp.json`. Expect both absent from the Copilot session.
