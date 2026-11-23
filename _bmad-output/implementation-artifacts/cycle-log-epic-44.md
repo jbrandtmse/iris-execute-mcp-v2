@@ -96,3 +96,5 @@
 2026-11-23T06:48:12Z	Story 44.3	committed	sha=5acae405 branch=epic44 pushed=yes ci=pending run=45126565033
 2026-11-23T06:49:05Z	Story 44.6	plan_clarification_requested	answered=owner_rulings_#140(Q-A_A,Q-B_empty-string_overrides,Q-C_Local-only) applied=intent-contract,AD-9,AD-15 status=blocked->draft
 2026-11-23T06:49:05Z	Epic 44	spine_updated	ad=AD-9,AD-15 reason=44.6_keychain_secret_path(owner_ruling) by=lead story=44-6-launcher-provider-works-in-copilot-sessions lint=ok decision=140
+2026-11-23T06:50:36Z	Epic 44	epic_context_compiled	reason=planning_artifacts_newer(44.2/44.3/44.6_amendments,AD-9/15/19/30/34) model=claude-opus-5-5 lines=82
+2026-11-23T06:50:36Z	Story 44.6	stage_spawned	stage=plan spawn_at=2026-11-23T06:50:36Z model=claude-opus-5-5 agent_name=44-6-launcher-provider-works-in-copilot-sessions-plan-2 cycle_iteration=2 dispatch=spec_path(draft)
