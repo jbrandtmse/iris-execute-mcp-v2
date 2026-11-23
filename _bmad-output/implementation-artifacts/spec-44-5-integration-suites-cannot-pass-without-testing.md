@@ -312,6 +312,33 @@ deferred:
 
 **Shared surfaces:** `LIVE_SUITES['integration-data'].allowedSkips`, `ROOT_GATE_SCRIPTS`, `DECLARED_STEPS.gates`/`.throwaway`, the root `package.json` scripts (`REAL_CHECKS`), and the README CI section. Every test added or changed passes on a fresh environment, in either order (lifecycle chains excepted, as in Boundaries).
 
+### QA
+
+Two files added, both in the default suite of `@iris-mcp/all` (no live IRIS, hermetic, pass in default and `--sequence.shuffle --sequence.seed=44` order): `packages/iris-mcp-all/src/__tests__/story-44-5-qa-scanner-shapes.test.ts` (90 tests) and `packages/iris-mcp-all/src/__tests__/story-44-5-qa-docdb-enable-step.test.ts` (28 tests). `@iris-mcp/all` count after QA: 7039 + 118 = 7157.
+
+Mutations (each applied to the production file, the new test observed red, then reverted with `git checkout --` and `git diff --quiet <file>` clean):
+- mutation (QA, observed): `isTestCallback` accepts only arrow functions (drop `ts.isFunctionExpression`) in `live-guard-scan.mjs` -> 3 red (function expression, named function expression, generator).
+- mutation (QA, observed): `enclosingFunction` climbs past a callback that is not a test callback -> 4 red (forEach and map returns, an isError `if` in a nested callback, and its blind-spot row).
+- mutation (QA, observed): `endsLoudly` reads the first statement of the then-branch instead of the last -> 3 red ("a log, then a throw", a skip call last, "a throw that is not the last statement").
+- mutation (QA, observed): `endsLoudly` returns true whenever the `if` has an `else` -> 1 red ("a non-loud then-branch, with the assertion in the else").
+- mutation (QA, observed): `main()` of `check-live-guards.mjs` swallows a reader error (try/catch to no findings) -> 2 red (an unreadable file, a covered file missing on disk).
+- mutation (QA, observed): `main()` exits 1 only for more than one finding -> 1 red ("one finding in one file is enough for exit 1").
+- mutation (QA, observed): `DOCDB_ENABLE_BEFORE = 'integration-dev'` in `ci-checks.mjs` -> 3 red (the lifecycle suite is not immediately after the enable step; the real-ci.yml baseline; the "moved after integration-data" row).
+- mutation (QA, observed): `DOCDB_ENABLE_BEFORE = 'prepublish-all'` -> 4 red (the F5-holding suite runs after the enable step, derived from the suites' own file lists; the lifecycle row; the baseline; the "before prepublish-all" row).
+- mutation (QA, observed): `ROOT_GATE_SCRIPTS` puts `pnpm check:live-guards` before the epics-sync check -> 3 red (gates order, the baseline, the moved-step row).
+- mutation (QA, observed): delete the `enable %Service_DocDB` step from `.github/workflows/ci.yml` -> 11 red (the parsed-workflow order test, the baseline and every mutation row that needs the block).
+- mutation (QA, observed): `DOCDB_ENABLE_SCRIPT` names a file that is not on disk -> 15 red (the existence pin, the script pins, the argv run, the workflow rows).
+- mutation (QA, observed): drop `--namespace %SYS` from the declared session step -> 7 red, including both argv-run rows (the CLI refuses the step before it reaches the state-file check).
+- mutation (QA, observed): restore `export const DOCDB_SKIPS` in `ci-checks.mjs` -> 1 red (the allowlist is gone from the registry module).
+- mutation (QA, observed): comment out the `Modify` line of `ci-enable-docdb-service.script` -> 1 red (Modify then Get).
+- mutation (QA, observed): split the `Terminate` onto its own line (it would run unconditionally) -> 1 red (the failure line).
+- mutation (QA, observed): delete the final `Halt` -> 1 red.
+- mutation (QA, observed): add an `it` holding `forEach((r) => { if (!r.isError) {...} })` to `ops.integration.test.ts` -> the new "none of those shapes occurs in an armed file" test goes red naming `ops.integration.test.ts:297`, while `pnpm check:live-guards` still prints `73 armed files, 0 findings` (the scan false negative below, shown on the real tree).
+
+Findings (production, none fixed here; the scanner and CLI are unchanged):
+- Scan false negatives, all latent (no armed file holds one; pinned by the new "latent" test, which walks a typed AST independent of the scan's regex). Not in the module header: `created?.x` and `created["x"]` (the pattern is `\bcreated\.`), `result["isError"]` and a destructured `isError`, a `switch` on an outcome, an outcome `if` inside a callback nested in a test (`forEach`, `Promise.all(rows.map(...))`; rule G scopes by the nearest function, and rule C does the same although the spec says "inside a test callback"), `it.each` over a tagged template, and `it`/`test` imported under an alias or bound to a variable. Documented in the header and pinned as such: `&&`/ternary-gated assertions and a non-inline callback.
+- `main()` has no zero-file guard: `main([], { files: [] })` returns 0 and prints `0 armed files, 0 findings`. The default list cannot be empty today (`live-guard-check.test.ts` pins more than 60 files), so it is a latent weakness of the gate, not a defect of the shipped tree.
+
 **Lead (post-push):** the armed CI run URL of the `epic44` tip goes here (AC 44.5.4).
 
 ## Auto Run Result
