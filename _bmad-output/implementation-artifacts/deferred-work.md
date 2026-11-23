@@ -4235,3 +4235,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-4-bootstrap-compile-result-accuracy.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: compile.ts:135-170 reads result.content[].errors, which IRIS never sends (2026.1, 2026.2, IRIS for Health 2026.2, Atelier v1-v8); General.Compile replaces the status when it writes Storage (irislib/%Atelier/v1/Utils/General.cls:1318-1385), so HTTP 200 with no status error
 - 2026-11-23T10:38:57Z status=routed owner=burndown by=harvest note=fix by reusing Story 44.4's verifyCompiled check (two Atelier reads) in the tool; the epic burn-down story
+
+### DW-755: iris_doc_load and env-promote read a compile as successful from per-document errors only, so a Storage-written partial failure reads as success there (the DW-754 root cause)
+- source: spec-44-4-bootstrap-compile-result-accuracy.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: load.ts:604-640 computes compilationResult.success from per-document errors, env-promote.ts:975 posts action/compile; the planning probe shows real documents never carry errors; unverified to the end of result handling
+- 2026-11-23T12:18:39Z status=routed owner=burndown by=harvest note=fix with DW-754 by reusing verifyCompiled; probe first (Rule #16)
