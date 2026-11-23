@@ -6175,7 +6175,7 @@ These five are set to `in-progress` when the proposal is applied, so the Story 4
   - **Data and docs.** `ADAPTER_DATA_VERSION` is bumped, and the README adapter tables are regenerated.
 - **AC 44.2.3** — **The shared workspace file.** A workspace `.mcp.json` is also Claude Code's project file (`claude-code` adapter, project scope). Decide the rule and pin it on non-canonical fixtures (Rule #58), as the AD-30 amendment in the proposal (§4.3) states it:
   - entries are owned per server name, not per client;
-  - a write for one client that finds a byte-identical entry adopts it, and any other entry under that name is a conflict;
+  - a write for one client that finds a byte-identical entry adopts it, and any other entry under that name is a conflict; *(Amended 2026-11-23 by the owner's option-B fallback, wave-9 decisions #139 and #142.)* As built, nothing is adopted: each entry has one owner, and the other client's `apply` (an identical entry included), `disable`, `enable`, `remove` and `restore` of it are refused and write nothing; configuring both clients for one project means picking one. Only the Claude Code and VS Code project scopes share the file (DW-743).
   - a disable (stash) or remove for one client says that the other client reads the same file;
   - `detect`, `status` and `doctor` show the one file under both clients without counting it twice.
 - **AC 44.2.4** — **Existing installs.**

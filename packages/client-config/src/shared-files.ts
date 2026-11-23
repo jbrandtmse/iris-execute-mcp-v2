@@ -15,8 +15,11 @@
  *    without a path never makes VS Code an owner: it describes the old `.vscode/mcp.json`.
  *
  * `apply`, `disable`, `enable` and `remove` by a client that does not own an entry that is in the file are refused and
- * write nothing; a name that is not in the file is created (or put back from a stash) by whoever asks, and that client
- * then owns it. This module is pure: it reads the ledger and the resolved paths it is given and never touches a file.
+ * write nothing, and so is a `restore` whose backup would change such an entry; a name that is not in the file is
+ * created (or put back from a stash) by whoever asks, and that client then owns it. An entry under a name outside the
+ * iris-mcp namespace that no record of this file names belongs to nobody: only a client whose own record counts here
+ * (`recordingClients`) changes it, so a VS Code record without a path never does. This module is pure: it reads the
+ * ledger and the resolved paths it is given and never touches a file.
  */
 
 import { CLIENT_ADAPTERS } from "./adapters.js";
@@ -147,19 +150,23 @@ interface LedgerRecord {
 
 /**
  * The refusal for a client that does not own an entry of the shared file: names the file and the owner, says nothing
- * was written, and gives the way out (remove the entry with its owner, then write it with this client). It never
- * echoes an entry's content.
+ * was written, and gives the way out (remove the entry with its owner, then write it with this client). A `restore`
+ * is refused when the backup would change such an entry. It never echoes an entry's content.
  */
 export function ownedByOtherReason(args: {
-  verb: "write" | "disable" | "enable" | "remove";
+  verb: "write" | "disable" | "enable" | "remove" | "restore";
   path: string;
   name: string;
   client: string;
   owner: string;
 }): string {
   const label = (id: string): string => (CLIENT_ADAPTERS[id] !== undefined ? `${CLIENT_ADAPTERS[id].displayName} (${id})` : id);
+  const what =
+    args.verb === "restore"
+      ? `refusing to restore ${args.path}: the backup would change "${args.name}", which belongs to ${label(args.owner)}. `
+      : `refusing to ${args.verb} "${args.name}" in ${args.path}: the entry belongs to ${label(args.owner)}. `;
   return (
-    `refusing to ${args.verb} "${args.name}" in ${args.path}: the entry belongs to ${label(args.owner)}. ` +
+    what +
     `Claude Code and VS Code both read this workspace file, and one client never changes an entry the other owns, so nothing was written. ` +
     `To use ${args.client} for this server instead, remove the entry with its owner first: ` +
     `npx -y -p ${pinnedSpec("@iris-mcp/client-config")} iris-mcp-clients remove --client ${args.owner} --scope project --server ${args.name}, ` +
@@ -168,9 +175,11 @@ export function ownedByOtherReason(args: {
 }
 
 /**
- * The state after a client removes `name` from the shared file `at`: its own records and stash for the file go, and so
- * do the manager-created records of the other clients for the same file, which no longer describe an entry that is
- * there. Their stashes stay: a stash is a disabled copy the other client can still enable.
+ * The state after a client removes `name` from the shared file `at`: its own records and stash for the file go. When the
+ * client owns the name there (or nobody does), so do the manager-created records of the other clients for the same file,
+ * which no longer describe an entry that is there. A client that does not own the name (it removes an entry its owner
+ * has disabled, which is not in the file) drops only its own records: the owner's record and stash stay. Stashes of the
+ * other clients always stay: a stash is a disabled copy its owner can still enable.
  */
 export function dropRemovedShared(
   state: ManagerState,
@@ -180,8 +189,9 @@ export function dropRemovedShared(
   peers: readonly SharedPeer[],
   at: RecordFile,
 ): ManagerState {
+  const owner = peers.length === 0 ? client : fileOwner(state, client, scope, name, peers, at);
   const own = dropStash(dropManaged(state, client, scope, name, at), client, scope, name, at);
-  return dropPeerRecords(own, peers, name, at);
+  return owner === null || owner === client ? dropPeerRecords(own, peers, name, at) : own;
 }
 
 /**

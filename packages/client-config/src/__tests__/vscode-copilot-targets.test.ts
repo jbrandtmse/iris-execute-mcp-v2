@@ -278,6 +278,33 @@ describe("AC 44.2.4: old installs are reported, then moved by apply through the 
     expect(fs.exists(PROJECT_FILE)).toBe(false);
   });
 
+  it("a re-apply of an entry already in the new file that would also move an old-file entry asks for confirmation: no --yes on a non-TTY exits 2 and edits nothing", async () => {
+    const fs = new MemFs();
+    expect((await cli(fs, ["apply", "--client", "vscode", "--scope", "project", "--servers", "iris-dev-mcp", "--yes"])).exit).toBe(0);
+    const written = fs.readFile(PROJECT_FILE);
+    fs.seed(OLD_PROJECT, OLD_PROJECT_TEXT);
+    const run = await cli(fs, ["apply", "--client", "vscode", "--scope", "project", "--servers", "iris-dev-mcp"]);
+    expect(run.exit).toBe(2);
+    expect(fs.readFile(OLD_PROJECT)).toBe(OLD_PROJECT_TEXT);
+    expect(fs.readFile(PROJECT_FILE)).toBe(written);
+  });
+
+  for (const [owner, other] of [["claude-code", "vscode"], ["vscode", "claude-code"]] as const) {
+    it(`a diff by ${other} of an entry ${owner} owns in the shared file exits 1, names ${owner} and the file, and writes nothing`, async () => {
+      const fs = new MemFs();
+      expect((await cli(fs, ["apply", "--client", owner, "--scope", "project", "--servers", "iris-dev-mcp", "--yes"])).exit).toBe(0);
+      const shared = fs.readFile(PROJECT_FILE);
+      const before = readState(fs, STATE_DIR, "linux");
+      const run = await cli(fs, ["diff", "--client", other, "--scope", "project", "--servers", "iris-dev-mcp", "--json"]);
+      expect(run.exit).toBe(1);
+      expect((JSON.parse(run.stdout) as { ok: boolean }).ok).toBe(false);
+      expect(run.stderr).toContain(`(${owner})`);
+      expect(run.stderr).toContain(PROJECT_FILE);
+      expect(fs.readFile(PROJECT_FILE)).toBe(shared);
+      expect(readState(fs, STATE_DIR, "linux")).toEqual(before);
+    });
+  }
+
   it("a multi-server apply with one server owned by claude-code exits 1 before it writes any server", async () => {
     const fs = new MemFs();
     expect((await cli(fs, ["apply", "--client", "claude-code", "--scope", "project", "--servers", "iris-dev-mcp", "--yes"])).exit).toBe(0);

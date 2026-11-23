@@ -73,12 +73,14 @@ iris-mcp-clients skills install|uninstall --client <id> [--project <dir>] [--dry
     entry included), `disable`, `enable` and `remove` of that entry exit 1 and write nothing.
     Nothing is ever adopted. Configuring both clients for one project means picking one client
     per server; to switch, `remove` the entry with its owner, then `apply` it with the other
-    client. An iris-mcp entry that no record names for this file belongs to Claude Code. The owner's
-    `disable` or `remove` says that the other client reads the same file. `detect`, `status`
-    and `doctor` list the file under both clients and check it once. Ownership is kept per
-    project file: a record or a disabled entry from another project never counts, and after a
-    project folder is moved or renamed, `enable` finds nothing to enable there and `apply`
-    writes the entry again.
+    client. An iris-mcp entry that no record names for this file belongs to Claude Code. A
+    `restore` whose backup would change an entry the other client owns is refused the same way.
+    The owner's `disable` or `remove` says that the other client reads the same file. `detect`,
+    `status` and `doctor` list the file under both clients and check it once. Ownership is kept
+    per project file: a record or a disabled entry from another project never counts, and after
+    a project folder is moved or renamed, `enable` finds nothing to enable there and VS Code's
+    entries there belong to Claude Code: `remove` them with `claude-code`, then `apply` with
+    `vscode`.
   - There is no password prompt and no `inputs` array: the Copilot harness cannot forward
     either. `env-reference` writes `"IRIS_PASSWORD": "${IRIS_PASSWORD}"`, which VS Code resolves
     from the environment it was launched with (restart VS Code from a shell that has the

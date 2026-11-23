@@ -4165,6 +4165,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: built CLI: pre-44.2 pathless cc record + pathless vscode server-manager stash; vscode enable adopts (ledger: vscode:B only), vscode apply env-reference exits 0 changed:1 over cc's entry. Reverse: vscode stash-add enable from a pathless stash leaves no vscode record; cc apply rewrites it. Only apply's adopt calls recordAdoptedOwners
 - 2026-11-22T23:54:03Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=rework_cap_reached: re-review 3 HIGH, not patched; Planner decides; proposed fix in spec Review Findings (rework re-review 3)
 - 2026-11-23T04:51:36Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=rr4 HIGH: vscode disable+enable of cc entry (pathless/no cc record) makes vscode sole owner; overwrite; option B
+- 2026-11-23T06:01:31Z status=resolved-by:44-2-vs-code-copilot-mcp-configuration-targets owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=option B rr5: lead MATRIX-B 120/120 on rebuilt CLI; non-owner refused every verb+restore; pins B2-B9 + rr5 foreign/restore pins
 
 ### DW-743: sharedPeers counts the same client's other scope as a sharing peer, so from the home directory a cursor, codex, gemini, kimi-code or jetbrains-junie user-scope re-apply with a pre-44.2 (pathless) or missing state record is refused as a shared-file conflict
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: high | fix-risk: low | footprint: in-story
@@ -4176,13 +4177,26 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: med | footprint: in-story
 - evidence: built CLI: vscode apply in A, rename A; vscode mode change exits 1 naming claude-code; same-mode re-apply adopts and records claude-code:A-moved; later mode change still exits 1. An unrecorded entry cannot be told apart from a lost-state Claude Code entry
 - 2026-11-22T23:54:18Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=AD-30 decision #137 (an adoption records the implied owner, 'or none'); refusal, never an overwrite; remove then apply clears it
+- 2026-11-23T06:01:31Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=option B: moved-folder vscode re-apply is refused, records nothing; docs now say remove with claude-code then apply
 
 ### DW-745: A put-back vscode enable of a path-less pre-44.2 stash into a shared .mcp.json also records claude-code as implied owner, so a later differing vscode write is refused naming claude-code
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: low | footprint: in-story
 - evidence: rework-4 review, Verification Gap repro on the built CLI (lead matrix E6 setup, then enable + apply --mode env-reference exits 1); gating the implied record on adopting-only turns lead matrix E2 red
 - 2026-11-23T04:39:01Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=lead note=decision_141: fails safe (refusal, never an overwrite); pre-44.2 path-less vscode stash only; workaround remove then apply; the implied-owner rule is what AD-30 #137 and matrix E2 require
+- 2026-11-23T06:01:31Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=moot_under_option_B: adopt path and implied-owner record removed (no recordAdoptedOwners); B9 put-back owns, no cc record
 
 ### DW-746: client-config restore rolls back the whole shared .mcp.json from the calling client's backups, so it can revert the other client's entry; restore is not subject to the option-B one-owner rule
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: med | footprint: in-story
 - evidence: engine.ts restore only names the other reader; a restore of a backup taken before Claude Code wrote an entry removes that entry and leaves its ledger record (rework-5 review)
 - 2026-11-23T05:40:42Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=harvest note=for the option-B re-review: patch (refuse a shared-file restore that would change the other client's owned entries, or restore owned entries only) if fix-risk allows, else route to burndown
+- 2026-11-23T06:01:31Z status=resolved-by:44-2-vs-code-copilot-mcp-configuration-targets owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=restore refused when backup changes an entry the other client owns; built-CLI pin + mutation line (rr5)
+
+### DW-747: A vscode entry left in the old .vscode/mcp.json cannot be cleaned by the CLI while claude-code owns the same server in the shared .mcp.json: vscode remove/apply are refused, and doctor's vscode-local-harness-entries fix names that apply
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: rr5 review (blind-hunter + edge-case-hunter): remove/apply refusal returns before withLegacyRemoval; doctor check 7 fix = apply --client vscode; only way out is remove with claude-code first, which switches the server to vscode
+- 2026-11-23T06:01:37Z status=routed owner=burndown by=cr note=needs a decision: may a refused vscode verb still sweep its own old-file entry, or doctor name the owner's remove; option B says refused verbs write nothing
+
+### DW-748: An entry re-added from outside the tool (git pull, claude mcp add, hand edit) after claude-code removed it belongs to vscode when vscode still holds a stash of it for the file, so claude-code is refused it
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: rr5 verification-gap trace: vscode apply, vscode disable (stash), cc apply (drops vscode record), cc remove (stash kept), outside write; fileOwner's stash tier returns vscode
+- 2026-11-23T06:01:37Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=AD-30 owner order is record, then stash, then claude-code; fails safe (refusal naming vscode); way out: remove with vscode

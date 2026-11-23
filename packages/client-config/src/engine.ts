@@ -49,6 +49,7 @@ import {
   peerClients,
   peersRecordingFile,
   PRE_SHARING_WRITERS,
+  recordingClients,
   sharedFileNote,
   sharedPeers,
   type SharedPeer,
@@ -71,6 +72,7 @@ import { CANONICAL_SERVERS, type CanonicalEntry, type CanonicalServerName, type 
 import {
   applyWrite,
   executeNativeEdit,
+  readChosenBackup,
   restoreBackup,
   REAL_WRITE_FS,
   type WriteFs,
@@ -101,7 +103,7 @@ export interface EngineResult {
   /** Non-fatal problems (e.g. the config write succeeded but the state.json
    * update failed) — the operation still reports ok. */
   warnings?: string[];
-  /** The other clients that read the same file; present only on a refusal because another client owns the entry, and on a disable or remove that affects them (Story 44.2). */
+  /** The other clients that read the same file; present only on a refusal because another client owns the entry, and on a disable, remove or restore that affects them (Story 44.2). */
   sharedWith?: string[];
   /** Says that other clients read the same file (a disable or remove of a shared entry; Story 44.2). */
   sharedNote?: string;
@@ -224,28 +226,46 @@ function ownershipRefusal(
   if (isManagerCreated(state, client, scope, name, at)) return null;
   if (findStash(state, client, scope, name, at)) return null;
   if (!present) return null; // creation is how an entry becomes manager-created
+  return unrecordedForeignReason(name);
+}
+
+/** The refusal for a name outside the iris-mcp namespace that state.json does not record (for `shared`, in that file). */
+function unrecordedForeignReason(name: string, shared?: { path: string; client: string }): string {
   return (
-    `refusing to modify "${name}": the name is outside the iris-mcp namespace ` +
-    `(it is not one of ${CANONICAL_SERVERS.join(", ")}) and state.json does not record it as manager-created`
+    `refusing to modify "${name}"${shared !== undefined ? ` in ${shared.path}` : ""}: the name is outside the iris-mcp namespace ` +
+    `(it is not one of ${CANONICAL_SERVERS.join(", ")}) and state.json does not record it as manager-created` +
+    (shared !== undefined ? ` by ${shared.client} for this file` : "")
   );
 }
 
 /**
  * The refusal for an operation by a client that does not own an entry that is in a shared file, or `null`: nothing is
- * shared, the entry is not in the file, nobody owns it, or this client does (see shared-files.ts `fileOwner`).
- * `present` is whether the entry is in the file.
+ * shared, the entry is not in the file, or this client owns it (see shared-files.ts `fileOwner`). An entry nobody owns
+ * (a name outside the iris-mcp namespace that no record of this file names) is changed only by a client whose own
+ * record counts for the file (`recordingClients`): a VS Code record without a path describes its old file, never this
+ * one. `present` is whether the entry is in the file. Runs before `ownershipRefusal`, so the owner is the one named.
  */
 function notOwnerRefusal(
   target: Target,
   name: string,
   verb: "write" | "disable" | "enable" | "remove",
   present: boolean,
-): { reason: string; owner: string } | null {
+): { reason: string; owner?: string } | null {
   if (!present || target.peers.length === 0) return null;
   const client = target.adapter.id;
   const owner = fileOwner(target.state, client, target.scope, name, target.peers, target.at);
-  if (owner === null || owner === client) return null;
-  return { reason: ownedByOtherReason({ verb, path: target.path, name, client, owner }), owner };
+  if (owner === client) return null;
+  if (owner !== null) return { reason: ownedByOtherReason({ verb, path: target.path, name, client, owner }), owner };
+  // Nobody owns the name. For the pre-sharing writer the namespace rule (`ownershipRefusal`) decides on the same records,
+  // with its own text; any other client changes it only through a record that counts for this file.
+  if (PRE_SHARING_WRITERS.includes(client)) return null;
+  if (recordingClients(target.state, client, target.scope, name, target.peers, target.at).includes(client)) return null;
+  return { reason: unrecordedForeignReason(name, { path: target.path, client }) };
+}
+
+/** The `sharedWith` field of a refusal that names an owner. */
+function ownerField(refusal: { owner?: string }): Partial<EngineResult> {
+  return refusal.owner !== undefined ? { sharedWith: [refusal.owner] } : {};
 }
 
 /** True when `name` is in the shared file `content`. False for an unshared file, an unparseable one and an empty one. */
@@ -277,7 +297,9 @@ export function sharedWriteVerdict(
   const current = readCurrent(fs, target.path);
   if (!current.ok) return { kind: "none" };
   const conflict = notOwnerRefusal(target, entry.name, "write", sharedEntryPresent(target, current.content, entry.name));
-  return conflict === null ? { kind: "none" } : { kind: "conflict", path: target.path, sharedWith: [conflict.owner], reason: conflict.reason };
+  return conflict === null
+    ? { kind: "none" }
+    : { kind: "conflict", path: target.path, sharedWith: conflict.owner !== undefined ? [conflict.owner] : [], reason: conflict.reason };
 }
 
 /** True when a stashed or written entry holds `${env:...}`, `${input:...}` or `${command:...}` references (the old VS Code harness's syntax). */
@@ -498,6 +520,10 @@ export function apply(
     if (parsed.ok) existing = ownEntry(parsed.entries, entry.name);
   }
   const present = existing !== undefined;
+  // A shared file: an entry that is in the file and belongs to the other client is never written, equal or not (AD-30).
+  // A name that is not in the file is created as ever.
+  const conflict = notOwnerRefusal(target, entry.name, "write", present);
+  if (conflict !== null) return fail(client, scope, "apply", target.path, conflict.reason, ownerField(conflict));
   const refusal = ownershipRefusal(target.state, client, scope, entry.name, present, target.at);
   if (refusal) return fail(client, scope, "apply", target.path, refusal);
 
@@ -512,11 +538,6 @@ export function apply(
       ? dropStash(recorded, client, scope, entry.name, target.at)
       : recorded;
   };
-
-  // A shared file: an entry that is in the file and belongs to the other client is never written, equal or not (AD-30).
-  // A name that is not in the file is created as ever.
-  const conflict = notOwnerRefusal(target, entry.name, "write", existing !== undefined);
-  if (conflict !== null) return fail(client, scope, "apply", target.path, conflict.reason, { sharedWith: [conflict.owner] });
 
   const result = runEdit({
     ctx,
@@ -562,13 +583,13 @@ export function enable(
   if (current.content === null) {
     return noopMissingFile(client, scope, "enable", target.path, target.adapter);
   }
-  const refusal = ownershipRefusal(target.state, client, scope, name, true, target.at);
-  if (refusal) return fail(client, scope, "enable", target.path, refusal);
   // In a shared file the owner of an entry that is in the file is the only client that may enable it; the other
   // client's stash is kept. An entry that is not in the file is put back by whoever holds the stash.
   const present = sharedEntryPresent(target, current.content, name);
   const notOwner = notOwnerRefusal(target, name, "enable", present);
-  if (notOwner !== null) return fail(client, scope, "enable", target.path, notOwner.reason, { sharedWith: [notOwner.owner] });
+  if (notOwner !== null) return fail(client, scope, "enable", target.path, notOwner.reason, ownerField(notOwner));
+  const refusal = ownershipRefusal(target.state, client, scope, name, true, target.at);
+  if (refusal) return fail(client, scope, "enable", target.path, refusal);
   const diffOptions: DiffOptions | undefined = stash ? { nativeEntry: stash.entry } : undefined;
   if (!target.adapter.nativeDisableFlag && !stash) {
     // Stash client, entry absent, nothing stashed: distinguish "already
@@ -632,11 +653,11 @@ export function disable(
   if (current.content === null) {
     return noopMissingFile(client, scope, "disable", target.path, target.adapter);
   }
-  const refusal = ownershipRefusal(target.state, client, scope, name, true, target.at);
-  if (refusal) return fail(client, scope, "disable", target.path, refusal);
   // In a shared file only the owner of an entry that is in the file may disable it, so only an owner ever takes a stash.
   const notOwner = notOwnerRefusal(target, name, "disable", sharedEntryPresent(target, current.content, name));
-  if (notOwner !== null) return fail(client, scope, "disable", target.path, notOwner.reason, { sharedWith: [notOwner.owner] });
+  if (notOwner !== null) return fail(client, scope, "disable", target.path, notOwner.reason, ownerField(notOwner));
+  const refusal = ownershipRefusal(target.state, client, scope, name, true, target.at);
+  if (refusal) return fail(client, scope, "disable", target.path, refusal);
 
   // For a stash client the entry is captured BEFORE the write: the parsed
   // native entry, exactly as it sat in the file (spec §3.4 stash shape).
@@ -686,6 +707,9 @@ function removeFromTarget(
   if ("action" in target) return target;
   const current = readCurrent(fs, target.path);
   if (!current.ok) return fail(client, scope, "remove", target.path, current.reason);
+  // In a shared file only the owner of an entry that is in the file may remove it.
+  const notOwner = notOwnerRefusal(target, name, "remove", sharedEntryPresent(target, current.content, name));
+  if (notOwner !== null) return fail(client, scope, "remove", target.path, notOwner.reason, ownerField(notOwner));
   const refusal = ownershipRefusal(target.state, client, scope, name, true, target.at);
   if (refusal) return fail(client, scope, "remove", target.path, refusal);
   if (current.content === null) {
@@ -734,9 +758,6 @@ function removeFromTarget(
       );
     }
   }
-  // In a shared file only the owner of an entry that is in the file may remove it.
-  const notOwner = notOwnerRefusal(target, name, "remove", sharedEntryPresent(target, current.content, name));
-  if (notOwner !== null) return fail(client, scope, "remove", target.path, notOwner.reason, { sharedWith: [notOwner.owner] });
 
   return withSharedNote(
     runEdit({
@@ -754,8 +775,38 @@ function removeFromTarget(
   );
 }
 
+/**
+ * The refusal for a restore of a shared file whose backup would change an entry another client owns, or `null`: the file
+ * is not shared, there is no backup (the restore reports that), or either side cannot be read or parsed (restore is how a
+ * broken file is recovered, so the whole-file rollback stays). An entry nobody owns does not stop it.
+ */
+function sharedRestoreRefusal(
+  target: Target,
+  backup: ReturnType<typeof readChosenBackup>,
+  fs: WriteFs,
+): { reason: string; owner: string } | null {
+  if (target.peers.length === 0 || !backup.ok) return null;
+  const current = readCurrent(fs, target.path);
+  if (!current.ok) return null;
+  const entriesOf = (text: string | null): Record<string, RawEntry> | null => {
+    if (text === null) return {};
+    const parsed = readConfigEntries(target.adapter, text);
+    return parsed.ok ? parsed.entries : null;
+  };
+  const now = entriesOf(current.content);
+  const then = entriesOf(backup.content);
+  if (now === null || then === null) return null;
+  const client = target.adapter.id;
+  for (const name of new Set([...Object.keys(now), ...Object.keys(then)])) {
+    if (JSON.stringify(ownEntry(now, name)) === JSON.stringify(ownEntry(then, name))) continue;
+    const owner = fileOwner(target.state, client, target.scope, name, target.peers, target.at);
+    if (owner !== null && owner !== client) return { reason: ownedByOtherReason({ verb: "restore", path: target.path, name, client, owner }), owner };
+  }
+  return null;
+}
+
 /** restore: restore the latest (or a named) timestamped backup of one
- * client's config file. */
+ * client's config file. In a shared file it is refused when the backup would change an entry the other client owns. */
 export function restore(
   ctx: EngineHostContext,
   client: string,
@@ -765,7 +816,7 @@ export function restore(
   const fs = options.fs ?? REAL_WRITE_FS;
   const target = resolveTarget(ctx, client, scope, "restore", fs);
   if ("action" in target) return target;
-  const result = restoreBackup(target.path, {
+  const restoreOptions = {
     adapter: target.adapter,
     client: target.adapter.id,
     scope,
@@ -774,7 +825,10 @@ export function restore(
     ...(options.backup !== undefined ? { backup: options.backup } : {}),
     fs,
     ...(options.now !== undefined ? { now: options.now } : {}),
-  });
+  };
+  const owned = sharedRestoreRefusal(target, readChosenBackup(target.path, restoreOptions), fs);
+  if (owned !== null) return fail(client, scope, "restore", target.path, owned.reason, { sharedWith: [owned.owner] });
+  const result = restoreBackup(target.path, restoreOptions);
   if (!result.ok) {
     return fail(client, scope, "restore", target.path, result.reason ?? "restore failed", {
       ...(result.backupPath !== undefined ? { backupPath: result.backupPath } : {}),

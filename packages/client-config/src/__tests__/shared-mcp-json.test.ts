@@ -394,6 +394,14 @@ describe("an owner's disable and remove say that the other client reads the same
     const data = (JSON.parse(restored.stdout) as { data: { sharedWith?: string[]; sharedNote?: string } }).data;
     expect(data.sharedWith).toEqual(["claude-code"]);
     expect(data.sharedNote).toContain("Claude Code (claude-code) reads the same file");
+    // claude-code's latest backup predates vscode's entry, so its restore would remove an entry vscode owns: refused.
+    const shared = fs.readFile(FILE);
+    const refused = await step(fs, ["restore", ...project("claude-code")]);
+    expect(refused.exit).toBe(1);
+    expect(refused.stderr).toContain(`the backup would change "iris-interop-mcp", which belongs to VS Code (Copilot) (vscode)`);
+    expect(fs.readFile(FILE)).toBe(shared);
+    // A later claude-code write backs up the file with vscode's entry in it; restoring that changes claude-code's own only.
+    expect((await step(fs, applyArgs("claude-code"))).exit).toBe(0);
     const ccRestore = await step(fs, ["restore", ...project("claude-code")]);
     expect(ccRestore.exit, ccRestore.stderr).toBe(0);
     expect(ccRestore.stdout).toContain("VS Code (Copilot) (vscode) reads the same file");
