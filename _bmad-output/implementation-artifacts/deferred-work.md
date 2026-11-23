@@ -4174,3 +4174,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: med | footprint: in-story
 - evidence: built CLI: vscode apply in A, rename A; vscode mode change exits 1 naming claude-code; same-mode re-apply adopts and records claude-code:A-moved; later mode change still exits 1. An unrecorded entry cannot be told apart from a lost-state Claude Code entry
 - 2026-11-22T23:54:18Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=AD-30 decision #137 (an adoption records the implied owner, 'or none'); refusal, never an overwrite; remove then apply clears it
+
+### DW-745: A put-back vscode enable of a path-less pre-44.2 stash into a shared .mcp.json also records claude-code as implied owner, so a later differing vscode write is refused naming claude-code
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: rework-4 review, Verification Gap repro on the built CLI (lead matrix E6 setup, then enable + apply --mode env-reference exits 1); gating the implied record on adopting-only turns lead matrix E2 red
+- 2026-11-23T04:39:01Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=lead note=decision_141: fails safe (refusal, never an overwrite); pre-44.2 path-less vscode stash only; workaround remove then apply; the implied-owner rule is what AD-30 #137 and matrix E2 require
