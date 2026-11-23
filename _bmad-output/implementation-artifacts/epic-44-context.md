@@ -15,6 +15,7 @@ Fix the defects that shipped in `1.1.0` and were found by Epic 42's reviews, plu
 - Story 44.4: Bootstrap Compile Result Accuracy
 - Story 44.5: Integration Suites Cannot Pass Without Testing
 - Story 44.7: Epic 44 Burn-down
+- Story 44.8: Local Resolver Hands a Password Only to User-Scoped Servers
 
 ## Requirements & Constraints
 
@@ -53,4 +54,4 @@ Fix the defects that shipped in `1.1.0` and were found by Epic 42's reviews, plu
   - DW-758: 12 armed tests that assert only that a reply has text.
   A description change is a sanctioned Frozen goldens entry plus a tools-list snapshot regeneration. A bootstrapped-class change regenerates the embed in the same story.
 - **As built in 44.5.** `pnpm check:live-guards` refuses a test in an armed file that returns early or asserts only inside an `isError`/`created.` branch; it is syntactic, with documented limits. The CI throwaway job enables `%Service_DocDB` after `prepublish-all` and before `integration-data`, so the DocDB lifecycle runs armed with an empty allowlist. New or changed armed tests must assert their outcome unconditionally.
-
+- **44.8 (owner, decision #153; DW-752).** 44.1 to 44.7 are done. 44.8 is added before the merge: under the Local harness the launcher resolver takes the host from the merged `intersystems.servers` view and the password from Server Manager by server name, so a workspace override could receive a user server's password. Probe Server Manager's session keying first (it may close DW-752 with evidence). The fix reuses DW-749's `isUserScopedServer` rule in the Local resolver, makes the workspace-override case a sanctioned AD-15 change, pins user-only servers byte-identical, and mutation-proves the guard on the Local path. Fakes use real API shapes. Keychain or credential proofs use the fake keyring under a scratch HOME, never the real profile or keychain.

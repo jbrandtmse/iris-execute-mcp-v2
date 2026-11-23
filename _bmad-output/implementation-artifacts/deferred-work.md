@@ -4036,6 +4036,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-21T20:50:02Z status=decision-pending owner=burndown by=planner note=human=owner: verified domain, then O1/O2 for both stores, then flip enabled:true, docs back to store install, the first store publish; seam documented in 42.7
 - 2026-11-22T07:02:05Z status=decision-pending owner=burndown by=merge_gate note=kept decision-pending at the epic-42 close on the Planner's instruction: an owner decision relayed by the Planner (decision #130)
 - 2026-11-22T16:58:29Z status=decision-pending owner=burndown by=x0 note=Epic 44 X.0 gate: an owner decision; epics.md Epic 44 lists it Out of scope and the Planner relays that it stays decision-pending (wave-8 decision #131); asked again at the next decision sheet
+- 2026-11-23T21:25:52Z status=decision-pending owner=burndown by=merge_gate note=owner answer 2026-11-23 (decision #153): stays an owner item; the vsix is attached to the GitHub Release by hand with a sha256 check (Planner)
 
 ### DW-720: The release does not attach the vsix to the tag's GitHub Release: the maintainer does it by hand (gh release create, notes from the CHANGELOG section, sha256 checked against manifest.json)
 - source: spec-42-7-vs-code-extension-publish.md | severity: low | fix-risk: med | footprint: out-of-footprint
@@ -4043,6 +4044,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-21T20:50:02Z status=decision-pending owner=burndown by=planner note=build as its own story: a separate github-release job after publish with contents: write and no id-token; already-published = success on re-run; red proof and dry run
 - 2026-11-22T07:02:05Z status=decision-pending owner=burndown by=merge_gate note=kept decision-pending at the epic-42 close on the Planner's instruction: an owner decision relayed by the Planner (decision #130)
 - 2026-11-22T16:58:29Z status=decision-pending owner=burndown by=x0 note=Epic 44 X.0 gate: an owner decision; epics.md Epic 44 lists it Out of scope and the Planner relays that it stays decision-pending (wave-8 decision #131); asked again at the next decision sheet
+- 2026-11-23T21:25:52Z status=decision-pending owner=burndown by=merge_gate note=owner answer 2026-11-23 (decision #153): stays an owner item; the vsix is attached to the GitHub Release by hand with a sha256 check (Planner)
 
 ### DW-721: VS Code calls the files the vscode adapter writes (.vscode/mcp.json and the profile mcp.json) deprecated Local-harness files, removed in February 2027; new Copilot configurations belong in ~/.copilot/mcp-config.json (or COPILOT_HOME) and a workspace-root .mcp.json, both keyed mcpServers
 - source: spec-42-9-install-docs-and-client-re-certification.md (deferred frontmatter; decision #118) | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -4056,6 +4058,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-22T06:41:00Z status=decision-pending owner=burndown by=planner note=human=owner submits at claude.ai/directory/manage; before that, a pack story adds the icon (owner-supplied square PNG, 512-2048 px), a LICENSE in skills-pack and its README, and network.hosts, released in a patch tag; nothing is submitted by an agent
 - 2026-11-22T07:02:05Z status=decision-pending owner=burndown by=merge_gate note=kept decision-pending at the epic-42 close on the Planner's instruction: an owner decision relayed by the Planner (decision #130)
 - 2026-11-22T16:58:29Z status=decision-pending owner=burndown by=x0 note=Epic 44 X.0 gate: an owner decision; epics.md Epic 44 lists it Out of scope and the Planner relays that it stays decision-pending (wave-8 decision #131); asked again at the next decision sheet
+- 2026-11-23T21:25:52Z status=decision-pending owner=burndown by=merge_gate note=owner answer 2026-11-23 (decision #153): stays an owner item; the vsix is attached to the GitHub Release by hand with a sha256 check (Planner)
 
 ### DW-723: iris_docdb_property action=index on a property that already exists always fails with ERROR #5805 (DocDB indexes every property it creates; the tool re-creates it)
 - source: spec-44-1-docdb-create-registers-the-database.md | severity: med | fix-risk: med | footprint: in-epic
@@ -4234,6 +4237,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-6-launcher-provider-works-in-copilot-sessions.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: resolveEnvForLabel uses getServerSpec (merged user+workspace layers) then getSession for the server name; pre-existing since Story 31.x and shared by every Server Manager consumer; AC-11 pins the Local env unchanged; unverified: Server Manager 3.x auth provider keying not checked
 - 2026-11-23T08:43:48Z status=decision-pending owner=burndown by=cr note=product call: extend the 44.6 user-scope guard (isUserScopedServer) to Local resolve? diverges from Server Manager/ObjectScript norms
+- 2026-11-23T21:25:52Z status=routed owner=44-8-local-resolver-hands-a-password-only-to-user-scoped-servers by=merge_gate note=owner answer 2026-11-23 (decision #153): option (c), fix before the release in Story 44.8; probe first, may close with evidence
 
 ### DW-753: credentials-cli-real-keyring.test.ts is order-dependent: its two tests share a module-level fakeStore Map that no hook clears, so a shuffled run fails the list assertion
 - source: cycle-log-epic-44.md (lead fresh check, Story 44.6) | severity: low | fix-risk: low | footprint: in-epic
