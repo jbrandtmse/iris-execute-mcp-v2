@@ -192,6 +192,8 @@ Rejected:
 
 ## Spec Change Log
 
+- 2026-11-23 (lead, CI rework, decision #148): CI run 45178755450 failed in the three gates jobs (story-caused): `story-44-4-qa-startup-ledger.test.ts` reads the frozen handler golden directly, so `story-43-4-qa-gate-guards.test.ts`'s routing guard failed, and `story-42-1-qa-changeset-readers.test.ts` failed with it (its child run re-runs the guard). Fix: the QA ledger test joins `FROZEN_READERS` (it applies ledger entries to the frozen golden, as the 43.4 ledger tests do). The full `@iris-mcp/all` suite was then run locally on a closed port before the push. The `throwaway` job was green: the five dev live gates that call `compileDocs` passed armed.
+
 - 2026-11-23 (lead, decision #146): the first build pass halted `blocked` (AC 44.4.7 vs the frozen handler golden's startup requests). Answer: AC 44.4.8 (a `startup` section for the golden ledger, sanction `S-44.4-current-check`, and the listener answers the check). The Never lines on the `current` path, Frozen goldens and the listener were corrected. `deferred:` cleared (both items now in scope).
 
 - 2026-11-23 (lead, spec gate, decision #145): AC 44.4.7 added (the next-start `current` check, from the first `deferred:` item, now in scope); the `unconfigured` stop confirmed; the `iris_doc_compile` item harvested to the ledger as DW-754 (routed to the burn-down) and removed from `deferred:`.
