@@ -4076,6 +4076,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-1-docdb-create-registers-the-database.md | severity: med | fix-risk: med | footprint: in-epic
 - evidence: DocDbRegisterTest/DocDbRegisterNamespaceTest are seeded but never executed by any buildLiveSuites suite, and the data lifecycle skips in CI (DOCDB_SKIPS); renaming 'registered' in DocDbRecord leaves the default suite and CI green
 - 2026-11-22T19:38:23Z status=routed owner=44-5-integration-suites-cannot-pass-without-testing by=cr note=44.5 owns the DocDB CI seam (AC 44.5.4); run the IRIS-side DocDB classes in the seeded throwaway leg
+- 2026-11-23T16:50:10Z status=resolved-by:44-5-integration-suites-cannot-pass-without-testing owner=44-5-integration-suites-cannot-pass-without-testing by=lead note=CI throwaway job enables %Service_DocDB after prepublish-all and runs the DocDB lifecycle (integration-data 12/12, 0 skipped, CI run 45208039769) and the dev suite runs DocDbRegisterTest (5) and DocDbRegisterNamespaceTest (3) with totals pinned (custom-rest.integration.test.ts)
 
 ### DW-727: DocDbRegisterNamespaceTest copies the ServiceEnabled and RecordExists helpers of DocDbRegisterTest
 - source: spec-44-1-docdb-create-registers-the-database.md | severity: low | fix-risk: low | footprint: in-story
@@ -4230,6 +4231,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: cycle-log-epic-44.md (lead fresh check, Story 44.6) | severity: low | fix-risk: low | footprint: in-epic
 - evidence: pnpm vitest --sequence.shuffle --sequence.seed=44 on packages/shared: 1 failed (expected names [prod-wiring-server], got 2); in order 2/2 pass; file unchanged since Story 31.2 (c6d39e4e)
 - 2026-11-23T08:45:54Z status=open owner=44-5-integration-suites-cannot-pass-without-testing by=lead note=Rule 19 hermeticity; fix: fakeStore.clear() in a beforeEach; 44.5 hardens the suites
+- 2026-11-23T16:50:10Z status=resolved-by:44-5-integration-suites-cannot-pass-without-testing owner=44-5-integration-suites-cannot-pass-without-testing by=lead note=beforeEach clears fakeStore; a third test asserts the store starts empty so dropping the hook fails the default-order run; passes default and shuffled seed 44 (shared 2651)
 
 ### DW-754: iris_doc_compile reports success for a compile in which a class failed while another class had its Storage written
 - source: spec-44-4-bootstrap-compile-result-accuracy.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -4255,3 +4257,4 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-5-integration-suites-cannot-pass-without-testing.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: Story 44.5 review (blind hunter AST walk): admin password-validate x2 and permission-check; interop production status, auto-start get/set, event logs x2, queue status, rules, transforms, trace. Untouched by 44.5 (outside its 48-site grammar); a tool reply always carries text, so toBeDefined cannot fail.
 - 2026-11-23T16:28:21Z status=routed owner=burndown by=cr note=per test: assert isError falsy (or the documented error) and verify on a CI-image throwaway; weak-password may be an expected error
+- 2026-11-23T16:50:10Z status=routed owner=burndown by=lead note=count correction: 12 tests, not 13 (the CR patched the ops task run in-story; spec-44-5 records 12)
