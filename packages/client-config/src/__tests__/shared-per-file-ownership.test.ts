@@ -23,7 +23,8 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { dropRemovedShared, ownerClients, recordAdoptedOwners, recordingClients, soleOwner, sharedPeers } from "../shared-files.js";
+import { resolveScopePath } from "../paths.js";
+import { SHARED_PROJECT_CLIENTS, dropRemovedShared, ownerClients, recordAdoptedOwners, recordingClients, soleOwner, sharedPeers } from "../shared-files.js";
 import { addStash, dropManaged, findStash, isManagerCreated, readState, recordManaged, type ManagerState } from "../state.js";
 import { CLIENT_ADAPTERS } from "../adapters.js";
 
@@ -516,8 +517,8 @@ describe("DW-742: an enable in the shared .mcp.json records the enabler for the 
 
   // Lead matrix E6. Captured from the pre-fix tree: the stash was put back with no record of the file, and a claude-code
   // write of a different entry then exited 0 over vscode's entry.
-  it("E6: a pathless vscode record and stash put back into an empty .mcp.json; a different claude-code write is refused", () => {
-    const world = makeWorld();
+  /** A pre-44.2 vscode record and stash (no file named) of its entry, with the entry gone from an empty `.mcp.json`. */
+  function pathlessVscodeStash(world: World): void {
     seedMcp(world.b, EMPTY);
     expect(world.run(world.b, APPLY("vscode", "server-manager")).status).toBe(0);
     const entry = (JSON.parse(readFileSync(mcpJson(world.b), "utf8")) as { mcpServers: Record<string, unknown> }).mcpServers["iris-dev-mcp"];
@@ -531,6 +532,11 @@ describe("DW-742: an enable in the shared .mcp.json records the enabler for the 
         stashes: [{ client: "vscode", scope: "project", name: "iris-dev-mcp", entry, disabledAt: OLD }],
       }) + "\n",
     );
+  }
+
+  it("E6: a pathless vscode record and stash put back into an empty .mcp.json; a different claude-code write is refused", () => {
+    const world = makeWorld();
+    pathlessVscodeStash(world);
 
     const enabled = world.run(world.b, TOGGLE("enable", "vscode"));
     expect(enabled.status, enabled.stdout + enabled.stderr).toBe(0);
@@ -548,8 +554,11 @@ describe("DW-742: an enable in the shared .mcp.json records the enabler for the 
     seedMcp(world.b, COMPACT);
     expect(world.run(world.b, APPLY("claude-code", "env-reference")).status).toBe(0);
     expect(world.run(world.b, TOGGLE("disable", "claude-code")).status).toBe(0);
+    const disabled = ledger(world).entries;
     expect(world.run(world.b, TOGGLE("enable", "claude-code")).status).toBe(0);
     expect(ledger(world).entries.map((record) => `${record.client}:${record.path}`)).toEqual([`claude-code:${mcpJson(world.b)}`]);
+    // A record that already names the file is left as it is, timestamps included.
+    expect(ledger(world).entries).toEqual(disabled);
   }, T);
 });
 
@@ -581,6 +590,7 @@ describe("DW-743: only the claude-code and vscode project scopes share a file, w
         const fromHome = sequence(id, state, (world) => world.home);
         const elsewhere = sequence(id, state, (world) => world.b);
         expect({ state, ...fromHome }).toEqual({ state, ...elsewhere, out: fromHome.out });
+        expect(fromHome.first, `${id} ${state}: the first apply`).toBe(0);
         expect(fromHome.change, `${id} ${state}: ${fromHome.out}`).toBe(0);
         expect(fromHome.out).not.toContain("shared with");
       }
@@ -712,6 +722,17 @@ describe("per-file ledger units (in memory)", () => {
     if (cursor === undefined) throw new Error("registry");
     expect(sharedPeers(cursor, "user", ctxHome)).toEqual([]);
     expect(sharedPeers(cursor, "project", ctxHome)).toEqual([]);
+  });
+
+  it("SHARED_PROJECT_CLIENTS lists every adapter whose project file is another adapter's project file (from a project directory, not HOME)", () => {
+    const ctx = { platform: "linux" as const, env: {}, homeDir: "/home/u", projectDir: "/work/p" };
+    const byPath = new Map<string, string[]>();
+    for (const adapter of Object.values(CLIENT_ADAPTERS)) {
+      const file = resolveScopePath(adapter, "project", ctx);
+      if (file !== null) byPath.set(file, [...(byPath.get(file) ?? []), adapter.id]);
+    }
+    const sharing = [...byPath.values()].filter((ids) => ids.length > 1).flat().sort();
+    expect(sharing).toEqual([...SHARED_PROJECT_CLIENTS].sort());
   });
 
   it("implied ownership is for the canonical iris-mcp names only: an unrecorded entry under any other name is nobody's", () => {

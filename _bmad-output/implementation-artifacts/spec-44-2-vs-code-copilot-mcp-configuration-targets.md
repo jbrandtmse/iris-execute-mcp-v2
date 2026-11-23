@@ -2,7 +2,7 @@
 title: 'Story 44.2: VS Code Copilot MCP Configuration Targets'
 type: 'bugfix'
 created: '2026-11-22'
-status: 'in-progress'
+status: 'done'
 baseline_revision: 'b26adedea59a740857a8e09bd3412b5c14313a88'
 baseline_commit: '65ad54a404df4f0d407dbd729ba9ca6b4bc625d9'
 review_loop_iteration: 4
@@ -418,6 +418,26 @@ Implement stage, 2026-11-22 (no change to the `<intent-contract>`; every item be
   - `[false]` `[reject]` Intent-4: `dropRemovedShared` leaves a pathless peer record — same refutation as Edge-9.
   - `[false]` `[reject]` Intent-5: `path` on every adapter's record changes the state file — an additive optional field; old files parse and `engine-e2e.test.ts` pins the new key.
 
+### 2026-11-22 — Review pass (rework 4, follow-up of the interrupted run; frozen diff `b26adede` to the tree)
+- verdicts: 23 findings — high 0, medium 3, low 15, false 4, maybe-false 1
+- findings:
+  - `[medium]` `[reject]` Blind-1, Edge-1, Gap-3 (one root cause): a put-back `enable` of a path-less vscode stash also records claude-code as the implied owner (reproduced by the Gap layer on the built CLI), so a later different vscode `apply` is refused naming claude-code — AD-15 and lead matrix E2 specify this: the implied owner of an unrecorded canonical entry is claude-code, and E2 (a pre-44.2 claude-code record, the entry removed by a vscode `disable`, then `enable`) needs it. Gating it on an adopting enable was applied, E2 went red, and it was reverted (spec-bound, closed `by-design`); reachable only from a pre-44.2 vscode project stash, workaround `remove` then `apply`; the CHANGELOG sentence that said "when it adopts" was corrected to what the code does.
+  - `[low]` `[reject]` Blind-2, Edge-2: `enable` records `containsSecret` as `prior?.containsSecret ?? true` — the same default the adopting branch used before this iteration (moved, not new); the conservative default is the documented one, and nothing reads the flag to a user's harm.
+  - `[low]` `[reject]` Blind-3: no test drives `claude-code enable` of a stash in the shared file — the pre-sharing writer is covered by E2 and by the in-memory units; a `wontfix-accepted` test gap, `reopen_if` a claude-code enable defect is reported.
+  - `[low]` `[patch]` Blind-4, Edge-3, Gap-2 (one root cause): `SHARED_PROJECT_CLIENTS` is a second hand-kept roster and the unit test copies it — patched: a test resolves every adapter's project path from a non-home directory and requires the adapters that share a file to equal the list.
+  - `[low]` `[reject]` Blind-5: the canonical-name gate on implied ownership is not in the CHANGELOG, and `soleOwner` is false when nobody owns — a non-canonical name reaches a shared file only through `doctor --repair`, whose entry the same client records (the owner is then that client, so it is sole), so the message is unreachable.
+  - `[low]` `[patch]` Blind-6, Gap-5: `docs/client-config/README.md` still says `server-manager` writes no secret without the base `IRIS_*` variables the launcher README now names — patched: the credentials sentence names `IRIS_SERVER_MANAGER` and `IRIS_SM_SERVERS` and the base variables.
+  - `[low]` `[reject]` Blind-7: the docs do not name DW-742 and DW-743 — tickets belong to the ledger, the CHANGELOG states each behavior.
+  - `[low]` `[reject]` Blind-8: the E3 loop is slow and compares output through a spread — it runs 6 spawns per client in about 1 s each, and the explicit `not.toContain("shared with")` guards the text.
+  - `[low]` `[patch]` Blind-9, Gap-1: the `recordedHere` branch of `enable` is unpinned (only the `client:path` list was asserted) — patched: the records after the enable equal the records after the disable; mutation line written.
+  - `[low]` `[reject]` Blind-10: `SHARED_PROJECT_CLIENTS` is not re-exported from `index.ts` — an internal roster, deliberately not public surface.
+  - `[maybe-false]` `[reject]` Edge-4: a path-less vscode project stash taken from the old `.vscode/mcp.json` can be enabled into `.mcp.json` — a server-manager stash has no old-harness references and is a valid standard entry; no concrete harm shown, and the case is the pre-44.2 stash the earlier iterations decided; would be low even if true.
+  - `[low]` `[patch]` Gap-4: the E3 loop never asserts the first user-scope apply exits 0 — patched: `expect(fromHome.first).toBe(0)`.
+  - `[false]` `[reject]` Intent-A: "shared" is path-computed (A1) versus a fixed two-client list (A2/A3) — descriptive; the owner's ruling (decision #139) is A2/A3 by construction.
+  - `[false]` `[reject]` Intent-B: implied ownership for canonical names only — descriptive; the rework item 3 asks for it.
+  - `[false]` `[reject]` Intent-C: `enable` in a shared file records ownership, which the intent text does not name — descriptive; decision #137 and rework item DW-742 ask for it.
+  - `[false]` `[reject]` Intent-D: the E3, E5 and E6 pins start from hand-built states and the roster test is in-memory — descriptive; the pins run the built CLI and each state is a shape a pre-44.2 install writes.
+
 ## Design Notes
 
 **D-1 Probe results (AC 44.2.1; 2026-11-22).** Sources:
@@ -609,6 +629,10 @@ Mutation evidence (rework re-review 3, 2026-11-22; same procedure as re-review 2
 - mutation: DW-742 half 1 (an adopting `enable` records the implied owner) -- `enable`'s `recordAdoptedOwners` call replaced by the unchanged state, rebuilt -> "E5: ..." red (1 test); restored with `cmp`, rebuilt.
 - mutation: DW-742 half 2 (an `enable` that puts a stash back records the enabler for the file) -- the stash-add case removed from the record condition (`!adopting` alone), rebuilt -> "E6: ..." red (1 test); restored with `cmp`, rebuilt. The guard "a client's ordinary disable then enable ... adds no record for the other client" has no mutation line: it pins current behavior against over-recording and was not mutated.
 - Iteration 4 gate, on the rebuilt CLI with fresh scratch HOME and directories: lead matrix `MATRIX OK (37 checks)` and `MATRIX-EXT OK (81 checks)` (E3 over every registered adapter, E5, E6, E2 green); `shared-per-file-ownership.test.ts` 45 tests; the whole `@iris-mcp/client-config` suite 52 files, 1438 tests; launcher suite 458 passed, 3 skipped; 42 doc-claim, changelog and README test files in `iris-mcp-all` 861 passed, 41 skipped; `type-check` and `lint` clean.
+- Mutation evidence (iteration 4 review pass, 2026-11-22; each applied with `perl -0pi`, the package rebuilt, the named test run with `-t`, the file restored from a copy and `cmp`-checked byte-identical, rebuilt):
+- mutation: DW-742 (a record that already names the file is left as it is) -- `engine.ts` `enable`'s `recordedHere ? next :` set to `false ? next :` -> `shared-per-file-ownership.test.ts` "a client's ordinary disable then enable ... adds no record for the other client" red at the new unchanged-records assertion (1 test; the old `client:path` list assertion stayed green under this mutation).
+- mutation: DW-743 (the sharing roster is complete) -- `shared-files.ts` `SHARED_PROJECT_CLIENTS` cut to `["claude-code"]` -> "SHARED_PROJECT_CLIENTS lists every adapter whose project file is another adapter's project file" red (1 test; its expected value comes from the resolved adapter paths, not from the list).
+- No mutation line for the added `expect(fromHome.first).toBe(0)` in the E3 loop: it strengthens a setup step, and the pin of the AC (the mode change from HOME) keeps its DW-743 line above.
 - Path of each mutation: the process pins and the repro run on the BUILT bin as a child process with a scratch HOME; the units run in memory. `engine-e2e.test.ts` and `shared-mcp-json.test.ts` run the engine and `runCli` in process.
 
 **Shared surfaces:**
@@ -666,6 +690,9 @@ Rework 4 (2026-11-22; owner override, wave-9 decision #139):
 - Same overstatement left in place (outside the item): `docs/client-config/README.md` line 190 ("The `server-manager` mode replaces the password prompt: it writes no secret, and the server reads the password from your OS keychain") does not mention the base `IRIS_*` variables.
 - For the lead (Rule 20): AD-30's "Shared files" bullet can take one sentence after the DW-743 fix. Proposed text, to append after "...without counting it twice.": "Only the project scope of Claude Code and the project scope of VS Code Copilot ever share a file: no other adapter, no user scope and no client's own other scope is a peer, whatever the working directory." And in the per-file sentence, replace "an `enable` that adopts records the enabling client for the file (wave-9 decision #137, DW-741)" with "an `enable` that adopts or puts a stash back records the enabling client for the file, and an adopting `enable` records the implied pre-sharing owner too (wave-9 decisions #137 and #139, DW-741, DW-742)." The implied-ownership sentence ("an unrecorded canonical entry also counts") already says canonical; it needs no change.
 - No lead matrix check was judged wrong.
+- Review of this pass (2026-11-22; four layers, all delivered; frozen diff `b26adede` to the tree, spec and cycle log excluded): 23 findings, high 0 / medium 3 / low 15 / maybe-false 1 / false 4. Patched: 8 low rows (one test pinning that the sharing roster is complete, `recordedHere` pinned by an unchanged-record assertion, the DW-743 setup step asserted exit 0, one `docs/client-config/README.md` credentials sentence, one CHANGELOG sentence corrected to what the code does). Deferred: none. Rejected: 15, each with its reason in the triage log. No high, so the follow-up review recommendation is false.
+- Residual risk, closed `by-design` in triage (medium, spec-bound): `enable` of a PATH-LESS vscode stash into a shared `.mcp.json` where the entry is absent also records claude-code as the implied owner (AD-15), so a later different vscode `apply` is refused naming claude-code, which never wrote it. Reproduction: the E6 setup (path-less vscode record and stash, empty `.mcp.json`), `enable --client vscode`, then `apply --client vscode --mode env-reference` exits 1. Reachable only from a pre-44.2 vscode project stash; the workaround is `remove` then `apply`. Gating the implied-owner record on an adopting enable was tried and made lead matrix E2 red (a pre-44.2 claude-code record whose entry a vscode `disable` removed, then `enable` puts back), so it was reverted: telling E2 from this case needs a rule on path-less peer records that the spec does not give. The lead owns that call.
+- Verification of this pass (foreground, scratch homes only): build; the `(loop)` sets green (133 and 66 tests); `render-certification-table.mjs --check` exit 0; lead matrix `MATRIX OK (37 checks)` and `MATRIX-EXT OK (81 checks)` on the rebuilt CLI after the patches; `@iris-mcp/client-config` 52 files, 1439 tests; launcher 32 files, 458 passed / 3 skipped; `@iris-mcp/all` 8 shards all green; `lint`, `type-check`, `gen:governance-baseline:check` (141 frozen keys) and `gen:ipm:check` pass.
 
 ## Tests Added
 

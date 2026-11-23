@@ -187,7 +187,7 @@ Both use the root key **`mcpServers`**, expand `${VAR}` from the environment VS 
 }
 ```
 
-**Credentials.** `${IRIS_*}` resolves from the environment VS Code was started with, so export the variables in a shell and start VS Code (`code .`) from it, and start it again after you change them. The `server-manager` mode replaces the password prompt: it writes no secret, and the server reads the password from your OS keychain.
+**Credentials.** `${IRIS_*}` resolves from the environment VS Code was started with, so export the variables in a shell and start VS Code (`code .`) from it, and start it again after you change them. The `server-manager` mode replaces the password prompt: it writes no secret (only `IRIS_SERVER_MANAGER` and `IRIS_SM_SERVERS`), and the server reads the password from your OS keychain; the server's `default` profile still reads the base `IRIS_*` connection variables from the same environment.
 
 **Moving from the old files.** Earlier versions wrote VS Code's own `mcp.json` files (the profile `mcp.json` and `.vscode/mcp.json`, root key `servers`, with an `inputs` password prompt). Those belong to the Local harness, which VS Code removes in February 2027, and the Copilot harness does not forward their entries. `iris-mcp-clients status` and `doctor` report any iris-mcp entry still in them, and the next `apply --client vscode --scope <user|project>` writes the new file and then removes the entry from the old one, leaving everything else in that file as it was.
 
