@@ -4245,3 +4245,8 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - source: spec-44-4-bootstrap-compile-result-accuracy.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: format.ts:262-310 posts action/xml/load?flags=..c and surfaces only result.content[].status; no class-level check. Whether IRIS leaves the failure out of that status when the load writes Storage is unprobed (Rule #16).
 - 2026-11-23T12:49:18Z status=routed owner=burndown by=cr note=probe xml/load with a Storage-written partial failure first; if real, reuse verifyCompiled as DW-754/755 do
+
+### DW-757: iris_database_manage delete removes only the CPF entry: the database stays mounted and its IRIS.DAT stays on disk, so a second admin integration run on one instance fails at create (ERROR #60)
+- source: spec-44-5-integration-suites-cannot-pass-without-testing.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: seen while hardening admin.integration.test.ts database create (Story 44.5): a second run on the same instance fails at create with ERROR #60 the database must be dismounted; CI unaffected (fresh container per run)
+- 2026-11-23T15:37:44Z status=routed owner=burndown by=harvest note=probe first (Rule #16): decide whether delete should dismount (and whether removing IRIS.DAT is in scope or by-design), then fix or close-by-decision

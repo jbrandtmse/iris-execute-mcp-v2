@@ -665,7 +665,7 @@ No AC contradicts an AD's Rule. D-2 refines AD-30's draft bullet, which the prop
 - Verdicts differing from D-5's as written: `clientsView.test.ts:84` (a detect fixture holding a profile `mcp.json` path) was M, not L: it now holds the new user-file path, because it mirrors what `detect` prints for vscode. `cli/clients.ts:1543,1557` (the doctor's old-file branch) was deleted, not kept (Spec Change Log 3). `certify.mjs:481-483` was M, not D (the comment went with the explicit-mode special case). The re-pointed tests: `readers.test.ts`, `diff.test.ts`, `e2e.test.ts`, `qa-33-5-unit.test.ts` read the old JSONC fixtures through `vscodeLegacyAdapter()` (L); `golden.test.ts` has new Copilot goldens (`golden/vscode`, `golden/vscode-compact`, captured from the engine) and the old ones under `golden/vscode-legacy*` driven through the legacy view (L); `byte-preservation.test.ts`, `engine-e2e.test.ts`, `clients-cli*.test.ts`, `qa-33-5-process.test.ts`, `status.test.ts`, `home-guard.test.ts`, `synthesize.test.ts`, `adapters.test.ts` moved to the new shape (M).
 - The new hits this story's own files add are the intended ones: `adapters.ts` `legacyScopes` (`servers`, `${env:`-era paths: L), `engine.ts` `LEGACY_REFERENCE` and the enable refusal text (L), the new tests and their old-format seeds (L), the READMEs, `docs/client-config/README.md` and the CHANGELOG entry (D).
 
-**D-6 Owner runbook (human-only, AC 44.2.7; pair it with `epic-43-decision-sheet-item-1-…`).**
+**D-6 Owner runbook (human-only, AC 44.2.7; pair it with `epic-43-decision-sheet-item-1-…`).** **Outcome, steps 1-7: not run (owner has no Copilot subscription; owner decision 2026-11-23).** The rows stay in this spec as the runbook for anyone who later has a Copilot subscription; the story stays done (wave-9 decision #149).
 1. Setup:
    - VS Code ≥ 1.146, signed in to Copilot, the Copilot harness selected (the default);
    - a throwaway IRIS (`node scripts/throwaway-iris.mjs up …`), never shared data;
@@ -680,6 +680,8 @@ No AC contradicts an AD's Rule. D-2 refines AD-30's draft bullet, which the prop
 **Release handoff (AC 44.2.9).** The end-of-epic release must carry `@iris-mcp/client-config` (the CLI the MCP Clients view runs through `npx -y -p @iris-mcp/client-config@1`). The fixed version group carries the others. A new vsix is not needed for the fix. The changed extension README reaches the Marketplace only with the next vsix (DW-720, out of scope).
 
 ## Verification
+
+- Human-only, never run (wave-9 decision #149, 2026-11-23): D-6 steps 1-7 (AC 44.2.7), not run (owner has no Copilot subscription; owner decision 2026-11-23). The vscode certification record keeps its `humanOnly` marker (`markedOn` 2026-11-23) with the residual risk that the Copilot-harness paths are verified against VS Code 1.147.0 source and an emulated Agent Host only.
 
 **Commands:**
 - (loop) `pnpm turbo run build --filter @iris-mcp/client-config` (timeout 600000) -- expected: success.

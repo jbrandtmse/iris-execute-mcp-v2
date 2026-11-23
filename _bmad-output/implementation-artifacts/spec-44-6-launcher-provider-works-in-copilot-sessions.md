@@ -247,7 +247,7 @@ CI on `ecc82b0` failed in two jobs, both caused by this story's review patches. 
 
 **P-5 The env.ts allowlist under the Copilot harness.** The AH drops `null` entries (P-2), so only an empty-string override can stand in for "unset" there, and only where the server reads `""` as unset (P-12).
 
-**P-6 Human-only rows (the owner's sitting; a signed-in Copilot user, VS Code >= 1.146, throwaway IRIS via `node scripts/throwaway-iris.mjs`, never shared data).**
+**P-6 Human-only rows** (outcome, rows 1-6: not run (owner has no Copilot subscription; owner decision 2026-11-23); decision #149) **(the owner's sitting; a signed-in Copilot user, VS Code >= 1.146, throwaway IRIS via `node scripts/throwaway-iris.mjs`, never shared data).**
 1. Env passthrough: start VS Code from a shell with `FOO=1`; forward a server whose env omits `FOO` and that logs `process.env.FOO` to stderr; record whether the child sees it.
 2. `null` keys: forward a definition with `"FOO": null` under the same shell; record whether the child sees `FOO`.
 3. A literal `${X}` in env: confirm the server is listed as not delivered in the agent-host MCP list.
@@ -330,6 +330,7 @@ CI on `ecc82b0` failed in two jobs, both caused by this story's review patches. 
 **Manual checks:**
 - Lead smoke (once, throwaway only): `node scripts/throwaway-iris.mjs run --host-port 52792 -- <a disposable scratchpad script>` that stores the throwaway's password in the fake keyring (scratch `HOME`, preload), takes the launcher provider's provided env for a plan pointed at `127.0.0.1:52792`, spawns the server from it and calls `iris_server_info` successfully; then one refusal: an empty fake keyring gives the AC-3 exit and no IRIS request. Never the shared `iris-community-edition`.
 - Human-only (AC-14, recorded 2026-11-23, no sitting yet): the owner's VS Code sitting (44.2 runbook D-6), on a build carrying 44.2 and 44.6, runs P-6 rows 1-5 and the provider-check row (P-6 row 6).
+- Human-only, never run (wave-9 decision #149, 2026-11-23): P-6 rows 1-5 and AC 44.6.5 (P-6 row 6, the provider-check row), not run (owner has no Copilot subscription; owner decision 2026-11-23). The story stays done; the residual risk is in the vscode certification record and the release notes.
 - Rule 19 fresh check (lead): run this story's added and changed test files on a clean checkout + build, forward and reverse order.
 
 ## Auto Run Result

@@ -58,7 +58,7 @@
       "date": "2026-11-22",
       "humanOnly": {
         "check": "in a Copilot chat session the iris_* tools are listed and one read call (for example iris_server_info) succeeds, from ~/.copilot/mcp-config.json and from the workspace .mcp.json (owner runbook: D-6 of the Story 44.2 spec)",
-        "markedOn": "2026-11-22"
+        "markedOn": "2026-11-23"
       },
       "host": "darwin/arm64",
       "server": "iris-dev-mcp",
@@ -81,7 +81,7 @@
         "PASS remove (engine)",
         "PASS byte-exact restore + side-effect cleanup — config bytes identical to pre-pass"
       ],
-      "residualRisk": "File-level lifecycle certified live with iris-dev-mcp against the published @iris-mcp/dev@1 (1.1.0), under a scratch HOME (a seeded scratch mcp-config.json, not a person's real config) and a scratch project directory. The Copilot-session check is human-only (the D-6 runbook of the Story 44.2 spec, DW-442): no signed-in Copilot session was available, and the VS Code GUI was not launched. Not covered by this pass: the launcher extension's own server definitions lose their connection settings under the Copilot harness (deferred; Story 44.6 fixes it), and a name present in both the user and the workspace file has no documented precedence (runbook step 4).",
+      "residualRisk": "The Copilot-harness paths (the new .mcp.json / ~/.copilot/mcp-config.json targets, legacy-file forwarding, precedence, and the launcher provider's keychain credential) are verified against VS Code 1.147.0 source and an emulated Agent Host only; no real Copilot session has been run (owner has no Copilot subscription, 2026-11-23).",
       "against": "@iris-mcp/dev@1 → 1.1.0"
     },
     "cline": {
