@@ -4062,18 +4062,21 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: irislib/%DocDB/Database.cls:384-388 and irislib/%Api/DocDB/v1.cls:355-374; live 2026.2 throwaway: create prop then index the same prop -> HTTP 400 #5805; docdb.ts:688-693
 - 2026-11-22T19:00:13Z status=routed owner=burndown by=harvest note=out of 44.1: the fix changes iris_docdb_property request bytes that AC 44.1.7 pins
 - 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
 
 ### DW-724: A property created by iris_docdb_property never matches an iris_docdb_find filter (the tool sends no path, so the property is never populated)
 - source: spec-44-1-docdb-create-registers-the-database.md | severity: med | fix-risk: med | footprint: in-epic
 - evidence: live 2026.2 throwaway: property category created without path, doc inserted, find [category,test,=] -> []; with ?path=category it matches; docs inserted before the property are not backfilled; docdb.ts:683-687
 - 2026-11-22T19:00:13Z status=routed owner=burndown by=harvest note=out of 44.1 (pinned request bytes); probe whether path should default to the property name
 - 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
 
 ### DW-725: The iris_docdb_manage description claims create takes optional property definitions; the input schema has no such field
 - source: spec-44-1-docdb-create-registers-the-database.md | severity: low | fix-risk: low | footprint: in-epic
 - evidence: docdb.ts:266 vs inputSchema docdb.ts:271-284 (action, database, namespace only)
 - 2026-11-22T19:00:13Z status=routed owner=burndown by=harvest note=AC 44.1.5 appends text only (Frozen goldens), so the false clause needs a recorded AD-15 correction
 - 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
 
 ### DW-726: No CI run drives the IRIS-side DocDB record route or its %UnitTest classes, so a contract drift between docdb.ts and DocDbRecord ships green
 - source: spec-44-1-docdb-create-registers-the-database.md | severity: med | fix-risk: med | footprint: in-epic
@@ -4201,6 +4204,7 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: rr5 review (blind-hunter + edge-case-hunter): remove/apply refusal returns before withLegacyRemoval; doctor check 7 fix = apply --client vscode; only way out is remove with claude-code first, which switches the server to vscode
 - 2026-11-23T06:01:37Z status=routed owner=burndown by=cr note=needs a decision: may a refused vscode verb still sweep its own old-file entry, or doctor name the owner's remove; option B says refused verbs write nothing
 - 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
 
 ### DW-748: An entry re-added from outside the tool (git pull, claude mcp add, hand edit) after claude-code removed it belongs to vscode when vscode still holds a stash of it for the file, so claude-code is refused it
 - source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: low | footprint: in-story
@@ -4242,24 +4246,28 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: compile.ts:135-170 reads result.content[].errors, which IRIS never sends (2026.1, 2026.2, IRIS for Health 2026.2, Atelier v1-v8); General.Compile replaces the status when it writes Storage (irislib/%Atelier/v1/Utils/General.cls:1318-1385), so HTTP 200 with no status error
 - 2026-11-23T10:38:57Z status=routed owner=burndown by=harvest note=fix by reusing Story 44.4's verifyCompiled check (two Atelier reads) in the tool; the epic burn-down story
 - 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
 
 ### DW-755: iris_doc_load and env-promote read a compile as successful from per-document errors only, so a Storage-written partial failure reads as success there (the DW-754 root cause)
 - source: spec-44-4-bootstrap-compile-result-accuracy.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: load.ts:604-640 computes compilationResult.success from per-document errors, env-promote.ts:975 posts action/compile; the planning probe shows real documents never carry errors; unverified to the end of result handling
 - 2026-11-23T12:18:39Z status=routed owner=burndown by=harvest note=fix with DW-754 by reusing verifyCompiled; probe first (Rule #16)
 - 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
 
 ### DW-756: iris_doc_xml_export import with compile:true judges the compile only by per-file status text, so a Storage-written partial failure may read as success (unverified; the DW-754 root cause)
 - source: spec-44-4-bootstrap-compile-result-accuracy.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: format.ts:262-310 posts action/xml/load?flags=..c and surfaces only result.content[].status; no class-level check. Whether IRIS leaves the failure out of that status when the load writes Storage is unprobed (Rule #16).
 - 2026-11-23T12:49:18Z status=routed owner=burndown by=cr note=probe xml/load with a Storage-written partial failure first; if real, reuse verifyCompiled as DW-754/755 do
 - 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=CLOSED-WITH-EVIDENCE: probes G/H show xml/load per-file status carries ERROR #5475 naming the failing class whether or not Storage was written; a live-gate leg pins it (Story 44.7)
 
 ### DW-757: iris_database_manage delete removes only the CPF entry: the database stays mounted and its IRIS.DAT stays on disk, so a second admin integration run on one instance fails at create (ERROR #60)
 - source: spec-44-5-integration-suites-cannot-pass-without-testing.md | severity: med | fix-risk: med | footprint: out-of-footprint
 - evidence: seen while hardening admin.integration.test.ts database create (Story 44.5): a second run on the same instance fails at create with ERROR #60 the database must be dismounted; CI unaffected (fresh container per run)
 - 2026-11-23T15:37:44Z status=routed owner=burndown by=harvest note=probe first (Rule #16): decide whether delete should dismount (and whether removing IRIS.DAT is in scope or by-design), then fix or close-by-decision
 - 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
 
 ### DW-758: 13 pre-existing armed integration tests assert only content[0]?.text toBeDefined, so an isError result passes them (a shape check:live-guards cannot see: no if)
 - source: spec-44-5-integration-suites-cannot-pass-without-testing.md | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -4267,11 +4275,13 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - 2026-11-23T16:28:21Z status=routed owner=burndown by=cr note=per test: assert isError falsy (or the documented error) and verify on a CI-image throwaway; weak-password may be an expected error
 - 2026-11-23T16:50:10Z status=routed owner=burndown by=lead note=count correction: 12 tests, not 13 (the CR patched the ops task run in-story; spec-44-5 records 12)
 - 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
 
 ### DW-759: A failed routine (.mac/.int/.inc) in a compile that also writes a class's Storage still reads as success in iris_doc_compile, iris_doc_load and iris_env_promote: the Story 44.4 check covers classes only
 - source: spec-44-7-epic-44-burn-down.md | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: General.Compile overwrites tSC in its tUpdated loop (irislib/%Atelier/v1/Utils/General.cls:1318-1385); verifyCompiled refuses non-.cls names; the 44.4 oracle table records Atelier upd stays true for a failed routine; not probed with a routine
 - 2026-11-23T17:13:26Z status=routed owner=44-7-epic-44-burn-down by=harvest note=taken into Story 44.7 at its spec gate (decision #151): probe for a routine oracle, resolve or close by decision with the limit documented
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
 
 ### DW-760: A compile failure of an .inc or .int document alone, in a compile that also writes a persistent class's Storage, still reads as success in iris_doc_compile, iris_doc_load and iris_env_promote: IRIS's docnames upd flag carries no compile verdict for them
 - source: spec-44-7-epic-44-burn-down.md | severity: low | fix-risk: med | footprint: in-epic
