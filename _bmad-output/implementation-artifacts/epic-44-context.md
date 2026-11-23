@@ -14,6 +14,7 @@ Fix the defects that shipped in `1.1.0` and were found by Epic 42's reviews, plu
 - Story 44.3: Confirmation Bound to the Scope Shown
 - Story 44.4: Bootstrap Compile Result Accuracy
 - Story 44.5: Integration Suites Cannot Pass Without Testing
+- Story 44.7: Epic 44 Burn-down
 
 ## Requirements & Constraints
 
@@ -43,8 +44,13 @@ Fix the defects that shipped in `1.1.0` and were found by Epic 42's reviews, plu
 
 ## Cross-Story Dependencies
 
-- **Status.** 44.1, 44.2, 44.3, 44.4 and 44.6 are done. Next to plan: 44.5, then the burn-down story. Owner human rows remain for one VS Code Copilot-harness sitting (44.2 re-certification plus 44.6's provider-check and probe rows) on a build carrying both; without it they are marked human-only with the date.
-- **44.4 → 44.5.** 44.4 moved the CI seed and the live doc helpers onto the compile check (no English console lines remain there). Its five dev live gates that call `compileDocs` are first exercised armed by CI (run 45178755450). 44.5 hardens the armed suites that 44.1 and 44.4 touch.
-- **Routed to 44.5.** DW-726: no CI run drives the IRIS-side DocDB record route or its `%UnitTest` classes; run them in the seeded throwaway leg. DW-753: `credentials-cli-real-keyring.test.ts` is order-dependent (shared module-level `fakeStore` never cleared); fix with a clear in `beforeEach`.
-- **44.6 → 44.5.** The armed `launcher-live` suite now builds its provider with the Server Manager inspection (the DW-749 guard); 44.5's inventory covers that suite as it stands.
-- **44.5 last.** A suite that newly fails because it now tests something is fixed in the story if the test is wrong, or filed under the ledger rules if the product is wrong. Its armed CI run of the wave tip is the epic-done evidence.
+- **Status.** 44.1 to 44.6 are done. 44.7, the burn-down, is the last story; the epic closes after it. There will be no VS Code Copilot sitting: the owner has no Copilot subscription (decision #149), so those rows are closed as not run and the release notes say the Copilot paths are verified against source only.
+- **44.7 burn-down (decision #150).** Nine ledger entries, each ending terminal (resolved, closed with evidence, or closed by decision; never re-deferred). Each is probed first, and each code fix is proven live on a throwaway or mutation-verified:
+  - DocDB tool defects from 44.1's probe: DW-723 (`index` re-creates an existing property), DW-724 (`property` sends no `path`), DW-725 (`manage` description claims property definitions);
+  - DW-747: a client-config vscode legacy-entry cleanup dead end under the refuse-only shared `.mcp.json`;
+  - the Story 44.4 compile-check root cause in other tools: DW-754 (`iris_doc_compile`), DW-755 (`iris_doc_load`, `iris_env_promote`), DW-756 (`iris_doc_xml_export` with `compile: true`). Reuse `verifyCompiled`;
+  - DW-757: `iris_database_manage delete` leaves the database mounted;
+  - DW-758: 12 armed tests that assert only that a reply has text.
+  A description change is a sanctioned Frozen goldens entry plus a tools-list snapshot regeneration. A bootstrapped-class change regenerates the embed in the same story.
+- **As built in 44.5.** `pnpm check:live-guards` refuses a test in an armed file that returns early or asserts only inside an `isError`/`created.` branch; it is syntactic, with documented limits. The CI throwaway job enables `%Service_DocDB` after `prepublish-all` and before `integration-data`, so the DocDB lifecycle runs armed with an empty allowlist. New or changed armed tests must assert their outcome unconditionally.
+
