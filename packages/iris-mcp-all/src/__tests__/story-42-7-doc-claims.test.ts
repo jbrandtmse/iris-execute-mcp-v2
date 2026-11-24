@@ -180,9 +180,11 @@ describe("Story 42.7: the extension CHANGELOG", () => {
   it("has no section headed as unpublished 0.1.0, and its first released section records the story", () => {
     expect(sectionsOfExtension.map((section) => section.split("\n")[0])).not.toContain("## [0.1.0] \u2014 Unreleased (not yet published)");
     expect(current).not.toBe("");
-    // An `## [Unreleased]` section (Story 44.6 onward) may sit above the release; the release itself stays the first dated one.
+    // An `## [Unreleased]` section and later releases (1.2.0 onward) sit above it; the extension's first store-ready release, 1.1.0,
+    // is the dated section that records the story.
     const released = sectionsOfExtension.filter((section) => !section.startsWith("## [Unreleased]"));
-    expect(released[0]?.includes("(Story 42.7)"), "the first released section is the one that records the story").toBe(true);
+    const first = released.find((section) => section.startsWith("## [1.1.0]"));
+    expect(first?.includes("(Story 42.7)"), "the 1.1.0 section is the one that records the story").toBe(true);
   });
 
   it("records the publisher and `private`, the lockstep, the working directory and the green suite", () => {

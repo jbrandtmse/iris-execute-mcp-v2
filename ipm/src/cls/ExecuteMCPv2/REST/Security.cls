@@ -2192,6 +2192,154 @@ ClassMethod ServiceManage() As %Status
     Quit $$$OK
 }
 
+/// Report on, and optionally register, the <class>Security.DocDBs</class> record of a DocDB database.
+/// <p>IRIS denies every DocDB call on a database that has no record with <code>ERROR #822: Access
+/// Denied</code>, and the DocDB REST API (<code>/api/docdb/v1</code>) never writes that record, so a database
+/// made through it is unusable until the record exists (Story 44.1). This method is the
+/// <var>%request</var>-independent seam behind <method>DocDbGet</method> and <method>DocDbManage</method>.</p>
+/// <p>It validates <var>pName</var> and <var>pNamespace</var>, then checks in <var>pNamespace</var> whether the
+/// DocDB database exists (<method>%DocDB.Database.xNExists</method>), and in <code>%SYS</code> whether its record
+/// exists (<method>Security.DocDBs.Exists</method>). <method>Exists</method> answers 0 both for an absent record
+/// (status 793) and for a caller that lacks <code>%DocDB_Admin</code> (status 822), so any other status is returned
+/// as the denial it is rather than reported as <code>registered:false</code>.</p>
+/// <p>With <var>pRegister</var> set, a database that exists without a record gets one through IRIS's own
+/// <code>$$Create^%SYS.DOCDB</code>, which checks the caller's privilege and the <code>%Service_DocDB</code>
+/// service itself and writes no <code>Resource</code>. A name with no DocDB database is refused: IRIS would write
+/// a record for it all the same. The namespace is restored on every path.</p>
+/// <p><var>pResult</var> is <code>{name, namespace, exists, registered, alreadyRegistered}</code>: <code>exists</code>
+/// is the DocDB database, <code>registered</code> the record after the call, <code>alreadyRegistered</code>
+/// whether the record was there before it.</p>
+ClassMethod DocDbRecord(pName As %String, pNamespace As %String, pRegister As %Boolean = 0, Output pResult As %DynamicObject) As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Set pResult = ""
+    Try {
+        ; Validate first, before any namespace switch
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired($Get(pName), "name")
+        If $$$ISERR(tSC) Quit
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired($Get(pNamespace), "namespace")
+        If $$$ISERR(tSC) Quit
+
+        ; Does the DocDB database exist in the target namespace?
+        Set $NAMESPACE = pNamespace
+        Set tDbExists = +##class(%DocDB.Database).xNExists(pName)
+        Set $NAMESPACE = tOrigNS
+
+        ; Does its Security.DocDBs record exist? (Security.* lives in %SYS)
+        Set tExSC = $$$OK
+        Set $NAMESPACE = "%SYS"
+        Set tRecord = +##class(Security.DocDBs).Exists(pName, pNamespace, , .tExSC)
+        Set $NAMESPACE = tOrigNS
+        If 'tRecord && $$$ISERR(tExSC) && '$System.Status.Equals(tExSC, 793) {
+            ; Exists answers 0 with status 793 (DocDBDoesNotExist) for an absent record; anything else, such as 822, is a denial
+            Set tSC = tExSC
+            Quit
+        }
+
+        Set tAlready = tRecord
+        If pRegister && 'tRecord {
+            If 'tDbExists {
+                Set tSC = $$$ERROR($$$GeneralError, "No DocDB database '"_pName_"' exists in namespace "_pNamespace_"; no Security.DocDBs record was written")
+                Quit
+            }
+            Kill tProps
+            Set tSC = $$Create^%SYS.DOCDB(pName, pNamespace, .tProps)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) Quit
+            Set tRecord = 1
+        }
+
+        Set pResult = {}
+        Do pResult.%Set("name", pName)
+        Do pResult.%Set("namespace", pNamespace)
+        Do pResult.%Set("exists", tDbExists, "boolean")
+        Do pResult.%Set("registered", tRecord, "boolean")
+        Do pResult.%Set("alreadyRegistered", tAlready, "boolean")
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Report whether a DocDB database exists and has a <class>Security.DocDBs</class> record.
+/// <p><code>GET /security/docdb?name=&amp;namespace=</code> returns <code>{name, namespace, exists,
+/// registered, alreadyRegistered}</code> (see <method>DocDbRecord</method>). Both query parameters are required.
+/// A denial from IRIS is an error envelope, never <code>registered:false</code>.</p>
+ClassMethod DocDbGet() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tName = $Get(%request.Data("name", 1))
+        Set tNamespace = $Get(%request.Data("namespace", 1))
+
+        Set tSC = ..DocDbRecord(tName, tNamespace, 0, .tResult)
+        Set $NAMESPACE = tOrigNS
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Register the <class>Security.DocDBs</class> record of an existing DocDB database.
+/// <p>Reads a JSON body <code>{action:"register", name, namespace}</code> and calls
+/// <method>DocDbRecord</method> with registration on. The record is written with no properties (enabled, no
+/// Resource) by IRIS's own <code>$$Create^%SYS.DOCDB</code>, which does the privilege check; this handler adds no
+/// check and no role change. A name with no DocDB database, and a caller IRIS denies, are error envelopes. A
+/// database that already has a record is reported with <code>alreadyRegistered:true</code> and not touched.</p>
+ClassMethod DocDbManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body (before any namespace switch — Utils is in HSCUSTOM)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tAction = tBody.%Get("action")
+        Set tName = tBody.%Get("name")
+        Set tNamespace = tBody.%Get("namespace")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If tAction '= "register" {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be: register")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tSC = ..DocDbRecord(tName, tNamespace, 1, .tResult)
+        Set $NAMESPACE = tOrigNS
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
 /// List LDAP configurations, get a single config, or run a config-validity test.
 /// <p>Backed by <class>Security.LDAPConfigs</class> in <code>%SYS</code>
 /// (Story 15.2). Routing on the GET query parameters:</p>

@@ -1,5 +1,18 @@
 # @iris-mcp/all
 
+## 1.2.0
+
+### Patch Changes
+
+- Updated dependencies [3d7e878]
+- Updated dependencies [5924aa2]
+- Updated dependencies [ec8ab44]
+  - @iris-mcp/data@1.2.0
+  - @iris-mcp/dev@1.2.0
+  - @iris-mcp/interop@1.2.0
+  - @iris-mcp/admin@1.2.0
+  - @iris-mcp/ops@1.2.0
+
 ## 1.1.0
 
 ### Patch Changes

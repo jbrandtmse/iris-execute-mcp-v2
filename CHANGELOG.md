@@ -2,9 +2,9 @@
 
 All notable changes to the IRIS MCP Server Suite are documented in this file.
 
-## [Unreleased] — Epic 44 release summary
+## [1.2.0] — 2026-11-24
 
-This summarises the Epic 44 release for the release notes. The story sections below have the details. Every behaviour change here is a sanctioned AD-15 change, recorded with its wave-9 decision.
+Epic 44 Correctness & Safety Fixes, a minor release (approved by the owner on 2026-11-23) because it makes sanctioned behaviour changes. The `[1.2.0 detail]` story sections below have the details. Every behaviour change here is a sanctioned AD-15 change, recorded with its wave-9 decision.
 
 ### Behavior changes
 
@@ -23,9 +23,9 @@ This summarises the Epic 44 release for the release notes. The story sections be
 
 ### IRIS side
 
-- `BOOTSTRAP_VERSION` moves from `1.1.0+2.244fe8623c76` (the v1.1.0 release) to `1.1.0+5.6cbac260e73f`. Two IRIS-side changes cause this: the `ExecuteMCPv2.REST.Security` DocDB record route in Story 44.1 (`+3`), and the `ExecuteMCPv2.REST.Config` delete-dismount in Story 44.7 (`+4`, then `+5` after its review). The server redeploys its IRIS classes on the next connect.
+- `BOOTSTRAP_VERSION` moves from `1.1.0+2.244fe8623c76` to `1.2.0+5.6cbac260e73f`, counting from the v1.1.0 release. Two IRIS-side changes cause this: the `ExecuteMCPv2.REST.Security` DocDB record route in Story 44.1 (`+3`), and the `ExecuteMCPv2.REST.Config` delete-dismount in Story 44.7 (`+4`, then `+5` after its review). The server redeploys its IRIS classes on the next connect.
 
-## [Unreleased] — Story 44.8: Local Resolver Hands a Password Only to User-Scoped Servers
+## [1.2.0 detail] — Story 44.8: Local Resolver Hands a Password Only to User-Scoped Servers
 
 ### Fixed
 
@@ -36,7 +36,7 @@ This summarises the Epic 44 release for the release notes. The story sections be
 
 - **This is a sanctioned AD-15 change (wave-9 decisions #153 and #154).** The same rule now covers the shared import: a keychain or helper password goes only to a server whose definition does not come from a workspace-scope settings file, and a workspace-defined server gets the warning above instead (a behaviour change for a repository that defines a server of the user's name; the remedy is to define it in user settings under a name no workspace file uses). Under the Local harness a server defined only in a workspace's settings (a team's committed `.vscode/settings.json`) used to start through Server Manager's prompt or stored session; it is now refused with the warning, and so is one a workspace overrides. The remedy: define the server in your user settings under a name no workspace settings use, and select that name in `irisMcpLauncher.servers`. A server defined in user settings alone resolves exactly as before (the resolved env, the `getSession` call sequence and options, every warning text and the cancellation outcome, pinned by tests). The Copilot-harness (provide) path, `isUserScopedServer`, `credentials.ts` and every tool, action, governance key and description are unchanged (the only `packages/shared` source that changes is the DW-761 Server Manager import and credential chain above, plus one doc comment in `profiles.ts`); `GOVERNANCE_BASELINE` stays `1e62c5ad5bf7`. The Local harness is removed from VS Code in February 2027, so the behaviour change is short-lived.
 
-## [Unreleased] — Story 44.7: Epic 44 Burn-down
+## [1.2.0 detail] — Story 44.7: Epic 44 Burn-down
 
 ### Fixed
 
@@ -58,7 +58,7 @@ This summarises the Epic 44 release for the release notes. The story sections be
 - **New live gate `compile-check-live-gate.test.ts`** (in the dev prepublish roster, 8 legs): `iris_doc_compile` (a partial failure, a wildcard, a clean list, a routine), `iris_doc_load`, `iris_env_promote` (a class, a routine) and the evidence for DW-756 below. New IRIS-side test class `ExecuteMCPv2.Tests.DatabaseDeleteTest` (7 tests), run by the dev integration suite.
 - **DW-756 closed with evidence.** The `iris_doc_xml_export` import already names a failed class: its per-file `status` carries `ERROR #5475` with the class name whether or not Storage was written, so it needs no check (live gate leg 6).
 
-## [Unreleased] — Story 44.5: Integration Suites Cannot Pass Without Testing
+## [1.2.0 detail] — Story 44.5: Integration Suites Cannot Pass Without Testing
 
 ### Fixed
 
@@ -73,7 +73,7 @@ This summarises the Epic 44 release for the release notes. The story sections be
 - **The dev integration suite runs the IRIS-side DocDB tests**: `ExecuteMCPv2.Tests.DocDbRegisterTest` (5 tests) and `ExecuteMCPv2.Tests.DocDbRegisterNamespaceTest` (3 tests) through `iris_execute_tests`, asserting the counts.
 - No package, tool, action, governance key, visibility or description changes, no IRIS-side class change and no `BOOTSTRAP_VERSION` change: only test files, scripts, the workflow and documents changed.
 
-## [Unreleased] — Story 44.4: Bootstrap Compile Result Accuracy
+## [1.2.0 detail] — Story 44.4: Bootstrap Compile Result Accuracy
 
 ### Fixed
 
@@ -87,7 +87,7 @@ This summarises the Epic 44 release for the release notes. The story sections be
 - **The frozen handler golden sanctions the startup requests of the `current` check (sanction `S-44.4-current-check`, wave-9 decision #146).** A `current` start now makes three more requests while a server starts (the HTTP client's `HEAD /api/atelier/` CSRF pre-flight before the POST, the dictionary query and the `docnames` read), so the sanctioned-change ledger gained a `startup` section whose only operation is `insert`: 15 entries, three for each of the five servers, with values taken from running the built servers. The frozen goldens are unchanged. The test fake IRIS (`scripts/lib/fake-iris-listener.mjs`) answers the check with a clean result for every class the query names, so a fake `current` start still reports `compiled: true`.
 - **Two more Atelier reads per bootstrap that compiles, and on a `current` start**: one `action/query` over `%Dictionary.ClassDefinition` and `%Dictionary.CompiledClass`, and one `docnames/CLS` read per package root (one for the roster). On a stock instance the HTTP client also sends its `HEAD /api/atelier/` CSRF pre-flight before the query's POST, so the wire carries three more requests. The check needs the same `%Developer` access as the rest of the bootstrap. A clean `BootstrapResult` is byte-identical to before (pinned); `newer`, `foreign` and `unknown` runs, and an IPM-owned run that would write, send nothing new. No IRIS-side class changes (`BOOTSTRAP_VERSION` is unchanged), and no tool, action, governance key, visibility or description changes.
 
-## [Unreleased] — Story 44.6: Launcher Provider Works in Copilot Sessions
+## [1.2.0 detail] — Story 44.6: Launcher Provider Works in Copilot Sessions
 
 ### Fixed
 
@@ -98,7 +98,7 @@ This summarises the Epic 44 release for the release notes. The story sections be
 - **New operator variable `IRIS_CREDENTIAL_NAME` (sanctioned AD-15 change; wave-9 decision #140, owner ruling).** When it is set (not empty, not blank) and `IRIS_PASSWORD` is unset or empty, the `default` profile takes its password from the same keychain / `IRIS_CREDENTIAL_HELPER` chain that already serves Server Manager profiles (service `iris-mcp`, account `<name>`, links 2 and 3 only), and each `IRIS_PROFILES` entry without a `password` looks up its own name (a miss keeps the inherited password and logs one warning). A non-empty `IRIS_PASSWORD` still wins; an exhausted chain fails startup naming `IRIS_CREDENTIAL_NAME`, the name and `iris-mcp-credentials set <name>`; a value with a control character fails startup. `IRIS_USERNAME` stays required. `@iris-mcp/shared` exports `resolveStoredCredential`, links 2 and 3 of the chain, which `resolveCredential` now calls after link 1.
 - **Unchanged behavior, pinned.** With `IRIS_CREDENTIAL_NAME` unset, empty or blank, `loadConfig` and `loadProfileRegistry` return the same configuration and throw the same error texts (the two `IRIS_USERNAME` and `IRIS_PASSWORD` messages verbatim), and neither the keychain nor the helper is consulted. No tool, action, governance key, visibility or description changes; `GOVERNANCE_BASELINE` stays `1e62c5ad5bf7` (141 keys).
 
-## [Unreleased] — Story 44.3: Confirmation Bound to the Scope Shown
+## [1.2.0 detail] — Story 44.3: Confirmation Bound to the Scope Shown
 
 ### Fixed
 
@@ -110,7 +110,7 @@ This summarises the Epic 44 release for the release notes. The story sections be
 - **An accepted `resendFiltered` sends its read-only preview twice**, once on the round that asks and once on the round that carries the accept, to compare the filter and the cap with the ones shown. A decline sends it once. The fail-closed preview (DW-657) is unchanged.
 - **Unchanged behavior, pinned.** A client that does not declare form elicitation gets today's requests, result and audit entry. A call whose scope does not change has today's dialog text, result and audit entry. No tool, action, input field, governance key, visibility, tool description or schema changes; the frozen goldens and the tools-list snapshot are untouched. `REFUSAL_CODES` gains `CONFIRMATION_SCOPE_CHANGED`, and `@iris-mcp/shared` exports the `ConfirmationScope` type.
 
-## [Unreleased] — Story 44.2: VS Code Copilot MCP Configuration Targets
+## [1.2.0 detail] — Story 44.2: VS Code Copilot MCP Configuration Targets
 
 ### Fixed
 
@@ -127,7 +127,7 @@ This summarises the Epic 44 release for the release notes. The story sections be
 - **Release note.** The end-of-epic release must carry `@iris-mcp/client-config`, the CLI the MCP Clients view runs through `npx -y -p @iris-mcp/client-config@1`. No new vsix is needed for this fix; the changed extension README reaches the Marketplace with the next vsix.
 - **Not yet tried in a live Copilot session.** The VS Code Copilot changes in this release (Stories 44.2 and 44.6) are checked against VS Code's source and an emulated Copilot harness, but have not yet been tried in a real Copilot session. If something does not work there, please report it as a GitHub issue.
 
-## [Unreleased] — Story 44.1: DocDB Create Registers the Database
+## [1.2.0 detail] — Story 44.1: DocDB Create Registers the Database
 
 ### Fixed
 

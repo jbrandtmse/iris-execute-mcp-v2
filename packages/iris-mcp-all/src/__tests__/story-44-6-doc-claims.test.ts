@@ -90,7 +90,7 @@ describe("Story 44.6: the changelogs and the changeset", () => {
   });
 
   it("the root CHANGELOG has the Story 44.6 block naming the sanctioned AD-15 change and the 44.2 limitation it resolves", () => {
-    const block = read("CHANGELOG.md").split(/^(?=## \[)/m).find((section) => section.startsWith("## [Unreleased] — Story 44.6")) ?? "";
+    const block = read("CHANGELOG.md").split(/^(?=## \[)/m).find((section) => /^## \[(?:Unreleased|\d+\.\d+\.\d+ detail)\] — Story 44\.6/.test(section)) ?? "";
     const flat = squash(block);
     expect(flat).toContain("sanctioned AD-15 change");
     expect(flat).toContain("resolves the \"Known limitation (deferred)\" bullet of Story 44.2");
