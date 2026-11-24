@@ -1,0 +1,40 @@
+{
+  "mcpServers": {
+    "iris-dev-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@iris-mcp/dev@1"],
+      "env": {
+        "IRIS_SERVER_MANAGER": "auto"
+      },
+      "tools": ["*"]
+    },
+    "microsoft-learn": {
+      "command": "npx",
+      "args": ["-y", "@microsoft/learn-mcp"],
+      "env": {
+        "API_KEY": "BSA_foreignKeyABC"
+      },
+      "tools": ["*"]
+    },
+    "iris-ops-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@iris-mcp/ops@1"
+      ],
+      "env": {
+        "IRIS_HOST": "iris.example.com",
+        "IRIS_PORT": "52773",
+        "IRIS_USERNAME": "svc",
+        "IRIS_NAMESPACE": "PROD",
+        "IRIS_HTTPS": "true",
+        "IRIS_PASSWORD": "${IRIS_PASSWORD}"
+      },
+      "tools": [
+        "*"
+      ]
+    }
+  }
+}

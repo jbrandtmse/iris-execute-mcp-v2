@@ -461,6 +461,28 @@ export async function resolveCredential(
     return { password: envPassword, source: "env" };
   }
 
+  return resolveStoredCredential(serverName, options);
+}
+
+/**
+ * Links 2-3 of the chain only: the OS keychain (service `iris-mcp`, account
+ * `name`), then `IRIS_CREDENTIAL_HELPER` when configured (`name` as its final
+ * argv). Link 1 (`IRIS_PROFILES.<name>.password` / `IRIS_PASSWORD`) is never
+ * consulted, so a caller that already owns the explicit-password decision
+ * (the `IRIS_CREDENTIAL_NAME` path) cannot receive another profile's password
+ * by account-name collision. Same seams and never-throws contract as
+ * {@link resolveCredential}.
+ *
+ * @param name    - The keychain account and the helper's `argv[1]`.
+ * @param options - Injectable deps for tests; production callers omit
+ *   `getKeychainPassword`/`runCredentialHelper`.
+ */
+export async function resolveStoredCredential(
+  name: string,
+  options: CredentialChainOptions = {},
+): Promise<CredentialLinkResult | undefined> {
+  const env = options.env ?? process.env;
+
   // Link 2 — OS keychain.
   const getKeychainPassword = options.getKeychainPassword ?? getKeychainPasswordDefault;
   let keychainPassword: string | undefined;
@@ -473,13 +495,13 @@ export async function resolveCredential(
     // this function, `resolveServerManagerCredentials`, `loadProfileRegistry`
     // and `McpServerBase.start()` — breaking this module's "NEVER throws"
     // contract and failing server startup.
-    keychainPassword = usablePassword(await getKeychainPassword(serverName));
+    keychainPassword = usablePassword(await getKeychainPassword(name));
   } catch (e: unknown) {
     // Belt-and-braces: the default implementation above never throws, but an
     // injected test double (or a future native-module edge case) might. A
     // keychain failure must never abort the chain.
     logger.debug(
-      `IRIS credential chain: keychain link error for "${serverName}" — ` +
+      `IRIS credential chain: keychain link error for "${name}" — ` +
         `${e instanceof Error ? e.message : String(e)}. Skipping this link.`,
     );
     keychainPassword = undefined;
@@ -496,10 +518,10 @@ export async function resolveCredential(
     try {
       // `usablePassword` inside the try — same never-throws reasoning as the
       // keychain link above.
-      helperPassword = usablePassword(await runCredentialHelper(helperCommand, serverName));
+      helperPassword = usablePassword(await runCredentialHelper(helperCommand, name));
     } catch (e: unknown) {
       logger.debug(
-        `IRIS credential chain: credential-helper link error for "${serverName}" — ` +
+        `IRIS credential chain: credential-helper link error for "${name}" — ` +
           `${e instanceof Error ? e.message : String(e)}. Skipping this link.`,
       );
       helperPassword = undefined;
@@ -565,12 +587,30 @@ export async function resolveServerManagerCredentials(
 ): Promise<IrisProfile[]> {
   const resolvedProfiles: IrisProfile[] = [];
   const exhaustedNames: string[] = [];
+  /** DW-761: names a workspace-scope settings file defines, which the chain is never run for. */
+  const workspaceRefusedNames: string[] = [];
 
   for (const entry of entries) {
-    const { credentialStatus, ...profile } = entry;
+    const { credentialStatus, workspaceScope, ...profile } = entry;
 
     if (credentialStatus === "resolved") {
       resolvedProfiles.push(profile);
+      continue;
+    }
+
+    // DW-761: the credential chain resolves by NAME, and a workspace-scope settings file (the folder's
+    // `.vscode/settings.json` or a `.code-workspace` file) is chosen by whoever wrote the repository. Pairing the user's
+    // keychain or helper password with the host such a file names would hand it to the repository's author, so the chain
+    // is not run for it. Only a password the same definition carries inline (status "resolved", above) is used.
+    if (workspaceScope === true) {
+      workspaceRefusedNames.push(entry.name);
+      logger.warn(
+        `IRIS_SERVER_MANAGER: server "${entry.name}" is defined or overridden in a workspace settings file ` +
+          `(${entry.sourceFile ?? "a workspace settings file"}), so no stored password (OS keychain or ` +
+          `IRIS_CREDENTIAL_HELPER) was used for it: a workspace must not choose where that password is sent. ` +
+          `Define "${entry.name}" in your user settings under a name no workspace file uses, or define it with its ` +
+          `full connection fields via IRIS_PROFILES.`,
+      );
       continue;
     }
 
@@ -587,13 +627,26 @@ export async function resolveServerManagerCredentials(
     }
   }
 
-  if (options.mode === "required" && exhaustedNames.length > 0) {
-    throw new Error(
-      `IRIS_SERVER_MANAGER=required but the credential chain could not resolve a password ` +
-        `for: ${exhaustedNames.join(", ")}. Remediation per profile: run ` +
-        `"iris-mcp-credentials set <name>" (OS keychain), set IRIS_CREDENTIAL_HELPER, or ` +
-        `define the profile with its full connection fields via IRIS_PROFILES.`,
-    );
+  if (options.mode === "required" && (exhaustedNames.length > 0 || workspaceRefusedNames.length > 0)) {
+    const parts: string[] = [];
+    if (exhaustedNames.length > 0) {
+      parts.push(
+        `IRIS_SERVER_MANAGER=required but the credential chain could not resolve a password ` +
+          `for: ${exhaustedNames.join(", ")}. Remediation per profile: run ` +
+          `"iris-mcp-credentials set <name>" (OS keychain), set IRIS_CREDENTIAL_HELPER, or ` +
+          `define the profile with its full connection fields via IRIS_PROFILES.`,
+      );
+    }
+    if (workspaceRefusedNames.length > 0) {
+      parts.push(
+        `IRIS_SERVER_MANAGER=required but ${workspaceRefusedNames.join(", ")} ` +
+          `${workspaceRefusedNames.length === 1 ? "is" : "are"} defined or overridden in a workspace settings file, ` +
+          `so no stored password (OS keychain or IRIS_CREDENTIAL_HELPER) was used: a workspace must not choose ` +
+          `where that password is sent. Define each in your user settings under a name no workspace file uses, ` +
+          `or define it with its full connection fields via IRIS_PROFILES.`,
+      );
+    }
+    throw new Error(parts.join(" "));
   }
 
   return resolvedProfiles;

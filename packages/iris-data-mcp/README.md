@@ -122,6 +122,8 @@ Set `IRIS_SERVER_MANAGER=auto` to import IRIS connection definitions straight fr
 
 In addition to the standard prerequisites, the four DocDB tools require the `%Service_DocDB` service to be enabled on the IRIS instance. **`%Service_DocDB` is disabled by default on IRIS.** Enable it through the Management Portal under *System Administration > Security > Services > %Service_DocDB*, or via the `iris_service_manage` tool (`action="enable"`, `name="%Service_DocDB"` — that tool is provided by the `@iris-mcp/admin` server) — note that action is itself governance-default-disabled and needs an `IRIS_GOVERNANCE` override such as `{"global": {"iris_service_manage:enable": true}}`. While the service is disabled, every DocDB call fails with `ERROR #822: Access Denied`; the tools detect this case and return an actionable error naming both remedy routes. The detection performs one follow-up check of the live service state via the suite's custom ExecuteMCPv2 REST endpoint — on an instance without that endpoint deployed, the raw `ERROR #822` passes through unchanged.
 
+Every DocDB database also needs a `Security.DocDBs` record, which IRIS checks on every call other than `list`; without it IRIS answers `ERROR #822: Access Denied` even with the service enabled. The DocDB REST API never writes that record, so `iris_docdb_manage` `create` does: after it creates the database it registers the record through the suite's ExecuteMCPv2 REST service (`POST /api/executemcp/v2/security/docdb`, which calls IRIS's own `$$Create^%SYS.DOCDB`). The record has no Resource, so it adds no access restriction of its own, and IRIS checks that the caller holds `%DocDB_Admin` (or `%Admin_Secure`). Registration therefore needs the ExecuteMCPv2 REST service deployed on the instance at the current version, which the first server to connect deploys or upgrades; an IPM installation is upgraded through IPM instead (see the IPM section of the suite README), and a hand-loaded or foreign copy is left alone. A database made by `1.1.0` or earlier has no record, so every call on it fails with `#822`, and `drop` fails too; run `create` with the same name and the record is registered and the database works again (`create` on a database that already has its record returns the usual "already defined" error, unchanged).
+
 ---
 
 ## Tool Reference
@@ -140,10 +142,10 @@ Provided by the shared framework and available on **every** suite server (Epic 1
 
 | Tool | Description | Key Parameters | Annotations |
 |------|-------------|----------------|-------------|
-| `iris_docdb_manage` | Create, drop, or list document databases | `action`, `database?`, `namespace?` | destructive |
+| `iris_docdb_manage` | Create, drop, or list document databases; `create` makes an empty database (define its properties with `iris_docdb_property`). `create` also registers the database's `Security.DocDBs` record (and repairs a database that has none) | `action`, `database?`, `namespace?` | destructive |
 | `iris_docdb_document` | Insert, get, update, or delete documents | `action`, `database`, `id?`, `document?`, `namespace?` | destructive |
 | `iris_docdb_find` | Query documents with filter criteria | `database`, `filter`, `namespace?` | readOnly, idempotent |
-| `iris_docdb_property` | Create, drop, or index properties | `action`, `database`, `property`, `type?`, `namespace?` | destructive |
+| `iris_docdb_property` | Create, drop, or index properties; `create` fills the property from `path` (default `$.<property>`), and `index` reports an existing property without writing | `action`, `database`, `property`, `type?`, `path?`, `namespace?` | destructive |
 
 > All four DocDB tools require `%Service_DocDB` to be enabled on the instance (disabled by default on IRIS) — see [Prerequisites](#prerequisites). With the service disabled they return an actionable `ERROR #822: Access Denied` error naming both remedy routes.
 
@@ -253,13 +255,18 @@ No prompts in v1 (Epic 25). See the [Workflow Prompts & Agent Skills](../../READ
 }
 ```
 
-**Output:**
+**Output** (the DocDB definition, abbreviated, plus `registered`, which says the database's `Security.DocDBs` record exists):
 ```json
 {
-  "database": "Customers",
-  "status": "created"
+  "content": {
+    "Name": "Customers",
+    "Class": "ISC.DM.Customers"
+  },
+  "registered": true
 }
 ```
+
+When `Customers` already exists without a record, `create` registers it and returns `{"database": "Customers", "namespace": "USER", "created": false, "registered": true}`. If the record cannot be registered, the result is an error that says whether the database was created, carries the real error text, and names the two fixes (run `create` again, or add the record in the Management Portal).
 </details>
 
 <details>
@@ -362,6 +369,8 @@ comparison operator for filtering to work correctly (e.g., use `%Integer` for nu
 }
 ```
 
+**Where the property is read from (`path`):** the tool sends `path` (default `$.<property>`, the top-level field of the same name; for example `"path": "$.address.city"`) so that DocDB fills the property from each document. A property created with no path is never filled in, and a `find` on it matches nothing. DocDB fills a property when a document is saved, so documents saved before the property exists are not found by it until they are saved again. DocDB also indexes every property it creates, so a created property is already indexed.
+
 **Type encoding note:** The IRIS DocDB API reads `type` from a URL query parameter, not the JSON body.
 IRIS type names begin with `%` (e.g. `%Integer`, `%String`). The tool encodes these correctly using
 split/join encoding that preserves the `%` prefix as a literal `%` in the URL — standard `encodeURIComponent`
@@ -380,13 +389,16 @@ would convert `%Integer` to `%25Integer`, causing IRIS to look for class `%Libra
 }
 ```
 
-**Output:**
+**Output** (the property `email` already exists, so nothing is written):
 ```json
 {
-  "property": "email",
-  "indexed": true
+  "content": { "Name": "email", "Type": "%Library.String" },
+  "indexed": true,
+  "created": false
 }
 ```
+
+DocDB has no operation that only adds an index: it indexes every property when it creates it. So `index` reads the property and reports it with `indexed: true, created: false` (it used to re-create the property and fail with `ERROR #5805`). For a property that does not exist yet it creates it (`%String`, read from `path`, default `$.<property>`) and answers `created: true`. A system property (a name starting with `%`) cannot be indexed and is refused without a request.
 </details>
 
 <details>
@@ -582,6 +594,8 @@ REST management tools use the IRIS built-in Management API at `/api/mgmnt/v2/{na
 
 **Important:** DocDB tools require the `%Service_DocDB` service to be enabled in the target IRIS instance (it is disabled by default on IRIS). Without this service, DocDB operations fail with `ERROR #822: Access Denied` — the tools detect this case and return an actionable error naming the cause and both remedy routes (Management Portal, or `iris_service_manage` `action="enable"` under an `IRIS_GOVERNANCE` override).
 
+`iris_docdb_manage` `create` is the one DocDB action that also calls the suite's ExecuteMCPv2 REST service: it registers the database's `Security.DocDBs` record through `POST /api/executemcp/v2/security/docdb`. When an `#822` arrives with the service enabled, the tools check the record with `GET /api/executemcp/v2/security/docdb` and name a missing record in the error.
+
 ---
 
 ## Error Handling
@@ -593,6 +607,7 @@ REST management tools use the IRIS built-in Management API at `/api/mgmnt/v2/{na
 | `IRIS connection refused` | IRIS web server not running or wrong host/port | Verify `IRIS_HOST` and `IRIS_PORT` settings |
 | `401 Unauthorized` | Invalid credentials | Check `IRIS_USERNAME` and `IRIS_PASSWORD` |
 | `ERROR #822: Access Denied` (from `/api/docdb/v1/...`) | `%Service_DocDB` not enabled (disabled by default on IRIS) — the DocDB tools translate this into an actionable error naming both remedies | Enable the service via the Management Portal (*System Administration > Security > Services > %Service_DocDB*), or `iris_service_manage` `action="enable"` (itself governance-default-disabled; needs an `IRIS_GOVERNANCE` override) |
+| `ERROR #822: Access Denied` with `%Service_DocDB` enabled | The database exists but has no `Security.DocDBs` record (a database made by `1.1.0` or earlier, or created outside the tool); or its record is disabled or names a Resource the caller does not hold; or the caller lacks `%Service_DocDB:USE`, or the caller lacks `%DocDB_Admin` (which `create`, `drop`, `list` and the record check need). For a caller that may read the record, the DocDB tools check it and say so when it is missing; otherwise the original error passes through | Run `iris_docdb_manage` `create` with the same database name: it registers a missing record. Or add or fix the record in the Management Portal under *System Administration > Security > Applications > Doc DB Applications* |
 | `Database not found` | DocDB database does not exist | Use `iris_docdb_manage` with action `list` to check available databases |
 | `Document not found` | Invalid document ID | Verify the document ID with `iris_docdb_find` |
 | `Cube not found` | DeepSee cube does not exist | Use `iris_analytics_cubes` with action `list` to see available cubes |

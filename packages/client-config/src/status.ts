@@ -20,8 +20,9 @@ import { readFileSync } from "node:fs";
 
 import { ADAPTER_DATA_VERSION, CLIENT_ADAPTERS } from "./adapters.js";
 import { detectClients, REAL_DETECTION_FS, type DetectionFs } from "./detect.js";
-import { resolveScopePath } from "./paths.js";
+import { adapterForScope, legacyAdapterView, resolveLegacyPath, resolveScopePath } from "./paths.js";
 import { isFlagDisabled, readConfigEntries } from "./readers.js";
+import { peerClients, sharedPeers } from "./shared-files.js";
 import {
   CANONICAL_SERVERS,
   type CanonicalServerName,
@@ -50,11 +51,25 @@ export interface ServerStatus {
 
 export type ScopeFileState = "ok" | "missing" | "unparseable" | "unresolved";
 
+/** An old-location file (the legacy VS Code mcp.json files) that still holds iris-mcp entries or cannot be read (Story 44.2). */
+export interface LegacyFileStatus {
+  path: string;
+  file: "ok" | "unparseable";
+  /** Parse reason for `unparseable` (path + reason only; never content). */
+  error?: string;
+  /** The canonical iris-mcp servers still in the old file, in CANONICAL_SERVERS order. Names only. */
+  servers: CanonicalServerName[];
+}
+
 export interface ScopeStatus {
   scope: ClientScope;
   path: string | null;
   file: ScopeFileState;
-  /** Parse reason for `unparseable` (path + reason only — never content). */
+  /** Other clients that read this same file (a shared `.mcp.json`); absent when nobody shares it (Story 44.2). */
+  sharedWith?: string[];
+  /** Old-location files of this scope that still hold iris-mcp entries; absent when there are none (Story 44.2). */
+  legacy?: LegacyFileStatus[];
+  /** Parse reason for `unparseable` (path + reason only; never content). */
   error?: string;
   /** All 6 canonical servers, in CANONICAL_SERVERS order. Empty when not ok. */
   servers: ServerStatus[];
@@ -114,18 +129,66 @@ export function buildStatusMatrix(
     clients.push({
       client: adapter.id,
       displayName: adapter.displayName,
-      scopes: adapter.scopes.map((scopeDef) => scopeStatus(adapter, scopeDef.scope, ctx, fs)),
+      scopes: adapter.scopes.map((scopeDef) => scopeStatus(adapter, scopeDef.scope, ctx, fs, adapters)),
     });
   }
   return { adapterDataVersion: ADAPTER_DATA_VERSION, clients, undetected };
 }
 
 function scopeStatus(
-  adapter: ClientAdapter,
+  baseAdapter: ClientAdapter,
+  scope: ClientScope,
+  ctx: HostContext,
+  fs: StatusFs,
+  adapters: Readonly<Record<string, ClientAdapter>>,
+): ScopeStatus {
+  const status = fileScopeStatus(baseAdapter, scope, ctx, fs);
+  const sharedWith = peerClients(sharedPeers(baseAdapter, scope, ctx, adapters));
+  const legacy = legacyStatus(baseAdapter, scope, ctx, fs);
+  return {
+    ...status,
+    ...(sharedWith.length > 0 ? { sharedWith } : {}),
+    ...(legacy.length > 0 ? { legacy } : {}),
+  };
+}
+
+/** The old-location files of one scope that still hold canonical entries or cannot be read. Read-only. */
+function legacyStatus(adapter: ClientAdapter, scope: ClientScope, ctx: HostContext, fs: StatusFs): LegacyFileStatus[] {
+  const out: LegacyFileStatus[] = [];
+  for (const def of adapter.legacyScopes ?? []) {
+    if (def.scope !== scope) continue;
+    const path = resolveLegacyPath(adapter, def, ctx);
+    if (path === null) continue;
+    try {
+      if (!fs.exists(path)) continue;
+    } catch {
+      continue;
+    }
+    let content: string;
+    try {
+      content = fs.readFile(path);
+    } catch (err) {
+      out.push({ path, file: "unparseable", error: `could not read the file: ${err instanceof Error ? err.message : String(err)}`, servers: [] });
+      continue;
+    }
+    const parsed = readConfigEntries(legacyAdapterView(adapter, def), content);
+    if (!parsed.ok) {
+      out.push({ path, file: "unparseable", error: parsed.error, servers: [] });
+      continue;
+    }
+    const servers = CANONICAL_SERVERS.filter((server) => Object.prototype.hasOwnProperty.call(parsed.entries, server));
+    if (servers.length > 0) out.push({ path, file: "ok", servers });
+  }
+  return out;
+}
+
+function fileScopeStatus(
+  baseAdapter: ClientAdapter,
   scope: ClientScope,
   ctx: HostContext,
   fs: StatusFs,
 ): ScopeStatus {
+  const adapter = adapterForScope(baseAdapter, scope);
   // Per-probe degradation (the detect.ts pattern, Story 33.5 AC 33.5.5): an
   // exists probe that THROWS (EACCES on an unreadable parent, an injected
   // throwing probe) reports not-exists — it must never escape as an
@@ -137,7 +200,7 @@ function scopeStatus(
       return false;
     }
   };
-  const path = resolveScopePath(adapter, scope, ctx, safeExists);
+  const path = resolveScopePath(baseAdapter, scope, ctx, safeExists);
   const empty: Pick<ScopeStatus, "servers" | "foreign"> = { servers: [], foreign: [] };
   if (path === null) {
     return { scope, path: null, file: "unresolved", ...empty };

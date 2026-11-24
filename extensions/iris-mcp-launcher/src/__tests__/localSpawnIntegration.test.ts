@@ -40,6 +40,7 @@ import { LauncherProvider } from "../serverDefinitionProvider.js";
 import type { AuthApi, LauncherSettings, ServerManagerApi } from "../types.js";
 import { liveGateTarget } from "./liveArming.js";
 import { resolveSdkEsmDir } from "./sdkClientStore.js";
+import { userScopeServers } from "./serverManagerInspection.js";
 
 // Repo root — 4 levels up from src/__tests__ (__tests__ -> src ->
 // iris-mcp-launcher -> extensions -> repo root), matching the pattern
@@ -161,6 +162,8 @@ function newProvider(providerWarnings: string[]): LauncherProvider {
         developmentRepoPath: REPO_ROOT,
       }),
     showWarning: (message) => providerWarnings.push(message),
+    // The provided env is built only for a server defined in user settings alone.
+    inspectServerManagerServers: () => userScopeServers(["local-iris"]),
   });
 }
 
@@ -250,8 +253,15 @@ describe("Integration AC 31.6.8 — a local-path definition actually starts and 
       // never a bare "node" resolved from the host's PATH. In THIS process
       // (vitest, plain Node) execPath IS node, and ELECTRON_RUN_AS_NODE is
       // inert — the real spawn below is unaffected.
+      // Story 44.6: the provided definition also carries the non-secret env a Copilot-harness session spawns; the
+      // Local resolve below replaces it, so only its credential name is pinned here (the whole env: `serverDefinitionProvider.test.ts`).
       expect(planned).toEqual([
-        { label: "IRIS Dev Tools — local-iris", command: process.execPath, args: [DEV_MCP_ENTRY_POINT] },
+        {
+          label: "IRIS Dev Tools — local-iris",
+          command: process.execPath,
+          args: [DEV_MCP_ENTRY_POINT],
+          env: expect.objectContaining({ IRIS_CREDENTIAL_NAME: "local-iris" }),
+        },
       ]);
 
       // ── 2. REAL synthesized env, via the REAL resolveEnvForLabel ──

@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type { ToolContext } from "@iris-mcp/shared";
 import { docCompileTool } from "../tools/compile.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
+import { cleanCompileAnswer, fakeCompileAndCheck } from "./compile-check-fakes.js";
+import { checkCouldNotRunText, notConfirmedText } from "../tools/compile-check.js";
 
 // ── iris_doc_compile ───────────────────────────────────────────────
 
@@ -15,9 +17,9 @@ describe("iris_doc_compile", () => {
   });
 
   it("should compile a single document successfully and return success status", async () => {
-    mockHttp.post.mockResolvedValue(
-      envelope({ content: [{ name: "MyApp.Service.cls", status: "OK", errors: [] }] }, ["Compilation started..."]),
-    );
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer(["MyApp.Service.cls"], ["Compilation started..."]),
+    });
 
     const result = await docCompileTool.handler(
       { doc: "MyApp.Service.cls" },
@@ -34,12 +36,18 @@ describe("iris_doc_compile", () => {
     });
     expect(result.isError).toBe(false);
     expect(result.content[0]?.text).toContain("Successfully compiled");
+    // Story 44.7: the clean path adds exactly the check's two reads (the dictionary query, then docnames).
+    expect(calls.posts).toEqual([
+      "/api/atelier/v7/USER/action/compile",
+      "/api/atelier/v7/USER/action/query",
+    ]);
+    expect(calls.gets).toEqual(["/api/atelier/v7/USER/docnames/CLS?filter=MyApp."]);
+    expect(calls.queryParameters).toEqual([["MyApp.Service"]]);
+    expect(result.structuredContent).not.toHaveProperty("errors");
   });
 
   it("should pass compilation flags to endpoint as query parameter", async () => {
-    mockHttp.post.mockResolvedValue(
-      envelope({ content: [{ name: "Test.cls", status: "OK", errors: [] }] }),
-    );
+    fakeCompileAndCheck(mockHttp, { compile: cleanCompileAnswer(["Test.cls"]) });
 
     await docCompileTool.handler(
       { doc: "Test.cls", flags: "cku" },
@@ -54,11 +62,7 @@ describe("iris_doc_compile", () => {
 
   it("should compile multiple documents in a single request", async () => {
     const docs = ["One.cls", "Two.cls", "Three.cls"];
-    mockHttp.post.mockResolvedValue(
-      envelope({
-        content: docs.map((d) => ({ name: d, status: "OK", errors: [] })),
-      }),
-    );
+    fakeCompileAndCheck(mockHttp, { compile: cleanCompileAnswer(docs) });
 
     const result = await docCompileTool.handler({ doc: docs }, ctx);
 
@@ -146,9 +150,7 @@ describe("iris_doc_compile", () => {
   });
 
   it("should use namespace override when provided", async () => {
-    mockHttp.post.mockResolvedValue(
-      envelope({ content: [{ name: "Test.cls", status: "OK", errors: [] }] }),
-    );
+    const calls = fakeCompileAndCheck(mockHttp, { compile: cleanCompileAnswer(["Test.cls"]) });
 
     await docCompileTool.handler(
       { doc: "Test.cls", namespace: "HSCUSTOM" },
@@ -159,12 +161,16 @@ describe("iris_doc_compile", () => {
       "/api/atelier/v7/HSCUSTOM/action/compile",
       ["Test.cls"],
     );
+    // The check reads the same namespace the compile ran in.
+    expect(calls.posts).toEqual([
+      "/api/atelier/v7/HSCUSTOM/action/compile",
+      "/api/atelier/v7/HSCUSTOM/action/query",
+    ]);
+    expect(calls.gets).toEqual(["/api/atelier/v7/HSCUSTOM/docnames/CLS?filter=Test."]);
   });
 
   it("should include compilationTime in result", async () => {
-    mockHttp.post.mockResolvedValue(
-      envelope({ content: [{ name: "Test.cls", status: "OK", errors: [] }] }),
-    );
+    fakeCompileAndCheck(mockHttp, { compile: cleanCompileAnswer(["Test.cls"]) });
 
     const result = await docCompileTool.handler(
       { doc: "Test.cls" },
@@ -208,12 +214,9 @@ describe("iris_doc_compile", () => {
   });
 
   it("should include console output when present in sync mode", async () => {
-    mockHttp.post.mockResolvedValue(
-      envelope(
-        { content: [{ name: "Test.cls", status: "OK", errors: [] }] },
-        ["Compilation started on Test.cls", "Compilation successful"],
-      ),
-    );
+    fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer(["Test.cls"], ["Compilation started on Test.cls", "Compilation successful"]),
+    });
 
     const result = await docCompileTool.handler(
       { doc: "Test.cls" },
@@ -225,5 +228,313 @@ describe("iris_doc_compile", () => {
       "Compilation started on Test.cls",
       "Compilation successful",
     ]);
+  });
+});
+
+// ── Story 44.7: the compile check (DW-754) ─────────────────────────
+//
+// Probe A (2026-11-23): [X fails, P persistent] answers HTTP 200 with no status error and no per-document error, and
+// `verifyCompiled` names X. The fakes (compile-check-fakes.ts) return the captured row and docnames shapes.
+
+describe("iris_doc_compile: the compile check (Story 44.7, DW-754)", () => {
+  let mockHttp: ReturnType<typeof createMockHttp>;
+  let ctx: ToolContext;
+
+  beforeEach(() => {
+    mockHttp = createMockHttp();
+    ctx = createMockCtx(mockHttp);
+  });
+
+  type Structured = {
+    success: boolean;
+    errors?: Array<{ document: string; error: string }>;
+    documents: string[];
+  };
+
+  it("a partial failure with no error listed is success:false and names exactly the failing class", async () => {
+    fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer(["Bad.cls", "Persistent.cls"], ["Compiling 2 classes"]),
+      broken: ["Bad.cls"],
+    });
+
+    const result = await docCompileTool.handler({ doc: ["Bad.cls", "Persistent.cls"] }, ctx);
+
+    expect(result.isError).toBe(false);
+    const structured = result.structuredContent as Structured;
+    expect(structured.success).toBe(false);
+    expect(structured.errors).toEqual([{ document: "Bad.cls", error: notConfirmedText("Bad.cls") }]);
+    expect(result.content[0]?.text).toContain("Compilation failed for Bad.cls, Persistent.cls with 1 error(s)");
+  });
+
+  it("names every failing class when several fail, in the order given", async () => {
+    fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer(["A.cls", "B.cls", "C.cls"]),
+      broken: ["C.cls", "A.cls"],
+    });
+
+    const result = await docCompileTool.handler({ doc: ["A.cls", "B.cls", "C.cls"] }, ctx);
+
+    expect((result.structuredContent as Structured).errors?.map((e) => e.document)).toEqual(["A.cls", "C.cls"]);
+  });
+
+  it("a wildcard is expanded through docnames and the matches are checked", async () => {
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer([]),
+      broken: ["Pkg.PBad.cls"],
+      catalog: [
+        { name: "Pkg.PBad.cls" },
+        { name: "Pkg.PGood.cls" },
+        { name: "Pkg.Other.cls" }, // the filter is a "name contains" read; the whole name must match the pattern
+        { name: "Pkg.PGenerated.cls", gen: true }, // generated documents are skipped
+        { name: "Pkg.PSub.Nested.cls" }, // '*' matches a run, dots included
+        { name: "Other.Pkg.PBad.cls" }, // "contains" returns it, the anchored pattern does not
+      ],
+    });
+
+    const result = await docCompileTool.handler({ doc: "Pkg.P*.cls" }, ctx);
+
+    expect(calls.gets[0]).toBe("/api/atelier/v7/USER/docnames/CLS?filter=Pkg.P");
+    expect(calls.queryParameters).toEqual([["Pkg.PBad", "Pkg.PGood", "Pkg.PSub.Nested"]]);
+    const structured = result.structuredContent as Structured;
+    expect(structured.success).toBe(false);
+    expect(structured.errors).toEqual([{ document: "Pkg.PBad.cls", error: notConfirmedText("Pkg.PBad.cls") }]);
+    // The compile request itself is unchanged: IRIS expands the pattern.
+    expect(mockHttp.post).toHaveBeenCalledWith("/api/atelier/v7/USER/action/compile", ["Pkg.P*.cls"]);
+  });
+
+  it("'?' matches one character", async () => {
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer([]),
+      catalog: [{ name: "Pkg.A1.cls" }, { name: "Pkg.A22.cls" }, { name: "Pkg.B1.cls" }],
+    });
+
+    await docCompileTool.handler({ doc: "Pkg.A?.cls" }, ctx);
+    expect(calls.queryParameters).toEqual([["Pkg.A1"]]);
+  });
+
+  it("a wildcard with no literal prefix is never listed (Rule #38): the named documents are still checked, and the result says what was not", async () => {
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer([]),
+      catalog: [{ name: "Pkg.A1.cls" }, { name: "Other.A1.cls" }],
+    });
+
+    const result = await docCompileTool.handler({ doc: ["*.A1.cls", "Pkg.A1.cls"] }, ctx);
+
+    expect(calls.gets.filter((url) => !url.includes("?filter="))).toEqual([]);
+    expect(calls.queryParameters).toEqual([["Pkg.A1"]]);
+    const structured = result.structuredContent as Structured & { checkNote?: string };
+    expect(structured.success).toBe(true);
+    expect(structured.checkNote).toBe(
+      "the compile check did not judge the documents matched by *.A1.cls: a wildcard with no literal prefix, one in the extension, " +
+        "or one that matches more than 1000 documents, is not expanded, so IRIS's answer alone decided them. Name the documents, " +
+        "or use a pattern with a package prefix and a .cls or .mac extension, to have them checked.",
+    );
+  });
+
+  it("a wildcard in the extension (Pkg.*) is not expanded, and the result names it", async () => {
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer([]),
+      catalog: [{ name: "Pkg.A.cls" }, { name: "Pkg.R.mac" }],
+    });
+
+    const result = await docCompileTool.handler({ doc: ["Pkg.*", "Pkg.A.cls"] }, ctx);
+
+    expect(calls.queryParameters).toEqual([["Pkg.A"]]);
+    const structured = result.structuredContent as Structured & { checkNote?: string };
+    expect(structured.success).toBe(true);
+    expect(structured.checkNote).toContain("matched by Pkg.*:");
+  });
+
+  it("a pattern whose matches would pass 1000 expanded documents is not expanded; a smaller one in the same call is", async () => {
+    const big = Array.from({ length: 1000 }, (_, index) => ({ name: `Big.C${index}.cls` }));
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer([]),
+      catalog: [...big, { name: "Small.A.cls" }, { name: "Small.B.cls" }],
+    });
+
+    const result = await docCompileTool.handler({ doc: ["Small.*.cls", "Big.*.cls"] }, ctx);
+
+    expect(calls.queryParameters).toEqual([["Small.A", "Small.B"]]);
+    const structured = result.structuredContent as Structured & { checkNote?: string };
+    expect(structured.success).toBe(true);
+    expect(structured.checkNote).toContain("matched by Big.*.cls:");
+  });
+
+  it("exactly 1000 expanded documents are all checked, with no note", async () => {
+    const thousand = Array.from({ length: 1000 }, (_, index) => ({ name: `Big.C${index}.cls` }));
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer([]),
+      catalog: thousand,
+    });
+
+    const result = await docCompileTool.handler({ doc: "Big.*.cls" }, ctx);
+
+    expect(calls.queryParameters.flat()).toHaveLength(1000);
+    expect(calls.queryParameters.map((batch) => batch.length)).toEqual(Array(10).fill(100));
+    expect(Object.keys(result.structuredContent as object)).not.toContain("checkNote");
+  });
+
+  it("flags without 'c' still run the check: IRIS compiles anyway", async () => {
+    // Probe 2026-11-23 (irishealth-community 2026.2, HSCUSTOM): `action/compile?flags=k` and `?flags=-c` compiled a class that had
+    // never been compiled (console "Compiling class ...", `verifyCompiled` [] after, the class unconfirmed before), and a broken
+    // class still answered #5475. `$SYSTEM.OBJ.CompileList` (irislib/%SYSTEM/OBJ.cls) compiles whatever the qualifiers say.
+    for (const flags of ["k", "-c"]) {
+      mockHttp.post.mockReset();
+      mockHttp.get.mockReset();
+      const calls = fakeCompileAndCheck(mockHttp, {
+        compile: cleanCompileAnswer(["Pkg.X.cls"]),
+        broken: ["Pkg.X.cls"],
+      });
+
+      const result = await docCompileTool.handler({ doc: "Pkg.X.cls", flags }, ctx);
+
+      expect(calls.posts, flags).toEqual([`/api/atelier/v7/USER/action/compile?flags=${encodeURIComponent(flags)}`, "/api/atelier/v7/USER/action/query"]);
+      expect((result.structuredContent as Structured).success, flags).toBe(false);
+    }
+  });
+
+  it("a wildcard that matches nothing checks nothing and the result stays a success", async () => {
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer([]),
+      catalog: [{ name: "Other.X.cls" }],
+    });
+
+    const result = await docCompileTool.handler({ doc: "Pkg.P*.cls" }, ctx);
+
+    expect(calls.posts).toEqual(["/api/atelier/v7/USER/action/compile"]);
+    expect(calls.gets).toHaveLength(1); // the expansion only
+    expect((result.structuredContent as Structured).success).toBe(true);
+  });
+
+  it("a name with a leading quote is an exclusion: what it matches is not checked", async () => {
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer([]),
+      catalog: [{ name: "Pkg.A.cls" }, { name: "Pkg.B.cls" }, { name: "Pkg.C.cls" }],
+    });
+
+    await docCompileTool.handler({ doc: ["Pkg.*.cls", "'Pkg.B.cls"] }, ctx);
+
+    expect(calls.queryParameters).toEqual([["Pkg.A", "Pkg.C"]]);
+  });
+
+  it("documents the check cannot judge (.inc, .int) are not checked: no check request is sent for them", async () => {
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: envelope({ content: [{ name: "Rtn.int", status: "", errors: [] }] }),
+    });
+
+    const result = await docCompileTool.handler({ doc: ["Rtn.int", "Inc.inc"] }, ctx);
+
+    expect(calls.posts).toEqual(["/api/atelier/v7/USER/action/compile"]);
+    expect(calls.gets).toEqual([]);
+    expect((result.structuredContent as Structured).success).toBe(true);
+  });
+
+  // DW-759 (probe 2026-11-23): [bad.mac, ok.mac, Pers.cls] answers HTTP 200 and success:true; docnames/RTN lists bad.mac upd false.
+  it("a failed .mac routine in a compile that wrote a class's Storage is success:false and names exactly that routine", async () => {
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer(["Pkg.Bad.mac", "Pkg.Ok.mac", "Pkg.Pers.cls"], ["Compiling routine : Pkg.Bad.mac", "ERROR: ..."]),
+      broken: ["Pkg.Bad.mac"],
+      catalog: [{ name: "Pkg.Bad.mac" }, { name: "Pkg.Ok.mac" }],
+    });
+
+    const result = await docCompileTool.handler({ doc: ["Pkg.Bad.mac", "Pkg.Ok.mac", "Pkg.Pers.cls"] }, ctx);
+
+    expect(result.isError).toBe(false);
+    const structured = result.structuredContent as Structured;
+    expect(structured.success).toBe(false);
+    expect(structured.errors).toEqual([{ document: "Pkg.Bad.mac", error: notConfirmedText("Pkg.Bad.mac") }]);
+    expect(structured.errors?.[0]?.error).toBe(
+      "Pkg.Bad.mac did not compile: IRIS's up-to-date flag does not confirm it (IRIS answered the compile without a status error; see console)",
+    );
+    // The class is checked as before (one dictionary query, one CLS read), and the routine by one RTN read.
+    expect(calls.queryParameters).toEqual([["Pkg.Pers"]]);
+    expect(calls.gets).toEqual([
+      "/api/atelier/v7/USER/docnames/CLS?filter=Pkg.",
+      "/api/atelier/v7/USER/docnames/RTN?filter=Pkg.",
+    ]);
+  });
+
+  it("a .mac wildcard is expanded through docnames/RTN, and an .inc or .int it does not name is left alone", async () => {
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer([]),
+      broken: ["Pkg.RBad.mac"],
+      catalog: [{ name: "Pkg.RBad.mac" }, { name: "Pkg.ROk.mac" }, { name: "Pkg.RInc.inc" }, { name: "Pkg.RInt.int" }],
+    });
+
+    const result = await docCompileTool.handler({ doc: "Pkg.R*.mac" }, ctx);
+
+    expect(calls.gets[0]).toBe("/api/atelier/v7/USER/docnames/RTN?filter=Pkg.R");
+    expect(calls.queryParameters).toEqual([]);
+    expect((result.structuredContent as Structured).errors).toEqual([{ document: "Pkg.RBad.mac", error: notConfirmedText("Pkg.RBad.mac") }]);
+  });
+
+  it("a routine listing that cannot be read is a check that cannot run: success:false, never a pass", async () => {
+    fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer(["Pkg.Ok.mac"]),
+      catalog: [{ name: "Pkg.Ok.mac" }],
+      routineListFails: new Error("ECONNRESET"),
+    });
+
+    const result = await docCompileTool.handler({ doc: "Pkg.Ok.mac" }, ctx);
+
+    expect((result.structuredContent as Structured).success).toBe(false);
+    expect((result.structuredContent as Structured).errors).toEqual([{ document: "*", error: checkCouldNotRunText(new Error("ECONNRESET")) }]);
+  });
+
+  it("errors the compile already listed are reported as before, with no check request", async () => {
+    const calls = fakeCompileAndCheck(mockHttp, {
+      compile: envelope({
+        content: [{ name: "Bad.cls", status: "ERROR", errors: [{ error: "ERROR #5540: Expected '}' but found EOF", line: 15, char: 1 }] }],
+      }),
+    });
+
+    const result = await docCompileTool.handler({ doc: "Bad.cls" }, ctx);
+
+    expect(calls.posts).toEqual(["/api/atelier/v7/USER/action/compile"]);
+    expect(calls.gets).toEqual([]);
+    expect((result.structuredContent as Structured).errors).toEqual([
+      { document: "Bad.cls", error: "ERROR #5540: Expected '}' but found EOF", line: 15, char: 1 },
+    ]);
+  });
+
+  it("a check that cannot run is success:false with one '*' entry, and isError stays false", async () => {
+    fakeCompileAndCheck(mockHttp, {
+      compile: cleanCompileAnswer(["Test.cls"]),
+      queryFails: new Error("ECONNRESET"),
+    });
+
+    const result = await docCompileTool.handler({ doc: "Test.cls" }, ctx);
+
+    expect(result.isError).toBe(false);
+    const structured = result.structuredContent as Structured;
+    expect(structured.success).toBe(false);
+    expect(structured.errors).toEqual([
+      { document: "*", error: checkCouldNotRunText(new Error("ECONNRESET")) },
+    ]);
+    expect(structured.errors?.[0]?.error).toBe("the check that every class compiled could not run: ECONNRESET");
+  });
+
+  it("async mode sends no check request (Story 44.7 pin)", async () => {
+    const calls = fakeCompileAndCheck(mockHttp, { compile: envelope({ trackingId: "job-1" }, ["queued"]) });
+
+    const result = await docCompileTool.handler({ doc: ["Large.pkg.cls"], async: true }, ctx);
+
+    expect(calls.posts).toEqual(["/api/atelier/v7/USER/action/compile?async=1"]);
+    expect(calls.gets).toEqual([]);
+    expect(result.structuredContent).toEqual({
+      mode: "async",
+      docs: ["Large.pkg.cls"],
+      response: { trackingId: "job-1" },
+      console: ["queued"],
+    });
+  });
+
+  it("a status error still throws, and no check request follows it (Story 44.7 pin)", async () => {
+    const statusError = new Error("IRIS reported errors for POST action/compile. Details: ERROR #5475");
+    const calls = fakeCompileAndCheck(mockHttp, { compile: statusError });
+
+    await expect(docCompileTool.handler({ doc: "X.cls" }, ctx)).rejects.toThrow("ERROR #5475");
+    expect(calls.posts).toEqual(["/api/atelier/v7/USER/action/compile"]);
+    expect(calls.gets).toEqual([]);
   });
 });

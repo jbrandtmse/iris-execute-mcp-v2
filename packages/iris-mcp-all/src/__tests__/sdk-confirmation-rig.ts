@@ -25,6 +25,20 @@ import type { AuditEntry, ElicitationAnswer, ElicitationRequest, SdkClient, SdkV
 /** The answer a dialog gets until {@link SdkRig.answer} says otherwise: an accept with Confirm ticked. */
 const TICKED_ACCEPT: ElicitationAnswer = { action: "accept", content: { confirm: true } };
 
+/** An answer chosen per dialog: `request` is the dialog being answered and `index` is its 0-based position among the rig's dialogs. */
+export type AnswerFunction = (request: ElicitationRequest, index: number) => ElicitationAnswer;
+
+/** Which listener a change reaches: the one the profile `default` reaches, or the second one (`other`, a promotion's target). */
+export type RigListener = "default" | "other";
+
+/** What the fake `resendFiltered` route answers for an item, in place of its own count and defaulted `to`. */
+export interface ResendPreviewOverride {
+  matchCount?: number;
+  to?: string;
+  /** Answer every preview of the item with an HTTP 500 error envelope. */
+  failPreview?: boolean;
+}
+
 /** What one call did, as the client, the listener and the audit file saw it. */
 export interface SdkExchange {
   /** The tool result, without the 2026-07-28 server identity in `_meta`. */
@@ -40,8 +54,15 @@ export interface SdkRig {
   port: number;
   asked: ElicitationRequest[];
   auditFile: string;
-  /** Set how the client answers the next dialogs; `"never"` leaves them unanswered. */
-  answer: (answer: ElicitationAnswer | "never") => void;
+  /**
+   * Set how the client answers the next dialogs; `"never"` leaves them unanswered. A function chooses the answer per dialog, so a test
+   * can change a fake while the dialog is open.
+   */
+  answer: (answer: ElicitationAnswer | AnswerFunction | "never") => void;
+  /** Make a listener serve `lines` as the content of the document `name` (the fake's `setDocumentContent`); `undefined` removes it. */
+  setDocumentContent: (which: RigListener, name: string, lines: string[] | undefined) => void;
+  /** Make a listener count and date the `resendFiltered` preview of `item` as `override` says (the fake's `setResendPreview`). */
+  setResendPreview: (which: RigListener, item: string, override: ResendPreviewOverride | undefined) => void;
   call: (tool: string, args: Record<string, unknown>) => Promise<SdkExchange>;
   /** The normalized tool entries of the audit file once it holds `count` of them, without `seq`. */
   entries: (count: number) => Promise<Array<Record<string, unknown>>>;
@@ -111,7 +132,7 @@ export async function openSdkRig(pkg: string, negotiation: SdkVersionNegotiation
   const auditFile = path.join(directory, "audit.jsonl");
   const asked: ElicitationRequest[] = [];
   let stderr = "";
-  let next: ElicitationAnswer | "never" = options.firstAnswer ?? TICKED_ACCEPT;
+  let next: ElicitationAnswer | AnswerFunction | "never" = options.firstAnswer ?? TICKED_ACCEPT;
   let client: SdkClient;
   try {
     client = await connectSdkClient(
@@ -127,7 +148,8 @@ export async function openSdkRig(pkg: string, negotiation: SdkVersionNegotiation
         ...(options.capabilities !== undefined ? { clientCapabilities: options.capabilities } : {}),
         onElicitation: (request) => {
           asked.push(request);
-          return next === "never" ? new Promise<ElicitationAnswer>(() => undefined) : next;
+          if (next === "never") return new Promise<ElicitationAnswer>(() => undefined);
+          return typeof next === "function" ? next(request, asked.length - 1) : next;
         },
       },
       {
@@ -157,6 +179,12 @@ export async function openSdkRig(pkg: string, negotiation: SdkVersionNegotiation
   };
   rigs.push(close);
 
+  const listenerOf = (which: RigListener): typeof fake => {
+    if (which === "default") return fake;
+    if (otherFake === undefined) throw new Error("This rig has no second listener (set secondListener).");
+    return otherFake;
+  };
+
   return {
     port: fake.port,
     asked,
@@ -165,6 +193,8 @@ export async function openSdkRig(pkg: string, negotiation: SdkVersionNegotiation
     answer: (answer) => {
       next = answer;
     },
+    setDocumentContent: (which, name, lines) => listenerOf(which).setDocumentContent(name, lines),
+    setResendPreview: (which, item, override) => listenerOf(which).setResendPreview(item, override),
     call: async (tool, args) => {
       const before = fake.requests.length;
       const askedBefore = asked.length;

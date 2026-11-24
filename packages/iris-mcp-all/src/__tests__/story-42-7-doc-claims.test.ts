@@ -177,10 +177,12 @@ describe("Story 42.7: the extension CHANGELOG", () => {
   const sectionsOfExtension = read("extensions/iris-mcp-launcher/CHANGELOG.md").split(/^(?=## \[)/m).slice(1);
   const current = squash(sectionsOfExtension.find((section) => section.includes("(Story 42.7)")) ?? "");
 
-  it("has no section headed as unpublished 0.1.0, and its first section records the story", () => {
+  it("has no section headed as unpublished 0.1.0, and its first released section records the story", () => {
     expect(sectionsOfExtension.map((section) => section.split("\n")[0])).not.toContain("## [0.1.0] \u2014 Unreleased (not yet published)");
     expect(current).not.toBe("");
-    expect(sectionsOfExtension[0]?.includes("(Story 42.7)"), "the first section is the one that records the story").toBe(true);
+    // An `## [Unreleased]` section (Story 44.6 onward) may sit above the release; the release itself stays the first dated one.
+    const released = sectionsOfExtension.filter((section) => !section.startsWith("## [Unreleased]"));
+    expect(released[0]?.includes("(Story 42.7)"), "the first released section is the one that records the story").toBe(true);
   });
 
   it("records the publisher and `private`, the lockstep, the working directory and the green suite", () => {

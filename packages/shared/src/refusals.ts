@@ -35,6 +35,8 @@ export const REFUSAL_CODES = {
   PRODUCTION_BUSY: "PRODUCTION_BUSY",
   /** The person declined, dismissed or did not tick the confirmation dialog of a gate, so nothing was changed. */
   CONFIRMATION_DECLINED: "CONFIRMATION_DECLINED",
+  /** The scope of a confirmation gate changed again after the person was asked again, so the call was not run and nothing was changed. */
+  CONFIRMATION_SCOPE_CHANGED: "CONFIRMATION_SCOPE_CHANGED",
 } as const;
 
 /** One of the {@link REFUSAL_CODES} values. */

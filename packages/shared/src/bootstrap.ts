@@ -48,7 +48,9 @@ const PACKAGE_SEMVER = BOOTSTRAP_VERSION.split("+")[0] as string;
  *    bootstrap changes nothing and warns, naming the failure and the remedy.
  *
  * - `current`: the deployed classes carry the embedded marker AND the web
- *    application is registered. Bootstrap skips everything.
+ *    application is registered. Bootstrap skips the deploy, and runs the
+ *    compile check ({@link verifyCompiled}) so that a class an earlier start
+ *    failed to compile is reported again.
  *
  * - `unconfigured`: the deployed classes carry the embedded marker, but the
  *    `/api/executemcp/v2` web application is NOT registered. The version
@@ -57,10 +59,11 @@ const PACKAGE_SEMVER = BOOTSTRAP_VERSION.split("+")[0] as string;
  *    gated `Configure` step. This divergence happens whenever %SYS state and
  *    the code-bearing database part ways: a container migration or %SYS
  *    restore that keeps a persisted code DB, a first install where Configure
- *    failed (e.g. missing privileges), etc. Bootstrap re-runs ONLY the
- *    privileged one-time steps (web app registration + package mapping +
- *    ^UnitTestRoot) — it does NOT redeploy or recompile, since the classes
- *    are already current. This is the self-healing path.
+ *    failed (e.g. missing privileges), etc. Bootstrap does NOT redeploy (the
+ *    source is current); it recompiles, checks that every class compiled, and
+ *    only then re-runs the privileged one-time steps (web app registration +
+ *    package mapping + ^UnitTestRoot). A failed compile stops before them. This
+ *    is the self-healing path.
  *
  * - `stale`: the REST service is deployed from an OLDER build than this one
  *    (a lower semver, the same semver with a lower sequence, or a legacy bare
@@ -284,7 +287,8 @@ async function ipmOwnership(
  *   the moment deploy+compile succeed, independent of the privileged
  *   `Configure` step). We therefore call `ExecuteMCPv2.Setup_IsConfigured()`
  *   to verify the actual `/api/executemcp/v2` registration:
- *   - registered → `{ status: "current" }` (skip everything).
+ *   - registered → `{ status: "current" }` (skip the deploy; `bootstrap()`
+ *     still runs the read-only compile check).
  *   - not registered → `{ status: "unconfigured" }` (re-run the privileged
  *     steps only — self-heal). This covers the %SYS-refreshed-but-code-DB-
  *     persisted case (container migration, %SYS restore) and a first install
@@ -423,16 +427,285 @@ export async function deployClasses(
  *
  * `names` defaults to every embedded bootstrap class. The Atelier response
  * is returned, so a caller that compiles other documents can read the
- * compile output; the bootstrap flow ignores it.
+ * compile output. A compile that answered is not thereby a compile that
+ * succeeded: IRIS answers HTTP 200 with no status error when only some classes
+ * failed (a compile that also writes a class's Storage replaces the compile
+ * status), and the console is localized text. Use {@link compileAndVerify} to
+ * judge it.
  */
 export async function compileClasses(
   http: IrisHttpClient,
-  config: IrisConnectionConfig,
+  config: Pick<IrisConnectionConfig, "namespace">,
   version: number,
   names: readonly string[] = [...BOOTSTRAP_CLASSES.keys()],
 ): Promise<AtelierEnvelope<unknown>> {
   const path = atelierPath(version, config.namespace, "action/compile");
   return http.post(path, [...names]);
+}
+
+/** What {@link compileAndVerify} found out about one compile. */
+export interface CompileReport {
+  /**
+   * The documents (`Pkg.Name.cls`), in the order of the list that was compiled, that the check does not confirm as
+   * compiled: no compiled class, a compile error on it, or IRIS's own up-to-date flag false.
+   */
+  notCompiled: string[];
+  /**
+   * The `errors[].error` texts of a compile that IRIS answered with a status error; empty when IRIS answered without one.
+   * A non-empty list makes the compile a failure even when `notCompiled` is empty. The texts are context for a person:
+   * IRIS names at most one failed class there, so they never decide which classes failed.
+   */
+  irisErrors: string[];
+  /** The compile's response envelope, when IRIS answered it without a status error; absent when it answered with one. */
+  envelope?: AtelierEnvelope<unknown>;
+}
+
+/** The SQL of the compile check: one row per class definition among the `count` names, with whether it compiled and whether it carries a compile error. */
+/**
+ * The most class names one compile-check query carries. Atelier's query handler fails with `<STACK>` (#5002) on an `IN` list of
+ * about 400 parameters (probe 2026-11-23, irishealth-community 2026.2: 375 names answered, 400 failed), so a larger check is
+ * sent in batches of this size.
+ */
+export const COMPILE_CHECK_BATCH = 100;
+
+function compileCheckQuery(count: number): string {
+  return (
+    "SELECT d.ID AS ID, CASE WHEN c.ID IS NULL THEN 0 ELSE 1 END AS Compiled, " +
+    "CASE WHEN c.ClassCompileError IS NULL OR c.ClassCompileError = '' THEN 0 ELSE 1 END AS CompileError " +
+    "FROM %Dictionary.ClassDefinition d LEFT JOIN %Dictionary.CompiledClass c ON c.ID = d.ID " +
+    `WHERE d.ID IN (${Array.from({ length: count }, () => "?").join(", ")})`
+  );
+}
+
+/** Refuse a document name that is not a class (`Pkg.Name.cls`): the check reads the class dictionary. */
+function assertClassDocuments(names: readonly string[]): void {
+  const other = names.find((name) => !name.endsWith(".cls") || name.length <= ".cls".length);
+  if (other !== undefined) {
+    throw new Error(`the compile check reads the class dictionary, so it takes class documents ending in .cls; ${JSON.stringify(other)} is not one.`);
+  }
+}
+
+/**
+ * Decide, for each class in `names`, whether it is compiled. The decision reads no localized text and never trusts the
+ * answer of the compile request. A class counts as compiled only when all three hold:
+ *
+ * - the class dictionary has a compiled class for it (`%Dictionary.CompiledClass`);
+ * - that compiled class carries no compile error (`ClassCompileError`);
+ * - Atelier's `docnames` lists the class with `upd` true, which is IRIS's own up-to-date judgment (it also holds for a
+ *   rollback to identical content, and is false for a class skipped because a dependency failed).
+ *
+ * The reads: one `action/query` over the dictionary per {@link COMPILE_CHECK_BATCH} names, and one `docnames/CLS?filter=` GET
+ * per distinct first name segment (the package root) of `names`. Returns the documents that are not confirmed, in the order of
+ * `names`.
+ *
+ * @throws {Error} When a name does not end in `.cls`, and whatever the two requests throw: a check that cannot run is never
+ *   a pass.
+ */
+export async function verifyCompiled(
+  http: IrisHttpClient,
+  namespace: string,
+  version: number,
+  names: readonly string[],
+): Promise<string[]> {
+  assertClassDocuments(names);
+  if (names.length === 0) return [];
+  const ids = names.map((name) => name.slice(0, -".cls".length));
+
+  // The dictionary query matches IDs exactly, while the docnames filter ignores case, and IRIS refuses a class whose name
+  // differs from an existing one only in case. So keying the verdicts by the lowercase name never merges two classes, and a
+  // name asked in another case than the class's own gets no row and is named.
+  const clean = new Set<string>();
+  for (let start = 0; start < ids.length; start += COMPILE_CHECK_BATCH) {
+    const batch = ids.slice(start, start + COMPILE_CHECK_BATCH);
+    const rows = await http.post(atelierPath(version, namespace, "action/query"), {
+      query: compileCheckQuery(batch.length),
+      parameters: batch,
+    });
+    const content = (rows.result as { content?: Array<Record<string, unknown>> } | undefined)?.content;
+    for (const row of Array.isArray(content) ? content : []) {
+      if (Number(row["Compiled"]) === 1 && Number(row["CompileError"]) === 0) clean.add(String(row["ID"]).toLowerCase());
+    }
+  }
+
+  const updated = await upToDateDocuments(http, namespace, version, "CLS", ids);
+
+  return names.filter((name, index) => !(clean.has((ids[index] as string).toLowerCase()) && updated.has(name.toLowerCase())));
+}
+
+/**
+ * The lower-cased names of the documents of `category` that IRIS lists as up to date (`upd: true`): one
+ * `docnames/<category>?filter=` GET per distinct first name segment (the package root) of `stems` (document names without
+ * their extension). The filter is a "name contains" read, so the entries of other packages come back too; the callers match by name.
+ */
+async function upToDateDocuments(
+  http: IrisHttpClient,
+  namespace: string,
+  version: number,
+  category: "CLS" | "RTN",
+  stems: readonly string[],
+): Promise<Set<string>> {
+  const updated = new Set<string>();
+  const roots = [...new Set(stems.map((stem) => stem.split(".")[0] as string))];
+  for (const root of roots) {
+    const listed = await http.get(
+      atelierPath(version, namespace, `docnames/${category}?filter=${encodeURIComponent(`${root}.`)}`),
+    );
+    const entries = (listed.result as { content?: Array<Record<string, unknown>> } | undefined)?.content;
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (entry["upd"] === true) updated.add(String(entry["name"]).toLowerCase());
+    }
+  }
+  return updated;
+}
+
+/**
+ * Decide, for each routine document in `names` (`Pkg.Name.mac`), whether the compile that covered it confirmed it (Story 44.7,
+ * DW-759). IRIS answers a compile with HTTP 200, no status error and no per-document error when a routine fails in a compile
+ * that also writes a persistent class's Storage, so the answer proves nothing. Atelier's `docnames/RTN` lists each routine
+ * with IRIS's own up-to-date flag (`upd`), which is false for a routine that did not compile and true once it did (probe
+ * 2026-11-23, irishealth-community 2026.2: failing `.mac` false, clean `.mac` true, an uncompiled one false). The decision reads no
+ * localized text.
+ *
+ * Only `.mac` documents are judged. The flag of an include file (`.inc`) is true whether or not anything compiled it, and the
+ * flag of an `.int` is true after a failed compile too (same probe), so neither can be decided from it.
+ *
+ * One `docnames/RTN?filter=` GET per distinct first name segment. Returns the unconfirmed documents in the order of `names`.
+ *
+ * @throws {Error} When a name does not end in `.mac`, and whatever the requests throw: a check that cannot run is never a pass.
+ */
+export async function verifyRoutinesCompiled(
+  http: IrisHttpClient,
+  namespace: string,
+  version: number,
+  names: readonly string[],
+): Promise<string[]> {
+  const other = names.find((name) => !name.endsWith(".mac") || name.length <= ".mac".length);
+  if (other !== undefined) {
+    throw new Error(`the routine compile check reads the up-to-date flag of .mac routines, so it takes documents ending in .mac; ${JSON.stringify(other)} is not one.`);
+  }
+  if (names.length === 0) return [];
+  const updated = await upToDateDocuments(http, namespace, version, "RTN", names.map((name) => name.slice(0, -".mac".length)));
+  return names.filter((name) => !updated.has(name.toLowerCase()));
+}
+
+/** What one compile and its check came to: a report, or which of the two stages failed to answer. */
+type CompileOutcome =
+  | { kind: "report"; report: CompileReport }
+  | { kind: "compile-failed"; error: unknown }
+  | { kind: "check-failed"; error: unknown };
+
+/** The text of one Atelier status error entry. */
+function statusErrorText(entry: unknown): string {
+  if (entry !== null && typeof entry === "object" && typeof (entry as { error?: unknown }).error === "string") {
+    return (entry as { error: string }).error;
+  }
+  return typeof entry === "string" ? entry : JSON.stringify(entry);
+}
+
+/** Compile `names`, then check them; the stage that did not answer is named, never confused with a verdict. */
+async function compileWithCheck(
+  http: IrisHttpClient,
+  config: Pick<IrisConnectionConfig, "namespace">,
+  version: number,
+  names: readonly string[],
+): Promise<CompileOutcome> {
+  assertClassDocuments(names);
+  let envelope: AtelierEnvelope<unknown> | undefined;
+  let irisErrors: string[] = [];
+  try {
+    envelope = await compileClasses(http, config, version, names);
+  } catch (error: unknown) {
+    // A status error with HTTP 2xx is a compile IRIS answered: keep its texts and check what compiled. Anything else is a
+    // compile request that got no Atelier answer, and there is nothing to check.
+    if (!(error instanceof IrisApiError) || error.statusCode < 200 || error.statusCode >= 300) {
+      return { kind: "compile-failed", error };
+    }
+    irisErrors = error.errors.map(statusErrorText);
+  }
+  let notCompiled: string[];
+  try {
+    notCompiled = await verifyCompiled(http, config.namespace, version, names);
+  } catch (error: unknown) {
+    return { kind: "check-failed", error };
+  }
+  return { kind: "report", report: { notCompiled, irisErrors, ...(envelope === undefined ? {} : { envelope }) } };
+}
+
+/**
+ * Compile `names` (default: every embedded bootstrap class) and check that each one compiled ({@link verifyCompiled}).
+ * This, and nothing in the compile's own answer, is how a caller judges a compile.
+ *
+ * A compile that IRIS answers with a status error (HTTP 2xx) is not thrown: its texts are in `irisErrors`, and the check
+ * still names every class that did not compile.
+ *
+ * @throws The error of a compile request that got no Atelier answer (a transport error, a non-2xx status), unchanged and
+ *   with no check request sent; and an `Error` ("the check that every class compiled could not run: ...") when the check's
+ *   own requests fail.
+ */
+export async function compileAndVerify(
+  http: IrisHttpClient,
+  config: Pick<IrisConnectionConfig, "namespace">,
+  version: number,
+  names: readonly string[] = [...BOOTSTRAP_CLASSES.keys()],
+): Promise<CompileReport> {
+  const outcome = await compileWithCheck(http, config, version, names);
+  if (outcome.kind === "report") return outcome.report;
+  if (outcome.kind === "check-failed") {
+    throw new Error(`the check that every class compiled could not run: ${describeFailure(outcome.error)}`);
+  }
+  throw outcome.error;
+}
+
+/**
+ * The `Compile failed: ...` error text of a report (one line, no localized text), or `undefined` when the report is clean.
+ * `total` is the number of classes that were compiled.
+ */
+function compileFailureText(report: CompileReport, total: number): string | undefined {
+  const reported = oneLine(report.irisErrors.join(" | "), 300);
+  if (report.notCompiled.length > 0) {
+    const names = report.notCompiled.map((name) => name.replace(/\.cls$/, "")).join(", ");
+    const context = report.irisErrors.length > 0 ? `. IRIS reported: ${reported}` : "";
+    return `Compile failed: ${report.notCompiled.length} of ${total} classes did not compile: ${names}${context}`;
+  }
+  if (report.irisErrors.length > 0) return `Compile failed: IRIS reported errors: ${reported}`;
+  return undefined;
+}
+
+/** The text for a check whose own requests failed. */
+function checkCouldNotRunText(error: unknown): string {
+  return `Compile failed: the check that every class compiled could not run: ${describeFailure(error)}`;
+}
+
+/**
+ * Compile the embedded classes and confirm that every one compiled. Records the verdict in `result` (`compiled`, and the
+ * `Compile failed: ...` text in `errors`), logs `success` only for a confirmed compile, and returns whether the compile is
+ * confirmed. A failed or unverifiable compile returns `false`: the caller then runs none of the privileged steps.
+ */
+async function compileEmbedded(
+  http: IrisHttpClient,
+  config: IrisConnectionConfig,
+  version: number,
+  result: BootstrapResult,
+  success: string,
+): Promise<boolean> {
+  const outcome = await compileWithCheck(http, config, version, [...BOOTSTRAP_CLASSES.keys()]);
+  if (outcome.kind === "compile-failed") {
+    const msg = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+    result.errors.push(`Compile failed: ${msg}`);
+    return false;
+  }
+  if (outcome.kind === "check-failed") {
+    result.errors.push(checkCouldNotRunText(outcome.error));
+    return false;
+  }
+  const failure = compileFailureText(outcome.report, BOOTSTRAP_CLASSES.size);
+  if (failure !== undefined) {
+    result.errors.push(failure);
+    return false;
+  }
+  result.compiled = true;
+  logger.info(success);
+  return true;
 }
 
 /**
@@ -749,13 +1022,18 @@ async function leftToIpm(
  * Full bootstrap orchestration.
  *
  * 1. Probe deployment + configuration state.
- * 2. `current` (classes match AND web app registered) → skip everything.
+ * 2. `current` (classes match AND web app registered) - skip the deploy and the
+ *    privileged steps, but run the compile check (two reads, no compile): a
+ *    class that an earlier start failed to compile is reported again, with
+ *    `compiled: false`, until it is fixed.
  * 3. `unconfigured` (classes match but web app absent) → skip deploy (source is
  *    current) but RECOMPILE, then run the privileged steps (configure + mapping
  *    + UnitTestRoot) to self-heal. The recompile matters: the web app being
  *    absent means %SYS diverged from the code DB (migration / %SYS reset), which
  *    can also leave stale or version-incompatible compiled objects even though
  *    the source hash matches — verified live, the dispatch 500s until recompiled.
+ *    A compile that is not confirmed class by class ({@link compileAndVerify})
+ *    stops the flow before the privileged steps, here as on every branch.
  * 4. `stale` (an OLDER deployment) → redeploy + recompile. The privileged steps
  *    are normally already done, so they're skipped — BUT we verify the web app
  *    is actually registered first (same root cause as the reported bug); if it's
@@ -833,9 +1111,24 @@ export async function bootstrap(
     result.deployedVersion = probe.deployedVersion;
   }
 
-  // If already current (deployed version matches embedded version), skip everything.
+  // If already current (deployed version matches embedded version), skip the deploy. The marker and the web application
+  // prove neither that an earlier start's compile finished nor that every class compiled, so the same check that follows
+  // a compile runs here too (two reads, no compile): a partial failure is reported again until it is fixed.
   if (probe.status === "current") {
     result.deployed = true;
+    const names = [...BOOTSTRAP_CLASSES.keys()];
+    let notCompiled: string[];
+    try {
+      notCompiled = await verifyCompiled(http, config.namespace, version, names);
+    } catch (error: unknown) {
+      result.errors.push(checkCouldNotRunText(error));
+      return result;
+    }
+    const failure = compileFailureText({ notCompiled, irisErrors: [] }, names.length);
+    if (failure !== undefined) {
+      result.errors.push(failure);
+      return result;
+    }
     result.compiled = true;
     result.configured = true;
     result.mapped = true;
@@ -873,16 +1166,11 @@ export async function bootstrap(
     logger.info(
       `Bootstrap: REST classes present at version ${BOOTSTRAP_VERSION} but web application not registered — recompiling and running configuration steps`,
     );
-    try {
-      await compileClasses(http, config, version);
-      result.compiled = true;
-      logger.info("Bootstrap: classes recompiled successfully");
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      result.errors.push(`Compile failed: ${msg}`);
-      // Continue to Configure anyway — creating the web app is the primary
-      // self-heal and is independent of compilation. The compile failure is
-      // surfaced via errors[] and compiled=false for the caller to see.
+    // A failed or unverifiable compile stops here: registering the web application over classes that did not compile
+    // would leave the instance reporting `current` on the next start with the failure never mentioned again. Left
+    // unconfigured, every start recompiles and reports it until it is fixed.
+    if (!(await compileEmbedded(http, config, version, result, "Bootstrap: classes recompiled successfully"))) {
+      return result;
     }
   } else {
     // Log the transition so operators can see in logs what is happening.
@@ -915,14 +1203,8 @@ export async function bootstrap(
     if (!(await markerAllowsCompile(http, config, version, result, probe.status, true))) {
       return result;
     }
-    try {
-      await compileClasses(http, config, version);
-      result.compiled = true;
-      logger.info("Bootstrap: classes compiled successfully");
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      result.errors.push(`Compile failed: ${msg}`);
-      // Cannot continue without compilation
+    // Cannot continue without a compile that is confirmed class by class.
+    if (!(await compileEmbedded(http, config, version, result, "Bootstrap: classes compiled successfully"))) {
       return result;
     }
   }

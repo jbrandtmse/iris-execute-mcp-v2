@@ -44,7 +44,9 @@ const BASELINE_BODY_SHA256: Record<string, string> = {
   "edit-and-test-class": "079ecc5e9aa0ac75b8b1d678effc58b1f10eca25bf57143f60985f96a08319c1",
   "find-patient-messages": "8a4b23c39576bdebc79531d5bd8fd5d3b16b644f652935a8741da00078579dc0",
   "promote-environment-change": "08c3eccd1fa4eb24287f94c4ba16170334541f7f55e2feb53c3d600d1c672454",
-  "provision-project-environment": "29e831684c069a88b31aaede2dd98afcfc4e74cbbbd57cdef072c1eccb36167c",
+  // Re-pinned by Story 44.7 (sanction S-44.7-database-delete): the rollback note after each database delete gained one sentence,
+  // the change that the wire-golden ledger entry `44.7/database-delete-prompt/...` pins byte for byte. Captured from the built dist.
+  "provision-project-environment": "425244efa64d840ccf7597704cc021307434bcac652c047daf59c5a1d3fd4b85",
   "recover-stuck-production": "64395fdac525550ee29ce2d35e988600a7061a0d410688778a59a176922fed89",
   "resend-failed-messages": "2a08eb10d16ce9110f4d526109318900543353b8a462fa27bbfa834921ec0ea3",
   "run-external-backup": "028e5ff841258f03053d4fd340e04bdf92710193c836f86a5de67bfc7c4bc4d5",

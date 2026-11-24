@@ -589,6 +589,11 @@ export function activate(context: vscode.ExtensionContext): void {
     // output channel only, never a toast; the provider bounds the content to
     // the error name + a truncated message (no profile/env/session data).
     logDiagnostic: (message) => outputChannel.appendLine(message),
+    // The layers Server Manager's `getServerSpec` merges, read in the scope it reads them in.
+    inspectServerManagerServers: (scope) =>
+      vscode.workspace
+        .getConfiguration("intersystems", scope as vscode.ConfigurationScope | undefined)
+        .inspect<unknown>("servers"),
   });
 
   // 32-3-R8 (Story 32.4): monotonic refresh guard. Two overlapping async
@@ -661,7 +666,10 @@ export function activate(context: vscode.ExtensionContext): void {
       provideMcpServerDefinitions: async (_token) => {
         // 31-4-6: the editor's CancellationToken is honored on the resolve
         // path (the multi-server credential loop); the provide path resolves
-        // no credentials, so the token is not needed here.
+        // no credentials, so the token is not needed here. The provided `env`
+        // is what a Copilot-harness session spawns (the resolver never runs
+        // for it) and holds no secret; under the Local harness the resolver's
+        // env replaces it wholesale.
         const planned = await provider.providePlannedDefinitions();
         // VS Code starts a definition without a `cwd` in the user's home
         // directory today. Setting it explicitly keeps `npx` from resolving a
@@ -672,7 +680,7 @@ export function activate(context: vscode.ExtensionContext): void {
             definition.label,
             definition.command,
             definition.args,
-            {},
+            definition.env,
           );
           def.cwd = cwd;
           return def;

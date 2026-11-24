@@ -1031,7 +1031,7 @@ describe("Story 31.0 — Server Manager minimal wire-in (AC 31.0.4, 31.0.5)", ()
       IRIS_USERNAME: "admin",
       IRIS_PASSWORD: "secret",
       IRIS_SERVER_MANAGER: "auto",
-      IRIS_SM_WORKSPACE: workspaceDir,
+      IRIS_SM_SETTINGS_PATHS: join(workspaceDir, ".vscode", "settings.json"), // DW-761: an operator-named file is user scope (a discovered workspace file gets no keychain password)
     };
     // AC 31.1.2: no test may touch a real keychain — inject a fake that never
     // resolves anything, so "noPassword" is genuinely chain-exhausted.
@@ -1237,7 +1237,7 @@ describe("Integration AC 31.1.5 — credential chain wired into loadProfileRegis
       IRIS_USERNAME: "admin",
       IRIS_PASSWORD: "secret",
       IRIS_SERVER_MANAGER: "auto",
-      IRIS_SM_WORKSPACE: workspaceDir,
+      IRIS_SM_SETTINGS_PATHS: join(workspaceDir, ".vscode", "settings.json"), // DW-761: an operator-named file is user scope (a discovered workspace file gets no keychain password)
     };
     const registry = await loadProfileRegistry(env, process.platform, {
       getKeychainPassword: async (name) => (name === "chainServer" ? "chainresolvedpw" : undefined),
@@ -1263,7 +1263,7 @@ describe("Integration AC 31.1.5 — credential chain wired into loadProfileRegis
       IRIS_USERNAME: "admin",
       IRIS_PASSWORD: "secret",
       IRIS_SERVER_MANAGER: "auto",
-      IRIS_SM_WORKSPACE: workspaceDir,
+      IRIS_SM_SETTINGS_PATHS: join(workspaceDir, ".vscode", "settings.json"), // DW-761: an operator-named file is user scope (a discovered workspace file gets no keychain password)
     };
     const registry = await loadProfileRegistry(env, process.platform, {
       getKeychainPassword: async () => undefined,
@@ -1279,7 +1279,7 @@ describe("Integration AC 31.1.5 — credential chain wired into loadProfileRegis
       IRIS_USERNAME: "admin",
       IRIS_PASSWORD: "secret",
       IRIS_SERVER_MANAGER: "required",
-      IRIS_SM_WORKSPACE: workspaceDir,
+      IRIS_SM_SETTINGS_PATHS: join(workspaceDir, ".vscode", "settings.json"), // DW-761: an operator-named file is user scope (a discovered workspace file gets no keychain password)
     };
     let caught: unknown;
     try {
@@ -1317,7 +1317,7 @@ describe("Integration AC 31.1.5 — credential chain wired into loadProfileRegis
         IRIS_USERNAME: "admin",
         IRIS_PASSWORD: "secret",
         IRIS_SERVER_MANAGER: "auto",
-        IRIS_SM_WORKSPACE: workspaceDir,
+        IRIS_SM_SETTINGS_PATHS: join(workspaceDir, ".vscode", "settings.json"), // DW-761: an operator-named file is user scope (a discovered workspace file gets no keychain password)
       },
       process.platform,
       { getKeychainPassword: async () => "resolvedviachain" },
@@ -1418,7 +1418,7 @@ describe("Integration AC 31.1.5 — credential chain wired into loadProfileRegis
       IRIS_USERNAME: "admin",
       IRIS_PASSWORD: "secret",
       IRIS_SERVER_MANAGER: "auto",
-      IRIS_SM_WORKSPACE: workspaceDir,
+      IRIS_SM_SETTINGS_PATHS: join(workspaceDir, ".vscode", "settings.json"), // DW-761: an operator-named file is user scope (a discovered workspace file gets no keychain password)
     };
     // `Entry.getPassword()` is typed `string | null`; a consumer wiring it
     // straight through used to crash startup with a TypeError from `.trim()`.

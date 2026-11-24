@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "microsoft-learn": { "command": "npx", "args": ["-y", "@microsoft/learn-mcp"], "env": { "API_KEY": "BSA_foreignKeyABC" }, "tools": ["*"] }
+  }
+}

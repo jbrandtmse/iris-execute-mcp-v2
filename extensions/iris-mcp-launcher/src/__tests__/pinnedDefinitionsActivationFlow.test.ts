@@ -34,6 +34,8 @@ function specFor(name: string): ServerSpec {
 }
 
 function serverManagerWith(names: string[]): (typeof mockState)["serverManager"] {
+  // The user-scope `intersystems.servers` setting Server Manager reads these servers from.
+  mockState.configStore.set("intersystems.servers", Object.fromEntries(names.map((name) => [name, specFor(name)])));
   const api: ServerManagerApi = {
     getServerNames: () => names.map((name) => ({ name, description: "", detail: "" })),
     getServerSpec: async (name: string) => specFor(name),
@@ -180,5 +182,78 @@ describe("Story 42.1 QA - the RESOLVED definition keeps the @1 pin and the home-
     expect(launched[0]!.args).toEqual([path.join(distDir, "index.js")]);
     expect(launched[0]!.cwd?.fsPath).toBe(expectedHomeFsPath());
     expect(launched[0]!.env["IRIS_HOST"]).toBe("prod.example.com");
+  });
+});
+
+describe("Story 44.6 - the definition the REAL extension.ts provides carries the non-secret env; the resolved one is the Local env", () => {
+  it("provided: the editor's definition holds the connection and credential name and no secret; resolved: the password replaces the whole env", async () => {
+    mockState.serverManager = serverManagerWith(["prod"]);
+
+    activate(fakeContext());
+    await flushEditor();
+    const provided = await provideDefinitions();
+
+    expect(provided).toHaveLength(1);
+    const env = provided[0]!.env;
+    expect(env["IRIS_HOST"]).toBe("prod.example.com");
+    expect(env["IRIS_PORT"]).toBe("52773");
+    expect(env["IRIS_USERNAME"]).toBe("_SYSTEM");
+    expect(env["IRIS_CREDENTIAL_NAME"]).toBe("prod");
+    expect(env["IRIS_PASSWORD"]).toBe("");
+    expect(JSON.stringify(provided)).not.toContain("SYS\"");
+
+    const launched = await provideAndResolve();
+    expect(launched).toHaveLength(1);
+    expect(launched[0]!.env["IRIS_PASSWORD"]).toBe("SYS");
+    expect(launched[0]!.env["IRIS_PROFILES"]).toBeNull();
+    expect(launched[0]!.env).not.toHaveProperty("IRIS_CREDENTIAL_NAME");
+  });
+
+  it("DW-749 / Story 44.8 (DW-752): a workspace settings.json that overrides the user's server keeps the provided env empty, and the Local resolve refuses it before any session call", async () => {
+    mockState.serverManager = serverManagerWith(["prod"]);
+    // The workspace layer `inspect("servers")` reports as `workspaceValue` (the real `.vscode/settings.json` layer).
+    mockState.configWorkspaceStore.set("intersystems.servers", { prod: { webServer: { host: "evil.example.com" } } });
+
+    activate(fakeContext());
+    await flushEditor();
+    const provided = await provideDefinitions();
+
+    expect(provided).toHaveLength(1);
+    expect(provided[0]!.env).toEqual({});
+    const provider = mockState.mcpProviders[0]!.provider;
+    const token = { isCancellationRequested: false };
+    mockState.warnings.length = 0;
+    expect(await provider.resolveMcpServerDefinition(provided[0]!, token)).toBeUndefined();
+    const refusals = mockState.warnings.filter((message) => message.includes("is defined or overridden in this workspace's settings"));
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toContain('IRIS server "prod"');
+    expect(mockState.getSessionCalls).toEqual([]);
+  });
+
+  it("Story 44.8 control: the same server defined in user settings alone still resolves its stored password through the Local path", async () => {
+    mockState.serverManager = serverManagerWith(["prod"]);
+
+    activate(fakeContext());
+    await flushEditor();
+    mockState.warnings.length = 0;
+    const launched = await provideAndResolve();
+
+    expect(launched).toHaveLength(1);
+    expect(launched[0]!.env["IRIS_PASSWORD"]).toBe("SYS");
+    expect(mockState.warnings.filter((message) => message.includes("is defined or overridden"))).toEqual([]);
+  });
+
+  it("combineProfiles: the provided definition keeps the empty env (Local-only), and still resolves to the combined Local env", async () => {
+    mockState.configStore.set(`${CONFIG}.combineProfiles`, true);
+    mockState.serverManager = serverManagerWith(["a", "b"]);
+
+    activate(fakeContext());
+    await flushEditor();
+    const provided = await provideDefinitions();
+
+    expect(provided).toHaveLength(1);
+    expect(provided[0]!.env).toEqual({});
+    const launched = await provideAndResolve();
+    expect(Object.keys(JSON.parse(launched[0]!.env["IRIS_PROFILES"] as string)).sort()).toEqual(["a", "b"]);
   });
 });

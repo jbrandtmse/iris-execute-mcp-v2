@@ -23,7 +23,11 @@ export const databaseManageTool: ToolDefinition = {
   description:
     "Create, modify, or delete an IRIS database. For 'create', directory is required. " +
     "For 'modify', only provided fields are updated. For 'delete', only the name is needed. " +
-    "Note: Deletion removes the database from the IRIS configuration but does NOT cancel " +
+    "Deletion removes the database from the IRIS configuration and dismounts it (unless another " +
+    "configured database uses the same directory; the reply then has 'dismounted: false' and a " +
+    "'dismountNote'). Its IRIS.DAT and directory stay on disk, so a 'create' at the same directory " +
+    "fails until that file is removed. " +
+    "Note: Deletion does NOT cancel " +
     "pending background work (e.g., extent-index rebuilds) that may have been scheduled " +
     "against the deleted directory. The IRIS console may log alerts for such operations " +
     "post-delete; these are informational and do not indicate tool failure.",

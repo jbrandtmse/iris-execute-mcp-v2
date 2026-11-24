@@ -42,6 +42,8 @@ import type { ToolContext } from "@iris-mcp/shared";
 import { IrisApiError, ProfileResolutionError, loadGovernanceFile } from "@iris-mcp/shared";
 import { envPromoteTool } from "../tools/env-promote.js";
 import { notFound } from "./conflict-fakes.js";
+import { cleanCheckReads, cleanCompileAnswer, fakeCompileAndCheck } from "./compile-check-fakes.js";
+import { notConfirmedText } from "../tools/compile-check.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
 // ── shared fixture helpers ───────────────────────────────────────────
@@ -917,8 +919,12 @@ describe("iris_env_promote:execute", () => {
         if (path.includes("doc/Changed.cls")) return envelope({ name: "Changed.cls", content: ["Class Changed {}"] });
         throw new Error(`unexpected sourceHttp.get ${path}`);
       });
+      // Story 44.7: the clean path adds the compile check's two reads on the target (the dictionary query, then docnames).
+      const check = cleanCheckReads();
       targetHttp.get.mockImplementation(async (path: string) => {
         if (path === "/api/atelier/") return versionResponse();
+        const checked = check.get(path);
+        if (checked !== undefined) return checked;
         // The Storage guard reads the target's copy of each class: every class here is new on the target.
         if (path.includes("/doc/")) throw notFound(path);
         throw new Error(`unexpected targetHttp.get ${path}`);
@@ -929,6 +935,8 @@ describe("iris_env_promote:execute", () => {
           const names = body as string[];
           return envelope({ content: names.map((name) => ({ name, errors: [] })) });
         }
+        const checked = check.post(path, body);
+        if (checked !== undefined) return checked;
         throw new Error(`unexpected targetHttp.post ${path}`);
       });
 
@@ -949,6 +957,21 @@ describe("iris_env_promote:execute", () => {
       const sc = result.structuredContent as unknown as ExecuteResultSC;
       expect(sc.executed.every((e) => e.status === "completed")).toBe(true);
       expect(sc.summary).toEqual({ completed: 2, failed: 0, skipped: 0 });
+      // Story 44.7 (AC 44.7.2): the clean result is the pre-story one, member for member (no `error`, no extra field).
+      expect(sc.executed.map((step) => ({ ...step }))).toEqual(
+        plan.steps.map((step) => ({
+          index: step.index,
+          domain: "documents",
+          operation: "putAndCompile",
+          subject: step.subject,
+          status: "completed",
+        })),
+      );
+      expect(Object.keys(sc).sort()).toEqual(["executed", "planHash", "source", "summary", "target"]);
+      expect(targetHttp.post.mock.calls.map((c) => c[0])).toEqual([
+        expect.stringContaining("/action/compile"),
+        expect.stringContaining("/action/query"),
+      ]);
 
       // Exactly ONE batched compile call, carrying BOTH doc names.
       const compileCalls = targetHttp.post.mock.calls.filter((c) => (c[0] as string).includes("/action/compile"));
@@ -1114,6 +1137,128 @@ describe("iris_env_promote:execute", () => {
       // batch treats the first compile failure as the halt point, matching
       // the general halt-on-first-error contract uniformly across domains.
       expect(bySubject.get("New.cls")?.status).toBe("skipped");
+    });
+
+    // Story 44.7 (DW-755): probe F -- a compile that fails one class while it writes another's Storage answers HTTP 200 with no
+    // error listed. The target's class dictionary and up-to-date flag decide (`verifyCompiled`), with the shapes the fakes capture.
+    describe("the compile check (Story 44.7, DW-755)", () => {
+      function arrangeCheck(options: { broken?: string[]; queryFails?: Error }) {
+        sourceHttp.get.mockImplementation(async (path: string) => {
+          if (path === "/api/atelier/") return versionResponse();
+          if (path.includes("doc/New.cls")) return envelope({ name: "New.cls", content: ["Class New {}"] });
+          if (path.includes("doc/Changed.cls")) return envelope({ name: "Changed.cls", content: ["Class Changed {}"] });
+          throw new Error(`unexpected sourceHttp.get ${path}`);
+        });
+        targetHttp.put.mockResolvedValue(envelope({}));
+        return fakeCompileAndCheck(targetHttp, {
+          compile: cleanCompileAnswer(["Changed.cls", "New.cls"]),
+          ...options,
+          otherGet: async (path: string) => {
+            if (path === "/api/atelier/") return versionResponse();
+            if (path.includes("/doc/")) throw notFound(path);
+            throw new Error(`unexpected targetHttp.get ${path}`);
+          },
+        });
+      }
+
+      async function run() {
+        const diff = documentsDiff();
+        const plan = await buildPlan(diff);
+        expect(plan.steps.map((s) => s.subject)).toEqual(["Changed.cls", "New.cls"]);
+        return envPromoteTool.handler(
+          { action: "execute", source: "source", target: "target", diff, plan, steps: plan.steps.map((s) => s.index), confirm: true },
+          ctx,
+        );
+      }
+
+      it("a class the check does not confirm: its step is 'failed' with the compile error, and no later step is completed", async () => {
+        arrangeCheck({ broken: ["Changed.cls"] });
+
+        const result = await run();
+
+        expect(result.isError).toBe(true);
+        const sc = result.structuredContent as unknown as ExecuteResultSC;
+        const bySubject = new Map(sc.executed.map((e) => [e.subject, e]));
+        expect(bySubject.get("Changed.cls")?.status).toBe("failed");
+        expect(bySubject.get("Changed.cls")?.error).toBe(`compile error: ${notConfirmedText("Changed.cls")}`);
+        expect(bySubject.get("New.cls")?.status).toBe("skipped");
+        expect(sc.summary).toEqual({ completed: 0, failed: 1, skipped: 1 });
+      });
+
+      it("the unconfirmed class is the second one: the first completes, the second fails, none after it completes", async () => {
+        arrangeCheck({ broken: ["New.cls"] });
+
+        const sc = (await run()).structuredContent as unknown as ExecuteResultSC;
+
+        const bySubject = new Map(sc.executed.map((e) => [e.subject, e]));
+        expect(bySubject.get("Changed.cls")?.status).toBe("completed");
+        expect(bySubject.get("New.cls")?.status).toBe("failed");
+        expect(bySubject.get("New.cls")?.error).toBe(`compile error: ${notConfirmedText("New.cls")}`);
+      });
+
+      it("a .mac routine the check does not confirm (DW-759): its step is 'failed' with the compile error and the later step is skipped", async () => {
+        sourceHttp.get.mockImplementation(async (path: string) => {
+          if (path === "/api/atelier/") return versionResponse();
+          if (path.includes("doc/Aaa.mac")) return envelope({ name: "Aaa.mac", content: ["ROUTINE Aaa", " quit"] });
+          if (path.includes("doc/New.cls")) return envelope({ name: "New.cls", content: ["Class New {}"] });
+          throw new Error(`unexpected sourceHttp.get ${path}`);
+        });
+        targetHttp.put.mockResolvedValue(envelope({}));
+        fakeCompileAndCheck(targetHttp, {
+          compile: cleanCompileAnswer(["Aaa.mac", "New.cls"]),
+          broken: ["Aaa.mac"],
+          catalog: [{ name: "Aaa.mac" }],
+          otherGet: async (path: string) => {
+            if (path === "/api/atelier/") return versionResponse();
+            if (path.includes("/doc/")) throw notFound(path);
+            throw new Error(`unexpected targetHttp.get ${path}`);
+          },
+        });
+        const diff = documentsDiff();
+        const documents = (diff.domains as { documents: { onlyInSource: string[]; differs: unknown[] } }).documents;
+        documents.onlyInSource = ["Aaa.mac", "New.cls"];
+        documents.differs = [];
+        const plan = await buildPlan(diff);
+        expect(plan.steps.map((s) => s.subject)).toEqual(["Aaa.mac", "New.cls"]);
+
+        const result = await envPromoteTool.handler(
+          { action: "execute", source: "source", target: "target", diff, plan, steps: plan.steps.map((s) => s.index), confirm: true },
+          ctx,
+        );
+
+        expect(result.isError).toBe(true);
+        const sc = result.structuredContent as unknown as ExecuteResultSC;
+        const bySubject = new Map(sc.executed.map((e) => [e.subject, e]));
+        expect(bySubject.get("Aaa.mac")?.status).toBe("failed");
+        expect(bySubject.get("Aaa.mac")?.error).toBe(`compile error: ${notConfirmedText("Aaa.mac")}`);
+        expect(bySubject.get("New.cls")?.status).toBe("skipped");
+      });
+
+      it("a check that cannot run: the first step fails and the rest are skipped, never completed", async () => {
+        arrangeCheck({ queryFails: new Error("ECONNRESET") });
+
+        const result = await run();
+
+        expect(result.isError).toBe(true);
+        const sc = result.structuredContent as unknown as ExecuteResultSC;
+        const bySubject = new Map(sc.executed.map((e) => [e.subject, e]));
+        expect(bySubject.get("Changed.cls")?.status).toBe("failed");
+        expect(bySubject.get("Changed.cls")?.error).toBe("the check that every class compiled could not run: ECONNRESET");
+        expect(bySubject.get("New.cls")?.status).toBe("skipped");
+      });
+
+      it("a compile that listed an error sends no check request (the failure path is unchanged)", async () => {
+        const calls = arrangeCheck({});
+        targetHttp.post.mockImplementationOnce(async () =>
+          envelope({ content: [{ name: "Changed.cls", errors: [{ error: "ERROR #1: Syntax error" }] }, { name: "New.cls", errors: [] }] }),
+        );
+
+        const sc = (await run()).structuredContent as unknown as ExecuteResultSC;
+
+        expect(calls.posts).toEqual([]);
+        expect(calls.gets).toEqual([]);
+        expect(new Map(sc.executed.map((e) => [e.subject, e])).get("Changed.cls")?.error).toContain("Syntax error");
+      });
     });
 
     it("a source GET returning 200 WITHOUT a content array fails the step and NEVER PUTs empty content (never blanks a target doc)", async () => {
@@ -1775,8 +1920,11 @@ describe("Story 43.3: confirmation (execute)", () => {
       if (path.includes("doc/Changed.cls")) return envelope({ name: "Changed.cls", content: ["Class Changed {}"] });
       throw new Error(`unexpected sourceHttp.get ${path}`);
     });
+    const check = cleanCheckReads();
     targetHttp.get.mockImplementation(async (path: string) => {
       if (path === "/api/atelier/") return versionResponse();
+      const checked = check.get(path);
+      if (checked !== undefined) return checked;
       // Every class is new on the target, so the Storage guard's read finds nothing to drop.
       if (path.includes("/doc/")) throw notFound(path);
       throw new Error(`unexpected targetHttp.get ${path}`);
@@ -1786,6 +1934,8 @@ describe("Story 43.3: confirmation (execute)", () => {
       if (path.includes("/action/compile")) {
         return envelope({ content: (body as string[]).map((name) => ({ name, errors: [] })) });
       }
+      const checked = check.post(path, body);
+      if (checked !== undefined) return checked;
       throw new Error(`unexpected targetHttp.post ${path}`);
     });
   }
@@ -1803,9 +1953,12 @@ describe("Story 43.3: confirmation (execute)", () => {
     expect(confirm.mock.calls[0]?.[0]).toEqual({
       operation: "promote changes to another server",
       target: "server 'target', namespace SADEMO",
-      scope:
-        "3 step(s) from server 'source': #1 mappings createMapping global::NewGlobal; " +
-        "#3 webapps modifyWebApp /api/new; #4 config setConfig Maxprocesses",
+      scope: {
+        text:
+          "3 step(s) from server 'source': #1 mappings createMapping global::NewGlobal; " +
+          "#3 webapps modifyWebApp /api/new; #4 config setConfig Maxprocesses",
+        binding: [],
+      },
     });
     expect(result.isError).toBeFalsy();
     expect(targetHttp.post).toHaveBeenCalledTimes(3);
@@ -1831,8 +1984,10 @@ describe("Story 43.3: confirmation (execute)", () => {
     expect(confirm.mock.calls[0]?.[0]).toEqual({
       operation: "promote changes to another server",
       target: "server 'target', namespace SADEMO",
-      scope:
-        "2 step(s) from server 'source': #1 documents putAndCompile Changed.cls; #2 documents putAndCompile New.cls",
+      scope: {
+        text: "2 step(s) from server 'source': #1 documents putAndCompile Changed.cls; #2 documents putAndCompile New.cls",
+        binding: [],
+      },
     });
     expect(result.isError).toBeFalsy();
     expect(targetHttp.put).toHaveBeenCalledTimes(2);
@@ -1905,7 +2060,7 @@ describe("Story 43.3: confirmation (execute)", () => {
       );
 
       expect(confirm).toHaveBeenCalledTimes(1);
-      expect(confirm.mock.calls[0]?.[0]?.scope).toBe(scopeCase.scope);
+      expect(confirm.mock.calls[0]?.[0]?.scope).toEqual({ text: scopeCase.scope, binding: [] });
     });
   }
 

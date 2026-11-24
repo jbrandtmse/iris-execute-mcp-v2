@@ -28,7 +28,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { homeGuardReason, samePath } from "../home-guard.js";
 import { CLIENT_ADAPTERS } from "../adapters.js";
 import { resolvesToHome } from "../cli/host-probes.js";
-import { ensureInputs } from "../engine.js";
+import { apply } from "../engine.js";
 import { MemFs } from "./helpers.js";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -294,16 +294,16 @@ describe("DW-702: the pure pieces", () => {
     expect(homeGuardReason(cursor, { ...ctx, projectIsHome: true })).toContain("is the user file /h/.cursor/mcp.json");
   });
 
-  it("ensureInputs, the engine's other project-scope write, refuses too and writes nothing", () => {
+  it("the engine apply of the vscode project scope (the shared .mcp.json) refuses from the home directory and writes nothing (Story 44.2)", () => {
     const fs = new MemFs();
-    const descriptor = { type: "promptString" as const, id: "iris-password", description: "IRIS password", password: true };
     const ctx = { platform: "linux" as const, env: {}, homeDir: "/h", projectDir: "/h", stateDir: "/state" };
-    const refused = ensureInputs({ ...ctx, projectIsHome: true }, "vscode", "project", [descriptor], { fs });
+    const entry = { name: "iris-dev-mcp" as const, command: "npx", args: ["-y", "@iris-mcp/dev@1"] };
+    const refused = apply({ ...ctx, projectIsHome: true }, "vscode", "project", entry, { fs });
     expect(refused.ok).toBe(false);
     expect(refused.reason).toContain("refusing to write the project scope of vscode");
-    expect(fs.exists("/h/.vscode/mcp.json")).toBe(false);
-    const allowed = ensureInputs({ ...ctx, projectIsHome: false }, "vscode", "project", [descriptor], { fs });
+    expect(fs.exists("/h/.mcp.json")).toBe(false);
+    const allowed = apply({ ...ctx, projectIsHome: false }, "vscode", "project", entry, { fs });
     expect(allowed.ok, allowed.reason).toBe(true);
-    expect(fs.exists("/h/.vscode/mcp.json")).toBe(true);
+    expect(fs.exists("/h/.mcp.json")).toBe(true);
   });
 });

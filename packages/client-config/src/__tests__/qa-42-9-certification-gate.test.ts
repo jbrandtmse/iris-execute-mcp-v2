@@ -126,7 +126,9 @@ describe("the records themselves: one per adapter, and nothing certified-live th
     for (const [id, record] of Object.entries(results.clients)) {
       const human = record.humanOnly as { check: string; markedOn: string } | undefined;
       if (human === undefined) continue;
-      expect(human.markedOn, id).toBe("2026-11-21");
+      // Story 42.9 dated every marker 2026-11-21; Story 44.2 re-certified vscode (2026-11-22), and the owner's
+      // no-Copilot ruling (wave-9 decision #149) re-dated its marker 2026-11-23: the Copilot-session rows will not be run.
+      expect(human.markedOn, id).toBe(id === "vscode" ? "2026-11-23" : "2026-11-21");
       expect(human.check.length, id).toBeGreaterThan(20);
       if (record.disposition === "certified-live") expect(Array.isArray(record.evidence) && (record.evidence as unknown[]).length > 0, `${id} keeps its recorded evidence`).toBe(true);
     }

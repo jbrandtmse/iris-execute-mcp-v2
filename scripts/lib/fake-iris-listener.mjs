@@ -11,12 +11,35 @@
 //   run can be compared with another by what each server asked IRIS for. It is SDK-free and reaches nothing but its
 //   own socket.
 //
-//   Every reply is a function of the request alone: two runs against fresh listeners that make the same requests get
-//   the same bytes. The SQL endpoint and the product routes choose their reply from marker values in the request
+//   It also answers the compile check that a `current` start runs (Story 44.4, AC 44.4.8; `verifyCompiled` of the shared
+//   package): the dictionary join over the class names in the request's `parameters` answers one row per name, in the
+//   shape the planning probe captured (`{ID, Compiled: 1, CompileError: 0}`), and every later `GET docnames/CLS?filter=<text>`
+//   answers one entry per name that such a query has named (the listener remembers every one, for its lifetime) and that
+//   contains `<text>`, ignoring case (`{name, cat, ts, upd: true, db, gen}`). So a
+//   fake `current` start is a clean one. A docnames read with no earlier check query, and every other docnames route,
+//   answers as before.
+//
+//   Every reply is a function of the request and, for a `docnames/CLS?filter=` read, of the compile-check query that
+//   the listener answered before it (the one thing it remembers across requests): two runs against fresh listeners
+//   that make the same requests in the same order get the same bytes. The SQL endpoint and the product routes choose their reply from marker values in the request
 //   (`SELECT boom` answers an HTTP 500 error envelope, `filter=throw` answers a non-JSON page, namespace `ERRNS`
 //   answers an HTTP 500 error envelope; a `resendFiltered` of item `Demo.Refused` is refused as IRIS refuses, HTTP 200
 //   with the error in the envelope, and one of item `Demo.PreviewDown` answers its preview with an HTTP 500 error
 //   envelope); a document called `Demo.Missing.cls` is absent.
+//
+//   Opt-in overrides let a test change what the fake answers while a call is in flight (Story 44.3). With none set,
+//   every reply is exactly as described above. `setDocumentContent(name, lines)` makes GET and HEAD of `doc/<name>`
+//   answer a document whose content is `lines`, under a timestamp of its own (a new one for every call, as IRIS gives a
+//   changed document a new `ts`); `undefined` removes the override. `setDocumentFailure(name, true)` makes GET and HEAD
+//   of `doc/<name>` answer an HTTP 500 error envelope (`false` removes it). `setResendPreview(item, { matchCount, to })`
+//   makes the `resendFiltered` route, preview and execute alike, count `matchCount` messages for `item` and answer `to`
+//   in a preview when the request's `to` is absent or empty (IRIS fills such a `to` with the current second;
+//   `MessageResend.cls`); `failPreview: true` answers every preview of `item` with an HTTP 500 error envelope;
+//   `setResendPreview(item, undefined)` removes it. A request's own non-empty `to` is never replaced. Without an
+//   override, a preview answers an absent or empty `to` with the request's `from`.
+//
+//   `authorizations` (Story 44.6) lists the `Authorization` header of each request (`undefined` when it carried none),
+//   in the order of `requests`. It is a separate list so `requests` and every reply stay as they were.
 
 import http from 'node:http';
 
@@ -32,6 +55,9 @@ export function envelope(result) {
 export function errorEnvelope(text, code) {
   return { status: { errors: [{ error: text, code, domain: '%ObjectErrors', id: 'GeneralError', params: [] }], summary: text }, console: [], result: {} };
 }
+
+/** The statement of the compile check (`verifyCompiled` of the shared package): the dictionary join over the class names. */
+const COMPILE_CHECK_STATEMENT = /FROM %Dictionary\.ClassDefinition d LEFT JOIN %Dictionary\.CompiledClass c ON c\.ID = d\.ID WHERE d\.ID IN \(/;
 
 /** The document `Demo.Sample.cls` as the Atelier document route returns it. */
 const SAMPLE_DOCUMENT = {
@@ -82,10 +108,27 @@ function matchCountOf(item) {
  * @param {object} options
  * @param {string} options.bootstrapVersion - The value `ExecuteMCPv2.Setup_GetBootstrapVersion()` answers: the
  *   `BOOTSTRAP_VERSION` of the build under test, so the probe finds the classes current and deploys nothing.
- * @returns {Promise<{ port: number, requests: Array<{ method: string, url: string, body: string }>, close: () => Promise<void> }>}
+ * @returns {Promise<{
+ *   port: number,
+ *   requests: Array<{ method: string, url: string, body: string }>,
+ *   authorizations: Array<{ method: string, url: string, authorization: string | undefined }>,
+ *   setDocumentContent: (name: string, lines: string[] | undefined) => void,
+ *   setDocumentFailure: (name: string, failing: boolean) => void,
+ *   setResendPreview: (item: string, override: { matchCount?: number, to?: string, failPreview?: boolean } | undefined) => void,
+ *   close: () => Promise<void>,
+ * }>}
  */
 export async function startFakeIris({ bootstrapVersion }) {
   const requests = [];
+  // The Authorization header of each request, in the same order as `requests` and kept apart from it so the
+  // `requests` records (compared byte for byte by the handler goldens) stay as they were.
+  const authorizations = [];
+  const documentOverrides = new Map();
+  const failingDocuments = new Set();
+  let overrideVersion = 0;
+  const previewOverrides = new Map();
+  // The class names that the compile check's dictionary query has named (without `.cls`), for the docnames read after it.
+  const checkedClasses = new Set();
 
   const reply = (res, status, body, headers = {}) => {
     const text = typeof body === 'string' ? body : JSON.stringify(body);
@@ -122,7 +165,12 @@ export async function startFakeIris({ bootstrapVersion }) {
         const query = String(body?.query ?? '');
         if (query.includes('Setup_GetBootstrapVersion')) reply(res, 200, envelope({ content: [{ Version: bootstrapVersion }] }));
         else if (query.includes('Setup_IsConfigured')) reply(res, 200, envelope({ content: [{ Configured: 1 }] }));
-        else reply(res, 200, envelope({ content: [] }));
+        else if (COMPILE_CHECK_STATEMENT.test(query)) {
+          // The compile check: every class the request names has a compiled row, no compile error and an up-to-date `upd`.
+          const names = Array.isArray(body?.parameters) ? body.parameters.map(String) : [];
+          for (const name of names) checkedClasses.add(name);
+          reply(res, 200, envelope({ content: names.map((name) => ({ ID: name, Compiled: 1, CompileError: 0 })) }));
+        } else reply(res, 200, envelope({ content: [] }));
         return;
       }
       if (method === 'POST' && action === 'action/compile') {
@@ -134,6 +182,16 @@ export async function startFakeIris({ bootstrapVersion }) {
           reply(res, 200, '<html><body>not an Atelier envelope</body></html>');
           return;
         }
+        const filter = (url.searchParams.get('filter') ?? '').toLowerCase();
+        if (action === 'docnames/CLS' && filter !== '') {
+          const checked = [...checkedClasses].filter((name) => name.toLowerCase().includes(filter));
+          if (checked.length > 0) {
+            reply(res, 200, envelope({
+              content: checked.map((name) => ({ name: `${name}.cls`, cat: 'CLS', ts: '2026-01-01 00:00:00.000', upd: true, db: 'HSCUSTOM', gen: false })),
+            }));
+            return;
+          }
+        }
         reply(res, 200, envelope({
           content: [
             { name: 'Demo.Other.cls', cat: 'CLS', ts: '2026-01-02 00:00:00.000', upd: false, db: 'HSCUSTOM', gen: false },
@@ -144,6 +202,26 @@ export async function startFakeIris({ bootstrapVersion }) {
       }
       if (action.startsWith('doc/')) {
         const name = decodeURIComponent(action.slice('doc/'.length));
+        if (failingDocuments.has(name) && (method === 'GET' || method === 'HEAD')) {
+          if (method === 'HEAD') {
+            res.writeHead(500);
+            res.end();
+          } else {
+            reply(res, 500, errorEnvelope(`ERROR #5002: the fake IRIS could not read ${name}`, 5002));
+          }
+          return;
+        }
+        const overridden = documentOverrides.get(name);
+        if (overridden !== undefined && (method === 'GET' || method === 'HEAD')) {
+          const known = name === 'Demo.Stored.cls' ? STORED_DOCUMENT : SAMPLE_DOCUMENT;
+          if (method === 'HEAD') {
+            res.writeHead(200, { ETag: `"${overridden.ts}"` });
+            res.end();
+          } else {
+            reply(res, 200, envelope({ ...known, name, ts: overridden.ts, content: overridden.lines }));
+          }
+          return;
+        }
         if (name === 'Demo.Stored.cls') {
           if (method === 'HEAD') {
             res.writeHead(200, { ETag: `"${STORED_DOCUMENT.ts}"` });
@@ -236,7 +314,8 @@ export async function startFakeIris({ bootstrapVersion }) {
       return;
     }
     if (method === 'POST' && path === '/api/executemcp/v2/interop/message/resend' && body?.action === 'resendFiltered') {
-      const matchCount = matchCountOf(body.item);
+      const override = previewOverrides.get(body.item);
+      const matchCount = override?.matchCount ?? matchCountOf(body.item);
       const maxMessages = body.maxMessages ?? 100;
       const preview = body.dryRun === undefined || body.dryRun === true;
       // `Demo.Refused`: IRIS refuses the preview and the execute alike, the way the ExecuteMCPv2 handlers refuse
@@ -249,7 +328,7 @@ export async function startFakeIris({ bootstrapVersion }) {
         ));
         return;
       }
-      if (body.item === 'Demo.PreviewDown' && preview) {
+      if ((body.item === 'Demo.PreviewDown' || override?.failPreview === true) && preview) {
         reply(res, 500, errorEnvelope('ERROR #5002: the fake IRIS preview failed', 5002));
         return;
       }
@@ -262,7 +341,7 @@ export async function startFakeIris({ bootstrapVersion }) {
           item: body.item,
           status: body.status ?? 'Errored',
           from: body.from,
-          to: body.to ?? body.from,
+          to: body.to === undefined || body.to === '' ? (override?.to ?? body.from) : body.to,
           maxMessages,
         }));
       } else if (!body.confirm) {
@@ -296,6 +375,7 @@ export async function startFakeIris({ bootstrapVersion }) {
     req.on('end', () => {
       const bodyText = Buffer.concat(chunks).toString('utf8');
       requests.push({ method: req.method ?? '', url: req.url ?? '', body: bodyText });
+      authorizations.push({ method: req.method ?? '', url: req.url ?? '', authorization: req.headers.authorization });
       route(req.method ?? '', req.url ?? '', bodyText, res);
     });
   });
@@ -306,6 +386,22 @@ export async function startFakeIris({ bootstrapVersion }) {
   return {
     port: server.address().port,
     requests,
+    authorizations,
+    setDocumentContent: (name, lines) => {
+      if (lines === undefined) documentOverrides.delete(name);
+      else {
+        overrideVersion += 1;
+        documentOverrides.set(name, { lines: [...lines], ts: `2026-01-03 00:00:00.${String(overrideVersion % 1000).padStart(3, '0')}` });
+      }
+    },
+    setDocumentFailure: (name, failing) => {
+      if (failing) failingDocuments.add(name);
+      else failingDocuments.delete(name);
+    },
+    setResendPreview: (item, override) => {
+      if (override === undefined) previewOverrides.delete(item);
+      else previewOverrides.set(item, { ...override });
+    },
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections();

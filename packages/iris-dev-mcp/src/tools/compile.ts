@@ -11,8 +11,15 @@
  * transport/connection failures set `isError: true`.
  */
 
-import { atelierPath, type ToolDefinition } from "@iris-mcp/shared";
+import { atelierPath, type ToolContext, type ToolDefinition } from "@iris-mcp/shared";
 import { z } from "zod";
+import {
+  checkCouldNotRunText,
+  isCheckableClass,
+  isCheckableRoutine,
+  notConfirmedText,
+  unconfirmedDocuments,
+} from "./compile-check.js";
 import { booleanParam } from "./zod-helpers.js";
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -34,6 +41,106 @@ interface CompilationDocResult {
 /** Shape of the `result.content` array in the Atelier compile response. */
 interface CompileResultContent {
   content?: CompilationDocResult[];
+}
+
+// ── Compile check (Story 44.7, DW-754) ─────────────────────────────
+
+/** True when a document name carries a wildcard that IRIS expands (`*` any run, `?` one character). */
+function hasWildcard(name: string): boolean {
+  return /[*?]/.test(name);
+}
+
+/** An anchored, case-insensitive regex for a document name or wildcard pattern: `*` is any run, `?` one character. */
+function wildcardRegex(pattern: string): RegExp {
+  const source = [...pattern]
+    .map((ch) => (ch === "*" ? ".*" : ch === "?" ? "." : ch.replace(/[.+^${}()|[\]\\]/g, "\\$&")))
+    .join("");
+  return new RegExp(`^${source}$`, "i");
+}
+
+/** The most documents the wildcard patterns of one compile may expand to for the check; a pattern past it is not expanded. */
+export const MAX_EXPANDED_DOCUMENTS = 1000;
+
+/** What the check covers: the documents it judges, and the wildcard patterns whose matches it leaves to IRIS's answer. */
+interface Coverage {
+  documents: string[];
+  unchecked: string[];
+}
+
+/** The note a result carries when wildcard patterns were not expanded for the check. */
+function uncheckedNote(patterns: readonly string[]): string {
+  return (
+    `the compile check did not judge the documents matched by ${patterns.join(", ")}: a wildcard with no literal prefix, one ` +
+    `in the extension, or one that matches more than ${MAX_EXPANDED_DOCUMENTS} documents, is not expanded, so IRIS's answer ` +
+    "alone decided them. Name the documents, or use a pattern with a package prefix and a .cls or .mac extension, to have " +
+    "them checked."
+  );
+}
+
+/**
+ * The documents the compile of `docs` covers, for the check: concrete `.cls` and `.mac` names as given, and each `.cls` or `.mac`
+ * wildcard pattern expanded through `docnames` (IRIS expands it for the compile itself, so the tool has to know what it matched).
+ * `GET docnames/CLS|RTN?filter=<literal prefix>` is a "name contains" read, so the entries are kept only when the whole name
+ * matches the pattern, and generated documents are skipped. A name with a leading `'` is an exclusion: what it matches is
+ * removed. Other documents (`.inc`, `.int`, ...) are not checked. A pattern that matches nothing adds nothing.
+ *
+ * Bounded (Rule #38): a pattern with no literal prefix (`*.cls`) would list the whole namespace, so it is never listed; and a
+ * pattern whose matches would take the expanded total past {@link MAX_EXPANDED_DOCUMENTS} is not expanded. A pattern with a
+ * wildcard in its extension (`Pkg.*`) names no extension the check can judge. All three are returned in `unchecked`, and the
+ * explicitly named documents are checked either way.
+ */
+async function documentsCovered(ctx: ToolContext, ns: string, docs: readonly string[]): Promise<Coverage> {
+  const included: string[] = [];
+  const excluded: RegExp[] = [];
+  const unchecked: string[] = [];
+  let expanded = 0;
+  for (const raw of docs) {
+    const isExclusion = raw.startsWith("'");
+    const name = isExclusion ? raw.slice(1) : raw;
+    if (!isExclusion && hasWildcard(name.slice(name.lastIndexOf(".") + 1))) {
+      // `Pkg.*` or `*`: IRIS compiles classes and routines alike, and the pattern names no extension the check can judge.
+      unchecked.push(name);
+      continue;
+    }
+    if (!isCheckableClass(name) && !isCheckableRoutine(name)) continue;
+    if (isExclusion) {
+      excluded.push(wildcardRegex(name));
+      continue;
+    }
+    if (!hasWildcard(name)) {
+      included.push(name);
+      continue;
+    }
+    const prefix = name.slice(0, name.search(/[*?]/));
+    if (prefix === "") {
+      unchecked.push(name);
+      continue;
+    }
+    const listed = await ctx.http.get<{ content?: Array<{ name?: unknown; gen?: unknown }> }>(
+      atelierPath(ctx.atelierVersion, ns, `docnames/${isCheckableClass(name) ? "CLS" : "RTN"}?filter=${encodeURIComponent(prefix)}`),
+    );
+    const entries = listed.result?.content;
+    const pattern = wildcardRegex(name);
+    const matches: string[] = [];
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (entry.gen === true || typeof entry.name !== "string") continue;
+      if (pattern.test(entry.name)) matches.push(entry.name);
+    }
+    if (expanded + matches.length > MAX_EXPANDED_DOCUMENTS) {
+      unchecked.push(name);
+      continue;
+    }
+    expanded += matches.length;
+    included.push(...matches);
+  }
+  const seen = new Set<string>();
+  const documents = included.filter((name) => {
+    const key = name.toLowerCase();
+    if (seen.has(key) || excluded.some((rx) => rx.test(name))) return false;
+    seen.add(key);
+    return true;
+  });
+  return { documents, unchecked };
 }
 
 // ── iris_doc_compile ───────────────────────────────────────────────
@@ -158,6 +265,24 @@ export const docCompileTool: ToolDefinition = {
       }
     }
 
+    // Story 44.7 (DW-754 and DW-759, AD-14): an HTTP 200 with no error listed is not proof that every document compiled.
+    // IRIS answers so when one class or routine fails in a compile that also writes a persistent class's Storage, so the
+    // class dictionary and IRIS's up-to-date flag decide for a class (`verifyCompiled`) and the flag for a `.mac` routine
+    // (`verifyRoutinesCompiled`); neither reads localized text. Only a compile that listed no error is checked: one that
+    // listed errors already fails, and a check that cannot run fails it too, never passes it.
+    let checkNote: string | undefined;
+    if (allErrors.length === 0) {
+      try {
+        const covered = await documentsCovered(ctx, ns, docs);
+        if (covered.unchecked.length > 0) checkNote = uncheckedNote(covered.unchecked);
+        for (const document of await unconfirmedDocuments(ctx.http, ns, ctx.atelierVersion, covered.documents)) {
+          allErrors.push({ document, error: notConfirmedText(document) });
+        }
+      } catch (error: unknown) {
+        allErrors.push({ document: "*", error: checkCouldNotRunText(error) });
+      }
+    }
+
     const hasErrors = allErrors.length > 0;
 
     const result = {
@@ -165,6 +290,7 @@ export const docCompileTool: ToolDefinition = {
       documents: docs,
       compilationTime: `${elapsed}ms`,
       ...(hasErrors ? { errors: allErrors } : {}),
+      ...(checkNote !== undefined ? { checkNote } : {}),
       ...(consoleOutput.length > 0 ? { console: consoleOutput } : {}),
     };
 

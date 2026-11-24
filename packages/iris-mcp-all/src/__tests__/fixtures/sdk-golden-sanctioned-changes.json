@@ -1,5 +1,5 @@
 {
-  "description": "Sanctioned changes (AD-15) to bytes held by the frozen SDK v1 goldens sdk-wire-golden.json and sdk-handler-golden.json, from Story 43.4 and every later story. Each entry names a golden, a row (or, for a handler entry with section \"audit\", an element of the server's audit array), an RFC 6901 pointer inside the row's parsed line (or inside that audit element), the exact value before the entry (old: the frozen value, or the new value of the entry before it for the same pointer) and the exact new value (new). The goldens themselves are never edited or recaptured; scripts/lib/golden-sanctioned-changes.mjs applies the entries and the golden tests compare every other byte unchanged.",
+  "description": "Sanctioned changes (AD-15) to bytes held by the frozen SDK v1 goldens sdk-wire-golden.json and sdk-handler-golden.json, from Story 43.4 and every later story. Each entry names a golden, a row (or, for a handler entry with section \"audit\", an element of the server's audit array; or, for a handler entry with section \"startup\" and op \"insert\", an index of the server's startup request array, with the inserted request as new and no old), an RFC 6901 pointer inside the row's parsed line (or inside that audit element), the exact value before the entry (old: the frozen value, or the new value of the entry before it for the same pointer) and the exact new value (new). The goldens themselves are never edited or recaptured; scripts/lib/golden-sanctioned-changes.mjs applies the entries and the golden tests compare every other byte unchanged.",
   "changes": [
     {
       "id": "43.4/description/iris_env_promote@dev-main",
@@ -898,6 +898,379 @@
       "appendOnly": true,
       "old": "Turn a prior iris_env_diff result into an ordered, reviewable promotion PLAN (source -> target), or EXECUTE an allowlisted subset of that plan against 'target'. Actions:\n\n- **plan** (read, enabled by default): a PURE TRANSFORM of a prior iris_env_diff 'structuredContent' result -- pass it as 'diff'. No IRIS connection is made; the result is deterministic and idempotent given the same diff. Steps are grouped by domain in DEPENDENCY ORDER: mappings -> documents (put+compile, batched) -> defaultSettings -> webapps -> config; within a domain, steps are ordered by subject. Each step is {index, domain, operation, subject, detail, direction:'sourceToTarget'}. Every 'onlyInTarget' item from the diff (something exists on the target only) is emitted as a WARNING, never a step -- NO delete/remove operation exists anywhere in any plan, in this or any future version. A credential-redacted value from the diff (e.g. '[REDACTED:differs]') survives into the plan's 'detail' text unchanged -- the plaintext never appears in plan output. The plan embeds a 'planHash' (SHA-256 of the source diff, canonical/key-sorted JSON) that 'execute' uses to detect and refuse a stale plan (one generated from a diff that has since changed).\n- **execute** (write, DEFAULT-DISABLED): run ONLY the allowlisted 'steps' indices from 'plan', IN PLAN ORDER, against 'target' -- behind FOUR refuse-before-any-write gates, each mutating NOTHING on failure: (1) 'confirm' must be true; (2) 'steps' must be a non-empty array whose every index exists in 'plan.steps' (out-of-range indices are refused); (3) plan-hash freshness -- pass the SAME 'diff' that produced 'plan'; if it no longer hashes to 'plan.planHash' the plan is STALE and execution is refused (regenerate the plan first); (4) the TARGET profile's OWN governance policy must enable every write family used by the allowlisted steps (e.g. iris_config_manage:set, iris_doc_put/iris_doc_compile, iris_mapping_manage:create[/:delete for an update], iris_default_settings_manage:set, iris_webapp_manage:modify) -- a disabled key refuses execution NAMING that key, which is what stops a caller on an unrestricted profile from writing into a governance-locked target. Once all four gates pass, steps run IN PLAN ORDER and HALT ON THE FIRST FAILURE: that step is 'failed', every step after it is 'skipped' (never attempted), every step before it is 'completed' -- a partial apply is always reported, never hidden (per-step {index,domain,operation,subject,status,error?} in the 'executed' array). EVERY write RE-FETCHES the CURRENT value from 'source' live at execute time (the plan carries no write data -- it is a spec, not a data snapshot); a credential System Default Settings value is re-fetched live and forwarded to 'target' WITHOUT ever appearing in this tool's output. 'documents' steps are PUT sequentially (source -> target) then COMPILED in ONE batched call. 'execute' NEVER deletes a target-only item in any version -- the ONLY delete it ever issues is the intra-'updateMapping' delete+create REPLACE of a mapping 'source' also has.\n\nGOVERNANCE -- 'execute' is a default-disabled write (a real environment-mutating action, NOT a recovery-of-last-resort like iris_production_control:clean). Enable via IRIS_GOVERNANCE, e.g.:\n{\"global\": {\"iris_env_promote:execute\": true}}\n\nSAFETY -- direction is always sourceToTarget (promote source's state onto target); nothing on the target is EVER deleted by this tool, in any action, in any version.\n\nHUMAN CONFIRMATION -- when the MCP client supports form elicitation, 'execute' also asks the person in a confirmation dialog, after all four gates pass and right before the first write to 'target'; only an accept with Confirm ticked proceeds, and a decline or a dismissal returns CONFIRMATION_DECLINED with nothing changed (do not repeat the call unless the person asks). A client without elicitation is not asked, and the call works as described above.",
       "new": "Turn a prior iris_env_diff result into an ordered, reviewable promotion PLAN (source -> target), or EXECUTE an allowlisted subset of that plan against 'target'. Actions:\n\n- **plan** (read, enabled by default): a PURE TRANSFORM of a prior iris_env_diff 'structuredContent' result -- pass it as 'diff'. No IRIS connection is made; the result is deterministic and idempotent given the same diff. Steps are grouped by domain in DEPENDENCY ORDER: mappings -> documents (put+compile, batched) -> defaultSettings -> webapps -> config; within a domain, steps are ordered by subject. Each step is {index, domain, operation, subject, detail, direction:'sourceToTarget'}. Every 'onlyInTarget' item from the diff (something exists on the target only) is emitted as a WARNING, never a step -- NO delete/remove operation exists anywhere in any plan, in this or any future version. A credential-redacted value from the diff (e.g. '[REDACTED:differs]') survives into the plan's 'detail' text unchanged -- the plaintext never appears in plan output. The plan embeds a 'planHash' (SHA-256 of the source diff, canonical/key-sorted JSON) that 'execute' uses to detect and refuse a stale plan (one generated from a diff that has since changed).\n- **execute** (write, DEFAULT-DISABLED): run ONLY the allowlisted 'steps' indices from 'plan', IN PLAN ORDER, against 'target' -- behind FOUR refuse-before-any-write gates, each mutating NOTHING on failure: (1) 'confirm' must be true; (2) 'steps' must be a non-empty array whose every index exists in 'plan.steps' (out-of-range indices are refused); (3) plan-hash freshness -- pass the SAME 'diff' that produced 'plan'; if it no longer hashes to 'plan.planHash' the plan is STALE and execution is refused (regenerate the plan first); (4) the TARGET profile's OWN governance policy must enable every write family used by the allowlisted steps (e.g. iris_config_manage:set, iris_doc_put/iris_doc_compile, iris_mapping_manage:create[/:delete for an update], iris_default_settings_manage:set, iris_webapp_manage:modify) -- a disabled key refuses execution NAMING that key, which is what stops a caller on an unrestricted profile from writing into a governance-locked target. Once all four gates pass, steps run IN PLAN ORDER and HALT ON THE FIRST FAILURE: that step is 'failed', every step after it is 'skipped' (never attempted), every step before it is 'completed' -- a partial apply is always reported, never hidden (per-step {index,domain,operation,subject,status,error?} in the 'executed' array). EVERY write RE-FETCHES the CURRENT value from 'source' live at execute time (the plan carries no write data -- it is a spec, not a data snapshot); a credential System Default Settings value is re-fetched live and forwarded to 'target' WITHOUT ever appearing in this tool's output. 'documents' steps are PUT sequentially (source -> target) then COMPILED in ONE batched call. 'execute' NEVER deletes a target-only item in any version -- the ONLY delete it ever issues is the intra-'updateMapping' delete+create REPLACE of a mapping 'source' also has.\n\nGOVERNANCE -- 'execute' is a default-disabled write (a real environment-mutating action, NOT a recovery-of-last-resort like iris_production_control:clean). Enable via IRIS_GOVERNANCE, e.g.:\n{\"global\": {\"iris_env_promote:execute\": true}}\n\nSAFETY -- direction is always sourceToTarget (promote source's state onto target); nothing on the target is EVER deleted by this tool, in any action, in any version.\n\nHUMAN CONFIRMATION -- when the MCP client supports form elicitation, 'execute' also asks the person in a confirmation dialog, after all four gates pass and right before the first write to 'target'; only an accept with Confirm ticked proceeds, and a decline or a dismissal returns CONFIRMATION_DECLINED with nothing changed (do not repeat the call unless the person asks). A client without elicitation is not asked, and the call works as described above.\n\nSTORAGE GUARD -- before the confirmation dialog and before any write, 'execute' reads the source and target copy of each class it would promote; if a source copy lacks one of the Storage definitions the target class has now, the whole execute is refused with STORAGE_DROPPED and nothing changes, because IRIS would generate new storage on the target at the next compile, which can change how existing rows are read. allowStorageRegeneration (default false) lets it through; the dialog and the result then name the dropped definitions."
+    },
+    {
+      "id": "44.1/docdb-manage-text/iris_docdb_manage@data-main",
+      "sanction": "S-44.1-docdb-manage-text",
+      "story": "44.1",
+      "golden": "wire",
+      "server": "iris-data-mcp",
+      "session": "main",
+      "label": "tools-list",
+      "pointer": "/result/tools/0/description",
+      "op": "replace",
+      "appendOnly": true,
+      "old": "Create, drop, or list IRIS document databases. 'list' returns all DocDB databases in the namespace. 'create' creates a new document database with optional property definitions. 'drop' permanently removes a document database and all its data. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied.",
+      "new": "Create, drop, or list IRIS document databases. 'list' returns all DocDB databases in the namespace. 'create' creates a new document database with optional property definitions. 'drop' permanently removes a document database and all its data. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied. 'create' also registers the database's Security.DocDBs record, which every other DocDB call on that database requires, and on a database that exists without one it registers the missing record."
+    },
+    {
+      "id": "44.4/startup/iris-dev-mcp@6",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-dev-mcp",
+      "section": "startup",
+      "pointer": "/6",
+      "op": "insert",
+      "new": {
+        "method": "HEAD",
+        "url": "/api/atelier/",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-dev-mcp@7",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-dev-mcp",
+      "section": "startup",
+      "pointer": "/7",
+      "op": "insert",
+      "new": {
+        "method": "POST",
+        "url": "/api/atelier/v8/HSCUSTOM/action/query",
+        "body": "{\"query\":\"SELECT d.ID AS ID, CASE WHEN c.ID IS NULL THEN 0 ELSE 1 END AS Compiled, CASE WHEN c.ClassCompileError IS NULL OR c.ClassCompileError = '' THEN 0 ELSE 1 END AS CompileError FROM %Dictionary.ClassDefinition d LEFT JOIN %Dictionary.CompiledClass c ON c.ID = d.ID WHERE d.ID IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\",\"parameters\":[\"ExecuteMCPv2.Utils\",\"ExecuteMCPv2.Setup\",\"ExecuteMCPv2.Diagram.Event\",\"ExecuteMCPv2.Diagram.RenderEvent\",\"ExecuteMCPv2.Diagram.Loader\",\"ExecuteMCPv2.Diagram.Correlator\",\"ExecuteMCPv2.Diagram.Compressor\",\"ExecuteMCPv2.Diagram.Writer\",\"ExecuteMCPv2.Diagram.Generate\",\"ExecuteMCPv2.Loc.Classifier\",\"ExecuteMCPv2.Loc.Scanner\",\"ExecuteMCPv2.Loc.Generate\",\"ExecuteMCPv2.Coverage.Job\",\"ExecuteMCPv2.Coverage.Runner\",\"ExecuteMCPv2.REST.Base\",\"ExecuteMCPv2.REST.Global\",\"ExecuteMCPv2.REST.Command\",\"ExecuteMCPv2.REST.UnitTest\",\"ExecuteMCPv2.REST.Config\",\"ExecuteMCPv2.REST.Security\",\"ExecuteMCPv2.REST.Interop\",\"ExecuteMCPv2.REST.MessageResend\",\"ExecuteMCPv2.REST.MessageSearch\",\"ExecuteMCPv2.REST.MessageBody\",\"ExecuteMCPv2.REST.Loc\",\"ExecuteMCPv2.REST.Monitor\",\"ExecuteMCPv2.REST.Health\",\"ExecuteMCPv2.REST.EnvSync\",\"ExecuteMCPv2.REST.Task\",\"ExecuteMCPv2.REST.SystemConfig\",\"ExecuteMCPv2.REST.Analytics\",\"ExecuteMCPv2.REST.SqlAdvisor\",\"ExecuteMCPv2.REST.Sql\",\"ExecuteMCPv2.REST.Coverage\",\"ExecuteMCPv2.REST.Dispatch\"]}"
+      }
+    },
+    {
+      "id": "44.4/startup/iris-dev-mcp@8",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-dev-mcp",
+      "section": "startup",
+      "pointer": "/8",
+      "op": "insert",
+      "new": {
+        "method": "GET",
+        "url": "/api/atelier/v8/HSCUSTOM/docnames/CLS?filter=ExecuteMCPv2.",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-admin-mcp@6",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-admin-mcp",
+      "section": "startup",
+      "pointer": "/6",
+      "op": "insert",
+      "new": {
+        "method": "HEAD",
+        "url": "/api/atelier/",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-admin-mcp@7",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-admin-mcp",
+      "section": "startup",
+      "pointer": "/7",
+      "op": "insert",
+      "new": {
+        "method": "POST",
+        "url": "/api/atelier/v8/HSCUSTOM/action/query",
+        "body": "{\"query\":\"SELECT d.ID AS ID, CASE WHEN c.ID IS NULL THEN 0 ELSE 1 END AS Compiled, CASE WHEN c.ClassCompileError IS NULL OR c.ClassCompileError = '' THEN 0 ELSE 1 END AS CompileError FROM %Dictionary.ClassDefinition d LEFT JOIN %Dictionary.CompiledClass c ON c.ID = d.ID WHERE d.ID IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\",\"parameters\":[\"ExecuteMCPv2.Utils\",\"ExecuteMCPv2.Setup\",\"ExecuteMCPv2.Diagram.Event\",\"ExecuteMCPv2.Diagram.RenderEvent\",\"ExecuteMCPv2.Diagram.Loader\",\"ExecuteMCPv2.Diagram.Correlator\",\"ExecuteMCPv2.Diagram.Compressor\",\"ExecuteMCPv2.Diagram.Writer\",\"ExecuteMCPv2.Diagram.Generate\",\"ExecuteMCPv2.Loc.Classifier\",\"ExecuteMCPv2.Loc.Scanner\",\"ExecuteMCPv2.Loc.Generate\",\"ExecuteMCPv2.Coverage.Job\",\"ExecuteMCPv2.Coverage.Runner\",\"ExecuteMCPv2.REST.Base\",\"ExecuteMCPv2.REST.Global\",\"ExecuteMCPv2.REST.Command\",\"ExecuteMCPv2.REST.UnitTest\",\"ExecuteMCPv2.REST.Config\",\"ExecuteMCPv2.REST.Security\",\"ExecuteMCPv2.REST.Interop\",\"ExecuteMCPv2.REST.MessageResend\",\"ExecuteMCPv2.REST.MessageSearch\",\"ExecuteMCPv2.REST.MessageBody\",\"ExecuteMCPv2.REST.Loc\",\"ExecuteMCPv2.REST.Monitor\",\"ExecuteMCPv2.REST.Health\",\"ExecuteMCPv2.REST.EnvSync\",\"ExecuteMCPv2.REST.Task\",\"ExecuteMCPv2.REST.SystemConfig\",\"ExecuteMCPv2.REST.Analytics\",\"ExecuteMCPv2.REST.SqlAdvisor\",\"ExecuteMCPv2.REST.Sql\",\"ExecuteMCPv2.REST.Coverage\",\"ExecuteMCPv2.REST.Dispatch\"]}"
+      }
+    },
+    {
+      "id": "44.4/startup/iris-admin-mcp@8",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-admin-mcp",
+      "section": "startup",
+      "pointer": "/8",
+      "op": "insert",
+      "new": {
+        "method": "GET",
+        "url": "/api/atelier/v8/HSCUSTOM/docnames/CLS?filter=ExecuteMCPv2.",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-interop-mcp@6",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-interop-mcp",
+      "section": "startup",
+      "pointer": "/6",
+      "op": "insert",
+      "new": {
+        "method": "HEAD",
+        "url": "/api/atelier/",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-interop-mcp@7",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-interop-mcp",
+      "section": "startup",
+      "pointer": "/7",
+      "op": "insert",
+      "new": {
+        "method": "POST",
+        "url": "/api/atelier/v8/HSCUSTOM/action/query",
+        "body": "{\"query\":\"SELECT d.ID AS ID, CASE WHEN c.ID IS NULL THEN 0 ELSE 1 END AS Compiled, CASE WHEN c.ClassCompileError IS NULL OR c.ClassCompileError = '' THEN 0 ELSE 1 END AS CompileError FROM %Dictionary.ClassDefinition d LEFT JOIN %Dictionary.CompiledClass c ON c.ID = d.ID WHERE d.ID IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\",\"parameters\":[\"ExecuteMCPv2.Utils\",\"ExecuteMCPv2.Setup\",\"ExecuteMCPv2.Diagram.Event\",\"ExecuteMCPv2.Diagram.RenderEvent\",\"ExecuteMCPv2.Diagram.Loader\",\"ExecuteMCPv2.Diagram.Correlator\",\"ExecuteMCPv2.Diagram.Compressor\",\"ExecuteMCPv2.Diagram.Writer\",\"ExecuteMCPv2.Diagram.Generate\",\"ExecuteMCPv2.Loc.Classifier\",\"ExecuteMCPv2.Loc.Scanner\",\"ExecuteMCPv2.Loc.Generate\",\"ExecuteMCPv2.Coverage.Job\",\"ExecuteMCPv2.Coverage.Runner\",\"ExecuteMCPv2.REST.Base\",\"ExecuteMCPv2.REST.Global\",\"ExecuteMCPv2.REST.Command\",\"ExecuteMCPv2.REST.UnitTest\",\"ExecuteMCPv2.REST.Config\",\"ExecuteMCPv2.REST.Security\",\"ExecuteMCPv2.REST.Interop\",\"ExecuteMCPv2.REST.MessageResend\",\"ExecuteMCPv2.REST.MessageSearch\",\"ExecuteMCPv2.REST.MessageBody\",\"ExecuteMCPv2.REST.Loc\",\"ExecuteMCPv2.REST.Monitor\",\"ExecuteMCPv2.REST.Health\",\"ExecuteMCPv2.REST.EnvSync\",\"ExecuteMCPv2.REST.Task\",\"ExecuteMCPv2.REST.SystemConfig\",\"ExecuteMCPv2.REST.Analytics\",\"ExecuteMCPv2.REST.SqlAdvisor\",\"ExecuteMCPv2.REST.Sql\",\"ExecuteMCPv2.REST.Coverage\",\"ExecuteMCPv2.REST.Dispatch\"]}"
+      }
+    },
+    {
+      "id": "44.4/startup/iris-interop-mcp@8",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-interop-mcp",
+      "section": "startup",
+      "pointer": "/8",
+      "op": "insert",
+      "new": {
+        "method": "GET",
+        "url": "/api/atelier/v8/HSCUSTOM/docnames/CLS?filter=ExecuteMCPv2.",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-ops-mcp@6",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-ops-mcp",
+      "section": "startup",
+      "pointer": "/6",
+      "op": "insert",
+      "new": {
+        "method": "HEAD",
+        "url": "/api/atelier/",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-ops-mcp@7",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-ops-mcp",
+      "section": "startup",
+      "pointer": "/7",
+      "op": "insert",
+      "new": {
+        "method": "POST",
+        "url": "/api/atelier/v8/HSCUSTOM/action/query",
+        "body": "{\"query\":\"SELECT d.ID AS ID, CASE WHEN c.ID IS NULL THEN 0 ELSE 1 END AS Compiled, CASE WHEN c.ClassCompileError IS NULL OR c.ClassCompileError = '' THEN 0 ELSE 1 END AS CompileError FROM %Dictionary.ClassDefinition d LEFT JOIN %Dictionary.CompiledClass c ON c.ID = d.ID WHERE d.ID IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\",\"parameters\":[\"ExecuteMCPv2.Utils\",\"ExecuteMCPv2.Setup\",\"ExecuteMCPv2.Diagram.Event\",\"ExecuteMCPv2.Diagram.RenderEvent\",\"ExecuteMCPv2.Diagram.Loader\",\"ExecuteMCPv2.Diagram.Correlator\",\"ExecuteMCPv2.Diagram.Compressor\",\"ExecuteMCPv2.Diagram.Writer\",\"ExecuteMCPv2.Diagram.Generate\",\"ExecuteMCPv2.Loc.Classifier\",\"ExecuteMCPv2.Loc.Scanner\",\"ExecuteMCPv2.Loc.Generate\",\"ExecuteMCPv2.Coverage.Job\",\"ExecuteMCPv2.Coverage.Runner\",\"ExecuteMCPv2.REST.Base\",\"ExecuteMCPv2.REST.Global\",\"ExecuteMCPv2.REST.Command\",\"ExecuteMCPv2.REST.UnitTest\",\"ExecuteMCPv2.REST.Config\",\"ExecuteMCPv2.REST.Security\",\"ExecuteMCPv2.REST.Interop\",\"ExecuteMCPv2.REST.MessageResend\",\"ExecuteMCPv2.REST.MessageSearch\",\"ExecuteMCPv2.REST.MessageBody\",\"ExecuteMCPv2.REST.Loc\",\"ExecuteMCPv2.REST.Monitor\",\"ExecuteMCPv2.REST.Health\",\"ExecuteMCPv2.REST.EnvSync\",\"ExecuteMCPv2.REST.Task\",\"ExecuteMCPv2.REST.SystemConfig\",\"ExecuteMCPv2.REST.Analytics\",\"ExecuteMCPv2.REST.SqlAdvisor\",\"ExecuteMCPv2.REST.Sql\",\"ExecuteMCPv2.REST.Coverage\",\"ExecuteMCPv2.REST.Dispatch\"]}"
+      }
+    },
+    {
+      "id": "44.4/startup/iris-ops-mcp@8",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-ops-mcp",
+      "section": "startup",
+      "pointer": "/8",
+      "op": "insert",
+      "new": {
+        "method": "GET",
+        "url": "/api/atelier/v8/HSCUSTOM/docnames/CLS?filter=ExecuteMCPv2.",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-data-mcp@6",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-data-mcp",
+      "section": "startup",
+      "pointer": "/6",
+      "op": "insert",
+      "new": {
+        "method": "HEAD",
+        "url": "/api/atelier/",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.4/startup/iris-data-mcp@7",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-data-mcp",
+      "section": "startup",
+      "pointer": "/7",
+      "op": "insert",
+      "new": {
+        "method": "POST",
+        "url": "/api/atelier/v8/HSCUSTOM/action/query",
+        "body": "{\"query\":\"SELECT d.ID AS ID, CASE WHEN c.ID IS NULL THEN 0 ELSE 1 END AS Compiled, CASE WHEN c.ClassCompileError IS NULL OR c.ClassCompileError = '' THEN 0 ELSE 1 END AS CompileError FROM %Dictionary.ClassDefinition d LEFT JOIN %Dictionary.CompiledClass c ON c.ID = d.ID WHERE d.ID IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\",\"parameters\":[\"ExecuteMCPv2.Utils\",\"ExecuteMCPv2.Setup\",\"ExecuteMCPv2.Diagram.Event\",\"ExecuteMCPv2.Diagram.RenderEvent\",\"ExecuteMCPv2.Diagram.Loader\",\"ExecuteMCPv2.Diagram.Correlator\",\"ExecuteMCPv2.Diagram.Compressor\",\"ExecuteMCPv2.Diagram.Writer\",\"ExecuteMCPv2.Diagram.Generate\",\"ExecuteMCPv2.Loc.Classifier\",\"ExecuteMCPv2.Loc.Scanner\",\"ExecuteMCPv2.Loc.Generate\",\"ExecuteMCPv2.Coverage.Job\",\"ExecuteMCPv2.Coverage.Runner\",\"ExecuteMCPv2.REST.Base\",\"ExecuteMCPv2.REST.Global\",\"ExecuteMCPv2.REST.Command\",\"ExecuteMCPv2.REST.UnitTest\",\"ExecuteMCPv2.REST.Config\",\"ExecuteMCPv2.REST.Security\",\"ExecuteMCPv2.REST.Interop\",\"ExecuteMCPv2.REST.MessageResend\",\"ExecuteMCPv2.REST.MessageSearch\",\"ExecuteMCPv2.REST.MessageBody\",\"ExecuteMCPv2.REST.Loc\",\"ExecuteMCPv2.REST.Monitor\",\"ExecuteMCPv2.REST.Health\",\"ExecuteMCPv2.REST.EnvSync\",\"ExecuteMCPv2.REST.Task\",\"ExecuteMCPv2.REST.SystemConfig\",\"ExecuteMCPv2.REST.Analytics\",\"ExecuteMCPv2.REST.SqlAdvisor\",\"ExecuteMCPv2.REST.Sql\",\"ExecuteMCPv2.REST.Coverage\",\"ExecuteMCPv2.REST.Dispatch\"]}"
+      }
+    },
+    {
+      "id": "44.4/startup/iris-data-mcp@8",
+      "sanction": "S-44.4-current-check",
+      "story": "44.4",
+      "golden": "handler",
+      "server": "iris-data-mcp",
+      "section": "startup",
+      "pointer": "/8",
+      "op": "insert",
+      "new": {
+        "method": "GET",
+        "url": "/api/atelier/v8/HSCUSTOM/docnames/CLS?filter=ExecuteMCPv2.",
+        "body": ""
+      }
+    },
+    {
+      "id": "44.7/docdb-property-text/iris_docdb_property@data-main",
+      "sanction": "S-44.7-docdb-property",
+      "story": "44.7",
+      "golden": "wire",
+      "server": "iris-data-mcp",
+      "session": "main",
+      "label": "tools-list",
+      "pointer": "/result/tools/3/description",
+      "op": "replace",
+      "old": "Create, drop, or index a property on an IRIS document database. 'create' defines a new property with a specified type. 'drop' removes a property definition. 'index' creates an index on a property for faster queries. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied.",
+      "new": "Create, drop, or index a property on an IRIS document database. 'create' defines a new property with a specified type and fills it from the document field at 'path' (default '$.<property>', the top-level field of the same name). Documents saved before the property exists are not filled in until they are saved again. DocDB indexes every property it creates, so a created property is already indexed. 'drop' removes a property definition. 'index' reports an existing property as indexed without writing anything, and creates a property that does not exist yet (a %String read from 'path'). A system property (a name starting with '%') cannot be indexed. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied."
+    },
+    {
+      "id": "44.7/docdb-property-schema/iris_docdb_property@data-main",
+      "sanction": "S-44.7-docdb-property",
+      "story": "44.7",
+      "golden": "wire",
+      "server": "iris-data-mcp",
+      "session": "main",
+      "label": "tools-list",
+      "pointer": "/result/tools/3/inputSchema/properties",
+      "op": "replace",
+      "old": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "create",
+            "drop",
+            "index"
+          ],
+          "description": "Action to perform: 'create', 'drop', or 'index'"
+        },
+        "database": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Document database name"
+        },
+        "property": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Property name"
+        },
+        "type": {
+          "description": "Property type (required for 'create', e.g., '%String', '%Integer')",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Target namespace (default: configured namespace)",
+          "type": "string"
+        },
+        "server": {
+          "description": "Named server profile to target for this call (from `IRIS_PROFILES`). Omit to use the default server.",
+          "type": "string"
+        }
+      },
+      "new": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "create",
+            "drop",
+            "index"
+          ],
+          "description": "Action to perform: 'create', 'drop', or 'index'"
+        },
+        "database": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Document database name"
+        },
+        "property": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Property name"
+        },
+        "type": {
+          "description": "Property type (required for 'create', e.g., '%String', '%Integer')",
+          "type": "string"
+        },
+        "path": {
+          "description": "Document path the property is read from, for 'create' and for 'index' of a property that does not exist yet (default '$.<property>', e.g. '$.address.city'). Ignored by 'drop' and by 'index' of an existing property.",
+          "type": "string",
+          "minLength": 1
+        },
+        "namespace": {
+          "description": "Target namespace (default: configured namespace)",
+          "type": "string"
+        },
+        "server": {
+          "description": "Named server profile to target for this call (from `IRIS_PROFILES`). Omit to use the default server.",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "id": "44.7/docdb-manage-text/iris_docdb_manage@data-main",
+      "sanction": "S-44.7-docdb-manage-text",
+      "story": "44.7",
+      "golden": "wire",
+      "server": "iris-data-mcp",
+      "session": "main",
+      "label": "tools-list",
+      "pointer": "/result/tools/0/description",
+      "op": "replace",
+      "old": "Create, drop, or list IRIS document databases. 'list' returns all DocDB databases in the namespace. 'create' creates a new document database with optional property definitions. 'drop' permanently removes a document database and all its data. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied. 'create' also registers the database's Security.DocDBs record, which every other DocDB call on that database requires, and on a database that exists without one it registers the missing record.",
+      "new": "Create, drop, or list IRIS document databases. 'list' returns all DocDB databases in the namespace. 'create' creates an empty document database; define its properties with iris_docdb_property. 'drop' permanently removes a document database and all its data. Prerequisite: the %Service_DocDB service must be enabled on the instance (it is disabled by default on IRIS) — a disabled service fails these calls with ERROR #822: Access Denied. 'create' also registers the database's Security.DocDBs record, which every other DocDB call on that database requires, and on a database that exists without one it registers the missing record."
+    },
+    {
+      "id": "44.7/database-delete/iris_database_manage@admin-main",
+      "sanction": "S-44.7-database-delete",
+      "story": "44.7",
+      "golden": "wire",
+      "server": "iris-admin-mcp",
+      "session": "main",
+      "label": "tools-list",
+      "pointer": "/result/tools/2/description",
+      "op": "replace",
+      "old": "Create, modify, or delete an IRIS database. For 'create', directory is required. For 'modify', only provided fields are updated. For 'delete', only the name is needed. Note: Deletion removes the database from the IRIS configuration but does NOT cancel pending background work (e.g., extent-index rebuilds) that may have been scheduled against the deleted directory. The IRIS console may log alerts for such operations post-delete; these are informational and do not indicate tool failure.",
+      "new": "Create, modify, or delete an IRIS database. For 'create', directory is required. For 'modify', only provided fields are updated. For 'delete', only the name is needed. Deletion removes the database from the IRIS configuration and dismounts it (unless another configured database uses the same directory; the reply then has 'dismounted: false' and a 'dismountNote'). Its IRIS.DAT and directory stay on disk, so a 'create' at the same directory fails until that file is removed. Note: Deletion does NOT cancel pending background work (e.g., extent-index rebuilds) that may have been scheduled against the deleted directory. The IRIS console may log alerts for such operations post-delete; these are informational and do not indicate tool failure."
+    },
+    {
+      "id": "44.7/database-delete-prompt/provision-project-environment@admin-main",
+      "sanction": "S-44.7-database-delete",
+      "story": "44.7",
+      "golden": "wire",
+      "server": "iris-admin-mcp",
+      "session": "main",
+      "label": "prompts-get:with-arguments",
+      "pointer": "/result/messages/0/content/text",
+      "op": "replace",
+      "old": "# Provision Project Environment\n\nProject: `demo`\n\nVerify EACH step succeeded (inspect the tool result) before proceeding to the next. If any step fails partway through, roll back the steps already completed (see the rollback note after each step) rather than leaving a half-provisioned environment.\n\n1. Call `iris_database_manage` action 'create' with `name: \"demoDATA\"` and a `directory` for the DATA database. *Rollback: `iris_database_manage` action 'delete' with `name: \"demoDATA\"`.*\n2. Call `iris_database_manage` action 'create' with `name: \"demoCODE\"` and a `directory` for the CODE database. *Rollback: `iris_database_manage` action 'delete' with `name: \"demoCODE\"`.*\n3. Call `iris_namespace_manage` action 'create' with `name: \"demo\"`, `dataDatabase: \"demoDATA\"`, `codeDatabase: \"demoCODE\"`. *Rollback: `iris_namespace_manage` action 'delete' with `name: \"demo\"`, then undo steps 1-2.*\n4. Call `iris_user_manage` action 'create' with a `name` and `password` for the project's service/developer account, and `namespace: \"demo\"` as its default namespace. *Rollback: `iris_user_manage` action 'delete' with the same `name`.*\n5. Call `iris_webapp_manage` action 'create' with a `name` starting with '/' (e.g. '/api/demo'), `namespace: \"demo\"`, and (if applicable) a `dispatchClass`. Note: creating a web app does NOT notify the CSP gateway — it requires saving through the Management Portal or a gateway restart to become active. *Rollback: `iris_webapp_manage` action 'delete' with the same `name`.*\n6. Summarize what was created (database names, namespace, user, web app path) and any manual follow-up needed (CSP gateway activation for the new web app).",
+      "new": "# Provision Project Environment\n\nProject: `demo`\n\nVerify EACH step succeeded (inspect the tool result) before proceeding to the next. If any step fails partway through, roll back the steps already completed (see the rollback note after each step) rather than leaving a half-provisioned environment.\n\n1. Call `iris_database_manage` action 'create' with `name: \"demoDATA\"` and a `directory` for the DATA database. *Rollback: `iris_database_manage` action 'delete' with `name: \"demoDATA\"`. Delete keeps the database's IRIS.DAT in its directory, so a later create at the same directory fails until that file is removed by hand; retry with a new directory instead.*\n2. Call `iris_database_manage` action 'create' with `name: \"demoCODE\"` and a `directory` for the CODE database. *Rollback: `iris_database_manage` action 'delete' with `name: \"demoCODE\"`. Delete keeps the database's IRIS.DAT in its directory, so a later create at the same directory fails until that file is removed by hand; retry with a new directory instead.*\n3. Call `iris_namespace_manage` action 'create' with `name: \"demo\"`, `dataDatabase: \"demoDATA\"`, `codeDatabase: \"demoCODE\"`. *Rollback: `iris_namespace_manage` action 'delete' with `name: \"demo\"`, then undo steps 1-2.*\n4. Call `iris_user_manage` action 'create' with a `name` and `password` for the project's service/developer account, and `namespace: \"demo\"` as its default namespace. *Rollback: `iris_user_manage` action 'delete' with the same `name`.*\n5. Call `iris_webapp_manage` action 'create' with a `name` starting with '/' (e.g. '/api/demo'), `namespace: \"demo\"`, and (if applicable) a `dispatchClass`. Note: creating a web app does NOT notify the CSP gateway — it requires saving through the Management Portal or a gateway restart to become active. *Rollback: `iris_webapp_manage` action 'delete' with the same `name`.*\n6. Summarize what was created (database names, namespace, user, web app path) and any manual follow-up needed (CSP gateway activation for the new web app)."
     }
   ]
 }

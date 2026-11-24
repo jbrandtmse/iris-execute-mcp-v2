@@ -78,13 +78,15 @@ describe("CLIENT_ADAPTERS registry", () => {
   });
 
   it("the odd root keys match the spec capability table", () => {
-    expect(CLIENT_ADAPTERS["vscode"]?.rootKey).toBe("servers");
+    // VS Code Copilot reads `mcpServers` since Story 44.2; its old Local-harness files keep `servers` as read-only legacy scopes.
+    expect(CLIENT_ADAPTERS["vscode"]?.rootKey).toBe("mcpServers");
+    expect(CLIENT_ADAPTERS["vscode"]?.legacyScopes?.map((l) => l.rootKey)).toEqual(["servers", "servers"]);
     expect(CLIENT_ADAPTERS["zed"]?.rootKey).toBe("context_servers");
     expect(CLIENT_ADAPTERS["goose"]?.rootKey).toBe("extensions");
     expect(CLIENT_ADAPTERS["codex"]?.rootKey).toBe("mcp_servers");
     // Every other client uses mcpServers.
     for (const adapter of adapters) {
-      if (!["vscode", "zed", "goose", "codex"].includes(adapter.id)) {
+      if (!["zed", "goose", "codex"].includes(adapter.id)) {
         expect(adapter.rootKey, adapter.id).toBe("mcpServers");
       }
     }
@@ -209,6 +211,50 @@ describe("the 2026-11-21 re-disposition (Story 42.9, DW-626)", () => {
   });
 
   it("stamps the adapter data with the implementation date", () => {
-    expect(ADAPTER_DATA_VERSION).toBe("2026-11-21.1");
+    expect(ADAPTER_DATA_VERSION).toBe("2026-11-22.1");
+  });
+});
+
+describe("the vscode adapter reads the Copilot harness files (Story 44.2, AC 44.2.2)", () => {
+  const vscode = CLIENT_ADAPTERS["vscode"];
+
+  it("targets the Copilot user file and the shared workspace .mcp.json, as strict-JSON mcpServers with ${VAR} expansion", () => {
+    expect(vscode?.format).toBe("json");
+    expect(vscode?.rootKey).toBe("mcpServers");
+    expect(vscode?.envExpansion).toBe("claude");
+    expect(vscode?.entryShape).toBe("standard");
+    const user = vscode?.scopes.find((s) => s.scope === "user");
+    expect(user?.paths).toEqual({
+      win32: "~/.copilot/mcp-config.json",
+      darwin: "~/.copilot/mcp-config.json",
+      linux: "~/.copilot/mcp-config.json",
+    });
+    expect(user?.envOverride).toEqual({ var: "COPILOT_HOME", pathSuffix: "mcp-config.json" });
+    expect(user?.entryShape).toBe("copilot");
+    expect(user?.strictJson).toBe(true);
+    const project = vscode?.scopes.find((s) => s.scope === "project");
+    expect(project?.paths.linux).toBe(".mcp.json");
+    expect(project?.entryShape).toBeUndefined();
+  });
+
+  it("keeps the old Local-harness files as read-only legacy scopes (JSONC, root key servers, ${env:} expansion)", () => {
+    const legacy = vscode?.legacyScopes ?? [];
+    expect(legacy.map((l) => [l.scope, l.format, l.rootKey, l.envExpansion])).toEqual([
+      ["user", "jsonc", "servers", "vscode"],
+      ["project", "jsonc", "servers", "vscode"],
+    ]);
+    expect(legacy[0]?.paths.darwin).toBe("~/Library/Application Support/Code/User/mcp.json");
+    expect(legacy[1]?.paths.linux).toBe(".vscode/mcp.json");
+  });
+
+  it("no other adapter sets a legacy scope, a per-scope shape or strict JSON (the back-compat pin lives in adapters-44-2-backcompat.test.ts)", () => {
+    for (const adapter of Object.values(CLIENT_ADAPTERS)) {
+      if (adapter.id === "vscode") continue;
+      expect(adapter.legacyScopes, adapter.id).toBeUndefined();
+      for (const scope of adapter.scopes) {
+        expect(scope.entryShape, adapter.id).toBeUndefined();
+        expect(scope.strictJson, adapter.id).toBeUndefined();
+      }
+    }
   });
 });

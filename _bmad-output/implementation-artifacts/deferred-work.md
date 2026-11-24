@@ -4035,12 +4035,16 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: scripts/lib/release-core.mjs RELEASE_CHANNELS vscode-marketplace enabled:false enabledBy 'owner: publisher needs a verified domain (DW-719)'; owner steps O1 (Marketplace publisher iris-mcp, Open VSX namespace), O2 (Marketplace trusted-publishing policy, OVSX_PAT), O4 (Open VSX trusted publisher) not done; v1.1.0 ships the vsix on the GitHub Release by hand
 - 2026-11-21T20:50:02Z status=decision-pending owner=burndown by=planner note=human=owner: verified domain, then O1/O2 for both stores, then flip enabled:true, docs back to store install, the first store publish; seam documented in 42.7
 - 2026-11-22T07:02:05Z status=decision-pending owner=burndown by=merge_gate note=kept decision-pending at the epic-42 close on the Planner's instruction: an owner decision relayed by the Planner (decision #130)
+- 2026-11-22T16:58:29Z status=decision-pending owner=burndown by=x0 note=Epic 44 X.0 gate: an owner decision; epics.md Epic 44 lists it Out of scope and the Planner relays that it stays decision-pending (wave-8 decision #131); asked again at the next decision sheet
+- 2026-11-23T21:25:52Z status=decision-pending owner=burndown by=merge_gate note=owner answer 2026-11-23 (decision #153): stays an owner item; the vsix is attached to the GitHub Release by hand with a sha256 check (Planner)
 
 ### DW-720: The release does not attach the vsix to the tag's GitHub Release: the maintainer does it by hand (gh release create, notes from the CHANGELOG section, sha256 checked against manifest.json)
 - source: spec-42-7-vs-code-extension-publish.md | severity: low | fix-risk: med | footprint: out-of-footprint
 - evidence: release.yml has no github-release channel or job and no contents: write; Planner fallback for v1.1.0 (2026-11-21); sizing: new channel or job, workflow declaration, 5->6 channel pins, README table
 - 2026-11-21T20:50:02Z status=decision-pending owner=burndown by=planner note=build as its own story: a separate github-release job after publish with contents: write and no id-token; already-published = success on re-run; red proof and dry run
 - 2026-11-22T07:02:05Z status=decision-pending owner=burndown by=merge_gate note=kept decision-pending at the epic-42 close on the Planner's instruction: an owner decision relayed by the Planner (decision #130)
+- 2026-11-22T16:58:29Z status=decision-pending owner=burndown by=x0 note=Epic 44 X.0 gate: an owner decision; epics.md Epic 44 lists it Out of scope and the Planner relays that it stays decision-pending (wave-8 decision #131); asked again at the next decision sheet
+- 2026-11-23T21:25:52Z status=decision-pending owner=burndown by=merge_gate note=owner answer 2026-11-23 (decision #153): stays an owner item; the vsix is attached to the GitHub Release by hand with a sha256 check (Planner)
 
 ### DW-721: VS Code calls the files the vscode adapter writes (.vscode/mcp.json and the profile mcp.json) deprecated Local-harness files, removed in February 2027; new Copilot configurations belong in ~/.copilot/mcp-config.json (or COPILOT_HOME) and a workspace-root .mcp.json, both keyed mcpServers
 - source: spec-42-9-install-docs-and-client-re-certification.md (deferred frontmatter; decision #118) | severity: med | fix-risk: med | footprint: out-of-footprint
@@ -4053,3 +4057,251 @@ See _bmad/custom/skill-rules.md Rule 15 (entry grammar) and Rule 17 (the drain).
 - evidence: claude plugin validate (Claude Code 2.1.330), 2026-11-22: packages/client-config/skills-pack and the marketplace root both pass. Plugin-directory findings: ICON_MISSING (the icon is fixed at the first portal save or submit, so it must exist before then; an authored asset, the owner's); network.hosts undeclared for the 5 MCP servers and 18 skills (advisory); no LICENSE file in the plugin root (plugin.json says MIT; the git-subdir install copies only skills-pack) and the README does not state the license. The marketplace pins ref v1.1.0, so pack changes reach the directory only with a new tag
 - 2026-11-22T06:41:00Z status=decision-pending owner=burndown by=planner note=human=owner submits at claude.ai/directory/manage; before that, a pack story adds the icon (owner-supplied square PNG, 512-2048 px), a LICENSE in skills-pack and its README, and network.hosts, released in a patch tag; nothing is submitted by an agent
 - 2026-11-22T07:02:05Z status=decision-pending owner=burndown by=merge_gate note=kept decision-pending at the epic-42 close on the Planner's instruction: an owner decision relayed by the Planner (decision #130)
+- 2026-11-22T16:58:29Z status=decision-pending owner=burndown by=x0 note=Epic 44 X.0 gate: an owner decision; epics.md Epic 44 lists it Out of scope and the Planner relays that it stays decision-pending (wave-8 decision #131); asked again at the next decision sheet
+- 2026-11-23T21:25:52Z status=decision-pending owner=burndown by=merge_gate note=owner answer 2026-11-23 (decision #153): stays an owner item; the vsix is attached to the GitHub Release by hand with a sha256 check (Planner)
+
+### DW-723: iris_docdb_property action=index on a property that already exists always fails with ERROR #5805 (DocDB indexes every property it creates; the tool re-creates it)
+- source: spec-44-1-docdb-create-registers-the-database.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: irislib/%DocDB/Database.cls:384-388 and irislib/%Api/DocDB/v1.cls:355-374; live 2026.2 throwaway: create prop then index the same prop -> HTTP 400 #5805; docdb.ts:688-693
+- 2026-11-22T19:00:13Z status=routed owner=burndown by=harvest note=out of 44.1: the fix changes iris_docdb_property request bytes that AC 44.1.7 pins
+- 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
+
+### DW-724: A property created by iris_docdb_property never matches an iris_docdb_find filter (the tool sends no path, so the property is never populated)
+- source: spec-44-1-docdb-create-registers-the-database.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: live 2026.2 throwaway: property category created without path, doc inserted, find [category,test,=] -> []; with ?path=category it matches; docs inserted before the property are not backfilled; docdb.ts:683-687
+- 2026-11-22T19:00:13Z status=routed owner=burndown by=harvest note=out of 44.1 (pinned request bytes); probe whether path should default to the property name
+- 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
+
+### DW-725: The iris_docdb_manage description claims create takes optional property definitions; the input schema has no such field
+- source: spec-44-1-docdb-create-registers-the-database.md | severity: low | fix-risk: low | footprint: in-epic
+- evidence: docdb.ts:266 vs inputSchema docdb.ts:271-284 (action, database, namespace only)
+- 2026-11-22T19:00:13Z status=routed owner=burndown by=harvest note=AC 44.1.5 appends text only (Frozen goldens), so the false clause needs a recorded AD-15 correction
+- 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
+
+### DW-726: No CI run drives the IRIS-side DocDB record route or its %UnitTest classes, so a contract drift between docdb.ts and DocDbRecord ships green
+- source: spec-44-1-docdb-create-registers-the-database.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: DocDbRegisterTest/DocDbRegisterNamespaceTest are seeded but never executed by any buildLiveSuites suite, and the data lifecycle skips in CI (DOCDB_SKIPS); renaming 'registered' in DocDbRecord leaves the default suite and CI green
+- 2026-11-22T19:38:23Z status=routed owner=44-5-integration-suites-cannot-pass-without-testing by=cr note=44.5 owns the DocDB CI seam (AC 44.5.4); run the IRIS-side DocDB classes in the seeded throwaway leg
+- 2026-11-23T16:50:10Z status=resolved-by:44-5-integration-suites-cannot-pass-without-testing owner=44-5-integration-suites-cannot-pass-without-testing by=lead note=CI throwaway job enables %Service_DocDB after prepublish-all and runs the DocDB lifecycle (integration-data 12/12, 0 skipped, CI run 45208039769) and the dev suite runs DocDbRegisterTest (5) and DocDbRegisterNamespaceTest (3) with totals pinned (custom-rest.integration.test.ts)
+
+### DW-727: DocDbRegisterNamespaceTest copies the ServiceEnabled and RecordExists helpers of DocDbRegisterTest
+- source: spec-44-1-docdb-create-registers-the-database.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: src/ExecuteMCPv2/Tests/DocDbRegisterNamespaceTest.cls ServiceEnabled/RecordExists vs DocDbRegisterTest.cls:48-78 (ServiceEnabled verbatim, RecordExists with a namespace argument); weak reason: self-contained test classes, as with ResolvePort
+- 2026-11-22T19:38:23Z status=wontfix-accepted owner=44-1-docdb-create-registers-the-database by=cr note=reopen_if=a third ExecuteMCPv2.Tests class copies ServiceEnabled or RecordExists
+
+### DW-728: An 822 caused by a disabled Security.DocDBs record or a record Resource passes through unexplained, and create over a stale disabled record reports registered:true
+- source: spec-44-1-docdb-create-registers-the-database.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: CheckAccess^%SYS.DOCDB answers 792 (disabled) or 791 (Resource) then 822; DocDbRecord reports registered:true, and the spec's matrix row Record present requires pass-through
+- 2026-11-22T19:38:23Z status=by-design owner=44-1-docdb-create-registers-the-database by=cr note=spec: Record present passes the error through; the Safety note leaves a disabled or Resource record untouched
+
+### DW-729: POST /security/docdb answers success (exists:false, registered:true) for an orphan record whose DocDB database does not exist
+- source: spec-44-1-docdb-create-registers-the-database.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: DocDbRecord checks tDbExists only when no record exists (Security.cls DocDbRecord); IRIS writes orphan records (probe P11); the tool only registers after a DocDB create or 25051, so the database always exists
+- 2026-11-22T19:38:23Z status=wontfix-theoretical owner=44-1-docdb-create-registers-the-database by=cr note=real if a consumer calls POST /security/docdb without a successful DocDB create first
+
+### DW-730: create on an existing registered database returns the registration-failure text, not the already-defined error, when the register call itself fails
+- source: spec-44-1-docdb-create-registers-the-database.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: docdb.ts create path: 25051 then a register 404 or network error returns registrationFailure(created:false); README/changeset say already-defined is unchanged when the record is present
+- 2026-11-22T19:38:23Z status=by-design owner=44-1-docdb-create-registers-the-database by=cr note=spec matrix row Repair fails: 25051 plus a failed register returns the failure text with created:false
+
+### DW-731: The launcher extension's mcpServerDefinitionProvider servers reach a Copilot-harness session without connection settings or credentials
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: med | footprint: in-epic
+- evidence: extension.ts:660-700 provides McpStdioServerDefinition(label,command,args,{}) and adds IRIS_* only in resolveMcpServerDefinition; VS Code 1.147.0 forwards the provided launch as is (workbench qls/PVn), the resolver runs only on a Local start; docs: do not rely on an interactive resolver during background forwarding (fetched 2026-11-22)
+- 2026-11-22T21:49:01Z status=routed owner=44-6-launcher-provider-works-in-copilot-sessions by=harvest note=owner ruling, decision #134: Story 44.6 fixes it; its vsix ships with the end-of-epic release (manual attach)
+- 2026-11-23T08:45:54Z status=resolved-by:44-6-launcher-provider-works-in-copilot-sessions by=adjudication note=provided_definition_carries_non-secret_IRIS_*+IRIS_CREDENTIAL_NAME_for_user-scope_servers;fresh-process_gate_authenticates_via_fake_keychain;owner_Copilot_sitting_AC_44.6.5_pending
+
+### DW-732: Story 44.2's patch changeset removes four public exports of @iris-mcp/client-config (ensureInputs, presentInputIds, VscodeInput, VSCODE_PASSWORD_INPUT_ID)
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: packages/client-config/src/index.ts no longer exports them (Spec Change Log 3); an external importer breaks on a patch upgrade
+- 2026-11-22T21:49:01Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=harvest note=lead: keep the patch bump (decision #133) and make it semver-true by keeping the four exports as @deprecated re-exports that still work; for the code review to patch
+- 2026-11-22T22:21:18Z status=resolved-by:44-2-vs-code-copilot-mcp-configuration-targets by=cr note=src/deprecated.ts keeps the 4 names (+EnsureInputsResult) as working @deprecated exports; deprecated-exports.test.ts pins them (mutation M1 red)
+
+### DW-733: The client-config ownership ledger is keyed (client, scope, name) with no file path, so a claude-code project record from one project counts as a sharing owner in another project's .mcp.json
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: state.ts:123-135 sameSlot/isManagerCreated ignore the path; shared-files.ts ownerClients reads them for the Story 44.2 shared-file rule; effect: vscode adopts-or-conflicts where a fresh write was right
+- 2026-11-22T21:49:01Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=harvest note=keying is pre-existing; the new shared-file rule is what reads it across projects; code review to patch within the state format if fix-risk allows, else re-own with the residual
+- 2026-11-22T22:21:18Z status=escalated owner=burndown by=cr note=fix-risk high: needs a file path on ledger records (spec 3.4 state shape) + per-file record/drop/stash; probe: claude-code mode change refused in a project VS Code never touched
+- 2026-11-22T22:21:18Z occurrence=44-2-vs-code-copilot-mcp-configuration-targets
+- 2026-11-22T22:25:45Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=lead note=decision_135:reproduced_on_built_CLI(claude-code_mode_change_in_project_B_refused_by_vscode_record_from_A);AD-15_regression=HIGH;rework_1_adds_optional_path_on_records
+- 2026-11-22T23:20:45Z status=resolved-by:44-2-vs-code-copilot-mcp-configuration-targets by=cr note=built CLI env-i scratch HOME: vscode A then claude-code B apply+mode change exit 0, bytes == control; swapped; one-project adopt/refuse; pathless state ok
+
+### DW-734: The strict Copilot user file accepts a leading BOM (readers.ts strips U+FEFF before the strict parse)
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: QA probe: a BOM-prefixed ~/.copilot/mcp-config.json applies with exit 0 and keeps the BOM; whether the Agent Host's JSON.parse read strips a BOM is unverified
+- 2026-11-22T22:21:30Z status=wontfix-accepted owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=manager never adds a BOM; reopen_if=D-6 or a bundle check shows a BOM-prefixed mcp-config.json is not loaded
+
+### DW-735: A remove by one client of a shared .mcp.json entry leaves the other client's ledger record behind
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: high | footprint: in-story
+- evidence: QA probe: after claude-code remove, the vscode record stays; a later different claude-code entry makes a vscode re-apply conflict; dropping peer records is unsafe while records carry no path (DW-733)
+- 2026-11-22T22:21:30Z status=wontfix-accepted owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=reopen_if=DW-733 lands path-keyed records (then drop the peers' records for that file on remove)
+- 2026-11-22T23:20:45Z status=resolved-by:44-2-vs-code-copilot-mcp-configuration-targets by=cr note=dropRemovedShared: built-CLI remove dropped vscode A record, kept vscode B record and vscode stash; pinned + mutation-verified
+
+### DW-736: doctor labels a shared .mcp.json finding with the first client in registry order (claude-code) even for a VS Code-only user
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: QA probe: a vscode-only apply, then doctor lists [claude-code/project] reference findings; the spec requires the file checked once
+- 2026-11-22T22:21:30Z status=wontfix-accepted owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=reopen_if=a user reports a doctor finding labelled with a client they never configured
+
+### DW-737: The capture scripts the pre-44-2 oracle fixtures cite (capture-oracle.mjs, capture-oracle-unrecorded.mjs) are not in the repository
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: adapters-44-2-backcompat.test.ts and both oracle fixtures name node capture-oracle.mjs; git ls-files has no such script, so the oracle cannot be re-captured from 9f7797c5
+- 2026-11-22T22:21:30Z status=wontfix-accepted owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=reopen_if=the pre-44-2 oracle fixtures need refreshing or a review disputes a captured value
+
+### DW-738: doctor's orphaned-stashes check resolves each stash's file from the current directory, not from the stash's recorded path
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: cli/clients.ts:1731-1745 check 4 calls resolveScopePath(adapter, stash.scope, ctx) per stash; pre-existing cross-project reading, now fixable since records carry path
+- 2026-11-22T23:07:19Z status=wontfix-accepted owner=44-2-vs-code-copilot-mcp-configuration-targets by=harvest note=reopen_if=a doctor run reports a stash as orphaned (or healthy) for a file in a different project than the recorded path; needs a call on stashes of deleted files
+
+### DW-739: Per-file ledger matching changes each client's own cross-project behavior (stash enabled only where disabled; repaired non-canonical name not owned in another project) without a recorded Lead decision or AD-30 spine text
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: high | footprint: in-story
+- evidence: built CLI: claude-code disable in A, enable in A moved to A2 exits 1 'no disabled entry is stashed' (pre-story enabled); repair-recorded iris-dev-mcp2 in A, remove in B exits 1 (auditor probe). Slot-wide own matching would reopen DW-733 in reverse (claude-code remove in B drops its A record, vscode then overwrites A)
+- 2026-11-22T23:20:45Z status=decision-pending owner=burndown by=cr note=human=Lead: ratify per-file own-record semantics as AD-15 sanctioned change and write the AD-30 per-file refinement into the spine (Rule 20); CHANGELOG now states it
+- 2026-11-22T23:23:28Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=lead note=decision_136:ratified_as_sanctioned_AD-15_change;old_slot-wide_matching_leaked_across_projects;AD-30_spine_text_written;CHANGELOG_states_the_move_cost
+
+### DW-740: Ledger record paths are compared as resolved strings, not real paths, so one .mcp.json reached through a Windows junction or subst drive is two files and the shared-file conflict guard can fail open
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: resolveTarget records target.path from process.cwd(); the home guard uses realOrResolved but the ledger compare uses pathKey; posix getcwd is physical, Windows cwd is not
+- 2026-11-22T23:20:45Z status=wontfix-accepted owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=reopen_if=a ledger shows two records of one client and name whose paths realpath to the same file (Windows junction/subst cwd)
+
+### DW-741: AD-30 spine per-file sentence states the adopt rule as 'the other client recorded without a path'; the patched rule records the pre-sharing writer (Claude Code) whenever it owns the adopted entry with no record for that file, and an enable-adopt records the enabler
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: re-review 2 HIGH patch: recordAdoptedOwners keys on recordingClients/ownerClients, not on a pathless record (a converted record, or none, also triggers); vscode-as-other-client pathless records describe the old .vscode/mcp.json and are never recorded; the spine sentence is both narrower and wider than the code
+- 2026-11-22T23:35:58Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=lead Rule 20 spine edit at the rework commit; proposed text in the spec's Review Findings (rework re-review 2)
+- 2026-11-22T23:38:22Z status=resolved-by:44-2-vs-code-copilot-mcp-configuration-targets by=lead note=decision_137:AD-30_adoption_sentence_rewritten_to_the_reviewer_text;lint_spine_0
+
+### DW-742: An enable in a shared .mcp.json establishes no per-file ownership: an adopting enable never records the implied owner (Claude Code), and a stash-add enable from a pathless stash records nobody, so the other client later overwrites the entry unrefused
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: high | fix-risk: low | footprint: in-story
+- evidence: built CLI: pre-44.2 pathless cc record + pathless vscode server-manager stash; vscode enable adopts (ledger: vscode:B only), vscode apply env-reference exits 0 changed:1 over cc's entry. Reverse: vscode stash-add enable from a pathless stash leaves no vscode record; cc apply rewrites it. Only apply's adopt calls recordAdoptedOwners
+- 2026-11-22T23:54:03Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=rework_cap_reached: re-review 3 HIGH, not patched; Planner decides; proposed fix in spec Review Findings (rework re-review 3)
+- 2026-11-23T04:51:36Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=rr4 HIGH: vscode disable+enable of cc entry (pathless/no cc record) makes vscode sole owner; overwrite; option B
+- 2026-11-23T06:01:31Z status=resolved-by:44-2-vs-code-copilot-mcp-configuration-targets owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=option B rr5: lead MATRIX-B 120/120 on rebuilt CLI; non-owner refused every verb+restore; pins B2-B9 + rr5 foreign/restore pins
+
+### DW-743: sharedPeers counts the same client's other scope as a sharing peer, so from the home directory a cursor, codex, gemini, kimi-code or jetbrains-junie user-scope re-apply with a pre-44.2 (pathless) or missing state record is refused as a shared-file conflict
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: high | fix-risk: low | footprint: in-story
+- evidence: built CLI, cwd=HOME: user path == the client's own project path (~/.cursor/mcp.json); pathless own record never counts once peers exist (recordingClients), no implied owner (not pre-sharing), so a mode change exits 1 'shared with another client'; same run from another dir exits 0; pre-story had no shared rule; status shows sharedWith:[cursor]
+- 2026-11-22T23:54:18Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=rework_cap_reached: re-review 3 HIGH, not patched; Planner decides; AC 44.2.8 back-compat, AD-15; fix: skip same-client peers in sharedPeers
+- 2026-11-23T04:51:36Z status=resolved-by:44-2-vs-code-copilot-mcp-configuration-targets by=cr note=rr4: sharedPeers project-pair-only by construction; matrix-ext E3 81/81; roster pin red on linux+darwin collision
+
+### DW-744: A VS Code-only user whose project folder moved (or whose state file was lost) is refused a mode change as 'shared with claude-code', and a same-mode re-apply records Claude Code as an owner of the file for good
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: built CLI: vscode apply in A, rename A; vscode mode change exits 1 naming claude-code; same-mode re-apply adopts and records claude-code:A-moved; later mode change still exits 1. An unrecorded entry cannot be told apart from a lost-state Claude Code entry
+- 2026-11-22T23:54:18Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=AD-30 decision #137 (an adoption records the implied owner, 'or none'); refusal, never an overwrite; remove then apply clears it
+- 2026-11-23T06:01:31Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=option B: moved-folder vscode re-apply is refused, records nothing; docs now say remove with claude-code then apply
+
+### DW-745: A put-back vscode enable of a path-less pre-44.2 stash into a shared .mcp.json also records claude-code as implied owner, so a later differing vscode write is refused naming claude-code
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: rework-4 review, Verification Gap repro on the built CLI (lead matrix E6 setup, then enable + apply --mode env-reference exits 1); gating the implied record on adopting-only turns lead matrix E2 red
+- 2026-11-23T04:39:01Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=lead note=decision_141: fails safe (refusal, never an overwrite); pre-44.2 path-less vscode stash only; workaround remove then apply; the implied-owner rule is what AD-30 #137 and matrix E2 require
+- 2026-11-23T06:01:31Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=moot_under_option_B: adopt path and implied-owner record removed (no recordAdoptedOwners); B9 put-back owns, no cc record
+
+### DW-746: client-config restore rolls back the whole shared .mcp.json from the calling client's backups, so it can revert the other client's entry; restore is not subject to the option-B one-owner rule
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: engine.ts restore only names the other reader; a restore of a backup taken before Claude Code wrote an entry removes that entry and leaves its ledger record (rework-5 review)
+- 2026-11-23T05:40:42Z status=open owner=44-2-vs-code-copilot-mcp-configuration-targets by=harvest note=for the option-B re-review: patch (refuse a shared-file restore that would change the other client's owned entries, or restore owned entries only) if fix-risk allows, else route to burndown
+- 2026-11-23T06:01:31Z status=resolved-by:44-2-vs-code-copilot-mcp-configuration-targets owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=restore refused when backup changes an entry the other client owns; built-CLI pin + mutation line (rr5)
+
+### DW-747: A vscode entry left in the old .vscode/mcp.json cannot be cleaned by the CLI while claude-code owns the same server in the shared .mcp.json: vscode remove/apply are refused, and doctor's vscode-local-harness-entries fix names that apply
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: rr5 review (blind-hunter + edge-case-hunter): remove/apply refusal returns before withLegacyRemoval; doctor check 7 fix = apply --client vscode; only way out is remove with claude-code first, which switches the server to vscode
+- 2026-11-23T06:01:37Z status=routed owner=burndown by=cr note=needs a decision: may a refused vscode verb still sweep its own old-file entry, or doctor name the owner's remove; option B says refused verbs write nothing
+- 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
+
+### DW-748: An entry re-added from outside the tool (git pull, claude mcp add, hand edit) after claude-code removed it belongs to vscode when vscode still holds a stash of it for the file, so claude-code is refused it
+- source: spec-44-2-vs-code-copilot-mcp-configuration-targets.md | severity: med | fix-risk: low | footprint: in-story
+- evidence: rr5 verification-gap trace: vscode apply, vscode disable (stash), cc apply (drops vscode record), cc remove (stash kept), outside write; fileOwner's stash tier returns vscode
+- 2026-11-23T06:01:37Z status=by-design owner=44-2-vs-code-copilot-mcp-configuration-targets by=cr note=AD-30 owner order is record, then stash, then claude-code; fails safe (refusal naming vscode); way out: remove with vscode
+
+### DW-749: The 44.6 keychain entry is chosen by Server Manager server name only, so a workspace-scope intersystems.servers entry reusing a user-scope server's name would send that stored password to the workspace entry's host
+- source: spec-44-6-launcher-provider-works-in-copilot-sessions.md | severity: med | fix-risk: med | footprint: in-story
+- evidence: IRIS_CREDENTIAL_NAME carries the server name; the host comes from that server's spec; nothing ties the stored entry to a host (serverDefinitionProvider.ts providedEnvFor); the Server Manager import keys the keychain the same way; unverified
+- 2026-11-23T08:12:06Z status=open owner=44-6-launcher-provider-works-in-copilot-sessions by=harvest note=for the code review: verify, then patch (e.g. do not provide IRIS_CREDENTIAL_NAME for a name defined at more than one scope, or bind the entry to its host) or route with the residual
+- 2026-11-23T08:27:23Z severity=high by=lead note=QA_confirmed(dw749Characterization.test.ts):workspace-scope_override_of_webServer.host_sends_the_user's_stored_password_to_the_workspace_host_on_the_Copilot_path_without_a_prompt;reachable_from_an_untrusted_repo's_.vscode/settings.json;must_fix_in_44.6_review
+- 2026-11-23T08:43:48Z status=resolved-by:44-6-launcher-provider-works-in-copilot-sessions by=cr note=provide names IRIS_CREDENTIAL_NAME only for a user-scope-only server (inspect, same scope); else env {}; pinned fresh-process+control, mutation red
+
+### DW-750: The launcher fires no MCP definitions-changed event when intersystems.servers changes, so a Copilot-harness session keeps the old provided host/port/username until a window reload
+- source: spec-44-6-launcher-provider-works-in-copilot-sessions.md | severity: low | fix-risk: med | footprint: in-story
+- evidence: extension.ts:652 refreshes only the status bar; no onDidChangeMcpServerDefinitions emitter; command/args already behave this way; README says reload the window
+- 2026-11-23T08:12:06Z status=wontfix-accepted owner=44-6-launcher-provider-works-in-copilot-sessions by=harvest note=reopen_if=a user report of a stale Copilot-session connection after editing intersystems.servers, or VS Code documents re-provide on change
+- 2026-11-23T08:43:48Z occurrence=44-6-launcher-provider-works-in-copilot-sessions
+
+### DW-751: McpServerBase.start() copies the registry-completed default password back into this.config with no test; nothing reads this.config.password after start
+- source: spec-44-6-launcher-provider-works-in-copilot-sessions.md | severity: low | fix-risk: low | footprint: in-story
+- evidence: server-base.ts:2793; deleting the block turns no test red
+- 2026-11-23T08:12:06Z status=open owner=44-6-launcher-provider-works-in-copilot-sessions by=harvest note=for the code review: two-way door - delete the block if truly unread, or pin it with a start harness
+- 2026-11-23T08:43:48Z status=resolved-by:44-6-launcher-provider-works-in-copilot-sessions by=cr note=block deleted (server-base.ts byte-identical to baseline); private config.password unread: bootstrap reads host/port/namespace
+
+### DW-752: Under the Local harness the launcher resolver takes the host from the merged intersystems.servers view and the password from Server Manager's session for that name, so a workspace override of a user server's host may receive that password
+- source: spec-44-6-launcher-provider-works-in-copilot-sessions.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: resolveEnvForLabel uses getServerSpec (merged user+workspace layers) then getSession for the server name; pre-existing since Story 31.x and shared by every Server Manager consumer; AC-11 pins the Local env unchanged; unverified: Server Manager 3.x auth provider keying not checked
+- 2026-11-23T08:43:48Z status=decision-pending owner=burndown by=cr note=product call: extend the 44.6 user-scope guard (isUserScopedServer) to Local resolve? diverges from Server Manager/ObjectScript norms
+- 2026-11-23T21:25:52Z status=routed owner=44-8-local-resolver-hands-a-password-only-to-user-scoped-servers by=merge_gate note=owner answer 2026-11-23 (decision #153): option (c), fix before the release in Story 44.8; probe first, may close with evidence
+- 2026-11-23T23:37:38Z status=resolved-by:44-8-local-resolver-hands-a-password-only-to-user-scoped-servers owner=44-8-local-resolver-hands-a-password-only-to-user-scoped-servers by=lead note=probe confirmed the leak (SM 3.16.0 keys by name+username; VS Code merges layers; built-dist probe reproduced); the Local resolve guard (inspectServerScope, before any getServerSpec/getAccount/getSession) refuses workspace-defined/overridden servers with a named warning; mutation-proven on the Local path (launcher 8 red); user-only byte-identical
+
+### DW-753: credentials-cli-real-keyring.test.ts is order-dependent: its two tests share a module-level fakeStore Map that no hook clears, so a shuffled run fails the list assertion
+- source: cycle-log-epic-44.md (lead fresh check, Story 44.6) | severity: low | fix-risk: low | footprint: in-epic
+- evidence: pnpm vitest --sequence.shuffle --sequence.seed=44 on packages/shared: 1 failed (expected names [prod-wiring-server], got 2); in order 2/2 pass; file unchanged since Story 31.2 (c6d39e4e)
+- 2026-11-23T08:45:54Z status=open owner=44-5-integration-suites-cannot-pass-without-testing by=lead note=Rule 19 hermeticity; fix: fakeStore.clear() in a beforeEach; 44.5 hardens the suites
+- 2026-11-23T16:50:10Z status=resolved-by:44-5-integration-suites-cannot-pass-without-testing owner=44-5-integration-suites-cannot-pass-without-testing by=lead note=beforeEach clears fakeStore; a third test asserts the store starts empty so dropping the hook fails the default-order run; passes default and shuffled seed 44 (shared 2651)
+
+### DW-754: iris_doc_compile reports success for a compile in which a class failed while another class had its Storage written
+- source: spec-44-4-bootstrap-compile-result-accuracy.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: compile.ts:135-170 reads result.content[].errors, which IRIS never sends (2026.1, 2026.2, IRIS for Health 2026.2, Atelier v1-v8); General.Compile replaces the status when it writes Storage (irislib/%Atelier/v1/Utils/General.cls:1318-1385), so HTTP 200 with no status error
+- 2026-11-23T10:38:57Z status=routed owner=burndown by=harvest note=fix by reusing Story 44.4's verifyCompiled check (two Atelier reads) in the tool; the epic burn-down story
+- 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
+
+### DW-755: iris_doc_load and env-promote read a compile as successful from per-document errors only, so a Storage-written partial failure reads as success there (the DW-754 root cause)
+- source: spec-44-4-bootstrap-compile-result-accuracy.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: load.ts:604-640 computes compilationResult.success from per-document errors, env-promote.ts:975 posts action/compile; the planning probe shows real documents never carry errors; unverified to the end of result handling
+- 2026-11-23T12:18:39Z status=routed owner=burndown by=harvest note=fix with DW-754 by reusing verifyCompiled; probe first (Rule #16)
+- 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
+
+### DW-756: iris_doc_xml_export import with compile:true judges the compile only by per-file status text, so a Storage-written partial failure may read as success (unverified; the DW-754 root cause)
+- source: spec-44-4-bootstrap-compile-result-accuracy.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: format.ts:262-310 posts action/xml/load?flags=..c and surfaces only result.content[].status; no class-level check. Whether IRIS leaves the failure out of that status when the load writes Storage is unprobed (Rule #16).
+- 2026-11-23T12:49:18Z status=routed owner=burndown by=cr note=probe xml/load with a Storage-written partial failure first; if real, reuse verifyCompiled as DW-754/755 do
+- 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=CLOSED-WITH-EVIDENCE: probes G/H show xml/load per-file status carries ERROR #5475 naming the failing class whether or not Storage was written; a live-gate leg pins it (Story 44.7)
+
+### DW-757: iris_database_manage delete removes only the CPF entry: the database stays mounted and its IRIS.DAT stays on disk, so a second admin integration run on one instance fails at create (ERROR #60)
+- source: spec-44-5-integration-suites-cannot-pass-without-testing.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: seen while hardening admin.integration.test.ts database create (Story 44.5): a second run on the same instance fails at create with ERROR #60 the database must be dismounted; CI unaffected (fresh container per run)
+- 2026-11-23T15:37:44Z status=routed owner=burndown by=harvest note=probe first (Rule #16): decide whether delete should dismount (and whether removing IRIS.DAT is in scope or by-design), then fix or close-by-decision
+- 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
+
+### DW-758: 13 pre-existing armed integration tests assert only content[0]?.text toBeDefined, so an isError result passes them (a shape check:live-guards cannot see: no if)
+- source: spec-44-5-integration-suites-cannot-pass-without-testing.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: Story 44.5 review (blind hunter AST walk): admin password-validate x2 and permission-check; interop production status, auto-start get/set, event logs x2, queue status, rules, transforms, trace. Untouched by 44.5 (outside its 48-site grammar); a tool reply always carries text, so toBeDefined cannot fail.
+- 2026-11-23T16:28:21Z status=routed owner=burndown by=cr note=per test: assert isError falsy (or the documented error) and verify on a CI-image throwaway; weak-password may be an expected error
+- 2026-11-23T16:50:10Z status=routed owner=burndown by=lead note=count correction: 12 tests, not 13 (the CR patched the ops task run in-story; spec-44-5 records 12)
+- 2026-11-23T16:54:11Z status=routed owner=44-7-epic-44-burn-down by=lead note=chartered at the Epic 44 burn-down gate (decision #150); terminal disposition required (Rule #37)
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
+
+### DW-759: A failed routine (.mac/.int/.inc) in a compile that also writes a class's Storage still reads as success in iris_doc_compile, iris_doc_load and iris_env_promote: the Story 44.4 check covers classes only
+- source: spec-44-7-epic-44-burn-down.md | severity: low | fix-risk: med | footprint: out-of-footprint
+- evidence: General.Compile overwrites tSC in its tUpdated loop (irislib/%Atelier/v1/Utils/General.cls:1318-1385); verifyCompiled refuses non-.cls names; the 44.4 oracle table records Atelier upd stays true for a failed routine; not probed with a routine
+- 2026-11-23T17:13:26Z status=routed owner=44-7-epic-44-burn-down by=harvest note=taken into Story 44.7 at its spec gate (decision #151): probe for a routine oracle, resolve or close by decision with the limit documented
+- 2026-11-23T20:41:53Z status=resolved-by:44-7-epic-44-burn-down owner=44-7-epic-44-burn-down by=lead note=Story 44.7 disposition table: resolved (live probe + fix; mutation lines in spec-44-7 Verification; CR 0369423f)
+
+### DW-760: A compile failure of an .inc or .int document alone, in a compile that also writes a persistent class's Storage, still reads as success in iris_doc_compile, iris_doc_load and iris_env_promote: IRIS's docnames upd flag carries no compile verdict for them
+- source: spec-44-7-epic-44-burn-down.md | severity: low | fix-risk: med | footprint: in-epic
+- evidence: Story 44.7 probe: docnames/RTN upd is true for an .inc whether or not anything compiled it; the .int case likewise has no non-console oracle; .mac is resolved via upd (DW-759)
+- 2026-11-23T19:03:36Z status=routed owner=44-7-epic-44-burn-down by=harvest note=remainder of DW-759
+- 2026-11-23T19:03:49Z status=wontfix-accepted owner=44-7-epic-44-burn-down by=lead note=closed by decision #152: no oracle that reads no console text exists for .inc/.int (Rule #13); the limit is documented in packages/iris-dev-mcp/README.md and the CHANGELOG; reopen if IRIS exposes one
+
+### DW-761: The shared Server Manager import (IRIS_SERVER_MANAGER=auto) takes a server's definition from the first settings file that names it (workspace before user) and the password from the keychain by server name, so a workspace file may direct a stored password to its own host (the DW-752 class)
+- source: spec-44-8-local-resolver-hands-a-password-only-to-user-scoped-servers.md | severity: med | fix-risk: med | footprint: out-of-footprint
+- evidence: packages/shared/src/server-manager-source.ts:288-310 (candidate files in precedence order, workspace first; first sighting decides); credential chain keyed by server name (credential-chain.ts); unprobed whether a host-only workspace entry claims the slot
+- 2026-11-23T21:35:53Z status=routed owner=44-8-local-resolver-hands-a-password-only-to-user-scoped-servers by=harvest note=taken into Story 44.8 at its spec gate (decision #154): probe, then fix with the user-scope rule or close with evidence
+- 2026-11-23T23:37:38Z status=resolved-by:44-8-local-resolver-hands-a-password-only-to-user-scoped-servers owner=44-8-local-resolver-hands-a-password-only-to-user-scoped-servers by=lead note=probe confirmed (a workspace entry claimed the slot and got the keychain password); workspace-scope entries (incl. relative IRIS_SM_SETTINGS_PATHS) never run the credential chain: auto skips with a warning, required fails naming it; inline password in the same file allowed; mutation-proven (shared 13 red)
+
+### DW-762: A repository-controlled MCP server env that sets IRIS_SM_SETTINGS_PATHS to the repository's own settings file makes that file count as user scope, bypassing DW-761's workspace-scope guard
+- source: spec-44-8-local-resolver-hands-a-password-only-to-user-scoped-servers.md | severity: med | fix-risk: low | footprint: out-of-footprint
+- evidence: server-manager-source.ts discoverScopedSettingsFiles treats IRIS_SM_SETTINGS_PATHS files as the operator's own; unprobed whether a repo can set it
+- 2026-11-23T22:31:21Z status=routed owner=44-8-local-resolver-hands-a-password-only-to-user-scoped-servers by=harvest note=lead triage at dev_complete (decision #155)
+- 2026-11-23T22:31:21Z status=by-design owner=44-8-local-resolver-hands-a-password-only-to-user-scoped-servers by=lead note=decision #155: whoever sets a server's launch env (a committed .mcp.json env block, approved by the client) also chooses its command, which is arbitrary code execution, and can equally set IRIS_HOST with IRIS_CREDENTIAL_NAME; the launch config is inside the trust boundary the client's project-server approval guards, so this adds no new capability. The guard defends against settings files, which are data, not against launch config.

@@ -10,18 +10,20 @@
  * dependency order to avoid conflicts. All test resources use the
  * "MCPAdminTest" prefix for easy identification.
  *
- * NOTE: Some REST endpoints may return HTTP 500 on certain IRIS deployments
- * due to missing server-side utility classes. The tests tolerate these known
- * API errors: they verify the tool handler processes the response correctly
- * (returns isError with a descriptive message) rather than throwing an
- * unhandled exception. Verification (list) tests are skipped when the
- * preceding create call did not actually succeed.
+ * NOTE (Story 44.5, DW-684): a create that fails FAILS its test, and a verify
+ * test asserts that its create succeeded before it reads the list. An armed CI
+ * suite reports a test with no failing assertion as passed, so no test here
+ * tolerates a failed create or asserts only when one succeeded
+ * (`pnpm check:live-guards` refuses that shape). The four creates that used to
+ * fail on the CI image (database, namespace, mapping, OAuth server) had two
+ * test defects as their causes: the database create needs a `directory` (the
+ * namespace and the mapping need the database), and the OAuth server create
+ * needs `customizationRoles`.
  */
 
 import { describe, it, expect, afterAll, beforeAll } from "vitest";
 import {
   IrisHttpClient,
-  IrisApiError,
   negotiateVersion,
   buildToolContext,
   type ToolContext,
@@ -64,6 +66,11 @@ const REST_OK = globalThis.__CUSTOM_REST_AVAILABLE__;
 // ── Test constants ────────────────────────────────────────────────────
 
 const TEST_DB_NAME = "MCPADMINTEST-DATA";
+/**
+ * Story 44.7 (DW-757): `delete` keeps the database's `IRIS.DAT` and its directory on disk, so a fixed directory would make
+ * the second run on one instance fail its create (#78, file already exists). Each run takes its own leaf.
+ */
+const TEST_DB_RUN_ID = `${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
 const TEST_NS_NAME = "MCPADMINTEST";
 const TEST_RESOURCE_NAME = "MCPAdminTestResource";
 const TEST_ROLE_NAME = "MCPAdminTestRole";
@@ -81,8 +88,8 @@ let ctx: ToolContext;
 let oauthAvailable = false;
 
 /**
- * Track what was successfully created (isError was NOT set on the response)
- * for both cleanup and to gate verification tests.
+ * Track what was successfully created (isError was NOT set on the response).
+ * A verify test asserts its flag, so a failed create fails twice, not silently.
  */
 const created = {
   database: false,
@@ -132,27 +139,54 @@ async function safeDelete(
 const MAX_LIST_PAGES = 200;
 
 /**
- * The first page's result and the `name` of every row on every page of a paginated list tool. The list tools return one
+ * The first page's result and every row on every page of a paginated list tool. The list tools return one
  * page of 50 rows plus a `nextCursor`, and a fresh IRIS for Health holds more resources and roles than fit on one page,
  * so a row that was just created is on the first page only by chance.
  */
-async function listAllNames(
+async function listAllRows<Row extends { name: string }>(
   tool: { handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<ToolResult> },
-  rowsKey: "resources" | "roles",
+  rowsKey: "resources" | "roles" | "databases",
   toolCtx: ToolContext,
-): Promise<{ first: ToolResult; names: string[] }> {
+): Promise<{ first: ToolResult; rows: Row[] }> {
   const first = await tool.handler({}, toolCtx);
-  const names: string[] = [];
+  const rows: Row[] = [];
   let page = first;
   for (let pages = 1; !page.isError; pages++) {
     const structured = page.structuredContent as Record<string, unknown> & { nextCursor?: string };
-    names.push(...(structured[rowsKey] as Array<{ name: string }>).map((row) => row.name));
+    rows.push(...(structured[rowsKey] as Row[]));
     if (structured.nextCursor === undefined) break;
     if (pages >= MAX_LIST_PAGES) throw new Error(`${rowsKey}: still a nextCursor after ${MAX_LIST_PAGES} pages`);
     page = await tool.handler({ cursor: structured.nextCursor }, toolCtx);
     if (page.isError) throw new Error(`${rowsKey}: page ${pages + 1} failed: ${page.content[0]?.text}`);
   }
-  return { first, names };
+  return { first, rows };
+}
+
+/** The first page's result and the `name` of every row on every page of a paginated list tool. */
+async function listAllNames(
+  tool: { handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<ToolResult> },
+  rowsKey: "resources" | "roles",
+  toolCtx: ToolContext,
+): Promise<{ first: ToolResult; names: string[] }> {
+  const { first, rows } = await listAllRows<{ name: string }>(tool, rowsKey, toolCtx);
+  return { first, names: rows.map((row) => row.name) };
+}
+
+/**
+ * The directory for the test database: a sibling of the `USER` database's directory, with that directory's separator
+ * (`<parent of USER's directory>/mcpadmintestdata<run id>/`). The create action requires a `directory`, and a sibling of a
+ * directory IRIS already uses is a place the instance can create on any platform. The leaf is unique per run
+ * ({@link TEST_DB_RUN_ID}), because `delete` leaves the directory and its `IRIS.DAT` behind.
+ */
+async function testDatabaseDirectory(toolCtx: ToolContext): Promise<string> {
+  const { rows } = await listAllRows<{ name: string; directory: string }>(databaseListTool, "databases", toolCtx);
+  const user = rows.find((row) => row.name.toUpperCase() === "USER");
+  expect(user?.directory, "database.list must list the USER database with its directory").toBeTruthy();
+  const userDirectory = user?.directory ?? "";
+  const separator = userDirectory.includes("\\") ? "\\" : "/";
+  const trimmed = userDirectory.replace(/[\\/]+$/, "");
+  const parent = trimmed.slice(0, trimmed.lastIndexOf(separator));
+  return `${parent}${separator}mcpadmintestdata${TEST_DB_RUN_ID}${separator}`;
 }
 
 describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
@@ -221,35 +255,23 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
   describe("database management", () => {
     it("creates a test database", async () => {
       attempted.database = true;
+      const directory = await testDatabaseDirectory(ctx);
       const result = await databaseManageTool.handler(
-        { action: "create", name: TEST_DB_NAME },
+        { action: "create", name: TEST_DB_NAME, directory },
         ctx,
       );
 
-      // Verify the handler returned a result without throwing
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        created.database = true;
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      created.database = true;
     });
 
     it("verifies database in database.list", async () => {
-      const result = await databaseListTool.handler({}, ctx);
+      expect(created.database, "the create test must have created the database").toBe(true);
+      const { first: result, rows } = await listAllRows<{ name: string }>(databaseListTool, "databases", ctx);
 
-      // Verify the handler returned a result without throwing
-      expect(result.content[0]?.text).toBeDefined();
-
-      // Only verify list contents if the list call succeeded and create succeeded
-      if (!result.isError && created.database) {
-        const structured = result.structuredContent as {
-          databases: Array<{ name: string }>;
-          count: number;
-        };
-        const found = structured.databases.some(
-          (db) => db.name.toUpperCase() === TEST_DB_NAME.toUpperCase(),
-        );
-        expect(found).toBe(true);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const found = rows.some((db) => db.name.toUpperCase() === TEST_DB_NAME.toUpperCase());
+      expect(found).toBe(true);
     });
   });
 
@@ -268,26 +290,23 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        created.namespace = true;
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      created.namespace = true;
     });
 
     it("verifies namespace in namespace.list", async () => {
+      expect(created.namespace, "the create test must have created the namespace").toBe(true);
       const result = await namespaceListTool.handler({}, ctx);
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError && created.namespace) {
-        const structured = result.structuredContent as {
-          namespaces: Array<{ name: string }>;
-          count: number;
-        };
-        const found = structured.namespaces.some(
-          (ns) => ns.name.toUpperCase() === TEST_NS_NAME.toUpperCase(),
-        );
-        expect(found).toBe(true);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const structured = result.structuredContent as {
+        namespaces: Array<{ name: string }>;
+        count: number;
+      };
+      const found = structured.namespaces.some(
+        (ns) => ns.name.toUpperCase() === TEST_NS_NAME.toUpperCase(),
+      );
+      expect(found).toBe(true);
     });
   });
 
@@ -307,29 +326,26 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        created.mapping = true;
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      created.mapping = true;
     });
 
     it("verifies mapping in mapping.list", async () => {
+      expect(created.mapping, "the create test must have created the mapping").toBe(true);
       const result = await mappingListTool.handler(
         { namespace: TEST_NS_NAME, type: "global" },
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError && created.mapping) {
-        const structured = result.structuredContent as {
-          mappings: Array<{ name: string }>;
-          count: number;
-        };
-        const found = structured.mappings.some(
-          (m) => m.name === TEST_MAPPING_NAME,
-        );
-        expect(found).toBe(true);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const structured = result.structuredContent as {
+        mappings: Array<{ name: string }>;
+        count: number;
+      };
+      const found = structured.mappings.some(
+        (m) => m.name === TEST_MAPPING_NAME,
+      );
+      expect(found).toBe(true);
     });
   });
 
@@ -348,19 +364,16 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        created.resource = true;
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      created.resource = true;
     });
 
     it("verifies resource in resource.list", async () => {
+      expect(created.resource, "the create test must have created the resource").toBe(true);
       const { first: result, names } = await listAllNames(resourceListTool, "resources", ctx);
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError && created.resource) {
-        expect(names).toContain(TEST_RESOURCE_NAME);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      expect(names).toContain(TEST_RESOURCE_NAME);
     });
   });
 
@@ -379,19 +392,16 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        created.role = true;
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      created.role = true;
     });
 
     it("verifies role in role.list", async () => {
+      expect(created.role, "the create test must have created the role").toBe(true);
       const { first: result, names } = await listAllNames(roleListTool, "roles", ctx);
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError && created.role) {
-        expect(names).toContain(TEST_ROLE_NAME);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      expect(names).toContain(TEST_ROLE_NAME);
     });
   });
 
@@ -413,37 +423,32 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        created.user = true;
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      created.user = true;
     });
 
     it("verifies user via user.get", async () => {
+      expect(created.user, "the create test must have created the user").toBe(true);
       const result = await userGetTool.handler(
         { name: TEST_USER_NAME },
         ctx,
       );
 
-      // Verify the handler returned a result without throwing
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError && created.user) {
-        // The REST response may return username in different fields depending
-        // on IRIS version; check the text serialization for the user name or
-        // the full name which contains "MCP Admin".
-        const text = result.content[0]?.text ?? "";
-        expect(text).toContain("MCP Admin");
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      // The REST response may return username in different fields depending
+      // on IRIS version; check the text serialization for the user name or
+      // the full name which contains "MCP Admin".
+      const text = result.content[0]?.text ?? "";
+      expect(text).toContain("MCP Admin");
     });
 
     it("lists all users and finds test user", async () => {
+      expect(created.user, "the create test must have created the user").toBe(true);
       const result = await userGetTool.handler({}, ctx);
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError && created.user) {
-        const text = result.content[0]?.text ?? "";
-        expect(text).toContain(TEST_USER_NAME);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const text = result.content[0]?.text ?? "";
+      expect(text).toContain(TEST_USER_NAME);
     });
   });
 
@@ -456,6 +461,7 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         ctx,
       );
 
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
       expect(result.content[0]?.text).toBeDefined();
     });
 
@@ -465,20 +471,20 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         ctx,
       );
 
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
       expect(result.content[0]?.text).toBeDefined();
     });
 
     it("verifies role assignment via user.get", async () => {
+      expect(created.user, "the create test must have created the user").toBe(true);
       const result = await userGetTool.handler(
         { name: TEST_USER_NAME },
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError && created.user) {
-        const text = result.content[0]?.text ?? "";
-        expect(text).toContain(TEST_ROLE_NAME);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const text = result.content[0]?.text ?? "";
+      expect(text).toContain(TEST_ROLE_NAME);
     });
   });
 
@@ -491,7 +497,9 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
+      // Story 44.7 (DW-758): the probed reply is `{valid:true,policy:{…}}`.
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      expect(result.structuredContent, result.content[0]?.text).toMatchObject({ valid: true });
     });
 
     it("validates a weak password returns result", async () => {
@@ -500,7 +508,12 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
+      // The probed reply is `{valid:false,message:"ERROR #845: …"}`: a policy
+      // verdict, not a tool error.
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const verdict = result.structuredContent as { valid?: boolean; message?: string };
+      expect(verdict?.valid, result.content[0]?.text).toBe(false);
+      expect(verdict.message ?? "").toContain("845");
     });
   });
 
@@ -517,14 +530,13 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError && created.user && created.resource) {
-        const structured = result.structuredContent as {
-          granted: boolean;
-          target: string;
-        };
-        expect(structured.target).toBe(TEST_USER_NAME);
-      }
+      expect(created.user && created.resource, "the user and the resource creates must have succeeded").toBe(true);
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const structured = result.structuredContent as {
+        granted: boolean;
+        target: string;
+      };
+      expect(structured.target).toBe(TEST_USER_NAME);
     });
 
     it("checks permission for a known system user", async () => {
@@ -537,7 +549,10 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
+      // Story 44.7 (DW-758): the probed reply is
+      // `{granted:true,reason:"target holds %All super-role"}` (Rule #6).
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      expect(result.structuredContent, result.content[0]?.text).toMatchObject({ granted: true });
     });
   });
 
@@ -558,53 +573,50 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        created.webapp = true;
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      created.webapp = true;
     });
 
     it("verifies web app via webapp.get", async () => {
+      expect(created.webapp, "the create test must have created the web app").toBe(true);
       const result = await webappGetTool.handler(
         { name: TEST_WEBAPP_NAME },
         ctx,
       );
 
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
       expect(result.content[0]?.text).toBeDefined();
     });
 
     it("verifies web app in webapp.list", async () => {
+      expect(created.webapp, "the create test must have created the web app").toBe(true);
       const result = await webappListTool.handler({}, ctx);
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError && created.webapp) {
-        const structured = result.structuredContent as {
-          webapps: Array<Record<string, unknown>>;
-          count: number;
-        };
-        expect(structured.count).toBeGreaterThan(0);
-        const text = result.content[0]?.text ?? "";
-        expect(text).toContain(TEST_WEBAPP_NAME);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const structured = result.structuredContent as {
+        webapps: Array<Record<string, unknown>>;
+        count: number;
+      };
+      expect(structured.count).toBeGreaterThan(0);
+      const text = result.content[0]?.text ?? "";
+      expect(text).toContain(TEST_WEBAPP_NAME);
     });
 
     it("lists web apps filtered by namespace", async () => {
+      expect(created.webapp, "the create test must have created the web app").toBe(true);
       const result = await webappListTool.handler(
         { namespace: TEST_NS_NAME },
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError && created.webapp) {
-        const structured = result.structuredContent as {
-          webapps: Array<Record<string, unknown>>;
-          count: number;
-        };
-        if (structured.count > 0) {
-          const text = result.content[0]?.text ?? "";
-          expect(text).toContain(TEST_WEBAPP_NAME);
-        }
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const structured = result.structuredContent as {
+        webapps: Array<Record<string, unknown>>;
+        count: number;
+      };
+      expect(structured.count).toBeGreaterThanOrEqual(1);
+      const text = result.content[0]?.text ?? "";
+      expect(text).toContain(TEST_WEBAPP_NAME);
     });
   });
 
@@ -624,20 +636,17 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        created.ssl = true;
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      created.ssl = true;
     });
 
     it("verifies SSL config in ssl.list", async () => {
+      expect(created.ssl, "the create test must have created the SSL configuration").toBe(true);
       const result = await sslListTool.handler({}, ctx);
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError && created.ssl) {
-        const text = result.content[0]?.text ?? "";
-        expect(text).toContain(TEST_SSL_NAME);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const text = result.content[0]?.text ?? "";
+      expect(text).toContain(TEST_SSL_NAME);
     });
   });
 
@@ -652,31 +661,22 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
       async (testContext) => {
         if (!oauthAvailable) testContext.skip();
         attempted.oauth = true;
-        try {
-          const result = await oauthManageTool.handler(
-            {
-              action: "create",
-              entity: "server",
-              issuerURL: "https://mcpadmintest.example.com",
-              name: "MCPAdminTestOAuth",
-              description: "Integration test OAuth2 server",
-              supportedScopes: "openid profile",
-            },
-            ctx,
-          );
+        // customizationRoles is Required by OAuth2.Server.Configuration: the tool sends "" when it is omitted and IRIS refuses.
+        const result = await oauthManageTool.handler(
+          {
+            action: "create",
+            entity: "server",
+            issuerURL: "https://mcpadmintest.example.com",
+            name: "MCPAdminTestOAuth",
+            description: "Integration test OAuth2 server",
+            supportedScopes: "openid profile",
+            customizationRoles: "%DB_IRISSYS,%Manager",
+          },
+          ctx,
+        );
 
-          expect(result.content[0]?.text).toBeDefined();
-          if (!result.isError) {
-            created.oauth = true;
-          }
-        } catch (error: unknown) {
-          // OAuth2 creation may fail if required IRIS classes are missing
-          if (error instanceof IrisApiError) {
-            expect([400, 404, 500]).toContain(error.statusCode);
-          } else {
-            throw error;
-          }
-        }
+        expect(result.isError, result.content[0]?.text).toBeFalsy();
+        created.oauth = true;
       },
     );
 
@@ -684,20 +684,58 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-admin-mcp integration", () => {
       "verifies OAuth2 config in oauth.list",
       async (testContext) => {
         if (!oauthAvailable) testContext.skip();
+        expect(created.oauth, "the create test must have created the OAuth2 server").toBe(true);
         const result = await oauthListTool.handler({}, ctx);
 
-        expect(result.content[0]?.text).toBeDefined();
-        if (!result.isError) {
-          const structured = result.structuredContent as {
-            servers: Array<Record<string, unknown>>;
-            clients: Array<Record<string, unknown>>;
-            serverCount: number;
-            clientCount: number;
-          };
-          expect(structured.serverCount).toBeGreaterThanOrEqual(0);
-          expect(structured.clientCount).toBeGreaterThanOrEqual(0);
-        }
+        expect(result.isError, result.content[0]?.text).toBeFalsy();
+        const structured = result.structuredContent as {
+          servers: Array<Record<string, unknown>>;
+          clients: Array<Record<string, unknown>>;
+          serverCount: number;
+          clientCount: number;
+        };
+        expect(structured.serverCount).toBeGreaterThanOrEqual(1);
+        expect(result.content[0]?.text ?? "").toContain("https://mcpadmintest.example.com");
       },
     );
+  });
+
+  // ── 13. Database delete: refused while in use, then dismounted (Story 44.7, DW-757) ──
+  //
+  // Last, because it takes the namespace and the database away. afterAll's deletes
+  // stay as the safety net for a run that failed before this point.
+
+  describe("database delete", () => {
+    it("refuses to delete a database a namespace uses, and changes nothing", async () => {
+      expect(created.database && created.namespace, "the database and namespace creates must have succeeded").toBe(true);
+      const refused = await databaseManageTool.handler({ action: "delete", name: TEST_DB_NAME }, ctx);
+
+      expect(refused.isError, refused.content[0]?.text).toBe(true);
+      expect(refused.content[0]?.text ?? "").toContain("in use");
+      const { rows } = await listAllRows<{ name: string }>(databaseListTool, "databases", ctx);
+      expect(rows.some((db) => db.name.toUpperCase() === TEST_DB_NAME.toUpperCase())).toBe(true);
+    });
+
+    it("dismounts the database it deletes", async () => {
+      expect(created.database && created.namespace && created.mapping, "the creates must have succeeded").toBe(true);
+      const mapping = await mappingManageTool.handler(
+        { action: "delete", type: "global", namespace: TEST_NS_NAME, name: TEST_MAPPING_NAME },
+        ctx,
+      );
+      expect(mapping.isError, mapping.content[0]?.text).toBeFalsy();
+      const namespace = await namespaceManageTool.handler({ action: "delete", name: TEST_NS_NAME }, ctx);
+      expect(namespace.isError, namespace.content[0]?.text).toBeFalsy();
+
+      const result = await databaseManageTool.handler({ action: "delete", name: TEST_DB_NAME }, ctx);
+
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      expect(result.structuredContent, result.content[0]?.text).toMatchObject({
+        action: "deleted",
+        name: TEST_DB_NAME,
+        dismounted: true,
+      });
+      const { rows } = await listAllRows<{ name: string }>(databaseListTool, "databases", ctx);
+      expect(rows.some((db) => db.name.toUpperCase() === TEST_DB_NAME.toUpperCase())).toBe(false);
+    });
   });
 });

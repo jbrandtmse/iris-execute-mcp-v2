@@ -13,6 +13,7 @@ import { CONFIRMATION_TEXT_LIMIT, IrisApiError, ProfileResolutionError } from "@
 import { STORAGE_FIXTURES } from "@iris-mcp/shared/test-helpers/storage-guard-fixtures";
 import { envPromoteTool } from "../tools/env-promote.js";
 import { currentClass, notFound } from "./conflict-fakes.js";
+import { cleanCheckReads } from "./compile-check-fakes.js";
 import { createMockHttp, createMockCtx, envelope } from "./test-helpers.js";
 
 /** A scanner fixture's text for class `name`, found by the start of its id. */
@@ -39,6 +40,20 @@ const DECLINED_RESULT = {
 
 /** The one mapping the source holds, which the mixed plan creates on the target. */
 const MAPPING = { name: "NewGlobal", type: "global", namespace: "HSCUSTOM", database: "IRISDB" };
+
+/** The dialog text of the scope of a confirm request (a promotion's scope carries its binding beside it). */
+function scopeTextOf(request: { scope?: unknown } | undefined): string {
+  const scope = request?.scope;
+  if (typeof scope === "object" && scope !== null && "text" in scope) return String((scope as { text: unknown }).text);
+  throw new Error("the confirm request carried no scope with a text");
+}
+
+/** The binding of the scope of a confirm request: what the person's answer is bound to. */
+function scopeBindingOf(request: { scope?: unknown } | undefined): unknown {
+  const scope = request?.scope;
+  if (typeof scope === "object" && scope !== null && "binding" in scope) return (scope as { binding: unknown }).binding;
+  throw new Error("the confirm request carried no scope with a binding");
+}
 
 /** The call order of a mock's first call: later calls have larger numbers. */
 function firstCallOrder(fn: { mock: { invocationCallOrder: number[] } }): number {
@@ -122,8 +137,12 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
       }
       throw notFound(path);
     });
+    // Story 44.7: the clean path adds the compile check's two reads on the target (the dictionary query, then docnames).
+    const check = cleanCheckReads({ routines: ["Rtn.mac"] });
     targetHttp.get.mockImplementation(async (path: string) => {
       if (path === "/api/atelier/") return envelope({ content: { api: 8 } });
+      const checked = check.get(path);
+      if (checked !== undefined) return checked;
       for (const [name, lines] of Object.entries(targetDocs)) {
         if (path === `${TGT}${name}`) return envelope(currentClass(lines));
       }
@@ -132,6 +151,8 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
     targetHttp.put.mockResolvedValue(envelope({ status: "" }));
     targetHttp.post.mockImplementation(async (path: string, body: unknown) => {
       if (path.includes("/action/compile")) return envelope({ content: (body as string[]).map((name) => ({ name, errors: [] })) });
+      const checked = check.post(path, body);
+      if (checked !== undefined) return checked;
       return envelope({ success: true });
     });
   }
@@ -291,9 +312,12 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
       expect(confirm.mock.calls[0]?.[0]).toEqual({
         operation: "promote changes to another server",
         target: "server 'target', namespace SADEMO",
-        scope:
-          "4 step(s) from server 'source': #1 mappings createMapping global::NewGlobal; #2 documents putAndCompile Changed.cls; " +
-          "#3 documents putAndCompile New.cls; #4 documents putAndCompile Rtn.mac; drops Storage definitions: Changed.cls ('Default')",
+        scope: {
+          text:
+            "4 step(s) from server 'source': #1 mappings createMapping global::NewGlobal; #2 documents putAndCompile Changed.cls; " +
+            "#3 documents putAndCompile New.cls; #4 documents putAndCompile Rtn.mac; drops Storage definitions: Changed.cls ('Default')",
+          binding: [{ name: "Changed.cls", droppedStorage: ["Default"] }],
+        },
       });
       const asked = firstCallOrder(confirm);
       expect(firstCallOrder(sourceHttp.get)).toBeLessThan(asked);
@@ -383,10 +407,29 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
       // Ten listed steps would make the scope 653 characters, which the dialog cuts at 600: eight steps make it 580.
       const listed = Array.from({ length: 8 }, (_, i) => `#${i + 1} documents putAndCompile C${String(i + 1).padStart(2, "0")}.cls`).join("; ");
       const dropped = Array.from({ length: 10 }, (_, i) => `C${String(i + 1).padStart(2, "0")}.cls ('Default')`).join("; ");
-      expect(confirm.mock.calls[0]?.[0]?.scope).toBe(
+      expect(scopeTextOf(confirm.mock.calls[0]?.[0])).toBe(
         `12 step(s) from server 'source': ${listed}; and 4 more; drops Storage definitions: ${dropped}; and 2 more`,
       );
       expect((result.structuredContent as { storageDrops: unknown[] }).storageDrops).toHaveLength(12);
+    });
+
+    it("binds every drop of the execute, including the ones past the tenth that the dialog text cuts", async () => {
+      sourceDocs = {};
+      targetDocs = {};
+      for (let i = 1; i <= 11; i += 1) {
+        const name = `C${String(i).padStart(2, "0")}`;
+        sourceDocs[`${name}.cls`] = withoutStorage(name);
+        targetDocs[`${name}.cls`] = withStorage(name);
+      }
+      const confirm = proceedingConfirm();
+      ctx.confirm = confirm;
+
+      await execute(manyClassesDiff(11), Array.from({ length: 11 }, (_, i) => i + 1), { allowStorageRegeneration: true });
+
+      expect(scopeTextOf(confirm.mock.calls[0]?.[0])).toContain("; and 1 more");
+      expect(scopeBindingOf(confirm.mock.calls[0]?.[0])).toEqual(
+        Array.from({ length: 11 }, (_, i) => ({ name: `C${String(i + 1).padStart(2, "0")}.cls`, droppedStorage: ["Default"] })),
+      );
     });
 
     describe("long class names", () => {
@@ -418,7 +461,7 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
 
         await execute(namedClassesDiff(), names.map((_, i) => i + 1), { allowStorageRegeneration: true });
 
-        const scope = String(confirm.mock.calls[0]?.[0]?.scope);
+        const scope = scopeTextOf(confirm.mock.calls[0]?.[0]);
         const dropped = droppingIndexes.map((i) => `${names[i - 1]}.cls ('Default')`).join("; ");
         const shown = (scope.match(/#\d+ documents putAndCompile/g) ?? []).length;
         expect(scope.length).toBeLessThanOrEqual(CONFIRMATION_TEXT_LIMIT);
@@ -440,7 +483,7 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
 
         // One step and ten drops make 646 characters, nine drops 607: eight drops make the scope 556.
         const dropped = names.slice(0, 8).map((name) => `${name}.cls ('Default')`).join("; ");
-        const scope = String(confirm.mock.calls[0]?.[0]?.scope);
+        const scope = scopeTextOf(confirm.mock.calls[0]?.[0]);
         expect(scope).toBe(
           `10 step(s) from server 'source': #1 documents putAndCompile ${names[0]}.cls; and 9 more; ` +
             `drops Storage definitions: ${dropped}; and 2 more`,
@@ -459,17 +502,24 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
         await execute(namedClassesDiff(), names.map((_, i) => i + 1), { allowStorageRegeneration: true });
 
         const listed = names.map((name, i) => `#${i + 1} documents putAndCompile ${name}.cls`).join("; ");
-        expect(confirm.mock.calls[0]?.[0]?.scope).toBe(`10 step(s) from server 'source': ${listed}`);
+        expect(scopeTextOf(confirm.mock.calls[0]?.[0])).toBe(`10 step(s) from server 'source': ${listed}`);
         expect(listed.length).toBeGreaterThan(600);
       });
     });
 
     it("reads and writes each side with the Atelier version that side negotiated: source v8, target v7", async () => {
       const TGT7 = "/api/atelier/v7/SADEMO/doc/";
+      const check = cleanCheckReads();
       targetHttp.get.mockImplementation(async (path: string) => {
         if (path === "/api/atelier/") return envelope({ content: { api: 7 } });
+        const checked = check.get(path);
+        if (checked !== undefined) return checked;
         if (path === `${TGT7}Changed.cls`) return envelope(currentClass(withStorage("Changed")));
         throw notFound(path);
+      });
+      targetHttp.post.mockImplementation(async (path: string, body: unknown) => {
+        if (path.includes("/action/compile")) return envelope({ content: (body as string[]).map((name) => ({ name, errors: [] })) });
+        return check.post(path, body) ?? envelope({ success: true });
       });
 
       const refused = await execute(mixedDiff(), [2]);
@@ -495,7 +545,7 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
 
       const result = await execute(mixedDiff(), [1, 2, 3, 4]);
 
-      expect(confirm.mock.calls[0]?.[0]?.scope).toBe(
+      expect(scopeTextOf(confirm.mock.calls[0]?.[0])).toBe(
         "4 step(s) from server 'source': #1 mappings createMapping global::NewGlobal; #2 documents putAndCompile Changed.cls; " +
           "#3 documents putAndCompile New.cls; #4 documents putAndCompile Rtn.mac",
       );
@@ -511,7 +561,8 @@ describe("iris_env_promote execute: the Storage guard (Story 42.11)", () => {
 
       const result = await execute(mixedDiff(), [1, 2, 3, 4], { allowStorageRegeneration: true });
 
-      expect(confirm.mock.calls[0]?.[0]?.scope).not.toContain("drops Storage definitions");
+      expect(scopeTextOf(confirm.mock.calls[0]?.[0])).not.toContain("drops Storage definitions");
+      expect(scopeBindingOf(confirm.mock.calls[0]?.[0])).toEqual([]);
       expect(Object.keys(result.structuredContent as object)).toEqual(["source", "target", "planHash", "executed", "summary"]);
     });
 

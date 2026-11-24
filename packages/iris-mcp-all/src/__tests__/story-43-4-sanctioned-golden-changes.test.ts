@@ -7,9 +7,10 @@
  * `fixtures/sdk-golden-sanctioned-changes.json`, and the golden tests compare the live bytes with the frozen capture plus those
  * entries (`scripts/lib/golden-sanctioned-changes.mjs`). This file keeps the ledger honest. It pins:
  *  - both frozen files byte for byte, by SHA-256;
- *  - the entries of every story by id and order (43.4 first, then 42.10), so adding or removing one is a visible change of this file;
- *  - a shape for each of the five sanctions: how many entries it holds, which golden and operation, what the pointer may name, and
+ *  - the entries of every story by id and order (43.4 first, then 42.10, 42.11, 44.1, 44.4 and 44.7), so adding or removing one is a visible change of this file;
+ *  - a shape for each sanction: how many entries it holds, which golden and operation, what the pointer may name, and
  *    whether a description entry appends (S-43.4-descriptions) or corrects (S-42.10-resend-text). A sanction with no shape fails;
+ *    S-44.4-current-check holds the 15 startup inserts (Story 44.4, AC 44.4.8), three per server, written from the spec;
  *  - each entry's `old` against the value before it: the frozen value at its pointer, or the `new` of the entry before it;
  *  - that the sanctioned wire golden differs from the frozen one in exactly the rows the entries name, and the sanctioned handler golden
  *    in exactly the rows and the audit elements they name (a call entry only), every other byte as frozen;
@@ -107,11 +108,48 @@ const STORY_42_11_IDS = [
   "42.11/storage-guard-text/iris_env_promote@dev-main",
 ];
 
+/** The Story 44.1 entry (S-44.1-docdb-manage-text): the one sentence appended to the `iris_docdb_manage` description. */
+const STORY_44_1_IDS = ["44.1/docdb-manage-text/iris_docdb_manage@data-main"];
+
+/** The sentence Story 44.1 appends (after one space) to the `iris_docdb_manage` description, written from its spec. */
+const DOCDB_REGISTER_SENTENCE =
+  "'create' also registers the database's Security.DocDBs record, which every other DocDB call on that database requires, and on a database that exists without one it registers the missing record.";
+
+/**
+ * The Story 44.4 entries (S-44.4-current-check, wave-9 decision #146): the three startup requests that a `current` start's compile check
+ * adds, at the indexes 6, 7 and 8 of each server's frozen six, for the five servers in the golden's order. Their values come from running the
+ * built servers against the fake listener, never from this file.
+ */
+const STORY_44_4_IDS = [
+  "iris-dev-mcp",
+  "iris-admin-mcp",
+  "iris-interop-mcp",
+  "iris-ops-mcp",
+  "iris-data-mcp",
+].flatMap((server) => [6, 7, 8].map((index) => `44.4/startup/${server}@${index}`));
+
+/**
+ * The Story 44.7 entries (wave-9 decision #151), in ledger order: the `iris_docdb_property` description correction and its `inputSchema.properties`
+ * replacement (S-44.7-docdb-property), the `iris_docdb_manage` description correction (S-44.7-docdb-manage-text) and the `iris_database_manage`
+ * description correction plus the matching rollback note of the `provision-project-environment` prompt's rendered text (S-44.7-database-delete).
+ * One row each: only the `main` session of the data and admin servers lists these tools and renders that prompt.
+ */
+const STORY_44_7_IDS = [
+  "44.7/docdb-property-text/iris_docdb_property@data-main",
+  "44.7/docdb-property-schema/iris_docdb_property@data-main",
+  "44.7/docdb-manage-text/iris_docdb_manage@data-main",
+  "44.7/database-delete/iris_database_manage@admin-main",
+  "44.7/database-delete-prompt/provision-project-environment@admin-main",
+];
+
 /** The entry ids of each story, in the order the ledger lists the stories (landing order). */
 const STORIES: Array<[string, string[]]> = [
   ["43.4", STORY_43_4_IDS],
   ["42.10", STORY_42_10_IDS],
   ["42.11", STORY_42_11_IDS],
+  ["44.1", STORY_44_1_IDS],
+  ["44.4", STORY_44_4_IDS],
+  ["44.7", STORY_44_7_IDS],
 ];
 
 /** The 13 tools Story 42.10 flips to `destructiveHint: true` (decision #39), by server. Written from the spec, never read from the ledger. */
@@ -162,8 +200,8 @@ interface Change {
   label?: string;
   section?: string;
   pointer: string;
-  op: "replace" | "remove";
-  old: unknown;
+  op: "replace" | "remove" | "insert";
+  old?: unknown;
   new?: unknown;
   appendOnly?: boolean;
 }
@@ -176,7 +214,7 @@ interface Shape {
   story: string;
   count: number;
   golden: "wire" | "handler";
-  op: "replace" | "remove";
+  op: "replace" | "remove" | "insert";
   text: TextKind;
   check: (change: Change, frozenToolName: string | undefined) => string[];
 }
@@ -280,7 +318,52 @@ function storagePropertiesProblems(change: Change, toolName: string | undefined)
   return problems;
 }
 
-/** The seven sanctions the ledger registers, written from the specs of Stories 43.4, 42.10 and 42.11. */
+/** The class documents the compile check of a `current` start names (the 35-class roster of `bootstrap-classes.ts`), counted from the spec of Story 44.4. */
+const CURRENT_CHECK_CLASS_COUNT = 35;
+
+/**
+ * What is wrong with a Story 44.4 startup entry, written from the spec (AC 44.4.7, AC 44.4.8): a `current` start sends, after its two
+ * probe reads, a HEAD of the Atelier root (the HTTP client's CSRF pre-flight, sent before each POST while no token is held), then the dictionary query of the compile check over
+ * the roster's class names (one `?` and one `parameters` name each), then one `docnames/CLS?filter=ExecuteMCPv2.` GET. The three go in
+ * as indexes 6, 7 and 8 of the server's six frozen startup requests, in that order, and nowhere else.
+ */
+function currentCheckProblems(change: Change): string[] {
+  const request = change.new as { method?: unknown; url?: unknown; body?: unknown } | undefined;
+  const problems = [
+    ...unmet(change.section !== "startup", `${change.id}: must address the startup array`),
+    ...unmet(change.id !== `44.4/startup/${change.server}@${tokensOf(change.pointer)[0]}`, `${change.id}: the id must be 44.4/startup/<server>@<index>`),
+    ...unmet(hasOwn(change, "old") || hasOwn(change, "label") || hasOwn(change, "session"), `${change.id}: an insert has no old, label or session`),
+  ];
+  const index = tokensOf(change.pointer)[0];
+  if (index === "6") {
+    problems.push(...unmet(request?.method !== "HEAD" || request.url !== "/api/atelier/" || request.body !== "", `${change.id}: index 6 is the HEAD of the Atelier root`));
+  } else if (index === "7") {
+    const body = typeof request?.body === "string" ? (JSON.parse(request.body) as { query?: string; parameters?: string[] }) : {};
+    const marks = (body.query ?? "").match(/\?/g)?.length ?? 0;
+    const names = body.parameters ?? [];
+    problems.push(
+      ...unmet(request?.method !== "POST" || request.url !== "/api/atelier/v8/HSCUSTOM/action/query", `${change.id}: index 7 is the POST of action/query`),
+      ...unmet(
+        !/^SELECT d\.ID AS ID, .* FROM %Dictionary\.ClassDefinition d LEFT JOIN %Dictionary\.CompiledClass c ON c\.ID = d\.ID WHERE d\.ID IN \(\?(, \?)*\)$/.test(body.query ?? ""),
+        `${change.id}: index 7 is the dictionary query of the compile check`,
+      ),
+      ...unmet(Object.keys(body).sort().join(",") !== "parameters,query", `${change.id}: the body holds exactly query and parameters`),
+      ...unmet(marks !== names.length || names.length !== CURRENT_CHECK_CLASS_COUNT, `${change.id}: one ? and one parameter for each of the ${CURRENT_CHECK_CLASS_COUNT} roster classes`),
+      ...unmet(new Set(names).size !== names.length || names.some((name) => !/^ExecuteMCPv2\.[A-Za-z.]+$/.test(name) || name.endsWith(".cls")), `${change.id}: the parameters are distinct ExecuteMCPv2 class names without .cls`),
+    );
+  } else if (index === "8") {
+    problems.push(
+      ...unmet(request?.method !== "GET" || request.url !== "/api/atelier/v8/HSCUSTOM/docnames/CLS?filter=ExecuteMCPv2." || request.body !== "", `${change.id}: index 8 is the docnames GET of the ExecuteMCPv2 package`),
+    );
+  } else {
+    problems.push(`${change.id}: the index must be 6, 7 or 8`);
+  }
+  return problems;
+}
+
+const hasOwn = (object: object, key: string): boolean => Object.prototype.hasOwnProperty.call(object, key);
+
+/** The twelve sanctions the ledger registers, written from the specs of Stories 43.4, 42.10, 42.11, 44.1, 44.4 and 44.7. */
 const SANCTIONS: Record<string, Shape> = {
   "S-43.4-descriptions": {
     story: "43.4",
@@ -365,7 +448,129 @@ const SANCTIONS: Record<string, Shape> = {
       ];
     },
   },
+  "S-44.1-docdb-manage-text": {
+    story: "44.1",
+    count: 1,
+    golden: "wire",
+    op: "replace",
+    text: "append",
+    check: (change, toolName) => [
+      ...unmet(change.server !== "iris-data-mcp" || change.label !== "tools-list", `${change.id}: must append to a tools-list row of the data server`),
+      ...unmet(!/^\/result\/tools\/\d+\/description$/.test(change.pointer), `${change.id}: must point at a tool's description`),
+      ...unmet(toolName !== "iris_docdb_manage", `${change.id}: the tool at its pointer (${String(toolName)}) must be iris_docdb_manage`),
+      ...unmet(change.new !== `${String(change.old)} ${DOCDB_REGISTER_SENTENCE}`, `${change.id}: new must be old, one space and the spec's sentence`),
+    ],
+  },
+  "S-44.4-current-check": {
+    story: "44.4",
+    count: 15,
+    golden: "handler",
+    op: "insert",
+    text: "none",
+    check: (change) => currentCheckProblems(change),
+  },
+  "S-44.7-docdb-property": {
+    story: "44.7",
+    count: 2,
+    golden: "wire",
+    op: "replace",
+    text: "correction",
+    check: (change, toolName) => [
+      ...unmet(change.server !== "iris-data-mcp" || change.label !== "tools-list", `${change.id}: must change a tools-list row of the data server`),
+      ...unmet(toolName !== "iris_docdb_property", `${change.id}: the tool at its pointer (${String(toolName)}) must be iris_docdb_property`),
+      ...docdbPropertyProblems(change),
+    ],
+  },
+  "S-44.7-docdb-manage-text": {
+    story: "44.7",
+    count: 1,
+    golden: "wire",
+    op: "replace",
+    text: "correction",
+    check: (change, toolName) => [
+      ...unmet(change.server !== "iris-data-mcp" || change.label !== "tools-list", `${change.id}: must change a tools-list row of the data server`),
+      ...unmet(!/^\/result\/tools\/\d+\/description$/.test(change.pointer), `${change.id}: must point at a tool's description`),
+      ...unmet(toolName !== "iris_docdb_manage", `${change.id}: the tool at its pointer (${String(toolName)}) must be iris_docdb_manage`),
+      ...unmet(!String(change.old).includes("with optional property definitions"), `${change.id}: the frozen text is the one that claims create takes property definitions`),
+      ...unmet(String(change.new).includes("property definitions") || !String(change.new).includes("'create' creates an empty document database; define its properties with iris_docdb_property."), `${change.id}: the corrected text says create makes an empty database whose properties iris_docdb_property defines`),
+      ...unmet(!String(change.new).includes(DOCDB_REGISTER_SENTENCE), `${change.id}: the Story 44.1 sentence stays`),
+    ],
+  },
+  "S-44.7-database-delete": {
+    story: "44.7",
+    count: 2,
+    golden: "wire",
+    op: "replace",
+    text: "correction",
+    check: (change, toolName) => (change.label === "prompts-get:with-arguments" ? provisionRollbackProblems(change) : [
+      ...unmet(change.server !== "iris-admin-mcp" || change.label !== "tools-list", `${change.id}: must change a tools-list row of the admin server`),
+      ...unmet(!/^\/result\/tools\/\d+\/description$/.test(change.pointer), `${change.id}: must point at a tool's description`),
+      ...unmet(toolName !== "iris_database_manage", `${change.id}: the tool at its pointer (${String(toolName)}) must be iris_database_manage`),
+      ...unmet(
+        !String(change.new).includes("dismounts it") ||
+          !String(change.new).includes("IRIS.DAT and directory stay on disk") ||
+          !String(change.new).includes("fails until that file is removed") ||
+          !String(change.new).includes("does NOT cancel pending background work"),
+        `${change.id}: the corrected text says delete dismounts, keeps IRIS.DAT and the directory, makes a create at that directory fail, and keeps the background-work note`,
+      ),
+    ]),
+  },
 };
+
+/** The rollback sentence the `provision-project-environment` prompt gains after each database delete (S-44.7-database-delete). */
+const PROVISION_ROLLBACK_SENTENCE =
+  "Delete keeps the database's IRIS.DAT in its directory, so a later create at the same directory fails until that file is removed by hand; retry with a new directory instead.";
+
+/**
+ * What is wrong with the S-44.7-database-delete entry on the `provision-project-environment` prompt: it rewrites the rendered text of
+ * the admin `main` session's `prompts-get:with-arguments` row, and the only change is the rollback sentence after each of the two
+ * database deletes (steps 1 and 2); every other byte of the text is as frozen.
+ */
+function provisionRollbackProblems(change: Change): string[] {
+  const before = String(change.old);
+  const after = String(change.new);
+  const expected = before.replace(
+    /(\*Rollback: `iris_database_manage` action 'delete' with `name: "demo(?:DATA|CODE)"`\.)\*/g,
+    `$1 ${PROVISION_ROLLBACK_SENTENCE}*`,
+  );
+  return [
+    ...unmet(change.server !== "iris-admin-mcp" || change.session !== "main", `${change.id}: must change the admin server's main session`),
+    ...unmet(change.pointer !== "/result/messages/0/content/text", `${change.id}: must point at the rendered prompt text`),
+    ...unmet(expected === before, `${change.id}: the frozen text has the two database rollback notes`),
+    ...unmet(after !== expected, `${change.id}: new must be the frozen text with the rollback sentence after each database delete, and nothing else changed`),
+  ];
+}
+
+/**
+ * What is wrong with one S-44.7-docdb-property entry, written from the spec of Story 44.7 (Design Notes, Decisions): the description
+ * entry says `create` fills the property from `path` (default `$.<property>`), that earlier documents are not filled in until saved
+ * again, and what `index` does; the schema entry is the frozen properties object plus exactly one new member, `path`, a string of at
+ * least one character, just before `namespace`, with every other member as frozen.
+ */
+function docdbPropertyProblems(change: Change): string[] {
+  if (/^\/result\/tools\/\d+\/description$/.test(change.pointer)) {
+    const text = String(change.new);
+    return [
+      ...unmet(!String(change.old).includes("'index' creates an index on a property for faster queries."), `${change.id}: the frozen text is the one that claims index creates an index`),
+      ...unmet(!text.includes("'path'") || !text.includes("'$.<property>'"), `${change.id}: create is filled from 'path', default '$.<property>'`),
+      ...unmet(!text.includes("saved again"), `${change.id}: documents saved before the property exists are not filled in until saved again`),
+      ...unmet(!text.includes("DocDB indexes every property it creates"), `${change.id}: DocDB indexes every property it creates`),
+      ...unmet(!text.includes("'index' reports an existing property as indexed without writing anything, and creates a property that does not exist yet"), `${change.id}: what index does`),
+      ...unmet(text.includes("creates an index on a property for faster queries"), `${change.id}: the false claim is gone`),
+    ];
+  }
+  if (!/^\/result\/tools\/\d+\/inputSchema\/properties$/.test(change.pointer)) return [`${change.id}: must point at the description or the inputSchema properties`];
+  const before = change.old;
+  const after = change.new;
+  if (!isPlainRecord(before) || !isPlainRecord(after)) return [`${change.id}: old and new must be properties objects`];
+  const keys = Object.keys(after);
+  const path = after["path"];
+  return [
+    ...unmet(keys.join(",") !== "action,database,property,type,path,namespace,server", `${change.id}: the members are the frozen ones plus path, just before namespace`),
+    ...unmet(!isPlainRecord(path) || path["type"] !== "string" || path["minLength"] !== 1 || typeof path["description"] !== "string", `${change.id}: path is a string of at least one character with a description`),
+    ...Object.keys(before).flatMap((key) => unmet(!isDeepStrictEqual(after[key], before[key]), `${change.id}: member ${key} must be as frozen`)),
+  ];
+}
 
 /**
  * What is wrong with how `entries` use `shapes`: a sanction with no shape, an entry that is not its sanction's story, golden or
@@ -424,6 +629,19 @@ const GOOD_AUDIT_CHANGE: Change = {
   new: "%SYS",
 };
 
+/** An in-memory handler startup insert that is valid until a test breaks one member. */
+const GOOD_STARTUP_CHANGE: Change = {
+  id: "t/startup",
+  sanction: "S-44.4-current-check",
+  story: "44.4",
+  golden: "handler",
+  server: "iris-admin-mcp",
+  section: "startup",
+  pointer: "/6",
+  op: "insert",
+  new: { method: "HEAD", url: "/api/atelier/", body: "" },
+};
+
 describe("the frozen goldens", () => {
   it("sdk-wire-golden.json is byte-unchanged", () => {
     expect(sha256(GOLDEN_RELATIVE_PATH)).toBe(FROZEN_WIRE_SHA256);
@@ -440,7 +658,7 @@ describe("the ledger", () => {
     expect(readSanctionedChanges(REPO_ROOT)).toHaveLength(changes.length);
   });
 
-  it("holds the entries of Story 43.4, then Story 42.10, then Story 42.11, each story's ids in order, and no other entry", () => {
+  it("holds the entries of Story 43.4, then Story 42.10, then Story 42.11, then Story 44.1, then Story 44.4, then Story 44.7, each story's ids in order, and no other entry", () => {
     expect(changes.map((change) => change.id)).toEqual(STORIES.flatMap(([, ids]) => ids));
     for (const [story, ids] of STORIES) {
       expect(changes.filter((change) => change.story === story).map((change) => change.id), `Story ${story}`).toEqual(ids);
@@ -448,12 +666,15 @@ describe("the ledger", () => {
     expect(STORY_43_4_IDS).toHaveLength(11);
     expect(STORY_42_10_IDS).toHaveLength(23);
     expect(STORY_42_11_IDS).toHaveLength(8);
+    expect(STORY_44_1_IDS).toHaveLength(1);
+    expect(STORY_44_4_IDS).toHaveLength(15);
+    expect(STORY_44_7_IDS).toHaveLength(5);
     expect(SANCTIONED_CHANGES_RELATIVE_PATH).toBe("packages/iris-mcp-all/src/__tests__/fixtures/sdk-golden-sanctioned-changes.json");
   });
 
   it("every entry's old is the value before it: the frozen value at its pointer, or the new value of the entry before it for that pointer", () => {
     const lastNew = new Map<string, unknown>();
-    for (const change of changes) {
+    for (const change of changes.filter((candidate) => candidate.section !== "startup")) {
       const row = change.section === "audit" ? change.server : keyOf(change);
       const chain = `${change.golden}|${change.section ?? "rows"}|${row}|${change.pointer}`;
       const expected = lastNew.has(chain) ? lastNew.get(chain) : frozenValueAt(change);
@@ -466,6 +687,7 @@ describe("the ledger", () => {
   it("no entry is a no-op, and a description entry under S-43.4-descriptions only appends a sentence that names the dialog", () => {
     for (const change of changes) {
       if (change.op === "replace") expect(change.new, `${change.id}: new differs from old`).not.toEqual(change.old);
+      else if (change.op === "insert") expect(Object.prototype.hasOwnProperty.call(change, "old"), `${change.id}: an insert carries no old`).toBe(false);
       else expect(Object.prototype.hasOwnProperty.call(change, "new"), `${change.id}: a remove carries no new`).toBe(false);
     }
     for (const change of changes.filter((candidate) => candidate.sanction === "S-43.4-descriptions")) {
@@ -485,6 +707,21 @@ describe("the ledger", () => {
       expect(change.pointer, change.id).toBe("/result/resources/1");
       expect(change.label, change.id).toBe("resources-list");
     }
+  });
+
+  it("each server's startup entries insert at an index inside the array as it stands, in file order, and the frozen startup holds six requests", () => {
+    for (const [server, session] of Object.entries(frozenHandler.servers)) {
+      const frozenLength = (session.startup as unknown[]).length;
+      expect(frozenLength, `${server}: the frozen startup`).toBe(6);
+      let length = frozenLength;
+      for (const change of changes.filter((candidate) => candidate.section === "startup" && candidate.server === server)) {
+        expect(change.op, change.id).toBe("insert");
+        expect(Number(tokensOf(change.pointer)[0]), `${change.id}: the index is in range`).toBeLessThanOrEqual(length);
+        length += 1;
+      }
+      expect(length, `${server}: three requests inserted`).toBe(frozenLength + 3);
+    }
+    expect(changes.filter((candidate) => candidate.section === "startup").map((candidate) => candidate.golden)).toEqual(Array(15).fill("handler"));
   });
 
   it("every sanction is registered with a shape, and each entry has its sanction's shape (an append appends, a correction is registered as one)", () => {
@@ -598,7 +835,7 @@ describe("the sanctioned goldens", () => {
   it("the handler golden differs from the frozen one in exactly the rows and the audit elements the entries name, and only in the members they name", () => {
     const sanctioned = readSanctionedGolden(REPO_ROOT, "handler") as HandlerGolden;
     const handlerChanges = changes.filter((change) => change.golden === "handler");
-    const namedRows = new Set(handlerChanges.filter((change) => change.section !== "audit").map(keyOf));
+    const namedRows = new Set(handlerChanges.filter((change) => change.section === undefined).map(keyOf));
     const namedAudit = new Set(handlerChanges.filter((change) => change.section === "audit").map(auditKeyOf));
     expect(namedAudit.size, "the ledger names an audit element").toBeGreaterThan(0);
     const { servers: frozenServers, ...frozenHeader } = frozenHandler as HandlerGolden & Record<string, unknown>;
@@ -608,7 +845,14 @@ describe("the sanctioned goldens", () => {
 
     for (const [server, frozenSession] of Object.entries(frozenHandler.servers)) {
       const session = sanctioned.servers[server]!;
-      expect(session.startup, `${server}: the startup requests are the frozen ones`).toEqual(frozenSession.startup);
+      // The startup requests are the frozen ones plus the entries' inserts, each at the index its pointer names, in file order.
+      const startup = structuredClone(frozenSession.startup) as unknown[];
+      for (const change of handlerChanges.filter((candidate) => candidate.section === "startup" && candidate.server === server)) {
+        startup.splice(Number(tokensOf(change.pointer)[0]), 0, change.new);
+      }
+      expect(session.startup, `${server}: the startup requests are the frozen ones with the entries' inserts`).toEqual(startup);
+      const insertedHere = handlerChanges.filter((candidate) => candidate.section === "startup" && candidate.server === server).length;
+      expect((session.startup as unknown[]).length, `${server}: nothing but the entries' requests was added`).toBe((frozenSession.startup as unknown[]).length + insertedHere);
       expect(session.rows.map((row) => row.label), `${server}: the same rows`).toEqual(frozenSession.rows.map((row) => row.label));
       for (const [index, frozenRow] of frozenSession.rows.entries()) {
         const key = `${server}/${frozenRow.label}`;
@@ -689,6 +933,11 @@ describe("the CHANGELOG names every sanction", () => {
       "42.11 S-42.11-storage-guard-text",
       "43.4 S-43.4-descriptions",
       "43.4 S-43.4-governance-resource",
+      "44.1 S-44.1-docdb-manage-text",
+      "44.4 S-44.4-current-check",
+      "44.7 S-44.7-database-delete",
+      "44.7 S-44.7-docdb-manage-text",
+      "44.7 S-44.7-docdb-property",
     ]);
     expect(changelogProblems(changes, changelog)).toEqual([]);
   });
@@ -775,6 +1024,45 @@ describe("the loader refuses what it cannot apply, naming the entry", () => {
     expect(() => applyHandler([{ ...GOOD_AUDIT_CHANGE, server: "iris-nope-mcp" }])).toThrow(/Sanctioned change 't\/audit'/);
   });
 
+  it("a malformed startup entry: an index out of range, a new of another shape, an old, a replace or remove, an insert elsewhere", () => {
+    const validate = (entry: Record<string, unknown>): unknown => validateSanctionedChanges({ description: "d", changes: [entry] });
+    expect(validate(GOOD_STARTUP_CHANGE)).toHaveLength(1);
+    // Out of range: the frozen startup of the admin server holds six requests, so 7 is past its end; 6 is the end and is fine.
+    expect(() => applyHandler([{ ...GOOD_STARTUP_CHANGE, pointer: "/7" }])).toThrow(/Sanctioned change 't\/startup': index 7 is out of range: the startup array of iris-admin-mcp holds 6 requests/);
+    expect(applyHandler([{ ...GOOD_STARTUP_CHANGE, pointer: "/6" }]).servers["iris-admin-mcp"]!.startup).toHaveLength(7);
+    // The count is the one after the earlier entries of the same server.
+    expect(() => applyHandler([GOOD_STARTUP_CHANGE, { ...GOOD_STARTUP_CHANGE, id: "t/second", pointer: "/8" }])).toThrow(/Sanctioned change 't\/second': index 8 is out of range: .* holds 7 requests/);
+    expect(applyHandler([GOOD_STARTUP_CHANGE, { ...GOOD_STARTUP_CHANGE, id: "t/second", pointer: "/7" }]).servers["iris-admin-mcp"]!.startup).toHaveLength(8);
+    for (const bad of [
+      { method: "HEAD", url: "/x" },
+      { method: "HEAD", url: "/x", body: "", extra: 1 },
+      { method: "HEAD", url: "/x", body: 1 },
+      { method: 1, url: "/x", body: "" },
+      "HEAD /x",
+      [],
+      null,
+    ]) {
+      expect(() => validate({ ...GOOD_STARTUP_CHANGE, new: bad }), JSON.stringify(bad)).toThrow(/Sanctioned change 't\/startup': new must be exactly \{ method, url, body \}/);
+    }
+    const { new: _new, ...withoutNew } = GOOD_STARTUP_CHANGE;
+    expect(() => validate(withoutNew)).toThrow(/Sanctioned change 't\/startup': an 'insert' change needs new/);
+    expect(() => validate({ ...GOOD_STARTUP_CHANGE, old: { method: "HEAD", url: "/x", body: "" } })).toThrow(/Sanctioned change 't\/startup': an 'insert' change has no old/);
+    expect(() => validate({ ...GOOD_STARTUP_CHANGE, op: "replace", old: "x" })).toThrow(/Sanctioned change 't\/startup': a 'startup' change must be an 'insert'/);
+    expect(() => validate({ ...GOOD_STARTUP_CHANGE, op: "remove", old: "x" })).toThrow(/Sanctioned change 't\/startup': a 'startup' change must be an 'insert'/);
+    expect(() => validate({ ...GOOD_STARTUP_CHANGE, pointer: "/1/url" })).toThrow(/Sanctioned change 't\/startup': a 'startup' pointer must be \/<index>/);
+    expect(() => validate({ ...GOOD_STARTUP_CHANGE, pointer: "/first" })).toThrow(/Sanctioned change 't\/startup': a 'startup' pointer must be \/<index>/);
+    expect(() => validate({ ...GOOD_STARTUP_CHANGE, label: "namespace-list" })).toThrow(/Sanctioned change 't\/startup': a 'startup' change addresses an element of the startup array and has no label/);
+    expect(() => validate({ ...GOOD_STARTUP_CHANGE, golden: "wire", session: "main" })).toThrow(/Sanctioned change 't\/startup': a 'startup' change must be a 'handler' change/);
+    expect(() => validate({ ...GOOD_STARTUP_CHANGE, appendOnly: true })).toThrow(/Sanctioned change 't\/startup': an 'insert' change is never appendOnly/);
+    // An insert anywhere else: a row of the wire golden, a row of the handler golden, an audit element.
+    expect(() => validate({ ...GOOD_WIRE_CHANGE, op: "insert" })).toThrow(/Sanctioned change 't\/good': an 'insert' change belongs to section 'startup'/);
+    expect(() => validate({ ...GOOD_AUDIT_CHANGE, op: "insert" })).toThrow(/Sanctioned change 't\/audit': an 'insert' change belongs to section 'startup'/);
+    const { session: _session, ...handlerRow } = GOOD_WIRE_CHANGE;
+    expect(() => validate({ ...handlerRow, golden: "handler", op: "insert" })).toThrow(/Sanctioned change 't\/good': an 'insert' change belongs to section 'startup'/);
+    // Every request that no entry inserts is the frozen one, whatever the server.
+    expect(() => applyHandler([{ ...GOOD_STARTUP_CHANGE, server: "iris-nope-mcp" }])).toThrow(/Sanctioned change 't\/startup': the golden has no startup array for iris-nope-mcp/);
+  });
+
   it("a refused audit entry applies nothing: the entries before it are not returned, and the input golden is untouched", () => {
     const input = structuredClone(frozenHandler);
     expect(() => applySanctionedChanges(input, "handler", [GOOD_AUDIT_CHANGE, { ...GOOD_AUDIT_CHANGE, id: "t/second", pointer: "/0/version", old: "0.0.2", new: "0.0.3" }])).toThrow(
@@ -848,6 +1136,34 @@ describe("the loader's operations", () => {
     for (const [server, session] of Object.entries(frozenHandler.servers)) {
       if (server !== "iris-admin-mcp") expect(sanctioned.servers[server], server).toEqual(session);
     }
+  });
+
+  it("a startup insert puts exactly its request at its index, moves no other request, and no row, no audit element and no other server", () => {
+    const frozenAdmin = frozenHandler.servers["iris-admin-mcp"]!;
+    const first = { method: "HEAD", url: "/first", body: "" };
+    const second = { method: "GET", url: "/second", body: "" };
+    const third = { method: "POST", url: "/third", body: "{}" };
+    const sanctioned = applySanctionedChanges(structuredClone(frozenHandler), "handler", [
+      { ...GOOD_STARTUP_CHANGE, id: "t/a", pointer: "/0", new: first },
+      { ...GOOD_STARTUP_CHANGE, id: "t/b", pointer: "/3", new: second },
+      { ...GOOD_STARTUP_CHANGE, id: "t/c", pointer: "/8", new: third },
+    ]) as HandlerGolden;
+    const admin = sanctioned.servers["iris-admin-mcp"]!;
+    const frozen = frozenAdmin.startup as unknown[];
+    // After /0 the array is [first, f0..f5]; after /3 it is [first, f0, f1, second, f2..f5]; /8 appends (8 requests precede it).
+    expect(admin.startup).toEqual([first, frozen[0], frozen[1], second, frozen[2], frozen[3], frozen[4], frozen[5], third]);
+    expect(admin.rows, "no row line moves").toEqual(frozenAdmin.rows);
+    expect(admin.audit, "no audit element moves").toEqual(frozenAdmin.audit);
+    for (const [server, session] of Object.entries(frozenHandler.servers)) {
+      if (server !== "iris-admin-mcp") expect(sanctioned.servers[server], server).toEqual(session);
+    }
+  });
+
+  it("a startup insert is ignored when the wire golden is applied, and the input golden is untouched", () => {
+    expect(applySanctionedChanges(structuredClone(frozenWire), "wire", [GOOD_STARTUP_CHANGE])).toEqual(frozenWire);
+    const input = structuredClone(frozenHandler);
+    applySanctionedChanges(input, "handler", [GOOD_STARTUP_CHANGE]);
+    expect(input).toEqual(frozenHandler);
   });
 
   it("audit entries on one element apply in file order", () => {

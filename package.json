@@ -23,6 +23,7 @@
     "gen:pack:check": "node scripts/gen-pack.mjs --check",
     "gen:listings": "node scripts/gen-listings.mjs",
     "gen:listings:check": "node scripts/gen-listings.mjs --check",
+    "check:live-guards": "node scripts/check-live-guards.mjs",
     "check:provenance": "node scripts/check-provenance.mjs",
     "validate:prompts": "node scripts/validate-prompts.mjs",
     "live:bootstrap-guard": "node scripts/throwaway-iris.mjs run -- pnpm --filter @iris-mcp/all exec vitest run src/__tests__/story-42-2-bootstrap-guard-live-gate.test.ts",

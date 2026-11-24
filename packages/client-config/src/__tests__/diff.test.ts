@@ -18,10 +18,12 @@ import { parseDocument } from "yaml";
 import {
   CLIENT_ADAPTERS,
   CANONICAL_SERVERS,
+  adapterForScope,
   diff,
   entryPresence,
   executeNativeEdit,
   readConfigEntries,
+  mergeUpdateEntry,
   findTomlEntryRegion,
   findTomlInsertLine,
   scanTomlStructure,
@@ -41,7 +43,9 @@ import {
   FOREIGN_ENTRY_NAMES,
   FOREIGN_SECRET_MARKERS,
   PLANTED_FOREIGN_NAME,
+  VSCODE_LEGACY_FIXTURE,
   plantForeignSecrets,
+  vscodeLegacyAdapter,
 } from "./helpers.js";
 
 const PKG_BY_SERVER: Record<CanonicalServerName, string> = {
@@ -305,9 +309,9 @@ describe("JSON/JSONC edits (jsonc-parser modify — the 33.1 apply set)", () => 
     expect(disable.ok).toBe(false);
   });
 
-  it("VS Code JSONC apply preserves comments around the edit", () => {
-    const adapter = adapterOf("vscode");
-    const content = readFixture("vscode/user.jsonc");
+  it("JSONC apply preserves comments around the edit (the vscode legacy view: the roster's only JSONC reader since Story 44.2)", () => {
+    const adapter = vscodeLegacyAdapter();
+    const content = readFixture(VSCODE_LEGACY_FIXTURE);
     const result = expectOk(diff(content, canonicalEntry("iris-ops-mcp"), adapter, "user", "apply"));
     const after = applyEdits(content, (result.native as JsoncNativeEdit).edits);
     expect(after).toContain("// VS Code user MCP configuration");
@@ -317,6 +321,47 @@ describe("JSON/JSONC edits (jsonc-parser modify — the 33.1 apply set)", () => 
       expect(parsed.entries["iris-ops-mcp"]).toBeDefined();
       expect(parsed.entries["microsoft-learn"]).toBeDefined();
     }
+  });
+
+  it("vscode user scope renders the Copilot-global shape {type, command, args, env, tools} (Story 44.2)", () => {
+    const adapter = adapterOf("vscode");
+    const entry = { ...canonicalEntry("iris-admin-mcp"), env: { IRIS_HOST: "${IRIS_HOST}" } };
+    expect(renderNativeEntry(adapterForScope(adapter, "user"), entry)).toEqual({
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@iris-mcp/admin@1"],
+      env: { IRIS_HOST: "${IRIS_HOST}" },
+      tools: ["*"],
+    });
+    // The rendered key order is the one VS Code writes: type, command, args, env, tools.
+    expect(Object.keys(renderNativeEntry(adapterForScope(adapter, "user"), entry))).toEqual(["type", "command", "args", "env", "tools"]);
+    const result = expectOk(diff(`{"mcpServers":{}}`, entry, adapter, "user", "apply"));
+    const after = applyEdits(`{"mcpServers":{}}`, (result.native as JsoncNativeEdit).edits);
+    expect(JSON.parse(after).mcpServers["iris-admin-mcp"]).toEqual(renderNativeEntry(adapterForScope(adapter, "user"), entry));
+  });
+
+  it("vscode project scope renders exactly what claude-code writes for the same entry (Story 44.2: one shared .mcp.json)", () => {
+    const entry = { ...canonicalEntry("iris-admin-mcp"), env: { IRIS_HOST: "${IRIS_HOST}" } };
+    const asVscode = expectOk(diff(null, entry, adapterOf("vscode"), "project", "apply"));
+    const asClaude = expectOk(diff(null, entry, adapterOf("claude-code"), "project", "apply"));
+    expect(asVscode.native).toEqual(asClaude.native);
+  });
+
+  it("an UPDATE of a Copilot-shaped entry keeps unmanaged keys and a user-narrowed tools list", () => {
+    const adapter = adapterForScope(adapterOf("vscode"), "user");
+    const merged = mergeUpdateEntry(
+      adapter,
+      { type: "stdio", command: "old", args: ["x"], tools: ["iris_doc_get"], timeout: 5 },
+      { type: "stdio", command: "npx", args: ["-y", "p@1"], env: { IRIS_HOST: "h" }, tools: ["*"] },
+    );
+    expect(merged).toEqual({
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "p@1"],
+      tools: ["iris_doc_get"],
+      timeout: 5,
+      env: { IRIS_HOST: "h" },
+    });
   });
 
   it("Zed apply renders the context_servers command-object shape", () => {

@@ -75,8 +75,8 @@ let config: IrisConnectionConfig;
 let ctx: ToolContext;
 
 /**
- * Track what was successfully created (isError was NOT set on the response)
- * for both cleanup and to gate verification tests.
+ * Track what was successfully created (isError was NOT set on the response).
+ * A later test asserts its flag (Story 44.5): it never returns early without it.
  */
 const created = {
   production: false,
@@ -169,31 +169,30 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        created.production = true;
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      created.production = true;
     });
 
     it("verifies production status after creation", async () => {
       const result = await productionStatusTool.handler({}, ctx);
 
-      expect(result.content[0]?.text).toBeDefined();
-      // Production may or may not be the "current" production depending on
-      // IRIS state; at minimum the handler should return without error
+      // Story 44.7 (DW-758): the probed reply on the CI image is
+      // `{name:"",state:"Stopped",stateCode:2}`. Which production is "current"
+      // depends on IRIS state, so assert the shape, not the name.
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const status = result.structuredContent as { state?: unknown };
+      expect(typeof status?.state, result.content[0]?.text).toBe("string");
     });
 
     it("gets production summary across namespaces", async () => {
       const result = await productionSummaryTool.handler({}, ctx);
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        const structured = result.structuredContent as {
-          productions: unknown[];
-          count: number;
-        };
-        expect(structured.count).toBeGreaterThanOrEqual(0);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const structured = result.structuredContent as {
+        productions: unknown[];
+        count: number;
+      };
+      expect(structured.count).toBeGreaterThanOrEqual(0);
     });
   });
 
@@ -201,7 +200,7 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
 
   describe("production control", () => {
     it("starts the test production", async () => {
-      if (!created.production) return;
+      expect(created.production, "the create test must have created the production").toBe(true);
 
       attempted.productionStarted = true;
       const result = await productionControlTool.handler(
@@ -209,43 +208,41 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        created.productionStarted = true;
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      created.productionStarted = true;
     });
 
     it("verifies production is running via status", async () => {
-      if (!created.productionStarted) return;
+      expect(created.productionStarted, "the start test must have started the production").toBe(true);
 
       const result = await productionStatusTool.handler(
         { detail: true },
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        const text = result.content[0]?.text ?? "";
-        // Production should show a state
-        expect(text.length).toBeGreaterThan(0);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const text = result.content[0]?.text ?? "";
+      // Production should show a state
+      expect(text.length).toBeGreaterThan(0);
     });
   });
 
   // ── 3. Config items (AC3) ────────────────────────────────────────
 
   describe("production item management", () => {
-    it("gets config item settings (may return error for empty production)", async () => {
-      if (!created.productionStarted) return;
+    it("reports a config item that the empty production does not have", async () => {
+      expect(created.productionStarted, "the start test must have started the production").toBe(true);
 
-      // An empty production has no items, so this may return an error
-      // or an empty result — both are valid
+      // Story 44.7 (DW-758, Rule #56): the test production has no items, so the
+      // documented outcome is an error that names the item
+      // ("ERROR #5001: Config item 'NonExistentItem' not found").
       const result = await productionItemTool.handler(
         { action: "get", itemName: "NonExistentItem" },
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
+      expect(result.isError, result.content[0]?.text).toBe(true);
+      expect(result.content[0]?.text ?? "").toContain("NonExistentItem");
     });
   });
 
@@ -258,25 +255,52 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
+      // Story 44.7 (DW-758): the probed reply is `{action:"get",autoStart:"",enabled:false}`.
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const current = result.structuredContent as { autoStart?: unknown; enabled?: unknown };
+      expect(typeof current?.autoStart, result.content[0]?.text).toBe("string");
+      expect(typeof current?.enabled, result.content[0]?.text).toBe("boolean");
     });
 
-    it("sets auto-start and restores original value", async () => {
-      // Set auto-start to a known value
-      const setResult = await productionAutostartTool.handler(
-        { action: "set", productionName: TEST_PRODUCTION, enabled: false },
-        ctx,
-      );
+    it("sets auto-start to the test production and restores the original value", async () => {
+      expect(created.production, "the create test must have created the production").toBe(true);
 
-      expect(setResult.content[0]?.text).toBeDefined();
+      // Story 44.7 (DW-758): read the original, set the test production, check
+      // the change, then restore the original and check the restore. The
+      // restore runs even when an assertion above it fails.
+      const readAutoStart = async (): Promise<{ autoStart: string; enabled: boolean }> => {
+        const got = await productionAutostartTool.handler({ action: "get" }, ctx);
+        expect(got.isError, got.content[0]?.text).toBeFalsy();
+        const body = got.structuredContent as { autoStart: string; enabled: boolean };
+        expect(typeof body?.autoStart, got.content[0]?.text).toBe("string");
+        return body;
+      };
 
-      // Verify with a get
-      const getResult = await productionAutostartTool.handler(
-        { action: "get" },
-        ctx,
-      );
+      const original = await readAutoStart();
+      try {
+        const setResult = await productionAutostartTool.handler(
+          { action: "set", productionName: TEST_PRODUCTION },
+          ctx,
+        );
+        expect(setResult.isError, setResult.content[0]?.text).toBeFalsy();
+        expect(setResult.structuredContent, setResult.content[0]?.text).toMatchObject({
+          autoStart: TEST_PRODUCTION,
+          enabled: true,
+        });
 
-      expect(getResult.content[0]?.text).toBeDefined();
+        const afterSet = await readAutoStart();
+        expect(afterSet).toMatchObject({ autoStart: TEST_PRODUCTION, enabled: true });
+      } finally {
+        const restoreResult = await productionAutostartTool.handler(
+          { action: "set", productionName: original.autoStart },
+          ctx,
+        );
+        expect(restoreResult.isError, restoreResult.content[0]?.text).toBeFalsy();
+      }
+
+      const afterRestore = await readAutoStart();
+      expect(afterRestore.autoStart).toBe(original.autoStart);
+      expect(afterRestore.enabled).toBe(original.enabled);
     });
   });
 
@@ -289,8 +313,11 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      // May return empty array if no logs exist yet, that is OK
+      // Story 44.7 (DW-758): the probed reply is `{entries:[{type:4,…}]}`. The
+      // list may be empty when no logs exist yet; the field must still be an array.
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const logs = result.structuredContent as { entries?: unknown };
+      expect(Array.isArray(logs?.entries), result.content[0]?.text).toBe(true);
     });
 
     it("queries event logs filtered by type", async () => {
@@ -299,7 +326,13 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const logs = result.structuredContent as { entries?: Array<{ type: number }> };
+      expect(Array.isArray(logs?.entries), result.content[0]?.text).toBe(true);
+      // The "Info" display name maps to its stored number, 4 (DW-585).
+      for (const entry of logs.entries ?? []) {
+        expect(entry.type).toBe(4);
+      }
     });
   });
 
@@ -309,8 +342,11 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
     it("queries queue status", async () => {
       const result = await productionQueuesTool.handler({}, ctx);
 
-      expect(result.content[0]?.text).toBeDefined();
-      // May return empty queues for test production
+      // Story 44.7 (DW-758): the probed reply is `{queues:[…],count:3}`.
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const queues = result.structuredContent as { queues?: unknown[]; count?: number };
+      expect(Array.isArray(queues?.queues), result.content[0]?.text).toBe(true);
+      expect(queues.count).toBe(queues.queues?.length);
     });
   });
 
@@ -320,12 +356,10 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
     it("lists available adapters", async () => {
       const result = await productionAdaptersTool.handler({}, ctx);
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        // Adapters should return some built-in adapters
-        const text = result.content[0]?.text ?? "";
-        expect(text.length).toBeGreaterThan(2); // at least "[]" or more
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      // Adapters should return some built-in adapters
+      const text = result.content[0]?.text ?? "";
+      expect(text.length).toBeGreaterThan(2); // at least "[]" or more
     });
   });
 
@@ -344,22 +378,19 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        created.credential = true;
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      created.credential = true;
     });
 
     it("verifies credential in credential list (no passwords)", async () => {
+      expect(created.credential, "the create test must have created the credential").toBe(true);
       const result = await credentialListTool.handler({}, ctx);
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError && created.credential) {
-        const text = result.content[0]?.text ?? "";
-        expect(text).toContain(TEST_CREDENTIAL);
-        // Passwords must never be exposed
-        expect(text).not.toContain("testpass123");
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const text = result.content[0]?.text ?? "";
+      expect(text).toContain(TEST_CREDENTIAL);
+      // Passwords must never be exposed
+      expect(text).not.toContain("testpass123");
     });
   });
 
@@ -378,14 +409,12 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        created.lookupEntry = true;
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      created.lookupEntry = true;
     });
 
     it("gets the lookup table entry to verify", async () => {
-      if (!created.lookupEntry) return;
+      expect(created.lookupEntry, "the set test must have created the lookup entry").toBe(true);
 
       const result = await lookupManageTool.handler(
         {
@@ -396,11 +425,9 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        const text = result.content[0]?.text ?? "";
-        expect(text).toContain(TEST_LOOKUP_VALUE);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const text = result.content[0]?.text ?? "";
+      expect(text).toContain(TEST_LOOKUP_VALUE);
     });
   });
 
@@ -408,7 +435,7 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
 
   describe("lookup table transfer", () => {
     it("exports a lookup table as XML", async () => {
-      if (!created.lookupEntry) return;
+      expect(created.lookupEntry, "the set test must have created the lookup entry").toBe(true);
 
       const result = await lookupTransferTool.handler(
         {
@@ -418,16 +445,14 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      if (!result.isError) {
-        // XML export should contain the table name
-        const text = result.content[0]?.text ?? "";
-        expect(text.length).toBeGreaterThan(0);
-      }
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      // XML export should contain the table name
+      const text = result.content[0]?.text ?? "";
+      expect(text.length).toBeGreaterThan(0);
     });
 
     it("re-imports the lookup table", async () => {
-      if (!created.lookupEntry) return;
+      expect(created.lookupEntry, "the set test must have created the lookup entry").toBe(true);
 
       // Simple import test: re-import the same table
       // The import tool requires XML content; we export first then import
@@ -439,13 +464,13 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      if (exportResult.isError) return;
+      expect(exportResult.isError, exportResult.content[0]?.text).toBeFalsy();
 
       // Extract XML from export result
       const structured = exportResult.structuredContent as { xml?: string; content?: string };
       const xml = structured?.xml ?? structured?.content ?? exportResult.content[0]?.text ?? "";
 
-      if (!xml || xml.length === 0) return;
+      expect(xml, "the export must return the table's XML").toBeTruthy();
 
       const importResult = await lookupTransferTool.handler(
         {
@@ -456,7 +481,10 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(importResult.content[0]?.text).toBeDefined();
+      expect(importResult.isError, importResult.content[0]?.text).toBeFalsy();
+      // An import of XML that holds no entry also succeeds (with 0), so the count is what shows the table's entry came back in.
+      const imported = importResult.structuredContent as { entryCount?: number };
+      expect(imported?.entryCount, importResult.content[0]?.text).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -466,15 +494,19 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
     it("lists business rules (may be empty in test namespace)", async () => {
       const result = await ruleListTool.handler({}, ctx);
 
-      expect(result.content[0]?.text).toBeDefined();
-      // Empty result is valid for test namespace
+      // Story 44.7 (DW-758): the probed reply is `{rules:[],count:0,total:0}`. An
+      // empty list is valid for the test namespace; the field must be an array.
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const rules = result.structuredContent as { rules?: unknown };
+      expect(Array.isArray(rules?.rules), result.content[0]?.text).toBe(true);
     });
 
     it("lists data transformations (may be empty in test namespace)", async () => {
       const result = await transformListTool.handler({}, ctx);
 
-      expect(result.content[0]?.text).toBeDefined();
-      // Empty result is valid for test namespace
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const transforms = result.structuredContent as { transforms?: unknown };
+      expect(Array.isArray(transforms?.transforms), result.content[0]?.text).toBe(true);
     });
   });
 
@@ -487,8 +519,15 @@ describe.skipIf(!IRIS_OK || !REST_OK)("iris-interop-mcp integration", () => {
         ctx,
       );
 
-      expect(result.content[0]?.text).toBeDefined();
-      // Empty or error is valid for a test production with no traffic
+      // Story 44.7 (DW-758): the probed reply is `{messages:[{sessionId:1,…}],count:1}`.
+      // A namespace with no traffic answers an empty list, so every returned
+      // message is checked against the session asked for.
+      expect(result.isError, result.content[0]?.text).toBeFalsy();
+      const trace = result.structuredContent as { messages?: Array<{ sessionId: number }> };
+      expect(Array.isArray(trace?.messages), result.content[0]?.text).toBe(true);
+      for (const message of trace.messages ?? []) {
+        expect(message.sessionId).toBe(1);
+      }
     });
   });
 });

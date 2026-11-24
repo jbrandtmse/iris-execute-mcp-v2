@@ -582,9 +582,13 @@ export const docEditTool: ToolDefinition = {
       const outcome = await ctx.confirm?.({
         operation: "save a document without the Storage guard",
         target: `document ${name}, namespace ${ns}`,
-        scope:
-          `${edits.length} edit(s); ` +
-          (dropped.length > 0 ? `drops Storage definition(s): ${dropped.join(", ")}` : "drops no Storage definition"),
+        // The dialog text is cut at 600 characters; the binding is every dropped name.
+        scope: {
+          text:
+            `${edits.length} edit(s); ` +
+            (dropped.length > 0 ? `drops Storage definition(s): ${dropped.join(", ")}` : "drops no Storage definition"),
+          binding: dropped,
+        },
       });
       if (outcome !== undefined && !outcome.proceed) return outcome.result;
     }

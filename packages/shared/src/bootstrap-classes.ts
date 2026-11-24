@@ -31,7 +31,7 @@
  * packages/shared/package.json. Compared against
  * `ExecuteMCPv2.Setup_GetBootstrapVersion()` at MCP server startup.
  */
-export const BOOTSTRAP_VERSION = "1.1.0+2.244fe8623c76";
+export const BOOTSTRAP_VERSION = "1.1.0+5.6cbac260e73f";
 
 export interface BootstrapClass {
   name: string;
@@ -1267,7 +1267,7 @@ Parameter WEBAPP = "/api/executemcp/v2";
 /// deployment, an equal semver and sequence with a different hash, the
 /// <code>"dev"</code> placeholder and any unparseable value are left in place
 /// with a warning.</p>
-Parameter BOOTSTRAPVERSION = "1.1.0+2.244fe8623c76";
+Parameter BOOTSTRAPVERSION = "1.1.0+5.6cbac260e73f";
 
 /// Register the <code>/api/executemcp/v2</code> web application.
 /// <p>Creates or updates the web application to route requests to
@@ -7000,6 +7000,14 @@ ClassMethod DatabaseManage() As %Status
             Quit
         }
 
+        ; delete switches to %SYS and restores the namespace itself (Story 44.7, DW-757), so it runs before the switch below.
+        If tAction = "delete" {
+            Set tSC = ..DeleteDatabaseEntry(tName, .tResult)
+            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+            Do ..RenderResponseBody($$$OK, , tResult)
+            Quit
+        }
+
         ; Switch to %SYS for Config operations
         Set $NAMESPACE = "%SYS"
 
@@ -7109,14 +7117,6 @@ ClassMethod DatabaseManage() As %Status
             Set tResult = {"action": "modified", "name": (tName)}
             Do ..RenderResponseBody($$$OK, , tResult)
         }
-        ElseIf tAction = "delete" {
-            Set tSC = ##class(Config.Databases).Delete(tName)
-            Set $NAMESPACE = tOrigNS
-            If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
-
-            Set tResult = {"action": "deleted", "name": (tName)}
-            Do ..RenderResponseBody($$$OK, , tResult)
-        }
     }
     Catch ex {
         Set $NAMESPACE = tOrigNS
@@ -7125,6 +7125,143 @@ ClassMethod DatabaseManage() As %Status
         Set tSC = $$$OK
     }
     Quit $$$OK
+}
+
+/// Delete a database's configuration entry and dismount the database (Story 44.7, DW-757).
+/// <p><code>Config.Databases.Delete</code> only removes the configuration entry, so the database stayed mounted and a later
+/// create at the same directory failed (#60). This reads the directory and server, deletes the entry and dismounts the
+/// directory with <code>SYS.Database.DismountDatabase</code> when <method>ShouldDismount</method> says so: a local entry whose
+/// directory no other local entry names. A remote (ECP) entry dismounts nothing on this instance.
+/// <code>IRIS.DAT</code> and the directory stay on disk: removing them is irreversible data loss and this action has no
+/// confirmation gate.</p>
+/// <p>Delete's own error (in use by a namespace, no such name, ...) is returned unchanged and nothing changes. A dismount
+/// that cannot run is not an error, because the entry is already gone: the result says <code>dismounted: false</code> and
+/// carries a <code>dismountNote</code>.</p>
+/// <p>Switches to %SYS itself and restores <code>$NAMESPACE</code> on every path (AD-13), so it runs from any namespace.
+/// The text of a failed dismount is sanitized after the namespace is restored.</p>
+/// <ul>
+/// <li><var>pName</var> - the database's configuration name</li>
+/// <li><var>pResult</var> - (output) <code>{"action": "deleted", "name": ..., "dismounted": true|false}</code>, plus
+/// <code>dismountNote</code> when it was not dismounted</li>
+/// </ul>
+ClassMethod DeleteDatabaseEntry(pName As %String, Output pResult As %DynamicObject) As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Set pResult = ""
+    Set tDir = ""
+    Set tServer = ""
+    Set tDeleted = 0
+    Set tSharedBy = ""
+    Set tShareUnknown = 0
+    Set tDismounted = 0
+    Set tDismountSC = $$$OK
+    Try {
+        Set $NAMESPACE = "%SYS"
+
+        ; The entry holds the directory and the server and Delete removes them, so read them first. A name that does
+        ; not exist gets Delete's own error below.
+        Kill tProps
+        If $$$ISOK(##class(Config.Databases).Get(pName, .tProps)) {
+            Set tDir = $Get(tProps("Directory"))
+            Set tServer = $Get(tProps("Server"))
+        }
+
+        Set tSC = ##class(Config.Databases).Delete(pName)
+        If $$$ISERR(tSC) Quit
+        Set tDeleted = 1
+
+        ; A remote (ECP) entry names a directory on its own server: nothing on this instance is dismounted for it.
+        If (tDir '= "") && (tServer = "") {
+            ; The other configured databases, for the shared-directory check.
+            Kill tOthers
+            Set tRS = ##class(%ResultSet).%New("Config.Databases:List")
+            Set tListSC = tRS.Execute("*")
+            If $$$ISERR(tListSC) {
+                Set tShareUnknown = 1
+            } Else {
+                Set tN = 0
+                While tRS.Next() {
+                    Set tN = tN + 1
+                    Set tOthers(tN) = $ListBuild(tRS.Get("Name"), tRS.Get("Server"), tRS.Get("Directory"))
+                }
+            }
+            Do tRS.Close()
+
+            If ('tShareUnknown) && (..ShouldDismount(tServer, tDir, .tOthers, .tSharedBy)) {
+                Set tDismountSC = ##class(SYS.Database).DismountDatabase(##class(%Library.File).NormalizeDirectory(tDir))
+                If $$$ISOK(tDismountSC) Set tDismounted = 1
+            }
+        }
+    }
+    Catch ex {
+        If tDeleted {
+            ; The entry is gone: report what did not happen, never an error.
+            Set tSC = $$$OK
+            Set tDismountSC = ex.AsStatus()
+        } Else {
+            Set tSC = ex.AsStatus()
+        }
+    }
+    Set $NAMESPACE = tOrigNS
+    If $$$ISERR(tSC) Quit tSC
+
+    Set pResult = {"action": "deleted", "name": (pName)}
+    Do pResult.%Set("dismounted", tDismounted, "boolean")
+    If 'tDismounted {
+        If tServer '= "" {
+            Set tNote = "Not dismounted: the database is on the remote server '"_tServer_"', so nothing on this instance was dismounted."
+        } ElseIf tSharedBy '= "" {
+            Set tNote = "Not dismounted: the configured database '"_tSharedBy_"' uses the same directory."
+        } ElseIf tShareUnknown {
+            Set tNote = "Not dismounted: the configured databases could not be listed to check whether the directory is shared."
+        } ElseIf tDir = "" {
+            Set tNote = "Not dismounted: the directory of the database could not be read."
+        } Else {
+            Set tNote = "The configuration entry was removed, but the database could not be dismounted: "_##class(ExecuteMCPv2.Utils).StripErrorPrefix($System.Status.GetErrorText(##class(ExecuteMCPv2.Utils).SanitizeError(tDismountSC)))
+        }
+        Do pResult.%Set("dismountNote", tNote)
+    }
+    Quit $$$OK
+}
+
+/// Whether deleting a database entry dismounts its directory, decided from the deleted entry and the configured databases
+/// that remain (Story 44.7, DW-757).
+/// <p>Only a local entry (an empty <code>Server</code>, see <code>Config.Databases</code>) is dismounted, and only when no other
+/// local entry names the same directory. A remote (ECP) entry names a directory on its own server, so it is never dismounted
+/// here and never counts as sharing a local directory.</p>
+/// <ul>
+/// <li><var>pServer</var> - the deleted entry's <code>Server</code> (empty for a local database)</li>
+/// <li><var>pDirectory</var> - the deleted entry's <code>Directory</code></li>
+/// <li><var>pOthers</var> - the remaining entries, <code>pOthers(n) = $ListBuild(name, server, directory)</code></li>
+/// <li><var>pSharedBy</var> - (output) the name of a local entry that names the same directory, else empty</li>
+/// </ul>
+ClassMethod ShouldDismount(pServer As %String, pDirectory As %String, ByRef pOthers, Output pSharedBy As %String) As %Boolean
+{
+    Set pSharedBy = ""
+    If (pServer '= "") || (pDirectory = "") Quit 0
+    Set tKey = ..DirectoryKey(pDirectory)
+    Set tI = ""
+    For {
+        Set tI = $Order(pOthers(tI))
+        Quit:tI=""
+        Set tRow = pOthers(tI)
+        If $ListGet(tRow, 2) '= "" Continue
+        If ..DirectoryKey($ListGet(tRow, 3)) = tKey {
+            Set pSharedBy = $ListGet(tRow, 1)
+            Quit
+        }
+    }
+    Quit (pSharedBy = "")
+}
+
+/// The key two database directories are compared by: the normalized absolute directory, upper-cased on Windows, where
+/// paths are not case-sensitive (Story 44.7, DW-757).
+ClassMethod DirectoryKey(pDirectory As %String) As %String
+{
+    Set tKey = ##class(%Library.File).NormalizeDirectory(pDirectory)
+    If $ZVersion(1) = 2 Set tKey = $ZConvert(tKey, "U")
+    Quit tKey
 }
 
 /// List all global, routine, or package mappings for a namespace.
@@ -9560,6 +9697,154 @@ ClassMethod ServiceManage() As %Status
         Do tResult.%Set("action", tAction)
         Do tResult.%Set("name", tName)
         Do tResult.%Set("success", 1, "boolean")
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Report on, and optionally register, the <class>Security.DocDBs</class> record of a DocDB database.
+/// <p>IRIS denies every DocDB call on a database that has no record with <code>ERROR #822: Access
+/// Denied</code>, and the DocDB REST API (<code>/api/docdb/v1</code>) never writes that record, so a database
+/// made through it is unusable until the record exists (Story 44.1). This method is the
+/// <var>%request</var>-independent seam behind <method>DocDbGet</method> and <method>DocDbManage</method>.</p>
+/// <p>It validates <var>pName</var> and <var>pNamespace</var>, then checks in <var>pNamespace</var> whether the
+/// DocDB database exists (<method>%DocDB.Database.xNExists</method>), and in <code>%SYS</code> whether its record
+/// exists (<method>Security.DocDBs.Exists</method>). <method>Exists</method> answers 0 both for an absent record
+/// (status 793) and for a caller that lacks <code>%DocDB_Admin</code> (status 822), so any other status is returned
+/// as the denial it is rather than reported as <code>registered:false</code>.</p>
+/// <p>With <var>pRegister</var> set, a database that exists without a record gets one through IRIS's own
+/// <code>$$Create^%SYS.DOCDB</code>, which checks the caller's privilege and the <code>%Service_DocDB</code>
+/// service itself and writes no <code>Resource</code>. A name with no DocDB database is refused: IRIS would write
+/// a record for it all the same. The namespace is restored on every path.</p>
+/// <p><var>pResult</var> is <code>{name, namespace, exists, registered, alreadyRegistered}</code>: <code>exists</code>
+/// is the DocDB database, <code>registered</code> the record after the call, <code>alreadyRegistered</code>
+/// whether the record was there before it.</p>
+ClassMethod DocDbRecord(pName As %String, pNamespace As %String, pRegister As %Boolean = 0, Output pResult As %DynamicObject) As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Set pResult = ""
+    Try {
+        ; Validate first, before any namespace switch
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired($Get(pName), "name")
+        If $$$ISERR(tSC) Quit
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired($Get(pNamespace), "namespace")
+        If $$$ISERR(tSC) Quit
+
+        ; Does the DocDB database exist in the target namespace?
+        Set $NAMESPACE = pNamespace
+        Set tDbExists = +##class(%DocDB.Database).xNExists(pName)
+        Set $NAMESPACE = tOrigNS
+
+        ; Does its Security.DocDBs record exist? (Security.* lives in %SYS)
+        Set tExSC = $$$OK
+        Set $NAMESPACE = "%SYS"
+        Set tRecord = +##class(Security.DocDBs).Exists(pName, pNamespace, , .tExSC)
+        Set $NAMESPACE = tOrigNS
+        If 'tRecord && $$$ISERR(tExSC) && '$System.Status.Equals(tExSC, 793) {
+            ; Exists answers 0 with status 793 (DocDBDoesNotExist) for an absent record; anything else, such as 822, is a denial
+            Set tSC = tExSC
+            Quit
+        }
+
+        Set tAlready = tRecord
+        If pRegister && 'tRecord {
+            If 'tDbExists {
+                Set tSC = $$$ERROR($$$GeneralError, "No DocDB database '"_pName_"' exists in namespace "_pNamespace_"; no Security.DocDBs record was written")
+                Quit
+            }
+            Kill tProps
+            Set tSC = $$Create^%SYS.DOCDB(pName, pNamespace, .tProps)
+            Set $NAMESPACE = tOrigNS
+            If $$$ISERR(tSC) Quit
+            Set tRecord = 1
+        }
+
+        Set pResult = {}
+        Do pResult.%Set("name", pName)
+        Do pResult.%Set("namespace", pNamespace)
+        Do pResult.%Set("exists", tDbExists, "boolean")
+        Do pResult.%Set("registered", tRecord, "boolean")
+        Do pResult.%Set("alreadyRegistered", tAlready, "boolean")
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+}
+
+/// Report whether a DocDB database exists and has a <class>Security.DocDBs</class> record.
+/// <p><code>GET /security/docdb?name=&amp;namespace=</code> returns <code>{name, namespace, exists,
+/// registered, alreadyRegistered}</code> (see <method>DocDbRecord</method>). Both query parameters are required.
+/// A denial from IRIS is an error envelope, never <code>registered:false</code>.</p>
+ClassMethod DocDbGet() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        Set tName = $Get(%request.Data("name", 1))
+        Set tNamespace = $Get(%request.Data("namespace", 1))
+
+        Set tSC = ..DocDbRecord(tName, tNamespace, 0, .tResult)
+        Set $NAMESPACE = tOrigNS
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
+        Do ..RenderResponseBody($$$OK, , tResult)
+    }
+    Catch ex {
+        Set $NAMESPACE = tOrigNS
+        Set tSC = ex.AsStatus()
+        Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+        Set tSC = $$$OK
+    }
+    Quit $$$OK
+}
+
+/// Register the <class>Security.DocDBs</class> record of an existing DocDB database.
+/// <p>Reads a JSON body <code>{action:"register", name, namespace}</code> and calls
+/// <method>DocDbRecord</method> with registration on. The record is written with no properties (enabled, no
+/// Resource) by IRIS's own <code>$$Create^%SYS.DOCDB</code>, which does the privilege check; this handler adds no
+/// check and no role change. A name with no DocDB database, and a caller IRIS denies, are error envelopes. A
+/// database that already has a record is reported with <code>alreadyRegistered:true</code> and not touched.</p>
+ClassMethod DocDbManage() As %Status
+{
+    Set tSC = $$$OK
+    Set tOrigNS = $NAMESPACE
+    Try {
+        ; Read JSON body (before any namespace switch — Utils is in HSCUSTOM)
+        Set tSC = ##class(ExecuteMCPv2.Utils).ReadRequestBody(.tBody)
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If '$IsObject(tBody) {
+            Set tSC = $$$ERROR($$$GeneralError, "Request body is required")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tAction = tBody.%Get("action")
+        Set tName = tBody.%Get("name")
+        Set tNamespace = tBody.%Get("namespace")
+
+        Set tSC = ##class(ExecuteMCPv2.Utils).ValidateRequired(tAction, "action")
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+        If tAction '= "register" {
+            Set tSC = $$$ERROR($$$GeneralError, "Parameter 'action' must be: register")
+            Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC))
+            Set tSC = $$$OK
+            Quit
+        }
+
+        Set tSC = ..DocDbRecord(tName, tNamespace, 1, .tResult)
+        Set $NAMESPACE = tOrigNS
+        If $$$ISERR(tSC) { Do ..RenderResponseBody(##class(ExecuteMCPv2.Utils).SanitizeError(tSC)) Set tSC = $$$OK Quit }
+
         Do ..RenderResponseBody($$$OK, , tResult)
     }
     Catch ex {
@@ -20870,6 +21155,10 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
   <Route Url="/security/service" Method="GET" Call="ExecuteMCPv2.REST.Security:ServiceList" />
   <Route Url="/security/service" Method="POST" Call="ExecuteMCPv2.REST.Security:ServiceManage" />
 
+  <!-- Epic 44: Security / DocDB database record (Security.DocDBs) registration -->
+  <Route Url="/security/docdb" Method="GET" Call="ExecuteMCPv2.REST.Security:DocDbGet" />
+  <Route Url="/security/docdb" Method="POST" Call="ExecuteMCPv2.REST.Security:DocDbManage" />
+
   <!-- Epic 15: Security / LDAP Configuration Management -->
   <Route Url="/security/ldap" Method="GET" Call="ExecuteMCPv2.REST.Security:LdapList" />
   <Route Url="/security/ldap" Method="POST" Call="ExecuteMCPv2.REST.Security:LdapManage" />
@@ -21033,7 +21322,7 @@ Class ExecuteMCPv2.InstallGuard Extends %RegisteredObject
 /// This package's bootstrap version marker, <code>&lt;semver&gt;+&lt;sequence&gt;.&lt;hash&gt;</code>.
 /// <p>The value on disk is <code>"dev"</code>, a placeholder. <code>scripts/gen-bootstrap.mjs</code>
 /// stamps the real marker into the copy it embeds and packages, and this file is not edited for it.</p>
-Parameter BOOTSTRAPVERSION = "1.1.0+2.244fe8623c76";
+Parameter BOOTSTRAPVERSION = "1.1.0+5.6cbac260e73f";
 
 /// The class whose compiled BOOTSTRAPVERSION parameter is the deployed marker.
 Parameter SETUPCLASS = "ExecuteMCPv2.Setup";

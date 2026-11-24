@@ -114,7 +114,8 @@ describe.each(ERAS)("Story 43.3 on the %s era, by hand: the six gates", (era: Er
         const end = await ask.answer(TICKED);
 
         expect(rawWithIdZero(end.raw)).toBe(baselineLine(baseline.result, era, serverIdentity(g.pkg)));
-        expect(rig.writes("a")).toEqual([...g.preflight, ...baseline.a]);
+        // The accepting round resolves the scope again, so a gate that previews sends its preview once per round (Story 44.3).
+        expect(rig.writes("a")).toEqual([...g.preflight, ...g.preflight, ...baseline.a]);
         expect(rig.writes("b")).toEqual(baseline.b);
         await rig.wire.quiet(250);
         expect(conn.dialogs(), "asked exactly once").toBe(1);
