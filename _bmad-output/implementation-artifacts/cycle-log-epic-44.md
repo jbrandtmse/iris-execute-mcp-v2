@@ -215,3 +215,9 @@
 2026-11-23T23:40:14Z	Story 44.8	ledger_adjudicated	slice=empty DW-752=resolved-by DW-761=resolved-by DW-762=by-design(decision_155) lead_fixes=release_summary_BOOTSTRAP_from(1.1.0+2.244fe8623c76,v1.1.0;44.1+44.7)+spine_AD-9/AD-15(DW-761_confirmed,relative_paths=workspace) lint=ok changelog_readers=1360_green
 2026-11-23T23:40:14Z	Story 44.8	smoke_complete	driver=built_iris-dev-mcp_process+shared_SM_import(auto/required) scratch_HOME+fake_keyring(never_real) two_fake_listeners(user,attacker) checks=12/12 A_user-only_password_to_user_host B_workspace_override_auto:profile_absent,0_requests_to_attacker,warning_names_file,no_secret_in_stderr C_required:exit_1_naming_srvx,0_to_attacker
 2026-11-23T23:40:14Z	Story 44.8	fresh_check	in-order+shuffled_seed44: shared_114,launcher_221,all_7 full_all_post-CR=242_files_6500(CR_run)
+2026-11-23T23:40:36Z	Story 44.8	committed	sha=498ca9e build_sha=9f95bae cr_sha=bcc80a2 pushed=epic44 ci=pending run=45290816532
+2026-11-23T23:40:36Z	Story 44.8	story_cycle	plan=1 implement=1 qa=1 cr=1 rework=0 smoke=12/12 decisions=153,154,155 ledger_resolved=DW-752,DW-761 ledger_closed=DW-762(by-design)
+2026-11-24T00:10:35Z	Story 44.8	ci_result	run=45290816532 result=green jobs=all url=https://github.com/jbrandtmse/iris-execute-mcp-v2/actions/runs/45290816532
+2026-11-24T00:10:35Z	Epic 44	epic_status_done	stories=8/8_done(44.1-44.8) ci_tip=45290816532_green(epic-done_armed_run_of_the_tip) re-close_after_44.8
+2026-11-24T00:10:35Z	Epic 44	model_tier_checkpoint	armed=false metric=first_cr_unresolved_high_med_per_story_mean=0.25(8_stories) threshold=2 result=no_change(recheck_after_44.8)
+2026-11-24T00:10:35Z	Epic 44	epic_merge	plan=epic44->feature/feature-wave-9-bug-fixes(--no-ff)_then_delete_epic44(local+remote) ledger=open0,routed0,decision_pending3(DW-719,720,722_owner_items)
